@@ -1,0 +1,56 @@
+from collections import Counter
+
+from backend.backend import Backend
+from backend.utils import Square
+from pieces.pieces import Piece, PieceColor, PieceType
+
+
+WHITE = PieceColor.WHITE
+BLACK = PieceColor.BLACK
+
+K = PieceType.KING
+Q = PieceType.QUEEN
+R = PieceType.ROOK
+B = PieceType.BISHOP
+N = PieceType.KNIGHT
+P = PieceType.PAWN
+
+
+def sq(row, col):
+    return Square(row, col)
+
+
+def make_backend(piece_map, turn=WHITE, castling_rights=None, ep_target=None, halfmove_clock=0):
+    """Build a Backend with state set directly. piece_map: dict[Square, Piece]."""
+    backend = Backend()
+    for s, piece in piece_map.items():
+        backend.state[s.row][s.col] = piece
+    backend.turn = turn
+    backend.castling_rights = (
+        dict(castling_rights) if castling_rights is not None
+        else {'WK': True, 'WQ': True, 'BK': True, 'BQ': True}
+    )
+    backend.en_passant_target = ep_target
+    backend.halfmove_clock = halfmove_clock
+    backend.move_history = []
+    backend.position_counts = Counter()
+    backend.position_counts[backend._position_key()] = 1
+    return backend
+
+
+def piece(piece_type, color):
+    return Piece(piece_type, color)
+
+
+def kings_only(white_king=sq(7, 4), black_king=sq(0, 4)):
+    """Two-king minimal board. Helpful baseline for many tests."""
+    return {white_king: piece(K, WHITE), black_king: piece(K, BLACK)}
+
+
+def play_moves(backend, moves):
+    """Play a list of (from, to) tuples. Asserts each is legal. Returns last MoveResult."""
+    last = None
+    for from_sq, to_sq in moves:
+        last = backend.try_move(from_sq, to_sq)
+        assert last.legal, f"Move {from_sq} -> {to_sq} was rejected"
+    return last

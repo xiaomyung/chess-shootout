@@ -29,3 +29,12 @@ class MoveResult:
     is_checkmate: bool = False
     is_stalemate: bool = False
     promotion_required: bool = False
+
+
+@dataclass
+class HistoryEntry:
+    move: Move
+    prev_castling_rights: tuple
+    prev_en_passant_target: Optional[Square]
+    prev_halfmove_clock: int
+    position_key_added: Optional[tuple]
