@@ -114,7 +114,7 @@ class Backend:
             captured=entry.move.captured,
             promoted_to=piece_type,
         )
-        self._finalize_ply(entry)
+        self._finalize_move(entry)
         return self._build_move_result(entry.move.captured)
 
     def undo(self):
@@ -199,10 +199,10 @@ class Backend:
             position_key_added=None,
         )
         self.move_history.append(entry)
-        self._finalize_ply(entry)
+        self._finalize_move(entry)
         return self._build_move_result(captured)
 
-    def _finalize_ply(self, entry):
+    def _finalize_move(self, entry):
         entry.prev_castling_rights = (
             self.castling_rights['WK'], self.castling_rights['WQ'],
             self.castling_rights['BK'], self.castling_rights['BQ'],

@@ -15,6 +15,7 @@ class Board:
         self.window = window
         self.backend = backend
         self.font = pg.font.SysFont("Arial", 18, bold=True)
+        self.board_guides_font_factor = 50
         self.board_side_size = self.window.get_size()[0] * self.SCREEN_FRACTION_X
 
         self.cell_size = 0
@@ -32,11 +33,14 @@ class Board:
         self.pending_promotion_square = None
 
     def _render_text(self):
-        for i in range(self.SIZE):
-            row_text = self.font.render(self.file_labels[i], True, Colors.white)
-            col_number = self.font.render(str(i + 1), True, Colors.white)
-            self.file_labels_rendered.append(row_text)
-            self.rank_labels_rendered.append(col_number)
+        self.file_labels_rendered = [
+            self.font.render(self.file_labels[i], True, Colors.white)
+            for i in range(self.SIZE)
+        ]
+        self.rank_labels_rendered = [
+            self.font.render(str(i + 1), True, Colors.white)
+            for i in range(self.SIZE)
+        ]
 
     def _load_piece_images(self):
         for piece_color in PieceColor:
@@ -154,7 +158,7 @@ class Board:
         pg.draw.circle(
             overlay,
             Colors.move_indicator,
-            (self.cell_size // 2, self.cell_size // 2),
+            (self.cell_size / 2, self.cell_size / 2),
             radius,
         )
         self.window.blit(overlay, rect.topleft)
@@ -166,7 +170,7 @@ class Board:
         pg.draw.circle(
             overlay,
             Colors.move_indicator,
-            (self.cell_size // 2, self.cell_size // 2),
+            (self.cell_size / 2, self.cell_size / 2),
             radius,
             thickness,
         )
@@ -179,11 +183,12 @@ class Board:
         self.cell_size = rect.width // self.SIZE
         self.text_padding = rect.width * self.TEXT_PADDING_FRACTION
         self.rescale_pieces()
+        self._render_text()
 
     def cell_at(self, pos):
         x, y = pos
-        col = int((x - self.board_offset_x) // self.cell_size)
-        row = int((y - self.board_offset_y) // self.cell_size)
+        col = int((x - self.board_offset_x) / self.cell_size)
+        row = int((y - self.board_offset_y) / self.cell_size)
         if 0 <= col < self.SIZE and 0 <= row < self.SIZE:
             return Square(row, col)
         return None

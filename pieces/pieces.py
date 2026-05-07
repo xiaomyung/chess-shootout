@@ -1,3 +1,4 @@
+import os
 from enum import Enum
 
 from paths import PROJECT_ROOT
@@ -25,7 +26,7 @@ class Piece:
 
     @property
     def img_path(self):
-        return f"{PROJECT_ROOT}/pieces/img/{self.type.value}_{self.color.value}.png"
+        return os.path.join(PROJECT_ROOT, "pieces", "img", f"{self.type.value}_{self.color.value}.png")
 
 
 BACK_RANK = [

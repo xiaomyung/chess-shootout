@@ -3,6 +3,7 @@ import pygame as pg
 from backend.backend import Backend
 from frontend.board import Board
 from frontend.right_menu import RightMenu
+from frontend.result_menu import ResultMenu
 
 
 class Frontend:
@@ -17,6 +18,7 @@ class Frontend:
 
         self.backend = Backend()
         self.board = Board(self.window, self.backend)
+        self.result_menu = ResultMenu(self.window)
         self.right_menu = RightMenu(self.window)
 
         self.backend.new_game()
@@ -38,6 +40,7 @@ class Frontend:
     def draw_frame(self):
         pg.display.set_caption(f"{self.clock.get_fps():.1f}")
         self.board.draw_board()
+        self.result_menu.draw_result_window()
         self.right_menu.draw_menu()
 
     def _compute_layout(self):
@@ -46,15 +49,38 @@ class Frontend:
         board_size_px = effective * self.board.SCREEN_FRACTION_X
 
         board_x = board_size_px * self.board.OFFSET_FRACTION_X
-        board_y = window_height // 2 - board_size_px // 2
-        board_rect = pg.Rect(board_x, board_y, board_size_px, board_size_px)
+        board_y = window_height / 2 - board_size_px / 2
 
-        menu_rect = pg.Rect(
-            board_rect.right, 0,
-            window_width - board_rect.right, window_height
+        board_rect = pg.Rect(
+            board_x,
+            board_y,
+            board_size_px,
+            board_size_px
         )
 
+        result_width = self.board.cell_size * 2.5
+        result_height = self.board.cell_size * 2.5
+        result_rect = pg.Rect(
+            board_x + board_size_px / 2 - result_width / 2,
+            board_y + board_size_px / 2 - result_height / 2,
+            result_width,
+            result_height
+        )
+
+        menu_rect = pg.Rect(
+            board_rect.right,
+            0,
+            max(window_width - board_rect.right, 300),
+            max(window_height, 500)
+        )
+
+        self.board.font = pg.font.SysFont(
+            "Arial",
+            int(effective // self.board.board_guides_font_factor),
+            bold=True
+        )
         self.board.set_rect(board_rect)
+        self.result_menu.set_rect(result_rect)
         self.right_menu.set_rect(menu_rect)
 
     def mouse_left_clicked(self, pos):
