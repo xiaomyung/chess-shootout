@@ -1,7 +1,27 @@
 from collections import Counter
+from itertools import product
 
 from pieces.pieces import PieceType, PieceColor, Piece, BACK_RANK
 from backend.utils import Move, MoveResult, Square, HistoryEntry
+
+
+SAN_PIECE_LETTER = {
+    PieceType.KNIGHT: "N",
+    PieceType.BISHOP: "B",
+    PieceType.ROOK: "R",
+    PieceType.QUEEN: "Q",
+    PieceType.KING: "K",
+}
+
+SAN_FILES = "abcdefgh"
+
+CASTLING_KEYS = ("WK", "WQ", "BK", "BQ")
+DEFAULT_CASTLING_RIGHTS = {"WK": True, "WQ": True, "BK": True, "BQ": True}
+FIFTY_MOVE_HALFMOVES = 100
+
+
+def opponent_of(color):
+    return PieceColor.BLACK if color == PieceColor.WHITE else PieceColor.WHITE
 
 
 class Backend:
@@ -26,7 +46,7 @@ class Backend:
         self.turn = PieceColor.WHITE
         self.move_history = []
         self.en_passant_target = None
-        self.castling_rights = {'WK': True, 'WQ': True, 'BK': True, 'BQ': True}
+        self.castling_rights = dict(DEFAULT_CASTLING_RIGHTS)
         self.halfmove_clock = 0
         self.position_counts = Counter()
 
@@ -35,7 +55,7 @@ class Backend:
         self.turn = PieceColor.WHITE
         self.move_history = []
         self.en_passant_target = None
-        self.castling_rights = {'WK': True, 'WQ': True, 'BK': True, 'BQ': True}
+        self.castling_rights = dict(DEFAULT_CASTLING_RIGHTS)
         self.halfmove_clock = 0
         self.position_counts = Counter()
 
@@ -61,8 +81,7 @@ class Backend:
 
     def is_in_check(self, color):
         king_sq = self._find_king(color)
-        opponent = PieceColor.BLACK if color == PieceColor.WHITE else PieceColor.WHITE
-        return self._is_square_attacked(king_sq, opponent)
+        return self._is_square_attacked(king_sq, opponent_of(color))
 
     def is_game_over(self):
         return self.game_result() is not None
@@ -70,14 +89,14 @@ class Backend:
     def game_result(self):
         if self._has_no_legal_moves(self.turn):
             if self.is_in_check(self.turn):
-                return 'black_wins' if self.turn == PieceColor.WHITE else 'white_wins'
-            return 'draw_stalemate'
+                return "black_wins" if self.turn == PieceColor.WHITE else "white_wins"
+            return "draw_stalemate"
         if self._has_insufficient_material():
-            return 'draw_insufficient_material'
+            return "draw_insufficient_material"
         if self.position_counts and max(self.position_counts.values()) >= 3:
-            return 'draw_repetition'
-        if self.halfmove_clock >= 100:
-            return 'draw_fifty_move'
+            return "draw_repetition"
+        if self.halfmove_clock >= FIFTY_MOVE_HALFMOVES:
+            return "draw_fifty_move"
         return None
 
     def try_move(self, from_sq, to_sq):
@@ -114,6 +133,7 @@ class Backend:
             captured=entry.move.captured,
             promoted_to=piece_type,
         )
+        entry.san += f"={SAN_PIECE_LETTER[piece_type]}"
         self._finalize_move(entry)
         return self._build_move_result(entry.move.captured)
 
@@ -127,10 +147,7 @@ class Backend:
             self.position_counts[entry.position_key_added] -= 1
             if self.position_counts[entry.position_key_added] == 0:
                 del self.position_counts[entry.position_key_added]
-            self.castling_rights = dict(zip(
-                ('WK', 'WQ', 'BK', 'BQ'),
-                entry.prev_castling_rights,
-            ))
+            self.castling_rights = dict(zip(CASTLING_KEYS, entry.prev_castling_rights))
             self.en_passant_target = entry.prev_en_passant_target
             self.halfmove_clock = entry.prev_halfmove_clock
             self._switch_turn()
@@ -149,12 +166,14 @@ class Backend:
 
     def _apply_normal(self, from_sq, to_sq, piece):
         captured = self.state[to_sq.row][to_sq.col]
+        san = self._build_san(from_sq, to_sq, piece, captured)
         self.state[to_sq.row][to_sq.col] = piece
         self.state[from_sq.row][from_sq.col] = None
         move = Move(from_sq, to_sq, piece, captured=captured)
-        return self._record_and_finalize(move, captured)
+        return self._record_and_finalize(move, captured, san)
 
     def _apply_castle(self, from_sq, to_sq, piece):
+        san = "O-O" if to_sq.col == 6 else "O-O-O"
         self.state[to_sq.row][to_sq.col] = piece
         self.state[from_sq.row][from_sq.col] = None
         if to_sq.col == 6:
@@ -164,19 +183,21 @@ class Backend:
         self.state[from_sq.row][rook_to_col] = self.state[from_sq.row][rook_from_col]
         self.state[from_sq.row][rook_from_col] = None
         move = Move(from_sq, to_sq, piece, is_castle=True)
-        return self._record_and_finalize(move, None)
+        return self._record_and_finalize(move, None, san)
 
     def _apply_en_passant(self, from_sq, to_sq, piece):
         captured_sq = Square(from_sq.row, to_sq.col)
         captured = self.state[captured_sq.row][captured_sq.col]
+        san = self._build_san(from_sq, to_sq, piece, captured, is_en_passant=True)
         self.state[to_sq.row][to_sq.col] = piece
         self.state[from_sq.row][from_sq.col] = None
         self.state[captured_sq.row][captured_sq.col] = None
         move = Move(from_sq, to_sq, piece, captured=captured, is_en_passant=True)
-        return self._record_and_finalize(move, captured)
+        return self._record_and_finalize(move, captured, san)
 
     def _apply_promotion_pending(self, from_sq, to_sq, piece):
         captured = self.state[to_sq.row][to_sq.col]
+        san = self._build_san(from_sq, to_sq, piece, captured)
         self.state[to_sq.row][to_sq.col] = piece
         self.state[from_sq.row][from_sq.col] = None
         move = Move(from_sq, to_sq, piece, captured=captured)
@@ -186,48 +207,72 @@ class Backend:
             prev_en_passant_target=self.en_passant_target,
             prev_halfmove_clock=self.halfmove_clock,
             position_key_added=None,
+            san=san,
         )
         self.move_history.append(entry)
         return MoveResult(legal=True, captured=captured, promotion_required=True)
 
-    def _record_and_finalize(self, move, captured):
+    def _record_and_finalize(self, move, captured, san):
         entry = HistoryEntry(
             move=move,
             prev_castling_rights=(),
             prev_en_passant_target=None,
             prev_halfmove_clock=0,
             position_key_added=None,
+            san=san,
         )
         self.move_history.append(entry)
         self._finalize_move(entry)
         return self._build_move_result(captured)
 
+    def _build_san(self, from_sq, to_sq, piece, captured, is_en_passant=False):
+        target = f"{SAN_FILES[to_sq.col]}{self.SIZE - to_sq.row}"
+        if piece.type == PieceType.PAWN:
+            if captured is not None or is_en_passant:
+                return f"{SAN_FILES[from_sq.col]}x{target}"
+            return target
+        disambig = self._san_disambiguation(from_sq, to_sq, piece)
+        capture = "x" if captured is not None else ""
+        return f"{SAN_PIECE_LETTER[piece.type]}{disambig}{capture}{target}"
+
+    def _san_disambiguation(self, from_sq, to_sq, piece):
+        rivals = []
+        for r, c in product(range(self.SIZE), repeat=2):
+            if r == from_sq.row and c == from_sq.col:
+                continue
+            other = self.state[r][c]
+            if other is None or other.type != piece.type or other.color != piece.color:
+                continue
+            if to_sq in self.legal_moves_from(Square(r, c)):
+                rivals.append(Square(r, c))
+        if not rivals:
+            return ""
+        if all(rv.col != from_sq.col for rv in rivals):
+            return SAN_FILES[from_sq.col]
+        if all(rv.row != from_sq.row for rv in rivals):
+            return str(self.SIZE - from_sq.row)
+        return f"{SAN_FILES[from_sq.col]}{self.SIZE - from_sq.row}"
+
     def _finalize_move(self, entry):
-        entry.prev_castling_rights = (
-            self.castling_rights['WK'], self.castling_rights['WQ'],
-            self.castling_rights['BK'], self.castling_rights['BQ'],
-        )
+        entry.prev_castling_rights = tuple(self.castling_rights[k] for k in CASTLING_KEYS)
         entry.prev_en_passant_target = self.en_passant_target
         entry.prev_halfmove_clock = self.halfmove_clock
 
         m = entry.move
 
         if m.piece.type == PieceType.KING:
-            if m.piece.color == PieceColor.WHITE:
-                self.castling_rights['WK'] = False
-                self.castling_rights['WQ'] = False
-            else:
-                self.castling_rights['BK'] = False
-                self.castling_rights['BQ'] = False
+            prefix = "W" if m.piece.color == PieceColor.WHITE else "B"
+            self.castling_rights[prefix + "K"] = False
+            self.castling_rights[prefix + "Q"] = False
         for sq in (m.from_sq, m.to_sq):
             if sq == Square(7, 0):
-                self.castling_rights['WQ'] = False
+                self.castling_rights["WQ"] = False
             elif sq == Square(7, 7):
-                self.castling_rights['WK'] = False
+                self.castling_rights["WK"] = False
             elif sq == Square(0, 0):
-                self.castling_rights['BQ'] = False
+                self.castling_rights["BQ"] = False
             elif sq == Square(0, 7):
-                self.castling_rights['BK'] = False
+                self.castling_rights["BK"] = False
 
         if m.piece.type == PieceType.PAWN and abs(m.to_sq.row - m.from_sq.row) == 2:
             self.en_passant_target = Square(
@@ -245,6 +290,14 @@ class Backend:
         key = self._position_key()
         self.position_counts[key] += 1
         entry.position_key_added = key
+        in_check = self.is_in_check(self.turn)
+        no_moves = self._has_no_legal_moves(self.turn)
+        entry.gives_checkmate = in_check and no_moves
+        entry.gives_check = in_check and not no_moves
+        if entry.gives_checkmate:
+            entry.san += "#"
+        elif entry.gives_check:
+            entry.san += "+"
 
     def _build_move_result(self, captured):
         result = self.game_result()
@@ -253,8 +306,8 @@ class Backend:
             legal=True,
             captured=captured,
             is_check=is_check,
-            is_checkmate=result in ('white_wins', 'black_wins'),
-            is_stalemate=result == 'draw_stalemate',
+            is_checkmate=result in ("white_wins", "black_wins"),
+            is_stalemate=result == "draw_stalemate",
         )
 
     def _position_key(self):
@@ -262,10 +315,7 @@ class Backend:
             tuple((p.type, p.color) if p is not None else None for p in row)
             for row in self.state
         )
-        rights = (
-            self.castling_rights['WK'], self.castling_rights['WQ'],
-            self.castling_rights['BK'], self.castling_rights['BQ'],
-        )
+        rights = tuple(self.castling_rights[k] for k in CASTLING_KEYS)
         return (board, self.turn, rights, self.en_passant_target)
 
     def _pseudo_legal_moves(self, square):
@@ -296,20 +346,19 @@ class Backend:
         return []
 
     def _has_no_legal_moves(self, color):
-        for row in range(self.SIZE):
-            for col in range(self.SIZE):
-                piece = self.state[row][col]
-                if piece is None or piece.color != color:
-                    continue
-                if self.legal_moves_from(Square(row, col)):
-                    return False
+        for row, col in product(range(self.SIZE), repeat=2):
+            piece = self.state[row][col]
+            if piece is None or piece.color != color:
+                continue
+            if self.legal_moves_from(Square(row, col)):
+                return False
         return True
 
     def _knight_and_king_moves(self, square, piece, offsets):
         moves = []
 
-        for dest_r, dest_c in offsets:
-            target = Square(square.row + dest_r, square.col + dest_c)
+        for dr, dc in offsets:
+            target = Square(square.row + dr, square.col + dc)
             if not self._in_bounds(target):
                 continue
 
@@ -324,8 +373,8 @@ class Backend:
     def _sliding_moves(self, square, piece, directions):
         moves = []
 
-        for dest_r, dest_c in directions:
-            row, col = square.row + dest_r, square.col + dest_c
+        for dr, dc in directions:
+            row, col = square.row + dr, square.col + dc
 
             while 0 <= row < self.SIZE and 0 <= col < self.SIZE:
                 target_piece = self.state[row][col]
@@ -340,8 +389,8 @@ class Backend:
                 else:
                     break
 
-                row += dest_r
-                col += dest_c
+                row += dr
+                col += dc
 
         return moves
 
@@ -384,18 +433,18 @@ class Backend:
         if self.is_in_check(piece.color):
             return []
 
-        opponent = PieceColor.BLACK if piece.color == PieceColor.WHITE else PieceColor.WHITE
-        prefix = 'W' if piece.color == PieceColor.WHITE else 'B'
+        opponent = opponent_of(piece.color)
+        prefix = "W" if piece.color == PieceColor.WHITE else "B"
         moves = []
 
-        if self.castling_rights[prefix + 'K']:
+        if self.castling_rights[prefix + "K"]:
             if (self.state[home_row][5] is None
                     and self.state[home_row][6] is None
                     and not self._is_square_attacked(Square(home_row, 5), opponent)
                     and not self._is_square_attacked(Square(home_row, 6), opponent)):
                 moves.append(Square(home_row, 6))
 
-        if self.castling_rights[prefix + 'Q']:
+        if self.castling_rights[prefix + "Q"]:
             if (self.state[home_row][1] is None
                     and self.state[home_row][2] is None
                     and self.state[home_row][3] is None
@@ -424,49 +473,49 @@ class Backend:
     def _has_insufficient_material(self):
         non_kings = []
         bishops = []
-        for row in range(self.SIZE):
-            for col in range(self.SIZE):
-                piece = self.state[row][col]
-                if piece is None or piece.type == PieceType.KING:
-                    continue
-                non_kings.append(piece)
-                if piece.type == PieceType.BISHOP:
-                    bishops.append((row, col, piece))
+        for row, col in product(range(self.SIZE), repeat=2):
+            piece = self.state[row][col]
+            if piece is None or piece.type == PieceType.KING:
+                continue
+            non_kings.append(piece)
+            if piece.type == PieceType.BISHOP:
+                bishops.append((row, col, piece))
 
         if not non_kings:
             return True
         if len(non_kings) == 1 and non_kings[0].type in (PieceType.BISHOP, PieceType.KNIGHT):
             return True
         if len(non_kings) == 2 and len(bishops) == 2:
-            b1, b2 = bishops
-            if b1[2].color != b2[2].color:
-                if (b1[0] + b1[1]) % 2 == (b2[0] + b2[1]) % 2:
+            bishop_a, bishop_b = bishops
+            if bishop_a[2].color != bishop_b[2].color:
+                square_color_a = (bishop_a[0] + bishop_a[1]) % 2
+                square_color_b = (bishop_b[0] + bishop_b[1]) % 2
+                if square_color_a == square_color_b:
                     return True
         return False
 
     def _is_square_attacked(self, square, by_color):
-        for row in range(self.SIZE):
-            for col in range(self.SIZE):
-                piece = self.state[row][col]
-                if piece is None or piece.color != by_color:
-                    continue
+        for row, col in product(range(self.SIZE), repeat=2):
+            piece = self.state[row][col]
+            if piece is None or piece.color != by_color:
+                continue
 
-                if piece.type == PieceType.PAWN:
-                    direction = -1 if by_color == PieceColor.WHITE else 1
-                    for diag_col in (-1, 1):
-                        if row + direction == square.row and col + diag_col == square.col:
-                            return True
-                    continue
+            if piece.type == PieceType.PAWN:
+                direction = -1 if by_color == PieceColor.WHITE else 1
+                for diag_col in (-1, 1):
+                    if row + direction == square.row and col + diag_col == square.col:
+                        return True
+                continue
 
-                if piece.type == PieceType.KING:
-                    for dr, dc in self.KING_OFFSETS:
-                        if row + dr == square.row and col + dc == square.col:
-                            return True
-                    continue
+            if piece.type == PieceType.KING:
+                for dr, dc in self.KING_OFFSETS:
+                    if row + dr == square.row and col + dc == square.col:
+                        return True
+                continue
 
-                attacker_sq = Square(row, col)
-                if square in self._pseudo_legal_moves(attacker_sq):
-                    return True
+            attacker_sq = Square(row, col)
+            if square in self._pseudo_legal_moves(attacker_sq):
+                return True
 
         return False
 
@@ -494,8 +543,7 @@ class Backend:
 
         try:
             king_sq = self._find_king(piece.color)
-            opponent = PieceColor.BLACK if piece.color == PieceColor.WHITE else PieceColor.WHITE
-            in_check = self._is_square_attacked(king_sq, opponent)
+            in_check = self._is_square_attacked(king_sq, opponent_of(piece.color))
         finally:
             self.state[from_sq.row][from_sq.col] = piece
             self.state[to_sq.row][to_sq.col] = captured
@@ -505,11 +553,10 @@ class Backend:
         return in_check
 
     def _find_king(self, color):
-        for row in range(self.SIZE):
-            for col in range(self.SIZE):
-                piece = self.state[row][col]
-                if piece is not None and piece.type == PieceType.KING and piece.color == color:
-                    return Square(row, col)
+        for row, col in product(range(self.SIZE), repeat=2):
+            piece = self.state[row][col]
+            if piece is not None and piece.type == PieceType.KING and piece.color == color:
+                return Square(row, col)
         raise ValueError(f"No {color} king on the board")
 
     def _switch_turn(self):

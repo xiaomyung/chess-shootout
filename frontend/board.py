@@ -1,3 +1,5 @@
+from itertools import product
+
 import pygame as pg
 
 from backend.utils import Square
@@ -16,7 +18,6 @@ class Board:
         self.backend = backend
         self.font = pg.font.SysFont("Arial", 18, bold=True)
         self.board_guides_font_factor = 50
-        self.board_side_size = self.window.get_size()[0] * self.SCREEN_FRACTION_X
 
         self.cell_size = 0
         self.board_offset_x = 0
@@ -31,6 +32,7 @@ class Board:
         self.piece_images_scaled = {}
         self.selected_square = None
         self.pending_promotion_square = None
+        self.flipped = False
 
     def _render_text(self):
         self.file_labels_rendered = [
@@ -49,6 +51,9 @@ class Board:
                 self.piece_images_original[(piece_type, piece_color)] = pg.image.load(piece.img_path).convert_alpha()
 
     def _cell_rect(self, row, col):
+        if self.flipped:
+            row = self.SIZE - 1 - row
+            col = self.SIZE - 1 - col
         return pg.Rect(
             col * self.cell_size + self.board_offset_x,
             row * self.cell_size + self.board_offset_y,
@@ -117,9 +122,8 @@ class Board:
             self.window.blit(symbol, (x, y))
 
     def draw_board(self):
-        for row in range(self.SIZE):
-            for col in range(self.SIZE):
-                self.draw_cell(row, col)
+        for row, col in product(range(self.SIZE), repeat=2):
+            self.draw_cell(row, col)
         self._draw_vertical_guides()
         self._draw_horizontal_guides()
         self._draw_selection_highlight()
@@ -128,15 +132,14 @@ class Board:
         self._draw_promotion_picker()
 
     def draw_pieces(self):
-        for row in range(self.SIZE):
-            for col in range(self.SIZE):
-                piece = self.backend.piece_at(Square(row, col))
-                if piece is None:
-                    continue
+        for row, col in product(range(self.SIZE), repeat=2):
+            piece = self.backend.piece_at(Square(row, col))
+            if piece is None:
+                continue
 
-                rect = self._cell_rect(row, col)
-                surface = self.piece_images_scaled[(piece.type, piece.color)]
-                self.window.blit(surface, rect.topleft)
+            rect = self._cell_rect(row, col)
+            surface = self.piece_images_scaled[(piece.type, piece.color)]
+            self.window.blit(surface, rect.topleft)
 
     def _draw_move_indicators(self):
         if self.selected_square is None:
@@ -179,7 +182,6 @@ class Board:
     def set_rect(self, rect):
         self.board_offset_x = rect.x
         self.board_offset_y = rect.y
-        self.board_side_size = rect.width
         self.cell_size = rect.width // self.SIZE
         self.text_padding = rect.width * self.TEXT_PADDING_FRACTION
         self.rescale_pieces()
@@ -189,9 +191,12 @@ class Board:
         x, y = pos
         col = int((x - self.board_offset_x) / self.cell_size)
         row = int((y - self.board_offset_y) / self.cell_size)
-        if 0 <= col < self.SIZE and 0 <= row < self.SIZE:
-            return Square(row, col)
-        return None
+        if not (0 <= col < self.SIZE and 0 <= row < self.SIZE):
+            return None
+        if self.flipped:
+            row = self.SIZE - 1 - row
+            col = self.SIZE - 1 - col
+        return Square(row, col)
 
     def handle_click(self, square):
         if self.pending_promotion_square is not None:

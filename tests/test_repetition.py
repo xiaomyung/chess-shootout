@@ -24,7 +24,7 @@ def test_threefold_repetition_via_knight_shuffle():
     for m in moves:
         last = bk.try_move(*m)
         assert last.legal
-    assert bk.game_result() == 'draw_repetition'
+    assert bk.game_result() == "draw_repetition"
 
 
 def test_repetition_does_not_trigger_too_early():
@@ -47,7 +47,7 @@ def test_castling_rights_in_position_key():
         sq(0, 4): piece(K, BLACK),
     }
     bk1 = make_backend(pieces)
-    bk2 = make_backend(pieces, castling_rights={'WK': False, 'WQ': True, 'BK': True, 'BQ': True})
+    bk2 = make_backend(pieces, castling_rights={"WK": False, "WQ": True, "BK": True, "BQ": True})
     assert bk1._position_key() != bk2._position_key()
 
 

@@ -12,7 +12,7 @@ def _checkmate_position():
         sq(6, 7): piece(P, WHITE),
         sq(7, 0): piece(R, BLACK),
         sq(0, 0): piece(K, BLACK),
-    }, turn=WHITE, castling_rights={'WK': False, 'WQ': False, 'BK': False, 'BQ': False})
+    }, turn=WHITE, castling_rights={"WK": False, "WQ": False, "BK": False, "BQ": False})
 
 
 def test_try_move_rejected_after_checkmate():
@@ -27,7 +27,7 @@ def test_try_move_rejected_after_stalemate():
         sq(0, 0): piece(K, BLACK),
         sq(1, 2): piece(K, WHITE),
         sq(2, 1): piece(Q, WHITE),
-    }, turn=BLACK, castling_rights={'WK': False, 'WQ': False, 'BK': False, 'BQ': False})
+    }, turn=BLACK, castling_rights={"WK": False, "WQ": False, "BK": False, "BQ": False})
     assert bk.is_game_over()
     assert not bk.try_move(sq(0, 0), sq(0, 1)).legal
 

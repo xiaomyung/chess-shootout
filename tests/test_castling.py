@@ -39,8 +39,8 @@ def test_kingside_castle_executes_correctly():
     assert bk.state[7][7] is None
     assert bk.state[7][4] is None
     # Castling rights for that color cleared.
-    assert not bk.castling_rights['WK']
-    assert not bk.castling_rights['WQ']
+    assert not bk.castling_rights["WK"]
+    assert not bk.castling_rights["WQ"]
 
 
 def test_queenside_castle_executes_correctly():
@@ -75,7 +75,7 @@ def test_cannot_castle_into_check():
 
 def test_cannot_castle_when_king_has_moved():
     bk = make_backend(_empty_back_rank(),
-                      castling_rights={'WK': False, 'WQ': False, 'BK': True, 'BQ': True})
+                      castling_rights={"WK": False, "WQ": False, "BK": True, "BQ": True})
     moves = bk.legal_moves_from(sq(7, 4))
     assert sq(7, 6) not in moves
     assert sq(7, 2) not in moves
@@ -83,7 +83,7 @@ def test_cannot_castle_when_king_has_moved():
 
 def test_cannot_castle_when_kingside_rook_has_moved():
     bk = make_backend(_empty_back_rank(),
-                      castling_rights={'WK': False, 'WQ': True, 'BK': True, 'BQ': True})
+                      castling_rights={"WK": False, "WQ": True, "BK": True, "BQ": True})
     moves = bk.legal_moves_from(sq(7, 4))
     assert sq(7, 6) not in moves
     assert sq(7, 2) in moves  # queenside still available
@@ -128,8 +128,8 @@ def test_capturing_h1_rook_revokes_only_kingside():
         sq(0, 7): piece(R, BLACK),
     }, turn=BLACK)
     bk.try_move(sq(0, 7), sq(7, 7))
-    assert not bk.castling_rights['WK']
-    assert bk.castling_rights['WQ']
+    assert not bk.castling_rights["WK"]
+    assert bk.castling_rights["WQ"]
 
 
 def test_capturing_a8_rook_revokes_only_black_queenside():
@@ -140,5 +140,5 @@ def test_capturing_a8_rook_revokes_only_black_queenside():
         sq(0, 0): piece(R, BLACK),
     }, turn=WHITE)
     bk.try_move(sq(7, 0), sq(0, 0))
-    assert bk.castling_rights['BK']
-    assert not bk.castling_rights['BQ']
+    assert bk.castling_rights["BK"]
+    assert not bk.castling_rights["BQ"]

@@ -6,7 +6,7 @@ from tests.helpers import (
 
 def test_kvk_is_draw():
     bk = make_backend({sq(7, 4): piece(K, WHITE), sq(0, 4): piece(K, BLACK)})
-    assert bk.game_result() == 'draw_insufficient_material'
+    assert bk.game_result() == "draw_insufficient_material"
 
 
 def test_kbvk_is_draw():
@@ -15,7 +15,7 @@ def test_kbvk_is_draw():
         sq(7, 5): piece(B, WHITE),
         sq(0, 4): piece(K, BLACK),
     })
-    assert bk.game_result() == 'draw_insufficient_material'
+    assert bk.game_result() == "draw_insufficient_material"
 
 
 def test_knvk_is_draw():
@@ -24,7 +24,7 @@ def test_knvk_is_draw():
         sq(7, 6): piece(N, WHITE),
         sq(0, 4): piece(K, BLACK),
     })
-    assert bk.game_result() == 'draw_insufficient_material'
+    assert bk.game_result() == "draw_insufficient_material"
 
 
 def test_kbvkb_same_color_is_draw():
@@ -35,7 +35,7 @@ def test_kbvkb_same_color_is_draw():
         sq(0, 4): piece(K, BLACK),
         sq(0, 7): piece(B, BLACK),
     })
-    assert bk.game_result() == 'draw_insufficient_material'
+    assert bk.game_result() == "draw_insufficient_material"
 
 
 def test_kbvkb_opposite_color_not_draw():
@@ -46,7 +46,7 @@ def test_kbvkb_opposite_color_not_draw():
         sq(0, 0): piece(B, BLACK),
         sq(0, 4): piece(K, BLACK),
     })
-    assert bk.game_result() != 'draw_insufficient_material'
+    assert bk.game_result() != "draw_insufficient_material"
 
 
 def test_knvkn_not_draw():
@@ -57,7 +57,7 @@ def test_knvkn_not_draw():
         sq(0, 4): piece(K, BLACK),
         sq(0, 1): piece(N, BLACK),
     })
-    assert bk.game_result() != 'draw_insufficient_material'
+    assert bk.game_result() != "draw_insufficient_material"
 
 
 def test_kbb_v_k_not_draw():
@@ -68,7 +68,7 @@ def test_kbb_v_k_not_draw():
         sq(7, 7): piece(B, WHITE),
         sq(0, 4): piece(K, BLACK),
     })
-    assert bk.game_result() != 'draw_insufficient_material'
+    assert bk.game_result() != "draw_insufficient_material"
 
 
 def test_kp_v_k_not_draw():
@@ -77,4 +77,4 @@ def test_kp_v_k_not_draw():
         sq(6, 0): piece(P, WHITE),
         sq(0, 4): piece(K, BLACK),
     })
-    assert bk.game_result() != 'draw_insufficient_material'
+    assert bk.game_result() != "draw_insufficient_material"

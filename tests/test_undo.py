@@ -11,13 +11,13 @@ def _snapshot(backend):
         for row in backend.state
     )
     return {
-        'state': state,
-        'turn': backend.turn,
-        'castling_rights': dict(backend.castling_rights),
-        'en_passant_target': backend.en_passant_target,
-        'halfmove_clock': backend.halfmove_clock,
-        'position_counts': dict(backend.position_counts),
-        'move_history_len': len(backend.move_history),
+        "state": state,
+        "turn": backend.turn,
+        "castling_rights": dict(backend.castling_rights),
+        "en_passant_target": backend.en_passant_target,
+        "halfmove_clock": backend.halfmove_clock,
+        "position_counts": dict(backend.position_counts),
+        "move_history_len": len(backend.move_history),
     }
 
 

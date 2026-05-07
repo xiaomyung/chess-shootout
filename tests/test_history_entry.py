@@ -65,4 +65,4 @@ def test_prev_state_round_trips_via_undo():
     assert entry.prev_castling_rights == (True, True, True, True)
     bk.undo()
     assert bk.halfmove_clock == 37
-    assert bk.castling_rights == {'WK': True, 'WQ': True, 'BK': True, 'BQ': True}
+    assert bk.castling_rights == {"WK": True, "WQ": True, "BK": True, "BQ": True}

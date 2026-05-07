@@ -38,3 +38,6 @@ class HistoryEntry:
     prev_en_passant_target: Optional[Square]
     prev_halfmove_clock: int
     position_key_added: Optional[tuple]
+    gives_check: bool = False
+    gives_checkmate: bool = False
+    san: str = ""

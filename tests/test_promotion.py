@@ -1,3 +1,5 @@
+import pytest
+
 from tests.helpers import (
     BLACK, WHITE, K, Q, R, B, N, P,
     make_backend, piece, sq,
@@ -48,7 +50,7 @@ def test_promotion_with_capture():
     bk.promote(sq(0, 0), Q)
     assert bk.state[0][0].type == Q
     # Capturing the a8 rook revokes BQ castling right.
-    assert not bk.castling_rights['BQ']
+    assert not bk.castling_rights["BQ"]
 
 
 def test_promotion_with_mate():
@@ -57,23 +59,21 @@ def test_promotion_with_mate():
         sq(1, 6): piece(P, WHITE),
         sq(1, 5): piece(K, WHITE),
         sq(0, 7): piece(K, BLACK),
-    }, castling_rights={'WK': False, 'WQ': False, 'BK': False, 'BQ': False})
+    }, castling_rights={"WK": False, "WQ": False, "BK": False, "BQ": False})
     bk.try_move(sq(1, 6), sq(0, 6))
     result = bk.promote(sq(0, 6), Q)
     assert result.is_checkmate
-    assert bk.game_result() == 'white_wins'
+    assert bk.game_result() == "white_wins"
 
 
 def test_promote_invalid_target_raises():
     bk = _white_promotion_setup()
     bk.try_move(sq(1, 0), sq(0, 0))
-    import pytest
     with pytest.raises(ValueError):
         bk.promote(sq(0, 0), K)
 
 
 def test_promote_when_nothing_pending_raises():
     bk = _white_promotion_setup()
-    import pytest
     with pytest.raises(ValueError):
         bk.promote(sq(0, 0), Q)

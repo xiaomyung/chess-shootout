@@ -17,7 +17,7 @@ def test_fools_mate():
     result = bk.try_move(sq(0, 3), sq(4, 7))  # Qd8-h4#
     assert result.legal
     assert result.is_checkmate
-    assert bk.game_result() == 'black_wins'
+    assert bk.game_result() == "black_wins"
 
 
 def test_back_rank_mate():
@@ -29,9 +29,9 @@ def test_back_rank_mate():
         sq(6, 7): piece(P, WHITE),
         sq(7, 0): piece(R, BLACK),
         sq(0, 0): piece(K, BLACK),
-    }, turn=WHITE, castling_rights={'WK': False, 'WQ': False, 'BK': False, 'BQ': False})
+    }, turn=WHITE, castling_rights={"WK": False, "WQ": False, "BK": False, "BQ": False})
     assert bk.is_in_check(WHITE)
-    assert bk.game_result() == 'black_wins'
+    assert bk.game_result() == "black_wins"
 
 
 def test_classic_stalemate():
@@ -40,9 +40,9 @@ def test_classic_stalemate():
         sq(0, 0): piece(K, BLACK),
         sq(1, 2): piece(K, WHITE),
         sq(2, 1): piece(Q, WHITE),
-    }, turn=BLACK, castling_rights={'WK': False, 'WQ': False, 'BK': False, 'BQ': False})
+    }, turn=BLACK, castling_rights={"WK": False, "WQ": False, "BK": False, "BQ": False})
     assert not bk.is_in_check(BLACK)
-    assert bk.game_result() == 'draw_stalemate'
+    assert bk.game_result() == "draw_stalemate"
 
 
 def test_check_does_not_end_game_if_response_exists():

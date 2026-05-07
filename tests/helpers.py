@@ -1,12 +1,13 @@
 from collections import Counter
 
-from backend.backend import Backend
+from backend.backend import Backend, DEFAULT_CASTLING_RIGHTS
 from backend.utils import Square
 from pieces.pieces import Piece, PieceColor, PieceType
 
 
 WHITE = PieceColor.WHITE
 BLACK = PieceColor.BLACK
+NO_CASTLING = {"WK": False, "WQ": False, "BK": False, "BQ": False}
 
 K = PieceType.KING
 Q = PieceType.QUEEN
@@ -28,7 +29,7 @@ def make_backend(piece_map, turn=WHITE, castling_rights=None, ep_target=None, ha
     backend.turn = turn
     backend.castling_rights = (
         dict(castling_rights) if castling_rights is not None
-        else {'WK': True, 'WQ': True, 'BK': True, 'BQ': True}
+        else dict(DEFAULT_CASTLING_RIGHTS)
     )
     backend.en_passant_target = ep_target
     backend.halfmove_clock = halfmove_clock

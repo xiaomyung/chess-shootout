@@ -14,9 +14,9 @@ def test_stalemate_reported_over_insufficient_material():
         sq(1, 2): piece(K, WHITE),
         sq(5, 4): piece(B, WHITE),
         sq(0, 0): piece(K, BLACK),
-    }, turn=BLACK, castling_rights={'WK': False, 'WQ': False, 'BK': False, 'BQ': False})
+    }, turn=BLACK, castling_rights={"WK": False, "WQ": False, "BK": False, "BQ": False})
     assert not bk.is_in_check(BLACK)
-    assert bk.game_result() == 'draw_stalemate'
+    assert bk.game_result() == "draw_stalemate"
 
 
 def test_mate_with_sufficient_material_reports_winner():
@@ -28,5 +28,5 @@ def test_mate_with_sufficient_material_reports_winner():
         sq(6, 7): piece(P, WHITE),
         sq(7, 0): piece(R, BLACK),
         sq(0, 0): piece(K, BLACK),
-    }, turn=WHITE, castling_rights={'WK': False, 'WQ': False, 'BK': False, 'BQ': False})
-    assert bk.game_result() == 'black_wins'
+    }, turn=WHITE, castling_rights={"WK": False, "WQ": False, "BK": False, "BQ": False})
+    assert bk.game_result() == "black_wins"

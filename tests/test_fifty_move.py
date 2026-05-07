@@ -12,7 +12,7 @@ def test_fifty_move_draw_at_100_halfmoves():
     }, turn=WHITE, halfmove_clock=99)
     bk.try_move(sq(7, 0), sq(7, 1))  # rook shuffle, no capture, no pawn — clock += 1
     assert bk.halfmove_clock == 100
-    assert bk.game_result() == 'draw_fifty_move'
+    assert bk.game_result() == "draw_fifty_move"
 
 
 def test_pawn_move_resets_halfmove_clock():
