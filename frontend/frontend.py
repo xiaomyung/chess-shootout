@@ -264,7 +264,7 @@ class Frontend:
         )
 
         start_width = board_size_px * 0.7
-        start_height = board_size_px * 0.85
+        start_height = board_size_px * 0.7
         start_rect = pg.Rect(
             board_x + board_size_px / 2 - start_width / 2,
             board_y + board_size_px / 2 - start_height / 2,

@@ -45,6 +45,7 @@ class StartMenu:
         self.row_gap = 6
         self.section_gap = 10
         self.label_to_selector_gap = 6
+        self.input_to_section_gap = 20
         self.title = "Chess"
 
         self.text_input = TextInput(window)
@@ -70,6 +71,10 @@ class StartMenu:
         self.y = rect.y
         self.width = rect.width
         self.height = rect.height
+        self.padding = max(int(rect.height * 0.03), 10)
+        self.section_gap = max(int(rect.height * 0.025), 8)
+        self.label_to_selector_gap = max(int(rect.height * 0.015), 4)
+        self.input_to_section_gap = max(int(rect.height * 0.05), 14)
         self.title_font = pg.font.SysFont(
             "Arial", max(int(rect.height / 14), 14), bold=True,
         )
@@ -134,7 +139,7 @@ class StartMenu:
         input_rect = pg.Rect(content_x, cursor, content_w, input_h)
         self.text_input.set_rect(input_rect)
         self.text_input.draw()
-        cursor = input_rect.bottom + self.section_gap * 2
+        cursor = input_rect.bottom + self.input_to_section_gap
 
         section_step = label_h + self.label_to_selector_gap + selector_h + self.section_gap
 
