@@ -19,15 +19,11 @@ jobs:
           python-version: "3.12"
           cache: pip
 
-      - name: Install dependencies
-        run: pip install -r requirements.txt -r requirements-dev.txt imageio-ffmpeg
+      - name: Install ffmpeg
+        run: sudo apt-get install -y --no-install-recommends ffmpeg
 
-      - name: Expose ffmpeg on PATH (for pydub)
-        run: |
-          SRC=$(python -c "import imageio_ffmpeg; print(imageio_ffmpeg.get_ffmpeg_exe())")
-          mkdir -p "$HOME/.bin"
-          ln -sf "$SRC" "$HOME/.bin/ffmpeg"
-          echo "$HOME/.bin" >> "$GITHUB_PATH"
+      - name: Install dependencies
+        run: pip install -r requirements.txt -r requirements-dev.txt
 
       - name: Run tests
         run: pytest tests -n auto -q
