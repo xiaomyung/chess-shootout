@@ -300,6 +300,8 @@ class Frontend:
                 on_no=lambda: self.online_client.send_rematch_response(False),
                 yes_label="Accept", no_label="Decline",
             )
+        elif event.type == "game_resumed":
+            self._handle_game_resumed(event.payload)
         elif event.type == "connection_status":
             return  # opp_state already updated inside OnlineClient
         elif event.type == "error":
@@ -309,6 +311,27 @@ class Frontend:
                 on_no=self._on_online_cancel,
                 yes_label="Retry", no_label="Cancel",
             )
+
+    def _handle_game_resumed(self, payload):
+        from backend.fen import apply_fen
+        self.match.new_game()
+        apply_fen(self.match.backend, payload["fen"])
+        for entry in payload.get("move_history", []):
+            self.match.backend.apply_san(entry["san"])
+        if self._time_control is not None:
+            initial, incr = self._time_control
+            self.match.setup_clock(initial, incr)
+            clock_snap = payload.get("clock") or {}
+            if self.match.clock is not None:
+                self.match.clock.restore_from_server(
+                    clock_snap.get("white_remaining", 0.0),
+                    clock_snap.get("black_remaining", 0.0),
+                    clock_snap.get("running_for"),
+                )
+        self.board.cancel_animations()
+        self.board.selected_square = None
+        self.board._clear_premoves()
+        self.board.clear_annotations()
 
     def _handle_takeback_applied(self, payload):
         if self.match.move_history:
@@ -371,6 +394,7 @@ class Frontend:
         self.manual_result = None
         self.result_menu.set_online_mode(True)
         self.mode = ONLINE
+        self._online_initial_flip = (payload["your_color"] == "black")
         self._chosen_side = payload["your_color"]
         self.white_name = payload["white_name"]
         self.black_name = payload["black_name"]
@@ -388,6 +412,7 @@ class Frontend:
             "ping_ms": None,
         })
         self._reset_to_new_game()
+        self.board.flipped = self._online_initial_flip
         self.sound_manager.play_game_start()
 
     def _on_local_move_applied(self, from_sq, to_sq, promotion):

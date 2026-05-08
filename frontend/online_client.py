@@ -12,6 +12,8 @@ import websockets
 HTTP_TIMEOUT_SECONDS = 5.0
 SERVER_FULL_RETRIES = 3
 SERVER_FULL_BACKOFF_SECONDS = 1.5
+RECONNECT_TOTAL_SECONDS = 60
+RECONNECT_INTERVAL_SECONDS = 2
 PROTOCOL_VERSION = 1
 
 
@@ -90,6 +92,7 @@ class OnlineClient:
         self.opp_state = "connected"
         self.ping_ms = None
         self._in_queue = False
+        self._game_active = False
 
     def connect(self, addr, request):
         self._addr = addr
@@ -203,10 +206,42 @@ class OnlineClient:
         self._inbound.put(Event("matchmake_response", mm))
         try:
             await self._run_ws_session()
+            while (not self._stop.is_set() and self._game_active
+                   and self._session_token is not None):
+                self.state = "reconnecting"
+                self.opp_state = "reconnecting"
+                resumed = await self._resume_with_retries()
+                if not resumed:
+                    self._inbound.put(Event("error", {"reason": "reconnect_failed"}))
+                    break
+                self._inbound.put(Event("game_resumed", resumed))
+                try:
+                    await self._run_ws_session()
+                except Exception as exc:
+                    self._inbound.put(Event("error", {"reason": str(exc)}))
+                    break
         except Exception as exc:
             self._inbound.put(Event("error", {"reason": str(exc)}))
         finally:
             self.state = "disconnected"
+
+    async def _resume_with_retries(self):
+        deadline = asyncio.get_event_loop().time() + RECONNECT_TOTAL_SECONDS
+        async with httpx.AsyncClient(timeout=HTTP_TIMEOUT_SECONDS) as http:
+            while asyncio.get_event_loop().time() < deadline and not self._stop.is_set():
+                try:
+                    r = await http.post(_http_url(self._addr, "/resume"),
+                                        json={"version": PROTOCOL_VERSION,
+                                              "room_id": self._room_id,
+                                              "session_token": self._session_token})
+                    if r.status_code == 200:
+                        return r.json()
+                    if r.status_code in (401, 410, 404):
+                        return None
+                except (httpx.HTTPError, httpx.TimeoutException):
+                    pass
+                await asyncio.sleep(RECONNECT_INTERVAL_SECONDS)
+        return None
 
     async def _matchmake_with_retries(self, request):
         last_exc = None
@@ -263,6 +298,9 @@ class OnlineClient:
                 msg_type = msg.get("type", "")
                 if msg_type == "game_start":
                     self._in_queue = False
+                    self._game_active = True
+                if msg_type == "result":
+                    self._game_active = False
                 if msg_type == "connection_status":
                     self.opp_state = msg.get("opp_state", "connected")
                 self._inbound.put(Event(msg_type, msg))
