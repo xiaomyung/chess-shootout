@@ -371,6 +371,10 @@ class Frontend:
                 if event.button == 1:
                     self.mouse_left_clicked(event.pos)
 
+            elif event.type == pg.MOUSEWHEEL:
+                if self.mode != "menu":
+                    self.right_menu.handle_scroll(pg.mouse.get_pos(), event.y)
+
             elif event.type == pg.VIDEORESIZE:
                 w = max(event.w, MIN_WINDOW_WIDTH)
                 h = max(event.h, MIN_WINDOW_HEIGHT)
