@@ -1,3 +1,5 @@
+import ctypes
+import glob
 import os
 import random
 from datetime import datetime
@@ -44,6 +46,28 @@ MIN_WINDOW_WIDTH = 900
 MIN_WINDOW_HEIGHT = 500
 
 
+def _apply_window_min_size(width, height):
+    try:
+        from pygame._sdl2 import video as sdl2_video
+    except ImportError:
+        return
+    paths = glob.glob(os.path.join(os.path.dirname(pg.__file__), "..", "pygame.libs", "libSDL2-2-*"))
+    if not paths:
+        return
+    try:
+        sdl = ctypes.CDLL(paths[0])
+        sdl.SDL_GetWindowFromID.argtypes = [ctypes.c_uint32]
+        sdl.SDL_GetWindowFromID.restype = ctypes.c_void_p
+        sdl.SDL_SetWindowMinimumSize.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_int]
+        sdl.SDL_SetWindowMinimumSize.restype = None
+        window = sdl2_video.Window.from_display_module()
+        ptr = sdl.SDL_GetWindowFromID(window.id)
+        if ptr:
+            sdl.SDL_SetWindowMinimumSize(ptr, width, height)
+    except (OSError, AttributeError, pg.error):
+        pass
+
+
 class Frontend:
 
     def __init__(self, window_width: int, window_height: int):
@@ -52,6 +76,7 @@ class Frontend:
         self.window_width = max(window_width, MIN_WINDOW_WIDTH)
         self.window_height = max(window_height, MIN_WINDOW_HEIGHT)
         self.window = pg.display.set_mode((self.window_width, self.window_height), pg.RESIZABLE)
+        _apply_window_min_size(MIN_WINDOW_WIDTH, MIN_WINDOW_HEIGHT)
         self.clock = pg.time.Clock()
 
         self.mode = "menu"
@@ -343,10 +368,6 @@ class Frontend:
                     self.mouse_left_clicked(event.pos)
 
             elif event.type == pg.VIDEORESIZE:
-                w = max(event.w, MIN_WINDOW_WIDTH)
-                h = max(event.h, MIN_WINDOW_HEIGHT)
-                if (w, h) != (event.w, event.h):
-                    self.window = pg.display.set_mode((w, h), pg.RESIZABLE)
-                self.window_width = w
-                self.window_height = h
+                self.window_width = max(event.w, MIN_WINDOW_WIDTH)
+                self.window_height = max(event.h, MIN_WINDOW_HEIGHT)
                 self._compute_layout()
