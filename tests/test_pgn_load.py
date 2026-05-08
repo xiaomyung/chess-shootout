@@ -152,6 +152,8 @@ def test_apply_san_disambiguation_by_file():
     backend.state[6][5] = Piece(PieceType.KNIGHT, PieceColor.WHITE)
     backend.state[7][7] = Piece(PieceType.KING, PieceColor.WHITE)
     backend.state[0][7] = Piece(PieceType.KING, PieceColor.BLACK)
+    # Filler pawn so KNN v K isn't auto-drawn before the move can land.
+    backend.state[1][0] = Piece(PieceType.PAWN, PieceColor.BLACK)
     backend.turn = PieceColor.WHITE
     backend.move_history = []
     backend.position_counts = Counter()

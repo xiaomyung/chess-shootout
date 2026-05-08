@@ -567,11 +567,13 @@ class Backend:
     def _has_insufficient_material(self):
         non_kings = []
         bishops = []
+        by_color = {PieceColor.WHITE: [], PieceColor.BLACK: []}
         for row, col in product(range(self.SIZE), repeat=2):
             piece = self.state[row][col]
             if piece is None or piece.type == PieceType.KING:
                 continue
             non_kings.append(piece)
+            by_color[piece.color].append(piece)
             if piece.type == PieceType.BISHOP:
                 bishops.append((row, col, piece))
 
@@ -579,13 +581,22 @@ class Backend:
             return True
         if len(non_kings) == 1 and non_kings[0].type in (PieceType.BISHOP, PieceType.KNIGHT):
             return True
-        if len(non_kings) == 2 and len(bishops) == 2:
-            bishop_a, bishop_b = bishops
-            if bishop_a[2].color != bishop_b[2].color:
-                square_color_a = (bishop_a[0] + bishop_a[1]) % 2
-                square_color_b = (bishop_b[0] + bishop_b[1]) % 2
-                if square_color_a == square_color_b:
+        if len(non_kings) == 2:
+            white, black = by_color[PieceColor.WHITE], by_color[PieceColor.BLACK]
+            if (len(white) == 1 and len(black) == 1
+                    and white[0].type == PieceType.KNIGHT
+                    and black[0].type == PieceType.KNIGHT):
+                return True
+            for side in (white, black):
+                if len(side) == 2 and all(p.type == PieceType.KNIGHT for p in side):
                     return True
+            if len(bishops) == 2:
+                bishop_a, bishop_b = bishops
+                if bishop_a[2].color != bishop_b[2].color:
+                    square_color_a = (bishop_a[0] + bishop_a[1]) % 2
+                    square_color_b = (bishop_b[0] + bishop_b[1]) % 2
+                    if square_color_a == square_color_b:
+                        return True
         return False
 
     def _is_square_attacked(self, square, by_color):
