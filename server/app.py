@@ -200,6 +200,11 @@ def create_app(*, now_provider=time.monotonic, max_rooms=100):
             raise HTTPException(status_code=404, detail={"reason": Reason.NOT_IN_ROOM})
         except InvalidTokenError:
             raise HTTPException(status_code=401, detail={"reason": Reason.SESSION_EXPIRED})
+        except RuntimeError as exc:
+            if str(exc) == "game_already_started":
+                # Cancel is moot — the game is in progress. Idempotent no-op.
+                return {"status": "already_started"}
+            raise
         return {"status": "ok"}
 
     @app.post("/resume", response_model=ResumeResponse)

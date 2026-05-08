@@ -29,6 +29,7 @@ class PlayerStrip:
         self.captured = []
         self.advantage = 0
         self.captured_color = None
+        self.connection_state = None
         self.padding = 10
         self.pocket_inset = 4
         self.pocket_fraction = 0.28
@@ -50,13 +51,14 @@ class PlayerStrip:
         self.icons = icons
 
     def set_state(self, name, clock_seconds, active, captured=None, advantage=0,
-                  captured_color=None):
+                  captured_color=None, connection_state=None):
         self.name = name
         self.clock_seconds = clock_seconds
         self.active = active
         self.captured = captured or []
         self.advantage = advantage
         self.captured_color = captured_color
+        self.connection_state = connection_state
 
     def draw(self):
         pg.draw.rect(self.window, Colors.dark_menu, self.rect, border_radius=4)
@@ -79,11 +81,24 @@ class PlayerStrip:
         if self.active:
             pg.draw.rect(self.window, Colors.button_hover, name_region, border_radius=3)
 
+        dot_offset = 0
+        if self.connection_state is not None:
+            dot_radius = max(int(self.rect.height * 0.10), 4)
+            dot_color = {
+                "connected": (60, 200, 90),
+                "reconnecting": (220, 180, 40),
+                "disconnected": (210, 60, 60),
+            }.get(self.connection_state, (140, 140, 140))
+            dot_x = name_region.x + self.pocket_inset + dot_radius
+            dot_y = name_region.centery
+            pg.draw.circle(self.window, dot_color, (dot_x, dot_y), dot_radius)
+            dot_offset = dot_radius * 2 + 6
+
         name_surf = self.name_font.render(self.name, True, Colors.white)
-        max_w = name_region.width - 2 * self.pocket_inset
+        max_w = name_region.width - 2 * self.pocket_inset - dot_offset
         if name_surf.get_width() > max_w > 0:
             name_surf = name_surf.subsurface(pg.Rect(0, 0, max_w, name_surf.get_height()))
-        name_x = name_region.x + self.pocket_inset
+        name_x = name_region.x + self.pocket_inset + dot_offset
         name_y = name_region.centery - name_surf.get_height() / 2
         self.window.blit(name_surf, (name_x, name_y))
 

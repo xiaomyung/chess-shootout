@@ -685,6 +685,9 @@ class Board:
         self._start_move_animation(pm.from_sq, pm.to_sq, result.promotion_required)
         return True
 
+    def animate_remote_move(self, from_sq, to_sq):
+        self._start_move_animation(from_sq, to_sq, promotion_required=False)
+
     def _start_move_animation(self, from_sq, to_sq, promotion_required):
         self.review_ply = None
         self._target_ply = None

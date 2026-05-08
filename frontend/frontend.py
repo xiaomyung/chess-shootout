@@ -147,6 +147,13 @@ class Frontend:
 
     def _on_back_to_menu(self):
         self.mode = "menu"
+        if self.online_client is not None:
+            self.online_client.disconnect()
+            self.online_client = None
+        self.match.mode = SINGLE_SCREEN
+        self.match.local_color = None
+        self.match.on_local_move_applied = None
+        self.right_menu.set_game_info(None)
         self._reset_to_new_game()
         self._refresh_load_pgn_availability()
         self.start_menu.show()
@@ -242,6 +249,8 @@ class Frontend:
         if self.online_client is not None:
             self.online_client.cancel_queue()
             self.online_client = None
+        self.match.on_local_move_applied = None
+        self.right_menu.set_game_info(None)
         self.server_modal.hide()
         self.wait_modal.hide()
         self.mode = "menu"
@@ -251,7 +260,11 @@ class Frontend:
         if self.online_client is None:
             return
         for event in self.online_client.drain_inbound():
-            self._handle_online_event(event)
+            try:
+                self._handle_online_event(event)
+            except Exception:
+                import traceback
+                traceback.print_exc()
 
     def _handle_online_event(self, event):
         if event.type == "matchmake_response":
@@ -286,7 +299,9 @@ class Frontend:
         to_sq = _square_from_coord(payload["to"])
         promo = payload.get("promotion")
         promo_type = _PROMO_TYPE_BY_LETTER.get(promo) if promo else None
-        self.match.apply_remote_move(from_sq, to_sq, promo_type)
+        result = self.match.apply_remote_move(from_sq, to_sq, promo_type)
+        if result.legal:
+            self.board.animate_remote_move(from_sq, to_sq)
 
     def _handle_online_result(self, payload):
         reason = payload.get("reason", "")
@@ -317,6 +332,13 @@ class Frontend:
         self.match.local_color = (PieceColor.WHITE if payload["your_color"] == "white"
                                   else PieceColor.BLACK)
         self.match.on_local_move_applied = self._on_local_move_applied
+        self.right_menu.set_game_info({
+            "white_name": payload["white_name"],
+            "black_name": payload["black_name"],
+            "time_minutes": payload["time_minutes"],
+            "increment_seconds": payload["increment_seconds"],
+            "ping_ms": None,
+        })
         self._reset_to_new_game()
         self.sound_manager.play_game_start()
 
@@ -515,7 +537,13 @@ class Frontend:
             history = history[:self.board.review_ply]
         captured = captured_by(history, color)
         advantage = material_advantage(history, color)
-        return name, seconds, active, captured, advantage, opponent_of(color)
+        connection_state = None
+        if (self.mode == ONLINE and self.online_client is not None
+                and self.match.local_color is not None
+                and color != self.match.local_color):
+            connection_state = self.online_client.opp_state
+        return (name, seconds, active, captured, advantage,
+                opponent_of(color), connection_state)
 
     def _compute_layout(self):
         window_width, window_height = self.window.get_size()

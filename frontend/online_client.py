@@ -87,7 +87,9 @@ class OnlineClient:
         self._room_id = None
         self._session_token = None
         self.state = "disconnected"
+        self.opp_state = "connected"
         self.ping_ms = None
+        self._in_queue = False
 
     def connect(self, addr, request):
         self._addr = addr
@@ -103,7 +105,7 @@ class OnlineClient:
         asyncio.run_coroutine_threadsafe(self._cancel_async(), self._loop)
 
     async def _cancel_async(self):
-        if self._room_id and self._session_token:
+        if self._in_queue and self._room_id and self._session_token:
             try:
                 async with httpx.AsyncClient(timeout=HTTP_TIMEOUT_SECONDS) as http:
                     await http.request(
@@ -114,6 +116,7 @@ class OnlineClient:
                     )
             except Exception:
                 pass
+        self._in_queue = False
         self._stop.set()
         if self._ws is not None:
             try:
@@ -196,6 +199,7 @@ class OnlineClient:
             return
         self._room_id = mm["room_id"]
         self._session_token = mm["session_token"]
+        self._in_queue = True
         self._inbound.put(Event("matchmake_response", mm))
         try:
             await self._run_ws_session()
@@ -257,6 +261,10 @@ class OnlineClient:
                 except json.JSONDecodeError:
                     continue
                 msg_type = msg.get("type", "")
+                if msg_type == "game_start":
+                    self._in_queue = False
+                if msg_type == "connection_status":
+                    self.opp_state = msg.get("opp_state", "connected")
                 self._inbound.put(Event(msg_type, msg))
                 if msg_type == "result":
                     break
