@@ -8,6 +8,11 @@ def format_clock(seconds):
         return "—:—"
     if seconds < 0:
         seconds = 0
+    if seconds < 30:
+        total_tenths = int(seconds * 10)
+        minutes, rem = divmod(total_tenths, 600)
+        secs, tenths = divmod(rem, 10)
+        return f"{minutes}:{secs:02d}.{tenths}"
     total = int(seconds)
     minutes, secs = divmod(total, 60)
     return f"{minutes}:{secs:02d}"

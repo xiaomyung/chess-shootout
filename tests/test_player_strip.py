@@ -28,10 +28,11 @@ def test_format_clock_minutes_seconds():
 
 
 def test_format_clock_zero():
-    assert format_clock(0.0) == "0:00"
+    # Zero is below 30s threshold → tenths display.
+    assert format_clock(0.0) == "0:00.0"
 
 
-def test_format_clock_floors_fraction():
+def test_format_clock_floors_fraction_above_30s():
     # 599.9s should display as 9:59 (integer floor), not roll up to 10:00.
     assert format_clock(599.9) == "9:59"
 
@@ -41,7 +42,29 @@ def test_format_clock_none_renders_em_dashes():
 
 
 def test_format_clock_negative_clamps_to_zero():
-    assert format_clock(-3.0) == "0:00"
+    assert format_clock(-3.0) == "0:00.0"
+
+
+def test_format_clock_at_30s_no_tenths():
+    # 30.0 is the boundary; tenths only below 30.
+    assert format_clock(30.0) == "0:30"
+
+
+def test_format_clock_just_below_30s_shows_tenths():
+    assert format_clock(29.999) == "0:29.9"
+
+
+def test_format_clock_low_seconds_with_tenths():
+    assert format_clock(25.3) == "0:25.3"
+
+
+def test_format_clock_truncates_tenths():
+    # 9.95s should show 0:09.9 (truncate, not round to 10.0).
+    assert format_clock(9.95) == "0:09.9"
+
+
+def test_format_clock_well_above_30s_no_tenths():
+    assert format_clock(125.7) == "2:05"
 
 
 def test_set_state_records_fields(strip):
