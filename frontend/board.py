@@ -294,6 +294,20 @@ class Board:
             rook_piece = self.backend.piece_at(rook_to)
             self.start_animation(rook_from, rook_to, rook_piece)
 
+    def start_undo_animation(self, move):
+        moving_piece = self.backend.piece_at(move.from_sq)
+        if moving_piece is None:
+            return
+        self.start_animation(move.to_sq, move.from_sq, moving_piece)
+        if move.is_castle:
+            home_row = move.from_sq.row
+            if move.to_sq.col == 6:
+                rook_post, rook_home = Square(home_row, 5), Square(home_row, 7)
+            else:
+                rook_post, rook_home = Square(home_row, 3), Square(home_row, 0)
+            rook_piece = self.backend.piece_at(rook_home)
+            self.start_animation(rook_post, rook_home, rook_piece)
+
     def _set_pending_promotion(self, sq):
         self.pending_promotion_square = sq
 

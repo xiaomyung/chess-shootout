@@ -165,7 +165,11 @@ class Frontend:
             self.manual_result = None
             return
         self.board.cancel_animations()
+        if not self.backend.move_history:
+            return
+        move = self.backend.move_history[-1].move
         self.backend.undo()
+        self.board.start_undo_animation(move)
 
     def _on_resign(self):
         if self.current_result() is not None:

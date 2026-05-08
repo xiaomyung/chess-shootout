@@ -182,13 +182,69 @@ def test_promotion_picker_deferred_until_animation_completes(board):
     assert board.pending_promotion_square == Square(0, 0)
 
 
-def test_undo_cancels_animations_via_frontend():
+def test_undo_starts_reverse_animation_via_frontend():
+    from frontend.frontend import Frontend
+    app = Frontend(800, 600)
+    app._on_start_game(DEFAULT_CONFIG)
+    app.board.handle_click(Square(6, 4))
+    app.board.handle_click(Square(4, 4))
+    # Cancel forward anim by completing it, then undo.
+    app.board.cancel_animations()
+    app._on_undo()
+    assert app.board.is_animating()
+    a = app.board.animations[0]
+    # Reverse direction: animation from = original move's to_sq, to = from_sq.
+    assert a.from_sq == Square(4, 4)
+    assert a.to_sq == Square(6, 4)
+    assert a.piece.type == PieceType.PAWN
+
+
+def test_undo_during_forward_animation_replaces_with_reverse():
     from frontend.frontend import Frontend
     app = Frontend(800, 600)
     app._on_start_game(DEFAULT_CONFIG)
     app.board.handle_click(Square(6, 4))
     app.board.handle_click(Square(4, 4))
     assert app.board.is_animating()
+    forward = app.board.animations[0]
+    app._on_undo()
+    # Old animation gone; new reverse animation in flight.
+    assert app.board.is_animating()
+    assert app.board.animations[0] is not forward
+    assert app.board.animations[0].from_sq == Square(4, 4)
+
+
+def test_undo_castle_triggers_two_reverse_animations():
+    from frontend.frontend import Frontend
+    app = Frontend(800, 600)
+    app._on_start_game(DEFAULT_CONFIG)
+    backend = app.backend
+    backend.state = [[None] * 8 for _ in range(8)]
+    backend.state[7][4] = Piece(PieceType.KING, PieceColor.WHITE)
+    backend.state[7][7] = Piece(PieceType.ROOK, PieceColor.WHITE)
+    backend.state[0][4] = Piece(PieceType.KING, PieceColor.BLACK)
+    from collections import Counter
+    backend.move_history = []
+    backend.position_counts = Counter()
+    backend.position_counts[backend._position_key()] = 1
+    app.board.handle_click(Square(7, 4))
+    app.board.handle_click(Square(7, 6))
+    app.board.cancel_animations()
+    app._on_undo()
+    kinds = sorted(a.piece.type.name for a in app.board.animations)
+    assert kinds == ["KING", "ROOK"]
+    # King reverses 7,6 -> 7,4; rook reverses 7,5 -> 7,7.
+    king_anim = next(a for a in app.board.animations if a.piece.type == PieceType.KING)
+    rook_anim = next(a for a in app.board.animations if a.piece.type == PieceType.ROOK)
+    assert (king_anim.from_sq, king_anim.to_sq) == (Square(7, 6), Square(7, 4))
+    assert (rook_anim.from_sq, rook_anim.to_sq) == (Square(7, 5), Square(7, 7))
+
+
+def test_undo_with_empty_history_is_a_noop():
+    from frontend.frontend import Frontend
+    app = Frontend(800, 600)
+    app._on_start_game(DEFAULT_CONFIG)
+    # No moves made; undo should not error or start an animation.
     app._on_undo()
     assert not app.board.is_animating()
 
