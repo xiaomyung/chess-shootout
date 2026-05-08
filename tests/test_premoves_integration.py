@@ -127,17 +127,18 @@ def test_knight_premove_l_shape_queued(board):
     assert len(board.premoves) == 1
 
 
-def test_bishop_sideways_silently_rejected(board):
+def test_bishop_sideways_queues_lax(board):
+    # Premove queueing is now lax: any shape is queued, legality is verified at
+    # execution time (when the engine refuses, the chain is wiped).
     board.backend.turn = PieceColor.BLACK
-    # Place white bishop at (4, 4) for clarity.
     setup_position(board, {
         Square(7, 4): Piece(PieceType.KING, PieceColor.WHITE),
         Square(0, 4): Piece(PieceType.KING, PieceColor.BLACK),
         Square(4, 4): Piece(PieceType.BISHOP, PieceColor.WHITE),
     }, turn=PieceColor.BLACK)
     board.handle_click(Square(4, 4))
-    board.handle_click(Square(4, 7))  # sideways - invalid bishop shape
-    assert board.premoves == []
+    board.handle_click(Square(4, 7))
+    assert len(board.premoves) == 1
 
 
 def test_pawn_diagonal_to_empty_queues_LAX(board):
@@ -1086,7 +1087,8 @@ def test_right_click_during_drag_queues_premove(board):
     assert board.premoves[0].to_sq == Square(4, 4)
 
 
-def test_right_click_during_drag_ends_drag(board):
+def test_right_click_during_drag_keeps_dragging_for_chain(board):
+    # Drag stays active so the user can chain more premoves with the same hold.
     setup_position(board, {
         Square(7, 4): Piece(PieceType.KING, PieceColor.WHITE),
         Square(0, 4): Piece(PieceType.KING, PieceColor.BLACK),
@@ -1094,22 +1096,45 @@ def test_right_click_during_drag_ends_drag(board):
     }, turn=PieceColor.BLACK)
     _start_drag(board, Square(6, 4))
     board.queue_premove_from_drag(Square(4, 4))
-    assert board.dragging_from is None
-    assert board.selected_square is None
-    assert board._drag_cursor is None
+    assert board.dragging_from == Square(6, 4)
+    assert board._drag_cursor is not None
+    assert board._drag_chain_tip == Square(4, 4)
 
 
-def test_right_click_during_drag_invalid_shape_does_not_queue(board):
+def test_right_click_during_drag_chains_inside_single_hold(board):
+    # Same drag, two right-clicks: chain head advances along the queued tips.
+    setup_position(board, {
+        Square(7, 4): Piece(PieceType.KING, PieceColor.WHITE),
+        Square(0, 4): Piece(PieceType.KING, PieceColor.BLACK),
+        Square(1, 5): Piece(PieceType.ROOK, PieceColor.WHITE),
+        Square(1, 6): Piece(PieceType.PAWN, PieceColor.BLACK),
+        Square(1, 7): Piece(PieceType.PAWN, PieceColor.BLACK),
+    }, turn=PieceColor.BLACK)
+    board.match.local_color = PieceColor.WHITE
+    _start_drag(board, Square(1, 5))
+    board.queue_premove_from_drag(Square(1, 6))
+    assert len(board.premoves) == 1
+    # Still dragging — second right-click queues from the new tip g7 to h7.
+    assert board.dragging_from == Square(1, 5)
+    assert board._drag_chain_tip == Square(1, 6)
+    board.queue_premove_from_drag(Square(1, 7))
+    assert len(board.premoves) == 2
+    assert board.premoves[1].from_sq == Square(1, 6)
+    assert board.premoves[1].to_sq == Square(1, 7)
+    assert board._drag_chain_tip == Square(1, 7)
+
+
+def test_right_click_during_drag_lax_shape_still_queues(board):
+    # Simplified premove logic: queueing accepts any shape — legality verified
+    # only at execution. A rook moving diagonally still gets queued.
     setup_position(board, {
         Square(7, 4): Piece(PieceType.KING, PieceColor.WHITE),
         Square(0, 4): Piece(PieceType.KING, PieceColor.BLACK),
         Square(7, 0): Piece(PieceType.ROOK, PieceColor.WHITE),
     }, turn=PieceColor.BLACK)
     _start_drag(board, Square(7, 0))
-    # Rook can't move diagonally — premove rejected, drag stays.
-    assert board.queue_premove_from_drag(Square(5, 2)) is False
-    assert board.premoves == []
-    assert board.dragging_from == Square(7, 0)
+    assert board.queue_premove_from_drag(Square(5, 2)) is True
+    assert len(board.premoves) == 1
 
 
 def test_right_click_during_drag_same_square_no_queue(board):
@@ -1129,29 +1154,6 @@ def test_right_click_drag_premove_skipped_when_not_dragging(board):
     assert board.premoves == []
 
 
-def test_right_click_drag_premove_chains_via_repeated_drag(board):
-    # User right-clicks to queue the first premove, then re-clicks the
-    # speculative tip to start a new drag, then right-clicks again.
-    setup_position(board, {
-        Square(7, 4): Piece(PieceType.KING, PieceColor.WHITE),
-        Square(0, 4): Piece(PieceType.KING, PieceColor.BLACK),
-        Square(1, 5): Piece(PieceType.ROOK, PieceColor.WHITE),
-        Square(1, 6): Piece(PieceType.PAWN, PieceColor.BLACK),
-        Square(1, 7): Piece(PieceType.PAWN, PieceColor.BLACK),
-    }, turn=PieceColor.BLACK)
-    board.match.local_color = PieceColor.WHITE
-    _start_drag(board, Square(1, 5))
-    board.queue_premove_from_drag(Square(1, 6))
-    assert len(board.premoves) == 1
-    # Click g7 (speculative tip) to begin a new drag.
-    _start_drag(board, Square(1, 6))
-    assert board.dragging_from == Square(1, 6)
-    board.queue_premove_from_drag(Square(1, 7))
-    assert len(board.premoves) == 2
-    assert board.premoves[1].from_sq == Square(1, 6)
-    assert board.premoves[1].to_sq == Square(1, 7)
-
-
 def test_right_click_drag_premove_blocked_for_opp_piece_in_online(board):
     setup_position(board, {
         Square(7, 4): Piece(PieceType.KING, PieceColor.WHITE),
@@ -1163,8 +1165,22 @@ def test_right_click_drag_premove_blocked_for_opp_piece_in_online(board):
     # somehow the drag started, the queue helper must reject it.
     board.dragging_from = Square(1, 4)
     board.selected_square = Square(1, 4)
+    board._drag_chain_tip = Square(1, 4)
     assert board.queue_premove_from_drag(Square(2, 4)) is False
     assert board.premoves == []
+
+
+def test_right_click_drag_premove_chain_clears_when_drag_ends(board):
+    setup_position(board, {
+        Square(7, 4): Piece(PieceType.KING, PieceColor.WHITE),
+        Square(0, 4): Piece(PieceType.KING, PieceColor.BLACK),
+        Square(6, 4): Piece(PieceType.PAWN, PieceColor.WHITE),
+    }, turn=PieceColor.BLACK)
+    _start_drag(board, Square(6, 4))
+    board.queue_premove_from_drag(Square(4, 4))
+    board.end_press()
+    assert board._drag_chain_tip is None
+    assert board.dragging_from is None
 
 
 def test_premove_immediately_after_other_premove_fires(board):

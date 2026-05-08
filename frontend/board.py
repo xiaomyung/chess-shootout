@@ -6,7 +6,7 @@ import pygame as pg
 from backend.utils import Square
 from frontend.animation import PieceAnimation
 from frontend.colors import Colors
-from frontend.premoves import Premove, is_premove_shape_valid, speculative_board
+from frontend.premoves import Premove, speculative_board
 from backend.pieces import PieceType, PieceColor, Piece
 
 
@@ -51,6 +51,7 @@ class Board:
         self._press_pos = None
         self.dragging_from = None
         self._drag_cursor = None
+        self._drag_chain_tip = None
         self.review_ply = None
         self._target_ply = None
         self.read_only = False
@@ -502,6 +503,7 @@ class Board:
         if dx * dx + dy * dy < DRAG_THRESHOLD_PX * DRAG_THRESHOLD_PX:
             return
         self.dragging_from = self.selected_square
+        self._drag_chain_tip = self.selected_square
         self._drag_cursor = pos
 
     def end_press(self):
@@ -509,30 +511,25 @@ class Board:
         self._press_pos = None
         self.dragging_from = None
         self._drag_cursor = None
+        self._drag_chain_tip = None
         return was_dragging
 
     def queue_premove_from_drag(self, target_sq):
         if self.read_only or self.review_ply is not None:
             return False
-        if self.dragging_from is None or target_sq == self.dragging_from:
+        if self._drag_chain_tip is None or target_sq == self._drag_chain_tip:
             return False
         if self.pending_promotion_square is not None:
             return False
         grid = self._effective_grid()
-        piece = grid[self.dragging_from.row][self.dragging_from.col]
+        piece = grid[self._drag_chain_tip.row][self._drag_chain_tip.col]
         if piece is None:
             return False
         local_color = getattr(self.match, "local_color", None)
         if local_color is not None and piece.color != local_color:
             return False
-        before_len = len(self.premoves)
-        self._queue_premove(self.dragging_from, target_sq, piece)
-        if len(self.premoves) == before_len:
-            return False
-        self.dragging_from = None
-        self._drag_cursor = None
-        self.selected_square = None
-        self._press_pos = None
+        self._queue_premove(self._drag_chain_tip, target_sq, piece)
+        self._drag_chain_tip = target_sq
         return True
 
     def cell_at(self, pos):
@@ -660,7 +657,7 @@ class Board:
         self.selected_square = square
 
     def _queue_premove(self, from_sq, to_sq, piece):
-        if not is_premove_shape_valid(piece, from_sq, to_sq):
+        if from_sq == to_sq:
             return
         if self.premove_color is not None and self.premove_color != piece.color:
             self._clear_premoves()
