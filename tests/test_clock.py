@@ -1,7 +1,7 @@
 import pytest
 
 from backend.clock import Clock
-from pieces.pieces import PieceColor
+from pieces import PieceColor
 
 from tests.helpers import (
     BLACK, WHITE, K, Q, R, B, N, P,

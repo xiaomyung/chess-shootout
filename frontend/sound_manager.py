@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pygame as pg
 
-from pieces.pieces import PieceType
+from pieces import PieceType
 
 
 @dataclass

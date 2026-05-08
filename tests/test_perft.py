@@ -1,6 +1,6 @@
 from backend.backend import Backend
 from backend.utils import Square
-from pieces.pieces import PieceColor, PieceType
+from pieces import PieceColor, PieceType
 
 
 def perft(backend, depth):

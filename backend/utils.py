@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 from typing import Optional
 
-from pieces.pieces import Piece, PieceType
+from pieces import Piece, PieceType
 
 
 @dataclass(frozen=True)

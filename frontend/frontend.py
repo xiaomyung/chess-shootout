@@ -13,7 +13,7 @@ from frontend.sound_manager import SoundManager
 from frontend.start_menu import StartMenu
 from frontend.pgn import generate_pgn, TIMEOUT_RESULTS
 from paths import PROJECT_ROOT, SOUNDS_DIR
-from pieces.pieces import PieceColor, PieceType
+from pieces import PieceColor, PieceType
 
 
 MANUAL_RESULT_TEXT = {

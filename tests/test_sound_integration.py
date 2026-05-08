@@ -11,7 +11,7 @@ import pytest
 
 from backend.utils import Square
 from frontend.frontend import Frontend
-from pieces.pieces import Piece, PieceColor, PieceType
+from pieces import Piece, PieceColor, PieceType
 
 
 @pytest.fixture(scope="module", autouse=True)

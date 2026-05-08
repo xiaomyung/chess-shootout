@@ -8,7 +8,7 @@ import pytest
 from backend.backend import Backend
 from backend.utils import Square
 from frontend.animation import PieceAnimation
-from pieces.pieces import Piece, PieceColor, PieceType
+from pieces import Piece, PieceColor, PieceType
 
 
 DEFAULT_CONFIG = {
