@@ -14,9 +14,10 @@ class Board:
     TEXT_PADDING_FRACTION = 0.006
     SIZE = 8
 
-    def __init__(self, window, backend):
+    def __init__(self, window, backend, move_landed_callback=None):
         self.window = window
         self.backend = backend
+        self.move_landed_callback = move_landed_callback
         self.font = pg.font.SysFont("Arial", 18, bold=True)
         self.board_guides_font_factor = 50
 
@@ -276,10 +277,11 @@ class Board:
         entry = self.backend.move_history[-1]
         moving_piece = entry.move.piece
 
-        on_complete = None
         if promotion_required:
             promotion_sq = to_sq
             on_complete = lambda: self._set_pending_promotion(promotion_sq)
+        else:
+            on_complete = self._fire_move_landed
 
         self.start_animation(from_sq, to_sq, moving_piece, on_complete=on_complete)
 
@@ -311,6 +313,14 @@ class Board:
     def _set_pending_promotion(self, sq):
         self.pending_promotion_square = sq
 
+    def _fire_move_landed(self):
+        if self.move_landed_callback is None or not self.backend.move_history:
+            return
+        entry = self.backend.move_history[-1]
+        if entry.position_key_added is None:
+            return
+        self.move_landed_callback(entry)
+
     def _handle_promotion_click(self, clicked_sq):
         sq = self.pending_promotion_square
         color = self.backend.piece_at(sq).color
@@ -326,6 +336,7 @@ class Board:
         chosen = options[offset]
         self.backend.promote(sq, chosen)
         self.pending_promotion_square = None
+        self._fire_move_landed()
 
     def _try_select(self, square):
         piece = self.backend.piece_at(square)

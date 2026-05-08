@@ -9,9 +9,10 @@ from frontend.board import Board
 from frontend.player_strip import PlayerStrip
 from frontend.right_menu import RightMenu
 from frontend.result_menu import ResultMenu
+from frontend.sound_manager import SoundManager
 from frontend.start_menu import StartMenu
 from frontend.pgn import generate_pgn, TIMEOUT_RESULTS
-from paths import PROJECT_ROOT
+from paths import PROJECT_ROOT, SOUNDS_DIR
 from pieces.pieces import PieceColor, PieceType
 
 
@@ -63,7 +64,8 @@ class Frontend:
         self._time_control = None
 
         self.backend = Backend()
-        self.board = Board(self.window, self.backend)
+        self.sound_manager = SoundManager(SOUNDS_DIR, enabled=pg.mixer.get_init() is not None)
+        self.board = Board(self.window, self.backend, move_landed_callback=self._on_move_landed)
         self.result_menu = ResultMenu(self.window, {
             "new_game": self._on_new_game,
             "save_pgn": self._on_save_pgn,
@@ -100,6 +102,7 @@ class Frontend:
 
     def _on_new_game(self):
         self._reset_to_new_game()
+        self.sound_manager.play_game_start()
 
     def _on_back_to_menu(self):
         self.mode = "menu"
@@ -133,8 +136,10 @@ class Frontend:
 
         self._reset_to_new_game()
         self.start_menu.hide()
+        self.sound_manager.play_game_start()
 
     def _reset_to_new_game(self):
+        self.sound_manager.stop_all()
         self.manual_result = None
         self.backend.new_game()
         if self._time_control is not None:
@@ -170,6 +175,7 @@ class Frontend:
         self.board.cancel_animations()
         if not self.backend.move_history:
             return
+        self.sound_manager.play_undo()
         move = self.backend.move_history[-1].move
         self.backend.undo()
         self.board.start_undo_animation(move)
@@ -196,6 +202,16 @@ class Frontend:
     def _on_flip(self):
         self.board.flipped = not self.board.flipped
 
+    def _on_move_landed(self, entry):
+        if entry.gives_checkmate:
+            self.sound_manager.play_checkmate()
+        else:
+            self.sound_manager.play_move()
+        if entry.move.captured is not None:
+            self.sound_manager.play_capture()
+        if entry.gives_check and not entry.gives_checkmate:
+            self.sound_manager.play_check()
+
     def run(self):
         while self.running:
             self.check_events()
@@ -209,6 +225,8 @@ class Frontend:
     def draw_frame(self):
         if self.mode != "menu" and self.current_result() is None:
             self.backend.tick_clock()
+
+        self._update_heartbeat()
 
         now = pg.time.get_ticks()
         if (self.mode == "single_screen"
@@ -237,6 +255,17 @@ class Frontend:
         over = self.current_result() is not None
         self.player_strip_top.set_state(*self._strip_state(top_color, turn, over))
         self.player_strip_bottom.set_state(*self._strip_state(bottom_color, turn, over))
+
+    def _update_heartbeat(self):
+        clock = self.backend.clock
+        paused = (self.mode == "menu"
+                  or self.current_result() is not None
+                  or clock is None)
+        if paused or clock.initial_seconds <= 0:
+            fraction = None
+        else:
+            fraction = clock.remaining(self.backend.current_turn()) / clock.initial_seconds
+        self.sound_manager.update_heartbeat(fraction, paused)
 
     def _strip_state(self, color, turn, over):
         name = self.white_name if color == PieceColor.WHITE else self.black_name
