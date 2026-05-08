@@ -220,30 +220,36 @@ class Board:
         to_rect = self._cell_rect(to_sq.row, to_sq.col)
         from_pos = (from_rect.centerx, from_rect.centery)
         to_pos = (to_rect.centerx, to_rect.centery)
-        width = max(int(self.cell_size * 0.18), 4)
+        width = max(int(self.cell_size * 0.18), 5)
+        if width % 2 == 0:
+            width -= 1
         head_size = max(int(self.cell_size * 0.35), 8)
-        cap_radius = max(width // 2, 2)
+        cap_radius = width // 2
 
         surface_size = self.window.get_size()
         overlay = pg.Surface(surface_size, pg.SRCALPHA)
-
-        pg.draw.circle(overlay, color, from_pos, cap_radius)
 
         corner_sq = self._knight_arrow_corner(from_sq, to_sq)
         if corner_sq is not None:
             corner_rect = self._cell_rect(corner_sq.row, corner_sq.col)
             corner_pos = (corner_rect.centerx, corner_rect.centery)
             pg.draw.line(overlay, color, from_pos, corner_pos, width)
+            pg.draw.line(overlay, color, corner_pos, to_pos, width)
             pg.draw.circle(overlay, color, corner_pos, cap_radius)
             shaft_origin = corner_pos
         else:
             shaft_origin = from_pos
 
+        pg.draw.circle(overlay, color, from_pos, cap_radius)
+
         angle = math.atan2(to_pos[1] - shaft_origin[1], to_pos[0] - shaft_origin[0])
-        shaft_end = (
-            to_pos[0] - head_size * 0.55 * math.cos(angle),
-            to_pos[1] - head_size * 0.55 * math.sin(angle),
-        )
+        if corner_sq is None:
+            shaft_end = (
+                to_pos[0] - head_size * 0.55 * math.cos(angle),
+                to_pos[1] - head_size * 0.55 * math.sin(angle),
+            )
+            pg.draw.line(overlay, color, shaft_origin, shaft_end, width)
+
         head_half = math.radians(150)
         head_left = (
             to_pos[0] + head_size * math.cos(angle + head_half),
@@ -253,8 +259,6 @@ class Board:
             to_pos[0] + head_size * math.cos(angle - head_half),
             to_pos[1] + head_size * math.sin(angle - head_half),
         )
-
-        pg.draw.line(overlay, color, shaft_origin, shaft_end, width)
         pg.draw.polygon(overlay, color, [to_pos, head_left, head_right])
         self.window.blit(overlay, (0, 0))
 
