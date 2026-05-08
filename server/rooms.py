@@ -240,10 +240,19 @@ class RoomManager:
             if now - room.ended_at >= REMATCH_KEEP_ALIVE_SECONDS:
                 to_drop.append(room_id)
         for room_id in to_drop:
-            room = self._active.pop(room_id)
-            for slot in (room.white, room.black):
-                if slot is not None:
-                    self._uuid_to_room.pop(slot.client_uuid, None)
+            self._drop_room(room_id)
+
+    def drop_room_now(self, room_id):
+        if room_id in self._active:
+            self._drop_room(room_id)
+
+    def _drop_room(self, room_id):
+        room = self._active.pop(room_id, None)
+        if room is None:
+            return
+        for slot in (room.white, room.black):
+            if slot is not None:
+                self._uuid_to_room.pop(slot.client_uuid, None)
 
     def reset_for_rematch(self, room_id):
         room = self._active.get(room_id)
