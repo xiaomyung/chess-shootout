@@ -338,6 +338,9 @@ async def _ws_session(app, websocket, room_id):
     auth_color = color
     rooms.mark_connected(room.room_id, color)
     connections.add(room.room_id, color, websocket)
+    log.info("ws auth ok room=%s color=%s paired=%s has_both=%s",
+             room.room_id, color, room.is_paired(),
+             connections.has_both(room.room_id))
 
     if room.is_paired() and connections.has_both(room.room_id):
         if room.started_at is None or room.first_move_at is None:
@@ -354,6 +357,10 @@ async def _ws_session(app, websocket, room_id):
                 raw = await websocket.receive_text()
             except WebSocketDisconnect:
                 break
+            except Exception as exc:
+                log.warning("ws recv unexpected exc room=%s color=%s exc=%r",
+                            room.room_id, color, exc)
+                break
             if len(raw) > MAX_INBOUND_MESSAGE_BYTES:
                 await websocket.close(code=WS_CLOSE_PAYLOAD_TOO_LARGE)
                 return
@@ -364,6 +371,8 @@ async def _ws_session(app, websocket, room_id):
         if auth_room is not None and auth_color is not None:
             rooms.mark_disconnected(auth_room.room_id, auth_color)
             connections.remove(auth_room.room_id, auth_color)
+            log.info("ws disconnected room=%s color=%s",
+                     auth_room.room_id, auth_color)
             opp_ws = connections.get(auth_room.room_id, auth_room.opp_color(auth_color))
             if opp_ws is not None and auth_room.result is None:
                 await _send(opp_ws, ConnectionStatusMessage(opp_state="reconnecting"))
@@ -371,6 +380,7 @@ async def _ws_session(app, websocket, room_id):
 
 async def _broadcast_game_start(connections, room):
     fen = export_fen(room.backend)
+    sent = []
     for color in ("white", "black"):
         ws = connections.get(room.room_id, color)
         if ws is None:
@@ -383,6 +393,8 @@ async def _broadcast_game_start(connections, room):
             increment_seconds=room.increment_seconds,
             your_color=color,
         ))
+        sent.append(color)
+    log.info("game_start broadcast room=%s sent_to=%s", room.room_id, sent)
 
 
 async def _dispatch(app, websocket, room, color, raw):

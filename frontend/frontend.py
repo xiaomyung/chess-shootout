@@ -97,6 +97,7 @@ class Frontend:
             "new_game": self._on_new_game,
             "save_pgn": self._on_save_pgn,
             "menu": self._on_back_to_menu,
+            "rematch": self._on_rematch,
         })
         self.start_menu = StartMenu(self.window, {
             "start_game": self._on_start_game,
@@ -154,6 +155,7 @@ class Frontend:
         self.match.local_color = None
         self.match.on_local_move_applied = None
         self.right_menu.set_game_info(None)
+        self.result_menu.set_online_mode(False)
         self._reset_to_new_game()
         self._refresh_load_pgn_availability()
         self.start_menu.show()
@@ -275,12 +277,50 @@ class Frontend:
             self._handle_remote_move_applied(event.payload)
         elif event.type == "result":
             self._handle_online_result(event.payload)
+        elif event.type == "draw_offered":
+            self.confirm_modal.show(
+                "Opponent offers a draw",
+                on_yes=lambda: self.online_client.send_draw_response(True),
+                on_no=lambda: self.online_client.send_draw_response(False),
+                yes_label="Accept", no_label="Decline",
+            )
+        elif event.type == "takeback_offered":
+            self.confirm_modal.show(
+                "Opponent requests a takeback",
+                on_yes=lambda: self.online_client.send_takeback_response(True),
+                on_no=lambda: self.online_client.send_takeback_response(False),
+                yes_label="Accept", no_label="Decline",
+            )
+        elif event.type == "takeback_applied":
+            self._handle_takeback_applied(event.payload)
+        elif event.type == "rematch_request":
+            self.confirm_modal.show(
+                "Opponent wants a rematch",
+                on_yes=lambda: self.online_client.send_rematch_response(True),
+                on_no=lambda: self.online_client.send_rematch_response(False),
+                yes_label="Accept", no_label="Decline",
+            )
+        elif event.type == "connection_status":
+            return  # opp_state already updated inside OnlineClient
         elif event.type == "error":
             self.confirm_modal.show(
                 event.payload.get("reason", "Server unreachable"),
                 on_yes=lambda: self._on_server_addr_connect(env.get_server_addr()),
                 on_no=self._on_online_cancel,
                 yes_label="Retry", no_label="Cancel",
+            )
+
+    def _handle_takeback_applied(self, payload):
+        if self.match.move_history:
+            last = self.match.move_history[-1].move
+            self.match.undo()
+            self.board.start_undo_animation(last)
+        clock_snap = payload.get("clock") or {}
+        if self.match.clock is not None:
+            self.match.clock.restore_from_server(
+                clock_snap.get("white_remaining", self.match.clock.white_remaining),
+                clock_snap.get("black_remaining", self.match.clock.black_remaining),
+                clock_snap.get("running_for"),
             )
 
     def _handle_remote_move_applied(self, payload):
@@ -320,8 +360,16 @@ class Frontend:
         elif reason == "server_shutdown":
             self.manual_result = "draw_agreement"
 
+    def _on_rematch(self):
+        if self.online_client is None:
+            return
+        self.online_client.send_rematch_request()
+
     def _start_online_game(self, payload):
         self.wait_modal.hide()
+        self.confirm_modal.hide()
+        self.manual_result = None
+        self.result_menu.set_online_mode(True)
         self.mode = ONLINE
         self._chosen_side = payload["your_color"]
         self.white_name = payload["white_name"]
@@ -392,6 +440,9 @@ class Frontend:
     def _on_undo(self):
         if self.pgn_review:
             return
+        if self.mode == ONLINE and self.online_client is not None:
+            self.online_client.send_takeback_request()
+            return
         self.board.selected_square = None
         self.board._clear_premoves()
         self.board.clear_annotations()
@@ -417,6 +468,9 @@ class Frontend:
     def _perform_resign(self):
         if self.current_result() is not None:
             return
+        if self.mode == ONLINE and self.online_client is not None:
+            self.online_client.send_resign()
+            return
         loser = self.match.current_turn()
         self._auto_complete_pending_promotion()
         self.manual_result = "black_wins" if loser == PieceColor.WHITE else "white_wins"
@@ -432,6 +486,9 @@ class Frontend:
 
     def _perform_draw(self):
         if self.current_result() is not None:
+            return
+        if self.mode == ONLINE and self.online_client is not None:
+            self.online_client.send_draw_offer()
             return
         self._auto_complete_pending_promotion()
         self.manual_result = "draw_agreement"

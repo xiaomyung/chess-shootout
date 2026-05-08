@@ -10,12 +10,19 @@ BUTTONS = [
     ("Menu", "menu"),
 ]
 
+ONLINE_BUTTONS = [
+    ("Rematch", "rematch"),
+    ("Save PGN", "save_pgn"),
+    ("Menu", "menu"),
+]
+
 
 class ResultMenu:
 
     def __init__(self, window, callbacks):
         self.window = window
         self.callbacks = callbacks
+        self.online_mode = False
         self.x = 0
         self.y = 0
         self.width = 0
@@ -93,6 +100,9 @@ class ResultMenu:
                 return True
         return False
 
+    def set_online_mode(self, online):
+        self.online_mode = online
+
     def _draw_buttons(self, rect):
         gap = self.padding
         btn_h = max(rect.height * 0.18, 28)
@@ -102,6 +112,7 @@ class ResultMenu:
             rect.width - 2 * gap,
             btn_h,
         )
+        buttons = ONLINE_BUTTONS if self.online_mode else BUTTONS
         self.button_rects = draw_button_row(
-            self.window, row_rect, BUTTONS, self.button_font, gap,
+            self.window, row_rect, buttons, self.button_font, gap,
         )
