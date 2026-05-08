@@ -538,10 +538,34 @@ class Board:
         piece_at_clicked = grid[square.row][square.col]
         live_at_clicked = self.match.state[square.row][square.col]
         current_turn = self.match.current_turn()
+        local_color = getattr(self.match, "local_color", None)
+
+        def _is_real_move_eligible(live_piece):
+            if live_piece is None or live_piece.color != current_turn:
+                return False
+            if local_color is not None and live_piece.color != local_color:
+                return False
+            return True
+
+        def _chain_piece(spec_piece, live_piece):
+            if self.premove_color is None or spec_piece is None:
+                return None
+            if local_color is None or local_color != self.premove_color:
+                return None
+            if current_turn == local_color:
+                return None
+            if spec_piece.color != self.premove_color:
+                return None
+            if live_piece is not None and live_piece.color == self.premove_color:
+                return None
+            return spec_piece
 
         if self.selected_square is None:
-            if (live_at_clicked is not None
-                    and live_at_clicked.color == current_turn):
+            chain_piece = _chain_piece(piece_at_clicked, live_at_clicked)
+            if chain_piece is not None:
+                self._try_select_for_premove(square, chain_piece)
+                return
+            if _is_real_move_eligible(live_at_clicked):
                 self._try_select(square)
                 return
             if piece_at_clicked is None:
@@ -567,18 +591,21 @@ class Board:
         from_sq = self.selected_square
         self.selected_square = None
         live_from_piece = self.match.state[from_sq.row][from_sq.col]
-        if (live_from_piece is not None
-                and live_from_piece.color == current_turn):
+        spec_from_piece = grid[from_sq.row][from_sq.col]
+        chain_from_piece = _chain_piece(spec_from_piece, live_from_piece)
+        if chain_from_piece is not None:
+            self._queue_premove(from_sq, square, chain_from_piece)
+            return
+        if _is_real_move_eligible(live_from_piece):
             result = self.match.try_move(from_sq, square)
             if not result.legal:
                 return
             self._start_move_animation(from_sq, square, result.promotion_required)
             return
 
-        selected_piece = grid[from_sq.row][from_sq.col]
-        if selected_piece is None:
+        if spec_from_piece is None:
             return
-        self._queue_premove(from_sq, square, selected_piece)
+        self._queue_premove(from_sq, square, spec_from_piece)
 
     def _effective_grid(self):
         if not self.premoves:

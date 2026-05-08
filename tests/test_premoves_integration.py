@@ -995,6 +995,72 @@ def test_scholars_mate_chain_aborts_when_queen_captured_mid_chain(board):
     assert len(board.backend.move_history) == history_len_before
 
 
+def test_chain_capture_continues_with_local_color(board):
+    # Same scenario but in online mode (Match.local_color = WHITE). The bug
+    # was that during black's turn _try_select silently rejected the click
+    # because the live g7 piece is black, so the chain extension got swallowed.
+    setup_position(board, {
+        Square(7, 4): Piece(PieceType.KING, PieceColor.WHITE),
+        Square(0, 4): Piece(PieceType.KING, PieceColor.BLACK),
+        Square(1, 5): Piece(PieceType.ROOK, PieceColor.WHITE),
+        Square(1, 6): Piece(PieceType.PAWN, PieceColor.BLACK),
+        Square(1, 7): Piece(PieceType.PAWN, PieceColor.BLACK),
+    }, turn=PieceColor.BLACK)
+    board.match.local_color = PieceColor.WHITE
+    board.handle_click(Square(1, 5))
+    board.handle_click(Square(1, 6))
+    assert len(board.premoves) == 1
+    board.handle_click(Square(1, 6))
+    assert board.selected_square == Square(1, 6)
+    board.handle_click(Square(1, 7))
+    assert len(board.premoves) == 2
+    assert board.premoves[1].from_sq == Square(1, 6)
+    assert board.premoves[1].to_sq == Square(1, 7)
+
+
+def test_real_move_still_wins_when_local_piece_is_side_to_move(board):
+    # Online-mode equivalent of test_capture_target_of_opponent_premove_with_my_threatened_piece:
+    # white-with-local_color=WHITE must grab the LIVE white rook on its turn,
+    # NOT the speculative black rook parked there by a leftover black premove
+    # that was queued before local_color was set.
+    setup_position(board, {
+        Square(7, 4): Piece(PieceType.KING, PieceColor.WHITE),
+        Square(0, 4): Piece(PieceType.KING, PieceColor.BLACK),
+        Square(4, 3): Piece(PieceType.ROOK, PieceColor.WHITE),
+        Square(6, 3): Piece(PieceType.ROOK, PieceColor.BLACK),
+    }, turn=PieceColor.WHITE)
+    # Queue black's Rd2xd4 with local_color cleared (simulating a queue that
+    # was built before the local-color guard kicked in, or in a different mode).
+    board.handle_click(Square(6, 3))
+    board.handle_click(Square(4, 3))
+    assert len(board.premoves) == 1
+    board.match.local_color = PieceColor.WHITE
+    # White (local) selects d4 → must hit the live white rook, not the spec.
+    board.handle_click(Square(4, 3))
+    assert board.selected_square == Square(4, 3)
+    board.handle_click(Square(6, 3))
+    assert len(board.backend.move_history) == 1
+    last = board.backend.move_history[-1].move
+    assert last.from_sq == Square(4, 3)
+    assert last.to_sq == Square(6, 3)
+    assert last.captured is not None and last.captured.type == PieceType.ROOK
+
+
+def test_online_opponent_turn_click_on_opp_piece_does_nothing_when_no_chain(board):
+    # With local_color set and no premoves queued, clicking an opp piece on
+    # opp's turn should be a noop (no select, no phantom premove).
+    setup_position(board, {
+        Square(7, 4): Piece(PieceType.KING, PieceColor.WHITE),
+        Square(0, 4): Piece(PieceType.KING, PieceColor.BLACK),
+        Square(1, 5): Piece(PieceType.ROOK, PieceColor.WHITE),
+        Square(1, 6): Piece(PieceType.PAWN, PieceColor.BLACK),
+    }, turn=PieceColor.BLACK)
+    board.match.local_color = PieceColor.WHITE
+    board.handle_click(Square(1, 6))
+    assert board.selected_square is None
+    assert board.premoves == []
+
+
 def test_premove_immediately_after_other_premove_fires(board):
     # Two queued premoves. Both should fire across two turn cycles.
     board.backend.turn = PieceColor.BLACK
