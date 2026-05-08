@@ -12,7 +12,10 @@ from frontend.board import Board
 from frontend.capture_summary import captured_by, material_advantage
 from frontend.confirm_modal import ConfirmModal
 from frontend.file_picker import FilePicker
+from frontend.online_client import OnlineClient
 from frontend.player_strip import PlayerStrip
+from frontend.server_modal import ServerAddressModal
+from frontend.wait_modal import WaitModal
 from frontend.right_menu import RightMenu, BUTTONS as RIGHT_MENU_BUTTONS, REVIEW_BUTTONS as RIGHT_MENU_REVIEW_BUTTONS
 from frontend.result_menu import ResultMenu
 from frontend.sound_manager import SoundManager
@@ -94,6 +97,9 @@ class Frontend:
             audio_panel=self.audio_panel)
         self.confirm_modal = ConfirmModal(self.window)
         self.file_picker = FilePicker(self.window)
+        self.server_modal = ServerAddressModal(self.window)
+        self.wait_modal = WaitModal(self.window)
+        self.online_client = None
         self.player_strip_top = PlayerStrip(self.window)
         self.player_strip_bottom = PlayerStrip(self.window)
 
@@ -163,6 +169,9 @@ class Frontend:
 
     def _on_start_game(self, config):
         env.set_last_mode(config["mode"])
+        if config["mode"] == ONLINE:
+            self._begin_online_flow(config)
+            return
         if config["mode"] != SINGLE_SCREEN:
             return
 
@@ -187,6 +196,72 @@ class Frontend:
 
         self._reset_to_new_game()
         self.start_menu.hide()
+        self.sound_manager.play_game_start()
+
+    def _begin_online_flow(self, config):
+        self._online_config = config
+        self.start_menu.hide()
+        self.server_modal.show(
+            prefilled=env.get_server_addr(),
+            on_connect=self._on_server_addr_connect,
+            on_cancel=self._on_online_cancel,
+        )
+
+    def _on_server_addr_connect(self, addr):
+        if not addr:
+            self._on_online_cancel()
+            return
+        self.online_client = OnlineClient()
+        request = {
+            "nickname": (self._online_config.get("nickname") or "").strip() or "Player",
+            "client_uuid": env.get_or_create_client_uuid(),
+            "time_minutes": self._online_config["time_minutes"] or 5,
+            "increment_seconds": self._online_config["increment_seconds"],
+            "side_preference": self._online_config["side"],
+        }
+        self.online_client.connect(addr, request)
+        self.wait_modal.show("Searching for opponent…", self._on_online_cancel)
+
+    def _on_online_cancel(self):
+        if self.online_client is not None:
+            self.online_client.cancel_queue()
+            self.online_client = None
+        self.server_modal.hide()
+        self.wait_modal.hide()
+        self.mode = "menu"
+        self.start_menu.show()
+
+    def _drain_online_inbound(self):
+        if self.online_client is None:
+            return
+        for event in self.online_client.drain_inbound():
+            self._handle_online_event(event)
+
+    def _handle_online_event(self, event):
+        if event.type == "matchmake_response":
+            self.wait_modal.set_subtitle("Match found!")
+        elif event.type == "game_start":
+            self._start_online_game(event.payload)
+        elif event.type == "error":
+            self.confirm_modal.show(
+                event.payload.get("reason", "Server unreachable"),
+                on_yes=lambda: self._on_server_addr_connect(env.get_server_addr()),
+                on_no=self._on_online_cancel,
+                yes_label="Retry", no_label="Cancel",
+            )
+
+    def _start_online_game(self, payload):
+        self.wait_modal.hide()
+        self.mode = ONLINE
+        self._chosen_side = payload["your_color"]
+        self.white_name = payload["white_name"]
+        self.black_name = payload["black_name"]
+        self._time_control = (payload["time_minutes"] * 60,
+                              payload["increment_seconds"])
+        self.match.mode = ONLINE
+        self.match.local_color = (PieceColor.WHITE if payload["your_color"] == "white"
+                                  else PieceColor.BLACK)
+        self._reset_to_new_game()
         self.sound_manager.play_game_start()
 
     def _right_menu_buttons(self):
@@ -346,6 +421,9 @@ class Frontend:
             self.confirm_modal.draw()
         self.start_menu.draw()
         self.file_picker.draw()
+        self.server_modal.draw()
+        self.wait_modal.draw()
+        self._drain_online_inbound()
 
     def _update_player_strips(self):
         top_color = PieceColor.WHITE if self.board.flipped else PieceColor.BLACK
@@ -402,6 +480,14 @@ class Frontend:
             result_width,
             result_height
         )
+        wait_width = max(result_width, 360)
+        wait_height = max(cell_size * 1.6, 200)
+        wait_rect = pg.Rect(
+            board_x + board_size_px / 2 - wait_width / 2,
+            board_y + board_size_px / 2 - wait_height / 2,
+            wait_width,
+            wait_height,
+        )
 
         start_width = board_size_px * 0.7
         start_height = board_size_px * 0.7
@@ -442,6 +528,8 @@ class Frontend:
         self.board.set_rect(board_rect)
         self.result_menu.set_rect(result_rect)
         self.confirm_modal.set_rect(result_rect)
+        self.server_modal.set_rect(result_rect)
+        self.wait_modal.set_rect(wait_rect)
         self.file_picker.set_rect(start_rect)
         self.start_menu.set_rect(start_rect)
         self.right_menu.set_rect(menu_rect)
@@ -487,6 +575,14 @@ class Frontend:
     def mouse_left_clicked(self, pos):
         if self.file_picker.is_visible():
             self.file_picker.handle_click(pos)
+            return
+        if self.server_modal.handle_click(pos):
+            return
+        if self.server_modal.is_visible():
+            return
+        if self.wait_modal.handle_click(pos):
+            return
+        if self.wait_modal.is_visible():
             return
         if self.mode == "menu":
             self.start_menu.handle_click(pos)
@@ -574,6 +670,12 @@ class Frontend:
                     self.running = False
                     continue
                 if self.file_picker.is_visible():
+                    continue
+                if self.server_modal.is_visible() and self.server_modal.handle_key(event):
+                    continue
+                if self.server_modal.is_visible():
+                    continue
+                if self.wait_modal.is_visible():
                     continue
                 if self.start_menu.is_visible() and self.start_menu.handle_key(event):
                     continue
