@@ -46,7 +46,7 @@ def manager(fake_channels):
 def test_loads_variants_and_oneshots(manager):
     assert len(manager._piece_move_sounds) > 0
     assert len(manager._reload_sounds) > 0
-    for key in ("checkmate", "undo", "game_start", "heartbeat_mild"):
+    for key in ("checkmate", "undo", "game_start", "heartbeat_mild", "castle"):
         assert manager._sounds[key] is not None
 
 
@@ -170,6 +170,12 @@ def test_play_game_start(manager):
     sound.play.assert_called_once_with(fade_ms=ONESHOT_FADE_MS)
 
 
+def test_play_castle(manager):
+    sound = manager._sounds["castle"] = MagicMock()
+    manager.play_castle()
+    sound.play.assert_called_once_with(fade_ms=ONESHOT_FADE_MS)
+
+
 def test_disabled_manager_play_methods_are_noops():
     sm = SoundManager(SOUNDS_DIR, enabled=False)
     # None of these should raise.
@@ -177,6 +183,7 @@ def test_disabled_manager_play_methods_are_noops():
     sm.play_check()
     sm.play_capture()
     sm.play_checkmate()
+    sm.play_castle()
     sm.play_undo()
     sm.play_game_start()
     sm.update_heartbeat(0.05, paused=False)

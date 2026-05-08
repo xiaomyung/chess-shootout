@@ -251,7 +251,7 @@ def test_checkmate_plays_only_checkmate_no_move():
     app.sound_manager.play_check.assert_not_called()
 
 
-def test_castle_fires_dispatch_only_once():
+def test_castle_kingside_plays_castle_sound_not_move():
     app = make_app()
     app._on_start_game(base_config(time_minutes=None))
     setup_position(app, {
@@ -263,12 +263,75 @@ def test_castle_fires_dispatch_only_once():
     app.sound_manager.reset_mock()
     app.board.handle_click(Square(7, 4))
     app.board.handle_click(Square(7, 6))
-    # Two animations live (king + rook). Complete them all.
     for a in list(app.board.animations):
         a.start_ms = pg.time.get_ticks() - 10_000
     app.board._draw_animations()
-    # Only the king's animation has on_complete; play_move fires once.
-    assert app.sound_manager.play_move.call_count == 1
+    app.sound_manager.play_castle.assert_called_once()
+    app.sound_manager.play_move.assert_not_called()
+    app.sound_manager.play_capture.assert_not_called()
+    app.sound_manager.play_check.assert_not_called()
+    app.sound_manager.play_checkmate.assert_not_called()
+
+
+def test_castle_queenside_plays_castle_sound():
+    app = make_app()
+    app._on_start_game(base_config(time_minutes=None))
+    setup_position(app, {
+        Square(7, 4): Piece(PieceType.KING, PieceColor.WHITE),
+        Square(7, 0): Piece(PieceType.ROOK, PieceColor.WHITE),
+        Square(0, 4): Piece(PieceType.KING, PieceColor.BLACK),
+    })
+    app.backend.castling_rights = {"WK": False, "WQ": True, "BK": False, "BQ": False}
+    app.sound_manager.reset_mock()
+    app.board.handle_click(Square(7, 4))
+    app.board.handle_click(Square(7, 2))
+    for a in list(app.board.animations):
+        a.start_ms = pg.time.get_ticks() - 10_000
+    app.board._draw_animations()
+    app.sound_manager.play_castle.assert_called_once()
+    app.sound_manager.play_move.assert_not_called()
+
+
+def test_castle_with_check_plays_castle_and_check():
+    # White castles queenside; the rook lands on d1 attacking the black king on d8.
+    app = make_app()
+    app._on_start_game(base_config(time_minutes=None))
+    setup_position(app, {
+        Square(7, 4): Piece(PieceType.KING, PieceColor.WHITE),
+        Square(7, 0): Piece(PieceType.ROOK, PieceColor.WHITE),
+        Square(0, 3): Piece(PieceType.KING, PieceColor.BLACK),
+    })
+    app.backend.castling_rights = {"WK": False, "WQ": True, "BK": False, "BQ": False}
+    app.sound_manager.reset_mock()
+    app.board.handle_click(Square(7, 4))
+    app.board.handle_click(Square(7, 2))
+    for a in list(app.board.animations):
+        a.start_ms = pg.time.get_ticks() - 10_000
+    app.board._draw_animations()
+    app.sound_manager.play_castle.assert_called_once()
+    app.sound_manager.play_check.assert_called_once()
+    app.sound_manager.play_move.assert_not_called()
+    app.sound_manager.play_checkmate.assert_not_called()
+
+
+def test_castle_dispatch_fires_only_once_for_two_animations():
+    # Castling spawns king + rook animations; only the king's on_complete dispatches.
+    app = make_app()
+    app._on_start_game(base_config(time_minutes=None))
+    setup_position(app, {
+        Square(7, 4): Piece(PieceType.KING, PieceColor.WHITE),
+        Square(7, 7): Piece(PieceType.ROOK, PieceColor.WHITE),
+        Square(0, 4): Piece(PieceType.KING, PieceColor.BLACK),
+    })
+    app.backend.castling_rights = {"WK": True, "WQ": False, "BK": False, "BQ": False}
+    app.sound_manager.reset_mock()
+    app.board.handle_click(Square(7, 4))
+    app.board.handle_click(Square(7, 6))
+    assert len(app.board.animations) == 2
+    for a in list(app.board.animations):
+        a.start_ms = pg.time.get_ticks() - 10_000
+    app.board._draw_animations()
+    assert app.sound_manager.play_castle.call_count == 1
 
 
 def test_reverse_animation_does_not_fire_dispatch():

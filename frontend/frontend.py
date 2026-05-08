@@ -205,6 +205,8 @@ class Frontend:
     def _on_move_landed(self, entry):
         if entry.gives_checkmate:
             self.sound_manager.play_checkmate()
+        elif entry.move.is_castle:
+            self.sound_manager.play_castle()
         else:
             self.sound_manager.play_move()
         if entry.move.captured is not None:

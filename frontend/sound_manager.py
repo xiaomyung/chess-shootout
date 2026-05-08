@@ -66,6 +66,7 @@ class SoundManager:
             "undo": self._safe_load(sounds_dir / "rewind.mp3"),
             "game_start": self._safe_load(sounds_dir / "game_start.mp3"),
             "heartbeat_mild": self._safe_load(sounds_dir / "heartbeat_mild.mp3"),
+            "castle": self._safe_load(sounds_dir / "castle_sound.mp3"),
         }
         self._deep_source_path = sounds_dir / "heartbeat_deep.mp3"
         self._deep_variants = None
@@ -162,6 +163,9 @@ class SoundManager:
 
     def play_checkmate(self):
         self._play_one_shot("checkmate")
+
+    def play_castle(self):
+        self._play_one_shot("castle")
 
     def play_undo(self):
         self._play_one_shot("undo")
