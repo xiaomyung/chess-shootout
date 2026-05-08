@@ -19,14 +19,15 @@ jobs:
           python-version: "3.12"
           cache: pip
 
-      - name: Install ffmpeg (cached)
-        uses: awalsh128/cache-apt-pkgs-action@v1
-        with:
-          packages: ffmpeg
-          version: 1.0
-
       - name: Install dependencies
-        run: pip install -r requirements.txt -r requirements-dev.txt
+        run: pip install -r requirements.txt -r requirements-dev.txt imageio-ffmpeg
+
+      - name: Expose ffmpeg on PATH (for pydub)
+        run: |
+          SRC=$(python -c "import imageio_ffmpeg; print(imageio_ffmpeg.get_ffmpeg_exe())")
+          mkdir -p "$HOME/.bin"
+          ln -sf "$SRC" "$HOME/.bin/ffmpeg"
+          echo "$HOME/.bin" >> "$GITHUB_PATH"
 
       - name: Run tests
         run: pytest tests -n auto -q
