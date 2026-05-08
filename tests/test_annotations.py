@@ -348,14 +348,14 @@ def test_undo_clears_annotations():
 def test_resign_clears_annotations():
     app = make_app()
     app.board.toggle_highlight(Square(0, 0))
-    app._on_resign()
+    app._perform_resign()
     assert app.board.highlighted_squares == set()
 
 
 def test_draw_clears_annotations():
     app = make_app()
     app.board.toggle_arrow(Square(6, 0), Square(4, 0))
-    app._on_draw()
+    app._perform_draw()
     assert app.board.arrows == []
 
 

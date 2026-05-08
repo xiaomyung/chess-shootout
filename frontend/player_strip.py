@@ -26,23 +26,37 @@ class PlayerStrip:
         self.name = ""
         self.clock_seconds = None
         self.active = False
+        self.captured = []
+        self.advantage = 0
+        self.captured_color = None
         self.padding = 10
         self.pocket_inset = 4
         self.pocket_fraction = 0.28
         self.name_font = pg.font.SysFont("Arial", 14, bold=True)
         self.clock_font = pg.font.SysFont("monospace", 16, bold=True)
+        self.advantage_font = pg.font.SysFont("Arial", 14, bold=True)
+        self.icons = {}
 
     def set_rect(self, rect):
         self.rect = pg.Rect(rect)
         name_size = max(int(rect.height * 0.45), 12)
         clock_size = max(int(rect.height * 0.55), 14)
+        adv_size = max(int(rect.height * 0.4), 10)
         self.name_font = pg.font.SysFont("Arial", name_size, bold=True)
         self.clock_font = pg.font.SysFont("monospace", clock_size, bold=True)
+        self.advantage_font = pg.font.SysFont("Arial", adv_size, bold=True)
 
-    def set_state(self, name, clock_seconds, active):
+    def set_piece_icons(self, icons):
+        self.icons = icons
+
+    def set_state(self, name, clock_seconds, active, captured=None, advantage=0,
+                  captured_color=None):
         self.name = name
         self.clock_seconds = clock_seconds
         self.active = active
+        self.captured = captured or []
+        self.advantage = advantage
+        self.captured_color = captured_color
 
     def draw(self):
         pg.draw.rect(self.window, Colors.dark_menu, self.rect, border_radius=4)
@@ -69,11 +83,11 @@ class PlayerStrip:
         max_w = name_region.width - 2 * self.pocket_inset
         if name_surf.get_width() > max_w > 0:
             name_surf = name_surf.subsurface(pg.Rect(0, 0, max_w, name_surf.get_height()))
-        self.window.blit(
-            name_surf,
-            (name_region.x + self.pocket_inset,
-             name_region.centery - name_surf.get_height() / 2),
-        )
+        name_x = name_region.x + self.pocket_inset
+        name_y = name_region.centery - name_surf.get_height() / 2
+        self.window.blit(name_surf, (name_x, name_y))
+
+        self._draw_captures(name_region, name_x + name_surf.get_width())
 
         pg.draw.rect(self.window, Colors.light_grey_menu, pocket_rect, border_radius=3)
         clock_text = format_clock(self.clock_seconds)
@@ -83,3 +97,31 @@ class PlayerStrip:
             (pocket_rect.centerx - clock_surf.get_width() / 2,
              pocket_rect.centery - clock_surf.get_height() / 2),
         )
+
+    def _draw_captures(self, name_region, start_x):
+        if not self.captured or self.captured_color is None or not self.icons:
+            return
+        gap = 6
+        x = start_x + gap
+        max_x = name_region.right - self.pocket_inset
+        icon_h = 0
+        for piece_type in self.captured:
+            icon = self.icons.get((piece_type, self.captured_color))
+            if icon is None:
+                continue
+            if x + icon.get_width() > max_x:
+                return
+            self.window.blit(icon, (x, name_region.centery - icon.get_height() / 2))
+            x += icon.get_width() - icon.get_width() // 3
+            icon_h = max(icon_h, icon.get_height())
+
+        if self.advantage > 0:
+            adv_surf = self.advantage_font.render(
+                f"+{self.advantage}", True, Colors.white,
+            )
+            adv_x = x + 12
+            if adv_x + adv_surf.get_width() <= max_x:
+                self.window.blit(
+                    adv_surf,
+                    (adv_x, name_region.centery - adv_surf.get_height() / 2),
+                )

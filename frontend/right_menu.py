@@ -12,6 +12,11 @@ BUTTONS = [
     ("Flip", "flip"),
 ]
 
+REVIEW_BUTTONS = [
+    ("Menu", "menu"),
+    ("Flip", "flip"),
+]
+
 SCROLL_FADE_MS = 2000
 SCROLL_THUMB_WIDTH = 4
 SCROLL_THUMB_RIGHT_OFFSET = 4
@@ -20,10 +25,13 @@ SCROLL_THUMB_MIN_HEIGHT = 18
 
 class RightMenu:
 
-    def __init__(self, window, backend, callbacks):
+    def __init__(self, window, backend, callbacks, board=None,
+                 buttons_provider=None):
         self.window = window
         self.backend = backend
         self.callbacks = callbacks
+        self.board = board
+        self.buttons_provider = buttons_provider or (lambda: BUTTONS)
 
         self.padding = 10
         self.button_gap = 6
@@ -43,6 +51,7 @@ class RightMenu:
         self._total_rows = 0
         self._max_lines = 0
         self._last_scroll_activity_ms = 0
+        self._move_cell_hits = []
 
     def set_rect(self, rect):
         self.font = pg.font.SysFont(
@@ -87,8 +96,17 @@ class RightMenu:
     def handle_click(self, pos):
         for key, rect in self.button_rects.items():
             if rect.collidepoint(pos):
-                self.callbacks[key]()
+                callback = self.callbacks.get(key)
+                if callback is not None:
+                    callback()
                 return True
+        if self.board is None or not self.moves_rect.collidepoint(pos):
+            return False
+        for cell_rect, ply in self._move_cell_hits:
+            if not cell_rect.collidepoint(pos):
+                continue
+            self.board.animate_review_ply(ply)
+            return True
         return False
 
     def handle_scroll(self, pos, dy):
@@ -106,25 +124,57 @@ class RightMenu:
         line_h = self.font.get_linesize()
         self._max_lines = max(int((rect.height - 2 * self.padding) // line_h), 0)
 
-        rows = [
-            f"{number:>3}. {white.san:<7} {black.san if black else ''}"
-            for number, white, black in iter_move_pairs(history)
-        ]
-        self._total_rows = len(rows)
+        pairs = list(iter_move_pairs(history))
+        self._total_rows = len(pairs)
 
         max_offset = max(0, self._total_rows - self._max_lines)
         self.scroll_offset = min(self.scroll_offset, max_offset)
 
         end = self._total_rows - self.scroll_offset
         start = max(0, end - self._max_lines)
-        visible = rows[start:end] if self._max_lines else []
 
-        for i, line in enumerate(visible):
-            surf = self.font.render(line, True, Colors.white)
-            self.window.blit(
-                surf,
-                (rect.x + self.padding, rect.y + self.padding + i * line_h),
-            )
+        active_ply = self._active_ply(len(history))
+        self._move_cell_hits = []
+
+        char_w, _ = self.font.size("0")
+        prefix_chars = 5  # "  1. " etc.
+        prefix_w = char_w * prefix_chars
+        cell_pad = 4
+        inner_w = rect.width - 2 * self.padding
+        cell_w = max((inner_w - prefix_w) // 2 - cell_pad, char_w * 4)
+
+        for i, pair_idx in enumerate(range(start, end)):
+            number, white_entry, black_entry = pairs[pair_idx]
+            white_ply = pair_idx * 2 + 1
+            black_ply = pair_idx * 2 + 2 if black_entry is not None else None
+
+            row_y = rect.y + self.padding + i * line_h
+            row_x = rect.x + self.padding
+
+            prefix_surf = self.font.render(f"{number:>3}.", True, Colors.white)
+            self.window.blit(prefix_surf, (row_x, row_y))
+
+            white_x = row_x + prefix_w
+            white_cell = pg.Rect(white_x, row_y, cell_w, line_h)
+            self._draw_move_cell(white_cell, white_entry.san, active_ply == white_ply)
+            self._move_cell_hits.append((white_cell, white_ply))
+
+            if black_entry is not None:
+                black_x = white_x + cell_w + cell_pad
+                black_cell = pg.Rect(black_x, row_y, cell_w, line_h)
+                self._draw_move_cell(black_cell, black_entry.san, active_ply == black_ply)
+                self._move_cell_hits.append((black_cell, black_ply))
+
+    def _draw_move_cell(self, rect, san, active):
+        if active:
+            pg.draw.rect(self.window, Colors.button_hover, rect, border_radius=3)
+        surf = self.font.render(san, True, Colors.white)
+        self.window.blit(surf, (rect.x + 2, rect.y))
+
+    def _active_ply(self, history_len):
+        if self.board is not None and self.board.review_ply is not None:
+            return self.board.review_ply
+        return history_len
 
     def _draw_scroll_indicator(self, rect):
         max_offset = max(0, self._total_rows - self._max_lines)
@@ -150,5 +200,6 @@ class RightMenu:
 
     def _draw_buttons(self, rect):
         self.button_rects = draw_button_row(
-            self.window, rect, BUTTONS, self.button_font, self.button_gap,
+            self.window, rect, self.buttons_provider(),
+            self.button_font, self.button_gap,
         )

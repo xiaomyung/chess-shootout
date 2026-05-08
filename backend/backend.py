@@ -1,3 +1,5 @@
+import copy
+import re
 import time
 from collections import Counter
 from itertools import product
@@ -15,7 +17,26 @@ SAN_PIECE_LETTER = {
     PieceType.KING: "K",
 }
 
+SAN_LETTER_TO_PIECE = {v: k for k, v in SAN_PIECE_LETTER.items()}
+
 SAN_FILES = "abcdefgh"
+
+_SAN_PROMOTION = {
+    "Q": PieceType.QUEEN,
+    "R": PieceType.ROOK,
+    "B": PieceType.BISHOP,
+    "N": PieceType.KNIGHT,
+}
+
+_SAN_MOVE_RE = re.compile(
+    r"^([NBRQK])?"
+    r"([a-h])?"
+    r"([1-8])?"
+    r"(x)?"
+    r"([a-h])"
+    r"([1-8])"
+    r"(=([NBRQ]))?$"
+)
 
 CASTLING_KEYS = ("WK", "WQ", "BK", "BQ")
 DEFAULT_CASTLING_RIGHTS = {"WK": True, "WQ": True, "BK": True, "BQ": True}
@@ -153,6 +174,59 @@ class Backend:
         entry.san += f"={SAN_PIECE_LETTER[piece_type]}"
         self._finalize_move(entry)
         return self._build_move_result(entry.move.captured)
+
+    def position_at(self, ply):
+        if ply < 0 or ply > len(self.move_history):
+            raise ValueError(f"Ply {ply} out of range 0..{len(self.move_history)}")
+        if ply == len(self.move_history):
+            return [list(row) for row in self.state]
+        snapshot = copy.deepcopy(self)
+        while len(snapshot.move_history) > ply:
+            snapshot.undo()
+        return snapshot.state
+
+    def apply_san(self, san):
+        san = san.rstrip("!?+#")
+        if not san:
+            return MoveResult(legal=False)
+        home_row = 7 if self.turn == PieceColor.WHITE else 0
+        if san in ("O-O", "0-0"):
+            return self.try_move(Square(home_row, 4), Square(home_row, 6))
+        if san in ("O-O-O", "0-0-0"):
+            return self.try_move(Square(home_row, 4), Square(home_row, 2))
+
+        match = _SAN_MOVE_RE.match(san)
+        if match is None:
+            return MoveResult(legal=False)
+        piece_letter, dis_file, dis_rank, _capture, tgt_file, tgt_rank, _, promo_letter = match.groups()
+
+        target = Square(self.SIZE - int(tgt_rank), SAN_FILES.index(tgt_file))
+        piece_type = (SAN_LETTER_TO_PIECE[piece_letter]
+                      if piece_letter is not None else PieceType.PAWN)
+
+        candidates = []
+        for r, c in product(range(self.SIZE), repeat=2):
+            piece = self.state[r][c]
+            if piece is None or piece.type != piece_type or piece.color != self.turn:
+                continue
+            if dis_file is not None and c != SAN_FILES.index(dis_file):
+                continue
+            if dis_rank is not None and r != self.SIZE - int(dis_rank):
+                continue
+            if target in self.legal_moves_from(Square(r, c)):
+                candidates.append(Square(r, c))
+
+        if len(candidates) != 1:
+            return MoveResult(legal=False)
+
+        result = self.try_move(candidates[0], target)
+        if not result.legal:
+            return result
+        if result.promotion_required:
+            promo_type = (_SAN_PROMOTION[promo_letter]
+                          if promo_letter is not None else PieceType.QUEEN)
+            return self.promote(target, promo_type)
+        return result
 
     def undo(self):
         if not self.move_history:

@@ -10,6 +10,9 @@ from frontend.premoves import Premove, is_premove_shape_valid, speculative_board
 from backend.pieces import PieceType, PieceColor, Piece
 
 
+DRAG_THRESHOLD_PX = 6
+
+
 class Board:
     SCREEN_FRACTION_X = 0.8
     OFFSET_FRACTION_X = 0.02
@@ -45,6 +48,13 @@ class Board:
         self.highlighted_squares = set()
         self.arrows = []
         self._right_drag_start_square = None
+        self._press_pos = None
+        self._press_cell = None
+        self.dragging_from = None
+        self._drag_cursor = None
+        self.review_ply = None
+        self._target_ply = None
+        self.read_only = False
 
     def _render_text(self):
         self.file_labels_rendered = [
@@ -130,8 +140,15 @@ class Board:
     def draw_board(self):
         for row, col in product(range(self.SIZE), repeat=2):
             self.draw_cell(row, col)
+        if self.review_ply is not None:
+            self._draw_vertical_guides()
+            self._draw_horizontal_guides()
+            self.draw_pieces()
+            self._draw_animations()
+            return
         self._draw_check_highlight()
         self._draw_premove_highlights()
+        self._draw_last_move_highlight()
         self._draw_annotation_highlights()
         self._draw_vertical_guides()
         self._draw_horizontal_guides()
@@ -139,9 +156,31 @@ class Board:
         self._draw_move_indicators()
         self.draw_pieces()
         self._draw_animations()
+        self._draw_dragged_piece()
         self._draw_arrows()
         self._draw_drag_preview_arrow()
         self._draw_promotion_picker()
+
+    def _draw_last_move_highlight(self):
+        if not self.backend.move_history:
+            return
+        move = self.backend.move_history[-1].move
+        for sq in (move.from_sq, move.to_sq):
+            rect = self._cell_rect(sq.row, sq.col)
+            overlay = pg.Surface((rect.width, rect.height), pg.SRCALPHA)
+            overlay.fill(Colors.last_move)
+            self.window.blit(overlay, rect.topleft)
+
+    def _draw_dragged_piece(self):
+        if self.dragging_from is None or self._drag_cursor is None:
+            return
+        piece = self.backend.piece_at(self.dragging_from)
+        if piece is None:
+            return
+        surface = self.piece_images_scaled[(piece.type, piece.color)]
+        x = self._drag_cursor[0] - self.cell_size / 2
+        y = self._drag_cursor[1] - self.cell_size / 2
+        self.window.blit(surface, (x, y))
 
     def _draw_premove_highlights(self):
         if not self.premoves:
@@ -270,7 +309,24 @@ class Board:
                 pg.draw.rect(self.window, Colors.selection_red, rect)
 
     def draw_pieces(self):
+        if self.review_ply is not None:
+            grid = self.backend.position_at(self.review_ply)
+            hidden = {a.from_sq for a in self.animations}
+            for row, col in product(range(self.SIZE), repeat=2):
+                sq = Square(row, col)
+                if sq in hidden:
+                    continue
+                piece = grid[row][col]
+                if piece is None:
+                    continue
+                rect = self._cell_rect(row, col)
+                surface = self.piece_images_scaled[(piece.type, piece.color)]
+                self.window.blit(surface, rect.topleft)
+            return
+
         hidden = {a.to_sq for a in self.animations}
+        if self.dragging_from is not None:
+            hidden.add(self.dragging_from)
         for row, col in product(range(self.SIZE), repeat=2):
             sq = Square(row, col)
             if sq in hidden:
@@ -322,6 +378,63 @@ class Board:
     def cancel_animations(self):
         self.animations = []
 
+    def jump_to_review_ply(self, ply):
+        self.cancel_animations()
+        self._target_ply = None
+        history_len = len(self.backend.move_history)
+        if ply is None or ply >= history_len:
+            self.review_ply = None
+        else:
+            self.review_ply = max(0, ply)
+
+    def _snap_in_flight_review_animation(self):
+        if self._target_ply is None:
+            self.cancel_animations()
+            return
+        history_len = len(self.backend.move_history)
+        if self._target_ply >= history_len:
+            self.review_ply = None
+        else:
+            self.review_ply = self._target_ply
+        self._target_ply = None
+        self.cancel_animations()
+
+    def animate_review_ply(self, ply):
+        self._snap_in_flight_review_animation()
+        history_len = len(self.backend.move_history)
+        if ply is None or ply > history_len:
+            self.review_ply = None
+            self._target_ply = None
+            return
+        if ply <= 0:
+            self.review_ply = 0
+            self._target_ply = None
+            return
+        entry = self.backend.move_history[ply - 1]
+        move = entry.move
+        self.review_ply = ply - 1
+        self._target_ply = ply
+        target_ply = ply
+        end_ply = None if ply == history_len else ply
+
+        def finish():
+            self.review_ply = end_ply
+            if self._target_ply == target_ply:
+                self._target_ply = None
+
+        self.start_animation(move.from_sq, move.to_sq, move.piece,
+                             on_complete=finish)
+        if move.is_castle:
+            home_row = move.from_sq.row
+            if move.to_sq.col == 6:
+                rook_from = Square(home_row, 7)
+                rook_to = Square(home_row, 5)
+            else:
+                rook_from = Square(home_row, 0)
+                rook_to = Square(home_row, 3)
+            rook_piece = Piece(PieceType.ROOK, move.piece.color)
+            self.start_animation(rook_from, rook_to, rook_piece)
+
     def _draw_move_indicators(self):
         if self.selected_square is None:
             return
@@ -372,6 +485,37 @@ class Board:
         self.rescale_pieces()
         self._render_text()
 
+    def begin_press(self, pos):
+        self._press_pos = pos
+        self._press_cell = self.cell_at(pos)
+
+    def update_drag_motion(self, pos):
+        if self.read_only:
+            return
+        if self._press_pos is None or self.selected_square is None:
+            return
+        if self.pending_promotion_square is not None:
+            return
+        if self.review_ply is not None:
+            return
+        if self.dragging_from is not None:
+            self._drag_cursor = pos
+            return
+        dx = pos[0] - self._press_pos[0]
+        dy = pos[1] - self._press_pos[1]
+        if dx * dx + dy * dy < DRAG_THRESHOLD_PX * DRAG_THRESHOLD_PX:
+            return
+        self.dragging_from = self.selected_square
+        self._drag_cursor = pos
+
+    def end_press(self):
+        was_dragging = self.dragging_from is not None
+        self._press_pos = None
+        self._press_cell = None
+        self.dragging_from = None
+        self._drag_cursor = None
+        return was_dragging
+
     def cell_at(self, pos):
         x, y = pos
         col = int((x - self.board_offset_x) / self.cell_size)
@@ -384,6 +528,10 @@ class Board:
         return Square(row, col)
 
     def handle_click(self, square):
+        if self.read_only:
+            return
+        if self.review_ply is not None:
+            return
         if self.is_animating():
             return
 
@@ -393,9 +541,14 @@ class Board:
 
         grid = self._effective_grid()
         piece_at_clicked = grid[square.row][square.col]
+        live_at_clicked = self.backend.state[square.row][square.col]
         current_turn = self.backend.current_turn()
 
         if self.selected_square is None:
+            if (live_at_clicked is not None
+                    and live_at_clicked.color == current_turn):
+                self._try_select(square)
+                return
             if piece_at_clicked is None:
                 resolved = self._resolve_chain_tip(square)
                 if resolved != square:
@@ -409,10 +562,7 @@ class Board:
                 if self.premoves:
                     self._clear_premoves()
                 return
-            if piece_at_clicked.color == current_turn:
-                self._try_select(square)
-            else:
-                self._try_select_for_premove(square, piece_at_clicked)
+            self._try_select_for_premove(square, piece_at_clicked)
             return
 
         if square == self.selected_square:
@@ -421,17 +571,19 @@ class Board:
 
         from_sq = self.selected_square
         self.selected_square = None
-        selected_piece = grid[from_sq.row][from_sq.col]
-        if selected_piece is None:
-            return
-
-        if selected_piece.color == current_turn:
+        live_from_piece = self.backend.state[from_sq.row][from_sq.col]
+        if (live_from_piece is not None
+                and live_from_piece.color == current_turn):
             result = self.backend.try_move(from_sq, square)
             if not result.legal:
                 return
             self._start_move_animation(from_sq, square, result.promotion_required)
-        else:
-            self._queue_premove(from_sq, square, selected_piece)
+            return
+
+        selected_piece = grid[from_sq.row][from_sq.col]
+        if selected_piece is None:
+            return
+        self._queue_premove(from_sq, square, selected_piece)
 
     def _effective_grid(self):
         if not self.premoves:
@@ -488,6 +640,9 @@ class Board:
         return True
 
     def _start_move_animation(self, from_sq, to_sq, promotion_required):
+        self.review_ply = None
+        self._target_ply = None
+        self.cancel_animations()
         self.clear_annotations()
         entry = self.backend.move_history[-1]
         moving_piece = entry.move.piece
@@ -497,6 +652,10 @@ class Board:
             on_complete = lambda: self._set_pending_promotion(promotion_sq)
         else:
             on_complete = self._fire_move_landed
+
+        if self.dragging_from is not None:
+            on_complete()
+            return
 
         self.start_animation(from_sq, to_sq, moving_piece, on_complete=on_complete)
 

@@ -66,6 +66,8 @@ class StartMenu:
         self._increment_rects = {}
         self._side_rects = {}
         self._start_rect = pg.Rect(0, 0, 0, 0)
+        self._load_pgn_rect = pg.Rect(0, 0, 0, 0)
+        self.load_pgn_available = False
 
     def set_rect(self, rect):
         self.x = rect.x
@@ -168,9 +170,16 @@ class StartMenu:
         )
         cursor += section_step
 
-        start_rect = pg.Rect(content_x, cursor + self.section_gap,
-                             content_w, start_h)
+        row_y = cursor + self.section_gap
+        gap = self.row_gap
+        half_w = (content_w - gap) // 2
+        load_rect = pg.Rect(content_x, row_y, half_w, start_h)
+        start_rect = pg.Rect(content_x + half_w + gap, row_y,
+                             content_w - half_w - gap, start_h)
+        self._load_pgn_rect = load_rect
         self._start_rect = start_rect
+        _draw_button(self.window, load_rect, "Load PGN", self.start_font,
+                     disabled=not self.load_pgn_available)
         _draw_button(self.window, start_rect, "Start Game", self.start_font,
                      force_pressed=False)
 
@@ -214,6 +223,11 @@ class StartMenu:
             if br.collidepoint(pos):
                 self.selected_side = key
                 return True
+
+        if self._load_pgn_rect.collidepoint(pos):
+            if self.load_pgn_available and "load_pgn" in self.callbacks:
+                self.callbacks["load_pgn"]()
+            return True
 
         if self._start_rect.collidepoint(pos):
             self.callbacks["start_game"](self.build_config())

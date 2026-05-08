@@ -306,7 +306,7 @@ def test_resign_clears_premove_queue():
     app.backend.turn = PieceColor.BLACK
     app.board.handle_click(Square(6, 4))
     app.board.handle_click(Square(4, 4))
-    app._on_resign()
+    app._perform_resign()
     assert app.board.premoves == []
 
 
@@ -320,7 +320,7 @@ def test_draw_clears_premove_queue():
     app.backend.turn = PieceColor.BLACK
     app.board.handle_click(Square(6, 4))
     app.board.handle_click(Square(4, 4))
-    app._on_draw()
+    app._perform_draw()
     assert app.board.premoves == []
 
 
@@ -798,6 +798,56 @@ def test_chain_clicking_intermediate_square_resolves_to_tip(board):
     # Should resolve forward through chain to a5.
     board.handle_click(Square(4, 0))
     assert board.selected_square == Square(3, 0)
+
+
+def test_capture_target_of_opponent_premove_with_my_threatened_piece(board):
+    # Bug repro: black queues Rd2xd4 (would capture white rook at d4) during
+    # white's turn. Then white plays Rxd2 — the white rook on d4, despite the
+    # speculative state showing a black rook on d4, must remain selectable as
+    # white's own piece based on the LIVE state.
+    setup_position(board, {
+        Square(7, 4): Piece(PieceType.KING, PieceColor.WHITE),
+        Square(0, 4): Piece(PieceType.KING, PieceColor.BLACK),
+        Square(4, 3): Piece(PieceType.ROOK, PieceColor.WHITE),  # d4
+        Square(6, 3): Piece(PieceType.ROOK, PieceColor.BLACK),  # d2
+    }, turn=PieceColor.WHITE)
+    # Black queues Rd2xd4 (during white's turn).
+    board.handle_click(Square(6, 3))
+    board.handle_click(Square(4, 3))
+    assert len(board.premoves) == 1
+    assert board.premove_color == PieceColor.BLACK
+    # White plays Rxd2 — selecting d4 should grab the white rook (live state),
+    # not the speculative black rook.
+    board.handle_click(Square(4, 3))
+    assert board.selected_square == Square(4, 3)
+    board.handle_click(Square(6, 3))
+    assert len(board.backend.move_history) == 1
+    last = board.backend.move_history[-1].move
+    assert last.from_sq == Square(4, 3)
+    assert last.to_sq == Square(6, 3)
+    assert last.captured is not None
+    assert last.captured.type == PieceType.ROOK
+
+
+def test_move_threatened_piece_away_from_opponent_premove(board):
+    # Variant: white moves the rook elsewhere instead of capturing.
+    setup_position(board, {
+        Square(7, 4): Piece(PieceType.KING, PieceColor.WHITE),
+        Square(0, 4): Piece(PieceType.KING, PieceColor.BLACK),
+        Square(4, 3): Piece(PieceType.ROOK, PieceColor.WHITE),
+        Square(6, 3): Piece(PieceType.ROOK, PieceColor.BLACK),
+    }, turn=PieceColor.WHITE)
+    board.handle_click(Square(6, 3))
+    board.handle_click(Square(4, 3))
+    assert len(board.premoves) == 1
+    # White moves the rook sideways to a4.
+    board.handle_click(Square(4, 3))
+    board.handle_click(Square(4, 0))
+    assert len(board.backend.move_history) == 1
+    last = board.backend.move_history[-1].move
+    assert last.from_sq == Square(4, 3)
+    assert last.to_sq == Square(4, 0)
+    assert last.captured is None
 
 
 def test_clicking_truly_empty_square_still_cancels(board):

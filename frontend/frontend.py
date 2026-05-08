@@ -1,3 +1,4 @@
+import glob
 import os
 import random
 from datetime import datetime
@@ -6,12 +7,16 @@ import pygame as pg
 
 from backend.backend import Backend
 from frontend.board import Board
+from frontend.capture_summary import captured_by, material_advantage
+from frontend.confirm_modal import ConfirmModal
+from frontend.file_picker import FilePicker
 from frontend.player_strip import PlayerStrip
-from frontend.right_menu import RightMenu
+from frontend.right_menu import RightMenu, BUTTONS as RIGHT_MENU_BUTTONS, REVIEW_BUTTONS as RIGHT_MENU_REVIEW_BUTTONS
 from frontend.result_menu import ResultMenu
 from frontend.sound_manager import SoundManager
 from frontend.start_menu import StartMenu
 from frontend.pgn import generate_pgn, TIMEOUT_RESULTS
+from frontend.pgn_load import load_pgn_into_backend
 from backend.paths import PROJECT_ROOT, SOUNDS_DIR
 from backend.pieces import PieceColor, PieceType
 
@@ -62,6 +67,7 @@ class Frontend:
         self.black_name = "Player 2"
         self._chosen_side = "white"
         self._time_control = None
+        self.pgn_review = False
 
         self.backend = Backend()
         self.sound_manager = SoundManager(SOUNDS_DIR, enabled=pg.mixer.get_init() is not None)
@@ -73,19 +79,24 @@ class Frontend:
         })
         self.start_menu = StartMenu(self.window, {
             "start_game": self._on_start_game,
+            "load_pgn": self._on_load_last_game,
         })
         self.right_menu = RightMenu(self.window, self.backend, {
             "undo": self._on_undo,
             "resign": self._on_resign,
             "draw": self._on_draw,
             "flip": self._on_flip,
-        })
+            "menu": self._on_back_to_menu,
+        }, board=self.board, buttons_provider=self._right_menu_buttons)
+        self.confirm_modal = ConfirmModal(self.window)
+        self.file_picker = FilePicker(self.window)
         self.player_strip_top = PlayerStrip(self.window)
         self.player_strip_bottom = PlayerStrip(self.window)
 
         self.backend.new_game()
         self.board.load_assets()
         self._compute_layout()
+        self._refresh_load_pgn_availability()
 
         pg.display.set_caption("Chess")
 
@@ -107,7 +118,40 @@ class Frontend:
     def _on_back_to_menu(self):
         self.mode = "menu"
         self._reset_to_new_game()
+        self._refresh_load_pgn_availability()
         self.start_menu.show()
+
+    def _refresh_load_pgn_availability(self):
+        self.start_menu.load_pgn_available = self._latest_pgn_path() is not None
+
+    def _latest_pgn_path(self):
+        pattern = os.path.join(PROJECT_ROOT, "games", "game-*.pgn")
+        files = glob.glob(pattern)
+        if not files:
+            return None
+        return max(files, key=os.path.getmtime)
+
+    def _on_load_last_game(self):
+        games_dir = os.path.join(PROJECT_ROOT, "games")
+        self.file_picker.show(
+            games_dir, "*.pgn",
+            on_select=self._load_pgn_from_path,
+        )
+
+    def _load_pgn_from_path(self, path):
+        with open(path) as f:
+            text = f.read()
+        self.mode = "single_screen"
+        self._time_control = None
+        self._reset_to_new_game()
+        _, ok = load_pgn_into_backend(self.backend, text)
+        if not ok:
+            return
+        if self.backend.move_history:
+            self.board.review_ply = 0
+        self.pgn_review = True
+        self.board.read_only = True
+        self.start_menu.hide()
 
     def _on_start_game(self, config):
         if config["mode"] != "single_screen":
@@ -138,7 +182,14 @@ class Frontend:
         self.start_menu.hide()
         self.sound_manager.play_game_start()
 
+    def _right_menu_buttons(self):
+        if self.pgn_review:
+            return RIGHT_MENU_REVIEW_BUTTONS
+        return RIGHT_MENU_BUTTONS
+
     def _reset_to_new_game(self):
+        self.pgn_review = False
+        self.board.read_only = False
         self.sound_manager.stop_all()
         self.manual_result = None
         self.backend.new_game()
@@ -151,6 +202,9 @@ class Frontend:
         self.board.cancel_animations()
         self.board._clear_premoves()
         self.board.clear_annotations()
+        self.board.end_press()
+        self.board.review_ply = None
+        self.confirm_modal.hide()
         self._last_turn_for_flip = None
 
     def _on_save_pgn(self):
@@ -171,9 +225,12 @@ class Frontend:
             ))
 
     def _on_undo(self):
+        if self.pgn_review:
+            return
         self.board.selected_square = None
         self.board._clear_premoves()
         self.board.clear_annotations()
+        self.board.review_ply = None
         if self.manual_result is not None:
             self.manual_result = None
             return
@@ -186,6 +243,13 @@ class Frontend:
         self.board.start_undo_animation(move)
 
     def _on_resign(self):
+        if self.pgn_review or self.current_result() is not None:
+            return
+        self.confirm_modal.show(
+            "Resign?", on_yes=self._perform_resign, yes_label="Resign",
+        )
+
+    def _perform_resign(self):
         if self.current_result() is not None:
             return
         loser = self.backend.current_turn()
@@ -195,6 +259,13 @@ class Frontend:
         self.board.clear_annotations()
 
     def _on_draw(self):
+        if self.pgn_review or self.current_result() is not None:
+            return
+        self.confirm_modal.show(
+            "Offer draw?", on_yes=self._perform_draw, yes_label="Draw",
+        )
+
+    def _perform_draw(self):
         if self.current_result() is not None:
             return
         self._auto_complete_pending_promotion()
@@ -265,7 +336,9 @@ class Frontend:
             self.right_menu.draw_menu()
             self.result_menu.set_text(self.result_text())
             self.result_menu.draw()
+            self.confirm_modal.draw()
         self.start_menu.draw()
+        self.file_picker.draw()
 
     def _update_player_strips(self):
         top_color = PieceColor.WHITE if self.board.flipped else PieceColor.BLACK
@@ -291,7 +364,13 @@ class Frontend:
         seconds = (self.backend.clock.remaining(color)
                    if self.backend.clock is not None else None)
         active = (color == turn) and not over
-        return name, seconds, active
+        history = self.backend.move_history
+        if self.board.review_ply is not None:
+            history = history[:self.board.review_ply]
+        captured = captured_by(history, color)
+        advantage = material_advantage(history, color)
+        opponent = PieceColor.BLACK if color == PieceColor.WHITE else PieceColor.WHITE
+        return name, seconds, active, captured, advantage, opponent
 
     def _compute_layout(self):
         window_width, window_height = self.window.get_size()
@@ -356,10 +435,24 @@ class Frontend:
         )
         self.board.set_rect(board_rect)
         self.result_menu.set_rect(result_rect)
+        self.confirm_modal.set_rect(result_rect)
+        self.file_picker.set_rect(start_rect)
         self.start_menu.set_rect(start_rect)
         self.right_menu.set_rect(menu_rect)
         self.player_strip_top.set_rect(top_strip_rect)
         self.player_strip_bottom.set_rect(bottom_strip_rect)
+        self._refresh_capture_icons(strip_height)
+
+    def _refresh_capture_icons(self, strip_height):
+        if not self.board.piece_images_original:
+            return
+        target = max(int(strip_height * 0.6), 1)
+        icons = {
+            key: pg.transform.smoothscale(surface, (target, target))
+            for key, surface in self.board.piece_images_original.items()
+        }
+        self.player_strip_top.set_piece_icons(icons)
+        self.player_strip_bottom.set_piece_icons(icons)
 
     def _right_click_pressed(self, pos):
         if self.mode == "menu" or self.current_result() is not None:
@@ -384,8 +477,15 @@ class Frontend:
         self.board._right_drag_start_square = None
 
     def mouse_left_clicked(self, pos):
+        if self.file_picker.is_visible():
+            self.file_picker.handle_click(pos)
+            return
         if self.mode == "menu":
             self.start_menu.handle_click(pos)
+            return
+        if self.confirm_modal.handle_click(pos):
+            return
+        if self.confirm_modal.is_visible():
             return
         if self.result_menu.handle_click(pos):
             return
@@ -399,29 +499,99 @@ class Frontend:
                 self.board.clear_annotations()
             self.board.handle_click(square)
 
+    def _handle_shortcut_key(self, event):
+        if self.confirm_modal.is_visible() or self.file_picker.is_visible():
+            return False
+        if event.key == pg.K_f:
+            self._on_flip()
+            return True
+        if event.key == pg.K_z and (event.mod & pg.KMOD_CTRL):
+            self._on_undo()
+            return True
+        if event.key == pg.K_LEFT:
+            self._step_review(-1)
+            return True
+        if event.key == pg.K_RIGHT:
+            self._step_review(1)
+            return True
+        if event.key == pg.K_HOME:
+            if self.backend.move_history:
+                self.board.review_ply = 0
+            return True
+        if event.key == pg.K_END:
+            self.board.review_ply = None
+            return True
+        return False
+
+    def _step_review(self, delta):
+        history_len = len(self.backend.move_history)
+        if history_len == 0:
+            return
+        if self.board._target_ply is not None:
+            current = self.board._target_ply
+        elif self.board.review_ply is not None:
+            current = self.board.review_ply
+        else:
+            current = history_len
+        new_ply = max(0, min(history_len, current + delta))
+        if new_ply == current:
+            return
+        if delta > 0:
+            self.board.animate_review_ply(new_ply)
+        else:
+            self.board.jump_to_review_ply(new_ply)
+
+    def _mouse_left_pressed(self, pos):
+        self.mouse_left_clicked(pos)
+        if (self.mode != "menu"
+                and self.current_result() is None
+                and not self.file_picker.is_visible()
+                and not self.confirm_modal.is_visible()):
+            self.board.begin_press(pos)
+
+    def _mouse_left_released(self, pos):
+        was_dragging = self.board.dragging_from is not None
+        if was_dragging:
+            self.mouse_left_clicked(pos)
+        self.board.end_press()
+
     def check_events(self):
         for event in pg.event.get():
             if event.type == pg.QUIT:
                 self.running = False
 
             elif event.type == pg.KEYDOWN:
-                if self.start_menu.is_visible() and self.start_menu.handle_key(event):
-                    continue
                 if event.key == pg.K_ESCAPE:
                     self.running = False
+                    continue
+                if self.file_picker.is_visible():
+                    continue
+                if self.start_menu.is_visible() and self.start_menu.handle_key(event):
+                    continue
+                if self.start_menu.is_visible():
+                    continue
+                self._handle_shortcut_key(event)
 
             elif event.type == pg.MOUSEBUTTONDOWN:
                 if event.button == 1:
-                    self.mouse_left_clicked(event.pos)
+                    self._mouse_left_pressed(event.pos)
                 elif event.button == 3:
                     self._right_click_pressed(event.pos)
 
             elif event.type == pg.MOUSEBUTTONUP:
-                if event.button == 3:
+                if event.button == 1:
+                    self._mouse_left_released(event.pos)
+                elif event.button == 3:
                     self._right_click_released(event.pos)
 
+            elif event.type == pg.MOUSEMOTION:
+                if event.buttons[0]:
+                    self.board.update_drag_motion(event.pos)
+
             elif event.type == pg.MOUSEWHEEL:
-                if self.mode != "menu":
+                if self.file_picker.is_visible():
+                    self.file_picker.handle_scroll(pg.mouse.get_pos(), event.y)
+                elif self.mode != "menu":
                     self.right_menu.handle_scroll(pg.mouse.get_pos(), event.y)
 
             elif event.type == pg.VIDEORESIZE:

@@ -16,33 +16,35 @@ def _pygame_init():
     pg.quit()
 
 
-def test_minimum_constants_are_900_and_500():
-    assert MIN_WINDOW_WIDTH == 900
+def test_minimum_constants_match_module():
+    # Width may evolve as the right menu grows; pin the height floor and assert
+    # width remains at or above 900 (the historical minimum).
+    assert MIN_WINDOW_WIDTH >= 900
     assert MIN_WINDOW_HEIGHT == 500
 
 
 def test_construction_clamps_width_only():
-    app = Frontend(800, 600)
-    assert app.window_width == 900
+    app = Frontend(MIN_WINDOW_WIDTH - 100, 600)
+    assert app.window_width == MIN_WINDOW_WIDTH
     assert app.window_height == 600
 
 
 def test_construction_clamps_both_dims():
-    app = Frontend(800, 400)
-    assert app.window_width == 900
-    assert app.window_height == 500
+    app = Frontend(MIN_WINDOW_WIDTH - 100, MIN_WINDOW_HEIGHT - 100)
+    assert app.window_width == MIN_WINDOW_WIDTH
+    assert app.window_height == MIN_WINDOW_HEIGHT
 
 
 def test_construction_no_clamp_when_at_minimum():
-    app = Frontend(900, 500)
-    assert app.window_width == 900
-    assert app.window_height == 500
+    app = Frontend(MIN_WINDOW_WIDTH, MIN_WINDOW_HEIGHT)
+    assert app.window_width == MIN_WINDOW_WIDTH
+    assert app.window_height == MIN_WINDOW_HEIGHT
 
 
 def test_construction_no_clamp_when_above_minimum():
-    app = Frontend(1200, 800)
-    assert app.window_width == 1200
-    assert app.window_height == 800
+    app = Frontend(MIN_WINDOW_WIDTH + 200, MIN_WINDOW_HEIGHT + 300)
+    assert app.window_width == MIN_WINDOW_WIDTH + 200
+    assert app.window_height == MIN_WINDOW_HEIGHT + 300
 
 
 def test_construction_display_surface_meets_minimum():
@@ -54,7 +56,7 @@ def test_construction_display_surface_meets_minimum():
 
 
 def test_videoresize_too_small_clamps():
-    app = Frontend(1000, 800)
+    app = Frontend(MIN_WINDOW_WIDTH + 100, MIN_WINDOW_HEIGHT + 200)
     event = pg.event.Event(pg.VIDEORESIZE, {"w": 600, "h": 300, "size": (600, 300)})
     pg.event.post(event)
     app.check_events()
@@ -63,18 +65,21 @@ def test_videoresize_too_small_clamps():
 
 
 def test_videoresize_adequate_passes_through():
-    app = Frontend(1000, 800)
-    event = pg.event.Event(pg.VIDEORESIZE, {"w": 1100, "h": 700, "size": (1100, 700)})
+    app = Frontend(MIN_WINDOW_WIDTH, MIN_WINDOW_HEIGHT + 200)
+    big_w = MIN_WINDOW_WIDTH + 50
+    big_h = MIN_WINDOW_HEIGHT + 100
+    event = pg.event.Event(pg.VIDEORESIZE, {"w": big_w, "h": big_h, "size": (big_w, big_h)})
     pg.event.post(event)
     app.check_events()
-    assert app.window_width == 1100
-    assert app.window_height == 700
+    assert app.window_width == big_w
+    assert app.window_height == big_h
 
 
 def test_videoresize_partial_clamp_only_height():
-    app = Frontend(1000, 800)
-    event = pg.event.Event(pg.VIDEORESIZE, {"w": 1100, "h": 200, "size": (1100, 200)})
+    app = Frontend(MIN_WINDOW_WIDTH, MIN_WINDOW_HEIGHT + 200)
+    big_w = MIN_WINDOW_WIDTH + 50
+    event = pg.event.Event(pg.VIDEORESIZE, {"w": big_w, "h": 200, "size": (big_w, 200)})
     pg.event.post(event)
     app.check_events()
-    assert app.window_width == 1100
+    assert app.window_width == big_w
     assert app.window_height == MIN_WINDOW_HEIGHT
