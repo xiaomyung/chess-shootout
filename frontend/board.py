@@ -122,6 +122,7 @@ class Board:
     def draw_board(self):
         for row, col in product(range(self.SIZE), repeat=2):
             self.draw_cell(row, col)
+        self._draw_check_highlight()
         self._draw_vertical_guides()
         self._draw_horizontal_guides()
         self._draw_selection_highlight()
@@ -129,6 +130,15 @@ class Board:
         self.draw_pieces()
         self._draw_animations()
         self._draw_promotion_picker()
+
+    def _draw_check_highlight(self):
+        for row, col in product(range(self.SIZE), repeat=2):
+            piece = self.backend.piece_at(Square(row, col))
+            if piece is None or piece.type != PieceType.KING:
+                continue
+            if self.backend.is_in_check(piece.color):
+                rect = self._cell_rect(row, col)
+                pg.draw.rect(self.window, Colors.selection_red, rect)
 
     def draw_pieces(self):
         hidden = {a.to_sq for a in self.animations}
