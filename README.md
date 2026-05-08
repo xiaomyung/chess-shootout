@@ -32,7 +32,7 @@ sudo pacman -S python ffmpeg
 # Debian / Ubuntu
 sudo apt install python3 python3-venv ffmpeg
 
-git clone https://github.com/<your-username>/chess-pygame.git
+git clone https://github.com/xiaomyung/chess-pygame.git
 cd chess-pygame
 python3 -m venv .venv
 source .venv/bin/activate
@@ -45,7 +45,7 @@ python main.py
 ```bash
 brew install python ffmpeg
 
-git clone https://github.com/<your-username>/chess-pygame.git
+git clone https://github.com/xiaomyung/chess-pygame.git
 cd chess-pygame
 python3 -m venv .venv
 source .venv/bin/activate
@@ -60,7 +60,7 @@ python main.py
 # Install ffmpeg, e.g. via winget:
 winget install Gyan.FFmpeg
 
-git clone https://github.com/<your-username>/chess-pygame.git
+git clone https://github.com/xiaomyung/chess-pygame.git
 cd chess-pygame
 python -m venv .venv
 .venv\Scripts\Activate.ps1
