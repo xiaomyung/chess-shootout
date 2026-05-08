@@ -2,7 +2,7 @@ import time
 from dataclasses import dataclass, field
 from typing import Callable, Optional
 
-from pieces import PieceColor
+from backend.pieces import PieceColor
 
 
 def _opposite(color):

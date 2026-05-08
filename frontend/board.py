@@ -5,7 +5,7 @@ import pygame as pg
 from backend.utils import Square
 from frontend.animation import PieceAnimation
 from frontend.colors import Colors
-from pieces import PieceType, PieceColor, Piece
+from backend.pieces import PieceType, PieceColor, Piece
 
 
 class Board:

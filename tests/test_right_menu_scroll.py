@@ -37,7 +37,7 @@ def menu():
 def play_n_moves(backend, n):
     # Synthesize fake history entries; we only care about the row count for scroll.
     from backend.utils import Square, Move, HistoryEntry
-    from pieces import Piece, PieceType, PieceColor
+    from backend.pieces import Piece, PieceType, PieceColor
     pawn = Piece(PieceType.PAWN, PieceColor.WHITE)
     move = Move(Square(6, 0), Square(5, 0), pawn)
     backend.move_history = [

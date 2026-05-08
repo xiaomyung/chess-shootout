@@ -1,7 +1,7 @@
 import os
 from enum import Enum
 
-from paths import PIECES_IMG_DIR
+from backend.paths import PIECES_IMG_DIR
 
 
 class PieceColor(Enum):

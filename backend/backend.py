@@ -2,7 +2,7 @@ import time
 from collections import Counter
 from itertools import product
 
-from pieces import PieceType, PieceColor, Piece, BACK_RANK
+from backend.pieces import PieceType, PieceColor, Piece, BACK_RANK
 from backend.clock import Clock
 from backend.utils import Move, MoveResult, Square, HistoryEntry
 

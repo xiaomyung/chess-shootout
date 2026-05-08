@@ -2,7 +2,7 @@ from dataclasses import dataclass
 from typing import Callable, Optional
 
 from backend.utils import Square
-from pieces import Piece
+from backend.pieces import Piece
 
 
 @dataclass

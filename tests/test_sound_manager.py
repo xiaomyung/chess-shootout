@@ -13,8 +13,8 @@ from frontend.sound_manager import (
     SoundManager, HeartbeatConfig,
     STATE_OFF, STATE_MILD, STATE_DEEP, ONESHOT_FADE_MS,
 )
-from paths import SOUNDS_DIR
-from pieces import PieceType
+from backend.paths import SOUNDS_DIR
+from backend.pieces import PieceType
 
 
 @pytest.fixture(scope="module", autouse=True)

@@ -2,7 +2,7 @@ from collections import Counter
 
 from backend.backend import Backend, DEFAULT_CASTLING_RIGHTS
 from backend.utils import Square
-from pieces import Piece, PieceColor, PieceType
+from backend.pieces import Piece, PieceColor, PieceType
 
 
 WHITE = PieceColor.WHITE

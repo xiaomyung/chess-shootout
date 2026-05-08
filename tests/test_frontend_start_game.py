@@ -7,7 +7,7 @@ import pygame as pg
 import pytest
 
 from backend.utils import Square
-from pieces import PieceColor
+from backend.pieces import PieceColor
 from frontend.frontend import Frontend, OPPONENT_NAME_FOR_MODE
 
 
