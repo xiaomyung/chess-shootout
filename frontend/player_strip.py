@@ -51,9 +51,9 @@ class PlayerStrip:
         )
 
         name_region = pg.Rect(
-            self.rect.x + self.padding,
+            self.rect.x + self.pocket_inset,
             self.rect.y + self.pocket_inset,
-            pocket_rect.x - self.rect.x - self.padding - self.pocket_inset,
+            pocket_rect.x - self.rect.x - 2 * self.pocket_inset,
             self.rect.height - 2 * self.pocket_inset,
         )
 
