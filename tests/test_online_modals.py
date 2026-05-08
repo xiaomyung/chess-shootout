@@ -97,32 +97,9 @@ def test_wait_modal_subtitle_renders_without_crash():
     assert m.subtitle == "00:05"
 
 
-# ---- OnlineClient stub ----
+# ---- OnlineClient (real impl) ----
 
-def test_stub_drains_no_events_initially():
+def test_online_client_drains_no_events_initially():
     c = OnlineClient()
-    assert c.drain_inbound() == []
-
-
-def test_stub_connect_eventually_fires_game_start():
-    import time
-    c = OnlineClient()
-    c.connect("localhost:8000", {"nickname": "A", "time_minutes": 5,
-                                   "increment_seconds": 0,
-                                   "side_preference": "random"})
-    # Wait long enough for the canned timers to elapse.
-    time.sleep(2)
-    events = c.drain_inbound()
-    types = [e.type for e in events]
-    assert "matchmake_response" in types
-    assert "game_start" in types
-
-
-def test_stub_cancel_clears_pending_events():
-    c = OnlineClient()
-    c.connect("localhost:8000", {"nickname": "A", "time_minutes": 5,
-                                   "increment_seconds": 0,
-                                   "side_preference": "random"})
-    c.cancel_queue()
     assert c.drain_inbound() == []
     assert c.state == "disconnected"

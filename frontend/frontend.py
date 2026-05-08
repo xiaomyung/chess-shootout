@@ -6,6 +6,7 @@ from datetime import datetime
 import pygame as pg
 
 from backend.match import Match, SINGLE_SCREEN, BOT, ONLINE
+from backend.utils import Square
 from frontend import env
 from frontend.audio_panel import AudioPanel
 from frontend.board import Board
@@ -53,6 +54,21 @@ AUTO_FLIP_DELAY_MS = 200
 
 MIN_WINDOW_WIDTH = 900
 MIN_WINDOW_HEIGHT = 500
+
+_PROMO_TYPE_BY_LETTER = {
+    "q": PieceType.QUEEN, "r": PieceType.ROOK,
+    "b": PieceType.BISHOP, "n": PieceType.KNIGHT,
+}
+
+
+def _coord(sq):
+    return f"{chr(ord('a') + sq.col)}{8 - sq.row}"
+
+
+def _square_from_coord(coord):
+    file_idx = ord(coord[0]) - ord("a")
+    rank = int(coord[1])
+    return Square(8 - rank, file_idx)
 
 
 class Frontend:
@@ -239,9 +255,13 @@ class Frontend:
 
     def _handle_online_event(self, event):
         if event.type == "matchmake_response":
-            self.wait_modal.set_subtitle("Match found!")
+            return  # Just enqueued; pairing happens later via game_start.
         elif event.type == "game_start":
             self._start_online_game(event.payload)
+        elif event.type == "move_applied":
+            self._handle_remote_move_applied(event.payload)
+        elif event.type == "result":
+            self._handle_online_result(event.payload)
         elif event.type == "error":
             self.confirm_modal.show(
                 event.payload.get("reason", "Server unreachable"),
@@ -249,6 +269,41 @@ class Frontend:
                 on_no=self._on_online_cancel,
                 yes_label="Retry", no_label="Cancel",
             )
+
+    def _handle_remote_move_applied(self, payload):
+        clock_snap = payload.get("clock") or {}
+        if self.match.clock is not None:
+            self.match.clock.restore_from_server(
+                clock_snap.get("white_remaining", self.match.clock.white_remaining),
+                clock_snap.get("black_remaining", self.match.clock.black_remaining),
+                clock_snap.get("running_for"),
+            )
+        san = payload.get("san")
+        last = self.match.move_history[-1] if self.match.move_history else None
+        if last is not None and last.san == san:
+            return  # Echo of our own move; clock already synced.
+        from_sq = _square_from_coord(payload["from"])
+        to_sq = _square_from_coord(payload["to"])
+        promo = payload.get("promotion")
+        promo_type = _PROMO_TYPE_BY_LETTER.get(promo) if promo else None
+        self.match.apply_remote_move(from_sq, to_sq, promo_type)
+
+    def _handle_online_result(self, payload):
+        reason = payload.get("reason", "")
+        winner = payload.get("winner_color")
+        if reason in ("checkmate", "timeout"):
+            self.manual_result = ("white_wins" if winner == "white" else "black_wins")
+        elif reason == "resignation":
+            self.manual_result = ("white_wins" if winner == "white" else "black_wins")
+        elif reason in ("draw_agreement", "draw_stalemate", "draw_repetition",
+                        "draw_fifty_move", "draw_insufficient_material"):
+            self.manual_result = "draw_agreement"
+        elif reason == "abandonment":
+            self.manual_result = ("white_wins" if winner == "white" else "black_wins")
+        elif reason == "aborted":
+            self.manual_result = "draw_agreement"
+        elif reason == "server_shutdown":
+            self.manual_result = "draw_agreement"
 
     def _start_online_game(self, payload):
         self.wait_modal.hide()
@@ -261,8 +316,14 @@ class Frontend:
         self.match.mode = ONLINE
         self.match.local_color = (PieceColor.WHITE if payload["your_color"] == "white"
                                   else PieceColor.BLACK)
+        self.match.on_local_move_applied = self._on_local_move_applied
         self._reset_to_new_game()
         self.sound_manager.play_game_start()
+
+    def _on_local_move_applied(self, from_sq, to_sq, promotion):
+        if self.online_client is None:
+            return
+        self.online_client.send_move(_coord(from_sq), _coord(to_sq), promotion)
 
     def _right_menu_buttons(self):
         if self.pgn_review:

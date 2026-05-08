@@ -95,7 +95,9 @@ class RoomManager:
         return len(self._active)
 
     def get(self, room_id):
-        return self._active.get(room_id)
+        if room_id in self._active:
+            return self._active[room_id]
+        return self._find_in_queue(room_id)
 
     async def enqueue(self, *, client_uuid, nickname, session_token,
                       time_minutes, increment_seconds, side_preference):

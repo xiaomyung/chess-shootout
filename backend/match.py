@@ -18,12 +18,39 @@ class Match:
         self.local_color = local_color
         self.backend = Backend()
         self.backend.new_game()
+        self.on_local_move_applied = None
 
     def try_move(self, from_sq, to_sq) -> MoveResult:
-        return self.backend.try_move(from_sq, to_sq)
+        result = self.backend.try_move(from_sq, to_sq)
+        if result.legal and not result.promotion_required:
+            self._fire_local_move(from_sq, to_sq, None)
+        return result
+
+    def apply_remote_move(self, from_sq, to_sq, promotion=None) -> MoveResult:
+        result = self.backend.try_move(from_sq, to_sq)
+        if not result.legal:
+            return result
+        if result.promotion_required and promotion is not None:
+            return self.backend.promote(to_sq, promotion)
+        return result
 
     def promote(self, square, piece_type) -> MoveResult:
-        return self.backend.promote(square, piece_type)
+        result = self.backend.promote(square, piece_type)
+        if result.legal:
+            from backend.pieces import PieceType
+            promo_letter = {
+                PieceType.QUEEN: "q", PieceType.ROOK: "r",
+                PieceType.BISHOP: "b", PieceType.KNIGHT: "n",
+            }.get(piece_type)
+            entry = self.backend.move_history[-1] if self.backend.move_history else None
+            from_sq = entry.move.from_sq if entry else None
+            if from_sq is not None:
+                self._fire_local_move(from_sq, square, promo_letter)
+        return result
+
+    def _fire_local_move(self, from_sq, to_sq, promotion):
+        if self.on_local_move_applied is not None:
+            self.on_local_move_applied(from_sq, to_sq, promotion)
 
     def undo(self) -> None:
         self.backend.undo()

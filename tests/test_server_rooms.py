@@ -209,6 +209,15 @@ async def test_gc_drops_finished_rooms_after_keep_alive(manager, clock):
 
 
 @pytest.mark.asyncio
+async def test_get_finds_queued_room_before_pairing(manager):
+    """First player's WS auth happens before the second matchmakes.
+    `get(room_id)` must resolve queued rooms too, else auth fails."""
+    room = await manager.enqueue(**_enqueue_kwargs("alice"))
+    found = manager.get(room.room_id)
+    assert found is room
+
+
+@pytest.mark.asyncio
 async def test_color_of_returns_correct_color(manager):
     await manager.enqueue(**_enqueue_kwargs("alice"))
     room = await manager.enqueue(**_enqueue_kwargs("bob"))
