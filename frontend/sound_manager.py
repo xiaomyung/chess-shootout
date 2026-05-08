@@ -85,8 +85,9 @@ class SoundManager:
 
     def _load_capture_sounds(self, sounds_dir):
         result = {}
+        capture_dir = sounds_dir / "capture_sounds"
         for piece_type, filename in CAPTURE_SOUND_BY_PIECE.items():
-            sound = self._safe_load(sounds_dir / filename)
+            sound = self._safe_load(capture_dir / filename)
             if sound is not None:
                 result[piece_type] = sound
         return result

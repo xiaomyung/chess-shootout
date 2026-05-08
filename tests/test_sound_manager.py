@@ -57,6 +57,21 @@ def test_loads_per_piece_capture_sounds(manager):
         assert manager._capture_sounds[pt] is not None
 
 
+def test_each_piece_capture_sound_is_distinct(manager):
+    # Six unique Sound objects (one per piece type), no aliasing.
+    sounds = [manager._capture_sounds[pt] for pt in (
+        PieceType.PAWN, PieceType.KNIGHT, PieceType.BISHOP,
+        PieceType.ROOK, PieceType.QUEEN, PieceType.KING,
+    )]
+    assert len(set(id(s) for s in sounds)) == 6
+
+
+def test_capture_sounds_loaded_from_capture_sounds_subdir(tmp_path):
+    # No capture_sounds/ subdir → empty dict.
+    sm = SoundManager(tmp_path, mild_channel=MagicMock(), deep_channel=MagicMock())
+    assert sm._capture_sounds == {}
+
+
 def test_loads_deep_variants(manager):
     variants = manager._ensure_deep_variants()
     assert len(variants) >= 2

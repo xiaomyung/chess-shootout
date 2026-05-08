@@ -208,7 +208,7 @@ class Frontend:
         else:
             self.sound_manager.play_move()
         if entry.move.captured is not None:
-            self.sound_manager.play_capture(entry.move.captured.type)
+            self.sound_manager.play_capture(entry.move.piece.type)
         if entry.gives_check and not entry.gives_checkmate:
             self.sound_manager.play_check()
 

@@ -165,9 +165,53 @@ def test_capture_plays_move_and_capture():
     app.board.handle_click(Square(4, 7))
     fire_animation(app)
     app.sound_manager.play_move.assert_called_once()
-    app.sound_manager.play_capture.assert_called_once()
+    # Capture sound is keyed on the CAPTURING piece (queen), not the captured (pawn).
+    app.sound_manager.play_capture.assert_called_once_with(PieceType.QUEEN)
     app.sound_manager.play_check.assert_not_called()
     app.sound_manager.play_checkmate.assert_not_called()
+
+
+@pytest.mark.parametrize("attacker_type,target_type", [
+    (PieceType.PAWN, PieceType.QUEEN),
+    (PieceType.KNIGHT, PieceType.PAWN),
+    (PieceType.BISHOP, PieceType.ROOK),
+    (PieceType.ROOK, PieceType.BISHOP),
+    (PieceType.QUEEN, PieceType.KNIGHT),
+])
+def test_capture_dispatches_capturing_piece_type(attacker_type, target_type):
+    app = make_app()
+    app._on_start_game(base_config(time_minutes=None))
+    setup_position(app, {
+        Square(7, 0): Piece(PieceType.KING, PieceColor.WHITE),
+        Square(0, 0): Piece(PieceType.KING, PieceColor.BLACK),
+        Square(4, 4): Piece(attacker_type, PieceColor.WHITE),
+        Square(3, 4): Piece(target_type, PieceColor.BLACK),
+    })
+    # For pieces that can't move 1 square forward (e.g., pawn captures diagonally),
+    # arrange the target so the move is legal: pawn captures diagonally, knight L-shape, etc.
+    if attacker_type == PieceType.PAWN:
+        # White pawn at (4, 4) captures diagonally to (3, 5).
+        app.backend.state[3][4] = None
+        app.backend.state[3][5] = Piece(target_type, PieceColor.BLACK)
+        from_sq, to_sq = Square(4, 4), Square(3, 5)
+    elif attacker_type == PieceType.KNIGHT:
+        # Knight at (4, 4) captures at (2, 3).
+        app.backend.state[3][4] = None
+        app.backend.state[2][3] = Piece(target_type, PieceColor.BLACK)
+        from_sq, to_sq = Square(4, 4), Square(2, 3)
+    elif attacker_type == PieceType.BISHOP:
+        # Bishop at (4, 4) captures diagonally at (2, 6).
+        app.backend.state[3][4] = None
+        app.backend.state[2][6] = Piece(target_type, PieceColor.BLACK)
+        from_sq, to_sq = Square(4, 4), Square(2, 6)
+    else:
+        # Rook / queen: straight move from (4, 4) to (3, 4).
+        from_sq, to_sq = Square(4, 4), Square(3, 4)
+    app.sound_manager.reset_mock()
+    app.board.handle_click(from_sq)
+    app.board.handle_click(to_sq)
+    fire_animation(app)
+    app.sound_manager.play_capture.assert_called_once_with(attacker_type)
 
 
 def test_check_plays_move_and_check():
