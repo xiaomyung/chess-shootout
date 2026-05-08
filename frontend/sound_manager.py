@@ -1,8 +1,11 @@
+import io
 import random
 from dataclasses import dataclass, field
 from pathlib import Path
 
 import pygame as pg
+
+from pieces.pieces import PieceType
 
 
 @dataclass
@@ -14,6 +17,8 @@ class HeartbeatConfig:
     fade_in_ms: int = 400
     crossfade_ms: int = 300
     fade_out_ms: int = 300
+    deep_speed_max: float = 2.0
+    deep_speed_step: float = 0.05
 
 
 STATE_OFF = "off"
@@ -21,6 +26,15 @@ STATE_MILD = "mild"
 STATE_DEEP = "deep"
 
 ONESHOT_FADE_MS = 20
+
+CAPTURE_SOUND_BY_PIECE = {
+    PieceType.PAWN: "pawn_shot.mp3",
+    PieceType.KNIGHT: "knight_shot.mp3",
+    PieceType.BISHOP: "bishop_shot.mp3",
+    PieceType.ROOK: "rook_shot.mp3",
+    PieceType.QUEEN: "queen_shot.mp3",
+    PieceType.KING: "king_shot.mp3",
+}
 
 
 class SoundManager:
@@ -30,11 +44,15 @@ class SoundManager:
         self.enabled = enabled
         self.heartbeat = heartbeat or HeartbeatConfig()
         self._state = STATE_OFF
+        self._deep_speed_bucket = -1
 
         if not self.enabled:
             self._piece_move_sounds = []
             self._reload_sounds = []
+            self._capture_sounds = {}
             self._sounds = {}
+            self._deep_source_path = Path()
+            self._deep_variants = []
             self._mild_channel = None
             self._deep_channel = None
             return
@@ -42,22 +60,71 @@ class SoundManager:
         sounds_dir = Path(sounds_dir)
         self._piece_move_sounds = self._load_variants(sounds_dir / "piece_moves")
         self._reload_sounds = self._load_variants(sounds_dir / "shotgun_reloads")
+        self._capture_sounds = self._load_capture_sounds(sounds_dir)
         self._sounds = {
-            "capture": self._safe_load(sounds_dir / "shotgun_fire.mp3"),
             "checkmate": self._safe_load(sounds_dir / "metal_pipe_falling.mp3"),
             "undo": self._safe_load(sounds_dir / "rewind.mp3"),
             "game_start": self._safe_load(sounds_dir / "game_start.mp3"),
             "heartbeat_mild": self._safe_load(sounds_dir / "heartbeat_mild.mp3"),
-            "heartbeat_deep": self._safe_load(sounds_dir / "heartbeat_deep.mp3"),
         }
+        self._deep_source_path = sounds_dir / "heartbeat_deep.mp3"
+        self._deep_variants = None
         self._mild_channel = mild_channel if mild_channel is not None else self._reserve_channel(0)
         self._deep_channel = deep_channel if deep_channel is not None else self._reserve_channel(1)
+
+    def _ensure_deep_variants(self):
+        if self._deep_variants is None:
+            self._deep_variants = self._build_deep_variants(self._deep_source_path)
+        return self._deep_variants
 
     def _load_variants(self, dir_path):
         if not dir_path.is_dir():
             return []
-        return [self._safe_load(p) for p in sorted(dir_path.glob("*.mp3"))
-                if self._safe_load(p) is not None]
+        return [s for p in sorted(dir_path.glob("*.mp3"))
+                if (s := self._safe_load(p)) is not None]
+
+    def _load_capture_sounds(self, sounds_dir):
+        result = {}
+        for piece_type, filename in CAPTURE_SOUND_BY_PIECE.items():
+            sound = self._safe_load(sounds_dir / filename)
+            if sound is not None:
+                result[piece_type] = sound
+        return result
+
+    def _build_deep_variants(self, source_path):
+        if not source_path.exists():
+            return []
+        try:
+            from pydub import AudioSegment
+            from pydub.effects import speedup
+        except ImportError:
+            single = self._safe_load(source_path)
+            return [single] if single is not None else []
+
+        try:
+            base = AudioSegment.from_mp3(str(source_path))
+        except Exception:
+            single = self._safe_load(source_path)
+            return [single] if single is not None else []
+
+        cfg = self.heartbeat
+        speeds = []
+        s = 1.0
+        while s <= cfg.deep_speed_max + 1e-9:
+            speeds.append(round(s, 4))
+            s += cfg.deep_speed_step
+
+        variants = []
+        for speed in speeds:
+            try:
+                seg = base if abs(speed - 1.0) < 1e-9 else speedup(base, playback_speed=speed)
+                buf = io.BytesIO()
+                seg.export(buf, format="wav")
+                buf.seek(0)
+                variants.append(pg.mixer.Sound(buffer=buf.read()))
+            except Exception:
+                continue
+        return variants
 
     @staticmethod
     def _safe_load(path):
@@ -83,8 +150,14 @@ class SoundManager:
             return
         random.choice(self._reload_sounds).play(fade_ms=ONESHOT_FADE_MS)
 
-    def play_capture(self):
-        self._play_one_shot("capture")
+    def play_capture(self, piece_type=None):
+        if not self.enabled:
+            return
+        sound = self._capture_sounds.get(piece_type)
+        if sound is None and self._capture_sounds:
+            sound = next(iter(self._capture_sounds.values()))
+        if sound is not None:
+            sound.play(fade_ms=ONESHOT_FADE_MS)
 
     def play_checkmate(self):
         self._play_one_shot("checkmate")
@@ -105,13 +178,13 @@ class SoundManager:
     def update_heartbeat(self, fraction_remaining, paused):
         if not self.enabled:
             return
-        cfg = self.heartbeat
         desired = self._desired_state(fraction_remaining, paused)
-        self._transition_to(desired)
+        self._transition_to(desired, fraction_remaining)
         if desired == STATE_MILD and self._mild_channel is not None:
             self._mild_channel.set_volume(self._mild_volume(fraction_remaining))
         elif desired == STATE_DEEP and self._deep_channel is not None:
             self._deep_channel.set_volume(self._deep_volume(fraction_remaining))
+            self._update_deep_speed(fraction_remaining)
 
     def _desired_state(self, fraction, paused):
         cfg = self.heartbeat
@@ -121,7 +194,7 @@ class SoundManager:
             return STATE_MILD
         return STATE_DEEP
 
-    def _transition_to(self, desired):
+    def _transition_to(self, desired, fraction):
         if desired == self._state:
             return
         cfg = self.heartbeat
@@ -131,14 +204,16 @@ class SoundManager:
                 self._mild_channel.fadeout(cfg.fade_out_ms)
             elif prev == STATE_DEEP and self._deep_channel is not None:
                 self._deep_channel.fadeout(cfg.fade_out_ms)
+            self._deep_speed_bucket = -1
         elif desired == STATE_MILD:
             if prev == STATE_DEEP and self._deep_channel is not None:
                 self._deep_channel.fadeout(cfg.crossfade_ms)
             self._start_mild()
+            self._deep_speed_bucket = -1
         elif desired == STATE_DEEP:
             if prev == STATE_MILD and self._mild_channel is not None:
                 self._mild_channel.fadeout(cfg.crossfade_ms)
-            self._start_deep()
+            self._start_deep(fraction)
         self._state = desired
 
     def _start_mild(self):
@@ -148,12 +223,35 @@ class SoundManager:
         cfg = self.heartbeat
         self._mild_channel.play(sound, loops=-1, fade_ms=cfg.fade_in_ms)
 
-    def _start_deep(self):
-        sound = self._sounds.get("heartbeat_deep")
-        if self._deep_channel is None or sound is None:
+    def _start_deep(self, fraction):
+        variants = self._ensure_deep_variants()
+        if self._deep_channel is None or not variants:
             return
+        bucket = self._desired_deep_bucket(fraction)
+        self._deep_speed_bucket = bucket
+        sound = variants[bucket]
         cfg = self.heartbeat
         self._deep_channel.play(sound, loops=-1, fade_ms=cfg.crossfade_ms)
+
+    def _update_deep_speed(self, fraction):
+        variants = self._ensure_deep_variants()
+        if self._deep_channel is None or not variants:
+            return
+        target = self._desired_deep_bucket(fraction)
+        if target == self._deep_speed_bucket:
+            return
+        self._deep_speed_bucket = target
+        sound = variants[target]
+        self._deep_channel.play(sound, loops=-1, fade_ms=ONESHOT_FADE_MS)
+
+    def _desired_deep_bucket(self, fraction):
+        cfg = self.heartbeat
+        n = len(self._ensure_deep_variants())
+        if n <= 1 or cfg.deep_start_fraction <= 0:
+            return 0
+        progress = (cfg.deep_start_fraction - fraction) / cfg.deep_start_fraction
+        progress = max(0.0, min(progress, 1.0))
+        return min(int(progress * (n - 1) + 0.5), n - 1)
 
     def _mild_volume(self, fraction):
         cfg = self.heartbeat
@@ -185,3 +283,4 @@ class SoundManager:
         if self._deep_channel is not None:
             self._deep_channel.fadeout(cfg.fade_out_ms)
         self._state = STATE_OFF
+        self._deep_speed_bucket = -1
