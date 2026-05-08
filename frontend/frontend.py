@@ -54,7 +54,7 @@ class Frontend:
         self.mode = "menu"
         self.manual_result = None
         self._last_turn_for_flip = None
-        self.white_name = "Player"
+        self.white_name = "Player 1"
         self.black_name = "Player 2"
         self._chosen_side = "white"
         self._time_control = None
@@ -114,7 +114,7 @@ class Frontend:
             side = random.choice(["white", "black"])
         self._chosen_side = side
 
-        nickname = (config.get("nickname") or "").strip() or "Player"
+        nickname = (config.get("nickname") or "").strip() or "Player 1"
         opponent_name = OPPONENT_NAME_FOR_MODE[config["mode"]]
         if side == "white":
             self.white_name, self.black_name = nickname, opponent_name

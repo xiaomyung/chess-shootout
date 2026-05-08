@@ -50,13 +50,13 @@ def test_start_game_single_screen_white_side():
 def test_start_game_empty_nickname_falls_back_to_player():
     app = make_app()
     app._on_start_game(base_config(nickname=""))
-    assert app.white_name == "Player"
+    assert app.white_name == "Player 1"
 
 
 def test_start_game_whitespace_nickname_falls_back():
     app = make_app()
     app._on_start_game(base_config(nickname="   "))
-    assert app.white_name == "Player"
+    assert app.white_name == "Player 1"
 
 
 def test_start_game_black_side_swaps_names():
