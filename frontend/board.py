@@ -1,3 +1,4 @@
+import math
 from itertools import product
 
 import pygame as pg
@@ -41,6 +42,9 @@ class Board:
         self.last_animation_completed_at_ms = 0
         self.premoves = []
         self.premove_color = None
+        self.highlighted_squares = set()
+        self.arrows = []
+        self._right_drag_start_square = None
 
     def _render_text(self):
         self.file_labels_rendered = [
@@ -128,12 +132,15 @@ class Board:
             self.draw_cell(row, col)
         self._draw_check_highlight()
         self._draw_premove_highlights()
+        self._draw_annotation_highlights()
         self._draw_vertical_guides()
         self._draw_horizontal_guides()
         self._draw_selection_highlight()
         self._draw_move_indicators()
         self.draw_pieces()
         self._draw_animations()
+        self._draw_arrows()
+        self._draw_drag_preview_arrow()
         self._draw_promotion_picker()
 
     def _draw_premove_highlights(self):
@@ -149,6 +156,83 @@ class Board:
                 overlay = pg.Surface((rect.width, rect.height), pg.SRCALPHA)
                 overlay.fill(Colors.premove)
                 self.window.blit(overlay, rect.topleft)
+
+    def toggle_highlight(self, sq):
+        if sq in self.highlighted_squares:
+            self.highlighted_squares.remove(sq)
+        else:
+            self.highlighted_squares.add(sq)
+
+    def toggle_arrow(self, from_sq, to_sq):
+        arrow = (from_sq, to_sq)
+        if arrow in self.arrows:
+            self.arrows.remove(arrow)
+        else:
+            self.arrows.append(arrow)
+
+    def is_square_annotated(self, sq):
+        if sq in self.highlighted_squares:
+            return True
+        for from_sq, to_sq in self.arrows:
+            if sq == from_sq or sq == to_sq:
+                return True
+        return False
+
+    def clear_annotations(self):
+        self.highlighted_squares = set()
+        self.arrows = []
+        self._right_drag_start_square = None
+
+    def _draw_annotation_highlights(self):
+        for sq in self.highlighted_squares:
+            rect = self._cell_rect(sq.row, sq.col)
+            overlay = pg.Surface((rect.width, rect.height), pg.SRCALPHA)
+            overlay.fill(Colors.annotation_highlight)
+            self.window.blit(overlay, rect.topleft)
+
+    def _draw_arrows(self):
+        for from_sq, to_sq in self.arrows:
+            self._render_arrow(from_sq, to_sq, Colors.annotation_arrow)
+
+    def _draw_drag_preview_arrow(self):
+        if self._right_drag_start_square is None:
+            return
+        end_sq = self.cell_at(pg.mouse.get_pos())
+        if end_sq is None or end_sq == self._right_drag_start_square:
+            return
+        self._render_arrow(self._right_drag_start_square, end_sq,
+                           Colors.annotation_arrow_preview)
+
+    def _render_arrow(self, from_sq, to_sq, color):
+        if self.cell_size <= 0:
+            return
+        from_rect = self._cell_rect(from_sq.row, from_sq.col)
+        to_rect = self._cell_rect(to_sq.row, to_sq.col)
+        from_pos = (from_rect.centerx, from_rect.centery)
+        to_pos = (to_rect.centerx, to_rect.centery)
+        width = max(int(self.cell_size * 0.18), 4)
+        head_size = max(int(self.cell_size * 0.35), 8)
+
+        angle = math.atan2(to_pos[1] - from_pos[1], to_pos[0] - from_pos[0])
+        shaft_end = (
+            to_pos[0] - head_size * 0.55 * math.cos(angle),
+            to_pos[1] - head_size * 0.55 * math.sin(angle),
+        )
+        head_half = math.radians(150)
+        head_left = (
+            to_pos[0] + head_size * math.cos(angle + head_half),
+            to_pos[1] + head_size * math.sin(angle + head_half),
+        )
+        head_right = (
+            to_pos[0] + head_size * math.cos(angle - head_half),
+            to_pos[1] + head_size * math.sin(angle - head_half),
+        )
+
+        surface_size = self.window.get_size()
+        overlay = pg.Surface(surface_size, pg.SRCALPHA)
+        pg.draw.line(overlay, color, from_pos, shaft_end, width)
+        pg.draw.polygon(overlay, color, [to_pos, head_left, head_right])
+        self.window.blit(overlay, (0, 0))
 
     def _draw_check_highlight(self):
         for row, col in product(range(self.SIZE), repeat=2):
@@ -378,6 +462,7 @@ class Board:
         return True
 
     def _start_move_animation(self, from_sq, to_sq, promotion_required):
+        self.clear_annotations()
         entry = self.backend.move_history[-1]
         moving_piece = entry.move.piece
 

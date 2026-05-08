@@ -150,6 +150,7 @@ class Frontend:
         self.board.pending_promotion_square = None
         self.board.cancel_animations()
         self.board._clear_premoves()
+        self.board.clear_annotations()
         self._last_turn_for_flip = None
 
     def _on_save_pgn(self):
@@ -172,6 +173,7 @@ class Frontend:
     def _on_undo(self):
         self.board.selected_square = None
         self.board._clear_premoves()
+        self.board.clear_annotations()
         if self.manual_result is not None:
             self.manual_result = None
             return
@@ -190,6 +192,7 @@ class Frontend:
         self._auto_complete_pending_promotion()
         self.manual_result = "black_wins" if loser == PieceColor.WHITE else "white_wins"
         self.board._clear_premoves()
+        self.board.clear_annotations()
 
     def _on_draw(self):
         if self.current_result() is not None:
@@ -197,6 +200,7 @@ class Frontend:
         self._auto_complete_pending_promotion()
         self.manual_result = "draw_agreement"
         self.board._clear_premoves()
+        self.board.clear_annotations()
 
     def _auto_complete_pending_promotion(self):
         if self.board.pending_promotion_square is None:
@@ -357,6 +361,28 @@ class Frontend:
         self.player_strip_top.set_rect(top_strip_rect)
         self.player_strip_bottom.set_rect(bottom_strip_rect)
 
+    def _right_click_pressed(self, pos):
+        if self.mode == "menu" or self.current_result() is not None:
+            return
+        sq = self.board.cell_at(pos)
+        if sq is not None:
+            self.board._right_drag_start_square = sq
+
+    def _right_click_released(self, pos):
+        if self.mode == "menu":
+            self.board._right_drag_start_square = None
+            return
+        start = self.board._right_drag_start_square
+        end = self.board.cell_at(pos)
+        if start is not None:
+            if end is None:
+                pass
+            elif end == start:
+                self.board.toggle_highlight(start)
+            else:
+                self.board.toggle_arrow(start, end)
+        self.board._right_drag_start_square = None
+
     def mouse_left_clicked(self, pos):
         if self.mode == "menu":
             self.start_menu.handle_click(pos)
@@ -369,6 +395,8 @@ class Frontend:
             return
         square = self.board.cell_at(pos)
         if square is not None:
+            if not self.board.is_square_annotated(square):
+                self.board.clear_annotations()
             self.board.handle_click(square)
 
     def check_events(self):
@@ -385,6 +413,12 @@ class Frontend:
             elif event.type == pg.MOUSEBUTTONDOWN:
                 if event.button == 1:
                     self.mouse_left_clicked(event.pos)
+                elif event.button == 3:
+                    self._right_click_pressed(event.pos)
+
+            elif event.type == pg.MOUSEBUTTONUP:
+                if event.button == 3:
+                    self._right_click_released(event.pos)
 
             elif event.type == pg.MOUSEWHEEL:
                 if self.mode != "menu":

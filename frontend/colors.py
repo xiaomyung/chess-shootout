@@ -10,3 +10,6 @@ class Colors:
     selection_red = "#d49595"
     move_indicator = "#28282864"
     premove = "#d7646482"
+    annotation_highlight = "#ff9f368c"
+    annotation_arrow = "#ff9f36c8"
+    annotation_arrow_preview = "#ff9f3680"
