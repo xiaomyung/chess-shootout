@@ -67,19 +67,13 @@ class Board:
 
         sq = self.pending_promotion_square
         color = self.backend.piece_at(sq).color
-        rect = self._cell_rect(sq.row, sq.col)
 
         options = [PieceType.QUEEN, PieceType.ROOK, PieceType.BISHOP, PieceType.KNIGHT]
 
         direction = 1 if color == PieceColor.WHITE else -1
 
         for i, piece_type in enumerate(options):
-            cell_rect = pg.Rect(
-                rect.left,
-                rect.top + i * self.cell_size * direction,
-                self.cell_size,
-                self.cell_size,
-            )
+            cell_rect = self._cell_rect(sq.row + i * direction, sq.col)
             pg.draw.rect(self.window, Colors.white, cell_rect)
             pg.draw.rect(self.window, Colors.dark_menu, cell_rect, 1)
             surface = self.piece_images_scaled[(piece_type, color)]
