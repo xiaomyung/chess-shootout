@@ -746,6 +746,205 @@ def test_premove_capturing_opposite_piece_fires_with_capture(board):
     assert captured.type == PieceType.KNIGHT
 
 
+def test_chain_clicking_original_from_square_resolves_to_tip(board):
+    # User queues e2-e4. Then clicks e2 (the visual location) to chain — should
+    # resolve to e4 (the speculative tip) and let them queue e4-e5.
+    board.backend.turn = PieceColor.BLACK
+    board.handle_click(Square(6, 4))
+    board.handle_click(Square(4, 4))  # premove e2-e4
+    assert len(board.premoves) == 1
+    # Click the ORIGINAL e2 square — the pawn is visually still there, but speculatively
+    # at e4. Should resolve to e4.
+    board.handle_click(Square(6, 4))
+    assert board.selected_square == Square(4, 4)
+    # Now extend the chain.
+    board.handle_click(Square(3, 4))  # e4-e5
+    assert len(board.premoves) == 2
+    assert board.premoves[1].from_sq == Square(4, 4)
+    assert board.premoves[1].to_sq == Square(3, 4)
+
+
+def test_chain_three_deep_clicking_original_resolves_to_final_tip(board):
+    # Queue a3 -> a4 -> a5. Click a2 (original) -> resolves to a5, allow a5-a6.
+    board.backend.turn = PieceColor.BLACK
+    board.handle_click(Square(6, 0))
+    board.handle_click(Square(5, 0))  # a2-a3
+    board.handle_click(Square(5, 0))
+    board.handle_click(Square(4, 0))  # a3-a4
+    board.handle_click(Square(4, 0))
+    board.handle_click(Square(3, 0))  # a4-a5
+    assert len(board.premoves) == 3
+    # Click ORIGINAL a2 → should resolve to a5.
+    board.handle_click(Square(6, 0))
+    assert board.selected_square == Square(3, 0)
+    # Continue the chain.
+    board.handle_click(Square(2, 0))  # a5-a6
+    assert len(board.premoves) == 4
+    assert board.premoves[3].from_sq == Square(3, 0)
+
+
+def test_chain_clicking_intermediate_square_resolves_to_tip(board):
+    # Chain a2->a4->a5. Click a4 (intermediate) → resolves to a5.
+    board.backend.turn = PieceColor.BLACK
+    board.handle_click(Square(6, 0))
+    board.handle_click(Square(4, 0))  # a2-a4
+    # Click a4 (this IS the speculative tip; no resolution needed).
+    board.handle_click(Square(4, 0))
+    assert board.selected_square == Square(4, 0)
+    # Queue a4-a5.
+    board.handle_click(Square(3, 0))
+    assert len(board.premoves) == 2
+    # Now click an intermediate square (a4) — speculatively that's still empty (piece is at a5).
+    # Should resolve forward through chain to a5.
+    board.handle_click(Square(4, 0))
+    assert board.selected_square == Square(3, 0)
+
+
+def test_clicking_truly_empty_square_still_cancels(board):
+    # Make sure resolution doesn't break the cancel-on-empty behavior.
+    board.backend.turn = PieceColor.BLACK
+    board.handle_click(Square(6, 4))
+    board.handle_click(Square(4, 4))  # premove
+    assert len(board.premoves) == 1
+    # Click a square that has no piece in either backend state OR queued premove paths.
+    board.handle_click(Square(3, 3))
+    assert board.premoves == []
+
+
+def test_chain_resolution_does_not_trigger_when_no_relevant_premove(board):
+    # Click an empty square that isn't a from_sq of any premove → should cancel queue (or noop).
+    board.backend.turn = PieceColor.BLACK
+    board.handle_click(Square(6, 4))
+    board.handle_click(Square(4, 4))  # premove e2-e4
+    # Click e3 (NOT a from_sq of any premove).
+    board.handle_click(Square(5, 4))
+    # Should cancel (no resolution found).
+    assert board.premoves == []
+    assert board.selected_square is None
+
+
+def test_chain_via_resolution_then_fire(board):
+    # Full path: queue, chain via original-square click, then fire both.
+    board.backend.turn = PieceColor.BLACK
+    board.handle_click(Square(6, 4))
+    board.handle_click(Square(4, 4))
+    board.handle_click(Square(6, 4))  # click original to chain
+    board.handle_click(Square(3, 4))
+    assert len(board.premoves) == 2
+
+    # Fire first.
+    board.backend.turn = PieceColor.WHITE
+    fired = board.try_apply_next_premove()
+    assert fired is True
+    fire_animation(board)
+    assert len(board.premoves) == 1
+
+    # Fire second.
+    board.backend.turn = PieceColor.WHITE
+    fired = board.try_apply_next_premove()
+    assert fired is True
+    fire_animation(board)
+    assert len(board.premoves) == 0
+    assert len(board.backend.move_history) == 2
+
+
+def test_scholars_mate_via_premove_chain(board):
+    # 1. e4 e5 2. Bc4 Nc6 3. Qh5 Nf6?? 4. Qxf7#
+    # White plays move 1 normally, then queues [Bc4, Qh5, Qxf7] during black's turn,
+    # then plays out — each premove fires on white's successive turns and Qxf7 mates.
+
+    # 1. e4
+    board.handle_click(Square(6, 4))
+    board.handle_click(Square(4, 4))
+    fire_animation(board)
+    # ... e5
+    board.handle_click(Square(1, 4))
+    board.handle_click(Square(3, 4))
+    fire_animation(board)
+
+    # Queue [Bc4, Qh5, Qxf7] (force black turn so white's piece-clicks become premoves).
+    board.backend.turn = PieceColor.BLACK
+    board.handle_click(Square(7, 5))   # Bf1
+    board.handle_click(Square(4, 2))   # Bc4 - premove 1
+    board.handle_click(Square(7, 3))   # Qd1
+    board.handle_click(Square(3, 7))   # Qh5 - premove 2
+    board.handle_click(Square(7, 3))   # Qd1 (original) → resolves to Qh5
+    board.handle_click(Square(1, 5))   # Qxf7 - premove 3
+    assert len(board.premoves) == 3
+
+    # Fire Bc4 (white's turn).
+    board.backend.turn = PieceColor.WHITE
+    assert board.try_apply_next_premove() is True
+    fire_animation(board)
+    # 2... Nc6
+    board.handle_click(Square(0, 1))
+    board.handle_click(Square(2, 2))
+    fire_animation(board)
+    # Fire Qh5
+    assert board.try_apply_next_premove() is True
+    fire_animation(board)
+    # 3... Nf6 (the blunder)
+    board.handle_click(Square(0, 6))
+    board.handle_click(Square(2, 5))
+    fire_animation(board)
+    # Fire Qxf7 — checkmate.
+    assert board.try_apply_next_premove() is True
+    fire_animation(board)
+
+    assert board.backend.game_result() == "white_wins"
+    assert board.premoves == []
+
+
+def test_scholars_mate_chain_aborts_when_queen_captured_mid_chain(board):
+    # White queues [Qh5, Qxf7]. Black plays Nf6 (attacks h5). Qh5 fires anyway —
+    # engine accepts the move (it's a blunder, not illegal). Black then captures the
+    # queen with Nxh5. White's turn → Qxf7 has no queen on h5 → illegal → queue wiped.
+
+    board.handle_click(Square(6, 4))
+    board.handle_click(Square(4, 4))   # 1. e4
+    fire_animation(board)
+    board.handle_click(Square(1, 4))
+    board.handle_click(Square(3, 4))   # 1... e5
+    fire_animation(board)
+
+    # Queue [Qh5, Qxf7] during black's turn (manually flipped).
+    board.backend.turn = PieceColor.BLACK
+    board.handle_click(Square(7, 3))
+    board.handle_click(Square(3, 7))   # premove Qd1-h5
+    board.handle_click(Square(7, 3))   # original d1 → resolves to h5 via chain
+    board.handle_click(Square(1, 5))   # premove Qh5xf7
+    assert len(board.premoves) == 2
+
+    # 2... Nf6 (black knight attacks h5).
+    board.backend.turn = PieceColor.BLACK
+    board.handle_click(Square(0, 6))
+    board.handle_click(Square(2, 5))
+    fire_animation(board)
+
+    # White's turn → Qh5 fires (legal, just a blunder).
+    assert board.try_apply_next_premove() is True
+    fire_animation(board)
+    assert board.backend.state[3][7] is not None
+    assert board.backend.state[3][7].type == PieceType.QUEEN
+
+    # 3... Nxh5 (black captures queen).
+    board.handle_click(Square(2, 5))
+    board.handle_click(Square(3, 7))
+    fire_animation(board)
+    assert board.backend.state[3][7].type == PieceType.KNIGHT
+
+    # White's turn → Qxf7 fails (no queen on h5) → queue cleared entirely.
+    fired = board.try_apply_next_premove()
+    assert fired is False
+    assert board.premoves == []
+    assert board.premove_color is None
+    # White's queen is gone, no third move was played.
+    history_len_before = len(board.backend.move_history)
+    fired_again = board.try_apply_next_premove()
+    assert fired_again is False
+    assert len(board.backend.move_history) == history_len_before
+
+
 def test_premove_immediately_after_other_premove_fires(board):
     # Two queued premoves. Both should fire across two turn cycles.
     board.backend.turn = PieceColor.BLACK

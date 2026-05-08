@@ -287,6 +287,15 @@ class Board:
 
         if self.selected_square is None:
             if piece_at_clicked is None:
+                resolved = self._resolve_chain_tip(square)
+                if resolved != square:
+                    resolved_piece = grid[resolved.row][resolved.col]
+                    if resolved_piece is not None:
+                        if resolved_piece.color == current_turn:
+                            self._try_select(resolved)
+                        else:
+                            self._try_select_for_premove(resolved, resolved_piece)
+                        return
                 if self.premoves:
                     self._clear_premoves()
                 return
@@ -318,6 +327,21 @@ class Board:
         if not self.premoves:
             return self.backend.state
         return speculative_board(self.backend, self.premoves)
+
+    def _resolve_chain_tip(self, square):
+        sq = square
+        visited = {sq}
+        for _ in range(len(self.premoves)):
+            next_sq = None
+            for pm in self.premoves:
+                if pm.from_sq == sq:
+                    next_sq = pm.to_sq
+                    break
+            if next_sq is None or next_sq in visited:
+                break
+            sq = next_sq
+            visited.add(sq)
+        return sq
 
     def _try_select_for_premove(self, square, piece):
         if self.premove_color is not None and self.premove_color != piece.color:
