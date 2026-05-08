@@ -7,8 +7,8 @@ from frontend.widgets import _draw_button, draw_selector
 
 MODE_OPTIONS = [
     ("Single-screen", "single_screen"),
-    ("Bot — TBD", "bot"),
-    ("Online — TBD", "online"),
+    ("Bot", "bot"),
+    ("Online", "online"),
 ]
 
 TIME_OPTIONS = [
@@ -76,7 +76,7 @@ class StartMenu:
             "Arial", max(int(rect.height / 28), 10), bold=True,
         )
         self.button_font = pg.font.SysFont(
-            "Arial", max(int(rect.height / 26), 11), bold=True,
+            "Arial", max(int(rect.height / 38), 10), bold=True,
         )
         self.start_font = pg.font.SysFont(
             "Arial", max(int(rect.height / 18), 12), bold=True,
