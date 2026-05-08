@@ -133,7 +133,7 @@ class StartMenu:
         input_rect = pg.Rect(content_x, cursor, content_w, input_h)
         self.text_input.set_rect(input_rect)
         self.text_input.draw()
-        cursor = input_rect.bottom + self.section_gap
+        cursor = input_rect.bottom + self.section_gap * 2
 
         self._mode_rects = self._draw_section(
             "Game mode", cursor, content_x, content_w, label_h, selector_h,
