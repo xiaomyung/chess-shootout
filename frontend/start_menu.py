@@ -1,6 +1,7 @@
 import pygame as pg
 
 from backend.match import SINGLE_SCREEN, BOT, ONLINE
+from frontend import env
 from frontend.colors import Colors
 from frontend.text_input import TextInput
 from frontend.widgets import draw_button, draw_selector
@@ -50,8 +51,10 @@ class StartMenu:
         self.title = "Chess"
 
         self.text_input = TextInput(window)
+        self.text_input.text = env.get_nickname()
 
-        self.selected_mode = SINGLE_SCREEN
+        last_mode = env.get_last_mode()
+        self.selected_mode = last_mode if last_mode in (SINGLE_SCREEN, BOT, ONLINE) else SINGLE_SCREEN
         self.selected_time_minutes = 10
         self.selected_increment_seconds = 5
         self.selected_side = "white"

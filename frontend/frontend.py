@@ -6,6 +6,7 @@ from datetime import datetime
 import pygame as pg
 
 from backend.match import Match, SINGLE_SCREEN, BOT, ONLINE
+from frontend import env
 from frontend.audio_panel import AudioPanel
 from frontend.board import Board
 from frontend.capture_summary import captured_by, material_advantage
@@ -161,6 +162,7 @@ class Frontend:
         self.start_menu.hide()
 
     def _on_start_game(self, config):
+        env.set_last_mode(config["mode"])
         if config["mode"] != SINGLE_SCREEN:
             return
 
