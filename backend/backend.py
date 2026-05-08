@@ -1,7 +1,9 @@
+import time
 from collections import Counter
 from itertools import product
 
 from pieces.pieces import PieceType, PieceColor, Piece, BACK_RANK
+from backend.clock import Clock
 from backend.utils import Move, MoveResult, Square, HistoryEntry
 
 
@@ -49,6 +51,7 @@ class Backend:
         self.castling_rights = dict(DEFAULT_CASTLING_RIGHTS)
         self.halfmove_clock = 0
         self.position_counts = Counter()
+        self.clock = None
 
     def new_game(self):
         self.state = [[None] * self.SIZE for _ in range(self.SIZE)]
@@ -58,6 +61,7 @@ class Backend:
         self.castling_rights = dict(DEFAULT_CASTLING_RIGHTS)
         self.halfmove_clock = 0
         self.position_counts = Counter()
+        self.clock = None
 
         for col, piece_type in enumerate(BACK_RANK):
             self.state[0][col] = Piece(piece_type, PieceColor.BLACK)
@@ -66,6 +70,17 @@ class Backend:
             self.state[7][col] = Piece(piece_type, PieceColor.WHITE)
 
         self.position_counts[self._position_key()] = 1
+
+    def setup_clock(self, initial_seconds, increment_seconds, now_provider=time.monotonic):
+        self.clock = Clock.create(initial_seconds, increment_seconds, now_provider=now_provider)
+        self.clock.start()
+
+    def tick_clock(self):
+        if self.clock is None or self.clock.flagged is not None:
+            return
+        if self._has_no_legal_moves(self.turn):
+            return
+        self.clock.tick()
 
     def piece_at(self, square):
         return self.state[square.row][square.col]
@@ -91,6 +106,8 @@ class Backend:
             if self.is_in_check(self.turn):
                 return "black_wins" if self.turn == PieceColor.WHITE else "white_wins"
             return "draw_stalemate"
+        if self.clock is not None and self.clock.flagged is not None:
+            return "black_wins_on_time" if self.clock.flagged == PieceColor.WHITE else "white_wins_on_time"
         if self._has_insufficient_material():
             return "draw_insufficient_material"
         if self.position_counts and max(self.position_counts.values()) >= 3:
@@ -150,6 +167,8 @@ class Backend:
             self.castling_rights = dict(zip(CASTLING_KEYS, entry.prev_castling_rights))
             self.en_passant_target = entry.prev_en_passant_target
             self.halfmove_clock = entry.prev_halfmove_clock
+            if self.clock is not None and entry.prev_clock_snapshot is not None:
+                self.clock.restore(entry.prev_clock_snapshot)
             self._switch_turn()
 
         self.state[m.from_sq.row][m.from_sq.col] = m.piece
@@ -257,6 +276,7 @@ class Backend:
         entry.prev_castling_rights = tuple(self.castling_rights[k] for k in CASTLING_KEYS)
         entry.prev_en_passant_target = self.en_passant_target
         entry.prev_halfmove_clock = self.halfmove_clock
+        entry.prev_clock_snapshot = self.clock.snapshot() if self.clock is not None else None
 
         m = entry.move
 
@@ -286,6 +306,7 @@ class Backend:
         else:
             self.halfmove_clock += 1
 
+        mover = m.piece.color
         self._switch_turn()
         key = self._position_key()
         self.position_counts[key] += 1
@@ -298,6 +319,12 @@ class Backend:
             entry.san += "#"
         elif entry.gives_check:
             entry.san += "+"
+
+        if self.clock is not None:
+            if entry.gives_checkmate or no_moves:
+                self.clock.stop()
+            else:
+                self.clock.on_move_made(mover)
 
     def _build_move_result(self, captured):
         result = self.game_result()

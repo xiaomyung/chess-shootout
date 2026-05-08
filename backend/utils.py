@@ -41,3 +41,4 @@ class HistoryEntry:
     gives_check: bool = False
     gives_checkmate: bool = False
     san: str = ""
+    prev_clock_snapshot: Optional[tuple] = None
