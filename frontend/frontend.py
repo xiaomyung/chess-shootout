@@ -169,6 +169,7 @@ class Frontend:
             ))
 
     def _on_undo(self):
+        self.board.selected_square = None
         if self.manual_result is not None:
             self.manual_result = None
             return

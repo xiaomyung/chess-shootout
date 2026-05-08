@@ -249,6 +249,35 @@ def test_undo_with_empty_history_is_a_noop():
     assert not app.board.is_animating()
 
 
+def test_undo_clears_active_selection():
+    from frontend.frontend import Frontend
+    app = Frontend(800, 600)
+    app._on_start_game(DEFAULT_CONFIG)
+    app.board.handle_click(Square(6, 4))
+    assert app.board.selected_square == Square(6, 4)
+    app._on_undo()
+    assert app.board.selected_square is None
+
+
+def test_undo_clears_selection_even_when_history_empty():
+    from frontend.frontend import Frontend
+    app = Frontend(800, 600)
+    app._on_start_game(DEFAULT_CONFIG)
+    app.board.handle_click(Square(6, 4))
+    app._on_undo()
+    assert app.board.selected_square is None
+
+
+def test_undo_clears_selection_even_when_manual_result_set():
+    from frontend.frontend import Frontend
+    app = Frontend(800, 600)
+    app._on_start_game(DEFAULT_CONFIG)
+    app.manual_result = "white_wins"
+    app.board.selected_square = Square(6, 4)
+    app._on_undo()
+    assert app.board.selected_square is None
+
+
 def test_last_animation_completed_at_ms_initial_zero(board):
     assert board.last_animation_completed_at_ms == 0
 
