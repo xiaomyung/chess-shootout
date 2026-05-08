@@ -25,10 +25,10 @@ SCROLL_THUMB_MIN_HEIGHT = 18
 
 class RightMenu:
 
-    def __init__(self, window, backend, callbacks, board=None,
+    def __init__(self, window, match, callbacks, board=None,
                  buttons_provider=None, audio_panel=None):
         self.window = window
-        self.backend = backend
+        self.match = match
         self.callbacks = callbacks
         self.board = board
         self.buttons_provider = buttons_provider or (lambda: BUTTONS)
@@ -54,6 +54,11 @@ class RightMenu:
         self._max_lines = 0
         self._last_scroll_activity_ms = 0
         self._move_cell_hits = []
+
+    @property
+    def backend(self):
+        inner = getattr(self.match, "backend", None)
+        return inner if inner is not None else self.match
 
     def set_rect(self, rect):
         self.font = pg.font.SysFont(
@@ -134,7 +139,7 @@ class RightMenu:
         return True
 
     def _draw_moves(self, rect):
-        history = self.backend.move_history
+        history = self.match.move_history
         line_h = self.font.get_linesize()
         self._max_lines = max(int((rect.height - 2 * self.padding) // line_h), 0)
 

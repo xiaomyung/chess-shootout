@@ -19,9 +19,9 @@ class Board:
     TEXT_PADDING_FRACTION = 0.006
     SIZE = 8
 
-    def __init__(self, window, backend, move_landed_callback=None):
+    def __init__(self, window, match, move_landed_callback=None):
         self.window = window
-        self.backend = backend
+        self.match = match
         self.move_landed_callback = move_landed_callback
         self.font = pg.font.SysFont("Arial", 18, bold=True)
         self.board_guides_font_factor = 50
@@ -56,6 +56,11 @@ class Board:
         self._target_ply = None
         self.read_only = False
 
+    @property
+    def backend(self):
+        inner = getattr(self.match, "backend", None)
+        return inner if inner is not None else self.match
+
     def _render_text(self):
         self.file_labels_rendered = [
             self.font.render(self.file_labels[i], True, Colors.white)
@@ -88,7 +93,7 @@ class Board:
             return
 
         sq = self.pending_promotion_square
-        color = self.backend.piece_at(sq).color
+        color = self.match.piece_at(sq).color
 
         options = [PieceType.QUEEN, PieceType.ROOK, PieceType.BISHOP, PieceType.KNIGHT]
 
@@ -162,9 +167,9 @@ class Board:
         self._draw_promotion_picker()
 
     def _draw_last_move_highlight(self):
-        if not self.backend.move_history:
+        if not self.match.move_history:
             return
-        move = self.backend.move_history[-1].move
+        move = self.match.move_history[-1].move
         for sq in (move.from_sq, move.to_sq):
             rect = self._cell_rect(sq.row, sq.col)
             overlay = pg.Surface((rect.width, rect.height), pg.SRCALPHA)
@@ -174,7 +179,7 @@ class Board:
     def _draw_dragged_piece(self):
         if self.dragging_from is None or self._drag_cursor is None:
             return
-        piece = self.backend.piece_at(self.dragging_from)
+        piece = self.match.piece_at(self.dragging_from)
         if piece is None:
             return
         surface = self.piece_images_scaled[(piece.type, piece.color)]
@@ -301,16 +306,16 @@ class Board:
 
     def _draw_check_highlight(self):
         for row, col in product(range(self.SIZE), repeat=2):
-            piece = self.backend.piece_at(Square(row, col))
+            piece = self.match.piece_at(Square(row, col))
             if piece is None or piece.type != PieceType.KING:
                 continue
-            if self.backend.is_in_check(piece.color):
+            if self.match.is_in_check(piece.color):
                 rect = self._cell_rect(row, col)
                 pg.draw.rect(self.window, Colors.selection_red, rect)
 
     def draw_pieces(self):
         if self.review_ply is not None:
-            grid = self.backend.position_at(self.review_ply)
+            grid = self.match.position_at(self.review_ply)
             hidden = {a.from_sq for a in self.animations}
             for row, col in product(range(self.SIZE), repeat=2):
                 sq = Square(row, col)
@@ -331,7 +336,7 @@ class Board:
             sq = Square(row, col)
             if sq in hidden:
                 continue
-            piece = self.backend.piece_at(sq)
+            piece = self.match.piece_at(sq)
             if piece is None:
                 continue
 
@@ -381,7 +386,7 @@ class Board:
     def jump_to_review_ply(self, ply):
         self.cancel_animations()
         self._target_ply = None
-        history_len = len(self.backend.move_history)
+        history_len = len(self.match.move_history)
         if ply is None or ply >= history_len:
             self.review_ply = None
         else:
@@ -391,7 +396,7 @@ class Board:
         if self._target_ply is None:
             self.cancel_animations()
             return
-        history_len = len(self.backend.move_history)
+        history_len = len(self.match.move_history)
         if self._target_ply >= history_len:
             self.review_ply = None
         else:
@@ -401,7 +406,7 @@ class Board:
 
     def animate_review_ply(self, ply):
         self._snap_in_flight_review_animation()
-        history_len = len(self.backend.move_history)
+        history_len = len(self.match.move_history)
         if ply is None or ply > history_len:
             self.review_ply = None
             self._target_ply = None
@@ -410,7 +415,7 @@ class Board:
             self.review_ply = 0
             self._target_ply = None
             return
-        entry = self.backend.move_history[ply - 1]
+        entry = self.match.move_history[ply - 1]
         move = entry.move
         self.review_ply = ply - 1
         self._target_ply = ply
@@ -439,14 +444,14 @@ class Board:
         if self.selected_square is None:
             return
 
-        piece = self.backend.piece_at(self.selected_square)
-        if piece is None or piece.color != self.backend.current_turn():
+        piece = self.match.piece_at(self.selected_square)
+        if piece is None or piece.color != self.match.current_turn():
             return
 
-        legal_moves = self.backend.legal_moves_from(self.selected_square)
+        legal_moves = self.match.legal_moves_from(self.selected_square)
         for target in legal_moves:
             rect = self._cell_rect(target.row, target.col)
-            target_piece = self.backend.piece_at(target)
+            target_piece = self.match.piece_at(target)
 
             if target_piece is None:
                 self._draw_dot(rect)
@@ -541,8 +546,8 @@ class Board:
 
         grid = self._effective_grid()
         piece_at_clicked = grid[square.row][square.col]
-        live_at_clicked = self.backend.state[square.row][square.col]
-        current_turn = self.backend.current_turn()
+        live_at_clicked = self.match.state[square.row][square.col]
+        current_turn = self.match.current_turn()
 
         if self.selected_square is None:
             if (live_at_clicked is not None
@@ -571,10 +576,10 @@ class Board:
 
         from_sq = self.selected_square
         self.selected_square = None
-        live_from_piece = self.backend.state[from_sq.row][from_sq.col]
+        live_from_piece = self.match.state[from_sq.row][from_sq.col]
         if (live_from_piece is not None
                 and live_from_piece.color == current_turn):
-            result = self.backend.try_move(from_sq, square)
+            result = self.match.try_move(from_sq, square)
             if not result.legal:
                 return
             self._start_move_animation(from_sq, square, result.promotion_required)
@@ -587,8 +592,8 @@ class Board:
 
     def _effective_grid(self):
         if not self.premoves:
-            return self.backend.state
-        return speculative_board(self.backend, self.premoves)
+            return self.match.state
+        return speculative_board(self.match, self.premoves)
 
     def _resolve_chain_tip(self, square):
         sq = square
@@ -606,6 +611,9 @@ class Board:
         return sq
 
     def _try_select_for_premove(self, square, piece):
+        local_color = getattr(self.match, "local_color", None)
+        if local_color is not None and piece.color != local_color:
+            return
         if self.premove_color is not None and self.premove_color != piece.color:
             self._clear_premoves()
         self.selected_square = square
@@ -624,12 +632,12 @@ class Board:
 
     def try_apply_next_premove(self):
         if (not self.premoves
-                or self.premove_color != self.backend.current_turn()
+                or self.premove_color != self.match.current_turn()
                 or self.pending_promotion_square is not None
                 or self.is_animating()):
             return False
         pm = self.premoves[0]
-        result = self.backend.try_move(pm.from_sq, pm.to_sq)
+        result = self.match.try_move(pm.from_sq, pm.to_sq)
         if not result.legal:
             self._clear_premoves()
             return False
@@ -644,7 +652,7 @@ class Board:
         self._target_ply = None
         self.cancel_animations()
         self.clear_annotations()
-        entry = self.backend.move_history[-1]
+        entry = self.match.move_history[-1]
         moving_piece = entry.move.piece
 
         if promotion_required:
@@ -667,11 +675,11 @@ class Board:
             else:
                 rook_from = Square(home_row, 0)
                 rook_to = Square(home_row, 3)
-            rook_piece = self.backend.piece_at(rook_to)
+            rook_piece = self.match.piece_at(rook_to)
             self.start_animation(rook_from, rook_to, rook_piece)
 
     def start_undo_animation(self, move):
-        moving_piece = self.backend.piece_at(move.from_sq)
+        moving_piece = self.match.piece_at(move.from_sq)
         if moving_piece is None:
             return
         self.start_animation(move.to_sq, move.from_sq, moving_piece)
@@ -681,23 +689,23 @@ class Board:
                 rook_post, rook_home = Square(home_row, 5), Square(home_row, 7)
             else:
                 rook_post, rook_home = Square(home_row, 3), Square(home_row, 0)
-            rook_piece = self.backend.piece_at(rook_home)
+            rook_piece = self.match.piece_at(rook_home)
             self.start_animation(rook_post, rook_home, rook_piece)
 
     def _set_pending_promotion(self, sq):
         self.pending_promotion_square = sq
 
     def _fire_move_landed(self):
-        if self.move_landed_callback is None or not self.backend.move_history:
+        if self.move_landed_callback is None or not self.match.move_history:
             return
-        entry = self.backend.move_history[-1]
+        entry = self.match.move_history[-1]
         if entry.position_key_added is None:
             return
         self.move_landed_callback(entry)
 
     def _handle_promotion_click(self, clicked_sq):
         sq = self.pending_promotion_square
-        color = self.backend.piece_at(sq).color
+        color = self.match.piece_at(sq).color
         options = [PieceType.QUEEN, PieceType.ROOK, PieceType.BISHOP, PieceType.KNIGHT]
         direction = 1 if color == PieceColor.WHITE else -1
 
@@ -708,16 +716,18 @@ class Board:
             return
 
         chosen = options[offset]
-        self.backend.promote(sq, chosen)
+        self.match.promote(sq, chosen)
         self.pending_promotion_square = None
         self._fire_move_landed()
 
     def _try_select(self, square):
-        piece = self.backend.piece_at(square)
+        piece = self.match.piece_at(square)
         if piece is None:
             return
-
-        if piece.color != self.backend.current_turn():
+        if piece.color != self.match.current_turn():
+            return
+        local_color = getattr(self.match, "local_color", None)
+        if local_color is not None and piece.color != local_color:
             return
         self.selected_square = square
 

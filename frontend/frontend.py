@@ -5,7 +5,7 @@ from datetime import datetime
 
 import pygame as pg
 
-from backend.backend import Backend
+from backend.match import Match
 from frontend.audio_panel import AudioPanel
 from frontend.board import Board
 from frontend.capture_summary import captured_by, material_advantage
@@ -70,9 +70,9 @@ class Frontend:
         self._time_control = None
         self.pgn_review = False
 
-        self.backend = Backend()
+        self.match = Match()
         self.sound_manager = SoundManager(SOUNDS_DIR, enabled=pg.mixer.get_init() is not None)
-        self.board = Board(self.window, self.backend, move_landed_callback=self._on_move_landed)
+        self.board = Board(self.window, self.match, move_landed_callback=self._on_move_landed)
         self.result_menu = ResultMenu(self.window, {
             "new_game": self._on_new_game,
             "save_pgn": self._on_save_pgn,
@@ -83,7 +83,7 @@ class Frontend:
             "load_pgn": self._on_load_last_game,
         })
         self.audio_panel = AudioPanel(self.window, self.sound_manager)
-        self.right_menu = RightMenu(self.window, self.backend, {
+        self.right_menu = RightMenu(self.window, self.match, {
             "undo": self._on_undo,
             "resign": self._on_resign,
             "draw": self._on_draw,
@@ -96,20 +96,24 @@ class Frontend:
         self.player_strip_top = PlayerStrip(self.window)
         self.player_strip_bottom = PlayerStrip(self.window)
 
-        self.backend.new_game()
+        self.match.new_game()
         self.board.load_assets()
         self._compute_layout()
         self._refresh_load_pgn_availability()
 
         pg.display.set_caption("Chess")
 
+    @property
+    def backend(self):
+        return self.match.backend
+
     def current_result(self):
-        return self.manual_result or self.backend.game_result()
+        return self.manual_result or self.match.game_result()
 
     def result_text(self):
         if self.manual_result is not None:
             return MANUAL_RESULT_TEXT.get(self.manual_result)
-        engine = self.backend.game_result()
+        engine = self.match.game_result()
         if engine is None:
             return None
         return ENGINE_RESULT_TEXT.get(engine)
@@ -147,10 +151,10 @@ class Frontend:
         self.mode = "single_screen"
         self._time_control = None
         self._reset_to_new_game()
-        _, ok = load_pgn_into_backend(self.backend, text)
+        _, ok = load_pgn_into_backend(self.match, text)
         if not ok:
             return
-        if self.backend.move_history:
+        if self.match.move_history:
             self.board.review_ply = 0
         self.pgn_review = True
         self.board.read_only = True
@@ -195,10 +199,10 @@ class Frontend:
         self.board.read_only = False
         self.sound_manager.stop_all()
         self.manual_result = None
-        self.backend.new_game()
+        self.match.new_game()
         if self._time_control is not None:
             initial, incr = self._time_control
-            self.backend.setup_clock(initial, incr)
+            self.match.setup_clock(initial, incr)
         self.board.flipped = False
         self.board.selected_square = None
         self.board.pending_promotion_square = None
@@ -222,7 +226,7 @@ class Frontend:
         termination = "Time forfeit" if result in TIMEOUT_RESULTS else None
         with open(path, "w") as f:
             f.write(generate_pgn(
-                self.backend.move_history, result,
+                self.match.move_history, result,
                 white_name=self.white_name, black_name=self.black_name,
                 time_control=time_control, termination=termination,
             ))
@@ -238,11 +242,11 @@ class Frontend:
             self.manual_result = None
             return
         self.board.cancel_animations()
-        if not self.backend.move_history:
+        if not self.match.move_history:
             return
         self.sound_manager.play_undo()
-        move = self.backend.move_history[-1].move
-        self.backend.undo()
+        move = self.match.move_history[-1].move
+        self.match.undo()
         self.board.start_undo_animation(move)
 
     def _on_resign(self):
@@ -255,7 +259,7 @@ class Frontend:
     def _perform_resign(self):
         if self.current_result() is not None:
             return
-        loser = self.backend.current_turn()
+        loser = self.match.current_turn()
         self._auto_complete_pending_promotion()
         self.manual_result = "black_wins" if loser == PieceColor.WHITE else "white_wins"
         self.board._clear_premoves()
@@ -279,7 +283,7 @@ class Frontend:
     def _auto_complete_pending_promotion(self):
         if self.board.pending_promotion_square is None:
             return
-        self.backend.promote(self.board.pending_promotion_square, PieceType.QUEEN)
+        self.match.promote(self.board.pending_promotion_square, PieceType.QUEEN)
         self.board.pending_promotion_square = None
 
     def _on_flip(self):
@@ -309,7 +313,7 @@ class Frontend:
 
     def draw_frame(self):
         if self.mode != "menu" and self.current_result() is None:
-            self.backend.tick_clock()
+            self.match.tick_clock()
 
         self._update_heartbeat()
 
@@ -321,7 +325,7 @@ class Frontend:
         if (self.mode == "single_screen"
                 and self.current_result() is None
                 and post_animation_settled):
-            current = self.backend.current_turn()
+            current = self.match.current_turn()
             if current != self._last_turn_for_flip:
                 self.board.flipped = (current == PieceColor.BLACK)
                 self._last_turn_for_flip = current
@@ -346,28 +350,28 @@ class Frontend:
     def _update_player_strips(self):
         top_color = PieceColor.WHITE if self.board.flipped else PieceColor.BLACK
         bottom_color = PieceColor.BLACK if self.board.flipped else PieceColor.WHITE
-        turn = self.backend.current_turn()
+        turn = self.match.current_turn()
         over = self.current_result() is not None
         self.player_strip_top.set_state(*self._strip_state(top_color, turn, over))
         self.player_strip_bottom.set_state(*self._strip_state(bottom_color, turn, over))
 
     def _update_heartbeat(self):
-        clock = self.backend.clock
+        clock = self.match.clock
         paused = (self.mode == "menu"
                   or self.current_result() is not None
                   or clock is None)
         if paused or clock.initial_seconds <= 0:
             fraction = None
         else:
-            fraction = clock.remaining(self.backend.current_turn()) / clock.initial_seconds
+            fraction = clock.remaining(self.match.current_turn()) / clock.initial_seconds
         self.sound_manager.update_heartbeat(fraction, paused)
 
     def _strip_state(self, color, turn, over):
         name = self.white_name if color == PieceColor.WHITE else self.black_name
-        seconds = (self.backend.clock.remaining(color)
-                   if self.backend.clock is not None else None)
+        seconds = (self.match.clock.remaining(color)
+                   if self.match.clock is not None else None)
         active = (color == turn) and not over
-        history = self.backend.move_history
+        history = self.match.move_history
         if self.board.review_ply is not None:
             history = history[:self.board.review_ply]
         captured = captured_by(history, color)
@@ -518,7 +522,7 @@ class Frontend:
             self._step_review(1)
             return True
         if event.key == pg.K_HOME:
-            if self.backend.move_history:
+            if self.match.move_history:
                 self.board.review_ply = 0
             return True
         if event.key == pg.K_END:
@@ -527,7 +531,7 @@ class Frontend:
         return False
 
     def _step_review(self, delta):
-        history_len = len(self.backend.move_history)
+        history_len = len(self.match.move_history)
         if history_len == 0:
             return
         if self.board._target_ply is not None:
