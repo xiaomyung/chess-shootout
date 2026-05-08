@@ -3,6 +3,7 @@ from itertools import product
 import pygame as pg
 
 from backend.utils import Square
+from frontend.animation import PieceAnimation
 from frontend.colors import Colors
 from pieces.pieces import PieceType, PieceColor, Piece
 
@@ -33,6 +34,9 @@ class Board:
         self.selected_square = None
         self.pending_promotion_square = None
         self.flipped = False
+        self.animations = []
+        self.animation_duration_ms = 180
+        self.last_animation_completed_at_ms = 0
 
     def _render_text(self):
         self.file_labels_rendered = [
@@ -123,17 +127,61 @@ class Board:
         self._draw_selection_highlight()
         self._draw_move_indicators()
         self.draw_pieces()
+        self._draw_animations()
         self._draw_promotion_picker()
 
     def draw_pieces(self):
+        hidden = {a.to_sq for a in self.animations}
         for row, col in product(range(self.SIZE), repeat=2):
-            piece = self.backend.piece_at(Square(row, col))
+            sq = Square(row, col)
+            if sq in hidden:
+                continue
+            piece = self.backend.piece_at(sq)
             if piece is None:
                 continue
 
             rect = self._cell_rect(row, col)
             surface = self.piece_images_scaled[(piece.type, piece.color)]
             self.window.blit(surface, rect.topleft)
+
+    def _draw_animations(self):
+        if not self.animations:
+            return
+        now = pg.time.get_ticks()
+        completed = []
+        for a in self.animations:
+            progress = a.progress(now)
+            fr = self._cell_rect(a.from_sq.row, a.from_sq.col)
+            to = self._cell_rect(a.to_sq.row, a.to_sq.col)
+            x = fr.x + (to.x - fr.x) * progress
+            y = fr.y + (to.y - fr.y) * progress
+            surface = self.piece_images_scaled[(a.piece.type, a.piece.color)]
+            self.window.blit(surface, (x, y))
+            if a.is_done(now):
+                completed.append(a)
+        for a in completed:
+            self.animations.remove(a)
+        if completed and not self.animations:
+            self.last_animation_completed_at_ms = now
+        for a in completed:
+            if a.on_complete is not None:
+                a.on_complete()
+
+    def is_animating(self):
+        return bool(self.animations)
+
+    def start_animation(self, from_sq, to_sq, piece, on_complete=None):
+        self.animations.append(PieceAnimation(
+            from_sq=from_sq,
+            to_sq=to_sq,
+            piece=piece,
+            start_ms=pg.time.get_ticks(),
+            duration_ms=self.animation_duration_ms,
+            on_complete=on_complete,
+        ))
+
+    def cancel_animations(self):
+        self.animations = []
 
     def _draw_move_indicators(self):
         if self.selected_square is None:
@@ -193,6 +241,9 @@ class Board:
         return Square(row, col)
 
     def handle_click(self, square):
+        if self.is_animating():
+            return
+
         if self.pending_promotion_square is not None:
             self._handle_promotion_click(square)
             return
@@ -202,11 +253,39 @@ class Board:
         elif square == self.selected_square:
             self.selected_square = None
         else:
-            result = self.backend.try_move(self.selected_square, square)
+            from_sq = self.selected_square
+            result = self.backend.try_move(from_sq, square)
             self.selected_square = None
 
-            if result.legal and result.promotion_required:
-                self.pending_promotion_square = square
+            if not result.legal:
+                return
+
+            self._start_move_animation(from_sq, square, result.promotion_required)
+
+    def _start_move_animation(self, from_sq, to_sq, promotion_required):
+        entry = self.backend.move_history[-1]
+        moving_piece = entry.move.piece
+
+        on_complete = None
+        if promotion_required:
+            promotion_sq = to_sq
+            on_complete = lambda: self._set_pending_promotion(promotion_sq)
+
+        self.start_animation(from_sq, to_sq, moving_piece, on_complete=on_complete)
+
+        if entry.move.is_castle:
+            home_row = from_sq.row
+            if to_sq.col == 6:
+                rook_from = Square(home_row, 7)
+                rook_to = Square(home_row, 5)
+            else:
+                rook_from = Square(home_row, 0)
+                rook_to = Square(home_row, 3)
+            rook_piece = self.backend.piece_at(rook_to)
+            self.start_animation(rook_from, rook_to, rook_piece)
+
+    def _set_pending_promotion(self, sq):
+        self.pending_promotion_square = sq
 
     def _handle_promotion_click(self, clicked_sq):
         sq = self.pending_promotion_square

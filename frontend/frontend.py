@@ -28,6 +28,8 @@ ENGINE_RESULT_TEXT = {
     "draw_insufficient_material": ("Draw", "by insufficient material"),
 }
 
+AUTO_FLIP_DELAY_MS = 200
+
 
 class Frontend:
 
@@ -104,6 +106,7 @@ class Frontend:
         self.board.flipped = False
         self.board.selected_square = None
         self.board.pending_promotion_square = None
+        self.board.cancel_animations()
         self._last_turn_for_flip = None
 
     def _on_save_pgn(self):
@@ -121,6 +124,7 @@ class Frontend:
         if self.manual_result is not None:
             self.manual_result = None
             return
+        self.board.cancel_animations()
         self.backend.undo()
 
     def _on_resign(self):
@@ -156,7 +160,11 @@ class Frontend:
         pg.quit()
 
     def draw_frame(self):
-        if self.mode == "single_screen" and self.current_result() is None:
+        now = pg.time.get_ticks()
+        if (self.mode == "single_screen"
+                and self.current_result() is None
+                and not self.board.is_animating()
+                and now - self.board.last_animation_completed_at_ms >= AUTO_FLIP_DELAY_MS):
             current = self.backend.current_turn()
             if current != self._last_turn_for_flip:
                 self.board.flipped = (current == PieceColor.BLACK)
