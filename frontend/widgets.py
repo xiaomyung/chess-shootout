@@ -3,13 +3,13 @@ import pygame as pg
 from frontend.colors import Colors
 
 
-def _draw_button(window, rect, label, font):
+def _draw_button(window, rect, label, font, force_pressed=False):
     mouse_pos = pg.mouse.get_pos()
     mouse_down = pg.mouse.get_pressed()[0]
     hovered = rect.collidepoint(mouse_pos)
     pressed = hovered and mouse_down
 
-    if pressed:
+    if force_pressed or pressed:
         bg = Colors.button_pressed
     elif hovered:
         bg = Colors.button_hover
@@ -45,5 +45,17 @@ def draw_button_column(window, rect, buttons, font, gap):
         y = rect.y + i * (btn_h + gap)
         br = pg.Rect(rect.x, y, rect.width, btn_h)
         _draw_button(window, br, label, font)
+        button_rects[key] = br
+    return button_rects
+
+
+def draw_selector(window, rect, options, font, gap, selected_key):
+    n = len(options)
+    btn_w = (rect.width - gap * (n - 1)) / n
+    button_rects = {}
+    for i, (label, key) in enumerate(options):
+        x = rect.x + i * (btn_w + gap)
+        br = pg.Rect(x, rect.y, btn_w, rect.height)
+        _draw_button(window, br, label, font, force_pressed=(key == selected_key))
         button_rects[key] = br
     return button_rects

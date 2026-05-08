@@ -1,0 +1,69 @@
+import pygame as pg
+
+from frontend.colors import Colors
+
+
+class TextInput:
+
+    def __init__(self, window, max_chars=20, placeholder="nickname"):
+        self.window = window
+        self.max_chars = max_chars
+        self.placeholder = placeholder
+        self.text = ""
+        self.focused = False
+        self.rect = pg.Rect(0, 0, 0, 0)
+        self.font_factor = 1.6
+        self.font = pg.font.SysFont("Arial", 16, bold=True)
+        self.padding = 8
+
+    def set_rect(self, rect):
+        self.rect = pg.Rect(rect)
+        size = max(int(rect.height / self.font_factor), 10)
+        self.font = pg.font.SysFont("Arial", size, bold=True)
+
+    def draw(self):
+        pg.draw.rect(self.window, Colors.light_grey_menu, self.rect, border_radius=4)
+        border_color = Colors.button_pressed if self.focused else Colors.button_border
+        border_width = 2 if self.focused else 1
+        pg.draw.rect(self.window, border_color, self.rect, border_width, border_radius=4)
+
+        if self.text:
+            display = self.text + ("|" if self.focused else "")
+            color = Colors.white
+        elif self.focused:
+            display = "|"
+            color = Colors.white
+        else:
+            display = self.placeholder
+            color = Colors.button_border
+
+        surface = self.font.render(display, True, color)
+        self.window.blit(
+            surface,
+            (self.rect.x + self.padding,
+             self.rect.centery - surface.get_height() / 2),
+        )
+
+    def handle_click(self, pos):
+        inside = self.rect.collidepoint(pos)
+        self.focused = inside
+        return inside
+
+    def handle_key(self, event):
+        if not self.focused:
+            return False
+        if event.key == pg.K_ESCAPE:
+            self.focused = False
+            return True
+        if event.key == pg.K_RETURN:
+            self.focused = False
+            return True
+        if event.key == pg.K_BACKSPACE:
+            if self.text:
+                self.text = self.text[:-1]
+            return True
+        char = getattr(event, "unicode", "")
+        if char and char.isprintable() and len(self.text) < self.max_chars:
+            self.text += char
+            return True
+        return False

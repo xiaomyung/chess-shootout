@@ -11,6 +11,15 @@ from frontend.animation import PieceAnimation
 from pieces.pieces import Piece, PieceColor, PieceType
 
 
+DEFAULT_CONFIG = {
+    "mode": "single_screen",
+    "nickname": "Tester",
+    "time_minutes": None,
+    "increment_seconds": 5,
+    "side": "white",
+}
+
+
 @pytest.fixture(scope="module", autouse=True)
 def _pygame_init():
     pg.init()
@@ -176,7 +185,7 @@ def test_promotion_picker_deferred_until_animation_completes(board):
 def test_undo_cancels_animations_via_frontend():
     from frontend.frontend import Frontend
     app = Frontend(800, 600)
-    app._on_single_screen()
+    app._on_start_game(DEFAULT_CONFIG)
     app.board.handle_click(Square(6, 4))
     app.board.handle_click(Square(4, 4))
     assert app.board.is_animating()
@@ -214,7 +223,7 @@ def test_last_animation_completed_at_ms_unchanged_on_cancel(board):
 def test_auto_flip_blocked_during_post_animation_delay():
     from frontend.frontend import AUTO_FLIP_DELAY_MS, Frontend
     app = Frontend(800, 600)
-    app._on_single_screen()
+    app._on_start_game(DEFAULT_CONFIG)
     app.board.handle_click(Square(6, 4))
     app.board.handle_click(Square(4, 4))
     app.board.animations[0].start_ms = pg.time.get_ticks() - 10_000

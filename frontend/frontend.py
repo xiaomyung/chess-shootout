@@ -1,4 +1,5 @@
 import os
+import random
 from datetime import datetime
 
 import pygame as pg
@@ -26,6 +27,14 @@ ENGINE_RESULT_TEXT = {
     "draw_repetition": ("Draw", "by threefold repetition"),
     "draw_fifty_move": ("Draw", "by fifty-move rule"),
     "draw_insufficient_material": ("Draw", "by insufficient material"),
+    "white_wins_on_time": ("White wins", "on time"),
+    "black_wins_on_time": ("Black wins", "on time"),
+}
+
+OPPONENT_NAME_FOR_MODE = {
+    "single_screen": "Player 2",
+    "bot": "AI Bot",
+    "online": "Opponent",
 }
 
 AUTO_FLIP_DELAY_MS = 200
@@ -44,6 +53,10 @@ class Frontend:
         self.mode = "menu"
         self.manual_result = None
         self._last_turn_for_flip = None
+        self.white_name = "Player"
+        self.black_name = "Player 2"
+        self._chosen_side = "white"
+        self._time_control = None
 
         self.backend = Backend()
         self.board = Board(self.window, self.backend)
@@ -53,9 +66,7 @@ class Frontend:
             "menu": self._on_back_to_menu,
         })
         self.start_menu = StartMenu(self.window, {
-            "single_screen": self._on_single_screen,
-            "bot": self._on_bot,
-            "online": self._on_online,
+            "start_game": self._on_start_game,
         })
         self.right_menu = RightMenu(self.window, self.backend, {
             "undo": self._on_undo,
@@ -89,20 +100,40 @@ class Frontend:
         self._reset_to_new_game()
         self.start_menu.show()
 
-    def _on_single_screen(self):
+    def _on_start_game(self, config):
+        if config["mode"] != "single_screen":
+            return
+
         self.mode = "single_screen"
+
+        side = config["side"]
+        if side == "random":
+            side = random.choice(["white", "black"])
+        self._chosen_side = side
+
+        nickname = (config.get("nickname") or "").strip() or "Player"
+        opponent_name = OPPONENT_NAME_FOR_MODE[config["mode"]]
+        if side == "white":
+            self.white_name, self.black_name = nickname, opponent_name
+        else:
+            self.white_name, self.black_name = opponent_name, nickname
+
+        if config["time_minutes"] is not None:
+            initial = config["time_minutes"] * 60
+            incr = config["increment_seconds"]
+            self._time_control = (initial, incr)
+        else:
+            self._time_control = None
+
         self._reset_to_new_game()
         self.start_menu.hide()
-
-    def _on_bot(self):
-        pass
-
-    def _on_online(self):
-        pass
 
     def _reset_to_new_game(self):
         self.manual_result = None
         self.backend.new_game()
+        if self._time_control is not None:
+            initial, incr = self._time_control
+            self.backend.setup_clock(initial, incr)
         self.board.flipped = False
         self.board.selected_square = None
         self.board.pending_promotion_square = None
@@ -202,8 +233,8 @@ class Frontend:
             result_height
         )
 
-        start_width = cell_size * 4
-        start_height = cell_size * 3.5
+        start_width = board_size_px * 0.7
+        start_height = board_size_px * 0.85
         start_rect = pg.Rect(
             board_x + board_size_px / 2 - start_width / 2,
             board_y + board_size_px / 2 - start_height / 2,
@@ -248,6 +279,8 @@ class Frontend:
                 self.running = False
 
             elif event.type == pg.KEYDOWN:
+                if self.start_menu.is_visible() and self.start_menu.handle_key(event):
+                    continue
                 if event.key == pg.K_ESCAPE:
                     self.running = False
 

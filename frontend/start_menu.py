@@ -1,13 +1,33 @@
 import pygame as pg
 
 from frontend.colors import Colors
-from frontend.widgets import draw_button_column
+from frontend.text_input import TextInput
+from frontend.widgets import _draw_button, draw_selector
 
 
-BUTTONS = [
+MODE_OPTIONS = [
     ("Single-screen", "single_screen"),
-    ("Play with bot", "bot"),
-    ("Play online", "online"),
+    ("Bot — TBD", "bot"),
+    ("Online — TBD", "online"),
+]
+
+TIME_OPTIONS = [
+    ("No clock", None),
+    ("5 min", 5),
+    ("10 min", 10),
+    ("15 min", 15),
+]
+
+INCREMENT_OPTIONS = [
+    ("+2", 2),
+    ("+5", 5),
+    ("+10", 10),
+]
+
+SIDE_OPTIONS = [
+    ("White", "white"),
+    ("Random", "random"),
+    ("Black", "black"),
 ]
 
 
@@ -21,14 +41,28 @@ class StartMenu:
         self.y = 0
         self.width = 0
         self.height = 0
-        self.padding = 12
-        self.button_gap = 8
+        self.padding = 14
+        self.row_gap = 6
+        self.section_gap = 10
         self.title = "Chess"
-        self.title_font_factor = 6
-        self.button_font_factor = 14
+
+        self.text_input = TextInput(window)
+
+        self.selected_mode = "single_screen"
+        self.selected_time_minutes = 10
+        self.selected_increment_seconds = 5
+        self.selected_side = "white"
+
         self.title_font = pg.font.SysFont("Arial", 28, bold=True)
+        self.label_font = pg.font.SysFont("Arial", 12, bold=True)
         self.button_font = pg.font.SysFont("Arial", 14, bold=True)
-        self.button_rects = {}
+        self.start_font = pg.font.SysFont("Arial", 18, bold=True)
+
+        self._mode_rects = {}
+        self._time_rects = {}
+        self._increment_rects = {}
+        self._side_rects = {}
+        self._start_rect = pg.Rect(0, 0, 0, 0)
 
     def set_rect(self, rect):
         self.x = rect.x
@@ -36,10 +70,16 @@ class StartMenu:
         self.width = rect.width
         self.height = rect.height
         self.title_font = pg.font.SysFont(
-            "Arial", max(int(rect.height / self.title_font_factor), 12), bold=True
+            "Arial", max(int(rect.height / 14), 14), bold=True,
+        )
+        self.label_font = pg.font.SysFont(
+            "Arial", max(int(rect.height / 28), 10), bold=True,
         )
         self.button_font = pg.font.SysFont(
-            "Arial", max(int(rect.height / self.button_font_factor), 10), bold=True
+            "Arial", max(int(rect.height / 26), 11), bold=True,
+        )
+        self.start_font = pg.font.SysFont(
+            "Arial", max(int(rect.height / 18), 12), bold=True,
         )
 
     def show(self):
@@ -51,38 +91,121 @@ class StartMenu:
     def is_visible(self):
         return self.visible
 
+    def build_config(self):
+        return {
+            "mode": self.selected_mode,
+            "nickname": self.text_input.text,
+            "time_minutes": self.selected_time_minutes,
+            "increment_seconds": self.selected_increment_seconds,
+            "side": self.selected_side,
+        }
+
     def draw(self):
         if not self.visible:
-            self.button_rects = {}
+            self._mode_rects = {}
+            self._time_rects = {}
+            self._increment_rects = {}
+            self._side_rects = {}
+            self._start_rect = pg.Rect(0, 0, 0, 0)
             return
 
-        rect = pg.Rect(self.x, self.y, self.width, self.height)
-        pg.draw.rect(self.window, Colors.light_grey_menu, rect, border_radius=8)
-        pg.draw.rect(self.window, Colors.button_border, rect, 2, border_radius=8)
+        outer = pg.Rect(self.x, self.y, self.width, self.height)
+        pg.draw.rect(self.window, Colors.light_grey_menu, outer, border_radius=8)
+        pg.draw.rect(self.window, Colors.button_border, outer, 2, border_radius=8)
 
         title_surf = self.title_font.render(self.title, True, Colors.white)
-        title_y = rect.y + self.padding * 2
+        title_y = outer.y + self.padding
         self.window.blit(
             title_surf,
-            (rect.centerx - title_surf.get_width() / 2, title_y),
+            (outer.centerx - title_surf.get_width() / 2, title_y),
         )
 
-        col_top = title_y + title_surf.get_height() + self.padding
-        col_rect = pg.Rect(
-            rect.x + self.padding,
-            col_top,
-            rect.width - 2 * self.padding,
-            rect.bottom - col_top - self.padding,
+        content_x = outer.x + self.padding
+        content_w = outer.width - 2 * self.padding
+
+        input_h = max(int(outer.height * 0.07), 24)
+        selector_h = max(int(outer.height * 0.075), 26)
+        start_h = max(int(outer.height * 0.09), 30)
+        label_h = max(int(outer.height * 0.04), 12)
+
+        cursor = title_y + title_surf.get_height() + self.section_gap
+
+        input_rect = pg.Rect(content_x, cursor, content_w, input_h)
+        self.text_input.set_rect(input_rect)
+        self.text_input.draw()
+        cursor = input_rect.bottom + self.section_gap
+
+        self._mode_rects = self._draw_section(
+            "Game mode", cursor, content_x, content_w, label_h, selector_h,
+            MODE_OPTIONS, self.selected_mode,
         )
-        self.button_rects = draw_button_column(
-            self.window, col_rect, BUTTONS, self.button_font, self.button_gap,
+        cursor += label_h + selector_h + self.section_gap
+
+        self._time_rects = self._draw_section(
+            "Time", cursor, content_x, content_w, label_h, selector_h,
+            TIME_OPTIONS, self.selected_time_minutes,
+        )
+        cursor += label_h + selector_h + self.section_gap
+
+        self._increment_rects = self._draw_section(
+            "Increment (s)", cursor, content_x, content_w, label_h, selector_h,
+            INCREMENT_OPTIONS, self.selected_increment_seconds,
+        )
+        cursor += label_h + selector_h + self.section_gap
+
+        self._side_rects = self._draw_section(
+            "Side", cursor, content_x, content_w, label_h, selector_h,
+            SIDE_OPTIONS, self.selected_side,
+        )
+        cursor += label_h + selector_h + self.section_gap
+
+        start_rect = pg.Rect(content_x, outer.bottom - self.padding - start_h,
+                             content_w, start_h)
+        self._start_rect = start_rect
+        _draw_button(self.window, start_rect, "Start Game", self.start_font,
+                     force_pressed=False)
+
+    def _draw_section(self, label, top, content_x, content_w, label_h,
+                      selector_h, options, selected_key):
+        label_surf = self.label_font.render(label, True, Colors.white)
+        self.window.blit(label_surf, (content_x, top))
+        selector_rect = pg.Rect(content_x, top + label_h, content_w, selector_h)
+        return draw_selector(
+            self.window, selector_rect, options, self.button_font,
+            gap=self.row_gap, selected_key=selected_key,
         )
 
     def handle_click(self, pos):
         if not self.visible:
             return False
-        for key, br in self.button_rects.items():
+
+        if self.text_input.rect.collidepoint(pos):
+            self.text_input.handle_click(pos)
+            return True
+        self.text_input.handle_click(pos)
+
+        for key, br in self._mode_rects.items():
             if br.collidepoint(pos):
-                self.callbacks[key]()
+                self.selected_mode = key
                 return True
+        for key, br in self._time_rects.items():
+            if br.collidepoint(pos):
+                self.selected_time_minutes = key
+                return True
+        for key, br in self._increment_rects.items():
+            if br.collidepoint(pos):
+                self.selected_increment_seconds = key
+                return True
+        for key, br in self._side_rects.items():
+            if br.collidepoint(pos):
+                self.selected_side = key
+                return True
+
+        if self._start_rect.collidepoint(pos):
+            self.callbacks["start_game"](self.build_config())
+            return True
+
         return False
+
+    def handle_key(self, event):
+        return self.text_input.handle_key(event)
