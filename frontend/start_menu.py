@@ -44,6 +44,7 @@ class StartMenu:
         self.padding = 14
         self.row_gap = 6
         self.section_gap = 10
+        self.label_to_selector_gap = 6
         self.title = "Chess"
 
         self.text_input = TextInput(window)
@@ -135,31 +136,33 @@ class StartMenu:
         self.text_input.draw()
         cursor = input_rect.bottom + self.section_gap * 2
 
+        section_step = label_h + self.label_to_selector_gap + selector_h + self.section_gap
+
         self._mode_rects = self._draw_section(
             "Game mode", cursor, content_x, content_w, label_h, selector_h,
             MODE_OPTIONS, self.selected_mode,
         )
-        cursor += label_h + selector_h + self.section_gap
+        cursor += section_step
 
         self._time_rects = self._draw_section(
             "Time", cursor, content_x, content_w, label_h, selector_h,
             TIME_OPTIONS, self.selected_time_minutes,
         )
-        cursor += label_h + selector_h + self.section_gap
+        cursor += section_step
 
         self._increment_rects = self._draw_section(
             "Increment (s)", cursor, content_x, content_w, label_h, selector_h,
             INCREMENT_OPTIONS, self.selected_increment_seconds,
         )
-        cursor += label_h + selector_h + self.section_gap
+        cursor += section_step
 
         self._side_rects = self._draw_section(
             "Side", cursor, content_x, content_w, label_h, selector_h,
             SIDE_OPTIONS, self.selected_side,
         )
-        cursor += label_h + selector_h + self.section_gap
+        cursor += section_step
 
-        start_rect = pg.Rect(content_x, outer.bottom - self.padding - start_h,
+        start_rect = pg.Rect(content_x, cursor + self.section_gap,
                              content_w, start_h)
         self._start_rect = start_rect
         _draw_button(self.window, start_rect, "Start Game", self.start_font,
@@ -169,7 +172,12 @@ class StartMenu:
                       selector_h, options, selected_key):
         label_surf = self.label_font.render(label, True, Colors.white)
         self.window.blit(label_surf, (content_x, top))
-        selector_rect = pg.Rect(content_x, top + label_h, content_w, selector_h)
+        selector_rect = pg.Rect(
+            content_x,
+            top + label_h + self.label_to_selector_gap,
+            content_w,
+            selector_h,
+        )
         return draw_selector(
             self.window, selector_rect, options, self.button_font,
             gap=self.row_gap, selected_key=selected_key,
