@@ -19,6 +19,7 @@ TIME_OPTIONS = [
 ]
 
 INCREMENT_OPTIONS = [
+    ("+0", 0),
     ("+2", 2),
     ("+5", 5),
     ("+10", 10),
