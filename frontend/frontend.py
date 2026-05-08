@@ -6,6 +6,7 @@ from datetime import datetime
 import pygame as pg
 
 from backend.backend import Backend
+from frontend.audio_panel import AudioPanel
 from frontend.board import Board
 from frontend.capture_summary import captured_by, material_advantage
 from frontend.confirm_modal import ConfirmModal
@@ -81,13 +82,15 @@ class Frontend:
             "start_game": self._on_start_game,
             "load_pgn": self._on_load_last_game,
         })
+        self.audio_panel = AudioPanel(self.window, self.sound_manager)
         self.right_menu = RightMenu(self.window, self.backend, {
             "undo": self._on_undo,
             "resign": self._on_resign,
             "draw": self._on_draw,
             "flip": self._on_flip,
             "menu": self._on_back_to_menu,
-        }, board=self.board, buttons_provider=self._right_menu_buttons)
+        }, board=self.board, buttons_provider=self._right_menu_buttons,
+            audio_panel=self.audio_panel)
         self.confirm_modal = ConfirmModal(self.window)
         self.file_picker = FilePicker(self.window)
         self.player_strip_top = PlayerStrip(self.window)
@@ -550,6 +553,7 @@ class Frontend:
             self.board.begin_press(pos)
 
     def _mouse_left_released(self, pos):
+        self.audio_panel.end_drag()
         was_dragging = self.board.dragging_from is not None
         if was_dragging:
             self.mouse_left_clicked(pos)
@@ -586,7 +590,8 @@ class Frontend:
 
             elif event.type == pg.MOUSEMOTION:
                 if event.buttons[0]:
-                    self.board.update_drag_motion(event.pos)
+                    if not self.audio_panel.handle_drag(event.pos, True):
+                        self.board.update_drag_motion(event.pos)
 
             elif event.type == pg.MOUSEWHEEL:
                 if self.file_picker.is_visible():

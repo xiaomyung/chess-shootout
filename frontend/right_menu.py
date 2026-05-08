@@ -26,12 +26,13 @@ SCROLL_THUMB_MIN_HEIGHT = 18
 class RightMenu:
 
     def __init__(self, window, backend, callbacks, board=None,
-                 buttons_provider=None):
+                 buttons_provider=None, audio_panel=None):
         self.window = window
         self.backend = backend
         self.callbacks = callbacks
         self.board = board
         self.buttons_provider = buttons_provider or (lambda: BUTTONS)
+        self.audio_panel = audio_panel
 
         self.padding = 10
         self.button_gap = 6
@@ -45,6 +46,7 @@ class RightMenu:
         self.outer_rect = pg.Rect(0, 0, 0, 0)
         self.moves_rect = pg.Rect(0, 0, 0, 0)
         self.buttons_rect = pg.Rect(0, 0, 0, 0)
+        self.audio_rect = pg.Rect(0, 0, 0, 0)
         self.button_rects = {}
 
         self.scroll_offset = 0
@@ -69,10 +71,18 @@ class RightMenu:
 
         button_row_h = self.button_font.get_height() + 2 * self.button_v_pad
         inner_w = self.outer_rect.width - 2 * p
+        small_gap = max(int(self.outer_rect.height * 0.01), 4)
+
+        self.audio_rect = pg.Rect(
+            self.outer_rect.x + p,
+            self.outer_rect.bottom - p - button_row_h,
+            inner_w,
+            button_row_h,
+        )
 
         self.buttons_rect = pg.Rect(
             self.outer_rect.x + p,
-            self.outer_rect.bottom - p - button_row_h,
+            self.audio_rect.y - small_gap - button_row_h,
             inner_w,
             button_row_h,
         )
@@ -88,10 +98,12 @@ class RightMenu:
     def draw_menu(self):
         pg.draw.rect(self.window, Colors.dark_menu, self.outer_rect)
         pg.draw.rect(self.window, Colors.light_grey_menu, self.moves_rect)
-        pg.draw.rect(self.window, Colors.light_grey_menu, self.buttons_rect)
         self._draw_moves(self.moves_rect)
         self._draw_scroll_indicator(self.moves_rect)
         self._draw_buttons(self.buttons_rect)
+        if self.audio_panel is not None:
+            self.audio_panel.set_rect(self.audio_rect)
+            self.audio_panel.draw()
 
     def handle_click(self, pos):
         for key, rect in self.button_rects.items():
@@ -100,6 +112,8 @@ class RightMenu:
                 if callback is not None:
                     callback()
                 return True
+        if self.audio_panel is not None and self.audio_panel.handle_click(pos):
+            return True
         if self.board is None or not self.moves_rect.collidepoint(pos):
             return False
         for cell_rect, ply in self._move_cell_hits:

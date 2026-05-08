@@ -32,21 +32,20 @@ SIDE_OPTIONS = [
 ]
 
 
+SECTIONS = [
+    ("Game mode", "selected_mode", MODE_OPTIONS),
+    ("Time", "selected_time_minutes", TIME_OPTIONS),
+    ("Increment (s)", "selected_increment_seconds", INCREMENT_OPTIONS),
+    ("Side", "selected_side", SIDE_OPTIONS),
+]
+
+
 class StartMenu:
 
     def __init__(self, window, callbacks):
         self.window = window
         self.callbacks = callbacks
         self.visible = True
-        self.x = 0
-        self.y = 0
-        self.width = 0
-        self.height = 0
-        self.padding = 14
-        self.row_gap = 6
-        self.section_gap = 10
-        self.label_to_selector_gap = 6
-        self.input_to_section_gap = 20
         self.title = "Chess"
 
         self.text_input = TextInput(window)
@@ -61,35 +60,103 @@ class StartMenu:
         self.button_font = pg.font.SysFont("Arial", 14, bold=True)
         self.start_font = pg.font.SysFont("Arial", 18, bold=True)
 
-        self._mode_rects = {}
-        self._time_rects = {}
-        self._increment_rects = {}
-        self._side_rects = {}
-        self._start_rect = pg.Rect(0, 0, 0, 0)
+        self._outer = pg.Rect(0, 0, 0, 0)
+        self._title_pos = (0, 0)
+        self._input_rect = pg.Rect(0, 0, 0, 0)
+        self._section_label_y = [0, 0, 0, 0]
+        self._section_selector_rect = [pg.Rect(0, 0, 0, 0) for _ in range(4)]
         self._load_pgn_rect = pg.Rect(0, 0, 0, 0)
+        self._start_rect = pg.Rect(0, 0, 0, 0)
+
+        self._section_rects_by_key = {
+            "selected_mode": {},
+            "selected_time_minutes": {},
+            "selected_increment_seconds": {},
+            "selected_side": {},
+        }
+
+        self.row_gap = 6
         self.load_pgn_available = False
 
     def set_rect(self, rect):
-        self.x = rect.x
-        self.y = rect.y
-        self.width = rect.width
-        self.height = rect.height
-        self.padding = max(int(rect.height * 0.03), 10)
-        self.section_gap = max(int(rect.height * 0.025), 8)
-        self.label_to_selector_gap = max(int(rect.height * 0.015), 4)
-        self.input_to_section_gap = max(int(rect.height * 0.05), 14)
-        self.title_font = pg.font.SysFont(
-            "Arial", max(int(rect.height / 14), 14), bold=True,
+        self._outer = pg.Rect(rect)
+        h = rect.height
+
+        padding = max(int(h * 0.03), 10)
+        self.title_font = pg.font.SysFont("Arial", max(int(h / 14), 14), bold=True)
+        self.label_font = pg.font.SysFont("Arial", max(int(h / 32), 10), bold=True)
+        self.button_font = pg.font.SysFont("Arial", max(int(h / 38), 10), bold=True)
+        self.start_font = pg.font.SysFont("Arial", max(int(h / 30), 11), bold=True)
+
+        inner_x = rect.x + padding
+        inner_w = rect.width - 2 * padding
+        inner_top = rect.y + padding
+        inner_bottom = rect.bottom - padding
+
+        title_h = self.title_font.get_height()
+        title_top = inner_top
+        self._title_pos = (rect.centerx, title_top)
+
+        start_h = max(int(h * 0.075), 28)
+        start_y = inner_bottom - start_h
+
+        title_to_input_gap = max(int(h * 0.035), 10)
+        input_to_sections_gap = max(int(h * 0.04), 12)
+        sections_to_button_gap = max(int(h * 0.035), 10)
+
+        input_h = min(max(int(h * 0.05), 26), 52)
+        input_y = title_top + title_h + title_to_input_gap
+        self._input_rect = pg.Rect(inner_x, input_y, inner_w, input_h)
+
+        sections_top = input_y + input_h + input_to_sections_gap
+        sections_bottom = start_y - sections_to_button_gap
+        sections_h = max(sections_bottom - sections_top, 0)
+
+        inter_block_gap = max(int(h * 0.022), 6)
+        block_count = 4
+        block_h = max(
+            (sections_h - inter_block_gap * (block_count - 1)) // block_count, 1,
         )
-        self.label_font = pg.font.SysFont(
-            "Arial", max(int(rect.height / 28), 10), bold=True,
+
+        section_label_h = max(int(block_h * 0.3), 10)
+        section_label_to_selector_gap = max(int(block_h * 0.08), 3)
+        selector_h = max(
+            block_h - section_label_h - section_label_to_selector_gap, 12,
         )
-        self.button_font = pg.font.SysFont(
-            "Arial", max(int(rect.height / 38), 10), bold=True,
+
+        block_y = sections_top
+        for i in range(block_count):
+            self._section_label_y[i] = block_y
+            self._section_selector_rect[i] = pg.Rect(
+                inner_x,
+                block_y + section_label_h + section_label_to_selector_gap,
+                inner_w,
+                selector_h,
+            )
+            block_y += block_h + inter_block_gap
+
+        gap = self.row_gap
+        half_w = (inner_w - gap) // 2
+        self._load_pgn_rect = pg.Rect(inner_x, start_y, half_w, start_h)
+        self._start_rect = pg.Rect(
+            inner_x + half_w + gap, start_y, inner_w - half_w - gap, start_h,
         )
-        self.start_font = pg.font.SysFont(
-            "Arial", max(int(rect.height / 18), 12), bold=True,
-        )
+
+    @property
+    def _mode_rects(self):
+        return self._section_rects_by_key["selected_mode"]
+
+    @property
+    def _time_rects(self):
+        return self._section_rects_by_key["selected_time_minutes"]
+
+    @property
+    def _increment_rects(self):
+        return self._section_rects_by_key["selected_increment_seconds"]
+
+    @property
+    def _side_rects(self):
+        return self._section_rects_by_key["selected_side"]
 
     def show(self):
         self.visible = True
@@ -111,118 +178,54 @@ class StartMenu:
 
     def draw(self):
         if not self.visible:
-            self._mode_rects = {}
-            self._time_rects = {}
-            self._increment_rects = {}
-            self._side_rects = {}
-            self._start_rect = pg.Rect(0, 0, 0, 0)
+            for key in self._section_rects_by_key:
+                self._section_rects_by_key[key] = {}
             return
 
-        outer = pg.Rect(self.x, self.y, self.width, self.height)
-        pg.draw.rect(self.window, Colors.light_grey_menu, outer, border_radius=8)
-        pg.draw.rect(self.window, Colors.button_border, outer, 2, border_radius=8)
+        pg.draw.rect(self.window, Colors.light_grey_menu, self._outer, border_radius=8)
+        pg.draw.rect(self.window, Colors.button_border, self._outer, 2, border_radius=8)
 
         title_surf = self.title_font.render(self.title, True, Colors.white)
-        title_y = outer.y + self.padding
-        self.window.blit(
-            title_surf,
-            (outer.centerx - title_surf.get_width() / 2, title_y),
-        )
+        title_x = self._title_pos[0] - title_surf.get_width() / 2
+        self.window.blit(title_surf, (title_x, self._title_pos[1]))
 
-        content_x = outer.x + self.padding
-        content_w = outer.width - 2 * self.padding
-
-        input_h = max(int(outer.height * 0.07), 24)
-        selector_h = max(int(outer.height * 0.075), 26)
-        start_h = max(int(outer.height * 0.09), 30)
-        label_h = max(int(outer.height * 0.04), 12)
-
-        cursor = title_y + title_surf.get_height() + self.section_gap
-
-        input_rect = pg.Rect(content_x, cursor, content_w, input_h)
-        self.text_input.set_rect(input_rect)
+        self.text_input.set_rect(self._input_rect)
         self.text_input.draw()
-        cursor = input_rect.bottom + self.input_to_section_gap
 
-        section_step = label_h + self.label_to_selector_gap + selector_h + self.section_gap
+        for i, (label, attr, options) in enumerate(SECTIONS):
+            self._draw_section(
+                i, label, options, getattr(self, attr), attr,
+            )
 
-        self._mode_rects = self._draw_section(
-            "Game mode", cursor, content_x, content_w, label_h, selector_h,
-            MODE_OPTIONS, self.selected_mode,
-        )
-        cursor += section_step
-
-        self._time_rects = self._draw_section(
-            "Time", cursor, content_x, content_w, label_h, selector_h,
-            TIME_OPTIONS, self.selected_time_minutes,
-        )
-        cursor += section_step
-
-        self._increment_rects = self._draw_section(
-            "Increment (s)", cursor, content_x, content_w, label_h, selector_h,
-            INCREMENT_OPTIONS, self.selected_increment_seconds,
-        )
-        cursor += section_step
-
-        self._side_rects = self._draw_section(
-            "Side", cursor, content_x, content_w, label_h, selector_h,
-            SIDE_OPTIONS, self.selected_side,
-        )
-        cursor += section_step
-
-        row_y = cursor + self.section_gap
-        gap = self.row_gap
-        half_w = (content_w - gap) // 2
-        load_rect = pg.Rect(content_x, row_y, half_w, start_h)
-        start_rect = pg.Rect(content_x + half_w + gap, row_y,
-                             content_w - half_w - gap, start_h)
-        self._load_pgn_rect = load_rect
-        self._start_rect = start_rect
-        _draw_button(self.window, load_rect, "Load PGN", self.start_font,
+        _draw_button(self.window, self._load_pgn_rect, "Load PGN", self.start_font,
                      disabled=not self.load_pgn_available)
-        _draw_button(self.window, start_rect, "Start Game", self.start_font,
+        _draw_button(self.window, self._start_rect, "Start Game", self.start_font,
                      force_pressed=False)
 
-    def _draw_section(self, label, top, content_x, content_w, label_h,
-                      selector_h, options, selected_key):
+    def _draw_section(self, idx, label, options, selected_key, attr):
         label_surf = self.label_font.render(label, True, Colors.white)
-        self.window.blit(label_surf, (content_x, top))
-        selector_rect = pg.Rect(
-            content_x,
-            top + label_h + self.label_to_selector_gap,
-            content_w,
-            selector_h,
+        x = self._section_selector_rect[idx].x
+        self.window.blit(label_surf, (x, self._section_label_y[idx]))
+        rects = draw_selector(
+            self.window, self._section_selector_rect[idx], options,
+            self.button_font, gap=self.row_gap, selected_key=selected_key,
         )
-        return draw_selector(
-            self.window, selector_rect, options, self.button_font,
-            gap=self.row_gap, selected_key=selected_key,
-        )
+        self._section_rects_by_key[attr] = rects
 
     def handle_click(self, pos):
         if not self.visible:
             return False
 
-        if self.text_input.rect.collidepoint(pos):
+        if self._input_rect.collidepoint(pos):
             self.text_input.handle_click(pos)
             return True
         self.text_input.handle_click(pos)
 
-        for key, br in self._mode_rects.items():
-            if br.collidepoint(pos):
-                self.selected_mode = key
-                return True
-        for key, br in self._time_rects.items():
-            if br.collidepoint(pos):
-                self.selected_time_minutes = key
-                return True
-        for key, br in self._increment_rects.items():
-            if br.collidepoint(pos):
-                self.selected_increment_seconds = key
-                return True
-        for key, br in self._side_rects.items():
-            if br.collidepoint(pos):
-                self.selected_side = key
-                return True
+        for attr, rects in self._section_rects_by_key.items():
+            for key, br in rects.items():
+                if br.collidepoint(pos):
+                    setattr(self, attr, key)
+                    return True
 
         if self._load_pgn_rect.collidepoint(pos):
             if self.load_pgn_available and "load_pgn" in self.callbacks:

@@ -42,6 +42,7 @@ class SoundManager:
     def __init__(self, sounds_dir, *, enabled=True, heartbeat=None,
                  mild_channel=None, deep_channel=None):
         self.enabled = enabled
+        self.master_volume = 1.0
         self.heartbeat = heartbeat or HeartbeatConfig()
         self._state = STATE_OFF
         self._deep_speed_bucket = -1
@@ -142,15 +143,28 @@ class SoundManager:
         except pg.error:
             return None
 
+    def set_master_volume(self, value):
+        self.master_volume = max(0.0, min(1.0, float(value)))
+
+    def set_enabled(self, value):
+        new_enabled = bool(value)
+        if not new_enabled and self.enabled:
+            self.stop_all()
+        self.enabled = new_enabled
+
+    def _play_with_master(self, sound):
+        sound.set_volume(self.master_volume)
+        sound.play(fade_ms=ONESHOT_FADE_MS)
+
     def play_move(self):
         if not self.enabled or not self._piece_move_sounds:
             return
-        random.choice(self._piece_move_sounds).play(fade_ms=ONESHOT_FADE_MS)
+        self._play_with_master(random.choice(self._piece_move_sounds))
 
     def play_check(self):
         if not self.enabled or not self._reload_sounds:
             return
-        random.choice(self._reload_sounds).play(fade_ms=ONESHOT_FADE_MS)
+        self._play_with_master(random.choice(self._reload_sounds))
 
     def play_capture(self, piece_type=None):
         if not self.enabled:
@@ -159,7 +173,7 @@ class SoundManager:
         if sound is None and self._capture_sounds:
             sound = next(iter(self._capture_sounds.values()))
         if sound is not None:
-            sound.play(fade_ms=ONESHOT_FADE_MS)
+            self._play_with_master(sound)
 
     def play_checkmate(self):
         self._play_one_shot("checkmate")
@@ -178,7 +192,7 @@ class SoundManager:
             return
         sound = self._sounds.get(key)
         if sound is not None:
-            sound.play(fade_ms=ONESHOT_FADE_MS)
+            self._play_with_master(sound)
 
     def update_heartbeat(self, fraction_remaining, paused):
         if not self.enabled:
@@ -277,7 +291,8 @@ class SoundManager:
     def _lerp_volume(self, progress):
         cfg = self.heartbeat
         progress = max(0.0, min(progress, 1.0))
-        return cfg.min_volume + (cfg.max_volume - cfg.min_volume) * progress
+        base = cfg.min_volume + (cfg.max_volume - cfg.min_volume) * progress
+        return base * self.master_volume
 
     def stop_all(self):
         if not self.enabled:
