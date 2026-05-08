@@ -511,6 +511,30 @@ class Board:
         self._drag_cursor = None
         return was_dragging
 
+    def queue_premove_from_drag(self, target_sq):
+        if self.read_only or self.review_ply is not None:
+            return False
+        if self.dragging_from is None or target_sq == self.dragging_from:
+            return False
+        if self.pending_promotion_square is not None:
+            return False
+        grid = self._effective_grid()
+        piece = grid[self.dragging_from.row][self.dragging_from.col]
+        if piece is None:
+            return False
+        local_color = getattr(self.match, "local_color", None)
+        if local_color is not None and piece.color != local_color:
+            return False
+        before_len = len(self.premoves)
+        self._queue_premove(self.dragging_from, target_sq, piece)
+        if len(self.premoves) == before_len:
+            return False
+        self.dragging_from = None
+        self._drag_cursor = None
+        self.selected_square = None
+        self._press_pos = None
+        return True
+
     def cell_at(self, pos):
         x, y = pos
         col = int((x - self.board_offset_x) / self.cell_size)

@@ -462,8 +462,12 @@ class Frontend:
         if self.mode == "menu" or self.current_result() is not None:
             return
         sq = self.board.cell_at(pos)
-        if sq is not None:
-            self.board._right_drag_start_square = sq
+        if sq is None:
+            return
+        if self.board.dragging_from is not None:
+            if self.board.queue_premove_from_drag(sq):
+                return
+        self.board._right_drag_start_square = sq
 
     def _right_click_released(self, pos):
         start = self.board._right_drag_start_square
