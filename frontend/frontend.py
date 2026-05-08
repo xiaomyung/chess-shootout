@@ -149,6 +149,7 @@ class Frontend:
         self.board.selected_square = None
         self.board.pending_promotion_square = None
         self.board.cancel_animations()
+        self.board._clear_premoves()
         self._last_turn_for_flip = None
 
     def _on_save_pgn(self):
@@ -170,6 +171,7 @@ class Frontend:
 
     def _on_undo(self):
         self.board.selected_square = None
+        self.board._clear_premoves()
         if self.manual_result is not None:
             self.manual_result = None
             return
@@ -187,12 +189,14 @@ class Frontend:
         loser = self.backend.current_turn()
         self._auto_complete_pending_promotion()
         self.manual_result = "black_wins" if loser == PieceColor.WHITE else "white_wins"
+        self.board._clear_premoves()
 
     def _on_draw(self):
         if self.current_result() is not None:
             return
         self._auto_complete_pending_promotion()
         self.manual_result = "draw_agreement"
+        self.board._clear_premoves()
 
     def _auto_complete_pending_promotion(self):
         if self.board.pending_promotion_square is None:
@@ -232,14 +236,22 @@ class Frontend:
         self._update_heartbeat()
 
         now = pg.time.get_ticks()
+        post_animation_settled = (
+            not self.board.is_animating()
+            and now - self.board.last_animation_completed_at_ms >= AUTO_FLIP_DELAY_MS
+        )
         if (self.mode == "single_screen"
                 and self.current_result() is None
-                and not self.board.is_animating()
-                and now - self.board.last_animation_completed_at_ms >= AUTO_FLIP_DELAY_MS):
+                and post_animation_settled):
             current = self.backend.current_turn()
             if current != self._last_turn_for_flip:
                 self.board.flipped = (current == PieceColor.BLACK)
                 self._last_turn_for_flip = current
+
+        if (self.mode != "menu"
+                and self.current_result() is None
+                and post_animation_settled):
+            self.board.try_apply_next_premove()
 
         self.board.draw_board()
         if self.mode != "menu":

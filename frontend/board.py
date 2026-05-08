@@ -5,6 +5,7 @@ import pygame as pg
 from backend.utils import Square
 from frontend.animation import PieceAnimation
 from frontend.colors import Colors
+from frontend.premoves import Premove, is_premove_shape_valid, speculative_board
 from backend.pieces import PieceType, PieceColor, Piece
 
 
@@ -38,6 +39,8 @@ class Board:
         self.animations = []
         self.animation_duration_ms = 180
         self.last_animation_completed_at_ms = 0
+        self.premoves = []
+        self.premove_color = None
 
     def _render_text(self):
         self.file_labels_rendered = [
@@ -124,6 +127,7 @@ class Board:
         for row, col in product(range(self.SIZE), repeat=2):
             self.draw_cell(row, col)
         self._draw_check_highlight()
+        self._draw_premove_highlights()
         self._draw_vertical_guides()
         self._draw_horizontal_guides()
         self._draw_selection_highlight()
@@ -131,6 +135,20 @@ class Board:
         self.draw_pieces()
         self._draw_animations()
         self._draw_promotion_picker()
+
+    def _draw_premove_highlights(self):
+        if not self.premoves:
+            return
+        seen = set()
+        for pm in self.premoves:
+            for sq in (pm.from_sq, pm.to_sq):
+                if sq in seen:
+                    continue
+                seen.add(sq)
+                rect = self._cell_rect(sq.row, sq.col)
+                overlay = pg.Surface((rect.width, rect.height), pg.SRCALPHA)
+                overlay.fill(Colors.premove)
+                self.window.blit(overlay, rect.topleft)
 
     def _draw_check_highlight(self):
         for row, col in product(range(self.SIZE), repeat=2):
@@ -198,6 +216,10 @@ class Board:
         if self.selected_square is None:
             return
 
+        piece = self.backend.piece_at(self.selected_square)
+        if piece is None or piece.color != self.backend.current_turn():
+            return
+
         legal_moves = self.backend.legal_moves_from(self.selected_square)
         for target in legal_moves:
             rect = self._cell_rect(target.row, target.col)
@@ -259,19 +281,77 @@ class Board:
             self._handle_promotion_click(square)
             return
 
-        if self.selected_square is None:
-            self._try_select(square)
-        elif square == self.selected_square:
-            self.selected_square = None
-        else:
-            from_sq = self.selected_square
-            result = self.backend.try_move(from_sq, square)
-            self.selected_square = None
+        grid = self._effective_grid()
+        piece_at_clicked = grid[square.row][square.col]
+        current_turn = self.backend.current_turn()
 
+        if self.selected_square is None:
+            if piece_at_clicked is None:
+                if self.premoves:
+                    self._clear_premoves()
+                return
+            if piece_at_clicked.color == current_turn:
+                self._try_select(square)
+            else:
+                self._try_select_for_premove(square, piece_at_clicked)
+            return
+
+        if square == self.selected_square:
+            self.selected_square = None
+            return
+
+        from_sq = self.selected_square
+        self.selected_square = None
+        selected_piece = grid[from_sq.row][from_sq.col]
+        if selected_piece is None:
+            return
+
+        if selected_piece.color == current_turn:
+            result = self.backend.try_move(from_sq, square)
             if not result.legal:
                 return
-
             self._start_move_animation(from_sq, square, result.promotion_required)
+        else:
+            self._queue_premove(from_sq, square, selected_piece)
+
+    def _effective_grid(self):
+        if not self.premoves:
+            return self.backend.state
+        return speculative_board(self.backend, self.premoves)
+
+    def _try_select_for_premove(self, square, piece):
+        if self.premove_color is not None and self.premove_color != piece.color:
+            self._clear_premoves()
+        self.selected_square = square
+
+    def _queue_premove(self, from_sq, to_sq, piece):
+        if not is_premove_shape_valid(piece, from_sq, to_sq):
+            return
+        if self.premove_color is not None and self.premove_color != piece.color:
+            self._clear_premoves()
+        self.premoves.append(Premove(from_sq, to_sq, piece))
+        self.premove_color = piece.color
+
+    def _clear_premoves(self):
+        self.premoves = []
+        self.premove_color = None
+
+    def try_apply_next_premove(self):
+        if (not self.premoves
+                or self.premove_color != self.backend.current_turn()
+                or self.pending_promotion_square is not None
+                or self.is_animating()):
+            return False
+        pm = self.premoves[0]
+        result = self.backend.try_move(pm.from_sq, pm.to_sq)
+        if not result.legal:
+            self._clear_premoves()
+            return False
+        self.premoves.pop(0)
+        if not self.premoves:
+            self.premove_color = None
+        self._start_move_animation(pm.from_sq, pm.to_sq, result.promotion_required)
+        return True
 
     def _start_move_animation(self, from_sq, to_sq, promotion_required):
         entry = self.backend.move_history[-1]

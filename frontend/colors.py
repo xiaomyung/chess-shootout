@@ -8,4 +8,5 @@ class Colors:
     button_pressed = "#5a5a58"
     button_border = "#4a4a48"
     selection_red = "#d49595"
-    move_indicator = (40, 40, 40, 100)
+    move_indicator = "#28282864"
+    premove = "#d7646482"
