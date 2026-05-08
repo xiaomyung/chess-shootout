@@ -4,7 +4,7 @@ import time
 from collections import Counter
 from itertools import product
 
-from backend.pieces import PieceType, PieceColor, Piece, BACK_RANK
+from backend.pieces import PieceType, PieceColor, Piece, BACK_RANK, opponent_of
 from backend.clock import Clock
 from backend.utils import Move, MoveResult, Square, HistoryEntry
 
@@ -41,10 +41,6 @@ _SAN_MOVE_RE = re.compile(
 CASTLING_KEYS = ("WK", "WQ", "BK", "BQ")
 DEFAULT_CASTLING_RIGHTS = {"WK": True, "WQ": True, "BK": True, "BQ": True}
 FIFTY_MOVE_HALFMOVES = 100
-
-
-def opponent_of(color):
-    return PieceColor.BLACK if color == PieceColor.WHITE else PieceColor.WHITE
 
 
 class Backend:
@@ -269,10 +265,7 @@ class Backend:
         san = "O-O" if to_sq.col == 6 else "O-O-O"
         self.state[to_sq.row][to_sq.col] = piece
         self.state[from_sq.row][from_sq.col] = None
-        if to_sq.col == 6:
-            rook_from_col, rook_to_col = 7, 5
-        else:
-            rook_from_col, rook_to_col = 0, 3
+        rook_from_col, rook_to_col = (7, 5) if to_sq.col == 6 else (0, 3)
         self.state[from_sq.row][rook_to_col] = self.state[from_sq.row][rook_from_col]
         self.state[from_sq.row][rook_from_col] = None
         move = Move(from_sq, to_sq, piece, is_castle=True)
@@ -661,9 +654,7 @@ class Backend:
         raise ValueError(f"No {color} king on the board")
 
     def _switch_turn(self):
-        self.turn = (
-            PieceColor.BLACK if self.turn == PieceColor.WHITE else PieceColor.WHITE
-        )
+        self.turn = opponent_of(self.turn)
 
     def _in_bounds(self, square):
         return 0 <= square.row < self.SIZE and 0 <= square.col < self.SIZE

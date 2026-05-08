@@ -7,7 +7,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 A virtualenv lives at `.venv/`. Use it directly:
 
 - **Run the game:** `.venv/bin/python main.py`
-- **Run all tests:** `.venv/bin/pytest tests -q` (~3s; the perft suite is the slowest piece)
+- **Run all tests:** `.venv/bin/pytest tests -n 8 -q` (~5s under xdist; ~17s serial). `pytest-xdist` is in `requirements-dev.txt`.
 - **Run one file or test:** `.venv/bin/pytest tests/test_castling.py -v`, `.venv/bin/pytest tests/test_san.py::test_user_promotion_game_disambiguation -v`
 - **Smoke-test the frontend headlessly:** prefix with `SDL_VIDEODRIVER=dummy` and call `Frontend(w, h).draw_frame()`
 
@@ -21,7 +21,7 @@ Three layers, top-down:
 2. **`backend/`** — chess rules engine. `Backend` class + supporting dataclasses. No pygame, no UI.
 3. **`frontend/`** — pygame UI. Owns a `Backend`, drives the event loop, renders.
 
-The frontend currently talks directly to the backend. There is **no `Match`/session layer yet** — that's the planned wedge for online play (see "Online plan" below).
+`Frontend` and `Board` consume a `Match` (`backend/match.py`), which wraps a `Backend`. `Match` delegates the engine API and exposes `local_color` for player-color gating. Tests and direct mutations go through `match.backend.X` (or the `backend` property as an escape hatch on `Frontend`/`Board`/`RightMenu`). Production code reads/calls via `self.match.X`.
 
 ### Backend contract (the "public API" the frontend depends on)
 
@@ -49,7 +49,7 @@ Castling generation calls `_is_square_attacked` (path checks). Without care, tha
 
 ### Frontend orchestration
 
-`Frontend` owns: `Backend`, `Board`, `RightMenu`, `ResultMenu`. `_compute_layout` runs at startup and on `pg.VIDEORESIZE`; it computes rects + calls `set_rect` on each child. Each child's `set_rect` rebuilds its fonts (scale with rect width via `_factor` attributes). `Frontend.draw_frame` is called every frame; click events flow `mouse_left_clicked` → result_menu → right_menu → board, in that priority.
+`Frontend` owns: `Match`, `Board`, `RightMenu`, `ResultMenu`, `ConfirmModal`, `FilePicker`, `AudioPanel`, `StartMenu`. `_compute_layout` runs at startup and on `pg.VIDEORESIZE`; it computes rects + calls `set_rect` on each child. Each child's `set_rect` rebuilds its fonts (scale with rect width via `_factor` attributes). `Frontend.draw_frame` is called every frame; click events flow `file_picker` → `start_menu` → `confirm_modal` → `result_menu` → `right_menu` → `board`, in that priority. `pgn_review` and `Board.read_only` lock the board when a saved PGN is being reviewed (only the Menu and Flip right-menu buttons remain active).
 
 `Frontend.manual_result` (resign / draw_agreement) lives separately from `backend.game_result()`. `current_result()` is the union; `result_text()` maps to `(title, reason)` for the modal.
 
@@ -71,17 +71,21 @@ Castling generation calls `_is_square_attacked` (path checks). Without care, tha
 - **Double quotes for all strings.** Single quotes only when the string contains `"`.
 - **No docstrings outside tests/helpers.** The codebase does not use them.
 - **Don't add fields/flags/branches "for future use."** Add them when the use lands.
+- **`self.backend` is an escape hatch only.** Production code on `Frontend`/`Board`/`RightMenu` reads via `self.match.X`. The `backend` property exists for tests and direct engine mutations (`app.match.backend.turn = X` / `app.backend.X` work identically).
+- **Esc only closes the window.** Don't bind Esc to dismiss modals, exit review mode, or any other in-game action.
+- **In-app pygame modals only.** Don't use `tkinter` or system file dialogs — they're broken on the user's KDE/Wayland setup. Mirror `frontend/file_picker.py` / `frontend/confirm_modal.py`.
 
-## Online plan (not yet implemented)
+## Online plan
 
-The user plans to host an online server. Before networking, the local code needs:
+Pre-online architectural prereqs are **done** (commit `b6683c3`):
 
-1. A **`Match` layer** between `Frontend` and `Backend` — moves flow through `Match`, not directly into `Backend`. The same Match shape will run locally (input from clicks) and remotely (input from WebSocket).
-2. **Player-color gating** — `Frontend.local_color: Optional[PieceColor]` (None = hot-seat). Filters clicks before they hit the backend.
-3. **State serialization** (FEN-ish or full JSON) — the wire protocol needs it; PGN-load is a natural test fixture for the same code.
-4. **Game timer (clock)** — model in the engine, not bolted on later.
+- ✅ `Match` layer (`backend/match.py`). The seam where `try_move` will become "send over WS, await ack, commit on ack."
+- ✅ Player-color gating (`Match.local_color`, applied in `Board._try_select` / `_try_select_for_premove`).
+- ✅ FEN serialization (`backend/fen.py` — `export_fen` / `apply_fen`).
+- ✅ Game timer (`backend/clock.py`, integrated since earlier).
+- ✅ PGN round-trip (`frontend/pgn.py` exporter + `frontend/pgn_load.py` parser + `Backend.apply_san`).
 
-Server stack chosen: **FastAPI + WebSockets** (REST for matchmaking + WebSocket per game, tested locally with `httpx.AsyncClient` + `pytest-asyncio`).
+Remaining: clean-code skill pass, then **FastAPI + WebSockets** server (REST for matchmaking + WebSocket per game, tested locally with `httpx.AsyncClient` + `pytest-asyncio`).
 
 ## Repo hygiene
 

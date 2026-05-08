@@ -1,6 +1,6 @@
 from collections import Counter
 
-from backend.backend import CASTLING_KEYS, DEFAULT_CASTLING_RIGHTS, SAN_FILES
+from backend.backend import Backend, CASTLING_KEYS, SAN_FILES
 from backend.pieces import Piece, PieceColor, PieceType
 from backend.utils import Square
 
@@ -20,7 +20,7 @@ CASTLING_FEN_CHARS = (("WK", "K"), ("WQ", "Q"), ("BK", "k"), ("BQ", "q"))
 
 
 def export_fen(backend):
-    placement = "/".join(_rank_to_fen(backend, row) for row in range(8))
+    placement = "/".join(_rank_to_fen(backend, row) for row in range(Backend.SIZE))
     turn = "w" if backend.turn == PieceColor.WHITE else "b"
     rights = _castling_rights_to_fen(backend.castling_rights)
     ep = _square_to_algebraic(backend.en_passant_target)
@@ -38,7 +38,6 @@ def apply_fen(backend, fen):
     castling = parts[2]
     ep = parts[3]
     halfmove = int(parts[4]) if len(parts) >= 5 else 0
-    # parts[5] (fullmove) is informational only; we don't store it.
 
     state = _parse_placement(placement)
     backend.state = state
@@ -54,7 +53,7 @@ def apply_fen(backend, fen):
 def _rank_to_fen(backend, row):
     out = []
     empty = 0
-    for col in range(8):
+    for col in range(Backend.SIZE):
         piece = backend.state[row][col]
         if piece is None:
             empty += 1
@@ -77,14 +76,14 @@ def _castling_rights_to_fen(rights):
 def _square_to_algebraic(square):
     if square is None:
         return "-"
-    return f"{SAN_FILES[square.col]}{8 - square.row}"
+    return f"{SAN_FILES[square.col]}{Backend.SIZE - square.row}"
 
 
 def _parse_placement(placement):
-    state = [[None] * 8 for _ in range(8)]
+    state = [[None] * Backend.SIZE for _ in range(Backend.SIZE)]
     ranks = placement.split("/")
-    if len(ranks) != 8:
-        raise ValueError(f"FEN placement must have 8 ranks: {placement!r}")
+    if len(ranks) != Backend.SIZE:
+        raise ValueError(f"FEN placement must have {Backend.SIZE} ranks: {placement!r}")
     for row, rank in enumerate(ranks):
         col = 0
         for ch in rank:
@@ -95,8 +94,8 @@ def _parse_placement(placement):
             piece_type = FEN_TO_PIECE[ch.lower()]
             state[row][col] = Piece(piece_type, color)
             col += 1
-        if col != 8:
-            raise ValueError(f"FEN rank {row} did not fill 8 columns: {rank!r}")
+        if col != Backend.SIZE:
+            raise ValueError(f"FEN rank {row} did not fill {Backend.SIZE} columns: {rank!r}")
     return state
 
 
@@ -116,4 +115,4 @@ def _parse_ep(field):
     if len(field) != 2:
         raise ValueError(f"Invalid en-passant field: {field!r}")
     file_ch, rank_ch = field
-    return Square(8 - int(rank_ch), SAN_FILES.index(file_ch))
+    return Square(Backend.SIZE - int(rank_ch), SAN_FILES.index(file_ch))

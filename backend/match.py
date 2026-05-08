@@ -1,3 +1,4 @@
+import time
 from typing import Optional
 
 from backend.backend import Backend
@@ -30,8 +31,8 @@ class Match:
     def new_game(self) -> None:
         self.backend.new_game()
 
-    def setup_clock(self, *args, **kwargs):
-        self.backend.setup_clock(*args, **kwargs)
+    def setup_clock(self, initial_seconds, increment_seconds, now_provider=time.monotonic):
+        self.backend.setup_clock(initial_seconds, increment_seconds, now_provider)
 
     def tick_clock(self):
         self.backend.tick_clock()
@@ -41,6 +42,9 @@ class Match:
 
     def game_result(self):
         return self.backend.game_result()
+
+    def is_game_over(self):
+        return self.backend.is_game_over()
 
     def is_in_check(self, color):
         return self.backend.is_in_check(color)

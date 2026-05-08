@@ -6,7 +6,7 @@ import pygame as pg
 import pytest
 
 from frontend.widgets import (
-    _draw_button, draw_button_row, draw_button_column, draw_selector,
+    draw_button, draw_button_row, draw_button_column, draw_selector,
 )
 
 
@@ -23,19 +23,19 @@ def font():
     return pg.font.SysFont("Arial", 14, bold=True)
 
 
-def test_draw_button_smoke_idle(font):
+def testdraw_button_smoke_idle(font):
     surface = pg.display.get_surface()
     rect = pg.Rect(0, 0, 100, 30)
-    _draw_button(surface, rect, "OK", font)
+    draw_button(surface, rect, "OK", font)
 
 
-def test_draw_button_smoke_force_pressed(font):
+def testdraw_button_smoke_force_pressed(font):
     surface = pg.display.get_surface()
     rect = pg.Rect(0, 0, 100, 30)
-    _draw_button(surface, rect, "OK", font, force_pressed=True)
+    draw_button(surface, rect, "OK", font, force_pressed=True)
 
 
-def test_draw_button_row_returns_keyed_rects(font):
+def testdraw_button_row_returns_keyed_rects(font):
     surface = pg.display.get_surface()
     rect = pg.Rect(0, 0, 300, 30)
     buttons = [("Yes", "yes"), ("No", "no")]
@@ -46,7 +46,7 @@ def test_draw_button_row_returns_keyed_rects(font):
     assert rects["yes"].width == pytest.approx(145, abs=1)
 
 
-def test_draw_button_column_returns_keyed_rects(font):
+def testdraw_button_column_returns_keyed_rects(font):
     surface = pg.display.get_surface()
     rect = pg.Rect(0, 0, 100, 200)
     buttons = [("A", "a"), ("B", "b"), ("C", "c")]

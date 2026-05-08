@@ -5,7 +5,7 @@ from datetime import datetime
 
 import pygame as pg
 
-from backend.match import Match
+from backend.match import Match, SINGLE_SCREEN, BOT, ONLINE
 from frontend.audio_panel import AudioPanel
 from frontend.board import Board
 from frontend.capture_summary import captured_by, material_advantage
@@ -19,7 +19,7 @@ from frontend.start_menu import StartMenu
 from frontend.pgn import generate_pgn, TIMEOUT_RESULTS
 from frontend.pgn_load import load_pgn_into_backend
 from backend.paths import PROJECT_ROOT, SOUNDS_DIR
-from backend.pieces import PieceColor, PieceType
+from backend.pieces import PieceColor, PieceType, opponent_of
 
 
 MANUAL_RESULT_TEXT = {
@@ -40,9 +40,9 @@ ENGINE_RESULT_TEXT = {
 }
 
 OPPONENT_NAME_FOR_MODE = {
-    "single_screen": "Player 2",
-    "bot": "AI Bot",
-    "online": "Opponent",
+    SINGLE_SCREEN: "Player 2",
+    BOT: "AI Bot",
+    ONLINE: "Opponent",
 }
 
 AUTO_FLIP_DELAY_MS = 200
@@ -148,7 +148,7 @@ class Frontend:
     def _load_pgn_from_path(self, path):
         with open(path) as f:
             text = f.read()
-        self.mode = "single_screen"
+        self.mode = SINGLE_SCREEN
         self._time_control = None
         self._reset_to_new_game()
         _, ok = load_pgn_into_backend(self.match, text)
@@ -161,10 +161,10 @@ class Frontend:
         self.start_menu.hide()
 
     def _on_start_game(self, config):
-        if config["mode"] != "single_screen":
+        if config["mode"] != SINGLE_SCREEN:
             return
 
-        self.mode = "single_screen"
+        self.mode = SINGLE_SCREEN
 
         side = config["side"]
         if side == "random":
@@ -173,17 +173,15 @@ class Frontend:
 
         nickname = (config.get("nickname") or "").strip() or "Player 1"
         opponent_name = OPPONENT_NAME_FOR_MODE[config["mode"]]
-        if side == "white":
-            self.white_name, self.black_name = nickname, opponent_name
-        else:
-            self.white_name, self.black_name = opponent_name, nickname
+        self.white_name, self.black_name = (
+            (nickname, opponent_name) if side == "white"
+            else (opponent_name, nickname)
+        )
 
-        if config["time_minutes"] is not None:
-            initial = config["time_minutes"] * 60
-            incr = config["increment_seconds"]
-            self._time_control = (initial, incr)
-        else:
-            self._time_control = None
+        self._time_control = (
+            (config["time_minutes"] * 60, config["increment_seconds"])
+            if config["time_minutes"] is not None else None
+        )
 
         self._reset_to_new_game()
         self.start_menu.hide()
@@ -322,7 +320,7 @@ class Frontend:
             not self.board.is_animating()
             and now - self.board.last_animation_completed_at_ms >= AUTO_FLIP_DELAY_MS
         )
-        if (self.mode == "single_screen"
+        if (self.mode == SINGLE_SCREEN
                 and self.current_result() is None
                 and post_animation_settled):
             current = self.match.current_turn()
@@ -376,8 +374,7 @@ class Frontend:
             history = history[:self.board.review_ply]
         captured = captured_by(history, color)
         advantage = material_advantage(history, color)
-        opponent = PieceColor.BLACK if color == PieceColor.WHITE else PieceColor.WHITE
-        return name, seconds, active, captured, advantage, opponent
+        return name, seconds, active, captured, advantage, opponent_of(color)
 
     def _compute_layout(self):
         window_width, window_height = self.window.get_size()
@@ -469,19 +466,17 @@ class Frontend:
             self.board._right_drag_start_square = sq
 
     def _right_click_released(self, pos):
-        if self.mode == "menu":
-            self.board._right_drag_start_square = None
-            return
         start = self.board._right_drag_start_square
-        end = self.board.cell_at(pos)
-        if start is not None:
-            if end is None:
-                pass
-            elif end == start:
-                self.board.toggle_highlight(start)
-            else:
-                self.board.toggle_arrow(start, end)
         self.board._right_drag_start_square = None
+        if self.mode == "menu" or start is None:
+            return
+        end = self.board.cell_at(pos)
+        if end is None:
+            return
+        if end == start:
+            self.board.toggle_highlight(start)
+        else:
+            self.board.toggle_arrow(start, end)
 
     def mouse_left_clicked(self, pos):
         if self.file_picker.is_visible():

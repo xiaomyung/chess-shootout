@@ -9,6 +9,10 @@ class PieceColor(Enum):
     BLACK = "black"
 
 
+def opponent_of(color):
+    return PieceColor.BLACK if color == PieceColor.WHITE else PieceColor.WHITE
+
+
 class PieceType(Enum):
     PAWN = "pawn"
     KNIGHT = "knight"

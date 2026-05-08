@@ -2,7 +2,7 @@ import pygame as pg
 
 from frontend.colors import Colors
 from frontend.pgn import iter_move_pairs
-from frontend.widgets import draw_button_row
+from frontend.widgets import draw_button_row, draw_scroll_thumb
 
 
 BUTTONS = [
@@ -16,11 +16,6 @@ REVIEW_BUTTONS = [
     ("Menu", "menu"),
     ("Flip", "flip"),
 ]
-
-SCROLL_FADE_MS = 2000
-SCROLL_THUMB_WIDTH = 4
-SCROLL_THUMB_RIGHT_OFFSET = 4
-SCROLL_THUMB_MIN_HEIGHT = 18
 
 
 class RightMenu:
@@ -156,7 +151,7 @@ class RightMenu:
         self._move_cell_hits = []
 
         char_w, _ = self.font.size("0")
-        prefix_chars = 5  # "  1. " etc.
+        prefix_chars = 5
         prefix_w = char_w * prefix_chars
         cell_pad = 4
         inner_w = rect.width - 2 * self.padding
@@ -199,23 +194,15 @@ class RightMenu:
         max_offset = max(0, self._total_rows - self._max_lines)
         if max_offset == 0:
             return
-        if pg.time.get_ticks() - self._last_scroll_activity_ms > SCROLL_FADE_MS:
-            return
-
-        track_y = rect.y + self.padding
-        track_h = rect.height - 2 * self.padding
-        if track_h <= 0:
-            return
-
-        thumb_h = max(SCROLL_THUMB_MIN_HEIGHT,
-                      int(track_h * self._max_lines / self._total_rows))
-        thumb_h = min(thumb_h, track_h)
-        thumb_y = track_y + int((track_h - thumb_h) * (1 - self.scroll_offset / max_offset))
-        thumb_x = rect.right - SCROLL_THUMB_RIGHT_OFFSET - SCROLL_THUMB_WIDTH
-
-        thumb_rect = pg.Rect(thumb_x, thumb_y, SCROLL_THUMB_WIDTH, thumb_h)
-        pg.draw.rect(self.window, Colors.button_hover, thumb_rect,
-                     border_radius=SCROLL_THUMB_WIDTH // 2)
+        track_rect = pg.Rect(
+            rect.x, rect.y + self.padding,
+            rect.width, rect.height - 2 * self.padding,
+        )
+        offset_fraction = 1 - self.scroll_offset / max_offset
+        draw_scroll_thumb(
+            self.window, track_rect, self._total_rows, self._max_lines,
+            offset_fraction, self._last_scroll_activity_ms,
+        )
 
     def _draw_buttons(self, rect):
         self.button_rects = draw_button_row(

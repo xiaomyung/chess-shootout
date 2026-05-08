@@ -104,7 +104,6 @@ class PlayerStrip:
         gap = 6
         x = start_x + gap
         max_x = name_region.right - self.pocket_inset
-        icon_h = 0
         for piece_type in self.captured:
             icon = self.icons.get((piece_type, self.captured_color))
             if icon is None:
@@ -113,7 +112,6 @@ class PlayerStrip:
                 return
             self.window.blit(icon, (x, name_region.centery - icon.get_height() / 2))
             x += icon.get_width() - icon.get_width() // 3
-            icon_h = max(icon_h, icon.get_height())
 
         if self.advantage > 0:
             adv_surf = self.advantage_font.render(

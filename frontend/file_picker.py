@@ -3,13 +3,7 @@ import os
 import pygame as pg
 
 from frontend.colors import Colors
-from frontend.widgets import _draw_button
-
-
-SCROLL_FADE_MS = 2000
-SCROLL_THUMB_WIDTH = 4
-SCROLL_THUMB_RIGHT_OFFSET = 4
-SCROLL_THUMB_MIN_HEIGHT = 18
+from frontend.widgets import draw_button, draw_scroll_thumb
 
 
 class FilePicker:
@@ -137,29 +131,18 @@ class FilePicker:
             btn_h,
         )
         self._cancel_rect = cancel_rect
-        _draw_button(self.window, cancel_rect, "Cancel", self.button_font)
+        draw_button(self.window, cancel_rect, "Cancel", self.button_font)
 
     def _draw_scroll_indicator(self):
         total = len(self.entries)
         max_offset = max(0, total - self._max_visible)
         if max_offset == 0:
             return
-        if pg.time.get_ticks() - self._last_scroll_activity_ms > SCROLL_FADE_MS:
-            return
-        track_y = self._list_rect.y
-        track_h = self._list_rect.height
-        if track_h <= 0:
-            return
-        thumb_h = max(SCROLL_THUMB_MIN_HEIGHT,
-                      int(track_h * self._max_visible / total))
-        thumb_h = min(thumb_h, track_h)
-        thumb_y = track_y + int(
-            (track_h - thumb_h) * (self.scroll_offset / max_offset)
+        offset_fraction = self.scroll_offset / max_offset
+        draw_scroll_thumb(
+            self.window, self._list_rect, total, self._max_visible,
+            offset_fraction, self._last_scroll_activity_ms,
         )
-        thumb_x = self._list_rect.right - SCROLL_THUMB_RIGHT_OFFSET - SCROLL_THUMB_WIDTH
-        thumb_rect = pg.Rect(thumb_x, thumb_y, SCROLL_THUMB_WIDTH, thumb_h)
-        pg.draw.rect(self.window, Colors.button_hover, thumb_rect,
-                     border_radius=SCROLL_THUMB_WIDTH // 2)
 
     def handle_click(self, pos):
         if not self.visible:

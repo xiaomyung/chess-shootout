@@ -49,7 +49,6 @@ class Board:
         self.arrows = []
         self._right_drag_start_square = None
         self._press_pos = None
-        self._press_cell = None
         self.dragging_from = None
         self._drag_cursor = None
         self.review_ply = None
@@ -202,10 +201,7 @@ class Board:
                 self.window.blit(overlay, rect.topleft)
 
     def toggle_highlight(self, sq):
-        if sq in self.highlighted_squares:
-            self.highlighted_squares.remove(sq)
-        else:
-            self.highlighted_squares.add(sq)
+        self.highlighted_squares ^= {sq}
 
     def toggle_arrow(self, from_sq, to_sq):
         arrow = (from_sq, to_sq)
@@ -215,12 +211,9 @@ class Board:
             self.arrows.append(arrow)
 
     def is_square_annotated(self, sq):
-        if sq in self.highlighted_squares:
-            return True
-        for from_sq, to_sq in self.arrows:
-            if sq == from_sq or sq == to_sq:
-                return True
-        return False
+        return sq in self.highlighted_squares or any(
+            sq in (from_sq, to_sq) for from_sq, to_sq in self.arrows
+        )
 
     def clear_annotations(self):
         self.highlighted_squares = set()
@@ -431,12 +424,11 @@ class Board:
                              on_complete=finish)
         if move.is_castle:
             home_row = move.from_sq.row
-            if move.to_sq.col == 6:
-                rook_from = Square(home_row, 7)
-                rook_to = Square(home_row, 5)
-            else:
-                rook_from = Square(home_row, 0)
-                rook_to = Square(home_row, 3)
+            rook_from, rook_to = (
+                (Square(home_row, 7), Square(home_row, 5))
+                if move.to_sq.col == 6
+                else (Square(home_row, 0), Square(home_row, 3))
+            )
             rook_piece = Piece(PieceType.ROOK, move.piece.color)
             self.start_animation(rook_from, rook_to, rook_piece)
 
@@ -492,7 +484,6 @@ class Board:
 
     def begin_press(self, pos):
         self._press_pos = pos
-        self._press_cell = self.cell_at(pos)
 
     def update_drag_motion(self, pos):
         if self.read_only:
@@ -516,7 +507,6 @@ class Board:
     def end_press(self):
         was_dragging = self.dragging_from is not None
         self._press_pos = None
-        self._press_cell = None
         self.dragging_from = None
         self._drag_cursor = None
         return was_dragging
@@ -655,11 +645,11 @@ class Board:
         entry = self.match.move_history[-1]
         moving_piece = entry.move.piece
 
-        if promotion_required:
-            promotion_sq = to_sq
-            on_complete = lambda: self._set_pending_promotion(promotion_sq)
-        else:
-            on_complete = self._fire_move_landed
+        on_complete = (
+            (lambda: self._set_pending_promotion(to_sq))
+            if promotion_required
+            else self._fire_move_landed
+        )
 
         if self.dragging_from is not None:
             on_complete()
@@ -669,12 +659,11 @@ class Board:
 
         if entry.move.is_castle:
             home_row = from_sq.row
-            if to_sq.col == 6:
-                rook_from = Square(home_row, 7)
-                rook_to = Square(home_row, 5)
-            else:
-                rook_from = Square(home_row, 0)
-                rook_to = Square(home_row, 3)
+            rook_from, rook_to = (
+                (Square(home_row, 7), Square(home_row, 5))
+                if to_sq.col == 6
+                else (Square(home_row, 0), Square(home_row, 3))
+            )
             rook_piece = self.match.piece_at(rook_to)
             self.start_animation(rook_from, rook_to, rook_piece)
 
@@ -685,10 +674,11 @@ class Board:
         self.start_animation(move.to_sq, move.from_sq, moving_piece)
         if move.is_castle:
             home_row = move.from_sq.row
-            if move.to_sq.col == 6:
-                rook_post, rook_home = Square(home_row, 5), Square(home_row, 7)
-            else:
-                rook_post, rook_home = Square(home_row, 3), Square(home_row, 0)
+            rook_post, rook_home = (
+                (Square(home_row, 5), Square(home_row, 7))
+                if move.to_sq.col == 6
+                else (Square(home_row, 3), Square(home_row, 0))
+            )
             rook_piece = self.match.piece_at(rook_home)
             self.start_animation(rook_post, rook_home, rook_piece)
 

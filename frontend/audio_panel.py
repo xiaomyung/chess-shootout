@@ -1,7 +1,7 @@
 import pygame as pg
 
 from frontend.colors import Colors
-from frontend.widgets import _draw_button
+from frontend.widgets import draw_button
 
 
 SLIDER_FRACTION = 0.75
@@ -57,7 +57,7 @@ class AudioPanel:
 
     def _draw_mute(self):
         label = "Unmute" if not self.sound_manager.enabled else "Mute"
-        _draw_button(self.window, self.mute_rect, label, self.button_font)
+        draw_button(self.window, self.mute_rect, label, self.button_font)
 
     def _track_rect(self):
         track_h = max(int(self.slider_rect.height * 0.25), 4)

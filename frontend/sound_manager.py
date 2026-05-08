@@ -1,6 +1,6 @@
 import io
 import random
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 
 import pygame as pg

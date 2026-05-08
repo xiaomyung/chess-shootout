@@ -2,11 +2,7 @@ import time
 from dataclasses import dataclass, field
 from typing import Callable, Optional
 
-from backend.pieces import PieceColor
-
-
-def _opposite(color):
-    return PieceColor.BLACK if color == PieceColor.WHITE else PieceColor.WHITE
+from backend.pieces import PieceColor, opponent_of
 
 
 @dataclass
@@ -63,7 +59,7 @@ class Clock:
             self.white_remaining += self.increment_seconds
         else:
             self.black_remaining += self.increment_seconds
-        self.running_for = _opposite(mover)
+        self.running_for = opponent_of(mover)
         self.last_tick_at = self.now_provider()
 
     def stop(self):

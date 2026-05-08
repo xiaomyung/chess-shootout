@@ -1,4 +1,4 @@
-from backend.pieces import PieceColor, PieceType
+from backend.pieces import PieceType, opponent_of
 
 
 PIECE_VALUES = {
@@ -33,6 +33,5 @@ def captured_by(history, color):
 
 def material_advantage(history, color):
     own = sum(PIECE_VALUES[t] for t in captured_by(history, color))
-    other = PieceColor.BLACK if color == PieceColor.WHITE else PieceColor.WHITE
-    opp = sum(PIECE_VALUES[t] for t in captured_by(history, other))
+    opp = sum(PIECE_VALUES[t] for t in captured_by(history, opponent_of(color)))
     return own - opp

@@ -1,14 +1,15 @@
 import pygame as pg
 
+from backend.match import SINGLE_SCREEN, BOT, ONLINE
 from frontend.colors import Colors
 from frontend.text_input import TextInput
-from frontend.widgets import _draw_button, draw_selector
+from frontend.widgets import draw_button, draw_selector
 
 
 MODE_OPTIONS = [
-    ("Single-screen", "single_screen"),
-    ("Bot", "bot"),
-    ("Online", "online"),
+    ("Single-screen", SINGLE_SCREEN),
+    ("Bot", BOT),
+    ("Online", ONLINE),
 ]
 
 TIME_OPTIONS = [
@@ -50,7 +51,7 @@ class StartMenu:
 
         self.text_input = TextInput(window)
 
-        self.selected_mode = "single_screen"
+        self.selected_mode = SINGLE_SCREEN
         self.selected_time_minutes = 10
         self.selected_increment_seconds = 5
         self.selected_side = "white"
@@ -178,8 +179,7 @@ class StartMenu:
 
     def draw(self):
         if not self.visible:
-            for key in self._section_rects_by_key:
-                self._section_rects_by_key[key] = {}
+            self._section_rects_by_key = {k: {} for k in self._section_rects_by_key}
             return
 
         pg.draw.rect(self.window, Colors.light_grey_menu, self._outer, border_radius=8)
@@ -197,10 +197,9 @@ class StartMenu:
                 i, label, options, getattr(self, attr), attr,
             )
 
-        _draw_button(self.window, self._load_pgn_rect, "Load PGN", self.start_font,
-                     disabled=not self.load_pgn_available)
-        _draw_button(self.window, self._start_rect, "Start Game", self.start_font,
-                     force_pressed=False)
+        draw_button(self.window, self._load_pgn_rect, "Load PGN", self.start_font,
+                    disabled=not self.load_pgn_available)
+        draw_button(self.window, self._start_rect, "Start Game", self.start_font)
 
     def _draw_section(self, idx, label, options, selected_key, attr):
         label_surf = self.label_font.render(label, True, Colors.white)

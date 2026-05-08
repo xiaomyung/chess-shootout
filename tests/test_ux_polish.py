@@ -257,7 +257,6 @@ def test_end_press_clears_state(board):
     assert was_dragging is True
     assert board.dragging_from is None
     assert board._press_pos is None
-    assert board._press_cell is None
 
 
 def test_drag_skips_origin_in_draw_pieces(board):

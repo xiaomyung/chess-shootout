@@ -7,8 +7,9 @@ import pygame as pg
 import pytest
 
 from backend.backend import Backend
-from frontend.right_menu import (
-    RightMenu, SCROLL_FADE_MS, SCROLL_THUMB_RIGHT_OFFSET, SCROLL_THUMB_WIDTH,
+from frontend.right_menu import RightMenu
+from frontend.widgets import (
+    SCROLL_FADE_MS, SCROLL_THUMB_RIGHT_OFFSET, SCROLL_THUMB_WIDTH,
 )
 
 
