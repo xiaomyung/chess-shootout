@@ -40,14 +40,17 @@ OPPONENT_NAME_FOR_MODE = {
 
 AUTO_FLIP_DELAY_MS = 200
 
+MIN_WINDOW_WIDTH = 900
+MIN_WINDOW_HEIGHT = 500
+
 
 class Frontend:
 
     def __init__(self, window_width: int, window_height: int):
         self.running = True
         self.target_fps = 60
-        self.window_width = window_width
-        self.window_height = window_height
+        self.window_width = max(window_width, MIN_WINDOW_WIDTH)
+        self.window_height = max(window_height, MIN_WINDOW_HEIGHT)
         self.window = pg.display.set_mode((self.window_width, self.window_height), pg.RESIZABLE)
         self.clock = pg.time.Clock()
 
@@ -340,4 +343,10 @@ class Frontend:
                     self.mouse_left_clicked(event.pos)
 
             elif event.type == pg.VIDEORESIZE:
+                w = max(event.w, MIN_WINDOW_WIDTH)
+                h = max(event.h, MIN_WINDOW_HEIGHT)
+                if (w, h) != (event.w, event.h):
+                    self.window = pg.display.set_mode((w, h), pg.RESIZABLE)
+                self.window_width = w
+                self.window_height = h
                 self._compute_layout()
