@@ -6,10 +6,11 @@ import pygame as pg
 
 from backend.backend import Backend
 from frontend.board import Board
+from frontend.player_strip import PlayerStrip
 from frontend.right_menu import RightMenu
 from frontend.result_menu import ResultMenu
 from frontend.start_menu import StartMenu
-from frontend.pgn import generate_pgn
+from frontend.pgn import generate_pgn, TIMEOUT_RESULTS
 from paths import PROJECT_ROOT
 from pieces.pieces import PieceColor, PieceType
 
@@ -74,6 +75,8 @@ class Frontend:
             "draw": self._on_draw,
             "flip": self._on_flip,
         })
+        self.player_strip_top = PlayerStrip(self.window)
+        self.player_strip_bottom = PlayerStrip(self.window)
 
         self.backend.new_game()
         self.board.load_assets()
@@ -148,8 +151,14 @@ class Frontend:
         os.makedirs(games_dir, exist_ok=True)
         filename = f"game-{datetime.now().strftime('%Y%m%d-%H%M%S')}.pgn"
         path = os.path.join(games_dir, filename)
+        time_control = self._time_control
+        termination = "Time forfeit" if result in TIMEOUT_RESULTS else None
         with open(path, "w") as f:
-            f.write(generate_pgn(self.backend.move_history, result))
+            f.write(generate_pgn(
+                self.backend.move_history, result,
+                white_name=self.white_name, black_name=self.black_name,
+                time_control=time_control, termination=termination,
+            ))
 
     def _on_undo(self):
         if self.manual_result is not None:
@@ -191,6 +200,9 @@ class Frontend:
         pg.quit()
 
     def draw_frame(self):
+        if self.mode != "menu" and self.current_result() is None:
+            self.backend.tick_clock()
+
         now = pg.time.get_ticks()
         if (self.mode == "single_screen"
                 and self.current_result() is None
@@ -203,10 +215,28 @@ class Frontend:
 
         self.board.draw_board()
         if self.mode != "menu":
+            self._update_player_strips()
+            self.player_strip_top.draw()
+            self.player_strip_bottom.draw()
             self.right_menu.draw_menu()
             self.result_menu.set_text(self.result_text())
             self.result_menu.draw()
         self.start_menu.draw()
+
+    def _update_player_strips(self):
+        top_color = PieceColor.WHITE if self.board.flipped else PieceColor.BLACK
+        bottom_color = PieceColor.BLACK if self.board.flipped else PieceColor.WHITE
+        turn = self.backend.current_turn()
+        over = self.current_result() is not None
+        self.player_strip_top.set_state(*self._strip_state(top_color, turn, over))
+        self.player_strip_bottom.set_state(*self._strip_state(bottom_color, turn, over))
+
+    def _strip_state(self, color, turn, over):
+        name = self.white_name if color == PieceColor.WHITE else self.black_name
+        seconds = (self.backend.clock.remaining(color)
+                   if self.backend.clock is not None else None)
+        active = (color == turn) and not over
+        return name, seconds, active
 
     def _compute_layout(self):
         window_width, window_height = self.window.get_size()
@@ -249,6 +279,21 @@ class Frontend:
             max(window_height, 500)
         )
 
+        strip_height = board_size_px * 0.075
+        strip_gap = board_size_px * 0.015
+        top_strip_rect = pg.Rect(
+            board_x,
+            board_y - strip_height - strip_gap,
+            board_size_px,
+            strip_height,
+        )
+        bottom_strip_rect = pg.Rect(
+            board_x,
+            board_y + board_size_px + strip_gap,
+            board_size_px,
+            strip_height,
+        )
+
         self.board.font = pg.font.SysFont(
             "Arial",
             int(effective // self.board.board_guides_font_factor),
@@ -258,6 +303,8 @@ class Frontend:
         self.result_menu.set_rect(result_rect)
         self.start_menu.set_rect(start_rect)
         self.right_menu.set_rect(menu_rect)
+        self.player_strip_top.set_rect(top_strip_rect)
+        self.player_strip_bottom.set_rect(bottom_strip_rect)
 
     def mouse_left_clicked(self, pos):
         if self.mode == "menu":
