@@ -203,6 +203,16 @@ class Board:
         self._render_arrow(self._right_drag_start_square, end_sq,
                            Colors.annotation_arrow_preview)
 
+    @staticmethod
+    def _knight_arrow_corner(from_sq, to_sq):
+        dr = to_sq.row - from_sq.row
+        dc = to_sq.col - from_sq.col
+        if {abs(dr), abs(dc)} != {1, 2}:
+            return None
+        if abs(dr) == 2:
+            return Square(to_sq.row, from_sq.col)
+        return Square(from_sq.row, to_sq.col)
+
     def _render_arrow(self, from_sq, to_sq, color):
         if self.cell_size <= 0:
             return
@@ -212,8 +222,24 @@ class Board:
         to_pos = (to_rect.centerx, to_rect.centery)
         width = max(int(self.cell_size * 0.18), 4)
         head_size = max(int(self.cell_size * 0.35), 8)
+        cap_radius = max(width // 2, 2)
 
-        angle = math.atan2(to_pos[1] - from_pos[1], to_pos[0] - from_pos[0])
+        surface_size = self.window.get_size()
+        overlay = pg.Surface(surface_size, pg.SRCALPHA)
+
+        pg.draw.circle(overlay, color, from_pos, cap_radius)
+
+        corner_sq = self._knight_arrow_corner(from_sq, to_sq)
+        if corner_sq is not None:
+            corner_rect = self._cell_rect(corner_sq.row, corner_sq.col)
+            corner_pos = (corner_rect.centerx, corner_rect.centery)
+            pg.draw.line(overlay, color, from_pos, corner_pos, width)
+            pg.draw.circle(overlay, color, corner_pos, cap_radius)
+            shaft_origin = corner_pos
+        else:
+            shaft_origin = from_pos
+
+        angle = math.atan2(to_pos[1] - shaft_origin[1], to_pos[0] - shaft_origin[0])
         shaft_end = (
             to_pos[0] - head_size * 0.55 * math.cos(angle),
             to_pos[1] - head_size * 0.55 * math.sin(angle),
@@ -228,9 +254,7 @@ class Board:
             to_pos[1] + head_size * math.sin(angle - head_half),
         )
 
-        surface_size = self.window.get_size()
-        overlay = pg.Surface(surface_size, pg.SRCALPHA)
-        pg.draw.line(overlay, color, from_pos, shaft_end, width)
+        pg.draw.line(overlay, color, shaft_origin, shaft_end, width)
         pg.draw.polygon(overlay, color, [to_pos, head_left, head_right])
         self.window.blit(overlay, (0, 0))
 

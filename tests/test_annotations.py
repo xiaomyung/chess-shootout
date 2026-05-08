@@ -389,6 +389,59 @@ def test_draw_arrows_does_not_crash(board):
     board._draw_arrows()
 
 
+def test_draw_knight_arrows_does_not_crash(board):
+    # All 8 knight L's from a center square.
+    center = Square(4, 4)
+    for dr, dc in [(-2, -1), (-2, 1), (-1, -2), (-1, 2),
+                   (1, -2), (1, 2), (2, -1), (2, 1)]:
+        board.toggle_arrow(center, Square(center.row + dr, center.col + dc))
+    board._draw_arrows()
+
+
+# ---------- Knight arrow corner geometry ----------
+
+def test_knight_corner_long_vertical_first():
+    # dr = -2, dc = 1 (e.g., g1 -> f3): vertical leg first → corner at (from.row + dr, from.col)
+    corner = Board._knight_arrow_corner(Square(7, 6), Square(5, 5))
+    assert corner == Square(5, 6)
+
+
+def test_knight_corner_long_horizontal_first():
+    # dr = -1, dc = 2 (e.g., g1 -> i2 doesn't exist, use d4 -> f5): horizontal first → corner at (from.row, to.col)
+    corner = Board._knight_arrow_corner(Square(4, 3), Square(3, 5))
+    assert corner == Square(4, 5)
+
+
+def test_knight_corner_negative_directions():
+    # dr = 2, dc = -1 (e.g., e4 -> d6 — south two, west one)
+    corner = Board._knight_arrow_corner(Square(4, 4), Square(6, 3))
+    assert corner == Square(6, 4)
+
+
+def test_knight_corner_returns_none_for_non_l():
+    assert Board._knight_arrow_corner(Square(6, 4), Square(4, 4)) is None  # rook move
+    assert Board._knight_arrow_corner(Square(0, 0), Square(7, 7)) is None  # bishop
+    assert Board._knight_arrow_corner(Square(4, 4), Square(4, 4)) is None  # same square
+    assert Board._knight_arrow_corner(Square(4, 4), Square(2, 2)) is None  # diagonal
+
+
+def test_knight_corner_all_eight_l_shapes():
+    center = Square(4, 4)
+    expected_corners = {
+        (-2, -1): Square(2, 4),
+        (-2,  1): Square(2, 4),
+        (-1, -2): Square(4, 2),
+        (-1,  2): Square(4, 6),
+        ( 1, -2): Square(4, 2),
+        ( 1,  2): Square(4, 6),
+        ( 2, -1): Square(6, 4),
+        ( 2,  1): Square(6, 4),
+    }
+    for (dr, dc), expected in expected_corners.items():
+        corner = Board._knight_arrow_corner(center, Square(center.row + dr, center.col + dc))
+        assert corner == expected, f"dr={dr}, dc={dc}: got {corner}, expected {expected}"
+
+
 def test_draw_drag_preview_arrow_no_drag_is_noop(board):
     board._right_drag_start_square = None
     board._draw_drag_preview_arrow()  # must not raise
