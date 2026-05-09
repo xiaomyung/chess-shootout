@@ -179,7 +179,8 @@ caps. Steps in the Cloudflare dashboard for your zone:
    protection from any other site you ever host on the same root
    domain. Instead:
 
-   **WAF Custom Rule** (Cloudflare → Security → WAF → Custom rules):
+   **Custom Rule** (Cloudflare → Security rules → Custom rules — older
+   dashboards label this section "WAF" instead of "Security rules"):
    - Field: Hostname, Operator: equals, Value: `chess.your-domain.com`
    - Action: Skip
    - Features to skip: Bot Fight Mode, Super Bot Fight Mode, All
