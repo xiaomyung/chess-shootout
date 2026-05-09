@@ -48,14 +48,15 @@ def draw_button(window, rect, label, font, force_pressed=False, disabled=False):
     )
 
 
-def draw_button_row(window, rect, buttons, font, gap):
+def draw_button_row(window, rect, buttons, font, gap, disabled_keys=None):
     n = len(buttons)
     btn_w = (rect.width - gap * (n - 1)) / n
     button_rects = {}
+    disabled_keys = disabled_keys or set()
     for i, (label, key) in enumerate(buttons):
         x = rect.x + i * (btn_w + gap)
         br = pg.Rect(x, rect.y, btn_w, rect.height)
-        draw_button(window, br, label, font)
+        draw_button(window, br, label, font, disabled=key in disabled_keys)
         button_rects[key] = br
     return button_rects
 

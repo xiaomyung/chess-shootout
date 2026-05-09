@@ -268,14 +268,17 @@ def test_undo_clears_selection_even_when_history_empty():
     assert app.board.selected_square is None
 
 
-def test_undo_clears_selection_even_when_manual_result_set():
+def test_undo_no_op_when_manual_result_set():
+    # Undo is fully blocked once the game has ended — it must not undo a move,
+    # not dismiss the result, not even mutate selection.
     from frontend.frontend import Frontend
     app = Frontend(800, 600)
     app._on_start_game(DEFAULT_CONFIG)
     app.manual_result = "white_wins"
     app.board.selected_square = Square(6, 4)
     app._on_undo()
-    assert app.board.selected_square is None
+    assert app.manual_result == "white_wins"
+    assert app.board.selected_square == Square(6, 4)
 
 
 def test_last_animation_completed_at_ms_initial_zero(board):

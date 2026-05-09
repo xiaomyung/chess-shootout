@@ -158,3 +158,55 @@ def test_new_game_clears_pending_result_state():
     assert app._result_first_seen_at_ms is not None
     app._reset_to_new_game()
     assert app._result_first_seen_at_ms is None
+
+
+# ---------- in-game buttons disabled after result ----------
+
+def test_right_menu_buttons_disabled_after_result():
+    app = _make_app()
+    app.manual_result = "white_wins"
+    assert app._right_menu_disabled_keys() == {"undo", "resign", "draw", "flip"}
+
+
+def test_right_menu_buttons_active_during_normal_play():
+    app = _make_app()
+    assert app._right_menu_disabled_keys() == set()
+
+
+def test_right_menu_buttons_active_in_pgn_review():
+    app = _make_app()
+    app.manual_result = "white_wins"
+    app.pgn_review = True
+    # Review mode renders REVIEW_BUTTONS; nothing extra to disable.
+    assert app._right_menu_disabled_keys() == set()
+
+
+def test_undo_no_op_after_result():
+    app = _make_app()
+    # Play a move so there's something to undo.
+    app.board.handle_click(Square(6, 4))
+    app.board.handle_click(Square(4, 4))
+    history_len = len(app.match.move_history)
+    # Game-over state.
+    app.manual_result = "white_wins"
+    app._on_undo()
+    # Result still set, history untouched, no undo animation queued.
+    assert app.manual_result == "white_wins"
+    assert len(app.match.move_history) == history_len
+
+
+def test_flip_no_op_after_result():
+    app = _make_app()
+    flipped_before = app.board.flipped
+    app.manual_result = "white_wins"
+    app._on_flip()
+    assert app.board.flipped == flipped_before
+
+
+def test_flip_works_in_pgn_review_even_with_result():
+    app = _make_app()
+    app.manual_result = "white_wins"
+    app.pgn_review = True
+    flipped_before = app.board.flipped
+    app._on_flip()
+    assert app.board.flipped != flipped_before

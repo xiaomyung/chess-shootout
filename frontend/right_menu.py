@@ -21,13 +21,15 @@ REVIEW_BUTTONS = [
 class RightMenu:
 
     def __init__(self, window, match, callbacks, board=None,
-                 buttons_provider=None, audio_panel=None):
+                 buttons_provider=None, audio_panel=None,
+                 disabled_keys_provider=None):
         self.window = window
         self.match = match
         self.callbacks = callbacks
         self.board = board
         self.buttons_provider = buttons_provider or (lambda: BUTTONS)
         self.audio_panel = audio_panel
+        self.disabled_keys_provider = disabled_keys_provider or (lambda: set())
 
         self.padding = 10
         self.button_gap = 6
@@ -148,8 +150,11 @@ class RightMenu:
             )
 
     def handle_click(self, pos):
+        disabled = self.disabled_keys_provider()
         for key, rect in self.button_rects.items():
             if rect.collidepoint(pos):
+                if key in disabled:
+                    return True
                 callback = self.callbacks.get(key)
                 if callback is not None:
                     callback()
@@ -284,4 +289,5 @@ class RightMenu:
         self.button_rects = draw_button_row(
             self.window, rect, self.buttons_provider(),
             self.button_font, self.button_gap,
+            disabled_keys=self.disabled_keys_provider(),
         )

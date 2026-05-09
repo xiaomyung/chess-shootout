@@ -120,7 +120,8 @@ class Frontend:
             "flip": self._on_flip,
             "menu": self._on_back_to_menu,
         }, board=self.board, buttons_provider=self._right_menu_buttons,
-            audio_panel=self.audio_panel)
+            audio_panel=self.audio_panel,
+            disabled_keys_provider=self._right_menu_disabled_keys)
         self.confirm_modal = ConfirmModal(self.window)
         self.file_picker = FilePicker(self.window)
         self.server_modal = ServerAddressModal(self.window)
@@ -504,6 +505,11 @@ class Frontend:
             return RIGHT_MENU_REVIEW_BUTTONS
         return RIGHT_MENU_BUTTONS
 
+    def _right_menu_disabled_keys(self):
+        if self.current_result() is None or self.pgn_review:
+            return set()
+        return {"undo", "resign", "draw", "flip"}
+
     def _reset_to_new_game(self):
         self.pgn_review = False
         self.board.read_only = False
@@ -553,7 +559,7 @@ class Frontend:
             ))
 
     def _on_undo(self):
-        if self.pgn_review:
+        if self.pgn_review or self.current_result() is not None:
             return
         if self.mode == ONLINE and self.online_client is not None:
             self.online_client.send_takeback_request()
@@ -562,9 +568,6 @@ class Frontend:
         self.board._clear_premoves()
         self.board.clear_annotations()
         self.board.review_ply = None
-        if self.manual_result is not None:
-            self.manual_result = None
-            return
         self.board.cancel_animations()
         if not self.match.move_history:
             return
@@ -617,6 +620,8 @@ class Frontend:
         self.board.pending_promotion_square = None
 
     def _on_flip(self):
+        if self.current_result() is not None and not self.pgn_review:
+            return
         self.board.flipped = not self.board.flipped
 
     def _on_move_landed(self, entry):
