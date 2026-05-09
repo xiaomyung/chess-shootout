@@ -38,11 +38,20 @@ class TextInput:
             color = Colors.button_border
 
         surface = self.font.render(display, True, color)
+        max_w = max(self.rect.width - 2 * self.padding, 0)
+        if surface.get_width() > max_w > 0:
+            crop = pg.Rect(
+                surface.get_width() - max_w, 0, max_w, surface.get_height(),
+            )
+            surface = surface.subsurface(crop)
+        prev_clip = self.window.get_clip()
+        self.window.set_clip(self.rect)
         self.window.blit(
             surface,
             (self.rect.x + self.padding,
              self.rect.centery - surface.get_height() / 2),
         )
+        self.window.set_clip(prev_clip)
 
     def handle_click(self, pos):
         inside = self.rect.collidepoint(pos)
