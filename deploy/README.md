@@ -171,15 +171,28 @@ caps. Steps in the Cloudflare dashboard for your zone:
    serves a Let's Encrypt cert that satisfies (strict).
 3. **SSL/TLS → Edge Certificates → Always Use HTTPS = ON.**
 4. **Network → WebSockets = ON** (default; verify).
-5. **Security → Bots → Bot Fight Mode = OFF.** Bot Fight Mode serves
-   a JS interstitial to anything that looks like a "bot" — including
-   `curl`, the pygame client (which doesn't run JS), and any WebSocket
-   handshake. Confirmed in production: enabling it breaks every
-   legitimate API call. The app's per-uuid + per-IP rate limits already
-   cover abusive automation.
-6. **Security → Settings → Security Level = Essentially Off** (or
-   Low). Higher levels reintroduce the same challenge-page problem
-   for any client Cloudflare's heuristics flag.
+5. **Bot Fight Mode and Security Level: scope a bypass to the chess
+   subdomain — don't relax them zone-wide.** Bot Fight Mode serves a
+   JS interstitial to anything Cloudflare's heuristics flag as a bot,
+   which includes `curl`, the pygame client (no JS runtime), and the
+   WebSocket handshake. Disabling it zone-wide would also strip
+   protection from any other site you ever host on the same root
+   domain. Instead:
+
+   **WAF Custom Rule** (Cloudflare → Security → WAF → Custom rules):
+   - Field: Hostname, Operator: equals, Value: `chess.your-domain.com`
+   - Action: Skip
+   - Features to skip: Bot Fight Mode, Super Bot Fight Mode, All
+     Managed Rules
+
+   **Configuration Rule** (Cloudflare → Rules → Configuration Rules):
+   - Hostname equals `chess.your-domain.com`
+   - Then settings: Security Level → Essentially Off
+
+   Net effect: zone-wide protection stays strict; only the chess
+   subdomain pass-through is wide-open at the CF layer. The app's
+   per-uuid + per-IP rate limits and Pydantic validation cover abuse
+   on its end.
 
 Cloudflare's WebSocket idle timeout is 100 seconds — our server already
 sends ping frames every 20s (`ws_ping_interval=20` in
