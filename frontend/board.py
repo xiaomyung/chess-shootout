@@ -706,20 +706,27 @@ class Board:
         )
 
         if self.dragging_from is not None:
-            on_complete()
+            if entry.move.is_castle:
+                self._start_castle_rook_animation(entry, from_sq, on_complete=on_complete)
+            else:
+                on_complete()
             return
 
         self.start_animation(from_sq, to_sq, moving_piece, on_complete=on_complete)
 
         if entry.move.is_castle:
-            home_row = from_sq.row
-            rook_from, rook_to = (
-                (Square(home_row, 7), Square(home_row, 5))
-                if to_sq.col == 6
-                else (Square(home_row, 0), Square(home_row, 3))
-            )
-            rook_piece = self.match.piece_at(rook_to)
-            self.start_animation(rook_from, rook_to, rook_piece)
+            self._start_castle_rook_animation(entry, from_sq)
+
+    def _start_castle_rook_animation(self, entry, king_from_sq, on_complete=None):
+        home_row = king_from_sq.row
+        king_to_col = entry.move.to_sq.col
+        rook_from, rook_to = (
+            (Square(home_row, 7), Square(home_row, 5))
+            if king_to_col == 6
+            else (Square(home_row, 0), Square(home_row, 3))
+        )
+        rook_piece = self.match.piece_at(rook_to)
+        self.start_animation(rook_from, rook_to, rook_piece, on_complete=on_complete)
 
     def start_undo_animation(self, move):
         moving_piece = self.match.piece_at(move.from_sq)
