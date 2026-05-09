@@ -555,6 +555,11 @@ class Board:
         local_color = getattr(self.match, "local_color", None)
         if local_color is not None and piece.color != local_color:
             return False
+        # Premoves only make sense when it's NOT the moving side's turn.
+        # On its own turn the player should play through try_move; queueing
+        # a premove on top would fire a duplicate sound + speculative state.
+        if piece.color == self.match.current_turn():
+            return False
         if not piece_can_pseudo_reach(piece, chain_tip, target_sq):
             return False
         self._queue_premove(chain_tip, target_sq, piece)

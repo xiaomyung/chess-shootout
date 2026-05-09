@@ -1139,6 +1139,21 @@ def test_right_click_during_drag_off_shape_rejected_pseudo_legal(board):
     assert board.premoves == []
 
 
+def test_drag_right_click_on_own_turn_does_not_queue_premove(board):
+    # Real-turn moves go through try_move; queueing a premove would fire a
+    # spurious move-sound and speculative state.
+    setup_position(board, {
+        Square(7, 4): Piece(PieceType.KING, PieceColor.WHITE),
+        Square(0, 4): Piece(PieceType.KING, PieceColor.BLACK),
+        Square(7, 0): Piece(PieceType.ROOK, PieceColor.WHITE),
+        Square(6, 0): Piece(PieceType.KNIGHT, PieceColor.WHITE),
+    }, turn=PieceColor.WHITE)
+    _start_drag(board, Square(7, 0))
+    # Rook a1 is shape-reachable to a3 but the path is blocked by knight at a2.
+    assert board.queue_premove_from_drag(Square(5, 0)) is False
+    assert board.premoves == []
+
+
 def test_right_click_during_drag_same_square_no_queue(board):
     setup_position(board, {
         Square(7, 4): Piece(PieceType.KING, PieceColor.WHITE),
