@@ -14,6 +14,7 @@ from frontend.board import Board
 from frontend.panels.capture_summary import captured_by, material_advantage
 from frontend.modals.confirm import ConfirmModal
 from frontend.modals.file_picker import FilePicker
+from frontend.modals.fen_input import FenInputModal
 from frontend.modals.help import HelpModal
 from frontend.visual.toast import Toast
 from frontend.online.client import OnlineClient, fetch_resume, probe_active_game
@@ -150,6 +151,7 @@ class Frontend(OnlineEventsMixin):
         self.start_menu = StartMenu(self.window, {
             "start_game": self._on_start_game,
             "load_pgn": self._on_load_last_game,
+            "fen": self._on_open_fen_modal,
             "reconnect": self._on_reconnect_active_game,
         })
         self._pending_reconnect = None
@@ -168,6 +170,7 @@ class Frontend(OnlineEventsMixin):
         self.confirm_modal = ConfirmModal(self.window)
         self.file_picker = FilePicker(self.window)
         self.help_modal = HelpModal(self.window)
+        self.fen_input_modal = FenInputModal(self.window)
         self.toast = Toast(self.window)
         self._last_saved_pgn_path = None
         self.server_modal = ServerAddressModal(self.window)
@@ -222,8 +225,8 @@ class Frontend(OnlineEventsMixin):
         self.start_menu.load_pgn_available = self._latest_pgn_path() is not None
 
     def _latest_pgn_path(self):
-        pattern = os.path.join(PROJECT_ROOT, "games", "game-*.pgn")
-        files = glob.glob(pattern)
+        games_dir = os.path.join(PROJECT_ROOT, "games")
+        files = glob.glob(os.path.join(games_dir, "*.pgn"))
         if not files:
             return None
         return max(files, key=os.path.getmtime)
@@ -234,6 +237,28 @@ class Frontend(OnlineEventsMixin):
             games_dir, "*.pgn",
             on_select=self._load_pgn_from_path,
         )
+
+    def _on_open_fen_modal(self):
+        self.fen_input_modal.show(on_submit=self._start_game_from_fen)
+
+    def _start_game_from_fen(self, fen):
+        from backend.fen import apply_fen
+        try:
+            apply_fen(self.match.backend, fen)
+        except (ValueError, KeyError, IndexError):
+            return False
+        self.mode = SINGLE_SCREEN
+        self._time_control = None
+        self._chosen_side = "white"
+        self.white_name = "Player 1"
+        self.black_name = "Player 2"
+        self.match.mode = SINGLE_SCREEN
+        self.match.local_color = None
+        self._reset_to_new_game()
+        apply_fen(self.match.backend, fen)
+        self.fen_input_modal.hide()
+        self.start_menu.hide()
+        return True
 
     def _load_pgn_from_path(self, path):
         with open(path) as f:
@@ -612,6 +637,7 @@ class Frontend(OnlineEventsMixin):
         self.server_modal.draw()
         self.wait_modal.draw()
         self.help_modal.draw()
+        self.fen_input_modal.draw()
         self.toast.draw()
         self._drain_online_inbound()
 
@@ -814,6 +840,7 @@ class Frontend(OnlineEventsMixin):
         self.file_picker.set_rect(start_rect)
         self.start_menu.set_rect(start_rect)
         self.help_modal.set_rect(result_rect)
+        self.fen_input_modal.set_rect(result_rect)
         self.right_menu.set_rect(menu_rect)
         self.player_strip_top.set_rect(top_strip_rect)
         self.player_strip_bottom.set_rect(bottom_strip_rect)
@@ -862,6 +889,9 @@ class Frontend(OnlineEventsMixin):
             return
         if self.help_modal.is_visible():
             self.help_modal.handle_click(pos)
+            return
+        if self.fen_input_modal.is_visible():
+            self.fen_input_modal.handle_click(pos)
             return
         if self.file_picker.is_visible():
             self.file_picker.handle_click(pos)
@@ -998,6 +1028,9 @@ class Frontend(OnlineEventsMixin):
                 if self.server_modal.is_visible():
                     continue
                 if self.wait_modal.is_visible():
+                    continue
+                if self.fen_input_modal.is_visible():
+                    self.fen_input_modal.handle_key(event)
                     continue
                 if self.start_menu.is_visible() and self.start_menu.handle_key(event):
                     continue

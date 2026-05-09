@@ -70,6 +70,7 @@ class StartMenu:
         self._section_label_ys = [0, 0, 0, 0]
         self._section_selector_rects = [pg.Rect(0, 0, 0, 0) for _ in range(4)]
         self._load_pgn_rect = pg.Rect(0, 0, 0, 0)
+        self._fen_rect = pg.Rect(0, 0, 0, 0)
         self._reconnect_rect = pg.Rect(0, 0, 0, 0)
         self._start_rect = pg.Rect(0, 0, 0, 0)
 
@@ -149,23 +150,22 @@ class StartMenu:
             block_y += block_h + inter_block_gap
 
         gap = self.row_gap
+        button_keys = ["load_pgn", "fen"]
         if self.reconnect_available:
-            third_w = (inner_w - 2 * gap) // 3
-            self._load_pgn_rect = pg.Rect(inner_x, start_y, third_w, start_h)
-            self._reconnect_rect = pg.Rect(
-                inner_x + third_w + gap, start_y, third_w, start_h,
-            )
-            self._start_rect = pg.Rect(
-                inner_x + 2 * (third_w + gap), start_y,
-                inner_w - 2 * (third_w + gap), start_h,
-            )
-        else:
-            half_w = (inner_w - gap) // 2
-            self._load_pgn_rect = pg.Rect(inner_x, start_y, half_w, start_h)
-            self._reconnect_rect = pg.Rect(0, 0, 0, 0)
-            self._start_rect = pg.Rect(
-                inner_x + half_w + gap, start_y, inner_w - half_w - gap, start_h,
-            )
+            button_keys.append("reconnect")
+        button_keys.append("start")
+        n = len(button_keys)
+        cell_w = (inner_w - gap * (n - 1)) // n
+        layout = {}
+        x = inner_x
+        for i, key in enumerate(button_keys):
+            width = inner_w - x + inner_x if i == n - 1 else cell_w
+            layout[key] = pg.Rect(x, start_y, width, start_h)
+            x += cell_w + gap
+        self._load_pgn_rect = layout["load_pgn"]
+        self._fen_rect = layout["fen"]
+        self._reconnect_rect = layout.get("reconnect", pg.Rect(0, 0, 0, 0))
+        self._start_rect = layout["start"]
 
     @property
     def _mode_rects(self):
@@ -227,6 +227,7 @@ class StartMenu:
 
         draw_button(self.window, self._load_pgn_rect, "Load PGN", self.start_font,
                     disabled=not self.load_pgn_available)
+        draw_button(self.window, self._fen_rect, "From FEN", self.start_font)
         if self.reconnect_available:
             draw_button(self.window, self._reconnect_rect, "Reconnect", self.start_font)
         draw_button(self.window, self._start_rect, self.start_button_label, self.start_font)
@@ -259,6 +260,11 @@ class StartMenu:
         if self._load_pgn_rect.collidepoint(pos):
             if self.load_pgn_available and "load_pgn" in self.callbacks:
                 self.callbacks["load_pgn"]()
+            return True
+
+        if self._fen_rect.collidepoint(pos):
+            if "fen" in self.callbacks:
+                self.callbacks["fen"]()
             return True
 
         if self.reconnect_available and self._reconnect_rect.collidepoint(pos):
