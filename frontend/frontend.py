@@ -844,8 +844,11 @@ class Frontend:
         if sq is None:
             return
         if self.board.dragging_from is not None:
-            if self.board.queue_premove_from_drag(sq):
-                return
+            # Right-click during a left-drag is reserved for premove chaining.
+            # Even if the chain extension is rejected, do not register the
+            # click as a highlight/arrow start.
+            self.board.queue_premove_from_drag(sq)
+            return
         self.board._right_drag_start_square = sq
 
     def _right_click_released(self, pos):

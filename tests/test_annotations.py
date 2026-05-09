@@ -143,6 +143,24 @@ def test_right_click_down_off_board_no_drag_start():
     assert app.board._right_drag_start_square is None
 
 
+def test_right_click_during_left_drag_does_not_start_highlight():
+    """While the user is left-dragging a piece, right-click is reserved for
+    premove chaining only — it must NOT register as a highlight start, even
+    when the chain extension is rejected (e.g. illegal shape)."""
+    app = make_app()
+    # Simulate an active left-drag.
+    app.board.dragging_from = Square(6, 4)
+    other_sq = Square(2, 2)
+    rect = app.board._cell_rect(other_sq.row, other_sq.col)
+    post_event(pg.MOUSEBUTTONDOWN, button=3, pos=rect.center)
+    app.check_events()
+    assert app.board._right_drag_start_square is None
+    # Releasing right-click does nothing (no start saved → no highlight).
+    post_event(pg.MOUSEBUTTONUP, button=3, pos=rect.center)
+    app.check_events()
+    assert other_sq not in app.board.highlighted_squares
+
+
 def test_right_click_release_same_square_toggles_highlight():
     app = make_app()
     sq = Square(6, 4)
