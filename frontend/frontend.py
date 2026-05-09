@@ -55,7 +55,7 @@ def _copy_to_clipboard(text):
         try:
             subprocess.run(
                 [tool, *args], input=text.encode("utf-8"),
-                check=True, timeout=2,
+                check=True, timeout=2, start_new_session=True,
             )
             return True
         except (subprocess.SubprocessError, OSError):
