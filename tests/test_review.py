@@ -604,13 +604,13 @@ def test_pgn_review_shows_only_menu_and_flip_buttons(tmp_path):
     _load_test_pgn(app, tmp_path)
     buttons = app._right_menu_buttons()
     keys = {key for _, key in buttons}
-    assert keys == {"menu", "flip"}
+    assert keys == {"menu", "flip", "help"}
 
 
 def test_live_mode_shows_full_buttons():
     app = _new_app()
     keys = {key for _, key in app._right_menu_buttons()}
-    assert keys == {"undo", "resign", "draw", "flip"}
+    assert keys == {"undo", "resign", "draw", "flip", "help"}
 
 
 def test_pgn_review_menu_button_returns_to_start_menu(tmp_path):
@@ -641,7 +641,7 @@ def test_new_game_clears_pgn_review_flag(tmp_path):
     app._on_new_game()
     assert app.pgn_review is False
     keys = {key for _, key in app._right_menu_buttons()}
-    assert keys == {"undo", "resign", "draw", "flip"}
+    assert keys == {"undo", "resign", "draw", "flip", "help"}
 
 
 def test_ctrl_z_does_not_undo_in_pgn_review(tmp_path):

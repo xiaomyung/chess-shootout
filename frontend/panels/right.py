@@ -10,11 +10,13 @@ BUTTONS = [
     ("Resign", "resign"),
     ("Draw", "draw"),
     ("Flip", "flip"),
+    ("?", "help"),
 ]
 
 REVIEW_BUTTONS = [
     ("Menu", "menu"),
     ("Flip", "flip"),
+    ("?", "help"),
 ]
 
 

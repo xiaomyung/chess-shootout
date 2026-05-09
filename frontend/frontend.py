@@ -120,6 +120,7 @@ class Frontend:
             "draw": self._on_draw,
             "flip": self._on_flip,
             "menu": self._on_back_to_menu,
+            "help": self._on_help,
         }, board=self.board, buttons_provider=self._right_menu_buttons,
             audio_panel=self.audio_panel,
             disabled_keys_provider=self._right_menu_disabled_keys)
@@ -625,6 +626,9 @@ class Frontend:
         if self.current_result() is not None and not self.pgn_review:
             return
         self.board.flipped = not self.board.flipped
+
+    def _on_help(self):
+        self.help_modal.show()
 
     def _on_move_landed(self, entry):
         if entry.gives_checkmate:
