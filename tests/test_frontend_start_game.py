@@ -217,37 +217,54 @@ def test_auto_save_marks_time_forfeit_on_timeout(tmp_path, monkeypatch):
     assert '[Result "0-1"]' in content
 
 
-def test_copy_pgn_invokes_clipboard(monkeypatch):
+def test_auto_save_records_path_and_shows_toast(tmp_path, monkeypatch):
     app = make_app()
     app._on_start_game(base_config())
     app.backend.try_move(Square(6, 4), Square(4, 4))
+    monkeypatch.setattr("frontend.frontend.PROJECT_ROOT", str(tmp_path))
     app.manual_result = "white_wins"
+    path = app._auto_save_pgn()
+    assert path is not None
+    assert app._last_saved_pgn_path == path
+    assert app.toast.is_visible() is True
+    assert "Saved" in app.toast.message
+
+
+def test_open_pgn_invokes_default_app(tmp_path, monkeypatch):
+    app = make_app()
+    app._on_start_game(base_config())
+    app.backend.try_move(Square(6, 4), Square(4, 4))
+    monkeypatch.setattr("frontend.frontend.PROJECT_ROOT", str(tmp_path))
+    app.manual_result = "white_wins"
+    app._auto_save_pgn()
     captured = {}
     monkeypatch.setattr(
-        "frontend.frontend._copy_to_clipboard",
-        lambda text: captured.setdefault("text", text) or True,
+        "frontend.frontend._open_with_default_app",
+        lambda path: captured.setdefault("path", path) or True,
     )
-    app._on_copy_pgn()
-    assert "[Result" in captured["text"]
-    assert app.toast.is_visible() is True
+    app._on_open_pgn()
+    assert captured["path"] == app._last_saved_pgn_path
 
 
-def test_copy_pgn_falls_back_to_unavailable_toast(monkeypatch):
+def test_open_pgn_no_op_when_no_saved_path():
+    app = make_app()
+    app._on_start_game(base_config())
+    app._on_open_pgn()
+    assert app.toast.message == "No saved PGN"
+
+
+def test_open_pgn_warns_on_open_failure(tmp_path, monkeypatch):
     app = make_app()
     app._on_start_game(base_config())
     app.backend.try_move(Square(6, 4), Square(4, 4))
+    monkeypatch.setattr("frontend.frontend.PROJECT_ROOT", str(tmp_path))
     app.manual_result = "white_wins"
-    monkeypatch.setattr("frontend.frontend._copy_to_clipboard", lambda text: False)
-    app._on_copy_pgn()
-    assert app.toast.is_visible() is True
-    assert app.toast.message == "Clipboard unavailable"
-
-
-def test_copy_pgn_no_op_when_no_result(monkeypatch):
-    app = make_app()
-    app._on_start_game(base_config())
-    app._on_copy_pgn()
-    assert app.toast.is_visible() is False
+    app._auto_save_pgn()
+    monkeypatch.setattr(
+        "frontend.frontend._open_with_default_app", lambda _path: False,
+    )
+    app._on_open_pgn()
+    assert app.toast.message == "Could not open PGN"
 
 
 @pytest.mark.parametrize("mode_value,expected_prefix", [

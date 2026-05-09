@@ -39,33 +39,37 @@ MANUAL_RESULT_TEXT = {
     "server_shutdown": ("Game cancelled", "server shutting down"),
 }
 
-def _copy_to_clipboard(text):
+def _open_with_default_app(path):
     import shutil
     import subprocess
-    candidates = [
-        ("wl-copy", []),
-        ("xclip", ["-selection", "clipboard"]),
-        ("xsel", ["--clipboard", "--input"]),
-        ("pbcopy", []),
-        ("clip", []),
-    ]
-    for tool, args in candidates:
-        if shutil.which(tool) is None:
+    import sys
+    if sys.platform == "darwin":
+        candidates = [["open", path]]
+    elif sys.platform.startswith("win"):
+        try:
+            os.startfile(path)
+            return True
+        except OSError:
+            return False
+    else:
+        candidates = [
+            ["xdg-open", path],
+            ["gio", "open", path],
+        ]
+    for cmd in candidates:
+        if shutil.which(cmd[0]) is None:
             continue
         try:
-            subprocess.run(
-                [tool, *args], input=text.encode("utf-8"),
-                check=True, timeout=2, start_new_session=True,
+            subprocess.Popen(
+                cmd,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                start_new_session=True,
             )
             return True
-        except (subprocess.SubprocessError, OSError):
+        except OSError:
             continue
-    try:
-        pg.scrap.init()
-        pg.scrap.put(pg.SCRAP_TEXT, text.encode("utf-8"))
-        return True
-    except (pg.error, AttributeError):
-        return False
+    return False
 
 
 def _score_str(score):
@@ -139,7 +143,7 @@ class Frontend(OnlineEventsMixin):
                            on_premove_queued=self.sound_manager.play_premove_queued)
         self.result_menu = ResultMenu(self.window, {
             "new_game": self._on_new_game,
-            "copy_pgn": self._on_copy_pgn,
+            "open_pgn": self._on_open_pgn,
             "menu": self._on_back_to_menu,
             "rematch": self._on_rematch,
         })
@@ -165,6 +169,7 @@ class Frontend(OnlineEventsMixin):
         self.file_picker = FilePicker(self.window)
         self.help_modal = HelpModal(self.window)
         self.toast = Toast(self.window)
+        self._last_saved_pgn_path = None
         self.server_modal = ServerAddressModal(self.window)
         self.wait_modal = WaitModal(self.window)
         self.online_client = None
@@ -395,6 +400,7 @@ class Frontend(OnlineEventsMixin):
         self._flag_fall_played = False
         self._result_first_seen_at_ms = None
         self._pgn_result_tag = None
+        self._last_saved_pgn_path = None
         self.right_menu.reset_for_new_game()
         self.match.new_game()
         if self._time_control is not None:
@@ -411,30 +417,33 @@ class Frontend(OnlineEventsMixin):
         self.confirm_modal.hide()
         self._last_turn_for_flip = None
 
-    def _on_copy_pgn(self):
-        text = self._build_pgn_text()
-        if text is None:
+    def _on_open_pgn(self):
+        path = self._last_saved_pgn_path
+        if path is None or not os.path.exists(path):
+            self.toast.show("No saved PGN")
             return
-        if _copy_to_clipboard(text):
-            self.toast.show("PGN copied")
-        else:
-            self.toast.show("Clipboard unavailable")
+        if not _open_with_default_app(path):
+            self.toast.show("Could not open PGN")
 
     def _auto_save_online_pgn(self):
         self._auto_save_pgn()
 
     def _auto_save_pgn(self):
         if not self.match.move_history:
-            return
+            return None
         text = self._build_pgn_text()
         if text is None:
-            return
+            return None
         prefix = self._auto_save_prefix()
         games_dir = os.path.join(PROJECT_ROOT, "games")
         os.makedirs(games_dir, exist_ok=True)
         filename = f"{prefix}-{datetime.now().strftime('%Y%m%d-%H%M%S')}.pgn"
-        with open(os.path.join(games_dir, filename), "w") as f:
+        path = os.path.join(games_dir, filename)
+        with open(path, "w") as f:
             f.write(text)
+        self._last_saved_pgn_path = path
+        self.toast.show(f"Saved {filename}", duration_ms=3000)
+        return path
 
     def _auto_save_prefix(self):
         if self.mode == ONLINE:
