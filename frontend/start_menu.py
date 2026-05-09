@@ -201,6 +201,10 @@ class StartMenu:
             "side": self.selected_side,
         }
 
+    @property
+    def start_button_label(self):
+        return "Start Search" if self.selected_mode == "online" else "Start Game"
+
     def draw(self):
         if not self.visible:
             self._section_rects_by_key = {k: {} for k in self._section_rects_by_key}
@@ -225,7 +229,7 @@ class StartMenu:
                     disabled=not self.load_pgn_available)
         if self.reconnect_available:
             draw_button(self.window, self._reconnect_rect, "Reconnect", self.start_font)
-        draw_button(self.window, self._start_rect, "Start Game", self.start_font)
+        draw_button(self.window, self._start_rect, self.start_button_label, self.start_font)
 
     def _draw_section(self, idx, label, options, selected_key, attr):
         label_surf = self.label_font.render(label, True, Colors.white)

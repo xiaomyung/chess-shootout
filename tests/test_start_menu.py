@@ -141,6 +141,20 @@ def test_start_game_fires_for_bot_mode(menu):
     assert called[0]["mode"] == "bot"
 
 
+@pytest.mark.parametrize(
+    "mode,expected_label",
+    [
+        ("single_screen", "Start Game"),
+        ("bot", "Start Game"),
+        ("online", "Start Search"),
+    ],
+)
+def test_start_button_label_per_mode(menu, mode, expected_label):
+    sm, _ = menu
+    sm.selected_mode = mode
+    assert sm.start_button_label == expected_label
+
+
 def test_start_game_fires_for_online_mode(menu):
     sm, called = menu
     called.clear()
