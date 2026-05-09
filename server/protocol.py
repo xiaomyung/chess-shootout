@@ -6,10 +6,6 @@ from pydantic import BaseModel, Field, field_validator
 
 PROTOCOL_VERSION = 1
 MAX_NICKNAME_LEN = 20
-ALLOWED_TIME_CONTROLS = {(1, 0), (3, 0), (3, 2), (5, 0), (5, 3), (10, 0), (10, 5), (15, 10)}
-NICKNAME_RE = re.compile(r"^[\x20-\x7e]+$")
-COLORS = ("white", "black")
-SIDE_PREFERENCES = ("white", "black", "random")
 
 
 class Reason:
@@ -65,8 +61,6 @@ class HistoryEntryWire(BaseModel):
     san: str
 
 
-# -------- HTTP request/response --------
-
 class MatchmakeRequest(_Base):
     nickname: str
     client_uuid: str
@@ -107,19 +101,12 @@ class ResumeResponse(_Base):
     move_history: list[HistoryEntryWire]
     clock: ClockSnapshot
     your_color: Literal["white", "black"]
-    opp_nickname: str
-    time_minutes: int
-    increment_seconds: int
-    draw_pending_by: Optional[Literal["white", "black"]] = None
-    takeback_pending_by: Optional[Literal["white", "black"]] = None
 
 
 class HealthResponse(BaseModel):
     status: str = "ok"
     rooms_active: int
 
-
-# -------- WebSocket inbound --------
 
 class AuthMessage(_Base):
     type: Literal["auth"] = "auth"
@@ -133,14 +120,6 @@ class MoveMessage(_Base):
     promotion: Optional[Literal["q", "r", "b", "n"]] = None
 
     model_config = {"populate_by_name": True}
-
-
-class ResignMessage(_Base):
-    type: Literal["resign"] = "resign"
-
-
-class DrawOfferMessage(_Base):
-    type: Literal["draw_offer"] = "draw_offer"
 
 
 class DrawResponseMessage(_Base):
@@ -157,16 +136,10 @@ class RematchResponseMessage(_Base):
     accept: bool
 
 
-class TakebackRequestMessage(_Base):
-    type: Literal["takeback_request"] = "takeback_request"
-
-
 class TakebackResponseMessage(_Base):
     type: Literal["takeback_response"] = "takeback_response"
     accept: bool
 
-
-# -------- WebSocket outbound --------
 
 class GameStartMessage(_Base):
     type: Literal["game_start"] = "game_start"
@@ -212,10 +185,6 @@ class TakebackAppliedMessage(_Base):
 class ConnectionStatusMessage(_Base):
     type: Literal["connection_status"] = "connection_status"
     opp_state: Literal["connected", "reconnecting", "disconnected"]
-
-
-class MatchmakeTimeoutMessage(_Base):
-    type: Literal["matchmake_timeout"] = "matchmake_timeout"
 
 
 class ErrorMessage(_Base):

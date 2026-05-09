@@ -8,17 +8,7 @@ from server.app import (
     PROTOCOL_VERSION, WS_CLOSE_INVALID_TOKEN, _sweep, create_app,
 )
 from server.protocol import Reason
-
-
-class FakeClock:
-    def __init__(self):
-        self.t = 0.0
-
-    def __call__(self):
-        return self.t
-
-    def advance(self, dt):
-        self.t += dt
+from tests.helpers import FakeClock
 
 
 @pytest.fixture

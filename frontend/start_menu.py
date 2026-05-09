@@ -67,8 +67,8 @@ class StartMenu:
         self._outer = pg.Rect(0, 0, 0, 0)
         self._title_pos = (0, 0)
         self._input_rect = pg.Rect(0, 0, 0, 0)
-        self._section_label_y = [0, 0, 0, 0]
-        self._section_selector_rect = [pg.Rect(0, 0, 0, 0) for _ in range(4)]
+        self._section_label_ys = [0, 0, 0, 0]
+        self._section_selector_rects = [pg.Rect(0, 0, 0, 0) for _ in range(4)]
         self._load_pgn_rect = pg.Rect(0, 0, 0, 0)
         self._start_rect = pg.Rect(0, 0, 0, 0)
 
@@ -130,8 +130,8 @@ class StartMenu:
 
         block_y = sections_top
         for i in range(block_count):
-            self._section_label_y[i] = block_y
-            self._section_selector_rect[i] = pg.Rect(
+            self._section_label_ys[i] = block_y
+            self._section_selector_rects[i] = pg.Rect(
                 inner_x,
                 block_y + section_label_h + section_label_to_selector_gap,
                 inner_w,
@@ -206,10 +206,10 @@ class StartMenu:
 
     def _draw_section(self, idx, label, options, selected_key, attr):
         label_surf = self.label_font.render(label, True, Colors.white)
-        x = self._section_selector_rect[idx].x
-        self.window.blit(label_surf, (x, self._section_label_y[idx]))
+        x = self._section_selector_rects[idx].x
+        self.window.blit(label_surf, (x, self._section_label_ys[idx]))
         rects = draw_selector(
-            self.window, self._section_selector_rect[idx], options,
+            self.window, self._section_selector_rects[idx], options,
             self.button_font, gap=self.row_gap, selected_key=selected_key,
         )
         self._section_rects_by_key[attr] = rects

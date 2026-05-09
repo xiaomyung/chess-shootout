@@ -1,6 +1,4 @@
-"""Unit tests for the real OnlineClient — scheme heuristic + URL builders.
-End-to-end tests against an in-process server live in Phase 10's
-test_online_flow.py."""
+"""Unit tests for OnlineClient URL builders. End-to-end flow lives in test_online_flow.py."""
 from frontend.online_client import _http_url, _split_addr, _ws_url
 
 

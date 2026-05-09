@@ -8,7 +8,7 @@ import pytest
 from frontend import widgets
 from frontend.widgets import (
     BUTTON_LABEL_PADDING_PX,
-    draw_button, draw_button_row, draw_button_column, draw_selector,
+    draw_button, draw_button_row, draw_selector,
     fit_text_to_rect,
 )
 
@@ -26,36 +26,27 @@ def font():
     return pg.font.SysFont("Arial", 14, bold=True)
 
 
-def testdraw_button_smoke_idle(font):
+def test_draw_button_smoke_idle(font):
     surface = pg.display.get_surface()
     rect = pg.Rect(0, 0, 100, 30)
     draw_button(surface, rect, "OK", font)
 
 
-def testdraw_button_smoke_force_pressed(font):
+def test_draw_button_smoke_force_pressed(font):
     surface = pg.display.get_surface()
     rect = pg.Rect(0, 0, 100, 30)
     draw_button(surface, rect, "OK", font, force_pressed=True)
 
 
-def testdraw_button_row_returns_keyed_rects(font):
+def test_draw_button_row_returns_keyed_rects(font):
     surface = pg.display.get_surface()
     rect = pg.Rect(0, 0, 300, 30)
     buttons = [("Yes", "yes"), ("No", "no")]
     rects = draw_button_row(surface, rect, buttons, font, gap=10)
     assert set(rects.keys()) == {"yes", "no"}
-    assert rects["yes"].height == 30
     # Width: (300 - 10) / 2 = 145.
+    assert rects["yes"].height == 30
     assert rects["yes"].width == pytest.approx(145, abs=1)
-
-
-def testdraw_button_column_returns_keyed_rects(font):
-    surface = pg.display.get_surface()
-    rect = pg.Rect(0, 0, 100, 200)
-    buttons = [("A", "a"), ("B", "b"), ("C", "c")]
-    rects = draw_button_column(surface, rect, buttons, font, gap=8)
-    assert set(rects.keys()) == {"a", "b", "c"}
-    assert rects["a"].width == 100
 
 
 def test_draw_selector_returns_keyed_rects(font):

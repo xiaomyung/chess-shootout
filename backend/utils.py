@@ -4,10 +4,36 @@ from typing import Optional
 from backend.pieces import Piece, PieceType
 
 
+BOARD_SIZE = 8
+
+PROMO_LETTER_BY_TYPE = {
+    PieceType.QUEEN: "q",
+    PieceType.ROOK: "r",
+    PieceType.BISHOP: "b",
+    PieceType.KNIGHT: "n",
+}
+PROMO_TYPE_BY_LETTER = {v: k for k, v in PROMO_LETTER_BY_TYPE.items()}
+
+
 @dataclass(frozen=True)
 class Square:
     row: int
     col: int
+
+
+def coord_from_square(sq):
+    return chr(ord("a") + sq.col) + str(BOARD_SIZE - sq.row)
+
+
+def square_from_coord(coord):
+    if len(coord) != 2:
+        raise ValueError(f"invalid coord: {coord!r}")
+    file_ch, rank_ch = coord[0], coord[1]
+    col = ord(file_ch) - ord("a")
+    row = BOARD_SIZE - int(rank_ch)
+    if not (0 <= col < BOARD_SIZE and 0 <= row < BOARD_SIZE):
+        raise ValueError(f"out-of-board coord: {coord!r}")
+    return Square(row, col)
 
 
 @dataclass(frozen=True)

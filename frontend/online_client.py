@@ -38,9 +38,6 @@ def _looks_like_ip_or_localhost(host):
 
 
 def _split_addr(addr):
-    """Return (scheme, host, port) given an addr like 'localhost:8000',
-    'wss://chess.example.com', or 'chess.example.com:443'.
-    Falls back to scheme heuristic when none provided."""
     explicit_scheme = None
     rest = addr
     for prefix in ("ws://", "wss://", "http://", "https://"):
@@ -84,17 +81,15 @@ class OnlineClient:
     def __init__(self):
         self._inbound = queue.Queue()
         self._loop = None
-        self._loop_ready = threading.Event()
         self._thread = None
         self._stop = threading.Event()
-        self._outbound_q = None  # asyncio.Queue, set in worker thread
+        self._outbound = None
         self._ws = None
         self._addr = None
         self._room_id = None
         self._session_token = None
         self.state = "disconnected"
         self.opp_state = "connected"
-        self.ping_ms = None
         self._in_queue = False
         self._game_active = False
 
@@ -166,14 +161,13 @@ class OnlineClient:
 
     def _send(self, payload):
         payload.setdefault("version", PROTOCOL_VERSION)
-        if self._loop is None or self._loop.is_closed() or self._outbound_q is None:
+        if self._loop is None or self._loop.is_closed() or self._outbound is None:
             log.debug("send dropped (loop not running): type=%s", payload.get("type"))
             return
         try:
-            self._loop.call_soon_threadsafe(self._outbound_q.put_nowait, payload)
+            self._loop.call_soon_threadsafe(self._outbound.put_nowait, payload)
             log.debug("ws send type=%s", payload.get("type"))
         except RuntimeError:
-            # Loop closed between the check and the call — race; ignore.
             pass
 
     def drain_inbound(self):
@@ -185,13 +179,10 @@ class OnlineClient:
                 break
         return events
 
-    # ------- Worker thread -------
-
     def _run_loop(self, request):
         self._loop = asyncio.new_event_loop()
         asyncio.set_event_loop(self._loop)
-        self._outbound_q = asyncio.Queue()
-        self._loop_ready.set()
+        self._outbound = asyncio.Queue()
         try:
             self._loop.run_until_complete(self._async_main(request))
         except Exception as exc:
@@ -270,7 +261,7 @@ class OnlineClient:
                     r = await http.post(_http_url(self._addr, "/matchmake"),
                                         json=payload)
                     if r.status_code == 503:
-                        last_exc = RuntimeError("server_full")
+                        last_exc = RuntimeError("room_full")
                         await asyncio.sleep(SERVER_FULL_BACKOFF_SECONDS)
                         continue
                     if r.status_code >= 400:
@@ -284,7 +275,7 @@ class OnlineClient:
                     raise RuntimeError("server_unreachable") from exc
         if last_exc is not None:
             raise last_exc
-        raise RuntimeError("server_full")
+        raise RuntimeError("room_full")
 
     async def _run_ws_session(self):
         ws_url = _ws_url(self._addr, f"/ws/{self._room_id}")
@@ -332,7 +323,7 @@ class OnlineClient:
     async def _send_loop(self, ws):
         try:
             while not self._stop.is_set():
-                payload = await self._outbound_q.get()
+                payload = await self._outbound.get()
                 await ws.send(json.dumps(payload))
         except (websockets.ConnectionClosed, asyncio.CancelledError):
             pass

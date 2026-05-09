@@ -14,7 +14,6 @@ GRACE_SECONDS = 60
 REMATCH_KEEP_ALIVE_SECONDS = 60
 PAIRING_WAIT_SECONDS = 30
 FIRST_MOVE_ABORT_SECONDS = 60
-QUEUE_MAX_SECONDS = 5 * 60
 
 
 class AlreadyInGameError(Exception):
@@ -147,20 +146,12 @@ class RoomManager:
 
     @staticmethod
     def _resolve_colors(first_pref, second_pref):
-        if first_pref == "random" and second_pref == "random":
-            second = random.choice(["white", "black"])
-            return second, ("white" if second == "black" else "black")
-        if second_pref == "random":
-            first = first_pref
-            second = "black" if first == "white" else "white"
-            return second, first
-        if first_pref == "random":
+        if second_pref != "random":
             second = second_pref
-            first = "black" if second == "white" else "white"
-            return second, first
-        if first_pref != second_pref:
-            return second_pref, first_pref
-        second = random.choice(["white", "black"])
+        elif first_pref != "random":
+            second = "black" if first_pref == "white" else "white"
+        else:
+            second = random.choice(["white", "black"])
         first = "black" if second == "white" else "white"
         return second, first
 
@@ -204,7 +195,6 @@ class RoomManager:
             slot.disconnected_at = self._now()
 
     def grace_expired_rooms(self):
-        """Yield (room, abandoned_color) for rooms whose grace window has lapsed."""
         now = self._now()
         for room in list(self._active.values()):
             if room.result is not None:
@@ -231,7 +221,6 @@ class RoomManager:
         room.ended_at = self._now()
 
     def gc_finished_rooms(self):
-        """Drop rooms whose result fired more than REMATCH_KEEP_ALIVE_SECONDS ago."""
         now = self._now()
         to_drop = []
         for room_id, room in self._active.items():

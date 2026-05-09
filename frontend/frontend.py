@@ -6,8 +6,9 @@ from datetime import datetime
 
 import pygame as pg
 
+from backend.fen import apply_fen
 from backend.match import Match, SINGLE_SCREEN, BOT, ONLINE
-from backend.utils import Square
+from backend.utils import PROMO_TYPE_BY_LETTER, coord_from_square, square_from_coord
 from frontend import env
 from frontend.audio_panel import AudioPanel
 from frontend.board import Board
@@ -53,27 +54,19 @@ OPPONENT_NAME_FOR_MODE = {
     ONLINE: "Opponent",
 }
 
+ONLINE_WIN_REASONS = {"checkmate", "timeout", "resignation", "abandonment"}
+ONLINE_DRAW_REASONS = {
+    "draw_agreement", "draw_stalemate", "draw_repetition",
+    "draw_fifty_move", "draw_insufficient_material",
+}
+ONLINE_STATIC_RESULTS = {"aborted", "server_shutdown"}
+
 AUTO_FLIP_DELAY_MS = 200
 
 MIN_WINDOW_WIDTH = 900
 MIN_WINDOW_HEIGHT = 500
 
 log = logging.getLogger("chess.frontend")
-
-_PROMO_TYPE_BY_LETTER = {
-    "q": PieceType.QUEEN, "r": PieceType.ROOK,
-    "b": PieceType.BISHOP, "n": PieceType.KNIGHT,
-}
-
-
-def _coord(sq):
-    return f"{chr(ord('a') + sq.col)}{8 - sq.row}"
-
-
-def _square_from_coord(coord):
-    file_idx = ord(coord[0]) - ord("a")
-    rank = int(coord[1])
-    return Square(8 - rank, file_idx)
 
 
 class Frontend:
@@ -276,12 +269,11 @@ class Frontend:
             try:
                 self._handle_online_event(event)
             except Exception:
-                import traceback
-                traceback.print_exc()
+                log.exception("online event handler failed")
 
     def _handle_online_event(self, event):
         if event.type == "matchmake_response":
-            return  # Just enqueued; pairing happens later via game_start.
+            return
         elif event.type == "game_start":
             self._start_online_game(event.payload)
         elif event.type == "move_applied":
@@ -289,32 +281,25 @@ class Frontend:
         elif event.type == "result":
             self._handle_online_result(event.payload)
         elif event.type == "draw_offered":
-            self.confirm_modal.show(
-                "Opponent offers a draw",
-                on_yes=lambda: self.online_client.send_draw_response(True),
-                on_no=lambda: self.online_client.send_draw_response(False),
-                yes_label="Accept", no_label="Decline",
+            self._show_opp_offer_modal(
+                "Opponent offers a draw", self.online_client.send_draw_response,
             )
         elif event.type == "takeback_offered":
-            self.confirm_modal.show(
+            self._show_opp_offer_modal(
                 "Opponent requests a takeback",
-                on_yes=lambda: self.online_client.send_takeback_response(True),
-                on_no=lambda: self.online_client.send_takeback_response(False),
-                yes_label="Accept", no_label="Decline",
+                self.online_client.send_takeback_response,
             )
         elif event.type == "takeback_applied":
             self._handle_takeback_applied(event.payload)
         elif event.type == "rematch_request":
-            self.confirm_modal.show(
+            self._show_opp_offer_modal(
                 "Opponent wants a rematch",
-                on_yes=lambda: self.online_client.send_rematch_response(True),
-                on_no=lambda: self.online_client.send_rematch_response(False),
-                yes_label="Accept", no_label="Decline",
+                self.online_client.send_rematch_response,
             )
         elif event.type == "game_resumed":
             self._handle_game_resumed(event.payload)
         elif event.type == "connection_status":
-            return  # opp_state already updated inside OnlineClient
+            return
         elif event.type == "error":
             reason = event.payload.get("reason", "")
             game_state_reasons = {
@@ -331,8 +316,31 @@ class Frontend:
                 yes_label="Retry", no_label="Cancel",
             )
 
+    def _show_opp_offer_modal(self, title, send_response):
+        self.confirm_modal.show(
+            title,
+            on_yes=lambda: send_response(True),
+            on_no=lambda: send_response(False),
+            yes_label="Accept", no_label="Decline",
+        )
+
+    def _apply_clock_snap(self, payload, *, default_to_existing):
+        clock_snap = payload.get("clock") or {}
+        if self.match.clock is None:
+            return
+        if default_to_existing:
+            white_default = self.match.clock.white_remaining
+            black_default = self.match.clock.black_remaining
+        else:
+            white_default = 0.0
+            black_default = 0.0
+        self.match.clock.restore_from_server(
+            clock_snap.get("white_remaining", white_default),
+            clock_snap.get("black_remaining", black_default),
+            clock_snap.get("running_for"),
+        )
+
     def _handle_game_resumed(self, payload):
-        from backend.fen import apply_fen
         self.match.new_game()
         apply_fen(self.match.backend, payload["fen"])
         for entry in payload.get("move_history", []):
@@ -340,13 +348,7 @@ class Frontend:
         if self._time_control is not None:
             initial, incr = self._time_control
             self.match.setup_clock(initial, incr)
-            clock_snap = payload.get("clock") or {}
-            if self.match.clock is not None:
-                self.match.clock.restore_from_server(
-                    clock_snap.get("white_remaining", 0.0),
-                    clock_snap.get("black_remaining", 0.0),
-                    clock_snap.get("running_for"),
-                )
+            self._apply_clock_snap(payload, default_to_existing=False)
         self.board.cancel_animations()
         self.board.selected_square = None
         self.board._clear_premoves()
@@ -357,30 +359,18 @@ class Frontend:
             last = self.match.move_history[-1].move
             self.match.undo()
             self.board.start_undo_animation(last)
-        clock_snap = payload.get("clock") or {}
-        if self.match.clock is not None:
-            self.match.clock.restore_from_server(
-                clock_snap.get("white_remaining", self.match.clock.white_remaining),
-                clock_snap.get("black_remaining", self.match.clock.black_remaining),
-                clock_snap.get("running_for"),
-            )
+        self._apply_clock_snap(payload, default_to_existing=True)
 
     def _handle_remote_move_applied(self, payload):
-        clock_snap = payload.get("clock") or {}
-        if self.match.clock is not None:
-            self.match.clock.restore_from_server(
-                clock_snap.get("white_remaining", self.match.clock.white_remaining),
-                clock_snap.get("black_remaining", self.match.clock.black_remaining),
-                clock_snap.get("running_for"),
-            )
+        self._apply_clock_snap(payload, default_to_existing=True)
         san = payload.get("san")
         last = self.match.move_history[-1] if self.match.move_history else None
         if last is not None and last.san == san:
-            return  # Echo of our own move; clock already synced.
-        from_sq = _square_from_coord(payload["from"])
-        to_sq = _square_from_coord(payload["to"])
+            return
+        from_sq = square_from_coord(payload["from"])
+        to_sq = square_from_coord(payload["to"])
         promo = payload.get("promotion")
-        promo_type = _PROMO_TYPE_BY_LETTER.get(promo) if promo else None
+        promo_type = PROMO_TYPE_BY_LETTER.get(promo) if promo else None
         result = self.match.apply_remote_move(from_sq, to_sq, promo_type)
         if result.legal:
             self.board.animate_remote_move(from_sq, to_sq)
@@ -388,19 +378,12 @@ class Frontend:
     def _handle_online_result(self, payload):
         reason = payload.get("reason", "")
         winner = payload.get("winner_color")
-        if reason in ("checkmate", "timeout"):
-            self.manual_result = ("white_wins" if winner == "white" else "black_wins")
-        elif reason == "resignation":
-            self.manual_result = ("white_wins" if winner == "white" else "black_wins")
-        elif reason in ("draw_agreement", "draw_stalemate", "draw_repetition",
-                        "draw_fifty_move", "draw_insufficient_material"):
+        if reason in ONLINE_WIN_REASONS:
+            self.manual_result = "white_wins" if winner == "white" else "black_wins"
+        elif reason in ONLINE_DRAW_REASONS:
             self.manual_result = "draw_agreement"
-        elif reason == "abandonment":
-            self.manual_result = ("white_wins" if winner == "white" else "black_wins")
-        elif reason == "aborted":
-            self.manual_result = "aborted"
-        elif reason == "server_shutdown":
-            self.manual_result = "server_shutdown"
+        elif reason in ONLINE_STATIC_RESULTS:
+            self.manual_result = reason
         if self.manual_result is not None:
             self._auto_save_online_pgn()
 
@@ -443,7 +426,7 @@ class Frontend:
     def _on_local_move_applied(self, from_sq, to_sq, promotion):
         if self.online_client is None:
             return
-        self.online_client.send_move(_coord(from_sq), _coord(to_sq), promotion)
+        self.online_client.send_move(coord_from_square(from_sq), coord_from_square(to_sq), promotion)
 
     def _right_menu_buttons(self):
         if self.pgn_review:

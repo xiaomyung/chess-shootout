@@ -60,18 +60,6 @@ def draw_button_row(window, rect, buttons, font, gap):
     return button_rects
 
 
-def draw_button_column(window, rect, buttons, font, gap):
-    n = len(buttons)
-    btn_h = (rect.height - gap * (n - 1)) / n
-    button_rects = {}
-    for i, (label, key) in enumerate(buttons):
-        y = rect.y + i * (btn_h + gap)
-        br = pg.Rect(rect.x, y, rect.width, btn_h)
-        draw_button(window, br, label, font)
-        button_rects[key] = br
-    return button_rects
-
-
 def draw_selector(window, rect, options, font, gap, selected_key):
     n = len(options)
     btn_w = (rect.width - gap * (n - 1)) / n

@@ -18,7 +18,6 @@ def _main():
     args = parser.parse_args()
     logging_setup.configure()
     if args.reload:
-        # Reload mode requires an import string for the app factory.
         os.environ.setdefault("CHESS_MAX_ROOMS", str(args.max_rooms))
         uvicorn.run("server.__main__:_app_factory", host=args.host, port=args.port,
                     reload=True, factory=True,

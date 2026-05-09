@@ -1,8 +1,8 @@
 import asyncio
+import json
 import time
 from collections import defaultdict
 from contextlib import asynccontextmanager
-from typing import Optional
 
 from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse
@@ -12,21 +12,23 @@ from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
 
 from backend.fen import export_fen
-from backend.pieces import PieceColor, PieceType
-from backend.utils import Square
+from backend.pieces import PieceColor
+from backend.utils import (
+    PROMO_LETTER_BY_TYPE, PROMO_TYPE_BY_LETTER, coord_from_square, square_from_coord,
+)
 from server import logging_setup
 from server.protocol import (
-    ALLOWED_TIME_CONTROLS, AuthMessage, CancelMatchmakeRequest, ClockSnapshot,
-    ConnectionStatusMessage, DrawOfferedMessage, DrawOfferMessage, DrawResponseMessage,
+    AuthMessage, CancelMatchmakeRequest, ClockSnapshot,
+    ConnectionStatusMessage, DrawOfferedMessage, DrawResponseMessage,
     ErrorMessage, GameStartMessage, HealthResponse, HistoryEntryWire, MatchmakeRequest,
-    MatchmakeResponse, MatchmakeTimeoutMessage, MoveAppliedMessage, MoveMessage,
+    MatchmakeResponse, MoveAppliedMessage, MoveMessage,
     PROTOCOL_VERSION, Reason, RematchRequestMessage, RematchResponseMessage,
-    ResignMessage, ResultMessage, ResumeRequest, ResumeResponse, TakebackAppliedMessage,
-    TakebackOfferedMessage, TakebackRequestMessage, TakebackResponseMessage,
+    ResultMessage, ResumeRequest, ResumeResponse, TakebackAppliedMessage,
+    TakebackOfferedMessage, TakebackResponseMessage,
 )
 from server.rooms import (
-    AlreadyInGameError, FIRST_MOVE_ABORT_SECONDS, GRACE_SECONDS, InvalidTokenError,
-    NotInRoomError, PAIRING_WAIT_SECONDS, QUEUE_MAX_SECONDS, REMATCH_KEEP_ALIVE_SECONDS,
+    AlreadyInGameError, FIRST_MOVE_ABORT_SECONDS, InvalidTokenError,
+    NotInRoomError, PAIRING_WAIT_SECONDS,
     RoomManager,
 )
 
@@ -34,12 +36,8 @@ from server.rooms import (
 CLOCK_TICK_INTERVAL_SECONDS = 0.1
 MAX_INBOUND_MESSAGE_BYTES = 4096
 
-# WebSocket close codes (RFC 6455)
-WS_CLOSE_NORMAL = 1000
 WS_CLOSE_PAYLOAD_TOO_LARGE = 1009
-WS_CLOSE_SERVER_ERROR = 1011
 WS_CLOSE_INVALID_TOKEN = 4000
-WS_CLOSE_ABANDONMENT = 4001
 WS_CLOSE_SERVER_SHUTDOWN = 4002
 
 log = logging_setup.get_logger("chess.server.app")
@@ -57,26 +55,6 @@ _RESULT_REASON_BY_GAME_RESULT = {
 }
 
 
-def _square_from_coord(coord):
-    if not isinstance(coord, str) or len(coord) != 2:
-        raise ValueError(f"bad square coord: {coord!r}")
-    file_idx = ord(coord[0]) - ord("a")
-    rank = int(coord[1])
-    if not (0 <= file_idx < 8) or not (1 <= rank <= 8):
-        raise ValueError(f"bad square coord: {coord!r}")
-    return Square(8 - rank, file_idx)
-
-
-def _coord_from_square(sq):
-    return f"{chr(ord('a') + sq.col)}{8 - sq.row}"
-
-
-_PROMO_TYPE_BY_LETTER = {
-    "q": PieceType.QUEEN, "r": PieceType.ROOK,
-    "b": PieceType.BISHOP, "n": PieceType.KNIGHT,
-}
-
-
 def _clock_snapshot(clock):
     if clock is None:
         return ClockSnapshot(white_remaining=0.0, black_remaining=0.0, running_for=None)
@@ -91,8 +69,6 @@ def _clock_snapshot(clock):
 
 
 class ConnectionRegistry:
-    """WS registry keyed by client_uuid (stable across color reshuffles).
-    Color lookup is resolved through the room's current slot assignment."""
 
     def __init__(self):
         self._by_room: dict[str, dict[str, WebSocket]] = defaultdict(dict)
@@ -141,7 +117,7 @@ async def _send(ws, message):
 
 
 async def _broadcast(connections, room, message):
-    for color, ws in list(connections.all_for_room(room)):
+    for _, ws in list(connections.all_for_room(room)):
         await _send(ws, message)
 
 
@@ -163,8 +139,8 @@ def create_app(*, now_provider=time.monotonic, max_rooms=100):
                 await _send(ws, shutdown_msg)
                 try:
                     await ws.close(code=WS_CLOSE_SERVER_SHUTDOWN)
-                except Exception:
-                    pass
+                except (RuntimeError, WebSocketDisconnect) as exc:
+                    log.debug("ws close on shutdown failed: %s", exc)
 
     app = FastAPI(lifespan=lifespan)
     app.state.rooms = rooms
@@ -242,13 +218,12 @@ def create_app(*, now_provider=time.monotonic, max_rooms=100):
         if room.result is not None:
             log.info("resume rejected room=%s reason=game_already_over", body.room_id)
             raise HTTPException(status_code=410, detail={"reason": room.result[0]})
-        opp = room.slot(room.opp_color(color))
         history = []
         for entry in (room.backend.move_history if room.backend else []):
             move = entry.move
             history.append(HistoryEntryWire(
-                from_sq=_coord_from_square(move.from_sq),
-                to_sq=_coord_from_square(move.to_sq),
+                from_sq=coord_from_square(move.from_sq),
+                to_sq=coord_from_square(move.to_sq),
                 promotion=_promotion_letter(move),
                 san=entry.san,
             ))
@@ -257,11 +232,6 @@ def create_app(*, now_provider=time.monotonic, max_rooms=100):
             move_history=history,
             clock=_clock_snapshot(room.backend.clock),
             your_color=color,
-            opp_nickname=opp.nickname if opp else "",
-            time_minutes=room.time_minutes,
-            increment_seconds=room.increment_seconds,
-            draw_pending_by=room.draw_offered_by,
-            takeback_pending_by=room.takeback_offered_by,
         )
 
     @app.websocket("/ws/{room_id}")
@@ -317,15 +287,11 @@ async def _sweep(app):
                          and connections.get_for_color(room, "white") is not None)
         black_present = (room.black is not None
                          and connections.get_for_color(room, "black") is not None)
-        # Both players gone pre-game → drop immediately (uuids free for a
-        # fresh queue join).
         if (room.first_move_at is None
                 and not white_present and not black_present):
             log.info("drop room=%s reason=both_disconnected_pre_game", room.room_id)
             rooms.drop_room_now(room.room_id)
             continue
-        # Game has already ended and at least one player walked → drop now.
-        # Rematch needs both online; if one is gone the room is dead anyway.
         if room.result is not None and not (white_present and black_present):
             log.info("drop room=%s reason=post_result_disconnect", room.room_id)
             rooms.drop_room_now(room.room_id)
@@ -342,44 +308,46 @@ def _first_validation_reason(exc):
 def _promotion_letter(move):
     if move.promoted_to is None:
         return None
-    return {
-        PieceType.QUEEN: "q", PieceType.ROOK: "r",
-        PieceType.BISHOP: "b", PieceType.KNIGHT: "n",
-    }.get(move.promoted_to)
+    return PROMO_LETTER_BY_TYPE.get(move.promoted_to)
 
 
-async def _ws_session(app, websocket, room_id):
-    rooms = app.state.rooms
-    connections = app.state.connections
-    auth_color = None
-    auth_room = None
-    auth_uuid = None
+async def _authenticate_ws(websocket, rooms, room_id):
     try:
         first_raw = await asyncio.wait_for(
             websocket.receive_text(), timeout=PAIRING_WAIT_SECONDS)
     except (asyncio.TimeoutError, WebSocketDisconnect):
         await websocket.close(code=WS_CLOSE_INVALID_TOKEN)
-        return
+        return None
     if len(first_raw) > MAX_INBOUND_MESSAGE_BYTES:
         await websocket.close(code=WS_CLOSE_PAYLOAD_TOO_LARGE)
-        return
+        return None
     try:
-        first = AuthMessage.model_validate_json(first_raw)
+        auth_msg = AuthMessage.model_validate_json(first_raw)
     except (ValidationError, ValueError):
         await websocket.close(code=WS_CLOSE_INVALID_TOKEN)
-        return
-    if first.version != PROTOCOL_VERSION:
+        return None
+    if auth_msg.version != PROTOCOL_VERSION:
         await _send(websocket, ErrorMessage(reason=Reason.VERSION_MISMATCH))
         await websocket.close(code=WS_CLOSE_INVALID_TOKEN)
-        return
+        return None
     room = rooms.get(room_id)
     if room is None:
         await websocket.close(code=WS_CLOSE_INVALID_TOKEN)
-        return
-    color, slot = room.slot_by_token(first.session_token)
+        return None
+    color, slot = room.slot_by_token(auth_msg.session_token)
     if slot is None:
         await websocket.close(code=WS_CLOSE_INVALID_TOKEN)
+        return None
+    return room, color, slot
+
+
+async def _ws_session(app, websocket, room_id):
+    rooms = app.state.rooms
+    connections = app.state.connections
+    auth = await _authenticate_ws(websocket, rooms, room_id)
+    if auth is None:
         return
+    room, color, slot = auth
     auth_room = room
     auth_color = color
     auth_uuid = slot.client_uuid
@@ -394,7 +362,6 @@ async def _ws_session(app, websocket, room_id):
             room.started_at = app.state.now()
         await _broadcast_game_start(connections, room)
     elif connections.get_for_color(room, room.opp_color(color)) is not None:
-        # Opponent reconnected: notify them that we're back.
         await _send(connections.get_for_color(room, room.opp_color(color)),
                     ConnectionStatusMessage(opp_state="connected"))
 
@@ -447,8 +414,6 @@ async def _broadcast_game_start(connections, room):
 
 
 async def _dispatch(app, websocket, room, color, raw):
-    rooms = app.state.rooms
-    connections = app.state.connections
     msg_type = _peek_type(raw)
     if msg_type == "move":
         await _handle_move(app, room, color, raw)
@@ -471,24 +436,21 @@ async def _dispatch(app, websocket, room, color, raw):
 
 
 def _peek_type(raw):
-    import json
     try:
         return json.loads(raw).get("type")
     except (json.JSONDecodeError, ValueError):
         return None
 
 
-def _color_to_piece_color(color):
-    return PieceColor.WHITE if color == "white" else PieceColor.BLACK
-
-
 async def _handle_move(app, room, color, raw):
     rooms = app.state.rooms
     connections = app.state.connections
+    if room.backend is None:
+        return
     try:
         msg = MoveMessage.model_validate_json(raw)
-        from_sq = _square_from_coord(msg.from_sq)
-        to_sq = _square_from_coord(msg.to_sq)
+        from_sq = square_from_coord(msg.from_sq)
+        to_sq = square_from_coord(msg.to_sq)
     except (ValidationError, ValueError):
         await _send(connections.get_for_color(room, color),
                     ErrorMessage(reason=Reason.INVALID_MOVE_FORMAT))
@@ -507,7 +469,7 @@ async def _handle_move(app, room, color, raw):
         return
     if result.promotion_required:
         promo_letter = msg.promotion or "q"
-        promo_type = _PROMO_TYPE_BY_LETTER[promo_letter]
+        promo_type = PROMO_TYPE_BY_LETTER[promo_letter]
         room.backend.promote(to_sq, promo_type)
     if room.first_move_at is None:
         room.first_move_at = app.state.now()
@@ -553,7 +515,6 @@ async def _handle_draw_offer(app, room, color):
                     ErrorMessage(reason=Reason.NOT_YOUR_TURN))
         return
     if room.draw_offered_by is not None and room.draw_offered_by != color:
-        # Mutual draw offer — auto-agree.
         log.info("draw mutual room=%s", room.room_id)
         rooms.finalize_result(room.room_id, Reason.DRAW_AGREEMENT)
         room.draw_offered_by = None
@@ -576,7 +537,7 @@ async def _handle_draw_response(app, room, color, raw):
     except ValidationError:
         return
     if room.draw_offered_by == color:
-        return  # can't respond to your own offer
+        return
     if msg.accept:
         log.info("draw accepted room=%s by=%s", room.room_id, color)
         rooms.finalize_result(room.room_id, Reason.DRAW_AGREEMENT)
@@ -592,7 +553,7 @@ async def _handle_rematch_request(app, room, color):
     rooms = app.state.rooms
     connections = app.state.connections
     if room.result is None:
-        return  # rematch only after game ended
+        return
     if color in room.rematch_offered_by:
         return
     room.rematch_offered_by.add(color)
@@ -628,7 +589,6 @@ async def _handle_rematch_response(app, room, color, raw):
 
 
 async def _handle_takeback_request(app, room, color):
-    rooms = app.state.rooms
     connections = app.state.connections
     if room.result is not None or room.backend is None:
         return

@@ -125,9 +125,9 @@ class RightMenu:
         info = self.game_info
         line_h = self.font.get_linesize()
         names = f"{info.get('white_name', '?')}  vs  {info.get('black_name', '?')}"
-        tc = info.get('time_minutes', 0), info.get('increment_seconds', 0)
-        tc_line = f"{tc[0]} min + {tc[1]} sec"
-        ping_ms = info.get('ping_ms')
+        time_control = info.get("time_minutes", 0), info.get("increment_seconds", 0)
+        tc_line = f"{time_control[0]} min + {time_control[1]} sec"
+        ping_ms = info.get("ping_ms")
         ping_line = f"ping: {ping_ms} ms" if ping_ms is not None else "ping: —"
         for i, line in enumerate((names, tc_line, ping_line)):
             surf = self.font.render(line, True, Colors.white)

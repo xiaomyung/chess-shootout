@@ -6,17 +6,7 @@ from server.rooms import (
     AlreadyInGameError, GRACE_SECONDS, InvalidTokenError, NotInRoomError,
     PlayerSlot, REMATCH_KEEP_ALIVE_SECONDS, Room, RoomManager,
 )
-
-
-class FakeClock:
-    def __init__(self):
-        self.t = 0.0
-
-    def __call__(self):
-        return self.t
-
-    def advance(self, dt):
-        self.t += dt
+from tests.helpers import FakeClock
 
 
 def _enqueue_kwargs(client_uuid, **overrides):

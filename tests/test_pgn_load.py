@@ -240,12 +240,10 @@ def test_round_trip_disambiguation_from_initial():
 
 
 def test_round_trip_promotion_from_initial():
-    # Build a game that reaches a pawn promotion via realistic moves.
+    # Smoke: 3 legal opening moves round-trip through PGN write+load. Promotion
+    # itself is covered by direct apply_san tests.
     backend = Backend()
     backend.new_game()
-    # 1. e4 d5 2. exd5 Qxd5 3. Nc3 Qd8 4. d4 Nf6 5. Nf3 ... slow.
-    # Easier: skip — promotion is exhaustively tested by apply_san direct test
-    # and capture_and_check covers complex SAN. Just smoke a short game.
     sans = ["e4", "d5", "exd5"]
     for s in sans:
         assert backend.apply_san(s).legal

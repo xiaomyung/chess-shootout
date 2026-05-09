@@ -2,8 +2,8 @@ import time
 from typing import Optional
 
 from backend.backend import Backend
-from backend.utils import MoveResult
 from backend.pieces import PieceColor
+from backend.utils import MoveResult, PROMO_LETTER_BY_TYPE
 
 
 SINGLE_SCREEN = "single_screen"
@@ -37,11 +37,7 @@ class Match:
     def promote(self, square, piece_type) -> MoveResult:
         result = self.backend.promote(square, piece_type)
         if result.legal:
-            from backend.pieces import PieceType
-            promo_letter = {
-                PieceType.QUEEN: "q", PieceType.ROOK: "r",
-                PieceType.BISHOP: "b", PieceType.KNIGHT: "n",
-            }.get(piece_type)
+            promo_letter = PROMO_LETTER_BY_TYPE.get(piece_type)
             entry = self.backend.move_history[-1] if self.backend.move_history else None
             from_sq = entry.move.from_sq if entry else None
             if from_sq is not None:
