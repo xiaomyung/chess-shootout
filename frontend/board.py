@@ -53,7 +53,6 @@ class Board:
         self._press_pos = None
         self.dragging_from = None
         self._drag_cursor = None
-        self._drag_chain_tip = None
         self.review_ply = None
         self._target_ply = None
         self.read_only = False
@@ -185,6 +184,10 @@ class Board:
         if piece is None:
             return
         surface = self.piece_images_scaled[(piece.type, piece.color)]
+        ghost = surface.copy()
+        ghost.set_alpha(int(255 * 0.30))
+        origin_rect = self._cell_rect(self.dragging_from.row, self.dragging_from.col)
+        self.window.blit(ghost, origin_rect.topleft)
         x = self._drag_cursor[0] - self.cell_size / 2
         y = self._drag_cursor[1] - self.cell_size / 2
         self.window.blit(surface, (x, y))
@@ -202,6 +205,19 @@ class Board:
                 overlay = pg.Surface((rect.width, rect.height), pg.SRCALPHA)
                 overlay.fill(Colors.premove)
                 self.window.blit(overlay, rect.topleft)
+        chain_tip = self._active_chain_tip()
+        if chain_tip is not None:
+            rect = self._cell_rect(chain_tip.row, chain_tip.col)
+            overlay = pg.Surface((rect.width, rect.height), pg.SRCALPHA)
+            overlay.fill(Colors.premove_chain_tip)
+            self.window.blit(overlay, rect.topleft)
+
+    def _active_chain_tip(self):
+        active_sq = self.dragging_from or self.selected_square
+        if active_sq is None or not self.premoves:
+            return None
+        tip = self._resolve_chain_tip(active_sq)
+        return tip if tip != active_sq else None
 
     def toggle_highlight(self, sq):
         self.highlighted_squares ^= {sq}
@@ -505,7 +521,6 @@ class Board:
         if dx * dx + dy * dy < DRAG_THRESHOLD_PX * DRAG_THRESHOLD_PX:
             return
         self.dragging_from = self.selected_square
-        self._drag_chain_tip = self.selected_square
         self._drag_cursor = pos
 
     def end_press(self):
@@ -513,25 +528,26 @@ class Board:
         self._press_pos = None
         self.dragging_from = None
         self._drag_cursor = None
-        self._drag_chain_tip = None
         return was_dragging
 
     def queue_premove_from_drag(self, target_sq):
         if self.read_only or self.review_ply is not None:
             return False
-        if self._drag_chain_tip is None or target_sq == self._drag_chain_tip:
+        if self.dragging_from is None:
+            return False
+        chain_tip = self._resolve_chain_tip(self.dragging_from)
+        if target_sq == chain_tip:
             return False
         if self.pending_promotion_square is not None:
             return False
         grid = self._effective_grid()
-        piece = grid[self._drag_chain_tip.row][self._drag_chain_tip.col]
+        piece = grid[chain_tip.row][chain_tip.col]
         if piece is None:
             return False
         local_color = getattr(self.match, "local_color", None)
         if local_color is not None and piece.color != local_color:
             return False
-        self._queue_premove(self._drag_chain_tip, target_sq, piece)
-        self._drag_chain_tip = target_sq
+        self._queue_premove(chain_tip, target_sq, piece)
         return True
 
     def cell_at(self, pos):

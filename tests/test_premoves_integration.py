@@ -1098,7 +1098,8 @@ def test_right_click_during_drag_keeps_dragging_for_chain(board):
     board.queue_premove_from_drag(Square(4, 4))
     assert board.dragging_from == Square(6, 4)
     assert board._drag_cursor is not None
-    assert board._drag_chain_tip == Square(4, 4)
+    # Chain tip resolves dynamically via _resolve_chain_tip(dragging_from).
+    assert board._resolve_chain_tip(board.dragging_from) == Square(4, 4)
 
 
 def test_right_click_during_drag_chains_inside_single_hold(board):
@@ -1116,12 +1117,12 @@ def test_right_click_during_drag_chains_inside_single_hold(board):
     assert len(board.premoves) == 1
     # Still dragging — second right-click queues from the new tip g7 to h7.
     assert board.dragging_from == Square(1, 5)
-    assert board._drag_chain_tip == Square(1, 6)
+    assert board._resolve_chain_tip(board.dragging_from) == Square(1, 6)
     board.queue_premove_from_drag(Square(1, 7))
     assert len(board.premoves) == 2
     assert board.premoves[1].from_sq == Square(1, 6)
     assert board.premoves[1].to_sq == Square(1, 7)
-    assert board._drag_chain_tip == Square(1, 7)
+    assert board._resolve_chain_tip(board.dragging_from) == Square(1, 7)
 
 
 def test_right_click_during_drag_lax_shape_still_queues(board):
@@ -1165,7 +1166,6 @@ def test_right_click_drag_premove_blocked_for_opp_piece_in_online(board):
     # somehow the drag started, the queue helper must reject it.
     board.dragging_from = Square(1, 4)
     board.selected_square = Square(1, 4)
-    board._drag_chain_tip = Square(1, 4)
     assert board.queue_premove_from_drag(Square(2, 4)) is False
     assert board.premoves == []
 
@@ -1179,8 +1179,8 @@ def test_right_click_drag_premove_chain_clears_when_drag_ends(board):
     _start_drag(board, Square(6, 4))
     board.queue_premove_from_drag(Square(4, 4))
     board.end_press()
-    assert board._drag_chain_tip is None
     assert board.dragging_from is None
+    assert board._drag_cursor is None
 
 
 def test_premove_immediately_after_other_premove_fires(board):
