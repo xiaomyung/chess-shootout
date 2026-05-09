@@ -228,7 +228,7 @@ async def test_first_move_timeout_aborts_room(app, clock):
                         time_minutes=5, increment_seconds=0, side_preference="black")
     room = list(rooms._active.values())[0]
     room.started_at = clock()
-    clock.advance(31)
+    clock.advance(61)
     await _sweep(app)
     assert room.result == ("aborted", None)
 

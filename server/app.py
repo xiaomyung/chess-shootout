@@ -312,19 +312,22 @@ async def _sweep(app):
         rooms.finalize_abandonment(room.room_id, abandoned_color)
         await _broadcast(connections, room,
                          ResultMessage(reason=Reason.ABANDONMENT, winner_color=winner))
-    # If both players are gone AND no move has been played yet, drop the
-    # room immediately so their uuids free up for a fresh game. Once moves
-    # have been played, fall back to the standard 60 s grace + GC path so
-    # transient WS blips (both reconnecting at once) can still resume.
     for room in list(rooms._active.values()):
-        if room.first_move_at is not None:
-            continue
         white_present = (room.white is not None
                          and connections.get_for_color(room, "white") is not None)
         black_present = (room.black is not None
                          and connections.get_for_color(room, "black") is not None)
-        if not white_present and not black_present:
+        # Both players gone pre-game → drop immediately (uuids free for a
+        # fresh queue join).
+        if (room.first_move_at is None
+                and not white_present and not black_present):
             log.info("drop room=%s reason=both_disconnected_pre_game", room.room_id)
+            rooms.drop_room_now(room.room_id)
+            continue
+        # Game has already ended and at least one player walked → drop now.
+        # Rematch needs both online; if one is gone the room is dead anyway.
+        if room.result is not None and not (white_present and black_present):
+            log.info("drop room=%s reason=post_result_disconnect", room.room_id)
             rooms.drop_room_now(room.room_id)
     rooms.gc_finished_rooms()
 
