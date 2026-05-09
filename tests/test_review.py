@@ -430,26 +430,36 @@ def test_strip_state_captures_track_review_ply():
 
     # In live state white's captured list has 1 black pawn.
     state = app._strip_state(PieceColor.WHITE, app.backend.current_turn(), False)
-    captured_live = state[3]
-    advantage_live = state[4]
-    assert len(captured_live) == 1
-    assert advantage_live == 1
+    assert len(state["captured"]) == 1
+    assert state["advantage"] == 1
 
     # While reviewing ply 2 (after d5, before the capture) → no captures yet.
     app.board.review_ply = 2
     state = app._strip_state(PieceColor.WHITE, app.backend.current_turn(), False)
-    captured_at_2 = state[3]
-    advantage_at_2 = state[4]
-    assert captured_at_2 == []
-    assert advantage_at_2 == 0
+    assert state["captured"] == []
+    assert state["advantage"] == 0
 
     # Reviewing ply 3 (after the capture) → matches live.
     app.board.review_ply = 3
     state = app._strip_state(PieceColor.WHITE, app.backend.current_turn(), False)
-    captured_at_3 = state[3]
-    advantage_at_3 = state[4]
-    assert len(captured_at_3) == 1
-    assert advantage_at_3 == 1
+    assert len(state["captured"]) == 1
+    assert state["advantage"] == 1
+
+
+def test_last_move_highlight_in_review_targets_reviewed_move():
+    app = _new_app()
+    app.backend.try_move(Square(6, 4), Square(4, 4))   # 1.e4
+    app.backend.try_move(Square(1, 3), Square(3, 3))   # 1...d5
+    app.backend.try_move(Square(4, 4), Square(3, 3))   # 2.exd5
+    # In review mode at ply 1, the last-move highlight should mark e2-e4.
+    app.board.review_ply = 1
+    move = app.match.move_history[app.board.review_ply - 1].move
+    assert move.from_sq == Square(6, 4)
+    assert move.to_sq == Square(4, 4)
+    # At ply 0 (initial) there's no last move to highlight.
+    app.board.review_ply = 0
+    # _draw_last_move_highlight should silently do nothing — exercise the path.
+    app.board.draw_board()
 
 
 def test_active_row_highlight_in_live_mode_is_last_ply():
@@ -594,13 +604,13 @@ def test_pgn_review_shows_only_menu_and_flip_buttons(tmp_path):
     _load_test_pgn(app, tmp_path)
     buttons = app._right_menu_buttons()
     keys = {key for _, key in buttons}
-    assert keys == {"menu", "flip"}
+    assert keys == {"menu", "flip", "help"}
 
 
 def test_live_mode_shows_full_buttons():
     app = _new_app()
     keys = {key for _, key in app._right_menu_buttons()}
-    assert keys == {"undo", "resign", "draw", "flip"}
+    assert keys == {"undo", "resign", "draw", "flip", "help"}
 
 
 def test_pgn_review_menu_button_returns_to_start_menu(tmp_path):
@@ -631,7 +641,7 @@ def test_new_game_clears_pgn_review_flag(tmp_path):
     app._on_new_game()
     assert app.pgn_review is False
     keys = {key for _, key in app._right_menu_buttons()}
-    assert keys == {"undo", "resign", "draw", "flip"}
+    assert keys == {"undo", "resign", "draw", "flip", "help"}
 
 
 def test_ctrl_z_does_not_undo_in_pgn_review(tmp_path):

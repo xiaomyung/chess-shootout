@@ -1,41 +1,45 @@
 import asyncio
-import json
 import time
-from collections import defaultdict
+from collections import defaultdict, deque
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 from pydantic import ValidationError
 from slowapi import Limiter
 from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
 
 from backend.fen import export_fen
-from backend.pieces import PieceColor
 from backend.utils import (
-    PROMO_LETTER_BY_TYPE, PROMO_TYPE_BY_LETTER, coord_from_square, square_from_coord,
+    PROMO_LETTER_BY_TYPE, coord_from_square,
 )
 from server import logging_setup
+from server.broadcasts import broadcast_game_start
+from server.connections import ConnectionRegistry, send
+from server.handlers import _clock_snapshot, dispatch
 from server.protocol import (
-    AuthMessage, CancelMatchmakeRequest, ClockSnapshot,
-    ConnectionStatusMessage, DrawOfferedMessage, DrawResponseMessage,
-    ErrorMessage, GameStartMessage, HealthResponse, HistoryEntryWire, MatchmakeRequest,
-    MatchmakeResponse, MoveAppliedMessage, MoveMessage,
-    PROTOCOL_VERSION, Reason, ReclaimRequest, ReclaimResponse,
-    RematchRequestMessage, RematchResponseMessage,
-    ResultMessage, ResumeRequest, ResumeResponse, TakebackAppliedMessage,
-    TakebackOfferedMessage, TakebackResponseMessage,
+    AuthMessage, CancelMatchmakeRequest,
+    ConnectionStatusMessage, ErrorMessage, HealthResponse, HistoryEntryWire, MatchmakeRequest,
+    MatchmakeResponse, PROTOCOL_VERSION, Reason, ReclaimRequest, ReclaimResponse,
+    ResultMessage, ResumeRequest, ResumeResponse,
+    is_uuid4,
 )
 from server.rooms import (
-    AlreadyInGameError, FIRST_MOVE_ABORT_SECONDS, InvalidTokenError,
-    NotInRoomError, PAIRING_WAIT_SECONDS,
+    AlreadyInGameError, InvalidTokenError, NotInRoomError, PAIRING_WAIT_SECONDS,
     RoomManager,
 )
+from server.sweep import Sweep
 
 
 CLOCK_TICK_INTERVAL_SECONDS = 0.1
 MAX_INBOUND_MESSAGE_BYTES = 4096
+
+RECLAIM_PER_UUID_LIMIT_PER_MINUTE = 5
+RECLAIM_WINDOW_SECONDS = 60.0
+
+WS_MESSAGES_PER_SECOND = 30
+WS_RATE_WINDOW_SECONDS = 1.0
 
 WS_CLOSE_PAYLOAD_TOO_LARGE = 1009
 WS_CLOSE_INVALID_TOKEN = 4000
@@ -44,88 +48,35 @@ WS_CLOSE_SERVER_SHUTDOWN = 4002
 log = logging_setup.get_logger("chess.server.app")
 
 
-_RESULT_REASON_BY_GAME_RESULT = {
-    "white_wins": (Reason.CHECKMATE, "white"),
-    "black_wins": (Reason.CHECKMATE, "black"),
-    "white_wins_on_time": (Reason.TIMEOUT, "white"),
-    "black_wins_on_time": (Reason.TIMEOUT, "black"),
-    "draw_stalemate": (Reason.DRAW_STALEMATE, None),
-    "draw_repetition": (Reason.DRAW_REPETITION, None),
-    "draw_fifty_move": (Reason.DRAW_FIFTY_MOVE, None),
-    "draw_insufficient_material": (Reason.DRAW_INSUFFICIENT_MATERIAL, None),
-}
+class UuidRateLimiter:
 
+    def __init__(self, limit_per_minute, window_seconds, now_provider=time.monotonic):
+        self.limit = limit_per_minute
+        self.window = window_seconds
+        self._now = now_provider
+        self._calls: dict[str, deque] = defaultdict(deque)
 
-def _clock_snapshot(clock):
-    if clock is None:
-        return ClockSnapshot(white_remaining=0.0, black_remaining=0.0, running_for=None)
-    running = None
-    if clock.running_for is not None:
-        running = "white" if clock.running_for == PieceColor.WHITE else "black"
-    return ClockSnapshot(
-        white_remaining=clock.white_remaining,
-        black_remaining=clock.black_remaining,
-        running_for=running,
-    )
-
-
-class ConnectionRegistry:
-
-    def __init__(self):
-        self._by_room: dict[str, dict[str, WebSocket]] = defaultdict(dict)
-
-    def add(self, room_id, client_uuid, ws):
-        self._by_room[room_id][client_uuid] = ws
-
-    def remove(self, room_id, client_uuid):
-        if room_id in self._by_room:
-            self._by_room[room_id].pop(client_uuid, None)
-            if not self._by_room[room_id]:
-                self._by_room.pop(room_id, None)
-
-    def get_for_color(self, room, color):
-        slot = room.slot(color)
-        if slot is None:
-            return None
-        return self._by_room.get(room.room_id, {}).get(slot.client_uuid)
-
-    def has_both(self, room):
-        if not room.is_paired():
+    def hit(self, key):
+        now = self._now()
+        cutoff = now - self.window
+        d = self._calls[key]
+        while d and d[0] < cutoff:
+            d.popleft()
+        if len(d) >= self.limit:
             return False
-        present = self._by_room.get(room.room_id, {})
-        return (room.white.client_uuid in present
-                and room.black.client_uuid in present)
-
-    def all_for_room(self, room):
-        for color in ("white", "black"):
-            ws = self.get_for_color(room, color)
-            if ws is not None:
-                yield color, ws
-
-    def all_active(self):
-        for room_id, by_uuid in self._by_room.items():
-            for ws in by_uuid.values():
-                yield room_id, ws
-
-
-async def _send(ws, message):
-    if ws is None:
-        return
-    try:
-        await ws.send_json(message.model_dump(by_alias=True))
-    except Exception as exc:
-        log.warning("broadcast send failed: %s", exc)
-
-
-async def _broadcast(connections, room, message):
-    for _, ws in list(connections.all_for_room(room)):
-        await _send(ws, message)
+        d.append(now)
+        return True
 
 
 def create_app(*, now_provider=time.monotonic, max_rooms=100):
     rooms = RoomManager(now_provider=now_provider, max_rooms=max_rooms)
     connections = ConnectionRegistry()
     limiter = Limiter(key_func=get_remote_address)
+    reclaim_limiter = UuidRateLimiter(
+        RECLAIM_PER_UUID_LIMIT_PER_MINUTE, RECLAIM_WINDOW_SECONDS,
+        now_provider=now_provider,
+    )
+    started_at = now_provider()
 
     @asynccontextmanager
     async def lifespan(app):
@@ -137,7 +88,7 @@ def create_app(*, now_provider=time.monotonic, max_rooms=100):
             sweep_task.cancel()
             shutdown_msg = ResultMessage(reason=Reason.SERVER_SHUTDOWN)
             for _, ws in list(connections.all_active()):
-                await _send(ws, shutdown_msg)
+                await send(ws, shutdown_msg)
                 try:
                     await ws.close(code=WS_CLOSE_SERVER_SHUTDOWN)
                 except (RuntimeError, WebSocketDisconnect) as exc:
@@ -148,18 +99,40 @@ def create_app(*, now_provider=time.monotonic, max_rooms=100):
     app.state.connections = connections
     app.state.limiter = limiter
     app.state.now = now_provider
+    app.state.started_at = started_at
+    app.state.reclaim_limiter = reclaim_limiter
+    app.state.sweep = Sweep(rooms, connections, now_provider)
 
     @app.exception_handler(RateLimitExceeded)
     async def _rate_limit_handler(request, exc):
-        return JSONResponse(status_code=429, content={"reason": "rate_limited"})
+        return JSONResponse(
+            status_code=429,
+            content={"detail": {"reason": Reason.RATE_LIMITED}},
+        )
 
     @app.exception_handler(ValidationError)
     async def _validation_handler(request, exc):
         return JSONResponse(status_code=422, content={"reason": _first_validation_reason(exc)})
 
+    @app.get("/")
+    async def root():
+        return {
+            "service": "chess-server",
+            "version": PROTOCOL_VERSION,
+            "endpoints": ["/healthz", "/matchmake", "/resume", "/reclaim", "/ws/{room_id}"],
+        }
+
+    @app.get("/favicon.ico")
+    async def favicon():
+        return Response(status_code=204)
+
     @app.get("/healthz", response_model=HealthResponse)
     async def healthz():
-        return HealthResponse(rooms_active=rooms.rooms_active)
+        return HealthResponse(
+            rooms_active=rooms.rooms_active,
+            queue_depth=rooms.queue_depth,
+            uptime_s=now_provider() - app.state.started_at,
+        )
 
     @app.post("/matchmake", response_model=MatchmakeResponse)
     @limiter.limit("10/minute")
@@ -168,7 +141,8 @@ def create_app(*, now_provider=time.monotonic, max_rooms=100):
                  body.nickname, body.client_uuid[:8],
                  body.time_minutes, body.increment_seconds, body.side_preference)
         if body.time_minutes < 1 or body.increment_seconds < 0:
-            raise HTTPException(status_code=422, detail={"reason": "invalid_time_control"})
+            raise HTTPException(status_code=422,
+                                  detail={"reason": Reason.INVALID_TIME_CONTROL})
         token = RoomManager.make_session_token()
         try:
             room = await rooms.enqueue(
@@ -242,6 +216,9 @@ def create_app(*, now_provider=time.monotonic, max_rooms=100):
     @app.post("/reclaim", response_model=ReclaimResponse)
     @limiter.limit("30/minute")
     async def post_reclaim(request: Request, body: ReclaimRequest):
+        if not reclaim_limiter.hit(body.client_uuid):
+            log.info("reclaim rate-limited uuid=%s", body.client_uuid[:8])
+            raise HTTPException(status_code=429, detail={"reason": Reason.RATE_LIMITED})
         log.info("reclaim request uuid=%s", body.client_uuid[:8])
         try:
             room, color, new_token = await rooms.reclaim_session(body.client_uuid)
@@ -257,6 +234,9 @@ def create_app(*, now_provider=time.monotonic, max_rooms=100):
 
     @app.websocket("/ws/{room_id}")
     async def ws_endpoint(websocket: WebSocket, room_id: str):
+        if not is_uuid4(room_id):
+            await websocket.close(code=WS_CLOSE_INVALID_TOKEN)
+            return
         await websocket.accept()
         await _ws_session(app, websocket, room_id)
 
@@ -267,56 +247,13 @@ async def _sweep_loop(app):
     try:
         while True:
             await asyncio.sleep(CLOCK_TICK_INTERVAL_SECONDS)
-            await _sweep(app)
+            await app.state.sweep.step_all()
     except asyncio.CancelledError:
         pass
 
 
 async def _sweep(app):
-    rooms = app.state.rooms
-    connections = app.state.connections
-    for room in list(rooms._active.values()):
-        if room.result is not None:
-            continue
-        backend = room.backend
-        if backend is not None and backend.clock is not None and room.first_move_at is not None:
-            backend.tick_clock()
-            game_result = backend.game_result()
-            if game_result in _RESULT_REASON_BY_GAME_RESULT:
-                reason, winner = _RESULT_REASON_BY_GAME_RESULT[game_result]
-                log.info("game over room=%s reason=%s winner=%s",
-                         room.room_id, reason, winner)
-                rooms.finalize_result(room.room_id, reason, winner_color=winner)
-                await _broadcast(connections, room,
-                                 ResultMessage(reason=reason, winner_color=winner))
-        now = app.state.now()
-        if (room.is_paired() and room.first_move_at is None
-                and room.started_at is not None
-                and now - room.started_at >= FIRST_MOVE_ABORT_SECONDS):
-            log.info("aborted room=%s reason=no_first_move", room.room_id)
-            rooms.finalize_result(room.room_id, Reason.ABORTED)
-            await _broadcast(connections, room, ResultMessage(reason=Reason.ABORTED))
-    for room, abandoned_color in list(rooms.grace_expired_rooms()):
-        winner = room.opp_color(abandoned_color)
-        log.info("abandonment room=%s loser=%s winner=%s",
-                 room.room_id, abandoned_color, winner)
-        rooms.finalize_abandonment(room.room_id, abandoned_color)
-        await _broadcast(connections, room,
-                         ResultMessage(reason=Reason.ABANDONMENT, winner_color=winner))
-    for room in list(rooms._active.values()):
-        white_present = (room.white is not None
-                         and connections.get_for_color(room, "white") is not None)
-        black_present = (room.black is not None
-                         and connections.get_for_color(room, "black") is not None)
-        if (room.first_move_at is None
-                and not white_present and not black_present):
-            log.info("drop room=%s reason=both_disconnected_pre_game", room.room_id)
-            rooms.drop_room_now(room.room_id)
-            continue
-        if room.result is not None and not (white_present and black_present):
-            log.info("drop room=%s reason=post_result_disconnect", room.room_id)
-            rooms.drop_room_now(room.room_id)
-    rooms.gc_finished_rooms()
+    await app.state.sweep.step_all()
 
 
 def _first_validation_reason(exc):
@@ -348,7 +285,7 @@ async def _authenticate_ws(websocket, rooms, room_id):
         await websocket.close(code=WS_CLOSE_INVALID_TOKEN)
         return None
     if auth_msg.version != PROTOCOL_VERSION:
-        await _send(websocket, ErrorMessage(reason=Reason.VERSION_MISMATCH))
+        await send(websocket, ErrorMessage(reason=Reason.VERSION_MISMATCH))
         await websocket.close(code=WS_CLOSE_INVALID_TOKEN)
         return None
     room = rooms.get(room_id)
@@ -381,11 +318,16 @@ async def _ws_session(app, websocket, room_id):
     if room.is_paired() and connections.has_both(room) and not room.game_start_broadcast:
         if room.started_at is None:
             room.started_at = app.state.now()
-        await _broadcast_game_start(connections, room)
+        await broadcast_game_start(connections, room)
     else:
         opp_ws = connections.get_for_color(room, room.opp_color(color))
         if opp_ws is not None:
-            await _send(opp_ws, ConnectionStatusMessage(opp_state="connected"))
+            await send(opp_ws, ConnectionStatusMessage(opp_state="connected"))
+
+    ws_rate_limiter = UuidRateLimiter(
+        WS_MESSAGES_PER_SECOND, WS_RATE_WINDOW_SECONDS,
+        now_provider=app.state.now,
+    )
 
     try:
         while True:
@@ -403,7 +345,14 @@ async def _ws_session(app, websocket, room_id):
             current_color = room.color_of(auth_uuid)
             if current_color is None:
                 break
-            await _dispatch(app, websocket, room, current_color, raw)
+            if not ws_rate_limiter.hit(auth_uuid):
+                await send(websocket, ErrorMessage(reason=Reason.RATE_LIMITED))
+                continue
+            t0 = app.state.now()
+            msg_type, outcome = await dispatch(app, websocket, room, current_color, raw)
+            log.debug("ws dispatch room=%s uuid=%s type=%s latency_ms=%.1f outcome=%s",
+                      room.room_id, auth_uuid[:8], msg_type,
+                      (app.state.now() - t0) * 1000.0, outcome)
     finally:
         if auth_room is not None and auth_color is not None:
             rooms.mark_disconnected(auth_room.room_id, auth_color)
@@ -413,243 +362,4 @@ async def _ws_session(app, websocket, room_id):
                      auth_room.room_id, auth_color)
             opp_ws = connections.get_for_color(auth_room, auth_room.opp_color(auth_color))
             if opp_ws is not None and auth_room.result is None:
-                await _send(opp_ws, ConnectionStatusMessage(opp_state="reconnecting"))
-
-
-async def _broadcast_game_start(connections, room):
-    fen = export_fen(room.backend)
-    sent = []
-    for color in ("white", "black"):
-        ws = connections.get_for_color(room, color)
-        if ws is None:
-            continue
-        await _send(ws, GameStartMessage(
-            fen=fen,
-            white_name=room.white.nickname if room.white else "",
-            black_name=room.black.nickname if room.black else "",
-            time_minutes=room.time_minutes,
-            increment_seconds=room.increment_seconds,
-            your_color=color,
-        ))
-        sent.append(color)
-    room.game_start_broadcast = True
-    log.info("game_start broadcast room=%s sent_to=%s", room.room_id, sent)
-
-
-async def _dispatch(app, websocket, room, color, raw):
-    msg_type = _peek_type(raw)
-    if msg_type == "move":
-        await _handle_move(app, room, color, raw)
-    elif msg_type == "resign":
-        await _handle_resign(app, room, color)
-    elif msg_type == "draw_offer":
-        await _handle_draw_offer(app, room, color)
-    elif msg_type == "draw_response":
-        await _handle_draw_response(app, room, color, raw)
-    elif msg_type == "rematch_request":
-        await _handle_rematch_request(app, room, color)
-    elif msg_type == "rematch_response":
-        await _handle_rematch_response(app, room, color, raw)
-    elif msg_type == "takeback_request":
-        await _handle_takeback_request(app, room, color)
-    elif msg_type == "takeback_response":
-        await _handle_takeback_response(app, room, color, raw)
-    else:
-        await _send(websocket, ErrorMessage(reason=Reason.INVALID_MESSAGE))
-
-
-def _peek_type(raw):
-    try:
-        return json.loads(raw).get("type")
-    except (json.JSONDecodeError, ValueError):
-        return None
-
-
-async def _handle_move(app, room, color, raw):
-    rooms = app.state.rooms
-    connections = app.state.connections
-    if room.backend is None:
-        return
-    try:
-        msg = MoveMessage.model_validate_json(raw)
-        from_sq = square_from_coord(msg.from_sq)
-        to_sq = square_from_coord(msg.to_sq)
-    except (ValidationError, ValueError):
-        await _send(connections.get_for_color(room, color),
-                    ErrorMessage(reason=Reason.INVALID_MOVE_FORMAT))
-        return
-    expected = "white" if room.backend.current_turn() == PieceColor.WHITE else "black"
-    if expected != color:
-        log.info("move rejected room=%s mover=%s expected=%s reason=not_your_turn",
-                 room.room_id, color, expected)
-        await _send(connections.get_for_color(room, color),
-                    ErrorMessage(reason=Reason.NOT_YOUR_TURN))
-        return
-    result = room.backend.try_move(from_sq, to_sq)
-    if not result.legal:
-        await _send(connections.get_for_color(room, color),
-                    ErrorMessage(reason=Reason.INVALID_MOVE_FORMAT))
-        return
-    if result.promotion_required:
-        promo_letter = msg.promotion or "q"
-        promo_type = PROMO_TYPE_BY_LETTER[promo_letter]
-        room.backend.promote(to_sq, promo_type)
-    if room.first_move_at is None:
-        room.first_move_at = app.state.now()
-    room.draw_offered_by = None
-    room.takeback_offered_by = None
-    san = room.backend.move_history[-1].san
-    log.info("move applied room=%s mover=%s san=%s", room.room_id, color, san)
-    applied = MoveAppliedMessage(
-        from_sq=msg.from_sq, to_sq=msg.to_sq, promotion=msg.promotion,
-        san=san, clock=_clock_snapshot(room.backend.clock),
-    )
-    await _broadcast(connections, room, applied)
-    game_result = room.backend.game_result()
-    if game_result in _RESULT_REASON_BY_GAME_RESULT:
-        reason, winner = _RESULT_REASON_BY_GAME_RESULT[game_result]
-        rooms.finalize_result(room.room_id, reason, winner_color=winner)
-        await _broadcast(connections, room,
-                         ResultMessage(reason=reason, winner_color=winner))
-
-
-async def _handle_resign(app, room, color):
-    rooms = app.state.rooms
-    connections = app.state.connections
-    if room.result is not None:
-        return
-    winner = room.opp_color(color)
-    log.info("resign room=%s loser=%s winner=%s", room.room_id, color, winner)
-    rooms.finalize_result(room.room_id, Reason.RESIGNATION, winner_color=winner)
-    await _broadcast(connections, room,
-                     ResultMessage(reason=Reason.RESIGNATION, winner_color=winner))
-
-
-async def _handle_draw_offer(app, room, color):
-    rooms = app.state.rooms
-    connections = app.state.connections
-    if room.result is not None:
-        return
-    if room.backend is None:
-        return
-    expected = "white" if room.backend.current_turn() == PieceColor.WHITE else "black"
-    if color != expected:
-        await _send(connections.get_for_color(room, color),
-                    ErrorMessage(reason=Reason.NOT_YOUR_TURN))
-        return
-    if room.draw_offered_by is not None and room.draw_offered_by != color:
-        log.info("draw mutual room=%s", room.room_id)
-        rooms.finalize_result(room.room_id, Reason.DRAW_AGREEMENT)
-        room.draw_offered_by = None
-        await _broadcast(connections, room,
-                         ResultMessage(reason=Reason.DRAW_AGREEMENT))
-        return
-    log.info("draw offered room=%s by=%s", room.room_id, color)
-    room.draw_offered_by = color
-    opp_ws = connections.get_for_color(room, room.opp_color(color))
-    await _send(opp_ws, DrawOfferedMessage())
-
-
-async def _handle_draw_response(app, room, color, raw):
-    rooms = app.state.rooms
-    connections = app.state.connections
-    if room.result is not None or room.draw_offered_by is None:
-        return
-    try:
-        msg = DrawResponseMessage.model_validate_json(raw)
-    except ValidationError:
-        return
-    if room.draw_offered_by == color:
-        return
-    if msg.accept:
-        log.info("draw accepted room=%s by=%s", room.room_id, color)
-        rooms.finalize_result(room.room_id, Reason.DRAW_AGREEMENT)
-        room.draw_offered_by = None
-        await _broadcast(connections, room,
-                         ResultMessage(reason=Reason.DRAW_AGREEMENT))
-    else:
-        log.info("draw declined room=%s by=%s", room.room_id, color)
-        room.draw_offered_by = None
-
-
-async def _handle_rematch_request(app, room, color):
-    rooms = app.state.rooms
-    connections = app.state.connections
-    if room.result is None:
-        return
-    if color in room.rematch_offered_by:
-        return
-    room.rematch_offered_by.add(color)
-    if len(room.rematch_offered_by) == 2:
-        log.info("rematch mutual — restart room=%s", room.room_id)
-        rooms.reset_for_rematch(room.room_id)
-        await _broadcast_game_start(connections, room)
-        return
-    log.info("rematch requested room=%s by=%s", room.room_id, color)
-    opp_ws = connections.get_for_color(room, room.opp_color(color))
-    if opp_ws is not None:
-        await _send(opp_ws, RematchRequestMessage())
-
-
-async def _handle_rematch_response(app, room, color, raw):
-    rooms = app.state.rooms
-    connections = app.state.connections
-    if room.result is None:
-        return
-    try:
-        msg = RematchResponseMessage.model_validate_json(raw)
-    except ValidationError:
-        return
-    if not room.rematch_offered_by:
-        return
-    if msg.accept:
-        log.info("rematch accepted room=%s by=%s", room.room_id, color)
-        rooms.reset_for_rematch(room.room_id)
-        await _broadcast_game_start(connections, room)
-    else:
-        log.info("rematch declined room=%s by=%s", room.room_id, color)
-        room.rematch_offered_by.clear()
-
-
-async def _handle_takeback_request(app, room, color):
-    connections = app.state.connections
-    if room.result is not None or room.backend is None:
-        return
-    expected = "white" if room.backend.current_turn() == PieceColor.WHITE else "black"
-    if color == expected:
-        await _send(connections.get_for_color(room, color),
-                    ErrorMessage(reason=Reason.NOT_YOUR_TURN))
-        return
-    if not room.backend.move_history:
-        return
-    last_mover_color = "black" if expected == "white" else "white"
-    if last_mover_color != color:
-        return
-    log.info("takeback requested room=%s by=%s", room.room_id, color)
-    room.takeback_offered_by = color
-    opp_ws = connections.get_for_color(room, room.opp_color(color))
-    await _send(opp_ws, TakebackOfferedMessage())
-
-
-async def _handle_takeback_response(app, room, color, raw):
-    rooms = app.state.rooms
-    connections = app.state.connections
-    if room.result is not None or room.takeback_offered_by is None:
-        return
-    try:
-        msg = TakebackResponseMessage.model_validate_json(raw)
-    except ValidationError:
-        return
-    if room.takeback_offered_by == color:
-        return
-    if msg.accept:
-        log.info("takeback accepted room=%s by=%s", room.room_id, color)
-        room.backend.undo()
-        room.takeback_offered_by = None
-        await _broadcast(connections, room, TakebackAppliedMessage(
-            fen=export_fen(room.backend),
-            clock=_clock_snapshot(room.backend.clock),
-        ))
-    else:
-        log.info("takeback declined room=%s by=%s", room.room_id, color)
-        room.takeback_offered_by = None
+                await send(opp_ws, ConnectionStatusMessage(opp_state="reconnecting"))

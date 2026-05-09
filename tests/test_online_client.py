@@ -1,5 +1,5 @@
-"""Unit tests for OnlineClient URL builders. End-to-end flow lives in test_online_flow.py."""
-from frontend.online_client import _http_url, _split_addr, _ws_url
+"""URL builder unit tests. Live in transport.py post-M19; the client just delegates."""
+from frontend.online.transport import _UrlBuilder, _split_addr
 
 
 def test_split_addr_localhost_picks_ws():
@@ -32,17 +32,21 @@ def test_split_addr_port_8000_picks_ws_for_hostname():
     assert scheme == "ws" and host == "chess.example.com" and port == 8000
 
 
-def test_http_url_localhost_uses_http():
-    assert _http_url("localhost:8000", "/matchmake") == "http://localhost:8000/matchmake"
+def test_url_builder_http_localhost():
+    u = _UrlBuilder("localhost:8000")
+    assert u.http("/matchmake") == "http://localhost:8000/matchmake"
 
 
-def test_http_url_hostname_uses_https():
-    assert _http_url("chess.example.com", "/matchmake") == "https://chess.example.com:443/matchmake"
+def test_url_builder_http_hostname_uses_https():
+    u = _UrlBuilder("chess.example.com")
+    assert u.http("/matchmake") == "https://chess.example.com:443/matchmake"
 
 
-def test_ws_url_localhost():
-    assert _ws_url("localhost:8000", "/ws/abc") == "ws://localhost:8000/ws/abc"
+def test_url_builder_ws_localhost():
+    u = _UrlBuilder("localhost:8000")
+    assert u.ws("/ws/abc") == "ws://localhost:8000/ws/abc"
 
 
-def test_ws_url_hostname_uses_wss():
-    assert _ws_url("chess.example.com", "/ws/abc") == "wss://chess.example.com:443/ws/abc"
+def test_url_builder_ws_hostname_uses_wss():
+    u = _UrlBuilder("chess.example.com")
+    assert u.ws("/ws/abc") == "wss://chess.example.com:443/ws/abc"

@@ -94,6 +94,10 @@ class RoomManager:
     def rooms_active(self):
         return len(self._active)
 
+    @property
+    def queue_depth(self):
+        return sum(len(q) for q in self._queue.values())
+
     def get(self, room_id):
         if room_id in self._active:
             return self._active[room_id]

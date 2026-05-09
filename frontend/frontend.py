@@ -7,25 +7,28 @@ from datetime import datetime
 
 import pygame as pg
 
-from backend.fen import apply_fen
 from backend.match import Match, SINGLE_SCREEN, BOT, ONLINE
-from backend.utils import PROMO_TYPE_BY_LETTER, coord_from_square, square_from_coord
 from frontend import env
-from frontend.audio_panel import AudioPanel
+from frontend.panels.audio import AudioPanel
 from frontend.board import Board
-from frontend.capture_summary import captured_by, material_advantage
-from frontend.confirm_modal import ConfirmModal
-from frontend.file_picker import FilePicker
-from frontend.online_client import OnlineClient, fetch_resume, probe_active_game
-from frontend.player_strip import PlayerStrip
-from frontend.server_modal import ServerAddressModal
-from frontend.wait_modal import WaitModal
-from frontend.right_menu import RightMenu, BUTTONS as RIGHT_MENU_BUTTONS, REVIEW_BUTTONS as RIGHT_MENU_REVIEW_BUTTONS
-from frontend.result_menu import ResultMenu
-from frontend.sound_manager import SoundManager
-from frontend.start_menu import StartMenu
-from frontend.pgn import generate_pgn, TIMEOUT_RESULTS
-from frontend.pgn_load import load_pgn_into_backend
+from frontend.panels.capture_summary import captured_by, material_advantage
+from frontend.modals.confirm import ConfirmModal
+from frontend.modals.file_picker import FilePicker
+from frontend.modals.fen_input import FenInputModal
+from frontend.modals.help import HelpModal
+from frontend.modals.reconnecting import ReconnectingModal
+from frontend.visual.toast import Toast
+from frontend.online.client import OnlineClient, fetch_resume, probe_active_game
+from frontend.online.events import OnlineEventsMixin
+from frontend.panels.player_strip import PlayerStrip
+from frontend.modals.server import ServerAddressModal
+from frontend.modals.wait import WaitModal
+from frontend.panels.right import RightMenu, BUTTONS as RIGHT_MENU_BUTTONS, REVIEW_BUTTONS as RIGHT_MENU_REVIEW_BUTTONS
+from frontend.modals.result import ResultMenu
+from frontend.audio.sound_manager import SoundManager
+from frontend.modals.start import StartMenu
+from frontend.pgn.generate import generate_pgn, TIMEOUT_RESULTS
+from frontend.pgn.load import load_pgn_into_backend
 from backend.paths import PROJECT_ROOT, SOUNDS_DIR
 from backend.pieces import PieceColor, PieceType, opponent_of
 
@@ -37,6 +40,49 @@ MANUAL_RESULT_TEXT = {
     "aborted": ("Game aborted", "no moves played"),
     "server_shutdown": ("Game cancelled", "server shutting down"),
 }
+
+def _open_with_default_app(path):
+    import shutil
+    import subprocess
+    import sys
+    if sys.platform == "darwin":
+        candidates = [["open", path]]
+    elif sys.platform.startswith("win"):
+        try:
+            os.startfile(path)
+            return True
+        except OSError:
+            return False
+    else:
+        candidates = [
+            ["xdg-open", path],
+            ["gio", "open", path],
+        ]
+    for cmd in candidates:
+        if shutil.which(cmd[0]) is None:
+            continue
+        try:
+            subprocess.Popen(
+                cmd,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                start_new_session=True,
+            )
+            return True
+        except OSError:
+            continue
+    return False
+
+
+def _score_str(score):
+    int_part = int(score)
+    has_half = score - int_part >= 0.5 - 1e-9
+    if int_part == 0 and has_half:
+        return "½"
+    if has_half:
+        return f"{int_part}½"
+    return str(int_part)
+
 
 ENGINE_RESULT_TEXT = {
     "white_wins": ("White wins", "by checkmate"),
@@ -55,22 +101,43 @@ OPPONENT_NAME_FOR_MODE = {
     ONLINE: "Opponent",
 }
 
-ONLINE_WIN_REASONS = {"checkmate", "timeout", "resignation", "abandonment"}
-ONLINE_DRAW_REASONS = {
-    "draw_agreement", "draw_stalemate", "draw_repetition",
-    "draw_fifty_move", "draw_insufficient_material",
-}
-ONLINE_STATIC_RESULTS = {"aborted", "server_shutdown"}
 
 AUTO_FLIP_DELAY_MS = 200
+RESULT_FADE_MS = 400
+RESULT_MODAL_DELAY_MS = 500
+RESULT_FADE_MAX_ALPHA = 140
+
+ANIM_MS_DEFAULT = 180
+ANIM_MS_MIN = 140
+ANIM_MS_MAX = 280
+
+MATCH_FOUND_HOLD_MS = 500
+SAVED_PGN_TOAST_DURATION_MS = 3000
 
 MIN_WINDOW_WIDTH = 900
 MIN_WINDOW_HEIGHT = 500
 
+def _games_dir():
+    return os.path.join(PROJECT_ROOT, "games")
+
+
+PROMOTION_KEYS = {
+    pg.K_q: PieceType.QUEEN,
+    pg.K_r: PieceType.ROOK,
+    pg.K_b: PieceType.BISHOP,
+    pg.K_n: PieceType.KNIGHT,
+}
+
+
+def compute_animation_ms(initial_seconds):
+    if initial_seconds is None or initial_seconds <= 0:
+        return ANIM_MS_DEFAULT
+    return max(ANIM_MS_MIN, min(ANIM_MS_MAX, int(initial_seconds * 0.5)))
+
 log = logging.getLogger("chess.frontend")
 
 
-class Frontend:
+class Frontend(OnlineEventsMixin):
 
     def __init__(self, window_width: int, window_height: int):
         self.running = True
@@ -88,19 +155,28 @@ class Frontend:
         self._chosen_side = "white"
         self._time_control = None
         self.pgn_review = False
+        self._flag_fall_played = False
+        self._result_first_seen_at_ms = None
+        self._pgn_result_tag = None
+        self._series_white_score = 0.0
+        self._series_black_score = 0.0
+        self._series_room_id = None
 
         self.match = Match()
         self.sound_manager = SoundManager(SOUNDS_DIR, enabled=pg.mixer.get_init() is not None)
-        self.board = Board(self.window, self.match, move_landed_callback=self._on_move_landed)
+        self.board = Board(self.window, self.match,
+                           move_landed_callback=self._on_move_landed,
+                           on_premove_queued=self.sound_manager.play_premove_queued)
         self.result_menu = ResultMenu(self.window, {
             "new_game": self._on_new_game,
-            "save_pgn": self._on_save_pgn,
+            "open_pgn": self._on_open_pgn,
             "menu": self._on_back_to_menu,
             "rematch": self._on_rematch,
         })
         self.start_menu = StartMenu(self.window, {
             "start_game": self._on_start_game,
             "load_pgn": self._on_load_last_game,
+            "fen": self._on_open_fen_modal,
             "reconnect": self._on_reconnect_active_game,
         })
         self._pending_reconnect = None
@@ -112,12 +188,22 @@ class Frontend:
             "draw": self._on_draw,
             "flip": self._on_flip,
             "menu": self._on_back_to_menu,
+            "help": self._on_help,
         }, board=self.board, buttons_provider=self._right_menu_buttons,
-            audio_panel=self.audio_panel)
+            audio_panel=self.audio_panel,
+            disabled_keys_provider=self._right_menu_disabled_keys)
         self.confirm_modal = ConfirmModal(self.window)
         self.file_picker = FilePicker(self.window)
+        self.help_modal = HelpModal(self.window)
+        self.fen_input_modal = FenInputModal(self.window)
+        self.toast = Toast(self.window)
+        self._last_saved_pgn_path = None
         self.server_modal = ServerAddressModal(self.window)
         self.wait_modal = WaitModal(self.window)
+        self.reconnecting_modal = ReconnectingModal(self.window)
+        self._wait_started_at_ms = None
+        self._match_found_at_ms = None
+        self._pending_game_start_payload = None
         self.online_client = None
         self.player_strip_top = PlayerStrip(self.window)
         self.player_strip_bottom = PlayerStrip(self.window)
@@ -168,18 +254,38 @@ class Frontend:
         self.start_menu.load_pgn_available = self._latest_pgn_path() is not None
 
     def _latest_pgn_path(self):
-        pattern = os.path.join(PROJECT_ROOT, "games", "game-*.pgn")
-        files = glob.glob(pattern)
+        files = glob.glob(os.path.join(_games_dir(), "*.pgn"))
         if not files:
             return None
         return max(files, key=os.path.getmtime)
 
     def _on_load_last_game(self):
-        games_dir = os.path.join(PROJECT_ROOT, "games")
         self.file_picker.show(
-            games_dir, "*.pgn",
+            _games_dir(), "*.pgn",
             on_select=self._load_pgn_from_path,
         )
+
+    def _on_open_fen_modal(self):
+        self.fen_input_modal.show(on_submit=self._start_game_from_fen)
+
+    def _start_game_from_fen(self, fen):
+        from backend.fen import apply_fen
+        try:
+            apply_fen(self.match.backend, fen)
+        except (ValueError, KeyError, IndexError):
+            return False
+        self.mode = SINGLE_SCREEN
+        self._time_control = None
+        self._chosen_side = "white"
+        self.white_name = "Player 1"
+        self.black_name = "Player 2"
+        self.match.mode = SINGLE_SCREEN
+        self.match.local_color = None
+        self._reset_to_new_game()
+        apply_fen(self.match.backend, fen)
+        self.fen_input_modal.hide()
+        self.start_menu.hide()
+        return True
 
     def _load_pgn_from_path(self, path):
         with open(path) as f:
@@ -187,9 +293,10 @@ class Frontend:
         self.mode = SINGLE_SCREEN
         self._time_control = None
         self._reset_to_new_game()
-        _, ok = load_pgn_into_backend(self.match, text)
+        parsed, ok = load_pgn_into_backend(self.match, text)
         if not ok:
             return
+        self._pgn_result_tag = parsed.result
         if self.match.move_history:
             self.board.review_ply = 0
         self.pgn_review = True
@@ -308,6 +415,9 @@ class Frontend:
         }
         self.online_client.connect(addr, request)
         self.wait_modal.show("Searching for opponent…", self._on_online_cancel)
+        self._wait_started_at_ms = pg.time.get_ticks()
+        self._match_found_at_ms = None
+        self._pending_game_start_payload = None
 
     def _on_online_cancel(self):
         log.info("online flow cancel")
@@ -318,192 +428,93 @@ class Frontend:
         self.right_menu.set_game_info(None)
         self.server_modal.hide()
         self.wait_modal.hide()
+        self._wait_started_at_ms = None
+        self._match_found_at_ms = None
+        self._pending_game_start_payload = None
         self.mode = "menu"
         self.start_menu.show()
-
-    def _drain_online_inbound(self):
-        if self.online_client is None:
-            return
-        for event in self.online_client.drain_inbound():
-            try:
-                self._handle_online_event(event)
-            except Exception:
-                log.exception("online event handler failed")
-
-    def _handle_online_event(self, event):
-        if event.type == "matchmake_response":
-            return
-        elif event.type == "game_start":
-            self._start_online_game(event.payload)
-        elif event.type == "move_applied":
-            self._handle_remote_move_applied(event.payload)
-        elif event.type == "result":
-            self._handle_online_result(event.payload)
-        elif event.type == "draw_offered":
-            self._show_opp_offer_modal(
-                "Opponent offers a draw", self.online_client.send_draw_response,
-            )
-        elif event.type == "takeback_offered":
-            self._show_opp_offer_modal(
-                "Opponent requests a takeback",
-                self.online_client.send_takeback_response,
-            )
-        elif event.type == "takeback_applied":
-            self._handle_takeback_applied(event.payload)
-        elif event.type == "rematch_request":
-            self._show_opp_offer_modal(
-                "Opponent wants a rematch",
-                self.online_client.send_rematch_response,
-            )
-        elif event.type == "game_resumed":
-            self._handle_game_resumed(event.payload)
-        elif event.type == "connection_status":
-            return
-        elif event.type == "error":
-            reason = event.payload.get("reason", "")
-            game_state_reasons = {
-                "not_your_turn", "invalid_move_format", "invalid_message",
-                "version_mismatch",
-            }
-            if reason in game_state_reasons:
-                return
-            self.wait_modal.hide()
-            self.confirm_modal.show(
-                reason or "Server unreachable",
-                on_yes=lambda: self._on_server_addr_connect(env.get_server_addr()),
-                on_no=self._on_online_cancel,
-                yes_label="Retry", no_label="Cancel",
-            )
-
-    def _show_opp_offer_modal(self, title, send_response):
-        self.confirm_modal.show(
-            title,
-            on_yes=lambda: send_response(True),
-            on_no=lambda: send_response(False),
-            yes_label="Accept", no_label="Decline",
-        )
-
-    def _apply_clock_snap(self, payload, *, default_to_existing):
-        clock_snap = payload.get("clock") or {}
-        if self.match.clock is None:
-            return
-        if default_to_existing:
-            white_default = self.match.clock.white_remaining
-            black_default = self.match.clock.black_remaining
-        else:
-            white_default = 0.0
-            black_default = 0.0
-        self.match.clock.restore_from_server(
-            clock_snap.get("white_remaining", white_default),
-            clock_snap.get("black_remaining", black_default),
-            clock_snap.get("running_for"),
-        )
-
-    def _handle_game_resumed(self, payload):
-        self.match.new_game()
-        for entry in payload.get("move_history", []):
-            result = self.match.backend.apply_san(entry["san"])
-            if not result.legal:
-                log.warning("resume: SAN replay failed at %r", entry.get("san"))
-                apply_fen(self.match.backend, payload["fen"])
-                break
-        if self._time_control is not None:
-            initial, incr = self._time_control
-            self.match.setup_clock(initial, incr)
-            self._apply_clock_snap(payload, default_to_existing=False)
-        self.board.cancel_animations()
-        self.board.selected_square = None
-        self.board._clear_premoves()
-        self.board.clear_annotations()
-
-    def _handle_takeback_applied(self, payload):
-        if self.match.move_history:
-            last = self.match.move_history[-1].move
-            self.match.undo()
-            self.board.start_undo_animation(last)
-        self._apply_clock_snap(payload, default_to_existing=True)
-
-    def _handle_remote_move_applied(self, payload):
-        self._apply_clock_snap(payload, default_to_existing=True)
-        san = payload.get("san")
-        last = self.match.move_history[-1] if self.match.move_history else None
-        if last is not None and last.san == san:
-            return
-        from_sq = square_from_coord(payload["from"])
-        to_sq = square_from_coord(payload["to"])
-        promo = payload.get("promotion")
-        promo_type = PROMO_TYPE_BY_LETTER.get(promo) if promo else None
-        result = self.match.apply_remote_move(from_sq, to_sq, promo_type)
-        if result.legal:
-            self.board.animate_remote_move(from_sq, to_sq)
-
-    def _handle_online_result(self, payload):
-        reason = payload.get("reason", "")
-        winner = payload.get("winner_color")
-        if reason in ONLINE_WIN_REASONS:
-            self.manual_result = "white_wins" if winner == "white" else "black_wins"
-        elif reason in ONLINE_DRAW_REASONS:
-            self.manual_result = "draw_agreement"
-        elif reason in ONLINE_STATIC_RESULTS:
-            self.manual_result = reason
-        if self.manual_result is not None:
-            self._auto_save_online_pgn()
 
     def _on_rematch(self):
         if self.online_client is None:
             return
         self.online_client.send_rematch_request()
 
-    def _start_online_game(self, payload):
-        opp_name = (payload.get("white_name") if payload.get("your_color") == "black"
-                    else payload.get("black_name"))
-        log.info("game start as %s vs %s", payload.get("your_color"), opp_name)
-        pg.display.set_caption(f"Chess — vs {opp_name}")
-        self.wait_modal.hide()
-        self.confirm_modal.hide()
-        self.manual_result = None
-        self.result_menu.set_online_mode(True)
-        self.mode = ONLINE
-        self._online_initial_flip = (payload["your_color"] == "black")
-        self._chosen_side = payload["your_color"]
-        self.white_name = payload["white_name"]
-        self.black_name = payload["black_name"]
-        self._time_control = (payload["time_minutes"] * 60,
-                              payload["increment_seconds"])
-        self.match.mode = ONLINE
-        self.match.local_color = (PieceColor.WHITE if payload["your_color"] == "white"
-                                  else PieceColor.BLACK)
-        self.match.on_local_move_applied = self._on_local_move_applied
-        self.right_menu.set_game_info({
-            "white_name": payload["white_name"],
-            "black_name": payload["black_name"],
-            "time_minutes": payload["time_minutes"],
-            "increment_seconds": payload["increment_seconds"],
-            "ping_ms": None,
-        })
+    def _tear_down_online_session(self):
+        if self.online_client is not None:
+            self.online_client.disconnect()
+            self.online_client = None
+        self.reconnecting_modal.hide()
+        self.match.on_local_move_applied = None
+        self.right_menu.set_game_info(None)
+        self.result_menu.set_online_mode(False)
+        self.match.mode = SINGLE_SCREEN
+        self.match.local_color = None
+        self.mode = "menu"
+        pg.display.set_caption("Chess")
         self._reset_to_new_game()
-        self.board.flipped = self._online_initial_flip
-        self.sound_manager.play_game_start()
+        self._refresh_load_pgn_availability()
 
-    def _on_local_move_applied(self, from_sq, to_sq, promotion):
-        if self.online_client is None:
-            return
-        self.online_client.send_move(coord_from_square(from_sq), coord_from_square(to_sq), promotion)
+    def _abandon_online_game(self):
+        log.info("abandoning online game (reconnect cancelled)")
+        self._tear_down_online_session()
+        self.start_menu.show()
+
+    def _restart_online_search(self):
+        log.info("restarting online search after server restart")
+        self._tear_down_online_session()
+        self.start_menu.hide()
+        if getattr(self, "_online_config", None) is not None:
+            self._on_server_addr_connect(env.get_server_addr())
+
+    def _update_online_phase(self):
+        if self.wait_modal.is_visible() and self._match_found_at_ms is None:
+            if self._wait_started_at_ms is not None:
+                elapsed = (pg.time.get_ticks() - self._wait_started_at_ms) // 1000
+                mm = elapsed // 60
+                ss = elapsed % 60
+                self.wait_modal.set_subtitle(f"{mm:02d}:{ss:02d}")
+        if (self._match_found_at_ms is not None
+                and self._pending_game_start_payload is not None
+                and pg.time.get_ticks() - self._match_found_at_ms >= MATCH_FOUND_HOLD_MS):
+            payload = self._pending_game_start_payload
+            self._pending_game_start_payload = None
+            self._match_found_at_ms = None
+            self._wait_started_at_ms = None
+            self._start_online_game(payload)
+        if (self.online_client is not None
+                and self.online_client.state == "reconnecting"):
+            if not self.reconnecting_modal.is_visible():
+                self.reconnecting_modal.show(on_cancel=self._abandon_online_game)
+        elif self.reconnecting_modal.is_visible():
+            self.reconnecting_modal.hide()
 
     def _right_menu_buttons(self):
         if self.pgn_review:
             return RIGHT_MENU_REVIEW_BUTTONS
         return RIGHT_MENU_BUTTONS
 
+    def _right_menu_disabled_keys(self):
+        if self.current_result() is None or self.pgn_review:
+            return set()
+        return {"undo", "resign", "draw", "flip"}
+
     def _reset_to_new_game(self):
         self.pgn_review = False
         self.board.read_only = False
         self.sound_manager.stop_all()
         self.manual_result = None
+        self._flag_fall_played = False
+        self._result_first_seen_at_ms = None
+        self._pgn_result_tag = None
+        self._last_saved_pgn_path = None
+        self.right_menu.reset_for_new_game()
         self.match.new_game()
         if self._time_control is not None:
             initial, incr = self._time_control
             self.match.setup_clock(initial, incr)
+            self.board.animation_duration_ms = compute_animation_ms(initial)
+        else:
+            self.board.animation_duration_ms = ANIM_MS_DEFAULT
         self.board.flipped = False
         self.board.selected_square = None
         self.board.pending_promotion_square = None
@@ -515,33 +526,51 @@ class Frontend:
         self.confirm_modal.hide()
         self._last_turn_for_flip = None
 
-    def _on_save_pgn(self):
-        self._write_pgn(prefix="game")
-
-    def _auto_save_online_pgn(self):
-        if not self.match.move_history:
+    def _on_open_pgn(self):
+        path = self._last_saved_pgn_path
+        if path is None or not os.path.exists(path):
+            self.toast.show("No saved PGN")
             return
-        self._write_pgn(prefix="online")
+        if not _open_with_default_app(path):
+            self.toast.show("Could not open PGN")
 
-    def _write_pgn(self, prefix):
+    def _auto_save_pgn(self):
+        if not self.match.move_history:
+            return None
+        text = self._build_pgn_text()
+        if text is None:
+            return None
+        prefix = self._auto_save_prefix()
+        os.makedirs(_games_dir(), exist_ok=True)
+        filename = f"{prefix}-{datetime.now().strftime('%Y%m%d-%H%M%S')}.pgn"
+        path = os.path.join(_games_dir(), filename)
+        with open(path, "w") as f:
+            f.write(text)
+        self._last_saved_pgn_path = path
+        self.toast.show(f"Saved {filename}", duration_ms=SAVED_PGN_TOAST_DURATION_MS)
+        return path
+
+    def _auto_save_prefix(self):
+        if self.mode == ONLINE:
+            return "online"
+        if self.mode == BOT:
+            return "bot"
+        return "local"
+
+    def _build_pgn_text(self):
         result = self.current_result()
         if result is None:
-            return
-        games_dir = os.path.join(PROJECT_ROOT, "games")
-        os.makedirs(games_dir, exist_ok=True)
-        filename = f"{prefix}-{datetime.now().strftime('%Y%m%d-%H%M%S')}.pgn"
-        path = os.path.join(games_dir, filename)
+            return None
         time_control = self._time_control
         termination = "Time forfeit" if result in TIMEOUT_RESULTS else None
-        with open(path, "w") as f:
-            f.write(generate_pgn(
-                self.match.move_history, result,
-                white_name=self.white_name, black_name=self.black_name,
-                time_control=time_control, termination=termination,
-            ))
+        return generate_pgn(
+            self.match.move_history, result,
+            white_name=self.white_name, black_name=self.black_name,
+            time_control=time_control, termination=termination,
+        )
 
     def _on_undo(self):
-        if self.pgn_review:
+        if self.pgn_review or self.current_result() is not None:
             return
         if self.mode == ONLINE and self.online_client is not None:
             self.online_client.send_takeback_request()
@@ -550,9 +579,6 @@ class Frontend:
         self.board._clear_premoves()
         self.board.clear_annotations()
         self.board.review_ply = None
-        if self.manual_result is not None:
-            self.manual_result = None
-            return
         self.board.cancel_animations()
         if not self.match.move_history:
             return
@@ -605,7 +631,12 @@ class Frontend:
         self.board.pending_promotion_square = None
 
     def _on_flip(self):
+        if self.current_result() is not None and not self.pgn_review:
+            return
         self.board.flipped = not self.board.flipped
+
+    def _on_help(self):
+        self.help_modal.show()
 
     def _on_move_landed(self, entry):
         if entry.gives_checkmate:
@@ -618,6 +649,19 @@ class Frontend:
             self.sound_manager.play_capture(entry.move.piece.type)
         if entry.gives_check and not entry.gives_checkmate:
             self.sound_manager.play_check()
+        self._maybe_flash_increment_for(entry.move.piece.color)
+
+    def _maybe_flash_increment_for(self, mover_color):
+        clock = self.match.clock
+        if clock is None or clock.increment_seconds <= 0:
+            return
+        mover_strip = (self.player_strip_top
+                       if self._strip_color_top() == mover_color
+                       else self.player_strip_bottom)
+        mover_strip.flash_increment()
+
+    def _strip_color_top(self):
+        return PieceColor.WHITE if self.board.flipped else PieceColor.BLACK
 
     def run(self):
         while self.running:
@@ -630,9 +674,13 @@ class Frontend:
         pg.quit()
 
     def draw_frame(self):
+        if getattr(self, "_last_layout_mode", None) != self.mode:
+            self._compute_layout()
+
         if self.mode != "menu" and self.current_result() is None:
             self.match.tick_clock()
 
+        self._maybe_play_flag_fall()
         self._update_heartbeat()
 
         now = pg.time.get_ticks()
@@ -653,29 +701,111 @@ class Frontend:
                 and post_animation_settled):
             self.board.try_apply_next_premove()
 
-        self.board.draw_board()
         if self.mode != "menu":
+            self.board.draw_board()
             self._update_player_strips()
+            self._refresh_game_info()
             self.player_strip_top.draw()
             self.player_strip_bottom.draw()
             self.right_menu.draw_menu()
-            self.result_menu.set_text(self.result_text())
-            self.result_menu.draw()
+            self._update_result_pending()
+            self._draw_result_fade_overlay()
+            if self._result_modal_should_show() and not self.pgn_review:
+                self.result_menu.set_text(self.result_text())
+                self.result_menu.draw()
             self.confirm_modal.draw()
         self._refresh_reconnect_button()
         self.start_menu.draw()
         self.file_picker.draw()
         self.server_modal.draw()
         self.wait_modal.draw()
+        self.reconnecting_modal.draw()
+        self.help_modal.draw()
+        self.fen_input_modal.draw()
+        self.toast.draw()
         self._drain_online_inbound()
+        self._update_online_phase()
+
+    def _refresh_game_info(self):
+        self.right_menu.set_game_info(self._compute_game_info_lines())
+
+    def _compute_game_info_lines(self):
+        if self.mode == "menu":
+            return None
+        if self.pgn_review:
+            tc = self._format_time_control()
+            result = self._pgn_result_tag or "*"
+            return ["Review", tc, result] if tc else ["Review", result]
+        if self.mode == ONLINE:
+            names = f"{self.white_name}  vs  {self.black_name}"
+            tc = self._format_time_control() or "no clock"
+            return [names, tc, self._series_score_text()]
+        if self.mode == BOT:
+            tc = self._format_time_control() or "no clock"
+            return ["vs Bot (preview)", tc]
+        tc = self._format_time_control() or "no clock"
+        return ["Local game", tc]
+
+    def _format_time_control(self):
+        if self._time_control is None:
+            return None
+        initial, incr = self._time_control
+        return f"{int(initial // 60)}+{int(incr)}"
+
+    def _series_score_text(self):
+        return f"{_score_str(self._series_white_score)} - {_score_str(self._series_black_score)}"
 
     def _update_player_strips(self):
         top_color = PieceColor.WHITE if self.board.flipped else PieceColor.BLACK
         bottom_color = PieceColor.BLACK if self.board.flipped else PieceColor.WHITE
         turn = self.match.current_turn()
         over = self.current_result() is not None
-        self.player_strip_top.set_state(*self._strip_state(top_color, turn, over))
-        self.player_strip_bottom.set_state(*self._strip_state(bottom_color, turn, over))
+        self.player_strip_top.set_state(**self._strip_state(top_color, turn, over))
+        self.player_strip_bottom.set_state(**self._strip_state(bottom_color, turn, over))
+
+    def _update_result_pending(self):
+        if self.current_result() is None or self.pgn_review:
+            self._result_first_seen_at_ms = None
+            return
+        if self._result_first_seen_at_ms is None:
+            self._result_first_seen_at_ms = pg.time.get_ticks()
+            if self.mode != ONLINE:
+                self._auto_save_pgn()
+
+    def _result_elapsed_ms(self):
+        if self._result_first_seen_at_ms is None:
+            return None
+        return pg.time.get_ticks() - self._result_first_seen_at_ms
+
+    def _result_modal_should_show(self):
+        elapsed = self._result_elapsed_ms()
+        return elapsed is not None and elapsed >= RESULT_MODAL_DELAY_MS
+
+    def _draw_result_fade_overlay(self):
+        elapsed = self._result_elapsed_ms()
+        if elapsed is None:
+            return
+        alpha = min(RESULT_FADE_MAX_ALPHA,
+                      int(RESULT_FADE_MAX_ALPHA * elapsed / RESULT_FADE_MS))
+        if alpha <= 0:
+            return
+        overlay = pg.Surface(self.window.get_size(), pg.SRCALPHA)
+        overlay.fill((0, 0, 0, alpha))
+        self.window.blit(overlay, (0, 0))
+
+    def _skip_result_fade(self):
+        if self._result_first_seen_at_ms is None:
+            return
+        self._result_first_seen_at_ms = pg.time.get_ticks() - RESULT_MODAL_DELAY_MS
+
+    def _maybe_play_flag_fall(self):
+        if self._flag_fall_played or self.mode == "menu":
+            return
+        clock = self.match.clock
+        if clock is None or clock.flagged is None:
+            return
+        self.sound_manager.play_flag_fall()
+        self._flag_fall_played = True
 
     def _update_heartbeat(self):
         clock = self.match.clock
@@ -692,6 +822,8 @@ class Frontend:
         name = self.white_name if color == PieceColor.WHITE else self.black_name
         seconds = (self.match.clock.remaining(color)
                    if self.match.clock is not None else None)
+        initial_seconds = (self.match.clock.initial_seconds
+                           if self.match.clock is not None else None)
         active = (color == turn) and not over
         history = self.match.move_history
         if self.board.review_ply is not None:
@@ -703,8 +835,16 @@ class Frontend:
                 and self.match.local_color is not None
                 and color != self.match.local_color):
             connection_state = self.online_client.opp_state
-        return (name, seconds, active, captured, advantage,
-                opponent_of(color), connection_state)
+        return {
+            "name": name,
+            "clock_seconds": seconds,
+            "active": active,
+            "captured": captured,
+            "advantage": advantage,
+            "captured_color": opponent_of(color),
+            "connection_state": connection_state,
+            "clock_initial_seconds": initial_seconds,
+        }
 
     def _compute_layout(self):
         window_width, window_height = self.window.get_size()
@@ -739,14 +879,27 @@ class Frontend:
             wait_height,
         )
 
-        start_width = board_size_px * 0.7
-        start_height = board_size_px * 0.7
+        start_width = min(window_width * 0.55, board_size_px * 0.85)
+        start_height = min(window_height * 0.85, board_size_px * 0.95)
         start_rect = pg.Rect(
-            board_x + board_size_px / 2 - start_width / 2,
-            board_y + board_size_px / 2 - start_height / 2,
+            window_width / 2 - start_width / 2,
+            window_height / 2 - start_height / 2,
             start_width,
             start_height
         )
+
+        menu_modal_width = min(start_width, max(result_width, 360))
+        menu_modal_height = min(start_height, max(cell_size * 1.6, 200))
+        menu_modal_rect = pg.Rect(
+            window_width / 2 - menu_modal_width / 2,
+            window_height / 2 - menu_modal_height / 2,
+            menu_modal_width,
+            menu_modal_height,
+        )
+
+        board_visible = self.mode != "menu"
+        flex_rect = wait_rect if board_visible else menu_modal_rect
+        result_modal_rect = result_rect if board_visible else menu_modal_rect
 
         menu_rect = pg.Rect(
             board_rect.right,
@@ -777,11 +930,15 @@ class Frontend:
         )
         self.board.set_rect(board_rect)
         self.result_menu.set_rect(result_rect)
-        self.confirm_modal.set_rect(result_rect)
-        self.server_modal.set_rect(result_rect)
-        self.wait_modal.set_rect(wait_rect)
+        self.confirm_modal.set_rect(result_modal_rect)
+        self.server_modal.set_rect(flex_rect)
+        self.wait_modal.set_rect(flex_rect)
+        self.reconnecting_modal.set_rect(flex_rect)
         self.file_picker.set_rect(start_rect)
         self.start_menu.set_rect(start_rect)
+        self.help_modal.set_rect(result_rect)
+        self.fen_input_modal.set_rect(flex_rect)
+        self._last_layout_mode = self.mode
         self.right_menu.set_rect(menu_rect)
         self.player_strip_top.set_rect(top_strip_rect)
         self.player_strip_bottom.set_rect(bottom_strip_rect)
@@ -805,8 +962,8 @@ class Frontend:
         if sq is None:
             return
         if self.board.dragging_from is not None:
-            if self.board.queue_premove_from_drag(sq):
-                return
+            self.board.queue_premove_from_drag(sq)
+            return
         self.board._right_drag_start_square = sq
 
     def _right_click_released(self, pos):
@@ -823,6 +980,17 @@ class Frontend:
             self.board.toggle_arrow(start, end)
 
     def mouse_left_clicked(self, pos):
+        if (self.current_result() is not None
+                and self._result_first_seen_at_ms is not None
+                and not self._result_modal_should_show()):
+            self._skip_result_fade()
+            return
+        if self.help_modal.is_visible():
+            self.help_modal.handle_click(pos)
+            return
+        if self.fen_input_modal.is_visible():
+            self.fen_input_modal.handle_click(pos)
+            return
         if self.file_picker.is_visible():
             self.file_picker.handle_click(pos)
             return
@@ -833,6 +1001,10 @@ class Frontend:
         if self.wait_modal.handle_click(pos):
             return
         if self.wait_modal.is_visible():
+            return
+        if self.reconnecting_modal.handle_click(pos):
+            return
+        if self.reconnecting_modal.is_visible():
             return
         if self.mode == "menu":
             self.start_menu.handle_click(pos)
@@ -854,10 +1026,24 @@ class Frontend:
             self.board.handle_click(square)
 
     def _handle_shortcut_key(self, event):
+        if self.help_modal.is_visible():
+            self.help_modal.hide()
+            return True
+        if self._handle_promotion_key(event):
+            return True
         if self.confirm_modal.is_visible() or self.file_picker.is_visible():
             return False
+        if getattr(event, "unicode", "") == "?":
+            self.help_modal.show()
+            return True
         if event.key == pg.K_f:
             self._on_flip()
+            return True
+        if event.key == pg.K_r:
+            self._on_resign()
+            return True
+        if event.key == pg.K_d:
+            self._on_draw()
             return True
         if event.key == pg.K_z and (event.mod & pg.KMOD_CTRL):
             self._on_undo()
@@ -876,6 +1062,18 @@ class Frontend:
             self.board.review_ply = None
             return True
         return False
+
+    def _handle_promotion_key(self, event):
+        if self.board.pending_promotion_square is None:
+            return False
+        chosen = PROMOTION_KEYS.get(event.key)
+        if chosen is None:
+            return False
+        sq = self.board.pending_promotion_square
+        self.match.promote(sq, chosen)
+        self.board.pending_promotion_square = None
+        self.board._fire_move_landed()
+        return True
 
     def _step_review(self, delta):
         history_len = len(self.match.move_history)
@@ -927,6 +1125,11 @@ class Frontend:
                     continue
                 if self.wait_modal.is_visible():
                     continue
+                if self.reconnecting_modal.is_visible():
+                    continue
+                if self.fen_input_modal.is_visible():
+                    self.fen_input_modal.handle_key(event)
+                    continue
                 if self.start_menu.is_visible() and self.start_menu.handle_key(event):
                     continue
                 if self.start_menu.is_visible():
@@ -951,7 +1154,9 @@ class Frontend:
                         self.board.update_drag_motion(event.pos)
 
             elif event.type == pg.MOUSEWHEEL:
-                if self.file_picker.is_visible():
+                if self.help_modal.is_visible():
+                    self.help_modal.handle_scroll(pg.mouse.get_pos(), event.y)
+                elif self.file_picker.is_visible():
                     self.file_picker.handle_scroll(pg.mouse.get_pos(), event.y)
                 elif self.mode != "menu":
                     self.right_menu.handle_scroll(pg.mouse.get_pos(), event.y)

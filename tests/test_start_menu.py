@@ -5,7 +5,7 @@ os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
 import pygame as pg
 import pytest
 
-from frontend.start_menu import StartMenu
+from frontend.modals.start import StartMenu
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -38,7 +38,7 @@ def test_defaults(menu):
     assert sm.selected_mode == "single_screen"
     assert sm.selected_time_minutes == 10
     assert sm.selected_increment_seconds == 5
-    assert sm.selected_side == "white"
+    assert sm.selected_side == "random"
     assert sm.text_input.text == ""
 
 
@@ -139,6 +139,20 @@ def test_start_game_fires_for_bot_mode(menu):
     sm.handle_click(sm._start_rect.center)
     assert len(called) == 1
     assert called[0]["mode"] == "bot"
+
+
+@pytest.mark.parametrize(
+    "mode,expected_label",
+    [
+        ("single_screen", "Start Game"),
+        ("bot", "Start Game"),
+        ("online", "Start Search"),
+    ],
+)
+def test_start_button_label_per_mode(menu, mode, expected_label):
+    sm, _ = menu
+    sm.selected_mode = mode
+    assert sm.start_button_label == expected_label
 
 
 def test_start_game_fires_for_online_mode(menu):

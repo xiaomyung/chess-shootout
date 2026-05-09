@@ -7,8 +7,8 @@ import pygame as pg
 import pytest
 
 from backend.backend import Backend
-from frontend.right_menu import RightMenu
-from frontend.widgets import (
+from frontend.panels.right import RightMenu
+from frontend.visual.widgets import (
     SCROLL_FADE_MS, SCROLL_THUMB_RIGHT_OFFSET, SCROLL_THUMB_WIDTH,
 )
 
@@ -165,3 +165,81 @@ def test_indicator_constants():
     assert SCROLL_FADE_MS == 2000
     assert SCROLL_THUMB_WIDTH > 0
     assert SCROLL_THUMB_RIGHT_OFFSET > 0
+
+
+# ---------- M10: scroll preservation across new moves ----------
+
+def test_scroll_offset_advances_when_user_was_scrolled_up(menu):
+    play_n_moves(menu.backend, 200)  # plenty of overflow
+    menu.draw_menu()
+    menu.scroll_offset = 5
+    menu.draw_menu()  # capture _last_seen_total_rows = current total
+    seen_before = menu._last_seen_total_rows
+    play_n_moves(menu.backend, 204)  # 2 more pairs
+    menu.draw_menu()
+    # The viewing window should have anchored on the same plies — offset bumped
+    # by the same amount as total rows grew.
+    assert menu.scroll_offset == 5 + (menu._total_rows - seen_before)
+
+
+def test_scroll_offset_at_bottom_stays_at_bottom_when_new_moves_arrive(menu):
+    play_n_moves(menu.backend, 200)
+    menu.draw_menu()
+    assert menu.scroll_offset == 0
+    play_n_moves(menu.backend, 204)
+    menu.draw_menu()
+    assert menu.scroll_offset == 0
+
+
+def test_reset_for_new_game_clears_scroll_state(menu):
+    play_n_moves(menu.backend, 60)
+    menu.draw_menu()
+    menu.scroll_offset = 4
+    menu.draw_menu()
+    menu.reset_for_new_game()
+    assert menu.scroll_offset == 0
+    assert menu._total_rows == 0
+    assert menu._last_seen_total_rows == 0
+    assert menu._last_scroll_activity_ms == 0
+
+
+# ---------- M10: review-mode auto-scroll to active ply ----------
+
+class _StubBoard:
+    def __init__(self, review_ply):
+        self.review_ply = review_ply
+
+    def animate_review_ply(self, _ply):
+        pass
+
+
+def test_review_mode_jumps_into_window_when_above_visible_range(menu):
+    menu.board = _StubBoard(review_ply=2)  # very early ply
+    play_n_moves(menu.backend, 200)
+    menu.scroll_offset = 0  # at the bottom
+    menu.draw_menu()
+    # Review jumped to ply 2 (pair 0). The visible window must cover it.
+    end = menu._total_rows - menu.scroll_offset
+    start = max(0, end - menu._max_lines)
+    assert start <= 0 < end
+
+
+def test_review_mode_jumps_into_window_when_below_visible_range(menu):
+    menu.board = _StubBoard(review_ply=160)  # late-game ply
+    play_n_moves(menu.backend, 200)
+    menu.scroll_offset = menu._total_rows  # silly large; clamps later
+    menu.draw_menu()
+    pair_idx = (160 - 1) // 2
+    end = menu._total_rows - menu.scroll_offset
+    start = max(0, end - menu._max_lines)
+    assert start <= pair_idx < end
+
+
+def test_live_play_no_active_jump_does_not_change_offset(menu):
+    """When not in review mode the previous offset-preservation logic still
+    governs (no review-mode forced jump)."""
+    play_n_moves(menu.backend, 200)
+    menu.draw_menu()
+    menu.scroll_offset = 3
+    menu.draw_menu()
+    assert menu.scroll_offset == 3

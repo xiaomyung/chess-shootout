@@ -3,8 +3,8 @@ from collections import Counter
 from backend.backend import Backend
 from backend.pieces import Piece, PieceColor, PieceType
 from backend.utils import Square
-from frontend.pgn import generate_pgn
-from frontend.pgn_load import parse_pgn, load_pgn_into_backend
+from frontend.pgn.generate import generate_pgn
+from frontend.pgn.load import parse_pgn, load_pgn_into_backend
 
 
 def _round_trip(backend, result_code="*"):

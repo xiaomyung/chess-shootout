@@ -7,8 +7,15 @@ import time
 import pytest
 import uvicorn
 
-from frontend.online_client import OnlineClient
+from frontend.online.client import OnlineClient
 from server.app import create_app
+from tests.helpers import fake_uuid4
+
+
+ALICE = fake_uuid4(1)
+BOB = fake_uuid4(2)
+ALICE2 = fake_uuid4(11)
+BOB2 = fake_uuid4(12)
 
 
 @pytest.fixture
@@ -66,11 +73,11 @@ def _wait_for(client, type_name, timeout=4.0):
 def test_two_clients_pair_and_play_a_move(server):
     addr = f"localhost:{server}"
     a = OnlineClient()
-    a.connect(addr, {"nickname": "Alice", "client_uuid": "alice",
+    a.connect(addr, {"nickname": "Alice", "client_uuid": ALICE,
                       "time_minutes": 5, "increment_seconds": 0,
                       "side_preference": "white"})
     b = OnlineClient()
-    b.connect(addr, {"nickname": "Bob", "client_uuid": "bob",
+    b.connect(addr, {"nickname": "Bob", "client_uuid": BOB,
                       "time_minutes": 5, "increment_seconds": 0,
                       "side_preference": "black"})
 
@@ -99,11 +106,11 @@ def test_two_clients_pair_and_play_a_move(server):
 def test_resign_broadcasts_result_to_both_clients(server):
     addr = f"localhost:{server}"
     a = OnlineClient()
-    a.connect(addr, {"nickname": "Alice", "client_uuid": "alice2",
+    a.connect(addr, {"nickname": "Alice", "client_uuid": ALICE2,
                       "time_minutes": 5, "increment_seconds": 0,
                       "side_preference": "white"})
     b = OnlineClient()
-    b.connect(addr, {"nickname": "Bob", "client_uuid": "bob2",
+    b.connect(addr, {"nickname": "Bob", "client_uuid": BOB2,
                       "time_minutes": 5, "increment_seconds": 0,
                       "side_preference": "black"})
     _wait_for(a, "game_start")

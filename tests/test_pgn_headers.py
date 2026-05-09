@@ -1,4 +1,4 @@
-from frontend.pgn import generate_pgn
+from frontend.pgn.generate import generate_pgn
 
 
 def test_player_names_in_headers():
