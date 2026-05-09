@@ -68,6 +68,67 @@ pip install -r requirements.txt
 python main.py
 ```
 
+## Online play
+
+Two players, one server. The server is authoritative — it runs the same
+engine code as the client and validates every move.
+
+### Quick start (local)
+
+```bash
+# Terminal 1 — server (default port 8000)
+python -m server
+
+# Terminal 2 — first client
+python main.py --client-uuid alice --nickname Alice
+
+# Terminal 3 — second client
+python main.py --client-uuid bob --nickname Bob
+```
+
+Both clients pick **Online** mode in the start menu, choose time control and
+side preference, click **Start Game**, accept `localhost:8000` in the address
+modal. As soon as the second player connects with the same time control,
+both clients land in the game with the player's color at the bottom.
+
+### Settings (`.env`)
+
+The client reads a `.env` at the repo root (gitignored). Copy `.env.example`
+and fill in:
+
+```
+CHESS_SERVER_ADDR=localhost:8000
+CHESS_NICKNAME=YourName
+CHESS_CLIENT_UUID=          # auto-generated on first launch
+CHESS_LAST_MODE=             # auto-saved
+```
+
+CLI flags `--client-uuid` and `--nickname` override `.env` for the running
+process — handy for testing two clients on the same machine.
+
+### In-game actions
+
+- **Resign** at any time → opponent wins.
+- **Draw** while it's your turn → opponent gets an Accept/Decline prompt;
+  mutual draws auto-agree.
+- **Undo** (= takeback) only directly after your own move (while the
+  opponent is on the clock) → opponent prompted; on accept, one ply rolls
+  back and the clock is restored.
+- **Rematch** from the result modal → opponent prompted; on accept, the
+  same room restarts with swapped colors.
+
+### Reconnection
+
+WS drops mid-game (e.g., transient WiFi blip) trigger an automatic
+`/resume` retry every 2 s for up to 60 s. The opponent sees a yellow status
+dot. On success the game continues from the exact ply. Closing the client
+process drops the in-memory session token — reconnection only handles
+network blips, not crashes.
+
+### Deployment
+
+See [deploy/README.md](deploy/README.md) for VPS setup with Caddy + systemd.
+
 ## Running tests
 
 ```bash
