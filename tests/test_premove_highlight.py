@@ -194,7 +194,7 @@ def test_dragged_piece_renders_ghost_on_origin(board):
 
 
 def test_chain_tip_premove_overlay_color_is_brighter():
-    from frontend.colors import Colors
+    from frontend.visual.colors import Colors
     chain_tip = pg.Color(Colors.premove_chain_tip)
     queued = pg.Color(Colors.premove)
     # Brighter = higher opacity (more visible) than the dim queued squares.

@@ -5,8 +5,8 @@ os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
 import pygame as pg
 import pytest
 
-from frontend import widgets
-from frontend.widgets import (
+from frontend.visual import widgets
+from frontend.visual.widgets import (
     BUTTON_LABEL_PADDING_PX,
     draw_button, draw_button_row, draw_selector,
     fit_text_to_rect,

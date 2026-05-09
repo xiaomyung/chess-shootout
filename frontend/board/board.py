@@ -5,8 +5,8 @@ import pygame as pg
 
 from backend.pseudo_legal import piece_can_pseudo_reach
 from backend.utils import Square
-from frontend.animation import PieceAnimation
-from frontend.colors import Colors
+from frontend.visual.animation import PieceAnimation
+from frontend.visual.colors import Colors
 from frontend.premoves import Premove, speculative_board
 from backend.pieces import PieceType, PieceColor, Piece
 

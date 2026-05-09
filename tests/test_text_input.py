@@ -5,7 +5,7 @@ os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
 import pygame as pg
 import pytest
 
-from frontend.text_input import TextInput
+from frontend.visual.text_input import TextInput
 
 
 @pytest.fixture(scope="module", autouse=True)

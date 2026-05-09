@@ -7,7 +7,7 @@ import time
 import pytest
 import uvicorn
 
-from frontend.online_client import OnlineClient
+from frontend.online.client import OnlineClient
 from server.app import create_app
 
 

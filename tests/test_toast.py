@@ -7,7 +7,7 @@ os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
 import pygame as pg
 import pytest
 
-from frontend.toast import DEFAULT_DURATION_MS, FADE_OUT_MS, Toast
+from frontend.visual.toast import DEFAULT_DURATION_MS, FADE_OUT_MS, Toast
 
 
 @pytest.fixture(scope="module", autouse=True)

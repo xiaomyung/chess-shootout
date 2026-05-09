@@ -5,8 +5,8 @@ os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
 import pygame as pg
 import pytest
 
-from frontend.result_menu import BUTTONS, ResultMenu
-from frontend.widgets import BUTTON_LABEL_PADDING_PX
+from frontend.modals.result import BUTTONS, ResultMenu
+from frontend.visual.widgets import BUTTON_LABEL_PADDING_PX
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -36,7 +36,7 @@ def test_button_labels_fit_inside_buttons_at_tight_size():
         rect = menu.button_rects[key]
         rendered = menu.button_font.render(label, True, (255, 255, 255))
         # Apply the same fit_text_to_rect logic that draw_button uses.
-        from frontend.widgets import fit_text_to_rect
+        from frontend.visual.widgets import fit_text_to_rect
         fitted = fit_text_to_rect(rendered, rect)
         assert fitted.get_width() <= rect.width - 2 * BUTTON_LABEL_PADDING_PX
         assert fitted.get_height() <= rect.height - 2 * BUTTON_LABEL_PADDING_PX

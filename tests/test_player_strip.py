@@ -5,11 +5,11 @@ os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
 import pygame as pg
 import pytest
 
-from frontend.clock_visual import (
+from frontend.visual.clock_visual import (
     INCREMENT_FLASH_MS, LOW_TIME_FRACTION, clock_pocket_color,
 )
-from frontend.colors import Colors
-from frontend.player_strip import PlayerStrip, format_clock
+from frontend.visual.colors import Colors
+from frontend.panels.player_strip import PlayerStrip, format_clock
 
 
 @pytest.fixture(scope="module", autouse=True)

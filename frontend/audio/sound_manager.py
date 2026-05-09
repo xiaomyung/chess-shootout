@@ -5,7 +5,7 @@ from pathlib import Path
 import pygame as pg
 
 from backend.pieces import PieceType
-from frontend.clock_visual import LOW_TIME_FRACTION
+from frontend.visual.clock_visual import LOW_TIME_FRACTION
 
 
 @dataclass

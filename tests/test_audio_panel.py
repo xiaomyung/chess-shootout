@@ -9,9 +9,9 @@ import pygame as pg
 import pytest
 
 from backend.paths import SOUNDS_DIR
-from frontend.audio_panel import AudioPanel, SLIDER_FRACTION
-from frontend.right_menu import RightMenu
-from frontend.sound_manager import SoundManager
+from frontend.panels.audio import AudioPanel, SLIDER_FRACTION
+from frontend.panels.right import RightMenu
+from frontend.audio.sound_manager import SoundManager
 
 
 @pytest.fixture(scope="module", autouse=True)

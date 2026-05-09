@@ -1,7 +1,7 @@
 import pygame as pg
 
-from frontend.colors import Colors
-from frontend.widgets import draw_button_row, fit_text_to_rect
+from frontend.visual.colors import Colors
+from frontend.visual.widgets import draw_button_row, fit_text_to_rect
 
 
 BUTTONS = [

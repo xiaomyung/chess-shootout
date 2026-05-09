@@ -2,9 +2,9 @@ import pygame as pg
 
 from backend.match import SINGLE_SCREEN, BOT, ONLINE
 from frontend import env
-from frontend.colors import Colors
-from frontend.text_input import TextInput
-from frontend.widgets import draw_button, draw_selector
+from frontend.visual.colors import Colors
+from frontend.visual.text_input import TextInput
+from frontend.visual.widgets import draw_button, draw_selector
 
 
 MODE_OPTIONS = [

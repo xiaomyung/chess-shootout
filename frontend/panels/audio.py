@@ -1,8 +1,8 @@
 import pygame as pg
 
 from frontend import env
-from frontend.colors import Colors
-from frontend.widgets import draw_button
+from frontend.visual.colors import Colors
+from frontend.visual.widgets import draw_button
 
 
 SLIDER_FRACTION = 0.75

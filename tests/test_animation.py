@@ -7,7 +7,7 @@ import pytest
 
 from backend.backend import Backend
 from backend.utils import Square
-from frontend.animation import PieceAnimation
+from frontend.visual.animation import PieceAnimation
 from backend.pieces import Piece, PieceColor, PieceType
 
 

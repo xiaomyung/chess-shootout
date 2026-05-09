@@ -7,7 +7,8 @@ os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
 import pygame as pg
 import pytest
 
-from frontend.modal_base import BaseModal, BasePanel
+from frontend.modals.base import BaseModal
+from frontend.panels.base import BasePanel
 
 
 @pytest.fixture(scope="module", autouse=True)

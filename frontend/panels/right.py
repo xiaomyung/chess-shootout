@@ -1,8 +1,8 @@
 import pygame as pg
 
-from frontend.colors import Colors
-from frontend.pgn import iter_move_pairs
-from frontend.widgets import draw_button_row, draw_scroll_thumb
+from frontend.visual.colors import Colors
+from frontend.pgn.generate import iter_move_pairs
+from frontend.visual.widgets import draw_button_row, draw_scroll_thumb
 
 
 BUTTONS = [

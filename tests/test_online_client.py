@@ -1,5 +1,5 @@
 """Unit tests for OnlineClient URL builders. End-to-end flow lives in test_online_flow.py."""
-from frontend.online_client import _http_url, _split_addr, _ws_url
+from frontend.online.client import _http_url, _split_addr, _ws_url
 
 
 def test_split_addr_localhost_picks_ws():

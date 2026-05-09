@@ -1,7 +1,7 @@
 import pygame as pg
 
-from frontend.clock_visual import INCREMENT_FLASH_MS, clock_pocket_color
-from frontend.colors import Colors
+from frontend.visual.clock_visual import INCREMENT_FLASH_MS, clock_pocket_color
+from frontend.visual.colors import Colors
 
 
 def format_clock(seconds):

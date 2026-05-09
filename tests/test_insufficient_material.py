@@ -1,6 +1,6 @@
 
 from backend.backend import Backend
-from frontend.pgn_load import parse_pgn
+from frontend.pgn.load import parse_pgn
 from tests.helpers import (
     BLACK, WHITE, K, Q, R, B, N, P,
     make_backend, piece, sq,

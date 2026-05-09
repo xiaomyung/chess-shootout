@@ -13,8 +13,8 @@ from backend.backend import Backend
 from backend.pieces import Piece, PieceColor, PieceType
 from backend.utils import Square
 from frontend.board import Board, DRAG_THRESHOLD_PX
-from frontend.capture_summary import captured_by, material_advantage
-from frontend.confirm_modal import ConfirmModal
+from frontend.panels.capture_summary import captured_by, material_advantage
+from frontend.modals.confirm import ConfirmModal
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -408,7 +408,7 @@ def test_material_advantage_after_queen_trade():
 
 
 def test_player_strip_set_state_accepts_captures(board):
-    from frontend.player_strip import PlayerStrip
+    from frontend.panels.player_strip import PlayerStrip
     strip = PlayerStrip(pg.display.get_surface())
     strip.set_rect(pg.Rect(0, 0, 400, 40))
     strip.set_state("Alice", 100, True,
@@ -420,7 +420,7 @@ def test_player_strip_set_state_accepts_captures(board):
 
 
 def test_player_strip_draws_with_captures_smoke(board):
-    from frontend.player_strip import PlayerStrip
+    from frontend.panels.player_strip import PlayerStrip
     strip = PlayerStrip(pg.display.get_surface())
     strip.set_rect(pg.Rect(0, 0, 400, 40))
     strip.set_piece_icons(board.piece_images_scaled)
@@ -433,7 +433,7 @@ def test_player_strip_draws_with_captures_smoke(board):
 
 def test_player_strip_advantage_negative_not_rendered(board):
     # Only the leading side shows "+N"; the trailing side renders no number.
-    from frontend.player_strip import PlayerStrip
+    from frontend.panels.player_strip import PlayerStrip
     strip = PlayerStrip(pg.display.get_surface())
     strip.set_rect(pg.Rect(0, 0, 400, 40))
     strip.set_state("Alice", 100, True, captured=[],

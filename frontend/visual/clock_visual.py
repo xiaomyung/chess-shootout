@@ -1,6 +1,6 @@
 import pygame as pg
 
-from frontend.colors import Colors
+from frontend.visual.colors import Colors
 
 
 LOW_TIME_FRACTION = 0.10

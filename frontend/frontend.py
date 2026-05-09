@@ -11,22 +11,22 @@ from backend.fen import apply_fen
 from backend.match import Match, SINGLE_SCREEN, BOT, ONLINE
 from backend.utils import PROMO_TYPE_BY_LETTER, coord_from_square, square_from_coord
 from frontend import env
-from frontend.audio_panel import AudioPanel
+from frontend.panels.audio import AudioPanel
 from frontend.board import Board
-from frontend.capture_summary import captured_by, material_advantage
-from frontend.confirm_modal import ConfirmModal
-from frontend.file_picker import FilePicker
-from frontend.help_modal import HelpModal
-from frontend.online_client import OnlineClient, fetch_resume, probe_active_game
-from frontend.player_strip import PlayerStrip
-from frontend.server_modal import ServerAddressModal
-from frontend.wait_modal import WaitModal
-from frontend.right_menu import RightMenu, BUTTONS as RIGHT_MENU_BUTTONS, REVIEW_BUTTONS as RIGHT_MENU_REVIEW_BUTTONS
-from frontend.result_menu import ResultMenu
-from frontend.sound_manager import SoundManager
-from frontend.start_menu import StartMenu
-from frontend.pgn import generate_pgn, TIMEOUT_RESULTS
-from frontend.pgn_load import load_pgn_into_backend
+from frontend.panels.capture_summary import captured_by, material_advantage
+from frontend.modals.confirm import ConfirmModal
+from frontend.modals.file_picker import FilePicker
+from frontend.modals.help import HelpModal
+from frontend.online.client import OnlineClient, fetch_resume, probe_active_game
+from frontend.panels.player_strip import PlayerStrip
+from frontend.modals.server import ServerAddressModal
+from frontend.modals.wait import WaitModal
+from frontend.panels.right import RightMenu, BUTTONS as RIGHT_MENU_BUTTONS, REVIEW_BUTTONS as RIGHT_MENU_REVIEW_BUTTONS
+from frontend.modals.result import ResultMenu
+from frontend.audio.sound_manager import SoundManager
+from frontend.modals.start import StartMenu
+from frontend.pgn.generate import generate_pgn, TIMEOUT_RESULTS
+from frontend.pgn.load import load_pgn_into_backend
 from backend.paths import PROJECT_ROOT, SOUNDS_DIR
 from backend.pieces import PieceColor, PieceType, opponent_of
 

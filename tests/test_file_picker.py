@@ -5,7 +5,7 @@ os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
 import pygame as pg
 import pytest
 
-from frontend.file_picker import FilePicker
+from frontend.modals.file_picker import FilePicker
 
 
 @pytest.fixture(scope="module", autouse=True)

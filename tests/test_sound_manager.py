@@ -9,7 +9,7 @@ from unittest.mock import MagicMock, patch
 import pygame as pg
 import pytest
 
-from frontend.sound_manager import (
+from frontend.audio.sound_manager import (
     SoundManager, HeartbeatConfig,
     STATE_OFF, STATE_HEARTBEAT, ONESHOT_FADE_MS,
 )

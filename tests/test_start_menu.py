@@ -5,7 +5,7 @@ os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
 import pygame as pg
 import pytest
 
-from frontend.start_menu import StartMenu
+from frontend.modals.start import StartMenu
 
 
 @pytest.fixture(scope="module", autouse=True)
