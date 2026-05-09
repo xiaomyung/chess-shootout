@@ -115,6 +115,36 @@ def test_chain_tip_for_other_piece_returns_none(board):
     assert board._active_chain_tip() is None
 
 
+def test_chain_tip_visible_when_selected_is_origin_after_click(board):
+    """Click flow: re-click the original square (now empty in spec) → chain
+    walk lands selection on the tip. Highlight must still appear."""
+    _setup_premove_state(board, {
+        Square(7, 4): Piece(PieceType.KING, PieceColor.WHITE),
+        Square(0, 4): Piece(PieceType.KING, PieceColor.BLACK),
+        Square(6, 4): Piece(PieceType.PAWN, PieceColor.WHITE),
+    }, turn=PieceColor.BLACK)
+    board.handle_click(Square(6, 4))   # select pawn
+    board.handle_click(Square(4, 4))   # premove e2->e4
+    board.handle_click(Square(6, 4))   # click original (empty in spec) → lands on tip
+    assert board.selected_square == Square(4, 4)
+    assert board._active_chain_tip() == Square(4, 4)
+
+
+def test_chain_tip_visible_when_selected_is_tip_directly(board):
+    """Click flow: click the speculative piece directly (the tip). Selection
+    lands on the tip. Highlight must still appear, just like drag mode."""
+    _setup_premove_state(board, {
+        Square(7, 4): Piece(PieceType.KING, PieceColor.WHITE),
+        Square(0, 4): Piece(PieceType.KING, PieceColor.BLACK),
+        Square(6, 4): Piece(PieceType.PAWN, PieceColor.WHITE),
+    }, turn=PieceColor.BLACK)
+    board.handle_click(Square(6, 4))   # select pawn
+    board.handle_click(Square(4, 4))   # premove e2->e4
+    board.handle_click(Square(4, 4))   # click the speculative piece on e4
+    assert board.selected_square == Square(4, 4)
+    assert board._active_chain_tip() == Square(4, 4)
+
+
 def test_chain_tip_visible_during_drag(board):
     _setup_premove_state(board, {
         Square(7, 4): Piece(PieceType.KING, PieceColor.WHITE),

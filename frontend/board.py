@@ -217,7 +217,14 @@ class Board:
         if active_sq is None or not self.premoves:
             return None
         tip = self._resolve_chain_tip(active_sq)
-        return tip if tip != active_sq else None
+        if tip != active_sq:
+            return tip
+        # Click flow can land the selection directly on the chain tip
+        # (clicked the speculative piece position). Treat that as the tip too.
+        for pm in self.premoves:
+            if pm.to_sq == active_sq:
+                return active_sq
+        return None
 
     def toggle_highlight(self, sq):
         self.highlighted_squares ^= {sq}
