@@ -22,6 +22,8 @@ ROW_FONT_SIZE = 15
 TITLE_FONT_SIZE = 22
 BUTTON_FONT_SIZE = 14
 ROW_PAD_Y = 10
+MIN_WIDTH = 320
+MIN_HEIGHT = 280
 
 
 class HelpModal(BaseModal):
@@ -33,6 +35,20 @@ class HelpModal(BaseModal):
         self.scroll_offset = 0
         self._max_scroll_offset = 0
         self._rows_rect = pg.Rect(0, 0, 0, 0)
+
+    def set_rect(self, rect):
+        # Layout's rect drives the centre; we enforce a readable minimum so
+        # the modal stays usable at the window's minimum size.
+        win_w, win_h = self.window.get_size()
+        margin = 16
+        cx = rect.centerx
+        cy = rect.centery
+        w = min(max(rect.width, MIN_WIDTH), max(win_w - margin, MIN_WIDTH))
+        h = min(max(rect.height, MIN_HEIGHT), max(win_h - margin, MIN_HEIGHT))
+        x = max(margin // 2, min(cx - w // 2, win_w - w - margin // 2))
+        y = max(margin // 2, min(cy - h // 2, win_h - h - margin // 2))
+        self.rect = pg.Rect(x, y, w, h)
+        self._on_rect_changed()
 
     def _on_rect_changed(self):
         self.title_font = pg.font.SysFont("Arial", TITLE_FONT_SIZE, bold=True)
