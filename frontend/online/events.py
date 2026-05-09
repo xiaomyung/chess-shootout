@@ -87,6 +87,15 @@ class OnlineEventsMixin:
         }
         if reason in game_state_reasons:
             return
+        if reason == "room_lost":
+            self.reconnecting_modal.hide()
+            self.confirm_modal.show(
+                "Server restarted — game ended",
+                on_yes=self._restart_online_search,
+                on_no=self._abandon_online_game,
+                yes_label="New Search", no_label="Cancel",
+            )
+            return
         if reason in ONLINE_HARD_FAILURE_REASONS or reason.startswith("http_"):
             self.wait_modal.hide()
             label = ONLINE_HARD_FAILURE_LABELS.get(reason, "Server unreachable")

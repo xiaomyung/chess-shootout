@@ -214,6 +214,10 @@ class OnlineClient:
                 self.state = "reconnecting"
                 self.opp_state = "reconnecting"
                 resumed = await self._resume_with_retries()
+                if resumed is self.ROOM_LOST:
+                    log.warning("reconnect: server alive but room gone")
+                    self._inbound.put(Event("error", {"reason": "room_lost"}))
+                    break
                 if not resumed:
                     log.warning("reconnect gave up")
                     self._inbound.put(Event("error", {"reason": "reconnect_failed"}))
@@ -260,6 +264,10 @@ class OnlineClient:
                 self.state = "reconnecting"
                 self.opp_state = "reconnecting"
                 resumed = await self._resume_with_retries()
+                if resumed is self.ROOM_LOST:
+                    log.warning("reconnect: server alive but room gone")
+                    self._inbound.put(Event("error", {"reason": "room_lost"}))
+                    break
                 if not resumed:
                     log.warning("reconnect gave up")
                     self._inbound.put(Event("error", {"reason": "reconnect_failed"}))
@@ -278,6 +286,8 @@ class OnlineClient:
             log.info("session ended state=disconnected")
             self.state = "disconnected"
 
+    ROOM_LOST = object()
+
     async def _resume_with_retries(self):
         deadline = asyncio.get_event_loop().time() + RECONNECT_TOTAL_SECONDS
         body = ResumeRequest(
@@ -288,6 +298,9 @@ class OnlineClient:
                 try:
                     response = await self._transport.resume_async(body, http)
                 except FatalResumeError:
+                    health = await self._transport.healthz_async(http)
+                    if health is not None:
+                        return self.ROOM_LOST
                     return None
                 if response is not None:
                     return response.model_dump()

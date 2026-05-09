@@ -429,8 +429,7 @@ class Frontend(OnlineEventsMixin):
             return
         self.online_client.send_rematch_request()
 
-    def _abandon_online_game(self):
-        log.info("abandoning online game (reconnect cancelled)")
+    def _tear_down_online_session(self):
         if self.online_client is not None:
             self.online_client.disconnect()
             self.online_client = None
@@ -444,7 +443,18 @@ class Frontend(OnlineEventsMixin):
         pg.display.set_caption("Chess")
         self._reset_to_new_game()
         self._refresh_load_pgn_availability()
+
+    def _abandon_online_game(self):
+        log.info("abandoning online game (reconnect cancelled)")
+        self._tear_down_online_session()
         self.start_menu.show()
+
+    def _restart_online_search(self):
+        log.info("restarting online search after server restart")
+        self._tear_down_online_session()
+        self.start_menu.hide()
+        if getattr(self, "_online_config", None) is not None:
+            self._on_server_addr_connect(env.get_server_addr())
 
     def _update_online_phase(self):
         if self.wait_modal.is_visible() and self._match_found_at_ms is None:

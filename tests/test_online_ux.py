@@ -222,6 +222,38 @@ def test_unknown_hard_failure_falls_back_to_generic_label(frontend):
     assert frontend.confirm_modal.title == "Server unreachable"
 
 
+def test_room_lost_shows_new_search_modal(frontend, monkeypatch):
+    # Distinct from reconnect_failed: server is back up but the room is gone.
+    # User gets "New Search" instead of "Retry" so they can find a fresh game
+    # without manually navigating through the menu.
+    restart_calls = []
+    monkeypatch.setattr(frontend, "_restart_online_search",
+                         lambda: restart_calls.append(True))
+    frontend._handle_online_error({"reason": "room_lost"})
+    assert frontend.confirm_modal.is_visible()
+    assert "Server restarted" in frontend.confirm_modal.title
+    assert frontend.confirm_modal.yes_label == "New Search"
+    # Yes button triggers _restart_online_search (a new matchmake), not Retry
+    # against the dead room.
+    frontend.confirm_modal.draw()
+    frontend.confirm_modal.handle_click(
+        frontend.confirm_modal.button_rects["yes"].center,
+    )
+    assert restart_calls == [True]
+
+
+def test_room_lost_cancel_returns_to_menu(frontend, monkeypatch):
+    abandoned = []
+    monkeypatch.setattr(frontend, "_abandon_online_game",
+                         lambda: abandoned.append(True))
+    frontend._handle_online_error({"reason": "room_lost"})
+    frontend.confirm_modal.draw()
+    frontend.confirm_modal.handle_click(
+        frontend.confirm_modal.button_rects["no"].center,
+    )
+    assert abandoned == [True]
+
+
 def test_http_prefixed_error_treated_as_hard_failure(frontend):
     frontend._handle_online_error({"reason": "http_503"})
     assert frontend.confirm_modal.is_visible()

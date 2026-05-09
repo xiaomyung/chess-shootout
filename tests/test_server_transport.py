@@ -225,6 +225,28 @@ async def test_resume_async_404_raises_fatal_resume_error():
 
 
 @pytest.mark.asyncio
+async def test_healthz_async_returns_typed_response():
+    body = {"status": "ok", "version": PROTOCOL_VERSION,
+            "rooms_active": 1, "queue_depth": 0, "uptime_s": 1.5}
+    transport = httpx.MockTransport(_make_handler(status_code=200, body=body))
+    async with httpx.AsyncClient(transport=transport) as http:
+        st = ServerTransport("localhost:8000")
+        resp = await st.healthz_async(http)
+    assert resp is not None
+    assert resp.rooms_active == 1
+
+
+@pytest.mark.asyncio
+async def test_healthz_async_returns_none_when_unreachable():
+    def boom(request):
+        raise httpx.ConnectError("nope")
+    transport = httpx.MockTransport(boom)
+    async with httpx.AsyncClient(transport=transport) as http:
+        st = ServerTransport("localhost:8000")
+        assert await st.healthz_async(http) is None
+
+
+@pytest.mark.asyncio
 async def test_resume_async_5xx_returns_none_for_retry():
     # Server hiccups (e.g. 503) are transient — keep retrying within the
     # reconnect window.

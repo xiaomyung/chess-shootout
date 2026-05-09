@@ -179,6 +179,19 @@ class ServerTransport:
         except (ValueError, json.JSONDecodeError):
             return None
 
+    async def healthz_async(self, http) -> Optional[HealthResponse]:
+        url = self._url.http("/healthz")
+        try:
+            r = await http.get(url)
+        except (httpx.HTTPError, httpx.TimeoutException):
+            return None
+        if r.status_code != 200:
+            return None
+        try:
+            return HealthResponse.model_validate(r.json())
+        except (ValueError, json.JSONDecodeError):
+            return None
+
     async def matchmake_async(self, req: MatchmakeRequest, http) -> MatchmakeResponse:
         url = self._url.http("/matchmake")
         r = await http.post(url, json=req.model_dump())
