@@ -5,11 +5,12 @@ from pathlib import Path
 import pygame as pg
 
 from backend.pieces import PieceType
+from frontend.clock_visual import LOW_TIME_FRACTION
 
 
 @dataclass
 class HeartbeatConfig:
-    start_fraction: float = 0.10
+    start_fraction: float = LOW_TIME_FRACTION
     min_volume: float = 0.10
     max_volume: float = 1.0
     fade_in_ms: int = 400
