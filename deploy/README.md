@@ -16,7 +16,7 @@ sudo useradd -r -m -d /opt/chess chess
 sudo -u chess git clone https://github.com/xiaomyung/chess-pygame /opt/chess
 cd /opt/chess
 sudo -u chess python3.12 -m venv .venv
-sudo -u chess .venv/bin/pip install -r requirements.txt
+sudo -u chess .venv/bin/pip install -e .
 
 # 3. Server env
 sudo cp deploy/chess-server.service.example /etc/systemd/system/chess-server.service
@@ -45,7 +45,7 @@ curl https://your-actual-domain.com/healthz
 ```bash
 cd /opt/chess
 sudo -u chess git pull
-sudo -u chess .venv/bin/pip install -r requirements.txt
+sudo -u chess .venv/bin/pip install -e .
 sudo systemctl restart chess-server
 ```
 

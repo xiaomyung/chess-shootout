@@ -22,7 +22,16 @@ PGN export and review.
 - [`ffmpeg`](https://ffmpeg.org/) on `$PATH` (used by `pydub` for MP3 capture
   sounds)
 
-## Launch guide
+## Install
+
+The project uses `pyproject.toml`. Two flavours of install:
+
+| Goal | Command |
+|---|---|
+| **Just play the game** | `pip install -e .` |
+| **Run tests / contribute** | `pip install -e ".[dev]"` |
+
+`-e` means editable: pip installs the dependencies and points at the cloned source tree, so `python main.py` keeps working as you edit. The `[dev]` extra adds pytest + xdist + asyncio + httpx — none of which a player needs.
 
 ### Linux
 
@@ -36,7 +45,8 @@ git clone https://github.com/xiaomyung/chess-pygame.git
 cd chess-pygame
 python3 -m venv .venv
 source .venv/bin/activate
-pip install -r requirements.txt
+pip install -e .          # players
+# pip install -e ".[dev]" # contributors
 python main.py
 ```
 
@@ -49,7 +59,7 @@ git clone https://github.com/xiaomyung/chess-pygame.git
 cd chess-pygame
 python3 -m venv .venv
 source .venv/bin/activate
-pip install -r requirements.txt
+pip install -e .
 python main.py
 ```
 
@@ -64,7 +74,7 @@ git clone https://github.com/xiaomyung/chess-pygame.git
 cd chess-pygame
 python -m venv .venv
 .venv\Scripts\Activate.ps1
-pip install -r requirements.txt
+pip install -e .
 python main.py
 ```
 
@@ -132,7 +142,7 @@ See [deploy/README.md](deploy/README.md) for VPS setup with Caddy + systemd.
 ## Running tests
 
 ```bash
-pip install -r requirements-dev.txt
+pip install -e ".[dev]"
 pytest tests -n 8 -q
 ```
 
