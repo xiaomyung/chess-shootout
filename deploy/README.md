@@ -147,8 +147,11 @@ a `:80` static-file block you may want to keep, and Caddy supports
 multiple site blocks in one file):
 
 ```bash
-sudo tee -a /etc/caddy/Caddyfile < /opt/chess/repo/deploy/Caddyfile.example > /dev/null
+# Single sudo shell — the source file lives under /opt/chess (owned
+# by the chess user) so reading and writing both need elevation.
+sudo sh -c 'cat /opt/chess/repo/deploy/Caddyfile.example >> /etc/caddy/Caddyfile'
 sudo sed -i 's/chess.example.com/your-actual-domain.com/' /etc/caddy/Caddyfile
+sudo systemctl reload caddy
 ```
 
 If you don't want the default `:80` static-file site, comment that
