@@ -161,6 +161,7 @@ class OnlineEventsMixin:
             last = self.match.move_history[-1].move
             self.match.undo()
             self.board.start_undo_animation(last)
+            self.sound_manager.play_undo()
         self._apply_clock_snap(payload, default_to_existing=True)
 
     def _handle_remote_move_applied(self, payload):
