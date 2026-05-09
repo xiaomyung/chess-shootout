@@ -63,6 +63,9 @@ ONLINE_DRAW_REASONS = {
 ONLINE_STATIC_RESULTS = {"aborted", "server_shutdown"}
 
 AUTO_FLIP_DELAY_MS = 200
+RESULT_FADE_MS = 400
+RESULT_MODAL_DELAY_MS = 500
+RESULT_FADE_MAX_ALPHA = 90
 
 MIN_WINDOW_WIDTH = 900
 MIN_WINDOW_HEIGHT = 500
@@ -89,6 +92,7 @@ class Frontend:
         self._time_control = None
         self.pgn_review = False
         self._flag_fall_played = False
+        self._result_first_seen_at_ms = None
 
         self.match = Match()
         self.sound_manager = SoundManager(SOUNDS_DIR, enabled=pg.mixer.get_init() is not None)
@@ -506,6 +510,7 @@ class Frontend:
         self.sound_manager.stop_all()
         self.manual_result = None
         self._flag_fall_played = False
+        self._result_first_seen_at_ms = None
         self.right_menu.reset_for_new_game()
         self.match.new_game()
         if self._time_control is not None:
@@ -680,8 +685,11 @@ class Frontend:
             self.player_strip_top.draw()
             self.player_strip_bottom.draw()
             self.right_menu.draw_menu()
-            self.result_menu.set_text(self.result_text())
-            self.result_menu.draw()
+            self._update_result_pending()
+            self._draw_result_fade_overlay()
+            if self._result_modal_should_show():
+                self.result_menu.set_text(self.result_text())
+                self.result_menu.draw()
             self.confirm_modal.draw()
         self._refresh_reconnect_button()
         self.start_menu.draw()
@@ -697,6 +705,41 @@ class Frontend:
         over = self.current_result() is not None
         self.player_strip_top.set_state(**self._strip_state(top_color, turn, over))
         self.player_strip_bottom.set_state(**self._strip_state(bottom_color, turn, over))
+
+    def _update_result_pending(self):
+        if self.current_result() is None:
+            self._result_first_seen_at_ms = None
+            return
+        if self._result_first_seen_at_ms is None:
+            self._result_first_seen_at_ms = pg.time.get_ticks()
+
+    def _result_elapsed_ms(self):
+        if self._result_first_seen_at_ms is None:
+            return None
+        return pg.time.get_ticks() - self._result_first_seen_at_ms
+
+    def _result_modal_should_show(self):
+        elapsed = self._result_elapsed_ms()
+        return elapsed is not None and elapsed >= RESULT_MODAL_DELAY_MS
+
+    def _draw_result_fade_overlay(self):
+        elapsed = self._result_elapsed_ms()
+        if elapsed is None:
+            return
+        if elapsed >= RESULT_FADE_MS:
+            alpha = RESULT_FADE_MAX_ALPHA
+        else:
+            alpha = int(RESULT_FADE_MAX_ALPHA * elapsed / RESULT_FADE_MS)
+        if alpha <= 0:
+            return
+        overlay = pg.Surface(self.window.get_size(), pg.SRCALPHA)
+        overlay.fill((96, 96, 96, alpha))
+        self.window.blit(overlay, (0, 0))
+
+    def _skip_result_fade(self):
+        if self._result_first_seen_at_ms is None:
+            return
+        self._result_first_seen_at_ms = pg.time.get_ticks() - RESULT_MODAL_DELAY_MS
 
     def _maybe_play_flag_fall(self):
         if self._flag_fall_played or self.mode == "menu":
@@ -866,6 +909,12 @@ class Frontend:
             self.board.toggle_arrow(start, end)
 
     def mouse_left_clicked(self, pos):
+        # Click during the post-result fade fast-forwards into the modal.
+        if (self.current_result() is not None
+                and self._result_first_seen_at_ms is not None
+                and not self._result_modal_should_show()):
+            self._skip_result_fade()
+            return
         if self.file_picker.is_visible():
             self.file_picker.handle_click(pos)
             return
