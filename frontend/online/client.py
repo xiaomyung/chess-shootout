@@ -235,6 +235,7 @@ class OnlineClient:
             self._loop.run_until_complete(self._async_main(request))
         except Exception as exc:
             self._inbound.put(Event("error", {"reason": str(exc)}))
+            self._dump_crash_log(exc)
         finally:
             try:
                 self._loop.close()
@@ -249,11 +250,25 @@ class OnlineClient:
             self._loop.run_until_complete(self._async_main_resume(resume_payload))
         except Exception as exc:
             self._inbound.put(Event("error", {"reason": str(exc)}))
+            self._dump_crash_log(exc)
         finally:
             try:
                 self._loop.close()
             except Exception:
                 pass
+
+    def _dump_crash_log(self, exc):
+        try:
+            from frontend import crash_log
+            crash_log.write_crash_log(exc, crash_log.get_memory_buffer(), {
+                "online_state": self.state,
+                "addr": self._addr,
+                "room_id": self._room_id,
+                "in_queue": self._in_queue,
+                "game_active": self._game_active,
+            })
+        except Exception:
+            log.exception("crash log write failed")
 
     async def _async_main_resume(self, resume_payload):
         log.info("reconnect-resume addr=%s room=%s", self._addr, self._room_id)

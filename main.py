@@ -4,7 +4,7 @@ import os
 
 import pygame as pg
 
-from frontend import env
+from frontend import env, crash_log
 from frontend.frontend import Frontend
 
 
@@ -22,13 +22,25 @@ if __name__ == "__main__":
         format="%(asctime)s %(levelname)s %(name)s %(message)s",
         datefmt="%H:%M:%S",
     )
+    handler = crash_log.install_memory_handler()
+    log = logging.getLogger("chess.main")
+    log.info("client starting pid=%s", os.getpid())
     env.load()
     env.set_overrides(client_uuid=args.client_uuid, nickname=args.nickname)
     pg.init()
+    mixer_ok = True
     try:
         pg.mixer.init()
     except pg.error:
-        pass
+        mixer_ok = False
+    log.info("pygame init ok mixer=%s", mixer_ok)
     window_width, window_height = 1200, 1000
-    app = Frontend(window_width, window_height)
-    app.run()
+    app = None
+    try:
+        app = Frontend(window_width, window_height)
+        log.info("frontend ready window=%dx%d", window_width, window_height)
+        app.run()
+    except Exception as exc:
+        state = crash_log.gather_state(app) if app is not None else {}
+        crash_log.write_crash_log(exc, handler.buffer, state)
+        raise
