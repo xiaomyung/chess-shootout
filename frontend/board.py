@@ -590,6 +590,14 @@ class Board:
             self.selected_square = None
             return
 
+        if self._should_switch_focus_to(square, grid, live_at_clicked, current_turn, local_color):
+            self.selected_square = None
+            if self._is_real_move_eligible(live_at_clicked, current_turn, local_color):
+                self._try_select(square)
+            else:
+                self._try_select_for_premove(square, live_at_clicked)
+            return
+
         from_sq = self.selected_square
         self.selected_square = None
         live_from_piece = self.match.state[from_sq.row][from_sq.col]
@@ -615,6 +623,23 @@ class Board:
         if live_piece is None or live_piece.color != current_turn:
             return False
         if local_color is not None and live_piece.color != local_color:
+            return False
+        return True
+
+    def _should_switch_focus_to(self, square, grid, live_at_clicked, current_turn, local_color):
+        """A click on another own-side piece switches focus instead of attempting a move.
+
+        Both the previously-selected piece and the clicked square must hold pieces
+        of the same own color (online: local_color; offline: current_turn). Cross-color
+        clicks fall through to the original move/capture/premove path.
+        """
+        if self.selected_square is None:
+            return False
+        own_color = local_color if local_color is not None else current_turn
+        selected_piece = grid[self.selected_square.row][self.selected_square.col]
+        if selected_piece is None or selected_piece.color != own_color:
+            return False
+        if live_at_clicked is None or live_at_clicked.color != own_color:
             return False
         return True
 
