@@ -1,26 +1,39 @@
 # chess-pygame
 
-A full-featured local chess game built with [pygame](https://www.pygame.org/).
-Hot-seat play, drag-and-drop or click-to-move, premoves, annotations, clocks,
-PGN export and review.
+A full-featured chess game built with [pygame](https://www.pygame.org/).
+Hot-seat play, drag-and-drop or click-to-move, premoves, annotations,
+clocks, PGN auto-save and review, and an authoritative online server for
+two-player matches.
 
 ## Features
 
 - Complete chess rules engine (castling, en passant, promotion, threefold
-  repetition, fifty-move rule, insufficient material)
-- Drag-and-drop or click-to-move input
-- Premove queueing (chess.com-style) with auto-fire on turn flip
-- Right-click annotations: square highlights and arrows
-- Time controls with increment, board flip, undo, resign, draw agreement
-- PGN save and click-through review with arrow-key stepping
-- Captured-piece graveyard and material balance per side
-- Heartbeat audio when low on time
+  repetition, fifty-move rule, insufficient material).
+- Drag-and-drop or click-to-move input; right-click annotations
+  (highlights and arrows).
+- Premove queueing (chess.com-style) with pseudo-legal validation,
+  bouncing chains, and brighter chain-tip highlight.
+- Time controls with increment, board flip, undo, resign, draw
+  agreement; clock pocket reddens below 10 % and the heartbeat fades in.
+- **PGN auto-save** to `games/<prefix>-YYYYMMDD-HHMMSS.pgn` (`local`,
+  `bot`, or `online`); the result modal has an **Open PGN** button that
+  launches the file in your OS default editor (`xdg-open` / `open` /
+  `os.startfile`).
+- **From FEN** start option in the main menu: paste any valid FEN to
+  start a single-screen game from that position.
+- **Help modal** (right-panel `?` button or `?` hotkey) lists every
+  shortcut.
+- Captured-piece graveyard and material balance per side.
+- Master volume slider with an audio panel — value persisted in `.env`.
+- Online play: authoritative FastAPI server, animated reconnect overlay,
+  rematch / takeback / draw flows, crash-log capture for bug reports.
 
 ## Requirements
 
-- Python 3.10 – 3.13 (3.14 has a pygame import bug; avoid)
-- [`ffmpeg`](https://ffmpeg.org/) on `$PATH` (used by `pydub` for MP3 capture
-  sounds)
+- Python `>=3.12,<3.13` (pinned in `pyproject.toml`; pygame's 3.14 wheel
+  ships without `pygame.mixer`).
+- No external runtime dependencies — every audio asset ships
+  pre-encoded as `.ogg`, so `ffmpeg` is **not** required.
 
 ## Install
 
@@ -31,15 +44,18 @@ The project uses `pyproject.toml`. Two flavours of install:
 | **Just play the game** | `pip install -e .` |
 | **Run tests / contribute** | `pip install -e ".[dev]"` |
 
-`-e` means editable: pip installs the dependencies and points at the cloned source tree, so `python main.py` keeps working as you edit. The `[dev]` extra adds pytest + xdist + asyncio + httpx — none of which a player needs.
+`-e` means editable: pip installs the dependencies and points at the
+cloned source tree, so `python main.py` keeps working as you edit. The
+`[dev]` extra adds pytest + xdist + asyncio + httpx — none of which a
+player needs.
 
 ### Linux
 
 ```bash
 # Arch
-sudo pacman -S python ffmpeg
+sudo pacman -S python
 # Debian / Ubuntu
-sudo apt install python3 python3-venv ffmpeg
+sudo apt install python3 python3-venv
 
 git clone https://github.com/xiaomyung/chess-pygame.git
 cd chess-pygame
@@ -53,7 +69,7 @@ python main.py
 ### macOS
 
 ```bash
-brew install python ffmpeg
+brew install python
 
 git clone https://github.com/xiaomyung/chess-pygame.git
 cd chess-pygame
@@ -67,8 +83,6 @@ python main.py
 
 ```powershell
 # Install Python 3.12 from python.org (tick "Add to PATH")
-# Install ffmpeg, e.g. via winget:
-winget install Gyan.FFmpeg
 
 git clone https://github.com/xiaomyung/chess-pygame.git
 cd chess-pygame
@@ -77,6 +91,20 @@ python -m venv .venv
 pip install -e .
 python main.py
 ```
+
+## Hotkeys
+
+| Key | Action |
+|---|---|
+| `F` | Flip board |
+| `R` | Resign / promote to rook (when a promotion is pending) |
+| `D` | Offer draw |
+| `Q` / `B` / `N` | Promote (queen / bishop / knight) |
+| `Ctrl+Z` | Undo (online: takeback request) |
+| `←` / `→` | Step through review |
+| `Home` / `End` | Jump to ply 0 / live |
+| `?` | Open Help modal |
+| `Esc` | Close the window |
 
 ## Online play
 
@@ -96,48 +124,77 @@ python main.py --client-uuid alice --nickname Alice
 python main.py --client-uuid bob --nickname Bob
 ```
 
-Both clients pick **Online** mode in the start menu, choose time control and
-side preference, click **Start Game**, accept `localhost:8000` in the address
-modal. As soon as the second player connects with the same time control,
-both clients land in the game with the player's color at the bottom.
+`--client-uuid alice` is a debug shortcut: non-UUID4 aliases are coerced
+into a deterministic UUID4 client-side so the server's UUID4 validator
+still accepts them. Real clients get a UUID4 auto-generated on first
+launch and persisted in `.env`.
+
+Both clients pick **Online** mode in the start menu, choose time
+control and side preference, click **Start Search**, accept
+`localhost:8000` in the address modal. As soon as the second player
+connects with the same time control, both clients see "Match found!"
+for half a second and the game starts with the player's color at the
+bottom.
 
 ### Settings (`.env`)
 
-The client reads a `.env` at the repo root (gitignored). Copy `.env.example`
-and fill in:
+The client reads a `.env` at the repo root (gitignored). Copy
+`.env.example` and fill in:
 
 ```
 CHESS_SERVER_ADDR=localhost:8000
 CHESS_NICKNAME=YourName
-CHESS_CLIENT_UUID=          # auto-generated on first launch
+CHESS_CLIENT_UUID=          # auto-generated UUID4 on first launch
 CHESS_LAST_MODE=             # auto-saved
+CHESS_MASTER_VOLUME=0.70     # 0.0 – 1.0, in-game slider persists here
 ```
 
-CLI flags `--client-uuid` and `--nickname` override `.env` for the running
-process — handy for testing two clients on the same machine.
+CLI flags `--client-uuid` and `--nickname` override `.env` for the
+running process — handy for testing two clients on the same machine.
 
 ### In-game actions
 
 - **Resign** at any time → opponent wins.
-- **Draw** while it's your turn → opponent gets an Accept/Decline prompt;
-  mutual draws auto-agree.
+- **Draw** while it's your turn → opponent gets an Accept/Decline
+  prompt; mutual draws auto-agree.
 - **Undo** (= takeback) only directly after your own move (while the
-  opponent is on the clock) → opponent prompted; on accept, one ply rolls
-  back and the clock is restored.
+  opponent is on the clock) → opponent prompted; on accept, one ply
+  rolls back and the clock is restored.
 - **Rematch** from the result modal → opponent prompted; on accept, the
-  same room restarts with swapped colors.
+  same room restarts with swapped colors. The series score (e.g.
+  `1½ – ½`) shows in the right panel.
 
 ### Reconnection
 
-WS drops mid-game (e.g., transient WiFi blip) trigger an automatic
-`/resume` retry every 2 s for up to 60 s. The opponent sees a yellow status
-dot. On success the game continues from the exact ply. Closing the client
-process drops the in-memory session token — reconnection only handles
-network blips, not crashes.
+Three layered recovery paths:
+
+- **WS drops mid-game** (transient WiFi blip): client retries `/resume`
+  every 2 s for up to 60 s. The opponent sees a "Reconnecting…" overlay
+  and a yellow status dot. On success the game continues from the exact
+  ply.
+- **Client app restart** (you closed the window mid-game): on next
+  launch the client probes `POST /reclaim {client_uuid}`; if the room
+  is still alive the start menu shows a **Reconnect** button between
+  Load PGN and Start Search.
+- **Server restart** (server killed and brought back): when `/resume`
+  fatals but `/healthz` is reachable, the client knows the room is gone
+  and surfaces a dedicated modal — **"Server restarted — game ended"**
+  with [New Search] / [Cancel]. New Search re-runs matchmake against
+  your previous time control without bouncing through the start menu.
+
+Server-side rooms are in-memory only (no DB), so a true server crash
+loses the game state — but you go straight to a fresh search on click.
+
+### Crash log capture
+
+Unhandled exceptions write `crashlogs/YYYYMMDD-HHMMSS.txt` with the
+traceback, app state, and an in-memory log buffer of the whole session.
+`crashlogs/` is gitignored. Attach the file when reporting bugs.
 
 ### Deployment
 
-See [deploy/README.md](deploy/README.md) for VPS setup with Caddy + systemd.
+See [deploy/README.md](deploy/README.md) for VPS setup with Caddy +
+systemd.
 
 ## Running tests
 
@@ -145,6 +202,8 @@ See [deploy/README.md](deploy/README.md) for VPS setup with Caddy + systemd.
 pip install -e ".[dev]"
 pytest tests -n 8 -q
 ```
+
+~8 s under xdist for 1071 tests; ~25 s serial.
 
 ## License
 
