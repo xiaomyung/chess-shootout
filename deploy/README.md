@@ -165,12 +165,31 @@ hidden, edge DDoS mitigation, free WAF rules, plus the app-level
 caps. Steps in the Cloudflare dashboard for your zone:
 
 1. **DNS → Records** — add `A` (and optionally `AAAA`) for `chess`,
-   pointing at the VPS, **proxy status = Proxied** (orange cloud).
-2. **SSL/TLS → Overview → Encryption Mode = Full (strict).** Anything
-   weaker (Flexible, Full) makes the edge↔origin link spoofable. Caddy
-   serves a Let's Encrypt cert that satisfies (strict).
-3. **SSL/TLS → Edge Certificates → Always Use HTTPS = ON.**
-4. **Network → WebSockets = ON** (default; verify).
+   pointing at the VPS. **Set proxy status to DNS only (gray cloud)
+   for now** — we'll flip to proxied after Caddy has its first cert
+   (see step 6 below).
+2. Wait ~30 s for DNS, then on the VPS:
+   ```bash
+   sudo systemctl restart caddy
+   sudo journalctl -u caddy -f
+   ```
+   Watch for `certificate obtained successfully` for the chess
+   hostname (~10 s). Ctrl-C the journal. Verify direct:
+   ```bash
+   curl https://chess.your-domain.com/healthz
+   ```
+3. **Now flip the chess DNS record to Proxied (orange cloud).**
+4. **SSL/TLS → Overview → Encryption Mode = Full (strict).** Anything
+   weaker (Flexible, Full) makes the edge↔origin link spoofable. The
+   Let's Encrypt cert Caddy just got satisfies (strict).
+5. **SSL/TLS → Edge Certificates → Always Use HTTPS = ON.**
+6. **Network → WebSockets = ON** (default; verify).
+
+**Why the order matters:** Caddy's first cert needs HTTP-01 validation
+to reach origin directly. With Cloudflare proxied + Full (strict)
+already on, the LE challenge gets a 522 because CF refuses to connect
+to a cert-less origin → cert never issues → infinite loop. After the
+first cert exists, renewals work fine through the proxy.
 5. **Bot Fight Mode (free plan): turn OFF zone-wide.** Bot Fight Mode
    serves a JS interstitial to anything Cloudflare's heuristics flag
    as a bot, which includes `curl`, the pygame client (no JS runtime),
