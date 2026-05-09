@@ -57,7 +57,7 @@ class StartMenu:
         self.selected_mode = last_mode if last_mode in (SINGLE_SCREEN, BOT, ONLINE) else SINGLE_SCREEN
         self.selected_time_minutes = 10
         self.selected_increment_seconds = 5
-        self.selected_side = "white"
+        self.selected_side = "random"
 
         self.title_font = pg.font.SysFont("Arial", 28, bold=True)
         self.label_font = pg.font.SysFont("Arial", 12, bold=True)

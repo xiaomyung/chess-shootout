@@ -38,7 +38,7 @@ def test_defaults(menu):
     assert sm.selected_mode == "single_screen"
     assert sm.selected_time_minutes == 10
     assert sm.selected_increment_seconds == 5
-    assert sm.selected_side == "white"
+    assert sm.selected_side == "random"
     assert sm.text_input.text == ""
 
 
