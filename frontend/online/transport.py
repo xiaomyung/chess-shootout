@@ -39,7 +39,7 @@ class TransportHTTPError(TransportError):
 
 
 class FatalResumeError(TransportError):
-    """Server rejected resume with a status that won't change on retry."""
+    pass
 
 
 def _looks_like_ip_or_localhost(host):
@@ -70,11 +70,10 @@ def _split_addr(addr):
         port = None
     if explicit_scheme:
         ws_scheme = "ws" if explicit_scheme in ("ws://", "http://") else "wss"
+    elif _looks_like_ip_or_localhost(host) or port == 8000:
+        ws_scheme = "ws"
     else:
-        if _looks_like_ip_or_localhost(host) or port == 8000:
-            ws_scheme = "ws"
-        else:
-            ws_scheme = "wss"
+        ws_scheme = "wss"
     if port is None:
         port = 8000 if ws_scheme == "ws" else 443
     return ws_scheme, host, port
@@ -99,16 +98,17 @@ class _UrlBuilder:
 def _safe_error_reason(response):
     try:
         body = response.json()
-    except Exception:
+    except json.JSONDecodeError:
         return None
-    if isinstance(body, dict):
-        if "reason" in body:
-            return body["reason"]
-        detail = body.get("detail")
-        if isinstance(detail, dict) and "reason" in detail:
-            return detail["reason"]
-        if isinstance(detail, str):
-            return detail
+    if not isinstance(body, dict):
+        return None
+    if "reason" in body:
+        return body["reason"]
+    detail = body.get("detail")
+    if isinstance(detail, dict) and "reason" in detail:
+        return detail["reason"]
+    if isinstance(detail, str):
+        return detail
     return None
 
 

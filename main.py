@@ -41,6 +41,9 @@ if __name__ == "__main__":
         log.info("frontend ready window=%dx%d", window_width, window_height)
         app.run()
     except Exception as exc:
-        state = crash_log.gather_state(app) if app is not None else {}
-        crash_log.write_crash_log(exc, handler.buffer, state)
+        try:
+            state = crash_log.gather_state(app) if app is not None else {}
+            crash_log.write_crash_log(exc, handler.buffer, state)
+        except Exception:
+            log.exception("crash log write failed")
         raise

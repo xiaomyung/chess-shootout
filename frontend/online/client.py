@@ -5,8 +5,8 @@ import threading
 from dataclasses import dataclass
 
 from frontend.online.transport import (
-    FatalResumeError, HTTP_TIMEOUT_SECONDS, ServerTransport, TransportError,
-    TransportHTTPError, SchemaVersionMismatch, WsConnectionClosed,
+    FatalResumeError, ServerTransport, TransportError, TransportHTTPError,
+    SchemaVersionMismatch, WsConnectionClosed,
 )
 from server.protocol import (
     CancelMatchmakeRequest, MatchmakeRequest, ResumeRequest,
@@ -38,7 +38,7 @@ def probe_active_game(addr, client_uuid, timeout=2.0):
     return response.model_dump()
 
 
-def fetch_resume(addr, room_id, session_token, timeout=5.0):
+def fetch_resume(addr, room_id, session_token):
     transport = ServerTransport(addr)
     response = transport.resume_blocking(room_id, session_token)
     if response is None:
@@ -47,6 +47,8 @@ def fetch_resume(addr, room_id, session_token, timeout=5.0):
 
 
 class OnlineClient:
+
+    ROOM_LOST = object()
 
     def __init__(self):
         self._inbound = queue.Queue()
@@ -67,10 +69,7 @@ class OnlineClient:
     def connect(self, addr, request):
         self._addr = addr
         self._transport = ServerTransport(addr)
-        self._thread = threading.Thread(
-            target=self._run_loop, args=(request,), daemon=True,
-        )
-        self._thread.start()
+        self._spawn_loop_thread(self._async_main, request)
 
     def reconnect_to_existing(self, addr, room_id, session_token, resume_payload):
         self._addr = addr
@@ -78,8 +77,11 @@ class OnlineClient:
         self._room_id = room_id
         self._session_token = session_token
         self._game_active = True
+        self._spawn_loop_thread(self._async_main_resume, resume_payload)
+
+    def _spawn_loop_thread(self, coro_factory, *args):
         self._thread = threading.Thread(
-            target=self._run_loop_resume, args=(resume_payload,), daemon=True,
+            target=self._run_loop, args=(coro_factory, args), daemon=True,
         )
         self._thread.start()
 
@@ -158,27 +160,12 @@ class OnlineClient:
                 break
         return events
 
-    def _run_loop(self, request):
+    def _run_loop(self, coro_factory, args):
         self._loop = asyncio.new_event_loop()
         asyncio.set_event_loop(self._loop)
         self._outbound = asyncio.Queue()
         try:
-            self._loop.run_until_complete(self._async_main(request))
-        except Exception as exc:
-            self._inbound.put(Event("error", {"reason": str(exc)}))
-            self._dump_crash_log(exc)
-        finally:
-            try:
-                self._loop.close()
-            except Exception:
-                pass
-
-    def _run_loop_resume(self, resume_payload):
-        self._loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(self._loop)
-        self._outbound = asyncio.Queue()
-        try:
-            self._loop.run_until_complete(self._async_main_resume(resume_payload))
+            self._loop.run_until_complete(coro_factory(*args))
         except Exception as exc:
             self._inbound.put(Event("error", {"reason": str(exc)}))
             self._dump_crash_log(exc)
@@ -206,35 +193,7 @@ class OnlineClient:
         self.state = "connecting"
         self._inbound.put(Event("game_start", resume_payload))
         self._inbound.put(Event("game_resumed", resume_payload))
-        try:
-            await self._run_ws_session()
-            while (not self._stop.is_set() and self._game_active
-                   and self._session_token is not None):
-                log.info("ws dropped mid-game; attempting reconnect")
-                self.state = "reconnecting"
-                self.opp_state = "reconnecting"
-                resumed = await self._resume_with_retries()
-                if resumed is self.ROOM_LOST:
-                    log.warning("reconnect: server alive but room gone")
-                    self._inbound.put(Event("error", {"reason": "room_lost"}))
-                    break
-                if not resumed:
-                    log.warning("reconnect gave up")
-                    self._inbound.put(Event("error", {"reason": "reconnect_failed"}))
-                    break
-                log.info("reconnect succeeded; resuming game")
-                self._inbound.put(Event("game_resumed", resumed))
-                try:
-                    await self._run_ws_session()
-                except Exception as exc:
-                    self._inbound.put(Event("error", {"reason": str(exc)}))
-                    break
-        except Exception as exc:
-            log.warning("ws session crash: %s", exc)
-            self._inbound.put(Event("error", {"reason": str(exc)}))
-        finally:
-            log.info("session ended state=disconnected")
-            self.state = "disconnected"
+        await self._run_session_with_reconnects()
 
     async def _async_main(self, request):
         log.info("connect addr=%s", self._addr)
@@ -256,6 +215,9 @@ class OnlineClient:
         self._in_queue = True
         log.info("matchmake ok room=%s", self._room_id)
         self._inbound.put(Event("matchmake_response", mm))
+        await self._run_session_with_reconnects()
+
+    async def _run_session_with_reconnects(self):
         try:
             await self._run_ws_session()
             while (not self._stop.is_set() and self._game_active
@@ -285,8 +247,6 @@ class OnlineClient:
         finally:
             log.info("session ended state=disconnected")
             self.state = "disconnected"
-
-    ROOM_LOST = object()
 
     async def _resume_with_retries(self):
         deadline = asyncio.get_event_loop().time() + RECONNECT_TOTAL_SECONDS

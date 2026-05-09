@@ -112,9 +112,21 @@ ANIM_MS_MIN = 140
 ANIM_MS_MAX = 280
 
 MATCH_FOUND_HOLD_MS = 500
+SAVED_PGN_TOAST_DURATION_MS = 3000
 
 MIN_WINDOW_WIDTH = 900
 MIN_WINDOW_HEIGHT = 500
+
+def _games_dir():
+    return os.path.join(PROJECT_ROOT, "games")
+
+
+PROMOTION_KEYS = {
+    pg.K_q: PieceType.QUEEN,
+    pg.K_r: PieceType.ROOK,
+    pg.K_b: PieceType.BISHOP,
+    pg.K_n: PieceType.KNIGHT,
+}
 
 
 def compute_animation_ms(initial_seconds):
@@ -242,16 +254,14 @@ class Frontend(OnlineEventsMixin):
         self.start_menu.load_pgn_available = self._latest_pgn_path() is not None
 
     def _latest_pgn_path(self):
-        games_dir = os.path.join(PROJECT_ROOT, "games")
-        files = glob.glob(os.path.join(games_dir, "*.pgn"))
+        files = glob.glob(os.path.join(_games_dir(), "*.pgn"))
         if not files:
             return None
         return max(files, key=os.path.getmtime)
 
     def _on_load_last_game(self):
-        games_dir = os.path.join(PROJECT_ROOT, "games")
         self.file_picker.show(
-            games_dir, "*.pgn",
+            _games_dir(), "*.pgn",
             on_select=self._load_pgn_from_path,
         )
 
@@ -475,10 +485,8 @@ class Frontend(OnlineEventsMixin):
                 and self.online_client.state == "reconnecting"):
             if not self.reconnecting_modal.is_visible():
                 self.reconnecting_modal.show(on_cancel=self._abandon_online_game)
-        else:
-            if self.reconnecting_modal.is_visible():
-                self.reconnecting_modal.hide()
-
+        elif self.reconnecting_modal.is_visible():
+            self.reconnecting_modal.hide()
 
     def _right_menu_buttons(self):
         if self.pgn_review:
@@ -526,9 +534,6 @@ class Frontend(OnlineEventsMixin):
         if not _open_with_default_app(path):
             self.toast.show("Could not open PGN")
 
-    def _auto_save_online_pgn(self):
-        self._auto_save_pgn()
-
     def _auto_save_pgn(self):
         if not self.match.move_history:
             return None
@@ -536,14 +541,13 @@ class Frontend(OnlineEventsMixin):
         if text is None:
             return None
         prefix = self._auto_save_prefix()
-        games_dir = os.path.join(PROJECT_ROOT, "games")
-        os.makedirs(games_dir, exist_ok=True)
+        os.makedirs(_games_dir(), exist_ok=True)
         filename = f"{prefix}-{datetime.now().strftime('%Y%m%d-%H%M%S')}.pgn"
-        path = os.path.join(games_dir, filename)
+        path = os.path.join(_games_dir(), filename)
         with open(path, "w") as f:
             f.write(text)
         self._last_saved_pgn_path = path
-        self.toast.show(f"Saved {filename}", duration_ms=3000)
+        self.toast.show(f"Saved {filename}", duration_ms=SAVED_PGN_TOAST_DURATION_MS)
         return path
 
     def _auto_save_prefix(self):
@@ -781,10 +785,8 @@ class Frontend(OnlineEventsMixin):
         elapsed = self._result_elapsed_ms()
         if elapsed is None:
             return
-        if elapsed >= RESULT_FADE_MS:
-            alpha = RESULT_FADE_MAX_ALPHA
-        else:
-            alpha = int(RESULT_FADE_MAX_ALPHA * elapsed / RESULT_FADE_MS)
+        alpha = min(RESULT_FADE_MAX_ALPHA,
+                      int(RESULT_FADE_MAX_ALPHA * elapsed / RESULT_FADE_MS))
         if alpha <= 0:
             return
         overlay = pg.Surface(self.window.get_size(), pg.SRCALPHA)
@@ -1064,13 +1066,7 @@ class Frontend(OnlineEventsMixin):
     def _handle_promotion_key(self, event):
         if self.board.pending_promotion_square is None:
             return False
-        promo_keys = {
-            pg.K_q: PieceType.QUEEN,
-            pg.K_r: PieceType.ROOK,
-            pg.K_b: PieceType.BISHOP,
-            pg.K_n: PieceType.KNIGHT,
-        }
-        chosen = promo_keys.get(event.key)
+        chosen = PROMOTION_KEYS.get(event.key)
         if chosen is None:
             return False
         sq = self.board.pending_promotion_square

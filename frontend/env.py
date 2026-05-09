@@ -37,7 +37,7 @@ def _coerce_to_uuid4(value):
         parsed = uuid.UUID(value)
         if parsed.version == 4:
             return str(parsed)
-    except (ValueError, AttributeError, TypeError):
+    except ValueError:
         pass
     digest = hashlib.sha256(f"chess-debug-alias:{value}".encode()).hexdigest()[:32]
     digest = digest[:12] + "4" + digest[13:16] + "8" + digest[17:32]
@@ -93,13 +93,6 @@ def set_master_volume(value):
 
 
 def _persist(key, value):
-    """Update one key in .env via atomic temp-file rename.
-
-    Preserves comments, blank lines, and unrelated keys. Drops malformed
-    lines (e.g. partial-write fragments) so corruption self-heals on the
-    next write. Always emits unquoted `KEY=value` regardless of what the
-    file looked like before — keeps the format predictable.
-    """
     existing = _ENV_PATH.read_text() if _ENV_PATH.exists() else ""
     out_lines = []
     replaced = False

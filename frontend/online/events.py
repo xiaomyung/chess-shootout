@@ -1,5 +1,7 @@
 import logging
 
+import pygame as pg
+
 from backend.fen import apply_fen
 from backend.match import ONLINE
 from backend.pieces import PieceColor
@@ -33,6 +35,11 @@ ONLINE_TRANSIENT_REASON_LABELS = {
     "takeback_already_pending": "Takeback already pending",
     "no_takeback_available": "Nothing to take back",
     "rematch_already_pending": "Rematch already requested",
+}
+
+ONLINE_GAME_STATE_REASONS = {
+    "not_your_turn", "invalid_move_format", "invalid_message",
+    "version_mismatch",
 }
 
 
@@ -81,11 +88,7 @@ class OnlineEventsMixin:
 
     def _handle_online_error(self, payload):
         reason = payload.get("reason", "")
-        game_state_reasons = {
-            "not_your_turn", "invalid_move_format", "invalid_message",
-            "version_mismatch",
-        }
-        if reason in game_state_reasons:
+        if reason in ONLINE_GAME_STATE_REASONS:
             return
         if reason == "room_lost":
             self.reconnecting_modal.hide()
@@ -192,10 +195,9 @@ class OnlineEventsMixin:
         if self.manual_result is not None:
             if reason == "timeout":
                 self.sound_manager.play_flag_fall()
-            self._auto_save_online_pgn()
+            self._auto_save_pgn()
 
     def _begin_match_found_transition(self, payload):
-        import pygame as pg
         if self._pending_game_start_payload is not None:
             return
         self._pending_game_start_payload = payload
@@ -204,7 +206,6 @@ class OnlineEventsMixin:
         self.sound_manager.play_online_game_start()
 
     def _start_online_game(self, payload):
-        import pygame as pg
         opp_name = (payload.get("white_name") if payload.get("your_color") == "black"
                     else payload.get("black_name"))
         log.info("game start as %s vs %s", payload.get("your_color"), opp_name)

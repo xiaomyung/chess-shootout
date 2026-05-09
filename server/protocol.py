@@ -26,6 +26,7 @@ class Reason:
     VERSION_MISMATCH = "version_mismatch"
     INVALID_MESSAGE = "invalid_message"
     INVALID_MOVE_FORMAT = "invalid_move_format"
+    INVALID_TIME_CONTROL = "invalid_time_control"
     NOT_YOUR_TURN = "not_your_turn"
     SESSION_EXPIRED = "session_expired"
     ALREADY_IN_GAME = "already_in_game"

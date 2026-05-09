@@ -105,7 +105,10 @@ def create_app(*, now_provider=time.monotonic, max_rooms=100):
 
     @app.exception_handler(RateLimitExceeded)
     async def _rate_limit_handler(request, exc):
-        return JSONResponse(status_code=429, content={"reason": "rate_limited"})
+        return JSONResponse(
+            status_code=429,
+            content={"detail": {"reason": Reason.RATE_LIMITED}},
+        )
 
     @app.exception_handler(ValidationError)
     async def _validation_handler(request, exc):
@@ -138,7 +141,8 @@ def create_app(*, now_provider=time.monotonic, max_rooms=100):
                  body.nickname, body.client_uuid[:8],
                  body.time_minutes, body.increment_seconds, body.side_preference)
         if body.time_minutes < 1 or body.increment_seconds < 0:
-            raise HTTPException(status_code=422, detail={"reason": "invalid_time_control"})
+            raise HTTPException(status_code=422,
+                                  detail={"reason": Reason.INVALID_TIME_CONTROL})
         token = RoomManager.make_session_token()
         try:
             room = await rooms.enqueue(

@@ -9,11 +9,12 @@ from backend.utils import (
 )
 from server import logging_setup
 from server.connections import broadcast, send
+from server.broadcasts import broadcast_game_start
 from server.protocol import (
-    DrawOfferedMessage, DrawResponseMessage, ErrorMessage, MoveAppliedMessage,
-    MoveMessage, Reason, RematchRequestMessage, RematchResponseMessage,
-    ResultMessage, TakebackAppliedMessage, TakebackOfferedMessage,
-    TakebackResponseMessage,
+    ClockSnapshot, DrawOfferedMessage, DrawResponseMessage, ErrorMessage,
+    MoveAppliedMessage, MoveMessage, Reason, RematchRequestMessage,
+    RematchResponseMessage, ResultMessage, TakebackAppliedMessage,
+    TakebackOfferedMessage, TakebackResponseMessage,
 )
 from server.sweep import _RESULT_REASON_BY_GAME_RESULT
 
@@ -21,8 +22,11 @@ from server.sweep import _RESULT_REASON_BY_GAME_RESULT
 log = logging_setup.get_logger("chess.server.app")
 
 
+def _color_to_move(backend):
+    return "white" if backend.current_turn() == PieceColor.WHITE else "black"
+
+
 def _clock_snapshot(clock):
-    from server.protocol import ClockSnapshot
     if clock is None:
         return ClockSnapshot(white_remaining=0.0, black_remaining=0.0, running_for=None)
     running = None
@@ -64,7 +68,7 @@ async def handle_move(app, websocket, room, color, raw):
         await send(connections.get_for_color(room, color),
                      ErrorMessage(reason=Reason.INVALID_MOVE_FORMAT))
         return "invalid_move_format"
-    expected = "white" if room.backend.current_turn() == PieceColor.WHITE else "black"
+    expected = _color_to_move(room.backend)
     if expected != color:
         log.info("move rejected room=%s mover=%s expected=%s reason=not_your_turn",
                  room.room_id, color, expected)
@@ -119,7 +123,7 @@ async def handle_draw_offer(app, websocket, room, color, raw):
     connections = app.state.connections
     if room.result is not None or room.backend is None:
         return "noop"
-    expected = "white" if room.backend.current_turn() == PieceColor.WHITE else "black"
+    expected = _color_to_move(room.backend)
     if color != expected:
         await send(connections.get_for_color(room, color),
                      ErrorMessage(reason=Reason.NOT_YOUR_TURN))
@@ -172,7 +176,6 @@ async def handle_rematch_request(app, websocket, room, color, raw):
     if len(room.rematch_offered_by) == 2:
         log.info("rematch mutual — restart room=%s", room.room_id)
         rooms.reset_for_rematch(room.room_id)
-        from server.broadcasts import broadcast_game_start
         await broadcast_game_start(connections, room)
         return "started"
     log.info("rematch requested room=%s by=%s", room.room_id, color)
@@ -196,7 +199,6 @@ async def handle_rematch_response(app, websocket, room, color, raw):
     if msg.accept:
         log.info("rematch accepted room=%s by=%s", room.room_id, color)
         rooms.reset_for_rematch(room.room_id)
-        from server.broadcasts import broadcast_game_start
         await broadcast_game_start(connections, room)
         return "accepted"
     log.info("rematch declined room=%s by=%s", room.room_id, color)
@@ -208,16 +210,13 @@ async def handle_takeback_request(app, websocket, room, color, raw):
     connections = app.state.connections
     if room.result is not None or room.backend is None:
         return "noop"
-    expected = "white" if room.backend.current_turn() == PieceColor.WHITE else "black"
+    expected = _color_to_move(room.backend)
     if color == expected:
         await send(connections.get_for_color(room, color),
                      ErrorMessage(reason=Reason.NOT_YOUR_TURN))
         return "not_your_turn"
     if not room.backend.move_history:
         return "no_moves"
-    last_mover_color = "black" if expected == "white" else "white"
-    if last_mover_color != color:
-        return "not_last_mover"
     log.info("takeback requested room=%s by=%s", room.room_id, color)
     room.takeback_offered_by = color
     opp_ws = connections.get_for_color(room, room.opp_color(color))
