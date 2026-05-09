@@ -32,27 +32,43 @@ matches our `requires-python = ">=3.12,<3.13"` pin. pyenv builds a
 local 3.12 for the `chess` user without touching system Python.
 
 ```bash
-sudo -u chess -- bash -lc '
-    curl -fsSL https://pyenv.run | bash
-    cat >> ~/.bashrc <<EOF
+# Install pyenv into /opt/chess/.pyenv. -H forces HOME to chess's home;
+# without it, sudo leaves HOME pointing at YOUR home and pyenv can't
+# read it.
+sudo -u chess -H -- bash -c 'curl -fsSL https://pyenv.run | bash'
 
-export PYENV_ROOT="\$HOME/.pyenv"
-[[ -d \$PYENV_ROOT/bin ]] && export PATH="\$PYENV_ROOT/bin:\$PATH"
-eval "\$(pyenv init - bash)"
+# Add pyenv to chess's .bashrc for future interactive sessions.
+sudo -u chess -H -- tee -a /opt/chess/.bashrc > /dev/null <<'EOF'
+
+export PYENV_ROOT="$HOME/.pyenv"
+[[ -d $PYENV_ROOT/bin ]] && export PATH="$PYENV_ROOT/bin:$PATH"
+eval "$(pyenv init - bash)"
 EOF
-'
 
-sudo -u chess -i bash -c 'pyenv install 3.12 && pyenv global 3.12 && python --version'
+# Install Python 3.12 — this compiles from source, ~2 min the first
+# time. We export PYENV_ROOT/PATH inline because non-interactive sudo
+# shells don't source .bashrc.
+sudo -u chess -H -- bash -c '
+    export PYENV_ROOT="$HOME/.pyenv"
+    export PATH="$PYENV_ROOT/bin:$PATH"
+    eval "$(pyenv init - bash)"
+    pyenv install 3.12
+    pyenv global 3.12
+    python --version
+'
 # Expect: Python 3.12.x
 ```
 
 (If you already have a working `python3.12` from `bookworm-backports`,
-skip this and have the venv use `/usr/bin/python3.12` instead.)
+skip this and have the venv in step 3 use `/usr/bin/python3.12` instead.)
 
 ### 3. Clone, venv, install
 
 ```bash
-sudo -u chess -i bash -c '
+sudo -u chess -H -- bash -c '
+    export PYENV_ROOT="$HOME/.pyenv"
+    export PATH="$PYENV_ROOT/bin:$PATH"
+    eval "$(pyenv init - bash)"
     git clone https://github.com/xiaomyung/chess-pygame /opt/chess/repo
     cd /opt/chess/repo
     python -m venv .venv
@@ -132,7 +148,7 @@ and can click **New Search** to immediately re-pair.
 ## Updating
 
 ```bash
-sudo -u chess -i bash -c 'cd /opt/chess/repo && git pull && .venv/bin/pip install -e .'
+sudo -u chess -H -- bash -c 'cd /opt/chess/repo && git pull && .venv/bin/pip install -e .'
 sudo systemctl restart chess-server
 ```
 
