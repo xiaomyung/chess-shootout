@@ -49,32 +49,57 @@ cloned source tree, so `python main.py` keeps working as you edit. The
 `[dev]` extra adds pytest + xdist + asyncio + httpx — none of which a
 player needs.
 
+**You need Python 3.12 specifically.** Newer Python versions ship pygame
+wheels without `pygame.mixer` (no audio); older versions miss syntax
+the codebase uses. Check with `python3.12 --version` before continuing.
+
 ### Linux
 
 ```bash
-# Arch
-sudo pacman -S python
-# Debian / Ubuntu
-sudo apt install python3 python3-venv
+# Arch (community/extra has python312)
+sudo pacman -S python312
+PY=python3.12
+
+# Debian / Ubuntu — the deadsnakes PPA carries 3.12 even on older releases
+sudo add-apt-repository ppa:deadsnakes/ppa
+sudo apt update
+sudo apt install python3.12 python3.12-venv
+PY=python3.12
+
+# Fedora
+sudo dnf install python3.12
+PY=python3.12
 
 git clone https://github.com/xiaomyung/chess-pygame.git
 cd chess-pygame
-python3 -m venv .venv
+$PY -m venv .venv          # NOTE: use the explicit 3.12 binary, not `python3`
 source .venv/bin/activate
-pip install -e .          # players
-# pip install -e ".[dev]" # contributors
+python --version           # should print Python 3.12.x
+pip install -e .           # players
+# pip install -e ".[dev]"  # contributors
 python main.py
+```
+
+If `python3.12` isn't in your distro's repos, [`pyenv`](https://github.com/pyenv/pyenv)
+is the portable fallback:
+
+```bash
+curl https://pyenv.run | bash      # one-time
+pyenv install 3.12
+pyenv shell 3.12
+python -m venv .venv               # picks up the pyenv-shell version
 ```
 
 ### macOS
 
 ```bash
-brew install python
+brew install python@3.12
 
 git clone https://github.com/xiaomyung/chess-pygame.git
 cd chess-pygame
-python3 -m venv .venv
+python3.12 -m venv .venv
 source .venv/bin/activate
+python --version           # should print Python 3.12.x
 pip install -e .
 python main.py
 ```
@@ -82,12 +107,14 @@ python main.py
 ### Windows (PowerShell)
 
 ```powershell
-# Install Python 3.12 from python.org (tick "Add to PATH")
+# Download Python 3.12.x from https://www.python.org/downloads/release/
+# (tick "Add Python to PATH" during install). Don't use 3.13+.
 
 git clone https://github.com/xiaomyung/chess-pygame.git
 cd chess-pygame
-python -m venv .venv
+py -3.12 -m venv .venv     # the `py` launcher picks 3.12 specifically
 .venv\Scripts\Activate.ps1
+python --version           # should print Python 3.12.x
 pip install -e .
 python main.py
 ```
