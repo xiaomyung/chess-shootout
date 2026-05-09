@@ -37,8 +37,6 @@ class HelpModal(BaseModal):
         self._rows_rect = pg.Rect(0, 0, 0, 0)
 
     def set_rect(self, rect):
-        # Layout's rect drives the centre; we enforce a readable minimum so
-        # the modal stays usable at the window's minimum size.
         win_w, win_h = self.window.get_size()
         margin = 16
         cx = rect.centerx
@@ -140,7 +138,6 @@ class HelpModal(BaseModal):
                     desc_surf,
                     (desc_rect.x, desc_rect.centery - desc_surf.get_height() // 2),
                 )
-                # Thin separator beneath each row except the very last one shown.
                 if i < end - start - 1:
                     sep_y = row_y + line_h - 1
                     pg.draw.line(
@@ -166,7 +163,6 @@ class HelpModal(BaseModal):
             return False
         if self._max_scroll_offset == 0:
             return False
-        # Wheel up (dy > 0) scrolls toward earlier rows.
         self.scroll_offset = max(
             0, min(self.scroll_offset - dy, self._max_scroll_offset),
         )

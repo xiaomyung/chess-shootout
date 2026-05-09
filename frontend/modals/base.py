@@ -6,13 +6,6 @@ DEFAULT_PADDING = 12
 
 
 class BaseModal:
-    """Common scaffolding for blocking-overlay modals.
-
-    Owns the rect, a height-driven font factory, and visibility/click hooks.
-    Subclasses implement `draw`, override `is_visible`, and use `font()` to
-    build size-scaled fonts. `consumes_clicks_when_visible` lets the click
-    priority chain skip non-blocking variants.
-    """
 
     consumes_clicks_when_visible = True
 

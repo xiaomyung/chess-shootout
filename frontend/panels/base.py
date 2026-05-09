@@ -5,12 +5,6 @@ DEFAULT_FONT_FAMILY = "Arial"
 
 
 class BasePanel:
-    """Common scaffolding for persistent (non-blocking) UI panels.
-
-    Same rect/font helpers as `modals.base.BaseModal`, but panels render
-    alongside the board and don't intercept clicks unless the panel says so
-    explicitly via `handle_click`.
-    """
 
     consumes_clicks_when_visible = False
 

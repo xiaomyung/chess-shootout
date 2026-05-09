@@ -227,8 +227,6 @@ class Board:
         tip = self._resolve_chain_tip(active_sq)
         if tip != active_sq:
             return tip
-        # Click flow can land the selection directly on the chain tip
-        # (clicked the speculative piece position). Treat that as the tip too.
         for pm in self.premoves:
             if pm.to_sq == active_sq:
                 return active_sq
@@ -562,9 +560,6 @@ class Board:
         local_color = getattr(self.match, "local_color", None)
         if local_color is not None and piece.color != local_color:
             return False
-        # Premoves only make sense when it's NOT the moving side's turn.
-        # On its own turn the player should play through try_move; queueing
-        # a premove on top would fire a duplicate sound + speculative state.
         if piece.color == self.match.current_turn():
             return False
         if not piece_can_pseudo_reach(piece, chain_tip, target_sq):
@@ -702,10 +697,6 @@ class Board:
         return speculative_board(self.match, self.premoves)
 
     def _resolve_chain_tip(self, square):
-        # Walk the premoves list in order: each entry advances the position
-        # if its from_sq matches the current square. This handles chains that
-        # revisit a square (e.g. rook bouncing a8 ↔ b8) — the tip is whichever
-        # square the LAST applicable premove leaves the piece on.
         sq = square
         for pm in self.premoves:
             if pm.from_sq == sq:
@@ -851,9 +842,6 @@ class Board:
     def _draw_selection_highlight(self):
         if self.selected_square is None:
             return
-        # When the selection coincides with the chain tip, the bright premove
-        # overlay already marks the piece's current spec position. Drawing the
-        # selection border on top doubles up visually — skip it.
         if self.selected_square == self._active_chain_tip():
             return
 

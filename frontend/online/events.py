@@ -1,10 +1,3 @@
-"""Online-event dispatch — extracted from Frontend as a mixin.
-
-`Frontend` multiply-inherits this so the methods still see `self.X` for
-every attribute they touch. The bodies are unchanged; this file just
-gives them a dedicated home so frontend.py stops being one giant class.
-"""
-
 import logging
 
 from backend.fen import apply_fen
@@ -26,7 +19,6 @@ ONLINE_STATIC_RESULTS = {"aborted", "server_shutdown"}
 
 
 class OnlineEventsMixin:
-    """Inbound-event handlers for online play. Mixes into `Frontend`."""
 
     def _drain_online_inbound(self):
         if self.online_client is None:
@@ -149,8 +141,14 @@ class OnlineEventsMixin:
         winner = payload.get("winner_color")
         if reason in ONLINE_WIN_REASONS:
             self.manual_result = "white_wins" if winner == "white" else "black_wins"
+            if winner == "white":
+                self._series_white_score += 1
+            elif winner == "black":
+                self._series_black_score += 1
         elif reason in ONLINE_DRAW_REASONS:
             self.manual_result = "draw_agreement"
+            self._series_white_score += 0.5
+            self._series_black_score += 0.5
         elif reason in ONLINE_STATIC_RESULTS:
             self.manual_result = reason
         if self.manual_result is not None:
@@ -179,13 +177,11 @@ class OnlineEventsMixin:
         self.match.local_color = (PieceColor.WHITE if payload["your_color"] == "white"
                                   else PieceColor.BLACK)
         self.match.on_local_move_applied = self._on_local_move_applied
-        self.right_menu.set_game_info({
-            "white_name": payload["white_name"],
-            "black_name": payload["black_name"],
-            "time_minutes": payload["time_minutes"],
-            "increment_seconds": payload["increment_seconds"],
-            "ping_ms": None,
-        })
+        pair = tuple(sorted([payload["white_name"], payload["black_name"]]))
+        if getattr(self, "_series_pair", None) != pair:
+            self._series_pair = pair
+            self._series_white_score = 0.0
+            self._series_black_score = 0.0
         self._reset_to_new_game()
         self.board.flipped = self._online_initial_flip
         self.sound_manager.play_online_game_start()

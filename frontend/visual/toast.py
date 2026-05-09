@@ -12,12 +12,6 @@ PADDING_Y = 8
 
 
 class Toast:
-    """Transient top-of-screen notification.
-
-    Auto-dismisses after `duration_ms`. Doesn't intercept clicks — purely
-    informational. Stacking is intentionally not supported: a new `show()`
-    call replaces the current message.
-    """
 
     def __init__(self, window):
         self.window = window

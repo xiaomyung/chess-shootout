@@ -20,6 +20,14 @@ REVIEW_BUTTONS = [
 ]
 
 
+def _legacy_dict_to_lines(info):
+    names = f"{info.get('white_name', '?')}  vs  {info.get('black_name', '?')}"
+    tc_line = f"{info.get('time_minutes', 0)} min + {info.get('increment_seconds', 0)} sec"
+    ping_ms = info.get("ping_ms")
+    ping_line = f"ping: {ping_ms} ms" if ping_ms is not None else "ping: —"
+    return [names, tc_line, ping_line]
+
+
 class RightMenu:
 
     def __init__(self, window, match, callbacks, board=None,
@@ -105,9 +113,17 @@ class RightMenu:
         self.moves_rect = pg.Rect(self.outer_rect.x + p, moves_top, inner_w, moves_h)
 
     def _info_section_height(self):
-        if self.game_info is None:
+        lines = self._info_lines()
+        if not lines:
             return 0
-        return self.font.get_linesize() * 3 + self.padding
+        return self.font.get_linesize() * len(lines) + self.padding
+
+    def _info_lines(self):
+        if self.game_info is None:
+            return []
+        if isinstance(self.game_info, dict):
+            return _legacy_dict_to_lines(self.game_info)
+        return list(self.game_info)
 
     def set_game_info(self, info):
         self.game_info = info
@@ -122,7 +138,7 @@ class RightMenu:
 
     def draw_menu(self):
         pg.draw.rect(self.window, Colors.dark_menu, self.outer_rect)
-        if self.game_info is not None and self.info_rect.height > 0:
+        if self._info_lines() and self.info_rect.height > 0:
             self._draw_game_info(self.info_rect)
         pg.draw.rect(self.window, Colors.light_grey_menu, self.moves_rect)
         self._draw_moves(self.moves_rect)
@@ -133,14 +149,8 @@ class RightMenu:
             self.audio_panel.draw()
 
     def _draw_game_info(self, rect):
-        info = self.game_info
         line_h = self.font.get_linesize()
-        names = f"{info.get('white_name', '?')}  vs  {info.get('black_name', '?')}"
-        time_control = info.get("time_minutes", 0), info.get("increment_seconds", 0)
-        tc_line = f"{time_control[0]} min + {time_control[1]} sec"
-        ping_ms = info.get("ping_ms")
-        ping_line = f"ping: {ping_ms} ms" if ping_ms is not None else "ping: —"
-        for i, line in enumerate((names, tc_line, ping_line)):
+        for i, line in enumerate(self._info_lines()):
             surf = self.font.render(line, True, Colors.white)
             max_w = rect.width - 2 * self.padding
             if surf.get_width() > max_w > 0:
@@ -190,10 +200,6 @@ class RightMenu:
         pairs = list(iter_move_pairs(history))
         self._total_rows = len(pairs)
 
-        # If new pairs have appeared and the user was scrolled up, advance the
-        # offset by the same amount so their viewing window stays anchored on
-        # the same plies. When at the bottom (offset == 0), auto-follow keeps
-        # the latest move visible (offset stays 0).
         if (self._last_seen_total_rows
                 and self._total_rows > self._last_seen_total_rows
                 and self.scroll_offset > 0):
@@ -203,8 +209,6 @@ class RightMenu:
         max_offset = max(0, self._total_rows - self._max_lines)
         self.scroll_offset = min(self.scroll_offset, max_offset)
 
-        # In review mode, always keep the active ply visible — the user
-        # explicitly navigated to it.
         if self.board is not None and self.board.review_ply is not None:
             active_ply = self._active_ply(len(history))
             if active_ply > 0:
@@ -258,7 +262,6 @@ class RightMenu:
         return history_len
 
     def _scroll_offset_to_show_pair(self, pair_idx):
-        """Pick a scroll_offset that keeps `pair_idx` inside the visible window."""
         if self._max_lines <= 0:
             return self.scroll_offset
         max_offset = max(0, self._total_rows - self._max_lines)

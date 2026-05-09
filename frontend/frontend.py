@@ -38,6 +38,16 @@ MANUAL_RESULT_TEXT = {
     "server_shutdown": ("Game cancelled", "server shutting down"),
 }
 
+def _score_str(score):
+    int_part = int(score)
+    has_half = score - int_part >= 0.5 - 1e-9
+    if int_part == 0 and has_half:
+        return "½"
+    if has_half:
+        return f"{int_part}½"
+    return str(int_part)
+
+
 ENGINE_RESULT_TEXT = {
     "white_wins": ("White wins", "by checkmate"),
     "black_wins": ("Black wins", "by checkmate"),
@@ -87,6 +97,10 @@ class Frontend(OnlineEventsMixin):
         self.pgn_review = False
         self._flag_fall_played = False
         self._result_first_seen_at_ms = None
+        self._pgn_result_tag = None
+        self._series_white_score = 0.0
+        self._series_black_score = 0.0
+        self._series_room_id = None
 
         self.match = Match()
         self.sound_manager = SoundManager(SOUNDS_DIR, enabled=pg.mixer.get_init() is not None)
@@ -191,9 +205,10 @@ class Frontend(OnlineEventsMixin):
         self.mode = SINGLE_SCREEN
         self._time_control = None
         self._reset_to_new_game()
-        _, ok = load_pgn_into_backend(self.match, text)
+        parsed, ok = load_pgn_into_backend(self.match, text)
         if not ok:
             return
+        self._pgn_result_tag = parsed.result
         if self.match.move_history:
             self.board.review_ply = 0
         self.pgn_review = True
@@ -348,6 +363,7 @@ class Frontend(OnlineEventsMixin):
         self.manual_result = None
         self._flag_fall_played = False
         self._result_first_seen_at_ms = None
+        self._pgn_result_tag = None
         self.right_menu.reset_for_new_game()
         self.match.new_game()
         if self._time_control is not None:
@@ -521,12 +537,13 @@ class Frontend(OnlineEventsMixin):
         self.board.draw_board()
         if self.mode != "menu":
             self._update_player_strips()
+            self._refresh_game_info()
             self.player_strip_top.draw()
             self.player_strip_bottom.draw()
             self.right_menu.draw_menu()
             self._update_result_pending()
             self._draw_result_fade_overlay()
-            if self._result_modal_should_show():
+            if self._result_modal_should_show() and not self.pgn_review:
                 self.result_menu.set_text(self.result_text())
                 self.result_menu.draw()
             self.confirm_modal.draw()
@@ -538,6 +555,35 @@ class Frontend(OnlineEventsMixin):
         self.help_modal.draw()
         self._drain_online_inbound()
 
+    def _refresh_game_info(self):
+        self.right_menu.set_game_info(self._compute_game_info_lines())
+
+    def _compute_game_info_lines(self):
+        if self.mode == "menu":
+            return None
+        if self.pgn_review:
+            tc = self._format_time_control()
+            result = self._pgn_result_tag or "*"
+            return ["Review", tc, result] if tc else ["Review", result]
+        if self.mode == ONLINE:
+            names = f"{self.white_name}  vs  {self.black_name}"
+            tc = self._format_time_control() or "no clock"
+            return [names, tc, self._series_score_text()]
+        if self.mode == BOT:
+            tc = self._format_time_control() or "no clock"
+            return ["vs Bot (preview)", tc]
+        tc = self._format_time_control() or "no clock"
+        return ["Local game", tc]
+
+    def _format_time_control(self):
+        if self._time_control is None:
+            return None
+        initial, incr = self._time_control
+        return f"{int(initial // 60)}+{int(incr)}"
+
+    def _series_score_text(self):
+        return f"{_score_str(self._series_white_score)} - {_score_str(self._series_black_score)}"
+
     def _update_player_strips(self):
         top_color = PieceColor.WHITE if self.board.flipped else PieceColor.BLACK
         bottom_color = PieceColor.BLACK if self.board.flipped else PieceColor.WHITE
@@ -547,7 +593,7 @@ class Frontend(OnlineEventsMixin):
         self.player_strip_bottom.set_state(**self._strip_state(bottom_color, turn, over))
 
     def _update_result_pending(self):
-        if self.current_result() is None:
+        if self.current_result() is None or self.pgn_review:
             self._result_first_seen_at_ms = None
             return
         if self._result_first_seen_at_ms is None:
@@ -729,9 +775,6 @@ class Frontend(OnlineEventsMixin):
         if sq is None:
             return
         if self.board.dragging_from is not None:
-            # Right-click during a left-drag is reserved for premove chaining.
-            # Even if the chain extension is rejected, do not register the
-            # click as a highlight/arrow start.
             self.board.queue_premove_from_drag(sq)
             return
         self.board._right_drag_start_square = sq
@@ -750,7 +793,6 @@ class Frontend(OnlineEventsMixin):
             self.board.toggle_arrow(start, end)
 
     def mouse_left_clicked(self, pos):
-        # Click during the post-result fade fast-forwards into the modal.
         if (self.current_result() is not None
                 and self._result_first_seen_at_ms is not None
                 and not self._result_modal_should_show()):
