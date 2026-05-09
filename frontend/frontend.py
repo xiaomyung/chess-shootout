@@ -65,7 +65,7 @@ ONLINE_STATIC_RESULTS = {"aborted", "server_shutdown"}
 AUTO_FLIP_DELAY_MS = 200
 RESULT_FADE_MS = 400
 RESULT_MODAL_DELAY_MS = 500
-RESULT_FADE_MAX_ALPHA = 90
+RESULT_FADE_MAX_ALPHA = 140
 
 MIN_WINDOW_WIDTH = 900
 MIN_WINDOW_HEIGHT = 500
@@ -733,7 +733,7 @@ class Frontend:
         if alpha <= 0:
             return
         overlay = pg.Surface(self.window.get_size(), pg.SRCALPHA)
-        overlay.fill((96, 96, 96, alpha))
+        overlay.fill((0, 0, 0, alpha))
         self.window.blit(overlay, (0, 0))
 
     def _skip_result_fade(self):
