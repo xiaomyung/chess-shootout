@@ -153,6 +153,7 @@ class Frontend:
 
     def _on_back_to_menu(self):
         self.mode = "menu"
+        pg.display.set_caption("Chess")
         if self.online_client is not None:
             self.online_client.disconnect()
             self.online_client = None
@@ -400,6 +401,8 @@ class Frontend:
             self.manual_result = "aborted"
         elif reason == "server_shutdown":
             self.manual_result = "server_shutdown"
+        if self.manual_result is not None:
+            self._auto_save_online_pgn()
 
     def _on_rematch(self):
         if self.online_client is None:
@@ -407,9 +410,10 @@ class Frontend:
         self.online_client.send_rematch_request()
 
     def _start_online_game(self, payload):
-        log.info("game start as %s vs %s", payload.get("your_color"),
-                 payload.get("white_name") if payload.get("your_color") == "black"
-                 else payload.get("black_name"))
+        opp_name = (payload.get("white_name") if payload.get("your_color") == "black"
+                    else payload.get("black_name"))
+        log.info("game start as %s vs %s", payload.get("your_color"), opp_name)
+        pg.display.set_caption(f"Chess — vs {opp_name}")
         self.wait_modal.hide()
         self.confirm_modal.hide()
         self.manual_result = None
@@ -467,12 +471,20 @@ class Frontend:
         self._last_turn_for_flip = None
 
     def _on_save_pgn(self):
+        self._write_pgn(prefix="game")
+
+    def _auto_save_online_pgn(self):
+        if not self.match.move_history:
+            return
+        self._write_pgn(prefix="online")
+
+    def _write_pgn(self, prefix):
         result = self.current_result()
         if result is None:
             return
         games_dir = os.path.join(PROJECT_ROOT, "games")
         os.makedirs(games_dir, exist_ok=True)
-        filename = f"game-{datetime.now().strftime('%Y%m%d-%H%M%S')}.pgn"
+        filename = f"{prefix}-{datetime.now().strftime('%Y%m%d-%H%M%S')}.pgn"
         path = os.path.join(games_dir, filename)
         time_control = self._time_control
         termination = "Time forfeit" if result in TIMEOUT_RESULTS else None
