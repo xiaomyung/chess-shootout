@@ -62,8 +62,52 @@ class TextInput:
             if self.text:
                 self.text = self.text[:-1]
             return True
+        if event.key == pg.K_v and (event.mod & pg.KMOD_CTRL):
+            pasted = _paste_from_clipboard()
+            if pasted:
+                room = self.max_chars - len(self.text)
+                self.text += pasted[:room]
+            return True
         char = getattr(event, "unicode", "")
         if char and char.isprintable() and len(self.text) < self.max_chars:
             self.text += char
             return True
         return False
+
+
+def _paste_from_clipboard():
+    import shutil
+    import subprocess
+    candidates = [
+        ["wl-paste", "--no-newline"],
+        ["xclip", "-selection", "clipboard", "-o"],
+        ["xsel", "--clipboard", "--output"],
+        ["pbpaste"],
+    ]
+    for cmd in candidates:
+        if shutil.which(cmd[0]) is None:
+            continue
+        try:
+            result = subprocess.run(
+                cmd, capture_output=True, timeout=2, check=True,
+            )
+        except (subprocess.SubprocessError, OSError):
+            continue
+        try:
+            text = result.stdout.decode("utf-8", errors="replace")
+        except Exception:
+            continue
+        return _sanitise(text)
+    try:
+        pg.scrap.init()
+        raw = pg.scrap.get(pg.SCRAP_TEXT)
+        if raw is None:
+            return ""
+        return _sanitise(raw.decode("utf-8", errors="replace"))
+    except (pg.error, AttributeError):
+        return ""
+
+
+def _sanitise(text):
+    text = text.replace("\r\n", " ").replace("\n", " ").replace("\r", " ")
+    return "".join(ch for ch in text if ch.isprintable() or ch == " ").strip()

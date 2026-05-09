@@ -120,3 +120,61 @@ def test_draw_smoke_paths(ti):
     # Typed + unfocused: shows text.
     ti.focused = False
     ti.draw()
+
+
+def test_ctrl_v_pastes_clipboard_content(ti, monkeypatch):
+    monkeypatch.setattr(
+        "frontend.visual.text_input._paste_from_clipboard",
+        lambda: "pasted text",
+    )
+    ti.focused = True
+    event = pg.event.Event(
+        pg.KEYDOWN, {"key": pg.K_v, "unicode": "v", "mod": pg.KMOD_CTRL},
+    )
+    handled = ti.handle_key(event)
+    assert handled is True
+    assert ti.text == "pasted text"
+
+
+def test_ctrl_v_truncates_to_max_chars(monkeypatch):
+    inp = TextInput(pg.display.get_surface(), max_chars=5)
+    inp.set_rect(pg.Rect(0, 0, 200, 30))
+    inp.focused = True
+    monkeypatch.setattr(
+        "frontend.visual.text_input._paste_from_clipboard",
+        lambda: "abcdefghij",
+    )
+    event = pg.event.Event(
+        pg.KEYDOWN, {"key": pg.K_v, "unicode": "v", "mod": pg.KMOD_CTRL},
+    )
+    inp.handle_key(event)
+    assert inp.text == "abcde"
+
+
+def test_ctrl_v_appends_to_existing_text(ti, monkeypatch):
+    monkeypatch.setattr(
+        "frontend.visual.text_input._paste_from_clipboard",
+        lambda: "world",
+    )
+    ti.focused = True
+    ti.text = "hello "
+    event = pg.event.Event(
+        pg.KEYDOWN, {"key": pg.K_v, "unicode": "v", "mod": pg.KMOD_CTRL},
+    )
+    ti.handle_key(event)
+    assert ti.text == "hello world"
+
+
+def test_v_without_ctrl_just_types_v(ti):
+    ti.focused = True
+    event = pg.event.Event(
+        pg.KEYDOWN, {"key": pg.K_v, "unicode": "v", "mod": 0},
+    )
+    ti.handle_key(event)
+    assert ti.text == "v"
+
+
+def test_paste_strips_newlines_and_trims():
+    from frontend.visual.text_input import _sanitise
+    assert _sanitise("  rnbqkbnr/pppppppp\n  ") == "rnbqkbnr/pppppppp"
+    assert _sanitise("a\r\nb") == "a b"
