@@ -68,3 +68,19 @@ class FakeClock:
 
     def advance(self, dt):
         self.t += dt
+
+
+def fake_uuid4(seed):
+    """Build a deterministic UUID4-shaped string from an integer seed.
+
+    Useful in server tests where the protocol now demands UUID4 format but
+    we want short readable names. The result has version nibble = 4 and
+    variant nibble in {8,9,a,b}, so it satisfies the regex.
+    """
+    n = int(seed)
+    # 32 hex chars, then formatted with version + variant fixed.
+    hex_pad = f"{n:032x}"
+    return (
+        f"{hex_pad[0:8]}-{hex_pad[8:12]}-4{hex_pad[13:16]}-"
+        f"8{hex_pad[17:20]}-{hex_pad[20:32]}"
+    )

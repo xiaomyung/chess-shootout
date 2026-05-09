@@ -5,6 +5,10 @@ from server.protocol import (
     AuthMessage, ErrorMessage, GameStartMessage, MatchmakeRequest,
     MoveMessage, PROTOCOL_VERSION, normalize_nickname,
 )
+from tests.helpers import fake_uuid4
+
+
+U1 = fake_uuid4(1)
 
 
 def test_normalize_nickname_strips_and_collapses():
@@ -37,7 +41,7 @@ def test_normalize_nickname_accepts_printable_ascii():
 
 def test_matchmake_request_normalizes_nickname():
     req = MatchmakeRequest(
-        nickname="  Alice  ", client_uuid="u1",
+        nickname="  Alice  ", client_uuid=U1,
         time_minutes=5, increment_seconds=0,
     )
     assert req.nickname == "Alice"
@@ -46,14 +50,14 @@ def test_matchmake_request_normalizes_nickname():
 def test_matchmake_request_rejects_negative_time():
     with pytest.raises(ValidationError):
         MatchmakeRequest(
-            nickname="Alice", client_uuid="u1",
+            nickname="Alice", client_uuid=U1,
             time_minutes=-1, increment_seconds=0,
         )
 
 
 def test_matchmake_request_default_side_is_random():
     req = MatchmakeRequest(
-        nickname="Alice", client_uuid="u1",
+        nickname="Alice", client_uuid=U1,
         time_minutes=5, increment_seconds=0,
     )
     assert req.side_preference == "random"
@@ -62,7 +66,7 @@ def test_matchmake_request_default_side_is_random():
 def test_matchmake_request_rejects_bad_side():
     with pytest.raises(ValidationError):
         MatchmakeRequest(
-            nickname="Alice", client_uuid="u1",
+            nickname="Alice", client_uuid=U1,
             time_minutes=5, increment_seconds=0,
             side_preference="middle",
         )

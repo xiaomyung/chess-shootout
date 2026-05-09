@@ -7,6 +7,20 @@ from pydantic import BaseModel, Field, field_validator
 PROTOCOL_VERSION = 1
 MAX_NICKNAME_LEN = 20
 
+UUID4_RE = re.compile(
+    r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$",
+)
+
+
+def is_uuid4(value):
+    return isinstance(value, str) and bool(UUID4_RE.match(value))
+
+
+def _validate_uuid4(value, name):
+    if not is_uuid4(value):
+        raise ValueError(f"invalid_{name}")
+    return value
+
 
 class Reason:
     VERSION_MISMATCH = "version_mismatch"
@@ -17,6 +31,7 @@ class Reason:
     ALREADY_IN_GAME = "already_in_game"
     NOT_IN_ROOM = "not_in_room"
     ROOM_FULL = "room_full"
+    RATE_LIMITED = "rate_limited"
 
     CHECKMATE = "checkmate"
     RESIGNATION = "resignation"
@@ -73,6 +88,11 @@ class MatchmakeRequest(_Base):
     def _normalize(cls, v):
         return normalize_nickname(v)
 
+    @field_validator("client_uuid")
+    @classmethod
+    def _uuid4(cls, v):
+        return _validate_uuid4(v, "client_uuid")
+
     @field_validator("time_minutes", "increment_seconds")
     @classmethod
     def _non_negative(cls, v):
@@ -90,10 +110,20 @@ class CancelMatchmakeRequest(_Base):
     room_id: str
     session_token: str
 
+    @field_validator("room_id")
+    @classmethod
+    def _uuid4(cls, v):
+        return _validate_uuid4(v, "room_id")
+
 
 class ResumeRequest(_Base):
     room_id: str
     session_token: str
+
+    @field_validator("room_id")
+    @classmethod
+    def _uuid4(cls, v):
+        return _validate_uuid4(v, "room_id")
 
 
 class ResumeResponse(_Base):
@@ -110,6 +140,11 @@ class ResumeResponse(_Base):
 class ReclaimRequest(_Base):
     client_uuid: str
 
+    @field_validator("client_uuid")
+    @classmethod
+    def _uuid4(cls, v):
+        return _validate_uuid4(v, "client_uuid")
+
 
 class ReclaimResponse(_Base):
     room_id: str
@@ -118,7 +153,10 @@ class ReclaimResponse(_Base):
 
 class HealthResponse(BaseModel):
     status: str = "ok"
+    version: int = PROTOCOL_VERSION
     rooms_active: int
+    queue_depth: int = 0
+    uptime_s: float = 0.0
 
 
 class AuthMessage(_Base):

@@ -1,7 +1,7 @@
 import asyncio
 import json
 import time
-from collections import defaultdict
+from collections import defaultdict, deque
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
@@ -26,6 +26,7 @@ from server.protocol import (
     RematchRequestMessage, RematchResponseMessage,
     ResultMessage, ResumeRequest, ResumeResponse, TakebackAppliedMessage,
     TakebackOfferedMessage, TakebackResponseMessage,
+    is_uuid4,
 )
 from server.rooms import (
     AlreadyInGameError, FIRST_MOVE_ABORT_SECONDS, InvalidTokenError,
@@ -37,9 +38,32 @@ from server.rooms import (
 CLOCK_TICK_INTERVAL_SECONDS = 0.1
 MAX_INBOUND_MESSAGE_BYTES = 4096
 
+RECLAIM_PER_UUID_LIMIT_PER_MINUTE = 5
+RECLAIM_WINDOW_SECONDS = 60.0
+
 WS_CLOSE_PAYLOAD_TOO_LARGE = 1009
 WS_CLOSE_INVALID_TOKEN = 4000
 WS_CLOSE_SERVER_SHUTDOWN = 4002
+
+
+class UuidRateLimiter:
+
+    def __init__(self, limit_per_minute, window_seconds, now_provider=time.monotonic):
+        self.limit = limit_per_minute
+        self.window = window_seconds
+        self._now = now_provider
+        self._calls: dict[str, deque] = defaultdict(deque)
+
+    def hit(self, key):
+        now = self._now()
+        cutoff = now - self.window
+        d = self._calls[key]
+        while d and d[0] < cutoff:
+            d.popleft()
+        if len(d) >= self.limit:
+            return False
+        d.append(now)
+        return True
 
 log = logging_setup.get_logger("chess.server.app")
 
@@ -126,6 +150,11 @@ def create_app(*, now_provider=time.monotonic, max_rooms=100):
     rooms = RoomManager(now_provider=now_provider, max_rooms=max_rooms)
     connections = ConnectionRegistry()
     limiter = Limiter(key_func=get_remote_address)
+    reclaim_limiter = UuidRateLimiter(
+        RECLAIM_PER_UUID_LIMIT_PER_MINUTE, RECLAIM_WINDOW_SECONDS,
+        now_provider=now_provider,
+    )
+    started_at = now_provider()
 
     @asynccontextmanager
     async def lifespan(app):
@@ -148,6 +177,8 @@ def create_app(*, now_provider=time.monotonic, max_rooms=100):
     app.state.connections = connections
     app.state.limiter = limiter
     app.state.now = now_provider
+    app.state.started_at = started_at
+    app.state.reclaim_limiter = reclaim_limiter
 
     @app.exception_handler(RateLimitExceeded)
     async def _rate_limit_handler(request, exc):
@@ -159,7 +190,11 @@ def create_app(*, now_provider=time.monotonic, max_rooms=100):
 
     @app.get("/healthz", response_model=HealthResponse)
     async def healthz():
-        return HealthResponse(rooms_active=rooms.rooms_active)
+        return HealthResponse(
+            rooms_active=rooms.rooms_active,
+            queue_depth=rooms.queue_depth,
+            uptime_s=now_provider() - app.state.started_at,
+        )
 
     @app.post("/matchmake", response_model=MatchmakeResponse)
     @limiter.limit("10/minute")
@@ -242,6 +277,9 @@ def create_app(*, now_provider=time.monotonic, max_rooms=100):
     @app.post("/reclaim", response_model=ReclaimResponse)
     @limiter.limit("30/minute")
     async def post_reclaim(request: Request, body: ReclaimRequest):
+        if not reclaim_limiter.hit(body.client_uuid):
+            log.info("reclaim rate-limited uuid=%s", body.client_uuid[:8])
+            raise HTTPException(status_code=429, detail={"reason": Reason.RATE_LIMITED})
         log.info("reclaim request uuid=%s", body.client_uuid[:8])
         try:
             room, color, new_token = await rooms.reclaim_session(body.client_uuid)
@@ -257,6 +295,9 @@ def create_app(*, now_provider=time.monotonic, max_rooms=100):
 
     @app.websocket("/ws/{room_id}")
     async def ws_endpoint(websocket: WebSocket, room_id: str):
+        if not is_uuid4(room_id):
+            await websocket.close(code=WS_CLOSE_INVALID_TOKEN)
+            return
         await websocket.accept()
         await _ws_session(app, websocket, room_id)
 
