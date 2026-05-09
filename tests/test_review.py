@@ -430,26 +430,20 @@ def test_strip_state_captures_track_review_ply():
 
     # In live state white's captured list has 1 black pawn.
     state = app._strip_state(PieceColor.WHITE, app.backend.current_turn(), False)
-    captured_live = state[3]
-    advantage_live = state[4]
-    assert len(captured_live) == 1
-    assert advantage_live == 1
+    assert len(state["captured"]) == 1
+    assert state["advantage"] == 1
 
     # While reviewing ply 2 (after d5, before the capture) → no captures yet.
     app.board.review_ply = 2
     state = app._strip_state(PieceColor.WHITE, app.backend.current_turn(), False)
-    captured_at_2 = state[3]
-    advantage_at_2 = state[4]
-    assert captured_at_2 == []
-    assert advantage_at_2 == 0
+    assert state["captured"] == []
+    assert state["advantage"] == 0
 
     # Reviewing ply 3 (after the capture) → matches live.
     app.board.review_ply = 3
     state = app._strip_state(PieceColor.WHITE, app.backend.current_turn(), False)
-    captured_at_3 = state[3]
-    advantage_at_3 = state[4]
-    assert len(captured_at_3) == 1
-    assert advantage_at_3 == 1
+    assert len(state["captured"]) == 1
+    assert state["advantage"] == 1
 
 
 def test_active_row_highlight_in_live_mode_is_last_ply():

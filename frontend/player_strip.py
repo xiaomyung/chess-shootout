@@ -1,5 +1,6 @@
 import pygame as pg
 
+from frontend.clock_visual import INCREMENT_FLASH_MS, clock_pocket_color
 from frontend.colors import Colors
 
 
@@ -25,11 +26,13 @@ class PlayerStrip:
         self.rect = pg.Rect(0, 0, 0, 0)
         self.name = ""
         self.clock_seconds = None
+        self.clock_initial_seconds = None
         self.active = False
         self.captured = []
         self.advantage = 0
         self.captured_color = None
         self.connection_state = None
+        self._flash_until_ms = 0
         self.padding = 10
         self.pocket_inset = 4
         self.pocket_fraction = 0.28
@@ -51,14 +54,21 @@ class PlayerStrip:
         self.icons = icons
 
     def set_state(self, name, clock_seconds, active, captured=None, advantage=0,
-                  captured_color=None, connection_state=None):
+                  captured_color=None, connection_state=None,
+                  clock_initial_seconds=None):
         self.name = name
         self.clock_seconds = clock_seconds
+        self.clock_initial_seconds = clock_initial_seconds
         self.active = active
         self.captured = captured or []
         self.advantage = advantage
         self.captured_color = captured_color
         self.connection_state = connection_state
+
+    def flash_increment(self, now_ms=None):
+        if now_ms is None:
+            now_ms = pg.time.get_ticks()
+        self._flash_until_ms = now_ms + INCREMENT_FLASH_MS
 
     def draw(self):
         pg.draw.rect(self.window, Colors.dark_menu, self.rect, border_radius=4)
@@ -104,7 +114,18 @@ class PlayerStrip:
 
         self._draw_captures(name_region, name_x + name_surf.get_width())
 
-        pg.draw.rect(self.window, Colors.light_grey_menu, pocket_rect, border_radius=3)
+        pocket_color = clock_pocket_color(self._clock_fraction())
+        pg.draw.rect(self.window, pocket_color, pocket_rect, border_radius=3)
+
+        flash_alpha = self._increment_flash_alpha()
+        if flash_alpha > 0:
+            flash_color = pg.Color(Colors.clock_increment_flash)
+            flash_surface = pg.Surface(pocket_rect.size, pg.SRCALPHA)
+            flash_color.a = flash_alpha
+            pg.draw.rect(flash_surface, flash_color,
+                         flash_surface.get_rect(), border_radius=3)
+            self.window.blit(flash_surface, pocket_rect.topleft)
+
         clock_text = format_clock(self.clock_seconds)
         clock_surf = self.clock_font.render(clock_text, True, Colors.white)
         self.window.blit(
@@ -112,6 +133,23 @@ class PlayerStrip:
             (pocket_rect.centerx - clock_surf.get_width() / 2,
              pocket_rect.centery - clock_surf.get_height() / 2),
         )
+
+    def _clock_fraction(self):
+        if (self.clock_seconds is None or self.clock_initial_seconds is None
+                or self.clock_initial_seconds <= 0):
+            return None
+        return max(0.0, self.clock_seconds / self.clock_initial_seconds)
+
+    def _increment_flash_alpha(self, now_ms=None):
+        if self._flash_until_ms <= 0:
+            return 0
+        if now_ms is None:
+            now_ms = pg.time.get_ticks()
+        remaining = self._flash_until_ms - now_ms
+        if remaining <= 0:
+            return 0
+        progress = remaining / INCREMENT_FLASH_MS
+        return int(180 * max(0.0, min(1.0, progress)))
 
     def _draw_captures(self, name_region, start_x):
         if not self.captured or self.captured_color is None or not self.icons:

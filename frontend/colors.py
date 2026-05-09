@@ -14,3 +14,5 @@ class Colors:
     annotation_arrow = "#ff9f36c8"
     annotation_arrow_preview = "#ff9f3680"
     last_move = "#f7eb6580"
+    clock_low_time = "#7a1f1f"
+    clock_increment_flash = "#3aa54f"

@@ -624,6 +624,19 @@ class Frontend:
             self.sound_manager.play_capture(entry.move.piece.type)
         if entry.gives_check and not entry.gives_checkmate:
             self.sound_manager.play_check()
+        self._maybe_flash_increment_for(entry.move.piece.color)
+
+    def _maybe_flash_increment_for(self, mover_color):
+        clock = self.match.clock
+        if clock is None or clock.increment_seconds <= 0:
+            return
+        mover_strip = (self.player_strip_top
+                       if self._strip_color_top() == mover_color
+                       else self.player_strip_bottom)
+        mover_strip.flash_increment()
+
+    def _strip_color_top(self):
+        return PieceColor.WHITE if self.board.flipped else PieceColor.BLACK
 
     def run(self):
         while self.running:
@@ -681,8 +694,8 @@ class Frontend:
         bottom_color = PieceColor.BLACK if self.board.flipped else PieceColor.WHITE
         turn = self.match.current_turn()
         over = self.current_result() is not None
-        self.player_strip_top.set_state(*self._strip_state(top_color, turn, over))
-        self.player_strip_bottom.set_state(*self._strip_state(bottom_color, turn, over))
+        self.player_strip_top.set_state(**self._strip_state(top_color, turn, over))
+        self.player_strip_bottom.set_state(**self._strip_state(bottom_color, turn, over))
 
     def _maybe_play_flag_fall(self):
         if self._flag_fall_played or self.mode == "menu":
@@ -708,6 +721,8 @@ class Frontend:
         name = self.white_name if color == PieceColor.WHITE else self.black_name
         seconds = (self.match.clock.remaining(color)
                    if self.match.clock is not None else None)
+        initial_seconds = (self.match.clock.initial_seconds
+                           if self.match.clock is not None else None)
         active = (color == turn) and not over
         history = self.match.move_history
         if self.board.review_ply is not None:
@@ -719,8 +734,16 @@ class Frontend:
                 and self.match.local_color is not None
                 and color != self.match.local_color):
             connection_state = self.online_client.opp_state
-        return (name, seconds, active, captured, advantage,
-                opponent_of(color), connection_state)
+        return {
+            "name": name,
+            "clock_seconds": seconds,
+            "active": active,
+            "captured": captured,
+            "advantage": advantage,
+            "captured_color": opponent_of(color),
+            "connection_state": connection_state,
+            "clock_initial_seconds": initial_seconds,
+        }
 
     def _compute_layout(self):
         window_width, window_height = self.window.get_size()
