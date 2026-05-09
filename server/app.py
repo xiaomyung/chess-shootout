@@ -206,6 +206,8 @@ def create_app(*, now_provider=time.monotonic, max_rooms=100):
                 promotion=_promotion_letter(move),
                 san=entry.san,
             ))
+        if room.backend is not None:
+            room.backend.tick_clock()
         return ResumeResponse(
             fen=export_fen(room.backend),
             move_history=history,

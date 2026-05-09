@@ -2,6 +2,7 @@ import asyncio
 import logging
 import queue
 import threading
+from collections import deque
 from dataclasses import dataclass
 
 from frontend.online.transport import (
@@ -20,6 +21,8 @@ SERVER_FULL_RETRIES = 3
 SERVER_FULL_BACKOFF_SECONDS = 1.5
 RECONNECT_TOTAL_SECONDS = 60
 RECONNECT_INTERVAL_SECONDS = 2
+PING_INTERVAL_SECONDS = 5
+PING_SAMPLE_WINDOW = 5
 
 
 @dataclass
@@ -65,6 +68,12 @@ class OnlineClient:
         self.opp_state = "connected"
         self._in_queue = False
         self._game_active = False
+        self._ping_samples_ms = deque(maxlen=PING_SAMPLE_WINDOW)
+
+    def get_ping_ms(self):
+        if not self._ping_samples_ms:
+            return None
+        return int(round(sum(self._ping_samples_ms) / len(self._ping_samples_ms)))
 
     def connect(self, addr, request):
         self._addr = addr
@@ -191,8 +200,6 @@ class OnlineClient:
     async def _async_main_resume(self, resume_payload):
         log.info("reconnect-resume addr=%s room=%s", self._addr, self._room_id)
         self.state = "connecting"
-        self._inbound.put(Event("game_start", resume_payload))
-        self._inbound.put(Event("game_resumed", resume_payload))
         await self._run_session_with_reconnects()
 
     async def _async_main(self, request):
@@ -249,12 +256,12 @@ class OnlineClient:
             self.state = "disconnected"
 
     async def _resume_with_retries(self):
-        deadline = asyncio.get_event_loop().time() + RECONNECT_TOTAL_SECONDS
+        deadline = asyncio.get_running_loop().time() + RECONNECT_TOTAL_SECONDS
         body = ResumeRequest(
             room_id=self._room_id, session_token=self._session_token,
         )
         async with self._transport.make_async_http() as http:
-            while asyncio.get_event_loop().time() < deadline and not self._stop.is_set():
+            while asyncio.get_running_loop().time() < deadline and not self._stop.is_set():
                 try:
                     response = await self._transport.resume_async(body, http)
                 except FatalResumeError:
@@ -294,14 +301,17 @@ class OnlineClient:
         ws = await self._transport.ws_connect(self._room_id, self._session_token)
         self._ws = ws
         self.state = "connected"
+        self._ping_samples_ms.clear()
         recv_task = asyncio.create_task(self._recv_loop(ws))
         send_task = asyncio.create_task(self._send_loop(ws))
+        ping_task = asyncio.create_task(self._ping_loop(ws))
         try:
             await asyncio.wait({recv_task, send_task},
                                  return_when=asyncio.FIRST_COMPLETED)
         finally:
             recv_task.cancel()
             send_task.cancel()
+            ping_task.cancel()
             await ws.close()
             self._ws = None
 
@@ -335,5 +345,21 @@ class OnlineClient:
                     log.warning("unknown ws send method=%s", method)
                     continue
                 await send(*args)
+        except (WsConnectionClosed, asyncio.CancelledError):
+            pass
+
+    async def _ping_loop(self, ws):
+        try:
+            while not self._stop.is_set():
+                await asyncio.sleep(PING_INTERVAL_SECONDS)
+                try:
+                    pong_waiter = await ws.ping()
+                    latency_s = await pong_waiter
+                except (WsConnectionClosed, asyncio.CancelledError):
+                    raise
+                except Exception as exc:
+                    log.debug("ping failed: %r", exc)
+                    continue
+                self._ping_samples_ms.append(latency_s * 1000.0)
         except (WsConnectionClosed, asyncio.CancelledError):
             pass

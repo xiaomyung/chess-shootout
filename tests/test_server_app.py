@@ -311,3 +311,37 @@ async def test_grace_expiry_yields_abandonment(app, clock):
     clock.advance(61)
     await _sweep(app)
     assert room.result == (Reason.ABANDONMENT, "black")
+
+
+@pytest.mark.asyncio
+async def test_resume_ticks_clock_before_snapshotting(app, client, clock):
+    # /resume must reflect elapsed time as of the request — not the value
+    # from the last 0.1 s sweep tick. Without an explicit tick before the
+    # snapshot, the response can lag the truth by up to a sweep interval,
+    # and a slow client (or a scheduler hiccup) can stretch that further.
+    random.seed(0)
+    rooms = app.state.rooms
+    await rooms.enqueue(client_uuid=ALICE, nickname="A", session_token="ta",
+                        time_minutes=5, increment_seconds=0, side_preference="white")
+    await rooms.enqueue(client_uuid=BOB, nickname="B", session_token="tb",
+                        time_minutes=5, increment_seconds=0, side_preference="black")
+    room = list(rooms._active.values())[0]
+    room.started_at = clock()
+    room.first_move_at = clock()
+    # White is to move; setup_clock starts the white clock at the current
+    # FakeClock instant. Advancing the clock by 7 s without firing a sweep
+    # leaves room.backend.clock.white_remaining stale at 300.0 — until the
+    # /resume handler ticks it.
+    initial_white = room.backend.clock.white_remaining
+    clock.advance(7)
+    r = client.post("/resume", json={
+        "version": PROTOCOL_VERSION,
+        "room_id": room.room_id,
+        "session_token": "ta",
+    })
+    assert r.status_code == 200
+    snap = r.json()["clock"]
+    # Stale snapshot would have been initial_white (300.0). Fresh tick
+    # subtracts the 7 s the FakeClock advanced.
+    assert snap["white_remaining"] == pytest.approx(initial_white - 7, abs=0.01)
+    assert snap["running_for"] == "white"
