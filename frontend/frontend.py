@@ -748,35 +748,23 @@ class Frontend(OnlineEventsMixin):
     def _compute_game_info_lines(self):
         if self.mode == "menu":
             return None
-        count_tc = self._format_move_count_and_tc()
+        tc = self._format_time_control() or "no clock"
         if self.pgn_review:
             result = self._pgn_result_tag or "*"
-            return ["Review", count_tc, result]
+            return ["Review", f"{result}  ·  {tc}"]
         if self.mode == ONLINE:
             names = f"{self.white_name}  vs  {self.black_name}"
-            return [names, count_tc, self._series_score_text(),
+            return [names, f"{self._series_score_text()}  ·  {tc}",
                     self._format_ping_line()]
         if self.mode == BOT:
-            return ["vs Bot (preview)", count_tc]
-        return ["Local game", count_tc]
+            return ["vs Bot (preview)", tc]
+        return ["Local game", tc]
 
     def _format_time_control(self):
         if self._time_control is None:
             return None
         initial, incr = self._time_control
         return f"{int(initial // 60)}+{int(incr)}"
-
-    def _current_move_number(self):
-        if self.board.review_ply is not None:
-            ply = self.board.review_ply
-        else:
-            ply = len(self.match.move_history)
-        return (ply // 2) + 1
-
-    def _format_move_count_and_tc(self):
-        move = f"Move {self._current_move_number()}"
-        tc = self._format_time_control() or "no clock"
-        return f"{move}  ·  {tc}"
 
     def _format_ping_line(self):
         ping = (self.online_client.get_ping_ms()

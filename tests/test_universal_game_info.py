@@ -39,21 +39,18 @@ def _start_local(app, time_minutes=5, incr=2):
 # ---------- single-screen ----------
 
 def test_single_screen_lines():
-    # Row 2 carries both move count and game time in the new shared layout —
-    # same convention across local / bot / online / pgn-review.
+    # Local mode has no series concept, so row 2 is just the time control.
     app = _make_app()
     _start_local(app)
     lines = app._compute_game_info_lines()
-    assert lines == ["Local game", "Move 1  ·  5+2"]
+    assert lines == ["Local game", "5+2"]
 
 
 def test_single_screen_no_clock_lines():
-    # No time control still occupies the row — collapsed to "no clock" so
-    # the layout stays a stable two-column "<count> · <time>" shape.
     app = _make_app()
     _start_local(app, time_minutes=None, incr=0)
     lines = app._compute_game_info_lines()
-    assert lines == ["Local game", "Move 1  ·  no clock"]
+    assert lines == ["Local game", "no clock"]
 
 
 # ---------- bot mode ----------
@@ -64,12 +61,15 @@ def test_bot_mode_lines():
     app._time_control = (180, 0)
     lines = app._compute_game_info_lines()
     assert lines[0] == "vs Bot (preview)"
-    assert lines[1] == "Move 1  ·  3+0"
+    assert lines[1] == "3+0"
 
 
 # ---------- online mode (series score) ----------
 
 def test_online_initial_series_zero_zero():
+    # Online combines series score and time control on row 2 so the panel
+    # reads "Alice vs Bob / 0 - 0 · 3+2 / ping: —" — three lines instead
+    # of four, more compact use of vertical space.
     app = _make_app()
     app.mode = ONLINE
     app.white_name = "Alice"
@@ -77,11 +77,8 @@ def test_online_initial_series_zero_zero():
     app._time_control = (180, 2)
     lines = app._compute_game_info_lines()
     assert lines[0] == "Alice  vs  Bob"
-    assert lines[1] == "Move 1  ·  3+2"
-    assert lines[2] == "0 - 0"
-    # Online gets a fourth line for the live ping; with no client attached
-    # yet we render the "—" placeholder.
-    assert lines[3] == "ping: —"
+    assert lines[1] == "0 - 0  ·  3+2"
+    assert lines[2] == "ping: —"
 
 
 @pytest.mark.parametrize(
@@ -104,7 +101,7 @@ def test_series_score_formatting(white_score, black_score, expected):
     app._series_white_score = white_score
     app._series_black_score = black_score
     lines = app._compute_game_info_lines()
-    assert lines[2] == expected
+    assert lines[1] == f"{expected}  ·  1+0"
 
 
 def test_series_resets_when_opponent_pair_changes():
@@ -171,12 +168,14 @@ def test_aborted_does_not_change_series():
 # ---------- pgn review ----------
 
 def test_pgn_review_uses_pgn_result_tag():
+    # PGN review treats the result tag as the "count" — combined with TC on
+    # the same row, mirroring the online "score · TC" layout.
     app = _make_app()
     _start_local(app)
     app._pgn_result_tag = "1-0"
     app.pgn_review = True
     lines = app._compute_game_info_lines()
-    assert "1-0" in lines
+    assert lines == ["Review", "1-0  ·  5+2"]
 
 
 def test_pgn_review_falls_back_to_star_when_no_tag():
@@ -185,7 +184,7 @@ def test_pgn_review_falls_back_to_star_when_no_tag():
     app._pgn_result_tag = None
     app.pgn_review = True
     lines = app._compute_game_info_lines()
-    assert "*" in lines
+    assert lines == ["Review", "*  ·  5+2"]
 
 
 def test_pgn_review_inline_result_suppresses_modal():
@@ -203,45 +202,6 @@ def test_menu_mode_returns_no_lines():
     assert app._compute_game_info_lines() is None
 
 
-# ---------- move count advances after each ply ----------
-
-def test_move_count_advances_after_each_ply():
-    # ply 0 → Move 1 (white about to play move 1)
-    # ply 1 → Move 1 (black about to reply on move 1)
-    # ply 2 → Move 2 (white about to play move 2), etc.
-    from backend.utils import Square
-    app = _make_app()
-    _start_local(app)
-    assert "Move 1  ·" in app._compute_game_info_lines()[1]
-    app.board.handle_click(Square(6, 4))
-    app.board.handle_click(Square(4, 4))
-    app.board.cancel_animations()
-    assert "Move 1  ·" in app._compute_game_info_lines()[1]
-    app.board.handle_click(Square(1, 4))
-    app.board.handle_click(Square(3, 4))
-    app.board.cancel_animations()
-    assert "Move 2  ·" in app._compute_game_info_lines()[1]
-
-
-def test_pgn_review_uses_review_ply_for_count():
-    # In PGN review, the count reflects the position currently shown, not the
-    # full game length.
-    from backend.utils import Square
-    app = _make_app()
-    _start_local(app)
-    for fr, to in [(Square(6, 4), Square(4, 4)),
-                   (Square(1, 4), Square(3, 4)),
-                   (Square(7, 6), Square(5, 5))]:
-        app.board.handle_click(fr)
-        app.board.handle_click(to)
-        app.board.cancel_animations()
-    app.pgn_review = True
-    app.board.review_ply = 1
-    assert "Move 1  ·" in app._compute_game_info_lines()[1]
-    app.board.review_ply = 2
-    assert "Move 2  ·" in app._compute_game_info_lines()[1]
-
-
 # ---------- online ping line ----------
 
 def test_online_ping_line_shows_value_when_client_has_samples():
@@ -254,7 +214,7 @@ def test_online_ping_line_shows_value_when_client_has_samples():
     fake.get_ping_ms.return_value = 42
     app.online_client = fake
     lines = app._compute_game_info_lines()
-    assert lines[3] == "ping: 42 ms"
+    assert lines[2] == "ping: 42 ms"
 
 
 def test_online_ping_line_dash_when_no_samples():
@@ -267,7 +227,7 @@ def test_online_ping_line_dash_when_no_samples():
     fake.get_ping_ms.return_value = None
     app.online_client = fake
     lines = app._compute_game_info_lines()
-    assert lines[3] == "ping: —"
+    assert lines[2] == "ping: —"
 
 
 # ---------- right_menu set_game_info accepts list ----------
