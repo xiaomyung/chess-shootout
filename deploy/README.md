@@ -141,12 +141,59 @@ sudo chown chess:chess /var/log/chess-server.log
 ### 5. Caddy + DNS
 
 Point an `A` (and optionally `AAAA`) record for your hostname at the
-VPS, then:
+VPS, then **append** the chess site block to your existing
+`/etc/caddy/Caddyfile` (don't overwrite — Debian's default already has
+a `:80` static-file block you may want to keep, and Caddy supports
+multiple site blocks in one file):
 
 ```bash
-sudo cp /opt/chess/repo/deploy/Caddyfile.example /etc/caddy/Caddyfile
+sudo tee -a /etc/caddy/Caddyfile < /opt/chess/repo/deploy/Caddyfile.example > /dev/null
 sudo sed -i 's/chess.example.com/your-actual-domain.com/' /etc/caddy/Caddyfile
 ```
+
+If you don't want the default `:80` static-file site, comment that
+block out manually after appending — Caddy will just not serve it.
+
+#### Cloudflare proxied (recommended for security)
+
+If your DNS is on Cloudflare, putting `chess.your-domain.com` behind
+the orange cloud (proxied) is the recommended setup — origin IP
+hidden, edge DDoS mitigation, free WAF rules, plus the app-level
+caps. Steps in the Cloudflare dashboard for your zone:
+
+1. **DNS → Records** — add `A` (and optionally `AAAA`) for `chess`,
+   pointing at the VPS, **proxy status = Proxied** (orange cloud).
+2. **SSL/TLS → Overview → Encryption Mode = Full (strict).** Anything
+   weaker (Flexible, Full) makes the edge↔origin link spoofable. Caddy
+   serves a Let's Encrypt cert that satisfies (strict).
+3. **SSL/TLS → Edge Certificates → Always Use HTTPS = ON.**
+4. **Network → WebSockets = ON** (default; verify).
+5. **Security → Bots → Bot Fight Mode = ON** (free).
+
+Cloudflare's WebSocket idle timeout is 100 seconds — our server already
+sends ping frames every 20s (`ws_ping_interval=20` in
+`server/app.py`), well under the cap.
+
+Optionally restrict origin firewall to Cloudflare IP ranges only so
+attackers can't bypass the proxy by hitting your VPS IP directly:
+
+```bash
+# Make sure SSH is allowed BEFORE enabling the firewall.
+sudo ufw allow ssh
+
+# Allow 80/443 only from Cloudflare's published IPv4 ranges.
+for cidr in $(curl -s https://www.cloudflare.com/ips-v4); do
+    sudo ufw allow from "$cidr" to any port 80 proto tcp
+    sudo ufw allow from "$cidr" to any port 443 proto tcp
+done
+
+sudo ufw default deny incoming
+sudo ufw enable
+```
+
+(Cloudflare's IPv4 ranges change rarely — once or twice a year. If
+you want to be tidy, re-run the loop on update; otherwise current
+rules keep working.)
 
 ### 6. Start everything
 
