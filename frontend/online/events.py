@@ -17,6 +17,24 @@ ONLINE_DRAW_REASONS = {
 }
 ONLINE_STATIC_RESULTS = {"aborted", "server_shutdown"}
 
+ONLINE_HARD_FAILURE_REASONS = {
+    "server_unreachable", "reconnect_failed", "room_full",
+}
+
+ONLINE_HARD_FAILURE_LABELS = {
+    "server_unreachable": "Server unreachable",
+    "reconnect_failed": "Could not reconnect",
+    "room_full": "Server is full",
+}
+
+ONLINE_TRANSIENT_REASON_LABELS = {
+    "rate_limited": "Slow down a bit",
+    "draw_offer_already_pending": "Draw offer already pending",
+    "takeback_already_pending": "Takeback already pending",
+    "no_takeback_available": "Nothing to take back",
+    "rematch_already_pending": "Rematch already requested",
+}
+
 
 class OnlineEventsMixin:
 
@@ -33,7 +51,7 @@ class OnlineEventsMixin:
         if event.type == "matchmake_response":
             return
         elif event.type == "game_start":
-            self._start_online_game(event.payload)
+            self._begin_match_found_transition(event.payload)
         elif event.type == "move_applied":
             self._handle_remote_move_applied(event.payload)
         elif event.type == "result":
@@ -59,20 +77,31 @@ class OnlineEventsMixin:
         elif event.type == "connection_status":
             return
         elif event.type == "error":
-            reason = event.payload.get("reason", "")
-            game_state_reasons = {
-                "not_your_turn", "invalid_move_format", "invalid_message",
-                "version_mismatch",
-            }
-            if reason in game_state_reasons:
-                return
+            self._handle_online_error(event.payload)
+
+    def _handle_online_error(self, payload):
+        reason = payload.get("reason", "")
+        game_state_reasons = {
+            "not_your_turn", "invalid_move_format", "invalid_message",
+            "version_mismatch",
+        }
+        if reason in game_state_reasons:
+            return
+        if reason in ONLINE_HARD_FAILURE_REASONS or reason.startswith("http_"):
             self.wait_modal.hide()
+            label = ONLINE_HARD_FAILURE_LABELS.get(reason, "Server unreachable")
             self.confirm_modal.show(
-                reason or "Server unreachable",
+                label,
                 on_yes=lambda: self._on_server_addr_connect(env.get_server_addr()),
                 on_no=self._on_online_cancel,
                 yes_label="Retry", no_label="Cancel",
             )
+            return
+        if reason:
+            label = ONLINE_TRANSIENT_REASON_LABELS.get(reason, reason)
+            self.toast.show(label)
+        else:
+            self.toast.show("Server error")
 
     def _show_opp_offer_modal(self, title, send_response):
         self.confirm_modal.show(
@@ -156,6 +185,15 @@ class OnlineEventsMixin:
                 self.sound_manager.play_flag_fall()
             self._auto_save_online_pgn()
 
+    def _begin_match_found_transition(self, payload):
+        import pygame as pg
+        if self._pending_game_start_payload is not None:
+            return
+        self._pending_game_start_payload = payload
+        self._match_found_at_ms = pg.time.get_ticks()
+        self.wait_modal.set_subtitle("Match found!")
+        self.sound_manager.play_online_game_start()
+
     def _start_online_game(self, payload):
         import pygame as pg
         opp_name = (payload.get("white_name") if payload.get("your_color") == "black"
@@ -184,7 +222,6 @@ class OnlineEventsMixin:
             self._series_black_score = 0.0
         self._reset_to_new_game()
         self.board.flipped = self._online_initial_flip
-        self.sound_manager.play_online_game_start()
 
     def _on_local_move_applied(self, from_sq, to_sq, promotion):
         if self.online_client is None:

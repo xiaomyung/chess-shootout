@@ -59,18 +59,6 @@ class ConfirmModal:
         pg.draw.rect(self.window, Colors.light_grey_menu, rect, border_radius=8)
         pg.draw.rect(self.window, Colors.button_border, rect, 2, border_radius=8)
 
-        title_band = pg.Rect(
-            rect.x + self.padding, rect.y + self.padding * 2,
-            rect.width - 2 * self.padding, int(rect.height * 0.35),
-        )
-        title_surf = fit_text_to_rect(
-            self.title_font.render(self.title, True, Colors.white), title_band,
-        )
-        self.window.blit(
-            title_surf,
-            (rect.centerx - title_surf.get_width() / 2, title_band.y),
-        )
-
         gap = self.padding
         btn_h = max(rect.height * 0.22, 28)
         row_rect = pg.Rect(
@@ -78,6 +66,22 @@ class ConfirmModal:
             rect.bottom - gap - btn_h,
             rect.width - 2 * gap,
             btn_h,
+        )
+
+        text_top = rect.y + self.padding
+        text_bottom = row_rect.y - gap
+        text_height = max(text_bottom - text_top, 1)
+        title_band = pg.Rect(
+            rect.x + self.padding, text_top,
+            rect.width - 2 * self.padding, text_height,
+        )
+        title_surf = fit_text_to_rect(
+            self.title_font.render(self.title, True, Colors.white), title_band,
+        )
+        self.window.blit(
+            title_surf,
+            (rect.centerx - title_surf.get_width() / 2,
+             text_top + (text_height - title_surf.get_height()) / 2),
         )
         self.button_rects = draw_button_row(
             self.window,

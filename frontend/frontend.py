@@ -16,6 +16,7 @@ from frontend.modals.confirm import ConfirmModal
 from frontend.modals.file_picker import FilePicker
 from frontend.modals.fen_input import FenInputModal
 from frontend.modals.help import HelpModal
+from frontend.modals.reconnecting import ReconnectingModal
 from frontend.visual.toast import Toast
 from frontend.online.client import OnlineClient, fetch_resume, probe_active_game
 from frontend.online.events import OnlineEventsMixin
@@ -106,8 +107,20 @@ RESULT_FADE_MS = 400
 RESULT_MODAL_DELAY_MS = 500
 RESULT_FADE_MAX_ALPHA = 140
 
+ANIM_MS_DEFAULT = 180
+ANIM_MS_MIN = 140
+ANIM_MS_MAX = 280
+
+MATCH_FOUND_HOLD_MS = 500
+
 MIN_WINDOW_WIDTH = 900
 MIN_WINDOW_HEIGHT = 500
+
+
+def compute_animation_ms(initial_seconds):
+    if initial_seconds is None or initial_seconds <= 0:
+        return ANIM_MS_DEFAULT
+    return max(ANIM_MS_MIN, min(ANIM_MS_MAX, int(initial_seconds * 0.5)))
 
 log = logging.getLogger("chess.frontend")
 
@@ -175,6 +188,10 @@ class Frontend(OnlineEventsMixin):
         self._last_saved_pgn_path = None
         self.server_modal = ServerAddressModal(self.window)
         self.wait_modal = WaitModal(self.window)
+        self.reconnecting_modal = ReconnectingModal(self.window)
+        self._wait_started_at_ms = None
+        self._match_found_at_ms = None
+        self._pending_game_start_payload = None
         self.online_client = None
         self.player_strip_top = PlayerStrip(self.window)
         self.player_strip_bottom = PlayerStrip(self.window)
@@ -388,6 +405,9 @@ class Frontend(OnlineEventsMixin):
         }
         self.online_client.connect(addr, request)
         self.wait_modal.show("Searching for opponent…", self._on_online_cancel)
+        self._wait_started_at_ms = pg.time.get_ticks()
+        self._match_found_at_ms = None
+        self._pending_game_start_payload = None
 
     def _on_online_cancel(self):
         log.info("online flow cancel")
@@ -398,6 +418,9 @@ class Frontend(OnlineEventsMixin):
         self.right_menu.set_game_info(None)
         self.server_modal.hide()
         self.wait_modal.hide()
+        self._wait_started_at_ms = None
+        self._match_found_at_ms = None
+        self._pending_game_start_payload = None
         self.mode = "menu"
         self.start_menu.show()
 
@@ -405,6 +428,46 @@ class Frontend(OnlineEventsMixin):
         if self.online_client is None:
             return
         self.online_client.send_rematch_request()
+
+    def _abandon_online_game(self):
+        log.info("abandoning online game (reconnect cancelled)")
+        if self.online_client is not None:
+            self.online_client.disconnect()
+            self.online_client = None
+        self.reconnecting_modal.hide()
+        self.match.on_local_move_applied = None
+        self.right_menu.set_game_info(None)
+        self.result_menu.set_online_mode(False)
+        self.match.mode = SINGLE_SCREEN
+        self.match.local_color = None
+        self.mode = "menu"
+        pg.display.set_caption("Chess")
+        self._reset_to_new_game()
+        self._refresh_load_pgn_availability()
+        self.start_menu.show()
+
+    def _update_online_phase(self):
+        if self.wait_modal.is_visible() and self._match_found_at_ms is None:
+            if self._wait_started_at_ms is not None:
+                elapsed = (pg.time.get_ticks() - self._wait_started_at_ms) // 1000
+                mm = elapsed // 60
+                ss = elapsed % 60
+                self.wait_modal.set_subtitle(f"{mm:02d}:{ss:02d}")
+        if (self._match_found_at_ms is not None
+                and self._pending_game_start_payload is not None
+                and pg.time.get_ticks() - self._match_found_at_ms >= MATCH_FOUND_HOLD_MS):
+            payload = self._pending_game_start_payload
+            self._pending_game_start_payload = None
+            self._match_found_at_ms = None
+            self._wait_started_at_ms = None
+            self._start_online_game(payload)
+        if (self.online_client is not None
+                and self.online_client.state == "reconnecting"):
+            if not self.reconnecting_modal.is_visible():
+                self.reconnecting_modal.show(on_cancel=self._abandon_online_game)
+        else:
+            if self.reconnecting_modal.is_visible():
+                self.reconnecting_modal.hide()
 
 
     def _right_menu_buttons(self):
@@ -431,6 +494,9 @@ class Frontend(OnlineEventsMixin):
         if self._time_control is not None:
             initial, incr = self._time_control
             self.match.setup_clock(initial, incr)
+            self.board.animation_duration_ms = compute_animation_ms(initial)
+        else:
+            self.board.animation_duration_ms = ANIM_MS_DEFAULT
         self.board.flipped = False
         self.board.selected_square = None
         self.board.pending_promotion_square = None
@@ -594,6 +660,9 @@ class Frontend(OnlineEventsMixin):
         pg.quit()
 
     def draw_frame(self):
+        if getattr(self, "_last_layout_mode", None) != self.mode:
+            self._compute_layout()
+
         if self.mode != "menu" and self.current_result() is None:
             self.match.tick_clock()
 
@@ -618,8 +687,8 @@ class Frontend(OnlineEventsMixin):
                 and post_animation_settled):
             self.board.try_apply_next_premove()
 
-        self.board.draw_board()
         if self.mode != "menu":
+            self.board.draw_board()
             self._update_player_strips()
             self._refresh_game_info()
             self.player_strip_top.draw()
@@ -636,10 +705,12 @@ class Frontend(OnlineEventsMixin):
         self.file_picker.draw()
         self.server_modal.draw()
         self.wait_modal.draw()
+        self.reconnecting_modal.draw()
         self.help_modal.draw()
         self.fen_input_modal.draw()
         self.toast.draw()
         self._drain_online_inbound()
+        self._update_online_phase()
 
     def _refresh_game_info(self):
         self.right_menu.set_game_info(self._compute_game_info_lines())
@@ -796,14 +867,27 @@ class Frontend(OnlineEventsMixin):
             wait_height,
         )
 
-        start_width = board_size_px * 0.7
-        start_height = board_size_px * 0.7
+        start_width = min(window_width * 0.55, board_size_px * 0.85)
+        start_height = min(window_height * 0.85, board_size_px * 0.95)
         start_rect = pg.Rect(
-            board_x + board_size_px / 2 - start_width / 2,
-            board_y + board_size_px / 2 - start_height / 2,
+            window_width / 2 - start_width / 2,
+            window_height / 2 - start_height / 2,
             start_width,
             start_height
         )
+
+        menu_modal_width = min(start_width, max(result_width, 360))
+        menu_modal_height = min(start_height, max(cell_size * 1.6, 200))
+        menu_modal_rect = pg.Rect(
+            window_width / 2 - menu_modal_width / 2,
+            window_height / 2 - menu_modal_height / 2,
+            menu_modal_width,
+            menu_modal_height,
+        )
+
+        board_visible = self.mode != "menu"
+        flex_rect = wait_rect if board_visible else menu_modal_rect
+        result_modal_rect = result_rect if board_visible else menu_modal_rect
 
         menu_rect = pg.Rect(
             board_rect.right,
@@ -834,13 +918,15 @@ class Frontend(OnlineEventsMixin):
         )
         self.board.set_rect(board_rect)
         self.result_menu.set_rect(result_rect)
-        self.confirm_modal.set_rect(result_rect)
-        self.server_modal.set_rect(result_rect)
-        self.wait_modal.set_rect(wait_rect)
+        self.confirm_modal.set_rect(result_modal_rect)
+        self.server_modal.set_rect(flex_rect)
+        self.wait_modal.set_rect(flex_rect)
+        self.reconnecting_modal.set_rect(flex_rect)
         self.file_picker.set_rect(start_rect)
         self.start_menu.set_rect(start_rect)
         self.help_modal.set_rect(result_rect)
-        self.fen_input_modal.set_rect(result_rect)
+        self.fen_input_modal.set_rect(flex_rect)
+        self._last_layout_mode = self.mode
         self.right_menu.set_rect(menu_rect)
         self.player_strip_top.set_rect(top_strip_rect)
         self.player_strip_bottom.set_rect(bottom_strip_rect)
@@ -903,6 +989,10 @@ class Frontend(OnlineEventsMixin):
         if self.wait_modal.handle_click(pos):
             return
         if self.wait_modal.is_visible():
+            return
+        if self.reconnecting_modal.handle_click(pos):
+            return
+        if self.reconnecting_modal.is_visible():
             return
         if self.mode == "menu":
             self.start_menu.handle_click(pos)
@@ -1028,6 +1118,8 @@ class Frontend(OnlineEventsMixin):
                 if self.server_modal.is_visible():
                     continue
                 if self.wait_modal.is_visible():
+                    continue
+                if self.reconnecting_modal.is_visible():
                     continue
                 if self.fen_input_modal.is_visible():
                     self.fen_input_modal.handle_key(event)
