@@ -72,8 +72,9 @@ def test_get_or_create_client_uuid_returns_existing(monkeypatch):
 
 
 def test_get_or_create_client_uuid_honors_override():
-    env.set_overrides(client_uuid="cli-override")
-    assert env.get_or_create_client_uuid() == "cli-override"
+    canonical = "00000000-0000-4000-8000-000000000099"
+    env.set_overrides(client_uuid=canonical)
+    assert env.get_or_create_client_uuid() == canonical
 
 
 def test_set_last_mode_persists_to_env_file():
@@ -193,3 +194,28 @@ def test_persist_appends_new_key_when_absent():
     assert "# only a comment" in contents
     assert "CHESS_LAST_MODE=online" in contents
     assert "CHESS_MASTER_VOLUME=0.500" in contents
+
+
+def test_set_overrides_passes_uuid4_through_unchanged():
+    canonical = "00000000-0000-4000-8000-000000000001"
+    env.set_overrides(client_uuid=canonical)
+    assert env._uuid_override == canonical
+
+
+def test_set_overrides_coerces_short_alias_to_uuid4():
+    # The CLI shortcut `--client-uuid alice` used to produce a 422 against
+    # the new server-side UUID4 validator. Coerce short aliases into a
+    # deterministic UUID4 so the debug shortcut still works.
+    env.set_overrides(client_uuid="alice")
+    from server.protocol import is_uuid4
+    assert is_uuid4(env._uuid_override)
+
+
+def test_set_overrides_coercion_is_deterministic_per_alias():
+    env.set_overrides(client_uuid="alice")
+    a1 = env._uuid_override
+    env.set_overrides(client_uuid="alice")
+    a2 = env._uuid_override
+    assert a1 == a2
+    env.set_overrides(client_uuid="bob")
+    assert env._uuid_override != a1
