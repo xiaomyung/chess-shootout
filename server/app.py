@@ -38,6 +38,10 @@ MAX_INBOUND_MESSAGE_BYTES = 4096
 RECLAIM_PER_UUID_LIMIT_PER_MINUTE = 5
 RECLAIM_WINDOW_SECONDS = 60.0
 
+MATCHMAKE_PER_IP_LIMIT = "60/minute"
+RESUME_PER_IP_LIMIT = "60/minute"
+RECLAIM_PER_IP_LIMIT = "120/minute"
+
 WS_MESSAGES_PER_SECOND = 30
 WS_RATE_WINDOW_SECONDS = 1.0
 
@@ -135,7 +139,7 @@ def create_app(*, now_provider=time.monotonic, max_rooms=100):
         )
 
     @app.post("/matchmake", response_model=MatchmakeResponse)
-    @limiter.limit("10/minute")
+    @limiter.limit(MATCHMAKE_PER_IP_LIMIT)
     async def post_matchmake(request: Request, body: MatchmakeRequest):
         log.info("matchmake nickname=%s uuid=%s tc=%s+%s side=%s",
                  body.nickname, body.client_uuid[:8],
@@ -179,7 +183,7 @@ def create_app(*, now_provider=time.monotonic, max_rooms=100):
         return {"status": "ok"}
 
     @app.post("/resume", response_model=ResumeResponse)
-    @limiter.limit("30/minute")
+    @limiter.limit(RESUME_PER_IP_LIMIT)
     async def post_resume(request: Request, body: ResumeRequest):
         log.info("resume request room=%s", body.room_id)
         room = rooms.get(body.room_id)
@@ -214,7 +218,7 @@ def create_app(*, now_provider=time.monotonic, max_rooms=100):
         )
 
     @app.post("/reclaim", response_model=ReclaimResponse)
-    @limiter.limit("30/minute")
+    @limiter.limit(RECLAIM_PER_IP_LIMIT)
     async def post_reclaim(request: Request, body: ReclaimRequest):
         if not reclaim_limiter.hit(body.client_uuid):
             log.info("reclaim rate-limited uuid=%s", body.client_uuid[:8])

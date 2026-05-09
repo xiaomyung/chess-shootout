@@ -242,3 +242,4 @@ class ConnectionStatusMessage(_Base):
 class ErrorMessage(_Base):
     type: Literal["error"] = "error"
     reason: str
+    msg_type: Optional[str] = None

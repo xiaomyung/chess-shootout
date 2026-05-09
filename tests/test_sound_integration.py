@@ -120,6 +120,29 @@ def test_undo_with_manual_result_does_not_play_undo():
     app.sound_manager.play_undo.assert_not_called()
 
 
+def test_takeback_applied_plays_undo_sound():
+    # Online flow: opponent accepted our takeback request, server replies
+    # with takeback_applied. The sound should play just like a local undo.
+    app = make_app()
+    app._on_start_game(base_config(time_minutes=None))
+    app.board.handle_click(Square(6, 4))
+    app.board.handle_click(Square(4, 4))
+    app.board.cancel_animations()
+    app.sound_manager.reset_mock()
+    app._handle_takeback_applied({"clock": {}})
+    app.sound_manager.play_undo.assert_called_once()
+
+
+def test_takeback_applied_with_empty_history_does_not_play_undo():
+    # If somehow takeback_applied arrives with no history (edge case during
+    # rapid disconnect), don't fire the rewind sound for nothing.
+    app = make_app()
+    app._on_start_game(base_config(time_minutes=None))
+    app.sound_manager.reset_mock()
+    app._handle_takeback_applied({"clock": {}})
+    app.sound_manager.play_undo.assert_not_called()
+
+
 # ---------- Move-landed dispatch ----------
 
 def fire_animation(app):

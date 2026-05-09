@@ -274,9 +274,42 @@ def test_unknown_transient_reason_falls_through_to_raw_label(frontend):
 
 
 def test_game_state_errors_produce_neither_modal_nor_toast(frontend):
+    # Bare not_your_turn without an originating msg_type stays silent
+    # (covers the move-race case where the client already gates by turn
+    # and the server's reply is just defensive).
     frontend._handle_online_error({"reason": "not_your_turn"})
     assert not frontend.confirm_modal.is_visible()
     assert not frontend.toast.is_visible()
+
+
+def test_not_your_turn_for_draw_offer_shows_toast(frontend):
+    # When the user clicked Draw while it wasn't their turn, the server's
+    # not_your_turn reply is tagged with msg_type=draw_offer — friendly
+    # toast explains why the action was rejected.
+    frontend._handle_online_error(
+        {"reason": "not_your_turn", "msg_type": "draw_offer"},
+    )
+    assert frontend.toast.is_visible()
+    assert "draw" in frontend.toast.message.lower()
+    assert not frontend.confirm_modal.is_visible()
+
+
+def test_not_your_turn_for_takeback_request_shows_toast(frontend):
+    frontend._handle_online_error(
+        {"reason": "not_your_turn", "msg_type": "takeback_request"},
+    )
+    assert frontend.toast.is_visible()
+    assert "take back" in frontend.toast.message.lower()
+
+
+def test_not_your_turn_with_unknown_msg_type_stays_silent(frontend):
+    # Future-proof: a msg_type the client doesn't recognise falls through
+    # silently rather than echoing a raw engine code at the user.
+    frontend._handle_online_error(
+        {"reason": "not_your_turn", "msg_type": "weird_action"},
+    )
+    assert not frontend.toast.is_visible()
+    assert not frontend.confirm_modal.is_visible()
 
 
 def test_hard_failure_set_is_well_formed():

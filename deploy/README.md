@@ -110,11 +110,3 @@ ws dispatch room=… uuid=… type=draw_offer latency_ms=0.2 outcome=offered
 ```
 
 UUIDs are truncated to 8 chars in every log line.
-
-## Out of scope (v1)
-
-- Docker / k8s
-- Multi-instance scaling (in-memory rooms don't shard)
-- Persistent game-history database
-- Metrics scraping (Prometheus)
-- Centralized log shipping
