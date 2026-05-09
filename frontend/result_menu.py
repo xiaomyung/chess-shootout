@@ -1,11 +1,17 @@
 import pygame as pg
 
 from frontend.colors import Colors
-from frontend.widgets import draw_button_row
+from frontend.widgets import draw_button_row, fit_text_to_rect
 
 
 BUTTONS = [
     ("New Game", "new_game"),
+    ("Save PGN", "save_pgn"),
+    ("Menu", "menu"),
+]
+
+ONLINE_BUTTONS = [
+    ("Rematch", "rematch"),
     ("Save PGN", "save_pgn"),
     ("Menu", "menu"),
 ]
@@ -16,6 +22,7 @@ class ResultMenu:
     def __init__(self, window, callbacks):
         self.window = window
         self.callbacks = callbacks
+        self.online_mode = False
         self.x = 0
         self.y = 0
         self.width = 0
@@ -65,10 +72,18 @@ class ResultMenu:
         pg.draw.rect(self.window, Colors.light_grey_menu, rect, border_radius=8)
         pg.draw.rect(self.window, Colors.button_border, rect, 2, border_radius=8)
 
-        title_surf = self.title_font.render(self.title, True, Colors.white)
-        reason_surf = self.reason_font.render(self.reason, True, Colors.white)
+        text_band = pg.Rect(
+            rect.x + self.padding, rect.y + self.padding * 2,
+            rect.width - 2 * self.padding, int(rect.height * 0.45),
+        )
+        title_surf = fit_text_to_rect(
+            self.title_font.render(self.title, True, Colors.white), text_band,
+        )
+        reason_surf = fit_text_to_rect(
+            self.reason_font.render(self.reason, True, Colors.white), text_band,
+        )
 
-        title_y = rect.y + self.padding * 2
+        title_y = text_band.y
         reason_y = title_y + title_surf.get_height() + 4
 
         self.window.blit(title_surf, (rect.centerx - title_surf.get_width() / 2, title_y))
@@ -85,6 +100,9 @@ class ResultMenu:
                 return True
         return False
 
+    def set_online_mode(self, online):
+        self.online_mode = online
+
     def _draw_buttons(self, rect):
         gap = self.padding
         btn_h = max(rect.height * 0.18, 28)
@@ -94,6 +112,7 @@ class ResultMenu:
             rect.width - 2 * gap,
             btn_h,
         )
+        buttons = ONLINE_BUTTONS if self.online_mode else BUTTONS
         self.button_rects = draw_button_row(
-            self.window, row_rect, BUTTONS, self.button_font, gap,
+            self.window, row_rect, buttons, self.button_font, gap,
         )

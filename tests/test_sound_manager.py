@@ -54,16 +54,34 @@ def test_loads_per_piece_capture_sounds(manager):
     for pt in (PieceType.PAWN, PieceType.KNIGHT, PieceType.BISHOP,
                PieceType.ROOK, PieceType.QUEEN, PieceType.KING):
         assert pt in manager._capture_sounds
-        assert manager._capture_sounds[pt] is not None
+        assert len(manager._capture_sounds[pt]) >= 1
 
 
-def test_each_piece_capture_sound_is_distinct(manager):
-    # Six unique Sound objects (one per piece type), no aliasing.
-    sounds = [manager._capture_sounds[pt] for pt in (
+def test_each_piece_capture_first_variant_is_distinct(manager):
+    # First variant of each piece must be a distinct Sound (no aliasing).
+    sounds = [manager._capture_sounds[pt][0] for pt in (
         PieceType.PAWN, PieceType.KNIGHT, PieceType.BISHOP,
         PieceType.ROOK, PieceType.QUEEN, PieceType.KING,
     )]
     assert len(set(id(s) for s in sounds)) == 6
+
+
+def test_king_capture_loads_multiple_variants(manager):
+    assert len(manager._capture_sounds[PieceType.KING]) >= 2
+
+
+def test_capture_pack_dir_takes_precedence_over_single_file(tmp_path):
+    capture_dir = tmp_path / "capture_sounds"
+    capture_dir.mkdir()
+    # Build a fake variant pack dir AND a single-file fallback for "pawn_shot".
+    pack = capture_dir / "pawn_shot"
+    pack.mkdir()
+    real_king = SOUNDS_DIR / "capture_sounds" / "king_capture" / "01.mp3"
+    (pack / "01.mp3").write_bytes(real_king.read_bytes())
+    (pack / "02.mp3").write_bytes(real_king.read_bytes())
+    (capture_dir / "pawn_shot.mp3").write_bytes(real_king.read_bytes())
+    sm = SoundManager(tmp_path, mild_channel=MagicMock(), deep_channel=MagicMock())
+    assert len(sm._capture_sounds[PieceType.PAWN]) == 2
 
 
 def test_capture_sounds_loaded_from_capture_sounds_subdir(tmp_path):
@@ -122,26 +140,39 @@ def test_play_check_picks_from_reloads(manager):
 
 def test_play_capture_pawn():
     sm = SoundManager(SOUNDS_DIR, mild_channel=MagicMock(), deep_channel=MagicMock())
-    sm._capture_sounds[PieceType.PAWN] = MagicMock()
+    target = MagicMock()
+    sm._capture_sounds[PieceType.PAWN] = [target]
     sm.play_capture(PieceType.PAWN)
-    sm._capture_sounds[PieceType.PAWN].play.assert_called_once_with(fade_ms=ONESHOT_FADE_MS)
+    target.play.assert_called_once_with(fade_ms=ONESHOT_FADE_MS)
 
 
 def test_play_capture_each_piece_picks_right_sound():
     sm = SoundManager(SOUNDS_DIR, mild_channel=MagicMock(), deep_channel=MagicMock())
+    targets = {}
     for pt in (PieceType.PAWN, PieceType.KNIGHT, PieceType.BISHOP,
                PieceType.ROOK, PieceType.QUEEN, PieceType.KING):
-        sm._capture_sounds[pt] = MagicMock()
-    for pt in (PieceType.PAWN, PieceType.KNIGHT, PieceType.BISHOP,
-               PieceType.ROOK, PieceType.QUEEN, PieceType.KING):
+        targets[pt] = MagicMock()
+        sm._capture_sounds[pt] = [targets[pt]]
+    for pt, target in targets.items():
         sm.play_capture(pt)
-        sm._capture_sounds[pt].play.assert_called_once_with(fade_ms=ONESHOT_FADE_MS)
+        target.play.assert_called_once_with(fade_ms=ONESHOT_FADE_MS)
+
+
+def test_play_capture_king_random_choice_picks_from_variants():
+    sm = SoundManager(SOUNDS_DIR, mild_channel=MagicMock(), deep_channel=MagicMock())
+    variants = sm._capture_sounds[PieceType.KING]
+    assert len(variants) >= 2
+    chosen = MagicMock()
+    with patch.object(random, "choice", return_value=chosen) as mock_choice:
+        sm.play_capture(PieceType.KING)
+    mock_choice.assert_called_once_with(variants)
+    chosen.play.assert_called_once_with(fade_ms=ONESHOT_FADE_MS)
 
 
 def test_play_capture_unknown_piece_falls_back_to_first():
     sm = SoundManager(SOUNDS_DIR, mild_channel=MagicMock(), deep_channel=MagicMock())
     fallback = MagicMock()
-    sm._capture_sounds = {PieceType.PAWN: fallback}
+    sm._capture_sounds = {PieceType.PAWN: [fallback]}
     sm.play_capture(None)
     fallback.play.assert_called_once_with(fade_ms=ONESHOT_FADE_MS)
 
@@ -150,6 +181,17 @@ def test_play_capture_no_sounds_no_op():
     sm = SoundManager(SOUNDS_DIR, mild_channel=MagicMock(), deep_channel=MagicMock())
     sm._capture_sounds = {}
     sm.play_capture(PieceType.PAWN)  # no raise
+
+
+def test_play_random_helper_noop_when_empty(manager):
+    manager._play_random([])  # must not raise; nothing plays
+
+
+def test_play_random_helper_noop_when_disabled():
+    sm = SoundManager(SOUNDS_DIR, enabled=False)
+    target = MagicMock()
+    sm._play_random([target])
+    target.play.assert_not_called()
 
 
 def test_play_checkmate(manager):

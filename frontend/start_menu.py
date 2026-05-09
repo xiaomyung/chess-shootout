@@ -1,6 +1,7 @@
 import pygame as pg
 
 from backend.match import SINGLE_SCREEN, BOT, ONLINE
+from frontend import env
 from frontend.colors import Colors
 from frontend.text_input import TextInput
 from frontend.widgets import draw_button, draw_selector
@@ -50,8 +51,10 @@ class StartMenu:
         self.title = "Chess"
 
         self.text_input = TextInput(window)
+        self.text_input.text = env.get_nickname()
 
-        self.selected_mode = SINGLE_SCREEN
+        last_mode = env.get_last_mode()
+        self.selected_mode = last_mode if last_mode in (SINGLE_SCREEN, BOT, ONLINE) else SINGLE_SCREEN
         self.selected_time_minutes = 10
         self.selected_increment_seconds = 5
         self.selected_side = "white"
@@ -64,9 +67,10 @@ class StartMenu:
         self._outer = pg.Rect(0, 0, 0, 0)
         self._title_pos = (0, 0)
         self._input_rect = pg.Rect(0, 0, 0, 0)
-        self._section_label_y = [0, 0, 0, 0]
-        self._section_selector_rect = [pg.Rect(0, 0, 0, 0) for _ in range(4)]
+        self._section_label_ys = [0, 0, 0, 0]
+        self._section_selector_rects = [pg.Rect(0, 0, 0, 0) for _ in range(4)]
         self._load_pgn_rect = pg.Rect(0, 0, 0, 0)
+        self._reconnect_rect = pg.Rect(0, 0, 0, 0)
         self._start_rect = pg.Rect(0, 0, 0, 0)
 
         self._section_rects_by_key = {
@@ -78,6 +82,14 @@ class StartMenu:
 
         self.row_gap = 6
         self.load_pgn_available = False
+        self.reconnect_available = False
+
+    def set_reconnect_available(self, available):
+        if self.reconnect_available == available:
+            return
+        self.reconnect_available = available
+        if self._outer.width > 0:
+            self.set_rect(self._outer)
 
     def set_rect(self, rect):
         self._outer = pg.Rect(rect)
@@ -127,8 +139,8 @@ class StartMenu:
 
         block_y = sections_top
         for i in range(block_count):
-            self._section_label_y[i] = block_y
-            self._section_selector_rect[i] = pg.Rect(
+            self._section_label_ys[i] = block_y
+            self._section_selector_rects[i] = pg.Rect(
                 inner_x,
                 block_y + section_label_h + section_label_to_selector_gap,
                 inner_w,
@@ -137,11 +149,23 @@ class StartMenu:
             block_y += block_h + inter_block_gap
 
         gap = self.row_gap
-        half_w = (inner_w - gap) // 2
-        self._load_pgn_rect = pg.Rect(inner_x, start_y, half_w, start_h)
-        self._start_rect = pg.Rect(
-            inner_x + half_w + gap, start_y, inner_w - half_w - gap, start_h,
-        )
+        if self.reconnect_available:
+            third_w = (inner_w - 2 * gap) // 3
+            self._load_pgn_rect = pg.Rect(inner_x, start_y, third_w, start_h)
+            self._reconnect_rect = pg.Rect(
+                inner_x + third_w + gap, start_y, third_w, start_h,
+            )
+            self._start_rect = pg.Rect(
+                inner_x + 2 * (third_w + gap), start_y,
+                inner_w - 2 * (third_w + gap), start_h,
+            )
+        else:
+            half_w = (inner_w - gap) // 2
+            self._load_pgn_rect = pg.Rect(inner_x, start_y, half_w, start_h)
+            self._reconnect_rect = pg.Rect(0, 0, 0, 0)
+            self._start_rect = pg.Rect(
+                inner_x + half_w + gap, start_y, inner_w - half_w - gap, start_h,
+            )
 
     @property
     def _mode_rects(self):
@@ -199,14 +223,16 @@ class StartMenu:
 
         draw_button(self.window, self._load_pgn_rect, "Load PGN", self.start_font,
                     disabled=not self.load_pgn_available)
+        if self.reconnect_available:
+            draw_button(self.window, self._reconnect_rect, "Reconnect", self.start_font)
         draw_button(self.window, self._start_rect, "Start Game", self.start_font)
 
     def _draw_section(self, idx, label, options, selected_key, attr):
         label_surf = self.label_font.render(label, True, Colors.white)
-        x = self._section_selector_rect[idx].x
-        self.window.blit(label_surf, (x, self._section_label_y[idx]))
+        x = self._section_selector_rects[idx].x
+        self.window.blit(label_surf, (x, self._section_label_ys[idx]))
         rects = draw_selector(
-            self.window, self._section_selector_rect[idx], options,
+            self.window, self._section_selector_rects[idx], options,
             self.button_font, gap=self.row_gap, selected_key=selected_key,
         )
         self._section_rects_by_key[attr] = rects
@@ -229,6 +255,11 @@ class StartMenu:
         if self._load_pgn_rect.collidepoint(pos):
             if self.load_pgn_available and "load_pgn" in self.callbacks:
                 self.callbacks["load_pgn"]()
+            return True
+
+        if self.reconnect_available and self._reconnect_rect.collidepoint(pos):
+            if "reconnect" in self.callbacks:
+                self.callbacks["reconnect"]()
             return True
 
         if self._start_rect.collidepoint(pos):

@@ -40,9 +40,12 @@ class RightMenu:
 
         self.outer_rect = pg.Rect(0, 0, 0, 0)
         self.moves_rect = pg.Rect(0, 0, 0, 0)
+        self.info_rect = pg.Rect(0, 0, 0, 0)
         self.buttons_rect = pg.Rect(0, 0, 0, 0)
         self.audio_rect = pg.Rect(0, 0, 0, 0)
         self.button_rects = {}
+        self.game_info = None
+        self._last_outer_rect = None
 
         self.scroll_offset = 0
         self._total_rows = 0
@@ -68,6 +71,7 @@ class RightMenu:
             rect.x + p, rect.y + p,
             rect.width - 2 * p, rect.height - 2 * p,
         )
+        self._last_outer_rect = pg.Rect(rect)
 
         button_row_h = self.button_font.get_height() + 2 * self.button_v_pad
         inner_w = self.outer_rect.width - 2 * p
@@ -87,16 +91,28 @@ class RightMenu:
             button_row_h,
         )
 
-        moves_h = max(self.buttons_rect.y - self.outer_rect.y - 2 * p, 0)
-        self.moves_rect = pg.Rect(
-            self.outer_rect.x + p,
-            self.outer_rect.y + p,
-            inner_w,
-            moves_h,
-        )
+        info_h = self._info_section_height()
+        info_y = self.outer_rect.y + p
+        self.info_rect = pg.Rect(self.outer_rect.x + p, info_y, inner_w, info_h)
+
+        moves_top = info_y + info_h + (small_gap if info_h > 0 else 0)
+        moves_h = max(self.buttons_rect.y - moves_top - p, 0)
+        self.moves_rect = pg.Rect(self.outer_rect.x + p, moves_top, inner_w, moves_h)
+
+    def _info_section_height(self):
+        if self.game_info is None:
+            return 0
+        return self.font.get_linesize() * 3 + self.padding
+
+    def set_game_info(self, info):
+        self.game_info = info
+        if self._last_outer_rect is not None:
+            self.set_rect(self._last_outer_rect)
 
     def draw_menu(self):
         pg.draw.rect(self.window, Colors.dark_menu, self.outer_rect)
+        if self.game_info is not None and self.info_rect.height > 0:
+            self._draw_game_info(self.info_rect)
         pg.draw.rect(self.window, Colors.light_grey_menu, self.moves_rect)
         self._draw_moves(self.moves_rect)
         self._draw_scroll_indicator(self.moves_rect)
@@ -104,6 +120,25 @@ class RightMenu:
         if self.audio_panel is not None:
             self.audio_panel.set_rect(self.audio_rect)
             self.audio_panel.draw()
+
+    def _draw_game_info(self, rect):
+        info = self.game_info
+        line_h = self.font.get_linesize()
+        names = f"{info.get('white_name', '?')}  vs  {info.get('black_name', '?')}"
+        time_control = info.get("time_minutes", 0), info.get("increment_seconds", 0)
+        tc_line = f"{time_control[0]} min + {time_control[1]} sec"
+        ping_ms = info.get("ping_ms")
+        ping_line = f"ping: {ping_ms} ms" if ping_ms is not None else "ping: —"
+        for i, line in enumerate((names, tc_line, ping_line)):
+            surf = self.font.render(line, True, Colors.white)
+            max_w = rect.width - 2 * self.padding
+            if surf.get_width() > max_w > 0:
+                surf = surf.subsurface(pg.Rect(0, 0, max_w, surf.get_height()))
+            self.window.blit(
+                surf,
+                (rect.x + (rect.width - surf.get_width()) // 2,
+                 rect.y + i * line_h),
+            )
 
     def handle_click(self, pos):
         for key, rect in self.button_rects.items():

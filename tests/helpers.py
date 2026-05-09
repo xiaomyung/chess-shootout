@@ -55,3 +55,16 @@ def play_moves(backend, moves):
         last = backend.try_move(from_sq, to_sq)
         assert last.legal, f"Move {from_sq} -> {to_sq} was rejected"
     return last
+
+
+class FakeClock:
+    """Monotonic clock stand-in for server-room/app tests. Advances explicitly."""
+
+    def __init__(self):
+        self.t = 0.0
+
+    def __call__(self):
+        return self.t
+
+    def advance(self, dt):
+        self.t += dt

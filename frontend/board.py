@@ -6,7 +6,7 @@ import pygame as pg
 from backend.utils import Square
 from frontend.animation import PieceAnimation
 from frontend.colors import Colors
-from frontend.premoves import Premove, is_premove_shape_valid, speculative_board
+from frontend.premoves import Premove, speculative_board
 from backend.pieces import PieceType, PieceColor, Piece
 
 
@@ -51,6 +51,7 @@ class Board:
         self._press_pos = None
         self.dragging_from = None
         self._drag_cursor = None
+        self._drag_chain_tip = None
         self.review_ply = None
         self._target_ply = None
         self.read_only = False
@@ -66,8 +67,8 @@ class Board:
             for i in range(self.SIZE)
         ]
         self.rank_labels_rendered = [
-            self.font.render(str(i + 1), True, Colors.white)
-            for i in range(self.SIZE)
+            self.font.render(str(self.SIZE - r), True, Colors.white)
+            for r in range(self.SIZE)
         ]
 
     def _load_piece_images(self):
@@ -125,20 +126,20 @@ class Board:
         pg.draw.rect(self.window, color, rect)
 
     def _draw_vertical_guides(self):
-        for row in range(self.SIZE):
-            rect = self._cell_rect(row, 0)
-            symbol = self.rank_labels_rendered[row]
-            x = rect.left + self.text_padding
-            y = rect.top + self.text_padding
-            self.window.blit(symbol, (x, y))
+        for visual_row in range(self.SIZE):
+            array_row = (self.SIZE - 1 - visual_row) if self.flipped else visual_row
+            x = self.board_offset_x + self.text_padding
+            y = visual_row * self.cell_size + self.board_offset_y + self.text_padding
+            self.window.blit(self.rank_labels_rendered[array_row], (x, y))
 
     def _draw_horizontal_guides(self):
-        bottom_row = self.SIZE - 1
-        for col in range(self.SIZE):
-            rect = self._cell_rect(bottom_row, col)
-            symbol = self.file_labels_rendered[col]
-            x = rect.right - symbol.get_width() - self.text_padding
-            y = rect.bottom - symbol.get_height() - self.text_padding
+        bottom_y = (self.SIZE - 1) * self.cell_size + self.board_offset_y
+        for visual_col in range(self.SIZE):
+            array_col = (self.SIZE - 1 - visual_col) if self.flipped else visual_col
+            symbol = self.file_labels_rendered[array_col]
+            x = (visual_col * self.cell_size + self.board_offset_x
+                 + self.cell_size - symbol.get_width() - self.text_padding)
+            y = bottom_y + self.cell_size - symbol.get_height() - self.text_padding
             self.window.blit(symbol, (x, y))
 
     def draw_board(self):
@@ -502,6 +503,7 @@ class Board:
         if dx * dx + dy * dy < DRAG_THRESHOLD_PX * DRAG_THRESHOLD_PX:
             return
         self.dragging_from = self.selected_square
+        self._drag_chain_tip = self.selected_square
         self._drag_cursor = pos
 
     def end_press(self):
@@ -509,7 +511,26 @@ class Board:
         self._press_pos = None
         self.dragging_from = None
         self._drag_cursor = None
+        self._drag_chain_tip = None
         return was_dragging
+
+    def queue_premove_from_drag(self, target_sq):
+        if self.read_only or self.review_ply is not None:
+            return False
+        if self._drag_chain_tip is None or target_sq == self._drag_chain_tip:
+            return False
+        if self.pending_promotion_square is not None:
+            return False
+        grid = self._effective_grid()
+        piece = grid[self._drag_chain_tip.row][self._drag_chain_tip.col]
+        if piece is None:
+            return False
+        local_color = getattr(self.match, "local_color", None)
+        if local_color is not None and piece.color != local_color:
+            return False
+        self._queue_premove(self._drag_chain_tip, target_sq, piece)
+        self._drag_chain_tip = target_sq
+        return True
 
     def cell_at(self, pos):
         x, y = pos
@@ -538,10 +559,15 @@ class Board:
         piece_at_clicked = grid[square.row][square.col]
         live_at_clicked = self.match.state[square.row][square.col]
         current_turn = self.match.current_turn()
+        local_color = getattr(self.match, "local_color", None)
 
         if self.selected_square is None:
-            if (live_at_clicked is not None
-                    and live_at_clicked.color == current_turn):
+            chain_piece = self._premove_chain_piece(
+                piece_at_clicked, live_at_clicked, current_turn, local_color)
+            if chain_piece is not None:
+                self._try_select_for_premove(square, chain_piece)
+                return
+            if self._is_real_move_eligible(live_at_clicked, current_turn, local_color):
                 self._try_select(square)
                 return
             if piece_at_clicked is None:
@@ -567,18 +593,43 @@ class Board:
         from_sq = self.selected_square
         self.selected_square = None
         live_from_piece = self.match.state[from_sq.row][from_sq.col]
-        if (live_from_piece is not None
-                and live_from_piece.color == current_turn):
+        spec_from_piece = grid[from_sq.row][from_sq.col]
+        chain_from_piece = self._premove_chain_piece(
+            spec_from_piece, live_from_piece, current_turn, local_color)
+        if chain_from_piece is not None:
+            self._queue_premove(from_sq, square, chain_from_piece)
+            return
+        if self._is_real_move_eligible(live_from_piece, current_turn, local_color):
             result = self.match.try_move(from_sq, square)
             if not result.legal:
                 return
             self._start_move_animation(from_sq, square, result.promotion_required)
             return
 
-        selected_piece = grid[from_sq.row][from_sq.col]
-        if selected_piece is None:
+        if spec_from_piece is None:
             return
-        self._queue_premove(from_sq, square, selected_piece)
+        self._queue_premove(from_sq, square, spec_from_piece)
+
+    @staticmethod
+    def _is_real_move_eligible(live_piece, current_turn, local_color):
+        if live_piece is None or live_piece.color != current_turn:
+            return False
+        if local_color is not None and live_piece.color != local_color:
+            return False
+        return True
+
+    def _premove_chain_piece(self, spec_piece, live_piece, current_turn, local_color):
+        if self.premove_color is None or spec_piece is None:
+            return None
+        if local_color is None or local_color != self.premove_color:
+            return None
+        if current_turn == local_color:
+            return None
+        if spec_piece.color != self.premove_color:
+            return None
+        if live_piece is not None and live_piece.color == self.premove_color:
+            return None
+        return spec_piece
 
     def _effective_grid(self):
         if not self.premoves:
@@ -609,7 +660,7 @@ class Board:
         self.selected_square = square
 
     def _queue_premove(self, from_sq, to_sq, piece):
-        if not is_premove_shape_valid(piece, from_sq, to_sq):
+        if from_sq == to_sq:
             return
         if self.premove_color is not None and self.premove_color != piece.color:
             self._clear_premoves()
@@ -636,6 +687,9 @@ class Board:
             self.premove_color = None
         self._start_move_animation(pm.from_sq, pm.to_sq, result.promotion_required)
         return True
+
+    def animate_remote_move(self, from_sq, to_sq):
+        self._start_move_animation(from_sq, to_sq, promotion_required=False)
 
     def _start_move_animation(self, from_sq, to_sq, promotion_required):
         self.review_ply = None

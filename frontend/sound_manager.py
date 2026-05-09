@@ -28,12 +28,12 @@ STATE_DEEP = "deep"
 ONESHOT_FADE_MS = 20
 
 CAPTURE_SOUND_BY_PIECE = {
-    PieceType.PAWN: "pawn_shot.mp3",
-    PieceType.KNIGHT: "knight_shot.mp3",
-    PieceType.BISHOP: "bishop_shot.mp3",
-    PieceType.ROOK: "rook_shot.mp3",
-    PieceType.QUEEN: "queen_shot.mp3",
-    PieceType.KING: "king_shot.mp3",
+    PieceType.PAWN: "pawn_shot",
+    PieceType.KNIGHT: "knight_shot",
+    PieceType.BISHOP: "bishop_shot",
+    PieceType.ROOK: "rook_shot",
+    PieceType.QUEEN: "queen_shot",
+    PieceType.KING: "king_capture",
 }
 
 
@@ -88,11 +88,20 @@ class SoundManager:
     def _load_capture_sounds(self, sounds_dir):
         result = {}
         capture_dir = sounds_dir / "capture_sounds"
-        for piece_type, filename in CAPTURE_SOUND_BY_PIECE.items():
-            sound = self._safe_load(capture_dir / filename)
-            if sound is not None:
-                result[piece_type] = sound
+        for piece_type, name in CAPTURE_SOUND_BY_PIECE.items():
+            variants = self._load_variant_pack(capture_dir, name)
+            if variants:
+                result[piece_type] = variants
         return result
+
+    def _load_variant_pack(self, parent, name):
+        pack_dir = parent / name
+        if pack_dir.is_dir():
+            variants = self._load_variants(pack_dir)
+            if variants:
+                return variants
+        single = self._safe_load(parent / f"{name}.mp3")
+        return [single] if single is not None else []
 
     def _build_deep_variants(self, source_path):
         if not source_path.exists():
@@ -156,24 +165,22 @@ class SoundManager:
         sound.set_volume(self.master_volume)
         sound.play(fade_ms=ONESHOT_FADE_MS)
 
-    def play_move(self):
-        if not self.enabled or not self._piece_move_sounds:
+    def _play_random(self, sounds):
+        if not self.enabled or not sounds:
             return
-        self._play_with_master(random.choice(self._piece_move_sounds))
+        self._play_with_master(random.choice(sounds))
+
+    def play_move(self):
+        self._play_random(self._piece_move_sounds)
 
     def play_check(self):
-        if not self.enabled or not self._reload_sounds:
-            return
-        self._play_with_master(random.choice(self._reload_sounds))
+        self._play_random(self._reload_sounds)
 
     def play_capture(self, piece_type=None):
-        if not self.enabled:
-            return
-        sound = self._capture_sounds.get(piece_type)
-        if sound is None and self._capture_sounds:
-            sound = next(iter(self._capture_sounds.values()))
-        if sound is not None:
-            self._play_with_master(sound)
+        variants = self._capture_sounds.get(piece_type)
+        if not variants and self._capture_sounds:
+            variants = next(iter(self._capture_sounds.values()))
+        self._play_random(variants or [])
 
     def play_checkmate(self):
         self._play_one_shot("checkmate")

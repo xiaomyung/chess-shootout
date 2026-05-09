@@ -1,0 +1,16 @@
+# Caddy 2.x config for the chess server.
+#
+# 1. Replace `chess.example.com` with your actual hostname.
+# 2. Point your DNS A/AAAA record at the VPS.
+# 3. Place this file at /etc/caddy/Caddyfile (or include it).
+# 4. Caddy obtains a Let's Encrypt cert automatically on first run.
+# 5. WebSocket Upgrade is forwarded by reverse_proxy by default.
+
+chess.example.com {
+    reverse_proxy localhost:8000
+    encode zstd gzip
+    log {
+        output file /var/log/caddy/chess-access.log
+        format console
+    }
+}

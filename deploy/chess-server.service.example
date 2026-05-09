@@ -1,0 +1,27 @@
+# systemd unit for the chess multiplayer server.
+#
+# 1. Copy to /etc/systemd/system/chess-server.service and edit paths.
+# 2. Create /etc/chess-server.env with at least: HOST=127.0.0.1, PORT=8000,
+#    LOG_LEVEL=INFO, MAX_ROOMS=100.
+# 3. systemctl daemon-reload && systemctl enable --now chess-server
+# 4. Caddy reverse-proxies localhost:8000 to public 443 (see Caddyfile.example).
+
+[Unit]
+Description=Chess multiplayer server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=chess
+Group=chess
+WorkingDirectory=/opt/chess
+EnvironmentFile=/etc/chess-server.env
+ExecStart=/opt/chess/.venv/bin/python -m server
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

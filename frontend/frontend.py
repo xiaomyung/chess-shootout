@@ -1,17 +1,25 @@
 import glob
+import logging
 import os
 import random
+import threading
 from datetime import datetime
 
 import pygame as pg
 
+from backend.fen import apply_fen
 from backend.match import Match, SINGLE_SCREEN, BOT, ONLINE
+from backend.utils import PROMO_TYPE_BY_LETTER, coord_from_square, square_from_coord
+from frontend import env
 from frontend.audio_panel import AudioPanel
 from frontend.board import Board
 from frontend.capture_summary import captured_by, material_advantage
 from frontend.confirm_modal import ConfirmModal
 from frontend.file_picker import FilePicker
+from frontend.online_client import OnlineClient, fetch_resume, probe_active_game
 from frontend.player_strip import PlayerStrip
+from frontend.server_modal import ServerAddressModal
+from frontend.wait_modal import WaitModal
 from frontend.right_menu import RightMenu, BUTTONS as RIGHT_MENU_BUTTONS, REVIEW_BUTTONS as RIGHT_MENU_REVIEW_BUTTONS
 from frontend.result_menu import ResultMenu
 from frontend.sound_manager import SoundManager
@@ -26,6 +34,8 @@ MANUAL_RESULT_TEXT = {
     "white_wins": ("White wins", "by resignation"),
     "black_wins": ("Black wins", "by resignation"),
     "draw_agreement": ("Draw", "by agreement"),
+    "aborted": ("Game aborted", "no moves played"),
+    "server_shutdown": ("Game cancelled", "server shutting down"),
 }
 
 ENGINE_RESULT_TEXT = {
@@ -45,10 +55,19 @@ OPPONENT_NAME_FOR_MODE = {
     ONLINE: "Opponent",
 }
 
+ONLINE_WIN_REASONS = {"checkmate", "timeout", "resignation", "abandonment"}
+ONLINE_DRAW_REASONS = {
+    "draw_agreement", "draw_stalemate", "draw_repetition",
+    "draw_fifty_move", "draw_insufficient_material",
+}
+ONLINE_STATIC_RESULTS = {"aborted", "server_shutdown"}
+
 AUTO_FLIP_DELAY_MS = 200
 
 MIN_WINDOW_WIDTH = 900
 MIN_WINDOW_HEIGHT = 500
+
+log = logging.getLogger("chess.frontend")
 
 
 class Frontend:
@@ -77,11 +96,15 @@ class Frontend:
             "new_game": self._on_new_game,
             "save_pgn": self._on_save_pgn,
             "menu": self._on_back_to_menu,
+            "rematch": self._on_rematch,
         })
         self.start_menu = StartMenu(self.window, {
             "start_game": self._on_start_game,
             "load_pgn": self._on_load_last_game,
+            "reconnect": self._on_reconnect_active_game,
         })
+        self._pending_reconnect = None
+        self._pending_reconnect_lock = threading.Lock()
         self.audio_panel = AudioPanel(self.window, self.sound_manager)
         self.right_menu = RightMenu(self.window, self.match, {
             "undo": self._on_undo,
@@ -93,6 +116,9 @@ class Frontend:
             audio_panel=self.audio_panel)
         self.confirm_modal = ConfirmModal(self.window)
         self.file_picker = FilePicker(self.window)
+        self.server_modal = ServerAddressModal(self.window)
+        self.wait_modal = WaitModal(self.window)
+        self.online_client = None
         self.player_strip_top = PlayerStrip(self.window)
         self.player_strip_bottom = PlayerStrip(self.window)
 
@@ -100,6 +126,7 @@ class Frontend:
         self.board.load_assets()
         self._compute_layout()
         self._refresh_load_pgn_availability()
+        self._spawn_reconnect_probe()
 
         pg.display.set_caption("Chess")
 
@@ -124,6 +151,15 @@ class Frontend:
 
     def _on_back_to_menu(self):
         self.mode = "menu"
+        pg.display.set_caption("Chess")
+        if self.online_client is not None:
+            self.online_client.disconnect()
+            self.online_client = None
+        self.match.mode = SINGLE_SCREEN
+        self.match.local_color = None
+        self.match.on_local_move_applied = None
+        self.right_menu.set_game_info(None)
+        self.result_menu.set_online_mode(False)
         self._reset_to_new_game()
         self._refresh_load_pgn_availability()
         self.start_menu.show()
@@ -160,7 +196,65 @@ class Frontend:
         self.board.read_only = True
         self.start_menu.hide()
 
+    def _spawn_reconnect_probe(self):
+        addr = env.get_server_addr()
+        client_uuid = env.get_or_create_client_uuid()
+        if not addr or not client_uuid:
+            return
+        thread = threading.Thread(
+            target=self._reconnect_probe_worker,
+            args=(addr, client_uuid),
+            daemon=True,
+        )
+        thread.start()
+
+    def _reconnect_probe_worker(self, addr, client_uuid):
+        reclaim = probe_active_game(addr, client_uuid)
+        if reclaim is None:
+            return
+        resume = fetch_resume(addr, reclaim["room_id"], reclaim["session_token"])
+        if resume is None:
+            return
+        with self._pending_reconnect_lock:
+            self._pending_reconnect = {
+                "addr": addr,
+                "room_id": reclaim["room_id"],
+                "session_token": reclaim["session_token"],
+                "resume": resume,
+            }
+
+    def _refresh_reconnect_button(self):
+        with self._pending_reconnect_lock:
+            available = self._pending_reconnect is not None
+        self.start_menu.set_reconnect_available(available)
+
+    def _on_reconnect_active_game(self):
+        with self._pending_reconnect_lock:
+            pending = self._pending_reconnect
+            self._pending_reconnect = None
+        if pending is None:
+            return
+        self.start_menu.set_reconnect_available(False)
+        resume = pending["resume"]
+        nickname = (resume["white_name"] if resume["your_color"] == "white"
+                    else resume["black_name"])
+        self.start_menu.text_input.text = nickname
+        self.start_menu.selected_mode = ONLINE
+        self.start_menu.selected_time_minutes = resume["time_minutes"]
+        self.start_menu.selected_increment_seconds = resume["increment_seconds"]
+        self.start_menu.selected_side = resume["your_color"]
+        self.online_client = OnlineClient()
+        self.match.on_local_move_applied = self._on_local_move_applied
+        self.online_client.reconnect_to_existing(
+            pending["addr"], pending["room_id"], pending["session_token"], resume,
+        )
+        self.start_menu.hide()
+
     def _on_start_game(self, config):
+        env.set_last_mode(config["mode"])
+        if config["mode"] == ONLINE:
+            self._begin_online_flow(config)
+            return
         if config["mode"] != SINGLE_SCREEN:
             return
 
@@ -186,6 +280,215 @@ class Frontend:
         self._reset_to_new_game()
         self.start_menu.hide()
         self.sound_manager.play_game_start()
+
+    def _begin_online_flow(self, config):
+        log.info("online flow begin tc=%s+%s side=%s",
+                 config.get("time_minutes"), config.get("increment_seconds"),
+                 config.get("side"))
+        self._online_config = config
+        self.start_menu.hide()
+        self.server_modal.show(
+            prefilled=env.get_server_addr(),
+            on_connect=self._on_server_addr_connect,
+            on_cancel=self._on_online_cancel,
+        )
+
+    def _on_server_addr_connect(self, addr):
+        log.info("connect to %s", addr)
+        if not addr:
+            self._on_online_cancel()
+            return
+        self.online_client = OnlineClient()
+        request = {
+            "nickname": (self._online_config.get("nickname") or "").strip() or "Player",
+            "client_uuid": env.get_or_create_client_uuid(),
+            "time_minutes": self._online_config["time_minutes"] or 5,
+            "increment_seconds": self._online_config["increment_seconds"],
+            "side_preference": self._online_config["side"],
+        }
+        self.online_client.connect(addr, request)
+        self.wait_modal.show("Searching for opponent…", self._on_online_cancel)
+
+    def _on_online_cancel(self):
+        log.info("online flow cancel")
+        if self.online_client is not None:
+            self.online_client.cancel_queue()
+            self.online_client = None
+        self.match.on_local_move_applied = None
+        self.right_menu.set_game_info(None)
+        self.server_modal.hide()
+        self.wait_modal.hide()
+        self.mode = "menu"
+        self.start_menu.show()
+
+    def _drain_online_inbound(self):
+        if self.online_client is None:
+            return
+        for event in self.online_client.drain_inbound():
+            try:
+                self._handle_online_event(event)
+            except Exception:
+                log.exception("online event handler failed")
+
+    def _handle_online_event(self, event):
+        if event.type == "matchmake_response":
+            return
+        elif event.type == "game_start":
+            self._start_online_game(event.payload)
+        elif event.type == "move_applied":
+            self._handle_remote_move_applied(event.payload)
+        elif event.type == "result":
+            self._handle_online_result(event.payload)
+        elif event.type == "draw_offered":
+            self._show_opp_offer_modal(
+                "Opponent offers a draw", self.online_client.send_draw_response,
+            )
+        elif event.type == "takeback_offered":
+            self._show_opp_offer_modal(
+                "Opponent requests a takeback",
+                self.online_client.send_takeback_response,
+            )
+        elif event.type == "takeback_applied":
+            self._handle_takeback_applied(event.payload)
+        elif event.type == "rematch_request":
+            self._show_opp_offer_modal(
+                "Opponent wants a rematch",
+                self.online_client.send_rematch_response,
+            )
+        elif event.type == "game_resumed":
+            self._handle_game_resumed(event.payload)
+        elif event.type == "connection_status":
+            return
+        elif event.type == "error":
+            reason = event.payload.get("reason", "")
+            game_state_reasons = {
+                "not_your_turn", "invalid_move_format", "invalid_message",
+                "version_mismatch",
+            }
+            if reason in game_state_reasons:
+                return
+            self.wait_modal.hide()
+            self.confirm_modal.show(
+                reason or "Server unreachable",
+                on_yes=lambda: self._on_server_addr_connect(env.get_server_addr()),
+                on_no=self._on_online_cancel,
+                yes_label="Retry", no_label="Cancel",
+            )
+
+    def _show_opp_offer_modal(self, title, send_response):
+        self.confirm_modal.show(
+            title,
+            on_yes=lambda: send_response(True),
+            on_no=lambda: send_response(False),
+            yes_label="Accept", no_label="Decline",
+        )
+
+    def _apply_clock_snap(self, payload, *, default_to_existing):
+        clock_snap = payload.get("clock") or {}
+        if self.match.clock is None:
+            return
+        if default_to_existing:
+            white_default = self.match.clock.white_remaining
+            black_default = self.match.clock.black_remaining
+        else:
+            white_default = 0.0
+            black_default = 0.0
+        self.match.clock.restore_from_server(
+            clock_snap.get("white_remaining", white_default),
+            clock_snap.get("black_remaining", black_default),
+            clock_snap.get("running_for"),
+        )
+
+    def _handle_game_resumed(self, payload):
+        self.match.new_game()
+        for entry in payload.get("move_history", []):
+            result = self.match.backend.apply_san(entry["san"])
+            if not result.legal:
+                log.warning("resume: SAN replay failed at %r", entry.get("san"))
+                apply_fen(self.match.backend, payload["fen"])
+                break
+        if self._time_control is not None:
+            initial, incr = self._time_control
+            self.match.setup_clock(initial, incr)
+            self._apply_clock_snap(payload, default_to_existing=False)
+        self.board.cancel_animations()
+        self.board.selected_square = None
+        self.board._clear_premoves()
+        self.board.clear_annotations()
+
+    def _handle_takeback_applied(self, payload):
+        if self.match.move_history:
+            last = self.match.move_history[-1].move
+            self.match.undo()
+            self.board.start_undo_animation(last)
+        self._apply_clock_snap(payload, default_to_existing=True)
+
+    def _handle_remote_move_applied(self, payload):
+        self._apply_clock_snap(payload, default_to_existing=True)
+        san = payload.get("san")
+        last = self.match.move_history[-1] if self.match.move_history else None
+        if last is not None and last.san == san:
+            return
+        from_sq = square_from_coord(payload["from"])
+        to_sq = square_from_coord(payload["to"])
+        promo = payload.get("promotion")
+        promo_type = PROMO_TYPE_BY_LETTER.get(promo) if promo else None
+        result = self.match.apply_remote_move(from_sq, to_sq, promo_type)
+        if result.legal:
+            self.board.animate_remote_move(from_sq, to_sq)
+
+    def _handle_online_result(self, payload):
+        reason = payload.get("reason", "")
+        winner = payload.get("winner_color")
+        if reason in ONLINE_WIN_REASONS:
+            self.manual_result = "white_wins" if winner == "white" else "black_wins"
+        elif reason in ONLINE_DRAW_REASONS:
+            self.manual_result = "draw_agreement"
+        elif reason in ONLINE_STATIC_RESULTS:
+            self.manual_result = reason
+        if self.manual_result is not None:
+            self._auto_save_online_pgn()
+
+    def _on_rematch(self):
+        if self.online_client is None:
+            return
+        self.online_client.send_rematch_request()
+
+    def _start_online_game(self, payload):
+        opp_name = (payload.get("white_name") if payload.get("your_color") == "black"
+                    else payload.get("black_name"))
+        log.info("game start as %s vs %s", payload.get("your_color"), opp_name)
+        pg.display.set_caption(f"Chess — vs {opp_name}")
+        self.wait_modal.hide()
+        self.confirm_modal.hide()
+        self.manual_result = None
+        self.result_menu.set_online_mode(True)
+        self.mode = ONLINE
+        self._online_initial_flip = (payload["your_color"] == "black")
+        self._chosen_side = payload["your_color"]
+        self.white_name = payload["white_name"]
+        self.black_name = payload["black_name"]
+        self._time_control = (payload["time_minutes"] * 60,
+                              payload["increment_seconds"])
+        self.match.mode = ONLINE
+        self.match.local_color = (PieceColor.WHITE if payload["your_color"] == "white"
+                                  else PieceColor.BLACK)
+        self.match.on_local_move_applied = self._on_local_move_applied
+        self.right_menu.set_game_info({
+            "white_name": payload["white_name"],
+            "black_name": payload["black_name"],
+            "time_minutes": payload["time_minutes"],
+            "increment_seconds": payload["increment_seconds"],
+            "ping_ms": None,
+        })
+        self._reset_to_new_game()
+        self.board.flipped = self._online_initial_flip
+        self.sound_manager.play_game_start()
+
+    def _on_local_move_applied(self, from_sq, to_sq, promotion):
+        if self.online_client is None:
+            return
+        self.online_client.send_move(coord_from_square(from_sq), coord_from_square(to_sq), promotion)
 
     def _right_menu_buttons(self):
         if self.pgn_review:
@@ -213,12 +516,20 @@ class Frontend:
         self._last_turn_for_flip = None
 
     def _on_save_pgn(self):
+        self._write_pgn(prefix="game")
+
+    def _auto_save_online_pgn(self):
+        if not self.match.move_history:
+            return
+        self._write_pgn(prefix="online")
+
+    def _write_pgn(self, prefix):
         result = self.current_result()
         if result is None:
             return
         games_dir = os.path.join(PROJECT_ROOT, "games")
         os.makedirs(games_dir, exist_ok=True)
-        filename = f"game-{datetime.now().strftime('%Y%m%d-%H%M%S')}.pgn"
+        filename = f"{prefix}-{datetime.now().strftime('%Y%m%d-%H%M%S')}.pgn"
         path = os.path.join(games_dir, filename)
         time_control = self._time_control
         termination = "Time forfeit" if result in TIMEOUT_RESULTS else None
@@ -231,6 +542,9 @@ class Frontend:
 
     def _on_undo(self):
         if self.pgn_review:
+            return
+        if self.mode == ONLINE and self.online_client is not None:
+            self.online_client.send_takeback_request()
             return
         self.board.selected_square = None
         self.board._clear_premoves()
@@ -257,6 +571,9 @@ class Frontend:
     def _perform_resign(self):
         if self.current_result() is not None:
             return
+        if self.mode == ONLINE and self.online_client is not None:
+            self.online_client.send_resign()
+            return
         loser = self.match.current_turn()
         self._auto_complete_pending_promotion()
         self.manual_result = "black_wins" if loser == PieceColor.WHITE else "white_wins"
@@ -272,6 +589,9 @@ class Frontend:
 
     def _perform_draw(self):
         if self.current_result() is not None:
+            return
+        if self.mode == ONLINE and self.online_client is not None:
+            self.online_client.send_draw_offer()
             return
         self._auto_complete_pending_promotion()
         self.manual_result = "draw_agreement"
@@ -342,8 +662,12 @@ class Frontend:
             self.result_menu.set_text(self.result_text())
             self.result_menu.draw()
             self.confirm_modal.draw()
+        self._refresh_reconnect_button()
         self.start_menu.draw()
         self.file_picker.draw()
+        self.server_modal.draw()
+        self.wait_modal.draw()
+        self._drain_online_inbound()
 
     def _update_player_strips(self):
         top_color = PieceColor.WHITE if self.board.flipped else PieceColor.BLACK
@@ -374,7 +698,13 @@ class Frontend:
             history = history[:self.board.review_ply]
         captured = captured_by(history, color)
         advantage = material_advantage(history, color)
-        return name, seconds, active, captured, advantage, opponent_of(color)
+        connection_state = None
+        if (self.mode == ONLINE and self.online_client is not None
+                and self.match.local_color is not None
+                and color != self.match.local_color):
+            connection_state = self.online_client.opp_state
+        return (name, seconds, active, captured, advantage,
+                opponent_of(color), connection_state)
 
     def _compute_layout(self):
         window_width, window_height = self.window.get_size()
@@ -399,6 +729,14 @@ class Frontend:
             board_y + board_size_px / 2 - result_height / 2,
             result_width,
             result_height
+        )
+        wait_width = max(result_width, 360)
+        wait_height = max(cell_size * 1.6, 200)
+        wait_rect = pg.Rect(
+            board_x + board_size_px / 2 - wait_width / 2,
+            board_y + board_size_px / 2 - wait_height / 2,
+            wait_width,
+            wait_height,
         )
 
         start_width = board_size_px * 0.7
@@ -440,6 +778,8 @@ class Frontend:
         self.board.set_rect(board_rect)
         self.result_menu.set_rect(result_rect)
         self.confirm_modal.set_rect(result_rect)
+        self.server_modal.set_rect(result_rect)
+        self.wait_modal.set_rect(wait_rect)
         self.file_picker.set_rect(start_rect)
         self.start_menu.set_rect(start_rect)
         self.right_menu.set_rect(menu_rect)
@@ -462,8 +802,12 @@ class Frontend:
         if self.mode == "menu" or self.current_result() is not None:
             return
         sq = self.board.cell_at(pos)
-        if sq is not None:
-            self.board._right_drag_start_square = sq
+        if sq is None:
+            return
+        if self.board.dragging_from is not None:
+            if self.board.queue_premove_from_drag(sq):
+                return
+        self.board._right_drag_start_square = sq
 
     def _right_click_released(self, pos):
         start = self.board._right_drag_start_square
@@ -481,6 +825,14 @@ class Frontend:
     def mouse_left_clicked(self, pos):
         if self.file_picker.is_visible():
             self.file_picker.handle_click(pos)
+            return
+        if self.server_modal.handle_click(pos):
+            return
+        if self.server_modal.is_visible():
+            return
+        if self.wait_modal.handle_click(pos):
+            return
+        if self.wait_modal.is_visible():
             return
         if self.mode == "menu":
             self.start_menu.handle_click(pos)
@@ -568,6 +920,12 @@ class Frontend:
                     self.running = False
                     continue
                 if self.file_picker.is_visible():
+                    continue
+                if self.server_modal.is_visible() and self.server_modal.handle_key(event):
+                    continue
+                if self.server_modal.is_visible():
+                    continue
+                if self.wait_modal.is_visible():
                     continue
                 if self.start_menu.is_visible() and self.start_menu.handle_key(event):
                     continue

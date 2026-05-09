@@ -86,3 +86,14 @@ class Clock:
             self.last_tick_at,
             self.flagged,
         ) = snap
+
+    def restore_from_server(self, white_remaining, black_remaining, running_for):
+        self.white_remaining = float(white_remaining)
+        self.black_remaining = float(black_remaining)
+        if running_for == "white":
+            self.running_for = PieceColor.WHITE
+        elif running_for == "black":
+            self.running_for = PieceColor.BLACK
+        else:
+            self.running_for = None
+        self.last_tick_at = self.now_provider() if self.running_for is not None else None

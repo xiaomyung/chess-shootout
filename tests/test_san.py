@@ -104,11 +104,14 @@ def test_promotion_with_capture_san():
 
 
 def test_two_knights_file_disambiguation():
+    # A black pawn keeps material above the auto-draw threshold (KNN v K
+    # would otherwise be insufficient material and try_move would refuse).
     bk = make_backend({
         sq(7, 1): piece(N, WHITE),
         sq(7, 3): piece(N, WHITE),
         sq(7, 7): piece(K, WHITE),
         sq(0, 0): piece(K, BLACK),
+        sq(1, 0): piece(P, BLACK),
     }, castling_rights=_no_castling())
     bk.try_move(sq(7, 1), sq(5, 2))
     assert bk.move_history[-1].san == "Nbc3"

@@ -1,7 +1,7 @@
 import pygame as pg
 
 from frontend.colors import Colors
-from frontend.widgets import draw_button_row
+from frontend.widgets import draw_button_row, fit_text_to_rect
 
 
 class ConfirmModal:
@@ -59,11 +59,16 @@ class ConfirmModal:
         pg.draw.rect(self.window, Colors.light_grey_menu, rect, border_radius=8)
         pg.draw.rect(self.window, Colors.button_border, rect, 2, border_radius=8)
 
-        title_surf = self.title_font.render(self.title, True, Colors.white)
-        title_y = rect.y + self.padding * 2
+        title_band = pg.Rect(
+            rect.x + self.padding, rect.y + self.padding * 2,
+            rect.width - 2 * self.padding, int(rect.height * 0.35),
+        )
+        title_surf = fit_text_to_rect(
+            self.title_font.render(self.title, True, Colors.white), title_band,
+        )
         self.window.blit(
             title_surf,
-            (rect.centerx - title_surf.get_width() / 2, title_y),
+            (rect.centerx - title_surf.get_width() / 2, title_band.y),
         )
 
         gap = self.padding

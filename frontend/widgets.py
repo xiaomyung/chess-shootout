@@ -7,6 +7,18 @@ SCROLL_FADE_MS = 2000
 SCROLL_THUMB_WIDTH = 4
 SCROLL_THUMB_RIGHT_OFFSET = 4
 SCROLL_THUMB_MIN_HEIGHT = 18
+BUTTON_LABEL_PADDING_PX = 6
+
+
+def fit_text_to_rect(text_surface, rect, padding=BUTTON_LABEL_PADDING_PX):
+    max_w = max(rect.width - 2 * padding, 1)
+    max_h = max(rect.height - 2 * padding, 1)
+    tw, th = text_surface.get_size()
+    if tw <= max_w and th <= max_h:
+        return text_surface
+    scale = min(max_w / tw, max_h / th)
+    new_size = (max(int(tw * scale), 1), max(int(th * scale), 1))
+    return pg.transform.smoothscale(text_surface, new_size)
 
 
 def draw_button(window, rect, label, font, force_pressed=False, disabled=False):
@@ -29,7 +41,7 @@ def draw_button(window, rect, label, font, force_pressed=False, disabled=False):
 
     pg.draw.rect(window, bg, rect, border_radius=4)
     pg.draw.rect(window, Colors.button_border, rect, 1, border_radius=4)
-    text = font.render(label, True, text_color)
+    text = fit_text_to_rect(font.render(label, True, text_color), rect)
     window.blit(
         text,
         (rect.centerx - text.get_width() / 2, rect.centery - text.get_height() / 2),
@@ -43,18 +55,6 @@ def draw_button_row(window, rect, buttons, font, gap):
     for i, (label, key) in enumerate(buttons):
         x = rect.x + i * (btn_w + gap)
         br = pg.Rect(x, rect.y, btn_w, rect.height)
-        draw_button(window, br, label, font)
-        button_rects[key] = br
-    return button_rects
-
-
-def draw_button_column(window, rect, buttons, font, gap):
-    n = len(buttons)
-    btn_h = (rect.height - gap * (n - 1)) / n
-    button_rects = {}
-    for i, (label, key) in enumerate(buttons):
-        y = rect.y + i * (btn_h + gap)
-        br = pg.Rect(rect.x, y, rect.width, btn_h)
         draw_button(window, br, label, font)
         button_rects[key] = br
     return button_rects
