@@ -1,24 +1,25 @@
 import asyncio
-import ipaddress
-import json
 import logging
 import queue
 import threading
 from dataclasses import dataclass
 
-import httpx
-import websockets
+from frontend.online.transport import (
+    FatalResumeError, HTTP_TIMEOUT_SECONDS, ServerTransport, TransportError,
+    TransportHTTPError, SchemaVersionMismatch, WsConnectionClosed,
+)
+from server.protocol import (
+    CancelMatchmakeRequest, MatchmakeRequest, ResumeRequest,
+)
 
 
 log = logging.getLogger("chess.client")
 
 
-HTTP_TIMEOUT_SECONDS = 5.0
 SERVER_FULL_RETRIES = 3
 SERVER_FULL_BACKOFF_SECONDS = 1.5
 RECONNECT_TOTAL_SECONDS = 60
 RECONNECT_INTERVAL_SECONDS = 2
-PROTOCOL_VERSION = 1
 
 
 @dataclass
@@ -27,91 +28,22 @@ class Event:
     payload: dict
 
 
-def _looks_like_ip_or_localhost(host):
-    if host in ("localhost", "127.0.0.1", "0.0.0.0"):
-        return True
-    try:
-        ipaddress.ip_address(host)
-        return True
-    except ValueError:
-        return False
-
-
-def _split_addr(addr):
-    explicit_scheme = None
-    rest = addr
-    for prefix in ("ws://", "wss://", "http://", "https://"):
-        if addr.startswith(prefix):
-            explicit_scheme = prefix
-            rest = addr[len(prefix):]
-            break
-    if "/" in rest:
-        rest = rest.split("/", 1)[0]
-    if ":" in rest:
-        host, port_s = rest.rsplit(":", 1)
-        port = int(port_s)
-    else:
-        host = rest
-        port = None
-    if explicit_scheme:
-        ws_scheme = "ws" if explicit_scheme in ("ws://", "http://") else "wss"
-    else:
-        if _looks_like_ip_or_localhost(host) or port == 8000:
-            ws_scheme = "ws"
-        else:
-            ws_scheme = "wss"
-    if port is None:
-        port = 8000 if ws_scheme == "ws" else 443
-    return ws_scheme, host, port
-
-
-def _http_url(addr, path):
-    ws_scheme, host, port = _split_addr(addr)
-    http_scheme = "https" if ws_scheme == "wss" else "http"
-    return f"{http_scheme}://{host}:{port}{path}"
-
-
-def _ws_url(addr, path):
-    ws_scheme, host, port = _split_addr(addr)
-    return f"{ws_scheme}://{host}:{port}{path}"
-
-
 def probe_active_game(addr, client_uuid, timeout=2.0):
     if not addr or not client_uuid:
         return None
-    try:
-        r = httpx.post(
-            _http_url(addr, "/reclaim"),
-            json={"version": PROTOCOL_VERSION, "client_uuid": client_uuid},
-            timeout=timeout,
-        )
-    except (httpx.HTTPError, httpx.TimeoutException):
+    transport = ServerTransport(addr)
+    response = transport.reclaim_blocking(client_uuid, timeout=timeout)
+    if response is None:
         return None
-    if r.status_code != 200:
-        return None
-    try:
-        return r.json()
-    except (ValueError, json.JSONDecodeError):
-        return None
+    return response.model_dump()
 
 
 def fetch_resume(addr, room_id, session_token, timeout=5.0):
-    try:
-        r = httpx.post(
-            _http_url(addr, "/resume"),
-            json={"version": PROTOCOL_VERSION,
-                  "room_id": room_id,
-                  "session_token": session_token},
-            timeout=timeout,
-        )
-    except (httpx.HTTPError, httpx.TimeoutException):
+    transport = ServerTransport(addr)
+    response = transport.resume_blocking(room_id, session_token)
+    if response is None:
         return None
-    if r.status_code != 200:
-        return None
-    try:
-        return r.json()
-    except (ValueError, json.JSONDecodeError):
-        return None
+    return response.model_dump()
 
 
 class OnlineClient:
@@ -123,6 +55,7 @@ class OnlineClient:
         self._stop = threading.Event()
         self._outbound = None
         self._ws = None
+        self._transport = None
         self._addr = None
         self._room_id = None
         self._session_token = None
@@ -133,6 +66,7 @@ class OnlineClient:
 
     def connect(self, addr, request):
         self._addr = addr
+        self._transport = ServerTransport(addr)
         self._thread = threading.Thread(
             target=self._run_loop, args=(request,), daemon=True,
         )
@@ -140,6 +74,7 @@ class OnlineClient:
 
     def reconnect_to_existing(self, addr, room_id, session_token, resume_payload):
         self._addr = addr
+        self._transport = ServerTransport(addr)
         self._room_id = room_id
         self._session_token = session_token
         self._game_active = True
@@ -157,22 +92,18 @@ class OnlineClient:
     async def _cancel_async(self):
         if self._in_queue and self._room_id and self._session_token:
             try:
-                async with httpx.AsyncClient(timeout=HTTP_TIMEOUT_SECONDS) as http:
-                    await http.request(
-                        "DELETE", _http_url(self._addr, "/matchmake"),
-                        json={"version": PROTOCOL_VERSION,
-                              "room_id": self._room_id,
-                              "session_token": self._session_token},
+                async with self._transport.make_async_http() as http:
+                    body = CancelMatchmakeRequest(
+                        room_id=self._room_id,
+                        session_token=self._session_token,
                     )
+                    await self._transport.cancel_matchmake_async(body, http)
             except Exception:
                 pass
         self._in_queue = False
         self._stop.set()
         if self._ws is not None:
-            try:
-                await self._ws.close()
-            except Exception:
-                pass
+            await self._ws.close()
 
     def disconnect(self):
         if self._loop is None or not self._loop.is_running():
@@ -183,38 +114,38 @@ class OnlineClient:
             asyncio.run_coroutine_threadsafe(self._ws.close(), self._loop)
 
     def send_move(self, from_sq, to_sq, promotion=None):
-        self._send({"type": "move", "from": from_sq, "to": to_sq,
-                    "promotion": promotion})
+        self._enqueue("send_move", from_sq, to_sq, promotion)
 
     def send_resign(self):
-        self._send({"type": "resign"})
+        self._enqueue("send_resign")
 
     def send_draw_offer(self):
-        self._send({"type": "draw_offer"})
+        self._enqueue("send_draw_offer")
 
     def send_draw_response(self, accept):
-        self._send({"type": "draw_response", "accept": accept})
+        self._enqueue("send_draw_response", accept)
 
     def send_rematch_request(self):
-        self._send({"type": "rematch_request"})
+        self._enqueue("send_rematch_request")
 
     def send_rematch_response(self, accept):
-        self._send({"type": "rematch_response", "accept": accept})
+        self._enqueue("send_rematch_response", accept)
 
     def send_takeback_request(self):
-        self._send({"type": "takeback_request"})
+        self._enqueue("send_takeback_request")
 
     def send_takeback_response(self, accept):
-        self._send({"type": "takeback_response", "accept": accept})
+        self._enqueue("send_takeback_response", accept)
 
-    def _send(self, payload):
-        payload.setdefault("version", PROTOCOL_VERSION)
+    def _enqueue(self, method, *args):
         if self._loop is None or self._loop.is_closed() or self._outbound is None:
-            log.debug("send dropped (loop not running): type=%s", payload.get("type"))
+            log.debug("send dropped (loop not running): method=%s", method)
             return
         try:
-            self._loop.call_soon_threadsafe(self._outbound.put_nowait, payload)
-            log.debug("ws send type=%s", payload.get("type"))
+            self._loop.call_soon_threadsafe(
+                self._outbound.put_nowait, (method, args),
+            )
+            log.debug("ws send method=%s", method)
         except RuntimeError:
             pass
 
@@ -306,6 +237,11 @@ class OnlineClient:
         try:
             self.state = "connecting"
             mm = await self._matchmake_with_retries(request)
+        except SchemaVersionMismatch as exc:
+            log.warning("schema version mismatch reason=%s", exc)
+            self._inbound.put(Event("error", {"reason": "version_mismatch"}))
+            self.state = "disconnected"
+            return
         except Exception as exc:
             log.warning("matchmake failed reason=%s", exc)
             self._inbound.put(Event("error", {"reason": str(exc)}))
@@ -344,38 +280,34 @@ class OnlineClient:
 
     async def _resume_with_retries(self):
         deadline = asyncio.get_event_loop().time() + RECONNECT_TOTAL_SECONDS
-        async with httpx.AsyncClient(timeout=HTTP_TIMEOUT_SECONDS) as http:
+        body = ResumeRequest(
+            room_id=self._room_id, session_token=self._session_token,
+        )
+        async with self._transport.make_async_http() as http:
             while asyncio.get_event_loop().time() < deadline and not self._stop.is_set():
                 try:
-                    r = await http.post(_http_url(self._addr, "/resume"),
-                                        json={"version": PROTOCOL_VERSION,
-                                              "room_id": self._room_id,
-                                              "session_token": self._session_token})
-                    if r.status_code == 200:
-                        return r.json()
-                    if r.status_code in (401, 410, 404):
-                        return None
-                except (httpx.HTTPError, httpx.TimeoutException):
-                    pass
+                    response = await self._transport.resume_async(body, http)
+                except FatalResumeError:
+                    return None
+                if response is not None:
+                    return response.model_dump()
                 await asyncio.sleep(RECONNECT_INTERVAL_SECONDS)
         return None
 
     async def _matchmake_with_retries(self, request):
         last_exc = None
-        async with httpx.AsyncClient(timeout=HTTP_TIMEOUT_SECONDS) as http:
+        req = MatchmakeRequest(**request)
+        async with self._transport.make_async_http() as http:
             for attempt in range(SERVER_FULL_RETRIES + 1):
                 try:
-                    payload = {"version": PROTOCOL_VERSION, **request}
-                    r = await http.post(_http_url(self._addr, "/matchmake"),
-                                        json=payload)
-                    if r.status_code == 503:
+                    return (await self._transport.matchmake_async(req, http)).model_dump()
+                except TransportHTTPError as exc:
+                    if exc.status_code == 503:
                         last_exc = RuntimeError("room_full")
                         await asyncio.sleep(SERVER_FULL_BACKOFF_SECONDS)
                         continue
-                    if r.status_code >= 400:
-                        raise RuntimeError(_safe_error_reason(r) or f"http_{r.status_code}")
-                    return r.json()
-                except (httpx.HTTPError, httpx.TimeoutException) as exc:
+                    raise RuntimeError(exc.reason or f"http_{exc.status_code}") from exc
+                except TransportError as exc:
                     last_exc = exc
                     if attempt < SERVER_FULL_RETRIES:
                         await asyncio.sleep(SERVER_FULL_BACKOFF_SECONDS)
@@ -386,32 +318,25 @@ class OnlineClient:
         raise RuntimeError("room_full")
 
     async def _run_ws_session(self):
-        ws_url = _ws_url(self._addr, f"/ws/{self._room_id}")
-        log.info("ws connecting %s", ws_url)
-        async with websockets.connect(ws_url, ping_interval=20,
-                                       ping_timeout=30) as ws:
-            self._ws = ws
-            self.state = "connected"
-            await ws.send(json.dumps({"version": PROTOCOL_VERSION,
-                                       "type": "auth",
-                                       "session_token": self._session_token}))
-            recv_task = asyncio.create_task(self._recv_loop(ws))
-            send_task = asyncio.create_task(self._send_loop(ws))
-            try:
-                await asyncio.wait({recv_task, send_task},
-                                   return_when=asyncio.FIRST_COMPLETED)
-            finally:
-                recv_task.cancel()
-                send_task.cancel()
-                self._ws = None
+        ws = await self._transport.ws_connect(self._room_id, self._session_token)
+        self._ws = ws
+        self.state = "connected"
+        recv_task = asyncio.create_task(self._recv_loop(ws))
+        send_task = asyncio.create_task(self._send_loop(ws))
+        try:
+            await asyncio.wait({recv_task, send_task},
+                                 return_when=asyncio.FIRST_COMPLETED)
+        finally:
+            recv_task.cancel()
+            send_task.cancel()
+            await ws.close()
+            self._ws = None
 
     async def _recv_loop(self, ws):
         try:
             while not self._stop.is_set():
-                raw = await ws.recv()
-                try:
-                    msg = json.loads(raw)
-                except json.JSONDecodeError:
+                msg = await ws.recv()
+                if msg is None:
                     continue
                 msg_type = msg.get("type", "")
                 log.debug("ws recv type=%s", msg_type)
@@ -425,29 +350,17 @@ class OnlineClient:
                 if msg_type == "connection_status":
                     self.opp_state = msg.get("opp_state", "connected")
                 self._inbound.put(Event(msg_type, msg))
-        except (websockets.ConnectionClosed, asyncio.CancelledError):
+        except (WsConnectionClosed, asyncio.CancelledError):
             pass
 
     async def _send_loop(self, ws):
         try:
             while not self._stop.is_set():
-                payload = await self._outbound.get()
-                await ws.send(json.dumps(payload))
-        except (websockets.ConnectionClosed, asyncio.CancelledError):
+                method, args = await self._outbound.get()
+                send = getattr(ws, method, None)
+                if send is None:
+                    log.warning("unknown ws send method=%s", method)
+                    continue
+                await send(*args)
+        except (WsConnectionClosed, asyncio.CancelledError):
             pass
-
-
-def _safe_error_reason(response):
-    try:
-        body = response.json()
-    except Exception:
-        return None
-    if isinstance(body, dict):
-        if "reason" in body:
-            return body["reason"]
-        detail = body.get("detail")
-        if isinstance(detail, dict) and "reason" in detail:
-            return detail["reason"]
-        if isinstance(detail, str):
-            return detail
-    return None

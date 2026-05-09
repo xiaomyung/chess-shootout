@@ -1,0 +1,396 @@
+"""M19: ServerTransport + ServerWebSocket are the single client-side surface
+for HTTP and WS interactions with the server.
+
+Strategy:
+- HTTP tests use httpx.MockTransport routed through ServerTransport's
+  _http_client constructor arg, so we hit a hand-rolled fake handler
+  rather than spinning up uvicorn for each case. That keeps coverage
+  fast and lets us assert the wire-level method/path/body shape.
+- WS tests use the real in-process server (uvicorn in a thread, same
+  pattern as test_online_flow.py) and verify each ServerWebSocket
+  send_* method round-trips through the real protocol path.
+- Schema-version-mismatch is hit via a fake server response.
+"""
+import asyncio
+import json
+import socket
+import threading
+import time
+
+import httpx
+import pytest
+import uvicorn
+
+from frontend.online.transport import (
+    FatalResumeError, SchemaVersionMismatch, ServerTransport, ServerWebSocket,
+    TransportError, TransportHTTPError, _split_addr,
+)
+from server.app import create_app
+from server.protocol import (
+    HealthResponse, MatchmakeRequest, MatchmakeResponse, PROTOCOL_VERSION,
+    Reason, ResumeRequest,
+)
+from tests.helpers import fake_uuid4
+
+
+ALICE = fake_uuid4(1)
+BOB = fake_uuid4(2)
+
+
+# ---- HTTP via httpx.MockTransport -------------------------------------------
+
+
+def _make_handler(*, status_code=200, body=None, capture=None):
+    def handler(request):
+        if capture is not None:
+            capture.append({
+                "method": request.method,
+                "url": str(request.url),
+                "json": json.loads(request.content) if request.content else None,
+            })
+        return httpx.Response(status_code=status_code, json=body)
+    return handler
+
+
+@pytest.fixture
+def captured():
+    return []
+
+
+@pytest.fixture
+def fake_http(captured):
+    transport = httpx.MockTransport(_make_handler(
+        status_code=200, body={"status": "ok"}, capture=captured,
+    ))
+    with httpx.Client(transport=transport) as client:
+        yield client
+
+
+def test_healthz_hits_get_path(captured):
+    body = {"status": "ok", "version": PROTOCOL_VERSION,
+            "rooms_active": 7, "queue_depth": 2, "uptime_s": 99.9}
+    transport = httpx.MockTransport(_make_handler(
+        status_code=200, body=body, capture=captured,
+    ))
+    with httpx.Client(transport=transport) as client:
+        st = ServerTransport("localhost:8000", http_client=client)
+        resp = st.healthz()
+    assert isinstance(resp, HealthResponse)
+    assert resp.rooms_active == 7
+    assert resp.queue_depth == 2
+    assert captured[0]["method"] == "GET"
+    assert captured[0]["url"].endswith("/healthz")
+
+
+def test_reclaim_blocking_returns_typed_response(captured):
+    body = {"version": PROTOCOL_VERSION, "room_id": fake_uuid4(50),
+            "session_token": "tok-99"}
+    transport = httpx.MockTransport(_make_handler(
+        status_code=200, body=body, capture=captured,
+    ))
+    with httpx.Client(transport=transport) as client:
+        st = ServerTransport("localhost:8000", http_client=client)
+        resp = st.reclaim_blocking(ALICE)
+    assert resp is not None
+    assert resp.session_token == "tok-99"
+    assert captured[0]["method"] == "POST"
+    assert captured[0]["url"].endswith("/reclaim")
+    assert captured[0]["json"]["client_uuid"] == ALICE
+
+
+def test_reclaim_blocking_returns_none_on_404(captured):
+    transport = httpx.MockTransport(_make_handler(
+        status_code=404, body={"reason": "not_in_room"}, capture=captured,
+    ))
+    with httpx.Client(transport=transport) as client:
+        st = ServerTransport("localhost:8000", http_client=client)
+        assert st.reclaim_blocking(ALICE) is None
+
+
+def test_resume_blocking_returns_typed_response(captured):
+    body = {
+        "version": PROTOCOL_VERSION,
+        "fen": "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
+        "move_history": [],
+        "clock": {"white_remaining": 60.0, "black_remaining": 60.0,
+                    "running_for": "white"},
+        "your_color": "white",
+        "white_name": "Alice", "black_name": "Bob",
+        "time_minutes": 5, "increment_seconds": 0,
+    }
+    transport = httpx.MockTransport(_make_handler(
+        status_code=200, body=body, capture=captured,
+    ))
+    with httpx.Client(transport=transport) as client:
+        st = ServerTransport("localhost:8000", http_client=client)
+        resp = st.resume_blocking(fake_uuid4(50), "tok-99")
+    assert resp is not None
+    assert resp.your_color == "white"
+    assert captured[0]["method"] == "POST"
+    assert captured[0]["url"].endswith("/resume")
+
+
+def test_http_error_with_unknown_status_raises_transport_error(captured):
+    transport = httpx.MockTransport(_make_handler(
+        status_code=500, body={"reason": "boom"}, capture=captured,
+    ))
+    with httpx.Client(transport=transport) as client:
+        st = ServerTransport("localhost:8000", http_client=client)
+        with pytest.raises(TransportHTTPError) as info:
+            st.healthz()
+        assert info.value.status_code == 500
+
+
+def test_version_mismatch_raises_typed_exception(captured):
+    transport = httpx.MockTransport(_make_handler(
+        status_code=400, body={"reason": Reason.VERSION_MISMATCH},
+        capture=captured,
+    ))
+    with httpx.Client(transport=transport) as client:
+        st = ServerTransport("localhost:8000", http_client=client)
+        with pytest.raises(SchemaVersionMismatch):
+            st.healthz()
+
+
+def test_network_failure_surfaces_transport_error():
+    def boom(request):
+        raise httpx.ConnectError("nope")
+    transport = httpx.MockTransport(boom)
+    with httpx.Client(transport=transport) as client:
+        st = ServerTransport("localhost:8000", http_client=client)
+        with pytest.raises(TransportError):
+            st.healthz()
+
+
+# ---- Async helpers via httpx.AsyncClient + MockTransport -------------------
+
+
+@pytest.mark.asyncio
+async def test_matchmake_async_returns_typed_response(captured):
+    body = {"version": PROTOCOL_VERSION, "room_id": fake_uuid4(50),
+            "session_token": "tok-99"}
+    transport = httpx.MockTransport(_make_handler(
+        status_code=200, body=body, capture=captured,
+    ))
+    async with httpx.AsyncClient(transport=transport) as http:
+        st = ServerTransport("localhost:8000")
+        req = MatchmakeRequest(nickname="Alice", client_uuid=ALICE,
+                                  time_minutes=5, increment_seconds=0)
+        resp = await st.matchmake_async(req, http)
+    assert isinstance(resp, MatchmakeResponse)
+    assert captured[0]["method"] == "POST"
+    assert captured[0]["url"].endswith("/matchmake")
+
+
+@pytest.mark.asyncio
+async def test_matchmake_async_503_maps_to_typed_http_error():
+    transport = httpx.MockTransport(_make_handler(
+        status_code=503, body={"detail": {"reason": "room_full"}},
+    ))
+    async with httpx.AsyncClient(transport=transport) as http:
+        st = ServerTransport("localhost:8000")
+        req = MatchmakeRequest(nickname="Alice", client_uuid=ALICE,
+                                  time_minutes=5, increment_seconds=0)
+        with pytest.raises(TransportHTTPError) as info:
+            await st.matchmake_async(req, http)
+        assert info.value.status_code == 503
+
+
+@pytest.mark.asyncio
+async def test_resume_async_410_raises_fatal_resume_error():
+    # Game-already-over → server replies 410. Helper raises FatalResumeError
+    # so the retry loop in OnlineClient bails immediately instead of
+    # spinning for the full reconnect window — matches pre-M19 semantics.
+    transport = httpx.MockTransport(_make_handler(
+        status_code=410, body={"detail": {"reason": "checkmate"}},
+    ))
+    async with httpx.AsyncClient(transport=transport) as http:
+        st = ServerTransport("localhost:8000")
+        body = ResumeRequest(room_id=fake_uuid4(50), session_token="t")
+        with pytest.raises(FatalResumeError):
+            await st.resume_async(body, http)
+
+
+@pytest.mark.asyncio
+async def test_resume_async_404_raises_fatal_resume_error():
+    # Server-restart leaves rooms gone (404). Don't retry forever.
+    transport = httpx.MockTransport(_make_handler(
+        status_code=404, body={"detail": {"reason": "not_in_room"}},
+    ))
+    async with httpx.AsyncClient(transport=transport) as http:
+        st = ServerTransport("localhost:8000")
+        body = ResumeRequest(room_id=fake_uuid4(50), session_token="t")
+        with pytest.raises(FatalResumeError):
+            await st.resume_async(body, http)
+
+
+@pytest.mark.asyncio
+async def test_resume_async_5xx_returns_none_for_retry():
+    # Server hiccups (e.g. 503) are transient — keep retrying within the
+    # reconnect window.
+    transport = httpx.MockTransport(_make_handler(status_code=503, body={}))
+    async with httpx.AsyncClient(transport=transport) as http:
+        st = ServerTransport("localhost:8000")
+        body = ResumeRequest(room_id=fake_uuid4(50), session_token="t")
+        assert await st.resume_async(body, http) is None
+
+
+# ---- WS round-trip via real in-process uvicorn ------------------------------
+
+
+@pytest.fixture
+def server_port():
+    s = socket.socket()
+    s.bind(("127.0.0.1", 0))
+    port = s.getsockname()[1]
+    s.close()
+    return port
+
+
+@pytest.fixture
+def server(server_port):
+    app = create_app(max_rooms=8)
+    config = uvicorn.Config(app, host="127.0.0.1", port=server_port,
+                              log_level="warning",
+                              ws_ping_interval=20, ws_ping_timeout=30)
+    srv = uvicorn.Server(config)
+    t = threading.Thread(target=srv.run, daemon=True)
+    t.start()
+    deadline = time.time() + 5
+    while not srv.started and time.time() < deadline:
+        time.sleep(0.05)
+    yield server_port
+    srv.should_exit = True
+    t.join(timeout=2)
+
+
+@pytest.mark.asyncio
+async def test_server_websocket_send_move_round_trip(server):
+    addr = f"localhost:{server}"
+    st = ServerTransport(addr)
+
+    async with httpx.AsyncClient(timeout=2.0) as http:
+        a = await st.matchmake_async(
+            MatchmakeRequest(nickname="Alice", client_uuid=ALICE,
+                                time_minutes=5, increment_seconds=0,
+                                side_preference="white"),
+            http,
+        )
+        b = await st.matchmake_async(
+            MatchmakeRequest(nickname="Bob", client_uuid=BOB,
+                                time_minutes=5, increment_seconds=0,
+                                side_preference="black"),
+            http,
+        )
+
+    ws_a = await st.ws_connect(a.room_id, a.session_token)
+    ws_b = await st.ws_connect(b.room_id, b.session_token)
+    try:
+        # Drain the game_start broadcast.
+        msg_a = await asyncio.wait_for(ws_a.recv(), timeout=2.0)
+        msg_b = await asyncio.wait_for(ws_b.recv(), timeout=2.0)
+        assert msg_a["type"] == "game_start"
+        assert msg_b["type"] == "game_start"
+        # Send a typed move.
+        await ws_a.send_move("e2", "e4")
+        applied_a = await asyncio.wait_for(ws_a.recv(), timeout=2.0)
+        applied_b = await asyncio.wait_for(ws_b.recv(), timeout=2.0)
+        assert applied_a["type"] == "move_applied"
+        assert applied_a["san"] == "e4"
+        assert applied_b["from"] == "e2"
+        # And resign.
+        await ws_a.send_resign()
+        result_a = await asyncio.wait_for(ws_a.recv(), timeout=2.0)
+        assert result_a["type"] == "result"
+        assert result_a["reason"] == Reason.RESIGNATION
+    finally:
+        await ws_a.close()
+        await ws_b.close()
+
+
+# ---- ServerWebSocket — direct send shape verification -----------------------
+
+
+class _RecordingWS:
+
+    def __init__(self):
+        self.sent = []
+        self.closed = False
+
+    async def send(self, payload):
+        self.sent.append(payload)
+
+    async def recv(self):
+        return ""
+
+    async def close(self):
+        self.closed = True
+
+
+@pytest.mark.asyncio
+async def test_server_websocket_send_methods_emit_typed_payloads():
+    ws = ServerWebSocket(_RecordingWS())
+    inner = ws._ws
+
+    await ws.send_move("e2", "e4", promotion=None)
+    move = json.loads(inner.sent[-1])
+    assert move["type"] == "move"
+    assert move["from"] == "e2"
+    assert move["to"] == "e4"
+    assert move["promotion"] is None
+
+    await ws.send_resign()
+    assert json.loads(inner.sent[-1])["type"] == "resign"
+
+    await ws.send_draw_offer()
+    assert json.loads(inner.sent[-1])["type"] == "draw_offer"
+
+    await ws.send_draw_response(True)
+    payload = json.loads(inner.sent[-1])
+    assert payload["type"] == "draw_response" and payload["accept"] is True
+
+    await ws.send_rematch_request()
+    assert json.loads(inner.sent[-1])["type"] == "rematch_request"
+
+    await ws.send_rematch_response(False)
+    payload = json.loads(inner.sent[-1])
+    assert payload["type"] == "rematch_response" and payload["accept"] is False
+
+    await ws.send_takeback_request()
+    assert json.loads(inner.sent[-1])["type"] == "takeback_request"
+
+    await ws.send_takeback_response(True)
+    payload = json.loads(inner.sent[-1])
+    assert payload["type"] == "takeback_response" and payload["accept"] is True
+
+
+# ---- Pin: only transport.py imports httpx / websockets ---------------------
+
+
+def test_only_transport_module_imports_httpx_or_websockets():
+    # The whole point of M19 is that nobody outside transport.py touches
+    # the network libraries. If a future commit accidentally imports them
+    # in client.py / events.py / etc., this guard catches it.
+    import os
+    import re
+    frontend_dir = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        "frontend",
+    )
+    bad_pattern = re.compile(r"^\s*(import\s+httpx|import\s+websockets|"
+                                r"from\s+httpx|from\s+websockets)",
+                                re.MULTILINE)
+    offenders = []
+    for root, _, files in os.walk(frontend_dir):
+        for name in files:
+            if not name.endswith(".py"):
+                continue
+            path = os.path.join(root, name)
+            if path.endswith(os.path.join("online", "transport.py")):
+                continue
+            with open(path) as f:
+                if bad_pattern.search(f.read()):
+                    offenders.append(path)
+    assert offenders == [], (
+        f"these modules import httpx/websockets directly: {offenders}"
+    )
