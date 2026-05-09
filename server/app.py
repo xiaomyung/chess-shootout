@@ -412,8 +412,6 @@ async def _ws_session(app, websocket, room_id):
             if current_color is None:
                 break
             await _dispatch(app, websocket, room, current_color, raw)
-            if room.result is not None:
-                break
     finally:
         if auth_room is not None and auth_color is not None:
             rooms.mark_disconnected(auth_room.room_id, auth_color)

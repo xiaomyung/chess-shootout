@@ -166,10 +166,15 @@ class OnlineClient:
 
     def _send(self, payload):
         payload.setdefault("version", PROTOCOL_VERSION)
-        if self._loop is None or self._outbound_q is None:
+        if self._loop is None or self._loop.is_closed() or self._outbound_q is None:
+            log.debug("send dropped (loop not running): type=%s", payload.get("type"))
             return
-        log.debug("ws send type=%s", payload.get("type"))
-        self._loop.call_soon_threadsafe(self._outbound_q.put_nowait, payload)
+        try:
+            self._loop.call_soon_threadsafe(self._outbound_q.put_nowait, payload)
+            log.debug("ws send type=%s", payload.get("type"))
+        except RuntimeError:
+            # Loop closed between the check and the call — race; ignore.
+            pass
 
     def drain_inbound(self):
         events = []
@@ -321,8 +326,6 @@ class OnlineClient:
                 if msg_type == "connection_status":
                     self.opp_state = msg.get("opp_state", "connected")
                 self._inbound.put(Event(msg_type, msg))
-                if msg_type == "result":
-                    break
         except (websockets.ConnectionClosed, asyncio.CancelledError):
             pass
 
