@@ -155,6 +155,20 @@ class RoomManager:
         first = "black" if second == "white" else "white"
         return second, first
 
+    async def reclaim_session(self, client_uuid):
+        async with self._lock:
+            room_id = self._uuid_to_room.get(client_uuid)
+            if room_id is None or room_id not in self._active:
+                raise NotInRoomError()
+            room = self._active[room_id]
+            for color in ("white", "black"):
+                slot = room.slot(color)
+                if slot is not None and slot.client_uuid == client_uuid:
+                    new_token = self.make_session_token()
+                    slot.session_token = new_token
+                    return room, color, new_token
+            raise NotInRoomError()
+
     async def cancel_wait(self, room_id, session_token):
         async with self._lock:
             room = self._find_in_queue(room_id)

@@ -76,6 +76,44 @@ def _ws_url(addr, path):
     return f"{ws_scheme}://{host}:{port}{path}"
 
 
+def probe_active_game(addr, client_uuid, timeout=2.0):
+    if not addr or not client_uuid:
+        return None
+    try:
+        r = httpx.post(
+            _http_url(addr, "/reclaim"),
+            json={"version": PROTOCOL_VERSION, "client_uuid": client_uuid},
+            timeout=timeout,
+        )
+    except (httpx.HTTPError, httpx.TimeoutException):
+        return None
+    if r.status_code != 200:
+        return None
+    try:
+        return r.json()
+    except (ValueError, json.JSONDecodeError):
+        return None
+
+
+def fetch_resume(addr, room_id, session_token, timeout=5.0):
+    try:
+        r = httpx.post(
+            _http_url(addr, "/resume"),
+            json={"version": PROTOCOL_VERSION,
+                  "room_id": room_id,
+                  "session_token": session_token},
+            timeout=timeout,
+        )
+    except (httpx.HTTPError, httpx.TimeoutException):
+        return None
+    if r.status_code != 200:
+        return None
+    try:
+        return r.json()
+    except (ValueError, json.JSONDecodeError):
+        return None
+
+
 class OnlineClient:
 
     def __init__(self):
@@ -97,6 +135,16 @@ class OnlineClient:
         self._addr = addr
         self._thread = threading.Thread(
             target=self._run_loop, args=(request,), daemon=True,
+        )
+        self._thread.start()
+
+    def reconnect_to_existing(self, addr, room_id, session_token, resume_payload):
+        self._addr = addr
+        self._room_id = room_id
+        self._session_token = session_token
+        self._game_active = True
+        self._thread = threading.Thread(
+            target=self._run_loop_resume, args=(resume_payload,), daemon=True,
         )
         self._thread.start()
 
@@ -192,6 +240,51 @@ class OnlineClient:
                 self._loop.close()
             except Exception:
                 pass
+
+    def _run_loop_resume(self, resume_payload):
+        self._loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(self._loop)
+        self._outbound = asyncio.Queue()
+        try:
+            self._loop.run_until_complete(self._async_main_resume(resume_payload))
+        except Exception as exc:
+            self._inbound.put(Event("error", {"reason": str(exc)}))
+        finally:
+            try:
+                self._loop.close()
+            except Exception:
+                pass
+
+    async def _async_main_resume(self, resume_payload):
+        log.info("reconnect-resume addr=%s room=%s", self._addr, self._room_id)
+        self.state = "connecting"
+        self._inbound.put(Event("game_start", resume_payload))
+        self._inbound.put(Event("game_resumed", resume_payload))
+        try:
+            await self._run_ws_session()
+            while (not self._stop.is_set() and self._game_active
+                   and self._session_token is not None):
+                log.info("ws dropped mid-game; attempting reconnect")
+                self.state = "reconnecting"
+                self.opp_state = "reconnecting"
+                resumed = await self._resume_with_retries()
+                if not resumed:
+                    log.warning("reconnect gave up")
+                    self._inbound.put(Event("error", {"reason": "reconnect_failed"}))
+                    break
+                log.info("reconnect succeeded; resuming game")
+                self._inbound.put(Event("game_resumed", resumed))
+                try:
+                    await self._run_ws_session()
+                except Exception as exc:
+                    self._inbound.put(Event("error", {"reason": str(exc)}))
+                    break
+        except Exception as exc:
+            log.warning("ws session crash: %s", exc)
+            self._inbound.put(Event("error", {"reason": str(exc)}))
+        finally:
+            log.info("session ended state=disconnected")
+            self.state = "disconnected"
 
     async def _async_main(self, request):
         log.info("connect addr=%s", self._addr)

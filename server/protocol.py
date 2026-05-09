@@ -101,6 +101,19 @@ class ResumeResponse(_Base):
     move_history: list[HistoryEntryWire]
     clock: ClockSnapshot
     your_color: Literal["white", "black"]
+    white_name: str
+    black_name: str
+    time_minutes: int
+    increment_seconds: int
+
+
+class ReclaimRequest(_Base):
+    client_uuid: str
+
+
+class ReclaimResponse(_Base):
+    room_id: str
+    session_token: str
 
 
 class HealthResponse(BaseModel):

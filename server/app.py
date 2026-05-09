@@ -22,7 +22,8 @@ from server.protocol import (
     ConnectionStatusMessage, DrawOfferedMessage, DrawResponseMessage,
     ErrorMessage, GameStartMessage, HealthResponse, HistoryEntryWire, MatchmakeRequest,
     MatchmakeResponse, MoveAppliedMessage, MoveMessage,
-    PROTOCOL_VERSION, Reason, RematchRequestMessage, RematchResponseMessage,
+    PROTOCOL_VERSION, Reason, ReclaimRequest, ReclaimResponse,
+    RematchRequestMessage, RematchResponseMessage,
     ResultMessage, ResumeRequest, ResumeResponse, TakebackAppliedMessage,
     TakebackOfferedMessage, TakebackResponseMessage,
 )
@@ -232,7 +233,27 @@ def create_app(*, now_provider=time.monotonic, max_rooms=100):
             move_history=history,
             clock=_clock_snapshot(room.backend.clock),
             your_color=color,
+            white_name=room.white.nickname if room.white else "",
+            black_name=room.black.nickname if room.black else "",
+            time_minutes=room.time_minutes,
+            increment_seconds=room.increment_seconds,
         )
+
+    @app.post("/reclaim", response_model=ReclaimResponse)
+    @limiter.limit("30/minute")
+    async def post_reclaim(request: Request, body: ReclaimRequest):
+        log.info("reclaim request uuid=%s", body.client_uuid[:8])
+        try:
+            room, color, new_token = await rooms.reclaim_session(body.client_uuid)
+        except NotInRoomError:
+            raise HTTPException(status_code=404, detail={"reason": Reason.NOT_IN_ROOM})
+        if room.result is not None:
+            log.info("reclaim rejected uuid=%s reason=game_already_over",
+                     body.client_uuid[:8])
+            raise HTTPException(status_code=410, detail={"reason": room.result[0]})
+        log.info("reclaim ok uuid=%s room=%s color=%s",
+                 body.client_uuid[:8], room.room_id, color)
+        return ReclaimResponse(room_id=room.room_id, session_token=new_token)
 
     @app.websocket("/ws/{room_id}")
     async def ws_endpoint(websocket: WebSocket, room_id: str):
@@ -357,13 +378,13 @@ async def _ws_session(app, websocket, room_id):
              room.room_id, auth_uuid[:8], color, room.is_paired(),
              connections.has_both(room))
 
-    if room.is_paired() and connections.has_both(room):
-        if room.started_at is None or room.first_move_at is None:
-            room.started_at = app.state.now()
+    if room.is_paired() and connections.has_both(room) and room.started_at is None:
+        room.started_at = app.state.now()
         await _broadcast_game_start(connections, room)
-    elif connections.get_for_color(room, room.opp_color(color)) is not None:
-        await _send(connections.get_for_color(room, room.opp_color(color)),
-                    ConnectionStatusMessage(opp_state="connected"))
+    else:
+        opp_ws = connections.get_for_color(room, room.opp_color(color))
+        if opp_ws is not None:
+            await _send(opp_ws, ConnectionStatusMessage(opp_state="connected"))
 
     try:
         while True:

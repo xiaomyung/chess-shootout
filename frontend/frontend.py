@@ -2,6 +2,7 @@ import glob
 import logging
 import os
 import random
+import threading
 from datetime import datetime
 
 import pygame as pg
@@ -15,7 +16,7 @@ from frontend.board import Board
 from frontend.capture_summary import captured_by, material_advantage
 from frontend.confirm_modal import ConfirmModal
 from frontend.file_picker import FilePicker
-from frontend.online_client import OnlineClient
+from frontend.online_client import OnlineClient, fetch_resume, probe_active_game
 from frontend.player_strip import PlayerStrip
 from frontend.server_modal import ServerAddressModal
 from frontend.wait_modal import WaitModal
@@ -100,7 +101,10 @@ class Frontend:
         self.start_menu = StartMenu(self.window, {
             "start_game": self._on_start_game,
             "load_pgn": self._on_load_last_game,
+            "reconnect": self._on_reconnect_active_game,
         })
+        self._pending_reconnect = None
+        self._pending_reconnect_lock = threading.Lock()
         self.audio_panel = AudioPanel(self.window, self.sound_manager)
         self.right_menu = RightMenu(self.window, self.match, {
             "undo": self._on_undo,
@@ -122,6 +126,7 @@ class Frontend:
         self.board.load_assets()
         self._compute_layout()
         self._refresh_load_pgn_availability()
+        self._spawn_reconnect_probe()
 
         pg.display.set_caption("Chess")
 
@@ -189,6 +194,60 @@ class Frontend:
             self.board.review_ply = 0
         self.pgn_review = True
         self.board.read_only = True
+        self.start_menu.hide()
+
+    def _spawn_reconnect_probe(self):
+        addr = env.get_server_addr()
+        client_uuid = env.get_or_create_client_uuid()
+        if not addr or not client_uuid:
+            return
+        thread = threading.Thread(
+            target=self._reconnect_probe_worker,
+            args=(addr, client_uuid),
+            daemon=True,
+        )
+        thread.start()
+
+    def _reconnect_probe_worker(self, addr, client_uuid):
+        reclaim = probe_active_game(addr, client_uuid)
+        if reclaim is None:
+            return
+        resume = fetch_resume(addr, reclaim["room_id"], reclaim["session_token"])
+        if resume is None:
+            return
+        with self._pending_reconnect_lock:
+            self._pending_reconnect = {
+                "addr": addr,
+                "room_id": reclaim["room_id"],
+                "session_token": reclaim["session_token"],
+                "resume": resume,
+            }
+
+    def _refresh_reconnect_button(self):
+        with self._pending_reconnect_lock:
+            available = self._pending_reconnect is not None
+        self.start_menu.set_reconnect_available(available)
+
+    def _on_reconnect_active_game(self):
+        with self._pending_reconnect_lock:
+            pending = self._pending_reconnect
+            self._pending_reconnect = None
+        if pending is None:
+            return
+        self.start_menu.set_reconnect_available(False)
+        resume = pending["resume"]
+        nickname = (resume["white_name"] if resume["your_color"] == "white"
+                    else resume["black_name"])
+        self.start_menu.text_input.text = nickname
+        self.start_menu.selected_mode = ONLINE
+        self.start_menu.selected_time_minutes = resume["time_minutes"]
+        self.start_menu.selected_increment_seconds = resume["increment_seconds"]
+        self.start_menu.selected_side = resume["your_color"]
+        self.online_client = OnlineClient()
+        self.match.on_local_move_applied = self._on_local_move_applied
+        self.online_client.reconnect_to_existing(
+            pending["addr"], pending["room_id"], pending["session_token"], resume,
+        )
         self.start_menu.hide()
 
     def _on_start_game(self, config):
@@ -600,6 +659,7 @@ class Frontend:
             self.result_menu.set_text(self.result_text())
             self.result_menu.draw()
             self.confirm_modal.draw()
+        self._refresh_reconnect_button()
         self.start_menu.draw()
         self.file_picker.draw()
         self.server_modal.draw()
