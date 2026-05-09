@@ -116,7 +116,10 @@ class RightMenu:
         lines = self._info_lines()
         if not lines:
             return 0
-        return self.font.get_linesize() * len(lines) + self.padding
+        return self._info_line_height() * len(lines) + self.padding
+
+    def _info_line_height(self):
+        return self.font.get_linesize() + 4
 
     def _info_lines(self):
         if self.game_info is None:
@@ -149,7 +152,7 @@ class RightMenu:
             self.audio_panel.draw()
 
     def _draw_game_info(self, rect):
-        line_h = self.font.get_linesize()
+        line_h = self._info_line_height()
         for i, line in enumerate(self._info_lines()):
             surf = self.font.render(line, True, Colors.white)
             max_w = rect.width - 2 * self.padding
