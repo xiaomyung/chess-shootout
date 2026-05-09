@@ -401,9 +401,12 @@ class Frontend:
 
     def _handle_game_resumed(self, payload):
         self.match.new_game()
-        apply_fen(self.match.backend, payload["fen"])
         for entry in payload.get("move_history", []):
-            self.match.backend.apply_san(entry["san"])
+            result = self.match.backend.apply_san(entry["san"])
+            if not result.legal:
+                log.warning("resume: SAN replay failed at %r", entry.get("san"))
+                apply_fen(self.match.backend, payload["fen"])
+                break
         if self._time_control is not None:
             initial, incr = self._time_control
             self.match.setup_clock(initial, incr)
