@@ -40,9 +40,13 @@ CAPTURE_SOUND_BY_PIECE = {
 class SoundManager:
 
     def __init__(self, sounds_dir, *, enabled=True, heartbeat=None,
-                 mild_channel=None, deep_channel=None):
+                 mild_channel=None, deep_channel=None, master_volume=None):
+        from frontend import env
         self.enabled = enabled
-        self.master_volume = 1.0
+        self.master_volume = (
+            env.get_master_volume() if master_volume is None
+            else max(0.0, min(1.0, float(master_volume)))
+        )
         self.heartbeat = heartbeat or HeartbeatConfig()
         self._state = STATE_OFF
         self._deep_speed_bucket = -1

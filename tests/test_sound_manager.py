@@ -38,7 +38,7 @@ def fake_channels():
 def manager(fake_channels):
     mild, deep = fake_channels
     return SoundManager(SOUNDS_DIR, heartbeat=FAST_HEARTBEAT,
-                        mild_channel=mild, deep_channel=deep)
+                        mild_channel=mild, deep_channel=deep, master_volume=1.0)
 
 
 # ---------- Construction ----------
@@ -485,7 +485,8 @@ def test_custom_thresholds(fake_channels):
 def test_custom_volume_bounds(fake_channels):
     mild, deep = fake_channels
     cfg = HeartbeatConfig(min_volume=0.3, max_volume=0.7)
-    sm = SoundManager(SOUNDS_DIR, heartbeat=cfg, mild_channel=mild, deep_channel=deep)
+    sm = SoundManager(SOUNDS_DIR, heartbeat=cfg, mild_channel=mild,
+                      deep_channel=deep, master_volume=1.0)
     sm.update_heartbeat(0.20, paused=False)  # MILD start
     assert mild.set_volume.call_args[0][0] == pytest.approx(0.3)
     sm.update_heartbeat(0.10001, paused=False)  # MILD end

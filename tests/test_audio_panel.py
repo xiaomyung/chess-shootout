@@ -25,7 +25,7 @@ def _pygame_init():
 @pytest.fixture
 def sm():
     pg.mixer.init() if not pg.mixer.get_init() else None
-    return SoundManager(SOUNDS_DIR, enabled=True)
+    return SoundManager(SOUNDS_DIR, enabled=True, master_volume=1.0)
 
 
 @pytest.fixture
@@ -37,8 +37,27 @@ def panel(sm):
 
 # ---------- SoundManager additions ----------
 
-def test_master_volume_default_is_one(sm):
+def test_master_volume_explicit_override(sm):
+    # Fixture passes master_volume=1.0; verify the explicit value is honored.
     assert sm.master_volume == 1.0
+
+
+def test_master_volume_falls_back_to_env_default(monkeypatch, tmp_path):
+    pg.mixer.init() if not pg.mixer.get_init() else None
+    from frontend import env as env_mod
+    monkeypatch.setattr(env_mod, "_ENV_PATH", tmp_path / ".env")
+    monkeypatch.delenv("CHESS_MASTER_VOLUME", raising=False)
+    s = SoundManager(SOUNDS_DIR, enabled=True)
+    assert s.master_volume == env_mod._DEFAULT_MASTER_VOLUME
+
+
+def test_master_volume_reads_env_when_set(monkeypatch, tmp_path):
+    pg.mixer.init() if not pg.mixer.get_init() else None
+    from frontend import env as env_mod
+    monkeypatch.setattr(env_mod, "_ENV_PATH", tmp_path / ".env")
+    monkeypatch.setenv("CHESS_MASTER_VOLUME", "0.42")
+    s = SoundManager(SOUNDS_DIR, enabled=True)
+    assert s.master_volume == pytest.approx(0.42, abs=1e-3)
 
 
 def test_set_master_volume_clamps_below_zero(sm):
@@ -88,7 +107,7 @@ def test_play_with_master_scales_volume_before_playing():
 
 def test_lerp_volume_scales_by_master():
     pg.mixer.init() if not pg.mixer.get_init() else None
-    s = SoundManager(SOUNDS_DIR, enabled=True)
+    s = SoundManager(SOUNDS_DIR, enabled=True, master_volume=1.0)
     base = s._lerp_volume(1.0)
     s.master_volume = 0.5
     half = s._lerp_volume(1.0)
@@ -174,6 +193,28 @@ def test_panel_end_drag_clears(panel):
     assert panel._dragging_slider is True
     panel.end_drag()
     assert panel._dragging_slider is False
+
+
+def test_panel_end_drag_persists_volume_to_env(panel, sm, monkeypatch, tmp_path):
+    from frontend import env as env_mod
+    monkeypatch.setattr(env_mod, "_ENV_PATH", tmp_path / ".env")
+    monkeypatch.delenv("CHESS_MASTER_VOLUME", raising=False)
+    panel.set_rect(pg.Rect(0, 0, 200, 40))
+    track = panel._track_rect()
+    panel.handle_click((track.centerx, track.centery))
+    assert panel._dragging_slider is True
+    panel.end_drag()
+    # The end-of-drag persisted whatever volume the slider committed.
+    assert env_mod.get_master_volume() == pytest.approx(sm.master_volume, abs=1e-3)
+
+
+def test_panel_end_drag_does_not_persist_when_not_dragging(panel, monkeypatch, tmp_path):
+    from frontend import env as env_mod
+    monkeypatch.setattr(env_mod, "_ENV_PATH", tmp_path / ".env")
+    monkeypatch.delenv("CHESS_MASTER_VOLUME", raising=False)
+    # No prior click/drag — end_drag should not write to .env.
+    panel.end_drag()
+    assert not (tmp_path / ".env").exists()
 
 
 def test_panel_drag_clamps_at_track_edges(panel, sm):

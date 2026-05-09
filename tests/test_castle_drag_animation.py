@@ -127,3 +127,16 @@ def test_drag_castle_rook_animation_carries_on_complete(board):
     # In drag-castle the on_complete (move_landed_callback firing) is attached to the rook
     # — without this the post-move auto-flip + sound logic would never run.
     assert rook_anim.on_complete is not None
+
+
+def test_drag_move_stamps_last_animation_completed_for_flip_delay(board):
+    """A non-castle drag move snaps with no animation but must still trigger the
+    post-move flip delay — otherwise the board flips instantly mid-drag-release,
+    which feels jarring compared to clicked moves."""
+    e2 = Square(6, 4)
+    e4 = Square(4, 4)
+    before = board.last_animation_completed_at_ms
+    board.handle_click(e2)
+    board.dragging_from = e2
+    board.handle_click(e4)
+    assert board.last_animation_completed_at_ms > before

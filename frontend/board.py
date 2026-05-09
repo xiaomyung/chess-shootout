@@ -735,6 +735,7 @@ class Board:
                 self._start_castle_rook_animation(entry, from_sq, on_complete=on_complete)
             else:
                 on_complete()
+                self.last_animation_completed_at_ms = pg.time.get_ticks()
             return
 
         self.start_animation(from_sq, to_sq, moving_piece, on_complete=on_complete)

@@ -1,5 +1,6 @@
 import pygame as pg
 
+from frontend import env
 from frontend.colors import Colors
 from frontend.widgets import draw_button
 
@@ -90,6 +91,8 @@ class AudioPanel:
         return True
 
     def end_drag(self):
+        if self._dragging_slider:
+            env.set_master_volume(self.sound_manager.master_volume)
         self._dragging_slider = False
 
     def _update_volume_from_pos(self, pos):

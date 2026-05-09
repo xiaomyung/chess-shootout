@@ -6,6 +6,7 @@ from dotenv import load_dotenv, set_key
 
 
 _DEFAULT_SERVER_ADDR = "localhost:8000"
+_DEFAULT_MASTER_VOLUME = 0.70
 
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 _ENV_PATH = _PROJECT_ROOT / ".env"
@@ -56,6 +57,23 @@ def get_last_mode():
 def set_last_mode(mode):
     os.environ["CHESS_LAST_MODE"] = mode
     _persist("CHESS_LAST_MODE", mode)
+
+
+def get_master_volume():
+    raw = os.environ.get("CHESS_MASTER_VOLUME")
+    if not raw:
+        return _DEFAULT_MASTER_VOLUME
+    try:
+        value = float(raw)
+    except ValueError:
+        return _DEFAULT_MASTER_VOLUME
+    return max(0.0, min(1.0, value))
+
+
+def set_master_volume(value):
+    clamped = max(0.0, min(1.0, float(value)))
+    os.environ["CHESS_MASTER_VOLUME"] = f"{clamped:.3f}"
+    _persist("CHESS_MASTER_VOLUME", f"{clamped:.3f}")
 
 
 def _persist(key, value):
