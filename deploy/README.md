@@ -25,6 +25,39 @@ The `build-essential ... liblzma-dev` block is what `pyenv` needs to
 compile Python from source; skip it if you already have a working 3.12
 on the system.
 
+#### Debian 13 (Trixie) binutils gotcha
+
+On Debian 13 the `binutils-x86-64-linux-gnu` package ships its
+binaries (`as`, `ld`, ...) with mode `0750` or `0754`, so the chess
+user can't execute them. `gcc` will fail with
+`cannot execute 'as': posix_spawnp: Permission denied` part-way through
+the pyenv build. Fix once after the apt install:
+
+```bash
+sudo chmod 0755 \
+    /usr/bin/x86_64-linux-gnu-as \
+    /usr/bin/x86_64-linux-gnu-ld \
+    /usr/bin/x86_64-linux-gnu-ld.bfd \
+    /usr/bin/x86_64-linux-gnu-ld.gold \
+    /usr/bin/x86_64-linux-gnu-objcopy \
+    /usr/bin/x86_64-linux-gnu-objdump \
+    /usr/bin/x86_64-linux-gnu-strip \
+    /usr/bin/x86_64-linux-gnu-ar \
+    /usr/bin/x86_64-linux-gnu-ranlib \
+    /usr/bin/x86_64-linux-gnu-nm 2>/dev/null
+```
+
+Reinstalling `binutils-x86-64-linux-gnu` does not help — the .deb
+itself ships with these perms. Verified on Hetzner's Debian 13 image
+and on a separate Debian 13 homelab.
+
+Quick verify:
+
+```bash
+echo 'int main(void){return 0;}' > /tmp/h.c && gcc /tmp/h.c -o /tmp/h && echo OK || echo FAIL
+rm -f /tmp/h /tmp/h.c
+```
+
 ### 2. Python 3.12 via pyenv (under the `chess` user)
 
 Debian 12's main repos top out at 3.11; Debian 13 ships 3.13 — neither
