@@ -32,6 +32,8 @@ MANUAL_RESULT_TEXT = {
     "white_wins": ("White wins", "by resignation"),
     "black_wins": ("Black wins", "by resignation"),
     "draw_agreement": ("Draw", "by agreement"),
+    "aborted": ("Game aborted", "no moves played"),
+    "server_shutdown": ("Game cancelled", "server shutting down"),
 }
 
 ENGINE_RESULT_TEXT = {
@@ -395,9 +397,9 @@ class Frontend:
         elif reason == "abandonment":
             self.manual_result = ("white_wins" if winner == "white" else "black_wins")
         elif reason == "aborted":
-            self.manual_result = "draw_agreement"
+            self.manual_result = "aborted"
         elif reason == "server_shutdown":
-            self.manual_result = "draw_agreement"
+            self.manual_result = "server_shutdown"
 
     def _on_rematch(self):
         if self.online_client is None:
