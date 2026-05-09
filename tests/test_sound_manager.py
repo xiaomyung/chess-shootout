@@ -108,6 +108,27 @@ def test_construction_with_missing_oneshot_files_returns_none(tmp_path):
         assert sm._sounds[key] is None
 
 
+def test_reserve_channel_marks_channel_as_reserved_in_pg_mixer():
+    # Bug repro: without set_reserved(1) the heartbeat channel (Channel(0))
+    # remains a valid auto-allocation target. A one-shot sound (e.g.
+    # online_game_start) played while heartbeat is silent gets auto-assigned
+    # to channel 0, and the next stop_all() — which fades out channel 0
+    # because it "owns" the heartbeat channel — silences the still-playing
+    # one-shot. Reserving the slot keeps auto-alloc on channels 1..N-1.
+    with patch.object(pg.mixer, "set_reserved") as set_reserved:
+        SoundManager._reserve_channel(0)
+    set_reserved.assert_called_once_with(1)
+
+
+def test_real_construction_reserves_channel_zero(tmp_path):
+    # End-to-end: building a SoundManager without an injected heartbeat
+    # channel must call set_reserved(1) so subsequent Sound.play() never
+    # picks channel 0.
+    with patch.object(pg.mixer, "set_reserved") as set_reserved:
+        SoundManager(tmp_path, master_volume=1.0)
+    set_reserved.assert_called_once_with(1)
+
+
 # ---------- One-shot dispatch ----------
 
 @pytest.mark.parametrize("method,sounds_attr", [

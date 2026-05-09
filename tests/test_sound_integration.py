@@ -52,7 +52,6 @@ def test_start_game_single_screen_plays_game_start():
 def test_start_game_calls_stop_all_before_play_game_start():
     app = make_app()
     app._on_start_game(base_config())
-    # stop_all happens in _reset_to_new_game, before play_game_start.
     calls = [c[0] for c in app.sound_manager.method_calls]
     assert "stop_all" in calls
     assert "play_game_start" in calls

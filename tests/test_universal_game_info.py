@@ -39,6 +39,7 @@ def _start_local(app, time_minutes=5, incr=2):
 # ---------- single-screen ----------
 
 def test_single_screen_lines():
+    # Local mode has no series concept, so row 2 is just the time control.
     app = _make_app()
     _start_local(app)
     lines = app._compute_game_info_lines()
@@ -66,6 +67,9 @@ def test_bot_mode_lines():
 # ---------- online mode (series score) ----------
 
 def test_online_initial_series_zero_zero():
+    # Online combines series score and time control on row 2 so the panel
+    # reads "Alice vs Bob / 0 - 0 · 3+2 / ping: —" — three lines instead
+    # of four, more compact use of vertical space.
     app = _make_app()
     app.mode = ONLINE
     app.white_name = "Alice"
@@ -73,8 +77,8 @@ def test_online_initial_series_zero_zero():
     app._time_control = (180, 2)
     lines = app._compute_game_info_lines()
     assert lines[0] == "Alice  vs  Bob"
-    assert lines[1] == "3+2"
-    assert lines[2] == "0 - 0"
+    assert lines[1] == "0 - 0  ·  3+2"
+    assert lines[2] == "ping: —"
 
 
 @pytest.mark.parametrize(
@@ -97,7 +101,7 @@ def test_series_score_formatting(white_score, black_score, expected):
     app._series_white_score = white_score
     app._series_black_score = black_score
     lines = app._compute_game_info_lines()
-    assert lines[2] == expected
+    assert lines[1] == f"{expected}  ·  1+0"
 
 
 def test_series_resets_when_opponent_pair_changes():
@@ -164,12 +168,14 @@ def test_aborted_does_not_change_series():
 # ---------- pgn review ----------
 
 def test_pgn_review_uses_pgn_result_tag():
+    # PGN review treats the result tag as the "count" — combined with TC on
+    # the same row, mirroring the online "score · TC" layout.
     app = _make_app()
     _start_local(app)
     app._pgn_result_tag = "1-0"
     app.pgn_review = True
     lines = app._compute_game_info_lines()
-    assert "1-0" in lines
+    assert lines == ["Review", "1-0  ·  5+2"]
 
 
 def test_pgn_review_falls_back_to_star_when_no_tag():
@@ -178,7 +184,7 @@ def test_pgn_review_falls_back_to_star_when_no_tag():
     app._pgn_result_tag = None
     app.pgn_review = True
     lines = app._compute_game_info_lines()
-    assert "*" in lines
+    assert lines == ["Review", "*  ·  5+2"]
 
 
 def test_pgn_review_inline_result_suppresses_modal():
@@ -194,6 +200,34 @@ def test_menu_mode_returns_no_lines():
     app = _make_app()
     assert app.mode == "menu"
     assert app._compute_game_info_lines() is None
+
+
+# ---------- online ping line ----------
+
+def test_online_ping_line_shows_value_when_client_has_samples():
+    app = _make_app()
+    app.mode = ONLINE
+    app.white_name = "A"
+    app.black_name = "B"
+    app._time_control = (60, 0)
+    fake = MagicMock()
+    fake.get_ping_ms.return_value = 42
+    app.online_client = fake
+    lines = app._compute_game_info_lines()
+    assert lines[2] == "ping: 42 ms"
+
+
+def test_online_ping_line_dash_when_no_samples():
+    app = _make_app()
+    app.mode = ONLINE
+    app.white_name = "A"
+    app.black_name = "B"
+    app._time_control = (60, 0)
+    fake = MagicMock()
+    fake.get_ping_ms.return_value = None
+    app.online_client = fake
+    lines = app._compute_game_info_lines()
+    assert lines[2] == "ping: —"
 
 
 # ---------- right_menu set_game_info accepts list ----------

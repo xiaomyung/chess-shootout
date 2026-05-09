@@ -105,7 +105,9 @@ class SoundManager:
     @staticmethod
     def _reserve_channel(idx):
         try:
-            return pg.mixer.Channel(idx)
+            channel = pg.mixer.Channel(idx)
+            pg.mixer.set_reserved(idx + 1)
+            return channel
         except pg.error:
             return None
 

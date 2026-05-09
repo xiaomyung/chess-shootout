@@ -124,7 +124,6 @@ class ServerTransport:
 
     def _sync_request(self, method, path, *, json_body=None, timeout=HTTP_TIMEOUT_SECONDS):
         url = self._url.http(path)
-        client = self._http or httpx
         try:
             if self._http is not None:
                 r = self._http.request(method, url, json=json_body, timeout=timeout)
@@ -279,3 +278,6 @@ class ServerWebSocket:
             return json.loads(raw)
         except json.JSONDecodeError:
             return None
+
+    async def ping(self):
+        return await self._ws.ping()

@@ -19,7 +19,7 @@ from frontend.modals.help import HelpModal
 from frontend.modals.reconnecting import ReconnectingModal
 from frontend.visual.toast import Toast
 from frontend.online.client import OnlineClient, fetch_resume, probe_active_game
-from frontend.online.events import OnlineEventsMixin
+from frontend.online.events import ONLINE_HARD_FAILURE_LABELS, OnlineEventsMixin
 from frontend.panels.player_strip import PlayerStrip
 from frontend.modals.server import ServerAddressModal
 from frontend.modals.wait import WaitModal
@@ -342,7 +342,21 @@ class Frontend(OnlineEventsMixin):
         if pending is None:
             return
         self.start_menu.set_reconnect_available(False)
-        resume = pending["resume"]
+        resume = fetch_resume(
+            pending["addr"], pending["room_id"], pending["session_token"],
+        )
+        if resume is None:
+            log.warning("reconnect: fresh /resume failed; restoring pending entry")
+            with self._pending_reconnect_lock:
+                self._pending_reconnect = pending
+            self.start_menu.set_reconnect_available(True)
+            self.confirm_modal.show(
+                ONLINE_HARD_FAILURE_LABELS["reconnect_failed"],
+                on_yes=self._on_reconnect_active_game,
+                on_no=lambda: None,
+                yes_label="Retry", no_label="Cancel",
+            )
+            return
         nickname = (resume["white_name"] if resume["your_color"] == "white"
                     else resume["black_name"])
         self.start_menu.text_input.text = nickname
@@ -352,6 +366,8 @@ class Frontend(OnlineEventsMixin):
         self.start_menu.selected_side = resume["your_color"]
         self.online_client = OnlineClient()
         self.match.on_local_move_applied = self._on_local_move_applied
+        self._start_online_game(resume)
+        self._handle_game_resumed(resume)
         self.online_client.reconnect_to_existing(
             pending["addr"], pending["room_id"], pending["session_token"], resume,
         )
@@ -732,18 +748,16 @@ class Frontend(OnlineEventsMixin):
     def _compute_game_info_lines(self):
         if self.mode == "menu":
             return None
+        tc = self._format_time_control() or "no clock"
         if self.pgn_review:
-            tc = self._format_time_control()
             result = self._pgn_result_tag or "*"
-            return ["Review", tc, result] if tc else ["Review", result]
+            return ["Review", f"{result}  ·  {tc}"]
         if self.mode == ONLINE:
             names = f"{self.white_name}  vs  {self.black_name}"
-            tc = self._format_time_control() or "no clock"
-            return [names, tc, self._series_score_text()]
+            return [names, f"{self._series_score_text()}  ·  {tc}",
+                    self._format_ping_line()]
         if self.mode == BOT:
-            tc = self._format_time_control() or "no clock"
             return ["vs Bot (preview)", tc]
-        tc = self._format_time_control() or "no clock"
         return ["Local game", tc]
 
     def _format_time_control(self):
@@ -751,6 +765,11 @@ class Frontend(OnlineEventsMixin):
             return None
         initial, incr = self._time_control
         return f"{int(initial // 60)}+{int(incr)}"
+
+    def _format_ping_line(self):
+        ping = (self.online_client.get_ping_ms()
+                if self.online_client is not None else None)
+        return f"ping: {ping} ms" if ping is not None else "ping: —"
 
     def _series_score_text(self):
         return f"{_score_str(self._series_white_score)} - {_score_str(self._series_black_score)}"
