@@ -171,29 +171,32 @@ caps. Steps in the Cloudflare dashboard for your zone:
    serves a Let's Encrypt cert that satisfies (strict).
 3. **SSL/TLS → Edge Certificates → Always Use HTTPS = ON.**
 4. **Network → WebSockets = ON** (default; verify).
-5. **Bot Fight Mode and Security Level: scope a bypass to the chess
-   subdomain — don't relax them zone-wide.** Bot Fight Mode serves a
-   JS interstitial to anything Cloudflare's heuristics flag as a bot,
-   which includes `curl`, the pygame client (no JS runtime), and the
-   WebSocket handshake. Disabling it zone-wide would also strip
-   protection from any other site you ever host on the same root
-   domain. Instead:
+5. **Bot Fight Mode (free plan): turn OFF zone-wide.** Bot Fight Mode
+   serves a JS interstitial to anything Cloudflare's heuristics flag
+   as a bot, which includes `curl`, the pygame client (no JS runtime),
+   and the WebSocket handshake. Per Cloudflare's own docs, free Bot
+   Fight Mode "does not run on the Ruleset Engine" and **cannot be
+   bypassed by a Custom Rule** — that bypass works only with Super Bot
+   Fight Mode on the Pro plan. So the only free-tier option is to
+   disable it zone-wide.
 
-   **Custom Rule** (Cloudflare → Security rules → Custom rules — older
-   dashboards label this section "WAF" instead of "Security rules"):
-   - Field: Hostname, Operator: equals, Value: `chess.your-domain.com`
-   - Action: Skip
-   - Features to skip: Bot Fight Mode, Super Bot Fight Mode, All
-     Managed Rules
+   For the rest of your domain (non-chess sites), real bot protection
+   on the free tier is better done with: Cloudflare Managed Rules,
+   Custom Rules targeting specific abuse signatures per-hostname, and
+   Rate Limiting (1 free rule). All of those DO honor per-hostname
+   filters, unlike Bot Fight Mode.
 
-   **Configuration Rule** (Cloudflare → Rules → Configuration Rules):
-   - Hostname equals `chess.your-domain.com`
+6. **Security Level: keep zone-wide strict, override for chess via
+   Configuration Rule.** Higher Security Level levels reintroduce the
+   same JS-challenge problem for any client Cloudflare's heuristics
+   flag. To scope this only to the chess subdomain, follow Cloudflare's
+   Configuration Rules docs (https://developers.cloudflare.com/rules/configuration-rules/create-dashboard/):
+   - When: Hostname equals `chess.your-domain.com`
    - Then settings: Security Level → Essentially Off
 
-   Net effect: zone-wide protection stays strict; only the chess
-   subdomain pass-through is wide-open at the CF layer. The app's
-   per-uuid + per-IP rate limits and Pydantic validation cover abuse
-   on its end.
+The app's per-uuid + per-IP rate limits and Pydantic validation cover
+abuse on the chess subdomain server-side, so the relaxed CF posture
+on that one hostname is fine.
 
 Cloudflare's WebSocket idle timeout is 100 seconds — our server already
 sends ping frames every 20s (`ws_ping_interval=20` in
