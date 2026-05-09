@@ -27,9 +27,9 @@ class HelpModal(BaseModal):
         self.button_rects = {}
 
     def _on_rect_changed(self):
-        self.title_font = self.font(factor=10, min_size=18, bold=True)
-        self.row_font = self.font(factor=18, min_size=14, bold=False)
-        self.button_font = self.font(factor=20, min_size=12, bold=True)
+        self.title_font = self.font(factor=14, min_size=14, bold=True)
+        self.row_font = self.font(factor=28, min_size=10, bold=False)
+        self.button_font = self.font(factor=24, min_size=11, bold=True)
 
     def show(self):
         self._visible = True
@@ -64,19 +64,32 @@ class HelpModal(BaseModal):
         rows_top = title_band.bottom + pad
         rows_bottom = self.rect.bottom - pad - button_h - pad
         rows_height = max(rows_bottom - rows_top, 1)
-        line_h = max(rows_height // max(len(HOTKEYS), 1), self.row_font.get_height() + 4)
+        line_h = max(rows_height // max(len(HOTKEYS), 1), 1)
 
-        key_col_w = int((self.rect.width - 2 * pad) * 0.4)
+        inner_w = self.rect.width - 2 * pad
+        key_col_w = int(inner_w * 0.35)
+        desc_col_w = inner_w - key_col_w - pad
         for i, (key, desc) in enumerate(HOTKEYS):
             row_y = rows_top + i * line_h
             if row_y + line_h > rows_bottom:
                 break
-            key_surf = self.row_font.render(key, True, Colors.white)
-            self.window.blit(key_surf, (self.rect.x + pad, row_y))
-            desc_surf = self.row_font.render(desc, True, Colors.white)
+            key_rect = pg.Rect(self.rect.x + pad, row_y, key_col_w, line_h)
+            desc_rect = pg.Rect(
+                self.rect.x + pad + key_col_w + pad, row_y, desc_col_w, line_h,
+            )
+            key_surf = fit_text_to_rect(
+                self.row_font.render(key, True, Colors.white), key_rect,
+            )
+            desc_surf = fit_text_to_rect(
+                self.row_font.render(desc, True, Colors.white), desc_rect,
+            )
+            self.window.blit(
+                key_surf,
+                (key_rect.x, key_rect.centery - key_surf.get_height() // 2),
+            )
             self.window.blit(
                 desc_surf,
-                (self.rect.x + pad + key_col_w, row_y),
+                (desc_rect.x, desc_rect.centery - desc_surf.get_height() // 2),
             )
 
         button_row = pg.Rect(
