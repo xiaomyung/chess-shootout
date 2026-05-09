@@ -73,7 +73,7 @@ async def handle_move(app, websocket, room, color, raw):
         log.info("move rejected room=%s mover=%s expected=%s reason=not_your_turn",
                  room.room_id, color, expected)
         await send(connections.get_for_color(room, color),
-                     ErrorMessage(reason=Reason.NOT_YOUR_TURN))
+                     ErrorMessage(reason=Reason.NOT_YOUR_TURN, msg_type="move"))
         return "not_your_turn"
     result = room.backend.try_move(from_sq, to_sq)
     if not result.legal:
@@ -126,7 +126,7 @@ async def handle_draw_offer(app, websocket, room, color, raw):
     expected = _color_to_move(room.backend)
     if color != expected:
         await send(connections.get_for_color(room, color),
-                     ErrorMessage(reason=Reason.NOT_YOUR_TURN))
+                     ErrorMessage(reason=Reason.NOT_YOUR_TURN, msg_type="draw_offer"))
         return "not_your_turn"
     if room.draw_offered_by is not None and room.draw_offered_by != color:
         log.info("draw mutual room=%s", room.room_id)
@@ -213,7 +213,8 @@ async def handle_takeback_request(app, websocket, room, color, raw):
     expected = _color_to_move(room.backend)
     if color == expected:
         await send(connections.get_for_color(room, color),
-                     ErrorMessage(reason=Reason.NOT_YOUR_TURN))
+                     ErrorMessage(reason=Reason.NOT_YOUR_TURN,
+                                    msg_type="takeback_request"))
         return "not_your_turn"
     if not room.backend.move_history:
         return "no_moves"

@@ -201,6 +201,50 @@ def test_out_of_turn_move_rejected(client):
             err = json.loads(ws_b.receive_text())
             assert err["type"] == "error"
             assert err["reason"] == Reason.NOT_YOUR_TURN
+            # The originating msg_type rides along so the client can attach a
+            # context-specific toast (M-PR online UX).
+            assert err["msg_type"] == "move"
+
+
+def test_draw_offer_off_turn_tags_msg_type(client):
+    # Black tries to offer a draw before white moves — server replies
+    # not_your_turn AND tells the client the offending msg_type.
+    random.seed(0)
+    r1 = _matchmake(client, uuid=ALICE, side="white")
+    r2 = _matchmake(client, uuid=BOB, side="black")
+    with client.websocket_connect(f"/ws/{r1.json()['room_id']}") as ws_w:
+        ws_w.send_text(json.dumps(_auth_msg(r1.json()["session_token"])))
+        with client.websocket_connect(f"/ws/{r2.json()['room_id']}") as ws_b:
+            ws_b.send_text(json.dumps(_auth_msg(r2.json()["session_token"])))
+            ws_w.receive_text()
+            ws_b.receive_text()
+            ws_b.send_text(json.dumps({"version": PROTOCOL_VERSION,
+                                        "type": "draw_offer"}))
+            err = json.loads(ws_b.receive_text())
+            assert err["type"] == "error"
+            assert err["reason"] == Reason.NOT_YOUR_TURN
+            assert err["msg_type"] == "draw_offer"
+
+
+def test_takeback_request_off_turn_tags_msg_type(client):
+    # White is on the move (no plies played) — white asking for a
+    # takeback gets not_your_turn tagged with msg_type=takeback_request
+    # so the client can surface the right toast.
+    random.seed(0)
+    r1 = _matchmake(client, uuid=ALICE, side="white")
+    r2 = _matchmake(client, uuid=BOB, side="black")
+    with client.websocket_connect(f"/ws/{r1.json()['room_id']}") as ws_w:
+        ws_w.send_text(json.dumps(_auth_msg(r1.json()["session_token"])))
+        with client.websocket_connect(f"/ws/{r2.json()['room_id']}") as ws_b:
+            ws_b.send_text(json.dumps(_auth_msg(r2.json()["session_token"])))
+            ws_w.receive_text()
+            ws_b.receive_text()
+            ws_w.send_text(json.dumps({"version": PROTOCOL_VERSION,
+                                        "type": "takeback_request"}))
+            err = json.loads(ws_w.receive_text())
+            assert err["type"] == "error"
+            assert err["reason"] == Reason.NOT_YOUR_TURN
+            assert err["msg_type"] == "takeback_request"
 
 
 def test_invalid_move_format_rejected(client):

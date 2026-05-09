@@ -42,6 +42,11 @@ ONLINE_GAME_STATE_REASONS = {
     "version_mismatch",
 }
 
+NOT_YOUR_TURN_TOASTS = {
+    "draw_offer": "You can only offer a draw on your own turn",
+    "takeback_request": "Take back is only available right after your move",
+}
+
 
 class OnlineEventsMixin:
 
@@ -88,6 +93,11 @@ class OnlineEventsMixin:
 
     def _handle_online_error(self, payload):
         reason = payload.get("reason", "")
+        if reason == "not_your_turn":
+            label = NOT_YOUR_TURN_TOASTS.get(payload.get("msg_type"))
+            if label is not None:
+                self.toast.show(label)
+            return
         if reason in ONLINE_GAME_STATE_REASONS:
             return
         if reason == "room_lost":
