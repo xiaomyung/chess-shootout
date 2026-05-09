@@ -4,23 +4,69 @@ Single-VPS deployment with Caddy + systemd. Local dev runs on
 `localhost:8000` with no TLS; the VPS runs uvicorn behind Caddy on
 `:443` with auto-renewed Let's Encrypt certs.
 
-## Server VPS setup
+Tested on Debian 12 (Bookworm) and Debian 13 (Trixie). All commands
+below run as a sudoer user (e.g. `apollo`); the actual chess process
+runs as a dedicated unprivileged `chess` system user.
+
+## One-time setup
+
+### 1. System packages and the `chess` user
 
 ```bash
-# 1. System packages
 sudo apt update
-sudo apt install -y python3.12 python3.12-venv caddy git
+sudo apt install -y caddy git curl \
+    build-essential libssl-dev zlib1g-dev libbz2-dev libreadline-dev \
+    libsqlite3-dev libncursesw5-dev xz-utils tk-dev libffi-dev liblzma-dev
 
-# 2. App user + checkout
-sudo useradd -r -m -d /opt/chess chess
-sudo -u chess git clone https://github.com/xiaomyung/chess-pygame /opt/chess
-cd /opt/chess
-sudo -u chess python3.12 -m venv .venv
-sudo -u chess .venv/bin/pip install -e .
+sudo useradd -r -m -d /opt/chess -s /bin/bash chess
+```
 
-# 3. Server env
-sudo cp deploy/chess-server.service.example /etc/systemd/system/chess-server.service
-sudo tee /etc/chess-server.env > /dev/null <<EOF
+The `build-essential ... liblzma-dev` block is what `pyenv` needs to
+compile Python from source; skip it if you already have a working 3.12
+on the system.
+
+### 2. Python 3.12 via pyenv (under the `chess` user)
+
+Debian 12's main repos top out at 3.11; Debian 13 ships 3.13 — neither
+matches our `requires-python = ">=3.12,<3.13"` pin. pyenv builds a
+local 3.12 for the `chess` user without touching system Python.
+
+```bash
+sudo -u chess -- bash -lc '
+    curl -fsSL https://pyenv.run | bash
+    cat >> ~/.bashrc <<EOF
+
+export PYENV_ROOT="\$HOME/.pyenv"
+[[ -d \$PYENV_ROOT/bin ]] && export PATH="\$PYENV_ROOT/bin:\$PATH"
+eval "\$(pyenv init - bash)"
+EOF
+'
+
+sudo -u chess -i bash -c 'pyenv install 3.12 && pyenv global 3.12 && python --version'
+# Expect: Python 3.12.x
+```
+
+(If you already have a working `python3.12` from `bookworm-backports`,
+skip this and have the venv use `/usr/bin/python3.12` instead.)
+
+### 3. Clone, venv, install
+
+```bash
+sudo -u chess -i bash -c '
+    git clone https://github.com/xiaomyung/chess-pygame /opt/chess/repo
+    cd /opt/chess/repo
+    python -m venv .venv
+    .venv/bin/pip install -U pip
+    .venv/bin/pip install -e .
+'
+```
+
+### 4. systemd unit + env
+
+```bash
+sudo cp /opt/chess/repo/deploy/chess-server.service.example /etc/systemd/system/chess-server.service
+
+sudo tee /etc/chess-server.env > /dev/null <<'EOF'
 HOST=127.0.0.1
 PORT=8000
 LOG_LEVEL=INFO
@@ -28,47 +74,78 @@ LOG_FILE=/var/log/chess-server.log
 MAX_ROOMS=100
 EOF
 
-# 4. Caddy
-sudo cp deploy/Caddyfile.example /etc/caddy/Caddyfile
-sudo sed -i 's/chess.example.com/your-actual-domain.com/' /etc/caddy/Caddyfile
+sudo touch /var/log/chess-server.log
+sudo chown chess:chess /var/log/chess-server.log
+```
 
-# 5. Start
+### 5. Caddy + DNS
+
+Point an `A` (and optionally `AAAA`) record for your hostname at the
+VPS, then:
+
+```bash
+sudo cp /opt/chess/repo/deploy/Caddyfile.example /etc/caddy/Caddyfile
+sudo sed -i 's/chess.example.com/your-actual-domain.com/' /etc/caddy/Caddyfile
+```
+
+### 6. Start everything
+
+```bash
 sudo systemctl daemon-reload
 sudo systemctl enable --now chess-server caddy
+```
 
-# 6. Verify
+### 7. Verify
+
+```bash
 curl https://your-actual-domain.com/healthz
 # {"status":"ok","version":1,"rooms_active":0,"queue_depth":0,"uptime_s":4.12}
 ```
 
-`LOG_FILE` is optional — when set, the server attaches a
-`RotatingFileHandler` (5 MiB × 3 backups) to the root logger in
-addition to journald. Drop the line to log only via `journalctl`.
+## Operations
+
+Day-to-day commands. All require `sudo` unless noted.
+
+| Action | Command |
+|---|---|
+| Start | `sudo systemctl start chess-server` |
+| Stop | `sudo systemctl stop chess-server` |
+| Restart (e.g. after env change) | `sudo systemctl restart chess-server` |
+| Status (running? recent logs?) | `sudo systemctl status chess-server` |
+| Live logs | `sudo journalctl -u chess-server -f` |
+| Logs since boot | `sudo journalctl -u chess-server -b` |
+| Last 200 lines | `sudo journalctl -u chess-server -n 200 --no-pager` |
+| Live `LOG_FILE` (if set) | `sudo tail -f /var/log/chess-server.log` |
+| Disable autostart | `sudo systemctl disable chess-server` |
+| Re-enable autostart | `sudo systemctl enable chess-server` |
+| Caddy reload (config change) | `sudo systemctl reload caddy` |
+| Caddy logs | `sudo journalctl -u caddy -f` |
+
+The `chess-server.service` lifespan handler broadcasts a
+`server_shutdown` result to all active rooms before exit, so a clean
+`stop` / `restart` shows connected clients
+"Game cancelled / server shutting down" instead of an abrupt drop.
+After a restart, clients reconnecting hit the
+"Server restarted — game ended" modal (`/resume` 4xx + `/healthz` ok)
+and can click **New Search** to immediately re-pair.
 
 ## Updating
 
 ```bash
-cd /opt/chess
-sudo -u chess git pull
-sudo -u chess .venv/bin/pip install -e .
+sudo -u chess -i bash -c 'cd /opt/chess/repo && git pull && .venv/bin/pip install -e .'
 sudo systemctl restart chess-server
 ```
-
-The `chess-server.service` lifespan handler broadcasts a
-`server_shutdown` result to all active rooms before exit, so connected
-clients see "Game cancelled / server shutting down" instead of an
-abrupt drop. Clients reconnecting after the restart hit the
-"Server restarted — game ended" modal (because `/resume` 4xx-fatals but
-`/healthz` is reachable) and can click **New Search** to immediately
-re-pair.
 
 ## Client connection
 
 Players set `CHESS_SERVER_ADDR=your-actual-domain.com` in their `.env`.
 The client's scheme heuristic picks `wss://` for hostnames (anything
-that isn't `localhost`/IP/port-8000), so TLS is automatic.
+that isn't `localhost`/IP/port-8000), so TLS is automatic — no
+configuration on the client.
 
-## Endpoints
+## Reference
+
+### Endpoints
 
 | Path | Method | Purpose |
 |---|---|---|
@@ -80,14 +157,19 @@ that isn't `localhost`/IP/port-8000), so TLS is automatic.
 | `/reclaim` | POST | App-restart reconnect (uuid → fresh token) |
 | `/ws/{room_id}` | WS | Auth handshake then game events |
 
-`/reclaim` is rate-limited per-uuid (5/min sliding window) on top of
-slowapi's 30/min/IP cap. Per-WS dispatch is rate-limited at 30 msg/sec
-per session — exceeded messages get a `rate_limited` error reply.
+### Rate limits
 
-## Logs
+- `/reclaim` — 5/min per uuid (sliding 60s window) on top of slowapi's
+  120/min/IP cap.
+- `/matchmake` — 60/min/IP.
+- `/resume` — 60/min/IP.
+- Per-WS — 30 msg/sec per session; exceeded messages get a
+  `rate_limited` error reply but the connection stays open.
 
-`journalctl -u chess-server -f` (or `tail -f $LOG_FILE` if set) shows
-the structured key-value lines:
+### Logs
+
+`journalctl -u chess-server -f` (or `tail -f $LOG_FILE`) shows the
+structured key-value lines:
 
 ```
 matchmake nickname=… uuid=… tc=…
@@ -102,11 +184,13 @@ abandonment / aborted / drop room=…
 ws disconnected room=… color=…
 ```
 
-`LOG_LEVEL=DEBUG` adds one line per WS message:
+`LOG_LEVEL=DEBUG` in `/etc/chess-server.env` adds one line per WS
+message:
 
 ```
 ws dispatch room=… uuid=… type=move latency_ms=0.9 outcome=applied
 ws dispatch room=… uuid=… type=draw_offer latency_ms=0.2 outcome=offered
 ```
 
-UUIDs are truncated to 8 chars in every log line.
+UUIDs are truncated to 8 chars in every log line. Restart the service
+after changing `LOG_LEVEL`.
