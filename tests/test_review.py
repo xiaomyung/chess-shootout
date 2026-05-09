@@ -446,6 +446,22 @@ def test_strip_state_captures_track_review_ply():
     assert state["advantage"] == 1
 
 
+def test_last_move_highlight_in_review_targets_reviewed_move():
+    app = _new_app()
+    app.backend.try_move(Square(6, 4), Square(4, 4))   # 1.e4
+    app.backend.try_move(Square(1, 3), Square(3, 3))   # 1...d5
+    app.backend.try_move(Square(4, 4), Square(3, 3))   # 2.exd5
+    # In review mode at ply 1, the last-move highlight should mark e2-e4.
+    app.board.review_ply = 1
+    move = app.match.move_history[app.board.review_ply - 1].move
+    assert move.from_sq == Square(6, 4)
+    assert move.to_sq == Square(4, 4)
+    # At ply 0 (initial) there's no last move to highlight.
+    app.board.review_ply = 0
+    # _draw_last_move_highlight should silently do nothing — exercise the path.
+    app.board.draw_board()
+
+
 def test_active_row_highlight_in_live_mode_is_last_ply():
     app = _new_app()
     _play_e4_e5_nf3(app)

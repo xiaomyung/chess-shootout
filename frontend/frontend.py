@@ -506,6 +506,7 @@ class Frontend:
         self.sound_manager.stop_all()
         self.manual_result = None
         self._flag_fall_played = False
+        self.right_menu.reset_for_new_game()
         self.match.new_game()
         if self._time_control is not None:
             initial, incr = self._time_control

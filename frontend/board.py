@@ -148,6 +148,7 @@ class Board:
         for row, col in product(range(self.SIZE), repeat=2):
             self.draw_cell(row, col)
         if self.review_ply is not None:
+            self._draw_last_move_highlight()
             self._draw_vertical_guides()
             self._draw_horizontal_guides()
             self.draw_pieces()
@@ -169,9 +170,15 @@ class Board:
         self._draw_promotion_picker()
 
     def _draw_last_move_highlight(self):
-        if not self.match.move_history:
+        history = self.match.move_history
+        if not history:
             return
-        move = self.match.move_history[-1].move
+        if self.review_ply is not None:
+            if self.review_ply == 0:
+                return
+            move = history[self.review_ply - 1].move
+        else:
+            move = history[-1].move
         for sq in (move.from_sq, move.to_sq):
             rect = self._cell_rect(sq.row, sq.col)
             overlay = pg.Surface((rect.width, rect.height), pg.SRCALPHA)

@@ -52,6 +52,7 @@ class RightMenu:
         self._max_lines = 0
         self._last_scroll_activity_ms = 0
         self._move_cell_hits = []
+        self._last_seen_total_rows = 0
 
     @property
     def backend(self):
@@ -108,6 +109,12 @@ class RightMenu:
         self.game_info = info
         if self._last_outer_rect is not None:
             self.set_rect(self._last_outer_rect)
+
+    def reset_for_new_game(self):
+        self.scroll_offset = 0
+        self._total_rows = 0
+        self._last_seen_total_rows = 0
+        self._last_scroll_activity_ms = 0
 
     def draw_menu(self):
         pg.draw.rect(self.window, Colors.dark_menu, self.outer_rect)
@@ -176,8 +183,26 @@ class RightMenu:
         pairs = list(iter_move_pairs(history))
         self._total_rows = len(pairs)
 
+        # If new pairs have appeared and the user was scrolled up, advance the
+        # offset by the same amount so their viewing window stays anchored on
+        # the same plies. When at the bottom (offset == 0), auto-follow keeps
+        # the latest move visible (offset stays 0).
+        if (self._last_seen_total_rows
+                and self._total_rows > self._last_seen_total_rows
+                and self.scroll_offset > 0):
+            self.scroll_offset += self._total_rows - self._last_seen_total_rows
+        self._last_seen_total_rows = self._total_rows
+
         max_offset = max(0, self._total_rows - self._max_lines)
         self.scroll_offset = min(self.scroll_offset, max_offset)
+
+        # In review mode, always keep the active ply visible — the user
+        # explicitly navigated to it.
+        if self.board is not None and self.board.review_ply is not None:
+            active_ply = self._active_ply(len(history))
+            if active_ply > 0:
+                pair_idx = (active_ply - 1) // 2
+                self.scroll_offset = self._scroll_offset_to_show_pair(pair_idx)
 
         end = self._total_rows - self.scroll_offset
         start = max(0, end - self._max_lines)
@@ -224,6 +249,22 @@ class RightMenu:
         if self.board is not None and self.board.review_ply is not None:
             return self.board.review_ply
         return history_len
+
+    def _scroll_offset_to_show_pair(self, pair_idx):
+        """Pick a scroll_offset that keeps `pair_idx` inside the visible window."""
+        if self._max_lines <= 0:
+            return self.scroll_offset
+        max_offset = max(0, self._total_rows - self._max_lines)
+        end = self._total_rows - self.scroll_offset
+        start = max(0, end - self._max_lines)
+        if start <= pair_idx < end:
+            return self.scroll_offset
+        if pair_idx >= end:
+            new_end = pair_idx + 1
+        else:
+            new_end = pair_idx + self._max_lines
+        new_offset = self._total_rows - new_end
+        return max(0, min(new_offset, max_offset))
 
     def _draw_scroll_indicator(self, rect):
         max_offset = max(0, self._total_rows - self._max_lines)
