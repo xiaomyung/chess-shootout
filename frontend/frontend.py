@@ -877,7 +877,7 @@ class Frontend:
         self.wait_modal.set_rect(wait_rect)
         self.file_picker.set_rect(start_rect)
         self.start_menu.set_rect(start_rect)
-        self.help_modal.set_rect(start_rect)
+        self.help_modal.set_rect(result_rect)
         self.right_menu.set_rect(menu_rect)
         self.player_strip_top.set_rect(top_strip_rect)
         self.player_strip_bottom.set_rect(bottom_strip_rect)
@@ -1091,7 +1091,9 @@ class Frontend:
                         self.board.update_drag_motion(event.pos)
 
             elif event.type == pg.MOUSEWHEEL:
-                if self.file_picker.is_visible():
+                if self.help_modal.is_visible():
+                    self.help_modal.handle_scroll(pg.mouse.get_pos(), event.y)
+                elif self.file_picker.is_visible():
                     self.file_picker.handle_scroll(pg.mouse.get_pos(), event.y)
                 elif self.mode != "menu":
                     self.right_menu.handle_scroll(pg.mouse.get_pos(), event.y)
