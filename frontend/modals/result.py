@@ -6,13 +6,13 @@ from frontend.visual.widgets import draw_button_row, fit_text_to_rect
 
 BUTTONS = [
     ("New Game", "new_game"),
-    ("Save PGN", "save_pgn"),
+    ("Copy PGN", "copy_pgn"),
     ("Menu", "menu"),
 ]
 
 ONLINE_BUTTONS = [
     ("Rematch", "rematch"),
-    ("Save PGN", "save_pgn"),
+    ("Copy PGN", "copy_pgn"),
     ("Menu", "menu"),
 ]
 

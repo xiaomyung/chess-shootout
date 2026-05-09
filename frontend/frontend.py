@@ -15,6 +15,7 @@ from frontend.panels.capture_summary import captured_by, material_advantage
 from frontend.modals.confirm import ConfirmModal
 from frontend.modals.file_picker import FilePicker
 from frontend.modals.help import HelpModal
+from frontend.visual.toast import Toast
 from frontend.online.client import OnlineClient, fetch_resume, probe_active_game
 from frontend.online.events import OnlineEventsMixin
 from frontend.panels.player_strip import PlayerStrip
@@ -109,7 +110,7 @@ class Frontend(OnlineEventsMixin):
                            on_premove_queued=self.sound_manager.play_premove_queued)
         self.result_menu = ResultMenu(self.window, {
             "new_game": self._on_new_game,
-            "save_pgn": self._on_save_pgn,
+            "copy_pgn": self._on_copy_pgn,
             "menu": self._on_back_to_menu,
             "rematch": self._on_rematch,
         })
@@ -134,6 +135,7 @@ class Frontend(OnlineEventsMixin):
         self.confirm_modal = ConfirmModal(self.window)
         self.file_picker = FilePicker(self.window)
         self.help_modal = HelpModal(self.window)
+        self.toast = Toast(self.window)
         self.server_modal = ServerAddressModal(self.window)
         self.wait_modal = WaitModal(self.window)
         self.online_client = None
@@ -380,30 +382,51 @@ class Frontend(OnlineEventsMixin):
         self.confirm_modal.hide()
         self._last_turn_for_flip = None
 
-    def _on_save_pgn(self):
-        self._write_pgn(prefix="game")
+    def _on_copy_pgn(self):
+        text = self._build_pgn_text()
+        if text is None:
+            return
+        try:
+            pg.scrap.init()
+            pg.scrap.put(pg.SCRAP_TEXT, text.encode("utf-8"))
+            self.toast.show("PGN copied")
+        except (pg.error, AttributeError):
+            self.toast.show("Clipboard unavailable")
 
     def _auto_save_online_pgn(self):
+        self._auto_save_pgn()
+
+    def _auto_save_pgn(self):
         if not self.match.move_history:
             return
-        self._write_pgn(prefix="online")
-
-    def _write_pgn(self, prefix):
-        result = self.current_result()
-        if result is None:
+        text = self._build_pgn_text()
+        if text is None:
             return
+        prefix = self._auto_save_prefix()
         games_dir = os.path.join(PROJECT_ROOT, "games")
         os.makedirs(games_dir, exist_ok=True)
         filename = f"{prefix}-{datetime.now().strftime('%Y%m%d-%H%M%S')}.pgn"
-        path = os.path.join(games_dir, filename)
+        with open(os.path.join(games_dir, filename), "w") as f:
+            f.write(text)
+
+    def _auto_save_prefix(self):
+        if self.mode == ONLINE:
+            return "online"
+        if self.mode == BOT:
+            return "bot"
+        return "local"
+
+    def _build_pgn_text(self):
+        result = self.current_result()
+        if result is None:
+            return None
         time_control = self._time_control
         termination = "Time forfeit" if result in TIMEOUT_RESULTS else None
-        with open(path, "w") as f:
-            f.write(generate_pgn(
-                self.match.move_history, result,
-                white_name=self.white_name, black_name=self.black_name,
-                time_control=time_control, termination=termination,
-            ))
+        return generate_pgn(
+            self.match.move_history, result,
+            white_name=self.white_name, black_name=self.black_name,
+            time_control=time_control, termination=termination,
+        )
 
     def _on_undo(self):
         if self.pgn_review or self.current_result() is not None:
@@ -553,6 +576,7 @@ class Frontend(OnlineEventsMixin):
         self.server_modal.draw()
         self.wait_modal.draw()
         self.help_modal.draw()
+        self.toast.draw()
         self._drain_online_inbound()
 
     def _refresh_game_info(self):
@@ -598,6 +622,8 @@ class Frontend(OnlineEventsMixin):
             return
         if self._result_first_seen_at_ms is None:
             self._result_first_seen_at_ms = pg.time.get_ticks()
+            if self.mode != ONLINE:
+                self._auto_save_pgn()
 
     def _result_elapsed_ms(self):
         if self._result_first_seen_at_ms is None:

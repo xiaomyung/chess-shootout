@@ -187,28 +187,83 @@ def test_no_active_at_game_over():
     assert app.player_strip_bottom.active is False
 
 
-def test_save_pgn_writes_headers_with_names_and_time_control(tmp_path, monkeypatch):
+def test_auto_save_writes_headers_with_names_and_time_control(tmp_path, monkeypatch):
     app = make_app()
     app._on_start_game(base_config())
     monkeypatch.setattr("frontend.frontend.PROJECT_ROOT", str(tmp_path))
-    app.manual_result = "white_wins"  # by resignation
-    app._on_save_pgn()
+    app.backend.try_move(Square(6, 4), Square(4, 4))  # need a move so PGN body is non-empty
+    app.manual_result = "white_wins"
+    app._auto_save_pgn()
     files = list((tmp_path / "games").glob("*.pgn"))
     assert len(files) == 1
+    assert files[0].name.startswith("local-")
     content = files[0].read_text()
     assert '[White "alice"]' in content
     assert '[Black "Player 2"]' in content
     assert '[TimeControl "300+2"]' in content
 
 
-def test_save_pgn_marks_time_forfeit_on_timeout(tmp_path, monkeypatch):
+def test_auto_save_marks_time_forfeit_on_timeout(tmp_path, monkeypatch):
     app = make_app()
     app._on_start_game(base_config())
+    app.backend.try_move(Square(6, 4), Square(4, 4))
     app.backend.clock.flagged = PieceColor.WHITE
     app.backend.clock.white_remaining = 0
     monkeypatch.setattr("frontend.frontend.PROJECT_ROOT", str(tmp_path))
-    app._on_save_pgn()
+    app._auto_save_pgn()
     files = list((tmp_path / "games").glob("*.pgn"))
     content = files[0].read_text()
     assert '[Termination "Time forfeit"]' in content
     assert '[Result "0-1"]' in content
+
+
+def test_copy_pgn_invokes_clipboard(monkeypatch):
+    app = make_app()
+    app._on_start_game(base_config())
+    app.backend.try_move(Square(6, 4), Square(4, 4))
+    app.manual_result = "white_wins"
+    captured = {}
+
+    class FakeScrap:
+        SCRAP_TEXT = "text/plain"
+
+        @staticmethod
+        def init():
+            captured["init"] = True
+
+        @staticmethod
+        def put(kind, payload):
+            captured["kind"] = kind
+            captured["payload"] = payload
+
+    monkeypatch.setattr(pg, "scrap", FakeScrap, raising=False)
+    monkeypatch.setattr(pg, "SCRAP_TEXT", FakeScrap.SCRAP_TEXT, raising=False)
+    app._on_copy_pgn()
+    assert captured.get("init") is True
+    assert b"[Result" in captured["payload"]
+    assert app.toast.is_visible() is True
+
+
+def test_copy_pgn_no_op_when_no_result(monkeypatch):
+    app = make_app()
+    app._on_start_game(base_config())
+    app._on_copy_pgn()
+    assert app.toast.is_visible() is False
+
+
+@pytest.mark.parametrize("mode_value,expected_prefix", [
+    ("single_screen", "local"),
+    ("bot", "bot"),
+    ("online", "online"),
+])
+def test_auto_save_filename_prefix_per_mode(tmp_path, monkeypatch, mode_value, expected_prefix):
+    app = make_app()
+    app._on_start_game(base_config())
+    app.backend.try_move(Square(6, 4), Square(4, 4))
+    monkeypatch.setattr("frontend.frontend.PROJECT_ROOT", str(tmp_path))
+    app.mode = mode_value
+    app.manual_result = "white_wins"
+    app._auto_save_pgn()
+    files = list((tmp_path / "games").glob("*.pgn"))
+    assert files
+    assert files[0].name.startswith(f"{expected_prefix}-")
