@@ -121,6 +121,22 @@ def test_invalid_fen_returns_false_and_keeps_modal_open():
     assert app.fen_input_modal.is_visible() is True
 
 
+def test_fen_button_disabled_in_online_mode():
+    captured = {}
+    callbacks = {
+        "start_game": lambda cfg: None,
+        "fen": lambda: captured.setdefault("opened", True),
+    }
+    from frontend.modals.start import StartMenu
+    sm = StartMenu(pg.display.get_surface(), callbacks)
+    sm.set_rect(pg.Rect(100, 50, 600, 700))
+    sm.selected_mode = "online"
+    sm.show()
+    sm.draw()
+    sm.handle_click(sm._fen_rect.center)
+    assert captured.get("opened") is None
+
+
 def test_start_menu_emits_fen_callback():
     captured = {}
     callbacks = {

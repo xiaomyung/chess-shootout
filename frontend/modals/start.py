@@ -227,7 +227,8 @@ class StartMenu:
 
         draw_button(self.window, self._load_pgn_rect, "Load PGN", self.start_font,
                     disabled=not self.load_pgn_available)
-        draw_button(self.window, self._fen_rect, "From FEN", self.start_font)
+        draw_button(self.window, self._fen_rect, "From FEN", self.start_font,
+                    disabled=self.selected_mode == "online")
         if self.reconnect_available:
             draw_button(self.window, self._reconnect_rect, "Reconnect", self.start_font)
         draw_button(self.window, self._start_rect, self.start_button_label, self.start_font)
@@ -263,6 +264,8 @@ class StartMenu:
             return True
 
         if self._fen_rect.collidepoint(pos):
+            if self.selected_mode == "online":
+                return True
             if "fen" in self.callbacks:
                 self.callbacks["fen"]()
             return True
