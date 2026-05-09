@@ -50,6 +50,7 @@ class Room:
     started_at: Optional[float] = None
     first_move_at: Optional[float] = None
     ended_at: Optional[float] = None
+    game_start_broadcast: bool = False
     draw_offered_by: Optional[str] = None
     takeback_offered_by: Optional[str] = None
     rematch_offered_by: set = field(default_factory=set)
@@ -271,6 +272,7 @@ class RoomManager:
         room.started_at = self._now()
         room.first_move_at = None
         room.ended_at = None
+        room.game_start_broadcast = False
         room.draw_offered_by = None
         room.takeback_offered_by = None
         room.rematch_offered_by = set()

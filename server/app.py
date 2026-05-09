@@ -378,8 +378,9 @@ async def _ws_session(app, websocket, room_id):
              room.room_id, auth_uuid[:8], color, room.is_paired(),
              connections.has_both(room))
 
-    if room.is_paired() and connections.has_both(room) and room.started_at is None:
-        room.started_at = app.state.now()
+    if room.is_paired() and connections.has_both(room) and not room.game_start_broadcast:
+        if room.started_at is None:
+            room.started_at = app.state.now()
         await _broadcast_game_start(connections, room)
     else:
         opp_ws = connections.get_for_color(room, room.opp_color(color))
@@ -431,6 +432,7 @@ async def _broadcast_game_start(connections, room):
             your_color=color,
         ))
         sent.append(color)
+    room.game_start_broadcast = True
     log.info("game_start broadcast room=%s sent_to=%s", room.room_id, sent)
 
 
