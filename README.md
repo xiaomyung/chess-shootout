@@ -55,39 +55,50 @@ the codebase uses. Check with `python3.12 --version` before continuing.
 
 ### Linux
 
+The recommended path on any Linux is [`pyenv`](https://github.com/pyenv/pyenv) —
+distro Python packages drift between releases, but pyenv guarantees a
+matching 3.12.x. Skip to your distro's "native" block only if you know
+the package version maps to 3.12.
+
+#### Universal (any Linux, recommended)
+
 ```bash
-# Arch (community/extra has python312)
-sudo pacman -S python312
-PY=python3.12
-
-# Debian / Ubuntu — the deadsnakes PPA carries 3.12 even on older releases
-sudo add-apt-repository ppa:deadsnakes/ppa
-sudo apt update
-sudo apt install python3.12 python3.12-venv
-PY=python3.12
-
-# Fedora
-sudo dnf install python3.12
-PY=python3.12
+curl https://pyenv.run | bash       # one-time; follow shell-rc instructions printed at the end
+pyenv install 3.12
+pyenv shell 3.12
+python --version                    # Python 3.12.x
 
 git clone https://github.com/xiaomyung/chess-pygame.git
 cd chess-pygame
-$PY -m venv .venv          # NOTE: use the explicit 3.12 binary, not `python3`
+python -m venv .venv
 source .venv/bin/activate
-python --version           # should print Python 3.12.x
-pip install -e .           # players
-# pip install -e ".[dev]"  # contributors
+python --version                    # Python 3.12.x — confirms the venv inherited it
+pip install -e .                    # players
+# pip install -e ".[dev]"           # contributors
 python main.py
 ```
 
-If `python3.12` isn't in your distro's repos, [`pyenv`](https://github.com/pyenv/pyenv)
-is the portable fallback:
+#### Native packages (when they happen to ship 3.12)
+
+| Distro | Default version | If 3.12 not the default |
+|---|---|---|
+| Arch (rolling) | currently `python` *may* be 3.12.x — check `python --version` first | use pyenv |
+| Ubuntu 24.04+ | `apt install python3.12 python3.12-venv` | — |
+| Ubuntu 22.04 / 23.x | needs deadsnakes PPA (Ubuntu-only): `apt install software-properties-common && add-apt-repository ppa:deadsnakes/ppa && apt update && apt install python3.12 python3.12-venv` | — |
+| Debian 12 (bookworm) | enable bookworm-backports, then `apt install -t bookworm-backports python3.12 python3.12-venv` — or use pyenv (simpler) | use pyenv |
+| Fedora 39+ | `dnf install python3.12` | — |
+
+Then the same venv steps as above, but with `python3.12 -m venv .venv`
+instead of `python -m venv .venv`:
 
 ```bash
-curl https://pyenv.run | bash      # one-time
-pyenv install 3.12
-pyenv shell 3.12
-python -m venv .venv               # picks up the pyenv-shell version
+git clone https://github.com/xiaomyung/chess-pygame.git
+cd chess-pygame
+python3.12 -m venv .venv
+source .venv/bin/activate
+python --version                    # Python 3.12.x
+pip install -e .
+python main.py
 ```
 
 ### macOS
