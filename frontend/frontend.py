@@ -16,6 +16,7 @@ from frontend.board import Board
 from frontend.capture_summary import captured_by, material_advantage
 from frontend.confirm_modal import ConfirmModal
 from frontend.file_picker import FilePicker
+from frontend.help_modal import HelpModal
 from frontend.online_client import OnlineClient, fetch_resume, probe_active_game
 from frontend.player_strip import PlayerStrip
 from frontend.server_modal import ServerAddressModal
@@ -124,6 +125,7 @@ class Frontend:
             disabled_keys_provider=self._right_menu_disabled_keys)
         self.confirm_modal = ConfirmModal(self.window)
         self.file_picker = FilePicker(self.window)
+        self.help_modal = HelpModal(self.window)
         self.server_modal = ServerAddressModal(self.window)
         self.wait_modal = WaitModal(self.window)
         self.online_client = None
@@ -701,6 +703,7 @@ class Frontend:
         self.file_picker.draw()
         self.server_modal.draw()
         self.wait_modal.draw()
+        self.help_modal.draw()
         self._drain_online_inbound()
 
     def _update_player_strips(self):
@@ -870,6 +873,7 @@ class Frontend:
         self.wait_modal.set_rect(wait_rect)
         self.file_picker.set_rect(start_rect)
         self.start_menu.set_rect(start_rect)
+        self.help_modal.set_rect(start_rect)
         self.right_menu.set_rect(menu_rect)
         self.player_strip_top.set_rect(top_strip_rect)
         self.player_strip_bottom.set_rect(bottom_strip_rect)
@@ -920,6 +924,9 @@ class Frontend:
                 and not self._result_modal_should_show()):
             self._skip_result_fade()
             return
+        if self.help_modal.is_visible():
+            self.help_modal.handle_click(pos)
+            return
         if self.file_picker.is_visible():
             self.file_picker.handle_click(pos)
             return
@@ -951,10 +958,24 @@ class Frontend:
             self.board.handle_click(square)
 
     def _handle_shortcut_key(self, event):
+        if self.help_modal.is_visible():
+            self.help_modal.hide()
+            return True
+        if self._handle_promotion_key(event):
+            return True
         if self.confirm_modal.is_visible() or self.file_picker.is_visible():
             return False
+        if getattr(event, "unicode", "") == "?":
+            self.help_modal.show()
+            return True
         if event.key == pg.K_f:
             self._on_flip()
+            return True
+        if event.key == pg.K_r:
+            self._on_resign()
+            return True
+        if event.key == pg.K_d:
+            self._on_draw()
             return True
         if event.key == pg.K_z and (event.mod & pg.KMOD_CTRL):
             self._on_undo()
@@ -973,6 +994,24 @@ class Frontend:
             self.board.review_ply = None
             return True
         return False
+
+    def _handle_promotion_key(self, event):
+        if self.board.pending_promotion_square is None:
+            return False
+        promo_keys = {
+            pg.K_q: PieceType.QUEEN,
+            pg.K_r: PieceType.ROOK,
+            pg.K_b: PieceType.BISHOP,
+            pg.K_n: PieceType.KNIGHT,
+        }
+        chosen = promo_keys.get(event.key)
+        if chosen is None:
+            return False
+        sq = self.board.pending_promotion_square
+        self.match.promote(sq, chosen)
+        self.board.pending_promotion_square = None
+        self.board._fire_move_landed()
+        return True
 
     def _step_review(self, delta):
         history_len = len(self.match.move_history)
