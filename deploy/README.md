@@ -165,31 +165,51 @@ hidden, edge DDoS mitigation, free WAF rules, plus the app-level
 caps. Steps in the Cloudflare dashboard for your zone:
 
 1. **DNS → Records** — add `A` (and optionally `AAAA`) for `chess`,
-   pointing at the VPS. **Set proxy status to DNS only (gray cloud)
-   for now** — we'll flip to proxied after Caddy has its first cert
-   (see step 6 below).
-2. Wait ~30 s for DNS, then on the VPS:
-   ```bash
-   sudo systemctl restart caddy
-   sudo journalctl -u caddy -f
+   pointing at the VPS, **Proxy status = Proxied (orange cloud)**.
+   Keep it proxied throughout — never flip to DNS only, that leaks
+   the origin IP into DNS history and Certificate Transparency logs
+   permanently.
+
+2. **SSL/TLS → Origin Server → Create Certificate.** Default settings
+   are fine (ECC, 15 years, hostname `chess.your-domain.com`). Click
+   Create. Cloudflare displays the origin certificate and private key
+   **once** — copy both immediately:
+   - Save the certificate PEM block as `/etc/caddy/chess-origin.crt`
+     on the VPS.
+   - Save the private key PEM block as `/etc/caddy/chess-origin.key`.
+   - `sudo chown root:caddy /etc/caddy/chess-origin.{crt,key}`
+   - `sudo chmod 640 /etc/caddy/chess-origin.{crt,key}`
+
+3. **Tell Caddy to use that cert** instead of Let's Encrypt. In
+   `/etc/caddy/Caddyfile`, the chess site block becomes:
    ```
-   Watch for `certificate obtained successfully` for the chess
-   hostname (~10 s). Ctrl-C the journal. Verify direct:
-   ```bash
-   curl https://chess.your-domain.com/healthz
+   chess.your-domain.com {
+       tls /etc/caddy/chess-origin.crt /etc/caddy/chess-origin.key
+       reverse_proxy localhost:8000
+       encode zstd gzip
+       log {
+           output file /var/log/caddy/chess-access.log
+           format console
+       }
+   }
    ```
-3. **Now flip the chess DNS record to Proxied (orange cloud).**
+   Then `sudo caddy validate --config /etc/caddy/Caddyfile && sudo systemctl reload caddy`.
+
 4. **SSL/TLS → Overview → Encryption Mode = Full (strict).** Anything
-   weaker (Flexible, Full) makes the edge↔origin link spoofable. The
-   Let's Encrypt cert Caddy just got satisfies (strict).
+   weaker is spoofable. The Cloudflare Origin Certificate satisfies
+   (strict) because Cloudflare's own edge trusts its own origin CA.
+
 5. **SSL/TLS → Edge Certificates → Always Use HTTPS = ON.**
+
 6. **Network → WebSockets = ON** (default; verify).
 
-**Why the order matters:** Caddy's first cert needs HTTP-01 validation
-to reach origin directly. With Cloudflare proxied + Full (strict)
-already on, the LE challenge gets a 522 because CF refuses to connect
-to a cert-less origin → cert never issues → infinite loop. After the
-first cert exists, renewals work fine through the proxy.
+**Why Origin Certificate, not Let's Encrypt:** With CF proxied + Full
+(strict), the LE HTTP-01 challenge reaches origin via CF, but CF
+refuses to connect to a cert-less origin → 522 → cert never issues.
+The "fix" of flipping to DNS only temporarily would expose the origin
+IP. Origin Certificate sidesteps the whole bootstrap problem and
+keeps the IP behind Cloudflare permanently. Renewal isn't a concern —
+the cert lives for 15 years.
 5. **Bot Fight Mode (free plan): turn OFF zone-wide.** Bot Fight Mode
    serves a JS interstitial to anything Cloudflare's heuristics flag
    as a bot, which includes `curl`, the pygame client (no JS runtime),
