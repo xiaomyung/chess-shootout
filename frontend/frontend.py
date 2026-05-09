@@ -88,10 +88,13 @@ class Frontend:
         self._chosen_side = "white"
         self._time_control = None
         self.pgn_review = False
+        self._flag_fall_played = False
 
         self.match = Match()
         self.sound_manager = SoundManager(SOUNDS_DIR, enabled=pg.mixer.get_init() is not None)
-        self.board = Board(self.window, self.match, move_landed_callback=self._on_move_landed)
+        self.board = Board(self.window, self.match,
+                           move_landed_callback=self._on_move_landed,
+                           on_premove_queued=self.sound_manager.play_premove_queued)
         self.result_menu = ResultMenu(self.window, {
             "new_game": self._on_new_game,
             "save_pgn": self._on_save_pgn,
@@ -447,6 +450,8 @@ class Frontend:
         elif reason in ONLINE_STATIC_RESULTS:
             self.manual_result = reason
         if self.manual_result is not None:
+            if reason == "timeout":
+                self.sound_manager.play_flag_fall()
             self._auto_save_online_pgn()
 
     def _on_rematch(self):
@@ -483,7 +488,7 @@ class Frontend:
         })
         self._reset_to_new_game()
         self.board.flipped = self._online_initial_flip
-        self.sound_manager.play_game_start()
+        self.sound_manager.play_online_game_start()
 
     def _on_local_move_applied(self, from_sq, to_sq, promotion):
         if self.online_client is None:
@@ -500,6 +505,7 @@ class Frontend:
         self.board.read_only = False
         self.sound_manager.stop_all()
         self.manual_result = None
+        self._flag_fall_played = False
         self.match.new_game()
         if self._time_control is not None:
             initial, incr = self._time_control
@@ -633,6 +639,7 @@ class Frontend:
         if self.mode != "menu" and self.current_result() is None:
             self.match.tick_clock()
 
+        self._maybe_play_flag_fall()
         self._update_heartbeat()
 
         now = pg.time.get_ticks()
@@ -676,6 +683,15 @@ class Frontend:
         over = self.current_result() is not None
         self.player_strip_top.set_state(*self._strip_state(top_color, turn, over))
         self.player_strip_bottom.set_state(*self._strip_state(bottom_color, turn, over))
+
+    def _maybe_play_flag_fall(self):
+        if self._flag_fall_played or self.mode == "menu":
+            return
+        clock = self.match.clock
+        if clock is None or clock.flagged is None:
+            return
+        self.sound_manager.play_flag_fall()
+        self._flag_fall_played = True
 
     def _update_heartbeat(self):
         clock = self.match.clock

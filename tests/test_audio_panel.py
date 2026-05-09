@@ -105,12 +105,12 @@ def test_play_with_master_scales_volume_before_playing():
     fake_sound.play.assert_called_once()
 
 
-def test_lerp_volume_scales_by_master():
+def test_heartbeat_volume_scales_by_master():
     pg.mixer.init() if not pg.mixer.get_init() else None
     s = SoundManager(SOUNDS_DIR, enabled=True, master_volume=1.0)
-    base = s._lerp_volume(1.0)
+    base = s._heartbeat_volume(0.0)
     s.master_volume = 0.5
-    half = s._lerp_volume(1.0)
+    half = s._heartbeat_volume(0.0)
     assert half == pytest.approx(base * 0.5)
 
 

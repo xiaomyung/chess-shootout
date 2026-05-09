@@ -19,10 +19,12 @@ class Board:
     TEXT_PADDING_FRACTION = 0.006
     SIZE = 8
 
-    def __init__(self, window, match, move_landed_callback=None):
+    def __init__(self, window, match, move_landed_callback=None,
+                 on_premove_queued=None):
         self.window = window
         self.match = match
         self.move_landed_callback = move_landed_callback
+        self.on_premove_queued = on_premove_queued
         self.font = pg.font.SysFont("Arial", 18, bold=True)
         self.board_guides_font_factor = 50
 
@@ -691,6 +693,8 @@ class Board:
             self._clear_premoves()
         self.premoves.append(Premove(from_sq, to_sq, piece))
         self.premove_color = piece.color
+        if self.on_premove_queued is not None:
+            self.on_premove_queued()
 
     def _clear_premoves(self):
         self.premoves = []

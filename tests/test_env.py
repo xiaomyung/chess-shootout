@@ -128,3 +128,68 @@ def test_master_volume_persists_round_trip():
 def test_master_volume_clamped_to_unit_range(raw_value, expected):
     env.set_master_volume(raw_value)
     assert env.get_master_volume() == pytest.approx(expected, abs=1e-3)
+
+
+def test_persist_preserves_comments_and_unrelated_keys():
+    env._ENV_PATH.write_text(
+        "# server addr comment\n"
+        "CHESS_SERVER_ADDR=chess.example.com\n"
+        "\n"
+        "# nickname comment\n"
+        "CHESS_NICKNAME=Magnus\n"
+        "CHESS_LAST_MODE=online\n"
+    )
+    env.set_master_volume(0.42)
+    contents = env._ENV_PATH.read_text()
+    assert "# server addr comment" in contents
+    assert "CHESS_SERVER_ADDR=chess.example.com" in contents
+    assert "# nickname comment" in contents
+    assert "CHESS_NICKNAME=Magnus" in contents
+    assert "CHESS_LAST_MODE=online" in contents
+    assert "CHESS_MASTER_VOLUME=" in contents
+
+
+def test_persist_replaces_existing_key_in_place():
+    env._ENV_PATH.write_text(
+        "CHESS_LAST_MODE=online\n"
+        "CHESS_MASTER_VOLUME=0.300\n"
+        "CHESS_NICKNAME=Magnus\n"
+    )
+    env.set_master_volume(0.800)
+    lines = env._ENV_PATH.read_text().splitlines()
+    # Replaced in place, not appended at the end.
+    assert any("CHESS_MASTER_VOLUME=0.800" in line for line in lines)
+    # Last key is unchanged (didn't get reordered).
+    assert lines[-1] == "CHESS_NICKNAME=Magnus"
+
+
+def test_persist_drops_malformed_lines():
+    # Stray fragment without a `KEY=` prefix (the bug we're hardening against).
+    env._ENV_PATH.write_text(
+        "CHESS_LAST_MODE=online\n"
+        "CHESS_MASTER_VOLUME=0.5\n"
+        "0.5\n"
+    )
+    env.set_master_volume(0.7)
+    contents = env._ENV_PATH.read_text()
+    # Stray fragment is gone after the first persist.
+    assert "0.5\n" not in contents.replace("=0.5\n", "")
+    assert contents.count("CHESS_MASTER_VOLUME=") == 1
+    assert "CHESS_MASTER_VOLUME=0.700" in contents
+
+
+def test_persist_writes_unquoted_values():
+    env.set_master_volume(0.65)
+    contents = env._ENV_PATH.read_text()
+    # No spurious quotes around the value.
+    assert "CHESS_MASTER_VOLUME=0.650" in contents
+    assert "CHESS_MASTER_VOLUME='0.650'" not in contents
+
+
+def test_persist_appends_new_key_when_absent():
+    env._ENV_PATH.write_text("# only a comment\nCHESS_LAST_MODE=online\n")
+    env.set_master_volume(0.5)
+    contents = env._ENV_PATH.read_text()
+    assert "# only a comment" in contents
+    assert "CHESS_LAST_MODE=online" in contents
+    assert "CHESS_MASTER_VOLUME=0.500" in contents

@@ -1,8 +1,11 @@
 import os
+import re
 import uuid
 from pathlib import Path
 
-from dotenv import load_dotenv, set_key
+from dotenv import load_dotenv
+
+_KEY_LINE_RE = re.compile(r"^([A-Za-z_][A-Za-z0-9_]*)\s*=(.*)$")
 
 
 _DEFAULT_SERVER_ADDR = "localhost:8000"
@@ -77,5 +80,32 @@ def set_master_volume(value):
 
 
 def _persist(key, value):
-    _ENV_PATH.touch(exist_ok=True)
-    set_key(str(_ENV_PATH), key, value)
+    """Update one key in .env via atomic temp-file rename.
+
+    Preserves comments, blank lines, and unrelated keys. Drops malformed
+    lines (e.g. partial-write fragments) so corruption self-heals on the
+    next write. Always emits unquoted `KEY=value` regardless of what the
+    file looked like before — keeps the format predictable.
+    """
+    existing = _ENV_PATH.read_text() if _ENV_PATH.exists() else ""
+    out_lines = []
+    replaced = False
+    for line in existing.splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            out_lines.append(line)
+            continue
+        match = _KEY_LINE_RE.match(stripped)
+        if match is None:
+            continue
+        if match.group(1) == key:
+            out_lines.append(f"{key}={value}")
+            replaced = True
+        else:
+            out_lines.append(line)
+    if not replaced:
+        out_lines.append(f"{key}={value}")
+    body = "\n".join(out_lines) + "\n"
+    tmp_path = _ENV_PATH.with_suffix(_ENV_PATH.suffix + f".tmp.{os.getpid()}")
+    tmp_path.write_text(body)
+    os.replace(tmp_path, _ENV_PATH)
