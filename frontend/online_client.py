@@ -1,12 +1,16 @@
 import asyncio
 import ipaddress
 import json
+import logging
 import queue
 import threading
 from dataclasses import dataclass
 
 import httpx
 import websockets
+
+
+log = logging.getLogger("chess.client")
 
 
 HTTP_TIMEOUT_SECONDS = 5.0
@@ -164,6 +168,7 @@ class OnlineClient:
         payload.setdefault("version", PROTOCOL_VERSION)
         if self._loop is None or self._outbound_q is None:
             return
+        log.debug("ws send type=%s", payload.get("type"))
         self._loop.call_soon_threadsafe(self._outbound_q.put_nowait, payload)
 
     def drain_inbound(self):
@@ -193,27 +198,33 @@ class OnlineClient:
                 pass
 
     async def _async_main(self, request):
+        log.info("connect addr=%s", self._addr)
         try:
             self.state = "connecting"
             mm = await self._matchmake_with_retries(request)
         except Exception as exc:
+            log.warning("matchmake failed reason=%s", exc)
             self._inbound.put(Event("error", {"reason": str(exc)}))
             self.state = "disconnected"
             return
         self._room_id = mm["room_id"]
         self._session_token = mm["session_token"]
         self._in_queue = True
+        log.info("matchmake ok room=%s", self._room_id)
         self._inbound.put(Event("matchmake_response", mm))
         try:
             await self._run_ws_session()
             while (not self._stop.is_set() and self._game_active
                    and self._session_token is not None):
+                log.info("ws dropped mid-game; attempting reconnect")
                 self.state = "reconnecting"
                 self.opp_state = "reconnecting"
                 resumed = await self._resume_with_retries()
                 if not resumed:
+                    log.warning("reconnect gave up")
                     self._inbound.put(Event("error", {"reason": "reconnect_failed"}))
                     break
+                log.info("reconnect succeeded; resuming game")
                 self._inbound.put(Event("game_resumed", resumed))
                 try:
                     await self._run_ws_session()
@@ -221,8 +232,10 @@ class OnlineClient:
                     self._inbound.put(Event("error", {"reason": str(exc)}))
                     break
         except Exception as exc:
+            log.warning("ws session crash: %s", exc)
             self._inbound.put(Event("error", {"reason": str(exc)}))
         finally:
+            log.info("session ended state=disconnected")
             self.state = "disconnected"
 
     async def _resume_with_retries(self):
@@ -270,6 +283,7 @@ class OnlineClient:
 
     async def _run_ws_session(self):
         ws_url = _ws_url(self._addr, f"/ws/{self._room_id}")
+        log.info("ws connecting %s", ws_url)
         async with websockets.connect(ws_url, ping_interval=20,
                                        ping_timeout=30) as ws:
             self._ws = ws
@@ -296,11 +310,14 @@ class OnlineClient:
                 except json.JSONDecodeError:
                     continue
                 msg_type = msg.get("type", "")
+                log.debug("ws recv type=%s", msg_type)
                 if msg_type == "game_start":
                     self._in_queue = False
                     self._game_active = True
                 if msg_type == "result":
                     self._game_active = False
+                    log.info("ws result reason=%s winner=%s",
+                             msg.get("reason"), msg.get("winner_color"))
                 if msg_type == "connection_status":
                     self.opp_state = msg.get("opp_state", "connected")
                 self._inbound.put(Event(msg_type, msg))

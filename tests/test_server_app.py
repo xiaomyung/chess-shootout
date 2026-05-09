@@ -63,7 +63,12 @@ def test_matchmake_returns_room_and_token(client):
 
 
 def test_matchmake_rejects_invalid_time_control(client):
-    r = _matchmake(client, time=99)
+    r = _matchmake(client, time=0)
+    assert r.status_code == 422
+    r = client.post("/matchmake", json={
+        "version": PROTOCOL_VERSION, "client_uuid": "z", "nickname": "Z",
+        "time_minutes": 5, "increment_seconds": -1,
+    })
     assert r.status_code == 422
 
 

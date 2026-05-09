@@ -1,4 +1,6 @@
 import argparse
+import logging
+import os
 
 import pygame as pg
 
@@ -15,6 +17,11 @@ def _parse_args():
 
 if __name__ == "__main__":
     args = _parse_args()
+    logging.basicConfig(
+        level=os.environ.get("LOG_LEVEL", "INFO").upper(),
+        format="%(asctime)s %(levelname)s %(name)s %(message)s",
+        datefmt="%H:%M:%S",
+    )
     env.load()
     env.set_overrides(client_uuid=args.client_uuid, nickname=args.nickname)
     pg.init()

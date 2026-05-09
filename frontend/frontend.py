@@ -1,4 +1,5 @@
 import glob
+import logging
 import os
 import random
 from datetime import datetime
@@ -54,6 +55,8 @@ AUTO_FLIP_DELAY_MS = 200
 
 MIN_WINDOW_WIDTH = 900
 MIN_WINDOW_HEIGHT = 500
+
+log = logging.getLogger("chess.frontend")
 
 _PROMO_TYPE_BY_LETTER = {
     "q": PieceType.QUEEN, "r": PieceType.ROOK,
@@ -224,6 +227,9 @@ class Frontend:
         self.sound_manager.play_game_start()
 
     def _begin_online_flow(self, config):
+        log.info("online flow begin tc=%s+%s side=%s",
+                 config.get("time_minutes"), config.get("increment_seconds"),
+                 config.get("side"))
         self._online_config = config
         self.start_menu.hide()
         self.server_modal.show(
@@ -233,6 +239,7 @@ class Frontend:
         )
 
     def _on_server_addr_connect(self, addr):
+        log.info("connect to %s", addr)
         if not addr:
             self._on_online_cancel()
             return
@@ -248,6 +255,7 @@ class Frontend:
         self.wait_modal.show("Searching for opponent…", self._on_online_cancel)
 
     def _on_online_cancel(self):
+        log.info("online flow cancel")
         if self.online_client is not None:
             self.online_client.cancel_queue()
             self.online_client = None
@@ -305,8 +313,16 @@ class Frontend:
         elif event.type == "connection_status":
             return  # opp_state already updated inside OnlineClient
         elif event.type == "error":
+            reason = event.payload.get("reason", "")
+            game_state_reasons = {
+                "not_your_turn", "invalid_move_format", "invalid_message",
+                "version_mismatch",
+            }
+            if reason in game_state_reasons:
+                return
+            self.wait_modal.hide()
             self.confirm_modal.show(
-                event.payload.get("reason", "Server unreachable"),
+                reason or "Server unreachable",
                 on_yes=lambda: self._on_server_addr_connect(env.get_server_addr()),
                 on_no=self._on_online_cancel,
                 yes_label="Retry", no_label="Cancel",
@@ -389,6 +405,9 @@ class Frontend:
         self.online_client.send_rematch_request()
 
     def _start_online_game(self, payload):
+        log.info("game start as %s vs %s", payload.get("your_color"),
+                 payload.get("white_name") if payload.get("your_color") == "black"
+                 else payload.get("black_name"))
         self.wait_modal.hide()
         self.confirm_modal.hide()
         self.manual_result = None

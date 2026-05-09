@@ -187,7 +187,10 @@ def create_app(*, now_provider=time.monotonic, max_rooms=100):
     @app.post("/matchmake", response_model=MatchmakeResponse)
     @limiter.limit("10/minute")
     async def post_matchmake(request: Request, body: MatchmakeRequest):
-        if (body.time_minutes, body.increment_seconds) not in ALLOWED_TIME_CONTROLS:
+        log.info("matchmake nickname=%s uuid=%s tc=%s+%s side=%s",
+                 body.nickname, body.client_uuid[:8],
+                 body.time_minutes, body.increment_seconds, body.side_preference)
+        if body.time_minutes < 1 or body.increment_seconds < 0:
             raise HTTPException(status_code=422, detail={"reason": "invalid_time_control"})
         token = RoomManager.make_session_token()
         try:
@@ -198,11 +201,14 @@ def create_app(*, now_provider=time.monotonic, max_rooms=100):
                 side_preference=body.side_preference,
             )
         except AlreadyInGameError:
+            log.info("matchmake rejected uuid=%s reason=already_in_game", body.client_uuid[:8])
             raise HTTPException(status_code=409, detail={"reason": Reason.ALREADY_IN_GAME})
         except RuntimeError as exc:
             if str(exc) == "server_full":
+                log.warning("matchmake rejected reason=server_full")
                 raise HTTPException(status_code=503, detail={"reason": Reason.ROOM_FULL})
             raise
+        log.info("matchmake ok room=%s paired=%s", room.room_id, room.is_paired())
         return MatchmakeResponse(room_id=room.room_id, session_token=token)
 
     @app.delete("/matchmake")
@@ -215,22 +221,26 @@ def create_app(*, now_provider=time.monotonic, max_rooms=100):
             raise HTTPException(status_code=401, detail={"reason": Reason.SESSION_EXPIRED})
         except RuntimeError as exc:
             if str(exc) == "game_already_started":
-                # Cancel is moot — the game is in progress. Idempotent no-op.
+                log.info("cancel ignored room=%s reason=game_already_started", body.room_id)
                 return {"status": "already_started"}
             raise
+        log.info("cancel ok room=%s", body.room_id)
         return {"status": "ok"}
 
     @app.post("/resume", response_model=ResumeResponse)
     @limiter.limit("30/minute")
     async def post_resume(request: Request, body: ResumeRequest):
+        log.info("resume request room=%s", body.room_id)
         room = rooms.get(body.room_id)
         if room is None:
+            log.info("resume rejected room=%s reason=not_in_room", body.room_id)
             raise HTTPException(status_code=404, detail={"reason": Reason.NOT_IN_ROOM})
         color, slot = room.slot_by_token(body.session_token)
         if slot is None:
+            log.info("resume rejected room=%s reason=session_expired", body.room_id)
             raise HTTPException(status_code=401, detail={"reason": Reason.SESSION_EXPIRED})
         if room.result is not None:
-            # Game is already over; client gets a result instead.
+            log.info("resume rejected room=%s reason=game_already_over", body.room_id)
             raise HTTPException(status_code=410, detail={"reason": room.result[0]})
         opp = room.slot(room.opp_color(color))
         history = []
@@ -283,6 +293,8 @@ async def _sweep(app):
             game_result = backend.game_result()
             if game_result in _RESULT_REASON_BY_GAME_RESULT:
                 reason, winner = _RESULT_REASON_BY_GAME_RESULT[game_result]
+                log.info("game over room=%s reason=%s winner=%s",
+                         room.room_id, reason, winner)
                 rooms.finalize_result(room.room_id, reason, winner_color=winner)
                 await _broadcast(connections, room,
                                  ResultMessage(reason=reason, winner_color=winner))
@@ -290,11 +302,14 @@ async def _sweep(app):
         if (room.is_paired() and room.first_move_at is None
                 and room.started_at is not None
                 and now - room.started_at >= FIRST_MOVE_ABORT_SECONDS):
+            log.info("aborted room=%s reason=no_first_move", room.room_id)
             rooms.finalize_result(room.room_id, Reason.ABORTED)
             await _broadcast(connections, room, ResultMessage(reason=Reason.ABORTED))
     for room, abandoned_color in list(rooms.grace_expired_rooms()):
-        rooms.finalize_abandonment(room.room_id, abandoned_color)
         winner = room.opp_color(abandoned_color)
+        log.info("abandonment room=%s loser=%s winner=%s",
+                 room.room_id, abandoned_color, winner)
+        rooms.finalize_abandonment(room.room_id, abandoned_color)
         await _broadcast(connections, room,
                          ResultMessage(reason=Reason.ABANDONMENT, winner_color=winner))
     # If both players are gone AND no move has been played yet, drop the
@@ -309,6 +324,7 @@ async def _sweep(app):
         black_present = (room.black is not None
                          and connections.get_for_color(room, "black") is not None)
         if not white_present and not black_present:
+            log.info("drop room=%s reason=both_disconnected_pre_game", room.room_id)
             rooms.drop_room_now(room.room_id)
     rooms.gc_finished_rooms()
 
@@ -366,8 +382,8 @@ async def _ws_session(app, websocket, room_id):
     auth_uuid = slot.client_uuid
     rooms.mark_connected(room.room_id, color)
     connections.add(room.room_id, auth_uuid, websocket)
-    log.info("ws auth ok room=%s color=%s paired=%s has_both=%s",
-             room.room_id, color, room.is_paired(),
+    log.info("ws auth ok room=%s uuid=%s tentative_color=%s paired=%s has_both=%s",
+             room.room_id, auth_uuid[:8], color, room.is_paired(),
              connections.has_both(room))
 
     if room.is_paired() and connections.has_both(room):
@@ -392,7 +408,10 @@ async def _ws_session(app, websocket, room_id):
             if len(raw) > MAX_INBOUND_MESSAGE_BYTES:
                 await websocket.close(code=WS_CLOSE_PAYLOAD_TOO_LARGE)
                 return
-            await _dispatch(app, websocket, room, color, raw)
+            current_color = room.color_of(auth_uuid)
+            if current_color is None:
+                break
+            await _dispatch(app, websocket, room, current_color, raw)
             if room.result is not None:
                 break
     finally:
@@ -475,6 +494,8 @@ async def _handle_move(app, room, color, raw):
         return
     expected = "white" if room.backend.current_turn() == PieceColor.WHITE else "black"
     if expected != color:
+        log.info("move rejected room=%s mover=%s expected=%s reason=not_your_turn",
+                 room.room_id, color, expected)
         await _send(connections.get_for_color(room, color),
                     ErrorMessage(reason=Reason.NOT_YOUR_TURN))
         return
@@ -492,6 +513,7 @@ async def _handle_move(app, room, color, raw):
     room.draw_offered_by = None
     room.takeback_offered_by = None
     san = room.backend.move_history[-1].san
+    log.info("move applied room=%s mover=%s san=%s", room.room_id, color, san)
     applied = MoveAppliedMessage(
         from_sq=msg.from_sq, to_sq=msg.to_sq, promotion=msg.promotion,
         san=san, clock=_clock_snapshot(room.backend.clock),
@@ -511,6 +533,7 @@ async def _handle_resign(app, room, color):
     if room.result is not None:
         return
     winner = room.opp_color(color)
+    log.info("resign room=%s loser=%s winner=%s", room.room_id, color, winner)
     rooms.finalize_result(room.room_id, Reason.RESIGNATION, winner_color=winner)
     await _broadcast(connections, room,
                      ResultMessage(reason=Reason.RESIGNATION, winner_color=winner))
@@ -530,11 +553,13 @@ async def _handle_draw_offer(app, room, color):
         return
     if room.draw_offered_by is not None and room.draw_offered_by != color:
         # Mutual draw offer — auto-agree.
+        log.info("draw mutual room=%s", room.room_id)
         rooms.finalize_result(room.room_id, Reason.DRAW_AGREEMENT)
         room.draw_offered_by = None
         await _broadcast(connections, room,
                          ResultMessage(reason=Reason.DRAW_AGREEMENT))
         return
+    log.info("draw offered room=%s by=%s", room.room_id, color)
     room.draw_offered_by = color
     opp_ws = connections.get_for_color(room, room.opp_color(color))
     await _send(opp_ws, DrawOfferedMessage())
@@ -552,11 +577,13 @@ async def _handle_draw_response(app, room, color, raw):
     if room.draw_offered_by == color:
         return  # can't respond to your own offer
     if msg.accept:
+        log.info("draw accepted room=%s by=%s", room.room_id, color)
         rooms.finalize_result(room.room_id, Reason.DRAW_AGREEMENT)
         room.draw_offered_by = None
         await _broadcast(connections, room,
                          ResultMessage(reason=Reason.DRAW_AGREEMENT))
     else:
+        log.info("draw declined room=%s by=%s", room.room_id, color)
         room.draw_offered_by = None
 
 
@@ -569,9 +596,11 @@ async def _handle_rematch_request(app, room, color):
         return
     room.rematch_offered_by.add(color)
     if len(room.rematch_offered_by) == 2:
+        log.info("rematch mutual — restart room=%s", room.room_id)
         rooms.reset_for_rematch(room.room_id)
         await _broadcast_game_start(connections, room)
         return
+    log.info("rematch requested room=%s by=%s", room.room_id, color)
     opp_ws = connections.get_for_color(room, room.opp_color(color))
     if opp_ws is not None:
         await _send(opp_ws, RematchRequestMessage())
@@ -589,9 +618,11 @@ async def _handle_rematch_response(app, room, color, raw):
     if not room.rematch_offered_by:
         return
     if msg.accept:
+        log.info("rematch accepted room=%s by=%s", room.room_id, color)
         rooms.reset_for_rematch(room.room_id)
         await _broadcast_game_start(connections, room)
     else:
+        log.info("rematch declined room=%s by=%s", room.room_id, color)
         room.rematch_offered_by.clear()
 
 
@@ -610,6 +641,7 @@ async def _handle_takeback_request(app, room, color):
     last_mover_color = "black" if expected == "white" else "white"
     if last_mover_color != color:
         return
+    log.info("takeback requested room=%s by=%s", room.room_id, color)
     room.takeback_offered_by = color
     opp_ws = connections.get_for_color(room, room.opp_color(color))
     await _send(opp_ws, TakebackOfferedMessage())
@@ -627,6 +659,7 @@ async def _handle_takeback_response(app, room, color, raw):
     if room.takeback_offered_by == color:
         return
     if msg.accept:
+        log.info("takeback accepted room=%s by=%s", room.room_id, color)
         room.backend.undo()
         room.takeback_offered_by = None
         await _broadcast(connections, room, TakebackAppliedMessage(
@@ -634,4 +667,5 @@ async def _handle_takeback_response(app, room, color, raw):
             clock=_clock_snapshot(room.backend.clock),
         ))
     else:
+        log.info("takeback declined room=%s by=%s", room.room_id, color)
         room.takeback_offered_by = None
