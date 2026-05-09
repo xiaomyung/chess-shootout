@@ -31,24 +31,33 @@ Debian 12's main repos top out at 3.11; Debian 13 ships 3.13 — neither
 matches our `requires-python = ">=3.12,<3.13"` pin. pyenv builds a
 local 3.12 for the `chess` user without touching system Python.
 
+Every block below sets `HOME=/opt/chess` explicitly because `sudo -H`
+is not honoured uniformly across Debian sudoers configs (Hetzner's
+default image leaks the invoking user's HOME into the chess shell,
+which pyenv then can't `cd` into).
+
 ```bash
-# Install pyenv into /opt/chess/.pyenv. -H forces HOME to chess's home;
-# without it, sudo leaves HOME pointing at YOUR home and pyenv can't
-# read it.
-sudo -u chess -H -- bash -c 'curl -fsSL https://pyenv.run | bash'
+# Install pyenv into /opt/chess/.pyenv.
+sudo -u chess -- bash -c '
+    export HOME=/opt/chess
+    cd $HOME
+    curl -fsSL https://pyenv.run | bash
+'
 
 # Add pyenv to chess's .bashrc for future interactive sessions.
-sudo -u chess -H -- tee -a /opt/chess/.bashrc > /dev/null <<'EOF'
+sudo -u chess -- tee -a /opt/chess/.bashrc > /dev/null <<'EOF'
 
 export PYENV_ROOT="$HOME/.pyenv"
 [[ -d $PYENV_ROOT/bin ]] && export PATH="$PYENV_ROOT/bin:$PATH"
 eval "$(pyenv init - bash)"
 EOF
 
-# Install Python 3.12 — this compiles from source, ~2 min the first
-# time. We export PYENV_ROOT/PATH inline because non-interactive sudo
+# Install Python 3.12 — compiles from source, ~2 min the first time.
+# We export PYENV_ROOT/PATH inline because non-interactive sudo
 # shells don't source .bashrc.
-sudo -u chess -H -- bash -c '
+sudo -u chess -- bash -c '
+    export HOME=/opt/chess
+    cd $HOME
     export PYENV_ROOT="$HOME/.pyenv"
     export PATH="$PYENV_ROOT/bin:$PATH"
     eval "$(pyenv init - bash)"
@@ -65,7 +74,9 @@ skip this and have the venv in step 3 use `/usr/bin/python3.12` instead.)
 ### 3. Clone, venv, install
 
 ```bash
-sudo -u chess -H -- bash -c '
+sudo -u chess -- bash -c '
+    export HOME=/opt/chess
+    cd $HOME
     export PYENV_ROOT="$HOME/.pyenv"
     export PATH="$PYENV_ROOT/bin:$PATH"
     eval "$(pyenv init - bash)"
@@ -148,7 +159,7 @@ and can click **New Search** to immediately re-pair.
 ## Updating
 
 ```bash
-sudo -u chess -H -- bash -c 'cd /opt/chess/repo && git pull && .venv/bin/pip install -e .'
+sudo -u chess -- bash -c 'export HOME=/opt/chess && cd /opt/chess/repo && git pull && .venv/bin/pip install -e .'
 sudo systemctl restart chess-server
 ```
 
