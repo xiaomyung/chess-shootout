@@ -3,6 +3,7 @@ from itertools import product
 
 import pygame as pg
 
+from backend.pseudo_legal import piece_can_pseudo_reach
 from backend.utils import Square
 from frontend.animation import PieceAnimation
 from frontend.colors import Colors
@@ -554,6 +555,8 @@ class Board:
         local_color = getattr(self.match, "local_color", None)
         if local_color is not None and piece.color != local_color:
             return False
+        if not piece_can_pseudo_reach(piece, chain_tip, target_sq):
+            return False
         self._queue_premove(chain_tip, target_sq, piece)
         return True
 
@@ -711,6 +714,8 @@ class Board:
 
     def _queue_premove(self, from_sq, to_sq, piece):
         if from_sq == to_sq:
+            return
+        if not piece_can_pseudo_reach(piece, from_sq, to_sq):
             return
         if self.premove_color is not None and self.premove_color != piece.color:
             self._clear_premoves()

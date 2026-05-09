@@ -127,9 +127,10 @@ def test_knight_premove_l_shape_queued(board):
     assert len(board.premoves) == 1
 
 
-def test_bishop_sideways_queues_lax(board):
-    # Premove queueing is now lax: any shape is queued, legality is verified at
-    # execution time (when the engine refuses, the chain is wiped).
+def test_bishop_sideways_rejected_pseudo_legal(board):
+    # M9: pseudo-legal pre-validation rejects an off-shape premove (bishop
+    # along a rank). Engine still has the final word, but we don't bother
+    # queueing impossible chains.
     board.backend.turn = PieceColor.BLACK
     setup_position(board, {
         Square(7, 4): Piece(PieceType.KING, PieceColor.WHITE),
@@ -138,7 +139,7 @@ def test_bishop_sideways_queues_lax(board):
     }, turn=PieceColor.BLACK)
     board.handle_click(Square(4, 4))
     board.handle_click(Square(4, 7))
-    assert len(board.premoves) == 1
+    assert board.premoves == []
 
 
 def test_pawn_diagonal_to_empty_queues_LAX(board):
@@ -1125,17 +1126,17 @@ def test_right_click_during_drag_chains_inside_single_hold(board):
     assert board._resolve_chain_tip(board.dragging_from) == Square(1, 7)
 
 
-def test_right_click_during_drag_lax_shape_still_queues(board):
-    # Simplified premove logic: queueing accepts any shape — legality verified
-    # only at execution. A rook moving diagonally still gets queued.
+def test_right_click_during_drag_off_shape_rejected_pseudo_legal(board):
+    # M9: drag-release on an off-shape target (rook diagonal) is rejected
+    # by the pseudo-legal gate. Chain stays empty.
     setup_position(board, {
         Square(7, 4): Piece(PieceType.KING, PieceColor.WHITE),
         Square(0, 4): Piece(PieceType.KING, PieceColor.BLACK),
         Square(7, 0): Piece(PieceType.ROOK, PieceColor.WHITE),
     }, turn=PieceColor.BLACK)
     _start_drag(board, Square(7, 0))
-    assert board.queue_premove_from_drag(Square(5, 2)) is True
-    assert len(board.premoves) == 1
+    assert board.queue_premove_from_drag(Square(5, 2)) is False
+    assert board.premoves == []
 
 
 def test_right_click_during_drag_same_square_no_queue(board):
