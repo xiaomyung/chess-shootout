@@ -838,6 +838,11 @@ class Board:
     def _draw_selection_highlight(self):
         if self.selected_square is None:
             return
+        # When the selection coincides with the chain tip, the bright premove
+        # overlay already marks the piece's current spec position. Drawing the
+        # selection border on top doubles up visually — skip it.
+        if self.selected_square == self._active_chain_tip():
+            return
 
         rect = self._cell_rect(self.selected_square.row, self.selected_square.col)
         pg.draw.rect(self.window, Colors.selection_red, rect, 4)
