@@ -39,6 +39,35 @@ MANUAL_RESULT_TEXT = {
     "server_shutdown": ("Game cancelled", "server shutting down"),
 }
 
+def _copy_to_clipboard(text):
+    import shutil
+    import subprocess
+    candidates = [
+        ("wl-copy", []),
+        ("xclip", ["-selection", "clipboard"]),
+        ("xsel", ["--clipboard", "--input"]),
+        ("pbcopy", []),
+        ("clip", []),
+    ]
+    for tool, args in candidates:
+        if shutil.which(tool) is None:
+            continue
+        try:
+            subprocess.run(
+                [tool, *args], input=text.encode("utf-8"),
+                check=True, timeout=2,
+            )
+            return True
+        except (subprocess.SubprocessError, OSError):
+            continue
+    try:
+        pg.scrap.init()
+        pg.scrap.put(pg.SCRAP_TEXT, text.encode("utf-8"))
+        return True
+    except (pg.error, AttributeError):
+        return False
+
+
 def _score_str(score):
     int_part = int(score)
     has_half = score - int_part >= 0.5 - 1e-9
@@ -386,11 +415,9 @@ class Frontend(OnlineEventsMixin):
         text = self._build_pgn_text()
         if text is None:
             return
-        try:
-            pg.scrap.init()
-            pg.scrap.put(pg.SCRAP_TEXT, text.encode("utf-8"))
+        if _copy_to_clipboard(text):
             self.toast.show("PGN copied")
-        except (pg.error, AttributeError):
+        else:
             self.toast.show("Clipboard unavailable")
 
     def _auto_save_online_pgn(self):

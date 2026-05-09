@@ -223,25 +223,24 @@ def test_copy_pgn_invokes_clipboard(monkeypatch):
     app.backend.try_move(Square(6, 4), Square(4, 4))
     app.manual_result = "white_wins"
     captured = {}
-
-    class FakeScrap:
-        SCRAP_TEXT = "text/plain"
-
-        @staticmethod
-        def init():
-            captured["init"] = True
-
-        @staticmethod
-        def put(kind, payload):
-            captured["kind"] = kind
-            captured["payload"] = payload
-
-    monkeypatch.setattr(pg, "scrap", FakeScrap, raising=False)
-    monkeypatch.setattr(pg, "SCRAP_TEXT", FakeScrap.SCRAP_TEXT, raising=False)
+    monkeypatch.setattr(
+        "frontend.frontend._copy_to_clipboard",
+        lambda text: captured.setdefault("text", text) or True,
+    )
     app._on_copy_pgn()
-    assert captured.get("init") is True
-    assert b"[Result" in captured["payload"]
+    assert "[Result" in captured["text"]
     assert app.toast.is_visible() is True
+
+
+def test_copy_pgn_falls_back_to_unavailable_toast(monkeypatch):
+    app = make_app()
+    app._on_start_game(base_config())
+    app.backend.try_move(Square(6, 4), Square(4, 4))
+    app.manual_result = "white_wins"
+    monkeypatch.setattr("frontend.frontend._copy_to_clipboard", lambda text: False)
+    app._on_copy_pgn()
+    assert app.toast.is_visible() is True
+    assert app.toast.message == "Clipboard unavailable"
 
 
 def test_copy_pgn_no_op_when_no_result(monkeypatch):
