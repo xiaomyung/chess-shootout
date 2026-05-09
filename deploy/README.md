@@ -171,7 +171,15 @@ caps. Steps in the Cloudflare dashboard for your zone:
    serves a Let's Encrypt cert that satisfies (strict).
 3. **SSL/TLS → Edge Certificates → Always Use HTTPS = ON.**
 4. **Network → WebSockets = ON** (default; verify).
-5. **Security → Bots → Bot Fight Mode = ON** (free).
+5. **Security → Bots → Bot Fight Mode = OFF.** Bot Fight Mode serves
+   a JS interstitial to anything that looks like a "bot" — including
+   `curl`, the pygame client (which doesn't run JS), and any WebSocket
+   handshake. Confirmed in production: enabling it breaks every
+   legitimate API call. The app's per-uuid + per-IP rate limits already
+   cover abusive automation.
+6. **Security → Settings → Security Level = Essentially Off** (or
+   Low). Higher levels reintroduce the same challenge-page problem
+   for any client Cloudflare's heuristics flag.
 
 Cloudflare's WebSocket idle timeout is 100 seconds — our server already
 sends ping frames every 20s (`ws_ping_interval=20` in
