@@ -7,9 +7,7 @@ from datetime import datetime
 
 import pygame as pg
 
-from backend.fen import apply_fen
 from backend.match import Match, SINGLE_SCREEN, BOT, ONLINE
-from backend.utils import PROMO_TYPE_BY_LETTER, coord_from_square, square_from_coord
 from frontend import env
 from frontend.panels.audio import AudioPanel
 from frontend.board import Board
@@ -18,6 +16,7 @@ from frontend.modals.confirm import ConfirmModal
 from frontend.modals.file_picker import FilePicker
 from frontend.modals.help import HelpModal
 from frontend.online.client import OnlineClient, fetch_resume, probe_active_game
+from frontend.online.events import OnlineEventsMixin
 from frontend.panels.player_strip import PlayerStrip
 from frontend.modals.server import ServerAddressModal
 from frontend.modals.wait import WaitModal
@@ -56,12 +55,6 @@ OPPONENT_NAME_FOR_MODE = {
     ONLINE: "Opponent",
 }
 
-ONLINE_WIN_REASONS = {"checkmate", "timeout", "resignation", "abandonment"}
-ONLINE_DRAW_REASONS = {
-    "draw_agreement", "draw_stalemate", "draw_repetition",
-    "draw_fifty_move", "draw_insufficient_material",
-}
-ONLINE_STATIC_RESULTS = {"aborted", "server_shutdown"}
 
 AUTO_FLIP_DELAY_MS = 200
 RESULT_FADE_MS = 400
@@ -74,7 +67,7 @@ MIN_WINDOW_HEIGHT = 500
 log = logging.getLogger("chess.frontend")
 
 
-class Frontend:
+class Frontend(OnlineEventsMixin):
 
     def __init__(self, window_width: int, window_height: int):
         self.running = True
@@ -332,176 +325,11 @@ class Frontend:
         self.mode = "menu"
         self.start_menu.show()
 
-    def _drain_online_inbound(self):
-        if self.online_client is None:
-            return
-        for event in self.online_client.drain_inbound():
-            try:
-                self._handle_online_event(event)
-            except Exception:
-                log.exception("online event handler failed")
-
-    def _handle_online_event(self, event):
-        if event.type == "matchmake_response":
-            return
-        elif event.type == "game_start":
-            self._start_online_game(event.payload)
-        elif event.type == "move_applied":
-            self._handle_remote_move_applied(event.payload)
-        elif event.type == "result":
-            self._handle_online_result(event.payload)
-        elif event.type == "draw_offered":
-            self._show_opp_offer_modal(
-                "Opponent offers a draw", self.online_client.send_draw_response,
-            )
-        elif event.type == "takeback_offered":
-            self._show_opp_offer_modal(
-                "Opponent requests a takeback",
-                self.online_client.send_takeback_response,
-            )
-        elif event.type == "takeback_applied":
-            self._handle_takeback_applied(event.payload)
-        elif event.type == "rematch_request":
-            self._show_opp_offer_modal(
-                "Opponent wants a rematch",
-                self.online_client.send_rematch_response,
-            )
-        elif event.type == "game_resumed":
-            self._handle_game_resumed(event.payload)
-        elif event.type == "connection_status":
-            return
-        elif event.type == "error":
-            reason = event.payload.get("reason", "")
-            game_state_reasons = {
-                "not_your_turn", "invalid_move_format", "invalid_message",
-                "version_mismatch",
-            }
-            if reason in game_state_reasons:
-                return
-            self.wait_modal.hide()
-            self.confirm_modal.show(
-                reason or "Server unreachable",
-                on_yes=lambda: self._on_server_addr_connect(env.get_server_addr()),
-                on_no=self._on_online_cancel,
-                yes_label="Retry", no_label="Cancel",
-            )
-
-    def _show_opp_offer_modal(self, title, send_response):
-        self.confirm_modal.show(
-            title,
-            on_yes=lambda: send_response(True),
-            on_no=lambda: send_response(False),
-            yes_label="Accept", no_label="Decline",
-        )
-
-    def _apply_clock_snap(self, payload, *, default_to_existing):
-        clock_snap = payload.get("clock") or {}
-        if self.match.clock is None:
-            return
-        if default_to_existing:
-            white_default = self.match.clock.white_remaining
-            black_default = self.match.clock.black_remaining
-        else:
-            white_default = 0.0
-            black_default = 0.0
-        self.match.clock.restore_from_server(
-            clock_snap.get("white_remaining", white_default),
-            clock_snap.get("black_remaining", black_default),
-            clock_snap.get("running_for"),
-        )
-
-    def _handle_game_resumed(self, payload):
-        self.match.new_game()
-        for entry in payload.get("move_history", []):
-            result = self.match.backend.apply_san(entry["san"])
-            if not result.legal:
-                log.warning("resume: SAN replay failed at %r", entry.get("san"))
-                apply_fen(self.match.backend, payload["fen"])
-                break
-        if self._time_control is not None:
-            initial, incr = self._time_control
-            self.match.setup_clock(initial, incr)
-            self._apply_clock_snap(payload, default_to_existing=False)
-        self.board.cancel_animations()
-        self.board.selected_square = None
-        self.board._clear_premoves()
-        self.board.clear_annotations()
-
-    def _handle_takeback_applied(self, payload):
-        if self.match.move_history:
-            last = self.match.move_history[-1].move
-            self.match.undo()
-            self.board.start_undo_animation(last)
-        self._apply_clock_snap(payload, default_to_existing=True)
-
-    def _handle_remote_move_applied(self, payload):
-        self._apply_clock_snap(payload, default_to_existing=True)
-        san = payload.get("san")
-        last = self.match.move_history[-1] if self.match.move_history else None
-        if last is not None and last.san == san:
-            return
-        from_sq = square_from_coord(payload["from"])
-        to_sq = square_from_coord(payload["to"])
-        promo = payload.get("promotion")
-        promo_type = PROMO_TYPE_BY_LETTER.get(promo) if promo else None
-        result = self.match.apply_remote_move(from_sq, to_sq, promo_type)
-        if result.legal:
-            self.board.animate_remote_move(from_sq, to_sq)
-
-    def _handle_online_result(self, payload):
-        reason = payload.get("reason", "")
-        winner = payload.get("winner_color")
-        if reason in ONLINE_WIN_REASONS:
-            self.manual_result = "white_wins" if winner == "white" else "black_wins"
-        elif reason in ONLINE_DRAW_REASONS:
-            self.manual_result = "draw_agreement"
-        elif reason in ONLINE_STATIC_RESULTS:
-            self.manual_result = reason
-        if self.manual_result is not None:
-            if reason == "timeout":
-                self.sound_manager.play_flag_fall()
-            self._auto_save_online_pgn()
-
     def _on_rematch(self):
         if self.online_client is None:
             return
         self.online_client.send_rematch_request()
 
-    def _start_online_game(self, payload):
-        opp_name = (payload.get("white_name") if payload.get("your_color") == "black"
-                    else payload.get("black_name"))
-        log.info("game start as %s vs %s", payload.get("your_color"), opp_name)
-        pg.display.set_caption(f"Chess — vs {opp_name}")
-        self.wait_modal.hide()
-        self.confirm_modal.hide()
-        self.manual_result = None
-        self.result_menu.set_online_mode(True)
-        self.mode = ONLINE
-        self._online_initial_flip = (payload["your_color"] == "black")
-        self._chosen_side = payload["your_color"]
-        self.white_name = payload["white_name"]
-        self.black_name = payload["black_name"]
-        self._time_control = (payload["time_minutes"] * 60,
-                              payload["increment_seconds"])
-        self.match.mode = ONLINE
-        self.match.local_color = (PieceColor.WHITE if payload["your_color"] == "white"
-                                  else PieceColor.BLACK)
-        self.match.on_local_move_applied = self._on_local_move_applied
-        self.right_menu.set_game_info({
-            "white_name": payload["white_name"],
-            "black_name": payload["black_name"],
-            "time_minutes": payload["time_minutes"],
-            "increment_seconds": payload["increment_seconds"],
-            "ping_ms": None,
-        })
-        self._reset_to_new_game()
-        self.board.flipped = self._online_initial_flip
-        self.sound_manager.play_online_game_start()
-
-    def _on_local_move_applied(self, from_sq, to_sq, promotion):
-        if self.online_client is None:
-            return
-        self.online_client.send_move(coord_from_square(from_sq), coord_from_square(to_sq), promotion)
 
     def _right_menu_buttons(self):
         if self.pgn_review:
