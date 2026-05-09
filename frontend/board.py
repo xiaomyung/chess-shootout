@@ -702,18 +702,14 @@ class Board:
         return speculative_board(self.match, self.premoves)
 
     def _resolve_chain_tip(self, square):
+        # Walk the premoves list in order: each entry advances the position
+        # if its from_sq matches the current square. This handles chains that
+        # revisit a square (e.g. rook bouncing a8 ↔ b8) — the tip is whichever
+        # square the LAST applicable premove leaves the piece on.
         sq = square
-        visited = {sq}
-        for _ in range(len(self.premoves)):
-            next_sq = None
-            for pm in self.premoves:
-                if pm.from_sq == sq:
-                    next_sq = pm.to_sq
-                    break
-            if next_sq is None or next_sq in visited:
-                break
-            sq = next_sq
-            visited.add(sq)
+        for pm in self.premoves:
+            if pm.from_sq == sq:
+                sq = pm.to_sq
         return sq
 
     def _try_select_for_premove(self, square, piece):

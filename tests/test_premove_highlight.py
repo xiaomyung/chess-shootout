@@ -199,3 +199,55 @@ def test_chain_tip_premove_overlay_color_is_brighter():
     queued = pg.Color(Colors.premove)
     # Brighter = higher opacity (more visible) than the dim queued squares.
     assert chain_tip.a > queued.a
+
+
+# ---------- Bouncing chain (revisits squares) ----------
+
+def test_chain_tip_resolves_correctly_when_rook_bounces(board):
+    """Rook bounces a8 ↔ b8. The chain tip must reflect the LAST applicable
+    premove, not the first square that gets revisited."""
+    _setup_premove_state(board, {
+        Square(7, 4): Piece(PieceType.KING, PieceColor.WHITE),
+        Square(0, 4): Piece(PieceType.KING, PieceColor.BLACK),
+        Square(7, 0): Piece(PieceType.ROOK, PieceColor.WHITE),
+    }, turn=PieceColor.BLACK)
+    board.handle_click(Square(7, 0))   # select rook
+    board.handle_click(Square(0, 0))   # premove a1->a8
+    board.handle_click(Square(0, 0))   # re-select chain tip
+    board.handle_click(Square(0, 1))   # premove a8->b8
+    board.handle_click(Square(0, 1))   # re-select chain tip
+    board.handle_click(Square(0, 0))   # premove b8->a8 (BOUNCE)
+    assert board._resolve_chain_tip(Square(7, 0)) == Square(0, 0)
+    assert len(board.premoves) == 3
+
+    # Continue bouncing: a8 -> b8 again.
+    board.handle_click(Square(0, 0))
+    board.handle_click(Square(0, 1))
+    assert board._resolve_chain_tip(Square(7, 0)) == Square(0, 1)
+    assert len(board.premoves) == 4
+
+
+def test_premove_overlay_drawn_once_per_square_even_in_bounce_chain(board):
+    """The seen-set in _draw_premove_highlights ensures each unique square is
+    rendered with the dim overlay once — overlays don't compound visually."""
+    _setup_premove_state(board, {
+        Square(7, 4): Piece(PieceType.KING, PieceColor.WHITE),
+        Square(0, 4): Piece(PieceType.KING, PieceColor.BLACK),
+        Square(7, 0): Piece(PieceType.ROOK, PieceColor.WHITE),
+    }, turn=PieceColor.BLACK)
+    # Build a bouncing chain.
+    board.handle_click(Square(7, 0))
+    board.handle_click(Square(0, 0))
+    board.handle_click(Square(0, 0))
+    board.handle_click(Square(0, 1))
+    board.handle_click(Square(0, 1))
+    board.handle_click(Square(0, 0))
+    board.handle_click(Square(0, 0))
+    board.handle_click(Square(0, 1))
+
+    unique_squares = set()
+    for pm in board.premoves:
+        unique_squares.add(pm.from_sq)
+        unique_squares.add(pm.to_sq)
+    # Three unique squares (a1, a8, b8) — the overlay loop visits each once.
+    assert unique_squares == {Square(7, 0), Square(0, 0), Square(0, 1)}
