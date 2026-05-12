@@ -8,12 +8,11 @@ from typing import Optional
 from uuid import uuid4
 
 from backend.backend import Backend
+from server.protocol import FIRST_MOVE_ABORT_SECONDS, GRACE_SECONDS
 
 
-GRACE_SECONDS = 60
 REMATCH_KEEP_ALIVE_SECONDS = 60
 PAIRING_WAIT_SECONDS = 30
-FIRST_MOVE_ABORT_SECONDS = 60
 
 
 class AlreadyInGameError(Exception):

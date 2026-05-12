@@ -10,7 +10,7 @@ from frontend.online.transport import (
     SchemaVersionMismatch, WsConnectionClosed,
 )
 from server.protocol import (
-    CancelMatchmakeRequest, MatchmakeRequest, ResumeRequest,
+    CancelMatchmakeRequest, GRACE_SECONDS, MatchmakeRequest, ResumeRequest,
 )
 
 
@@ -19,7 +19,7 @@ log = logging.getLogger("chess.client")
 
 SERVER_FULL_RETRIES = 3
 SERVER_FULL_BACKOFF_SECONDS = 1.5
-RECONNECT_TOTAL_SECONDS = 60
+RECONNECT_TOTAL_SECONDS = GRACE_SECONDS
 RECONNECT_INTERVAL_SECONDS = 2
 PING_INTERVAL_SECONDS = 5
 PING_SAMPLE_WINDOW = 5

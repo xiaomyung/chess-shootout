@@ -1,7 +1,6 @@
 from server import logging_setup
 from server.connections import broadcast
-from server.protocol import Reason, ResultMessage
-from server.rooms import FIRST_MOVE_ABORT_SECONDS
+from server.protocol import FIRST_MOVE_ABORT_SECONDS, Reason, ResultMessage
 
 
 log = logging_setup.get_logger("chess.server.app")
