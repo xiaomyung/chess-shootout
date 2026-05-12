@@ -5,8 +5,8 @@ from frontend.visual.colors import Colors
 from frontend.visual.widgets import draw_button
 
 
-TEXT_FRACTION = 0.15
-SLIDER_FRACTION = 0.60
+TEXT_FRACTION = 0.20
+SLIDER_FRACTION = 0.55
 SLIDER_GAP_PX = 6
 
 
@@ -52,8 +52,10 @@ class AudioPanel:
         self._draw_mute()
 
     def _draw_volume_text(self):
-        percent = int(round(self.sound_manager.master_volume * 100))
-        surf = self.button_font.render(f"{percent}%", True, Colors.white)
+        surf = self.button_font.render("Volume", True, Colors.white)
+        if surf.get_width() > self.text_rect.width > 0:
+            surf = surf.subsurface(pg.Rect(0, 0, self.text_rect.width,
+                                           surf.get_height()))
         x = self.text_rect.right - surf.get_width()
         y = self.text_rect.centery - surf.get_height() // 2
         self.window.blit(surf, (x, y))

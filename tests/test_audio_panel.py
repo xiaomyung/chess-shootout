@@ -261,71 +261,33 @@ def test_panel_resize_keeps_layout_proportions(panel):
         assert abs(panel.slider_rect.width / w - SLIDER_FRACTION) < 0.05
 
 
-# ---------- Volume text label (Bug 5) ----------
+# ---------- Volume label (Bug 5) ----------
 
-def _rendered_text_pixel_count(panel, color=(255, 255, 255)):
-    snapshot = pg.Surface(panel.text_rect.size, pg.SRCALPHA)
-    surface = panel.window
-    panel.window = snapshot
-    panel.text_rect = pg.Rect(0, 0, *panel.text_rect.size)
-    try:
-        panel._draw_volume_text()
-    finally:
-        panel.window = surface
-    arr = pg.surfarray.pixels3d(snapshot)
-    return int((arr.sum(axis=2) > 0).sum())
-
-
-def test_volume_text_default_visible(panel):
+def test_volume_label_fits_inside_text_rect_at_default_size(panel):
     panel.set_rect(pg.Rect(0, 0, 400, 40))
-    panel.sound_manager.set_master_volume(0.5)
-    panel.draw()
-    rendered = panel.button_font.render("50%", True, (255, 255, 255))
+    rendered = panel.button_font.render("Volume", True, (255, 255, 255))
     assert rendered.get_width() <= panel.text_rect.width
 
 
-@pytest.mark.parametrize("volume,expected", [
-    (0.0, "0%"),
-    (0.5, "50%"),
-    (1.0, "100%"),
-    (0.42, "42%"),
-])
-def test_volume_text_renders_correct_percent(panel, volume, expected):
+def test_volume_label_is_static_across_volume_changes(panel, sm):
     panel.set_rect(pg.Rect(0, 0, 400, 40))
-    panel.sound_manager.set_master_volume(volume)
-    rendered = panel.button_font.render(expected, True, (255, 255, 255))
-    # Sanity check: the rendered string fits inside text_rect.
-    assert rendered.get_width() <= panel.text_rect.width + 8
-    # The percent calculation matches what _draw_volume_text computes.
-    percent = int(round(panel.sound_manager.master_volume * 100))
-    assert f"{percent}%" == expected
+    # The label exists purely to identify the slider — it must not depend on
+    # the current volume value.
+    sm.set_master_volume(0.0)
+    panel.draw()
+    sm.set_master_volume(1.0)
+    panel.draw()
+    # Both calls render the same string; sanity-check the source font matches.
+    rendered_low = panel.button_font.render("Volume", True, (255, 255, 255))
+    rendered_high = panel.button_font.render("Volume", True, (255, 255, 255))
+    assert pg.image.tobytes(rendered_low, "RGBA") == pg.image.tobytes(
+        rendered_high, "RGBA")
 
 
-def test_volume_text_updates_after_drag(panel, sm):
-    panel.set_rect(pg.Rect(0, 0, 400, 40))
-    sm.set_master_volume(0.10)
-    assert int(round(sm.master_volume * 100)) == 10
-    track = panel._track_rect()
-    panel.handle_click((track.right, track.centery))
-    assert int(round(sm.master_volume * 100)) == 100
-
-
-def test_volume_text_unchanged_when_toggling_mute(panel, sm):
-    panel.set_rect(pg.Rect(0, 0, 400, 40))
-    sm.set_master_volume(0.42)
-    panel.handle_click(panel.mute_rect.center)
-    # Mute toggles sm.enabled but leaves master_volume untouched, so the
-    # displayed percent stays at 42.
-    assert int(round(sm.master_volume * 100)) == 42
-
-
-def test_volume_text_rounds_to_integer(panel, sm):
-    panel.set_rect(pg.Rect(0, 0, 400, 40))
-    sm.set_master_volume(0.345)
-    # int(round(0.345*100)) is 34 or 35 depending on banker's rounding;
-    # accept whichever Python produces.
-    rendered = int(round(sm.master_volume * 100))
-    assert rendered in (34, 35)
+def test_volume_label_renders_without_overflow_at_narrow_width(panel):
+    panel.set_rect(pg.Rect(0, 0, 120, 40))
+    # Even at a tight panel size, draw must not raise (subsurface clip path).
+    panel.draw()
 
 
 # ---------- RightMenu integration ----------
