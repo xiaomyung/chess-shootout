@@ -56,9 +56,8 @@ class AudioPanel:
         if surf.get_width() > self.text_rect.width > 0:
             surf = surf.subsurface(pg.Rect(0, 0, self.text_rect.width,
                                            surf.get_height()))
-        x = self.text_rect.right - surf.get_width()
         y = self.text_rect.centery - surf.get_height() // 2
-        self.window.blit(surf, (x, y))
+        self.window.blit(surf, (self.text_rect.x, y))
 
     def _draw_slider(self):
         track = self._track_rect()
