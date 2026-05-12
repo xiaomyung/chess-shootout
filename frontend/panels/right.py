@@ -181,7 +181,7 @@ class RightMenu:
         for cell_rect, ply in self._move_cell_hits:
             if not cell_rect.collidepoint(pos):
                 continue
-            self.board.animate_review_ply(ply)
+            self.board.jump_to_review_ply(ply)
             return True
         return False
 

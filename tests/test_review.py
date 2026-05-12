@@ -335,7 +335,9 @@ def test_arrows_noop_when_history_empty():
 
 # ---------- RightMenu click-through ----------
 
-def test_clicking_white_cell_animates_to_white_ply():
+def test_clicking_white_cell_jumps_directly_to_white_ply():
+    # Clicks land the selector directly on the clicked ply — no animation,
+    # no transient highlight on ply-1.
     app = _new_app()
     _play_e4_e5_nf3(app)
     app.draw_frame()
@@ -343,15 +345,12 @@ def test_clicking_white_cell_animates_to_white_ply():
     cell_rect, ply = hits[0]
     assert ply == 1
     app.right_menu.handle_click(cell_rect.center)
-    # During animation: review_ply = ply - 1 (pre-move).
-    assert app.board.review_ply == 0
-    assert len(app.board.animations) >= 1
-    # Fire the animation to completion — review_ply advances to the clicked ply.
-    fire_animation(app.board)
     assert app.board.review_ply == 1
+    assert app.board._target_ply is None
+    assert app.board.animations == []
 
 
-def test_clicking_black_cell_animates_to_black_ply():
+def test_clicking_black_cell_jumps_directly_to_black_ply():
     app = _new_app()
     _play_e4_e5_nf3(app)
     app.draw_frame()
@@ -359,11 +358,12 @@ def test_clicking_black_cell_animates_to_black_ply():
     cell_rect, ply = hits[1]
     assert ply == 2
     app.right_menu.handle_click(cell_rect.center)
-    fire_animation(app.board)
     assert app.board.review_ply == 2
+    assert app.board.animations == []
 
 
-def test_clicking_latest_move_animates_then_returns_to_live():
+def test_clicking_latest_move_returns_to_live():
+    # Clicking the last move cell snaps directly to live (review_ply=None).
     app = _new_app()
     _play_e4_e5_nf3(app)
     app.board.review_ply = 1
@@ -372,11 +372,25 @@ def test_clicking_latest_move_animates_then_returns_to_live():
     cell_rect, ply = hits[-1]
     assert ply == len(app.backend.move_history)
     app.right_menu.handle_click(cell_rect.center)
-    # Animation queued: pre-move state at ply N-1, on completion → live (None).
-    assert app.board.review_ply == ply - 1
-    assert len(app.board.animations) >= 1
-    fire_animation(app.board)
     assert app.board.review_ply is None
+    assert app.board.animations == []
+
+
+def test_clicking_a_distant_move_never_transiently_lands_on_predecessor():
+    # Regression: previously animate_review_ply set review_ply = ply - 1 before
+    # the animation, so the move-list highlight flashed backwards. Now clicks
+    # never touch ply-1 — the selector lands on the chosen move only.
+    app = _new_app()
+    _play_e4_e5_nf3(app)
+    app.board.review_ply = 0
+    app.draw_frame()
+    hits = app.right_menu._move_cell_hits
+    cell_rect, ply = hits[-1]
+    app.right_menu.handle_click(cell_rect.center)
+    # No animation queued → no pre-snap to ply-1.
+    assert app.board.animations == []
+    assert app.board._target_ply is None
+    assert app.board.review_ply == ply or app.board.review_ply is None
 
 
 def test_animate_review_ply_starts_animation_from_correct_squares():
