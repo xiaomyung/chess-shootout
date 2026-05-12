@@ -63,7 +63,7 @@ def test_abort_at_10_percent_elapsed_shows(monkeypatch):
     app._first_move_deadline_ms = 60_000
     monkeypatch.setattr(pg.time, "get_ticks", lambda: 7_000)
     state = _strip(app, PieceColor.WHITE)
-    assert state["auto_end_label"] == "abort"
+    assert state["auto_end_label"] == "Abort in"
     assert state["auto_end_seconds"] == pytest.approx(53.0, abs=0.1)
 
 
@@ -92,7 +92,7 @@ def test_abandon_above_gate_shows(monkeypatch):
     monkeypatch.setattr(pg.time, "get_ticks", lambda: 12_000)
     app._opp_disconnected_at_ms = 0
     state = _strip(app, PieceColor.BLACK)
-    assert state["auto_end_label"] == "abandon"
+    assert state["auto_end_label"] == "Abandon in"
     assert state["auto_end_seconds"] == pytest.approx(GRACE_SECONDS - 12, abs=0.1)
 
 
@@ -102,7 +102,7 @@ def test_reconnect_local_strip_shows(monkeypatch):
     monkeypatch.setattr(pg.time, "get_ticks", lambda: 12_000)
     app._local_disconnected_at_ms = 0
     state = _strip(app, PieceColor.WHITE)
-    assert state["auto_end_label"] == "reconnect"
+    assert state["auto_end_label"] == "Reconnect in"
     assert state["auto_end_seconds"] == pytest.approx(RECONNECT_TOTAL_SECONDS - 12, abs=0.1)
 
 
@@ -114,7 +114,7 @@ def test_priority_reconnect_beats_abort_on_local_strip(monkeypatch):
     app._first_move_deadline_ms = 60_000
     app._local_disconnected_at_ms = 0
     state = _strip(app, PieceColor.WHITE)
-    assert state["auto_end_label"] == "reconnect"
+    assert state["auto_end_label"] == "Reconnect in"
 
 
 def test_priority_abandon_beats_abort_when_opp_is_side_to_move(monkeypatch):
@@ -125,7 +125,7 @@ def test_priority_abandon_beats_abort_when_opp_is_side_to_move(monkeypatch):
     app._first_move_deadline_ms = 60_000
     app._opp_disconnected_at_ms = 0
     state = _strip(app, PieceColor.WHITE)
-    assert state["auto_end_label"] == "abandon"
+    assert state["auto_end_label"] == "Abandon in"
 
 
 # ---------- Mode immunity ----------

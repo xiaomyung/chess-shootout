@@ -5,6 +5,7 @@ from frontend.visual.colors import Colors
 
 
 AUTO_END_RED_THRESHOLD_SECONDS = 10
+AUTO_END_BADGE_FONT_SCALE = 0.75
 
 
 def format_clock(seconds):
@@ -50,6 +51,7 @@ class PlayerStrip:
         self.name_font = pg.font.SysFont("Arial", 14, bold=True)
         self.clock_font = pg.font.SysFont("monospace", 16, bold=True)
         self.advantage_font = pg.font.SysFont("Arial", 14, bold=True)
+        self.auto_end_font = pg.font.SysFont("Arial", 11, bold=True)
         self.icons = {}
 
     def set_rect(self, rect):
@@ -57,9 +59,11 @@ class PlayerStrip:
         name_size = max(int(rect.height * 0.45), 12)
         clock_size = max(int(rect.height * 0.55), 14)
         adv_size = max(int(rect.height * 0.4), 10)
+        auto_end_size = max(int(name_size * AUTO_END_BADGE_FONT_SCALE), 9)
         self.name_font = pg.font.SysFont("Arial", name_size, bold=True)
         self.clock_font = pg.font.SysFont("monospace", clock_size, bold=True)
         self.advantage_font = pg.font.SysFont("Arial", adv_size, bold=True)
+        self.auto_end_font = pg.font.SysFont("Arial", auto_end_size, bold=True)
 
     def set_piece_icons(self, icons):
         self.icons = icons
@@ -179,7 +183,7 @@ class PlayerStrip:
         color = (Colors.auto_end_alert
                  if self.auto_end_seconds < AUTO_END_RED_THRESHOLD_SECONDS
                  else Colors.white)
-        surf = self.name_font.render(text, True, color)
+        surf = self.auto_end_font.render(text, True, color)
         max_w = name_region.width - 2 * self.pocket_inset
         if surf.get_width() > max_w > 0:
             surf = surf.subsurface(pg.Rect(0, 0, max_w, surf.get_height()))

@@ -983,13 +983,13 @@ class Frontend(OnlineEventsMixin):
         is_local = (color == self.match.local_color)
         if is_local and self._local_disconnected_at_ms is not None:
             return self._auto_end_remaining(
-                "reconnect", self._local_disconnected_at_ms,
+                "Reconnect in", self._local_disconnected_at_ms,
                 RECONNECT_TOTAL_SECONDS, now,
             )
         if (not is_local
                 and self._opp_disconnected_at_ms is not None):
             return self._auto_end_remaining(
-                "abandon", self._opp_disconnected_at_ms, GRACE_SECONDS, now,
+                "Abandon in", self._opp_disconnected_at_ms, GRACE_SECONDS, now,
             )
         if (color == self.match.current_turn()
                 and not self.match.move_history
@@ -1001,7 +1001,7 @@ class Frontend(OnlineEventsMixin):
             elapsed = FIRST_MOVE_ABORT_SECONDS - remaining
             if elapsed < 0.1 * FIRST_MOVE_ABORT_SECONDS:
                 return None, None
-            return "abort", remaining
+            return "Abort in", remaining
         return None, None
 
     def _auto_end_remaining(self, label, snap_ms, total_seconds, now_ms):
