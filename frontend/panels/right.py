@@ -148,7 +148,10 @@ class RightMenu:
         self._draw_scroll_indicator(self.moves_rect)
         self._draw_buttons(self.buttons_rect)
         if self.audio_panel is not None:
-            self.audio_panel.set_rect(self.audio_rect)
+            self.audio_panel.set_rect(
+                self.audio_rect, button_font=self.button_font,
+                n_columns=len(self.buttons_provider()), gap=self.button_gap,
+            )
             self.audio_panel.draw()
 
     def _draw_game_info(self, rect):
