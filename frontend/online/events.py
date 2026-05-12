@@ -218,14 +218,18 @@ class OnlineEventsMixin:
         winner = payload.get("winner_color")
         if reason in ONLINE_WIN_REASONS:
             self.manual_result = "white_wins" if winner == "white" else "black_wins"
-            if winner == "white":
-                self._series_white_score += 1
-            elif winner == "black":
-                self._series_black_score += 1
+            winner_name = self.white_name if winner == "white" else self.black_name
+            if winner_name is not None:
+                self._series_scores[winner_name] = (
+                    self._series_scores.get(winner_name, 0.0) + 1
+                )
         elif reason in ONLINE_DRAW_REASONS:
             self.manual_result = "draw_agreement"
-            self._series_white_score += 0.5
-            self._series_black_score += 0.5
+            for name in (self.white_name, self.black_name):
+                if name is not None:
+                    self._series_scores[name] = (
+                        self._series_scores.get(name, 0.0) + 0.5
+                    )
         elif reason in ONLINE_STATIC_RESULTS:
             self.manual_result = reason
         if self.manual_result is not None:
@@ -264,8 +268,7 @@ class OnlineEventsMixin:
         pair = tuple(sorted([payload["white_name"], payload["black_name"]]))
         if getattr(self, "_series_pair", None) != pair:
             self._series_pair = pair
-            self._series_white_score = 0.0
-            self._series_black_score = 0.0
+            self._series_scores = {pair[0]: 0.0, pair[1]: 0.0}
         self._reset_to_new_game()
         self.board.flipped = self._online_initial_flip
 

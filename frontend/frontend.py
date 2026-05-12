@@ -158,8 +158,7 @@ class Frontend(OnlineEventsMixin):
         self._flag_fall_played = False
         self._result_first_seen_at_ms = None
         self._pgn_result_tag = None
-        self._series_white_score = 0.0
-        self._series_black_score = 0.0
+        self._series_scores = {}
         self._series_room_id = None
         self._resyncing = False
 
@@ -754,9 +753,13 @@ class Frontend(OnlineEventsMixin):
             result = self._pgn_result_tag or "*"
             return ["Review", f"{result}  ·  {tc}"]
         if self.mode == ONLINE:
-            names = f"{self.white_name}  vs  {self.black_name}"
-            return [names, f"{self._series_score_text()}  ·  {tc}",
-                    self._format_ping_line()]
+            white_score = self._series_scores.get(self.white_name, 0.0)
+            black_score = self._series_scores.get(self.black_name, 0.0)
+            scoreboard = (
+                f"{self.white_name}  {_score_str(white_score)} - "
+                f"{_score_str(black_score)}  {self.black_name}"
+            )
+            return [scoreboard, tc, self._format_ping_line()]
         if self.mode == BOT:
             return ["vs Bot (preview)", tc]
         return ["Local game", tc]
@@ -771,9 +774,6 @@ class Frontend(OnlineEventsMixin):
         ping = (self.online_client.get_ping_ms()
                 if self.online_client is not None else None)
         return f"ping: {ping} ms" if ping is not None else "ping: —"
-
-    def _series_score_text(self):
-        return f"{_score_str(self._series_white_score)} - {_score_str(self._series_black_score)}"
 
     def _update_player_strips(self):
         top_color = PieceColor.WHITE if self.board.flipped else PieceColor.BLACK
