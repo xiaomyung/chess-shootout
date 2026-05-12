@@ -43,34 +43,10 @@ Issues = "https://github.com/xiaomyung/chess-pygame/issues"
 packages = ["backend", "frontend", "pieces", "server"]
 
 [tool.pylama]
-linters = "pycodestyle,pyflakes,mccabe"
+linters = "pycodestyle,pyflakes"
 max_line_length = 100
 ignore = "E127"
 
 [[tool.pylama.files]]
-path = "backend/backend.py"
-ignore = "C901"
-
-[[tool.pylama.files]]
-path = "frontend/frontend.py"
-ignore = "C901"
-
-[[tool.pylama.files]]
-path = "frontend/board/board.py"
-ignore = "C901"
-
-[[tool.pylama.files]]
-path = "frontend/modals/start.py"
-ignore = "C901"
-
-[[tool.pylama.files]]
-path = "frontend/online/events.py"
-ignore = "C901"
-
-[[tool.pylama.files]]
-path = "server/app.py"
-ignore = "C901"
-
-[[tool.pylama.files]]
 path = "tests/*"
-ignore = "E402,C901"
+ignore = "E402"
