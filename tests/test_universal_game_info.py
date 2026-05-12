@@ -205,6 +205,76 @@ def test_score_follows_player_through_color_swap_end_to_end():
     assert lines[0] == "Friend  0 - 1  Me"
 
 
+# ---------- result-modal subtitle per online reason (Bug 4) ----------
+
+@pytest.mark.parametrize("reason,winner,expected", [
+    ("checkmate",    "white", ("White wins", "by checkmate")),
+    ("checkmate",    "black", ("Black wins", "by checkmate")),
+    ("timeout",      "white", ("White wins", "on time")),
+    ("timeout",      "black", ("Black wins", "on time")),
+    ("resignation",  "white", ("White wins", "by resignation")),
+    ("resignation",  "black", ("Black wins", "by resignation")),
+    ("abandonment",  "white", ("White wins", "by abandonment")),
+    ("abandonment",  "black", ("Black wins", "by abandonment")),
+])
+def test_online_win_result_subtitle_reports_actual_reason(reason, winner, expected):
+    # Bug 4: every online win used to render "by resignation" because
+    # _handle_online_result flattened all win reasons to bare white_wins.
+    app = _make_app()
+    app.mode = ONLINE
+    app.white_name = "Alice"
+    app.black_name = "Bob"
+    app._series_pair = ("Alice", "Bob")
+    app._series_scores = {"Alice": 0.0, "Bob": 0.0}
+    app._handle_online_result({"reason": reason, "winner_color": winner})
+    assert app.result_text() == expected
+
+
+@pytest.mark.parametrize("draw_reason,expected", [
+    ("draw_agreement",             ("Draw", "by agreement")),
+    ("draw_stalemate",             ("Draw", "by agreement")),
+    ("draw_repetition",            ("Draw", "by agreement")),
+    ("draw_fifty_move",            ("Draw", "by agreement")),
+    ("draw_insufficient_material", ("Draw", "by agreement")),
+])
+def test_online_draw_result_subtitle(draw_reason, expected):
+    # All online draws are flattened to manual_result="draw_agreement" by
+    # the existing handler; subtitle reflects that.
+    app = _make_app()
+    app.mode = ONLINE
+    app.white_name = "Alice"
+    app.black_name = "Bob"
+    app._series_pair = ("Alice", "Bob")
+    app._series_scores = {"Alice": 0.0, "Bob": 0.0}
+    app._handle_online_result({"reason": draw_reason})
+    assert app.result_text() == expected
+
+
+def test_local_resignation_subtitle_reports_resignation():
+    # Local resignation path also uses compound code → no "by checkmate" mislabel.
+    app = _make_app()
+    _start_local(app)
+    app._perform_resign()
+    assert app.result_text() == ("Black wins", "by resignation")
+
+
+def test_engine_checkmate_subtitle_reports_checkmate():
+    # Engine path: bare white_wins / black_wins in RESULT_TEXT means
+    # "checkmate", which is the only way the engine produces them.
+    app = _make_app()
+    _start_local(app)
+    # Simulate the engine reporting a white checkmate.
+    app.match.backend.game_result = lambda: "white_wins"
+    assert app.result_text() == ("White wins", "by checkmate")
+
+
+def test_engine_flag_fall_subtitle_reports_on_time():
+    app = _make_app()
+    _start_local(app)
+    app.match.backend.game_result = lambda: "white_wins_on_time"
+    assert app.result_text() == ("White wins", "on time")
+
+
 # ---------- pgn review ----------
 
 def test_pgn_review_uses_pgn_result_tag():

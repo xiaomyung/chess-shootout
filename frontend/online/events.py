@@ -12,7 +12,13 @@ from frontend import env
 log = logging.getLogger("chess.frontend")
 
 
-ONLINE_WIN_REASONS = {"checkmate", "timeout", "resignation", "abandonment"}
+ONLINE_WIN_RESULT_BY_REASON = {
+    "checkmate":   ("white_wins",                  "black_wins"),
+    "timeout":     ("white_wins_on_time",          "black_wins_on_time"),
+    "resignation": ("white_wins_by_resignation",   "black_wins_by_resignation"),
+    "abandonment": ("white_wins_by_abandonment",   "black_wins_by_abandonment"),
+}
+ONLINE_WIN_REASONS = frozenset(ONLINE_WIN_RESULT_BY_REASON)
 ONLINE_DRAW_REASONS = {
     "draw_agreement", "draw_stalemate", "draw_repetition",
     "draw_fifty_move", "draw_insufficient_material",
@@ -217,7 +223,8 @@ class OnlineEventsMixin:
         reason = payload.get("reason", "")
         winner = payload.get("winner_color")
         if reason in ONLINE_WIN_REASONS:
-            self.manual_result = "white_wins" if winner == "white" else "black_wins"
+            white_code, black_code = ONLINE_WIN_RESULT_BY_REASON[reason]
+            self.manual_result = white_code if winner == "white" else black_code
             winner_name = self.white_name if winner == "white" else self.black_name
             if winner_name is not None:
                 self._series_scores[winner_name] = (

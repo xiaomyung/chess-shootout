@@ -33,9 +33,19 @@ from backend.paths import PROJECT_ROOT, SOUNDS_DIR
 from backend.pieces import PieceColor, PieceType, opponent_of
 
 
-MANUAL_RESULT_TEXT = {
-    "white_wins": ("White wins", "by resignation"),
-    "black_wins": ("Black wins", "by resignation"),
+RESULT_TEXT = {
+    "white_wins": ("White wins", "by checkmate"),
+    "black_wins": ("Black wins", "by checkmate"),
+    "white_wins_on_time": ("White wins", "on time"),
+    "black_wins_on_time": ("Black wins", "on time"),
+    "white_wins_by_resignation": ("White wins", "by resignation"),
+    "black_wins_by_resignation": ("Black wins", "by resignation"),
+    "white_wins_by_abandonment": ("White wins", "by abandonment"),
+    "black_wins_by_abandonment": ("Black wins", "by abandonment"),
+    "draw_stalemate": ("Draw", "by stalemate"),
+    "draw_repetition": ("Draw", "by threefold repetition"),
+    "draw_fifty_move": ("Draw", "by fifty-move rule"),
+    "draw_insufficient_material": ("Draw", "by insufficient material"),
     "draw_agreement": ("Draw", "by agreement"),
     "aborted": ("Game aborted", "no moves played"),
     "server_shutdown": ("Game cancelled", "server shutting down"),
@@ -83,17 +93,6 @@ def _score_str(score):
         return f"{int_part}½"
     return str(int_part)
 
-
-ENGINE_RESULT_TEXT = {
-    "white_wins": ("White wins", "by checkmate"),
-    "black_wins": ("Black wins", "by checkmate"),
-    "draw_stalemate": ("Draw", "by stalemate"),
-    "draw_repetition": ("Draw", "by threefold repetition"),
-    "draw_fifty_move": ("Draw", "by fifty-move rule"),
-    "draw_insufficient_material": ("Draw", "by insufficient material"),
-    "white_wins_on_time": ("White wins", "on time"),
-    "black_wins_on_time": ("Black wins", "on time"),
-}
 
 OPPONENT_NAME_FOR_MODE = {
     SINGLE_SCREEN: "Player 2",
@@ -224,12 +223,10 @@ class Frontend(OnlineEventsMixin):
         return self.manual_result or self.match.game_result()
 
     def result_text(self):
-        if self.manual_result is not None:
-            return MANUAL_RESULT_TEXT.get(self.manual_result)
-        engine = self.match.game_result()
-        if engine is None:
+        code = self.current_result()
+        if code is None:
             return None
-        return ENGINE_RESULT_TEXT.get(engine)
+        return RESULT_TEXT.get(code)
 
     def _on_new_game(self):
         self._reset_to_new_game()
@@ -618,7 +615,10 @@ class Frontend(OnlineEventsMixin):
             return
         loser = self.match.current_turn()
         self._auto_complete_pending_promotion()
-        self.manual_result = "black_wins" if loser == PieceColor.WHITE else "white_wins"
+        self.manual_result = (
+            "black_wins_by_resignation" if loser == PieceColor.WHITE
+            else "white_wins_by_resignation"
+        )
         self.board._clear_premoves()
         self.board.clear_annotations()
 
