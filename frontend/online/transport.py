@@ -266,6 +266,9 @@ class ServerWebSocket:
     async def send_takeback_response(self, accept):
         await self._send(TakebackResponseMessage(accept=accept))
 
+    async def send_give_time(self):
+        await self._send_raw({"type": "give_time", "version": PROTOCOL_VERSION})
+
     async def _send(self, message):
         await self._ws.send(message.model_dump_json(by_alias=True))
 

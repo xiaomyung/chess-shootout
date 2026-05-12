@@ -92,6 +92,8 @@ class OnlineEventsMixin:
             )
         elif event.type == "game_resumed":
             self._handle_game_resumed(event.payload)
+        elif event.type == "time_granted":
+            self._handle_time_granted(event.payload)
         elif event.type == "connection_status":
             return
         elif event.type == "error":
@@ -179,6 +181,16 @@ class OnlineEventsMixin:
         self.board._clear_premoves()
         self.board.clear_annotations()
         self._resyncing = False
+
+    def _handle_time_granted(self, payload):
+        self._apply_clock_snap(payload, default_to_existing=False)
+        added = float(payload.get("seconds_added", 0))
+        granted_by = payload.get("granted_by")
+        recipient_color = "black" if granted_by == "white" else "white"
+        if granted_by == self._chosen_side:
+            self._give_time_toast_for_giver(recipient_color, added)
+        else:
+            self._give_time_toast_for_receiver(granted_by, added)
 
     def _handle_takeback_applied(self, payload):
         if self._resyncing:

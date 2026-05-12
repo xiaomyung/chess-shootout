@@ -14,7 +14,7 @@ from server.protocol import (
     ClockSnapshot, DrawOfferedMessage, DrawResponseMessage, ErrorMessage,
     MoveAppliedMessage, MoveMessage, Reason, RematchRequestMessage,
     RematchResponseMessage, ResultMessage, TakebackAppliedMessage,
-    TakebackOfferedMessage, TakebackResponseMessage,
+    TakebackOfferedMessage, TakebackResponseMessage, TimeGrantedMessage,
 )
 from server.sweep import _RESULT_REASON_BY_GAME_RESULT
 
@@ -252,6 +252,23 @@ async def handle_takeback_response(app, websocket, room, color, raw):
     return "declined"
 
 
+GIVE_TIME_SECONDS = 15
+
+
+async def handle_give_time(app, websocket, room, color, raw):
+    connections = app.state.connections
+    if room.result is not None or room.backend is None or room.backend.clock is None:
+        return "noop"
+    opp_piece_color = PieceColor.BLACK if color == "white" else PieceColor.WHITE
+    added = room.backend.clock.add_time(opp_piece_color, GIVE_TIME_SECONDS)
+    log.info("give_time room=%s by=%s added=%.2f", room.room_id, color, added)
+    await broadcast(connections, room, TimeGrantedMessage(
+        granted_by=color, seconds_added=added,
+        clock=_clock_snapshot(room.backend.clock),
+    ))
+    return "granted" if added > 0 else "capped"
+
+
 HANDLERS = {
     "move": handle_move,
     "resign": handle_resign,
@@ -261,4 +278,5 @@ HANDLERS = {
     "rematch_response": handle_rematch_response,
     "takeback_request": handle_takeback_request,
     "takeback_response": handle_takeback_response,
+    "give_time": handle_give_time,
 }

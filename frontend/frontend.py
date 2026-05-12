@@ -106,6 +106,9 @@ RESULT_FADE_MS = 400
 RESULT_MODAL_DELAY_MS = 500
 RESULT_FADE_MAX_ALPHA = 140
 
+GIVE_TIME_SECONDS = 15
+GIVE_TIME_DEBOUNCE_MS = 500
+
 ANIM_MS_DEFAULT = 180
 ANIM_MS_MIN = 140
 ANIM_MS_MAX = 280
@@ -160,6 +163,7 @@ class Frontend(OnlineEventsMixin):
         self._series_scores = {}
         self._series_room_id = None
         self._resyncing = False
+        self._last_give_time_at_ms = -GIVE_TIME_DEBOUNCE_MS
 
         self.match = Match()
         self.sound_manager = SoundManager(SOUNDS_DIR, enabled=pg.mixer.get_init() is not None)
@@ -188,6 +192,7 @@ class Frontend(OnlineEventsMixin):
             "flip": self._on_flip,
             "menu": self._on_back_to_menu,
             "help": self._on_help,
+            "give_time": self._on_give_time,
         }, board=self.board, buttons_provider=self._right_menu_buttons,
             audio_panel=self.audio_panel,
             disabled_keys_provider=self._right_menu_disabled_keys)
@@ -511,9 +516,17 @@ class Frontend(OnlineEventsMixin):
         return RIGHT_MENU_BUTTONS
 
     def _right_menu_disabled_keys(self):
-        if self.current_result() is None or self.pgn_review:
+        if self.pgn_review:
             return set()
-        return {"undo", "resign", "draw", "flip"}
+        if self.current_result() is not None:
+            return {"undo", "resign", "draw", "flip", "give_time"}
+        disabled = set()
+        clock = self.match.clock
+        if clock is None or clock.flagged is not None:
+            disabled.add("give_time")
+        if pg.time.get_ticks() - self._last_give_time_at_ms < GIVE_TIME_DEBOUNCE_MS:
+            disabled.add("give_time")
+        return disabled
 
     def _reset_to_new_game(self):
         self.pgn_review = False
@@ -643,6 +656,41 @@ class Frontend(OnlineEventsMixin):
         self.manual_result = "draw_agreement"
         self.board._clear_premoves()
         self.board.clear_annotations()
+
+    def _on_give_time(self):
+        if self.pgn_review or self.current_result() is not None:
+            return
+        clock = self.match.clock
+        if clock is None or clock.flagged is not None:
+            return
+        now = pg.time.get_ticks()
+        if now - self._last_give_time_at_ms < GIVE_TIME_DEBOUNCE_MS:
+            return
+        self._last_give_time_at_ms = now
+        if self.mode == ONLINE and self.online_client is not None:
+            self.online_client.send_give_time()
+            return
+        recipient = self._give_time_recipient()
+        added = clock.add_time(recipient, GIVE_TIME_SECONDS)
+        self._give_time_toast_for_giver(recipient, added)
+
+    def _give_time_recipient(self):
+        if self.mode == ONLINE and self.match.local_color is not None:
+            return opponent_of(self.match.local_color)
+        return self.match.current_turn()
+
+    def _give_time_toast_for_giver(self, recipient_color, added):
+        name = self._name_for_color(recipient_color)
+        if added <= 0:
+            self.toast.show(f"{name} already at maximum time")
+        else:
+            self.toast.show(f"Gave {int(round(added))} sec to {name}")
+
+    def _give_time_toast_for_receiver(self, giver_color, added):
+        if added <= 0:
+            return
+        name = self._name_for_color(giver_color)
+        self.toast.show(f"{name} gave you {int(round(added))} seconds")
 
     def _auto_complete_pending_promotion(self):
         if self.board.pending_promotion_square is None:

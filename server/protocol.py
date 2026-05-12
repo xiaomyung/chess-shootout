@@ -236,6 +236,17 @@ class TakebackAppliedMessage(_Base):
     ply: int
 
 
+class GiveTimeMessage(_Base):
+    type: Literal["give_time"] = "give_time"
+
+
+class TimeGrantedMessage(_Base):
+    type: Literal["time_granted"] = "time_granted"
+    granted_by: Literal["white", "black"]
+    seconds_added: float
+    clock: ClockSnapshot
+
+
 class ConnectionStatusMessage(_Base):
     type: Literal["connection_status"] = "connection_status"
     opp_state: Literal["connected", "reconnecting", "disconnected"]
