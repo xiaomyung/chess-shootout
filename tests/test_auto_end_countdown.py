@@ -11,9 +11,9 @@ import pytest
 
 from backend.match import BOT, ONLINE, SINGLE_SCREEN
 from backend.pieces import PieceColor
-from frontend.frontend import FIRST_MOVE_ABORT_SECONDS, Frontend
+from frontend.frontend import Frontend
 from frontend.online.client import RECONNECT_TOTAL_SECONDS
-from server.protocol import GRACE_SECONDS
+from server.protocol import FIRST_MOVE_ABORT_SECONDS, GRACE_SECONDS
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -53,14 +53,14 @@ def _strip(app, color):
 def test_abort_under_10_percent_elapsed_is_hidden(monkeypatch):
     app = _online_app()
     monkeypatch.setattr(pg.time, "get_ticks", lambda: 0)
-    app._first_move_deadline_ms = 60_000  # 60 s window starting now.
+    app._first_move_deadline_ms = FIRST_MOVE_ABORT_SECONDS * 1000  # 60 s window starting now.
     monkeypatch.setattr(pg.time, "get_ticks", lambda: 5_000)
     assert _strip(app, PieceColor.WHITE)["auto_end_label"] is None
 
 
 def test_abort_at_10_percent_elapsed_shows(monkeypatch):
     app = _online_app()
-    app._first_move_deadline_ms = 60_000
+    app._first_move_deadline_ms = FIRST_MOVE_ABORT_SECONDS * 1000
     monkeypatch.setattr(pg.time, "get_ticks", lambda: 7_000)
     state = _strip(app, PieceColor.WHITE)
     assert state["auto_end_label"] == "Abort in"
@@ -70,7 +70,7 @@ def test_abort_at_10_percent_elapsed_shows(monkeypatch):
 def test_abort_clears_on_first_move(monkeypatch):
     from backend.utils import Square
     app = _online_app()
-    app._first_move_deadline_ms = 60_000
+    app._first_move_deadline_ms = FIRST_MOVE_ABORT_SECONDS * 1000
     monkeypatch.setattr(pg.time, "get_ticks", lambda: 30_000)
     app.match.try_move(Square(6, 4), Square(4, 4))
     assert _strip(app, PieceColor.WHITE)["auto_end_label"] is None
@@ -111,7 +111,7 @@ def test_reconnect_local_strip_shows(monkeypatch):
 def test_priority_reconnect_beats_abort_on_local_strip(monkeypatch):
     app = _online_app()
     monkeypatch.setattr(pg.time, "get_ticks", lambda: 12_000)
-    app._first_move_deadline_ms = 60_000
+    app._first_move_deadline_ms = FIRST_MOVE_ABORT_SECONDS * 1000
     app._local_disconnected_at_ms = 0
     state = _strip(app, PieceColor.WHITE)
     assert state["auto_end_label"] == "Reconnect in"
@@ -122,7 +122,7 @@ def test_priority_abandon_beats_abort_when_opp_is_side_to_move(monkeypatch):
     # Put local on black so white (side-to-move at start) is the opp.
     app.match.local_color = PieceColor.BLACK
     monkeypatch.setattr(pg.time, "get_ticks", lambda: 12_000)
-    app._first_move_deadline_ms = 60_000
+    app._first_move_deadline_ms = FIRST_MOVE_ABORT_SECONDS * 1000
     app._opp_disconnected_at_ms = 0
     state = _strip(app, PieceColor.WHITE)
     assert state["auto_end_label"] == "Abandon in"
@@ -134,7 +134,7 @@ def test_local_mode_never_emits_badge(monkeypatch):
     app = _online_app()
     app.mode = SINGLE_SCREEN
     monkeypatch.setattr(pg.time, "get_ticks", lambda: 30_000)
-    app._first_move_deadline_ms = 60_000
+    app._first_move_deadline_ms = FIRST_MOVE_ABORT_SECONDS * 1000
     app._opp_disconnected_at_ms = 0
     app._local_disconnected_at_ms = 0
     app.online_client.opp_state = "reconnecting"
@@ -147,7 +147,7 @@ def test_bot_mode_never_emits_badge(monkeypatch):
     app = _online_app()
     app.mode = BOT
     monkeypatch.setattr(pg.time, "get_ticks", lambda: 30_000)
-    app._first_move_deadline_ms = 60_000
+    app._first_move_deadline_ms = FIRST_MOVE_ABORT_SECONDS * 1000
     assert _strip(app, PieceColor.WHITE)["auto_end_label"] is None
 
 
@@ -155,7 +155,7 @@ def test_bot_mode_never_emits_badge(monkeypatch):
 
 def test_result_clears_timestamps(monkeypatch):
     app = _online_app()
-    app._first_move_deadline_ms = 60_000
+    app._first_move_deadline_ms = FIRST_MOVE_ABORT_SECONDS * 1000
     app._opp_disconnected_at_ms = 0
     app._local_disconnected_at_ms = 0
     app._handle_online_result({"reason": "checkmate", "winner_color": "white"})
@@ -194,7 +194,7 @@ def test_begin_match_found_uses_started_seconds_ago(monkeypatch):
 def test_heartbeat_below_red_threshold_fires_zero_fraction(monkeypatch):
     app = _online_app()
     monkeypatch.setattr(pg.time, "get_ticks", lambda: 55_000)
-    app._first_move_deadline_ms = 60_000  # remaining = 5 s, below 10 s
+    app._first_move_deadline_ms = FIRST_MOVE_ABORT_SECONDS * 1000  # remaining = 5 s, below 10 s
     # No chess clock setup → fraction starts as None.
     app._update_heartbeat()
     args, _ = app.sound_manager.update_heartbeat.call_args
@@ -205,7 +205,7 @@ def test_heartbeat_below_red_threshold_fires_zero_fraction(monkeypatch):
 def test_heartbeat_above_red_threshold_uses_min_fraction(monkeypatch):
     app = _online_app()
     monkeypatch.setattr(pg.time, "get_ticks", lambda: 30_000)
-    app._first_move_deadline_ms = 60_000  # remaining = 30 s → 30/60 = 0.5
+    app._first_move_deadline_ms = FIRST_MOVE_ABORT_SECONDS * 1000  # remaining = 30 s → 30/60 = 0.5
     app._update_heartbeat()
     args, _ = app.sound_manager.update_heartbeat.call_args
     fraction, _ = args

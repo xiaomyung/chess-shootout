@@ -53,7 +53,7 @@ class Reason:
 def normalize_nickname(raw):
     if raw is None:
         raise ValueError("nickname required")
-    if not all(0x20 <= ord(c) <= 0x7e for c in raw):
+    if not (raw.isascii() and raw.isprintable()):
         raise ValueError("nickname must be printable ASCII")
     collapsed = re.sub(r"\s+", " ", raw.strip())
     if not collapsed:
@@ -238,10 +238,6 @@ class TakebackAppliedMessage(_Base):
     fen: str
     clock: ClockSnapshot
     ply: int
-
-
-class GiveTimeMessage(_Base):
-    type: Literal["give_time"] = "give_time"
 
 
 class TimeGrantedMessage(_Base):

@@ -4,10 +4,12 @@ import random
 import pytest
 from fastapi.testclient import TestClient
 
-from server.app import (
-    PROTOCOL_VERSION, WS_CLOSE_INVALID_TOKEN, _sweep, create_app,
-)
-from server.protocol import Reason
+from server.app import PROTOCOL_VERSION, create_app
+
+
+async def _sweep(app):
+    await app.state.sweep.step_all()
+from server.protocol import FIRST_MOVE_ABORT_SECONDS, GRACE_SECONDS, Reason
 from tests.helpers import FakeClock, fake_uuid4
 
 
@@ -206,8 +208,8 @@ def test_out_of_turn_move_rejected(client):
             err = json.loads(ws_b.receive_text())
             assert err["type"] == "error"
             assert err["reason"] == Reason.NOT_YOUR_TURN
-            # The originating msg_type rides along so the client can attach a
-            # context-specific toast (M-PR online UX).
+            # The originating msg_type rides along so the client can attach
+            # a context-specific toast.
             assert err["msg_type"] == "move"
 
 
@@ -279,7 +281,7 @@ async def test_first_move_timeout_aborts_room(app, clock):
                         time_minutes=5, increment_seconds=0, side_preference="black")
     room = list(rooms._active.values())[0]
     room.started_at = clock()
-    clock.advance(61)
+    clock.advance(FIRST_MOVE_ABORT_SECONDS + 1)
     await _sweep(app)
     assert room.result == ("aborted", None)
 
@@ -313,7 +315,7 @@ async def test_grace_expiry_yields_abandonment(app, clock):
     room.started_at = clock()
     room.first_move_at = clock()
     rooms.mark_disconnected(room.room_id, "white")
-    clock.advance(61)
+    clock.advance(GRACE_SECONDS + 1)
     await _sweep(app)
     assert room.result == (Reason.ABANDONMENT, "black")
 

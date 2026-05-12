@@ -258,10 +258,6 @@ async def _sweep_loop(app):
         pass
 
 
-async def _sweep(app):
-    await app.state.sweep.step_all()
-
-
 def _first_validation_reason(exc):
     errs = exc.errors() if hasattr(exc, "errors") else []
     if not errs:

@@ -22,7 +22,9 @@ from frontend.online.client import (
     OnlineClient, RECONNECT_TOTAL_SECONDS, fetch_resume, probe_active_game,
 )
 from frontend.online.events import ONLINE_HARD_FAILURE_LABELS, OnlineEventsMixin
-from frontend.panels.player_strip import PlayerStrip
+from frontend.panels.player_strip import (
+    AUTO_END_RED_THRESHOLD_SECONDS, PlayerStrip,
+)
 from frontend.modals.server import ServerAddressModal
 from frontend.modals.wait import WaitModal
 from frontend.panels.right import RightMenu, BUTTONS as RIGHT_MENU_BUTTONS, REVIEW_BUTTONS as RIGHT_MENU_REVIEW_BUTTONS
@@ -112,6 +114,7 @@ RESULT_MODAL_DELAY_MS = 500
 RESULT_FADE_MAX_ALPHA = 140
 
 GIVE_TIME_DEBOUNCE_MS = 500
+AUTO_END_GATE_FRACTION = 0.1
 
 ANIM_MS_DEFAULT = 180
 ANIM_MS_MIN = 140
@@ -165,7 +168,6 @@ class Frontend(OnlineEventsMixin):
         self._result_first_seen_at_ms = None
         self._pgn_result_tag = None
         self._series_scores = {}
-        self._series_room_id = None
         self._resyncing = False
         self._last_give_time_at_ms = -GIVE_TIME_DEBOUNCE_MS
         self._first_move_deadline_ms = None
@@ -345,7 +347,6 @@ class Frontend(OnlineEventsMixin):
                 "addr": addr,
                 "room_id": reclaim["room_id"],
                 "session_token": reclaim["session_token"],
-                "resume": resume,
             }
 
     def _refresh_reconnect_button(self):
@@ -594,7 +595,7 @@ class Frontend(OnlineEventsMixin):
             return None
         prefix = self._auto_save_prefix()
         os.makedirs(_games_dir(), exist_ok=True)
-        filename = f"{prefix}-{datetime.now().strftime('%Y%m%d-%H%M%S')}.pgn"
+        filename = f"{prefix}-{datetime.now().strftime("%Y%m%d-%H%M%S")}.pgn"
         path = os.path.join(_games_dir(), filename)
         with open(path, "w") as f:
             f.write(text)
@@ -850,8 +851,8 @@ class Frontend(OnlineEventsMixin):
         return f"ping: {ping} ms" if ping is not None else "ping: —"
 
     def _update_player_strips(self):
-        top_color = PieceColor.WHITE if self.board.flipped else PieceColor.BLACK
-        bottom_color = PieceColor.BLACK if self.board.flipped else PieceColor.WHITE
+        top_color = self._strip_color_top()
+        bottom_color = opponent_of(top_color)
         turn = self.match.current_turn()
         over = self.current_result() is not None
         self.player_strip_top.set_state(**self._strip_state(top_color, turn, over))
@@ -939,7 +940,7 @@ class Frontend(OnlineEventsMixin):
         if not candidates:
             return None
         remaining, total = min(candidates, key=lambda r: r[0])
-        if remaining < 10:
+        if remaining < AUTO_END_RED_THRESHOLD_SECONDS:
             return 0.0
         return remaining / total
 
@@ -999,14 +1000,14 @@ class Frontend(OnlineEventsMixin):
                 return None, None
             remaining = remaining_ms / 1000.0
             elapsed = FIRST_MOVE_ABORT_SECONDS - remaining
-            if elapsed < 0.1 * FIRST_MOVE_ABORT_SECONDS:
+            if elapsed < AUTO_END_GATE_FRACTION * FIRST_MOVE_ABORT_SECONDS:
                 return None, None
             return "Abort in", remaining
         return None, None
 
     def _auto_end_remaining(self, label, snap_ms, total_seconds, now_ms):
         elapsed = (now_ms - snap_ms) / 1000.0
-        if elapsed < 0.1 * total_seconds:
+        if elapsed < AUTO_END_GATE_FRACTION * total_seconds:
             return None, None
         remaining = total_seconds - elapsed
         if remaining <= 0:
@@ -1072,7 +1073,7 @@ class Frontend(OnlineEventsMixin):
             board_rect.right,
             0,
             max(window_width - board_rect.right, 300),
-            max(window_height, 500)
+            max(window_height, MIN_WINDOW_HEIGHT)
         )
 
         strip_height = board_size_px * 0.075

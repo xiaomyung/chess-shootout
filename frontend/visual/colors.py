@@ -18,3 +18,9 @@ class Colors:
     clock_low_time = "#7a1f1f"
     clock_increment_flash = "#3aa54f"
     auto_end_alert = "#e0524d"
+    connection_dots = {
+        "connected": "#3cc85a",
+        "reconnecting": "#dcb428",
+        "disconnected": "#d23c3c",
+        "unknown": "#8c8c8c",
+    }

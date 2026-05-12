@@ -97,7 +97,6 @@ class OnlineEventsMixin:
             self._handle_time_granted(event.payload)
         elif event.type == "connection_status":
             self._handle_connection_status(event.payload)
-            return
         elif event.type == "error":
             self._handle_online_error(event.payload)
 

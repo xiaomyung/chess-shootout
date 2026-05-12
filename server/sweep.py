@@ -6,7 +6,7 @@ from server.protocol import FIRST_MOVE_ABORT_SECONDS, Reason, ResultMessage
 log = logging_setup.get_logger("chess.server.app")
 
 
-_RESULT_REASON_BY_GAME_RESULT = {
+RESULT_REASON_BY_GAME_RESULT = {
     "white_wins": (Reason.CHECKMATE, "white"),
     "black_wins": (Reason.CHECKMATE, "black"),
     "white_wins_on_time": (Reason.TIMEOUT, "white"),
@@ -40,8 +40,8 @@ class Sweep:
                     and room.first_move_at is not None):
                 backend.tick_clock()
                 game_result = backend.game_result()
-                if game_result in _RESULT_REASON_BY_GAME_RESULT:
-                    reason, winner = _RESULT_REASON_BY_GAME_RESULT[game_result]
+                if game_result in RESULT_REASON_BY_GAME_RESULT:
+                    reason, winner = RESULT_REASON_BY_GAME_RESULT[game_result]
                     log.info("game over room=%s reason=%s winner=%s",
                              room.room_id, reason, winner)
                     self.rooms.finalize_result(room.room_id, reason,

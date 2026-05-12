@@ -17,7 +17,7 @@ from server.protocol import (
     TakebackAppliedMessage, TakebackOfferedMessage, TakebackResponseMessage,
     TimeGrantedMessage,
 )
-from server.sweep import _RESULT_REASON_BY_GAME_RESULT
+from server.sweep import RESULT_REASON_BY_GAME_RESULT
 
 
 log = logging_setup.get_logger("chess.server.app")
@@ -98,8 +98,8 @@ async def handle_move(app, websocket, room, color, raw):
     )
     await broadcast(connections, room, applied)
     game_result = room.backend.game_result()
-    if game_result in _RESULT_REASON_BY_GAME_RESULT:
-        reason, winner = _RESULT_REASON_BY_GAME_RESULT[game_result]
+    if game_result in RESULT_REASON_BY_GAME_RESULT:
+        reason, winner = RESULT_REASON_BY_GAME_RESULT[game_result]
         rooms.finalize_result(room.room_id, reason, winner_color=winner)
         await broadcast(connections, room,
                           ResultMessage(reason=reason, winner_color=winner))

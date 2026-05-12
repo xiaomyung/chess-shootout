@@ -6,6 +6,7 @@ from frontend.visual.colors import Colors
 
 AUTO_END_RED_THRESHOLD_SECONDS = 10
 AUTO_END_BADGE_FONT_SCALE = 0.75
+INCREMENT_FLASH_PEAK_ALPHA = 180
 
 
 def format_clock(seconds):
@@ -112,11 +113,9 @@ class PlayerStrip:
         dot_offset = 0
         if self.connection_state is not None:
             dot_radius = max(int(self.rect.height * 0.10), 4)
-            dot_color = {
-                "connected": (60, 200, 90),
-                "reconnecting": (220, 180, 40),
-                "disconnected": (210, 60, 60),
-            }.get(self.connection_state, (140, 140, 140))
+            dot_color = Colors.connection_dots.get(
+                self.connection_state, Colors.connection_dots["unknown"],
+            )
             dot_x = name_region.x + self.pocket_inset + dot_radius
             dot_y = name_region.centery
             pg.draw.circle(self.window, dot_color, (dot_x, dot_y), dot_radius)
@@ -174,7 +173,7 @@ class PlayerStrip:
         if remaining <= 0:
             return 0
         progress = remaining / INCREMENT_FLASH_MS
-        return int(180 * max(0.0, min(1.0, progress)))
+        return int(INCREMENT_FLASH_PEAK_ALPHA * max(0.0, min(1.0, progress)))
 
     def _render_auto_end_badge(self, name_region):
         if self.auto_end_label is None or self.auto_end_seconds is None:
