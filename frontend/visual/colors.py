@@ -17,3 +17,4 @@ class Colors:
     last_move = "#f7eb6580"
     clock_low_time = "#7a1f1f"
     clock_increment_flash = "#3aa54f"
+    auto_end_alert = "#e0524d"

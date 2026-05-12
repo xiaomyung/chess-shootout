@@ -18,7 +18,9 @@ from frontend.modals.fen_input import FenInputModal
 from frontend.modals.help import HelpModal
 from frontend.modals.reconnecting import ReconnectingModal
 from frontend.visual.toast import Toast
-from frontend.online.client import OnlineClient, fetch_resume, probe_active_game
+from frontend.online.client import (
+    OnlineClient, RECONNECT_TOTAL_SECONDS, fetch_resume, probe_active_game,
+)
 from frontend.online.events import ONLINE_HARD_FAILURE_LABELS, OnlineEventsMixin
 from frontend.panels.player_strip import PlayerStrip
 from frontend.modals.server import ServerAddressModal
@@ -31,7 +33,9 @@ from frontend.pgn.generate import generate_pgn, TIMEOUT_RESULTS
 from frontend.pgn.load import load_pgn_into_backend
 from backend.paths import PROJECT_ROOT, SOUNDS_DIR
 from backend.pieces import PieceColor, PieceType, opponent_of
-from server.protocol import GIVE_TIME_SECONDS
+from server.protocol import (
+    FIRST_MOVE_ABORT_SECONDS, GIVE_TIME_SECONDS, GRACE_SECONDS,
+)
 
 
 RESULT_TEXT = {
@@ -906,7 +910,38 @@ class Frontend(OnlineEventsMixin):
             fraction = None
         else:
             fraction = clock.remaining(self.match.current_turn()) / clock.initial_seconds
+        auto_end_fraction = self._auto_end_heartbeat_fraction()
+        if auto_end_fraction is not None:
+            fraction = (auto_end_fraction if fraction is None
+                        else min(fraction, auto_end_fraction))
         self.sound_manager.update_heartbeat(fraction, paused)
+
+    def _auto_end_heartbeat_fraction(self):
+        if self.mode != ONLINE:
+            return None
+        now = pg.time.get_ticks()
+        candidates = []
+        for snap_ms, total in (
+            (self._opp_disconnected_at_ms, GRACE_SECONDS),
+            (self._local_disconnected_at_ms, RECONNECT_TOTAL_SECONDS),
+        ):
+            if snap_ms is None:
+                continue
+            remaining = total - (now - snap_ms) / 1000.0
+            if remaining <= 0:
+                continue
+            candidates.append((remaining, total))
+        if (self._first_move_deadline_ms is not None
+                and not self.match.move_history):
+            remaining_ms = self._first_move_deadline_ms - now
+            if remaining_ms > 0:
+                candidates.append((remaining_ms / 1000.0, FIRST_MOVE_ABORT_SECONDS))
+        if not candidates:
+            return None
+        remaining, total = min(candidates, key=lambda r: r[0])
+        if remaining < 10:
+            return 0.0
+        return remaining / total
 
     def _strip_state(self, color, turn, over):
         name = self._name_for_color(color)
@@ -925,6 +960,7 @@ class Frontend(OnlineEventsMixin):
                 and self.match.local_color is not None
                 and color != self.match.local_color):
             connection_state = self.online_client.opp_state
+        auto_end_label, auto_end_seconds = self._compute_auto_end(color, over)
         return {
             "name": name,
             "clock_seconds": seconds,
@@ -934,7 +970,48 @@ class Frontend(OnlineEventsMixin):
             "captured_color": opponent_of(color),
             "connection_state": connection_state,
             "clock_initial_seconds": initial_seconds,
+            "auto_end_label": auto_end_label,
+            "auto_end_seconds": auto_end_seconds,
         }
+
+    def _compute_auto_end(self, color, over):
+        if (self.mode != ONLINE or over or self.match.local_color is None):
+            return None, None
+        if self.match.move_history:
+            self._first_move_deadline_ms = None
+        now = pg.time.get_ticks()
+        is_local = (color == self.match.local_color)
+        if is_local and self._local_disconnected_at_ms is not None:
+            return self._auto_end_remaining(
+                "reconnect", self._local_disconnected_at_ms,
+                RECONNECT_TOTAL_SECONDS, now,
+            )
+        if (not is_local
+                and self._opp_disconnected_at_ms is not None):
+            return self._auto_end_remaining(
+                "abandon", self._opp_disconnected_at_ms, GRACE_SECONDS, now,
+            )
+        if (color == self.match.current_turn()
+                and not self.match.move_history
+                and self._first_move_deadline_ms is not None):
+            remaining_ms = self._first_move_deadline_ms - now
+            if remaining_ms <= 0:
+                return None, None
+            remaining = remaining_ms / 1000.0
+            elapsed = FIRST_MOVE_ABORT_SECONDS - remaining
+            if elapsed < 0.1 * FIRST_MOVE_ABORT_SECONDS:
+                return None, None
+            return "abort", remaining
+        return None, None
+
+    def _auto_end_remaining(self, label, snap_ms, total_seconds, now_ms):
+        elapsed = (now_ms - snap_ms) / 1000.0
+        if elapsed < 0.1 * total_seconds:
+            return None, None
+        remaining = total_seconds - elapsed
+        if remaining <= 0:
+            return None, None
+        return label, remaining
 
     def _compute_layout(self):
         window_width, window_height = self.window.get_size()
