@@ -164,6 +164,10 @@ class Frontend(OnlineEventsMixin):
         self._series_room_id = None
         self._resyncing = False
         self._last_give_time_at_ms = -GIVE_TIME_DEBOUNCE_MS
+        self._first_move_deadline_ms = None
+        self._opp_disconnected_at_ms = None
+        self._local_disconnected_at_ms = None
+        self._prev_online_state = None
 
         self.match = Match()
         self.sound_manager = SoundManager(SOUNDS_DIR, enabled=pg.mixer.get_init() is not None)
@@ -252,6 +256,10 @@ class Frontend(OnlineEventsMixin):
         self.match.on_local_move_applied = None
         self.right_menu.set_game_info(None)
         self.result_menu.set_online_mode(False)
+        self._first_move_deadline_ms = None
+        self._opp_disconnected_at_ms = None
+        self._local_disconnected_at_ms = None
+        self._prev_online_state = None
         self._reset_to_new_game()
         self._refresh_load_pgn_availability()
         self.start_menu.show()
@@ -509,6 +517,16 @@ class Frontend(OnlineEventsMixin):
                 self.reconnecting_modal.show(on_cancel=self._abandon_online_game)
         elif self.reconnecting_modal.is_visible():
             self.reconnecting_modal.hide()
+        self._track_local_online_state()
+
+    def _track_local_online_state(self):
+        current = self.online_client.state if self.online_client is not None else None
+        prev = self._prev_online_state
+        if current == "reconnecting" and prev != "reconnecting":
+            self._local_disconnected_at_ms = pg.time.get_ticks()
+        elif current != "reconnecting" and prev == "reconnecting":
+            self._local_disconnected_at_ms = None
+        self._prev_online_state = current
 
     def _right_menu_buttons(self):
         if self.pgn_review:
