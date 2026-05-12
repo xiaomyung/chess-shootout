@@ -148,6 +148,45 @@ class OnlineClient:
     def send_takeback_response(self, accept):
         self._enqueue("send_takeback_response", accept)
 
+    def request_state_sync(self):
+        if (self._loop is None or self._loop.is_closed()
+                or self._transport is None
+                or self._room_id is None or self._session_token is None):
+            log.debug("state-sync dropped: loop not running")
+            return
+        try:
+            asyncio.run_coroutine_threadsafe(self._fetch_state_sync(), self._loop)
+        except RuntimeError:
+            pass
+
+    async def _fetch_state_sync(self):
+        body = ResumeRequest(
+            room_id=self._room_id, session_token=self._session_token,
+        )
+        try:
+            async with self._transport.make_async_http() as http:
+                response = await self._transport.resume_async(body, http)
+        except FatalResumeError as exc:
+            log.warning("state-sync fatal: %s", exc)
+            try:
+                async with self._transport.make_async_http() as http:
+                    health = await self._transport.healthz_async(http)
+            except Exception:
+                health = None
+            reason = "room_lost" if health is not None else "reconnect_failed"
+            self._inbound.put(Event("error", {"reason": reason}))
+            return
+        except Exception as exc:
+            log.warning("state-sync failed: %s", exc)
+            self._inbound.put(Event("error", {"reason": "reconnect_failed"}))
+            return
+        if response is None:
+            self._inbound.put(Event("error", {"reason": "reconnect_failed"}))
+            return
+        log.info("state-sync ok room=%s ply=%d",
+                 self._room_id, len(response.move_history))
+        self._inbound.put(Event("game_resumed", response.model_dump()))
+
     def _enqueue(self, method, *args):
         if self._loop is None or self._loop.is_closed() or self._outbound is None:
             log.debug("send dropped (loop not running): method=%s", method)

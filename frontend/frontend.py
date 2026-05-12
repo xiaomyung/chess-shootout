@@ -161,6 +161,7 @@ class Frontend(OnlineEventsMixin):
         self._series_white_score = 0.0
         self._series_black_score = 0.0
         self._series_room_id = None
+        self._resyncing = False
 
         self.match = Match()
         self.sound_manager = SoundManager(SOUNDS_DIR, enabled=pg.mixer.get_init() is not None)

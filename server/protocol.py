@@ -210,6 +210,7 @@ class MoveAppliedMessage(_Base):
     promotion: Optional[Literal["q", "r", "b", "n"]] = None
     san: str
     clock: ClockSnapshot
+    ply: int
 
     model_config = {"populate_by_name": True}
 
@@ -232,6 +233,7 @@ class TakebackAppliedMessage(_Base):
     type: Literal["takeback_applied"] = "takeback_applied"
     fen: str
     clock: ClockSnapshot
+    ply: int
 
 
 class ConnectionStatusMessage(_Base):

@@ -149,6 +149,13 @@ class OnlineEventsMixin:
             clock_snap.get("running_for"),
         )
 
+    def _begin_resync(self):
+        if self._resyncing:
+            return
+        self._resyncing = True
+        if self.online_client is not None:
+            self.online_client.request_state_sync()
+
     def _handle_game_resumed(self, payload):
         self.match.new_game()
         for entry in payload.get("move_history", []):
@@ -165,8 +172,16 @@ class OnlineEventsMixin:
         self.board.selected_square = None
         self.board._clear_premoves()
         self.board.clear_annotations()
+        self._resyncing = False
 
     def _handle_takeback_applied(self, payload):
+        if self._resyncing:
+            return
+        server_ply = payload.get("ply")
+        expected = len(self.match.move_history) - 1
+        if server_ply is not None and server_ply != expected:
+            self._begin_resync()
+            return
         if self.match.move_history:
             last = self.match.move_history[-1].move
             self.match.undo()
@@ -175,11 +190,19 @@ class OnlineEventsMixin:
         self._apply_clock_snap(payload, default_to_existing=True)
 
     def _handle_remote_move_applied(self, payload):
-        self._apply_clock_snap(payload, default_to_existing=True)
+        if self._resyncing:
+            return
         san = payload.get("san")
         last = self.match.move_history[-1] if self.match.move_history else None
         if last is not None and last.san == san:
+            self._apply_clock_snap(payload, default_to_existing=True)
             return
+        server_ply = payload.get("ply")
+        expected = len(self.match.move_history) + 1
+        if server_ply is not None and server_ply != expected:
+            self._begin_resync()
+            return
+        self._apply_clock_snap(payload, default_to_existing=True)
         from_sq = square_from_coord(payload["from"])
         to_sq = square_from_coord(payload["to"])
         promo = payload.get("promotion")
@@ -187,6 +210,8 @@ class OnlineEventsMixin:
         result = self.match.apply_remote_move(from_sq, to_sq, promo_type)
         if result.legal:
             self.board.animate_remote_move(from_sq, to_sq)
+        else:
+            self._begin_resync()
 
     def _handle_online_result(self, payload):
         reason = payload.get("reason", "")

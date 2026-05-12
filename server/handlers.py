@@ -93,6 +93,7 @@ async def handle_move(app, websocket, room, color, raw):
     applied = MoveAppliedMessage(
         from_sq=msg.from_sq, to_sq=msg.to_sq, promotion=msg.promotion,
         san=san, clock=_clock_snapshot(room.backend.clock),
+        ply=len(room.backend.move_history),
     )
     await broadcast(connections, room, applied)
     game_result = room.backend.game_result()
@@ -243,6 +244,7 @@ async def handle_takeback_response(app, websocket, room, color, raw):
         await broadcast(connections, room, TakebackAppliedMessage(
             fen=export_fen(room.backend),
             clock=_clock_snapshot(room.backend.clock),
+            ply=len(room.backend.move_history),
         ))
         return "accepted"
     log.info("takeback declined room=%s by=%s", room.room_id, color)
