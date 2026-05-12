@@ -134,6 +134,7 @@ async def test_dispatch_returns_invalid_message_for_unknown_type(app):
     class _FakeWS:
         def __init__(self):
             self.sent = []
+
         async def send_json(self, payload):
             self.sent.append(payload)
     ws = _FakeWS()

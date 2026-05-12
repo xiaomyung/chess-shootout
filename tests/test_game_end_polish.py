@@ -97,7 +97,6 @@ def test_fade_alpha_starts_low_and_grows_to_max():
     app = _make_app()
     app.manual_result = "white_wins"
     app._update_result_pending()
-    base = app._result_first_seen_at_ms
 
     # Right at t=0, alpha is 0.
     app._result_first_seen_at_ms = pg.time.get_ticks()

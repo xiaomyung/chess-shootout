@@ -17,7 +17,8 @@ def _pygame_init():
     pg.quit()
 
 
-def _no_op(): pass
+def _no_op():
+    pass
 
 
 def _make_menu():

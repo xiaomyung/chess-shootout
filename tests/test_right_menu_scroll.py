@@ -111,9 +111,7 @@ def test_handle_scroll_records_activity_timestamp(menu):
 def test_visible_rows_slice_reflects_scroll_offset(menu):
     play_n_moves(menu.backend, 200)
     menu.draw_menu()
-    total = menu._total_rows
-    visible = menu._max_lines
-    # At offset=0, last `visible` rows shown. At offset=N, slice shifts up by N.
+    # At offset=0, last `_max_lines` rows shown. At offset=N, slice shifts up by N.
     menu.scroll_offset = 5
     menu.draw_menu()
     # We can't directly assert what was rendered, but the offset is preserved.

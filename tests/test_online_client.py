@@ -106,6 +106,7 @@ class _FakeWs:
     async def ping(self):
         self.ping_calls += 1
         latency = self._latencies.pop(0)
+
         async def _waiter():
             return latency
         return _waiter()
@@ -148,6 +149,7 @@ def test_ping_loop_swallows_transient_ping_failures(monkeypatch):
             self.calls += 1
             if self.calls == 1:
                 raise RuntimeError("transient blip")
+
             async def _waiter():
                 return 0.025
             return _waiter()

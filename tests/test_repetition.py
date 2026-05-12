@@ -1,6 +1,6 @@
 from backend.backend import Backend
 from tests.helpers import (
-    BLACK, WHITE, K, Q, R, B, N, P,
+    BLACK, WHITE, K, R,
     make_backend, piece, sq,
 )
 

@@ -5,7 +5,7 @@ import pytest
 from server.protocol import GRACE_SECONDS
 from server.rooms import (
     AlreadyInGameError, InvalidTokenError, NotInRoomError,
-    PlayerSlot, REMATCH_KEEP_ALIVE_SECONDS, Room, RoomManager,
+    REMATCH_KEEP_ALIVE_SECONDS, RoomManager,
 )
 from tests.helpers import FakeClock
 

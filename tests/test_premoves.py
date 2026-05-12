@@ -1,9 +1,8 @@
-from backend.pieces import Piece, PieceColor, PieceType
 from backend.utils import Square
 from frontend.premoves import Premove, speculative_board
 
 from tests.helpers import (
-    BLACK, WHITE, K, Q, R, B, N, P,
+    BLACK, WHITE, K, P,
     make_backend, piece, sq,
 )
 

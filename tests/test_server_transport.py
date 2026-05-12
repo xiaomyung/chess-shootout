@@ -23,7 +23,7 @@ import uvicorn
 
 from frontend.online.transport import (
     FatalResumeError, SchemaVersionMismatch, ServerTransport, ServerWebSocket,
-    TransportError, TransportHTTPError, _split_addr,
+    TransportError, TransportHTTPError,
 )
 from server.app import create_app
 from server.protocol import (

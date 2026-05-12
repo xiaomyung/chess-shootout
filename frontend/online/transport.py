@@ -5,7 +5,7 @@ from typing import Optional
 
 import httpx
 import websockets
-from websockets.exceptions import ConnectionClosed as WsConnectionClosed
+from websockets.exceptions import ConnectionClosed
 
 from server.protocol import (
     AuthMessage, CancelMatchmakeRequest, DrawResponseMessage, HealthResponse,
@@ -14,6 +14,8 @@ from server.protocol import (
     RematchResponseMessage, ResumeRequest, ResumeResponse,
     TakebackResponseMessage,
 )
+
+WsConnectionClosed = ConnectionClosed
 
 
 log = logging.getLogger("chess.client.transport")

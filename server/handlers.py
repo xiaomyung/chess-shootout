@@ -228,7 +228,6 @@ async def handle_takeback_request(app, websocket, room, color, raw):
 
 
 async def handle_takeback_response(app, websocket, room, color, raw):
-    rooms = app.state.rooms
     connections = app.state.connections
     if room.result is not None or room.takeback_offered_by is None:
         return "noop"

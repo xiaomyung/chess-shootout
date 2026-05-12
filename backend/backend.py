@@ -112,7 +112,9 @@ class Backend:
                 return "black_wins" if self.turn == PieceColor.WHITE else "white_wins"
             return "draw_stalemate"
         if self.clock is not None and self.clock.flagged is not None:
-            return "black_wins_on_time" if self.clock.flagged == PieceColor.WHITE else "white_wins_on_time"
+            if self.clock.flagged == PieceColor.WHITE:
+                return "black_wins_on_time"
+            return "white_wins_on_time"
         if self._has_insufficient_material():
             return "draw_insufficient_material"
         if self.position_counts and max(self.position_counts.values()) >= 3:
@@ -182,7 +184,8 @@ class Backend:
         match = _SAN_MOVE_RE.match(san)
         if match is None:
             return MoveResult(legal=False)
-        piece_letter, dis_file, dis_rank, _capture, tgt_file, tgt_rank, _, promo_letter = match.groups()
+        (piece_letter, dis_file, dis_rank, _capture,
+         tgt_file, tgt_rank, _, promo_letter) = match.groups()
 
         target = Square(self.SIZE - int(tgt_rank), SAN_FILES.index(tgt_file))
         piece_type = (SAN_LETTER_TO_PIECE[piece_letter]

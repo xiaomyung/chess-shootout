@@ -425,7 +425,8 @@ def test_knight_corner_long_vertical_first():
 
 
 def test_knight_corner_long_horizontal_first():
-    # dr = -1, dc = 2 (e.g., g1 -> i2 doesn't exist, use d4 -> f5): horizontal first → corner at (from.row, to.col)
+    # dr = -1, dc = 2 (e.g., g1 -> i2 doesn't exist, use d4 -> f5):
+    # horizontal first → corner at (from.row, to.col)
     corner = Board._knight_arrow_corner(Square(4, 3), Square(3, 5))
     assert corner == Square(4, 5)
 
@@ -447,16 +448,17 @@ def test_knight_corner_all_eight_l_shapes():
     center = Square(4, 4)
     expected_corners = {
         (-2, -1): Square(2, 4),
-        (-2,  1): Square(2, 4),
+        (-2, 1): Square(2, 4),
         (-1, -2): Square(4, 2),
-        (-1,  2): Square(4, 6),
-        ( 1, -2): Square(4, 2),
-        ( 1,  2): Square(4, 6),
-        ( 2, -1): Square(6, 4),
-        ( 2,  1): Square(6, 4),
+        (-1, 2): Square(4, 6),
+        (1, -2): Square(4, 2),
+        (1, 2): Square(4, 6),
+        (2, -1): Square(6, 4),
+        (2, 1): Square(6, 4),
     }
     for (dr, dc), expected in expected_corners.items():
-        corner = Board._knight_arrow_corner(center, Square(center.row + dr, center.col + dc))
+        target = Square(center.row + dr, center.col + dc)
+        corner = Board._knight_arrow_corner(center, target)
         assert corner == expected, f"dr={dr}, dc={dc}: got {corner}, expected {expected}"
 
 
@@ -507,6 +509,6 @@ def test_premove_queueing_does_not_clear_annotations(board):
     board.toggle_highlight(Square(4, 4))
     board.handle_click(Square(6, 4))
     board.handle_click(Square(4, 4))  # premove (4,4) IS highlighted but we don't fire animation
-    # The premove queue happens, the highlighted_squares should stay since no _start_move_animation ran.
+    # Premove enqueues without firing animation, so highlighted_squares should stay.
     assert len(board.premoves) == 1
     assert Square(4, 4) in board.highlighted_squares

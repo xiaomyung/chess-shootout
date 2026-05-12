@@ -1,6 +1,5 @@
 """End-to-end test: two clients pair against an in-process server, play
 a short game over real WebSockets, and verify state symmetry."""
-import asyncio
 import threading
 import time
 
