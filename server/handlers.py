@@ -178,7 +178,7 @@ async def handle_rematch_request(app, websocket, room, color, raw):
     if len(room.rematch_offered_by) == 2:
         log.info("rematch mutual — restart room=%s", room.room_id)
         rooms.reset_for_rematch(room.room_id)
-        await broadcast_game_start(connections, room)
+        await broadcast_game_start(connections, room, app.state.now)
         return "started"
     log.info("rematch requested room=%s by=%s", room.room_id, color)
     opp_ws = connections.get_for_color(room, room.opp_color(color))
@@ -201,7 +201,7 @@ async def handle_rematch_response(app, websocket, room, color, raw):
     if msg.accept:
         log.info("rematch accepted room=%s by=%s", room.room_id, color)
         rooms.reset_for_rematch(room.room_id)
-        await broadcast_game_start(connections, room)
+        await broadcast_game_start(connections, room, app.state.now)
         return "accepted"
     log.info("rematch declined room=%s by=%s", room.room_id, color)
     room.rematch_offered_by.clear()

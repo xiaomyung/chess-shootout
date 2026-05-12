@@ -324,7 +324,7 @@ async def _ws_session(app, websocket, room_id):
     if room.is_paired() and connections.has_both(room) and not room.game_start_broadcast:
         if room.started_at is None:
             room.started_at = app.state.now()
-        await broadcast_game_start(connections, room)
+        await broadcast_game_start(connections, room, app.state.now)
     else:
         opp_ws = connections.get_for_color(room, room.opp_color(color))
         if opp_ws is not None:

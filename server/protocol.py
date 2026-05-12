@@ -204,6 +204,7 @@ class GameStartMessage(_Base):
     time_minutes: int
     increment_seconds: int
     your_color: Literal["white", "black"]
+    started_seconds_ago: float = 0.0
 
 
 class MoveAppliedMessage(_Base):

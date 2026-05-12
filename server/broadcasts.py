@@ -8,8 +8,9 @@ from server.protocol import GameStartMessage
 log = logging_setup.get_logger("chess.server.app")
 
 
-async def broadcast_game_start(connections, room):
+async def broadcast_game_start(connections, room, now):
     fen = export_fen(room.backend)
+    started_seconds_ago = max(now() - (room.started_at or now()), 0.0)
     sent = []
     for color in ("white", "black"):
         ws = connections.get_for_color(room, color)
@@ -22,7 +23,9 @@ async def broadcast_game_start(connections, room):
             time_minutes=room.time_minutes,
             increment_seconds=room.increment_seconds,
             your_color=color,
+            started_seconds_ago=started_seconds_ago,
         ))
         sent.append(color)
     room.game_start_broadcast = True
-    log.info("game_start broadcast room=%s sent_to=%s", room.room_id, sent)
+    log.info("game_start broadcast room=%s sent_to=%s elapsed=%.2f",
+             room.room_id, sent, started_seconds_ago)

@@ -154,6 +154,11 @@ def test_two_clients_pair_and_get_game_start(client):
             assert msg_b["your_color"] == "black"
             assert msg_a["white_name"] == "Alice"
             assert msg_a["black_name"] == "Alice"  # nickname default in helper
+            # FakeClock starts at 0; pairing and broadcast happen in the same
+            # tick window so elapsed is effectively zero. Just lock in the
+            # field's presence + numeric type.
+            assert "started_seconds_ago" in msg_a
+            assert msg_a["started_seconds_ago"] == pytest.approx(0.0, abs=1.0)
 
 
 def test_full_short_game_e4_e5_resign(client):
