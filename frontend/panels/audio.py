@@ -5,7 +5,8 @@ from frontend.visual.colors import Colors
 from frontend.visual.widgets import draw_button
 
 
-SLIDER_FRACTION = 0.75
+TEXT_FRACTION = 0.15
+SLIDER_FRACTION = 0.60
 SLIDER_GAP_PX = 6
 
 
@@ -15,6 +16,7 @@ class AudioPanel:
         self.window = window
         self.sound_manager = sound_manager
         self.rect = pg.Rect(0, 0, 0, 0)
+        self.text_rect = pg.Rect(0, 0, 0, 0)
         self.slider_rect = pg.Rect(0, 0, 0, 0)
         self.mute_rect = pg.Rect(0, 0, 0, 0)
         self.button_font = pg.font.SysFont("Arial", 14, bold=True)
@@ -23,20 +25,38 @@ class AudioPanel:
 
     def set_rect(self, rect):
         self.rect = pg.Rect(rect)
-        slider_w = int((rect.width - SLIDER_GAP_PX) * SLIDER_FRACTION)
-        mute_w = rect.width - SLIDER_GAP_PX - slider_w
-        self.slider_rect = pg.Rect(rect.x, rect.y, slider_w, rect.height)
-        self.mute_rect = pg.Rect(rect.x + slider_w + SLIDER_GAP_PX, rect.y,
-                                 mute_w, rect.height)
         self.button_font = pg.font.SysFont(
             "Arial", max(int(rect.width / self.button_font_factor), 10), bold=True,
         )
+        self.text_rect, self.slider_rect, self.mute_rect = self._split_regions(rect)
+
+    def _split_regions(self, rect):
+        text_w = max(int(rect.width * TEXT_FRACTION), 1)
+        slider_w = max(int(rect.width * SLIDER_FRACTION), 1)
+        mute_w = max(rect.width - text_w - slider_w - 2 * SLIDER_GAP_PX, 0)
+        text_rect = pg.Rect(rect.x, rect.y, text_w, rect.height)
+        slider_rect = pg.Rect(
+            rect.x + text_w + SLIDER_GAP_PX, rect.y, slider_w, rect.height,
+        )
+        mute_rect = pg.Rect(
+            rect.x + text_w + slider_w + 2 * SLIDER_GAP_PX, rect.y,
+            mute_w, rect.height,
+        )
+        return text_rect, slider_rect, mute_rect
 
     def draw(self):
         if self.rect.width <= 0 or self.rect.height <= 0:
             return
+        self._draw_volume_text()
         self._draw_slider()
         self._draw_mute()
+
+    def _draw_volume_text(self):
+        percent = int(round(self.sound_manager.master_volume * 100))
+        surf = self.button_font.render(f"{percent}%", True, Colors.white)
+        x = self.text_rect.right - surf.get_width()
+        y = self.text_rect.centery - surf.get_height() // 2
+        self.window.blit(surf, (x, y))
 
     def _draw_slider(self):
         track = self._track_rect()

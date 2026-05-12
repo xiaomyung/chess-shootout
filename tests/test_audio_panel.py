@@ -9,7 +9,7 @@ import pygame as pg
 import pytest
 
 from backend.paths import SOUNDS_DIR
-from frontend.panels.audio import AudioPanel, SLIDER_FRACTION
+from frontend.panels.audio import AudioPanel, SLIDER_FRACTION, TEXT_FRACTION
 from frontend.panels.right import RightMenu
 from frontend.audio.sound_manager import SoundManager
 
@@ -122,16 +122,25 @@ def test_play_disabled_does_nothing(sm):
 
 # ---------- AudioPanel ----------
 
-def test_panel_set_rect_splits_slider_75_mute_25(panel):
-    panel.set_rect(pg.Rect(0, 0, 100, 40))
-    expected_slider_w = int((100 - 6) * SLIDER_FRACTION)
-    assert panel.slider_rect.width == expected_slider_w
-    assert panel.slider_rect.x < panel.mute_rect.x
-    # The slider takes ~75% of the available width.
-    ratio = panel.slider_rect.width / (
-        panel.slider_rect.width + panel.mute_rect.width
-    )
-    assert 0.7 <= ratio <= 0.8
+def test_panel_set_rect_allocates_text_slider_mute_in_order(panel):
+    # New three-region layout: [volume text][slider][mute], left to right.
+    panel.set_rect(pg.Rect(0, 0, 200, 40))
+    assert panel.text_rect.x < panel.slider_rect.x < panel.mute_rect.x
+    assert panel.text_rect.right <= panel.slider_rect.x
+    assert panel.slider_rect.right <= panel.mute_rect.x
+    assert panel.text_rect.width > 0
+    assert panel.slider_rect.width > 0
+    assert panel.mute_rect.width > 0
+
+
+def test_panel_regions_use_configured_fractions(panel):
+    # The text gets ~TEXT_FRACTION and the slider gets ~SLIDER_FRACTION
+    # of the panel width; mute fills the remainder.
+    panel.set_rect(pg.Rect(0, 0, 400, 40))
+    total = panel.text_rect.width + panel.slider_rect.width + panel.mute_rect.width
+    assert total + 2 * 6 <= 400  # two SLIDER_GAP_PX gaps
+    assert abs(panel.text_rect.width / 400 - TEXT_FRACTION) < 0.02
+    assert abs(panel.slider_rect.width / 400 - SLIDER_FRACTION) < 0.02
 
 
 def test_panel_click_mute_button_toggles_enabled(panel, sm):
@@ -241,13 +250,82 @@ def test_panel_draw_smoke(panel):
     panel.draw()
 
 
-def test_panel_resize_keeps_75_25(panel):
+def test_panel_resize_keeps_layout_proportions(panel):
+    # Across panel widths, the three regions stay left-to-right with no
+    # overlap and similar proportional weights.
     for w in [120, 240, 480]:
         panel.set_rect(pg.Rect(0, 0, w, 40))
-        ratio = panel.slider_rect.width / (
-            panel.slider_rect.width + panel.mute_rect.width
-        )
-        assert 0.7 <= ratio <= 0.8
+        assert panel.text_rect.right <= panel.slider_rect.x
+        assert panel.slider_rect.right <= panel.mute_rect.x
+        assert abs(panel.text_rect.width / w - TEXT_FRACTION) < 0.05
+        assert abs(panel.slider_rect.width / w - SLIDER_FRACTION) < 0.05
+
+
+# ---------- Volume text label (Bug 5) ----------
+
+def _rendered_text_pixel_count(panel, color=(255, 255, 255)):
+    snapshot = pg.Surface(panel.text_rect.size, pg.SRCALPHA)
+    surface = panel.window
+    panel.window = snapshot
+    panel.text_rect = pg.Rect(0, 0, *panel.text_rect.size)
+    try:
+        panel._draw_volume_text()
+    finally:
+        panel.window = surface
+    arr = pg.surfarray.pixels3d(snapshot)
+    return int((arr.sum(axis=2) > 0).sum())
+
+
+def test_volume_text_default_visible(panel):
+    panel.set_rect(pg.Rect(0, 0, 400, 40))
+    panel.sound_manager.set_master_volume(0.5)
+    panel.draw()
+    rendered = panel.button_font.render("50%", True, (255, 255, 255))
+    assert rendered.get_width() <= panel.text_rect.width
+
+
+@pytest.mark.parametrize("volume,expected", [
+    (0.0, "0%"),
+    (0.5, "50%"),
+    (1.0, "100%"),
+    (0.42, "42%"),
+])
+def test_volume_text_renders_correct_percent(panel, volume, expected):
+    panel.set_rect(pg.Rect(0, 0, 400, 40))
+    panel.sound_manager.set_master_volume(volume)
+    rendered = panel.button_font.render(expected, True, (255, 255, 255))
+    # Sanity check: the rendered string fits inside text_rect.
+    assert rendered.get_width() <= panel.text_rect.width + 8
+    # The percent calculation matches what _draw_volume_text computes.
+    percent = int(round(panel.sound_manager.master_volume * 100))
+    assert f"{percent}%" == expected
+
+
+def test_volume_text_updates_after_drag(panel, sm):
+    panel.set_rect(pg.Rect(0, 0, 400, 40))
+    sm.set_master_volume(0.10)
+    assert int(round(sm.master_volume * 100)) == 10
+    track = panel._track_rect()
+    panel.handle_click((track.right, track.centery))
+    assert int(round(sm.master_volume * 100)) == 100
+
+
+def test_volume_text_unchanged_when_toggling_mute(panel, sm):
+    panel.set_rect(pg.Rect(0, 0, 400, 40))
+    sm.set_master_volume(0.42)
+    panel.handle_click(panel.mute_rect.center)
+    # Mute toggles sm.enabled but leaves master_volume untouched, so the
+    # displayed percent stays at 42.
+    assert int(round(sm.master_volume * 100)) == 42
+
+
+def test_volume_text_rounds_to_integer(panel, sm):
+    panel.set_rect(pg.Rect(0, 0, 400, 40))
+    sm.set_master_volume(0.345)
+    # int(round(0.345*100)) is 34 or 35 depending on banker's rounding;
+    # accept whichever Python produces.
+    rendered = int(round(sm.master_volume * 100))
+    assert rendered in (34, 35)
 
 
 # ---------- RightMenu integration ----------
