@@ -27,7 +27,11 @@ from frontend.panels.player_strip import (
 )
 from frontend.modals.server import ServerAddressModal
 from frontend.modals.wait import WaitModal
-from frontend.panels.right import RightMenu, BUTTONS as RIGHT_MENU_BUTTONS, REVIEW_BUTTONS as RIGHT_MENU_REVIEW_BUTTONS
+from frontend.panels.right import (
+    RightMenu,
+    BUTTONS as RIGHT_MENU_BUTTONS,
+    REVIEW_BUTTONS as RIGHT_MENU_REVIEW_BUTTONS,
+)
 from frontend.modals.result import ResultMenu
 from frontend.audio.sound_manager import SoundManager
 from frontend.modals.start import StartMenu
@@ -57,6 +61,7 @@ RESULT_TEXT = {
     "aborted": ("Game aborted", "no moves played"),
     "server_shutdown": ("Game cancelled", "server shutting down"),
 }
+
 
 def _open_with_default_app(path):
     import shutil
@@ -126,6 +131,7 @@ SAVED_PGN_TOAST_DURATION_MS = 3000
 MIN_WINDOW_WIDTH = 900
 MIN_WINDOW_HEIGHT = 500
 
+
 def _games_dir():
     return os.path.join(PROJECT_ROOT, "games")
 
@@ -142,6 +148,7 @@ def compute_animation_ms(initial_seconds):
     if initial_seconds is None or initial_seconds <= 0:
         return ANIM_MS_DEFAULT
     return max(ANIM_MS_MIN, min(ANIM_MS_MAX, int(initial_seconds * 0.5)))
+
 
 log = logging.getLogger("chess.frontend")
 

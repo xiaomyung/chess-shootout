@@ -1,5 +1,5 @@
 from tests.helpers import (
-    BLACK, WHITE, K, Q, R, B, N, P,
+    BLACK, WHITE, K, Q, R, N,
     make_backend, piece, sq,
 )
 
@@ -37,18 +37,18 @@ def test_check_must_be_addressed():
     # Black rook on e3 gives check to white king on e1; white must block, capture, or move out.
     bk = make_backend({
         sq(7, 4): piece(K, WHITE),
-        sq(7, 0): piece(R, WHITE),  # rook can block at e2 or e3? No — rook on a1 reaches e1 along rank 1 only by moving.
+        sq(7, 0): piece(R, WHITE),  # rook on a1 — only reaches the e-file by moving.
         sq(5, 4): piece(R, BLACK),
         sq(0, 0): piece(K, BLACK),
     })
-    # White rook on a1 cannot block (can't reach the e-file in one move) but king can move.
+    # White rook on a1 cannot block (can't reach e-file in one move) but king can move.
     # Verify only king-escape moves are legal for the king and the rook has no rescue.
     king_moves = set(bk.legal_moves_from(sq(7, 4)))
     # King can move to d1 or f1 (not blocked, not on e-file).
     assert sq(7, 3) in king_moves
     assert sq(7, 5) in king_moves
-    # Rook on a1 can move along the rank or up the a-file; but none addresses check unless blocking the e-file.
+    # Rook on a1 has no move that addresses the check; the e-file is out of reach.
     rook_moves = set(bk.legal_moves_from(sq(7, 0)))
-    # Anything that doesn't address check is illegal — only blocking on the e-file (e.g., e7 e2) counts.
+    # Anything that doesn't address check is illegal — only blocking on the e-file counts.
     # The rook on a1 cannot reach the e-file in one move, so it has no legal moves.
     assert rook_moves == set()

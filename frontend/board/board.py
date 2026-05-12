@@ -77,7 +77,8 @@ class Board:
         for piece_color in PieceColor:
             for piece_type in PieceType:
                 piece = Piece(piece_type, piece_color)
-                self.piece_images_original[(piece_type, piece_color)] = pg.image.load(piece.img_path).convert_alpha()
+                image = pg.image.load(piece.img_path).convert_alpha()
+                self.piece_images_original[(piece_type, piece_color)] = image
 
     def _cell_rect(self, row, col):
         if self.flipped:

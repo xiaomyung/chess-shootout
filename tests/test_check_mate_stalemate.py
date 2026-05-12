@@ -1,6 +1,6 @@
 from backend.backend import Backend
 from tests.helpers import (
-    BLACK, WHITE, K, Q, R, B, N, P,
+    BLACK, WHITE, K, Q, R, P,
     make_backend, piece, sq, play_moves,
 )
 
@@ -35,7 +35,7 @@ def test_back_rank_mate():
 
 
 def test_classic_stalemate():
-    # Black king on a8, white king on c7, white queen on b6 — black to move, no legal moves, not in check.
+    # Black king a8, white king c7, white queen b6 — black to move, no legal moves, not in check.
     bk = make_backend({
         sq(0, 0): piece(K, BLACK),
         sq(1, 2): piece(K, WHITE),

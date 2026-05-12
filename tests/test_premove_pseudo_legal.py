@@ -8,13 +8,13 @@ box plus castle-from-home. Engine remains authoritative on fire.
 
 import pytest
 
-from backend.pieces import Piece, PieceColor, PieceType
-from backend.pseudo_legal import (
-    BLACK_KING_HOME_ROW, BOARD_SIZE, CASTLE_TARGET_COLS, KING_HOME_COL,
-    KNIGHT_OFFSETS, WHITE_KING_HOME_ROW, WHITE_PAWN_START_ROW,
-    BLACK_PAWN_START_ROW, piece_can_pseudo_reach,
+from backend.pieces import (
+    BLACK_KING_HOME_ROW, BLACK_PAWN_START_ROW, CASTLE_TARGET_COLS,
+    KING_HOME_COL, KNIGHT_OFFSETS, Piece, PieceColor, PieceType,
+    WHITE_KING_HOME_ROW, WHITE_PAWN_START_ROW,
 )
-from backend.utils import Square
+from backend.pseudo_legal import piece_can_pseudo_reach
+from backend.utils import BOARD_SIZE, Square
 
 
 def sq(row, col):
@@ -50,7 +50,9 @@ def test_pawn_one_step_forward(color, start_row, one_forward):
 def test_pawn_two_step_only_from_starting_rank():
     white = Piece(PieceType.PAWN, PieceColor.WHITE)
     # From starting rank: 2 forward OK.
-    assert piece_can_pseudo_reach(white, sq(WHITE_PAWN_START_ROW, 4), sq(WHITE_PAWN_START_ROW - 2, 4))
+    assert piece_can_pseudo_reach(
+        white, sq(WHITE_PAWN_START_ROW, 4), sq(WHITE_PAWN_START_ROW - 2, 4),
+    )
     # From any other rank: 2 forward rejected.
     assert piece_can_pseudo_reach(white, sq(4, 4), sq(2, 4)) is False
 

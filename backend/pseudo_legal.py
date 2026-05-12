@@ -1,10 +1,10 @@
 from backend.pieces import (
-    BLACK_KING_HOME_ROW, BLACK_PAWN_START_ROW, CASTLE_TARGET_COLS,
+    CASTLE_TARGET_COLS,
     KING_HOME_COL, KING_OFFSETS, KNIGHT_OFFSETS, PieceType,
-    WHITE_KING_HOME_ROW, WHITE_PAWN_START_ROW, king_home_row, pawn_forward,
+    king_home_row, pawn_forward,
     pawn_start_row,
 )
-from backend.utils import BOARD_SIZE, on_board
+from backend.utils import on_board
 
 
 def piece_can_pseudo_reach(piece, from_sq, to_sq):

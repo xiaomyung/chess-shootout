@@ -3,13 +3,11 @@ import os
 os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
 os.environ.setdefault("SDL_AUDIODRIVER", "dummy")
 
-from collections import Counter
-
 import pygame as pg
 import pytest
 
 from backend.match import Match, ONLINE
-from backend.pieces import Piece, PieceColor, PieceType
+from backend.pieces import PieceColor
 from backend.utils import Square
 from frontend.board import Board
 

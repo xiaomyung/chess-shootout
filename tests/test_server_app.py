@@ -116,7 +116,7 @@ def test_cancel_with_bogus_token_rejected(client):
 
 
 def test_ws_rejects_bad_auth_token(client):
-    r1 = _matchmake(client, uuid=ALICE)
+    _matchmake(client, uuid=ALICE)
     r2 = _matchmake(client, uuid=BOB)
     body = r2.json()
     with client.websocket_connect(f"/ws/{body['room_id']}") as ws:
@@ -127,7 +127,7 @@ def test_ws_rejects_bad_auth_token(client):
 
 
 def test_ws_rejects_non_auth_first_message(client):
-    r1 = _matchmake(client, uuid=ALICE)
+    _matchmake(client, uuid=ALICE)
     r2 = _matchmake(client, uuid=BOB)
     body = r2.json()
     with client.websocket_connect(f"/ws/{body['room_id']}") as ws:
@@ -186,7 +186,7 @@ def test_full_short_game_e4_e5_resign(client):
             ws_b.receive_text()
             ws_w.send_text(json.dumps({"version": PROTOCOL_VERSION, "type": "resign"}))
             res_w = json.loads(ws_w.receive_text())
-            res_b = json.loads(ws_b.receive_text())
+            ws_b.receive_text()
             assert res_w["type"] == "result"
             assert res_w["reason"] == Reason.RESIGNATION
             assert res_w["winner_color"] == "black"

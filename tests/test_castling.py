@@ -1,5 +1,5 @@
 from tests.helpers import (
-    BLACK, WHITE, K, Q, R, B, N, P,
+    BLACK, WHITE, K, R, N,
     make_backend, piece, sq,
 )
 

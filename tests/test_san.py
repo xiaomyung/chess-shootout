@@ -1,7 +1,7 @@
 from backend.backend import Backend
 from frontend.pgn.generate import generate_pgn
 from tests.helpers import (
-    BLACK, WHITE, K, Q, R, B, N, P,
+    BLACK, WHITE, K, Q, R, N, P,
     make_backend, piece, sq,
 )
 

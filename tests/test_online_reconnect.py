@@ -14,7 +14,6 @@ Two reconnect paths land here:
    board + clock back to the starting position with full time.
 """
 import os
-from types import SimpleNamespace
 
 os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
 os.environ.setdefault("SDL_AUDIODRIVER", "dummy")

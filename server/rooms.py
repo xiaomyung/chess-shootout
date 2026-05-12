@@ -115,7 +115,9 @@ class RoomManager:
                 room = queue.pop(0)
                 first_slot = room.white or room.black
                 first_pref = first_slot.side_preference
-                second_color, first_color_resolved = self._resolve_colors(first_pref, side_preference)
+                second_color, first_color_resolved = self._resolve_colors(
+                    first_pref, side_preference,
+                )
                 room.white = None
                 room.black = None
                 setattr(room, first_color_resolved, first_slot)
@@ -126,7 +128,9 @@ class RoomManager:
                 setattr(room, second_color, new_slot)
                 room.backend = Backend()
                 room.backend.new_game()
-                room.backend.setup_clock(time_minutes * 60, increment_seconds, now_provider=self._now)
+                room.backend.setup_clock(
+                    time_minutes * 60, increment_seconds, now_provider=self._now,
+                )
                 room.started_at = self._now()
                 self._uuid_to_room[client_uuid] = room.room_id
                 self._active[room.room_id] = room

@@ -9,7 +9,6 @@ import pytest
 
 from server.app import create_app
 from server.protocol import Reason
-from server.sweep import Sweep
 from tests.helpers import FakeClock, fake_uuid4
 
 
@@ -88,7 +87,6 @@ async def test_sweep_step_drop_orphans_pre_game(sweep, app, clock):
                           time_minutes=5, increment_seconds=0, side_preference="white")
     await rooms.enqueue(client_uuid=BOB, nickname="B", session_token="tb",
                           time_minutes=5, increment_seconds=0, side_preference="black")
-    room = list(rooms._active.values())[0]
     assert rooms.rooms_active == 1
     sweep.step_drop_orphans_and_post_result()
     assert rooms.rooms_active == 0
