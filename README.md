@@ -265,6 +265,17 @@ pytest tests -n 8 -q
 
 ~9 s under xdist for 1189 tests; ~25 s serial.
 
+## Linting
+
+Pylama (pycodestyle + pyflakes, configured in `pyproject.toml`) runs in CI and gates merges to master.
+
+```bash
+pip install -e ".[dev]"
+pylama backend frontend server main.py tests
+```
+
+Clean run exits 0. Same command runs in the `lint` GitHub Actions job, so a green local run means the PR check will pass.
+
 ## License
 
 MIT — see [LICENSE](LICENSE).
