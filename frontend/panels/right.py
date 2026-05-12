@@ -6,17 +6,12 @@ from frontend.visual.widgets import draw_button_row, draw_scroll_thumb
 
 
 BUTTONS = [
-    ("Undo", "undo"),
-    ("Resign", "resign"),
-    ("Draw", "draw"),
-    ("Flip", "flip"),
-    ("?", "help"),
+    [("Undo", "undo"), ("Resign", "resign"), ("Draw", "draw")],
+    [("Give 15 sec", "give_time"), ("Flip", "flip"), ("?", "help")],
 ]
 
 REVIEW_BUTTONS = [
-    ("Menu", "menu"),
-    ("Flip", "flip"),
-    ("?", "help"),
+    [("Menu", "menu"), ("Flip", "flip"), ("?", "help")],
 ]
 
 
@@ -97,11 +92,13 @@ class RightMenu:
             button_row_h,
         )
 
+        n_rows = max(len(self.buttons_provider()), 1)
+        buttons_block_h = n_rows * button_row_h + (n_rows - 1) * small_gap
         self.buttons_rect = pg.Rect(
             self.outer_rect.x + p,
-            self.audio_rect.y - small_gap - button_row_h,
+            self.audio_rect.y - small_gap - buttons_block_h,
             inner_w,
-            button_row_h,
+            buttons_block_h,
         )
 
         info_h = self._info_section_height()
@@ -148,9 +145,11 @@ class RightMenu:
         self._draw_scroll_indicator(self.moves_rect)
         self._draw_buttons(self.buttons_rect)
         if self.audio_panel is not None:
+            rows = self.buttons_provider()
+            n_cols = len(rows[0]) if rows else 5
             self.audio_panel.set_rect(
                 self.audio_rect, button_font=self.button_font,
-                n_columns=len(self.buttons_provider()), gap=self.button_gap,
+                n_columns=n_cols, gap=self.button_gap,
             )
             self.audio_panel.draw()
 
@@ -297,8 +296,20 @@ class RightMenu:
         )
 
     def _draw_buttons(self, rect):
-        self.button_rects = draw_button_row(
-            self.window, rect, self.buttons_provider(),
-            self.button_font, self.button_gap,
-            disabled_keys=self.disabled_keys_provider(),
-        )
+        rows = self.buttons_provider()
+        self.button_rects = {}
+        if not rows:
+            return
+        row_h = (rect.height - (len(rows) - 1) * self.button_gap) / len(rows)
+        disabled = self.disabled_keys_provider()
+        for i, row in enumerate(rows):
+            row_rect = pg.Rect(
+                rect.x,
+                round(rect.y + i * (row_h + self.button_gap)),
+                rect.width,
+                round(row_h),
+            )
+            self.button_rects.update(draw_button_row(
+                self.window, row_rect, row, self.button_font, self.button_gap,
+                disabled_keys=disabled,
+            ))

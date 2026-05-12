@@ -377,8 +377,11 @@ def test_right_menu_three_panels_resize_proportionally():
     rm.set_rect(pg.Rect(0, 0, 250, 1200))
     h2 = rm.moves_rect.height
     assert h2 > h1
-    # Buttons and audio rects keep similar heights.
-    assert abs(rm.buttons_rect.height - rm.audio_rect.height) <= 2
+    # Default BUTTONS has two rows, so the block is ~2x audio (single row),
+    # plus the small inter-row gap.
+    n_rows = len(rm.buttons_provider())
+    expected = n_rows * rm.audio_rect.height + max(n_rows - 1, 0) * 4
+    assert abs(rm.buttons_rect.height - expected) <= n_rows * 2 + 4
 
 
 def test_right_menu_routes_click_to_audio_panel():

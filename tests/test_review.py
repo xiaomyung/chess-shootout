@@ -613,18 +613,40 @@ def test_new_game_clears_read_only(tmp_path):
     assert app.board.read_only is False
 
 
+def _flat_button_keys(rows):
+    return {key for row in rows for _, key in row}
+
+
 def test_pgn_review_shows_only_menu_and_flip_buttons(tmp_path):
     app = _new_app()
     _load_test_pgn(app, tmp_path)
-    buttons = app._right_menu_buttons()
-    keys = {key for _, key in buttons}
-    assert keys == {"menu", "flip", "help"}
+    assert _flat_button_keys(app._right_menu_buttons()) == {"menu", "flip", "help"}
 
 
 def test_live_mode_shows_full_buttons():
     app = _new_app()
-    keys = {key for _, key in app._right_menu_buttons()}
-    assert keys == {"undo", "resign", "draw", "flip", "help"}
+    assert _flat_button_keys(app._right_menu_buttons()) == {
+        "undo", "resign", "draw", "give_time", "flip", "help",
+    }
+
+
+def test_live_mode_buttons_are_two_rows_of_three():
+    # Layout pin: the right-menu button section is two rows of three
+    # buttons each, so the audio slider (which mirrors the first row's
+    # column count) lines up with the buttons above it.
+    app = _new_app()
+    rows = app._right_menu_buttons()
+    assert len(rows) == 2
+    assert [key for _, key in rows[0]] == ["undo", "resign", "draw"]
+    assert [key for _, key in rows[1]] == ["give_time", "flip", "help"]
+
+
+def test_review_mode_is_one_row():
+    app = _new_app()
+    app.pgn_review = True
+    rows = app._right_menu_buttons()
+    assert len(rows) == 1
+    assert [key for _, key in rows[0]] == ["menu", "flip", "help"]
 
 
 def test_pgn_review_menu_button_returns_to_start_menu(tmp_path):
@@ -654,8 +676,9 @@ def test_new_game_clears_pgn_review_flag(tmp_path):
     assert app.pgn_review is True
     app._on_new_game()
     assert app.pgn_review is False
-    keys = {key for _, key in app._right_menu_buttons()}
-    assert keys == {"undo", "resign", "draw", "flip", "help"}
+    assert _flat_button_keys(app._right_menu_buttons()) == {
+        "undo", "resign", "draw", "give_time", "flip", "help",
+    }
 
 
 def test_ctrl_z_does_not_undo_in_pgn_review(tmp_path):
