@@ -164,11 +164,17 @@ curl http://<vps-ip>:8000/healthz
 
 ## Connecting from the game
 
-In the game's start menu, open the **Server address** field and type
-the VPS IP — for example `203.0.113.5`. The client auto-picks
-`ws://203.0.113.5:8000` (any IP address, or any host on port 8000, gets
-plaintext WS) and persists the address to your local `.env` as
-`CHESS_SERVER_ADDR`.
+In the game's start menu, open the **Server address** field. Two forms
+are accepted:
+
+- `<ip>` — uses the default port 8000.  Example: `203.0.113.5`.
+- `<ip>:<port>` — uses the typed port.  Example: `203.0.113.5:9999`.
+
+The client picks plaintext WebSocket (`ws://…`) automatically for any
+IP, and persists what you typed to your local `.env` as
+`CHESS_SERVER_ADDR`. If you change the server's `PORT` in
+`/etc/chess-server.env`, players must include the matching `:<port>`
+when connecting (and you must open it in UFW — see step 5).
 
 That's it — match-make and play.
 

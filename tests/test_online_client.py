@@ -37,6 +37,21 @@ def test_split_addr_port_8000_picks_ws_for_hostname():
     assert scheme == "ws" and host == "chess.example.com" and port == 8000
 
 
+def test_split_addr_ip_without_port_defaults_to_8000():
+    scheme, host, port = _split_addr("203.0.113.5")
+    assert scheme == "ws" and host == "203.0.113.5" and port == 8000
+
+
+def test_split_addr_ip_with_custom_port_uses_that_port():
+    scheme, host, port = _split_addr("203.0.113.5:9999")
+    assert scheme == "ws" and host == "203.0.113.5" and port == 9999
+
+
+def test_split_addr_localhost_without_port_defaults_to_8000():
+    scheme, host, port = _split_addr("localhost")
+    assert scheme == "ws" and host == "localhost" and port == 8000
+
+
 def test_url_builder_http_localhost():
     u = _UrlBuilder("localhost:8000")
     assert u.http("/matchmake") == "http://localhost:8000/matchmake"
