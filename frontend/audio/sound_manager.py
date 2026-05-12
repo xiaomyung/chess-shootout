@@ -32,6 +32,10 @@ CAPTURE_SOUND_BY_PIECE = {
 }
 
 
+def _clamp_volume(value):
+    return max(0.0, min(1.0, float(value)))
+
+
 class SoundManager:
 
     def __init__(self, sounds_dir, *, enabled=True, heartbeat=None,
@@ -40,7 +44,7 @@ class SoundManager:
         self.enabled = enabled
         self.master_volume = (
             env.get_master_volume() if master_volume is None
-            else max(0.0, min(1.0, float(master_volume)))
+            else _clamp_volume(master_volume)
         )
         self.heartbeat = heartbeat or HeartbeatConfig()
         self._state = STATE_OFF
@@ -112,7 +116,7 @@ class SoundManager:
             return None
 
     def set_master_volume(self, value):
-        self.master_volume = max(0.0, min(1.0, float(value)))
+        self.master_volume = _clamp_volume(value)
 
     def set_enabled(self, value):
         new_enabled = bool(value)

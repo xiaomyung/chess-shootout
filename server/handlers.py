@@ -12,9 +12,10 @@ from server.connections import broadcast, send
 from server.broadcasts import broadcast_game_start
 from server.protocol import (
     ClockSnapshot, DrawOfferedMessage, DrawResponseMessage, ErrorMessage,
-    MoveAppliedMessage, MoveMessage, Reason, RematchRequestMessage,
-    RematchResponseMessage, ResultMessage, TakebackAppliedMessage,
-    TakebackOfferedMessage, TakebackResponseMessage, TimeGrantedMessage,
+    GIVE_TIME_SECONDS, MoveAppliedMessage, MoveMessage, Reason,
+    RematchRequestMessage, RematchResponseMessage, ResultMessage,
+    TakebackAppliedMessage, TakebackOfferedMessage, TakebackResponseMessage,
+    TimeGrantedMessage,
 )
 from server.sweep import _RESULT_REASON_BY_GAME_RESULT
 
@@ -252,14 +253,14 @@ async def handle_takeback_response(app, websocket, room, color, raw):
     return "declined"
 
 
-GIVE_TIME_SECONDS = 15
-
-
 async def handle_give_time(app, websocket, room, color, raw):
     connections = app.state.connections
     if room.result is not None or room.backend is None or room.backend.clock is None:
         return "noop"
-    opp_piece_color = PieceColor.BLACK if color == "white" else PieceColor.WHITE
+    opp_color_str = room.opp_color(color)
+    opp_piece_color = (
+        PieceColor.WHITE if opp_color_str == "white" else PieceColor.BLACK
+    )
     added = room.backend.clock.add_time(opp_piece_color, GIVE_TIME_SECONDS)
     log.info("give_time room=%s by=%s added=%.2f", room.room_id, color, added)
     await broadcast(connections, room, TimeGrantedMessage(

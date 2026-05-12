@@ -6,6 +6,7 @@ from pydantic import BaseModel, Field, field_validator
 
 PROTOCOL_VERSION = 1
 MAX_NICKNAME_LEN = 20
+GIVE_TIME_SECONDS = 15
 
 UUID4_RE = re.compile(
     r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$",

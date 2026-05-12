@@ -19,6 +19,8 @@ from frontend.audio.sound_manager import SoundManager
 @pytest.fixture(scope="module", autouse=True)
 def _pygame_init():
     pg.init()
+    if not pg.mixer.get_init():
+        pg.mixer.init()
     pg.display.set_mode((1500, 800))
     yield
     pg.quit()
@@ -26,7 +28,6 @@ def _pygame_init():
 
 @pytest.fixture
 def sm():
-    pg.mixer.init() if not pg.mixer.get_init() else None
     return SoundManager(SOUNDS_DIR, enabled=True, master_volume=1.0)
 
 
@@ -45,7 +46,6 @@ def test_master_volume_explicit_override(sm):
 
 
 def test_master_volume_falls_back_to_env_default(monkeypatch, tmp_path):
-    pg.mixer.init() if not pg.mixer.get_init() else None
     from frontend import env as env_mod
     monkeypatch.setattr(env_mod, "_ENV_PATH", tmp_path / ".env")
     monkeypatch.delenv("CHESS_MASTER_VOLUME", raising=False)
@@ -54,7 +54,6 @@ def test_master_volume_falls_back_to_env_default(monkeypatch, tmp_path):
 
 
 def test_master_volume_reads_env_when_set(monkeypatch, tmp_path):
-    pg.mixer.init() if not pg.mixer.get_init() else None
     from frontend import env as env_mod
     monkeypatch.setattr(env_mod, "_ENV_PATH", tmp_path / ".env")
     monkeypatch.setenv("CHESS_MASTER_VOLUME", "0.42")
@@ -78,7 +77,6 @@ def test_set_master_volume_accepts_mid_range(sm):
 
 
 def test_set_enabled_false_calls_stop_all():
-    pg.mixer.init() if not pg.mixer.get_init() else None
     s = SoundManager(SOUNDS_DIR, enabled=True)
     stopped = []
     s.stop_all = lambda: stopped.append(True)
@@ -88,7 +86,6 @@ def test_set_enabled_false_calls_stop_all():
 
 
 def test_set_enabled_true_does_not_stop():
-    pg.mixer.init() if not pg.mixer.get_init() else None
     s = SoundManager(SOUNDS_DIR, enabled=False)
     stopped = []
     s.stop_all = lambda: stopped.append(True)
@@ -98,7 +95,6 @@ def test_set_enabled_true_does_not_stop():
 
 
 def test_play_with_master_scales_volume_before_playing():
-    pg.mixer.init() if not pg.mixer.get_init() else None
     s = SoundManager(SOUNDS_DIR, enabled=True)
     s.master_volume = 0.3
     fake_sound = MagicMock()
@@ -108,7 +104,6 @@ def test_play_with_master_scales_volume_before_playing():
 
 
 def test_heartbeat_volume_scales_by_master():
-    pg.mixer.init() if not pg.mixer.get_init() else None
     s = SoundManager(SOUNDS_DIR, enabled=True, master_volume=1.0)
     base = s._heartbeat_volume(0.0)
     s.master_volume = 0.5
@@ -169,7 +164,6 @@ def test_panel_grid_aligns_with_actual_buttons_row():
     # Mirror the right-menu button column boundaries exactly: each audio
     # region's x/right should match the corresponding button's x/right.
     from frontend.visual.widgets import draw_button_row
-    pg.mixer.init() if not pg.mixer.get_init() else None
     sm = SoundManager(SOUNDS_DIR, enabled=True)
     p = AudioPanel(pg.display.get_surface(), sm)
     font = pg.font.SysFont("Arial", 14, bold=True)
@@ -193,7 +187,6 @@ def test_panel_grid_aligns_with_actual_buttons_row():
 
 
 def test_panel_grid_uses_external_button_font_when_passed():
-    pg.mixer.init() if not pg.mixer.get_init() else None
     sm = SoundManager(SOUNDS_DIR, enabled=True)
     p = AudioPanel(pg.display.get_surface(), sm)
     custom_font = pg.font.SysFont("Arial", 22, bold=True)

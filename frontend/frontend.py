@@ -31,6 +31,7 @@ from frontend.pgn.generate import generate_pgn, TIMEOUT_RESULTS
 from frontend.pgn.load import load_pgn_into_backend
 from backend.paths import PROJECT_ROOT, SOUNDS_DIR
 from backend.pieces import PieceColor, PieceType, opponent_of
+from server.protocol import GIVE_TIME_SECONDS
 
 
 RESULT_TEXT = {
@@ -106,7 +107,6 @@ RESULT_FADE_MS = 400
 RESULT_MODAL_DELAY_MS = 500
 RESULT_FADE_MAX_ALPHA = 140
 
-GIVE_TIME_SECONDS = 15
 GIVE_TIME_DEBOUNCE_MS = 500
 
 ANIM_MS_DEFAULT = 180
@@ -278,7 +278,7 @@ class Frontend(OnlineEventsMixin):
         from backend.fen import apply_fen
         try:
             apply_fen(self.match.backend, fen)
-        except (ValueError, KeyError, IndexError):
+        except (ValueError, KeyError):
             return False
         self.mode = SINGLE_SCREEN
         self._time_control = None

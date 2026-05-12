@@ -53,6 +53,9 @@ class Backend:
     SIZE = BOARD_SIZE
 
     def __init__(self):
+        self._reset_state()
+
+    def _reset_state(self):
         self.state = [[None] * self.SIZE for _ in range(self.SIZE)]
         self.turn = PieceColor.WHITE
         self.move_history = []
@@ -63,14 +66,7 @@ class Backend:
         self.clock = None
 
     def new_game(self):
-        self.state = [[None] * self.SIZE for _ in range(self.SIZE)]
-        self.turn = PieceColor.WHITE
-        self.move_history = []
-        self.en_passant_target = None
-        self.castling_rights = dict(DEFAULT_CASTLING_RIGHTS)
-        self.halfmove_clock = 0
-        self.position_counts = Counter()
-        self.clock = None
+        self._reset_state()
 
         for col, piece_type in enumerate(BACK_RANK):
             self.state[0][col] = Piece(piece_type, PieceColor.BLACK)

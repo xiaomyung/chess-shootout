@@ -52,13 +52,11 @@ def generate_pgn(move_history, result, white_name="?", black_name="?",
     if termination is not None:
         header.append(f'[Termination "{termination}"]')
 
-    parts = []
-    for number, white, black in iter_move_pairs(move_history):
-        if black is not None:
-            parts.append(f"{number}. {white.san} {black.san}")
-        else:
-            parts.append(f"{number}. {white.san}")
-
+    parts = [
+        f"{number}. {white.san} {black.san}" if black is not None
+        else f"{number}. {white.san}"
+        for number, white, black in iter_move_pairs(move_history)
+    ]
     body = " ".join(parts)
     if code != "*":
         body = f"{body} {code}" if body else code

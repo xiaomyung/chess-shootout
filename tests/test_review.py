@@ -3,14 +3,13 @@ import os
 os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
 os.environ.setdefault("SDL_AUDIODRIVER", "dummy")
 
-from collections import Counter
 from unittest.mock import MagicMock
 
 import pygame as pg
 import pytest
 
 from backend.backend import Backend
-from backend.pieces import Piece, PieceColor, PieceType
+from backend.pieces import PieceColor, PieceType
 from backend.utils import Square
 from frontend.board import Board
 

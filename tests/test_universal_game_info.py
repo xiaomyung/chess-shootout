@@ -1,4 +1,4 @@
-"""Universal game-info panel (M14): info lines per mode + real result sources."""
+"""Universal game-info panel: info lines per mode + real result sources."""
 
 import os
 

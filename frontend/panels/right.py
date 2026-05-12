@@ -3,11 +3,12 @@ import pygame as pg
 from frontend.visual.colors import Colors
 from frontend.pgn.generate import iter_move_pairs
 from frontend.visual.widgets import draw_button_row, draw_scroll_thumb
+from server.protocol import GIVE_TIME_SECONDS
 
 
 BUTTONS = [
     [("Undo", "undo"), ("Resign", "resign"), ("Draw", "draw")],
-    [("Give 15 sec", "give_time"), ("Flip", "flip"), ("?", "help")],
+    [(f"Give {GIVE_TIME_SECONDS} sec", "give_time"), ("Flip", "flip"), ("?", "help")],
 ]
 
 REVIEW_BUTTONS = [
@@ -63,8 +64,7 @@ class RightMenu:
 
     @property
     def backend(self):
-        inner = getattr(self.match, "backend", None)
-        return inner if inner is not None else self.match
+        return getattr(self.match, "backend", self.match)
 
     def set_rect(self, rect):
         self.font = pg.font.SysFont(

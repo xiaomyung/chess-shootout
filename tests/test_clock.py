@@ -4,8 +4,8 @@ from backend.clock import Clock
 from backend.pieces import PieceColor
 
 from tests.helpers import (
-    BLACK, WHITE, K, Q, R, B, N, P,
-    make_backend, piece, sq, play_moves,
+    BLACK, WHITE, K, Q, R, B, P,
+    make_backend, piece, sq,
 )
 
 

@@ -197,15 +197,15 @@ def create_app(*, now_provider=time.monotonic, max_rooms=100):
         if room.result is not None:
             log.info("resume rejected room=%s reason=game_already_over", body.room_id)
             raise HTTPException(status_code=410, detail={"reason": room.result[0]})
-        history = []
-        for entry in (room.backend.move_history if room.backend else []):
-            move = entry.move
-            history.append(HistoryEntryWire(
-                from_sq=coord_from_square(move.from_sq),
-                to_sq=coord_from_square(move.to_sq),
-                promotion=_promotion_letter(move),
+        history = [
+            HistoryEntryWire(
+                from_sq=coord_from_square(entry.move.from_sq),
+                to_sq=coord_from_square(entry.move.to_sq),
+                promotion=_promotion_letter(entry.move),
                 san=entry.san,
-            ))
+            )
+            for entry in (room.backend.move_history if room.backend else [])
+        ]
         if room.backend is not None:
             room.backend.tick_clock()
         return ResumeResponse(

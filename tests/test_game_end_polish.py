@@ -5,13 +5,11 @@ import os
 os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
 os.environ.setdefault("SDL_AUDIODRIVER", "dummy")
 
-from collections import Counter
 from unittest.mock import MagicMock
 
 import pygame as pg
 import pytest
 
-from backend.pieces import Piece, PieceColor, PieceType
 from backend.utils import Square
 from frontend.frontend import (
     Frontend, RESULT_FADE_MS, RESULT_FADE_MAX_ALPHA, RESULT_MODAL_DELAY_MS,

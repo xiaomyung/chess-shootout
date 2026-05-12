@@ -12,8 +12,6 @@ Covers:
 import json
 import os
 import random
-import threading
-import time
 
 os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
 os.environ.setdefault("SDL_AUDIODRIVER", "dummy")
