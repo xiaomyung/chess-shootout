@@ -168,7 +168,9 @@ def test_resign_modal_yes_completes_resign():
     yes_rect = app.confirm_modal.button_rects["yes"]
     app.mouse_left_clicked(yes_rect.center)
     assert app.confirm_modal.is_visible() is False
-    assert app.manual_result == "black_wins"  # white was on turn → loses
+    # white was on turn → loses; resignation uses the compound code so the
+    # modal subtitle reads "by resignation" and not "by checkmate".
+    assert app.manual_result == "black_wins_by_resignation"
 
 
 def test_resign_modal_no_keeps_game_active():

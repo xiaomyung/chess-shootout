@@ -4,8 +4,8 @@ from backend.clock import Clock
 from backend.pieces import PieceColor
 
 from tests.helpers import (
-    BLACK, WHITE, K, Q, R, B, N, P,
-    make_backend, piece, sq, play_moves,
+    BLACK, WHITE, K, Q, R, B, P,
+    make_backend, piece, sq,
 )
 
 
@@ -346,3 +346,67 @@ def test_clock_stops_on_checkmate():
     assert bk.game_result() == "white_wins"
     # Clock should have stopped (no further on_move_made on a mate).
     assert bk.clock.running_for is None
+
+
+# ---------- add_time (Give 15 sec feature) ----------
+
+def test_add_time_with_remaining_below_initial_adds_full_amount():
+    clock, _ = make_clock(180, 0)
+    clock.black_remaining = 100.0
+    added = clock.add_time(PieceColor.BLACK, 15)
+    assert added == 15.0
+    assert clock.black_remaining == 115.0
+
+
+def test_add_time_at_cap_returns_zero():
+    clock, _ = make_clock(180, 0)
+    # Both sides start at initial; no headroom.
+    added = clock.add_time(PieceColor.WHITE, 15)
+    assert added == 0.0
+    assert clock.white_remaining == 180.0
+
+
+def test_add_time_partial_cap_returns_actual_amount_added():
+    clock, _ = make_clock(180, 0)
+    clock.black_remaining = 170.0
+    added = clock.add_time(PieceColor.BLACK, 15)
+    assert added == 10.0
+    assert clock.black_remaining == 180.0
+
+
+def test_add_time_isolates_color():
+    clock, _ = make_clock(180, 0)
+    clock.white_remaining = 100.0
+    clock.black_remaining = 100.0
+    added = clock.add_time(PieceColor.BLACK, 15)
+    assert added == 15.0
+    assert clock.white_remaining == 100.0
+    assert clock.black_remaining == 115.0
+
+
+def test_add_time_to_flagged_player_is_noop():
+    clock, _ = make_clock(180, 0)
+    clock.white_remaining = 0.0
+    clock.flagged = PieceColor.WHITE
+    added = clock.add_time(PieceColor.WHITE, 15)
+    assert added == 0.0
+    assert clock.white_remaining == 0.0
+    assert clock.flagged == PieceColor.WHITE
+
+
+def test_add_time_when_remaining_above_initial_is_noop():
+    # Increments can legitimately push a player above initial_seconds.
+    # add_time treats that as already-at-maximum (no headroom).
+    clock, _ = make_clock(60, 5)
+    clock.white_remaining = 75.0
+    added = clock.add_time(PieceColor.WHITE, 15)
+    assert added == 0.0
+    assert clock.white_remaining == 75.0
+
+
+def test_add_time_with_zero_seconds_is_noop():
+    clock, _ = make_clock(180, 0)
+    clock.black_remaining = 100.0
+    added = clock.add_time(PieceColor.BLACK, 0)
+    assert added == 0.0
+    assert clock.black_remaining == 100.0

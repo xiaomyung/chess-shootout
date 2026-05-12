@@ -66,6 +66,20 @@ class Clock:
         self.running_for = None
         self.last_tick_at = None
 
+    def add_time(self, color, seconds):
+        if self.flagged is not None:
+            return 0.0
+        remaining = self.remaining(color)
+        headroom = max(self.initial_seconds - remaining, 0.0)
+        added = min(float(seconds), headroom)
+        if added <= 0:
+            return 0.0
+        if color == PieceColor.WHITE:
+            self.white_remaining += added
+        else:
+            self.black_remaining += added
+        return added
+
     def remaining(self, color):
         return self.white_remaining if color == PieceColor.WHITE else self.black_remaining
 

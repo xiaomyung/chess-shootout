@@ -27,6 +27,18 @@ two-player matches.
 - Master volume slider with an audio panel — value persisted in `.env`.
 - Online play: authoritative FastAPI server, animated reconnect overlay,
   rematch / takeback / draw flows, crash-log capture for bug reports.
+- **Give 15 sec** button (online + local) — top up the opponent's clock
+  by 15 seconds, capped at the initial time control. Toasts use player
+  nicknames ("Gave 15 sec to Bob" / "Bob already at maximum time" / the
+  receiver sees "Alice gave you 15 seconds").
+- **Auto-end countdown badges** in the player strip (online) — shows
+  `Abort in 0:45` when no first move has been played, `Abandon in 0:45`
+  when the opponent has dropped, `Reconnect in 0:45` for your own WS
+  reconnect window. Digits turn red and the heartbeat starts at 10 s
+  remaining.
+- Series score follows the player nickname through colour-swapping
+  rematches (so winning game 1 as white keeps your `1 - 0` when you
+  switch to black in the rematch).
 
 ## Requirements
 
@@ -168,11 +180,12 @@ still accepts them. Real clients get a UUID4 auto-generated on first
 launch and persisted in `.env`.
 
 Both clients pick **Online** mode in the start menu, choose time
-control and side preference, click **Start Search**, accept
-`localhost:8000` in the address modal. As soon as the second player
-connects with the same time control, both clients see "Match found!"
-for half a second and the game starts with the player's color at the
-bottom.
+control and side preference, click **Start Search**, and accept the
+server address. The address field takes either `<ip>` (port defaults
+to 8000) or `<ip>:<port>`; for local play `localhost` is enough. As
+soon as the second player connects with the same time control, both
+clients see "Match found!" for half a second and the game starts with
+the player's color at the bottom.
 
 ### Settings (`.env`)
 
@@ -198,18 +211,26 @@ running process — handy for testing two clients on the same machine.
 - **Undo** (= takeback) only directly after your own move (while the
   opponent is on the clock) → opponent prompted; on accept, one ply
   rolls back and the clock is restored.
+- **Give 15 sec** → adds 15 seconds to your opponent's clock (capped at
+  the initial time control). 500 ms debounce so a double-click only
+  fires once.
 - **Rematch** from the result modal → opponent prompted; on accept, the
   same room restarts with swapped colors. The series score (e.g.
-  `1½ – ½`) shows in the right panel.
+  `Alice 1 - 0 Bob`) shows in the right panel and follows the players,
+  not the colours.
 
 ### Reconnection
 
 Three layered recovery paths:
 
 - **WS drops mid-game** (transient WiFi blip): client retries `/resume`
-  every 2 s for up to 60 s. The opponent sees a "Reconnecting…" overlay
-  and a yellow status dot. On success the game continues from the exact
-  ply.
+  every 2 s for up to 60 s. The opponent sees a "Reconnecting…" overlay,
+  a yellow status dot, and an `Abandon in 0:45` countdown badge in
+  your strip; you see a `Reconnect in 0:45` badge in your own strip
+  while the modal is up. On success the game continues from the exact
+  ply. Every move + takeback also carries a `ply` counter, so if a
+  single message silently drops without breaking the socket, the client
+  detects the gap and resyncs automatically via `/resume`.
 - **Client app restart** (you closed the window mid-game): on next
   launch the client probes `POST /reclaim {client_uuid}`; if the room
   is still alive the start menu shows a **Reconnect** button between
@@ -231,8 +252,9 @@ traceback, app state, and an in-memory log buffer of the whole session.
 
 ### Deployment
 
-See [deploy/README.md](deploy/README.md) for VPS setup with Caddy +
-systemd.
+See [deploy/README.md](deploy/README.md) for VPS setup with systemd —
+the server listens directly on a public TCP port; no TLS, DNS, or
+reverse proxy required.
 
 ## Running tests
 
@@ -241,7 +263,7 @@ pip install -e ".[dev]"
 pytest tests -n 8 -q
 ```
 
-~8 s under xdist for 1071 tests; ~25 s serial.
+~9 s under xdist for 1189 tests; ~25 s serial.
 
 ## License
 

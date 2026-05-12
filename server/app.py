@@ -197,15 +197,15 @@ def create_app(*, now_provider=time.monotonic, max_rooms=100):
         if room.result is not None:
             log.info("resume rejected room=%s reason=game_already_over", body.room_id)
             raise HTTPException(status_code=410, detail={"reason": room.result[0]})
-        history = []
-        for entry in (room.backend.move_history if room.backend else []):
-            move = entry.move
-            history.append(HistoryEntryWire(
-                from_sq=coord_from_square(move.from_sq),
-                to_sq=coord_from_square(move.to_sq),
-                promotion=_promotion_letter(move),
+        history = [
+            HistoryEntryWire(
+                from_sq=coord_from_square(entry.move.from_sq),
+                to_sq=coord_from_square(entry.move.to_sq),
+                promotion=_promotion_letter(entry.move),
                 san=entry.san,
-            ))
+            )
+            for entry in (room.backend.move_history if room.backend else [])
+        ]
         if room.backend is not None:
             room.backend.tick_clock()
         return ResumeResponse(
@@ -256,10 +256,6 @@ async def _sweep_loop(app):
             await app.state.sweep.step_all()
     except asyncio.CancelledError:
         pass
-
-
-async def _sweep(app):
-    await app.state.sweep.step_all()
 
 
 def _first_validation_reason(exc):
@@ -324,7 +320,7 @@ async def _ws_session(app, websocket, room_id):
     if room.is_paired() and connections.has_both(room) and not room.game_start_broadcast:
         if room.started_at is None:
             room.started_at = app.state.now()
-        await broadcast_game_start(connections, room)
+        await broadcast_game_start(connections, room, app.state.now)
     else:
         opp_ws = connections.get_for_color(room, room.opp_color(color))
         if opp_ws is not None:

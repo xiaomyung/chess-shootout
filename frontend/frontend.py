@@ -18,9 +18,13 @@ from frontend.modals.fen_input import FenInputModal
 from frontend.modals.help import HelpModal
 from frontend.modals.reconnecting import ReconnectingModal
 from frontend.visual.toast import Toast
-from frontend.online.client import OnlineClient, fetch_resume, probe_active_game
+from frontend.online.client import (
+    OnlineClient, RECONNECT_TOTAL_SECONDS, fetch_resume, probe_active_game,
+)
 from frontend.online.events import ONLINE_HARD_FAILURE_LABELS, OnlineEventsMixin
-from frontend.panels.player_strip import PlayerStrip
+from frontend.panels.player_strip import (
+    AUTO_END_RED_THRESHOLD_SECONDS, PlayerStrip,
+)
 from frontend.modals.server import ServerAddressModal
 from frontend.modals.wait import WaitModal
 from frontend.panels.right import RightMenu, BUTTONS as RIGHT_MENU_BUTTONS, REVIEW_BUTTONS as RIGHT_MENU_REVIEW_BUTTONS
@@ -31,11 +35,24 @@ from frontend.pgn.generate import generate_pgn, TIMEOUT_RESULTS
 from frontend.pgn.load import load_pgn_into_backend
 from backend.paths import PROJECT_ROOT, SOUNDS_DIR
 from backend.pieces import PieceColor, PieceType, opponent_of
+from server.protocol import (
+    FIRST_MOVE_ABORT_SECONDS, GIVE_TIME_SECONDS, GRACE_SECONDS,
+)
 
 
-MANUAL_RESULT_TEXT = {
-    "white_wins": ("White wins", "by resignation"),
-    "black_wins": ("Black wins", "by resignation"),
+RESULT_TEXT = {
+    "white_wins": ("White wins", "by checkmate"),
+    "black_wins": ("Black wins", "by checkmate"),
+    "white_wins_on_time": ("White wins", "on time"),
+    "black_wins_on_time": ("Black wins", "on time"),
+    "white_wins_by_resignation": ("White wins", "by resignation"),
+    "black_wins_by_resignation": ("Black wins", "by resignation"),
+    "white_wins_by_abandonment": ("White wins", "by abandonment"),
+    "black_wins_by_abandonment": ("Black wins", "by abandonment"),
+    "draw_stalemate": ("Draw", "by stalemate"),
+    "draw_repetition": ("Draw", "by threefold repetition"),
+    "draw_fifty_move": ("Draw", "by fifty-move rule"),
+    "draw_insufficient_material": ("Draw", "by insufficient material"),
     "draw_agreement": ("Draw", "by agreement"),
     "aborted": ("Game aborted", "no moves played"),
     "server_shutdown": ("Game cancelled", "server shutting down"),
@@ -84,17 +101,6 @@ def _score_str(score):
     return str(int_part)
 
 
-ENGINE_RESULT_TEXT = {
-    "white_wins": ("White wins", "by checkmate"),
-    "black_wins": ("Black wins", "by checkmate"),
-    "draw_stalemate": ("Draw", "by stalemate"),
-    "draw_repetition": ("Draw", "by threefold repetition"),
-    "draw_fifty_move": ("Draw", "by fifty-move rule"),
-    "draw_insufficient_material": ("Draw", "by insufficient material"),
-    "white_wins_on_time": ("White wins", "on time"),
-    "black_wins_on_time": ("Black wins", "on time"),
-}
-
 OPPONENT_NAME_FOR_MODE = {
     SINGLE_SCREEN: "Player 2",
     BOT: "AI Bot",
@@ -106,6 +112,9 @@ AUTO_FLIP_DELAY_MS = 200
 RESULT_FADE_MS = 400
 RESULT_MODAL_DELAY_MS = 500
 RESULT_FADE_MAX_ALPHA = 140
+
+GIVE_TIME_DEBOUNCE_MS = 500
+AUTO_END_GATE_FRACTION = 0.1
 
 ANIM_MS_DEFAULT = 180
 ANIM_MS_MIN = 140
@@ -158,9 +167,13 @@ class Frontend(OnlineEventsMixin):
         self._flag_fall_played = False
         self._result_first_seen_at_ms = None
         self._pgn_result_tag = None
-        self._series_white_score = 0.0
-        self._series_black_score = 0.0
-        self._series_room_id = None
+        self._series_scores = {}
+        self._resyncing = False
+        self._last_give_time_at_ms = -GIVE_TIME_DEBOUNCE_MS
+        self._first_move_deadline_ms = None
+        self._opp_disconnected_at_ms = None
+        self._local_disconnected_at_ms = None
+        self._prev_online_state = None
 
         self.match = Match()
         self.sound_manager = SoundManager(SOUNDS_DIR, enabled=pg.mixer.get_init() is not None)
@@ -189,6 +202,7 @@ class Frontend(OnlineEventsMixin):
             "flip": self._on_flip,
             "menu": self._on_back_to_menu,
             "help": self._on_help,
+            "give_time": self._on_give_time,
         }, board=self.board, buttons_provider=self._right_menu_buttons,
             audio_panel=self.audio_panel,
             disabled_keys_provider=self._right_menu_disabled_keys)
@@ -224,12 +238,14 @@ class Frontend(OnlineEventsMixin):
         return self.manual_result or self.match.game_result()
 
     def result_text(self):
-        if self.manual_result is not None:
-            return MANUAL_RESULT_TEXT.get(self.manual_result)
-        engine = self.match.game_result()
-        if engine is None:
+        code = self.current_result()
+        if code is None:
             return None
-        return ENGINE_RESULT_TEXT.get(engine)
+        return RESULT_TEXT.get(code)
+
+    def _name_for_color(self, color):
+        is_white = color in (PieceColor.WHITE, "white")
+        return self.white_name if is_white else self.black_name
 
     def _on_new_game(self):
         self._reset_to_new_game()
@@ -246,6 +262,10 @@ class Frontend(OnlineEventsMixin):
         self.match.on_local_move_applied = None
         self.right_menu.set_game_info(None)
         self.result_menu.set_online_mode(False)
+        self._first_move_deadline_ms = None
+        self._opp_disconnected_at_ms = None
+        self._local_disconnected_at_ms = None
+        self._prev_online_state = None
         self._reset_to_new_game()
         self._refresh_load_pgn_availability()
         self.start_menu.show()
@@ -272,7 +292,7 @@ class Frontend(OnlineEventsMixin):
         from backend.fen import apply_fen
         try:
             apply_fen(self.match.backend, fen)
-        except (ValueError, KeyError, IndexError):
+        except (ValueError, KeyError):
             return False
         self.mode = SINGLE_SCREEN
         self._time_control = None
@@ -327,7 +347,6 @@ class Frontend(OnlineEventsMixin):
                 "addr": addr,
                 "room_id": reclaim["room_id"],
                 "session_token": reclaim["session_token"],
-                "resume": resume,
             }
 
     def _refresh_reconnect_button(self):
@@ -503,6 +522,16 @@ class Frontend(OnlineEventsMixin):
                 self.reconnecting_modal.show(on_cancel=self._abandon_online_game)
         elif self.reconnecting_modal.is_visible():
             self.reconnecting_modal.hide()
+        self._track_local_online_state()
+
+    def _track_local_online_state(self):
+        current = self.online_client.state if self.online_client is not None else None
+        prev = self._prev_online_state
+        if current == "reconnecting" and prev != "reconnecting":
+            self._local_disconnected_at_ms = pg.time.get_ticks()
+        elif current != "reconnecting" and prev == "reconnecting":
+            self._local_disconnected_at_ms = None
+        self._prev_online_state = current
 
     def _right_menu_buttons(self):
         if self.pgn_review:
@@ -510,9 +539,17 @@ class Frontend(OnlineEventsMixin):
         return RIGHT_MENU_BUTTONS
 
     def _right_menu_disabled_keys(self):
-        if self.current_result() is None or self.pgn_review:
+        if self.pgn_review:
             return set()
-        return {"undo", "resign", "draw", "flip"}
+        if self.current_result() is not None:
+            return {"undo", "resign", "draw", "flip", "give_time"}
+        disabled = set()
+        clock = self.match.clock
+        if clock is None or clock.flagged is not None:
+            disabled.add("give_time")
+        if pg.time.get_ticks() - self._last_give_time_at_ms < GIVE_TIME_DEBOUNCE_MS:
+            disabled.add("give_time")
+        return disabled
 
     def _reset_to_new_game(self):
         self.pgn_review = False
@@ -558,7 +595,7 @@ class Frontend(OnlineEventsMixin):
             return None
         prefix = self._auto_save_prefix()
         os.makedirs(_games_dir(), exist_ok=True)
-        filename = f"{prefix}-{datetime.now().strftime('%Y%m%d-%H%M%S')}.pgn"
+        filename = f"{prefix}-{datetime.now().strftime("%Y%m%d-%H%M%S")}.pgn"
         path = os.path.join(_games_dir(), filename)
         with open(path, "w") as f:
             f.write(text)
@@ -618,7 +655,10 @@ class Frontend(OnlineEventsMixin):
             return
         loser = self.match.current_turn()
         self._auto_complete_pending_promotion()
-        self.manual_result = "black_wins" if loser == PieceColor.WHITE else "white_wins"
+        self.manual_result = (
+            "black_wins_by_resignation" if loser == PieceColor.WHITE
+            else "white_wins_by_resignation"
+        )
         self.board._clear_premoves()
         self.board.clear_annotations()
 
@@ -639,6 +679,41 @@ class Frontend(OnlineEventsMixin):
         self.manual_result = "draw_agreement"
         self.board._clear_premoves()
         self.board.clear_annotations()
+
+    def _on_give_time(self):
+        if self.pgn_review or self.current_result() is not None:
+            return
+        clock = self.match.clock
+        if clock is None or clock.flagged is not None:
+            return
+        now = pg.time.get_ticks()
+        if now - self._last_give_time_at_ms < GIVE_TIME_DEBOUNCE_MS:
+            return
+        self._last_give_time_at_ms = now
+        if self.mode == ONLINE and self.online_client is not None:
+            self.online_client.send_give_time()
+            return
+        recipient = self._give_time_recipient()
+        added = clock.add_time(recipient, GIVE_TIME_SECONDS)
+        self._give_time_toast_for_giver(recipient, added)
+
+    def _give_time_recipient(self):
+        if self.mode == ONLINE and self.match.local_color is not None:
+            return opponent_of(self.match.local_color)
+        return self.match.current_turn()
+
+    def _give_time_toast_for_giver(self, recipient_color, added):
+        name = self._name_for_color(recipient_color)
+        if added <= 0:
+            self.toast.show(f"{name} already at maximum time")
+        else:
+            self.toast.show(f"Gave {int(round(added))} sec to {name}")
+
+    def _give_time_toast_for_receiver(self, giver_color, added):
+        if added <= 0:
+            return
+        name = self._name_for_color(giver_color)
+        self.toast.show(f"{name} gave you {int(round(added))} seconds")
 
     def _auto_complete_pending_promotion(self):
         if self.board.pending_promotion_square is None:
@@ -753,9 +828,13 @@ class Frontend(OnlineEventsMixin):
             result = self._pgn_result_tag or "*"
             return ["Review", f"{result}  ·  {tc}"]
         if self.mode == ONLINE:
-            names = f"{self.white_name}  vs  {self.black_name}"
-            return [names, f"{self._series_score_text()}  ·  {tc}",
-                    self._format_ping_line()]
+            white_score = self._series_scores.get(self.white_name, 0.0)
+            black_score = self._series_scores.get(self.black_name, 0.0)
+            scoreboard = (
+                f"{self.white_name}  {_score_str(white_score)} - "
+                f"{_score_str(black_score)}  {self.black_name}"
+            )
+            return [scoreboard, tc, self._format_ping_line()]
         if self.mode == BOT:
             return ["vs Bot (preview)", tc]
         return ["Local game", tc]
@@ -771,12 +850,9 @@ class Frontend(OnlineEventsMixin):
                 if self.online_client is not None else None)
         return f"ping: {ping} ms" if ping is not None else "ping: —"
 
-    def _series_score_text(self):
-        return f"{_score_str(self._series_white_score)} - {_score_str(self._series_black_score)}"
-
     def _update_player_strips(self):
-        top_color = PieceColor.WHITE if self.board.flipped else PieceColor.BLACK
-        bottom_color = PieceColor.BLACK if self.board.flipped else PieceColor.WHITE
+        top_color = self._strip_color_top()
+        bottom_color = opponent_of(top_color)
         turn = self.match.current_turn()
         over = self.current_result() is not None
         self.player_strip_top.set_state(**self._strip_state(top_color, turn, over))
@@ -835,10 +911,41 @@ class Frontend(OnlineEventsMixin):
             fraction = None
         else:
             fraction = clock.remaining(self.match.current_turn()) / clock.initial_seconds
+        auto_end_fraction = self._auto_end_heartbeat_fraction()
+        if auto_end_fraction is not None:
+            fraction = (auto_end_fraction if fraction is None
+                        else min(fraction, auto_end_fraction))
         self.sound_manager.update_heartbeat(fraction, paused)
 
+    def _auto_end_heartbeat_fraction(self):
+        if self.mode != ONLINE:
+            return None
+        now = pg.time.get_ticks()
+        candidates = []
+        for snap_ms, total in (
+            (self._opp_disconnected_at_ms, GRACE_SECONDS),
+            (self._local_disconnected_at_ms, RECONNECT_TOTAL_SECONDS),
+        ):
+            if snap_ms is None:
+                continue
+            remaining = total - (now - snap_ms) / 1000.0
+            if remaining <= 0:
+                continue
+            candidates.append((remaining, total))
+        if (self._first_move_deadline_ms is not None
+                and not self.match.move_history):
+            remaining_ms = self._first_move_deadline_ms - now
+            if remaining_ms > 0:
+                candidates.append((remaining_ms / 1000.0, FIRST_MOVE_ABORT_SECONDS))
+        if not candidates:
+            return None
+        remaining, total = min(candidates, key=lambda r: r[0])
+        if remaining < AUTO_END_RED_THRESHOLD_SECONDS:
+            return 0.0
+        return remaining / total
+
     def _strip_state(self, color, turn, over):
-        name = self.white_name if color == PieceColor.WHITE else self.black_name
+        name = self._name_for_color(color)
         seconds = (self.match.clock.remaining(color)
                    if self.match.clock is not None else None)
         initial_seconds = (self.match.clock.initial_seconds
@@ -854,6 +961,7 @@ class Frontend(OnlineEventsMixin):
                 and self.match.local_color is not None
                 and color != self.match.local_color):
             connection_state = self.online_client.opp_state
+        auto_end_label, auto_end_seconds = self._compute_auto_end(color, over)
         return {
             "name": name,
             "clock_seconds": seconds,
@@ -863,7 +971,48 @@ class Frontend(OnlineEventsMixin):
             "captured_color": opponent_of(color),
             "connection_state": connection_state,
             "clock_initial_seconds": initial_seconds,
+            "auto_end_label": auto_end_label,
+            "auto_end_seconds": auto_end_seconds,
         }
+
+    def _compute_auto_end(self, color, over):
+        if (self.mode != ONLINE or over or self.match.local_color is None):
+            return None, None
+        if self.match.move_history:
+            self._first_move_deadline_ms = None
+        now = pg.time.get_ticks()
+        is_local = (color == self.match.local_color)
+        if is_local and self._local_disconnected_at_ms is not None:
+            return self._auto_end_remaining(
+                "Reconnect in", self._local_disconnected_at_ms,
+                RECONNECT_TOTAL_SECONDS, now,
+            )
+        if (not is_local
+                and self._opp_disconnected_at_ms is not None):
+            return self._auto_end_remaining(
+                "Abandon in", self._opp_disconnected_at_ms, GRACE_SECONDS, now,
+            )
+        if (color == self.match.current_turn()
+                and not self.match.move_history
+                and self._first_move_deadline_ms is not None):
+            remaining_ms = self._first_move_deadline_ms - now
+            if remaining_ms <= 0:
+                return None, None
+            remaining = remaining_ms / 1000.0
+            elapsed = FIRST_MOVE_ABORT_SECONDS - remaining
+            if elapsed < AUTO_END_GATE_FRACTION * FIRST_MOVE_ABORT_SECONDS:
+                return None, None
+            return "Abort in", remaining
+        return None, None
+
+    def _auto_end_remaining(self, label, snap_ms, total_seconds, now_ms):
+        elapsed = (now_ms - snap_ms) / 1000.0
+        if elapsed < AUTO_END_GATE_FRACTION * total_seconds:
+            return None, None
+        remaining = total_seconds - elapsed
+        if remaining <= 0:
+            return None, None
+        return label, remaining
 
     def _compute_layout(self):
         window_width, window_height = self.window.get_size()
@@ -924,7 +1073,7 @@ class Frontend(OnlineEventsMixin):
             board_rect.right,
             0,
             max(window_width - board_rect.right, 300),
-            max(window_height, 500)
+            max(window_height, MIN_WINDOW_HEIGHT)
         )
 
         strip_height = board_size_px * 0.075

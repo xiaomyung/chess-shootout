@@ -1,4 +1,4 @@
-"""Universal game-info panel (M14): info lines per mode + real result sources."""
+"""Universal game-info panel: info lines per mode + real result sources."""
 
 import os
 
@@ -67,102 +67,212 @@ def test_bot_mode_lines():
 # ---------- online mode (series score) ----------
 
 def test_online_initial_series_zero_zero():
-    # Online combines series score and time control on row 2 so the panel
-    # reads "Alice vs Bob / 0 - 0 · 3+2 / ping: —" — three lines instead
-    # of four, more compact use of vertical space.
+    # Online layout: line 1 packs names + score in board-color order,
+    # line 2 is bare time control, line 3 is live ping.
     app = _make_app()
     app.mode = ONLINE
     app.white_name = "Alice"
     app.black_name = "Bob"
     app._time_control = (180, 2)
     lines = app._compute_game_info_lines()
-    assert lines[0] == "Alice  vs  Bob"
-    assert lines[1] == "0 - 0  ·  3+2"
+    assert lines[0] == "Alice  0 - 0  Bob"
+    assert lines[1] == "3+2"
     assert lines[2] == "ping: —"
 
 
 @pytest.mark.parametrize(
     "white_score,black_score,expected",
     [
-        (0, 0, "0 - 0"),
-        (1, 0, "1 - 0"),
-        (1, 1, "1 - 1"),
-        (1.5, 0.5, "1½ - ½"),
-        (2, 1.5, "2 - 1½"),
-        (0.5, 0.5, "½ - ½"),
+        (0, 0, "Alice  0 - 0  Bob"),
+        (1, 0, "Alice  1 - 0  Bob"),
+        (1, 1, "Alice  1 - 1  Bob"),
+        (1.5, 0.5, "Alice  1½ - ½  Bob"),
+        (2, 1.5, "Alice  2 - 1½  Bob"),
+        (0.5, 0.5, "Alice  ½ - ½  Bob"),
     ],
 )
 def test_series_score_formatting(white_score, black_score, expected):
     app = _make_app()
     app.mode = ONLINE
-    app.white_name = "A"
-    app.black_name = "B"
+    app.white_name = "Alice"
+    app.black_name = "Bob"
     app._time_control = (60, 0)
-    app._series_white_score = white_score
-    app._series_black_score = black_score
+    app._series_scores = {"Alice": white_score, "Bob": black_score}
     lines = app._compute_game_info_lines()
-    assert lines[1] == f"{expected}  ·  1+0"
+    assert lines[0] == expected
+    assert lines[1] == "1+0"
 
 
 def test_series_resets_when_opponent_pair_changes():
     app = _make_app()
     app._series_pair = ("A", "C")
-    app._series_white_score = 2
-    app._series_black_score = 1
+    app._series_scores = {"A": 2, "C": 1}
     app._start_online_game({
         "your_color": "white", "white_name": "A", "black_name": "B",
         "time_minutes": 3, "increment_seconds": 0,
     })
-    assert app._series_white_score == 0
-    assert app._series_black_score == 0
+    assert app._series_scores == {"A": 0.0, "B": 0.0}
     assert app._series_pair == ("A", "B")
 
 
-def test_series_persists_across_rematch_with_same_pair():
+def test_series_persists_across_rematch_with_color_swap():
+    # Bug 3 regression: score is keyed by player identity, so a rematch
+    # with swapped colors keeps the same number attached to each player.
     app = _make_app()
     app._series_pair = tuple(sorted(["A", "B"]))
-    app._series_white_score = 1
-    app._series_black_score = 0
-    # Rematch with the same pair (colors swapped, but pair is sorted-tuple).
+    # Alice won game 1 as white → A has 1, B has 0.
+    app._series_scores = {"A": 1, "B": 0}
+    # Rematch: Bob is now white, Alice now black. Same pair, scores persist.
     app._start_online_game({
         "your_color": "black", "white_name": "B", "black_name": "A",
         "time_minutes": 3, "increment_seconds": 0,
     })
-    assert app._series_white_score == 1
-    assert app._series_black_score == 0
+    # Stored scores unchanged.
+    assert app._series_scores == {"A": 1, "B": 0}
+    # Displayed line follows board-color order — Bob with 0 on the left
+    # (white side), Alice with 1 on the right (black side).
+    lines = app._compute_game_info_lines()
+    assert lines[0] == "B  0 - 1  A"
 
 
 def test_series_increments_on_white_win():
     app = _make_app()
     app.mode = ONLINE
-    app._series_pair = ("A", "B")
-    app._series_white_score = 0
-    app._series_black_score = 0
+    app.white_name = "Alice"
+    app.black_name = "Bob"
+    app._series_pair = ("Alice", "Bob")
+    app._series_scores = {"Alice": 0.0, "Bob": 0.0}
     app._handle_online_result({"reason": "checkmate", "winner_color": "white"})
-    assert app._series_white_score == 1
-    assert app._series_black_score == 0
+    assert app._series_scores == {"Alice": 1, "Bob": 0.0}
+
+
+def test_series_increments_on_black_win():
+    app = _make_app()
+    app.mode = ONLINE
+    app.white_name = "Alice"
+    app.black_name = "Bob"
+    app._series_pair = ("Alice", "Bob")
+    app._series_scores = {"Alice": 0.0, "Bob": 0.0}
+    app._handle_online_result({"reason": "checkmate", "winner_color": "black"})
+    assert app._series_scores == {"Alice": 0.0, "Bob": 1}
 
 
 def test_series_increments_on_draw():
     app = _make_app()
     app.mode = ONLINE
-    app._series_pair = ("A", "B")
-    app._series_white_score = 0
-    app._series_black_score = 0
+    app.white_name = "Alice"
+    app.black_name = "Bob"
+    app._series_pair = ("Alice", "Bob")
+    app._series_scores = {"Alice": 0.0, "Bob": 0.0}
     app._handle_online_result({"reason": "draw_repetition"})
-    assert app._series_white_score == 0.5
-    assert app._series_black_score == 0.5
+    assert app._series_scores == {"Alice": 0.5, "Bob": 0.5}
 
 
 def test_aborted_does_not_change_series():
     app = _make_app()
     app.mode = ONLINE
-    app._series_pair = ("A", "B")
-    app._series_white_score = 1
-    app._series_black_score = 0
+    app.white_name = "Alice"
+    app.black_name = "Bob"
+    app._series_pair = ("Alice", "Bob")
+    app._series_scores = {"Alice": 1, "Bob": 0}
     app._handle_online_result({"reason": "aborted"})
-    assert app._series_white_score == 1
-    assert app._series_black_score == 0
+    assert app._series_scores == {"Alice": 1, "Bob": 0}
+
+
+def test_score_follows_player_through_color_swap_end_to_end():
+    # Two games in a row with the same opponent. Game 1: I play white and
+    # win. Game 2: I play black. My nickname's score should be 1 in both
+    # games regardless of the color I hold.
+    app = _make_app()
+    # Game 1 — local player ("Me") is white.
+    app._start_online_game({
+        "your_color": "white", "white_name": "Me", "black_name": "Friend",
+        "time_minutes": 3, "increment_seconds": 0,
+    })
+    app._handle_online_result({"reason": "checkmate", "winner_color": "white"})
+    assert app._series_scores["Me"] == 1
+    assert app._series_scores["Friend"] == 0.0
+    # Game 2 — colors swap, same opponent.
+    app._start_online_game({
+        "your_color": "black", "white_name": "Friend", "black_name": "Me",
+        "time_minutes": 3, "increment_seconds": 0,
+    })
+    # Scores carry over because the sorted-pair key matches.
+    assert app._series_scores["Me"] == 1
+    assert app._series_scores["Friend"] == 0.0
+    # The displayed line attaches the win to the right nickname.
+    lines = app._compute_game_info_lines()
+    assert lines[0] == "Friend  0 - 1  Me"
+
+
+# ---------- result-modal subtitle per online reason (Bug 4) ----------
+
+@pytest.mark.parametrize("reason,winner,expected", [
+    ("checkmate",    "white", ("White wins", "by checkmate")),
+    ("checkmate",    "black", ("Black wins", "by checkmate")),
+    ("timeout",      "white", ("White wins", "on time")),
+    ("timeout",      "black", ("Black wins", "on time")),
+    ("resignation",  "white", ("White wins", "by resignation")),
+    ("resignation",  "black", ("Black wins", "by resignation")),
+    ("abandonment",  "white", ("White wins", "by abandonment")),
+    ("abandonment",  "black", ("Black wins", "by abandonment")),
+])
+def test_online_win_result_subtitle_reports_actual_reason(reason, winner, expected):
+    # Bug 4: every online win used to render "by resignation" because
+    # _handle_online_result flattened all win reasons to bare white_wins.
+    app = _make_app()
+    app.mode = ONLINE
+    app.white_name = "Alice"
+    app.black_name = "Bob"
+    app._series_pair = ("Alice", "Bob")
+    app._series_scores = {"Alice": 0.0, "Bob": 0.0}
+    app._handle_online_result({"reason": reason, "winner_color": winner})
+    assert app.result_text() == expected
+
+
+@pytest.mark.parametrize("draw_reason,expected", [
+    ("draw_agreement",             ("Draw", "by agreement")),
+    ("draw_stalemate",             ("Draw", "by agreement")),
+    ("draw_repetition",            ("Draw", "by agreement")),
+    ("draw_fifty_move",            ("Draw", "by agreement")),
+    ("draw_insufficient_material", ("Draw", "by agreement")),
+])
+def test_online_draw_result_subtitle(draw_reason, expected):
+    # All online draws are flattened to manual_result="draw_agreement" by
+    # the existing handler; subtitle reflects that.
+    app = _make_app()
+    app.mode = ONLINE
+    app.white_name = "Alice"
+    app.black_name = "Bob"
+    app._series_pair = ("Alice", "Bob")
+    app._series_scores = {"Alice": 0.0, "Bob": 0.0}
+    app._handle_online_result({"reason": draw_reason})
+    assert app.result_text() == expected
+
+
+def test_local_resignation_subtitle_reports_resignation():
+    # Local resignation path also uses compound code → no "by checkmate" mislabel.
+    app = _make_app()
+    _start_local(app)
+    app._perform_resign()
+    assert app.result_text() == ("Black wins", "by resignation")
+
+
+def test_engine_checkmate_subtitle_reports_checkmate():
+    # Engine path: bare white_wins / black_wins in RESULT_TEXT means
+    # "checkmate", which is the only way the engine produces them.
+    app = _make_app()
+    _start_local(app)
+    # Simulate the engine reporting a white checkmate.
+    app.match.backend.game_result = lambda: "white_wins"
+    assert app.result_text() == ("White wins", "by checkmate")
+
+
+def test_engine_flag_fall_subtitle_reports_on_time():
+    app = _make_app()
+    _start_local(app)
+    app.match.backend.game_result = lambda: "white_wins_on_time"
+    assert app.result_text() == ("White wins", "on time")
 
 
 # ---------- pgn review ----------

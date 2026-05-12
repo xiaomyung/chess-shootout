@@ -3,6 +3,7 @@ from collections import defaultdict
 from fastapi import WebSocket
 
 from server import logging_setup
+from server.protocol import ConnectionStatusMessage
 
 
 log = logging_setup.get_logger("chess.server.app")
@@ -49,13 +50,28 @@ class ConnectionRegistry:
 
 async def send(ws, message):
     if ws is None:
-        return
+        return True
     try:
         await ws.send_json(message.model_dump(by_alias=True))
+        return True
     except Exception as exc:
-        log.warning("broadcast send failed: %s", exc)
+        log.warning("ws send failed: %s", exc)
+        return False
 
 
 async def broadcast(connections, room, message):
-    for _, ws in list(connections.all_for_room(room)):
-        await send(ws, message)
+    failed_colors = []
+    for color, ws in list(connections.all_for_room(room)):
+        if not await send(ws, message):
+            failed_colors.append(color)
+    for color in failed_colors:
+        slot = room.slot(color)
+        if slot is not None:
+            connections.remove(room.room_id, slot.client_uuid)
+        opp_color = room.opp_color(color)
+        if opp_color in failed_colors:
+            continue
+        opp_ws = connections.get_for_color(room, opp_color)
+        if opp_ws is None:
+            continue
+        await send(opp_ws, ConnectionStatusMessage(opp_state="reconnecting"))

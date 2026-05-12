@@ -3,20 +3,16 @@ import pygame as pg
 from frontend.visual.colors import Colors
 from frontend.pgn.generate import iter_move_pairs
 from frontend.visual.widgets import draw_button_row, draw_scroll_thumb
+from server.protocol import GIVE_TIME_SECONDS
 
 
 BUTTONS = [
-    ("Undo", "undo"),
-    ("Resign", "resign"),
-    ("Draw", "draw"),
-    ("Flip", "flip"),
-    ("?", "help"),
+    [("Undo", "undo"), ("Resign", "resign"), ("Draw", "draw")],
+    [(f"Give {GIVE_TIME_SECONDS} sec", "give_time"), ("Flip", "flip"), ("?", "help")],
 ]
 
 REVIEW_BUTTONS = [
-    ("Menu", "menu"),
-    ("Flip", "flip"),
-    ("?", "help"),
+    [("Menu", "menu"), ("Flip", "flip"), ("?", "help")],
 ]
 
 
@@ -68,8 +64,7 @@ class RightMenu:
 
     @property
     def backend(self):
-        inner = getattr(self.match, "backend", None)
-        return inner if inner is not None else self.match
+        return getattr(self.match, "backend", self.match)
 
     def set_rect(self, rect):
         self.font = pg.font.SysFont(
@@ -97,11 +92,13 @@ class RightMenu:
             button_row_h,
         )
 
+        n_rows = max(len(self.buttons_provider()), 1)
+        buttons_block_h = n_rows * button_row_h + (n_rows - 1) * small_gap
         self.buttons_rect = pg.Rect(
             self.outer_rect.x + p,
-            self.audio_rect.y - small_gap - button_row_h,
+            self.audio_rect.y - small_gap - buttons_block_h,
             inner_w,
-            button_row_h,
+            buttons_block_h,
         )
 
         info_h = self._info_section_height()
@@ -148,7 +145,12 @@ class RightMenu:
         self._draw_scroll_indicator(self.moves_rect)
         self._draw_buttons(self.buttons_rect)
         if self.audio_panel is not None:
-            self.audio_panel.set_rect(self.audio_rect)
+            rows = self.buttons_provider()
+            n_cols = len(rows[0]) if rows else 5
+            self.audio_panel.set_rect(
+                self.audio_rect, button_font=self.button_font,
+                n_columns=n_cols, gap=self.button_gap,
+            )
             self.audio_panel.draw()
 
     def _draw_game_info(self, rect):
@@ -181,7 +183,7 @@ class RightMenu:
         for cell_rect, ply in self._move_cell_hits:
             if not cell_rect.collidepoint(pos):
                 continue
-            self.board.animate_review_ply(ply)
+            self.board.jump_to_review_ply(ply)
             return True
         return False
 
@@ -294,8 +296,20 @@ class RightMenu:
         )
 
     def _draw_buttons(self, rect):
-        self.button_rects = draw_button_row(
-            self.window, rect, self.buttons_provider(),
-            self.button_font, self.button_gap,
-            disabled_keys=self.disabled_keys_provider(),
-        )
+        rows = self.buttons_provider()
+        self.button_rects = {}
+        if not rows:
+            return
+        row_h = (rect.height - (len(rows) - 1) * self.button_gap) / len(rows)
+        disabled = self.disabled_keys_provider()
+        for i, row in enumerate(rows):
+            row_rect = pg.Rect(
+                rect.x,
+                round(rect.y + i * (row_h + self.button_gap)),
+                rect.width,
+                round(row_h),
+            )
+            self.button_rects.update(draw_button_row(
+                self.window, row_rect, row, self.button_font, self.button_gap,
+                disabled_keys=disabled,
+            ))

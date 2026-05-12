@@ -16,7 +16,7 @@ class ServerAddressModal:
         self.on_cancel = None
         self.title_font = pg.font.SysFont("Arial", 22, bold=True)
         self.button_font = pg.font.SysFont("Arial", 14, bold=True)
-        self.input = TextInput(window, max_chars=64, placeholder="host:port")
+        self.input = TextInput(window, max_chars=64, placeholder="IP or IP:port")
         self.button_rects = {}
 
     def set_rect(self, rect):

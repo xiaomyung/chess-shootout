@@ -3,14 +3,13 @@ import os
 os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
 os.environ.setdefault("SDL_AUDIODRIVER", "dummy")
 
-from collections import Counter
 from unittest.mock import MagicMock
 
 import pygame as pg
 import pytest
 
 from backend.backend import Backend
-from backend.pieces import Piece, PieceColor, PieceType
+from backend.pieces import PieceColor, PieceType
 from backend.utils import Square
 from frontend.board import Board
 
@@ -335,7 +334,9 @@ def test_arrows_noop_when_history_empty():
 
 # ---------- RightMenu click-through ----------
 
-def test_clicking_white_cell_animates_to_white_ply():
+def test_clicking_white_cell_jumps_directly_to_white_ply():
+    # Clicks land the selector directly on the clicked ply — no animation,
+    # no transient highlight on ply-1.
     app = _new_app()
     _play_e4_e5_nf3(app)
     app.draw_frame()
@@ -343,15 +344,12 @@ def test_clicking_white_cell_animates_to_white_ply():
     cell_rect, ply = hits[0]
     assert ply == 1
     app.right_menu.handle_click(cell_rect.center)
-    # During animation: review_ply = ply - 1 (pre-move).
-    assert app.board.review_ply == 0
-    assert len(app.board.animations) >= 1
-    # Fire the animation to completion — review_ply advances to the clicked ply.
-    fire_animation(app.board)
     assert app.board.review_ply == 1
+    assert app.board._target_ply is None
+    assert app.board.animations == []
 
 
-def test_clicking_black_cell_animates_to_black_ply():
+def test_clicking_black_cell_jumps_directly_to_black_ply():
     app = _new_app()
     _play_e4_e5_nf3(app)
     app.draw_frame()
@@ -359,11 +357,12 @@ def test_clicking_black_cell_animates_to_black_ply():
     cell_rect, ply = hits[1]
     assert ply == 2
     app.right_menu.handle_click(cell_rect.center)
-    fire_animation(app.board)
     assert app.board.review_ply == 2
+    assert app.board.animations == []
 
 
-def test_clicking_latest_move_animates_then_returns_to_live():
+def test_clicking_latest_move_returns_to_live():
+    # Clicking the last move cell snaps directly to live (review_ply=None).
     app = _new_app()
     _play_e4_e5_nf3(app)
     app.board.review_ply = 1
@@ -372,11 +371,25 @@ def test_clicking_latest_move_animates_then_returns_to_live():
     cell_rect, ply = hits[-1]
     assert ply == len(app.backend.move_history)
     app.right_menu.handle_click(cell_rect.center)
-    # Animation queued: pre-move state at ply N-1, on completion → live (None).
-    assert app.board.review_ply == ply - 1
-    assert len(app.board.animations) >= 1
-    fire_animation(app.board)
     assert app.board.review_ply is None
+    assert app.board.animations == []
+
+
+def test_clicking_a_distant_move_never_transiently_lands_on_predecessor():
+    # Regression: previously animate_review_ply set review_ply = ply - 1 before
+    # the animation, so the move-list highlight flashed backwards. Now clicks
+    # never touch ply-1 — the selector lands on the chosen move only.
+    app = _new_app()
+    _play_e4_e5_nf3(app)
+    app.board.review_ply = 0
+    app.draw_frame()
+    hits = app.right_menu._move_cell_hits
+    cell_rect, ply = hits[-1]
+    app.right_menu.handle_click(cell_rect.center)
+    # No animation queued → no pre-snap to ply-1.
+    assert app.board.animations == []
+    assert app.board._target_ply is None
+    assert app.board.review_ply == ply or app.board.review_ply is None
 
 
 def test_animate_review_ply_starts_animation_from_correct_squares():
@@ -599,18 +612,40 @@ def test_new_game_clears_read_only(tmp_path):
     assert app.board.read_only is False
 
 
+def _flat_button_keys(rows):
+    return {key for row in rows for _, key in row}
+
+
 def test_pgn_review_shows_only_menu_and_flip_buttons(tmp_path):
     app = _new_app()
     _load_test_pgn(app, tmp_path)
-    buttons = app._right_menu_buttons()
-    keys = {key for _, key in buttons}
-    assert keys == {"menu", "flip", "help"}
+    assert _flat_button_keys(app._right_menu_buttons()) == {"menu", "flip", "help"}
 
 
 def test_live_mode_shows_full_buttons():
     app = _new_app()
-    keys = {key for _, key in app._right_menu_buttons()}
-    assert keys == {"undo", "resign", "draw", "flip", "help"}
+    assert _flat_button_keys(app._right_menu_buttons()) == {
+        "undo", "resign", "draw", "give_time", "flip", "help",
+    }
+
+
+def test_live_mode_buttons_are_two_rows_of_three():
+    # Layout pin: the right-menu button section is two rows of three
+    # buttons each, so the audio slider (which mirrors the first row's
+    # column count) lines up with the buttons above it.
+    app = _new_app()
+    rows = app._right_menu_buttons()
+    assert len(rows) == 2
+    assert [key for _, key in rows[0]] == ["undo", "resign", "draw"]
+    assert [key for _, key in rows[1]] == ["give_time", "flip", "help"]
+
+
+def test_review_mode_is_one_row():
+    app = _new_app()
+    app.pgn_review = True
+    rows = app._right_menu_buttons()
+    assert len(rows) == 1
+    assert [key for _, key in rows[0]] == ["menu", "flip", "help"]
 
 
 def test_pgn_review_menu_button_returns_to_start_menu(tmp_path):
@@ -640,8 +675,9 @@ def test_new_game_clears_pgn_review_flag(tmp_path):
     assert app.pgn_review is True
     app._on_new_game()
     assert app.pgn_review is False
-    keys = {key for _, key in app._right_menu_buttons()}
-    assert keys == {"undo", "resign", "draw", "flip", "help"}
+    assert _flat_button_keys(app._right_menu_buttons()) == {
+        "undo", "resign", "draw", "give_time", "flip", "help",
+    }
 
 
 def test_ctrl_z_does_not_undo_in_pgn_review(tmp_path):

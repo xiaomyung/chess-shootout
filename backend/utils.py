@@ -21,6 +21,10 @@ class Square:
     col: int
 
 
+def on_board(sq):
+    return 0 <= sq.row < BOARD_SIZE and 0 <= sq.col < BOARD_SIZE
+
+
 def coord_from_square(sq):
     return chr(ord("a") + sq.col) + str(BOARD_SIZE - sq.row)
 

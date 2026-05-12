@@ -9,7 +9,9 @@ from frontend.visual.clock_visual import (
     INCREMENT_FLASH_MS, LOW_TIME_FRACTION, clock_pocket_color,
 )
 from frontend.visual.colors import Colors
-from frontend.panels.player_strip import PlayerStrip, format_clock
+from frontend.panels.player_strip import (
+    AUTO_END_RED_THRESHOLD_SECONDS, PlayerStrip, format_clock, format_countdown,
+)
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -190,3 +192,57 @@ def test_draw_smoke_with_low_time_fraction_and_flash(strip):
     strip.set_state("Alice", 5.0, True, clock_initial_seconds=300.0)
     strip.flash_increment(now_ms=pg.time.get_ticks())
     strip.draw()  # no exceptions, exercises both visual paths
+
+
+# ---------- Auto-end countdown badge ----------
+
+def test_format_countdown_mm_ss():
+    assert format_countdown(0) == "0:00"
+    assert format_countdown(7) == "0:07"
+    assert format_countdown(45) == "0:45"
+    assert format_countdown(60) == "1:00"
+    assert format_countdown(125) == "2:05"
+
+
+def test_format_countdown_negative_clamps_to_zero():
+    assert format_countdown(-5) == "0:00"
+
+
+def test_render_badge_returns_none_when_label_missing(strip):
+    strip.set_state("Alice", 60.0, True, clock_initial_seconds=300.0)
+    surf, _, _ = strip._render_auto_end_badge(strip.rect)
+    assert surf is None
+
+
+def test_render_badge_uses_white_above_threshold(strip):
+    strip.set_state("Alice", 60.0, True, clock_initial_seconds=300.0,
+                    auto_end_label="abort", auto_end_seconds=45)
+    surf, badge_x, badge_y = strip._render_auto_end_badge(strip.rect)
+    assert surf is not None
+    assert badge_x + surf.get_width() <= strip.rect.right
+
+
+def test_render_badge_uses_red_below_threshold(strip):
+    strip.set_state("Alice", 60.0, True, clock_initial_seconds=300.0,
+                    auto_end_label="abandon",
+                    auto_end_seconds=AUTO_END_RED_THRESHOLD_SECONDS - 1)
+    surf, _, _ = strip._render_auto_end_badge(strip.rect)
+    assert surf is not None
+
+
+def test_badge_clips_captures_max_x(strip):
+    # With a badge active and a long capture list, ensure draw doesn't crash.
+    strip.set_state("Alice", 60.0, True, clock_initial_seconds=300.0,
+                    captured=[], auto_end_label="abandon", auto_end_seconds=30)
+    strip.draw()
+
+
+def test_draw_smoke_without_badge_still_works(strip):
+    strip.set_state("Alice", 60.0, True, clock_initial_seconds=300.0)
+    strip.draw()
+
+
+def test_draw_smoke_with_badge_does_not_raise(strip):
+    strip.set_state("Alice", 60.0, True, clock_initial_seconds=300.0,
+                    auto_end_label="reconnect", auto_end_seconds=20)
+    strip.draw()

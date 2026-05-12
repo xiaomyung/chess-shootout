@@ -5,13 +5,11 @@ import os
 os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
 os.environ.setdefault("SDL_AUDIODRIVER", "dummy")
 
-from collections import Counter
 from unittest.mock import MagicMock
 
 import pygame as pg
 import pytest
 
-from backend.pieces import Piece, PieceColor, PieceType
 from backend.utils import Square
 from frontend.frontend import (
     Frontend, RESULT_FADE_MS, RESULT_FADE_MAX_ALPHA, RESULT_MODAL_DELAY_MS,
@@ -165,12 +163,16 @@ def test_new_game_clears_pending_result_state():
 def test_right_menu_buttons_disabled_after_result():
     app = _make_app()
     app.manual_result = "white_wins"
-    assert app._right_menu_disabled_keys() == {"undo", "resign", "draw", "flip"}
+    assert app._right_menu_disabled_keys() == {
+        "undo", "resign", "draw", "flip", "give_time",
+    }
 
 
 def test_right_menu_buttons_active_during_normal_play():
     app = _make_app()
-    assert app._right_menu_disabled_keys() == set()
+    # No clock configured at construction → give_time is disabled until a
+    # game is started with a time control.
+    assert app._right_menu_disabled_keys() == {"give_time"}
 
 
 def test_right_menu_buttons_active_in_pgn_review():

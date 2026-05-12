@@ -4,6 +4,11 @@ from frontend.visual.clock_visual import INCREMENT_FLASH_MS, clock_pocket_color
 from frontend.visual.colors import Colors
 
 
+AUTO_END_RED_THRESHOLD_SECONDS = 10
+AUTO_END_BADGE_FONT_SCALE = 0.75
+INCREMENT_FLASH_PEAK_ALPHA = 180
+
+
 def format_clock(seconds):
     if seconds is None:
         return "—:—"
@@ -16,6 +21,12 @@ def format_clock(seconds):
         return f"{minutes}:{secs:02d}.{tenths}"
     total = int(seconds)
     minutes, secs = divmod(total, 60)
+    return f"{minutes}:{secs:02d}"
+
+
+def format_countdown(seconds):
+    seconds = max(0, int(seconds))
+    minutes, secs = divmod(seconds, 60)
     return f"{minutes}:{secs:02d}"
 
 
@@ -32,6 +43,8 @@ class PlayerStrip:
         self.advantage = 0
         self.captured_color = None
         self.connection_state = None
+        self.auto_end_label = None
+        self.auto_end_seconds = None
         self._flash_until_ms = 0
         self.padding = 10
         self.pocket_inset = 4
@@ -39,6 +52,7 @@ class PlayerStrip:
         self.name_font = pg.font.SysFont("Arial", 14, bold=True)
         self.clock_font = pg.font.SysFont("monospace", 16, bold=True)
         self.advantage_font = pg.font.SysFont("Arial", 14, bold=True)
+        self.auto_end_font = pg.font.SysFont("Arial", 11, bold=True)
         self.icons = {}
 
     def set_rect(self, rect):
@@ -46,16 +60,19 @@ class PlayerStrip:
         name_size = max(int(rect.height * 0.45), 12)
         clock_size = max(int(rect.height * 0.55), 14)
         adv_size = max(int(rect.height * 0.4), 10)
+        auto_end_size = max(int(name_size * AUTO_END_BADGE_FONT_SCALE), 9)
         self.name_font = pg.font.SysFont("Arial", name_size, bold=True)
         self.clock_font = pg.font.SysFont("monospace", clock_size, bold=True)
         self.advantage_font = pg.font.SysFont("Arial", adv_size, bold=True)
+        self.auto_end_font = pg.font.SysFont("Arial", auto_end_size, bold=True)
 
     def set_piece_icons(self, icons):
         self.icons = icons
 
     def set_state(self, name, clock_seconds, active, captured=None, advantage=0,
                   captured_color=None, connection_state=None,
-                  clock_initial_seconds=None):
+                  clock_initial_seconds=None, auto_end_label=None,
+                  auto_end_seconds=None):
         self.name = name
         self.clock_seconds = clock_seconds
         self.clock_initial_seconds = clock_initial_seconds
@@ -64,6 +81,8 @@ class PlayerStrip:
         self.advantage = advantage
         self.captured_color = captured_color
         self.connection_state = connection_state
+        self.auto_end_label = auto_end_label
+        self.auto_end_seconds = auto_end_seconds
 
     def flash_increment(self, now_ms=None):
         if now_ms is None:
@@ -94,15 +113,15 @@ class PlayerStrip:
         dot_offset = 0
         if self.connection_state is not None:
             dot_radius = max(int(self.rect.height * 0.10), 4)
-            dot_color = {
-                "connected": (60, 200, 90),
-                "reconnecting": (220, 180, 40),
-                "disconnected": (210, 60, 60),
-            }.get(self.connection_state, (140, 140, 140))
+            dot_color = Colors.connection_dots.get(
+                self.connection_state, Colors.connection_dots["unknown"],
+            )
             dot_x = name_region.x + self.pocket_inset + dot_radius
             dot_y = name_region.centery
             pg.draw.circle(self.window, dot_color, (dot_x, dot_y), dot_radius)
             dot_offset = dot_radius * 2 + 6
+
+        badge_surf, badge_x, badge_y = self._render_auto_end_badge(name_region)
 
         name_surf = self.name_font.render(self.name, True, Colors.white)
         max_w = name_region.width - 2 * self.pocket_inset - dot_offset
@@ -112,7 +131,12 @@ class PlayerStrip:
         name_y = name_region.centery - name_surf.get_height() / 2
         self.window.blit(name_surf, (name_x, name_y))
 
-        self._draw_captures(name_region, name_x + name_surf.get_width())
+        captures_max_x = (badge_x - 8 if badge_surf is not None
+                          else name_region.right - self.pocket_inset)
+        self._draw_captures(name_region, name_x + name_surf.get_width(), captures_max_x)
+
+        if badge_surf is not None:
+            self.window.blit(badge_surf, (badge_x, badge_y))
 
         pocket_color = clock_pocket_color(self._clock_fraction())
         pg.draw.rect(self.window, pocket_color, pocket_rect, border_radius=3)
@@ -149,14 +173,30 @@ class PlayerStrip:
         if remaining <= 0:
             return 0
         progress = remaining / INCREMENT_FLASH_MS
-        return int(180 * max(0.0, min(1.0, progress)))
+        return int(INCREMENT_FLASH_PEAK_ALPHA * max(0.0, min(1.0, progress)))
 
-    def _draw_captures(self, name_region, start_x):
+    def _render_auto_end_badge(self, name_region):
+        if self.auto_end_label is None or self.auto_end_seconds is None:
+            return None, 0, 0
+        text = f"{self.auto_end_label} {format_countdown(self.auto_end_seconds)}"
+        color = (Colors.auto_end_alert
+                 if self.auto_end_seconds < AUTO_END_RED_THRESHOLD_SECONDS
+                 else Colors.white)
+        surf = self.auto_end_font.render(text, True, color)
+        max_w = name_region.width - 2 * self.pocket_inset
+        if surf.get_width() > max_w > 0:
+            surf = surf.subsurface(pg.Rect(0, 0, max_w, surf.get_height()))
+        badge_x = name_region.right - self.pocket_inset - surf.get_width()
+        badge_y = name_region.centery - surf.get_height() / 2
+        return surf, badge_x, badge_y
+
+    def _draw_captures(self, name_region, start_x, max_x=None):
         if not self.captured or self.captured_color is None or not self.icons:
             return
         gap = 6
         x = start_x + gap
-        max_x = name_region.right - self.pocket_inset
+        if max_x is None:
+            max_x = name_region.right - self.pocket_inset
         for piece_type in self.captured:
             icon = self.icons.get((piece_type, self.captured_color))
             if icon is None:

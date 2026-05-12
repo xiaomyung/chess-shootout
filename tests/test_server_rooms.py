@@ -2,8 +2,9 @@ import random
 
 import pytest
 
+from server.protocol import GRACE_SECONDS
 from server.rooms import (
-    AlreadyInGameError, GRACE_SECONDS, InvalidTokenError, NotInRoomError,
+    AlreadyInGameError, InvalidTokenError, NotInRoomError,
     PlayerSlot, REMATCH_KEEP_ALIVE_SECONDS, Room, RoomManager,
 )
 from tests.helpers import FakeClock

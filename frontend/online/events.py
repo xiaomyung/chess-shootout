@@ -7,12 +7,19 @@ from backend.match import ONLINE
 from backend.pieces import PieceColor
 from backend.utils import PROMO_TYPE_BY_LETTER, coord_from_square, square_from_coord
 from frontend import env
+from server.protocol import FIRST_MOVE_ABORT_SECONDS
 
 
 log = logging.getLogger("chess.frontend")
 
 
-ONLINE_WIN_REASONS = {"checkmate", "timeout", "resignation", "abandonment"}
+ONLINE_WIN_RESULT_BY_REASON = {
+    "checkmate":   ("white_wins",                  "black_wins"),
+    "timeout":     ("white_wins_on_time",          "black_wins_on_time"),
+    "resignation": ("white_wins_by_resignation",   "black_wins_by_resignation"),
+    "abandonment": ("white_wins_by_abandonment",   "black_wins_by_abandonment"),
+}
+ONLINE_WIN_REASONS = frozenset(ONLINE_WIN_RESULT_BY_REASON)
 ONLINE_DRAW_REASONS = {
     "draw_agreement", "draw_stalemate", "draw_repetition",
     "draw_fifty_move", "draw_insufficient_material",
@@ -86,8 +93,10 @@ class OnlineEventsMixin:
             )
         elif event.type == "game_resumed":
             self._handle_game_resumed(event.payload)
+        elif event.type == "time_granted":
+            self._handle_time_granted(event.payload)
         elif event.type == "connection_status":
-            return
+            self._handle_connection_status(event.payload)
         elif event.type == "error":
             self._handle_online_error(event.payload)
 
@@ -149,10 +158,17 @@ class OnlineEventsMixin:
             clock_snap.get("running_for"),
         )
 
+    def _begin_resync(self):
+        if self._resyncing:
+            return
+        self._resyncing = True
+        if self.online_client is not None:
+            self.online_client.request_state_sync()
+
     def _handle_game_resumed(self, payload):
         self.match.new_game()
         for entry in payload.get("move_history", []):
-            result = self.match.backend.apply_san(entry["san"])
+            result = self.match.apply_san(entry["san"])
             if not result.legal:
                 log.warning("resume: SAN replay failed at %r", entry.get("san"))
                 apply_fen(self.match.backend, payload["fen"])
@@ -165,8 +181,26 @@ class OnlineEventsMixin:
         self.board.selected_square = None
         self.board._clear_premoves()
         self.board.clear_annotations()
+        self._resyncing = False
+
+    def _handle_time_granted(self, payload):
+        self._apply_clock_snap(payload, default_to_existing=False)
+        added = float(payload.get("seconds_added", 0))
+        granted_by = payload.get("granted_by")
+        recipient_color = "black" if granted_by == "white" else "white"
+        if granted_by == self._chosen_side:
+            self._give_time_toast_for_giver(recipient_color, added)
+        else:
+            self._give_time_toast_for_receiver(granted_by, added)
 
     def _handle_takeback_applied(self, payload):
+        if self._resyncing:
+            return
+        server_ply = payload.get("ply")
+        expected = len(self.match.move_history) - 1
+        if server_ply is not None and server_ply != expected:
+            self._begin_resync()
+            return
         if self.match.move_history:
             last = self.match.move_history[-1].move
             self.match.undo()
@@ -175,11 +209,19 @@ class OnlineEventsMixin:
         self._apply_clock_snap(payload, default_to_existing=True)
 
     def _handle_remote_move_applied(self, payload):
-        self._apply_clock_snap(payload, default_to_existing=True)
+        if self._resyncing:
+            return
         san = payload.get("san")
         last = self.match.move_history[-1] if self.match.move_history else None
         if last is not None and last.san == san:
+            self._apply_clock_snap(payload, default_to_existing=True)
             return
+        server_ply = payload.get("ply")
+        expected = len(self.match.move_history) + 1
+        if server_ply is not None and server_ply != expected:
+            self._begin_resync()
+            return
+        self._apply_clock_snap(payload, default_to_existing=True)
         from_sq = square_from_coord(payload["from"])
         to_sq = square_from_coord(payload["to"])
         promo = payload.get("promotion")
@@ -187,23 +229,31 @@ class OnlineEventsMixin:
         result = self.match.apply_remote_move(from_sq, to_sq, promo_type)
         if result.legal:
             self.board.animate_remote_move(from_sq, to_sq)
+        else:
+            self._begin_resync()
 
     def _handle_online_result(self, payload):
         reason = payload.get("reason", "")
         winner = payload.get("winner_color")
         if reason in ONLINE_WIN_REASONS:
-            self.manual_result = "white_wins" if winner == "white" else "black_wins"
-            if winner == "white":
-                self._series_white_score += 1
-            elif winner == "black":
-                self._series_black_score += 1
+            white_code, black_code = ONLINE_WIN_RESULT_BY_REASON[reason]
+            self.manual_result = white_code if winner == "white" else black_code
+            winner_name = self._name_for_color(winner)
+            self._series_scores[winner_name] = (
+                self._series_scores.get(winner_name, 0.0) + 1
+            )
         elif reason in ONLINE_DRAW_REASONS:
             self.manual_result = "draw_agreement"
-            self._series_white_score += 0.5
-            self._series_black_score += 0.5
+            for name in (self.white_name, self.black_name):
+                self._series_scores[name] = (
+                    self._series_scores.get(name, 0.0) + 0.5
+                )
         elif reason in ONLINE_STATIC_RESULTS:
             self.manual_result = reason
         if self.manual_result is not None:
+            self._first_move_deadline_ms = None
+            self._opp_disconnected_at_ms = None
+            self._local_disconnected_at_ms = None
             if reason == "timeout":
                 self.sound_manager.play_flag_fall()
             self._auto_save_pgn()
@@ -212,9 +262,22 @@ class OnlineEventsMixin:
         if self._pending_game_start_payload is not None:
             return
         self._pending_game_start_payload = payload
-        self._match_found_at_ms = pg.time.get_ticks()
+        now = pg.time.get_ticks()
+        self._match_found_at_ms = now
+        elapsed = float(payload.get("started_seconds_ago", 0.0))
+        self._first_move_deadline_ms = now + int(
+            (FIRST_MOVE_ABORT_SECONDS - elapsed) * 1000
+        )
         self.wait_modal.set_subtitle("Match found!")
         self.sound_manager.play_online_game_start()
+
+    def _handle_connection_status(self, payload):
+        opp_state = payload.get("opp_state", "connected")
+        if opp_state in ("reconnecting", "disconnected"):
+            if self._opp_disconnected_at_ms is None:
+                self._opp_disconnected_at_ms = pg.time.get_ticks()
+        else:
+            self._opp_disconnected_at_ms = None
 
     def _start_online_game(self, payload):
         opp_name = (payload.get("white_name") if payload.get("your_color") == "black"
@@ -239,8 +302,9 @@ class OnlineEventsMixin:
         pair = tuple(sorted([payload["white_name"], payload["black_name"]]))
         if getattr(self, "_series_pair", None) != pair:
             self._series_pair = pair
-            self._series_white_score = 0.0
-            self._series_black_score = 0.0
+            self._series_scores = {pair[0]: 0.0, pair[1]: 0.0}
+        self._opp_disconnected_at_ms = None
+        self._local_disconnected_at_ms = None
         self._reset_to_new_game()
         self.board.flipped = self._online_initial_flip
 

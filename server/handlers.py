@@ -12,11 +12,12 @@ from server.connections import broadcast, send
 from server.broadcasts import broadcast_game_start
 from server.protocol import (
     ClockSnapshot, DrawOfferedMessage, DrawResponseMessage, ErrorMessage,
-    MoveAppliedMessage, MoveMessage, Reason, RematchRequestMessage,
-    RematchResponseMessage, ResultMessage, TakebackAppliedMessage,
-    TakebackOfferedMessage, TakebackResponseMessage,
+    GIVE_TIME_SECONDS, MoveAppliedMessage, MoveMessage, Reason,
+    RematchRequestMessage, RematchResponseMessage, ResultMessage,
+    TakebackAppliedMessage, TakebackOfferedMessage, TakebackResponseMessage,
+    TimeGrantedMessage,
 )
-from server.sweep import _RESULT_REASON_BY_GAME_RESULT
+from server.sweep import RESULT_REASON_BY_GAME_RESULT
 
 
 log = logging_setup.get_logger("chess.server.app")
@@ -93,11 +94,12 @@ async def handle_move(app, websocket, room, color, raw):
     applied = MoveAppliedMessage(
         from_sq=msg.from_sq, to_sq=msg.to_sq, promotion=msg.promotion,
         san=san, clock=_clock_snapshot(room.backend.clock),
+        ply=len(room.backend.move_history),
     )
     await broadcast(connections, room, applied)
     game_result = room.backend.game_result()
-    if game_result in _RESULT_REASON_BY_GAME_RESULT:
-        reason, winner = _RESULT_REASON_BY_GAME_RESULT[game_result]
+    if game_result in RESULT_REASON_BY_GAME_RESULT:
+        reason, winner = RESULT_REASON_BY_GAME_RESULT[game_result]
         rooms.finalize_result(room.room_id, reason, winner_color=winner)
         await broadcast(connections, room,
                           ResultMessage(reason=reason, winner_color=winner))
@@ -176,7 +178,7 @@ async def handle_rematch_request(app, websocket, room, color, raw):
     if len(room.rematch_offered_by) == 2:
         log.info("rematch mutual — restart room=%s", room.room_id)
         rooms.reset_for_rematch(room.room_id)
-        await broadcast_game_start(connections, room)
+        await broadcast_game_start(connections, room, app.state.now)
         return "started"
     log.info("rematch requested room=%s by=%s", room.room_id, color)
     opp_ws = connections.get_for_color(room, room.opp_color(color))
@@ -199,7 +201,7 @@ async def handle_rematch_response(app, websocket, room, color, raw):
     if msg.accept:
         log.info("rematch accepted room=%s by=%s", room.room_id, color)
         rooms.reset_for_rematch(room.room_id)
-        await broadcast_game_start(connections, room)
+        await broadcast_game_start(connections, room, app.state.now)
         return "accepted"
     log.info("rematch declined room=%s by=%s", room.room_id, color)
     room.rematch_offered_by.clear()
@@ -243,11 +245,29 @@ async def handle_takeback_response(app, websocket, room, color, raw):
         await broadcast(connections, room, TakebackAppliedMessage(
             fen=export_fen(room.backend),
             clock=_clock_snapshot(room.backend.clock),
+            ply=len(room.backend.move_history),
         ))
         return "accepted"
     log.info("takeback declined room=%s by=%s", room.room_id, color)
     room.takeback_offered_by = None
     return "declined"
+
+
+async def handle_give_time(app, websocket, room, color, raw):
+    connections = app.state.connections
+    if room.result is not None or room.backend is None or room.backend.clock is None:
+        return "noop"
+    opp_color_str = room.opp_color(color)
+    opp_piece_color = (
+        PieceColor.WHITE if opp_color_str == "white" else PieceColor.BLACK
+    )
+    added = room.backend.clock.add_time(opp_piece_color, GIVE_TIME_SECONDS)
+    log.info("give_time room=%s by=%s added=%.2f", room.room_id, color, added)
+    await broadcast(connections, room, TimeGrantedMessage(
+        granted_by=color, seconds_added=added,
+        clock=_clock_snapshot(room.backend.clock),
+    ))
+    return "granted" if added > 0 else "capped"
 
 
 HANDLERS = {
@@ -259,4 +279,5 @@ HANDLERS = {
     "rematch_response": handle_rematch_response,
     "takeback_request": handle_takeback_request,
     "takeback_response": handle_takeback_response,
+    "give_time": handle_give_time,
 }

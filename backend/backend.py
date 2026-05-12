@@ -4,9 +4,15 @@ import time
 from collections import Counter
 from itertools import product
 
-from backend.pieces import PieceType, PieceColor, Piece, BACK_RANK, opponent_of
+from backend.pieces import (
+    BACK_RANK, BISHOP_DIRECTIONS, KING_OFFSETS, KNIGHT_OFFSETS, Piece,
+    PieceColor, PieceType, QUEEN_DIRECTIONS, ROOK_DIRECTIONS, king_home_row,
+    opponent_of, pawn_forward, pawn_start_row,
+)
 from backend.clock import Clock
-from backend.utils import Move, MoveResult, Square, HistoryEntry
+from backend.utils import (
+    BOARD_SIZE, HistoryEntry, Move, MoveResult, Square, on_board,
+)
 
 
 SAN_PIECE_LETTER = {
@@ -44,23 +50,12 @@ FIFTY_MOVE_HALFMOVES = 100
 
 
 class Backend:
-    SIZE = 8
-
-    KNIGHT_OFFSETS = [
-        (-2, -1), (-2, 1), (-1, -2), (-1, 2),
-        (1, -2), (1, 2), (2, -1), (2, 1)
-    ]
-
-    KING_OFFSETS = [
-        (-1, -1), (-1, 0), (-1, 1), (0, -1),
-        (0, 1), (1, -1), (1, 0), (1, 1)
-    ]
-
-    BISHOP_DIRECTIONS = [(-1, -1), (-1, 1), (1, -1), (1, 1)]
-    ROOK_DIRECTIONS = [(-1, 0), (1, 0), (0, -1), (0, 1)]
-    QUEEN_DIRECTIONS = BISHOP_DIRECTIONS + ROOK_DIRECTIONS
+    SIZE = BOARD_SIZE
 
     def __init__(self):
+        self._reset_state()
+
+    def _reset_state(self):
         self.state = [[None] * self.SIZE for _ in range(self.SIZE)]
         self.turn = PieceColor.WHITE
         self.move_history = []
@@ -71,14 +66,7 @@ class Backend:
         self.clock = None
 
     def new_game(self):
-        self.state = [[None] * self.SIZE for _ in range(self.SIZE)]
-        self.turn = PieceColor.WHITE
-        self.move_history = []
-        self.en_passant_target = None
-        self.castling_rights = dict(DEFAULT_CASTLING_RIGHTS)
-        self.halfmove_clock = 0
-        self.position_counts = Counter()
-        self.clock = None
+        self._reset_state()
 
         for col, piece_type in enumerate(BACK_RANK):
             self.state[0][col] = Piece(piece_type, PieceColor.BLACK)
@@ -185,7 +173,7 @@ class Backend:
         san = san.rstrip("!?+#")
         if not san:
             return MoveResult(legal=False)
-        home_row = 7 if self.turn == PieceColor.WHITE else 0
+        home_row = king_home_row(self.turn)
         if san in ("O-O", "0-0"):
             return self.try_move(Square(home_row, 4), Square(home_row, 6))
         if san in ("O-O-O", "0-0-0"):
@@ -418,21 +406,21 @@ class Backend:
             return []
 
         if piece.type == PieceType.KNIGHT:
-            return self._knight_and_king_moves(square, piece, self.KNIGHT_OFFSETS)
+            return self._knight_and_king_moves(square, piece, KNIGHT_OFFSETS)
 
         if piece.type == PieceType.KING:
-            moves = self._knight_and_king_moves(square, piece, self.KING_OFFSETS)
+            moves = self._knight_and_king_moves(square, piece, KING_OFFSETS)
             moves.extend(self._castling_moves(square, piece))
             return moves
 
         if piece.type == PieceType.BISHOP:
-            return self._sliding_moves(square, piece, self.BISHOP_DIRECTIONS)
+            return self._sliding_moves(square, piece, BISHOP_DIRECTIONS)
 
         if piece.type == PieceType.ROOK:
-            return self._sliding_moves(square, piece, self.ROOK_DIRECTIONS)
+            return self._sliding_moves(square, piece, ROOK_DIRECTIONS)
 
         if piece.type == PieceType.QUEEN:
-            return self._sliding_moves(square, piece, self.QUEEN_DIRECTIONS)
+            return self._sliding_moves(square, piece, QUEEN_DIRECTIONS)
 
         if piece.type == PieceType.PAWN:
             return self._pawn_moves(square, piece)
@@ -453,7 +441,7 @@ class Backend:
 
         for dr, dc in offsets:
             target = Square(square.row + dr, square.col + dc)
-            if not self._in_bounds(target):
+            if not on_board(target):
                 continue
 
             target_piece = self.state[target.row][target.col]
@@ -491,11 +479,11 @@ class Backend:
     def _pawn_moves(self, square, piece):
         moves = []
 
-        direction = -1 if piece.color == PieceColor.WHITE else 1
-        start_row = 6 if piece.color == PieceColor.WHITE else 1
+        direction = pawn_forward(piece.color)
+        start_row = pawn_start_row(piece.color)
 
         one_ahead = Square(square.row + direction, square.col)
-        if self._in_bounds(one_ahead) and self.state[one_ahead.row][one_ahead.col] is None:
+        if on_board(one_ahead) and self.state[one_ahead.row][one_ahead.col] is None:
             moves.append(one_ahead)
 
             if square.row == start_row:
@@ -505,7 +493,7 @@ class Backend:
 
         for diag_col in (-1, 1):
             target = Square(square.row + direction, square.col + diag_col)
-            if not self._in_bounds(target):
+            if not on_board(target):
                 continue
 
             target_piece = self.state[target.row][target.col]
@@ -521,7 +509,7 @@ class Backend:
     def _castling_moves(self, square, piece):
         if piece.type != PieceType.KING:
             return []
-        home_row = 7 if piece.color == PieceColor.WHITE else 0
+        home_row = king_home_row(piece.color)
         if square != Square(home_row, 4):
             return []
         if self.is_in_check(piece.color):
@@ -551,7 +539,7 @@ class Backend:
     def _is_castling_move(self, from_sq, to_sq, piece):
         if piece.type != PieceType.KING:
             return False
-        home_row = 7 if piece.color == PieceColor.WHITE else 0
+        home_row = king_home_row(piece.color)
         if from_sq != Square(home_row, 4):
             return False
         return abs(to_sq.col - from_sq.col) == 2
@@ -606,14 +594,14 @@ class Backend:
                 continue
 
             if piece.type == PieceType.PAWN:
-                direction = -1 if by_color == PieceColor.WHITE else 1
+                direction = pawn_forward(by_color)
                 for diag_col in (-1, 1):
                     if row + direction == square.row and col + diag_col == square.col:
                         return True
                 continue
 
             if piece.type == PieceType.KING:
-                for dr, dc in self.KING_OFFSETS:
+                for dr, dc in KING_OFFSETS:
                     if row + dr == square.row and col + dc == square.col:
                         return True
                 continue
@@ -666,6 +654,3 @@ class Backend:
 
     def _switch_turn(self):
         self.turn = opponent_of(self.turn)
-
-    def _in_bounds(self, square):
-        return 0 <= square.row < self.SIZE and 0 <= square.col < self.SIZE

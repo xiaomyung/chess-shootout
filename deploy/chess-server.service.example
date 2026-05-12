@@ -1,10 +1,11 @@
 # systemd unit for the chess multiplayer server.
 #
 # 1. Copy to /etc/systemd/system/chess-server.service and edit paths.
-# 2. Create /etc/chess-server.env with at least: HOST=127.0.0.1, PORT=8000,
-#    LOG_LEVEL=INFO, MAX_ROOMS=100.
+# 2. Create /etc/chess-server.env with at least: HOST=0.0.0.0, PORT=8000,
+#    LOG_LEVEL=INFO, MAX_ROOMS=100. Use HOST=127.0.0.1 only if you're
+#    fronting it with your own reverse proxy.
 # 3. systemctl daemon-reload && systemctl enable --now chess-server
-# 4. Caddy reverse-proxies localhost:8000 to public 443 (see Caddyfile.example).
+# 4. Open PORT in UFW: `ufw allow 8000/tcp`.
 
 [Unit]
 Description=Chess multiplayer server

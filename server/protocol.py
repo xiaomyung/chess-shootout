@@ -6,6 +6,9 @@ from pydantic import BaseModel, Field, field_validator
 
 PROTOCOL_VERSION = 1
 MAX_NICKNAME_LEN = 20
+GIVE_TIME_SECONDS = 15
+FIRST_MOVE_ABORT_SECONDS = 60
+GRACE_SECONDS = 60
 
 UUID4_RE = re.compile(
     r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$",
@@ -50,7 +53,7 @@ class Reason:
 def normalize_nickname(raw):
     if raw is None:
         raise ValueError("nickname required")
-    if not all(0x20 <= ord(c) <= 0x7e for c in raw):
+    if not (raw.isascii() and raw.isprintable()):
         raise ValueError("nickname must be printable ASCII")
     collapsed = re.sub(r"\s+", " ", raw.strip())
     if not collapsed:
@@ -201,6 +204,7 @@ class GameStartMessage(_Base):
     time_minutes: int
     increment_seconds: int
     your_color: Literal["white", "black"]
+    started_seconds_ago: float = 0.0
 
 
 class MoveAppliedMessage(_Base):
@@ -210,6 +214,7 @@ class MoveAppliedMessage(_Base):
     promotion: Optional[Literal["q", "r", "b", "n"]] = None
     san: str
     clock: ClockSnapshot
+    ply: int
 
     model_config = {"populate_by_name": True}
 
@@ -231,6 +236,14 @@ class TakebackOfferedMessage(_Base):
 class TakebackAppliedMessage(_Base):
     type: Literal["takeback_applied"] = "takeback_applied"
     fen: str
+    clock: ClockSnapshot
+    ply: int
+
+
+class TimeGrantedMessage(_Base):
+    type: Literal["time_granted"] = "time_granted"
+    granted_by: Literal["white", "black"]
+    seconds_added: float
     clock: ClockSnapshot
 
 

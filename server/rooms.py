@@ -8,12 +8,11 @@ from typing import Optional
 from uuid import uuid4
 
 from backend.backend import Backend
+from server.protocol import GRACE_SECONDS
 
 
-GRACE_SECONDS = 60
 REMATCH_KEEP_ALIVE_SECONDS = 60
 PAIRING_WAIT_SECONDS = 30
-FIRST_MOVE_ABORT_SECONDS = 60
 
 
 class AlreadyInGameError(Exception):
@@ -108,14 +107,13 @@ class RoomManager:
         async with self._lock:
             if client_uuid in self._uuid_to_room:
                 raise AlreadyInGameError()
-            if len(self._active) + sum(len(q) for q in self._queue.values()) >= self._max_rooms:
+            if len(self._active) + self.queue_depth >= self._max_rooms:
                 raise RuntimeError("server_full")
             tc = (time_minutes, increment_seconds)
             queue = self._queue[tc]
             if queue:
                 room = queue.pop(0)
-                first_color = "white" if room.white is not None else "black"
-                first_slot = room.white if first_color == "white" else room.black
+                first_slot = room.white or room.black
                 first_pref = first_slot.side_preference
                 second_color, first_color_resolved = self._resolve_colors(first_pref, side_preference)
                 room.white = None
@@ -241,12 +239,11 @@ class RoomManager:
 
     def gc_finished_rooms(self):
         now = self._now()
-        to_drop = []
-        for room_id, room in self._active.items():
-            if room.ended_at is None:
-                continue
-            if now - room.ended_at >= REMATCH_KEEP_ALIVE_SECONDS:
-                to_drop.append(room_id)
+        to_drop = [
+            room_id for room_id, room in self._active.items()
+            if room.ended_at is not None
+            and now - room.ended_at >= REMATCH_KEEP_ALIVE_SECONDS
+        ]
         for room_id in to_drop:
             self._drop_room(room_id)
 

@@ -5,8 +5,8 @@ from frontend.visual.colors import Colors
 from frontend.visual.widgets import draw_button
 
 
-SLIDER_FRACTION = 0.75
-SLIDER_GAP_PX = 6
+DEFAULT_BUTTON_COLUMNS = 5
+DEFAULT_BUTTON_GAP_PX = 6
 
 
 class AudioPanel:
@@ -15,28 +15,55 @@ class AudioPanel:
         self.window = window
         self.sound_manager = sound_manager
         self.rect = pg.Rect(0, 0, 0, 0)
+        self.text_rect = pg.Rect(0, 0, 0, 0)
         self.slider_rect = pg.Rect(0, 0, 0, 0)
         self.mute_rect = pg.Rect(0, 0, 0, 0)
         self.button_font = pg.font.SysFont("Arial", 14, bold=True)
         self.button_font_factor = 28
         self._dragging_slider = False
 
-    def set_rect(self, rect):
+    def set_rect(self, rect, *, button_font=None,
+                 n_columns=DEFAULT_BUTTON_COLUMNS, gap=DEFAULT_BUTTON_GAP_PX):
         self.rect = pg.Rect(rect)
-        slider_w = int((rect.width - SLIDER_GAP_PX) * SLIDER_FRACTION)
-        mute_w = rect.width - SLIDER_GAP_PX - slider_w
-        self.slider_rect = pg.Rect(rect.x, rect.y, slider_w, rect.height)
-        self.mute_rect = pg.Rect(rect.x + slider_w + SLIDER_GAP_PX, rect.y,
-                                 mute_w, rect.height)
-        self.button_font = pg.font.SysFont(
-            "Arial", max(int(rect.width / self.button_font_factor), 10), bold=True,
+        if button_font is not None:
+            self.button_font = button_font
+        else:
+            self.button_font = pg.font.SysFont(
+                "Arial", max(int(rect.width / self.button_font_factor), 10),
+                bold=True,
+            )
+        self.text_rect, self.slider_rect, self.mute_rect = self._split_regions(
+            rect, max(n_columns, 3), gap,
         )
+
+    def _split_regions(self, rect, n, gap):
+        btn_w = (rect.width - gap * (n - 1)) / n
+        slider_span = max(n - 2, 1)
+        text_rect = pg.Rect(rect.x, rect.y, round(btn_w), rect.height)
+        slider_x = rect.x + btn_w + gap
+        slider_w = slider_span * btn_w + (slider_span - 1) * gap
+        slider_rect = pg.Rect(
+            round(slider_x), rect.y, round(slider_w), rect.height,
+        )
+        mute_x = rect.x + (n - 1) * (btn_w + gap)
+        mute_rect = pg.Rect(round(mute_x), rect.y, round(btn_w), rect.height)
+        return text_rect, slider_rect, mute_rect
 
     def draw(self):
         if self.rect.width <= 0 or self.rect.height <= 0:
             return
+        self._draw_volume_text()
         self._draw_slider()
         self._draw_mute()
+
+    def _draw_volume_text(self):
+        surf = self.button_font.render("Volume", True, Colors.white)
+        if surf.get_width() > self.text_rect.width > 0:
+            surf = surf.subsurface(pg.Rect(0, 0, self.text_rect.width,
+                                           surf.get_height()))
+        x = self.text_rect.centerx - surf.get_width() // 2
+        y = self.text_rect.centery - surf.get_height() // 2
+        self.window.blit(surf, (x, y))
 
     def _draw_slider(self):
         track = self._track_rect()

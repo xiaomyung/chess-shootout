@@ -6,6 +6,10 @@ RESULT_CODES = {
     "black_wins": "0-1",
     "white_wins_on_time": "1-0",
     "black_wins_on_time": "0-1",
+    "white_wins_by_resignation": "1-0",
+    "black_wins_by_resignation": "0-1",
+    "white_wins_by_abandonment": "1-0",
+    "black_wins_by_abandonment": "0-1",
     "draw_stalemate": "1/2-1/2",
     "draw_repetition": "1/2-1/2",
     "draw_fifty_move": "1/2-1/2",
@@ -48,13 +52,11 @@ def generate_pgn(move_history, result, white_name="?", black_name="?",
     if termination is not None:
         header.append(f'[Termination "{termination}"]')
 
-    parts = []
-    for number, white, black in iter_move_pairs(move_history):
-        if black is not None:
-            parts.append(f"{number}. {white.san} {black.san}")
-        else:
-            parts.append(f"{number}. {white.san}")
-
+    parts = [
+        f"{number}. {white.san} {black.san}" if black is not None
+        else f"{number}. {white.san}"
+        for number, white, black in iter_move_pairs(move_history)
+    ]
     body = " ".join(parts)
     if code != "*":
         body = f"{body} {code}" if body else code
