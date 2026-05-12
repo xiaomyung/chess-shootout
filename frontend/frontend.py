@@ -228,6 +228,10 @@ class Frontend(OnlineEventsMixin):
             return None
         return RESULT_TEXT.get(code)
 
+    def _name_for_color(self, color):
+        is_white = color in (PieceColor.WHITE, "white")
+        return self.white_name if is_white else self.black_name
+
     def _on_new_game(self):
         self._reset_to_new_game()
         self.sound_manager.play_game_start()
@@ -839,7 +843,7 @@ class Frontend(OnlineEventsMixin):
         self.sound_manager.update_heartbeat(fraction, paused)
 
     def _strip_state(self, color, turn, over):
-        name = self.white_name if color == PieceColor.WHITE else self.black_name
+        name = self._name_for_color(color)
         seconds = (self.match.clock.remaining(color)
                    if self.match.clock is not None else None)
         initial_seconds = (self.match.clock.initial_seconds

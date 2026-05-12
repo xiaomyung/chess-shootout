@@ -225,7 +225,7 @@ class OnlineEventsMixin:
         if reason in ONLINE_WIN_REASONS:
             white_code, black_code = ONLINE_WIN_RESULT_BY_REASON[reason]
             self.manual_result = white_code if winner == "white" else black_code
-            winner_name = self.white_name if winner == "white" else self.black_name
+            winner_name = self._name_for_color(winner)
             if winner_name is not None:
                 self._series_scores[winner_name] = (
                     self._series_scores.get(winner_name, 0.0) + 1
