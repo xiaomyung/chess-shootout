@@ -228,9 +228,14 @@ Three layered recovery paths:
   a yellow status dot, and an `Abandon in 0:45` countdown badge in
   your strip; you see a `Reconnect in 0:45` badge in your own strip
   while the modal is up. On success the game continues from the exact
-  ply. Every move + takeback also carries a `ply` counter, so if a
-  single message silently drops without breaking the socket, the client
-  detects the gap and resyncs automatically via `/resume`.
+  ply. Desync is caught two ways: every move + takeback carries a `ply`
+  counter, and the server broadcasts a periodic `state_sync` ply beacon
+  (~2.5 s) — so even a move lost while it's your turn to receive (with no
+  follow-up message to react to) is detected within a couple of seconds
+  and resynced automatically via `/resume`. Both players see a toast
+  while it resolves (`Resyncing…` for the affected player, `Opponent is
+  resyncing…` for the other), and a reconnecting socket can no longer be
+  orphaned server-side by a stale session.
 - **Client app restart** (you closed the window mid-game): on next
   launch the client probes `POST /reclaim {client_uuid}`; if the room
   is still alive the start menu shows a **Reconnect** button between
