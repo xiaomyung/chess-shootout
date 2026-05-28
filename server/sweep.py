@@ -1,9 +1,14 @@
 from server import logging_setup
 from server.connections import broadcast
-from server.protocol import FIRST_MOVE_ABORT_SECONDS, Reason, ResultMessage
+from server.protocol import (
+    FIRST_MOVE_ABORT_SECONDS, Reason, ResultMessage, StateSyncMessage,
+)
 
 
 log = logging_setup.get_logger("chess.server.app")
+
+
+BEACON_INTERVAL_SECONDS = 2.5
 
 
 RESULT_REASON_BY_GAME_RESULT = {
@@ -24,12 +29,30 @@ class Sweep:
         self.rooms = rooms
         self.connections = connections
         self._now = now_provider
+        self._last_beacon = {}
 
     async def step_all(self):
         await self.step_clock_and_first_move_abort()
         await self.step_grace_expired()
+        await self.step_state_sync_beacon()
         self.step_drop_orphans_and_post_result()
         self.rooms.gc_finished_rooms()
+
+    async def step_state_sync_beacon(self):
+        now = self._now()
+        active_ids = set()
+        for room in list(self.rooms._active.values()):
+            if (room.result is not None or room.first_move_at is None
+                    or not room.is_paired() or room.backend is None):
+                continue
+            active_ids.add(room.room_id)
+            if now - self._last_beacon.get(room.room_id, 0.0) < BEACON_INTERVAL_SECONDS:
+                continue
+            self._last_beacon[room.room_id] = now
+            await broadcast(self.connections, room,
+                            StateSyncMessage(ply=len(room.backend.move_history)))
+        for room_id in [rid for rid in self._last_beacon if rid not in active_ids]:
+            self._last_beacon.pop(room_id, None)
 
     async def step_clock_and_first_move_abort(self):
         for room in list(self.rooms._active.values()):

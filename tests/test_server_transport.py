@@ -385,6 +385,12 @@ async def test_server_websocket_send_methods_emit_typed_payloads():
     payload = json.loads(inner.sent[-1])
     assert payload["type"] == "takeback_response" and payload["accept"] is True
 
+    await ws.send_give_time()
+    assert json.loads(inner.sent[-1])["type"] == "give_time"
+
+    await ws.send_resync()
+    assert json.loads(inner.sent[-1])["type"] == "resync"
+
 
 # ---- Pin: only transport.py imports httpx / websockets ---------------------
 

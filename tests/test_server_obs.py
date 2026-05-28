@@ -61,7 +61,7 @@ def test_handlers_dispatch_table_covers_all_known_message_types():
         "move", "resign", "draw_offer", "draw_response",
         "rematch_request", "rematch_response",
         "takeback_request", "takeback_response",
-        "give_time",
+        "give_time", "resync",
     }
     assert set(HANDLERS.keys()) == expected
 
