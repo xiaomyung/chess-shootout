@@ -174,10 +174,8 @@ class OnlineEventsMixin:
             self.online_client.request_state_sync()
 
     def _handle_state_sync(self, payload):
-        if self._resyncing or self.online_client is None:
-            self._last_beacon_mismatch_ply = None
-            return
-        if self.online_client.state != "connected":
+        if (self._resyncing or self.online_client is None
+                or self.online_client.state != "connected"):
             self._last_beacon_mismatch_ply = None
             return
         server_ply = payload.get("ply")

@@ -51,8 +51,8 @@ class Sweep:
             self._last_beacon[room.room_id] = now
             await broadcast(self.connections, room,
                             StateSyncMessage(ply=len(room.backend.move_history)))
-        for room_id in [rid for rid in self._last_beacon if rid not in active_ids]:
-            self._last_beacon.pop(room_id, None)
+        for room_id in self._last_beacon.keys() - active_ids:
+            del self._last_beacon[room_id]
 
     async def step_clock_and_first_move_abort(self):
         for room in list(self.rooms._active.values()):
