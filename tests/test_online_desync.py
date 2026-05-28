@@ -267,3 +267,91 @@ def test_begin_resync_is_idempotent_during_inflight_request(monkeypatch):
     # The flag prevents duplicate requests while a resync is in flight.
     assert app._resyncing is True
     assert app.online_client.request_state_sync.call_count == 1
+
+
+# ---------- Client: periodic state-sync beacon reconciliation ----------
+
+def test_state_sync_matching_ply_is_noop():
+    app = _online_app()
+    app.online_client.state = "connected"
+    # Local history is empty (ply 0) and the beacon agrees.
+    app._handle_state_sync({"ply": 0})
+    assert app._resyncing is False
+    assert app._last_beacon_mismatch_ply is None
+    app.online_client.request_state_sync.assert_not_called()
+
+
+def test_state_sync_single_mismatch_does_not_resync():
+    app = _online_app()
+    app.online_client.state = "connected"
+    # One diverged beacon could be a move legitimately in flight — debounce.
+    app._handle_state_sync({"ply": 2})
+    assert app._resyncing is False
+    assert app._last_beacon_mismatch_ply == 2
+    app.online_client.request_state_sync.assert_not_called()
+
+
+def test_state_sync_stable_mismatch_triggers_resync():
+    app = _online_app()
+    app.online_client.state = "connected"
+    # The same divergence on two consecutive beacons is a real lost move.
+    app._handle_state_sync({"ply": 2})
+    app._handle_state_sync({"ply": 2})
+    assert app._resyncing is True
+    app.online_client.send_resync.assert_called_once()
+    app.online_client.request_state_sync.assert_called_once()
+
+
+def test_state_sync_ignored_while_reconnecting():
+    app = _online_app()
+    app.online_client.state = "reconnecting"
+    app._handle_state_sync({"ply": 5})
+    app._handle_state_sync({"ply": 5})
+    assert app._resyncing is False
+    assert app._last_beacon_mismatch_ply is None
+    app.online_client.request_state_sync.assert_not_called()
+
+
+def test_state_sync_ignored_while_resyncing():
+    app = _online_app()
+    app.online_client.state = "connected"
+    app._resyncing = True
+    app._handle_state_sync({"ply": 5})
+    app.online_client.request_state_sync.assert_not_called()
+
+
+# ---------- Client: resync self-heal + both-player indicators ----------
+
+def test_resyncing_shows_toast_each_frame():
+    app = _online_app()
+    app.online_client.state = "connected"
+    app._resyncing = True
+    app._resync_started_at_ms = pg.time.get_ticks()
+    app._update_online_phase()
+    assert app.toast.message == "Resyncing…"
+
+
+def test_resyncing_self_heals_after_timeout():
+    from frontend.frontend import RESYNC_TIMEOUT_MS
+    app = _online_app()
+    app.online_client.state = "connected"
+    app._resyncing = True
+    app._last_beacon_mismatch_ply = 3
+    app._resync_started_at_ms = pg.time.get_ticks() - (RESYNC_TIMEOUT_MS + 1000)
+    app._update_online_phase()
+    assert app._resyncing is False
+    assert app._last_beacon_mismatch_ply is None
+
+
+def test_online_error_room_lost_clears_resyncing():
+    app = _online_app()
+    app._resyncing = True
+    app._handle_online_error({"reason": "room_lost"})
+    assert app._resyncing is False
+
+
+def test_opponent_resync_shows_toast():
+    from frontend.online.client import Event
+    app = _online_app()
+    app._handle_online_event(Event("resync", {}))
+    assert app.toast.message == "Opponent is resyncing…"

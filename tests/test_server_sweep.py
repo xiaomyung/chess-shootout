@@ -9,7 +9,16 @@ import pytest
 
 from server.app import create_app
 from server.protocol import Reason
+from server.sweep import BEACON_INTERVAL_SECONDS
 from tests.helpers import FakeClock, fake_uuid4
+
+
+async def _pair(rooms):
+    await rooms.enqueue(client_uuid=ALICE, nickname="A", session_token="ta",
+                        time_minutes=5, increment_seconds=0, side_preference="white")
+    await rooms.enqueue(client_uuid=BOB, nickname="B", session_token="tb",
+                        time_minutes=5, increment_seconds=0, side_preference="black")
+    return list(rooms._active.values())[0]
 
 
 ALICE = fake_uuid4(1)
@@ -117,13 +126,78 @@ async def test_sweep_step_all_runs_in_documented_order(sweep, app, clock, monkey
     async def _trace_grace():
         calls.append("grace")
 
+    async def _trace_beacon():
+        calls.append("state_sync_beacon")
+
     def _trace_drop():
         calls.append("drop_orphans")
 
     monkeypatch.setattr(sweep, "step_clock_and_first_move_abort", _trace_clock)
     monkeypatch.setattr(sweep, "step_grace_expired", _trace_grace)
+    monkeypatch.setattr(sweep, "step_state_sync_beacon", _trace_beacon)
     monkeypatch.setattr(sweep, "step_drop_orphans_and_post_result", _trace_drop)
     monkeypatch.setattr(sweep.rooms, "gc_finished_rooms",
                           lambda: calls.append("gc"))
     await sweep.step_all()
-    assert calls == ["clock_and_first_move", "grace", "drop_orphans", "gc"]
+    assert calls == ["clock_and_first_move", "grace", "state_sync_beacon",
+                     "drop_orphans", "gc"]
+
+
+@pytest.mark.asyncio
+async def test_beacon_emits_state_sync_for_active_started_room(sweep, app, clock, monkeypatch):
+    rooms = app.state.rooms
+    room = await _pair(rooms)
+    room.started_at = clock()
+    room.first_move_at = clock()
+    clock.advance(10)
+    sent = []
+
+    async def _capture(connections, r, message):
+        sent.append((r.room_id, message))
+
+    monkeypatch.setattr("server.sweep.broadcast", _capture)
+    await sweep.step_state_sync_beacon()
+    assert len(sent) == 1
+    room_id, message = sent[0]
+    assert room_id == room.room_id
+    assert message.type == "state_sync"
+    assert message.ply == len(room.backend.move_history)
+
+
+@pytest.mark.asyncio
+async def test_beacon_throttled_to_interval(sweep, app, clock, monkeypatch):
+    rooms = app.state.rooms
+    room = await _pair(rooms)
+    room.first_move_at = clock()
+    clock.advance(10)
+    sent = []
+
+    async def _capture(connections, r, message):
+        sent.append(message)
+
+    monkeypatch.setattr("server.sweep.broadcast", _capture)
+    await sweep.step_state_sync_beacon()
+    await sweep.step_state_sync_beacon()
+    assert len(sent) == 1
+    clock.advance(BEACON_INTERVAL_SECONDS + 0.01)
+    await sweep.step_state_sync_beacon()
+    assert len(sent) == 2
+
+
+@pytest.mark.asyncio
+async def test_beacon_skips_pre_first_move_and_finished_rooms(sweep, app, clock, monkeypatch):
+    rooms = app.state.rooms
+    room = await _pair(rooms)
+    clock.advance(10)
+    sent = []
+
+    async def _capture(connections, r, message):
+        sent.append(message)
+
+    monkeypatch.setattr("server.sweep.broadcast", _capture)
+    await sweep.step_state_sync_beacon()
+    assert sent == []
+    room.first_move_at = clock()
+    rooms.finalize_result(room.room_id, Reason.RESIGNATION, winner_color="white")
+    await sweep.step_state_sync_beacon()
+    assert sent == []

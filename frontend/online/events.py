@@ -97,6 +97,10 @@ class OnlineEventsMixin:
             self._handle_time_granted(event.payload)
         elif event.type == "connection_status":
             self._handle_connection_status(event.payload)
+        elif event.type == "state_sync":
+            self._handle_state_sync(event.payload)
+        elif event.type == "resync":
+            self.toast.show("Opponent is resyncing…")
         elif event.type == "error":
             self._handle_online_error(event.payload)
 
@@ -110,6 +114,7 @@ class OnlineEventsMixin:
         if reason in ONLINE_GAME_STATE_REASONS:
             return
         if reason == "room_lost":
+            self._resyncing = False
             self.reconnecting_modal.hide()
             self.confirm_modal.show(
                 "Server restarted — game ended",
@@ -119,6 +124,7 @@ class OnlineEventsMixin:
             )
             return
         if reason in ONLINE_HARD_FAILURE_REASONS or reason.startswith("http_"):
+            self._resyncing = False
             self.wait_modal.hide()
             label = ONLINE_HARD_FAILURE_LABELS.get(reason, "Server unreachable")
             self.confirm_modal.show(
@@ -162,8 +168,26 @@ class OnlineEventsMixin:
         if self._resyncing:
             return
         self._resyncing = True
+        self._resync_started_at_ms = pg.time.get_ticks()
         if self.online_client is not None:
+            self.online_client.send_resync()
             self.online_client.request_state_sync()
+
+    def _handle_state_sync(self, payload):
+        if (self._resyncing or self.online_client is None
+                or self.online_client.state != "connected"):
+            self._last_beacon_mismatch_ply = None
+            return
+        server_ply = payload.get("ply")
+        if server_ply is None:
+            return
+        if server_ply == len(self.match.move_history):
+            self._last_beacon_mismatch_ply = None
+            return
+        if self._last_beacon_mismatch_ply == server_ply:
+            self._begin_resync()
+        else:
+            self._last_beacon_mismatch_ply = server_ply
 
     def _handle_game_resumed(self, payload):
         self.match.new_game()
@@ -182,6 +206,7 @@ class OnlineEventsMixin:
         self.board._clear_premoves()
         self.board.clear_annotations()
         self._resyncing = False
+        self._last_beacon_mismatch_ply = None
 
     def _handle_time_granted(self, payload):
         self._apply_clock_snap(payload, default_to_existing=False)

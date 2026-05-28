@@ -151,6 +151,9 @@ class OnlineClient:
     def send_give_time(self):
         self._enqueue("send_give_time")
 
+    def send_resync(self):
+        self._enqueue("send_resync")
+
     def request_state_sync(self):
         if (self._loop is None or self._loop.is_closed()
                 or self._transport is None

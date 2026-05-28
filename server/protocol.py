@@ -252,6 +252,15 @@ class ConnectionStatusMessage(_Base):
     opp_state: Literal["connected", "reconnecting", "disconnected"]
 
 
+class StateSyncMessage(_Base):
+    type: Literal["state_sync"] = "state_sync"
+    ply: int
+
+
+class ResyncNoticeMessage(_Base):
+    type: Literal["resync"] = "resync"
+
+
 class ErrorMessage(_Base):
     type: Literal["error"] = "error"
     reason: str

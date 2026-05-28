@@ -9,8 +9,33 @@ from server.app import PROTOCOL_VERSION, create_app
 
 async def _sweep(app):
     await app.state.sweep.step_all()
+from server.connections import ConnectionRegistry
 from server.protocol import FIRST_MOVE_ABORT_SECONDS, GRACE_SECONDS, Reason
 from tests.helpers import FakeClock, fake_uuid4
+
+
+def test_registry_add_returns_displaced_socket():
+    reg = ConnectionRegistry()
+    ws_old, ws_new = object(), object()
+    assert reg.add("r", "u", ws_old) is None
+    assert reg.add("r", "u", ws_new) is ws_old
+    assert reg.add("r", "u", ws_new) is None
+
+
+def test_registry_remove_is_identity_guarded():
+    reg = ConnectionRegistry()
+    ws_old, ws_new = object(), object()
+    reg.add("r", "u", ws_old)
+    reg.add("r", "u", ws_new)
+    assert reg.remove("r", "u", ws_old) is False
+    assert reg._by_room["r"]["u"] is ws_new
+    assert reg.remove("r", "u", ws_new) is True
+    assert "r" not in reg._by_room
+
+
+def test_registry_remove_unknown_room_returns_false():
+    reg = ConnectionRegistry()
+    assert reg.remove("nope", "u", object()) is False
 
 
 ALICE = fake_uuid4(1)

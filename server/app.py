@@ -48,6 +48,7 @@ WS_RATE_WINDOW_SECONDS = 1.0
 WS_CLOSE_PAYLOAD_TOO_LARGE = 1009
 WS_CLOSE_INVALID_TOKEN = 4000
 WS_CLOSE_SERVER_SHUTDOWN = 4002
+WS_CLOSE_SUPERSEDED = 4003
 
 log = logging_setup.get_logger("chess.server.app")
 
@@ -312,7 +313,12 @@ async def _ws_session(app, websocket, room_id):
     auth_color = color
     auth_uuid = slot.client_uuid
     rooms.mark_connected(room.room_id, color)
-    connections.add(room.room_id, auth_uuid, websocket)
+    displaced = connections.add(room.room_id, auth_uuid, websocket)
+    if displaced is not None:
+        try:
+            await displaced.close(code=WS_CLOSE_SUPERSEDED)
+        except (RuntimeError, WebSocketDisconnect) as exc:
+            log.debug("ws close on supersede failed: %s", exc)
     log.info("ws auth ok room=%s uuid=%s tentative_color=%s paired=%s has_both=%s",
              room.room_id, auth_uuid[:8], color, room.is_paired(),
              connections.has_both(room))
@@ -356,10 +362,8 @@ async def _ws_session(app, websocket, room_id):
                       room.room_id, auth_uuid[:8], msg_type,
                       (app.state.now() - t0) * 1000.0, outcome)
     finally:
-        if auth_room is not None and auth_color is not None:
+        if connections.remove(auth_room.room_id, auth_uuid, websocket):
             rooms.mark_disconnected(auth_room.room_id, auth_color)
-            if auth_uuid is not None:
-                connections.remove(auth_room.room_id, auth_uuid)
             log.info("ws disconnected room=%s color=%s",
                      auth_room.room_id, auth_color)
             opp_ws = connections.get_for_color(auth_room, auth_room.opp_color(auth_color))

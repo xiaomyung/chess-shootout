@@ -127,6 +127,7 @@ ANIM_MS_MAX = 280
 
 MATCH_FOUND_HOLD_MS = 500
 SAVED_PGN_TOAST_DURATION_MS = 3000
+RESYNC_TIMEOUT_MS = 8000
 
 MIN_WINDOW_WIDTH = 900
 MIN_WINDOW_HEIGHT = 500
@@ -176,6 +177,8 @@ class Frontend(OnlineEventsMixin):
         self._pgn_result_tag = None
         self._series_scores = {}
         self._resyncing = False
+        self._resync_started_at_ms = 0
+        self._last_beacon_mismatch_ply = None
         self._last_give_time_at_ms = -GIVE_TIME_DEBOUNCE_MS
         self._first_move_deadline_ms = None
         self._opp_disconnected_at_ms = None
@@ -529,6 +532,12 @@ class Frontend(OnlineEventsMixin):
                 self.reconnecting_modal.show(on_cancel=self._abandon_online_game)
         elif self.reconnecting_modal.is_visible():
             self.reconnecting_modal.hide()
+        if self._resyncing:
+            if pg.time.get_ticks() - self._resync_started_at_ms > RESYNC_TIMEOUT_MS:
+                self._resyncing = False
+                self._last_beacon_mismatch_ply = None
+            else:
+                self.toast.show("Resyncing…")
         self._track_local_online_state()
 
     def _track_local_online_state(self):

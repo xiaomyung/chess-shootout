@@ -14,8 +14,8 @@ from server.protocol import (
     ClockSnapshot, DrawOfferedMessage, DrawResponseMessage, ErrorMessage,
     GIVE_TIME_SECONDS, MoveAppliedMessage, MoveMessage, Reason,
     RematchRequestMessage, RematchResponseMessage, ResultMessage,
-    TakebackAppliedMessage, TakebackOfferedMessage, TakebackResponseMessage,
-    TimeGrantedMessage,
+    ResyncNoticeMessage, TakebackAppliedMessage, TakebackOfferedMessage,
+    TakebackResponseMessage, TimeGrantedMessage,
 )
 from server.sweep import RESULT_REASON_BY_GAME_RESULT
 
@@ -269,6 +269,16 @@ async def handle_give_time(app, websocket, room, color, raw):
     return "granted" if added > 0 else "capped"
 
 
+async def handle_resync(app, websocket, room, color, raw):
+    connections = app.state.connections
+    if room.result is not None:
+        return "noop"
+    opp_ws = connections.get_for_color(room, room.opp_color(color))
+    if opp_ws is not None:
+        await send(opp_ws, ResyncNoticeMessage())
+    return "relayed"
+
+
 HANDLERS = {
     "move": handle_move,
     "resign": handle_resign,
@@ -279,4 +289,5 @@ HANDLERS = {
     "takeback_request": handle_takeback_request,
     "takeback_response": handle_takeback_response,
     "give_time": handle_give_time,
+    "resync": handle_resync,
 }

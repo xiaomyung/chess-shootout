@@ -3,12 +3,26 @@ from pydantic import ValidationError
 
 from server.protocol import (
     AuthMessage, ErrorMessage, GameStartMessage, MatchmakeRequest,
-    MoveMessage, PROTOCOL_VERSION, normalize_nickname,
+    MoveMessage, PROTOCOL_VERSION, ResyncNoticeMessage, StateSyncMessage,
+    normalize_nickname,
 )
 from tests.helpers import fake_uuid4
 
 
 U1 = fake_uuid4(1)
+
+
+def test_state_sync_message_round_trip():
+    msg = StateSyncMessage(ply=7)
+    payload = msg.model_dump()
+    assert payload == {"version": PROTOCOL_VERSION, "type": "state_sync", "ply": 7}
+    assert StateSyncMessage.model_validate(payload).ply == 7
+
+
+def test_resync_notice_message_round_trip():
+    payload = ResyncNoticeMessage().model_dump()
+    assert payload == {"version": PROTOCOL_VERSION, "type": "resync"}
+    assert ResyncNoticeMessage.model_validate(payload).type == "resync"
 
 
 def test_normalize_nickname_strips_and_collapses():
