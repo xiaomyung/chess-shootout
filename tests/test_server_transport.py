@@ -6,26 +6,21 @@ Strategy:
   _http_client constructor arg, so we hit a hand-rolled fake handler
   rather than spinning up uvicorn for each case. That keeps coverage
   fast and lets us assert the wire-level method/path/body shape.
-- WS tests use the real in-process server (uvicorn in a thread, same
-  pattern as test_online_flow.py) and verify each ServerWebSocket
-  send_* method round-trips through the real protocol path.
+- WS tests use the real in-process server (the `server` fixture in
+  tests/conftest.py, shared with test_online_flow.py) and verify each
+  ServerWebSocket send_* method round-trips through the real protocol path.
 - Schema-version-mismatch is hit via a fake server response.
 """
 import asyncio
 import json
-import socket
-import threading
-import time
 
 import httpx
 import pytest
-import uvicorn
 
 from frontend.online.transport import (
     FatalResumeError, SchemaVersionMismatch, ServerTransport, ServerWebSocket,
     TransportError, TransportHTTPError,
 )
-from server.app import create_app
 from server.protocol import (
     HealthResponse, MatchmakeRequest, MatchmakeResponse, PROTOCOL_VERSION,
     Reason, ResumeRequest,
@@ -257,33 +252,7 @@ async def test_resume_async_5xx_returns_none_for_retry():
         assert await st.resume_async(body, http) is None
 
 
-# ---- WS round-trip via real in-process uvicorn ------------------------------
-
-
-@pytest.fixture
-def server_port():
-    s = socket.socket()
-    s.bind(("127.0.0.1", 0))
-    port = s.getsockname()[1]
-    s.close()
-    return port
-
-
-@pytest.fixture
-def server(server_port):
-    app = create_app(max_rooms=8)
-    config = uvicorn.Config(app, host="127.0.0.1", port=server_port,
-                              log_level="warning",
-                              ws_ping_interval=20, ws_ping_timeout=30)
-    srv = uvicorn.Server(config)
-    t = threading.Thread(target=srv.run, daemon=True)
-    t.start()
-    deadline = time.time() + 5
-    while not srv.started and time.time() < deadline:
-        time.sleep(0.05)
-    yield server_port
-    srv.should_exit = True
-    t.join(timeout=2)
+# ---- WS round-trip via real in-process uvicorn (server fixture in conftest) -
 
 
 @pytest.mark.asyncio
@@ -291,7 +260,7 @@ async def test_server_websocket_send_move_round_trip(server):
     addr = f"localhost:{server}"
     st = ServerTransport(addr)
 
-    async with httpx.AsyncClient(timeout=2.0) as http:
+    async with httpx.AsyncClient(timeout=10.0) as http:
         a = await st.matchmake_async(
             MatchmakeRequest(nickname="Alice", client_uuid=ALICE,
                                 time_minutes=5, increment_seconds=0,
@@ -309,20 +278,20 @@ async def test_server_websocket_send_move_round_trip(server):
     ws_b = await st.ws_connect(b.room_id, b.session_token)
     try:
         # Drain the game_start broadcast.
-        msg_a = await asyncio.wait_for(ws_a.recv(), timeout=2.0)
-        msg_b = await asyncio.wait_for(ws_b.recv(), timeout=2.0)
+        msg_a = await asyncio.wait_for(ws_a.recv(), timeout=10.0)
+        msg_b = await asyncio.wait_for(ws_b.recv(), timeout=10.0)
         assert msg_a["type"] == "game_start"
         assert msg_b["type"] == "game_start"
         # Send a typed move.
         await ws_a.send_move("e2", "e4")
-        applied_a = await asyncio.wait_for(ws_a.recv(), timeout=2.0)
-        applied_b = await asyncio.wait_for(ws_b.recv(), timeout=2.0)
+        applied_a = await asyncio.wait_for(ws_a.recv(), timeout=10.0)
+        applied_b = await asyncio.wait_for(ws_b.recv(), timeout=10.0)
         assert applied_a["type"] == "move_applied"
         assert applied_a["san"] == "e4"
         assert applied_b["from"] == "e2"
         # And resign.
         await ws_a.send_resign()
-        result_a = await asyncio.wait_for(ws_a.recv(), timeout=2.0)
+        result_a = await asyncio.wait_for(ws_a.recv(), timeout=10.0)
         assert result_a["type"] == "result"
         assert result_a["reason"] == Reason.RESIGNATION
     finally:

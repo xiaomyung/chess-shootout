@@ -1,13 +1,14 @@
 """End-to-end test: two clients pair against an in-process server, play
-a short game over real WebSockets, and verify state symmetry."""
-import threading
+a short game over real WebSockets, and verify state symmetry.
+
+The `server` fixture lives in tests/conftest.py (shared with
+test_server_transport.py). Poll timeouts here are deliberately generous:
+OnlineClient._matchmake_with_retries can spend ~4.5s retrying before it
+gives up, so a tight poll would time out before a transient first attempt
+recovers."""
 import time
 
-import pytest
-import uvicorn
-
 from frontend.online.client import OnlineClient
-from server.app import create_app
 from tests.helpers import fake_uuid4
 
 
@@ -17,35 +18,7 @@ ALICE2 = fake_uuid4(11)
 BOB2 = fake_uuid4(12)
 
 
-@pytest.fixture
-def server_port():
-    """Find a free port (0 → kernel picks); spin up a uvicorn server in a thread."""
-    import socket
-    s = socket.socket()
-    s.bind(("127.0.0.1", 0))
-    port = s.getsockname()[1]
-    s.close()
-    return port
-
-
-@pytest.fixture
-def server(server_port):
-    app = create_app(max_rooms=8)
-    config = uvicorn.Config(app, host="127.0.0.1", port=server_port,
-                             log_level="warning",
-                             ws_ping_interval=20, ws_ping_timeout=30)
-    srv = uvicorn.Server(config)
-    t = threading.Thread(target=srv.run, daemon=True)
-    t.start()
-    deadline = time.time() + 5
-    while not srv.started and time.time() < deadline:
-        time.sleep(0.05)
-    yield server_port
-    srv.should_exit = True
-    t.join(timeout=2)
-
-
-def _drain(client, timeout=4.0):
+def _drain(client, timeout=15.0):
     deadline = time.time() + timeout
     seen = []
     while time.time() < deadline:
@@ -58,7 +31,7 @@ def _drain(client, timeout=4.0):
     return seen
 
 
-def _wait_for(client, type_name, timeout=4.0):
+def _wait_for(client, type_name, timeout=15.0):
     deadline = time.time() + timeout
     while time.time() < deadline:
         events = client.drain_inbound()
