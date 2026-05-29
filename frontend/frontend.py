@@ -137,6 +137,8 @@ RESYNC_TIMEOUT_MS = 8000
 MIN_WINDOW_WIDTH = 900
 MIN_WINDOW_HEIGHT = 500
 
+WINDOW_TITLE = "Chess Shootout"
+
 
 def _games_dir():
     return str(paths.get_games_dir())
@@ -251,7 +253,7 @@ class Frontend(OnlineEventsMixin):
         self._refresh_load_pgn_availability()
         self._spawn_reconnect_probe()
 
-        pg.display.set_caption("Chess Shootout")
+        pg.display.set_caption(WINDOW_TITLE)
 
     @property
     def backend(self):
@@ -276,7 +278,7 @@ class Frontend(OnlineEventsMixin):
 
     def _on_back_to_menu(self):
         self.mode = "menu"
-        pg.display.set_caption("Chess Shootout")
+        pg.display.set_caption(WINDOW_TITLE)
         if self.online_client is not None:
             self.online_client.disconnect()
             self.online_client = None
@@ -326,12 +328,12 @@ class Frontend(OnlineEventsMixin):
         )
 
     def _on_reset_data_folder(self):
-        default = paths._portable_dir() if paths.is_portable() else paths._default_data_dir()
+        default = paths.get_default_data_dir()
         self._apply_data_folder_change(str(default), to_default=True)
 
     def _apply_data_folder_change(self, new_dir, to_default=False):
         old_games = str(paths.get_games_dir())
-        new_games = os.path.join(new_dir, "games")
+        new_games = os.path.join(new_dir, paths.GAMES_SUBDIR)
         if os.path.normpath(old_games) == os.path.normpath(new_games):
             self._commit_data_dir(new_dir, to_default, None)
             return
@@ -353,9 +355,9 @@ class Frontend(OnlineEventsMixin):
             self._commit_data_dir(new_dir, to_default, None)
 
     def _commit_data_dir(self, new_dir, to_default, move_from):
-        if move_from is not None:
-            if not self._move_pgns(move_from, os.path.join(new_dir, "games")):
-                return
+        new_games = os.path.join(new_dir, paths.GAMES_SUBDIR)
+        if move_from is not None and not self._move_pgns(move_from, new_games):
+            return
         if to_default:
             env.set_data_dir(None)
         else:
@@ -594,7 +596,7 @@ class Frontend(OnlineEventsMixin):
         self.match.mode = SINGLE_SCREEN
         self.match.local_color = None
         self.mode = "menu"
-        pg.display.set_caption("Chess Shootout")
+        pg.display.set_caption(WINDOW_TITLE)
         self._reset_to_new_game()
         self._refresh_load_pgn_availability()
 

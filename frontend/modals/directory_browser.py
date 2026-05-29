@@ -2,6 +2,7 @@ import os
 
 import pygame as pg
 
+import paths
 from frontend.visual.colors import Colors
 from frontend.visual.fonts import get_font
 from frontend.visual.text_input import TextInput
@@ -96,10 +97,10 @@ class DirectoryBrowser:
             self.current = os.path.abspath(path)
             self._reload()
 
-    def _writable(self, d):
-        if not os.path.isdir(d) or not os.access(d, os.W_OK):
+    def _writable(self, directory):
+        if not os.path.isdir(directory) or not os.access(directory, os.W_OK):
             return False
-        test = os.path.join(d, _WRITE_TEST_NAME)
+        test = os.path.join(directory, _WRITE_TEST_NAME)
         try:
             with open(test, "w"):
                 pass
@@ -153,7 +154,7 @@ class DirectoryBrowser:
         )
         self.window.blit(label_surf, (inner_x, y))
         y += label_surf.get_height() + 4
-        dest = os.path.join(self.current, "games")
+        dest = os.path.join(self.current, paths.GAMES_SUBDIR)
         for line in wrap_path(dest, self.path_font, inner_w):
             line_surf = self.path_font.render(line, True, Colors.white)
             self.window.blit(line_surf, (inner_x, y))

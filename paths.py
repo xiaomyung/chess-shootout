@@ -5,8 +5,9 @@ from pathlib import Path
 import platformdirs
 
 
-appname = "chess-shootout"
-appauthor = False
+APP_NAME = "chess-shootout"
+APP_AUTHOR = False
+GAMES_SUBDIR = "games"
 
 
 def is_frozen():
@@ -50,19 +51,19 @@ def _portable_dir():
 
 def _default_config_dir():
     if is_frozen():
-        return Path(platformdirs.user_config_dir(appname, appauthor))
+        return Path(platformdirs.user_config_dir(APP_NAME, APP_AUTHOR))
     return _source_root()
 
 
 def _default_data_dir():
     if is_frozen():
-        return Path(platformdirs.user_data_dir(appname, appauthor))
+        return Path(platformdirs.user_data_dir(APP_NAME, APP_AUTHOR))
     return _source_root()
 
 
 def _default_log_dir():
     if is_frozen():
-        return Path(platformdirs.user_log_dir(appname, appauthor))
+        return Path(platformdirs.user_log_dir(APP_NAME, APP_AUTHOR))
     return _source_root()
 
 
@@ -81,6 +82,12 @@ def get_data_dir():
     return _default_data_dir()
 
 
+def get_default_data_dir():
+    if is_portable():
+        return _portable_dir()
+    return _default_data_dir()
+
+
 def get_log_dir():
     if is_portable():
         return _portable_dir()
@@ -88,4 +95,4 @@ def get_log_dir():
 
 
 def get_games_dir():
-    return get_data_dir() / "games"
+    return get_data_dir() / GAMES_SUBDIR

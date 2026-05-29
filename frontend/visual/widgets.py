@@ -24,12 +24,9 @@ def fit_text_to_rect(text_surface, rect, padding=BUTTON_LABEL_PADDING_PX):
 
 
 def wrap_path(text, font, max_w, max_lines=6):
-    tokens = []
     parts = text.split("/")
-    for i, part in enumerate(parts):
-        token = part + "/" if i < len(parts) - 1 else part
-        if token:
-            tokens.append(token)
+    tokens = [part + "/" if i < len(parts) - 1 else part for i, part in enumerate(parts)]
+    tokens = [token for token in tokens if token]
     lines = []
     line = ""
     for token in tokens:
@@ -53,11 +50,16 @@ def wrap_path(text, font, max_w, max_lines=6):
     return lines
 
 
+def _hover_state(rect):
+    hovered = rect.collidepoint(pg.mouse.get_pos())
+    pressed = hovered and pg.mouse.get_pressed()[0]
+    return hovered, pressed
+
+
 def _button_bg(rect, force_pressed=False, disabled=False):
     if disabled:
         return Colors.dark_menu, Colors.button_border
-    hovered = rect.collidepoint(pg.mouse.get_pos())
-    pressed = hovered and pg.mouse.get_pressed()[0]
+    hovered, pressed = _hover_state(rect)
     if force_pressed or pressed:
         bg = Colors.button_pressed
     elif hovered:
@@ -80,8 +82,7 @@ def draw_button(window, rect, label, font, force_pressed=False, disabled=False):
 
 def draw_icon_button(window, rect, icon_fn, force_pressed=False, disabled=False):
     if not disabled:
-        hovered = rect.collidepoint(pg.mouse.get_pos())
-        pressed = hovered and pg.mouse.get_pressed()[0]
+        hovered, pressed = _hover_state(rect)
         if force_pressed or pressed:
             pg.draw.rect(window, Colors.button_pressed, rect, border_radius=4)
         elif hovered:
