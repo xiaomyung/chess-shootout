@@ -29,48 +29,49 @@ def strip():
     return s
 
 
-def test_format_clock_minutes_seconds():
-    assert format_clock(75.0) == "1:15"
+def _snapshot(strip):
+    region = strip.window.subsurface(strip.rect)
+    return pg.image.tostring(region, "RGB")
 
 
-def test_format_clock_zero():
-    # Zero is below 30s threshold → tenths display.
-    assert format_clock(0.0) == "0:00.0"
+def _draw_on_blank(strip):
+    strip.window.fill((0, 0, 0))
+    strip.draw()
+    return _snapshot(strip)
 
 
-def test_format_clock_floors_fraction_above_30s():
-    # 599.9s should display as 9:59 (integer floor), not roll up to 10:00.
-    assert format_clock(599.9) == "9:59"
+@pytest.mark.parametrize(
+    "seconds, expected",
+    [
+        pytest.param(75.0, "1:15", id="minutes_seconds"),
+        pytest.param(0.0, "0:00.0", id="zero_below_30s_shows_tenths"),
+        pytest.param(599.9, "9:59", id="floors_fraction_not_roll_up"),
+        pytest.param(None, "—:—", id="none_renders_em_dashes"),
+        pytest.param(-3.0, "0:00.0", id="negative_clamps_to_zero"),
+        pytest.param(30.0, "0:30", id="at_30s_boundary_no_tenths"),
+        pytest.param(29.999, "0:29.9", id="just_below_30s_shows_tenths"),
+        pytest.param(25.3, "0:25.3", id="low_seconds_with_tenths"),
+        pytest.param(9.95, "0:09.9", id="truncates_tenths_not_round_up"),
+        pytest.param(125.7, "2:05", id="well_above_30s_no_tenths"),
+    ],
+)
+def test_format_clock(seconds, expected):
+    assert format_clock(seconds) == expected
 
 
-def test_format_clock_none_renders_em_dashes():
-    assert format_clock(None) == "—:—"
-
-
-def test_format_clock_negative_clamps_to_zero():
-    assert format_clock(-3.0) == "0:00.0"
-
-
-def test_format_clock_at_30s_no_tenths():
-    # 30.0 is the boundary; tenths only below 30.
-    assert format_clock(30.0) == "0:30"
-
-
-def test_format_clock_just_below_30s_shows_tenths():
-    assert format_clock(29.999) == "0:29.9"
-
-
-def test_format_clock_low_seconds_with_tenths():
-    assert format_clock(25.3) == "0:25.3"
-
-
-def test_format_clock_truncates_tenths():
-    # 9.95s should show 0:09.9 (truncate, not round to 10.0).
-    assert format_clock(9.95) == "0:09.9"
-
-
-def test_format_clock_well_above_30s_no_tenths():
-    assert format_clock(125.7) == "2:05"
+@pytest.mark.parametrize(
+    "seconds, expected",
+    [
+        pytest.param(0, "0:00", id="zero"),
+        pytest.param(7, "0:07", id="single_digit_seconds"),
+        pytest.param(45, "0:45", id="under_a_minute"),
+        pytest.param(60, "1:00", id="exact_minute"),
+        pytest.param(125, "2:05", id="minutes_and_seconds"),
+        pytest.param(-5, "0:00", id="negative_clamps_to_zero"),
+    ],
+)
+def test_format_countdown(seconds, expected):
+    assert format_countdown(seconds) == expected
 
 
 def test_set_state_records_fields(strip):
@@ -80,19 +81,9 @@ def test_set_state_records_fields(strip):
     assert strip.active is True
 
 
-def test_draw_smoke_active_with_clock(strip):
-    strip.set_state("Alice", 65.0, True)
-    strip.draw()
-
-
-def test_draw_smoke_inactive_with_clock(strip):
-    strip.set_state("Bob", 599.9, False)
-    strip.draw()
-
-
-def test_draw_smoke_no_clock(strip):
-    strip.set_state("Carol", None, False)
-    strip.draw()
+def test_set_state_carries_initial_seconds(strip):
+    strip.set_state("Alice", 60.0, True, clock_initial_seconds=600.0)
+    assert strip.clock_initial_seconds == 600.0
 
 
 def test_set_rect_rebuilds_fonts(strip):
@@ -102,27 +93,27 @@ def test_set_rect_rebuilds_fonts(strip):
     assert bigger > initial
 
 
-def test_draw_at_multiple_sizes_does_not_crash(strip):
-    for size in [(200, 24), (400, 40), (800, 80)]:
-        strip.set_rect(pg.Rect(0, 0, *size))
-        strip.set_state("X" * 25, 12.3, True)
-        strip.draw()
+@pytest.mark.parametrize(
+    "fraction",
+    [
+        pytest.param(0.50, id="above_threshold"),
+        pytest.param(LOW_TIME_FRACTION, id="exactly_at_threshold"),
+        pytest.param(None, id="none_no_clock"),
+    ],
+)
+def test_pocket_color_returns_base_when_not_low(fraction):
+    assert clock_pocket_color(fraction) == pg.Color(Colors.light_grey_menu)
 
 
-# ---------- clock_pocket_color (low-time tint) ----------
-
-def test_pocket_color_above_threshold_returns_base():
-    # Above LOW_TIME_FRACTION → no tint.
-    assert clock_pocket_color(0.50) == pg.Color(Colors.light_grey_menu)
-
-
-def test_pocket_color_at_threshold_returns_base():
-    # Exactly at the threshold → still base (tint kicks in only below).
-    assert clock_pocket_color(LOW_TIME_FRACTION) == pg.Color(Colors.light_grey_menu)
-
-
-def test_pocket_color_at_zero_returns_low_time():
-    assert clock_pocket_color(0.0) == pg.Color(Colors.clock_low_time)
+@pytest.mark.parametrize(
+    "fraction",
+    [
+        pytest.param(0.0, id="at_zero"),
+        pytest.param(-0.1, id="negative_clamps_to_full_tint"),
+    ],
+)
+def test_pocket_color_returns_low_time_at_or_below_zero(fraction):
+    assert clock_pocket_color(fraction) == pg.Color(Colors.clock_low_time)
 
 
 def test_pocket_color_at_halfway_lerps_halfway():
@@ -130,22 +121,9 @@ def test_pocket_color_at_halfway_lerps_halfway():
     low = pg.Color(Colors.clock_low_time)
     actual = clock_pocket_color(LOW_TIME_FRACTION / 2.0)
     expected = base.lerp(low, 0.5)
-    # Each channel within 1 of the expected lerp.
     for i in range(4):
         assert abs(actual[i] - expected[i]) <= 1
 
-
-def test_pocket_color_handles_none_fraction():
-    # None is treated like "no clock" — base color, no tint.
-    assert clock_pocket_color(None) == pg.Color(Colors.light_grey_menu)
-
-
-def test_pocket_color_handles_negative_fraction():
-    # Defensive: negative fractions are clamped to zero (full tint).
-    assert clock_pocket_color(-0.1) == pg.Color(Colors.clock_low_time)
-
-
-# ---------- Increment flash ----------
 
 def test_increment_flash_alpha_zero_when_inactive(strip):
     assert strip._increment_flash_alpha() == 0
@@ -160,52 +138,25 @@ def test_increment_flash_decays_to_zero(strip):
 
 
 def test_increment_flash_alpha_starts_high(strip):
+    """At t=0 the flash alpha is at peak and decays as time elapses."""
     base = 1000
     strip.flash_increment(now_ms=base)
-    # At t=0 the alpha should be at peak (full progress).
     assert strip._increment_flash_alpha(now_ms=base) > strip._increment_flash_alpha(
         now_ms=base + INCREMENT_FLASH_MS // 2
     )
 
 
-def test_set_state_carries_initial_seconds(strip):
-    strip.set_state("Alice", 60.0, True, clock_initial_seconds=600.0)
-    assert strip.clock_initial_seconds == 600.0
-
-
-def test_clock_fraction_none_when_initial_missing(strip):
-    strip.set_state("Alice", 60.0, True)
-    assert strip._clock_fraction() is None
-
-
-def test_clock_fraction_computed_from_seconds(strip):
-    strip.set_state("Alice", 30.0, True, clock_initial_seconds=300.0)
-    assert strip._clock_fraction() == pytest.approx(0.10, abs=1e-6)
-
-
-def test_clock_fraction_clamps_negative_to_zero(strip):
-    strip.set_state("Alice", -5.0, True, clock_initial_seconds=300.0)
-    assert strip._clock_fraction() == 0.0
-
-
-def test_draw_smoke_with_low_time_fraction_and_flash(strip):
-    strip.set_state("Alice", 5.0, True, clock_initial_seconds=300.0)
-    strip.flash_increment(now_ms=pg.time.get_ticks())
-    strip.draw()  # no exceptions, exercises both visual paths
-
-
-# ---------- Auto-end countdown badge ----------
-
-def test_format_countdown_mm_ss():
-    assert format_countdown(0) == "0:00"
-    assert format_countdown(7) == "0:07"
-    assert format_countdown(45) == "0:45"
-    assert format_countdown(60) == "1:00"
-    assert format_countdown(125) == "2:05"
-
-
-def test_format_countdown_negative_clamps_to_zero():
-    assert format_countdown(-5) == "0:00"
+@pytest.mark.parametrize(
+    "clock_seconds, initial, expected",
+    [
+        pytest.param(60.0, None, None, id="none_when_initial_missing"),
+        pytest.param(30.0, 300.0, pytest.approx(0.10, abs=1e-6), id="computed_from_seconds"),
+        pytest.param(-5.0, 300.0, 0.0, id="clamps_negative_to_zero"),
+    ],
+)
+def test_clock_fraction(strip, clock_seconds, initial, expected):
+    strip.set_state("Alice", clock_seconds, True, clock_initial_seconds=initial)
+    assert strip._clock_fraction() == expected
 
 
 def test_render_badge_returns_none_when_label_missing(strip):
@@ -230,19 +181,85 @@ def test_render_badge_uses_red_below_threshold(strip):
     assert surf is not None
 
 
-def test_badge_clips_captures_max_x(strip):
-    # With a badge active and a long capture list, ensure draw doesn't crash.
-    strip.set_state("Alice", 60.0, True, clock_initial_seconds=300.0,
-                    captured=[], auto_end_label="abandon", auto_end_seconds=30)
+def test_draw_active_fills_name_region_with_hover(strip):
+    """Active strips paint the name region with button_hover; inactive don't."""
+    strip.set_state("Alice", 65.0, True)
+    active_px = _draw_on_blank(strip)
+    strip.set_state("Alice", 65.0, False)
+    inactive_px = _draw_on_blank(strip)
+    assert active_px != inactive_px
+    strip.set_state("Alice", 65.0, True)
+    strip.window.fill((0, 0, 0))
     strip.draw()
+    hover = pg.Color(Colors.button_hover)
+    row = [strip.window.get_at((x, strip.rect.centery))[:3]
+           for x in range(strip.rect.left, strip.rect.right)]
+    assert (hover.r, hover.g, hover.b) in row
 
 
-def test_draw_smoke_without_badge_still_works(strip):
-    strip.set_state("Alice", 60.0, True, clock_initial_seconds=300.0)
-    strip.draw()
+def test_draw_inactive_with_clock_paints_strip(strip):
+    strip.set_state("Bob", 599.9, False)
+    painted = _draw_on_blank(strip)
+    assert any(painted)
 
 
-def test_draw_smoke_with_badge_does_not_raise(strip):
+def test_draw_no_clock_differs_from_clocked(strip):
+    """The em-dash no-clock render differs in pixels from a real clock render."""
+    strip.set_state("Carol", None, False)
+    no_clock = _draw_on_blank(strip)
+    strip.set_state("Carol", 599.9, False)
+    with_clock = _draw_on_blank(strip)
+    assert no_clock != with_clock
+
+
+def test_draw_name_text_changes_pixels(strip):
+    strip.set_state("Alice", 65.0, True)
+    short = _draw_on_blank(strip)
+    strip.set_state("Zzzzz", 65.0, True)
+    other = _draw_on_blank(strip)
+    assert short != other
+
+
+def test_draw_low_time_flash_changes_pocket_pixels(strip):
+    """Triggering the increment flash visibly alters the pocket pixels."""
+    strip.set_state("Alice", 5.0, True, clock_initial_seconds=300.0)
+    no_flash = _draw_on_blank(strip)
+    strip.flash_increment(now_ms=pg.time.get_ticks())
+    with_flash = _draw_on_blank(strip)
+    assert no_flash != with_flash
+
+
+@pytest.mark.parametrize(
+    "size, prev_min_height",
+    [
+        pytest.param((200, 24), 0, id="small"),
+        pytest.param((400, 40), 14, id="medium_taller_font"),
+        pytest.param((800, 80), 21, id="large_taller_font"),
+    ],
+)
+def test_draw_at_multiple_sizes_lays_out_and_scales(strip, size, prev_min_height):
+    strip.set_rect(pg.Rect(0, 0, *size))
+    strip.set_state("X" * 25, 12.3, True)
+    painted = _draw_on_blank(strip)
+    assert any(painted)
+    assert strip.name_font.get_height() > prev_min_height
+
+
+def test_draw_with_badge_differs_from_without(strip):
+    """An active auto-end badge adds badge pixels absent when no label is set."""
     strip.set_state("Alice", 60.0, True, clock_initial_seconds=300.0,
                     auto_end_label="reconnect", auto_end_seconds=20)
-    strip.draw()
+    with_badge = _draw_on_blank(strip)
+    strip.set_state("Alice", 60.0, True, clock_initial_seconds=300.0)
+    without_badge = _draw_on_blank(strip)
+    assert with_badge != without_badge
+
+
+def test_draw_badge_with_captures_stays_within_strip(strip):
+    """Badge + capture list draws and the badge stays inside the strip bounds."""
+    strip.set_state("Alice", 60.0, True, clock_initial_seconds=300.0,
+                    captured=[], auto_end_label="abandon", auto_end_seconds=30)
+    painted = _draw_on_blank(strip)
+    assert any(painted)
+    surf, badge_x, _ = strip._render_auto_end_badge(strip.rect)
+    assert badge_x + surf.get_width() <= strip.rect.right

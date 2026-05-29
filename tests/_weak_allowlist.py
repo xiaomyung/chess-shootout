@@ -19,19 +19,6 @@ WEAK_ALLOWLIST = {
     "test_game_end_polish.py": {
         "test_fade_overlay_no_op_when_no_result": _SMOKE,
     },
-    "test_online_ux.py": {
-        "test_reconnecting_modal_subtitle_renders_without_crash": _SMOKE,
-    },
-    "test_player_strip.py": {
-        "test_badge_clips_captures_max_x": _SMOKE,
-        "test_draw_at_multiple_sizes_does_not_crash": _SMOKE,
-        "test_draw_smoke_active_with_clock": _SMOKE,
-        "test_draw_smoke_inactive_with_clock": _SMOKE,
-        "test_draw_smoke_no_clock": _SMOKE,
-        "test_draw_smoke_with_badge_does_not_raise": _SMOKE,
-        "test_draw_smoke_with_low_time_fraction_and_flash": _SMOKE,
-        "test_draw_smoke_without_badge_still_works": _SMOKE,
-    },
     "test_ux_polish.py": {
         "test_last_move_highlight_renders_when_history_nonempty": _SMOKE,
         "test_player_strip_advantage_negative_not_rendered": _SMOKE,

@@ -70,12 +70,9 @@ def resume_payload(
     }
 
 
-# ---- _handle_game_resumed: server is the source of truth ---------------------
-
 def test_handle_game_resumed_applies_server_clock_snapshot(app):
-    # Mid-game disconnect path: _time_control is already set from the original
-    # _start_online_game; we should replay the moves and overwrite the local
-    # clock with the server's authoritative remainders + side-to-move.
+    """Mid-game drop: replay SANs, build the clock from the existing
+    _time_control, then overwrite remainders + side-to-move from the snapshot."""
     app._time_control = (300, 2)
     app.match.local_color = PieceColor.WHITE
     payload = resume_payload(
@@ -86,16 +83,17 @@ def test_handle_game_resumed_applies_server_clock_snapshot(app):
     app._handle_game_resumed(payload)
 
     assert app.match.clock is not None
+    assert app.match.clock.increment_seconds == 2.0
     assert app.match.clock.white_remaining == 240.0
     assert app.match.clock.black_remaining == 180.0
     assert app.match.clock.running_for == PieceColor.WHITE
     assert [e.san for e in app.match.move_history] == ["e4", "e5"]
+    assert app.match.current_turn() == PieceColor.WHITE
 
 
 def test_handle_game_resumed_does_not_reset_clock_to_initial(app):
-    # The bug we're fixing: a fresh local clock starts at initial_seconds
-    # (300 here). After applying the server snapshot we must end at the
-    # server's value, never at the fresh-start value.
+    """A fresh clock starts at initial_seconds (300); applying the snapshot must
+    land on the server value, never the fresh-start value."""
     app._time_control = (300, 0)
     app.match.local_color = PieceColor.WHITE
     payload = resume_payload(
@@ -106,15 +104,14 @@ def test_handle_game_resumed_does_not_reset_clock_to_initial(app):
 
     assert app.match.clock.white_remaining == pytest.approx(42.0)
     assert app.match.clock.black_remaining == pytest.approx(17.0)
-    # Specifically NOT the initial-seconds value.
+    assert app.match.clock.running_for == PieceColor.BLACK
     assert app.match.clock.white_remaining != 300.0
+    assert app.match.move_history == []
 
-
-# ---- _on_reconnect_active_game: end-to-end app-restart resume ---------------
 
 def test_on_reconnect_active_game_sets_up_online_state_and_clock(app, monkeypatch):
-    # Stub the async client so we don't actually open a thread/WS during the
-    # test. The bug repro is purely about main-thread state transitions.
+    """App-restart Reconnect drives the full main-thread setup synchronously;
+    reconnect_to_existing is stubbed so no thread/WS opens."""
     monkeypatch.setattr(
         "frontend.online.client.OnlineClient.reconnect_to_existing",
         lambda self, *a, **kw: None,
@@ -131,8 +128,6 @@ def test_on_reconnect_active_game_sets_up_online_state_and_clock(app, monkeypatc
         "addr": "localhost:8000",
         "room_id": "room-x",
         "session_token": "tok",
-        # Stale cached payload — exercises the fix that we DON'T trust this
-        # snapshot and refetch instead.
         "resume": resume_payload(
             white_remaining=999.0, black_remaining=999.0, running_for="white",
         ),
@@ -145,16 +140,15 @@ def test_on_reconnect_active_game_sets_up_online_state_and_clock(app, monkeypatc
     assert app.match.local_color == PieceColor.BLACK
     assert [e.san for e in app.match.move_history] == ["d4", "d5", "c4"]
     assert app.match.clock is not None
-    # Fresh values, not the stale cached 999s.
     assert app.match.clock.white_remaining == pytest.approx(200.0)
     assert app.match.clock.black_remaining == pytest.approx(210.0)
     assert app.match.clock.running_for == PieceColor.BLACK
+    assert app._pending_reconnect is None
 
 
 def test_on_reconnect_active_game_refetches_resume_to_avoid_drift(app, monkeypatch):
-    # Concrete repro of the user-reported "drifts a couple seconds" bug:
-    # the cached payload was taken at app launch but the click can land
-    # arbitrarily later. We must hit /resume again right at click-time.
+    """Drift repro: the cached payload was taken at launch but the click lands
+    arbitrarily later, so /resume is re-fetched at click-time."""
     monkeypatch.setattr(
         "frontend.online.client.OnlineClient.reconnect_to_existing",
         lambda self, *a, **kw: None,
@@ -180,9 +174,8 @@ def test_on_reconnect_active_game_refetches_resume_to_avoid_drift(app, monkeypat
 
 
 def test_on_reconnect_active_game_failed_refetch_restores_pending(app, monkeypatch):
-    # If the fresh /resume call fails, we must NOT silently fall back to
-    # the stale cached snapshot — that's exactly the drift this fixes. The
-    # pending entry is restored so the user can retry from the same modal.
+    """A failed /resume must not fall back to the stale snapshot: stay out of
+    the game, restore the pending entry, and surface a Retry/Cancel modal."""
     monkeypatch.setattr(
         "frontend.online.client.OnlineClient.reconnect_to_existing",
         lambda self, *a, **kw: None,
@@ -197,31 +190,25 @@ def test_on_reconnect_active_game_failed_refetch_restores_pending(app, monkeypat
     }
     app._pending_reconnect = dict(pending)
     app._on_reconnect_active_game()
-    # We did NOT enter the game — mode stays at "menu" (or whatever it was).
     assert app.mode != ONLINE
-    # And the entry is restored so the start-menu Reconnect button stays live.
     assert app._pending_reconnect == pending
-    # User-visible: a confirm modal is up offering Retry / Cancel.
+    assert app.start_menu.reconnect_available
     assert app.confirm_modal.is_visible()
 
 
 def test_on_reconnect_active_game_no_pending_is_noop(app, monkeypatch):
-    # Defensive guard: clicking Reconnect after the pending entry was cleared
-    # should not crash and should not flip mode.
+    """Clicking Reconnect after the pending entry was cleared must not crash or
+    flip mode."""
     app._pending_reconnect = None
     prior_mode = app.mode
     app._on_reconnect_active_game()
     assert app.mode == prior_mode
+    assert app._pending_reconnect is None
 
-
-# ---- _async_main_resume no longer queues game_start / game_resumed ----------
 
 def test_async_main_resume_does_not_queue_legacy_events():
-    # The synchronous path in _on_reconnect_active_game now owns full
-    # state setup. The async loop's only job for the initial reconnect is
-    # to open the WS — it must NOT queue duplicate game_start/game_resumed
-    # events (those are what raced with the match-found transition and
-    # caused the original reset-to-initial bug).
+    """The async loop only opens the WS on reconnect; it must not queue a
+    duplicate game_start/game_resumed pair (the original reset-to-initial race)."""
     import asyncio
     from frontend.online.client import OnlineClient
 

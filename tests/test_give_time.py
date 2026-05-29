@@ -1,8 +1,7 @@
-"""Give 15 sec feature: local cap, debounce, toast wording, online round-trip.
+"""Give 15 sec: local clock cap, debounce, toast wording, online round-trip.
 
-Covers commit D of the give-time feature: button callback, recipient logic,
-toast formatters (giver + receiver), debounce gate, and the server's
-TimeGrantedMessage broadcast end-to-end.
+The cap (Clock.add_time) and the giver/receiver toast formatters are pure
+logic; the two server tests drive a real WebSocket round-trip end-to-end.
 """
 import json
 import os
@@ -50,12 +49,9 @@ def _start_local(app, time_minutes=3, incr=0):
     })
 
 
-# ---------- Local single-screen: recipient is the side currently on the clock ----------
-
 def test_local_click_gives_time_to_active_clock_side():
     app = _make_app()
     _start_local(app)
-    # Carve out headroom on white's clock so the cap doesn't fire.
     app.match.clock.white_remaining = 100.0
     app._on_give_time()
     assert app.match.clock.white_remaining == 115.0
@@ -80,42 +76,37 @@ def test_local_debounce_blocks_immediate_second_click():
     app._on_give_time()
     assert app.match.clock.white_remaining == 115.0
     app._on_give_time()
-    # Debounce: no second add.
     assert app.match.clock.white_remaining == 115.0
 
 
-def test_local_cap_at_initial_shows_toast_and_no_change(monkeypatch):
+@pytest.mark.parametrize(
+    "start_remaining, expected_remaining, toast_fmt",
+    [
+        pytest.param(
+            180.0, 180.0, "{name} already at maximum time",
+            id="full_cap_no_add_announces_maximum",
+        ),
+        pytest.param(
+            173.0, 180.0, "Gave 7 sec to {name}",
+            id="partial_cap_announces_actual_amount",
+        ),
+        pytest.param(
+            100.0, 115.0, "Gave 15 sec to {name}",
+            id="full_amount_uses_recipient_nickname",
+        ),
+    ],
+)
+def test_local_give_time_caps_and_toasts(
+    monkeypatch, start_remaining, expected_remaining, toast_fmt
+):
     app = _make_app()
     _start_local(app, time_minutes=3, incr=0)
-    toast_calls = []
-    monkeypatch.setattr(app.toast, "show", lambda msg, **kw: toast_calls.append(msg))
-    # White is already at exactly initial; give_time should be a no-op.
-    app._on_give_time()
-    assert app.match.clock.white_remaining == 180.0
-    assert len(toast_calls) == 1
-    assert "already at maximum time" in toast_calls[0]
-
-
-def test_local_partial_cap_announces_actual_amount(monkeypatch):
-    app = _make_app()
-    _start_local(app, time_minutes=3, incr=0)
-    # White has 7 seconds of headroom only.
-    app.match.clock.white_remaining = 173.0
-    toast_calls = []
-    monkeypatch.setattr(app.toast, "show", lambda msg, **kw: toast_calls.append(msg))
-    app._on_give_time()
-    assert app.match.clock.white_remaining == 180.0
-    assert toast_calls == [f"Gave 7 sec to {app.white_name}"]
-
-
-def test_local_full_amount_toast_uses_recipient_nickname(monkeypatch):
-    app = _make_app()
-    _start_local(app, time_minutes=3, incr=0)
-    app.match.clock.white_remaining = 100.0
+    app.match.clock.white_remaining = start_remaining
     toast_calls = []
     monkeypatch.setattr(app.toast, "show", lambda msg, **kw: toast_calls.append(msg))
     app._on_give_time()
-    assert toast_calls == [f"Gave 15 sec to {app.white_name}"]
+    assert app.match.clock.white_remaining == expected_remaining
+    assert toast_calls == [toast_fmt.format(name=app.white_name)]
 
 
 def test_local_noop_when_no_clock():
@@ -125,7 +116,6 @@ def test_local_noop_when_no_clock():
         "time_minutes": None, "increment_seconds": 0,
         "side": "white",
     })
-    # No clock at all — give_time is a silent no-op.
     app._on_give_time()
     assert app.match.clock is None
 
@@ -140,12 +130,9 @@ def test_local_noop_when_game_over():
     assert app.match.clock.white_remaining == before
 
 
-# ---------- Disabled-keys reflect cooldown / clock state ----------
-
 def test_disabled_keys_excludes_give_time_when_clock_present_and_idle():
     app = _make_app()
     _start_local(app)
-    # Ensure debounce window is clear.
     app._last_give_time_at_ms = -10_000
     assert "give_time" not in app._right_menu_disabled_keys()
 
@@ -174,8 +161,6 @@ def test_disabled_keys_includes_give_time_after_result():
     assert "give_time" in app._right_menu_disabled_keys()
 
 
-# ---------- Online client: send_give_time enqueues ----------
-
 def test_online_client_send_give_time_enqueues():
     from frontend.online.client import OnlineClient
     client = OnlineClient()
@@ -183,15 +168,12 @@ def test_online_client_send_give_time_enqueues():
     client._loop.is_closed.return_value = False
     client._outbound = MagicMock()
     client.send_give_time()
-    # The enqueue path delegates to _loop.call_soon_threadsafe.
     client._loop.call_soon_threadsafe.assert_called_once()
     args = client._loop.call_soon_threadsafe.call_args.args
     method, method_args = args[1]
     assert method == "send_give_time"
     assert method_args == ()
 
-
-# ---------- Online events: time_granted toast routing ----------
 
 def _online_app():
     app = _make_app()
@@ -205,48 +187,24 @@ def _online_app():
     return app
 
 
-def test_time_granted_giver_branch_shows_recipient_toast(monkeypatch):
+@pytest.mark.parametrize(
+    "granted_by, seconds_added, expected_toasts",
+    [
+        pytest.param("white", 15.0, ["Gave 15 sec to Bob"], id="giver_full_recipient_toast"),
+        pytest.param("white", 0.0, ["Bob already at maximum time"], id="giver_cap_toast"),
+        pytest.param("black", 15.0, ["Bob gave you 15 seconds"], id="receiver_giver_toast"),
+        pytest.param("black", 0.0, [], id="receiver_silent_on_zero_add"),
+    ],
+)
+def test_time_granted_routes_toast(monkeypatch, granted_by, seconds_added, expected_toasts):
     app = _online_app()
     toast_calls = []
     monkeypatch.setattr(app.toast, "show", lambda msg, **kw: toast_calls.append(msg))
     app._handle_time_granted({
-        "granted_by": "white", "seconds_added": 15.0, "clock": {},
+        "granted_by": granted_by, "seconds_added": seconds_added, "clock": {},
     })
-    assert toast_calls == ["Gave 15 sec to Bob"]
+    assert toast_calls == expected_toasts
 
-
-def test_time_granted_giver_branch_cap_toast(monkeypatch):
-    app = _online_app()
-    toast_calls = []
-    monkeypatch.setattr(app.toast, "show", lambda msg, **kw: toast_calls.append(msg))
-    app._handle_time_granted({
-        "granted_by": "white", "seconds_added": 0.0, "clock": {},
-    })
-    assert toast_calls == ["Bob already at maximum time"]
-
-
-def test_time_granted_receiver_branch_shows_giver_toast(monkeypatch):
-    app = _online_app()
-    toast_calls = []
-    monkeypatch.setattr(app.toast, "show", lambda msg, **kw: toast_calls.append(msg))
-    app._handle_time_granted({
-        "granted_by": "black", "seconds_added": 15.0, "clock": {},
-    })
-    assert toast_calls == ["Bob gave you 15 seconds"]
-
-
-def test_time_granted_receiver_silent_on_zero(monkeypatch):
-    app = _online_app()
-    toast_calls = []
-    monkeypatch.setattr(app.toast, "show", lambda msg, **kw: toast_calls.append(msg))
-    app._handle_time_granted({
-        "granted_by": "black", "seconds_added": 0.0, "clock": {},
-    })
-    # Nothing happened on my clock — no notification needed.
-    assert toast_calls == []
-
-
-# ---------- Server end-to-end ----------
 
 @pytest.fixture
 def clock():
