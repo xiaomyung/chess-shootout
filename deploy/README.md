@@ -107,7 +107,7 @@ sudo -u chess -- bash -c '
     cd /opt/chess/repo
     python -m venv .venv
     .venv/bin/pip install -U pip
-    .venv/bin/pip install -e .
+    .venv/bin/pip install -e ".[server]"
 '
 ```
 
@@ -199,6 +199,6 @@ server shutting down". Reconnects after a restart hit the
 ## Updating
 
 ```bash
-sudo -u chess -- bash -c 'export HOME=/opt/chess && cd /opt/chess/repo && git pull && .venv/bin/pip install -e .'
+sudo -u chess -- bash -c 'export HOME=/opt/chess && cd /opt/chess/repo && git pull && .venv/bin/pip install -e ".[server]"'
 sudo systemctl restart chess-server
 ```
