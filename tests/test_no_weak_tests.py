@@ -4,22 +4,16 @@ Statically scans every tests/test_*.py and flags a test function as weak when
 it exercises no real behavior: no non-trivial assertion, no pytest.raises/warns,
 and no call to an assertion helper (named assert_* / expect_*, or a known helper
 such as play_moves). Tests whose only assertion is `assert True`, `assert <lit>`,
-or `assert X == X` count as weak.
-
-The WEAK_ALLOWLIST in _weak_allowlist.py records the tests grandfathered in while
-the suite is cleaned up; it self-prunes — a name that is no longer weak fails the
-allowlist test, forcing its removal. The goal is an empty allowlist.
+or `assert X == X` count as weak. Every test must exercise real behavior — there
+is no allowlist; strengthen a flagged test rather than grandfathering it.
 """
 
 import ast
 from pathlib import Path
 
-from tests._weak_allowlist import WEAK_ALLOWLIST
-
 TESTS_DIR = Path(__file__).resolve().parent
 SKIP_FILES = {
-    "__init__.py", "conftest.py", "helpers.py",
-    "test_no_weak_tests.py", "_weak_allowlist.py",
+    "__init__.py", "conftest.py", "helpers.py", "test_no_weak_tests.py",
 }
 KNOWN_ASSERTION_HELPERS = {"play_moves", "play_sans", "assert_moves_legal"}
 ASSERTION_HELPER_PREFIXES = ("assert", "expect", "verify", "check", "ensure")
@@ -119,25 +113,12 @@ def _collect_weak():
     return found
 
 
-def test_no_unexpected_weak_tests():
+def test_no_weak_tests():
     found = _collect_weak()
     reasons = {(f, n): r for f, w in found.items() for n, r in w.items()}
-    allow = {(f, n) for f, names in WEAK_ALLOWLIST.items() for n in names}
-    unexpected = sorted(k for k in reasons if k not in allow)
-    detail = "\n".join(f"  {f}::{n} — {reasons[(f, n)]}" for f, n in unexpected)
-    assert not unexpected, (
-        "Weak tests not in the allowlist — strengthen them to exercise real "
-        f"behavior (or fix/delete):\n{detail}"
-    )
-
-
-def test_weak_allowlist_has_no_dead_entries():
-    found = _collect_weak()
-    flat = {(f, n) for f, w in found.items() for n in w}
-    allow = {(f, n) for f, names in WEAK_ALLOWLIST.items() for n in names}
-    dead = sorted(allow - flat)
-    detail = "\n".join(f"  {f}::{n}" for f, n in dead)
-    assert not dead, (
-        "Allowlist entries that are no longer weak — remove them from "
-        f"_weak_allowlist.py:\n{detail}"
+    offenders = sorted(reasons)
+    detail = "\n".join(f"  {f}::{n} — {reasons[(f, n)]}" for f, n in offenders)
+    assert not offenders, (
+        "These tests do not exercise real behavior — strengthen each to assert a "
+        f"real outcome (or fix/delete):\n{detail}"
     )

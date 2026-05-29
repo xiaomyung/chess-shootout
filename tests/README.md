@@ -92,9 +92,8 @@ these):
 - a test with no assertion and no behavior check (a bare `draw()` "doesn't crash").
 
 A render path still worth guarding should assert something real about the result
-(rects produced, expected colors/state), not just "didn't raise". The
-`_weak_allowlist.py` grandfather list is now empty and enforcing — strengthen a new
-test rather than adding to it.
+(rects produced, expected colors/state), not just "didn't raise". There is no
+allowlist — the guard fails on any weak test, so strengthen it rather than ship it.
 
 ## Determinism (xdist-safe)
 
