@@ -246,9 +246,6 @@ def test_server_broadcasts_time_granted_to_both_peers(client):
             ws_b.send_text(json.dumps(_auth(b["session_token"])))
             ws_w.receive_text()
             ws_b.receive_text()
-            # White (Alice) consumes some time, then black gives time.
-            # At game start both clocks are at initial (300s), so we
-            # mutate the server room to introduce headroom on white.
             room = client.app.state.rooms.get(a["room_id"])
             room.backend.clock.white_remaining = 200.0
             ws_b.send_text(json.dumps({"version": PROTOCOL_VERSION,
@@ -278,7 +275,6 @@ def test_server_caps_at_initial_seconds_and_still_broadcasts(client):
                                        "type": "give_time"}))
             granted = json.loads(ws_w.receive_text())
             ws_b.receive_text()
-            # White already at initial → seconds_added == 0, still broadcast.
             assert granted["type"] == "time_granted"
             assert granted["seconds_added"] == pytest.approx(0.0)
             assert granted["granted_by"] == "black"

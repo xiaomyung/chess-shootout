@@ -283,19 +283,16 @@ async def test_server_websocket_send_move_round_trip(server):
     ws_a = await st.ws_connect(a.room_id, a.session_token)
     ws_b = await st.ws_connect(b.room_id, b.session_token)
     try:
-        # Drain the game_start broadcast.
         msg_a = await asyncio.wait_for(ws_a.recv(), timeout=10.0)
         msg_b = await asyncio.wait_for(ws_b.recv(), timeout=10.0)
         assert msg_a["type"] == "game_start"
         assert msg_b["type"] == "game_start"
-        # Send a typed move.
         await ws_a.send_move("e2", "e4")
         applied_a = await asyncio.wait_for(ws_a.recv(), timeout=10.0)
         applied_b = await asyncio.wait_for(ws_b.recv(), timeout=10.0)
         assert applied_a["type"] == "move_applied"
         assert applied_a["san"] == "e4"
         assert applied_b["from"] == "e2"
-        # And resign.
         await ws_a.send_resign()
         result_a = await asyncio.wait_for(ws_a.recv(), timeout=10.0)
         assert result_a["type"] == "result"
@@ -403,9 +400,6 @@ async def test_server_websocket_send_methods_emit_typed_payloads():
 
 
 def test_only_transport_module_imports_httpx_or_websockets():
-    # The whole point of M19 is that nobody outside transport.py touches
-    # the network libraries. If a future commit accidentally imports them
-    # in client.py / events.py / etc., this guard catches it.
     import os
     import re
     frontend_dir = os.path.join(

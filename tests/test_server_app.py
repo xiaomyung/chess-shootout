@@ -188,10 +188,7 @@ def test_two_clients_pair_and_get_game_start(client):
             assert msg_a["your_color"] == "white"
             assert msg_b["your_color"] == "black"
             assert msg_a["white_name"] == "Alice"
-            assert msg_a["black_name"] == "Alice"  # nickname default in helper
-            # FakeClock starts at 0; pairing and broadcast happen in the same
-            # tick window so elapsed is effectively zero. Just lock in the
-            # field's presence + numeric type.
+            assert msg_a["black_name"] == "Alice"
             assert "started_seconds_ago" in msg_a
             assert msg_a["started_seconds_ago"] == pytest.approx(0.0, abs=1.0)
 
@@ -204,7 +201,7 @@ def test_full_short_game_e4_e5_resign(client):
         ws_w.send_text(json.dumps(_auth_msg(r1.json()["session_token"])))
         with client.websocket_connect(f"/ws/{r2.json()['room_id']}") as ws_b:
             ws_b.send_text(json.dumps(_auth_msg(r2.json()["session_token"])))
-            ws_w.receive_text()  # game_start
+            ws_w.receive_text()
             ws_b.receive_text()
             ws_w.send_text(json.dumps({"version": PROTOCOL_VERSION, "type": "move",
                                         "from": "e2", "to": "e4"}))
@@ -235,20 +232,15 @@ def test_out_of_turn_move_rejected(client):
             ws_b.send_text(json.dumps(_auth_msg(r2.json()["session_token"])))
             ws_w.receive_text()
             ws_b.receive_text()
-            # Black tries to move first.
             ws_b.send_text(json.dumps({"version": PROTOCOL_VERSION, "type": "move",
                                         "from": "e7", "to": "e5"}))
             err = json.loads(ws_b.receive_text())
             assert err["type"] == "error"
             assert err["reason"] == Reason.NOT_YOUR_TURN
-            # The originating msg_type rides along so the client can attach
-            # a context-specific toast.
             assert err["msg_type"] == "move"
 
 
 def test_draw_offer_off_turn_tags_msg_type(client):
-    # Black tries to offer a draw before white moves — server replies
-    # not_your_turn AND tells the client the offending msg_type.
     random.seed(0)
     r1 = _matchmake(client, uuid=ALICE, side="white")
     r2 = _matchmake(client, uuid=BOB, side="black")
@@ -267,9 +259,6 @@ def test_draw_offer_off_turn_tags_msg_type(client):
 
 
 def test_takeback_request_off_turn_tags_msg_type(client):
-    # White is on the move (no plies played) — white asking for a
-    # takeback gets not_your_turn tagged with msg_type=takeback_request
-    # so the client can surface the right toast.
     random.seed(0)
     r1 = _matchmake(client, uuid=ALICE, side="white")
     r2 = _matchmake(client, uuid=BOB, side="black")

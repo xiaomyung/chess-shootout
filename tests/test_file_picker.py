@@ -68,7 +68,7 @@ def test_picker_click_row_invokes_callback(picker, tmp_path):
     picked = []
     picker.show(str(tmp_path), "*.pgn",
                 on_select=lambda path: picked.append(path))
-    picker.draw()  # populate _row_rects
+    picker.draw()
     row_rect, _ = picker._row_rects[0]
     consumed = picker.handle_click(row_rect.center)
     assert consumed is True
@@ -113,7 +113,7 @@ def _populate(tmp_path, count):
 def test_picker_scroll_advances_offset(picker, tmp_path):
     _populate(tmp_path, 50)
     picker.show(str(tmp_path), "*.pgn", on_select=lambda p: None)
-    picker.draw()  # populate _max_visible and _list_rect
+    picker.draw()
     pos = picker._list_rect.center
     consumed = picker.handle_scroll(pos, -1)
     assert consumed is True

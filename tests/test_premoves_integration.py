@@ -86,8 +86,6 @@ def _new_app():
     return app
 
 
-# ---------- Click flow: single click sets selection, never queues ----------
-
 @pytest.mark.parametrize(
     "turn, click_sq, expected_selected",
     [
@@ -127,8 +125,6 @@ def test_click_empty_with_no_queue_is_noop(board):
     assert board.premoves == []
 
 
-# ---------- Validation: LAX pseudo-legal queueing from the default board ----------
-
 @pytest.mark.parametrize(
     "from_sq, to_sq",
     [
@@ -160,8 +156,6 @@ def test_bishop_sideways_rejected_pseudo_legal(board):
     assert board.premoves == []
 
 
-# ---------- Chaining ----------
-
 def test_chain_two_premoves_different_pieces(board):
     board.backend.turn = BLACK
     board.handle_click(Square(6, 4))
@@ -181,8 +175,6 @@ def test_chain_same_piece_uses_speculative_board(board):
     assert board.premoves[1].from_sq == Square(4, 0)
     assert board.premoves[1].to_sq == Square(3, 0)
 
-
-# ---------- Auto-fire (legal path) ----------
 
 def test_premove_fires_on_turn_match(board):
     board.backend.turn = BLACK
@@ -247,8 +239,6 @@ def test_chain_fires_one_per_turn(board):
     assert len(board.premoves) == 1
 
 
-# ---------- Auto-fire (illegal path) ----------
-
 def test_illegal_premove_clears_entire_chain(board):
     board.backend.turn = BLACK
     board.handle_click(Square(6, 4))
@@ -279,8 +269,6 @@ def test_illegal_fire_leaves_board_responsive(board):
     assert board.selected_square == Square(6, 0)
 
 
-# ---------- Cancellation paths via Frontend ----------
-
 @pytest.mark.parametrize(
     "action",
     [
@@ -301,8 +289,6 @@ def test_frontend_action_clears_premove_queue(action):
     assert app.board.premoves == []
 
 
-# ---------- Move indicator suppression ----------
-
 def test_move_indicators_suppressed_for_premove_selection(board):
     board.backend.turn = BLACK
     board.handle_click(Square(6, 4))
@@ -321,8 +307,6 @@ def test_move_indicators_drawn_for_normal_selection(board):
     board._draw_move_indicators()
     assert len(drawn) > 0
 
-
-# ---------- Visual highlights ----------
 
 def test_premove_highlight_renders_from_and_to_for_one_premove(board):
     """_draw_premove_highlights overlays both endpoint squares of the queued ply."""
@@ -347,8 +331,6 @@ def test_premove_highlight_renders_nothing_when_queue_empty(board):
     board._clear_premoves()
     assert _highlighted_squares(board) == set()
 
-
-# ---------- Frontend integration in draw_frame ----------
 
 def test_draw_frame_invokes_try_apply_next_premove():
     app = _new_app()
@@ -387,8 +369,6 @@ def test_draw_frame_blocks_premove(setup):
     app.draw_frame()
     assert called[0] == 0
 
-
-# ---------- Mixed flows: premoves + real moves interleaved ----------
 
 def test_normal_move_then_premove_then_fire(board):
     board.handle_click(Square(6, 4))

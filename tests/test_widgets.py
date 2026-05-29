@@ -68,7 +68,6 @@ def test_draw_button_row_returns_keyed_rects(font):
     buttons = [("Yes", "yes"), ("No", "no")]
     rects = draw_button_row(surface, rect, buttons, font, gap=10)
     assert set(rects.keys()) == {"yes", "no"}
-    # Width: (300 - 10) / 2 = 145.
     assert rects["yes"].height == 30
     assert rects["yes"].width == pytest.approx(145, abs=1)
 
@@ -79,7 +78,6 @@ def test_draw_selector_returns_keyed_rects(font):
     options = [("5 min", 5), ("10 min", 10), ("15 min", 15)]
     rects = draw_selector(surface, rect, options, font, gap=6, selected_key=10)
     assert set(rects.keys()) == {5, 10, 15}
-    # Shouldn't crash for any selected key.
     draw_selector(surface, rect, options, font, gap=6, selected_key=None)
 
 
@@ -89,7 +87,6 @@ def test_draw_selector_button_widths_are_equal(font):
     options = [("a", 1), ("b", 2), ("c", 3), ("d", 4)]
     rects = draw_selector(surface, rect, options, font, gap=6, selected_key=2)
     widths = sorted({r.width for r in rects.values()})
-    # Allow tiny float tolerance.
     assert max(widths) - min(widths) < 1
 
 
@@ -148,15 +145,15 @@ def test_wrap_path_breaks_after_slashes(font):
     text = "/aaa/bbb/ccc/ddd/eee/fff/ggg/hhh"
     lines = widgets.wrap_path(text, font, 90)
     assert len(lines) >= 2
-    assert all(font.size(ln)[0] <= 90 for ln in lines)        # never overflows
-    assert all(ln.endswith("/") for ln in lines[:-1])          # breaks at slash
-    assert "".join(lines) == text                              # lossless
+    assert all(font.size(ln)[0] <= 90 for ln in lines)
+    assert all(ln.endswith("/") for ln in lines[:-1])
+    assert "".join(lines) == text
 
 
 def test_wrap_path_char_wraps_an_overlong_segment(font):
     seg = "z" * 30
     lines = widgets.wrap_path(seg, font, 100)
-    assert len(lines) >= 2                 # a slash-less segment still wraps
+    assert len(lines) >= 2
     assert "".join(lines) == seg
 
 

@@ -110,8 +110,6 @@ def _assert_arrow_drawn(board, circle_centers, arrow_tips, from_sq, to_sq):
     assert _cell_center(board, to_sq) in arrow_tips
 
 
-# ---------- State primitives ----------
-
 def test_toggle_highlight_adds(board):
     board.toggle_highlight(Square(4, 4))
     assert Square(4, 4) in board.highlighted_squares
@@ -168,8 +166,6 @@ def test_clear_annotations_empties_state(board):
     assert board.arrows == []
     assert board._right_drag_start_square is None
 
-
-# ---------- Right-click event flow ----------
 
 def post_event(event_type, **kwargs):
     pg.event.post(pg.event.Event(event_type, kwargs))
@@ -278,8 +274,6 @@ def test_right_click_in_menu_mode_is_noop():
     assert app.board.highlighted_squares == set()
 
 
-# ---------- Left-click clear-on-neutral ----------
-
 def test_left_click_neutral_square_clears_annotations():
     app = make_app()
     app.board.toggle_highlight(Square(4, 4))
@@ -325,8 +319,6 @@ def test_left_click_off_board_does_not_clear():
     app.check_events()
     assert Square(4, 4) in app.board.highlighted_squares
 
-
-# ---------- Auto-clear on real move ----------
 
 def test_normal_move_clears_annotations(board):
     board.toggle_highlight(Square(0, 0))
@@ -389,8 +381,6 @@ def test_premove_fire_clears_annotations(board):
     assert board.arrows == []
 
 
-# ---------- Auto-clear on undo / game transitions ----------
-
 def test_undo_clears_annotations():
     app = make_app()
     app.board.handle_click(Square(6, 4))
@@ -433,8 +423,6 @@ def test_back_to_menu_clears_annotations():
     assert app.board.highlighted_squares == set()
 
 
-# ---------- Drawing path: highlights blit per square ----------
-
 def test_draw_annotation_highlights_renders_each_square(board, monkeypatch):
     """Each highlighted square's cell is resolved and tinted; the pixel under
     the cell changes from the cleared background."""
@@ -457,8 +445,6 @@ def test_draw_annotation_highlights_empty_draws_nothing(board, monkeypatch):
     assert seen == []
     assert board.window.get_at(_cell_center(board, Square(4, 4))) == (0, 0, 0, 255)
 
-
-# ---------- Drawing path: arrows render shaft + head per pair ----------
 
 @pytest.mark.parametrize(
     "from_sq, to_sq",
@@ -519,8 +505,6 @@ def test_draw_knight_arrow_renders_with_elbow(board, monkeypatch, dr, dc):
                for start, end in line_segments)
 
 
-# ---------- Knight arrow corner geometry ----------
-
 @pytest.mark.parametrize(
     "from_sq, to_sq, expected",
     [
@@ -546,8 +530,6 @@ def test_draw_knight_arrow_renders_with_elbow(board, monkeypatch, dr, dc):
 def test_knight_arrow_corner(from_sq, to_sq, expected):
     assert Board._knight_arrow_corner(from_sq, to_sq) == expected
 
-
-# ---------- Drawing path: drag preview ----------
 
 def test_draw_drag_preview_arrow_no_drag_is_noop(board, monkeypatch):
     """No drag start -> nothing is rendered (no caps, no head, no shaft)."""
@@ -603,8 +585,6 @@ def test_draw_full_board_with_annotations_renders_all_layers(board, monkeypatch)
     for sq in highlights:
         assert board.window.get_at(_cell_center(board, sq)) != plain_pixels[sq]
 
-
-# ---------- Combined scenarios ----------
 
 def test_highlights_and_arrows_coexist(board):
     board.toggle_highlight(Square(4, 4))

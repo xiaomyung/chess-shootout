@@ -78,8 +78,6 @@ def _paired_ws(client):
     return a, b
 
 
-# ---------- Server: ply field on broadcasts ----------
-
 def test_move_applied_includes_ply(client):
     a, b = _paired_ws(client)
     with client.websocket_connect(f"/ws/{a['room_id']}") as ws_w:
@@ -91,7 +89,6 @@ def test_move_applied_includes_ply(client):
             ws_w.send_text(json.dumps(_move("e2", "e4")))
             applied_w = json.loads(ws_w.receive_text())
             applied_b = json.loads(ws_b.receive_text())
-            # Ply 1 because exactly one move has been played.
             assert applied_w["ply"] == 1
             assert applied_b["ply"] == 1
             ws_b.send_text(json.dumps(_move("e7", "e5")))
@@ -115,11 +112,9 @@ def test_takeback_applied_includes_ply(client):
             ws_b.send_text(json.dumps(_move("e7", "e5")))
             ws_w.receive_text()
             ws_b.receive_text()
-            # The player who just moved (black) can request a takeback
-            # of their own last move; white accepts.
             ws_b.send_text(json.dumps({"version": PROTOCOL_VERSION,
                                        "type": "takeback_request"}))
-            ws_w.receive_text()  # takeback_offered
+            ws_w.receive_text()
             ws_w.send_text(json.dumps({"version": PROTOCOL_VERSION,
                                        "type": "takeback_response",
                                        "accept": True}))
@@ -129,8 +124,6 @@ def test_takeback_applied_includes_ply(client):
             assert tb_w["ply"] == 1
             assert tb_b["ply"] == 1
 
-
-# ---------- Server: dropped broadcast pushes reconnecting status ----------
 
 def test_dropped_broadcast_pushes_reconnecting_to_surviving_peer(client, monkeypatch):
     a, b = _paired_ws(client)
@@ -154,8 +147,6 @@ def test_dropped_broadcast_pushes_reconnecting_to_surviving_peer(client, monkeyp
             monkeypatch.setattr(connections_module, "send", flaky_send)
 
             ws_w.send_text(json.dumps(_move("e2", "e4")))
-            # The first recipient gets dropped; the second peer gets the
-            # move_applied AND a connection_status: reconnecting.
             seen_types = set()
             for _ in range(2):
                 msg = json.loads(ws_b.receive_text())
