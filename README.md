@@ -52,6 +52,13 @@ anytime from the in-app **Options** (gear, top-right of the menu). The Windows
 **portable** build is the exception — it keeps everything in a `data/` folder
 beside the executable, so the whole app stays self-contained.
 
+> **Tip for the portable build:** since it creates a `data/` folder next to the
+> `.exe`, give it its own folder before the first run — make a new directory
+> (e.g. `ChessShootout/`, on a USB stick or anywhere), drop
+> `ChessShootout-<version>-Portable.exe` inside, and launch it from there. That
+> keeps the app and its data tidy in one place instead of scattering a `data/`
+> folder into wherever you downloaded it.
+
 ## Play from source
 
 Requires **Python 3.12** — and specifically 3.12: newer pygame wheels drop
