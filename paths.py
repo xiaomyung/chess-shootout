@@ -35,25 +35,17 @@ def _source_root():
     return Path(__file__).parent.resolve()
 
 
-def get_app_dir():
-    appimage = os.environ.get("APPIMAGE")
-    if appimage:
-        return Path(appimage).resolve().parent
-    if is_frozen():
-        executable = Path(sys.executable).resolve()
-        for parent in executable.parents:
-            if parent.suffix == ".app":
-                return parent.parent
-        return executable.parent
-    return _source_root()
+def _is_onefile():
+    meipass = Path(getattr(sys, "_MEIPASS", "")).resolve()
+    return not meipass.is_relative_to(Path(sys.executable).resolve().parent)
 
 
 def is_portable():
-    return (get_app_dir() / "portable.txt").exists()
+    return is_frozen() and _is_onefile()
 
 
 def _portable_dir():
-    return get_app_dir() / "data"
+    return Path(sys.executable).resolve().parent / "data"
 
 
 def _default_config_dir():

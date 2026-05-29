@@ -54,7 +54,7 @@ jobs:
         run: |
           pyinstaller --onefile --windowed --noupx --name ChessShootout --icon assets/icons/icon.ico --add-data "assets;assets" --exclude-module fastapi --exclude-module uvicorn --exclude-module starlette --exclude-module slowapi main.py
           New-Item -ItemType Directory -Force -Path out | Out-Null
-          Move-Item -Force dist/ChessShootout.exe "out/ChessShootout-$env:VER.exe"
+          Move-Item -Force dist/ChessShootout.exe "out/ChessShootout-$env:VER-Portable.exe"
           $env:CHESS_VERSION = $env:VER
           pyinstaller --noconfirm chess.spec
           choco install innosetup -y --no-progress

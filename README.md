@@ -42,14 +42,15 @@ No Python needed — grab the file for your OS from the
 
 | OS | File | First run |
 |----|------|-----------|
-| **Windows 10/11** | `ChessShootoutSetup-<version>.exe` (installer, no admin) or `ChessShootout-<version>.exe` (portable) | Unsigned, so SmartScreen warns: **More info → Run anyway**. |
+| **Windows 10/11** | `ChessShootout-<version>-Setup.exe` (installer, no admin) or `ChessShootout-<version>-Portable.exe` (portable) | Unsigned, so SmartScreen warns: **More info → Run anyway**. |
 | **macOS** (Apple Silicon) | `ChessShootout-<version>.dmg` | Drag **Chess Shootout** to Applications. Unsigned, so first launch is blocked: **System Settings → Privacy & Security → Open Anyway**, or run `xattr -dr com.apple.quarantine /Applications/ChessShootout.app`. |
 | **Linux** (incl. Arch) | `ChessShootout-<version>-x86_64.AppImage` | `chmod +x` it, then run. No install, no FUSE. |
 
 Games, settings, and logs live in a per-user location (`%APPDATA%`,
-`~/Library/Application Support`, `~/.local/share`). Change the games folder
-anytime from the in-app **Options** (gear, top-right of the menu), or drop a
-`portable.txt` beside the app to keep everything alongside it.
+`~/Library/Application Support`, `~/.local/share`); change the games folder
+anytime from the in-app **Options** (gear, top-right of the menu). The Windows
+**portable** build is the exception — it keeps everything in a `data/` folder
+beside the executable, so the whole app stays self-contained.
 
 ## Play from source
 
