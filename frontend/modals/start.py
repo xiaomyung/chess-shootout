@@ -98,7 +98,6 @@ class StartMenu:
         self._start_rect = pg.Rect(0, 0, 0, 0)
         self._gear_rect = pg.Rect(0, 0, 0, 0)
 
-        self._footer_font = get_font(12)
         self._footer_prefix_surf = None
         self._footer_link_surf = None
         self._footer_link_mask_surf = None
@@ -211,7 +210,6 @@ class StartMenu:
     def _build_footer(self):
         win_w, win_h = self.window.get_size()
         font = get_font(max(int(win_h / 64), 9))
-        self._footer_font = font
         prefix = footer_prefix_text()
         self._footer_prefix_surf = font.render(prefix, True, Colors.footer_text)
         self._footer_link_surf = font.render(FOOTER_LINK_TEXT, True, Colors.footer_link)
