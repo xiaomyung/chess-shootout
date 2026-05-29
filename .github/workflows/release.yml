@@ -45,8 +45,8 @@ jobs:
         shell: pwsh
         run: |
           $v = $env:GITHUB_REF_NAME -replace '^v',''
-          "VER=$v" | Out-File -FilePath $env:GITHUB_ENV -Append
-          Set-Content -Path assets/version.txt -Value $v
+          "VER=$v" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          Set-Content -Path assets/version.txt -Value $v -Encoding utf8
 
       - name: Build Windows (portable exe + installer)
         if: matrix.os == 'windows-latest'
@@ -58,7 +58,7 @@ jobs:
           $env:CHESS_VERSION = $env:VER
           pyinstaller --noconfirm chess.spec
           choco install innosetup -y --no-progress
-          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" /DAppVer=$env:VER packaging\chess.iss
+          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" "/DAppVer=$env:VER" packaging\chess.iss
 
       - name: Build macOS (.app -> .dmg)
         if: matrix.os == 'macos-latest'
