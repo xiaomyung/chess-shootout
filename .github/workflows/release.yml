@@ -37,12 +37,16 @@ jobs:
 
       - name: Derive version (posix)
         if: runner.os != 'Windows'
-        run: echo "VER=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
+        run: |
+          echo "VER=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
+          echo "${GITHUB_REF_NAME#v}" > assets/version.txt
       - name: Derive version (windows)
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          "VER=$($env:GITHUB_REF_NAME -replace '^v','')" | Out-File -FilePath $env:GITHUB_ENV -Append
+          $v = $env:GITHUB_REF_NAME -replace '^v',''
+          "VER=$v" | Out-File -FilePath $env:GITHUB_ENV -Append
+          Set-Content -Path assets/version.txt -Value $v
 
       - name: Build Windows (portable exe + installer)
         if: matrix.os == 'windows-latest'

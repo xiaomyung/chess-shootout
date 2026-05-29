@@ -7,8 +7,8 @@ import pytest
 
 import paths
 from frontend.modals.start import (
-    FOOTER_PREFIX, FOOTER_SHINE_HOVER_PERIOD_MS, FOOTER_SHINE_PERIOD_MS,
-    FOOTER_SHINE_SWEEP_MS, FOOTER_URL, StartMenu,
+    FOOTER_SHINE_HOVER_PERIOD_MS, FOOTER_SHINE_PERIOD_MS, FOOTER_SHINE_SWEEP_MS,
+    FOOTER_URL, StartMenu, footer_prefix_text,
 )
 
 
@@ -26,12 +26,17 @@ def _menu(callbacks=None):
     return menu
 
 
-def test_footer_text_is_versioned_credit_line():
-    # The displayed prefix is built from the live build version, so a bump
-    # to paths.APP_VERSION flows straight into the menu footer.
-    assert FOOTER_PREFIX.format(version=paths.APP_VERSION) == (
-        f"Chess Shootout v{paths.APP_VERSION} - Designed and developed by "
-    )
+def test_footer_shows_build_version_when_present(monkeypatch):
+    # A real CI build bundles assets/version.txt, so the footer shows it.
+    monkeypatch.setattr(paths, "get_app_version", lambda: "1.2.3")
+    assert footer_prefix_text() == "Chess Shootout v1.2.3 - Designed and developed by "
+
+
+def test_footer_shows_dev_when_no_build_version(monkeypatch):
+    # Source / local dev builds have no bundled version file, so the footer
+    # says (dev) rather than masquerading as a release.
+    monkeypatch.setattr(paths, "get_app_version", lambda: "")
+    assert footer_prefix_text() == "Chess Shootout (dev) - Designed and developed by "
 
 
 def test_footer_builds_and_draws():

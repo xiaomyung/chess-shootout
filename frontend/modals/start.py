@@ -44,7 +44,7 @@ SECTIONS = [
 ]
 
 
-FOOTER_PREFIX = "Chess Shootout v{version} - Designed and developed by "
+FOOTER_PREFIX = "Chess Shootout {label} - Designed and developed by "
 FOOTER_LINK_TEXT = "xiaomyung"
 FOOTER_URL = "https://github.com/xiaomyung"
 FOOTER_MARGIN_PX = 10
@@ -54,6 +54,12 @@ FOOTER_SHINE_SWEEP_MS = 1100
 FOOTER_SHINE_HOVER_PERIOD_MS = 500
 FOOTER_SHINE_HOVER_SWEEP_MS = 450
 FOOTER_SHINE_MAX_ALPHA = 200
+
+
+def footer_prefix_text():
+    version = paths.get_app_version()
+    label = "v" + version if version else "(dev)"
+    return FOOTER_PREFIX.format(label=label)
 
 
 class StartMenu:
@@ -206,7 +212,7 @@ class StartMenu:
         win_w, win_h = self.window.get_size()
         font = get_font(max(int(win_h / 64), 9))
         self._footer_font = font
-        prefix = FOOTER_PREFIX.format(version=paths.APP_VERSION)
+        prefix = footer_prefix_text()
         self._footer_prefix_surf = font.render(prefix, True, Colors.footer_text)
         self._footer_link_surf = font.render(FOOTER_LINK_TEXT, True, Colors.footer_link)
         self._footer_link_mask_surf = font.render(FOOTER_LINK_TEXT, True, Colors.white)

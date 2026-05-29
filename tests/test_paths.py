@@ -22,6 +22,18 @@ def test_resource_path_joins_under_asset_base(monkeypatch):
     assert paths.resource_path("assets", "fonts", "x.ttf") == expected
 
 
+def test_app_version_reads_bundled_file(monkeypatch, tmp_path):
+    version_file = tmp_path / "version.txt"
+    version_file.write_text("1.2.3\n")
+    monkeypatch.setattr(paths, "resource_path", lambda *parts: version_file)
+    assert paths.get_app_version() == "1.2.3"
+
+
+def test_app_version_blank_when_file_missing(monkeypatch, tmp_path):
+    monkeypatch.setattr(paths, "resource_path", lambda *parts: tmp_path / "absent.txt")
+    assert paths.get_app_version() == ""
+
+
 def test_override_changes_only_data_dir(monkeypatch):
     monkeypatch.setattr(sys, "frozen", False, raising=False)
     monkeypatch.delenv("APPIMAGE", raising=False)

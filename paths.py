@@ -7,7 +7,6 @@ import platformdirs
 
 APP_NAME = "chess-shootout"
 APP_AUTHOR = False
-APP_VERSION = "1.0.0"
 GAMES_SUBDIR = "games"
 
 
@@ -23,6 +22,13 @@ def get_asset_base():
 
 def resource_path(*parts):
     return get_asset_base().joinpath(*parts)
+
+
+def get_app_version():
+    try:
+        return resource_path("assets", "version.txt").read_text().strip()
+    except OSError:
+        return ""
 
 
 def _source_root():
