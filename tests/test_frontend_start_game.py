@@ -190,7 +190,7 @@ def test_no_active_at_game_over():
 def test_auto_save_writes_headers_with_names_and_time_control(tmp_path, monkeypatch):
     app = make_app()
     app._on_start_game(base_config())
-    monkeypatch.setattr("frontend.frontend.PROJECT_ROOT", str(tmp_path))
+    monkeypatch.setenv("CHESS_DATA_DIR", str(tmp_path))
     app.backend.try_move(Square(6, 4), Square(4, 4))  # need a move so PGN body is non-empty
     app.manual_result = "white_wins"
     app._auto_save_pgn()
@@ -209,7 +209,7 @@ def test_auto_save_marks_time_forfeit_on_timeout(tmp_path, monkeypatch):
     app.backend.try_move(Square(6, 4), Square(4, 4))
     app.backend.clock.flagged = PieceColor.WHITE
     app.backend.clock.white_remaining = 0
-    monkeypatch.setattr("frontend.frontend.PROJECT_ROOT", str(tmp_path))
+    monkeypatch.setenv("CHESS_DATA_DIR", str(tmp_path))
     app._auto_save_pgn()
     files = list((tmp_path / "games").glob("*.pgn"))
     content = files[0].read_text()
@@ -221,7 +221,7 @@ def test_auto_save_records_path_and_shows_toast(tmp_path, monkeypatch):
     app = make_app()
     app._on_start_game(base_config())
     app.backend.try_move(Square(6, 4), Square(4, 4))
-    monkeypatch.setattr("frontend.frontend.PROJECT_ROOT", str(tmp_path))
+    monkeypatch.setenv("CHESS_DATA_DIR", str(tmp_path))
     app.manual_result = "white_wins"
     path = app._auto_save_pgn()
     assert path is not None
@@ -234,7 +234,7 @@ def test_open_pgn_invokes_default_app(tmp_path, monkeypatch):
     app = make_app()
     app._on_start_game(base_config())
     app.backend.try_move(Square(6, 4), Square(4, 4))
-    monkeypatch.setattr("frontend.frontend.PROJECT_ROOT", str(tmp_path))
+    monkeypatch.setenv("CHESS_DATA_DIR", str(tmp_path))
     app.manual_result = "white_wins"
     app._auto_save_pgn()
     captured = {}
@@ -257,7 +257,7 @@ def test_open_pgn_warns_on_open_failure(tmp_path, monkeypatch):
     app = make_app()
     app._on_start_game(base_config())
     app.backend.try_move(Square(6, 4), Square(4, 4))
-    monkeypatch.setattr("frontend.frontend.PROJECT_ROOT", str(tmp_path))
+    monkeypatch.setenv("CHESS_DATA_DIR", str(tmp_path))
     app.manual_result = "white_wins"
     app._auto_save_pgn()
     monkeypatch.setattr(
@@ -276,7 +276,7 @@ def test_auto_save_filename_prefix_per_mode(tmp_path, monkeypatch, mode_value, e
     app = make_app()
     app._on_start_game(base_config())
     app.backend.try_move(Square(6, 4), Square(4, 4))
-    monkeypatch.setattr("frontend.frontend.PROJECT_ROOT", str(tmp_path))
+    monkeypatch.setenv("CHESS_DATA_DIR", str(tmp_path))
     app.mode = mode_value
     app.manual_result = "white_wins"
     app._auto_save_pgn()

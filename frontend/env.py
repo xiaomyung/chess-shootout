@@ -6,6 +6,8 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
+import paths
+
 _KEY_LINE_RE = re.compile(r"^([A-Za-z_][A-Za-z0-9_]*)\s*=(.*)$")
 
 
@@ -17,6 +19,11 @@ _ENV_PATH = _PROJECT_ROOT / ".env"
 
 _uuid_override = None
 _nickname_override = None
+
+
+def init_paths():
+    global _ENV_PATH
+    _ENV_PATH = paths.get_config_dir() / ".env"
 
 
 def load():
@@ -75,6 +82,19 @@ def set_last_mode(mode):
     _persist("CHESS_LAST_MODE", mode)
 
 
+def get_data_dir_override():
+    return os.environ.get("CHESS_DATA_DIR") or ""
+
+
+def set_data_dir(path):
+    if path:
+        os.environ["CHESS_DATA_DIR"] = path
+        _persist("CHESS_DATA_DIR", path)
+    else:
+        os.environ.pop("CHESS_DATA_DIR", None)
+        _persist_delete("CHESS_DATA_DIR")
+
+
 def get_master_volume():
     raw = os.environ.get("CHESS_MASTER_VOLUME")
     if not raw:
@@ -112,6 +132,27 @@ def _persist(key, value):
     if not replaced:
         out_lines.append(f"{key}={value}")
     body = "\n".join(out_lines) + "\n"
+    _atomic_write(body)
+
+
+def _persist_delete(key):
+    if not _ENV_PATH.exists():
+        return
+    out_lines = []
+    for line in _ENV_PATH.read_text().splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            out_lines.append(line)
+            continue
+        match = _KEY_LINE_RE.match(stripped)
+        if match is not None and match.group(1) == key:
+            continue
+        out_lines.append(line)
+    _atomic_write(("\n".join(out_lines) + "\n") if out_lines else "")
+
+
+def _atomic_write(body):
+    _ENV_PATH.parent.mkdir(parents=True, exist_ok=True)
     tmp_path = _ENV_PATH.with_suffix(_ENV_PATH.suffix + f".tmp.{os.getpid()}")
     tmp_path.write_text(body)
     os.replace(tmp_path, _ENV_PATH)

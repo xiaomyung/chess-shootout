@@ -4,6 +4,7 @@ import os
 
 import pygame as pg
 
+import paths
 from frontend import env, crash_log
 from frontend.frontend import Frontend
 
@@ -25,6 +26,7 @@ if __name__ == "__main__":
     handler = crash_log.install_memory_handler()
     log = logging.getLogger("chess.main")
     log.info("client starting pid=%s", os.getpid())
+    env.init_paths()
     env.load()
     env.set_overrides(client_uuid=args.client_uuid, nickname=args.nickname)
     pg.init()
@@ -43,7 +45,7 @@ if __name__ == "__main__":
     except Exception as exc:
         try:
             state = crash_log.gather_state(app) if app is not None else {}
-            crash_log.write_crash_log(exc, handler.buffer, state)
+            crash_log.write_crash_log(exc, handler.buffer, state, root=paths.get_log_dir())
         except Exception:
             log.exception("crash log write failed")
         raise

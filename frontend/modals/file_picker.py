@@ -35,7 +35,7 @@ class FilePicker:
         self.window = window
         self.rect = pg.Rect(0, 0, 0, 0)
         self.visible = False
-        self.title = "Load PGN"
+        self.title = "History"
         self.entries = []
         self.on_select = None
         self.on_cancel = None

@@ -1,3 +1,5 @@
+import math
+
 import pygame as pg
 
 from frontend.visual.colors import Colors
@@ -21,24 +23,52 @@ def fit_text_to_rect(text_surface, rect, padding=BUTTON_LABEL_PADDING_PX):
     return pg.transform.smoothscale(text_surface, new_size)
 
 
-def draw_button(window, rect, label, font, force_pressed=False, disabled=False):
-    if disabled:
-        bg = Colors.dark_menu
-        text_color = Colors.button_border
-    else:
-        mouse_pos = pg.mouse.get_pos()
-        mouse_down = pg.mouse.get_pressed()[0]
-        hovered = rect.collidepoint(mouse_pos)
-        pressed = hovered and mouse_down
-
-        if force_pressed or pressed:
-            bg = Colors.button_pressed
-        elif hovered:
-            bg = Colors.button_hover
+def wrap_path(text, font, max_w, max_lines=6):
+    tokens = []
+    parts = text.split("/")
+    for i, part in enumerate(parts):
+        token = part + "/" if i < len(parts) - 1 else part
+        if token:
+            tokens.append(token)
+    lines = []
+    line = ""
+    for token in tokens:
+        if line and font.size(line + token)[0] > max_w:
+            lines.append(line)
+            line = ""
+            if len(lines) >= max_lines:
+                return lines
+        if not line and font.size(token)[0] > max_w:
+            for ch in token:
+                if line and font.size(line + ch)[0] > max_w:
+                    lines.append(line)
+                    line = ""
+                    if len(lines) >= max_lines:
+                        return lines
+                line += ch
         else:
-            bg = Colors.dark_menu
-        text_color = Colors.white
+            line += token
+    if line and len(lines) < max_lines:
+        lines.append(line)
+    return lines
 
+
+def _button_bg(rect, force_pressed=False, disabled=False):
+    if disabled:
+        return Colors.dark_menu, Colors.button_border
+    hovered = rect.collidepoint(pg.mouse.get_pos())
+    pressed = hovered and pg.mouse.get_pressed()[0]
+    if force_pressed or pressed:
+        bg = Colors.button_pressed
+    elif hovered:
+        bg = Colors.button_hover
+    else:
+        bg = Colors.dark_menu
+    return bg, Colors.white
+
+
+def draw_button(window, rect, label, font, force_pressed=False, disabled=False):
+    bg, text_color = _button_bg(rect, force_pressed, disabled)
     pg.draw.rect(window, bg, rect, border_radius=4)
     pg.draw.rect(window, Colors.button_border, rect, 1, border_radius=4)
     text = fit_text_to_rect(font.render(label, True, text_color), rect)
@@ -46,6 +76,42 @@ def draw_button(window, rect, label, font, force_pressed=False, disabled=False):
         text,
         (rect.centerx - text.get_width() / 2, rect.centery - text.get_height() / 2),
     )
+
+
+def draw_icon_button(window, rect, icon_fn, force_pressed=False, disabled=False):
+    if not disabled:
+        hovered = rect.collidepoint(pg.mouse.get_pos())
+        pressed = hovered and pg.mouse.get_pressed()[0]
+        if force_pressed or pressed:
+            pg.draw.rect(window, Colors.button_pressed, rect, border_radius=4)
+        elif hovered:
+            pg.draw.rect(window, Colors.button_hover, rect, border_radius=4)
+    icon_fn(window, rect)
+
+
+def draw_gear(window, rect):
+    ss = 4
+    w, h = max(rect.width, 1) * ss, max(rect.height, 1) * ss
+    surf = pg.Surface((w, h), pg.SRCALPHA)
+    cx, cy = w / 2, h / 2
+    r = min(w, h) * 0.30
+    teeth = 8
+    r0, r1 = r * 0.72, r * 1.46
+    hw_base, hw_tip = r * 0.30, r * 0.16
+    for i in range(teeth):
+        a = math.tau * i / teeth
+        dx, dy = math.cos(a), math.sin(a)
+        px, py = -dy, dx
+        pts = [
+            (cx + dx * r0 + px * hw_base, cy + dy * r0 + py * hw_base),
+            (cx + dx * r0 - px * hw_base, cy + dy * r0 - py * hw_base),
+            (cx + dx * r1 - px * hw_tip, cy + dy * r1 - py * hw_tip),
+            (cx + dx * r1 + px * hw_tip, cy + dy * r1 + py * hw_tip),
+        ]
+        pg.draw.polygon(surf, Colors.white, pts)
+    hole_r = r * 0.40
+    pg.draw.circle(surf, Colors.white, (int(cx), int(cy)), int(r), width=int(r - hole_r))
+    window.blit(pg.transform.smoothscale(surf, (rect.width, rect.height)), rect.topleft)
 
 
 def draw_button_row(window, rect, buttons, font, gap, disabled_keys=None):
