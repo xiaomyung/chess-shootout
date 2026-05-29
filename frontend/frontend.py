@@ -251,7 +251,7 @@ class Frontend(OnlineEventsMixin):
         self._refresh_load_pgn_availability()
         self._spawn_reconnect_probe()
 
-        pg.display.set_caption("Chess")
+        pg.display.set_caption("Chess Shootout")
 
     @property
     def backend(self):
@@ -276,7 +276,7 @@ class Frontend(OnlineEventsMixin):
 
     def _on_back_to_menu(self):
         self.mode = "menu"
-        pg.display.set_caption("Chess")
+        pg.display.set_caption("Chess Shootout")
         if self.online_client is not None:
             self.online_client.disconnect()
             self.online_client = None
@@ -594,7 +594,7 @@ class Frontend(OnlineEventsMixin):
         self.match.mode = SINGLE_SCREEN
         self.match.local_color = None
         self.mode = "menu"
-        pg.display.set_caption("Chess")
+        pg.display.set_caption("Chess Shootout")
         self._reset_to_new_game()
         self._refresh_load_pgn_availability()
 

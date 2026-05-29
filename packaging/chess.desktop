@@ -1,0 +1,7 @@
+[Desktop Entry]
+Type=Application
+Name=Chess Shootout
+Exec=ChessShootout
+Icon=chess-shootout
+Categories=Game;BoardGame;
+Terminal=false

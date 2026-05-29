@@ -1,4 +1,4 @@
-# chess-pygame
+# Chess Shootout
 
 A full-featured chess game built with [pygame](https://www.pygame.org/).
 Hot-seat play, drag-and-drop or click-to-move, premoves, annotations,
@@ -40,14 +40,29 @@ two-player matches.
   rematches (so winning game 1 as white keeps your `1 - 0` when you
   switch to black in the rematch).
 
-## Requirements
+## Download
+
+No Python needed — grab the file for your OS from the
+[**Releases**](https://github.com/xiaomyung/chess-shootout/releases) page:
+
+| OS | Download | First run |
+|----|----------|-----------|
+| **Windows 10/11** | `ChessShootoutSetup.exe` (installer) or `ChessShootout.exe` (portable) | The installer needs no admin. Both are unsigned, so SmartScreen shows *"Windows protected your PC"* → click **More info → Run anyway**. |
+| **macOS** (Apple Silicon) | `ChessShootout.dmg` | Open the dmg, drag **Chess Shootout** to Applications. It's unsigned, so the first launch is blocked: **System Settings → Privacy & Security → Open Anyway** (or run `xattr -dr com.apple.quarantine /Applications/ChessShootout.app`). |
+| **Linux** (incl. Arch) | `ChessShootout-x86_64.AppImage` | `chmod +x ChessShootout-x86_64.AppImage` then double-click or run it. No install, no Python. |
+
+Your games, settings, and logs are stored per-user (`%APPDATA%` / `~/Library`
+/ `~/.local/share`); change the games folder anytime via the **gear → Options**
+menu. Drop a `portable.txt` next to the app to keep everything beside it instead.
+
+## Requirements (from source)
 
 - Python `>=3.12,<3.13` (pinned in `pyproject.toml`; pygame's 3.14 wheel
   ships without `pygame.mixer`).
 - No external runtime dependencies — every audio asset ships
   pre-encoded as `.ogg`, so `ffmpeg` is **not** required.
 
-## Install
+## Install (from source)
 
 The project uses `pyproject.toml`. Two flavours of install:
 
@@ -80,8 +95,8 @@ pyenv install 3.12
 pyenv shell 3.12
 python --version                    # Python 3.12.x
 
-git clone https://github.com/xiaomyung/chess-pygame.git
-cd chess-pygame
+git clone https://github.com/xiaomyung/chess-shootout.git
+cd chess-shootout
 python -m venv .venv
 source .venv/bin/activate
 python --version                    # Python 3.12.x — confirms the venv inherited it
@@ -104,8 +119,8 @@ Then the same venv steps as above, but with `python3.12 -m venv .venv`
 instead of `python -m venv .venv`:
 
 ```bash
-git clone https://github.com/xiaomyung/chess-pygame.git
-cd chess-pygame
+git clone https://github.com/xiaomyung/chess-shootout.git
+cd chess-shootout
 python3.12 -m venv .venv
 source .venv/bin/activate
 python --version                    # Python 3.12.x
@@ -118,8 +133,8 @@ python main.py
 ```bash
 brew install python@3.12
 
-git clone https://github.com/xiaomyung/chess-pygame.git
-cd chess-pygame
+git clone https://github.com/xiaomyung/chess-shootout.git
+cd chess-shootout
 python3.12 -m venv .venv
 source .venv/bin/activate
 python --version           # should print Python 3.12.x
@@ -133,8 +148,8 @@ python main.py
 # Download Python 3.12.x from https://www.python.org/downloads/release/
 # (tick "Add Python to PATH" during install). Don't use 3.13+.
 
-git clone https://github.com/xiaomyung/chess-pygame.git
-cd chess-pygame
+git clone https://github.com/xiaomyung/chess-shootout.git
+cd chess-shootout
 py -3.12 -m venv .venv     # the `py` launcher picks 3.12 specifically
 .venv\Scripts\Activate.ps1
 python --version           # should print Python 3.12.x

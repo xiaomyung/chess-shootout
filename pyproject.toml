@@ -3,7 +3,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "chess-pygame"
+name = "chess-shootout"
 version = "1.0.0"
 description = "Full-featured local and online chess built with pygame"
 readme = "README.md"
@@ -32,7 +32,7 @@ server = [
     "slowapi==0.1.9",
 ]
 dev = [
-    "chess-pygame[server]",
+    "chess-shootout[server]",
     "pytest==9.0.3",
     "pytest-xdist==3.8.0",
     "pytest-asyncio==1.3.0",
@@ -46,8 +46,8 @@ build = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/xiaomyung/chess-pygame"
-Issues = "https://github.com/xiaomyung/chess-pygame/issues"
+Homepage = "https://github.com/xiaomyung/chess-shootout"
+Issues = "https://github.com/xiaomyung/chess-shootout/issues"
 
 [tool.hatch.build.targets.wheel]
 packages = ["backend", "frontend", "pieces", "server"]

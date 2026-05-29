@@ -5,7 +5,7 @@ from pathlib import Path
 import platformdirs
 
 
-appname = "chess-pygame"
+appname = "chess-shootout"
 appauthor = False
 
 

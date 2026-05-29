@@ -9,3 +9,7 @@ crashlogs/
 .env
 build/
 dist/
+out/
+AppDir/
+*.AppImage
+local_build/
