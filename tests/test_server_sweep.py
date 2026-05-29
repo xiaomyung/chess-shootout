@@ -9,7 +9,7 @@ import pytest
 
 from server.app import create_app
 from server.protocol import Reason
-from server.sweep import BEACON_INTERVAL_SECONDS
+from server.sweep import BEACON_INTERVAL_SECONDS, PREGAME_CONNECT_GRACE_SECONDS
 from tests.helpers import FakeClock, fake_uuid4
 
 
@@ -88,15 +88,18 @@ async def test_sweep_step_grace_expired_yields_abandonment(sweep, app, clock):
 
 @pytest.mark.asyncio
 async def test_sweep_step_drop_orphans_pre_game(sweep, app, clock):
-    # Both players are pre-game and neither has a live ws — the room is
-    # garbage and should be dropped immediately, not after the rematch
-    # keep-alive window.
+    # A paired pre-game room with no live ws is reaped only after the
+    # connect-grace window, so the clients' ws handshakes can land first.
+    # Within the grace the room survives; past it the room is dropped.
     rooms = app.state.rooms
     await rooms.enqueue(client_uuid=ALICE, nickname="A", session_token="ta",
                           time_minutes=5, increment_seconds=0, side_preference="white")
     await rooms.enqueue(client_uuid=BOB, nickname="B", session_token="tb",
                           time_minutes=5, increment_seconds=0, side_preference="black")
     assert rooms.rooms_active == 1
+    sweep.step_drop_orphans_and_post_result()
+    assert rooms.rooms_active == 1
+    clock.advance(PREGAME_CONNECT_GRACE_SECONDS)
     sweep.step_drop_orphans_and_post_result()
     assert rooms.rooms_active == 0
 

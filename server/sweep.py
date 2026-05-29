@@ -10,6 +10,8 @@ log = logging_setup.get_logger("chess.server.app")
 
 BEACON_INTERVAL_SECONDS = 2.5
 
+PREGAME_CONNECT_GRACE_SECONDS = 5.0
+
 
 RESULT_REASON_BY_GAME_RESULT = {
     "white_wins": (Reason.CHECKMATE, "white"),
@@ -91,13 +93,16 @@ class Sweep:
                                               winner_color=winner))
 
     def step_drop_orphans_and_post_result(self):
+        now = self._now()
         for room in list(self.rooms._active.values()):
             white_present = (room.white is not None
                              and self.connections.get_for_color(room, "white") is not None)
             black_present = (room.black is not None
                              and self.connections.get_for_color(room, "black") is not None)
             if (room.first_move_at is None
-                    and not white_present and not black_present):
+                    and not white_present and not black_present
+                    and room.started_at is not None
+                    and now - room.started_at >= PREGAME_CONNECT_GRACE_SECONDS):
                 log.info("drop room=%s reason=both_disconnected_pre_game", room.room_id)
                 self.rooms.drop_room_now(room.room_id)
                 continue
