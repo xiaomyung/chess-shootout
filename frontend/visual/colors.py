@@ -21,6 +21,8 @@ class Colors:
     result_win = "#7bbf6a"
     result_loss = "#d46a64"
     result_neutral = "#b9b9b9"
+    footer_text = "#67675f"
+    footer_link = "#6f9fe0"
     connection_dots = {
         "connected": "#3cc85a",
         "reconnecting": "#dcb428",

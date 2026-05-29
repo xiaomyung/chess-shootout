@@ -9,7 +9,10 @@
 #
 # Only the web stack is excluded; server.protocol (pydantic-only) stays, since the
 # client imports it. macOS wraps the COLLECT output into ChessShootout.app via BUNDLE.
+import os
 import sys
+
+CHESS_VERSION = os.environ.get("CHESS_VERSION", "0.0.0")
 
 a = Analysis(
     ["main.py"],
@@ -47,4 +50,9 @@ if sys.platform == "darwin":
         name="ChessShootout.app",
         icon="assets/icons/icon.icns",
         bundle_identifier="dev.xiaomyung.chess-shootout",
+        version=CHESS_VERSION,
+        info_plist={
+            "CFBundleShortVersionString": CHESS_VERSION,
+            "CFBundleVersion": CHESS_VERSION,
+        },
     )

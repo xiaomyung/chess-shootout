@@ -13,3 +13,4 @@ out/
 AppDir/
 *.AppImage
 local_build/
+assets/version.txt

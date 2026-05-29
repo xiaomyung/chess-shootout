@@ -24,6 +24,13 @@ def resource_path(*parts):
     return get_asset_base().joinpath(*parts)
 
 
+def get_app_version():
+    try:
+        return resource_path("assets", "version.txt").read_text().strip()
+    except OSError:
+        return ""
+
+
 def _source_root():
     return Path(__file__).parent.resolve()
 
