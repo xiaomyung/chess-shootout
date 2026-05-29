@@ -42,9 +42,9 @@ No Python needed — grab the file for your OS from the
 
 | OS | File | First run |
 |----|------|-----------|
-| **Windows 10/11** | `ChessShootoutSetup.exe` (installer, no admin) or `ChessShootout.exe` (portable) | Unsigned, so SmartScreen warns: **More info → Run anyway**. |
-| **macOS** (Apple Silicon) | `ChessShootout.dmg` | Drag **Chess Shootout** to Applications. Unsigned, so first launch is blocked: **System Settings → Privacy & Security → Open Anyway**, or run `xattr -dr com.apple.quarantine /Applications/ChessShootout.app`. |
-| **Linux** (incl. Arch) | `ChessShootout-x86_64.AppImage` | `chmod +x` it, then run. No install, no FUSE. |
+| **Windows 10/11** | `ChessShootoutSetup-<version>.exe` (installer, no admin) or `ChessShootout-<version>.exe` (portable) | Unsigned, so SmartScreen warns: **More info → Run anyway**. |
+| **macOS** (Apple Silicon) | `ChessShootout-<version>.dmg` | Drag **Chess Shootout** to Applications. Unsigned, so first launch is blocked: **System Settings → Privacy & Security → Open Anyway**, or run `xattr -dr com.apple.quarantine /Applications/ChessShootout.app`. |
+| **Linux** (incl. Arch) | `ChessShootout-<version>-x86_64.AppImage` | `chmod +x` it, then run. No install, no FUSE. |
 
 Games, settings, and logs live in a per-user location (`%APPDATA%`,
 `~/Library/Application Support`, `~/.local/share`). Change the games folder
@@ -199,12 +199,28 @@ Install the dev extra, then run the same checks CI does:
 
 ```bash
 pip install -e ".[dev]"
-pytest tests -n 8 -q                            # ~10 s for 1318 tests (~25 s serial)
+pytest tests -n 8 -q                            # ~12 s for 1331 tests (~25 s serial)
 pylama backend frontend server main.py paths.py tests   # pycodestyle + pyflakes; exits 0 when clean
 ```
 
 Both gate merges to `master` (the `test` and `lint` jobs), so a green local
 run means the PR checks will pass.
+
+### Releasing
+
+Releases are built by CI on a version tag — merging to `master` builds nothing.
+
+```bash
+git tag -a v1.2.0 -m "Chess Shootout 1.2.0"   # v1.2.0-rc1 for a pre-release
+git push origin v1.2.0
+```
+
+The tagged build runs the test suite, then builds all three OSes and stamps the
+version (taken from the tag) into every artifact filename, the Windows
+installer, the macOS bundle, and the in-app footer, before assembling a
+**draft** GitHub Release. A hyphen in the tag marks it a pre-release. Review the
+four artifacts, then **Publish**. No version is hardcoded anywhere — the tag is
+the single source of truth.
 
 ## License
 
