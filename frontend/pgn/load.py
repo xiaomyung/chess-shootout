@@ -101,14 +101,22 @@ def _format_time_from_filename(filename, mtime):
     return datetime.fromtimestamp(mtime).strftime("%Y.%m.%d %H:%M:%S"), mtime
 
 
-def _format_time_control(value):
+def parse_time_control(value):
     if not value or value == "-":
-        return "No clock"
+        return None
     try:
         initial, incr = value.split("+")
-        return f"{int(initial) // 60}+{int(incr)}"
+        return int(initial), int(incr)
     except ValueError:
+        return None
+
+
+def _format_time_control(value):
+    tc = parse_time_control(value)
+    if tc is None:
         return "No clock"
+    initial, incr = tc
+    return f"{initial // 60}+{incr}"
 
 
 def summarize_pgn_file(path, text, mtime, filename=None):

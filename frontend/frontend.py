@@ -36,7 +36,7 @@ from frontend.modals.result import ResultMenu
 from frontend.audio.sound_manager import SoundManager
 from frontend.modals.start import StartMenu
 from frontend.pgn.generate import generate_pgn, TIMEOUT_RESULTS
-from frontend.pgn.load import load_pgn_into_backend
+from frontend.pgn.load import load_pgn_into_backend, parse_time_control
 from backend.paths import PROJECT_ROOT, SOUNDS_DIR
 from backend.pieces import PieceColor, PieceType, opponent_of
 from server.protocol import (
@@ -328,6 +328,9 @@ class Frontend(OnlineEventsMixin):
         if not ok:
             return
         self._pgn_result_tag = parsed.result
+        self.white_name = parsed.headers.get("White", "Player 1")
+        self.black_name = parsed.headers.get("Black", "Player 2")
+        self._time_control = parse_time_control(parsed.headers.get("TimeControl", "-"))
         if self.match.move_history:
             self.board.review_ply = 0
         self.pgn_review = True

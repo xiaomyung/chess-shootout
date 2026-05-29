@@ -3,7 +3,8 @@ from datetime import datetime
 import pytest
 
 from frontend.pgn.load import (
-    PgnSummary, parse_pgn, parse_pgn_headers, summarize_pgn_file,
+    PgnSummary, parse_pgn, parse_pgn_headers, parse_time_control,
+    summarize_pgn_file,
 )
 
 
@@ -120,6 +121,23 @@ def test_filename_defaults_to_basename_of_path():
     s = summarize_pgn_file("/games/online-20260529-152355.pgn", "", 1000.0)
     assert s.type == "Online"
     assert s.time == "2026.05.29 15:23:55"
+
+
+# ---------- parse_time_control ----------
+
+@pytest.mark.parametrize("value,expected", [
+    ("600+5", (600, 5)),
+    ("300+2", (300, 2)),
+    ("60+0", (60, 0)),
+    ("-", None),
+    ("", None),
+    ("abc", None),
+    ("600", None),
+    ("+5", None),
+    ("600+", None),
+])
+def test_parse_time_control(value, expected):
+    assert parse_time_control(value) == expected
 
 
 # ---------- parse_pgn_headers ----------
