@@ -7,6 +7,7 @@ import platformdirs
 
 APP_NAME = "chess-shootout"
 APP_AUTHOR = False
+APP_VERSION = "1.0.0"
 GAMES_SUBDIR = "games"
 
 

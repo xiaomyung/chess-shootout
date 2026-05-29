@@ -1,5 +1,6 @@
 import pygame as pg
 
+import paths
 from backend.match import SINGLE_SCREEN, BOT, ONLINE
 from frontend import env
 from frontend.visual.colors import Colors
@@ -43,6 +44,18 @@ SECTIONS = [
 ]
 
 
+FOOTER_PREFIX = "Chess Shootout v{version} - Designed and developed by "
+FOOTER_LINK_TEXT = "xiaomyung"
+FOOTER_URL = "https://github.com/xiaomyung"
+FOOTER_MARGIN_PX = 10
+FOOTER_LINK_HITBOX_PAD_PX = 9
+FOOTER_SHINE_PERIOD_MS = 10000
+FOOTER_SHINE_SWEEP_MS = 1100
+FOOTER_SHINE_HOVER_PERIOD_MS = 500
+FOOTER_SHINE_HOVER_SWEEP_MS = 450
+FOOTER_SHINE_MAX_ALPHA = 200
+
+
 class StartMenu:
 
     def __init__(self, window, callbacks):
@@ -78,6 +91,17 @@ class StartMenu:
         self._reconnect_rect = pg.Rect(0, 0, 0, 0)
         self._start_rect = pg.Rect(0, 0, 0, 0)
         self._gear_rect = pg.Rect(0, 0, 0, 0)
+
+        self._footer_font = get_font(12)
+        self._footer_prefix_surf = None
+        self._footer_link_surf = None
+        self._footer_link_mask_surf = None
+        self._footer_shine_band = None
+        self._footer_shine_w = 0
+        self._footer_prefix_pos = (0, 0)
+        self._footer_link_rect = pg.Rect(0, 0, 0, 0)
+        self._footer_link_hitbox = pg.Rect(0, 0, 0, 0)
+        self._footer_underline_y = 0
 
         self._section_rects_by_key = {
             "selected_mode": {},
@@ -176,6 +200,35 @@ class StartMenu:
         self._reconnect_rect = layout.get("reconnect", pg.Rect(0, 0, 0, 0))
         self._start_rect = layout["start"]
 
+        self._build_footer()
+
+    def _build_footer(self):
+        win_w, win_h = self.window.get_size()
+        font = get_font(max(int(win_h / 64), 9))
+        self._footer_font = font
+        prefix = FOOTER_PREFIX.format(version=paths.APP_VERSION)
+        self._footer_prefix_surf = font.render(prefix, True, Colors.footer_text)
+        self._footer_link_surf = font.render(FOOTER_LINK_TEXT, True, Colors.footer_link)
+        self._footer_link_mask_surf = font.render(FOOTER_LINK_TEXT, True, Colors.white)
+        prefix_w = self._footer_prefix_surf.get_width()
+        link_w, link_h = self._footer_link_surf.get_size()
+        x = (win_w - prefix_w - link_w) // 2
+        y = win_h - FOOTER_MARGIN_PX - link_h
+        self._footer_prefix_pos = (x, y)
+        self._footer_link_rect = pg.Rect(x + prefix_w, y, link_w, link_h)
+        self._footer_link_hitbox = self._footer_link_rect.inflate(
+            FOOTER_LINK_HITBOX_PAD_PX * 2, FOOTER_LINK_HITBOX_PAD_PX * 2,
+        )
+        self._footer_underline_y = y + link_h - 1
+        band_w = max(int(link_w * 0.5), 12)
+        band = pg.Surface((band_w, link_h), pg.SRCALPHA)
+        half = band_w / 2
+        for col in range(band_w):
+            alpha = int(FOOTER_SHINE_MAX_ALPHA * (1 - abs(col - half) / half))
+            pg.draw.line(band, (255, 255, 255, alpha), (col, 0), (col, link_h))
+        self._footer_shine_band = band
+        self._footer_shine_w = band_w
+
     @property
     def _mode_rects(self):
         return self._section_rects_by_key["selected_mode"]
@@ -244,6 +297,34 @@ class StartMenu:
             draw_button(self.window, self._reconnect_rect, "Reconnect", self.start_font)
         draw_button(self.window, self._start_rect, self.start_button_label, self.start_font)
 
+        self._draw_footer()
+
+    def _footer_link_hovered(self):
+        return bool(self._footer_link_hitbox.collidepoint(pg.mouse.get_pos()))
+
+    def _draw_footer(self):
+        if self._footer_prefix_surf is None:
+            return
+        self.window.blit(self._footer_prefix_surf, self._footer_prefix_pos)
+        self.window.blit(self._footer_link_surf, self._footer_link_rect.topleft)
+        pg.draw.line(self.window, Colors.footer_link,
+                     (self._footer_link_rect.x, self._footer_underline_y),
+                     (self._footer_link_rect.right - 1, self._footer_underline_y))
+        hovered = self._footer_link_hovered()
+        period = FOOTER_SHINE_HOVER_PERIOD_MS if hovered else FOOTER_SHINE_PERIOD_MS
+        sweep = FOOTER_SHINE_HOVER_SWEEP_MS if hovered else FOOTER_SHINE_SWEEP_MS
+        elapsed = pg.time.get_ticks() % period
+        if elapsed >= sweep:
+            return
+        progress = elapsed / sweep
+        link_w = self._footer_link_rect.width
+        link_h = self._footer_link_rect.height
+        offset = int(progress * (link_w + self._footer_shine_w) - self._footer_shine_w)
+        shine = pg.Surface((link_w, link_h), pg.SRCALPHA)
+        shine.blit(self._footer_shine_band, (offset, 0))
+        shine.blit(self._footer_link_mask_surf, (0, 0), special_flags=pg.BLEND_RGBA_MULT)
+        self.window.blit(shine, self._footer_link_rect.topleft)
+
     def _draw_section(self, idx, label, options, selected_key, attr):
         label_surf = self.label_font.render(label, True, Colors.white)
         x = self._section_selector_rects[idx].x
@@ -261,6 +342,11 @@ class StartMenu:
         if self._gear_rect.collidepoint(pos):
             if "options" in self.callbacks:
                 self.callbacks["options"]()
+            return True
+
+        if self._footer_link_hitbox.collidepoint(pos):
+            if "open_url" in self.callbacks:
+                self.callbacks["open_url"](FOOTER_URL)
             return True
 
         if self._input_rect.collidepoint(pos):

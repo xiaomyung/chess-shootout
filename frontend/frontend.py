@@ -214,6 +214,7 @@ class Frontend(OnlineEventsMixin):
             "fen": self._on_open_fen_modal,
             "reconnect": self._on_reconnect_active_game,
             "options": self._on_open_options,
+            "open_url": _open_with_default_app,
         })
         self._pending_reconnect = None
         self._pending_reconnect_lock = threading.Lock()
