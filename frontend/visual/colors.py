@@ -18,6 +18,9 @@ class Colors:
     clock_low_time = "#7a1f1f"
     clock_increment_flash = "#3aa54f"
     auto_end_alert = "#e0524d"
+    result_win = "#7bbf6a"
+    result_loss = "#d46a64"
+    result_neutral = "#b9b9b9"
     connection_dots = {
         "connected": "#3cc85a",
         "reconnecting": "#dcb428",

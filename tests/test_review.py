@@ -551,6 +551,35 @@ def test_load_pgn_from_path_loads_game(tmp_path):
     assert app.pgn_review is True
 
 
+def test_load_pgn_populates_names_and_time_control(tmp_path):
+    pgn_path = tmp_path / "named.pgn"
+    pgn_path.write_text(
+        '[White "alice"]\n[Black "bob"]\n[Result "1-0"]\n[TimeControl "600+5"]\n\n'
+        "1. e4 e5 1-0\n"
+    )
+    app = _new_app()
+    app._load_pgn_from_path(str(pgn_path))
+    assert app.white_name == "alice"
+    assert app.black_name == "bob"
+    assert app._time_control == (600, 5)
+    assert app._name_for_color(PieceColor.WHITE) == "alice"
+    assert app._name_for_color(PieceColor.BLACK) == "bob"
+    # Review game-info mirrors an ongoing game (real time control) under a
+    # "Review" title rather than the old "no clock" placeholder.
+    assert app._compute_game_info_lines() == ["Review", "1-0  ·  10+5"]
+
+
+def test_load_pgn_without_time_control_shows_no_clock(tmp_path):
+    pgn_path = tmp_path / "noclock.pgn"
+    pgn_path.write_text(
+        '[White "A"]\n[Black "B"]\n[Result "0-1"]\n\n1. e4 e5 0-1\n'
+    )
+    app = _new_app()
+    app._load_pgn_from_path(str(pgn_path))
+    assert app._time_control is None
+    assert app._compute_game_info_lines() == ["Review", "0-1  ·  no clock"]
+
+
 def _load_test_pgn(app, tmp_path):
     pgn_path = tmp_path / "test.pgn"
     pgn_path.write_text('[White "A"]\n[Black "B"]\n\n1. e4 e5 2. Nf3 Nc6 *\n')

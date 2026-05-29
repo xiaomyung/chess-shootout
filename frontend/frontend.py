@@ -36,7 +36,7 @@ from frontend.modals.result import ResultMenu
 from frontend.audio.sound_manager import SoundManager
 from frontend.modals.start import StartMenu
 from frontend.pgn.generate import generate_pgn, TIMEOUT_RESULTS
-from frontend.pgn.load import load_pgn_into_backend
+from frontend.pgn.load import load_pgn_into_backend, parse_time_control
 from backend.paths import PROJECT_ROOT, SOUNDS_DIR
 from backend.pieces import PieceColor, PieceType, opponent_of
 from server.protocol import (
@@ -293,6 +293,7 @@ class Frontend(OnlineEventsMixin):
         self.file_picker.show(
             _games_dir(), "*.pgn",
             on_select=self._load_pgn_from_path,
+            nickname=env.get_nickname(),
         )
 
     def _on_open_fen_modal(self):
@@ -327,6 +328,9 @@ class Frontend(OnlineEventsMixin):
         if not ok:
             return
         self._pgn_result_tag = parsed.result
+        self.white_name = parsed.headers.get("White", "Player 1")
+        self.black_name = parsed.headers.get("Black", "Player 2")
+        self._time_control = parse_time_control(parsed.headers.get("TimeControl", "-"))
         if self.match.move_history:
             self.board.review_ply = 0
         self.pgn_review = True
@@ -1072,6 +1076,15 @@ class Frontend(OnlineEventsMixin):
             start_height
         )
 
+        file_picker_width = min(window_width * 0.9, 1100)
+        file_picker_height = min(window_height * 0.85, 760)
+        file_picker_rect = pg.Rect(
+            window_width / 2 - file_picker_width / 2,
+            window_height / 2 - file_picker_height / 2,
+            file_picker_width,
+            file_picker_height,
+        )
+
         menu_modal_width = min(start_width, max(result_width, 360))
         menu_modal_height = min(start_height, max(cell_size * 1.6, 200))
         menu_modal_rect = pg.Rect(
@@ -1118,7 +1131,7 @@ class Frontend(OnlineEventsMixin):
         self.server_modal.set_rect(flex_rect)
         self.wait_modal.set_rect(flex_rect)
         self.reconnecting_modal.set_rect(flex_rect)
-        self.file_picker.set_rect(start_rect)
+        self.file_picker.set_rect(file_picker_rect)
         self.start_menu.set_rect(start_rect)
         self.help_modal.set_rect(result_rect)
         self.fen_input_modal.set_rect(flex_rect)
