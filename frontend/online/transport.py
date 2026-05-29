@@ -1,8 +1,10 @@
 import ipaddress
 import json
 import logging
+import ssl
 from typing import Optional
 
+import certifi
 import httpx
 import websockets
 from websockets.exceptions import ConnectionClosed
@@ -22,6 +24,9 @@ log = logging.getLogger("chess.client.transport")
 
 
 HTTP_TIMEOUT_SECONDS = 5.0
+
+
+_TLS_CONTEXT = ssl.create_default_context(cafile=certifi.where())
 
 
 class TransportError(Exception):
@@ -121,7 +126,7 @@ class ServerTransport:
         self._url = _UrlBuilder(addr)
         self._http = http_client
         self._async_http_factory = async_http_factory or (
-            lambda: httpx.AsyncClient(timeout=HTTP_TIMEOUT_SECONDS)
+            lambda: httpx.AsyncClient(timeout=HTTP_TIMEOUT_SECONDS, verify=_TLS_CONTEXT)
         )
 
     def _sync_request(self, method, path, *, json_body=None, timeout=HTTP_TIMEOUT_SECONDS):
@@ -130,7 +135,7 @@ class ServerTransport:
             if self._http is not None:
                 r = self._http.request(method, url, json=json_body, timeout=timeout)
             else:
-                r = httpx.request(method, url, json=json_body, timeout=timeout)
+                r = httpx.request(method, url, json=json_body, timeout=timeout, verify=_TLS_CONTEXT)
         except (httpx.HTTPError, httpx.TimeoutException) as exc:
             raise TransportError(str(exc)) from exc
         return r
@@ -225,7 +230,8 @@ class ServerTransport:
     async def ws_connect(self, room_id, session_token):
         url = self._url.ws(f"/ws/{room_id}")
         log.info("ws connecting %s", url)
-        ws = await websockets.connect(url, ping_interval=20, ping_timeout=30)
+        tls = _TLS_CONTEXT if self._url.ws_scheme == "wss" else None
+        ws = await websockets.connect(url, ssl=tls, ping_interval=20, ping_timeout=30)
         await ws.send(AuthMessage(session_token=session_token).model_dump_json())
         return ServerWebSocket(ws)
 
