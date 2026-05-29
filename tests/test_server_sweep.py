@@ -1,9 +1,8 @@
-"""M18b: Sweep step methods tested in isolation via fake clock.
+"""Sweep step methods exercised in isolation via a fake clock.
 
-The Sweep class wraps the per-tick lifecycle that used to live as a
-free `_sweep` function. Each step does one thing — clock + first-move
-abort, grace expiry, orphan/post-result drop, GC — so we can drive
-each independently without going through the full asyncio loop.
+The Sweep class wraps the per-tick lifecycle: each step does one thing
+(clock + first-move abort, grace expiry, orphan/post-result drop, beacon,
+GC) so we drive each independently without the full asyncio loop.
 """
 import pytest
 
@@ -13,16 +12,18 @@ from server.sweep import BEACON_INTERVAL_SECONDS, PREGAME_CONNECT_GRACE_SECONDS
 from tests.helpers import FakeClock, fake_uuid4
 
 
-async def _pair(rooms):
-    await rooms.enqueue(client_uuid=ALICE, nickname="A", session_token="ta",
-                        time_minutes=5, increment_seconds=0, side_preference="white")
-    await rooms.enqueue(client_uuid=BOB, nickname="B", session_token="tb",
-                        time_minutes=5, increment_seconds=0, side_preference="black")
-    return list(rooms._active.values())[0]
-
-
 ALICE = fake_uuid4(1)
 BOB = fake_uuid4(2)
+
+
+async def _pair(rooms, time_minutes=5):
+    await rooms.enqueue(client_uuid=ALICE, nickname="A", session_token="ta",
+                        time_minutes=time_minutes, increment_seconds=0,
+                        side_preference="white")
+    await rooms.enqueue(client_uuid=BOB, nickname="B", session_token="tb",
+                        time_minutes=time_minutes, increment_seconds=0,
+                        side_preference="black")
+    return list(rooms._active.values())[0]
 
 
 @pytest.fixture
@@ -41,46 +42,43 @@ def sweep(app):
 
 
 @pytest.mark.asyncio
-async def test_sweep_step_first_move_abort(sweep, app, clock):
-    rooms = app.state.rooms
-    await rooms.enqueue(client_uuid=ALICE, nickname="A", session_token="ta",
-                          time_minutes=5, increment_seconds=0, side_preference="white")
-    await rooms.enqueue(client_uuid=BOB, nickname="B", session_token="tb",
-                          time_minutes=5, increment_seconds=0, side_preference="black")
-    room = list(rooms._active.values())[0]
-    room.started_at = clock()
-    clock.advance(61)
-    await sweep.step_clock_and_first_move_abort()
-    assert room.result == ("aborted", None)
+@pytest.mark.parametrize(
+    "time_minutes, set_first_move, advance, expected_result, expected_reason",
+    [
+        pytest.param(5, False, 61, ("aborted", None), None,
+                     id="no_first_move_aborts"),
+        pytest.param(1, True, 70, None, Reason.TIMEOUT,
+                     id="flagged_clock_times_out"),
+    ],
+)
+async def test_sweep_step_clock_and_first_move(sweep, app, clock, time_minutes,
+                                               set_first_move, advance,
+                                               expected_result, expected_reason):
+    """Same step, two distinct outcomes: pre-first-move abort vs clock timeout.
 
-
-@pytest.mark.asyncio
-async def test_sweep_step_clock_flag_yields_timeout(sweep, app, clock):
-    rooms = app.state.rooms
-    await rooms.enqueue(client_uuid=ALICE, nickname="A", session_token="ta",
-                          time_minutes=1, increment_seconds=0, side_preference="white")
-    await rooms.enqueue(client_uuid=BOB, nickname="B", session_token="tb",
-                          time_minutes=1, increment_seconds=0, side_preference="black")
-    room = list(rooms._active.values())[0]
+    Expected differs in kind per case (the abort branch yields a fixed
+    ("aborted", None) tuple; the timeout branch yields a TIMEOUT reason on the
+    flagged side), so each case carries its own expected — never flattened.
+    """
+    room = await _pair(app.state.rooms, time_minutes=time_minutes)
     room.started_at = clock()
-    room.first_move_at = clock()
-    clock.advance(70)
+    if set_first_move:
+        room.first_move_at = clock()
+    clock.advance(advance)
     await sweep.step_clock_and_first_move_abort()
-    assert room.result is not None
-    assert room.result[0] == Reason.TIMEOUT
+    if expected_result is not None:
+        assert room.result == expected_result
+    else:
+        assert room.result is not None
+        assert room.result[0] == expected_reason
 
 
 @pytest.mark.asyncio
 async def test_sweep_step_grace_expired_yields_abandonment(sweep, app, clock):
-    rooms = app.state.rooms
-    await rooms.enqueue(client_uuid=ALICE, nickname="A", session_token="ta",
-                          time_minutes=5, increment_seconds=0, side_preference="white")
-    await rooms.enqueue(client_uuid=BOB, nickname="B", session_token="tb",
-                          time_minutes=5, increment_seconds=0, side_preference="black")
-    room = list(rooms._active.values())[0]
+    room = await _pair(app.state.rooms)
     room.started_at = clock()
     room.first_move_at = clock()
-    rooms.mark_disconnected(room.room_id, "white")
+    app.state.rooms.mark_disconnected(room.room_id, "white")
     clock.advance(61)
     await sweep.step_grace_expired()
     assert room.result == (Reason.ABANDONMENT, "black")
@@ -88,14 +86,10 @@ async def test_sweep_step_grace_expired_yields_abandonment(sweep, app, clock):
 
 @pytest.mark.asyncio
 async def test_sweep_step_drop_orphans_pre_game(sweep, app, clock):
-    # A paired pre-game room with no live ws is reaped only after the
-    # connect-grace window, so the clients' ws handshakes can land first.
-    # Within the grace the room survives; past it the room is dropped.
+    """A paired pre-game room with no live ws survives within the connect
+    grace (so client ws handshakes can still land) and is dropped past it."""
     rooms = app.state.rooms
-    await rooms.enqueue(client_uuid=ALICE, nickname="A", session_token="ta",
-                          time_minutes=5, increment_seconds=0, side_preference="white")
-    await rooms.enqueue(client_uuid=BOB, nickname="B", session_token="tb",
-                          time_minutes=5, increment_seconds=0, side_preference="black")
+    await _pair(rooms)
     assert rooms.rooms_active == 1
     sweep.step_drop_orphans_and_post_result()
     assert rooms.rooms_active == 1
@@ -106,14 +100,10 @@ async def test_sweep_step_drop_orphans_pre_game(sweep, app, clock):
 
 @pytest.mark.asyncio
 async def test_sweep_step_drop_orphans_skips_after_first_move(sweep, app, clock):
-    # After the first move, missing connections start the grace timer
-    # rather than triggering an immediate drop.
+    """After the first move a missing connection starts the grace timer
+    instead of dropping the room immediately."""
     rooms = app.state.rooms
-    await rooms.enqueue(client_uuid=ALICE, nickname="A", session_token="ta",
-                          time_minutes=5, increment_seconds=0, side_preference="white")
-    await rooms.enqueue(client_uuid=BOB, nickname="B", session_token="tb",
-                          time_minutes=5, increment_seconds=0, side_preference="black")
-    room = list(rooms._active.values())[0]
+    room = await _pair(rooms)
     room.first_move_at = clock()
     sweep.step_drop_orphans_and_post_result()
     assert rooms.rooms_active == 1
@@ -140,7 +130,7 @@ async def test_sweep_step_all_runs_in_documented_order(sweep, app, clock, monkey
     monkeypatch.setattr(sweep, "step_state_sync_beacon", _trace_beacon)
     monkeypatch.setattr(sweep, "step_drop_orphans_and_post_result", _trace_drop)
     monkeypatch.setattr(sweep.rooms, "gc_finished_rooms",
-                          lambda: calls.append("gc"))
+                        lambda: calls.append("gc"))
     await sweep.step_all()
     assert calls == ["clock_and_first_move", "grace", "state_sync_beacon",
                      "drop_orphans", "gc"]

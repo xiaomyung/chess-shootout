@@ -73,12 +73,12 @@ def _auth_msg(token):
 
 
 def test_health_returns_zero_rooms_initially(client):
+    """/healthz exposes status, rooms_active, queue_depth, uptime_s, version."""
     r = client.get("/healthz")
     assert r.status_code == 200
     body = r.json()
     assert body["status"] == "ok"
     assert body["rooms_active"] == 0
-    # Expanded /healthz: queue_depth, uptime_s, version are all present.
     assert body["queue_depth"] == 0
     assert body["uptime_s"] >= 0.0
     assert body["version"] == PROTOCOL_VERSION
@@ -91,22 +91,30 @@ def test_matchmake_returns_room_and_token(client):
     assert "room_id" in body and "session_token" in body
 
 
-def test_matchmake_rejects_invalid_time_control(client):
-    r = _matchmake(client, time=0)
-    assert r.status_code == 422
-    r = client.post("/matchmake", json={
-        "version": PROTOCOL_VERSION, "client_uuid": ZED, "nickname": "Z",
-        "time_minutes": 5, "increment_seconds": -1,
-    })
-    assert r.status_code == 422
-
-
-def test_matchmake_rejects_invalid_nickname(client):
-    r = client.post("/matchmake", json={
-        "version": PROTOCOL_VERSION, "client_uuid": ZED,
-        "nickname": "", "time_minutes": 5, "increment_seconds": 0,
-    })
-    assert r.status_code == 422
+@pytest.mark.parametrize(
+    "body",
+    [
+        pytest.param(
+            {"version": PROTOCOL_VERSION, "client_uuid": ALICE, "nickname": "Alice",
+             "time_minutes": 0, "increment_seconds": 0, "side_preference": "random"},
+            id="zero_time_minutes",
+        ),
+        pytest.param(
+            {"version": PROTOCOL_VERSION, "client_uuid": ZED, "nickname": "Z",
+             "time_minutes": 5, "increment_seconds": -1},
+            id="negative_increment",
+        ),
+        pytest.param(
+            {"version": PROTOCOL_VERSION, "client_uuid": ZED,
+             "nickname": "", "time_minutes": 5, "increment_seconds": 0},
+            id="empty_nickname",
+        ),
+    ],
+)
+def test_matchmake_rejects_invalid_field(client, body):
+    """Each invalid matchmake field is rejected with 422 before any room is created."""
+    assert client.post("/matchmake", json=body).status_code == 422
+    assert client.get("/healthz").json()["rooms_active"] == 0
 
 
 def test_matchmake_rejects_already_in_game(client):
@@ -118,6 +126,7 @@ def test_matchmake_rejects_already_in_game(client):
 
 
 def test_cancel_matchmake_removes_from_queue(client):
+    """Cancelling frees the uuid: it can re-matchmake afterwards."""
     r = _matchmake(client, uuid=ALICE)
     body = r.json()
     cancel = client.request("DELETE", "/matchmake", json={
@@ -125,7 +134,6 @@ def test_cancel_matchmake_removes_from_queue(client):
         "room_id": body["room_id"], "session_token": body["session_token"],
     })
     assert cancel.status_code == 200
-    # Same uuid can re-matchmake afterwards.
     r2 = _matchmake(client, uuid=ALICE)
     assert r2.status_code == 200
 
@@ -330,13 +338,13 @@ async def test_clock_flag_during_play_broadcasts_timeout(app, clock):
 
 @pytest.mark.asyncio
 async def test_grace_expiry_yields_abandonment(app, clock):
+    """first_move_at set skips the abort window; grace expiry awards the opponent."""
     rooms = app.state.rooms
     await rooms.enqueue(client_uuid=ALICE, nickname="A", session_token="ta",
                         time_minutes=5, increment_seconds=0, side_preference="white")
     await rooms.enqueue(client_uuid=BOB, nickname="B", session_token="tb",
                         time_minutes=5, increment_seconds=0, side_preference="black")
     room = list(rooms._active.values())[0]
-    # Pretend a move was already made — this skips the first-move-abort window.
     room.started_at = clock()
     room.first_move_at = clock()
     rooms.mark_disconnected(room.room_id, "white")
@@ -347,10 +355,9 @@ async def test_grace_expiry_yields_abandonment(app, clock):
 
 @pytest.mark.asyncio
 async def test_resume_ticks_clock_before_snapshotting(app, client, clock):
-    # /resume must reflect elapsed time as of the request — not the value
-    # from the last 0.1 s sweep tick. Without an explicit tick before the
-    # snapshot, the response can lag the truth by up to a sweep interval,
-    # and a slow client (or a scheduler hiccup) can stretch that further.
+    """/resume ticks the clock before snapshotting, so its reply reflects elapsed
+    time as of the request rather than the last sweep tick (a stale snapshot would
+    return the pre-advance white_remaining)."""
     random.seed(0)
     rooms = app.state.rooms
     await rooms.enqueue(client_uuid=ALICE, nickname="A", session_token="ta",
@@ -360,10 +367,6 @@ async def test_resume_ticks_clock_before_snapshotting(app, client, clock):
     room = list(rooms._active.values())[0]
     room.started_at = clock()
     room.first_move_at = clock()
-    # White is to move; setup_clock starts the white clock at the current
-    # FakeClock instant. Advancing the clock by 7 s without firing a sweep
-    # leaves room.backend.clock.white_remaining stale at 300.0 — until the
-    # /resume handler ticks it.
     initial_white = room.backend.clock.white_remaining
     clock.advance(7)
     r = client.post("/resume", json={
@@ -373,7 +376,5 @@ async def test_resume_ticks_clock_before_snapshotting(app, client, clock):
     })
     assert r.status_code == 200
     snap = r.json()["clock"]
-    # Stale snapshot would have been initial_white (300.0). Fresh tick
-    # subtracts the 7 s the FakeClock advanced.
     assert snap["white_remaining"] == pytest.approx(initial_white - 7, abs=0.01)
     assert snap["running_for"] == "white"

@@ -1,27 +1,26 @@
-"""M18a: protocol-boundary validation + per-uuid /reclaim limit + /healthz.
+"""M18a protocol-boundary validation: UUID4 rejection (model + route layers),
+the per-uuid /reclaim sliding-window limit, and the expanded /healthz fields.
 
-Pydantic now rejects non-UUID4 client_uuid / room_id at the route boundary,
-the WS endpoint short-circuits when the path param doesn't look like a
-UUID4, /reclaim is throttled to 5/min per uuid in addition to slowapi's
-30/min/IP cap, and /healthz returns the new (queue_depth, uptime_s,
-version) fields.
+Two distinct layers are exercised on purpose: the Pydantic models reject
+non-UUID4 ids with a ValidationError, and the FastAPI routes map that into an
+HTTP 422 — keep both, they verify different seams.
 """
 import json
 
+import pydantic
 import pytest
 from fastapi.testclient import TestClient
+from starlette.websockets import WebSocketDisconnect
 
 from server.app import (
     PROTOCOL_VERSION, RECLAIM_PER_UUID_LIMIT_PER_MINUTE, UuidRateLimiter,
-    create_app,
+    WS_CLOSE_INVALID_TOKEN, create_app,
 )
 from server.protocol import (
-    CancelMatchmakeRequest, MatchmakeRequest, ReclaimRequest, ResumeRequest,
-    is_uuid4,
+    CancelMatchmakeRequest, MatchmakeRequest, Reason, ReclaimRequest,
+    ResumeRequest, is_uuid4,
 )
 from tests.helpers import FakeClock, fake_uuid4
-
-import pydantic
 
 
 ALICE = fake_uuid4(1)
@@ -29,53 +28,67 @@ BOB = fake_uuid4(2)
 ROOM = fake_uuid4(100)
 
 
-# ---- is_uuid4 helper --------------------------------------------------------
-
-def test_is_uuid4_accepts_canonical_v4_strings():
-    # Generated UUIDs from python's uuid module satisfy the regex.
-    import uuid
-    for _ in range(8):
-        assert is_uuid4(str(uuid.uuid4()))
-
-
-def test_is_uuid4_rejects_short_or_malformed_strings():
-    bad = ["", "alice", "aaaa", "not-a-uuid",
-           "00000000-0000-0000-0000-000000000000",  # version nibble != 4
-           "00000000-0000-4000-0000-000000000000",  # variant nibble not in 8/9/a/b
-           None, 42, ["uuid"]]
-    for b in bad:
-        assert not is_uuid4(b), f"unexpectedly accepted {b!r}"
+@pytest.mark.parametrize(
+    "value",
+    [
+        pytest.param("00000000-0000-4000-8000-000000000000", id="variant_8"),
+        pytest.param("12345678-1234-4234-9234-123456789abc", id="variant_9"),
+        pytest.param("f47ac10b-58cc-4372-a567-0e02b2c3d479", id="variant_a"),
+        pytest.param("abcdef01-2345-4678-bcde-f01234567890", id="variant_b"),
+        pytest.param(ALICE, id="fake_uuid4_seed_1"),
+        pytest.param(ROOM, id="fake_uuid4_seed_100"),
+    ],
+)
+def test_is_uuid4_accepts_canonical_v4_strings(value):
+    assert is_uuid4(value)
 
 
-# ---- Pydantic UUID4 validation on each request model ------------------------
+@pytest.mark.parametrize(
+    "value",
+    [
+        pytest.param("", id="empty"),
+        pytest.param("alice", id="alpha_word"),
+        pytest.param("aaaa", id="too_short"),
+        pytest.param("not-a-uuid", id="hyphenated_word"),
+        pytest.param("00000000-0000-0000-0000-000000000000", id="version_nibble_not_4"),
+        pytest.param("00000000-0000-4000-0000-000000000000", id="variant_nibble_not_8_9_a_b"),
+        pytest.param(None, id="none"),
+        pytest.param(42, id="int"),
+        pytest.param(["uuid"], id="list"),
+    ],
+)
+def test_is_uuid4_rejects_short_or_malformed_values(value):
+    assert not is_uuid4(value)
 
-def test_matchmake_request_rejects_non_uuid4_client_uuid():
+
+@pytest.mark.parametrize(
+    "build",
+    [
+        pytest.param(
+            lambda: MatchmakeRequest(nickname="Alice", client_uuid="alice",
+                                     time_minutes=5, increment_seconds=0),
+            id="matchmake_client_uuid",
+        ),
+        pytest.param(lambda: ReclaimRequest(client_uuid="alice"), id="reclaim_client_uuid"),
+        pytest.param(
+            lambda: ResumeRequest(room_id="my-room", session_token="t"),
+            id="resume_room_id",
+        ),
+        pytest.param(
+            lambda: CancelMatchmakeRequest(room_id="my-room", session_token="t"),
+            id="cancel_matchmake_room_id",
+        ),
+    ],
+)
+def test_request_model_rejects_non_uuid4(build):
     with pytest.raises(pydantic.ValidationError):
-        MatchmakeRequest(nickname="Alice", client_uuid="alice",
-                         time_minutes=5, increment_seconds=0)
-
-
-def test_reclaim_request_rejects_non_uuid4_client_uuid():
-    with pytest.raises(pydantic.ValidationError):
-        ReclaimRequest(client_uuid="alice")
-
-
-def test_resume_request_rejects_non_uuid4_room_id():
-    with pytest.raises(pydantic.ValidationError):
-        ResumeRequest(room_id="my-room", session_token="t")
-
-
-def test_cancel_matchmake_request_rejects_non_uuid4_room_id():
-    with pytest.raises(pydantic.ValidationError):
-        CancelMatchmakeRequest(room_id="my-room", session_token="t")
+        build()
 
 
 def test_resume_request_accepts_valid_uuid4_room_id():
     req = ResumeRequest(room_id=ROOM, session_token="t")
     assert req.room_id == ROOM
 
-
-# ---- Route-level rejection (HTTP 422) ---------------------------------------
 
 @pytest.fixture
 def clock():
@@ -87,53 +100,52 @@ def client(clock):
     return TestClient(create_app(now_provider=clock, max_rooms=8))
 
 
-def test_matchmake_returns_422_when_client_uuid_is_garbage(client):
-    r = client.post("/matchmake", json={
-        "version": PROTOCOL_VERSION, "client_uuid": "alice",
-        "nickname": "Alice", "time_minutes": 5, "increment_seconds": 0,
-    })
-    assert r.status_code == 422
+@pytest.mark.parametrize(
+    "method, route, payload, expected_status",
+    [
+        pytest.param(
+            "POST", "/matchmake",
+            {"version": PROTOCOL_VERSION, "client_uuid": "alice",
+             "nickname": "Alice", "time_minutes": 5, "increment_seconds": 0},
+            422, id="matchmake_garbage_client_uuid",
+        ),
+        pytest.param(
+            "POST", "/resume",
+            {"version": PROTOCOL_VERSION, "room_id": "not-a-uuid", "session_token": "x"},
+            422, id="resume_garbage_room_id",
+        ),
+        pytest.param(
+            "POST", "/reclaim",
+            {"version": PROTOCOL_VERSION, "client_uuid": "u1"},
+            422, id="reclaim_garbage_client_uuid",
+        ),
+        pytest.param(
+            "DELETE", "/matchmake",
+            {"version": PROTOCOL_VERSION, "room_id": "blah", "session_token": "t"},
+            422, id="cancel_matchmake_garbage_room_id",
+        ),
+    ],
+)
+def test_route_rejects_non_uuid4_payload(client, method, route, payload, expected_status):
+    r = client.request(method, route, json=payload)
+    assert r.status_code == expected_status
 
 
-def test_resume_returns_422_when_room_id_is_garbage(client):
-    r = client.post("/resume", json={
-        "version": PROTOCOL_VERSION,
-        "room_id": "not-a-uuid", "session_token": "x",
-    })
-    assert r.status_code == 422
-
-
-def test_reclaim_returns_422_when_client_uuid_is_garbage(client):
-    r = client.post("/reclaim", json={
-        "version": PROTOCOL_VERSION, "client_uuid": "u1",
-    })
-    assert r.status_code == 422
-
-
-def test_cancel_matchmake_returns_422_when_room_id_is_garbage(client):
-    r = client.request("DELETE", "/matchmake", json={
-        "version": PROTOCOL_VERSION,
-        "room_id": "blah", "session_token": "t",
-    })
-    assert r.status_code == 422
-
-
-def test_ws_rejects_garbage_room_id_in_path(client):
-    # The WS endpoint validates the path param up-front and closes before
-    # accepting any frame. The client must not get a successful auth.
-    with pytest.raises(Exception):
+def test_ws_closes_with_invalid_token_on_garbage_room_id_path(client):
+    """The WS endpoint validates the path param up-front and closes (code 4000)
+    before accepting any frame, so the client never gets a successful auth."""
+    with pytest.raises(WebSocketDisconnect) as excinfo:
         with client.websocket_connect("/ws/not-a-uuid") as ws:
             ws.send_text(json.dumps({"version": PROTOCOL_VERSION,
-                                      "type": "auth", "session_token": "t"}))
+                                     "type": "auth", "session_token": "t"}))
             ws.receive_text()
+    assert excinfo.value.code == WS_CLOSE_INVALID_TOKEN
 
-
-# ---- Per-uuid /reclaim rate limit ------------------------------------------
 
 def test_reclaim_per_uuid_rate_limited_after_burst(client):
-    # The 5th call still goes through (NOT_IN_ROOM since the uuid isn't in a
-    # room), but the 6th is short-circuited with 429 rate_limited regardless
-    # of room state.
+    """The 5th call still resolves (404 NOT_IN_ROOM since the uuid isn't in a
+    room); the 6th is short-circuited with 429 rate_limited regardless of room
+    state."""
     for _ in range(RECLAIM_PER_UUID_LIMIT_PER_MINUTE):
         r = client.post("/reclaim", json={
             "version": PROTOCOL_VERSION, "client_uuid": ALICE,
@@ -143,14 +155,11 @@ def test_reclaim_per_uuid_rate_limited_after_burst(client):
         "version": PROTOCOL_VERSION, "client_uuid": ALICE,
     })
     assert r.status_code == 429
-    body = r.json()
-    # Detail-wrapping mirrors the convention used by the rest of the
-    # HTTPException sites in app.py.
-    assert body.get("detail", {}).get("reason") == "rate_limited"
+    assert r.json().get("detail", {}).get("reason") == Reason.RATE_LIMITED
 
 
 def test_reclaim_limit_is_per_uuid_independent(client):
-    # Burst on Alice — Bob's first call still goes through.
+    """Bursting Alice past the cap leaves Bob's first call unthrottled."""
     for _ in range(RECLAIM_PER_UUID_LIMIT_PER_MINUTE):
         client.post("/reclaim", json={
             "version": PROTOCOL_VERSION, "client_uuid": ALICE,
@@ -158,23 +167,20 @@ def test_reclaim_limit_is_per_uuid_independent(client):
     r = client.post("/reclaim", json={
         "version": PROTOCOL_VERSION, "client_uuid": BOB,
     })
-    # Bob hits NOT_IN_ROOM (404), not rate_limited (429).
     assert r.status_code == 404
 
 
 def test_reclaim_window_slides_releases_capacity(clock):
-    # UuidRateLimiter is a sliding 60s window. Drive it directly with the fake
-    # clock to verify the release behaviour without relying on real time.
+    """UuidRateLimiter is a sliding 60s window — driven directly with the fake
+    clock to verify capacity is released without relying on real time."""
     limiter = UuidRateLimiter(limit_per_minute=5, window_seconds=60.0,
-                                now_provider=clock)
+                              now_provider=clock)
     for _ in range(5):
         assert limiter.hit("u")
     assert not limiter.hit("u")
     clock.advance(61)
     assert limiter.hit("u")
 
-
-# ---- Expanded /healthz ------------------------------------------------------
 
 def test_healthz_includes_version_field(client):
     body = client.get("/healthz").json()
@@ -184,7 +190,6 @@ def test_healthz_includes_version_field(client):
 def test_healthz_includes_queue_depth_and_uptime(clock, client):
     body = client.get("/healthz").json()
     assert body["queue_depth"] == 0
-    # Initial uptime tied to the fake clock — both are zero at TestClient init.
     assert body["uptime_s"] == pytest.approx(0.0, abs=1e-6)
     clock.advance(7.5)
     body = client.get("/healthz").json()
@@ -192,8 +197,8 @@ def test_healthz_includes_queue_depth_and_uptime(clock, client):
 
 
 def test_healthz_queue_depth_reflects_pending_room(clock, client):
-    # One unpaired matchmake request → queue_depth bumps to 1 until a peer
-    # arrives.
+    """One unpaired matchmake bumps queue_depth to 1; the peer pairs it into a
+    room, draining the queue and incrementing rooms_active."""
     r = client.post("/matchmake", json={
         "version": PROTOCOL_VERSION, "client_uuid": ALICE,
         "nickname": "Alice", "time_minutes": 5, "increment_seconds": 0,
@@ -202,7 +207,6 @@ def test_healthz_queue_depth_reflects_pending_room(clock, client):
     body = client.get("/healthz").json()
     assert body["queue_depth"] == 1
     assert body["rooms_active"] == 0
-    # When Bob pairs in, the queue empties and rooms_active goes up.
     client.post("/matchmake", json={
         "version": PROTOCOL_VERSION, "client_uuid": BOB,
         "nickname": "Bob", "time_minutes": 5, "increment_seconds": 0,
