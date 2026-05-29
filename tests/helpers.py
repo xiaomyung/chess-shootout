@@ -57,6 +57,33 @@ def play_moves(backend, moves):
     return last
 
 
+def sq_of(algebraic):
+    """Algebraic square like "e4" -> Square. Rank 8 is row 0, file a is col 0."""
+    col = "abcdefgh".index(algebraic[0])
+    row = 8 - int(algebraic[1])
+    return Square(row, col)
+
+
+def squares(text):
+    """Space-separated algebraic squares -> set of Squares ("" -> empty set)."""
+    return {sq_of(token) for token in text.split()}
+
+
+def assert_legal_moves(backend, from_sq, expected):
+    """Assert legal destinations from from_sq equal expected, exactly.
+
+    from_sq and expected accept algebraic strings ("d4", "c6 e6 b5") or a
+    Square / iterable of Squares, so exact move-set checks stay terse.
+    """
+    if isinstance(from_sq, str):
+        from_sq = sq_of(from_sq)
+    expected = squares(expected) if isinstance(expected, str) else set(expected)
+    actual = set(backend.legal_moves_from(from_sq))
+    assert actual == expected, (
+        f"from {from_sq}: missing={expected - actual} extra={actual - expected}"
+    )
+
+
 class FakeClock:
     """Monotonic clock stand-in for server-room/app tests. Advances explicitly."""
 

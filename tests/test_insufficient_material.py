@@ -1,3 +1,4 @@
+import pytest
 
 from backend.backend import Backend
 from frontend.pgn.load import parse_pgn
@@ -7,103 +8,107 @@ from tests.helpers import (
 )
 
 
-def test_kvk_is_draw():
-    bk = make_backend({sq(7, 4): piece(K, WHITE), sq(0, 4): piece(K, BLACK)})
-    assert bk.game_result() == "draw_insufficient_material"
-
-
-def test_kbvk_is_draw():
-    bk = make_backend({
-        sq(7, 4): piece(K, WHITE),
-        sq(7, 5): piece(B, WHITE),
-        sq(0, 4): piece(K, BLACK),
-    })
-    assert bk.game_result() == "draw_insufficient_material"
-
-
-def test_knvk_is_draw():
-    bk = make_backend({
-        sq(7, 4): piece(K, WHITE),
-        sq(7, 6): piece(N, WHITE),
-        sq(0, 4): piece(K, BLACK),
-    })
-    assert bk.game_result() == "draw_insufficient_material"
-
-
-def test_kbvkb_same_color_is_draw():
-    # Both bishops on light squares: a1 (sum 7+0=7 odd) and h8 (0+7=7 odd) — same color.
-    bk = make_backend({
-        sq(7, 4): piece(K, WHITE),
-        sq(7, 0): piece(B, WHITE),
-        sq(0, 4): piece(K, BLACK),
-        sq(0, 7): piece(B, BLACK),
-    })
-    assert bk.game_result() == "draw_insufficient_material"
-
-
-def test_kbvkb_opposite_color_not_draw():
-    # White bishop on a1 (odd), black bishop on a8 (0+0=0 even) — opposite colors.
-    bk = make_backend({
-        sq(7, 4): piece(K, WHITE),
-        sq(7, 0): piece(B, WHITE),
-        sq(0, 0): piece(B, BLACK),
-        sq(0, 4): piece(K, BLACK),
-    })
-    assert bk.game_result() != "draw_insufficient_material"
-
-
-def test_knvkn_is_draw():
-    # FIDE-strict allows a helpmate, but the project follows lichess/chess.com
-    # convention: K+N v K+N has no forced mate, so we auto-draw it.
-    bk = make_backend({
-        sq(7, 4): piece(K, WHITE),
-        sq(7, 6): piece(N, WHITE),
-        sq(0, 4): piece(K, BLACK),
-        sq(0, 1): piece(N, BLACK),
-    })
-    assert bk.game_result() == "draw_insufficient_material"
-
-
-def test_knn_v_k_is_draw():
-    # FIDE 5.2.2: two knights cannot force checkmate against a lone king.
-    bk = make_backend({
-        sq(7, 4): piece(K, WHITE),
-        sq(7, 1): piece(N, WHITE),
-        sq(7, 6): piece(N, WHITE),
-        sq(0, 4): piece(K, BLACK),
-    })
-    assert bk.game_result() == "draw_insufficient_material"
-
-
-def test_kbn_v_k_not_draw():
-    # K+B+N v K is sufficient — bishop-and-knight mate exists.
-    bk = make_backend({
-        sq(7, 4): piece(K, WHITE),
-        sq(7, 5): piece(B, WHITE),
-        sq(7, 6): piece(N, WHITE),
-        sq(0, 4): piece(K, BLACK),
-    })
-    assert bk.game_result() != "draw_insufficient_material"
-
-
-def test_kbb_v_k_not_draw():
-    # K with two bishops on any colors v lone K — sufficient material; mate exists.
-    bk = make_backend({
-        sq(7, 4): piece(K, WHITE),
-        sq(7, 0): piece(B, WHITE),
-        sq(7, 7): piece(B, WHITE),
-        sq(0, 4): piece(K, BLACK),
-    })
-    assert bk.game_result() != "draw_insufficient_material"
-
-
-def test_kp_v_k_not_draw():
-    bk = make_backend({
-        sq(7, 4): piece(K, WHITE),
-        sq(6, 0): piece(P, WHITE),
-        sq(0, 4): piece(K, BLACK),
-    })
-    assert bk.game_result() != "draw_insufficient_material"
+@pytest.mark.parametrize(
+    "piece_map, expected",
+    [
+        pytest.param(
+            {sq(7, 4): piece(K, WHITE), sq(0, 4): piece(K, BLACK)},
+            "draw_insufficient_material",
+            id="kvk_draw",
+        ),
+        pytest.param(
+            {
+                sq(7, 4): piece(K, WHITE),
+                sq(7, 5): piece(B, WHITE),
+                sq(0, 4): piece(K, BLACK),
+            },
+            "draw_insufficient_material",
+            id="kb_v_k_draw",
+        ),
+        pytest.param(
+            {
+                sq(7, 4): piece(K, WHITE),
+                sq(7, 6): piece(N, WHITE),
+                sq(0, 4): piece(K, BLACK),
+            },
+            "draw_insufficient_material",
+            id="kn_v_k_draw",
+        ),
+        pytest.param(
+            {
+                sq(7, 4): piece(K, WHITE),
+                sq(7, 0): piece(B, WHITE),
+                sq(0, 4): piece(K, BLACK),
+                sq(0, 7): piece(B, BLACK),
+            },
+            "draw_insufficient_material",
+            id="kb_v_kb_same_square_color_draw",
+        ),
+        pytest.param(
+            {
+                sq(7, 4): piece(K, WHITE),
+                sq(7, 6): piece(N, WHITE),
+                sq(0, 4): piece(K, BLACK),
+                sq(0, 1): piece(N, BLACK),
+            },
+            "draw_insufficient_material",
+            id="kn_v_kn_draw_lichess_convention",
+        ),
+        pytest.param(
+            {
+                sq(7, 4): piece(K, WHITE),
+                sq(7, 1): piece(N, WHITE),
+                sq(7, 6): piece(N, WHITE),
+                sq(0, 4): piece(K, BLACK),
+            },
+            "draw_insufficient_material",
+            id="knn_v_k_draw_fide_5_2_2",
+        ),
+        pytest.param(
+            {
+                sq(7, 4): piece(K, WHITE),
+                sq(7, 0): piece(B, WHITE),
+                sq(0, 0): piece(B, BLACK),
+                sq(0, 4): piece(K, BLACK),
+            },
+            None,
+            id="kb_v_kb_opposite_square_color_not_draw",
+        ),
+        pytest.param(
+            {
+                sq(7, 4): piece(K, WHITE),
+                sq(7, 5): piece(B, WHITE),
+                sq(7, 6): piece(N, WHITE),
+                sq(0, 4): piece(K, BLACK),
+            },
+            None,
+            id="kbn_v_k_mate_exists_not_draw",
+        ),
+        pytest.param(
+            {
+                sq(7, 4): piece(K, WHITE),
+                sq(7, 0): piece(B, WHITE),
+                sq(7, 7): piece(B, WHITE),
+                sq(0, 4): piece(K, BLACK),
+            },
+            None,
+            id="kbb_v_k_mate_exists_not_draw",
+        ),
+        pytest.param(
+            {
+                sq(7, 4): piece(K, WHITE),
+                sq(6, 0): piece(P, WHITE),
+                sq(0, 4): piece(K, BLACK),
+            },
+            None,
+            id="kp_v_k_not_draw",
+        ),
+    ],
+)
+def test_insufficient_material(piece_map, expected):
+    """FIDE auto-draw set: lone B/N and KN v KN/KNN v K draw; same-square-color
+    opposite bishops draw; KBN/KBB/KP keep mating chances so game_result() is None."""
+    assert make_backend(piece_map).game_result() == expected
 
 
 _KN_VS_KN_PGN = """\
@@ -126,9 +131,8 @@ e4 15. Rxg6 Bxe3 16. Rg3 Nd4 17. Rxe3 Nxc2 18. Nc3 Bxb5 19. Rf3 e3 20. Rxe3 Nxe3
 
 
 def test_replay_pgn_kn_vs_kn_auto_draws():
-    # Regression for the saved game that decayed to K+N v K+N but kept playing.
-    # After 35... Nxh7 the position is K+N v K+N — engine must auto-draw at
-    # ply 70 (the saved PGN incorrectly continued with 36. Nd5+ Kd6).
+    """Regression: a saved game decayed to K+N v K+N at ply 70 (35... Nxh7) but
+    the PGN kept playing; the engine must auto-draw there, not at 36. Nd5+."""
     parsed = parse_pgn(_KN_VS_KN_PGN)
     bk = Backend()
     bk.new_game()

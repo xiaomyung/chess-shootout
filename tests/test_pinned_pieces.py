@@ -5,20 +5,18 @@ from tests.helpers import (
 
 
 def test_absolute_pin_blocks_move_off_line():
-    # White king on e1, white knight on e2, black rook on e8 pins the knight.
+    """A knight pinned to its king by a rook on the same file has no legal move."""
     bk = make_backend({
         sq(7, 4): piece(K, WHITE),
         sq(6, 4): piece(N, WHITE),
         sq(0, 4): piece(R, BLACK),
         sq(0, 0): piece(K, BLACK),
     })
-    moves = bk.legal_moves_from(sq(6, 4))
-    # Knight cannot move at all (any knight move leaves king exposed).
-    assert moves == []
+    assert bk.legal_moves_from(sq(6, 4)) == []
 
 
 def test_pinned_rook_can_move_along_pin_line():
-    # White rook pinned along the e-file by black queen — can move within the pin.
+    """A rook pinned along the e-file may slide anywhere on the line, including the capture."""
     bk = make_backend({
         sq(7, 4): piece(K, WHITE),
         sq(6, 4): piece(R, WHITE),
@@ -26,29 +24,16 @@ def test_pinned_rook_can_move_along_pin_line():
         sq(0, 0): piece(K, BLACK),
     })
     moves = set(bk.legal_moves_from(sq(6, 4)))
-    # Rook can capture the queen or move to any e-file square between.
-    assert sq(0, 4) in moves
-    assert sq(5, 4) in moves
-    # But cannot leave the e-file.
-    assert sq(6, 5) not in moves
+    assert moves == {sq(5, 4), sq(4, 4), sq(3, 4), sq(2, 4), sq(1, 4), sq(0, 4)}
 
 
 def test_check_must_be_addressed():
-    # Black rook on e3 gives check to white king on e1; white must block, capture, or move out.
+    """In check from a rook on the e-file, only king escapes off the line are legal."""
     bk = make_backend({
         sq(7, 4): piece(K, WHITE),
-        sq(7, 0): piece(R, WHITE),  # rook on a1 — only reaches the e-file by moving.
+        sq(7, 0): piece(R, WHITE),
         sq(5, 4): piece(R, BLACK),
         sq(0, 0): piece(K, BLACK),
     })
-    # White rook on a1 cannot block (can't reach e-file in one move) but king can move.
-    # Verify only king-escape moves are legal for the king and the rook has no rescue.
-    king_moves = set(bk.legal_moves_from(sq(7, 4)))
-    # King can move to d1 or f1 (not blocked, not on e-file).
-    assert sq(7, 3) in king_moves
-    assert sq(7, 5) in king_moves
-    # Rook on a1 has no move that addresses the check; the e-file is out of reach.
-    rook_moves = set(bk.legal_moves_from(sq(7, 0)))
-    # Anything that doesn't address check is illegal — only blocking on the e-file counts.
-    # The rook on a1 cannot reach the e-file in one move, so it has no legal moves.
-    assert rook_moves == set()
+    assert set(bk.legal_moves_from(sq(7, 4))) == {sq(7, 3), sq(7, 5), sq(6, 3), sq(6, 5)}
+    assert bk.legal_moves_from(sq(7, 0)) == []

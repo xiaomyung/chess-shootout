@@ -1,146 +1,93 @@
+import pytest
+
 from tests.helpers import (
     BLACK, WHITE, K, Q, R, B, N, P,
-    make_backend, piece, sq,
+    assert_legal_moves, make_backend, piece, sq,
 )
 
 
-def test_knight_open_board_eight_moves():
-    # Knight on d4 (row 4, col 3) on an empty board should have 8 moves.
-    bk = make_backend({
-        sq(4, 3): piece(N, WHITE),
-        sq(7, 4): piece(K, WHITE),
-        sq(0, 4): piece(K, BLACK),
-    })
-    moves = bk.legal_moves_from(sq(4, 3))
-    assert len(moves) == 8
+@pytest.mark.parametrize(
+    "pieces, from_sq, expected",
+    [
+        pytest.param(
+            {sq(4, 3): piece(N, WHITE), sq(7, 4): piece(K, WHITE), sq(0, 4): piece(K, BLACK)},
+            "d4", "c6 e6 b5 f5 b3 f3 c2 e2",
+            id="knight_open_board_eight_moves",
+        ),
+        pytest.param(
+            {sq(7, 0): piece(N, WHITE), sq(7, 4): piece(K, WHITE), sq(0, 4): piece(K, BLACK)},
+            "a1", "b3 c2",
+            id="knight_corner_two_moves",
+        ),
+        pytest.param(
+            {sq(4, 3): piece(B, WHITE), sq(2, 5): piece(P, WHITE),
+             sq(7, 4): piece(K, WHITE), sq(0, 4): piece(K, BLACK)},
+            "d4", "a7 b6 c5 e5 c3 e3 b2 f2 a1 g1",
+            id="bishop_stops_short_of_friendly_blocker",
+        ),
+        pytest.param(
+            {sq(4, 3): piece(B, WHITE), sq(2, 5): piece(P, BLACK),
+             sq(7, 4): piece(K, WHITE), sq(0, 4): piece(K, BLACK)},
+            "d4", "a7 b6 c5 e5 f6 c3 e3 b2 f2 a1 g1",
+            id="bishop_captures_enemy_not_past_it",
+        ),
+        pytest.param(
+            {sq(4, 4): piece(R, WHITE), sq(7, 4): piece(K, WHITE), sq(0, 0): piece(K, BLACK)},
+            "e4", "e8 e7 e6 e5 a4 b4 c4 d4 f4 g4 h4 e3 e2",
+            id="rook_horizontal_and_vertical_king_blocks",
+        ),
+        pytest.param(
+            {sq(4, 4): piece(Q, WHITE), sq(7, 0): piece(K, WHITE), sq(0, 7): piece(K, BLACK)},
+            "e4",
+            "a8 e8 b7 e7 h7 c6 e6 g6 d5 e5 f5 a4 b4 c4 d4 f4 g4 h4 d3 e3 f3 c2 e2 g2 b1 e1 h1",
+            id="queen_combines_rook_and_bishop_27",
+        ),
+        pytest.param(
+            {sq(4, 4): piece(K, WHITE), sq(0, 0): piece(K, BLACK)},
+            "e4", "d5 e5 f5 d4 f4 d3 e3 f3",
+            id="king_one_square_in_all_directions",
+        ),
+        pytest.param(
+            {sq(6, 4): piece(P, WHITE), sq(7, 4): piece(K, WHITE), sq(0, 4): piece(K, BLACK)},
+            "e2", "e3 e4",
+            id="pawn_single_and_double_push_from_start",
+        ),
+        pytest.param(
+            {sq(3, 4): piece(P, WHITE), sq(7, 4): piece(K, WHITE), sq(0, 4): piece(K, BLACK)},
+            "e5", "e6",
+            id="pawn_no_double_push_after_first_move",
+        ),
+        pytest.param(
+            {sq(4, 4): piece(P, WHITE), sq(3, 3): piece(P, BLACK), sq(3, 5): piece(P, BLACK),
+             sq(7, 4): piece(K, WHITE), sq(0, 4): piece(K, BLACK)},
+            "e4", "d5 e5 f5",
+            id="pawn_pushes_and_captures_both_diagonals",
+        ),
+        pytest.param(
+            {sq(6, 4): piece(P, WHITE), sq(5, 4): piece(P, BLACK),
+             sq(7, 4): piece(K, WHITE), sq(0, 4): piece(K, BLACK)},
+            "e2", "",
+            id="pawn_blocked_head_on_has_no_moves",
+        ),
+    ],
+)
+def test_legal_moves_match_piece_shape(pieces, from_sq, expected):
+    assert_legal_moves(make_backend(pieces), from_sq, expected)
 
 
-def test_knight_corner_two_moves():
-    # Knight on a1 has only 2 legal moves (b3, c2).
-    bk = make_backend({
-        sq(7, 0): piece(N, WHITE),
-        sq(7, 4): piece(K, WHITE),
-        sq(0, 4): piece(K, BLACK),
-    })
-    moves = bk.legal_moves_from(sq(7, 0))
-    assert set(moves) == {sq(5, 1), sq(6, 2)}
-
-
-def test_bishop_blocked_by_friendly():
-    # Bishop on d4, friendly pawn on f6 blocks the NE diagonal.
-    bk = make_backend({
-        sq(4, 3): piece(B, WHITE),
-        sq(2, 5): piece(P, WHITE),
-        sq(7, 4): piece(K, WHITE),
-        sq(0, 4): piece(K, BLACK),
-    })
-    moves = set(bk.legal_moves_from(sq(4, 3)))
-    assert sq(2, 5) not in moves
-    assert sq(3, 4) in moves
-    assert sq(1, 6) not in moves
-
-
-def test_bishop_captures_enemy():
-    bk = make_backend({
-        sq(4, 3): piece(B, WHITE),
-        sq(2, 5): piece(P, BLACK),
-        sq(7, 4): piece(K, WHITE),
-        sq(0, 4): piece(K, BLACK),
-    })
-    moves = set(bk.legal_moves_from(sq(4, 3)))
-    assert sq(2, 5) in moves
-    assert sq(1, 6) not in moves  # cannot pass through captured piece
-
-
-def test_rook_horizontal_and_vertical():
-    # Rook on e4, friendly king on e1. Up=4, down=2 (blocked by king), left=4, right=3.
-    bk = make_backend({
-        sq(4, 4): piece(R, WHITE),
-        sq(7, 4): piece(K, WHITE),
-        sq(0, 0): piece(K, BLACK),
-    })
-    moves = set(bk.legal_moves_from(sq(4, 4)))
-    assert len(moves) == 4 + 2 + 4 + 3
-    assert sq(7, 4) not in moves
-
-
-def test_queen_combines_rook_and_bishop():
-    bk = make_backend({
-        sq(4, 4): piece(Q, WHITE),
-        sq(7, 0): piece(K, WHITE),
-        sq(0, 7): piece(K, BLACK),
-    })
-    moves = bk.legal_moves_from(sq(4, 4))
-    assert len(moves) == 27  # max queen mobility on otherwise empty board
-
-
-def test_king_one_square_moves():
-    bk = make_backend({sq(4, 4): piece(K, WHITE), sq(0, 0): piece(K, BLACK)})
-    moves = set(bk.legal_moves_from(sq(4, 4)))
-    assert moves == {sq(3, 3), sq(3, 4), sq(3, 5), sq(4, 3), sq(4, 5), sq(5, 3), sq(5, 4), sq(5, 5)}
-
-
-def test_pawn_single_and_double_push_from_start():
-    bk = make_backend({
-        sq(6, 4): piece(P, WHITE),
-        sq(7, 4): piece(K, WHITE),
-        sq(0, 4): piece(K, BLACK),
-    })
-    moves = set(bk.legal_moves_from(sq(6, 4)))
-    assert moves == {sq(5, 4), sq(4, 4)}
-
-
-def test_pawn_no_double_push_after_first_move():
-    # Pawn on rank 5 (row 3) — only single push.
-    bk = make_backend({
-        sq(3, 4): piece(P, WHITE),
-        sq(7, 4): piece(K, WHITE),
-        sq(0, 4): piece(K, BLACK),
-    })
-    moves = set(bk.legal_moves_from(sq(3, 4)))
-    assert moves == {sq(2, 4)}
-
-
-def test_pawn_diagonal_capture():
-    bk = make_backend({
-        sq(4, 4): piece(P, WHITE),
-        sq(3, 3): piece(P, BLACK),
-        sq(3, 5): piece(P, BLACK),
-        sq(7, 4): piece(K, WHITE),
-        sq(0, 4): piece(K, BLACK),
-    })
-    moves = set(bk.legal_moves_from(sq(4, 4)))
-    assert sq(3, 3) in moves
-    assert sq(3, 5) in moves
-    assert sq(3, 4) in moves
-
-
-def test_pawn_blocked_cannot_push():
-    bk = make_backend({
-        sq(6, 4): piece(P, WHITE),
-        sq(5, 4): piece(P, BLACK),
-        sq(7, 4): piece(K, WHITE),
-        sq(0, 4): piece(K, BLACK),
-    })
-    moves = bk.legal_moves_from(sq(6, 4))
-    assert moves == []
-
-
-def test_pawn_does_not_attack_forward_square():
-    # Existing behavior: a pawn does not threaten its forward square.
+@pytest.mark.parametrize(
+    "target, expected",
+    [
+        pytest.param(sq(3, 4), False, id="pawn_does_not_attack_forward_square"),
+        pytest.param(sq(3, 3), True, id="pawn_attacks_left_diagonal"),
+        pytest.param(sq(3, 5), True, id="pawn_attacks_right_diagonal"),
+    ],
+)
+def test_pawn_attack_geometry(target, expected):
+    """A pawn threatens only its two forward diagonals, never the push square."""
     bk = make_backend({
         sq(4, 4): piece(P, WHITE),
         sq(7, 7): piece(K, WHITE),
         sq(0, 0): piece(K, BLACK),
     })
-    assert not bk._is_square_attacked(sq(3, 4), WHITE)
-
-
-def test_pawn_attacks_diagonals():
-    bk = make_backend({
-        sq(4, 4): piece(P, WHITE),
-        sq(7, 7): piece(K, WHITE),
-        sq(0, 0): piece(K, BLACK),
-    })
-    assert bk._is_square_attacked(sq(3, 3), WHITE)
-    assert bk._is_square_attacked(sq(3, 5), WHITE)
+    assert bk._is_square_attacked(target, WHITE) is expected
