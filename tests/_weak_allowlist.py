@@ -43,13 +43,6 @@ WEAK_ALLOWLIST = {
         "test_draw_smoke_with_low_time_fraction_and_flash": _SMOKE,
         "test_draw_smoke_without_badge_still_works": _SMOKE,
     },
-    "test_premove_highlight.py": {
-        "test_dragged_piece_renders_ghost_on_origin": _SMOKE,
-    },
-    "test_premoves_integration.py": {
-        "test_premove_highlight_smoke_multiple_premoves": _SMOKE,
-        "test_premove_highlight_smoke_one_premove": _SMOKE,
-    },
     "test_right_menu_scroll.py": {
         "test_indicator_fades_after_2s": _SMOKE,
     },

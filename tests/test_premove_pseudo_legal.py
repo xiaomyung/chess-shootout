@@ -1,202 +1,156 @@
-"""Pseudo-legal premove validation (bugs 13 + 15).
+"""Pseudo-legal premove validation (lax move-shape gate, bugs 13 + 15).
 
-A premove from→to is admissible iff a single piece of that type, alone on
-an empty board at `from`, could plausibly reach `to`. Pawns are direction-
-correct; knights L-shaped only; sliders along their lines; king 1-square
-box plus castle-from-home. Engine remains authoritative on fire.
+A premove from->to is admissible iff a single piece of that type, alone on an
+empty board at `from`, could plausibly reach `to` by shape alone: pawns
+direction-correct, knights L-shaped, sliders along their lines, king a 1-square
+box plus castle-from-home. This is intentionally LAX (no occupancy, no check) --
+the engine stays authoritative when the premove fires. Chain extension reuses
+the same gate from the speculative chain tip, so a multi-step premove chain must
+stay shape-legal at every hop.
 """
 
 import pytest
 
 from backend.pieces import (
     BLACK_KING_HOME_ROW, BLACK_PAWN_START_ROW, CASTLE_TARGET_COLS,
-    KING_HOME_COL, KNIGHT_OFFSETS, Piece, PieceColor, PieceType,
+    KING_HOME_COL, KING_OFFSETS, KNIGHT_OFFSETS, Piece, PieceColor, PieceType,
     WHITE_KING_HOME_ROW, WHITE_PAWN_START_ROW,
 )
 from backend.pseudo_legal import piece_can_pseudo_reach
 from backend.utils import BOARD_SIZE, Square
 
+from tests.helpers import sq, sq_of
 
-def sq(row, col):
-    return Square(row, col)
+WHITE = PieceColor.WHITE
+BLACK = PieceColor.BLACK
 
-
-# ---------- Sanity guards ----------
 
 @pytest.mark.parametrize("piece_type", list(PieceType))
 def test_same_square_rejected(piece_type):
-    piece = Piece(piece_type, PieceColor.WHITE)
-    assert piece_can_pseudo_reach(piece, sq(4, 4), sq(4, 4)) is False
+    p = Piece(piece_type, WHITE)
+    assert piece_can_pseudo_reach(p, sq(4, 4), sq(4, 4)) is False
 
 
 @pytest.mark.parametrize("piece_type", list(PieceType))
 def test_off_board_target_rejected(piece_type):
-    piece = Piece(piece_type, PieceColor.WHITE)
-    assert piece_can_pseudo_reach(piece, sq(4, 4), sq(-1, 4)) is False
-    assert piece_can_pseudo_reach(piece, sq(4, 4), sq(4, BOARD_SIZE)) is False
+    p = Piece(piece_type, WHITE)
+    assert piece_can_pseudo_reach(p, sq(4, 4), sq(-1, 4)) is False
+    assert piece_can_pseudo_reach(p, sq(4, 4), sq(4, BOARD_SIZE)) is False
 
 
-# ---------- Pawn ----------
-
-@pytest.mark.parametrize("color,start_row,one_forward", [
-    (PieceColor.WHITE, WHITE_PAWN_START_ROW, WHITE_PAWN_START_ROW - 1),
-    (PieceColor.BLACK, BLACK_PAWN_START_ROW, BLACK_PAWN_START_ROW + 1),
+@pytest.mark.parametrize("color, from_sq, to_sq, admissible", [
+    pytest.param(WHITE, sq(WHITE_PAWN_START_ROW, 4), sq(WHITE_PAWN_START_ROW - 1, 4),
+                 True, id="white_one_step_forward"),
+    pytest.param(BLACK, sq(BLACK_PAWN_START_ROW, 4), sq(BLACK_PAWN_START_ROW + 1, 4),
+                 True, id="black_one_step_forward"),
+    pytest.param(WHITE, sq(WHITE_PAWN_START_ROW, 4), sq(WHITE_PAWN_START_ROW - 2, 4),
+                 True, id="white_two_step_from_start_rank"),
+    pytest.param(WHITE, sq(4, 4), sq(2, 4), False, id="white_two_step_off_start_rank"),
+    pytest.param(WHITE, sq(4, 4), sq(5, 4), False, id="white_backward_rejected"),
+    pytest.param(BLACK, sq(4, 4), sq(3, 4), False, id="black_backward_rejected"),
+    pytest.param(WHITE, sq(4, 4), sq(3, 3), True, id="white_diagonal_left_capture"),
+    pytest.param(WHITE, sq(4, 4), sq(3, 5), True, id="white_diagonal_right_capture"),
+    pytest.param(WHITE, sq(4, 4), sq(2, 6), False, id="white_diagonal_two_squares_rejected"),
+    pytest.param(WHITE, sq(1, 4), sq(0, 4), True, id="white_forward_onto_last_rank_promo"),
+    pytest.param(BLACK, sq(6, 4), sq(7, 4), True, id="black_forward_onto_last_rank_promo"),
 ])
-def test_pawn_one_step_forward(color, start_row, one_forward):
-    piece = Piece(PieceType.PAWN, color)
-    assert piece_can_pseudo_reach(piece, sq(start_row, 4), sq(one_forward, 4)) is True
+def test_pawn_pseudo_reach(color, from_sq, to_sq, admissible):
+    p = Piece(PieceType.PAWN, color)
+    assert piece_can_pseudo_reach(p, from_sq, to_sq) is admissible
 
 
-def test_pawn_two_step_only_from_starting_rank():
-    white = Piece(PieceType.PAWN, PieceColor.WHITE)
-    # From starting rank: 2 forward OK.
-    assert piece_can_pseudo_reach(
-        white, sq(WHITE_PAWN_START_ROW, 4), sq(WHITE_PAWN_START_ROW - 2, 4),
-    )
-    # From any other rank: 2 forward rejected.
-    assert piece_can_pseudo_reach(white, sq(4, 4), sq(2, 4)) is False
+_KNIGHT_L = [
+    pytest.param(sq(4 + dr, 4 + dc), True, id=f"l_shape_{i}")
+    for i, (dr, dc) in enumerate(KNIGHT_OFFSETS)
+]
 
 
-def test_pawn_backward_rejected():
-    white = Piece(PieceType.PAWN, PieceColor.WHITE)
-    black = Piece(PieceType.PAWN, PieceColor.BLACK)
-    # White moves up (decreasing row); going down is rejected.
-    assert piece_can_pseudo_reach(white, sq(4, 4), sq(5, 4)) is False
-    # Black moves down (increasing row); going up is rejected.
-    assert piece_can_pseudo_reach(black, sq(4, 4), sq(3, 4)) is False
-
-
-def test_pawn_diagonal_capture_shape():
-    white = Piece(PieceType.PAWN, PieceColor.WHITE)
-    assert piece_can_pseudo_reach(white, sq(4, 4), sq(3, 3)) is True
-    assert piece_can_pseudo_reach(white, sq(4, 4), sq(3, 5)) is True
-
-
-def test_pawn_diagonal_two_squares_rejected():
-    white = Piece(PieceType.PAWN, PieceColor.WHITE)
-    assert piece_can_pseudo_reach(white, sq(4, 4), sq(2, 6)) is False
-
-
-def test_pawn_promotion_squares_admissible():
-    # Forward to last rank counts as a forward push of 1.
-    white = Piece(PieceType.PAWN, PieceColor.WHITE)
-    black = Piece(PieceType.PAWN, PieceColor.BLACK)
-    assert piece_can_pseudo_reach(white, sq(1, 4), sq(0, 4)) is True
-    assert piece_can_pseudo_reach(black, sq(6, 4), sq(7, 4)) is True
-
-
-# ---------- Knight ----------
-
-def test_knight_each_l_shape_offset_admissible():
-    knight = Piece(PieceType.KNIGHT, PieceColor.WHITE)
-    origin = sq(4, 4)
-    for drow, dcol in KNIGHT_OFFSETS:
-        target = sq(origin.row + drow, origin.col + dcol)
-        assert piece_can_pseudo_reach(knight, origin, target), \
-            f"knight L-shape ({drow},{dcol}) should be admissible"
-
-
-@pytest.mark.parametrize("target", [
-    Square(4, 0),  # same rank
-    Square(0, 4),  # same file
-    Square(0, 0),  # diagonal
-    Square(3, 3),  # one diagonal step
-    Square(4, 5),  # adjacent
+@pytest.mark.parametrize("to_sq, admissible", _KNIGHT_L + [
+    pytest.param(sq(4, 0), False, id="same_rank_rejected"),
+    pytest.param(sq(0, 4), False, id="same_file_rejected"),
+    pytest.param(sq(0, 0), False, id="diagonal_rejected"),
+    pytest.param(sq(3, 3), False, id="one_diagonal_step_rejected"),
+    pytest.param(sq(4, 5), False, id="adjacent_rejected"),
 ])
-def test_knight_non_l_rejected(target):
-    knight = Piece(PieceType.KNIGHT, PieceColor.WHITE)
-    assert piece_can_pseudo_reach(knight, sq(4, 4), target) is False
+def test_knight_pseudo_reach(to_sq, admissible):
+    p = Piece(PieceType.KNIGHT, WHITE)
+    assert piece_can_pseudo_reach(p, sq(4, 4), to_sq) is admissible
 
 
-# ---------- Bishop ----------
-
-@pytest.mark.parametrize("target", [
-    Square(0, 0), Square(7, 7), Square(7, 1), Square(1, 7), Square(3, 3),
+@pytest.mark.parametrize("to_sq, admissible", [
+    pytest.param(sq_of("a8"), True, id="diagonal_up_left"),
+    pytest.param(sq_of("h1"), True, id="diagonal_down_right"),
+    pytest.param(sq_of("b1"), True, id="diagonal_down_left"),
+    pytest.param(sq_of("h7"), True, id="diagonal_up_right"),
+    pytest.param(sq_of("d5"), True, id="one_diagonal_step"),
+    pytest.param(sq_of("a4"), False, id="rank_rejected"),
+    pytest.param(sq_of("e8"), False, id="file_rejected"),
+    pytest.param(sq_of("f4"), False, id="adjacent_rank_rejected"),
 ])
-def test_bishop_diagonals_admissible(target):
-    bishop = Piece(PieceType.BISHOP, PieceColor.WHITE)
-    assert piece_can_pseudo_reach(bishop, sq(4, 4), target) is True
+def test_bishop_pseudo_reach(to_sq, admissible):
+    p = Piece(PieceType.BISHOP, WHITE)
+    assert piece_can_pseudo_reach(p, sq_of("e4"), to_sq) is admissible
 
 
-@pytest.mark.parametrize("target", [
-    Square(4, 0), Square(0, 4), Square(4, 5),
+@pytest.mark.parametrize("to_sq, admissible", [
+    pytest.param(sq_of("a4"), True, id="rank_left"),
+    pytest.param(sq_of("h4"), True, id="rank_right"),
+    pytest.param(sq_of("e8"), True, id="file_up"),
+    pytest.param(sq_of("e1"), True, id="file_down"),
+    pytest.param(sq_of("a8"), False, id="diagonal_rejected"),
+    pytest.param(sq_of("d5"), False, id="one_diagonal_rejected"),
+    pytest.param(sq_of("g3"), False, id="off_line_rejected"),
 ])
-def test_bishop_non_diagonal_rejected(target):
-    bishop = Piece(PieceType.BISHOP, PieceColor.WHITE)
-    assert piece_can_pseudo_reach(bishop, sq(4, 4), target) is False
+def test_rook_pseudo_reach(to_sq, admissible):
+    p = Piece(PieceType.ROOK, WHITE)
+    assert piece_can_pseudo_reach(p, sq_of("e4"), to_sq) is admissible
 
 
-# ---------- Rook ----------
-
-@pytest.mark.parametrize("target", [
-    Square(4, 0), Square(4, 7), Square(0, 4), Square(7, 4),
+@pytest.mark.parametrize("to_sq, admissible", [
+    pytest.param(sq_of("a4"), True, id="rank"),
+    pytest.param(sq_of("e8"), True, id="file"),
+    pytest.param(sq_of("h1"), True, id="diagonal_down_right"),
+    pytest.param(sq_of("a8"), True, id="diagonal_up_left"),
+    pytest.param(sq_of("f6"), False, id="knight_shape_rejected"),
 ])
-def test_rook_lines_admissible(target):
-    rook = Piece(PieceType.ROOK, PieceColor.WHITE)
-    assert piece_can_pseudo_reach(rook, sq(4, 4), target) is True
+def test_queen_pseudo_reach(to_sq, admissible):
+    p = Piece(PieceType.QUEEN, WHITE)
+    assert piece_can_pseudo_reach(p, sq_of("e4"), to_sq) is admissible
 
 
-@pytest.mark.parametrize("target", [
-    Square(0, 0), Square(3, 3), Square(5, 6),
+_KING_BOX = [
+    pytest.param(sq(4 + dr, 4 + dc), True, id=f"box_{i}")
+    for i, (dr, dc) in enumerate(KING_OFFSETS)
+]
+
+
+@pytest.mark.parametrize("to_sq, admissible", _KING_BOX + [
+    pytest.param(sq(4, 6), False, id="two_squares_horizontal_rejected"),
+    pytest.param(sq(2, 4), False, id="two_squares_vertical_rejected"),
 ])
-def test_rook_off_lines_rejected(target):
-    rook = Piece(PieceType.ROOK, PieceColor.WHITE)
-    assert piece_can_pseudo_reach(rook, sq(4, 4), target) is False
+def test_king_box_pseudo_reach(to_sq, admissible):
+    p = Piece(PieceType.KING, WHITE)
+    assert piece_can_pseudo_reach(p, sq(4, 4), to_sq) is admissible
 
 
-# ---------- Queen ----------
-
-@pytest.mark.parametrize("target", [
-    Square(4, 0), Square(0, 4), Square(7, 7), Square(0, 0),
+@pytest.mark.parametrize("color, from_sq, to_col, admissible", [
+    pytest.param(WHITE, sq(WHITE_KING_HOME_ROW, KING_HOME_COL), CASTLE_TARGET_COLS[0],
+                 True, id="white_queenside_from_home"),
+    pytest.param(WHITE, sq(WHITE_KING_HOME_ROW, KING_HOME_COL), CASTLE_TARGET_COLS[1],
+                 True, id="white_kingside_from_home"),
+    pytest.param(BLACK, sq(BLACK_KING_HOME_ROW, KING_HOME_COL), CASTLE_TARGET_COLS[0],
+                 True, id="black_queenside_from_home"),
+    pytest.param(BLACK, sq(BLACK_KING_HOME_ROW, KING_HOME_COL), CASTLE_TARGET_COLS[1],
+                 True, id="black_kingside_from_home"),
+    pytest.param(WHITE, sq(6, 4), CASTLE_TARGET_COLS[1], False, id="white_kingside_off_home"),
+    pytest.param(WHITE, sq(6, 4), CASTLE_TARGET_COLS[0], False, id="white_queenside_off_home"),
 ])
-def test_queen_lines_and_diagonals_admissible(target):
-    queen = Piece(PieceType.QUEEN, PieceColor.WHITE)
-    assert piece_can_pseudo_reach(queen, sq(4, 4), target) is True
+def test_king_castle_pseudo_reach(color, from_sq, to_col, admissible):
+    """Castle-from is admissible only when the king sits on its home square."""
+    p = Piece(PieceType.KING, color)
+    to_sq = sq(from_sq.row, to_col)
+    assert piece_can_pseudo_reach(p, from_sq, to_sq) is admissible
 
-
-def test_queen_off_pattern_rejected():
-    queen = Piece(PieceType.QUEEN, PieceColor.WHITE)
-    # Knight-shape jump.
-    assert piece_can_pseudo_reach(queen, sq(4, 4), sq(2, 5)) is False
-
-
-# ---------- King ----------
-
-def test_king_one_square_box_admissible():
-    king = Piece(PieceType.KING, PieceColor.WHITE)
-    origin = sq(4, 4)
-    for drow in (-1, 0, 1):
-        for dcol in (-1, 0, 1):
-            if drow == 0 and dcol == 0:
-                continue
-            assert piece_can_pseudo_reach(king, origin, sq(origin.row + drow, origin.col + dcol))
-
-
-def test_king_two_squares_rejected():
-    king = Piece(PieceType.KING, PieceColor.WHITE)
-    assert piece_can_pseudo_reach(king, sq(4, 4), sq(4, 6)) is False
-    assert piece_can_pseudo_reach(king, sq(4, 4), sq(2, 4)) is False
-
-
-@pytest.mark.parametrize("color,home_row", [
-    (PieceColor.WHITE, WHITE_KING_HOME_ROW),
-    (PieceColor.BLACK, BLACK_KING_HOME_ROW),
-])
-def test_king_castle_admissible_only_from_home(color, home_row):
-    king = Piece(PieceType.KING, color)
-    home = sq(home_row, KING_HOME_COL)
-    for col in CASTLE_TARGET_COLS:
-        assert piece_can_pseudo_reach(king, home, sq(home_row, col)) is True
-
-
-def test_king_castle_rejected_when_not_on_home():
-    king = Piece(PieceType.KING, PieceColor.WHITE)
-    # King moved off home (e2): cannot castle from there.
-    assert piece_can_pseudo_reach(king, sq(6, 4), sq(7, 6)) is False
-    assert piece_can_pseudo_reach(king, sq(6, 4), sq(7, 2)) is False
-
-
-# ---------- Chain extension via Board._queue_premove gate ----------
 
 def _setup(board, piece_map, turn=PieceColor.BLACK):
     from collections import Counter
@@ -240,20 +194,20 @@ def board():
 
 
 def test_chain_rook_rejects_non_line_extension(board):
-    """User's example: rook a1 → a5 (file), then a5 → e5 (rank), then e5 → d4 (off-line)."""
+    """Rook a1->a5 (file), a5->e5 (rank, OK), then e5->d4 (diagonal, rejected)."""
     _setup(board, {
         Square(7, 4): Piece(PieceType.KING, PieceColor.WHITE),
         Square(0, 4): Piece(PieceType.KING, PieceColor.BLACK),
         Square(7, 0): Piece(PieceType.ROOK, PieceColor.WHITE),
     })
-    board.handle_click(Square(7, 0))   # select rook
-    board.handle_click(Square(3, 0))   # premove a1->a5
-    board.handle_click(Square(3, 0))   # re-select speculative rook
-    board.handle_click(Square(3, 4))   # chain a5->e5 (rank — admissible)
+    board.handle_click(Square(7, 0))
+    board.handle_click(Square(3, 0))
+    board.handle_click(Square(3, 0))
+    board.handle_click(Square(3, 4))
     assert len(board.premoves) == 2
 
-    board.handle_click(Square(3, 4))   # re-select on e5
-    board.handle_click(Square(4, 3))   # try chain e5->d4 (diagonal — REJECTED)
+    board.handle_click(Square(3, 4))
+    board.handle_click(Square(4, 3))
     assert len(board.premoves) == 2, "diagonal extension on rook should be rejected"
 
 
@@ -263,11 +217,11 @@ def test_chain_knight_rejects_non_l_shape(board):
         Square(0, 4): Piece(PieceType.KING, PieceColor.BLACK),
         Square(7, 6): Piece(PieceType.KNIGHT, PieceColor.WHITE),
     })
-    board.handle_click(Square(7, 6))   # select knight (g1)
-    board.handle_click(Square(7, 0))   # try Ng1->a1 (illegal shape — rejected)
+    board.handle_click(Square(7, 6))
+    board.handle_click(Square(7, 0))
     assert board.premoves == []
-    board.handle_click(Square(7, 6))   # re-select
-    board.handle_click(Square(5, 5))   # Ng1->f3 (L-shape — admissible)
+    board.handle_click(Square(7, 6))
+    board.handle_click(Square(5, 5))
     assert len(board.premoves) == 1
 
 
@@ -277,11 +231,11 @@ def test_chain_pawn_direction_correct(board):
         Square(0, 4): Piece(PieceType.KING, PieceColor.BLACK),
         Square(6, 0): Piece(PieceType.PAWN, PieceColor.WHITE),
     })
-    board.handle_click(Square(6, 0))  # select pawn
-    board.handle_click(Square(7, 0))  # try backward (REJECTED)
+    board.handle_click(Square(6, 0))
+    board.handle_click(Square(7, 0))
     assert board.premoves == []
-    board.handle_click(Square(6, 0))  # re-select
-    board.handle_click(Square(4, 0))  # forward 2 from start (admissible)
+    board.handle_click(Square(6, 0))
+    board.handle_click(Square(4, 0))
     assert len(board.premoves) == 1
 
 
@@ -290,17 +244,16 @@ def test_chain_castle_from_home_only(board):
         Square(7, 4): Piece(PieceType.KING, PieceColor.WHITE),
         Square(0, 4): Piece(PieceType.KING, PieceColor.BLACK),
     })
-    board.handle_click(Square(7, 4))  # select king (e1)
-    board.handle_click(Square(7, 6))  # premove e1->g1 (castle from home — admissible)
+    board.handle_click(Square(7, 4))
+    board.handle_click(Square(7, 6))
     assert len(board.premoves) == 1
-    # Now imagine king moved off home in a previous chain step. Re-init.
     _setup(board, {
         Square(7, 4): Piece(PieceType.KING, PieceColor.WHITE),
         Square(0, 4): Piece(PieceType.KING, PieceColor.BLACK),
     })
-    board.handle_click(Square(7, 4))  # select king
-    board.handle_click(Square(6, 4))  # premove e1->e2 (one step)
+    board.handle_click(Square(7, 4))
+    board.handle_click(Square(6, 4))
     assert len(board.premoves) == 1
-    board.handle_click(Square(6, 4))  # re-select on e2 chain tip
-    board.handle_click(Square(7, 6))  # try castle from e2 (REJECTED)
+    board.handle_click(Square(6, 4))
+    board.handle_click(Square(7, 6))
     assert len(board.premoves) == 1, "castle premove not allowed when king not on home in chain"
