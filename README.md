@@ -200,7 +200,7 @@ Install the dev extra, then run the same checks CI does:
 ```bash
 pip install -e ".[dev]"
 pytest tests -n 8 -q                            # ~10 s for 1318 tests (~25 s serial)
-pylama backend frontend server main.py tests    # pycodestyle + pyflakes; exits 0 when clean
+pylama backend frontend server main.py paths.py tests   # pycodestyle + pyflakes; exits 0 when clean
 ```
 
 Both gate merges to `master` (the `test` and `lint` jobs), so a green local
