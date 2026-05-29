@@ -9,6 +9,7 @@ from frontend.visual.animation import PieceAnimation
 from frontend.visual.colors import Colors
 from frontend.premoves import Premove, speculative_board
 from backend.pieces import PieceType, PieceColor, Piece
+from frontend.visual.fonts import get_font
 
 
 DRAG_THRESHOLD_PX = 6
@@ -26,7 +27,7 @@ class Board:
         self.match = match
         self.move_landed_callback = move_landed_callback
         self.on_premove_queued = on_premove_queued
-        self.font = pg.font.SysFont("Arial", 18, bold=True)
+        self.font = get_font(18, bold=True)
         self.board_guides_font_factor = 50
 
         self.cell_size = 0

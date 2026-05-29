@@ -2,6 +2,7 @@ import pygame as pg
 
 from frontend.visual.clock_visual import INCREMENT_FLASH_MS, clock_pocket_color
 from frontend.visual.colors import Colors
+from frontend.visual.fonts import get_font
 
 
 AUTO_END_RED_THRESHOLD_SECONDS = 10
@@ -49,10 +50,10 @@ class PlayerStrip:
         self.padding = 10
         self.pocket_inset = 4
         self.pocket_fraction = 0.28
-        self.name_font = pg.font.SysFont("Arial", 14, bold=True)
-        self.clock_font = pg.font.SysFont("monospace", 16, bold=True)
-        self.advantage_font = pg.font.SysFont("Arial", 14, bold=True)
-        self.auto_end_font = pg.font.SysFont("Arial", 11, bold=True)
+        self.name_font = get_font(14, bold=True)
+        self.clock_font = get_font(16, bold=True, mono=True)
+        self.advantage_font = get_font(14, bold=True)
+        self.auto_end_font = get_font(11, bold=True)
         self.icons = {}
 
     def set_rect(self, rect):
@@ -61,10 +62,10 @@ class PlayerStrip:
         clock_size = max(int(rect.height * 0.55), 14)
         adv_size = max(int(rect.height * 0.4), 10)
         auto_end_size = max(int(name_size * AUTO_END_BADGE_FONT_SCALE), 9)
-        self.name_font = pg.font.SysFont("Arial", name_size, bold=True)
-        self.clock_font = pg.font.SysFont("monospace", clock_size, bold=True)
-        self.advantage_font = pg.font.SysFont("Arial", adv_size, bold=True)
-        self.auto_end_font = pg.font.SysFont("Arial", auto_end_size, bold=True)
+        self.name_font = get_font(name_size, bold=True)
+        self.clock_font = get_font(clock_size, bold=True, mono=True)
+        self.advantage_font = get_font(adv_size, bold=True)
+        self.auto_end_font = get_font(auto_end_size, bold=True)
 
     def set_piece_icons(self, icons):
         self.icons = icons

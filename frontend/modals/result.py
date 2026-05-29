@@ -2,6 +2,7 @@ import pygame as pg
 
 from frontend.visual.colors import Colors
 from frontend.visual.widgets import draw_button_row, fit_text_to_rect
+from frontend.visual.fonts import get_font
 
 
 BUTTONS = [
@@ -28,9 +29,9 @@ class ResultMenu:
         self.width = 0
         self.height = 0
         self.padding = 12
-        self.title_font = pg.font.SysFont("Arial", 28, bold=True)
-        self.reason_font = pg.font.SysFont("Arial", 16)
-        self.button_font = pg.font.SysFont("Arial", 14, bold=True)
+        self.title_font = get_font(28, bold=True)
+        self.reason_font = get_font(16)
+        self.button_font = get_font(14, bold=True)
         self.title = None
         self.reason = None
         self.button_rects = {}
@@ -43,15 +44,9 @@ class ResultMenu:
         self.y = rect.y
         self.width = rect.width
         self.height = rect.height
-        self.title_font = pg.font.SysFont(
-            "Arial", max(int(rect.height / self.title_font_factor), 12), bold=True
-        )
-        self.reason_font = pg.font.SysFont(
-            "Arial", max(int(rect.height / self.reason_font_factor), 10)
-        )
-        self.button_font = pg.font.SysFont(
-            "Arial", max(int(rect.height / self.button_font_factor), 10), bold=True
-        )
+        self.title_font = get_font(max(int(rect.height / self.title_font_factor), 12), bold=True)
+        self.reason_font = get_font(max(int(rect.height / self.reason_font_factor), 10))
+        self.button_font = get_font(max(int(rect.height / self.button_font_factor), 10), bold=True)
 
     def set_text(self, title_reason):
         if title_reason is None:

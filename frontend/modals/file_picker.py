@@ -5,6 +5,7 @@ import pygame as pg
 from frontend.pgn.load import summarize_pgn_file
 from frontend.visual.colors import Colors
 from frontend.visual.widgets import draw_button, draw_scroll_thumb, fit_text_to_rect
+from frontend.visual.fonts import get_font
 
 
 COLUMN_TITLES = ("Time", "Type", "Time Control", "White", "Black", "Result")
@@ -41,10 +42,10 @@ class FilePicker:
         self.nickname = None
         self.scroll_offset = 0
         self.padding = 14
-        self.title_font = pg.font.SysFont("Arial", 22, bold=True)
-        self.header_font = pg.font.SysFont("Arial", 14, bold=True)
-        self.row_font = pg.font.SysFont("Arial", 14)
-        self.button_font = pg.font.SysFont("Arial", 14, bold=True)
+        self.title_font = get_font(22, bold=True)
+        self.header_font = get_font(14, bold=True)
+        self.row_font = get_font(14)
+        self.button_font = get_font(14, bold=True)
         self._row_rects = []
         self._cancel_rect = pg.Rect(0, 0, 0, 0)
         self._list_rect = pg.Rect(0, 0, 0, 0)
@@ -53,18 +54,10 @@ class FilePicker:
 
     def set_rect(self, rect):
         self.rect = pg.Rect(rect)
-        self.title_font = pg.font.SysFont(
-            "Arial", max(int(rect.height / 18), 16), bold=True,
-        )
-        self.header_font = pg.font.SysFont(
-            "Arial", max(int(rect.height / 30), 13), bold=True,
-        )
-        self.row_font = pg.font.SysFont(
-            "Arial", max(int(rect.height / 30), 12),
-        )
-        self.button_font = pg.font.SysFont(
-            "Arial", max(int(rect.height / 30), 12), bold=True,
-        )
+        self.title_font = get_font(max(int(rect.height / 18), 16), bold=True)
+        self.header_font = get_font(max(int(rect.height / 30), 13), bold=True)
+        self.row_font = get_font(max(int(rect.height / 30), 12))
+        self.button_font = get_font(max(int(rect.height / 30), 12), bold=True)
 
     def show(self, directory, pattern, on_select, on_cancel=None, nickname=None):
         self.entries = self._build_summaries(directory, pattern)

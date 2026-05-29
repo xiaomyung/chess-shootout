@@ -2,6 +2,7 @@ import pygame as pg
 
 from frontend.visual.colors import Colors
 from frontend.visual.widgets import draw_button_row, fit_text_to_rect
+from frontend.visual.fonts import get_font
 
 
 class ConfirmModal:
@@ -16,8 +17,8 @@ class ConfirmModal:
         self.title = None
         self.on_yes = None
         self.on_no = None
-        self.title_font = pg.font.SysFont("Arial", 24, bold=True)
-        self.button_font = pg.font.SysFont("Arial", 14, bold=True)
+        self.title_font = get_font(24, bold=True)
+        self.button_font = get_font(14, bold=True)
         self.title_font_factor = 6
         self.button_font_factor = 14
         self.button_rects = {}
@@ -27,12 +28,8 @@ class ConfirmModal:
         self.y = rect.y
         self.width = rect.width
         self.height = rect.height
-        self.title_font = pg.font.SysFont(
-            "Arial", max(int(rect.height / self.title_font_factor), 12), bold=True
-        )
-        self.button_font = pg.font.SysFont(
-            "Arial", max(int(rect.height / self.button_font_factor), 10), bold=True
-        )
+        self.title_font = get_font(max(int(rect.height / self.title_font_factor), 12), bold=True)
+        self.button_font = get_font(max(int(rect.height / self.button_font_factor), 10), bold=True)
 
     def show(self, title, on_yes, on_no=None, yes_label="Yes", no_label="Cancel"):
         self.title = title

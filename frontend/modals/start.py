@@ -5,6 +5,7 @@ from frontend import env
 from frontend.visual.colors import Colors
 from frontend.visual.text_input import TextInput
 from frontend.visual.widgets import draw_button, draw_selector
+from frontend.visual.fonts import get_font
 
 
 MODE_OPTIONS = [
@@ -62,10 +63,10 @@ class StartMenu:
         self.selected_increment_seconds = 5
         self.selected_side = "random"
 
-        self.title_font = pg.font.SysFont("Arial", 28, bold=True)
-        self.label_font = pg.font.SysFont("Arial", 12, bold=True)
-        self.button_font = pg.font.SysFont("Arial", 14, bold=True)
-        self.start_font = pg.font.SysFont("Arial", 18, bold=True)
+        self.title_font = get_font(28, bold=True)
+        self.label_font = get_font(12, bold=True)
+        self.button_font = get_font(14, bold=True)
+        self.start_font = get_font(18, bold=True)
 
         self._outer = pg.Rect(0, 0, 0, 0)
         self._title_pos = (0, 0)
@@ -100,10 +101,10 @@ class StartMenu:
         h = rect.height
 
         padding = max(int(h * 0.03), 10)
-        self.title_font = pg.font.SysFont("Arial", max(int(h / 14), 14), bold=True)
-        self.label_font = pg.font.SysFont("Arial", max(int(h / 32), 10), bold=True)
-        self.button_font = pg.font.SysFont("Arial", max(int(h / 38), 10), bold=True)
-        self.start_font = pg.font.SysFont("Arial", max(int(h / 30), 11), bold=True)
+        self.title_font = get_font(max(int(h / 14), 14), bold=True)
+        self.label_font = get_font(max(int(h / 32), 10), bold=True)
+        self.button_font = get_font(max(int(h / 38), 10), bold=True)
+        self.start_font = get_font(max(int(h / 30), 11), bold=True)
 
         inner_x = rect.x + padding
         inner_w = rect.width - 2 * padding

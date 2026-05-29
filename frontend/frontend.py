@@ -18,6 +18,7 @@ from frontend.modals.fen_input import FenInputModal
 from frontend.modals.help import HelpModal
 from frontend.modals.reconnecting import ReconnectingModal
 from frontend.visual.toast import Toast
+from frontend.visual.fonts import get_font
 from frontend.online.client import (
     OnlineClient, RECONNECT_TOTAL_SECONDS, fetch_resume, probe_active_game,
 )
@@ -1120,10 +1121,8 @@ class Frontend(OnlineEventsMixin):
             strip_height,
         )
 
-        self.board.font = pg.font.SysFont(
-            "Arial",
-            int(effective // self.board.board_guides_font_factor),
-            bold=True
+        self.board.font = get_font(
+            int(effective // self.board.board_guides_font_factor), bold=True,
         )
         self.board.set_rect(board_rect)
         self.result_menu.set_rect(result_rect)

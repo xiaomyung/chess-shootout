@@ -2,6 +2,7 @@ import pygame as pg
 
 from frontend.visual.colors import Colors
 from frontend.visual.widgets import draw_button_row, fit_text_to_rect
+from frontend.visual.fonts import get_font
 
 
 class WaitModal:
@@ -13,22 +14,16 @@ class WaitModal:
         self.title = None
         self.subtitle = ""
         self.on_cancel = None
-        self.title_font = pg.font.SysFont("Arial", 22, bold=True)
-        self.subtitle_font = pg.font.SysFont("Arial", 14)
-        self.button_font = pg.font.SysFont("Arial", 14, bold=True)
+        self.title_font = get_font(22, bold=True)
+        self.subtitle_font = get_font(14)
+        self.button_font = get_font(14, bold=True)
         self.button_rects = {}
 
     def set_rect(self, rect):
         self.rect = pg.Rect(rect)
-        self.title_font = pg.font.SysFont(
-            "Arial", max(int(rect.height / 6), 18), bold=True,
-        )
-        self.subtitle_font = pg.font.SysFont(
-            "Arial", max(int(rect.height / 12), 14),
-        )
-        self.button_font = pg.font.SysFont(
-            "Arial", max(int(rect.height / 14), 12), bold=True,
-        )
+        self.title_font = get_font(max(int(rect.height / 6), 18), bold=True)
+        self.subtitle_font = get_font(max(int(rect.height / 12), 14))
+        self.button_font = get_font(max(int(rect.height / 14), 12), bold=True)
 
     def show(self, title, on_cancel):
         self.title = title

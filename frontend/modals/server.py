@@ -3,6 +3,7 @@ import pygame as pg
 from frontend.visual.colors import Colors
 from frontend.visual.text_input import TextInput
 from frontend.visual.widgets import draw_button_row, fit_text_to_rect
+from frontend.visual.fonts import get_font
 
 
 class ServerAddressModal:
@@ -14,19 +15,15 @@ class ServerAddressModal:
         self.title = None
         self.on_connect = None
         self.on_cancel = None
-        self.title_font = pg.font.SysFont("Arial", 22, bold=True)
-        self.button_font = pg.font.SysFont("Arial", 14, bold=True)
+        self.title_font = get_font(22, bold=True)
+        self.button_font = get_font(14, bold=True)
         self.input = TextInput(window, max_chars=64, placeholder="IP or IP:port")
         self.button_rects = {}
 
     def set_rect(self, rect):
         self.rect = pg.Rect(rect)
-        self.title_font = pg.font.SysFont(
-            "Arial", max(int(rect.height / 7), 12), bold=True,
-        )
-        self.button_font = pg.font.SysFont(
-            "Arial", max(int(rect.height / 14), 10), bold=True,
-        )
+        self.title_font = get_font(max(int(rect.height / 7), 12), bold=True)
+        self.button_font = get_font(max(int(rect.height / 14), 10), bold=True)
         input_h = max(int(rect.height * 0.20), 30)
         self.input.set_rect(pg.Rect(
             rect.x + self.padding, rect.centery - input_h // 2,

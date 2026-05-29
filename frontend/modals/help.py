@@ -3,6 +3,7 @@ import pygame as pg
 from frontend.visual.colors import Colors
 from frontend.modals.base import BaseModal
 from frontend.visual.widgets import draw_button_row, fit_text_to_rect
+from frontend.visual.fonts import get_font
 
 
 HOTKEYS = [
@@ -49,9 +50,9 @@ class HelpModal(BaseModal):
         self._on_rect_changed()
 
     def _on_rect_changed(self):
-        self.title_font = pg.font.SysFont("Arial", TITLE_FONT_SIZE, bold=True)
-        self.row_font = pg.font.SysFont("Arial", ROW_FONT_SIZE, bold=False)
-        self.button_font = pg.font.SysFont("Arial", BUTTON_FONT_SIZE, bold=True)
+        self.title_font = get_font(TITLE_FONT_SIZE, bold=True)
+        self.row_font = get_font(ROW_FONT_SIZE, bold=False)
+        self.button_font = get_font(BUTTON_FONT_SIZE, bold=True)
 
     def show(self):
         self._visible = True
