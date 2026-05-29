@@ -54,7 +54,7 @@ jobs:
         run: |
           pyinstaller --onefile --windowed --noupx --name ChessShootout --icon assets/icons/icon.ico --add-data "assets;assets" --exclude-module fastapi --exclude-module uvicorn --exclude-module starlette --exclude-module slowapi main.py
           New-Item -ItemType Directory -Force -Path out | Out-Null
-          Move-Item -Force dist/ChessShootout.exe "out/ChessShootout-$env:VER.exe"
+          Move-Item -Force dist/ChessShootout.exe "out/ChessShootout-$env:VER-Portable.exe"
           $env:CHESS_VERSION = $env:VER
           pyinstaller --noconfirm chess.spec
           choco install innosetup -y --no-progress
@@ -77,9 +77,22 @@ jobs:
           mkdir -p out
           mv ChessShootout-x86_64.AppImage "out/ChessShootout-$VER-x86_64.AppImage"
 
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist-${{ matrix.os }}
+          path: out/
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
       - uses: softprops/action-gh-release@v2
         with:
-          files: out/*
+          files: dist/*
           generate_release_notes: true
           prerelease: ${{ contains(github.ref_name, '-') }}
           draft: true

@@ -7,7 +7,6 @@ import paths
 def test_source_mode_defaults(monkeypatch):
     monkeypatch.setattr(sys, "frozen", False, raising=False)
     monkeypatch.delenv("CHESS_DATA_DIR", raising=False)
-    monkeypatch.delenv("APPIMAGE", raising=False)
     root = paths._source_root()
     assert paths.get_asset_base() == root
     assert paths.get_config_dir() == root
@@ -36,7 +35,6 @@ def test_app_version_blank_when_file_missing(monkeypatch, tmp_path):
 
 def test_override_changes_only_data_dir(monkeypatch):
     monkeypatch.setattr(sys, "frozen", False, raising=False)
-    monkeypatch.delenv("APPIMAGE", raising=False)
     monkeypatch.setenv("CHESS_DATA_DIR", "/tmp/cd")
     assert paths.get_data_dir() == Path("/tmp/cd")
     assert paths.get_games_dir() == Path("/tmp/cd/games")
@@ -47,16 +45,15 @@ def test_override_changes_only_data_dir(monkeypatch):
 
 def test_override_expands_user(monkeypatch):
     monkeypatch.setattr(sys, "frozen", False, raising=False)
-    monkeypatch.delenv("APPIMAGE", raising=False)
     monkeypatch.setenv("CHESS_DATA_DIR", "~/chessdata")
     assert paths.get_data_dir() == Path.home() / "chessdata"
 
 
 def test_frozen_mode_uses_platformdirs(monkeypatch):
     monkeypatch.setattr(sys, "frozen", True, raising=False)
+    monkeypatch.setattr(sys, "executable", "/tmp/Chess", raising=False)
     monkeypatch.setattr(sys, "_MEIPASS", "/tmp/_MEI", raising=False)
     monkeypatch.delenv("CHESS_DATA_DIR", raising=False)
-    monkeypatch.delenv("APPIMAGE", raising=False)
     monkeypatch.setattr(paths.platformdirs, "user_config_dir", lambda a, b: "/x/config")
     monkeypatch.setattr(paths.platformdirs, "user_data_dir", lambda a, b: "/x/data")
     monkeypatch.setattr(paths.platformdirs, "user_log_dir", lambda a, b: "/x/log")
@@ -69,15 +66,20 @@ def test_frozen_mode_uses_platformdirs(monkeypatch):
 
 def test_frozen_override_still_wins(monkeypatch):
     monkeypatch.setattr(sys, "frozen", True, raising=False)
+    monkeypatch.setattr(sys, "executable", "/tmp/Chess", raising=False)
     monkeypatch.setattr(sys, "_MEIPASS", "/tmp/_MEI", raising=False)
-    monkeypatch.delenv("APPIMAGE", raising=False)
     monkeypatch.setenv("CHESS_DATA_DIR", "/tmp/cd")
     assert paths.get_data_dir() == Path("/tmp/cd")
 
 
-def test_portable_beats_override_and_default(monkeypatch, tmp_path):
-    monkeypatch.setattr(paths, "get_app_dir", lambda: tmp_path)
-    (tmp_path / "portable.txt").write_text("")
+def test_portable_onefile_beats_override_and_default(monkeypatch, tmp_path):
+    # The portable build is the PyInstaller onefile exe: its _MEIPASS is a temp
+    # dir outside the executable folder, so data lands in ./data/ beside it and
+    # wins over any CHESS_DATA_DIR override.
+    exe = tmp_path / "ChessShootout-1.0.0-Portable.exe"
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+    monkeypatch.setattr(sys, "executable", str(exe), raising=False)
+    monkeypatch.setattr(sys, "_MEIPASS", "/tmp/_MEI_onefile", raising=False)
     monkeypatch.setenv("CHESS_DATA_DIR", "/tmp/cd")
     assert paths.is_portable() is True
     portable_data = tmp_path / "data"
@@ -87,31 +89,17 @@ def test_portable_beats_override_and_default(monkeypatch, tmp_path):
     assert paths.get_games_dir() == portable_data / "games"
 
 
-def test_not_portable_without_marker(monkeypatch, tmp_path):
-    monkeypatch.setattr(paths, "get_app_dir", lambda: tmp_path)
+def test_onedir_install_is_not_portable(monkeypatch, tmp_path):
+    # The installer / .app / AppImage ship the onedir build: _MEIPASS sits
+    # inside the executable folder, so it uses the per-user location.
+    appdir = tmp_path / "app"
+    (appdir / "_internal").mkdir(parents=True)
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+    monkeypatch.setattr(sys, "executable", str(appdir / "ChessShootout"), raising=False)
+    monkeypatch.setattr(sys, "_MEIPASS", str(appdir / "_internal"), raising=False)
     assert paths.is_portable() is False
 
 
-def test_get_app_dir_appimage(monkeypatch):
-    monkeypatch.setenv("APPIMAGE", "/home/u/Apps/Chess.AppImage")
-    assert paths.get_app_dir() == Path("/home/u/Apps")
-
-
-def test_get_app_dir_macos_app_bundle(monkeypatch):
-    monkeypatch.delenv("APPIMAGE", raising=False)
-    monkeypatch.setattr(sys, "frozen", True, raising=False)
-    monkeypatch.setattr(sys, "executable", "/Apps/Chess.app/Contents/MacOS/Chess", raising=False)
-    assert paths.get_app_dir() == Path("/Apps")
-
-
-def test_get_app_dir_frozen_plain_executable(monkeypatch):
-    monkeypatch.delenv("APPIMAGE", raising=False)
-    monkeypatch.setattr(sys, "frozen", True, raising=False)
-    monkeypatch.setattr(sys, "executable", "/opt/chess/Chess", raising=False)
-    assert paths.get_app_dir() == Path("/opt/chess")
-
-
-def test_get_app_dir_source(monkeypatch):
-    monkeypatch.delenv("APPIMAGE", raising=False)
+def test_source_is_not_portable(monkeypatch):
     monkeypatch.setattr(sys, "frozen", False, raising=False)
-    assert paths.get_app_dir() == paths._source_root()
+    assert paths.is_portable() is False
