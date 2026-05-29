@@ -92,5 +92,56 @@ these):
 - a test with no assertion and no behavior check (a bare `draw()` "doesn't crash").
 
 A render path still worth guarding should assert something real about the result
-(rects produced, expected colors/state), not just "didn't raise". Tests being
-migrated are listed in `_weak_allowlist.py`; that list self-prunes to empty.
+(rects produced, expected colors/state), not just "didn't raise". The
+`_weak_allowlist.py` grandfather list is now empty and enforcing — strengthen a new
+test rather than adding to it.
+
+## Determinism (xdist-safe)
+
+The suite runs under `pytest-xdist`, where each worker imports the test modules in
+its own process. A `parametrize`'s argvalues must therefore be **identical across
+processes**, or collection diverges and the run errors with "Different tests were
+collected between gw0 and gwN". Use fixed literals — never build argvalues from
+`uuid.uuid4()`, `random`, the clock, or unsorted `set`/`dict` iteration (sort if you
+must). Verify a parametrize change with `pytest tests -n auto`, not just `-n0`.
+
+## Worked examples (before → after)
+
+**Collapse a cluster** — ten near-identical material checks become one table:
+
+```python
+# before: 10 functions, each make_backend(...) then assert game_result() == ...
+def test_kvk_is_draw():
+    bk = make_backend({sq(7, 4): piece(K, WHITE), sq(0, 4): piece(K, BLACK)})
+    assert bk.game_result() == "draw_insufficient_material"
+# ...nine more...
+
+# after: one parametrized test; each FIDE case keeps its own expected, rationale in the id
+@pytest.mark.parametrize("pieces, expected", [
+    pytest.param(KV_K, "draw_insufficient_material", id="kvk_draw"),
+    pytest.param(KNN_V_K, "draw_insufficient_material", id="knn_v_k_draw_fide_5_2_2"),
+    pytest.param(KBB_V_K, None, id="kbb_v_k_mate_exists_not_drawn"),
+])
+def test_insufficient_material(pieces, expected):
+    assert make_backend(pieces).game_result() == expected
+```
+
+**Strengthen a render smoke** — assert the output, not just "doesn't crash":
+
+```python
+# before: a weak smoke (banned by the guard)
+def test_draw_button_smoke_idle(font):
+    draw_button(surface, rect, "OK", font)   # no assertion
+
+# after: assert the rendered pixels match the state colour, with an idle-vs-pressed diff
+def test_draw_button_idle_and_pressed_render_differently(font):
+    draw_button(surface, rect, "OK", font, force_pressed=False)
+    idle = surface.get_at((rect.x + 8, rect.centery))[:3]
+    draw_button(surface, rect, "OK", font, force_pressed=True)
+    pressed = surface.get_at((rect.x + 8, rect.centery))[:3]
+    assert idle != pressed
+    assert idle == pg.Color(Colors.dark_menu)[:3]
+```
+
+To prove a render assertion bites, neutralize the draw **inside the test** with
+`monkeypatch` (it auto-reverts) — never edit a source file, even temporarily.
