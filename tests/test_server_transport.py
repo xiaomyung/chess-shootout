@@ -13,6 +13,7 @@ Strategy:
 """
 import asyncio
 import json
+import ssl
 
 import httpx
 import pytest
@@ -297,6 +298,44 @@ async def test_server_websocket_send_move_round_trip(server):
     finally:
         await ws_a.close()
         await ws_b.close()
+
+
+@pytest.mark.asyncio
+async def test_ws_connect_uses_tls_context_for_wss(monkeypatch):
+    # A frozen build has no system trust store, so wss must get an explicit
+    # certifi-backed SSL context (regression for the v1.0.0 cert-verify bug).
+    captured = {}
+
+    class _FakeWs:
+        async def send(self, _payload):
+            pass
+
+    async def _fake_connect(url, **kwargs):
+        captured["ssl"] = kwargs.get("ssl")
+        return _FakeWs()
+
+    monkeypatch.setattr("frontend.online.transport.websockets.connect", _fake_connect)
+    st = ServerTransport("chess.example.com")
+    await st.ws_connect("room1", "tok")
+    assert isinstance(captured["ssl"], ssl.SSLContext)
+
+
+@pytest.mark.asyncio
+async def test_ws_connect_plaintext_for_ws(monkeypatch):
+    captured = {}
+
+    class _FakeWs:
+        async def send(self, _payload):
+            pass
+
+    async def _fake_connect(url, **kwargs):
+        captured["ssl"] = kwargs.get("ssl")
+        return _FakeWs()
+
+    monkeypatch.setattr("frontend.online.transport.websockets.connect", _fake_connect)
+    st = ServerTransport("localhost:8000")
+    await st.ws_connect("room1", "tok")
+    assert captured["ssl"] is None
 
 
 # ---- ServerWebSocket — direct send shape verification -----------------------

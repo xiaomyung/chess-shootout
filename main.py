@@ -2,11 +2,15 @@ import argparse
 import logging
 import os
 
+import certifi
 import pygame as pg
 
 import paths
 from frontend import env, crash_log
 from frontend.frontend import Frontend
+
+
+os.environ.setdefault("SSL_CERT_FILE", certifi.where())
 
 
 def _parse_args():

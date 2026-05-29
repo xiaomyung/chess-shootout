@@ -4,6 +4,7 @@
 #   portable Windows onefile:    pyinstaller --onefile --windowed --noupx \
 #                                  --name ChessShootout --icon assets/icons/icon.ico \
 #                                  --add-data "assets;assets" \
+#                                  --collect-data certifi --hidden-import certifi \
 #                                  --exclude-module fastapi --exclude-module uvicorn \
 #                                  --exclude-module starlette --exclude-module slowapi main.py
 #
@@ -12,14 +13,16 @@
 import os
 import sys
 
+from PyInstaller.utils.hooks import collect_data_files
+
 CHESS_VERSION = os.environ.get("CHESS_VERSION", "0.0.0")
 
 a = Analysis(
     ["main.py"],
     pathex=["."],
     binaries=[],
-    datas=[("assets", "assets")],
-    hiddenimports=[],
+    datas=[("assets", "assets"), *collect_data_files("certifi")],
+    hiddenimports=["certifi"],
     excludes=["fastapi", "uvicorn", "starlette", "slowapi"],
     noarchive=False,
 )
