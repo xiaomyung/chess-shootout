@@ -35,32 +35,47 @@ jobs:
           python-version: "3.12"
       - run: pip install -e ".[build]"
 
+      - name: Derive version (posix)
+        if: runner.os != 'Windows'
+        run: echo "VER=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
+      - name: Derive version (windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          "VER=$($env:GITHUB_REF_NAME -replace '^v','')" | Out-File -FilePath $env:GITHUB_ENV -Append
+
       - name: Build Windows (portable exe + installer)
         if: matrix.os == 'windows-latest'
         shell: pwsh
         run: |
           pyinstaller --onefile --windowed --noupx --name ChessShootout --icon assets/icons/icon.ico --add-data "assets;assets" --exclude-module fastapi --exclude-module uvicorn --exclude-module starlette --exclude-module slowapi main.py
           New-Item -ItemType Directory -Force -Path out | Out-Null
-          Move-Item -Force dist/ChessShootout.exe out/ChessShootout.exe
+          Move-Item -Force dist/ChessShootout.exe "out/ChessShootout-$env:VER.exe"
+          $env:CHESS_VERSION = $env:VER
           pyinstaller --noconfirm chess.spec
           choco install innosetup -y --no-progress
-          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" packaging\chess.iss
+          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" /DAppVer=$env:VER packaging\chess.iss
 
       - name: Build macOS (.app -> .dmg)
         if: matrix.os == 'macos-latest'
         run: |
+          export CHESS_VERSION="$VER"
           pyinstaller --noconfirm chess.spec
           mkdir -p out
-          hdiutil create -volname "Chess Shootout" -srcfolder dist/ChessShootout.app -ov -format UDZO out/ChessShootout.dmg
+          hdiutil create -volname "Chess Shootout" -srcfolder dist/ChessShootout.app -ov -format UDZO "out/ChessShootout-$VER.dmg"
 
       - name: Build Linux (AppImage)
         if: matrix.os == 'ubuntu-22.04'
         run: |
+          export CHESS_VERSION="$VER"
           pyinstaller --noconfirm chess.spec
           packaging/build_appimage.sh
           mkdir -p out
-          mv ChessShootout-x86_64.AppImage out/
+          mv ChessShootout-x86_64.AppImage "out/ChessShootout-$VER-x86_64.AppImage"
 
       - uses: softprops/action-gh-release@v2
         with:
           files: out/*
+          generate_release_notes: true
+          prerelease: ${{ contains(github.ref_name, '-') }}
+          draft: true

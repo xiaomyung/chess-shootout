@@ -2,16 +2,20 @@
 ;   ISCC.exe packaging\chess.iss   (after a onedir PyInstaller build into dist\ChessShootout)
 ; Per-user install (no admin), Start-menu shortcut, uninstaller; data lives in %APPDATA%.
 
+#ifndef AppVer
+  #define AppVer "0.0.0"
+#endif
+
 [Setup]
 AppName=Chess Shootout
-AppVersion=1.0.0
+AppVersion={#AppVer}
 AppPublisher=xiaomyung
 DefaultDirName={localappdata}\Programs\ChessShootout
 DefaultGroupName=Chess Shootout
 PrivilegesRequired=lowest
 DisableProgramGroupPage=yes
 OutputDir=..\out
-OutputBaseFilename=ChessShootoutSetup
+OutputBaseFilename=ChessShootoutSetup-{#AppVer}
 SetupIconFile=..\assets\icons\icon.ico
 WizardStyle=modern
 Compression=lzma2
