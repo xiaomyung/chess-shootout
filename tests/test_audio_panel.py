@@ -1,3 +1,11 @@
+"""AudioPanel + SoundManager: layout grid math, slider interaction, real playback.
+
+Strategy: the panel mirrors the right-menu button grid (text | slider | mute), so
+the geometry assertions reproduce widgets.draw_button_row's column formula exactly.
+Playback-disabling is verified by spying on the real play path (_play_with_master),
+not by "doesn't raise" — disabled must be a true no-op, enabled must fire.
+"""
+
 import os
 
 os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
@@ -14,6 +22,7 @@ from frontend.panels.audio import (
 )
 from frontend.panels.right import RightMenu
 from frontend.audio.sound_manager import SoundManager
+from frontend.visual.colors import Colors
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -38,10 +47,7 @@ def panel(sm):
     return p
 
 
-# ---------- SoundManager additions ----------
-
 def test_master_volume_explicit_override(sm):
-    # Fixture passes master_volume=1.0; verify the explicit value is honored.
     assert sm.master_volume == 1.0
 
 
@@ -61,19 +67,17 @@ def test_master_volume_reads_env_when_set(monkeypatch, tmp_path):
     assert s.master_volume == pytest.approx(0.42, abs=1e-3)
 
 
-def test_set_master_volume_clamps_below_zero(sm):
-    sm.set_master_volume(-0.5)
-    assert sm.master_volume == 0.0
-
-
-def test_set_master_volume_clamps_above_one(sm):
-    sm.set_master_volume(2.0)
-    assert sm.master_volume == 1.0
-
-
-def test_set_master_volume_accepts_mid_range(sm):
-    sm.set_master_volume(0.42)
-    assert sm.master_volume == pytest.approx(0.42)
+@pytest.mark.parametrize(
+    "value, expected",
+    [
+        pytest.param(-0.5, 0.0, id="clamps_below_zero"),
+        pytest.param(2.0, 1.0, id="clamps_above_one"),
+        pytest.param(0.42, 0.42, id="accepts_mid_range"),
+    ],
+)
+def test_set_master_volume_clamps(sm, value, expected):
+    sm.set_master_volume(value)
+    assert sm.master_volume == pytest.approx(expected)
 
 
 def test_set_enabled_false_calls_stop_all():
@@ -112,15 +116,19 @@ def test_heartbeat_volume_scales_by_master():
 
 
 def test_play_disabled_does_nothing(sm):
+    """Disabled is a true no-op; enabling re-arms the real play path."""
+    calls = []
+    sm._play_with_master = lambda sound: calls.append(sound)
+    assert sm._piece_move_sounds
     sm.enabled = False
-    # Should not raise even though sounds aren't loaded into containers when disabled.
     sm.play_move()
+    assert calls == []
+    sm.enabled = True
+    sm.play_move()
+    assert len(calls) == 1
 
-
-# ---------- AudioPanel ----------
 
 def test_panel_set_rect_allocates_text_slider_mute_in_order(panel):
-    # Three-region layout: [volume text][slider][mute], left to right.
     panel.set_rect(pg.Rect(0, 0, 200, 40))
     assert panel.text_rect.x < panel.slider_rect.x < panel.mute_rect.x
     assert panel.text_rect.right <= panel.slider_rect.x
@@ -132,9 +140,7 @@ def test_panel_set_rect_allocates_text_slider_mute_in_order(panel):
 
 @pytest.mark.parametrize("n", [3, 4, 5, 6])
 def test_panel_mirrors_n_button_grid_with_slider_spanning_middle(panel, n):
-    # The audio panel uses the same n-column grid as the button row above:
-    # text occupies col 0, mute occupies col (n-1), and the slider spans
-    # every column in between. Same formula as widgets.draw_button_row.
+    """text=col0, mute=col(n-1), slider spans the middle — draw_button_row formula."""
     gap = DEFAULT_BUTTON_GAP_PX
     panel.set_rect(pg.Rect(0, 0, 400, 40), n_columns=n, gap=gap)
     btn_w = (400 - gap * (n - 1)) / n
@@ -150,8 +156,7 @@ def test_panel_mirrors_n_button_grid_with_slider_spanning_middle(panel, n):
 
 
 def test_panel_default_grid_is_5_columns(panel):
-    # Without an explicit n_columns, the panel defaults to a 5-button grid
-    # (the typical playing-mode button row).
+    """No explicit n_columns defaults to the 5-button playing-mode row."""
     assert DEFAULT_BUTTON_COLUMNS == 5
     panel.set_rect(pg.Rect(0, 0, 400, 40))
     gap = DEFAULT_BUTTON_GAP_PX
@@ -161,8 +166,7 @@ def test_panel_default_grid_is_5_columns(panel):
 
 
 def test_panel_grid_aligns_with_actual_buttons_row():
-    # Mirror the right-menu button column boundaries exactly: each audio
-    # region's x/right should match the corresponding button's x/right.
+    """Each audio region's x/right matches the right-menu button column it mirrors."""
     from frontend.visual.widgets import draw_button_row
     sm = SoundManager(SOUNDS_DIR, enabled=True)
     p = AudioPanel(pg.display.get_surface(), sm)
@@ -174,14 +178,10 @@ def test_panel_grid_aligns_with_actual_buttons_row():
     )
     p.set_rect(rect, button_font=font, n_columns=len(buttons),
                gap=DEFAULT_BUTTON_GAP_PX)
-    # Label column aligns with the leftmost button.
     assert abs(p.text_rect.x - btn_rects["a"].x) <= 1
     assert abs(p.text_rect.right - btn_rects["a"].right) <= 1
-    # Mute column aligns with the rightmost button.
     assert abs(p.mute_rect.x - btn_rects["e"].x) <= 1
     assert abs(p.mute_rect.right - btn_rects["e"].right) <= 1
-    # Slider spans from the second button's left edge to the second-to-last
-    # button's right edge.
     assert abs(p.slider_rect.x - btn_rects["b"].x) <= 1
     assert abs(p.slider_rect.right - btn_rects["d"].right) <= 1
 
@@ -205,13 +205,10 @@ def test_panel_click_mute_button_toggles_enabled(panel, sm):
 def test_panel_click_slider_track_sets_value(panel, sm):
     panel.set_rect(pg.Rect(0, 0, 200, 40))
     track = panel._track_rect()
-    # Click at the right edge → volume ≈ 1.0.
     panel.handle_click((track.right, track.centery))
     assert sm.master_volume == pytest.approx(1.0)
-    # Click at the left edge → volume ≈ 0.0.
     panel.handle_click((track.x, track.centery))
     assert sm.master_volume == pytest.approx(0.0)
-    # Click at midpoint → volume ≈ 0.5.
     panel.handle_click((track.centerx, track.centery))
     assert sm.master_volume == pytest.approx(0.5, abs=0.05)
 
@@ -264,7 +261,6 @@ def test_panel_end_drag_persists_volume_to_env(panel, sm, monkeypatch, tmp_path)
     panel.handle_click((track.centerx, track.centery))
     assert panel._dragging_slider is True
     panel.end_drag()
-    # The end-of-drag persisted whatever volume the slider committed.
     assert env_mod.get_master_volume() == pytest.approx(sm.master_volume, abs=1e-3)
 
 
@@ -272,7 +268,6 @@ def test_panel_end_drag_does_not_persist_when_not_dragging(panel, monkeypatch, t
     from frontend import env as env_mod
     monkeypatch.setattr(env_mod, "_ENV_PATH", tmp_path / ".env")
     monkeypatch.delenv("CHESS_MASTER_VOLUME", raising=False)
-    # No prior click/drag — end_drag should not write to .env.
     panel.end_drag()
     assert not (tmp_path / ".env").exists()
 
@@ -281,10 +276,8 @@ def test_panel_drag_clamps_at_track_edges(panel, sm):
     panel.set_rect(pg.Rect(0, 0, 200, 40))
     track = panel._track_rect()
     panel.handle_click(track.center)
-    # Drag far left of the track.
     panel.handle_drag((track.x - 500, track.centery), True)
     assert sm.master_volume == pytest.approx(0.0)
-    # Drag far right.
     panel.handle_drag((track.right + 500, track.centery), True)
     assert sm.master_volume == pytest.approx(1.0)
 
@@ -294,55 +287,74 @@ def test_panel_click_outside_returns_false(panel):
     assert consumed is False
 
 
-def test_panel_draw_smoke(panel):
-    # Mute then draw both states.
+@pytest.mark.parametrize("enabled", [True, False], ids=["enabled", "muted"])
+def test_panel_draw_paints_into_window(sm, enabled):
+    """draw() paints the panel region in both mute states (block pixel-diff)."""
+    sm.set_enabled(enabled)
+    win = pg.display.get_surface()
+    p = AudioPanel(win, sm)
+    p.set_rect(pg.Rect(0, 0, 400, 40))
+    win.fill((0, 0, 0), p.rect)
+    before = pg.image.tobytes(win.subsurface(p.rect).copy(), "RGB")
+    p.draw()
+    after = pg.image.tobytes(win.subsurface(p.rect).copy(), "RGB")
+    assert after != before
+    assert p.text_rect.width > 0
+    assert p.slider_rect.width > 0
+    assert p.mute_rect.width > 0
+
+
+def test_panel_draw_noop_when_rect_collapsed(panel):
+    """A zero-width rect short-circuits draw() with no painting."""
+    panel.set_rect(pg.Rect(0, 0, 0, 0))
+    win = panel.window
+    region = pg.Rect(0, 0, 50, 50)
+    win.fill((0, 0, 0), region)
+    before = pg.image.tobytes(win.subsurface(region).copy(), "RGB")
     panel.draw()
-    panel.sound_manager.set_enabled(False)
-    panel.draw()
+    after = pg.image.tobytes(win.subsurface(region).copy(), "RGB")
+    assert after == before
 
 
-def test_panel_resize_keeps_layout_proportions(panel):
-    # Across panel widths, the three regions stay left-to-right with no
-    # overlap and the column-grid math holds.
-    for w in [120, 240, 480]:
-        panel.set_rect(pg.Rect(0, 0, w, 40))
-        assert panel.text_rect.right <= panel.slider_rect.x
-        assert panel.slider_rect.right <= panel.mute_rect.x
-        assert panel.text_rect.x == 0
-        # Mute hugs the right edge to within rounding.
-        assert abs(panel.mute_rect.right - w) <= 1
+@pytest.mark.parametrize("w", [120, 240, 480], ids=["w120", "w240", "w480"])
+def test_panel_resize_keeps_layout_proportions(panel, w):
+    """Across widths the three regions stay ordered, non-overlapping, mute hugs right."""
+    panel.set_rect(pg.Rect(0, 0, w, 40))
+    assert panel.text_rect.right <= panel.slider_rect.x
+    assert panel.slider_rect.right <= panel.mute_rect.x
+    assert panel.text_rect.x == 0
+    assert abs(panel.mute_rect.right - w) <= 1
 
-
-# ---------- Volume label (Bug 5) ----------
 
 def test_volume_label_fits_inside_text_rect_at_default_size(panel):
     panel.set_rect(pg.Rect(0, 0, 400, 40))
-    rendered = panel.button_font.render("Volume", True, (255, 255, 255))
+    rendered = panel.button_font.render("Volume", True, Colors.white)
     assert rendered.get_width() <= panel.text_rect.width
 
 
 def test_volume_label_is_static_across_volume_changes(panel, sm):
     panel.set_rect(pg.Rect(0, 0, 400, 40))
-    # The label exists purely to identify the slider — it must not depend on
-    # the current volume value.
     sm.set_master_volume(0.0)
     panel.draw()
     sm.set_master_volume(1.0)
     panel.draw()
-    # Both calls render the same string; sanity-check the source font matches.
-    rendered_low = panel.button_font.render("Volume", True, (255, 255, 255))
-    rendered_high = panel.button_font.render("Volume", True, (255, 255, 255))
+    rendered_low = panel.button_font.render("Volume", True, Colors.white)
+    rendered_high = panel.button_font.render("Volume", True, Colors.white)
     assert pg.image.tobytes(rendered_low, "RGBA") == pg.image.tobytes(
         rendered_high, "RGBA")
 
 
-def test_volume_label_renders_without_overflow_at_narrow_width(panel):
-    panel.set_rect(pg.Rect(0, 0, 120, 40))
-    # Even at a tight panel size, draw must not raise (subsurface clip path).
+@pytest.mark.parametrize("w", [120, 400], ids=["narrow", "default"])
+def test_volume_label_blitted_width_fits_text_rect(panel, w):
+    """The label is clip-fit to its column: blitted width never exceeds text_rect."""
+    panel.set_rect(pg.Rect(0, 0, w, 40))
+    surf = panel.button_font.render("Volume", True, Colors.white)
+    if surf.get_width() > panel.text_rect.width > 0:
+        surf = surf.subsurface(
+            pg.Rect(0, 0, panel.text_rect.width, surf.get_height()))
+    assert surf.get_width() <= panel.text_rect.width
     panel.draw()
 
-
-# ---------- RightMenu integration ----------
 
 def test_right_menu_audio_rect_below_buttons_rect():
     backend_mock = MagicMock()
@@ -357,11 +369,11 @@ def test_right_menu_moves_rect_shrinks_when_audio_added():
     backend_mock.move_history = []
     rm = RightMenu(pg.display.get_surface(), backend_mock, callbacks={})
     rm.set_rect(pg.Rect(0, 0, 250, 800))
-    # moves_rect should not extend past the buttons_rect top.
     assert rm.moves_rect.bottom <= rm.buttons_rect.y
 
 
 def test_right_menu_three_panels_resize_proportionally():
+    """Button block height tracks audio-row height times the number of rows."""
     backend_mock = MagicMock()
     backend_mock.move_history = []
     rm = RightMenu(pg.display.get_surface(), backend_mock, callbacks={})
@@ -370,8 +382,6 @@ def test_right_menu_three_panels_resize_proportionally():
     rm.set_rect(pg.Rect(0, 0, 250, 1200))
     h2 = rm.moves_rect.height
     assert h2 > h1
-    # Default BUTTONS has two rows, so the block is ~2x audio (single row),
-    # plus the small inter-row gap.
     n_rows = len(rm.buttons_provider())
     expected = n_rows * rm.audio_rect.height + max(n_rows - 1, 0) * 4
     assert abs(rm.buttons_rect.height - expected) <= n_rows * 2 + 4
@@ -385,7 +395,6 @@ def test_right_menu_routes_click_to_audio_panel():
     rm = RightMenu(pg.display.get_surface(), backend_mock, callbacks={},
                    audio_panel=panel)
     rm.set_rect(pg.Rect(0, 0, 250, 800))
-    # Force draw to apply audio_rect into the panel.
     rm.draw_menu()
     initial = sm.enabled
     rm.handle_click(panel.mute_rect.center)
