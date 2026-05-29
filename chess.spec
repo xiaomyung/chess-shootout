@@ -1,0 +1,50 @@
+# PyInstaller build for the chess client.
+#
+#   onedir build (current OS):   pyinstaller chess.spec
+#   portable Windows onefile:    pyinstaller --onefile --windowed --noupx \
+#                                  --name Chess --icon assets/icons/icon.ico \
+#                                  --add-data "assets;assets" \
+#                                  --exclude-module fastapi --exclude-module uvicorn \
+#                                  --exclude-module starlette --exclude-module slowapi main.py
+#
+# Only the web stack is excluded; server.protocol (pydantic-only) stays, since the
+# client imports it. macOS wraps the COLLECT output into Chess.app via BUNDLE.
+import sys
+
+a = Analysis(
+    ["main.py"],
+    pathex=["."],
+    binaries=[],
+    datas=[("assets", "assets")],
+    hiddenimports=[],
+    excludes=["fastapi", "uvicorn", "starlette", "slowapi"],
+    noarchive=False,
+)
+pyz = PYZ(a.pure)
+
+exe = EXE(
+    pyz,
+    a.scripts,
+    [],
+    exclude_binaries=True,
+    name="Chess",
+    console=False,
+    upx=False,
+    icon="assets/icons/icon.ico",
+)
+
+coll = COLLECT(
+    exe,
+    a.binaries,
+    a.datas,
+    upx=False,
+    name="Chess",
+)
+
+if sys.platform == "darwin":
+    app = BUNDLE(
+        coll,
+        name="Chess.app",
+        icon="assets/icons/icon.icns",
+        bundle_identifier="dev.xiaomyung.chess",
+    )

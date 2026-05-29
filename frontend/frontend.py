@@ -167,6 +167,11 @@ class Frontend(OnlineEventsMixin):
         self.window_width = max(window_width, MIN_WINDOW_WIDTH)
         self.window_height = max(window_height, MIN_WINDOW_HEIGHT)
         self.window = pg.display.set_mode((self.window_width, self.window_height), pg.RESIZABLE)
+        try:
+            icon = pg.image.load(str(paths.resource_path("assets", "icons", "icon.png")))
+            pg.display.set_icon(icon)
+        except (pg.error, OSError):
+            pass
         self.clock = pg.time.Clock()
 
         self.mode = "menu"
