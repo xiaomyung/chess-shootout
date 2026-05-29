@@ -7,7 +7,6 @@ import paths
 def test_source_mode_defaults(monkeypatch):
     monkeypatch.setattr(sys, "frozen", False, raising=False)
     monkeypatch.delenv("CHESS_DATA_DIR", raising=False)
-    monkeypatch.delenv("APPIMAGE", raising=False)
     root = paths._source_root()
     assert paths.get_asset_base() == root
     assert paths.get_config_dir() == root
@@ -36,7 +35,6 @@ def test_app_version_blank_when_file_missing(monkeypatch, tmp_path):
 
 def test_override_changes_only_data_dir(monkeypatch):
     monkeypatch.setattr(sys, "frozen", False, raising=False)
-    monkeypatch.delenv("APPIMAGE", raising=False)
     monkeypatch.setenv("CHESS_DATA_DIR", "/tmp/cd")
     assert paths.get_data_dir() == Path("/tmp/cd")
     assert paths.get_games_dir() == Path("/tmp/cd/games")
@@ -47,7 +45,6 @@ def test_override_changes_only_data_dir(monkeypatch):
 
 def test_override_expands_user(monkeypatch):
     monkeypatch.setattr(sys, "frozen", False, raising=False)
-    monkeypatch.delenv("APPIMAGE", raising=False)
     monkeypatch.setenv("CHESS_DATA_DIR", "~/chessdata")
     assert paths.get_data_dir() == Path.home() / "chessdata"
 
@@ -57,7 +54,6 @@ def test_frozen_mode_uses_platformdirs(monkeypatch):
     monkeypatch.setattr(sys, "executable", "/tmp/Chess", raising=False)
     monkeypatch.setattr(sys, "_MEIPASS", "/tmp/_MEI", raising=False)
     monkeypatch.delenv("CHESS_DATA_DIR", raising=False)
-    monkeypatch.delenv("APPIMAGE", raising=False)
     monkeypatch.setattr(paths.platformdirs, "user_config_dir", lambda a, b: "/x/config")
     monkeypatch.setattr(paths.platformdirs, "user_data_dir", lambda a, b: "/x/data")
     monkeypatch.setattr(paths.platformdirs, "user_log_dir", lambda a, b: "/x/log")

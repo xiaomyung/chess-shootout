@@ -35,9 +35,13 @@ def _source_root():
     return Path(__file__).parent.resolve()
 
 
+def _exe_dir():
+    return Path(sys.executable).resolve().parent
+
+
 def _is_onefile():
     meipass = Path(getattr(sys, "_MEIPASS", "")).resolve()
-    return not meipass.is_relative_to(Path(sys.executable).resolve().parent)
+    return not meipass.is_relative_to(_exe_dir())
 
 
 def is_portable():
@@ -45,7 +49,7 @@ def is_portable():
 
 
 def _portable_dir():
-    return Path(sys.executable).resolve().parent / "data"
+    return _exe_dir() / "data"
 
 
 def _default_config_dir():
