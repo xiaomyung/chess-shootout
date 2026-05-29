@@ -2,6 +2,7 @@ import pygame as pg
 
 from frontend.visual.colors import Colors
 from frontend.visual.widgets import fit_text_to_rect
+from frontend.visual.fonts import get_font
 
 
 DEFAULT_DURATION_MS = 1800
@@ -18,7 +19,7 @@ class Toast:
         self.message = None
         self._shown_at_ms = 0
         self.duration_ms = DEFAULT_DURATION_MS
-        self.font = pg.font.SysFont("Arial", 16, bold=True)
+        self.font = get_font(16, bold=True)
 
     def show(self, message, duration_ms=None):
         self.message = message

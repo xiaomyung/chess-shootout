@@ -2,22 +2,27 @@ import glob
 import logging
 import os
 import random
+import shutil
 import threading
 from datetime import datetime
 
 import pygame as pg
 
+import paths
 from backend.match import Match, SINGLE_SCREEN, BOT, ONLINE
 from frontend import env
 from frontend.panels.audio import AudioPanel
 from frontend.board import Board
 from frontend.panels.capture_summary import captured_by, material_advantage
 from frontend.modals.confirm import ConfirmModal
+from frontend.modals.directory_browser import DirectoryBrowser
 from frontend.modals.file_picker import FilePicker
 from frontend.modals.fen_input import FenInputModal
+from frontend.modals.options import OptionsModal, PathRow
 from frontend.modals.help import HelpModal
 from frontend.modals.reconnecting import ReconnectingModal
 from frontend.visual.toast import Toast
+from frontend.visual.fonts import get_font
 from frontend.online.client import (
     OnlineClient, RECONNECT_TOTAL_SECONDS, fetch_resume, probe_active_game,
 )
@@ -37,7 +42,7 @@ from frontend.audio.sound_manager import SoundManager
 from frontend.modals.start import StartMenu
 from frontend.pgn.generate import generate_pgn, TIMEOUT_RESULTS
 from frontend.pgn.load import load_pgn_into_backend, parse_time_control
-from backend.paths import PROJECT_ROOT, SOUNDS_DIR
+from backend.paths import SOUNDS_DIR
 from backend.pieces import PieceColor, PieceType, opponent_of
 from server.protocol import (
     FIRST_MOVE_ABORT_SECONDS, GIVE_TIME_SECONDS, GRACE_SECONDS,
@@ -132,9 +137,11 @@ RESYNC_TIMEOUT_MS = 8000
 MIN_WINDOW_WIDTH = 900
 MIN_WINDOW_HEIGHT = 500
 
+WINDOW_TITLE = "Chess Shootout"
+
 
 def _games_dir():
-    return os.path.join(PROJECT_ROOT, "games")
+    return str(paths.get_games_dir())
 
 
 PROMOTION_KEYS = {
@@ -162,6 +169,11 @@ class Frontend(OnlineEventsMixin):
         self.window_width = max(window_width, MIN_WINDOW_WIDTH)
         self.window_height = max(window_height, MIN_WINDOW_HEIGHT)
         self.window = pg.display.set_mode((self.window_width, self.window_height), pg.RESIZABLE)
+        try:
+            icon = pg.image.load(str(paths.resource_path("assets", "icons", "icon.png")))
+            pg.display.set_icon(icon)
+        except (pg.error, OSError):
+            pass
         self.clock = pg.time.Clock()
 
         self.mode = "menu"
@@ -201,6 +213,7 @@ class Frontend(OnlineEventsMixin):
             "load_pgn": self._on_load_last_game,
             "fen": self._on_open_fen_modal,
             "reconnect": self._on_reconnect_active_game,
+            "options": self._on_open_options,
         })
         self._pending_reconnect = None
         self._pending_reconnect_lock = threading.Lock()
@@ -220,6 +233,8 @@ class Frontend(OnlineEventsMixin):
         self.file_picker = FilePicker(self.window)
         self.help_modal = HelpModal(self.window)
         self.fen_input_modal = FenInputModal(self.window)
+        self.options_modal = OptionsModal(self.window)
+        self.directory_browser = DirectoryBrowser(self.window)
         self.toast = Toast(self.window)
         self._last_saved_pgn_path = None
         self.server_modal = ServerAddressModal(self.window)
@@ -238,7 +253,7 @@ class Frontend(OnlineEventsMixin):
         self._refresh_load_pgn_availability()
         self._spawn_reconnect_probe()
 
-        pg.display.set_caption("Chess")
+        pg.display.set_caption(WINDOW_TITLE)
 
     @property
     def backend(self):
@@ -263,7 +278,7 @@ class Frontend(OnlineEventsMixin):
 
     def _on_back_to_menu(self):
         self.mode = "menu"
-        pg.display.set_caption("Chess")
+        pg.display.set_caption(WINDOW_TITLE)
         if self.online_client is not None:
             self.online_client.disconnect()
             self.online_client = None
@@ -295,6 +310,88 @@ class Frontend(OnlineEventsMixin):
             on_select=self._load_pgn_from_path,
             nickname=env.get_nickname(),
         )
+
+    def _on_open_options(self):
+        rows = [PathRow(
+            "Games folder",
+            lambda: str(paths.get_games_dir()),
+            self._on_change_data_folder,
+            self._on_reset_data_folder,
+        )]
+        self.options_modal.show(rows)
+
+    def _on_change_data_folder(self):
+        self.directory_browser.show(
+            str(paths.get_data_dir()),
+            on_select=self._apply_data_folder_change,
+            on_error=self.toast.show,
+        )
+
+    def _on_reset_data_folder(self):
+        default = paths.get_default_data_dir()
+        self._apply_data_folder_change(str(default), to_default=True)
+
+    def _apply_data_folder_change(self, new_dir, to_default=False):
+        old_games = str(paths.get_games_dir())
+        new_games = os.path.join(new_dir, paths.GAMES_SUBDIR)
+        if os.path.normpath(old_games) == os.path.normpath(new_games):
+            self._commit_data_dir(new_dir, to_default, None)
+            return
+        if os.path.isdir(old_games):
+            pgns = [f for f in os.listdir(old_games) if f.endswith(".pgn")]
+        else:
+            pgns = []
+        if pgns:
+            count = len(pgns)
+            suffix = "s" if count != 1 else ""
+            self.confirm_modal.show(
+                f"Move {count} saved game{suffix} to the new folder?",
+                on_yes=lambda: self._commit_data_dir(new_dir, to_default, old_games),
+                on_no=lambda: self._commit_data_dir(new_dir, to_default, None),
+                yes_label="Move", no_label="Don't move",
+                on_extra=lambda: None, extra_label="Cancel",
+            )
+        else:
+            self._commit_data_dir(new_dir, to_default, None)
+
+    def _commit_data_dir(self, new_dir, to_default, move_from):
+        new_games = os.path.join(new_dir, paths.GAMES_SUBDIR)
+        if move_from is not None and not self._move_pgns(move_from, new_games):
+            return
+        if to_default:
+            env.set_data_dir(None)
+        else:
+            env.set_data_dir(new_dir)
+        self._refresh_load_pgn_availability()
+        self.toast.show("Data folder updated")
+
+    def _move_pgns(self, src, dst):
+        try:
+            os.makedirs(dst, exist_ok=True)
+            for name in os.listdir(src):
+                if not name.endswith(".pgn"):
+                    continue
+                target = os.path.join(dst, name)
+                if os.path.exists(target):
+                    target = self._unique_pgn_name(dst, name)
+                shutil.move(os.path.join(src, name), target)
+        except OSError:
+            self.toast.show("Could not move games")
+            return False
+        try:
+            os.rmdir(src)
+        except OSError:
+            pass
+        return True
+
+    def _unique_pgn_name(self, dst, name):
+        base, ext = os.path.splitext(name)
+        i = 1
+        while True:
+            candidate = os.path.join(dst, f"{base}-{i}{ext}")
+            if not os.path.exists(candidate):
+                return candidate
+            i += 1
 
     def _on_open_fen_modal(self):
         self.fen_input_modal.show(on_submit=self._start_game_from_fen)
@@ -499,7 +596,7 @@ class Frontend(OnlineEventsMixin):
         self.match.mode = SINGLE_SCREEN
         self.match.local_color = None
         self.mode = "menu"
-        pg.display.set_caption("Chess")
+        pg.display.set_caption(WINDOW_TITLE)
         self._reset_to_new_game()
         self._refresh_load_pgn_availability()
 
@@ -784,6 +881,13 @@ class Frontend(OnlineEventsMixin):
 
         pg.quit()
 
+    def _menu_overlay_active(self):
+        return any(m.is_visible() for m in (
+            self.options_modal, self.directory_browser, self.file_picker,
+            self.fen_input_modal, self.server_modal, self.wait_modal,
+            self.reconnecting_modal, self.help_modal, self.confirm_modal,
+        ))
+
     def draw_frame(self):
         if getattr(self, "_last_layout_mode", None) != self.mode:
             self._compute_layout()
@@ -824,15 +928,18 @@ class Frontend(OnlineEventsMixin):
             if self._result_modal_should_show() and not self.pgn_review:
                 self.result_menu.set_text(self.result_text())
                 self.result_menu.draw()
-            self.confirm_modal.draw()
         self._refresh_reconnect_button()
-        self.start_menu.draw()
+        if not self._menu_overlay_active():
+            self.start_menu.draw()
+        self.options_modal.draw()
+        self.directory_browser.draw()
         self.file_picker.draw()
         self.server_modal.draw()
         self.wait_modal.draw()
         self.reconnecting_modal.draw()
         self.help_modal.draw()
         self.fen_input_modal.draw()
+        self.confirm_modal.draw()
         self.toast.draw()
         self._drain_online_inbound()
         self._update_online_phase()
@@ -1120,10 +1227,8 @@ class Frontend(OnlineEventsMixin):
             strip_height,
         )
 
-        self.board.font = pg.font.SysFont(
-            "Arial",
-            int(effective // self.board.board_guides_font_factor),
-            bold=True
+        self.board.font = get_font(
+            int(effective // self.board.board_guides_font_factor), bold=True,
         )
         self.board.set_rect(board_rect)
         self.result_menu.set_rect(result_rect)
@@ -1135,6 +1240,14 @@ class Frontend(OnlineEventsMixin):
         self.start_menu.set_rect(start_rect)
         self.help_modal.set_rect(result_rect)
         self.fen_input_modal.set_rect(flex_rect)
+        options_width = min(int(window_width * 0.7), 620)
+        options_height = min(int(window_height * 0.55), 400)
+        self.options_modal.set_rect(pg.Rect(
+            window_width / 2 - options_width / 2,
+            window_height / 2 - options_height / 2,
+            options_width, options_height,
+        ))
+        self.directory_browser.set_rect(file_picker_rect)
         self._last_layout_mode = self.mode
         self.right_menu.set_rect(menu_rect)
         self.player_strip_top.set_rect(top_strip_rect)
@@ -1203,12 +1316,18 @@ class Frontend(OnlineEventsMixin):
             return
         if self.reconnecting_modal.is_visible():
             return
-        if self.mode == "menu":
-            self.start_menu.handle_click(pos)
+        if self.directory_browser.is_visible():
+            self.directory_browser.handle_click(pos)
             return
         if self.confirm_modal.handle_click(pos):
             return
         if self.confirm_modal.is_visible():
+            return
+        if self.options_modal.is_visible():
+            self.options_modal.handle_click(pos)
+            return
+        if self.mode == "menu":
+            self.start_menu.handle_click(pos)
             return
         if self.result_menu.handle_click(pos):
             return
@@ -1314,6 +1433,11 @@ class Frontend(OnlineEventsMixin):
                 if event.key == pg.K_ESCAPE:
                     self.running = False
                     continue
+                if self.directory_browser.is_visible():
+                    self.directory_browser.handle_key(event)
+                    continue
+                if self.options_modal.is_visible():
+                    continue
                 if self.file_picker.is_visible():
                     continue
                 if self.server_modal.is_visible() and self.server_modal.handle_key(event):
@@ -1351,7 +1475,9 @@ class Frontend(OnlineEventsMixin):
                         self.board.update_drag_motion(event.pos)
 
             elif event.type == pg.MOUSEWHEEL:
-                if self.help_modal.is_visible():
+                if self.directory_browser.is_visible():
+                    self.directory_browser.handle_scroll(pg.mouse.get_pos(), event.y)
+                elif self.help_modal.is_visible():
                     self.help_modal.handle_scroll(pg.mouse.get_pos(), event.y)
                 elif self.file_picker.is_visible():
                     self.file_picker.handle_scroll(pg.mouse.get_pos(), event.y)

@@ -1,6 +1,7 @@
 import pygame as pg
 
 from frontend.visual.colors import Colors
+from frontend.visual.fonts import get_font
 
 
 class TextInput:
@@ -13,13 +14,13 @@ class TextInput:
         self.focused = False
         self.rect = pg.Rect(0, 0, 0, 0)
         self.font_factor = 1.6
-        self.font = pg.font.SysFont("Arial", 16, bold=True)
+        self.font = get_font(16, bold=True)
         self.padding = 8
 
     def set_rect(self, rect):
         self.rect = pg.Rect(rect)
         size = max(int(rect.height / self.font_factor), 10)
-        self.font = pg.font.SysFont("Arial", size, bold=True)
+        self.font = get_font(size, bold=True)
 
     def draw(self):
         pg.draw.rect(self.window, Colors.light_grey_menu, self.rect, border_radius=4)

@@ -116,6 +116,26 @@ def test_draw_button_does_not_scale_when_label_fits(font, monkeypatch):
     assert calls == []
 
 
+def test_wrap_path_single_line_when_it_fits(font):
+    assert widgets.wrap_path("/a/b/c", font, 1000) == ["/a/b/c"]
+
+
+def test_wrap_path_breaks_after_slashes(font):
+    text = "/aaa/bbb/ccc/ddd/eee/fff/ggg/hhh"
+    lines = widgets.wrap_path(text, font, 90)
+    assert len(lines) >= 2
+    assert all(font.size(ln)[0] <= 90 for ln in lines)        # never overflows
+    assert all(ln.endswith("/") for ln in lines[:-1])          # breaks at slash
+    assert "".join(lines) == text                              # lossless
+
+
+def test_wrap_path_char_wraps_an_overlong_segment(font):
+    seg = "z" * 30
+    lines = widgets.wrap_path(seg, font, 100)
+    assert len(lines) >= 2                 # a slash-less segment still wraps
+    assert "".join(lines) == seg
+
+
 def test_draw_button_scales_long_label_to_fit(monkeypatch):
     surface = pg.display.get_surface()
     big_font = pg.font.SysFont("Arial", 24, bold=True)

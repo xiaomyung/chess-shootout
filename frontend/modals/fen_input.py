@@ -4,6 +4,7 @@ from frontend.modals.base import BaseModal
 from frontend.visual.colors import Colors
 from frontend.visual.text_input import TextInput
 from frontend.visual.widgets import draw_button_row, fit_text_to_rect
+from frontend.visual.fonts import get_font
 
 
 FEN_INPUT_MAX_CHARS = 100
@@ -19,9 +20,9 @@ class FenInputModal(BaseModal):
         self.button_rects = {}
         self.text_input = TextInput(window, max_chars=FEN_INPUT_MAX_CHARS,
                                     placeholder="paste FEN…")
-        self.title_font = pg.font.SysFont("Arial", 20, bold=True)
-        self.error_font = pg.font.SysFont("Arial", 14, bold=False)
-        self.button_font = pg.font.SysFont("Arial", 14, bold=True)
+        self.title_font = get_font(20, bold=True)
+        self.error_font = get_font(14, bold=False)
+        self.button_font = get_font(14, bold=True)
 
     def _on_rect_changed(self):
         self.title_font = self.font(factor=8, min_size=18, bold=True)

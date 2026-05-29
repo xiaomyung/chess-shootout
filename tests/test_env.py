@@ -7,7 +7,7 @@ from frontend import env
 
 _ISOLATED_VARS = (
     "CHESS_SERVER_ADDR", "CHESS_NICKNAME", "CHESS_CLIENT_UUID",
-    "CHESS_LAST_MODE", "CHESS_MASTER_VOLUME",
+    "CHESS_LAST_MODE", "CHESS_MASTER_VOLUME", "CHESS_DATA_DIR",
 )
 
 
@@ -219,3 +219,35 @@ def test_set_overrides_coercion_is_deterministic_per_alias():
     assert a1 == a2
     env.set_overrides(client_uuid="bob")
     assert env._uuid_override != a1
+
+
+def test_get_data_dir_override_empty_when_unset():
+    assert env.get_data_dir_override() == ""
+
+
+def test_set_data_dir_persists_and_reads():
+    env.set_data_dir("/tmp/mygames")
+    assert env.get_data_dir_override() == "/tmp/mygames"
+    assert "CHESS_DATA_DIR=/tmp/mygames" in env._ENV_PATH.read_text()
+
+
+def test_set_data_dir_none_clears_override():
+    env.set_data_dir("/tmp/mygames")
+    env.set_data_dir(None)
+    assert env.get_data_dir_override() == ""
+    contents = env._ENV_PATH.read_text() if env._ENV_PATH.exists() else ""
+    assert "CHESS_DATA_DIR" not in contents
+
+
+def test_set_data_dir_creates_missing_config_parent(tmp_path, monkeypatch):
+    nested = tmp_path / "newconfig" / ".env"
+    monkeypatch.setattr(env, "_ENV_PATH", nested)
+    env.set_data_dir("/tmp/x")
+    assert nested.exists()
+
+
+def test_init_paths_points_env_at_config_dir(tmp_path, monkeypatch):
+    import paths
+    monkeypatch.setattr(paths, "get_config_dir", lambda: tmp_path)
+    env.init_paths()
+    assert env._ENV_PATH == tmp_path / ".env"

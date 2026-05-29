@@ -4,6 +4,7 @@ from frontend.visual.colors import Colors
 from frontend.pgn.generate import iter_move_pairs
 from frontend.visual.widgets import draw_button_row, draw_scroll_thumb
 from server.protocol import GIVE_TIME_SECONDS
+from frontend.visual.fonts import get_font
 
 
 BUTTONS = [
@@ -43,8 +44,8 @@ class RightMenu:
         self.moves_font_factor = 22
         self.button_font_factor = 28
 
-        self.font = pg.font.SysFont("monospace", 16)
-        self.button_font = pg.font.SysFont("Arial", 14, bold=True)
+        self.font = get_font(16, mono=True)
+        self.button_font = get_font(14, bold=True)
 
         self.outer_rect = pg.Rect(0, 0, 0, 0)
         self.moves_rect = pg.Rect(0, 0, 0, 0)
@@ -67,12 +68,8 @@ class RightMenu:
         return getattr(self.match, "backend", self.match)
 
     def set_rect(self, rect):
-        self.font = pg.font.SysFont(
-            "monospace", max(int(rect.width / self.moves_font_factor), 10)
-        )
-        self.button_font = pg.font.SysFont(
-            "Arial", max(int(rect.width / self.button_font_factor), 10), bold=True
-        )
+        self.font = get_font(max(int(rect.width / self.moves_font_factor), 10), mono=True)
+        self.button_font = get_font(max(int(rect.width / self.button_font_factor), 10), bold=True)
 
         p = self.padding
         self.outer_rect = pg.Rect(

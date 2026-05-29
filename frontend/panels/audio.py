@@ -3,6 +3,7 @@ import pygame as pg
 from frontend import env
 from frontend.visual.colors import Colors
 from frontend.visual.widgets import draw_button
+from frontend.visual.fonts import get_font
 
 
 DEFAULT_BUTTON_COLUMNS = 5
@@ -18,7 +19,7 @@ class AudioPanel:
         self.text_rect = pg.Rect(0, 0, 0, 0)
         self.slider_rect = pg.Rect(0, 0, 0, 0)
         self.mute_rect = pg.Rect(0, 0, 0, 0)
-        self.button_font = pg.font.SysFont("Arial", 14, bold=True)
+        self.button_font = get_font(14, bold=True)
         self.button_font_factor = 28
         self._dragging_slider = False
 
@@ -28,9 +29,8 @@ class AudioPanel:
         if button_font is not None:
             self.button_font = button_font
         else:
-            self.button_font = pg.font.SysFont(
-                "Arial", max(int(rect.width / self.button_font_factor), 10),
-                bold=True,
+            self.button_font = get_font(
+                max(int(rect.width / self.button_font_factor), 10), bold=True,
             )
         self.text_rect, self.slider_rect, self.mute_rect = self._split_regions(
             rect, max(n_columns, 3), gap,

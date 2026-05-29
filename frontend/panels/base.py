@@ -1,7 +1,6 @@
 import pygame as pg
 
-
-DEFAULT_FONT_FAMILY = "Arial"
+from frontend.visual.fonts import get_font
 
 
 class BasePanel:
@@ -19,9 +18,9 @@ class BasePanel:
     def _on_rect_changed(self):
         pass
 
-    def font(self, factor, min_size=12, bold=True, family=DEFAULT_FONT_FAMILY):
+    def font(self, factor, min_size=12, bold=True):
         size = max(int(self.rect.height / factor), min_size)
-        return pg.font.SysFont(family, size, bold=bold)
+        return get_font(size, bold=bold)
 
     def draw(self):
         pass

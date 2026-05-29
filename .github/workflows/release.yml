@@ -1,0 +1,66 @@
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -e ".[dev]"
+      - run: pytest tests -n auto -q
+        env:
+          SDL_VIDEODRIVER: dummy
+          SDL_AUDIODRIVER: dummy
+
+  build:
+    needs: test
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest, ubuntu-22.04]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -e ".[build]"
+
+      - name: Build Windows (portable exe + installer)
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: |
+          pyinstaller --onefile --windowed --noupx --name ChessShootout --icon assets/icons/icon.ico --add-data "assets;assets" --exclude-module fastapi --exclude-module uvicorn --exclude-module starlette --exclude-module slowapi main.py
+          New-Item -ItemType Directory -Force -Path out | Out-Null
+          Move-Item -Force dist/ChessShootout.exe out/ChessShootout.exe
+          pyinstaller --noconfirm chess.spec
+          choco install innosetup -y --no-progress
+          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" packaging\chess.iss
+
+      - name: Build macOS (.app -> .dmg)
+        if: matrix.os == 'macos-latest'
+        run: |
+          pyinstaller --noconfirm chess.spec
+          mkdir -p out
+          hdiutil create -volname "Chess Shootout" -srcfolder dist/ChessShootout.app -ov -format UDZO out/ChessShootout.dmg
+
+      - name: Build Linux (AppImage)
+        if: matrix.os == 'ubuntu-22.04'
+        run: |
+          pyinstaller --noconfirm chess.spec
+          packaging/build_appimage.sh
+          mkdir -p out
+          mv ChessShootout-x86_64.AppImage out/
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: out/*

@@ -493,8 +493,8 @@ def test_active_row_highlight_follows_review_ply():
 # ---------- Load PGN button ----------
 
 def test_load_pgn_button_disabled_when_no_pgn(tmp_path, monkeypatch):
-    # Force PROJECT_ROOT to an empty tmp dir so there are no games.
-    monkeypatch.setattr("frontend.frontend.PROJECT_ROOT", str(tmp_path))
+    # Point the data dir at an empty tmp dir so there are no games.
+    monkeypatch.setenv("CHESS_DATA_DIR", str(tmp_path))
     app = _new_app_in_isolated_root(tmp_path)
     app.start_menu.show()
     app._refresh_load_pgn_availability()
@@ -507,7 +507,7 @@ def test_load_pgn_button_enabled_when_pgn_exists(tmp_path, monkeypatch):
     (games_dir / "game-20250101-120000.pgn").write_text(
         '[White "A"]\n[Black "B"]\n\n1. e4 e5 *\n'
     )
-    monkeypatch.setattr("frontend.frontend.PROJECT_ROOT", str(tmp_path))
+    monkeypatch.setenv("CHESS_DATA_DIR", str(tmp_path))
     app = _new_app_in_isolated_root(tmp_path)
     app._refresh_load_pgn_availability()
     assert app.start_menu.load_pgn_available is True
@@ -523,7 +523,7 @@ def test_load_pgn_picks_most_recent_by_mtime(tmp_path, monkeypatch):
     # Force mtime ordering.
     os.utime(older, (1_000, 1_000))
     os.utime(newer, (2_000, 2_000))
-    monkeypatch.setattr("frontend.frontend.PROJECT_ROOT", str(tmp_path))
+    monkeypatch.setenv("CHESS_DATA_DIR", str(tmp_path))
     app = _new_app_in_isolated_root(tmp_path)
     path = app._latest_pgn_path()
     assert path is not None
@@ -719,7 +719,7 @@ def test_ctrl_z_does_not_undo_in_pgn_review(tmp_path):
 
 
 def _new_app_in_isolated_root(tmp_path):
-    # Build a Frontend after PROJECT_ROOT has been monkeypatched on the module.
+    # Build a Frontend after CHESS_DATA_DIR has been pointed at the tmp dir.
     from frontend.frontend import Frontend
     app = Frontend(1500, 800)
     app.sound_manager = MagicMock()

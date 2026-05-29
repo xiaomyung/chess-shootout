@@ -47,4 +47,4 @@ jobs:
         run: pip install -e .[dev]
 
       - name: Run pylama
-        run: pylama backend frontend server main.py tests
+        run: pylama backend frontend server main.py paths.py tests

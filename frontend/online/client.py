@@ -231,6 +231,7 @@ class OnlineClient:
 
     def _dump_crash_log(self, exc):
         try:
+            import paths
             from frontend import crash_log
             crash_log.write_crash_log(exc, crash_log.get_memory_buffer(), {
                 "online_state": self.state,
@@ -238,7 +239,7 @@ class OnlineClient:
                 "room_id": self._room_id,
                 "in_queue": self._in_queue,
                 "game_active": self._game_active,
-            })
+            }, root=paths.get_log_dir())
         except Exception:
             log.exception("crash log write failed")
 

@@ -3,6 +3,7 @@ import pygame as pg
 from frontend.modals.base import BaseModal
 from frontend.visual.colors import Colors
 from frontend.visual.widgets import draw_button_row, fit_text_to_rect
+from frontend.visual.fonts import get_font
 
 
 class ReconnectingModal(BaseModal):
@@ -13,9 +14,9 @@ class ReconnectingModal(BaseModal):
         self.title = "Reconnecting…"
         self.subtitle = ""
         self.on_cancel = None
-        self.title_font = pg.font.SysFont("Arial", 22, bold=True)
-        self.subtitle_font = pg.font.SysFont("Arial", 14)
-        self.button_font = pg.font.SysFont("Arial", 14, bold=True)
+        self.title_font = get_font(22, bold=True)
+        self.subtitle_font = get_font(14)
+        self.button_font = get_font(14, bold=True)
         self.button_rects = {}
 
     def _on_rect_changed(self):

@@ -2,6 +2,7 @@ import pygame as pg
 
 from frontend.visual.colors import Colors
 from frontend.visual.widgets import draw_button_row, fit_text_to_rect
+from frontend.visual.fonts import get_font
 
 
 class ConfirmModal:
@@ -16,8 +17,9 @@ class ConfirmModal:
         self.title = None
         self.on_yes = None
         self.on_no = None
-        self.title_font = pg.font.SysFont("Arial", 24, bold=True)
-        self.button_font = pg.font.SysFont("Arial", 14, bold=True)
+        self.on_extra = None
+        self.title_font = get_font(24, bold=True)
+        self.button_font = get_font(14, bold=True)
         self.title_font_factor = 6
         self.button_font_factor = 14
         self.button_rects = {}
@@ -27,24 +29,24 @@ class ConfirmModal:
         self.y = rect.y
         self.width = rect.width
         self.height = rect.height
-        self.title_font = pg.font.SysFont(
-            "Arial", max(int(rect.height / self.title_font_factor), 12), bold=True
-        )
-        self.button_font = pg.font.SysFont(
-            "Arial", max(int(rect.height / self.button_font_factor), 10), bold=True
-        )
+        self.title_font = get_font(max(int(rect.height / self.title_font_factor), 12), bold=True)
+        self.button_font = get_font(max(int(rect.height / self.button_font_factor), 10), bold=True)
 
-    def show(self, title, on_yes, on_no=None, yes_label="Yes", no_label="Cancel"):
+    def show(self, title, on_yes, on_no=None, yes_label="Yes", no_label="Cancel",
+             on_extra=None, extra_label="Cancel"):
         self.title = title
         self.on_yes = on_yes
         self.on_no = on_no
+        self.on_extra = on_extra
         self.yes_label = yes_label
         self.no_label = no_label
+        self.extra_label = extra_label
 
     def hide(self):
         self.title = None
         self.on_yes = None
         self.on_no = None
+        self.on_extra = None
         self.button_rects = {}
 
     def is_visible(self):
@@ -83,20 +85,20 @@ class ConfirmModal:
             (rect.centerx - title_surf.get_width() / 2,
              text_top + (text_height - title_surf.get_height()) / 2),
         )
+        buttons = [(self.yes_label, "yes"), (self.no_label, "no")]
+        if self.on_extra is not None:
+            buttons.append((self.extra_label, "extra"))
         self.button_rects = draw_button_row(
-            self.window,
-            row_rect,
-            [(self.yes_label, "yes"), (self.no_label, "no")],
-            self.button_font,
-            gap,
+            self.window, row_rect, buttons, self.button_font, gap,
         )
 
     def handle_click(self, pos):
         if not self.is_visible():
             return False
+        callbacks = {"yes": self.on_yes, "no": self.on_no, "extra": self.on_extra}
         for key, br in self.button_rects.items():
             if br.collidepoint(pos):
-                callback = self.on_yes if key == "yes" else self.on_no
+                callback = callbacks.get(key)
                 self.hide()
                 if callback is not None:
                     callback()

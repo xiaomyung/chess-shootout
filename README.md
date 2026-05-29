@@ -1,146 +1,104 @@
-# chess-pygame
+# Chess Shootout
 
-A full-featured chess game built with [pygame](https://www.pygame.org/).
-Hot-seat play, drag-and-drop or click-to-move, premoves, annotations,
-clocks, PGN auto-save and review, and an authoritative online server for
-two-player matches.
+A full-featured chess game built with [pygame](https://www.pygame.org/) —
+local hot-seat play, premoves, clocks, annotations, PGN auto-save and
+review, plus an authoritative server for online two-player matches.
 
 ## Features
 
-- Complete chess rules engine (castling, en passant, promotion, threefold
-  repetition, fifty-move rule, insufficient material).
-- Drag-and-drop or click-to-move input; right-click annotations
-  (highlights and arrows).
-- Premove queueing (chess.com-style) with pseudo-legal validation,
-  bouncing chains, and brighter chain-tip highlight.
-- Time controls with increment, board flip, undo, resign, draw
-  agreement; clock pocket reddens below 10 % and the heartbeat fades in.
-- **PGN auto-save** to `games/<prefix>-YYYYMMDD-HHMMSS.pgn` (`local`,
-  `bot`, or `online`); the result modal has an **Open PGN** button that
-  launches the file in your OS default editor (`xdg-open` / `open` /
-  `os.startfile`).
-- **From FEN** start option in the main menu: paste any valid FEN to
-  start a single-screen game from that position.
-- **Help modal** (right-panel `?` button or `?` hotkey) lists every
-  shortcut.
-- Captured-piece graveyard and material balance per side.
-- Master volume slider with an audio panel — value persisted in `.env`.
-- Online play: authoritative FastAPI server, animated reconnect overlay,
-  rematch / takeback / draw flows, crash-log capture for bug reports.
-- **Give 15 sec** button (online + local) — top up the opponent's clock
-  by 15 seconds, capped at the initial time control. Toasts use player
-  nicknames ("Gave 15 sec to Bob" / "Bob already at maximum time" / the
-  receiver sees "Alice gave you 15 seconds").
-- **Auto-end countdown badges** in the player strip (online) — shows
-  `Abort in 0:45` when no first move has been played, `Abandon in 0:45`
-  when the opponent has dropped, `Reconnect in 0:45` for your own WS
-  reconnect window. Digits turn red and the heartbeat starts at 10 s
-  remaining.
-- Series score follows the player nickname through colour-swapping
-  rematches (so winning game 1 as white keeps your `1 - 0` when you
-  switch to black in the rematch).
+**Gameplay**
+- Complete rules engine: castling, en passant, promotion, threefold
+  repetition, fifty-move rule, insufficient material.
+- Drag-and-drop or click-to-move; right-click highlights and arrows.
+- chess.com-style premove queueing (pseudo-legal validation, bouncing chains).
+- Time controls with increment, board flip, undo, resign, draw agreement.
+- Start from any FEN, or play two-up on a single screen.
+- Captured-piece graveyard with running material balance; master-volume
+  slider persisted to `.env`.
+- Help modal listing every shortcut (`?` or the right-panel button).
 
-## Requirements
+**PGN**
+- Every game auto-saves to `games/<prefix>-YYYYMMDD-HHMMSS.pgn` (`local`,
+  `bot`, or `online`).
+- Load and review past games from the **History** menu; step through with
+  the arrow keys.
+- **Open PGN** in the result modal opens the file in your OS default app.
 
-- Python `>=3.12,<3.13` (pinned in `pyproject.toml`; pygame's 3.14 wheel
-  ships without `pygame.mixer`).
-- No external runtime dependencies — every audio asset ships
-  pre-encoded as `.ogg`, so `ffmpeg` is **not** required.
+**Online**
+- Authoritative FastAPI + WebSocket server that runs the same engine as the
+  client and validates every move.
+- Rematch (colors swap; the series score follows the player, not the color),
+  takeback, draw offers, and **Give 15 sec** (tops up the opponent's clock,
+  capped at the starting time).
+- Live abort / abandon / reconnect countdowns in the player strips.
+- Layered reconnection for WiFi blips, app restarts, and server restarts
+  (see [Reconnection](#reconnection)).
+- Crash-log capture for easy bug reports.
 
-## Install
+## Download
 
-The project uses `pyproject.toml`. Two flavours of install:
+No Python needed — grab the file for your OS from the
+[**Releases**](https://github.com/xiaomyung/chess-shootout/releases) page.
 
-| Goal | Command |
-|---|---|
-| **Just play the game** | `pip install -e .` |
-| **Run tests / contribute** | `pip install -e ".[dev]"` |
+| OS | File | First run |
+|----|------|-----------|
+| **Windows 10/11** | `ChessShootoutSetup.exe` (installer, no admin) or `ChessShootout.exe` (portable) | Unsigned, so SmartScreen warns: **More info → Run anyway**. |
+| **macOS** (Apple Silicon) | `ChessShootout.dmg` | Drag **Chess Shootout** to Applications. Unsigned, so first launch is blocked: **System Settings → Privacy & Security → Open Anyway**, or run `xattr -dr com.apple.quarantine /Applications/ChessShootout.app`. |
+| **Linux** (incl. Arch) | `ChessShootout-x86_64.AppImage` | `chmod +x` it, then run. No install, no FUSE. |
 
-`-e` means editable: pip installs the dependencies and points at the
-cloned source tree, so `python main.py` keeps working as you edit. The
-`[dev]` extra adds pytest + xdist + asyncio + httpx — none of which a
-player needs.
+Games, settings, and logs live in a per-user location (`%APPDATA%`,
+`~/Library/Application Support`, `~/.local/share`). Change the games folder
+anytime from the in-app **Options** (gear, top-right of the menu), or drop a
+`portable.txt` beside the app to keep everything alongside it.
 
-**You need Python 3.12 specifically.** Newer Python versions ship pygame
-wheels without `pygame.mixer` (no audio); older versions miss syntax
-the codebase uses. Check with `python3.12 --version` before continuing.
+## Play from source
 
-### Linux
+Requires **Python 3.12** — and specifically 3.12: newer pygame wheels drop
+`pygame.mixer` (no audio) and the code uses 3.12 syntax. There are no other
+runtime dependencies — all audio ships as `.ogg`, so `ffmpeg` is not required.
 
-The recommended path on any Linux is [`pyenv`](https://github.com/pyenv/pyenv) —
-distro Python packages drift between releases, but pyenv guarantees a
-matching 3.12.x. Skip to your distro's "native" block only if you know
-the package version maps to 3.12.
-
-#### Universal (any Linux, recommended)
+Once you have 3.12:
 
 ```bash
-curl https://pyenv.run | bash       # one-time; follow shell-rc instructions printed at the end
+git clone https://github.com/xiaomyung/chess-shootout.git
+cd chess-shootout
+python3.12 -m venv .venv          # Windows: py -3.12 -m venv .venv
+source .venv/bin/activate         # Windows: .venv\Scripts\Activate.ps1
+python --version                  # confirm 3.12.x
+pip install -e .                  # add ".[dev]" for tests + linting
+python main.py
+```
+
+`-e` is an editable install: pip resolves dependencies but runs against your
+working tree, so edits take effect with no reinstall.
+
+### Getting Python 3.12
+
+**Linux** — `pyenv` is the most reliable route, since distro packages drift:
+
+```bash
+curl https://pyenv.run | bash     # one-time; follow the shell-rc steps it prints
 pyenv install 3.12
-pyenv shell 3.12
-python --version                    # Python 3.12.x
-
-git clone https://github.com/xiaomyung/chess-pygame.git
-cd chess-pygame
-python -m venv .venv
-source .venv/bin/activate
-python --version                    # Python 3.12.x — confirms the venv inherited it
-pip install -e .                    # players
-# pip install -e ".[dev]"           # contributors
-python main.py
+pyenv shell 3.12                  # `python3.12` now resolves for the venv step above
 ```
 
-#### Native packages (when they happen to ship 3.12)
+<details>
+<summary>Native distro packages (when they happen to ship 3.12)</summary>
 
-| Distro | Default version | If 3.12 not the default |
-|---|---|---|
-| Arch (rolling) | currently `python` *may* be 3.12.x — check `python --version` first | use pyenv |
-| Ubuntu 24.04+ | `apt install python3.12 python3.12-venv` | — |
-| Ubuntu 22.04 / 23.x | needs deadsnakes PPA (Ubuntu-only): `apt install software-properties-common && add-apt-repository ppa:deadsnakes/ppa && apt update && apt install python3.12 python3.12-venv` | — |
-| Debian 12 (bookworm) | enable bookworm-backports, then `apt install -t bookworm-backports python3.12 python3.12-venv` — or use pyenv (simpler) | use pyenv |
-| Fedora 39+ | `dnf install python3.12` | — |
+| Distro | Command |
+|---|---|
+| Arch (rolling) | often already 3.12 — check `python --version`, else use pyenv |
+| Ubuntu 24.04+ | `sudo apt install python3.12 python3.12-venv` |
+| Ubuntu 22.04 / 23.x | deadsnakes: `sudo add-apt-repository ppa:deadsnakes/ppa && sudo apt update && sudo apt install python3.12 python3.12-venv` |
+| Debian 12 | enable bookworm-backports, or use pyenv (simpler) |
+| Fedora 39+ | `sudo dnf install python3.12` |
 
-Then the same venv steps as above, but with `python3.12 -m venv .venv`
-instead of `python -m venv .venv`:
+</details>
 
-```bash
-git clone https://github.com/xiaomyung/chess-pygame.git
-cd chess-pygame
-python3.12 -m venv .venv
-source .venv/bin/activate
-python --version                    # Python 3.12.x
-pip install -e .
-python main.py
-```
+**macOS** — `brew install python@3.12`
 
-### macOS
-
-```bash
-brew install python@3.12
-
-git clone https://github.com/xiaomyung/chess-pygame.git
-cd chess-pygame
-python3.12 -m venv .venv
-source .venv/bin/activate
-python --version           # should print Python 3.12.x
-pip install -e .
-python main.py
-```
-
-### Windows (PowerShell)
-
-```powershell
-# Download Python 3.12.x from https://www.python.org/downloads/release/
-# (tick "Add Python to PATH" during install). Don't use 3.13+.
-
-git clone https://github.com/xiaomyung/chess-pygame.git
-cd chess-pygame
-py -3.12 -m venv .venv     # the `py` launcher picks 3.12 specifically
-.venv\Scripts\Activate.ps1
-python --version           # should print Python 3.12.x
-pip install -e .
-python main.py
-```
+**Windows** — install 3.12.x from [python.org](https://www.python.org/downloads/)
+(tick *Add Python to PATH*); the `py -3.12` launcher then selects it.
 
 ## Hotkeys
 
@@ -158,128 +116,95 @@ python main.py
 
 ## Online play
 
-Two players, one server. The server is authoritative — it runs the same
-engine code as the client and validates every move.
+Two players, one server — authoritative, running the same engine as the client.
 
 ### Quick start (local)
 
 ```bash
-# Terminal 1 — server (default port 8000)
-python -m server
-
-# Terminal 2 — first client
-python main.py --client-uuid alice --nickname Alice
-
-# Terminal 3 — second client
-python main.py --client-uuid bob --nickname Bob
+python -m server                                      # terminal 1 (port 8000)
+python main.py --client-uuid alice --nickname Alice   # terminal 2
+python main.py --client-uuid bob   --nickname Bob     # terminal 3
 ```
 
-`--client-uuid alice` is a debug shortcut: non-UUID4 aliases are coerced
-into a deterministic UUID4 client-side so the server's UUID4 validator
-still accepts them. Real clients get a UUID4 auto-generated on first
-launch and persisted in `.env`.
+`--client-uuid alice` is a debug shortcut: any non-UUID4 alias is coerced to
+a deterministic UUID4 client-side so the server's validator accepts it. Real
+clients auto-generate and persist a UUID4 on first launch.
 
-Both clients pick **Online** mode in the start menu, choose time
-control and side preference, click **Start Search**, and accept the
-server address. The address field takes either `<ip>` (port defaults
-to 8000) or `<ip>:<port>`; for local play `localhost` is enough. As
-soon as the second player connects with the same time control, both
-clients see "Match found!" for half a second and the game starts with
-the player's color at the bottom.
+In each client pick **Online**, choose time control and side, hit **Start
+Search**, and confirm the server address (`<ip>` defaults to port 8000, or
+`<ip>:<port>`; `localhost` for local play). When a second player joins with
+the same time control, both see "Match found!" and the game begins.
 
 ### Settings (`.env`)
 
-The client reads a `.env` at the repo root (gitignored). Copy
-`.env.example` and fill in:
+The client reads a gitignored `.env` at the repo root — copy `.env.example`:
 
 ```
 CHESS_SERVER_ADDR=localhost:8000
 CHESS_NICKNAME=YourName
 CHESS_CLIENT_UUID=          # auto-generated UUID4 on first launch
-CHESS_LAST_MODE=             # auto-saved
-CHESS_MASTER_VOLUME=0.70     # 0.0 – 1.0, in-game slider persists here
+CHESS_LAST_MODE=            # auto-saved
+CHESS_MASTER_VOLUME=0.70    # 0.0–1.0; the in-game slider writes here
 ```
 
-CLI flags `--client-uuid` and `--nickname` override `.env` for the
-running process — handy for testing two clients on the same machine.
+`--client-uuid` and `--nickname` override `.env` for a single run (handy for
+two clients on one machine). The games folder is set from in-app **Options**
+and persisted as `CHESS_DATA_DIR`.
 
 ### In-game actions
 
-- **Resign** at any time → opponent wins.
-- **Draw** while it's your turn → opponent gets an Accept/Decline
-  prompt; mutual draws auto-agree.
-- **Undo** (= takeback) only directly after your own move (while the
-  opponent is on the clock) → opponent prompted; on accept, one ply
-  rolls back and the clock is restored.
-- **Give 15 sec** → adds 15 seconds to your opponent's clock (capped at
-  the initial time control). 500 ms debounce so a double-click only
-  fires once.
-- **Rematch** from the result modal → opponent prompted; on accept, the
-  same room restarts with swapped colors. The series score (e.g.
-  `Alice 1 - 0 Bob`) shows in the right panel and follows the players,
-  not the colours.
+- **Resign** — opponent wins.
+- **Draw** (on your turn) — opponent gets Accept/Decline; mutual offers auto-agree.
+- **Undo / takeback** — only right after your own move, while the opponent is
+  on the clock; on accept, one ply rolls back and the clocks restore.
+- **Give 15 sec** — adds 15 s to the opponent's clock, capped at the starting
+  time control (debounced against double-clicks).
+- **Rematch** (from the result modal) — the same room restarts with swapped
+  colors; the series score follows the players, not the colors.
 
 ### Reconnection
 
 Three layered recovery paths:
 
-- **WS drops mid-game** (transient WiFi blip): client retries `/resume`
-  every 2 s for up to 60 s. The opponent sees a "Reconnecting…" overlay,
-  a yellow status dot, and an `Abandon in 0:45` countdown badge in
-  your strip; you see a `Reconnect in 0:45` badge in your own strip
-  while the modal is up. On success the game continues from the exact
-  ply. Desync is caught two ways: every move + takeback carries a `ply`
-  counter, and the server broadcasts a periodic `state_sync` ply beacon
-  (~2.5 s) — so even a move lost while it's your turn to receive (with no
-  follow-up message to react to) is detected within a couple of seconds
-  and resynced automatically via `/resume`. Both players see a toast
-  while it resolves (`Resyncing…` for the affected player, `Opponent is
-  resyncing…` for the other), and a reconnecting socket can no longer be
-  orphaned server-side by a stale session.
-- **Client app restart** (you closed the window mid-game): on next
-  launch the client probes `POST /reclaim {client_uuid}`; if the room
-  is still alive the start menu shows a **Reconnect** button between
-  Load PGN and Start Search.
-- **Server restart** (server killed and brought back): when `/resume`
-  fatals but `/healthz` is reachable, the client knows the room is gone
-  and surfaces a dedicated modal — **"Server restarted — game ended"**
-  with [New Search] / [Cancel]. New Search re-runs matchmake against
-  your previous time control without bouncing through the start menu.
+- **WS drops mid-game** (WiFi blip) — the client retries `/resume` every 2 s
+  for up to 60 s. The opponent sees a "Reconnecting…" overlay, a yellow status
+  dot, and an `Abandon in …` countdown; you see `Reconnect in …`. Desync is
+  caught two ways — every move/takeback carries a `ply` counter, and the server
+  emits a periodic `state_sync` beacon (~2.5 s) — so even a move lost with no
+  follow-up message to react to is detected and resynced via `/resume` within
+  seconds. Both players see a resync toast while it resolves.
+- **Client app restart** — on next launch the client probes `POST /reclaim`;
+  if the room is still alive, a **Reconnect** button appears in the start menu.
+- **Server restart** — when `/resume` fails but `/healthz` is reachable, the
+  client shows **"Server restarted — game ended"** with New Search / Cancel;
+  New Search re-matches against your previous time control directly.
 
-Server-side rooms are in-memory only (no DB), so a true server crash
-loses the game state — but you go straight to a fresh search on click.
+Rooms are in-memory only (no DB), so a true server crash loses game state —
+but New Search starts a fresh game in one click.
 
-### Crash log capture
+### Crash logs
 
-Unhandled exceptions write `crashlogs/YYYYMMDD-HHMMSS.txt` with the
-traceback, app state, and an in-memory log buffer of the whole session.
-`crashlogs/` is gitignored. Attach the file when reporting bugs.
+Unhandled exceptions write `crashlogs/YYYYMMDD-HHMMSS.txt` (traceback, app
+state, and the whole-session log buffer). `crashlogs/` is gitignored — attach
+the file when reporting a bug.
 
 ### Deployment
 
-See [deploy/README.md](deploy/README.md) for VPS setup with systemd —
-the server listens directly on a public TCP port; no TLS, DNS, or
-reverse proxy required.
+See [deploy/README.md](deploy/README.md) for single-VPS systemd setup — the
+server listens directly on a public TCP port; no TLS, DNS, or reverse proxy.
 
-## Running tests
+## Development
 
-```bash
-pip install -e ".[dev]"
-pytest tests -n 8 -q
-```
-
-~9 s under xdist for 1189 tests; ~25 s serial.
-
-## Linting
-
-Pylama (pycodestyle + pyflakes, configured in `pyproject.toml`) runs in CI and gates merges to master.
+Install the dev extra, then run the same checks CI does:
 
 ```bash
 pip install -e ".[dev]"
-pylama backend frontend server main.py tests
+pytest tests -n 8 -q                            # ~10 s for 1318 tests (~25 s serial)
+pylama backend frontend server main.py paths.py tests   # pycodestyle + pyflakes; exits 0 when clean
 ```
 
-Clean run exits 0. Same command runs in the `lint` GitHub Actions job, so a green local run means the PR check will pass.
+Both gate merges to `master` (the `test` and `lint` jobs), so a green local
+run means the PR checks will pass.
 
 ## License
 
