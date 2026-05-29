@@ -23,8 +23,6 @@ from frontend.crash_log import (
 )
 
 
-# ---- write_crash_log: file location & filename shape ------------------------
-
 def test_write_crash_log_creates_dir_under_root(tmp_path):
     path = write_crash_log(ValueError("boom"), [], {}, root=tmp_path)
     assert path.exists()
@@ -32,7 +30,7 @@ def test_write_crash_log_creates_dir_under_root(tmp_path):
 
 
 def test_write_crash_log_creates_dir_when_missing(tmp_path):
-    # Even if no `crashlogs/` exists yet, the helper should mkdir -p it.
+    """root that doesn't exist yet must be mkdir -p'd."""
     target = tmp_path / "fresh"
     path = write_crash_log(ValueError("x"), [], {}, root=target)
     assert (target / CRASHLOG_DIR_NAME).is_dir()
@@ -44,53 +42,51 @@ def test_write_crash_log_filename_is_timestamped(tmp_path):
     assert re.fullmatch(r"\d{8}-\d{6}\.txt", path.name)
 
 
-# ---- write_crash_log: content sections --------------------------------------
+@pytest.mark.parametrize(
+    "log_buffer, state, expected_substrings",
+    [
+        pytest.param(
+            [], {}, ["== State at crash ==", "(no state captured)"],
+            id="empty_state_falls_back_to_placeholder",
+        ),
+        pytest.param(
+            [], {}, ["== Logs ==", "(no log records captured)"],
+            id="empty_buffer_falls_back_to_placeholder",
+        ),
+        pytest.param(
+            [],
+            {"mode": "online", "move_history_len": 12, "online_state": "connected"},
+            ["== State at crash ==", "mode: online",
+             "move_history_len: 12", "online_state: connected"],
+            id="state_section_lists_each_key_value",
+        ),
+        pytest.param(
+            ["10:00:01 INFO chess.client connecting",
+             "10:00:02 INFO chess.client matchmake ok"],
+            {},
+            ["== Logs ==", "connecting", "matchmake ok"],
+            id="log_section_includes_each_buffer_line",
+        ),
+    ],
+)
+def test_crash_log_content_includes(tmp_path, log_buffer, state, expected_substrings):
+    """Each section header and rendered line lands verbatim in the file."""
+    path = write_crash_log(ValueError("x"), log_buffer, state, root=tmp_path)
+    content = path.read_text()
+    for fragment in expected_substrings:
+        assert fragment in content
+
 
 def test_crash_log_includes_traceback(tmp_path):
+    """Needs a real raise so exc.__traceback__ is populated for the formatter."""
     try:
         raise RuntimeError("kaboom")
     except RuntimeError as exc:
         path = write_crash_log(exc, [], {}, root=tmp_path)
     content = path.read_text()
-    # Traceback section header + the actual exception text + the raise line.
     assert "== Traceback ==" in content
     assert "RuntimeError" in content
     assert "kaboom" in content
-
-
-def test_crash_log_includes_state_section(tmp_path):
-    state = {"mode": "online", "move_history_len": 12,
-             "online_state": "connected"}
-    path = write_crash_log(ValueError("x"), [], state, root=tmp_path)
-    content = path.read_text()
-    assert "== State at crash ==" in content
-    assert "mode: online" in content
-    assert "move_history_len: 12" in content
-    assert "online_state: connected" in content
-
-
-def test_crash_log_handles_empty_state_dict(tmp_path):
-    path = write_crash_log(ValueError("x"), [], {}, root=tmp_path)
-    content = path.read_text()
-    assert "no state captured" in content
-
-
-def test_crash_log_includes_log_buffer(tmp_path):
-    buffer = [
-        "10:00:01 INFO chess.client connecting",
-        "10:00:02 INFO chess.client matchmake ok",
-    ]
-    path = write_crash_log(ValueError("x"), buffer, {}, root=tmp_path)
-    content = path.read_text()
-    assert "== Logs ==" in content
-    assert "matchmake ok" in content
-    assert "connecting" in content
-
-
-def test_crash_log_handles_empty_log_buffer(tmp_path):
-    path = write_crash_log(ValueError("x"), [], {}, root=tmp_path)
-    content = path.read_text()
-    assert "no log records captured" in content
 
 
 def test_crash_log_section_order_is_traceback_state_logs(tmp_path):
@@ -107,13 +103,9 @@ def test_crash_log_section_order_is_traceback_state_logs(tmp_path):
     assert i_tb < i_state < i_logs
 
 
-# ---- install_memory_handler -------------------------------------------------
-
 @pytest.fixture
 def isolated_root_logger():
-    # Snapshot existing root handlers so we can restore them — this test
-    # mutates the global logger and we don't want to leak the change to
-    # neighbouring test files.
+    """Snapshot/restore root handlers so the global-logger mutation doesn't leak."""
     root = logging.getLogger()
     saved_handlers = list(root.handlers)
     saved_level = root.level
@@ -135,7 +127,7 @@ def test_install_memory_handler_captures_log_records(isolated_root_logger):
 
 
 def test_install_memory_handler_uses_canonical_format(isolated_root_logger):
-    # Match the format used elsewhere in the app: time + level + name + msg.
+    """Format mirrors the app: level + logger name + msg all rendered per line."""
     handler = install_memory_handler()
     isolated_root_logger.setLevel(logging.DEBUG)
     log = logging.getLogger("chess.test_format")
@@ -147,8 +139,7 @@ def test_install_memory_handler_uses_canonical_format(isolated_root_logger):
 
 
 def test_install_memory_handler_buffer_unbounded(isolated_root_logger):
-    # The user explicitly wants the buffer unbounded — assert that lots of
-    # records all stay in the buffer (no LRU eviction).
+    """Buffer is intentionally unbounded — every record stays, no LRU eviction."""
     handler = install_memory_handler()
     isolated_root_logger.setLevel(logging.DEBUG)
     log = logging.getLogger("chess.test_volume")
@@ -158,8 +149,6 @@ def test_install_memory_handler_buffer_unbounded(isolated_root_logger):
     burst_lines = [L for L in handler.buffer if "burst-" in L]
     assert len(burst_lines) == 500
 
-
-# ---- gather_state ----------------------------------------------------------
 
 def test_gather_state_extracts_all_known_fields():
     fe = SimpleNamespace(
@@ -176,19 +165,18 @@ def test_gather_state_extracts_all_known_fields():
 
 
 def test_gather_state_handles_missing_match_and_client():
-    # Crashes that happen during early init may have no match / no client —
-    # gather_state must not raise.
+    """Early-init crashes (no match / no client) must not raise."""
     fe = SimpleNamespace(mode="menu", match=None, online_client=None,
                          window=SimpleNamespace(get_size=lambda: (900, 600)))
     state = gather_state(fe)
     assert state["mode"] == "menu"
     assert state["move_history_len"] is None
     assert state["online_state"] is None
+    assert state["window_size"] == (900, 600)
 
 
 def test_gather_state_tolerates_completely_blank_object():
-    # `app` could be None very early — but gather_state is only called when
-    # app is non-None. Still, an empty namespace shouldn't blow up.
+    """A bare namespace (no attrs) yields all-None rather than blowing up."""
     state = gather_state(SimpleNamespace())
     assert state == {
         "mode": None,
@@ -198,11 +186,8 @@ def test_gather_state_tolerates_completely_blank_object():
     }
 
 
-# ---- end-to-end (handler → buffer → write_crash_log) ------------------------
-
 def test_end_to_end_handler_drains_into_crash_log(tmp_path, isolated_root_logger):
-    # The whole flow main.py uses: install handler, capture some logs, then
-    # call write_crash_log with the handler's buffer when something blows up.
+    """Full main.py flow: install handler, log, then drain its buffer on crash."""
     handler = install_memory_handler()
     isolated_root_logger.setLevel(logging.DEBUG)
     log = logging.getLogger("chess.e2e_crash")
@@ -213,7 +198,7 @@ def test_end_to_end_handler_drains_into_crash_log(tmp_path, isolated_root_logger
         raise RuntimeError("step-3-broken")
     except RuntimeError as exc:
         path = write_crash_log(exc, handler.buffer, {"mode": "menu"},
-                                 root=tmp_path)
+                               root=tmp_path)
     content = path.read_text()
     assert "step-1-ok" in content
     assert "step-2-suspicious" in content

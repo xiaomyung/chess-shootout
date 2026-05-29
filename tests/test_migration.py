@@ -20,7 +20,7 @@ def _pygame_init():
 
 @pytest.fixture(autouse=True)
 def _isolate_env(tmp_path_factory, monkeypatch):
-    # Keep set_data_dir away from the real repo .env, and start with no override.
+    """Pin set_data_dir to a temp .env (never the real repo) and start unset."""
     envfile = tmp_path_factory.mktemp("envcfg") / ".env"
     monkeypatch.setattr(env, "_ENV_PATH", envfile)
     monkeypatch.delenv("CHESS_DATA_DIR", raising=False)
@@ -33,7 +33,8 @@ def _app():
 
 
 def _draw_then_click_confirm(app, key):
-    app.draw_frame()  # lays out the confirm modal's button rects
+    """Lay out the confirm modal's button rects, then click the named button."""
+    app.draw_frame()
     app.confirm_modal.handle_click(app.confirm_modal.button_rects[key].center)
 
 
@@ -48,10 +49,13 @@ def test_move_pgns_relocates_and_renames_collisions(tmp_path):
     (dst / "a.pgn").write_text("existing")
     assert app._move_pgns(str(src), str(dst)) is True
     names = sorted(os.listdir(dst))
-    assert "a.pgn" in names      # pre-existing kept
-    assert "a-1.pgn" in names    # collision renamed
+    assert "a.pgn" in names
+    assert "a-1.pgn" in names
     assert "b.pgn" in names
-    assert not os.path.isdir(src)   # emptied old games dir is removed
+    assert (dst / "a.pgn").read_text() == "existing"
+    assert (dst / "a-1.pgn").read_text() == "1"
+    assert (dst / "b.pgn").read_text() == "2"
+    assert not os.path.isdir(src)
 
 
 def test_move_pgns_keeps_old_dir_when_non_pgn_present(tmp_path):
@@ -61,12 +65,15 @@ def test_move_pgns_keeps_old_dir_when_non_pgn_present(tmp_path):
     (src / "a.pgn").write_text("1")
     (src / "notes.txt").write_text("keep me")
     assert app._move_pgns(str(src), str(tmp_path / "new")) is True
-    assert os.path.isdir(src)              # not removed: a non-pgn file remains
+    assert os.path.isdir(src)
     assert (src / "notes.txt").exists()
-    assert not (src / "a.pgn").exists()    # the pgn was still moved
+    assert (src / "notes.txt").read_text() == "keep me"
+    assert not (src / "a.pgn").exists()
+    assert (tmp_path / "new" / "a.pgn").read_text() == "1"
 
 
 def test_move_pgns_failure_returns_false(tmp_path, monkeypatch):
+    """An OSError during the move aborts: returns False and leaves the source pgn."""
     app = _app()
     src = tmp_path / "old"
     src.mkdir()
@@ -77,12 +84,15 @@ def test_move_pgns_failure_returns_false(tmp_path, monkeypatch):
 
     monkeypatch.setattr("frontend.frontend.shutil.move", boom)
     assert app._move_pgns(str(src), str(tmp_path / "new")) is False
+    assert (src / "a.pgn").exists()
+    assert os.path.isdir(src)
 
 
 def test_change_with_no_games_commits_immediately(tmp_path, monkeypatch):
+    """No games/ in the old dir: commit straight through with no confirm prompt."""
     cur = tmp_path / "cur"
     cur.mkdir()
-    monkeypatch.setenv("CHESS_DATA_DIR", str(cur))  # empty: no games/
+    monkeypatch.setenv("CHESS_DATA_DIR", str(cur))
     app = _app()
     new = tmp_path / "new"
     new.mkdir()
@@ -92,6 +102,7 @@ def test_change_with_no_games_commits_immediately(tmp_path, monkeypatch):
 
 
 def test_change_with_games_prompts_then_moves(tmp_path, monkeypatch):
+    """Games present: prompt, then 'Move' relocates them and commits the new dir."""
     cur = tmp_path / "cur"
     (cur / "games").mkdir(parents=True)
     (cur / "games" / "g.pgn").write_text("x")
@@ -102,12 +113,13 @@ def test_change_with_games_prompts_then_moves(tmp_path, monkeypatch):
     app._apply_data_folder_change(str(new))
     assert app.confirm_modal.is_visible() is True
     _draw_then_click_confirm(app, "yes")
-    assert (new / "games" / "g.pgn").exists()
-    assert not (cur / "games").exists()          # emptied old games dir removed
+    assert (new / "games" / "g.pgn").read_text() == "x"
+    assert not (cur / "games").exists()
     assert str(paths.get_data_dir()) == str(new)
 
 
 def test_change_with_games_dont_move_leaves_them(tmp_path, monkeypatch):
+    """'Don't move' still commits the new dir but leaves the old games in place."""
     cur = tmp_path / "cur"
     (cur / "games").mkdir(parents=True)
     (cur / "games" / "g.pgn").write_text("x")
@@ -117,12 +129,13 @@ def test_change_with_games_dont_move_leaves_them(tmp_path, monkeypatch):
     new.mkdir()
     app._apply_data_folder_change(str(new))
     _draw_then_click_confirm(app, "no")
-    assert (cur / "games" / "g.pgn").exists()        # original untouched
+    assert (cur / "games" / "g.pgn").exists()
     assert not (new / "games" / "g.pgn").exists()
     assert str(paths.get_data_dir()) == str(new)
 
 
 def test_change_with_games_cancel_aborts(tmp_path, monkeypatch):
+    """'Cancel' (the extra button) aborts: nothing moves and the data dir is unchanged."""
     cur = tmp_path / "cur"
     (cur / "games").mkdir(parents=True)
     (cur / "games" / "g.pgn").write_text("x")
@@ -131,13 +144,14 @@ def test_change_with_games_cancel_aborts(tmp_path, monkeypatch):
     new = tmp_path / "new"
     new.mkdir()
     app._apply_data_folder_change(str(new))
-    _draw_then_click_confirm(app, "extra")           # Cancel
-    assert (cur / "games" / "g.pgn").exists()         # original untouched
+    _draw_then_click_confirm(app, "extra")
+    assert (cur / "games" / "g.pgn").exists()
     assert not (new / "games").exists()
-    assert str(paths.get_data_dir()) == str(cur)      # data dir NOT changed
+    assert str(paths.get_data_dir()) == str(cur)
 
 
 def test_reset_clears_override(tmp_path, monkeypatch):
+    """Reset to default clears the persisted CHESS_DATA_DIR override entirely."""
     custom = tmp_path / "custom"
     custom.mkdir()
     monkeypatch.setenv("CHESS_DATA_DIR", str(custom))
@@ -149,15 +163,17 @@ def test_reset_clears_override(tmp_path, monkeypatch):
 
 
 def test_menu_hidden_while_overlay_modal_open():
+    """An open overlay modal hides the menu; closing it brings the menu back."""
     app = _app()
-    assert app._menu_overlay_active() is False     # plain menu shows
+    assert app._menu_overlay_active() is False
     app._on_open_options()
-    assert app._menu_overlay_active() is True       # modal open -> menu hidden
+    assert app._menu_overlay_active() is True
     app.options_modal.hide()
-    assert app._menu_overlay_active() is False       # modal closed -> menu back
+    assert app._menu_overlay_active() is False
 
 
 def test_menu_click_routes_to_options_not_start_menu(monkeypatch):
+    """With the options modal open, clicks route to it and never reach start_menu."""
     app = _app()
     assert app.mode == "menu"
     app._on_open_options()
@@ -165,5 +181,5 @@ def test_menu_click_routes_to_options_not_start_menu(monkeypatch):
     received = []
     monkeypatch.setattr(app.start_menu, "handle_click", lambda pos: received.append(pos))
     app.mouse_left_clicked((10, 10))
-    assert received == []                       # start_menu shielded by the modal
+    assert received == []
     assert app.options_modal.is_visible() is True
