@@ -1,3 +1,7 @@
+"""ResultMenu geometry/render invariants: button labels always fit inside their
+buttons (the same fit_text_to_rect path draw_button uses), buttons stay inside the
+modal at sane sizes, and clicks route to the keyed callback."""
+
 import os
 
 os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
@@ -6,7 +10,7 @@ import pygame as pg
 import pytest
 
 from frontend.modals.result import BUTTONS, ResultMenu
-from frontend.visual.widgets import BUTTON_LABEL_PADDING_PX
+from frontend.visual.widgets import BUTTON_LABEL_PADDING_PX, fit_text_to_rect
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -26,18 +30,25 @@ def _make_menu():
     return ResultMenu(pg.display.get_surface(), callbacks)
 
 
-def test_button_labels_fit_inside_buttons_at_tight_size():
-    # Tight rect simulates a heavily resized window — buttons would otherwise
-    # be too narrow to hold "New Game" / "Save PGN" at the height-derived font size.
+@pytest.mark.parametrize(
+    "title_reason",
+    [
+        pytest.param(("Black wins", "by checkmate"), id="black_wins_checkmate"),
+        pytest.param(("White wins", "by resignation"), id="white_wins_resignation"),
+        pytest.param(("Draw", "by insufficient material"), id="draw_insufficient_material"),
+        pytest.param(("White wins", "on time"), id="white_wins_on_time"),
+    ],
+)
+def test_button_labels_fit_inside_buttons_at_tight_size(title_reason):
+    """A tight rect (heavily resized window) would otherwise be too narrow for the
+    labels at the height-derived font; fit_text_to_rect must shrink them to fit."""
     menu = _make_menu()
     menu.set_rect(pg.Rect(0, 0, 240, 160))
-    menu.set_text(("Black wins", "by checkmate"))
+    menu.set_text(title_reason)
     menu.draw()
     for label, key in BUTTONS:
         rect = menu.button_rects[key]
         rendered = menu.button_font.render(label, True, (255, 255, 255))
-        # Apply the same fit_text_to_rect logic that draw_button uses.
-        from frontend.visual.widgets import fit_text_to_rect
         fitted = fit_text_to_rect(rendered, rect)
         assert fitted.get_width() <= rect.width - 2 * BUTTON_LABEL_PADDING_PX
         assert fitted.get_height() <= rect.height - 2 * BUTTON_LABEL_PADDING_PX

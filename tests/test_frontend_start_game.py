@@ -1,3 +1,8 @@
+"""Frontend start-game wiring: _on_start_game mode gating, name/clock setup, and the
+player-strip/auto-save behavior that hangs off a started game. Only single_screen
+actually starts a game in-process; bot returns early and online defers to the server
+modal, so neither builds a clock or leaves the "menu" mode."""
+
 import os
 import random
 
@@ -47,16 +52,16 @@ def test_start_game_single_screen_white_side():
     assert app.backend.clock.increment_seconds == 2
 
 
-def test_start_game_empty_nickname_falls_back_to_player():
+@pytest.mark.parametrize("nickname", [
+    pytest.param("", id="empty_string"),
+    pytest.param("   ", id="whitespace_only"),
+])
+def test_start_game_blank_nickname_falls_back_to_player(nickname):
+    """Blank/whitespace nicknames are stripped to "Player 1" for the white side."""
     app = make_app()
-    app._on_start_game(base_config(nickname=""))
+    app._on_start_game(base_config(nickname=nickname))
     assert app.white_name == "Player 1"
-
-
-def test_start_game_whitespace_nickname_falls_back():
-    app = make_app()
-    app._on_start_game(base_config(nickname="   "))
-    assert app.white_name == "Player 1"
+    assert app.black_name == "Player 2"
 
 
 def test_start_game_black_side_swaps_names():
@@ -66,11 +71,11 @@ def test_start_game_black_side_swaps_names():
     assert app.black_name == "alice"
 
 
-def test_start_game_random_side_resolves_deterministically():
+def test_start_game_random_side_resolves_to_concrete_color():
+    """A "random" side preference is resolved to a concrete color before game start."""
     app = make_app()
     random.seed(0)
     app._on_start_game(base_config(side="random"))
-    # _chosen_side is concrete after random resolution.
     assert app._chosen_side in {"white", "black"}
 
 
@@ -80,32 +85,41 @@ def test_opponent_name_for_each_mode():
     assert OPPONENT_NAME_FOR_MODE["online"] == "Opponent"
 
 
-def test_start_game_bot_mode_is_inert():
+def test_start_game_bot_mode_returns_early_without_starting():
+    """Bot mode hits the early return: no game is set up and the menu stays put."""
     app = make_app()
+    pre_mode = app.mode
     app._on_start_game(base_config(mode="bot"))
-    assert app.mode == "menu"
+    assert app.mode == pre_mode == "menu"
     assert app.backend.clock is None
     assert app.start_menu.is_visible() is True
+    assert app.server_modal.is_visible() is False
 
 
-def test_start_game_online_mode_is_inert():
+def test_start_game_online_mode_routes_to_server_flow_without_starting():
+    """Online mode defers to the server modal; the game itself is not started."""
     app = make_app()
+    pre_mode = app.mode
     app._on_start_game(base_config(mode="online"))
-    assert app.mode == "menu"
+    assert app.mode == pre_mode == "menu"
     assert app.backend.clock is None
+    assert app.start_menu.is_visible() is False
+    assert app.server_modal.is_visible() is True
 
 
-def test_no_clock_means_backend_clock_is_none():
+def test_no_clock_leaves_strips_clockless():
+    """With time_minutes=None no clock is built and the strips report no seconds."""
     app = make_app()
     app._on_start_game(base_config(time_minutes=None))
     assert app.backend.clock is None
-    # _update_player_strips must not crash with None clock.
     app._update_player_strips()
+    assert app.player_strip_top.clock_seconds is None
+    assert app.player_strip_bottom.clock_seconds is None
 
 
 def test_tick_clock_called_only_outside_menu():
+    """draw_frame ticks the clock only once a game has started, never in the menu."""
     app = make_app()
-    # In menu mode, draw_frame must NOT call tick_clock.
     calls = []
     original_tick = app.backend.tick_clock
     app.backend.tick_clock = lambda: calls.append(1)
@@ -113,7 +127,6 @@ def test_tick_clock_called_only_outside_menu():
     assert calls == []
 
     app._on_start_game(base_config())
-    # After leaving menu, draw_frame ticks the clock.
     app.draw_frame()
     assert len(calls) >= 1
     app.backend.tick_clock = original_tick
@@ -140,39 +153,38 @@ def test_new_game_preserves_time_control():
 
 
 def test_undo_with_clock_restores_remaining():
+    """A move debits and increments the clock; undo restores the pre-move remaining."""
     app = make_app()
     app._on_start_game(base_config())
     pre = app.backend.clock.white_remaining
     app.board.handle_click(Square(6, 4))
     app.board.handle_click(Square(4, 4))
-    # Move-made debits + adds increment, so remaining should differ from pre.
     assert app.backend.clock.white_remaining != pre
     app._on_undo()
     assert app.backend.clock.white_remaining == pre
 
 
-def test_strip_orientation_no_flip_puts_black_on_top():
+@pytest.mark.parametrize("flipped, top_is_white", [
+    pytest.param(False, False, id="no_flip_black_on_top"),
+    pytest.param(True, True, id="flipped_white_on_top"),
+])
+def test_strip_orientation_follows_board_flip(flipped, top_is_white):
+    """The top strip shows whichever color the flip puts at the top of the board."""
     app = make_app()
     app._on_start_game(base_config())
-    app.board.flipped = False
+    app.board.flipped = flipped
     app._update_player_strips()
-    assert app.player_strip_top.name == app.black_name
-    assert app.player_strip_bottom.name == app.white_name
-
-
-def test_strip_orientation_flipped_puts_white_on_top():
-    app = make_app()
-    app._on_start_game(base_config())
-    app.board.flipped = True
-    app._update_player_strips()
-    assert app.player_strip_top.name == app.white_name
-    assert app.player_strip_bottom.name == app.black_name
+    top, bottom = (app.white_name, app.black_name) if top_is_white \
+        else (app.black_name, app.white_name)
+    assert app.player_strip_top.name == top
+    assert app.player_strip_bottom.name == bottom
 
 
 def test_active_strip_at_start_is_bottom_when_white_to_move():
+    """Unflipped, white is at the bottom, so the bottom strip is the active one at move 1."""
     app = make_app()
     app._on_start_game(base_config())
-    app.board.flipped = False  # White at bottom.
+    app.board.flipped = False
     app._update_player_strips()
     assert app.player_strip_bottom.active is True
     assert app.player_strip_top.active is False
@@ -191,7 +203,7 @@ def test_auto_save_writes_headers_with_names_and_time_control(tmp_path, monkeypa
     app = make_app()
     app._on_start_game(base_config())
     monkeypatch.setenv("CHESS_DATA_DIR", str(tmp_path))
-    app.backend.try_move(Square(6, 4), Square(4, 4))  # need a move so PGN body is non-empty
+    app.backend.try_move(Square(6, 4), Square(4, 4))
     app.manual_result = "white_wins"
     app._auto_save_pgn()
     files = list((tmp_path / "games").glob("*.pgn"))
@@ -267,10 +279,10 @@ def test_open_pgn_warns_on_open_failure(tmp_path, monkeypatch):
     assert app.toast.message == "Could not open PGN"
 
 
-@pytest.mark.parametrize("mode_value,expected_prefix", [
-    ("single_screen", "local"),
-    ("bot", "bot"),
-    ("online", "online"),
+@pytest.mark.parametrize("mode_value, expected_prefix", [
+    pytest.param("single_screen", "local", id="single_screen_local"),
+    pytest.param("bot", "bot", id="bot_bot"),
+    pytest.param("online", "online", id="online_online"),
 ])
 def test_auto_save_filename_prefix_per_mode(tmp_path, monkeypatch, mode_value, expected_prefix):
     app = make_app()

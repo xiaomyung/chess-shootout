@@ -1,7 +1,8 @@
-"""Click-other-piece-while-selected re-selects in one click.
+"""Click-other-piece-while-selected re-selects in one click (Bug 4).
 
-Bug 4: previously deselected without re-selecting; user had to click twice.
-Existing premove chains stay queued — the chain belongs to its piece, not the selection.
+Previously a click on a different own piece deselected without re-selecting,
+forcing a second click. Existing premove chains stay queued across a focus
+switch — the chain belongs to its piece, not to the current selection.
 """
 
 import os
@@ -49,52 +50,33 @@ def _setup_position(bd, piece_map, turn=PieceColor.WHITE):
     bk.position_counts[bk._position_key()] = 1
 
 
-# ---------- Offline (single-screen) ----------
-
-def test_click_own_piece_with_another_selected_reselects_in_one_click(board):
-    # White to move. Select e2 pawn, then click d2 pawn (also white).
+@pytest.mark.parametrize(
+    "click_sq, expected_selection",
+    [
+        pytest.param(Square(6, 3), Square(6, 3), id="own_piece_d2_reselects_in_one_click"),
+        pytest.param(Square(6, 4), None, id="same_square_e2_deselects"),
+        pytest.param(Square(3, 0), None, id="empty_illegal_square_deselects_no_reselect"),
+        pytest.param(Square(1, 4), None, id="opponent_e7_capture_illegal_deselects"),
+    ],
+)
+def test_second_click_selection_from_selected_e2(board, click_sq, expected_selection):
+    """With e2 selected, the second click resolves selection without re-selecting foes."""
     board.handle_click(Square(6, 4))
     assert board.selected_square == Square(6, 4)
-    board.handle_click(Square(6, 3))
-    assert board.selected_square == Square(6, 3)
-
-
-def test_click_same_square_still_deselects(board):
-    # Regression: clicking the selected square deselects without re-selecting.
-    board.handle_click(Square(6, 4))
-    board.handle_click(Square(6, 4))
-    assert board.selected_square is None
+    board.handle_click(click_sq)
+    assert board.selected_square == expected_selection
 
 
 def test_click_legal_target_still_makes_move(board):
-    # Regression: clicking a legal destination plays the move.
+    """Clicking a legal destination from the selection plays the move."""
     board.handle_click(Square(6, 4))
     board.handle_click(Square(4, 4))
+    assert board.selected_square is None
     assert board.match.move_history, "expected one move in history"
 
 
-def test_click_empty_illegal_square_deselects_without_reselect(board):
-    # Selecting e2, then clicking an empty distant square (illegal) deselects.
-    board.handle_click(Square(6, 4))
-    assert board.selected_square == Square(6, 4)
-    board.handle_click(Square(3, 0))
-    assert board.selected_square is None
-
-
-def test_click_opponent_piece_deselects_via_existing_capture_path(board):
-    # Selecting white pawn e2, clicking black pawn at e7 — capture is illegal
-    # from e2 (not adjacent), so the move attempt fails and selection clears.
-    board.handle_click(Square(6, 4))
-    board.handle_click(Square(1, 4))
-    assert board.selected_square is None
-    # Crucially we did NOT re-select the opponent's piece.
-
-
-# ---------- Online (premove flow, not-our-turn) ----------
-
 def test_click_own_piece_during_opp_turn_with_chain_keeps_chain_intact(board):
-    # Bring board to an online-style state: not our turn, queued chain for piece A,
-    # click own piece B → B selected, chain for A still in self.premoves.
+    """Online not-our-turn: switching focus to another own piece keeps the queued chain."""
     board.match.local_color = PieceColor.WHITE
     _setup_position(
         board,
@@ -107,14 +89,12 @@ def test_click_own_piece_during_opp_turn_with_chain_keeps_chain_intact(board):
         turn=PieceColor.BLACK,
     )
 
-    # Select e2, queue premove e2→e4.
     board.handle_click(Square(6, 4))
     board.handle_click(Square(4, 4))
     assert len(board.premoves) == 1
     assert board.premove_color == PieceColor.WHITE
     chain_count_before = len(board.premoves)
 
-    # Now click another own piece (d2). Selection switches; chain stays queued.
     board.handle_click(Square(6, 3))
     assert board.selected_square == Square(6, 3)
     assert len(board.premoves) == chain_count_before
@@ -123,7 +103,7 @@ def test_click_own_piece_during_opp_turn_with_chain_keeps_chain_intact(board):
 
 
 def test_click_then_chain_two_independent_pieces(board):
-    # Both pieces' chains coexist and fire in order on opponent's move.
+    """Two own pieces' premove chains coexist and fire in order on the opponent's move."""
     board.match.local_color = PieceColor.WHITE
     _setup_position(
         board,
@@ -136,15 +116,12 @@ def test_click_then_chain_two_independent_pieces(board):
         turn=PieceColor.BLACK,
     )
 
-    # Premove e2→e4 (piece A).
     board.handle_click(Square(6, 4))
     board.handle_click(Square(4, 4))
 
-    # Switch focus to d2 in one click.
     board.handle_click(Square(6, 3))
     assert board.selected_square == Square(6, 3)
 
-    # Chain a premove for d2→d4 (piece B).
     board.handle_click(Square(4, 3))
     assert len(board.premoves) == 2
     moves = {(pm.from_sq, pm.to_sq) for pm in board.premoves}

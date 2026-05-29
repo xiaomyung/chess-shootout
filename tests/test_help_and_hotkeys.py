@@ -1,4 +1,9 @@
-"""Help modal + R/D + Q/R/B/N hotkeys (M13)."""
+"""Help modal + R/D + Q/R/B/N hotkeys (M13).
+
+Drives keys through Frontend._handle_shortcut_key / _handle_promotion_key to
+verify the help modal toggles, resign/draw open the right confirm prompt, and a
+pending promotion both consumes the piece key and shadows the resign hotkey.
+"""
 
 import os
 
@@ -37,8 +42,6 @@ def _key_event(key, unicode="", mod=0):
     return pg.event.Event(pg.KEYDOWN, {"key": key, "unicode": unicode, "mod": mod})
 
 
-# ---------- Help modal ----------
-
 def test_help_modal_starts_hidden():
     app = _make_app()
     assert app.help_modal.is_visible() is False
@@ -60,25 +63,23 @@ def test_any_key_closes_help():
 def test_help_modal_close_button_hides_it():
     app = _make_app()
     app.help_modal.show()
-    app.help_modal.draw()  # builds button rects
+    app.help_modal.draw()
     close_rect = app.help_modal.button_rects.get("close")
     assert close_rect is not None
     app.help_modal.handle_click(close_rect.center)
     assert app.help_modal.is_visible() is False
 
 
-# ---------- Resign / Draw hotkeys ----------
-
-def test_r_key_opens_resign_confirm():
+@pytest.mark.parametrize("key,title,yes_label", [
+    pytest.param(pg.K_r, "Resign?", "Resign", id="r_opens_resign_confirm"),
+    pytest.param(pg.K_d, "Offer draw?", "Draw", id="d_opens_draw_confirm"),
+])
+def test_action_hotkey_opens_confirm(key, title, yes_label):
     app = _make_app()
-    app._handle_shortcut_key(_key_event(pg.K_r))
+    app._handle_shortcut_key(_key_event(key))
     assert app.confirm_modal.is_visible() is True
-
-
-def test_d_key_opens_draw_confirm():
-    app = _make_app()
-    app._handle_shortcut_key(_key_event(pg.K_d))
-    assert app.confirm_modal.is_visible() is True
+    assert app.confirm_modal.title == title
+    assert app.confirm_modal.yes_label == yes_label
 
 
 def test_r_key_no_op_when_game_over():
@@ -87,8 +88,6 @@ def test_r_key_no_op_when_game_over():
     app._handle_shortcut_key(_key_event(pg.K_r))
     assert app.confirm_modal.is_visible() is False
 
-
-# ---------- Promotion hotkeys ----------
 
 def _setup_promotion_pending(app, color):
     bk = app.backend
@@ -101,12 +100,10 @@ def _setup_promotion_pending(app, color):
     bk.move_history = []
     bk.position_counts = Counter()
     bk.position_counts[bk._position_key()] = 1
-    # White e7 -> e8 (or black analogue) puts the pawn one row from promotion.
     src = Square(1 if color == PieceColor.WHITE else 6, 0)
     dst = Square(0 if color == PieceColor.WHITE else 7, 0)
     app.board.handle_click(src)
     app.board.handle_click(dst)
-    # Drive any animation to completion so the picker is set.
     if app.board.is_animating():
         for a in list(app.board.animations):
             a.start_ms = pg.time.get_ticks() - 10_000
@@ -116,10 +113,10 @@ def _setup_promotion_pending(app, color):
 
 
 @pytest.mark.parametrize("key,expected", [
-    (pg.K_q, PieceType.QUEEN),
-    (pg.K_r, PieceType.ROOK),
-    (pg.K_b, PieceType.BISHOP),
-    (pg.K_n, PieceType.KNIGHT),
+    pytest.param(pg.K_q, PieceType.QUEEN, id="q_promotes_to_queen"),
+    pytest.param(pg.K_r, PieceType.ROOK, id="r_promotes_to_rook"),
+    pytest.param(pg.K_b, PieceType.BISHOP, id="b_promotes_to_bishop"),
+    pytest.param(pg.K_n, PieceType.KNIGHT, id="n_promotes_to_knight"),
 ])
 def test_promotion_hotkey_picks_piece(key, expected):
     app = _make_app()
@@ -133,9 +130,8 @@ def test_promotion_hotkey_picks_piece(key, expected):
 
 
 def test_promotion_hotkey_no_op_when_no_pending_promotion():
+    """With nothing to promote, Q falls through (_handle_promotion_key returns False)."""
     app = _make_app()
-    # No promotion pending — Q key falls through to the regular flow (returns
-    # False from _handle_promotion_key, then nothing in the chain matches Q).
     handled = app._handle_promotion_key(_key_event(pg.K_q))
     assert handled is False
 
@@ -145,5 +141,5 @@ def test_r_during_promotion_picks_rook_not_resign():
     app = _make_app()
     _setup_promotion_pending(app, PieceColor.WHITE)
     app._handle_shortcut_key(_key_event(pg.K_r))
-    assert app.confirm_modal.is_visible() is False  # resign NOT triggered
-    assert app.board.pending_promotion_square is None  # rook chosen instead
+    assert app.confirm_modal.is_visible() is False
+    assert app.board.pending_promotion_square is None

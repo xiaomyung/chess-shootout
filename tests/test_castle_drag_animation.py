@@ -71,33 +71,34 @@ def _trigger_drag_castle(board, target_sq):
     board.handle_click(target_sq)
 
 
-def test_drag_castle_kingside_animates_rook_only(board):
-    _setup_castle_position(board.backend, kingside_only=True)
-    _trigger_drag_castle(board, WHITE_KINGSIDE_TARGET)
+@pytest.mark.parametrize(
+    "setup_kwargs, target, rook_home, rook_dest",
+    [
+        pytest.param(
+            {"kingside_only": True}, WHITE_KINGSIDE_TARGET,
+            WHITE_ROOK_KS_HOME, WHITE_ROOK_KS_DEST, id="kingside",
+        ),
+        pytest.param(
+            {"queenside_only": True}, WHITE_QUEENSIDE_TARGET,
+            WHITE_ROOK_QS_HOME, WHITE_ROOK_QS_DEST, id="queenside",
+        ),
+    ],
+)
+def test_drag_castle_animates_rook_only(board, setup_kwargs, target, rook_home, rook_dest):
+    """King snaps to its destination via the drag; only the rook animates."""
+    _setup_castle_position(board.backend, **setup_kwargs)
+    _trigger_drag_castle(board, target)
 
-    # King has already snapped to its destination via the drag — only the rook anim.
     assert len(board.animations) == 1
     rook_anim = board.animations[0]
     assert rook_anim.piece.type == PieceType.ROOK
     assert rook_anim.piece.color == PieceColor.WHITE
-    assert rook_anim.from_sq == WHITE_ROOK_KS_HOME
-    assert rook_anim.to_sq == WHITE_ROOK_KS_DEST
-
-
-def test_drag_castle_queenside_animates_rook_only(board):
-    _setup_castle_position(board.backend, queenside_only=True)
-    _trigger_drag_castle(board, WHITE_QUEENSIDE_TARGET)
-
-    assert len(board.animations) == 1
-    rook_anim = board.animations[0]
-    assert rook_anim.piece.type == PieceType.ROOK
-    assert rook_anim.from_sq == WHITE_ROOK_QS_HOME
-    assert rook_anim.to_sq == WHITE_ROOK_QS_DEST
+    assert rook_anim.from_sq == rook_home
+    assert rook_anim.to_sq == rook_dest
 
 
 def test_drag_non_castle_skips_animation_entirely(board):
     """Regression: a regular drag move still snaps both ends — no animation."""
-    # Default starting position; drag e2 -> e4.
     e2 = Square(6, 4)
     e4 = Square(4, 4)
     board.handle_click(e2)
@@ -111,7 +112,6 @@ def test_click_castle_animates_both_pieces(board):
     """Regression: click-castle (no drag) keeps both king and rook animations."""
     _setup_castle_position(board.backend, kingside_only=True)
     board.handle_click(KING_HOME)
-    # Note: dragging_from stays None — this is a click-castle, not a drag.
     board.handle_click(WHITE_KINGSIDE_TARGET)
 
     kinds = sorted(a.piece.type.name for a in board.animations)
@@ -124,8 +124,6 @@ def test_drag_castle_rook_animation_carries_on_complete(board):
     _trigger_drag_castle(board, WHITE_KINGSIDE_TARGET)
 
     rook_anim = board.animations[0]
-    # In drag-castle the on_complete (move_landed_callback firing) is attached to the rook
-    # — without this the post-move auto-flip + sound logic would never run.
     assert rook_anim.on_complete is not None
 
 

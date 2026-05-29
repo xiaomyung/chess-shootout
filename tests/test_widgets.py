@@ -6,6 +6,7 @@ import pygame as pg
 import pytest
 
 from frontend.visual import widgets
+from frontend.visual.colors import Colors
 from frontend.visual.widgets import (
     BUTTON_LABEL_PADDING_PX,
     draw_button, draw_button_row, draw_selector,
@@ -26,16 +27,39 @@ def font():
     return pg.font.SysFont("Arial", 14, bold=True)
 
 
-def test_draw_button_smoke_idle(font):
-    surface = pg.display.get_surface()
-    rect = pg.Rect(0, 0, 100, 30)
-    draw_button(surface, rect, "OK", font)
+def _button_fill_pixel(surface, rect):
+    return surface.get_at((rect.x + 8, rect.centery))[:3]
 
 
-def test_draw_button_smoke_force_pressed(font):
+@pytest.mark.parametrize(
+    "force_pressed, expected_bg",
+    [
+        pytest.param(False, Colors.dark_menu, id="idle_fills_dark_menu"),
+        pytest.param(True, Colors.button_pressed, id="pressed_fills_button_pressed"),
+    ],
+)
+def test_draw_button_fills_state_color(font, force_pressed, expected_bg):
+    """draw_button paints the state background (idle=dark_menu, pressed=button_pressed)."""
     surface = pg.display.get_surface()
-    rect = pg.Rect(0, 0, 100, 30)
+    rect = pg.Rect(10, 10, 100, 30)
+    surface.fill((0, 0, 0), rect)
+    draw_button(surface, rect, "OK", font, force_pressed=force_pressed)
+    assert _button_fill_pixel(surface, rect) == pg.Color(expected_bg)[:3]
+
+
+def test_draw_button_idle_and_pressed_render_differently(font):
+    """Pixel block-diff: idle and force_pressed paint different fills (dark_menu vs pressed)."""
+    surface = pg.display.get_surface()
+    rect = pg.Rect(10, 10, 100, 30)
+    surface.fill((0, 0, 0), rect)
+    draw_button(surface, rect, "OK", font, force_pressed=False)
+    idle_fill = _button_fill_pixel(surface, rect)
+    surface.fill((0, 0, 0), rect)
     draw_button(surface, rect, "OK", font, force_pressed=True)
+    pressed_fill = _button_fill_pixel(surface, rect)
+    assert idle_fill != pressed_fill
+    assert idle_fill == pg.Color(Colors.dark_menu)[:3]
+    assert pressed_fill == pg.Color(Colors.button_pressed)[:3]
 
 
 def test_draw_button_row_returns_keyed_rects(font):

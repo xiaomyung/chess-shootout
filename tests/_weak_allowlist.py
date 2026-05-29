@@ -21,12 +21,6 @@ WEAK_ALLOWLIST = {
         "test_play_disabled_does_nothing": _SMOKE,
         "test_volume_label_renders_without_overflow_at_narrow_width": _SMOKE,
     },
-    "test_directory_browser.py": {
-        "test_draw_runs_without_error": _SMOKE,
-    },
-    "test_file_picker.py": {
-        "test_picker_scroll_indicator_appears_only_when_overflow": _SMOKE,
-    },
     "test_game_end_polish.py": {
         "test_fade_overlay_no_op_when_no_result": _SMOKE,
     },
@@ -43,31 +37,14 @@ WEAK_ALLOWLIST = {
         "test_draw_smoke_with_low_time_fraction_and_flash": _SMOKE,
         "test_draw_smoke_without_badge_still_works": _SMOKE,
     },
-    "test_right_menu_scroll.py": {
-        "test_indicator_fades_after_2s": _SMOKE,
-    },
     "test_sound_manager.py": {
         "test_disabled_manager_play_methods_are_noops": _SMOKE,
         "test_play_capture_no_sounds_no_op": _SMOKE,
         "test_play_random_helper_noop_when_empty": _SMOKE,
     },
-    "test_start_menu_footer.py": {
-        "test_draw_runs_while_hovering": _SMOKE,
-        "test_shine_phase_draws_in_and_out_of_sweep": _SMOKE,
-    },
-    "test_text_input.py": {
-        "test_draw_smoke_paths": _SMOKE,
-    },
-    "test_toast.py": {
-        "test_draw_smoke_visible": _SMOKE,
-    },
     "test_ux_polish.py": {
         "test_last_move_highlight_renders_when_history_nonempty": _SMOKE,
         "test_player_strip_advantage_negative_not_rendered": _SMOKE,
         "test_player_strip_draws_with_captures_smoke": _SMOKE,
-    },
-    "test_widgets.py": {
-        "test_draw_button_smoke_force_pressed": _SMOKE,
-        "test_draw_button_smoke_idle": _SMOKE,
     },
 }

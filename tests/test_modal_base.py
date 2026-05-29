@@ -1,4 +1,9 @@
-"""BaseModal / BasePanel scaffolding (M12)."""
+"""BaseModal / BasePanel share set_rect/font scaffolding.
+
+Both copy the rect on set_rect, fire _on_rect_changed, and size fonts off rect
+height with a min_size floor. They diverge only on consumes_clicks_when_visible
+(modal True, panel False) and is_visible (modal-only, defaults hidden).
+"""
 
 import os
 
@@ -24,19 +29,36 @@ def window():
     return pg.display.get_surface()
 
 
-# ---------- BaseModal ----------
+@pytest.mark.parametrize(
+    "cls, expected_consumes",
+    [
+        pytest.param(BaseModal, True, id="modal_consumes_clicks_when_visible"),
+        pytest.param(BasePanel, False, id="panel_does_not_consume_clicks"),
+    ],
+)
+def test_base_widget_default_contract(window, cls, expected_consumes):
+    """Both bases share an empty rect + inert handle_click; only the consume flag differs."""
+    widget = cls(window)
+    assert widget.rect == pg.Rect(0, 0, 0, 0)
+    assert widget.rect.size == (0, 0)
+    assert widget.consumes_clicks_when_visible is expected_consumes
+    assert widget.handle_click((0, 0)) is False
+    assert widget.handle_click((50, 50)) is False
 
-def test_base_modal_default_rect_is_empty(window):
-    modal = BaseModal(window)
-    assert modal.rect.size == (0, 0)
+
+def test_base_modal_is_hidden_by_default(window):
+    """BaseModal defines is_visible (panels do not); the unconfigured default is hidden."""
+    assert BaseModal(window).is_visible() is False
 
 
 def test_base_modal_set_rect_stores_a_copy(window):
+    """set_rect copies the rect, so later mutation of the source does not leak in."""
     modal = BaseModal(window)
     src = pg.Rect(10, 20, 100, 200)
     modal.set_rect(src)
-    src.width = 999
-    assert modal.rect.width == 100  # set_rect copied the rect
+    assert modal.rect == pg.Rect(10, 20, 100, 200)
+    src.update(999, 999, 999, 999)
+    assert modal.rect == pg.Rect(10, 20, 100, 200)
 
 
 def test_base_modal_set_rect_calls_hook(window):
@@ -61,38 +83,22 @@ def test_base_modal_font_scales_with_rect_height(window):
 
 
 def test_base_modal_font_respects_min_size(window):
+    """A tiny rect (height/factor below the floor) clamps to min_size, not the raw size."""
     modal = BaseModal(window)
-    modal.set_rect(pg.Rect(0, 0, 200, 10))  # tiny
-    f = modal.font(factor=4, min_size=18)
-    # min_size guarantees the font isn't smaller than that.
-    assert f.get_height() >= 18
-
-
-def test_base_modal_default_visibility_and_click(window):
-    modal = BaseModal(window)
-    assert modal.is_visible() is False
-    assert modal.handle_click((0, 0)) is False
-
-
-def test_base_modal_consumes_clicks_when_visible_default_true(window):
-    modal = BaseModal(window)
-    assert modal.consumes_clicks_when_visible is True
-
-
-# ---------- BasePanel ----------
-
-def test_base_panel_does_not_consume_clicks_by_default(window):
-    panel = BasePanel(window)
-    assert panel.consumes_clicks_when_visible is False
+    modal.set_rect(pg.Rect(0, 0, 200, 10))
+    floored = modal.font(factor=4, min_size=18).get_height()
+    raw = modal.font(factor=4, min_size=1).get_height()
+    assert floored >= 18
+    assert floored > raw
 
 
 def test_base_panel_set_rect_and_font(window):
+    """Panel stores its rect verbatim and sizes fonts off height once above the floor."""
     panel = BasePanel(window)
     panel.set_rect(pg.Rect(0, 0, 100, 200))
     assert panel.rect == pg.Rect(0, 0, 100, 200)
-    assert panel.font(factor=10, min_size=12).get_height() >= 12
-
-
-def test_base_panel_default_handle_click_returns_false(window):
-    panel = BasePanel(window)
-    assert panel.handle_click((50, 50)) is False
+    tall = panel.font(factor=10, min_size=12).get_height()
+    panel.set_rect(pg.Rect(0, 0, 100, 100))
+    short = panel.font(factor=10, min_size=12).get_height()
+    assert tall >= 12
+    assert tall > short
