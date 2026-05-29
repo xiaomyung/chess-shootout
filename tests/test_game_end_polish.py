@@ -1,4 +1,9 @@
-"""Game-end polish (M-B): fade-to-grayscale + 500ms result-modal delay."""
+"""Game-end polish (M-B): fade-to-grayscale + 500ms result-modal delay.
+
+The fade tests block-diff a known-bright window region: _draw_result_fade_overlay
+blits a black (0,0,0,alpha) SRCALPHA overlay, so a white pixel darkens to exactly
+255 - alpha. alpha ramps 0 -> RESULT_FADE_MAX_ALPHA over RESULT_FADE_MS.
+"""
 
 import os
 
@@ -33,7 +38,14 @@ def _make_app():
     return app
 
 
-# ---------- _result_first_seen_at_ms tracking ----------
+_PROBE = (10, 10)
+
+
+def _fade_probe_after_white(app):
+    app.window.fill((255, 255, 255))
+    app._draw_result_fade_overlay()
+    return app.window.get_at(_PROBE)
+
 
 def test_no_result_keeps_first_seen_none():
     app = _make_app()
@@ -69,8 +81,6 @@ def test_first_seen_does_not_reset_on_subsequent_frames():
     assert app._result_first_seen_at_ms == captured
 
 
-# ---------- modal-show timing ----------
-
 def test_modal_hidden_immediately_after_result():
     app = _make_app()
     app.manual_result = "white_wins"
@@ -91,46 +101,50 @@ def test_modal_not_shown_when_no_result():
     assert app._result_modal_should_show() is False
 
 
-# ---------- fade overlay ----------
-
 def test_fade_alpha_starts_low_and_grows_to_max():
     app = _make_app()
     app.manual_result = "white_wins"
     app._update_result_pending()
 
-    # Right at t=0, alpha is 0.
     app._result_first_seen_at_ms = pg.time.get_ticks()
     assert app._result_elapsed_ms() == 0
+    assert tuple(_fade_probe_after_white(app)) == (255, 255, 255, 255)
 
-    # Halfway through fade, alpha is roughly half max.
     app._result_first_seen_at_ms = pg.time.get_ticks() - RESULT_FADE_MS // 2
     elapsed = app._result_elapsed_ms()
     expected_alpha = int(RESULT_FADE_MAX_ALPHA * elapsed / RESULT_FADE_MS)
     assert abs(expected_alpha - RESULT_FADE_MAX_ALPHA // 2) <= 1
+    half = _fade_probe_after_white(app)
+    assert half.r == half.g == half.b == 255 - expected_alpha
 
-    # After fade completes, alpha is at max.
     app._result_first_seen_at_ms = pg.time.get_ticks() - RESULT_FADE_MS - 100
-    # _draw_result_fade_overlay should not raise.
-    app._draw_result_fade_overlay()
+    maxed = _fade_probe_after_white(app)
+    assert maxed.r == maxed.g == maxed.b == 255 - RESULT_FADE_MAX_ALPHA
 
 
 def test_fade_overlay_no_op_when_no_result():
+    """No result: the overlay must not paint and first-seen stays None;
+    once a result lands and the fade completes it darkens the window."""
     app = _make_app()
-    # No result, no fade — exercise the no-op path.
-    app._draw_result_fade_overlay()
 
+    assert app._result_first_seen_at_ms is None
+    assert _fade_probe_after_white(app) == pg.Color(255, 255, 255, 255)
+    assert app._result_first_seen_at_ms is None
 
-# ---------- click-to-skip ----------
+    app.manual_result = "white_wins"
+    app._update_result_pending()
+    app._result_first_seen_at_ms = pg.time.get_ticks() - RESULT_FADE_MS - 100
+    darkened = _fade_probe_after_white(app)
+    assert darkened.r == darkened.g == darkened.b == 255 - RESULT_FADE_MAX_ALPHA
+    assert darkened.r < 255
+
 
 def test_click_during_fade_window_skips_to_modal():
     app = _make_app()
     app.manual_result = "white_wins"
     app._update_result_pending()
-    # Inside the fade window: modal not yet shown.
     assert app._result_modal_should_show() is False
-    # Simulate click during the fade.
     app.mouse_left_clicked((100, 100))
-    # The skip handler fast-forwarded the timer.
     assert app._result_modal_should_show() is True
 
 
@@ -138,15 +152,11 @@ def test_click_outside_fade_window_does_not_alter_state():
     app = _make_app()
     app.manual_result = "white_wins"
     app._update_result_pending()
-    # Past the modal-delay → modal already showing.
     app._result_first_seen_at_ms = pg.time.get_ticks() - RESULT_MODAL_DELAY_MS - 100
     captured = app._result_first_seen_at_ms
     app.mouse_left_clicked((100, 100))
-    # Already past delay; the fade-skip branch should NOT mutate the timestamp.
     assert app._result_first_seen_at_ms == captured
 
-
-# ---------- new-game lifecycle ----------
 
 def test_new_game_clears_pending_result_state():
     app = _make_app()
@@ -157,8 +167,6 @@ def test_new_game_clears_pending_result_state():
     assert app._result_first_seen_at_ms is None
 
 
-# ---------- in-game buttons disabled after result ----------
-
 def test_right_menu_buttons_disabled_after_result():
     app = _make_app()
     app.manual_result = "white_wins"
@@ -168,30 +176,26 @@ def test_right_menu_buttons_disabled_after_result():
 
 
 def test_right_menu_buttons_active_during_normal_play():
+    """No clock at construction, so only give_time stays disabled."""
     app = _make_app()
-    # No clock configured at construction → give_time is disabled until a
-    # game is started with a time control.
     assert app._right_menu_disabled_keys() == {"give_time"}
 
 
 def test_right_menu_buttons_active_in_pgn_review():
+    """Review renders REVIEW_BUTTONS, so nothing extra is disabled."""
     app = _make_app()
     app.manual_result = "white_wins"
     app.pgn_review = True
-    # Review mode renders REVIEW_BUTTONS; nothing extra to disable.
     assert app._right_menu_disabled_keys() == set()
 
 
 def test_undo_no_op_after_result():
     app = _make_app()
-    # Play a move so there's something to undo.
     app.board.handle_click(Square(6, 4))
     app.board.handle_click(Square(4, 4))
     history_len = len(app.match.move_history)
-    # Game-over state.
     app.manual_result = "white_wins"
     app._on_undo()
-    # Result still set, history untouched, no undo animation queued.
     assert app.manual_result == "white_wins"
     assert len(app.match.move_history) == history_len
 

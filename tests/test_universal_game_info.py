@@ -36,39 +36,30 @@ def _start_local(app, time_minutes=5, incr=2):
     })
 
 
-# ---------- single-screen ----------
-
-def test_single_screen_lines():
-    # Local mode has no series concept, so row 2 is just the time control.
+@pytest.mark.parametrize(
+    "time_minutes, incr, expected",
+    [
+        pytest.param(5, 2, ["Local game", "5+2"], id="with_clock"),
+        pytest.param(None, 0, ["Local game", "no clock"], id="no_clock"),
+    ],
+)
+def test_single_screen_lines(time_minutes, incr, expected):
+    """Local mode has no series concept, so row 2 is just the time control."""
     app = _make_app()
-    _start_local(app)
-    lines = app._compute_game_info_lines()
-    assert lines == ["Local game", "5+2"]
+    _start_local(app, time_minutes=time_minutes, incr=incr)
+    assert app._compute_game_info_lines() == expected
 
-
-def test_single_screen_no_clock_lines():
-    app = _make_app()
-    _start_local(app, time_minutes=None, incr=0)
-    lines = app._compute_game_info_lines()
-    assert lines == ["Local game", "no clock"]
-
-
-# ---------- bot mode ----------
 
 def test_bot_mode_lines():
     app = _make_app()
     app.mode = BOT
     app._time_control = (180, 0)
-    lines = app._compute_game_info_lines()
-    assert lines[0] == "vs Bot (preview)"
-    assert lines[1] == "3+0"
+    assert app._compute_game_info_lines() == ["vs Bot (preview)", "3+0"]
 
-
-# ---------- online mode (series score) ----------
 
 def test_online_initial_series_zero_zero():
-    # Online layout: line 1 packs names + score in board-color order,
-    # line 2 is bare time control, line 3 is live ping.
+    """Online line 1 packs names + score in board-color order, line 2 is
+    bare time control, line 3 is live ping."""
     app = _make_app()
     app.mode = ONLINE
     app.white_name = "Alice"
@@ -116,45 +107,36 @@ def test_series_resets_when_opponent_pair_changes():
 
 
 def test_series_persists_across_rematch_with_color_swap():
-    # Bug 3 regression: score is keyed by player identity, so a rematch
-    # with swapped colors keeps the same number attached to each player.
+    """Bug 3 regression: score is keyed by player identity, so a rematch with
+    swapped colors keeps the same number attached to each player."""
     app = _make_app()
     app._series_pair = tuple(sorted(["A", "B"]))
-    # Alice won game 1 as white → A has 1, B has 0.
     app._series_scores = {"A": 1, "B": 0}
-    # Rematch: Bob is now white, Alice now black. Same pair, scores persist.
     app._start_online_game({
         "your_color": "black", "white_name": "B", "black_name": "A",
         "time_minutes": 3, "increment_seconds": 0,
     })
-    # Stored scores unchanged.
     assert app._series_scores == {"A": 1, "B": 0}
-    # Displayed line follows board-color order — Bob with 0 on the left
-    # (white side), Alice with 1 on the right (black side).
     lines = app._compute_game_info_lines()
     assert lines[0] == "B  0 - 1  A"
 
 
-def test_series_increments_on_white_win():
+@pytest.mark.parametrize(
+    "winner_color, expected_scores",
+    [
+        pytest.param("white", {"Alice": 1, "Bob": 0.0}, id="white_win"),
+        pytest.param("black", {"Alice": 0.0, "Bob": 1}, id="black_win"),
+    ],
+)
+def test_series_increments_on_win(winner_color, expected_scores):
     app = _make_app()
     app.mode = ONLINE
     app.white_name = "Alice"
     app.black_name = "Bob"
     app._series_pair = ("Alice", "Bob")
     app._series_scores = {"Alice": 0.0, "Bob": 0.0}
-    app._handle_online_result({"reason": "checkmate", "winner_color": "white"})
-    assert app._series_scores == {"Alice": 1, "Bob": 0.0}
-
-
-def test_series_increments_on_black_win():
-    app = _make_app()
-    app.mode = ONLINE
-    app.white_name = "Alice"
-    app.black_name = "Bob"
-    app._series_pair = ("Alice", "Bob")
-    app._series_scores = {"Alice": 0.0, "Bob": 0.0}
-    app._handle_online_result({"reason": "checkmate", "winner_color": "black"})
-    assert app._series_scores == {"Alice": 0.0, "Bob": 1}
+    app._handle_online_result({"reason": "checkmate", "winner_color": winner_color})
+    assert app._series_scores == expected_scores
 
 
 def test_series_increments_on_draw():
@@ -180,11 +162,9 @@ def test_aborted_does_not_change_series():
 
 
 def test_score_follows_player_through_color_swap_end_to_end():
-    # Two games in a row with the same opponent. Game 1: I play white and
-    # win. Game 2: I play black. My nickname's score should be 1 in both
-    # games regardless of the color I hold.
+    """Two games, same opponent. Game 1: I play white and win. Game 2: I play
+    black. My nickname's score stays 1 regardless of the color I hold."""
     app = _make_app()
-    # Game 1 — local player ("Me") is white.
     app._start_online_game({
         "your_color": "white", "white_name": "Me", "black_name": "Friend",
         "time_minutes": 3, "increment_seconds": 0,
@@ -192,20 +172,15 @@ def test_score_follows_player_through_color_swap_end_to_end():
     app._handle_online_result({"reason": "checkmate", "winner_color": "white"})
     assert app._series_scores["Me"] == 1
     assert app._series_scores["Friend"] == 0.0
-    # Game 2 — colors swap, same opponent.
     app._start_online_game({
         "your_color": "black", "white_name": "Friend", "black_name": "Me",
         "time_minutes": 3, "increment_seconds": 0,
     })
-    # Scores carry over because the sorted-pair key matches.
     assert app._series_scores["Me"] == 1
     assert app._series_scores["Friend"] == 0.0
-    # The displayed line attaches the win to the right nickname.
     lines = app._compute_game_info_lines()
     assert lines[0] == "Friend  0 - 1  Me"
 
-
-# ---------- result-modal subtitle per online reason (Bug 4) ----------
 
 @pytest.mark.parametrize("reason,winner,expected", [
     ("checkmate",    "white", ("White wins", "by checkmate")),
@@ -218,8 +193,8 @@ def test_score_follows_player_through_color_swap_end_to_end():
     ("abandonment",  "black", ("Black wins", "by abandonment")),
 ])
 def test_online_win_result_subtitle_reports_actual_reason(reason, winner, expected):
-    # Bug 4: every online win used to render "by resignation" because
-    # _handle_online_result flattened all win reasons to bare white_wins.
+    """Bug 4: every online win used to render "by resignation" because
+    _handle_online_result flattened all win reasons to bare white_wins."""
     app = _make_app()
     app.mode = ONLINE
     app.white_name = "Alice"
@@ -238,8 +213,8 @@ def test_online_win_result_subtitle_reports_actual_reason(reason, winner, expect
     ("draw_insufficient_material", ("Draw", "by agreement")),
 ])
 def test_online_draw_result_subtitle(draw_reason, expected):
-    # All online draws are flattened to manual_result="draw_agreement" by
-    # the existing handler; subtitle reflects that.
+    """All online draws are flattened to manual_result="draw_agreement" by the
+    existing handler; subtitle reflects that."""
     app = _make_app()
     app.mode = ONLINE
     app.white_name = "Alice"
@@ -251,50 +226,45 @@ def test_online_draw_result_subtitle(draw_reason, expected):
 
 
 def test_local_resignation_subtitle_reports_resignation():
-    # Local resignation path also uses compound code → no "by checkmate" mislabel.
+    """Local resignation path uses the compound code so it never mislabels as
+    "by checkmate"."""
     app = _make_app()
     _start_local(app)
     app._perform_resign()
     assert app.result_text() == ("Black wins", "by resignation")
 
 
-def test_engine_checkmate_subtitle_reports_checkmate():
-    # Engine path: bare white_wins / black_wins in RESULT_TEXT means
-    # "checkmate", which is the only way the engine produces them.
+@pytest.mark.parametrize(
+    "engine_result, expected",
+    [
+        pytest.param("white_wins", ("White wins", "by checkmate"), id="checkmate"),
+        pytest.param("white_wins_on_time", ("White wins", "on time"), id="flag_fall"),
+    ],
+)
+def test_engine_result_subtitle_reports_actual_reason(engine_result, expected):
+    """Bare white_wins / black_wins in RESULT_TEXT means checkmate (the only way
+    the engine produces them); compound codes carry the explicit reason."""
     app = _make_app()
     _start_local(app)
-    # Simulate the engine reporting a white checkmate.
-    app.match.backend.game_result = lambda: "white_wins"
-    assert app.result_text() == ("White wins", "by checkmate")
+    app.match.backend.game_result = lambda: engine_result
+    assert app.result_text() == expected
 
 
-def test_engine_flag_fall_subtitle_reports_on_time():
+@pytest.mark.parametrize(
+    "result_tag, expected",
+    [
+        pytest.param("1-0", ["Review", "1-0  ·  5+2"], id="result_tag"),
+        pytest.param(None, ["Review", "*  ·  5+2"], id="star_fallback"),
+    ],
+)
+def test_pgn_review_lines(result_tag, expected):
+    """PGN review treats the result tag (or "*" fallback) as the "count",
+    combined with TC on the same row, mirroring the online "score · TC" layout."""
     app = _make_app()
     _start_local(app)
-    app.match.backend.game_result = lambda: "white_wins_on_time"
-    assert app.result_text() == ("White wins", "on time")
-
-
-# ---------- pgn review ----------
-
-def test_pgn_review_uses_pgn_result_tag():
-    # PGN review treats the result tag as the "count" — combined with TC on
-    # the same row, mirroring the online "score · TC" layout.
-    app = _make_app()
-    _start_local(app)
-    app._pgn_result_tag = "1-0"
+    app._pgn_result_tag = result_tag
     app.pgn_review = True
-    lines = app._compute_game_info_lines()
-    assert lines == ["Review", "1-0  ·  5+2"]
-
-
-def test_pgn_review_falls_back_to_star_when_no_tag():
-    app = _make_app()
-    _start_local(app)
-    app._pgn_result_tag = None
-    app.pgn_review = True
-    lines = app._compute_game_info_lines()
-    assert lines == ["Review", "*  ·  5+2"]
+    assert app._compute_game_info_lines() == expected
 
 
 def test_pgn_review_inline_result_suppresses_modal():
@@ -312,35 +282,25 @@ def test_menu_mode_returns_no_lines():
     assert app._compute_game_info_lines() is None
 
 
-# ---------- online ping line ----------
-
-def test_online_ping_line_shows_value_when_client_has_samples():
+@pytest.mark.parametrize(
+    "ping_value, expected_line",
+    [
+        pytest.param(42, "ping: 42 ms", id="has_samples"),
+        pytest.param(None, "ping: —", id="no_samples"),
+    ],
+)
+def test_online_ping_line(ping_value, expected_line):
     app = _make_app()
     app.mode = ONLINE
     app.white_name = "A"
     app.black_name = "B"
     app._time_control = (60, 0)
     fake = MagicMock()
-    fake.get_ping_ms.return_value = 42
+    fake.get_ping_ms.return_value = ping_value
     app.online_client = fake
     lines = app._compute_game_info_lines()
-    assert lines[2] == "ping: 42 ms"
+    assert lines[2] == expected_line
 
-
-def test_online_ping_line_dash_when_no_samples():
-    app = _make_app()
-    app.mode = ONLINE
-    app.white_name = "A"
-    app.black_name = "B"
-    app._time_control = (60, 0)
-    fake = MagicMock()
-    fake.get_ping_ms.return_value = None
-    app.online_client = fake
-    lines = app._compute_game_info_lines()
-    assert lines[2] == "ping: —"
-
-
-# ---------- right_menu set_game_info accepts list ----------
 
 def test_right_menu_accepts_list_of_lines():
     from frontend.panels.right import RightMenu
@@ -360,10 +320,7 @@ def test_right_menu_accepts_legacy_dict():
         "white_name": "A", "black_name": "B",
         "time_minutes": 3, "increment_seconds": 2, "ping_ms": 50,
     })
-    lines = rm._info_lines()
-    assert "A" in lines[0] and "B" in lines[0]
-    assert "3" in lines[1] and "2" in lines[1]
-    assert "50" in lines[2]
+    assert rm._info_lines() == ["A  vs  B", "3 min + 2 sec", "ping: 50 ms"]
 
 
 def test_right_menu_no_info_when_none():
