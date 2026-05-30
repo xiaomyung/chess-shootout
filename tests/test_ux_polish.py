@@ -392,7 +392,7 @@ def test_material_advantage_after_queen_trade():
     assert material_advantage(backend.move_history, PieceColor.BLACK) == 0
 
 
-def test_player_strip_set_state_accepts_captures(board):
+def test_player_strip_set_state_accepts_captures():
     from frontend.panels.player_strip import PlayerStrip
     strip = PlayerStrip(pg.display.get_surface())
     strip.set_rect(pg.Rect(0, 0, 400, 40))

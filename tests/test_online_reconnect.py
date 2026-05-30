@@ -196,7 +196,7 @@ def test_on_reconnect_active_game_failed_refetch_restores_pending(app, monkeypat
     assert app.confirm_modal.is_visible()
 
 
-def test_on_reconnect_active_game_no_pending_is_noop(app, monkeypatch):
+def test_on_reconnect_active_game_no_pending_is_noop(app):
     """Clicking Reconnect after the pending entry was cleared must not crash or
     flip mode."""
     app._pending_reconnect = None

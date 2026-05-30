@@ -154,7 +154,7 @@ def test_dropped_broadcast_pushes_reconnecting_to_surviving_peer(client, monkeyp
             assert "connection_status" in seen_types
 
 
-def _online_app(monkeypatch=None):
+def _online_app():
     from frontend.frontend import Frontend
     app = Frontend(1000, 800)
     app.sound_manager = MagicMock()
@@ -168,7 +168,7 @@ def _online_app(monkeypatch=None):
     return app
 
 
-def test_remote_move_with_correct_ply_applies(monkeypatch):
+def test_remote_move_with_correct_ply_applies():
     app = _online_app()
     payload = {"from": "e2", "to": "e4", "san": "e4", "ply": 1,
                "clock": {}}
@@ -178,7 +178,7 @@ def test_remote_move_with_correct_ply_applies(monkeypatch):
     assert len(app.match.move_history) == 1
 
 
-def test_remote_move_with_skipped_ply_triggers_resync(monkeypatch):
+def test_remote_move_with_skipped_ply_triggers_resync():
     """Empty local history (ply 0) vs server ply 3 means plies 1-2 were missed."""
     app = _online_app()
     payload = {"from": "e7", "to": "e5", "san": "e5", "ply": 3,
@@ -189,7 +189,7 @@ def test_remote_move_with_skipped_ply_triggers_resync(monkeypatch):
     assert len(app.match.move_history) == 0
 
 
-def test_remote_move_with_illegal_payload_triggers_resync(monkeypatch):
+def test_remote_move_with_illegal_payload_triggers_resync():
     """Ply matches but from/to is illegal (no piece on e3); apply returns legal=False."""
     app = _online_app()
     payload = {"from": "e3", "to": "e4", "san": "e4", "ply": 1,
@@ -199,7 +199,7 @@ def test_remote_move_with_illegal_payload_triggers_resync(monkeypatch):
     app.online_client.request_state_sync.assert_called_once()
 
 
-def test_resync_gate_drops_subsequent_move_applied(monkeypatch):
+def test_resync_gate_drops_subsequent_move_applied():
     """A held gate drops the move without applying it or firing a new request."""
     app = _online_app()
     app._resyncing = True
@@ -210,7 +210,7 @@ def test_resync_gate_drops_subsequent_move_applied(monkeypatch):
     app.online_client.request_state_sync.assert_not_called()
 
 
-def test_takeback_applied_with_skipped_ply_triggers_resync(monkeypatch):
+def test_takeback_applied_with_skipped_ply_triggers_resync():
     """Local has 1 ply but server's post-takeback ply 5 is impossible without misses."""
     from backend.utils import Square
     app = _online_app()
@@ -221,7 +221,7 @@ def test_takeback_applied_with_skipped_ply_triggers_resync(monkeypatch):
     app.online_client.request_state_sync.assert_called_once()
 
 
-def test_game_resumed_clears_resync_gate(monkeypatch):
+def test_game_resumed_clears_resync_gate():
     app = _online_app()
     app._time_control = (300, 0)
     app.match.setup_clock(300, 0)
@@ -240,7 +240,7 @@ def test_game_resumed_clears_resync_gate(monkeypatch):
     assert len(app.match.move_history) == 2
 
 
-def test_begin_resync_is_idempotent_during_inflight_request(monkeypatch):
+def test_begin_resync_is_idempotent_during_inflight_request():
     """The in-flight flag suppresses duplicate requests across repeated calls."""
     app = _online_app()
     app._begin_resync()

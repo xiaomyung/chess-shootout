@@ -196,7 +196,7 @@ def test_healthz_includes_queue_depth_and_uptime(clock, client):
     assert body["uptime_s"] == pytest.approx(7.5, abs=1e-3)
 
 
-def test_healthz_queue_depth_reflects_pending_room(clock, client):
+def test_healthz_queue_depth_reflects_pending_room(client):
     """One unpaired matchmake bumps queue_depth to 1; the peer pairs it into a
     room, draining the queue and incrementing rooms_active."""
     r = client.post("/matchmake", json={

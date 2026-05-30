@@ -111,7 +111,7 @@ def test_per_ws_rate_limit_constant_is_documented():
     assert WS_MESSAGES_PER_SECOND == 30
 
 
-def test_per_ws_rate_limit_emits_rate_limited_error(client, clock):
+def test_per_ws_rate_limit_emits_rate_limited_error(client):
     """A burst past the per-WS cap yields at least one rate_limited error.
 
     Bogus moves are used because they're cheap and never mutate game state, so
