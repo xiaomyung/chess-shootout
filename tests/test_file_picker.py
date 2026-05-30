@@ -7,6 +7,10 @@ import pytest
 
 from frontend.modals.file_picker import FilePicker, result_mark
 from frontend.visual.colors import Colors
+from frontend.visual.widgets import (
+    SCROLL_THUMB_RIGHT_OFFSET,
+    SCROLL_THUMB_WIDTH,
+)
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -64,7 +68,7 @@ def test_picker_click_row_invokes_callback(picker, tmp_path):
     picked = []
     picker.show(str(tmp_path), "*.pgn",
                 on_select=lambda path: picked.append(path))
-    picker.draw()  # populate _row_rects
+    picker.draw()
     row_rect, _ = picker._row_rects[0]
     consumed = picker.handle_click(row_rect.center)
     assert consumed is True
@@ -85,10 +89,9 @@ def test_picker_click_cancel_invokes_cancel_callback(picker, tmp_path):
 
 
 def test_picker_does_not_handle_keys():
-    # Esc must close the window — picker should not consume keys.
+    """Esc must close the window, so the picker exposes no key handler."""
     p = FilePicker(pg.display.get_surface())
     p.set_rect(pg.Rect(0, 0, 400, 300))
-    # Ensure no `handle_key` method exists or that calling it on Esc does nothing.
     assert not hasattr(p, "handle_key")
 
 
@@ -110,7 +113,7 @@ def _populate(tmp_path, count):
 def test_picker_scroll_advances_offset(picker, tmp_path):
     _populate(tmp_path, 50)
     picker.show(str(tmp_path), "*.pgn", on_select=lambda p: None)
-    picker.draw()  # populate _max_visible and _list_rect
+    picker.draw()
     pos = picker._list_rect.center
     consumed = picker.handle_scroll(pos, -1)
     assert consumed is True
@@ -134,7 +137,6 @@ def test_picker_scroll_does_not_go_negative(picker, tmp_path):
     picker.draw()
     pos = picker._list_rect.center
     consumed = picker.handle_scroll(pos, 1)
-    # Already at top; nothing more to scroll.
     if len(picker.entries) <= picker._max_visible:
         assert consumed is False
     assert picker.scroll_offset == 0
@@ -162,44 +164,89 @@ def test_picker_scrolled_view_shows_correct_subset(picker, tmp_path):
     assert visible_paths[0] == expected_first
 
 
-def test_picker_scroll_indicator_appears_only_when_overflow(picker, tmp_path):
-    # No overflow: indicator never drawn (no exception either).
-    _populate(tmp_path, 2)
+def _scroll_thumb_drawn(picker):
+    track = picker._list_rect
+    thumb_x = track.right - SCROLL_THUMB_RIGHT_OFFSET - SCROLL_THUMB_WIDTH
+    region = pg.Rect(thumb_x, track.y, SCROLL_THUMB_WIDTH, track.height)
+    sub = picker.window.subsurface(region).copy()
+    thumb = pg.Color(Colors.button_hover)
+    for y in range(sub.get_height()):
+        for x in range(sub.get_width()):
+            if sub.get_at((x, y))[:3] == (thumb.r, thumb.g, thumb.b):
+                return True
+    return False
+
+
+@pytest.mark.parametrize("rows_over_visible", [
+    pytest.param(-6, id="few_rows_no_overflow"),
+    pytest.param(0, id="exactly_full_no_overflow"),
+    pytest.param(1, id="one_extra_row_overflows"),
+    pytest.param(192, id="many_rows_overflow"),
+])
+def test_picker_scroll_indicator_appears_only_when_overflow(
+    picker, tmp_path, rows_over_visible,
+):
+    """Thumb (Colors.button_hover strip) renders iff entries exceed _max_visible.
+
+    The exactly-full case (offset==0) is the boundary: a full but non-scrolling
+    list must show no indicator. Activity is kept fresh so the only variable is
+    overflow, not the 2 s scroll-fade.
+    """
     picker.show(str(tmp_path), "*.pgn", on_select=lambda p: None)
-    picker.draw()  # smoke
-    # Overflow case: just smoke that draw runs.
-    _populate(tmp_path, 200)
+    picker.draw()
+    count = picker._max_visible + rows_over_visible
+    _populate(tmp_path, count)
     picker.show(str(tmp_path), "*.pgn", on_select=lambda p: None)
     picker._last_scroll_activity_ms = pg.time.get_ticks()
+    picker.window.fill((0, 0, 0))
     picker.draw()
+    expected = count > picker._max_visible
+    assert _scroll_thumb_drawn(picker) is expected
 
 
-# ---------- result mark (client-perspective + spectator view) ----------
+def test_picker_scroll_indicator_fades_after_inactivity(picker, tmp_path):
+    """Overflowing list still hides the thumb once activity is stale (>2 s)."""
+    _populate(tmp_path, 200)
+    picker.show(str(tmp_path), "*.pgn", on_select=lambda p: None)
+    picker.draw()
+    assert len(picker.entries) > picker._max_visible
+    picker._last_scroll_activity_ms = pg.time.get_ticks() - 10_000
+    picker.window.fill((0, 0, 0))
+    picker.draw()
+    assert _scroll_thumb_drawn(picker) is False
+
 
 @pytest.mark.parametrize("white,black,code,nick,symbol,color", [
-    # Client is White: +/-/= from own perspective.
-    ("me", "opp", "1-0", "me", "+", Colors.result_win),
-    ("me", "opp", "0-1", "me", "-", Colors.result_loss),
-    ("me", "opp", "1/2-1/2", "me", "=", Colors.result_neutral),
-    ("me", "opp", "*", "me", "=", Colors.result_neutral),
-    # Client is Black (colors swapped on a rematch).
-    ("opp", "me", "0-1", "me", "+", Colors.result_win),
-    ("opp", "me", "1-0", "me", "-", Colors.result_loss),
-    ("opp", "me", "1/2-1/2", "me", "=", Colors.result_neutral),
-    # Spectator (neither name is the client): objective winner, neutral color.
-    ("a", "b", "1-0", "me", "W", Colors.result_neutral),
-    ("a", "b", "0-1", "me", "B", Colors.result_neutral),
-    ("a", "b", "1/2-1/2", "me", "=", Colors.result_neutral),
-    ("a", "b", "*", "me", "=", Colors.result_neutral),
-    # No nickname → spectator view of every game.
-    ("a", "b", "1-0", "", "W", Colors.result_neutral),
-    ("a", "b", "0-1", None, "B", Colors.result_neutral),
+    pytest.param("me", "opp", "1-0", "me", "+", Colors.result_win,
+                 id="white_self_win"),
+    pytest.param("me", "opp", "0-1", "me", "-", Colors.result_loss,
+                 id="white_self_loss"),
+    pytest.param("me", "opp", "1/2-1/2", "me", "=", Colors.result_neutral,
+                 id="white_self_draw"),
+    pytest.param("me", "opp", "*", "me", "=", Colors.result_neutral,
+                 id="white_self_unfinished"),
+    pytest.param("opp", "me", "0-1", "me", "+", Colors.result_win,
+                 id="black_self_win_after_swap"),
+    pytest.param("opp", "me", "1-0", "me", "-", Colors.result_loss,
+                 id="black_self_loss_after_swap"),
+    pytest.param("opp", "me", "1/2-1/2", "me", "=", Colors.result_neutral,
+                 id="black_self_draw_after_swap"),
+    pytest.param("a", "b", "1-0", "me", "W", Colors.result_neutral,
+                 id="spectator_white_won_neutral"),
+    pytest.param("a", "b", "0-1", "me", "B", Colors.result_neutral,
+                 id="spectator_black_won_neutral"),
+    pytest.param("a", "b", "1/2-1/2", "me", "=", Colors.result_neutral,
+                 id="spectator_draw_neutral"),
+    pytest.param("a", "b", "*", "me", "=", Colors.result_neutral,
+                 id="spectator_unfinished_neutral"),
+    pytest.param("a", "b", "1-0", "", "W", Colors.result_neutral,
+                 id="empty_nick_is_spectator"),
+    pytest.param("a", "b", "0-1", None, "B", Colors.result_neutral,
+                 id="none_nick_is_spectator"),
 ])
 def test_result_mark(white, black, code, nick, symbol, color):
     assert result_mark(code, white, black, nick) == (symbol, color)
 
-
-# ---------- table rendering / entry shape ----------
 
 _REAL_PGN = (
     '[Event "Casual Game"]\n[Site "?"]\n[Date "2026.05.29"]\n[Round "?"]\n'
@@ -256,7 +303,6 @@ def test_picker_skips_unreadable_file(picker, tmp_path):
     bad = tmp_path / "local-20260529-152356.pgn"
     bad.write_bytes(b"\xff\xfe\x00\x01 not utf-8")
     picker.show(str(tmp_path), "*.pgn", on_select=lambda p: None)
-    # The bad file is skipped (decode error), the good one survives.
     names = [os.path.basename(s.path) for s in picker.entries]
     assert "online-20260529-152355.pgn" in names
 

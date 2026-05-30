@@ -7,72 +7,61 @@ from frontend.online.client import OnlineClient, PING_SAMPLE_WINDOW
 from frontend.online.transport import _UrlBuilder, _split_addr
 
 
-def test_split_addr_localhost_picks_ws():
-    scheme, host, port = _split_addr("localhost:8000")
-    assert scheme == "ws" and host == "localhost" and port == 8000
+@pytest.mark.parametrize(
+    "addr, scheme, host, port",
+    [
+        pytest.param("localhost:8000", "ws", "localhost", 8000, id="localhost_picks_ws"),
+        pytest.param("127.0.0.1:9001", "ws", "127.0.0.1", 9001, id="ip_picks_ws"),
+        pytest.param(
+            "chess.example.com", "wss", "chess.example.com", 443, id="hostname_picks_wss"
+        ),
+        pytest.param(
+            "ws://chess.example.com", "ws", "chess.example.com", 8000, id="explicit_ws_overrides"
+        ),
+        pytest.param(
+            "wss://localhost:8443", "wss", "localhost", 8443, id="explicit_wss_overrides_localhost"
+        ),
+        pytest.param(
+            "chess.example.com:8000", "ws", "chess.example.com", 8000,
+            id="port_8000_picks_ws_for_hostname",
+        ),
+        pytest.param("203.0.113.5", "ws", "203.0.113.5", 8000, id="ip_without_port_defaults_8000"),
+        pytest.param(
+            "203.0.113.5:9999", "ws", "203.0.113.5", 9999, id="ip_with_custom_port_uses_that_port"
+        ),
+        pytest.param(
+            "localhost", "ws", "localhost", 8000, id="localhost_without_port_defaults_8000"
+        ),
+    ],
+)
+def test_split_addr(addr, scheme, host, port):
+    assert _split_addr(addr) == (scheme, host, port)
 
 
-def test_split_addr_ip_picks_ws():
-    scheme, host, port = _split_addr("127.0.0.1:9001")
-    assert scheme == "ws" and host == "127.0.0.1" and port == 9001
+@pytest.mark.parametrize(
+    "addr, method, path, expected",
+    [
+        pytest.param(
+            "localhost:8000", "http", "/matchmake", "http://localhost:8000/matchmake",
+            id="http_localhost",
+        ),
+        pytest.param(
+            "chess.example.com", "http", "/matchmake",
+            "https://chess.example.com:443/matchmake", id="http_hostname_uses_https",
+        ),
+        pytest.param(
+            "localhost:8000", "ws", "/ws/abc", "ws://localhost:8000/ws/abc", id="ws_localhost"
+        ),
+        pytest.param(
+            "chess.example.com", "ws", "/ws/abc", "wss://chess.example.com:443/ws/abc",
+            id="ws_hostname_uses_wss",
+        ),
+    ],
+)
+def test_url_builder(addr, method, path, expected):
+    u = _UrlBuilder(addr)
+    assert getattr(u, method)(path) == expected
 
-
-def test_split_addr_hostname_picks_wss():
-    scheme, host, port = _split_addr("chess.example.com")
-    assert scheme == "wss" and host == "chess.example.com" and port == 443
-
-
-def test_split_addr_explicit_ws_overrides():
-    scheme, host, port = _split_addr("ws://chess.example.com")
-    assert scheme == "ws" and host == "chess.example.com"
-
-
-def test_split_addr_explicit_wss_overrides_localhost():
-    scheme, host, port = _split_addr("wss://localhost:8443")
-    assert scheme == "wss" and host == "localhost" and port == 8443
-
-
-def test_split_addr_port_8000_picks_ws_for_hostname():
-    scheme, host, port = _split_addr("chess.example.com:8000")
-    assert scheme == "ws" and host == "chess.example.com" and port == 8000
-
-
-def test_split_addr_ip_without_port_defaults_to_8000():
-    scheme, host, port = _split_addr("203.0.113.5")
-    assert scheme == "ws" and host == "203.0.113.5" and port == 8000
-
-
-def test_split_addr_ip_with_custom_port_uses_that_port():
-    scheme, host, port = _split_addr("203.0.113.5:9999")
-    assert scheme == "ws" and host == "203.0.113.5" and port == 9999
-
-
-def test_split_addr_localhost_without_port_defaults_to_8000():
-    scheme, host, port = _split_addr("localhost")
-    assert scheme == "ws" and host == "localhost" and port == 8000
-
-
-def test_url_builder_http_localhost():
-    u = _UrlBuilder("localhost:8000")
-    assert u.http("/matchmake") == "http://localhost:8000/matchmake"
-
-
-def test_url_builder_http_hostname_uses_https():
-    u = _UrlBuilder("chess.example.com")
-    assert u.http("/matchmake") == "https://chess.example.com:443/matchmake"
-
-
-def test_url_builder_ws_localhost():
-    u = _UrlBuilder("localhost:8000")
-    assert u.ws("/ws/abc") == "ws://localhost:8000/ws/abc"
-
-
-def test_url_builder_ws_hostname_uses_wss():
-    u = _UrlBuilder("chess.example.com")
-    assert u.ws("/ws/abc") == "wss://chess.example.com:443/ws/abc"
-
-
-# ---------- ping rolling average exposed for the game-info panel ----------
 
 def test_get_ping_ms_returns_none_until_first_sample():
     client = OnlineClient()
@@ -86,17 +75,14 @@ def test_get_ping_ms_rounds_average_of_samples():
 
 
 def test_get_ping_ms_window_caps_at_constant():
-    # The deque caps at PING_SAMPLE_WINDOW so very old samples don't drag
-    # the displayed value when the connection's RTT changes.
+    """The deque caps at PING_SAMPLE_WINDOW so stale RTTs can't drag the value."""
     client = OnlineClient()
     for v in range(20):
         client._ping_samples_ms.append(float(v))
     assert len(client._ping_samples_ms) == PING_SAMPLE_WINDOW
-    # Last 5 samples are 15..19, mean = 17.0.
+    assert list(client._ping_samples_ms) == [15.0, 16.0, 17.0, 18.0, 19.0]
     assert client.get_ping_ms() == 17
 
-
-# ---------- ping loop pushes samples from ws.ping() ----------
 
 class _FakeWs:
     def __init__(self, latencies):
@@ -113,7 +99,7 @@ class _FakeWs:
 
 
 def test_ping_loop_records_samples(monkeypatch):
-    # Shrink the inter-ping wait so the test runs in milliseconds.
+    """ws.ping() pong latencies are converted s->ms and pushed onto the rolling window."""
     monkeypatch.setattr("frontend.online.client.PING_INTERVAL_SECONDS", 0.001)
 
     client = OnlineClient()
@@ -135,10 +121,11 @@ def test_ping_loop_records_samples(monkeypatch):
     asyncio.run(_drive())
 
     assert list(client._ping_samples_ms)[:3] == pytest.approx([30.0, 45.0, 60.0])
-    assert client.get_ping_ms() in (40, 41, 42, 43, 44, 45)  # rolling mean of first 3
+    assert client.get_ping_ms() in (40, 41, 42, 43, 44, 45)
 
 
 def test_ping_loop_swallows_transient_ping_failures(monkeypatch):
+    """A raised ws.ping() is logged and skipped; the next successful ping still records."""
     monkeypatch.setattr("frontend.online.client.PING_INTERVAL_SECONDS", 0.001)
 
     class _FlakyWs:
@@ -172,16 +159,13 @@ def test_ping_loop_swallows_transient_ping_failures(monkeypatch):
 
     asyncio.run(_drive())
 
-    # Failure was swallowed; the next successful ping landed.
     assert client._ping_samples_ms[-1] == pytest.approx(25.0)
     assert fake_ws.calls >= 2
 
 
 def test_ws_session_clears_old_ping_samples_on_reconnect():
-    # When a new ws session starts (mid-game reconnect), stale RTTs from the
-    # previous link must not skew the rolling average.
+    """A fresh ws session must drop the previous link's RTTs from the rolling average."""
     client = OnlineClient()
     client._ping_samples_ms.extend([100.0, 110.0, 120.0])
-    # Simulate the cleanup _run_ws_session does at the top of a fresh session.
     client._ping_samples_ms.clear()
     assert client.get_ping_ms() is None

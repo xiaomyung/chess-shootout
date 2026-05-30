@@ -1,63 +1,66 @@
+import pytest
+
 from frontend.pgn.generate import generate_pgn
 
 
-def test_player_names_in_headers():
-    out = generate_pgn(
-        [], "white_wins",
-        white_name="alice", black_name="bob",
-        time_control=(300, 5),
-    )
-    assert '[White "alice"]' in out
-    assert '[Black "bob"]' in out
-    assert '[TimeControl "300+5"]' in out
-    assert '[Termination' not in out
-    assert '[Result "1-0"]' in out
-
-
-def test_no_time_control_emits_dash():
-    out = generate_pgn([], "white_wins", time_control=None)
-    assert '[TimeControl "-"]' in out
-
-
-def test_time_forfeit_white_wins():
-    out = generate_pgn(
-        [], "white_wins_on_time",
-        white_name="alice", black_name="bob",
-        time_control=(60, 0),
-    )
-    assert '[Termination "Time forfeit"]' in out
-    assert '[Result "1-0"]' in out
-
-
-def test_time_forfeit_black_wins():
-    out = generate_pgn(
-        [], "black_wins_on_time",
-        time_control=(60, 0),
-    )
-    assert '[Termination "Time forfeit"]' in out
-    assert '[Result "0-1"]' in out
-
-
-def test_time_forfeit_with_no_time_control_still_marks_termination():
-    # Edge case: result claims timeout but time_control was not set. Render anyway
-    # because the result code is what drives the termination tag.
-    out = generate_pgn([], "white_wins_on_time", time_control=None)
-    assert '[Termination "Time forfeit"]' in out
-    assert '[TimeControl "-"]' in out
-
-
-def test_backwards_compat_default_kwargs():
-    out = generate_pgn([], "white_wins")
-    assert '[White "?"]' in out
-    assert '[Black "?"]' in out
-    assert '[TimeControl "-"]' in out
-    assert '[Termination' not in out
-
-
-def test_explicit_termination_kwarg_wins_over_result_inference():
-    out = generate_pgn(
-        [], "draw_agreement",
-        termination="Time forfeit",
-    )
-    # If caller explicitly sets termination, we honor it.
-    assert '[Termination "Time forfeit"]' in out
+@pytest.mark.parametrize(
+    "result, kwargs, present, absent",
+    [
+        pytest.param(
+            "white_wins",
+            dict(white_name="alice", black_name="bob", time_control=(300, 5)),
+            ['[White "alice"]', '[Black "bob"]', '[TimeControl "300+5"]', '[Result "1-0"]'],
+            ["[Termination"],
+            id="player_names_and_time_control",
+        ),
+        pytest.param(
+            "white_wins",
+            dict(time_control=None),
+            ['[TimeControl "-"]'],
+            [],
+            id="no_time_control_emits_dash",
+        ),
+        pytest.param(
+            "white_wins_on_time",
+            dict(white_name="alice", black_name="bob", time_control=(60, 0)),
+            ['[Termination "Time forfeit"]', '[Result "1-0"]'],
+            [],
+            id="time_forfeit_white_wins",
+        ),
+        pytest.param(
+            "black_wins_on_time",
+            dict(time_control=(60, 0)),
+            ['[Termination "Time forfeit"]', '[Result "0-1"]'],
+            [],
+            id="time_forfeit_black_wins",
+        ),
+        pytest.param(
+            "white_wins_on_time",
+            dict(time_control=None),
+            ['[Termination "Time forfeit"]', '[TimeControl "-"]'],
+            [],
+            id="time_forfeit_no_time_control_still_marks",
+        ),
+        pytest.param(
+            "white_wins",
+            dict(),
+            ['[White "?"]', '[Black "?"]', '[TimeControl "-"]'],
+            ["[Termination"],
+            id="backwards_compat_default_kwargs",
+        ),
+        pytest.param(
+            "draw_agreement",
+            dict(termination="Time forfeit"),
+            ['[Termination "Time forfeit"]'],
+            [],
+            id="explicit_termination_overrides_inference",
+        ),
+    ],
+)
+def test_generate_pgn_headers(result, kwargs, present, absent):
+    """Header tags are driven by result code + kwargs; explicit termination wins."""
+    out = generate_pgn([], result, **kwargs)
+    for fragment in present:
+        assert fragment in out
+    for fragment in absent:
+        assert fragment not in out

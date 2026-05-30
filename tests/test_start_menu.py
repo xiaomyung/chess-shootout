@@ -1,3 +1,10 @@
+"""StartMenu selector/layout behavior: clicks mutate the matching selection,
+the start button relabels per mode, and state survives a hide/show cycle.
+
+A `menu` is built at a fixed 400x600 rect and drawn once so the per-section
+selector rects exist before any click is dispatched.
+"""
+
 import os
 
 os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
@@ -25,7 +32,7 @@ def menu():
 
     sm = StartMenu(pg.display.get_surface(), {"start_game": on_start})
     sm.set_rect(pg.Rect(100, 50, 400, 600))
-    sm.draw()  # Build internal rects.
+    sm.draw()
     return sm, callbacks_called
 
 
@@ -42,50 +49,43 @@ def test_defaults(menu):
     assert sm.text_input.text == ""
 
 
-def test_click_time_5_min_updates_selection(menu):
+@pytest.mark.parametrize(
+    "rects_attr, selected_attr, preset, key",
+    [
+        pytest.param("_mode_rects", "selected_mode", "single_screen", "bot",
+                     id="mode_bot"),
+        pytest.param("_time_rects", "selected_time_minutes", 10, 5,
+                     id="time_5_min"),
+        pytest.param("_increment_rects", "selected_increment_seconds", 5, 10,
+                     id="increment_10"),
+        pytest.param("_side_rects", "selected_side", "black", "random",
+                     id="side_random_from_black"),
+        pytest.param("_side_rects", "selected_side", "random", "black",
+                     id="side_black"),
+    ],
+)
+def test_click_selector_sets_selection(menu, rects_attr, selected_attr, preset, key):
+    """Clicking a selector cell consumes the click and sets its bound attr.
+
+    Each case preacts to a non-target value so the assertion proves a real
+    change, not the unchanged default.
+    """
     sm, _ = menu
-    target = sm._time_rects[5]
+    setattr(sm, selected_attr, preset)
+    target = getattr(sm, rects_attr)[key]
     assert sm.handle_click(target.center) is True
-    assert sm.selected_time_minutes == 5
+    assert getattr(sm, selected_attr) == key
 
 
 def test_click_no_clock_sets_time_minutes_to_none(menu):
+    """Picking "No clock" nulls the minutes but keeps the increment in config."""
     sm, _ = menu
     target = sm._time_rects[None]
     sm.handle_click(target.center)
     assert sm.selected_time_minutes is None
-    # Increment selection still present (stable dict shape).
     config = sm.build_config()
     assert "increment_seconds" in config
     assert config["increment_seconds"] == 5
-
-
-def test_click_increment_updates_selection(menu):
-    sm, _ = menu
-    target = sm._increment_rects[10]
-    sm.handle_click(target.center)
-    assert sm.selected_increment_seconds == 10
-
-
-def test_click_side_random(menu):
-    sm, _ = menu
-    target = sm._side_rects["random"]
-    sm.handle_click(target.center)
-    assert sm.selected_side == "random"
-
-
-def test_click_side_black(menu):
-    sm, _ = menu
-    target = sm._side_rects["black"]
-    sm.handle_click(target.center)
-    assert sm.selected_side == "black"
-
-
-def test_click_mode_bot(menu):
-    sm, _ = menu
-    target = sm._mode_rects["bot"]
-    sm.handle_click(target.center)
-    assert sm.selected_mode == "bot"
 
 
 def test_typing_via_handle_key(menu):
@@ -131,38 +131,36 @@ def test_start_game_fires_even_with_empty_nickname(menu):
     assert called[0]["nickname"] == ""
 
 
-def test_start_game_fires_for_bot_mode(menu):
+@pytest.mark.parametrize(
+    "mode",
+    [
+        pytest.param("bot", id="bot"),
+        pytest.param("online", id="online"),
+    ],
+)
+def test_start_game_fires_for_mode(menu, mode):
+    """Selecting a mode then clicking Start fires with that mode in the config."""
     sm, called = menu
     called.clear()
-    sm.selected_mode = "bot"
+    sm.selected_mode = mode
     sm.draw()
     sm.handle_click(sm._start_rect.center)
     assert len(called) == 1
-    assert called[0]["mode"] == "bot"
+    assert called[0]["mode"] == mode
 
 
 @pytest.mark.parametrize(
-    "mode,expected_label",
+    "mode, expected_label",
     [
-        ("single_screen", "Start Game"),
-        ("bot", "Start Game"),
-        ("online", "Start Search"),
+        pytest.param("single_screen", "Start Game", id="single_screen_start_game"),
+        pytest.param("bot", "Start Game", id="bot_start_game"),
+        pytest.param("online", "Start Search", id="online_start_search"),
     ],
 )
 def test_start_button_label_per_mode(menu, mode, expected_label):
     sm, _ = menu
     sm.selected_mode = mode
     assert sm.start_button_label == expected_label
-
-
-def test_start_game_fires_for_online_mode(menu):
-    sm, called = menu
-    called.clear()
-    sm.selected_mode = "online"
-    sm.draw()
-    sm.handle_click(sm._start_rect.center)
-    assert len(called) == 1
-    assert called[0]["mode"] == "online"
 
 
 def test_state_preservation_across_hide_show(menu):

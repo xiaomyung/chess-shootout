@@ -1,4 +1,5 @@
 import os
+import uuid
 
 import pytest
 
@@ -30,22 +31,32 @@ def _isolate_env(tmp_path, monkeypatch):
         os.environ.pop(var, None)
 
 
-def test_get_server_addr_returns_default_when_unset():
-    assert env.get_server_addr() == "localhost:8000"
+@pytest.mark.parametrize(
+    "getter, default",
+    [
+        pytest.param("get_server_addr", "localhost:8000", id="server_addr_defaults_localhost"),
+        pytest.param("get_nickname", "", id="nickname_defaults_empty"),
+        pytest.param("get_last_mode", "", id="last_mode_defaults_empty"),
+        pytest.param("get_data_dir_override", "", id="data_dir_override_defaults_empty"),
+    ],
+)
+def test_getter_returns_default_when_unset(getter, default):
+    assert getattr(env, getter)() == default
 
 
-def test_get_server_addr_reads_environment(monkeypatch):
-    monkeypatch.setenv("CHESS_SERVER_ADDR", "chess.example.com")
-    assert env.get_server_addr() == "chess.example.com"
-
-
-def test_get_nickname_returns_empty_when_unset():
-    assert env.get_nickname() == ""
-
-
-def test_get_nickname_reads_environment(monkeypatch):
-    monkeypatch.setenv("CHESS_NICKNAME", "Magnus")
-    assert env.get_nickname() == "Magnus"
+@pytest.mark.parametrize(
+    "var, getter, value",
+    [
+        pytest.param(
+            "CHESS_SERVER_ADDR", "get_server_addr", "chess.example.com",
+            id="server_addr_reads_env",
+        ),
+        pytest.param("CHESS_NICKNAME", "get_nickname", "Magnus", id="nickname_reads_env"),
+    ],
+)
+def test_getter_reads_environment(monkeypatch, var, getter, value):
+    monkeypatch.setenv(var, value)
+    assert getattr(env, getter)() == value
 
 
 def test_nickname_override_wins(monkeypatch):
@@ -55,8 +66,11 @@ def test_nickname_override_wins(monkeypatch):
 
 
 def test_get_or_create_client_uuid_generates_when_unset():
+    """A fresh launch mints a real uuid4 and caches it for the next call."""
     fresh = env.get_or_create_client_uuid()
-    assert len(fresh) == 36  # uuid4 string length
+    assert uuid.UUID(fresh).version == 4
+    assert os.environ["CHESS_CLIENT_UUID"] == fresh
+    assert env.get_or_create_client_uuid() == fresh
 
 
 def test_get_or_create_client_uuid_persists_to_env_file():
@@ -85,10 +99,6 @@ def test_set_last_mode_persists_to_env_file():
     assert "online" in contents
 
 
-def test_get_last_mode_returns_empty_when_unset():
-    assert env.get_last_mode() == ""
-
-
 def test_load_reads_env_file_when_present(monkeypatch):
     env._ENV_PATH.write_text("CHESS_SERVER_ADDR=test.example.com\n")
     env.load()
@@ -97,21 +107,22 @@ def test_load_reads_env_file_when_present(monkeypatch):
 
 def test_load_no_op_when_env_file_missing():
     assert not env._ENV_PATH.exists()
-    env.load()  # must not raise
+    env.load()
     assert env.get_server_addr() == "localhost:8000"
 
 
-def test_master_volume_default_when_unset():
-    assert env.get_master_volume() == env._DEFAULT_MASTER_VOLUME
-
-
-def test_master_volume_default_when_blank(monkeypatch):
-    monkeypatch.setenv("CHESS_MASTER_VOLUME", "")
-    assert env.get_master_volume() == env._DEFAULT_MASTER_VOLUME
-
-
-def test_master_volume_default_when_garbage(monkeypatch):
-    monkeypatch.setenv("CHESS_MASTER_VOLUME", "not-a-float")
+@pytest.mark.parametrize(
+    "raw",
+    [
+        pytest.param(None, id="unset"),
+        pytest.param("", id="blank"),
+        pytest.param("not-a-float", id="garbage"),
+    ],
+)
+def test_master_volume_falls_back_to_default(monkeypatch, raw):
+    """Unset, blank, and unparseable values all return the default volume."""
+    if raw is not None:
+        monkeypatch.setenv("CHESS_MASTER_VOLUME", raw)
     assert env.get_master_volume() == env._DEFAULT_MASTER_VOLUME
 
 
@@ -151,6 +162,7 @@ def test_persist_preserves_comments_and_unrelated_keys():
 
 
 def test_persist_replaces_existing_key_in_place():
+    """An updated key is rewritten where it sat; trailing keys keep their order."""
     env._ENV_PATH.write_text(
         "CHESS_LAST_MODE=online\n"
         "CHESS_MASTER_VOLUME=0.300\n"
@@ -158,14 +170,12 @@ def test_persist_replaces_existing_key_in_place():
     )
     env.set_master_volume(0.800)
     lines = env._ENV_PATH.read_text().splitlines()
-    # Replaced in place, not appended at the end.
     assert any("CHESS_MASTER_VOLUME=0.800" in line for line in lines)
-    # Last key is unchanged (didn't get reordered).
     assert lines[-1] == "CHESS_NICKNAME=Magnus"
 
 
 def test_persist_drops_malformed_lines():
-    # Stray fragment without a `KEY=` prefix (the bug we're hardening against).
+    """A stray fragment lacking a `KEY=` prefix is dropped on the first persist."""
     env._ENV_PATH.write_text(
         "CHESS_LAST_MODE=online\n"
         "CHESS_MASTER_VOLUME=0.5\n"
@@ -173,7 +183,6 @@ def test_persist_drops_malformed_lines():
     )
     env.set_master_volume(0.7)
     contents = env._ENV_PATH.read_text()
-    # Stray fragment is gone after the first persist.
     assert "0.5\n" not in contents.replace("=0.5\n", "")
     assert contents.count("CHESS_MASTER_VOLUME=") == 1
     assert "CHESS_MASTER_VOLUME=0.700" in contents
@@ -182,7 +191,6 @@ def test_persist_drops_malformed_lines():
 def test_persist_writes_unquoted_values():
     env.set_master_volume(0.65)
     contents = env._ENV_PATH.read_text()
-    # No spurious quotes around the value.
     assert "CHESS_MASTER_VOLUME=0.650" in contents
     assert "CHESS_MASTER_VOLUME='0.650'" not in contents
 
@@ -203,9 +211,7 @@ def test_set_overrides_passes_uuid4_through_unchanged():
 
 
 def test_set_overrides_coerces_short_alias_to_uuid4():
-    # The CLI shortcut `--client-uuid alice` used to produce a 422 against
-    # the new server-side UUID4 validator. Coerce short aliases into a
-    # deterministic UUID4 so the debug shortcut still works.
+    """`--client-uuid alice` once 422'd the server validator; coerce to a uuid4."""
     env.set_overrides(client_uuid="alice")
     from server.protocol import is_uuid4
     assert is_uuid4(env._uuid_override)
@@ -219,10 +225,6 @@ def test_set_overrides_coercion_is_deterministic_per_alias():
     assert a1 == a2
     env.set_overrides(client_uuid="bob")
     assert env._uuid_override != a1
-
-
-def test_get_data_dir_override_empty_when_unset():
-    assert env.get_data_dir_override() == ""
 
 
 def test_set_data_dir_persists_and_reads():

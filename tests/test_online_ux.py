@@ -20,8 +20,8 @@ from frontend.frontend import (
 )
 from frontend.modals.reconnecting import ReconnectingModal
 from frontend.online.events import (
-    ONLINE_HARD_FAILURE_LABELS, ONLINE_HARD_FAILURE_REASONS,
-    ONLINE_TRANSIENT_REASON_LABELS,
+    NOT_YOUR_TURN_TOASTS, ONLINE_HARD_FAILURE_LABELS,
+    ONLINE_HARD_FAILURE_REASONS, ONLINE_TRANSIENT_REASON_LABELS,
 )
 
 
@@ -37,51 +37,36 @@ def _pygame_init():
 def frontend():
     fe = Frontend(900, 600)
     yield fe
-    # Re-establish a display so subsequent module-scope tests still find one.
     pg.display.set_mode((600, 400))
 
 
-# ---- compute_animation_ms ----------------------------------------------------
-
-def test_anim_ms_default_when_no_clock():
-    # No clock → use the default; menu / casual play still feels snappy.
-    assert compute_animation_ms(None) == ANIM_MS_DEFAULT
-    assert compute_animation_ms(0) == ANIM_MS_DEFAULT
-
-
-def test_anim_ms_clamps_low_for_bullet_time_control():
-    # Bullet 1+0 (60s) → 0.5 * 60 = 30, clamped up to ANIM_MS_MIN.
-    assert compute_animation_ms(60) == ANIM_MS_MIN
-
-
-def test_anim_ms_in_range_for_blitz():
-    # Blitz 5+0 (300s) → 0.5 * 300 = 150 → in range as-is.
-    assert compute_animation_ms(300) == 150
-    assert ANIM_MS_MIN <= compute_animation_ms(300) <= ANIM_MS_MAX
+@pytest.mark.parametrize(
+    "seconds, expected",
+    [
+        pytest.param(None, ANIM_MS_DEFAULT, id="no_clock_uses_default"),
+        pytest.param(0, ANIM_MS_DEFAULT, id="zero_clock_uses_default"),
+        pytest.param(60, ANIM_MS_MIN, id="bullet_1plus0_clamps_to_min"),
+        pytest.param(300, 150, id="blitz_5plus0_in_range_as_is"),
+        pytest.param(600, ANIM_MS_MAX, id="rapid_10plus0_clamps_to_max"),
+        pytest.param(3600, ANIM_MS_MAX, id="classical_still_capped_at_max"),
+    ],
+)
+def test_compute_animation_ms(seconds, expected):
+    assert compute_animation_ms(seconds) == expected
 
 
-def test_anim_ms_clamps_high_for_long_time_control():
-    # Rapid 10+0 (600s) → 0.5 * 600 = 300, clamped down to ANIM_MS_MAX.
-    assert compute_animation_ms(600) == ANIM_MS_MAX
-    # And further: classical (3600s) still capped at the max.
-    assert compute_animation_ms(3600) == ANIM_MS_MAX
-
-
-# ---- _reset_to_new_game wires animation duration to the time control --------
-
-def test_reset_to_new_game_sets_anim_ms_from_time_control(frontend):
-    frontend._time_control = (300, 0)
+@pytest.mark.parametrize(
+    "time_control, expected",
+    [
+        pytest.param((300, 0), compute_animation_ms(300), id="time_control_drives_anim_ms"),
+        pytest.param(None, ANIM_MS_DEFAULT, id="no_clock_uses_default"),
+    ],
+)
+def test_reset_to_new_game_sets_anim_ms(frontend, time_control, expected):
+    frontend._time_control = time_control
     frontend._reset_to_new_game()
-    assert frontend.board.animation_duration_ms == compute_animation_ms(300)
+    assert frontend.board.animation_duration_ms == expected
 
-
-def test_reset_to_new_game_uses_default_when_no_clock(frontend):
-    frontend._time_control = None
-    frontend._reset_to_new_game()
-    assert frontend.board.animation_duration_ms == ANIM_MS_DEFAULT
-
-
-# ---- ReconnectingModal -------------------------------------------------------
 
 def test_reconnecting_modal_starts_hidden():
     m = ReconnectingModal(pg.display.get_surface())
@@ -94,20 +79,43 @@ def test_reconnecting_modal_show_makes_visible_and_caches_callback():
     cancelled = []
     m.show(on_cancel=lambda: cancelled.append(True))
     assert m.is_visible()
-    m.draw()  # populates button_rects
+    m.draw()
     m.handle_click(m.button_rects["cancel"].center)
     assert cancelled == [True]
 
 
-def test_reconnecting_modal_subtitle_renders_without_crash():
-    m = ReconnectingModal(pg.display.get_surface())
+def test_reconnecting_modal_subtitle_renders_visible_pixels():
+    """The subtitle text is actually blitted: white glyph pixels land on the
+    modal that were absent before set_subtitle (regression guard for a
+    silently-dropped subtitle)."""
+    win = pg.display.get_surface()
+    m = ReconnectingModal(win)
     m.set_rect(pg.Rect(0, 0, 400, 220))
     m.show(on_cancel=lambda: None)
-    m.set_subtitle("Trying to reconnect…")
+    subtitle = "Trying to reconnect…"
+
+    rendered = m.subtitle_font.render(subtitle, True, (255, 255, 255))
+    assert rendered.get_width() > 0 and rendered.get_height() > 0
+
+    def white_pixels():
+        return sum(
+            1
+            for x in range(m.rect.width)
+            for y in range(m.rect.height)
+            if win.get_at((x, y))[:3] == (255, 255, 255)
+        )
+
+    win.fill((0, 0, 0))
     m.draw()
+    without_subtitle = white_pixels()
 
+    win.fill((0, 0, 0))
+    m.set_subtitle(subtitle)
+    m.draw()
+    with_subtitle = white_pixels()
 
-# ---- Frontend integration with reconnecting overlay -------------------------
+    assert with_subtitle > without_subtitle
+
 
 def test_reconnecting_overlay_appears_when_client_state_is_reconnecting(frontend):
     fake_client = SimpleNamespace(state="reconnecting")
@@ -129,7 +137,7 @@ def test_reconnecting_overlay_hides_when_client_recovers(frontend):
 def test_reconnecting_overlay_cancel_calls_abandon(frontend, monkeypatch):
     abandoned = []
     monkeypatch.setattr(frontend, "_abandon_online_game",
-                         lambda: abandoned.append(True))
+                        lambda: abandoned.append(True))
     fake_client = SimpleNamespace(state="reconnecting")
     frontend.online_client = fake_client
     frontend._update_online_phase()
@@ -139,8 +147,6 @@ def test_reconnecting_overlay_cancel_calls_abandon(frontend, monkeypatch):
     )
     assert abandoned == [True]
 
-
-# ---- Wait modal phases (search elapsed counter, then match-found hold) ------
 
 def test_wait_modal_subtitle_shows_elapsed_seconds(frontend, monkeypatch):
     fake_now = [10000]
@@ -160,7 +166,7 @@ def test_match_found_payload_held_for_500ms_before_start(frontend, monkeypatch):
     monkeypatch.setattr(pg.time, "get_ticks", lambda: fake_now[0])
     started = []
     monkeypatch.setattr(frontend, "_start_online_game",
-                         lambda payload: started.append(payload))
+                        lambda payload: started.append(payload))
     frontend.wait_modal.show("Searching…", on_cancel=lambda: None)
     frontend._wait_started_at_ms = fake_now[0]
 
@@ -168,18 +174,14 @@ def test_match_found_payload_held_for_500ms_before_start(frontend, monkeypatch):
                "time_minutes": 5, "increment_seconds": 0}
     frontend._begin_match_found_transition(payload)
 
-    # During the hold the modal should display the celebration subtitle
-    # and the game should not have started yet.
     assert frontend.wait_modal.subtitle == "Match found!"
     fake_now[0] += MATCH_FOUND_HOLD_MS - 50
     frontend._update_online_phase()
     assert started == []
 
-    # Once the hold elapses, _start_online_game fires exactly once.
     fake_now[0] += 100
     frontend._update_online_phase()
     assert started == [payload]
-    # And subsequent ticks don't fire it again.
     fake_now[0] += 1000
     frontend._update_online_phase()
     assert started == [payload]
@@ -191,50 +193,46 @@ def test_match_found_transition_plays_online_game_start_sound(frontend):
     frontend.wait_modal.show("Searching…", on_cancel=lambda: None)
     frontend._wait_started_at_ms = pg.time.get_ticks()
     frontend._begin_match_found_transition({"your_color": "white",
-                                             "white_name": "A",
-                                             "black_name": "B",
-                                             "time_minutes": 5,
-                                             "increment_seconds": 0})
+                                            "white_name": "A",
+                                            "black_name": "B",
+                                            "time_minutes": 5,
+                                            "increment_seconds": 0})
     assert plays == [True]
 
 
-# ---- Toast for transient errors / modal for hard failures -------------------
-
-def test_hard_failure_error_shows_confirm_modal(frontend):
-    frontend._handle_online_error({"reason": "server_unreachable"})
+@pytest.mark.parametrize(
+    "reason, expected_title",
+    [
+        pytest.param("server_unreachable",
+                     ONLINE_HARD_FAILURE_LABELS["server_unreachable"],
+                     id="server_unreachable_friendly_label"),
+        pytest.param("reconnect_failed",
+                     ONLINE_HARD_FAILURE_LABELS["reconnect_failed"],
+                     id="reconnect_failed_friendly_label"),
+        pytest.param("http_503", "Server unreachable",
+                     id="http_prefixed_falls_back_to_generic"),
+    ],
+)
+def test_hard_failure_shows_confirm_modal_with_friendly_label(
+    frontend, reason, expected_title,
+):
+    """Hard failures surface a confirm modal with readable text (no raw engine
+    code in the title) and never eat the event into a toast."""
+    frontend._handle_online_error({"reason": reason})
     assert frontend.confirm_modal.is_visible()
-    # And the toast did NOT eat the event.
+    assert frontend.confirm_modal.title == expected_title
+    assert reason not in frontend.confirm_modal.title
     assert frontend.toast.is_visible() is False
 
 
-def test_hard_failure_modal_uses_friendly_label(frontend):
-    # Raw engine codes shouldn't bleed into the UI — show readable text.
-    frontend._handle_online_error({"reason": "reconnect_failed"})
-    assert frontend.confirm_modal.is_visible()
-    assert frontend.confirm_modal.title == ONLINE_HARD_FAILURE_LABELS["reconnect_failed"]
-    # Specifically, the engine code itself must not surface in the title.
-    assert "reconnect_failed" not in frontend.confirm_modal.title
-
-
-def test_unknown_hard_failure_falls_back_to_generic_label(frontend):
-    frontend._handle_online_error({"reason": "http_503"})
-    assert frontend.confirm_modal.is_visible()
-    assert frontend.confirm_modal.title == "Server unreachable"
-
-
 def test_room_lost_shows_new_search_modal(frontend, monkeypatch):
-    # Distinct from reconnect_failed: server is back up but the room is gone.
-    # User gets "New Search" instead of "Retry" so they can find a fresh game
-    # without manually navigating through the menu.
     restart_calls = []
     monkeypatch.setattr(frontend, "_restart_online_search",
-                         lambda: restart_calls.append(True))
+                        lambda: restart_calls.append(True))
     frontend._handle_online_error({"reason": "room_lost"})
     assert frontend.confirm_modal.is_visible()
     assert "Server restarted" in frontend.confirm_modal.title
     assert frontend.confirm_modal.yes_label == "New Search"
-    # Yes button triggers _restart_online_search (a new matchmake), not Retry
-    # against the dead room.
     frontend.confirm_modal.draw()
     frontend.confirm_modal.handle_click(
         frontend.confirm_modal.button_rects["yes"].center,
@@ -245,7 +243,7 @@ def test_room_lost_shows_new_search_modal(frontend, monkeypatch):
 def test_room_lost_cancel_returns_to_menu(frontend, monkeypatch):
     abandoned = []
     monkeypatch.setattr(frontend, "_abandon_online_game",
-                         lambda: abandoned.append(True))
+                        lambda: abandoned.append(True))
     frontend._handle_online_error({"reason": "room_lost"})
     frontend.confirm_modal.draw()
     frontend.confirm_modal.handle_click(
@@ -254,99 +252,80 @@ def test_room_lost_cancel_returns_to_menu(frontend, monkeypatch):
     assert abandoned == [True]
 
 
-def test_http_prefixed_error_treated_as_hard_failure(frontend):
-    frontend._handle_online_error({"reason": "http_503"})
-    assert frontend.confirm_modal.is_visible()
-
-
-def test_transient_error_shows_toast_not_modal(frontend):
-    # rate_limited maps to a friendly label, not a modal.
-    frontend._handle_online_error({"reason": "rate_limited"})
+@pytest.mark.parametrize(
+    "reason, expected_message",
+    [
+        pytest.param("rate_limited",
+                     ONLINE_TRANSIENT_REASON_LABELS["rate_limited"],
+                     id="known_reason_maps_to_friendly_label"),
+        pytest.param("weird_thing", "weird_thing",
+                     id="unknown_reason_falls_through_to_raw"),
+    ],
+)
+def test_transient_error_shows_toast_not_modal(frontend, reason, expected_message):
+    frontend._handle_online_error({"reason": reason})
     assert frontend.toast.is_visible()
-    assert frontend.toast.message == ONLINE_TRANSIENT_REASON_LABELS["rate_limited"]
+    assert frontend.toast.message == expected_message
     assert not frontend.confirm_modal.is_visible()
 
 
-def test_unknown_transient_reason_falls_through_to_raw_label(frontend):
-    frontend._handle_online_error({"reason": "weird_thing"})
-    assert frontend.toast.is_visible()
-    assert frontend.toast.message == "weird_thing"
-
-
-def test_game_state_errors_produce_neither_modal_nor_toast(frontend):
-    # Bare not_your_turn without an originating msg_type stays silent
-    # (covers the move-race case where the client already gates by turn
-    # and the server's reply is just defensive).
-    frontend._handle_online_error({"reason": "not_your_turn"})
+@pytest.mark.parametrize(
+    "payload",
+    [
+        pytest.param({"reason": "not_your_turn"}, id="bare_not_your_turn"),
+        pytest.param({"reason": "not_your_turn", "msg_type": "weird_action"},
+                     id="not_your_turn_unknown_msg_type"),
+    ],
+)
+def test_not_your_turn_without_known_msg_type_stays_silent(frontend, payload):
+    """A not_your_turn reply with no recognised msg_type is purely defensive
+    (the client already gates by turn) — it must show neither modal nor toast."""
+    frontend._handle_online_error(payload)
     assert not frontend.confirm_modal.is_visible()
     assert not frontend.toast.is_visible()
 
 
-def test_not_your_turn_for_draw_offer_shows_toast(frontend):
-    # When the user clicked Draw while it wasn't their turn, the server's
-    # not_your_turn reply is tagged with msg_type=draw_offer — friendly
-    # toast explains why the action was rejected.
-    frontend._handle_online_error(
-        {"reason": "not_your_turn", "msg_type": "draw_offer"},
-    )
+@pytest.mark.parametrize(
+    "msg_type",
+    [
+        pytest.param("draw_offer", id="draw_offer_explains_own_turn_only"),
+        pytest.param("takeback_request", id="takeback_explains_after_move_only"),
+    ],
+)
+def test_not_your_turn_with_known_msg_type_shows_toast(frontend, msg_type):
+    """When the rejected action is tagged with a msg_type the client knows, a
+    friendly toast explains why it was rejected — and no modal pops."""
+    frontend._handle_online_error({"reason": "not_your_turn", "msg_type": msg_type})
     assert frontend.toast.is_visible()
-    assert "draw" in frontend.toast.message.lower()
-    assert not frontend.confirm_modal.is_visible()
-
-
-def test_not_your_turn_for_takeback_request_shows_toast(frontend):
-    frontend._handle_online_error(
-        {"reason": "not_your_turn", "msg_type": "takeback_request"},
-    )
-    assert frontend.toast.is_visible()
-    assert "take back" in frontend.toast.message.lower()
-
-
-def test_not_your_turn_with_unknown_msg_type_stays_silent(frontend):
-    # Future-proof: a msg_type the client doesn't recognise falls through
-    # silently rather than echoing a raw engine code at the user.
-    frontend._handle_online_error(
-        {"reason": "not_your_turn", "msg_type": "weird_action"},
-    )
-    assert not frontend.toast.is_visible()
+    assert frontend.toast.message == NOT_YOUR_TURN_TOASTS[msg_type]
     assert not frontend.confirm_modal.is_visible()
 
 
 def test_hard_failure_set_is_well_formed():
-    # Sanity: keep this set in sync if the server adds new hard reasons.
     assert "server_unreachable" in ONLINE_HARD_FAILURE_REASONS
     assert "reconnect_failed" in ONLINE_HARD_FAILURE_REASONS
 
 
-# ---- Main-menu redesign: board hidden when in menu mode ---------------------
-
 def test_menu_mode_skips_board_draw(frontend, monkeypatch):
     drew = []
     monkeypatch.setattr(frontend.board, "draw_board",
-                         lambda: drew.append(True))
+                        lambda: drew.append(True))
     frontend.mode = "menu"
     frontend.draw_frame()
     assert drew == []
-    # Switching back to a game causes the board to draw again.
     frontend.mode = "single_screen"
     frontend.draw_frame()
     assert drew == [True]
 
 
 def test_start_menu_centered_on_window_not_board(frontend):
-    # The start menu modal should be centered on the window so it doesn't
-    # appear off-center while the board is hidden.
     rect = frontend.start_menu._outer
     win_w, win_h = frontend.window.get_size()
     assert abs(rect.centerx - win_w / 2) <= 1
     assert abs(rect.centery - win_h / 2) <= 1
 
 
-# ---- Modal flex: window-centered in menu mode, board-centered in-game --------
-
 def test_menu_mode_centers_flex_modals_on_window(frontend):
-    # In menu mode (board hidden), the flex modals (server/wait/fen) must
-    # share the start menu's center — anything else looks misaligned.
     frontend.mode = "menu"
     frontend._compute_layout()
     win_w, _ = frontend.window.get_size()
@@ -360,22 +339,16 @@ def _board_centerx(board):
 
 
 def test_game_mode_centers_flex_modals_on_board(frontend):
-    # Once the board is visible, those same modals follow the board so the
-    # user's eyes don't have to jump from menu-center to board-center.
     from backend.match import SINGLE_SCREEN
     frontend.mode = SINGLE_SCREEN
     frontend._compute_layout()
     board_cx = _board_centerx(frontend.board)
-    # Allow 1 px slack — board_size_px is divided by SIZE (8) and floored,
-    # so the integer offset can sit within a pixel of the geometric center.
     assert abs(frontend.fen_input_modal.rect.centerx - board_cx) <= 4
     assert abs(frontend.wait_modal.rect.centerx - board_cx) <= 4
     assert abs(frontend.server_modal.rect.centerx - board_cx) <= 4
 
 
 def test_mode_change_relays_modal_rects_via_draw_frame(frontend):
-    # Switching modes between frames should re-layout flex modals
-    # automatically — no explicit caller needs to remember to do it.
     from backend.match import SINGLE_SCREEN
     frontend.mode = "menu"
     frontend._compute_layout()

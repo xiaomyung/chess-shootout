@@ -62,14 +62,23 @@ def fire_animation(board):
     board._draw_animations()
 
 
-# ---------- A1: Last-move highlight ----------
+def _cell_block(board, row, col):
+    rect = board._cell_rect(row, col)
+    cx, cy = rect.centerx, rect.centery
+    return [board.window.get_at((cx + dx, cy + dy))
+            for dx in (-2, 0, 2) for dy in (-2, 0, 2)]
+
 
 def test_last_move_highlight_renders_when_history_nonempty(board):
+    """Both from/to squares get the translucent last-move overlay blitted."""
     board.handle_click(Square(6, 4))
     board.handle_click(Square(4, 4))
     fire_animation(board)
-    # Should render without raising; covers from + to overlay paths.
+    before_from = _cell_block(board, 6, 4)
+    before_to = _cell_block(board, 4, 4)
     board._draw_last_move_highlight()
+    assert _cell_block(board, 6, 4) != before_from
+    assert _cell_block(board, 4, 4) != before_to
 
 
 def test_last_move_highlight_skipped_when_history_empty(board):
@@ -80,7 +89,6 @@ def test_last_move_highlight_skipped_when_history_empty(board):
         board._draw_last_move_highlight()
     finally:
         board._cell_rect = original_cell_rect
-    # No history → highlight path never queries cell rects.
     assert rects == []
 
 
@@ -102,8 +110,6 @@ def test_last_move_highlight_uses_both_squares(board):
     assert (4, 4) in rects
 
 
-# ---------- A2: Resign confirmation modal ----------
-
 def test_confirm_modal_hidden_by_default():
     modal = ConfirmModal(pg.display.get_surface())
     modal.set_rect(pg.Rect(0, 0, 200, 100))
@@ -123,7 +129,7 @@ def test_confirm_modal_yes_invokes_callback_and_hides():
     fired = [False]
     modal.show("Resign?", on_yes=lambda: fired.__setitem__(0, True),
                yes_label="Resign", no_label="Cancel")
-    modal.draw()  # populates button_rects
+    modal.draw()
     yes_rect = modal.button_rects["yes"]
     consumed = modal.handle_click(yes_rect.center)
     assert consumed is True
@@ -149,7 +155,6 @@ def test_confirm_modal_click_outside_buttons_does_nothing():
     modal.set_rect(pg.Rect(0, 0, 200, 100))
     modal.show("Q?", on_yes=lambda: None)
     modal.draw()
-    # A point outside both buttons (top of modal).
     assert modal.handle_click((10, 5)) is False
     assert modal.is_visible() is True
 
@@ -162,14 +167,13 @@ def test_resign_button_shows_modal_and_does_not_resign():
 
 
 def test_resign_modal_yes_completes_resign():
+    """White on turn resigns -> compound code so subtitle reads 'by resignation'."""
     app = _new_app()
     app._on_resign()
-    app.draw_frame()  # populates button_rects
+    app.draw_frame()
     yes_rect = app.confirm_modal.button_rects["yes"]
     app.mouse_left_clicked(yes_rect.center)
     assert app.confirm_modal.is_visible() is False
-    # white was on turn → loses; resignation uses the compound code so the
-    # modal subtitle reads "by resignation" and not "by checkmate".
     assert app.manual_result == "black_wins_by_resignation"
 
 
@@ -184,13 +188,11 @@ def test_resign_modal_no_keeps_game_active():
 
 
 def test_resign_blocks_other_clicks_while_modal_open():
-    # While the modal is up, clicks on the board should not select pieces.
+    """With the confirm modal up, board clicks must not select a piece."""
     app = _new_app()
     app._on_resign()
     app.draw_frame()
-    # Click on a board square; modal is up so this should be ignored.
-    target = (50, 50)
-    app.mouse_left_clicked(target)
+    app.mouse_left_clicked((50, 50))
     assert app.board.selected_square is None
 
 
@@ -210,8 +212,6 @@ def test_draw_modal_yes_completes_draw():
     assert app.manual_result == "draw_agreement"
 
 
-# ---------- A3: Drag-and-drop ----------
-
 def test_drag_threshold_constant_is_six():
     assert DRAG_THRESHOLD_PX == 6
 
@@ -222,7 +222,7 @@ def test_begin_press_records_position(board):
 
 
 def test_motion_below_threshold_does_not_start_drag(board):
-    board.handle_click(Square(6, 4))  # select white pawn
+    board.handle_click(Square(6, 4))
     board.begin_press((10, 10))
     board.update_drag_motion((11, 11))
     assert board.dragging_from is None
@@ -237,7 +237,6 @@ def test_motion_past_threshold_starts_drag(board):
 
 def test_drag_ignores_motion_when_no_selection(board):
     board.begin_press((10, 10))
-    # No piece was selected on press.
     board.update_drag_motion((50, 50))
     assert board.dragging_from is None
 
@@ -265,8 +264,6 @@ def test_drag_skips_origin_in_draw_pieces(board):
     board.handle_click(Square(6, 4))
     board.begin_press((10, 10))
     board.update_drag_motion((50, 50))
-    # Spy by replacing piece_images_scaled values with a sentinel surface and
-    # tracking which (row, col) the cell_rect is queried for in draw_pieces.
     visited = []
     original_cell_rect = board._cell_rect
     board._cell_rect = lambda r, c: visited.append((r, c)) or original_cell_rect(r, c)
@@ -281,26 +278,22 @@ def test_dragged_piece_renders_at_cursor(board):
     board.handle_click(Square(6, 4))
     board.begin_press((10, 10))
     board.update_drag_motion((123, 234))
-    # Smoke test: drawing at a cursor position must not raise.
     board._draw_dragged_piece()
-    # Internal state holds the cursor pixel exactly.
     assert board._drag_cursor == (123, 234)
 
 
 def test_dragged_piece_no_op_without_drag_state(board):
-    # Without dragging_from set, draw is a no-op even if cursor is set.
+    """Without dragging_from, the dragged-piece draw is a no-op even with a cursor set."""
     assert board.dragging_from is None
     board._drag_cursor = (10, 10)
-    board._draw_dragged_piece()  # must not raise
+    board._draw_dragged_piece()
 
 
 def test_drag_and_drop_executes_legal_move():
     app = _new_app()
-    # Board geometry — find pixel for white e2 pawn and e4 destination.
     e2_rect = app.board._cell_rect(6, 4)
     e4_rect = app.board._cell_rect(4, 4)
     app._mouse_left_pressed(e2_rect.center)
-    # Move past threshold to a midpoint, then release on e4.
     midpoint = (e4_rect.centerx, e2_rect.centery - DRAG_THRESHOLD_PX * 4)
     app.board.update_drag_motion(midpoint)
     app._mouse_left_released(e4_rect.center)
@@ -312,27 +305,24 @@ def test_drag_and_drop_executes_legal_move():
 
 
 def test_drag_drop_skips_slide_animation():
-    # When a move lands via drag, we should NOT queue a slide animation —
-    # the drag motion already showed the piece arriving at the target.
+    """A drag-landed move queues no slide animation -- the drag already showed arrival."""
     app = _new_app()
     e2_rect = app.board._cell_rect(6, 4)
     e4_rect = app.board._cell_rect(4, 4)
     app._mouse_left_pressed(e2_rect.center)
     app.board.update_drag_motion(e4_rect.center)
     app._mouse_left_released(e4_rect.center)
-    # Move applied to the backend.
     assert len(app.backend.move_history) == 1
-    # No animation queued — drag-drop is instant.
     assert app.board.animations == []
 
 
 def test_click_click_still_animates():
-    # Sanity counter-test: a non-drag move (just two clicks) DOES animate.
+    """Counter-test to drag-drop: a two-click (non-drag) move DOES animate."""
     app = _new_app()
     e2_rect = app.board._cell_rect(6, 4)
     e4_rect = app.board._cell_rect(4, 4)
-    app.mouse_left_clicked(e2_rect.center)  # click1: select
-    app.mouse_left_clicked(e4_rect.center)  # click2: move
+    app.mouse_left_clicked(e2_rect.center)
+    app.mouse_left_clicked(e4_rect.center)
     assert len(app.backend.move_history) == 1
     assert len(app.board.animations) == 1
 
@@ -343,12 +333,9 @@ def test_drag_below_threshold_falls_back_to_click_click():
     app._mouse_left_pressed(e2_rect.center)
     app.board.update_drag_motion((e2_rect.centerx + 1, e2_rect.centery))
     app._mouse_left_released((e2_rect.centerx + 1, e2_rect.centery))
-    # No drag fired → no move yet, but the press selected the pawn.
     assert app.board.selected_square == Square(6, 4)
     assert len(app.backend.move_history) == 0
 
-
-# ---------- A4: Captured pieces + material balance ----------
 
 def test_captured_by_empty_at_start():
     backend = Backend()
@@ -358,12 +345,12 @@ def test_captured_by_empty_at_start():
 
 
 def test_captured_by_after_pawn_capture():
+    """1. e4 d5 2. exd5 -- white's capture list holds the one black pawn."""
     backend = Backend()
     backend.new_game()
-    # 1. e4 d5 2. exd5
-    backend.try_move(Square(6, 4), Square(4, 4))  # e4
-    backend.try_move(Square(1, 3), Square(3, 3))  # d5
-    backend.try_move(Square(4, 4), Square(3, 3))  # exd5
+    backend.try_move(Square(6, 4), Square(4, 4))
+    backend.try_move(Square(1, 3), Square(3, 3))
+    backend.try_move(Square(4, 4), Square(3, 3))
     assert captured_by(backend.move_history, PieceColor.WHITE) == [PieceType.PAWN]
     assert captured_by(backend.move_history, PieceColor.BLACK) == []
 
@@ -392,9 +379,6 @@ def test_material_advantage_after_queen_trade():
     backend.state[7][7] = Piece(PieceType.KING, PieceColor.WHITE)
     backend.state[4][4] = Piece(PieceType.QUEEN, PieceColor.WHITE)
     backend.state[3][4] = Piece(PieceType.QUEEN, PieceColor.BLACK)
-    # Black pawn one rank above the white queen's destination (4,4) —
-    # actually black pawn moves down (row index increases). After WxQ at (3,4),
-    # a black pawn at (2,3) captures forward-diagonally to (3,4).
     backend.state[2][3] = Piece(PieceType.PAWN, PieceColor.BLACK)
     backend.turn = PieceColor.WHITE
     backend.move_history = []
@@ -404,12 +388,11 @@ def test_material_advantage_after_queen_trade():
     assert res1.legal
     res2 = backend.try_move(Square(2, 3), Square(3, 4))
     assert res2.legal
-    # Two queens captured (one each side) → net zero material.
     assert material_advantage(backend.move_history, PieceColor.WHITE) == 0
     assert material_advantage(backend.move_history, PieceColor.BLACK) == 0
 
 
-def test_player_strip_set_state_accepts_captures(board):
+def test_player_strip_set_state_accepts_captures():
     from frontend.panels.player_strip import PlayerStrip
     strip = PlayerStrip(pg.display.get_surface())
     strip.set_rect(pg.Rect(0, 0, 400, 40))
@@ -421,29 +404,65 @@ def test_player_strip_set_state_accepts_captures(board):
     assert strip.captured_color == PieceColor.BLACK
 
 
-def test_player_strip_draws_with_captures_smoke(board):
+class _AdvantageFontSpy:
+    def __init__(self, real):
+        self._real = real
+        self.rendered = []
+
+    def render(self, text, *args, **kwargs):
+        self.rendered.append(text)
+        return self._real.render(text, *args, **kwargs)
+
+    def __getattr__(self, name):
+        return getattr(self._real, name)
+
+
+def _make_strip(window, icons, captured, advantage):
     from frontend.panels.player_strip import PlayerStrip
-    strip = PlayerStrip(pg.display.get_surface())
+    strip = PlayerStrip(window)
     strip.set_rect(pg.Rect(0, 0, 400, 40))
-    strip.set_piece_icons(board.piece_images_scaled)
-    strip.set_state("Alice", 100, True,
-                    captured=[PieceType.PAWN, PieceType.KNIGHT],
-                    advantage=4,
-                    captured_color=PieceColor.BLACK)
-    strip.draw()
+    strip.set_piece_icons(icons)
+    strip.set_state("Alice", 100, True, captured=captured,
+                    advantage=advantage, captured_color=PieceColor.BLACK)
+    return strip
+
+
+def _strip_region_bytes(window):
+    region = window.subsurface(pg.Rect(0, 0, 400, 40)).copy()
+    return pg.image.tostring(region, "RGBA")
+
+
+def test_player_strip_draws_with_captures_smoke(board):
+    """Captured PAWN+KNIGHT icons actually paint the strip's capture region."""
+    window = pg.display.get_surface()
+    icons = board.piece_images_scaled
+    _make_strip(window, icons, [], 0).draw()
+    before = _strip_region_bytes(window)
+    _make_strip(window, icons, [PieceType.PAWN, PieceType.KNIGHT], 0).draw()
+    assert _strip_region_bytes(window) != before
 
 
 def test_player_strip_advantage_negative_not_rendered(board):
-    # Only the leading side shows "+N"; the trailing side renders no number.
+    """Only the leading side renders '+N'; a negative advantage draws no number."""
     from frontend.panels.player_strip import PlayerStrip
-    strip = PlayerStrip(pg.display.get_surface())
-    strip.set_rect(pg.Rect(0, 0, 400, 40))
-    strip.set_state("Alice", 100, True, captured=[],
-                    advantage=-3, captured_color=PieceColor.WHITE)
-    strip.draw()  # smoke
+    leading = PlayerStrip(pg.display.get_surface())
+    leading.set_rect(pg.Rect(0, 0, 400, 40))
+    leading.set_piece_icons(board.piece_images_scaled)
+    leading.set_state("Alice", 100, True, captured=[PieceType.PAWN],
+                      advantage=3, captured_color=PieceColor.WHITE)
+    leading.advantage_font = _AdvantageFontSpy(leading.advantage_font)
+    leading.draw()
+    assert leading.advantage_font.rendered == ["+3"]
 
+    trailing = PlayerStrip(pg.display.get_surface())
+    trailing.set_rect(pg.Rect(0, 0, 400, 40))
+    trailing.set_piece_icons(board.piece_images_scaled)
+    trailing.set_state("Alice", 100, True, captured=[PieceType.PAWN],
+                       advantage=-3, captured_color=PieceColor.WHITE)
+    trailing.advantage_font = _AdvantageFontSpy(trailing.advantage_font)
+    trailing.draw()
+    assert trailing.advantage_font.rendered == []
 
-# ---------- A5: Keyboard shortcuts ----------
 
 def test_f_key_flips_board():
     app = _new_app()
@@ -477,7 +496,7 @@ def test_z_without_ctrl_does_not_undo():
 
 def test_shortcuts_blocked_while_confirm_modal_open():
     app = _new_app()
-    app._on_resign()  # opens modal
+    app._on_resign()
     initial_flipped = app.board.flipped
     event = pg.event.Event(pg.KEYDOWN, key=pg.K_f, mod=0)
     handled = app._handle_shortcut_key(event)

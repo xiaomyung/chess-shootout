@@ -1,3 +1,10 @@
+"""FEN-input modal + Frontend integration.
+
+Invariant: the FEN modal mirrors BaseModal show/hide visibility, validates
+through its on_submit callback (falsy return -> "Invalid FEN" error), and the
+start menu's "From FEN" button is inert while a search/online game is selected.
+"""
+
 import os
 
 os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
@@ -31,8 +38,6 @@ def _key(key, unicode="", mod=0):
     return pg.event.Event(pg.KEYDOWN, {"key": key, "unicode": unicode, "mod": mod})
 
 
-# ---------- FenInputModal in isolation ----------
-
 @pytest.fixture
 def modal():
     m = FenInputModal(pg.display.get_surface())
@@ -40,8 +45,15 @@ def modal():
     return m
 
 
-def test_starts_hidden(modal):
+def test_visibility_follows_show_then_hide(modal):
+    """Starts hidden, show() reveals + focuses, hide() conceals + blurs."""
     assert modal.is_visible() is False
+    modal.show(on_submit=lambda fen: True)
+    assert modal.is_visible() is True
+    assert modal.text_input.focused is True
+    modal.hide()
+    assert modal.is_visible() is False
+    assert modal.text_input.focused is False
 
 
 def test_show_focuses_input(modal):
@@ -59,17 +71,18 @@ def test_hide_clears_state(modal):
     assert modal.text_input.focused is False
 
 
-def test_submit_empty_sets_error(modal):
-    modal.show(on_submit=lambda fen: True)
+@pytest.mark.parametrize(
+    "text, on_submit, expected",
+    [
+        pytest.param("", lambda fen: True, "empty", id="empty_text_reports_empty"),
+        pytest.param("garbage", lambda fen: False, "invalid", id="rejected_fen_reports_invalid"),
+    ],
+)
+def test_submit_sets_error(modal, text, on_submit, expected):
+    modal.show(on_submit=on_submit)
+    modal.text_input.text = text
     modal._submit()
-    assert "empty" in modal.error.lower()
-
-
-def test_submit_invalid_sets_invalid_error(modal):
-    modal.show(on_submit=lambda fen: False)
-    modal.text_input.text = "garbage"
-    modal._submit()
-    assert "invalid" in modal.error.lower()
+    assert expected in modal.error.lower()
 
 
 def test_submit_valid_clears_modal_via_callback(modal):
@@ -95,8 +108,6 @@ def test_enter_key_triggers_submit(modal):
     assert len(fired) == 1
 
 
-# ---------- Frontend integration ----------
-
 def test_fen_button_opens_modal():
     app = _make_app()
     app._on_open_fen_modal()
@@ -121,7 +132,14 @@ def test_invalid_fen_returns_false_and_keeps_modal_open():
     assert app.fen_input_modal.is_visible() is True
 
 
-def test_fen_button_disabled_in_online_mode():
+@pytest.mark.parametrize(
+    "selected_mode, expected_opened",
+    [
+        pytest.param("online", None, id="online_mode_disables_fen_button"),
+        pytest.param(SINGLE_SCREEN, True, id="local_mode_emits_fen_callback"),
+    ],
+)
+def test_start_menu_fen_button(selected_mode, expected_opened):
     captured = {}
     callbacks = {
         "start_game": lambda cfg: None,
@@ -130,23 +148,8 @@ def test_fen_button_disabled_in_online_mode():
     from frontend.modals.start import StartMenu
     sm = StartMenu(pg.display.get_surface(), callbacks)
     sm.set_rect(pg.Rect(100, 50, 600, 700))
-    sm.selected_mode = "online"
+    sm.selected_mode = selected_mode
     sm.show()
     sm.draw()
     sm.handle_click(sm._fen_rect.center)
-    assert captured.get("opened") is None
-
-
-def test_start_menu_emits_fen_callback():
-    captured = {}
-    callbacks = {
-        "start_game": lambda cfg: None,
-        "fen": lambda: captured.setdefault("opened", True),
-    }
-    from frontend.modals.start import StartMenu
-    sm = StartMenu(pg.display.get_surface(), callbacks)
-    sm.set_rect(pg.Rect(100, 50, 600, 700))
-    sm.show()
-    sm.draw()
-    sm.handle_click(sm._fen_rect.center)
-    assert captured.get("opened") is True
+    assert captured.get("opened") is expected_opened

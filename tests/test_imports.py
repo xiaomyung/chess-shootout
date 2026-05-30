@@ -5,6 +5,8 @@ later refactor moves something, this test fails immediately rather than
 later from some random downstream module.
 """
 
+import inspect
+
 import pytest
 
 from frontend.audio.sound_manager import SoundManager
@@ -39,23 +41,26 @@ from frontend.visual.widgets import draw_button, draw_button_row
     TextInput, Toast,
 ])
 def test_public_class_is_importable(symbol):
-    assert symbol is not None
+    assert inspect.isclass(symbol)
 
 
 def test_drag_threshold_constant_re_exported():
-    assert isinstance(DRAG_THRESHOLD_PX, int)
+    """6 px before a click upgrades to a drag; a real int, not a bool."""
+    assert type(DRAG_THRESHOLD_PX) is int
+    assert DRAG_THRESHOLD_PX == 6
 
 
 def test_pgn_module_exports():
-    assert callable(generate_pgn)
-    assert callable(load_pgn_into_backend)
+    assert inspect.isfunction(generate_pgn)
+    assert inspect.isfunction(load_pgn_into_backend)
 
 
 def test_clock_visual_exports():
-    assert isinstance(LOW_TIME_FRACTION, float)
-    assert callable(clock_pocket_color)
+    assert type(LOW_TIME_FRACTION) is float
+    assert LOW_TIME_FRACTION == 0.10
+    assert inspect.isfunction(clock_pocket_color)
 
 
 def test_widgets_module_exports():
-    assert callable(draw_button)
-    assert callable(draw_button_row)
+    assert inspect.isfunction(draw_button)
+    assert inspect.isfunction(draw_button_row)

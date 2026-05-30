@@ -1,13 +1,9 @@
-"""Desync detection + /resume recovery (commit 1).
+"""Desync detection + /resume recovery.
 
-Covers:
-- Server's MoveAppliedMessage / TakebackAppliedMessage carry a `ply` field
-  (used by clients to detect dropped broadcasts).
-- Server pushes ConnectionStatusMessage(opp_state="reconnecting") to the
-  surviving peer when a broadcast send fails.
-- Client detects out-of-order moves by ply mismatch and fires
-  request_state_sync, gating further move_applied via the `_resyncing` flag.
-- _handle_game_resumed clears the gate.
+Invariant under test: a client detects a dropped/out-of-order broadcast by
+comparing the server's `ply` field against `len(move_history)`, fires
+request_state_sync, and gates every further move_applied/takeback behind the
+`_resyncing` flag until _handle_game_resumed clears it.
 """
 import json
 import os
@@ -82,8 +78,6 @@ def _paired_ws(client):
     return a, b
 
 
-# ---------- Server: ply field on broadcasts ----------
-
 def test_move_applied_includes_ply(client):
     a, b = _paired_ws(client)
     with client.websocket_connect(f"/ws/{a['room_id']}") as ws_w:
@@ -95,7 +89,6 @@ def test_move_applied_includes_ply(client):
             ws_w.send_text(json.dumps(_move("e2", "e4")))
             applied_w = json.loads(ws_w.receive_text())
             applied_b = json.loads(ws_b.receive_text())
-            # Ply 1 because exactly one move has been played.
             assert applied_w["ply"] == 1
             assert applied_b["ply"] == 1
             ws_b.send_text(json.dumps(_move("e7", "e5")))
@@ -119,11 +112,9 @@ def test_takeback_applied_includes_ply(client):
             ws_b.send_text(json.dumps(_move("e7", "e5")))
             ws_w.receive_text()
             ws_b.receive_text()
-            # The player who just moved (black) can request a takeback
-            # of their own last move; white accepts.
             ws_b.send_text(json.dumps({"version": PROTOCOL_VERSION,
                                        "type": "takeback_request"}))
-            ws_w.receive_text()  # takeback_offered
+            ws_w.receive_text()
             ws_w.send_text(json.dumps({"version": PROTOCOL_VERSION,
                                        "type": "takeback_response",
                                        "accept": True}))
@@ -133,8 +124,6 @@ def test_takeback_applied_includes_ply(client):
             assert tb_w["ply"] == 1
             assert tb_b["ply"] == 1
 
-
-# ---------- Server: dropped broadcast pushes reconnecting status ----------
 
 def test_dropped_broadcast_pushes_reconnecting_to_surviving_peer(client, monkeypatch):
     a, b = _paired_ws(client)
@@ -158,8 +147,6 @@ def test_dropped_broadcast_pushes_reconnecting_to_surviving_peer(client, monkeyp
             monkeypatch.setattr(connections_module, "send", flaky_send)
 
             ws_w.send_text(json.dumps(_move("e2", "e4")))
-            # The first recipient gets dropped; the second peer gets the
-            # move_applied AND a connection_status: reconnecting.
             seen_types = set()
             for _ in range(2):
                 msg = json.loads(ws_b.receive_text())
@@ -167,9 +154,7 @@ def test_dropped_broadcast_pushes_reconnecting_to_surviving_peer(client, monkeyp
             assert "connection_status" in seen_types
 
 
-# ---------- Client: ply check + resync gate ----------
-
-def _online_app(monkeypatch=None):
+def _online_app():
     from frontend.frontend import Frontend
     app = Frontend(1000, 800)
     app.sound_manager = MagicMock()
@@ -183,7 +168,7 @@ def _online_app(monkeypatch=None):
     return app
 
 
-def test_remote_move_with_correct_ply_applies(monkeypatch):
+def test_remote_move_with_correct_ply_applies():
     app = _online_app()
     payload = {"from": "e2", "to": "e4", "san": "e4", "ply": 1,
                "clock": {}}
@@ -193,23 +178,20 @@ def test_remote_move_with_correct_ply_applies(monkeypatch):
     assert len(app.match.move_history) == 1
 
 
-def test_remote_move_with_skipped_ply_triggers_resync(monkeypatch):
+def test_remote_move_with_skipped_ply_triggers_resync():
+    """Empty local history (ply 0) vs server ply 3 means plies 1-2 were missed."""
     app = _online_app()
-    # Local history is empty (ply 0); server claims this is ply 3 —
-    # we've missed plies 1 and 2.
     payload = {"from": "e7", "to": "e5", "san": "e5", "ply": 3,
                "clock": {}}
     app._handle_remote_move_applied(payload)
     assert app._resyncing is True
     app.online_client.request_state_sync.assert_called_once()
-    # The illegal/out-of-order move must not have been applied.
     assert len(app.match.move_history) == 0
 
 
-def test_remote_move_with_illegal_payload_triggers_resync(monkeypatch):
+def test_remote_move_with_illegal_payload_triggers_resync():
+    """Ply matches but from/to is illegal (no piece on e3); apply returns legal=False."""
     app = _online_app()
-    # Ply matches but the from/to is illegal in the current position
-    # (no piece on e3). apply_remote_move returns legal=False.
     payload = {"from": "e3", "to": "e4", "san": "e4", "ply": 1,
                "clock": {}}
     app._handle_remote_move_applied(payload)
@@ -217,30 +199,29 @@ def test_remote_move_with_illegal_payload_triggers_resync(monkeypatch):
     app.online_client.request_state_sync.assert_called_once()
 
 
-def test_resync_gate_drops_subsequent_move_applied(monkeypatch):
+def test_resync_gate_drops_subsequent_move_applied():
+    """A held gate drops the move without applying it or firing a new request."""
     app = _online_app()
     app._resyncing = True
     payload = {"from": "e2", "to": "e4", "san": "e4", "ply": 1,
                "clock": {}}
     app._handle_remote_move_applied(payload)
-    # Gate held → no apply, no further request.
     assert len(app.match.move_history) == 0
     app.online_client.request_state_sync.assert_not_called()
 
 
-def test_takeback_applied_with_skipped_ply_triggers_resync(monkeypatch):
+def test_takeback_applied_with_skipped_ply_triggers_resync():
+    """Local has 1 ply but server's post-takeback ply 5 is impossible without misses."""
     from backend.utils import Square
     app = _online_app()
     app.match.try_move(Square(6, 4), Square(4, 4))
-    # Local has 1 ply. Server claims post-takeback ply is 5 —
-    # impossible without missed moves.
     payload = {"clock": {}, "fen": "", "ply": 5}
     app._handle_takeback_applied(payload)
     assert app._resyncing is True
     app.online_client.request_state_sync.assert_called_once()
 
 
-def test_game_resumed_clears_resync_gate(monkeypatch):
+def test_game_resumed_clears_resync_gate():
     app = _online_app()
     app._time_control = (300, 0)
     app.match.setup_clock(300, 0)
@@ -259,42 +240,37 @@ def test_game_resumed_clears_resync_gate(monkeypatch):
     assert len(app.match.move_history) == 2
 
 
-def test_begin_resync_is_idempotent_during_inflight_request(monkeypatch):
+def test_begin_resync_is_idempotent_during_inflight_request():
+    """The in-flight flag suppresses duplicate requests across repeated calls."""
     app = _online_app()
     app._begin_resync()
     app._begin_resync()
     app._begin_resync()
-    # The flag prevents duplicate requests while a resync is in flight.
     assert app._resyncing is True
     assert app.online_client.request_state_sync.call_count == 1
 
 
-# ---------- Client: periodic state-sync beacon reconciliation ----------
-
-def test_state_sync_matching_ply_is_noop():
+@pytest.mark.parametrize(
+    "server_ply, expected_mismatch_ply",
+    [
+        pytest.param(0, None, id="matching_ply_clears_mismatch_marker"),
+        pytest.param(2, 2, id="single_mismatch_only_records_debounce_marker"),
+    ],
+)
+def test_state_sync_first_beacon_does_not_resync(server_ply, expected_mismatch_ply):
+    """One beacon (matching, or a single divergence) never resyncs; it only debounces."""
     app = _online_app()
     app.online_client.state = "connected"
-    # Local history is empty (ply 0) and the beacon agrees.
-    app._handle_state_sync({"ply": 0})
+    app._handle_state_sync({"ply": server_ply})
     assert app._resyncing is False
-    assert app._last_beacon_mismatch_ply is None
-    app.online_client.request_state_sync.assert_not_called()
-
-
-def test_state_sync_single_mismatch_does_not_resync():
-    app = _online_app()
-    app.online_client.state = "connected"
-    # One diverged beacon could be a move legitimately in flight — debounce.
-    app._handle_state_sync({"ply": 2})
-    assert app._resyncing is False
-    assert app._last_beacon_mismatch_ply == 2
+    assert app._last_beacon_mismatch_ply == expected_mismatch_ply
     app.online_client.request_state_sync.assert_not_called()
 
 
 def test_state_sync_stable_mismatch_triggers_resync():
+    """The same divergence on two consecutive beacons is a real lost move."""
     app = _online_app()
     app.online_client.state = "connected"
-    # The same divergence on two consecutive beacons is a real lost move.
     app._handle_state_sync({"ply": 2})
     app._handle_state_sync({"ply": 2})
     assert app._resyncing is True
@@ -319,8 +295,6 @@ def test_state_sync_ignored_while_resyncing():
     app._handle_state_sync({"ply": 5})
     app.online_client.request_state_sync.assert_not_called()
 
-
-# ---------- Client: resync self-heal + both-player indicators ----------
 
 def test_resyncing_shows_toast_each_frame():
     app = _online_app()

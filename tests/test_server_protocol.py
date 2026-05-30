@@ -11,86 +11,123 @@ from tests.helpers import fake_uuid4
 
 U1 = fake_uuid4(1)
 
-
-def test_state_sync_message_round_trip():
-    msg = StateSyncMessage(ply=7)
-    payload = msg.model_dump()
-    assert payload == {"version": PROTOCOL_VERSION, "type": "state_sync", "ply": 7}
-    assert StateSyncMessage.model_validate(payload).ply == 7
-
-
-def test_resync_notice_message_round_trip():
-    payload = ResyncNoticeMessage().model_dump()
-    assert payload == {"version": PROTOCOL_VERSION, "type": "resync"}
-    assert ResyncNoticeMessage.model_validate(payload).type == "resync"
+GAME_START = GameStartMessage(
+    fen="rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
+    white_name="Alice", black_name="Bob",
+    time_minutes=5, increment_seconds=0,
+    your_color="white",
+)
 
 
-def test_normalize_nickname_strips_and_collapses():
-    assert normalize_nickname("  alice  ") == "alice"
-    assert normalize_nickname("a   b   c") == "a b c"
+@pytest.mark.parametrize(
+    "msg, expected",
+    [
+        pytest.param(
+            StateSyncMessage(ply=7),
+            {"version": PROTOCOL_VERSION, "type": "state_sync", "ply": 7},
+            id="state_sync",
+        ),
+        pytest.param(
+            ResyncNoticeMessage(),
+            {"version": PROTOCOL_VERSION, "type": "resync"},
+            id="resync_notice",
+        ),
+        pytest.param(
+            GAME_START,
+            {
+                "version": PROTOCOL_VERSION,
+                "type": "game_start",
+                "fen": "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
+                "white_name": "Alice",
+                "black_name": "Bob",
+                "time_minutes": 5,
+                "increment_seconds": 0,
+                "your_color": "white",
+                "started_seconds_ago": 0.0,
+            },
+            id="game_start",
+        ),
+    ],
+)
+def test_message_round_trip_matches_independent_wire_shape(msg, expected):
+    """model_dump matches a hand-written wire dict, and the dict re-parses to an equal model."""
+    assert msg.model_dump() == expected
+    assert type(msg).model_validate(expected) == msg
 
 
-def test_normalize_nickname_rejects_empty():
-    with pytest.raises(ValueError):
-        normalize_nickname("")
-    with pytest.raises(ValueError):
-        normalize_nickname("   ")
-
-
-def test_normalize_nickname_rejects_too_long():
-    with pytest.raises(ValueError):
-        normalize_nickname("x" * 21)
-
-
-def test_normalize_nickname_rejects_non_printable():
-    with pytest.raises(ValueError):
-        normalize_nickname("alice\x00")
-    with pytest.raises(ValueError):
-        normalize_nickname("alice\n")
-
-
-def test_normalize_nickname_accepts_printable_ascii():
-    assert normalize_nickname("Alice 42!") == "Alice 42!"
-
-
-def test_matchmake_request_normalizes_nickname():
-    req = MatchmakeRequest(
-        nickname="  Alice  ", client_uuid=U1,
-        time_minutes=5, increment_seconds=0,
-    )
-    assert req.nickname == "Alice"
-
-
-def test_matchmake_request_rejects_negative_time():
-    with pytest.raises(ValidationError):
-        MatchmakeRequest(
-            nickname="Alice", client_uuid=U1,
-            time_minutes=-1, increment_seconds=0,
-        )
-
-
-def test_matchmake_request_default_side_is_random():
-    req = MatchmakeRequest(
-        nickname="Alice", client_uuid=U1,
-        time_minutes=5, increment_seconds=0,
-    )
-    assert req.side_preference == "random"
-
-
-def test_matchmake_request_rejects_bad_side():
-    with pytest.raises(ValidationError):
-        MatchmakeRequest(
-            nickname="Alice", client_uuid=U1,
-            time_minutes=5, increment_seconds=0,
-            side_preference="middle",
-        )
-
-
-def test_messages_carry_protocol_version():
-    msg = AuthMessage(session_token="t")
+@pytest.mark.parametrize(
+    "msg",
+    [
+        pytest.param(AuthMessage(session_token="t"), id="auth"),
+        pytest.param(ErrorMessage(reason="version_mismatch"), id="error"),
+        pytest.param(StateSyncMessage(ply=0), id="state_sync"),
+        pytest.param(ResyncNoticeMessage(), id="resync"),
+    ],
+)
+def test_messages_carry_protocol_version(msg):
     assert msg.version == PROTOCOL_VERSION
-    msg2 = ErrorMessage(reason="version_mismatch")
-    assert msg2.version == PROTOCOL_VERSION
+
+
+@pytest.mark.parametrize(
+    "raw, expected",
+    [
+        pytest.param("  alice  ", "alice", id="strips_surrounding"),
+        pytest.param("a   b   c", "a b c", id="collapses_internal_runs"),
+        pytest.param("Alice 42!", "Alice 42!", id="keeps_printable_ascii"),
+    ],
+)
+def test_normalize_nickname_accepts(raw, expected):
+    assert normalize_nickname(raw) == expected
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        pytest.param("", id="empty"),
+        pytest.param("   ", id="whitespace_only"),
+        pytest.param("x" * 21, id="too_long"),
+        pytest.param("alice\x00", id="null_byte"),
+        pytest.param("alice\n", id="newline"),
+    ],
+)
+def test_normalize_nickname_rejects(raw):
+    with pytest.raises(ValueError):
+        normalize_nickname(raw)
+
+
+@pytest.mark.parametrize(
+    "kwargs, attr, expected",
+    [
+        pytest.param(
+            {"nickname": "  Alice  "}, "nickname", "Alice",
+            id="normalizes_nickname",
+        ),
+        pytest.param({}, "side_preference", "random", id="default_side_random"),
+    ],
+)
+def test_matchmake_request_accepts(kwargs, attr, expected):
+    base = {
+        "nickname": "Alice", "client_uuid": U1,
+        "time_minutes": 5, "increment_seconds": 0,
+    }
+    req = MatchmakeRequest(**{**base, **kwargs})
+    assert getattr(req, attr) == expected
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        pytest.param({"time_minutes": -1}, id="negative_time"),
+        pytest.param({"side_preference": "middle"}, id="bad_side"),
+    ],
+)
+def test_matchmake_request_rejects(kwargs):
+    base = {
+        "nickname": "Alice", "client_uuid": U1,
+        "time_minutes": 5, "increment_seconds": 0,
+    }
+    with pytest.raises(ValidationError):
+        MatchmakeRequest(**{**base, **kwargs})
 
 
 def test_move_message_uses_alias_for_from():
@@ -99,24 +136,13 @@ def test_move_message_uses_alias_for_from():
     assert msg.from_sq == "e2"
     assert msg.to_sq == "e4"
     assert msg.promotion is None
-    dumped = msg.model_dump(by_alias=True)
-    assert dumped["from"] == "e2"
-    assert dumped["to"] == "e4"
+    assert msg.model_dump(by_alias=True) == {
+        "version": PROTOCOL_VERSION, "type": "move",
+        "from": "e2", "to": "e4", "promotion": None,
+    }
 
 
 def test_move_message_promotion_validated():
     with pytest.raises(ValidationError):
         MoveMessage.model_validate({"type": "move", "version": 1,
                                     "from": "e7", "to": "e8", "promotion": "x"})
-
-
-def test_game_start_serializes_with_required_fields():
-    msg = GameStartMessage(
-        fen="rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
-        white_name="Alice", black_name="Bob",
-        time_minutes=5, increment_seconds=0,
-        your_color="white",
-    )
-    dumped = msg.model_dump()
-    assert dumped["type"] == "game_start"
-    assert dumped["your_color"] == "white"

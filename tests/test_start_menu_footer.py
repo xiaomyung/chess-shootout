@@ -7,8 +7,8 @@ import pytest
 
 import paths
 from frontend.modals.start import (
-    FOOTER_SHINE_HOVER_PERIOD_MS, FOOTER_SHINE_PERIOD_MS, FOOTER_SHINE_SWEEP_MS,
-    FOOTER_URL, StartMenu, footer_prefix_text,
+    FOOTER_SHINE_HOVER_PERIOD_MS, FOOTER_SHINE_HOVER_SWEEP_MS, FOOTER_SHINE_PERIOD_MS,
+    FOOTER_SHINE_SWEEP_MS, FOOTER_URL, StartMenu, footer_prefix_text,
 )
 
 
@@ -26,27 +26,52 @@ def _menu(callbacks=None):
     return menu
 
 
-def test_footer_shows_build_version_when_present(monkeypatch):
-    # A real CI build bundles assets/version.txt, so the footer shows it.
-    monkeypatch.setattr(paths, "get_app_version", lambda: "1.2.3")
-    assert footer_prefix_text() == "Chess Shootout v1.2.3 - Designed and developed by "
+def _link_region(menu):
+    rect = menu._footer_link_rect
+    return pg.image.tobytes(menu.window.subsurface(rect).copy(), "RGBA")
 
 
-def test_footer_shows_dev_when_no_build_version(monkeypatch):
-    # Source / local dev builds have no bundled version file, so the footer
-    # says (dev) rather than masquerading as a release.
-    monkeypatch.setattr(paths, "get_app_version", lambda: "")
-    assert footer_prefix_text() == "Chess Shootout (dev) - Designed and developed by "
+def _link_brightness(menu):
+    return sum(pg.transform.average_color(menu.window.subsurface(menu._footer_link_rect))[:3])
+
+
+def _draw_footer_frame(menu, monkeypatch, *, ticks, hovering):
+    rect = menu._footer_link_rect
+    menu.window.fill((20, 20, 20), rect.inflate(40, 40))
+    monkeypatch.setattr(pg.time, "get_ticks", lambda: ticks)
+    pos = menu._footer_link_hitbox.center if hovering else (0, 0)
+    monkeypatch.setattr(pg.mouse, "get_pos", lambda: pos)
+    menu.draw()
+
+
+@pytest.mark.parametrize(
+    "version, expected",
+    [
+        pytest.param(
+            "1.2.3", "Chess Shootout v1.2.3 - Designed and developed by ",
+            id="bundled_version_shown",
+        ),
+        pytest.param(
+            "", "Chess Shootout (dev) - Designed and developed by ",
+            id="no_version_file_shows_dev",
+        ),
+    ],
+)
+def test_footer_prefix_reflects_build_version(monkeypatch, version, expected):
+    """CI bundles assets/version.txt; source/local dev has none, so the footer
+    says (dev) rather than masquerading as a release."""
+    monkeypatch.setattr(paths, "get_app_version", lambda: version)
+    assert footer_prefix_text() == expected
 
 
 def test_footer_builds_and_draws():
+    """The footer sits at the bottom of the window, not inside the menu panel."""
     menu = _menu()
     assert menu._footer_prefix_surf is not None
     assert menu._footer_link_rect.width > 0
-    # Footer sits at the bottom of the window, not inside the menu panel.
     assert menu._footer_link_rect.bottom <= 700
     assert menu._footer_link_rect.top > menu._outer.bottom - menu._outer.height
-    menu.draw()  # must not raise
+    menu.draw()
 
 
 def test_clicking_link_opens_github_url():
@@ -58,8 +83,8 @@ def test_clicking_link_opens_github_url():
 
 
 def test_link_hitbox_extends_beyond_text():
-    # The clickable hitbox is padded around the glyphs, so a near-miss just
-    # above the small text still opens the link.
+    """The clickable hitbox is padded around the glyphs, so a near-miss just
+    above the small text still opens the link."""
     opened = []
     menu = _menu({"open_url": lambda url: opened.append(url)})
     menu.draw()
@@ -95,22 +120,34 @@ def test_link_hover_detection(monkeypatch):
 
 
 def test_hover_makes_the_slide_cycle_quicker():
-    # Hover shortens the shine period so the same slide repeats faster.
+    """Hover shortens the shine period so the same slide repeats faster."""
     assert FOOTER_SHINE_HOVER_PERIOD_MS < FOOTER_SHINE_PERIOD_MS
 
 
 def test_draw_runs_while_hovering(monkeypatch):
+    """At a tick past the idle sweep but inside the shorter hover sweep, hover
+    paints the shine while non-hover stays dark, so the link region brightens."""
     menu = _menu()
-    monkeypatch.setattr(pg.mouse, "get_pos", lambda: menu._footer_link_hitbox.center)
-    monkeypatch.setattr(pg.time, "get_ticks", lambda: 100)
-    menu.draw()  # hovered (quick) shine branch renders without error
+    tick = 5550
+    assert tick % FOOTER_SHINE_PERIOD_MS >= FOOTER_SHINE_SWEEP_MS
+    assert tick % FOOTER_SHINE_HOVER_PERIOD_MS < FOOTER_SHINE_HOVER_SWEEP_MS
+    _draw_footer_frame(menu, monkeypatch, ticks=tick, hovering=False)
+    idle = _link_region(menu)
+    idle_brightness = _link_brightness(menu)
+    _draw_footer_frame(menu, monkeypatch, ticks=tick, hovering=True)
+    assert _link_region(menu) != idle
+    assert _link_brightness(menu) > idle_brightness
 
 
 def test_shine_phase_draws_in_and_out_of_sweep(monkeypatch):
+    """Mid-sweep the white band overlays the link (brighter); past the sweep
+    the footer falls back to the static link surface (dimmer, no shine)."""
     menu = _menu()
     in_sweep = FOOTER_SHINE_SWEEP_MS // 2
     out_of_sweep = (FOOTER_SHINE_SWEEP_MS + FOOTER_SHINE_PERIOD_MS) // 2
-    monkeypatch.setattr(pg.time, "get_ticks", lambda: in_sweep)
-    menu.draw()  # shine band visible this frame
-    monkeypatch.setattr(pg.time, "get_ticks", lambda: out_of_sweep)
-    menu.draw()  # shine idle this frame
+    _draw_footer_frame(menu, monkeypatch, ticks=in_sweep, hovering=False)
+    sweep_region = _link_region(menu)
+    sweep_brightness = _link_brightness(menu)
+    _draw_footer_frame(menu, monkeypatch, ticks=out_of_sweep, hovering=False)
+    assert _link_region(menu) != sweep_region
+    assert sweep_brightness > _link_brightness(menu)

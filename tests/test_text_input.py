@@ -1,3 +1,11 @@
+"""TextInput widget: focus-gated key handling and state-driven render.
+
+The cursor "blink" is not time-based — draw() paints a trailing "|" iff
+self.focused, so focus state alone toggles the cursor glyph. Placeholder text
+uses the dim button_border color while real text and the cursor use white, so
+glyph-brightness sampling can distinguish the three render states.
+"""
+
 import os
 
 os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
@@ -23,9 +31,22 @@ def ti():
     return inp
 
 
-def make_key_event(key, unicode=""):
-    # KEYDOWN with unicode is reliably constructible via pg.event.Event.
-    return pg.event.Event(pg.KEYDOWN, {"key": key, "unicode": unicode, "mod": 0})
+def make_key_event(key, unicode="", mod=0):
+    return pg.event.Event(pg.KEYDOWN, {"key": key, "unicode": unicode, "mod": mod})
+
+
+def _count_bright_pixels(ti, threshold=120):
+    window = ti.window
+    window.fill((0, 0, 0))
+    ti.draw()
+    count = 0
+    inner = ti.rect.inflate(-6, -6)
+    for x in range(inner.left, inner.right):
+        for y in range(inner.top, inner.bottom):
+            r, g, b = window.get_at((x, y))[:3]
+            if min(r, g, b) > threshold:
+                count += 1
+    return count
 
 
 def test_construction_defaults(ti):
@@ -47,51 +68,38 @@ def test_handle_click_outside_unfocuses(ti):
     assert ti.focused is False
 
 
-def test_handle_key_printable_while_focused_appends(ti):
+@pytest.mark.parametrize(
+    "start_text, key, unicode, expected_text, expected_focused",
+    [
+        pytest.param("", pg.K_a, "a", "a", True, id="printable_appends"),
+        pytest.param("alice", pg.K_BACKSPACE, "", "alic", True, id="backspace_pops_last"),
+        pytest.param("", pg.K_BACKSPACE, "", "", True, id="backspace_on_empty_noop"),
+        pytest.param("", pg.K_RETURN, "", "", False, id="return_unfocuses"),
+        pytest.param("", pg.K_ESCAPE, "", "", False, id="escape_unfocuses"),
+    ],
+)
+def test_handle_key_while_focused(ti, start_text, key, unicode, expected_text, expected_focused):
+    """Focused key handling is always consumed; text/focus update per key."""
     ti.focused = True
-    consumed = ti.handle_key(make_key_event(pg.K_a, unicode="a"))
+    ti.text = start_text
+    consumed = ti.handle_key(make_key_event(key, unicode=unicode))
     assert consumed is True
-    assert ti.text == "a"
+    assert ti.text == expected_text
+    assert ti.focused is expected_focused
 
 
-def test_handle_key_printable_while_unfocused_no_change(ti):
-    consumed = ti.handle_key(make_key_event(pg.K_a, unicode="a"))
+@pytest.mark.parametrize(
+    "key, unicode",
+    [
+        pytest.param(pg.K_a, "a", id="printable_passes_through"),
+        pytest.param(pg.K_ESCAPE, "", id="escape_passes_through"),
+    ],
+)
+def test_handle_key_while_unfocused_not_consumed(ti, key, unicode):
+    """Unfocused input is never consumed and never mutates text."""
+    consumed = ti.handle_key(make_key_event(key, unicode=unicode))
     assert consumed is False
     assert ti.text == ""
-
-
-def test_handle_key_backspace_pops_last_char(ti):
-    ti.focused = True
-    ti.text = "alice"
-    consumed = ti.handle_key(make_key_event(pg.K_BACKSPACE))
-    assert consumed is True
-    assert ti.text == "alic"
-
-
-def test_handle_key_backspace_on_empty_no_error(ti):
-    ti.focused = True
-    consumed = ti.handle_key(make_key_event(pg.K_BACKSPACE))
-    assert consumed is True
-    assert ti.text == ""
-
-
-def test_handle_key_return_unfocuses(ti):
-    ti.focused = True
-    consumed = ti.handle_key(make_key_event(pg.K_RETURN))
-    assert consumed is True
-    assert ti.focused is False
-
-
-def test_handle_key_escape_while_focused_unfocuses(ti):
-    ti.focused = True
-    consumed = ti.handle_key(make_key_event(pg.K_ESCAPE))
-    assert consumed is True
-    assert ti.focused is False
-
-
-def test_handle_key_escape_while_unfocused_passes_through(ti):
-    consumed = ti.handle_key(make_key_event(pg.K_ESCAPE))
-    assert consumed is False
 
 
 def test_max_chars_enforced(ti):
@@ -108,32 +116,58 @@ def test_set_rect_rebuilds_font(ti):
     assert bigger_size > initial_size
 
 
-def test_draw_smoke_paths(ti):
-    # Empty + unfocused: shows placeholder.
-    ti.draw()
-    # Empty + focused: shows cursor only.
-    ti.focused = True
-    ti.draw()
-    # Typed + focused: shows text + cursor.
-    ti.text = "alice"
-    ti.draw()
-    # Typed + unfocused: shows text.
+def test_draw_placeholder_paints_no_white_pixels(ti):
+    """Empty + unfocused renders the dim placeholder, no white glyphs."""
+    assert _count_bright_pixels(ti) == 0
+
+
+def test_draw_focus_paints_cursor_on_empty(ti):
+    """Focusing an empty field paints the white "|" cursor (the blink glyph)."""
     ti.focused = False
-    ti.draw()
+    unfocused = _count_bright_pixels(ti)
+    ti.focused = True
+    focused = _count_bright_pixels(ti)
+    assert unfocused == 0
+    assert focused > 0
 
 
-def test_ctrl_v_pastes_clipboard_content(ti, monkeypatch):
+def test_draw_typed_text_paints_white_glyphs(ti):
+    """Typed text renders white glyphs well beyond the lone cursor."""
+    ti.focused = True
+    ti.text = ""
+    cursor_only = _count_bright_pixels(ti)
+    ti.text = "alice"
+    typed = _count_bright_pixels(ti)
+    assert typed > cursor_only * 3
+
+
+def test_draw_focus_adds_cursor_to_typed_text(ti):
+    """Same text, focus on vs off: focused paints the extra trailing cursor."""
+    ti.text = "alice"
+    ti.focused = False
+    without_cursor = _count_bright_pixels(ti)
+    ti.focused = True
+    with_cursor = _count_bright_pixels(ti)
+    assert with_cursor > without_cursor
+
+
+@pytest.mark.parametrize(
+    "start_text, pasted, expected",
+    [
+        pytest.param("", "pasted text", "pasted text", id="paste_into_empty"),
+        pytest.param("hello ", "world", "hello world", id="paste_appends_to_existing"),
+    ],
+)
+def test_ctrl_v_pastes_clipboard(ti, monkeypatch, start_text, pasted, expected):
     monkeypatch.setattr(
         "frontend.visual.text_input._paste_from_clipboard",
-        lambda: "pasted text",
+        lambda: pasted,
     )
     ti.focused = True
-    event = pg.event.Event(
-        pg.KEYDOWN, {"key": pg.K_v, "unicode": "v", "mod": pg.KMOD_CTRL},
-    )
-    handled = ti.handle_key(event)
+    ti.text = start_text
+    handled = ti.handle_key(make_key_event(pg.K_v, unicode="v", mod=pg.KMOD_CTRL))
     assert handled is True
-    assert ti.text == "pasted text"
+    assert ti.text == expected
 
 
 def test_ctrl_v_truncates_to_max_chars(monkeypatch):
@@ -144,37 +178,23 @@ def test_ctrl_v_truncates_to_max_chars(monkeypatch):
         "frontend.visual.text_input._paste_from_clipboard",
         lambda: "abcdefghij",
     )
-    event = pg.event.Event(
-        pg.KEYDOWN, {"key": pg.K_v, "unicode": "v", "mod": pg.KMOD_CTRL},
-    )
-    inp.handle_key(event)
+    inp.handle_key(make_key_event(pg.K_v, unicode="v", mod=pg.KMOD_CTRL))
     assert inp.text == "abcde"
-
-
-def test_ctrl_v_appends_to_existing_text(ti, monkeypatch):
-    monkeypatch.setattr(
-        "frontend.visual.text_input._paste_from_clipboard",
-        lambda: "world",
-    )
-    ti.focused = True
-    ti.text = "hello "
-    event = pg.event.Event(
-        pg.KEYDOWN, {"key": pg.K_v, "unicode": "v", "mod": pg.KMOD_CTRL},
-    )
-    ti.handle_key(event)
-    assert ti.text == "hello world"
 
 
 def test_v_without_ctrl_just_types_v(ti):
     ti.focused = True
-    event = pg.event.Event(
-        pg.KEYDOWN, {"key": pg.K_v, "unicode": "v", "mod": 0},
-    )
-    ti.handle_key(event)
+    ti.handle_key(make_key_event(pg.K_v, unicode="v", mod=0))
     assert ti.text == "v"
 
 
-def test_paste_strips_newlines_and_trims():
+@pytest.mark.parametrize(
+    "raw, expected",
+    [
+        pytest.param("  rnbqkbnr/pppppppp\n  ", "rnbqkbnr/pppppppp", id="trims_and_drops_newline"),
+        pytest.param("a\r\nb", "a b", id="crlf_becomes_space"),
+    ],
+)
+def test_sanitise_strips_newlines_and_trims(raw, expected):
     from frontend.visual.text_input import _sanitise
-    assert _sanitise("  rnbqkbnr/pppppppp\n  ") == "rnbqkbnr/pppppppp"
-    assert _sanitise("a\r\nb") == "a b"
+    assert _sanitise(raw) == expected

@@ -87,9 +87,25 @@ def test_new_folder_creates_and_reloads(tmp_path):
     assert "MyGames" in [n for n, _ in browser.entries]
 
 
-def test_draw_runs_without_error(tmp_path):
+def test_draw_lists_one_row_rect_per_entry(tmp_path):
+    """Browsing-mode draw() records a clickable row rect per visible entry."""
+    (tmp_path / "sub").mkdir()
     browser = _browser()
     browser.show(str(tmp_path), on_select=lambda p: None)
-    browser.draw()  # not creating
+    browser.draw()
+    assert [path for _, path in browser._row_rects] == [path for _, path in browser.entries]
+    assert all(rect.width > 0 and rect.height > 0 for rect, _ in browser._row_rects)
+    assert browser._select_rect.width > 0
+    assert browser._input_rect.width == 0
+
+
+def test_draw_creating_lays_out_name_input_and_create_button(tmp_path):
+    """Creating-mode draw() swaps the bottom bar for the name input + Create."""
+    browser = _browser()
+    browser.show(str(tmp_path), on_select=lambda p: None)
     browser.creating = True
-    browser.draw()  # creating: shows the name input + Create/Cancel
+    browser.draw()
+    assert browser._input_rect.width > 0
+    assert browser._create_rect.width > 0
+    assert browser._create_cancel_rect.width > 0
+    assert browser._select_rect.width == 0

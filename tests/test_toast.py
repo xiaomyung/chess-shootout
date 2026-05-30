@@ -1,4 +1,4 @@
-"""Toast widget (M12)."""
+"""Toast widget: visibility/alpha lifecycle and that draw() blits only while visible."""
 
 import os
 
@@ -23,13 +23,17 @@ def toast():
     return Toast(pg.display.get_surface())
 
 
-def test_toast_starts_invisible(toast):
-    assert toast.is_visible() is False
-
-
-def test_show_makes_toast_visible(toast):
-    toast.show("PGN copied")
-    assert toast.is_visible() is True
+@pytest.mark.parametrize(
+    "show_first, expected",
+    [
+        pytest.param(False, False, id="no_message_is_invisible"),
+        pytest.param(True, True, id="show_makes_visible"),
+    ],
+)
+def test_is_visible_tracks_message(toast, show_first, expected):
+    if show_first:
+        toast.show("PGN copied")
+    assert toast.is_visible() is expected
 
 
 def test_show_records_timestamp(toast):
@@ -46,18 +50,22 @@ def test_toast_invisible_after_duration_elapses(toast):
     assert toast.is_visible(now_ms=toast._shown_at_ms + 1000) is False
 
 
-def test_alpha_full_during_steady_phase(toast):
+@pytest.mark.parametrize(
+    "offset",
+    [
+        pytest.param(0, id="full_alpha_right_after_show"),
+        pytest.param(DEFAULT_DURATION_MS // 2, id="full_alpha_halfway_before_fade"),
+    ],
+)
+def test_alpha_full_outside_fade_out_window(toast, offset):
+    """Alpha holds at 255 until inside the trailing FADE_OUT_MS window."""
     toast.show("hello")
-    # Right after show, alpha = 255.
-    assert toast._alpha(toast._shown_at_ms) == 255
-    # Halfway through (well outside the fade-out window), still 255.
-    halfway = toast._shown_at_ms + DEFAULT_DURATION_MS // 2
-    assert toast._alpha(halfway) == 255
+    assert toast._alpha(toast._shown_at_ms + offset) == 255
 
 
 def test_alpha_decays_during_fade_out_window(toast):
+    """Inside the trailing fade-out window the alpha drops linearly below 255."""
     toast.show("hello")
-    # Inside the fade-out window the alpha drops linearly.
     near_end = toast._shown_at_ms + (DEFAULT_DURATION_MS - FADE_OUT_MS // 2)
     alpha = toast._alpha(near_end)
     assert 0 < alpha < 255
@@ -78,12 +86,33 @@ def test_hide_clears_message(toast):
 
 def test_draw_clears_message_after_expiry(toast):
     toast.show("expired", duration_ms=1)
-    # Force time well past expiry.
     toast._shown_at_ms = pg.time.get_ticks() - 1000
     toast.draw()
     assert toast.message is None
 
 
-def test_draw_smoke_visible(toast):
-    toast.show("smoke")
-    toast.draw()  # must not raise
+def _top_centre_painted(window):
+    """True if any pixel down the window's centre column (rows 12..50) is non-black.
+
+    The toast rect is horizontally centred at y=TOP_OFFSET_PX, so the centre column
+    always intersects it when drawn; an empty draw leaves the cleared black strip.
+    """
+    cx = window.get_width() // 2
+    return any(tuple(window.get_at((cx, y)))[:3] != (0, 0, 0) for y in range(12, 50))
+
+
+@pytest.mark.parametrize(
+    "show_first, expect_painted",
+    [
+        pytest.param(True, True, id="visible_toast_blits_overlay"),
+        pytest.param(False, False, id="invisible_toast_blits_nothing"),
+    ],
+)
+def test_draw_blits_only_when_visible(toast, show_first, expect_painted):
+    """draw() must paint the top-centre toast region iff the toast is visible."""
+    window = pg.display.get_surface()
+    window.fill((0, 0, 0), pg.Rect(0, 0, window.get_width(), 60))
+    if show_first:
+        toast.show("smoke")
+    toast.draw()
+    assert _top_centre_painted(window) is expect_painted

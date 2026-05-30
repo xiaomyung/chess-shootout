@@ -1,4 +1,10 @@
-"""Auto-end countdown badges in the player strip."""
+"""Auto-end countdown badges and heartbeat fold in the player strip.
+
+Drives Frontend._strip_state / _compute_auto_end / _update_heartbeat directly:
+no server fixture, no real WebSocket. All three auto-end windows
+(abort/abandon/reconnect) are 60 s; the 10 % gate hides the badge for the first
+6 s; the heartbeat red threshold is 10 s remaining.
+"""
 import os
 
 os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
@@ -11,6 +17,7 @@ import pytest
 
 from backend.match import BOT, ONLINE, SINGLE_SCREEN
 from backend.pieces import PieceColor
+from backend.utils import Square
 from frontend.frontend import Frontend
 from frontend.online.client import RECONNECT_TOTAL_SECONDS
 from server.protocol import FIRST_MOVE_ABORT_SECONDS, GRACE_SECONDS
@@ -48,93 +55,86 @@ def _strip(app, color):
     return app._strip_state(color, app.match.current_turn(), over)
 
 
-# ---------- 10% gate ----------
+ABORT_WINDOW_MS = FIRST_MOVE_ABORT_SECONDS * 1000
 
-def test_abort_under_10_percent_elapsed_is_hidden(monkeypatch):
+
+@pytest.mark.parametrize(
+    "local_color, first_move_deadline_ms, opp_disconnected_at_ms, "
+    "local_disconnected_at_ms, ticks, query_color, expected_label, expected_seconds",
+    [
+        pytest.param(
+            PieceColor.WHITE, ABORT_WINDOW_MS, None, None, 5_000,
+            PieceColor.WHITE, None, None, id="abort_under_10pct_hidden",
+        ),
+        pytest.param(
+            PieceColor.WHITE, ABORT_WINDOW_MS, None, None, 7_000,
+            PieceColor.WHITE, "Abort in", 53.0, id="abort_at_10pct_shows",
+        ),
+        pytest.param(
+            PieceColor.WHITE, None, 0, None, 5_000,
+            PieceColor.BLACK, None, None, id="abandon_below_gate_hidden",
+        ),
+        pytest.param(
+            PieceColor.WHITE, None, 0, None, 12_000,
+            PieceColor.BLACK, "Abandon in", GRACE_SECONDS - 12,
+            id="abandon_above_gate_shows",
+        ),
+        pytest.param(
+            PieceColor.WHITE, None, None, 0, 12_000,
+            PieceColor.WHITE, "Reconnect in", RECONNECT_TOTAL_SECONDS - 12,
+            id="reconnect_local_strip_shows",
+        ),
+        pytest.param(
+            PieceColor.WHITE, ABORT_WINDOW_MS, None, 0, 12_000,
+            PieceColor.WHITE, "Reconnect in", None,
+            id="reconnect_beats_abort_local_strip",
+        ),
+        pytest.param(
+            PieceColor.BLACK, ABORT_WINDOW_MS, 0, None, 12_000,
+            PieceColor.WHITE, "Abandon in", None,
+            id="abandon_beats_abort_opp_to_move",
+        ),
+    ],
+)
+def test_compute_auto_end_label_and_remaining(
+    monkeypatch, local_color, first_move_deadline_ms, opp_disconnected_at_ms,
+    local_disconnected_at_ms, ticks, query_color, expected_label, expected_seconds,
+):
+    """Reconnect > abandon > abort cascade plus the 10 % visibility gate."""
     app = _online_app()
-    monkeypatch.setattr(pg.time, "get_ticks", lambda: 0)
-    app._first_move_deadline_ms = FIRST_MOVE_ABORT_SECONDS * 1000  # 60 s window starting now.
-    monkeypatch.setattr(pg.time, "get_ticks", lambda: 5_000)
-    assert _strip(app, PieceColor.WHITE)["auto_end_label"] is None
-
-
-def test_abort_at_10_percent_elapsed_shows(monkeypatch):
-    app = _online_app()
-    app._first_move_deadline_ms = FIRST_MOVE_ABORT_SECONDS * 1000
-    monkeypatch.setattr(pg.time, "get_ticks", lambda: 7_000)
-    state = _strip(app, PieceColor.WHITE)
-    assert state["auto_end_label"] == "Abort in"
-    assert state["auto_end_seconds"] == pytest.approx(53.0, abs=0.1)
+    app.match.local_color = local_color
+    app._first_move_deadline_ms = first_move_deadline_ms
+    app._opp_disconnected_at_ms = opp_disconnected_at_ms
+    app._local_disconnected_at_ms = local_disconnected_at_ms
+    monkeypatch.setattr(pg.time, "get_ticks", lambda: ticks)
+    state = _strip(app, query_color)
+    assert state["auto_end_label"] == expected_label
+    if expected_seconds is None:
+        if expected_label is None:
+            assert state["auto_end_seconds"] is None
+    else:
+        assert state["auto_end_seconds"] == pytest.approx(expected_seconds, abs=0.1)
 
 
 def test_abort_clears_on_first_move(monkeypatch):
-    from backend.utils import Square
+    """The first played ply nulls the abort deadline as a side effect."""
     app = _online_app()
-    app._first_move_deadline_ms = FIRST_MOVE_ABORT_SECONDS * 1000
+    app._first_move_deadline_ms = ABORT_WINDOW_MS
     monkeypatch.setattr(pg.time, "get_ticks", lambda: 30_000)
     app.match.try_move(Square(6, 4), Square(4, 4))
     assert _strip(app, PieceColor.WHITE)["auto_end_label"] is None
     assert app._first_move_deadline_ms is None
 
 
-def test_abandon_below_gate_hidden(monkeypatch):
+@pytest.mark.parametrize("mode", [
+    pytest.param(SINGLE_SCREEN, id="single_screen"),
+    pytest.param(BOT, id="bot"),
+])
+def test_offline_mode_never_emits_badge(monkeypatch, mode):
     app = _online_app()
-    app.online_client.opp_state = "reconnecting"
-    monkeypatch.setattr(pg.time, "get_ticks", lambda: 5_000)
-    app._opp_disconnected_at_ms = 0
-    state = _strip(app, PieceColor.BLACK)
-    assert state["auto_end_label"] is None
-
-
-def test_abandon_above_gate_shows(monkeypatch):
-    app = _online_app()
-    app.online_client.opp_state = "reconnecting"
-    monkeypatch.setattr(pg.time, "get_ticks", lambda: 12_000)
-    app._opp_disconnected_at_ms = 0
-    state = _strip(app, PieceColor.BLACK)
-    assert state["auto_end_label"] == "Abandon in"
-    assert state["auto_end_seconds"] == pytest.approx(GRACE_SECONDS - 12, abs=0.1)
-
-
-def test_reconnect_local_strip_shows(monkeypatch):
-    app = _online_app()
-    app.online_client.state = "reconnecting"
-    monkeypatch.setattr(pg.time, "get_ticks", lambda: 12_000)
-    app._local_disconnected_at_ms = 0
-    state = _strip(app, PieceColor.WHITE)
-    assert state["auto_end_label"] == "Reconnect in"
-    assert state["auto_end_seconds"] == pytest.approx(RECONNECT_TOTAL_SECONDS - 12, abs=0.1)
-
-
-# ---------- Priority cascade ----------
-
-def test_priority_reconnect_beats_abort_on_local_strip(monkeypatch):
-    app = _online_app()
-    monkeypatch.setattr(pg.time, "get_ticks", lambda: 12_000)
-    app._first_move_deadline_ms = FIRST_MOVE_ABORT_SECONDS * 1000
-    app._local_disconnected_at_ms = 0
-    state = _strip(app, PieceColor.WHITE)
-    assert state["auto_end_label"] == "Reconnect in"
-
-
-def test_priority_abandon_beats_abort_when_opp_is_side_to_move(monkeypatch):
-    app = _online_app()
-    # Put local on black so white (side-to-move at start) is the opp.
-    app.match.local_color = PieceColor.BLACK
-    monkeypatch.setattr(pg.time, "get_ticks", lambda: 12_000)
-    app._first_move_deadline_ms = FIRST_MOVE_ABORT_SECONDS * 1000
-    app._opp_disconnected_at_ms = 0
-    state = _strip(app, PieceColor.WHITE)
-    assert state["auto_end_label"] == "Abandon in"
-
-
-# ---------- Mode immunity ----------
-
-def test_local_mode_never_emits_badge(monkeypatch):
-    app = _online_app()
-    app.mode = SINGLE_SCREEN
+    app.mode = mode
     monkeypatch.setattr(pg.time, "get_ticks", lambda: 30_000)
-    app._first_move_deadline_ms = FIRST_MOVE_ABORT_SECONDS * 1000
+    app._first_move_deadline_ms = ABORT_WINDOW_MS
     app._opp_disconnected_at_ms = 0
     app._local_disconnected_at_ms = 0
     app.online_client.opp_state = "reconnecting"
@@ -143,19 +143,9 @@ def test_local_mode_never_emits_badge(monkeypatch):
         assert _strip(app, color)["auto_end_label"] is None
 
 
-def test_bot_mode_never_emits_badge(monkeypatch):
+def test_result_clears_timestamps():
     app = _online_app()
-    app.mode = BOT
-    monkeypatch.setattr(pg.time, "get_ticks", lambda: 30_000)
-    app._first_move_deadline_ms = FIRST_MOVE_ABORT_SECONDS * 1000
-    assert _strip(app, PieceColor.WHITE)["auto_end_label"] is None
-
-
-# ---------- Game-end / rematch cleanup ----------
-
-def test_result_clears_timestamps(monkeypatch):
-    app = _online_app()
-    app._first_move_deadline_ms = FIRST_MOVE_ABORT_SECONDS * 1000
+    app._first_move_deadline_ms = ABORT_WINDOW_MS
     app._opp_disconnected_at_ms = 0
     app._local_disconnected_at_ms = 0
     app._handle_online_result({"reason": "checkmate", "winner_color": "white"})
@@ -178,6 +168,7 @@ def test_start_online_game_clears_disconnect_timestamps():
 
 
 def test_begin_match_found_uses_started_seconds_ago(monkeypatch):
+    """Deadline is server-stamped: now + (60 - started_seconds_ago) * 1000."""
     app = _online_app()
     monkeypatch.setattr(pg.time, "get_ticks", lambda: 1_000)
     app._begin_match_found_transition({
@@ -185,29 +176,19 @@ def test_begin_match_found_uses_started_seconds_ago(monkeypatch):
         "time_minutes": 3, "increment_seconds": 0,
         "started_seconds_ago": 4.0,
     })
-    # Deadline = now + (60 - 4) * 1000 = 1000 + 56000 = 57000.
     assert app._first_move_deadline_ms == 57_000
 
 
-# ---------- Heartbeat fold ----------
-
-def test_heartbeat_below_red_threshold_fires_zero_fraction(monkeypatch):
+@pytest.mark.parametrize("ticks, expected_fraction", [
+    pytest.param(55_000, 0.0, id="below_red_threshold_floors_to_zero"),
+    pytest.param(30_000, 0.5, id="above_red_threshold_uses_remaining_ratio"),
+])
+def test_heartbeat_folds_auto_end_fraction(monkeypatch, ticks, expected_fraction):
+    """No chess clock active, so the heartbeat takes the abort fraction directly."""
     app = _online_app()
-    monkeypatch.setattr(pg.time, "get_ticks", lambda: 55_000)
-    app._first_move_deadline_ms = FIRST_MOVE_ABORT_SECONDS * 1000  # remaining = 5 s, below 10 s
-    # No chess clock setup → fraction starts as None.
+    monkeypatch.setattr(pg.time, "get_ticks", lambda: ticks)
+    app._first_move_deadline_ms = ABORT_WINDOW_MS
     app._update_heartbeat()
     args, _ = app.sound_manager.update_heartbeat.call_args
-    fraction, paused = args
-    assert fraction == 0.0
-
-
-def test_heartbeat_above_red_threshold_uses_min_fraction(monkeypatch):
-    app = _online_app()
-    monkeypatch.setattr(pg.time, "get_ticks", lambda: 30_000)
-    app._first_move_deadline_ms = FIRST_MOVE_ABORT_SECONDS * 1000  # remaining = 30 s → 30/60 = 0.5
-    app._update_heartbeat()
-    args, _ = app.sound_manager.update_heartbeat.call_args
-    fraction, _ = args
-    # No chess clock active → take auto-end fraction directly.
-    assert fraction == pytest.approx(0.5, abs=0.01)
+    fraction, _paused = args
+    assert fraction == pytest.approx(expected_fraction, abs=0.01)

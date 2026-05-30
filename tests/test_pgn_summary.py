@@ -18,8 +18,6 @@ def _summary(filename, headers=None, mtime=1000.0):
     return summarize_pgn_file(f"/games/{filename}", text, mtime, filename=filename)
 
 
-# ---------- Time column ----------
-
 def test_time_parsed_from_filename_timestamp():
     s = _summary("online-20260529-152355.pgn")
     assert s.time == "2026.05.29 15:23:55"
@@ -34,14 +32,12 @@ def test_time_falls_back_to_mtime_when_no_timestamp_in_name():
 
 
 def test_time_falls_back_to_mtime_on_invalid_date():
-    # Regex matches 8+6 digits but the date is not a real calendar date.
+    """Regex matches 8+6 digits but the date is not a real calendar date."""
     mtime = 5000.0
     s = _summary("online-99999999-999999.pgn", mtime=mtime)
     assert s.time == datetime.fromtimestamp(mtime).strftime("%Y.%m.%d %H:%M:%S")
     assert s.sort_key == mtime
 
-
-# ---------- Type column ----------
 
 @pytest.mark.parametrize("filename,expected", [
     ("online-20260529-152355.pgn", "Online"),
@@ -54,8 +50,6 @@ def test_time_falls_back_to_mtime_on_invalid_date():
 def test_type_from_filename_prefix(filename, expected):
     assert _summary(filename).type == expected
 
-
-# ---------- Time Control column ----------
 
 @pytest.mark.parametrize("tc,expected", [
     ("600+5", "10+5"),
@@ -78,8 +72,6 @@ def test_time_control_missing_tag_is_no_clock():
     assert s.time_control == "No clock"
 
 
-# ---------- White / Black columns ----------
-
 def test_white_black_from_headers():
     s = _summary("local-20260101-000000.pgn",
                  headers={"White": "Alice", "Black": "Bob"})
@@ -93,8 +85,6 @@ def test_white_black_default_to_question_mark():
     assert s.black == "?"
 
 
-# ---------- Result column ----------
-
 @pytest.mark.parametrize("code", ["1-0", "0-1", "1/2-1/2", "*"])
 def test_result_code_preserved(code):
     s = _summary("local-20260101-000000.pgn", headers={"Result": code})
@@ -106,15 +96,17 @@ def test_result_missing_defaults_to_unfinished():
     assert s.result_code == "*"
 
 
-# ---------- Robustness ----------
-
-def test_summary_handles_empty_and_garbage_text():
-    for text in ("", "x", "not a pgn at all"):
-        s = summarize_pgn_file("/games/local-20260101-000000.pgn", text, 1000.0)
-        assert isinstance(s, PgnSummary)
-        assert s.white == "?"
-        assert s.result_code == "*"
-        assert s.time_control == "No clock"
+@pytest.mark.parametrize("text", [
+    pytest.param("", id="empty"),
+    pytest.param("x", id="single_char"),
+    pytest.param("not a pgn at all", id="prose"),
+])
+def test_summary_handles_empty_and_garbage_text(text):
+    s = summarize_pgn_file("/games/local-20260101-000000.pgn", text, 1000.0)
+    assert isinstance(s, PgnSummary)
+    assert s.white == "?"
+    assert s.result_code == "*"
+    assert s.time_control == "No clock"
 
 
 def test_filename_defaults_to_basename_of_path():
@@ -122,8 +114,6 @@ def test_filename_defaults_to_basename_of_path():
     assert s.type == "Online"
     assert s.time == "2026.05.29 15:23:55"
 
-
-# ---------- parse_time_control ----------
 
 @pytest.mark.parametrize("value,expected", [
     ("600+5", (600, 5)),
@@ -139,8 +129,6 @@ def test_filename_defaults_to_basename_of_path():
 def test_parse_time_control(value, expected):
     assert parse_time_control(value) == expected
 
-
-# ---------- parse_pgn_headers ----------
 
 def test_parse_pgn_headers_empty_on_garbage():
     assert parse_pgn_headers("x") == {}

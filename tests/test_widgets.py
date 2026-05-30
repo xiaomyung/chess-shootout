@@ -6,6 +6,7 @@ import pygame as pg
 import pytest
 
 from frontend.visual import widgets
+from frontend.visual.colors import Colors
 from frontend.visual.widgets import (
     BUTTON_LABEL_PADDING_PX,
     draw_button, draw_button_row, draw_selector,
@@ -26,16 +27,39 @@ def font():
     return pg.font.SysFont("Arial", 14, bold=True)
 
 
-def test_draw_button_smoke_idle(font):
-    surface = pg.display.get_surface()
-    rect = pg.Rect(0, 0, 100, 30)
-    draw_button(surface, rect, "OK", font)
+def _button_fill_pixel(surface, rect):
+    return surface.get_at((rect.x + 8, rect.centery))[:3]
 
 
-def test_draw_button_smoke_force_pressed(font):
+@pytest.mark.parametrize(
+    "force_pressed, expected_bg",
+    [
+        pytest.param(False, Colors.dark_menu, id="idle_fills_dark_menu"),
+        pytest.param(True, Colors.button_pressed, id="pressed_fills_button_pressed"),
+    ],
+)
+def test_draw_button_fills_state_color(font, force_pressed, expected_bg):
+    """draw_button paints the state background (idle=dark_menu, pressed=button_pressed)."""
     surface = pg.display.get_surface()
-    rect = pg.Rect(0, 0, 100, 30)
+    rect = pg.Rect(10, 10, 100, 30)
+    surface.fill((0, 0, 0), rect)
+    draw_button(surface, rect, "OK", font, force_pressed=force_pressed)
+    assert _button_fill_pixel(surface, rect) == pg.Color(expected_bg)[:3]
+
+
+def test_draw_button_idle_and_pressed_render_differently(font):
+    """Pixel block-diff: idle and force_pressed paint different fills (dark_menu vs pressed)."""
+    surface = pg.display.get_surface()
+    rect = pg.Rect(10, 10, 100, 30)
+    surface.fill((0, 0, 0), rect)
+    draw_button(surface, rect, "OK", font, force_pressed=False)
+    idle_fill = _button_fill_pixel(surface, rect)
+    surface.fill((0, 0, 0), rect)
     draw_button(surface, rect, "OK", font, force_pressed=True)
+    pressed_fill = _button_fill_pixel(surface, rect)
+    assert idle_fill != pressed_fill
+    assert idle_fill == pg.Color(Colors.dark_menu)[:3]
+    assert pressed_fill == pg.Color(Colors.button_pressed)[:3]
 
 
 def test_draw_button_row_returns_keyed_rects(font):
@@ -44,7 +68,6 @@ def test_draw_button_row_returns_keyed_rects(font):
     buttons = [("Yes", "yes"), ("No", "no")]
     rects = draw_button_row(surface, rect, buttons, font, gap=10)
     assert set(rects.keys()) == {"yes", "no"}
-    # Width: (300 - 10) / 2 = 145.
     assert rects["yes"].height == 30
     assert rects["yes"].width == pytest.approx(145, abs=1)
 
@@ -55,7 +78,6 @@ def test_draw_selector_returns_keyed_rects(font):
     options = [("5 min", 5), ("10 min", 10), ("15 min", 15)]
     rects = draw_selector(surface, rect, options, font, gap=6, selected_key=10)
     assert set(rects.keys()) == {5, 10, 15}
-    # Shouldn't crash for any selected key.
     draw_selector(surface, rect, options, font, gap=6, selected_key=None)
 
 
@@ -65,7 +87,6 @@ def test_draw_selector_button_widths_are_equal(font):
     options = [("a", 1), ("b", 2), ("c", 3), ("d", 4)]
     rects = draw_selector(surface, rect, options, font, gap=6, selected_key=2)
     widths = sorted({r.width for r in rects.values()})
-    # Allow tiny float tolerance.
     assert max(widths) - min(widths) < 1
 
 
@@ -124,15 +145,15 @@ def test_wrap_path_breaks_after_slashes(font):
     text = "/aaa/bbb/ccc/ddd/eee/fff/ggg/hhh"
     lines = widgets.wrap_path(text, font, 90)
     assert len(lines) >= 2
-    assert all(font.size(ln)[0] <= 90 for ln in lines)        # never overflows
-    assert all(ln.endswith("/") for ln in lines[:-1])          # breaks at slash
-    assert "".join(lines) == text                              # lossless
+    assert all(font.size(ln)[0] <= 90 for ln in lines)
+    assert all(ln.endswith("/") for ln in lines[:-1])
+    assert "".join(lines) == text
 
 
 def test_wrap_path_char_wraps_an_overlong_segment(font):
     seg = "z" * 30
     lines = widgets.wrap_path(seg, font, 100)
-    assert len(lines) >= 2                 # a slash-less segment still wraps
+    assert len(lines) >= 2
     assert "".join(lines) == seg
 
 

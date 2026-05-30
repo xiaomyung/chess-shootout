@@ -1,3 +1,12 @@
+"""Color gating for board selection.
+
+Online (local_color set) restricts selection to the local player's pieces at
+both the real-select and premove-select paths; hot-seat (local_color=None)
+lets either side be selected. Gating lives in _try_select / _try_select_for_premove
+(both guard `local_color is not None and piece.color != local_color`), so an
+opponent click is dropped before it can ever set selected_square.
+"""
+
 import os
 
 os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
@@ -28,46 +37,57 @@ def _make_board(local_color=None):
     return bd
 
 
-def test_local_color_none_allows_white_to_select_white_piece():
-    bd = _make_board(None)
-    bd.handle_click(Square(6, 4))
-    assert bd.selected_square == Square(6, 4)
+def _assert_select(bd, square, expected_can_select):
+    if expected_can_select:
+        assert bd.selected_square == square
+    else:
+        assert bd.selected_square is None
 
 
-def test_local_color_white_allows_white_select_on_white_turn():
-    bd = _make_board(PieceColor.WHITE)
-    bd.handle_click(Square(6, 4))
-    assert bd.selected_square == Square(6, 4)
+@pytest.mark.parametrize(
+    "local_color, square, expected_can_select",
+    [
+        pytest.param(
+            None, Square(6, 4), True,
+            id="hotseat_allows_white_real_select",
+        ),
+        pytest.param(
+            PieceColor.WHITE, Square(6, 4), True,
+            id="white_allows_own_real_select",
+        ),
+        pytest.param(
+            PieceColor.WHITE, Square(1, 4), False,
+            id="white_blocks_black_premove_select",
+        ),
+        pytest.param(
+            PieceColor.BLACK, Square(6, 4), False,
+            id="black_blocks_white_real_select",
+        ),
+    ],
+)
+def test_select_gating_on_white_turn(local_color, square, expected_can_select):
+    """At the backend's default white turn: own-color clicks select, opponent clicks drop."""
+    bd = _make_board(local_color)
+    bd.handle_click(square)
+    _assert_select(bd, square, expected_can_select)
 
 
-def test_local_color_white_blocks_black_premove_select():
-    # User is white (online). On white's turn, clicking a black piece would
-    # normally select it for premove — gating must prevent that.
-    bd = _make_board(PieceColor.WHITE)
-    # Backend starts at white's turn; black piece click would go to premove path.
-    bd.handle_click(Square(1, 4))  # black pawn
-    assert bd.selected_square is None
-
-
-def test_local_color_black_blocks_white_select_on_white_turn():
-    bd = _make_board(PieceColor.BLACK)
-    bd.handle_click(Square(6, 4))  # white pawn on white's turn (real-select normally)
-    # But local_color=BLACK → blocked at _try_select.
-    assert bd.selected_square is None
-
-
-def test_local_color_black_blocks_white_premove_select():
-    bd = _make_board(PieceColor.BLACK)
-    # Force black's turn so that white piece clicks would hit the premove path.
+@pytest.mark.parametrize(
+    "local_color, expected_can_select",
+    [
+        pytest.param(
+            PieceColor.BLACK, False,
+            id="black_blocks_white_premove_select",
+        ),
+        pytest.param(
+            None, True,
+            id="hotseat_allows_opposite_side_premove_select",
+        ),
+    ],
+)
+def test_select_gating_white_piece_on_black_turn(local_color, expected_can_select):
+    """Turn flipped to black so a white-piece click takes the premove path: gating still applies."""
+    bd = _make_board(local_color)
     bd.match.backend.turn = PieceColor.BLACK
-    bd.handle_click(Square(6, 4))  # white pawn
-    assert bd.selected_square is None
-
-
-def test_local_color_none_allows_both_sides_to_select():
-    # Hot-seat regression: opposite-color piece selection still goes via premove.
-    bd = _make_board(None)
-    # Force black's turn → white piece click goes to premove path.
-    bd.match.backend.turn = PieceColor.BLACK
     bd.handle_click(Square(6, 4))
-    assert bd.selected_square == Square(6, 4)
+    _assert_select(bd, Square(6, 4), expected_can_select)

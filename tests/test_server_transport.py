@@ -33,9 +33,6 @@ ALICE = fake_uuid4(1)
 BOB = fake_uuid4(2)
 
 
-# ---- HTTP via httpx.MockTransport -------------------------------------------
-
-
 def _make_handler(*, status_code=200, body=None, capture=None):
     def handler(request):
         if capture is not None:
@@ -126,26 +123,30 @@ def test_resume_blocking_returns_typed_response(captured):
     assert captured[0]["url"].endswith("/resume")
 
 
-def test_http_error_with_unknown_status_raises_transport_error(captured):
+@pytest.mark.parametrize(
+    "status_code, body, expected_exc, expected_status",
+    [
+        pytest.param(500, {"reason": "boom"}, TransportHTTPError, 500,
+                     id="unknown_5xx_raises_http_error"),
+        pytest.param(400, {"reason": Reason.VERSION_MISMATCH},
+                     SchemaVersionMismatch, None,
+                     id="version_mismatch_reason_raises_schema_mismatch"),
+    ],
+)
+def test_sync_http_error_status_maps_to_exception(
+    captured, status_code, body, expected_exc, expected_status,
+):
+    """Sync _parse_response: VERSION_MISMATCH reason short-circuits to
+    SchemaVersionMismatch; any other >=400 surfaces TransportHTTPError."""
     transport = httpx.MockTransport(_make_handler(
-        status_code=500, body={"reason": "boom"}, capture=captured,
+        status_code=status_code, body=body, capture=captured,
     ))
     with httpx.Client(transport=transport) as client:
         st = ServerTransport("localhost:8000", http_client=client)
-        with pytest.raises(TransportHTTPError) as info:
+        with pytest.raises(expected_exc) as info:
             st.healthz()
-        assert info.value.status_code == 500
-
-
-def test_version_mismatch_raises_typed_exception(captured):
-    transport = httpx.MockTransport(_make_handler(
-        status_code=400, body={"reason": Reason.VERSION_MISMATCH},
-        capture=captured,
-    ))
-    with httpx.Client(transport=transport) as client:
-        st = ServerTransport("localhost:8000", http_client=client)
-        with pytest.raises(SchemaVersionMismatch):
-            st.healthz()
+    if expected_status is not None:
+        assert info.value.status_code == expected_status
 
 
 def test_network_failure_surfaces_transport_error():
@@ -156,9 +157,6 @@ def test_network_failure_surfaces_transport_error():
         st = ServerTransport("localhost:8000", http_client=client)
         with pytest.raises(TransportError):
             st.healthz()
-
-
-# ---- Async helpers via httpx.AsyncClient + MockTransport -------------------
 
 
 @pytest.mark.asyncio
@@ -179,26 +177,49 @@ async def test_matchmake_async_returns_typed_response(captured):
 
 
 @pytest.mark.asyncio
-async def test_matchmake_async_503_maps_to_typed_http_error():
+@pytest.mark.parametrize(
+    "status_code, body, expected_exc, expected_status",
+    [
+        pytest.param(503, {"detail": {"reason": "room_full"}},
+                     TransportHTTPError, 503,
+                     id="503_maps_to_typed_http_error"),
+        pytest.param(400, {"reason": Reason.VERSION_MISMATCH},
+                     SchemaVersionMismatch, None,
+                     id="version_mismatch_reason_raises_schema_mismatch"),
+    ],
+)
+async def test_matchmake_async_http_error_status_maps_to_exception(
+    status_code, body, expected_exc, expected_status,
+):
+    """matchmake_async mirrors the sync mapping: VERSION_MISMATCH ->
+    SchemaVersionMismatch, any other >=400 -> TransportHTTPError."""
     transport = httpx.MockTransport(_make_handler(
-        status_code=503, body={"detail": {"reason": "room_full"}},
+        status_code=status_code, body=body,
     ))
     async with httpx.AsyncClient(transport=transport) as http:
         st = ServerTransport("localhost:8000")
         req = MatchmakeRequest(nickname="Alice", client_uuid=ALICE,
                                   time_minutes=5, increment_seconds=0)
-        with pytest.raises(TransportHTTPError) as info:
+        with pytest.raises(expected_exc) as info:
             await st.matchmake_async(req, http)
-        assert info.value.status_code == 503
+    if expected_status is not None:
+        assert info.value.status_code == expected_status
 
 
 @pytest.mark.asyncio
-async def test_resume_async_410_raises_fatal_resume_error():
-    # Game-already-over → server replies 410. Helper raises FatalResumeError
-    # so the retry loop in OnlineClient bails immediately instead of
-    # spinning for the full reconnect window — matches pre-M19 semantics.
+@pytest.mark.parametrize(
+    "status_code",
+    [
+        pytest.param(410, id="410_game_over_is_fatal"),
+        pytest.param(404, id="404_room_gone_is_fatal"),
+    ],
+)
+async def test_resume_async_fatal_status_raises_fatal_resume_error(status_code):
+    """FATAL set (410 game-over, 404 room-gone): raise FatalResumeError so the
+    OnlineClient retry loop bails immediately instead of spinning the full
+    reconnect window — distinct from the RETRY set below."""
     transport = httpx.MockTransport(_make_handler(
-        status_code=410, body={"detail": {"reason": "checkmate"}},
+        status_code=status_code, body={"detail": {"reason": "checkmate"}},
     ))
     async with httpx.AsyncClient(transport=transport) as http:
         st = ServerTransport("localhost:8000")
@@ -208,16 +229,14 @@ async def test_resume_async_410_raises_fatal_resume_error():
 
 
 @pytest.mark.asyncio
-async def test_resume_async_404_raises_fatal_resume_error():
-    # Server-restart leaves rooms gone (404). Don't retry forever.
-    transport = httpx.MockTransport(_make_handler(
-        status_code=404, body={"detail": {"reason": "not_in_room"}},
-    ))
+async def test_resume_async_5xx_returns_none_for_retry():
+    """RETRY set (5xx hiccup): return None so the caller keeps retrying within
+    the reconnect window — must NOT be flattened with the FATAL set."""
+    transport = httpx.MockTransport(_make_handler(status_code=503, body={}))
     async with httpx.AsyncClient(transport=transport) as http:
         st = ServerTransport("localhost:8000")
         body = ResumeRequest(room_id=fake_uuid4(50), session_token="t")
-        with pytest.raises(FatalResumeError):
-            await st.resume_async(body, http)
+        assert await st.resume_async(body, http) is None
 
 
 @pytest.mark.asyncio
@@ -242,18 +261,13 @@ async def test_healthz_async_returns_none_when_unreachable():
         assert await st.healthz_async(http) is None
 
 
-@pytest.mark.asyncio
-async def test_resume_async_5xx_returns_none_for_retry():
-    # Server hiccups (e.g. 503) are transient — keep retrying within the
-    # reconnect window.
-    transport = httpx.MockTransport(_make_handler(status_code=503, body={}))
-    async with httpx.AsyncClient(transport=transport) as http:
-        st = ServerTransport("localhost:8000")
-        body = ResumeRequest(room_id=fake_uuid4(50), session_token="t")
-        assert await st.resume_async(body, http) is None
-
-
-# ---- WS round-trip via real in-process uvicorn (server fixture in conftest) -
+async def _recv_skip_beacons(ws):
+    """Next non-beacon message. The server broadcasts a periodic state_sync beacon
+    during a live game, which can interleave with the message under test."""
+    while True:
+        msg = await asyncio.wait_for(ws.recv(), timeout=10.0)
+        if msg["type"] != "state_sync":
+            return msg
 
 
 @pytest.mark.asyncio
@@ -278,21 +292,18 @@ async def test_server_websocket_send_move_round_trip(server):
     ws_a = await st.ws_connect(a.room_id, a.session_token)
     ws_b = await st.ws_connect(b.room_id, b.session_token)
     try:
-        # Drain the game_start broadcast.
-        msg_a = await asyncio.wait_for(ws_a.recv(), timeout=10.0)
-        msg_b = await asyncio.wait_for(ws_b.recv(), timeout=10.0)
+        msg_a = await _recv_skip_beacons(ws_a)
+        msg_b = await _recv_skip_beacons(ws_b)
         assert msg_a["type"] == "game_start"
         assert msg_b["type"] == "game_start"
-        # Send a typed move.
         await ws_a.send_move("e2", "e4")
-        applied_a = await asyncio.wait_for(ws_a.recv(), timeout=10.0)
-        applied_b = await asyncio.wait_for(ws_b.recv(), timeout=10.0)
+        applied_a = await _recv_skip_beacons(ws_a)
+        applied_b = await _recv_skip_beacons(ws_b)
         assert applied_a["type"] == "move_applied"
         assert applied_a["san"] == "e4"
         assert applied_b["from"] == "e2"
-        # And resign.
         await ws_a.send_resign()
-        result_a = await asyncio.wait_for(ws_a.recv(), timeout=10.0)
+        result_a = await _recv_skip_beacons(ws_a)
         assert result_a["type"] == "result"
         assert result_a["reason"] == Reason.RESIGNATION
     finally:
@@ -302,8 +313,8 @@ async def test_server_websocket_send_move_round_trip(server):
 
 @pytest.mark.asyncio
 async def test_ws_connect_uses_tls_context_for_wss(monkeypatch):
-    # A frozen build has no system trust store, so wss must get an explicit
-    # certifi-backed SSL context (regression for the v1.0.0 cert-verify bug).
+    """A frozen build has no system trust store, so wss must get an explicit
+    certifi-backed SSL context (regression for the v1.0.0 cert-verify bug)."""
     captured = {}
 
     class _FakeWs:
@@ -336,9 +347,6 @@ async def test_ws_connect_plaintext_for_ws(monkeypatch):
     st = ServerTransport("localhost:8000")
     await st.ws_connect("room1", "tok")
     assert captured["ssl"] is None
-
-
-# ---- ServerWebSocket — direct send shape verification -----------------------
 
 
 class _RecordingWS:
@@ -400,13 +408,7 @@ async def test_server_websocket_send_methods_emit_typed_payloads():
     assert json.loads(inner.sent[-1])["type"] == "resync"
 
 
-# ---- Pin: only transport.py imports httpx / websockets ---------------------
-
-
 def test_only_transport_module_imports_httpx_or_websockets():
-    # The whole point of M19 is that nobody outside transport.py touches
-    # the network libraries. If a future commit accidentally imports them
-    # in client.py / events.py / etc., this guard catches it.
     import os
     import re
     frontend_dir = os.path.join(

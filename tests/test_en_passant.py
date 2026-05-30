@@ -1,3 +1,5 @@
+import pytest
+
 from backend.backend import Backend
 from tests.helpers import (
     BLACK, WHITE, K, R, P,
@@ -6,23 +8,40 @@ from tests.helpers import (
 
 
 def test_en_passant_capture_executes():
-    # White pawn on e5; black plays f7-f5; white captures e.p. landing on f6.
+    """1. e4 a6 2. e5 f5 3. exf6 e.p. lands on f6 and removes the f5 pawn."""
     bk = Backend()
     bk.new_game()
-    # Manually arrange: white pawn to e5, black pawn to f7 (already there).
-    # Play: 1. e4 a6 2. e5 f5 (black double-push next to white e5 pawn)
     bk.try_move(sq(6, 4), sq(4, 4))
     bk.try_move(sq(1, 0), sq(2, 0))
     bk.try_move(sq(4, 4), sq(3, 4))
     bk.try_move(sq(1, 5), sq(3, 5))
-    # EP target should be f6 = (2, 5).
     assert bk.en_passant_target == sq(2, 5)
     moves = bk.legal_moves_from(sq(3, 4))
     assert sq(2, 5) in moves
     result = bk.try_move(sq(3, 4), sq(2, 5))
     assert result.legal
-    assert bk.state[2][5].type == P  # white pawn lands on f6
-    assert bk.state[3][5] is None  # black pawn on f5 captured
+    assert bk.state[2][5].type == P
+    assert bk.state[2][5].color == WHITE
+    assert bk.state[3][5] is None
+    assert bk.state[3][4] is None
+
+
+@pytest.mark.parametrize(
+    "from_sq, to_sq, expected_target",
+    [
+        pytest.param(sq(6, 4), sq(4, 4), sq(5, 4), id="white_double_push_sets_e3"),
+        pytest.param(sq(1, 5), sq(3, 5), sq(2, 5), id="black_double_push_sets_f6"),
+        pytest.param(sq(6, 4), sq(5, 4), None, id="white_single_push_sets_none"),
+    ],
+)
+def test_pawn_push_sets_en_passant_target(from_sq, to_sq, expected_target):
+    """Only a two-square push sets the EP target, to the midpoint square."""
+    bk = Backend()
+    bk.new_game()
+    if from_sq.row == 1:
+        bk.try_move(sq(6, 0), sq(5, 0))
+    bk.try_move(from_sq, to_sq)
+    assert bk.en_passant_target == expected_target
 
 
 def test_ep_target_cleared_after_one_ply():
@@ -35,9 +54,7 @@ def test_ep_target_cleared_after_one_ply():
 
 
 def test_ep_pin_is_illegal():
-    # Classic en-passant pin: white K and P share the same rank as a black rook,
-    # with the just-pushed black pawn between them. exd6 e.p. clears two pawns from
-    # the rank and exposes the white king.
+    """exd6 e.p. clears both pawns from the king's rank, exposing it to the rook."""
     bk = make_backend({
         sq(3, 7): piece(K, WHITE),
         sq(3, 4): piece(P, WHITE),
@@ -49,13 +66,6 @@ def test_ep_pin_is_illegal():
     assert sq(2, 3) not in moves
 
 
-def test_two_square_push_only_sets_target_on_that_ply():
-    bk = Backend()
-    bk.new_game()
-    bk.try_move(sq(6, 4), sq(5, 4))  # single push e3
-    assert bk.en_passant_target is None
-
-
 def test_ep_resets_halfmove_clock():
     bk = make_backend({
         sq(7, 4): piece(K, WHITE),
@@ -65,3 +75,6 @@ def test_ep_resets_halfmove_clock():
     }, turn=WHITE, ep_target=sq(2, 3), halfmove_clock=42)
     bk.try_move(sq(3, 4), sq(2, 3))
     assert bk.halfmove_clock == 0
+    assert bk.state[2][3].type == P
+    assert bk.state[2][3].color == WHITE
+    assert bk.state[3][3] is None
