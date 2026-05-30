@@ -261,6 +261,15 @@ async def test_healthz_async_returns_none_when_unreachable():
         assert await st.healthz_async(http) is None
 
 
+async def _recv_skip_beacons(ws):
+    """Next non-beacon message. The server broadcasts a periodic state_sync beacon
+    during a live game, which can interleave with the message under test."""
+    while True:
+        msg = await asyncio.wait_for(ws.recv(), timeout=10.0)
+        if msg["type"] != "state_sync":
+            return msg
+
+
 @pytest.mark.asyncio
 async def test_server_websocket_send_move_round_trip(server):
     addr = f"localhost:{server}"
@@ -283,18 +292,18 @@ async def test_server_websocket_send_move_round_trip(server):
     ws_a = await st.ws_connect(a.room_id, a.session_token)
     ws_b = await st.ws_connect(b.room_id, b.session_token)
     try:
-        msg_a = await asyncio.wait_for(ws_a.recv(), timeout=10.0)
-        msg_b = await asyncio.wait_for(ws_b.recv(), timeout=10.0)
+        msg_a = await _recv_skip_beacons(ws_a)
+        msg_b = await _recv_skip_beacons(ws_b)
         assert msg_a["type"] == "game_start"
         assert msg_b["type"] == "game_start"
         await ws_a.send_move("e2", "e4")
-        applied_a = await asyncio.wait_for(ws_a.recv(), timeout=10.0)
-        applied_b = await asyncio.wait_for(ws_b.recv(), timeout=10.0)
+        applied_a = await _recv_skip_beacons(ws_a)
+        applied_b = await _recv_skip_beacons(ws_b)
         assert applied_a["type"] == "move_applied"
         assert applied_a["san"] == "e4"
         assert applied_b["from"] == "e2"
         await ws_a.send_resign()
-        result_a = await asyncio.wait_for(ws_a.recv(), timeout=10.0)
+        result_a = await _recv_skip_beacons(ws_a)
         assert result_a["type"] == "result"
         assert result_a["reason"] == Reason.RESIGNATION
     finally:
