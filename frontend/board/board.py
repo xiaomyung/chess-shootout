@@ -7,12 +7,22 @@ from backend.pseudo_legal import piece_can_pseudo_reach
 from backend.utils import Square
 from frontend.visual.animation import PieceAnimation
 from frontend.visual.colors import Colors
+from frontend.visual.draw import supersample
 from frontend.premoves import Premove, speculative_board
 from backend.pieces import PieceType, PieceColor, Piece
-from frontend.visual.fonts import get_font
+from frontend.visual.fonts import get_font, DISPLAY
 
 
 DRAG_THRESHOLD_PX = 6
+
+
+def _draw_capsule(surf, p1, p2, width, color):
+    dx, dy = p2[0] - p1[0], p2[1] - p1[1]
+    length = math.hypot(dx, dy)
+    bar = pg.Surface((int(length) + width, width), pg.SRCALPHA)
+    pg.draw.rect(bar, color, bar.get_rect(), border_radius=width // 2)
+    rotated = pg.transform.rotate(bar, -math.degrees(math.atan2(dy, dx)))
+    surf.blit(rotated, rotated.get_rect(center=((p1[0] + p2[0]) / 2, (p1[1] + p2[1]) / 2)))
 
 
 class Board:
@@ -20,6 +30,10 @@ class Board:
     OFFSET_FRACTION_X = 0.02
     TEXT_PADDING_FRACTION = 0.006
     SIZE = 8
+    FRAME_PAD_FRACTION = 0.055
+    FRAME_PAD_MIN = 16
+    FRAME_RADIUS = 14
+    GRID_RADIUS = 4
 
     def __init__(self, window, match, move_landed_callback=None,
                  on_premove_queued=None):
@@ -30,9 +44,14 @@ class Board:
         self.font = get_font(18, bold=True)
         self.board_guides_font_factor = 50
 
+        self.rect = pg.Rect(0, 0, 0, 0)
+        self.frame_pad = 0
         self.cell_size = 0
         self.board_offset_x = 0
         self.board_offset_y = 0
+        self._promotion_rects = {}
+        self._frame_surf = None
+        self._arrow_cache = None
 
         self.file_labels = "abcdefgh"
         self.file_labels_rendered = []
@@ -65,12 +84,14 @@ class Board:
         return inner if inner is not None else self.match
 
     def _render_text(self):
+        size = max(int(self.cell_size * 0.30), 11) if self.cell_size else 13
+        coord_font = get_font(size, bold=True, mono=True)
         self.file_labels_rendered = [
-            self.font.render(self.file_labels[i], True, Colors.white)
+            coord_font.render(self.file_labels[i], True, Colors.coord)
             for i in range(self.SIZE)
         ]
         self.rank_labels_rendered = [
-            self.font.render(str(self.SIZE - r), True, Colors.white)
+            coord_font.render(str(self.SIZE - r), True, Colors.coord)
             for r in range(self.SIZE)
         ]
 
@@ -92,23 +113,75 @@ class Board:
             self.cell_size
         )
 
+    PROMOTION_OPTIONS = [
+        (PieceType.QUEEN, "Q", "BOSS"), (PieceType.ROOK, "R", "TANK"),
+        (PieceType.BISHOP, "B", "SNIPER"), (PieceType.KNIGHT, "N", "WILDCARD"),
+    ]
+
     def _draw_promotion_picker(self):
+        self._promotion_rects = {}
         if self.pending_promotion_square is None:
             return
-
         sq = self.pending_promotion_square
         color = self.match.piece_at(sq).color
+        opt = max(48, min(int(self.cell_size), 72))
+        pad, gap, label_h = 10, 8, 20
+        panel_w = pad * 2 + 4 * opt + 3 * gap
+        panel_h = pad * 2 + label_h + 6 + opt
+        sq_rect = self._cell_rect(sq.row, sq.col)
+        win_w, win_h = self.window.get_size()
+        x = sq_rect.right + 10
+        if x + panel_w > win_w - 8:
+            x = sq_rect.left - panel_w - 10
+        x = max(8, min(x, win_w - panel_w - 8))
+        y = max(self.rect.y, min(sq_rect.centery - panel_h // 2, win_h - panel_h - 8))
+        panel = pg.Rect(x, y, panel_w, panel_h)
+        pg.draw.rect(self.window, Colors.light_grey_menu, panel, border_radius=12)
+        pg.draw.rect(self.window, Colors.accent, panel, 1, border_radius=12)
+        label = get_font(max(int(label_h * 0.8), 12), family=DISPLAY).render(
+            "UPGRADE", True, Colors.accent_hi)
+        self.window.blit(label, (panel.centerx - label.get_width() // 2, panel.y + pad - 2))
+        mouse = pg.mouse.get_pos()
+        cells_y = panel.y + pad + label_h + 6
+        for i, (ptype, hotkey, tag) in enumerate(self.PROMOTION_OPTIONS):
+            cell = pg.Rect(panel.x + pad + i * (opt + gap), cells_y, opt, opt)
+            hovered = cell.collidepoint(mouse)
+            pg.draw.rect(self.window, Colors.button_hover if hovered else Colors.dark_menu,
+                         cell, border_radius=11)
+            pg.draw.rect(self.window, Colors.accent if hovered else Colors.button_border,
+                         cell, 1, border_radius=11)
+            img = pg.transform.smoothscale(self.piece_images_original[(ptype, color)], (opt, opt))
+            self.window.blit(img, cell.topleft)
+            hk = get_font(max(int(opt * 0.18), 9), bold=True, mono=True).render(
+                hotkey, True, Colors.text_mute)
+            self.window.blit(hk, (cell.right - hk.get_width() - 3,
+                                  cell.bottom - hk.get_height() - 2))
+            if hovered:
+                tag_surf = get_font(max(int(opt * 0.14), 8), bold=True).render(
+                    tag, True, Colors.on_accent)
+                tag_rect = pg.Rect(0, 0, tag_surf.get_width() + 8, tag_surf.get_height() + 4)
+                tag_rect.center = (cell.centerx, cell.y - 6)
+                pg.draw.rect(self.window, Colors.amber, tag_rect, border_radius=7)
+                self.window.blit(tag_surf, (tag_rect.centerx - tag_surf.get_width() // 2,
+                                            tag_rect.centery - tag_surf.get_height() // 2))
+            self._promotion_rects[ptype] = cell
 
-        options = [PieceType.QUEEN, PieceType.ROOK, PieceType.BISHOP, PieceType.KNIGHT]
+    def pick_promotion(self, ptype):
+        if self.pending_promotion_square is None:
+            return
+        sq = self.pending_promotion_square
+        self.match.promote(sq, ptype)
+        self.pending_promotion_square = None
+        self._promotion_rects = {}
+        self._fire_move_landed()
 
-        direction = 1 if color == PieceColor.WHITE else -1
-
-        for i, piece_type in enumerate(options):
-            cell_rect = self._cell_rect(sq.row + i * direction, sq.col)
-            pg.draw.rect(self.window, Colors.white, cell_rect)
-            pg.draw.rect(self.window, Colors.dark_menu, cell_rect, 1)
-            surface = self.piece_images_scaled[(piece_type, color)]
-            self.window.blit(surface, cell_rect.topleft)
+    def pick_promotion_at(self, pos):
+        if self.pending_promotion_square is None:
+            return
+        for ptype, cell in self._promotion_rects.items():
+            if cell.collidepoint(pos):
+                self.pick_promotion(ptype)
+                return
 
     def load_assets(self):
         self._render_text()
@@ -130,23 +203,27 @@ class Board:
         pg.draw.rect(self.window, color, rect)
 
     def _draw_vertical_guides(self):
+        gutter_cx = (self.rect.x + self.board_offset_x) // 2
         for visual_row in range(self.SIZE):
             array_row = (self.SIZE - 1 - visual_row) if self.flipped else visual_row
-            x = self.board_offset_x + self.text_padding
-            y = visual_row * self.cell_size + self.board_offset_y + self.text_padding
-            self.window.blit(self.rank_labels_rendered[array_row], (x, y))
+            label = self.rank_labels_rendered[array_row]
+            cy = self.board_offset_y + visual_row * self.cell_size + self.cell_size // 2
+            self.window.blit(label, (gutter_cx - label.get_width() // 2,
+                                     cy - label.get_height() // 2))
 
     def _draw_horizontal_guides(self):
-        bottom_y = (self.SIZE - 1) * self.cell_size + self.board_offset_y
+        grid_bottom = self.board_offset_y + self.cell_size * self.SIZE
+        gutter_cy = (grid_bottom + self.rect.bottom) // 2
         for visual_col in range(self.SIZE):
             array_col = (self.SIZE - 1 - visual_col) if self.flipped else visual_col
-            symbol = self.file_labels_rendered[array_col]
-            x = (visual_col * self.cell_size + self.board_offset_x
-                 + self.cell_size - symbol.get_width() - self.text_padding)
-            y = bottom_y + self.cell_size - symbol.get_height() - self.text_padding
-            self.window.blit(symbol, (x, y))
+            label = self.file_labels_rendered[array_col]
+            cx = self.board_offset_x + visual_col * self.cell_size + self.cell_size // 2
+            self.window.blit(label, (cx - label.get_width() // 2,
+                                     gutter_cy - label.get_height() // 2))
 
     def draw_board(self):
+        if self._frame_surf is not None:
+            self.window.blit(self._frame_surf, self.rect.topleft)
         for row, col in product(range(self.SIZE), repeat=2):
             self.draw_cell(row, col)
         if self.review_ply is not None:
@@ -165,10 +242,10 @@ class Board:
         self._draw_selection_highlight()
         self._draw_move_indicators()
         self.draw_pieces()
+        self._draw_front_markers()
         self._draw_animations()
         self._draw_dragged_piece()
         self._draw_arrows()
-        self._draw_drag_preview_arrow()
         self._draw_promotion_picker()
 
     def _draw_last_move_highlight(self):
@@ -262,17 +339,26 @@ class Board:
             self.window.blit(overlay, rect.topleft)
 
     def _draw_arrows(self):
-        for from_sq, to_sq in self.arrows:
-            self._render_arrow(from_sq, to_sq, Colors.annotation_arrow)
-
-    def _draw_drag_preview_arrow(self):
-        if self._right_drag_start_square is None:
+        if self.cell_size <= 0:
+            self._arrow_cache = None
             return
-        end_sq = self.cell_at(pg.mouse.get_pos())
-        if end_sq is None or end_sq == self._right_drag_start_square:
+        items = [(fr, to, Colors.annotation_arrow) for fr, to in self.arrows]
+        if self._right_drag_start_square is not None:
+            end_sq = self.cell_at(pg.mouse.get_pos())
+            if end_sq is not None and end_sq != self._right_drag_start_square:
+                items.append((self._right_drag_start_square, end_sq,
+                              Colors.annotation_arrow_preview))
+        if not items:
+            self._arrow_cache = None
             return
-        self._render_arrow(self._right_drag_start_square, end_sq,
-                           Colors.annotation_arrow_preview)
+        key = (tuple(items), self.cell_size, self.board_offset_x,
+               self.board_offset_y, self.flipped, self.rect.size)
+        if self._arrow_cache is None or self._arrow_cache[0] != key:
+            def render(layer, scale):
+                for fr, to, color in items:
+                    self._render_arrow(layer, scale, fr, to, color)
+            self._arrow_cache = (key, supersample(self.rect.size, render))
+        self.window.blit(self._arrow_cache[1], self.rect.topleft)
 
     @staticmethod
     def _knight_arrow_corner(from_sq, to_sq):
@@ -284,25 +370,21 @@ class Board:
             return Square(to_sq.row, from_sq.col)
         return Square(from_sq.row, to_sq.col)
 
-    def _render_arrow(self, from_sq, to_sq, color):
-        if self.cell_size <= 0:
-            return
-        from_rect = self._cell_rect(from_sq.row, from_sq.col)
-        to_rect = self._cell_rect(to_sq.row, to_sq.col)
-        from_pos = (from_rect.centerx, from_rect.centery)
-        to_pos = (to_rect.centerx, to_rect.centery)
-        width = max(int(self.cell_size * 0.18), 5)
-        if width % 2 == 0:
-            width -= 1
-        head_size = max(int(self.cell_size * 0.35), 8)
-        cap_radius = width // 2
+    def _render_arrow(self, layer, scale, from_sq, to_sq, color):
+        def pt(sq):
+            r = self._cell_rect(sq.row, sq.col)
+            return ((r.centerx - self.rect.x) * scale, (r.centery - self.rect.y) * scale)
+
+        from_pos = pt(from_sq)
+        to_pos = pt(to_sq)
+        width = max(int(self.cell_size * 0.16), 5) * scale
+        head_size = max(int(self.cell_size * 0.38), 8) * scale
+        base = pg.Color(color)
+        rgb = (base.r, base.g, base.b)
+        max_a = base.a
 
         corner_sq = self._knight_arrow_corner(from_sq, to_sq)
-        if corner_sq is not None:
-            corner_rect = self._cell_rect(corner_sq.row, corner_sq.col)
-            shaft_origin = (corner_rect.centerx, corner_rect.centery)
-        else:
-            shaft_origin = from_pos
+        shaft_origin = pt(corner_sq) if corner_sq is not None else from_pos
 
         angle = math.atan2(to_pos[1] - shaft_origin[1], to_pos[0] - shaft_origin[0])
         shaft_end = (
@@ -310,26 +392,62 @@ class Board:
             to_pos[1] - head_size * 0.55 * math.sin(angle),
         )
         head_half = math.radians(150)
-        head_left = (
-            to_pos[0] + head_size * math.cos(angle + head_half),
-            to_pos[1] + head_size * math.sin(angle + head_half),
-        )
-        head_right = (
-            to_pos[0] + head_size * math.cos(angle - head_half),
-            to_pos[1] + head_size * math.sin(angle - head_half),
-        )
+        head_left = (to_pos[0] + head_size * math.cos(angle + head_half),
+                     to_pos[1] + head_size * math.sin(angle + head_half))
+        head_right = (to_pos[0] + head_size * math.cos(angle - head_half),
+                      to_pos[1] + head_size * math.sin(angle - head_half))
 
-        surface_size = self.window.get_size()
-        overlay = pg.Surface(surface_size, pg.SRCALPHA)
+        pts = [from_pos] + ([shaft_origin] if corner_sq is not None else []) + [shaft_end]
+        head = [to_pos, head_left, head_right]
+        pad = width + 4
+        xs = [p[0] for p in pts + head]
+        ys = [p[1] for p in pts + head]
+        ox, oy = min(xs) - pad, min(ys) - pad
+        w = max(int(max(xs) + pad - ox), 1)
+        h = max(int(max(ys) + pad - oy), 1)
+        arrow = pg.Surface((w, h), pg.SRCALPHA)
+        self._draw_shaft(arrow, rgb, max_a, [(x - ox, y - oy) for x, y in pts], width)
+        pg.draw.polygon(arrow, (*rgb, max_a), [(x - ox, y - oy) for x, y in head])
+        layer.blit(arrow, (int(ox), int(oy)))
 
-        if corner_sq is not None:
-            pg.draw.line(overlay, color, from_pos, shaft_origin, width)
-            pg.draw.circle(overlay, color, shaft_origin, cap_radius)
+    @staticmethod
+    def _gradient_capsule(rgb, length, width, a0, a1):
+        length = max(int(length), 1)
+        width = max(int(width), 1)
+        cols = min(length, 64)
+        strip = pg.Surface((cols, width), pg.SRCALPHA)
+        for x in range(cols):
+            t = x / max(cols - 1, 1)
+            pg.draw.line(strip, (*rgb, int(a0 + (a1 - a0) * t)), (x, 0), (x, width - 1))
+        bar = pg.transform.smoothscale(strip, (length, width))
+        mask = pg.Surface((length, width), pg.SRCALPHA)
+        pg.draw.rect(mask, (255, 255, 255, 255), mask.get_rect(), border_radius=width // 2)
+        bar.blit(mask, (0, 0), special_flags=pg.BLEND_RGBA_MULT)
+        return bar
 
-        pg.draw.line(overlay, color, shaft_origin, shaft_end, width)
-        pg.draw.circle(overlay, color, from_pos, cap_radius)
-        pg.draw.polygon(overlay, color, [to_pos, head_left, head_right])
-        self.window.blit(overlay, (0, 0))
+    def _draw_shaft(self, surf, rgb, max_a, pts, width):
+        seglens = [math.hypot(pts[i + 1][0] - pts[i][0], pts[i + 1][1] - pts[i][1])
+                   for i in range(len(pts) - 1)]
+        total = sum(seglens) or 1
+        n = len(pts)
+        done = 0.0
+        ext = width / 2
+        for i in range(n - 1):
+            ax, ay = pts[i]
+            bx, by = pts[i + 1]
+            seg = seglens[i] or 1
+            dx, dy = (bx - ax) / seg, (by - ay) / seg
+            if i > 0:
+                ax, ay = ax - dx * ext, ay - dy * ext
+            if i < n - 2:
+                bx, by = bx + dx * ext, by + dy * ext
+            a0 = max_a * (0.45 + 0.5 * (done / total))
+            a1 = max_a * (0.45 + 0.5 * ((done + seglens[i]) / total))
+            cap = self._gradient_capsule(rgb, math.hypot(bx - ax, by - ay), width, a0, a1)
+            rotated = pg.transform.rotate(cap, -math.degrees(math.atan2(by - ay, bx - ax)))
+            surf.blit(rotated, rotated.get_rect(center=((ax + bx) / 2, (ay + by) / 2)),
+                      special_flags=pg.BLEND_RGBA_MAX)
+            done += seglens[i]
 
     def _draw_check_highlight(self):
         for row, col in product(range(self.SIZE), repeat=2):
@@ -338,7 +456,20 @@ class Board:
                 continue
             if self.match.is_in_check(piece.color):
                 rect = self._cell_rect(row, col)
-                pg.draw.rect(self.window, Colors.selection_red, rect)
+                wash = pg.Surface((rect.width, rect.height), pg.SRCALPHA)
+                wash.fill(Colors.check_fill)
+                self.window.blit(wash, rect.topleft)
+                pg.draw.rect(self.window, Colors.check, rect, 3)
+
+    def _draw_hitmarker(self, rect, size, color, thick):
+        def render(surf, k):
+            u = size * k / 40.0
+            tw = max(int(thick * u), 2)
+            for (x1, y1), (x2, y2) in (((7, 7), (14.5, 14.5)), ((33, 7), (25.5, 14.5)),
+                                       ((7, 33), (14.5, 25.5)), ((33, 33), (25.5, 25.5))):
+                _draw_capsule(surf, (x1 * u, y1 * u), (x2 * u, y2 * u), tw, color)
+        self.window.blit(supersample(size, render),
+                         (rect.centerx - size // 2, rect.centery - size // 2))
 
     def draw_pieces(self):
         if self.review_ply is not None:
@@ -378,10 +509,11 @@ class Board:
         completed = []
         for a in self.animations:
             progress = a.progress(now)
+            eased = 1 - (1 - progress) ** 3
             fr = self._cell_rect(a.from_sq.row, a.from_sq.col)
             to = self._cell_rect(a.to_sq.row, a.to_sq.col)
-            x = fr.x + (to.x - fr.x) * progress
-            y = fr.y + (to.y - fr.y) * progress
+            x = fr.x + (to.x - fr.x) * eased
+            y = fr.y + (to.y - fr.y) * eased
             surface = self.piece_images_scaled[(a.piece.type, a.piece.color)]
             self.window.blit(surface, (x, y))
             if a.is_done(now):
@@ -466,55 +598,106 @@ class Board:
             rook_piece = Piece(PieceType.ROOK, move.piece.color)
             self.start_animation(rook_from, rook_to, rook_piece)
 
-    def _draw_move_indicators(self):
+    def _selected_legal_targets(self):
         if self.selected_square is None:
-            return
-
+            return []
         piece = self.match.piece_at(self.selected_square)
         if piece is None or piece.color != self.match.current_turn():
-            return
+            return []
+        return self.match.legal_moves_from(self.selected_square)
 
-        legal_moves = self.match.legal_moves_from(self.selected_square)
-        for target in legal_moves:
-            rect = self._cell_rect(target.row, target.col)
-            target_piece = self.match.piece_at(target)
+    def _draw_move_indicators(self):
+        for target in self._selected_legal_targets():
+            if self.match.piece_at(target) is None:
+                self._draw_dot(self._cell_rect(target.row, target.col))
 
-            if target_piece is None:
-                self._draw_dot(rect)
-            else:
-                self._draw_capture_ring(rect)
+    def _draw_front_markers(self):
+        ep = getattr(self.backend, "en_passant_target", None)
+        sel = self.selected_square
+        for target in self._selected_legal_targets():
+            if self.match.piece_at(target) is not None:
+                self._draw_capture_hitmarker(self._cell_rect(target.row, target.col))
+            elif ep is not None and target == ep and sel is not None:
+                mover = self.match.piece_at(sel)
+                if mover is not None and mover.type == PieceType.PAWN and target.col != sel.col:
+                    captured = Square(sel.row, target.col)
+                    self._draw_capture_hitmarker(self._cell_rect(captured.row, captured.col))
+        for row, col in product(range(self.SIZE), repeat=2):
+            piece = self.match.piece_at(Square(row, col))
+            if (piece is not None and piece.type == PieceType.KING
+                    and self.match.is_in_check(piece.color)):
+                self._draw_hitmarker(self._cell_rect(row, col),
+                                     max(int(self.cell_size * 1.0), 8), Colors.accent, 3.4)
 
     def _draw_dot(self, rect):
-        radius = int(self.cell_size * 0.15)
-        overlay = pg.Surface((self.cell_size, self.cell_size), pg.SRCALPHA)
-        pg.draw.circle(
-            overlay,
-            Colors.move_indicator,
-            (self.cell_size / 2, self.cell_size / 2),
-            radius,
-        )
-        self.window.blit(overlay, rect.topleft)
+        s = int(self.cell_size)
+        radius = max(int(s * 0.16), 4)
+        thickness = max(int(s * 0.05), 3)
 
-    def _draw_capture_ring(self, rect):
-        radius = int(self.cell_size * 0.45)
-        thickness = max(int(self.cell_size * 0.08), 3)
-        overlay = pg.Surface((self.cell_size, self.cell_size), pg.SRCALPHA)
-        pg.draw.circle(
-            overlay,
-            Colors.move_indicator,
-            (self.cell_size / 2, self.cell_size / 2),
-            radius,
-            thickness,
-        )
-        self.window.blit(overlay, rect.topleft)
+        def render(surf, k):
+            pg.draw.circle(surf, Colors.move_indicator, (s * k // 2, s * k // 2),
+                           radius * k, thickness * k)
+
+        self.window.blit(supersample(s, render), rect.topleft)
+
+    def _draw_capture_hitmarker(self, rect):
+        self._draw_hitmarker(rect, max(int(self.cell_size * 0.55), 8), Colors.accent, 4.2)
 
     def set_rect(self, rect):
-        self.board_offset_x = rect.x
-        self.board_offset_y = rect.y
-        self.cell_size = rect.width // self.SIZE
+        self.rect = pg.Rect(rect)
+        self.frame_pad = max(int(rect.width * self.FRAME_PAD_FRACTION), self.FRAME_PAD_MIN)
+        inner = rect.width - 2 * self.frame_pad
+        self.cell_size = max(inner // self.SIZE, 1)
+        used = self.cell_size * self.SIZE
+        free_w = rect.width - 2 * self.frame_pad - used
+        free_h = rect.height - 2 * self.frame_pad - used
+        self.board_offset_x = rect.x + self.frame_pad + free_w // 2
+        self.board_offset_y = rect.y + self.frame_pad + free_h // 2
         self.text_padding = rect.width * self.TEXT_PADDING_FRACTION
         self.rescale_pieces()
         self._render_text()
+        self._build_frame_surface()
+
+    def _build_frame_surface(self):
+        if self.rect.width <= 0 or self.rect.height <= 0:
+            self._frame_surf = None
+            return
+        w, h = self.rect.width, self.rect.height
+        top, bot = pg.Color(Colors.board_frame_inner), pg.Color(Colors.board_frame)
+        column = pg.Surface((1, h))
+        for y in range(h):
+            t = y / max(h - 1, 1)
+            column.set_at((0, y), (round(top.r + (bot.r - top.r) * t),
+                                   round(top.g + (bot.g - top.g) * t),
+                                   round(top.b + (bot.b - top.b) * t)))
+        bezel = pg.transform.scale(column, (w, h)).convert_alpha()
+        mask = pg.Surface((w, h), pg.SRCALPHA)
+        pg.draw.rect(mask, (255, 255, 255, 255), mask.get_rect(), border_radius=self.FRAME_RADIUS)
+        bezel.blit(mask, (0, 0), special_flags=pg.BLEND_RGBA_MULT)
+        surf = pg.Surface((w, h), pg.SRCALPHA)
+        surf.blit(bezel, (0, 0))
+        pg.draw.rect(surf, Colors.border_strong, surf.get_rect(), 2,
+                     border_radius=self.FRAME_RADIUS)
+        self._draw_corner_ticks(surf)
+        gx = self.board_offset_x - self.rect.x
+        gy = self.board_offset_y - self.rect.y
+        gs = self.cell_size * self.SIZE
+        pg.draw.rect(surf, "#000000", pg.Rect(gx - 1, gy - 1, gs + 2, gs + 2),
+                     border_radius=self.GRID_RADIUS)
+        self._frame_surf = surf
+
+    def _draw_corner_ticks(self, surf):
+        w, h = surf.get_size()
+        inset, length, thick = 8, 18, 2
+        color = pg.Color(Colors.accent)
+        color.a = 107
+        ticks = pg.Surface((w, h), pg.SRCALPHA)
+        corners = (((inset, inset), (1, 1)), ((w - inset, inset), (-1, 1)),
+                   ((inset, h - inset), (1, -1)), ((w - inset, h - inset), (-1, -1)))
+        for (cx, cy), (sx, sy) in corners:
+            pg.draw.line(ticks, color, (cx, cy), (cx + sx * length, cy), thick)
+            pg.draw.line(ticks, color, (cx, cy), (cx, cy + sy * length), thick)
+        surf.blit(ticks, (0, 0))
 
     def begin_press(self, pos):
         self._press_pos = pos
@@ -589,7 +772,6 @@ class Board:
             return
 
         if self.pending_promotion_square is not None:
-            self._handle_promotion_click(square)
             return
 
         grid = self._effective_grid()
@@ -813,23 +995,6 @@ class Board:
             return
         self.move_landed_callback(entry)
 
-    def _handle_promotion_click(self, clicked_sq):
-        sq = self.pending_promotion_square
-        color = self.match.piece_at(sq).color
-        options = [PieceType.QUEEN, PieceType.ROOK, PieceType.BISHOP, PieceType.KNIGHT]
-        direction = 1 if color == PieceColor.WHITE else -1
-
-        if clicked_sq.col != sq.col:
-            return
-        offset = (clicked_sq.row - sq.row) * direction
-        if not (0 <= offset < len(options)):
-            return
-
-        chosen = options[offset]
-        self.match.promote(sq, chosen)
-        self.pending_promotion_square = None
-        self._fire_move_landed()
-
     def _try_select(self, square):
         piece = self.match.piece_at(square)
         if piece is None:
@@ -848,4 +1013,7 @@ class Board:
             return
 
         rect = self._cell_rect(self.selected_square.row, self.selected_square.col)
+        wash = pg.Surface((rect.width, rect.height), pg.SRCALPHA)
+        wash.fill(Colors.selection_fill)
+        self.window.blit(wash, rect.topleft)
         pg.draw.rect(self.window, Colors.selection_red, rect, 4)

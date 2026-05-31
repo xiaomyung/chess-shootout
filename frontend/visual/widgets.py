@@ -3,6 +3,7 @@ import math
 import pygame as pg
 
 from frontend.visual.colors import Colors
+from frontend.visual.draw import supersample
 
 
 SCROLL_FADE_MS = 2000
@@ -105,28 +106,27 @@ def draw_icon_button(window, rect, icon_fn, force_pressed=False, disabled=False,
 
 
 def draw_gear(window, rect):
-    ss = 4
-    w, h = max(rect.width, 1) * ss, max(rect.height, 1) * ss
-    surf = pg.Surface((w, h), pg.SRCALPHA)
-    cx, cy = w / 2, h / 2
-    r = min(w, h) * 0.30
-    teeth = 8
-    r0, r1 = r * 0.72, r * 1.46
-    hw_base, hw_tip = r * 0.30, r * 0.16
-    for i in range(teeth):
-        a = math.tau * i / teeth
-        dx, dy = math.cos(a), math.sin(a)
-        px, py = -dy, dx
-        pts = [
-            (cx + dx * r0 + px * hw_base, cy + dy * r0 + py * hw_base),
-            (cx + dx * r0 - px * hw_base, cy + dy * r0 - py * hw_base),
-            (cx + dx * r1 - px * hw_tip, cy + dy * r1 - py * hw_tip),
-            (cx + dx * r1 + px * hw_tip, cy + dy * r1 + py * hw_tip),
-        ]
-        pg.draw.polygon(surf, Colors.white, pts)
-    hole_r = r * 0.40
-    pg.draw.circle(surf, Colors.white, (int(cx), int(cy)), int(r), width=int(r - hole_r))
-    window.blit(pg.transform.smoothscale(surf, (rect.width, rect.height)), rect.topleft)
+    def render(surf, k):
+        w, h = surf.get_size()
+        cx, cy = w / 2, h / 2
+        r = min(w, h) * 0.30
+        teeth = 8
+        r0, r1 = r * 0.72, r * 1.46
+        hw_base, hw_tip = r * 0.30, r * 0.16
+        for i in range(teeth):
+            a = math.tau * i / teeth
+            dx, dy = math.cos(a), math.sin(a)
+            px, py = -dy, dx
+            pg.draw.polygon(surf, Colors.white, [
+                (cx + dx * r0 + px * hw_base, cy + dy * r0 + py * hw_base),
+                (cx + dx * r0 - px * hw_base, cy + dy * r0 - py * hw_base),
+                (cx + dx * r1 - px * hw_tip, cy + dy * r1 - py * hw_tip),
+                (cx + dx * r1 + px * hw_tip, cy + dy * r1 + py * hw_tip),
+            ])
+        hole_r = r * 0.40
+        pg.draw.circle(surf, Colors.white, (int(cx), int(cy)), int(r), width=int(r - hole_r))
+
+    window.blit(supersample((max(rect.width, 1), max(rect.height, 1)), render), rect.topleft)
 
 
 def draw_button_row(window, rect, buttons, font, gap, disabled_keys=None):

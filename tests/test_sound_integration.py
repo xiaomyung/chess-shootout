@@ -387,7 +387,7 @@ def test_promotion_lands_no_sound_until_picker_chosen():
     fire_animation(app)
     app.sound_manager.play_move.assert_not_called()
     assert app.board.pending_promotion_square == Square(0, 0)
-    app.board.handle_click(Square(0, 0))
+    app.board.pick_promotion(PieceType.QUEEN)
     app.sound_manager.play_move.assert_called_once()
 
 

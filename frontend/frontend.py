@@ -1345,6 +1345,9 @@ class Frontend(OnlineEventsMixin):
             return
         if self.current_result() is not None:
             return
+        if self.board.pending_promotion_square is not None:
+            self.board.pick_promotion_at(pos)
+            return
         square = self.board.cell_at(pos)
         if square is not None:
             if not self.board.is_square_annotated(square):
@@ -1395,10 +1398,7 @@ class Frontend(OnlineEventsMixin):
         chosen = PROMOTION_KEYS.get(event.key)
         if chosen is None:
             return False
-        sq = self.board.pending_promotion_square
-        self.match.promote(sq, chosen)
-        self.board.pending_promotion_square = None
-        self.board._fire_move_landed()
+        self.board.pick_promotion(chosen)
         return True
 
     def _step_review(self, delta):
@@ -1424,6 +1424,7 @@ class Frontend(OnlineEventsMixin):
         if (self.mode != "menu"
                 and pos[1] >= self.chrome.HEIGHT
                 and self.current_result() is None
+                and self.board.pending_promotion_square is None
                 and not self.file_picker.is_visible()
                 and not self.confirm_modal.is_visible()):
             self.board.begin_press(pos)

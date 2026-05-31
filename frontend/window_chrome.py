@@ -8,6 +8,7 @@ import pygame as pg
 
 from paths import resource_path
 from frontend.visual.colors import Colors
+from frontend.visual.draw import supersample
 from frontend.visual.fonts import get_font
 
 log = logging.getLogger("chess.chrome")
@@ -195,12 +196,10 @@ class WindowChrome:
             self._draw_smooth_dot((rect.centerx, rect.centery), colors[key])
 
     def _draw_smooth_dot(self, center, color):
-        ss = 4
-        diameter = self.DOT_RADIUS * 2
-        big = pg.Surface((diameter * ss, diameter * ss), pg.SRCALPHA)
-        pg.draw.circle(big, pg.Color(color),
-                       (self.DOT_RADIUS * ss, self.DOT_RADIUS * ss), self.DOT_RADIUS * ss)
-        dot = pg.transform.smoothscale(big, (diameter, diameter))
+        def render(surf, k):
+            pg.draw.circle(surf, pg.Color(color),
+                           (self.DOT_RADIUS * k, self.DOT_RADIUS * k), self.DOT_RADIUS * k)
+        dot = supersample(self.DOT_RADIUS * 2, render)
         self.window.blit(dot, (center[0] - self.DOT_RADIUS, center[1] - self.DOT_RADIUS))
 
     def handle_click(self, pos):
