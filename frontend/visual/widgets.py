@@ -10,6 +10,7 @@ SCROLL_THUMB_WIDTH = 4
 SCROLL_THUMB_RIGHT_OFFSET = 4
 SCROLL_THUMB_MIN_HEIGHT = 18
 BUTTON_LABEL_PADDING_PX = 6
+BUTTON_RADIUS = 8
 
 
 def fit_text_to_rect(text_surface, rect, padding=BUTTON_LABEL_PADDING_PX):
@@ -58,21 +59,27 @@ def _hover_state(rect):
 
 def _button_bg(rect, force_pressed=False, disabled=False):
     if disabled:
-        return Colors.dark_menu, Colors.button_border
+        return Colors.dark_menu, Colors.footer_text
     hovered, pressed = _hover_state(rect)
     if force_pressed or pressed:
-        bg = Colors.button_pressed
-    elif hovered:
-        bg = Colors.button_hover
+        return Colors.button_pressed, Colors.white
+    if hovered:
+        return Colors.button_hover, Colors.white
+    return Colors.light_grey_menu, Colors.text_dim
+
+
+def draw_button(window, rect, label, font, force_pressed=False, disabled=False,
+                selected=False, primary=False):
+    if primary and not disabled:
+        hovered, pressed = _hover_state(rect)
+        bg = Colors.accent_press if pressed else (Colors.accent_hi if hovered else Colors.accent)
+        text_color = Colors.on_accent
+        border = bg
     else:
-        bg = Colors.dark_menu
-    return bg, Colors.white
-
-
-def draw_button(window, rect, label, font, force_pressed=False, disabled=False):
-    bg, text_color = _button_bg(rect, force_pressed, disabled)
-    pg.draw.rect(window, bg, rect, border_radius=4)
-    pg.draw.rect(window, Colors.button_border, rect, 1, border_radius=4)
+        bg, text_color = _button_bg(rect, force_pressed or selected, disabled)
+        border = Colors.accent if (selected and not disabled) else Colors.button_border
+    pg.draw.rect(window, bg, rect, border_radius=BUTTON_RADIUS)
+    pg.draw.rect(window, border, rect, 1, border_radius=BUTTON_RADIUS)
     text = fit_text_to_rect(font.render(label, True, text_color), rect)
     window.blit(
         text,
@@ -80,13 +87,20 @@ def draw_button(window, rect, label, font, force_pressed=False, disabled=False):
     )
 
 
-def draw_icon_button(window, rect, icon_fn, force_pressed=False, disabled=False):
-    if not disabled:
+def draw_icon_button(window, rect, icon_fn, force_pressed=False, disabled=False, muted=False):
+    if muted and not disabled:
+        pg.draw.rect(window, Colors.button_pressed, rect, border_radius=BUTTON_RADIUS)
+        pg.draw.rect(window, Colors.accent, rect, 1, border_radius=BUTTON_RADIUS)
+    elif not disabled:
         hovered, pressed = _hover_state(rect)
         if force_pressed or pressed:
-            pg.draw.rect(window, Colors.button_pressed, rect, border_radius=4)
+            bg = Colors.button_pressed
         elif hovered:
-            pg.draw.rect(window, Colors.button_hover, rect, border_radius=4)
+            bg = Colors.button_hover
+        else:
+            bg = Colors.light_grey_menu
+        pg.draw.rect(window, bg, rect, border_radius=BUTTON_RADIUS)
+        pg.draw.rect(window, Colors.button_border, rect, 1, border_radius=BUTTON_RADIUS)
     icon_fn(window, rect)
 
 
@@ -117,6 +131,8 @@ def draw_gear(window, rect):
 
 def draw_button_row(window, rect, buttons, font, gap, disabled_keys=None):
     n = len(buttons)
+    if n == 0 or rect.width <= gap * (n - 1):
+        return {}
     btn_w = (rect.width - gap * (n - 1)) / n
     button_rects = {}
     disabled_keys = disabled_keys or set()
@@ -130,12 +146,14 @@ def draw_button_row(window, rect, buttons, font, gap, disabled_keys=None):
 
 def draw_selector(window, rect, options, font, gap, selected_key):
     n = len(options)
+    if n == 0 or rect.width <= gap * (n - 1):
+        return {}
     btn_w = (rect.width - gap * (n - 1)) / n
     button_rects = {}
     for i, (label, key) in enumerate(options):
         x = rect.x + i * (btn_w + gap)
         br = pg.Rect(x, rect.y, btn_w, rect.height)
-        draw_button(window, br, label, font, force_pressed=(key == selected_key))
+        draw_button(window, br, label, font, selected=(key == selected_key))
         button_rects[key] = br
     return button_rects
 

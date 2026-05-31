@@ -30,6 +30,7 @@ class Colors:
     accent = "#ff5a36"
     accent_hi = "#ff7a5c"
     accent_press = "#e6431f"
+    on_accent = "#1a0b06"
     accent_glow = "#ff5a368c"
     amber = "#ffb020"
     amber_hi = "#ffc34d"

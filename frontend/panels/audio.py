@@ -2,7 +2,8 @@ import pygame as pg
 
 from frontend import env
 from frontend.visual.colors import Colors
-from frontend.visual.widgets import draw_button
+from frontend.visual.widgets import draw_icon_button
+from frontend.visual.icons import make_speaker_icon
 from frontend.visual.fonts import get_font
 
 
@@ -84,8 +85,8 @@ class AudioPanel:
                        (knob_x, self.slider_rect.centery), knob_radius, 1)
 
     def _draw_mute(self):
-        label = "Unmute" if not self.sound_manager.enabled else "Mute"
-        draw_button(self.window, self.mute_rect, label, self.button_font)
+        muted = not self.sound_manager.enabled
+        draw_icon_button(self.window, self.mute_rect, make_speaker_icon(muted), muted=muted)
 
     def _track_rect(self):
         track_h = max(int(self.slider_rect.height * 0.25), 4)

@@ -1,7 +1,6 @@
 import pygame as pg
 
 from frontend.visual.colors import Colors
-from frontend.visual.widgets import fit_text_to_rect
 from frontend.visual.fonts import get_font
 
 
@@ -17,12 +16,15 @@ class Toast:
     def __init__(self, window):
         self.window = window
         self.message = None
+        self.kind = "info"
+        self.top_inset = 0
         self._shown_at_ms = 0
         self.duration_ms = DEFAULT_DURATION_MS
         self.font = get_font(16, bold=True)
 
-    def show(self, message, duration_ms=None):
+    def show(self, message, duration_ms=None, kind="info"):
         self.message = message
+        self.kind = kind
         self._shown_at_ms = pg.time.get_ticks()
         if duration_ms is not None:
             self.duration_ms = duration_ms
@@ -51,24 +53,30 @@ class Toast:
         if not self.is_visible(now_ms):
             self.message = None
             return
-        text_surf = self.font.render(self.message, True, Colors.white)
-        toast_w = text_surf.get_width() + 2 * PADDING_X
+        hype = self.kind == "hype"
+        label = self.message.upper() if hype else self.message
+        text_color = Colors.on_accent if hype else Colors.text_dim
+        bg_color = pg.Color(Colors.accent if hype else Colors.dark_menu)
+        border_color = pg.Color(Colors.accent_hi if hype else Colors.button_border)
+        text_surf = self.font.render(label, True, text_color)
+        spark_d = text_surf.get_height() // 2 if hype else 0
+        spark_gap = spark_d + 6 if hype else 0
+        toast_w = text_surf.get_width() + 2 * PADDING_X + spark_gap
         toast_h = text_surf.get_height() + 2 * PADDING_Y
+        radius = toast_h // 2
         win_w = self.window.get_width()
-        rect = pg.Rect(
-            (win_w - toast_w) // 2, TOP_OFFSET_PX,
-            toast_w, toast_h,
-        )
+        rect = pg.Rect((win_w - toast_w) // 2, self.top_inset + TOP_OFFSET_PX, toast_w, toast_h)
         alpha = self._alpha(now_ms)
         overlay = pg.Surface(rect.size, pg.SRCALPHA)
-        bg = pg.Color(Colors.dark_menu)
-        bg.a = alpha
-        pg.draw.rect(overlay, bg, overlay.get_rect(), border_radius=6)
-        text_surf = fit_text_to_rect(text_surf, rect)
+        bg_color.a = alpha
+        border_color.a = alpha
+        pg.draw.rect(overlay, bg_color, overlay.get_rect(), border_radius=radius)
+        pg.draw.rect(overlay, border_color, overlay.get_rect(), 1, border_radius=radius)
         text_surf.set_alpha(alpha)
-        overlay.blit(
-            text_surf,
-            (rect.width // 2 - text_surf.get_width() // 2,
-             rect.height // 2 - text_surf.get_height() // 2),
-        )
+        text_x = PADDING_X + spark_gap
+        if hype:
+            spark = pg.Color(Colors.on_accent)
+            spark.a = alpha
+            pg.draw.circle(overlay, spark, (PADDING_X + spark_d // 2, toast_h // 2), spark_d // 2)
+        overlay.blit(text_surf, (text_x, rect.height // 2 - text_surf.get_height() // 2))
         self.window.blit(overlay, rect.topleft)

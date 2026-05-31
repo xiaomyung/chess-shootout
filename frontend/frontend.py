@@ -240,6 +240,7 @@ class Frontend(OnlineEventsMixin):
         self.options_modal = OptionsModal(self.window)
         self.directory_browser = DirectoryBrowser(self.window)
         self.toast = Toast(self.window)
+        self.toast.top_inset = self.chrome.HEIGHT
         self._last_saved_pgn_path = None
         self.server_modal = ServerAddressModal(self.window)
         self.wait_modal = WaitModal(self.window)
