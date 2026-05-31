@@ -66,41 +66,30 @@ class HelpModal(BaseModal):
         return self._visible
 
     def draw(self):
-        if not self._visible:
+        if not self._visible or self.rect.width <= 0:
             return
-        pg.draw.rect(self.window, Colors.light_grey_menu, self.rect, border_radius=8)
-        pg.draw.rect(self.window, Colors.button_border, self.rect, 2, border_radius=8)
-
+        self.draw_shell()
+        content = self.content_rect()
         pad = self.padding
-        title_band = pg.Rect(
-            self.rect.x + pad, self.rect.y + pad,
-            self.rect.width - 2 * pad, self.title_font.get_height() + 8,
-        )
         title_surf = fit_text_to_rect(
-            self.title_font.render("Hotkeys", True, Colors.white), title_band,
+            self.title_font.render("Hotkeys", True, Colors.white),
+            pg.Rect(0, 0, content.width, self.title_font.get_height() + 8),
         )
         self.window.blit(
-            title_surf,
-            (self.rect.centerx - title_surf.get_width() / 2, title_band.y),
-        )
+            title_surf, (content.centerx - title_surf.get_width() / 2, content.y))
 
         button_h = self.button_font.get_height() + 16
-        button_row = pg.Rect(
-            self.rect.x + pad, self.rect.bottom - pad - button_h,
-            self.rect.width - 2 * pad, button_h,
-        )
+        button_row = pg.Rect(content.x, content.bottom - button_h, content.width, button_h)
 
-        rows_top = title_band.bottom + pad
+        rows_top = content.y + title_surf.get_height() + pad
         rows_bottom = button_row.y - pad
         self._rows_rect = pg.Rect(
-            self.rect.x + pad, rows_top,
-            self.rect.width - 2 * pad, max(rows_bottom - rows_top, 1),
-        )
+            content.x, rows_top, content.width, max(rows_bottom - rows_top, 1))
         self._draw_rows(self._rows_rect)
 
         self.button_rects = draw_button_row(
             self.window, button_row, [("Close", "close")],
-            self.button_font, pad,
+            self.button_font, pad, primary_keys={"close"},
         )
 
     def _draw_rows(self, rows_rect):
@@ -126,10 +115,10 @@ class HelpModal(BaseModal):
                     desc_col_w, line_h,
                 )
                 key_surf = fit_text_to_rect(
-                    self.row_font.render(key, True, Colors.white), key_rect,
+                    self.row_font.render(key, True, Colors.amber_hi), key_rect,
                 )
                 desc_surf = fit_text_to_rect(
-                    self.row_font.render(desc, True, Colors.white), desc_rect,
+                    self.row_font.render(desc, True, Colors.text_dim), desc_rect,
                 )
                 self.window.blit(
                     key_surf,

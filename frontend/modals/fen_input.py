@@ -49,38 +49,24 @@ class FenInputModal(BaseModal):
         self.error = msg
 
     def draw(self):
-        if not self._visible:
+        if not self._visible or self.rect.width <= 0:
             return
-        pg.draw.rect(self.window, Colors.light_grey_menu, self.rect, border_radius=8)
-        pg.draw.rect(self.window, Colors.button_border, self.rect, 2, border_radius=8)
-
+        self.draw_shell()
+        content = self.content_rect()
         pad = self.padding
-        title_band = pg.Rect(
-            self.rect.x + pad, self.rect.y + pad,
-            self.rect.width - 2 * pad, self.title_font.get_height() + 6,
-        )
         title_surf = fit_text_to_rect(
             self.title_font.render("Start from FEN", True, Colors.white),
-            title_band,
+            pg.Rect(0, 0, content.width, self.title_font.get_height() + 6),
         )
         self.window.blit(
-            title_surf,
-            (self.rect.centerx - title_surf.get_width() / 2, title_band.y),
-        )
+            title_surf, (content.centerx - title_surf.get_width() / 2, content.y))
 
         button_h = self.button_font.get_height() + 16
-        button_row = pg.Rect(
-            self.rect.x + pad, self.rect.bottom - pad - button_h,
-            self.rect.width - 2 * pad, button_h,
-        )
+        button_row = pg.Rect(content.x, content.bottom - button_h, content.width, button_h)
 
         input_h = max(int(self.rect.height * 0.20), 32)
         input_rect = pg.Rect(
-            self.rect.x + pad,
-            title_band.bottom + pad,
-            self.rect.width - 2 * pad,
-            input_h,
-        )
+            content.x, content.y + title_surf.get_height() + pad, content.width, input_h)
         self.text_input.set_rect(input_rect)
         self.text_input.draw()
 
@@ -93,15 +79,12 @@ class FenInputModal(BaseModal):
                 self.error_font.render(self.error, True, Colors.selection_red),
                 error_rect,
             )
-            self.window.blit(
-                error_surf,
-                (error_rect.x, error_rect.y),
-            )
+            self.window.blit(error_surf, (error_rect.x, error_rect.y))
 
         self.button_rects = draw_button_row(
             self.window, button_row,
             [("Start", "start"), ("Cancel", "cancel")],
-            self.button_font, pad,
+            self.button_font, pad, primary_keys={"start"},
         )
 
     def handle_click(self, pos):

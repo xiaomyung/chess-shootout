@@ -71,8 +71,8 @@ def test_help_modal_close_button_hides_it():
 
 
 @pytest.mark.parametrize("key,title,yes_label", [
-    pytest.param(pg.K_r, "Resign?", "Resign", id="r_opens_resign_confirm"),
-    pytest.param(pg.K_d, "Offer draw?", "Draw", id="d_opens_draw_confirm"),
+    pytest.param(pg.K_r, "Tap out?", "I'm done", id="r_opens_resign_confirm"),
+    pytest.param(pg.K_d, "Offer a draw?", "Offer draw", id="d_opens_draw_confirm"),
 ])
 def test_action_hotkey_opens_confirm(key, title, yes_label):
     app = _make_app()

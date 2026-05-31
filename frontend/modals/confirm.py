@@ -1,40 +1,50 @@
 import pygame as pg
 
+from frontend.modals.base import BaseModal, MODAL_RAIL
 from frontend.visual.colors import Colors
+from frontend.visual.fonts import get_display_font, get_font
 from frontend.visual.widgets import draw_button_row, fit_text_to_rect
-from frontend.visual.fonts import get_font
 
 
-class ConfirmModal:
+def _wrap_words(text, font, max_w, max_lines=3):
+    words = text.split()
+    lines = []
+    line = ""
+    for word in words:
+        trial = f"{line} {word}".strip()
+        if line and font.size(trial)[0] > max_w:
+            lines.append(line)
+            line = word
+            if len(lines) >= max_lines:
+                break
+        else:
+            line = trial
+    if line and len(lines) < max_lines:
+        lines.append(line)
+    return lines
+
+
+class ConfirmModal(BaseModal):
 
     def __init__(self, window):
-        self.window = window
-        self.x = 0
-        self.y = 0
-        self.width = 0
-        self.height = 0
-        self.padding = 12
+        super().__init__(window)
         self.title = None
+        self.sub = ""
+        self.danger = False
         self.on_yes = None
         self.on_no = None
         self.on_extra = None
-        self.title_font = get_font(24, bold=True)
-        self.button_font = get_font(14, bold=True)
-        self.title_font_factor = 6
-        self.button_font_factor = 14
+        self.yes_label = "Confirm"
+        self.no_label = "Cancel"
+        self.extra_label = "Cancel"
         self.button_rects = {}
+        self._panel = pg.Rect(0, 0, 0, 0)
 
-    def set_rect(self, rect):
-        self.x = rect.x
-        self.y = rect.y
-        self.width = rect.width
-        self.height = rect.height
-        self.title_font = get_font(max(int(rect.height / self.title_font_factor), 12), bold=True)
-        self.button_font = get_font(max(int(rect.height / self.button_font_factor), 10), bold=True)
-
-    def show(self, title, on_yes, on_no=None, yes_label="Yes", no_label="Cancel",
-             on_extra=None, extra_label="Cancel"):
+    def show(self, title, on_yes, on_no=None, yes_label="Confirm", no_label="Cancel",
+             on_extra=None, extra_label="Cancel", sub="", danger=False):
         self.title = title
+        self.sub = sub
+        self.danger = danger
         self.on_yes = on_yes
         self.on_no = on_no
         self.on_extra = on_extra
@@ -53,44 +63,47 @@ class ConfirmModal:
         return self.title is not None
 
     def draw(self):
-        if not self.is_visible():
+        if not self.is_visible() or self.rect.width <= 0:
             self.button_rects = {}
             return
+        pad = self.padding
+        panel_w = min(self.rect.width, 440)
+        inner_w = panel_w - 2 * pad
+        title_font = get_display_font(max(int(panel_w * 0.07), 22))
+        sub_font = get_font(max(int(panel_w * 0.032), 13), bold=False)
+        button_font = get_font(max(int(panel_w * 0.034), 13), bold=True)
+        btn_h = max(int(panel_w * 0.11), 40)
 
-        rect = pg.Rect(self.x, self.y, self.width, self.height)
-        pg.draw.rect(self.window, Colors.light_grey_menu, rect, border_radius=8)
-        pg.draw.rect(self.window, Colors.button_border, rect, 2, border_radius=8)
-
-        gap = self.padding
-        btn_h = max(rect.height * 0.22, 28)
-        row_rect = pg.Rect(
-            rect.x + gap,
-            rect.bottom - gap - btn_h,
-            rect.width - 2 * gap,
-            btn_h,
-        )
-
-        text_top = rect.y + self.padding
-        text_bottom = row_rect.y - gap
-        text_height = max(text_bottom - text_top, 1)
-        title_band = pg.Rect(
-            rect.x + self.padding, text_top,
-            rect.width - 2 * self.padding, text_height,
-        )
         title_surf = fit_text_to_rect(
-            self.title_font.render(self.title, True, Colors.white), title_band,
-        )
-        self.window.blit(
-            title_surf,
-            (rect.centerx - title_surf.get_width() / 2,
-             text_top + (text_height - title_surf.get_height()) / 2),
-        )
-        buttons = [(self.yes_label, "yes"), (self.no_label, "no")]
+            title_font.render(self.title.upper(), True, Colors.white),
+            pg.Rect(0, 0, inner_w, title_font.get_height()))
+        sub_lines = _wrap_words(self.sub, sub_font, inner_w) if self.sub else []
+        line_h = sub_font.get_linesize()
+
+        gap_title = 8 if sub_lines else 0
+        block_h = (title_surf.get_height()
+                   + (gap_title + line_h * len(sub_lines) if sub_lines else 0))
+        panel_h = MODAL_RAIL + pad + block_h + max(int(panel_w * 0.05), 18) + btn_h + pad
+        panel = pg.Rect(0, 0, panel_w, panel_h)
+        panel.center = self.rect.center
+        self._panel = panel
+
+        self.draw_shell("loss" if self.danger else None, panel)
+        content = self.content_rect(panel)
+        y = content.y
+        self.window.blit(title_surf, (content.centerx - title_surf.get_width() / 2, y))
+        y += title_surf.get_height() + gap_title
+        for line in sub_lines:
+            surf = sub_font.render(line, True, Colors.text_dim)
+            self.window.blit(surf, (content.centerx - surf.get_width() / 2, y))
+            y += line_h
+
+        row = pg.Rect(content.x, content.bottom - btn_h, content.width, btn_h)
+        buttons = [(self.no_label, "no"), (self.yes_label, "yes")]
         if self.on_extra is not None:
             buttons.append((self.extra_label, "extra"))
         self.button_rects = draw_button_row(
-            self.window, row_rect, buttons, self.button_font, gap,
-        )
+            self.window, row, buttons, button_font, pad, primary_keys={"yes"})
 
     def handle_click(self, pos):
         if not self.is_visible():

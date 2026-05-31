@@ -45,25 +45,26 @@ class BaseModal:
     def handle_click(self, pos):
         return False
 
-    def content_rect(self):
+    def content_rect(self, rect=None):
+        r = rect if rect is not None else self.rect
         return pg.Rect(
-            self.rect.x + self.padding,
-            self.rect.y + MODAL_RAIL + self.padding,
-            self.rect.width - 2 * self.padding,
-            self.rect.height - MODAL_RAIL - 2 * self.padding,
+            r.x + self.padding,
+            r.y + MODAL_RAIL + self.padding,
+            r.width - 2 * self.padding,
+            r.height - MODAL_RAIL - 2 * self.padding,
         )
 
-    def draw_shell(self, intent=None):
-        if self.rect.width <= 0 or self.rect.height <= 0:
+    def draw_shell(self, intent=None, rect=None):
+        r = rect if rect is not None else self.rect
+        if r.width <= 0 or r.height <= 0:
             return
-        pg.draw.rect(self.window, Colors.modal_bg, self.rect, border_radius=MODAL_RADIUS)
-        pg.draw.rect(self.window, Colors.border_strong, self.rect, width=1,
+        pg.draw.rect(self.window, Colors.modal_bg, r, border_radius=MODAL_RADIUS)
+        pg.draw.rect(self.window, Colors.border_strong, r, width=1,
                      border_radius=MODAL_RADIUS)
-        self.window.blit(self._rail_surface(intent), self.rect.topleft)
+        self.window.blit(self._rail_surface(intent, r.width), r.topleft)
 
-    def _rail_surface(self, intent):
+    def _rail_surface(self, intent, width):
         start, end = INTENT_RAIL.get(intent, (Colors.accent, Colors.accent))
-        width = self.rect.width
 
         def render(surf, k):
             w, _ = surf.get_size()

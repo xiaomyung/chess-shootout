@@ -187,6 +187,7 @@ class Frontend(OnlineEventsMixin):
         self.window_height = max(window_height, MIN_WINDOW_HEIGHT)
         self.window = pg.display.set_mode(
             (self.window_width, self.window_height), WINDOW_FLAGS)
+        pg.key.set_repeat(400, 35)
         try:
             icon = pg.image.load(str(paths.resource_path("assets", "icons", "icon.png")))
             pg.display.set_icon(icon)
@@ -823,7 +824,9 @@ class Frontend(OnlineEventsMixin):
         if self.pgn_review or self.current_result() is not None:
             return
         self.confirm_modal.show(
-            "Resign?", on_yes=self._perform_resign, yes_label="Resign",
+            "Tap out?", on_yes=self._perform_resign,
+            sub="The pieces are watching.",
+            yes_label="I'm done", no_label="Keep fighting", danger=True,
         )
 
     def _perform_resign(self):
@@ -845,7 +848,9 @@ class Frontend(OnlineEventsMixin):
         if self.pgn_review or self.current_result() is not None:
             return
         self.confirm_modal.show(
-            "Offer draw?", on_yes=self._perform_draw, yes_label="Draw",
+            "Offer a draw?", on_yes=self._perform_draw,
+            sub="Propose splitting the point. No shots fired, no glory either.",
+            yes_label="Offer draw", no_label="Nevermind",
         )
 
     def _perform_draw(self):
