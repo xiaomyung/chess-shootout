@@ -57,9 +57,9 @@ def play_n_moves(backend, n):
 
 def _count_thumb_pixels(menu):
     """Pixels in the scroll-thumb column painted Colors.button_hover. The thumb
-    lives in a 4px band at the right edge of moves_rect; active move-cell
-    highlights (also button_hover) never reach this column, so a nonzero count
-    means the thumb itself was drawn."""
+    lives in a 4px band at the right edge of moves_rect; the active move-cell
+    highlight is button_pressed (a different colour) and never reaches this
+    column, so a nonzero count means the thumb itself was drawn."""
     rect = menu.moves_rect
     thumb_x = rect.right - SCROLL_THUMB_RIGHT_OFFSET - SCROLL_THUMB_WIDTH
     hover = pg.Color(Colors.button_hover)

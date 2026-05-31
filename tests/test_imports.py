@@ -27,7 +27,7 @@ from frontend.panels.right import RightMenu
 from frontend.pgn.generate import generate_pgn
 from frontend.pgn.load import load_pgn_into_backend
 from frontend.visual.animation import PieceAnimation
-from frontend.visual.clock_visual import LOW_TIME_FRACTION, clock_pocket_color
+from frontend.visual.clock_visual import LOW_TIME_FRACTION
 from frontend.visual.colors import Colors
 from frontend.visual.text_input import TextInput
 from frontend.visual.toast import Toast
@@ -58,7 +58,6 @@ def test_pgn_module_exports():
 def test_clock_visual_exports():
     assert type(LOW_TIME_FRACTION) is float
     assert LOW_TIME_FRACTION == 0.10
-    assert inspect.isfunction(clock_pocket_color)
 
 
 def test_widgets_module_exports():

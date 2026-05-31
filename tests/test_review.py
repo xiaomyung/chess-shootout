@@ -539,10 +539,12 @@ def test_load_pgn_populates_names_and_time_control(tmp_path):
     assert app._time_control == (600, 5)
     assert app._name_for_color(PieceColor.WHITE) == "alice"
     assert app._name_for_color(PieceColor.BLACK) == "bob"
-    assert app._compute_game_info_lines() == ["Review", "1-0  ·  10+5"]
+    assert app._compute_game_info() == {
+        "mode": "Review", "time_control": "10+5", "round": 1, "lines": ["1-0"],
+    }
 
 
-def test_load_pgn_without_time_control_shows_no_clock(tmp_path):
+def test_load_pgn_without_time_control_shows_infinity(tmp_path):
     pgn_path = tmp_path / "noclock.pgn"
     pgn_path.write_text(
         '[White "A"]\n[Black "B"]\n[Result "0-1"]\n\n1. e4 e5 0-1\n'
@@ -550,7 +552,9 @@ def test_load_pgn_without_time_control_shows_no_clock(tmp_path):
     app = _new_app()
     app._load_pgn_from_path(str(pgn_path))
     assert app._time_control is None
-    assert app._compute_game_info_lines() == ["Review", "0-1  ·  no clock"]
+    assert app._compute_game_info() == {
+        "mode": "Review", "time_control": "∞", "round": 1, "lines": ["0-1"],
+    }
 
 
 def _load_test_pgn(app, tmp_path):
@@ -623,20 +627,29 @@ def test_pgn_review_shows_only_menu_and_flip_buttons(tmp_path):
     assert _flat_button_keys(app._right_menu_buttons()) == {"menu", "flip", "help"}
 
 
-def test_live_mode_shows_full_buttons():
-    app = _new_app()
+def test_timed_mode_shows_full_buttons():
+    app = _new_timed_app()
     assert _flat_button_keys(app._right_menu_buttons()) == {
         "undo", "resign", "draw", "give_time", "flip", "help",
     }
 
 
-def test_live_mode_buttons_are_two_rows_of_three():
+def test_timed_mode_buttons_are_two_rows_of_three():
     """Layout pin: two rows of three buttons so the audio slider grid lines up."""
-    app = _new_app()
+    app = _new_timed_app()
     rows = app._right_menu_buttons()
     assert len(rows) == 2
     assert [key for _, key in rows[0]] == ["undo", "resign", "draw"]
     assert [key for _, key in rows[1]] == ["give_time", "flip", "help"]
+
+
+def test_untimed_mode_hides_give_time():
+    """No clock → no give-time button; row two collapses to Flip / Help."""
+    app = _new_app()
+    rows = app._right_menu_buttons()
+    assert len(rows) == 2
+    assert [key for _, key in rows[0]] == ["undo", "resign", "draw"]
+    assert [key for _, key in rows[1]] == ["flip", "help"]
 
 
 def test_review_mode_is_one_row():
@@ -674,7 +687,7 @@ def test_new_game_clears_pgn_review_flag(tmp_path):
     app._on_new_game()
     assert app.pgn_review is False
     assert _flat_button_keys(app._right_menu_buttons()) == {
-        "undo", "resign", "draw", "give_time", "flip", "help",
+        "undo", "resign", "draw", "flip", "help",
     }
 
 
@@ -685,6 +698,16 @@ def test_ctrl_z_does_not_undo_in_pgn_review(tmp_path):
     event = pg.event.Event(pg.KEYDOWN, key=pg.K_z, mod=pg.KMOD_CTRL)
     app._handle_shortcut_key(event)
     assert len(app.backend.move_history) == history_before
+
+
+def _new_timed_app():
+    from frontend.frontend import Frontend
+    app = Frontend(1500, 800)
+    app.sound_manager = MagicMock()
+    app._on_start_game({"mode": "single_screen", "nickname": "a",
+                        "time_minutes": 5, "increment_seconds": 0,
+                        "side": "white"})
+    return app
 
 
 def _new_app_in_isolated_root(tmp_path):

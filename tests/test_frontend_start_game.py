@@ -81,7 +81,7 @@ def test_start_game_random_side_resolves_to_concrete_color():
 
 def test_opponent_name_for_each_mode():
     assert OPPONENT_NAME_FOR_MODE["single_screen"] == "Player 2"
-    assert OPPONENT_NAME_FOR_MODE["bot"] == "AI Bot"
+    assert OPPONENT_NAME_FOR_MODE["bot"] == "Bot"
     assert OPPONENT_NAME_FOR_MODE["online"] == "Opponent"
 
 

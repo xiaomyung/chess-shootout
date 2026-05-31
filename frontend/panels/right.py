@@ -1,6 +1,7 @@
 import pygame as pg
 
 from frontend.visual.colors import Colors
+from frontend.visual.draw import rounded_rect_surface, blit_centered
 from frontend.pgn.generate import iter_move_pairs
 from frontend.visual.widgets import draw_button_row, draw_scroll_thumb
 from server.protocol import GIVE_TIME_SECONDS
@@ -12,17 +13,14 @@ BUTTONS = [
     [(f"Give {GIVE_TIME_SECONDS} sec", "give_time"), ("Flip", "flip"), ("?", "help")],
 ]
 
+UNTIMED_BUTTONS = [
+    [("Undo", "undo"), ("Resign", "resign"), ("Draw", "draw")],
+    [("Flip", "flip"), ("?", "help")],
+]
+
 REVIEW_BUTTONS = [
     [("Menu", "menu"), ("Flip", "flip"), ("?", "help")],
 ]
-
-
-def _legacy_dict_to_lines(info):
-    names = f"{info.get('white_name', '?')}  vs  {info.get('black_name', '?')}"
-    tc_line = f"{info.get('time_minutes', 0)} min + {info.get('increment_seconds', 0)} sec"
-    ping_ms = info.get("ping_ms")
-    ping_line = f"ping: {ping_ms} ms" if ping_ms is not None else "ping: —"
-    return [names, tc_line, ping_line]
 
 
 class RightMenu:
@@ -41,11 +39,14 @@ class RightMenu:
         self.padding = 10
         self.button_gap = 6
         self.button_v_pad = 8
-        self.moves_font_factor = 22
+        self.moves_font_factor = 24
         self.button_font_factor = 28
 
-        self.font = get_font(16, mono=True)
+        self.font = get_font(13, mono=True)
+        self.moves_font = get_font(14, bold=True)
         self.button_font = get_font(14, bold=True)
+        self.pill_font = get_font(11, bold=True)
+        self.round_font = get_font(11, bold=True)
 
         self.outer_rect = pg.Rect(0, 0, 0, 0)
         self.moves_rect = pg.Rect(0, 0, 0, 0)
@@ -62,6 +63,7 @@ class RightMenu:
         self._last_scroll_activity_ms = 0
         self._move_cell_hits = []
         self._last_seen_total_rows = 0
+        self._last_review_ply = None
 
     @property
     def backend(self):
@@ -69,7 +71,11 @@ class RightMenu:
 
     def set_rect(self, rect):
         self.font = get_font(max(int(rect.width / self.moves_font_factor), 10), mono=True)
+        self.moves_font = get_font(
+            max(int(rect.width / self.moves_font_factor), 10), bold=True)
         self.button_font = get_font(max(int(rect.width / self.button_font_factor), 10), bold=True)
+        self.pill_font = get_font(max(int(rect.width / 34), 9), bold=True)
+        self.round_font = get_font(max(int(rect.width / 34), 9), bold=True)
 
         p = self.padding
         self.outer_rect = pg.Rect(
@@ -107,20 +113,14 @@ class RightMenu:
         self.moves_rect = pg.Rect(self.outer_rect.x + p, moves_top, inner_w, moves_h)
 
     def _info_section_height(self):
-        lines = self._info_lines()
-        if not lines:
+        if self.game_info is None:
             return 0
-        return self._info_line_height() * len(lines) + self.padding
+        header_h = self.pill_font.get_height() + 12
+        lines = self.game_info.get("lines", [])
+        return header_h + self._info_line_height() * len(lines) + self.padding
 
     def _info_line_height(self):
-        return self.font.get_linesize() + 4
-
-    def _info_lines(self):
-        if self.game_info is None:
-            return []
-        if isinstance(self.game_info, dict):
-            return _legacy_dict_to_lines(self.game_info)
-        return list(self.game_info)
+        return self.font.get_linesize() + 2
 
     def set_game_info(self, info):
         self.game_info = info
@@ -132,12 +132,13 @@ class RightMenu:
         self._total_rows = 0
         self._last_seen_total_rows = 0
         self._last_scroll_activity_ms = 0
+        self._last_review_ply = None
 
     def draw_menu(self):
         pg.draw.rect(self.window, Colors.dark_menu, self.outer_rect)
-        if self._info_lines() and self.info_rect.height > 0:
+        if self.game_info is not None and self.info_rect.height > 0:
             self._draw_game_info(self.info_rect)
-        pg.draw.rect(self.window, Colors.light_grey_menu, self.moves_rect)
+        pg.draw.rect(self.window, Colors.surface_inset, self.moves_rect)
         self._draw_moves(self.moves_rect)
         self._draw_scroll_indicator(self.moves_rect)
         self._draw_buttons(self.buttons_rect)
@@ -151,17 +152,45 @@ class RightMenu:
             self.audio_panel.draw()
 
     def _draw_game_info(self, rect):
+        info = self.game_info
+        header_h = self.pill_font.get_height() + 12
+        cx = rect.x
+        cy = rect.y + header_h // 2
+        mode = info.get("mode")
+        if mode:
+            cx = self._draw_mode_pill(mode.upper(), cx, cy) + 10
+        tc = info.get("time_control")
+        if tc:
+            tc_surf = self.font.render(tc, True, Colors.white)
+            self.window.blit(tc_surf, (cx, cy - tc_surf.get_height() / 2))
+            cx += tc_surf.get_width() + 10
+        rnd = info.get("round")
+        if rnd:
+            rnd_surf = self.round_font.render(f"ROUND {rnd}", True, Colors.text_mute)
+            sep_x = rect.right - rnd_surf.get_width() - 12
+            pg.draw.line(self.window, Colors.button_border,
+                         (sep_x, cy - rnd_surf.get_height() // 2),
+                         (sep_x, cy + rnd_surf.get_height() // 2))
+            self.window.blit(rnd_surf, (rect.right - rnd_surf.get_width(),
+                                        cy - rnd_surf.get_height() / 2))
         line_h = self._info_line_height()
-        for i, line in enumerate(self._info_lines()):
-            surf = self.font.render(line, True, Colors.white)
-            max_w = rect.width - 2 * self.padding
+        for i, line in enumerate(info.get("lines", [])):
+            surf = self.font.render(line, True, Colors.text_dim)
+            max_w = rect.width
             if surf.get_width() > max_w > 0:
                 surf = surf.subsurface(pg.Rect(0, 0, max_w, surf.get_height()))
-            self.window.blit(
-                surf,
-                (rect.x + (rect.width - surf.get_width()) // 2,
-                 rect.y + i * line_h),
-            )
+            self.window.blit(surf, (rect.x, rect.y + header_h + i * line_h))
+
+    def _draw_mode_pill(self, text, x, cy):
+        surf = self.pill_font.render(text, True, Colors.amber_hi)
+        pad_x = max(int(surf.get_height() * 0.6), 5)
+        w = surf.get_width() + 2 * pad_x
+        h = surf.get_height() + 6
+        chip = rounded_rect_surface((w, h), h // 2, Colors.mode_pill_bg,
+                                    border=Colors.mode_pill_border, border_width=1)
+        self.window.blit(chip, (x, round(cy - h / 2)))
+        blit_centered(self.window, surf, (x + w / 2, cy))
+        return x + w
 
     def handle_click(self, pos):
         disabled = self.disabled_keys_provider()
@@ -196,7 +225,7 @@ class RightMenu:
 
     def _draw_moves(self, rect):
         history = self.match.move_history
-        line_h = self.font.get_linesize()
+        line_h = self.moves_font.get_linesize() + 2
         self._max_lines = max(int((rect.height - 2 * self.padding) // line_h), 0)
 
         pairs = list(iter_move_pairs(history))
@@ -211,11 +240,7 @@ class RightMenu:
         max_offset = max(0, self._total_rows - self._max_lines)
         self.scroll_offset = min(self.scroll_offset, max_offset)
 
-        if self.board is not None and self.board.review_ply is not None:
-            active_ply = self._active_ply(len(history))
-            if active_ply > 0:
-                pair_idx = (active_ply - 1) // 2
-                self.scroll_offset = self._scroll_offset_to_show_pair(pair_idx)
+        self._reveal_active_ply_on_nav(len(history))
 
         end = self._total_rows - self.scroll_offset
         start = max(0, end - self._max_lines)
@@ -224,8 +249,7 @@ class RightMenu:
         self._move_cell_hits = []
 
         char_w, _ = self.font.size("0")
-        prefix_chars = 5
-        prefix_w = char_w * prefix_chars
+        prefix_w = char_w * 5
         cell_pad = 4
         inner_w = rect.width - 2 * self.padding
         cell_w = max((inner_w - prefix_w) // 2 - cell_pad, char_w * 4)
@@ -238,25 +262,37 @@ class RightMenu:
             row_y = rect.y + self.padding + i * line_h
             row_x = rect.x + self.padding
 
-            prefix_surf = self.font.render(f"{number:>3}.", True, Colors.white)
-            self.window.blit(prefix_surf, (row_x, row_y))
+            prefix_surf = self.font.render(f"{number:>3}.", True, Colors.text_mute)
+            self.window.blit(prefix_surf, (row_x, row_y + (line_h - prefix_surf.get_height()) // 2))
 
             white_x = row_x + prefix_w
             white_cell = pg.Rect(white_x, row_y, cell_w, line_h)
-            self._draw_move_cell(white_cell, white_entry.san, active_ply == white_ply)
+            self._draw_move_cell(white_cell, white_entry, active_ply == white_ply)
             self._move_cell_hits.append((white_cell, white_ply))
 
             if black_entry is not None:
                 black_x = white_x + cell_w + cell_pad
                 black_cell = pg.Rect(black_x, row_y, cell_w, line_h)
-                self._draw_move_cell(black_cell, black_entry.san, active_ply == black_ply)
+                self._draw_move_cell(black_cell, black_entry, active_ply == black_ply)
                 self._move_cell_hits.append((black_cell, black_ply))
 
-    def _draw_move_cell(self, rect, san, active):
+    def _reveal_active_ply_on_nav(self, history_len):
+        review_ply = self.board.review_ply if self.board is not None else None
+        if review_ply == self._last_review_ply:
+            return
+        self._last_review_ply = review_ply
+        if review_ply is None or review_ply <= 0:
+            return
+        pair_idx = (review_ply - 1) // 2
+        self.scroll_offset = self._scroll_offset_to_show_pair(pair_idx)
+
+    def _draw_move_cell(self, rect, entry, active):
         if active:
-            pg.draw.rect(self.window, Colors.button_hover, rect, border_radius=3)
-        surf = self.font.render(san, True, Colors.white)
-        self.window.blit(surf, (rect.x + 2, rect.y))
+            pg.draw.rect(self.window, Colors.button_pressed, rect, border_radius=4)
+            pg.draw.rect(self.window, Colors.accent, rect, width=1, border_radius=4)
+        color = Colors.white if active else Colors.text_dim
+        surf = self.moves_font.render(entry.san, True, color)
+        self.window.blit(surf, (rect.x + 4, rect.centery - surf.get_height() / 2))
 
     def _active_ply(self, history_len):
         if self.board is not None and self.board.review_ply is not None:

@@ -36,6 +36,7 @@ from frontend.modals.wait import WaitModal
 from frontend.panels.right import (
     RightMenu,
     BUTTONS as RIGHT_MENU_BUTTONS,
+    UNTIMED_BUTTONS as RIGHT_MENU_UNTIMED_BUTTONS,
     REVIEW_BUTTONS as RIGHT_MENU_REVIEW_BUTTONS,
 )
 from frontend.modals.result import ResultMenu
@@ -114,10 +115,24 @@ def _score_str(score):
 
 OPPONENT_NAME_FOR_MODE = {
     SINGLE_SCREEN: "Player 2",
-    BOT: "AI Bot",
+    BOT: "Bot",
     ONLINE: "Opponent",
 }
 
+PLACEHOLDER_RATING = "1500"
+
+MODE_PILL_LABELS = {
+    SINGLE_SCREEN: "Local",
+    BOT: "Bot",
+    ONLINE: "Online",
+}
+
+
+RIGHT_PANEL_WIDTH = 360
+BOARD_AREA_MARGIN = 12
+STRIP_MARGIN = 5
+STRIP_HEIGHT_RATIO = 0.075
+STRIP_GAP_RATIO = 0.015
 
 AUTO_FLIP_DELAY_MS = 200
 RESULT_FADE_MS = 400
@@ -658,6 +673,8 @@ class Frontend(OnlineEventsMixin):
     def _right_menu_buttons(self):
         if self.pgn_review:
             return RIGHT_MENU_REVIEW_BUTTONS
+        if self.match.clock is None:
+            return RIGHT_MENU_UNTIMED_BUTTONS
         return RIGHT_MENU_BUTTONS
 
     def _right_menu_disabled_keys(self):
@@ -829,11 +846,14 @@ class Frontend(OnlineEventsMixin):
         if added <= 0:
             self.toast.show(f"{name} already at maximum time")
         else:
+            self._strip_for_color(recipient_color).flash_increment(added)
             self.toast.show(f"Gave {int(round(added))} sec to {name}")
 
     def _give_time_toast_for_receiver(self, giver_color, added):
         if added <= 0:
             return
+        if self.match.local_color is not None:
+            self._strip_for_color(self.match.local_color).flash_increment(added)
         name = self._name_for_color(giver_color)
         self.toast.show(f"{name} gave you {int(round(added))} seconds")
 
@@ -868,10 +888,13 @@ class Frontend(OnlineEventsMixin):
         clock = self.match.clock
         if clock is None or clock.increment_seconds <= 0:
             return
-        mover_strip = (self.player_strip_top
-                       if self._strip_color_top() == mover_color
-                       else self.player_strip_bottom)
-        mover_strip.flash_increment()
+        self._strip_for_color(mover_color).flash_increment()
+
+    def _strip_for_color(self, color):
+        is_white = color in (PieceColor.WHITE, "white")
+        top_is_white = self._strip_color_top() == PieceColor.WHITE
+        return (self.player_strip_top if is_white == top_is_white
+                else self.player_strip_bottom)
 
     def _strip_color_top(self):
         return PieceColor.WHITE if self.board.flipped else PieceColor.BLACK
@@ -951,26 +974,32 @@ class Frontend(OnlineEventsMixin):
         self._update_online_phase()
 
     def _refresh_game_info(self):
-        self.right_menu.set_game_info(self._compute_game_info_lines())
+        self.right_menu.set_game_info(self._compute_game_info())
 
-    def _compute_game_info_lines(self):
+    def _compute_game_info(self):
         if self.mode == "menu":
             return None
-        tc = self._format_time_control() or "no clock"
+        tc = self._format_time_control() or "∞"
+        rnd = self._current_round()
         if self.pgn_review:
-            result = self._pgn_result_tag or "*"
-            return ["Review", f"{result}  ·  {tc}"]
+            return {"mode": "Review", "time_control": tc, "round": rnd,
+                    "lines": [self._pgn_result_tag or "*"]}
+        info = {"mode": MODE_PILL_LABELS.get(self.mode, "Local"),
+                "time_control": tc, "round": rnd, "lines": []}
         if self.mode == ONLINE:
             white_score = self._series_scores.get(self.white_name, 0.0)
             black_score = self._series_scores.get(self.black_name, 0.0)
-            scoreboard = (
+            info["lines"] = [
                 f"{self.white_name}  {_score_str(white_score)} - "
-                f"{_score_str(black_score)}  {self.black_name}"
-            )
-            return [scoreboard, tc, self._format_ping_line()]
-        if self.mode == BOT:
-            return ["vs Bot (preview)", tc]
-        return ["Local game", tc]
+                f"{_score_str(black_score)}  {self.black_name}",
+                self._format_ping_line(),
+            ]
+        return info
+
+    def _current_round(self):
+        total = (self._series_scores.get(self.white_name, 0.0)
+                 + self._series_scores.get(self.black_name, 0.0))
+        return int(total) + 1
 
     def _format_time_control(self):
         if self._time_control is None:
@@ -1095,13 +1124,18 @@ class Frontend(OnlineEventsMixin):
                 and color != self.match.local_color):
             connection_state = self.online_client.opp_state
         auto_end_label, auto_end_seconds = self._compute_auto_end(color, over)
+        is_bot = self.mode == BOT and name == OPPONENT_NAME_FOR_MODE[BOT]
         return {
             "name": name,
+            "player_color": color,
+            "is_bot": is_bot,
+            "rating": PLACEHOLDER_RATING,
             "clock_seconds": seconds,
             "active": active,
             "captured": captured,
             "advantage": advantage,
             "captured_color": opponent_of(color),
+            "ko_count": len(captured),
             "connection_state": connection_state,
             "clock_initial_seconds": initial_seconds,
             "auto_end_label": auto_end_label,
@@ -1151,11 +1185,20 @@ class Frontend(OnlineEventsMixin):
         window_width, window_height = self.window.get_size()
         top = WindowChrome.HEIGHT
         avail_height = window_height - top
-        effective = max(min(window_width, avail_height), 300)
-        board_size_px = effective * self.board.SCREEN_FRACTION_X
+        panel_w = min(RIGHT_PANEL_WIDTH, int(window_width * 0.42))
+        board_area_w = max(window_width - panel_w, 200)
 
-        board_x = board_size_px * self.board.OFFSET_FRACTION_X
-        board_y = top + avail_height / 2 - board_size_px / 2
+        stack_factor = 1 + 2 * (STRIP_HEIGHT_RATIO + STRIP_GAP_RATIO)
+        h_budget = board_area_w - 2 * BOARD_AREA_MARGIN
+        v_budget = (avail_height - 2 * BOARD_AREA_MARGIN) / stack_factor
+        board_size_px = max(min(h_budget, v_budget), 240)
+
+        strip_height = board_size_px * STRIP_HEIGHT_RATIO
+        strip_gap = board_size_px * STRIP_GAP_RATIO
+        stack_h = board_size_px + 2 * (strip_height + strip_gap)
+
+        board_x = (board_area_w - board_size_px) / 2
+        board_y = top + (avail_height - stack_h) / 2 + strip_height + strip_gap
 
         board_rect = pg.Rect(
             board_x,
@@ -1214,29 +1257,29 @@ class Frontend(OnlineEventsMixin):
         result_modal_rect = result_rect if board_visible else menu_modal_rect
 
         menu_rect = pg.Rect(
-            board_rect.right,
+            window_width - panel_w,
             top,
-            max(window_width - board_rect.right, 300),
+            panel_w,
             avail_height
         )
 
-        strip_height = board_size_px * 0.075
-        strip_gap = board_size_px * 0.015
+        strip_x = STRIP_MARGIN
+        strip_w = board_area_w - 2 * STRIP_MARGIN
         top_strip_rect = pg.Rect(
-            board_x,
+            strip_x,
             board_y - strip_height - strip_gap,
-            board_size_px,
+            strip_w,
             strip_height,
         )
         bottom_strip_rect = pg.Rect(
-            board_x,
+            strip_x,
             board_y + board_size_px + strip_gap,
-            board_size_px,
+            strip_w,
             strip_height,
         )
 
         self.board.font = get_font(
-            int(effective // self.board.board_guides_font_factor), bold=True,
+            int(board_size_px // self.board.board_guides_font_factor), bold=True,
         )
         self.board.set_rect(board_rect)
         self.result_menu.set_rect(result_rect)
@@ -1265,7 +1308,7 @@ class Frontend(OnlineEventsMixin):
     def _refresh_capture_icons(self, strip_height):
         if not self.board.piece_images_original:
             return
-        target = max(int(strip_height * 0.6), 1)
+        target = max(int(strip_height * 0.42), 1)
         icons = {
             key: pg.transform.smoothscale(surface, (target, target))
             for key, surface in self.board.piece_images_original.items()

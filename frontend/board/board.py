@@ -26,8 +26,6 @@ def _draw_capsule(surf, p1, p2, width, color):
 
 
 class Board:
-    SCREEN_FRACTION_X = 0.8
-    OFFSET_FRACTION_X = 0.02
     TEXT_PADDING_FRACTION = 0.006
     SIZE = 8
     FRAME_PAD_FRACTION = 0.055

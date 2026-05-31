@@ -11,6 +11,7 @@ import pygame as pg
 import pytest
 
 from backend.match import BOT, ONLINE
+from frontend.visual.colors import Colors
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -37,38 +38,43 @@ def _start_local(app, time_minutes=5, incr=2):
 
 
 @pytest.mark.parametrize(
-    "time_minutes, incr, expected",
+    "time_minutes, incr, tc",
     [
-        pytest.param(5, 2, ["Local game", "5+2"], id="with_clock"),
-        pytest.param(None, 0, ["Local game", "no clock"], id="no_clock"),
+        pytest.param(5, 2, "5+2", id="with_clock"),
+        pytest.param(None, 0, "∞", id="untimed_shows_infinity"),
     ],
 )
-def test_single_screen_lines(time_minutes, incr, expected):
-    """Local mode has no series concept, so row 2 is just the time control."""
+def test_single_screen_info(time_minutes, incr, tc):
+    """Local mode: a Local pill, the time control, round 1, no extra lines."""
     app = _make_app()
     _start_local(app, time_minutes=time_minutes, incr=incr)
-    assert app._compute_game_info_lines() == expected
+    assert app._compute_game_info() == {
+        "mode": "Local", "time_control": tc, "round": 1, "lines": [],
+    }
 
 
-def test_bot_mode_lines():
+def test_bot_mode_info():
     app = _make_app()
     app.mode = BOT
     app._time_control = (180, 0)
-    assert app._compute_game_info_lines() == ["vs Bot (preview)", "3+0"]
+    assert app._compute_game_info() == {
+        "mode": "Bot", "time_control": "3+0", "round": 1, "lines": [],
+    }
 
 
 def test_online_initial_series_zero_zero():
-    """Online line 1 packs names + score in board-color order, line 2 is
-    bare time control, line 3 is live ping."""
+    """Online header carries the Online pill + TC + round; the scoreboard and
+    live ping drop into the extra lines below."""
     app = _make_app()
     app.mode = ONLINE
     app.white_name = "Alice"
     app.black_name = "Bob"
     app._time_control = (180, 2)
-    lines = app._compute_game_info_lines()
-    assert lines[0] == "Alice  0 - 0  Bob"
-    assert lines[1] == "3+2"
-    assert lines[2] == "ping: —"
+    info = app._compute_game_info()
+    assert info["mode"] == "Online"
+    assert info["time_control"] == "3+2"
+    assert info["lines"][0] == "Alice  0 - 0  Bob"
+    assert info["lines"][1] == "ping: —"
 
 
 @pytest.mark.parametrize(
@@ -89,9 +95,9 @@ def test_series_score_formatting(white_score, black_score, expected):
     app.black_name = "Bob"
     app._time_control = (60, 0)
     app._series_scores = {"Alice": white_score, "Bob": black_score}
-    lines = app._compute_game_info_lines()
-    assert lines[0] == expected
-    assert lines[1] == "1+0"
+    info = app._compute_game_info()
+    assert info["lines"][0] == expected
+    assert info["time_control"] == "1+0"
 
 
 def test_series_resets_when_opponent_pair_changes():
@@ -117,8 +123,7 @@ def test_series_persists_across_rematch_with_color_swap():
         "time_minutes": 3, "increment_seconds": 0,
     })
     assert app._series_scores == {"A": 1, "B": 0}
-    lines = app._compute_game_info_lines()
-    assert lines[0] == "B  0 - 1  A"
+    assert app._compute_game_info()["lines"][0] == "B  0 - 1  A"
 
 
 @pytest.mark.parametrize(
@@ -178,8 +183,7 @@ def test_score_follows_player_through_color_swap_end_to_end():
     })
     assert app._series_scores["Me"] == 1
     assert app._series_scores["Friend"] == 0.0
-    lines = app._compute_game_info_lines()
-    assert lines[0] == "Friend  0 - 1  Me"
+    assert app._compute_game_info()["lines"][0] == "Friend  0 - 1  Me"
 
 
 @pytest.mark.parametrize("reason,winner,expected", [
@@ -251,20 +255,22 @@ def test_engine_result_subtitle_reports_actual_reason(engine_result, expected):
 
 
 @pytest.mark.parametrize(
-    "result_tag, expected",
+    "result_tag, shown",
     [
-        pytest.param("1-0", ["Review", "1-0  ·  5+2"], id="result_tag"),
-        pytest.param(None, ["Review", "*  ·  5+2"], id="star_fallback"),
+        pytest.param("1-0", "1-0", id="result_tag"),
+        pytest.param(None, "*", id="star_fallback"),
     ],
 )
-def test_pgn_review_lines(result_tag, expected):
-    """PGN review treats the result tag (or "*" fallback) as the "count",
-    combined with TC on the same row, mirroring the online "score · TC" layout."""
+def test_pgn_review_info(result_tag, shown):
+    """PGN review shows a Review pill + TC and surfaces the result tag (or "*"
+    fallback) as the single extra line."""
     app = _make_app()
     _start_local(app)
     app._pgn_result_tag = result_tag
     app.pgn_review = True
-    assert app._compute_game_info_lines() == expected
+    assert app._compute_game_info() == {
+        "mode": "Review", "time_control": "5+2", "round": 1, "lines": [shown],
+    }
 
 
 def test_pgn_review_inline_result_suppresses_modal():
@@ -276,10 +282,10 @@ def test_pgn_review_inline_result_suppresses_modal():
     assert app._result_first_seen_at_ms is None
 
 
-def test_menu_mode_returns_no_lines():
+def test_menu_mode_returns_no_info():
     app = _make_app()
     assert app.mode == "menu"
-    assert app._compute_game_info_lines() is None
+    assert app._compute_game_info() is None
 
 
 @pytest.mark.parametrize(
@@ -298,35 +304,49 @@ def test_online_ping_line(ping_value, expected_line):
     fake = MagicMock()
     fake.get_ping_ms.return_value = ping_value
     app.online_client = fake
-    lines = app._compute_game_info_lines()
-    assert lines[2] == expected_line
+    assert app._compute_game_info()["lines"][1] == expected_line
 
 
-def test_right_menu_accepts_list_of_lines():
+def _info_menu():
     from frontend.panels.right import RightMenu
     from backend.backend import Backend
     rm = RightMenu(pg.display.get_surface(), Backend(), {})
-    rm.set_rect(pg.Rect(0, 0, 300, 600))
-    rm.set_game_info(["First", "Second", "Third"])
-    assert rm._info_lines() == ["First", "Second", "Third"]
+    rm.set_rect(pg.Rect(0, 0, 320, 640))
+    return rm
 
 
-def test_right_menu_accepts_legacy_dict():
-    from frontend.panels.right import RightMenu
-    from backend.backend import Backend
-    rm = RightMenu(pg.display.get_surface(), Backend(), {})
-    rm.set_rect(pg.Rect(0, 0, 300, 600))
-    rm.set_game_info({
-        "white_name": "A", "black_name": "B",
-        "time_minutes": 3, "increment_seconds": 2, "ping_ms": 50,
-    })
-    assert rm._info_lines() == ["A  vs  B", "3 min + 2 sec", "ping: 50 ms"]
+def test_right_menu_header_reserves_space_for_info():
+    rm = _info_menu()
+    rm.set_game_info({"mode": "Local", "time_control": "5+2", "round": 1, "lines": []})
+    assert rm.info_rect.height > 0
 
 
-def test_right_menu_no_info_when_none():
-    from frontend.panels.right import RightMenu
-    from backend.backend import Backend
-    rm = RightMenu(pg.display.get_surface(), Backend(), {})
-    rm.set_rect(pg.Rect(0, 0, 300, 600))
+def test_right_menu_extra_lines_grow_info_height():
+    rm = _info_menu()
+    rm.set_game_info({"mode": "Local", "time_control": "5+2", "round": 1, "lines": []})
+    bare = rm.info_rect.height
+    rm.set_game_info({"mode": "Online", "time_control": "5+2", "round": 1,
+                      "lines": ["A 0 - 0 B", "ping: —"]})
+    assert rm.info_rect.height > bare
+
+
+def test_right_menu_no_info_collapses_section():
+    rm = _info_menu()
     rm.set_game_info(None)
-    assert rm._info_lines() == []
+    assert rm.info_rect.height == 0
+
+
+def test_right_menu_mode_pill_draws_amber(monkeypatch):
+    rm = _info_menu()
+    rm.set_game_info({"mode": "Local", "time_control": "5+2", "round": 2, "lines": []})
+    win = pg.display.get_surface()
+    win.fill((0, 0, 0))
+    rm.draw_menu()
+    want = pg.Color(Colors.amber_hi)
+    found = any(
+        abs(win.get_at((x, y)).r - want.r) <= 30
+        and win.get_at((x, y)).g > 120 and win.get_at((x, y)).b < 130
+        for x in range(rm.info_rect.x, rm.info_rect.right, 2)
+        for y in range(rm.info_rect.y, rm.info_rect.y + 24)
+    )
+    assert found, "mode pill text should render in amber"

@@ -1,18 +1,23 @@
 import pygame as pg
 
-from frontend.visual.clock_visual import INCREMENT_FLASH_MS, clock_pocket_color
+from backend.pieces import PieceColor
+from frontend.visual.clock_visual import LOW_TIME_FRACTION
 from frontend.visual.colors import Colors
-from frontend.visual.fonts import get_font
+from frontend.visual.draw import supersample, rounded_rect_surface, blit_centered
+from frontend.visual.fonts import get_font, DISPLAY
 
 
 AUTO_END_RED_THRESHOLD_SECONDS = 10
 AUTO_END_BADGE_FONT_SCALE = 0.75
-INCREMENT_FLASH_PEAK_ALPHA = 180
+GIVE_TIME_FLASH_MS = 520
+GIVE_TIME_FLASH_PEAK_ALPHA = 150
+GIVE_TIME_FLOAT_MS = 1000
+KO_WINK_MS = 520
 
 
 def format_clock(seconds):
     if seconds is None:
-        return "—:—"
+        return "∞"
     if seconds < 0:
         seconds = 0
     if seconds < 30:
@@ -31,12 +36,22 @@ def format_countdown(seconds):
     return f"{minutes}:{secs:02d}"
 
 
+def give_time_float_alpha(progress):
+    if progress < 0 or progress >= 1:
+        return 0
+    ramp = progress / 0.3 if progress < 0.3 else (1 - progress) / 0.7
+    return max(0, min(255, int(255 * ramp)))
+
+
 class PlayerStrip:
 
     def __init__(self, window):
         self.window = window
         self.rect = pg.Rect(0, 0, 0, 0)
         self.name = ""
+        self.player_color = PieceColor.WHITE
+        self.is_bot = False
+        self.rating = None
         self.clock_seconds = None
         self.clock_initial_seconds = None
         self.active = False
@@ -46,26 +61,34 @@ class PlayerStrip:
         self.connection_state = None
         self.auto_end_label = None
         self.auto_end_seconds = None
+        self.ko_count = 0
         self._flash_until_ms = 0
-        self.padding = 10
-        self.pocket_inset = 4
-        self.pocket_fraction = 0.28
+        self._give_time_start_ms = 0
+        self._give_time_amount = 0
+        self._ko_wink_until_ms = 0
         self.name_font = get_font(14, bold=True)
+        self.rating_font = get_font(11, bold=True, mono=True)
         self.clock_font = get_font(16, bold=True, mono=True)
-        self.advantage_font = get_font(14, bold=True)
+        self.advantage_font = get_font(12, bold=True)
+        self.ko_font = get_font(10, bold=True)
+        self.letter_font = get_font(18, family=DISPLAY)
         self.auto_end_font = get_font(11, bold=True)
         self.icons = {}
+        self._avatar_cache = None
 
     def set_rect(self, rect):
         self.rect = pg.Rect(rect)
-        name_size = max(int(rect.height * 0.45), 12)
-        clock_size = max(int(rect.height * 0.55), 14)
-        adv_size = max(int(rect.height * 0.4), 10)
-        auto_end_size = max(int(name_size * AUTO_END_BADGE_FONT_SCALE), 9)
-        self.name_font = get_font(name_size, bold=True)
-        self.clock_font = get_font(clock_size, bold=True, mono=True)
-        self.advantage_font = get_font(adv_size, bold=True)
-        self.auto_end_font = get_font(auto_end_size, bold=True)
+        h = rect.height
+        ih = max(int(h * 0.68), 1)
+        self.name_font = get_font(max(int(ih * 0.42), 11), bold=True)
+        self.rating_font = get_font(max(int(ih * 0.28), 9), bold=True, mono=True)
+        self.clock_font = get_font(max(int(h * 0.5), 14), bold=True, mono=True)
+        self.advantage_font = get_font(max(int(ih * 0.34), 9), bold=True)
+        self.ko_font = get_font(max(int(ih * 0.3), 8), bold=True)
+        self.letter_font = get_font(max(int(ih * 0.5), 11), family=DISPLAY)
+        self.auto_end_font = get_font(
+            max(int(ih * 0.42 * AUTO_END_BADGE_FONT_SCALE), 9), bold=True)
+        self._avatar_cache = None
 
     def set_piece_icons(self, icons):
         self.icons = icons
@@ -73,8 +96,12 @@ class PlayerStrip:
     def set_state(self, name, clock_seconds, active, captured=None, advantage=0,
                   captured_color=None, connection_state=None,
                   clock_initial_seconds=None, auto_end_label=None,
-                  auto_end_seconds=None):
+                  auto_end_seconds=None, player_color=PieceColor.WHITE,
+                  is_bot=False, rating=None, ko_count=0):
         self.name = name
+        self.player_color = player_color
+        self.is_bot = is_bot
+        self.rating = rating
         self.clock_seconds = clock_seconds
         self.clock_initial_seconds = clock_initial_seconds
         self.active = active
@@ -84,80 +111,248 @@ class PlayerStrip:
         self.connection_state = connection_state
         self.auto_end_label = auto_end_label
         self.auto_end_seconds = auto_end_seconds
+        if ko_count > self.ko_count:
+            self._ko_wink_until_ms = pg.time.get_ticks() + KO_WINK_MS
+        self.ko_count = ko_count
 
-    def flash_increment(self, now_ms=None):
+    def flash_increment(self, seconds=0, now_ms=None):
         if now_ms is None:
             now_ms = pg.time.get_ticks()
-        self._flash_until_ms = now_ms + INCREMENT_FLASH_MS
+        self._flash_until_ms = now_ms + GIVE_TIME_FLASH_MS
+        if seconds > 0:
+            self._give_time_start_ms = now_ms
+            self._give_time_amount = seconds
 
     def draw(self):
-        pg.draw.rect(self.window, Colors.dark_menu, self.rect, border_radius=4)
+        h = self.rect.height
+        if h <= 0 or self.rect.width <= 0:
+            return
+        pad = max(int(h * 0.16), 4)
+        radius = max(int(h * 0.17), 5)
+        pg.draw.rect(self.window, Colors.surface, self.rect, border_radius=radius)
 
-        pocket_w = int(self.rect.width * self.pocket_fraction)
-        pocket_rect = pg.Rect(
-            self.rect.right - pocket_w - self.pocket_inset,
-            self.rect.y + self.pocket_inset,
-            pocket_w,
-            self.rect.height - 2 * self.pocket_inset,
-        )
+        av_size = max(h - 2 * pad, 1)
+        gap = max(int(h * 0.18), 6)
 
-        name_region = pg.Rect(
-            self.rect.x + self.pocket_inset,
-            self.rect.y + self.pocket_inset,
-            pocket_rect.x - self.rect.x - 2 * self.pocket_inset,
-            self.rect.height - 2 * self.pocket_inset,
-        )
+        clock_rect = self._draw_clock(pad, av_size)
+        ko_left = self._draw_ko(clock_rect.x - gap, av_size)
+
+        avatar_rect = pg.Rect(self.rect.x + pad, self.rect.y + pad, av_size, av_size)
+        self._draw_avatar(avatar_rect)
+
+        who_x = avatar_rect.right + gap
+        who_right = (ko_left if ko_left is not None else clock_rect.x) - gap
+        self._draw_who(who_x, who_right, av_size)
 
         if self.active:
-            pg.draw.rect(self.window, Colors.button_hover, name_region, border_radius=3)
+            pg.draw.rect(self.window, Colors.accent, self.rect, width=2,
+                         border_radius=radius)
+        else:
+            pg.draw.rect(self.window, Colors.button_border, self.rect, width=1,
+                         border_radius=radius)
 
-        dot_offset = 0
+        self._draw_give_time_float(clock_rect)
+
+    def _avatar_colors(self):
+        if self.player_color in (PieceColor.WHITE, "white") and not self.is_bot:
+            return (pg.Color(Colors.amber), pg.Color(Colors.accent),
+                    pg.Color(Colors.on_accent))
+        return (pg.Color(Colors.avatar_slate_top), pg.Color(Colors.avatar_slate_bottom),
+                pg.Color(Colors.avatar_letter_dark))
+
+    def _draw_avatar(self, rect):
+        top, bottom, letter_color = self._avatar_colors()
+        letter = (self.name[:1].upper() if self.name else "?")
+        key = (rect.width, top.r, top.g, top.b, bottom.r, bottom.g, bottom.b)
+        if self._avatar_cache is None or self._avatar_cache[0] != key:
+            self._avatar_cache = (key, self._build_avatar(rect.width, top, bottom))
+        self.window.blit(self._avatar_cache[1], rect.topleft)
+        glyph = self.letter_font.render(letter, True, letter_color)
+        self.window.blit(glyph, (rect.centerx - glyph.get_width() / 2,
+                                 rect.centery - glyph.get_height() / 2))
+
+    @staticmethod
+    def _build_avatar(size, top, bottom):
+        radius = max(int(size * 0.22), 2)
+
+        def render(surf, k):
+            w = surf.get_width()
+            for y in range(w):
+                t = y / max(w - 1, 1)
+                surf.fill(top.lerp(bottom, t), pg.Rect(0, y, w, 1))
+            mask = pg.Surface((w, w), pg.SRCALPHA)
+            pg.draw.rect(mask, (255, 255, 255, 255), mask.get_rect(),
+                         border_radius=int(radius * k))
+            surf.blit(mask, (0, 0), special_flags=pg.BLEND_RGBA_MULT)
+            pg.draw.rect(surf, (0, 0, 0, 80), surf.get_rect(),
+                         width=max(int(k), 1), border_radius=int(radius * k))
+        return supersample(size, render)
+
+    def _draw_who(self, x, right, ih):
+        if right <= x:
+            return
+        top_cy = self.rect.y + (self.rect.height - ih) // 2 + int(ih * 0.27)
+        bottom_cy = self.rect.y + (self.rect.height - ih) // 2 + int(ih * 0.74)
+        badge_x = self._draw_auto_end_badge(right, top_cy)
+        name_right = (badge_x - 8) if badge_x is not None else right
+        cursor = x
         if self.connection_state is not None:
-            dot_radius = max(int(self.rect.height * 0.10), 4)
-            dot_color = Colors.connection_dots.get(
-                self.connection_state, Colors.connection_dots["unknown"],
-            )
-            dot_x = name_region.x + self.pocket_inset + dot_radius
-            dot_y = name_region.centery
-            pg.draw.circle(self.window, dot_color, (dot_x, dot_y), dot_radius)
-            dot_offset = dot_radius * 2 + 6
-
-        badge_surf, badge_x, badge_y = self._render_auto_end_badge(name_region)
-
+            dot_r = max(int(ih * 0.11), 3)
+            color = Colors.connection_dots.get(
+                self.connection_state, Colors.connection_dots["unknown"])
+            pg.draw.circle(self.window, color, (cursor + dot_r, top_cy), dot_r)
+            cursor += dot_r * 2 + max(int(ih * 0.12), 4)
         name_surf = self.name_font.render(self.name, True, Colors.white)
-        max_w = name_region.width - 2 * self.pocket_inset - dot_offset
-        if name_surf.get_width() > max_w > 0:
-            name_surf = name_surf.subsurface(pg.Rect(0, 0, max_w, name_surf.get_height()))
-        name_x = name_region.x + self.pocket_inset + dot_offset
-        name_y = name_region.centery - name_surf.get_height() / 2
-        self.window.blit(name_surf, (name_x, name_y))
+        max_name_w = max(name_right - cursor, 1)
+        if name_surf.get_width() > max_name_w:
+            name_surf = name_surf.subsurface(
+                pg.Rect(0, 0, max_name_w, name_surf.get_height()))
+        self.window.blit(name_surf, (cursor, top_cy - name_surf.get_height() / 2))
+        cursor += name_surf.get_width() + max(int(ih * 0.14), 5)
+        if self.rating is not None:
+            self._draw_rating_pill(cursor, top_cy, name_right)
+        self._draw_captured(x, bottom_cy, right, ih)
 
-        captures_max_x = (badge_x - 8 if badge_surf is not None
-                          else name_region.right - self.pocket_inset)
-        self._draw_captures(name_region, name_x + name_surf.get_width(), captures_max_x)
+    def _draw_rating_pill(self, x, cy, right):
+        text = self.rating_font.render(str(self.rating), True, Colors.text_dim)
+        pad_x = max(int(text.get_height() * 0.45), 3)
+        w = text.get_width() + 2 * pad_x
+        h = text.get_height() + 4
+        if x + w > right:
+            return
+        pill = rounded_rect_surface((w, h), max(h // 3, 3), Colors.button_hover)
+        self.window.blit(pill, (x, round(cy - h / 2)))
+        blit_centered(self.window, text, (x + w / 2, cy))
 
-        if badge_surf is not None:
-            self.window.blit(badge_surf, (badge_x, badge_y))
+    def _draw_captured(self, x, cy, right, ih):
+        cursor = x
+        size = max(int(ih * 0.5), 6)
+        for piece_type in self.captured:
+            icon = self.icons.get((piece_type, self.captured_color))
+            if icon is None:
+                continue
+            if icon.get_height() != size:
+                icon = pg.transform.smoothscale(icon, (size, size))
+            if cursor + icon.get_width() > right:
+                return
+            self.window.blit(icon, (cursor, cy - icon.get_height() / 2))
+            cursor += icon.get_width() - icon.get_width() // 3
+        if self.advantage > 0:
+            self._draw_advantage_pill(cursor + max(int(ih * 0.18), 5), cy, right)
 
-        pocket_color = clock_pocket_color(self._clock_fraction())
-        pg.draw.rect(self.window, pocket_color, pocket_rect, border_radius=3)
+    def _draw_advantage_pill(self, x, cy, right):
+        text = self.advantage_font.render(f"+{self.advantage}", True, Colors.on_accent)
+        pad_x = max(int(text.get_height() * 0.55), 4)
+        w = text.get_width() + 2 * pad_x
+        h = text.get_height() + 2
+        if x + w > right:
+            return
+        pill = rounded_rect_surface((w, h), h // 2, Colors.amber)
+        self.window.blit(pill, (x, round(cy - h / 2)))
+        blit_centered(self.window, text, (x + w / 2, cy))
 
-        flash_alpha = self._increment_flash_alpha()
-        if flash_alpha > 0:
-            flash_color = pg.Color(Colors.clock_increment_flash)
-            flash_surface = pg.Surface(pocket_rect.size, pg.SRCALPHA)
-            flash_color.a = flash_alpha
-            pg.draw.rect(flash_surface, flash_color,
-                         flash_surface.get_rect(), border_radius=3)
-            self.window.blit(flash_surface, pocket_rect.topleft)
+    def _draw_ko(self, right, ih):
+        if self.ko_count <= 0:
+            return None
+        winking = pg.time.get_ticks() < self._ko_wink_until_ms
+        label_color = Colors.amber if winking else Colors.text_mute
+        text = self.ko_font.render(f"{self.ko_count} KO", True, label_color)
+        shell_w = max(int(ih * 0.16), 4)
+        shell_h = max(int(ih * 0.42), 7)
+        gap = max(int(ih * 0.12), 3)
+        block_w = shell_w + gap + text.get_width()
+        x = right - block_w
+        cy = self.rect.y + self.rect.height // 2
+        shell = pg.Rect(x, cy - shell_h // 2, shell_w, shell_h)
+        self._draw_shell(shell, winking)
+        blit_centered(self.window, text, (shell.right + gap + text.get_width() / 2, cy))
+        return x
 
-        clock_text = format_clock(self.clock_seconds)
-        clock_surf = self.clock_font.render(clock_text, True, Colors.white)
-        self.window.blit(
-            clock_surf,
-            (pocket_rect.centerx - clock_surf.get_width() / 2,
-             pocket_rect.centery - clock_surf.get_height() / 2),
-        )
+    def _draw_shell(self, rect, winking):
+        self.window.blit(self._build_shell(rect.width, rect.height, winking),
+                         rect.topleft)
+
+    @staticmethod
+    def _build_shell(w, h, winking):
+        def render(surf, k):
+            width, height = surf.get_size()
+            split = int(height * 0.78)
+            top = pg.Color(Colors.shell_red_hi if winking else Colors.shell_red)
+            red = pg.Color(Colors.shell_red)
+            brass = pg.Color(Colors.shell_brass)
+            for y in range(height):
+                if y < split:
+                    col = top.lerp(red, y / max(split - 1, 1))
+                else:
+                    col = brass
+                surf.fill(col, pg.Rect(0, y, width, 1))
+            mask = pg.Surface((width, height), pg.SRCALPHA)
+            pg.draw.rect(mask, (255, 255, 255, 255), mask.get_rect(),
+                         border_radius=max(int(2 * k), 1))
+            surf.blit(mask, (0, 0), special_flags=pg.BLEND_RGBA_MULT)
+        return supersample((max(w, 1), max(h, 1)), render)
+
+    def _draw_clock(self, pad, av_size):
+        text = format_clock(self.clock_seconds)
+        surf = self.clock_font.render(text, True, self._clock_text_color())
+        hpad = max(int(self.rect.height * 0.22), 8)
+        min_w = max(int(self.rect.height * 2.0), 70)
+        box_w = max(surf.get_width() + 2 * hpad, min_w)
+        box = pg.Rect(self.rect.right - pad - box_w, self.rect.y + pad, box_w, av_size)
+        radius = max(int(self.rect.height * 0.14), 5)
+        pg.draw.rect(self.window, Colors.app_bg, box, border_radius=radius)
+        flash = self._flash_alpha()
+        if flash > 0:
+            tint = pg.Surface(box.size, pg.SRCALPHA)
+            col = pg.Color(Colors.clock_increment_flash)
+            col.a = flash
+            pg.draw.rect(tint, col, tint.get_rect(), border_radius=radius)
+            self.window.blit(tint, box.topleft)
+        pg.draw.rect(self.window, self._clock_border_color(), box, width=1,
+                     border_radius=radius)
+        self.window.blit(surf, (box.centerx - surf.get_width() / 2,
+                                box.centery - surf.get_height() / 2))
+        return box
+
+    def _is_low_time(self):
+        frac = self._clock_fraction()
+        return frac is not None and frac < LOW_TIME_FRACTION
+
+    def _clock_text_color(self):
+        if self._is_low_time():
+            return Colors.clock_low_text
+        return Colors.white
+
+    def _clock_border_color(self):
+        if self._is_low_time():
+            return Colors.clock_low_time
+        return Colors.button_border
+
+    def _draw_give_time_float(self, clock_rect):
+        if self._give_time_start_ms <= 0:
+            return
+        progress = (pg.time.get_ticks() - self._give_time_start_ms) / GIVE_TIME_FLOAT_MS
+        alpha = give_time_float_alpha(progress)
+        if alpha <= 0:
+            return
+        text = f"+0:{int(self._give_time_amount):02d}"
+        surf = self.clock_font.render(text, True, Colors.clock_increment_flash)
+        surf.set_alpha(alpha)
+        rise = int((6 - 28 * progress))
+        self.window.blit(surf, (clock_rect.centerx - surf.get_width() / 2,
+                                clock_rect.y - surf.get_height() + rise))
+
+    def _draw_auto_end_badge(self, right, cy):
+        if self.auto_end_label is None or self.auto_end_seconds is None:
+            return None
+        text = f"{self.auto_end_label} {format_countdown(self.auto_end_seconds)}"
+        color = (Colors.auto_end_alert
+                 if self.auto_end_seconds < AUTO_END_RED_THRESHOLD_SECONDS
+                 else Colors.white)
+        surf = self.auto_end_font.render(text, True, color)
+        badge_x = right - surf.get_width()
+        self.window.blit(surf, (badge_x, cy - surf.get_height() / 2))
+        return badge_x
 
     def _clock_fraction(self):
         if (self.clock_seconds is None or self.clock_initial_seconds is None
@@ -165,7 +360,7 @@ class PlayerStrip:
             return None
         return max(0.0, self.clock_seconds / self.clock_initial_seconds)
 
-    def _increment_flash_alpha(self, now_ms=None):
+    def _flash_alpha(self, now_ms=None):
         if self._flash_until_ms <= 0:
             return 0
         if now_ms is None:
@@ -173,47 +368,5 @@ class PlayerStrip:
         remaining = self._flash_until_ms - now_ms
         if remaining <= 0:
             return 0
-        progress = remaining / INCREMENT_FLASH_MS
-        return int(INCREMENT_FLASH_PEAK_ALPHA * max(0.0, min(1.0, progress)))
-
-    def _render_auto_end_badge(self, name_region):
-        if self.auto_end_label is None or self.auto_end_seconds is None:
-            return None, 0, 0
-        text = f"{self.auto_end_label} {format_countdown(self.auto_end_seconds)}"
-        color = (Colors.auto_end_alert
-                 if self.auto_end_seconds < AUTO_END_RED_THRESHOLD_SECONDS
-                 else Colors.white)
-        surf = self.auto_end_font.render(text, True, color)
-        max_w = name_region.width - 2 * self.pocket_inset
-        if surf.get_width() > max_w > 0:
-            surf = surf.subsurface(pg.Rect(0, 0, max_w, surf.get_height()))
-        badge_x = name_region.right - self.pocket_inset - surf.get_width()
-        badge_y = name_region.centery - surf.get_height() / 2
-        return surf, badge_x, badge_y
-
-    def _draw_captures(self, name_region, start_x, max_x=None):
-        if not self.captured or self.captured_color is None or not self.icons:
-            return
-        gap = 6
-        x = start_x + gap
-        if max_x is None:
-            max_x = name_region.right - self.pocket_inset
-        for piece_type in self.captured:
-            icon = self.icons.get((piece_type, self.captured_color))
-            if icon is None:
-                continue
-            if x + icon.get_width() > max_x:
-                return
-            self.window.blit(icon, (x, name_region.centery - icon.get_height() / 2))
-            x += icon.get_width() - icon.get_width() // 3
-
-        if self.advantage > 0:
-            adv_surf = self.advantage_font.render(
-                f"+{self.advantage}", True, Colors.white,
-            )
-            adv_x = x + 12
-            if adv_x + adv_surf.get_width() <= max_x:
-                self.window.blit(
-                    adv_surf,
-                    (adv_x, name_region.centery - adv_surf.get_height() / 2),
-                )
+        progress = remaining / GIVE_TIME_FLASH_MS
+        return int(GIVE_TIME_FLASH_PEAK_ALPHA * max(0.0, min(1.0, progress)))
