@@ -23,6 +23,13 @@ class Colors:
     result_neutral = "#b9b9b9"
     footer_text = "#67675f"
     footer_link = "#6f9fe0"
+    app_bg = "#0c0e12"
+    titlebar_bg = "#14161b"
+    accent = "#ff5a36"
+    amber = "#ffb020"
+    titlebar_min = "#ffb020"
+    titlebar_max = "#46d17f"
+    titlebar_close = "#ff5a4f"
     connection_dots = {
         "connected": "#3cc85a",
         "reconnecting": "#dcb428",

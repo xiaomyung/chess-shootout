@@ -23,6 +23,7 @@ from frontend.modals.help import HelpModal
 from frontend.modals.reconnecting import ReconnectingModal
 from frontend.visual.toast import Toast
 from frontend.visual.fonts import get_font
+from frontend.window_chrome import WindowChrome, WINDOW_FLAGS
 from frontend.online.client import (
     OnlineClient, RECONNECT_TOTAL_SECONDS, fetch_resume, probe_active_game,
 )
@@ -168,12 +169,14 @@ class Frontend(OnlineEventsMixin):
         self.target_fps = 60
         self.window_width = max(window_width, MIN_WINDOW_WIDTH)
         self.window_height = max(window_height, MIN_WINDOW_HEIGHT)
-        self.window = pg.display.set_mode((self.window_width, self.window_height), pg.RESIZABLE)
+        self.window = pg.display.set_mode(
+            (self.window_width, self.window_height), WINDOW_FLAGS)
         try:
             icon = pg.image.load(str(paths.resource_path("assets", "icons", "icon.png")))
             pg.display.set_icon(icon)
         except (pg.error, OSError):
             pass
+        self.chrome = WindowChrome(self.window)
         self.clock = pg.time.Clock()
 
         self.mode = "menu"
@@ -877,6 +880,7 @@ class Frontend(OnlineEventsMixin):
             self.check_events()
             self.window.fill("black")
             self.draw_frame()
+            self.chrome.draw()
             self.clock.tick(self.target_fps)
             pg.display.flip()
 
@@ -1144,11 +1148,13 @@ class Frontend(OnlineEventsMixin):
 
     def _compute_layout(self):
         window_width, window_height = self.window.get_size()
-        effective = max(min(window_width, window_height), 300)
+        top = WindowChrome.HEIGHT
+        avail_height = window_height - top
+        effective = max(min(window_width, avail_height), 300)
         board_size_px = effective * self.board.SCREEN_FRACTION_X
 
         board_x = board_size_px * self.board.OFFSET_FRACTION_X
-        board_y = window_height / 2 - board_size_px / 2
+        board_y = top + avail_height / 2 - board_size_px / 2
 
         board_rect = pg.Rect(
             board_x,
@@ -1179,7 +1185,7 @@ class Frontend(OnlineEventsMixin):
         start_height = min(window_height * 0.85, board_size_px * 0.95)
         start_rect = pg.Rect(
             window_width / 2 - start_width / 2,
-            window_height / 2 - start_height / 2,
+            top + avail_height / 2 - start_height / 2,
             start_width,
             start_height
         )
@@ -1188,7 +1194,7 @@ class Frontend(OnlineEventsMixin):
         file_picker_height = min(window_height * 0.85, 760)
         file_picker_rect = pg.Rect(
             window_width / 2 - file_picker_width / 2,
-            window_height / 2 - file_picker_height / 2,
+            top + avail_height / 2 - file_picker_height / 2,
             file_picker_width,
             file_picker_height,
         )
@@ -1197,7 +1203,7 @@ class Frontend(OnlineEventsMixin):
         menu_modal_height = min(start_height, max(cell_size * 1.6, 200))
         menu_modal_rect = pg.Rect(
             window_width / 2 - menu_modal_width / 2,
-            window_height / 2 - menu_modal_height / 2,
+            top + avail_height / 2 - menu_modal_height / 2,
             menu_modal_width,
             menu_modal_height,
         )
@@ -1208,9 +1214,9 @@ class Frontend(OnlineEventsMixin):
 
         menu_rect = pg.Rect(
             board_rect.right,
-            0,
+            top,
             max(window_width - board_rect.right, 300),
-            max(window_height, MIN_WINDOW_HEIGHT)
+            avail_height
         )
 
         strip_height = board_size_px * 0.075
@@ -1245,7 +1251,7 @@ class Frontend(OnlineEventsMixin):
         options_height = min(int(window_height * 0.55), 400)
         self.options_modal.set_rect(pg.Rect(
             window_width / 2 - options_width / 2,
-            window_height / 2 - options_height / 2,
+            top + avail_height / 2 - options_height / 2,
             options_width, options_height,
         ))
         self.directory_browser.set_rect(file_picker_rect)
@@ -1291,6 +1297,8 @@ class Frontend(OnlineEventsMixin):
             self.board.toggle_arrow(start, end)
 
     def mouse_left_clicked(self, pos):
+        if self.chrome.handle_click(pos):
+            return
         if (self.current_result() is not None
                 and self._result_first_seen_at_ms is not None
                 and not self._result_modal_should_show()):
@@ -1413,6 +1421,7 @@ class Frontend(OnlineEventsMixin):
     def _mouse_left_pressed(self, pos):
         self.mouse_left_clicked(pos)
         if (self.mode != "menu"
+                and pos[1] >= self.chrome.HEIGHT
                 and self.current_result() is None
                 and not self.file_picker.is_visible()
                 and not self.confirm_modal.is_visible()):
@@ -1489,7 +1498,7 @@ class Frontend(OnlineEventsMixin):
                 w = max(event.w, MIN_WINDOW_WIDTH)
                 h = max(event.h, MIN_WINDOW_HEIGHT)
                 if (w, h) != (event.w, event.h):
-                    self.window = pg.display.set_mode((w, h), pg.RESIZABLE)
+                    self.window = pg.display.set_mode((w, h), WINDOW_FLAGS)
                 self.window_width = w
                 self.window_height = h
                 self._compute_layout()

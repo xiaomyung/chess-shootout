@@ -22,7 +22,7 @@ a = Analysis(
     pathex=["."],
     binaries=[],
     datas=[("assets", "assets"), *collect_data_files("certifi")],
-    hiddenimports=["certifi"],
+    hiddenimports=["certifi", "pygame._sdl2", "pygame._sdl2.video"],
     excludes=["fastapi", "uvicorn", "starlette", "slowapi"],
     noarchive=False,
 )
