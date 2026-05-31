@@ -6,6 +6,7 @@ import os
 
 import pygame as pg
 
+from paths import resource_path
 from frontend.visual.colors import Colors
 from frontend.visual.fonts import get_font
 
@@ -72,6 +73,7 @@ class WindowChrome:
         self._cb = None
         self._wordmark = None
         self._wordmark_accent = None
+        self._logo_surf = None
         self._init_sdl()
 
     def _init_sdl(self):
@@ -156,10 +158,22 @@ class WindowChrome:
         self._draw_logo()
         self._draw_dots()
 
+    def _load_logo(self):
+        try:
+            img = pg.image.load(
+                str(resource_path("assets", "icons", "brand_mark.png"))).convert_alpha()
+            return pg.transform.smoothscale(img, (self.LOGO_SIZE, self.LOGO_SIZE))
+        except (OSError, pg.error):
+            return None
+
     def _draw_logo(self):
         tile = pg.Rect(12, (self.HEIGHT - self.LOGO_SIZE) // 2, self.LOGO_SIZE, self.LOGO_SIZE)
-        pg.draw.rect(self.window, pg.Color(Colors.accent), tile, border_radius=5)
-        pg.draw.rect(self.window, pg.Color(Colors.amber), tile.inflate(-8, -8), border_radius=3)
+        if self._logo_surf is None:
+            self._logo_surf = self._load_logo()
+        if self._logo_surf is not None:
+            self.window.blit(self._logo_surf, tile)
+        else:
+            pg.draw.rect(self.window, pg.Color(Colors.accent), tile, border_radius=5)
         if self._wordmark is None:
             font = get_font(13, bold=True)
             self._wordmark = font.render("CHESS ", True, pg.Color(Colors.white))

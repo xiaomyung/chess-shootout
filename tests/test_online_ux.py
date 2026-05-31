@@ -18,6 +18,7 @@ from frontend.frontend import (
     ANIM_MS_DEFAULT, ANIM_MS_MIN, ANIM_MS_MAX, MATCH_FOUND_HOLD_MS,
     Frontend, compute_animation_ms,
 )
+from frontend.visual.colors import Colors
 from frontend.modals.reconnecting import ReconnectingModal
 from frontend.online.events import (
     NOT_YOUR_TURN_TOASTS, ONLINE_HARD_FAILURE_LABELS,
@@ -97,22 +98,24 @@ def test_reconnecting_modal_subtitle_renders_visible_pixels():
     rendered = m.subtitle_font.render(subtitle, True, (255, 255, 255))
     assert rendered.get_width() > 0 and rendered.get_height() > 0
 
-    def white_pixels():
+    text_rgb = pg.Color(Colors.white)[:3]
+
+    def text_pixels():
         return sum(
             1
             for x in range(m.rect.width)
             for y in range(m.rect.height)
-            if win.get_at((x, y))[:3] == (255, 255, 255)
+            if win.get_at((x, y))[:3] == text_rgb
         )
 
     win.fill((0, 0, 0))
     m.draw()
-    without_subtitle = white_pixels()
+    without_subtitle = text_pixels()
 
     win.fill((0, 0, 0))
     m.set_subtitle(subtitle)
     m.draw()
-    with_subtitle = white_pixels()
+    with_subtitle = text_pixels()
 
     assert with_subtitle > without_subtitle
 

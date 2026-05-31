@@ -26,6 +26,9 @@ a = Analysis(
     excludes=["fastapi", "uvicorn", "starlette", "slowapi"],
     noarchive=False,
 )
+# SVG sources (assets/pieces_svg) are build-time only; ship the rendered PNGs, not the sources.
+a.datas = [entry for entry in a.datas if not entry[0].lower().endswith(".svg")]
+
 pyz = PYZ(a.pure)
 
 exe = EXE(
