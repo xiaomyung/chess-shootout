@@ -238,6 +238,27 @@ def test_local_resignation_subtitle_reports_resignation():
     assert app.result_text() == ("Black wins", "by resignation")
 
 
+def test_single_screen_result_uses_winner_perspective_not_stale_local_color():
+    """Bug: a stale local_color left over from a prior online game must not flip
+    the single-screen result modal to the loser's clock / a DEFEAT word."""
+    from backend.pieces import PieceColor
+    app = _make_app()
+    _start_local(app)
+    app.match.local_color = PieceColor.BLACK   # stale perspective
+    assert app._result_subject_color("white_wins_by_resignation") == PieceColor.WHITE
+    assert app._outcome_word_intent("white_wins_by_resignation", "White wins") \
+        == ("White wins".upper(), "win")
+    assert app._result_subject_color("black_wins") == PieceColor.BLACK
+
+
+def test_single_screen_start_resets_local_color():
+    from backend.pieces import PieceColor
+    app = _make_app()
+    app.match.local_color = PieceColor.WHITE
+    _start_local(app)
+    assert app.match.local_color is None
+
+
 @pytest.mark.parametrize(
     "engine_result, expected",
     [

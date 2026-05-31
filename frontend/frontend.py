@@ -14,6 +14,7 @@ from frontend import env
 from frontend.panels.audio import AudioPanel
 from frontend.board import Board
 from frontend.panels.capture_summary import captured_by, material_advantage
+from frontend.result_stats import compute_result_stats
 from frontend.modals.confirm import ConfirmModal
 from frontend.modals.directory_browser import DirectoryBrowser
 from frontend.modals.file_picker import FilePicker
@@ -288,6 +289,44 @@ class Frontend(OnlineEventsMixin):
             return None
         return RESULT_TEXT.get(code)
 
+    def _feed_result_menu(self):
+        code = self.current_result()
+        text = self.result_text()
+        if code is None or text is None:
+            self.result_menu.set_result(None, "draw", "")
+            return
+        title, reason = text
+        word, intent = self._outcome_word_intent(code, title)
+        moves = (len(self.match.move_history) + 1) // 2
+        full_reason = f"{reason} · {moves} moves" if reason else f"{moves} moves"
+        subject = self._result_subject_color(code)
+        stats = compute_result_stats(self.match.move_history, self.match.clock, subject)
+        self.result_menu.set_result(word, intent, full_reason, stats)
+
+    def _perspective_color(self):
+        if self.mode in (ONLINE, BOT):
+            return self.match.local_color
+        return None
+
+    def _outcome_word_intent(self, code, title):
+        if code.startswith("draw"):
+            return "DRAW", "draw"
+        winner = PieceColor.WHITE if code.startswith("white_wins") else PieceColor.BLACK
+        local = self._perspective_color()
+        if local is not None:
+            if winner == local:
+                return "VICTORY", "win"
+            return "DEFEAT", "loss"
+        return title.upper(), "win"
+
+    def _result_subject_color(self, code):
+        local = self._perspective_color()
+        if local is not None:
+            return local
+        if code.startswith("black_wins"):
+            return PieceColor.BLACK
+        return PieceColor.WHITE
+
     def _name_for_color(self, color):
         is_white = color in (PieceColor.WHITE, "white")
         return self.white_name if is_white else self.black_name
@@ -532,6 +571,7 @@ class Frontend(OnlineEventsMixin):
             return
 
         self.mode = SINGLE_SCREEN
+        self.match.local_color = None
 
         side = config["side"]
         if side == "random":
@@ -955,7 +995,7 @@ class Frontend(OnlineEventsMixin):
             self._update_result_pending()
             self._draw_result_fade_overlay()
             if self._result_modal_should_show() and not self.pgn_review:
-                self.result_menu.set_text(self.result_text())
+                self._feed_result_menu()
                 self.result_menu.draw()
         self._refresh_reconnect_button()
         if not self._menu_overlay_active():
@@ -1208,8 +1248,8 @@ class Frontend(OnlineEventsMixin):
         )
 
         cell_size = board_size_px / self.board.SIZE
-        result_width = cell_size * 3.5
-        result_height = cell_size * 2.5
+        result_width = min(440, board_size_px * 0.92)
+        result_height = min(int(result_width * 0.95), avail_height - 2 * BOARD_AREA_MARGIN)
         result_rect = pg.Rect(
             board_x + board_size_px / 2 - result_width / 2,
             board_y + board_size_px / 2 - result_height / 2,

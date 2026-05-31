@@ -129,17 +129,20 @@ def draw_gear(window, rect):
     window.blit(supersample((max(rect.width, 1), max(rect.height, 1)), render), rect.topleft)
 
 
-def draw_button_row(window, rect, buttons, font, gap, disabled_keys=None):
+def draw_button_row(window, rect, buttons, font, gap, disabled_keys=None,
+                    primary_keys=None):
     n = len(buttons)
     if n == 0 or rect.width <= gap * (n - 1):
         return {}
     btn_w = (rect.width - gap * (n - 1)) / n
     button_rects = {}
     disabled_keys = disabled_keys or set()
+    primary_keys = primary_keys or set()
     for i, (label, key) in enumerate(buttons):
         x = rect.x + i * (btn_w + gap)
         br = pg.Rect(x, rect.y, btn_w, rect.height)
-        draw_button(window, br, label, font, disabled=key in disabled_keys)
+        draw_button(window, br, label, font, disabled=key in disabled_keys,
+                    primary=key in primary_keys)
         button_rects[key] = br
     return button_rects
 
