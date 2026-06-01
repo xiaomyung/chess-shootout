@@ -1,1 +1,18 @@
-<svg viewBox="0 0 100 124" xmlns="http://www.w3.org/2000/svg"><g stroke-linejoin="round" stroke-linecap="round"><rect x="22" y="100" width="56" height="15" rx="7" fill="#2e333b" stroke="#2e333b" stroke-width="1.6"/><ellipse cx="50" cy="98" rx="22" ry="7" fill="#2e333b" stroke="#2e333b" stroke-width="1.6"/><path d="M35,99 L34,66 L20,64 Q14,62 15,57 Q15,50 23,50 L41,49 L43,44 Q46,27 57,20 L54,37 L64,18 L69,44 Q74,64 64,84 L62,99 Z" fill="#2e333b" stroke="#2e333b" stroke-width="1.6"/></g><rect x="22" y="100" width="56" height="15" rx="7" fill="#efe7d6"/><ellipse cx="50" cy="98" rx="22" ry="7" fill="#efe7d6"/><path d="M35,99 L34,66 L20,64 Q14,62 15,57 Q15,50 23,50 L41,49 L43,44 Q46,27 57,20 L54,37 L64,18 L69,44 Q74,64 64,84 L62,99 Z" fill="#efe7d6"/><path d="M58,22 L68,46 Q74,64 64,83 L57,83 Q64,63 53,45 Z" fill="#ff5a36"/><path d="M38,45 L49,47" stroke="#231a10" stroke-width="3.4" stroke-linecap="round"/><circle cx="43" cy="52" r="3.2" fill="#231a10"/><circle cx="20" cy="58" r="1.8" fill="#231a10"/><path d="M15,61 L24,60.5" stroke="#231a10" stroke-width="1.8" stroke-linecap="round"/></svg>
+<svg viewBox="0 0 100 124" xmlns="http://www.w3.org/2000/svg">
+      <g stroke-linejoin="round" stroke-linecap="round">
+      <rect x="22" y="100" width="56" height="15" rx="7" fill="#2e333b" stroke="#2e333b" stroke-width="1.6"></rect>
+      <ellipse cx="50" cy="97" rx="22" ry="7" fill="#2e333b" stroke="#2e333b" stroke-width="1.6"></ellipse>
+      <path d="M35,99 L34,66 L20,64 Q14,62 15,57 Q15,50 23,50 L41,49 L43,44&#xA;               Q46,27 57,20 L54,37 L64,18 L69,44 Q74,64 64,84 L62,99 Z" fill="#2e333b" stroke="#2e333b" stroke-width="1.6"></path></g>
+      <rect x="22" y="100" width="56" height="15" rx="7" fill="#efe7d6"></rect>
+      <ellipse cx="50" cy="97" rx="22" ry="7" fill="#efe7d6"></ellipse>
+      <path d="M35,99 L34,66 L20,64 Q14,62 15,57 Q15,50 23,50 L41,49 L43,44&#xA;               Q46,27 57,20 L54,37 L64,18 L69,44 Q74,64 64,84 L62,99 Z" fill="#efe7d6"></path>
+      
+      <path d="M58,22 L68,46 Q74,64 64,83 L57,83 Q64,63 53,45 Z" fill="#ff5a36"></path>
+      
+      <path d="M38,45 L49,47" stroke="#231a10" stroke-width="3.4" stroke-linecap="round"></path>
+      <circle cx="43" cy="52" r="3.2" fill="#231a10"></circle>
+      
+      <circle cx="20" cy="58" r="1.8" fill="#231a10"></circle>
+      <path d="M15,61 L24,60.5" stroke="#231a10" stroke-width="1.8" stroke-linecap="round"></path>
+      
+    </svg>

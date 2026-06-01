@@ -58,67 +58,6 @@ def _pawn_face(p):
             f'<circle cx="56" cy="47" r="3" fill="{f}"/>')
 
 
-def _knight_shape(fill, stroke=None, sw=0):
-    a = _attr(fill, stroke, sw)
-    return (f'<rect x="22" y="100" width="56" height="15" rx="7" {a}/>'
-            f'<ellipse cx="50" cy="98" rx="22" ry="7" {a}/>'
-            f'<path d="M35,99 L34,66 L20,64 Q14,62 15,57 Q15,50 23,50 L41,49 L43,44 '
-            f'Q46,27 57,20 L54,37 L64,18 L69,44 Q74,64 64,84 L62,99 Z" {a}/>')
-
-
-def _knight_face(p):
-    f = p["feat"]
-    return (f'<path d="M58,22 L68,46 Q74,64 64,83 L57,83 Q64,63 53,45 Z" fill="{ACCENT}"/>'
-            f'<path d="M38,45 L49,47" stroke="{f}" stroke-width="3.4" stroke-linecap="round"/>'
-            f'<circle cx="43" cy="52" r="3.2" fill="{f}"/>'
-            f'<circle cx="20" cy="58" r="1.8" fill="{f}"/>'
-            f'<path d="M15,61 L24,60.5" stroke="{f}" stroke-width="1.8" stroke-linecap="round"/>')
-
-
-def _bishop_shape(fill, stroke=None, sw=0):
-    a = _attr(fill, stroke, sw)
-    return (f'<rect x="22" y="100" width="56" height="15" rx="7" {a}/>'
-            f'<ellipse cx="50" cy="66" rx="18" ry="6" {a}/>'
-            f'<path d="M37,69 L31,103 L69,103 L63,69 Z" {a}/>'
-            f'<ellipse cx="50" cy="40" rx="17" ry="26" {a}/>'
-            f'<circle cx="50" cy="11" r="5.5" {a}/>')
-
-
-def _bishop_face(p):
-    f = p["feat"]
-    return (f'<circle cx="50" cy="11" r="5.5" fill="{ACCENT}"/>'
-            f'<path d="M55,19 L49,28" stroke="{f}" stroke-width="3.4" stroke-linecap="round"/>'
-            f'<path d="M40,39 L48,41" stroke="{f}" stroke-width="3.2" stroke-linecap="round"/>'
-            f'<path d="M60,39 L52,41" stroke="{f}" stroke-width="3.2" stroke-linecap="round"/>'
-            f'<circle cx="45" cy="46" r="3" fill="{f}"/>'
-            f'<circle cx="55" cy="46" r="3" fill="{f}"/>'
-            f'<path d="M37,62 Q50,66 63,62 L62,65 Q50,70 38,65 Z" fill="{ACCENT}"/>'
-            f'<path d="M50,67 L45,80 L51,77 Z" fill="{ACCENT}"/>'
-            f'<path d="M50,67 L55,79 L51,77 Z" fill="{ACCENT}"/>'
-            f'<circle cx="50" cy="66" r="2.7" fill="{DEEP}"/>')
-
-
-def _rook_shape(fill, stroke=None, sw=0):
-    a = _attr(fill, stroke, sw)
-    return (f'<rect x="22" y="100" width="56" height="15" rx="7" {a}/>'
-            f'<ellipse cx="50" cy="97" rx="22" ry="7" {a}/>'
-            f'<path d="M33,97 L36,55 L64,55 L67,97 Z" {a}/>'
-            f'<rect x="31" y="48" width="38" height="9" rx="2" {a}/>'
-            f'<path d="M30,50 L30,30 Q30,28 32,28 L37,28 Q39,28 39,30 L39,35 Q39,37 41,37 '
-            f'L43.5,37 Q45.5,37 45.5,35 L45.5,30 Q45.5,28 47.5,28 L52.5,28 Q54.5,28 54.5,30 '
-            f'L54.5,35 Q54.5,37 56.5,37 L59,37 Q61,37 61,35 L61,30 Q61,28 63,28 L68,28 '
-            f'Q70,28 70,30 L70,50 Z" {a}/>')
-
-
-def _rook_face(p):
-    f = p["feat"]
-    return (f'<rect x="33" y="49.5" width="34" height="6" rx="2" fill="{ACCENT}"/>'
-            f'<path d="M40,64 L48,66" stroke="{f}" stroke-width="3.2" stroke-linecap="round"/>'
-            f'<path d="M60,64 L52,66" stroke="{f}" stroke-width="3.2" stroke-linecap="round"/>'
-            f'<circle cx="45" cy="72" r="3" fill="{f}"/>'
-            f'<circle cx="55" cy="72" r="3" fill="{f}"/>')
-
-
 def _queen_shape(fill, stroke=None, sw=0):
     a = _attr(fill, stroke, sw)
     return (f'<rect x="22" y="100" width="56" height="15" rx="7" {a}/>'
@@ -171,18 +110,19 @@ def _king_face(p):
             f'<circle cx="55" cy="50" r="3" fill="{f}"/>')
 
 
-PIECES = {
+GENERATED = {
     "pawn": (_pawn_shape, _pawn_face),
-    "knight": (_knight_shape, _knight_face),
-    "bishop": (_bishop_shape, _bishop_face),
-    "rook": (_rook_shape, _rook_face),
     "queen": (_queen_shape, _queen_face),
     "king": (_king_shape, _king_face),
 }
 
+HANDCRAFTED = ("bishop", "knight", "rook")
+
+PIECE_TYPES = ("pawn", "knight", "bishop", "rook", "queen", "king")
+
 
 def piece_svg(piece_type, color):
-    shape, face = PIECES[piece_type]
+    shape, face = GENERATED[piece_type]
     p = PALETTE[color]
     return (f'<svg viewBox="0 0 100 124" xmlns="http://www.w3.org/2000/svg">'
             f'{_outlined(shape, p)}{face(p)}</svg>')
@@ -219,12 +159,17 @@ def main():
     os.makedirs(SVG_DIR, exist_ok=True)
     os.makedirs(PNG_DIR, exist_ok=True)
     os.makedirs(ICON_DIR, exist_ok=True)
-    for piece_type in PIECES:
+    for piece_type in PIECE_TYPES:
         for color in PALETTE:
-            svg = piece_svg(piece_type, color)
             stem = f"{piece_type}_{color}"
-            with open(os.path.join(SVG_DIR, stem + ".svg"), "w") as fh:
-                fh.write(svg)
+            svg_path = os.path.join(SVG_DIR, stem + ".svg")
+            if piece_type in HANDCRAFTED:
+                with open(svg_path) as fh:
+                    svg = fh.read()
+            else:
+                svg = piece_svg(piece_type, color)
+                with open(svg_path, "w") as fh:
+                    fh.write(svg)
             cairosvg.svg2png(bytestring=svg.encode(), write_to=os.path.join(PNG_DIR, stem + ".png"),
                              output_width=PIECE_PX, output_height=PIECE_PX)
     with open(os.path.join(SVG_DIR, "app_icon.svg"), "w") as fh:
