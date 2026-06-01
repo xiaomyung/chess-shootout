@@ -9,6 +9,8 @@ from frontend import env
 _ISOLATED_VARS = (
     "CHESS_SERVER_ADDR", "CHESS_NICKNAME", "CHESS_CLIENT_UUID",
     "CHESS_LAST_MODE", "CHESS_MASTER_VOLUME", "CHESS_DATA_DIR",
+    "CHESS_REDUCE_MOTION", "CHESS_EFFECT_INTENSITY", "CHESS_DEFAULT_TC",
+    "CHESS_DEFAULT_INCREMENT", "CHESS_THEME",
 )
 
 
@@ -253,3 +255,44 @@ def test_init_paths_points_env_at_config_dir(tmp_path, monkeypatch):
     monkeypatch.setattr(paths, "get_config_dir", lambda: tmp_path)
     env.init_paths()
     assert env._ENV_PATH == tmp_path / ".env"
+
+
+# ---- settings keys (reduce-motion, intensity, default TC, theme) -----------
+
+def test_reduce_motion_defaults_false_and_round_trips():
+    assert env.get_reduce_motion() is False
+    env.set_reduce_motion(True)
+    assert env.get_reduce_motion() is True
+    assert "CHESS_REDUCE_MOTION=1" in env._ENV_PATH.read_text()
+    env.set_reduce_motion(False)
+    assert env.get_reduce_motion() is False
+
+
+def test_effect_intensity_defaults_full_and_validates():
+    assert env.get_effect_intensity() == "full"
+    env.set_effect_intensity("subtle")
+    assert env.get_effect_intensity() == "subtle"
+    env.set_effect_intensity("bogus")
+    assert env.get_effect_intensity() == "full"
+
+
+def test_default_time_control_round_trips():
+    assert env.get_default_time_control() == "10"
+    env.set_default_time_control("3")
+    assert env.get_default_time_control() == "3"
+    assert "CHESS_DEFAULT_TC=3" in env._ENV_PATH.read_text()
+
+
+def test_default_increment_round_trips():
+    assert env.get_default_increment() == "5"
+    env.set_default_increment("2")
+    assert env.get_default_increment() == "2"
+    assert "CHESS_DEFAULT_INCREMENT=2" in env._ENV_PATH.read_text()
+
+
+def test_theme_defaults_dark_and_rejects_unknown():
+    assert env.get_theme() == "dark"
+    env.set_theme("wood")            # not a known theme yet
+    assert env.get_theme() == "dark"
+    env.set_theme("dark")
+    assert env.get_theme() == "dark"

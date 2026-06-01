@@ -19,7 +19,9 @@ from frontend.modals.confirm import ConfirmModal
 from frontend.modals.directory_browser import DirectoryBrowser
 from frontend.modals.file_picker import FilePicker
 from frontend.modals.fen_input import FenInputModal
-from frontend.modals.options import OptionsModal, PathRow
+from frontend.modals.options import (
+    OptionsModal, PathRow, ToggleRow, SliderRow, SegmentedRow, SwatchRow,
+)
 from frontend.modals.help import HelpModal
 from frontend.modals.reconnecting import ReconnectingModal
 from frontend.visual.toast import Toast
@@ -372,13 +374,52 @@ class Frontend(OnlineEventsMixin):
         )
 
     def _on_open_options(self):
-        rows = [PathRow(
-            "Games folder",
-            lambda: str(paths.get_games_dir()),
-            self._on_change_data_folder,
-            self._on_reset_data_folder,
-        )]
-        self.options_modal.show(rows)
+        self.options_modal.show(self._build_settings_sections())
+
+    def _set_master_volume(self, value):
+        self.sound_manager.set_master_volume(value)
+        env.set_master_volume(value)
+
+    def _build_settings_sections(self):
+        time_options = [(label, label) for label in ("1", "3", "5", "10", "15", "∞")]
+        incr_options = [(label, label) for label in ("0", "2", "5", "10", "15")]
+        intensity_options = [("Subtle", "subtle"), ("Balanced", "balanced"), ("Full", "full")]
+        themes = [
+            ("dark", "#7a818b", "#2f343b", False),
+            ("wood", "#d8b483", "#8a5a3c", True),
+            ("green", "#b9c4a0", "#516b3e", True),
+            ("ice", "#b4c2d4", "#4a5a72", True),
+        ]
+        return [
+            ("Audio", [
+                SliderRow("Master volume", "", lambda: self.sound_manager.master_volume,
+                          self._set_master_volume),
+                ToggleRow("Mute all sound", "Silence every shot and callout",
+                          lambda: not self.sound_manager.enabled,
+                          lambda muted: self.sound_manager.set_enabled(not muted)),
+            ]),
+            ("Chaos", [
+                ToggleRow("Reduce motion", "Calm the shake, ragdolls and battle",
+                          env.get_reduce_motion, env.set_reduce_motion),
+                SegmentedRow("Effect intensity", "How loud the chaos gets",
+                             intensity_options, env.get_effect_intensity,
+                             env.set_effect_intensity),
+            ]),
+            ("Appearance", [
+                SwatchRow("Board theme", "More themes coming soon", themes,
+                          env.get_theme, env.set_theme),
+            ]),
+            ("Game", [
+                SegmentedRow("Default time", "Minutes on the clock, or untimed",
+                             time_options, env.get_default_time_control,
+                             env.set_default_time_control, mono=True),
+                SegmentedRow("Default increment", "Seconds added each move",
+                             incr_options, env.get_default_increment,
+                             env.set_default_increment, mono=True),
+                PathRow("Games folder", lambda: str(paths.get_games_dir()),
+                        self._on_change_data_folder, self._on_reset_data_folder),
+            ]),
+        ]
 
     def _on_change_data_folder(self):
         self.directory_browser.show(
@@ -1336,8 +1377,8 @@ class Frontend(OnlineEventsMixin):
         self.start_menu.set_rect(start_rect)
         self.help_modal.set_rect(result_rect)
         self.fen_input_modal.set_rect(flex_rect)
-        options_width = min(int(window_width * 0.7), 620)
-        options_height = min(int(window_height * 0.55), 400)
+        options_width = min(int(window_width * 0.7), 520)
+        options_height = min(int(window_height * 0.82), 620)
         self.options_modal.set_rect(pg.Rect(
             window_width / 2 - options_width / 2,
             top + avail_height / 2 - options_height / 2,
@@ -1575,7 +1616,9 @@ class Frontend(OnlineEventsMixin):
                         self.board.update_drag_motion(event.pos)
 
             elif event.type == pg.MOUSEWHEEL:
-                if self.directory_browser.is_visible():
+                if self.options_modal.is_visible():
+                    self.options_modal.handle_scroll(pg.mouse.get_pos(), event.y)
+                elif self.directory_browser.is_visible():
                     self.directory_browser.handle_scroll(pg.mouse.get_pos(), event.y)
                 elif self.help_modal.is_visible():
                     self.help_modal.handle_scroll(pg.mouse.get_pos(), event.y)

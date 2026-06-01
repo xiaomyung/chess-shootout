@@ -3,7 +3,7 @@ import math
 import pygame as pg
 
 from frontend.visual.colors import Colors
-from frontend.visual.draw import supersample
+from frontend.visual.draw import supersample, rounded_rect_surface, infinity_surface
 
 
 SCROLL_FADE_MS = 2000
@@ -79,8 +79,8 @@ def draw_button(window, rect, label, font, force_pressed=False, disabled=False,
     else:
         bg, text_color = _button_bg(rect, force_pressed or selected, disabled)
         border = Colors.accent if (selected and not disabled) else Colors.button_border
-    pg.draw.rect(window, bg, rect, border_radius=BUTTON_RADIUS)
-    pg.draw.rect(window, border, rect, 1, border_radius=BUTTON_RADIUS)
+    window.blit(rounded_rect_surface(rect.size, BUTTON_RADIUS, bg, border=border,
+                                     border_width=1), rect.topleft)
     text = fit_text_to_rect(font.render(label, True, text_color), rect)
     window.blit(
         text,
@@ -159,6 +159,48 @@ def draw_selector(window, rect, options, font, gap, selected_key):
         draw_button(window, br, label, font, selected=(key == selected_key))
         button_rects[key] = br
     return button_rects
+
+
+def draw_toggle(window, rect, fraction):
+    fraction = max(0.0, min(1.0, fraction))
+    track = pg.Color(Colors.button_pressed).lerp(pg.Color(Colors.accent), fraction)
+
+    def render(surf, k):
+        w, h = surf.get_size()
+        pg.draw.rect(surf, track, surf.get_rect(), border_radius=h // 2)
+        pad = max(int(h * 0.16), 2)
+        knob_d = h - 2 * pad
+        knob_x = pad + (w - 2 * pad - knob_d) * fraction
+        pg.draw.circle(surf, pg.Color(Colors.white),
+                       (int(knob_x + knob_d / 2), h // 2), int(knob_d / 2))
+    window.blit(supersample(rect.size, render, scale=6), rect.topleft)
+
+
+def draw_segmented(window, rect, options, selected_key, font, gap=3):
+    n = len(options)
+    if n == 0 or rect.width <= gap * (n + 1):
+        return {}
+    window.blit(rounded_rect_surface(rect.size, 8, Colors.surface_inset,
+                                     border=Colors.button_border, border_width=1),
+                rect.topleft)
+    inner = rect.inflate(-2 * gap, -2 * gap)
+    seg_w = (inner.width - gap * (n - 1)) / n
+    rects = {}
+    for i, (label, key) in enumerate(options):
+        sr = pg.Rect(round(inner.x + i * (seg_w + gap)), inner.y, round(seg_w), inner.height)
+        if key == selected_key:
+            window.blit(rounded_rect_surface(sr.size, 6, Colors.accent), sr.topleft)
+            color = Colors.on_accent
+        else:
+            color = Colors.text_dim
+        if label == "∞":
+            glyph = infinity_surface(int(sr.height * 0.42), color)
+        else:
+            glyph = fit_text_to_rect(font.render(label, True, color), sr)
+        window.blit(glyph, (sr.centerx - glyph.get_width() / 2,
+                            sr.centery - glyph.get_height() / 2))
+        rects[key] = sr
+    return rects
 
 
 def draw_scroll_thumb(window, track_rect, total, visible, offset_fraction, last_activity_ms):

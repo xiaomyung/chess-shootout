@@ -1,6 +1,6 @@
-"""OptionsModal / PathRow: draw lays out close + Change/Reset rects, clicks
-route to the right callback, the value getter is re-read every frame, and
-out-of-bounds clicks are consumed while the modal stays open."""
+"""OptionsModal + the layout-agnostic settings rows: the modal paints the shell
+and a Close button, sections render, and each control row (toggle / segmented /
+slider / swatch / path) routes clicks to its getter/setter."""
 
 import os
 
@@ -9,8 +9,11 @@ os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
 import pygame as pg
 import pytest
 
-from frontend.modals.options import OptionsModal, PathRow
+from frontend.modals.options import (
+    OptionsModal, PathRow, ToggleRow, SegmentedRow, SliderRow, SwatchRow, _Fonts,
+)
 from frontend.visual.colors import Colors
+from frontend.visual.fonts import get_font, get_mono_font
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -23,20 +26,34 @@ def _pygame_init():
 
 def _modal():
     modal = OptionsModal(pg.display.get_surface())
-    modal.set_rect(pg.Rect(100, 100, 420, 320))
+    modal.set_rect(pg.Rect(100, 60, 460, 560))
     return modal
 
 
-def test_show_makes_visible_and_draw_paints_modal():
-    """draw paints the light_grey_menu fill and lays out the close button."""
+def _fonts():
+    return _Fonts(get_font(14, bold=True), get_font(11), get_font(10, bold=True),
+                  get_mono_font(12), get_font(13, bold=True))
+
+
+def _draw_row(row, rect=pg.Rect(40, 40, 420, 56)):
+    win = pg.display.get_surface()
+    win.fill((0, 0, 0))
+    row.draw(win, rect, _fonts())
+    return row
+
+
+# ---- modal -----------------------------------------------------------------
+
+def test_show_paints_shell_and_close():
     modal = _modal()
-    row = PathRow("Data folder", lambda: "/tmp/x", lambda: None, lambda: None)
-    modal.show([row])
+    modal.show([("Game", [PathRow("Games folder", lambda: "/tmp/x",
+                                   lambda: None, lambda: None)])])
     assert modal.is_visible() is True
+    modal.window.fill((0, 0, 0))
     modal.draw()
-    fill_px = modal.window.get_at((modal.rect.x + 2, modal.rect.centery))[:3]
-    assert fill_px == pg.Color(Colors.light_grey_menu)[:3]
-    assert modal._close_rect.width > 0 and modal.rect.contains(modal._close_rect)
+    fill = modal.window.get_at((modal.rect.x + 3, modal.rect.centery))[:3]
+    assert fill == pg.Color(Colors.modal_bg)[:3]
+    assert "close" in modal.button_rects
 
 
 def test_close_button_hides_and_calls_on_close():
@@ -44,31 +61,9 @@ def test_close_button_hides_and_calls_on_close():
     closed = []
     modal.show([], on_close=lambda: closed.append(True))
     modal.draw()
-    modal.handle_click(modal._close_rect.center)
+    modal.handle_click(modal.button_rects["close"].center)
     assert modal.is_visible() is False
     assert closed == [True]
-
-
-@pytest.mark.parametrize(
-    "rect_attr, callback_index",
-    [
-        pytest.param("_change_rect", 0, id="change_button_invokes_on_change"),
-        pytest.param("_reset_rect", 1, id="reset_button_invokes_on_reset"),
-    ],
-)
-def test_pathrow_button_click_invokes_callback(rect_attr, callback_index):
-    """Clicking a PathRow button fires its callback and reports consumed."""
-    fired = [[], []]
-    row = PathRow(
-        "Data folder", lambda: "/tmp/x",
-        lambda: fired[0].append(True), lambda: fired[1].append(True),
-    )
-    modal = _modal()
-    modal.show([row])
-    modal.draw()
-    assert modal.handle_click(getattr(row, rect_attr).center) is True
-    assert fired[callback_index] == [True]
-    assert fired[1 - callback_index] == []
 
 
 def test_click_outside_is_consumed_and_stays_open():
@@ -79,19 +74,91 @@ def test_click_outside_is_consumed_and_stays_open():
     assert modal.is_visible() is True
 
 
-def test_pathrow_value_getter_read_each_frame():
-    """draw re-invokes the getter every frame so live path changes show up."""
-    calls = {"n": 0}
-
-    def getter():
-        calls["n"] += 1
-        return "/a"
-
-    row = PathRow("Data folder", getter, lambda: None, lambda: None)
+def test_sections_render():
     modal = _modal()
-    modal.show([row])
+    modal.show([("Audio", [ToggleRow("Mute", "", lambda: False, lambda v: None)]),
+                ("Game", [PathRow("Folder", lambda: "/x", lambda: None, lambda: None)])])
+    modal.window.fill((0, 0, 0))
     modal.draw()
-    after_first = calls["n"]
-    assert after_first >= 1
+    painted = modal.window.subsurface(modal.rect)
+    assert pg.image.tobytes(painted, "RGB") != bytes(painted.get_width()
+                                                     * painted.get_height() * 3)
+
+
+# ---- control rows ----------------------------------------------------------
+
+def test_toggle_row_flips_value():
+    state = {"on": False}
+    row = ToggleRow("Reduce motion", "calm", lambda: state["on"],
+                    lambda v: state.update(on=v))
+    _draw_row(row)
+    assert row.handle_click(row._ctl.center) is True
+    assert state["on"] is True
+
+
+def test_toggle_knob_animates_toward_target():
+    """After a flip the knob eases toward the new state across frames rather than
+    snapping instantly."""
+    state = {"on": False}
+    row = ToggleRow("Reduce motion", "calm", lambda: state["on"],
+                    lambda v: state.update(on=v))
+    _draw_row(row)
+    assert row._pos == 0.0
+    state["on"] = True
+    _draw_row(row)
+    assert 0.0 < row._pos < 1.0          # mid-transition, not instant
+    for _ in range(20):
+        _draw_row(row)
+    assert row._pos == 1.0               # settles fully on
+
+
+def test_segmented_row_selects_option():
+    chosen = {"v": "a"}
+    row = SegmentedRow("Intensity", "", [("A", "a"), ("B", "b"), ("C", "c")],
+                       lambda: chosen["v"], lambda k: chosen.update(v=k))
+    _draw_row(row)
+    assert row.handle_click(row._rects["c"].center) is True
+    assert chosen["v"] == "c"
+
+
+def test_slider_row_sets_value_from_click():
+    val = {"v": 0.0}
+    row = SliderRow("Volume", "", lambda: val["v"], lambda v: val.update(v=v))
+    _draw_row(row)
+    row.handle_click((row._track.right, row._track.centery))
+    assert val["v"] > 0.9
+
+
+def test_swatch_row_selects_unlocked_only():
+    chosen = {"v": "dark"}
+    swatches = [("dark", "#7a818b", "#2f343b", False), ("wood", "#d8b483", "#8a5a3c", True)]
+    row = SwatchRow("Theme", "soon", swatches, lambda: chosen["v"],
+                    lambda k: chosen.update(v=k))
+    _draw_row(row)
+    assert row.handle_click(row._rects["wood"][0].center) is False   # locked
+    assert chosen["v"] == "dark"
+    assert row.handle_click(row._rects["dark"][0].center) is True
+    assert chosen["v"] == "dark"
+
+
+def test_pathrow_buttons_route_callbacks():
+    fired = {"change": 0, "reset": 0}
+    row = PathRow("Games folder", lambda: "/tmp/x",
+                  lambda: fired.update(change=fired["change"] + 1),
+                  lambda: fired.update(reset=fired["reset"] + 1))
+    _draw_row(row, pg.Rect(40, 40, 420, 120))
+    assert row.handle_click(row._change_rect.center) is True
+    assert row.handle_click(row._reset_rect.center) is True
+    assert fired == {"change": 1, "reset": 1}
+
+
+def test_body_scroll_clamps():
+    modal = _modal()
+    modal.set_rect(pg.Rect(100, 60, 460, 240))
+    rows = [ToggleRow(f"opt {i}", "desc", lambda: False, lambda v: None) for i in range(12)]
+    modal.show([("Many", rows)])
     modal.draw()
-    assert calls["n"] > after_first
+    modal.handle_scroll((modal.rect.centerx, modal.rect.centery), -5)
+    assert modal.body.scroll > 0
+    modal.handle_scroll((modal.rect.centerx, modal.rect.centery), 999)
+    assert modal.body.scroll == 0

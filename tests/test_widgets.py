@@ -134,7 +134,10 @@ def test_draw_button_does_not_scale_when_label_fits(font, monkeypatch):
         lambda surf, size, *a, **kw: (calls.append(size), real_scale(surf, size, *a, **kw))[1],
     )
     draw_button(surface, rect, "OK", font)
-    assert calls == []
+    # the supersampled button background scales to rect.size; the label fits, so
+    # no extra (text-fit) scale to a different size should occur
+    text_scales = [size for size in calls if tuple(size) != (rect.width, rect.height)]
+    assert text_scales == []
 
 
 def test_wrap_path_single_line_when_it_fits(font):
@@ -168,6 +171,9 @@ def test_draw_button_scales_long_label_to_fit(monkeypatch):
         lambda surf, size, *a, **kw: (calls.append(size), real_scale(surf, size, *a, **kw))[1],
     )
     draw_button(surface, rect, "ReallyLongButtonLabel", big_font)
-    assert len(calls) == 1
-    scaled_w, _ = calls[0]
+    # ignore the supersampled-background scale (targets rect.size); the label is
+    # too long, so it must be scaled down to a smaller width
+    text_scales = [size for size in calls if tuple(size) != (rect.width, rect.height)]
+    assert len(text_scales) == 1
+    scaled_w, _ = text_scales[0]
     assert scaled_w <= rect.width - 2 * BUTTON_LABEL_PADDING_PX

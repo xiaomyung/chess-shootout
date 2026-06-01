@@ -137,8 +137,8 @@ class DirectoryBrowser:
     def draw(self):
         if not self.visible:
             return
-        pg.draw.rect(self.window, Colors.light_grey_menu, self.rect, border_radius=8)
-        pg.draw.rect(self.window, Colors.button_border, self.rect, 2, border_radius=8)
+        pg.draw.rect(self.window, Colors.modal_bg, self.rect, border_radius=14)
+        pg.draw.rect(self.window, Colors.border_strong, self.rect, 1, border_radius=14)
         pad = self.padding
         inner_x = self.rect.x + pad
         inner_w = self.rect.width - 2 * pad

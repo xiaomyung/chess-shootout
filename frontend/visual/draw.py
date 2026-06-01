@@ -11,6 +11,20 @@ def supersample(size, render, scale=SUPERSAMPLE):
     return pg.transform.smoothscale(big, size)
 
 
+def infinity_surface(height, color):
+    h = max(int(height), 6)
+    w = int(h * 1.7)
+    th = max(int(h * 0.16), 2)
+
+    def render(surf, k):
+        big_w, big_h = surf.get_size()
+        r = int(big_h * 0.38)
+        cy = big_h // 2
+        for cx in (int(big_w * 0.30), int(big_w * 0.70)):
+            pg.draw.circle(surf, pg.Color(color), (cx, cy), r, max(int(th * k), 1))
+    return supersample((w, h), render)
+
+
 def blit_centered(surface, text, center):
     ink = text.get_bounding_rect()
     surface.blit(text, (round(center[0] - ink.centerx), round(center[1] - ink.centery)))

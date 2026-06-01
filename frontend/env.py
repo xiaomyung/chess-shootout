@@ -13,6 +13,12 @@ _KEY_LINE_RE = re.compile(r"^([A-Za-z_][A-Za-z0-9_]*)\s*=(.*)$")
 
 _DEFAULT_SERVER_ADDR = "localhost:8000"
 _DEFAULT_MASTER_VOLUME = 0.70
+_EFFECT_INTENSITIES = ("subtle", "balanced", "full")
+_DEFAULT_EFFECT_INTENSITY = "full"
+_THEMES = ("dark",)
+_DEFAULT_THEME = "dark"
+_DEFAULT_TIME_CONTROL = "10"
+_DEFAULT_INCREMENT = "5"
 
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 _ENV_PATH = _PROJECT_ROOT / ".env"
@@ -110,6 +116,62 @@ def set_master_volume(value):
     clamped = max(0.0, min(1.0, float(value)))
     os.environ["CHESS_MASTER_VOLUME"] = f"{clamped:.3f}"
     _persist("CHESS_MASTER_VOLUME", f"{clamped:.3f}")
+
+
+def get_reduce_motion():
+    return os.environ.get("CHESS_REDUCE_MOTION") == "1"
+
+
+def set_reduce_motion(value):
+    serialized = "1" if value else "0"
+    os.environ["CHESS_REDUCE_MOTION"] = serialized
+    _persist("CHESS_REDUCE_MOTION", serialized)
+
+
+def get_effect_intensity():
+    value = os.environ.get("CHESS_EFFECT_INTENSITY")
+    if value in _EFFECT_INTENSITIES:
+        return value
+    return _DEFAULT_EFFECT_INTENSITY
+
+
+def set_effect_intensity(value):
+    if value not in _EFFECT_INTENSITIES:
+        value = _DEFAULT_EFFECT_INTENSITY
+    os.environ["CHESS_EFFECT_INTENSITY"] = value
+    _persist("CHESS_EFFECT_INTENSITY", value)
+
+
+def get_default_time_control():
+    return os.environ.get("CHESS_DEFAULT_TC") or _DEFAULT_TIME_CONTROL
+
+
+def set_default_time_control(value):
+    os.environ["CHESS_DEFAULT_TC"] = value
+    _persist("CHESS_DEFAULT_TC", value)
+
+
+def get_default_increment():
+    return os.environ.get("CHESS_DEFAULT_INCREMENT") or _DEFAULT_INCREMENT
+
+
+def set_default_increment(value):
+    os.environ["CHESS_DEFAULT_INCREMENT"] = value
+    _persist("CHESS_DEFAULT_INCREMENT", value)
+
+
+def get_theme():
+    value = os.environ.get("CHESS_THEME")
+    if value in _THEMES:
+        return value
+    return _DEFAULT_THEME
+
+
+def set_theme(value):
+    if value not in _THEMES:
+        value = _DEFAULT_THEME
+    os.environ["CHESS_THEME"] = value
+    _persist("CHESS_THEME", value)
 
 
 def _persist(key, value):
