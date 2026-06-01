@@ -35,7 +35,8 @@ from server.sweep import Sweep
 CLOCK_TICK_INTERVAL_SECONDS = 0.1
 MAX_INBOUND_MESSAGE_BYTES = 4096
 
-RECLAIM_PER_UUID_LIMIT_PER_MINUTE = 5
+RECLAIM_PER_UUID_LIMIT_PER_MINUTE = 100
+RATE_LIMIT_PRUNE_THRESHOLD = 4096
 RECLAIM_WINDOW_SECONDS = 60.0
 
 MATCHMAKE_PER_IP_LIMIT = "60/minute"
@@ -61,9 +62,19 @@ class UuidRateLimiter:
         self._now = now_provider
         self._calls: dict[str, deque] = defaultdict(deque)
 
+    def _prune(self, cutoff):
+        for key in list(self._calls.keys()):
+            d = self._calls[key]
+            while d and d[0] < cutoff:
+                d.popleft()
+            if not d:
+                del self._calls[key]
+
     def hit(self, key):
         now = self._now()
         cutoff = now - self.window
+        if len(self._calls) > RATE_LIMIT_PRUNE_THRESHOLD:
+            self._prune(cutoff)
         d = self._calls[key]
         while d and d[0] < cutoff:
             d.popleft()
@@ -218,6 +229,8 @@ def create_app(*, now_provider=time.monotonic, max_rooms=100):
             black_name=room.black.nickname if room.black else "",
             time_minutes=room.time_minutes,
             increment_seconds=room.increment_seconds,
+            white_score=room.score_for("white"),
+            black_score=room.score_for("black"),
         )
 
     @app.post("/reclaim", response_model=ReclaimResponse)

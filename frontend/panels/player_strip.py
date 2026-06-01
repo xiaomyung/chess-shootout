@@ -3,9 +3,9 @@ import pygame as pg
 from backend.pieces import PieceColor
 from frontend.visual.clock_visual import LOW_TIME_FRACTION
 from frontend.visual.colors import Colors
-from frontend.visual.draw import supersample, rounded_rect_surface, blit_centered
+from frontend.visual.draw import rounded_rect_surface, blit_centered, circle_surface
 from frontend.visual.fonts import get_font, DISPLAY
-from frontend.visual.widgets import build_shell
+from frontend.visual.widgets import build_avatar, build_shell
 
 
 AUTO_END_RED_THRESHOLD_SECONDS = 10
@@ -175,20 +175,7 @@ class PlayerStrip:
 
     @staticmethod
     def _build_avatar(size, top, bottom):
-        radius = max(int(size * 0.22), 2)
-
-        def render(surf, k):
-            w = surf.get_width()
-            for y in range(w):
-                t = y / max(w - 1, 1)
-                surf.fill(top.lerp(bottom, t), pg.Rect(0, y, w, 1))
-            mask = pg.Surface((w, w), pg.SRCALPHA)
-            pg.draw.rect(mask, (255, 255, 255, 255), mask.get_rect(),
-                         border_radius=int(radius * k))
-            surf.blit(mask, (0, 0), special_flags=pg.BLEND_RGBA_MULT)
-            pg.draw.rect(surf, (0, 0, 0, 80), surf.get_rect(),
-                         width=max(int(k), 1), border_radius=int(radius * k))
-        return supersample(size, render)
+        return build_avatar(size, top, bottom)
 
     def _draw_who(self, x, right, ih):
         if right <= x:
@@ -202,14 +189,15 @@ class PlayerStrip:
         else:
             top_cy = bottom_cy = self.rect.centery
             pill_max = ih
-        badge_x = self._draw_auto_end_badge(right, top_cy)
+        badge_x = self._draw_auto_end_badge(right, self.rect.centery)
         name_right = (badge_x - 8) if badge_x is not None else right
         cursor = x
         if self.connection_state is not None:
             dot_r = max(int(ih * 0.11), 3)
             color = Colors.connection_dots.get(
                 self.connection_state, Colors.connection_dots["unknown"])
-            pg.draw.circle(self.window, color, (cursor + dot_r, top_cy), dot_r)
+            dot = circle_surface(dot_r * 2, color)
+            self.window.blit(dot, (cursor, top_cy - dot_r))
             cursor += dot_r * 2 + max(int(ih * 0.12), 4)
         name_surf = self.name_font.render(self.name, True, Colors.white)
         max_name_w = max(name_right - cursor, 1)
@@ -337,7 +325,8 @@ class PlayerStrip:
         if alpha <= 0:
             return
         text = f"+0:{int(self._give_time_amount):02d}"
-        surf = self.clock_font.render(text, True, Colors.clock_increment_flash)
+        float_font = get_font(max(int(self.rect.height * 0.24), 11), bold=True, mono=True)
+        surf = float_font.render(text, True, Colors.clock_increment_flash)
         surf.set_alpha(alpha)
         rise = int((6 - 28 * progress))
         self.window.blit(surf, (clock_rect.centerx - surf.get_width() / 2,

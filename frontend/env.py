@@ -63,6 +63,14 @@ def get_server_addr():
     return os.environ.get("CHESS_SERVER_ADDR") or _DEFAULT_SERVER_ADDR
 
 
+def set_server_addr(value):
+    value = (value or "").strip()
+    if not value:
+        return
+    os.environ["CHESS_SERVER_ADDR"] = value
+    _persist("CHESS_SERVER_ADDR", value)
+
+
 def get_nickname():
     if _nickname_override:
         return _nickname_override

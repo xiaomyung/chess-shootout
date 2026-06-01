@@ -54,6 +54,11 @@ class Room:
     takeback_offered_by: Optional[str] = None
     rematch_offered_by: set = field(default_factory=set)
     result: Optional[tuple] = None
+    series_scores: dict = field(default_factory=dict)
+
+    def score_for(self, color):
+        slot = self.slot(color)
+        return self.series_scores.get(slot.nickname, 0.0) if slot else 0.0
 
     def is_paired(self):
         return self.white is not None and self.black is not None
@@ -233,6 +238,7 @@ class RoomManager:
         winner = room.opp_color(abandoned_color)
         room.result = ("abandonment", winner)
         room.ended_at = self._now()
+        self._award_series(room, "abandonment", winner)
 
     def finalize_result(self, room_id, reason, winner_color=None):
         room = self._active.get(room_id)
@@ -240,6 +246,21 @@ class RoomManager:
             return
         room.result = (reason, winner_color)
         room.ended_at = self._now()
+        self._award_series(room, reason, winner_color)
+
+    @staticmethod
+    def _award_series(room, reason, winner_color):
+        if reason in ("aborted", "server_shutdown"):
+            return
+        scores = room.series_scores
+        if winner_color in ("white", "black"):
+            slot = room.slot(winner_color)
+            if slot is not None:
+                scores[slot.nickname] = scores.get(slot.nickname, 0.0) + 1.0
+        elif reason.startswith("draw"):
+            for slot in (room.white, room.black):
+                if slot is not None:
+                    scores[slot.nickname] = scores.get(slot.nickname, 0.0) + 0.5
 
     def gc_finished_rooms(self):
         now = self._now()

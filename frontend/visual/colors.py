@@ -55,6 +55,8 @@ class Colors:
     text_dim = "#9aa4b2"
     text_mute = "#5c6573"
     border_strong = "#475064"
+    icon_chip_bg = "#3e3c34"
+    overlay_scrim = "#0c0e12d9"
     coord = "#aeb6c2"
     board_frame = "#0a0c0f"
     board_frame_inner = "#20242c"

@@ -240,7 +240,9 @@ def test_out_of_turn_move_rejected(client):
             assert err["msg_type"] == "move"
 
 
-def test_draw_offer_off_turn_tags_msg_type(client):
+def test_draw_offer_allowed_off_turn(client):
+    """Draws may be offered at any moment, regardless of whose turn it is: black
+    (not on move at the start) offers and white receives the draw_offered relay."""
     random.seed(0)
     r1 = _matchmake(client, uuid=ALICE, side="white")
     r2 = _matchmake(client, uuid=BOB, side="black")
@@ -252,10 +254,8 @@ def test_draw_offer_off_turn_tags_msg_type(client):
             ws_b.receive_text()
             ws_b.send_text(json.dumps({"version": PROTOCOL_VERSION,
                                         "type": "draw_offer"}))
-            err = json.loads(ws_b.receive_text())
-            assert err["type"] == "error"
-            assert err["reason"] == Reason.NOT_YOUR_TURN
-            assert err["msg_type"] == "draw_offer"
+            msg = json.loads(ws_w.receive_text())
+            assert msg["type"] == "draw_offered"
 
 
 def test_takeback_request_off_turn_tags_msg_type(client):

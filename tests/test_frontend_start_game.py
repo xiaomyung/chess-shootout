@@ -1,7 +1,8 @@
 """Frontend start-game wiring: _on_start_game mode gating, name/clock setup, and the
 player-strip/auto-save behavior that hangs off a started game. Only single_screen
-actually starts a game in-process; bot returns early and online defers to the server
-modal, so neither builds a clock or leaves the "menu" mode."""
+actually starts a game in-process; bot returns early and online connects directly to
+the configured server (address lives in Settings — no modal), so neither builds a
+clock or leaves the "menu" mode until the server confirms the game."""
 
 import os
 import random
@@ -13,7 +14,9 @@ import pytest
 
 from backend.utils import Square
 from backend.pieces import PieceColor
+from frontend import env
 from frontend.frontend import Frontend, OPPONENT_NAME_FOR_MODE
+from frontend.online.client import OnlineClient
 from frontend.pgn.load import extract_csmatchid, parse_pgn_headers
 from tests.helpers import fake_uuid4
 
@@ -109,18 +112,24 @@ def test_start_game_bot_mode_returns_early_without_starting():
     assert app.mode == pre_mode == "menu"
     assert app.backend.clock is None
     assert app.start_menu.is_visible() is True
-    assert app.server_modal.is_visible() is False
+    assert app.online_client is None
 
 
-def test_start_game_online_mode_routes_to_server_flow_without_starting():
-    """Online mode defers to the server modal; the game itself is not started."""
+def test_start_game_online_mode_starts_matchmaking_without_starting_game(monkeypatch):
+    """Online mode connects to the configured server directly (no modal) and shows
+    the searching wait modal; the game itself isn't set up until game_start."""
     app = make_app()
-    pre_mode = app.mode
+    connected = []
+    monkeypatch.setattr(
+        OnlineClient, "connect",
+        lambda self, addr, request: connected.append((addr, request)))
     app._on_start_game(base_config(mode="online"))
-    assert app.mode == pre_mode == "menu"
+    assert app.mode == "menu"
     assert app.backend.clock is None
     assert app.start_menu.is_visible() is False
-    assert app.server_modal.is_visible() is True
+    assert app.online_client is not None
+    assert app.wait_modal.is_visible() is True
+    assert connected and connected[0][0] == env.get_server_addr()
 
 
 def test_no_clock_leaves_strips_clockless():
@@ -381,3 +390,15 @@ def test_auto_save_filename_prefix_per_mode(tmp_path, monkeypatch, mode_value, e
     files = list((tmp_path / "games").glob("*.pgn"))
     assert files
     assert files[0].name.startswith(f"{expected_prefix}-")
+
+
+def test_settings_close_persists_server_address(monkeypatch):
+    """Editing the Settings server field and closing persists it via env, so the
+    next matchmake + reconnect probe target the last-used server."""
+    app = make_app()
+    saved = []
+    monkeypatch.setattr(env, "set_server_addr", lambda v: saved.append(v))
+    app._on_open_options()
+    app._server_addr_row.input.text = "chess.example.com:9000"
+    assert app._on_close_settings() is True
+    assert saved == ["chess.example.com:9000"]

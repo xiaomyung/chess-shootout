@@ -155,3 +155,19 @@ def test_handle_click_fires_callback():
     menu.draw()
     assert menu.handle_click(menu.button_rects["new_game"].center) is True
     assert fired == ["new_game"]
+
+
+def test_online_rematch_offered_relabels_primary_but_keeps_key():
+    """An incoming rematch request turns the result modal's primary button into
+    Accept, still routed through the 'rematch' key so it accepts the offer."""
+    callbacks = {"rematch": _no_op, "open_pgn": _no_op, "menu": _no_op}
+    menu = ResultMenu(pg.display.get_surface(), callbacks)
+    menu.set_rect(pg.Rect(0, 0, 440, 418))
+    menu.set_online_mode(True)
+    menu.set_result("DRAW", "draw", "By agreement · 20 moves", _stats(potg=None))
+    menu.set_rematch_offered(True)
+    assert menu.rematch_offered is True
+    menu.window.fill((0, 0, 0))
+    menu.draw()
+    assert "rematch" in menu.button_rects
+    assert menu.handle_click(menu.button_rects["rematch"].center) is True

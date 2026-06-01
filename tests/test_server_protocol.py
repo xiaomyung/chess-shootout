@@ -44,6 +44,8 @@ GAME_START = GameStartMessage(
                 "increment_seconds": 0,
                 "your_color": "white",
                 "started_seconds_ago": 0.0,
+                "white_score": 0.0,
+                "black_score": 0.0,
             },
             id="game_start",
         ),

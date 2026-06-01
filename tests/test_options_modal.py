@@ -10,7 +10,8 @@ import pygame as pg
 import pytest
 
 from frontend.modals.options import (
-    OptionsModal, PathRow, ToggleRow, SegmentedRow, SliderRow, SwatchRow, _Fonts,
+    OptionsModal, PathRow, TextRow, ToggleRow, SegmentedRow, SliderRow, SwatchRow,
+    _Fonts,
 )
 from frontend.visual.colors import Colors
 from frontend.visual.fonts import get_font, get_mono_font
@@ -215,3 +216,13 @@ def test_body_scroll_clamps():
     assert modal.body.scroll > 0
     modal.handle_scroll((modal.rect.centerx, modal.rect.centery), 999)
     assert modal.body.scroll == 0
+
+
+def test_text_row_reports_typed_value():
+    row = TextRow("Server", "where online connects", pg.display.get_surface(),
+                  lambda: "localhost:8000", placeholder="host or host:port")
+    _draw_row(row)
+    assert row.current_text() == "localhost:8000"
+    row.input.focused = True
+    row.input.text = "chess.example.com:9000"
+    assert row.current_text() == "chess.example.com:9000"

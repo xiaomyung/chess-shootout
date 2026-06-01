@@ -125,11 +125,6 @@ async def handle_draw_offer(app, websocket, room, color, raw):
     connections = app.state.connections
     if room.result is not None or room.backend is None:
         return "noop"
-    expected = _color_to_move(room.backend)
-    if color != expected:
-        await send(connections.get_for_color(room, color),
-                     ErrorMessage(reason=Reason.NOT_YOUR_TURN, msg_type="draw_offer"))
-        return "not_your_turn"
     if room.draw_offered_by is not None and room.draw_offered_by != color:
         log.info("draw mutual room=%s", room.room_id)
         rooms.finalize_result(room.room_id, Reason.DRAW_AGREEMENT)

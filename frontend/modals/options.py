@@ -318,6 +318,54 @@ class PathRow(_Row):
         return self.input.handle_key(event)
 
 
+class TextRow(_Row):
+
+    def __init__(self, label, desc, window, value_getter, placeholder=""):
+        super().__init__(label, desc)
+        self.value_getter = value_getter
+        self.input = TextInput(window, max_chars=128, placeholder=placeholder,
+                               mono=True, bg=Colors.app_bg, radius=7)
+        self.input.padding = 11
+        self.input.text = str(value_getter())
+        self._field_rect = pg.Rect(0, 0, 0, 0)
+
+    def _field_h(self, fonts):
+        return max(fonts.value.get_height() + 18, 34)
+
+    def height(self, fonts):
+        base = fonts.title.get_height() + (fonts.desc.get_height() + 2 if self.desc else 0)
+        return ROW_PAD + base + 10 + self._field_h(fonts) + ROW_PAD
+
+    def draw(self, window, rect, fonts):
+        x = rect.x
+        y = rect.y + ROW_PAD
+        window.blit(fonts.title.render(self.title, True, Colors.white), (x, y))
+        yy = y + fonts.title.get_height() + 2
+        if self.desc:
+            window.blit(fonts.desc.render(self.desc, True, Colors.text_mute), (x, yy))
+            yy += fonts.desc.get_height() + 2
+        yy += 10
+        if not self.input.focused and self.input.text != str(self.value_getter()):
+            self.input.text = str(self.value_getter())
+        self._field_rect = pg.Rect(x, yy, rect.width, self._field_h(fonts))
+        self.input.set_rect(self._field_rect)
+        self.input.font = fonts.value
+        self.input.draw()
+
+    def current_text(self):
+        return self.input.text.strip()
+
+    def handle_click(self, pos):
+        if self._field_rect.collidepoint(pos):
+            self.input.handle_click(pos)
+            return True
+        self.input.focused = False
+        return False
+
+    def handle_key(self, event):
+        return self.input.handle_key(event)
+
+
 class OptionsBody:
 
     def __init__(self):

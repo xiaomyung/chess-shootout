@@ -73,19 +73,19 @@ def test_online_initial_series_zero_zero():
     info = app._compute_game_info()
     assert info["mode"] == "Online"
     assert info["time_control"] == "3+2"
-    assert info["lines"][0] == "Alice  0 - 0  Bob"
+    assert info["lines"][0] == "Alice  0 – 0  Bob"
     assert info["lines"][1] == "ping: —"
 
 
 @pytest.mark.parametrize(
     "white_score,black_score,expected",
     [
-        (0, 0, "Alice  0 - 0  Bob"),
-        (1, 0, "Alice  1 - 0  Bob"),
-        (1, 1, "Alice  1 - 1  Bob"),
-        (1.5, 0.5, "Alice  1½ - ½  Bob"),
-        (2, 1.5, "Alice  2 - 1½  Bob"),
-        (0.5, 0.5, "Alice  ½ - ½  Bob"),
+        (0, 0, "Alice  0 – 0  Bob"),
+        (1, 0, "Alice  1 – 0  Bob"),
+        (1, 1, "Alice  1 – 1  Bob"),
+        (1.5, 0.5, "Alice  1½ – ½  Bob"),
+        (2, 1.5, "Alice  2 – 1½  Bob"),
+        (0.5, 0.5, "Alice  ½ – ½  Bob"),
     ],
 )
 def test_series_score_formatting(white_score, black_score, expected):
@@ -100,30 +100,33 @@ def test_series_score_formatting(white_score, black_score, expected):
     assert info["time_control"] == "1+0"
 
 
-def test_series_resets_when_opponent_pair_changes():
+def test_series_seeded_from_server_scores():
+    """The client adopts the server-authoritative series scores from the
+    game_start payload, overwriting any stale local tally (so a reconnect can't
+    desync the count)."""
     app = _make_app()
     app._series_pair = ("A", "C")
     app._series_scores = {"A": 2, "C": 1}
     app._start_online_game({
         "your_color": "white", "white_name": "A", "black_name": "B",
         "time_minutes": 3, "increment_seconds": 0,
+        "white_score": 1.0, "black_score": 0.5,
     })
-    assert app._series_scores == {"A": 0.0, "B": 0.0}
+    assert app._series_scores == {"A": 1.0, "B": 0.5}
     assert app._series_pair == ("A", "B")
 
 
-def test_series_persists_across_rematch_with_color_swap():
-    """Bug 3 regression: score is keyed by player identity, so a rematch with
-    swapped colors keeps the same number attached to each player."""
+def test_series_seeded_keyed_by_player_through_color_swap():
+    """Score is keyed by player identity: a rematch with swapped colors carries
+    each player's server score onto the right name."""
     app = _make_app()
-    app._series_pair = tuple(sorted(["A", "B"]))
-    app._series_scores = {"A": 1, "B": 0}
     app._start_online_game({
         "your_color": "black", "white_name": "B", "black_name": "A",
         "time_minutes": 3, "increment_seconds": 0,
+        "white_score": 0.0, "black_score": 1.0,
     })
-    assert app._series_scores == {"A": 1, "B": 0}
-    assert app._compute_game_info()["lines"][0] == "B  0 - 1  A"
+    assert app._series_scores == {"A": 1.0, "B": 0.0}
+    assert app._compute_game_info()["lines"][0] == "B  0 – 1  A"
 
 
 @pytest.mark.parametrize(
@@ -180,10 +183,11 @@ def test_score_follows_player_through_color_swap_end_to_end():
     app._start_online_game({
         "your_color": "black", "white_name": "Friend", "black_name": "Me",
         "time_minutes": 3, "increment_seconds": 0,
+        "white_score": 0.0, "black_score": 1.0,
     })
     assert app._series_scores["Me"] == 1
     assert app._series_scores["Friend"] == 0.0
-    assert app._compute_game_info()["lines"][0] == "Friend  0 - 1  Me"
+    assert app._compute_game_info()["lines"][0] == "Friend  0 – 1  Me"
 
 
 @pytest.mark.parametrize("reason,winner,expected", [

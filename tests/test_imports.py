@@ -15,8 +15,10 @@ from frontend.modals.base import BaseModal
 from frontend.modals.confirm import ConfirmModal
 from frontend.modals.history import HistoryView
 from frontend.modals.help import HelpModal
+from frontend.modals.match_found import MatchFoundModal
+from frontend.online.banners import OfferBanners
+from frontend.modals.options import OptionsModal
 from frontend.modals.result import ResultMenu
-from frontend.modals.server import ServerAddressModal
 from frontend.modals.start import StartMenu
 from frontend.modals.wait import WaitModal
 from frontend.online.client import OnlineClient
@@ -36,9 +38,9 @@ from frontend.visual.widgets import draw_button, draw_button_row
 
 @pytest.mark.parametrize("symbol", [
     SoundManager, Board, BaseModal, ConfirmModal, HistoryView, HelpModal,
-    ResultMenu, ServerAddressModal, StartMenu, WaitModal, OnlineClient,
-    AudioPanel, BasePanel, PlayerStrip, RightMenu, PieceAnimation, Colors,
-    TextInput, Toast,
+    MatchFoundModal, OfferBanners, OptionsModal, ResultMenu, StartMenu,
+    WaitModal, OnlineClient, AudioPanel, BasePanel, PlayerStrip, RightMenu,
+    PieceAnimation, Colors, TextInput, Toast,
 ])
 def test_public_class_is_importable(symbol):
     assert inspect.isclass(symbol)

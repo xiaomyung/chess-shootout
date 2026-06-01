@@ -36,6 +36,26 @@ def build_shell(w, h, winking=False):
     return supersample((max(w, 1), max(h, 1)), render)
 
 
+def build_avatar(size, top, bottom):
+    size = max(int(size), 1)
+    radius = max(int(size * 0.22), 2)
+    top = pg.Color(top)
+    bottom = pg.Color(bottom)
+
+    def render(surf, k):
+        w = surf.get_width()
+        for y in range(w):
+            t = y / max(w - 1, 1)
+            surf.fill(top.lerp(bottom, t), pg.Rect(0, y, w, 1))
+        mask = pg.Surface((w, w), pg.SRCALPHA)
+        pg.draw.rect(mask, (255, 255, 255, 255), mask.get_rect(),
+                     border_radius=int(radius * k))
+        surf.blit(mask, (0, 0), special_flags=pg.BLEND_RGBA_MULT)
+        pg.draw.rect(surf, (0, 0, 0, 80), surf.get_rect(),
+                     width=max(int(k), 1), border_radius=int(radius * k))
+    return supersample(size, render)
+
+
 def draw_pill(window, text, x, cy, font, text_color=Colors.amber_hi,
               bg=Colors.mode_pill_bg, border=Colors.mode_pill_border):
     surf = font.render(text, True, text_color)
@@ -47,6 +67,28 @@ def draw_pill(window, text, x, cy, font, text_color=Colors.amber_hi,
     window.blit(chip, (x, round(cy - h / 2)))
     blit_centered(window, surf, (x + w / 2, cy))
     return x + w
+
+
+def draw_series_chip(window, center, name_a, name_b, score, name_font, score_font,
+                     pad_x=12, pad_y=6, gap=10):
+    a = name_font.render(name_a, True, Colors.text_dim)
+    b = name_font.render(name_b, True, Colors.text_dim)
+    sc = score_font.render(score, True, Colors.amber_hi)
+    h = max(a.get_height(), b.get_height(), sc.get_height()) + 2 * pad_y
+    w = a.get_width() + sc.get_width() + b.get_width() + 2 * gap + 2 * pad_x
+    chip = rounded_rect_surface((w, h), h // 2, Colors.surface,
+                                border=Colors.button_border, border_width=1)
+    x0 = round(center[0] - w / 2)
+    y0 = round(center[1] - h / 2)
+    window.blit(chip, (x0, y0))
+    cy = center[1]
+    x = x0 + pad_x
+    blit_centered(window, a, (x + a.get_width() / 2, cy))
+    x += a.get_width() + gap
+    blit_centered(window, sc, (x + sc.get_width() / 2, cy))
+    x += sc.get_width() + gap
+    blit_centered(window, b, (x + b.get_width() / 2, cy))
+    return pg.Rect(x0, y0, w, h)
 
 
 def fit_text_to_rect(text_surface, rect, padding=BUTTON_LABEL_PADDING_PX):

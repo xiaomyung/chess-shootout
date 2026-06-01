@@ -177,7 +177,7 @@ class StartMenu:
     def set_rect(self, rect):
         self._avail = pg.Rect(rect)
         recon = 1 if self.reconnect_available else 0
-        natural = 124 + 64 + 66 + 54 + 66 + 48 + 42 + recon * 58 + 15 * (6 + recon)
+        natural = 124 + 64 + 66 + 54 + 66 + 48 + 42 + recon * 68 + 15 * (6 + recon)
         scale = min(1.0, max((rect.height - 44) / natural, 0.5))
         self._scale = scale
         s = scale
@@ -229,12 +229,13 @@ class StartMenu:
         y += self.tagline_font.get_height() + gap
 
         if self.reconnect_available:
-            recon_h = int(40 * s)
+            recon_h = int(50 * s)
             self._recon_rect = pg.Rect(x, y, w, recon_h)
-            btn_w = int(86 * s)
+            btn_w = int(92 * s)
+            btn_h = int(34 * s)
             self._recon_button_rect = pg.Rect(
-                self._recon_rect.right - int(11 * s) - btn_w,
-                y + (recon_h - int(26 * s)) // 2, btn_w, int(26 * s))
+                self._recon_rect.right - int(12 * s) - btn_w,
+                y + (recon_h - btn_h) // 2, btn_w, btn_h)
             y += recon_h + gap
         else:
             self._recon_rect = pg.Rect(0, 0, 0, 0)

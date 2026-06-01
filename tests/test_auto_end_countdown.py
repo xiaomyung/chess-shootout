@@ -81,12 +81,12 @@ ABORT_WINDOW_MS = FIRST_MOVE_ABORT_SECONDS * 1000
         ),
         pytest.param(
             PieceColor.WHITE, None, None, 0, 12_000,
-            PieceColor.WHITE, "Reconnect in", RECONNECT_TOTAL_SECONDS - 12,
+            PieceColor.WHITE, "Aborting in", RECONNECT_TOTAL_SECONDS - 12,
             id="reconnect_local_strip_shows",
         ),
         pytest.param(
             PieceColor.WHITE, ABORT_WINDOW_MS, None, 0, 12_000,
-            PieceColor.WHITE, "Reconnect in", None,
+            PieceColor.WHITE, "Aborting in", None,
             id="reconnect_beats_abort_local_strip",
         ),
         pytest.param(

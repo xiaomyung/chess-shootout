@@ -23,7 +23,7 @@ from frontend.modals.directory_browser import DirectoryBrowser
 from frontend.modals.history import HistoryView
 from frontend.modals.fen_input import FenInputModal
 from frontend.modals.options import (
-    OptionsModal, PathRow, ToggleRow, SliderRow, SegmentedRow, SwatchRow,
+    OptionsModal, PathRow, TextRow, ToggleRow, SliderRow, SegmentedRow, SwatchRow,
 )
 from frontend.modals.help import HelpModal
 from frontend.modals.reconnecting import ReconnectingModal
@@ -37,8 +37,9 @@ from frontend.online.events import ONLINE_HARD_FAILURE_LABELS, OnlineEventsMixin
 from frontend.panels.player_strip import (
     AUTO_END_RED_THRESHOLD_SECONDS, PlayerStrip,
 )
-from frontend.modals.server import ServerAddressModal
 from frontend.modals.wait import WaitModal
+from frontend.modals.match_found import MatchFoundModal
+from frontend.online.banners import OfferBanners
 from frontend.panels.right import (
     RightMenu,
     BUTTONS as RIGHT_MENU_BUTTONS,
@@ -152,9 +153,9 @@ ANIM_MS_DEFAULT = 180
 ANIM_MS_MIN = 140
 ANIM_MS_MAX = 280
 
-MATCH_FOUND_HOLD_MS = 500
 SAVED_PGN_TOAST_DURATION_MS = 3000
 RESYNC_TIMEOUT_MS = 8000
+RECONNECT_PROBE_INTERVAL_MS = 5000
 
 MIN_WINDOW_WIDTH = 900
 MIN_WINDOW_HEIGHT = 500
@@ -246,6 +247,9 @@ class Frontend(OnlineEventsMixin):
         })
         self._pending_reconnect = None
         self._pending_reconnect_lock = threading.Lock()
+        self._last_reconnect_probe_ms = 0
+        self._reconnect_probe_inflight = False
+        self._reconnect_probe_gen = 0
         self.audio_panel = AudioPanel(self.window, self.sound_manager)
         self.right_menu = RightMenu(self.window, self.match, {
             "undo": self._on_undo,
@@ -267,15 +271,18 @@ class Frontend(OnlineEventsMixin):
         self.options_modal = OptionsModal(self.window)
         self.directory_browser = DirectoryBrowser(self.window)
         self._data_folder_row = None
+        self._server_addr_row = None
         self.toast = Toast(self.window)
         self.toast.top_inset = self.chrome.HEIGHT
         self._last_saved_pgn_path = None
-        self.server_modal = ServerAddressModal(self.window)
         self.wait_modal = WaitModal(self.window)
+        self.match_found_modal = MatchFoundModal(self.window)
         self.reconnecting_modal = ReconnectingModal(self.window)
+        self.offer_banners = OfferBanners(self.window)
         self._wait_started_at_ms = None
         self._match_found_at_ms = None
         self._pending_game_start_payload = None
+        self._rematch_offered = False
         self.online_client = None
         self.player_strip_top = PlayerStrip(self.window)
         self.player_strip_bottom = PlayerStrip(self.window)
@@ -315,6 +322,13 @@ class Frontend(OnlineEventsMixin):
         subject = self._result_subject_color(code)
         stats = compute_result_stats(self.match.move_history, self.match.clock, subject)
         self.result_menu.set_result(word, intent, full_reason, stats)
+        if self.mode == ONLINE:
+            self.result_menu.set_series(
+                self.white_name, self.black_name,
+                _score_str(self._series_scores.get(self.white_name, 0.0)),
+                _score_str(self._series_scores.get(self.black_name, 0.0)))
+        else:
+            self.result_menu.set_series(None, None, None, None)
 
     def _perspective_color(self):
         if self.mode in (ONLINE, BOT):
@@ -402,6 +416,8 @@ class Frontend(OnlineEventsMixin):
     def _on_close_settings(self):
         if not self._validate_data_folder_on_close():
             return False
+        if self._server_addr_row is not None:
+            env.set_server_addr(self._server_addr_row.current_text())
         self.start_menu.apply_default_time_settings()
         return True
 
@@ -430,6 +446,9 @@ class Frontend(OnlineEventsMixin):
             lambda: str(paths.get_data_dir()),
             self._on_change_data_folder, self._on_reset_data_folder,
             suffix="/" + paths.GAMES_SUBDIR)
+        self._server_addr_row = TextRow(
+            "Server", "Where online games connect and reconnect",
+            self.window, env.get_server_addr, placeholder="host or host:port")
         time_options = [(label, label) for label in env.TIME_CONTROL_VALUES]
         incr_options = [(label, label) for label in env.INCREMENT_VALUES]
         intensity_options = [("Subtle", "subtle"), ("Balanced", "balanced"), ("Full", "full")]
@@ -466,6 +485,9 @@ class Frontend(OnlineEventsMixin):
                              incr_options, env.get_default_increment,
                              env.set_default_increment, mono=True),
                 self._data_folder_row,
+            ]),
+            ("Online", [
+                self._server_addr_row,
             ]),
         ]
 
@@ -591,36 +613,51 @@ class Frontend(OnlineEventsMixin):
     def _spawn_reconnect_probe(self):
         addr = env.get_server_addr()
         client_uuid = env.get_or_create_client_uuid()
-        if not addr or not client_uuid:
+        if not addr or not client_uuid or self._reconnect_probe_inflight:
             return
+        self._last_reconnect_probe_ms = pg.time.get_ticks()
+        self._reconnect_probe_inflight = True
+        with self._pending_reconnect_lock:
+            self._reconnect_probe_gen += 1
+            gen = self._reconnect_probe_gen
         thread = threading.Thread(
             target=self._reconnect_probe_worker,
-            args=(addr, client_uuid),
+            args=(addr, client_uuid, gen),
             daemon=True,
         )
         thread.start()
 
-    def _reconnect_probe_worker(self, addr, client_uuid):
-        reclaim = probe_active_game(addr, client_uuid)
-        if reclaim is None:
-            return
-        resume = fetch_resume(addr, reclaim["room_id"], reclaim["session_token"])
-        if resume is None:
-            return
-        with self._pending_reconnect_lock:
-            self._pending_reconnect = {
-                "addr": addr,
-                "room_id": reclaim["room_id"],
-                "session_token": reclaim["session_token"],
-            }
+    def _reconnect_probe_worker(self, addr, client_uuid, gen):
+        try:
+            reclaim = probe_active_game(addr, client_uuid)
+            resume = (fetch_resume(addr, reclaim["room_id"], reclaim["session_token"])
+                      if reclaim is not None else None)
+            with self._pending_reconnect_lock:
+                if gen != self._reconnect_probe_gen:
+                    return
+                if reclaim is None or resume is None:
+                    self._pending_reconnect = None
+                else:
+                    self._pending_reconnect = {
+                        "addr": addr,
+                        "room_id": reclaim["room_id"],
+                        "session_token": reclaim["session_token"],
+                    }
+        finally:
+            self._reconnect_probe_inflight = False
 
     def _refresh_reconnect_button(self):
+        if (self.mode == "menu" and self.online_client is None
+                and pg.time.get_ticks() - self._last_reconnect_probe_ms
+                >= RECONNECT_PROBE_INTERVAL_MS):
+            self._spawn_reconnect_probe()
         with self._pending_reconnect_lock:
             available = self._pending_reconnect is not None
         self.start_menu.set_reconnect_available(available)
 
     def _on_reconnect_active_game(self):
         with self._pending_reconnect_lock:
+            self._reconnect_probe_gen += 1
             pending = self._pending_reconnect
             self._pending_reconnect = None
         if pending is None:
@@ -696,11 +733,7 @@ class Frontend(OnlineEventsMixin):
                  config.get("side"))
         self._online_config = config
         self.start_menu.hide()
-        self.server_modal.show(
-            prefilled=env.get_server_addr(),
-            on_connect=self._on_server_addr_connect,
-            on_cancel=self._on_online_cancel,
-        )
+        self._on_server_addr_connect(env.get_server_addr())
 
     def _on_server_addr_connect(self, addr):
         log.info("connect to %s", addr)
@@ -716,10 +749,22 @@ class Frontend(OnlineEventsMixin):
             "side_preference": self._online_config["side"],
         }
         self.online_client.connect(addr, request)
-        self.wait_modal.show("Searching for opponent…", self._on_online_cancel)
+        mode_label, tc_text = self._search_labels()
+        self.wait_modal.show(mode_label, tc_text, self._on_online_cancel)
         self._wait_started_at_ms = pg.time.get_ticks()
         self._match_found_at_ms = None
         self._pending_game_start_payload = None
+
+    def _search_labels(self):
+        minutes = self._online_config.get("time_minutes") or 5
+        incr = self._online_config.get("increment_seconds", 0) or 0
+        if minutes < 3:
+            mode = "Bullet"
+        elif minutes < 10:
+            mode = "Blitz"
+        else:
+            mode = "Rapid"
+        return mode, f"{minutes} + {incr}"
 
     def _on_online_cancel(self):
         log.info("online flow cancel")
@@ -728,24 +773,33 @@ class Frontend(OnlineEventsMixin):
             self.online_client = None
         self.match.on_local_move_applied = None
         self.right_menu.set_game_info(None)
-        self.server_modal.hide()
         self.wait_modal.hide()
+        self.match_found_modal.hide()
+        self.offer_banners.clear()
         self._wait_started_at_ms = None
         self._match_found_at_ms = None
         self._pending_game_start_payload = None
-        self.mode = "menu"
-        self.start_menu.show()
+        self._return_to_menu_card()
 
     def _on_rematch(self):
         if self.online_client is None:
             return
-        self.online_client.send_rematch_request()
+        if self._rematch_offered:
+            self._rematch_offered = False
+            self.result_menu.set_rematch_offered(False)
+            self.online_client.send_rematch_response(True)
+        else:
+            self.online_client.send_rematch_request()
 
     def _tear_down_online_session(self):
         if self.online_client is not None:
             self.online_client.disconnect()
             self.online_client = None
         self.reconnecting_modal.hide()
+        self.match_found_modal.hide()
+        self.offer_banners.clear()
+        self._pending_game_start_payload = None
+        self._match_found_at_ms = None
         self.match.on_local_move_applied = None
         self.right_menu.set_game_info(None)
         self.result_menu.set_online_mode(False)
@@ -756,37 +810,37 @@ class Frontend(OnlineEventsMixin):
         self._reset_to_new_game()
         self._refresh_load_pgn_availability()
 
+    def _return_to_menu_card(self):
+        self.mode = "menu"
+        self.start_menu.show()
+        self.menu_page.set_page(PAGE_CARD)
+
     def _abandon_online_game(self):
         log.info("abandoning online game (reconnect cancelled)")
         self._tear_down_online_session()
-        self.start_menu.show()
+        self._return_to_menu_card()
 
     def _restart_online_search(self):
-        log.info("restarting online search after server restart")
+        log.info("restarting online search")
         self._tear_down_online_session()
-        self.start_menu.hide()
         if getattr(self, "_online_config", None) is not None:
-            self._on_server_addr_connect(env.get_server_addr())
+            self._begin_online_flow(self._online_config)
+        else:
+            self._return_to_menu_card()
 
     def _update_online_phase(self):
         if self.wait_modal.is_visible() and self._match_found_at_ms is None:
             if self._wait_started_at_ms is not None:
-                elapsed = (pg.time.get_ticks() - self._wait_started_at_ms) // 1000
-                mm = elapsed // 60
-                ss = elapsed % 60
-                self.wait_modal.set_subtitle(f"{mm:02d}:{ss:02d}")
-        if (self._match_found_at_ms is not None
-                and self._pending_game_start_payload is not None
-                and pg.time.get_ticks() - self._match_found_at_ms >= MATCH_FOUND_HOLD_MS):
-            payload = self._pending_game_start_payload
-            self._pending_game_start_payload = None
-            self._match_found_at_ms = None
-            self._wait_started_at_ms = None
-            self._start_online_game(payload)
-        if (self.online_client is not None
+                self.wait_modal.set_elapsed(
+                    (pg.time.get_ticks() - self._wait_started_at_ms) // 1000)
+        self.match_found_modal.update()
+        self._track_local_online_state()
+        if (self.mode == ONLINE and self.current_result() is None
+                and self.online_client is not None
                 and self.online_client.state == "reconnecting"):
             if not self.reconnecting_modal.is_visible():
-                self.reconnecting_modal.show(on_cancel=self._abandon_online_game)
+                self.reconnecting_modal.show(
+                    self._local_disconnected_at_ms, on_cancel=self._abandon_online_game)
         elif self.reconnecting_modal.is_visible():
             self.reconnecting_modal.hide()
         if self._resyncing:
@@ -795,7 +849,6 @@ class Frontend(OnlineEventsMixin):
                 self._last_beacon_mismatch_ply = None
             else:
                 self.toast.show("Resyncing…")
-        self._track_local_online_state()
 
     def _track_local_online_state(self):
         current = self.online_client.state if self.online_client is not None else None
@@ -830,6 +883,9 @@ class Frontend(OnlineEventsMixin):
         self.pgn_review = False
         self.board.read_only = False
         self._review_return_page = None
+        self.offer_banners.clear()
+        self._rematch_offered = False
+        self.result_menu.set_rematch_offered(False)
         self.sound_manager.stop_all()
         self.manual_result = None
         self._flag_fall_played = False
@@ -1064,8 +1120,9 @@ class Frontend(OnlineEventsMixin):
     def _menu_overlay_active(self):
         return any(m.is_visible() for m in (
             self.options_modal, self.directory_browser,
-            self.fen_input_modal, self.server_modal, self.wait_modal,
-            self.reconnecting_modal, self.help_modal, self.confirm_modal,
+            self.fen_input_modal, self.wait_modal,
+            self.match_found_modal, self.reconnecting_modal,
+            self.help_modal, self.confirm_modal,
         ))
 
     def draw_frame(self):
@@ -1103,11 +1160,13 @@ class Frontend(OnlineEventsMixin):
             self.player_strip_top.draw()
             self.player_strip_bottom.draw()
             self.right_menu.draw_menu()
+            self.offer_banners.draw(self.board.rect)
             self._update_result_pending()
-            self._draw_result_fade_overlay()
-            if self._result_modal_should_show() and not self.pgn_review:
-                self._feed_result_menu()
-                self.result_menu.draw()
+            if not self.match_found_modal.is_visible():
+                self._draw_result_fade_overlay()
+                if self._result_modal_should_show() and not self.pgn_review:
+                    self._feed_result_menu()
+                    self.result_menu.draw()
         entering_menu = self.mode == "menu" and self._prev_battle_mode != "menu"
         self._prev_battle_mode = self.mode
         if self.mode == "menu":
@@ -1123,8 +1182,8 @@ class Frontend(OnlineEventsMixin):
             self.menu_page.draw_foreground()
         self.options_modal.draw()
         self.directory_browser.draw()
-        self.server_modal.draw()
         self.wait_modal.draw()
+        self.match_found_modal.draw()
         self.reconnecting_modal.draw()
         self.help_modal.draw()
         self.fen_input_modal.draw()
@@ -1152,7 +1211,7 @@ class Frontend(OnlineEventsMixin):
             white_score = self._series_scores.get(self.white_name, 0.0)
             black_score = self._series_scores.get(self.black_name, 0.0)
             info["lines"] = [
-                f"{self.white_name}  {_score_str(white_score)} - "
+                f"{self.white_name}  {_score_str(white_score)} – "
                 f"{_score_str(black_score)}  {self.black_name}",
                 self._format_ping_line(),
             ]
@@ -1313,7 +1372,7 @@ class Frontend(OnlineEventsMixin):
         is_local = (color == self.match.local_color)
         if is_local and self._local_disconnected_at_ms is not None:
             return self._auto_end_remaining(
-                "Reconnect in", self._local_disconnected_at_ms,
+                "Aborting in", self._local_disconnected_at_ms,
                 RECONNECT_TOTAL_SECONDS, now,
             )
         if (not is_local
@@ -1448,9 +1507,9 @@ class Frontend(OnlineEventsMixin):
         self.board.set_rect(board_rect)
         self.result_menu.set_rect(result_rect)
         self.confirm_modal.set_rect(result_modal_rect)
-        self.server_modal.set_rect(flex_rect)
         self.wait_modal.set_rect(flex_rect)
-        self.reconnecting_modal.set_rect(flex_rect)
+        self.match_found_modal.set_rect(flex_rect)
+        self.reconnecting_modal.set_rect(board_rect)
         self.menu_page.set_rect(pg.Rect(0, 0, window_width, window_height), top, start_rect)
         self.menu_battle.top_inset = top
         self.menu_battle.set_rect(pg.Rect(0, 0, window_width, window_height))
@@ -1520,13 +1579,11 @@ class Frontend(OnlineEventsMixin):
         if self.fen_input_modal.is_visible():
             self.fen_input_modal.handle_click(pos)
             return
-        if self.server_modal.handle_click(pos):
-            return
-        if self.server_modal.is_visible():
-            return
         if self.wait_modal.handle_click(pos):
             return
         if self.wait_modal.is_visible():
+            return
+        if self.match_found_modal.is_visible():
             return
         if self.reconnecting_modal.handle_click(pos):
             return
@@ -1544,6 +1601,8 @@ class Frontend(OnlineEventsMixin):
             return
         if self.mode == "menu":
             self.menu_page.handle_click(pos)
+            return
+        if self.offer_banners.handle_click(pos):
             return
         if self.result_menu.handle_click(pos):
             return
@@ -1656,11 +1715,9 @@ class Frontend(OnlineEventsMixin):
                 if self.options_modal.is_visible():
                     self.options_modal.handle_key(event)
                     continue
-                if self.server_modal.is_visible() and self.server_modal.handle_key(event):
-                    continue
-                if self.server_modal.is_visible():
-                    continue
                 if self.wait_modal.is_visible():
+                    continue
+                if self.match_found_modal.is_visible():
                     continue
                 if self.reconnecting_modal.is_visible():
                     continue

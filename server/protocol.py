@@ -139,6 +139,8 @@ class ResumeResponse(_Base):
     black_name: str
     time_minutes: int
     increment_seconds: int
+    white_score: float = 0.0
+    black_score: float = 0.0
 
 
 class ReclaimRequest(_Base):
@@ -205,6 +207,8 @@ class GameStartMessage(_Base):
     increment_seconds: int
     your_color: Literal["white", "black"]
     started_seconds_ago: float = 0.0
+    white_score: float = 0.0
+    black_score: float = 0.0
 
 
 class MoveAppliedMessage(_Base):

@@ -3,8 +3,8 @@ import pygame as pg
 from frontend.modals.base import BaseModal
 from frontend.panels.player_strip import format_clock
 from frontend.visual.colors import Colors
-from frontend.visual.draw import rounded_rect_surface, blit_centered
-from frontend.visual.widgets import draw_button_row, fit_text_to_rect
+from frontend.visual.draw import rounded_rect_surface, blit_centered, stroked_text
+from frontend.visual.widgets import draw_button_row, fit_text_to_rect, draw_series_chip
 from frontend.visual.fonts import get_font, get_display_font
 
 
@@ -16,19 +16,6 @@ OUTCOME_COLOR = {
     "loss": Colors.result_loss,
     "draw": Colors.white,
 }
-
-
-def _stroked_text(font, text, fill, stroke, sw):
-    base = font.render(text, True, fill)
-    edge = font.render(text, True, stroke)
-    w, h = base.get_size()
-    surf = pg.Surface((w + 2 * sw, h + 2 * sw), pg.SRCALPHA)
-    for dx in range(-sw, sw + 1):
-        for dy in range(-sw, sw + 1):
-            if dx * dx + dy * dy <= sw * sw:
-                surf.blit(edge, (sw + dx, sw + dy))
-    surf.blit(base, (sw, sw))
-    return surf
 
 
 def _glow_behind(text_surf, color):
@@ -51,12 +38,16 @@ class ResultMenu(BaseModal):
         self.intent = "draw"
         self.reason = ""
         self.stats = None
+        self.series = None
+        self.rematch_offered = False
         self.button_rects = {}
         self.outcome_font = get_display_font(48)
         self.reason_font = get_font(12, bold=True)
         self.value_font = get_font(20, bold=True, mono=True)
         self.label_font = get_font(10, bold=True)
         self.button_font = get_font(14, bold=True)
+        self.series_name_font = get_font(12, bold=True)
+        self.series_score_font = get_font(16, mono=True)
         self._outcome_cache = None
 
     def _on_rect_changed(self):
@@ -67,6 +58,8 @@ class ResultMenu(BaseModal):
         self.value_font = get_font(max(int(h * 0.052), 13), bold=True, mono=True)
         self.label_font = get_font(max(int(h * 0.026), 8), bold=True)
         self.button_font = get_font(max(int(h * 0.04), 11), bold=True)
+        self.series_name_font = get_font(max(int(h * 0.032), 11), bold=True)
+        self.series_score_font = get_font(max(int(h * 0.042), 13), mono=True)
         self._outcome_cache = None
 
     def set_result(self, outcome, intent, reason, stats=None):
@@ -75,8 +68,17 @@ class ResultMenu(BaseModal):
         self.reason = reason or ""
         self.stats = stats
 
+    def set_series(self, name_a, name_b, score_a, score_b):
+        if name_a is None or name_b is None:
+            self.series = None
+        else:
+            self.series = (name_a, name_b, f"{score_a}–{score_b}")
+
     def set_online_mode(self, online):
         self.online_mode = online
+
+    def set_rematch_offered(self, offered):
+        self.rematch_offered = offered
 
     def is_visible(self):
         return self.outcome is not None
@@ -90,6 +92,7 @@ class ResultMenu(BaseModal):
         y = content.y + max(int(self.rect.height * 0.02), 4)
         y = self._draw_outcome(content, y)
         y = self._draw_reason(content, y)
+        y = self._draw_series(content, y)
         y = self._draw_highlight(content, y)
         self._draw_stats(content, y)
         self._draw_buttons(content)
@@ -99,8 +102,8 @@ class ResultMenu(BaseModal):
         key = (self.outcome, self.intent, self.outcome_font.get_height())
         if self._outcome_cache is None or self._outcome_cache[0] != key:
             color = OUTCOME_COLOR.get(self.intent, Colors.white)
-            text = _stroked_text(self.outcome_font, self.outcome.upper(),
-                                 color, Colors.outcome_stroke, sw)
+            text = stroked_text(self.outcome_font, self.outcome.upper(),
+                                color, Colors.outcome_stroke, sw)
             text = fit_text_to_rect(
                 text, pg.Rect(0, 0, content.width, int(content.height * 0.3)))
             glow = _glow_behind(text, color) if self.intent != "draw" else None
@@ -119,6 +122,15 @@ class ResultMenu(BaseModal):
         surf = fit_text_to_rect(surf, pg.Rect(0, 0, content.width, surf.get_height()))
         self.window.blit(surf, (content.centerx - surf.get_width() / 2, y))
         return y + surf.get_height() + max(int(self.rect.height * 0.03), 8)
+
+    def _draw_series(self, content, y):
+        if not self.online_mode or self.series is None:
+            return y
+        name_a, name_b, score = self.series
+        chip = draw_series_chip(
+            self.window, (content.centerx, y + self.series_score_font.get_height()),
+            name_a, name_b, score, self.series_name_font, self.series_score_font)
+        return chip.bottom + max(int(self.rect.height * 0.02), 5)
 
     def _draw_highlight(self, content, y):
         potg = self.stats.get("play_of_the_game") if self.stats else None
@@ -195,6 +207,8 @@ class ResultMenu(BaseModal):
         gap = max(int(content.width * 0.02), 6)
         row = pg.Rect(content.x, content.bottom - btn_h, content.width, btn_h)
         buttons = ONLINE_BUTTONS if self.online_mode else BUTTONS
+        if self.online_mode and self.rematch_offered:
+            buttons = [("Accept", "rematch")] + buttons[1:]
         self.button_rects = draw_button_row(
             self.window, row, buttons, self.button_font, gap,
             primary_keys={buttons[0][1]},

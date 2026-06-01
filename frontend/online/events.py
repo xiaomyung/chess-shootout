@@ -6,11 +6,18 @@ from backend.fen import apply_fen
 from backend.match import ONLINE
 from backend.pieces import PieceColor
 from backend.utils import PROMO_TYPE_BY_LETTER, coord_from_square, square_from_coord
-from frontend import env
 from server.protocol import FIRST_MOVE_ABORT_SECONDS
 
 
 log = logging.getLogger("chess.frontend")
+
+MATCH_FOUND_SECONDS = 3
+
+OFFER_BANNERS = {
+    "draw_offered": ("🤝", "offers a draw", "Accept", "Decline", "send_draw_response"),
+    "takeback_offered": ("↩️", "wants a takeback", "Allow", "Deny",
+                         "send_takeback_response"),
+}
 
 
 ONLINE_WIN_RESULT_BY_REASON = {
@@ -50,7 +57,6 @@ ONLINE_GAME_STATE_REASONS = {
 }
 
 NOT_YOUR_TURN_TOASTS = {
-    "draw_offer": "You can only offer a draw on your own turn",
     "takeback_request": "Take back is only available right after your move",
 }
 
@@ -75,22 +81,12 @@ class OnlineEventsMixin:
             self._handle_remote_move_applied(event.payload)
         elif event.type == "result":
             self._handle_online_result(event.payload)
-        elif event.type == "draw_offered":
-            self._show_opp_offer_modal(
-                "Opponent offers a draw", self.online_client.send_draw_response,
-            )
-        elif event.type == "takeback_offered":
-            self._show_opp_offer_modal(
-                "Opponent requests a takeback",
-                self.online_client.send_takeback_response,
-            )
+        elif event.type in ("draw_offered", "takeback_offered"):
+            self._push_offer_banner(event.type)
+        elif event.type == "rematch_request":
+            self._handle_rematch_request()
         elif event.type == "takeback_applied":
             self._handle_takeback_applied(event.payload)
-        elif event.type == "rematch_request":
-            self._show_opp_offer_modal(
-                "Opponent wants a rematch",
-                self.online_client.send_rematch_response,
-            )
         elif event.type == "game_resumed":
             self._handle_game_resumed(event.payload)
         elif event.type == "time_granted":
@@ -116,6 +112,7 @@ class OnlineEventsMixin:
         if reason == "room_lost":
             self._resyncing = False
             self.reconnecting_modal.hide()
+            self.offer_banners.clear()
             self.confirm_modal.show(
                 "Server restarted — game ended",
                 on_yes=self._restart_online_search,
@@ -126,12 +123,14 @@ class OnlineEventsMixin:
         if reason in ONLINE_HARD_FAILURE_REASONS or reason.startswith("http_"):
             self._resyncing = False
             self.wait_modal.hide()
+            self.match_found_modal.hide()
+            self.offer_banners.clear()
             label = ONLINE_HARD_FAILURE_LABELS.get(reason, "Server unreachable")
             self.confirm_modal.show(
                 label,
-                on_yes=lambda: self._on_server_addr_connect(env.get_server_addr()),
+                on_yes=self._restart_online_search,
                 on_no=self._on_online_cancel,
-                yes_label="Retry", no_label="Cancel",
+                yes_label="New Search", no_label="Cancel",
             )
             return
         if reason:
@@ -140,12 +139,22 @@ class OnlineEventsMixin:
         else:
             self.toast.show("Server error")
 
-    def _show_opp_offer_modal(self, title, send_response):
-        self.confirm_modal.show(
-            title,
-            on_yes=lambda: send_response(True),
+    def _handle_rematch_request(self):
+        self._rematch_offered = True
+        self.result_menu.set_rematch_offered(True)
+        self.toast.show("Opponent wants a rematch")
+
+    def _push_offer_banner(self, event_type):
+        if self.online_client is None:
+            return
+        icon, verb, ok_label, no_label, send_method = OFFER_BANNERS[event_type]
+        opp_color = "black" if self._chosen_side == "white" else "white"
+        opp_name = self._name_for_color(opp_color)
+        send_response = getattr(self.online_client, send_method)
+        self.offer_banners.push(
+            event_type, icon, opp_name, verb, ok_label, no_label,
+            on_ok=lambda: send_response(True),
             on_no=lambda: send_response(False),
-            yes_label="Accept", no_label="Decline",
         )
 
     def _apply_clock_snap(self, payload, *, default_to_existing):
@@ -168,6 +177,7 @@ class OnlineEventsMixin:
         if self._resyncing:
             return
         self._resyncing = True
+        self.offer_banners.clear()
         self._resync_started_at_ms = pg.time.get_ticks()
         if self.online_client is not None:
             self.online_client.send_resync()
@@ -258,6 +268,7 @@ class OnlineEventsMixin:
             self._begin_resync()
 
     def _handle_online_result(self, payload):
+        self.offer_banners.clear()
         reason = payload.get("reason", "")
         winner = payload.get("winner_color")
         if reason in ONLINE_WIN_REASONS:
@@ -281,7 +292,8 @@ class OnlineEventsMixin:
             self._local_disconnected_at_ms = None
             if reason == "timeout":
                 self.sound_manager.play_flag_fall()
-            self._auto_save_pgn()
+            if reason not in ONLINE_STATIC_RESULTS:
+                self._auto_save_pgn()
 
     def _begin_match_found_transition(self, payload):
         if self._pending_game_start_payload is not None:
@@ -293,8 +305,20 @@ class OnlineEventsMixin:
         self._first_move_deadline_ms = now + int(
             (FIRST_MOVE_ABORT_SECONDS - elapsed) * 1000
         )
-        self.wait_modal.set_subtitle("Match found!")
+        self.wait_modal.hide()
+        self.match_found_modal.show(
+            payload["white_name"], payload["black_name"], payload["your_color"],
+            self._finish_match_found, seconds=MATCH_FOUND_SECONDS,
+        )
         self.sound_manager.play_online_game_start()
+
+    def _finish_match_found(self):
+        payload = self._pending_game_start_payload
+        self._pending_game_start_payload = None
+        self._match_found_at_ms = None
+        self._wait_started_at_ms = None
+        if payload is not None:
+            self._start_online_game(payload)
 
     def _handle_connection_status(self, payload):
         opp_state = payload.get("opp_state", "connected")
@@ -325,10 +349,11 @@ class OnlineEventsMixin:
                                   else PieceColor.BLACK)
         self.match.on_local_move_applied = self._on_local_move_applied
         self._match_session_id = self._session_id_for_online()
-        pair = tuple(sorted([payload["white_name"], payload["black_name"]]))
-        if getattr(self, "_series_pair", None) != pair:
-            self._series_pair = pair
-            self._series_scores = {pair[0]: 0.0, pair[1]: 0.0}
+        self._series_pair = tuple(sorted([payload["white_name"], payload["black_name"]]))
+        self._series_scores = {
+            payload["white_name"]: float(payload.get("white_score", 0.0)),
+            payload["black_name"]: float(payload.get("black_score", 0.0)),
+        }
         self._opp_disconnected_at_ms = None
         self._local_disconnected_at_ms = None
         self._reset_to_new_game()

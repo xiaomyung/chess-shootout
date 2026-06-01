@@ -135,6 +135,23 @@ def test_master_volume_persists_round_trip():
     assert "CHESS_MASTER_VOLUME" in contents
 
 
+def test_server_addr_persists_round_trip():
+    env.set_server_addr("chess.example.com:9000")
+    assert env.get_server_addr() == "chess.example.com:9000"
+    assert "CHESS_SERVER_ADDR" in env._ENV_PATH.read_text()
+
+
+def test_server_addr_strips_whitespace():
+    env.set_server_addr("  localhost:8000  ")
+    assert env.get_server_addr() == "localhost:8000"
+
+
+@pytest.mark.parametrize("blank", ["", "   "])
+def test_server_addr_blank_is_noop_keeps_default(blank):
+    env.set_server_addr(blank)
+    assert env.get_server_addr() == "localhost:8000"
+
+
 @pytest.mark.parametrize(
     "raw_value,expected",
     [(-0.5, 0.0), (1.5, 1.0), (0.0, 0.0), (1.0, 1.0)],

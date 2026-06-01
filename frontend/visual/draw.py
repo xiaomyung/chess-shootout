@@ -34,6 +34,33 @@ def infinity_surface(height, color):
     return supersample((w, h), render, scale=8)
 
 
+_CIRCLE_CACHE = {}
+
+
+def circle_surface(diameter, color):
+    d = max(int(diameter), 1)
+    key = (d, color)
+    if key not in _CIRCLE_CACHE:
+        def render(surf, k):
+            r = surf.get_width() / 2
+            pg.draw.circle(surf, pg.Color(color), (r, r), r)
+        _CIRCLE_CACHE[key] = supersample(d, render)
+    return _CIRCLE_CACHE[key]
+
+
+def stroked_text(font, text, fill, stroke, sw):
+    base = font.render(text, True, fill)
+    edge = font.render(text, True, stroke)
+    w, h = base.get_size()
+    surf = pg.Surface((w + 2 * sw, h + 2 * sw), pg.SRCALPHA)
+    for dx in range(-sw, sw + 1):
+        for dy in range(-sw, sw + 1):
+            if dx * dx + dy * dy <= sw * sw:
+                surf.blit(edge, (sw + dx, sw + dy))
+    surf.blit(base, (sw, sw))
+    return surf
+
+
 def blit_centered(surface, text, center):
     ink = text.get_bounding_rect()
     surface.blit(text, (round(center[0] - ink.centerx), round(center[1] - ink.centery)))
