@@ -1055,6 +1055,21 @@ class MenuBattle:
         layer.fill((*pg.Color(p.get("color", Colors.amber_hi))[:3], max(0, alpha)))
         window.blit(layer, (sx, sy))
 
+    @staticmethod
+    def _wrap_words(text, font, max_w):
+        words = text.split()
+        if not words:
+            return [text]
+        lines, cur = [], words[0]
+        for word in words[1:]:
+            if font.size(cur + " " + word)[0] <= max_w:
+                cur += " " + word
+            else:
+                lines.append(cur)
+                cur = word
+        lines.append(cur)
+        return lines
+
     def _draw_bubble(self, window, ent, now):
         bub = ent.get("bubble")
         if bub is None:
@@ -1074,31 +1089,91 @@ class MenuBattle:
             bg, txt, border = Colors.amber, Colors.on_accent, Colors.amber_hi
         else:
             bg, txt, border = Colors.bubble_pawn_bg, Colors.bubble_pawn_text, Colors.border_strong
-        text_key = (bub["text"], bub["who"], round(self.scale, 3))
-        if bub.get("text_key") != text_key:
-            font = get_font(max(int(12 * self.scale), 9), bold=True)
-            bub["label"] = font.render(bub["text"], True, pg.Color(txt))
-            bub["text_key"] = text_key
-        label = bub["label"]
-        pad_x, pad_y = int(11 * self.scale), int(6 * self.scale)
-        bw = label.get_width() + pad_x * 2
-        bh = label.get_height() + pad_y * 2
+        scale = self.scale
+        font = get_font(max(int(12 * scale), 9), bold=True)
+        pad_x, pad_y = int(11 * scale), int(6 * scale)
+        tail = max(int(6 * scale), 3)
+        line_gap = max(int(2 * scale), 1)
         ox, oy = self.rect.topleft
         cx = ox + ent["x"]
-        by = oy + ent["y"] - ent["head"]
-        bx = cx - bw / 2
-        bx = max(self.rect.x + 2, min(bx, self.rect.right - bw - 2))
-        layer = pg.Surface((bw, bh + int(6 * self.scale)), pg.SRCALPHA)
-        pg.draw.rect(layer, pg.Color(bg), pg.Rect(0, 0, bw, bh), border_radius=int(10 * self.scale))
-        pg.draw.rect(layer, pg.Color(border), pg.Rect(0, 0, bw, bh), 1,
-                     border_radius=int(10 * self.scale))
-        tail = int(6 * self.scale)
-        tip_x = max(tail, min(bw - tail, cx - bx))
-        pg.draw.polygon(layer, pg.Color(bg), [(tip_x - tail, bh), (tip_x + tail, bh),
-                                              (tip_x, bh + tail)])
-        layer.blit(label, (pad_x, pad_y))
+        sprite_h = ent["sprite_h"]
+        top = oy + ent["y"] - sprite_h
+        body_y = oy + ent["y"] - sprite_h * 0.72
+        art = self._entity_art(ent["kind"])
+        half_w = art["normal"].get_width() / 2 if art else sprite_h * 0.32
+        lw, rw = self.rect.x + 4, self.rect.right - 4
+        card = self.avoid_rect
+
+        def measure(max_text_w):
+            mw = max(int(max_text_w), 1)
+            cache = bub.setdefault("_wrap", {})
+            ckey = (round(scale, 3), mw // 16)
+            if ckey not in cache:
+                lines = self._wrap_words(bub["text"], font, mw)
+                surfs = [font.render(line, True, pg.Color(txt)) for line in lines]
+                tw = max(s.get_width() for s in surfs)
+                th = sum(s.get_height() for s in surfs) + line_gap * (len(surfs) - 1)
+                cache[ckey] = (surfs, tw + 2 * pad_x, th + 2 * pad_y)
+            return cache[ckey]
+
+        above_lw, above_rw = lw, rw
+        if card.width > 0:
+            if cx <= card.centerx:
+                above_rw = min(above_rw, card.left - 6)
+            else:
+                above_lw = max(above_lw, card.right + 6)
+        surfs, bw, bh = measure(above_rw - above_lw - 2 * pad_x)
+        bx = max(above_lw, min(cx - bw / 2, above_rw - bw))
+        by = top - tail - bh
+        if by >= self.top_inset + 4 and not pg.Rect(bx, by, bw, bh).colliderect(card):
+            self._blit_bubble(window, surfs, bx, by, bw, bh, tail, "down",
+                              cx, top, bg, border, alpha, pad_x, pad_y, line_gap)
+            return
+
+        leftroom, rightroom = cx - lw, rw - cx
+        if card.width > 0 and card.top - 12 <= body_y <= card.bottom + 12:
+            if cx <= card.centerx:
+                rightroom = min(rightroom, card.left - 6 - cx)
+            else:
+                leftroom = min(leftroom, cx - card.right - 6)
+        if rightroom >= leftroom:
+            edge_x = cx + half_w
+            surfs, bw, bh = measure(rw - edge_x - tail - 2 * pad_x)
+            by = max(self.top_inset + 4, min(body_y - bh / 2, self.rect.bottom - bh - 4))
+            self._blit_bubble(window, surfs, edge_x + tail, by, bw, bh, tail, "left",
+                              edge_x, body_y, bg, border, alpha, pad_x, pad_y, line_gap)
+        else:
+            edge_x = cx - half_w
+            surfs, bw, bh = measure(edge_x - tail - lw - 2 * pad_x)
+            by = max(self.top_inset + 4, min(body_y - bh / 2, self.rect.bottom - bh - 4))
+            self._blit_bubble(window, surfs, edge_x - tail - bw, by, bw, bh, tail, "right",
+                              edge_x, body_y, bg, border, alpha, pad_x, pad_y, line_gap)
+
+    def _blit_bubble(self, window, surfs, bx, by, bw, bh, tail, direction,
+                     anchor_x, anchor_y, bg, border, alpha, pad_x, pad_y, line_gap):
+        layer = pg.Surface((int(bw) + 2 * tail, int(bh) + 2 * tail), pg.SRCALPHA)
+        body = pg.Rect(tail, tail, int(bw), int(bh))
+        radius = max(int(10 * self.scale), 4)
+        pg.draw.rect(layer, pg.Color(bg), body, border_radius=radius)
+        pg.draw.rect(layer, pg.Color(border), body, 1, border_radius=radius)
+        if direction in ("down", "up"):
+            tip = max(body.left + tail, min(int(anchor_x - bx) + tail, body.right - tail))
+            edge = body.bottom if direction == "down" else body.top
+            point = (tip, edge + tail) if direction == "down" else (tip, edge - tail)
+            pg.draw.polygon(layer, pg.Color(bg),
+                            [(tip - tail, edge), (tip + tail, edge), point])
+        else:
+            tip = max(body.top + tail, min(int(anchor_y - by) + tail, body.bottom - tail))
+            edge = body.left if direction == "left" else body.right
+            point = (edge - tail, tip) if direction == "left" else (edge + tail, tip)
+            pg.draw.polygon(layer, pg.Color(bg),
+                            [(edge, tip - tail), (edge, tip + tail), point])
+        y = body.y + pad_y
+        for surf in surfs:
+            layer.blit(surf, (body.x + pad_x, y))
+            y += surf.get_height() + line_gap
         layer.set_alpha(int(alpha * 255))
-        window.blit(layer, (bx, by - bh))
+        window.blit(layer, (bx - tail, by - tail))
 
     def _background(self, size):
         if self._bg_cache is not None and self._bg_cache[0] == size:

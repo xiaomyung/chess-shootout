@@ -21,6 +21,7 @@ from frontend.menu_battle import (
     WEAPON_SWITCH_MIN, WEAPON_SWITCH_MAX, GUN_DRAW_SEC,
 )
 from frontend.visual.colors import Colors
+from frontend.visual.fonts import get_font
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -981,3 +982,43 @@ def test_renders_without_piece_art():
     win.fill((0, 0, 0))
     b.draw(win)
     assert len(_distinct_colors(win, win.get_rect())) > 5
+
+
+def test_wrap_words_keeps_each_word_on_its_own_line_at_min_width():
+    lines = MenuBattle._wrap_words("alpha beta gamma", get_font(12, bold=True), 1)
+    assert lines == ["alpha", "beta", "gamma"]
+
+
+def test_wrap_words_does_not_split_a_single_word():
+    font = get_font(12, bold=True)
+    assert MenuBattle._wrap_words("supercalifragilistic", font, 1) == ["supercalifragilistic"]
+
+
+def test_wrap_words_stays_one_line_when_width_is_ample():
+    font = get_font(12, bold=True)
+    assert MenuBattle._wrap_words("short text here", font, 10000) == ["short text here"]
+
+
+def _amber_in_band(window, y0, y1):
+    amber = pg.Color(Colors.amber)[:3]
+    for y in range(max(y0, 0), min(y1, window.get_height())):
+        for x in range(0, window.get_width(), 3):
+            c = window.get_at((x, y))[:3]
+            if all(abs(a - b) <= 22 for a, b in zip(c, amber)):
+                return True
+    return False
+
+
+def test_bubble_near_titlebar_shifts_below_it():
+    """A queen whose head sits against the title bar gets her bubble shifted to the side,
+    entirely below the reserved title-bar strip (never drawn into it)."""
+    b = _battle()
+    q = b.queen
+    q["x"], q["y"] = 120, b.top_inset + q["head"] + 10
+    b._say(q, "GET BACK IN LINE", "queen", 1000)
+    b._last_ms = 1300
+    win = pg.display.get_surface()
+    win.fill((0, 0, 0))
+    b.draw(win)
+    assert not _amber_in_band(win, 0, b.top_inset)
+    assert _amber_in_band(win, b.top_inset, b.top_inset + 90)
