@@ -13,6 +13,7 @@ from backend.match import Match, SINGLE_SCREEN, BOT, ONLINE
 from frontend import env
 from frontend.panels.audio import AudioPanel
 from frontend.board import Board
+from frontend.menu_battle import MenuBattle
 from frontend.panels.capture_summary import captured_by, material_advantage
 from frontend.result_stats import compute_result_stats
 from frontend.modals.confirm import ConfirmModal
@@ -218,6 +219,7 @@ class Frontend(OnlineEventsMixin):
         self._opp_disconnected_at_ms = None
         self._local_disconnected_at_ms = None
         self._prev_online_state = None
+        self._prev_battle_mode = None
 
         self.match = Match()
         self.sound_manager = SoundManager(SOUNDS_DIR, enabled=pg.mixer.get_init() is not None)
@@ -271,6 +273,7 @@ class Frontend(OnlineEventsMixin):
         self.online_client = None
         self.player_strip_top = PlayerStrip(self.window)
         self.player_strip_bottom = PlayerStrip(self.window)
+        self.menu_battle = MenuBattle(self.window)
 
         self.match.new_game()
         self.board.load_assets()
@@ -1070,6 +1073,16 @@ class Frontend(OnlineEventsMixin):
             if self._result_modal_should_show() and not self.pgn_review:
                 self._feed_result_menu()
                 self.result_menu.draw()
+        entering_menu = self.mode == "menu" and self._prev_battle_mode != "menu"
+        self._prev_battle_mode = self.mode
+        if self.mode == "menu":
+            if entering_menu:
+                self.menu_battle.begin_intro()
+            self.menu_battle.set_avoid_rect(self.start_menu._outer)
+            self.menu_battle.set_logo_rect(self.start_menu._tile_rect)
+            self.menu_battle.update(now, env.get_reduce_motion())
+            self.menu_battle.draw(self.window)
+            self.menu_battle.draw_scrim(self.window)
         self._refresh_reconnect_button()
         if not self._menu_overlay_active():
             self.start_menu.draw()
@@ -1082,6 +1095,8 @@ class Frontend(OnlineEventsMixin):
         self.help_modal.draw()
         self.fen_input_modal.draw()
         self.confirm_modal.draw()
+        if self.mode == "menu":
+            self.menu_battle.draw_intro_overlay(self.window)
         self.toast.draw()
         self._drain_online_inbound()
         self._update_online_phase()
@@ -1404,6 +1419,9 @@ class Frontend(OnlineEventsMixin):
         self.reconnecting_modal.set_rect(flex_rect)
         self.file_picker.set_rect(file_picker_rect)
         self.start_menu.set_rect(start_rect)
+        self.menu_battle.top_inset = top
+        self.menu_battle.set_rect(pg.Rect(0, 0, window_width, window_height))
+        self.menu_battle.set_avoid_rect(self.start_menu._outer)
         self.help_modal.set_rect(result_rect)
         self.fen_input_modal.set_rect(flex_rect)
         options_width = min(int(window_width * 0.7), 520)

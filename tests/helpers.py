@@ -111,3 +111,20 @@ def fake_uuid4(seed):
         f"{hex_pad[0:8]}-{hex_pad[8:12]}-4{hex_pad[13:16]}-"
         f"8{hex_pad[17:20]}-{hex_pad[20:32]}"
     )
+
+
+def assert_pixel_color(surface, x, y, expected, tol=0):
+    """Assert a surface pixel matches an expected RGB color within tolerance.
+
+    `expected` may be a hex string (a Colors attribute) or an (r, g, b) tuple.
+    Compares only the RGB channels, ignoring alpha.
+    """
+    import pygame as pg
+
+    got = surface.get_at((int(x), int(y)))[:3]
+    want = pg.Color(expected)[:3] if isinstance(expected, str) else tuple(expected)[:3]
+    if tol == 0:
+        assert got == want, f"pixel ({x},{y}) was {got}, expected {want}"
+    else:
+        assert all(abs(g - w) <= tol for g, w in zip(got, want)), \
+            f"pixel ({x},{y}) was {got}, expected ~{want} (tol {tol})"

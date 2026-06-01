@@ -64,6 +64,16 @@ class Colors:
     titlebar_min = "#ffb020"
     titlebar_max = "#46d17f"
     titlebar_close = "#ff5a4f"
+    battle_bg = "#0d0f14"
+    battle_bg_hi = "#1a1f27"
+    battle_bg_edge = "#090a0e"
+    battle_floor = "#ff5a36"
+    battle_grid = "#ffffff"
+    battle_scrim = "#08090c"
+    battle_shadow = "#000000"
+    bubble_pawn_bg = "#20242c"
+    bubble_pawn_text = "#cfd6e0"
+    blood = "#d62b2b"
     connection_dots = {
         "connected": "#38d65b",
         "reconnecting": "#ffb020",
