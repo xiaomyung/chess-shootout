@@ -324,6 +324,7 @@ class OnlineEventsMixin:
         self.match.local_color = (PieceColor.WHITE if payload["your_color"] == "white"
                                   else PieceColor.BLACK)
         self.match.on_local_move_applied = self._on_local_move_applied
+        self._match_session_id = self._session_id_for_online()
         pair = tuple(sorted([payload["white_name"], payload["black_name"]]))
         if getattr(self, "_series_pair", None) != pair:
             self._series_pair = pair

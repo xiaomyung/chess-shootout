@@ -70,6 +70,10 @@ class OnlineClient:
         self._game_active = False
         self._ping_samples_ms = deque(maxlen=PING_SAMPLE_WINDOW)
 
+    @property
+    def room_id(self):
+        return self._room_id
+
     def get_ping_ms(self):
         if not self._ping_samples_ms:
             return None

@@ -21,6 +21,7 @@ class PgnSummary:
     black: str
     result_code: str
     sort_key: float
+    match_id: str = None
 
 
 _TAG_RE = re.compile(r'\[(\w+)\s+"([^"]*)"\]')
@@ -30,6 +31,10 @@ _RESULT_RE = re.compile(r"(1-0|0-1|1/2-1/2|\*)\s*$")
 _MOVE_NUMBER_PREFIX = re.compile(r"^\d+\.+")
 _BARE_NUMBER_RE = re.compile(r"^\d+\.+$")
 _FILENAME_TS_RE = re.compile(r"(\d{8})-(\d{6})")
+_CSMATCHID_RE = re.compile(
+    r"^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+    re.IGNORECASE,
+)
 
 _TYPE_LABELS = {
     "online": "Online",
@@ -44,6 +49,13 @@ def parse_pgn_headers(text):
     for m in _TAG_RE.finditer(text):
         headers[m.group(1)] = m.group(2)
     return headers
+
+
+def extract_csmatchid(headers):
+    raw = headers.get("CSMatchId", "")
+    if raw and _CSMATCHID_RE.match(raw):
+        return raw
+    return None
 
 
 def parse_pgn(text):
@@ -134,4 +146,5 @@ def summarize_pgn_file(path, text, mtime, filename=None):
         black=headers.get("Black", "?"),
         result_code=headers.get("Result", "*"),
         sort_key=sort_key,
+        match_id=extract_csmatchid(headers),
     )

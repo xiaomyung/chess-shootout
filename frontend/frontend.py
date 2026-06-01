@@ -4,6 +4,7 @@ import os
 import random
 import shutil
 import threading
+import uuid
 from datetime import datetime
 
 import pygame as pg
@@ -210,6 +211,7 @@ class Frontend(OnlineEventsMixin):
         self._flag_fall_played = False
         self._result_first_seen_at_ms = None
         self._pgn_result_tag = None
+        self._match_session_id = None
         self._series_scores = {}
         self._resyncing = False
         self._resync_started_at_ms = 0
@@ -344,6 +346,7 @@ class Frontend(OnlineEventsMixin):
 
     def _on_back_to_menu(self):
         self.mode = "menu"
+        self._match_session_id = None
         pg.display.set_caption(WINDOW_TITLE)
         if self.online_client is not None:
             self.online_client.disconnect()
@@ -540,6 +543,7 @@ class Frontend(OnlineEventsMixin):
         self.black_name = "Player 2"
         self.match.mode = SINGLE_SCREEN
         self.match.local_color = None
+        self._ensure_local_session()
         self._reset_to_new_game()
         apply_fen(self.match.backend, fen)
         self.fen_input_modal.hide()
@@ -662,6 +666,7 @@ class Frontend(OnlineEventsMixin):
             if config["time_minutes"] is not None else None
         )
 
+        self._ensure_local_session()
         self._reset_to_new_game()
         self.start_menu.hide()
         self.sound_manager.play_game_start()
@@ -861,6 +866,15 @@ class Frontend(OnlineEventsMixin):
             return "bot"
         return "local"
 
+    def _ensure_local_session(self):
+        if self._match_session_id is None:
+            self._match_session_id = str(uuid.uuid4())
+
+    def _session_id_for_online(self):
+        if self.online_client is not None and self.online_client.room_id:
+            return self.online_client.room_id
+        return str(uuid.uuid4())
+
     def _build_pgn_text(self):
         result = self.current_result()
         if result is None:
@@ -871,6 +885,7 @@ class Frontend(OnlineEventsMixin):
             self.match.move_history, result,
             white_name=self.white_name, black_name=self.black_name,
             time_control=time_control, termination=termination,
+            match_id=self._match_session_id,
         )
 
     def _on_undo(self):

@@ -14,6 +14,22 @@ import pytest
 from backend.utils import Square
 from backend.pieces import PieceColor
 from frontend.frontend import Frontend, OPPONENT_NAME_FOR_MODE
+from frontend.pgn.load import extract_csmatchid, parse_pgn_headers
+from tests.helpers import fake_uuid4
+
+
+class _StubClient:
+    def __init__(self, room_id):
+        self.room_id = room_id
+
+
+def _online_payload(**overrides):
+    payload = {
+        "white_name": "alice", "black_name": "bob", "your_color": "white",
+        "time_minutes": 5, "increment_seconds": 2,
+    }
+    payload.update(overrides)
+    return payload
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -277,6 +293,76 @@ def test_open_pgn_warns_on_open_failure(tmp_path, monkeypatch):
     )
     app._on_open_pgn()
     assert app.toast.message == "Could not open PGN"
+
+
+def test_local_game_mints_match_session_id():
+    app = make_app()
+    assert app._match_session_id is None
+    app._on_start_game(base_config())
+    assert extract_csmatchid({"CSMatchId": app._match_session_id}) == app._match_session_id
+
+
+def test_new_game_reuses_match_session_id():
+    """The in-game New Game button stacks onto the same match session (a local rematch)."""
+    app = make_app()
+    app._on_start_game(base_config())
+    first = app._match_session_id
+    app.manual_result = "white_wins"
+    app._on_new_game()
+    assert app._match_session_id == first
+
+
+def test_back_to_menu_clears_match_session_id():
+    app = make_app()
+    app._on_start_game(base_config())
+    assert app._match_session_id is not None
+    app._on_back_to_menu()
+    assert app._match_session_id is None
+
+
+def test_fresh_local_game_after_menu_return_mints_new_session():
+    app = make_app()
+    app._on_start_game(base_config())
+    first = app._match_session_id
+    app._on_back_to_menu()
+    app._on_start_game(base_config())
+    assert app._match_session_id != first
+
+
+def test_fen_start_mints_match_session_id():
+    app = make_app()
+    ok = app._start_game_from_fen("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1")
+    assert ok is True
+    assert extract_csmatchid({"CSMatchId": app._match_session_id}) == app._match_session_id
+
+
+def test_online_match_session_uses_room_id():
+    app = make_app()
+    room = fake_uuid4(2)
+    app.online_client = _StubClient(room)
+    app._start_online_game(_online_payload())
+    assert app._match_session_id == room
+
+
+def test_online_rematch_same_room_keeps_match_session_id():
+    """A rematch re-enters _start_online_game with the same room; the id is stable."""
+    app = make_app()
+    room = fake_uuid4(4)
+    app.online_client = _StubClient(room)
+    app._start_online_game(_online_payload())
+    app._start_online_game(_online_payload())
+    assert app._match_session_id == room
+
+
+def test_saved_local_pgn_contains_match_session_id(tmp_path, monkeypatch):
+    app = make_app()
+    app._on_start_game(base_config())
+    monkeypatch.setenv("CHESS_DATA_DIR", str(tmp_path))
+    app.backend.try_move(Square(6, 4), Square(4, 4))
+    app.manual_result = "white_wins"
+    app._auto_save_pgn()
+    content = list((tmp_path / "games").glob("*.pgn"))[0].read_text()
+    assert extract_csmatchid(parse_pgn_headers(content)) == app._match_session_id
 
 
 @pytest.mark.parametrize("mode_value, expected_prefix", [

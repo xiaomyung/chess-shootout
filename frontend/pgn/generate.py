@@ -28,7 +28,7 @@ def iter_move_pairs(history):
 
 
 def generate_pgn(move_history, result, white_name="?", black_name="?",
-                 time_control=None, termination=None):
+                 time_control=None, termination=None, match_id=None):
     code = RESULT_CODES.get(result, "*")
     if time_control is None:
         tc_value = "-"
@@ -49,6 +49,8 @@ def generate_pgn(move_history, result, white_name="?", black_name="?",
         f'[Result "{code}"]',
         f'[TimeControl "{tc_value}"]',
     ]
+    if match_id is not None:
+        header.append(f'[CSMatchId "{match_id}"]')
     if termination is not None:
         header.append(f'[Termination "{termination}"]')
 

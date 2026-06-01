@@ -6,6 +6,7 @@ from frontend.pgn.load import (
     PgnSummary, parse_pgn, parse_pgn_headers, parse_time_control,
     summarize_pgn_file,
 )
+from tests.helpers import fake_uuid4
 
 
 def _pgn(headers, body="1. e4 *"):
@@ -94,6 +95,17 @@ def test_result_code_preserved(code):
 def test_result_missing_defaults_to_unfinished():
     s = _summary("local-20260101-000000.pgn", headers={"White": "A"})
     assert s.result_code == "*"
+
+
+def test_summary_carries_csmatchid_from_headers():
+    mid = fake_uuid4(9)
+    s = _summary("online-20260101-000000.pgn", headers={"CSMatchId": mid})
+    assert s.match_id == mid
+
+
+def test_summary_match_id_none_when_tag_absent():
+    s = _summary("local-20260101-000000.pgn", headers={"White": "A"})
+    assert s.match_id is None
 
 
 @pytest.mark.parametrize("text", [

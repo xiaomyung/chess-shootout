@@ -6,7 +6,8 @@ from backend.backend import Backend
 from backend.pieces import Piece, PieceColor, PieceType
 from backend.utils import Square
 from frontend.pgn.generate import generate_pgn
-from frontend.pgn.load import parse_pgn, load_pgn_into_backend
+from frontend.pgn.load import extract_csmatchid, parse_pgn, load_pgn_into_backend
+from tests.helpers import fake_uuid4
 
 
 def _round_trip(backend, result_code="*"):
@@ -262,3 +263,18 @@ def test_load_pgn_returns_false_on_illegal_move():
     text = '[White "A"]\n\n1. e4 e9 *'
     _, ok = load_pgn_into_backend(fresh, text)
     assert not ok
+
+
+def test_extract_csmatchid_valid():
+    mid = fake_uuid4(42)
+    assert extract_csmatchid({"CSMatchId": mid}) == mid
+
+
+@pytest.mark.parametrize("headers", [
+    pytest.param({}, id="missing"),
+    pytest.param({"CSMatchId": ""}, id="empty"),
+    pytest.param({"CSMatchId": "not-a-uuid"}, id="garbage"),
+    pytest.param({"CSMatchId": "12345678-1234-1234-1234-123456789abc"}, id="not_v4"),
+])
+def test_extract_csmatchid_rejects_non_uuid4(headers):
+    assert extract_csmatchid(headers) is None
