@@ -2,6 +2,8 @@ import pygame as pg
 
 from frontend.modals.base import BaseModal, MODAL_RAIL
 from frontend.visual.colors import Colors
+from frontend.visual.draw import rounded_rect_surface
+from frontend.visual.emoji import blit_emoji
 from frontend.visual.fonts import get_display_font, get_font
 from frontend.visual.widgets import draw_button_row, fit_text_to_rect
 
@@ -31,6 +33,7 @@ class ConfirmModal(BaseModal):
         self.title = None
         self.sub = ""
         self.danger = False
+        self.emoji = None
         self.on_yes = None
         self.on_no = None
         self.on_extra = None
@@ -41,10 +44,11 @@ class ConfirmModal(BaseModal):
         self._panel = pg.Rect(0, 0, 0, 0)
 
     def show(self, title, on_yes, on_no=None, yes_label="Confirm", no_label="Cancel",
-             on_extra=None, extra_label="Cancel", sub="", danger=False):
+             on_extra=None, extra_label="Cancel", sub="", danger=False, emoji=None):
         self.title = title
         self.sub = sub
         self.danger = danger
+        self.emoji = emoji
         self.on_yes = on_yes
         self.on_no = on_no
         self.on_extra = on_extra
@@ -54,6 +58,7 @@ class ConfirmModal(BaseModal):
 
     def hide(self):
         self.title = None
+        self.emoji = None
         self.on_yes = None
         self.on_no = None
         self.on_extra = None
@@ -80,8 +85,10 @@ class ConfirmModal(BaseModal):
         sub_lines = _wrap_words(self.sub, sub_font, inner_w) if self.sub else []
         line_h = sub_font.get_linesize()
 
+        icon_side = max(int(panel_w * 0.12), 40) if self.emoji else 0
+        gap_icon = max(int(panel_w * 0.03), 12) if self.emoji else 0
         gap_title = 8 if sub_lines else 0
-        block_h = (title_surf.get_height()
+        block_h = (icon_side + gap_icon + title_surf.get_height()
                    + (gap_title + line_h * len(sub_lines) if sub_lines else 0))
         panel_h = MODAL_RAIL + pad + block_h + max(int(panel_w * 0.05), 18) + btn_h + pad
         panel = pg.Rect(0, 0, panel_w, panel_h)
@@ -91,6 +98,17 @@ class ConfirmModal(BaseModal):
         self.draw_shell("loss" if self.danger else None, panel)
         content = self.content_rect(panel)
         y = content.y
+        if self.emoji:
+            tile = pg.Rect(content.centerx - icon_side // 2, y, icon_side, icon_side)
+            fill = Colors.button_hover
+            border = Colors.button_border
+            if self.danger:
+                fill = pg.Color(Colors.result_loss).lerp(pg.Color(Colors.button_hover), 0.84)
+                border = pg.Color(Colors.result_loss).lerp(pg.Color(Colors.modal_bg), 0.6)
+            self.window.blit(rounded_rect_surface(tile.size, 13, fill, border=border,
+                                                  border_width=1), tile.topleft)
+            blit_emoji(self.window, self.emoji, tile.center, int(icon_side * 0.62))
+            y += icon_side + gap_icon
         self.window.blit(title_surf, (content.centerx - title_surf.get_width() / 2, y))
         y += title_surf.get_height() + gap_title
         for line in sub_lines:

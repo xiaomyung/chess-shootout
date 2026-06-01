@@ -4,9 +4,9 @@ from frontend.modals.base import BaseModal
 from frontend.visual.colors import Colors
 from frontend.visual.draw import supersample, rounded_rect_surface
 from frontend.visual.fonts import get_display_font, get_font, get_mono_font
+from frontend.visual.text_input import TextInput
 from frontend.visual.widgets import (
     draw_button, draw_button_row, draw_scroll_thumb, draw_segmented, draw_toggle,
-    wrap_path,
 )
 
 ROW_PAD = 12
@@ -73,6 +73,9 @@ class _Row:
         return rect.right
 
     def handle_click(self, pos):
+        return False
+
+    def handle_key(self, event):
         return False
 
 
@@ -242,45 +245,77 @@ class SwatchRow(_Row):
 
 class PathRow(_Row):
 
-    def __init__(self, label, value_getter, on_change, on_reset):
-        super().__init__(label)
+    def __init__(self, label, desc, window, value_getter, on_change, on_reset, suffix=""):
+        super().__init__(label, desc)
         self.value_getter = value_getter
         self.on_change = on_change
         self.on_reset = on_reset
+        self.suffix = suffix
+        self.input = TextInput(window, max_chars=512, placeholder="data folder path",
+                               mono=True, bg=Colors.app_bg, radius=7, rest_align="end")
+        self.input.padding = 11
+        self.input.text = str(value_getter())
         self._change_rect = pg.Rect(0, 0, 0, 0)
         self._reset_rect = pg.Rect(0, 0, 0, 0)
-        self._lines = 1
+        self._field_rect = pg.Rect(0, 0, 0, 0)
+
+    def _field_h(self, fonts):
+        return max(fonts.value.get_height() + 18, 34)
 
     def height(self, fonts):
-        self._lines = max(len(wrap_path(str(self.value_getter()), fonts.value, 999)), 1)
-        btn_h = max(fonts.button.get_height() + 12, 28)
-        return (fonts.title.get_height() + 4
-                + self._lines * (fonts.value.get_height() + 2) + 8 + btn_h + ROW_PAD)
+        base = fonts.title.get_height() + (fonts.desc.get_height() + 2 if self.desc else 0)
+        return ROW_PAD + base + 10 + self._field_h(fonts) + ROW_PAD
 
     def draw(self, window, rect, fonts):
         x = rect.x
-        y = rect.y + 2
+        y = rect.y + ROW_PAD
         window.blit(fonts.title.render(self.title, True, Colors.white), (x, y))
-        yy = y + fonts.title.get_height() + 4
-        for line in wrap_path(str(self.value_getter()), fonts.value, rect.width):
-            window.blit(fonts.value.render(line, True, Colors.text_dim), (x, yy))
-            yy += fonts.value.get_height() + 2
-        yy += 8
-        btn_h = max(fonts.button.get_height() + 12, 28)
-        btn_w = max(int(rect.width * 0.26), 90)
-        self._change_rect = pg.Rect(x, yy, btn_w, btn_h)
-        self._reset_rect = pg.Rect(x + btn_w + 8, yy, btn_w, btn_h)
+        yy = y + fonts.title.get_height() + 2
+        if self.desc:
+            window.blit(fonts.desc.render(self.desc, True, Colors.text_mute), (x, yy))
+            yy += fonts.desc.get_height() + 2
+        yy += 10
+        if not self.input.focused and self.input.text != str(self.value_getter()):
+            self.input.text = str(self.value_getter())
+        field_h = self._field_h(fonts)
+        btn_w = max(int(rect.width * 0.17), 72)
+        gap = 8
+        self._reset_rect = pg.Rect(rect.right - btn_w, yy, btn_w, field_h)
+        self._change_rect = pg.Rect(self._reset_rect.x - gap - btn_w, yy, btn_w, field_h)
+        suffix_surf = fonts.value.render(self.suffix, True, Colors.text_mute) if self.suffix \
+            else None
+        suffix_w = suffix_surf.get_width() + 6 if suffix_surf else 0
+        field_right = self._change_rect.x - gap - suffix_w
+        self._field_rect = pg.Rect(x, yy, max(field_right - x, 1), field_h)
+        self.input.set_rect(self._field_rect)
+        self.input.font = fonts.value
+        self.input.draw()
+        if suffix_surf:
+            window.blit(suffix_surf, (self._field_rect.right + 4,
+                                      self._field_rect.centery - suffix_surf.get_height() // 2))
         draw_button(window, self._change_rect, "Change", fonts.button)
         draw_button(window, self._reset_rect, "Reset", fonts.button)
 
+    def current_text(self):
+        return self.input.text.strip()
+
     def handle_click(self, pos):
         if self._change_rect.collidepoint(pos):
+            self.input.focused = False
             self.on_change()
             return True
         if self._reset_rect.collidepoint(pos):
+            self.input.focused = False
             self.on_reset()
             return True
+        if self._field_rect.collidepoint(pos):
+            self.input.handle_click(pos)
+            return True
+        self.input.focused = False
         return False
+
+    def handle_key(self, event):
+        return self.input.handle_key(event)
 
 
 class OptionsBody:
@@ -340,6 +375,13 @@ class OptionsBody:
         self._last_scroll_ms = pg.time.get_ticks()
         return True
 
+    def handle_key(self, event):
+        for _, rows in self.sections:
+            for row in rows:
+                if row.handle_key(event):
+                    return True
+        return False
+
 
 class OptionsModal(BaseModal):
 
@@ -396,9 +438,9 @@ class OptionsModal(BaseModal):
         if not self.visible:
             return False
         if self.button_rects.get("close") and self.button_rects["close"].collidepoint(pos):
+            if self.on_close is not None and self.on_close() is False:
+                return True
             self.hide()
-            if self.on_close is not None:
-                self.on_close()
             return True
         self.body.handle_click(pos)
         return True
@@ -407,3 +449,8 @@ class OptionsModal(BaseModal):
         if not self.visible:
             return False
         return self.body.handle_scroll(pos, dy)
+
+    def handle_key(self, event):
+        if not self.visible:
+            return False
+        return self.body.handle_key(event)

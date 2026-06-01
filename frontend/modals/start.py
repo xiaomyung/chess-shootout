@@ -81,6 +81,7 @@ class StartMenu:
         self.selected_time_minutes = 10
         self.selected_increment_seconds = 5
         self.selected_side = "random"
+        self.apply_default_time_settings()
 
         self.title_font = get_font(28, bold=True)
         self.label_font = get_font(12, bold=True)
@@ -118,6 +119,14 @@ class StartMenu:
         self.row_gap = 6
         self.load_pgn_available = False
         self.reconnect_available = False
+
+    def apply_default_time_settings(self):
+        minutes = env.default_time_minutes()
+        if minutes in [value for _, value in TIME_OPTIONS]:
+            self.selected_time_minutes = minutes
+        seconds = env.default_increment_seconds()
+        if seconds in [value for _, value in INCREMENT_OPTIONS]:
+            self.selected_increment_seconds = seconds
 
     def set_reconnect_available(self, available):
         if self.reconnect_available == available:

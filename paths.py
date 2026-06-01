@@ -99,3 +99,17 @@ def get_log_dir():
 
 def get_games_dir():
     return get_data_dir() / GAMES_SUBDIR
+
+
+def is_writable_dir(directory):
+    directory = str(directory) if directory else ""
+    if not directory or not os.path.isdir(directory) or not os.access(directory, os.W_OK):
+        return False
+    probe = os.path.join(directory, ".chess_write_test")
+    try:
+        with open(probe, "w"):
+            pass
+        os.remove(probe)
+    except OSError:
+        return False
+    return True

@@ -46,7 +46,8 @@ def _draw_row(row, rect=pg.Rect(40, 40, 420, 56)):
 
 def test_show_paints_shell_and_close():
     modal = _modal()
-    modal.show([("Game", [PathRow("Games folder", lambda: "/tmp/x",
+    modal.show([("Game", [PathRow("Games folder", "where games live",
+                                   pg.display.get_surface(), lambda: "/tmp/x",
                                    lambda: None, lambda: None)])])
     assert modal.is_visible() is True
     modal.window.fill((0, 0, 0))
@@ -77,7 +78,8 @@ def test_click_outside_is_consumed_and_stays_open():
 def test_sections_render():
     modal = _modal()
     modal.show([("Audio", [ToggleRow("Mute", "", lambda: False, lambda v: None)]),
-                ("Game", [PathRow("Folder", lambda: "/x", lambda: None, lambda: None)])])
+                ("Game", [PathRow("Folder", "", pg.display.get_surface(),
+                                  lambda: "/x", lambda: None, lambda: None)])])
     modal.window.fill((0, 0, 0))
     modal.draw()
     painted = modal.window.subsurface(modal.rect)
@@ -141,15 +143,66 @@ def test_swatch_row_selects_unlocked_only():
     assert chosen["v"] == "dark"
 
 
+def _path_row(getter=lambda: "/tmp/x", on_change=lambda: None, on_reset=lambda: None):
+    return PathRow("Games folder", "where games live", pg.display.get_surface(),
+                   getter, on_change, on_reset)
+
+
 def test_pathrow_buttons_route_callbacks():
     fired = {"change": 0, "reset": 0}
-    row = PathRow("Games folder", lambda: "/tmp/x",
-                  lambda: fired.update(change=fired["change"] + 1),
-                  lambda: fired.update(reset=fired["reset"] + 1))
+    row = _path_row(on_change=lambda: fired.update(change=fired["change"] + 1),
+                    on_reset=lambda: fired.update(reset=fired["reset"] + 1))
     _draw_row(row, pg.Rect(40, 40, 420, 120))
     assert row.handle_click(row._change_rect.center) is True
     assert row.handle_click(row._reset_rect.center) is True
     assert fired == {"change": 1, "reset": 1}
+
+
+def test_pathrow_field_click_focuses_input():
+    row = _path_row()
+    _draw_row(row, pg.Rect(40, 40, 420, 120))
+    assert row.handle_click(row._field_rect.center) is True
+    assert row.input.focused is True
+
+
+def test_pathrow_current_text_strips_and_reflects_input():
+    row = _path_row()
+    _draw_row(row, pg.Rect(40, 40, 420, 120))
+    row.input.text = "  /home/me/chess  "
+    assert row.current_text() == "/home/me/chess"
+
+
+def test_pathrow_handle_key_types_into_focused_field():
+    row = _path_row()
+    _draw_row(row, pg.Rect(40, 40, 420, 120))
+    row.input.text = ""
+    row.input.focused = True
+    ev = pg.event.Event(pg.KEYDOWN, key=pg.K_z, mod=0, unicode="z")
+    assert row.handle_key(ev) is True
+    assert row.current_text() == "z"
+
+
+def test_modal_handle_key_routes_to_focused_pathrow():
+    modal = _modal()
+    row = _path_row()
+    modal.show([("Game", [row])])
+    modal.draw()
+    row.input.text = ""
+    row.input.focused = True
+    ev = pg.event.Event(pg.KEYDOWN, key=pg.K_q, mod=0, unicode="q")
+    assert modal.handle_key(ev) is True
+    assert row.current_text() == "q"
+
+
+def test_close_gate_blocks_when_on_close_returns_false():
+    modal = _modal()
+    modal.show([], on_close=lambda: False)
+    modal.draw()
+    modal.handle_click(modal.button_rects["close"].center)
+    assert modal.is_visible() is True
+    modal.on_close = lambda: True
+    modal.handle_click(modal.button_rects["close"].center)
+    assert modal.is_visible() is False
 
 
 def test_body_scroll_clamps():

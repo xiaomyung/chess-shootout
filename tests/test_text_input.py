@@ -55,6 +55,15 @@ def test_construction_defaults(ti):
     assert ti.placeholder == "nickname"
 
 
+def test_mono_flag_uses_monospace_font():
+    from frontend.visual.fonts import get_mono_font
+    inp = TextInput(pg.display.get_surface(), mono=True)
+    inp.set_rect(pg.Rect(0, 0, 200, 32))
+    expected = get_mono_font(max(int(32 / inp.font_factor), 10))
+    assert inp.font.size("iiii") == expected.size("iiii")
+    assert inp.font.size("iiii") == inp.font.size("MMMM")
+
+
 def test_handle_click_inside_focuses(ti):
     consumed = ti.handle_click((60, 60))
     assert consumed is True

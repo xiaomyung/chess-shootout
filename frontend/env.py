@@ -19,6 +19,8 @@ _THEMES = ("dark",)
 _DEFAULT_THEME = "dark"
 _DEFAULT_TIME_CONTROL = "10"
 _DEFAULT_INCREMENT = "5"
+TIME_CONTROL_VALUES = ("1", "3", "5", "10", "15", "∞")
+INCREMENT_VALUES = ("0", "2", "5", "10", "15")
 
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 _ENV_PATH = _PROJECT_ROOT / ".env"
@@ -143,21 +145,36 @@ def set_effect_intensity(value):
 
 
 def get_default_time_control():
-    return os.environ.get("CHESS_DEFAULT_TC") or _DEFAULT_TIME_CONTROL
+    value = os.environ.get("CHESS_DEFAULT_TC") or _DEFAULT_TIME_CONTROL
+    return value if value in TIME_CONTROL_VALUES else _DEFAULT_TIME_CONTROL
 
 
 def set_default_time_control(value):
+    if value not in TIME_CONTROL_VALUES:
+        value = _DEFAULT_TIME_CONTROL
     os.environ["CHESS_DEFAULT_TC"] = value
     _persist("CHESS_DEFAULT_TC", value)
 
 
 def get_default_increment():
-    return os.environ.get("CHESS_DEFAULT_INCREMENT") or _DEFAULT_INCREMENT
+    value = os.environ.get("CHESS_DEFAULT_INCREMENT") or _DEFAULT_INCREMENT
+    return value if value in INCREMENT_VALUES else _DEFAULT_INCREMENT
 
 
 def set_default_increment(value):
+    if value not in INCREMENT_VALUES:
+        value = _DEFAULT_INCREMENT
     os.environ["CHESS_DEFAULT_INCREMENT"] = value
     _persist("CHESS_DEFAULT_INCREMENT", value)
+
+
+def default_time_minutes():
+    value = get_default_time_control()
+    return None if value == "∞" else int(value)
+
+
+def default_increment_seconds():
+    return int(get_default_increment())
 
 
 def get_theme():

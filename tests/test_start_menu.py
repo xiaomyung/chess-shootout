@@ -24,7 +24,9 @@ def _pygame_init():
 
 
 @pytest.fixture
-def menu():
+def menu(monkeypatch):
+    monkeypatch.delenv("CHESS_DEFAULT_TC", raising=False)
+    monkeypatch.delenv("CHESS_DEFAULT_INCREMENT", raising=False)
     callbacks_called = []
 
     def on_start(config):
@@ -34,6 +36,31 @@ def menu():
     sm.set_rect(pg.Rect(100, 50, 400, 600))
     sm.draw()
     return sm, callbacks_called
+
+
+def test_applies_mappable_env_default_time(monkeypatch):
+    """A persisted default time/increment the menu can show is selected on launch."""
+    monkeypatch.setenv("CHESS_DEFAULT_TC", "15")
+    monkeypatch.setenv("CHESS_DEFAULT_INCREMENT", "10")
+    sm = StartMenu(pg.display.get_surface(), {"start_game": lambda c: None})
+    assert sm.selected_time_minutes == 15
+    assert sm.selected_increment_seconds == 10
+
+
+def test_unmappable_env_default_keeps_fallback(monkeypatch):
+    """Defaults the current menu has no chip for (1 min, +15) keep the fallback
+    until the menu chips are expanded; the value still persists in env."""
+    monkeypatch.setenv("CHESS_DEFAULT_TC", "1")
+    monkeypatch.setenv("CHESS_DEFAULT_INCREMENT", "15")
+    sm = StartMenu(pg.display.get_surface(), {"start_game": lambda c: None})
+    assert sm.selected_time_minutes == 10
+    assert sm.selected_increment_seconds == 5
+
+
+def test_infinity_env_default_maps_to_no_clock(monkeypatch):
+    monkeypatch.setenv("CHESS_DEFAULT_TC", "∞")
+    sm = StartMenu(pg.display.get_surface(), {"start_game": lambda c: None})
+    assert sm.selected_time_minutes is None
 
 
 def make_key_event(key, unicode=""):

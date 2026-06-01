@@ -116,3 +116,18 @@ def test_extra_button_appended_last():
     m.draw()
     assert set(m.button_rects) == {"no", "yes", "extra"}
     assert m.button_rects["extra"].x > m.button_rects["yes"].x
+
+
+def test_emoji_icon_grows_panel_and_renders_tile():
+    plain = _modal()
+    plain.show("Tap out?", lambda: None)
+    plain.draw()
+    plain_h = plain._panel.height
+
+    iconed = _modal()
+    iconed.show("Tap out?", lambda: None, emoji="🏳️")
+    iconed.window.fill((0, 0, 0))
+    iconed.draw()
+    assert iconed._panel.height > plain_h
+    tile_band = pg.Rect(iconed._panel.centerx - 30, iconed._panel.y + 8, 60, 60)
+    assert _has_color(iconed.window, tile_band, Colors.button_hover, tol=18)

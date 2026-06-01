@@ -290,6 +290,28 @@ def test_default_increment_round_trips():
     assert "CHESS_DEFAULT_INCREMENT=2" in env._ENV_PATH.read_text()
 
 
+def test_default_time_control_rejects_unknown_value():
+    env.set_default_time_control("999")
+    assert env.get_default_time_control() == "10"
+
+
+def test_default_increment_rejects_unknown_value():
+    env.set_default_increment("7")
+    assert env.get_default_increment() == "5"
+
+
+def test_default_time_minutes_parses_value_and_infinity():
+    env.set_default_time_control("15")
+    assert env.default_time_minutes() == 15
+    env.set_default_time_control("∞")
+    assert env.default_time_minutes() is None
+
+
+def test_default_increment_seconds_parses_value():
+    env.set_default_increment("10")
+    assert env.default_increment_seconds() == 10
+
+
 def test_theme_defaults_dark_and_rejects_unknown():
     assert env.get_theme() == "dark"
     env.set_theme("wood")            # not a known theme yet

@@ -1,7 +1,7 @@
 import pygame as pg
 
 from frontend.visual.colors import Colors
-from frontend.visual.fonts import get_font
+from frontend.visual.fonts import get_font, get_mono_font
 
 CURSOR_BLINK_MS = 530
 DOUBLE_CLICK_MS = 400
@@ -9,17 +9,22 @@ DOUBLE_CLICK_MS = 400
 
 class TextInput:
 
-    def __init__(self, window, max_chars=20, placeholder="nickname"):
+    def __init__(self, window, max_chars=20, placeholder="nickname", mono=False,
+                 bg=None, radius=4, rest_align="start"):
         self.window = window
         self.max_chars = max_chars
         self.placeholder = placeholder
+        self.mono = mono
+        self.bg = bg
+        self.radius = radius
+        self.rest_align = rest_align
         self._text = ""
         self.cursor = 0
         self.sel_anchor = None
         self._focused = False
         self.rect = pg.Rect(0, 0, 0, 0)
         self.font_factor = 1.6
-        self.font = get_font(16, bold=True)
+        self.font = self._font(16)
         self.padding = 8
         self.scroll = 0
         self._last_action_ms = 0
@@ -51,10 +56,13 @@ class TextInput:
             self._dragging = False
         self._focused = value
 
+    def _font(self, size):
+        return get_mono_font(size) if self.mono else get_font(size, bold=True)
+
     def set_rect(self, rect):
         self.rect = pg.Rect(rect)
         size = max(int(rect.height / self.font_factor), 10)
-        self.font = get_font(size, bold=True)
+        self.font = self._font(size)
 
     # ---- editing helpers ---------------------------------------------------
 
@@ -252,10 +260,12 @@ class TextInput:
         return (pg.time.get_ticks() // CURSOR_BLINK_MS) % 2 == 0
 
     def draw(self):
-        pg.draw.rect(self.window, Colors.light_grey_menu, self.rect, border_radius=4)
+        bg = self.bg if self.bg is not None else Colors.light_grey_menu
+        pg.draw.rect(self.window, bg, self.rect, border_radius=self.radius)
         border_color = Colors.accent if self._focused else Colors.button_border
         border_width = 2 if self._focused else 1
-        pg.draw.rect(self.window, border_color, self.rect, border_width, border_radius=4)
+        pg.draw.rect(self.window, border_color, self.rect, border_width,
+                     border_radius=self.radius)
 
         if self._dragging:
             if pg.mouse.get_pressed()[0]:
@@ -266,17 +276,23 @@ class TextInput:
 
         field_w = self._field_width()
         cursor_x = self.font.size(self._text[:self.cursor])[0]
-        if cursor_x - self.scroll > field_w:
-            self.scroll = cursor_x - field_w
-        if cursor_x - self.scroll < 0:
-            self.scroll = cursor_x
+        if not self._focused:
+            if self.rest_align == "end":
+                self.scroll = max(0, self.font.size(self._text)[0] - field_w)
+            else:
+                self.scroll = 0
+        else:
+            if cursor_x - self.scroll > field_w:
+                self.scroll = cursor_x - field_w
+            if cursor_x - self.scroll < 0:
+                self.scroll = cursor_x
         self.scroll = max(0, self.scroll)
         base_x = self.rect.x + self.padding - self.scroll
         cy = self.rect.centery
         glyph_h = self.font.get_height()
 
         prev_clip = self.window.get_clip()
-        self.window.set_clip(self.rect)
+        self.window.set_clip(self.rect if prev_clip is None else self.rect.clip(prev_clip))
         sel = self._sel_range()
         if sel and self._focused:
             sx = base_x + self.font.size(self._text[:sel[0]])[0]

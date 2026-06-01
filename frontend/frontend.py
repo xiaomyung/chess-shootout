@@ -258,6 +258,7 @@ class Frontend(OnlineEventsMixin):
         self.fen_input_modal = FenInputModal(self.window)
         self.options_modal = OptionsModal(self.window)
         self.directory_browser = DirectoryBrowser(self.window)
+        self._data_folder_row = None
         self.toast = Toast(self.window)
         self.toast.top_inset = self.chrome.HEIGHT
         self._last_saved_pgn_path = None
@@ -374,15 +375,42 @@ class Frontend(OnlineEventsMixin):
         )
 
     def _on_open_options(self):
-        self.options_modal.show(self._build_settings_sections())
+        self.options_modal.show(self._build_settings_sections(),
+                                on_close=self._on_close_settings)
+
+    def _on_close_settings(self):
+        if not self._validate_data_folder_on_close():
+            return False
+        self.start_menu.apply_default_time_settings()
+        return True
+
+    def _validate_data_folder_on_close(self):
+        if self._data_folder_row is None:
+            return True
+        typed = self._data_folder_row.current_text()
+        if not typed:
+            return True
+        typed = os.path.abspath(os.path.expanduser(typed))
+        if os.path.normpath(typed) == os.path.normpath(str(paths.get_data_dir())):
+            return True
+        if not paths.is_writable_dir(typed):
+            self.toast.show("That folder isn't writable")
+            return False
+        self._apply_data_folder_change(typed)
+        return True
 
     def _set_master_volume(self, value):
         self.sound_manager.set_master_volume(value)
         env.set_master_volume(value)
 
     def _build_settings_sections(self):
-        time_options = [(label, label) for label in ("1", "3", "5", "10", "15", "∞")]
-        incr_options = [(label, label) for label in ("0", "2", "5", "10", "15")]
+        self._data_folder_row = PathRow(
+            "Games folder", "Where PGNs are saved", self.window,
+            lambda: str(paths.get_data_dir()),
+            self._on_change_data_folder, self._on_reset_data_folder,
+            suffix="/" + paths.GAMES_SUBDIR)
+        time_options = [(label, label) for label in env.TIME_CONTROL_VALUES]
+        incr_options = [(label, label) for label in env.INCREMENT_VALUES]
         intensity_options = [("Subtle", "subtle"), ("Balanced", "balanced"), ("Full", "full")]
         themes = [
             ("dark", "#7a818b", "#2f343b", False),
@@ -416,8 +444,7 @@ class Frontend(OnlineEventsMixin):
                 SegmentedRow("Default increment", "Seconds added each move",
                              incr_options, env.get_default_increment,
                              env.set_default_increment, mono=True),
-                PathRow("Games folder", lambda: str(paths.get_games_dir()),
-                        self._on_change_data_folder, self._on_reset_data_folder),
+                self._data_folder_row,
             ]),
         ]
 
@@ -450,7 +477,7 @@ class Frontend(OnlineEventsMixin):
                 on_yes=lambda: self._commit_data_dir(new_dir, to_default, old_games),
                 on_no=lambda: self._commit_data_dir(new_dir, to_default, None),
                 yes_label="Move", no_label="Don't move",
-                on_extra=lambda: None, extra_label="Cancel",
+                on_extra=lambda: None, extra_label="Cancel", emoji="📁",
             )
         else:
             self._commit_data_dir(new_dir, to_default, None)
@@ -867,7 +894,7 @@ class Frontend(OnlineEventsMixin):
         self.confirm_modal.show(
             "Tap out?", on_yes=self._perform_resign,
             sub="The pieces are watching.",
-            yes_label="I'm done", no_label="Keep fighting", danger=True,
+            yes_label="I'm done", no_label="Keep fighting", danger=True, emoji="🏳️",
         )
 
     def _perform_resign(self):
@@ -891,7 +918,7 @@ class Frontend(OnlineEventsMixin):
         self.confirm_modal.show(
             "Offer a draw?", on_yes=self._perform_draw,
             sub="Propose splitting the point. No shots fired, no glory either.",
-            yes_label="Offer draw", no_label="Nevermind",
+            yes_label="Offer draw", no_label="Nevermind", emoji="🤝",
         )
 
     def _perform_draw(self):
@@ -1578,6 +1605,7 @@ class Frontend(OnlineEventsMixin):
                     self.directory_browser.handle_key(event)
                     continue
                 if self.options_modal.is_visible():
+                    self.options_modal.handle_key(event)
                     continue
                 if self.file_picker.is_visible():
                     continue
@@ -1616,10 +1644,10 @@ class Frontend(OnlineEventsMixin):
                         self.board.update_drag_motion(event.pos)
 
             elif event.type == pg.MOUSEWHEEL:
-                if self.options_modal.is_visible():
-                    self.options_modal.handle_scroll(pg.mouse.get_pos(), event.y)
-                elif self.directory_browser.is_visible():
+                if self.directory_browser.is_visible():
                     self.directory_browser.handle_scroll(pg.mouse.get_pos(), event.y)
+                elif self.options_modal.is_visible():
+                    self.options_modal.handle_scroll(pg.mouse.get_pos(), event.y)
                 elif self.help_modal.is_visible():
                     self.help_modal.handle_scroll(pg.mouse.get_pos(), event.y)
                 elif self.file_picker.is_visible():

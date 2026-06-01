@@ -39,3 +39,11 @@ def get_body_font(size, bold=False):
 
 def get_mono_font(size, bold=False):
     return get_font(size, bold=bold, family=MONO)
+
+
+def get_emoji_font(size=128):
+    try:
+        return pg.font.Font(str(resource_path("assets", "fonts", "NotoColorEmoji.ttf")),
+                            max(int(size), 1))
+    except (OSError, pg.error):
+        return None

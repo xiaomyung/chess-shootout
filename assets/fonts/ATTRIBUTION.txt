@@ -14,4 +14,8 @@ which permits redistribution and bundling with applications.
   Space Mono — Colophon Foundry / Google Fonts.
   https://fonts.google.com/specimen/Space+Mono
 
+- NotoColorEmoji.ttf
+  Noto Color Emoji — Google. Color emoji glyphs (folder/file rows, confirm icons).
+  https://fonts.google.com/noto/specimen/Noto+Color+Emoji
+
 Full OFL-1.1 text: https://openfontlicense.org/
