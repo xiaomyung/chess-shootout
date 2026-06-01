@@ -3,6 +3,8 @@ import re
 from dataclasses import dataclass, field
 from datetime import datetime
 
+from frontend.visual.colors import Colors
+
 
 @dataclass
 class ParsedPGN:
@@ -22,6 +24,10 @@ class PgnSummary:
     result_code: str
     sort_key: float
     match_id: str = None
+    white_captures: int = 0
+    black_captures: int = 0
+    reason: str = ""
+    category: str = "Casual"
 
 
 _TAG_RE = re.compile(r'\[(\w+)\s+"([^"]*)"\]')
@@ -56,6 +62,47 @@ def extract_csmatchid(headers):
     if raw and _CSMATCHID_RE.match(raw):
         return raw
     return None
+
+
+def termination_reason(result_code, termination, last_san):
+    if last_san and last_san.endswith("#"):
+        return "Checkmate"
+    if termination == "Time forfeit":
+        return "Flagged"
+    if result_code in ("1-0", "0-1"):
+        return "Resigned"
+    if result_code == "1/2-1/2":
+        return "Draw"
+    return "Unfinished"
+
+
+def time_category(time_control_text):
+    if not time_control_text or "+" not in time_control_text:
+        return "Casual"
+    try:
+        minutes = int(time_control_text.split("+")[0])
+    except ValueError:
+        return "Casual"
+    if minutes < 3:
+        return "Bullet"
+    if minutes < 10:
+        return "Blitz"
+    return "Rapid"
+
+
+def format_relative_time(timestamp, now):
+    delta = max(now - timestamp, 0)
+    if delta < 60:
+        return "just now"
+    if delta < 3600:
+        return f"{int(delta // 60)}m ago"
+    if delta < 86400:
+        return f"{int(delta // 3600)}h ago"
+    if delta < 172800:
+        return "Yesterday"
+    if delta < 604800:
+        return datetime.fromtimestamp(timestamp).strftime("%a")
+    return datetime.fromtimestamp(timestamp).strftime("%Y.%m.%d")
 
 
 def parse_pgn(text):
@@ -123,10 +170,13 @@ def parse_time_control(value):
         return None
 
 
+NO_CLOCK_LABEL = "No clock"
+
+
 def _format_time_control(value):
     tc = parse_time_control(value)
     if tc is None:
-        return "No clock"
+        return NO_CLOCK_LABEL
     initial, incr = tc
     return f"{initial // 60}+{incr}"
 
@@ -134,17 +184,78 @@ def _format_time_control(value):
 def summarize_pgn_file(path, text, mtime, filename=None):
     if filename is None:
         filename = os.path.basename(path)
-    headers = parse_pgn_headers(text)
+    parsed = parse_pgn(text)
+    headers = parsed.headers
     time_str, sort_key = _format_time_from_filename(filename, mtime)
     type_label = _TYPE_LABELS.get(filename.split("-", 1)[0], "—")
+    time_control = _format_time_control(headers.get("TimeControl", "-"))
+    last_san = parsed.moves[-1] if parsed.moves else ""
     return PgnSummary(
         path=path,
         time=time_str,
         type=type_label,
-        time_control=_format_time_control(headers.get("TimeControl", "-")),
+        time_control=time_control,
         white=headers.get("White", "?"),
         black=headers.get("Black", "?"),
         result_code=headers.get("Result", "*"),
         sort_key=sort_key,
         match_id=extract_csmatchid(headers),
+        white_captures=sum(1 for move in parsed.moves[0::2] if "x" in move),
+        black_captures=sum(1 for move in parsed.moves[1::2] if "x" in move),
+        reason=termination_reason(headers.get("Result", "*"),
+                                  headers.get("Termination"), last_san),
+        category=time_category(time_control),
     )
+
+
+_SPECTATOR_SYMBOLS = {"1-0": "W", "0-1": "B"}
+
+
+def result_mark(result_code, white, black, nickname):
+    if nickname and nickname == white:
+        won, lost = "1-0", "0-1"
+    elif nickname and nickname == black:
+        won, lost = "0-1", "1-0"
+    else:
+        return _SPECTATOR_SYMBOLS.get(result_code, "="), Colors.result_neutral
+    if result_code == won:
+        return "+", Colors.result_win
+    if result_code == lost:
+        return "-", Colors.result_loss
+    return "=", Colors.result_neutral
+
+
+def scan_pgn_summaries(directory, pattern):
+    if not os.path.isdir(directory):
+        return []
+    suffix = pattern.lstrip("*")
+    summaries = []
+    for name in os.listdir(directory):
+        if not name.endswith(suffix):
+            continue
+        path = os.path.join(directory, name)
+        if not os.path.isfile(path):
+            continue
+        try:
+            with open(path) as f:
+                text = f.read()
+            mtime = os.path.getmtime(path)
+        except (OSError, UnicodeDecodeError):
+            continue
+        summaries.append(summarize_pgn_file(path, text, mtime, filename=name))
+    summaries.sort(
+        key=lambda s: (s.sort_key, os.path.basename(s.path)), reverse=True,
+    )
+    return summaries
+
+
+def group_by_csmatchid(summaries):
+    order = []
+    groups = {}
+    for summary in summaries:
+        key = summary.match_id or f"__solo__{summary.path}"
+        if key not in groups:
+            groups[key] = []
+            order.append((key, summary.match_id))
+        groups[key].append(summary)
+    return [(match_id, groups[key]) for key, match_id in order]

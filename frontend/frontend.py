@@ -17,9 +17,11 @@ from frontend.board import Board
 from frontend.menu_battle import MenuBattle
 from frontend.panels.capture_summary import captured_by, material_advantage
 from frontend.result_stats import compute_result_stats
+from frontend.menu_page import MenuPage, PAGE_CARD, PAGE_HISTORY
 from frontend.modals.confirm import ConfirmModal
 from frontend.modals.directory_browser import DirectoryBrowser
 from frontend.modals.file_picker import FilePicker
+from frontend.modals.history import HistoryView
 from frontend.modals.fen_input import FenInputModal
 from frontend.modals.options import (
     OptionsModal, PathRow, ToggleRow, SliderRow, SegmentedRow, SwatchRow,
@@ -212,6 +214,7 @@ class Frontend(OnlineEventsMixin):
         self._result_first_seen_at_ms = None
         self._pgn_result_tag = None
         self._match_session_id = None
+        self._review_return_page = None
         self._series_scores = {}
         self._resyncing = False
         self._resync_started_at_ms = 0
@@ -236,7 +239,7 @@ class Frontend(OnlineEventsMixin):
         })
         self.start_menu = StartMenu(self.window, {
             "start_game": self._on_start_game,
-            "load_pgn": self._on_load_last_game,
+            "load_pgn": self._on_open_history,
             "fen": self._on_open_fen_modal,
             "reconnect": self._on_reconnect_active_game,
             "options": self._on_open_options,
@@ -258,6 +261,9 @@ class Frontend(OnlineEventsMixin):
             disabled_keys_provider=self._right_menu_disabled_keys)
         self.confirm_modal = ConfirmModal(self.window)
         self.file_picker = FilePicker(self.window)
+        self.history_view = HistoryView(self.window, on_open=self._load_pgn_from_path,
+                                        on_back=self._on_menu_back)
+        self.menu_page = MenuPage(self.window, self.start_menu, self.history_view)
         self.help_modal = HelpModal(self.window)
         self.fen_input_modal = FenInputModal(self.window)
         self.options_modal = OptionsModal(self.window)
@@ -360,9 +366,15 @@ class Frontend(OnlineEventsMixin):
         self._opp_disconnected_at_ms = None
         self._local_disconnected_at_ms = None
         self._prev_online_state = None
+        return_page = self._review_return_page or PAGE_CARD
+        self._review_return_page = None
         self._reset_to_new_game()
         self._refresh_load_pgn_availability()
         self.start_menu.show()
+        if return_page == PAGE_HISTORY:
+            self._on_open_history()
+        else:
+            self.menu_page.set_page(PAGE_CARD)
 
     def _refresh_load_pgn_availability(self):
         self.start_menu.load_pgn_available = self._latest_pgn_path() is not None
@@ -373,12 +385,17 @@ class Frontend(OnlineEventsMixin):
             return None
         return max(files, key=os.path.getmtime)
 
-    def _on_load_last_game(self):
-        self.file_picker.show(
+    def _on_open_history(self):
+        self.history_view.show(
             _games_dir(), "*.pgn",
-            on_select=self._load_pgn_from_path,
+            on_open=self._load_pgn_from_path,
             nickname=env.get_nickname(),
         )
+        self.menu_page.set_page(PAGE_HISTORY)
+
+    def _on_menu_back(self):
+        self.history_view.hide()
+        self.menu_page.set_page(PAGE_CARD)
 
     def _on_open_options(self):
         self.options_modal.show(self._build_settings_sections(),
@@ -558,6 +575,9 @@ class Frontend(OnlineEventsMixin):
         self._reset_to_new_game()
         parsed, ok = load_pgn_into_backend(self.match, text)
         if not ok:
+            self.mode = "menu"
+            self.menu_page.set_page(PAGE_HISTORY)
+            self.toast.show("Could not load PGN")
             return
         self._pgn_result_tag = parsed.result
         self.white_name = parsed.headers.get("White", "Player 1")
@@ -567,6 +587,7 @@ class Frontend(OnlineEventsMixin):
             self.board.review_ply = 0
         self.pgn_review = True
         self.board.read_only = True
+        self._review_return_page = PAGE_HISTORY
         self.start_menu.hide()
 
     def _spawn_reconnect_probe(self):
@@ -810,6 +831,7 @@ class Frontend(OnlineEventsMixin):
     def _reset_to_new_game(self):
         self.pgn_review = False
         self.board.read_only = False
+        self._review_return_page = None
         self.sound_manager.stop_all()
         self.manual_result = None
         self._flag_fall_played = False
@@ -1091,16 +1113,16 @@ class Frontend(OnlineEventsMixin):
         entering_menu = self.mode == "menu" and self._prev_battle_mode != "menu"
         self._prev_battle_mode = self.mode
         if self.mode == "menu":
-            if entering_menu:
+            if entering_menu and self.menu_page.page == PAGE_CARD:
                 self.menu_battle.begin_intro()
-            self.menu_battle.set_avoid_rect(self.start_menu._outer)
-            self.menu_battle.set_logo_rect(self.start_menu._tile_rect)
+            self.menu_battle.set_avoid_rect(self.menu_page.avoid_rect())
+            self.menu_battle.set_logo_rect(self.menu_page.logo_rect())
             self.menu_battle.update(now, env.get_reduce_motion())
             self.menu_battle.draw(self.window)
             self.menu_battle.draw_scrim(self.window)
         self._refresh_reconnect_button()
-        if not self._menu_overlay_active():
-            self.start_menu.draw()
+        if self.mode == "menu" and not self._menu_overlay_active():
+            self.menu_page.draw_foreground()
         self.options_modal.draw()
         self.directory_browser.draw()
         self.file_picker.draw()
@@ -1433,10 +1455,10 @@ class Frontend(OnlineEventsMixin):
         self.wait_modal.set_rect(flex_rect)
         self.reconnecting_modal.set_rect(flex_rect)
         self.file_picker.set_rect(file_picker_rect)
-        self.start_menu.set_rect(start_rect)
+        self.menu_page.set_rect(pg.Rect(0, 0, window_width, window_height), top, start_rect)
         self.menu_battle.top_inset = top
         self.menu_battle.set_rect(pg.Rect(0, 0, window_width, window_height))
-        self.menu_battle.set_avoid_rect(self.start_menu._outer)
+        self.menu_battle.set_avoid_rect(self.menu_page.avoid_rect())
         self.help_modal.set_rect(result_rect)
         self.fen_input_modal.set_rect(flex_rect)
         options_width = min(int(window_width * 0.7), 520)
@@ -1528,7 +1550,7 @@ class Frontend(OnlineEventsMixin):
             self.options_modal.handle_click(pos)
             return
         if self.mode == "menu":
-            self.start_menu.handle_click(pos)
+            self.menu_page.handle_click(pos)
             return
         if self.result_menu.handle_click(pos):
             return
@@ -1655,9 +1677,8 @@ class Frontend(OnlineEventsMixin):
                 if self.fen_input_modal.is_visible():
                     self.fen_input_modal.handle_key(event)
                     continue
-                if self.start_menu.is_visible() and self.start_menu.handle_key(event):
-                    continue
-                if self.start_menu.is_visible():
+                if self.mode == "menu":
+                    self.menu_page.handle_key(event)
                     continue
                 self._handle_shortcut_key(event)
 
@@ -1688,7 +1709,9 @@ class Frontend(OnlineEventsMixin):
                     self.help_modal.handle_scroll(pg.mouse.get_pos(), event.y)
                 elif self.file_picker.is_visible():
                     self.file_picker.handle_scroll(pg.mouse.get_pos(), event.y)
-                elif self.mode != "menu":
+                elif self.mode == "menu":
+                    self.menu_page.handle_scroll(pg.mouse.get_pos(), event.y)
+                else:
                     self.right_menu.handle_scroll(pg.mouse.get_pos(), event.y)
 
             elif event.type == pg.VIDEORESIZE:

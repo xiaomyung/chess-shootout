@@ -1,8 +1,6 @@
-import os
-
 import pygame as pg
 
-from frontend.pgn.load import summarize_pgn_file
+from frontend.pgn.load import result_mark, scan_pgn_summaries
 from frontend.visual.colors import Colors
 from frontend.visual.widgets import draw_button, draw_scroll_thumb, fit_text_to_rect
 from frontend.visual.fonts import get_font
@@ -11,22 +9,6 @@ from frontend.visual.fonts import get_font
 COLUMN_TITLES = ("Time", "Type", "Time Control", "White", "Black", "Result")
 COLUMN_WEIGHTS = (0.25, 0.10, 0.13, 0.21, 0.21, 0.10)
 ROW_PAD_Y = 8
-
-_SPECTATOR_SYMBOLS = {"1-0": "W", "0-1": "B"}
-
-
-def result_mark(result_code, white, black, nickname):
-    if nickname and nickname == white:
-        won, lost = "1-0", "0-1"
-    elif nickname and nickname == black:
-        won, lost = "0-1", "1-0"
-    else:
-        return _SPECTATOR_SYMBOLS.get(result_code, "="), Colors.result_neutral
-    if result_code == won:
-        return "+", Colors.result_win
-    if result_code == lost:
-        return "-", Colors.result_loss
-    return "=", Colors.result_neutral
 
 
 class FilePicker:
@@ -60,7 +42,7 @@ class FilePicker:
         self.button_font = get_font(max(int(rect.height / 30), 12), bold=True)
 
     def show(self, directory, pattern, on_select, on_cancel=None, nickname=None):
-        self.entries = self._build_summaries(directory, pattern)
+        self.entries = scan_pgn_summaries(directory, pattern)
         self.on_select = on_select
         self.on_cancel = on_cancel
         self.nickname = nickname
@@ -251,27 +233,3 @@ class FilePicker:
         self.scroll_offset = max(0, min(self.scroll_offset - dy, max_offset))
         self._last_scroll_activity_ms = pg.time.get_ticks()
         return True
-
-    @staticmethod
-    def _build_summaries(directory, pattern):
-        if not os.path.isdir(directory):
-            return []
-        suffix = pattern.lstrip("*")
-        summaries = []
-        for name in os.listdir(directory):
-            if not name.endswith(suffix):
-                continue
-            path = os.path.join(directory, name)
-            if not os.path.isfile(path):
-                continue
-            try:
-                with open(path) as f:
-                    text = f.read()
-                mtime = os.path.getmtime(path)
-            except (OSError, UnicodeDecodeError):
-                continue
-            summaries.append(summarize_pgn_file(path, text, mtime, filename=name))
-        summaries.sort(
-            key=lambda s: (s.sort_key, os.path.basename(s.path)), reverse=True,
-        )
-        return summaries

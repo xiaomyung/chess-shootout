@@ -5,6 +5,7 @@ from frontend.visual.clock_visual import LOW_TIME_FRACTION
 from frontend.visual.colors import Colors
 from frontend.visual.draw import supersample, rounded_rect_surface, blit_centered
 from frontend.visual.fonts import get_font, DISPLAY
+from frontend.visual.widgets import build_shell
 
 
 AUTO_END_RED_THRESHOLD_SECONDS = 10
@@ -290,23 +291,7 @@ class PlayerStrip:
 
     @staticmethod
     def _build_shell(w, h, winking):
-        def render(surf, k):
-            width, height = surf.get_size()
-            split = int(height * 0.78)
-            top = pg.Color(Colors.shell_red_hi if winking else Colors.shell_red)
-            red = pg.Color(Colors.shell_red)
-            brass = pg.Color(Colors.shell_brass)
-            for y in range(height):
-                if y < split:
-                    col = top.lerp(red, y / max(split - 1, 1))
-                else:
-                    col = brass
-                surf.fill(col, pg.Rect(0, y, width, 1))
-            mask = pg.Surface((width, height), pg.SRCALPHA)
-            pg.draw.rect(mask, (255, 255, 255, 255), mask.get_rect(),
-                         border_radius=max(int(2 * k), 1))
-            surf.blit(mask, (0, 0), special_flags=pg.BLEND_RGBA_MULT)
-        return supersample((max(w, 1), max(h, 1)), render)
+        return build_shell(w, h, winking)
 
     def _draw_clock(self, pad, av_size):
         text = format_clock(self.clock_seconds)

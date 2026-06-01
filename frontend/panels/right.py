@@ -1,9 +1,8 @@
 import pygame as pg
 
 from frontend.visual.colors import Colors
-from frontend.visual.draw import rounded_rect_surface, blit_centered
 from frontend.pgn.generate import iter_move_pairs
-from frontend.visual.widgets import draw_button_row, draw_scroll_thumb
+from frontend.visual.widgets import draw_button_row, draw_scroll_thumb, draw_pill
 from server.protocol import GIVE_TIME_SECONDS
 from frontend.visual.fonts import get_font
 
@@ -182,15 +181,7 @@ class RightMenu:
             self.window.blit(surf, (rect.x, rect.y + header_h + i * line_h))
 
     def _draw_mode_pill(self, text, x, cy):
-        surf = self.pill_font.render(text, True, Colors.amber_hi)
-        pad_x = max(int(surf.get_height() * 0.6), 5)
-        w = surf.get_width() + 2 * pad_x
-        h = surf.get_height() + 6
-        chip = rounded_rect_surface((w, h), h // 2, Colors.mode_pill_bg,
-                                    border=Colors.mode_pill_border, border_width=1)
-        self.window.blit(chip, (x, round(cy - h / 2)))
-        blit_centered(self.window, surf, (x + w / 2, cy))
-        return x + w
+        return draw_pill(self.window, text, x, cy, self.pill_font)
 
     def handle_click(self, pos):
         disabled = self.disabled_keys_provider()

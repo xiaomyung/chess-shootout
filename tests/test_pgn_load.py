@@ -6,8 +6,20 @@ from backend.backend import Backend
 from backend.pieces import Piece, PieceColor, PieceType
 from backend.utils import Square
 from frontend.pgn.generate import generate_pgn
-from frontend.pgn.load import extract_csmatchid, parse_pgn, load_pgn_into_backend
+from frontend.pgn.load import (
+    PgnSummary, extract_csmatchid, format_relative_time, group_by_csmatchid,
+    load_pgn_into_backend, parse_pgn, scan_pgn_summaries, summarize_pgn_file,
+    termination_reason, time_category,
+)
 from tests.helpers import fake_uuid4
+
+
+def _summary(path, match_id=None, result="1-0", type_="Local"):
+    return PgnSummary(
+        path=path, time="t", type=type_, time_control="5+2",
+        white="alice", black="bob", result_code=result, sort_key=1.0,
+        match_id=match_id,
+    )
 
 
 def _round_trip(backend, result_code="*"):
@@ -278,3 +290,85 @@ def test_extract_csmatchid_valid():
 ])
 def test_extract_csmatchid_rejects_non_uuid4(headers):
     assert extract_csmatchid(headers) is None
+
+
+def test_group_by_csmatchid_merges_shared_id():
+    mid = fake_uuid4(1)
+    summaries = [_summary("a", mid), _summary("b", fake_uuid4(2)), _summary("c", mid)]
+    groups = group_by_csmatchid(summaries)
+    assert len(groups) == 2
+    shared = next(games for gid, games in groups if gid == mid)
+    assert [s.path for s in shared] == ["a", "c"]
+
+
+def test_group_by_csmatchid_legacy_each_solo():
+    groups = group_by_csmatchid([_summary("a", None), _summary("b", None)])
+    assert len(groups) == 2
+    assert all(gid is None for gid, _ in groups)
+
+
+def test_group_by_csmatchid_preserves_first_appearance_order():
+    mid = fake_uuid4(3)
+    groups = group_by_csmatchid([_summary("a", None), _summary("b", mid), _summary("c", mid)])
+    assert [gid for gid, _ in groups] == [None, mid]
+
+
+def test_scan_pgn_summaries_sorts_newest_first(tmp_path):
+    (tmp_path / "local-20260101-100000.pgn").write_text('[White "a"]\n\n1. e4 *')
+    (tmp_path / "local-20260101-200000.pgn").write_text('[White "b"]\n\n1. d4 *')
+    summaries = scan_pgn_summaries(str(tmp_path), "*.pgn")
+    assert [s.white for s in summaries] == ["b", "a"]
+
+
+def test_scan_pgn_summaries_excludes_non_pgn(tmp_path):
+    (tmp_path / "local-20260101-100000.pgn").write_text('[White "a"]\n\n1. e4 *')
+    (tmp_path / "notes.txt").write_text("not a game")
+    assert len(scan_pgn_summaries(str(tmp_path), "*.pgn")) == 1
+
+
+def test_summarize_counts_captures_per_color():
+    text = generate_pgn(_played_capture_game().move_history, "white_wins")
+    summary = summarize_pgn_file("/games/local-20260101-000000.pgn", text, 1.0)
+    assert summary.white_captures == 1
+    assert summary.black_captures == 1
+
+
+def _played_capture_game():
+    fresh = Backend()
+    fresh.new_game()
+    for san in ["e4", "d5", "exd5", "Qxd5"]:
+        assert fresh.apply_san(san).legal
+    return fresh
+
+
+@pytest.mark.parametrize("code,termination,last_san,expected", [
+    pytest.param("1-0", None, "Qxf7#", "Checkmate", id="checkmate"),
+    pytest.param("0-1", "Time forfeit", "Kg1", "Flagged", id="flagged"),
+    pytest.param("1-0", None, "Rd8", "Resigned", id="resigned"),
+    pytest.param("1/2-1/2", None, "Kf1", "Draw", id="draw"),
+    pytest.param("*", None, "", "Unfinished", id="unfinished"),
+])
+def test_termination_reason(code, termination, last_san, expected):
+    assert termination_reason(code, termination, last_san) == expected
+
+
+@pytest.mark.parametrize("tc,expected", [
+    pytest.param("1+0", "Bullet", id="bullet"),
+    pytest.param("3+2", "Blitz", id="blitz_3"),
+    pytest.param("5+0", "Blitz", id="blitz_5"),
+    pytest.param("10+5", "Rapid", id="rapid"),
+    pytest.param("No clock", "Casual", id="no_clock"),
+])
+def test_time_category(tc, expected):
+    assert time_category(tc) == expected
+
+
+@pytest.mark.parametrize("delta,expected", [
+    pytest.param(30, "just now", id="just_now"),
+    pytest.param(120, "2m ago", id="minutes"),
+    pytest.param(7200, "2h ago", id="hours"),
+    pytest.param(90000, "Yesterday", id="yesterday"),
+])
+def test_format_relative_time(delta, expected):
+    now = 1_700_000_000.0
+    assert format_relative_time(now - delta, now) == expected

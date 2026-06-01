@@ -5,7 +5,8 @@ os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
 import pygame as pg
 import pytest
 
-from frontend.modals.file_picker import FilePicker, result_mark
+from frontend.modals.file_picker import FilePicker
+from frontend.pgn.load import result_mark
 from frontend.visual.colors import Colors
 from frontend.visual.widgets import (
     SCROLL_THUMB_RIGHT_OFFSET,

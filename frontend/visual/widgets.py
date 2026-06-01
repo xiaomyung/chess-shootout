@@ -3,7 +3,9 @@ import math
 import pygame as pg
 
 from frontend.visual.colors import Colors
-from frontend.visual.draw import supersample, rounded_rect_surface, infinity_surface
+from frontend.visual.draw import (
+    supersample, rounded_rect_surface, infinity_surface, blit_centered,
+)
 
 
 SCROLL_FADE_MS = 2000
@@ -12,6 +14,39 @@ SCROLL_THUMB_RIGHT_OFFSET = 4
 SCROLL_THUMB_MIN_HEIGHT = 18
 BUTTON_LABEL_PADDING_PX = 6
 BUTTON_RADIUS = 8
+
+
+def build_shell(w, h, winking=False):
+    def render(surf, k):
+        width, height = surf.get_size()
+        split = int(height * 0.78)
+        top = pg.Color(Colors.shell_red_hi if winking else Colors.shell_red)
+        red = pg.Color(Colors.shell_red)
+        brass = pg.Color(Colors.shell_brass)
+        for y in range(height):
+            if y < split:
+                col = top.lerp(red, y / max(split - 1, 1))
+            else:
+                col = brass
+            surf.fill(col, pg.Rect(0, y, width, 1))
+        mask = pg.Surface((width, height), pg.SRCALPHA)
+        pg.draw.rect(mask, (255, 255, 255, 255), mask.get_rect(),
+                     border_radius=max(int(2 * k), 1))
+        surf.blit(mask, (0, 0), special_flags=pg.BLEND_RGBA_MULT)
+    return supersample((max(w, 1), max(h, 1)), render)
+
+
+def draw_pill(window, text, x, cy, font, text_color=Colors.amber_hi,
+              bg=Colors.mode_pill_bg, border=Colors.mode_pill_border):
+    surf = font.render(text, True, text_color)
+    pad_x = max(int(surf.get_height() * 0.6), 5)
+    w = surf.get_width() + 2 * pad_x
+    h = surf.get_height() + 6
+    chip = rounded_rect_surface((w, h), h // 2, bg,
+                                border=border, border_width=1)
+    window.blit(chip, (x, round(cy - h / 2)))
+    blit_centered(window, surf, (x + w / 2, cy))
+    return x + w
 
 
 def fit_text_to_rect(text_surface, rect, padding=BUTTON_LABEL_PADDING_PX):
