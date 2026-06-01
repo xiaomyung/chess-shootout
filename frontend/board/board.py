@@ -128,10 +128,12 @@ class Board:
         panel_h = pad * 2 + label_h + 6 + opt
         sq_rect = self._cell_rect(sq.row, sq.col)
         win_w, win_h = self.window.get_size()
+        left_bound = max(self.rect.x, 8)
+        right_bound = min(self.rect.right, win_w - 8)
         x = sq_rect.right + 10
-        if x + panel_w > win_w - 8:
+        if x + panel_w > right_bound:
             x = sq_rect.left - panel_w - 10
-        x = max(8, min(x, win_w - panel_w - 8))
+        x = max(left_bound, min(x, right_bound - panel_w))
         y = max(self.rect.y, min(sq_rect.centery - panel_h // 2, win_h - panel_h - 8))
         panel = pg.Rect(x, y, panel_w, panel_h)
         pg.draw.rect(self.window, Colors.light_grey_menu, panel, border_radius=12)

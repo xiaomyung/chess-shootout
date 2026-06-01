@@ -13,6 +13,7 @@ GIVE_TIME_FLASH_MS = 520
 GIVE_TIME_FLASH_PEAK_ALPHA = 150
 GIVE_TIME_FLOAT_MS = 1000
 KO_WINK_MS = 520
+TWO_ROW_MIN_IH = 26
 
 
 def format_clock(seconds):
@@ -81,9 +82,9 @@ class PlayerStrip:
         h = rect.height
         ih = max(int(h * 0.68), 1)
         self.name_font = get_font(max(int(ih * 0.42), 11), bold=True)
-        self.rating_font = get_font(max(int(ih * 0.28), 9), bold=True, mono=True)
+        self.rating_font = get_font(max(int(ih * 0.26), 8), bold=True, mono=True)
         self.clock_font = get_font(max(int(h * 0.5), 14), bold=True, mono=True)
-        self.advantage_font = get_font(max(int(ih * 0.34), 9), bold=True)
+        self.advantage_font = get_font(max(int(ih * 0.26), 8), bold=True)
         self.ko_font = get_font(max(int(ih * 0.3), 8), bold=True)
         self.letter_font = get_font(max(int(ih * 0.5), 11), family=DISPLAY)
         self.auto_end_font = get_font(
@@ -191,8 +192,15 @@ class PlayerStrip:
     def _draw_who(self, x, right, ih):
         if right <= x:
             return
-        top_cy = self.rect.y + (self.rect.height - ih) // 2 + int(ih * 0.27)
-        bottom_cy = self.rect.y + (self.rect.height - ih) // 2 + int(ih * 0.74)
+        two_row = ih >= TWO_ROW_MIN_IH
+        base = self.rect.y + (self.rect.height - ih) // 2
+        if two_row:
+            top_cy = base + int(ih * 0.25)
+            bottom_cy = base + int(ih * 0.76)
+            pill_max = max(bottom_cy - top_cy - 2, 8)
+        else:
+            top_cy = bottom_cy = self.rect.centery
+            pill_max = ih
         badge_x = self._draw_auto_end_badge(right, top_cy)
         name_right = (badge_x - 8) if badge_x is not None else right
         cursor = x
@@ -209,23 +217,30 @@ class PlayerStrip:
                 pg.Rect(0, 0, max_name_w, name_surf.get_height()))
         self.window.blit(name_surf, (cursor, top_cy - name_surf.get_height() / 2))
         cursor += name_surf.get_width() + max(int(ih * 0.14), 5)
-        if self.rating is not None:
-            self._draw_rating_pill(cursor, top_cy, name_right)
-        self._draw_captured(x, bottom_cy, right, ih)
+        if two_row:
+            if self.rating is not None:
+                self._draw_rating_pill(cursor, top_cy, name_right, pill_max)
+            self._draw_captured(x, bottom_cy, right, ih, pill_max)
+        else:
+            if self.rating is not None:
+                cursor = self._draw_rating_pill(cursor, bottom_cy, right, pill_max)
+            self._draw_captured(cursor, bottom_cy, right, ih, pill_max)
 
-    def _draw_rating_pill(self, x, cy, right):
+    def _draw_rating_pill(self, x, cy, right, max_h=10 ** 6):
         text = self.rating_font.render(str(self.rating), True, Colors.text_dim)
         pad_x = max(int(text.get_height() * 0.45), 3)
         w = text.get_width() + 2 * pad_x
-        h = text.get_height() + 4
+        h = min(text.get_height() + 2, max_h)
         if x + w > right:
-            return
+            return x
         pill = rounded_rect_surface((w, h), max(h // 3, 3), Colors.button_hover)
         self.window.blit(pill, (x, round(cy - h / 2)))
         blit_centered(self.window, text, (x + w / 2, cy))
+        return x + w + max(int(self.rect.height * 0.06), 4)
 
-    def _draw_captured(self, x, cy, right, ih):
+    def _draw_captured(self, x, cy, right, ih, max_h=10 ** 6):
         cursor = x
+        last_right = x
         size = max(int(ih * 0.5), 6)
         for piece_type in self.captured:
             icon = self.icons.get((piece_type, self.captured_color))
@@ -234,17 +249,18 @@ class PlayerStrip:
             if icon.get_height() != size:
                 icon = pg.transform.smoothscale(icon, (size, size))
             if cursor + icon.get_width() > right:
-                return
+                break
             self.window.blit(icon, (cursor, cy - icon.get_height() / 2))
+            last_right = cursor + icon.get_width()
             cursor += icon.get_width() - icon.get_width() // 3
         if self.advantage > 0:
-            self._draw_advantage_pill(cursor + max(int(ih * 0.18), 5), cy, right)
+            self._draw_advantage_pill(last_right + max(int(ih * 0.18), 5), cy, right, max_h)
 
-    def _draw_advantage_pill(self, x, cy, right):
+    def _draw_advantage_pill(self, x, cy, right, max_h=10 ** 6):
         text = self.advantage_font.render(f"+{self.advantage}", True, Colors.on_accent)
         pad_x = max(int(text.get_height() * 0.55), 4)
         w = text.get_width() + 2 * pad_x
-        h = text.get_height() + 2
+        h = min(text.get_height() + 2, max_h)
         if x + w > right:
             return
         pill = rounded_rect_surface((w, h), h // 2, Colors.amber)

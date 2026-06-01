@@ -138,19 +138,43 @@ def test_promotion_popover_has_four_options_and_routes_click(monkeypatch):
     assert picked == [PieceType.ROOK]
 
 
-def test_promotion_popover_flips_left_when_near_right_edge():
+def test_promotion_popover_flips_left_and_stays_within_board_right_edge():
     win = pg.display.get_surface()
     win.fill((0, 0, 0))
     match = Match()
     match.new_game()
     board = Board(win, match)
     board.load_assets()
-    board.set_rect(pg.Rect(40, 40, 680, 680))
+    # A small board leaves room to its right in the window — exactly where the side
+    # panel lives in-app. The popover must flip and stay within the board, not spill
+    # into that gap (bounds measured against the board rect, not the whole window).
+    board.set_rect(pg.Rect(40, 40, 360, 360))
     board.pending_promotion_square = Square(1, 7)   # h-file, hard against the right edge
     board.draw_board()
     sq_rect = board._cell_rect(1, 7)
-    panel_left = min(r.left for r in board._promotion_rects.values())
-    assert panel_left < sq_rect.left, "popover must flip to the left of a right-edge square"
+    cells = board._promotion_rects.values()
+    assert min(r.left for r in cells) < sq_rect.left, \
+        "popover must flip to the left of a right-edge square"
+    assert max(r.right for r in cells) <= board.rect.right, \
+        "popover must not spill past the board's right edge into the panel area"
+
+
+def test_promotion_popover_stays_within_board_left_edge():
+    win = pg.display.get_surface()
+    win.fill((0, 0, 0))
+    match = Match()
+    match.new_game()
+    board = Board(win, match)
+    board.load_assets()
+    board.set_rect(pg.Rect(40, 40, 360, 360))
+    board.pending_promotion_square = Square(1, 0)   # a-file, hard against the left edge
+    board.draw_board()
+    sq_rect = board._cell_rect(1, 0)
+    cells = board._promotion_rects.values()
+    assert max(r.right for r in cells) > sq_rect.right, \
+        "popover must sit to the right of a left-edge square"
+    assert min(r.left for r in cells) >= board.rect.x, \
+        "popover must not spill past the board's left edge"
 
 
 def test_flipped_cell_rect_mirrors():

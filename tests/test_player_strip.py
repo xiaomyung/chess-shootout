@@ -231,6 +231,64 @@ def test_advantage_pill_amber_when_ahead(strip):
         "amber +N pill should show when ahead"
 
 
+def test_advantage_pill_clears_last_captured_icon(strip):
+    """The +N pill anchors past the last captured icon's full right edge, not at the
+    fanned-overlap cursor (which sits 1/3 of an icon short and drew the pill on top)."""
+    strip.captured = [PieceType.QUEEN, PieceType.ROOK, PieceType.BISHOP]
+    strip.captured_color = PieceColor.WHITE
+    strip.advantage = 14
+    pill_x = []
+    strip._draw_advantage_pill = lambda x, cy, right, max_h=None: pill_x.append(x)
+    ih, x0, n = 44, 100, 3
+    strip._draw_captured(x0, cy=30, right=10_000, ih=ih)
+    size = max(int(ih * 0.5), 6)
+    gap = max(int(ih * 0.18), 5)
+    last_right = x0 + (n - 1) * (size - size // 3) + size
+    assert pill_x == [last_right + gap]
+
+
+def test_advantage_pill_survives_truncated_captures(strip):
+    """When the captured row is too long to fully fit, the pill still gets a chance
+    to draw (break, not return) rather than being silently dropped."""
+    drawn = []
+    strip._draw_advantage_pill = lambda x, cy, right, max_h=None: drawn.append(x)
+    strip.captured = [PieceType.PAWN] * 10
+    strip.captured_color = PieceColor.WHITE
+    strip.advantage = 6
+    strip._draw_captured(0, 30, 40, 44)
+    assert drawn, "advantage pill should still be offered after truncated captures"
+
+
+def test_rating_and_material_pills_dont_overlap_vertically(strip):
+    """Two-row layout caps each pill to its half-row so the rating and material
+    bubbles can't collide vertically."""
+    strip.set_rect(pg.Rect(0, 0, 320, 56))
+    boxes = {}
+    strip._draw_rating_pill = lambda x, cy, right, max_h=0: boxes.update(rating=(cy, max_h)) or x
+    strip._draw_advantage_pill = lambda x, cy, right, max_h=0: boxes.update(adv=(cy, max_h))
+    strip.set_state("Bob", None, False, captured=[PieceType.QUEEN],
+                    captured_color=PieceColor.WHITE, advantage=9,
+                    player_color=PieceColor.BLACK, rating="1500", ko_count=0)
+    _draw(strip)
+    (r_cy, r_max), (a_cy, a_max) = boxes["rating"], boxes["adv"]
+    assert a_cy - r_cy >= max(r_max, a_max), \
+        "rating and material pills must be at least one capped-height apart"
+
+
+def test_short_strip_falls_back_to_single_row(strip):
+    """A min-window-height strip puts the rating and material pills on one centered
+    row (no vertical stacking), so they never overlap."""
+    strip.set_rect(pg.Rect(0, 0, 200, 28))
+    cys = {}
+    strip._draw_rating_pill = lambda x, cy, right, max_h=0: cys.update(rating=cy) or (x + 30)
+    strip._draw_advantage_pill = lambda x, cy, right, max_h=0: cys.update(adv=cy)
+    strip.set_state("Bob", None, False, captured=[PieceType.QUEEN],
+                    captured_color=PieceColor.WHITE, advantage=9,
+                    player_color=PieceColor.BLACK, rating="1500", ko_count=0)
+    _draw(strip)
+    assert cys["rating"] == cys["adv"], "short strip should draw both pills on one row"
+
+
 def test_advantage_pill_absent_when_even(strip):
     strip.set_state("Bob", 60.0, False, captured=[], captured_color=PieceColor.WHITE,
                     advantage=0, player_color=PieceColor.BLACK, rating="1500", ko_count=0)
