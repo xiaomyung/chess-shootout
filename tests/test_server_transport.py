@@ -177,6 +177,21 @@ async def test_matchmake_async_returns_typed_response(captured):
 
 
 @pytest.mark.asyncio
+async def test_matchmake_async_sends_country(captured):
+    body = {"version": PROTOCOL_VERSION, "room_id": fake_uuid4(51),
+            "session_token": "tok-1"}
+    transport = httpx.MockTransport(_make_handler(
+        status_code=200, body=body, capture=captured,
+    ))
+    async with httpx.AsyncClient(transport=transport) as http:
+        st = ServerTransport("localhost:8000")
+        req = MatchmakeRequest(nickname="Alice", client_uuid=ALICE,
+                                  time_minutes=5, increment_seconds=0, country="US")
+        await st.matchmake_async(req, http)
+    assert captured[0]["json"]["country"] == "US"
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     "status_code, body, expected_exc, expected_status",
     [
@@ -306,6 +321,39 @@ async def test_server_websocket_send_move_round_trip(server):
         result_a = await _recv_skip_beacons(ws_a)
         assert result_a["type"] == "result"
         assert result_a["reason"] == Reason.RESIGNATION
+    finally:
+        await ws_a.close()
+        await ws_b.close()
+
+
+@pytest.mark.asyncio
+async def test_country_round_trips_through_game_start(server):
+    addr = f"localhost:{server}"
+    st = ServerTransport(addr)
+    c1, c2 = fake_uuid4(60), fake_uuid4(61)
+
+    async with httpx.AsyncClient(timeout=10.0) as http:
+        a = await st.matchmake_async(
+            MatchmakeRequest(nickname="Alice", client_uuid=c1,
+                                time_minutes=5, increment_seconds=0,
+                                side_preference="white", country="US"),
+            http,
+        )
+        b = await st.matchmake_async(
+            MatchmakeRequest(nickname="Bob", client_uuid=c2,
+                                time_minutes=5, increment_seconds=0,
+                                side_preference="black", country="RO"),
+            http,
+        )
+
+    ws_a = await st.ws_connect(a.room_id, a.session_token)
+    ws_b = await st.ws_connect(b.room_id, b.session_token)
+    try:
+        msg_a = await _recv_skip_beacons(ws_a)
+        msg_b = await _recv_skip_beacons(ws_b)
+        assert (msg_a["white_country"], msg_a["black_country"]) == ("US", "RO")
+        assert (msg_b["white_country"], msg_b["black_country"]) == ("US", "RO")
+        await ws_a.send_resign()
     finally:
         await ws_a.close()
         await ws_b.close()

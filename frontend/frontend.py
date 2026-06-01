@@ -11,7 +11,7 @@ import pygame as pg
 
 import paths
 from backend.match import Match, SINGLE_SCREEN, BOT, ONLINE
-from frontend import env
+from frontend import countries, env
 from frontend.panels.audio import AudioPanel
 from frontend.board import Board
 from frontend.menu_battle import MenuBattle
@@ -20,10 +20,11 @@ from frontend.result_stats import compute_result_stats
 from frontend.menu_page import MenuPage, PAGE_CARD, PAGE_HISTORY
 from frontend.modals.confirm import ConfirmModal
 from frontend.modals.directory_browser import DirectoryBrowser
+from frontend.modals.country_picker import CountryPicker
 from frontend.modals.history import HistoryView
 from frontend.modals.fen_input import FenInputModal
 from frontend.modals.options import (
-    OptionsModal, PathRow, TextRow, ToggleRow, SliderRow, SegmentedRow, SwatchRow,
+    OptionsModal, CountryRow, PathRow, TextRow, ToggleRow, SliderRow, SegmentedRow, SwatchRow,
 )
 from frontend.modals.help import HelpModal
 from frontend.modals.reconnecting import ReconnectingModal
@@ -207,6 +208,8 @@ class Frontend(OnlineEventsMixin):
         self._last_turn_for_flip = None
         self.white_name = "Player 1"
         self.black_name = "Player 2"
+        self.white_country = ""
+        self.black_country = ""
         self._chosen_side = "white"
         self._time_control = None
         self.pgn_review = False
@@ -270,6 +273,7 @@ class Frontend(OnlineEventsMixin):
         self.fen_input_modal = FenInputModal(self.window)
         self.options_modal = OptionsModal(self.window)
         self.directory_browser = DirectoryBrowser(self.window)
+        self.country_picker = CountryPicker(self.window)
         self._data_folder_row = None
         self._server_addr_row = None
         self.toast = Toast(self.window)
@@ -357,6 +361,10 @@ class Frontend(OnlineEventsMixin):
     def _name_for_color(self, color):
         is_white = color in (PieceColor.WHITE, "white")
         return self.white_name if is_white else self.black_name
+
+    def _country_for_color(self, color):
+        is_white = color in (PieceColor.WHITE, "white")
+        return self.white_country if is_white else self.black_country
 
     def _on_new_game(self):
         self._reset_to_new_game()
@@ -459,6 +467,10 @@ class Frontend(OnlineEventsMixin):
             ("ice", "#b4c2d4", "#4a5a72", True),
         ]
         return [
+            ("Profile", [
+                CountryRow("Country", "Shows your flag on the player strip",
+                           env.get_country, self._on_pick_country),
+            ]),
             ("Audio", [
                 SliderRow("Master volume", "", lambda: self.sound_manager.master_volume,
                           self._set_master_volume),
@@ -490,6 +502,12 @@ class Frontend(OnlineEventsMixin):
                 self._server_addr_row,
             ]),
         ]
+
+    def _on_pick_country(self):
+        self.country_picker.show(env.get_country(), self._apply_country_choice)
+
+    def _apply_country_choice(self, code):
+        env.set_country(code)
 
     def _on_change_data_folder(self):
         self.directory_browser.show(
@@ -578,6 +596,8 @@ class Frontend(OnlineEventsMixin):
         self._chosen_side = "white"
         self.white_name = "Player 1"
         self.black_name = "Player 2"
+        self.white_country = env.get_country()
+        self.black_country = countries.random_code()
         self.match.mode = SINGLE_SCREEN
         self.match.local_color = None
         self._ensure_local_session()
@@ -602,6 +622,8 @@ class Frontend(OnlineEventsMixin):
         self._pgn_result_tag = parsed.result
         self.white_name = parsed.headers.get("White", "Player 1")
         self.black_name = parsed.headers.get("Black", "Player 2")
+        self.white_country = ""
+        self.black_country = ""
         self._time_control = parse_time_control(parsed.headers.get("TimeControl", "-"))
         if self.match.move_history:
             self.board.review_ply = 0
@@ -716,6 +738,12 @@ class Frontend(OnlineEventsMixin):
             (nickname, opponent_name) if side == "white"
             else (opponent_name, nickname)
         )
+        my_country = env.get_country()
+        opp_country = countries.random_code()
+        self.white_country, self.black_country = (
+            (my_country, opp_country) if side == "white"
+            else (opp_country, my_country)
+        )
 
         self._time_control = (
             (config["time_minutes"] * 60, config["increment_seconds"])
@@ -747,6 +775,7 @@ class Frontend(OnlineEventsMixin):
             "time_minutes": self._online_config["time_minutes"] or 5,
             "increment_seconds": self._online_config["increment_seconds"],
             "side_preference": self._online_config["side"],
+            "country": env.get_country() or None,
         }
         self.online_client.connect(addr, request)
         mode_label, tc_text = self._search_labels()
@@ -1119,7 +1148,7 @@ class Frontend(OnlineEventsMixin):
 
     def _menu_overlay_active(self):
         return any(m.is_visible() for m in (
-            self.options_modal, self.directory_browser,
+            self.options_modal, self.directory_browser, self.country_picker,
             self.fen_input_modal, self.wait_modal,
             self.match_found_modal, self.reconnecting_modal,
             self.help_modal, self.confirm_modal,
@@ -1182,6 +1211,7 @@ class Frontend(OnlineEventsMixin):
             self.menu_page.draw_foreground()
         self.options_modal.draw()
         self.directory_browser.draw()
+        self.country_picker.draw()
         self.wait_modal.draw()
         self.match_found_modal.draw()
         self.reconnecting_modal.draw()
@@ -1358,6 +1388,7 @@ class Frontend(OnlineEventsMixin):
             "captured_color": opponent_of(color),
             "ko_count": len(captured),
             "connection_state": connection_state,
+            "country": self._country_for_color(color),
             "clock_initial_seconds": initial_seconds,
             "auto_end_label": auto_end_label,
             "auto_end_seconds": auto_end_seconds,
@@ -1524,6 +1555,7 @@ class Frontend(OnlineEventsMixin):
             options_width, options_height,
         ))
         self.directory_browser.set_rect(wide_overlay_rect)
+        self.country_picker.set_rect(wide_overlay_rect)
         self._last_layout_mode = self.mode
         self.right_menu.set_rect(menu_rect)
         self.player_strip_top.set_rect(top_strip_rect)
@@ -1588,6 +1620,9 @@ class Frontend(OnlineEventsMixin):
         if self.reconnecting_modal.handle_click(pos):
             return
         if self.reconnecting_modal.is_visible():
+            return
+        if self.country_picker.is_visible():
+            self.country_picker.handle_click(pos)
             return
         if self.directory_browser.is_visible():
             self.directory_browser.handle_click(pos)
@@ -1709,6 +1744,9 @@ class Frontend(OnlineEventsMixin):
                 if event.key == pg.K_ESCAPE:
                     self.running = False
                     continue
+                if self.country_picker.is_visible():
+                    self.country_picker.handle_key(event)
+                    continue
                 if self.directory_browser.is_visible():
                     self.directory_browser.handle_key(event)
                     continue
@@ -1748,7 +1786,9 @@ class Frontend(OnlineEventsMixin):
                         self.board.update_drag_motion(event.pos)
 
             elif event.type == pg.MOUSEWHEEL:
-                if self.directory_browser.is_visible():
+                if self.country_picker.is_visible():
+                    self.country_picker.handle_scroll(pg.mouse.get_pos(), event.y)
+                elif self.directory_browser.is_visible():
                     self.directory_browser.handle_scroll(pg.mouse.get_pos(), event.y)
                 elif self.options_modal.is_visible():
                     self.options_modal.handle_scroll(pg.mouse.get_pos(), event.y)

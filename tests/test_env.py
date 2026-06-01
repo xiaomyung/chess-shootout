@@ -10,7 +10,7 @@ _ISOLATED_VARS = (
     "CHESS_SERVER_ADDR", "CHESS_NICKNAME", "CHESS_CLIENT_UUID",
     "CHESS_LAST_MODE", "CHESS_MASTER_VOLUME", "CHESS_DATA_DIR",
     "CHESS_REDUCE_MOTION", "CHESS_EFFECT_INTENSITY", "CHESS_DEFAULT_TC",
-    "CHESS_DEFAULT_INCREMENT", "CHESS_THEME",
+    "CHESS_DEFAULT_INCREMENT", "CHESS_THEME", "CHESS_COUNTRY",
 )
 
 
@@ -150,6 +150,41 @@ def test_server_addr_strips_whitespace():
 def test_server_addr_blank_is_noop_keeps_default(blank):
     env.set_server_addr(blank)
     assert env.get_server_addr() == "localhost:8000"
+
+
+def test_country_defaults_empty():
+    assert env.get_country() == ""
+
+
+def test_country_persists_round_trip():
+    env.set_country("RO")
+    assert env.get_country() == "RO"
+    assert "CHESS_COUNTRY" in env._ENV_PATH.read_text()
+
+
+def test_country_normalizes_case_and_whitespace():
+    env.set_country("  us ")
+    assert env.get_country() == "US"
+
+
+def test_country_clears_on_blank_and_removes_key():
+    env.set_country("FR")
+    env.set_country("")
+    assert env.get_country() == ""
+    assert "CHESS_COUNTRY" not in os.environ
+    assert "CHESS_COUNTRY" not in env._ENV_PATH.read_text()
+
+
+@pytest.mark.parametrize("bad", ["usa", "1", "ZZ", "longstring"])
+def test_country_rejects_unknown_codes(bad):
+    env.set_country(bad)
+    assert env.get_country() == ""
+    assert "CHESS_COUNTRY" not in os.environ
+
+
+def test_country_getter_ignores_invalid_stored_value(monkeypatch):
+    monkeypatch.setenv("CHESS_COUNTRY", "garbage")
+    assert env.get_country() == ""
 
 
 @pytest.mark.parametrize(

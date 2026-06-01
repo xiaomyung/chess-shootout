@@ -14,7 +14,7 @@ import pytest
 
 from backend.utils import Square
 from backend.pieces import PieceColor
-from frontend import env
+from frontend import countries, env
 from frontend.frontend import Frontend, OPPONENT_NAME_FOR_MODE
 from frontend.online.client import OnlineClient
 from frontend.pgn.load import extract_csmatchid, parse_pgn_headers
@@ -88,6 +88,39 @@ def test_start_game_black_side_swaps_names():
     app._on_start_game(base_config(nickname="alice", side="black"))
     assert app.white_name == "Player 2"
     assert app.black_name == "alice"
+
+
+def test_start_game_gives_your_country_and_random_opponent(monkeypatch):
+    monkeypatch.setattr(env, "get_country", lambda: "RO")
+    app = make_app()
+    app._on_start_game(base_config(side="white"))
+    assert app.white_country == "RO"
+    assert app.black_country in countries.CODES
+    assert app.black_country != ""
+
+
+def test_start_game_black_side_swaps_country(monkeypatch):
+    monkeypatch.setattr(env, "get_country", lambda: "RO")
+    app = make_app()
+    app._on_start_game(base_config(side="black"))
+    assert app.black_country == "RO"
+    assert app.white_country in countries.CODES
+
+
+def test_start_game_no_country_leaves_your_side_blank(monkeypatch):
+    monkeypatch.setattr(env, "get_country", lambda: "")
+    app = make_app()
+    app._on_start_game(base_config(side="white"))
+    assert app.white_country == ""
+    assert app.black_country in countries.CODES
+
+
+def test_country_flows_to_player_strips(monkeypatch):
+    monkeypatch.setattr(env, "get_country", lambda: "RO")
+    app = make_app()
+    app._on_start_game(base_config(side="white"))
+    app._update_player_strips()
+    assert "RO" in {app.player_strip_top.country, app.player_strip_bottom.country}
 
 
 def test_start_game_random_side_resolves_to_concrete_color():
@@ -361,6 +394,22 @@ def test_online_rematch_same_room_keeps_match_session_id():
     app._start_online_game(_online_payload())
     app._start_online_game(_online_payload())
     assert app._match_session_id == room
+
+
+def test_online_game_start_threads_countries_to_state():
+    app = make_app()
+    app.online_client = _StubClient(fake_uuid4(6))
+    app._start_online_game(_online_payload(white_country="US", black_country="RO"))
+    assert app.white_country == "US"
+    assert app.black_country == "RO"
+
+
+def test_online_game_start_without_countries_defaults_blank():
+    app = make_app()
+    app.online_client = _StubClient(fake_uuid4(7))
+    app._start_online_game(_online_payload())
+    assert app.white_country == ""
+    assert app.black_country == ""
 
 
 def test_saved_local_pgn_contains_match_session_id(tmp_path, monkeypatch):

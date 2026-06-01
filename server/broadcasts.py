@@ -26,6 +26,8 @@ async def broadcast_game_start(connections, room, now):
             started_seconds_ago=started_seconds_ago,
             white_score=room.score_for("white"),
             black_score=room.score_for("black"),
+            white_country=room.white.country if room.white else None,
+            black_country=room.black.country if room.black else None,
         ))
         sent.append(color)
     room.game_start_broadcast = True

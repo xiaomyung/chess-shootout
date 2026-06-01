@@ -166,6 +166,7 @@ def create_app(*, now_provider=time.monotonic, max_rooms=100):
                 session_token=token, time_minutes=body.time_minutes,
                 increment_seconds=body.increment_seconds,
                 side_preference=body.side_preference,
+                country=body.country,
             )
         except AlreadyInGameError:
             log.info("matchmake rejected uuid=%s reason=already_in_game", body.client_uuid[:8])
@@ -231,6 +232,8 @@ def create_app(*, now_provider=time.monotonic, max_rooms=100):
             increment_seconds=room.increment_seconds,
             white_score=room.score_for("white"),
             black_score=room.score_for("black"),
+            white_country=room.white.country if room.white else None,
+            black_country=room.black.country if room.black else None,
         )
 
     @app.post("/reclaim", response_model=ReclaimResponse)

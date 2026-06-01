@@ -1,8 +1,10 @@
 import pygame as pg
 
+from frontend import countries
 from frontend.modals.base import BaseModal
 from frontend.visual.colors import Colors
 from frontend.visual.draw import supersample, rounded_rect_surface
+from frontend.visual.emoji import emoji_surface
 from frontend.visual.fonts import get_display_font, get_font, get_mono_font
 from frontend.visual.text_input import TextInput
 from frontend.visual.widgets import (
@@ -364,6 +366,56 @@ class TextRow(_Row):
 
     def handle_key(self, event):
         return self.input.handle_key(event)
+
+
+class CountryRow(_Row):
+
+    def __init__(self, title, desc, get_code, on_open):
+        super().__init__(title, desc)
+        self.get_code = get_code
+        self.on_open = on_open
+        self._ctl = pg.Rect(0, 0, 0, 0)
+        self._flag_cache = None
+
+    def _flag(self, code, size):
+        char = countries.flag_emoji(code)
+        if not char:
+            return None
+        key = (char, size)
+        if self._flag_cache is None or self._flag_cache[0] != key:
+            self._flag_cache = (key, emoji_surface(char, size))
+        return self._flag_cache[1]
+
+    def _draw_control(self, window, rect, fonts):
+        code = countries.normalize(self.get_code())
+        label = code if code else "None"
+        h = max(fonts.value.get_height() + 14, 30)
+        inner, gap = 12, 8
+        flag = self._flag(code, max(fonts.value.get_height(), 14))
+        chev = fonts.button.render("›", True, Colors.text_mute)
+        text_surf = fonts.value.render(label, True, Colors.white if code else Colors.text_mute)
+        flag_w = (flag.get_width() + gap) if flag is not None else 0
+        desired = 2 * inner + flag_w + text_surf.get_width() + 10 + chev.get_width()
+        w = min(desired, max(int(rect.width * 0.6), 90))
+        self._ctl = pg.Rect(rect.right - w, rect.centery - h // 2, w, h)
+        window.blit(rounded_rect_surface((w, h), max(h // 4, 6), Colors.button_hover),
+                    self._ctl.topleft)
+        window.blit(chev, (self._ctl.right - inner - chev.get_width(),
+                           self._ctl.centery - chev.get_height() // 2))
+        x = self._ctl.x + inner
+        if flag is not None:
+            window.blit(flag, (x, self._ctl.centery - flag.get_height() // 2))
+            x += flag.get_width() + gap
+        text_max = (self._ctl.right - inner - chev.get_width() - 10) - x
+        _blit_clip(window, text_surf, (x, self._ctl.centery - text_surf.get_height() // 2),
+                   text_max)
+        return self._ctl.x
+
+    def handle_click(self, pos):
+        if self._ctl.collidepoint(pos):
+            self.on_open()
+            return True
+        return False
 
 
 class OptionsBody:

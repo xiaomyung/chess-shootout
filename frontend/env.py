@@ -7,6 +7,7 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 import paths
+from frontend import countries
 
 _KEY_LINE_RE = re.compile(r"^([A-Za-z_][A-Za-z0-9_]*)\s*=(.*)$")
 
@@ -69,6 +70,20 @@ def set_server_addr(value):
         return
     os.environ["CHESS_SERVER_ADDR"] = value
     _persist("CHESS_SERVER_ADDR", value)
+
+
+def get_country():
+    return countries.normalize(os.environ.get("CHESS_COUNTRY") or "")
+
+
+def set_country(code):
+    normalized = countries.normalize(code)
+    if normalized:
+        os.environ["CHESS_COUNTRY"] = normalized
+        _persist("CHESS_COUNTRY", normalized)
+    else:
+        os.environ.pop("CHESS_COUNTRY", None)
+        _persist_delete("CHESS_COUNTRY")
 
 
 def get_nickname():

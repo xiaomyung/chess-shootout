@@ -33,6 +33,7 @@ class PlayerSlot:
     nickname: str
     session_token: str
     side_preference: str = "random"
+    country: Optional[str] = None
     connected: bool = False
     disconnected_at: Optional[float] = None
 
@@ -108,7 +109,8 @@ class RoomManager:
         return self._find_in_queue(room_id)
 
     async def enqueue(self, *, client_uuid, nickname, session_token,
-                      time_minutes, increment_seconds, side_preference):
+                      time_minutes, increment_seconds, side_preference,
+                      country=None):
         async with self._lock:
             if client_uuid in self._uuid_to_room:
                 raise AlreadyInGameError()
@@ -129,6 +131,7 @@ class RoomManager:
                 new_slot = PlayerSlot(
                     client_uuid=client_uuid, nickname=nickname,
                     session_token=session_token, side_preference=side_preference,
+                    country=country,
                 )
                 setattr(room, second_color, new_slot)
                 room.backend = Backend()
@@ -146,6 +149,7 @@ class RoomManager:
             slot = PlayerSlot(
                 client_uuid=client_uuid, nickname=nickname,
                 session_token=session_token, side_preference=side_preference,
+                country=country,
             )
             room = Room(
                 room_id=room_id, time_minutes=time_minutes,

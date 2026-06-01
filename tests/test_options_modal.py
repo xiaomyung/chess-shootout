@@ -10,8 +10,8 @@ import pygame as pg
 import pytest
 
 from frontend.modals.options import (
-    OptionsModal, PathRow, TextRow, ToggleRow, SegmentedRow, SliderRow, SwatchRow,
-    _Fonts,
+    CountryRow, OptionsModal, PathRow, TextRow, ToggleRow, SegmentedRow, SliderRow,
+    SwatchRow, _Fonts,
 )
 from frontend.visual.colors import Colors
 from frontend.visual.fonts import get_font, get_mono_font
@@ -226,3 +226,20 @@ def test_text_row_reports_typed_value():
     row.input.focused = True
     row.input.text = "chess.example.com:9000"
     assert row.current_text() == "chess.example.com:9000"
+
+
+def test_country_row_opens_picker_on_control_click():
+    opened = []
+    row = CountryRow("Country", "Your flag", lambda: "US", lambda: opened.append(1))
+    _draw_row(row)
+    assert row._ctl.width > 0
+    assert row.handle_click(row._ctl.center) is True
+    assert opened == [1]
+
+
+def test_country_row_ignores_click_outside_control():
+    opened = []
+    row = CountryRow("Country", "", lambda: "", lambda: opened.append(1))
+    _draw_row(row)
+    assert row.handle_click((5, 5)) is False
+    assert opened == []

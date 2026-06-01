@@ -309,6 +309,8 @@ class OnlineEventsMixin:
         self.match_found_modal.show(
             payload["white_name"], payload["black_name"], payload["your_color"],
             self._finish_match_found, seconds=MATCH_FOUND_SECONDS,
+            white_country=payload.get("white_country") or "",
+            black_country=payload.get("black_country") or "",
         )
         self.sound_manager.play_online_game_start()
 
@@ -342,6 +344,8 @@ class OnlineEventsMixin:
         self._chosen_side = payload["your_color"]
         self.white_name = payload["white_name"]
         self.black_name = payload["black_name"]
+        self.white_country = payload.get("white_country") or ""
+        self.black_country = payload.get("black_country") or ""
         self._time_control = (payload["time_minutes"] * 60,
                               payload["increment_seconds"])
         self.match.mode = ONLINE

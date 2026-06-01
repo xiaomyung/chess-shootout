@@ -63,6 +63,15 @@ def normalize_nickname(raw):
     return collapsed
 
 
+def normalize_country(raw):
+    if raw is None:
+        return None
+    value = str(raw).strip().upper()
+    if len(value) == 2 and value.isascii() and value.isalpha():
+        return value
+    return None
+
+
 class _Base(BaseModel):
     version: int = PROTOCOL_VERSION
 
@@ -86,11 +95,17 @@ class MatchmakeRequest(_Base):
     time_minutes: int
     increment_seconds: int
     side_preference: Literal["white", "black", "random"] = "random"
+    country: Optional[str] = None
 
     @field_validator("nickname")
     @classmethod
     def _normalize(cls, v):
         return normalize_nickname(v)
+
+    @field_validator("country", mode="before")
+    @classmethod
+    def _country(cls, v):
+        return normalize_country(v)
 
     @field_validator("client_uuid")
     @classmethod
@@ -141,6 +156,8 @@ class ResumeResponse(_Base):
     increment_seconds: int
     white_score: float = 0.0
     black_score: float = 0.0
+    white_country: Optional[str] = None
+    black_country: Optional[str] = None
 
 
 class ReclaimRequest(_Base):
@@ -209,6 +226,8 @@ class GameStartMessage(_Base):
     started_seconds_ago: float = 0.0
     white_score: float = 0.0
     black_score: float = 0.0
+    white_country: Optional[str] = None
+    black_country: Optional[str] = None
 
 
 class MoveAppliedMessage(_Base):

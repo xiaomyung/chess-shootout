@@ -1,5 +1,6 @@
 import pygame as pg
 
+from frontend.countries import flag_emoji
 from frontend.modals.base import BaseModal, MODAL_RAIL
 from frontend.visual.colors import Colors
 from frontend.visual.draw import stroked_text
@@ -23,18 +24,22 @@ class MatchFoundModal(BaseModal):
         self.opp_name = ""
         self.me_side = "white"
         self.opp_side = "black"
+        self.me_country = ""
+        self.opp_country = ""
         self.rating = "1500"
         self.on_done = None
         self._started_at = 0
         self._seconds = 3
+        self._flag_cache = {}
 
-    def show(self, white_name, black_name, your_color, on_done, seconds=3, rating="1500"):
+    def show(self, white_name, black_name, your_color, on_done, seconds=3, rating="1500",
+             white_country="", black_country=""):
         if your_color == "white":
-            self.me_name, self.me_side = white_name, "white"
-            self.opp_name, self.opp_side = black_name, "black"
+            self.me_name, self.me_side, self.me_country = white_name, "white", white_country
+            self.opp_name, self.opp_side, self.opp_country = black_name, "black", black_country
         else:
-            self.me_name, self.me_side = black_name, "black"
-            self.opp_name, self.opp_side = white_name, "white"
+            self.me_name, self.me_side, self.me_country = black_name, "black", black_country
+            self.opp_name, self.opp_side, self.opp_country = white_name, "white", white_country
         self.rating = rating
         self.on_done = on_done
         self._seconds = seconds
@@ -103,10 +108,10 @@ class MatchFoundModal(BaseModal):
 
         gap = max(int(panel_w * 0.027), 12)
         side_w = (content.width - vs_surf.get_width() - 2 * gap) / 2
-        self._draw_card(content.x + side_w / 2, y, av, side_w, card_h,
-                        self.me_name, self.me_side, name_font, rating_font, letter_font)
-        self._draw_card(content.right - side_w / 2, y, av, side_w, card_h,
-                        self.opp_name, self.opp_side, name_font, rating_font, letter_font)
+        self._draw_card(content.x + side_w / 2, y, av, side_w, card_h, self.me_name,
+                        self.me_side, self.me_country, name_font, rating_font, letter_font)
+        self._draw_card(content.right - side_w / 2, y, av, side_w, card_h, self.opp_name,
+                        self.opp_side, self.opp_country, name_font, rating_font, letter_font)
         self.window.blit(vs_surf, (content.centerx - vs_surf.get_width() / 2,
                                    y + (card_h - vs_surf.get_height()) / 2))
         y += vs_block_h + g_vs_bottom
@@ -118,7 +123,16 @@ class MatchFoundModal(BaseModal):
         self.window.blit(label, (cx, y))
         self.window.blit(number, (cx + label.get_width(), y))
 
-    def _draw_card(self, cx, y, av, side_w, card_h, name, side, name_font,
+    def _flag(self, country, size):
+        char = flag_emoji(country)
+        if not char:
+            return None
+        key = (char, size)
+        if key not in self._flag_cache:
+            self._flag_cache[key] = emoji_surface(char, size)
+        return self._flag_cache[key]
+
+    def _draw_card(self, cx, y, av, side_w, card_h, name, side, country, name_font,
                    rating_font, letter_font):
         top, bottom, letter_color = _avatar_colors(side)
         self.window.blit(build_avatar(av, top, bottom), (cx - av / 2, y))
@@ -126,11 +140,18 @@ class MatchFoundModal(BaseModal):
         glyph = letter_font.render(letter, True, letter_color)
         self.window.blit(glyph, (cx - glyph.get_width() / 2,
                                  y + av / 2 - glyph.get_height() / 2))
+        flag = self._flag(country, name_font.get_height())
+        flag_w = (flag.get_width() + 7) if flag is not None else 0
         name_surf = name_font.render(name, True, Colors.white)
         name_surf = fit_text_to_rect(
-            name_surf, pg.Rect(0, 0, side_w, name_surf.get_height()), padding=0)
+            name_surf, pg.Rect(0, 0, max(side_w - flag_w, 1), name_surf.get_height()),
+            padding=0)
         ny = y + av + 8
-        self.window.blit(name_surf, (cx - name_surf.get_width() / 2, ny))
+        gx = cx - (flag_w + name_surf.get_width()) / 2
+        if flag is not None:
+            self.window.blit(flag, (gx, ny + name_surf.get_height() / 2 - flag.get_height() / 2))
+            gx += flag.get_width() + 7
+        self.window.blit(name_surf, (gx, ny))
         rating = rating_font.render(self.rating, True, Colors.text_mute)
         self.window.blit(rating, (cx - rating.get_width() / 2,
                                   ny + name_surf.get_height() + 2))

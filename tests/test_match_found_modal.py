@@ -103,3 +103,21 @@ def test_build_avatar_white_side_is_amber_to_accent_gradient():
     assert av.get_size() == (52, 52)
     assert_pixel_color(av, 26, 3, Colors.amber, tol=30)
     assert_pixel_color(av, 26, 48, Colors.accent, tol=30)
+
+
+def test_show_maps_country_to_each_side():
+    m = _modal()
+    m.show("Alice", "Bob", "black", on_done=lambda: None,
+           white_country="US", black_country="RO")
+    assert m.me_country == "RO"
+    assert m.opp_country == "US"
+
+
+def test_draw_shows_country_flag():
+    win = pg.display.get_surface()
+    m = _modal()
+    m.show("Alice", "Bob", "white", on_done=lambda: None, seconds=3,
+           white_country="US", black_country="RO")
+    win.fill((0, 0, 0))
+    m.draw()
+    assert _near_count(win, m.rect, "#b22234", tol=70) > 0

@@ -206,6 +206,34 @@ async def test_reset_for_rematch_swaps_colors_and_clears_state(manager, clock):
 
 
 @pytest.mark.asyncio
+async def test_enqueue_stores_country_per_slot(manager):
+    await manager.enqueue(**_enqueue_kwargs("alice", country="US"))
+    room = await manager.enqueue(**_enqueue_kwargs("bob", country="RO"))
+    alice_color = room.color_of("alice")
+    assert room.slot(alice_color).country == "US"
+    assert room.slot(room.opp_color(alice_color)).country == "RO"
+
+
+@pytest.mark.asyncio
+async def test_enqueue_country_defaults_none(manager):
+    room = await manager.enqueue(**_enqueue_kwargs("alice"))
+    assert room.slot(room.color_of("alice")).country is None
+
+
+@pytest.mark.asyncio
+async def test_rematch_swaps_country_with_player(manager, clock):
+    await manager.enqueue(**_enqueue_kwargs("alice", country="US"))
+    room = await manager.enqueue(**_enqueue_kwargs("bob", country="RO"))
+    pre_white_country = room.white.country
+    pre_black_country = room.black.country
+    room.game_start_broadcast = True
+    manager.finalize_result(room.room_id, "checkmate", winner_color="white")
+    manager.reset_for_rematch(room.room_id)
+    assert room.white.country == pre_black_country
+    assert room.black.country == pre_white_country
+
+
+@pytest.mark.asyncio
 async def test_gc_drops_finished_rooms_after_keep_alive(manager, clock):
     await manager.enqueue(**_enqueue_kwargs("alice"))
     room = await manager.enqueue(**_enqueue_kwargs("bob"))

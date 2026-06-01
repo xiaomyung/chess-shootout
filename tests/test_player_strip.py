@@ -323,6 +323,80 @@ def test_ko_wink_does_not_arm_without_increment(strip):
     assert strip._ko_wink_until_ms == 0
 
 
+# ---- country flag ----------------------------------------------------------
+
+def test_flag_surface_returns_sized_emoji(strip):
+    strip.country = "US"
+    surf = strip._flag_surface(20)
+    assert surf is not None
+    assert surf.get_height() == 20
+    assert surf.get_width() > 0
+
+
+@pytest.mark.parametrize("code", [None, "", "ZZ", "usa"])
+def test_flag_surface_none_for_missing_or_invalid_country(strip, code):
+    strip.country = code
+    assert strip._flag_surface(20) is None
+
+
+def test_flag_changes_strip_render(strip):
+    strip.set_state("Alice", 300.0, True, connection_state="connected",
+                    player_color=PieceColor.WHITE)
+    _draw(strip)
+    without = _snapshot(strip)
+    strip.set_state("Alice", 300.0, True, connection_state="connected",
+                    player_color=PieceColor.WHITE, country="US")
+    _draw(strip)
+    assert _snapshot(strip) != without
+
+
+def test_flag_renders_us_red(strip):
+    strip.set_state("Alice", 300.0, False, connection_state="connected",
+                    player_color=PieceColor.BLACK, country="US")
+    _draw(strip)
+    region = pg.Rect(strip.rect.x + 55, strip.rect.y, 130, strip.rect.height)
+    assert _has_color(strip.window, region, "#b22234", tol=70)
+
+
+def test_flag_rect_set_when_country_present(strip):
+    strip.set_state("Alice", 300.0, True, player_color=PieceColor.BLACK, country="US")
+    _draw(strip)
+    assert strip._flag_rect.width > 0
+
+
+def test_flag_rect_empty_without_country(strip):
+    strip.set_state("Alice", 300.0, True, player_color=PieceColor.BLACK)
+    _draw(strip)
+    assert strip._flag_rect.width == 0
+
+
+def test_tooltip_alpha_eases_in_and_out(strip):
+    strip._tooltip_alpha = 0.0
+    for _ in range(60):
+        strip._advance_tooltip(True)
+    assert strip._tooltip_alpha > 0.9
+    for _ in range(60):
+        strip._advance_tooltip(False)
+    assert strip._tooltip_alpha < 0.1
+
+
+def test_tooltip_bubble_renders_country_name(strip):
+    strip.set_state("Alice", 300.0, True, player_color=PieceColor.BLACK, country="US")
+    _draw(strip)
+    strip._tooltip_alpha = 1.0
+    strip._blit_tooltip("United States")
+    flag = strip._flag_rect
+    region = pg.Rect(max(flag.centerx - 80, 0), flag.bottom + 2, 160, 30)
+    assert _has_color(strip.window, region, Colors.white, tol=20)
+
+
+def test_tooltip_resets_alpha_when_country_absent(strip):
+    strip.set_state("Alice", 300.0, True, player_color=PieceColor.BLACK)
+    strip._tooltip_alpha = 0.5
+    _draw(strip)
+    assert strip._tooltip_alpha == 0.0
+
+
 # ---- active glow -----------------------------------------------------------
 
 def test_active_black_strip_shows_accent_inactive_does_not(strip):

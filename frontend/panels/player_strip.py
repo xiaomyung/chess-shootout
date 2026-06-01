@@ -1,9 +1,11 @@
 import pygame as pg
 
 from backend.pieces import PieceColor
+from frontend.countries import flag_emoji, name_for
 from frontend.visual.clock_visual import LOW_TIME_FRACTION
 from frontend.visual.colors import Colors
 from frontend.visual.draw import rounded_rect_surface, blit_centered, circle_surface
+from frontend.visual.emoji import emoji_surface
 from frontend.visual.fonts import get_font, DISPLAY
 from frontend.visual.widgets import build_avatar, build_shell
 
@@ -15,6 +17,7 @@ GIVE_TIME_FLASH_PEAK_ALPHA = 150
 GIVE_TIME_FLOAT_MS = 1000
 KO_WINK_MS = 520
 TWO_ROW_MIN_IH = 26
+TOOLTIP_EASE = 0.22
 
 
 def format_clock(seconds):
@@ -61,6 +64,7 @@ class PlayerStrip:
         self.advantage = 0
         self.captured_color = None
         self.connection_state = None
+        self.country = None
         self.auto_end_label = None
         self.auto_end_seconds = None
         self.ko_count = 0
@@ -77,6 +81,10 @@ class PlayerStrip:
         self.auto_end_font = get_font(11, bold=True)
         self.icons = {}
         self._avatar_cache = None
+        self._flag_cache = None
+        self._flag_rect = pg.Rect(0, 0, 0, 0)
+        self._tooltip_alpha = 0.0
+        self.tooltip_font = get_font(12, bold=True)
 
     def set_rect(self, rect):
         self.rect = pg.Rect(rect)
@@ -90,6 +98,7 @@ class PlayerStrip:
         self.letter_font = get_font(max(int(ih * 0.5), 11), family=DISPLAY)
         self.auto_end_font = get_font(
             max(int(ih * 0.42 * AUTO_END_BADGE_FONT_SCALE), 9), bold=True)
+        self.tooltip_font = get_font(max(int(ih * 0.34), 11), bold=True)
         self._avatar_cache = None
 
     def set_piece_icons(self, icons):
@@ -99,11 +108,12 @@ class PlayerStrip:
                   captured_color=None, connection_state=None,
                   clock_initial_seconds=None, auto_end_label=None,
                   auto_end_seconds=None, player_color=PieceColor.WHITE,
-                  is_bot=False, rating=None, ko_count=0):
+                  is_bot=False, rating=None, ko_count=0, country=None):
         self.name = name
         self.player_color = player_color
         self.is_bot = is_bot
         self.rating = rating
+        self.country = country
         self.clock_seconds = clock_seconds
         self.clock_initial_seconds = clock_initial_seconds
         self.active = active
@@ -129,6 +139,7 @@ class PlayerStrip:
         h = self.rect.height
         if h <= 0 or self.rect.width <= 0:
             return
+        self._flag_rect = pg.Rect(0, 0, 0, 0)
         pad = max(int(h * 0.16), 4)
         radius = max(int(h * 0.17), 5)
         pg.draw.rect(self.window, Colors.surface, self.rect, border_radius=radius)
@@ -154,6 +165,7 @@ class PlayerStrip:
                          border_radius=radius)
 
         self._draw_give_time_float(clock_rect)
+        self._draw_flag_tooltip()
 
     def _avatar_colors(self):
         if self.player_color in (PieceColor.WHITE, "white") and not self.is_bot:
@@ -177,6 +189,53 @@ class PlayerStrip:
     def _build_avatar(size, top, bottom):
         return build_avatar(size, top, bottom)
 
+    def _flag_surface(self, height):
+        char = flag_emoji(self.country)
+        if not char:
+            return None
+        key = (char, height)
+        if self._flag_cache is None or self._flag_cache[0] != key:
+            self._flag_cache = (key, emoji_surface(char, height))
+        return self._flag_cache[1]
+
+    def _advance_tooltip(self, hovering):
+        target = 1.0 if hovering else 0.0
+        self._tooltip_alpha += (target - self._tooltip_alpha) * TOOLTIP_EASE
+        if abs(self._tooltip_alpha - target) < 0.01:
+            self._tooltip_alpha = target
+        return self._tooltip_alpha
+
+    def _draw_flag_tooltip(self):
+        name = name_for(self.country)
+        if not name or self._flag_rect.width == 0:
+            self._tooltip_alpha = 0.0
+            return
+        hovering = self._flag_rect.collidepoint(pg.mouse.get_pos())
+        self._advance_tooltip(hovering)
+        if self._tooltip_alpha <= 0.02:
+            return
+        self._blit_tooltip(name)
+
+    def _blit_tooltip(self, name):
+        alpha = int(max(0.0, min(1.0, self._tooltip_alpha)) * 255)
+        text = self.tooltip_font.render(name, True, Colors.white)
+        pad_x, pad_y = 9, 5
+        w = text.get_width() + 2 * pad_x
+        h = text.get_height() + 2 * pad_y
+        bubble = pg.Surface((w, h), pg.SRCALPHA)
+        bubble.blit(rounded_rect_surface((w, h), 6, Colors.app_bg,
+                                         border=Colors.button_border, border_width=1), (0, 0))
+        bubble.blit(text, (pad_x, pad_y))
+        bubble.set_alpha(alpha)
+        rise = int(5 * (1 - self._tooltip_alpha))
+        if self.rect.centery < self.window.get_height() / 2:
+            by = self._flag_rect.bottom + 5 + rise
+        else:
+            by = self._flag_rect.top - h - 5 - rise
+        bx = self._flag_rect.centerx - w // 2
+        bx = max(2, min(bx, self.window.get_width() - w - 2))
+        self.window.blit(bubble, (bx, by))
+
     def _draw_who(self, x, right, ih):
         if right <= x:
             return
@@ -199,6 +258,12 @@ class PlayerStrip:
             dot = circle_surface(dot_r * 2, color)
             self.window.blit(dot, (cursor, top_cy - dot_r))
             cursor += dot_r * 2 + max(int(ih * 0.12), 4)
+        flag = self._flag_surface(max(int(ih * 0.42), 10))
+        if flag is not None and cursor + flag.get_width() <= name_right:
+            self.window.blit(flag, (cursor, top_cy - flag.get_height() // 2))
+            self._flag_rect = pg.Rect(cursor, top_cy - flag.get_height() // 2,
+                                      flag.get_width(), flag.get_height())
+            cursor += flag.get_width() + max(int(ih * 0.1), 4)
         name_surf = self.name_font.render(self.name, True, Colors.white)
         max_name_w = max(name_right - cursor, 1)
         if name_surf.get_width() > max_name_w:
