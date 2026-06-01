@@ -325,9 +325,10 @@ def test_start_menu_centered_on_window_not_board(frontend):
     rect = frontend.start_menu._outer
     win_w, win_h = frontend.window.get_size()
     top = frontend.chrome.HEIGHT
-    content_center_y = top + (win_h - top) / 2
+    content_center_y = top + (win_h - top - 22) / 2
     assert abs(rect.centerx - win_w / 2) <= 1
     assert abs(rect.centery - content_center_y) <= 1
+    assert rect.bottom < frontend.start_menu._footer_link_rect.top
 
 
 def test_menu_mode_centers_flex_modals_on_window(frontend):

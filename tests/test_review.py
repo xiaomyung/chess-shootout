@@ -506,13 +506,14 @@ def test_load_pgn_picks_most_recent_by_mtime(tmp_path, monkeypatch):
     assert path.endswith("game-new.pgn")
 
 
-def test_load_pgn_button_layout_left_and_right():
+def test_history_and_fen_ghosts_below_start():
     app = _new_app()
     app.start_menu.show()
     app.start_menu.draw()
-    assert app.start_menu._load_pgn_rect.x < app.start_menu._start_rect.x
-    assert abs(app.start_menu._load_pgn_rect.width
-               - app.start_menu._start_rect.width) <= 2
+    sm = app.start_menu
+    assert sm._history_rect.x < sm._fen_rect.x
+    assert abs(sm._history_rect.width - sm._fen_rect.width) <= 2
+    assert sm._history_rect.top >= sm._start_rect.bottom
 
 
 def test_load_pgn_from_path_loads_game(tmp_path):

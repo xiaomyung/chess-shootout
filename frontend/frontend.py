@@ -1338,11 +1338,13 @@ class Frontend(OnlineEventsMixin):
             wait_height,
         )
 
-        start_width = min(window_width * 0.55, board_size_px * 0.85)
-        start_height = min(window_height * 0.85, board_size_px * 0.95)
+        footer_reserve = 22
+        usable_menu_h = max(avail_height - footer_reserve, 200)
+        start_width = min(440, window_width - 24)
+        start_height = min(max(usable_menu_h - 24, 200), 660)
         start_rect = pg.Rect(
             window_width / 2 - start_width / 2,
-            top + avail_height / 2 - start_height / 2,
+            top + usable_menu_h / 2 - start_height / 2,
             start_width,
             start_height
         )
@@ -1639,6 +1641,7 @@ class Frontend(OnlineEventsMixin):
                     self._right_click_released(event.pos)
 
             elif event.type == pg.MOUSEMOTION:
+                self.chrome.update_cursor(event.pos)
                 if event.buttons[0]:
                     if not self.audio_panel.handle_drag(event.pos, True):
                         self.board.update_drag_motion(event.pos)

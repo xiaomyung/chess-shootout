@@ -91,6 +91,33 @@ def test_hit_test_regions(chrome):
     assert _hit(chrome, 500, 699) == _HITTEST_RESIZE_BOTTOM
 
 
+def test_cursor_for_resize_edges_and_dots(chrome):
+    chrome._w, chrome._h = 1000, 700
+    chrome._layout_dots(1000)
+    assert chrome._cursor_for((1, 1)) == pg.SYSTEM_CURSOR_SIZENWSE
+    assert chrome._cursor_for((999, 1)) == pg.SYSTEM_CURSOR_SIZENESW
+    assert chrome._cursor_for((999, 350)) == pg.SYSTEM_CURSOR_SIZEWE
+    assert chrome._cursor_for((500, 699)) == pg.SYSTEM_CURSOR_SIZENS
+    assert chrome._cursor_for(chrome._dot_rects["close"].center) == pg.SYSTEM_CURSOR_HAND
+    # title-bar drag area and content both use the plain arrow
+    assert chrome._cursor_for((300, chrome.HEIGHT // 2)) == pg.SYSTEM_CURSOR_ARROW
+    assert chrome._cursor_for((300, 300)) == pg.SYSTEM_CURSOR_ARROW
+
+
+def test_dot_draws_glyph_on_hover(chrome, monkeypatch):
+    center = None
+    monkeypatch.setattr(pg.mouse, "get_pos", lambda: (0, 0))
+    chrome.window.fill("black")
+    chrome.draw()
+    center = chrome._dot_rects["close"].center
+    plain = tuple(chrome.window.get_at(center))
+    monkeypatch.setattr(pg.mouse, "get_pos", lambda: center)
+    chrome.window.fill("black")
+    chrome.draw()
+    hovered = tuple(chrome.window.get_at(center))
+    assert hovered != plain, "hovered close dot should show its × glyph"
+
+
 def test_layout_reserves_titlebar_and_keeps_board_playable_at_min_size():
     from frontend import env
     env.init_paths()

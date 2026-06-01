@@ -30,6 +30,17 @@ _HITTEST_RESIZE_LEFT = 9
 
 _SDL_WINDOW_MAXIMIZED = 0x00000080
 
+_RESIZE_CURSORS = {
+    _HITTEST_RESIZE_TOPLEFT: pg.SYSTEM_CURSOR_SIZENWSE,
+    _HITTEST_RESIZE_BOTTOMRIGHT: pg.SYSTEM_CURSOR_SIZENWSE,
+    _HITTEST_RESIZE_TOPRIGHT: pg.SYSTEM_CURSOR_SIZENESW,
+    _HITTEST_RESIZE_BOTTOMLEFT: pg.SYSTEM_CURSOR_SIZENESW,
+    _HITTEST_RESIZE_TOP: pg.SYSTEM_CURSOR_SIZENS,
+    _HITTEST_RESIZE_BOTTOM: pg.SYSTEM_CURSOR_SIZENS,
+    _HITTEST_RESIZE_LEFT: pg.SYSTEM_CURSOR_SIZEWE,
+    _HITTEST_RESIZE_RIGHT: pg.SYSTEM_CURSOR_SIZEWE,
+}
+
 
 class _SDLPoint(ctypes.Structure):
     _fields_ = [("x", ctypes.c_int), ("y", ctypes.c_int)]
@@ -75,6 +86,7 @@ class WindowChrome:
         self._wordmark = None
         self._wordmark_accent = None
         self._logo_surf = None
+        self._cursor = None
         self._init_sdl()
 
     def _init_sdl(self):
@@ -107,9 +119,7 @@ class WindowChrome:
         except Exception:
             log.warning("window chrome SDL hit-test unavailable", exc_info=True)
 
-    def _hit_test(self, win, area_ptr, data):
-        x = area_ptr.contents.x
-        y = area_ptr.contents.y
+    def _resize_code(self, x, y):
         w, h = self._w, self._h
         b = self.RESIZE_BORDER
         left, right = x < b, x >= w - b
@@ -130,12 +140,41 @@ class WindowChrome:
             return _HITTEST_RESIZE_LEFT
         if right:
             return _HITTEST_RESIZE_RIGHT
+        return None
+
+    def _hit_test(self, win, area_ptr, data):
+        x = area_ptr.contents.x
+        y = area_ptr.contents.y
+        code = self._resize_code(x, y)
+        if code is not None:
+            return code
         if y < self.HEIGHT:
             for rect in self._dot_rects.values():
                 if rect.collidepoint(x, y):
                     return _HITTEST_NORMAL
             return _HITTEST_DRAGGABLE
         return _HITTEST_NORMAL
+
+    def _over_dot(self, pos):
+        return any(rect.collidepoint(pos) for rect in self._dot_rects.values())
+
+    def _cursor_for(self, pos):
+        code = self._resize_code(pos[0], pos[1])
+        if code is not None:
+            return _RESIZE_CURSORS[code]
+        if pos[1] < self.HEIGHT and self._over_dot(pos):
+            return pg.SYSTEM_CURSOR_HAND
+        return pg.SYSTEM_CURSOR_ARROW
+
+    def update_cursor(self, pos):
+        self._w, self._h = self.window.get_size()
+        cursor = self._cursor_for(pos)
+        if cursor != self._cursor:
+            try:
+                pg.mouse.set_cursor(cursor)
+                self._cursor = cursor
+            except pg.error:
+                pass
 
     def _layout_dots(self, w):
         self._dot_rects = {}
@@ -192,8 +231,16 @@ class WindowChrome:
             "max": Colors.titlebar_max,
             "close": Colors.titlebar_close,
         }
+        mouse = pg.mouse.get_pos()
         for key, rect in self._dot_rects.items():
-            self._draw_smooth_dot((rect.centerx, rect.centery), colors[key])
+            base = pg.Color(colors[key])
+            hovered = rect.collidepoint(mouse)
+            col = base.lerp(pg.Color(255, 255, 255), 0.22) if hovered else base
+            self._draw_smooth_dot((rect.centerx, rect.centery), col)
+            if hovered:
+                self.window.blit(
+                    self._dot_glyph(key, base),
+                    (rect.centerx - self.DOT_RADIUS, rect.centery - self.DOT_RADIUS))
 
     def _draw_smooth_dot(self, center, color):
         def render(surf, k):
@@ -201,6 +248,25 @@ class WindowChrome:
                            (self.DOT_RADIUS * k, self.DOT_RADIUS * k), self.DOT_RADIUS * k)
         dot = supersample(self.DOT_RADIUS * 2, render)
         self.window.blit(dot, (center[0] - self.DOT_RADIUS, center[1] - self.DOT_RADIUS))
+
+    def _dot_glyph(self, key, base):
+        dark = base.lerp(pg.Color(0, 0, 0), 0.74)
+
+        def render(surf, k):
+            d = self.DOT_RADIUS * 2 * k
+            c = d / 2
+            g = self.DOT_RADIUS * k * 0.55
+            lw = max(int(1.5 * k), 2)
+            if key == "min":
+                pg.draw.line(surf, dark, (c - g, c), (c + g, c), lw)
+            elif key == "max":
+                box = pg.Rect(0, 0, round(2 * g), round(2 * g))
+                box.center = (round(c), round(c))
+                pg.draw.rect(surf, dark, box, lw)
+            else:
+                pg.draw.line(surf, dark, (c - g, c - g), (c + g, c + g), lw)
+                pg.draw.line(surf, dark, (c - g, c + g), (c + g, c - g), lw)
+        return supersample(self.DOT_RADIUS * 2, render, scale=8)
 
     def handle_click(self, pos):
         if pos[1] >= self.HEIGHT:

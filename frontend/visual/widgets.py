@@ -126,7 +126,8 @@ def draw_gear(window, rect):
         hole_r = r * 0.40
         pg.draw.circle(surf, Colors.white, (int(cx), int(cy)), int(r), width=int(r - hole_r))
 
-    window.blit(supersample((max(rect.width, 1), max(rect.height, 1)), render), rect.topleft)
+    window.blit(supersample((max(rect.width, 1), max(rect.height, 1)), render, scale=8),
+                rect.topleft)
 
 
 def draw_button_row(window, rect, buttons, font, gap, disabled_keys=None,
@@ -191,6 +192,8 @@ def draw_segmented(window, rect, options, selected_key, font, gap=3):
         if key == selected_key:
             window.blit(rounded_rect_surface(sr.size, 6, Colors.accent), sr.topleft)
             color = Colors.on_accent
+        elif sr.collidepoint(pg.mouse.get_pos()):
+            color = Colors.white
         else:
             color = Colors.text_dim
         if label == "∞":
@@ -200,6 +203,41 @@ def draw_segmented(window, rect, options, selected_key, font, gap=3):
         window.blit(glyph, (sr.centerx - glyph.get_width() / 2,
                             sr.centery - glyph.get_height() / 2))
         rects[key] = sr
+    return rects
+
+
+def draw_chip_row(window, rect, options, selected_key, font, gap=5, locked=False):
+    n = len(options)
+    if n == 0 or rect.width <= gap * (n - 1):
+        return {}
+    chip_w = (rect.width - gap * (n - 1)) / n
+    rects = {}
+    mouse = pg.mouse.get_pos()
+    for i, (label, key) in enumerate(options):
+        cr = pg.Rect(round(rect.x + i * (chip_w + gap)), rect.y, round(chip_w), rect.height)
+        is_nav = isinstance(key, str) and key.startswith("__")
+        on = (not is_nav) and key == selected_key
+        hovered = (not locked) and cr.collidepoint(mouse)
+        if locked:
+            bg, border = Colors.dark_menu, Colors.button_border
+            color = Colors.text_mute if on else Colors.footer_text
+        elif on:
+            bg, border, color = Colors.surface_inset, Colors.accent, Colors.white
+        elif is_nav:
+            bg, border, color = Colors.dark_menu, Colors.button_border, Colors.accent_hi
+        elif hovered:
+            bg, border, color = Colors.button_hover, Colors.button_border, Colors.white
+        else:
+            bg, border, color = Colors.dark_menu, Colors.button_border, Colors.text_dim
+        window.blit(rounded_rect_surface(cr.size, 7, bg, border=border, border_width=1),
+                    cr.topleft)
+        if label == "∞":
+            glyph = infinity_surface(int(cr.height * 0.42), color)
+        else:
+            glyph = fit_text_to_rect(font.render(label, True, color), cr)
+        window.blit(glyph, (cr.centerx - glyph.get_width() // 2,
+                            cr.centery - glyph.get_height() // 2))
+        rects[key] = cr
     return rects
 
 

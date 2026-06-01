@@ -1,3 +1,5 @@
+import math
+
 import pygame as pg
 
 SUPERSAMPLE = 4
@@ -14,15 +16,22 @@ def supersample(size, render, scale=SUPERSAMPLE):
 def infinity_surface(height, color):
     h = max(int(height), 6)
     w = int(h * 1.7)
-    th = max(int(h * 0.16), 2)
+    th = max(h * 0.2, 3.0)
 
     def render(surf, k):
         big_w, big_h = surf.get_size()
-        r = int(big_h * 0.38)
-        cy = big_h // 2
-        for cx in (int(big_w * 0.30), int(big_w * 0.70)):
-            pg.draw.circle(surf, pg.Color(color), (cx, cy), r, max(int(th * k), 1))
-    return supersample((w, h), render)
+        cx, cy = big_w / 2, big_h / 2
+        ax, ay = big_w * 0.355, big_h * 0.275
+        lw = max(int(th * k), 2)
+        n = 140
+        pts = []
+        for i in range(n):
+            t = 2 * math.pi * i / n
+            d = 1 + math.sin(t) ** 2
+            pts.append((cx + ax * math.cos(t) / d,
+                        cy + ay * math.sin(t) * math.cos(t) / d / 0.3536))
+        pg.draw.lines(surf, pg.Color(color), True, pts, lw)
+    return supersample((w, h), render, scale=8)
 
 
 def blit_centered(surface, text, center):

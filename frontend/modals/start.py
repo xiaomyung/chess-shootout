@@ -4,30 +4,25 @@ import paths
 from backend.match import SINGLE_SCREEN, BOT, ONLINE
 from frontend import env
 from frontend.visual.colors import Colors
+from frontend.visual.draw import rounded_rect_surface, supersample
+from frontend.visual.emoji import blit_emoji, emoji_surface
+from frontend.visual.fonts import get_display_font, get_font, get_mono_font
 from frontend.visual.text_input import TextInput
-from frontend.visual.widgets import draw_button, draw_gear, draw_icon_button, draw_selector
-from frontend.visual.fonts import get_font
+from frontend.visual.widgets import draw_chip_row, draw_gear, draw_segmented
 
 
 MODE_OPTIONS = [
-    ("Single-screen", SINGLE_SCREEN),
-    ("Bot", BOT),
+    ("Local", SINGLE_SCREEN),
+    ("vs Bot", BOT),
     ("Online", ONLINE),
 ]
 
-TIME_OPTIONS = [
-    ("No clock", None),
-    ("5 min", 5),
-    ("10 min", 10),
-    ("15 min", 15),
+TIME_PAGES = [
+    [("10", 10), ("15", 15), ("30", 30), ("∞", None)],
+    [("1", 1), ("2", 2), ("3", 3), ("5", 5)],
 ]
 
-INCREMENT_OPTIONS = [
-    ("+0", 0),
-    ("+2", 2),
-    ("+5", 5),
-    ("+10", 10),
-]
+INCREMENT_OPTIONS = [("0", 0), ("2", 2), ("5", 5), ("10", 10), ("15", 15)]
 
 SIDE_OPTIONS = [
     ("White", "white"),
@@ -35,14 +30,11 @@ SIDE_OPTIONS = [
     ("Black", "black"),
 ]
 
+ALL_TIME_VALUES = [value for page in TIME_PAGES for _, value in page]
 
-SECTIONS = [
-    ("Game mode", "selected_mode", MODE_OPTIONS),
-    ("Time", "selected_time_minutes", TIME_OPTIONS),
-    ("Increment (s)", "selected_increment_seconds", INCREMENT_OPTIONS),
-    ("Side", "selected_side", SIDE_OPTIONS),
-]
-
+WORDMARK_TOP = "CHESS"
+WORDMARK_BOTTOM = "SHOOTOUT"
+TAGLINE = "PAWNS GET WHAT THEY DESERVE"
 
 FOOTER_PREFIX = "Chess Shootout {label} - Designed and developed by "
 FOOTER_LINK_TEXT = "xiaomyung"
@@ -68,36 +60,71 @@ class StartMenu:
         self.window = window
         self.callbacks = callbacks
         self.visible = True
-        self.title = "Chess"
 
-        self.text_input = TextInput(window)
+        self.text_input = TextInput(window, max_chars=20, placeholder="Enter a nickname")
         self.text_input.text = env.get_nickname()
 
         last_mode = env.get_last_mode()
         self.selected_mode = (
-            last_mode if last_mode in (SINGLE_SCREEN, BOT, ONLINE)
-            else SINGLE_SCREEN
+            last_mode if last_mode in (SINGLE_SCREEN, BOT, ONLINE) else SINGLE_SCREEN
         )
         self.selected_time_minutes = 10
         self.selected_increment_seconds = 5
         self.selected_side = "random"
         self.apply_default_time_settings()
+        self._time_page = 0
 
-        self.title_font = get_font(28, bold=True)
-        self.label_font = get_font(12, bold=True)
-        self.button_font = get_font(14, bold=True)
-        self.start_font = get_font(18, bold=True)
+        self._side_imgs = {}
+        for color in ("white", "black"):
+            try:
+                img = pg.image.load(
+                    str(paths.resource_path("assets", "pieces_img", f"pawn_{color}.png")))
+                self._side_imgs[color] = img.convert_alpha()
+            except (pg.error, OSError):
+                self._side_imgs[color] = None
+        try:
+            self._brand_mark = pg.image.load(
+                str(paths.resource_path("assets", "icons", "brand_mark.png"))).convert_alpha()
+        except (pg.error, OSError):
+            self._brand_mark = None
 
         self._outer = pg.Rect(0, 0, 0, 0)
-        self._title_pos = (0, 0)
-        self._input_rect = pg.Rect(0, 0, 0, 0)
-        self._section_label_ys = [0, 0, 0, 0]
-        self._section_selector_rects = [pg.Rect(0, 0, 0, 0) for _ in range(4)]
-        self._load_pgn_rect = pg.Rect(0, 0, 0, 0)
-        self._fen_rect = pg.Rect(0, 0, 0, 0)
-        self._reconnect_rect = pg.Rect(0, 0, 0, 0)
-        self._start_rect = pg.Rect(0, 0, 0, 0)
+        self._scale = 1.0
+        self._tile_cache = None
+        self._start_cache = None
         self._gear_rect = pg.Rect(0, 0, 0, 0)
+        self._tile_rect = pg.Rect(0, 0, 0, 0)
+        self._wordmark_top = (0, 0)
+        self._wordmark_bottom = (0, 0)
+        self._tagline_pos = (0, 0)
+        self._recon_rect = pg.Rect(0, 0, 0, 0)
+        self._recon_button_rect = pg.Rect(0, 0, 0, 0)
+        self._input_rect = pg.Rect(0, 0, 0, 0)
+        self._mode_label_pos = (0, 0)
+        self._mode_rect = pg.Rect(0, 0, 0, 0)
+        self._time_label_pos = (0, 0)
+        self._incr_label_pos = (0, 0)
+        self._time_rect = pg.Rect(0, 0, 0, 0)
+        self._incr_rect = pg.Rect(0, 0, 0, 0)
+        self._side_label_pos = (0, 0)
+        self._side_rect = pg.Rect(0, 0, 0, 0)
+        self._start_rect = pg.Rect(0, 0, 0, 0)
+        self._history_rect = pg.Rect(0, 0, 0, 0)
+        self._fen_rect = pg.Rect(0, 0, 0, 0)
+
+        self._mode_rects = {}
+        self._time_rects = {}
+        self._incr_rects = {}
+        self._side_rects = {}
+
+        self.label_font = get_font(11, bold=True)
+        self.seg_font = get_font(13, bold=True)
+        self.chip_font = get_mono_font(13, bold=True)
+        self.button_font = get_font(13, bold=True)
+        self.wordmark_font = get_display_font(34)
+        self.tagline_font = get_font(10, bold=True)
+        self.start_font = get_display_font(22)
+        self.recon_font = get_font(12, bold=True)
 
         self._footer_prefix_surf = None
         self._footer_link_surf = None
@@ -109,24 +136,18 @@ class StartMenu:
         self._footer_link_hitbox = pg.Rect(0, 0, 0, 0)
         self._footer_underline_y = 0
 
-        self._section_rects_by_key = {
-            "selected_mode": {},
-            "selected_time_minutes": {},
-            "selected_increment_seconds": {},
-            "selected_side": {},
-        }
-
-        self.row_gap = 6
         self.load_pgn_available = False
         self.reconnect_available = False
 
     def apply_default_time_settings(self):
         minutes = env.default_time_minutes()
-        if minutes in [value for _, value in TIME_OPTIONS]:
+        if minutes in ALL_TIME_VALUES:
             self.selected_time_minutes = minutes
         seconds = env.default_increment_seconds()
         if seconds in [value for _, value in INCREMENT_OPTIONS]:
             self.selected_increment_seconds = seconds
+        if self.selected_time_minutes is None:
+            self.selected_increment_seconds = 0
 
     def set_reconnect_available(self, available):
         if self.reconnect_available == available:
@@ -134,129 +155,6 @@ class StartMenu:
         self.reconnect_available = available
         if self._outer.width > 0:
             self.set_rect(self._outer)
-
-    def set_rect(self, rect):
-        self._outer = pg.Rect(rect)
-        h = rect.height
-
-        padding = max(int(h * 0.03), 10)
-        gear_size = min(max(int(h * 0.05), 26), 46)
-        self._gear_rect = pg.Rect(
-            rect.right - padding - gear_size, rect.y + padding, gear_size, gear_size,
-        )
-        self.title_font = get_font(max(int(h / 14), 14), bold=True)
-        self.label_font = get_font(max(int(h / 32), 10), bold=True)
-        self.button_font = get_font(max(int(h / 38), 10), bold=True)
-        self.start_font = get_font(max(int(h / 30), 11), bold=True)
-
-        inner_x = rect.x + padding
-        inner_w = rect.width - 2 * padding
-        inner_top = rect.y + padding
-        inner_bottom = rect.bottom - padding
-
-        title_h = self.title_font.get_height()
-        title_top = inner_top
-        self._title_pos = (rect.centerx, title_top)
-
-        start_h = max(int(h * 0.075), 28)
-        start_y = inner_bottom - start_h
-
-        title_to_input_gap = max(int(h * 0.035), 10)
-        input_to_sections_gap = max(int(h * 0.04), 12)
-        sections_to_button_gap = max(int(h * 0.035), 10)
-
-        input_h = min(max(int(h * 0.05), 26), 52)
-        input_y = title_top + title_h + title_to_input_gap
-        self._input_rect = pg.Rect(inner_x, input_y, inner_w, input_h)
-
-        sections_top = input_y + input_h + input_to_sections_gap
-        sections_bottom = start_y - sections_to_button_gap
-        sections_h = max(sections_bottom - sections_top, 0)
-
-        inter_block_gap = max(int(h * 0.022), 6)
-        block_count = 4
-        block_h = max(
-            (sections_h - inter_block_gap * (block_count - 1)) // block_count, 1,
-        )
-
-        section_label_h = max(int(block_h * 0.3), 10)
-        section_label_to_selector_gap = max(int(block_h * 0.08), 3)
-        selector_h = max(
-            block_h - section_label_h - section_label_to_selector_gap, 12,
-        )
-
-        block_y = sections_top
-        for i in range(block_count):
-            self._section_label_ys[i] = block_y
-            self._section_selector_rects[i] = pg.Rect(
-                inner_x,
-                block_y + section_label_h + section_label_to_selector_gap,
-                inner_w,
-                selector_h,
-            )
-            block_y += block_h + inter_block_gap
-
-        gap = self.row_gap
-        button_keys = ["load_pgn", "fen"]
-        if self.reconnect_available:
-            button_keys.append("reconnect")
-        button_keys.append("start")
-        n = len(button_keys)
-        cell_w = (inner_w - gap * (n - 1)) // n
-        layout = {}
-        x = inner_x
-        for i, key in enumerate(button_keys):
-            width = inner_w - x + inner_x if i == n - 1 else cell_w
-            layout[key] = pg.Rect(x, start_y, width, start_h)
-            x += cell_w + gap
-        self._load_pgn_rect = layout["load_pgn"]
-        self._fen_rect = layout["fen"]
-        self._reconnect_rect = layout.get("reconnect", pg.Rect(0, 0, 0, 0))
-        self._start_rect = layout["start"]
-
-        self._build_footer()
-
-    def _build_footer(self):
-        win_w, win_h = self.window.get_size()
-        font = get_font(max(int(win_h / 64), 9))
-        prefix = footer_prefix_text()
-        self._footer_prefix_surf = font.render(prefix, True, Colors.footer_text)
-        self._footer_link_surf = font.render(FOOTER_LINK_TEXT, True, Colors.footer_link)
-        self._footer_link_mask_surf = font.render(FOOTER_LINK_TEXT, True, Colors.white)
-        prefix_w = self._footer_prefix_surf.get_width()
-        link_w, link_h = self._footer_link_surf.get_size()
-        x = (win_w - prefix_w - link_w) // 2
-        y = win_h - FOOTER_MARGIN_PX - link_h
-        self._footer_prefix_pos = (x, y)
-        self._footer_link_rect = pg.Rect(x + prefix_w, y, link_w, link_h)
-        self._footer_link_hitbox = self._footer_link_rect.inflate(
-            FOOTER_LINK_HITBOX_PAD_PX * 2, FOOTER_LINK_HITBOX_PAD_PX * 2,
-        )
-        self._footer_underline_y = y + link_h - 1
-        band_w = max(int(link_w * 0.5), 12)
-        band = pg.Surface((band_w, link_h), pg.SRCALPHA)
-        half = band_w / 2
-        for col in range(band_w):
-            alpha = int(FOOTER_SHINE_MAX_ALPHA * (1 - abs(col - half) / half))
-            pg.draw.line(band, (255, 255, 255, alpha), (col, 0), (col, link_h))
-        self._footer_shine_band = band
-        self._footer_shine_w = band_w
-
-    @property
-    def _mode_rects(self):
-        return self._section_rects_by_key["selected_mode"]
-
-    @property
-    def _time_rects(self):
-        return self._section_rects_by_key["selected_time_minutes"]
-
-    @property
-    def _increment_rects(self):
-        return self._section_rects_by_key["selected_increment_seconds"]
-
-    @property
-    def _side_rects(self):
-        return self._section_rects_by_key["selected_side"]
 
     def show(self):
         self.visible = True
@@ -276,41 +174,327 @@ class StartMenu:
             "side": self.selected_side,
         }
 
-    @property
-    def start_button_label(self):
-        return "Start Search" if self.selected_mode == "online" else "Start Game"
+    def set_rect(self, rect):
+        self._avail = pg.Rect(rect)
+        recon = 1 if self.reconnect_available else 0
+        natural = 124 + 64 + 66 + 54 + 66 + 48 + 42 + recon * 58 + 15 * (6 + recon)
+        scale = min(1.0, max((rect.height - 44) / natural, 0.5))
+        self._scale = scale
+        s = scale
+
+        self.label_font = get_font(max(int(11 * s), 9), bold=True)
+        self.seg_font = get_font(max(int(13 * s), 10), bold=True)
+        self.chip_font = get_mono_font(max(int(13 * s), 10), bold=True)
+        self.button_font = get_font(max(int(13 * s), 10), bold=True)
+        self.wordmark_font = get_display_font(max(int(34 * s), 18))
+        self.tagline_font = get_font(max(int(10 * s), 8), bold=True)
+        self.start_font = get_display_font(max(int(22 * s), 14))
+        self.recon_font = get_font(max(int(12 * s), 9), bold=True)
+
+        pad = int(22 * s)
+        bottom = self._layout(rect.y)
+        content_h = bottom - rect.y + pad
+        card_top = rect.y + max((rect.height - content_h) // 2, 0)
+        if card_top != rect.y:
+            self._layout(card_top)
+        self._outer = pg.Rect(rect.x, card_top, rect.width, content_h)
+        self._tile_cache = None
+        self._start_cache = None
+        self._build_footer()
+
+    def _layout(self, oy):
+        rect = self._avail
+        s = self._scale
+        pad = int(22 * s)
+        x = rect.x + pad
+        w = rect.width - 2 * pad
+        gap = max(int(15 * s), 6)
+        label_gap = max(int(6 * s), 3)
+        label_h = self.label_font.get_height()
+        y = oy + pad
+
+        gear = int(34 * s)
+        self._gear_rect = pg.Rect(rect.right - int(16 * s) - gear, oy + int(16 * s),
+                                  gear, gear)
+
+        tile = int(52 * s)
+        self._tile_rect = pg.Rect(rect.centerx - tile // 2, y, tile, tile)
+        y += tile + max(int(4 * s), 2)
+        top_h = self.wordmark_font.get_height()
+        self._wordmark_top = (rect.centerx, y)
+        y += int(top_h * 0.78)
+        self._wordmark_bottom = (rect.centerx, y)
+        y += int(top_h * 0.86)
+        self._tagline_pos = (rect.centerx, y)
+        y += self.tagline_font.get_height() + gap
+
+        if self.reconnect_available:
+            recon_h = int(40 * s)
+            self._recon_rect = pg.Rect(x, y, w, recon_h)
+            btn_w = int(86 * s)
+            self._recon_button_rect = pg.Rect(
+                self._recon_rect.right - int(11 * s) - btn_w,
+                y + (recon_h - int(26 * s)) // 2, btn_w, int(26 * s))
+            y += recon_h + gap
+        else:
+            self._recon_rect = pg.Rect(0, 0, 0, 0)
+            self._recon_button_rect = pg.Rect(0, 0, 0, 0)
+
+        self._nick_label_y = y
+        self._input_rect = pg.Rect(x, y + label_h + label_gap, w, int(42 * s))
+        y = self._input_rect.bottom + gap
+
+        seg_h = int(44 * s)
+        self._mode_label_pos = (x, y)
+        self._mode_rect = pg.Rect(x, y + label_h + label_gap, w, seg_h)
+        y = self._mode_rect.bottom + gap
+
+        col_gap = int(12 * s)
+        col_w = (w - col_gap) // 2
+        self._time_label_pos = (x, y)
+        self._incr_label_pos = (x + col_w + col_gap, y)
+        chips_y = y + label_h + label_gap
+        self._time_rect = pg.Rect(x, chips_y, col_w, int(34 * s))
+        self._incr_rect = pg.Rect(x + col_w + col_gap, chips_y, col_w, int(34 * s))
+        y = self._time_rect.bottom + gap
+
+        self._side_label_pos = (x, y)
+        self._side_rect = pg.Rect(x, y + label_h + label_gap, w, seg_h)
+        y = self._side_rect.bottom + gap
+
+        self._start_rect = pg.Rect(x, y, w, int(48 * s))
+        y = self._start_rect.bottom + gap
+
+        ghost_h = int(40 * s)
+        ghost_w = (w - col_gap) // 2
+        self._history_rect = pg.Rect(x, y, ghost_w, ghost_h)
+        self._fen_rect = pg.Rect(x + ghost_w + col_gap, y, w - ghost_w - col_gap, ghost_h)
+        return self._fen_rect.bottom
+
+    def _build_footer(self):
+        win_w, win_h = self.window.get_size()
+        font = get_font(max(int(win_h / 64), 9))
+        prefix = footer_prefix_text()
+        self._footer_prefix_surf = font.render(prefix, True, Colors.footer_text)
+        self._footer_link_surf = font.render(FOOTER_LINK_TEXT, True, Colors.footer_link)
+        self._footer_link_mask_surf = font.render(FOOTER_LINK_TEXT, True, Colors.white)
+        prefix_w = self._footer_prefix_surf.get_width()
+        link_w, link_h = self._footer_link_surf.get_size()
+        fx = (win_w - prefix_w - link_w) // 2
+        fy = win_h - FOOTER_MARGIN_PX - link_h
+        self._footer_prefix_pos = (fx, fy)
+        self._footer_link_rect = pg.Rect(fx + prefix_w, fy, link_w, link_h)
+        self._footer_link_hitbox = self._footer_link_rect.inflate(
+            FOOTER_LINK_HITBOX_PAD_PX * 2, FOOTER_LINK_HITBOX_PAD_PX * 2)
+        self._footer_underline_y = fy + link_h - 1
+        band_w = max(int(link_w * 0.5), 12)
+        band = pg.Surface((band_w, link_h), pg.SRCALPHA)
+        half = band_w / 2
+        for col in range(band_w):
+            alpha = int(FOOTER_SHINE_MAX_ALPHA * (1 - abs(col - half) / half))
+            pg.draw.line(band, (255, 255, 255, alpha), (col, 0), (col, link_h))
+        self._footer_shine_band = band
+        self._footer_shine_w = band_w
+
+    def _brand_tile(self):
+        size = self._tile_rect.size
+        if self._tile_cache is not None and self._tile_cache[0] == size:
+            return self._tile_cache[1]
+        if self._brand_mark is not None:
+            tile = pg.transform.smoothscale(self._brand_mark, size).convert_alpha()
+        else:
+            tile = rounded_rect_surface(size, 14, Colors.accent)
+        mask = supersample(size, lambda s, k: pg.draw.rect(
+            s, (255, 255, 255, 255), s.get_rect(), border_radius=int(14 * k)))
+        tile.blit(mask, (0, 0), special_flags=pg.BLEND_RGBA_MULT)
+        self._tile_cache = (size, tile)
+        return tile
+
+    def _start_surfaces(self):
+        size = self._start_rect.size
+        if self._start_cache is not None and self._start_cache[0] == size:
+            return self._start_cache[1:]
+
+        def render(surf, k):
+            wpx, hpx = surf.get_size()
+            top, bot = pg.Color(Colors.accent_hi), pg.Color(Colors.accent)
+            for yy in range(hpx):
+                surf.fill(top.lerp(bot, yy / max(hpx - 1, 1)), pg.Rect(0, yy, wpx, 1))
+            mask = pg.Surface((wpx, hpx), pg.SRCALPHA)
+            pg.draw.rect(mask, (255, 255, 255, 255), mask.get_rect(),
+                         border_radius=int(11 * k))
+            surf.blit(mask, (0, 0), special_flags=pg.BLEND_RGBA_MULT)
+
+        base = supersample(size, render)
+        glow = rounded_rect_surface(size, 11, (255, 255, 255, 30))
+        press = rounded_rect_surface(size, 11, (0, 0, 0, 50))
+        self._start_cache = (size, base, glow, press)
+        return base, glow, press
+
+    def _draw_start(self):
+        base, glow, press = self._start_surfaces()
+        hovered = self._start_rect.collidepoint(pg.mouse.get_pos())
+        pressed = hovered and pg.mouse.get_pressed()[0]
+        dy = 1 if pressed else 0
+        pos = (self._start_rect.x, self._start_rect.y + dy)
+        self.window.blit(base, pos)
+        if pressed:
+            self.window.blit(press, pos)
+        elif hovered:
+            self.window.blit(glow, pos)
+        label = self.start_font.render("START", True, Colors.on_accent)
+        self.window.blit(label, (self._start_rect.centerx - label.get_width() // 2,
+                                 self._start_rect.centery + dy - label.get_height() // 2))
 
     def draw(self):
         if not self.visible:
-            self._section_rects_by_key = {k: {} for k in self._section_rects_by_key}
+            self._mode_rects = self._time_rects = self._incr_rects = self._side_rects = {}
             return
+        r = self._outer
+        self.window.blit(rounded_rect_surface(r.size, 18, Colors.surface,
+                                              border=Colors.border_strong, border_width=1),
+                         r.topleft)
+        gear = self._gear_rect
+        gear_hover = gear.collidepoint(pg.mouse.get_pos())
+        self.window.blit(rounded_rect_surface(
+            gear.size, max(int(9 * self._scale), 5),
+            Colors.button_hover if gear_hover else Colors.surface_inset,
+            border=Colors.button_border, border_width=1), gear.topleft)
+        draw_gear(self.window, gear.inflate(-int(gear.width * 0.44),
+                                            -int(gear.height * 0.44)))
 
-        pg.draw.rect(self.window, Colors.light_grey_menu, self._outer, border_radius=8)
-        pg.draw.rect(self.window, Colors.button_border, self._outer, 2, border_radius=8)
+        self.window.blit(self._brand_tile(), self._tile_rect.topleft)
+        top_surf = self.wordmark_font.render(WORDMARK_TOP, True, Colors.white)
+        self.window.blit(top_surf, (self._wordmark_top[0] - top_surf.get_width() // 2,
+                                    self._wordmark_top[1]))
+        bot_surf = self.wordmark_font.render(WORDMARK_BOTTOM, True, Colors.accent)
+        self.window.blit(bot_surf, (self._wordmark_bottom[0] - bot_surf.get_width() // 2,
+                                    self._wordmark_bottom[1]))
+        tag_surf = self.tagline_font.render(TAGLINE, True, Colors.text_mute)
+        self.window.blit(tag_surf, (self._tagline_pos[0] - tag_surf.get_width() // 2,
+                                    self._tagline_pos[1]))
 
-        title_surf = self.title_font.render(self.title, True, Colors.white)
-        title_x = self._title_pos[0] - title_surf.get_width() / 2
-        self.window.blit(title_surf, (title_x, self._title_pos[1]))
+        if self.reconnect_available:
+            self._draw_recon()
 
-        draw_icon_button(self.window, self._gear_rect, draw_gear)
-
+        self._draw_label("NICKNAME", (self._input_rect.x, self._nick_label_y))
         self.text_input.set_rect(self._input_rect)
         self.text_input.draw()
 
-        for i, (label, attr, options) in enumerate(SECTIONS):
-            self._draw_section(
-                i, label, options, getattr(self, attr), attr,
-            )
+        self._draw_label("MODE", self._mode_label_pos)
+        self._mode_rects = draw_segmented(self.window, self._mode_rect, MODE_OPTIONS,
+                                          self.selected_mode, self.seg_font)
 
-        draw_button(self.window, self._load_pgn_rect, "History", self.start_font,
-                    disabled=not self.load_pgn_available)
-        draw_button(self.window, self._fen_rect, "From FEN", self.start_font,
-                    disabled=self.selected_mode == "online")
-        if self.reconnect_available:
-            draw_button(self.window, self._reconnect_rect, "Reconnect", self.start_font)
-        draw_button(self.window, self._start_rect, self.start_button_label, self.start_font)
+        self._draw_label("TIME", self._time_label_pos)
+        self._draw_label("INCREMENT", self._incr_label_pos)
+        self._time_rects = draw_chip_row(self.window, self._time_rect, self._time_options(),
+                                         self.selected_time_minutes, self.chip_font)
+        self._incr_rects = draw_chip_row(self.window, self._incr_rect, INCREMENT_OPTIONS,
+                                         self.selected_increment_seconds, self.chip_font,
+                                         locked=self.selected_time_minutes is None)
+
+        self._draw_label("YOUR SIDE", self._side_label_pos)
+        self._draw_side()
+
+        self._draw_start()
+        self._draw_ghost(self._history_rect, "🕑", "History",
+                         disabled=not self.load_pgn_available)
+        self._draw_ghost(self._fen_rect, "📋", "Paste FEN",
+                         disabled=self.selected_mode == "online")
 
         self._draw_footer()
+
+    def _time_options(self):
+        page = TIME_PAGES[self._time_page]
+        if self._time_page == 0:
+            return page + [("→", "__next__")]
+        return page + [("←", "__prev__")]
+
+    def _draw_label(self, text, pos):
+        self.window.blit(self.label_font.render(text, True, Colors.text_mute), pos)
+
+    def _draw_recon(self):
+        fill = pg.Color(Colors.amber).lerp(pg.Color(Colors.surface_inset), 0.84)
+        border = pg.Color(Colors.amber).lerp(pg.Color(Colors.surface_inset), 0.55)
+        self.window.blit(rounded_rect_surface(self._recon_rect.size, 9, fill,
+                                              border=border, border_width=1),
+                         self._recon_rect.topleft)
+        dot_r = max(int(4 * self._scale), 3)
+        pg.draw.circle(self.window, Colors.amber,
+                       (self._recon_rect.x + int(14 * self._scale), self._recon_rect.centery),
+                       dot_r)
+        text = self.recon_font.render("You have a game in progress", True, Colors.white)
+        self.window.blit(text, (self._recon_rect.x + int(26 * self._scale),
+                                self._recon_rect.centery - text.get_height() // 2))
+        self.window.blit(rounded_rect_surface(self._recon_button_rect.size, 6, Colors.surface,
+                                              border=Colors.amber, border_width=1),
+                         self._recon_button_rect.topleft)
+        label = self.recon_font.render("Reconnect", True, Colors.amber_hi)
+        self.window.blit(label, (self._recon_button_rect.centerx - label.get_width() // 2,
+                                 self._recon_button_rect.centery - label.get_height() // 2))
+
+    def _draw_side(self):
+        self.window.blit(rounded_rect_surface(self._side_rect.size, 9, Colors.surface_inset,
+                                              border=Colors.button_border, border_width=1),
+                         self._side_rect.topleft)
+        pad = max(int(4 * self._scale), 2)
+        inner = self._side_rect.inflate(-2 * pad, -2 * pad)
+        seg_gap = max(int(5 * self._scale), 2)
+        cell_w = (inner.width - seg_gap * 2) / 3
+        self._side_rects = {}
+        for i, (label, key) in enumerate(SIDE_OPTIONS):
+            cr = pg.Rect(round(inner.x + i * (cell_w + seg_gap)), inner.y,
+                         round(cell_w), inner.height)
+            color = Colors.text_dim
+            if key == self.selected_side:
+                self.window.blit(rounded_rect_surface(cr.size, 6, Colors.button_pressed,
+                                                      border=Colors.accent, border_width=1),
+                                 cr.topleft)
+                color = Colors.white
+            elif cr.collidepoint(pg.mouse.get_pos()):
+                color = Colors.white
+            self._draw_side_cell(cr, label, key, color)
+            self._side_rects[key] = cr
+
+    def _draw_side_cell(self, cr, label, key, color):
+        icon_size = int(cr.height * (0.66 if key == "random" else 0.95))
+        text = self.seg_font.render(label, True, color)
+        total_w = icon_size + max(int(5 * self._scale), 3) + text.get_width()
+        ix = cr.centerx - total_w // 2
+        iy = cr.centery
+        if key == "random":
+            if not blit_emoji(self.window, "🎲", (ix + icon_size // 2, iy), icon_size):
+                pg.draw.rect(self.window, color,
+                             pg.Rect(ix, iy - icon_size // 2, icon_size, icon_size),
+                             1, border_radius=4)
+        else:
+            img = self._side_imgs.get(key)
+            if img is not None:
+                scaled = pg.transform.smoothscale(img, (icon_size, icon_size))
+                self.window.blit(scaled, (ix, iy - icon_size // 2))
+        self.window.blit(text, (ix + icon_size + max(int(5 * self._scale), 3),
+                                iy - text.get_height() // 2))
+
+    def _draw_ghost(self, rect, emoji, label, disabled):
+        hovered = rect.collidepoint(pg.mouse.get_pos()) and not disabled
+        bg = Colors.light_grey_menu if hovered else Colors.surface
+        text_color = Colors.footer_text if disabled else (
+            Colors.white if hovered else Colors.text_dim)
+        self.window.blit(rounded_rect_surface(rect.size, 8, bg,
+                                              border=Colors.button_border, border_width=1),
+                         rect.topleft)
+        text = self.button_font.render(label, True, text_color)
+        icon = emoji_surface(emoji, int(rect.height * 0.5))
+        igap = max(int(6 * self._scale), 3)
+        if icon is not None:
+            total = icon.get_width() + igap + text.get_width()
+            ix = rect.centerx - total // 2
+            self.window.blit(icon, (ix, rect.centery - icon.get_height() // 2))
+            self.window.blit(text, (ix + icon.get_width() + igap,
+                                    rect.centery - text.get_height() // 2))
+        else:
+            self.window.blit(text, (rect.centerx - text.get_width() // 2,
+                                    rect.centery - text.get_height() // 2))
 
     def _footer_link_hovered(self):
         return bool(self._footer_link_hitbox.collidepoint(pg.mouse.get_pos()))
@@ -338,62 +522,60 @@ class StartMenu:
         shine.blit(self._footer_link_mask_surf, (0, 0), special_flags=pg.BLEND_RGBA_MULT)
         self.window.blit(shine, self._footer_link_rect.topleft)
 
-    def _draw_section(self, idx, label, options, selected_key, attr):
-        label_surf = self.label_font.render(label, True, Colors.white)
-        x = self._section_selector_rects[idx].x
-        self.window.blit(label_surf, (x, self._section_label_ys[idx]))
-        rects = draw_selector(
-            self.window, self._section_selector_rects[idx], options,
-            self.button_font, gap=self.row_gap, selected_key=selected_key,
-        )
-        self._section_rects_by_key[attr] = rects
-
     def handle_click(self, pos):
         if not self.visible:
             return False
-
         if self._gear_rect.collidepoint(pos):
             if "options" in self.callbacks:
                 self.callbacks["options"]()
             return True
-
         if self._footer_link_hitbox.collidepoint(pos):
             if "open_url" in self.callbacks:
                 self.callbacks["open_url"](FOOTER_URL)
             return True
-
+        if self.reconnect_available and self._recon_button_rect.collidepoint(pos):
+            if "reconnect" in self.callbacks:
+                self.callbacks["reconnect"]()
+            return True
         if self._input_rect.collidepoint(pos):
             self.text_input.handle_click(pos)
             return True
         self.text_input.handle_click(pos)
-
-        for attr, rects in self._section_rects_by_key.items():
-            for key, br in rects.items():
+        for key, br in self._mode_rects.items():
+            if br.collidepoint(pos):
+                self.selected_mode = key
+                return True
+        for key, br in self._time_rects.items():
+            if br.collidepoint(pos):
+                if key == "__next__":
+                    self._time_page = 1
+                elif key == "__prev__":
+                    self._time_page = 0
+                else:
+                    self.selected_time_minutes = key
+                    if key is None:
+                        self.selected_increment_seconds = 0
+                return True
+        if self.selected_time_minutes is not None:
+            for key, br in self._incr_rects.items():
                 if br.collidepoint(pos):
-                    setattr(self, attr, key)
+                    self.selected_increment_seconds = key
                     return True
-
-        if self._load_pgn_rect.collidepoint(pos):
+        for key, br in self._side_rects.items():
+            if br.collidepoint(pos):
+                self.selected_side = key
+                return True
+        if self._history_rect.collidepoint(pos):
             if self.load_pgn_available and "load_pgn" in self.callbacks:
                 self.callbacks["load_pgn"]()
             return True
-
         if self._fen_rect.collidepoint(pos):
-            if self.selected_mode == "online":
-                return True
-            if "fen" in self.callbacks:
+            if self.selected_mode != "online" and "fen" in self.callbacks:
                 self.callbacks["fen"]()
             return True
-
-        if self.reconnect_available and self._reconnect_rect.collidepoint(pos):
-            if "reconnect" in self.callbacks:
-                self.callbacks["reconnect"]()
-            return True
-
         if self._start_rect.collidepoint(pos):
             self.callbacks["start_game"](self.build_config())
             return True
-
         return False
 
     def handle_key(self, event):
