@@ -20,7 +20,6 @@ from frontend.result_stats import compute_result_stats
 from frontend.menu_page import MenuPage, PAGE_CARD, PAGE_HISTORY
 from frontend.modals.confirm import ConfirmModal
 from frontend.modals.directory_browser import DirectoryBrowser
-from frontend.modals.file_picker import FilePicker
 from frontend.modals.history import HistoryView
 from frontend.modals.fen_input import FenInputModal
 from frontend.modals.options import (
@@ -260,7 +259,6 @@ class Frontend(OnlineEventsMixin):
             audio_panel=self.audio_panel,
             disabled_keys_provider=self._right_menu_disabled_keys)
         self.confirm_modal = ConfirmModal(self.window)
-        self.file_picker = FilePicker(self.window)
         self.history_view = HistoryView(self.window, on_open=self._load_pgn_from_path,
                                         on_back=self._on_menu_back)
         self.menu_page = MenuPage(self.window, self.start_menu, self.history_view)
@@ -1065,7 +1063,7 @@ class Frontend(OnlineEventsMixin):
 
     def _menu_overlay_active(self):
         return any(m.is_visible() for m in (
-            self.options_modal, self.directory_browser, self.file_picker,
+            self.options_modal, self.directory_browser,
             self.fen_input_modal, self.server_modal, self.wait_modal,
             self.reconnecting_modal, self.help_modal, self.confirm_modal,
         ))
@@ -1125,7 +1123,6 @@ class Frontend(OnlineEventsMixin):
             self.menu_page.draw_foreground()
         self.options_modal.draw()
         self.directory_browser.draw()
-        self.file_picker.draw()
         self.server_modal.draw()
         self.wait_modal.draw()
         self.reconnecting_modal.draw()
@@ -1401,13 +1398,13 @@ class Frontend(OnlineEventsMixin):
             start_height
         )
 
-        file_picker_width = min(window_width * 0.9, 1100)
-        file_picker_height = min(window_height * 0.85, 760)
-        file_picker_rect = pg.Rect(
-            window_width / 2 - file_picker_width / 2,
-            top + avail_height / 2 - file_picker_height / 2,
-            file_picker_width,
-            file_picker_height,
+        wide_overlay_width = min(window_width * 0.9, 1100)
+        wide_overlay_height = min(window_height * 0.85, 760)
+        wide_overlay_rect = pg.Rect(
+            window_width / 2 - wide_overlay_width / 2,
+            top + avail_height / 2 - wide_overlay_height / 2,
+            wide_overlay_width,
+            wide_overlay_height,
         )
 
         menu_modal_width = min(start_width, max(result_width, 360))
@@ -1454,7 +1451,6 @@ class Frontend(OnlineEventsMixin):
         self.server_modal.set_rect(flex_rect)
         self.wait_modal.set_rect(flex_rect)
         self.reconnecting_modal.set_rect(flex_rect)
-        self.file_picker.set_rect(file_picker_rect)
         self.menu_page.set_rect(pg.Rect(0, 0, window_width, window_height), top, start_rect)
         self.menu_battle.top_inset = top
         self.menu_battle.set_rect(pg.Rect(0, 0, window_width, window_height))
@@ -1468,7 +1464,7 @@ class Frontend(OnlineEventsMixin):
             top + avail_height / 2 - options_height / 2,
             options_width, options_height,
         ))
-        self.directory_browser.set_rect(file_picker_rect)
+        self.directory_browser.set_rect(wide_overlay_rect)
         self._last_layout_mode = self.mode
         self.right_menu.set_rect(menu_rect)
         self.player_strip_top.set_rect(top_strip_rect)
@@ -1524,9 +1520,6 @@ class Frontend(OnlineEventsMixin):
         if self.fen_input_modal.is_visible():
             self.fen_input_modal.handle_click(pos)
             return
-        if self.file_picker.is_visible():
-            self.file_picker.handle_click(pos)
-            return
         if self.server_modal.handle_click(pos):
             return
         if self.server_modal.is_visible():
@@ -1573,7 +1566,7 @@ class Frontend(OnlineEventsMixin):
             return True
         if self._handle_promotion_key(event):
             return True
-        if self.confirm_modal.is_visible() or self.file_picker.is_visible():
+        if self.confirm_modal.is_visible():
             return False
         if getattr(event, "unicode", "") == "?":
             self.help_modal.show()
@@ -1638,7 +1631,6 @@ class Frontend(OnlineEventsMixin):
                 and pos[1] >= self.chrome.HEIGHT
                 and self.current_result() is None
                 and self.board.pending_promotion_square is None
-                and not self.file_picker.is_visible()
                 and not self.confirm_modal.is_visible()):
             self.board.begin_press(pos)
 
@@ -1663,8 +1655,6 @@ class Frontend(OnlineEventsMixin):
                     continue
                 if self.options_modal.is_visible():
                     self.options_modal.handle_key(event)
-                    continue
-                if self.file_picker.is_visible():
                     continue
                 if self.server_modal.is_visible() and self.server_modal.handle_key(event):
                     continue
@@ -1707,8 +1697,6 @@ class Frontend(OnlineEventsMixin):
                     self.options_modal.handle_scroll(pg.mouse.get_pos(), event.y)
                 elif self.help_modal.is_visible():
                     self.help_modal.handle_scroll(pg.mouse.get_pos(), event.y)
-                elif self.file_picker.is_visible():
-                    self.file_picker.handle_scroll(pg.mouse.get_pos(), event.y)
                 elif self.mode == "menu":
                     self.menu_page.handle_scroll(pg.mouse.get_pos(), event.y)
                 else:

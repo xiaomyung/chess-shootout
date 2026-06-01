@@ -13,7 +13,7 @@ from frontend.audio.sound_manager import SoundManager
 from frontend.board import Board, DRAG_THRESHOLD_PX
 from frontend.modals.base import BaseModal
 from frontend.modals.confirm import ConfirmModal
-from frontend.modals.file_picker import FilePicker
+from frontend.modals.history import HistoryView
 from frontend.modals.help import HelpModal
 from frontend.modals.result import ResultMenu
 from frontend.modals.server import ServerAddressModal
@@ -35,7 +35,7 @@ from frontend.visual.widgets import draw_button, draw_button_row
 
 
 @pytest.mark.parametrize("symbol", [
-    SoundManager, Board, BaseModal, ConfirmModal, FilePicker, HelpModal,
+    SoundManager, Board, BaseModal, ConfirmModal, HistoryView, HelpModal,
     ResultMenu, ServerAddressModal, StartMenu, WaitModal, OnlineClient,
     AudioPanel, BasePanel, PlayerStrip, RightMenu, PieceAnimation, Colors,
     TextInput, Toast,
