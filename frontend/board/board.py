@@ -5,9 +5,11 @@ import pygame as pg
 
 from backend.pseudo_legal import piece_can_pseudo_reach
 from backend.utils import Square
+from frontend import env
 from frontend.visual.animation import PieceAnimation
 from frontend.visual.colors import Colors
 from frontend.visual.draw import supersample
+from frontend.visual.effects import EffectManager
 from frontend.premoves import Premove, speculative_board
 from backend.pieces import PieceType, PieceColor, Piece
 from frontend.visual.fonts import get_font, DISPLAY
@@ -34,10 +36,11 @@ class Board:
     GRID_RADIUS = 4
 
     def __init__(self, window, match, move_landed_callback=None,
-                 on_premove_queued=None):
+                 on_premove_queued=None, shot_callback=None):
         self.window = window
         self.match = match
         self.move_landed_callback = move_landed_callback
+        self.shot_callback = shot_callback
         self.on_premove_queued = on_premove_queued
         self.font = get_font(18, bold=True)
         self.board_guides_font_factor = 50
@@ -62,6 +65,8 @@ class Board:
         self.pending_promotion_square = None
         self.flipped = False
         self.animations = []
+        self.effects = EffectManager()
+        self.effects.geom = lambda sq: self._cell_rect(sq.row, sq.col).center
         self.animation_duration_ms = 180
         self.last_animation_completed_at_ms = 0
         self.premoves = []
@@ -222,6 +227,8 @@ class Board:
                                      gutter_cy - label.get_height() // 2))
 
     def draw_board(self):
+        now = pg.time.get_ticks()
+        self.effects.update(now)
         if self._frame_surf is not None:
             self.window.blit(self._frame_surf, self.rect.topleft)
         for row, col in product(range(self.SIZE), repeat=2):
@@ -241,9 +248,11 @@ class Board:
         self._draw_horizontal_guides()
         self._draw_selection_highlight()
         self._draw_move_indicators()
+        self.effects.draw_holes(self.window, now)
         self.draw_pieces()
         self._draw_front_markers()
         self._draw_animations()
+        self.effects.draw_over(self.window, now)
         self._draw_dragged_piece()
         self._draw_arrows()
         self._draw_promotion_picker()
@@ -488,6 +497,7 @@ class Board:
             return
 
         hidden = {a.to_sq for a in self.animations}
+        hidden |= self.effects.held_squares()
         if self.dragging_from is not None:
             hidden.add(self.dragging_from)
         for row, col in product(range(self.SIZE), repeat=2):
@@ -544,6 +554,7 @@ class Board:
 
     def jump_to_review_ply(self, ply):
         self.cancel_animations()
+        self.effects.clear()
         self._target_ply = None
         history_len = len(self.match.move_history)
         if ply is None or ply >= history_len:
@@ -935,6 +946,7 @@ class Board:
         self.review_ply = None
         self._target_ply = None
         self.cancel_animations()
+        self.effects.cut()
         self.clear_annotations()
         entry = self.match.move_history[-1]
         moving_piece = entry.move.piece
@@ -944,6 +956,10 @@ class Board:
             if promotion_required
             else self._fire_move_landed
         )
+
+        if entry.move.captured is not None and self._capture_choreography(
+                entry, from_sq, to_sq, moving_piece, on_complete):
+            return
 
         if self.dragging_from is not None:
             if entry.move.is_castle:
@@ -994,6 +1010,31 @@ class Board:
         if entry.position_key_added is None:
             return
         self.move_landed_callback(entry)
+
+    def _capture_choreography(self, entry, from_sq, to_sq, moving_piece, on_complete):
+        captured = entry.move.captured
+        attacker = self.piece_images_scaled.get((moving_piece.type, moving_piece.color))
+        victim = self.piece_images_scaled.get((captured.type, captured.color))
+        if attacker is None or victim is None or self.cell_size <= 0:
+            if self.shot_callback is not None:
+                self.shot_callback(entry)
+            return False
+        self.effects.configure(env.get_reduce_motion(), env.get_effect_intensity())
+        victim_sq = (Square(from_sq.row, to_sq.col)
+                     if entry.move.is_en_passant else to_sq)
+        self.dragging_from = None
+        self._drag_cursor = None
+        shot = (lambda: self.shot_callback(entry)) if self.shot_callback is not None else None
+        self.effects.capture(
+            now_ms=pg.time.get_ticks(),
+            attacker_type=moving_piece.type.value,
+            attacker_surface=attacker, victim_surface=victim,
+            from_sq=from_sq, victim_sq=victim_sq, to_sq=to_sq,
+            cell_size=self.cell_size, on_fire=shot,
+            on_slide=lambda: self.start_animation(
+                from_sq, to_sq, moving_piece, on_complete=on_complete),
+        )
+        return True
 
     def _try_select(self, square):
         piece = self.match.piece_at(square)

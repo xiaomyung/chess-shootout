@@ -1,4 +1,3 @@
-import json
 import math
 import os
 import random
@@ -6,6 +5,7 @@ import random
 import pygame as pg
 
 import paths
+from frontend.visual import gunfx
 from frontend.visual.colors import Colors
 from frontend.visual.fonts import get_font
 
@@ -21,29 +21,10 @@ RAGDOLL_MS = 900
 IDLE_TIMEOUT_MS = 2000
 IDLE_RADIUS = 24
 FLASH_MS = 120
-GUN_LEN_RATIO = 0.62
-GUN_SCALE = {"revolver": 0.363, "ray_gun": 0.33, "hand_cannon": 0.50}
-GUN_RECOIL = {"revolver": 4, "ray_gun": 4, "lever_action": 7,
-              "hand_cannon": 9, "shotgun": 10, "blunderbuss": 12}
-RECOIL_DEFAULT = 5
 RECOIL_RECOVER = 12.0
 AIM_TOLERANCE = 0.12
 MISS_CHANCE = 0.20
 PROJECTILE_MAX_MS = 1600
-PROJECTILES = {
-    "revolver": {"style": "bullet", "speed": 1066, "size": 5, "len": 12, "pellets": 1,
-                 "spread": 0.0, "color": Colors.amber_hi},
-    "lever_action": {"style": "bullet", "speed": 1170, "size": 5, "len": 17, "pellets": 1,
-                     "spread": 0.0, "color": Colors.amber_hi},
-    "hand_cannon": {"style": "slug", "speed": 780, "size": 9, "len": 13, "pellets": 1,
-                    "spread": 0.0, "color": Colors.amber},
-    "shotgun": {"style": "pellet", "speed": 936, "size": 4, "len": 8, "pellets": 6,
-                "spread": 0.16, "color": Colors.amber_hi},
-    "blunderbuss": {"style": "pellet", "speed": 728, "size": 4, "len": 7, "pellets": 8,
-                    "spread": 0.26, "color": Colors.amber_hi},
-    "ray_gun": {"style": "bolt", "speed": 1300, "size": 6, "len": 28, "pellets": 1,
-                "spread": 0.0, "color": Colors.accent},
-}
 PAWN_WEAPON = "revolver"
 QUEEN_WEAPON = "blunderbuss"
 WEAPON_SWITCH_MIN = 3.0
@@ -116,35 +97,8 @@ class MenuBattle:
         except (pg.error, FileNotFoundError, OSError):
             return None
 
-    def _load_png(self, *parts):
-        try:
-            return pg.image.load(str(paths.resource_path("assets", "battle_png", *parts))) \
-                .convert_alpha()
-        except (pg.error, FileNotFoundError, OSError):
-            return None
-
     def _load_battle(self):
-        data = {"guns": {}, "flashes": {}}
-        try:
-            manifest = paths.resource_path("assets", "battle_png", "battle_manifest.json")
-            with open(manifest) as fh:
-                man = json.load(fh)
-        except (OSError, ValueError):
-            return data
-        for gun, gm in man.get("guns", {}).items():
-            img = self._load_png("guns", f"{gun}.png")
-            if img is not None:
-                data["guns"][gun] = {"img": img, "ax": gm["ax"], "ay": gm["ay"],
-                                     "gx": gm["gx"], "gy": gm["gy"]}
-        for gun, variants in man.get("flashes", {}).items():
-            flashes = []
-            for i, fm in enumerate(variants):
-                img = self._load_png("flashes", f"flashes_{gun}", f"flash_{i + 1}.png")
-                if img is not None:
-                    flashes.append({"img": img, "ax": fm["ax"], "ay": fm["ay"]})
-            if flashes:
-                data["flashes"][gun] = flashes
-        return data
+        return gunfx.load_battle_art()
 
     def _rnd(self, lo, hi):
         return lo + self.rng.random() * (hi - lo)
@@ -188,7 +142,7 @@ class MenuBattle:
         base = QUEEN_BASE_H if kind == "queen" else PAWN_BASE_H
         sprite_h = art["h"] if art else int(base * self.scale)
         ent["sprite_h"] = sprite_h
-        ent["gun_len"] = sprite_h * GUN_LEN_RATIO
+        ent["gun_len"] = sprite_h * gunfx.GUN_LEN_RATIO
         if kind == "queen":
             ent["gy"] = sprite_h * 0.46
             ent["head"] = sprite_h + 12 * self.scale
@@ -223,30 +177,14 @@ class MenuBattle:
 
     def _build_weapons(self):
         self._weapons = {}
-        reach = QUEEN_BASE_H * GUN_LEN_RATIO * self.scale
+        reach = QUEEN_BASE_H * gunfx.GUN_LEN_RATIO * self.scale
         for kind, guns in (("queen", sorted(self._battle["guns"])), ("pawn", (PAWN_WEAPON,))):
             built = {}
             for gun in guns:
-                g = self._battle["guns"].get(gun)
-                if g is None:
-                    continue
-                gbdist = math.hypot(g["ax"] - g["gx"], g["ay"] - g["gy"]) or 1.0
-                f = reach / gbdist * GUN_SCALE.get(gun, 1.0)
-                built[gun] = {
-                    "gun": self._scale_by(g["img"], f),
-                    "grip": (g["gx"] * f, g["gy"] * f),
-                    "barrel": (g["ax"] * f, g["ay"] * f),
-                    "flashes": [{"img": self._scale_by(fl["img"], f),
-                                 "anchor": (fl["ax"] * f, fl["ay"] * f)}
-                                for fl in self._battle["flashes"].get(gun, [])],
-                }
+                entry = gunfx.build_weapon(self._battle, gun, reach)
+                if entry is not None:
+                    built[gun] = entry
             self._weapons[kind] = built
-
-    @staticmethod
-    def _scale_by(img, f):
-        w = max(int(img.get_width() * f), 1)
-        h = max(int(img.get_height() * f), 1)
-        return pg.transform.smoothscale(img, (w, h))
 
     def _entity_art(self, kind):
         return self._art.get(kind)
@@ -677,14 +615,14 @@ class MenuBattle:
             q["anchor_x"], q["anchor_y"], q["anchor_ms"] = q["x"], q["y"], now_ms
 
     def _fire(self, shooter, target, is_queen, now_ms):
-        shooter["recoil"] = GUN_RECOIL.get(shooter.get("weapon"), RECOIL_DEFAULT) * self.scale
+        shooter["recoil"] = gunfx.gun_spec(shooter.get("weapon")).recoil * self.scale
         ax, ay = self._muzzle_point(shooter)
         self._add_flash(shooter, ax, ay, now_ms)
         hit = self.rng.random() >= MISS_CHANCE
         self._spawn_projectiles(shooter, target, is_queen, ax, ay, hit, now_ms)
 
     def _spawn_projectiles(self, shooter, target, is_queen, mx, my, hit, now_ms):
-        cfg = PROJECTILES.get(shooter.get("weapon"), PROJECTILES["revolver"])
+        spec = gunfx.gun_spec(shooter.get("weapon"))
         bx, by = self._body_point(target)
         if hit:
             ax, ay = bx, by
@@ -692,15 +630,15 @@ class MenuBattle:
             ax = bx + math.cos(shooter["aim"]) * 70
             ay = by - self._rnd(45, 90)
         base = math.atan2(ay - my, ax - mx)
-        speed = cfg["speed"] * self.scale
+        speed = spec.speed * self.scale
         shot = {"hit": hit, "is_queen": is_queen, "target": target, "resolved": False}
-        for i in range(cfg["pellets"]):
-            ang = base if i == 0 else base + self._rnd(-cfg["spread"], cfg["spread"])
+        for i in range(spec.pellets):
+            ang = base if i == 0 else base + self._rnd(-spec.spread, spec.spread)
             sp = speed if i == 0 else speed * self._rnd(0.85, 1.1)
             self.projectiles.append({
                 "x": mx, "y": my, "vx": math.cos(ang) * sp, "vy": math.sin(ang) * sp,
-                "style": cfg["style"], "size": cfg["size"] * self.scale,
-                "len": cfg["len"] * self.scale, "color": cfg["color"],
+                "style": spec.style, "size": spec.size * self.scale,
+                "len": spec.length * self.scale, "color": spec.color,
                 "shot": shot, "born": now_ms, "max_ms": PROJECTILE_MAX_MS})
 
     def _kill_pawn(self, p, now_ms):
@@ -816,8 +754,7 @@ class MenuBattle:
 
     @staticmethod
     def _smoothstep(x):
-        x = max(0.0, min(1.0, x))
-        return x * x * (3 - 2 * x)
+        return gunfx.smoothstep(x)
 
     def draw_intro_overlay(self, window):
         if not self._intro_active or self.queen is None:
@@ -929,16 +866,8 @@ class MenuBattle:
 
     def _draw_gun_flourish(self, window, entry, screen_pivot, aim, draw, total, spins, grow):
         p = 1.0 - draw / total
-        gscale = self._smoothstep(p) if grow else 1.0
-        if gscale <= 0.02:
-            return
-        img = entry["gun"]
-        img = pg.transform.smoothscale(
-            img, (max(int(img.get_width() * gscale), 1), max(int(img.get_height() * gscale), 1)))
-        grip = (entry["grip"][0] * gscale, entry["grip"][1] * gscale)
-        img, pivot_img, _, angle_deg = self._aimed(img, grip, None, aim)
-        spin = spins * 360.0 * (1.0 - p)
-        self._blit_rotated(window, img, pivot_img, screen_pivot, angle_deg - spin)
+        gunfx.draw_flourish(window, entry["gun"], entry["grip"], screen_pivot, aim, p,
+                            spins, grow)
 
     def _draw_drop(self, window, drop, now):
         prog = (now - drop["start"]) / drop["dur"]
@@ -950,33 +879,16 @@ class MenuBattle:
         window.blit(img, img.get_rect(center=(ox + drop["x"], oy + drop["y"])))
 
     def _aimed(self, image, pivot_img, target_img, aim):
-        w = image.get_width()
-        if math.cos(aim) < 0:
-            image = pg.transform.flip(image, True, False)
-            pivot_img = (w - pivot_img[0], pivot_img[1])
-            if target_img is not None:
-                target_img = (w - target_img[0], target_img[1])
-            angle_deg = math.degrees(math.pi - aim)
-        else:
-            angle_deg = -math.degrees(aim)
-        return image, pivot_img, target_img, angle_deg
+        return gunfx.aimed(image, pivot_img, target_img, aim)
 
     def _blit_aimed(self, window, image, pivot_img, screen_pivot, aim):
-        image, pivot_img, _, angle_deg = self._aimed(image, pivot_img, None, aim)
-        self._blit_rotated(window, image, pivot_img, screen_pivot, angle_deg)
+        gunfx.blit_aimed(window, image, pivot_img, screen_pivot, aim)
 
     def _aimed_target(self, image, pivot_img, target_img, screen_pivot, aim):
-        _, pivot_img, target_img, angle_deg = self._aimed(image, pivot_img, target_img, aim)
-        vec = pg.math.Vector2(target_img[0] - pivot_img[0],
-                              target_img[1] - pivot_img[1]).rotate(-angle_deg)
-        return screen_pivot[0] + vec.x, screen_pivot[1] + vec.y
+        return gunfx.aimed_target(image, pivot_img, target_img, screen_pivot, aim)
 
     def _blit_rotated(self, window, image, pivot_img, screen_pivot, angle_deg):
-        w, h = image.get_size()
-        rotated = pg.transform.rotate(image, angle_deg)
-        offset = pg.math.Vector2(pivot_img[0] - w / 2, pivot_img[1] - h / 2).rotate(-angle_deg)
-        center = (screen_pivot[0] - offset.x, screen_pivot[1] - offset.y)
-        window.blit(rotated, rotated.get_rect(center=center))
+        gunfx.blit_rotated(window, image, pivot_img, screen_pivot, angle_deg)
 
     def _draw_particle(self, window, p, now):
         ox, oy = self.rect.topleft
@@ -1020,13 +932,8 @@ class MenuBattle:
         if entry is None or p["idx"] >= len(entry["flashes"]):
             return
         fl = entry["flashes"][p["idx"]]
-        img = fl["img"]
-        alpha = int(255 * (1 - prog) ** 0.6)
-        if alpha < 255:
-            img = img.copy()
-            img.set_alpha(max(0, alpha))
         m = (self.rect.x + p["x"], self.rect.y + p["y"])
-        self._blit_aimed(window, img, fl["anchor"], m, p["aim"])
+        gunfx.draw_flash(window, fl["img"], fl["anchor"], m, p["aim"], prog)
 
     def _draw_hitmark(self, window, x, y, prog):
         alpha = int(255 * (1 - prog))

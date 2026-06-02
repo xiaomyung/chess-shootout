@@ -233,7 +233,8 @@ class Frontend(OnlineEventsMixin):
         self.sound_manager = SoundManager(SOUNDS_DIR, enabled=pg.mixer.get_init() is not None)
         self.board = Board(self.window, self.match,
                            move_landed_callback=self._on_move_landed,
-                           on_premove_queued=self.sound_manager.play_premove_queued)
+                           on_premove_queued=self.sound_manager.play_premove_queued,
+                           shot_callback=self._on_shot_fired)
         self.result_menu = ResultMenu(self.window, {
             "new_game": self._on_new_game,
             "open_pgn": self._on_open_pgn,
@@ -1114,11 +1115,12 @@ class Frontend(OnlineEventsMixin):
             self.sound_manager.play_castle()
         else:
             self.sound_manager.play_move()
-        if entry.move.captured is not None:
-            self.sound_manager.play_capture(entry.move.piece.type)
         if entry.gives_check and not entry.gives_checkmate:
             self.sound_manager.play_check()
         self._maybe_flash_increment_for(entry.move.piece.color)
+
+    def _on_shot_fired(self, entry):
+        self.sound_manager.play_capture(entry.move.piece.type)
 
     def _maybe_flash_increment_for(self, mover_color):
         clock = self.match.clock

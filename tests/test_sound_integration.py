@@ -148,8 +148,14 @@ def test_takeback_applied_with_empty_history_does_not_play_undo():
 
 
 def fire_animation(app):
-    app.board.animations[0].start_ms = pg.time.get_ticks() - 10_000
-    app.board._draw_animations()
+    em = app.board.effects
+    for c in list(em.captures):
+        c["fire_at"] = 0
+        c["impact_at"] = 0
+    em.update(pg.time.get_ticks())
+    if app.board.animations:
+        app.board.animations[0].start_ms = pg.time.get_ticks() - 10_000
+        app.board._draw_animations()
 
 
 def setup_position(app, piece_map, turn=PieceColor.WHITE):
