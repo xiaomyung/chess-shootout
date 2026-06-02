@@ -1031,28 +1031,26 @@ class Board:
         attacker = self.piece_images_scaled.get((moving_piece.type, moving_piece.color))
         victim = self.piece_images_scaled.get((captured.type, captured.color))
         if attacker is None or victim is None or self.cell_size <= 0:
-            self._on_capture_impact(color, victim_sq)
-            if self.shot_callback is not None:
-                self.shot_callback(entry)
+            self._on_capture_fire(entry, color, victim_sq)
             return False
         self.dragging_from = None
         self._drag_cursor = None
-        shot = (lambda: self.shot_callback(entry)) if self.shot_callback is not None else None
         self.effects.capture(
             now_ms=pg.time.get_ticks(),
             attacker_type=moving_piece.type.value,
             attacker_surface=attacker, victim_surface=victim,
             from_sq=from_sq, victim_sq=victim_sq, to_sq=to_sq,
             cell_size=self.cell_size, power=self._capture_power(captured.type),
-            on_fire=shot,
-            on_slide=lambda: (self._on_capture_impact(color, victim_sq),
-                              self.start_animation(from_sq, to_sq, moving_piece,
-                                                   on_complete=on_complete)),
+            on_fire=lambda: self._on_capture_fire(entry, color, victim_sq),
+            on_slide=lambda: self.start_animation(from_sq, to_sq, moving_piece,
+                                                  on_complete=on_complete),
         )
         return True
 
-    def _on_capture_impact(self, color, victim_sq):
+    def _on_capture_fire(self, entry, color, victim_sq):
         self.effects.register_kill(color, victim_sq, self.cell_size, pg.time.get_ticks())
+        if self.shot_callback is not None:
+            self.shot_callback(entry)
 
     @staticmethod
     def _capture_power(victim_type):

@@ -551,7 +551,7 @@ def test_show_check_gun_noop_in_review_mode(monkeypatch):
     assert board.effects._check_gun is None
 
 
-def test_kill_callout_fires_at_impact_not_at_move_start(monkeypatch):
+def test_kill_callout_fires_at_the_shot_not_at_move_start(monkeypatch):
     _no_motion(monkeypatch)
     board = _board()
     _place(board, {
@@ -567,9 +567,9 @@ def test_kill_callout_fires_at_impact_not_at_move_start(monkeypatch):
     assert board.effects.captures
     assert board.effects.callouts == [] and _tags(board.effects) == []
     c = board.effects.captures[0]
-    board.effects.update(c["fire_at"])
+    board.effects.update(c["fire_at"] - 1)
     assert board.effects.callouts == []
-    board.effects.update(c["impact_at"])
+    board.effects.update(c["fire_at"])
     assert len(board.effects.callouts) == 1
 
 
