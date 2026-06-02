@@ -51,14 +51,7 @@ STREAK_LABELS = {2: "DOUBLE KILL", 3: "TRIPLE KILL", 4: "QUADRA KILL",
                  5: "RAMPAGE", 6: "UNSTOPPABLE", 7: "GODLIKE"}
 HIT_WORDS = ("BLAM", "BOOM", "POW", "BANG", "HEADSHOT", "BODIED", "WASTED")
 
-PIECE_GUN = {
-    "pawn": "revolver",
-    "knight": "hand_cannon",
-    "bishop": "lever_action",
-    "rook": "shotgun",
-    "queen": "blunderbuss",
-    "king": "ray_gun",
-}
+PIECE_GUN = gunfx.PIECE_GUN
 
 
 class EffectManager:
@@ -218,11 +211,13 @@ class EffectManager:
             self._first_blood_spent = True
             self._callout(now_ms, "FIRST BLOOD", "FIRST ONE DOWN", "lg", cell,
                           Colors.amber_hi, Colors.amber_glow)
-        elif n in STREAK_LABELS:
+            return "first_blood"
+        if n in STREAK_LABELS:
             self._callout(now_ms, STREAK_LABELS[n], "", "xl" if n >= 5 else "lg", cell,
                           Colors.accent_hi, Colors.accent_glow)
-        else:
-            self._tag(now_ms, self._pick(HIT_WORDS), victim_sq, cell)
+            return STREAK_LABELS[n].lower().replace(" ", "_")
+        self._tag(now_ms, self._pick(HIT_WORDS), victim_sq, cell)
+        return "hit"
 
     def _callout(self, now, text, sub, size, cell, fill, glow):
         size_px = max(int(cell * (1.9 if size == "xl" else 1.3)), 24)

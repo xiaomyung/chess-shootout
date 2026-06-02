@@ -14,6 +14,7 @@ _KEY_LINE_RE = re.compile(r"^([A-Za-z_][A-Za-z0-9_]*)\s*=(.*)$")
 
 _DEFAULT_SERVER_ADDR = "localhost:8000"
 _DEFAULT_MASTER_VOLUME = 0.70
+_DEFAULT_MENU_VOLUME = 0.10
 _EFFECT_INTENSITIES = ("subtle", "balanced", "full")
 _DEFAULT_EFFECT_INTENSITY = "full"
 _THEMES = ("dark",)
@@ -141,6 +142,23 @@ def set_master_volume(value):
     clamped = max(0.0, min(1.0, float(value)))
     os.environ["CHESS_MASTER_VOLUME"] = f"{clamped:.3f}"
     _persist("CHESS_MASTER_VOLUME", f"{clamped:.3f}")
+
+
+def get_menu_volume():
+    raw = os.environ.get("CHESS_MENU_VOLUME")
+    if not raw:
+        return _DEFAULT_MENU_VOLUME
+    try:
+        value = float(raw)
+    except ValueError:
+        return _DEFAULT_MENU_VOLUME
+    return max(0.0, min(1.0, value))
+
+
+def set_menu_volume(value):
+    clamped = max(0.0, min(1.0, float(value)))
+    os.environ["CHESS_MENU_VOLUME"] = f"{clamped:.3f}"
+    _persist("CHESS_MENU_VOLUME", f"{clamped:.3f}")
 
 
 def get_reduce_motion():

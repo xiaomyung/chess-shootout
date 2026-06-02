@@ -8,7 +8,7 @@ from frontend import env
 
 _ISOLATED_VARS = (
     "CHESS_SERVER_ADDR", "CHESS_NICKNAME", "CHESS_CLIENT_UUID",
-    "CHESS_LAST_MODE", "CHESS_MASTER_VOLUME", "CHESS_DATA_DIR",
+    "CHESS_LAST_MODE", "CHESS_MASTER_VOLUME", "CHESS_MENU_VOLUME", "CHESS_DATA_DIR",
     "CHESS_REDUCE_MOTION", "CHESS_EFFECT_INTENSITY", "CHESS_DEFAULT_TC",
     "CHESS_DEFAULT_INCREMENT", "CHESS_THEME", "CHESS_COUNTRY",
 )
@@ -133,6 +133,26 @@ def test_master_volume_persists_round_trip():
     assert env.get_master_volume() == pytest.approx(0.42, abs=1e-3)
     contents = env._ENV_PATH.read_text()
     assert "CHESS_MASTER_VOLUME" in contents
+
+
+def test_menu_volume_defaults_to_ten_percent(monkeypatch):
+    monkeypatch.delenv("CHESS_MENU_VOLUME", raising=False)
+    assert env.get_menu_volume() == env._DEFAULT_MENU_VOLUME == pytest.approx(0.10)
+
+
+@pytest.mark.parametrize("raw", [None, "", "not-a-float"])
+def test_menu_volume_falls_back_to_default(monkeypatch, raw):
+    if raw is not None:
+        monkeypatch.setenv("CHESS_MENU_VOLUME", raw)
+    assert env.get_menu_volume() == env._DEFAULT_MENU_VOLUME
+
+
+def test_menu_volume_persists_round_trip_and_clamps():
+    env.set_menu_volume(0.35)
+    assert env.get_menu_volume() == pytest.approx(0.35, abs=1e-3)
+    assert "CHESS_MENU_VOLUME" in env._ENV_PATH.read_text()
+    env.set_menu_volume(1.8)
+    assert env.get_menu_volume() == pytest.approx(1.0, abs=1e-3)
 
 
 def test_server_addr_persists_round_trip():

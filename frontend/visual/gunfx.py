@@ -46,6 +46,15 @@ GUNS = {
                        speed=1300, size=6, length=28, color=Colors.accent),
 }
 
+PIECE_GUN = {
+    "pawn": "revolver",
+    "knight": "hand_cannon",
+    "bishop": "lever_action",
+    "rook": "shotgun",
+    "queen": "blunderbuss",
+    "king": "ray_gun",
+}
+
 
 def gun_spec(gun):
     return GUNS.get(gun, GUNS["revolver"])

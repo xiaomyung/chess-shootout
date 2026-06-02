@@ -4,8 +4,8 @@ from pathlib import Path
 
 import pygame as pg
 
-from backend.pieces import PieceType
 from frontend.visual.clock_visual import LOW_TIME_FRACTION
+from frontend.visual.gunfx import PIECE_GUN
 
 
 @dataclass
@@ -22,13 +22,34 @@ STATE_HEARTBEAT = "heartbeat"
 
 ONESHOT_FADE_MS = 20
 
-CAPTURE_SOUND_BY_PIECE = {
-    PieceType.PAWN: "pawn_shot",
-    PieceType.KNIGHT: "knight_shot",
-    PieceType.BISHOP: "bishop_shot",
-    PieceType.ROOK: "rook_shot",
-    PieceType.QUEEN: "queen_shot",
-    PieceType.KING: "king_capture",
+GUNS_DIR = "guns"
+
+ANNOUNCER_DIR = "announcer"
+
+ONE_SHOT_FILES = {
+    "checkmate": "metal_pipe_falling.ogg",
+    "undo": "rewind.ogg",
+    "game_start": "game_start.ogg",
+    "heartbeat": "heartbeat.ogg",
+    "castle": "castle_sound.ogg",
+    "you_lose": "you_lose.ogg",
+    "online_game_start": "online_game_start.ogg",
+    "executed": "executed.ogg",
+    "give_time": "give_time.ogg",
+    "surrender": "surrender.ogg",
+}
+
+ANNOUNCER_FILES = {
+    key: f"{ANNOUNCER_DIR}/{key}.ogg" for key in (
+        "first_blood", "double_kill", "triple_kill", "quadra_kill",
+        "rampage", "unstoppable", "godlike",
+    )
+}
+
+VARIANT_DIRS = {
+    "move": "piece_moves",
+    "reload": f"{GUNS_DIR}/shotgun_reloads",
+    "hit": f"{ANNOUNCER_DIR}/hits",
 }
 
 
@@ -39,37 +60,33 @@ def _clamp_volume(value):
 class SoundManager:
 
     def __init__(self, sounds_dir, *, enabled=True, heartbeat=None,
-                 heartbeat_channel=None, master_volume=None):
+                 heartbeat_channel=None, master_volume=None, menu_volume=None):
         from frontend import env
         self.enabled = enabled
         self.master_volume = (
             env.get_master_volume() if master_volume is None
             else _clamp_volume(master_volume)
         )
+        self.menu_volume = (
+            env.get_menu_volume() if menu_volume is None
+            else _clamp_volume(menu_volume)
+        )
         self.heartbeat = heartbeat or HeartbeatConfig()
         self._state = STATE_OFF
 
         if not self.enabled:
-            self._piece_move_sounds = []
-            self._reload_sounds = []
-            self._capture_sounds = {}
-            self._sounds = {}
+            self._variants = {}
+            self._gun_shots = {}
+            self._oneshots = {}
             self._heartbeat_channel = None
             return
 
         sounds_dir = Path(sounds_dir)
-        self._piece_move_sounds = self._load_variants(sounds_dir / "piece_moves")
-        self._reload_sounds = self._load_variants(sounds_dir / "shotgun_reloads")
-        self._capture_sounds = self._load_capture_sounds(sounds_dir)
-        self._sounds = {
-            "checkmate": self._safe_load(sounds_dir / "metal_pipe_falling.ogg"),
-            "undo": self._safe_load(sounds_dir / "rewind.ogg"),
-            "game_start": self._safe_load(sounds_dir / "game_start.ogg"),
-            "heartbeat": self._safe_load(sounds_dir / "heartbeat.ogg"),
-            "castle": self._safe_load(sounds_dir / "castle_sound.ogg"),
-            "you_lose": self._safe_load(sounds_dir / "you_lose.ogg"),
-            "online_game_start": self._safe_load(sounds_dir / "online_game_start.ogg"),
-        }
+        self._variants = {key: self._load_variants(sounds_dir / rel)
+                          for key, rel in VARIANT_DIRS.items()}
+        self._gun_shots = self._load_gun_shots(sounds_dir / GUNS_DIR)
+        self._oneshots = {key: self._safe_load(sounds_dir / rel)
+                          for key, rel in {**ONE_SHOT_FILES, **ANNOUNCER_FILES}.items()}
         self._heartbeat_channel = (
             heartbeat_channel if heartbeat_channel is not None
             else self._reserve_channel(0)
@@ -81,23 +98,9 @@ class SoundManager:
         return [s for p in sorted(dir_path.glob("*.ogg"))
                 if (s := self._safe_load(p)) is not None]
 
-    def _load_capture_sounds(self, sounds_dir):
-        result = {}
-        capture_dir = sounds_dir / "capture_sounds"
-        for piece_type, name in CAPTURE_SOUND_BY_PIECE.items():
-            variants = self._load_variant_pack(capture_dir, name)
-            if variants:
-                result[piece_type] = variants
-        return result
-
-    def _load_variant_pack(self, parent, name):
-        pack_dir = parent / name
-        if pack_dir.is_dir():
-            variants = self._load_variants(pack_dir)
-            if variants:
-                return variants
-        single = self._safe_load(parent / f"{name}.ogg")
-        return [single] if single is not None else []
+    def _load_gun_shots(self, guns_dir):
+        return {gun: s for gun in sorted(set(PIECE_GUN.values()))
+                if (s := self._safe_load(guns_dir / f"{gun}_shot.ogg")) is not None}
 
     @staticmethod
     def _safe_load(path):
@@ -118,15 +121,28 @@ class SoundManager:
     def set_master_volume(self, value):
         self.master_volume = _clamp_volume(value)
 
+    def set_menu_volume(self, value):
+        self.menu_volume = _clamp_volume(value)
+
     def set_enabled(self, value):
         new_enabled = bool(value)
         if not new_enabled and self.enabled:
             self.stop_all()
         self.enabled = new_enabled
 
-    def _play_with_master(self, sound):
-        sound.set_volume(self.master_volume)
+    def _play_at(self, sound, volume):
+        sound.set_volume(volume)
         sound.play(fade_ms=ONESHOT_FADE_MS)
+
+    def _play_with_master(self, sound):
+        self._play_at(sound, self.master_volume)
+
+    def play_menu_gun(self, gun):
+        if not self.enabled:
+            return
+        sound = self._gun_shots.get(gun)
+        if sound is not None:
+            self._play_at(sound, self.master_volume * self.menu_volume)
 
     def _play_random(self, sounds):
         if not self.enabled or not sounds:
@@ -134,19 +150,23 @@ class SoundManager:
         self._play_with_master(random.choice(sounds))
 
     def play_move(self):
-        self._play_random(self._piece_move_sounds)
+        self._play_random(self._variants.get("move", []))
 
     def play_premove_queued(self):
-        self._play_random(self._piece_move_sounds)
+        self._play_random(self._variants.get("move", []))
 
     def play_check(self):
-        self._play_random(self._reload_sounds)
+        self._play_random(self._variants.get("reload", []))
 
     def play_capture(self, piece_type=None):
-        variants = self._capture_sounds.get(piece_type)
-        if not variants and self._capture_sounds:
-            variants = next(iter(self._capture_sounds.values()))
-        self._play_random(variants or [])
+        if not self.enabled:
+            return
+        gun = PIECE_GUN.get(piece_type.value) if piece_type is not None else None
+        sound = self._gun_shots.get(gun)
+        if sound is None and self._gun_shots:
+            sound = next(iter(self._gun_shots.values()))
+        if sound is not None:
+            self._play_with_master(sound)
 
     def play_checkmate(self):
         self._play_one_shot("checkmate")
@@ -166,10 +186,25 @@ class SoundManager:
     def play_online_game_start(self):
         self._play_one_shot("online_game_start")
 
+    def play_announcer(self, key):
+        self._play_one_shot(key)
+
+    def play_hit(self):
+        self._play_random(self._variants.get("hit", []))
+
+    def play_mate_sting(self):
+        self._play_one_shot("executed")
+
+    def play_give_time(self):
+        self._play_one_shot("give_time")
+
+    def play_surrender(self):
+        self._play_one_shot("surrender")
+
     def _play_one_shot(self, key):
         if not self.enabled:
             return
-        sound = self._sounds.get(key)
+        sound = self._oneshots.get(key)
         if sound is not None:
             self._play_with_master(sound)
 
@@ -198,7 +233,7 @@ class SoundManager:
         self._state = desired
 
     def _start_heartbeat(self):
-        sound = self._sounds.get("heartbeat")
+        sound = self._oneshots.get("heartbeat")
         if self._heartbeat_channel is None or sound is None:
             return
         cfg = self.heartbeat

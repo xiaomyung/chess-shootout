@@ -238,7 +238,8 @@ class Frontend(OnlineEventsMixin):
         self.board = Board(self.window, self.match,
                            move_landed_callback=self._on_move_landed,
                            on_premove_queued=self.sound_manager.play_premove_queued,
-                           shot_callback=self._on_shot_fired)
+                           shot_callback=self._on_shot_fired,
+                           announce_callback=self._on_kill_announced)
         self.result_menu = ResultMenu(self.window, {
             "new_game": self._on_new_game,
             "open_pgn": self._on_open_pgn,
@@ -295,7 +296,7 @@ class Frontend(OnlineEventsMixin):
         self.online_client = None
         self.player_strip_top = PlayerStrip(self.window)
         self.player_strip_bottom = PlayerStrip(self.window)
-        self.menu_battle = MenuBattle(self.window)
+        self.menu_battle = MenuBattle(self.window, sound_manager=self.sound_manager)
 
         self.match.new_game()
         self.board.load_assets()
@@ -453,6 +454,10 @@ class Frontend(OnlineEventsMixin):
         self.sound_manager.set_master_volume(value)
         env.set_master_volume(value)
 
+    def _set_menu_volume(self, value):
+        self.sound_manager.set_menu_volume(value)
+        env.set_menu_volume(value)
+
     def _build_settings_sections(self):
         self._data_folder_row = PathRow(
             "Games folder", "Where PGNs are saved", self.window,
@@ -479,6 +484,8 @@ class Frontend(OnlineEventsMixin):
             ("Audio", [
                 SliderRow("Master volume", "", lambda: self.sound_manager.master_volume,
                           self._set_master_volume),
+                SliderRow("Menu volume", "", lambda: self.sound_manager.menu_volume,
+                          self._set_menu_volume),
                 ToggleRow("Mute all sound", "Silence every shot and callout",
                           lambda: not self.sound_manager.enabled,
                           lambda muted: self.sound_manager.set_enabled(not muted)),
@@ -1090,6 +1097,7 @@ class Frontend(OnlineEventsMixin):
         else:
             self._strip_for_color(recipient_color).flash_increment(added)
             self.toast.show(f"Gave {int(round(added))} sec to {name}")
+            self.sound_manager.play_give_time()
 
     def _give_time_toast_for_receiver(self, giver_color, added):
         if added <= 0:
@@ -1098,6 +1106,7 @@ class Frontend(OnlineEventsMixin):
             self._strip_for_color(self.match.local_color).flash_increment(added)
         name = self._name_for_color(giver_color)
         self.toast.show(f"{name} gave you {int(round(added))} seconds")
+        self.sound_manager.play_give_time()
 
     def _auto_complete_pending_promotion(self):
         if self.board.pending_promotion_square is None:
@@ -1127,6 +1136,12 @@ class Frontend(OnlineEventsMixin):
 
     def _on_shot_fired(self, entry):
         self.sound_manager.play_capture(entry.move.piece.type)
+
+    def _on_kill_announced(self, key):
+        if key == "hit":
+            self.sound_manager.play_hit()
+        else:
+            self.sound_manager.play_announcer(key)
 
     def _maybe_flash_increment_for(self, mover_color):
         clock = self.match.clock
@@ -1309,10 +1324,14 @@ class Frontend(OnlineEventsMixin):
         else:
             return
         is_mate = code in ("white_wins", "black_wins")
-        if is_mate or code.endswith("_by_resignation"):
+        is_resign = code.endswith("_by_resignation")
+        if is_mate or is_resign:
             self.board.show_surrender_flag(loser)
         if is_mate:
             self.board.show_checkmate_takeover(winner.value.upper())
+            self.sound_manager.play_mate_sting()
+        if is_resign:
+            self.sound_manager.play_surrender()
 
     def _result_elapsed_ms(self):
         if self._result_first_seen_at_ms is None:

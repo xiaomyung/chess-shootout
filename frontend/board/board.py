@@ -36,11 +36,12 @@ class Board:
     GRID_RADIUS = 4
 
     def __init__(self, window, match, move_landed_callback=None,
-                 on_premove_queued=None, shot_callback=None):
+                 on_premove_queued=None, shot_callback=None, announce_callback=None):
         self.window = window
         self.match = match
         self.move_landed_callback = move_landed_callback
         self.shot_callback = shot_callback
+        self.announce_callback = announce_callback
         self.on_premove_queued = on_premove_queued
         self.font = get_font(18, bold=True)
         self.board_guides_font_factor = 50
@@ -1048,9 +1049,11 @@ class Board:
         return True
 
     def _on_capture_fire(self, entry, color, victim_sq):
-        self.effects.register_kill(color, victim_sq, self.cell_size, pg.time.get_ticks())
+        key = self.effects.register_kill(color, victim_sq, self.cell_size, pg.time.get_ticks())
         if self.shot_callback is not None:
             self.shot_callback(entry)
+        if self.announce_callback is not None and key is not None:
+            self.announce_callback(key)
 
     def show_surrender_flag(self, color):
         if self.cell_size <= 0:

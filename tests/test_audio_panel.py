@@ -119,7 +119,7 @@ def test_play_disabled_does_nothing(sm):
     """Disabled is a true no-op; enabling re-arms the real play path."""
     calls = []
     sm._play_with_master = lambda sound: calls.append(sound)
-    assert sm._piece_move_sounds
+    assert sm._variants["move"]
     sm.enabled = False
     sm.play_move()
     assert calls == []

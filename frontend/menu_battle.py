@@ -58,9 +58,10 @@ DROP_MS = 3000
 
 
 class MenuBattle:
-    def __init__(self, window, rng=None):
+    def __init__(self, window, rng=None, sound_manager=None):
         self.window = window
         self.rng = rng or random.Random()
+        self.sound_manager = sound_manager
         self.rect = pg.Rect(0, 0, 0, 0)
         self.avoid_rect = pg.Rect(0, 0, 0, 0)
         self.obstacle = None
@@ -617,6 +618,8 @@ class MenuBattle:
 
     def _fire(self, shooter, target, is_queen, now_ms):
         shooter["recoil"] = gunfx.gun_spec(shooter.get("weapon")).recoil * self.scale
+        if self.sound_manager is not None:
+            self.sound_manager.play_menu_gun(shooter.get("weapon"))
         ax, ay = self._muzzle_point(shooter)
         self._add_flash(shooter, ax, ay, now_ms)
         hit = self.rng.random() >= MISS_CHANCE

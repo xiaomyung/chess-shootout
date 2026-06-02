@@ -586,6 +586,26 @@ def test_kill_callout_fires_at_the_shot_not_at_move_start(monkeypatch):
     assert len(board.effects.callouts) == 1
 
 
+def test_capture_routes_announcer_key_to_callback(monkeypatch):
+    _no_motion(monkeypatch)
+    board = _board()
+    keys = []
+    board.announce_callback = keys.append
+    _place(board, {
+        Square(7, 4): Piece(KING, WHITE),
+        Square(0, 4): Piece(KING, BLACK),
+        Square(4, 3): Piece(QUEEN, WHITE),
+        Square(2, 3): Piece(PAWN, BLACK),
+    })
+    board.match.backend.turn = WHITE
+    board.match.backend.move_history = []
+    board.handle_click(Square(4, 3))
+    board.handle_click(Square(2, 3))
+    assert keys == []
+    board.effects.update(board.effects.captures[0]["fire_at"])
+    assert keys == ["first_blood"]
+
+
 def test_capture_power_scales_with_victim_value():
     assert Board._capture_power(QUEEN) == "hard"
     assert Board._capture_power(ROOK) == "hard"
@@ -717,6 +737,14 @@ def test_tag_animation_rises_and_fades():
     rise_end, _, alpha_end = EffectManager._tag_anim(0.99)
     assert rise_end > rise_peak
     assert alpha_end < 10
+
+
+def test_register_kill_returns_the_announcer_key():
+    em = _em()
+    seq = [em.register_kill("white", Square(0, 4), 80, i) for i in range(8)]
+    assert seq == ["first_blood", "double_kill", "triple_kill", "quadra_kill",
+                   "rampage", "unstoppable", "godlike", "hit"]
+    assert em.register_kill("black", Square(4, 4), 80, 99) == "hit"
 
 
 def test_streak_label_table_matches_the_design():

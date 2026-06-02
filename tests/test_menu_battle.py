@@ -9,6 +9,7 @@ backdrop, the scrim darkening the edges) rather than bare draw() calls.
 import math
 import os
 import random
+from unittest.mock import MagicMock
 
 os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
 os.environ.setdefault("SDL_AUDIODRIVER", "dummy")
@@ -580,6 +581,25 @@ def test_shotgun_launches_a_pellet_spread_revolver_one():
     b.projectiles.clear()
     b._fire(b.queen, p, True, 5000)
     assert len(b.projectiles) == 1
+
+
+def test_fire_plays_the_shooters_gun_sound():
+    b = _battle()
+    b.sound_manager = MagicMock()
+    b.queen["weapon"] = "blunderbuss"
+    b._fire(b.queen, b.pawns[0], True, 5000)
+    b.sound_manager.play_menu_gun.assert_called_once_with("blunderbuss")
+    b.sound_manager.play_menu_gun.reset_mock()
+    p = b.pawns[0]
+    p["weapon"] = "revolver"
+    b._fire(p, b.queen, False, 5000)
+    b.sound_manager.play_menu_gun.assert_called_once_with("revolver")
+
+
+def test_fire_without_sound_manager_does_not_crash():
+    b = _battle()
+    assert b.sound_manager is None
+    b._fire(b.queen, b.pawns[0], True, 5000)
 
 
 def test_hit_projectile_collides_with_the_hitbox_and_lands():
