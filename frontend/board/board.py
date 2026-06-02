@@ -11,7 +11,7 @@ from frontend.visual.colors import Colors
 from frontend.visual.draw import supersample
 from frontend.visual.effects import EffectManager
 from frontend.premoves import Premove, speculative_board
-from backend.pieces import PieceType, PieceColor, Piece
+from backend.pieces import PieceType, PieceColor, Piece, opponent_of
 from frontend.visual.fonts import get_font, DISPLAY
 
 
@@ -53,6 +53,8 @@ class Board:
         self._promotion_rects = {}
         self._frame_surf = None
         self._arrow_cache = None
+        self._shake_dx = 0
+        self._shake_dy = 0
 
         self.file_labels = "abcdefgh"
         self.file_labels_rendered = []
@@ -105,7 +107,7 @@ class Board:
                 image = pg.image.load(piece.img_path).convert_alpha()
                 self.piece_images_original[(piece_type, piece_color)] = image
 
-    def _cell_rect(self, row, col):
+    def _cell_rect_base(self, row, col):
         if self.flipped:
             row = self.SIZE - 1 - row
             col = self.SIZE - 1 - col
@@ -115,6 +117,9 @@ class Board:
             self.cell_size,
             self.cell_size
         )
+
+    def _cell_rect(self, row, col):
+        return self._cell_rect_base(row, col).move(self._shake_dx, self._shake_dy)
 
     PROMOTION_OPTIONS = [
         (PieceType.QUEEN, "Q", "BOSS"), (PieceType.ROOK, "R", "TANK"),
@@ -131,7 +136,7 @@ class Board:
         pad, gap, label_h = 10, 8, 20
         panel_w = pad * 2 + 4 * opt + 3 * gap
         panel_h = pad * 2 + label_h + 6 + opt
-        sq_rect = self._cell_rect(sq.row, sq.col)
+        sq_rect = self._cell_rect_base(sq.row, sq.col)
         win_w, win_h = self.window.get_size()
         left_bound = max(self.rect.x, 8)
         right_bound = min(self.rect.right, win_w - 8)
@@ -213,8 +218,8 @@ class Board:
             array_row = (self.SIZE - 1 - visual_row) if self.flipped else visual_row
             label = self.rank_labels_rendered[array_row]
             cy = self.board_offset_y + visual_row * self.cell_size + self.cell_size // 2
-            self.window.blit(label, (gutter_cx - label.get_width() // 2,
-                                     cy - label.get_height() // 2))
+            self.window.blit(label, (gutter_cx - label.get_width() // 2 + self._shake_dx,
+                                     cy - label.get_height() // 2 + self._shake_dy))
 
     def _draw_horizontal_guides(self):
         grid_bottom = self.board_offset_y + self.cell_size * self.SIZE
@@ -223,14 +228,19 @@ class Board:
             array_col = (self.SIZE - 1 - visual_col) if self.flipped else visual_col
             label = self.file_labels_rendered[array_col]
             cx = self.board_offset_x + visual_col * self.cell_size + self.cell_size // 2
-            self.window.blit(label, (cx - label.get_width() // 2,
-                                     gutter_cy - label.get_height() // 2))
+            self.window.blit(label, (cx - label.get_width() // 2 + self._shake_dx,
+                                     gutter_cy - label.get_height() // 2 + self._shake_dy))
 
     def draw_board(self):
         now = pg.time.get_ticks()
         self.effects.update(now)
+        if self.review_ply is None:
+            self._shake_dx, self._shake_dy = self.effects.shake_offset(now)
+        else:
+            self._shake_dx = self._shake_dy = 0
         if self._frame_surf is not None:
-            self.window.blit(self._frame_surf, self.rect.topleft)
+            self.window.blit(self._frame_surf,
+                             (self.rect.x + self._shake_dx, self.rect.y + self._shake_dy))
         for row, col in product(range(self.SIZE), repeat=2):
             self.draw_cell(row, col)
         if self.review_ply is not None:
@@ -381,7 +391,7 @@ class Board:
 
     def _render_arrow(self, layer, scale, from_sq, to_sq, color):
         def pt(sq):
-            r = self._cell_rect(sq.row, sq.col)
+            r = self._cell_rect_base(sq.row, sq.col)
             return ((r.centerx - self.rect.x) * scale, (r.centery - self.rect.y) * scale)
 
         from_pos = pt(from_sq)
@@ -946,7 +956,7 @@ class Board:
         self.review_ply = None
         self._target_ply = None
         self.cancel_animations()
-        self.effects.cut()
+        self.effects.cut(pg.time.get_ticks())
         self.clear_annotations()
         entry = self.match.move_history[-1]
         moving_piece = entry.move.piece
@@ -1030,10 +1040,69 @@ class Board:
             attacker_type=moving_piece.type.value,
             attacker_surface=attacker, victim_surface=victim,
             from_sq=from_sq, victim_sq=victim_sq, to_sq=to_sq,
-            cell_size=self.cell_size, on_fire=shot,
+            cell_size=self.cell_size, power=self._capture_power(captured.type),
+            on_fire=shot,
             on_slide=lambda: self.start_animation(
                 from_sq, to_sq, moving_piece, on_complete=on_complete),
         )
+        return True
+
+    @staticmethod
+    def _capture_power(victim_type):
+        if victim_type in (PieceType.QUEEN, PieceType.ROOK):
+            return "hard"
+        if victim_type == PieceType.PAWN:
+            return "soft"
+        return "med"
+
+    SLIDERS = (PieceType.BISHOP, PieceType.ROOK, PieceType.QUEEN)
+
+    def show_check_gun(self, entry):
+        if self.cell_size <= 0 or self.review_ply is not None:
+            return
+        by_color = entry.move.piece.color
+        king_color = opponent_of(by_color)
+        king_sq = self._king_square(king_color)
+        if king_sq is None:
+            return
+        checker = self._checking_square(king_sq, by_color)
+        if checker is None:
+            return
+        self.effects.configure(env.get_reduce_motion(), env.get_effect_intensity())
+        self.effects.check(now_ms=pg.time.get_ticks(),
+                           attacker_type=self.match.piece_at(checker).type.value,
+                           king_sq=king_sq, from_sq=checker, cell_size=self.cell_size)
+
+    def _king_square(self, color):
+        for row, col in product(range(self.SIZE), repeat=2):
+            piece = self.match.piece_at(Square(row, col))
+            if piece is not None and piece.type == PieceType.KING and piece.color == color:
+                return Square(row, col)
+        return None
+
+    def _checking_square(self, king_sq, by_color):
+        grid = self.match.state
+        for row, col in product(range(self.SIZE), repeat=2):
+            piece = grid[row][col]
+            if piece is None or piece.color != by_color:
+                continue
+            sq = Square(row, col)
+            if not piece_can_pseudo_reach(piece, sq, king_sq):
+                continue
+            if piece.type in self.SLIDERS and not self._segment_empty(grid, sq, king_sq):
+                continue
+            return sq
+        return None
+
+    @staticmethod
+    def _segment_empty(grid, a, b):
+        dr = (b.row > a.row) - (b.row < a.row)
+        dc = (b.col > a.col) - (b.col < a.col)
+        r, c = a.row + dr, a.col + dc
+        while (r, c) != (b.row, b.col):
+            if grid[r][c] is not None:
+                return False
+            r, c = r + dr, c + dc
         return True
 
     def _try_select(self, square):

@@ -13,19 +13,21 @@ MUZZLE_MS = 220
 IMPACT_MS = 360
 BLOOD_MS = 700
 HOLE_IN_MS = 160
-HOLE_HOLD_MS = 2200
-HOLE_FADE_MS = 1400
+HOLE_HOLD_MS = 1100
+HOLE_FADE_MS = 700
 RAGDOLL_MS = 900
 SHAKE_HARD_MS = 420
 SHAKE_SOFT_MS = 260
 SPARK_MS = (300, 600)
 SMOKE_MS = (700, 1100)
+CHECK_DROP_MS = 3000
+RECOIL_MS = 180
 
 SPARK_COUNT = 10
 SPARK_COUNT_RM = 4
 SMOKE_PUFFS = 3
 
-SHAKE_AMP = {"hard": 9, "med": 5, "soft": 3}
+SHAKE_AMP = {"hard": 18, "med": 11, "soft": 6}
 INTENSITY_SCALE = {"subtle": 0.34, "balanced": 0.67, "full": 1.0}
 
 PIECE_GUN = {
@@ -48,6 +50,8 @@ class EffectManager:
         self.particles = []
         self.holes = []
         self.captures = []
+        self.drops = []
+        self._check_gun = None
         self.reduce_motion = False
         self.intensity = "full"
         self._shake = None
@@ -68,9 +72,14 @@ class EffectManager:
         self.particles = []
         self.holes = []
         self.captures = []
+        self.drops = []
+        self._check_gun = None
         self._shake = None
 
-    def cut(self):
+    def cut(self, now=None):
+        if self._check_gun is not None and now is not None:
+            self._release_check_gun(now)
+        self._check_gun = None
         self.captures = []
         self.particles = []
         self._shake = None
@@ -79,7 +88,8 @@ class EffectManager:
         return {c["to_sq"] for c in self.captures}
 
     def busy(self):
-        return bool(self.captures or self.particles or self.holes)
+        return bool(self.captures or self.particles or self.holes
+                    or self.drops or self._check_gun)
 
     def _rnd(self, lo, hi):
         return lo + self.rng.random() * (hi - lo)
@@ -118,7 +128,7 @@ class EffectManager:
         gun = PIECE_GUN.get(attacker_type, "revolver")
         weapon = self._weapon(gun, cell_size)
         if self.reduce_motion or weapon is None:
-            self._impact(now_ms, from_sq, victim_sq, victim_surface, cell_size, power)
+            self._impact(now_ms, from_sq, victim_sq, victim_surface, cell_size)
             if on_fire is not None:
                 on_fire()
             if on_slide is not None:
@@ -141,15 +151,25 @@ class EffectManager:
         weapon = self._weapon(gun, cell_size)
         if weapon is None or self.reduce_motion:
             return
-        self.particles.append({
-            "kind": "aim_gun", "weapon": weapon, "from_sq": from_sq, "victim_sq": king_sq,
-            "cell": cell_size, "start": now_ms, "dur": DRAW_MS + AIM_MS + 360,
-        })
+        if self._check_gun is not None:
+            self._release_check_gun(now_ms)
+        self._check_gun = {"weapon": weapon, "from_sq": from_sq, "victim_sq": king_sq,
+                           "cell": cell_size, "start": now_ms}
+
+    def _release_check_gun(self, now):
+        g = self._check_gun
+        if g is None:
+            return
+        self.drops.append({
+            "img": g["weapon"]["gun"], "from_sq": g["from_sq"], "cell": g["cell"],
+            "vx": self._rnd(-0.8, 0.8), "spin": self._rnd(-320, 320),
+            "fall": g["cell"] * 1.4, "start": now, "dur": CHECK_DROP_MS})
+        self._check_gun = None
 
     def _shoot(self, now, c):
         weapon = c["weapon"]
         if weapon["flashes"]:
-            self.particles.append({"kind": "flash", "weapon": weapon,
+            self.particles.append({"kind": "flash", "weapon": weapon, "gun": c["gun"],
                                    "idx": int(self.rng.random() * len(weapon["flashes"])),
                                    "from_sq": c["from_sq"], "victim_sq": c["victim_sq"],
                                    "cell": c["cell"], "start": now, "dur": MUZZLE_MS})
@@ -157,8 +177,9 @@ class EffectManager:
                                "from_sq": c["from_sq"], "victim_sq": c["victim_sq"],
                                "cell": c["cell"], "start": now,
                                "dur": max(c["impact_at"] - now, 1)})
+        self._trigger_shake(now, c["power"])
 
-    def _impact(self, now, from_sq, victim_sq, victim, cell, power):
+    def _impact(self, now, from_sq, victim_sq, victim, cell):
         self.particles.append({"kind": "impact", "victim_sq": victim_sq, "cell": cell,
                                "start": now, "dur": IMPACT_MS})
         self.particles.append({"kind": "blood", "victim_sq": victim_sq, "cell": cell,
@@ -184,7 +205,6 @@ class EffectManager:
                     "kind": "ragdoll", "surf": victim, "victim_sq": victim_sq,
                     "dir": 1 if math.cos(aim) >= 0 else -1,
                     "start": now, "dur": RAGDOLL_MS})
-            self._trigger_shake(now, power)
 
     def _trigger_shake(self, now, power):
         if self.reduce_motion:
@@ -214,13 +234,13 @@ class EffectManager:
                 if c["on_fire"] is not None:
                     c["on_fire"]()
             if c["fired"] and now >= c["impact_at"]:
-                self._impact(now, c["from_sq"], c["victim_sq"], c["victim"], c["cell"],
-                             c["power"])
+                self._impact(now, c["from_sq"], c["victim_sq"], c["victim"], c["cell"])
                 if c["on_slide"] is not None:
                     c["on_slide"]()
                 self.captures.remove(c)
         self.particles = [p for p in self.particles if now < p["start"] + p["dur"]]
         self.holes = [h for h in self.holes if now < h["start"] + h["dur"]]
+        self.drops = [d for d in self.drops if now < d["start"] + d["dur"]]
 
     def draw_holes(self, window, now):
         if self.geom is None:
@@ -235,6 +255,9 @@ class EffectManager:
             self._draw_capture(window, c, now)
         for p in self.particles:
             self._draw_particle(window, p, now)
+        for d in self.drops:
+            self._draw_gun_drop(window, d, now)
+        self._draw_held_gun(window, now)
 
     def _draw_capture(self, window, c, now):
         fx, fy = self._center(c["from_sq"])
@@ -251,7 +274,17 @@ class EffectManager:
             gunfx.draw_flourish(window, weapon["gun"], weapon["grip"], pivot, aim,
                                 t / DRAW_MS, gunfx.GUN_DRAW_SPINS_LAND)
         else:
+            if c["fired"]:
+                rx, ry = self._recoil(c["gun"], weapon, aim, now - c["fire_at"])
+                pivot = (pivot[0] + rx, pivot[1] + ry)
             gunfx.blit_aimed(window, weapon["gun"], weapon["grip"], pivot, aim)
+
+    def _recoil(self, gun, weapon, aim, elapsed):
+        if elapsed < 0 or elapsed >= RECOIL_MS:
+            return 0.0, 0.0
+        r = (gunfx.gun_spec(gun).recoil * weapon["scale"]
+             * (1.0 - gunfx.smoothstep(elapsed / RECOIL_MS)))
+        return -math.cos(aim) * r, -math.sin(aim) * r
 
     def _draw_particle(self, window, p, now):
         kind = p["kind"]
@@ -269,8 +302,6 @@ class EffectManager:
             self._draw_smoke(window, p, now)
         elif kind == "ragdoll":
             self._draw_ragdoll(window, p, now)
-        elif kind == "aim_gun":
-            self._draw_aim_gun(window, p, now)
 
     def _draw_flash(self, window, p, now):
         prog = (now - p["start"]) / p["dur"]
@@ -281,7 +312,9 @@ class EffectManager:
             return
         fl = weapon["flashes"][min(p["idx"], len(weapon["flashes"]) - 1)]
         muzzle, aim = self._muzzle(weapon, p["from_sq"], p["victim_sq"], p["cell"])
-        gunfx.draw_flash(window, fl["img"], fl["anchor"], muzzle, aim, prog)
+        rx, ry = self._recoil(p["gun"], weapon, aim, now - p["start"])
+        gunfx.draw_flash(window, fl["img"], fl["anchor"], (muzzle[0] + rx, muzzle[1] + ry),
+                         aim, prog)
 
     def _draw_projectile(self, window, p, now):
         prog = (now - p["start"]) / p["dur"]
@@ -395,17 +428,38 @@ class EffectManager:
         cx, cy = self._center(p["victim_sq"])
         window.blit(img, img.get_rect(center=(cx + tx, cy + ty)))
 
-    def _draw_aim_gun(self, window, p, now):
-        t = now - p["start"]
-        weapon = p["weapon"]
-        fx, fy = self._center(p["from_sq"])
-        aim = self._aim(p["from_sq"], p["victim_sq"])
-        pivot = (fx, fy - p["cell"] * 0.05)
+    def _draw_held_gun(self, window, now):
+        g = self._check_gun
+        if g is None:
+            return
+        t = now - g["start"]
+        weapon = g["weapon"]
+        fx, fy = self._center(g["from_sq"])
+        aim = self._aim(g["from_sq"], g["victim_sq"])
+        pivot = (fx, fy - g["cell"] * 0.05)
         if t < DRAW_MS:
             gunfx.draw_flourish(window, weapon["gun"], weapon["grip"], pivot, aim,
                                 t / DRAW_MS, gunfx.GUN_DRAW_SPINS_LAND)
         else:
             gunfx.blit_aimed(window, weapon["gun"], weapon["grip"], pivot, aim)
+
+    @staticmethod
+    def _drop_state(d, bx, by, t):
+        tm = min(t * 4.0, 1.0)
+        cell = d["cell"]
+        x = bx + d["vx"] * cell * tm
+        y = (by - cell * 0.05) - cell * 0.25 * tm + d["fall"] * (tm * tm)
+        return x, y, d["spin"] * tm, int(255 * (1.0 - t))
+
+    def _draw_gun_drop(self, window, d, now):
+        t = (now - d["start"]) / d["dur"]
+        if not 0.0 <= t < 1.0:
+            return
+        bx, by = self._center(d["from_sq"])
+        x, y, angle, alpha = self._drop_state(d, bx, by, t)
+        img = pg.transform.rotozoom(d["img"], angle, 1.0).copy()
+        img.set_alpha(alpha)
+        window.blit(img, img.get_rect(center=(x, y)))
 
     def _draw_hole(self, window, h, now):
         t = now - h["start"]

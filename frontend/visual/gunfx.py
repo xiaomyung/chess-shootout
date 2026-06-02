@@ -169,6 +169,7 @@ def build_weapon(art, gun, reach):
         "gun": scale_image(g["img"], f),
         "grip": (g["gx"] * f, g["gy"] * f),
         "barrel": (g["ax"] * f, g["ay"] * f),
+        "scale": f,
         "flashes": [{"img": scale_image(fl["img"], f), "anchor": (fl["ax"] * f, fl["ay"] * f)}
                     for fl in art["flashes"].get(gun, [])],
     }

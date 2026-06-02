@@ -934,6 +934,7 @@ class Frontend(OnlineEventsMixin):
         self.board.selected_square = None
         self.board.pending_promotion_square = None
         self.board.cancel_animations()
+        self.board.effects.clear()
         self.board._clear_premoves()
         self.board.clear_annotations()
         self.board.end_press()
@@ -1117,6 +1118,7 @@ class Frontend(OnlineEventsMixin):
             self.sound_manager.play_move()
         if entry.gives_check and not entry.gives_checkmate:
             self.sound_manager.play_check()
+            self.board.show_check_gun(entry)
         self._maybe_flash_increment_for(entry.move.piece.color)
 
     def _on_shot_fired(self, entry):
