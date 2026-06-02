@@ -1,7 +1,14 @@
 # Attribution
 
-Third-party assets bundled with Chess Shootout, by type. Sound effects are
-interim and may be replaced; this file is the single source for asset credits.
+Asset credits for Chess Shootout. Sound effects are interim and may be replaced.
+
+## Original assets
+
+The game's original visual assets (chess piece art, icons) and any sound effects
+authored for the project are © 2026 Xiao Myung, licensed under **CC BY-NC 4.0**
+(https://creativecommons.org/licenses/by-nc/4.0/; full text in
+LICENSE-CC-BY-NC-4.0.txt): reuse with credit, non-commercial only. The
+third-party assets below keep their own licenses.
 
 ## Fonts
 

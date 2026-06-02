@@ -232,4 +232,27 @@ the single source of truth.
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+**Source available, not open source.** Because it forbids commercial use, this
+project is *not* an OSI "open source" license — please don't call it that.
+
+- **Code** — [PolyForm Noncommercial License 1.0.0](LICENSE). Read, run, modify,
+  fork, and share it for any **non-commercial** purpose. You may **not** sell it
+  or use it (or parts of it) commercially.
+- **Original assets** (piece art, icons, and any sounds authored for the
+  project) — [**CC BY-NC 4.0**](LICENSE-CC-BY-NC-4.0.txt): reuse with credit,
+  non-commercial only.
+- **Bundled third-party assets** (fonts, sound effects, emoji) keep their own
+  licenses — see [ATTRIBUTION.md](ATTRIBUTION.md).
+- **v1.0.0** was released under the **MIT License** and stays MIT; the terms
+  above apply from **v2.0.0** onward.
+
+"Non-commercial" is meant generously: personal/hobby use, education, clubs,
+streaming/videos, and free forks that take donations are all fine — only selling
+or charging is off-limits. Running your own server for non-commercial play is
+fine; the online service operated by the author is not part of this grant and
+access to it is at the author's discretion.
+
+**"Chess Shootout"** is a trademark of the author — forks and derivatives must
+use a different name and not imply endorsement.
+
+Contributions are welcome under the terms in [CONTRIBUTING.md](CONTRIBUTING.md).
