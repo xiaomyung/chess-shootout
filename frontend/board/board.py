@@ -1052,6 +1052,19 @@ class Board:
         if self.shot_callback is not None:
             self.shot_callback(entry)
 
+    def show_surrender_flag(self, color):
+        if self.cell_size <= 0:
+            return
+        king_sq = self._king_square(color)
+        if king_sq is not None:
+            self.effects.raise_flag(king_sq, self.cell_size, pg.time.get_ticks())
+
+    def show_checkmate_takeover(self, winner_label):
+        self.effects.configure(env.get_reduce_motion(), env.get_effect_intensity())
+        now = pg.time.get_ticks()
+        self.effects.start_takeover("CHECKMATE", winner_label, now)
+        self.effects._trigger_shake(now, "hard")
+
     @staticmethod
     def _capture_power(victim_type):
         if victim_type in (PieceType.QUEEN, PieceType.ROOK):

@@ -5,6 +5,7 @@ import pygame as pg
 
 from frontend.visual import gunfx
 from frontend.visual.colors import Colors
+from frontend.visual.emoji import emoji_surface
 from frontend.visual.fonts import get_font, DISPLAY, SANS
 
 
@@ -34,6 +35,17 @@ INTENSITY_SCALE = {"subtle": 0.34, "balanced": 0.67, "full": 1.0}
 CALLOUT_LG_MS = 1150
 CALLOUT_XL_MS = 1500
 TAG_MS = 850
+FLAG_POP_MS = 300
+TAKEOVER_PAUSE_MS = 1000
+TAKEOVER_BG_MS = 200
+TAKEOVER_BARS_MS = 420
+TAKEOVER_MAIN_MS = 360
+TAKEOVER_OUT_MS = 340
+TAKEOVER_ANIM_MS = 1500
+TAKEOVER_TOTAL_MS = TAKEOVER_PAUSE_MS + TAKEOVER_ANIM_MS
+TAKEOVER_BG_ALPHA = 224
+TAKEOVER_BG_SETTLE = 140
+SURRENDER_FLAG = "🏳️"
 
 STREAK_LABELS = {2: "DOUBLE KILL", 3: "TRIPLE KILL", 4: "QUADRA KILL",
                  5: "RAMPAGE", 6: "UNSTOPPABLE", 7: "GODLIKE"}
@@ -61,6 +73,8 @@ class EffectManager:
         self.captures = []
         self.drops = []
         self.callouts = []
+        self.flags = []
+        self._takeover = None
         self._check_gun = None
         self.board_rect = None
         self._streak_color = None
@@ -88,6 +102,8 @@ class EffectManager:
         self.captures = []
         self.drops = []
         self.callouts = []
+        self.flags = []
+        self._takeover = None
         self._check_gun = None
         self._shake = None
         self._streak_color = None
@@ -221,6 +237,18 @@ class EffectManager:
         self.particles.append({"kind": "tag", "surf": surf, "victim_sq": victim_sq,
                                "cell": cell, "start": now, "dur": TAG_MS})
 
+    def raise_flag(self, sq, cell, now_ms):
+        self.flags = [{"sq": sq, "cell": cell, "start": now_ms}]
+
+    def start_takeover(self, reason, winner_label, now_ms):
+        self._takeover = {"reason": reason, "winner": winner_label, "start": now_ms, "h": None}
+
+    def has_takeover(self):
+        return self._takeover is not None
+
+    def clear_takeover(self):
+        self._takeover = None
+
     def _shoot(self, now, c):
         weapon = c["weapon"]
         if weapon["flashes"]:
@@ -314,6 +342,8 @@ class EffectManager:
         for d in self.drops:
             self._draw_gun_drop(window, d, now)
         self._draw_held_gun(window, now)
+        for f in self.flags:
+            self._draw_flag(window, f, now)
         for c in self.callouts:
             self._draw_callout(window, c, now)
 
@@ -628,3 +658,104 @@ class EffectManager:
             img.fill((255, 255, 255, max(alpha, 0)), special_flags=pg.BLEND_RGBA_MULT)
         cx, cy = self._center(p["victim_sq"])
         window.blit(img, img.get_rect(center=(cx, cy - rise * p["cell"] * 0.8)))
+
+    @staticmethod
+    def _pop(x):
+        x = max(0.0, min(1.0, x)) - 1.0
+        c = 1.70158
+        return 1 + (c + 1) * x ** 3 + c * x ** 2
+
+    def _draw_flag(self, window, f, now):
+        surf = emoji_surface(SURRENDER_FLAG, max(int(f["cell"] * 0.6), 8))
+        if surf is None:
+            return
+        t = (now - f["start"]) / FLAG_POP_MS
+        if t < 1.0:
+            surf = pg.transform.rotozoom(surf, 0.0, max(self._pop(t), 0.05))
+        cx, cy = self._center(f["sq"])
+        window.blit(surf, surf.get_rect(center=(cx + f["cell"] * 0.3, cy - f["cell"] * 0.3)))
+
+    @staticmethod
+    def _takeover_bar(width, height):
+        width = max(width, 4)
+        height = max(height, 2)
+        acc, amb = pg.Color(Colors.accent), pg.Color(Colors.amber)
+        bar = pg.Surface((width, height), pg.SRCALPHA)
+        for x in range(width):
+            f = x / (width - 1)
+            a = int(255 * math.sin(f * math.pi))
+            r = int(acc.r + (amb.r - acc.r) * f)
+            g = int(acc.g + (amb.g - acc.g) * f)
+            b = int(acc.b + (amb.b - acc.b) * f)
+            pg.draw.line(bar, (r, g, b, a), (x, 0), (x, height - 1))
+        return bar
+
+    def _build_takeover_surfaces(self, tk, w, h):
+        main_size = max(int(h * 0.22), 36)
+        tk["main"], _ = self._build_text_fx(tk["reason"], main_size, Colors.white,
+                                            Colors.callout_stroke, Colors.accent_glow)
+        sub_font = get_font(max(int(h * 0.042), 16), bold=True, family=SANS)
+        tk["sub"] = sub_font.render((tk["winner"] + " WINS").upper(), True,
+                                    pg.Color(Colors.amber_hi))
+        tk["bar"] = self._takeover_bar(int(w * 0.86), max(int(h * 0.013), 4))
+        tk["h"] = h
+
+    @staticmethod
+    def _blit_alpha(window, surf, topleft, alpha):
+        if alpha <= 0:
+            return
+        if alpha >= 255:
+            window.blit(surf, topleft)
+            return
+        img = surf.copy()
+        img.fill((255, 255, 255, alpha), special_flags=pg.BLEND_RGBA_MULT)
+        window.blit(img, topleft)
+
+    def draw_takeover(self, window, now):
+        tk = self._takeover
+        if tk is None:
+            return
+        t = now - tk["start"] - TAKEOVER_PAUSE_MS
+        if t < 0:
+            return
+        w, h = window.get_size()
+        out = max(0.0, min((t - (TAKEOVER_ANIM_MS - TAKEOVER_OUT_MS)) / TAKEOVER_OUT_MS, 1.0))
+        fade = 1.0 - out
+        bg_in = min(t / TAKEOVER_BG_MS, 1.0)
+        bg_alpha = int((TAKEOVER_BG_ALPHA - (TAKEOVER_BG_ALPHA - TAKEOVER_BG_SETTLE) * out) * bg_in)
+        overlay = pg.Surface((w, h), pg.SRCALPHA)
+        overlay.fill((10, 7, 12, max(bg_alpha, 0)))
+        window.blit(overlay, (0, 0))
+        if tk["h"] != h:
+            self._build_takeover_surfaces(tk, w, h)
+        main, sub, bar = tk["main"], tk["sub"], tk["bar"]
+        cx, cy = w // 2, int(h * 0.45)
+        bw = bar.get_width()
+        eased = 1 - (1 - min(t / TAKEOVER_BARS_MS, 1.0)) ** 3
+        off = int(bw * 1.2 * (1 - eased)) + int(bw * 1.2 * out)
+        center_x = cx - bw // 2
+        gap = main.get_height() // 2 + int(h * 0.05)
+        bar_alpha = int(255 * fade)
+        self._blit_alpha(window, bar, (center_x - off, cy - gap - bar.get_height() // 2), bar_alpha)
+        self._blit_alpha(window, bar, (center_x + off, cy + gap + sub.get_height()), bar_alpha)
+        md = t - 80
+        if md < 0:
+            m_scale, m_alpha = 2.4, 0
+        elif md < TAKEOVER_MAIN_MS:
+            fm = md / TAKEOVER_MAIN_MS
+            m_scale = 2.4 - 1.4 * (1 - (1 - fm) ** 3)
+            m_alpha = int(255 * min(fm * 2, 1.0))
+        else:
+            m_scale, m_alpha = 1.0, 255
+        m_scale += 0.12 * out
+        m_alpha = int(m_alpha * fade)
+        img = pg.transform.rotozoom(main, 0.0, m_scale)
+        if m_alpha < 255:
+            img = img.copy()
+            img.fill((255, 255, 255, max(m_alpha, 0)), special_flags=pg.BLEND_RGBA_MULT)
+        window.blit(img, img.get_rect(center=(cx, cy)))
+        s_alpha = int(min(max(t - 300, 0) / 300.0, 1.0) * 255 * fade)
+        if s_alpha > 0:
+            s = sub.copy()
+            s.fill((255, 255, 255, s_alpha), special_flags=pg.BLEND_RGBA_MULT)
+            window.blit(s, s.get_rect(center=(cx, cy + main.get_height() // 2 + sub.get_height())))

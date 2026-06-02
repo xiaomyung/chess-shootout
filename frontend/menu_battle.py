@@ -6,14 +6,15 @@ import pygame as pg
 
 import paths
 from frontend.visual import gunfx
+from frontend.visual import backdrop
 from frontend.visual.colors import Colors
 from frontend.visual.fonts import get_font
 
 
 AVOID_PAD = 0
 ROUTE_MARGIN = 22
-MAX_PAWNS = 10
-INITIAL_PAWNS = 8
+MAX_PAWNS = 15
+INITIAL_PAWNS = 5
 QUEEN_BASE_H = 104
 PAWN_BASE_H = 64
 DT_MAX = 0.05
@@ -520,7 +521,7 @@ class MenuBattle:
         self.acc["qfire"] -= dt
         if (self.acc["qfire"] <= 0 and nearest is not None and self._aligned(q, nearest)
                 and q["draw_anim"] <= 0):
-            self.acc["qfire"] = self._rnd(0.7, 1.6)
+            self.acc["qfire"] = self._rnd(0.23, 0.53)
             self._fire(q, nearest, True, now_ms)
 
         for p in alive:
@@ -547,8 +548,8 @@ class MenuBattle:
         self._separate_pawns()
 
         self.acc["spawn"] -= dt
-        if self.acc["spawn"] <= 0 and len(self.pawns) < MAX_PAWNS:
-            self.acc["spawn"] = self._rnd(1.2, 2.8)
+        while self.acc["spawn"] <= 0 and len(self.pawns) < MAX_PAWNS:
+            self.acc["spawn"] += self._rnd(0.18, 0.42)
             self._spawn_pawn(False)
 
         self.acc["talk"] -= dt
@@ -1085,25 +1086,7 @@ class MenuBattle:
     def _background(self, size):
         if self._bg_cache is not None and self._bg_cache[0] == size:
             return self._bg_cache[1]
-        w, h = size
-        grad = self._gradient(128, 0.5, 0.18, 1.2, 0.8,
-                              Colors.battle_bg_hi, Colors.battle_bg, Colors.battle_bg_edge)
-        surf = pg.transform.smoothscale(grad, size)
-        step = max(int(64 * self.scale), 32)
-        grid = pg.Surface(size, pg.SRCALPHA)
-        line = (*pg.Color(Colors.battle_grid)[:3], 6)
-        for gx in range(0, w, step):
-            pg.draw.line(grid, line, (gx, 0), (gx, h))
-        for gy in range(0, h, step):
-            pg.draw.line(grid, line, (0, gy), (w, gy))
-        surf.blit(grid, (0, 0))
-        floor_h = int(h * 0.38)
-        floor = pg.Surface((w, floor_h), pg.SRCALPHA)
-        fr, fg, fb = pg.Color(Colors.battle_floor)[:3]
-        for row in range(floor_h):
-            a = int(13 * row / floor_h)
-            pg.draw.line(floor, (fr, fg, fb, a), (0, row), (w, row))
-        surf.blit(floor, (0, h - floor_h))
+        surf = backdrop.arena_background(size, (0.5, 0.18))
         self._bg_cache = (size, surf)
         return surf
 
@@ -1114,20 +1097,6 @@ class MenuBattle:
         scrim = pg.transform.smoothscale(scrim, size)
         self._scrim_cache = (size, scrim)
         return scrim
-
-    def _gradient(self, n, cx, cy, rx, ry, c0, c1, c2):
-        surf = pg.Surface((n, n))
-        col0, col1, col2 = pg.Color(c0), pg.Color(c1), pg.Color(c2)
-        for yy in range(n):
-            fy = (yy / (n - 1) - cy) / ry
-            for xx in range(n):
-                fx = (xx / (n - 1) - cx) / rx
-                d = min(1.0, math.hypot(fx, fy))
-                if d < 0.6:
-                    surf.set_at((xx, yy), col0.lerp(col1, d / 0.6))
-                else:
-                    surf.set_at((xx, yy), col1.lerp(col2, (d - 0.6) / 0.4))
-        return surf
 
     def _radial(self, n, inner_a, outer_a, color):
         surf = pg.Surface((n, n), pg.SRCALPHA)

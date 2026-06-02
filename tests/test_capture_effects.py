@@ -21,6 +21,7 @@ os.environ.setdefault("SDL_AUDIODRIVER", "dummy")
 import random
 from dataclasses import FrozenInstanceError
 from types import SimpleNamespace
+from unittest.mock import MagicMock
 
 import pygame as pg
 import pytest
@@ -29,11 +30,13 @@ from backend.match import Match
 from backend.pieces import Piece, PieceColor, PieceType
 from backend.utils import Square
 from frontend.board import Board
+from frontend.frontend import Frontend
 from frontend.visual import gunfx
 from frontend.visual.effects import (
     AIM_MS, CALLOUT_LG_MS, CALLOUT_XL_MS, CHECK_DROP_MS, DRAW_MS, HIT_WORDS,
     HOLE_FADE_MS, HOLE_HOLD_MS, HOLE_IN_MS, INTENSITY_SCALE, PIECE_GUN, RECOIL_MS,
-    SHAKE_AMP, SHAKE_HARD_MS, STREAK_LABELS, TAG_MS, EffectManager,
+    SHAKE_AMP, SHAKE_HARD_MS, STREAK_LABELS, TAG_MS, TAKEOVER_PAUSE_MS,
+    TAKEOVER_TOTAL_MS, EffectManager,
 )
 from frontend.visual.gunfx import GUNS, GunSpec
 
@@ -47,9 +50,19 @@ KING, QUEEN, ROOK, BISHOP, KNIGHT, PAWN = (
 @pytest.fixture(scope="module", autouse=True)
 def _pygame_init():
     pg.init()
+    if pg.mixer.get_init() is None:
+        pg.mixer.init()
     pg.display.set_mode((780, 780))
     yield
     pg.quit()
+
+
+def _app():
+    app = Frontend(780, 780)
+    app.sound_manager = MagicMock()
+    app._on_start_game({"mode": "single_screen", "nickname": "alice",
+                        "time_minutes": None, "increment_seconds": 0, "side": "white"})
+    return app
 
 
 def _em(reduce_motion=False, intensity="full", seed=7):
@@ -722,3 +735,141 @@ def test_callouts_render_without_crashing():
     em.register_kill("white", Square(2, 3), 80, 200)
     em.draw_over(win, 320)
     assert len(em.callouts) == 1
+
+
+# --------------------------------------------------------------------------- #
+# 10c — checkmate takeover + surrender flag
+# --------------------------------------------------------------------------- #
+def test_takeover_lifecycle():
+    em = _em()
+    assert not em.has_takeover()
+    em.start_takeover("CHECKMATE", "WHITE", 0)
+    assert em.has_takeover()
+    em.clear_takeover()
+    assert not em.has_takeover()
+
+
+def test_takeover_renders_across_its_window_without_crashing():
+    em = _em()
+    em.start_takeover("CHECKMATE", "WHITE", 0)
+    win = pg.display.get_surface()
+    win.fill((0, 0, 0))
+    for now in (0, TAKEOVER_PAUSE_MS, TAKEOVER_PAUSE_MS + 200, TAKEOVER_PAUSE_MS + 800,
+                TAKEOVER_TOTAL_MS - 100, TAKEOVER_TOTAL_MS):
+        em.draw_takeover(win, now)
+    assert em.has_takeover()
+
+
+def test_takeover_holds_the_position_during_the_opening_pause():
+    em = _em()
+    em.start_takeover("CHECKMATE", "WHITE", 0)
+    win = pg.display.get_surface()
+    win.fill((0, 0, 0))
+    em.draw_takeover(win, TAKEOVER_PAUSE_MS - 100)
+    assert win.get_at((5, 5)) == pg.Color(0, 0, 0, 255)
+    em.draw_takeover(win, TAKEOVER_PAUSE_MS + 120)
+    assert win.get_at((5, 5)) != pg.Color(0, 0, 0, 255)
+
+
+def test_takeover_draw_clamps_negative_time():
+    em = _em()
+    em.start_takeover("CHECKMATE", "BLACK", 1000)
+    win = pg.display.get_surface()
+    em.draw_takeover(win, 500)
+    assert em.has_takeover()
+
+
+def test_raise_flag_then_clear():
+    em = _em()
+    em.raise_flag(Square(0, 4), 80, 0)
+    assert len(em.flags) == 1
+    assert em.flags[0]["sq"] == Square(0, 4)
+    em.start_takeover("CHECKMATE", "WHITE", 0)
+    em.clear()
+    assert em.flags == [] and not em.has_takeover()
+
+
+def test_flag_renders_through_its_pop_without_crashing():
+    em = _em()
+    em.raise_flag(Square(0, 4), 80, 0)
+    win = pg.display.get_surface()
+    win.fill((0, 0, 0))
+    for now in (0, 150, 400):
+        em.draw_over(win, now)
+    assert len(em.flags) == 1
+
+
+def test_flag_pop_overshoots_then_settles():
+    assert EffectManager._pop(0.0) == pytest.approx(0.0, abs=1e-6)
+    assert EffectManager._pop(1.0) == pytest.approx(1.0, abs=1e-6)
+    assert max(EffectManager._pop(x) for x in (0.6, 0.7, 0.8)) > 1.0
+
+
+def test_board_show_surrender_flag_anchors_to_the_kings_square():
+    board = _board()
+    _place(board, {Square(0, 4): Piece(KING, BLACK), Square(7, 4): Piece(KING, WHITE)})
+    board.show_surrender_flag(BLACK)
+    assert [f["sq"] for f in board.effects.flags] == [Square(0, 4)]
+
+
+def test_board_show_checkmate_takeover_activates(monkeypatch):
+    _no_motion(monkeypatch)
+    board = _board()
+    board.show_checkmate_takeover("WHITE")
+    assert board.effects.has_takeover()
+
+
+def test_checkmate_result_triggers_takeover_and_loser_flag(monkeypatch):
+    app = _app()
+    monkeypatch.setattr(app, "current_result", lambda: "white_wins")
+    app._trigger_result_effects()
+    assert app.board.effects.has_takeover()
+    assert [f["sq"] for f in app.board.effects.flags] == [Square(0, 4)]
+
+
+def test_resignation_raises_flag_without_takeover(monkeypatch):
+    app = _app()
+    monkeypatch.setattr(app, "current_result", lambda: "black_wins_by_resignation")
+    app._trigger_result_effects()
+    assert not app.board.effects.has_takeover()
+    assert [f["sq"] for f in app.board.effects.flags] == [Square(7, 4)]
+
+
+def test_timeout_win_raises_no_flag_and_no_takeover(monkeypatch):
+    app = _app()
+    monkeypatch.setattr(app, "current_result", lambda: "white_wins_on_time")
+    app._trigger_result_effects()
+    assert not app.board.effects.has_takeover()
+    assert app.board.effects.flags == []
+
+
+def test_draw_triggers_no_win_effects(monkeypatch):
+    app = _app()
+    monkeypatch.setattr(app, "current_result", lambda: "draw_agreement")
+    app._trigger_result_effects()
+    assert not app.board.effects.has_takeover()
+    assert app.board.effects.flags == []
+
+
+def test_result_sequence_waits_for_capture_choreography(monkeypatch):
+    app = _app()
+    monkeypatch.setattr(app, "current_result", lambda: "white_wins")
+    app.board.effects.captures = [{"in_flight": True}]
+    app._update_result_pending()
+    assert app._result_first_seen_at_ms is None
+    assert not app.board.effects.has_takeover()
+    app.board.effects.captures = []
+    app._update_result_pending()
+    assert app._result_first_seen_at_ms is not None
+    assert app.board.effects.has_takeover()
+
+
+def test_result_modal_waits_longer_while_a_takeover_plays(monkeypatch):
+    app = _app()
+    monkeypatch.setattr(app, "current_result", lambda: "white_wins")
+    app._update_result_pending()
+    assert app.board.effects.has_takeover()
+    app._result_first_seen_at_ms = pg.time.get_ticks() - 600
+    assert app._result_modal_should_show() is False
+    app._result_first_seen_at_ms = pg.time.get_ticks() - (TAKEOVER_TOTAL_MS + 50)
+    assert app._result_modal_should_show() is True

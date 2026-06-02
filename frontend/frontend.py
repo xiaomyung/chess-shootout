@@ -30,6 +30,8 @@ from frontend.modals.help import HelpModal
 from frontend.modals.reconnecting import ReconnectingModal
 from frontend.visual.toast import Toast
 from frontend.visual.fonts import get_font
+from frontend.visual import backdrop
+from frontend.visual.effects import TAKEOVER_TOTAL_MS
 from frontend.window_chrome import WindowChrome, WINDOW_FLAGS
 from frontend.online.client import (
     OnlineClient, RECONNECT_TOTAL_SECONDS, fetch_resume, probe_active_game,
@@ -145,6 +147,7 @@ STRIP_GAP_RATIO = 0.015
 AUTO_FLIP_DELAY_MS = 200
 RESULT_FADE_MS = 400
 RESULT_MODAL_DELAY_MS = 500
+RESULT_TAKEOVER_MS = TAKEOVER_TOTAL_MS
 RESULT_FADE_MAX_ALPHA = 140
 
 GIVE_TIME_DEBOUNCE_MS = 500
@@ -214,6 +217,7 @@ class Frontend(OnlineEventsMixin):
         self._time_control = None
         self.pgn_review = False
         self._flag_fall_played = False
+        self._game_bg_cache = None
         self._result_first_seen_at_ms = None
         self._pgn_result_tag = None
         self._match_session_id = None
@@ -1187,6 +1191,7 @@ class Frontend(OnlineEventsMixin):
             self.board.try_apply_next_premove()
 
         if self.mode != "menu":
+            self._draw_game_background()
             self.board.draw_board()
             self._update_player_strips()
             self._refresh_game_info()
@@ -1196,8 +1201,13 @@ class Frontend(OnlineEventsMixin):
             self.offer_banners.draw(self.board.rect)
             self._update_result_pending()
             if not self.match_found_modal.is_visible():
-                self._draw_result_fade_overlay()
-                if self._result_modal_should_show() and not self.pgn_review:
+                show_modal = self._result_modal_should_show() and not self.pgn_review
+                if not show_modal and self.board.effects.has_takeover():
+                    self.board.effects.draw_takeover(self.window, now)
+                else:
+                    self._draw_result_fade_overlay()
+                if show_modal:
+                    self.board.effects.clear_takeover()
                     self._feed_result_menu()
                     self.result_menu.draw()
         entering_menu = self.mode == "menu" and self._prev_battle_mode != "menu"
@@ -1275,14 +1285,34 @@ class Frontend(OnlineEventsMixin):
         self.player_strip_top.set_state(**self._strip_state(top_color, turn, over))
         self.player_strip_bottom.set_state(**self._strip_state(bottom_color, turn, over))
 
+    def _move_visually_settled(self):
+        return not self.board.is_animating() and not self.board.effects.captures
+
     def _update_result_pending(self):
         if self.current_result() is None or self.pgn_review:
             self._result_first_seen_at_ms = None
             return
-        if self._result_first_seen_at_ms is None:
+        if self._result_first_seen_at_ms is None and self._move_visually_settled():
             self._result_first_seen_at_ms = pg.time.get_ticks()
+            self._trigger_result_effects()
             if self.mode != ONLINE:
                 self._auto_save_pgn()
+
+    def _trigger_result_effects(self):
+        code = self.current_result()
+        if code is None:
+            return
+        if code.startswith("white_wins"):
+            winner, loser = PieceColor.WHITE, PieceColor.BLACK
+        elif code.startswith("black_wins"):
+            winner, loser = PieceColor.BLACK, PieceColor.WHITE
+        else:
+            return
+        is_mate = code in ("white_wins", "black_wins")
+        if is_mate or code.endswith("_by_resignation"):
+            self.board.show_surrender_flag(loser)
+        if is_mate:
+            self.board.show_checkmate_takeover(winner.value.upper())
 
     def _result_elapsed_ms(self):
         if self._result_first_seen_at_ms is None:
@@ -1291,7 +1321,22 @@ class Frontend(OnlineEventsMixin):
 
     def _result_modal_should_show(self):
         elapsed = self._result_elapsed_ms()
-        return elapsed is not None and elapsed >= RESULT_MODAL_DELAY_MS
+        if elapsed is None:
+            return False
+        delay = RESULT_TAKEOVER_MS if self.board.effects.has_takeover() else RESULT_MODAL_DELAY_MS
+        return elapsed >= delay
+
+    def _draw_game_background(self):
+        size = self.window.get_size()
+        w, h = size
+        if w <= 0 or h <= 0:
+            return
+        bc = self.board.rect.center
+        center = (bc[0] / w, bc[1] / h)
+        key = (size, bc)
+        if self._game_bg_cache is None or self._game_bg_cache[0] != key:
+            self._game_bg_cache = (key, backdrop.arena_background(size, center))
+        self.window.blit(self._game_bg_cache[1], (0, 0))
 
     def _draw_result_fade_overlay(self):
         elapsed = self._result_elapsed_ms()
@@ -1308,6 +1353,7 @@ class Frontend(OnlineEventsMixin):
     def _skip_result_fade(self):
         if self._result_first_seen_at_ms is None:
             return
+        self.board.effects.clear_takeover()
         self._result_first_seen_at_ms = pg.time.get_ticks() - RESULT_MODAL_DELAY_MS
 
     def _maybe_play_flag_fall(self):

@@ -133,11 +133,16 @@ class RightMenu:
         self._last_scroll_activity_ms = 0
         self._last_review_ply = None
 
+    OUTER_RADIUS = 10
+    INNER_RADIUS = 8
+
     def draw_menu(self):
-        pg.draw.rect(self.window, Colors.dark_menu, self.outer_rect)
+        pg.draw.rect(self.window, Colors.dark_menu, self.outer_rect,
+                     border_radius=self.OUTER_RADIUS)
         if self.game_info is not None and self.info_rect.height > 0:
             self._draw_game_info(self.info_rect)
-        pg.draw.rect(self.window, Colors.surface_inset, self.moves_rect)
+        pg.draw.rect(self.window, Colors.surface_inset, self.moves_rect,
+                     border_radius=self.INNER_RADIUS)
         self._draw_moves(self.moves_rect)
         self._draw_scroll_indicator(self.moves_rect)
         self._draw_buttons(self.buttons_rect)

@@ -650,6 +650,8 @@ def test_recoil_decays_back_to_rest():
     q["weapon"], q["aim"] = "shotgun", 0.0
     b._fire(q, b.pawns[0], True, 5000)
     kicked = q["recoil"]
+    # isolate the decay: block the queen from re-firing during the settle window
+    b.acc["qfire"] = 999
     for i in range(40):
         b.update(5000 + (i + 1) * 16)
     assert q["recoil"] < kicked * 0.1, "recoil should settle back toward rest"

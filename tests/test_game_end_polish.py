@@ -90,7 +90,7 @@ def test_modal_hidden_immediately_after_result():
 
 def test_modal_shows_after_delay_elapses():
     app = _make_app()
-    app.manual_result = "white_wins"
+    app.manual_result = "white_wins_on_time"
     app._update_result_pending()
     app._result_first_seen_at_ms = pg.time.get_ticks() - RESULT_MODAL_DELAY_MS - 1
     assert app._result_modal_should_show() is True
@@ -150,7 +150,7 @@ def test_click_during_fade_window_skips_to_modal():
 
 def test_click_outside_fade_window_does_not_alter_state():
     app = _make_app()
-    app.manual_result = "white_wins"
+    app.manual_result = "white_wins_on_time"
     app._update_result_pending()
     app._result_first_seen_at_ms = pg.time.get_ticks() - RESULT_MODAL_DELAY_MS - 100
     captured = app._result_first_seen_at_ms
