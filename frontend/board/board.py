@@ -666,6 +666,7 @@ class Board:
 
     def set_rect(self, rect):
         self.rect = pg.Rect(rect)
+        self.effects.board_rect = pg.Rect(rect)
         self.frame_pad = max(int(rect.width * self.FRAME_PAD_FRACTION), self.FRAME_PAD_MIN)
         inner = rect.width - 2 * self.frame_pad
         self.cell_size = max(inner // self.SIZE, 1)
@@ -1023,15 +1024,17 @@ class Board:
 
     def _capture_choreography(self, entry, from_sq, to_sq, moving_piece, on_complete):
         captured = entry.move.captured
+        color = moving_piece.color.value
+        victim_sq = (Square(from_sq.row, to_sq.col)
+                     if entry.move.is_en_passant else to_sq)
+        self.effects.configure(env.get_reduce_motion(), env.get_effect_intensity())
         attacker = self.piece_images_scaled.get((moving_piece.type, moving_piece.color))
         victim = self.piece_images_scaled.get((captured.type, captured.color))
         if attacker is None or victim is None or self.cell_size <= 0:
+            self._on_capture_impact(color, victim_sq)
             if self.shot_callback is not None:
                 self.shot_callback(entry)
             return False
-        self.effects.configure(env.get_reduce_motion(), env.get_effect_intensity())
-        victim_sq = (Square(from_sq.row, to_sq.col)
-                     if entry.move.is_en_passant else to_sq)
         self.dragging_from = None
         self._drag_cursor = None
         shot = (lambda: self.shot_callback(entry)) if self.shot_callback is not None else None
@@ -1042,10 +1045,14 @@ class Board:
             from_sq=from_sq, victim_sq=victim_sq, to_sq=to_sq,
             cell_size=self.cell_size, power=self._capture_power(captured.type),
             on_fire=shot,
-            on_slide=lambda: self.start_animation(
-                from_sq, to_sq, moving_piece, on_complete=on_complete),
+            on_slide=lambda: (self._on_capture_impact(color, victim_sq),
+                              self.start_animation(from_sq, to_sq, moving_piece,
+                                                   on_complete=on_complete)),
         )
         return True
+
+    def _on_capture_impact(self, color, victim_sq):
+        self.effects.register_kill(color, victim_sq, self.cell_size, pg.time.get_ticks())
 
     @staticmethod
     def _capture_power(victim_type):

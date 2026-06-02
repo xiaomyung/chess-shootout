@@ -5,6 +5,7 @@ import pygame as pg
 
 from frontend.visual import gunfx
 from frontend.visual.colors import Colors
+from frontend.visual.fonts import get_font, DISPLAY, SANS
 
 
 DRAW_MS = 240
@@ -30,6 +31,14 @@ SMOKE_PUFFS = 3
 SHAKE_AMP = {"hard": 18, "med": 11, "soft": 6}
 INTENSITY_SCALE = {"subtle": 0.34, "balanced": 0.67, "full": 1.0}
 
+CALLOUT_LG_MS = 1150
+CALLOUT_XL_MS = 1500
+TAG_MS = 850
+
+STREAK_LABELS = {2: "DOUBLE KILL", 3: "TRIPLE KILL", 4: "QUADRA KILL",
+                 5: "RAMPAGE", 6: "UNSTOPPABLE", 7: "GODLIKE"}
+HIT_WORDS = ("BLAM", "BOOM", "POW", "BANG", "HEADSHOT", "BODIED", "WASTED")
+
 PIECE_GUN = {
     "pawn": "revolver",
     "knight": "hand_cannon",
@@ -51,7 +60,12 @@ class EffectManager:
         self.holes = []
         self.captures = []
         self.drops = []
+        self.callouts = []
         self._check_gun = None
+        self.board_rect = None
+        self._streak_color = None
+        self._streak_count = 0
+        self._first_blood_spent = False
         self.reduce_motion = False
         self.intensity = "full"
         self._shake = None
@@ -73,8 +87,12 @@ class EffectManager:
         self.holes = []
         self.captures = []
         self.drops = []
+        self.callouts = []
         self._check_gun = None
         self._shake = None
+        self._streak_color = None
+        self._streak_count = 0
+        self._first_blood_spent = False
 
     def cut(self, now=None):
         if self._check_gun is not None and now is not None:
@@ -93,6 +111,9 @@ class EffectManager:
 
     def _rnd(self, lo, hi):
         return lo + self.rng.random() * (hi - lo)
+
+    def _pick(self, seq):
+        return seq[int(self.rng.random() * len(seq))]
 
     def _count(self, n):
         return max(1, int(round(n * INTENSITY_SCALE[self.intensity])))
@@ -165,6 +186,40 @@ class EffectManager:
             "vx": self._rnd(-0.8, 0.8), "spin": self._rnd(-320, 320),
             "fall": g["cell"] * 1.4, "start": now, "dur": CHECK_DROP_MS})
         self._check_gun = None
+
+    def reset_streak(self):
+        self._streak_color = None
+        self._streak_count = 0
+
+    def register_kill(self, color, victim_sq, cell, now_ms):
+        if color == self._streak_color:
+            self._streak_count += 1
+        else:
+            self._streak_color = color
+            self._streak_count = 1
+        n = self._streak_count
+        if not self._first_blood_spent:
+            self._first_blood_spent = True
+            self._callout(now_ms, "FIRST BLOOD", "FIRST ONE DOWN", "lg", cell,
+                          Colors.amber_hi, Colors.amber_glow)
+        elif n in STREAK_LABELS:
+            self._callout(now_ms, STREAK_LABELS[n], "", "xl" if n >= 5 else "lg", cell,
+                          Colors.accent_hi, Colors.accent_glow)
+        else:
+            self._tag(now_ms, self._pick(HIT_WORDS), victim_sq, cell)
+
+    def _callout(self, now, text, sub, size, cell, fill, glow):
+        size_px = max(int(cell * (1.9 if size == "xl" else 1.3)), 24)
+        surf = self._build_callout_surface(text, sub, size_px, fill, glow)
+        dur = CALLOUT_XL_MS if size == "xl" else CALLOUT_LG_MS
+        self.callouts = [{"surf": surf, "start": now, "dur": dur}]
+
+    def _tag(self, now, text, victim_sq, cell):
+        size_px = max(int(cell * 0.45), 12)
+        surf, _ = self._build_text_fx(text, size_px, Colors.amber_hi, Colors.tag_stroke,
+                                      Colors.amber_glow)
+        self.particles.append({"kind": "tag", "surf": surf, "victim_sq": victim_sq,
+                               "cell": cell, "start": now, "dur": TAG_MS})
 
     def _shoot(self, now, c):
         weapon = c["weapon"]
@@ -241,6 +296,7 @@ class EffectManager:
         self.particles = [p for p in self.particles if now < p["start"] + p["dur"]]
         self.holes = [h for h in self.holes if now < h["start"] + h["dur"]]
         self.drops = [d for d in self.drops if now < d["start"] + d["dur"]]
+        self.callouts = [c for c in self.callouts if now < c["start"] + c["dur"]]
 
     def draw_holes(self, window, now):
         if self.geom is None:
@@ -258,6 +314,8 @@ class EffectManager:
         for d in self.drops:
             self._draw_gun_drop(window, d, now)
         self._draw_held_gun(window, now)
+        for c in self.callouts:
+            self._draw_callout(window, c, now)
 
     def _draw_capture(self, window, c, now):
         fx, fy = self._center(c["from_sq"])
@@ -302,6 +360,8 @@ class EffectManager:
             self._draw_smoke(window, p, now)
         elif kind == "ragdoll":
             self._draw_ragdoll(window, p, now)
+        elif kind == "tag":
+            self._draw_tag(window, p, now)
 
     def _draw_flash(self, window, p, now):
         prog = (now - p["start"]) / p["dur"]
@@ -479,3 +539,92 @@ class EffectManager:
         pg.draw.circle(layer, (7, 9, 12, max(alpha, 0)), (r + 2, r + 2), r)
         cx, cy = self._center(h["victim_sq"])
         window.blit(layer, (cx - r - 2, cy - r - 2))
+
+    @staticmethod
+    def _build_text_fx(text, size_px, fill, stroke, glow):
+        text = text.upper()
+        font = get_font(max(int(size_px), 8), family=DISPLAY)
+        base = font.render(text, True, pg.Color(fill))
+        sw, sh = base.get_size()
+        stroke_w = max(int(size_px * 0.03), 2)
+        extrude = max(int(size_px * 0.06), 2)
+        glow_pad = max(int(size_px * 0.28), 6)
+        pad = stroke_w + glow_pad + 4
+        surf = pg.Surface((sw + pad * 2, sh + pad * 2 + extrude), pg.SRCALPHA)
+        cx, cy = pad, pad
+        glow_rgb = pg.Color(glow)[:3]
+        gtext = font.render(text, True, (*glow_rgb, 255))
+        small = pg.transform.smoothscale(gtext, (max(sw // 5, 1), max(sh // 5, 1)))
+        blur = pg.transform.smoothscale(small, (sw + glow_pad * 2, sh + glow_pad * 2))
+        blur.fill((255, 255, 255, 150), special_flags=pg.BLEND_RGBA_MULT)
+        surf.blit(blur, (cx - glow_pad, cy - glow_pad))
+        stroke_img = font.render(text, True, pg.Color(stroke))
+        surf.blit(stroke_img, (cx, cy + extrude))
+        for dx in (-stroke_w, 0, stroke_w):
+            for dy in (-stroke_w, 0, stroke_w):
+                if dx or dy:
+                    surf.blit(stroke_img, (cx + dx, cy + dy))
+        surf.blit(base, (cx, cy))
+        ink_bottom = cy + base.get_bounding_rect().bottom
+        return surf, ink_bottom
+
+    def _build_callout_surface(self, text, sub, size_px, fill, glow):
+        main, ink_bottom = self._build_text_fx(text, size_px, fill, Colors.callout_stroke, glow)
+        if not sub:
+            return main
+        sub_font = get_font(max(int(size_px * 0.17), 11), bold=True, family=SANS)
+        sub_img = sub_font.render(sub.upper(), True, pg.Color(Colors.text_dim))
+        gap = max(int(size_px * 0.13), 4)
+        top = ink_bottom + gap
+        w = max(main.get_width(), sub_img.get_width())
+        h = max(main.get_height(), top + sub_img.get_height())
+        surf = pg.Surface((w, h), pg.SRCALPHA)
+        surf.blit(main, ((w - main.get_width()) // 2, 0))
+        surf.blit(sub_img, ((w - sub_img.get_width()) // 2, top))
+        return surf
+
+    @staticmethod
+    def _callout_anim(prog):
+        if prog < 0.12:
+            f = prog / 0.12
+            return 0.5 + 0.56 * f, int(255 * f)
+        if prog < 0.78:
+            f = (prog - 0.12) / 0.66
+            return 1.06 - 0.06 * f, 255
+        f = (prog - 0.78) / 0.22
+        return 1.0 + 0.02 * f, int(255 * (1 - f))
+
+    def _draw_callout(self, window, c, now):
+        if self.board_rect is None:
+            return
+        prog = (now - c["start"]) / c["dur"]
+        if not 0.0 <= prog < 1.0:
+            return
+        scale, alpha = self._callout_anim(prog)
+        img = pg.transform.rotozoom(c["surf"], -3.0, scale)
+        if alpha < 255:
+            img = img.copy()
+            img.fill((255, 255, 255, max(alpha, 0)), special_flags=pg.BLEND_RGBA_MULT)
+        cx = self.board_rect.centerx
+        cy = self.board_rect.y + int(self.board_rect.height * 0.42)
+        window.blit(img, img.get_rect(center=(cx, cy)))
+
+    @staticmethod
+    def _tag_anim(prog):
+        if prog < 0.25:
+            f = prog / 0.25
+            return 0.65 * f, 0.4 + 0.7 * f, int(255 * f)
+        f = (prog - 0.25) / 0.75
+        return 0.65 + 0.35 * f, 1.1 - 0.1 * f, int(255 * (1 - f))
+
+    def _draw_tag(self, window, p, now):
+        prog = (now - p["start"]) / p["dur"]
+        if not 0.0 <= prog < 1.0:
+            return
+        rise, scale, alpha = self._tag_anim(prog)
+        img = pg.transform.rotozoom(p["surf"], -6.0, scale)
+        if alpha < 255:
+            img = img.copy()
+            img.fill((255, 255, 255, max(alpha, 0)), special_flags=pg.BLEND_RGBA_MULT)
+        cx, cy = self._center(p["victim_sq"])
+        window.blit(img, img.get_rect(center=(cx, cy - rise * p["cell"] * 0.8)))

@@ -1,11 +1,12 @@
-"""Phase 10a gun-fight capture/effects layer.
+"""Phase 10a/10b gun-fight capture/effects layer.
 
-Three surfaces are covered:
+Surfaces covered:
   * EffectManager (frontend/visual/effects.py) — the two-stage capture
     choreography (draw/aim -> fire -> travel -> impact), the board screen-shake
-    decay, the check gun-draw, and reduce-motion / intensity gating. A fake
-    `geom` resolver and an injected deterministic rng make every assertion
-    reproducible across xdist workers.
+    decay, the check gun-draw, reduce-motion / intensity gating, and the 10b
+    killstreak counter + announcer callouts (FIRST BLOOD -> DOUBLE..GODLIKE ->
+    hit-word tags; same-side, resets on recapture). A fake `geom` resolver and an
+    injected deterministic rng make every assertion reproducible across workers.
   * gunfx (frontend/visual/gunfx.py) — the shared GunSpec/GUNS registry that
     consolidated menu-battle's scattered gun dicts, plus the aim geometry.
   * Board (frontend/board/board.py) — that shake rides _cell_rect while
@@ -30,8 +31,9 @@ from backend.utils import Square
 from frontend.board import Board
 from frontend.visual import gunfx
 from frontend.visual.effects import (
-    AIM_MS, CHECK_DROP_MS, DRAW_MS, HOLE_FADE_MS, HOLE_HOLD_MS, HOLE_IN_MS,
-    INTENSITY_SCALE, PIECE_GUN, RECOIL_MS, SHAKE_AMP, SHAKE_HARD_MS, EffectManager,
+    AIM_MS, CALLOUT_LG_MS, CALLOUT_XL_MS, CHECK_DROP_MS, DRAW_MS, HIT_WORDS,
+    HOLE_FADE_MS, HOLE_HOLD_MS, HOLE_IN_MS, INTENSITY_SCALE, PIECE_GUN, RECOIL_MS,
+    SHAKE_AMP, SHAKE_HARD_MS, STREAK_LABELS, TAG_MS, EffectManager,
 )
 from frontend.visual.gunfx import GUNS, GunSpec
 
@@ -53,8 +55,13 @@ def _pygame_init():
 def _em(reduce_motion=False, intensity="full", seed=7):
     em = EffectManager(rng=random.Random(seed))
     em.geom = lambda sq: (sq.col * 100 + 50, sq.row * 100 + 50)
+    em.board_rect = pg.Rect(0, 0, 800, 800)
     em.configure(reduce_motion, intensity)
     return em
+
+
+def _tags(em):
+    return [p for p in em.particles if p["kind"] == "tag"]
 
 
 def _surf():
@@ -544,9 +551,174 @@ def test_show_check_gun_noop_in_review_mode(monkeypatch):
     assert board.effects._check_gun is None
 
 
+def test_kill_callout_fires_at_impact_not_at_move_start(monkeypatch):
+    _no_motion(monkeypatch)
+    board = _board()
+    _place(board, {
+        Square(7, 4): Piece(KING, WHITE),
+        Square(0, 4): Piece(KING, BLACK),
+        Square(4, 3): Piece(QUEEN, WHITE),
+        Square(2, 3): Piece(PAWN, BLACK),
+    })
+    board.match.backend.turn = WHITE
+    board.match.backend.move_history = []
+    board.handle_click(Square(4, 3))
+    board.handle_click(Square(2, 3))
+    assert board.effects.captures
+    assert board.effects.callouts == [] and _tags(board.effects) == []
+    c = board.effects.captures[0]
+    board.effects.update(c["fire_at"])
+    assert board.effects.callouts == []
+    board.effects.update(c["impact_at"])
+    assert len(board.effects.callouts) == 1
+
+
 def test_capture_power_scales_with_victim_value():
     assert Board._capture_power(QUEEN) == "hard"
     assert Board._capture_power(ROOK) == "hard"
     assert Board._capture_power(BISHOP) == "med"
     assert Board._capture_power(KNIGHT) == "med"
     assert Board._capture_power(PAWN) == "soft"
+
+
+# --------------------------------------------------------------------------- #
+# 10b — killstreak counter + announcer callouts
+# --------------------------------------------------------------------------- #
+def test_first_kill_of_the_game_is_first_blood():
+    em = _em()
+    em.register_kill("white", Square(0, 4), 80, 0)
+    assert em._streak_count == 1
+    assert len(em.callouts) == 1
+    assert _tags(em) == []
+    assert em.callouts[0]["dur"] == CALLOUT_LG_MS
+
+
+def test_streak_labels_escalate_for_same_side():
+    em = _em()
+    durs = []
+    for i in range(7):
+        em.register_kill("white", Square(0, 4), 80, i)
+        durs.append(em.callouts[0]["dur"] if em.callouts else None)
+    assert em._streak_count == 7
+    assert durs[0] == CALLOUT_LG_MS
+    assert durs[1] == CALLOUT_LG_MS
+    assert durs[3] == CALLOUT_LG_MS
+    assert durs[4] == CALLOUT_XL_MS
+    assert durs[6] == CALLOUT_XL_MS
+
+
+def test_eighth_consecutive_kill_falls_back_to_a_hit_word_tag():
+    em = _em()
+    for i in range(7):
+        em.register_kill("white", Square(0, 4), 80, i)
+    em.update(10_000)
+    em.register_kill("white", Square(0, 4), 80, 10_001)
+    assert em._streak_count == 8
+    assert em.callouts == []
+    assert len(_tags(em)) == 1
+
+
+def test_recapture_by_the_other_side_resets_the_streak():
+    em = _em()
+    em.register_kill("white", Square(0, 4), 80, 0)
+    em.register_kill("white", Square(0, 4), 80, 10)
+    assert em._streak_count == 2
+    em.register_kill("black", Square(4, 4), 80, 20)
+    assert em._streak_color == "black"
+    assert em._streak_count == 1
+
+
+def test_same_side_kill_after_a_quiet_move_keeps_building():
+    em = _em()
+    em.register_kill("white", Square(0, 4), 80, 0)
+    em.register_kill("white", Square(0, 4), 80, 50)
+    assert em._streak_count == 2
+
+
+def test_first_blood_only_once_per_game():
+    em = _em()
+    em.register_kill("white", Square(0, 4), 80, 0)
+    em.register_kill("black", Square(4, 4), 80, 10)
+    assert em._first_blood_spent is True
+    assert em._streak_count == 1
+    assert len(_tags(em)) == 1
+
+
+def test_clear_rearms_first_blood_and_resets_streak():
+    em = _em()
+    for i in range(3):
+        em.register_kill("white", Square(0, 4), 80, i)
+    em.clear()
+    assert em._streak_color is None
+    assert em._streak_count == 0
+    assert em._first_blood_spent is False
+    assert em.callouts == []
+
+
+def test_hit_word_tag_anchors_to_the_captured_square():
+    em = _em()
+    for i in range(7):
+        em.register_kill("white", Square(0, 4), 80, i)
+    em.update(10_000)
+    em.register_kill("white", Square(2, 3), 80, 10_001)
+    tag = _tags(em)[0]
+    assert tag["dur"] == TAG_MS
+    assert tag["victim_sq"] == Square(2, 3)
+
+
+def test_callout_replaces_so_only_one_big_callout_at_a_time():
+    em = _em()
+    em.register_kill("white", Square(0, 4), 80, 0)
+    em.register_kill("white", Square(0, 4), 80, 10)
+    assert len(em.callouts) == 1
+
+
+def test_callout_expires_after_its_duration():
+    em = _em()
+    em.register_kill("white", Square(0, 4), 80, 0)
+    dur = em.callouts[0]["dur"]
+    em.update(dur - 1)
+    assert len(em.callouts) == 1
+    em.update(dur + 1)
+    assert em.callouts == []
+
+
+def test_callout_animation_keyframes():
+    assert EffectManager._callout_anim(0.0) == (0.5, 0)
+    scale_in, alpha_in = EffectManager._callout_anim(0.12)
+    assert scale_in == pytest.approx(1.06)
+    assert alpha_in == 255
+    scale_hold, alpha_hold = EffectManager._callout_anim(0.5)
+    assert alpha_hold == 255
+    assert 1.0 <= scale_hold <= 1.06
+    scale_out, alpha_out = EffectManager._callout_anim(0.99)
+    assert alpha_out < 40
+
+
+def test_tag_animation_rises_and_fades():
+    rise0, scale0, alpha0 = EffectManager._tag_anim(0.0)
+    assert (rise0, alpha0) == (0.0, 0)
+    rise_peak, scale_peak, alpha_peak = EffectManager._tag_anim(0.25)
+    assert alpha_peak == 255
+    assert scale_peak == pytest.approx(1.1)
+    rise_end, _, alpha_end = EffectManager._tag_anim(0.99)
+    assert rise_end > rise_peak
+    assert alpha_end < 10
+
+
+def test_streak_label_table_matches_the_design():
+    assert STREAK_LABELS == {2: "DOUBLE KILL", 3: "TRIPLE KILL", 4: "QUADRA KILL",
+                             5: "RAMPAGE", 6: "UNSTOPPABLE", 7: "GODLIKE"}
+    assert HIT_WORDS == ("BLAM", "BOOM", "POW", "BANG", "HEADSHOT", "BODIED", "WASTED")
+
+
+def test_callouts_render_without_crashing():
+    em = _em()
+    win = pg.display.get_surface()
+    win.fill((0, 0, 0))
+    em.register_kill("white", Square(2, 3), 80, 0)
+    em.update(120)
+    em.draw_over(win, 120)
+    em.register_kill("white", Square(2, 3), 80, 200)
+    em.draw_over(win, 320)
+    assert len(em.callouts) == 1

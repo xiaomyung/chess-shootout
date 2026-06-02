@@ -78,6 +78,8 @@ class Colors:
     blood = "#d62b2b"
     blood_dark = "#b21f1f"
     smoke = "#bec4ce"
+    callout_stroke = "#120804"
+    tag_stroke = "#1a1206"
     connection_dots = {
         "connected": "#38d65b",
         "reconnecting": "#ffb020",
