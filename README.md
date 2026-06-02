@@ -252,7 +252,7 @@ or charging is off-limits. Running your own server for non-commercial play is
 fine; the online service operated by the author is not part of this grant and
 access to it is at the author's discretion.
 
-**"Chess Shootout"** is a trademark of the author — forks and derivatives must
+**"Chess Shootout™"** is a trademark of the author — forks and derivatives must
 use a different name and not imply endorsement.
 
 Contributions are welcome under the terms in [CONTRIBUTING.md](CONTRIBUTING.md).

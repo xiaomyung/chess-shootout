@@ -13,8 +13,9 @@ third-party assets below keep their own licenses.
 ## Fonts
 
 All bundled fonts are under the SIL Open Font License v1.1 (OFL-1.1), which
-permits redistribution and bundling with applications. Full text:
-https://openfontlicense.org/
+permits redistribution and bundling with applications. The full license text
+and each font's copyright notice ship alongside the fonts in
+assets/fonts/OFL.txt (https://openfontlicense.org/).
 
 - **assets/fonts/Anton-Regular.ttf** — Anton, by Vernon Adams / Google Fonts.
   https://fonts.google.com/specimen/Anton
