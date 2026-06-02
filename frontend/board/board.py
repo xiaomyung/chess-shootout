@@ -507,6 +507,7 @@ class Board:
                 self.window.blit(surface, rect.topleft)
             return
 
+        now = pg.time.get_ticks()
         hidden = {a.to_sq for a in self.animations}
         hidden |= self.effects.held_squares()
         if self.dragging_from is not None:
@@ -521,7 +522,8 @@ class Board:
 
             rect = self._cell_rect(row, col)
             surface = self.piece_images_scaled[(piece.type, piece.color)]
-            self.window.blit(surface, rect.topleft)
+            dx, dy = self.effects.piece_offset(sq, now)
+            self.window.blit(surface, (rect.x + dx, rect.y + dy))
 
     def _draw_animations(self):
         if not self.animations:
@@ -644,11 +646,14 @@ class Board:
                 if mover is not None and mover.type == PieceType.PAWN and target.col != sel.col:
                     captured = Square(sel.row, target.col)
                     self._draw_capture_hitmarker(self._cell_rect(captured.row, captured.col))
+        now = pg.time.get_ticks()
         for row, col in product(range(self.SIZE), repeat=2):
-            piece = self.match.piece_at(Square(row, col))
+            sq = Square(row, col)
+            piece = self.match.piece_at(sq)
             if (piece is not None and piece.type == PieceType.KING
                     and self.match.is_in_check(piece.color)):
-                self._draw_hitmarker(self._cell_rect(row, col),
+                dx, dy = self.effects.piece_offset(sq, now)
+                self._draw_hitmarker(self._cell_rect(row, col).move(dx, dy),
                                      max(int(self.cell_size * 1.0), 8), Colors.accent, 3.4)
 
     def _draw_dot(self, rect):
@@ -998,6 +1003,7 @@ class Board:
         self.start_animation(rook_from, rook_to, rook_piece, on_complete=on_complete)
 
     def start_undo_animation(self, move):
+        self.effects.clear()
         moving_piece = self.match.piece_at(move.from_sq)
         if moving_piece is None:
             return

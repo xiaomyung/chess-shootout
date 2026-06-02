@@ -34,8 +34,8 @@ from frontend.frontend import Frontend
 from frontend.visual import gunfx
 from frontend.visual.effects import (
     AIM_MS, CALLOUT_LG_MS, CALLOUT_XL_MS, CHECK_DROP_MS, DRAW_MS, HIT_WORDS,
-    HOLE_FADE_MS, HOLE_HOLD_MS, HOLE_IN_MS, INTENSITY_SCALE, PIECE_GUN, RECOIL_MS,
-    SHAKE_AMP, SHAKE_HARD_MS, STREAK_LABELS, TAG_MS, TAKEOVER_PAUSE_MS,
+    HOLE_FADE_MS, HOLE_HOLD_MS, HOLE_IN_MS, INTENSITY_SCALE, KING_SHAKE_MS, PIECE_GUN,
+    RECOIL_MS, SHAKE_AMP, SHAKE_HARD_MS, STREAK_LABELS, TAG_MS, TAKEOVER_PAUSE_MS,
     TAKEOVER_TOTAL_MS, EffectManager,
 )
 from frontend.visual.gunfx import GUNS, GunSpec
@@ -314,6 +314,55 @@ def test_reduce_motion_suppresses_check_gun():
     em.check(now_ms=0, attacker_type="rook", king_sq=Square(0, 4),
              from_sq=Square(0, 0), cell_size=80)
     assert em._check_gun is None and em.drops == []
+
+
+def test_check_shakes_the_king_piece_horizontally():
+    em = _em()
+    em.check(now_ms=0, attacker_type="rook", king_sq=Square(0, 4),
+             from_sq=Square(0, 0), cell_size=80)
+    offs = [em.piece_offset(Square(0, 4), t) for t in range(0, KING_SHAKE_MS, 20)]
+    assert any(dx != 0 for dx, dy in offs)
+    assert all(dy == 0 for dx, dy in offs)
+    assert em.piece_offset(Square(0, 4), KING_SHAKE_MS + 1) == (0, 0)
+
+
+def test_king_shake_only_affects_the_kings_square():
+    em = _em()
+    em.check(now_ms=0, attacker_type="rook", king_sq=Square(0, 4),
+             from_sq=Square(0, 0), cell_size=80)
+    assert em.piece_offset(Square(3, 3), 40) == (0, 0)
+
+
+def test_reduce_motion_suppresses_the_king_shake():
+    em = _em(reduce_motion=True)
+    em.check(now_ms=0, attacker_type="rook", king_sq=Square(0, 4),
+             from_sq=Square(0, 0), cell_size=80)
+    assert em._king_shake is None
+    assert em.piece_offset(Square(0, 4), 40) == (0, 0)
+
+
+def test_cut_and_clear_end_the_king_shake():
+    em = _em()
+    em.check(now_ms=0, attacker_type="rook", king_sq=Square(0, 4),
+             from_sq=Square(0, 0), cell_size=80)
+    em.cut(now=10)
+    assert em._king_shake is None
+    em.check(now_ms=20, attacker_type="rook", king_sq=Square(0, 4),
+             from_sq=Square(0, 0), cell_size=80)
+    em.clear()
+    assert em._king_shake is None
+
+
+def test_undo_clears_the_held_check_gun_and_shake():
+    board = _board()
+    board.effects.check(now_ms=0, attacker_type="rook", king_sq=Square(0, 4),
+                        from_sq=Square(0, 0), cell_size=board.cell_size)
+    assert board.effects._check_gun is not None
+    assert board.effects._king_shake is not None
+    board.start_undo_animation(
+        SimpleNamespace(from_sq=Square(3, 3), to_sq=Square(3, 3), is_castle=False))
+    assert board.effects._check_gun is None
+    assert board.effects._king_shake is None
 
 
 # --------------------------------------------------------------------------- #

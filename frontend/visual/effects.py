@@ -36,6 +36,7 @@ CALLOUT_LG_MS = 1150
 CALLOUT_XL_MS = 1500
 TAG_MS = 850
 FLAG_POP_MS = 300
+KING_SHAKE_MS = 360
 TAKEOVER_PAUSE_MS = 1000
 TAKEOVER_BG_MS = 200
 TAKEOVER_BARS_MS = 420
@@ -69,6 +70,7 @@ class EffectManager:
         self.flags = []
         self._takeover = None
         self._check_gun = None
+        self._king_shake = None
         self.board_rect = None
         self._streak_color = None
         self._streak_count = 0
@@ -98,6 +100,7 @@ class EffectManager:
         self.flags = []
         self._takeover = None
         self._check_gun = None
+        self._king_shake = None
         self._shake = None
         self._streak_color = None
         self._streak_count = 0
@@ -107,6 +110,7 @@ class EffectManager:
         if self._check_gun is not None and now is not None:
             self._release_check_gun(now)
         self._check_gun = None
+        self._king_shake = None
         self.captures = []
         self.particles = []
         self._shake = None
@@ -177,14 +181,28 @@ class EffectManager:
         })
 
     def check(self, *, now_ms, attacker_type, king_sq, from_sq, cell_size):
+        if self.reduce_motion:
+            return
+        self._king_shake = {"sq": king_sq, "start": now_ms,
+                            "amp": max(int(cell_size * 0.05), 2)}
         gun = PIECE_GUN.get(attacker_type, "revolver")
         weapon = self._weapon(gun, cell_size)
-        if weapon is None or self.reduce_motion:
+        if weapon is None:
             return
         if self._check_gun is not None:
             self._release_check_gun(now_ms)
         self._check_gun = {"weapon": weapon, "from_sq": from_sq, "victim_sq": king_sq,
                            "cell": cell_size, "start": now_ms}
+
+    def piece_offset(self, sq, now):
+        ks = self._king_shake
+        if ks is None or ks["sq"] != sq:
+            return (0, 0)
+        t = (now - ks["start"]) / KING_SHAKE_MS
+        if not 0.0 <= t < 1.0:
+            return (0, 0)
+        amp = ks["amp"] * (1.0 - t)
+        return (int(round(math.sin(t * math.tau * 2.5) * amp)), 0)
 
     def _release_check_gun(self, now):
         g = self._check_gun
