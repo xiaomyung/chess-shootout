@@ -76,7 +76,8 @@ class DirectoryBrowser(BaseModal):
     def is_visible(self):
         return self.visible
 
-    def _human_size(self, size):
+    @staticmethod
+    def _human_size(size):
         if size < 1024:
             return f"{size} B"
         if size < 1024 * 1024:

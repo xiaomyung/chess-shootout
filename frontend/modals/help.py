@@ -1,7 +1,7 @@
 import pygame as pg
 
 from frontend.visual.colors import Colors
-from frontend.modals.base import BaseModal
+from frontend.modals.base import BaseModal, BUTTON_VPAD
 from frontend.visual.widgets import draw_button_row, fit_text_to_rect
 from frontend.visual.fonts import get_font
 
@@ -78,7 +78,7 @@ class HelpModal(BaseModal):
         self.window.blit(
             title_surf, (content.centerx - title_surf.get_width() / 2, content.y))
 
-        button_h = self.button_font.get_height() + 16
+        button_h = self.button_font.get_height() + BUTTON_VPAD
         button_row = pg.Rect(content.x, content.bottom - button_h, content.width, button_h)
 
         rows_top = content.y + title_surf.get_height() + pad

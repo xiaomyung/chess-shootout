@@ -8,6 +8,8 @@ from frontend.visual.fonts import get_font
 DEFAULT_PADDING = 12
 MODAL_RADIUS = 14
 MODAL_RAIL = 5
+MODAL_MAX_WIDTH = 440
+BUTTON_VPAD = 16
 
 INTENT_RAIL = {
     "win": (Colors.result_win, Colors.modal_rail_win_end),

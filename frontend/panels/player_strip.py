@@ -294,17 +294,26 @@ class PlayerStrip:
                 cursor = self._draw_rating_pill(cursor, bottom_cy, right, pill_max)
             self._draw_captured(cursor, bottom_cy, right, ih, pill_max)
 
-    def _draw_rating_pill(self, x, cy, right, max_h=NO_PILL_HEIGHT_CAP):
-        text = self.rating_font.render(str(self.rating), True, Colors.text_dim)
-        pad_x = max(int(text.get_height() * 0.45), 3)
+    def _draw_text_pill(self, x, cy, right, text, bg, *,
+                        pad_ratio, pad_min, radius_div, radius_min, max_h):
+        pad_x = max(int(text.get_height() * pad_ratio), pad_min)
         w = text.get_width() + 2 * pad_x
         h = min(text.get_height() + 2, max_h)
         if x + w > right:
-            return x
-        pill = rounded_rect_surface((w, h), max(h // 3, 3), Colors.button_hover)
+            return None
+        pill = rounded_rect_surface((w, h), max(h // radius_div, radius_min), bg)
         self.window.blit(pill, (x, round(cy - h / 2)))
         blit_centered(self.window, text, (x + w / 2, cy))
-        return x + w + max(int(self.rect.height * 0.06), 4)
+        return x + w
+
+    def _draw_rating_pill(self, x, cy, right, max_h=NO_PILL_HEIGHT_CAP):
+        text = self.rating_font.render(str(self.rating), True, Colors.text_dim)
+        end = self._draw_text_pill(x, cy, right, text, Colors.button_hover,
+                                   pad_ratio=0.45, pad_min=3, radius_div=3, radius_min=3,
+                                   max_h=max_h)
+        if end is None:
+            return x
+        return end + max(int(self.rect.height * 0.06), 4)
 
     def _draw_captured(self, x, cy, right, ih, max_h=NO_PILL_HEIGHT_CAP):
         cursor = x
@@ -326,14 +335,8 @@ class PlayerStrip:
 
     def _draw_advantage_pill(self, x, cy, right, max_h=NO_PILL_HEIGHT_CAP):
         text = self.advantage_font.render(f"+{self.advantage}", True, Colors.on_accent)
-        pad_x = max(int(text.get_height() * 0.55), 4)
-        w = text.get_width() + 2 * pad_x
-        h = min(text.get_height() + 2, max_h)
-        if x + w > right:
-            return
-        pill = rounded_rect_surface((w, h), h // 2, Colors.amber)
-        self.window.blit(pill, (x, round(cy - h / 2)))
-        blit_centered(self.window, text, (x + w / 2, cy))
+        self._draw_text_pill(x, cy, right, text, Colors.amber,
+                             pad_ratio=0.55, pad_min=4, radius_div=2, radius_min=0, max_h=max_h)
 
     def _draw_ko(self, right, ih):
         if self.ko_count <= 0:

@@ -262,7 +262,17 @@ class SwatchRow(_Row):
         return False
 
 
-class PathRow(_Row):
+class _FieldRow(_Row):
+
+    def _field_h(self, fonts):
+        return max(fonts.value.get_height() + 18, 34)
+
+    def height(self, fonts):
+        base = fonts.title.get_height() + (fonts.desc.get_height() + 2 if self.desc else 0)
+        return ROW_PAD + base + 10 + self._field_h(fonts) + ROW_PAD
+
+
+class PathRow(_FieldRow):
 
     def __init__(self, label, desc, window, value_getter, on_change, on_reset, suffix=""):
         super().__init__(label, desc)
@@ -277,13 +287,6 @@ class PathRow(_Row):
         self._change_rect = pg.Rect(0, 0, 0, 0)
         self._reset_rect = pg.Rect(0, 0, 0, 0)
         self._field_rect = pg.Rect(0, 0, 0, 0)
-
-    def _field_h(self, fonts):
-        return max(fonts.value.get_height() + 18, 34)
-
-    def height(self, fonts):
-        base = fonts.title.get_height() + (fonts.desc.get_height() + 2 if self.desc else 0)
-        return ROW_PAD + base + 10 + self._field_h(fonts) + ROW_PAD
 
     def draw(self, window, rect, fonts):
         x = rect.x
@@ -337,7 +340,7 @@ class PathRow(_Row):
         return self.input.handle_key(event)
 
 
-class TextRow(_Row):
+class TextRow(_FieldRow):
 
     def __init__(self, label, desc, window, value_getter, placeholder=""):
         super().__init__(label, desc)
@@ -347,13 +350,6 @@ class TextRow(_Row):
         self.input.padding = 11
         self.input.text = str(value_getter())
         self._field_rect = pg.Rect(0, 0, 0, 0)
-
-    def _field_h(self, fonts):
-        return max(fonts.value.get_height() + 18, 34)
-
-    def height(self, fonts):
-        base = fonts.title.get_height() + (fonts.desc.get_height() + 2 if self.desc else 0)
-        return ROW_PAD + base + 10 + self._field_h(fonts) + ROW_PAD
 
     def draw(self, window, rect, fonts):
         x = rect.x

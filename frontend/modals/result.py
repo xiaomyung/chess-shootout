@@ -203,12 +203,15 @@ class ResultMenu(BaseModal):
             label_surf = self.label_font.render(label.upper(), True, Colors.text_mute)
             blit_centered(self.window, label_surf, (cell.centerx, cell.y + cell_h * 0.72))
 
+    def _button_height(self):
+        return max(int(self.rect.height * 0.1), 30)
+
     def _buttons_top(self, content):
-        btn_h = max(int(self.rect.height * 0.1), 30)
+        btn_h = self._button_height()
         return content.bottom - btn_h
 
     def _draw_buttons(self, content):
-        btn_h = max(int(self.rect.height * 0.1), 30)
+        btn_h = self._button_height()
         gap = max(int(content.width * 0.02), 6)
         row = pg.Rect(content.x, content.bottom - btn_h, content.width, btn_h)
         buttons = ONLINE_BUTTONS if self.online_mode else BUTTONS

@@ -1,6 +1,7 @@
 import pygame as pg
 
 from frontend.visual.colors import Colors
+from frontend.panels.audio import DEFAULT_BUTTON_COLUMNS
 from frontend.pgn.generate import iter_move_pairs
 from frontend.visual.widgets import draw_button_row, draw_scroll_thumb, draw_pill
 from server.protocol import GIVE_TIME_SECONDS
@@ -154,7 +155,7 @@ class RightMenu:
         self._draw_buttons(self.buttons_rect)
         if self.audio_panel is not None:
             rows = self.buttons_provider()
-            n_cols = len(rows[0]) if rows else 5
+            n_cols = len(rows[0]) if rows else DEFAULT_BUTTON_COLUMNS
             self.audio_panel.set_rect(
                 self.audio_rect, button_font=self.button_font,
                 n_columns=n_cols, gap=self.button_gap,

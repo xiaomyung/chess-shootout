@@ -1,6 +1,6 @@
 import pygame as pg
 
-from frontend.modals.base import BaseModal
+from frontend.modals.base import BaseModal, BUTTON_VPAD
 from frontend.visual.colors import Colors
 from frontend.visual.text_input import TextInput
 from frontend.visual.widgets import draw_button_row, fit_text_to_rect
@@ -61,7 +61,7 @@ class FenInputModal(BaseModal):
         self.window.blit(
             title_surf, (content.centerx - title_surf.get_width() / 2, content.y))
 
-        button_h = self.button_font.get_height() + 16
+        button_h = self.button_font.get_height() + BUTTON_VPAD
         button_row = pg.Rect(content.x, content.bottom - button_h, content.width, button_h)
 
         input_h = max(int(self.rect.height * 0.20), 32)

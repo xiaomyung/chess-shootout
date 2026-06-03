@@ -2,7 +2,7 @@ import math
 
 import pygame as pg
 
-from frontend.modals.base import BaseModal, MODAL_RAIL
+from frontend.modals.base import BaseModal, MODAL_MAX_WIDTH, MODAL_RAIL
 from frontend.panels.player_strip import format_countdown
 from frontend.visual.colors import Colors
 from frontend.visual.draw import supersample, rounded_rect_surface, circle_surface
@@ -107,7 +107,7 @@ class WaitModal(BaseModal):
             self.button_rects = {}
             return
         pad = self.padding
-        panel_w = min(self.rect.width, 440)
+        panel_w = min(self.rect.width, MODAL_MAX_WIDTH)
         title_font = get_display_font(max(int(panel_w * 0.06), 20))
         sub_font = get_font(max(int(panel_w * 0.03), 12), bold=False)
         mode_font = get_font(max(int(panel_w * 0.024), 9), bold=True)

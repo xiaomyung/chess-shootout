@@ -1,6 +1,6 @@
 import pygame as pg
 
-from frontend.modals.base import BaseModal, MODAL_RAIL
+from frontend.modals.base import BaseModal, MODAL_MAX_WIDTH, MODAL_RAIL
 from frontend.visual.colors import Colors
 from frontend.visual.draw import rounded_rect_surface
 from frontend.visual.emoji import blit_emoji
@@ -76,7 +76,7 @@ class ConfirmModal(BaseModal):
             self.button_rects = {}
             return
         pad = self.padding
-        panel_w = min(self.rect.width, 440)
+        panel_w = min(self.rect.width, MODAL_MAX_WIDTH)
         inner_w = panel_w - 2 * pad
         title_font = get_display_font(max(int(panel_w * 0.07), 22))
         sub_font = get_font(max(int(panel_w * 0.032), 13), bold=False)

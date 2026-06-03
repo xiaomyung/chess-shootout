@@ -127,38 +127,37 @@ def set_data_dir(path):
         _persist_delete("CHESS_DATA_DIR")
 
 
-def get_master_volume():
-    raw = os.environ.get("CHESS_MASTER_VOLUME")
+def _get_volume(key, default):
+    raw = os.environ.get(key)
     if not raw:
-        return _DEFAULT_MASTER_VOLUME
+        return default
     try:
         value = float(raw)
     except ValueError:
-        return _DEFAULT_MASTER_VOLUME
+        return default
     return max(0.0, min(1.0, value))
+
+
+def _set_volume(key, value):
+    clamped = max(0.0, min(1.0, float(value)))
+    os.environ[key] = f"{clamped:.3f}"
+    _persist(key, f"{clamped:.3f}")
+
+
+def get_master_volume():
+    return _get_volume("CHESS_MASTER_VOLUME", _DEFAULT_MASTER_VOLUME)
 
 
 def set_master_volume(value):
-    clamped = max(0.0, min(1.0, float(value)))
-    os.environ["CHESS_MASTER_VOLUME"] = f"{clamped:.3f}"
-    _persist("CHESS_MASTER_VOLUME", f"{clamped:.3f}")
+    _set_volume("CHESS_MASTER_VOLUME", value)
 
 
 def get_menu_volume():
-    raw = os.environ.get("CHESS_MENU_VOLUME")
-    if not raw:
-        return _DEFAULT_MENU_VOLUME
-    try:
-        value = float(raw)
-    except ValueError:
-        return _DEFAULT_MENU_VOLUME
-    return max(0.0, min(1.0, value))
+    return _get_volume("CHESS_MENU_VOLUME", _DEFAULT_MENU_VOLUME)
 
 
 def set_menu_volume(value):
-    clamped = max(0.0, min(1.0, float(value)))
-    os.environ["CHESS_MENU_VOLUME"] = f"{clamped:.3f}"
-    _persist("CHESS_MENU_VOLUME", f"{clamped:.3f}")
+    _set_volume("CHESS_MENU_VOLUME", value)
 
 
 def get_reduce_motion():
