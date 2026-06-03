@@ -29,6 +29,7 @@ import pytest
 
 from domain.match import Match
 from backend.pieces import Piece, PieceColor, PieceType
+from backend.pseudo_legal import king_square, checking_square, _segment_empty
 from backend.utils import Square
 from frontend.board import Board
 from frontend.frontend import Frontend
@@ -646,9 +647,9 @@ def _white_entry():
 
 def test_segment_empty_detects_a_blocker():
     grid = [[None] * 8 for _ in range(8)]
-    assert Board._segment_empty(grid, Square(0, 0), Square(0, 4)) is True
+    assert _segment_empty(grid, Square(0, 0), Square(0, 4)) is True
     grid[0][2] = Piece(PAWN, WHITE)
-    assert Board._segment_empty(grid, Square(0, 0), Square(0, 4)) is False
+    assert _segment_empty(grid, Square(0, 0), Square(0, 4)) is False
 
 
 def test_king_square_locates_both_kings():
@@ -657,9 +658,9 @@ def test_king_square_locates_both_kings():
         Square(0, 4): Piece(KING, BLACK),
         Square(7, 4): Piece(KING, WHITE),
     })
-    assert board._king_square(BLACK) == Square(0, 4)
-    assert board._king_square(WHITE) == Square(7, 4)
-    assert board._king_square(BLACK) != board._king_square(WHITE)
+    assert king_square(board.match.state, BLACK) == Square(0, 4)
+    assert king_square(board.match.state, WHITE) == Square(7, 4)
+    assert king_square(board.match.state, BLACK) != king_square(board.match.state, WHITE)
 
 
 def test_checking_square_skips_blocked_slider_finds_real_checker():
@@ -671,7 +672,7 @@ def test_checking_square_skips_blocked_slider_finds_real_checker():
         Square(0, 2): Piece(PAWN, WHITE),
         Square(4, 4): Piece(QUEEN, WHITE),
     })
-    assert board._checking_square(Square(0, 4), WHITE) == Square(4, 4)
+    assert checking_square(board.match.state, Square(0, 4), WHITE) == Square(4, 4)
 
 
 def test_show_check_gun_points_from_checker_to_king(monkeypatch):

@@ -1,10 +1,14 @@
+from itertools import product
+
 from backend.pieces import (
     CASTLE_TARGET_COLS,
     KING_HOME_COL, KING_OFFSETS, KNIGHT_OFFSETS, PieceType,
     king_home_row, pawn_forward,
     pawn_start_row,
 )
-from backend.utils import on_board
+from backend.utils import on_board, Square, BOARD_SIZE
+
+_SLIDERS = (PieceType.BISHOP, PieceType.ROOK, PieceType.QUEEN)
 
 
 def piece_can_pseudo_reach(piece, from_sq, to_sq):
@@ -66,3 +70,36 @@ def _king_can_reach(color, from_sq, to_sq):
         if to_sq.row == home_row and to_sq.col in CASTLE_TARGET_COLS:
             return True
     return False
+
+
+def king_square(state, color):
+    for row, col in product(range(BOARD_SIZE), repeat=2):
+        piece = state[row][col]
+        if piece is not None and piece.type == PieceType.KING and piece.color == color:
+            return Square(row, col)
+    return None
+
+
+def checking_square(state, king_sq, by_color):
+    for row, col in product(range(BOARD_SIZE), repeat=2):
+        piece = state[row][col]
+        if piece is None or piece.color != by_color:
+            continue
+        sq = Square(row, col)
+        if not piece_can_pseudo_reach(piece, sq, king_sq):
+            continue
+        if piece.type in _SLIDERS and not _segment_empty(state, sq, king_sq):
+            continue
+        return sq
+    return None
+
+
+def _segment_empty(state, a, b):
+    dr = (b.row > a.row) - (b.row < a.row)
+    dc = (b.col > a.col) - (b.col < a.col)
+    r, c = a.row + dr, a.col + dc
+    while (r, c) != (b.row, b.col):
+        if state[r][c] is not None:
+            return False
+        r, c = r + dr, c + dc
+    return True

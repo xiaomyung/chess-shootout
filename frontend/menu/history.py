@@ -12,6 +12,7 @@ from frontend.visual.draw import (
     blit_centered, infinity_surface, rounded_rect_surface, supersample,
 )
 from frontend.visual.fonts import get_display_font, get_font, get_mono_font
+from frontend.visual.icons import piece_png_path
 from frontend.visual.widgets import build_shell, draw_scroll_thumb
 
 
@@ -122,7 +123,7 @@ class HistoryView:
     def _pawn(self, color, size):
         if self._pawn_orig is None:
             self._pawn_orig = {
-                c: pg.image.load(Piece(PieceType.PAWN, c).img_path).convert_alpha()
+                c: pg.image.load(piece_png_path(Piece(PieceType.PAWN, c))).convert_alpha()
                 for c in (PieceColor.WHITE, PieceColor.BLACK)
             }
         key = (color, size)

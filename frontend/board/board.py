@@ -3,13 +3,14 @@ from itertools import product
 
 import pygame as pg
 
-from backend.pseudo_legal import piece_can_pseudo_reach
+from backend.pseudo_legal import piece_can_pseudo_reach, king_square, checking_square
 from backend.utils import Square
 from infra import env
 from frontend.visual.animation import PieceAnimation
 from frontend.visual.colors import Colors
 from frontend.visual.draw import supersample
 from frontend.visual.effects import EffectManager
+from frontend.visual.icons import piece_png_path
 from domain.premoves import Premove, speculative_board
 from backend.pieces import PieceType, PieceColor, Piece, opponent_of
 from frontend.visual.fonts import get_font, DISPLAY
@@ -120,7 +121,7 @@ class Board:
         for piece_color in PieceColor:
             for piece_type in PieceType:
                 piece = Piece(piece_type, piece_color)
-                image = pg.image.load(piece.img_path).convert_alpha()
+                image = pg.image.load(piece_png_path(piece)).convert_alpha()
                 self.piece_images_original[(piece_type, piece_color)] = image
 
     def _cell_rect_base(self, row, col):
@@ -1087,7 +1088,7 @@ class Board:
     def show_surrender_flag(self, color):
         if self.cell_size <= 0:
             return
-        king_sq = self._king_square(color)
+        king_sq = king_square(self.match.state, color)
         if king_sq is not None:
             self.effects.raise_flag(king_sq, self.cell_size, pg.time.get_ticks())
 
@@ -1105,55 +1106,21 @@ class Board:
             return "soft"
         return "med"
 
-    SLIDERS = (PieceType.BISHOP, PieceType.ROOK, PieceType.QUEEN)
-
     def show_check_gun(self, entry):
         if self.cell_size <= 0 or self.review_ply is not None:
             return
         by_color = entry.move.piece.color
         king_color = opponent_of(by_color)
-        king_sq = self._king_square(king_color)
+        king_sq = king_square(self.match.state, king_color)
         if king_sq is None:
             return
-        checker = self._checking_square(king_sq, by_color)
+        checker = checking_square(self.match.state, king_sq, by_color)
         if checker is None:
             return
         self.effects.configure(env.get_reduce_motion(), env.get_effect_intensity())
         self.effects.check(now_ms=pg.time.get_ticks(),
                            attacker_type=self.match.piece_at(checker).type.value,
                            king_sq=king_sq, from_sq=checker, cell_size=self.cell_size)
-
-    def _king_square(self, color):
-        for row, col in product(range(self.SIZE), repeat=2):
-            piece = self.match.piece_at(Square(row, col))
-            if piece is not None and piece.type == PieceType.KING and piece.color == color:
-                return Square(row, col)
-        return None
-
-    def _checking_square(self, king_sq, by_color):
-        grid = self.match.state
-        for row, col in product(range(self.SIZE), repeat=2):
-            piece = grid[row][col]
-            if piece is None or piece.color != by_color:
-                continue
-            sq = Square(row, col)
-            if not piece_can_pseudo_reach(piece, sq, king_sq):
-                continue
-            if piece.type in self.SLIDERS and not self._segment_empty(grid, sq, king_sq):
-                continue
-            return sq
-        return None
-
-    @staticmethod
-    def _segment_empty(grid, a, b):
-        dr = (b.row > a.row) - (b.row < a.row)
-        dc = (b.col > a.col) - (b.col < a.col)
-        r, c = a.row + dr, a.col + dc
-        while (r, c) != (b.row, b.col):
-            if grid[r][c] is not None:
-                return False
-            r, c = r + dr, c + dc
-        return True
 
     def _try_select(self, square):
         piece = self.match.piece_at(square)

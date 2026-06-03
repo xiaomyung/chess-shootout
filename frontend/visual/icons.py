@@ -1,9 +1,16 @@
 import math
+import os
 
 import pygame as pg
 
+from paths import PIECES_PNG_DIR
 from frontend.visual.colors import Colors
 from frontend.visual.draw import supersample
+
+
+def piece_png_path(piece):
+    return os.path.join(PIECES_PNG_DIR, f"{piece.type.value}_{piece.color.value}.png")
+
 
 _SPEAKER_BODY = [(3, 9), (6.5, 9), (11, 5.2), (11, 18.8), (6.5, 15), (3, 15)]
 
