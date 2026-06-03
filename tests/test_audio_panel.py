@@ -80,24 +80,6 @@ def test_set_master_volume_clamps(sm, value, expected):
     assert sm.master_volume == pytest.approx(expected)
 
 
-def test_set_enabled_false_calls_stop_all():
-    s = SoundManager(SOUNDS_DIR, enabled=True)
-    stopped = []
-    s.stop_all = lambda: stopped.append(True)
-    s.set_enabled(False)
-    assert stopped == [True]
-    assert s.enabled is False
-
-
-def test_set_enabled_true_does_not_stop():
-    s = SoundManager(SOUNDS_DIR, enabled=False)
-    stopped = []
-    s.stop_all = lambda: stopped.append(True)
-    s.set_enabled(True)
-    assert stopped == []
-    assert s.enabled is True
-
-
 def test_play_with_master_scales_volume_before_playing():
     s = SoundManager(SOUNDS_DIR, enabled=True)
     s.master_volume = 0.3

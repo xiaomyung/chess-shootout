@@ -43,8 +43,6 @@ def _draw_row(row, rect=pg.Rect(40, 40, 420, 56)):
     return row
 
 
-# ---- modal -----------------------------------------------------------------
-
 def test_show_paints_shell_and_close():
     modal = _modal()
     modal.show([("Game", [PathRow("Games folder", "where games live",
@@ -88,8 +86,6 @@ def test_sections_render():
                                                      * painted.get_height() * 3)
 
 
-# ---- control rows ----------------------------------------------------------
-
 def test_toggle_row_flips_value():
     state = {"on": False}
     row = ToggleRow("Reduce motion", "calm", lambda: state["on"],
@@ -109,10 +105,10 @@ def test_toggle_knob_animates_toward_target():
     assert row._pos == 0.0
     state["on"] = True
     _draw_row(row)
-    assert 0.0 < row._pos < 1.0          # mid-transition, not instant
+    assert 0.0 < row._pos < 1.0
     for _ in range(20):
         _draw_row(row)
-    assert row._pos == 1.0               # settles fully on
+    assert row._pos == 1.0
 
 
 def test_segmented_row_selects_option():
@@ -138,7 +134,7 @@ def test_swatch_row_selects_unlocked_only():
     row = SwatchRow("Theme", "soon", swatches, lambda: chosen["v"],
                     lambda k: chosen.update(v=k))
     _draw_row(row)
-    assert row.handle_click(row._rects["wood"][0].center) is False   # locked
+    assert row.handle_click(row._rects["wood"][0].center) is False
     assert chosen["v"] == "dark"
     assert row.handle_click(row._rects["dark"][0].center) is True
     assert chosen["v"] == "dark"

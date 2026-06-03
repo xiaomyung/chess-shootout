@@ -65,16 +65,12 @@ def _run(b, steps, start=1000, step_ms=16, reduce_motion=False):
     return t
 
 
-# ---- spawning / initial state ----------------------------------------------
-
 def test_running_battle_has_queen_and_pawns():
     b = _battle()
     assert b.queen is not None
     assert len(b.pawns) == INITIAL_PAWNS
     assert all(p["alive"] for p in b.pawns)
 
-
-# ---- entrance intro --------------------------------------------------------
 
 def test_launch_starts_in_intro_with_no_pawns():
     b = _intro_battle()
@@ -103,16 +99,16 @@ def test_intro_finishes_lands_queen_and_says_a_oneliner():
     assert b.queen["bubble"]["text"] in INTRO_LINES, "the queen should drop a one-liner on landing"
 
 
-def test_queen_lands_fully_inside_the_window_box():
-    for seed in range(10):
-        b = _intro_battle(seed=seed)
-        t = 1000
-        while b._intro_active and t < 1000 + 300 * 16:
-            b.update(t)
-            t += 16
-        assert not b._intro_active, f"seed {seed}: the intro should finish"
-        assert b._fully_in_window(b.queen), \
-            f"seed {seed}: the queen must land with her whole body inside the window"
+@pytest.mark.parametrize("seed", range(10), ids=lambda s: f"seed_{s}")
+def test_queen_lands_fully_inside_the_window_box(seed):
+    b = _intro_battle(seed=seed)
+    t = 1000
+    while b._intro_active and t < 1000 + 300 * 16:
+        b.update(t)
+        t += 16
+    assert not b._intro_active, "the intro should finish"
+    assert b._fully_in_window(b.queen), \
+        "the queen must land with her whole body inside the window"
 
 
 def test_pawns_only_start_after_the_intro():
@@ -282,8 +278,6 @@ def test_set_rect_rescales_without_respawning():
     assert b.queen["sprite_h"] != queen_h_before
 
 
-# ---- obstacle / routing geometry -------------------------------------------
-
 def test_in_obstacle_inside_vs_outside():
     b = _battle()
     cx, cy = b.avoid_rect.center
@@ -347,8 +341,6 @@ def test_no_obstacle_when_avoid_rect_empty():
     assert b._avoid(400, 300) == (400, 300)
 
 
-# ---- full-model collision --------------------------------------------------
-
 def test_entity_obstacle_expands_by_full_model_extent():
     b = _battle(card=pg.Rect(400, 250, 300, 200))
     o = b.obstacle
@@ -373,8 +365,6 @@ def test_full_model_rect_does_not_overlap_the_card():
     overlaps = left < o[2] and right > o[0] and top < o[3] and bottom > o[1]
     assert not overlaps, "the queen's whole model rect must clear the card"
 
-
-# ---- idle unstick ----------------------------------------------------------
 
 def test_idle_queen_rerolls_waypoint_after_two_seconds():
     b = _battle()
@@ -404,8 +394,6 @@ def test_moving_queen_resets_idle_anchor():
     assert q["anchor_x"] == q["x"]
     assert q["anchor_ms"] == 5000
 
-
-# ---- window-border collision (queen only) ----------------------------------
 
 def test_queen_full_model_stays_within_window_during_play():
     b = _battle()
@@ -539,8 +527,6 @@ def test_projectile_flies_along_the_barrel():
     assert delta < 0.3, "the projectile should travel along the barrel, not curve away"
 
 
-# ---- hit feedback (hitmarker + red particles + shake) ----------------------
-
 def test_kill_emits_hitmark_and_red_particles_not_a_blood_circle():
     b = _battle()
     p = b.pawns[0]
@@ -565,8 +551,6 @@ def test_landing_a_hit_on_the_queen_shakes_and_marks_her():
     assert any(pt["kind"] == "hitmark" for pt in b.particles)
     assert any(pt["kind"] == "spark" and pt["color"] == Colors.blood for pt in b.particles)
 
-
-# ---- projectiles -----------------------------------------------------------
 
 def test_shotgun_launches_a_pellet_spread_revolver_one():
     b = _battle()
@@ -650,8 +634,6 @@ def test_projectiles_freeze_under_reduce_motion():
     assert (pr["x"], pr["y"]) == pos, "projectiles must not move while motion is reduced"
 
 
-# ---- recoil ----------------------------------------------------------------
-
 def test_firing_kicks_recoil_scaled_by_gun_strength():
     b = _battle()
     q = b.queen
@@ -665,12 +647,12 @@ def test_firing_kicks_recoil_scaled_by_gun_strength():
 
 
 def test_recoil_decays_back_to_rest():
+    """Block the queen from re-firing during the settle window so only the decay is measured."""
     b = _battle()
     q = b.queen
     q["weapon"], q["aim"] = "shotgun", 0.0
     b._fire(q, b.pawns[0], True, 5000)
     kicked = q["recoil"]
-    # isolate the decay: block the queen from re-firing during the settle window
     b.acc["qfire"] = 999
     for i in range(40):
         b.update(5000 + (i + 1) * 16)
@@ -687,8 +669,6 @@ def test_recoil_nudges_the_muzzle_backward():
     kicked_x, _ = b._muzzle_point(q)
     assert kicked_x < rest_x, "aiming right, recoil should pull the muzzle back to the left"
 
-
-# ---- pawn-vs-pawn collision ------------------------------------------------
 
 def _pawns_overlap(b, a, c):
     w = b._art["pawn"]["w"]
@@ -729,8 +709,6 @@ def test_dying_pawns_are_excluded_from_separation():
     assert (a["x"], a["y"]) == (150.0, 300.0)
     assert (c["x"], c["y"]) == (150.0, 300.0)
 
-
-# ---- live simulation --------------------------------------------------------
 
 def test_update_moves_the_queen():
     b = _battle()
@@ -799,8 +777,6 @@ def test_pawn_count_stays_within_max_and_fills_up():
     assert peak >= MAX_PAWNS - 1, "spawning should fill up toward the max over a long run"
 
 
-# ---- reduce motion ----------------------------------------------------------
-
 def test_reduce_motion_freezes_positions():
     b = _battle()
     qx, qy = b.queen["x"], b.queen["y"]
@@ -816,8 +792,6 @@ def test_reduce_motion_shows_a_queen_bubble():
     assert b.queen["bubble"] is not None
     assert b.queen["bubble"]["who"] == "queen"
 
-
-# ---- rendering --------------------------------------------------------------
 
 def _distinct_colors(surf, rect, step=8):
     seen = set()
@@ -888,8 +862,6 @@ def test_gun_image_renders_near_the_hand():
               for y in range(region.y, region.bottom, 2))
     assert lit, "the gun image should render around the entity's hand"
 
-
-# ---- weapons ---------------------------------------------------------------
 
 def test_loads_all_six_guns_with_four_flashes_each():
     b = _battle()
@@ -980,8 +952,6 @@ def test_flash_index_is_uniform_over_many_shots():
                 seen.add(p["idx"])
     assert seen == {0, 1, 2, 3}, "all four flash variants should appear over many shots"
 
-
-# ---- robustness -------------------------------------------------------------
 
 def test_draw_is_noop_before_set_rect():
     b = MenuBattle(pg.display.get_surface(), rng=random.Random(1))

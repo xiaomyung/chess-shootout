@@ -105,7 +105,6 @@ def fake_uuid4(seed):
     variant nibble in {8,9,a,b}, so it satisfies the regex.
     """
     n = int(seed)
-    # 32 hex chars, then formatted with version + variant fixed.
     hex_pad = f"{n:032x}"
     return (
         f"{hex_pad[0:8]}-{hex_pad[8:12]}-4{hex_pad[13:16]}-"

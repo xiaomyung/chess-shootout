@@ -43,12 +43,10 @@ def _cell_has(win, rect, predicate):
 
 def test_arena_frame_insets_grid_and_caches_surface():
     board, _ = _board()
-    # the 8x8 grid is inset inside the framed rect by the frame pad
     assert board.board_offset_x >= board.rect.x + board.frame_pad - 2
     assert board.board_offset_y >= board.rect.y + board.frame_pad - 2
     assert board.cell_size > 0
     assert board._frame_surf is not None
-    # grid fits within the framed area
     grid_px = board.cell_size * board.SIZE
     assert board.board_offset_x + grid_px <= board.rect.right
     assert board.board_offset_y + grid_px <= board.rect.bottom
@@ -70,9 +68,9 @@ def test_selection_ring_is_opaque_accent():
 
 def test_legal_move_ring_drawn_on_empty_target():
     board, win = _board()
-    board.selected_square = Square(6, 4)   # white e2 pawn, white to move
+    board.selected_square = Square(6, 4)
     board.draw_board()
-    target = board._cell_rect(4, 4)        # e4, an empty legal target
+    target = board._cell_rect(4, 4)
 
     def reddish(c):
         return c[0] - c[1] > 40 and c[0] - c[2] > 40 and c[0] > 120
@@ -81,10 +79,10 @@ def test_legal_move_ring_drawn_on_empty_target():
 
 
 def test_capture_shows_orange_hitmarker_on_piece():
-    board, win = _board([((6, 4), (4, 4)), ((1, 3), (3, 3))])  # e4, d5
-    board.selected_square = Square(4, 4)   # e4 pawn can capture d5
+    board, win = _board([((6, 4), (4, 4)), ((1, 3), (3, 3))])
+    board.selected_square = Square(4, 4)
     board.draw_board()
-    target = board._cell_rect(3, 3)        # d5, the capturable black pawn
+    target = board._cell_rect(3, 3)
 
     def orange(c):
         return c[0] - c[1] > 60 and c[0] - c[2] > 60 and c[0] > 150
@@ -96,10 +94,10 @@ def test_en_passant_marks_captured_pawn_and_landing_square():
     board, win = _board([((6, 4), (4, 4)), ((1, 0), (2, 0)),
                          ((4, 4), (3, 4)), ((1, 3), (3, 3))])
     assert board.backend.en_passant_target == Square(2, 3)
-    board.selected_square = Square(3, 4)   # e5 pawn can take d5 en passant
+    board.selected_square = Square(3, 4)
     board.draw_board()
-    captured = board._cell_rect(3, 3)      # d5: the captured pawn -> orange hitmarker
-    landing = board._cell_rect(2, 3)       # d6: empty landing square -> ring
+    captured = board._cell_rect(3, 3)
+    landing = board._cell_rect(2, 3)
 
     def orange(c):
         return c[0] - c[1] > 60 and c[0] - c[2] > 60 and c[0] > 150
@@ -113,7 +111,7 @@ def test_en_passant_marks_captured_pawn_and_landing_square():
 
 def test_check_shows_red_flash_ring_and_orange_hitmarker():
     board, win = _board([((6, 5), (5, 5)), ((1, 4), (3, 4)),
-                         ((6, 6), (4, 6)), ((0, 3), (4, 7))])  # fool's mate
+                         ((6, 6), (4, 6)), ((0, 3), (4, 7))])
     assert board.match.is_in_check(PieceColor.WHITE)
     board.draw_board()
     king = board._cell_rect(7, 4)
@@ -139,17 +137,16 @@ def test_promotion_popover_has_four_options_and_routes_click(monkeypatch):
 
 
 def test_promotion_popover_flips_left_and_stays_within_board_right_edge():
+    """A small board leaves a panel-sized gap to its right; the popover must flip and stay
+    within the board, measured against the board rect, not the whole window."""
     win = pg.display.get_surface()
     win.fill((0, 0, 0))
     match = Match()
     match.new_game()
     board = Board(win, match)
     board.load_assets()
-    # A small board leaves room to its right in the window — exactly where the side
-    # panel lives in-app. The popover must flip and stay within the board, not spill
-    # into that gap (bounds measured against the board rect, not the whole window).
     board.set_rect(pg.Rect(40, 40, 360, 360))
-    board.pending_promotion_square = Square(1, 7)   # h-file, hard against the right edge
+    board.pending_promotion_square = Square(1, 7)
     board.draw_board()
     sq_rect = board._cell_rect(1, 7)
     cells = board._promotion_rects.values()
@@ -167,7 +164,7 @@ def test_promotion_popover_stays_within_board_left_edge():
     board = Board(win, match)
     board.load_assets()
     board.set_rect(pg.Rect(40, 40, 360, 360))
-    board.pending_promotion_square = Square(1, 0)   # a-file, hard against the left edge
+    board.pending_promotion_square = Square(1, 0)
     board.draw_board()
     sq_rect = board._cell_rect(1, 0)
     cells = board._promotion_rects.values()

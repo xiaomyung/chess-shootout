@@ -42,9 +42,7 @@ def _hit(chrome, x, y):
 def test_titlebar_renders_background_and_border(chrome):
     chrome.draw()
     window = pg.display.get_surface()
-    # bar background well clear of logo/wordmark/dots
     assert window.get_at((500, 4))[:3] == pg.Color(Colors.titlebar_bg)[:3]
-    # 1px hairline at the bottom of the bar
     assert window.get_at((500, chrome.HEIGHT - 1))[:3] == pg.Color(Colors.button_border)[:3]
 
 
@@ -70,22 +68,16 @@ def test_close_dot_click_posts_quit(chrome):
 
 def test_titlebar_consumes_clicks_but_passes_below(chrome):
     chrome.draw()
-    # a click anywhere on the bar is consumed (so it can't reach the board)
     assert chrome.handle_click((500, 4)) is True
-    # a click below the bar falls through to the rest of the UI
     assert chrome.handle_click((500, chrome.HEIGHT + 10)) is False
 
 
 def test_hit_test_regions(chrome):
     chrome._w, chrome._h = 1000, 700
     chrome._layout_dots(1000)
-    # title-bar background is draggable
     assert _hit(chrome, 300, chrome.HEIGHT // 2) == _HITTEST_DRAGGABLE
-    # over a traffic dot it is normal (so pygame gets the click)
     assert _hit(chrome, *chrome._dot_rects["close"].center) == _HITTEST_NORMAL
-    # content area below the bar is normal
     assert _hit(chrome, 300, 200) == _HITTEST_NORMAL
-    # window edges resize
     assert _hit(chrome, 1, 1) == _HITTEST_RESIZE_TOPLEFT
     assert _hit(chrome, 999, 350) == _HITTEST_RESIZE_RIGHT
     assert _hit(chrome, 500, 699) == _HITTEST_RESIZE_BOTTOM
@@ -99,13 +91,11 @@ def test_cursor_for_resize_edges_and_dots(chrome):
     assert chrome._cursor_for((999, 350)) == pg.SYSTEM_CURSOR_SIZEWE
     assert chrome._cursor_for((500, 699)) == pg.SYSTEM_CURSOR_SIZENS
     assert chrome._cursor_for(chrome._dot_rects["close"].center) == pg.SYSTEM_CURSOR_HAND
-    # title-bar drag area and content both use the plain arrow
     assert chrome._cursor_for((300, chrome.HEIGHT // 2)) == pg.SYSTEM_CURSOR_ARROW
     assert chrome._cursor_for((300, 300)) == pg.SYSTEM_CURSOR_ARROW
 
 
 def test_dot_draws_glyph_on_hover(chrome, monkeypatch):
-    center = None
     monkeypatch.setattr(pg.mouse, "get_pos", lambda: (0, 0))
     chrome.window.fill("black")
     chrome.draw()
@@ -123,7 +113,5 @@ def test_layout_reserves_titlebar_and_keeps_board_playable_at_min_size():
     env.init_paths()
     from frontend.frontend import Frontend
     app = Frontend(900, 500)
-    # board sits fully below the title bar
     assert app.board.board_offset_y >= app.chrome.HEIGHT - 1
-    # board stays comfortably playable at the minimum window size
     assert app.board.cell_size > 40

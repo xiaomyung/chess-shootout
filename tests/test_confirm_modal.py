@@ -81,7 +81,6 @@ def test_affirmative_is_primary_and_on_the_right():
     m.window.fill((0, 0, 0))
     m.draw()
     assert _has_color(m.window, m.button_rects["yes"].inflate(-8, -8), Colors.accent, 20)
-    # cancel sits left of the affirmative
     assert m.button_rects["no"].x < m.button_rects["yes"].x
 
 

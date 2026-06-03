@@ -25,8 +25,6 @@ def _pygame_init():
     pg.quit()
 
 
-# ----- colors --------------------------------------------------------------
-
 def test_new_palette_hex_values():
     expected = {
         "white_tile": "#828b99", "black_tile": "#2e333b", "white": "#f3f5f8",
@@ -44,13 +42,11 @@ def test_connection_dots_keys_intact():
     }
 
 
-def test_alpha_tokens_carry_transparency():
-    # move indicator + washes are 8-digit hex with non-opaque alpha
-    for attr in ("move_indicator", "last_move", "selection_fill", "check_fill", "premove"):
-        assert pg.Color(getattr(Colors, attr)).a < 255, attr
+@pytest.mark.parametrize(
+    "attr", ["move_indicator", "last_move", "selection_fill", "check_fill", "premove"])
+def test_alpha_token_carries_transparency(attr):
+    assert pg.Color(getattr(Colors, attr)).a < 255
 
-
-# ----- fonts ---------------------------------------------------------------
 
 def test_each_family_and_weight_loads():
     for family in (DISPLAY, SANS, MONO):
@@ -64,7 +60,6 @@ def test_get_font_default_family_follows_mono_flag():
     sans_name = fonts._FONT_FILES[(SANS, False)]
     mono_name = fonts._FONT_FILES[(MONO, False)]
     assert sans_name != mono_name
-    # default (no family) picks sans; mono=True picks the mono family
     assert get_font(20) is not None
     assert get_mono_font(20) is not None
     assert get_display_font(20) is not None
@@ -72,7 +67,7 @@ def test_get_font_default_family_follows_mono_flag():
 
 
 def test_fonts_are_not_cached():
-    # caching Font objects across pg.quit() segfaults; get_font must return fresh objects
+    """Caching Font objects across pg.quit() segfaults; get_font must return fresh objects."""
     assert get_font(20) is not get_font(20)
 
 
@@ -87,8 +82,6 @@ def test_missing_font_falls_back_to_sysfont(monkeypatch):
     f = get_font(18, family=SANS)
     assert isinstance(f, pg.font.Font)
 
-
-# ----- generated piece + icon assets ---------------------------------------
 
 def test_all_twelve_piece_pngs_load_at_512():
     for ptype in PieceType:

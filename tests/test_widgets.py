@@ -7,6 +7,7 @@ import pytest
 
 from frontend.visual import widgets
 from frontend.visual.colors import Colors
+from frontend.visual.fonts import get_font
 from frontend.visual.widgets import (
     BUTTON_LABEL_PADDING_PX,
     draw_button, draw_button_row, draw_selector,
@@ -24,7 +25,7 @@ def _pygame_init():
 
 @pytest.fixture
 def font():
-    return pg.font.SysFont("Arial", 14, bold=True)
+    return get_font(14, bold=True)
 
 
 def _button_fill_pixel(surface, rect):
@@ -91,14 +92,14 @@ def test_draw_selector_button_widths_are_equal(font):
 
 
 def test_fit_text_returns_original_when_label_fits():
-    f = pg.font.SysFont("Arial", 24, bold=True)
+    f = get_font(24, bold=True)
     surf = f.render("OK", True, (255, 255, 255))
     rect = pg.Rect(0, 0, 200, 60)
     assert fit_text_to_rect(surf, rect) is surf
 
 
 def test_fit_text_scales_when_too_wide():
-    f = pg.font.SysFont("Arial", 32, bold=True)
+    f = get_font(32, bold=True)
     surf = f.render("AVeryLongLabelThatWillNotFit", True, (255, 255, 255))
     rect = pg.Rect(0, 0, 50, 30)
     fitted = fit_text_to_rect(surf, rect)
@@ -108,7 +109,7 @@ def test_fit_text_scales_when_too_wide():
 
 
 def test_fit_text_scales_when_too_tall():
-    f = pg.font.SysFont("Arial", 80, bold=True)
+    f = get_font(80, bold=True)
     surf = f.render("X", True, (255, 255, 255))
     rect = pg.Rect(0, 0, 200, 20)
     fitted = fit_text_to_rect(surf, rect)
@@ -117,7 +118,7 @@ def test_fit_text_scales_when_too_tall():
 
 
 def test_fit_text_clamps_to_minimum_one_pixel():
-    f = pg.font.SysFont("Arial", 200, bold=True)
+    f = get_font(200, bold=True)
     surf = f.render("Massive", True, (255, 255, 255))
     rect = pg.Rect(0, 0, 5, 5)
     fitted = fit_text_to_rect(surf, rect)
@@ -125,6 +126,8 @@ def test_fit_text_clamps_to_minimum_one_pixel():
 
 
 def test_draw_button_does_not_scale_when_label_fits(font, monkeypatch):
+    """The supersample background scales to rect.size; a label that fits triggers no extra
+    text-fit scale to a different size."""
     surface = pg.display.get_surface()
     rect = pg.Rect(0, 0, 200, 40)
     calls = []
@@ -134,8 +137,6 @@ def test_draw_button_does_not_scale_when_label_fits(font, monkeypatch):
         lambda surf, size, *a, **kw: (calls.append(size), real_scale(surf, size, *a, **kw))[1],
     )
     draw_button(surface, rect, "OK", font)
-    # the supersampled button background scales to rect.size; the label fits, so
-    # no extra (text-fit) scale to a different size should occur
     text_scales = [size for size in calls if tuple(size) != (rect.width, rect.height)]
     assert text_scales == []
 
@@ -161,8 +162,10 @@ def test_wrap_path_char_wraps_an_overlong_segment(font):
 
 
 def test_draw_button_scales_long_label_to_fit(monkeypatch):
+    """A too-long label forces one extra scale below rect.size (ignoring the background
+    scale that targets rect.size)."""
     surface = pg.display.get_surface()
-    big_font = pg.font.SysFont("Arial", 24, bold=True)
+    big_font = get_font(24, bold=True)
     rect = pg.Rect(0, 0, 50, 30)
     calls = []
     real_scale = pg.transform.smoothscale
@@ -171,8 +174,6 @@ def test_draw_button_scales_long_label_to_fit(monkeypatch):
         lambda surf, size, *a, **kw: (calls.append(size), real_scale(surf, size, *a, **kw))[1],
     )
     draw_button(surface, rect, "ReallyLongButtonLabel", big_font)
-    # ignore the supersampled-background scale (targets rect.size); the label is
-    # too long, so it must be scaled down to a smaller width
     text_scales = [size for size in calls if tuple(size) != (rect.width, rect.height)]
     assert len(text_scales) == 1
     scaled_w, _ = text_scales[0]

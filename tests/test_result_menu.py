@@ -86,7 +86,6 @@ def test_win_outcome_is_green():
     menu.set_result("VICTORY", "win", "Checkmate · 31 moves", _stats())
     menu.window.fill((0, 0, 0))
     menu.draw()
-    # the outcome word fills the upper third of the body
     band = pg.Rect(rect.x, rect.y + 30, rect.width, int(rect.height * 0.22))
     assert _has_color(menu.window, band, Colors.result_win, tol=60)
 
@@ -98,9 +97,7 @@ def test_stats_grid_and_potg_render():
     menu.set_result("VICTORY", "win", "Checkmate · 31 moves", _stats())
     menu.window.fill((0, 0, 0))
     menu.draw()
-    # PLAY OF THE GAME label is amber
     assert _has_color(menu.window, rect, Colors.amber_hi, tol=40), "POTG label is amber"
-    # stat cells use the surface fill
     lower = pg.Rect(rect.x, rect.centery, rect.width, rect.height // 2)
     assert _has_color(menu.window, lower, Colors.surface, tol=10), "stat cells drawn"
 
@@ -112,7 +109,6 @@ def test_potg_absent_when_no_highlight():
     menu.set_result("DRAW", "draw", "Stalemate · 20 moves", _stats(potg=None))
     menu.window.fill((0, 0, 0))
     menu.draw()
-    # the amber POTG strip should be absent on a no-highlight game
     assert not _has_color(menu.window, rect, Colors.potg_border, tol=10), \
         "no PLAY OF THE GAME strip when there is no highlight"
 

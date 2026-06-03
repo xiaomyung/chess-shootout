@@ -80,12 +80,12 @@ def test_online_initial_series_zero_zero():
 @pytest.mark.parametrize(
     "white_score,black_score,expected",
     [
-        (0, 0, "Alice  0 – 0  Bob"),
-        (1, 0, "Alice  1 – 0  Bob"),
-        (1, 1, "Alice  1 – 1  Bob"),
-        (1.5, 0.5, "Alice  1½ – ½  Bob"),
-        (2, 1.5, "Alice  2 – 1½  Bob"),
-        (0.5, 0.5, "Alice  ½ – ½  Bob"),
+        pytest.param(0, 0, "Alice  0 – 0  Bob", id="zero_each"),
+        pytest.param(1, 0, "Alice  1 – 0  Bob", id="one_nil"),
+        pytest.param(1, 1, "Alice  1 – 1  Bob", id="one_all"),
+        pytest.param(1.5, 0.5, "Alice  1½ – ½  Bob", id="one_half_vs_half"),
+        pytest.param(2, 1.5, "Alice  2 – 1½  Bob", id="two_vs_one_half"),
+        pytest.param(0.5, 0.5, "Alice  ½ – ½  Bob", id="half_each"),
     ],
 )
 def test_series_score_formatting(white_score, black_score, expected):
@@ -191,14 +191,14 @@ def test_score_follows_player_through_color_swap_end_to_end():
 
 
 @pytest.mark.parametrize("reason,winner,expected", [
-    ("checkmate",    "white", ("White wins", "by checkmate")),
-    ("checkmate",    "black", ("Black wins", "by checkmate")),
-    ("timeout",      "white", ("White wins", "on time")),
-    ("timeout",      "black", ("Black wins", "on time")),
-    ("resignation",  "white", ("White wins", "by resignation")),
-    ("resignation",  "black", ("Black wins", "by resignation")),
-    ("abandonment",  "white", ("White wins", "by abandonment")),
-    ("abandonment",  "black", ("Black wins", "by abandonment")),
+    pytest.param("checkmate", "white", ("White wins", "by checkmate"), id="white_checkmate"),
+    pytest.param("checkmate", "black", ("Black wins", "by checkmate"), id="black_checkmate"),
+    pytest.param("timeout", "white", ("White wins", "on time"), id="white_timeout"),
+    pytest.param("timeout", "black", ("Black wins", "on time"), id="black_timeout"),
+    pytest.param("resignation", "white", ("White wins", "by resignation"), id="white_resign"),
+    pytest.param("resignation", "black", ("Black wins", "by resignation"), id="black_resign"),
+    pytest.param("abandonment", "white", ("White wins", "by abandonment"), id="white_abandon"),
+    pytest.param("abandonment", "black", ("Black wins", "by abandonment"), id="black_abandon"),
 ])
 def test_online_win_result_subtitle_reports_actual_reason(reason, winner, expected):
     """Bug 4: every online win used to render "by resignation" because
@@ -214,11 +214,11 @@ def test_online_win_result_subtitle_reports_actual_reason(reason, winner, expect
 
 
 @pytest.mark.parametrize("draw_reason,expected", [
-    ("draw_agreement",             ("Draw", "by agreement")),
-    ("draw_stalemate",             ("Draw", "by agreement")),
-    ("draw_repetition",            ("Draw", "by agreement")),
-    ("draw_fifty_move",            ("Draw", "by agreement")),
-    ("draw_insufficient_material", ("Draw", "by agreement")),
+    pytest.param("draw_agreement", ("Draw", "by agreement"), id="agreement"),
+    pytest.param("draw_stalemate", ("Draw", "by agreement"), id="stalemate"),
+    pytest.param("draw_repetition", ("Draw", "by agreement"), id="repetition"),
+    pytest.param("draw_fifty_move", ("Draw", "by agreement"), id="fifty_move"),
+    pytest.param("draw_insufficient_material", ("Draw", "by agreement"), id="insufficient"),
 ])
 def test_online_draw_result_subtitle(draw_reason, expected):
     """All online draws are flattened to manual_result="draw_agreement" by the
@@ -248,7 +248,7 @@ def test_single_screen_result_uses_winner_perspective_not_stale_local_color():
     from backend.pieces import PieceColor
     app = _make_app()
     _start_local(app)
-    app.match.local_color = PieceColor.BLACK   # stale perspective
+    app.match.local_color = PieceColor.BLACK
     assert app._result_subject_color("white_wins_by_resignation") == PieceColor.WHITE
     assert app._outcome_word_intent("white_wins_by_resignation", "White wins") \
         == ("White wins".upper(), "win")

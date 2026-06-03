@@ -32,8 +32,6 @@ def _top_border_rgb(surface, rect):
     return surface.get_at((rect.centerx, rect.top))[:3]
 
 
-# ----- selector dual state -------------------------------------------------
-
 def test_selector_marks_selected_with_accent_border(font):
     surface = pg.display.get_surface()
     surface.fill((0, 0, 0))
@@ -51,8 +49,6 @@ def test_selected_button_fills_pressed_color(font):
     assert surface.get_at((rect.centerx, rect.y + 4))[:3] == pg.Color(Colors.button_pressed)[:3]
 
 
-# ----- primary -------------------------------------------------------------
-
 def test_primary_button_uses_accent_fill(font):
     surface = pg.display.get_surface()
     surface.fill((0, 0, 0))
@@ -61,8 +57,6 @@ def test_primary_button_uses_accent_fill(font):
     assert surface.get_at((rect.x + 6, rect.centery))[:3] == pg.Color(Colors.accent)[:3]
 
 
-# ----- guards --------------------------------------------------------------
-
 def test_button_row_guards_empty_and_narrow(font):
     surface = pg.display.get_surface()
     assert draw_button_row(surface, pg.Rect(0, 0, 200, 30), [], font, 6) == {}
@@ -70,8 +64,6 @@ def test_button_row_guards_empty_and_narrow(font):
     assert draw_selector(surface, narrow, [("a", "a"), ("b", "b"), ("c", "c")],
                          font, 6, "a") == {}
 
-
-# ----- icon button muted + speaker icon ------------------------------------
 
 def test_icon_button_muted_draws_accent_border(font):
     surface = pg.display.get_surface()
@@ -93,8 +85,6 @@ def test_speaker_icon_renders_ink():
     )
     assert ink > 0
 
-
-# ----- toast tiers ---------------------------------------------------------
 
 def _band_has_color(surface, rgb):
     return any(

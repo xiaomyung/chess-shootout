@@ -329,8 +329,6 @@ def test_init_paths_points_env_at_config_dir(tmp_path, monkeypatch):
     assert env._ENV_PATH == tmp_path / ".env"
 
 
-# ---- settings keys (reduce-motion, intensity, default TC, theme) -----------
-
 def test_reduce_motion_defaults_false_and_round_trips():
     assert env.get_reduce_motion() is False
     env.set_reduce_motion(True)
@@ -386,7 +384,7 @@ def test_default_increment_seconds_parses_value():
 
 def test_theme_defaults_dark_and_rejects_unknown():
     assert env.get_theme() == "dark"
-    env.set_theme("wood")            # not a known theme yet
+    env.set_theme("wood")
     assert env.get_theme() == "dark"
     env.set_theme("dark")
     assert env.get_theme() == "dark"

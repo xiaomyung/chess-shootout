@@ -50,7 +50,7 @@ def test_streak_counts_consecutive_same_side_captures():
 def test_streak_resets_on_non_capture():
     history = [
         _entry(W, "xa", PieceType.PAWN),
-        _entry(W, "Nf3"),                      # quiet move breaks the streak
+        _entry(W, "Nf3"),
         _entry(W, "xb", PieceType.PAWN),
     ]
     assert _best_streak(history)[0] == 1
@@ -60,7 +60,7 @@ def test_streak_resets_on_opponent_recapture():
     history = [
         _entry(W, "xa", PieceType.PAWN),
         _entry(W, "xb", PieceType.PAWN),
-        _entry(B, "xc", PieceType.PAWN),       # recapture flips the run to black
+        _entry(B, "xc", PieceType.PAWN),
     ]
     best_len, best_start = _best_streak(history)
     assert best_len == 2 and best_start == 0
@@ -75,8 +75,8 @@ def test_checks_and_moves():
         _entry(W, "Qxf7#", PieceType.PAWN, gives_checkmate=True),
     ]
     stats = compute_result_stats(history, None, W)
-    assert stats["checks"] == 2          # the check and the mating check
-    assert stats["moves"] == 3           # 5 plies → 3 full moves
+    assert stats["checks"] == 2
+    assert stats["moves"] == 3
 
 
 def test_material_and_clock_left():
@@ -94,7 +94,7 @@ def test_clock_left_none_when_untimed():
 def test_play_of_the_game_picks_streak_start():
     history = [
         _entry(W, "Nf3"),
-        _entry(W, "Bxf7", PieceType.PAWN),     # streak begins here
+        _entry(W, "Bxf7", PieceType.PAWN),
         _entry(W, "Bxg8", PieceType.KNIGHT),
     ]
     potg = compute_result_stats(history, None, W)["play_of_the_game"]

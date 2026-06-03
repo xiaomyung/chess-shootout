@@ -60,8 +60,6 @@ def _snapshot(strip):
     return pg.image.tobytes(strip.window.subsurface(strip.rect), "RGB")
 
 
-# ---- formatting ------------------------------------------------------------
-
 @pytest.mark.parametrize(
     "seconds, expected",
     [
@@ -113,8 +111,6 @@ def test_give_time_float_alpha_decays_after_peak():
     assert give_time_float_alpha(0.5) > give_time_float_alpha(0.85)
 
 
-# ---- state -----------------------------------------------------------------
-
 def test_set_state_records_fields(strip):
     strip.set_state("Alice", 75.0, True, player_color=PieceColor.WHITE,
                     rating="1500", ko_count=2)
@@ -145,8 +141,6 @@ def test_clock_fraction(strip, clock_seconds, initial, expected):
     assert strip._clock_fraction() == expected
 
 
-# ---- low time --------------------------------------------------------------
-
 def test_low_time_below_threshold(strip):
     strip.set_state("Alice", 5.0, True, clock_initial_seconds=300.0)
     assert strip._is_low_time() is True
@@ -171,8 +165,6 @@ def test_active_clock_border_stays_neutral(strip):
     strip.set_state("Alice", 200.0, True, clock_initial_seconds=300.0)
     assert strip._clock_border_color() == Colors.button_border
 
-
-# ---- avatar ----------------------------------------------------------------
 
 def _avatar_top_pixel(strip):
     pad = max(int(strip.rect.height * 0.16), 4)
@@ -202,8 +194,6 @@ def test_bot_avatar_uses_slate_even_when_white(strip):
     assert px.b >= px.r, "bot avatar is slate regardless of board color"
 
 
-# ---- rating / captures / advantage / ko ------------------------------------
-
 def test_rating_pill_drawn(strip):
     strip.set_state("Alice", 60.0, False, player_color=PieceColor.WHITE,
                     rating="1500", ko_count=0)
@@ -217,12 +207,10 @@ def test_captured_icons_drawn(strip):
                     captured_color=PieceColor.BLACK, player_color=PieceColor.WHITE,
                     rating="1500", ko_count=0)
     _draw(strip)
-    # the fake icon fill colour should appear in the strip
     assert _has_color(strip.window, strip.rect, "#5ac8f0", tol=20)
 
 
 def test_advantage_pill_amber_when_ahead(strip):
-    # a slate (black) player has no amber in its avatar, isolating the +N pill
     strip.set_state("Bob", 60.0, False, captured=[PieceType.QUEEN],
                     captured_color=PieceColor.WHITE, advantage=9,
                     player_color=PieceColor.BLACK, rating="1500", ko_count=0)
@@ -323,8 +311,6 @@ def test_ko_wink_does_not_arm_without_increment(strip):
     assert strip._ko_wink_until_ms == 0
 
 
-# ---- country flag ----------------------------------------------------------
-
 def test_flag_surface_returns_sized_emoji(strip):
     strip.country = "US"
     surf = strip._flag_surface(20)
@@ -397,8 +383,6 @@ def test_tooltip_resets_alpha_when_country_absent(strip):
     assert strip._tooltip_alpha == 0.0
 
 
-# ---- active glow -----------------------------------------------------------
-
 def test_active_black_strip_shows_accent_inactive_does_not(strip):
     """A slate (black) strip has no accent at rest, so the accent border is a
     clean discriminator for the active 'whose turn' cue."""
@@ -413,8 +397,6 @@ def test_active_black_strip_shows_accent_inactive_does_not(strip):
     assert not _has_color(strip.window, strip.rect.inflate(20, 20), Colors.accent), \
         "inactive slate strip should have no accent"
 
-
-# ---- give-time flash + float ----------------------------------------------
 
 def test_flash_alpha_decays_to_zero(strip):
     base = 1000
@@ -440,7 +422,6 @@ def test_give_time_float_label_renders_above_strip(strip, monkeypatch):
                     clock_initial_seconds=300.0, rating="1500")
     strip._give_time_amount = 15
     strip._give_time_start_ms = 1000
-    # peak of the rise/fade window (progress 0.3 → full opacity)
     monkeypatch.setattr(pg.time, "get_ticks",
                         lambda: 1000 + int(GIVE_TIME_FLOAT_MS * 0.3))
     _draw(strip)
@@ -448,8 +429,6 @@ def test_give_time_float_label_renders_above_strip(strip, monkeypatch):
     assert _has_color(strip.window, above, Colors.clock_increment_flash, tol=45), \
         "give-time float label should rise above the strip"
 
-
-# ---- auto-end badge --------------------------------------------------------
 
 def test_auto_end_badge_absent_without_label(strip):
     strip.set_state("Alice", 60.0, True, clock_initial_seconds=300.0)
@@ -462,8 +441,6 @@ def test_auto_end_badge_within_bounds(strip):
     badge_x = strip._draw_auto_end_badge(strip.rect.right, strip.rect.centery)
     assert badge_x is not None and badge_x <= strip.rect.right
 
-
-# ---- robustness ------------------------------------------------------------
 
 @pytest.mark.parametrize("size", [(300, 28), (560, 56), (820, 96)])
 def test_draw_at_multiple_sizes(strip, size):

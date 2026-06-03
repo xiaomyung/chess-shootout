@@ -68,8 +68,6 @@ def _pawn_rows(backend, n):
     ]
 
 
-# ---- plain-text move cells -------------------------------------------------
-
 def test_move_cell_renders_san_text():
     rm, backend = _menu()
     win = rm.window
@@ -85,8 +83,6 @@ def test_move_cell_renders_san_text():
     assert _has_color(win, rm.moves_rect, pg.Color(Colors.text_dim)[:3], tol=45)
 
 
-# ---- current-move highlight ------------------------------------------------
-
 def test_current_move_highlight_uses_pressed_bg_and_accent_border():
     board = _Board()
     rm, backend = _menu(board)
@@ -94,7 +90,7 @@ def test_current_move_highlight_uses_pressed_bg_and_accent_border():
         _entry(PieceType.PAWN, PieceColor.WHITE, "e4"),
         _entry(PieceType.PAWN, PieceColor.BLACK, "e5"),
     ]
-    board.review_ply = 1   # white's move is the active ply
+    board.review_ply = 1
     rm.window.fill((0, 0, 0))
     rm.draw_menu()
     assert _has_color(rm.window, rm.moves_rect, pg.Color(Colors.button_pressed)[:3]), \
@@ -114,16 +110,14 @@ def test_move_cell_click_jumps_to_ply():
     assert board.jumped == [ply]
 
 
-# ---- scroll reveal on nav only ---------------------------------------------
-
 def test_review_nav_reveals_offscreen_ply():
     board = _Board()
     rm, backend = _menu(board)
     _pawn_rows(backend, 60)
     rm.window.fill((0, 0, 0))
-    rm.draw_menu()                 # live: pinned to the newest (offset 0)
+    rm.draw_menu()
     assert rm.scroll_offset == 0
-    board.review_ply = 2           # jump near the very top — off-screen
+    board.review_ply = 2
     rm.window.fill((0, 0, 0))
     rm.draw_menu()
     assert rm.scroll_offset > 0, "navigating to an off-screen ply scrolls to reveal it"
@@ -137,10 +131,10 @@ def test_no_resnap_when_review_ply_unchanged():
     _pawn_rows(backend, 60)
     board.review_ply = 2
     rm.window.fill((0, 0, 0))
-    rm.draw_menu()                 # snaps once
-    rm.scroll_offset = 0           # user scrolls back to the live tail
+    rm.draw_menu()
+    rm.scroll_offset = 0
     rm.window.fill((0, 0, 0))
-    rm.draw_menu()                 # same review_ply → must NOT re-snap
+    rm.draw_menu()
     assert rm.scroll_offset == 0
 
 

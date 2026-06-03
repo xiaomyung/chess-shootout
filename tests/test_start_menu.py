@@ -48,8 +48,6 @@ def make_key_event(key, unicode=""):
     return pg.event.Event(pg.KEYDOWN, {"key": key, "unicode": unicode, "mod": 0})
 
 
-# ---- env defaults ----------------------------------------------------------
-
 def test_applies_mappable_env_default_time(monkeypatch):
     _clean_env(monkeypatch)
     monkeypatch.setenv("CHESS_DEFAULT_TC", "15")
@@ -76,8 +74,6 @@ def test_infinity_env_default_maps_to_no_clock(monkeypatch):
     sm = StartMenu(pg.display.get_surface(), {"start_game": lambda c: None})
     assert sm.selected_time_minutes is None
 
-
-# ---- defaults & selection --------------------------------------------------
 
 def test_defaults(menu):
     sm, _ = menu
@@ -165,8 +161,6 @@ def test_pagination_nav_does_not_change_selection(menu):
     assert sm.build_config()["time_minutes"] == 10
 
 
-# ---- text input ------------------------------------------------------------
-
 def test_typing_via_handle_key(menu):
     sm, _ = menu
     sm.text_input.focused = True
@@ -190,8 +184,6 @@ def test_click_selector_unfocuses_text_input(menu):
     sm.handle_click(sm._mode_rects["single_screen"].center)
     assert sm.text_input.focused is False
 
-
-# ---- start + callbacks -----------------------------------------------------
 
 def test_start_fires_callback_with_full_config(menu):
     sm, called = menu
@@ -257,8 +249,6 @@ def test_paste_fen_blocked_in_online_mode(menu):
     sm.handle_click(sm._fen_rect.center)
     assert fired == [True]
 
-
-# ---- rendering / layout ----------------------------------------------------
 
 def _has_non_bg(win, rect):
     rect = rect.clip(win.get_rect())

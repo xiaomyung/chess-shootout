@@ -81,9 +81,6 @@ def _surf():
     return pg.Surface((40, 40), pg.SRCALPHA)
 
 
-# --------------------------------------------------------------------------- #
-# Screen shake
-# --------------------------------------------------------------------------- #
 def test_shake_offset_zero_when_idle():
     assert _em().shake_offset(0) == (0, 0)
 
@@ -127,9 +124,6 @@ def test_intensity_scales_shake_amplitude():
     assert subtle._shake["amp"] < full._shake["amp"]
 
 
-# --------------------------------------------------------------------------- #
-# Two-stage capture choreography
-# --------------------------------------------------------------------------- #
 def test_capture_defers_fire_and_impact_with_correct_timing():
     em = _em()
     fired, slid = [], []
@@ -221,9 +215,6 @@ def test_recoil_kicks_back_along_aim_then_recovers():
     assert em._recoil(c["gun"], c["weapon"], 0.0, RECOIL_MS) == (0.0, 0.0)
 
 
-# --------------------------------------------------------------------------- #
-# Check gun-draw: held until the opponent moves, then dropped (menu-battle style)
-# --------------------------------------------------------------------------- #
 def test_check_holds_the_gun_aimed_at_the_king():
     em = _em()
     em.check(now_ms=0, attacker_type="rook", king_sq=Square(0, 4),
@@ -365,9 +356,6 @@ def test_undo_clears_the_held_check_gun_and_shake():
     assert board.effects._king_shake is None
 
 
-# --------------------------------------------------------------------------- #
-# cut() / clear() lifecycle
-# --------------------------------------------------------------------------- #
 def test_bullet_hole_clears_after_its_shortened_lifetime():
     em = _em()
     em._impact(0, Square(7, 3), Square(0, 3), _surf(), 80)
@@ -389,9 +377,6 @@ def test_cut_keeps_bullet_holes_but_clear_drops_them():
     assert em.holes == []
 
 
-# --------------------------------------------------------------------------- #
-# gunfx registry + geometry
-# --------------------------------------------------------------------------- #
 def test_every_piece_gun_has_a_spec():
     for gun in sorted(set(PIECE_GUN.values())):
         assert isinstance(GUNS[gun], GunSpec)
@@ -440,9 +425,6 @@ def test_build_weapon_scales_grip_and_barrel():
     assert weapon["barrel"] != (0, 0)
 
 
-# --------------------------------------------------------------------------- #
-# Board shake integration
-# --------------------------------------------------------------------------- #
 def _board(position_moves=()):
     win = pg.display.get_surface()
     win.fill((0, 0, 0))
@@ -522,9 +504,6 @@ def test_promotion_popover_anchors_to_base_rect():
     assert board._promotion_rects
 
 
-# --------------------------------------------------------------------------- #
-# Board check-gun wiring
-# --------------------------------------------------------------------------- #
 def _place(board, pieces):
     grid = board.match.state
     for r in range(8):
@@ -663,9 +642,6 @@ def test_capture_power_scales_with_victim_value():
     assert Board._capture_power(PAWN) == "soft"
 
 
-# --------------------------------------------------------------------------- #
-# 10b — killstreak counter + announcer callouts
-# --------------------------------------------------------------------------- #
 def test_first_kill_of_the_game_is_first_blood():
     em = _em()
     em.register_kill("white", Square(0, 4), 80, 0)
@@ -802,21 +778,21 @@ def test_streak_label_table_matches_the_design():
     assert HIT_WORDS == ("BLAM", "BOOM", "POW", "BANG", "HEADSHOT", "BODIED", "WASTED")
 
 
-def test_callouts_render_without_crashing():
+def test_callout_paints_pixels_and_replaces_rather_than_stacks():
     em = _em()
     win = pg.display.get_surface()
     win.fill((0, 0, 0))
     em.register_kill("white", Square(2, 3), 80, 0)
-    em.update(120)
-    em.draw_over(win, 120)
-    em.register_kill("white", Square(2, 3), 80, 200)
-    em.draw_over(win, 320)
-    assert len(em.callouts) == 1
+    em.update(300)
+    em.draw_over(win, 300)
+    assert any(win.get_at((x, y))[:3] != (0, 0, 0)
+               for x in range(280, 520, 4) for y in range(290, 390, 4)), \
+        "the callout text paints near the board centre"
+    em.register_kill("white", Square(2, 3), 80, 400)
+    em.draw_over(win, 520)
+    assert len(em.callouts) == 1, "a new callout replaces the previous one, never stacks"
 
 
-# --------------------------------------------------------------------------- #
-# 10c — checkmate takeover + surrender flag
-# --------------------------------------------------------------------------- #
 def test_takeover_lifecycle():
     em = _em()
     assert not em.has_takeover()
@@ -826,14 +802,17 @@ def test_takeover_lifecycle():
     assert not em.has_takeover()
 
 
-def test_takeover_renders_across_its_window_without_crashing():
+def test_takeover_paints_the_backdrop_across_its_active_window():
     em = _em()
     em.start_takeover("CHECKMATE", "WHITE", 0)
     win = pg.display.get_surface()
-    win.fill((0, 0, 0))
     for now in (0, TAKEOVER_PAUSE_MS, TAKEOVER_PAUSE_MS + 200, TAKEOVER_PAUSE_MS + 800,
                 TAKEOVER_TOTAL_MS - 100, TAKEOVER_TOTAL_MS):
+        win.fill((0, 0, 0))
         em.draw_takeover(win, now)
+        if now > TAKEOVER_PAUSE_MS:
+            assert win.get_at((5, 5))[:3] != (0, 0, 0), \
+                f"the takeover backdrop should cover the screen at t={now}"
     assert em.has_takeover()
 
 
@@ -866,13 +845,16 @@ def test_raise_flag_then_clear():
     assert em.flags == [] and not em.has_takeover()
 
 
-def test_flag_renders_through_its_pop_without_crashing():
+def test_flag_paints_near_the_kings_square_through_its_pop():
     em = _em()
     em.raise_flag(Square(0, 4), 80, 0)
     win = pg.display.get_surface()
     win.fill((0, 0, 0))
     for now in (0, 150, 400):
         em.draw_over(win, now)
+    assert any(win.get_at((x, y))[:3] != (0, 0, 0)
+               for x in range(455, 498, 2) for y in range(6, 50, 2)), \
+        "the surrender flag paints near the king's square"
     assert len(em.flags) == 1
 
 

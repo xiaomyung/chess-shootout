@@ -37,8 +37,6 @@ def _sel_text(ti):
     return ti.text[sel[0]:sel[1]] if sel else None
 
 
-# ---- cursor movement -------------------------------------------------------
-
 def test_text_setter_puts_cursor_at_end(ti):
     ti.text = "hello"
     assert ti.cursor == 5
@@ -64,23 +62,21 @@ def test_ctrl_arrow_word_jump(ti):
     ti.text = "hello world foo"
     ti.handle_key(_ev(pg.K_HOME))
     ti.handle_key(_ev(pg.K_RIGHT, mod=pg.KMOD_CTRL))
-    assert ti.cursor == 6          # start of "world"
+    assert ti.cursor == 6
     ti.handle_key(_ev(pg.K_RIGHT, mod=pg.KMOD_CTRL))
-    assert ti.cursor == 12         # start of "foo"
+    assert ti.cursor == 12
 
-
-# ---- mid-string editing ----------------------------------------------------
 
 def test_insert_mid_string(ti):
     ti.text = "abc"
-    ti.handle_key(_ev(pg.K_LEFT))      # cursor at 2
+    ti.handle_key(_ev(pg.K_LEFT))
     ti.handle_key(_ev(pg.K_x, unicode="X"))
     assert ti.text == "abXc" and ti.cursor == 3
 
 
 def test_backspace_mid_string(ti):
     ti.text = "abcd"
-    ti.handle_key(_ev(pg.K_LEFT))      # cursor 3
+    ti.handle_key(_ev(pg.K_LEFT))
     ti.handle_key(_ev(pg.K_BACKSPACE))
     assert ti.text == "abd" and ti.cursor == 2
 
@@ -105,8 +101,6 @@ def test_ctrl_delete_deletes_word(ti):
     assert ti.text == "world"
 
 
-# ---- selection -------------------------------------------------------------
-
 def test_ctrl_a_selects_all(ti):
     ti.text = "select me"
     ti.handle_key(_ev(pg.K_a, mod=pg.KMOD_CTRL))
@@ -123,7 +117,7 @@ def test_shift_arrow_extends_selection(ti):
 
 def test_typing_replaces_selection(ti):
     ti.text = "hello"
-    ti.handle_key(_ev(pg.K_a, mod=pg.KMOD_CTRL))   # select all
+    ti.handle_key(_ev(pg.K_a, mod=pg.KMOD_CTRL))
     ti.handle_key(_ev(pg.K_z, unicode="Z"))
     assert ti.text == "Z"
 
@@ -137,8 +131,8 @@ def test_backspace_deletes_selection(ti):
 
 def test_arrow_collapses_selection_without_shift(ti):
     ti.text = "abcdef"
-    ti.handle_key(_ev(pg.K_a, mod=pg.KMOD_CTRL))   # select all, cursor at 6
-    ti.handle_key(_ev(pg.K_LEFT))                  # collapses to start
+    ti.handle_key(_ev(pg.K_a, mod=pg.KMOD_CTRL))
+    ti.handle_key(_ev(pg.K_LEFT))
     assert ti._sel_range() is None and ti.cursor == 0
 
 
@@ -161,13 +155,11 @@ def test_ctrl_c_copies_selection(ti, monkeypatch):
     assert captured == ["copy this"]
 
 
-# ---- mouse -----------------------------------------------------------------
-
 def test_click_positions_cursor_at_edges(ti):
     ti.text = "hello world"
     ti.handle_click((ti.rect.x + ti.padding, ti.rect.centery))
     assert ti.cursor == 0
-    ti.handle_click((ti.rect.right - 2, ti.rect.centery))   # inner right edge
+    ti.handle_click((ti.rect.right - 2, ti.rect.centery))
     assert ti.cursor == len(ti.text)
 
 
@@ -175,13 +167,13 @@ def test_double_click_selects_word(ti):
     ti.text = "hello world"
     x = ti.rect.x + ti.padding + ti.font.size("hello wo")[0]
     ti.handle_click((x, ti.rect.centery))
-    ti.handle_click((x, ti.rect.centery))   # second click within window → double
+    ti.handle_click((x, ti.rect.centery))
     assert _sel_text(ti) == "world"
 
 
 def test_drag_extends_selection(ti, monkeypatch):
     ti.text = "drag me"
-    ti.handle_click((ti.rect.x + ti.padding, ti.rect.centery))   # anchor at 0
+    ti.handle_click((ti.rect.x + ti.padding, ti.rect.centery))
     assert ti._dragging is True
     far_x = ti.rect.x + ti.padding + ti.font.size("drag")[0]
     monkeypatch.setattr(pg.mouse, "get_pressed", lambda *a, **k: (1, 0, 0))
