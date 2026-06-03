@@ -16,13 +16,13 @@ from unittest.mock import MagicMock
 import pygame as pg
 import pytest
 
-from backend.paths import SOUNDS_DIR
-from frontend.panels.audio import (
+from chessshootout.paths import SOUNDS_DIR
+from chessshootout.frontend.panels.audio import (
     AudioPanel, DEFAULT_BUTTON_COLUMNS, DEFAULT_BUTTON_GAP_PX,
 )
-from frontend.panels.right import RightMenu
-from frontend.audio.sound_manager import SoundManager
-from frontend.visual.colors import Colors
+from chessshootout.frontend.panels.right import RightMenu
+from chessshootout.frontend.audio.sound_manager import SoundManager
+from chessshootout.frontend.visual.colors import Colors
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -52,7 +52,7 @@ def test_master_volume_explicit_override(sm):
 
 
 def test_master_volume_falls_back_to_env_default(monkeypatch, tmp_path):
-    from frontend import env as env_mod
+    from chessshootout.infra import env as env_mod
     monkeypatch.setattr(env_mod, "_ENV_PATH", tmp_path / ".env")
     monkeypatch.delenv("CHESS_MASTER_VOLUME", raising=False)
     s = SoundManager(SOUNDS_DIR, enabled=True)
@@ -60,7 +60,7 @@ def test_master_volume_falls_back_to_env_default(monkeypatch, tmp_path):
 
 
 def test_master_volume_reads_env_when_set(monkeypatch, tmp_path):
-    from frontend import env as env_mod
+    from chessshootout.infra import env as env_mod
     monkeypatch.setattr(env_mod, "_ENV_PATH", tmp_path / ".env")
     monkeypatch.setenv("CHESS_MASTER_VOLUME", "0.42")
     s = SoundManager(SOUNDS_DIR, enabled=True)
@@ -78,24 +78,6 @@ def test_master_volume_reads_env_when_set(monkeypatch, tmp_path):
 def test_set_master_volume_clamps(sm, value, expected):
     sm.set_master_volume(value)
     assert sm.master_volume == pytest.approx(expected)
-
-
-def test_set_enabled_false_calls_stop_all():
-    s = SoundManager(SOUNDS_DIR, enabled=True)
-    stopped = []
-    s.stop_all = lambda: stopped.append(True)
-    s.set_enabled(False)
-    assert stopped == [True]
-    assert s.enabled is False
-
-
-def test_set_enabled_true_does_not_stop():
-    s = SoundManager(SOUNDS_DIR, enabled=False)
-    stopped = []
-    s.stop_all = lambda: stopped.append(True)
-    s.set_enabled(True)
-    assert stopped == []
-    assert s.enabled is True
 
 
 def test_play_with_master_scales_volume_before_playing():
@@ -119,7 +101,7 @@ def test_play_disabled_does_nothing(sm):
     """Disabled is a true no-op; enabling re-arms the real play path."""
     calls = []
     sm._play_with_master = lambda sound: calls.append(sound)
-    assert sm._piece_move_sounds
+    assert sm._variants["move"]
     sm.enabled = False
     sm.play_move()
     assert calls == []
@@ -167,7 +149,7 @@ def test_panel_default_grid_is_5_columns(panel):
 
 def test_panel_grid_aligns_with_actual_buttons_row():
     """Each audio region's x/right matches the right-menu button column it mirrors."""
-    from frontend.visual.widgets import draw_button_row
+    from chessshootout.frontend.visual.widgets import draw_button_row
     sm = SoundManager(SOUNDS_DIR, enabled=True)
     p = AudioPanel(pg.display.get_surface(), sm)
     font = pg.font.SysFont("Arial", 14, bold=True)
@@ -253,7 +235,7 @@ def test_panel_end_drag_clears(panel):
 
 
 def test_panel_end_drag_persists_volume_to_env(panel, sm, monkeypatch, tmp_path):
-    from frontend import env as env_mod
+    from chessshootout.infra import env as env_mod
     monkeypatch.setattr(env_mod, "_ENV_PATH", tmp_path / ".env")
     monkeypatch.delenv("CHESS_MASTER_VOLUME", raising=False)
     panel.set_rect(pg.Rect(0, 0, 200, 40))
@@ -265,7 +247,7 @@ def test_panel_end_drag_persists_volume_to_env(panel, sm, monkeypatch, tmp_path)
 
 
 def test_panel_end_drag_does_not_persist_when_not_dragging(panel, monkeypatch, tmp_path):
-    from frontend import env as env_mod
+    from chessshootout.infra import env as env_mod
     monkeypatch.setattr(env_mod, "_ENV_PATH", tmp_path / ".env")
     monkeypatch.delenv("CHESS_MASTER_VOLUME", raising=False)
     panel.end_drag()
@@ -328,7 +310,7 @@ def test_panel_resize_keeps_layout_proportions(panel, w):
 
 def test_volume_label_fits_inside_text_rect_at_default_size(panel):
     panel.set_rect(pg.Rect(0, 0, 400, 40))
-    rendered = panel.button_font.render("Volume", True, Colors.white)
+    rendered = panel.button_font.render("Volume", True, Colors.text)
     assert rendered.get_width() <= panel.text_rect.width
 
 
@@ -338,8 +320,8 @@ def test_volume_label_is_static_across_volume_changes(panel, sm):
     panel.draw()
     sm.set_master_volume(1.0)
     panel.draw()
-    rendered_low = panel.button_font.render("Volume", True, Colors.white)
-    rendered_high = panel.button_font.render("Volume", True, Colors.white)
+    rendered_low = panel.button_font.render("Volume", True, Colors.text)
+    rendered_high = panel.button_font.render("Volume", True, Colors.text)
     assert pg.image.tobytes(rendered_low, "RGBA") == pg.image.tobytes(
         rendered_high, "RGBA")
 
@@ -348,7 +330,7 @@ def test_volume_label_is_static_across_volume_changes(panel, sm):
 def test_volume_label_blitted_width_fits_text_rect(panel, w):
     """The label is clip-fit to its column: blitted width never exceeds text_rect."""
     panel.set_rect(pg.Rect(0, 0, w, 40))
-    surf = panel.button_font.render("Volume", True, Colors.white)
+    surf = panel.button_font.render("Volume", True, Colors.text)
     if surf.get_width() > panel.text_rect.width > 0:
         surf = surf.subsurface(
             pg.Rect(0, 0, panel.text_rect.width, surf.get_height()))

@@ -1,9 +1,10 @@
 """M16: Online UX layer.
 
 Animation duration scales with the time control, the wait modal shows
-elapsed time during search and "Match found!" for 500 ms before the game
-starts, the reconnecting overlay surfaces only while the client is
-reconnecting, and transient errors show a toast (not a modal).
+elapsed time during search, a themed match-found VS reveal holds for a few
+seconds before the game starts, the reconnecting on-board overlay surfaces
+only while the client is reconnecting mid-game, and transient errors show a
+toast (not a modal).
 """
 import os
 from types import SimpleNamespace
@@ -14,13 +15,15 @@ os.environ.setdefault("SDL_AUDIODRIVER", "dummy")
 import pygame as pg
 import pytest
 
-from frontend.frontend import (
-    ANIM_MS_DEFAULT, ANIM_MS_MIN, ANIM_MS_MAX, MATCH_FOUND_HOLD_MS,
+from chessshootout.domain.match import ONLINE
+from chessshootout.frontend.frontend import (
+    ANIM_MS_DEFAULT, ANIM_MS_MIN, ANIM_MS_MAX,
     Frontend, compute_animation_ms,
 )
-from frontend.modals.reconnecting import ReconnectingModal
-from frontend.online.events import (
-    NOT_YOUR_TURN_TOASTS, ONLINE_HARD_FAILURE_LABELS,
+from chessshootout.frontend.visual.colors import Colors
+from chessshootout.frontend.modals.reconnecting import ReconnectingModal
+from chessshootout.frontend.online.events import (
+    MATCH_FOUND_SECONDS, NOT_YOUR_TURN_TOASTS, ONLINE_HARD_FAILURE_LABELS,
     ONLINE_HARD_FAILURE_REASONS, ONLINE_TRANSIENT_REASON_LABELS,
 )
 
@@ -75,49 +78,44 @@ def test_reconnecting_modal_starts_hidden():
 
 def test_reconnecting_modal_show_makes_visible_and_caches_callback():
     m = ReconnectingModal(pg.display.get_surface())
-    m.set_rect(pg.Rect(0, 0, 400, 220))
+    m.set_rect(pg.Rect(0, 0, 400, 400))
     cancelled = []
-    m.show(on_cancel=lambda: cancelled.append(True))
+    m.show(pg.time.get_ticks(), on_cancel=lambda: cancelled.append(True))
     assert m.is_visible()
     m.draw()
-    m.handle_click(m.button_rects["cancel"].center)
+    m.handle_click(m.button_rects["abandon"].center)
     assert cancelled == [True]
 
 
-def test_reconnecting_modal_subtitle_renders_visible_pixels():
-    """The subtitle text is actually blitted: white glyph pixels land on the
-    modal that were absent before set_subtitle (regression guard for a
-    silently-dropped subtitle)."""
+def test_reconnecting_overlay_fills_board_rect_with_scrim():
+    """The overlay darkens the whole board rect (scrim) and paints an amber
+    spinner ring — both absent before show()."""
     win = pg.display.get_surface()
     m = ReconnectingModal(win)
-    m.set_rect(pg.Rect(0, 0, 400, 220))
-    m.show(on_cancel=lambda: None)
-    subtitle = "Trying to reconnect…"
+    rect = pg.Rect(0, 0, 420, 360)
+    m.set_rect(rect)
+    m.show(pg.time.get_ticks(), on_cancel=lambda: None)
 
-    rendered = m.subtitle_font.render(subtitle, True, (255, 255, 255))
-    assert rendered.get_width() > 0 and rendered.get_height() > 0
+    win.fill((0, 0, 0))
+    m.draw()
+    scrim_corner = win.get_at((4, 4))[:3]
+    assert scrim_corner != (0, 0, 0)
 
-    def white_pixels():
+    amber = pg.Color(Colors.amber)[:3]
+
+    def amber_pixels():
         return sum(
             1
-            for x in range(m.rect.width)
-            for y in range(m.rect.height)
-            if win.get_at((x, y))[:3] == (255, 255, 255)
+            for x in range(0, rect.width, 2)
+            for y in range(0, rect.height, 2)
+            if max(abs(win.get_at((x, y))[i] - amber[i]) for i in range(3)) < 24
         )
 
-    win.fill((0, 0, 0))
-    m.draw()
-    without_subtitle = white_pixels()
-
-    win.fill((0, 0, 0))
-    m.set_subtitle(subtitle)
-    m.draw()
-    with_subtitle = white_pixels()
-
-    assert with_subtitle > without_subtitle
+    assert amber_pixels() > 0
 
 
 def test_reconnecting_overlay_appears_when_client_state_is_reconnecting(frontend):
+    frontend.mode = ONLINE
     fake_client = SimpleNamespace(state="reconnecting")
     frontend.online_client = fake_client
     frontend._update_online_phase()
@@ -125,6 +123,7 @@ def test_reconnecting_overlay_appears_when_client_state_is_reconnecting(frontend
 
 
 def test_reconnecting_overlay_hides_when_client_recovers(frontend):
+    frontend.mode = ONLINE
     fake_client = SimpleNamespace(state="reconnecting")
     frontend.online_client = fake_client
     frontend._update_online_phase()
@@ -135,6 +134,7 @@ def test_reconnecting_overlay_hides_when_client_recovers(frontend):
 
 
 def test_reconnecting_overlay_cancel_calls_abandon(frontend, monkeypatch):
+    frontend.mode = ONLINE
     abandoned = []
     monkeypatch.setattr(frontend, "_abandon_online_game",
                         lambda: abandoned.append(True))
@@ -143,45 +143,48 @@ def test_reconnecting_overlay_cancel_calls_abandon(frontend, monkeypatch):
     frontend._update_online_phase()
     frontend.reconnecting_modal.draw()
     frontend.reconnecting_modal.handle_click(
-        frontend.reconnecting_modal.button_rects["cancel"].center,
+        frontend.reconnecting_modal.button_rects["abandon"].center,
     )
     assert abandoned == [True]
 
 
-def test_wait_modal_subtitle_shows_elapsed_seconds(frontend, monkeypatch):
+def test_wait_modal_elapsed_tracks_search_time(frontend, monkeypatch):
     fake_now = [10000]
     monkeypatch.setattr(pg.time, "get_ticks", lambda: fake_now[0])
-    frontend.wait_modal.show("Searching for opponent…", on_cancel=lambda: None)
+    frontend.wait_modal.show("Rapid", "10 + 5", on_cancel=lambda: None)
     frontend._wait_started_at_ms = fake_now[0]
     fake_now[0] += 7 * 1000
     frontend._update_online_phase()
-    assert frontend.wait_modal.subtitle == "00:07"
+    assert frontend.wait_modal.elapsed == 7
     fake_now[0] += 60 * 1000
     frontend._update_online_phase()
-    assert frontend.wait_modal.subtitle == "01:07"
+    assert frontend.wait_modal.elapsed == 67
 
 
-def test_match_found_payload_held_for_500ms_before_start(frontend, monkeypatch):
+def test_match_found_reveal_holds_then_starts_game(frontend, monkeypatch):
     fake_now = [50000]
     monkeypatch.setattr(pg.time, "get_ticks", lambda: fake_now[0])
     started = []
     monkeypatch.setattr(frontend, "_start_online_game",
                         lambda payload: started.append(payload))
-    frontend.wait_modal.show("Searching…", on_cancel=lambda: None)
+    frontend.wait_modal.show("Rapid", "10 + 5", on_cancel=lambda: None)
     frontend._wait_started_at_ms = fake_now[0]
 
     payload = {"your_color": "white", "white_name": "A", "black_name": "B",
                "time_minutes": 5, "increment_seconds": 0}
     frontend._begin_match_found_transition(payload)
 
-    assert frontend.wait_modal.subtitle == "Match found!"
-    fake_now[0] += MATCH_FOUND_HOLD_MS - 50
+    assert frontend.match_found_modal.is_visible()
+    assert not frontend.wait_modal.is_visible()
+    fake_now[0] += MATCH_FOUND_SECONDS * 1000 - 50
     frontend._update_online_phase()
     assert started == []
+    assert frontend.match_found_modal.is_visible()
 
     fake_now[0] += 100
     frontend._update_online_phase()
     assert started == [payload]
+    assert not frontend.match_found_modal.is_visible()
     fake_now[0] += 1000
     frontend._update_online_phase()
     assert started == [payload]
@@ -190,7 +193,7 @@ def test_match_found_payload_held_for_500ms_before_start(frontend, monkeypatch):
 def test_match_found_transition_plays_online_game_start_sound(frontend):
     plays = []
     frontend.sound_manager.play_online_game_start = lambda: plays.append(True)
-    frontend.wait_modal.show("Searching…", on_cancel=lambda: None)
+    frontend.wait_modal.show("Rapid", "10 + 5", on_cancel=lambda: None)
     frontend._wait_started_at_ms = pg.time.get_ticks()
     frontend._begin_match_found_transition({"your_color": "white",
                                             "white_name": "A",
@@ -288,7 +291,6 @@ def test_not_your_turn_without_known_msg_type_stays_silent(frontend, payload):
 @pytest.mark.parametrize(
     "msg_type",
     [
-        pytest.param("draw_offer", id="draw_offer_explains_own_turn_only"),
         pytest.param("takeback_request", id="takeback_explains_after_move_only"),
     ],
 )
@@ -321,8 +323,11 @@ def test_menu_mode_skips_board_draw(frontend, monkeypatch):
 def test_start_menu_centered_on_window_not_board(frontend):
     rect = frontend.start_menu._outer
     win_w, win_h = frontend.window.get_size()
+    top = frontend.chrome.HEIGHT
+    content_center_y = top + (win_h - top - 22) / 2
     assert abs(rect.centerx - win_w / 2) <= 1
-    assert abs(rect.centery - win_h / 2) <= 1
+    assert abs(rect.centery - content_center_y) <= 1
+    assert rect.bottom < frontend.start_menu._footer_link_rect.top
 
 
 def test_menu_mode_centers_flex_modals_on_window(frontend):
@@ -331,7 +336,7 @@ def test_menu_mode_centers_flex_modals_on_window(frontend):
     win_w, _ = frontend.window.get_size()
     assert abs(frontend.fen_input_modal.rect.centerx - win_w / 2) <= 1
     assert abs(frontend.wait_modal.rect.centerx - win_w / 2) <= 1
-    assert abs(frontend.server_modal.rect.centerx - win_w / 2) <= 1
+    assert abs(frontend.match_found_modal.rect.centerx - win_w / 2) <= 1
 
 
 def _board_centerx(board):
@@ -339,17 +344,17 @@ def _board_centerx(board):
 
 
 def test_game_mode_centers_flex_modals_on_board(frontend):
-    from backend.match import SINGLE_SCREEN
+    from chessshootout.domain.match import SINGLE_SCREEN
     frontend.mode = SINGLE_SCREEN
     frontend._compute_layout()
     board_cx = _board_centerx(frontend.board)
     assert abs(frontend.fen_input_modal.rect.centerx - board_cx) <= 4
     assert abs(frontend.wait_modal.rect.centerx - board_cx) <= 4
-    assert abs(frontend.server_modal.rect.centerx - board_cx) <= 4
+    assert abs(frontend.match_found_modal.rect.centerx - board_cx) <= 4
 
 
 def test_mode_change_relays_modal_rects_via_draw_frame(frontend):
-    from backend.match import SINGLE_SCREEN
+    from chessshootout.domain.match import SINGLE_SCREEN
     frontend.mode = "menu"
     frontend._compute_layout()
     win_w, _ = frontend.window.get_size()
@@ -358,3 +363,36 @@ def test_mode_change_relays_modal_rects_via_draw_frame(frontend):
     frontend.draw_frame()
     board_cx = _board_centerx(frontend.board)
     assert abs(frontend.wait_modal.rect.centerx - board_cx) <= 4
+
+
+def test_rematch_request_arms_result_modal_accept_and_toasts(frontend):
+    """An incoming rematch request flips the result modal's primary button to
+    Accept and shows a toast instead of a top-of-board banner."""
+    frontend._handle_rematch_request()
+    assert frontend._rematch_offered is True
+    assert frontend.result_menu.rematch_offered is True
+    assert frontend.toast.is_visible()
+    assert frontend.offer_banners.is_empty()
+
+
+def test_on_rematch_accepts_when_offered(frontend):
+    sent = []
+    frontend.online_client = SimpleNamespace(
+        send_rematch_response=lambda accept: sent.append(("resp", accept)),
+        send_rematch_request=lambda: sent.append(("req",)))
+    frontend._rematch_offered = True
+    frontend.result_menu.set_rematch_offered(True)
+    frontend._on_rematch()
+    assert sent == [("resp", True)]
+    assert frontend._rematch_offered is False
+    assert frontend.result_menu.rematch_offered is False
+
+
+def test_on_rematch_requests_when_not_offered(frontend):
+    sent = []
+    frontend.online_client = SimpleNamespace(
+        send_rematch_response=lambda accept: sent.append(("resp", accept)),
+        send_rematch_request=lambda: sent.append(("req",)))
+    frontend._rematch_offered = False
+    frontend._on_rematch()
+    assert sent == [("req",)]

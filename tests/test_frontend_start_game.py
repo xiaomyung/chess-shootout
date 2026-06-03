@@ -1,7 +1,8 @@
 """Frontend start-game wiring: _on_start_game mode gating, name/clock setup, and the
 player-strip/auto-save behavior that hangs off a started game. Only single_screen
-actually starts a game in-process; bot returns early and online defers to the server
-modal, so neither builds a clock or leaves the "menu" mode."""
+actually starts a game in-process; bot returns early and online connects directly to
+the configured server (address lives in Settings — no modal), so neither builds a
+clock or leaves the "menu" mode until the server confirms the game."""
 
 import os
 import random
@@ -11,9 +12,27 @@ os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
 import pygame as pg
 import pytest
 
-from backend.utils import Square
-from backend.pieces import PieceColor
-from frontend.frontend import Frontend, OPPONENT_NAME_FOR_MODE
+from chessshootout.backend.utils import Square
+from chessshootout.backend.pieces import PieceColor
+from chessshootout.infra import countries, env
+from chessshootout.frontend.frontend import Frontend, OPPONENT_NAME_FOR_MODE
+from chessshootout.online.client import OnlineClient
+from chessshootout.domain.pgn.load import extract_csmatchid, parse_pgn_headers
+from tests.helpers import fake_uuid4
+
+
+class _StubClient:
+    def __init__(self, room_id):
+        self.room_id = room_id
+
+
+def _online_payload(**overrides):
+    payload = {
+        "white_name": "alice", "black_name": "bob", "your_color": "white",
+        "time_minutes": 5, "increment_seconds": 2,
+    }
+    payload.update(overrides)
+    return payload
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -71,6 +90,39 @@ def test_start_game_black_side_swaps_names():
     assert app.black_name == "alice"
 
 
+def test_start_game_gives_your_country_and_random_opponent(monkeypatch):
+    monkeypatch.setattr(env, "get_country", lambda: "RO")
+    app = make_app()
+    app._on_start_game(base_config(side="white"))
+    assert app.white_country == "RO"
+    assert app.black_country in countries.CODES
+    assert app.black_country != ""
+
+
+def test_start_game_black_side_swaps_country(monkeypatch):
+    monkeypatch.setattr(env, "get_country", lambda: "RO")
+    app = make_app()
+    app._on_start_game(base_config(side="black"))
+    assert app.black_country == "RO"
+    assert app.white_country in countries.CODES
+
+
+def test_start_game_no_country_leaves_your_side_blank(monkeypatch):
+    monkeypatch.setattr(env, "get_country", lambda: "")
+    app = make_app()
+    app._on_start_game(base_config(side="white"))
+    assert app.white_country == ""
+    assert app.black_country in countries.CODES
+
+
+def test_country_flows_to_player_strips(monkeypatch):
+    monkeypatch.setattr(env, "get_country", lambda: "RO")
+    app = make_app()
+    app._on_start_game(base_config(side="white"))
+    app._update_player_strips()
+    assert "RO" in {app.player_strip_top.country, app.player_strip_bottom.country}
+
+
 def test_start_game_random_side_resolves_to_concrete_color():
     """A "random" side preference is resolved to a concrete color before game start."""
     app = make_app()
@@ -81,7 +133,7 @@ def test_start_game_random_side_resolves_to_concrete_color():
 
 def test_opponent_name_for_each_mode():
     assert OPPONENT_NAME_FOR_MODE["single_screen"] == "Player 2"
-    assert OPPONENT_NAME_FOR_MODE["bot"] == "AI Bot"
+    assert OPPONENT_NAME_FOR_MODE["bot"] == "Bot"
     assert OPPONENT_NAME_FOR_MODE["online"] == "Opponent"
 
 
@@ -93,18 +145,24 @@ def test_start_game_bot_mode_returns_early_without_starting():
     assert app.mode == pre_mode == "menu"
     assert app.backend.clock is None
     assert app.start_menu.is_visible() is True
-    assert app.server_modal.is_visible() is False
+    assert app.online_client is None
 
 
-def test_start_game_online_mode_routes_to_server_flow_without_starting():
-    """Online mode defers to the server modal; the game itself is not started."""
+def test_start_game_online_mode_starts_matchmaking_without_starting_game(monkeypatch):
+    """Online mode connects to the configured server directly (no modal) and shows
+    the searching wait modal; the game itself isn't set up until game_start."""
     app = make_app()
-    pre_mode = app.mode
+    connected = []
+    monkeypatch.setattr(
+        OnlineClient, "connect",
+        lambda self, addr, request: connected.append((addr, request)))
     app._on_start_game(base_config(mode="online"))
-    assert app.mode == pre_mode == "menu"
+    assert app.mode == "menu"
     assert app.backend.clock is None
     assert app.start_menu.is_visible() is False
-    assert app.server_modal.is_visible() is True
+    assert app.online_client is not None
+    assert app.wait_modal.is_visible() is True
+    assert connected and connected[0][0] == env.get_server_addr()
 
 
 def test_no_clock_leaves_strips_clockless():
@@ -251,7 +309,7 @@ def test_open_pgn_invokes_default_app(tmp_path, monkeypatch):
     app._auto_save_pgn()
     captured = {}
     monkeypatch.setattr(
-        "frontend.frontend._open_with_default_app",
+        "chessshootout.frontend.frontend._open_with_default_app",
         lambda path: captured.setdefault("path", path) or True,
     )
     app._on_open_pgn()
@@ -273,10 +331,96 @@ def test_open_pgn_warns_on_open_failure(tmp_path, monkeypatch):
     app.manual_result = "white_wins"
     app._auto_save_pgn()
     monkeypatch.setattr(
-        "frontend.frontend._open_with_default_app", lambda _path: False,
+        "chessshootout.frontend.frontend._open_with_default_app", lambda _path: False,
     )
     app._on_open_pgn()
     assert app.toast.message == "Could not open PGN"
+
+
+def test_local_game_mints_match_session_id():
+    app = make_app()
+    assert app._match_session_id is None
+    app._on_start_game(base_config())
+    assert extract_csmatchid({"CSMatchId": app._match_session_id}) == app._match_session_id
+
+
+def test_new_game_reuses_match_session_id():
+    """The in-game New Game button stacks onto the same match session (a local rematch)."""
+    app = make_app()
+    app._on_start_game(base_config())
+    first = app._match_session_id
+    app.manual_result = "white_wins"
+    app._on_new_game()
+    assert app._match_session_id == first
+
+
+def test_back_to_menu_clears_match_session_id():
+    app = make_app()
+    app._on_start_game(base_config())
+    assert app._match_session_id is not None
+    app._on_back_to_menu()
+    assert app._match_session_id is None
+
+
+def test_fresh_local_game_after_menu_return_mints_new_session():
+    app = make_app()
+    app._on_start_game(base_config())
+    first = app._match_session_id
+    app._on_back_to_menu()
+    app._on_start_game(base_config())
+    assert app._match_session_id != first
+
+
+def test_fen_start_mints_match_session_id():
+    app = make_app()
+    ok = app._start_game_from_fen("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1")
+    assert ok is True
+    assert extract_csmatchid({"CSMatchId": app._match_session_id}) == app._match_session_id
+
+
+def test_online_match_session_uses_room_id():
+    app = make_app()
+    room = fake_uuid4(2)
+    app.online_client = _StubClient(room)
+    app._start_online_game(_online_payload())
+    assert app._match_session_id == room
+
+
+def test_online_rematch_same_room_keeps_match_session_id():
+    """A rematch re-enters _start_online_game with the same room; the id is stable."""
+    app = make_app()
+    room = fake_uuid4(4)
+    app.online_client = _StubClient(room)
+    app._start_online_game(_online_payload())
+    app._start_online_game(_online_payload())
+    assert app._match_session_id == room
+
+
+def test_online_game_start_threads_countries_to_state():
+    app = make_app()
+    app.online_client = _StubClient(fake_uuid4(6))
+    app._start_online_game(_online_payload(white_country="US", black_country="RO"))
+    assert app.white_country == "US"
+    assert app.black_country == "RO"
+
+
+def test_online_game_start_without_countries_defaults_blank():
+    app = make_app()
+    app.online_client = _StubClient(fake_uuid4(7))
+    app._start_online_game(_online_payload())
+    assert app.white_country == ""
+    assert app.black_country == ""
+
+
+def test_saved_local_pgn_contains_match_session_id(tmp_path, monkeypatch):
+    app = make_app()
+    app._on_start_game(base_config())
+    monkeypatch.setenv("CHESS_DATA_DIR", str(tmp_path))
+    app.backend.try_move(Square(6, 4), Square(4, 4))
+    app.manual_result = "white_wins"
+    app._auto_save_pgn()
+    content = list((tmp_path / "games").glob("*.pgn"))[0].read_text()
+    assert extract_csmatchid(parse_pgn_headers(content)) == app._match_session_id
 
 
 @pytest.mark.parametrize("mode_value, expected_prefix", [
@@ -295,3 +439,15 @@ def test_auto_save_filename_prefix_per_mode(tmp_path, monkeypatch, mode_value, e
     files = list((tmp_path / "games").glob("*.pgn"))
     assert files
     assert files[0].name.startswith(f"{expected_prefix}-")
+
+
+def test_settings_close_persists_server_address(monkeypatch):
+    """Editing the Settings server field and closing persists it via env, so the
+    next matchmake + reconnect probe target the last-used server."""
+    app = make_app()
+    saved = []
+    monkeypatch.setattr(env, "set_server_addr", lambda v: saved.append(v))
+    app._on_open_options()
+    app._server_addr_row.input.text = "chess.example.com:9000"
+    assert app._on_close_settings() is True
+    assert saved == ["chess.example.com:9000"]

@@ -9,8 +9,8 @@ never mutated.
 
 import pytest
 
-from backend.utils import Square
-from frontend.premoves import Premove, speculative_board
+from chessshootout.backend.utils import Square
+from chessshootout.domain.premoves import Premove, speculative_board
 
 from tests.helpers import (
     BLACK, WHITE, K, P,

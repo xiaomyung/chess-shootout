@@ -2,10 +2,24 @@ from datetime import datetime
 
 import pytest
 
-from frontend.pgn.load import (
+from chessshootout.domain.pgn.load import (
     PgnSummary, parse_pgn, parse_pgn_headers, parse_time_control,
-    summarize_pgn_file,
+    result_mark, summarize_pgn_file,
 )
+from tests.helpers import fake_uuid4
+
+
+@pytest.mark.parametrize("result_code, nick, expected", [
+    pytest.param("1-0", "alice", ("+", "win"), id="my_win"),
+    pytest.param("0-1", "alice", ("-", "loss"), id="my_loss"),
+    pytest.param("1/2-1/2", "alice", ("=", "neutral"), id="my_draw"),
+    pytest.param("1-0", "carl", ("W", "neutral"), id="spectator_white_won"),
+    pytest.param("0-1", "carl", ("B", "neutral"), id="spectator_black_won"),
+    pytest.param("1/2-1/2", "carl", ("=", "neutral"), id="spectator_draw"),
+])
+def test_result_mark_returns_perspective_symbol_and_semantic_code(result_code, nick, expected):
+    """result_mark is UI-free: it returns a +/-/= symbol and a semantic code, not a Colour."""
+    assert result_mark(result_code, "alice", "bob", nick) == expected
 
 
 def _pgn(headers, body="1. e4 *"):
@@ -94,6 +108,17 @@ def test_result_code_preserved(code):
 def test_result_missing_defaults_to_unfinished():
     s = _summary("local-20260101-000000.pgn", headers={"White": "A"})
     assert s.result_code == "*"
+
+
+def test_summary_carries_csmatchid_from_headers():
+    mid = fake_uuid4(9)
+    s = _summary("online-20260101-000000.pgn", headers={"CSMatchId": mid})
+    assert s.match_id == mid
+
+
+def test_summary_match_id_none_when_tag_absent():
+    s = _summary("local-20260101-000000.pgn", headers={"White": "A"})
+    assert s.match_id is None
 
 
 @pytest.mark.parametrize("text", [

@@ -1,7 +1,7 @@
 import pytest
 
-from backend.backend import Backend
-from frontend.pgn.load import parse_pgn
+from chessshootout.backend.backend import Backend
+from chessshootout.domain.pgn.load import parse_pgn
 from tests.helpers import (
     BLACK, WHITE, K, B, N, P,
     make_backend, piece, sq,

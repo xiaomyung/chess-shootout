@@ -1,4 +1,4 @@
-"""Help modal + R/D + Q/R/B/N hotkeys (M13).
+"""Help modal + R/D + Q/R/B/N hotkeys.
 
 Drives keys through Frontend._handle_shortcut_key / _handle_promotion_key to
 verify the help modal toggles, resign/draw open the right confirm prompt, and a
@@ -16,8 +16,9 @@ from unittest.mock import MagicMock
 import pygame as pg
 import pytest
 
-from backend.pieces import Piece, PieceColor, PieceType
-from backend.utils import Square
+from chessshootout.backend.pieces import Piece, PieceColor, PieceType
+from chessshootout.backend.utils import Square
+from chessshootout.frontend.modals.help import HelpModal, HOTKEYS
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -29,7 +30,7 @@ def _pygame_init():
 
 
 def _make_app():
-    from frontend.frontend import Frontend
+    from chessshootout.frontend.frontend import Frontend
     app = Frontend(1000, 800)
     app.sound_manager = MagicMock()
     app._on_start_game({"mode": "single_screen", "nickname": "a",
@@ -71,8 +72,8 @@ def test_help_modal_close_button_hides_it():
 
 
 @pytest.mark.parametrize("key,title,yes_label", [
-    pytest.param(pg.K_r, "Resign?", "Resign", id="r_opens_resign_confirm"),
-    pytest.param(pg.K_d, "Offer draw?", "Draw", id="d_opens_draw_confirm"),
+    pytest.param(pg.K_r, "Tap out?", "I'm done", id="r_opens_resign_confirm"),
+    pytest.param(pg.K_d, "Offer a draw?", "Offer draw", id="d_opens_draw_confirm"),
 ])
 def test_action_hotkey_opens_confirm(key, title, yes_label):
     app = _make_app()
@@ -143,3 +144,23 @@ def test_r_during_promotion_picks_rook_not_resign():
     app._handle_shortcut_key(_key_event(pg.K_r))
     assert app.confirm_modal.is_visible() is False
     assert app.board.pending_promotion_square is None
+
+
+def test_review_row_uses_real_arrow_glyphs():
+    """Regression: the review-step row shows real left/right arrows.
+
+    The SANS body font lacks U+2190/U+2192 and rendered them as the .notdef
+    box (tofu); the key column uses the mono font, which has the glyphs. Render
+    each arrow and assert it differs from a guaranteed-missing glyph's box.
+    """
+    assert any("←" in key and "→" in key for key, _ in HOTKEYS)
+    modal = HelpModal(pg.display.get_surface())
+    modal.set_rect(pg.Rect(200, 150, 420, 420))
+    modal.show()
+    modal.draw()
+    tofu = pg.image.tobytes(
+        modal.key_font.render(chr(0xE000), True, (255, 255, 255)), "RGBA")
+    for arrow in ("←", "→"):
+        glyph = pg.image.tobytes(
+            modal.key_font.render(arrow, True, (255, 255, 255)), "RGBA")
+        assert glyph != tofu

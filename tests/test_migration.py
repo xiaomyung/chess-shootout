@@ -5,9 +5,9 @@ os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
 import pygame as pg
 import pytest
 
-import paths
-from frontend import env
-from frontend.frontend import Frontend
+from chessshootout import paths
+from chessshootout.infra import env
+from chessshootout.frontend.frontend import Frontend
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -82,7 +82,7 @@ def test_move_pgns_failure_returns_false(tmp_path, monkeypatch):
     def boom(*a, **k):
         raise OSError("disk full")
 
-    monkeypatch.setattr("frontend.frontend.shutil.move", boom)
+    monkeypatch.setattr("chessshootout.frontend.frontend.shutil.move", boom)
     assert app._move_pgns(str(src), str(tmp_path / "new")) is False
     assert (src / "a.pgn").exists()
     assert os.path.isdir(src)
@@ -170,6 +170,19 @@ def test_menu_hidden_while_overlay_modal_open():
     assert app._menu_overlay_active() is True
     app.options_modal.hide()
     assert app._menu_overlay_active() is False
+
+
+def test_options_close_applies_default_time_to_menu(monkeypatch):
+    """Closing Settings re-applies the persisted default time/increment to the
+    start-menu selection, overriding whatever was picked there before."""
+    app = _app()
+    app.start_menu.selected_time_minutes = 5
+    app.start_menu.selected_increment_seconds = 2
+    monkeypatch.setenv("CHESS_DEFAULT_TC", "15")
+    monkeypatch.setenv("CHESS_DEFAULT_INCREMENT", "10")
+    assert app._on_close_settings() is True
+    assert app.start_menu.selected_time_minutes == 15
+    assert app.start_menu.selected_increment_seconds == 10
 
 
 def test_menu_click_routes_to_options_not_start_menu(monkeypatch):

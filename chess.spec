@@ -6,7 +6,7 @@
 #                                  --add-data "assets;assets" \
 #                                  --collect-data certifi --hidden-import certifi \
 #                                  --exclude-module fastapi --exclude-module uvicorn \
-#                                  --exclude-module starlette --exclude-module slowapi main.py
+#                                  --exclude-module starlette --exclude-module slowapi chessshootout/main.py
 #
 # Only the web stack is excluded; server.protocol (pydantic-only) stays, since the
 # client imports it. macOS wraps the COLLECT output into ChessShootout.app via BUNDLE.
@@ -18,14 +18,18 @@ from PyInstaller.utils.hooks import collect_data_files
 CHESS_VERSION = os.environ.get("CHESS_VERSION", "0.0.0")
 
 a = Analysis(
-    ["main.py"],
+    ["chessshootout/main.py"],
     pathex=["."],
     binaries=[],
-    datas=[("assets", "assets"), *collect_data_files("certifi")],
-    hiddenimports=["certifi"],
+    datas=[("assets", "assets"), ("ATTRIBUTION.md", "."), ("LICENSE", "."),
+           ("LICENSE-CC-BY-NC-4.0.txt", "."), *collect_data_files("certifi")],
+    hiddenimports=["certifi", "pygame._sdl2", "pygame._sdl2.video"],
     excludes=["fastapi", "uvicorn", "starlette", "slowapi"],
     noarchive=False,
 )
+# SVG sources (assets/pieces_svg) are build-time only; ship the rendered PNGs, not the sources.
+a.datas = [entry for entry in a.datas if not entry[0].lower().endswith(".svg")]
+
 pyz = PYZ(a.pure)
 
 exe = EXE(

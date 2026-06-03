@@ -1,8 +1,11 @@
 # Chess Shootout
 
-A full-featured chess game built with [pygame](https://www.pygame.org/) —
-local hot-seat play, premoves, clocks, annotations, PGN auto-save and
-review, plus an authoritative server for online two-player matches.
+A full-featured chess game built with [pygame](https://www.pygame.org/):
+a clean UI at rest with comedic **gun-fight** chaos in the moments — pieces
+blast each other off the board and an FPS-style announcer calls the
+killstreaks. Local hot-seat play, premoves, clocks, annotations, PGN
+auto-save and review, plus an authoritative server for online two-player
+matches.
 
 ## Features
 
@@ -16,6 +19,16 @@ review, plus an authoritative server for online two-player matches.
 - Captured-piece graveyard with running material balance; master-volume
   slider persisted to `.env`.
 - Help modal listing every shortcut (`?` or the right-panel button).
+
+**Presentation**
+- Gun-fight captures — muzzle flash, tracer, impact, bullet holes, ragdoll,
+  comic blood, and board screen-shake; each piece type fires its own shot.
+- FPS-style announcer with killstreaks (FIRST BLOOD → DOUBLE … GODLIKE), a
+  checkmate takeover, and a surrender flag.
+- Custom borderless window chrome — native drag, edge/corner resize, and a
+  themed title bar on every screen.
+- Animated menu "battle" backdrop and themed result / online screens; a
+  reduce-motion toggle and effect-intensity control live in Options.
 
 **PGN**
 - Every game auto-saves to `games/<prefix>-YYYYMMDD-HHMMSS.pgn` (`local`,
@@ -74,7 +87,7 @@ python3.12 -m venv .venv          # Windows: py -3.12 -m venv .venv
 source .venv/bin/activate         # Windows: .venv\Scripts\Activate.ps1
 python --version                  # confirm 3.12.x
 pip install -e .                  # add ".[dev]" for tests + linting
-python main.py
+python -m chessshootout.main      # or just: chess-shootout
 ```
 
 `-e` is an editable install: pip resolves dependencies but runs against your
@@ -129,9 +142,9 @@ Two players, one server — authoritative, running the same engine as the client
 ### Quick start (local)
 
 ```bash
-python -m server                                      # terminal 1 (port 8000)
-python main.py --client-uuid alice --nickname Alice   # terminal 2
-python main.py --client-uuid bob   --nickname Bob     # terminal 3
+python -m chessshootout.server                                      # terminal 1 (port 8000)
+python -m chessshootout.main --client-uuid alice --nickname Alice   # terminal 2
+python -m chessshootout.main --client-uuid bob   --nickname Bob     # terminal 3
 ```
 
 `--client-uuid alice` is a debug shortcut: any non-UUID4 alias is coerced to
@@ -207,8 +220,8 @@ Install the dev extra, then run the same checks CI does:
 
 ```bash
 pip install -e ".[dev]"
-pytest tests -n 8 -q                            # ~12 s for 1331 tests (~25 s serial)
-pylama backend frontend server main.py paths.py tests   # pycodestyle + pyflakes; exits 0 when clean
+pytest tests -n 8 -q                            # run the test suite
+pylama chessshootout tests                      # pycodestyle + pyflakes; exits 0 when clean
 ```
 
 Both gate merges to `master` (the `test` and `lint` jobs), so a green local
@@ -232,4 +245,27 @@ the single source of truth.
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+**Source available, not open source.** Because it forbids commercial use, this
+project is *not* an OSI "open source" license — please don't call it that.
+
+- **Code** — [PolyForm Noncommercial License 1.0.0](LICENSE). Read, run, modify,
+  fork, and share it for any **non-commercial** purpose. You may **not** sell it
+  or use it (or parts of it) commercially.
+- **Original assets** (piece art, icons, and any sounds authored for the
+  project) — [**CC BY-NC 4.0**](LICENSE-CC-BY-NC-4.0.txt): reuse with credit,
+  non-commercial only.
+- **Bundled third-party assets** (fonts, sound effects, emoji) keep their own
+  licenses — see [ATTRIBUTION.md](ATTRIBUTION.md).
+- **v1.0.0** was released under the **MIT License** and stays MIT; the terms
+  above apply from **v2.0.0** onward.
+
+"Non-commercial" is meant generously: personal/hobby use, education, clubs,
+streaming/videos, and free forks that take donations are all fine — only selling
+or charging is off-limits. Running your own server for non-commercial play is
+fine; the online service operated by the author is not part of this grant and
+access to it is at the author's discretion.
+
+**"Chess Shootout™"** is a trademark of the author — forks and derivatives must
+use a different name and not imply endorsement.
+
+Contributions are welcome under the terms in [CONTRIBUTING.md](CONTRIBUTING.md).

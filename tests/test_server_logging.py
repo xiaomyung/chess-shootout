@@ -11,7 +11,7 @@ import os
 
 import pytest
 
-from server import logging_setup
+from chessshootout.server import logging_setup
 
 
 @pytest.fixture
@@ -124,7 +124,7 @@ def test_configure_file_handler_follows_log_file_env(tmp_path, monkeypatch,
 
 def test_existing_log_lines_use_kv_style_after_prefix():
     """Pin that app/handlers/sweep log lines keep `room=%s` + `uuid=%s` KV pairs."""
-    from server import app, handlers, sweep
+    from chessshootout.server import app, handlers, sweep
     sources = []
     for module in (app, handlers, sweep):
         path = module.__file__

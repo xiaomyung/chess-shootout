@@ -9,10 +9,11 @@ from unittest.mock import MagicMock
 import pygame as pg
 import pytest
 
-from backend.backend import Backend
-from backend.pieces import Piece, PieceColor, PieceType
-from backend.utils import Square
-from frontend.board import Board
+from chessshootout.backend.backend import Backend
+from chessshootout.backend.pieces import Piece, PieceColor, PieceType
+from chessshootout.backend.utils import Square
+from chessshootout.frontend.board import Board
+from chessshootout.frontend.visual.colors import Colors
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -34,7 +35,7 @@ def board():
 
 
 def make_app():
-    from frontend.frontend import Frontend
+    from chessshootout.frontend.frontend import Frontend
     app = Frontend(900, 500)
     app.sound_manager = MagicMock()
     app._on_start_game({"mode": "single_screen", "nickname": "a",
@@ -65,6 +66,31 @@ def fire_animation(board):
 def _cell_center(board, sq):
     rect = board._cell_rect(sq.row, sq.col)
     return rect.center
+
+
+def _arrow_region(board, sq):
+    rect = board._cell_rect(sq.row, sq.col)
+    return pg.Rect(rect.centerx - 8, rect.centery - 8, 16, 16).clip(board.window.get_rect())
+
+
+def _arrow_marks_cells(board, squares):
+    """Pixel-diff: which cells gain pixels when the arrows/drag-preview are drawn."""
+    win = board.window
+
+    def snapshot():
+        board._arrow_cache = None
+        win.fill((0, 0, 0))
+        board.draw_board()
+        return {sq: pg.image.tobytes(win.subsurface(_arrow_region(board, sq)), "RGB")
+                for sq in squares}
+
+    with_arrows = snapshot()
+    arrows, drag = board.arrows, board._right_drag_start_square
+    board.arrows, board._right_drag_start_square = [], None
+    without = snapshot()
+    board.arrows, board._right_drag_start_square = arrows, drag
+    board._arrow_cache = None
+    return {sq: with_arrows[sq] != without[sq] for sq in squares}
 
 
 def _spy_cell_rects(board, monkeypatch):
@@ -105,9 +131,10 @@ def _spy_arrow_geometry(monkeypatch):
     return circle_centers, arrow_tips, line_segments
 
 
-def _assert_arrow_drawn(board, circle_centers, arrow_tips, from_sq, to_sq):
-    assert _cell_center(board, from_sq) in circle_centers
-    assert _cell_center(board, to_sq) in arrow_tips
+def _assert_arrow_drawn(board, from_sq, to_sq):
+    marks = _arrow_marks_cells(board, [from_sq, to_sq])
+    assert marks[from_sq], "arrow should mark its from-square"
+    assert marks[to_sq], "arrow should mark its to-square"
 
 
 def test_toggle_highlight_adds(board):
@@ -264,7 +291,7 @@ def test_right_click_drag_twice_toggles_arrow_off():
 
 
 def test_right_click_in_menu_mode_is_noop():
-    from frontend.frontend import Frontend
+    from chessshootout.frontend.frontend import Frontend
     app = Frontend(900, 500)
     app.sound_manager = MagicMock()
     rect = app.board._cell_rect(0, 0)
@@ -454,15 +481,13 @@ def test_draw_annotation_highlights_empty_draws_nothing(board, monkeypatch):
         pytest.param(Square(4, 0), Square(4, 7), id="horizontal_arrow"),
     ],
 )
-def test_draw_arrows_renders_from_and_to(board, monkeypatch, from_sq, to_sq):
+def test_draw_arrows_renders_from_and_to(board, from_sq, to_sq):
     board.toggle_arrow(from_sq, to_sq)
-    circle_centers, arrow_tips, _ = _spy_arrow_geometry(monkeypatch)
-    board._draw_arrows()
-    _assert_arrow_drawn(board, circle_centers, arrow_tips, from_sq, to_sq)
+    _assert_arrow_drawn(board, from_sq, to_sq)
 
 
-def test_draw_arrows_renders_every_arrow(board, monkeypatch):
-    """All queued arrows are rendered, each contributing its from cap and head."""
+def test_draw_arrows_renders_every_arrow(board):
+    """All queued arrows are rendered, each marking its from- and to-square."""
     pairs = [
         (Square(6, 0), Square(4, 0)),
         (Square(7, 0), Square(0, 7)),
@@ -470,10 +495,9 @@ def test_draw_arrows_renders_every_arrow(board, monkeypatch):
     ]
     for from_sq, to_sq in pairs:
         board.toggle_arrow(from_sq, to_sq)
-    circle_centers, arrow_tips, _ = _spy_arrow_geometry(monkeypatch)
-    board._draw_arrows()
-    for from_sq, to_sq in pairs:
-        _assert_arrow_drawn(board, circle_centers, arrow_tips, from_sq, to_sq)
+    cells = [sq for pair in pairs for sq in pair]
+    marks = _arrow_marks_cells(board, cells)
+    assert all(marks[sq] for sq in cells)
 
 
 @pytest.mark.parametrize(
@@ -489,20 +513,38 @@ def test_draw_arrows_renders_every_arrow(board, monkeypatch):
         pytest.param(2, 1, id="down2_right1"),
     ],
 )
-def test_draw_knight_arrow_renders_with_elbow(board, monkeypatch, dr, dc):
-    """A knight arrow draws an L: a circle cap at the elbow corner plus the
-    from-cap and the arrowhead at the target."""
+def test_draw_knight_arrow_renders_with_elbow(board, dr, dc):
+    """A knight arrow draws an L: the shaft routes through the elbow corner,
+    so the from-, corner-, and to-squares all gain arrow pixels."""
     center = Square(4, 4)
     target = Square(center.row + dr, center.col + dc)
-    board.toggle_arrow(center, target)
-    circle_centers, arrow_tips, line_segments = _spy_arrow_geometry(monkeypatch)
-    board._draw_arrows()
-    _assert_arrow_drawn(board, circle_centers, arrow_tips, center, target)
     corner = Board._knight_arrow_corner(center, target)
-    corner_center = _cell_center(board, corner)
-    assert corner_center in circle_centers
-    assert any(start == corner_center or end == corner_center
-               for start, end in line_segments)
+    board.toggle_arrow(center, target)
+    marks = _arrow_marks_cells(board, [center, corner, target])
+    assert marks[center] and marks[corner] and marks[target]
+
+
+@pytest.mark.parametrize(
+    "from_sq, to_sq",
+    [
+        pytest.param(Square(7, 6), Square(5, 5), id="knight_elbow"),
+        pytest.param(Square(7, 0), Square(0, 7), id="long_diagonal"),
+        pytest.param(Square(6, 0), Square(4, 0), id="short_straight"),
+    ],
+)
+def test_arrow_overlap_does_not_double_alpha(board, from_sq, to_sq):
+    """Shaft capsules and the head are composited with BLEND_RGBA_MAX, so where
+    they overlap (knight elbow, shaft/head junction) the alpha takes the max
+    instead of summing — no opaque seam. The peak alpha anywhere on the arrow
+    must equal the color's own alpha and never exceed it; the summing bug would
+    clamp the overlap to 255."""
+    max_a = pg.Color(Colors.annotation_arrow).a
+    assert max_a < 255
+    layer = pg.Surface(board.rect.size, pg.SRCALPHA)
+    board._render_arrow(layer, 1, from_sq, to_sq, Colors.annotation_arrow)
+    w, h = layer.get_size()
+    peak = max(layer.get_at((x, y)).a for x in range(w) for y in range(h))
+    assert peak == max_a, f"overlap summed alpha to {peak}, expected exactly {max_a}"
 
 
 @pytest.mark.parametrize(
@@ -535,7 +577,7 @@ def test_draw_drag_preview_arrow_no_drag_is_noop(board, monkeypatch):
     """No drag start -> nothing is rendered (no caps, no head, no shaft)."""
     board._right_drag_start_square = None
     circle_centers, arrow_tips, line_segments = _spy_arrow_geometry(monkeypatch)
-    board._draw_drag_preview_arrow()
+    board._draw_arrows()
     assert circle_centers == []
     assert arrow_tips == []
     assert line_segments == []
@@ -548,9 +590,8 @@ def test_draw_drag_preview_arrow_with_active_drag(board, monkeypatch):
     end = Square(4, 4)
     board._right_drag_start_square = start
     monkeypatch.setattr(pg.mouse, "get_pos", lambda: _cell_center(board, end))
-    circle_centers, arrow_tips, _ = _spy_arrow_geometry(monkeypatch)
-    board._draw_drag_preview_arrow()
-    _assert_arrow_drawn(board, circle_centers, arrow_tips, start, end)
+    marks = _arrow_marks_cells(board, [start, end])
+    assert marks[start] and marks[end]
 
 
 def test_draw_drag_preview_arrow_same_square_is_noop(board, monkeypatch):
@@ -559,7 +600,7 @@ def test_draw_drag_preview_arrow_same_square_is_noop(board, monkeypatch):
     board._right_drag_start_square = start
     monkeypatch.setattr(pg.mouse, "get_pos", lambda: _cell_center(board, start))
     circle_centers, arrow_tips, line_segments = _spy_arrow_geometry(monkeypatch)
-    board._draw_drag_preview_arrow()
+    board._draw_arrows()
     assert circle_centers == []
     assert arrow_tips == []
     assert line_segments == []
@@ -578,10 +619,9 @@ def test_draw_full_board_with_annotations_renders_all_layers(board, monkeypatch)
     drag_start, drag_end = Square(0, 0), Square(2, 2)
     board._right_drag_start_square = drag_start
     monkeypatch.setattr(pg.mouse, "get_pos", lambda: _cell_center(board, drag_end))
-    circle_centers, arrow_tips, _ = _spy_arrow_geometry(monkeypatch)
+    marks = _arrow_marks_cells(board, [arrow_from, arrow_to, drag_start, drag_end])
+    assert all(marks.values())
     board.draw_board()
-    _assert_arrow_drawn(board, circle_centers, arrow_tips, arrow_from, arrow_to)
-    _assert_arrow_drawn(board, circle_centers, arrow_tips, drag_start, drag_end)
     for sq in highlights:
         assert board.window.get_at(_cell_center(board, sq)) != plain_pixels[sq]
 

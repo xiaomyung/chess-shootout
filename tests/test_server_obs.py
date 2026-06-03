@@ -13,11 +13,11 @@ import random
 import pytest
 from fastapi.testclient import TestClient
 
-from server.app import (
+from chessshootout.server.app import (
     PROTOCOL_VERSION, WS_MESSAGES_PER_SECOND, create_app,
 )
-from server.handlers import HANDLERS, dispatch
-from server.protocol import Reason
+from chessshootout.server.handlers import HANDLERS, dispatch
+from chessshootout.server.protocol import Reason
 from tests.helpers import FakeClock, fake_uuid4
 
 

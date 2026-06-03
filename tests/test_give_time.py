@@ -16,9 +16,9 @@ import pygame as pg
 import pytest
 from fastapi.testclient import TestClient
 
-from backend.match import ONLINE
-from backend.pieces import PieceColor
-from server.app import PROTOCOL_VERSION, create_app
+from chessshootout.domain.match import ONLINE
+from chessshootout.backend.pieces import PieceColor
+from chessshootout.server.app import PROTOCOL_VERSION, create_app
 from tests.helpers import FakeClock, fake_uuid4
 
 
@@ -35,7 +35,7 @@ def _pygame_init():
 
 
 def _make_app():
-    from frontend.frontend import Frontend
+    from chessshootout.frontend.frontend import Frontend
     app = Frontend(1000, 800)
     app.sound_manager = MagicMock()
     return app
@@ -58,7 +58,7 @@ def test_local_click_gives_time_to_active_clock_side():
 
 
 def test_local_click_after_first_move_gives_time_to_black():
-    from backend.utils import Square
+    from chessshootout.backend.utils import Square
     app = _make_app()
     _start_local(app)
     app.match.try_move(Square(6, 4), Square(4, 4))
@@ -162,7 +162,7 @@ def test_disabled_keys_includes_give_time_after_result():
 
 
 def test_online_client_send_give_time_enqueues():
-    from frontend.online.client import OnlineClient
+    from chessshootout.online.client import OnlineClient
     client = OnlineClient()
     client._loop = MagicMock()
     client._loop.is_closed.return_value = False

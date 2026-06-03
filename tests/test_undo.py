@@ -1,6 +1,6 @@
 import pytest
 
-from backend.backend import Backend
+from chessshootout.backend.backend import Backend
 from tests.helpers import (
     BLACK, WHITE, K, Q, R, P,
     make_backend, piece, sq,

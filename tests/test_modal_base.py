@@ -12,8 +12,8 @@ os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
 import pygame as pg
 import pytest
 
-from frontend.modals.base import BaseModal
-from frontend.panels.base import BasePanel
+from chessshootout.frontend.modals.base import BaseModal
+from chessshootout.frontend.panels.base import BasePanel
 
 
 @pytest.fixture(scope="module", autouse=True)

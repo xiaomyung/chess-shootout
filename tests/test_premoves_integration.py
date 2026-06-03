@@ -19,10 +19,10 @@ from unittest.mock import MagicMock
 import pygame as pg
 import pytest
 
-from backend.backend import Backend
-from backend.pieces import Piece, PieceColor, PieceType
-from backend.utils import Square
-from frontend.board import Board
+from chessshootout.backend.backend import Backend
+from chessshootout.backend.pieces import Piece, PieceColor, PieceType
+from chessshootout.backend.utils import Square
+from chessshootout.frontend.board import Board
 
 WHITE = PieceColor.WHITE
 BLACK = PieceColor.BLACK
@@ -77,7 +77,7 @@ def _highlighted_squares(board):
 
 
 def _new_app():
-    from frontend.frontend import Frontend
+    from chessshootout.frontend.frontend import Frontend
     app = Frontend(900, 500)
     app.sound_manager = MagicMock()
     app._on_start_game({"mode": "single_screen", "nickname": "a",

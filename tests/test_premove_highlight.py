@@ -18,10 +18,10 @@ from collections import Counter
 import pygame as pg
 import pytest
 
-from backend.backend import Backend
-from backend.pieces import Piece, PieceColor, PieceType
-from backend.utils import Square
-from frontend.board import Board
+from chessshootout.backend.backend import Backend
+from chessshootout.backend.pieces import Piece, PieceColor, PieceType
+from chessshootout.backend.utils import Square
+from chessshootout.frontend.board import Board
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -209,7 +209,7 @@ def test_dragged_piece_renders_ghost_on_origin(board):
 
 def test_chain_tip_premove_overlay_color_is_brighter():
     """The chain-tip overlay is more opaque than the dim queued-square overlay."""
-    from frontend.visual.colors import Colors
+    from chessshootout.frontend.visual.colors import Colors
     chain_tip = pg.Color(Colors.premove_chain_tip)
     queued = pg.Color(Colors.premove)
     assert chain_tip.a > queued.a

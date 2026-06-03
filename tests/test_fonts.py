@@ -10,8 +10,8 @@ from pathlib import Path
 import pygame as pg
 import pytest
 
-import paths
-from frontend.visual import fonts
+from chessshootout import paths
+from chessshootout.frontend.visual import fonts
 
 
 @pytest.fixture(autouse=True)

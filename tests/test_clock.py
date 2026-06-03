@@ -9,8 +9,8 @@ the full clock snapshot.
 
 import pytest
 
-from backend.clock import Clock
-from backend.pieces import PieceColor
+from chessshootout.backend.clock import Clock
+from chessshootout.backend.pieces import PieceColor
 
 from tests.helpers import (
     BLACK, WHITE, K, Q, R, B, P,

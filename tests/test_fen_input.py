@@ -15,8 +15,8 @@ from unittest.mock import MagicMock
 import pygame as pg
 import pytest
 
-from backend.match import SINGLE_SCREEN
-from frontend.modals.fen_input import FenInputModal
+from chessshootout.domain.match import SINGLE_SCREEN
+from chessshootout.frontend.modals.fen_input import FenInputModal
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -28,7 +28,7 @@ def _pygame_init():
 
 
 def _make_app():
-    from frontend.frontend import Frontend
+    from chessshootout.frontend.frontend import Frontend
     app = Frontend(1000, 800)
     app.sound_manager = MagicMock()
     return app
@@ -145,7 +145,7 @@ def test_start_menu_fen_button(selected_mode, expected_opened):
         "start_game": lambda cfg: None,
         "fen": lambda: captured.setdefault("opened", True),
     }
-    from frontend.modals.start import StartMenu
+    from chessshootout.frontend.modals.start import StartMenu
     sm = StartMenu(pg.display.get_surface(), callbacks)
     sm.set_rect(pg.Rect(100, 50, 600, 700))
     sm.selected_mode = selected_mode

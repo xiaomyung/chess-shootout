@@ -9,9 +9,9 @@ from collections import Counter
 import pygame as pg
 import pytest
 
-from backend.backend import Backend
-from backend.pieces import Piece, PieceColor, PieceType
-from backend.utils import Square
+from chessshootout.backend.backend import Backend
+from chessshootout.backend.pieces import Piece, PieceColor, PieceType
+from chessshootout.backend.utils import Square
 
 
 KING_HOME = Square(7, 4)
@@ -34,7 +34,7 @@ def _pygame_init():
 
 @pytest.fixture
 def board():
-    from frontend.board import Board
+    from chessshootout.frontend.board import Board
 
     backend = Backend()
     backend.new_game()

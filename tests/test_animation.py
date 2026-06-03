@@ -12,10 +12,10 @@ os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
 import pygame as pg
 import pytest
 
-from backend.backend import Backend
-from backend.utils import Square
-from frontend.visual.animation import PieceAnimation
-from backend.pieces import Piece, PieceColor, PieceType
+from chessshootout.backend.backend import Backend
+from chessshootout.backend.utils import Square
+from chessshootout.frontend.visual.animation import PieceAnimation
+from chessshootout.backend.pieces import Piece, PieceColor, PieceType
 
 
 DEFAULT_CONFIG = {
@@ -37,7 +37,7 @@ def _pygame_init():
 
 @pytest.fixture
 def board():
-    from frontend.board import Board
+    from chessshootout.frontend.board import Board
     backend = Backend()
     backend.new_game()
     bd = Board(pg.display.get_surface(), backend)
@@ -47,7 +47,7 @@ def board():
 
 
 def _start_game():
-    from frontend.frontend import Frontend
+    from chessshootout.frontend.frontend import Frontend
     app = Frontend(800, 600)
     app._on_start_game(DEFAULT_CONFIG)
     return app
@@ -305,7 +305,7 @@ def test_last_animation_completed_at_ms_unchanged_on_cancel(board):
 
 def test_auto_flip_blocked_during_post_animation_delay():
     """Auto-flip is suppressed for AUTO_FLIP_DELAY_MS after a slide lands."""
-    from frontend.frontend import AUTO_FLIP_DELAY_MS
+    from chessshootout.frontend.frontend import AUTO_FLIP_DELAY_MS
     app = _start_game()
     app.board.handle_click(Square(6, 4))
     app.board.handle_click(Square(4, 4))

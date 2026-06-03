@@ -12,10 +12,13 @@ CLAUDE.md
 games/
 crashlogs/
 .env
+.env.*
+!.env.example
 build/
 dist/
 out/
 AppDir/
 *.AppImage
+*.egg-info/
 local_build/
 assets/version.txt

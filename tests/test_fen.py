@@ -2,10 +2,10 @@ from collections import Counter
 
 import pytest
 
-from backend.backend import Backend
-from backend.fen import export_fen, apply_fen
-from backend.pieces import Piece, PieceColor, PieceType
-from backend.utils import Square
+from chessshootout.backend.backend import Backend
+from chessshootout.backend.fen import export_fen, apply_fen
+from chessshootout.backend.pieces import Piece, PieceColor, PieceType
+from chessshootout.backend.utils import Square
 
 
 INITIAL_FEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"

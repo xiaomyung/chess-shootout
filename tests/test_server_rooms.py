@@ -2,8 +2,8 @@ import random
 
 import pytest
 
-from server.protocol import GRACE_SECONDS
-from server.rooms import (
+from chessshootout.server.protocol import GRACE_SECONDS
+from chessshootout.server.rooms import (
     AlreadyInGameError, InvalidTokenError, NotInRoomError,
     REMATCH_KEEP_ALIVE_SECONDS, RoomManager,
 )
@@ -206,6 +206,34 @@ async def test_reset_for_rematch_swaps_colors_and_clears_state(manager, clock):
 
 
 @pytest.mark.asyncio
+async def test_enqueue_stores_country_per_slot(manager):
+    await manager.enqueue(**_enqueue_kwargs("alice", country="US"))
+    room = await manager.enqueue(**_enqueue_kwargs("bob", country="RO"))
+    alice_color = room.color_of("alice")
+    assert room.slot(alice_color).country == "US"
+    assert room.slot(room.opp_color(alice_color)).country == "RO"
+
+
+@pytest.mark.asyncio
+async def test_enqueue_country_defaults_none(manager):
+    room = await manager.enqueue(**_enqueue_kwargs("alice"))
+    assert room.slot(room.color_of("alice")).country is None
+
+
+@pytest.mark.asyncio
+async def test_rematch_swaps_country_with_player(manager, clock):
+    await manager.enqueue(**_enqueue_kwargs("alice", country="US"))
+    room = await manager.enqueue(**_enqueue_kwargs("bob", country="RO"))
+    pre_white_country = room.white.country
+    pre_black_country = room.black.country
+    room.game_start_broadcast = True
+    manager.finalize_result(room.room_id, "checkmate", winner_color="white")
+    manager.reset_for_rematch(room.room_id)
+    assert room.white.country == pre_black_country
+    assert room.black.country == pre_white_country
+
+
+@pytest.mark.asyncio
 async def test_gc_drops_finished_rooms_after_keep_alive(manager, clock):
     await manager.enqueue(**_enqueue_kwargs("alice"))
     room = await manager.enqueue(**_enqueue_kwargs("bob"))
@@ -250,3 +278,39 @@ async def test_slot_by_token_returns_correct_slot(manager):
     assert color == room.color_of("alice")
     color, slot = room.slot_by_token("bogus")
     assert slot is None and color is None
+
+
+@pytest.mark.asyncio
+async def test_series_scores_award_win_and_persist_across_rematch(manager):
+    """A win gives the winner +1 keyed by nickname; a later draw gives both +0.5;
+    the tally survives the color swap of a rematch."""
+    await manager.enqueue(**_enqueue_kwargs("alice"))
+    room = await manager.enqueue(**_enqueue_kwargs("bob"))
+    rid = room.room_id
+    white_name = room.white.nickname
+    black_name = room.black.nickname
+    manager.finalize_result(rid, "checkmate", "white")
+    assert room.series_scores[white_name] == 1.0
+    assert room.score_for("white") == 1.0
+    assert room.score_for("black") == 0.0
+    manager.reset_for_rematch(rid)
+    manager.finalize_result(rid, "draw_repetition", None)
+    assert room.series_scores[white_name] == 1.5
+    assert room.series_scores[black_name] == 0.5
+
+
+@pytest.mark.asyncio
+async def test_series_scores_award_on_abandonment(manager):
+    await manager.enqueue(**_enqueue_kwargs("alice"))
+    room = await manager.enqueue(**_enqueue_kwargs("bob"))
+    manager.finalize_abandonment(room.room_id, "white")
+    assert room.score_for("black") == 1.0
+    assert room.score_for("white") == 0.0
+
+
+@pytest.mark.asyncio
+async def test_series_scores_not_awarded_on_abort(manager):
+    await manager.enqueue(**_enqueue_kwargs("alice"))
+    room = await manager.enqueue(**_enqueue_kwargs("bob"))
+    manager.finalize_result(room.room_id, "aborted", None)
+    assert room.series_scores == {}

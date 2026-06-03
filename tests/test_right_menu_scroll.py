@@ -1,7 +1,7 @@
 """RightMenu move-list scroll: overflow gating, offset clamping, scroll-position
 preservation across new moves, review-mode auto-scroll, and the activity-driven
 scroll-thumb fade. The fade signal is read from real pixels in the thumb column
-(Colors.button_hover) so the test fails if draw_scroll_thumb stops honoring
+(Colors.surface_hover) so the test fails if draw_scroll_thumb stops honoring
 SCROLL_FADE_MS."""
 
 import os
@@ -12,10 +12,10 @@ os.environ.setdefault("SDL_AUDIODRIVER", "dummy")
 import pygame as pg
 import pytest
 
-from backend.backend import Backend
-from frontend.panels.right import RightMenu
-from frontend.visual.colors import Colors
-from frontend.visual.widgets import (
+from chessshootout.backend.backend import Backend
+from chessshootout.frontend.panels.right import RightMenu
+from chessshootout.frontend.visual.colors import Colors
+from chessshootout.frontend.visual.widgets import (
     SCROLL_FADE_MS, SCROLL_THUMB_RIGHT_OFFSET, SCROLL_THUMB_WIDTH,
 )
 
@@ -43,8 +43,8 @@ def menu():
 
 
 def play_n_moves(backend, n):
-    from backend.utils import Square, Move, HistoryEntry
-    from backend.pieces import Piece, PieceType, PieceColor
+    from chessshootout.backend.utils import Square, Move, HistoryEntry
+    from chessshootout.backend.pieces import Piece, PieceType, PieceColor
     pawn = Piece(PieceType.PAWN, PieceColor.WHITE)
     move = Move(Square(6, 0), Square(5, 0), pawn)
     backend.move_history = [
@@ -56,13 +56,13 @@ def play_n_moves(backend, n):
 
 
 def _count_thumb_pixels(menu):
-    """Pixels in the scroll-thumb column painted Colors.button_hover. The thumb
-    lives in a 4px band at the right edge of moves_rect; active move-cell
-    highlights (also button_hover) never reach this column, so a nonzero count
-    means the thumb itself was drawn."""
+    """Pixels in the scroll-thumb column painted Colors.surface_hover. The thumb
+    lives in a 4px band at the right edge of moves_rect; the active move-cell
+    highlight is surface_active (a different colour) and never reaches this
+    column, so a nonzero count means the thumb itself was drawn."""
     rect = menu.moves_rect
     thumb_x = rect.right - SCROLL_THUMB_RIGHT_OFFSET - SCROLL_THUMB_WIDTH
-    hover = pg.Color(Colors.button_hover)
+    hover = pg.Color(Colors.surface_hover)
     surf = menu.window
     count = 0
     for x in range(thumb_x, thumb_x + SCROLL_THUMB_WIDTH):

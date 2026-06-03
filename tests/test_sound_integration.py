@@ -17,9 +17,9 @@ from unittest.mock import MagicMock
 import pygame as pg
 import pytest
 
-from backend.utils import Square
-from frontend.frontend import Frontend
-from backend.pieces import Piece, PieceColor, PieceType
+from chessshootout.backend.utils import Square
+from chessshootout.frontend.frontend import Frontend
+from chessshootout.backend.pieces import Piece, PieceColor, PieceType
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -148,8 +148,17 @@ def test_takeback_applied_with_empty_history_does_not_play_undo():
 
 
 def fire_animation(app):
-    app.board.animations[0].start_ms = pg.time.get_ticks() - 10_000
-    app.board._draw_animations()
+    em = app.board.effects
+    for c in list(em.captures):
+        c["fire_at"] = 0
+    now = pg.time.get_ticks()
+    for i in range(300):
+        em.update(now + i * 16)
+        if not em.captures:
+            break
+    if app.board.animations:
+        app.board.animations[0].start_ms = pg.time.get_ticks() - 10_000
+        app.board._draw_animations()
 
 
 def setup_position(app, piece_map, turn=PieceColor.WHITE):
@@ -387,7 +396,7 @@ def test_promotion_lands_no_sound_until_picker_chosen():
     fire_animation(app)
     app.sound_manager.play_move.assert_not_called()
     assert app.board.pending_promotion_square == Square(0, 0)
-    app.board.handle_click(Square(0, 0))
+    app.board.pick_promotion(PieceType.QUEEN)
     app.sound_manager.play_move.assert_called_once()
 
 

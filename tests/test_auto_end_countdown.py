@@ -15,12 +15,12 @@ from unittest.mock import MagicMock
 import pygame as pg
 import pytest
 
-from backend.match import BOT, ONLINE, SINGLE_SCREEN
-from backend.pieces import PieceColor
-from backend.utils import Square
-from frontend.frontend import Frontend
-from frontend.online.client import RECONNECT_TOTAL_SECONDS
-from server.protocol import FIRST_MOVE_ABORT_SECONDS, GRACE_SECONDS
+from chessshootout.domain.match import BOT, ONLINE, SINGLE_SCREEN
+from chessshootout.backend.pieces import PieceColor
+from chessshootout.backend.utils import Square
+from chessshootout.frontend.frontend import Frontend
+from chessshootout.online.client import RECONNECT_TOTAL_SECONDS
+from chessshootout.server.protocol import FIRST_MOVE_ABORT_SECONDS, GRACE_SECONDS
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -81,12 +81,12 @@ ABORT_WINDOW_MS = FIRST_MOVE_ABORT_SECONDS * 1000
         ),
         pytest.param(
             PieceColor.WHITE, None, None, 0, 12_000,
-            PieceColor.WHITE, "Reconnect in", RECONNECT_TOTAL_SECONDS - 12,
+            PieceColor.WHITE, "Aborting in", RECONNECT_TOTAL_SECONDS - 12,
             id="reconnect_local_strip_shows",
         ),
         pytest.param(
             PieceColor.WHITE, ABORT_WINDOW_MS, None, 0, 12_000,
-            PieceColor.WHITE, "Reconnect in", None,
+            PieceColor.WHITE, "Aborting in", None,
             id="reconnect_beats_abort_local_strip",
         ),
         pytest.param(

@@ -3,12 +3,14 @@ import uuid
 
 import pytest
 
-from frontend import env
+from chessshootout.infra import env
 
 
 _ISOLATED_VARS = (
     "CHESS_SERVER_ADDR", "CHESS_NICKNAME", "CHESS_CLIENT_UUID",
-    "CHESS_LAST_MODE", "CHESS_MASTER_VOLUME", "CHESS_DATA_DIR",
+    "CHESS_LAST_MODE", "CHESS_MASTER_VOLUME", "CHESS_MENU_VOLUME", "CHESS_DATA_DIR",
+    "CHESS_REDUCE_MOTION", "CHESS_EFFECT_INTENSITY", "CHESS_DEFAULT_TC",
+    "CHESS_DEFAULT_INCREMENT", "CHESS_THEME", "CHESS_COUNTRY",
 )
 
 
@@ -133,6 +135,78 @@ def test_master_volume_persists_round_trip():
     assert "CHESS_MASTER_VOLUME" in contents
 
 
+def test_menu_volume_defaults_to_ten_percent(monkeypatch):
+    monkeypatch.delenv("CHESS_MENU_VOLUME", raising=False)
+    assert env.get_menu_volume() == env._DEFAULT_MENU_VOLUME == pytest.approx(0.10)
+
+
+@pytest.mark.parametrize("raw", [None, "", "not-a-float"])
+def test_menu_volume_falls_back_to_default(monkeypatch, raw):
+    if raw is not None:
+        monkeypatch.setenv("CHESS_MENU_VOLUME", raw)
+    assert env.get_menu_volume() == env._DEFAULT_MENU_VOLUME
+
+
+def test_menu_volume_persists_round_trip_and_clamps():
+    env.set_menu_volume(0.35)
+    assert env.get_menu_volume() == pytest.approx(0.35, abs=1e-3)
+    assert "CHESS_MENU_VOLUME" in env._ENV_PATH.read_text()
+    env.set_menu_volume(1.8)
+    assert env.get_menu_volume() == pytest.approx(1.0, abs=1e-3)
+
+
+def test_server_addr_persists_round_trip():
+    env.set_server_addr("chess.example.com:9000")
+    assert env.get_server_addr() == "chess.example.com:9000"
+    assert "CHESS_SERVER_ADDR" in env._ENV_PATH.read_text()
+
+
+def test_server_addr_strips_whitespace():
+    env.set_server_addr("  localhost:8000  ")
+    assert env.get_server_addr() == "localhost:8000"
+
+
+@pytest.mark.parametrize("blank", ["", "   "])
+def test_server_addr_blank_is_noop_keeps_default(blank):
+    env.set_server_addr(blank)
+    assert env.get_server_addr() == "localhost:8000"
+
+
+def test_country_defaults_empty():
+    assert env.get_country() == ""
+
+
+def test_country_persists_round_trip():
+    env.set_country("RO")
+    assert env.get_country() == "RO"
+    assert "CHESS_COUNTRY" in env._ENV_PATH.read_text()
+
+
+def test_country_normalizes_case_and_whitespace():
+    env.set_country("  us ")
+    assert env.get_country() == "US"
+
+
+def test_country_clears_on_blank_and_removes_key():
+    env.set_country("FR")
+    env.set_country("")
+    assert env.get_country() == ""
+    assert "CHESS_COUNTRY" not in os.environ
+    assert "CHESS_COUNTRY" not in env._ENV_PATH.read_text()
+
+
+@pytest.mark.parametrize("bad", ["usa", "1", "ZZ", "longstring"])
+def test_country_rejects_unknown_codes(bad):
+    env.set_country(bad)
+    assert env.get_country() == ""
+    assert "CHESS_COUNTRY" not in os.environ
+
+
+def test_country_getter_ignores_invalid_stored_value(monkeypatch):
+    monkeypatch.setenv("CHESS_COUNTRY", "garbage")
+    assert env.get_country() == ""
+
+
 @pytest.mark.parametrize(
     "raw_value,expected",
     [(-0.5, 0.0), (1.5, 1.0), (0.0, 0.0), (1.0, 1.0)],
@@ -213,7 +287,7 @@ def test_set_overrides_passes_uuid4_through_unchanged():
 def test_set_overrides_coerces_short_alias_to_uuid4():
     """`--client-uuid alice` once 422'd the server validator; coerce to a uuid4."""
     env.set_overrides(client_uuid="alice")
-    from server.protocol import is_uuid4
+    from chessshootout.server.protocol import is_uuid4
     assert is_uuid4(env._uuid_override)
 
 
@@ -249,7 +323,78 @@ def test_set_data_dir_creates_missing_config_parent(tmp_path, monkeypatch):
 
 
 def test_init_paths_points_env_at_config_dir(tmp_path, monkeypatch):
-    import paths
+    from chessshootout import paths
     monkeypatch.setattr(paths, "get_config_dir", lambda: tmp_path)
     env.init_paths()
     assert env._ENV_PATH == tmp_path / ".env"
+
+
+def test_env_default_path_derives_from_config_dir_not_file():
+    """Regression (package consolidation): env.py lives at chessshootout/infra/,
+    so a Path(__file__)-relative default resolves inside the package and drops a
+    stray chessshootout/.env. The default must derive from get_config_dir()."""
+    import pathlib
+    src = pathlib.Path(env.__file__).read_text()
+    assert "get_config_dir()" in src
+    assert "Path(__file__)" not in src
+
+
+def test_reduce_motion_defaults_false_and_round_trips():
+    assert env.get_reduce_motion() is False
+    env.set_reduce_motion(True)
+    assert env.get_reduce_motion() is True
+    assert "CHESS_REDUCE_MOTION=1" in env._ENV_PATH.read_text()
+    env.set_reduce_motion(False)
+    assert env.get_reduce_motion() is False
+
+
+def test_effect_intensity_defaults_full_and_validates():
+    assert env.get_effect_intensity() == "full"
+    env.set_effect_intensity("subtle")
+    assert env.get_effect_intensity() == "subtle"
+    env.set_effect_intensity("bogus")
+    assert env.get_effect_intensity() == "full"
+
+
+def test_default_time_control_round_trips():
+    assert env.get_default_time_control() == "10"
+    env.set_default_time_control("3")
+    assert env.get_default_time_control() == "3"
+    assert "CHESS_DEFAULT_TC=3" in env._ENV_PATH.read_text()
+
+
+def test_default_increment_round_trips():
+    assert env.get_default_increment() == "5"
+    env.set_default_increment("2")
+    assert env.get_default_increment() == "2"
+    assert "CHESS_DEFAULT_INCREMENT=2" in env._ENV_PATH.read_text()
+
+
+def test_default_time_control_rejects_unknown_value():
+    env.set_default_time_control("999")
+    assert env.get_default_time_control() == "10"
+
+
+def test_default_increment_rejects_unknown_value():
+    env.set_default_increment("7")
+    assert env.get_default_increment() == "5"
+
+
+def test_default_time_minutes_parses_value_and_infinity():
+    env.set_default_time_control("15")
+    assert env.default_time_minutes() == 15
+    env.set_default_time_control("∞")
+    assert env.default_time_minutes() is None
+
+
+def test_default_increment_seconds_parses_value():
+    env.set_default_increment("10")
+    assert env.default_increment_seconds() == 10
+
+
+def test_theme_defaults_dark_and_rejects_unknown():
+    assert env.get_theme() == "dark"
+    env.set_theme("wood")
+    assert env.get_theme() == "dark"
+    env.set_theme("dark")
+    assert env.get_theme() == "dark"

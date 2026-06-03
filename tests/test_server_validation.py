@@ -12,11 +12,11 @@ import pytest
 from fastapi.testclient import TestClient
 from starlette.websockets import WebSocketDisconnect
 
-from server.app import (
+from chessshootout.server.app import (
     PROTOCOL_VERSION, RECLAIM_PER_UUID_LIMIT_PER_MINUTE, UuidRateLimiter,
     WS_CLOSE_INVALID_TOKEN, create_app,
 )
-from server.protocol import (
+from chessshootout.server.protocol import (
     CancelMatchmakeRequest, MatchmakeRequest, Reason, ReclaimRequest,
     ResumeRequest, is_uuid4,
 )
@@ -180,6 +180,20 @@ def test_reclaim_window_slides_releases_capacity(clock):
     assert not limiter.hit("u")
     clock.advance(61)
     assert limiter.hit("u")
+
+
+def test_uuid_rate_limiter_prunes_stale_buckets(clock):
+    """Distinct uuids leave per-key buckets; once their hits age out, pruning
+    evicts the empty buckets so a flood of one-off uuids can't grow memory
+    unboundedly."""
+    limiter = UuidRateLimiter(limit_per_minute=5, window_seconds=60.0,
+                              now_provider=clock)
+    for i in range(50):
+        limiter.hit(f"uuid-{i}")
+    assert len(limiter._calls) == 50
+    clock.advance(61)
+    limiter._prune(clock() - limiter.window)
+    assert len(limiter._calls) == 0
 
 
 def test_healthz_includes_version_field(client):

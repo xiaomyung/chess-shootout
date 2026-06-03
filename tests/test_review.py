@@ -8,10 +8,10 @@ from unittest.mock import MagicMock
 import pygame as pg
 import pytest
 
-from backend.backend import Backend
-from backend.pieces import PieceColor, PieceType
-from backend.utils import Square
-from frontend.board import Board
+from chessshootout.backend.backend import Backend
+from chessshootout.backend.pieces import PieceColor, PieceType
+from chessshootout.backend.utils import Square
+from chessshootout.frontend.board import Board
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -33,7 +33,7 @@ def board():
 
 
 def _new_app():
-    from frontend.frontend import Frontend
+    from chessshootout.frontend.frontend import Frontend
     app = Frontend(1500, 800)
     app.sound_manager = MagicMock()
     app._on_start_game({"mode": "single_screen", "nickname": "a",
@@ -472,7 +472,7 @@ def test_active_row_highlight_follows_review_ply():
 def test_load_pgn_button_disabled_when_no_pgn(tmp_path, monkeypatch):
     """An empty data dir leaves the Load PGN button disabled."""
     monkeypatch.setenv("CHESS_DATA_DIR", str(tmp_path))
-    app = _new_app_in_isolated_root(tmp_path)
+    app = _new_menu_app()
     app.start_menu.show()
     app._refresh_load_pgn_availability()
     assert app.start_menu.load_pgn_available is False
@@ -485,7 +485,7 @@ def test_load_pgn_button_enabled_when_pgn_exists(tmp_path, monkeypatch):
         '[White "A"]\n[Black "B"]\n\n1. e4 e5 *\n'
     )
     monkeypatch.setenv("CHESS_DATA_DIR", str(tmp_path))
-    app = _new_app_in_isolated_root(tmp_path)
+    app = _new_menu_app()
     app._refresh_load_pgn_availability()
     assert app.start_menu.load_pgn_available is True
 
@@ -500,19 +500,20 @@ def test_load_pgn_picks_most_recent_by_mtime(tmp_path, monkeypatch):
     os.utime(older, (1_000, 1_000))
     os.utime(newer, (2_000, 2_000))
     monkeypatch.setenv("CHESS_DATA_DIR", str(tmp_path))
-    app = _new_app_in_isolated_root(tmp_path)
+    app = _new_menu_app()
     path = app._latest_pgn_path()
     assert path is not None
     assert path.endswith("game-new.pgn")
 
 
-def test_load_pgn_button_layout_left_and_right():
+def test_history_and_fen_ghosts_below_start():
     app = _new_app()
     app.start_menu.show()
     app.start_menu.draw()
-    assert app.start_menu._load_pgn_rect.x < app.start_menu._start_rect.x
-    assert abs(app.start_menu._load_pgn_rect.width
-               - app.start_menu._start_rect.width) <= 2
+    sm = app.start_menu
+    assert sm._history_rect.x < sm._fen_rect.x
+    assert abs(sm._history_rect.width - sm._fen_rect.width) <= 2
+    assert sm._history_rect.top >= sm._start_rect.bottom
 
 
 def test_load_pgn_from_path_loads_game(tmp_path):
@@ -539,10 +540,12 @@ def test_load_pgn_populates_names_and_time_control(tmp_path):
     assert app._time_control == (600, 5)
     assert app._name_for_color(PieceColor.WHITE) == "alice"
     assert app._name_for_color(PieceColor.BLACK) == "bob"
-    assert app._compute_game_info_lines() == ["Review", "1-0  ·  10+5"]
+    assert app._compute_game_info() == {
+        "mode": "Review", "time_control": "10+5", "round": 1, "lines": ["1-0"],
+    }
 
 
-def test_load_pgn_without_time_control_shows_no_clock(tmp_path):
+def test_load_pgn_without_time_control_shows_infinity(tmp_path):
     pgn_path = tmp_path / "noclock.pgn"
     pgn_path.write_text(
         '[White "A"]\n[Black "B"]\n[Result "0-1"]\n\n1. e4 e5 0-1\n'
@@ -550,7 +553,9 @@ def test_load_pgn_without_time_control_shows_no_clock(tmp_path):
     app = _new_app()
     app._load_pgn_from_path(str(pgn_path))
     assert app._time_control is None
-    assert app._compute_game_info_lines() == ["Review", "0-1  ·  no clock"]
+    assert app._compute_game_info() == {
+        "mode": "Review", "time_control": "∞", "round": 1, "lines": ["0-1"],
+    }
 
 
 def _load_test_pgn(app, tmp_path):
@@ -623,20 +628,29 @@ def test_pgn_review_shows_only_menu_and_flip_buttons(tmp_path):
     assert _flat_button_keys(app._right_menu_buttons()) == {"menu", "flip", "help"}
 
 
-def test_live_mode_shows_full_buttons():
-    app = _new_app()
+def test_timed_mode_shows_full_buttons():
+    app = _new_timed_app()
     assert _flat_button_keys(app._right_menu_buttons()) == {
         "undo", "resign", "draw", "give_time", "flip", "help",
     }
 
 
-def test_live_mode_buttons_are_two_rows_of_three():
+def test_timed_mode_buttons_are_two_rows_of_three():
     """Layout pin: two rows of three buttons so the audio slider grid lines up."""
-    app = _new_app()
+    app = _new_timed_app()
     rows = app._right_menu_buttons()
     assert len(rows) == 2
     assert [key for _, key in rows[0]] == ["undo", "resign", "draw"]
     assert [key for _, key in rows[1]] == ["give_time", "flip", "help"]
+
+
+def test_untimed_mode_hides_give_time():
+    """No clock → no give-time button; row two collapses to Flip / Help."""
+    app = _new_app()
+    rows = app._right_menu_buttons()
+    assert len(rows) == 2
+    assert [key for _, key in rows[0]] == ["undo", "resign", "draw"]
+    assert [key for _, key in rows[1]] == ["flip", "help"]
 
 
 def test_review_mode_is_one_row():
@@ -674,7 +688,7 @@ def test_new_game_clears_pgn_review_flag(tmp_path):
     app._on_new_game()
     assert app.pgn_review is False
     assert _flat_button_keys(app._right_menu_buttons()) == {
-        "undo", "resign", "draw", "give_time", "flip", "help",
+        "undo", "resign", "draw", "flip", "help",
     }
 
 
@@ -687,8 +701,18 @@ def test_ctrl_z_does_not_undo_in_pgn_review(tmp_path):
     assert len(app.backend.move_history) == history_before
 
 
-def _new_app_in_isolated_root(tmp_path):
-    from frontend.frontend import Frontend
+def _new_timed_app():
+    from chessshootout.frontend.frontend import Frontend
+    app = Frontend(1500, 800)
+    app.sound_manager = MagicMock()
+    app._on_start_game({"mode": "single_screen", "nickname": "a",
+                        "time_minutes": 5, "increment_seconds": 0,
+                        "side": "white"})
+    return app
+
+
+def _new_menu_app():
+    from chessshootout.frontend.frontend import Frontend
     app = Frontend(1500, 800)
     app.sound_manager = MagicMock()
     return app

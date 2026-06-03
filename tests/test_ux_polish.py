@@ -9,12 +9,12 @@ from unittest.mock import MagicMock
 import pygame as pg
 import pytest
 
-from backend.backend import Backend
-from backend.pieces import Piece, PieceColor, PieceType
-from backend.utils import Square
-from frontend.board import Board, DRAG_THRESHOLD_PX
-from frontend.panels.capture_summary import captured_by, material_advantage
-from frontend.modals.confirm import ConfirmModal
+from chessshootout.backend.backend import Backend
+from chessshootout.backend.pieces import Piece, PieceColor, PieceType
+from chessshootout.backend.utils import Square
+from chessshootout.frontend.board import Board, DRAG_THRESHOLD_PX
+from chessshootout.domain.capture_summary import captured_by, material_advantage
+from chessshootout.frontend.modals.confirm import ConfirmModal
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -36,7 +36,7 @@ def board():
 
 
 def _new_app():
-    from frontend.frontend import Frontend
+    from chessshootout.frontend.frontend import Frontend
     app = Frontend(900, 500)
     app.sound_manager = MagicMock()
     app._on_start_game({"mode": "single_screen", "nickname": "a",
@@ -393,7 +393,7 @@ def test_material_advantage_after_queen_trade():
 
 
 def test_player_strip_set_state_accepts_captures():
-    from frontend.panels.player_strip import PlayerStrip
+    from chessshootout.frontend.panels.player_strip import PlayerStrip
     strip = PlayerStrip(pg.display.get_surface())
     strip.set_rect(pg.Rect(0, 0, 400, 40))
     strip.set_state("Alice", 100, True,
@@ -418,7 +418,7 @@ class _AdvantageFontSpy:
 
 
 def _make_strip(window, icons, captured, advantage):
-    from frontend.panels.player_strip import PlayerStrip
+    from chessshootout.frontend.panels.player_strip import PlayerStrip
     strip = PlayerStrip(window)
     strip.set_rect(pg.Rect(0, 0, 400, 40))
     strip.set_piece_icons(icons)
@@ -444,7 +444,7 @@ def test_player_strip_draws_with_captures_smoke(board):
 
 def test_player_strip_advantage_negative_not_rendered(board):
     """Only the leading side renders '+N'; a negative advantage draws no number."""
-    from frontend.panels.player_strip import PlayerStrip
+    from chessshootout.frontend.panels.player_strip import PlayerStrip
     leading = PlayerStrip(pg.display.get_surface())
     leading.set_rect(pg.Rect(0, 0, 400, 40))
     leading.set_piece_icons(board.piece_images_scaled)

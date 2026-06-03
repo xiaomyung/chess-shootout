@@ -5,7 +5,7 @@ os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
 import pygame as pg
 import pytest
 
-import paths
+from chessshootout import paths
 
 
 @pytest.fixture(scope="module", autouse=True)
