@@ -9,7 +9,7 @@ os.environ.setdefault("SDL_AUDIODRIVER", "dummy")
 import pygame as pg
 import pytest
 
-from frontend.visual.emoji import blit_emoji, emoji_surface, has_emoji
+from frontend.visual.emoji import blit_emoji, emoji_surface
 from frontend.visual.fonts import get_emoji_font
 
 
@@ -31,7 +31,6 @@ def _distinct_colours(surf):
 
 def test_emoji_font_is_bundled():
     assert get_emoji_font() is not None
-    assert has_emoji() is True
 
 
 def test_emoji_surface_scales_to_requested_height():

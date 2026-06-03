@@ -18,10 +18,6 @@ def _base_surface(char):
     return _BASE[char]
 
 
-def has_emoji():
-    return get_emoji_font() is not None
-
-
 def emoji_surface(char, size):
     base = _base_surface(char)
     if base is None:

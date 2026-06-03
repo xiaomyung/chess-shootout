@@ -106,33 +106,6 @@ def fit_text_to_rect(text_surface, rect, padding=BUTTON_LABEL_PADDING_PX):
     return pg.transform.smoothscale(text_surface, new_size)
 
 
-def wrap_path(text, font, max_w, max_lines=6):
-    parts = text.split("/")
-    tokens = [part + "/" if i < len(parts) - 1 else part for i, part in enumerate(parts)]
-    tokens = [token for token in tokens if token]
-    lines = []
-    line = ""
-    for token in tokens:
-        if line and font.size(line + token)[0] > max_w:
-            lines.append(line)
-            line = ""
-            if len(lines) >= max_lines:
-                return lines
-        if not line and font.size(token)[0] > max_w:
-            for ch in token:
-                if line and font.size(line + ch)[0] > max_w:
-                    lines.append(line)
-                    line = ""
-                    if len(lines) >= max_lines:
-                        return lines
-                line += ch
-        else:
-            line += token
-    if line and len(lines) < max_lines:
-        lines.append(line)
-    return lines
-
-
 def _hover_state(rect):
     hovered = rect.collidepoint(pg.mouse.get_pos())
     pressed = hovered and pg.mouse.get_pressed()[0]
@@ -225,20 +198,6 @@ def draw_button_row(window, rect, buttons, font, gap, disabled_keys=None,
         br = pg.Rect(x, rect.y, btn_w, rect.height)
         draw_button(window, br, label, font, disabled=key in disabled_keys,
                     primary=key in primary_keys)
-        button_rects[key] = br
-    return button_rects
-
-
-def draw_selector(window, rect, options, font, gap, selected_key):
-    n = len(options)
-    if n == 0 or rect.width <= gap * (n - 1):
-        return {}
-    btn_w = (rect.width - gap * (n - 1)) / n
-    button_rects = {}
-    for i, (label, key) in enumerate(options):
-        x = rect.x + i * (btn_w + gap)
-        br = pg.Rect(x, rect.y, btn_w, rect.height)
-        draw_button(window, br, label, font, selected=(key == selected_key))
         button_rects[key] = br
     return button_rects
 

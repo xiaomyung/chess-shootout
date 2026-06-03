@@ -12,7 +12,7 @@ from backend.paths import PIECES_IMG_DIR
 from frontend.visual import fonts
 from frontend.visual.colors import Colors
 from frontend.visual.fonts import (
-    DISPLAY, SANS, MONO, get_font, get_display_font, get_body_font, get_mono_font,
+    DISPLAY, SANS, MONO, get_font, get_display_font, get_mono_font,
 )
 import paths
 
@@ -63,7 +63,6 @@ def test_get_font_default_family_follows_mono_flag():
     assert get_font(20) is not None
     assert get_mono_font(20) is not None
     assert get_display_font(20) is not None
-    assert get_body_font(20, bold=True) is not None
 
 
 def test_fonts_are_not_cached():

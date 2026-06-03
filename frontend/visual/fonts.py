@@ -33,10 +33,6 @@ def get_display_font(size, bold=False):
     return get_font(size, bold=bold, family=DISPLAY)
 
 
-def get_body_font(size, bold=False):
-    return get_font(size, bold=bold, family=SANS)
-
-
 def get_mono_font(size, bold=False):
     return get_font(size, bold=bold, family=MONO)
 

@@ -10,7 +10,7 @@ from frontend.visual.colors import Colors
 from frontend.visual.fonts import get_font
 from frontend.visual.widgets import (
     BUTTON_LABEL_PADDING_PX,
-    draw_button, draw_button_row, draw_selector,
+    draw_button, draw_button_row,
     fit_text_to_rect,
 )
 
@@ -73,24 +73,6 @@ def test_draw_button_row_returns_keyed_rects(font):
     assert rects["yes"].width == pytest.approx(145, abs=1)
 
 
-def test_draw_selector_returns_keyed_rects(font):
-    surface = pg.display.get_surface()
-    rect = pg.Rect(0, 0, 400, 40)
-    options = [("5 min", 5), ("10 min", 10), ("15 min", 15)]
-    rects = draw_selector(surface, rect, options, font, gap=6, selected_key=10)
-    assert set(rects.keys()) == {5, 10, 15}
-    draw_selector(surface, rect, options, font, gap=6, selected_key=None)
-
-
-def test_draw_selector_button_widths_are_equal(font):
-    surface = pg.display.get_surface()
-    rect = pg.Rect(0, 0, 400, 40)
-    options = [("a", 1), ("b", 2), ("c", 3), ("d", 4)]
-    rects = draw_selector(surface, rect, options, font, gap=6, selected_key=2)
-    widths = sorted({r.width for r in rects.values()})
-    assert max(widths) - min(widths) < 1
-
-
 def test_fit_text_returns_original_when_label_fits():
     f = get_font(24, bold=True)
     surf = f.render("OK", True, (255, 255, 255))
@@ -139,26 +121,6 @@ def test_draw_button_does_not_scale_when_label_fits(font, monkeypatch):
     draw_button(surface, rect, "OK", font)
     text_scales = [size for size in calls if tuple(size) != (rect.width, rect.height)]
     assert text_scales == []
-
-
-def test_wrap_path_single_line_when_it_fits(font):
-    assert widgets.wrap_path("/a/b/c", font, 1000) == ["/a/b/c"]
-
-
-def test_wrap_path_breaks_after_slashes(font):
-    text = "/aaa/bbb/ccc/ddd/eee/fff/ggg/hhh"
-    lines = widgets.wrap_path(text, font, 90)
-    assert len(lines) >= 2
-    assert all(font.size(ln)[0] <= 90 for ln in lines)
-    assert all(ln.endswith("/") for ln in lines[:-1])
-    assert "".join(lines) == text
-
-
-def test_wrap_path_char_wraps_an_overlong_segment(font):
-    seg = "z" * 30
-    lines = widgets.wrap_path(seg, font, 100)
-    assert len(lines) >= 2
-    assert "".join(lines) == seg
 
 
 def test_draw_button_scales_long_label_to_fit(monkeypatch):

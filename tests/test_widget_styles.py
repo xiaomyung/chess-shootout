@@ -9,7 +9,7 @@ import pytest
 from frontend.visual.colors import Colors
 from frontend.visual.fonts import get_font
 from frontend.visual.widgets import (
-    draw_button, draw_button_row, draw_selector, draw_icon_button,
+    draw_button, draw_button_row, draw_icon_button,
 )
 from frontend.visual.icons import draw_speaker
 from frontend.visual.toast import Toast
@@ -32,15 +32,6 @@ def _top_border_rgb(surface, rect):
     return surface.get_at((rect.centerx, rect.top))[:3]
 
 
-def test_selector_marks_selected_with_accent_border(font):
-    surface = pg.display.get_surface()
-    surface.fill((0, 0, 0))
-    rect = pg.Rect(20, 20, 300, 40)
-    rects = draw_selector(surface, rect, [("White", "w"), ("Black", "b")], font, 6, "w")
-    assert _top_border_rgb(surface, rects["w"]) == pg.Color(Colors.accent)[:3]
-    assert _top_border_rgb(surface, rects["b"]) == pg.Color(Colors.button_border)[:3]
-
-
 def test_selected_button_fills_pressed_color(font):
     surface = pg.display.get_surface()
     surface.fill((0, 0, 0))
@@ -61,8 +52,8 @@ def test_button_row_guards_empty_and_narrow(font):
     surface = pg.display.get_surface()
     assert draw_button_row(surface, pg.Rect(0, 0, 200, 30), [], font, 6) == {}
     narrow = pg.Rect(0, 0, 4, 30)
-    assert draw_selector(surface, narrow, [("a", "a"), ("b", "b"), ("c", "c")],
-                         font, 6, "a") == {}
+    assert draw_button_row(surface, narrow, [("a", "a"), ("b", "b"), ("c", "c")],
+                           font, 6) == {}
 
 
 def test_icon_button_muted_draws_accent_border(font):
