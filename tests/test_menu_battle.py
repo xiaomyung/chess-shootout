@@ -19,7 +19,7 @@ import pytest
 
 from frontend.menu.menu_battle import (
     MenuBattle, MAX_PAWNS, INITIAL_PAWNS, RAGDOLL_MS, IDLE_TIMEOUT_MS, IDLE_RADIUS,
-    WEAPON_SWITCH_MIN, WEAPON_SWITCH_MAX, GUN_DRAW_SEC,
+    WEAPON_SWITCH_MIN, WEAPON_SWITCH_MAX, GUN_DRAW_SEC, PROJECTILE_MAX_MS,
 )
 from frontend.visual.colors import Colors
 from frontend.visual.fonts import get_font
@@ -125,11 +125,13 @@ def test_pawns_only_start_after_the_intro():
     assert b.pawns, "pawns should start coming once the queen has landed"
 
 
-def test_reduce_motion_skips_the_intro_animation():
+def test_reduce_motion_clears_the_whole_battle():
     b = _intro_battle()
     b.update(1000, reduce_motion=True)
-    assert b._intro_active is False, "reduce-motion should not play the fly-in"
-    assert b.pawns, "the static scene should still be populated"
+    assert b.queen is None, "reduce-motion removes the queen"
+    assert b.pawns == [] and b.projectiles == [] and b.particles == [] and b.drops == [], \
+        "reduce-motion removes every fighter and effect, not just freezes them"
+    assert b._intro_active is False, "and there is no fly-in playing"
 
 
 def test_intro_queen_is_drawn_on_the_overlay():
@@ -152,6 +154,7 @@ def test_landing_arms_the_gun_draw_flourish():
 
 def test_gun_draw_flourish_decays_to_zero():
     b = _battle()
+    b.pawns = []
     b.queen["draw_anim"] = GUN_DRAW_SEC
     _run(b, 60)
     assert b.queen["draw_anim"] == 0.0
@@ -197,8 +200,7 @@ def test_kill_can_trigger_a_celebratory_spin():
     b = _battle()
     b.queen["draw_anim"] = 0.0
     b.rng = _ConstRng(0.0)
-    shot = {"hit": True, "is_queen": True, "target": b.pawns[0], "resolved": False}
-    b._land_hit(shot, 5000)
+    b._land_hit(True, b.pawns[0], 5000)
     assert b.queen["draw_anim"] > 0
     assert b.queen["draw_grow"] is False, "a kill spin twirls the gun without growing it"
     assert b.queen["draw_spins"] == 1
@@ -208,8 +210,7 @@ def test_most_kills_do_not_spin():
     b = _battle()
     b.queen["draw_anim"] = 0.0
     b.rng = _ConstRng(0.9)
-    shot = {"hit": True, "is_queen": True, "target": b.pawns[0], "resolved": False}
-    b._land_hit(shot, 5000)
+    b._land_hit(True, b.pawns[0], 5000)
     assert b.queen["draw_anim"] == 0.0
 
 
@@ -544,9 +545,8 @@ def test_kill_emits_hitmark_and_red_particles_not_a_blood_circle():
 def test_landing_a_hit_on_the_queen_shakes_and_marks_her():
     b = _battle()
     b.queen["flinch"] = 0.0
-    shot = {"hit": True, "is_queen": False, "target": b.queen, "resolved": False}
     b.particles.clear()
-    b._land_hit(shot, 5000)
+    b._land_hit(False, b.queen, 5000)
     assert b.queen["flinch"] == 1.0, "the queen should shake when hit"
     assert any(pt["kind"] == "hitmark" for pt in b.particles)
     assert any(pt["kind"] == "spark" and pt["color"] == Colors.blood for pt in b.particles)
@@ -621,17 +621,78 @@ def test_miss_projectile_flies_past_and_never_lands():
     assert b.projectiles == [], "a missed projectile should fly off and despawn"
 
 
-def test_projectiles_freeze_under_reduce_motion():
+def _pellet_at(x, y, is_queen=True, born=5000):
+    return {"x": x, "y": y, "vx": 0.0, "vy": 0.0, "style": "pellet",
+            "size": 4.0, "len": 7.0, "color": Colors.amber_hi,
+            "is_queen": is_queen, "born": born, "max_ms": PROJECTILE_MAX_MS}
+
+
+def test_every_queen_pellet_kills_any_pawn_it_lands_on():
+    """A pellet kills whatever pawn it intersects, not a pre-chosen target."""
+    b = _battle()
+    b.pawns = [b.pawns[0]]
+    victim = b.pawns[0]
+    victim["x"], victim["y"] = 400, 360
+    b.particles.clear()
+    b.projectiles = [_pellet_at(*b._body_point(victim))]
+    b._update_projectiles(0.016, 5016)
+    assert victim["dying"] is True, "a pellet landing on a pawn kills it"
+    assert b.projectiles == [], "the pellet is consumed on impact"
+    assert any(pt["kind"] == "hitmark" for pt in b.particles)
+
+
+def test_a_single_shot_can_drop_multiple_pawns():
+    """Each pellet of a spread resolves independently, so one blast can fell several pawns."""
+    b = _battle()
+    b.pawns = b.pawns[:2]
+    near, far = b.pawns
+    near["x"], near["y"] = 300, 300
+    far["x"], far["y"] = 650, 420
+    b.projectiles = [_pellet_at(*b._body_point(near)), _pellet_at(*b._body_point(far))]
+    b._update_projectiles(0.016, 5016)
+    assert near["dying"] and far["dying"], "each pellet kills the pawn it lands on"
+    assert b.projectiles == [], "both pellets are consumed"
+
+
+def test_lead_pellet_flies_straight_the_rest_scatter():
+    """One pellet always runs straight down the aim line; the remaining pellets fan out."""
+    b = _battle()
+    p = b.pawns[0]
+    p["x"], p["y"] = 500, 360
+    b.queen["weapon"] = "blunderbuss"
+    _aim_at(b, b.queen, p)
+    mx, my = b._muzzle_point(b.queen)
+    b.projectiles.clear()
+    b._spawn_projectiles(b.queen, p, True, mx, my, True, 5000)
+    bx, by = b._body_point(p)
+    base = math.atan2(by - my, bx - mx)
+
+    def off(pr):
+        return abs((math.atan2(pr["vy"], pr["vx"]) - base + math.pi) % (2 * math.pi) - math.pi)
+
+    assert off(b.projectiles[0]) < 1e-6, "the lead pellet is dead straight on the aim line"
+    assert any(off(pr) > 1e-3 for pr in b.projectiles[1:]), "the rest scatter around it"
+
+
+def test_pawn_pellet_strikes_the_queen_not_other_pawns():
+    """Pawn fire resolves against the queen only; pawns don't friendly-fire each other."""
+    b = _battle()
+    bystander = b.pawns[1]
+    bystander["x"], bystander["y"] = 400, 360
+    b.projectiles = [_pellet_at(*b._body_point(bystander), is_queen=False)]
+    b._update_projectiles(0.016, 5016)
+    assert bystander["alive"] is True, "a pawn's bullet passes through other pawns"
+
+
+def test_reduce_motion_removes_in_flight_projectiles():
     b = _battle()
     p = b.pawns[0]
     p["x"], p["y"] = 500, 360
     _aim_at(b, b.queen, p)
     b._spawn_projectiles(b.queen, p, True, *b._muzzle_point(b.queen), True, 5000)
-    pr = b.projectiles[0]
-    pos = (pr["x"], pr["y"])
-    for i in range(10):
-        b.update(5000 + (i + 1) * 16, reduce_motion=True)
-    assert (pr["x"], pr["y"]) == pos, "projectiles must not move while motion is reduced"
+    assert b.projectiles, "precondition: a projectile is mid-flight"
+    b.update(5016, reduce_motion=True)
+    assert b.projectiles == [], "reduce-motion clears projectiles, it does not freeze them"
 
 
 def test_firing_kicks_recoil_scaled_by_gun_strength():
@@ -777,20 +838,25 @@ def test_pawn_count_stays_within_max_and_fills_up():
     assert peak >= MAX_PAWNS - 1, "spawning should fill up toward the max over a long run"
 
 
-def test_reduce_motion_freezes_positions():
+def test_disabling_reduce_motion_restarts_from_the_intro():
     b = _battle()
-    qx, qy = b.queen["x"], b.queen["y"]
-    pawn_xs = [p["x"] for p in b.pawns]
-    _run(b, 60, reduce_motion=True)
-    assert (b.queen["x"], b.queen["y"]) == (qx, qy)
-    assert [p["x"] for p in b.pawns] == pawn_xs
+    b.update(2000, reduce_motion=True)
+    assert b.queen is None
+    b.update(2100, reduce_motion=False)
+    assert b.queen is not None, "turning reduce-motion off respawns the queen"
+    assert b._intro_active is True, "the battle restarts from the fly-in intro (from the logo)"
+    assert b.pawns == [], "the field starts empty and repopulates as the intro finishes"
 
 
-def test_reduce_motion_shows_a_queen_bubble():
+def test_reduce_motion_still_paints_the_backdrop():
     b = _battle()
-    _run(b, 5, reduce_motion=True)
-    assert b.queen["bubble"] is not None
-    assert b.queen["bubble"]["who"] == "queen"
+    b.update(1000, reduce_motion=True)
+    assert b.queen is None
+    surf = pg.display.get_surface()
+    surf.fill((0, 0, 0))
+    b.draw(surf)
+    assert len(_distinct_colors(surf, b.rect)) > 1, \
+        "the arena backdrop still renders even with the battle suppressed"
 
 
 def _distinct_colors(surf, rect, step=8):

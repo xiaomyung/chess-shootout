@@ -28,6 +28,8 @@ FLASH_MS = 120
 RECOIL_RECOVER = 12.0
 AIM_TOLERANCE = 0.12
 MISS_CHANCE = 0.20
+MISS_AIM_MIN = 0.35
+MISS_AIM_MAX = 0.6
 PROJECTILE_MAX_MS = 1600
 PAWN_WEAPON = "revolver"
 QUEEN_WEAPON = "blunderbuss"
@@ -84,7 +86,7 @@ class MenuBattle:
         self.acc = {"qfire": 0.0, "talk": 1.5, "spawn": 0.0}
         self._last_ms = None
         self._initialized = False
-        self._static_posed = False
+        self._reduced = False
         self._bg_cache = None
         self._scrim_cache = None
         self._queen_src = self._load_piece("queen", "white")
@@ -398,18 +400,16 @@ class MenuBattle:
             self._last_ms = now_ms
         dt = max(0.0, min(DT_MAX, (now_ms - self._last_ms) / 1000.0))
         self._last_ms = now_ms
+        if reduce_motion:
+            if not self._reduced:
+                self._suppress()
+            return
+        if self._reduced:
+            self._reduced = False
+            if self.rect.width > 0 and self.rect.height > 0:
+                self._spawn_initial()
         if self.queen is None:
             return
-        if reduce_motion:
-            if self._intro_active:
-                self._finish_intro(now_ms)
-                for _ in range(INITIAL_PAWNS):
-                    self._spawn_pawn(True)
-            if not self._static_posed:
-                self._say(self.queen, "PICK A SIDE, COWARD", "queen", now_ms, hold=10 ** 9)
-                self._static_posed = True
-            return
-        self._static_posed = False
         if self._intro_active:
             self._update_intro(dt, now_ms)
             self._prune(now_ms)
@@ -419,6 +419,17 @@ class MenuBattle:
         self._update_projectiles(dt, now_ms)
         self._update_drops(dt)
         self._prune(now_ms)
+
+    def _suppress(self):
+        self._reduced = True
+        self._intro_active = False
+        self._intro_start_ms = None
+        self._intro_land = None
+        self.queen = None
+        self.pawns = []
+        self.projectiles = []
+        self.particles = []
+        self.drops = []
 
     def _update_intro(self, dt, now_ms):
         if self._intro_start_ms is None:
@@ -627,22 +638,18 @@ class MenuBattle:
     def _spawn_projectiles(self, shooter, target, is_queen, mx, my, hit, now_ms):
         spec = gunfx.gun_spec(shooter.get("weapon"))
         bx, by = self._body_point(target)
-        if hit:
-            ax, ay = bx, by
-        else:
-            ax = bx + math.cos(shooter["aim"]) * 70
-            ay = by - self._rnd(45, 90)
-        base = math.atan2(ay - my, ax - mx)
+        base = math.atan2(by - my, bx - mx)
+        if not hit:
+            miss = self._rnd(MISS_AIM_MIN, MISS_AIM_MAX)
+            base += miss if self.rng.random() < 0.5 else -miss
         speed = spec.speed * self.scale
-        shot = {"hit": hit, "is_queen": is_queen, "target": target, "resolved": False}
-        for i in range(spec.pellets):
-            ang = base if i == 0 else base + self._rnd(-spec.spread, spec.spread)
-            sp = speed if i == 0 else speed * self._rnd(0.85, 1.1)
+        for ang, factor in gunfx.pellet_spread(spec, base, self._rnd):
+            sp = speed * factor
             self.projectiles.append({
                 "x": mx, "y": my, "vx": math.cos(ang) * sp, "vy": math.sin(ang) * sp,
                 "style": spec.style, "size": spec.size * self.scale,
                 "len": spec.length * self.scale, "color": spec.color,
-                "shot": shot, "born": now_ms, "max_ms": PROJECTILE_MAX_MS})
+                "is_queen": is_queen, "born": now_ms, "max_ms": PROJECTILE_MAX_MS})
 
     def _kill_pawn(self, p, now_ms):
         if not p["alive"]:
@@ -680,16 +687,21 @@ class MenuBattle:
         for pr in self.projectiles:
             pr["x"] += pr["vx"] * dt
             pr["y"] += pr["vy"] * dt
-            shot = pr["shot"]
-            if not shot["resolved"] and shot["hit"]:
-                tgt = shot["target"]
-                if tgt is not None and tgt.get("alive", True) and self._hits_hitbox(pr, tgt):
-                    shot["resolved"] = True
-                    self._land_hit(shot, now_ms)
-                    continue
+            target = self._projectile_hit(pr)
+            if target is not None:
+                self._land_hit(pr["is_queen"], target, now_ms)
+                continue
             if now_ms - pr["born"] <= pr["max_ms"] and not self._off_screen(pr["x"], pr["y"]):
                 survivors.append(pr)
         self.projectiles = survivors
+
+    def _projectile_hit(self, pr):
+        if pr["is_queen"]:
+            for p in self.pawns:
+                if p["alive"] and self._hits_hitbox(pr, p):
+                    return p
+            return None
+        return self.queen if self._hits_hitbox(pr, self.queen) else None
 
     def _hits_hitbox(self, pr, ent):
         art = self._entity_art(ent["kind"])
@@ -698,15 +710,14 @@ class MenuBattle:
         return (ent["x"] - hw <= pr["x"] <= ent["x"] + hw
                 and ent["y"] - ent["sprite_h"] <= pr["y"] <= ent["y"])
 
-    def _land_hit(self, shot, now_ms):
-        tgt = shot["target"]
-        if shot["is_queen"]:
-            self._kill_pawn(tgt, now_ms)
+    def _land_hit(self, is_queen, target, now_ms):
+        if is_queen:
+            self._kill_pawn(target, now_ms)
             if self.queen["draw_anim"] <= 0 and self.rng.random() < KILL_SPIN_CHANCE:
                 self._start_gun_flourish(self.queen, KILL_SPIN_SEC, 1, False)
         else:
             self.queen["flinch"] = 1.0
-            bx, by = self._body_point(tgt)
+            bx, by = self._body_point(target)
             self._add_hit(bx, by, now_ms)
 
     def _off_screen(self, x, y):
@@ -729,9 +740,11 @@ class MenuBattle:
                       if not (p["dying"] and now_ms - p["death_ms"] >= RAGDOLL_MS)]
 
     def draw(self, window):
-        if self.queen is None:
+        if self.rect.width <= 0 or self.rect.height <= 0:
             return
         window.blit(self._background((self.rect.width, self.rect.height)), self.rect.topleft)
+        if self.queen is None:
+            return
         now = self._last_ms or 0
         for d in self.drops:
             self._draw_drop(window, d, now)
@@ -901,28 +914,10 @@ class MenuBattle:
 
     def _draw_projectile(self, window, pr):
         ox, oy = self.rect.topleft
-        hx, hy = ox + pr["x"], oy + pr["y"]
         speed = math.hypot(pr["vx"], pr["vy"]) or 1.0
-        ux, uy = pr["vx"] / speed, pr["vy"] / speed
-        length = pr["len"]
-        tx, ty = hx - ux * length, hy - uy * length
-        size = max(pr["size"], 2)
-        pad = int(size + 3)
-        minx = min(hx, tx) - pad
-        miny = min(hy, ty) - pad
-        w = max(int(abs(hx - tx) + 2 * pad), 1)
-        h = max(int(abs(hy - ty) + 2 * pad), 1)
-        layer = pg.Surface((w, h), pg.SRCALPHA)
-        head = (hx - minx, hy - miny)
-        tail = (tx - minx, ty - miny)
-        rgb = pg.Color(pr["color"])[:3]
-        if length > 1:
-            pg.draw.line(layer, (*rgb, 90), tail, head, max(int(size * 1.6), 3))
-            pg.draw.line(layer, (*rgb, 255), tail, head, max(int(size * 0.7), 2))
-        pg.draw.circle(layer, (*rgb, 255), (int(head[0]), int(head[1])), int(size / 2) + 1)
-        pg.draw.circle(layer, (*pg.Color(Colors.text)[:3], 235),
-                       (int(head[0]), int(head[1])), max(int(size / 3), 1))
-        window.blit(layer, (minx, miny))
+        gunfx.draw_bullet(window, (ox + pr["x"], oy + pr["y"]),
+                          pr["vx"] / speed, pr["vy"] / speed,
+                          pr["color"], pr["size"], pr["len"])
 
     def _draw_flash(self, window, p, prog):
         entry = self._weapons.get(p["ent_kind"], {}).get(p["weapon"])
