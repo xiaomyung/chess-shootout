@@ -16,7 +16,7 @@ from unittest.mock import MagicMock
 import pygame as pg
 import pytest
 
-from backend.paths import SOUNDS_DIR
+from paths import SOUNDS_DIR
 from frontend.panels.audio import (
     AudioPanel, DEFAULT_BUTTON_COLUMNS, DEFAULT_BUTTON_GAP_PX,
 )

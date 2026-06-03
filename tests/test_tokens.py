@@ -8,7 +8,7 @@ import pygame as pg
 import pytest
 
 from backend.pieces import PieceColor, PieceType
-from backend.paths import PIECES_IMG_DIR
+from paths import PIECES_PNG_DIR
 from frontend.visual import fonts
 from frontend.visual.colors import Colors
 from frontend.visual.fonts import (
@@ -118,7 +118,7 @@ def test_missing_font_falls_back_to_sysfont(monkeypatch):
 def test_all_twelve_piece_pngs_load_at_512():
     for ptype in PieceType:
         for color in PieceColor:
-            path = os.path.join(PIECES_IMG_DIR, f"{ptype.value}_{color.value}.png")
+            path = os.path.join(PIECES_PNG_DIR, f"{ptype.value}_{color.value}.png")
             assert os.path.exists(path), path
             img = pg.image.load(path)
             assert img.get_size() == (512, 512), (ptype, color, img.get_size())

@@ -24,6 +24,11 @@ def resource_path(*parts):
     return get_asset_base().joinpath(*parts)
 
 
+PROJECT_ROOT = get_asset_base()
+SOUNDS_DIR = resource_path("assets", "sounds")
+PIECES_PNG_DIR = resource_path("assets", "pieces_png")
+
+
 def get_app_version():
     try:
         return resource_path("assets", "version.txt").read_text().strip()

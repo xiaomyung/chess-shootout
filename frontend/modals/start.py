@@ -92,7 +92,7 @@ class StartMenu:
         for color in ("white", "black"):
             try:
                 img = pg.image.load(
-                    str(paths.resource_path("assets", "pieces_img", f"pawn_{color}.png")))
+                    str(paths.resource_path("assets", "pieces_png", f"pawn_{color}.png")))
                 self._side_imgs[color] = img.convert_alpha()
             except (pg.error, OSError):
                 self._side_imgs[color] = None

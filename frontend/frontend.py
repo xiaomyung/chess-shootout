@@ -54,7 +54,7 @@ from frontend.audio.sound_manager import SoundManager
 from frontend.modals.start import StartMenu
 from frontend.pgn.generate import generate_pgn, TIMEOUT_RESULTS
 from frontend.pgn.load import load_pgn_into_backend, parse_time_control
-from backend.paths import SOUNDS_DIR
+from paths import SOUNDS_DIR
 from backend.pieces import PieceColor, PieceType, opponent_of
 from server.protocol import (
     FIRST_MOVE_ABORT_SECONDS, GIVE_TIME_SECONDS, GRACE_SECONDS,

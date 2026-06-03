@@ -21,7 +21,7 @@ from frontend.audio.sound_manager import (
     SoundManager, HeartbeatConfig,
     STATE_OFF, STATE_HEARTBEAT, ONESHOT_FADE_MS,
 )
-from backend.paths import SOUNDS_DIR
+from paths import SOUNDS_DIR
 from backend.pieces import PieceType
 from frontend.visual.gunfx import PIECE_GUN
 

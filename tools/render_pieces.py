@@ -4,7 +4,7 @@ import cairosvg
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SVG_DIR = os.path.join(ROOT, "assets", "pieces_svg")
-PNG_DIR = os.path.join(ROOT, "assets", "pieces_img")
+PNG_DIR = os.path.join(ROOT, "assets", "pieces_png")
 ICON_DIR = os.path.join(ROOT, "assets", "icons")
 
 PIECE_PX = 512

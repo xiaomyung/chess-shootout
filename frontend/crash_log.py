@@ -3,7 +3,7 @@ import traceback
 from datetime import datetime
 from pathlib import Path
 
-from backend.paths import PROJECT_ROOT
+from paths import PROJECT_ROOT
 
 
 CRASHLOG_DIR_NAME = "crashlogs"

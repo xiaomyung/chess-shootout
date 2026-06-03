@@ -1,7 +1,7 @@
 import os
 from enum import Enum
 
-from backend.paths import PIECES_IMG_DIR
+from paths import PIECES_PNG_DIR
 
 
 class PieceColor(Enum):
@@ -30,7 +30,7 @@ class Piece:
 
     @property
     def img_path(self):
-        return os.path.join(PIECES_IMG_DIR, f"{self.type.value}_{self.color.value}.png")
+        return os.path.join(PIECES_PNG_DIR, f"{self.type.value}_{self.color.value}.png")
 
 
 BACK_RANK = [

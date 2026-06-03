@@ -101,7 +101,7 @@ class MenuBattle:
 
     def _load_piece(self, piece_type, color):
         try:
-            path = paths.resource_path("assets", "pieces_img", f"{piece_type}_{color}.png")
+            path = paths.resource_path("assets", "pieces_png", f"{piece_type}_{color}.png")
             img = pg.image.load(str(path)).convert_alpha()
             return img.subsurface(img.get_bounding_rect()).copy()
         except (pg.error, FileNotFoundError, OSError):
