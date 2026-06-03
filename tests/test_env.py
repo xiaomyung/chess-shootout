@@ -329,6 +329,16 @@ def test_init_paths_points_env_at_config_dir(tmp_path, monkeypatch):
     assert env._ENV_PATH == tmp_path / ".env"
 
 
+def test_env_default_path_derives_from_config_dir_not_file():
+    """Regression (package consolidation): env.py lives at chessshootout/infra/,
+    so a Path(__file__)-relative default resolves inside the package and drops a
+    stray chessshootout/.env. The default must derive from get_config_dir()."""
+    import pathlib
+    src = pathlib.Path(env.__file__).read_text()
+    assert "get_config_dir()" in src
+    assert "Path(__file__)" not in src
+
+
 def test_reduce_motion_defaults_false_and_round_trips():
     assert env.get_reduce_motion() is False
     env.set_reduce_motion(True)

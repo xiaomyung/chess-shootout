@@ -2,7 +2,6 @@ import hashlib
 import os
 import re
 import uuid
-from pathlib import Path
 
 from dotenv import load_dotenv
 
@@ -24,8 +23,7 @@ _DEFAULT_INCREMENT = "5"
 TIME_CONTROL_VALUES = ("1", "3", "5", "10", "15", "∞")
 INCREMENT_VALUES = ("0", "2", "5", "10", "15")
 
-_PROJECT_ROOT = Path(__file__).resolve().parent.parent
-_ENV_PATH = _PROJECT_ROOT / ".env"
+_ENV_PATH = paths.get_config_dir() / ".env"
 
 _uuid_override = None
 _nickname_override = None

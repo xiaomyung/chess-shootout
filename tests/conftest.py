@@ -11,6 +11,15 @@ if str(ROOT) not in sys.path:
 SERVER_START_TIMEOUT_SECONDS = 15
 
 
+@pytest.fixture(autouse=True)
+def _isolate_env_file(tmp_path_factory, monkeypatch):
+    # Keep every test off the real .env files. Env writers (e.g. a Frontend
+    # ensuring a client UUID, or set_last_mode) otherwise persist to the
+    # module-default _ENV_PATH and leave a stray .env in the package dir.
+    from chessshootout.infra import env
+    monkeypatch.setattr(env, "_ENV_PATH", tmp_path_factory.mktemp("envcfg") / ".env")
+
+
 @pytest.fixture
 def server():
     # Bind the socket here and hand it to uvicorn while it is still open.
