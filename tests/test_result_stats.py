@@ -8,7 +8,7 @@ os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
 
 from backend.pieces import Piece, PieceColor, PieceType
 from backend.utils import Square, Move, HistoryEntry
-from frontend.result_stats import compute_result_stats, _best_streak
+from frontend.panels.result_stats import compute_result_stats, _best_streak
 
 W, B = PieceColor.WHITE, PieceColor.BLACK
 

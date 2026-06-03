@@ -16,12 +16,12 @@ from frontend.panels.audio import AudioPanel
 from frontend.board import Board
 from frontend.menu.menu_battle import MenuBattle
 from frontend.panels.capture_summary import captured_by, material_advantage
-from frontend.result_stats import compute_result_stats
+from frontend.panels.result_stats import compute_result_stats
 from frontend.menu.menu_page import MenuPage, PAGE_CARD, PAGE_HISTORY
+from frontend.menu.history import HistoryView
 from frontend.modals.confirm import ConfirmModal
 from frontend.modals.directory_browser import DirectoryBrowser
 from frontend.modals.country_picker import CountryPicker
-from frontend.modals.history import HistoryView
 from frontend.modals.fen_input import FenInputModal
 from frontend.modals.options import (
     OptionsModal, CountryRow, PathRow, TextRow, ToggleRow, SliderRow, SegmentedRow, SwatchRow,

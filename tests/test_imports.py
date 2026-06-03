@@ -13,7 +13,7 @@ from frontend.audio.sound_manager import SoundManager
 from frontend.board import Board, DRAG_THRESHOLD_PX
 from frontend.modals.base import BaseModal
 from frontend.modals.confirm import ConfirmModal
-from frontend.modals.history import HistoryView
+from frontend.menu.history import HistoryView
 from frontend.modals.help import HelpModal
 from frontend.modals.match_found import MatchFoundModal
 from frontend.online.banners import OfferBanners

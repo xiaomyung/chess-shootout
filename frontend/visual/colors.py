@@ -82,9 +82,7 @@ class Colors:
     tag_stroke = "#1a1206"
     bullet_hole = "#07090c"
     takeover_bg = "#0a070c"
-    connection_dots = {
-        "connected": "#38d65b",
-        "reconnecting": "#ffb020",
-        "disconnected": "#ff4d4d",
-        "unknown": "#8c8c8c",
-    }
+    dot_connected = "#38d65b"
+    dot_reconnecting = "#ffb020"
+    dot_disconnected = "#ff4d4d"
+    dot_unknown = "#8c8c8c"

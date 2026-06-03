@@ -36,10 +36,9 @@ def test_new_palette_hex_values():
         assert pg.Color(getattr(Colors, attr))[:3] == pg.Color(hexval)[:3], attr
 
 
-def test_connection_dots_keys_intact():
-    assert set(Colors.connection_dots) == {
-        "connected", "reconnecting", "disconnected", "unknown",
-    }
+@pytest.mark.parametrize("state", ["connected", "reconnecting", "disconnected", "unknown"])
+def test_connection_dot_color_is_opaque_hex(state):
+    assert pg.Color(getattr(Colors, "dot_" + state)).a == 255
 
 
 @pytest.mark.parametrize(

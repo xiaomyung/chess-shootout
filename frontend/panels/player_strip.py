@@ -267,8 +267,7 @@ class PlayerStrip:
         cursor = x
         if self.connection_state is not None:
             dot_r = max(int(ih * 0.11), 3)
-            color = Colors.connection_dots.get(
-                self.connection_state, Colors.connection_dots["unknown"])
+            color = getattr(Colors, "dot_" + self.connection_state, Colors.dot_unknown)
             dot = circle_surface(dot_r * 2, color)
             self.window.blit(dot, (cursor, top_cy - dot_r))
             cursor += dot_r * 2 + max(int(ih * 0.12), 4)
