@@ -3,7 +3,7 @@ import pygame as pg
 from chessshootout.frontend.visual.colors import Colors
 from chessshootout.frontend.modals.base import BaseModal, BUTTON_VPAD
 from chessshootout.frontend.visual.widgets import draw_button_row, fit_text_to_rect
-from chessshootout.frontend.visual.fonts import get_font
+from chessshootout.frontend.visual.fonts import get_font, get_mono_font
 
 
 HOTKEYS = [
@@ -52,6 +52,7 @@ class HelpModal(BaseModal):
     def _on_rect_changed(self):
         self.title_font = get_font(TITLE_FONT_SIZE, bold=True)
         self.row_font = get_font(ROW_FONT_SIZE, bold=False)
+        self.key_font = get_mono_font(ROW_FONT_SIZE)
         self.button_font = get_font(BUTTON_FONT_SIZE, bold=True)
 
     def show(self):
@@ -115,7 +116,7 @@ class HelpModal(BaseModal):
                     desc_col_w, line_h,
                 )
                 key_surf = fit_text_to_rect(
-                    self.row_font.render(key, True, Colors.amber_hi), key_rect,
+                    self.key_font.render(key, True, Colors.amber_hi), key_rect,
                 )
                 desc_surf = fit_text_to_rect(
                     self.row_font.render(desc, True, Colors.text_dim), desc_rect,
