@@ -81,7 +81,6 @@ RESULT_TEXT = {
 
 
 def _open_with_default_app(path):
-    import shutil
     import subprocess
     import sys
     if sys.platform == "darwin":

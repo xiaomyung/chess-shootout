@@ -371,7 +371,7 @@ class HistoryView:
 
     def _draw_badge(self, rect, result, font, radius):
         color = _BADGE_COLOR[result]
-        if result in ("draw", "spectator"):
+        if result == "draw":
             bg, border, ink = Colors.button_hover, Colors.button_border, Colors.text_dim
         else:
             bg, border, ink = color + "26", color + "5c", color

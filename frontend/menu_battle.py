@@ -11,7 +11,6 @@ from frontend.visual.colors import Colors
 from frontend.visual.fonts import get_font
 
 
-AVOID_PAD = 0
 ROUTE_MARGIN = 22
 MAX_PAWNS = 15
 INITIAL_PAWNS = 5
@@ -86,7 +85,7 @@ class MenuBattle:
         self._scrim_cache = None
         self._queen_src = self._load_piece("queen", "white")
         self._pawn_src = self._load_piece("pawn", "black")
-        self._battle = self._load_battle()
+        self._battle = gunfx.load_battle_art()
         self._art = {}
         self._shadow_surfs = {}
         self._weapons = {}
@@ -98,9 +97,6 @@ class MenuBattle:
             return img.subsurface(img.get_bounding_rect()).copy()
         except (pg.error, FileNotFoundError, OSError):
             return None
-
-    def _load_battle(self):
-        return gunfx.load_battle_art()
 
     def _rnd(self, lo, hi):
         return lo + self.rng.random() * (hi - lo)
@@ -198,8 +194,7 @@ class MenuBattle:
             return
         lx = a.x - self.rect.x
         ly = a.y - self.rect.y
-        self.obstacle = (lx - AVOID_PAD, ly - AVOID_PAD,
-                         lx + a.width + AVOID_PAD, ly + a.height + AVOID_PAD)
+        self.obstacle = (lx, ly, lx + a.width, ly + a.height)
 
     def _entity_obstacle(self, ent):
         o = self.obstacle
@@ -882,17 +877,11 @@ class MenuBattle:
         ox, oy = self.rect.topleft
         window.blit(img, img.get_rect(center=(ox + drop["x"], oy + drop["y"])))
 
-    def _aimed(self, image, pivot_img, target_img, aim):
-        return gunfx.aimed(image, pivot_img, target_img, aim)
-
     def _blit_aimed(self, window, image, pivot_img, screen_pivot, aim):
         gunfx.blit_aimed(window, image, pivot_img, screen_pivot, aim)
 
     def _aimed_target(self, image, pivot_img, target_img, screen_pivot, aim):
         return gunfx.aimed_target(image, pivot_img, target_img, screen_pivot, aim)
-
-    def _blit_rotated(self, window, image, pivot_img, screen_pivot, angle_deg):
-        gunfx.blit_rotated(window, image, pivot_img, screen_pivot, angle_deg)
 
     def _draw_particle(self, window, p, now):
         ox, oy = self.rect.topleft

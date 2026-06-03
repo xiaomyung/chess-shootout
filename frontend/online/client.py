@@ -357,7 +357,7 @@ class OnlineClient:
         ping_task = asyncio.create_task(self._ping_loop(ws))
         try:
             await asyncio.wait({recv_task, send_task},
-                                 return_when=asyncio.FIRST_COMPLETED)
+                               return_when=asyncio.FIRST_COMPLETED)
         finally:
             recv_task.cancel()
             send_task.cancel()

@@ -19,11 +19,10 @@ from server.broadcasts import broadcast_game_start
 from server.connections import ConnectionRegistry, send
 from server.handlers import _clock_snapshot, dispatch
 from server.protocol import (
-    AuthMessage, CancelMatchmakeRequest,
-    ConnectionStatusMessage, ErrorMessage, HealthResponse, HistoryEntryWire, MatchmakeRequest,
-    MatchmakeResponse, PROTOCOL_VERSION, Reason, ReclaimRequest, ReclaimResponse,
-    ResultMessage, ResumeRequest, ResumeResponse,
-    is_uuid4,
+    AuthMessage, CancelMatchmakeRequest, ConnectionStatusMessage, ErrorMessage,
+    HealthResponse, HistoryEntryWire, MatchmakeRequest, MatchmakeResponse,
+    PROTOCOL_VERSION, Reason, ReclaimRequest, ReclaimResponse, ResultMessage,
+    ResumeRequest, ResumeResponse, is_uuid4,
 )
 from server.rooms import (
     AlreadyInGameError, InvalidTokenError, NotInRoomError, PAIRING_WAIT_SECONDS,

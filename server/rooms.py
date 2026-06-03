@@ -53,9 +53,9 @@ class Room:
     game_start_broadcast: bool = False
     draw_offered_by: Optional[str] = None
     takeback_offered_by: Optional[str] = None
-    rematch_offered_by: set = field(default_factory=set)
-    result: Optional[tuple] = None
-    series_scores: dict = field(default_factory=dict)
+    rematch_offered_by: set[str] = field(default_factory=set)
+    result: Optional[tuple[str, str]] = None
+    series_scores: dict[str, float] = field(default_factory=dict)
 
     def score_for(self, color):
         slot = self.slot(color)

@@ -141,8 +141,8 @@ def load_pgn_into_backend(backend, text):
     parsed = parse_pgn(text)
     backend.new_game()
     for san in parsed.moves:
-        result = backend.apply_san(san)
-        if not result.legal:
+        move_result = backend.apply_san(san)
+        if not move_result.legal:
             return parsed, False
     return parsed, True
 

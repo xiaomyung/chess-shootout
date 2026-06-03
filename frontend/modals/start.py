@@ -100,6 +100,8 @@ class StartMenu:
         self._recon_rect = pg.Rect(0, 0, 0, 0)
         self._recon_button_rect = pg.Rect(0, 0, 0, 0)
         self._input_rect = pg.Rect(0, 0, 0, 0)
+        self._avail = pg.Rect(0, 0, 0, 0)
+        self._nick_label_y = 0
         self._mode_label_pos = (0, 0)
         self._mode_rect = pg.Rect(0, 0, 0, 0)
         self._time_label_pos = (0, 0)
@@ -401,7 +403,7 @@ class StartMenu:
         self._draw_ghost(self._history_rect, "🕑", "History",
                          disabled=not self.load_pgn_available)
         self._draw_ghost(self._fen_rect, "📋", "Paste FEN",
-                         disabled=self.selected_mode == "online")
+                         disabled=self.selected_mode == ONLINE)
 
         self._draw_footer()
 
@@ -571,7 +573,7 @@ class StartMenu:
                 self.callbacks["load_pgn"]()
             return True
         if self._fen_rect.collidepoint(pos):
-            if self.selected_mode != "online" and "fen" in self.callbacks:
+            if self.selected_mode != ONLINE and "fen" in self.callbacks:
                 self.callbacks["fen"]()
             return True
         if self._start_rect.collidepoint(pos):

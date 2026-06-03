@@ -236,7 +236,7 @@ class RightMenu:
         max_offset = max(0, self._total_rows - self._max_lines)
         self.scroll_offset = min(self.scroll_offset, max_offset)
 
-        self._reveal_active_ply_on_nav(len(history))
+        self._reveal_active_ply_on_nav()
 
         end = self._total_rows - self.scroll_offset
         start = max(0, end - self._max_lines)
@@ -272,7 +272,7 @@ class RightMenu:
                 self._draw_move_cell(black_cell, black_entry, active_ply == black_ply)
                 self._move_cell_hits.append((black_cell, black_ply))
 
-    def _reveal_active_ply_on_nav(self, history_len):
+    def _reveal_active_ply_on_nav(self):
         review_ply = self.board.review_ply if self.board is not None else None
         if review_ply == self._last_review_ply:
             return

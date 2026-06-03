@@ -874,12 +874,6 @@ class Board:
         return True
 
     def _should_switch_focus_to(self, square, grid, live_at_clicked, current_turn, local_color):
-        """A click on another own-side piece switches focus instead of attempting a move.
-
-        Both the previously-selected piece and the clicked square must hold pieces
-        of the same own color (online: local_color; offline: current_turn). Cross-color
-        clicks fall through to the original move/capture/premove path.
-        """
         if self.selected_square is None:
             return False
         own_color = local_color if local_color is not None else current_turn

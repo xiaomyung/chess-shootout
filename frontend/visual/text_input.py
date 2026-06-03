@@ -64,8 +64,6 @@ class TextInput:
         size = max(int(rect.height / self.font_factor), 10)
         self.font = self._font(size)
 
-    # ---- editing helpers ---------------------------------------------------
-
     def _touch(self):
         self._last_action_ms = pg.time.get_ticks()
 
@@ -139,8 +137,6 @@ class TextInput:
         self.sel_anchor = self._word_left(min(pos + 1, len(self._text)))
         self.cursor = self._word_right(pos)
         self._touch()
-
-    # ---- input -------------------------------------------------------------
 
     def handle_click(self, pos):
         if not self.rect.collidepoint(pos):
@@ -235,8 +231,6 @@ class TextInput:
         sel = self._sel_range()
         if sel:
             _copy_to_clipboard(self._text[sel[0]:sel[1]])
-
-    # ---- rendering ---------------------------------------------------------
 
     def _field_width(self):
         return max(self.rect.width - 2 * self.padding, 1)

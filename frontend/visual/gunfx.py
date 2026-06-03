@@ -8,9 +8,7 @@ import paths
 from frontend.visual.colors import Colors
 
 
-GUN_DRAW_SEC = 0.7
 GUN_DRAW_SPINS_LAND = 5
-GUN_DRAW_SPINS_SWAP = 3
 GUN_LEN_RATIO = 0.62
 RECOIL_DEFAULT = 5
 

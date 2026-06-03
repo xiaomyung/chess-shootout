@@ -88,9 +88,6 @@ class EffectManager:
             self._art = gunfx.load_battle_art()
         return self._art
 
-    def has_art(self):
-        return bool(self._ensure_art()["guns"])
-
     def clear(self):
         self.particles = []
         self.holes = []
@@ -117,10 +114,6 @@ class EffectManager:
 
     def held_squares(self):
         return {c["to_sq"] for c in self.captures}
-
-    def busy(self):
-        return bool(self.captures or self.particles or self.holes
-                    or self.drops or self._check_gun)
 
     def _rnd(self, lo, hi):
         return lo + self.rng.random() * (hi - lo)
@@ -213,10 +206,6 @@ class EffectManager:
             "vx": self._rnd(-0.8, 0.8), "spin": self._rnd(-320, 320),
             "fall": g["cell"] * 1.4, "start": now, "dur": CHECK_DROP_MS})
         self._check_gun = None
-
-    def reset_streak(self):
-        self._streak_color = None
-        self._streak_count = 0
 
     def register_kill(self, color, victim_sq, cell, now_ms):
         if color == self._streak_color:
