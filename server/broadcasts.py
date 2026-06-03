@@ -1,11 +1,17 @@
 from backend.fen import export_fen
 
 from server import logging_setup
-from server.connections import send
-from server.protocol import GameStartMessage
+from server.connections import broadcast, send
+from server.protocol import GameStartMessage, ResultMessage
 
 
 log = logging_setup.get_logger("chess.server.app")
+
+
+async def finalize_and_broadcast(rooms, connections, room, reason, winner_color=None):
+    rooms.finalize_result(room.room_id, reason, winner_color=winner_color)
+    await broadcast(connections, room,
+                    ResultMessage(reason=reason, winner_color=winner_color))
 
 
 async def broadcast_game_start(connections, room, now):

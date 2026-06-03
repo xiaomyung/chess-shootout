@@ -9,11 +9,11 @@ from backend.utils import (
 )
 from server import logging_setup
 from server.connections import broadcast, send
-from server.broadcasts import broadcast_game_start
+from server.broadcasts import broadcast_game_start, finalize_and_broadcast
 from server.protocol import (
     ClockSnapshot, DrawOfferedMessage, DrawResponseMessage, ErrorMessage,
     GIVE_TIME_SECONDS, MoveAppliedMessage, MoveMessage, Reason,
-    RematchRequestMessage, RematchResponseMessage, ResultMessage,
+    RematchRequestMessage, RematchResponseMessage,
     ResyncNoticeMessage, TakebackAppliedMessage, TakebackOfferedMessage,
     TakebackResponseMessage, TimeGrantedMessage,
 )
@@ -100,9 +100,7 @@ async def handle_move(app, websocket, room, color, raw):
     game_result = room.backend.game_result()
     if game_result in RESULT_REASON_BY_GAME_RESULT:
         reason, winner = RESULT_REASON_BY_GAME_RESULT[game_result]
-        rooms.finalize_result(room.room_id, reason, winner_color=winner)
-        await broadcast(connections, room,
-                          ResultMessage(reason=reason, winner_color=winner))
+        await finalize_and_broadcast(rooms, connections, room, reason, winner_color=winner)
         return f"applied+result:{reason}"
     return "applied"
 
@@ -114,9 +112,8 @@ async def handle_resign(app, websocket, room, color, raw):
         return "already_over"
     winner = room.opp_color(color)
     log.info("resign room=%s loser=%s winner=%s", room.room_id, color, winner)
-    rooms.finalize_result(room.room_id, Reason.RESIGNATION, winner_color=winner)
-    await broadcast(connections, room,
-                      ResultMessage(reason=Reason.RESIGNATION, winner_color=winner))
+    await finalize_and_broadcast(rooms, connections, room, Reason.RESIGNATION,
+                                 winner_color=winner)
     return "resigned"
 
 
@@ -127,10 +124,8 @@ async def handle_draw_offer(app, websocket, room, color, raw):
         return "noop"
     if room.draw_offered_by is not None and room.draw_offered_by != color:
         log.info("draw mutual room=%s", room.room_id)
-        rooms.finalize_result(room.room_id, Reason.DRAW_AGREEMENT)
         room.draw_offered_by = None
-        await broadcast(connections, room,
-                          ResultMessage(reason=Reason.DRAW_AGREEMENT))
+        await finalize_and_broadcast(rooms, connections, room, Reason.DRAW_AGREEMENT)
         return "agreed"
     log.info("draw offered room=%s by=%s", room.room_id, color)
     room.draw_offered_by = color
@@ -152,10 +147,8 @@ async def handle_draw_response(app, websocket, room, color, raw):
         return "self"
     if msg.accept:
         log.info("draw accepted room=%s by=%s", room.room_id, color)
-        rooms.finalize_result(room.room_id, Reason.DRAW_AGREEMENT)
         room.draw_offered_by = None
-        await broadcast(connections, room,
-                          ResultMessage(reason=Reason.DRAW_AGREEMENT))
+        await finalize_and_broadcast(rooms, connections, room, Reason.DRAW_AGREEMENT)
         return "accepted"
     log.info("draw declined room=%s by=%s", room.room_id, color)
     room.draw_offered_by = None

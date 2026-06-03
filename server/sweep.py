@@ -1,4 +1,5 @@
 from server import logging_setup
+from server.broadcasts import finalize_and_broadcast
 from server.connections import broadcast
 from server.protocol import (
     FIRST_MOVE_ABORT_SECONDS, Reason, ResultMessage, StateSyncMessage,
@@ -69,18 +70,15 @@ class Sweep:
                     reason, winner = RESULT_REASON_BY_GAME_RESULT[game_result]
                     log.info("game over room=%s reason=%s winner=%s",
                              room.room_id, reason, winner)
-                    self.rooms.finalize_result(room.room_id, reason,
-                                                 winner_color=winner)
-                    await broadcast(self.connections, room,
-                                      ResultMessage(reason=reason, winner_color=winner))
+                    await finalize_and_broadcast(self.rooms, self.connections, room,
+                                                 reason, winner_color=winner)
             now = self._now()
             if (room.is_paired() and room.first_move_at is None
                     and room.started_at is not None
                     and now - room.started_at >= FIRST_MOVE_ABORT_SECONDS):
                 log.info("aborted room=%s reason=no_first_move", room.room_id)
-                self.rooms.finalize_result(room.room_id, Reason.ABORTED)
-                await broadcast(self.connections, room,
-                                  ResultMessage(reason=Reason.ABORTED))
+                await finalize_and_broadcast(self.rooms, self.connections, room,
+                                             Reason.ABORTED)
 
     async def step_grace_expired(self):
         for room, abandoned_color in list(self.rooms.grace_expired_rooms()):
