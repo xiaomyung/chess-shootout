@@ -1,10 +1,12 @@
 Bundled fonts — SIL Open Font License, Version 1.1
 ===================================================
 
-The fonts in this folder are licensed under the SIL Open Font License,
-Version 1.1, reproduced in full below. Each font's copyright notice, taken
-verbatim from the font's own metadata, is reproduced here as required by
-condition 2 of the license. Source repositories are linked in the notices.
+The fonts in this folder, and the emoji/flag sprites under assets/emoji_png/
+that are pre-rendered from Noto Color Emoji, are licensed under the SIL Open
+Font License, Version 1.1, reproduced in full below. Each font's copyright
+notice, taken verbatim from the font's own metadata, is reproduced here as
+required by condition 2 of the license. Source repositories are linked in the
+notices.
 
   Anton (assets/fonts/Anton-Regular.ttf)
     Copyright 2020 The Anton Project Authors
@@ -18,7 +20,8 @@ condition 2 of the license. Source repositories are linked in the notices.
     Copyright 2016 The Space Mono Project Authors
     (https://github.com/googlefonts/spacemono)
 
-  Noto Color Emoji (assets/fonts/NotoColorEmoji.ttf)
+  Noto Color Emoji (rendered into assets/emoji_png/; build-time source font
+  at packaging/emoji/NotoColorEmoji.ttf, not shipped)
     Copyright 2022 Google Inc.
     "Noto" is a trademark of Google Inc.
 

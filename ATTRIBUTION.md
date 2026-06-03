@@ -24,7 +24,8 @@ assets/fonts/OFL.txt (https://openfontlicense.org/).
   font via fontTools. https://fonts.google.com/specimen/Space+Grotesk
 - **assets/fonts/SpaceMono-Regular.ttf, SpaceMono-Bold.ttf** — Space Mono,
   by Colophon Foundry / Google Fonts. https://fonts.google.com/specimen/Space+Mono
-- **assets/fonts/NotoColorEmoji.ttf** — Noto Color Emoji, by Google.
+- **assets/emoji_png/** — emoji and country-flag sprites pre-rendered from
+  Noto Color Emoji, by Google (SIL OFL 1.1; see assets/fonts/OFL.txt).
   https://fonts.google.com/noto/specimen/Noto+Color+Emoji
 
 ## Sounds
