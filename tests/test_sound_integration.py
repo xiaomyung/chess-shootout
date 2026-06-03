@@ -151,8 +151,11 @@ def fire_animation(app):
     em = app.board.effects
     for c in list(em.captures):
         c["fire_at"] = 0
-        c["impact_at"] = 0
-    em.update(pg.time.get_ticks())
+    now = pg.time.get_ticks()
+    for i in range(300):
+        em.update(now + i * 16)
+        if not em.captures:
+            break
     if app.board.animations:
         app.board.animations[0].start_ms = pg.time.get_ticks() - 10_000
         app.board._draw_animations()

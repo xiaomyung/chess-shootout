@@ -18,6 +18,7 @@ import os
 os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
 os.environ.setdefault("SDL_AUDIODRIVER", "dummy")
 
+import math
 import random
 from dataclasses import FrozenInstanceError
 from types import SimpleNamespace
@@ -35,8 +36,9 @@ from frontend.visual import gunfx
 from frontend.visual.effects import (
     AIM_MS, CALLOUT_LG_MS, CALLOUT_XL_MS, CHECK_DROP_MS, DRAW_MS, HIT_WORDS,
     HOLE_FADE_MS, HOLE_HOLD_MS, HOLE_IN_MS, INTENSITY_SCALE, KING_SHAKE_MS, PIECE_GUN,
-    RECOIL_MS, SHAKE_AMP, SHAKE_HARD_MS, STREAK_LABELS, TAG_MS, TAKEOVER_PAUSE_MS,
-    TAKEOVER_TOTAL_MS, EffectManager,
+    PROJECTILE_MAX_MS, PROJECTILE_TRAVEL_MS, RECOIL_MS, SHAKE_AMP, SHAKE_HARD_MS,
+    SHAKE_SOFT_MS, STREAK_LABELS, TAG_MS, TAKEOVER_PAUSE_MS, TAKEOVER_TOTAL_MS,
+    EffectManager,
 )
 from frontend.visual.gunfx import GUNS, GunSpec
 
@@ -124,7 +126,17 @@ def test_intensity_scales_shake_amplitude():
     assert subtle._shake["amp"] < full._shake["amp"]
 
 
-def test_capture_defers_fire_and_impact_with_correct_timing():
+def _run_until_resolved(em, start, step=16, limit=400):
+    t = start
+    for _ in range(limit):
+        t += step
+        em.update(t)
+        if not em.captures:
+            return t
+    return t
+
+
+def test_capture_fires_a_spread_then_resolves_on_lead_pellet_impact():
     em = _em()
     fired, slid = [], []
     em.capture(now_ms=1000, attacker_type="queen", attacker_surface=_surf(),
@@ -134,19 +146,19 @@ def test_capture_defers_fire_and_impact_with_correct_timing():
     assert len(em.captures) == 1
     c = em.captures[0]
     assert c["fire_at"] == 1000 + DRAW_MS + AIM_MS
-    assert c["impact_at"] > c["fire_at"]
     assert Square(0, 3) in em.held_squares()
 
     em.update(c["fire_at"] - 1)
-    assert fired == [] and slid == []
+    assert fired == [] and slid == [] and em.projectiles == []
 
     em.update(c["fire_at"])
     assert fired == [1] and slid == []
-    assert any(p["kind"] == "projectile" for p in em.particles)
+    assert len(em.projectiles) == GUNS["blunderbuss"].pellets, "queen fires a blunderbuss spread"
+    assert sum(1 for pr in em.projectiles if pr["lead"]) == 1, "exactly one lead pellet"
     assert Square(0, 3) in em.held_squares()
 
-    em.update(c["impact_at"])
-    assert slid == [1]
+    _run_until_resolved(em, c["fire_at"])
+    assert slid == [1], "the lead pellet reaching the victim triggers the attacker slide-in"
     assert em.captures == []
     assert any(p["kind"] == "impact" for p in em.particles)
     assert Square(0, 3) not in em.held_squares()
@@ -159,7 +171,7 @@ def test_capture_impact_spawns_ragdoll_blood_smoke_and_a_hole():
                to_sq=Square(0, 4), cell_size=80, power="hard")
     c = em.captures[0]
     em.update(c["fire_at"])
-    em.update(c["impact_at"])
+    _run_until_resolved(em, c["fire_at"])
     kinds = {p["kind"] for p in em.particles}
     assert {"impact", "blood", "ragdoll", "smoke"} <= kinds
     assert em.holes
@@ -213,6 +225,116 @@ def test_recoil_kicks_back_along_aim_then_recovers():
     rx_mid = em._recoil(c["gun"], c["weapon"], 0.0, RECOIL_MS // 2)[0]
     assert rx0 < rx_mid < 0
     assert em._recoil(c["gun"], c["weapon"], 0.0, RECOIL_MS) == (0.0, 0.0)
+
+
+def _stray(x, y, cell=80):
+    return {"x": x, "y": y, "vx": 1.0, "vy": 0.0, "color": GUNS["shotgun"].color,
+            "size": 4, "len": 8, "cell": cell, "lead": False, "capture": None,
+            "born": 0, "max_ms": PROJECTILE_MAX_MS}
+
+
+def test_stray_pellet_wounds_a_bystander_without_killing_it():
+    em = _em()
+    bystander = Square(4, 4)
+    cx, cy = em.geom(bystander)
+    em._bystanders = {bystander}
+    em.projectiles = [_stray(cx, cy)]
+    em.update(0)
+    kinds = {p["kind"] for p in em.particles}
+    assert "blood" in kinds, "a wounded bystander bleeds"
+    assert "ragdoll" not in kinds and not em.holes, "but it does not die — no ragdoll, no hole"
+    assert em._piece_shakes.get(bystander) is not None, "the wounded piece shakes"
+    assert em.projectiles == [], "the stray pellet is spent on impact"
+    assert bystander not in em._bystanders, "and the square won't be wounded twice"
+
+
+def test_lead_pellet_never_wounds_bystanders_only_the_victim_dies():
+    em = _em()
+    cx, cy = em.geom(Square(4, 4))
+    lead = _stray(cx, cy)
+    lead["lead"] = True
+    em._bystanders = {Square(4, 4)}
+    em.projectiles = [lead]
+    em.update(0)
+    assert em._piece_shakes == {}, "the aimed lead shot does not wound bystanders it passes"
+
+
+def test_single_pellet_gun_fires_one_bullet_and_wounds_no_bystanders():
+    em = _em()
+    em.capture(now_ms=0, attacker_type="pawn", attacker_surface=_surf(),
+               victim_surface=_surf(), from_sq=Square(6, 4), victim_sq=Square(5, 4),
+               to_sq=Square(5, 4), cell_size=80, occupied={Square(5, 0), Square(3, 4)})
+    c = em.captures[0]
+    em.update(c["fire_at"])
+    assert len(em.projectiles) == 1, "a revolver fires a single bullet (no spread)"
+    _run_until_resolved(em, c["fire_at"])
+    assert em._piece_shakes == {}, "one straight bullet wounds no bystanders"
+
+
+def test_piece_offset_jitters_a_wounded_piece():
+    em = _em()
+    sq = Square(2, 2)
+    em._piece_shakes = {sq: {"start": 0, "dur": SHAKE_SOFT_MS, "amp": 6}}
+    assert em.piece_offset(sq, SHAKE_SOFT_MS // 3) != (0, 0), "mid-window the piece jitters"
+    assert em.piece_offset(Square(0, 0), SHAKE_SOFT_MS // 3) == (0, 0), "other squares are still"
+    assert em.piece_offset(sq, SHAKE_SOFT_MS + 10) == (0, 0), "the jitter ends with the window"
+
+
+def test_cut_and_clear_drop_projectiles_and_bystanders():
+    em = _em()
+    em.projectiles = [_stray(10, 10)]
+    em._bystanders = {Square(1, 1)}
+    em._piece_shakes = {Square(1, 1): {"start": 0, "dur": SHAKE_SOFT_MS, "amp": 6}}
+    em.cut()
+    assert em.projectiles == [] and em._bystanders == set() and em._piece_shakes == {}
+
+
+def test_pellet_spread_lead_straight_rest_scattered():
+    spec = GUNS["shotgun"]
+    rng = random.Random(1)
+    spread = gunfx.pellet_spread(spec, 0.0, lambda lo, hi: lo + rng.random() * (hi - lo))
+    assert len(spread) == spec.pellets
+    assert spread[0] == (0.0, 1.0), "the lead pellet is dead straight at full speed"
+    assert all(abs(a) <= spec.spread for a, _ in spread[1:]), "the rest stay within spread"
+    assert any(a != 0.0 for a, _ in spread[1:]), "and actually deviate from the aim line"
+
+
+def test_draw_bullet_paints_a_streak():
+    surf = pg.Surface((80, 80), pg.SRCALPHA)
+    gunfx.draw_bullet(surf, (40, 40), 1.0, 0.0, GUNS["shotgun"].color, 6, 24)
+    assert surf.get_bounding_rect().width > 0, "the bullet leaves visible pixels"
+
+
+def _lead_speed(em, from_sq, victim_sq):
+    em.capture(now_ms=0, attacker_type="queen", attacker_surface=_surf(),
+               victim_surface=_surf(), from_sq=from_sq, victim_sq=victim_sq,
+               to_sq=victim_sq, cell_size=80)
+    c = em.captures[0]
+    em.update(c["fire_at"])
+    lead = next(pr for pr in em.projectiles if pr["lead"])
+    return math.hypot(lead["vx"], lead["vy"])
+
+
+def test_in_game_pellet_speed_scales_with_distance():
+    """Speed = distance / constant, so a far shot's pellets fly proportionally faster."""
+    near = _lead_speed(_em(), Square(4, 3), Square(4, 5))
+    far = _lead_speed(_em(), Square(7, 0), Square(0, 7))
+    assert far > near * 2, "a much farther capture launches a much faster bullet"
+
+
+def test_capture_resolves_in_a_distance_independent_window():
+    """Near and far captures both resolve in roughly the constant travel window."""
+    def elapsed(from_sq, victim_sq):
+        em = _em()
+        em.capture(now_ms=0, attacker_type="queen", attacker_surface=_surf(),
+                   victim_surface=_surf(), from_sq=from_sq, victim_sq=victim_sq,
+                   to_sq=victim_sq, cell_size=80)
+        c = em.captures[0]
+        return _run_until_resolved(em, c["fire_at"]) - c["fire_at"]
+    near = elapsed(Square(4, 3), Square(4, 5))
+    far = elapsed(Square(7, 0), Square(0, 7))
+    assert abs(near - far) <= 48, "resolution times stay within ~3 frames across distances"
+    assert far <= PROJECTILE_TRAVEL_MS + 48, "even a board-length shot resolves on the beat"
 
 
 def test_check_holds_the_gun_aimed_at_the_king():

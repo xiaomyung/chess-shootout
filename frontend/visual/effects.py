@@ -52,9 +52,11 @@ SURRENDER_FLAG = "🏳️"
 
 GUN_PIVOT_RISE_FRAC = 0.05
 PROJECTILE_REF_CELL = 104.0
-PROJECTILE_TRAVEL_FRAC = 0.85
-PROJECTILE_TRAVEL_MIN = 90
-PROJECTILE_TRAVEL_MAX = 300
+DT_MAX = 0.05
+PROJECTILE_TRAVEL_MS = 260
+PROJECTILE_MAX_MS = 1400
+PIECE_SHAKE_AMP_FRAC = 0.06
+WOUND_SPARKS = 6
 
 RAGDOLL_LAUNCH_FRAC = 0.45
 RAGDOLL_LAUNCH_X_FRAC = 1.6
@@ -82,12 +84,16 @@ class EffectManager:
         self.particles = []
         self.holes = []
         self.captures = []
+        self.projectiles = []
         self.drops = []
         self.callouts = []
         self.flags = []
         self._takeover = None
         self._check_gun = None
         self._king_shake = None
+        self._piece_shakes = {}
+        self._bystanders = set()
+        self._last_now = None
         self.board_rect = None
         self._streak_color = None
         self._streak_count = 0
@@ -109,12 +115,15 @@ class EffectManager:
         self.particles = []
         self.holes = []
         self.captures = []
+        self.projectiles = []
         self.drops = []
         self.callouts = []
         self.flags = []
         self._takeover = None
         self._check_gun = None
         self._king_shake = None
+        self._piece_shakes = {}
+        self._bystanders = set()
         self._shake = None
         self._streak_color = None
         self._streak_count = 0
@@ -125,7 +134,10 @@ class EffectManager:
             self._release_check_gun(now)
         self._check_gun = None
         self._king_shake = None
+        self._piece_shakes = {}
+        self._bystanders = set()
         self.captures = []
+        self.projectiles = []
         self.particles = []
         self._shake = None
 
@@ -168,7 +180,7 @@ class EffectManager:
 
     def capture(self, *, now_ms, attacker_type, attacker_surface, victim_surface,
                 from_sq, victim_sq, to_sq, cell_size, power="med",
-                on_fire=None, on_slide=None):
+                on_fire=None, on_slide=None, occupied=None):
         gun = PIECE_GUN.get(attacker_type, "revolver")
         weapon = self._weapon(gun, cell_size)
         if self.reduce_motion or weapon is None:
@@ -178,24 +190,19 @@ class EffectManager:
             if on_slide is not None:
                 on_slide()
             return
-        fire_at = now_ms + DRAW_MS + AIM_MS
-        fx, fy = self.geom(from_sq)
-        tx, ty = self.geom(victim_sq)
-        travel = max(PROJECTILE_TRAVEL_MIN,
-                     min(int(math.hypot(tx - fx, ty - fy) * PROJECTILE_TRAVEL_FRAC),
-                         PROJECTILE_TRAVEL_MAX))
         self.captures.append({
-            "start": now_ms, "fire_at": fire_at, "impact_at": fire_at + travel,
+            "start": now_ms, "fire_at": now_ms + DRAW_MS + AIM_MS,
             "fired": False, "gun": gun, "weapon": weapon,
             "from_sq": from_sq, "victim_sq": victim_sq, "to_sq": to_sq,
             "attacker": attacker_surface, "victim": victim_surface,
             "cell": cell_size, "power": power, "on_fire": on_fire, "on_slide": on_slide,
+            "occupied": {s for s in (occupied or ()) if s not in (from_sq, victim_sq)},
         })
 
     def check(self, *, now_ms, attacker_type, king_sq, from_sq, cell_size):
         if self.reduce_motion:
             return
-        self._king_shake = {"sq": king_sq, "start": now_ms,
+        self._king_shake = {"sq": king_sq, "start": now_ms, "dur": KING_SHAKE_MS,
                             "amp": max(int(cell_size * 0.05), 2)}
         gun = PIECE_GUN.get(attacker_type, "revolver")
         weapon = self._weapon(gun, cell_size)
@@ -208,12 +215,21 @@ class EffectManager:
 
     def piece_offset(self, sq, now):
         ks = self._king_shake
-        if ks is None or ks["sq"] != sq:
-            return (0, 0)
-        t = (now - ks["start"]) / KING_SHAKE_MS
+        if ks is not None and ks["sq"] == sq:
+            off = self._jitter(ks, now)
+            if off != (0, 0):
+                return off
+        s = self._piece_shakes.get(sq)
+        if s is not None:
+            return self._jitter(s, now)
+        return (0, 0)
+
+    @staticmethod
+    def _jitter(shake, now):
+        t = (now - shake["start"]) / shake["dur"]
         if not 0.0 <= t < 1.0:
             return (0, 0)
-        amp = ks["amp"] * (1.0 - t)
+        amp = shake["amp"] * (1.0 - t)
         return (int(round(math.sin(t * math.tau * 2.5) * amp)), 0)
 
     def _release_check_gun(self, now):
@@ -277,11 +293,27 @@ class EffectManager:
                                    "idx": int(self.rng.random() * len(weapon["flashes"])),
                                    "from_sq": c["from_sq"], "victim_sq": c["victim_sq"],
                                    "cell": c["cell"], "start": now, "dur": MUZZLE_MS})
-        self.particles.append({"kind": "projectile", "gun": c["gun"], "weapon": weapon,
-                               "from_sq": c["from_sq"], "victim_sq": c["victim_sq"],
-                               "cell": c["cell"], "start": now,
-                               "dur": max(c["impact_at"] - now, 1)})
+        self._spawn_pellets(now, c)
         self.trigger_shake(now, c["power"])
+
+    def _spawn_pellets(self, now, c):
+        spec = gunfx.gun_spec(c["gun"])
+        muzzle, _ = self._muzzle(c["weapon"], c["from_sq"], c["victim_sq"], c["cell"])
+        tx, ty = self._center(c["victim_sq"])
+        base = math.atan2(ty - muzzle[1], tx - muzzle[0])
+        f = c["cell"] / PROJECTILE_REF_CELL
+        dist = math.hypot(tx - muzzle[0], ty - muzzle[1]) or 1.0
+        speed = dist / (PROJECTILE_TRAVEL_MS / 1000.0)
+        self._bystanders = set(c["occupied"])
+        for i, (ang, factor) in enumerate(gunfx.pellet_spread(spec, base, self._rnd)):
+            sp = speed * factor
+            self.projectiles.append({
+                "x": muzzle[0], "y": muzzle[1],
+                "vx": math.cos(ang) * sp, "vy": math.sin(ang) * sp,
+                "color": spec.color, "size": max(spec.size * f, 2),
+                "len": max(spec.length * f, 6), "cell": c["cell"],
+                "lead": i == 0, "capture": c if i == 0 else None,
+                "born": now, "max_ms": PROJECTILE_MAX_MS})
 
     def _impact(self, now, from_sq, victim_sq, victim, cell):
         self.particles.append({"kind": "impact", "victim_sq": victim_sq, "cell": cell,
@@ -331,21 +363,86 @@ class EffectManager:
         return (int((r.random() * 2 - 1) * amp), int((r.random() * 2 - 1) * amp))
 
     def update(self, now):
+        dt = (0.0 if self._last_now is None
+              else max(0.0, min(DT_MAX, (now - self._last_now) / 1000.0)))
+        self._last_now = now
         for c in list(self.captures):
             if not c["fired"] and now >= c["fire_at"]:
                 self._shoot(now, c)
                 c["fired"] = True
                 if c["on_fire"] is not None:
                     c["on_fire"]()
-            if c["fired"] and now >= c["impact_at"]:
-                self._impact(now, c["from_sq"], c["victim_sq"], c["victim"], c["cell"])
-                if c["on_slide"] is not None:
-                    c["on_slide"]()
-                self.captures.remove(c)
+        self._update_projectiles(now, dt)
         self.particles = [p for p in self.particles if now < p["start"] + p["dur"]]
         self.holes = [h for h in self.holes if now < h["start"] + h["dur"]]
         self.drops = [d for d in self.drops if now < d["start"] + d["dur"]]
         self.callouts = [c for c in self.callouts if now < c["start"] + c["dur"]]
+        self._piece_shakes = {sq: s for sq, s in self._piece_shakes.items()
+                              if now < s["start"] + s["dur"]}
+
+    def _update_projectiles(self, now, dt):
+        survivors = []
+        for pr in self.projectiles:
+            pr["x"] += pr["vx"] * dt
+            pr["y"] += pr["vy"] * dt
+            expired = now - pr["born"] >= pr["max_ms"] or self._off_board(pr)
+            if pr["lead"]:
+                c = pr["capture"]
+                pending = c is not None and c in self.captures
+                arrived = now - pr["born"] >= PROJECTILE_TRAVEL_MS
+                if pending and (arrived or expired):
+                    self._resolve_capture(now, c)
+                    continue
+                if expired:
+                    continue
+            else:
+                sq = self._stray_target(pr)
+                if sq is not None:
+                    self._wound(now, sq, pr["cell"])
+                    self._bystanders.discard(sq)
+                    continue
+                if expired:
+                    continue
+            survivors.append(pr)
+        self.projectiles = survivors
+
+    def _pellet_hits_square(self, pr, sq):
+        cx, cy = self._center(sq)
+        half = pr["cell"] / 2.0
+        return abs(pr["x"] - cx) <= half and abs(pr["y"] - cy) <= half
+
+    def _stray_target(self, pr):
+        for sq in self._bystanders:
+            if self._pellet_hits_square(pr, sq):
+                return sq
+        return None
+
+    def _off_board(self, pr):
+        r = self.board_rect
+        if r is None:
+            return False
+        m = pr["cell"]
+        return (pr["x"] < r.x - m or pr["x"] > r.right + m
+                or pr["y"] < r.y - m or pr["y"] > r.bottom + m)
+
+    def _resolve_capture(self, now, c):
+        self._impact(now, c["from_sq"], c["victim_sq"], c["victim"], c["cell"])
+        if c["on_slide"] is not None:
+            c["on_slide"]()
+        if c in self.captures:
+            self.captures.remove(c)
+
+    def _wound(self, now, sq, cell):
+        self.particles.append({"kind": "blood", "victim_sq": sq, "cell": cell,
+                               "start": now, "dur": BLOOD_MS})
+        spark_size = max(int(cell * 0.06), 3)
+        for _ in range(self._count(WOUND_SPARKS)):
+            self.particles.append({
+                "kind": "spark", "victim_sq": sq, "ang": self._rnd(0, math.tau),
+                "dist": self._rnd(20, 70) * cell / 80.0, "size": spark_size,
+                "start": now, "dur": self._rnd(*SPARK_MS)})
+        self._piece_shakes[sq] = {"start": now, "dur": SHAKE_SOFT_MS,
+                                  "amp": max(int(cell * PIECE_SHAKE_AMP_FRAC), 2)}
 
     def draw_holes(self, window, now):
         if self.geom is None:
@@ -358,6 +455,8 @@ class EffectManager:
             return
         for c in self.captures:
             self._draw_capture(window, c, now)
+        for pr in self.projectiles:
+            self._draw_pellet(window, pr)
         for p in self.particles:
             self._draw_particle(window, p, now)
         for d in self.drops:
@@ -399,8 +498,6 @@ class EffectManager:
         kind = p["kind"]
         if kind == "flash":
             self._draw_flash(window, p, now)
-        elif kind == "projectile":
-            self._draw_projectile(window, p, now)
         elif kind == "impact":
             self._draw_impact(window, p, now)
         elif kind == "blood":
@@ -427,36 +524,10 @@ class EffectManager:
         gunfx.draw_flash(window, fl["img"], fl["anchor"], (muzzle[0] + rx, muzzle[1] + ry),
                          aim, prog)
 
-    def _draw_projectile(self, window, p, now):
-        prog = (now - p["start"]) / p["dur"]
-        if not 0.0 <= prog < 1.0:
-            return
-        muzzle, _ = self._muzzle(p["weapon"], p["from_sq"], p["victim_sq"], p["cell"])
-        tx, ty = self._center(p["victim_sq"])
-        hx = muzzle[0] + (tx - muzzle[0]) * prog
-        hy = muzzle[1] + (ty - muzzle[1]) * prog
-        dx, dy = tx - muzzle[0], ty - muzzle[1]
-        dist = math.hypot(dx, dy) or 1.0
-        ux, uy = dx / dist, dy / dist
-        spec = gunfx.gun_spec(p["gun"])
-        f = p["cell"] / PROJECTILE_REF_CELL
-        length = max(spec.length * f, 6)
-        size = max(spec.size * f, 2)
-        bx, by = hx - ux * length, hy - uy * length
-        rgb = pg.Color(spec.color)[:3]
-        pad = int(size + 4)
-        minx, miny = min(hx, bx) - pad, min(hy, by) - pad
-        w = max(int(abs(hx - bx) + 2 * pad), 1)
-        h = max(int(abs(hy - by) + 2 * pad), 1)
-        layer = pg.Surface((w, h), pg.SRCALPHA)
-        head = (hx - minx, hy - miny)
-        tail = (bx - minx, by - miny)
-        pg.draw.line(layer, (*rgb, 90), tail, head, max(int(size * 1.6), 3))
-        pg.draw.line(layer, (*rgb, 255), tail, head, max(int(size * 0.7), 2))
-        pg.draw.circle(layer, (*rgb, 255), (int(head[0]), int(head[1])), int(size / 2) + 1)
-        pg.draw.circle(layer, (255, 255, 255, 235), (int(head[0]), int(head[1])),
-                       max(int(size / 3), 1))
-        window.blit(layer, (minx, miny))
+    def _draw_pellet(self, window, pr):
+        speed = math.hypot(pr["vx"], pr["vy"]) or 1.0
+        gunfx.draw_bullet(window, (pr["x"], pr["y"]), pr["vx"] / speed, pr["vy"] / speed,
+                          pr["color"], pr["size"], pr["len"])
 
     def _draw_impact(self, window, p, now):
         prog = (now - p["start"]) / p["dur"]

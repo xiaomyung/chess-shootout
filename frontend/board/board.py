@@ -1062,12 +1062,15 @@ class Board:
             return False
         self.dragging_from = None
         self._drag_cursor = None
+        occupied = {Square(r, c) for r, c in product(range(self.SIZE), repeat=2)
+                    if self.match.piece_at(Square(r, c)) is not None}
         self.effects.capture(
             now_ms=pg.time.get_ticks(),
             attacker_type=moving_piece.type.value,
             attacker_surface=attacker, victim_surface=victim,
             from_sq=from_sq, victim_sq=victim_sq, to_sq=to_sq,
             cell_size=self.cell_size, power=self._capture_power(captured.type),
+            occupied=occupied,
             on_fire=lambda: self._on_capture_fire(entry, color, victim_sq),
             on_slide=lambda: self.start_animation(from_sq, to_sq, moving_piece,
                                                   on_complete=on_complete),

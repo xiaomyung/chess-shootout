@@ -58,6 +58,37 @@ def gun_spec(gun):
     return GUNS.get(gun, GUNS["revolver"])
 
 
+def pellet_spread(spec, base, rnd):
+    out = []
+    for i in range(spec.pellets):
+        if i == 0:
+            out.append((base, 1.0))
+        else:
+            out.append((base + rnd(-spec.spread, spec.spread), rnd(0.85, 1.1)))
+    return out
+
+
+def draw_bullet(window, head, ux, uy, color, size, length):
+    hx, hy = head
+    size = max(size, 2)
+    tx, ty = hx - ux * length, hy - uy * length
+    pad = int(size + 4)
+    minx, miny = min(hx, tx) - pad, min(hy, ty) - pad
+    w = max(int(abs(hx - tx) + 2 * pad), 1)
+    h = max(int(abs(hy - ty) + 2 * pad), 1)
+    layer = pg.Surface((w, h), pg.SRCALPHA)
+    head_l = (hx - minx, hy - miny)
+    tail_l = (tx - minx, ty - miny)
+    rgb = pg.Color(color)[:3]
+    if length > 1:
+        pg.draw.line(layer, (*rgb, 90), tail_l, head_l, max(int(size * 1.6), 3))
+        pg.draw.line(layer, (*rgb, 255), tail_l, head_l, max(int(size * 0.7), 2))
+    pg.draw.circle(layer, (*rgb, 255), (int(head_l[0]), int(head_l[1])), int(size / 2) + 1)
+    pg.draw.circle(layer, (*pg.Color(Colors.text)[:3], 235),
+                   (int(head_l[0]), int(head_l[1])), max(int(size / 3), 1))
+    window.blit(layer, (minx, miny))
+
+
 def smoothstep(x):
     x = max(0.0, min(1.0, x))
     return x * x * (3 - 2 * x)
