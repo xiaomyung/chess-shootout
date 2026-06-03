@@ -281,7 +281,7 @@ class EffectManager:
                                "from_sq": c["from_sq"], "victim_sq": c["victim_sq"],
                                "cell": c["cell"], "start": now,
                                "dur": max(c["impact_at"] - now, 1)})
-        self._trigger_shake(now, c["power"])
+        self.trigger_shake(now, c["power"])
 
     def _impact(self, now, from_sq, victim_sq, victim, cell):
         self.particles.append({"kind": "impact", "victim_sq": victim_sq, "cell": cell,
@@ -310,7 +310,7 @@ class EffectManager:
                     "dir": 1 if math.cos(aim) >= 0 else -1,
                     "start": now, "dur": RAGDOLL_MS})
 
-    def _trigger_shake(self, now, power):
+    def trigger_shake(self, now, power):
         if self.reduce_motion:
             return
         amp = SHAKE_AMP.get(power, 5) * INTENSITY_SCALE[self.intensity]

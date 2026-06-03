@@ -87,7 +87,7 @@ def test_shake_offset_zero_when_idle():
 
 def test_trigger_shake_is_bounded_then_self_clears():
     em = _em()
-    em._trigger_shake(1000, "hard")
+    em.trigger_shake(1000, "hard")
     amp = SHAKE_AMP["hard"]
     for t in range(1000, 1000 + SHAKE_HARD_MS, 20):
         ox, oy = em.shake_offset(t)
@@ -100,7 +100,7 @@ def test_trigger_shake_is_bounded_then_self_clears():
 
 def test_shake_decays_toward_end_of_window():
     em = _em()
-    em._trigger_shake(0, "hard")
+    em.trigger_shake(0, "hard")
     early = max(abs(c) for c in em.shake_offset(int(SHAKE_HARD_MS * 0.05)))
     late = max(abs(c) for c in em.shake_offset(int(SHAKE_HARD_MS * 0.95)))
     assert late < early
@@ -108,16 +108,16 @@ def test_shake_decays_toward_end_of_window():
 
 def test_reduce_motion_suppresses_shake():
     em = _em(reduce_motion=True)
-    em._trigger_shake(0, "hard")
+    em.trigger_shake(0, "hard")
     assert em._shake is None
     assert em.shake_offset(10) == (0, 0)
 
 
 def test_intensity_scales_shake_amplitude():
     full = _em(intensity="full")
-    full._trigger_shake(0, "hard")
+    full.trigger_shake(0, "hard")
     subtle = _em(intensity="subtle")
-    subtle._trigger_shake(0, "hard")
+    subtle.trigger_shake(0, "hard")
     assert full._shake["amp"] == pytest.approx(SHAKE_AMP["hard"] * 1.0)
     assert subtle._shake["amp"] == pytest.approx(
         SHAKE_AMP["hard"] * INTENSITY_SCALE["subtle"])

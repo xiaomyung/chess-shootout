@@ -655,7 +655,7 @@ class Board:
                 self._draw_dot(self._cell_rect(target.row, target.col))
 
     def _draw_front_markers(self):
-        ep = getattr(self.backend, "en_passant_target", None)
+        ep = self.match.en_passant_target
         sel = self.selected_square
         for target in self._selected_legal_targets():
             if self.match.piece_at(target) is not None:
@@ -1092,7 +1092,7 @@ class Board:
         self.effects.configure(env.get_reduce_motion(), env.get_effect_intensity())
         now = pg.time.get_ticks()
         self.effects.start_takeover("CHECKMATE", winner_label, now)
-        self.effects._trigger_shake(now, "hard")
+        self.effects.trigger_shake(now, "hard")
 
     @staticmethod
     def _capture_power(victim_type):

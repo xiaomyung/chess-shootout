@@ -34,12 +34,12 @@ class MenuPage:
 
     def avoid_rect(self):
         if self.page == PAGE_CARD:
-            return self.start_menu._outer
+            return self.start_menu.outer_rect()
         return self._active().rect
 
     def logo_rect(self):
         if self.page == PAGE_CARD:
-            return self.start_menu._tile_rect
+            return self.start_menu.tile_rect()
         return pg.Rect(0, 0, 0, 0)
 
     def draw_foreground(self):

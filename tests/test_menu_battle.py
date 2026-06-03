@@ -17,7 +17,7 @@ os.environ.setdefault("SDL_AUDIODRIVER", "dummy")
 import pygame as pg
 import pytest
 
-from frontend.menu_battle import (
+from frontend.menu.menu_battle import (
     MenuBattle, MAX_PAWNS, INITIAL_PAWNS, RAGDOLL_MS, IDLE_TIMEOUT_MS, IDLE_RADIUS,
     WEAPON_SWITCH_MIN, WEAPON_SWITCH_MAX, GUN_DRAW_SEC,
 )
@@ -88,7 +88,7 @@ def test_intro_holds_in_the_logo_during_the_start_grace():
 
 
 def test_intro_finishes_lands_queen_and_says_a_oneliner():
-    from frontend.menu_battle import INTRO_LINES
+    from frontend.menu.menu_battle import INTRO_LINES
     b = _intro_battle()
     t = 1000
     while b._intro_active and t < 1000 + 200 * 16:

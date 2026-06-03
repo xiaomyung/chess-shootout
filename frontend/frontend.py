@@ -14,10 +14,10 @@ from backend.match import Match, SINGLE_SCREEN, BOT, ONLINE
 from frontend import countries, env
 from frontend.panels.audio import AudioPanel
 from frontend.board import Board
-from frontend.menu_battle import MenuBattle
+from frontend.menu.menu_battle import MenuBattle
 from frontend.panels.capture_summary import captured_by, material_advantage
 from frontend.result_stats import compute_result_stats
-from frontend.menu_page import MenuPage, PAGE_CARD, PAGE_HISTORY
+from frontend.menu.menu_page import MenuPage, PAGE_CARD, PAGE_HISTORY
 from frontend.modals.confirm import ConfirmModal
 from frontend.modals.directory_browser import DirectoryBrowser
 from frontend.modals.country_picker import CountryPicker

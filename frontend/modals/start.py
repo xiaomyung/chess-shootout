@@ -181,6 +181,12 @@ class StartMenu:
     def is_visible(self):
         return self.visible
 
+    def outer_rect(self):
+        return self._outer
+
+    def tile_rect(self):
+        return self._tile_rect
+
     def build_config(self):
         return {
             "mode": self.selected_mode,

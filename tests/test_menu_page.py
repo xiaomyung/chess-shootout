@@ -9,7 +9,7 @@ os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
 import pygame as pg
 import pytest
 
-from frontend.menu_page import MenuPage, PAGE_CARD, PAGE_HISTORY
+from frontend.menu.menu_page import MenuPage, PAGE_CARD, PAGE_HISTORY
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -28,6 +28,12 @@ class _Card:
 
     def set_rect(self, rect):
         self._outer = pg.Rect(rect)
+
+    def outer_rect(self):
+        return self._outer
+
+    def tile_rect(self):
+        return self._tile_rect
 
     def draw(self):
         pass
