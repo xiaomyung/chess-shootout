@@ -1,18 +1,33 @@
 import pygame as pg
 
-from chessshootout.frontend.visual.fonts import get_emoji_font
+from chessshootout.paths import resource_path
 
 _BASE = {}
+
+_REGIONAL_A = 0x1F1E6
+_REGIONAL_Z = 0x1F1FF
+
+
+def emoji_png_path(char):
+    cps = [ord(c) for c in char]
+    if len(cps) == 2 and all(_REGIONAL_A <= cp <= _REGIONAL_Z for cp in cps):
+        iso = "".join(chr(cp - _REGIONAL_A + ord("A")) for cp in cps).lower()
+        return resource_path("assets", "emoji_png", "countries", iso + ".png")
+    key = "-".join(f"{cp:x}" for cp in cps)
+    return resource_path("assets", "emoji_png", "emoji", key + ".png")
 
 
 def _base_surface(char):
     if char not in _BASE:
-        font = get_emoji_font()
         surf = None
-        if font is not None:
+        if char:
             try:
-                surf = font.render(char, True, (255, 255, 255))
-            except (pg.error, ValueError):
+                surf = pg.image.load(str(emoji_png_path(char)))
+                try:
+                    surf = surf.convert_alpha()
+                except pg.error:
+                    pass
+            except (pg.error, FileNotFoundError, OSError):
                 surf = None
         _BASE[char] = surf
     return _BASE[char]
