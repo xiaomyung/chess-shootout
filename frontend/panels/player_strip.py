@@ -7,7 +7,7 @@ from frontend.visual.colors import Colors
 from frontend.visual.draw import rounded_rect_surface, blit_centered, circle_surface
 from frontend.visual.emoji import emoji_surface
 from frontend.visual.fonts import get_font, DISPLAY
-from frontend.visual.widgets import build_avatar, build_shell
+from frontend.visual.widgets import build_avatar, build_ko_badge
 
 
 AUTO_END_RED_THRESHOLD_SECONDS = 10
@@ -341,26 +341,11 @@ class PlayerStrip:
         if self.ko_count <= 0:
             return None
         winking = pg.time.get_ticks() < self._ko_wink_until_ms
-        label_color = Colors.amber if winking else Colors.text_muted
-        text = self.ko_font.render(f"{self.ko_count} KO", True, label_color)
-        shell_w = max(int(ih * 0.16), 4)
-        shell_h = max(int(ih * 0.42), 7)
-        gap = max(int(ih * 0.12), 3)
-        block_w = shell_w + gap + text.get_width()
-        x = right - block_w
+        badge = build_ko_badge(self.ko_count, self.ko_font, ih, winking)
+        x = right - badge.get_width()
         cy = self.rect.y + self.rect.height // 2
-        shell = pg.Rect(x, cy - shell_h // 2, shell_w, shell_h)
-        self._draw_shell(shell, winking)
-        blit_centered(self.window, text, (shell.right + gap + text.get_width() / 2, cy))
+        self.window.blit(badge, (x, cy - badge.get_height() // 2))
         return x
-
-    def _draw_shell(self, rect, winking):
-        self.window.blit(self._build_shell(rect.width, rect.height, winking),
-                         rect.topleft)
-
-    @staticmethod
-    def _build_shell(w, h, winking):
-        return build_shell(w, h, winking)
 
     def _draw_clock(self, pad, av_size):
         text = format_clock(self.clock_seconds)

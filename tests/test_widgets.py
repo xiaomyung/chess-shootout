@@ -32,6 +32,14 @@ def _button_fill_pixel(surface, rect):
     return surface.get_at((rect.x + 8, rect.centery))[:3]
 
 
+def test_build_ko_badge_paints_and_winks_amber(font):
+    plain = widgets.build_ko_badge(8, font, 28, winking=False)
+    wink = widgets.build_ko_badge(8, font, 28, winking=True)
+    assert plain.get_width() > 0 and plain.get_height() > 0, "the badge renders pixels"
+    assert pg.image.tostring(plain, "RGBA") != pg.image.tostring(wink, "RGBA"), \
+        "the amber wink recolors the badge"
+
+
 @pytest.mark.parametrize(
     "force_pressed, expected_bg",
     [

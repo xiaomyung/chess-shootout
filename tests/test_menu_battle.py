@@ -684,6 +684,127 @@ def test_pawn_pellet_strikes_the_queen_not_other_pawns():
     assert bystander["alive"] is True, "a pawn's bullet passes through other pawns"
 
 
+def _drew_anything(surf, rect=None):
+    rect = (rect or surf.get_rect()).clip(surf.get_rect())
+    for x in range(rect.left, rect.right, 4):
+        for y in range(rect.top, rect.bottom, 4):
+            if tuple(surf.get_at((x, y))[:3]) != (0, 0, 0):
+                return True
+    return False
+
+
+def test_new_queen_starts_with_a_zeroed_ko_counter():
+    b = _battle()
+    assert b.queen["kills"] == 0 and b.queen["ko_wink_until"] == 0
+
+
+def test_a_kill_bumps_the_ko_counter_into_its_amber_wink():
+    b = _battle()
+    b.pawns = [b.pawns[0]]
+    b._kill_pawn(b.pawns[0], 5000)
+    assert b.queen["kills"] == 1
+    assert b.queen["ko_wink_until"] > 5000, "a kill bumps the counter into the amber wink"
+
+
+def test_begin_intro_resets_the_ko_counter():
+    b = _battle()
+    b.queen["kills"], b.queen["ko_wink_until"] = 7, 10 ** 9
+    b.begin_intro()
+    assert b.queen["kills"] == 0 and b.queen["ko_wink_until"] == 0
+
+
+def test_ko_counter_draws_above_the_queen_after_the_intro():
+    b = _battle()
+    b.pawns = []
+    b.queen["x"], b.queen["y"], b.queen["kills"] = 500, 400, 3
+    surf = pg.display.get_surface()
+    surf.fill((0, 0, 0))
+    b._draw_ko_counter(surf)
+    assert _drew_anything(surf), "the counter shows once the queen has landed"
+
+
+def test_ko_counter_hidden_during_the_intro():
+    b = _intro_battle()
+    b.queen["x"], b.queen["y"], b.queen["kills"] = 500, 400, 3
+    surf = pg.display.get_surface()
+    surf.fill((0, 0, 0))
+    b._draw_ko_counter(surf)
+    assert not _drew_anything(surf), "the counter is hidden until the queen lands"
+
+
+def test_ko_counter_is_centered_above_the_head():
+    b = _battle()
+    b.pawns = []
+    b.queen["x"], b.queen["y"], b.queen["kills"] = 150, 400, 3  # open space, clear of the card
+    surf = pg.display.get_surface()
+    surf.fill((0, 0, 0))
+    b._draw_ko_counter(surf)
+    cx = int(b.queen["x"])
+    left = _drew_anything(surf, pg.Rect(0, 0, cx, surf.get_height()))
+    right = _drew_anything(surf, pg.Rect(cx, 0, surf.get_width() - cx, surf.get_height()))
+    head_top = int(b.queen["y"] - b.queen["sprite_h"])
+    assert left and right, "the badge straddles the queen's centre (centered above the head)"
+    assert not _drew_anything(surf, pg.Rect(0, head_top, surf.get_width(),
+                                            surf.get_height() - head_top)), \
+        "and it sits above the head, not over her body"
+
+
+def test_fits_above_rejects_top_edge_and_the_card_hitbox():
+    b = _battle()
+    assert b._fits_above(pg.Rect(40, b.rect.y + b.top_inset + 20, 60, 20)) is True
+    assert b._fits_above(pg.Rect(40, b.rect.y + b.top_inset - 5, 60, 20)) is False
+    assert b._fits_above(pg.Rect(b.avoid_rect.x + 10, b.avoid_rect.y + 10, 40, 20)) is False
+
+
+def test_prefer_right_picks_the_side_with_more_room():
+    b = _battle()
+    assert b._prefer_right(60, 400) is True, "near the left wall the badge wants the right"
+    assert b._prefer_right(b.rect.right - 60, 400) is False, "near the right wall it wants the left"
+
+
+def test_ko_counter_dodges_to_the_side_and_stays_near_the_head():
+    b = _battle()
+    b.pawns = []
+    sprite_h = b.queen["sprite_h"]
+    b.queen["y"], b.queen["kills"] = b.top_inset + sprite_h, 3
+    b.queen["x"] = 70  # hard against the LEFT edge, no room above -> sits to her right
+    surf = pg.display.get_surface()
+    surf.fill((0, 0, 0))
+    b._draw_ko_counter(surf)
+    qx = int(b.queen["x"])
+    mid_body = int(b.queen["y"] - sprite_h * 0.5)
+    assert _drew_anything(surf, pg.Rect(qx, 0, surf.get_width() - qx, surf.get_height())), \
+        "with the wall on the left, the badge dodges to her right"
+    assert not _drew_anything(surf, pg.Rect(0, 0, qx, surf.get_height())), "and not to her left"
+    assert not _drew_anything(surf, pg.Rect(0, mid_body, surf.get_width(),
+                                            surf.get_height() - mid_body)), \
+        "and it stays near the head, never dropping to mid-body"
+
+
+def test_ko_counter_dodges_the_menu_card_hitbox():
+    b = _battle()
+    b.pawns = []
+    card = b.avoid_rect
+    b.queen["x"], b.queen["kills"] = card.centerx, 3
+    b.queen["y"] = card.bottom + b.queen["sprite_h"]  # head tucked under the card -> no room above
+    surf = pg.display.get_surface()
+    surf.fill((0, 0, 0))
+    b._draw_ko_counter(surf)
+    assert _drew_anything(surf), "the badge still renders"
+    assert not _drew_anything(surf, card), "it avoids the menu card hitbox, not just the top edge"
+
+
+def test_ko_counter_draws_behind_the_voicelines(monkeypatch):
+    b = _battle()
+    order = []
+    monkeypatch.setattr(b, "_draw_ko_counter", lambda *a: order.append("ko"))
+    monkeypatch.setattr(b, "_draw_bubble", lambda *a: order.append("bubble"))
+    b.draw(b.window)
+    assert "ko" in order and "bubble" in order
+    assert order.index("ko") < order.index("bubble"), \
+        "the counter draws before (behind) the speech bubbles"
+
+
 def test_reduce_motion_removes_in_flight_projectiles():
     b = _battle()
     p = b.pawns[0]

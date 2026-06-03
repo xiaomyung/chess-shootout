@@ -9,6 +9,7 @@ from frontend.visual import gunfx
 from frontend.visual import backdrop
 from frontend.visual.colors import Colors
 from frontend.visual.fonts import get_font
+from frontend.visual.widgets import build_ko_badge
 
 
 SCALE_MIN = 0.85
@@ -60,6 +61,8 @@ KILL_SPIN_CHANCE = 0.20
 KILL_SPIN_SEC = 0.45
 DROP_GRAVITY = 900
 DROP_MS = 3000
+KO_WINK_MS = 520
+KO_HEIGHT_REF = 26
 
 
 class MenuBattle:
@@ -298,7 +301,8 @@ class MenuBattle:
              "flinch": 0.0, "aim": 0.0, "wp": None, "bubble": None,
              "anchor_x": qx, "anchor_y": qy, "anchor_ms": None, "weapon": QUEEN_WEAPON,
              "weapon_switch": self._rnd(WEAPON_SWITCH_MIN, WEAPON_SWITCH_MAX), "recoil": 0.0,
-             "draw_anim": 0.0, "draw_total": GUN_DRAW_SEC, "draw_spins": 0, "draw_grow": True}
+             "draw_anim": 0.0, "draw_total": GUN_DRAW_SEC, "draw_spins": 0, "draw_grow": True,
+             "kills": 0, "ko_wink_until": 0}
         self._size_entity(q)
         return q
 
@@ -323,6 +327,8 @@ class MenuBattle:
         if self.queen is not None:
             self.queen["bubble"] = None
             self.queen["flinch"] = 0.0
+            self.queen["kills"] = 0
+            self.queen["ko_wink_until"] = 0
 
     def _logo_center(self):
         if self._logo_rect.width > 0:
@@ -654,6 +660,9 @@ class MenuBattle:
     def _kill_pawn(self, p, now_ms):
         if not p["alive"]:
             return
+        if self.queen is not None:
+            self.queen["kills"] += 1
+            self.queen["ko_wink_until"] = now_ms + KO_WINK_MS
         p["alive"] = False
         p["dying"] = True
         p["death_ms"] = now_ms
@@ -756,10 +765,47 @@ class MenuBattle:
             self._draw_particle(window, p, now)
         for pr in self.projectiles:
             self._draw_projectile(window, pr)
+        self._draw_ko_counter(window)
         for p in self.pawns:
             self._draw_bubble(window, p, now)
         if not self._intro_active:
             self._draw_bubble(window, self.queen, now)
+
+    def _draw_ko_counter(self, window):
+        q = self.queen
+        if q is None or self._intro_active:
+            return
+        now = self._last_ms or 0
+        scale = self.scale
+        height = max(int(KO_HEIGHT_REF * scale), 16)
+        font = get_font(max(int(height * 0.3), 9), bold=True)
+        winking = now < q["ko_wink_until"]
+        badge = build_ko_badge(q["kills"], font, height, winking)
+        pad_x = max(int(7 * scale), 5)
+        pad_y = max(int(3 * scale), 2)
+        bw = badge.get_width() + pad_x * 2
+        bh = badge.get_height() + pad_y * 2
+        ox, oy = self.rect.topleft
+        cx = ox + q["x"]
+        gap = max(int(6 * scale), 4)
+        sprite_h = q["sprite_h"]
+        body_y = oy + q["y"] - sprite_h * 0.72
+        bx = max(self.rect.x + 2, min(cx - bw / 2, self.rect.right - bw - 2))
+        by = oy + q["y"] - sprite_h - gap - bh
+        if not self._fits_above(pg.Rect(int(bx), int(by), bw, bh)):
+            art = self._entity_art("queen")
+            half_w = (art["w"] if art else QUEEN_BASE_H * self.scale) / 2
+            bx = cx + half_w + gap if self._prefer_right(cx, body_y) else cx - half_w - gap - bw
+            by = body_y - bh / 2
+        bx = max(self.rect.x + 2, min(bx, self.rect.right - bw - 2))
+        by = max(self.rect.y + self.top_inset + 2, min(by, self.rect.bottom - bh - 2))
+        radius = max(int(bh * 0.42), 4)
+        pill = pg.Surface((bw, bh), pg.SRCALPHA)
+        pg.draw.rect(pill, pg.Color(Colors.surface), pill.get_rect(), border_radius=radius)
+        pg.draw.rect(pill, pg.Color(Colors.border_strong), pill.get_rect(), 1,
+                     border_radius=radius)
+        pill.blit(badge, (pad_x, pad_y))
+        window.blit(pill, (int(bx), int(by)))
 
     def draw_scrim(self, window):
         if self.rect.width <= 0 or self.rect.height <= 0:
@@ -969,6 +1015,23 @@ class MenuBattle:
         lines.append(cur)
         return lines
 
+    def _fits_above(self, rect):
+        if rect.top < self.rect.y + self.top_inset + 4:
+            return False
+        card = self.avoid_rect
+        return not (card.width > 0 and rect.colliderect(card))
+
+    def _prefer_right(self, cx, body_y):
+        lw, rw = self.rect.x + 4, self.rect.right - 4
+        leftroom, rightroom = cx - lw, rw - cx
+        card = self.avoid_rect
+        if card.width > 0 and card.top - 12 <= body_y <= card.bottom + 12:
+            if cx <= card.centerx:
+                rightroom = min(rightroom, card.left - 6 - cx)
+            else:
+                leftroom = min(leftroom, cx - card.right - 6)
+        return rightroom >= leftroom
+
     def _draw_bubble(self, window, ent, now):
         bub = ent.get("bubble")
         if bub is None:
@@ -1024,18 +1087,12 @@ class MenuBattle:
         surfs, bw, bh = measure(above_rw - above_lw - 2 * pad_x)
         bx = max(above_lw, min(cx - bw / 2, above_rw - bw))
         by = top - tail - bh
-        if by >= self.top_inset + 4 and not pg.Rect(bx, by, bw, bh).colliderect(card):
+        if self._fits_above(pg.Rect(bx, by, bw, bh)):
             self._blit_bubble(window, surfs, bx, by, bw, bh, tail, "down",
                               cx, top, bg, border, alpha, pad_x, pad_y, line_gap)
             return
 
-        leftroom, rightroom = cx - lw, rw - cx
-        if card.width > 0 and card.top - 12 <= body_y <= card.bottom + 12:
-            if cx <= card.centerx:
-                rightroom = min(rightroom, card.left - 6 - cx)
-            else:
-                leftroom = min(leftroom, cx - card.right - 6)
-        if rightroom >= leftroom:
+        if self._prefer_right(cx, body_y):
             edge_x = cx + half_w
             surfs, bw, bh = measure(rw - edge_x - tail - 2 * pad_x)
             by = max(self.top_inset + 4, min(body_y - bh / 2, self.rect.bottom - bh - 4))
