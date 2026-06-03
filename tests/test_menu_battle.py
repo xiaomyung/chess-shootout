@@ -18,7 +18,7 @@ import pygame as pg
 import pytest
 
 from chessshootout.frontend.menu.menu_battle import (
-    MenuBattle, MAX_PAWNS, INITIAL_PAWNS, RAGDOLL_MS, IDLE_TIMEOUT_MS, IDLE_RADIUS,
+    MenuBattle, MAX_PAWNS, RAGDOLL_MS, IDLE_TIMEOUT_MS, IDLE_RADIUS,
     WEAPON_SWITCH_MIN, WEAPON_SWITCH_MAX, GUN_DRAW_SEC, PROJECTILE_MAX_MS,
 )
 from chessshootout.frontend.visual.colors import Colors
@@ -34,6 +34,7 @@ def _pygame_init():
 
 
 TITLEBAR = 40
+INITIAL_PAWNS = 5
 
 
 def _intro_battle(seed=7, w=1000, h=700, card=pg.Rect(300, 130, 400, 440),
@@ -733,9 +734,10 @@ def test_ko_counter_hidden_during_the_intro():
 
 
 def test_ko_counter_is_centered_above_the_head():
+    """At (150, 400) — open space, clear of the card — the badge centers above the head."""
     b = _battle()
     b.pawns = []
-    b.queen["x"], b.queen["y"], b.queen["kills"] = 150, 400, 3  # open space, clear of the card
+    b.queen["x"], b.queen["y"], b.queen["kills"] = 150, 400, 3
     surf = pg.display.get_surface()
     surf.fill((0, 0, 0))
     b._draw_ko_counter(surf)
@@ -763,11 +765,12 @@ def test_prefer_right_picks_the_side_with_more_room():
 
 
 def test_ko_counter_dodges_to_the_side_and_stays_near_the_head():
+    """Wall on the left, no room above: the badge dodges right and stays near the head."""
     b = _battle()
     b.pawns = []
     sprite_h = b.queen["sprite_h"]
     b.queen["y"], b.queen["kills"] = b.top_inset + sprite_h, 3
-    b.queen["x"] = 70  # hard against the LEFT edge, no room above -> sits to her right
+    b.queen["x"] = 70
     surf = pg.display.get_surface()
     surf.fill((0, 0, 0))
     b._draw_ko_counter(surf)
@@ -782,11 +785,12 @@ def test_ko_counter_dodges_to_the_side_and_stays_near_the_head():
 
 
 def test_ko_counter_dodges_the_menu_card_hitbox():
+    """Head tucked under the menu card (no room above): the badge dodges the card hitbox."""
     b = _battle()
     b.pawns = []
     card = b.avoid_rect
     b.queen["x"], b.queen["kills"] = card.centerx, 3
-    b.queen["y"] = card.bottom + b.queen["sprite_h"]  # head tucked under the card -> no room above
+    b.queen["y"] = card.bottom + b.queen["sprite_h"]
     surf = pg.display.get_surface()
     surf.fill((0, 0, 0))
     b._draw_ko_counter(surf)

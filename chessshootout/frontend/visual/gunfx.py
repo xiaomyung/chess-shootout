@@ -11,6 +11,8 @@ from chessshootout.frontend.visual.colors import Colors
 GUN_DRAW_SPINS_LAND = 5
 GUN_LEN_RATIO = 0.62
 RECOIL_DEFAULT = 5
+RAGDOLL_MS = 900
+DT_MAX = 0.05
 
 
 @dataclass(frozen=True)

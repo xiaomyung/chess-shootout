@@ -4,6 +4,7 @@ import random
 import pygame as pg
 
 from chessshootout.frontend.visual import gunfx
+from chessshootout.frontend.visual.gunfx import DT_MAX, RAGDOLL_MS
 from chessshootout.frontend.visual.colors import Colors
 from chessshootout.frontend.visual.emoji import emoji_surface
 from chessshootout.frontend.visual.fonts import get_font, DISPLAY, SANS
@@ -17,13 +18,13 @@ BLOOD_MS = 700
 HOLE_IN_MS = 160
 HOLE_HOLD_MS = 1100
 HOLE_FADE_MS = 700
-RAGDOLL_MS = 900
 SHAKE_HARD_MS = 420
 SHAKE_SOFT_MS = 260
 SPARK_MS = (300, 600)
 SMOKE_MS = (700, 1100)
 CHECK_DROP_MS = 3000
 RECOIL_MS = 180
+BACK_OVERSHOOT = 1.70158
 
 SPARK_COUNT = 10
 SPARK_COUNT_RM = 4
@@ -52,7 +53,6 @@ SURRENDER_FLAG = "🏳️"
 
 GUN_PIVOT_RISE_FRAC = 0.05
 PROJECTILE_REF_CELL = 104.0
-DT_MAX = 0.05
 PROJECTILE_TRAVEL_MS = 260
 PROJECTILE_MAX_MS = 1400
 PIECE_SHAKE_AMP_FRAC = 0.06
@@ -70,8 +70,6 @@ RAGDOLL_FALL_SHRINK = 0.3
 STREAK_LABELS = {2: "DOUBLE KILL", 3: "TRIPLE KILL", 4: "QUADRA KILL",
                  5: "RAMPAGE", 6: "UNSTOPPABLE", 7: "GODLIKE"}
 HIT_WORDS = ("BLAM", "BOOM", "POW", "BANG", "HEADSHOT", "BODIED", "WASTED")
-
-PIECE_GUN = gunfx.PIECE_GUN
 
 
 class EffectManager:
@@ -181,7 +179,7 @@ class EffectManager:
     def capture(self, *, now_ms, attacker_type, attacker_surface, victim_surface,
                 from_sq, victim_sq, to_sq, cell_size, power="med",
                 on_fire=None, on_slide=None, occupied=None):
-        gun = PIECE_GUN.get(attacker_type, "revolver")
+        gun = gunfx.PIECE_GUN.get(attacker_type, "revolver")
         weapon = self._weapon(gun, cell_size)
         if self.reduce_motion or weapon is None:
             self._impact(now_ms, from_sq, victim_sq, victim_surface, cell_size)
@@ -204,7 +202,7 @@ class EffectManager:
             return
         self._king_shake = {"sq": king_sq, "start": now_ms, "dur": KING_SHAKE_MS,
                             "amp": max(int(cell_size * 0.05), 2)}
-        gun = PIECE_GUN.get(attacker_type, "revolver")
+        gun = gunfx.PIECE_GUN.get(attacker_type, "revolver")
         weapon = self._weapon(gun, cell_size)
         if weapon is None:
             return
@@ -756,8 +754,7 @@ class EffectManager:
     @staticmethod
     def _pop(x):
         x = max(0.0, min(1.0, x)) - 1.0
-        c = 1.70158
-        return 1 + (c + 1) * x ** 3 + c * x ** 2
+        return 1 + (BACK_OVERSHOOT + 1) * x ** 3 + BACK_OVERSHOOT * x ** 2
 
     def _draw_flag(self, window, f, now):
         surf = emoji_surface(SURRENDER_FLAG, max(int(f["cell"] * 0.6), 8))

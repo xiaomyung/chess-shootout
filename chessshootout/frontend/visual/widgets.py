@@ -18,6 +18,7 @@ PILL_PAD_Y = 6
 SEGMENT_RADIUS = 8
 SEGMENT_INNER_RADIUS = 6
 CHIP_RADIUS = 7
+KO_WINK_MS = 520
 
 
 def build_shell(w, h, winking=False):

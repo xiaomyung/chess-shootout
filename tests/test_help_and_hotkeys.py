@@ -1,4 +1,4 @@
-"""Help modal + R/D + Q/R/B/N hotkeys (M13).
+"""Help modal + R/D + Q/R/B/N hotkeys.
 
 Drives keys through Frontend._handle_shortcut_key / _handle_promotion_key to
 verify the help modal toggles, resign/draw open the right confirm prompt, and a

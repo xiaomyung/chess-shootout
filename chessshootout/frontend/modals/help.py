@@ -107,8 +107,7 @@ class HelpModal(BaseModal):
             desc_col_w = inner_w - key_col_w - self.padding
             start = self.scroll_offset
             end = min(start + visible, len(HOTKEYS))
-            for i, idx in enumerate(range(start, end)):
-                key, desc = HOTKEYS[idx]
+            for i, (key, desc) in enumerate(HOTKEYS[start:end]):
                 row_y = rows_rect.y + i * line_h
                 key_rect = pg.Rect(rows_rect.x, row_y, key_col_w, line_h)
                 desc_rect = pg.Rect(

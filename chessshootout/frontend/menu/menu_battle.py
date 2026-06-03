@@ -7,9 +7,10 @@ import pygame as pg
 from chessshootout import paths
 from chessshootout.frontend.visual import gunfx
 from chessshootout.frontend.visual import backdrop
+from chessshootout.frontend.visual.gunfx import DT_MAX, GUN_DRAW_SPINS_LAND, RAGDOLL_MS
 from chessshootout.frontend.visual.colors import Colors
 from chessshootout.frontend.visual.fonts import get_font
-from chessshootout.frontend.visual.widgets import build_ko_badge
+from chessshootout.frontend.visual.widgets import build_ko_badge, KO_WINK_MS
 
 
 SCALE_MIN = 0.85
@@ -18,11 +19,8 @@ SCALE_REF_HEIGHT = 760.0
 
 ROUTE_MARGIN = 22
 MAX_PAWNS = 15
-INITIAL_PAWNS = 5
 QUEEN_BASE_H = 104
 PAWN_BASE_H = 64
-DT_MAX = 0.05
-RAGDOLL_MS = 900
 IDLE_TIMEOUT_MS = 2000
 IDLE_RADIUS = 24
 FLASH_MS = 120
@@ -55,14 +53,21 @@ INTRO_GRACE_MS = 500
 INTRO_ARC = 90
 INTRO_DIM = 0.45
 GUN_DRAW_SEC = 0.7
-GUN_DRAW_SPINS_LAND = 5
 GUN_DRAW_SPINS_SWAP = 3
 KILL_SPIN_CHANCE = 0.20
 KILL_SPIN_SEC = 0.45
 DROP_GRAVITY = 900
 DROP_MS = 3000
-KO_WINK_MS = 520
 KO_HEIGHT_REF = 26
+HITMARK_MS = 220
+SPARK_MS = (280, 560)
+BUBBLE_HOLD_MS = 2200
+DEATH_BUBBLE_HOLD_MS = 900
+BUBBLE_FADE_IN_MS = 180
+BUBBLE_FADE_OUT_MS = 240
+SCRIM_N = 64
+SCRIM_INNER_ALPHA = 74
+SCRIM_OUTER_ALPHA = 180
 
 
 class MenuBattle:
@@ -382,7 +387,7 @@ class MenuBattle:
         if entry is None:
             length = ent["gun_len"]
             return px + math.cos(ent["aim"]) * length, py + math.sin(ent["aim"]) * length
-        return self._aimed_target(entry["gun"], entry["grip"], entry["barrel"],
+        return gunfx.aimed_target(entry["gun"], entry["grip"], entry["barrel"],
                                   (px, py), ent["aim"])
 
     def _aim_gun(self, ent, target, dt):
@@ -671,14 +676,14 @@ class MenuBattle:
         bx, by = self._body_point(p)
         self._add_hit(bx, by, now_ms)
         if self.rng.random() < 0.4:
-            self._say(p, self._pick(DEATH_LINES), "pawn", now_ms, hold=900)
+            self._say(p, self._pick(DEATH_LINES), "pawn", now_ms, hold=DEATH_BUBBLE_HOLD_MS)
 
     def _add_hit(self, x, y, now_ms):
         self.particles.append({"kind": "hitmark", "x": x, "y": y,
-                               "start": now_ms, "dur": 220})
+                               "start": now_ms, "dur": HITMARK_MS})
         self._add_sparks(x, y, 11, now_ms, Colors.blood)
 
-    def _say(self, ent, text, who, now_ms, hold=2200):
+    def _say(self, ent, text, who, now_ms, hold=BUBBLE_HOLD_MS):
         ent["bubble"] = {"text": text, "who": who, "start": now_ms, "hold": hold}
 
     def _add_flash(self, ent, x, y, now_ms):
@@ -740,7 +745,7 @@ class MenuBattle:
             self.particles.append({
                 "kind": "spark", "x": x, "y": y, "color": color,
                 "vx": math.cos(ang) * dist, "vy": math.sin(ang) * dist - 20,
-                "start": now_ms, "dur": self._rnd(280, 560)})
+                "start": now_ms, "dur": self._rnd(*SPARK_MS)})
 
     def _prune(self, now_ms):
         self.particles = [p for p in self.particles if now_ms - p["start"] < p["dur"]]
@@ -814,10 +819,6 @@ class MenuBattle:
         if self.debug:
             self._draw_debug(window)
 
-    @staticmethod
-    def _smoothstep(x):
-        return gunfx.smoothstep(x)
-
     def draw_intro_overlay(self, window):
         if not self._intro_active or self.queen is None:
             return
@@ -830,15 +831,15 @@ class MenuBattle:
         land = self._intro_land or (self.rect.width * 0.5, self.rect.height * 0.6)
         h = art["h"]
         logo_fit = (self._logo_rect.height * 0.92 / h) if self._logo_rect.height > 0 else 0.5
-        fly = self._smoothstep((t - 0.1) / 0.9)
+        fly = gunfx.smoothstep((t - 0.1) / 0.9)
         end_cx, end_cy = land[0], land[1] - h / 2
         cx = lx + (end_cx - lx) * fly
         cy = ly + (end_cy - ly) * fly - math.sin(fly * math.pi) * INTRO_ARC * self.scale
-        grow = self._smoothstep(t / 0.35)
+        grow = gunfx.smoothstep(t / 0.35)
         s = logo_fit + (1.0 - logo_fit) * grow
         sprite = pg.transform.smoothscale(
             art["normal"], (max(int(art["w"] * s), 1), max(int(h * s), 1))).copy()
-        g = int(255 * (1.0 - INTRO_DIM * self._smoothstep(t)))
+        g = int(255 * (1.0 - INTRO_DIM * gunfx.smoothstep(t)))
         sprite.fill((g, g, g, 255), special_flags=pg.BLEND_RGBA_MULT)
         flip = max(0.0, min(1.0, (t - 0.35) / 0.65))
         if flip:
@@ -924,7 +925,7 @@ class MenuBattle:
                 ent.get("draw_total", GUN_DRAW_SEC) or GUN_DRAW_SEC,
                 ent.get("draw_spins", GUN_DRAW_SPINS_LAND), ent.get("draw_grow", True))
         else:
-            self._blit_aimed(window, entry["gun"], entry["grip"], screen_pivot, ent["aim"])
+            gunfx.blit_aimed(window, entry["gun"], entry["grip"], screen_pivot, ent["aim"])
 
     def _draw_gun_flourish(self, window, entry, screen_pivot, aim, draw, total, spins, grow):
         p = 1.0 - draw / total
@@ -939,12 +940,6 @@ class MenuBattle:
         img.set_alpha(int(255 * (1.0 - prog)))
         ox, oy = self.rect.topleft
         window.blit(img, img.get_rect(center=(ox + drop["x"], oy + drop["y"])))
-
-    def _blit_aimed(self, window, image, pivot_img, screen_pivot, aim):
-        gunfx.blit_aimed(window, image, pivot_img, screen_pivot, aim)
-
-    def _aimed_target(self, image, pivot_img, target_img, screen_pivot, aim):
-        return gunfx.aimed_target(image, pivot_img, target_img, screen_pivot, aim)
 
     def _draw_particle(self, window, p, now):
         ox, oy = self.rect.topleft
@@ -1041,10 +1036,10 @@ class MenuBattle:
         if age >= total:
             ent["bubble"] = None
             return
-        if age < 180:
-            alpha = age / 180.0
-        elif age > total - 240:
-            alpha = max(0.0, (total - age) / 240.0)
+        if age < BUBBLE_FADE_IN_MS:
+            alpha = age / BUBBLE_FADE_IN_MS
+        elif age > total - BUBBLE_FADE_OUT_MS:
+            alpha = max(0.0, (total - age) / BUBBLE_FADE_OUT_MS)
         else:
             alpha = 1.0
         if bub["who"] == "queen":
@@ -1141,7 +1136,7 @@ class MenuBattle:
     def _scrim(self, size):
         if self._scrim_cache is not None and self._scrim_cache[0] == size:
             return self._scrim_cache[1]
-        scrim = self._radial(64, 74, 180, Colors.battle_scrim)
+        scrim = self._radial(SCRIM_N, SCRIM_INNER_ALPHA, SCRIM_OUTER_ALPHA, Colors.battle_scrim)
         scrim = pg.transform.smoothscale(scrim, size)
         self._scrim_cache = (size, scrim)
         return scrim

@@ -7,7 +7,7 @@ from chessshootout.frontend.visual.colors import Colors
 from chessshootout.frontend.visual.draw import rounded_rect_surface, blit_centered, circle_surface
 from chessshootout.frontend.visual.emoji import emoji_surface
 from chessshootout.frontend.visual.fonts import get_font, DISPLAY
-from chessshootout.frontend.visual.widgets import build_avatar, build_ko_badge
+from chessshootout.frontend.visual.widgets import build_avatar, build_ko_badge, KO_WINK_MS
 
 
 AUTO_END_RED_THRESHOLD_SECONDS = 10
@@ -15,7 +15,6 @@ AUTO_END_BADGE_FONT_SCALE = 0.75
 GIVE_TIME_FLASH_MS = 520
 GIVE_TIME_FLASH_PEAK_ALPHA = 150
 GIVE_TIME_FLOAT_MS = 1000
-KO_WINK_MS = 520
 TWO_ROW_MIN_IH = 26
 TOOLTIP_EASE = 0.22
 GIVE_TIME_FADE_IN_FRACTION = 0.3

@@ -1,9 +1,9 @@
-"""Phase 10a/10b gun-fight capture/effects layer.
+"""Gun-fight capture/effects layer.
 
 Surfaces covered:
   * EffectManager (frontend/visual/effects.py) — the two-stage capture
     choreography (draw/aim -> fire -> travel -> impact), the board screen-shake
-    decay, the check gun-draw, reduce-motion / intensity gating, and the 10b
+    decay, the check gun-draw, reduce-motion / intensity gating, and the
     killstreak counter + announcer callouts (FIRST BLOOD -> DOUBLE..GODLIKE ->
     hit-word tags; same-side, resets on recapture). A fake `geom` resolver and an
     injected deterministic rng make every assertion reproducible across workers.
@@ -36,12 +36,12 @@ from chessshootout.frontend.frontend import Frontend
 from chessshootout.frontend.visual import gunfx
 from chessshootout.frontend.visual.effects import (
     AIM_MS, CALLOUT_LG_MS, CALLOUT_XL_MS, CHECK_DROP_MS, DRAW_MS, HIT_WORDS,
-    HOLE_FADE_MS, HOLE_HOLD_MS, HOLE_IN_MS, INTENSITY_SCALE, KING_SHAKE_MS, PIECE_GUN,
+    HOLE_FADE_MS, HOLE_HOLD_MS, HOLE_IN_MS, INTENSITY_SCALE, KING_SHAKE_MS,
     PROJECTILE_MAX_MS, PROJECTILE_TRAVEL_MS, RECOIL_MS, SHAKE_AMP, SHAKE_HARD_MS,
     SHAKE_SOFT_MS, STREAK_LABELS, TAG_MS, TAKEOVER_PAUSE_MS, TAKEOVER_TOTAL_MS,
     EffectManager,
 )
-from chessshootout.frontend.visual.gunfx import GUNS, GunSpec
+from chessshootout.frontend.visual.gunfx import GUNS, GunSpec, PIECE_GUN
 
 WHITE, BLACK = PieceColor.WHITE, PieceColor.BLACK
 KING, QUEEN, ROOK, BISHOP, KNIGHT, PAWN = (
