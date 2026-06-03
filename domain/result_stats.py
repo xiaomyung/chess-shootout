@@ -1,5 +1,5 @@
 from backend.pieces import opponent_of
-from frontend.panels.capture_summary import (
+from domain.capture_summary import (
     PIECE_VALUES, captured_by, material_advantage,
 )
 

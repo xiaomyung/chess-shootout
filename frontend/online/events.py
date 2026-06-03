@@ -3,7 +3,7 @@ import logging
 import pygame as pg
 
 from backend.fen import apply_fen
-from backend.match import ONLINE
+from domain.match import ONLINE
 from backend.pieces import PieceColor
 from backend.utils import PROMO_TYPE_BY_LETTER, coord_from_square, square_from_coord
 from server.protocol import FIRST_MOVE_ABORT_SECONDS

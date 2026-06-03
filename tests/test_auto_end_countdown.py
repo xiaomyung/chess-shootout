@@ -15,7 +15,7 @@ from unittest.mock import MagicMock
 import pygame as pg
 import pytest
 
-from backend.match import BOT, ONLINE, SINGLE_SCREEN
+from domain.match import BOT, ONLINE, SINGLE_SCREEN
 from backend.pieces import PieceColor
 from backend.utils import Square
 from frontend.frontend import Frontend

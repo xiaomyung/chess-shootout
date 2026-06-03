@@ -12,14 +12,14 @@ from datetime import datetime
 import pygame as pg
 
 import paths
-from backend.match import Match, SINGLE_SCREEN, BOT, ONLINE
+from domain.match import Match, SINGLE_SCREEN, BOT, ONLINE
 from backend.fen import apply_fen
 from infra import countries, env
 from frontend.panels.audio import AudioPanel
 from frontend.board import Board
 from frontend.menu.menu_battle import MenuBattle
-from frontend.panels.capture_summary import captured_by, material_advantage
-from frontend.panels.result_stats import compute_result_stats
+from domain.capture_summary import captured_by, material_advantage
+from domain.result_stats import compute_result_stats
 from frontend.menu.menu_page import MenuPage, PAGE_CARD, PAGE_HISTORY
 from frontend.menu.history import HistoryView
 from frontend.modals.confirm import ConfirmModal
@@ -55,8 +55,8 @@ from frontend.panels.right import (
 from frontend.modals.result import ResultMenu
 from frontend.audio.sound_manager import SoundManager
 from frontend.modals.start import StartMenu
-from frontend.pgn.generate import generate_pgn, TIMEOUT_RESULTS
-from frontend.pgn.load import load_pgn_into_backend, parse_time_control
+from domain.pgn.generate import generate_pgn, TIMEOUT_RESULTS
+from domain.pgn.load import load_pgn_into_backend, parse_time_control
 from paths import SOUNDS_DIR
 from backend.pieces import PieceColor, PieceType, opponent_of
 from server.protocol import (

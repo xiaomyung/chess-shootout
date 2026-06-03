@@ -3,7 +3,7 @@ import time
 import pygame as pg
 
 from backend.pieces import Piece, PieceColor, PieceType
-from frontend.pgn.load import (
+from domain.pgn.load import (
     NO_CLOCK_LABEL, format_relative_time, group_by_csmatchid, scan_pgn_summaries,
     time_category,
 )

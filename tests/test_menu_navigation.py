@@ -12,7 +12,7 @@ import pytest
 
 from frontend.frontend import Frontend
 from frontend.menu.menu_page import PAGE_CARD, PAGE_HISTORY
-from frontend.pgn.generate import generate_pgn
+from domain.pgn.generate import generate_pgn
 from backend.backend import Backend
 
 

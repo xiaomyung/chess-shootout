@@ -3,8 +3,6 @@ import re
 from dataclasses import dataclass, field
 from datetime import datetime
 
-from frontend.visual.colors import Colors
-
 
 @dataclass
 class ParsedPGN:
@@ -227,12 +225,12 @@ def result_mark(result_code, white, black, nickname):
     elif nickname and nickname == black:
         won, lost = PGN_BLACK_WIN, PGN_WHITE_WIN
     else:
-        return _SPECTATOR_SYMBOLS.get(result_code, "="), Colors.text_dim
+        return _SPECTATOR_SYMBOLS.get(result_code, "="), "neutral"
     if result_code == won:
-        return "+", Colors.win
+        return "+", "win"
     if result_code == lost:
-        return "-", Colors.loss
-    return "=", Colors.text_dim
+        return "-", "loss"
+    return "=", "neutral"
 
 
 def scan_pgn_summaries(directory, pattern):

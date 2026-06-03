@@ -26,8 +26,8 @@ from frontend.panels.audio import AudioPanel
 from frontend.panels.base import BasePanel
 from frontend.panels.player_strip import PlayerStrip
 from frontend.panels.right import RightMenu
-from frontend.pgn.generate import generate_pgn
-from frontend.pgn.load import load_pgn_into_backend
+from domain.pgn.generate import generate_pgn
+from domain.pgn.load import load_pgn_into_backend
 from frontend.visual.animation import PieceAnimation
 from frontend.visual.clock_visual import LOW_TIME_FRACTION
 from frontend.visual.colors import Colors

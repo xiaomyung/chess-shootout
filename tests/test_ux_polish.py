@@ -13,7 +13,7 @@ from backend.backend import Backend
 from backend.pieces import Piece, PieceColor, PieceType
 from backend.utils import Square
 from frontend.board import Board, DRAG_THRESHOLD_PX
-from frontend.panels.capture_summary import captured_by, material_advantage
+from domain.capture_summary import captured_by, material_advantage
 from frontend.modals.confirm import ConfirmModal
 
 

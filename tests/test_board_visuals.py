@@ -6,7 +6,7 @@ os.environ.setdefault("SDL_AUDIODRIVER", "dummy")
 import pygame as pg
 import pytest
 
-from backend.match import Match
+from domain.match import Match
 from backend.pieces import PieceType, PieceColor
 from backend.utils import Square
 from frontend.board import Board

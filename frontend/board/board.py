@@ -10,7 +10,7 @@ from frontend.visual.animation import PieceAnimation
 from frontend.visual.colors import Colors
 from frontend.visual.draw import supersample
 from frontend.visual.effects import EffectManager
-from frontend.premoves import Premove, speculative_board
+from domain.premoves import Premove, speculative_board
 from backend.pieces import PieceType, PieceColor, Piece, opponent_of
 from frontend.visual.fonts import get_font, DISPLAY
 

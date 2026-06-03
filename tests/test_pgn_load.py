@@ -5,8 +5,8 @@ import pytest
 from backend.backend import Backend
 from backend.pieces import Piece, PieceColor, PieceType
 from backend.utils import Square
-from frontend.pgn.generate import generate_pgn
-from frontend.pgn.load import (
+from domain.pgn.generate import generate_pgn
+from domain.pgn.load import (
     PgnSummary, extract_csmatchid, format_relative_time, group_by_csmatchid,
     load_pgn_into_backend, parse_pgn, scan_pgn_summaries, summarize_pgn_file,
     termination_reason, time_category,

@@ -16,7 +16,7 @@ import pygame as pg
 import pytest
 from fastapi.testclient import TestClient
 
-from backend.match import ONLINE
+from domain.match import ONLINE
 from backend.pieces import PieceColor
 from server.app import PROTOCOL_VERSION, create_app
 from tests.helpers import FakeClock, fake_uuid4

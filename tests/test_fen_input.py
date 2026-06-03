@@ -15,7 +15,7 @@ from unittest.mock import MagicMock
 import pygame as pg
 import pytest
 
-from backend.match import SINGLE_SCREEN
+from domain.match import SINGLE_SCREEN
 from frontend.modals.fen_input import FenInputModal
 
 

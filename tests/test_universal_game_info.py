@@ -10,7 +10,7 @@ from unittest.mock import MagicMock
 import pygame as pg
 import pytest
 
-from backend.match import BOT, ONLINE
+from domain.match import BOT, ONLINE
 from frontend.visual.colors import Colors
 
 

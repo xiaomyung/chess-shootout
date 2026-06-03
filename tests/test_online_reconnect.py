@@ -23,7 +23,7 @@ from unittest.mock import MagicMock
 import pygame as pg
 import pytest
 
-from backend.match import ONLINE
+from domain.match import ONLINE
 from backend.pieces import PieceColor
 from frontend.frontend import Frontend
 

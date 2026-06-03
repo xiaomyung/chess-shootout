@@ -27,7 +27,7 @@ from unittest.mock import MagicMock
 import pygame as pg
 import pytest
 
-from backend.match import Match
+from domain.match import Match
 from backend.pieces import Piece, PieceColor, PieceType
 from backend.utils import Square
 from frontend.board import Board

@@ -1,6 +1,6 @@
 import pytest
 
-from frontend.pgn.generate import generate_pgn
+from domain.pgn.generate import generate_pgn
 
 
 @pytest.mark.parametrize(

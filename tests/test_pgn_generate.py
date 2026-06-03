@@ -4,8 +4,8 @@ clean roster), it round-trips back through the header parser, and adding it neve
 breaks movetext replay."""
 
 from backend.backend import Backend
-from frontend.pgn.generate import generate_pgn
-from frontend.pgn.load import (
+from domain.pgn.generate import generate_pgn
+from domain.pgn.load import (
     extract_csmatchid, load_pgn_into_backend, parse_pgn_headers,
 )
 from tests.helpers import fake_uuid4

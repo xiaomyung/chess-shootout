@@ -1,7 +1,7 @@
 import pygame as pg
 
 import paths
-from backend.match import SINGLE_SCREEN, BOT, ONLINE
+from domain.match import SINGLE_SCREEN, BOT, ONLINE
 from infra import env
 from frontend.visual.colors import Colors
 from frontend.visual.draw import rounded_rect_surface, supersample

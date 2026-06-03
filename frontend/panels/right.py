@@ -2,7 +2,7 @@ import pygame as pg
 
 from frontend.visual.colors import Colors
 from frontend.panels.audio import DEFAULT_BUTTON_COLUMNS
-from frontend.pgn.generate import iter_move_pairs
+from domain.pgn.generate import iter_move_pairs
 from frontend.visual.widgets import draw_button_row, draw_scroll_thumb, draw_pill
 from server.protocol import GIVE_TIME_SECONDS
 from frontend.visual.fonts import get_font
