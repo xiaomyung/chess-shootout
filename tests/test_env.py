@@ -3,7 +3,7 @@ import uuid
 
 import pytest
 
-from frontend import env
+from infra import env
 
 
 _ISOLATED_VARS = (

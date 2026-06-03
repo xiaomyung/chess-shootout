@@ -1,7 +1,7 @@
 import pygame as pg
 
 from backend.pieces import PieceColor
-from frontend.countries import flag_emoji, name_for
+from infra.countries import flag_emoji, name_for
 from frontend.visual.clock_visual import LOW_TIME_FRACTION
 from frontend.visual.colors import Colors
 from frontend.visual.draw import rounded_rect_surface, blit_centered, circle_surface

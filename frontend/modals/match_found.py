@@ -1,6 +1,6 @@
 import pygame as pg
 
-from frontend.countries import flag_emoji
+from infra.countries import flag_emoji
 from frontend.modals.base import BaseModal, MODAL_MAX_WIDTH, MODAL_RAIL
 from frontend.visual.colors import Colors
 from frontend.visual.draw import stroked_text

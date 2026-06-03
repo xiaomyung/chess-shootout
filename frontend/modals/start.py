@@ -2,7 +2,7 @@ import pygame as pg
 
 import paths
 from backend.match import SINGLE_SCREEN, BOT, ONLINE
-from frontend import env
+from infra import env
 from frontend.visual.colors import Colors
 from frontend.visual.draw import rounded_rect_surface, supersample
 from frontend.visual.emoji import blit_emoji, emoji_surface

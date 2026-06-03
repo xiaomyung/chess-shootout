@@ -109,7 +109,7 @@ def test_dot_draws_glyph_on_hover(chrome, monkeypatch):
 
 
 def test_layout_reserves_titlebar_and_keeps_board_playable_at_min_size():
-    from frontend import env
+    from infra import env
     env.init_paths()
     from frontend.frontend import Frontend
     app = Frontend(900, 500)

@@ -14,7 +14,7 @@ import pytest
 
 from backend.utils import Square
 from backend.pieces import PieceColor
-from frontend import countries, env
+from infra import countries, env
 from frontend.frontend import Frontend, OPPONENT_NAME_FOR_MODE
 from frontend.online.client import OnlineClient
 from frontend.pgn.load import extract_csmatchid, parse_pgn_headers

@@ -52,7 +52,7 @@ def test_master_volume_explicit_override(sm):
 
 
 def test_master_volume_falls_back_to_env_default(monkeypatch, tmp_path):
-    from frontend import env as env_mod
+    from infra import env as env_mod
     monkeypatch.setattr(env_mod, "_ENV_PATH", tmp_path / ".env")
     monkeypatch.delenv("CHESS_MASTER_VOLUME", raising=False)
     s = SoundManager(SOUNDS_DIR, enabled=True)
@@ -60,7 +60,7 @@ def test_master_volume_falls_back_to_env_default(monkeypatch, tmp_path):
 
 
 def test_master_volume_reads_env_when_set(monkeypatch, tmp_path):
-    from frontend import env as env_mod
+    from infra import env as env_mod
     monkeypatch.setattr(env_mod, "_ENV_PATH", tmp_path / ".env")
     monkeypatch.setenv("CHESS_MASTER_VOLUME", "0.42")
     s = SoundManager(SOUNDS_DIR, enabled=True)
@@ -235,7 +235,7 @@ def test_panel_end_drag_clears(panel):
 
 
 def test_panel_end_drag_persists_volume_to_env(panel, sm, monkeypatch, tmp_path):
-    from frontend import env as env_mod
+    from infra import env as env_mod
     monkeypatch.setattr(env_mod, "_ENV_PATH", tmp_path / ".env")
     monkeypatch.delenv("CHESS_MASTER_VOLUME", raising=False)
     panel.set_rect(pg.Rect(0, 0, 200, 40))
@@ -247,7 +247,7 @@ def test_panel_end_drag_persists_volume_to_env(panel, sm, monkeypatch, tmp_path)
 
 
 def test_panel_end_drag_does_not_persist_when_not_dragging(panel, monkeypatch, tmp_path):
-    from frontend import env as env_mod
+    from infra import env as env_mod
     monkeypatch.setattr(env_mod, "_ENV_PATH", tmp_path / ".env")
     monkeypatch.delenv("CHESS_MASTER_VOLUME", raising=False)
     panel.end_drag()

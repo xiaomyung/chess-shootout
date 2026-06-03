@@ -5,6 +5,8 @@ import threading
 from collections import deque
 from dataclasses import dataclass
 
+import paths
+from infra import crash_log
 from frontend.online.transport import (
     FatalResumeError, ServerTransport, TransportError, TransportHTTPError,
     SchemaVersionMismatch, WsConnectionClosed,
@@ -235,8 +237,6 @@ class OnlineClient:
 
     def _dump_crash_log(self, exc):
         try:
-            import paths
-            from frontend import crash_log
             crash_log.write_crash_log(exc, crash_log.get_memory_buffer(), {
                 "online_state": self.state,
                 "addr": self._addr,

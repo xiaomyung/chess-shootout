@@ -6,7 +6,7 @@ import certifi
 import pygame as pg
 
 import paths
-from frontend import env, crash_log
+from infra import env, crash_log
 from frontend.frontend import Frontend
 
 

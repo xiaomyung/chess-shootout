@@ -1,3 +1,6 @@
+import shutil
+import subprocess
+
 import pygame as pg
 
 from frontend.visual.colors import Colors
@@ -309,8 +312,6 @@ class TextInput:
 
 
 def _copy_to_clipboard(text):
-    import shutil
-    import subprocess
     for cmd in (["wl-copy"], ["xclip", "-selection", "clipboard"],
                 ["xsel", "--clipboard", "--input"], ["pbcopy"]):
         if shutil.which(cmd[0]) is None:
@@ -329,8 +330,6 @@ def _copy_to_clipboard(text):
 
 
 def _paste_from_clipboard():
-    import shutil
-    import subprocess
     candidates = [
         ["wl-paste", "--no-newline"],
         ["xclip", "-selection", "clipboard", "-o"],

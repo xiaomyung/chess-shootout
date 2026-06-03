@@ -4,7 +4,7 @@ by display name, flags are derived from the code as regional-indicator emoji (no
 and the lookups normalize/case-fold and reject unknown codes so render-time never receives
 a bogus regional-indicator pair."""
 
-from frontend import countries
+from infra import countries
 
 
 def test_list_is_substantial():

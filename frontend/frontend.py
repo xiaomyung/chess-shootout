@@ -3,6 +3,8 @@ import logging
 import os
 import random
 import shutil
+import subprocess
+import sys
 import threading
 import uuid
 from datetime import datetime
@@ -11,7 +13,8 @@ import pygame as pg
 
 import paths
 from backend.match import Match, SINGLE_SCREEN, BOT, ONLINE
-from frontend import countries, env
+from backend.fen import apply_fen
+from infra import countries, env
 from frontend.panels.audio import AudioPanel
 from frontend.board import Board
 from frontend.menu.menu_battle import MenuBattle
@@ -81,8 +84,6 @@ RESULT_TEXT = {
 
 
 def _open_with_default_app(path):
-    import subprocess
-    import sys
     if sys.platform == "darwin":
         candidates = [["open", path]]
     elif sys.platform.startswith("win"):
@@ -604,7 +605,6 @@ class Frontend(OnlineEventsMixin):
         self.fen_input_modal.show(on_submit=self._start_game_from_fen)
 
     def _start_game_from_fen(self, fen):
-        from backend.fen import apply_fen
         try:
             apply_fen(self.match.backend, fen)
         except (ValueError, KeyError):

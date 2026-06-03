@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pygame as pg
 
+from infra import env
 from frontend.visual.clock_visual import LOW_TIME_FRACTION
 from frontend.visual.gunfx import PIECE_GUN
 
@@ -61,7 +62,6 @@ class SoundManager:
 
     def __init__(self, sounds_dir, *, enabled=True, heartbeat=None,
                  heartbeat_channel=None, master_volume=None, menu_volume=None):
-        from frontend import env
         self.enabled = enabled
         self.master_volume = (
             env.get_master_volume() if master_volume is None

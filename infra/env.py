@@ -7,7 +7,7 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 import paths
-from frontend import countries
+from infra import countries
 
 _KEY_LINE_RE = re.compile(r"^([A-Za-z_][A-Za-z0-9_]*)\s*=(.*)$")
 

@@ -5,7 +5,7 @@ import pygame as pg
 
 from backend.pseudo_legal import piece_can_pseudo_reach
 from backend.utils import Square
-from frontend import env
+from infra import env
 from frontend.visual.animation import PieceAnimation
 from frontend.visual.colors import Colors
 from frontend.visual.draw import supersample

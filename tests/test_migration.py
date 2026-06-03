@@ -6,7 +6,7 @@ import pygame as pg
 import pytest
 
 import paths
-from frontend import env
+from infra import env
 from frontend.frontend import Frontend
 
 

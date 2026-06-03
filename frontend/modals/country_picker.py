@@ -1,6 +1,6 @@
 import pygame as pg
 
-from frontend import countries
+from infra import countries
 from frontend.modals.base import BaseModal, MODAL_RAIL
 from frontend.visual.colors import Colors
 from frontend.visual.draw import rounded_rect_surface

@@ -1,6 +1,6 @@
 import pygame as pg
 
-from frontend import env
+from infra import env
 from frontend.visual.colors import Colors
 from frontend.visual.widgets import draw_icon_button
 from frontend.visual.icons import make_speaker_icon
