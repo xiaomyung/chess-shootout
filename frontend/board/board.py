@@ -16,6 +16,7 @@ from frontend.visual.fonts import get_font, DISPLAY
 
 
 DRAG_THRESHOLD_PX = 6
+DRAG_GHOST_ALPHA_FRACTION = 0.30
 
 
 def _draw_capsule(surf, p1, p2, width, color):
@@ -34,6 +35,20 @@ class Board:
     FRAME_PAD_MIN = 16
     FRAME_RADIUS = 14
     GRID_RADIUS = 4
+
+    PROMOTION_OPTION_SIZE_MIN = 48
+    PROMOTION_OPTION_SIZE_MAX = 72
+    PROMOTION_PANEL_PAD = 10
+    PROMOTION_OPTION_GAP = 8
+    PROMOTION_LABEL_HEIGHT = 20
+    PROMOTION_LABEL_OPTION_GAP = 6
+    PROMOTION_SCREEN_MARGIN = 8
+
+    HITMARKER_SIZE_MIN = 8
+    KING_HITMARKER_SIZE_FACTOR = 1.0
+    KING_HITMARKER_THICKNESS = 3.4
+    CAPTURE_HITMARKER_SIZE_FACTOR = 0.55
+    CAPTURE_HITMARKER_THICKNESS = 4.2
 
     def __init__(self, window, match, move_landed_callback=None,
                  on_premove_queued=None, shot_callback=None, announce_callback=None):
@@ -133,19 +148,23 @@ class Board:
             return
         sq = self.pending_promotion_square
         color = self.match.piece_at(sq).color
-        opt = max(48, min(int(self.cell_size), 72))
-        pad, gap, label_h = 10, 8, 20
+        opt = max(self.PROMOTION_OPTION_SIZE_MIN,
+                  min(int(self.cell_size), self.PROMOTION_OPTION_SIZE_MAX))
+        pad, gap, label_h = (self.PROMOTION_PANEL_PAD, self.PROMOTION_OPTION_GAP,
+                             self.PROMOTION_LABEL_HEIGHT)
         panel_w = pad * 2 + 4 * opt + 3 * gap
-        panel_h = pad * 2 + label_h + 6 + opt
+        panel_h = pad * 2 + label_h + self.PROMOTION_LABEL_OPTION_GAP + opt
         sq_rect = self._cell_rect_base(sq.row, sq.col)
         win_w, win_h = self.window.get_size()
-        left_bound = max(self.rect.x, 8)
-        right_bound = min(self.rect.right, win_w - 8)
-        x = sq_rect.right + 10
+        left_bound = max(self.rect.x, self.PROMOTION_SCREEN_MARGIN)
+        right_bound = min(self.rect.right, win_w - self.PROMOTION_SCREEN_MARGIN)
+        x = sq_rect.right + self.PROMOTION_PANEL_PAD
         if x + panel_w > right_bound:
-            x = sq_rect.left - panel_w - 10
+            x = sq_rect.left - panel_w - self.PROMOTION_PANEL_PAD
         x = max(left_bound, min(x, right_bound - panel_w))
-        y = max(self.rect.y, min(sq_rect.centery - panel_h // 2, win_h - panel_h - 8))
+        y = max(self.rect.y,
+                min(sq_rect.centery - panel_h // 2,
+                    win_h - panel_h - self.PROMOTION_SCREEN_MARGIN))
         panel = pg.Rect(x, y, panel_w, panel_h)
         pg.draw.rect(self.window, Colors.light_grey_menu, panel, border_radius=12)
         pg.draw.rect(self.window, Colors.accent, panel, 1, border_radius=12)
@@ -153,7 +172,7 @@ class Board:
             "UPGRADE", True, Colors.accent_hi)
         self.window.blit(label, (panel.centerx - label.get_width() // 2, panel.y + pad - 2))
         mouse = pg.mouse.get_pos()
-        cells_y = panel.y + pad + label_h + 6
+        cells_y = panel.y + pad + label_h + self.PROMOTION_LABEL_OPTION_GAP
         for i, (ptype, hotkey, tag) in enumerate(self.PROMOTION_OPTIONS):
             cell = pg.Rect(panel.x + pad + i * (opt + gap), cells_y, opt, opt)
             hovered = cell.collidepoint(mouse)
@@ -292,7 +311,7 @@ class Board:
             return
         surface = self.piece_images_scaled[(piece.type, piece.color)]
         ghost = surface.copy()
-        ghost.set_alpha(int(255 * 0.30))
+        ghost.set_alpha(int(255 * DRAG_GHOST_ALPHA_FRACTION))
         origin_rect = self._cell_rect(self.dragging_from.row, self.dragging_from.col)
         self.window.blit(ghost, origin_rect.topleft)
         x = self._drag_cursor[0] - self.cell_size / 2
@@ -653,8 +672,11 @@ class Board:
             if (piece is not None and piece.type == PieceType.KING
                     and self.match.is_in_check(piece.color)):
                 dx, dy = self.effects.piece_offset(sq, now)
-                self._draw_hitmarker(self._cell_rect(row, col).move(dx, dy),
-                                     max(int(self.cell_size * 1.0), 8), Colors.accent, 3.4)
+                self._draw_hitmarker(
+                    self._cell_rect(row, col).move(dx, dy),
+                    max(int(self.cell_size * self.KING_HITMARKER_SIZE_FACTOR),
+                        self.HITMARKER_SIZE_MIN),
+                    Colors.accent, self.KING_HITMARKER_THICKNESS)
 
     def _draw_dot(self, rect):
         s = int(self.cell_size)
@@ -668,7 +690,11 @@ class Board:
         self.window.blit(supersample(s, render), rect.topleft)
 
     def _draw_capture_hitmarker(self, rect):
-        self._draw_hitmarker(rect, max(int(self.cell_size * 0.55), 8), Colors.accent, 4.2)
+        self._draw_hitmarker(
+            rect,
+            max(int(self.cell_size * self.CAPTURE_HITMARKER_SIZE_FACTOR),
+                self.HITMARKER_SIZE_MIN),
+            Colors.accent, self.CAPTURE_HITMARKER_THICKNESS)
 
     def set_rect(self, rect):
         self.rect = pg.Rect(rect)

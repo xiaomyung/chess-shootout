@@ -18,6 +18,17 @@ GIVE_TIME_FLOAT_MS = 1000
 KO_WINK_MS = 520
 TWO_ROW_MIN_IH = 26
 TOOLTIP_EASE = 0.22
+GIVE_TIME_FADE_IN_FRACTION = 0.3
+GIVE_TIME_FADE_OUT_FRACTION = 1 - GIVE_TIME_FADE_IN_FRACTION
+GIVE_TIME_FLOAT_RISE_PX = 6
+GIVE_TIME_FLOAT_TRAVEL_PX = 28
+NO_PILL_HEIGHT_CAP = 10 ** 6
+TOOLTIP_PAD_X = 9
+TOOLTIP_PAD_Y = 5
+TOOLTIP_RADIUS = 6
+TOOLTIP_RISE_PX = 5
+TOOLTIP_GAP_PX = 5
+TOOLTIP_EDGE_MARGIN_PX = 2
 
 
 def format_clock(seconds):
@@ -44,7 +55,9 @@ def format_countdown(seconds):
 def give_time_float_alpha(progress):
     if progress < 0 or progress >= 1:
         return 0
-    ramp = progress / 0.3 if progress < 0.3 else (1 - progress) / 0.7
+    ramp = (progress / GIVE_TIME_FADE_IN_FRACTION
+            if progress < GIVE_TIME_FADE_IN_FRACTION
+            else (1 - progress) / GIVE_TIME_FADE_OUT_FRACTION)
     return max(0, min(255, int(255 * ramp)))
 
 
@@ -219,21 +232,22 @@ class PlayerStrip:
     def _blit_tooltip(self, name):
         alpha = int(max(0.0, min(1.0, self._tooltip_alpha)) * 255)
         text = self.tooltip_font.render(name, True, Colors.white)
-        pad_x, pad_y = 9, 5
+        pad_x, pad_y = TOOLTIP_PAD_X, TOOLTIP_PAD_Y
         w = text.get_width() + 2 * pad_x
         h = text.get_height() + 2 * pad_y
         bubble = pg.Surface((w, h), pg.SRCALPHA)
-        bubble.blit(rounded_rect_surface((w, h), 6, Colors.app_bg,
+        bubble.blit(rounded_rect_surface((w, h), TOOLTIP_RADIUS, Colors.app_bg,
                                          border=Colors.button_border, border_width=1), (0, 0))
         bubble.blit(text, (pad_x, pad_y))
         bubble.set_alpha(alpha)
-        rise = int(5 * (1 - self._tooltip_alpha))
+        rise = int(TOOLTIP_RISE_PX * (1 - self._tooltip_alpha))
         if self.rect.centery < self.window.get_height() / 2:
-            by = self._flag_rect.bottom + 5 + rise
+            by = self._flag_rect.bottom + TOOLTIP_GAP_PX + rise
         else:
-            by = self._flag_rect.top - h - 5 - rise
+            by = self._flag_rect.top - h - TOOLTIP_GAP_PX - rise
         bx = self._flag_rect.centerx - w // 2
-        bx = max(2, min(bx, self.window.get_width() - w - 2))
+        bx = max(TOOLTIP_EDGE_MARGIN_PX,
+                 min(bx, self.window.get_width() - w - TOOLTIP_EDGE_MARGIN_PX))
         self.window.blit(bubble, (bx, by))
 
     def _draw_who(self, x, right, ih):
@@ -280,7 +294,7 @@ class PlayerStrip:
                 cursor = self._draw_rating_pill(cursor, bottom_cy, right, pill_max)
             self._draw_captured(cursor, bottom_cy, right, ih, pill_max)
 
-    def _draw_rating_pill(self, x, cy, right, max_h=10 ** 6):
+    def _draw_rating_pill(self, x, cy, right, max_h=NO_PILL_HEIGHT_CAP):
         text = self.rating_font.render(str(self.rating), True, Colors.text_dim)
         pad_x = max(int(text.get_height() * 0.45), 3)
         w = text.get_width() + 2 * pad_x
@@ -292,7 +306,7 @@ class PlayerStrip:
         blit_centered(self.window, text, (x + w / 2, cy))
         return x + w + max(int(self.rect.height * 0.06), 4)
 
-    def _draw_captured(self, x, cy, right, ih, max_h=10 ** 6):
+    def _draw_captured(self, x, cy, right, ih, max_h=NO_PILL_HEIGHT_CAP):
         cursor = x
         last_right = x
         size = max(int(ih * 0.5), 6)
@@ -310,7 +324,7 @@ class PlayerStrip:
         if self.advantage > 0:
             self._draw_advantage_pill(last_right + max(int(ih * 0.18), 5), cy, right, max_h)
 
-    def _draw_advantage_pill(self, x, cy, right, max_h=10 ** 6):
+    def _draw_advantage_pill(self, x, cy, right, max_h=NO_PILL_HEIGHT_CAP):
         text = self.advantage_font.render(f"+{self.advantage}", True, Colors.on_accent)
         pad_x = max(int(text.get_height() * 0.55), 4)
         w = text.get_width() + 2 * pad_x
@@ -393,7 +407,7 @@ class PlayerStrip:
         float_font = get_font(max(int(self.rect.height * 0.24), 11), bold=True, mono=True)
         surf = float_font.render(text, True, Colors.clock_increment_flash)
         surf.set_alpha(alpha)
-        rise = int((6 - 28 * progress))
+        rise = int(GIVE_TIME_FLOAT_RISE_PX - GIVE_TIME_FLOAT_TRAVEL_PX * progress)
         self.window.blit(surf, (clock_rect.centerx - surf.get_width() / 2,
                                 clock_rect.y - surf.get_height() + rise))
 

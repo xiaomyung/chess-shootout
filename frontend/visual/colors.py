@@ -80,6 +80,8 @@ class Colors:
     smoke = "#bec4ce"
     callout_stroke = "#120804"
     tag_stroke = "#1a1206"
+    bullet_hole = "#07090c"
+    takeover_bg = "#0a070c"
     connection_dots = {
         "connected": "#38d65b",
         "reconnecting": "#ffb020",

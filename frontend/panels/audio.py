@@ -9,6 +9,11 @@ from frontend.visual.fonts import get_font
 
 DEFAULT_BUTTON_COLUMNS = 5
 DEFAULT_BUTTON_GAP_PX = 6
+SLIDER_FRAME_RADIUS = 4
+SLIDER_TRACK_RADIUS = 2
+SLIDER_KNOB_MIN_RADIUS = 6
+SLIDER_TRACK_HEIGHT_RATIO = 0.25
+SLIDER_TRACK_MARGIN_RATIO = 0.4
 
 
 class AudioPanel:
@@ -68,17 +73,20 @@ class AudioPanel:
 
     def _draw_slider(self):
         track = self._track_rect()
-        pg.draw.rect(self.window, Colors.dark_menu, self.slider_rect, border_radius=4)
+        pg.draw.rect(self.window, Colors.dark_menu, self.slider_rect,
+                     border_radius=SLIDER_FRAME_RADIUS)
         pg.draw.rect(self.window, Colors.button_border, self.slider_rect, 1,
-                     border_radius=4)
-        pg.draw.rect(self.window, Colors.light_grey_menu, track, border_radius=2)
+                     border_radius=SLIDER_FRAME_RADIUS)
+        pg.draw.rect(self.window, Colors.light_grey_menu, track,
+                     border_radius=SLIDER_TRACK_RADIUS)
         volume = self.sound_manager.master_volume
         fill_w = int(track.width * volume)
         if fill_w > 0:
             fill_rect = pg.Rect(track.x, track.y, fill_w, track.height)
-            pg.draw.rect(self.window, Colors.button_hover, fill_rect, border_radius=2)
+            pg.draw.rect(self.window, Colors.button_hover, fill_rect,
+                         border_radius=SLIDER_TRACK_RADIUS)
         knob_x = track.x + fill_w
-        knob_radius = max(track.height, 6)
+        knob_radius = max(track.height, SLIDER_KNOB_MIN_RADIUS)
         pg.draw.circle(self.window, Colors.white,
                        (knob_x, self.slider_rect.centery), knob_radius)
         pg.draw.circle(self.window, Colors.button_border,
@@ -89,8 +97,8 @@ class AudioPanel:
         draw_icon_button(self.window, self.mute_rect, make_speaker_icon(muted), muted=muted)
 
     def _track_rect(self):
-        track_h = max(int(self.slider_rect.height * 0.25), 4)
-        margin = max(int(self.slider_rect.height * 0.4), 8)
+        track_h = max(int(self.slider_rect.height * SLIDER_TRACK_HEIGHT_RATIO), 4)
+        margin = max(int(self.slider_rect.height * SLIDER_TRACK_MARGIN_RATIO), 8)
         track_w = max(self.slider_rect.width - 2 * margin, 0)
         return pg.Rect(
             self.slider_rect.x + margin,

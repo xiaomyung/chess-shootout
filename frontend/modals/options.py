@@ -16,6 +16,22 @@ SECTION_GAP = 10
 SCROLLBAR_RESERVE = 14
 LABEL_GAP = 16
 
+TOGGLE_W = 46
+TOGGLE_H = 24
+TOGGLE_HIT_PAD_X = 16
+TOGGLE_HIT_PAD_Y = 14
+TOGGLE_SNAP_EPS = 0.02
+TOGGLE_LERP = 0.3
+
+SLIDER_WIDTH_RATIO = 0.46
+SLIDER_WIDTH_CAP = 200
+SLIDER_TRACK_H = 6
+SLIDER_KNOB_RADIUS = 7
+SLIDER_READOUT_GAP = 44
+SLIDER_LABEL_GAP = 8
+SLIDER_HIT_PAD_X = 20
+SLIDER_HIT_PAD_Y = 22
+
 
 class _Fonts:
     __slots__ = ("title", "desc", "section", "value", "button")
@@ -91,19 +107,20 @@ class ToggleRow(_Row):
         self._pos = None
 
     def _draw_control(self, window, rect, fonts):
-        self._ctl = pg.Rect(rect.right - 46, rect.centery - 12, 46, 24)
+        self._ctl = pg.Rect(rect.right - TOGGLE_W, rect.centery - TOGGLE_H // 2,
+                            TOGGLE_W, TOGGLE_H)
         target = 1.0 if self.getter() else 0.0
         if self._pos is None:
             self._pos = target
-        elif abs(self._pos - target) < 0.02:
+        elif abs(self._pos - target) < TOGGLE_SNAP_EPS:
             self._pos = target
         else:
-            self._pos += (target - self._pos) * 0.3
+            self._pos += (target - self._pos) * TOGGLE_LERP
         draw_toggle(window, self._ctl, self._pos)
         return self._ctl.x
 
     def handle_click(self, pos):
-        if self._ctl.inflate(16, 14).collidepoint(pos):
+        if self._ctl.inflate(TOGGLE_HIT_PAD_X, TOGGLE_HIT_PAD_Y).collidepoint(pos):
             self.setter(not self.getter())
             return True
         return False
@@ -167,9 +184,9 @@ class SliderRow(_Row):
         readout = fonts.value.render(str(int(round(value * 100))), True, Colors.text_dim)
         window.blit(readout, (rect.right - readout.get_width(),
                               rect.centery - readout.get_height() / 2))
-        slider_w = min(int(rect.width * 0.46), 200)
-        track_h = 6
-        track_right = rect.right - 44
+        slider_w = min(int(rect.width * SLIDER_WIDTH_RATIO), SLIDER_WIDTH_CAP)
+        track_h = SLIDER_TRACK_H
+        track_right = rect.right - SLIDER_READOUT_GAP
         self._track = pg.Rect(track_right - slider_w, rect.centery - track_h // 2,
                               slider_w, track_h)
         pg.draw.rect(window, Colors.surface_inset, self._track, border_radius=track_h // 2)
@@ -179,8 +196,8 @@ class SliderRow(_Row):
                          pg.Rect(self._track.x, self._track.y, fill_w, track_h),
                          border_radius=track_h // 2)
         pg.draw.circle(window, Colors.white,
-                       (self._track.x + fill_w, self._track.centery), 7)
-        return self._track.x - 8
+                       (self._track.x + fill_w, self._track.centery), SLIDER_KNOB_RADIUS)
+        return self._track.x - SLIDER_LABEL_GAP
 
     def _set_from_x(self, x):
         if self._track.width <= 0:
@@ -189,7 +206,7 @@ class SliderRow(_Row):
         self.setter(max(0.0, min(1.0, ratio)))
 
     def handle_click(self, pos):
-        if self._track.inflate(20, 22).collidepoint(pos):
+        if self._track.inflate(SLIDER_HIT_PAD_X, SLIDER_HIT_PAD_Y).collidepoint(pos):
             self._set_from_x(pos[0])
             self._dragging = True
             return True

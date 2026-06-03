@@ -13,6 +13,12 @@ from frontend.visual.text_input import TextInput
 from frontend.visual.widgets import draw_button, draw_scroll_thumb, fit_text_to_rect
 
 
+ROW_ICON_BOX_W = 24
+ROW_ICON_INSET = 6
+ROW_TEXT_INSET = 8
+ROW_META_INSET = 10
+
+
 class DirectoryBrowser(BaseModal):
 
     def __init__(self, window):
@@ -302,9 +308,10 @@ class DirectoryBrowser(BaseModal):
             draw_file(self.window, icon_box, Colors.text_mute)
 
     def _draw_input_row(self, row_rect):
-        icon_box = pg.Rect(row_rect.x + 6, row_rect.y, 24, row_rect.height)
+        icon_box = pg.Rect(row_rect.x + ROW_ICON_INSET, row_rect.y, ROW_ICON_BOX_W,
+                           row_rect.height)
         self._draw_row_icon(icon_box, True)
-        self._input_rect = pg.Rect(icon_box.right + 8, row_rect.y + 4,
+        self._input_rect = pg.Rect(icon_box.right + ROW_TEXT_INSET, row_rect.y + 4,
                                    row_rect.right - icon_box.right - 14, row_rect.height - 8)
         self.new_folder_input.set_rect(self._input_rect)
         self.new_folder_input.draw()
@@ -313,18 +320,20 @@ class DirectoryBrowser(BaseModal):
         name, path, is_dir, meta = entry
         if row_rect.collidepoint(mouse_pos):
             pg.draw.rect(self.window, Colors.button_hover, row_rect, border_radius=8)
-        icon_box = pg.Rect(row_rect.x + 6, row_rect.y, 24, row_rect.height)
+        icon_box = pg.Rect(row_rect.x + ROW_ICON_INSET, row_rect.y, ROW_ICON_BOX_W,
+                           row_rect.height)
         self._draw_row_icon(icon_box, is_dir)
         self._row_rects.append((row_rect, path, is_dir))
         meta_surf = self.meta_font.render(meta, True, Colors.text_mute)
-        meta_x = row_rect.right - 10 - meta_surf.get_width()
+        meta_x = row_rect.right - ROW_META_INSET - meta_surf.get_width()
         self.window.blit(meta_surf, (meta_x, row_rect.centery - meta_surf.get_height() // 2))
         name_color = Colors.white if is_dir else Colors.text_dim
         name_surf = fit_text_to_rect(
             self.row_font.render(name, True, name_color),
             pg.Rect(0, 0, max(meta_x - icon_box.right - 16, 1), row_rect.height))
         self.window.blit(name_surf,
-                         (icon_box.right + 8, row_rect.centery - name_surf.get_height() // 2))
+                         (icon_box.right + ROW_TEXT_INSET,
+                          row_rect.centery - name_surf.get_height() // 2))
 
     def handle_click(self, pos):
         if not self.visible:

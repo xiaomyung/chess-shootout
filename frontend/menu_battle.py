@@ -11,6 +11,10 @@ from frontend.visual.colors import Colors
 from frontend.visual.fonts import get_font
 
 
+SCALE_MIN = 0.85
+SCALE_MAX = 1.5
+SCALE_REF_HEIGHT = 760.0
+
 ROUTE_MARGIN = 22
 MAX_PAWNS = 15
 INITIAL_PAWNS = 5
@@ -107,7 +111,7 @@ class MenuBattle:
     def set_rect(self, rect):
         rect = pg.Rect(rect)
         self.rect = rect
-        self.scale = max(0.85, min(1.5, rect.height / 760.0))
+        self.scale = max(SCALE_MIN, min(SCALE_MAX, rect.height / SCALE_REF_HEIGHT))
         self._build_art()
         self._build_shadows()
         self._build_weapons()

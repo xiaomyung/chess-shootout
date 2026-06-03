@@ -20,6 +20,23 @@ FILTER_TYPE = {"online": "Online", "bot": "Bot", "local": "Local"}
 SCROLL_STEP = 56
 SCROLLBAR_GUTTER = 14
 
+CARD_RADIUS = 12
+CARD_INNER_PAD = 3
+CARD_TEXT_INSET = 16
+CARD_TEXT_VPAD = 12
+CARD_BADGE_SIZE = 44
+CARD_BADGE_RADIUS = 11
+GAME_BADGE_SIZE = 22
+GAME_BADGE_RADIUS = 6
+STAT_CARD_RADIUS = 11
+STAT_CARD_INSET = 14
+STAT_CARD_TOP = 12
+CHIP_PAD_X = 26
+CHIP_GAP = 6
+CHIP_RADIUS = 15
+TYPE_PILL_PAD_X = 16
+TYPE_PILL_PAD_Y = 5
+
 _BADGE_TEXT = {"win": "W", "loss": "L", "draw": "½"}
 _BADGE_COLOR = {"win": Colors.result_win, "loss": Colors.result_loss,
                 "draw": Colors.result_neutral}
@@ -237,8 +254,8 @@ class HistoryView:
         chips = []
         for label, key in FILTER_OPTIONS:
             tw = self._filter_font.size(label)[0]
-            chips.append((label, key, tw + 26))
-        total = sum(c[2] for c in chips) + 6 * (len(chips) - 1)
+            chips.append((label, key, tw + CHIP_PAD_X))
+        total = sum(c[2] for c in chips) + CHIP_GAP * (len(chips) - 1)
         cx = right - total
         left_edge = cx
         for label, key, cw in chips:
@@ -251,13 +268,13 @@ class HistoryView:
                 bg, border, color = Colors.button_hover, Colors.button_border, Colors.white
             else:
                 bg, border, color = Colors.surface, Colors.button_border, Colors.text_dim
-            self.window.blit(rounded_rect_surface(rect.size, 15, bg,
+            self.window.blit(rounded_rect_surface(rect.size, CHIP_RADIUS, bg,
                                                   border=border, border_width=1), rect.topleft)
             surf = self._filter_font.render(label, True, color)
             self.window.blit(surf, (rect.centerx - surf.get_width() // 2,
                                     rect.centery - surf.get_height() // 2))
             self._filter_rects[key] = rect
-            cx += cw + 6
+            cx += cw + CHIP_GAP
         return left_edge
 
     def _draw_count_chip(self, right, cy):
@@ -277,13 +294,14 @@ class HistoryView:
                  (draws, "DRAWS", Colors.white))
         for i, (value, label, color) in enumerate(cards):
             rect = pg.Rect(int(x + i * (card_w + gap)), y, int(card_w), h)
-            self.window.blit(rounded_rect_surface(rect.size, 11, Colors.surface,
+            self.window.blit(rounded_rect_surface(rect.size, STAT_CARD_RADIUS, Colors.surface,
                                                   border=Colors.button_border, border_width=1),
                              rect.topleft)
             num = self._stat_num_font.render(str(value), True, color)
-            self.window.blit(num, (rect.x + 14, rect.y + 12))
+            self.window.blit(num, (rect.x + STAT_CARD_INSET, rect.y + STAT_CARD_TOP))
             lab = self._stat_label_font.render(label, True, Colors.text_mute)
-            self.window.blit(lab, (rect.x + 14, rect.y + 12 + num.get_height() + 3))
+            self.window.blit(lab, (rect.x + STAT_CARD_INSET,
+                                   rect.y + STAT_CARD_TOP + num.get_height() + 3))
 
     def _draw_list(self):
         self._row_hits = []
@@ -337,35 +355,36 @@ class HistoryView:
         self._draw_scroll_indicator()
 
     def _draw_card(self, rect, group, block_h):
-        inner_x = rect.x + 3
-        inner_w = rect.width - 3
+        inner_x = rect.x + CARD_INNER_PAD
+        inner_w = rect.width - CARD_INNER_PAD
         expanded = block_h > rect.height
         hovered = rect.collidepoint(pg.mouse.get_pos())
         bg = Colors.button_hover if hovered else Colors.surface
-        self.window.blit(rounded_rect_surface((rect.width, block_h), 12,
+        self.window.blit(rounded_rect_surface((rect.width, block_h), CARD_RADIUS,
                                               _BADGE_COLOR[group.result]), rect.topleft)
         if expanded:
             self.window.blit(
-                rounded_rect_surface((inner_w, block_h), 12, Colors.surface_inset,
+                rounded_rect_surface((inner_w, block_h), CARD_RADIUS, Colors.surface_inset,
                                      border=Colors.button_border, border_width=1),
                 (inner_x, rect.y))
-            self.window.blit(rounded_rect_surface((inner_w, rect.height), 12, bg),
+            self.window.blit(rounded_rect_surface((inner_w, rect.height), CARD_RADIUS, bg),
                              (inner_x, rect.y))
         else:
             self.window.blit(
-                rounded_rect_surface((inner_w, rect.height), 12, bg,
+                rounded_rect_surface((inner_w, rect.height), CARD_RADIUS, bg,
                                      border=Colors.button_border, border_width=1),
                 (inner_x, rect.y))
 
-        badge = pg.Rect(rect.x + 16, rect.centery - 22, 44, 44)
-        self._draw_badge(badge, group.result, self._badge_font, 11)
+        badge = pg.Rect(rect.x + CARD_TEXT_INSET, rect.centery - CARD_BADGE_SIZE // 2,
+                        CARD_BADGE_SIZE, CARD_BADGE_SIZE)
+        self._draw_badge(badge, group.result, self._badge_font, CARD_BADGE_RADIUS)
 
-        text_x = badge.right + 16
-        self._draw_matchup(text_x, rect.y + 12, group)
+        text_x = badge.right + CARD_TEXT_INSET
+        self._draw_matchup(text_x, rect.y + CARD_TEXT_VPAD, group)
         meta = (f"{group.category} · {len(group.games)} games" if len(group.games) > 1
                 else f"{group.category} · {group.reason}")
         sub = self._sub_font.render(meta, True, Colors.text_mute)
-        self.window.blit(sub, (text_x, rect.bottom - sub.get_height() - 12))
+        self.window.blit(sub, (text_x, rect.bottom - sub.get_height() - CARD_TEXT_VPAD))
 
         self._draw_card_right(rect, group)
 
@@ -432,8 +451,8 @@ class HistoryView:
         bg = (Colors.amber + "1a") if online else Colors.surface_inset
         border = (Colors.amber + "57") if online else Colors.button_border
         surf = self._pill_font.render(text, True, color)
-        w = surf.get_width() + 16
-        h = surf.get_height() + 5
+        w = surf.get_width() + TYPE_PILL_PAD_X
+        h = surf.get_height() + TYPE_PILL_PAD_Y
         rect = pg.Rect(right - w, bottom - h, w, h)
         self.window.blit(rounded_rect_surface(rect.size, h // 2, bg,
                                               border=border, border_width=1), rect.topleft)
@@ -458,8 +477,9 @@ class HistoryView:
         gnum = self._gnum_font.render(f"GAME {index + 1}", True, Colors.text_mute)
         self.window.blit(gnum, (rect.x + 20, rect.centery - gnum.get_height() // 2))
         outcome = _game_outcome(game, self.nickname)
-        badge = pg.Rect(rect.x + 96, rect.centery - 11, 22, 22)
-        self._draw_badge(badge, outcome, self._gbadge_font, 6)
+        badge = pg.Rect(rect.x + 96, rect.centery - GAME_BADGE_SIZE // 2,
+                        GAME_BADGE_SIZE, GAME_BADGE_SIZE)
+        self._draw_badge(badge, outcome, self._gbadge_font, GAME_BADGE_RADIUS)
         reason = self._greason_font.render(game.reason, True, Colors.text_dim)
         self.window.blit(reason, (badge.right + 14, rect.centery - reason.get_height() // 2))
         you, opp = _game_ko(game, self.nickname)

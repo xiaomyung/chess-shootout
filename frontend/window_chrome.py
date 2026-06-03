@@ -74,6 +74,13 @@ class WindowChrome:
     DOT_GAP = 16
     DOT_MARGIN_RIGHT = 16
     LOGO_SIZE = 20
+    DOT_HIT_PAD = 8
+    LOGO_MARGIN_LEFT = 12
+    WORDMARK_GAP = 9
+    WORDMARK_FONT_PX = 13
+    DOT_HOVER_LIGHTEN = 0.22
+    DOT_GLYPH_DARKEN = 0.74
+    DOT_GLYPH_INSET = 0.55
 
     def __init__(self, window):
         self.window = window
@@ -182,7 +189,7 @@ class WindowChrome:
         order = ("close", "max", "min")
         x = w - self.DOT_MARGIN_RIGHT
         for key in order:
-            rect = pg.Rect(0, 0, self.DOT_RADIUS * 2 + 8, self.HEIGHT)
+            rect = pg.Rect(0, 0, self.DOT_RADIUS * 2 + self.DOT_HIT_PAD, self.HEIGHT)
             rect.centerx = x - self.DOT_RADIUS
             rect.centery = cy
             self._dot_rects[key] = rect
@@ -207,7 +214,8 @@ class WindowChrome:
             return None
 
     def _draw_logo(self):
-        tile = pg.Rect(12, (self.HEIGHT - self.LOGO_SIZE) // 2, self.LOGO_SIZE, self.LOGO_SIZE)
+        tile = pg.Rect(self.LOGO_MARGIN_LEFT, (self.HEIGHT - self.LOGO_SIZE) // 2,
+                       self.LOGO_SIZE, self.LOGO_SIZE)
         if self._logo_surf is None:
             self._logo_surf = self._load_logo()
         if self._logo_surf is not None:
@@ -215,10 +223,10 @@ class WindowChrome:
         else:
             pg.draw.rect(self.window, pg.Color(Colors.accent), tile, border_radius=5)
         if self._wordmark is None:
-            font = get_font(13, bold=True)
+            font = get_font(self.WORDMARK_FONT_PX, bold=True)
             self._wordmark = font.render("CHESS ", True, pg.Color(Colors.white))
             self._wordmark_accent = font.render("SHOOTOUT", True, pg.Color(Colors.accent))
-        tx = tile.right + 9
+        tx = tile.right + self.WORDMARK_GAP
         ty = self.HEIGHT // 2
         wm = self._wordmark
         self.window.blit(wm, (tx, ty - wm.get_height() // 2))
@@ -235,7 +243,7 @@ class WindowChrome:
         for key, rect in self._dot_rects.items():
             base = pg.Color(colors[key])
             hovered = rect.collidepoint(mouse)
-            col = base.lerp(pg.Color(255, 255, 255), 0.22) if hovered else base
+            col = base.lerp(pg.Color(255, 255, 255), self.DOT_HOVER_LIGHTEN) if hovered else base
             self._draw_smooth_dot((rect.centerx, rect.centery), col)
             if hovered:
                 self.window.blit(
@@ -250,12 +258,12 @@ class WindowChrome:
         self.window.blit(dot, (center[0] - self.DOT_RADIUS, center[1] - self.DOT_RADIUS))
 
     def _dot_glyph(self, key, base):
-        dark = base.lerp(pg.Color(0, 0, 0), 0.74)
+        dark = base.lerp(pg.Color(0, 0, 0), self.DOT_GLYPH_DARKEN)
 
         def render(surf, k):
             d = self.DOT_RADIUS * 2 * k
             c = d / 2
-            g = self.DOT_RADIUS * k * 0.55
+            g = self.DOT_RADIUS * k * self.DOT_GLYPH_INSET
             lw = max(int(1.5 * k), 2)
             if key == "min":
                 pg.draw.line(surf, dark, (c - g, c), (c + g, c), lw)

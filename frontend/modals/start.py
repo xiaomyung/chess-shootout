@@ -32,6 +32,20 @@ SIDE_OPTIONS = [
 
 ALL_TIME_VALUES = [value for page in TIME_PAGES for _, value in page]
 
+TIME_NEXT = "__next__"
+TIME_PREV = "__prev__"
+
+NATURAL_BRAND_H = 124
+NATURAL_NICK_H = 64
+NATURAL_MODE_H = 66
+NATURAL_TIME_H = 54
+NATURAL_SIDE_H = 66
+NATURAL_START_H = 48
+NATURAL_GHOST_H = 42
+NATURAL_RECON_H = 68
+NATURAL_SECTION_GAP = 15
+NATURAL_GAP_COUNT = 6
+
 WORDMARK_TOP = "CHESS"
 WORDMARK_BOTTOM = "SHOOTOUT"
 TAGLINE = "PAWNS GET WHAT THEY DESERVE"
@@ -179,7 +193,10 @@ class StartMenu:
     def set_rect(self, rect):
         self._avail = pg.Rect(rect)
         recon = 1 if self.reconnect_available else 0
-        natural = 124 + 64 + 66 + 54 + 66 + 48 + 42 + recon * 68 + 15 * (6 + recon)
+        natural = (NATURAL_BRAND_H + NATURAL_NICK_H + NATURAL_MODE_H + NATURAL_TIME_H
+                   + NATURAL_SIDE_H + NATURAL_START_H + NATURAL_GHOST_H
+                   + recon * NATURAL_RECON_H
+                   + NATURAL_SECTION_GAP * (NATURAL_GAP_COUNT + recon))
         scale = min(1.0, max((rect.height - 44) / natural, 0.5))
         self._scale = scale
         s = scale
@@ -410,8 +427,8 @@ class StartMenu:
     def _time_options(self):
         page = TIME_PAGES[self._time_page]
         if self._time_page == 0:
-            return page + [("→", "__next__")]
-        return page + [("←", "__prev__")]
+            return page + [("→", TIME_NEXT)]
+        return page + [("←", TIME_PREV)]
 
     def _draw_label(self, text, pos):
         self.window.blit(self.label_font.render(text, True, Colors.text_mute), pos)
@@ -550,9 +567,9 @@ class StartMenu:
                 return True
         for key, br in self._time_rects.items():
             if br.collidepoint(pos):
-                if key == "__next__":
+                if key == TIME_NEXT:
                     self._time_page = 1
-                elif key == "__prev__":
+                elif key == TIME_PREV:
                     self._time_page = 0
                 else:
                     self.selected_time_minutes = key

@@ -8,6 +8,10 @@ from frontend.visual.fonts import get_display_font, get_font
 from frontend.visual.widgets import draw_button_row, fit_text_to_rect
 
 
+TITLE_SUB_GAP = 8
+TITLE_TILE_RADIUS = 13
+
+
 def _wrap_words(text, font, max_w, max_lines=3):
     words = text.split()
     lines = []
@@ -87,7 +91,7 @@ class ConfirmModal(BaseModal):
 
         icon_side = max(int(panel_w * 0.12), 40) if self.emoji else 0
         gap_icon = max(int(panel_w * 0.03), 12) if self.emoji else 0
-        gap_title = 8 if sub_lines else 0
+        gap_title = TITLE_SUB_GAP if sub_lines else 0
         block_h = (icon_side + gap_icon + title_surf.get_height()
                    + (gap_title + line_h * len(sub_lines) if sub_lines else 0))
         panel_h = MODAL_RAIL + pad + block_h + max(int(panel_w * 0.05), 18) + btn_h + pad
@@ -105,8 +109,8 @@ class ConfirmModal(BaseModal):
             if self.danger:
                 fill = pg.Color(Colors.result_loss).lerp(pg.Color(Colors.button_hover), 0.84)
                 border = pg.Color(Colors.result_loss).lerp(pg.Color(Colors.modal_bg), 0.6)
-            self.window.blit(rounded_rect_surface(tile.size, 13, fill, border=border,
-                                                  border_width=1), tile.topleft)
+            self.window.blit(rounded_rect_surface(tile.size, TITLE_TILE_RADIUS, fill,
+                                                  border=border, border_width=1), tile.topleft)
             blit_emoji(self.window, self.emoji, tile.center, int(icon_side * 0.62))
             y += icon_side + gap_icon
         self.window.blit(title_surf, (content.centerx - title_surf.get_width() / 2, y))

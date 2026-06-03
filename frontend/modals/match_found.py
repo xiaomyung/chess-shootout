@@ -9,6 +9,11 @@ from frontend.visual.fonts import get_display_font, get_font, get_mono_font
 from frontend.visual.widgets import build_avatar, fit_text_to_rect
 
 
+FLAG_NAME_GAP = 7
+AVATAR_NAME_GAP = 8
+NAME_RATING_GAP = 2
+
+
 def _avatar_colors(side):
     if side in (Colors.white, "white", "w"):
         return (Colors.amber, Colors.accent, Colors.on_accent)
@@ -85,7 +90,8 @@ class MatchFoundModal(BaseModal):
         if vs_surf is None:
             vs_surf = stroked_text(vs_font, "VS", Colors.accent, Colors.outcome_stroke,
                                    max(int(vs_font.get_height() * 0.04), 1))
-        card_h = av + 8 + name_font.get_height() + 2 + rating_font.get_height()
+        card_h = (av + AVATAR_NAME_GAP + name_font.get_height() + NAME_RATING_GAP
+                  + rating_font.get_height())
         vs_block_h = max(card_h, vs_surf.get_height())
         cd_h = cd_font.get_height()
 
@@ -141,20 +147,20 @@ class MatchFoundModal(BaseModal):
         self.window.blit(glyph, (cx - glyph.get_width() / 2,
                                  y + av / 2 - glyph.get_height() / 2))
         flag = self._flag(country, name_font.get_height())
-        flag_w = (flag.get_width() + 7) if flag is not None else 0
+        flag_w = (flag.get_width() + FLAG_NAME_GAP) if flag is not None else 0
         name_surf = name_font.render(name, True, Colors.white)
         name_surf = fit_text_to_rect(
             name_surf, pg.Rect(0, 0, max(side_w - flag_w, 1), name_surf.get_height()),
             padding=0)
-        ny = y + av + 8
+        ny = y + av + AVATAR_NAME_GAP
         gx = cx - (flag_w + name_surf.get_width()) / 2
         if flag is not None:
             self.window.blit(flag, (gx, ny + name_surf.get_height() / 2 - flag.get_height() / 2))
-            gx += flag.get_width() + 7
+            gx += flag.get_width() + FLAG_NAME_GAP
         self.window.blit(name_surf, (gx, ny))
         rating = rating_font.render(self.rating, True, Colors.text_mute)
         self.window.blit(rating, (cx - rating.get_width() / 2,
-                                  ny + name_surf.get_height() + 2))
+                                  ny + name_surf.get_height() + NAME_RATING_GAP))
 
     def handle_click(self, pos):
         return False

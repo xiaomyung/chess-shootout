@@ -10,6 +10,13 @@ from frontend.visual.text_input import TextInput
 from frontend.visual.widgets import draw_button, draw_scroll_thumb
 
 
+ROW_VPAD = 16
+SCROLLBAR_GUTTER = 16
+ROW_FLAG_INSET = 10
+ROW_FLAG_GAP = 12
+ROW_CODE_INSET = 10
+
+
 class CountryPicker(BaseModal):
 
     def __init__(self, window):
@@ -108,7 +115,7 @@ class CountryPicker(BaseModal):
         list_bottom = btn_y - int(pad * 0.5)
         self._list_rect = pg.Rect(r.x + pad, list_top, r.width - 2 * pad,
                                   max(list_bottom - list_top, 1))
-        self._row_h = self.row_font.get_height() + 16
+        self._row_h = self.row_font.get_height() + ROW_VPAD
         self._max_visible = max(self._list_rect.height // self._row_h, 1)
         entries = self._entries()
         max_offset = max(0, len(entries) - self._max_visible)
@@ -118,7 +125,7 @@ class CountryPicker(BaseModal):
     def _draw_list(self, entries):
         self._row_rects = []
         max_offset = max(0, len(entries) - self._max_visible)
-        gutter = 16 if max_offset else 0
+        gutter = SCROLLBAR_GUTTER if max_offset else 0
         content_w = self._list_rect.width - gutter
         prev = self.window.get_clip()
         self.window.set_clip(self._list_rect)
@@ -145,17 +152,18 @@ class CountryPicker(BaseModal):
                 row_rect.topleft)
         elif row_rect.collidepoint(mouse):
             pg.draw.rect(self.window, Colors.button_hover, row_rect, border_radius=8)
-        x = row_rect.x + 10
-        flag = self._flag_for(code, max(int(self._row_h * 0.5), 12))
+        x = row_rect.x + ROW_FLAG_INSET
+        flag_size = max(int(self._row_h * 0.5), 12)
+        flag = self._flag_for(code, flag_size)
         if flag is not None:
             self.window.blit(flag, (x, row_rect.centery - flag.get_height() // 2))
-        x += max(int(self._row_h * 0.5), 12) + 12
+        x += flag_size + ROW_FLAG_GAP
         name_color = Colors.accent if selected else Colors.white
         name_surf = self.row_font.render(label, True, name_color)
         self.window.blit(name_surf, (x, row_rect.centery - name_surf.get_height() // 2))
         if code:
             code_surf = self.code_font.render(code, True, Colors.text_mute)
-            self.window.blit(code_surf, (row_rect.right - 10 - code_surf.get_width(),
+            self.window.blit(code_surf, (row_rect.right - ROW_CODE_INSET - code_surf.get_width(),
                                          row_rect.centery - code_surf.get_height() // 2))
 
     def _pick(self, code):

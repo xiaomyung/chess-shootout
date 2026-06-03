@@ -155,6 +155,13 @@ AUTO_END_GATE_FRACTION = 0.1
 ANIM_MS_DEFAULT = 180
 ANIM_MS_MIN = 140
 ANIM_MS_MAX = 280
+ANIM_MS_PER_SECOND = 0.5
+
+PANEL_WIDTH_RATIO = 0.42
+RESULT_HEIGHT_RATIO = 0.95
+WAIT_HEIGHT_RATIO = 1.6
+MENU_FOOTER_RESERVE = 22
+MIN_MODAL_WIDTH = 360
 
 SAVED_PGN_TOAST_DURATION_MS = 3000
 RESYNC_TIMEOUT_MS = 8000
@@ -181,7 +188,7 @@ PROMOTION_KEYS = {
 def compute_animation_ms(initial_seconds):
     if initial_seconds is None or initial_seconds <= 0:
         return ANIM_MS_DEFAULT
-    return max(ANIM_MS_MIN, min(ANIM_MS_MAX, int(initial_seconds * 0.5)))
+    return max(ANIM_MS_MIN, min(ANIM_MS_MAX, int(initial_seconds * ANIM_MS_PER_SECOND)))
 
 
 log = logging.getLogger("chess.frontend")
@@ -1505,7 +1512,7 @@ class Frontend(OnlineEventsMixin):
         window_width, window_height = self.window.get_size()
         top = WindowChrome.HEIGHT
         avail_height = window_height - top
-        panel_w = min(RIGHT_PANEL_WIDTH, int(window_width * 0.42))
+        panel_w = min(RIGHT_PANEL_WIDTH, int(window_width * PANEL_WIDTH_RATIO))
         board_area_w = max(window_width - panel_w, 200)
 
         stack_factor = 1 + 2 * (STRIP_HEIGHT_RATIO + STRIP_GAP_RATIO)
@@ -1529,15 +1536,16 @@ class Frontend(OnlineEventsMixin):
 
         cell_size = board_size_px / self.board.SIZE
         result_width = min(440, board_size_px * 0.92)
-        result_height = min(int(result_width * 0.95), avail_height - 2 * BOARD_AREA_MARGIN)
+        result_height = min(int(result_width * RESULT_HEIGHT_RATIO),
+                            avail_height - 2 * BOARD_AREA_MARGIN)
         result_rect = pg.Rect(
             board_x + board_size_px / 2 - result_width / 2,
             board_y + board_size_px / 2 - result_height / 2,
             result_width,
             result_height
         )
-        wait_width = max(result_width, 360)
-        wait_height = max(cell_size * 1.6, 200)
+        wait_width = max(result_width, MIN_MODAL_WIDTH)
+        wait_height = max(cell_size * WAIT_HEIGHT_RATIO, 200)
         wait_rect = pg.Rect(
             board_x + board_size_px / 2 - wait_width / 2,
             board_y + board_size_px / 2 - wait_height / 2,
@@ -1545,8 +1553,7 @@ class Frontend(OnlineEventsMixin):
             wait_height,
         )
 
-        footer_reserve = 22
-        usable_menu_h = max(avail_height - footer_reserve, 200)
+        usable_menu_h = max(avail_height - MENU_FOOTER_RESERVE, 200)
         start_width = min(440, window_width - 24)
         start_height = min(max(usable_menu_h - 24, 200), 660)
         start_rect = pg.Rect(
@@ -1565,8 +1572,8 @@ class Frontend(OnlineEventsMixin):
             wide_overlay_height,
         )
 
-        menu_modal_width = min(start_width, max(result_width, 360))
-        menu_modal_height = min(start_height, max(cell_size * 1.6, 200))
+        menu_modal_width = min(start_width, max(result_width, MIN_MODAL_WIDTH))
+        menu_modal_height = min(start_height, max(cell_size * WAIT_HEIGHT_RATIO, 200))
         menu_modal_rect = pg.Rect(
             window_width / 2 - menu_modal_width / 2,
             top + avail_height / 2 - menu_modal_height / 2,

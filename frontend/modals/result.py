@@ -11,6 +11,11 @@ from frontend.visual.fonts import get_font, get_display_font
 BUTTONS = [("New Game", "new_game"), ("Open PGN", "open_pgn"), ("Menu", "menu")]
 ONLINE_BUTTONS = [("Rematch", "rematch"), ("Open PGN", "open_pgn"), ("Menu", "menu")]
 
+SCORE_SEP = "–"
+STRIP_RADIUS = 10
+CARD_RADIUS = 9
+HIGHLIGHT_PAD_RATIO = 0.3
+
 OUTCOME_COLOR = {
     "win": Colors.result_win,
     "loss": Colors.result_loss,
@@ -72,7 +77,7 @@ class ResultMenu(BaseModal):
         if name_a is None or name_b is None:
             self.series = None
         else:
-            self.series = (name_a, name_b, f"{score_a}–{score_b}")
+            self.series = (name_a, name_b, f"{score_a}{SCORE_SEP}{score_b}")
 
     def set_online_mode(self, online):
         self.online_mode = online
@@ -137,14 +142,14 @@ class ResultMenu(BaseModal):
         if not potg:
             return y
         h = max(int(self.rect.height * 0.085), 28)
-        strip = rounded_rect_surface((content.width, h), 10, Colors.potg_bg,
+        strip = rounded_rect_surface((content.width, h), STRIP_RADIUS, Colors.potg_bg,
                                      border=Colors.potg_border, border_width=1)
         self.window.blit(strip, (content.x, y))
-        pad = max(int(h * 0.3), 8)
+        pad = max(int(h * HIGHLIGHT_PAD_RATIO), 8)
         cy = y + h / 2
         label = self.detail_font.render("HIGHLIGHT", True, Colors.amber_hi)
         self.window.blit(label, (content.x + pad, cy - label.get_height() / 2))
-        detail_x = content.x + pad + label.get_width() + max(int(h * 0.3), 8)
+        detail_x = content.x + pad + label.get_width() + max(int(h * HIGHLIGHT_PAD_RATIO), 8)
         detail = self.detail_font.render(potg, True, Colors.white)
         max_w = content.right - pad - detail_x
         if detail.get_width() > max_w > 0:
@@ -180,7 +185,7 @@ class ResultMenu(BaseModal):
             cx = content.x + (i % cols) * (cell_w + gap)
             cy = y + (i // cols) * (cell_h + gap)
             cell = pg.Rect(int(cx), int(cy), int(cell_w), int(cell_h))
-            bg = rounded_rect_surface(cell.size, 9, Colors.surface,
+            bg = rounded_rect_surface(cell.size, CARD_RADIUS, Colors.surface,
                                       border=Colors.button_border, border_width=1)
             self.window.blit(bg, cell.topleft)
             value_surf = self.value_font.render(value, True, Colors.white)

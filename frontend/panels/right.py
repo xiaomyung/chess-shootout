@@ -21,6 +21,11 @@ REVIEW_BUTTONS = [
     [("Menu", "menu"), ("Flip", "flip"), ("?", "help")],
 ]
 
+INFO_HEADER_PAD = 12
+MOVE_PREFIX_CHARS = 5
+MOVE_CELL_PAD = 4
+MOVE_MIN_CELL_CHARS = 4
+
 
 class RightMenu:
 
@@ -40,6 +45,7 @@ class RightMenu:
         self.button_v_pad = 8
         self.moves_font_factor = 24
         self.button_font_factor = 28
+        self.pill_font_factor = 34
 
         self.font = get_font(13, mono=True)
         self.moves_font = get_font(14, bold=True)
@@ -73,8 +79,8 @@ class RightMenu:
         self.moves_font = get_font(
             max(int(rect.width / self.moves_font_factor), 10), bold=True)
         self.button_font = get_font(max(int(rect.width / self.button_font_factor), 10), bold=True)
-        self.pill_font = get_font(max(int(rect.width / 34), 9), bold=True)
-        self.round_font = get_font(max(int(rect.width / 34), 9), bold=True)
+        self.pill_font = get_font(max(int(rect.width / self.pill_font_factor), 9), bold=True)
+        self.round_font = get_font(max(int(rect.width / self.pill_font_factor), 9), bold=True)
 
         p = self.padding
         self.outer_rect = pg.Rect(
@@ -114,7 +120,7 @@ class RightMenu:
     def _info_section_height(self):
         if self.game_info is None:
             return 0
-        header_h = self.pill_font.get_height() + 12
+        header_h = self.pill_font.get_height() + INFO_HEADER_PAD
         lines = self.game_info.get("lines", [])
         return header_h + self._info_line_height() * len(lines) + self.padding
 
@@ -157,7 +163,7 @@ class RightMenu:
 
     def _draw_game_info(self, rect):
         info = self.game_info
-        header_h = self.pill_font.get_height() + 12
+        header_h = self.pill_font.get_height() + INFO_HEADER_PAD
         cx = rect.x
         cy = rect.y + header_h // 2
         mode = info.get("mode")
@@ -245,10 +251,10 @@ class RightMenu:
         self._move_cell_hits = []
 
         char_w, _ = self.font.size("0")
-        prefix_w = char_w * 5
-        cell_pad = 4
+        prefix_w = char_w * MOVE_PREFIX_CHARS
+        cell_pad = MOVE_CELL_PAD
         inner_w = rect.width - 2 * self.padding
-        cell_w = max((inner_w - prefix_w) // 2 - cell_pad, char_w * 4)
+        cell_w = max((inner_w - prefix_w) // 2 - cell_pad, char_w * MOVE_MIN_CELL_CHARS)
 
         for i, pair_idx in enumerate(range(start, end)):
             number, white_entry, black_entry = pairs[pair_idx]

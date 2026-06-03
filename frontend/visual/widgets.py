@@ -14,6 +14,10 @@ SCROLL_THUMB_RIGHT_OFFSET = 4
 SCROLL_THUMB_MIN_HEIGHT = 18
 BUTTON_LABEL_PADDING_PX = 6
 BUTTON_RADIUS = 8
+PILL_PAD_Y = 6
+SEGMENT_RADIUS = 8
+SEGMENT_INNER_RADIUS = 6
+CHIP_RADIUS = 7
 
 
 def build_shell(w, h, winking=False):
@@ -61,7 +65,7 @@ def draw_pill(window, text, x, cy, font, text_color=Colors.amber_hi,
     surf = font.render(text, True, text_color)
     pad_x = max(int(surf.get_height() * 0.6), 5)
     w = surf.get_width() + 2 * pad_x
-    h = surf.get_height() + 6
+    h = surf.get_height() + PILL_PAD_Y
     chip = rounded_rect_surface((w, h), h // 2, bg,
                                 border=border, border_width=1)
     window.blit(chip, (x, round(cy - h / 2)))
@@ -258,7 +262,7 @@ def draw_segmented(window, rect, options, selected_key, font, gap=3):
     n = len(options)
     if n == 0 or rect.width <= gap * (n + 1):
         return {}
-    window.blit(rounded_rect_surface(rect.size, 8, Colors.surface_inset,
+    window.blit(rounded_rect_surface(rect.size, SEGMENT_RADIUS, Colors.surface_inset,
                                      border=Colors.button_border, border_width=1),
                 rect.topleft)
     inner = rect.inflate(-2 * gap, -2 * gap)
@@ -267,7 +271,8 @@ def draw_segmented(window, rect, options, selected_key, font, gap=3):
     for i, (label, key) in enumerate(options):
         sr = pg.Rect(round(inner.x + i * (seg_w + gap)), inner.y, round(seg_w), inner.height)
         if key == selected_key:
-            window.blit(rounded_rect_surface(sr.size, 6, Colors.accent), sr.topleft)
+            window.blit(rounded_rect_surface(sr.size, SEGMENT_INNER_RADIUS, Colors.accent),
+                        sr.topleft)
             color = Colors.on_accent
         elif sr.collidepoint(pg.mouse.get_pos()):
             color = Colors.white
@@ -306,7 +311,7 @@ def draw_chip_row(window, rect, options, selected_key, font, gap=5, locked=False
             bg, border, color = Colors.button_hover, Colors.button_border, Colors.white
         else:
             bg, border, color = Colors.dark_menu, Colors.button_border, Colors.text_dim
-        window.blit(rounded_rect_surface(cr.size, 7, bg, border=border, border_width=1),
+        window.blit(rounded_rect_surface(cr.size, CHIP_RADIUS, bg, border=border, border_width=1),
                     cr.topleft)
         if label == "∞":
             glyph = infinity_surface(int(cr.height * 0.42), color)

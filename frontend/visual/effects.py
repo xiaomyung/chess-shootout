@@ -46,7 +46,24 @@ TAKEOVER_ANIM_MS = 1500
 TAKEOVER_TOTAL_MS = TAKEOVER_PAUSE_MS + TAKEOVER_ANIM_MS
 TAKEOVER_BG_ALPHA = 224
 TAKEOVER_BG_SETTLE = 140
+TAKEOVER_MAIN_DELAY_MS = 80
+TAKEOVER_SUB_DELAY_MS = 300
 SURRENDER_FLAG = "🏳️"
+
+GUN_PIVOT_RISE_FRAC = 0.05
+PROJECTILE_REF_CELL = 104.0
+PROJECTILE_TRAVEL_FRAC = 0.85
+PROJECTILE_TRAVEL_MIN = 90
+PROJECTILE_TRAVEL_MAX = 300
+
+RAGDOLL_LAUNCH_FRAC = 0.45
+RAGDOLL_LAUNCH_X_FRAC = 1.6
+RAGDOLL_LAUNCH_Y_FRAC = -0.65
+RAGDOLL_LAUNCH_ROT = 120
+RAGDOLL_FALL_X_FRAC = 1.2
+RAGDOLL_FALL_Y_FRAC = 2.65
+RAGDOLL_FALL_ROT = 420
+RAGDOLL_FALL_SHRINK = 0.3
 
 STREAK_LABELS = {2: "DOUBLE KILL", 3: "TRIPLE KILL", 4: "QUADRA KILL",
                  5: "RAMPAGE", 6: "UNSTOPPABLE", 7: "GODLIKE"}
@@ -134,7 +151,7 @@ class EffectManager:
 
     def _pivot(self, from_sq, cell):
         cx, cy = self._center(from_sq)
-        return (cx, cy - cell * 0.05)
+        return (cx, cy - cell * GUN_PIVOT_RISE_FRAC)
 
     def _muzzle(self, weapon, from_sq, victim_sq, cell):
         aim = self._aim(from_sq, victim_sq)
@@ -164,7 +181,9 @@ class EffectManager:
         fire_at = now_ms + DRAW_MS + AIM_MS
         fx, fy = self.geom(from_sq)
         tx, ty = self.geom(victim_sq)
-        travel = max(90, min(int(math.hypot(tx - fx, ty - fy) * 0.85), 300))
+        travel = max(PROJECTILE_TRAVEL_MIN,
+                     min(int(math.hypot(tx - fx, ty - fy) * PROJECTILE_TRAVEL_FRAC),
+                         PROJECTILE_TRAVEL_MAX))
         self.captures.append({
             "start": now_ms, "fire_at": fire_at, "impact_at": fire_at + travel,
             "fired": False, "gun": gun, "weapon": weapon,
@@ -358,7 +377,7 @@ class EffectManager:
             window.blit(c["attacker"], c["attacker"].get_rect(center=(fx, fy)))
         weapon = c["weapon"]
         aim = math.atan2(ty - fy, tx - fx)
-        pivot = (fx, fy - c["cell"] * 0.05)
+        pivot = (fx, fy - c["cell"] * GUN_PIVOT_RISE_FRAC)
         t = now - c["start"]
         if t < DRAW_MS:
             gunfx.draw_flourish(window, weapon["gun"], weapon["grip"], pivot, aim,
@@ -420,7 +439,7 @@ class EffectManager:
         dist = math.hypot(dx, dy) or 1.0
         ux, uy = dx / dist, dy / dist
         spec = gunfx.gun_spec(p["gun"])
-        f = p["cell"] / 104.0
+        f = p["cell"] / PROJECTILE_REF_CELL
         length = max(spec.length * f, 6)
         size = max(spec.size * f, 2)
         bx, by = hx - ux * length, hy - uy * length
@@ -503,16 +522,18 @@ class EffectManager:
             return
         d = p["dir"]
         w = p["surf"].get_width()
-        if prog < 0.45:
-            t = prog / 0.45
-            tx, ty, rot, alpha, scl = d * 1.6 * w * t, -0.65 * w * t, d * 120 * t, 255, 1.0
+        if prog < RAGDOLL_LAUNCH_FRAC:
+            t = prog / RAGDOLL_LAUNCH_FRAC
+            tx = d * RAGDOLL_LAUNCH_X_FRAC * w * t
+            ty = RAGDOLL_LAUNCH_Y_FRAC * w * t
+            rot, alpha, scl = d * RAGDOLL_LAUNCH_ROT * t, 255, 1.0
         else:
-            t = (prog - 0.45) / 0.55
-            tx = d * w * (1.6 + 1.2 * t)
-            ty = w * (-0.65 + 2.65 * t)
-            rot = d * (120 + 420 * t)
+            t = (prog - RAGDOLL_LAUNCH_FRAC) / (1.0 - RAGDOLL_LAUNCH_FRAC)
+            tx = d * w * (RAGDOLL_LAUNCH_X_FRAC + RAGDOLL_FALL_X_FRAC * t)
+            ty = w * (RAGDOLL_LAUNCH_Y_FRAC + RAGDOLL_FALL_Y_FRAC * t)
+            rot = d * (RAGDOLL_LAUNCH_ROT + RAGDOLL_FALL_ROT * t)
             alpha = int(255 * (1 - t))
-            scl = 1.0 - 0.3 * t
+            scl = 1.0 - RAGDOLL_FALL_SHRINK * t
         img = pg.transform.rotozoom(p["surf"], rot, max(scl, 0.1))
         if alpha < 255:
             img = img.copy()
@@ -528,7 +549,7 @@ class EffectManager:
         weapon = g["weapon"]
         fx, fy = self._center(g["from_sq"])
         aim = self._aim(g["from_sq"], g["victim_sq"])
-        pivot = (fx, fy - g["cell"] * 0.05)
+        pivot = (fx, fy - g["cell"] * GUN_PIVOT_RISE_FRAC)
         if t < DRAW_MS:
             gunfx.draw_flourish(window, weapon["gun"], weapon["grip"], pivot, aim,
                                 t / DRAW_MS, gunfx.GUN_DRAW_SPINS_LAND)
@@ -540,7 +561,7 @@ class EffectManager:
         tm = min(t * 4.0, 1.0)
         cell = d["cell"]
         x = bx + d["vx"] * cell * tm
-        y = (by - cell * 0.05) - cell * 0.25 * tm + d["fall"] * (tm * tm)
+        y = (by - cell * GUN_PIVOT_RISE_FRAC) - cell * 0.25 * tm + d["fall"] * (tm * tm)
         return x, y, d["spin"] * tm, int(255 * (1.0 - t))
 
     def _draw_gun_drop(self, window, d, now):
@@ -568,7 +589,7 @@ class EffectManager:
         if r < 1 or alpha <= 0:
             return
         layer = pg.Surface((2 * r + 4, 2 * r + 4), pg.SRCALPHA)
-        pg.draw.circle(layer, (7, 9, 12, max(alpha, 0)), (r + 2, r + 2), r)
+        pg.draw.circle(layer, (*pg.Color(Colors.bullet_hole)[:3], max(alpha, 0)), (r + 2, r + 2), r)
         cx, cy = self._center(h["victim_sq"])
         window.blit(layer, (cx - r - 2, cy - r - 2))
 
@@ -726,7 +747,7 @@ class EffectManager:
         bg_in = min(t / TAKEOVER_BG_MS, 1.0)
         bg_alpha = int((TAKEOVER_BG_ALPHA - (TAKEOVER_BG_ALPHA - TAKEOVER_BG_SETTLE) * out) * bg_in)
         overlay = pg.Surface((w, h), pg.SRCALPHA)
-        overlay.fill((10, 7, 12, max(bg_alpha, 0)))
+        overlay.fill((*pg.Color(Colors.takeover_bg)[:3], max(bg_alpha, 0)))
         window.blit(overlay, (0, 0))
         if tk["h"] != h:
             self._build_takeover_surfaces(tk, w, h)
@@ -740,7 +761,7 @@ class EffectManager:
         bar_alpha = int(255 * fade)
         self._blit_alpha(window, bar, (center_x - off, cy - gap - bar.get_height() // 2), bar_alpha)
         self._blit_alpha(window, bar, (center_x + off, cy + gap + sub.get_height()), bar_alpha)
-        md = t - 80
+        md = t - TAKEOVER_MAIN_DELAY_MS
         if md < 0:
             m_scale, m_alpha = 2.4, 0
         elif md < TAKEOVER_MAIN_MS:
@@ -756,7 +777,8 @@ class EffectManager:
             img = img.copy()
             img.fill((255, 255, 255, max(m_alpha, 0)), special_flags=pg.BLEND_RGBA_MULT)
         window.blit(img, img.get_rect(center=(cx, cy)))
-        s_alpha = int(min(max(t - 300, 0) / 300.0, 1.0) * 255 * fade)
+        s_alpha = int(min(max(t - TAKEOVER_SUB_DELAY_MS, 0) / float(TAKEOVER_SUB_DELAY_MS),
+                          1.0) * 255 * fade)
         if s_alpha > 0:
             s = sub.copy()
             s.fill((255, 255, 255, s_alpha), special_flags=pg.BLEND_RGBA_MULT)

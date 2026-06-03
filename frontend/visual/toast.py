@@ -9,6 +9,7 @@ FADE_OUT_MS = 250
 TOP_OFFSET_PX = 12
 PADDING_X = 16
 PADDING_Y = 8
+SPARK_GAP_PX = 6
 
 
 class Toast:
@@ -60,7 +61,7 @@ class Toast:
         border_color = pg.Color(Colors.accent_hi if hype else Colors.button_border)
         text_surf = self.font.render(label, True, text_color)
         spark_d = text_surf.get_height() // 2 if hype else 0
-        spark_gap = spark_d + 6 if hype else 0
+        spark_gap = spark_d + SPARK_GAP_PX if hype else 0
         toast_w = text_surf.get_width() + 2 * PADDING_X + spark_gap
         toast_h = text_surf.get_height() + 2 * PADDING_Y
         radius = toast_h // 2

@@ -5,6 +5,7 @@ from frontend.visual.fonts import get_font, get_mono_font
 
 CURSOR_BLINK_MS = 530
 DOUBLE_CLICK_MS = 400
+DOUBLE_CLICK_PX = 6
 
 
 class TextInput:
@@ -147,7 +148,7 @@ class TextInput:
         now = pg.time.get_ticks()
         shift = pg.key.get_mods() & pg.KMOD_SHIFT
         double = (now - self._last_click_ms < DOUBLE_CLICK_MS
-                  and abs(pos[0] - self._last_click_x) < 6)
+                  and abs(pos[0] - self._last_click_x) < DOUBLE_CLICK_PX)
         self._last_click_ms = now
         self._last_click_x = pos[0]
         if double:

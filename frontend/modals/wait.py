@@ -14,6 +14,11 @@ RADAR_SWEEP_MS = 1400
 RADAR_PING_MS = 1600
 _SWEEP_CACHE = {}
 
+PILL_VPAD = 12
+PILL_INSET = 14
+PILL_GAP = 8
+PILL_HPAD = 28
+
 
 def _radar_sweep(size, color):
     key = (size, color)
@@ -117,8 +122,8 @@ class WaitModal(BaseModal):
             f"elapsed {format_countdown(self.elapsed)}", True, Colors.text_mute)
         mode = mode_font.render(self.mode_label.upper(), True, Colors.amber_hi)
         tc = tc_font.render(self.tc_text, True, Colors.white)
-        pill_h = max(mode.get_height(), tc.get_height()) + 12
-        pill_w = mode.get_width() + 8 + tc.get_width() + 28
+        pill_h = max(mode.get_height(), tc.get_height()) + PILL_VPAD
+        pill_w = mode.get_width() + PILL_GAP + tc.get_width() + PILL_HPAD
 
         g = max(int(panel_w * 0.03), 12)
         g2 = max(int(panel_w * 0.012), 5)
@@ -145,8 +150,9 @@ class WaitModal(BaseModal):
         px = cx - pill_w / 2
         self.window.blit(pill, (px, y))
         pcy = y + pill_h / 2
-        self.window.blit(mode, (px + 14, pcy - mode.get_height() / 2))
-        self.window.blit(tc, (px + 14 + mode.get_width() + 8, pcy - tc.get_height() / 2))
+        self.window.blit(mode, (px + PILL_INSET, pcy - mode.get_height() / 2))
+        self.window.blit(tc, (px + PILL_INSET + mode.get_width() + PILL_GAP,
+                              pcy - tc.get_height() / 2))
         y += pill_h + g2
         self.window.blit(elapsed, (cx - elapsed.get_width() / 2, y))
 

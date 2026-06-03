@@ -49,6 +49,16 @@ _TYPE_LABELS = {
     "game": "Local",
 }
 
+PGN_WHITE_WIN = "1-0"
+PGN_BLACK_WIN = "0-1"
+PGN_DRAW = "1/2-1/2"
+PGN_UNFINISHED = "*"
+
+MINUTE = 60
+HOUR = 3600
+DAY = 86400
+WEEK = 604800
+
 
 def parse_pgn_headers(text):
     headers = {}
@@ -69,9 +79,9 @@ def termination_reason(result_code, termination, last_san):
         return "Checkmate"
     if termination == "Time forfeit":
         return "Flagged"
-    if result_code in ("1-0", "0-1"):
+    if result_code in (PGN_WHITE_WIN, PGN_BLACK_WIN):
         return "Resigned"
-    if result_code == "1/2-1/2":
+    if result_code == PGN_DRAW:
         return "Draw"
     return "Unfinished"
 
@@ -92,15 +102,15 @@ def time_category(time_control_text):
 
 def format_relative_time(timestamp, now):
     delta = max(now - timestamp, 0)
-    if delta < 60:
+    if delta < MINUTE:
         return "just now"
-    if delta < 3600:
-        return f"{int(delta // 60)}m ago"
-    if delta < 86400:
-        return f"{int(delta // 3600)}h ago"
-    if delta < 172800:
+    if delta < HOUR:
+        return f"{int(delta // MINUTE)}m ago"
+    if delta < DAY:
+        return f"{int(delta // HOUR)}h ago"
+    if delta < 2 * DAY:
         return "Yesterday"
-    if delta < 604800:
+    if delta < WEEK:
         return datetime.fromtimestamp(timestamp).strftime("%a")
     return datetime.fromtimestamp(timestamp).strftime("%Y.%m.%d")
 
@@ -120,7 +130,7 @@ def parse_pgn(text):
             break
         body = new_body
 
-    result = "*"
+    result = PGN_UNFINISHED
     result_match = _RESULT_RE.search(body)
     if result_match:
         result = result_match.group(1)
@@ -197,25 +207,25 @@ def summarize_pgn_file(path, text, mtime, filename=None):
         time_control=time_control,
         white=headers.get("White", "?"),
         black=headers.get("Black", "?"),
-        result_code=headers.get("Result", "*"),
+        result_code=headers.get("Result", PGN_UNFINISHED),
         sort_key=sort_key,
         match_id=extract_csmatchid(headers),
         white_captures=sum(1 for move in parsed.moves[0::2] if "x" in move),
         black_captures=sum(1 for move in parsed.moves[1::2] if "x" in move),
-        reason=termination_reason(headers.get("Result", "*"),
+        reason=termination_reason(headers.get("Result", PGN_UNFINISHED),
                                   headers.get("Termination"), last_san),
         category=time_category(time_control),
     )
 
 
-_SPECTATOR_SYMBOLS = {"1-0": "W", "0-1": "B"}
+_SPECTATOR_SYMBOLS = {PGN_WHITE_WIN: "W", PGN_BLACK_WIN: "B"}
 
 
 def result_mark(result_code, white, black, nickname):
     if nickname and nickname == white:
-        won, lost = "1-0", "0-1"
+        won, lost = PGN_WHITE_WIN, PGN_BLACK_WIN
     elif nickname and nickname == black:
-        won, lost = "0-1", "1-0"
+        won, lost = PGN_BLACK_WIN, PGN_WHITE_WIN
     else:
         return _SPECTATOR_SYMBOLS.get(result_code, "="), Colors.result_neutral
     if result_code == won:

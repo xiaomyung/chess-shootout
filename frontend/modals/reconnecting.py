@@ -15,6 +15,15 @@ SPINNER_STROKE = 3
 SPINNER_GAP_DEG = 70
 SPIN_MS = 1000
 
+REF_DIAG = 480.0
+SPINNER_REF = 56
+HEADING_REF = 26
+SUB_REF = 13
+COUNTDOWN_REF = 30
+BUTTON_REF = 15
+GAP_REF = 16
+BUTTON_HEIGHT_REF = 46
+
 
 def _ring_surface(size, color, angle_deg):
     def render(surf, k):
@@ -72,19 +81,19 @@ class ReconnectingModal(BaseModal):
         scrim.fill(pg.Color(Colors.overlay_scrim))
         self.window.blit(scrim, rect.topleft)
 
-        scale = min(1.0, min(rect.width, rect.height) / 480.0)
-        spinner = max(int(56 * scale), 30)
-        heading_font = get_display_font(max(int(26 * scale), 16))
-        sub_font = get_font(max(int(13 * scale), 11), bold=False)
-        cd_font = get_mono_font(max(int(30 * scale), 18), bold=True)
-        button_font = get_font(max(int(15 * scale), 12), bold=True)
+        scale = min(1.0, min(rect.width, rect.height) / REF_DIAG)
+        spinner = max(int(SPINNER_REF * scale), 30)
+        heading_font = get_display_font(max(int(HEADING_REF * scale), 16))
+        sub_font = get_font(max(int(SUB_REF * scale), 11), bold=False)
+        cd_font = get_mono_font(max(int(COUNTDOWN_REF * scale), 18), bold=True)
+        button_font = get_font(max(int(BUTTON_REF * scale), 12), bold=True)
 
         heading = heading_font.render("RECONNECTING…", True, Colors.white)
         sub = sub_font.render("Hang tight, restoring your game", True, Colors.text_dim)
         cd = cd_font.render(format_countdown(self._remaining()), True, Colors.amber_hi)
 
-        g = max(int(16 * scale), 8)
-        btn_h = max(int(46 * scale), 30)
+        g = max(int(GAP_REF * scale), 8)
+        btn_h = max(int(BUTTON_HEIGHT_REF * scale), 30)
         total = (spinner + g + heading.get_height() + g // 2 + sub.get_height()
                  + g + cd.get_height() + g + btn_h)
         y = rect.centery - total / 2
