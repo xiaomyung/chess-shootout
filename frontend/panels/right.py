@@ -144,11 +144,11 @@ class RightMenu:
     INNER_RADIUS = 8
 
     def draw_menu(self):
-        pg.draw.rect(self.window, Colors.dark_menu, self.outer_rect,
+        pg.draw.rect(self.window, Colors.surface, self.outer_rect,
                      border_radius=self.OUTER_RADIUS)
         if self.game_info is not None and self.info_rect.height > 0:
             self._draw_game_info(self.info_rect)
-        pg.draw.rect(self.window, Colors.surface_inset, self.moves_rect,
+        pg.draw.rect(self.window, Colors.surface_raised, self.moves_rect,
                      border_radius=self.INNER_RADIUS)
         self._draw_moves(self.moves_rect)
         self._draw_scroll_indicator(self.moves_rect)
@@ -172,14 +172,14 @@ class RightMenu:
             cx = self._draw_mode_pill(mode.upper(), cx, cy) + 10
         tc = info.get("time_control")
         if tc:
-            tc_surf = self.font.render(tc, True, Colors.white)
+            tc_surf = self.font.render(tc, True, Colors.text)
             self.window.blit(tc_surf, (cx, cy - tc_surf.get_height() / 2))
             cx += tc_surf.get_width() + 10
         rnd = info.get("round")
         if rnd:
-            rnd_surf = self.round_font.render(f"ROUND {rnd}", True, Colors.text_mute)
+            rnd_surf = self.round_font.render(f"ROUND {rnd}", True, Colors.text_muted)
             sep_x = rect.right - rnd_surf.get_width() - 12
-            pg.draw.line(self.window, Colors.button_border,
+            pg.draw.line(self.window, Colors.border,
                          (sep_x, cy - rnd_surf.get_height() // 2),
                          (sep_x, cy + rnd_surf.get_height() // 2))
             self.window.blit(rnd_surf, (rect.right - rnd_surf.get_width(),
@@ -265,7 +265,7 @@ class RightMenu:
             row_y = rect.y + self.padding + i * line_h
             row_x = rect.x + self.padding
 
-            prefix_surf = self.font.render(f"{number:>3}.", True, Colors.text_mute)
+            prefix_surf = self.font.render(f"{number:>3}.", True, Colors.text_muted)
             self.window.blit(prefix_surf, (row_x, row_y + (line_h - prefix_surf.get_height()) // 2))
 
             white_x = row_x + prefix_w
@@ -291,9 +291,9 @@ class RightMenu:
 
     def _draw_move_cell(self, rect, entry, active):
         if active:
-            pg.draw.rect(self.window, Colors.button_pressed, rect, border_radius=4)
+            pg.draw.rect(self.window, Colors.surface_active, rect, border_radius=4)
             pg.draw.rect(self.window, Colors.accent, rect, width=1, border_radius=4)
-        color = Colors.white if active else Colors.text_dim
+        color = Colors.text if active else Colors.text_dim
         surf = self.moves_font.render(entry.san, True, color)
         self.window.blit(surf, (rect.x + 4, rect.centery - surf.get_height() / 2))
 

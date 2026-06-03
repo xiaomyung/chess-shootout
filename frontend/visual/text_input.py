@@ -255,9 +255,9 @@ class TextInput:
         return (pg.time.get_ticks() // CURSOR_BLINK_MS) % 2 == 0
 
     def draw(self):
-        bg = self.bg if self.bg is not None else Colors.light_grey_menu
+        bg = self.bg if self.bg is not None else Colors.surface_raised
         pg.draw.rect(self.window, bg, self.rect, border_radius=self.radius)
-        border_color = Colors.accent if self._focused else Colors.button_border
+        border_color = Colors.accent if self._focused else Colors.border
         border_width = 2 if self._focused else 1
         pg.draw.rect(self.window, border_color, self.rect, border_width,
                      border_radius=self.radius)
@@ -296,14 +296,14 @@ class TextInput:
             band.fill(pg.Color(Colors.text_selection))
             self.window.blit(band, (sx, cy - glyph_h / 2))
         if self._text:
-            surf = self.font.render(self._text, True, Colors.white)
+            surf = self.font.render(self._text, True, Colors.text)
             self.window.blit(surf, (base_x, cy - surf.get_height() / 2))
         elif not self._focused:
-            surf = self.font.render(self.placeholder, True, Colors.button_border)
+            surf = self.font.render(self.placeholder, True, Colors.border)
             self.window.blit(surf, (self.rect.x + self.padding, cy - surf.get_height() / 2))
         if self._cursor_visible():
             cx = base_x + cursor_x
-            pg.draw.line(self.window, Colors.white,
+            pg.draw.line(self.window, Colors.text,
                          (cx, cy - glyph_h / 2), (cx, cy + glyph_h / 2), 2)
         self.window.set_clip(prev_clip)
 

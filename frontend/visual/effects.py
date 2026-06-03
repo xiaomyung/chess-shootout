@@ -622,7 +622,7 @@ class EffectManager:
         return surf, ink_bottom
 
     def _build_callout_surface(self, text, sub, size_px, fill, glow):
-        main, ink_bottom = self._build_text_fx(text, size_px, fill, Colors.callout_stroke, glow)
+        main, ink_bottom = self._build_text_fx(text, size_px, fill, Colors.outcome_stroke, glow)
         if not sub:
             return main
         sub_font = get_font(max(int(size_px * 0.17), 11), bold=True, family=SANS)
@@ -715,8 +715,8 @@ class EffectManager:
 
     def _build_takeover_surfaces(self, tk, w, h):
         main_size = max(int(h * 0.22), 36)
-        tk["main"], _ = self._build_text_fx(tk["reason"], main_size, Colors.white,
-                                            Colors.callout_stroke, Colors.accent_glow)
+        tk["main"], _ = self._build_text_fx(tk["reason"], main_size, Colors.text,
+                                            Colors.outcome_stroke, Colors.accent_glow)
         sub_font = get_font(max(int(h * 0.042), 16), bold=True, family=SANS)
         tk["sub"] = sub_font.render((tk["winner"] + " WINS").upper(), True,
                                     pg.Color(Colors.amber_hi))

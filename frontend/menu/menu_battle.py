@@ -828,7 +828,7 @@ class MenuBattle:
                 img.set_alpha(alpha)
             window.blit(img, (feet_x - img.get_width() / 2, feet_y - img.get_height()))
         else:
-            color = Colors.white if ent["kind"] == "queen" else Colors.text_dim
+            color = Colors.text if ent["kind"] == "queen" else Colors.text_dim
             pg.draw.circle(window, color, (int(feet_x), int(feet_y - sprite_h / 2)),
                            int(sprite_h * 0.32))
         if not ent.get("dying"):
@@ -920,7 +920,7 @@ class MenuBattle:
             pg.draw.line(layer, (*rgb, 90), tail, head, max(int(size * 1.6), 3))
             pg.draw.line(layer, (*rgb, 255), tail, head, max(int(size * 0.7), 2))
         pg.draw.circle(layer, (*rgb, 255), (int(head[0]), int(head[1])), int(size / 2) + 1)
-        pg.draw.circle(layer, (*pg.Color(Colors.white)[:3], 235),
+        pg.draw.circle(layer, (*pg.Color(Colors.text)[:3], 235),
                        (int(head[0]), int(head[1])), max(int(size / 3), 1))
         window.blit(layer, (minx, miny))
 

@@ -81,7 +81,7 @@ def draw_series_chip(window, center, name_a, name_b, score, name_font, score_fon
     h = max(a.get_height(), b.get_height(), sc.get_height()) + 2 * pad_y
     w = a.get_width() + sc.get_width() + b.get_width() + 2 * gap + 2 * pad_x
     chip = rounded_rect_surface((w, h), h // 2, Colors.surface,
-                                border=Colors.button_border, border_width=1)
+                                border=Colors.border, border_width=1)
     x0 = round(center[0] - w / 2)
     y0 = round(center[1] - h / 2)
     window.blit(chip, (x0, y0))
@@ -114,13 +114,13 @@ def _hover_state(rect):
 
 def _button_bg(rect, force_pressed=False, disabled=False):
     if disabled:
-        return Colors.dark_menu, Colors.footer_text
+        return Colors.surface, Colors.text_muted
     hovered, pressed = _hover_state(rect)
     if force_pressed or pressed:
-        return Colors.button_pressed, Colors.white
+        return Colors.surface_active, Colors.text
     if hovered:
-        return Colors.button_hover, Colors.white
-    return Colors.light_grey_menu, Colors.text_dim
+        return Colors.surface_hover, Colors.text
+    return Colors.surface_raised, Colors.text_dim
 
 
 def draw_button(window, rect, label, font, force_pressed=False, disabled=False,
@@ -132,7 +132,7 @@ def draw_button(window, rect, label, font, force_pressed=False, disabled=False,
         border = bg
     else:
         bg, text_color = _button_bg(rect, force_pressed or selected, disabled)
-        border = Colors.accent if (selected and not disabled) else Colors.button_border
+        border = Colors.accent if (selected and not disabled) else Colors.border
     window.blit(rounded_rect_surface(rect.size, BUTTON_RADIUS, bg, border=border,
                                      border_width=1), rect.topleft)
     text = fit_text_to_rect(font.render(label, True, text_color), rect)
@@ -144,18 +144,18 @@ def draw_button(window, rect, label, font, force_pressed=False, disabled=False,
 
 def draw_icon_button(window, rect, icon_fn, force_pressed=False, disabled=False, muted=False):
     if muted and not disabled:
-        pg.draw.rect(window, Colors.button_pressed, rect, border_radius=BUTTON_RADIUS)
+        pg.draw.rect(window, Colors.surface_active, rect, border_radius=BUTTON_RADIUS)
         pg.draw.rect(window, Colors.accent, rect, 1, border_radius=BUTTON_RADIUS)
     elif not disabled:
         hovered, pressed = _hover_state(rect)
         if force_pressed or pressed:
-            bg = Colors.button_pressed
+            bg = Colors.surface_active
         elif hovered:
-            bg = Colors.button_hover
+            bg = Colors.surface_hover
         else:
-            bg = Colors.light_grey_menu
+            bg = Colors.surface_raised
         pg.draw.rect(window, bg, rect, border_radius=BUTTON_RADIUS)
-        pg.draw.rect(window, Colors.button_border, rect, 1, border_radius=BUTTON_RADIUS)
+        pg.draw.rect(window, Colors.border, rect, 1, border_radius=BUTTON_RADIUS)
     icon_fn(window, rect)
 
 
@@ -171,14 +171,14 @@ def draw_gear(window, rect):
             a = math.tau * i / teeth
             dx, dy = math.cos(a), math.sin(a)
             px, py = -dy, dx
-            pg.draw.polygon(surf, Colors.white, [
+            pg.draw.polygon(surf, Colors.text, [
                 (cx + dx * r0 + px * hw_base, cy + dy * r0 + py * hw_base),
                 (cx + dx * r0 - px * hw_base, cy + dy * r0 - py * hw_base),
                 (cx + dx * r1 - px * hw_tip, cy + dy * r1 - py * hw_tip),
                 (cx + dx * r1 + px * hw_tip, cy + dy * r1 + py * hw_tip),
             ])
         hole_r = r * 0.40
-        pg.draw.circle(surf, Colors.white, (int(cx), int(cy)), int(r), width=int(r - hole_r))
+        pg.draw.circle(surf, Colors.text, (int(cx), int(cy)), int(r), width=int(r - hole_r))
 
     window.blit(supersample((max(rect.width, 1), max(rect.height, 1)), render, scale=8),
                 rect.topleft)
@@ -204,7 +204,7 @@ def draw_button_row(window, rect, buttons, font, gap, disabled_keys=None,
 
 def draw_toggle(window, rect, fraction):
     fraction = max(0.0, min(1.0, fraction))
-    track = pg.Color(Colors.button_pressed).lerp(pg.Color(Colors.accent), fraction)
+    track = pg.Color(Colors.surface_active).lerp(pg.Color(Colors.accent), fraction)
 
     def render(surf, k):
         w, h = surf.get_size()
@@ -212,7 +212,7 @@ def draw_toggle(window, rect, fraction):
         pad = max(int(h * 0.16), 2)
         knob_d = h - 2 * pad
         knob_x = pad + (w - 2 * pad - knob_d) * fraction
-        pg.draw.circle(surf, pg.Color(Colors.white),
+        pg.draw.circle(surf, pg.Color(Colors.text),
                        (int(knob_x + knob_d / 2), h // 2), int(knob_d / 2))
     window.blit(supersample(rect.size, render, scale=6), rect.topleft)
 
@@ -221,8 +221,8 @@ def draw_segmented(window, rect, options, selected_key, font, gap=3):
     n = len(options)
     if n == 0 or rect.width <= gap * (n + 1):
         return {}
-    window.blit(rounded_rect_surface(rect.size, SEGMENT_RADIUS, Colors.surface_inset,
-                                     border=Colors.button_border, border_width=1),
+    window.blit(rounded_rect_surface(rect.size, SEGMENT_RADIUS, Colors.surface_raised,
+                                     border=Colors.border, border_width=1),
                 rect.topleft)
     inner = rect.inflate(-2 * gap, -2 * gap)
     seg_w = (inner.width - gap * (n - 1)) / n
@@ -234,7 +234,7 @@ def draw_segmented(window, rect, options, selected_key, font, gap=3):
                         sr.topleft)
             color = Colors.on_accent
         elif sr.collidepoint(pg.mouse.get_pos()):
-            color = Colors.white
+            color = Colors.text
         else:
             color = Colors.text_dim
         if label == "∞":
@@ -260,16 +260,16 @@ def draw_chip_row(window, rect, options, selected_key, font, gap=5, locked=False
         on = (not is_nav) and key == selected_key
         hovered = (not locked) and cr.collidepoint(mouse)
         if locked:
-            bg, border = Colors.dark_menu, Colors.button_border
-            color = Colors.text_mute if on else Colors.footer_text
+            bg, border = Colors.surface, Colors.border
+            color = Colors.text_muted
         elif on:
-            bg, border, color = Colors.surface_inset, Colors.accent, Colors.white
+            bg, border, color = Colors.surface_raised, Colors.accent, Colors.text
         elif is_nav:
-            bg, border, color = Colors.dark_menu, Colors.button_border, Colors.accent_hi
+            bg, border, color = Colors.surface, Colors.border, Colors.accent_hi
         elif hovered:
-            bg, border, color = Colors.button_hover, Colors.button_border, Colors.white
+            bg, border, color = Colors.surface_hover, Colors.border, Colors.text
         else:
-            bg, border, color = Colors.dark_menu, Colors.button_border, Colors.text_dim
+            bg, border, color = Colors.surface, Colors.border, Colors.text_dim
         window.blit(rounded_rect_surface(cr.size, CHIP_RADIUS, bg, border=border, border_width=1),
                     cr.topleft)
         if label == "∞":
@@ -292,7 +292,7 @@ def draw_scroll_thumb(window, track_rect, total, visible, offset_fraction, last_
     thumb_y = track_rect.y + int((track_rect.height - thumb_h) * offset_fraction)
     thumb_x = track_rect.right - SCROLL_THUMB_RIGHT_OFFSET - SCROLL_THUMB_WIDTH
     pg.draw.rect(
-        window, Colors.button_hover,
+        window, Colors.surface_hover,
         pg.Rect(thumb_x, thumb_y, SCROLL_THUMB_WIDTH, thumb_h),
         border_radius=SCROLL_THUMB_WIDTH // 2,
     )

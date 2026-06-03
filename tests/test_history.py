@@ -183,7 +183,7 @@ def test_untimed_game_renders_without_crash(tmp_path):
     assert view._groups[0].time_control == "No clock"
     card_rect, _ = view._row_hits[0]
     tc_region = pg.Rect(card_rect.right - 220, card_rect.centery, 120, 24)
-    assert _region_has_color(view.window, tc_region, Colors.white, tol=40)
+    assert _region_has_color(view.window, tc_region, Colors.text, tol=40)
 
 
 def test_empty_state_has_no_rows(tmp_path):
@@ -199,7 +199,7 @@ def test_empty_state_draws_message(tmp_path):
     view.set_rect(pg.Rect(40, 60, 840, 700))
     view.show(str(tmp_path), "*.pgn", nickname="alice")
     view.draw()
-    assert _region_has_color(view.window, view._list_rect, Colors.text_mute, tol=60)
+    assert _region_has_color(view.window, view._list_rect, Colors.text_muted, tol=60)
 
 
 def test_scroll_advances_and_caps(tmp_path):

@@ -52,7 +52,7 @@ def test_show_paints_shell_and_close():
     modal.window.fill((0, 0, 0))
     modal.draw()
     fill = modal.window.get_at((modal.rect.x + 3, modal.rect.centery))[:3]
-    assert fill == pg.Color(Colors.modal_bg)[:3]
+    assert fill == pg.Color(Colors.surface_raised)[:3]
     assert "close" in modal.button_rects
 
 

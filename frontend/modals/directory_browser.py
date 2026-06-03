@@ -181,7 +181,7 @@ class DirectoryBrowser(BaseModal):
 
     def _draw_header(self, r, pad):
         top = r.y + MODAL_RAIL
-        title_surf = self.title_font.render("CHOOSE DATA FOLDER", True, Colors.white)
+        title_surf = self.title_font.render("CHOOSE DATA FOLDER", True, Colors.text)
         band = max(title_surf.get_height(), self.tool_side)
         head_y = top + int(pad * 0.55)
         self.window.blit(title_surf,
@@ -202,23 +202,23 @@ class DirectoryBrowser(BaseModal):
         crumb_x = self._up_rect.right + 10
         self._blit_breadcrumb(crumb_x, self._up_rect.centery, r.right - pad - crumb_x)
         bar_bottom = bar_y + up_h + int(pad * 0.4)
-        pg.draw.line(self.window, Colors.button_border,
+        pg.draw.line(self.window, Colors.border,
                      (r.x + pad, bar_bottom), (r.right - pad, bar_bottom))
         return bar_bottom + int(pad * 0.45)
 
     def _draw_tool(self, rect, icon_fn, on, off=False):
         hovered = rect.collidepoint(pg.mouse.get_pos())
         if on:
-            self.window.blit(rounded_rect_surface(rect.size, 8, Colors.button_pressed,
+            self.window.blit(rounded_rect_surface(rect.size, 8, Colors.surface_active,
                                                   border=Colors.accent, border_width=1),
                              rect.topleft)
             color = Colors.accent
         elif hovered:
-            self.window.blit(rounded_rect_surface(rect.size, 8, Colors.button_hover),
+            self.window.blit(rounded_rect_surface(rect.size, 8, Colors.surface_hover),
                              rect.topleft)
-            color = Colors.white
+            color = Colors.text
         else:
-            color = Colors.text_mute
+            color = Colors.text_muted
         if off:
             icon_fn(self.window, rect, color, off=True)
         else:
@@ -228,7 +228,7 @@ class DirectoryBrowser(BaseModal):
         if avail <= 0:
             return
         parts = [p for p in self.current.replace("\\", "/").split("/") if p] or ["/"]
-        tail = self.crumb_font.render(parts[-1], True, Colors.white)
+        tail = self.crumb_font.render(parts[-1], True, Colors.text)
         disp = parts[:]
         truncated = False
         while True:
@@ -263,13 +263,13 @@ class DirectoryBrowser(BaseModal):
         dest = os.path.join(self.current, paths.GAMES_SUBDIR)
         val_surf = self.sel_val_font.render(
             self._fit_left(dest, self.sel_val_font, r.width - 2 * pad), True, Colors.text_dim)
-        label_surf = self.sel_label_font.render("SAVES TO", True, Colors.text_mute)
+        label_surf = self.sel_label_font.render("SAVES TO", True, Colors.text_muted)
         block_h = label_surf.get_height() + 3 + val_surf.get_height()
         block_y = btn_y - int(pad * 0.7) - block_h
         self.window.blit(label_surf, (r.x + pad, block_y))
         self.window.blit(val_surf, (r.x + pad, block_y + label_surf.get_height() + 3))
         foot_top = block_y - int(pad * 0.6)
-        pg.draw.line(self.window, Colors.button_border,
+        pg.draw.line(self.window, Colors.border,
                      (r.x + pad, foot_top), (r.right - pad, foot_top))
         return foot_top
 
@@ -306,7 +306,7 @@ class DirectoryBrowser(BaseModal):
         if is_dir:
             draw_folder(self.window, icon_box, Colors.amber)
         else:
-            draw_file(self.window, icon_box, Colors.text_mute)
+            draw_file(self.window, icon_box, Colors.text_muted)
 
     def _draw_input_row(self, row_rect):
         icon_box = pg.Rect(row_rect.x + ROW_ICON_INSET, row_rect.y, ROW_ICON_BOX_W,
@@ -320,15 +320,15 @@ class DirectoryBrowser(BaseModal):
     def _draw_entry_row(self, row_rect, entry, mouse_pos):
         name, path, is_dir, meta = entry
         if row_rect.collidepoint(mouse_pos):
-            pg.draw.rect(self.window, Colors.button_hover, row_rect, border_radius=8)
+            pg.draw.rect(self.window, Colors.surface_hover, row_rect, border_radius=8)
         icon_box = pg.Rect(row_rect.x + ROW_ICON_INSET, row_rect.y, ROW_ICON_BOX_W,
                            row_rect.height)
         self._draw_row_icon(icon_box, is_dir)
         self._row_rects.append((row_rect, path, is_dir))
-        meta_surf = self.meta_font.render(meta, True, Colors.text_mute)
+        meta_surf = self.meta_font.render(meta, True, Colors.text_muted)
         meta_x = row_rect.right - ROW_META_INSET - meta_surf.get_width()
         self.window.blit(meta_surf, (meta_x, row_rect.centery - meta_surf.get_height() // 2))
-        name_color = Colors.white if is_dir else Colors.text_dim
+        name_color = Colors.text if is_dir else Colors.text_dim
         name_surf = fit_text_to_rect(
             self.row_font.render(name, True, name_color),
             pg.Rect(0, 0, max(meta_x - icon_box.right - 16, 1), row_rect.height))

@@ -62,9 +62,9 @@ def test_not_visible_until_result_set():
 @pytest.mark.parametrize(
     "intent, rail_hex",
     [
-        pytest.param("win", Colors.result_win, id="win_green_rail"),
-        pytest.param("loss", Colors.result_loss, id="loss_red_rail"),
-        pytest.param("draw", Colors.result_neutral, id="draw_neutral_rail"),
+        pytest.param("win", Colors.win, id="win_green_rail"),
+        pytest.param("loss", Colors.loss, id="loss_red_rail"),
+        pytest.param("draw", Colors.text_dim, id="draw_neutral_rail"),
     ],
 )
 def test_intent_accent_rail(intent, rail_hex):
@@ -87,7 +87,7 @@ def test_win_outcome_is_green():
     menu.window.fill((0, 0, 0))
     menu.draw()
     band = pg.Rect(rect.x, rect.y + 30, rect.width, int(rect.height * 0.22))
-    assert _has_color(menu.window, band, Colors.result_win, tol=60)
+    assert _has_color(menu.window, band, Colors.win, tol=60)
 
 
 def test_stats_grid_and_potg_render():

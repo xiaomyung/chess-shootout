@@ -151,19 +151,19 @@ def test_low_time_below_threshold(strip):
 def test_not_low_time_above_threshold(strip):
     strip.set_state("Alice", 200.0, False, clock_initial_seconds=300.0)
     assert strip._is_low_time() is False
-    assert strip._clock_text_color() == Colors.white
+    assert strip._clock_text_color() == Colors.text
 
 
 def test_untimed_clock_is_never_low(strip):
     strip.set_state("Alice", None, False)
     assert strip._is_low_time() is False
-    assert strip._clock_text_color() == Colors.white
+    assert strip._clock_text_color() == Colors.text
 
 
 def test_active_clock_border_stays_neutral(strip):
     """The active cue is the glow, not a hard accent ring on the clock box."""
     strip.set_state("Alice", 200.0, True, clock_initial_seconds=300.0)
-    assert strip._clock_border_color() == Colors.button_border
+    assert strip._clock_border_color() == Colors.border
 
 
 def _avatar_top_pixel(strip):
@@ -198,8 +198,8 @@ def test_rating_pill_drawn(strip):
     strip.set_state("Alice", 60.0, False, player_color=PieceColor.WHITE,
                     rating="1500", ko_count=0)
     _draw(strip)
-    assert _has_color(strip.window, strip.rect, Colors.button_hover), \
-        "rating pill background (button_hover) should be visible"
+    assert _has_color(strip.window, strip.rect, Colors.surface_hover), \
+        "rating pill background (surface_hover) should be visible"
 
 
 def test_captured_icons_drawn(strip):
@@ -373,7 +373,7 @@ def test_tooltip_bubble_renders_country_name(strip):
     strip._blit_tooltip("United States")
     flag = strip._flag_rect
     region = pg.Rect(max(flag.centerx - 80, 0), flag.bottom + 2, 160, 30)
-    assert _has_color(strip.window, region, Colors.white, tol=20)
+    assert _has_color(strip.window, region, Colors.text, tol=20)
 
 
 def test_tooltip_resets_alpha_when_country_absent(strip):

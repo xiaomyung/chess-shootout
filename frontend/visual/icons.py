@@ -67,7 +67,7 @@ def draw_file(window, rect, color):
     if side < 4:
         return
     col = pg.Color(color)
-    fold = col.lerp(pg.Color(Colors.app_bg), 0.55)
+    fold = col.lerp(pg.Color(Colors.bg), 0.55)
 
     def render(surf, k):
         u = side * k / 24.0

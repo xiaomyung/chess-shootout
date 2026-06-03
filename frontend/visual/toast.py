@@ -57,8 +57,8 @@ class Toast:
         hype = self.kind == "hype"
         label = self.message.upper() if hype else self.message
         text_color = Colors.on_accent if hype else Colors.text_dim
-        bg_color = pg.Color(Colors.accent if hype else Colors.dark_menu)
-        border_color = pg.Color(Colors.accent_hi if hype else Colors.button_border)
+        bg_color = pg.Color(Colors.accent if hype else Colors.surface)
+        border_color = pg.Color(Colors.accent_hi if hype else Colors.border)
         text_surf = self.font.render(label, True, text_color)
         spark_d = text_surf.get_height() // 2 if hype else 0
         spark_gap = spark_d + SPARK_GAP_PX if hype else 0

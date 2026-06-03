@@ -63,7 +63,7 @@ class AudioPanel:
         self._draw_mute()
 
     def _draw_volume_text(self):
-        surf = self.button_font.render("Volume", True, Colors.white)
+        surf = self.button_font.render("Volume", True, Colors.text)
         if surf.get_width() > self.text_rect.width > 0:
             surf = surf.subsurface(pg.Rect(0, 0, self.text_rect.width,
                                            surf.get_height()))
@@ -73,23 +73,23 @@ class AudioPanel:
 
     def _draw_slider(self):
         track = self._track_rect()
-        pg.draw.rect(self.window, Colors.dark_menu, self.slider_rect,
+        pg.draw.rect(self.window, Colors.surface, self.slider_rect,
                      border_radius=SLIDER_FRAME_RADIUS)
-        pg.draw.rect(self.window, Colors.button_border, self.slider_rect, 1,
+        pg.draw.rect(self.window, Colors.border, self.slider_rect, 1,
                      border_radius=SLIDER_FRAME_RADIUS)
-        pg.draw.rect(self.window, Colors.light_grey_menu, track,
+        pg.draw.rect(self.window, Colors.surface_raised, track,
                      border_radius=SLIDER_TRACK_RADIUS)
         volume = self.sound_manager.master_volume
         fill_w = int(track.width * volume)
         if fill_w > 0:
             fill_rect = pg.Rect(track.x, track.y, fill_w, track.height)
-            pg.draw.rect(self.window, Colors.button_hover, fill_rect,
+            pg.draw.rect(self.window, Colors.surface_hover, fill_rect,
                          border_radius=SLIDER_TRACK_RADIUS)
         knob_x = track.x + fill_w
         knob_radius = max(track.height, SLIDER_KNOB_MIN_RADIUS)
-        pg.draw.circle(self.window, Colors.white,
+        pg.draw.circle(self.window, Colors.text,
                        (knob_x, self.slider_rect.centery), knob_radius)
-        pg.draw.circle(self.window, Colors.button_border,
+        pg.draw.circle(self.window, Colors.border,
                        (knob_x, self.slider_rect.centery), knob_radius, 1)
 
     def _draw_mute(self):

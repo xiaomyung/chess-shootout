@@ -227,12 +227,12 @@ def result_mark(result_code, white, black, nickname):
     elif nickname and nickname == black:
         won, lost = PGN_BLACK_WIN, PGN_WHITE_WIN
     else:
-        return _SPECTATOR_SYMBOLS.get(result_code, "="), Colors.result_neutral
+        return _SPECTATOR_SYMBOLS.get(result_code, "="), Colors.text_dim
     if result_code == won:
-        return "+", Colors.result_win
+        return "+", Colors.win
     if result_code == lost:
-        return "-", Colors.result_loss
-    return "=", Colors.result_neutral
+        return "-", Colors.loss
+    return "=", Colors.text_dim
 
 
 def scan_pgn_summaries(directory, pattern):

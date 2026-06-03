@@ -63,7 +63,7 @@ def test_selection_ring_is_opaque_accent():
     board.selected_square = Square(6, 4)
     board.draw_board()
     rect = board._cell_rect(6, 4)
-    assert win.get_at((rect.centerx, rect.top + 1))[:3] == pg.Color(Colors.selection_red)[:3]
+    assert win.get_at((rect.centerx, rect.top + 1))[:3] == pg.Color(Colors.accent)[:3]
 
 
 def test_legal_move_ring_drawn_on_empty_target():

@@ -72,7 +72,7 @@ class HelpModal(BaseModal):
         content = self.content_rect()
         pad = self.padding
         title_surf = fit_text_to_rect(
-            self.title_font.render("Hotkeys", True, Colors.white),
+            self.title_font.render("Hotkeys", True, Colors.text),
             pg.Rect(0, 0, content.width, self.title_font.get_height() + 8),
         )
         self.window.blit(
@@ -131,7 +131,7 @@ class HelpModal(BaseModal):
                 if i < end - start - 1:
                     sep_y = row_y + line_h - 1
                     pg.draw.line(
-                        self.window, Colors.button_border,
+                        self.window, Colors.border,
                         (rows_rect.x, sep_y), (rows_rect.right, sep_y), 1,
                     )
         finally:

@@ -301,9 +301,9 @@ class StartMenu:
         win_w, win_h = self.window.get_size()
         font = get_font(max(int(win_h / 64), 9))
         prefix = footer_prefix_text()
-        self._footer_prefix_surf = font.render(prefix, True, Colors.footer_text)
-        self._footer_link_surf = font.render(FOOTER_LINK_TEXT, True, Colors.footer_link)
-        self._footer_link_mask_surf = font.render(FOOTER_LINK_TEXT, True, Colors.white)
+        self._footer_prefix_surf = font.render(prefix, True, Colors.text_muted)
+        self._footer_link_surf = font.render(FOOTER_LINK_TEXT, True, Colors.text_dim)
+        self._footer_link_mask_surf = font.render(FOOTER_LINK_TEXT, True, Colors.text)
         prefix_w = self._footer_prefix_surf.get_width()
         link_w, link_h = self._footer_link_surf.get_size()
         fx = (win_w - prefix_w - link_w) // 2
@@ -384,19 +384,19 @@ class StartMenu:
         gear_hover = gear.collidepoint(pg.mouse.get_pos())
         self.window.blit(rounded_rect_surface(
             gear.size, max(int(9 * self._scale), 5),
-            Colors.button_hover if gear_hover else Colors.surface_inset,
-            border=Colors.button_border, border_width=1), gear.topleft)
+            Colors.surface_hover if gear_hover else Colors.surface_raised,
+            border=Colors.border, border_width=1), gear.topleft)
         draw_gear(self.window, gear.inflate(-int(gear.width * 0.44),
                                             -int(gear.height * 0.44)))
 
         self.window.blit(self._brand_tile(), self._tile_rect.topleft)
-        top_surf = self.wordmark_font.render(WORDMARK_TOP, True, Colors.white)
+        top_surf = self.wordmark_font.render(WORDMARK_TOP, True, Colors.text)
         self.window.blit(top_surf, (self._wordmark_top[0] - top_surf.get_width() // 2,
                                     self._wordmark_top[1]))
         bot_surf = self.wordmark_font.render(WORDMARK_BOTTOM, True, Colors.accent)
         self.window.blit(bot_surf, (self._wordmark_bottom[0] - bot_surf.get_width() // 2,
                                     self._wordmark_bottom[1]))
-        tag_surf = self.tagline_font.render(TAGLINE, True, Colors.text_mute)
+        tag_surf = self.tagline_font.render(TAGLINE, True, Colors.text_muted)
         self.window.blit(tag_surf, (self._tagline_pos[0] - tag_surf.get_width() // 2,
                                     self._tagline_pos[1]))
 
@@ -437,11 +437,11 @@ class StartMenu:
         return page + [("←", TIME_PREV)]
 
     def _draw_label(self, text, pos):
-        self.window.blit(self.label_font.render(text, True, Colors.text_mute), pos)
+        self.window.blit(self.label_font.render(text, True, Colors.text_muted), pos)
 
     def _draw_recon(self):
-        fill = pg.Color(Colors.amber).lerp(pg.Color(Colors.surface_inset), 0.84)
-        border = pg.Color(Colors.amber).lerp(pg.Color(Colors.surface_inset), 0.55)
+        fill = pg.Color(Colors.amber).lerp(pg.Color(Colors.surface_raised), 0.84)
+        border = pg.Color(Colors.amber).lerp(pg.Color(Colors.surface_raised), 0.55)
         self.window.blit(rounded_rect_surface(self._recon_rect.size, 9, fill,
                                               border=border, border_width=1),
                          self._recon_rect.topleft)
@@ -449,7 +449,7 @@ class StartMenu:
         pg.draw.circle(self.window, Colors.amber,
                        (self._recon_rect.x + int(14 * self._scale), self._recon_rect.centery),
                        dot_r)
-        text = self.recon_font.render("You have a game in progress", True, Colors.white)
+        text = self.recon_font.render("You have a game in progress", True, Colors.text)
         self.window.blit(text, (self._recon_rect.x + int(26 * self._scale),
                                 self._recon_rect.centery - text.get_height() // 2))
         self.window.blit(rounded_rect_surface(self._recon_button_rect.size, 6, Colors.surface,
@@ -460,8 +460,8 @@ class StartMenu:
                                  self._recon_button_rect.centery - label.get_height() // 2))
 
     def _draw_side(self):
-        self.window.blit(rounded_rect_surface(self._side_rect.size, 9, Colors.surface_inset,
-                                              border=Colors.button_border, border_width=1),
+        self.window.blit(rounded_rect_surface(self._side_rect.size, 9, Colors.surface_raised,
+                                              border=Colors.border, border_width=1),
                          self._side_rect.topleft)
         pad = max(int(4 * self._scale), 2)
         inner = self._side_rect.inflate(-2 * pad, -2 * pad)
@@ -473,12 +473,12 @@ class StartMenu:
                          round(cell_w), inner.height)
             color = Colors.text_dim
             if key == self.selected_side:
-                self.window.blit(rounded_rect_surface(cr.size, 6, Colors.button_pressed,
+                self.window.blit(rounded_rect_surface(cr.size, 6, Colors.surface_active,
                                                       border=Colors.accent, border_width=1),
                                  cr.topleft)
-                color = Colors.white
+                color = Colors.text
             elif cr.collidepoint(pg.mouse.get_pos()):
-                color = Colors.white
+                color = Colors.text
             self._draw_side_cell(cr, label, key, color)
             self._side_rects[key] = cr
 
@@ -503,11 +503,11 @@ class StartMenu:
 
     def _draw_ghost(self, rect, emoji, label, disabled):
         hovered = rect.collidepoint(pg.mouse.get_pos()) and not disabled
-        bg = Colors.light_grey_menu if hovered else Colors.surface
-        text_color = Colors.footer_text if disabled else (
-            Colors.white if hovered else Colors.text_dim)
+        bg = Colors.surface_raised if hovered else Colors.surface
+        text_color = Colors.text_muted if disabled else (
+            Colors.text if hovered else Colors.text_dim)
         self.window.blit(rounded_rect_surface(rect.size, 8, bg,
-                                              border=Colors.button_border, border_width=1),
+                                              border=Colors.border, border_width=1),
                          rect.topleft)
         text = self.button_font.render(label, True, text_color)
         icon = emoji_surface(emoji, int(rect.height * 0.5))
@@ -530,7 +530,7 @@ class StartMenu:
             return
         self.window.blit(self._footer_prefix_surf, self._footer_prefix_pos)
         self.window.blit(self._footer_link_surf, self._footer_link_rect.topleft)
-        pg.draw.line(self.window, Colors.footer_link,
+        pg.draw.line(self.window, Colors.text_dim,
                      (self._footer_link_rect.x, self._footer_underline_y),
                      (self._footer_link_rect.right - 1, self._footer_underline_y))
         hovered = self._footer_link_hovered()

@@ -17,9 +17,9 @@ CARD_RADIUS = 9
 HIGHLIGHT_PAD_RATIO = 0.3
 
 OUTCOME_COLOR = {
-    "win": Colors.result_win,
-    "loss": Colors.result_loss,
-    "draw": Colors.white,
+    "win": Colors.win,
+    "loss": Colors.loss,
+    "draw": Colors.text,
 }
 
 
@@ -106,7 +106,7 @@ class ResultMenu(BaseModal):
         sw = max(int(self.outcome_font.get_height() * 0.035), 2)
         key = (self.outcome, self.intent, self.outcome_font.get_height())
         if self._outcome_cache is None or self._outcome_cache[0] != key:
-            color = OUTCOME_COLOR.get(self.intent, Colors.white)
+            color = OUTCOME_COLOR.get(self.intent, Colors.text)
             text = stroked_text(self.outcome_font, self.outcome.upper(),
                                 color, Colors.outcome_stroke, sw)
             text = fit_text_to_rect(
@@ -150,7 +150,7 @@ class ResultMenu(BaseModal):
         label = self.detail_font.render("HIGHLIGHT", True, Colors.amber_hi)
         self.window.blit(label, (content.x + pad, cy - label.get_height() / 2))
         detail_x = content.x + pad + label.get_width() + max(int(h * HIGHLIGHT_PAD_RATIO), 8)
-        detail = self.detail_font.render(potg, True, Colors.white)
+        detail = self.detail_font.render(potg, True, Colors.text)
         max_w = content.right - pad - detail_x
         if detail.get_width() > max_w > 0:
             detail = fit_text_to_rect(detail, pg.Rect(0, 0, max_w, detail.get_height()))
@@ -186,13 +186,13 @@ class ResultMenu(BaseModal):
             cy = y + (i // cols) * (cell_h + gap)
             cell = pg.Rect(int(cx), int(cy), int(cell_w), int(cell_h))
             bg = rounded_rect_surface(cell.size, CARD_RADIUS, Colors.surface,
-                                      border=Colors.button_border, border_width=1)
+                                      border=Colors.border, border_width=1)
             self.window.blit(bg, cell.topleft)
-            value_surf = self.value_font.render(value, True, Colors.white)
+            value_surf = self.value_font.render(value, True, Colors.text)
             total_w = value_surf.get_width()
             vs_surf = None
             if vs:
-                vs_surf = self.detail_font.render(vs, True, Colors.text_mute)
+                vs_surf = self.detail_font.render(vs, True, Colors.text_muted)
                 total_w += vs_surf.get_width()
             vx = cell.centerx - total_w / 2
             vy = cell.y + cell_h * 0.28
@@ -200,7 +200,7 @@ class ResultMenu(BaseModal):
             if vs_surf is not None:
                 self.window.blit(vs_surf, (vx + value_surf.get_width(),
                                            vy - vs_surf.get_height() / 2))
-            label_surf = self.label_font.render(label.upper(), True, Colors.text_mute)
+            label_surf = self.label_font.render(label.upper(), True, Colors.text_muted)
             blit_centered(self.window, label_surf, (cell.centerx, cell.y + cell_h * 0.72))
 
     def _button_height(self):

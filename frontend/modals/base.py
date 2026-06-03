@@ -12,9 +12,9 @@ MODAL_MAX_WIDTH = 440
 BUTTON_VPAD = 16
 
 INTENT_RAIL = {
-    "win": (Colors.result_win, Colors.modal_rail_win_end),
-    "loss": (Colors.result_loss, Colors.modal_rail_loss_end),
-    "draw": (Colors.result_neutral, Colors.modal_rail_draw_end),
+    "win": (Colors.win, Colors.modal_rail_win_end),
+    "loss": (Colors.loss, Colors.modal_rail_loss_end),
+    "draw": (Colors.text_dim, Colors.modal_rail_draw_end),
 }
 
 
@@ -60,7 +60,7 @@ class BaseModal:
         r = rect if rect is not None else self.rect
         if r.width <= 0 or r.height <= 0:
             return
-        pg.draw.rect(self.window, Colors.modal_bg, r, border_radius=MODAL_RADIUS)
+        pg.draw.rect(self.window, Colors.surface_raised, r, border_radius=MODAL_RADIUS)
         pg.draw.rect(self.window, Colors.border_strong, r, width=1,
                      border_radius=MODAL_RADIUS)
         self.window.blit(self._rail_surface(intent, r.width), r.topleft)

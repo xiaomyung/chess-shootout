@@ -86,7 +86,7 @@ def test_draw_paints_win_rail_accent_and_amber():
     m.show("Alice", "Bob", "white", on_done=lambda: None, seconds=3)
     win.fill((0, 0, 0))
     m.draw()
-    assert _near_count(win, m.rect, Colors.result_win) > 0
+    assert _near_count(win, m.rect, Colors.win) > 0
     assert _near_count(win, m.rect, Colors.accent) > 0
     assert _near_count(win, m.rect, Colors.amber) > 0
 

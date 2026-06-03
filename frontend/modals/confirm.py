@@ -84,7 +84,7 @@ class ConfirmModal(BaseModal):
         btn_h = max(int(panel_w * 0.11), 40)
 
         title_surf = fit_text_to_rect(
-            title_font.render(self.title.upper(), True, Colors.white),
+            title_font.render(self.title.upper(), True, Colors.text),
             pg.Rect(0, 0, inner_w, title_font.get_height()))
         sub_lines = _wrap_words(self.sub, sub_font, inner_w) if self.sub else []
         line_h = sub_font.get_linesize()
@@ -104,11 +104,11 @@ class ConfirmModal(BaseModal):
         y = content.y
         if self.emoji:
             tile = pg.Rect(content.centerx - icon_side // 2, y, icon_side, icon_side)
-            fill = Colors.button_hover
-            border = Colors.button_border
+            fill = Colors.surface_hover
+            border = Colors.border
             if self.danger:
-                fill = pg.Color(Colors.result_loss).lerp(pg.Color(Colors.button_hover), 0.84)
-                border = pg.Color(Colors.result_loss).lerp(pg.Color(Colors.modal_bg), 0.6)
+                fill = pg.Color(Colors.loss).lerp(pg.Color(Colors.surface_hover), 0.84)
+                border = pg.Color(Colors.loss).lerp(pg.Color(Colors.surface_raised), 0.6)
             self.window.blit(rounded_rect_surface(tile.size, TITLE_TILE_RADIUS, fill,
                                                   border=border, border_width=1), tile.topleft)
             blit_emoji(self.window, self.emoji, tile.center, int(icon_side * 0.62))

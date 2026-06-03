@@ -310,7 +310,7 @@ def test_panel_resize_keeps_layout_proportions(panel, w):
 
 def test_volume_label_fits_inside_text_rect_at_default_size(panel):
     panel.set_rect(pg.Rect(0, 0, 400, 40))
-    rendered = panel.button_font.render("Volume", True, Colors.white)
+    rendered = panel.button_font.render("Volume", True, Colors.text)
     assert rendered.get_width() <= panel.text_rect.width
 
 
@@ -320,8 +320,8 @@ def test_volume_label_is_static_across_volume_changes(panel, sm):
     panel.draw()
     sm.set_master_volume(1.0)
     panel.draw()
-    rendered_low = panel.button_font.render("Volume", True, Colors.white)
-    rendered_high = panel.button_font.render("Volume", True, Colors.white)
+    rendered_low = panel.button_font.render("Volume", True, Colors.text)
+    rendered_high = panel.button_font.render("Volume", True, Colors.text)
     assert pg.image.tobytes(rendered_low, "RGBA") == pg.image.tobytes(
         rendered_high, "RGBA")
 
@@ -330,7 +330,7 @@ def test_volume_label_is_static_across_volume_changes(panel, sm):
 def test_volume_label_blitted_width_fits_text_rect(panel, w):
     """The label is clip-fit to its column: blitted width never exceeds text_rect."""
     panel.set_rect(pg.Rect(0, 0, w, 40))
-    surf = panel.button_font.render("Volume", True, Colors.white)
+    surf = panel.button_font.render("Volume", True, Colors.text)
     if surf.get_width() > panel.text_rect.width > 0:
         surf = surf.subsurface(
             pg.Rect(0, 0, panel.text_rect.width, surf.get_height()))

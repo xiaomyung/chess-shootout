@@ -26,7 +26,7 @@ class CountryPicker(BaseModal):
         self.current = ""
         self.scroll_offset = 0
         self.search = TextInput(window, max_chars=32, placeholder="Search countries",
-                                bg=Colors.app_bg, radius=7)
+                                bg=Colors.bg, radius=7)
         self.search.padding = 11
         self._filtered = list(countries.COUNTRIES)
         self._row_rects = []
@@ -98,7 +98,7 @@ class CountryPicker(BaseModal):
         r = self.rect
         pad = self.padding
         top = r.y + MODAL_RAIL + int(pad * 0.55)
-        title = self.title_font.render("PICK A COUNTRY", True, Colors.white)
+        title = self.title_font.render("PICK A COUNTRY", True, Colors.text)
         self.window.blit(title, (r.x + pad, top))
         sy = top + title.get_height() + int(pad * 0.5)
         field_h = max(self.search_font.get_height() + 16, 32)
@@ -147,22 +147,22 @@ class CountryPicker(BaseModal):
         selected = code == self.current
         if selected:
             self.window.blit(
-                rounded_rect_surface(row_rect.size, 8, Colors.button_pressed,
+                rounded_rect_surface(row_rect.size, 8, Colors.surface_active,
                                      border=Colors.accent, border_width=1),
                 row_rect.topleft)
         elif row_rect.collidepoint(mouse):
-            pg.draw.rect(self.window, Colors.button_hover, row_rect, border_radius=8)
+            pg.draw.rect(self.window, Colors.surface_hover, row_rect, border_radius=8)
         x = row_rect.x + ROW_FLAG_INSET
         flag_size = max(int(self._row_h * 0.5), 12)
         flag = self._flag_for(code, flag_size)
         if flag is not None:
             self.window.blit(flag, (x, row_rect.centery - flag.get_height() // 2))
         x += flag_size + ROW_FLAG_GAP
-        name_color = Colors.accent if selected else Colors.white
+        name_color = Colors.accent if selected else Colors.text
         name_surf = self.row_font.render(label, True, name_color)
         self.window.blit(name_surf, (x, row_rect.centery - name_surf.get_height() // 2))
         if code:
-            code_surf = self.code_font.render(code, True, Colors.text_mute)
+            code_surf = self.code_font.render(code, True, Colors.text_muted)
             self.window.blit(code_surf, (row_rect.right - ROW_CODE_INSET - code_surf.get_width(),
                                          row_rect.centery - code_surf.get_height() // 2))
 

@@ -116,12 +116,12 @@ class WaitModal(BaseModal):
         button_font = get_font(max(int(panel_w * 0.034), 13), bold=True)
         radar = min(68, max(int(panel_w * 0.15), 52))
 
-        title = title_font.render("SEARCHING…", True, Colors.white)
+        title = title_font.render("SEARCHING…", True, Colors.text)
         sub = sub_font.render("Finding you an opponent", True, Colors.text_dim)
         elapsed = elapsed_font.render(
-            f"elapsed {format_countdown(self.elapsed)}", True, Colors.text_mute)
+            f"elapsed {format_countdown(self.elapsed)}", True, Colors.text_muted)
         mode = mode_font.render(self.mode_label.upper(), True, Colors.amber_hi)
-        tc = tc_font.render(self.tc_text, True, Colors.white)
+        tc = tc_font.render(self.tc_text, True, Colors.text)
         pill_h = max(mode.get_height(), tc.get_height()) + PILL_VPAD
         pill_w = mode.get_width() + PILL_GAP + tc.get_width() + PILL_HPAD
 
@@ -146,7 +146,7 @@ class WaitModal(BaseModal):
         y += sub.get_height() + g
 
         pill = rounded_rect_surface((int(pill_w), int(pill_h)), pill_h // 2,
-                                    Colors.surface, border=Colors.button_border)
+                                    Colors.surface, border=Colors.border)
         px = cx - pill_w / 2
         self.window.blit(pill, (px, y))
         pcy = y + pill_h / 2

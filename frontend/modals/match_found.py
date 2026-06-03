@@ -15,7 +15,7 @@ NAME_RATING_GAP = 2
 
 
 def _avatar_colors(side):
-    if side in (Colors.white, "white", "w"):
+    if side in (Colors.text, "white", "w"):
         return (Colors.amber, Colors.accent, Colors.on_accent)
     return (Colors.avatar_slate_top, Colors.avatar_slate_bottom, Colors.avatar_letter_dark)
 
@@ -148,7 +148,7 @@ class MatchFoundModal(BaseModal):
                                  y + av / 2 - glyph.get_height() / 2))
         flag = self._flag(country, name_font.get_height())
         flag_w = (flag.get_width() + FLAG_NAME_GAP) if flag is not None else 0
-        name_surf = name_font.render(name, True, Colors.white)
+        name_surf = name_font.render(name, True, Colors.text)
         name_surf = fit_text_to_rect(
             name_surf, pg.Rect(0, 0, max(side_w - flag_w, 1), name_surf.get_height()),
             padding=0)
@@ -158,7 +158,7 @@ class MatchFoundModal(BaseModal):
             self.window.blit(flag, (gx, ny + name_surf.get_height() / 2 - flag.get_height() / 2))
             gx += flag.get_width() + FLAG_NAME_GAP
         self.window.blit(name_surf, (gx, ny))
-        rating = rating_font.render(self.rating, True, Colors.text_mute)
+        rating = rating_font.render(self.rating, True, Colors.text_muted)
         self.window.blit(rating, (cx - rating.get_width() / 2,
                                   ny + name_surf.get_height() + NAME_RATING_GAP))
 

@@ -37,7 +37,7 @@ def test_selected_button_fills_pressed_color(font):
     surface.fill((0, 0, 0))
     rect = pg.Rect(20, 20, 120, 40)
     draw_button(surface, rect, "X", font, selected=True)
-    assert surface.get_at((rect.centerx, rect.y + 4))[:3] == pg.Color(Colors.button_pressed)[:3]
+    assert surface.get_at((rect.centerx, rect.y + 4))[:3] == pg.Color(Colors.surface_active)[:3]
 
 
 def test_primary_button_uses_accent_fill(font):
@@ -90,7 +90,7 @@ def test_toast_info_and_hype_use_distinct_backgrounds():
     surface.fill((0, 0, 0))
     toast.show("reconnected", kind="info")
     toast.draw()
-    assert _band_has_color(surface, pg.Color(Colors.dark_menu)[:3])
+    assert _band_has_color(surface, pg.Color(Colors.surface)[:3])
 
     surface.fill((0, 0, 0))
     toast.show("first blood", kind="hype")
@@ -105,7 +105,7 @@ def test_toast_renders_below_top_inset():
     surface.fill((0, 0, 0))
     toast.show("synced", kind="info")
     toast.draw()
-    bg = pg.Color(Colors.dark_menu)[:3]
+    bg = pg.Color(Colors.surface)[:3]
 
     def band_has(y0, y1):
         return any(surface.get_at((x, y))[:3] == bg

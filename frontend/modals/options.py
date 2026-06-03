@@ -82,9 +82,9 @@ class _Row:
         x = rect.x
         y = rect.y + ROW_PAD
         avail = max(max_right - x, 1)
-        _blit_clip(window, fonts.title.render(self.title, True, Colors.white), (x, y), avail)
+        _blit_clip(window, fonts.title.render(self.title, True, Colors.text), (x, y), avail)
         if self.desc:
-            _blit_clip(window, fonts.desc.render(self.desc, True, Colors.text_mute),
+            _blit_clip(window, fonts.desc.render(self.desc, True, Colors.text_muted),
                        (x, y + fonts.title.get_height() + 2), avail)
 
     def _draw_control(self, window, rect, fonts):
@@ -146,10 +146,10 @@ class SegmentedRow(_Row):
     def draw(self, window, rect, fonts):
         x = rect.x
         y = rect.y + ROW_PAD
-        window.blit(fonts.title.render(self.title, True, Colors.white), (x, y))
+        window.blit(fonts.title.render(self.title, True, Colors.text), (x, y))
         yy = y + fonts.title.get_height() + 2
         if self.desc:
-            window.blit(fonts.desc.render(self.desc, True, Colors.text_mute), (x, yy))
+            window.blit(fonts.desc.render(self.desc, True, Colors.text_muted), (x, yy))
             yy += fonts.desc.get_height() + 2
         yy += 8
         font = (get_mono_font(max(int(fonts.button.get_height() * 0.82), 14))
@@ -189,13 +189,13 @@ class SliderRow(_Row):
         track_right = rect.right - SLIDER_READOUT_GAP
         self._track = pg.Rect(track_right - slider_w, rect.centery - track_h // 2,
                               slider_w, track_h)
-        pg.draw.rect(window, Colors.surface_inset, self._track, border_radius=track_h // 2)
+        pg.draw.rect(window, Colors.surface_raised, self._track, border_radius=track_h // 2)
         fill_w = int(self._track.width * value)
         if fill_w > 0:
             pg.draw.rect(window, Colors.accent,
                          pg.Rect(self._track.x, self._track.y, fill_w, track_h),
                          border_radius=track_h // 2)
-        pg.draw.circle(window, Colors.white,
+        pg.draw.circle(window, Colors.text,
                        (self._track.x + fill_w, self._track.centery), SLIDER_KNOB_RADIUS)
         return self._track.x - SLIDER_LABEL_GAP
 
@@ -228,10 +228,10 @@ class SwatchRow(_Row):
     def draw(self, window, rect, fonts):
         x = rect.x
         y = rect.y + ROW_PAD
-        window.blit(fonts.title.render(self.title, True, Colors.white), (x, y))
+        window.blit(fonts.title.render(self.title, True, Colors.text), (x, y))
         yy = y + fonts.title.get_height() + 2
         if self.desc:
-            window.blit(fonts.desc.render(self.desc, True, Colors.text_mute), (x, yy))
+            window.blit(fonts.desc.render(self.desc, True, Colors.text_muted), (x, yy))
             yy += fonts.desc.get_height() + 6
         self._rects = {}
         sw_w, sw_h, gap = 42, 30, 10
@@ -245,8 +245,8 @@ class SwatchRow(_Row):
                             r.topleft)
             if locked:
                 soon_font = get_font(max(int(sw_h * 0.38), 9), bold=True)
-                shadow = soon_font.render("SOON", True, Colors.app_bg)
-                tag = soon_font.render("SOON", True, Colors.white)
+                shadow = soon_font.render("SOON", True, Colors.bg)
+                tag = soon_font.render("SOON", True, Colors.text)
                 tx = r.centerx - tag.get_width() / 2
                 ty = r.centery - tag.get_height() / 2
                 window.blit(shadow, (tx + 1, ty + 1))
@@ -281,7 +281,7 @@ class PathRow(_FieldRow):
         self.on_reset = on_reset
         self.suffix = suffix
         self.input = TextInput(window, max_chars=512, placeholder="data folder path",
-                               mono=True, bg=Colors.app_bg, radius=7, rest_align="end")
+                               mono=True, bg=Colors.bg, radius=7, rest_align="end")
         self.input.padding = 11
         self.input.text = str(value_getter())
         self._change_rect = pg.Rect(0, 0, 0, 0)
@@ -291,10 +291,10 @@ class PathRow(_FieldRow):
     def draw(self, window, rect, fonts):
         x = rect.x
         y = rect.y + ROW_PAD
-        window.blit(fonts.title.render(self.title, True, Colors.white), (x, y))
+        window.blit(fonts.title.render(self.title, True, Colors.text), (x, y))
         yy = y + fonts.title.get_height() + 2
         if self.desc:
-            window.blit(fonts.desc.render(self.desc, True, Colors.text_mute), (x, yy))
+            window.blit(fonts.desc.render(self.desc, True, Colors.text_muted), (x, yy))
             yy += fonts.desc.get_height() + 2
         yy += 10
         if not self.input.focused and self.input.text != str(self.value_getter()):
@@ -304,7 +304,7 @@ class PathRow(_FieldRow):
         gap = 8
         self._reset_rect = pg.Rect(rect.right - btn_w, yy, btn_w, field_h)
         self._change_rect = pg.Rect(self._reset_rect.x - gap - btn_w, yy, btn_w, field_h)
-        suffix_surf = fonts.value.render(self.suffix, True, Colors.text_mute) if self.suffix \
+        suffix_surf = fonts.value.render(self.suffix, True, Colors.text_muted) if self.suffix \
             else None
         suffix_w = suffix_surf.get_width() + 6 if suffix_surf else 0
         field_right = self._change_rect.x - gap - suffix_w
@@ -346,7 +346,7 @@ class TextRow(_FieldRow):
         super().__init__(label, desc)
         self.value_getter = value_getter
         self.input = TextInput(window, max_chars=128, placeholder=placeholder,
-                               mono=True, bg=Colors.app_bg, radius=7)
+                               mono=True, bg=Colors.bg, radius=7)
         self.input.padding = 11
         self.input.text = str(value_getter())
         self._field_rect = pg.Rect(0, 0, 0, 0)
@@ -354,10 +354,10 @@ class TextRow(_FieldRow):
     def draw(self, window, rect, fonts):
         x = rect.x
         y = rect.y + ROW_PAD
-        window.blit(fonts.title.render(self.title, True, Colors.white), (x, y))
+        window.blit(fonts.title.render(self.title, True, Colors.text), (x, y))
         yy = y + fonts.title.get_height() + 2
         if self.desc:
-            window.blit(fonts.desc.render(self.desc, True, Colors.text_mute), (x, yy))
+            window.blit(fonts.desc.render(self.desc, True, Colors.text_muted), (x, yy))
             yy += fonts.desc.get_height() + 2
         yy += 10
         if not self.input.focused and self.input.text != str(self.value_getter()):
@@ -405,13 +405,13 @@ class CountryRow(_Row):
         h = max(fonts.value.get_height() + 14, 30)
         inner, gap = 12, 8
         flag = self._flag(code, max(fonts.value.get_height(), 14))
-        chev = fonts.button.render("›", True, Colors.text_mute)
-        text_surf = fonts.value.render(label, True, Colors.white if code else Colors.text_mute)
+        chev = fonts.button.render("›", True, Colors.text_muted)
+        text_surf = fonts.value.render(label, True, Colors.text if code else Colors.text_muted)
         flag_w = (flag.get_width() + gap) if flag is not None else 0
         desired = 2 * inner + flag_w + text_surf.get_width() + 10 + chev.get_width()
         w = min(desired, max(int(rect.width * 0.6), 90))
         self._ctl = pg.Rect(rect.right - w, rect.centery - h // 2, w, h)
-        window.blit(rounded_rect_surface((w, h), max(h // 4, 6), Colors.button_hover),
+        window.blit(rounded_rect_surface((w, h), max(h // 4, 6), Colors.surface_hover),
                     self._ctl.topleft)
         window.blit(chev, (self._ctl.right - inner - chev.get_width(),
                            self._ctl.centery - chev.get_height() // 2))
@@ -453,7 +453,7 @@ class OptionsBody:
         row_w = rect.width - SCROLLBAR_RESERVE
         y = rect.y - self.scroll
         for label, rows in self.sections:
-            window.blit(fonts.section.render(label.upper(), True, Colors.text_mute),
+            window.blit(fonts.section.render(label.upper(), True, Colors.text_muted),
                         (rect.x, y + 6))
             y += fonts.section.get_height() + 8
             for row in rows:
@@ -533,7 +533,7 @@ class OptionsModal(BaseModal):
             return
         self.draw_shell()
         content = self.content_rect()
-        title_surf = self.title_font.render("OPTIONS", True, Colors.white)
+        title_surf = self.title_font.render("OPTIONS", True, Colors.text)
         self.window.blit(title_surf, (content.centerx - title_surf.get_width() / 2, content.y))
         title_bottom = content.y + title_surf.get_height() + self.padding
 

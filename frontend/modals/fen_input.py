@@ -55,7 +55,7 @@ class FenInputModal(BaseModal):
         content = self.content_rect()
         pad = self.padding
         title_surf = fit_text_to_rect(
-            self.title_font.render("Start from FEN", True, Colors.white),
+            self.title_font.render("Start from FEN", True, Colors.text),
             pg.Rect(0, 0, content.width, self.title_font.get_height() + 6),
         )
         self.window.blit(
@@ -76,7 +76,7 @@ class FenInputModal(BaseModal):
                 input_rect.width, button_row.y - input_rect.bottom - pad,
             )
             error_surf = fit_text_to_rect(
-                self.error_font.render(self.error, True, Colors.selection_red),
+                self.error_font.render(self.error, True, Colors.accent),
                 error_rect,
             )
             self.window.blit(error_surf, (error_rect.x, error_rect.y))

@@ -22,14 +22,14 @@ SLIDE_MS = 260
 
 
 def _button_surface(label, font, ok):
-    text = font.render(label, True, Colors.on_accent if ok else Colors.white)
+    text = font.render(label, True, Colors.on_accent if ok else Colors.text)
     w = max(text.get_width() + 2 * BTN_PAD_X, BTN_MIN_W)
     h = text.get_height() + 2 * BTN_PAD_Y
     if ok:
         surf = rounded_rect_surface((w, h), BTN_RADIUS, Colors.accent)
     else:
-        surf = rounded_rect_surface((w, h), BTN_RADIUS, Colors.surface_inset,
-                                    border=Colors.button_border, border_width=1)
+        surf = rounded_rect_surface((w, h), BTN_RADIUS, Colors.surface_raised,
+                                    border=Colors.border, border_width=1)
     surf.blit(text, ((w - text.get_width()) / 2, (h - text.get_height()) / 2))
     return surf
 
@@ -86,7 +86,7 @@ class OfferBanners:
 
     def _draw_one(self, b, board_rect, y, h, name_font, verb_font, btn_font):
         name_surf = name_font.render(b["name"], True, Colors.amber_hi)
-        verb_surf = verb_font.render(f" {b['verb']}", True, Colors.white)
+        verb_surf = verb_font.render(f" {b['verb']}", True, Colors.text)
         msg_w = name_surf.get_width() + verb_surf.get_width()
         no_surf = _button_surface(b["no_label"], btn_font, False)
         ok_surf = _button_surface(b["ok_label"], btn_font, True)

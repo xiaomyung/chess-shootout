@@ -52,7 +52,7 @@ def test_danger_shows_red_rail():
     m.window.fill((0, 0, 0))
     m.draw()
     rail = pg.Rect(m._panel.x + 24, m._panel.y + 1, 120, 4)
-    assert _has_color(m.window, rail, Colors.result_loss, tol=45)
+    assert _has_color(m.window, rail, Colors.loss, tol=45)
 
 
 def test_non_danger_rail_is_accent():
@@ -129,4 +129,4 @@ def test_emoji_icon_grows_panel_and_renders_tile():
     iconed.draw()
     assert iconed._panel.height > plain_h
     tile_band = pg.Rect(iconed._panel.centerx - 30, iconed._panel.y + 8, 60, 60)
-    assert _has_color(iconed.window, tile_band, Colors.button_hover, tol=18)
+    assert _has_color(iconed.window, tile_band, Colors.surface_hover, tol=18)

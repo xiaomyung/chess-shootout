@@ -200,7 +200,7 @@ class WindowChrome:
         self._layout_dots(self._w)
         bar = pg.Rect(0, 0, self._w, self.HEIGHT)
         self.window.fill(pg.Color(Colors.titlebar_bg), bar)
-        pg.draw.line(self.window, pg.Color(Colors.button_border),
+        pg.draw.line(self.window, pg.Color(Colors.border),
                      (0, self.HEIGHT - 1), (self._w, self.HEIGHT - 1))
         self._draw_logo()
         self._draw_dots()
@@ -224,7 +224,7 @@ class WindowChrome:
             pg.draw.rect(self.window, pg.Color(Colors.accent), tile, border_radius=5)
         if self._wordmark is None:
             font = get_font(self.WORDMARK_FONT_PX, bold=True)
-            self._wordmark = font.render("CHESS ", True, pg.Color(Colors.white))
+            self._wordmark = font.render("CHESS ", True, pg.Color(Colors.text))
             self._wordmark_accent = font.render("SHOOTOUT", True, pg.Color(Colors.accent))
         tx = tile.right + self.WORDMARK_GAP
         ty = self.HEIGHT // 2
@@ -235,9 +235,9 @@ class WindowChrome:
 
     def _draw_dots(self):
         colors = {
-            "min": Colors.titlebar_min,
-            "max": Colors.titlebar_max,
-            "close": Colors.titlebar_close,
+            "min": Colors.amber,
+            "max": Colors.win,
+            "close": Colors.loss,
         }
         mouse = pg.mouse.get_pos()
         for key, rect in self._dot_rects.items():

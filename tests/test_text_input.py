@@ -2,7 +2,7 @@
 
 The cursor "blink" is not time-based — draw() paints a trailing "|" iff
 self.focused, so focus state alone toggles the cursor glyph. Placeholder text
-uses the dim button_border color while real text and the cursor use white, so
+uses the dim border color while real text and the cursor use the bright text color, so
 glyph-brightness sampling can distinguish the three render states.
 """
 

@@ -166,7 +166,7 @@ class Board:
                 min(sq_rect.centery - panel_h // 2,
                     win_h - panel_h - self.PROMOTION_SCREEN_MARGIN))
         panel = pg.Rect(x, y, panel_w, panel_h)
-        pg.draw.rect(self.window, Colors.light_grey_menu, panel, border_radius=12)
+        pg.draw.rect(self.window, Colors.surface_raised, panel, border_radius=12)
         pg.draw.rect(self.window, Colors.accent, panel, 1, border_radius=12)
         label = get_font(max(int(label_h * 0.8), 12), family=DISPLAY).render(
             "UPGRADE", True, Colors.accent_hi)
@@ -176,14 +176,14 @@ class Board:
         for i, (ptype, hotkey, tag) in enumerate(self.PROMOTION_OPTIONS):
             cell = pg.Rect(panel.x + pad + i * (opt + gap), cells_y, opt, opt)
             hovered = cell.collidepoint(mouse)
-            pg.draw.rect(self.window, Colors.button_hover if hovered else Colors.dark_menu,
+            pg.draw.rect(self.window, Colors.surface_hover if hovered else Colors.surface,
                          cell, border_radius=11)
-            pg.draw.rect(self.window, Colors.accent if hovered else Colors.button_border,
+            pg.draw.rect(self.window, Colors.accent if hovered else Colors.border,
                          cell, 1, border_radius=11)
             img = pg.transform.smoothscale(self.piece_images_original[(ptype, color)], (opt, opt))
             self.window.blit(img, cell.topleft)
             hk = get_font(max(int(opt * 0.18), 9), bold=True, mono=True).render(
-                hotkey, True, Colors.text_mute)
+                hotkey, True, Colors.text_muted)
             self.window.blit(hk, (cell.right - hk.get_width() - 3,
                                   cell.bottom - hk.get_height() - 2))
             if hovered:
@@ -1173,4 +1173,4 @@ class Board:
         wash = pg.Surface((rect.width, rect.height), pg.SRCALPHA)
         wash.fill(Colors.selection_fill)
         self.window.blit(wash, rect.topleft)
-        pg.draw.rect(self.window, Colors.selection_red, rect, 4)
+        pg.draw.rect(self.window, Colors.accent, rect, 4)

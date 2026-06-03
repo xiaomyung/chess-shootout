@@ -25,12 +25,19 @@ def _pygame_init():
     pg.quit()
 
 
-def test_new_palette_hex_values():
+def test_base_palette_hex_values():
+    """The base palette is the theming surface: every themeable knob pinned to its hex."""
     expected = {
-        "white_tile": "#828b99", "black_tile": "#2e333b", "white": "#f3f5f8",
-        "dark_menu": "#16191f", "light_grey_menu": "#1d212a", "button_border": "#313947",
-        "accent": "#ff5a36", "amber": "#ffb020", "app_bg": "#0c0e12",
-        "result_win": "#46d17f", "result_loss": "#ff5a4f", "border_strong": "#475064",
+        "bg": "#0c0e12", "surface": "#16191f", "surface_raised": "#1d212a",
+        "surface_hover": "#272d38", "surface_active": "#333a47", "titlebar_bg": "#14161b",
+        "text": "#f3f5f8", "text_dim": "#9aa4b2", "text_muted": "#5c6573",
+        "on_accent": "#1a0b06", "coord": "#aeb6c2",
+        "border": "#313947", "border_strong": "#475064",
+        "accent": "#ff5a36", "accent_hi": "#ff7a5c", "accent_press": "#e6431f",
+        "amber": "#ffb020", "amber_hi": "#ffc34d",
+        "win": "#46d17f", "loss": "#ff5a4f", "check": "#ff3b3b",
+        "white_tile": "#828b99", "black_tile": "#2e333b",
+        "board_frame": "#0a0c0f", "board_frame_inner": "#20242c",
     }
     for attr, hexval in expected.items():
         assert pg.Color(getattr(Colors, attr))[:3] == pg.Color(hexval)[:3], attr
@@ -45,6 +52,33 @@ def test_connection_dot_color_is_opaque_hex(state):
     "attr", ["move_indicator", "last_move", "selection_fill", "check_fill", "premove"])
 def test_alpha_token_carries_transparency(attr):
     assert pg.Color(getattr(Colors, attr)).a < 255
+
+
+@pytest.mark.parametrize("token, base, alpha", [
+    pytest.param("overlay_scrim", "bg", "d9", id="overlay_scrim_from_bg"),
+    pytest.param("accent_glow", "accent", "8c", id="accent_glow_from_accent"),
+    pytest.param("text_selection", "accent", "66", id="text_selection_from_accent"),
+    pytest.param("selection_fill", "accent", "38", id="selection_fill_from_accent"),
+    pytest.param("move_indicator", "accent", "d9", id="move_indicator_from_accent"),
+    pytest.param("amber_glow", "amber", "73", id="amber_glow_from_amber"),
+    pytest.param("annotation_highlight", "amber", "57", id="annotation_highlight_from_amber"),
+    pytest.param("annotation_arrow", "amber", "c7", id="annotation_arrow_from_amber"),
+    pytest.param("annotation_arrow_preview", "amber", "80", id="annot_arrow_preview_from_amber"),
+    pytest.param("last_move", "amber", "47", id="last_move_from_amber"),
+    pytest.param("mode_pill_bg", "amber", "1f", id="mode_pill_bg_from_amber"),
+    pytest.param("mode_pill_border", "amber", "66", id="mode_pill_border_from_amber"),
+    pytest.param("potg_bg", "amber", "1a", id="potg_bg_from_amber"),
+    pytest.param("potg_border", "amber", "52", id="potg_border_from_amber"),
+    pytest.param("check_fill", "check", "6b", id="check_fill_from_check"),
+])
+def test_alpha_token_is_base_plus_alpha(token, base, alpha):
+    """Tints derive as base + alpha so swapping a base knob propagates to its tints."""
+    assert getattr(Colors, token) == getattr(Colors, base) + alpha
+
+
+def test_reconnecting_dot_tracks_amber():
+    """The reconnecting dot reuses the amber knob (single source of truth)."""
+    assert Colors.dot_reconnecting == Colors.amber
 
 
 def test_each_family_and_weight_loads():

@@ -1,5 +1,5 @@
 """RightMenu rendering: plain-text SAN move cells (no figurine images), the
-current-move highlight (button_pressed fill + inset accent border), click→ply
+current-move highlight (surface_active fill + inset accent border), click→ply
 routing, and the scroll-reveal that fires only on review navigation — never as a
 per-frame re-snap that would fight manual scrollback."""
 
@@ -93,7 +93,7 @@ def test_current_move_highlight_uses_pressed_bg_and_accent_border():
     board.review_ply = 1
     rm.window.fill((0, 0, 0))
     rm.draw_menu()
-    assert _has_color(rm.window, rm.moves_rect, pg.Color(Colors.button_pressed)[:3]), \
+    assert _has_color(rm.window, rm.moves_rect, pg.Color(Colors.surface_active)[:3]), \
         "current move cell uses the pressed surface as its background"
     assert _has_color(rm.window, rm.moves_rect, pg.Color(Colors.accent)[:3]), \
         "current move cell has an inset accent border"

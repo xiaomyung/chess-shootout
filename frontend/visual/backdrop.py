@@ -40,7 +40,7 @@ def arena_background(size, center=(0.5, 0.18)):
     surf.blit(grid, (0, 0))
     floor_h = int(h * 0.38)
     floor = pg.Surface((w, floor_h), pg.SRCALPHA)
-    fr, fg, fb = pg.Color(Colors.battle_floor)[:3]
+    fr, fg, fb = pg.Color(Colors.accent)[:3]
     for row in range(floor_h):
         a = int(13 * row / floor_h)
         pg.draw.line(floor, (fr, fg, fb, a), (0, row), (w, row))

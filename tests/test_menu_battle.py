@@ -841,7 +841,7 @@ def test_draw_paints_many_distinct_colors():
 def test_scrim_darkens_edges_more_than_center():
     b = _battle()
     win = pg.display.get_surface()
-    win.fill(Colors.white)
+    win.fill(Colors.text)
     b.draw_scrim(win)
     center = sum(win.get_at(win.get_rect().center)[:3])
     corner = sum(win.get_at((2, 2))[:3])

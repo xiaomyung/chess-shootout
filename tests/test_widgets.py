@@ -35,12 +35,12 @@ def _button_fill_pixel(surface, rect):
 @pytest.mark.parametrize(
     "force_pressed, expected_bg",
     [
-        pytest.param(False, Colors.light_grey_menu, id="idle_fills_light_grey_menu"),
-        pytest.param(True, Colors.button_pressed, id="pressed_fills_button_pressed"),
+        pytest.param(False, Colors.surface_raised, id="idle_fills_surface_raised"),
+        pytest.param(True, Colors.surface_active, id="pressed_fills_surface_active"),
     ],
 )
 def test_draw_button_fills_state_color(font, force_pressed, expected_bg):
-    """draw_button paints the state background (idle=light_grey_menu, pressed=button_pressed)."""
+    """draw_button paints the state background (idle=surface_raised, pressed=surface_active)."""
     surface = pg.display.get_surface()
     rect = pg.Rect(10, 10, 100, 30)
     surface.fill((0, 0, 0), rect)
@@ -59,8 +59,8 @@ def test_draw_button_idle_and_pressed_render_differently(font):
     draw_button(surface, rect, "OK", font, force_pressed=True)
     pressed_fill = _button_fill_pixel(surface, rect)
     assert idle_fill != pressed_fill
-    assert idle_fill == pg.Color(Colors.light_grey_menu)[:3]
-    assert pressed_fill == pg.Color(Colors.button_pressed)[:3]
+    assert idle_fill == pg.Color(Colors.surface_raised)[:3]
+    assert pressed_fill == pg.Color(Colors.surface_active)[:3]
 
 
 def test_draw_button_row_returns_keyed_rects(font):

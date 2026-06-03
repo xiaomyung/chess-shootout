@@ -174,7 +174,7 @@ class PlayerStrip:
             pg.draw.rect(self.window, Colors.accent, self.rect, width=2,
                          border_radius=radius)
         else:
-            pg.draw.rect(self.window, Colors.button_border, self.rect, width=1,
+            pg.draw.rect(self.window, Colors.border, self.rect, width=1,
                          border_radius=radius)
 
         self._draw_give_time_float(clock_rect)
@@ -231,13 +231,13 @@ class PlayerStrip:
 
     def _blit_tooltip(self, name):
         alpha = int(max(0.0, min(1.0, self._tooltip_alpha)) * 255)
-        text = self.tooltip_font.render(name, True, Colors.white)
+        text = self.tooltip_font.render(name, True, Colors.text)
         pad_x, pad_y = TOOLTIP_PAD_X, TOOLTIP_PAD_Y
         w = text.get_width() + 2 * pad_x
         h = text.get_height() + 2 * pad_y
         bubble = pg.Surface((w, h), pg.SRCALPHA)
-        bubble.blit(rounded_rect_surface((w, h), TOOLTIP_RADIUS, Colors.app_bg,
-                                         border=Colors.button_border, border_width=1), (0, 0))
+        bubble.blit(rounded_rect_surface((w, h), TOOLTIP_RADIUS, Colors.bg,
+                                         border=Colors.border, border_width=1), (0, 0))
         bubble.blit(text, (pad_x, pad_y))
         bubble.set_alpha(alpha)
         rise = int(TOOLTIP_RISE_PX * (1 - self._tooltip_alpha))
@@ -277,7 +277,7 @@ class PlayerStrip:
             self._flag_rect = pg.Rect(cursor, top_cy - flag.get_height() // 2,
                                       flag.get_width(), flag.get_height())
             cursor += flag.get_width() + max(int(ih * 0.1), 4)
-        name_surf = self.name_font.render(self.name, True, Colors.white)
+        name_surf = self.name_font.render(self.name, True, Colors.text)
         max_name_w = max(name_right - cursor, 1)
         if name_surf.get_width() > max_name_w:
             name_surf = name_surf.subsurface(
@@ -307,7 +307,7 @@ class PlayerStrip:
 
     def _draw_rating_pill(self, x, cy, right, max_h=NO_PILL_HEIGHT_CAP):
         text = self.rating_font.render(str(self.rating), True, Colors.text_dim)
-        end = self._draw_text_pill(x, cy, right, text, Colors.button_hover,
+        end = self._draw_text_pill(x, cy, right, text, Colors.surface_hover,
                                    pad_ratio=0.45, pad_min=3, radius_div=3, radius_min=3,
                                    max_h=max_h)
         if end is None:
@@ -341,7 +341,7 @@ class PlayerStrip:
         if self.ko_count <= 0:
             return None
         winking = pg.time.get_ticks() < self._ko_wink_until_ms
-        label_color = Colors.amber if winking else Colors.text_mute
+        label_color = Colors.amber if winking else Colors.text_muted
         text = self.ko_font.render(f"{self.ko_count} KO", True, label_color)
         shell_w = max(int(ih * 0.16), 4)
         shell_h = max(int(ih * 0.42), 7)
@@ -370,7 +370,7 @@ class PlayerStrip:
         box_w = max(surf.get_width() + 2 * hpad, min_w)
         box = pg.Rect(self.rect.right - pad - box_w, self.rect.y + pad, box_w, av_size)
         radius = max(int(self.rect.height * 0.14), 5)
-        pg.draw.rect(self.window, Colors.app_bg, box, border_radius=radius)
+        pg.draw.rect(self.window, Colors.bg, box, border_radius=radius)
         flash = self._flash_alpha()
         if flash > 0:
             tint = pg.Surface(box.size, pg.SRCALPHA)
@@ -391,12 +391,12 @@ class PlayerStrip:
     def _clock_text_color(self):
         if self._is_low_time():
             return Colors.clock_low_text
-        return Colors.white
+        return Colors.text
 
     def _clock_border_color(self):
         if self._is_low_time():
             return Colors.clock_low_time
-        return Colors.button_border
+        return Colors.border
 
     def _draw_give_time_float(self, clock_rect):
         if self._give_time_start_ms <= 0:
@@ -417,9 +417,9 @@ class PlayerStrip:
         if self.auto_end_label is None or self.auto_end_seconds is None:
             return None
         text = f"{self.auto_end_label} {format_countdown(self.auto_end_seconds)}"
-        color = (Colors.auto_end_alert
+        color = (Colors.loss
                  if self.auto_end_seconds < AUTO_END_RED_THRESHOLD_SECONDS
-                 else Colors.white)
+                 else Colors.text)
         surf = self.auto_end_font.render(text, True, color)
         badge_x = right - surf.get_width()
         self.window.blit(surf, (badge_x, cy - surf.get_height() / 2))

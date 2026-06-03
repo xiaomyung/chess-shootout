@@ -88,7 +88,7 @@ class ReconnectingModal(BaseModal):
         cd_font = get_mono_font(max(int(COUNTDOWN_REF * scale), 18), bold=True)
         button_font = get_font(max(int(BUTTON_REF * scale), 12), bold=True)
 
-        heading = heading_font.render("RECONNECTING…", True, Colors.white)
+        heading = heading_font.render("RECONNECTING…", True, Colors.text)
         sub = sub_font.render("Hang tight, restoring your game", True, Colors.text_dim)
         cd = cd_font.render(format_countdown(self._remaining()), True, Colors.amber_hi)
 

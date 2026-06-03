@@ -43,16 +43,16 @@ def test_titlebar_renders_background_and_border(chrome):
     chrome.draw()
     window = pg.display.get_surface()
     assert window.get_at((500, 4))[:3] == pg.Color(Colors.titlebar_bg)[:3]
-    assert window.get_at((500, chrome.HEIGHT - 1))[:3] == pg.Color(Colors.button_border)[:3]
+    assert window.get_at((500, chrome.HEIGHT - 1))[:3] == pg.Color(Colors.border)[:3]
 
 
 def test_traffic_dots_use_their_colors(chrome):
     chrome.draw()
     window = pg.display.get_surface()
     expected = {
-        "min": Colors.titlebar_min,
-        "max": Colors.titlebar_max,
-        "close": Colors.titlebar_close,
+        "min": Colors.amber,
+        "max": Colors.win,
+        "close": Colors.loss,
     }
     for key, rect in chrome._dot_rects.items():
         assert window.get_at(rect.center)[:3] == pg.Color(expected[key])[:3]
