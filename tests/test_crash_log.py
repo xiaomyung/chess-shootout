@@ -18,7 +18,7 @@ os.environ.setdefault("SDL_AUDIODRIVER", "dummy")
 
 import pytest
 
-from infra.crash_log import (
+from chessshootout.infra.crash_log import (
     CRASHLOG_DIR_NAME, gather_state, install_memory_handler, write_crash_log,
 )
 

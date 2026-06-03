@@ -12,11 +12,11 @@ import pytest
 from fastapi.testclient import TestClient
 from starlette.websockets import WebSocketDisconnect
 
-from server.app import (
+from chessshootout.server.app import (
     PROTOCOL_VERSION, RECLAIM_PER_UUID_LIMIT_PER_MINUTE, UuidRateLimiter,
     WS_CLOSE_INVALID_TOKEN, create_app,
 )
-from server.protocol import (
+from chessshootout.server.protocol import (
     CancelMatchmakeRequest, MatchmakeRequest, Reason, ReclaimRequest,
     ResumeRequest, is_uuid4,
 )

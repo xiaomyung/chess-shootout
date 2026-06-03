@@ -1,7 +1,7 @@
 import sys
 from pathlib import Path
 
-import paths
+from chessshootout import paths
 
 
 def test_source_mode_defaults(monkeypatch):

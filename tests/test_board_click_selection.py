@@ -15,10 +15,10 @@ from collections import Counter
 import pygame as pg
 import pytest
 
-from backend.backend import Backend
-from backend.pieces import Piece, PieceColor, PieceType
-from backend.utils import Square
-from frontend.board import Board
+from chessshootout.backend.backend import Backend
+from chessshootout.backend.pieces import Piece, PieceColor, PieceType
+from chessshootout.backend.utils import Square
+from chessshootout.frontend.board import Board
 
 
 @pytest.fixture(scope="module", autouse=True)

@@ -8,7 +8,7 @@ gives up, so a tight poll would time out before a transient first attempt
 recovers."""
 import time
 
-from online.client import OnlineClient
+from chessshootout.online.client import OnlineClient
 from tests.helpers import fake_uuid4
 
 

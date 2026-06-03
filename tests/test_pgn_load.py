@@ -2,11 +2,11 @@ from collections import Counter
 
 import pytest
 
-from backend.backend import Backend
-from backend.pieces import Piece, PieceColor, PieceType
-from backend.utils import Square
-from domain.pgn.generate import generate_pgn
-from domain.pgn.load import (
+from chessshootout.backend.backend import Backend
+from chessshootout.backend.pieces import Piece, PieceColor, PieceType
+from chessshootout.backend.utils import Square
+from chessshootout.domain.pgn.generate import generate_pgn
+from chessshootout.domain.pgn.load import (
     PgnSummary, extract_csmatchid, format_relative_time, group_by_csmatchid,
     load_pgn_into_backend, parse_pgn, scan_pgn_summaries, summarize_pgn_file,
     termination_reason, time_category,

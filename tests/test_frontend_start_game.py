@@ -12,12 +12,12 @@ os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
 import pygame as pg
 import pytest
 
-from backend.utils import Square
-from backend.pieces import PieceColor
-from infra import countries, env
-from frontend.frontend import Frontend, OPPONENT_NAME_FOR_MODE
-from online.client import OnlineClient
-from domain.pgn.load import extract_csmatchid, parse_pgn_headers
+from chessshootout.backend.utils import Square
+from chessshootout.backend.pieces import PieceColor
+from chessshootout.infra import countries, env
+from chessshootout.frontend.frontend import Frontend, OPPONENT_NAME_FOR_MODE
+from chessshootout.online.client import OnlineClient
+from chessshootout.domain.pgn.load import extract_csmatchid, parse_pgn_headers
 from tests.helpers import fake_uuid4
 
 
@@ -309,7 +309,7 @@ def test_open_pgn_invokes_default_app(tmp_path, monkeypatch):
     app._auto_save_pgn()
     captured = {}
     monkeypatch.setattr(
-        "frontend.frontend._open_with_default_app",
+        "chessshootout.frontend.frontend._open_with_default_app",
         lambda path: captured.setdefault("path", path) or True,
     )
     app._on_open_pgn()
@@ -331,7 +331,7 @@ def test_open_pgn_warns_on_open_failure(tmp_path, monkeypatch):
     app.manual_result = "white_wins"
     app._auto_save_pgn()
     monkeypatch.setattr(
-        "frontend.frontend._open_with_default_app", lambda _path: False,
+        "chessshootout.frontend.frontend._open_with_default_app", lambda _path: False,
     )
     app._on_open_pgn()
     assert app.toast.message == "Could not open PGN"

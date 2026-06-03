@@ -6,9 +6,9 @@ GC) so we drive each independently without the full asyncio loop.
 """
 import pytest
 
-from server.app import create_app
-from server.protocol import Reason
-from server.sweep import BEACON_INTERVAL_SECONDS, PREGAME_CONNECT_GRACE_SECONDS
+from chessshootout.server.app import create_app
+from chessshootout.server.protocol import Reason
+from chessshootout.server.sweep import BEACON_INTERVAL_SECONDS, PREGAME_CONNECT_GRACE_SECONDS
 from tests.helpers import FakeClock, fake_uuid4
 
 
@@ -148,7 +148,7 @@ async def test_beacon_emits_state_sync_for_active_started_room(sweep, app, clock
     async def _capture(connections, r, message):
         sent.append((r.room_id, message))
 
-    monkeypatch.setattr("server.sweep.broadcast", _capture)
+    monkeypatch.setattr("chessshootout.server.sweep.broadcast", _capture)
     await sweep.step_state_sync_beacon()
     assert len(sent) == 1
     room_id, message = sent[0]
@@ -168,7 +168,7 @@ async def test_beacon_throttled_to_interval(sweep, app, clock, monkeypatch):
     async def _capture(connections, r, message):
         sent.append(message)
 
-    monkeypatch.setattr("server.sweep.broadcast", _capture)
+    monkeypatch.setattr("chessshootout.server.sweep.broadcast", _capture)
     await sweep.step_state_sync_beacon()
     await sweep.step_state_sync_beacon()
     assert len(sent) == 1
@@ -187,7 +187,7 @@ async def test_beacon_skips_pre_first_move_and_finished_rooms(sweep, app, clock,
     async def _capture(connections, r, message):
         sent.append(message)
 
-    monkeypatch.setattr("server.sweep.broadcast", _capture)
+    monkeypatch.setattr("chessshootout.server.sweep.broadcast", _capture)
     await sweep.step_state_sync_beacon()
     assert sent == []
     room.first_move_at = clock()

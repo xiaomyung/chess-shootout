@@ -1,6 +1,6 @@
 import pytest
 
-from domain.pgn.generate import generate_pgn
+from chessshootout.domain.pgn.generate import generate_pgn
 
 
 @pytest.mark.parametrize(

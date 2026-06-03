@@ -9,9 +9,9 @@ os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
 import pygame as pg
 import pytest
 
-from frontend.modals.result import BUTTONS, ResultMenu
-from frontend.visual.colors import Colors
-from frontend.visual.widgets import BUTTON_LABEL_PADDING_PX, fit_text_to_rect
+from chessshootout.frontend.modals.result import BUTTONS, ResultMenu
+from chessshootout.frontend.visual.colors import Colors
+from chessshootout.frontend.visual.widgets import BUTTON_LABEL_PADDING_PX, fit_text_to_rect
 
 
 @pytest.fixture(scope="module", autouse=True)

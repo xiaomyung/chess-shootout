@@ -1,8 +1,8 @@
 import pytest
 
-from backend.backend import Backend
-from backend.utils import Square
-from backend.pieces import PieceType
+from chessshootout.backend.backend import Backend
+from chessshootout.backend.utils import Square
+from chessshootout.backend.pieces import PieceType
 
 
 def perft(backend, depth):

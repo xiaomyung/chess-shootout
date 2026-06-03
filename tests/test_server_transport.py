@@ -18,11 +18,11 @@ import ssl
 import httpx
 import pytest
 
-from online.transport import (
+from chessshootout.online.transport import (
     FatalResumeError, SchemaVersionMismatch, ServerTransport, ServerWebSocket,
     TransportError, TransportHTTPError,
 )
-from server.protocol import (
+from chessshootout.server.protocol import (
     HealthResponse, MatchmakeRequest, MatchmakeResponse, PROTOCOL_VERSION,
     Reason, ResumeRequest,
 )
@@ -373,7 +373,7 @@ async def test_ws_connect_uses_tls_context_for_wss(monkeypatch):
         captured["ssl"] = kwargs.get("ssl")
         return _FakeWs()
 
-    monkeypatch.setattr("online.transport.websockets.connect", _fake_connect)
+    monkeypatch.setattr("chessshootout.online.transport.websockets.connect", _fake_connect)
     st = ServerTransport("chess.example.com")
     await st.ws_connect("room1", "tok")
     assert isinstance(captured["ssl"], ssl.SSLContext)
@@ -391,7 +391,7 @@ async def test_ws_connect_plaintext_for_ws(monkeypatch):
         captured["ssl"] = kwargs.get("ssl")
         return _FakeWs()
 
-    monkeypatch.setattr("online.transport.websockets.connect", _fake_connect)
+    monkeypatch.setattr("chessshootout.online.transport.websockets.connect", _fake_connect)
     st = ServerTransport("localhost:8000")
     await st.ws_connect("room1", "tok")
     assert captured["ssl"] is None
@@ -465,7 +465,7 @@ def test_only_transport_module_imports_httpx_or_websockets():
                                 re.MULTILINE)
     offenders = []
     for pkg in ("frontend", "online"):
-        for root, _, files in os.walk(os.path.join(root_dir, pkg)):
+        for root, _, files in os.walk(os.path.join(root_dir, "chessshootout", pkg)):
             for name in files:
                 if not name.endswith(".py"):
                     continue

@@ -1,8 +1,8 @@
 from collections import Counter
 
-from backend.backend import Backend, DEFAULT_CASTLING_RIGHTS
-from backend.utils import Square
-from backend.pieces import Piece, PieceColor, PieceType
+from chessshootout.backend.backend import Backend, DEFAULT_CASTLING_RIGHTS
+from chessshootout.backend.utils import Square
+from chessshootout.backend.pieces import Piece, PieceColor, PieceType
 
 
 WHITE = PieceColor.WHITE

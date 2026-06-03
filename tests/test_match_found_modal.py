@@ -11,9 +11,9 @@ os.environ.setdefault("SDL_AUDIODRIVER", "dummy")
 import pygame as pg
 import pytest
 
-from frontend.modals.match_found import MatchFoundModal
-from frontend.visual.colors import Colors
-from frontend.visual.widgets import build_avatar
+from chessshootout.frontend.modals.match_found import MatchFoundModal
+from chessshootout.frontend.visual.colors import Colors
+from chessshootout.frontend.visual.widgets import build_avatar
 from tests.helpers import assert_pixel_color
 
 

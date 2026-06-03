@@ -15,14 +15,14 @@ os.environ.setdefault("SDL_AUDIODRIVER", "dummy")
 import pygame as pg
 import pytest
 
-from domain.match import ONLINE
-from frontend.frontend import (
+from chessshootout.domain.match import ONLINE
+from chessshootout.frontend.frontend import (
     ANIM_MS_DEFAULT, ANIM_MS_MIN, ANIM_MS_MAX,
     Frontend, compute_animation_ms,
 )
-from frontend.visual.colors import Colors
-from frontend.modals.reconnecting import ReconnectingModal
-from frontend.online.events import (
+from chessshootout.frontend.visual.colors import Colors
+from chessshootout.frontend.modals.reconnecting import ReconnectingModal
+from chessshootout.frontend.online.events import (
     MATCH_FOUND_SECONDS, NOT_YOUR_TURN_TOASTS, ONLINE_HARD_FAILURE_LABELS,
     ONLINE_HARD_FAILURE_REASONS, ONLINE_TRANSIENT_REASON_LABELS,
 )
@@ -344,7 +344,7 @@ def _board_centerx(board):
 
 
 def test_game_mode_centers_flex_modals_on_board(frontend):
-    from domain.match import SINGLE_SCREEN
+    from chessshootout.domain.match import SINGLE_SCREEN
     frontend.mode = SINGLE_SCREEN
     frontend._compute_layout()
     board_cx = _board_centerx(frontend.board)
@@ -354,7 +354,7 @@ def test_game_mode_centers_flex_modals_on_board(frontend):
 
 
 def test_mode_change_relays_modal_rects_via_draw_frame(frontend):
-    from domain.match import SINGLE_SCREEN
+    from chessshootout.domain.match import SINGLE_SCREEN
     frontend.mode = "menu"
     frontend._compute_layout()
     win_w, _ = frontend.window.get_size()

@@ -15,12 +15,12 @@ from unittest.mock import MagicMock
 import pygame as pg
 import pytest
 
-from domain.match import BOT, ONLINE, SINGLE_SCREEN
-from backend.pieces import PieceColor
-from backend.utils import Square
-from frontend.frontend import Frontend
-from online.client import RECONNECT_TOTAL_SECONDS
-from server.protocol import FIRST_MOVE_ABORT_SECONDS, GRACE_SECONDS
+from chessshootout.domain.match import BOT, ONLINE, SINGLE_SCREEN
+from chessshootout.backend.pieces import PieceColor
+from chessshootout.backend.utils import Square
+from chessshootout.frontend.frontend import Frontend
+from chessshootout.online.client import RECONNECT_TOTAL_SECONDS
+from chessshootout.server.protocol import FIRST_MOVE_ABORT_SECONDS, GRACE_SECONDS
 
 
 @pytest.fixture(scope="module", autouse=True)

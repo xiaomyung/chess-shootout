@@ -23,9 +23,9 @@ from unittest.mock import MagicMock
 import pygame as pg
 import pytest
 
-from domain.match import ONLINE
-from backend.pieces import PieceColor
-from frontend.frontend import Frontend
+from chessshootout.domain.match import ONLINE
+from chessshootout.backend.pieces import PieceColor
+from chessshootout.frontend.frontend import Frontend
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -113,7 +113,7 @@ def test_on_reconnect_active_game_sets_up_online_state_and_clock(app, monkeypatc
     """App-restart Reconnect drives the full main-thread setup synchronously;
     reconnect_to_existing is stubbed so no thread/WS opens."""
     monkeypatch.setattr(
-        "online.client.OnlineClient.reconnect_to_existing",
+        "chessshootout.online.client.OnlineClient.reconnect_to_existing",
         lambda self, *a, **kw: None,
     )
     fresh = resume_payload(
@@ -122,7 +122,7 @@ def test_on_reconnect_active_game_sets_up_online_state_and_clock(app, monkeypatc
         white_remaining=200.0, black_remaining=210.0, running_for="black",
         time_minutes=5, increment_seconds=2,
     )
-    monkeypatch.setattr("frontend.frontend.fetch_resume",
+    monkeypatch.setattr("chessshootout.frontend.frontend.fetch_resume",
                         lambda *a, **kw: fresh)
     app._pending_reconnect = {
         "addr": "localhost:8000",
@@ -150,7 +150,7 @@ def test_on_reconnect_active_game_refetches_resume_to_avoid_drift(app, monkeypat
     """Drift repro: the cached payload was taken at launch but the click lands
     arbitrarily later, so /resume is re-fetched at click-time."""
     monkeypatch.setattr(
-        "online.client.OnlineClient.reconnect_to_existing",
+        "chessshootout.online.client.OnlineClient.reconnect_to_existing",
         lambda self, *a, **kw: None,
     )
     calls = []
@@ -161,7 +161,7 @@ def test_on_reconnect_active_game_refetches_resume_to_avoid_drift(app, monkeypat
             white_remaining=42.0, black_remaining=42.0, running_for="white",
         )
 
-    monkeypatch.setattr("frontend.frontend.fetch_resume", _fetch)
+    monkeypatch.setattr("chessshootout.frontend.frontend.fetch_resume", _fetch)
     app._pending_reconnect = {
         "addr": "localhost:8000",
         "room_id": "room-y",
@@ -177,10 +177,10 @@ def test_on_reconnect_active_game_failed_refetch_restores_pending(app, monkeypat
     """A failed /resume must not fall back to the stale snapshot: stay out of
     the game, restore the pending entry, and surface a Retry/Cancel modal."""
     monkeypatch.setattr(
-        "online.client.OnlineClient.reconnect_to_existing",
+        "chessshootout.online.client.OnlineClient.reconnect_to_existing",
         lambda self, *a, **kw: None,
     )
-    monkeypatch.setattr("frontend.frontend.fetch_resume",
+    monkeypatch.setattr("chessshootout.frontend.frontend.fetch_resume",
                         lambda *a, **kw: None)
     pending = {
         "addr": "localhost:8000",
@@ -210,7 +210,7 @@ def test_async_main_resume_does_not_queue_legacy_events():
     """The async loop only opens the WS on reconnect; it must not queue a
     duplicate game_start/game_resumed pair (the original reset-to-initial race)."""
     import asyncio
-    from online.client import OnlineClient
+    from chessshootout.online.client import OnlineClient
 
     client = OnlineClient()
     client._addr = "localhost:8000"

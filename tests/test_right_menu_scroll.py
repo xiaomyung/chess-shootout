@@ -12,10 +12,10 @@ os.environ.setdefault("SDL_AUDIODRIVER", "dummy")
 import pygame as pg
 import pytest
 
-from backend.backend import Backend
-from frontend.panels.right import RightMenu
-from frontend.visual.colors import Colors
-from frontend.visual.widgets import (
+from chessshootout.backend.backend import Backend
+from chessshootout.frontend.panels.right import RightMenu
+from chessshootout.frontend.visual.colors import Colors
+from chessshootout.frontend.visual.widgets import (
     SCROLL_FADE_MS, SCROLL_THUMB_RIGHT_OFFSET, SCROLL_THUMB_WIDTH,
 )
 
@@ -43,8 +43,8 @@ def menu():
 
 
 def play_n_moves(backend, n):
-    from backend.utils import Square, Move, HistoryEntry
-    from backend.pieces import Piece, PieceType, PieceColor
+    from chessshootout.backend.utils import Square, Move, HistoryEntry
+    from chessshootout.backend.pieces import Piece, PieceType, PieceColor
     pawn = Piece(PieceType.PAWN, PieceColor.WHITE)
     move = Move(Square(6, 0), Square(5, 0), pawn)
     backend.move_history = [

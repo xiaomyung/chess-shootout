@@ -18,11 +18,11 @@ import pygame as pg
 import pytest
 from fastapi.testclient import TestClient
 
-from domain.match import ONLINE
-from backend.pieces import PieceColor
-from server import connections as connections_module
-from server.app import PROTOCOL_VERSION, create_app
-from server.protocol import MoveAppliedMessage
+from chessshootout.domain.match import ONLINE
+from chessshootout.backend.pieces import PieceColor
+from chessshootout.server import connections as connections_module
+from chessshootout.server.app import PROTOCOL_VERSION, create_app
+from chessshootout.server.protocol import MoveAppliedMessage
 from tests.helpers import FakeClock, fake_uuid4
 
 
@@ -155,7 +155,7 @@ def test_dropped_broadcast_pushes_reconnecting_to_surviving_peer(client, monkeyp
 
 
 def _online_app():
-    from frontend.frontend import Frontend
+    from chessshootout.frontend.frontend import Frontend
     app = Frontend(1000, 800)
     app.sound_manager = MagicMock()
     app.online_client = MagicMock()
@@ -212,7 +212,7 @@ def test_resync_gate_drops_subsequent_move_applied():
 
 def test_takeback_applied_with_skipped_ply_triggers_resync():
     """Local has 1 ply but server's post-takeback ply 5 is impossible without misses."""
-    from backend.utils import Square
+    from chessshootout.backend.utils import Square
     app = _online_app()
     app.match.try_move(Square(6, 4), Square(4, 4))
     payload = {"clock": {}, "fen": "", "ply": 5}
@@ -306,7 +306,7 @@ def test_resyncing_shows_toast_each_frame():
 
 
 def test_resyncing_self_heals_after_timeout():
-    from frontend.frontend import RESYNC_TIMEOUT_MS
+    from chessshootout.frontend.frontend import RESYNC_TIMEOUT_MS
     app = _online_app()
     app.online_client.state = "connected"
     app._resyncing = True
@@ -325,7 +325,7 @@ def test_online_error_room_lost_clears_resyncing():
 
 
 def test_opponent_resync_shows_toast():
-    from online.client import Event
+    from chessshootout.online.client import Event
     app = _online_app()
     app._handle_online_event(Event("resync", {}))
     assert app.toast.message == "Opponent is resyncing…"

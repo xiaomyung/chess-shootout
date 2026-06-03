@@ -1,7 +1,7 @@
 import pytest
 from pydantic import ValidationError
 
-from server.protocol import (
+from chessshootout.server.protocol import (
     AuthMessage, ErrorMessage, GameStartMessage, MatchmakeRequest,
     MoveMessage, PROTOCOL_VERSION, ResyncNoticeMessage, StateSyncMessage,
     normalize_country, normalize_nickname,

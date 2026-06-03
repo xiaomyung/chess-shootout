@@ -7,14 +7,14 @@ os.environ.setdefault("SDL_AUDIODRIVER", "dummy")
 import pygame as pg
 import pytest
 
-from backend.pieces import PieceColor, PieceType
-from paths import PIECES_PNG_DIR
-from frontend.visual import fonts
-from frontend.visual.colors import Colors
-from frontend.visual.fonts import (
+from chessshootout.backend.pieces import PieceColor, PieceType
+from chessshootout.paths import PIECES_PNG_DIR
+from chessshootout.frontend.visual import fonts
+from chessshootout.frontend.visual.colors import Colors
+from chessshootout.frontend.visual.fonts import (
     DISPLAY, SANS, MONO, get_font, get_display_font, get_mono_font,
 )
-import paths
+from chessshootout import paths
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -104,7 +104,7 @@ def test_fonts_are_not_cached():
 
 
 def test_fonts_py_has_no_cache_decorator():
-    src = pathlib.Path("frontend/visual/fonts.py").read_text()
+    src = pathlib.Path(fonts.__file__).read_text()
     assert "lru_cache" not in src and "@cache" not in src
 
 

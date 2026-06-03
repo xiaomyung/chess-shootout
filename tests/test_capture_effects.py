@@ -27,21 +27,21 @@ from unittest.mock import MagicMock
 import pygame as pg
 import pytest
 
-from domain.match import Match
-from backend.pieces import Piece, PieceColor, PieceType
-from backend.pseudo_legal import king_square, checking_square, _segment_empty
-from backend.utils import Square
-from frontend.board import Board
-from frontend.frontend import Frontend
-from frontend.visual import gunfx
-from frontend.visual.effects import (
+from chessshootout.domain.match import Match
+from chessshootout.backend.pieces import Piece, PieceColor, PieceType
+from chessshootout.backend.pseudo_legal import king_square, checking_square, _segment_empty
+from chessshootout.backend.utils import Square
+from chessshootout.frontend.board import Board
+from chessshootout.frontend.frontend import Frontend
+from chessshootout.frontend.visual import gunfx
+from chessshootout.frontend.visual.effects import (
     AIM_MS, CALLOUT_LG_MS, CALLOUT_XL_MS, CHECK_DROP_MS, DRAW_MS, HIT_WORDS,
     HOLE_FADE_MS, HOLE_HOLD_MS, HOLE_IN_MS, INTENSITY_SCALE, KING_SHAKE_MS, PIECE_GUN,
     PROJECTILE_MAX_MS, PROJECTILE_TRAVEL_MS, RECOIL_MS, SHAKE_AMP, SHAKE_HARD_MS,
     SHAKE_SOFT_MS, STREAK_LABELS, TAG_MS, TAKEOVER_PAUSE_MS, TAKEOVER_TOTAL_MS,
     EffectManager,
 )
-from frontend.visual.gunfx import GUNS, GunSpec
+from chessshootout.frontend.visual.gunfx import GUNS, GunSpec
 
 WHITE, BLACK = PieceColor.WHITE, PieceColor.BLACK
 KING, QUEEN, ROOK, BISHOP, KNIGHT, PAWN = (
@@ -637,8 +637,9 @@ def _place(board, pieces):
 
 
 def _no_motion(monkeypatch):
-    monkeypatch.setattr("frontend.board.board.env.get_reduce_motion", lambda: False)
-    monkeypatch.setattr("frontend.board.board.env.get_effect_intensity", lambda: "full")
+    monkeypatch.setattr("chessshootout.frontend.board.board.env.get_reduce_motion", lambda: False)
+    monkeypatch.setattr("chessshootout.frontend.board.board.env.get_effect_intensity",
+                         lambda: "full")
 
 
 def _white_entry():

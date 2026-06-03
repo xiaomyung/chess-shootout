@@ -9,12 +9,12 @@ os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
 import pygame as pg
 import pytest
 
-from frontend.modals.options import (
+from chessshootout.frontend.modals.options import (
     CountryRow, OptionsModal, PathRow, TextRow, ToggleRow, SegmentedRow, SliderRow,
     SwatchRow, _Fonts,
 )
-from frontend.visual.colors import Colors
-from frontend.visual.fonts import get_font, get_mono_font
+from chessshootout.frontend.visual.colors import Colors
+from chessshootout.frontend.visual.fonts import get_font, get_mono_font
 
 
 @pytest.fixture(scope="module", autouse=True)

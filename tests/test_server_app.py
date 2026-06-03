@@ -4,13 +4,13 @@ import random
 import pytest
 from fastapi.testclient import TestClient
 
-from server.app import PROTOCOL_VERSION, create_app
+from chessshootout.server.app import PROTOCOL_VERSION, create_app
 
 
 async def _sweep(app):
     await app.state.sweep.step_all()
-from server.connections import ConnectionRegistry
-from server.protocol import FIRST_MOVE_ABORT_SECONDS, GRACE_SECONDS, Reason
+from chessshootout.server.connections import ConnectionRegistry
+from chessshootout.server.protocol import FIRST_MOVE_ABORT_SECONDS, GRACE_SECONDS, Reason
 from tests.helpers import FakeClock, fake_uuid4
 
 

@@ -9,8 +9,8 @@ os.environ.setdefault("SDL_AUDIODRIVER", "dummy")
 import pygame as pg
 import pytest
 
-from frontend.visual.emoji import blit_emoji, emoji_surface
-from frontend.visual.fonts import get_emoji_font
+from chessshootout.frontend.visual.emoji import blit_emoji, emoji_surface
+from chessshootout.frontend.visual.fonts import get_emoji_font
 
 
 @pytest.fixture(scope="module", autouse=True)

@@ -53,8 +53,11 @@ build = [
 Homepage = "https://github.com/xiaomyung/chess-shootout"
 Issues = "https://github.com/xiaomyung/chess-shootout/issues"
 
+[project.scripts]
+chess-shootout = "chessshootout.main:main"
+
 [tool.hatch.build.targets.wheel]
-packages = ["backend", "frontend", "pieces", "server"]
+packages = ["chessshootout"]
 
 [tool.pylama]
 linters = "pycodestyle,pyflakes"
@@ -66,4 +69,4 @@ path = "tests/*"
 ignore = "E402"
 
 [tool.coverage.run]
-source = ["backend", "frontend", "server", "paths", "main"]
+source = ["chessshootout"]

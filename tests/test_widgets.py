@@ -5,10 +5,10 @@ os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
 import pygame as pg
 import pytest
 
-from frontend.visual import widgets
-from frontend.visual.colors import Colors
-from frontend.visual.fonts import get_font
-from frontend.visual.widgets import (
+from chessshootout.frontend.visual import widgets
+from chessshootout.frontend.visual.colors import Colors
+from chessshootout.frontend.visual.fonts import get_font
+from chessshootout.frontend.visual.widgets import (
     BUTTON_LABEL_PADDING_PX,
     draw_button, draw_button_row,
     fit_text_to_rect,

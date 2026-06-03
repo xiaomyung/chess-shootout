@@ -2,8 +2,8 @@ import random
 
 import pytest
 
-from server.protocol import GRACE_SECONDS
-from server.rooms import (
+from chessshootout.server.protocol import GRACE_SECONDS
+from chessshootout.server.rooms import (
     AlreadyInGameError, InvalidTokenError, NotInRoomError,
     REMATCH_KEEP_ALIVE_SECONDS, RoomManager,
 )

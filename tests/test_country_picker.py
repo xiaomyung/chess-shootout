@@ -10,7 +10,7 @@ os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
 import pygame as pg
 import pytest
 
-from frontend.modals.country_picker import CountryPicker
+from chessshootout.frontend.modals.country_picker import CountryPicker
 
 
 @pytest.fixture(scope="module", autouse=True)

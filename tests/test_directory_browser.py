@@ -9,7 +9,7 @@ os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
 import pygame as pg
 import pytest
 
-from frontend.modals.directory_browser import DirectoryBrowser
+from chessshootout.frontend.modals.directory_browser import DirectoryBrowser
 
 
 @pytest.fixture(scope="module", autouse=True)

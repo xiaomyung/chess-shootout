@@ -5,9 +5,9 @@ os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
 import pygame as pg
 import pytest
 
-from backend.pieces import PieceType, PieceColor
-from frontend.visual.colors import Colors
-from frontend.panels.player_strip import (
+from chessshootout.backend.pieces import PieceType, PieceColor
+from chessshootout.frontend.visual.colors import Colors
+from chessshootout.frontend.panels.player_strip import (
     GIVE_TIME_FLOAT_MS, PlayerStrip, format_clock, format_countdown,
     give_time_float_alpha,
 )

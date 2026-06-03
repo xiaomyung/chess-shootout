@@ -9,7 +9,7 @@ os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
 import pygame as pg
 import pytest
 
-from frontend.visual.text_input import TextInput
+from chessshootout.frontend.visual.text_input import TextInput
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -137,7 +137,7 @@ def test_arrow_collapses_selection_without_shift(ti):
 
 
 def test_paste_replaces_selection(ti, monkeypatch):
-    monkeypatch.setattr("frontend.visual.text_input._paste_from_clipboard",
+    monkeypatch.setattr("chessshootout.frontend.visual.text_input._paste_from_clipboard",
                         lambda: "XYZ")
     ti.text = "hello"
     ti.handle_key(_ev(pg.K_a, mod=pg.KMOD_CTRL))
@@ -147,7 +147,7 @@ def test_paste_replaces_selection(ti, monkeypatch):
 
 def test_ctrl_c_copies_selection(ti, monkeypatch):
     captured = []
-    monkeypatch.setattr("frontend.visual.text_input._copy_to_clipboard",
+    monkeypatch.setattr("chessshootout.frontend.visual.text_input._copy_to_clipboard",
                         lambda t: captured.append(t))
     ti.text = "copy this"
     ti.handle_key(_ev(pg.K_a, mod=pg.KMOD_CTRL))

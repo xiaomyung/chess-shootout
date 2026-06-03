@@ -17,9 +17,9 @@ from unittest.mock import MagicMock
 import pygame as pg
 import pytest
 
-from backend.utils import Square
-from frontend.frontend import Frontend
-from backend.pieces import Piece, PieceColor, PieceType
+from chessshootout.backend.utils import Square
+from chessshootout.frontend.frontend import Frontend
+from chessshootout.backend.pieces import Piece, PieceColor, PieceType
 
 
 @pytest.fixture(scope="module", autouse=True)

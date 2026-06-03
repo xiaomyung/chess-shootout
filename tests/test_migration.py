@@ -5,9 +5,9 @@ os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
 import pygame as pg
 import pytest
 
-import paths
-from infra import env
-from frontend.frontend import Frontend
+from chessshootout import paths
+from chessshootout.infra import env
+from chessshootout.frontend.frontend import Frontend
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -82,7 +82,7 @@ def test_move_pgns_failure_returns_false(tmp_path, monkeypatch):
     def boom(*a, **k):
         raise OSError("disk full")
 
-    monkeypatch.setattr("frontend.frontend.shutil.move", boom)
+    monkeypatch.setattr("chessshootout.frontend.frontend.shutil.move", boom)
     assert app._move_pgns(str(src), str(tmp_path / "new")) is False
     assert (src / "a.pgn").exists()
     assert os.path.isdir(src)

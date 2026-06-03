@@ -10,8 +10,8 @@ os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
 import pygame as pg
 import pytest
 
-from frontend.menu.history import HistoryView
-from frontend.visual.colors import Colors
+from chessshootout.frontend.menu.history import HistoryView
+from chessshootout.frontend.visual.colors import Colors
 from tests.helpers import fake_uuid4
 
 

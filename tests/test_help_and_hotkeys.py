@@ -16,8 +16,8 @@ from unittest.mock import MagicMock
 import pygame as pg
 import pytest
 
-from backend.pieces import Piece, PieceColor, PieceType
-from backend.utils import Square
+from chessshootout.backend.pieces import Piece, PieceColor, PieceType
+from chessshootout.backend.utils import Square
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -29,7 +29,7 @@ def _pygame_init():
 
 
 def _make_app():
-    from frontend.frontend import Frontend
+    from chessshootout.frontend.frontend import Frontend
     app = Frontend(1000, 800)
     app.sound_manager = MagicMock()
     app._on_start_game({"mode": "single_screen", "nickname": "a",

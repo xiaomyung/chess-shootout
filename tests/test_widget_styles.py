@@ -6,13 +6,13 @@ os.environ.setdefault("SDL_AUDIODRIVER", "dummy")
 import pygame as pg
 import pytest
 
-from frontend.visual.colors import Colors
-from frontend.visual.fonts import get_font
-from frontend.visual.widgets import (
+from chessshootout.frontend.visual.colors import Colors
+from chessshootout.frontend.visual.fonts import get_font
+from chessshootout.frontend.visual.widgets import (
     draw_button, draw_button_row, draw_icon_button,
 )
-from frontend.visual.icons import draw_speaker
-from frontend.visual.toast import Toast
+from chessshootout.frontend.visual.icons import draw_speaker
+from chessshootout.frontend.visual.toast import Toast
 
 
 @pytest.fixture(scope="module", autouse=True)

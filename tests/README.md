@@ -12,7 +12,7 @@ should be able to fail for a real reason.
 .venv/bin/pytest tests/test_san.py -v          # one file
 .venv/bin/pytest "tests/test_clock.py::test_add_time_caps[at_initial]" -v   # one case
 .venv/bin/pytest tests -n auto --cov --cov-report=term:skip-covered          # coverage (informational)
-.venv/bin/pylama backend frontend server main.py paths.py tests             # lint (≤100 cols)
+.venv/bin/pylama chessshootout tests                                        # lint (≤100 cols)
 ```
 
 Do **not** run the suite while a chess server is live on `:8000` (the per-process

@@ -3,9 +3,9 @@ it sits below the Seven-Tag-Roster + TimeControl (so standard importers still re
 clean roster), it round-trips back through the header parser, and adding it never
 breaks movetext replay."""
 
-from backend.backend import Backend
-from domain.pgn.generate import generate_pgn
-from domain.pgn.load import (
+from chessshootout.backend.backend import Backend
+from chessshootout.domain.pgn.generate import generate_pgn
+from chessshootout.domain.pgn.load import (
     extract_csmatchid, load_pgn_into_backend, parse_pgn_headers,
 )
 from tests.helpers import fake_uuid4

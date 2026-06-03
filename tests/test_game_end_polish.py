@@ -15,8 +15,8 @@ from unittest.mock import MagicMock
 import pygame as pg
 import pytest
 
-from backend.utils import Square
-from frontend.frontend import (
+from chessshootout.backend.utils import Square
+from chessshootout.frontend.frontend import (
     Frontend, RESULT_FADE_MS, RESULT_FADE_MAX_ALPHA, RESULT_MODAL_DELAY_MS,
 )
 

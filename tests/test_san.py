@@ -1,7 +1,7 @@
 import pytest
 
-from backend.backend import Backend
-from domain.pgn.generate import generate_pgn
+from chessshootout.backend.backend import Backend
+from chessshootout.domain.pgn.generate import generate_pgn
 from tests.helpers import (
     BLACK, WHITE, K, Q, R, N, P,
     NO_CASTLING, make_backend, piece, sq,

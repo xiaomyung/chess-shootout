@@ -5,7 +5,7 @@ os.environ.setdefault("SDL_AUDIODRIVER", "dummy")
 
 import pygame as pg
 
-from frontend.window_chrome import WindowChrome, WINDOW_FLAGS
+from chessshootout.frontend.window_chrome import WindowChrome, WINDOW_FLAGS
 
 
 def main():

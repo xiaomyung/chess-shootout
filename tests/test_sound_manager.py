@@ -17,13 +17,13 @@ from unittest.mock import MagicMock, patch
 import pygame as pg
 import pytest
 
-from frontend.audio.sound_manager import (
+from chessshootout.frontend.audio.sound_manager import (
     SoundManager, HeartbeatConfig,
     STATE_OFF, STATE_HEARTBEAT, ONESHOT_FADE_MS,
 )
-from paths import SOUNDS_DIR
-from backend.pieces import PieceType
-from frontend.visual.gunfx import PIECE_GUN
+from chessshootout.paths import SOUNDS_DIR
+from chessshootout.backend.pieces import PieceType
+from chessshootout.frontend.visual.gunfx import PIECE_GUN
 
 GUN_NAMES = ("revolver", "hand_cannon", "lever_action", "shotgun", "blunderbuss", "ray_gun")
 

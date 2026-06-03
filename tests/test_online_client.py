@@ -3,8 +3,8 @@ import asyncio
 
 import pytest
 
-from online.client import OnlineClient, PING_SAMPLE_WINDOW
-from online.transport import _UrlBuilder, _split_addr
+from chessshootout.online.client import OnlineClient, PING_SAMPLE_WINDOW
+from chessshootout.online.transport import _UrlBuilder, _split_addr
 
 
 @pytest.mark.parametrize(
@@ -100,7 +100,7 @@ class _FakeWs:
 
 def test_ping_loop_records_samples(monkeypatch):
     """ws.ping() pong latencies are converted s->ms and pushed onto the rolling window."""
-    monkeypatch.setattr("online.client.PING_INTERVAL_SECONDS", 0.001)
+    monkeypatch.setattr("chessshootout.online.client.PING_INTERVAL_SECONDS", 0.001)
 
     client = OnlineClient()
     fake_ws = _FakeWs([0.030, 0.045, 0.060])
@@ -126,7 +126,7 @@ def test_ping_loop_records_samples(monkeypatch):
 
 def test_ping_loop_swallows_transient_ping_failures(monkeypatch):
     """A raised ws.ping() is logged and skipped; the next successful ping still records."""
-    monkeypatch.setattr("online.client.PING_INTERVAL_SECONDS", 0.001)
+    monkeypatch.setattr("chessshootout.online.client.PING_INTERVAL_SECONDS", 0.001)
 
     class _FlakyWs:
         def __init__(self):

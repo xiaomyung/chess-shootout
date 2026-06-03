@@ -11,13 +11,13 @@ stay shape-legal at every hop.
 
 import pytest
 
-from backend.pieces import (
+from chessshootout.backend.pieces import (
     BLACK_KING_HOME_ROW, BLACK_PAWN_START_ROW, CASTLE_TARGET_COLS,
     KING_HOME_COL, KING_OFFSETS, KNIGHT_OFFSETS, Piece, PieceColor, PieceType,
     WHITE_KING_HOME_ROW, WHITE_PAWN_START_ROW,
 )
-from backend.pseudo_legal import piece_can_pseudo_reach
-from backend.utils import BOARD_SIZE, Square
+from chessshootout.backend.pseudo_legal import piece_can_pseudo_reach
+from chessshootout.backend.utils import BOARD_SIZE, Square
 
 from tests.helpers import sq, sq_of
 
@@ -183,8 +183,8 @@ def _pygame_init():
 @pytest.fixture
 def board():
     import pygame as pg
-    from backend.backend import Backend
-    from frontend.board import Board
+    from chessshootout.backend.backend import Backend
+    from chessshootout.frontend.board import Board
     backend = Backend()
     backend.new_game()
     bd = Board(pg.display.get_surface(), backend)

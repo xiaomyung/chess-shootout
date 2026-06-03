@@ -11,11 +11,11 @@ os.environ.setdefault("SDL_AUDIODRIVER", "dummy")
 import pygame as pg
 import pytest
 
-from backend.backend import Backend
-from backend.pieces import Piece, PieceType, PieceColor
-from backend.utils import Square, Move, HistoryEntry
-from frontend.panels.right import RightMenu
-from frontend.visual.colors import Colors
+from chessshootout.backend.backend import Backend
+from chessshootout.backend.pieces import Piece, PieceType, PieceColor
+from chessshootout.backend.utils import Square, Move, HistoryEntry
+from chessshootout.frontend.panels.right import RightMenu
+from chessshootout.frontend.visual.colors import Colors
 
 
 @pytest.fixture(scope="module", autouse=True)

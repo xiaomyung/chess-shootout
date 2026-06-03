@@ -6,8 +6,8 @@ os.environ.setdefault("SDL_AUDIODRIVER", "dummy")
 import pygame as pg
 import pytest
 
-from online.client import OnlineClient
-from frontend.modals.wait import WaitModal
+from chessshootout.online.client import OnlineClient
+from chessshootout.frontend.modals.wait import WaitModal
 
 
 @pytest.fixture(scope="module", autouse=True)

@@ -16,13 +16,13 @@ from unittest.mock import MagicMock
 import pygame as pg
 import pytest
 
-from paths import SOUNDS_DIR
-from frontend.panels.audio import (
+from chessshootout.paths import SOUNDS_DIR
+from chessshootout.frontend.panels.audio import (
     AudioPanel, DEFAULT_BUTTON_COLUMNS, DEFAULT_BUTTON_GAP_PX,
 )
-from frontend.panels.right import RightMenu
-from frontend.audio.sound_manager import SoundManager
-from frontend.visual.colors import Colors
+from chessshootout.frontend.panels.right import RightMenu
+from chessshootout.frontend.audio.sound_manager import SoundManager
+from chessshootout.frontend.visual.colors import Colors
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -52,7 +52,7 @@ def test_master_volume_explicit_override(sm):
 
 
 def test_master_volume_falls_back_to_env_default(monkeypatch, tmp_path):
-    from infra import env as env_mod
+    from chessshootout.infra import env as env_mod
     monkeypatch.setattr(env_mod, "_ENV_PATH", tmp_path / ".env")
     monkeypatch.delenv("CHESS_MASTER_VOLUME", raising=False)
     s = SoundManager(SOUNDS_DIR, enabled=True)
@@ -60,7 +60,7 @@ def test_master_volume_falls_back_to_env_default(monkeypatch, tmp_path):
 
 
 def test_master_volume_reads_env_when_set(monkeypatch, tmp_path):
-    from infra import env as env_mod
+    from chessshootout.infra import env as env_mod
     monkeypatch.setattr(env_mod, "_ENV_PATH", tmp_path / ".env")
     monkeypatch.setenv("CHESS_MASTER_VOLUME", "0.42")
     s = SoundManager(SOUNDS_DIR, enabled=True)
@@ -149,7 +149,7 @@ def test_panel_default_grid_is_5_columns(panel):
 
 def test_panel_grid_aligns_with_actual_buttons_row():
     """Each audio region's x/right matches the right-menu button column it mirrors."""
-    from frontend.visual.widgets import draw_button_row
+    from chessshootout.frontend.visual.widgets import draw_button_row
     sm = SoundManager(SOUNDS_DIR, enabled=True)
     p = AudioPanel(pg.display.get_surface(), sm)
     font = pg.font.SysFont("Arial", 14, bold=True)
@@ -235,7 +235,7 @@ def test_panel_end_drag_clears(panel):
 
 
 def test_panel_end_drag_persists_volume_to_env(panel, sm, monkeypatch, tmp_path):
-    from infra import env as env_mod
+    from chessshootout.infra import env as env_mod
     monkeypatch.setattr(env_mod, "_ENV_PATH", tmp_path / ".env")
     monkeypatch.delenv("CHESS_MASTER_VOLUME", raising=False)
     panel.set_rect(pg.Rect(0, 0, 200, 40))
@@ -247,7 +247,7 @@ def test_panel_end_drag_persists_volume_to_env(panel, sm, monkeypatch, tmp_path)
 
 
 def test_panel_end_drag_does_not_persist_when_not_dragging(panel, monkeypatch, tmp_path):
-    from infra import env as env_mod
+    from chessshootout.infra import env as env_mod
     monkeypatch.setattr(env_mod, "_ENV_PATH", tmp_path / ".env")
     monkeypatch.delenv("CHESS_MASTER_VOLUME", raising=False)
     panel.end_drag()

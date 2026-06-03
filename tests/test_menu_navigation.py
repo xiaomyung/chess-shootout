@@ -10,10 +10,10 @@ os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
 import pygame as pg
 import pytest
 
-from frontend.frontend import Frontend
-from frontend.menu.menu_page import PAGE_CARD, PAGE_HISTORY
-from domain.pgn.generate import generate_pgn
-from backend.backend import Backend
+from chessshootout.frontend.frontend import Frontend
+from chessshootout.frontend.menu.menu_page import PAGE_CARD, PAGE_HISTORY
+from chessshootout.domain.pgn.generate import generate_pgn
+from chessshootout.backend.backend import Backend
 
 
 @pytest.fixture(scope="module", autouse=True)

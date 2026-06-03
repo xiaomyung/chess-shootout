@@ -13,7 +13,7 @@ os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
 import pygame as pg
 import pytest
 
-from frontend.visual.text_input import TextInput
+from chessshootout.frontend.visual.text_input import TextInput
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -56,7 +56,7 @@ def test_construction_defaults(ti):
 
 
 def test_mono_flag_uses_monospace_font():
-    from frontend.visual.fonts import get_mono_font
+    from chessshootout.frontend.visual.fonts import get_mono_font
     inp = TextInput(pg.display.get_surface(), mono=True)
     inp.set_rect(pg.Rect(0, 0, 200, 32))
     expected = get_mono_font(max(int(32 / inp.font_factor), 10))
@@ -169,7 +169,7 @@ def test_draw_focus_adds_cursor_to_typed_text(ti):
 )
 def test_ctrl_v_pastes_clipboard(ti, monkeypatch, start_text, pasted, expected):
     monkeypatch.setattr(
-        "frontend.visual.text_input._paste_from_clipboard",
+        "chessshootout.frontend.visual.text_input._paste_from_clipboard",
         lambda: pasted,
     )
     ti.focused = True
@@ -184,7 +184,7 @@ def test_ctrl_v_truncates_to_max_chars(monkeypatch):
     inp.set_rect(pg.Rect(0, 0, 200, 30))
     inp.focused = True
     monkeypatch.setattr(
-        "frontend.visual.text_input._paste_from_clipboard",
+        "chessshootout.frontend.visual.text_input._paste_from_clipboard",
         lambda: "abcdefghij",
     )
     inp.handle_key(make_key_event(pg.K_v, unicode="v", mod=pg.KMOD_CTRL))
@@ -205,5 +205,5 @@ def test_v_without_ctrl_just_types_v(ti):
     ],
 )
 def test_sanitise_strips_newlines_and_trims(raw, expected):
-    from frontend.visual.text_input import _sanitise
+    from chessshootout.frontend.visual.text_input import _sanitise
     assert _sanitise(raw) == expected

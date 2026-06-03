@@ -5,8 +5,8 @@ os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
 import pygame as pg
 import pytest
 
-import paths
-from frontend.modals.start import (
+from chessshootout import paths
+from chessshootout.frontend.modals.start import (
     FOOTER_SHINE_HOVER_PERIOD_MS, FOOTER_SHINE_HOVER_SWEEP_MS, FOOTER_SHINE_PERIOD_MS,
     FOOTER_SHINE_SWEEP_MS, FOOTER_URL, StartMenu, footer_prefix_text,
 )

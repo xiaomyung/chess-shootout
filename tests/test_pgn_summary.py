@@ -2,7 +2,7 @@ from datetime import datetime
 
 import pytest
 
-from domain.pgn.load import (
+from chessshootout.domain.pgn.load import (
     PgnSummary, parse_pgn, parse_pgn_headers, parse_time_control,
     result_mark, summarize_pgn_file,
 )

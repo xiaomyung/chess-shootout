@@ -3,7 +3,7 @@ import uuid
 
 import pytest
 
-from infra import env
+from chessshootout.infra import env
 
 
 _ISOLATED_VARS = (
@@ -287,7 +287,7 @@ def test_set_overrides_passes_uuid4_through_unchanged():
 def test_set_overrides_coerces_short_alias_to_uuid4():
     """`--client-uuid alice` once 422'd the server validator; coerce to a uuid4."""
     env.set_overrides(client_uuid="alice")
-    from server.protocol import is_uuid4
+    from chessshootout.server.protocol import is_uuid4
     assert is_uuid4(env._uuid_override)
 
 
@@ -323,7 +323,7 @@ def test_set_data_dir_creates_missing_config_parent(tmp_path, monkeypatch):
 
 
 def test_init_paths_points_env_at_config_dir(tmp_path, monkeypatch):
-    import paths
+    from chessshootout import paths
     monkeypatch.setattr(paths, "get_config_dir", lambda: tmp_path)
     env.init_paths()
     assert env._ENV_PATH == tmp_path / ".env"

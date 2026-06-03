@@ -9,8 +9,8 @@ os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
 import pygame as pg
 import pytest
 
-from frontend.modals.confirm import ConfirmModal
-from frontend.visual.colors import Colors
+from chessshootout.frontend.modals.confirm import ConfirmModal
+from chessshootout.frontend.visual.colors import Colors
 
 
 @pytest.fixture(scope="module", autouse=True)

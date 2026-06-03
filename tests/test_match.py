@@ -1,8 +1,8 @@
 import pytest
 
-from domain.match import Match, SINGLE_SCREEN, BOT, ONLINE
-from backend.pieces import Piece, PieceColor, PieceType
-from backend.utils import Square
+from chessshootout.domain.match import Match, SINGLE_SCREEN, BOT, ONLINE
+from chessshootout.backend.pieces import Piece, PieceColor, PieceType
+from chessshootout.backend.utils import Square
 
 
 @pytest.mark.parametrize(

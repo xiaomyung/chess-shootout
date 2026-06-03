@@ -8,10 +8,10 @@ from unittest.mock import MagicMock
 import pygame as pg
 import pytest
 
-from backend.backend import Backend
-from backend.pieces import PieceColor, PieceType
-from backend.utils import Square
-from frontend.board import Board
+from chessshootout.backend.backend import Backend
+from chessshootout.backend.pieces import PieceColor, PieceType
+from chessshootout.backend.utils import Square
+from chessshootout.frontend.board import Board
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -33,7 +33,7 @@ def board():
 
 
 def _new_app():
-    from frontend.frontend import Frontend
+    from chessshootout.frontend.frontend import Frontend
     app = Frontend(1500, 800)
     app.sound_manager = MagicMock()
     app._on_start_game({"mode": "single_screen", "nickname": "a",
@@ -702,7 +702,7 @@ def test_ctrl_z_does_not_undo_in_pgn_review(tmp_path):
 
 
 def _new_timed_app():
-    from frontend.frontend import Frontend
+    from chessshootout.frontend.frontend import Frontend
     app = Frontend(1500, 800)
     app.sound_manager = MagicMock()
     app._on_start_game({"mode": "single_screen", "nickname": "a",
@@ -712,7 +712,7 @@ def _new_timed_app():
 
 
 def _new_menu_app():
-    from frontend.frontend import Frontend
+    from chessshootout.frontend.frontend import Frontend
     app = Frontend(1500, 800)
     app.sound_manager = MagicMock()
     return app

@@ -10,8 +10,8 @@ from unittest.mock import MagicMock
 import pygame as pg
 import pytest
 
-from domain.match import BOT, ONLINE
-from frontend.visual.colors import Colors
+from chessshootout.domain.match import BOT, ONLINE
+from chessshootout.frontend.visual.colors import Colors
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -23,7 +23,7 @@ def _pygame_init():
 
 
 def _make_app():
-    from frontend.frontend import Frontend
+    from chessshootout.frontend.frontend import Frontend
     app = Frontend(1000, 800)
     app.sound_manager = MagicMock()
     return app
@@ -245,7 +245,7 @@ def test_local_resignation_subtitle_reports_resignation():
 def test_single_screen_result_uses_winner_perspective_not_stale_local_color():
     """Bug: a stale local_color left over from a prior online game must not flip
     the single-screen result modal to the loser's clock / a DEFEAT word."""
-    from backend.pieces import PieceColor
+    from chessshootout.backend.pieces import PieceColor
     app = _make_app()
     _start_local(app)
     app.match.local_color = PieceColor.BLACK
@@ -256,7 +256,7 @@ def test_single_screen_result_uses_winner_perspective_not_stale_local_color():
 
 
 def test_single_screen_start_resets_local_color():
-    from backend.pieces import PieceColor
+    from chessshootout.backend.pieces import PieceColor
     app = _make_app()
     app.match.local_color = PieceColor.WHITE
     _start_local(app)
@@ -333,8 +333,8 @@ def test_online_ping_line(ping_value, expected_line):
 
 
 def _info_menu():
-    from frontend.panels.right import RightMenu
-    from backend.backend import Backend
+    from chessshootout.frontend.panels.right import RightMenu
+    from chessshootout.backend.backend import Backend
     rm = RightMenu(pg.display.get_surface(), Backend(), {})
     rm.set_rect(pg.Rect(0, 0, 320, 640))
     return rm

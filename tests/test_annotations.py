@@ -9,11 +9,11 @@ from unittest.mock import MagicMock
 import pygame as pg
 import pytest
 
-from backend.backend import Backend
-from backend.pieces import Piece, PieceColor, PieceType
-from backend.utils import Square
-from frontend.board import Board
-from frontend.visual.colors import Colors
+from chessshootout.backend.backend import Backend
+from chessshootout.backend.pieces import Piece, PieceColor, PieceType
+from chessshootout.backend.utils import Square
+from chessshootout.frontend.board import Board
+from chessshootout.frontend.visual.colors import Colors
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -35,7 +35,7 @@ def board():
 
 
 def make_app():
-    from frontend.frontend import Frontend
+    from chessshootout.frontend.frontend import Frontend
     app = Frontend(900, 500)
     app.sound_manager = MagicMock()
     app._on_start_game({"mode": "single_screen", "nickname": "a",
@@ -291,7 +291,7 @@ def test_right_click_drag_twice_toggles_arrow_off():
 
 
 def test_right_click_in_menu_mode_is_noop():
-    from frontend.frontend import Frontend
+    from chessshootout.frontend.frontend import Frontend
     app = Frontend(900, 500)
     app.sound_manager = MagicMock()
     rect = app.board._cell_rect(0, 0)

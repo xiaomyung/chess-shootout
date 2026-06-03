@@ -7,8 +7,8 @@ os.environ.setdefault("SDL_AUDIODRIVER", "dummy")
 import pygame as pg
 import pytest
 
-from frontend.visual.colors import Colors
-from frontend.window_chrome import (
+from chessshootout.frontend.visual.colors import Colors
+from chessshootout.frontend.window_chrome import (
     WindowChrome,
     _SDLPoint,
     _HITTEST_NORMAL,
@@ -109,9 +109,9 @@ def test_dot_draws_glyph_on_hover(chrome, monkeypatch):
 
 
 def test_layout_reserves_titlebar_and_keeps_board_playable_at_min_size():
-    from infra import env
+    from chessshootout.infra import env
     env.init_paths()
-    from frontend.frontend import Frontend
+    from chessshootout.frontend.frontend import Frontend
     app = Frontend(900, 500)
     assert app.board.board_offset_y >= app.chrome.HEIGHT - 1
     assert app.board.cell_size > 40

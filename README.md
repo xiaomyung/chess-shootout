@@ -74,7 +74,7 @@ python3.12 -m venv .venv          # Windows: py -3.12 -m venv .venv
 source .venv/bin/activate         # Windows: .venv\Scripts\Activate.ps1
 python --version                  # confirm 3.12.x
 pip install -e .                  # add ".[dev]" for tests + linting
-python main.py
+python -m chessshootout.main      # or just: chess-shootout
 ```
 
 `-e` is an editable install: pip resolves dependencies but runs against your
@@ -129,9 +129,9 @@ Two players, one server — authoritative, running the same engine as the client
 ### Quick start (local)
 
 ```bash
-python -m server                                      # terminal 1 (port 8000)
-python main.py --client-uuid alice --nickname Alice   # terminal 2
-python main.py --client-uuid bob   --nickname Bob     # terminal 3
+python -m chessshootout.server                                      # terminal 1 (port 8000)
+python -m chessshootout.main --client-uuid alice --nickname Alice   # terminal 2
+python -m chessshootout.main --client-uuid bob   --nickname Bob     # terminal 3
 ```
 
 `--client-uuid alice` is a debug shortcut: any non-UUID4 alias is coerced to
@@ -208,7 +208,7 @@ Install the dev extra, then run the same checks CI does:
 ```bash
 pip install -e ".[dev]"
 pytest tests -n 8 -q                            # ~12 s for 1331 tests (~25 s serial)
-pylama backend frontend server main.py paths.py tests   # pycodestyle + pyflakes; exits 0 when clean
+pylama chessshootout tests                      # pycodestyle + pyflakes; exits 0 when clean
 ```
 
 Both gate merges to `master` (the `test` and `lint` jobs), so a green local

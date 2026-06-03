@@ -6,7 +6,7 @@
 #                                  --add-data "assets;assets" \
 #                                  --collect-data certifi --hidden-import certifi \
 #                                  --exclude-module fastapi --exclude-module uvicorn \
-#                                  --exclude-module starlette --exclude-module slowapi main.py
+#                                  --exclude-module starlette --exclude-module slowapi chessshootout/main.py
 #
 # Only the web stack is excluded; server.protocol (pydantic-only) stays, since the
 # client imports it. macOS wraps the COLLECT output into ChessShootout.app via BUNDLE.
@@ -18,7 +18,7 @@ from PyInstaller.utils.hooks import collect_data_files
 CHESS_VERSION = os.environ.get("CHESS_VERSION", "0.0.0")
 
 a = Analysis(
-    ["main.py"],
+    ["chessshootout/main.py"],
     pathex=["."],
     binaries=[],
     datas=[("assets", "assets"), ("ATTRIBUTION.md", "."), ("LICENSE", "."),

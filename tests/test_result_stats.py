@@ -6,9 +6,9 @@ import os
 
 os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
 
-from backend.pieces import Piece, PieceColor, PieceType
-from backend.utils import Square, Move, HistoryEntry
-from domain.result_stats import compute_result_stats, _best_streak
+from chessshootout.backend.pieces import Piece, PieceColor, PieceType
+from chessshootout.backend.utils import Square, Move, HistoryEntry
+from chessshootout.domain.result_stats import compute_result_stats, _best_streak
 
 W, B = PieceColor.WHITE, PieceColor.BLACK
 
