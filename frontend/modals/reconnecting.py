@@ -3,7 +3,7 @@ import math
 import pygame as pg
 
 from frontend.modals.base import BaseModal
-from frontend.online.client import RECONNECT_TOTAL_SECONDS
+from online.client import RECONNECT_TOTAL_SECONDS
 from frontend.panels.player_strip import format_countdown
 from frontend.visual.colors import Colors
 from frontend.visual.draw import supersample

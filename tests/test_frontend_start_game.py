@@ -16,7 +16,7 @@ from backend.utils import Square
 from backend.pieces import PieceColor
 from infra import countries, env
 from frontend.frontend import Frontend, OPPONENT_NAME_FOR_MODE
-from frontend.online.client import OnlineClient
+from online.client import OnlineClient
 from frontend.pgn.load import extract_csmatchid, parse_pgn_headers
 from tests.helpers import fake_uuid4
 

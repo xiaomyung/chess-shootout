@@ -36,7 +36,7 @@ from frontend.visual.fonts import get_font
 from frontend.visual import backdrop
 from frontend.visual.effects import TAKEOVER_TOTAL_MS
 from frontend.window_chrome import WindowChrome, WINDOW_FLAGS
-from frontend.online.client import (
+from online.client import (
     OnlineClient, RECONNECT_TOTAL_SECONDS, fetch_resume, probe_active_game,
 )
 from frontend.online.events import ONLINE_HARD_FAILURE_LABELS, OnlineEventsMixin

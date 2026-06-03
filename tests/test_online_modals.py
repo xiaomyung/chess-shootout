@@ -6,7 +6,7 @@ os.environ.setdefault("SDL_AUDIODRIVER", "dummy")
 import pygame as pg
 import pytest
 
-from frontend.online.client import OnlineClient
+from online.client import OnlineClient
 from frontend.modals.wait import WaitModal
 
 

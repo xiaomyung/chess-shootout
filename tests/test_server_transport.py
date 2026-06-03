@@ -18,7 +18,7 @@ import ssl
 import httpx
 import pytest
 
-from frontend.online.transport import (
+from online.transport import (
     FatalResumeError, SchemaVersionMismatch, ServerTransport, ServerWebSocket,
     TransportError, TransportHTTPError,
 )
@@ -373,7 +373,7 @@ async def test_ws_connect_uses_tls_context_for_wss(monkeypatch):
         captured["ssl"] = kwargs.get("ssl")
         return _FakeWs()
 
-    monkeypatch.setattr("frontend.online.transport.websockets.connect", _fake_connect)
+    monkeypatch.setattr("online.transport.websockets.connect", _fake_connect)
     st = ServerTransport("chess.example.com")
     await st.ws_connect("room1", "tok")
     assert isinstance(captured["ssl"], ssl.SSLContext)
@@ -391,7 +391,7 @@ async def test_ws_connect_plaintext_for_ws(monkeypatch):
         captured["ssl"] = kwargs.get("ssl")
         return _FakeWs()
 
-    monkeypatch.setattr("frontend.online.transport.websockets.connect", _fake_connect)
+    monkeypatch.setattr("online.transport.websockets.connect", _fake_connect)
     st = ServerTransport("localhost:8000")
     await st.ws_connect("room1", "tok")
     assert captured["ssl"] is None
@@ -459,24 +459,22 @@ async def test_server_websocket_send_methods_emit_typed_payloads():
 def test_only_transport_module_imports_httpx_or_websockets():
     import os
     import re
-    frontend_dir = os.path.join(
-        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-        "frontend",
-    )
+    root_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     bad_pattern = re.compile(r"^\s*(import\s+httpx|import\s+websockets|"
                                 r"from\s+httpx|from\s+websockets)",
                                 re.MULTILINE)
     offenders = []
-    for root, _, files in os.walk(frontend_dir):
-        for name in files:
-            if not name.endswith(".py"):
-                continue
-            path = os.path.join(root, name)
-            if path.endswith(os.path.join("online", "transport.py")):
-                continue
-            with open(path) as f:
-                if bad_pattern.search(f.read()):
-                    offenders.append(path)
+    for pkg in ("frontend", "online"):
+        for root, _, files in os.walk(os.path.join(root_dir, pkg)):
+            for name in files:
+                if not name.endswith(".py"):
+                    continue
+                path = os.path.join(root, name)
+                if path.endswith(os.path.join("online", "transport.py")):
+                    continue
+                with open(path) as f:
+                    if bad_pattern.search(f.read()):
+                        offenders.append(path)
     assert offenders == [], (
-        f"these modules import httpx/websockets directly: {offenders}"
+        f"only online/transport.py may import httpx/websockets: {offenders}"
     )

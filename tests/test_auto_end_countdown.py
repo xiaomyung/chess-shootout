@@ -19,7 +19,7 @@ from backend.match import BOT, ONLINE, SINGLE_SCREEN
 from backend.pieces import PieceColor
 from backend.utils import Square
 from frontend.frontend import Frontend
-from frontend.online.client import RECONNECT_TOTAL_SECONDS
+from online.client import RECONNECT_TOTAL_SECONDS
 from server.protocol import FIRST_MOVE_ABORT_SECONDS, GRACE_SECONDS
 
 

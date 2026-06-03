@@ -7,7 +7,7 @@ from dataclasses import dataclass
 
 import paths
 from infra import crash_log
-from frontend.online.transport import (
+from online.transport import (
     FatalResumeError, ServerTransport, TransportError, TransportHTTPError,
     SchemaVersionMismatch, WsConnectionClosed,
 )

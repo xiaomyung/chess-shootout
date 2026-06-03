@@ -21,7 +21,7 @@ from frontend.modals.options import OptionsModal
 from frontend.modals.result import ResultMenu
 from frontend.modals.start import StartMenu
 from frontend.modals.wait import WaitModal
-from frontend.online.client import OnlineClient
+from online.client import OnlineClient
 from frontend.panels.audio import AudioPanel
 from frontend.panels.base import BasePanel
 from frontend.panels.player_strip import PlayerStrip

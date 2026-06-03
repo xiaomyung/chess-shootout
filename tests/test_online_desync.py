@@ -325,7 +325,7 @@ def test_online_error_room_lost_clears_resyncing():
 
 
 def test_opponent_resync_shows_toast():
-    from frontend.online.client import Event
+    from online.client import Event
     app = _online_app()
     app._handle_online_event(Event("resync", {}))
     assert app.toast.message == "Opponent is resyncing…"

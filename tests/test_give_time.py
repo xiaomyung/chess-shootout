@@ -162,7 +162,7 @@ def test_disabled_keys_includes_give_time_after_result():
 
 
 def test_online_client_send_give_time_enqueues():
-    from frontend.online.client import OnlineClient
+    from online.client import OnlineClient
     client = OnlineClient()
     client._loop = MagicMock()
     client._loop.is_closed.return_value = False
