@@ -1244,6 +1244,8 @@ class Frontend(OnlineEventsMixin):
         self._refresh_reconnect_button()
         if self.mode == "menu" and not self._menu_overlay_active():
             self.menu_page.draw_foreground()
+        if self.mode == "menu":
+            self.menu_battle.draw_intro_overlay(self.window)
         self.options_modal.draw()
         self.directory_browser.draw()
         self.country_picker.draw()
@@ -1253,8 +1255,6 @@ class Frontend(OnlineEventsMixin):
         self.help_modal.draw()
         self.fen_input_modal.draw()
         self.confirm_modal.draw()
-        if self.mode == "menu":
-            self.menu_battle.draw_intro_overlay(self.window)
         self.toast.draw()
         self._drain_online_inbound()
         self._update_online_phase()

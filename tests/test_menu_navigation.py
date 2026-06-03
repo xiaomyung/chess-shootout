@@ -71,6 +71,22 @@ def test_battle_avoid_rect_follows_active_page():
     assert app.menu_battle.avoid_rect == app.history_view.rect
 
 
+def test_intro_overlay_draws_behind_menu_modals(monkeypatch):
+    """The battle fly-in queen must paint before the modals, so she never covers an open modal."""
+    app = make_app()
+    order = []
+    monkeypatch.setattr(app.menu_battle, "draw_intro_overlay",
+                        lambda *a, **k: order.append("intro"))
+    monkeypatch.setattr(app.options_modal, "draw", lambda *a, **k: order.append("options"))
+    monkeypatch.setattr(app.confirm_modal, "draw", lambda *a, **k: order.append("confirm"))
+    app.draw_frame()
+    assert {"intro", "options", "confirm"} <= set(order)
+    assert order.index("intro") < order.index("options"), \
+        "the fly-in queen must draw before (behind) the options modal"
+    assert order.index("intro") < order.index("confirm"), \
+        "and behind every other menu modal"
+
+
 def test_unloadable_pgn_restores_menu(tmp_path):
     bad = tmp_path / "broken.pgn"
     bad.write_text('[White "x"]\n\n1. e4 zz9 *')
