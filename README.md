@@ -1,8 +1,11 @@
 # Chess Shootout
 
-A full-featured chess game built with [pygame](https://www.pygame.org/) —
-local hot-seat play, premoves, clocks, annotations, PGN auto-save and
-review, plus an authoritative server for online two-player matches.
+A full-featured chess game built with [pygame](https://www.pygame.org/):
+a clean UI at rest with comedic **gun-fight** chaos in the moments — pieces
+blast each other off the board and an FPS-style announcer calls the
+killstreaks. Local hot-seat play, premoves, clocks, annotations, PGN
+auto-save and review, plus an authoritative server for online two-player
+matches.
 
 ## Features
 
@@ -16,6 +19,16 @@ review, plus an authoritative server for online two-player matches.
 - Captured-piece graveyard with running material balance; master-volume
   slider persisted to `.env`.
 - Help modal listing every shortcut (`?` or the right-panel button).
+
+**Presentation**
+- Gun-fight captures — muzzle flash, tracer, impact, bullet holes, ragdoll,
+  comic blood, and board screen-shake; each piece type fires its own shot.
+- FPS-style announcer with killstreaks (FIRST BLOOD → DOUBLE … GODLIKE), a
+  checkmate takeover, and a surrender flag.
+- Custom borderless window chrome — native drag, edge/corner resize, and a
+  themed title bar on every screen.
+- Animated menu "battle" backdrop and themed result / online screens; a
+  reduce-motion toggle and effect-intensity control live in Options.
 
 **PGN**
 - Every game auto-saves to `games/<prefix>-YYYYMMDD-HHMMSS.pgn` (`local`,
@@ -207,7 +220,7 @@ Install the dev extra, then run the same checks CI does:
 
 ```bash
 pip install -e ".[dev]"
-pytest tests -n 8 -q                            # ~12 s for 1331 tests (~25 s serial)
+pytest tests -n 8 -q                            # run the test suite
 pylama chessshootout tests                      # pycodestyle + pyflakes; exits 0 when clean
 ```
 
