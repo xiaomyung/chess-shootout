@@ -168,6 +168,7 @@ MIN_MODAL_WIDTH = 360
 SAVED_PGN_TOAST_DURATION_MS = 3000
 RESYNC_TIMEOUT_MS = 8000
 RECONNECT_PROBE_INTERVAL_MS = 5000
+RECONNECT_PROBE_MAX_ATTEMPTS = 3
 
 MIN_WINDOW_WIDTH = 900
 MIN_WINDOW_HEIGHT = 500
@@ -267,6 +268,7 @@ class Frontend(OnlineEventsMixin):
         self._last_reconnect_probe_ms = 0
         self._reconnect_probe_inflight = False
         self._reconnect_probe_gen = 0
+        self._reconnect_probe_attempts = 0
         self.audio_panel = AudioPanel(self.window, self.sound_manager)
         self.right_menu = RightMenu(self.window, self.match, {
             "undo": self._on_undo,
@@ -391,6 +393,7 @@ class Frontend(OnlineEventsMixin):
     def _on_back_to_menu(self):
         self.mode = "menu"
         self._match_session_id = None
+        self._reconnect_probe_attempts = 0
         pg.display.set_caption(WINDOW_TITLE)
         if self.online_client is not None:
             self.online_client.disconnect()
@@ -658,8 +661,12 @@ class Frontend(OnlineEventsMixin):
     def _spawn_reconnect_probe(self):
         addr = env.get_server_addr()
         client_uuid = env.get_or_create_client_uuid()
-        if not addr or not client_uuid or self._reconnect_probe_inflight:
+        if (not addr or not client_uuid or self._reconnect_probe_inflight
+                or self._reconnect_probe_attempts >= RECONNECT_PROBE_MAX_ATTEMPTS):
             return
+        with self._pending_reconnect_lock:
+            if self._pending_reconnect is not None:
+                return
         self._last_reconnect_probe_ms = pg.time.get_ticks()
         self._reconnect_probe_inflight = True
         with self._pending_reconnect_lock:
@@ -682,6 +689,7 @@ class Frontend(OnlineEventsMixin):
                     return
                 if reclaim is None or resume is None:
                     self._pending_reconnect = None
+                    self._reconnect_probe_attempts += 1
                 else:
                     self._pending_reconnect = {
                         "addr": addr,
@@ -865,6 +873,7 @@ class Frontend(OnlineEventsMixin):
 
     def _return_to_menu_card(self):
         self.mode = "menu"
+        self._reconnect_probe_attempts = 0
         self.start_menu.show()
         self.menu_page.set_page(PAGE_CARD)
 
