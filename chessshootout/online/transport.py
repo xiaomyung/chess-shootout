@@ -11,7 +11,7 @@ from websockets.exceptions import ConnectionClosed
 
 from chessshootout.server.protocol import (
     AuthMessage, CancelMatchmakeRequest, DrawResponseMessage, HealthResponse,
-    MatchmakeRequest, MatchmakeResponse, MoveMessage, PROTOCOL_VERSION,
+    MatchmakeRequest, MatchmakeResponse, MoveMessage, PingMessage, PROTOCOL_VERSION,
     Reason, ReclaimRequest, ReclaimResponse, RematchRequestMessage,
     RematchResponseMessage, ResumeRequest, ResumeResponse,
     TakebackResponseMessage,
@@ -277,8 +277,8 @@ class ServerWebSocket:
     async def send_give_time(self):
         await self._send_raw({"type": "give_time", "version": PROTOCOL_VERSION})
 
-    async def send_resync(self):
-        await self._send_raw({"type": "resync", "version": PROTOCOL_VERSION})
+    async def send_ping(self, ply):
+        await self._send(PingMessage(ply=ply))
 
     async def _send(self, message):
         await self._ws.send(message.model_dump_json(by_alias=True))

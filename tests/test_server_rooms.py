@@ -162,6 +162,32 @@ async def test_finalize_result_aborts_with_no_winner(manager, clock):
 
 
 @pytest.mark.asyncio
+async def test_in_progress_room_for_only_matches_started_unfinished_games(manager):
+    await manager.enqueue(**_enqueue_kwargs("alice"))
+    assert manager.in_progress_room_for("alice") is None
+    room = await manager.enqueue(**_enqueue_kwargs("bob"))
+    assert manager.in_progress_room_for("alice") is None
+    room.first_move_at = 1.0
+    in_prog = manager.in_progress_room_for("alice")
+    assert in_prog is not None
+    assert in_prog[0] is room
+    assert in_prog[1] == room.color_of("alice")
+    manager.finalize_result(room.room_id, "checkmate", winner_color="white")
+    assert manager.in_progress_room_for("alice") is None
+
+
+@pytest.mark.asyncio
+async def test_release_for_new_game_frees_active_and_queued_uuids(manager):
+    await manager.enqueue(**_enqueue_kwargs("alice"))
+    room = await manager.enqueue(**_enqueue_kwargs("bob"))
+    manager.release_for_new_game("alice")
+    assert manager.get(room.room_id) is None
+    await manager.enqueue(**_enqueue_kwargs("alice"))
+    manager.release_for_new_game("bob")
+    await manager.enqueue(**_enqueue_kwargs("bob"))
+
+
+@pytest.mark.asyncio
 async def test_clock_keeps_ticking_during_grace(manager, clock):
     """Clock is server-authoritative and never pauses on disconnect."""
     await manager.enqueue(**_enqueue_kwargs("alice", time_minutes=1, increment_seconds=0))

@@ -124,7 +124,12 @@ def test_reconnecting_overlay_appears_when_client_state_is_reconnecting(frontend
 
 def test_reconnecting_overlay_hides_when_client_recovers(frontend):
     frontend.mode = ONLINE
-    fake_client = SimpleNamespace(state="reconnecting")
+    fake_client = SimpleNamespace(
+        state="reconnecting",
+        is_server_silent=lambda: False,
+        heartbeat_interval=lambda: 2.0,
+        send_ping=lambda ply: None,
+    )
     frontend.online_client = fake_client
     frontend._update_online_phase()
     assert frontend.reconnecting_modal.is_visible()

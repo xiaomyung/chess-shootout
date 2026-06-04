@@ -1,14 +1,32 @@
+import os
 import re
 from typing import Literal, Optional
 
 from pydantic import BaseModel, Field, field_validator
 
 
+def _env_float(name, default):
+    try:
+        return float(os.environ[name])
+    except (KeyError, ValueError):
+        return default
+
+
+def _env_int(name, default):
+    try:
+        return int(os.environ[name])
+    except (KeyError, ValueError):
+        return default
+
+
 PROTOCOL_VERSION = 1
 MAX_NICKNAME_LEN = 20
 GIVE_TIME_SECONDS = 15
 FIRST_MOVE_ABORT_SECONDS = 60
-GRACE_SECONDS = 60
+GRACE_SECONDS = _env_float("GRACE_SECONDS", 60.0)
+HEARTBEAT_INTERVAL_SECONDS = _env_float("HEARTBEAT_INTERVAL_SECONDS", 2.0)
+HEARTBEAT_MISS_LIMIT = _env_int("HEARTBEAT_MISS_LIMIT", 3)
+HEARTBEAT_TIMEOUT_SECONDS = HEARTBEAT_INTERVAL_SECONDS * HEARTBEAT_MISS_LIMIT
 
 UUID4_RE = re.compile(
     r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$",
@@ -47,6 +65,7 @@ class Reason:
     TIMEOUT = "timeout"
     ABORTED = "aborted"
     ABORTED_DISCONNECT = "aborted_disconnect"
+    ABANDONMENT = "abandonment"
     SERVER_SHUTDOWN = "server_shutdown"
 
 
@@ -158,6 +177,8 @@ class ResumeResponse(_Base):
     black_score: float = 0.0
     white_country: Optional[str] = None
     black_country: Optional[str] = None
+    heartbeat_interval_seconds: float = HEARTBEAT_INTERVAL_SECONDS
+    grace_seconds: float = GRACE_SECONDS
 
 
 class ReclaimRequest(_Base):
@@ -228,6 +249,8 @@ class GameStartMessage(_Base):
     black_score: float = 0.0
     white_country: Optional[str] = None
     black_country: Optional[str] = None
+    heartbeat_interval_seconds: float = HEARTBEAT_INTERVAL_SECONDS
+    grace_seconds: float = GRACE_SECONDS
 
 
 class MoveAppliedMessage(_Base):
@@ -272,16 +295,20 @@ class TimeGrantedMessage(_Base):
 
 class ConnectionStatusMessage(_Base):
     type: Literal["connection_status"] = "connection_status"
-    opp_state: Literal["connected", "reconnecting", "disconnected"]
+    opp_state: Literal["connected", "reconnecting", "resyncing"]
 
 
-class StateSyncMessage(_Base):
-    type: Literal["state_sync"] = "state_sync"
-    ply: int
+class PingMessage(_Base):
+    type: Literal["ping"] = "ping"
+    ply: int = 0
 
 
-class ResyncNoticeMessage(_Base):
-    type: Literal["resync"] = "resync"
+class PongMessage(_Base):
+    type: Literal["pong"] = "pong"
+
+
+class ResyncDirectiveMessage(_Base):
+    type: Literal["resync_directive"] = "resync_directive"
 
 
 class ErrorMessage(_Base):

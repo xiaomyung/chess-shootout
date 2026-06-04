@@ -21,11 +21,11 @@ def _main():
         os.environ.setdefault("CHESS_MAX_ROOMS", str(args.max_rooms))
         uvicorn.run("chessshootout.server.__main__:_app_factory", host=args.host, port=args.port,
                     reload=True, factory=True,
-                    ws_ping_interval=20, ws_ping_timeout=30)
+                    ws_ping_interval=None)
     else:
         app = create_app(max_rooms=args.max_rooms)
         uvicorn.run(app, host=args.host, port=args.port,
-                    ws_ping_interval=20, ws_ping_timeout=30)
+                    ws_ping_interval=None)
 
 
 def _app_factory():

@@ -277,11 +277,11 @@ async def test_healthz_async_returns_none_when_unreachable():
 
 
 async def _recv_skip_beacons(ws):
-    """Next non-beacon message. The server broadcasts a periodic state_sync beacon
-    during a live game, which can interleave with the message under test."""
+    """Next message that isn't a heartbeat pong, which can interleave with the
+    message under test once a client starts pinging."""
     while True:
         msg = await asyncio.wait_for(ws.recv(), timeout=10.0)
-        if msg["type"] != "state_sync":
+        if msg["type"] != "pong":
             return msg
 
 
@@ -452,8 +452,10 @@ async def test_server_websocket_send_methods_emit_typed_payloads():
     await ws.send_give_time()
     assert json.loads(inner.sent[-1])["type"] == "give_time"
 
-    await ws.send_resync()
-    assert json.loads(inner.sent[-1])["type"] == "resync"
+    await ws.send_ping(3)
+    sent = json.loads(inner.sent[-1])
+    assert sent["type"] == "ping"
+    assert sent["ply"] == 3
 
 
 def test_only_transport_module_imports_httpx_or_websockets():

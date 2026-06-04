@@ -233,7 +233,7 @@ class Frontend(OnlineEventsMixin):
         self._series_scores = {}
         self._resyncing = False
         self._resync_started_at_ms = 0
-        self._last_beacon_mismatch_ply = None
+        self._last_heartbeat_sent_ms = 0
         self._last_give_time_at_ms = -GIVE_TIME_DEBOUNCE_MS
         self._first_move_deadline_ms = None
         self._opp_disconnected_at_ms = None
@@ -888,6 +888,7 @@ class Frontend(OnlineEventsMixin):
                     (pg.time.get_ticks() - self._wait_started_at_ms) // 1000)
         self.match_found_modal.update()
         self._track_local_online_state()
+        self._send_heartbeat_if_due()
         if (self.mode == ONLINE and self.current_result() is None
                 and self.online_client is not None
                 and self.online_client.state == "reconnecting"):
@@ -899,13 +900,26 @@ class Frontend(OnlineEventsMixin):
         if self._resyncing:
             if pg.time.get_ticks() - self._resync_started_at_ms > RESYNC_TIMEOUT_MS:
                 self._resyncing = False
-                self._last_beacon_mismatch_ply = None
                 if (self.online_client is not None
                         and self.online_client.state == "connected"):
                     log.info("resync timed out; escalating to reconnect")
                     self.online_client.force_reconnect()
             else:
                 self.toast.show("Resyncing…")
+
+    def _send_heartbeat_if_due(self):
+        if (self.mode != ONLINE or self.online_client is None
+                or self.online_client.state != "connected"
+                or self.current_result() is not None):
+            return
+        if self.online_client.is_server_silent():
+            log.info("server heartbeat silent; escalating to reconnect")
+            self.online_client.force_reconnect()
+            return
+        now = pg.time.get_ticks()
+        if now - self._last_heartbeat_sent_ms >= self.online_client.heartbeat_interval() * 1000:
+            self._last_heartbeat_sent_ms = now
+            self.online_client.send_ping(len(self.match.move_history))
 
     def _track_local_online_state(self):
         current = self.online_client.state if self.online_client is not None else None
