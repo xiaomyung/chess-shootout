@@ -235,15 +235,6 @@ class RoomManager:
                         and now - slot.disconnected_at >= GRACE_SECONDS):
                     yield room, color
 
-    def finalize_abandonment(self, room_id, abandoned_color):
-        room = self._active.get(room_id)
-        if room is None or room.result is not None:
-            return
-        winner = room.opp_color(abandoned_color)
-        room.result = ("abandonment", winner)
-        room.ended_at = self._now()
-        self._award_series(room, "abandonment", winner)
-
     def finalize_result(self, room_id, reason, winner_color=None):
         room = self._active.get(room_id)
         if room is None or room.result is not None:
@@ -254,7 +245,7 @@ class RoomManager:
 
     @staticmethod
     def _award_series(room, reason, winner_color):
-        if reason in ("aborted", "server_shutdown"):
+        if reason in ("aborted", "aborted_disconnect", "server_shutdown"):
             return
         scores = room.series_scores
         if winner_color in ("white", "black"):

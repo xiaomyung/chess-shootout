@@ -51,7 +51,14 @@ _HITTEST_CB = ctypes.CFUNCTYPE(
 )
 
 
-def _load_sdl():
+def _iter_sdl_candidates():
+    if os.name == "nt" and hasattr(ctypes, "WinDLL"):
+        try:
+            handle = ctypes.windll.kernel32.GetModuleHandleW("SDL2.dll")
+            if handle:
+                yield ctypes.WinDLL("SDL2.dll", handle=handle)
+        except (OSError, AttributeError):
+            pass
     pgdir = os.path.dirname(pg.__file__)
     roots = (pgdir, os.path.join(pgdir, ".."), os.path.join(pgdir, "..", "pygame.libs"),
              os.path.join(pgdir, ".dylibs"))
@@ -60,14 +67,20 @@ def _load_sdl():
         for pattern in patterns:
             for path in sorted(glob.glob(os.path.join(root, pattern))):
                 try:
-                    return ctypes.CDLL(path)
+                    yield ctypes.CDLL(path)
                 except OSError:
                     continue
-    name = ctypes.util.find_library("SDL2") or "SDL2"
-    return ctypes.CDLL(name)
+    for name in (ctypes.util.find_library("SDL2"), "libSDL2-2.0.so.0", "SDL2"):
+        if not name:
+            continue
+        try:
+            yield ctypes.CDLL(name)
+        except OSError:
+            continue
 
 
 class WindowChrome:
+    DOT_BUTTONS = (("close", Colors.loss), ("max", Colors.win), ("min", Colors.amber))
     HEIGHT = 36
     RESIZE_BORDER = 6
     DOT_RADIUS = 6
@@ -99,23 +112,13 @@ class WindowChrome:
     def _init_sdl(self):
         try:
             from pygame._sdl2 import video as sdl2video
-            self._sdl = _load_sdl()
-            self._sdl.SDL_GetWindowFromID.restype = ctypes.c_void_p
-            self._sdl.SDL_GetWindowFromID.argtypes = [ctypes.c_uint32]
-            self._sdl.SDL_GetWindowFlags.restype = ctypes.c_uint32
-            self._sdl.SDL_GetWindowFlags.argtypes = [ctypes.c_void_p]
-            self._sdl.SDL_SetWindowHitTest.restype = ctypes.c_int
-            self._sdl.SDL_SetWindowHitTest.argtypes = [
-                ctypes.c_void_p, _HITTEST_CB, ctypes.c_void_p
-            ]
-            self._sdl.SDL_SetWindowMinimumSize.argtypes = [
-                ctypes.c_void_p, ctypes.c_int, ctypes.c_int
-            ]
-            self._sdl.SDL_MaximizeWindow.argtypes = [ctypes.c_void_p]
-            self._sdl.SDL_RestoreWindow.argtypes = [ctypes.c_void_p]
-            self._sdl.SDL_MinimizeWindow.argtypes = [ctypes.c_void_p]
             self._sdl_window = sdl2video.Window.from_display_module()
-            self._win_ptr = self._sdl.SDL_GetWindowFromID(self._sdl_window.id)
+            self._resolve_owning_sdl(self._sdl_window.id)
+            if self._sdl is None or not self._win_ptr:
+                log.error("window chrome disabled: no SDL2 instance owns the window")
+                self._sdl = None
+                self._win_ptr = None
+                return
             self._cb = _HITTEST_CB(self._hit_test)
             rc = self._sdl.SDL_SetWindowHitTest(self._win_ptr, self._cb, None)
             if rc != 0:
@@ -125,6 +128,36 @@ class WindowChrome:
             )
         except Exception:
             log.warning("window chrome SDL hit-test unavailable", exc_info=True)
+            self._sdl = None
+            self._win_ptr = None
+
+    def _resolve_owning_sdl(self, win_id):
+        for sdl in _iter_sdl_candidates():
+            try:
+                sdl.SDL_GetWindowFromID.restype = ctypes.c_void_p
+                sdl.SDL_GetWindowFromID.argtypes = [ctypes.c_uint32]
+                win_ptr = sdl.SDL_GetWindowFromID(win_id)
+            except (OSError, AttributeError):
+                continue
+            if win_ptr:
+                self._sdl = sdl
+                self._win_ptr = win_ptr
+                self._configure_sdl_functions()
+                return
+
+    def _configure_sdl_functions(self):
+        self._sdl.SDL_GetWindowFlags.restype = ctypes.c_uint32
+        self._sdl.SDL_GetWindowFlags.argtypes = [ctypes.c_void_p]
+        self._sdl.SDL_SetWindowHitTest.restype = ctypes.c_int
+        self._sdl.SDL_SetWindowHitTest.argtypes = [
+            ctypes.c_void_p, _HITTEST_CB, ctypes.c_void_p
+        ]
+        self._sdl.SDL_SetWindowMinimumSize.argtypes = [
+            ctypes.c_void_p, ctypes.c_int, ctypes.c_int
+        ]
+        self._sdl.SDL_MaximizeWindow.argtypes = [ctypes.c_void_p]
+        self._sdl.SDL_RestoreWindow.argtypes = [ctypes.c_void_p]
+        self._sdl.SDL_MinimizeWindow.argtypes = [ctypes.c_void_p]
 
     def _resize_code(self, x, y):
         w, h = self._w, self._h
@@ -186,9 +219,8 @@ class WindowChrome:
     def _layout_dots(self, w):
         self._dot_rects = {}
         cy = self.HEIGHT // 2
-        order = ("close", "max", "min")
         x = w - self.DOT_MARGIN_RIGHT
-        for key in order:
+        for key, _ in self.DOT_BUTTONS:
             rect = pg.Rect(0, 0, self.DOT_RADIUS * 2 + self.DOT_HIT_PAD, self.HEIGHT)
             rect.centerx = x - self.DOT_RADIUS
             rect.centery = cy
@@ -234,11 +266,7 @@ class WindowChrome:
                          (tx + wm.get_width(), ty - self._wordmark_accent.get_height() // 2))
 
     def _draw_dots(self):
-        colors = {
-            "min": Colors.amber,
-            "max": Colors.win,
-            "close": Colors.loss,
-        }
+        colors = dict(self.DOT_BUTTONS)
         mouse = pg.mouse.get_pos()
         for key, rect in self._dot_rects.items():
             base = pg.Color(colors[key])

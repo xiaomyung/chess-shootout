@@ -16,6 +16,8 @@ ALICE = fake_uuid4(1)
 BOB = fake_uuid4(2)
 ALICE2 = fake_uuid4(11)
 BOB2 = fake_uuid4(12)
+ALICE3 = fake_uuid4(13)
+BOB3 = fake_uuid4(14)
 
 
 def _drain(client, timeout=15.0):
@@ -97,5 +99,36 @@ def test_resign_broadcasts_result_to_both_clients(server):
     assert a_result.payload["reason"] == "resignation"
     assert a_result.payload["winner_color"] == "black"
     assert b_result.payload["reason"] == "resignation"
+    a.disconnect()
+    b.disconnect()
+
+
+def test_online_rematch_swaps_colors(server):
+    """On a mutual rematch the server swaps colours: White becomes Black and vice
+    versa, and each client's fresh game_start carries the flipped your_color."""
+    addr = f"localhost:{server}"
+    a = OnlineClient()
+    a.connect(addr, {"nickname": "Alice", "client_uuid": ALICE3,
+                      "time_minutes": 5, "increment_seconds": 0,
+                      "side_preference": "white"})
+    b = OnlineClient()
+    b.connect(addr, {"nickname": "Bob", "client_uuid": BOB3,
+                      "time_minutes": 5, "increment_seconds": 0,
+                      "side_preference": "black"})
+    assert _wait_for(a, "game_start").payload["your_color"] == "white"
+    assert _wait_for(b, "game_start").payload["your_color"] == "black"
+
+    a.send_resign()
+    _wait_for(a, "result")
+    _wait_for(b, "result")
+
+    a.send_rematch_request()
+    b.send_rematch_request()
+    a_game2 = _wait_for(a, "game_start")
+    b_game2 = _wait_for(b, "game_start")
+    assert a_game2 is not None and b_game2 is not None
+    assert a_game2.payload["your_color"] == "black"
+    assert b_game2.payload["your_color"] == "white"
+
     a.disconnect()
     b.disconnect()

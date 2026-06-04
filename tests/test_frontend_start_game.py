@@ -354,6 +354,22 @@ def test_new_game_reuses_match_session_id():
     assert app._match_session_id == first
 
 
+def test_local_new_game_flips_sides_and_names():
+    """A local rematch flips the player's side: who played White now plays Black, with
+    the name/country labels swapped to match."""
+    app = make_app()
+    app._on_start_game(base_config(side="white", nickname="alice"))
+    assert app._chosen_side == "white"
+    assert app.white_name == "alice"
+    app.white_country, app.black_country = "RO", "US"
+    app.manual_result = "white_wins"
+    app._on_new_game()
+    assert app._chosen_side == "black"
+    assert app.white_name == "Player 2"
+    assert app.black_name == "alice"
+    assert (app.white_country, app.black_country) == ("US", "RO")
+
+
 def test_back_to_menu_clears_match_session_id():
     app = make_app()
     app._on_start_game(base_config())
@@ -439,6 +455,18 @@ def test_auto_save_filename_prefix_per_mode(tmp_path, monkeypatch, mode_value, e
     files = list((tmp_path / "games").glob("*.pgn"))
     assert files
     assert files[0].name.startswith(f"{expected_prefix}-")
+
+
+@pytest.mark.parametrize("mode_value", ["single_screen", "online"])
+def test_start_game_persists_nickname(monkeypatch, mode_value):
+    """Starting a game (local or online) persists the entered nickname so the profile
+    survives a relaunch."""
+    app = make_app()
+    saved = []
+    monkeypatch.setattr(env, "set_nickname", lambda v: saved.append(v))
+    monkeypatch.setattr(OnlineClient, "connect", lambda self, addr, request: None)
+    app._on_start_game(base_config(mode=mode_value, nickname="Hikaru"))
+    assert saved == ["Hikaru"]
 
 
 def test_settings_close_persists_server_address(monkeypatch):

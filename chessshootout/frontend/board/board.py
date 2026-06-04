@@ -587,7 +587,7 @@ class Board:
 
     def jump_to_review_ply(self, ply):
         self.cancel_animations()
-        self.effects.clear()
+        self.effects.clear_transients()
         self._target_ply = None
         history_len = len(self.match.move_history)
         if ply is None or ply >= history_len:
@@ -903,6 +903,8 @@ class Board:
     def _should_switch_focus_to(self, square, grid, live_at_clicked, current_turn, local_color):
         if self.selected_square is None:
             return False
+        if not self._is_real_move_eligible(live_at_clicked, current_turn, local_color):
+            return False
         own_color = local_color if local_color is not None else current_turn
         selected_piece = grid[self.selected_square.row][self.selected_square.col]
         if selected_piece is None or selected_piece.color != own_color:
@@ -1024,7 +1026,7 @@ class Board:
         self.start_animation(rook_from, rook_to, rook_piece, on_complete=on_complete)
 
     def start_undo_animation(self, move):
-        self.effects.clear()
+        self.effects.clear_transients()
         moving_piece = self.match.piece_at(move.from_sq)
         if moving_piece is None:
             return

@@ -130,6 +130,12 @@ class OnlineClient:
         if self._ws is not None:
             asyncio.run_coroutine_threadsafe(self._ws.close(), self._loop)
 
+    def force_reconnect(self):
+        if self._loop is None or not self._loop.is_running():
+            return
+        if self._ws is not None:
+            asyncio.run_coroutine_threadsafe(self._ws.close(), self._loop)
+
     def send_move(self, from_sq, to_sq, promotion=None):
         self._enqueue("send_move", from_sq, to_sq, promotion)
 

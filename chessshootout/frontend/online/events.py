@@ -31,7 +31,7 @@ ONLINE_DRAW_REASONS = {
     "draw_agreement", "draw_stalemate", "draw_repetition",
     "draw_fifty_move", "draw_insufficient_material",
 }
-ONLINE_STATIC_RESULTS = {"aborted", "server_shutdown"}
+ONLINE_STATIC_RESULTS = {"aborted", "aborted_disconnect", "server_shutdown"}
 
 ONLINE_HARD_FAILURE_REASONS = {
     "server_unreachable", "reconnect_failed", "room_full",
@@ -177,6 +177,7 @@ class OnlineEventsMixin:
         if self._resyncing:
             return
         self._resyncing = True
+        self._last_beacon_mismatch_ply = None
         self.offer_banners.clear()
         self._resync_started_at_ms = pg.time.get_ticks()
         if self.online_client is not None:
@@ -287,6 +288,7 @@ class OnlineEventsMixin:
         elif reason in ONLINE_STATIC_RESULTS:
             self.manual_result = reason
         if self.manual_result is not None:
+            self._result_first_seen_at_ms = None
             self._first_move_deadline_ms = None
             self._opp_disconnected_at_ms = None
             self._local_disconnected_at_ms = None

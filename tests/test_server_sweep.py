@@ -74,14 +74,14 @@ async def test_sweep_step_clock_and_first_move(sweep, app, clock, time_minutes,
 
 
 @pytest.mark.asyncio
-async def test_sweep_step_grace_expired_yields_abandonment(sweep, app, clock):
+async def test_sweep_step_grace_expired_aborts(sweep, app, clock):
     room = await _pair(app.state.rooms)
     room.started_at = clock()
     room.first_move_at = clock()
     app.state.rooms.mark_disconnected(room.room_id, "white")
     clock.advance(61)
     await sweep.step_grace_expired()
-    assert room.result == (Reason.ABANDONMENT, "black")
+    assert room.result == (Reason.ABORTED_DISCONNECT, None)
 
 
 @pytest.mark.asyncio

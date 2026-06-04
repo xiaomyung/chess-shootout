@@ -2,7 +2,7 @@ from chessshootout.server import logging_setup
 from chessshootout.server.broadcasts import finalize_and_broadcast
 from chessshootout.server.connections import broadcast
 from chessshootout.server.protocol import (
-    FIRST_MOVE_ABORT_SECONDS, Reason, ResultMessage, StateSyncMessage,
+    FIRST_MOVE_ABORT_SECONDS, Reason, StateSyncMessage,
 )
 
 
@@ -82,13 +82,10 @@ class Sweep:
 
     async def step_grace_expired(self):
         for room, abandoned_color in list(self.rooms.grace_expired_rooms()):
-            winner = room.opp_color(abandoned_color)
-            log.info("abandonment room=%s loser=%s winner=%s",
-                     room.room_id, abandoned_color, winner)
-            self.rooms.finalize_abandonment(room.room_id, abandoned_color)
-            await broadcast(self.connections, room,
-                              ResultMessage(reason=Reason.ABANDONMENT,
-                                              winner_color=winner))
+            log.info("aborted room=%s reason=disconnect gone=%s",
+                     room.room_id, abandoned_color)
+            await finalize_and_broadcast(self.rooms, self.connections, room,
+                                         Reason.ABORTED_DISCONNECT)
 
     def step_drop_orphans_and_post_result(self):
         now = self._now()

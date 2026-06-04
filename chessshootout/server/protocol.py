@@ -46,7 +46,7 @@ class Reason:
     DRAW_INSUFFICIENT_MATERIAL = "draw_insufficient_material"
     TIMEOUT = "timeout"
     ABORTED = "aborted"
-    ABANDONMENT = "abandonment"
+    ABORTED_DISCONNECT = "aborted_disconnect"
     SERVER_SHUTDOWN = "server_shutdown"
 
 

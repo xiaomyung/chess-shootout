@@ -79,6 +79,7 @@ RESULT_TEXT = {
     "draw_insufficient_material": ("Draw", "by insufficient material"),
     "draw_agreement": ("Draw", "by agreement"),
     "aborted": ("Game aborted", "no moves played"),
+    "aborted_disconnect": ("Game aborted", "opponent disconnected"),
     "server_shutdown": ("Game cancelled", "server shutting down"),
 }
 
@@ -380,6 +381,10 @@ class Frontend(OnlineEventsMixin):
         return self.white_country if is_white else self.black_country
 
     def _on_new_game(self):
+        if self.mode == SINGLE_SCREEN:
+            self._chosen_side = "black" if self._chosen_side == "white" else "white"
+            self.white_name, self.black_name = self.black_name, self.white_name
+            self.white_country, self.black_country = self.black_country, self.white_country
         self._reset_to_new_game()
         self.sound_manager.play_game_start()
 
@@ -736,6 +741,7 @@ class Frontend(OnlineEventsMixin):
 
     def _on_start_game(self, config):
         env.set_last_mode(config["mode"])
+        env.set_nickname(config.get("nickname") or "")
         if config["mode"] == ONLINE:
             self._begin_online_flow(config)
             return
@@ -894,6 +900,10 @@ class Frontend(OnlineEventsMixin):
             if pg.time.get_ticks() - self._resync_started_at_ms > RESYNC_TIMEOUT_MS:
                 self._resyncing = False
                 self._last_beacon_mismatch_ply = None
+                if (self.online_client is not None
+                        and self.online_client.state == "connected"):
+                    log.info("resync timed out; escalating to reconnect")
+                    self.online_client.force_reconnect()
             else:
                 self.toast.show("Resyncing…")
 

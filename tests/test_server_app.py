@@ -326,8 +326,9 @@ async def test_clock_flag_during_play_broadcasts_timeout(app, clock):
 
 
 @pytest.mark.asyncio
-async def test_grace_expiry_yields_abandonment(app, clock):
-    """first_move_at set skips the abort window; grace expiry awards the opponent."""
+async def test_grace_expiry_aborts_game(app, clock):
+    """first_move_at set skips the no-first-move abort window; grace expiry on a
+    disconnect aborts the game with no winner (nobody wins from the other leaving)."""
     rooms = app.state.rooms
     await rooms.enqueue(client_uuid=ALICE, nickname="A", session_token="ta",
                         time_minutes=5, increment_seconds=0, side_preference="white")
@@ -339,7 +340,7 @@ async def test_grace_expiry_yields_abandonment(app, clock):
     rooms.mark_disconnected(room.room_id, "white")
     clock.advance(GRACE_SECONDS + 1)
     await _sweep(app)
-    assert room.result == (Reason.ABANDONMENT, "black")
+    assert room.result == (Reason.ABORTED_DISCONNECT, None)
 
 
 @pytest.mark.asyncio

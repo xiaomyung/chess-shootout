@@ -377,7 +377,8 @@ async def _ws_session(app, websocket, room_id):
                       room.room_id, auth_uuid[:8], msg_type,
                       (app.state.now() - t0) * 1000.0, outcome)
     finally:
-        if connections.remove(auth_room.room_id, auth_uuid, websocket):
+        removed = connections.remove(auth_room.room_id, auth_uuid, websocket)
+        if removed or connections.get_for_color(auth_room, auth_color) is None:
             rooms.mark_disconnected(auth_room.room_id, auth_color)
             log.info("ws disconnected room=%s color=%s",
                      auth_room.room_id, auth_color)

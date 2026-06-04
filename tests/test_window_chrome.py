@@ -108,6 +108,61 @@ def test_dot_draws_glyph_on_hover(chrome, monkeypatch):
     assert hovered != plain, "hovered close dot should show its × glyph"
 
 
+class _FakeFn:
+    def __init__(self, ret=0):
+        self.ret = ret
+        self.restype = None
+        self.argtypes = None
+        self.calls = []
+
+    def __call__(self, *args):
+        self.calls.append(args)
+        return self.ret
+
+
+class _FakeSDL:
+    """Stand-in for a ctypes-loaded SDL2 handle. GetWindowFromID returns win_ptr_ret;
+    a 0 return models the wrong-instance case (empty window registry)."""
+    def __init__(self, win_ptr_ret):
+        self.SDL_GetWindowFromID = _FakeFn(win_ptr_ret)
+        for name in ("SDL_GetWindowFlags", "SDL_SetWindowHitTest", "SDL_SetWindowMinimumSize",
+                     "SDL_MaximizeWindow", "SDL_RestoreWindow", "SDL_MinimizeWindow"):
+            setattr(self, name, _FakeFn(0))
+
+
+def test_resolve_owning_sdl_skips_wrong_instance(chrome, monkeypatch):
+    """The fix: a second SDL2 instance (empty window registry → NULL) is rejected and
+    the candidate whose SDL_GetWindowFromID resolves the window is chosen."""
+    import chessshootout.frontend.window_chrome as wc
+    wrong, right = _FakeSDL(0), _FakeSDL(0xABCD)
+    monkeypatch.setattr(wc, "_iter_sdl_candidates", lambda: iter([wrong, right]))
+    chrome._sdl = None
+    chrome._win_ptr = None
+    chrome._resolve_owning_sdl(7)
+    assert chrome._sdl is right
+    assert chrome._win_ptr == 0xABCD
+    assert wrong.SDL_GetWindowFromID.calls == [(7,)]
+
+
+def test_resolve_owning_sdl_disables_when_no_instance_owns_window(chrome, monkeypatch):
+    import chessshootout.frontend.window_chrome as wc
+    monkeypatch.setattr(wc, "_iter_sdl_candidates", lambda: iter([_FakeSDL(0), _FakeSDL(0)]))
+    chrome._sdl = None
+    chrome._win_ptr = None
+    chrome._resolve_owning_sdl(7)
+    assert chrome._sdl is None
+    assert not chrome._win_ptr
+
+
+def test_toggle_maximize_no_op_when_chrome_disabled(chrome):
+    """With no owning SDL2 instance the min/max actions must no-op, not crash."""
+    chrome._sdl = None
+    chrome._win_ptr = None
+    chrome._toggle_maximize()
+    chrome._minimize()
+    assert chrome._is_maximized() is False
+
+
 def test_layout_reserves_titlebar_and_keeps_board_playable_at_min_size():
     from chessshootout.infra import env
     env.init_paths()

@@ -317,6 +317,39 @@ def test_resyncing_self_heals_after_timeout():
     assert app._last_beacon_mismatch_ply is None
 
 
+def test_begin_resync_resets_beacon_debounce():
+    """A fresh resync clears the 2-strike debounce so a later divergence re-arms cleanly."""
+    app = _online_app()
+    app._last_beacon_mismatch_ply = 5
+    app._begin_resync()
+    assert app._last_beacon_mismatch_ply is None
+    assert app._resyncing is True
+
+
+def test_resync_timeout_escalates_to_reconnect():
+    """A resync that never lands escalates to a full reconnect, so the opponent's abandon
+    countdown starts and recovery runs through the standard reconnect path."""
+    from chessshootout.frontend.frontend import RESYNC_TIMEOUT_MS
+    app = _online_app()
+    app.online_client.state = "connected"
+    app._resyncing = True
+    app._resync_started_at_ms = pg.time.get_ticks() - (RESYNC_TIMEOUT_MS + 1000)
+    app._update_online_phase()
+    assert app._resyncing is False
+    app.online_client.force_reconnect.assert_called_once()
+
+
+def test_resync_timeout_no_escalation_when_already_reconnecting():
+    from chessshootout.frontend.frontend import RESYNC_TIMEOUT_MS
+    app = _online_app()
+    app.online_client.state = "reconnecting"
+    app._resyncing = True
+    app._resync_started_at_ms = pg.time.get_ticks() - (RESYNC_TIMEOUT_MS + 1000)
+    app._update_online_phase()
+    assert app._resyncing is False
+    app.online_client.force_reconnect.assert_not_called()
+
+
 def test_online_error_room_lost_clears_resyncing():
     app = _online_app()
     app._resyncing = True

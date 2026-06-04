@@ -91,6 +91,14 @@ def get_nickname():
     return os.environ.get("CHESS_NICKNAME") or ""
 
 
+def set_nickname(value):
+    value = (value or "").strip()
+    if not value:
+        return
+    os.environ["CHESS_NICKNAME"] = value
+    _persist("CHESS_NICKNAME", value)
+
+
 def get_or_create_client_uuid():
     if _uuid_override:
         return _uuid_override
