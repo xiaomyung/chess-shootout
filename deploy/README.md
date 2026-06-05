@@ -93,27 +93,47 @@ sudo chmod 600 secrets/cf_aop_ca.pem
 
 ### 5. Firewall: only Cloudflare may reach the origin
 
-Docker's published ports **bypass UFW**, so the Cloudflare-ranges restriction
-must live in the `DOCKER-USER` chain, not a plain `ufw allow`:
+Docker's published ports **bypass UFW**, and Docker **recreates the `DOCKER-USER`
+chain on every boot and daemon restart** — so the Cloudflare-only rules can't live
+in `ufw` or `netfilter-persistent` (Docker would wipe them). Put them in a small
+systemd unit that re-applies them *after* Docker:
 
 ```bash
 sudo ufw allow ssh && sudo ufw default deny incoming && sudo ufw enable
 
-# Allow only Cloudflare ranges to the published 80/443 (IPv4 + IPv6):
-for ip in $(curl -s https://www.cloudflare.com/ips-v4); do
-  sudo iptables  -I DOCKER-USER -p tcp -m multiport --dports 80,443 -s "$ip" -j ACCEPT
+sudo tee /usr/local/sbin/cf-docker-firewall.sh >/dev/null <<'EOF'
+#!/usr/bin/env bash
+iptables -F DOCKER-USER
+for ip in $(curl -fsS --retry 3 https://www.cloudflare.com/ips-v4 || true); do
+  iptables -A DOCKER-USER -p tcp -m multiport --dports 80,443 -s "$ip" -j ACCEPT
 done
-for ip in $(curl -s https://www.cloudflare.com/ips-v6); do
-  sudo ip6tables -I DOCKER-USER -p tcp -m multiport --dports 80,443 -s "$ip" -j ACCEPT
-done
-# Drop everything else aimed at 80/443:
-sudo iptables  -A DOCKER-USER -p tcp -m multiport --dports 80,443 -j DROP
-sudo ip6tables -A DOCKER-USER -p tcp -m multiport --dports 80,443 -j DROP
-sudo apt-get install -y netfilter-persistent iptables-persistent
-sudo netfilter-persistent save
+iptables -A DOCKER-USER -p tcp -m multiport --dports 80,443 -j DROP
+iptables -A DOCKER-USER -j RETURN
+EOF
+sudo chmod 755 /usr/local/sbin/cf-docker-firewall.sh
+
+sudo tee /etc/systemd/system/cf-docker-firewall.service >/dev/null <<'EOF'
+[Unit]
+Description=Restrict published 80/443 to Cloudflare ranges
+After=docker.service network-online.target
+Wants=network-online.target
+Requires=docker.service
+PartOf=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/cf-docker-firewall.sh
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
+EOF
+sudo systemctl daemon-reload && sudo systemctl enable --now cf-docker-firewall.service
 ```
 
-This is the primary "only Cloudflare reaches the origin" control.
+This is the primary "only Cloudflare reaches the origin" control, and it survives
+reboots and Docker restarts. (The container publishes IPv4; if you enable Docker
+IPv6 publishing, add matching `ip6tables` rules with Cloudflare's IPv6 ranges.)
 
 ### 6. (Optional) Authenticated Origin Pulls
 
