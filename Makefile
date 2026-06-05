@@ -1,4 +1,4 @@
-.PHONY: build up up-edge down logs loadtest
+.PHONY: build up up-edge down logs loadtest update
 
 # Build the server image via compose.
 build:
@@ -23,3 +23,7 @@ logs:
 #   make loadtest ARGS="--addr localhost:8000 --rooms 200 --hold 60"
 loadtest:
 	.venv/bin/python tools/loadtest_server.py $(ARGS)
+
+# Update the running server to the latest release (or REF=v2.1.5) and recreate it.
+update:
+	./deploy/update.sh $(REF)
