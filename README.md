@@ -185,23 +185,29 @@ and persisted as `CHESS_DATA_DIR`.
 
 ### Reconnection
 
-Three layered recovery paths:
+Layered recovery:
 
-- **WS drops mid-game** (WiFi blip) — the client retries `/resume` every 2 s
-  for up to 60 s. The opponent sees a "Reconnecting…" overlay, a yellow status
-  dot, and an `Abandon in …` countdown; you see `Reconnect in …`. Desync is
-  caught two ways — every move/takeback carries a `ply` counter, and the server
-  emits a periodic `state_sync` beacon (~2.5 s) — so even a move lost with no
-  follow-up message to react to is detected and resynced via `/resume` within
-  seconds. Both players see a resync toast while it resolves.
+- **WS drops mid-game** (WiFi blip) — the client retries `/resume` until the
+  grace window (~60 s, server-configurable) expires. The opponent sees a
+  "Reconnecting…" overlay, a red status dot, and an `Abandon in …` countdown;
+  you see `Reconnect in …`. Liveness rides an **application-level heartbeat** —
+  a small `ping` the client sends every couple of seconds — so a dropped or
+  half-open connection is noticed even through a proxy. **Desync** is caught two
+  ways: every move/takeback carries a `ply` counter, and the heartbeat reports
+  the client's ply, so the server spots a player who has fallen behind and tells
+  it to `/resume`. While someone resyncs, the other player sees an amber status
+  dot and a toast.
 - **Client app restart** — on next launch the client probes `POST /reclaim`;
   if the room is still alive, a **Reconnect** button appears in the start menu.
 - **Server restart** — when `/resume` fails but `/healthz` is reachable, the
   client shows **"Server restarted — game ended"** with New Search / Cancel;
   New Search re-matches against your previous time control directly.
 
-Rooms are in-memory only (no DB), so a true server crash loses game state —
-but New Search starts a fresh game in one click.
+If a countdown ends with no reconnect, the game **aborts** (no winner) when a
+desync was left unresolved, or the waiting player **wins by abandonment** when
+the other side simply left; starting a new game while still in one forfeits the
+old immediately. Rooms are in-memory only (no DB), so a true server crash loses
+game state — but New Search starts a fresh game in one click.
 
 ### Crash logs
 
@@ -224,12 +230,16 @@ pytest tests -n 8 -q                            # run the test suite
 pylama chessshootout tests                      # pycodestyle + pyflakes; exits 0 when clean
 ```
 
-Both gate merges to `master` (the `test` and `lint` jobs), so a green local
-run means the PR checks will pass.
+These gate merges to `master` (the `test` and `lint` jobs); a third required
+check, `version-bump`, fails any PR that doesn't change `pyproject.toml`'s
+`[project].version`. So a green local run **plus a version bump** means the PR
+checks will pass.
 
 ### Releasing
 
 Releases are built by CI on a version tag — merging to `master` builds nothing.
+The version lives in **one place**, `pyproject.toml`'s `[project].version`; bump
+it (every PR does, anyway), then tag to match:
 
 ```bash
 git tag -a v1.2.0 -m "Chess Shootout 1.2.0"   # v1.2.0-rc1 for a pre-release
@@ -237,11 +247,16 @@ git push origin v1.2.0
 ```
 
 The tagged build runs the test suite, then builds all three OSes and stamps the
-version (taken from the tag) into every artifact filename, the Windows
-installer, the macOS bundle, and the in-app footer, before assembling a
-**draft** GitHub Release. A hyphen in the tag marks it a pre-release. Review the
-four artifacts, then **Publish**. No version is hardcoded anywhere — the tag is
-the single source of truth.
+version into every artifact filename, the Windows installer, the macOS bundle,
+and the in-app footer, before assembling a **draft** GitHub Release. The version
+is read from `pyproject.toml`, and the build **fails if the tag isn't
+`v<version>`** — so the tag and the package version can't drift. A hyphen marks
+a pre-release. Review the four artifacts, then **Publish**.
+
+To try real binaries *before* tagging, run the **dev-build** workflow
+(Actions → dev-build → Run workflow): it runs the same build and publishes the
+four artifacts to a private, maintainer-only **draft** pre-release
+(`v<version>-dev`) you can download and test locally.
 
 ## License
 

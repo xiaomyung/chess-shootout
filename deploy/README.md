@@ -124,6 +124,10 @@ PORT=8000
 LOG_LEVEL=INFO
 LOG_FILE=/var/log/chess-server.log
 MAX_ROOMS=100
+# Online-lifecycle tuning (optional; defaults shown):
+# GRACE_SECONDS=60                # reconnect window before a drop is resolved
+# HEARTBEAT_INTERVAL_SECONDS=2    # how often a client pings while in a game
+# HEARTBEAT_MISS_LIMIT=3          # missed pings before a player is marked gone
 EOF
 
 sudo touch /var/log/chess-server.log
