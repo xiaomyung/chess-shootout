@@ -1,0 +1,47 @@
+name: dev-build
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  version:
+    runs-on: ubuntu-latest
+    outputs:
+      ver: ${{ steps.v.outputs.ver }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - id: v
+        run: echo "ver=$(python packaging/project_version.py)-dev" >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: version
+    uses: ./.github/workflows/build.yml
+    with:
+      version: ${{ needs.version.outputs.ver }}
+
+  draft:
+    needs: [version, build]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Publish rolling private dev draft
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="v${{ needs.version.outputs.ver }}"
+          short="${GITHUB_SHA:0:7}"
+          gh release delete "$tag" --repo "$GITHUB_REPOSITORY" --yes --cleanup-tag 2>/dev/null || true
+          gh release create "$tag" dist/* \
+            --repo "$GITHUB_REPOSITORY" \
+            --draft --prerelease \
+            --title "Dev build $tag ($short)" \
+            --notes "Private dev build of \`${{ github.ref_name }}\` @ \`$short\`. Draft (maintainer-only) — download to test locally, then delete."
