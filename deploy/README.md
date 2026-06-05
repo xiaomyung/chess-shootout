@@ -179,11 +179,36 @@ curl -s https://chess.xiaomyung.com/healthz
 | Update | set `IMAGE_TAG` in `.env`, then `docker compose pull && sudo systemctl restart chess-server-compose` |
 | Rollback | pin a prior version (or image digest) in `.env`, `pull`, restart |
 
-**Normal updates** pin `IMAGE_TAG` to the version (e.g. `2.1.0`); `docker compose
-pull` fetches the latest build of that tag — including the **weekly base-image
-CVE rebuild**. For a guaranteed-unchanging rollback target, pin the full image
-**digest** in the compose `image:` line, since the `version`/`sha` tags are
-re-pushed by the weekly job.
+A clean `stop`/`restart` (or `up -d` onto a new image) lets the server broadcast
+`server_shutdown` to connected clients (`stop_grace_period` / `TimeoutStopSec=30`
+covers the 10 s drain).
 
-A clean `stop`/`restart` lets the server broadcast `server_shutdown` to connected
-clients (`TimeoutStopSec=30` covers the 10 s drain).
+## Updating to a new version
+
+A version-bumped PR merging to master auto-publishes the new image to GHCR
+(`docker.yml`). Roll it out one of two ways — pull the published image, or rebuild
+it on the box if you deploy from a clone:
+
+**Pull the published image (default install):**
+```bash
+cd /srv/chess-shootout
+sed -i 's/^IMAGE_TAG=.*/IMAGE_TAG=2.1.1/' .env      # the new version
+docker compose --profile edge pull
+docker compose --profile edge up -d
+```
+
+**Build on the box (clone-based install):**
+```bash
+cd /srv/chess-shootout
+git pull
+docker compose build
+docker compose --profile edge up -d
+```
+
+Either way only `chess-server` is recreated (Caddy is unchanged), and `up -d`
+triggers the graceful `server_shutdown` drain. With the systemd unit installed you
+can `sudo systemctl restart chess-server-compose` instead of `up -d`.
+
+**Rollback:** set `IMAGE_TAG` back to a prior version (or pin a full image
+`@sha256:` digest, which the weekly base-image rebuild can't move) and re-`up -d`.
+Pulling a pinned version tag also picks up the weekly base-image CVE rebuild.
