@@ -11,7 +11,7 @@ from websockets.exceptions import ConnectionClosed
 
 from chessshootout.server.protocol import (
     AuthMessage, CancelMatchmakeRequest, DrawResponseMessage, HealthResponse,
-    MatchmakeRequest, MatchmakeResponse, MoveMessage, PROTOCOL_VERSION,
+    MatchmakeRequest, MatchmakeResponse, MoveMessage, PingMessage, PROTOCOL_VERSION,
     Reason, ReclaimRequest, ReclaimResponse, RematchRequestMessage,
     RematchResponseMessage, ResumeRequest, ResumeResponse,
     TakebackResponseMessage,
@@ -71,7 +71,10 @@ def _split_addr(addr):
         rest = rest.split("/", 1)[0]
     if ":" in rest:
         host, port_s = rest.rsplit(":", 1)
-        port = int(port_s)
+        try:
+            port = int(port_s)
+        except ValueError as exc:
+            raise TransportError(f"invalid_address: {addr}") from exc
     else:
         host = rest
         port = None
@@ -277,8 +280,8 @@ class ServerWebSocket:
     async def send_give_time(self):
         await self._send_raw({"type": "give_time", "version": PROTOCOL_VERSION})
 
-    async def send_resync(self):
-        await self._send_raw({"type": "resync", "version": PROTOCOL_VERSION})
+    async def send_ping(self, ply):
+        await self._send(PingMessage(ply=ply))
 
     async def _send(self, message):
         await self._ws.send(message.model_dump_json(by_alias=True))
@@ -292,6 +295,3 @@ class ServerWebSocket:
             return json.loads(raw)
         except json.JSONDecodeError:
             return None
-
-    async def ping(self):
-        return await self._ws.ping()

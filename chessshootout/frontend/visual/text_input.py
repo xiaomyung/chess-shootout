@@ -14,9 +14,10 @@ DOUBLE_CLICK_PX = 6
 class TextInput:
 
     def __init__(self, window, max_chars=20, placeholder="nickname", mono=False,
-                 bg=None, radius=4, rest_align="start"):
+                 bg=None, radius=4, rest_align="start", on_commit=None):
         self.window = window
         self.max_chars = max_chars
+        self.on_commit = on_commit
         self.placeholder = placeholder
         self.mono = mono
         self.bg = bg
@@ -54,11 +55,14 @@ class TextInput:
     @focused.setter
     def focused(self, value):
         value = bool(value)
-        if value and not self._focused:
+        was = self._focused
+        if value and not was:
             self._touch()
         if not value:
             self._dragging = False
         self._focused = value
+        if was and not value and self.on_commit is not None:
+            self.on_commit(self._text)
 
     def _font(self, size):
         return get_mono_font(size) if self.mono else get_font(size, bold=True)
@@ -129,6 +133,7 @@ class TextInput:
 
     def _insert(self, text):
         self._delete_selection()
+        self.sel_anchor = None
         room = self.max_chars - len(self._text)
         if room <= 0:
             return
@@ -345,11 +350,7 @@ def _paste_from_clipboard():
             )
         except (subprocess.SubprocessError, OSError):
             continue
-        try:
-            text = result.stdout.decode("utf-8", errors="replace")
-        except Exception:
-            continue
-        return _sanitise(text)
+        return _sanitise(result.stdout.decode("utf-8", errors="replace"))
     try:
         pg.scrap.init()
         raw = pg.scrap.get(pg.SCRAP_TEXT)

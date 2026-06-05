@@ -25,7 +25,7 @@ import pytest
 
 from chessshootout.domain.match import ONLINE
 from chessshootout.backend.pieces import PieceColor
-from chessshootout.frontend.frontend import Frontend
+from chessshootout.frontend.frontend import Frontend, RECONNECT_PROBE_MAX_ATTEMPTS
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -230,3 +230,54 @@ def test_async_main_resume_does_not_queue_legacy_events():
 
     assert "game_start" not in queued_types
     assert "game_resumed" not in queued_types
+
+
+def test_probe_worker_increments_attempts_on_no_room(app, monkeypatch):
+    monkeypatch.setattr("chessshootout.frontend.frontend.probe_active_game",
+                        lambda addr, uuid: None)
+    app._reconnect_probe_attempts = 0
+    app._reconnect_probe_worker("addr", "uuid", app._reconnect_probe_gen)
+    assert app._reconnect_probe_attempts == 1
+    assert app._pending_reconnect is None
+
+
+def test_probe_worker_sets_pending_and_keeps_attempts_on_room_found(app, monkeypatch):
+    monkeypatch.setattr("chessshootout.frontend.frontend.probe_active_game",
+                        lambda addr, uuid: {"room_id": "r", "session_token": "t"})
+    monkeypatch.setattr("chessshootout.frontend.frontend.fetch_resume",
+                        lambda addr, room, token: {"fen": ""})
+    app._reconnect_probe_attempts = 0
+    app._reconnect_probe_worker("addr", "uuid", app._reconnect_probe_gen)
+    assert app._pending_reconnect is not None
+    assert app._reconnect_probe_attempts == 0
+
+
+def test_spawn_stops_after_max_attempts(app, monkeypatch):
+    started = []
+    monkeypatch.setattr("threading.Thread",
+                        lambda *a, **k: started.append(1) or MagicMock())
+    app._reconnect_probe_gen += 1
+    app._reconnect_probe_inflight = False
+    app._pending_reconnect = None
+    app._reconnect_probe_attempts = RECONNECT_PROBE_MAX_ATTEMPTS
+    app._spawn_reconnect_probe()
+    assert started == []
+
+
+def test_spawn_stops_when_room_already_pending(app, monkeypatch):
+    started = []
+    monkeypatch.setattr("threading.Thread",
+                        lambda *a, **k: started.append(1) or MagicMock())
+    app._reconnect_probe_gen += 1
+    app._reconnect_probe_inflight = False
+    app._reconnect_probe_attempts = 0
+    app._pending_reconnect = {"room_id": "r"}
+    app._spawn_reconnect_probe()
+    assert started == []
+
+
+def test_back_to_menu_resets_probe_attempts(app):
+    app._reconnect_probe_gen += 1
+    app._reconnect_probe_attempts = RECONNECT_PROBE_MAX_ATTEMPTS
+    app._on_back_to_menu()
+    assert app._reconnect_probe_attempts == 0

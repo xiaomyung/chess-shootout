@@ -1,15 +1,13 @@
 from chessshootout.server import logging_setup
 from chessshootout.server.broadcasts import finalize_and_broadcast
-from chessshootout.server.connections import broadcast
+from chessshootout.server.connections import send
 from chessshootout.server.protocol import (
-    FIRST_MOVE_ABORT_SECONDS, Reason, ResultMessage, StateSyncMessage,
+    ConnectionStatusMessage, FIRST_MOVE_ABORT_SECONDS, Reason,
 )
 
 
 log = logging_setup.get_logger("chess.server.app")
 
-
-BEACON_INTERVAL_SECONDS = 2.5
 
 PREGAME_CONNECT_GRACE_SECONDS = 5.0
 
@@ -32,30 +30,21 @@ class Sweep:
         self.rooms = rooms
         self.connections = connections
         self._now = now_provider
-        self._last_beacon = {}
 
     async def step_all(self):
         await self.step_clock_and_first_move_abort()
+        await self.step_heartbeat_timeout()
         await self.step_grace_expired()
-        await self.step_state_sync_beacon()
         self.step_drop_orphans_and_post_result()
         self.rooms.gc_finished_rooms()
 
-    async def step_state_sync_beacon(self):
-        now = self._now()
-        active_ids = set()
-        for room in list(self.rooms._active.values()):
-            if (room.result is not None or room.first_move_at is None
-                    or not room.is_paired() or room.backend is None):
-                continue
-            active_ids.add(room.room_id)
-            if now - self._last_beacon.get(room.room_id, 0.0) < BEACON_INTERVAL_SECONDS:
-                continue
-            self._last_beacon[room.room_id] = now
-            await broadcast(self.connections, room,
-                            StateSyncMessage(ply=len(room.backend.move_history)))
-        for room_id in self._last_beacon.keys() - active_ids:
-            del self._last_beacon[room_id]
+    async def step_heartbeat_timeout(self):
+        for room, color in list(self.rooms.heartbeat_timed_out_rooms()):
+            log.info("heartbeat timeout room=%s color=%s", room.room_id, color)
+            self.rooms.mark_disconnected(room.room_id, color)
+            opp_ws = self.connections.get_for_color(room, room.opp_color(color))
+            if opp_ws is not None:
+                await send(opp_ws, ConnectionStatusMessage(opp_state="reconnecting"))
 
     async def step_clock_and_first_move_abort(self):
         for room in list(self.rooms._active.values()):
@@ -81,14 +70,18 @@ class Sweep:
                                              Reason.ABORTED)
 
     async def step_grace_expired(self):
-        for room, abandoned_color in list(self.rooms.grace_expired_rooms()):
-            winner = room.opp_color(abandoned_color)
-            log.info("abandonment room=%s loser=%s winner=%s",
-                     room.room_id, abandoned_color, winner)
-            self.rooms.finalize_abandonment(room.room_id, abandoned_color)
-            await broadcast(self.connections, room,
-                              ResultMessage(reason=Reason.ABANDONMENT,
-                                              winner_color=winner))
+        for room, gone_color in list(self.rooms.grace_expired_rooms()):
+            slot = room.slot(gone_color)
+            if slot is not None and slot.desync_active:
+                log.info("aborted room=%s reason=desync gone=%s", room.room_id, gone_color)
+                await finalize_and_broadcast(self.rooms, self.connections, room,
+                                             Reason.ABORTED_DISCONNECT)
+            else:
+                winner = room.opp_color(gone_color)
+                log.info("abandonment room=%s loser=%s winner=%s",
+                         room.room_id, gone_color, winner)
+                await finalize_and_broadcast(self.rooms, self.connections, room,
+                                             Reason.ABANDONMENT, winner_color=winner)
 
     def step_drop_orphans_and_post_result(self):
         now = self._now()

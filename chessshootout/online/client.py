@@ -2,6 +2,7 @@ import asyncio
 import logging
 import queue
 import threading
+import time
 from collections import deque
 from dataclasses import dataclass
 
@@ -12,7 +13,8 @@ from chessshootout.online.transport import (
     SchemaVersionMismatch, WsConnectionClosed,
 )
 from chessshootout.server.protocol import (
-    CancelMatchmakeRequest, GRACE_SECONDS, MatchmakeRequest, ResumeRequest,
+    CancelMatchmakeRequest, GRACE_SECONDS, HEARTBEAT_INTERVAL_SECONDS,
+    HEARTBEAT_MISS_LIMIT, MatchmakeRequest, ResumeRequest,
 )
 
 
@@ -23,7 +25,6 @@ SERVER_FULL_RETRIES = 3
 SERVER_FULL_BACKOFF_SECONDS = 1.5
 RECONNECT_TOTAL_SECONDS = GRACE_SECONDS
 RECONNECT_INTERVAL_SECONDS = 2
-PING_INTERVAL_SECONDS = 5
 PING_SAMPLE_WINDOW = 5
 
 
@@ -36,7 +37,10 @@ class Event:
 def probe_active_game(addr, client_uuid, timeout=2.0):
     if not addr or not client_uuid:
         return None
-    transport = ServerTransport(addr)
+    try:
+        transport = ServerTransport(addr)
+    except TransportError:
+        return None
     response = transport.reclaim_blocking(client_uuid, timeout=timeout)
     if response is None:
         return None
@@ -71,6 +75,10 @@ class OnlineClient:
         self._in_queue = False
         self._game_active = False
         self._ping_samples_ms = deque(maxlen=PING_SAMPLE_WINDOW)
+        self._heartbeat_interval = HEARTBEAT_INTERVAL_SECONDS
+        self._reconnect_total = RECONNECT_TOTAL_SECONDS
+        self._last_ping_sent_at = 0.0
+        self._last_server_msg_at = 0.0
 
     @property
     def room_id(self):
@@ -83,12 +91,22 @@ class OnlineClient:
 
     def connect(self, addr, request):
         self._addr = addr
-        self._transport = ServerTransport(addr)
+        try:
+            self._transport = ServerTransport(addr)
+        except TransportError:
+            self._inbound.put(Event("error", {"reason": "server_unreachable"}))
+            self.state = "disconnected"
+            return
         self._spawn_loop_thread(self._async_main, request)
 
     def reconnect_to_existing(self, addr, room_id, session_token, resume_payload):
         self._addr = addr
-        self._transport = ServerTransport(addr)
+        try:
+            self._transport = ServerTransport(addr)
+        except TransportError:
+            self._inbound.put(Event("error", {"reason": "reconnect_failed"}))
+            self.state = "disconnected"
+            return
         self._room_id = room_id
         self._session_token = session_token
         self._game_active = True
@@ -130,6 +148,12 @@ class OnlineClient:
         if self._ws is not None:
             asyncio.run_coroutine_threadsafe(self._ws.close(), self._loop)
 
+    def force_reconnect(self):
+        if self._loop is None or not self._loop.is_running():
+            return
+        if self._ws is not None:
+            asyncio.run_coroutine_threadsafe(self._ws.close(), self._loop)
+
     def send_move(self, from_sq, to_sq, promotion=None):
         self._enqueue("send_move", from_sq, to_sq, promotion)
 
@@ -157,8 +181,20 @@ class OnlineClient:
     def send_give_time(self):
         self._enqueue("send_give_time")
 
-    def send_resync(self):
-        self._enqueue("send_resync")
+    def send_ping(self, ply):
+        self._last_ping_sent_at = time.monotonic()
+        self._enqueue("send_ping", ply)
+
+    def heartbeat_interval(self):
+        return self._heartbeat_interval
+
+    def seconds_since_server_msg(self):
+        if self._last_server_msg_at == 0.0:
+            return 0.0
+        return time.monotonic() - self._last_server_msg_at
+
+    def is_server_silent(self):
+        return self.seconds_since_server_msg() > self._heartbeat_interval * HEARTBEAT_MISS_LIMIT
 
     def request_state_sync(self):
         if (self._loop is None or self._loop.is_closed()
@@ -197,7 +233,9 @@ class OnlineClient:
             return
         log.info("state-sync ok room=%s ply=%d",
                  self._room_id, len(response.move_history))
-        self._inbound.put(Event("game_resumed", response.model_dump()))
+        resumed = response.model_dump()
+        self._adopt_timing(resumed)
+        self._inbound.put(Event("game_resumed", resumed))
 
     def _enqueue(self, method, *args):
         if self._loop is None or self._loop.is_closed() or self._outbound is None:
@@ -249,6 +287,8 @@ class OnlineClient:
 
     async def _async_main_resume(self, resume_payload):
         log.info("reconnect-resume addr=%s room=%s", self._addr, self._room_id)
+        if isinstance(resume_payload, dict):
+            self._adopt_timing(resume_payload)
         self.state = "connecting"
         await self._run_session_with_reconnects()
 
@@ -292,6 +332,7 @@ class OnlineClient:
                     self._inbound.put(Event("error", {"reason": "reconnect_failed"}))
                     break
                 log.info("reconnect succeeded; resuming game")
+                self._adopt_timing(resumed)
                 self._inbound.put(Event("game_resumed", resumed))
                 try:
                     await self._run_ws_session()
@@ -306,7 +347,7 @@ class OnlineClient:
             self.state = "disconnected"
 
     async def _resume_with_retries(self):
-        deadline = asyncio.get_running_loop().time() + RECONNECT_TOTAL_SECONDS
+        deadline = asyncio.get_running_loop().time() + self._reconnect_total
         body = ResumeRequest(
             room_id=self._room_id, session_token=self._session_token,
         )
@@ -354,16 +395,22 @@ class OnlineClient:
         self._ping_samples_ms.clear()
         recv_task = asyncio.create_task(self._recv_loop(ws))
         send_task = asyncio.create_task(self._send_loop(ws))
-        ping_task = asyncio.create_task(self._ping_loop(ws))
         try:
             await asyncio.wait({recv_task, send_task},
                                return_when=asyncio.FIRST_COMPLETED)
         finally:
             recv_task.cancel()
             send_task.cancel()
-            ping_task.cancel()
             await ws.close()
             self._ws = None
+
+    def _adopt_timing(self, msg):
+        interval = msg.get("heartbeat_interval_seconds")
+        if interval:
+            self._heartbeat_interval = float(interval)
+        grace = msg.get("grace_seconds")
+        if grace:
+            self._reconnect_total = float(grace)
 
     async def _recv_loop(self, ws):
         try:
@@ -371,8 +418,16 @@ class OnlineClient:
                 msg = await ws.recv()
                 if msg is None:
                     continue
+                self._last_server_msg_at = time.monotonic()
                 msg_type = msg.get("type", "")
                 log.debug("ws recv type=%s", msg_type)
+                if msg_type == "pong":
+                    if self._last_ping_sent_at:
+                        rtt_ms = (time.monotonic() - self._last_ping_sent_at) * 1000.0
+                        self._ping_samples_ms.append(rtt_ms)
+                    continue
+                if msg_type in ("game_start", "game_resumed"):
+                    self._adopt_timing(msg)
                 if msg_type == "game_start":
                     self._in_queue = False
                     self._game_active = True
@@ -395,21 +450,5 @@ class OnlineClient:
                     log.warning("unknown ws send method=%s", method)
                     continue
                 await send(*args)
-        except (WsConnectionClosed, asyncio.CancelledError):
-            pass
-
-    async def _ping_loop(self, ws):
-        try:
-            while not self._stop.is_set():
-                await asyncio.sleep(PING_INTERVAL_SECONDS)
-                try:
-                    pong_waiter = await ws.ping()
-                    latency_s = await pong_waiter
-                except (WsConnectionClosed, asyncio.CancelledError):
-                    raise
-                except Exception as exc:
-                    log.debug("ping failed: %r", exc)
-                    continue
-                self._ping_samples_ms.append(latency_s * 1000.0)
         except (WsConnectionClosed, asyncio.CancelledError):
             pass

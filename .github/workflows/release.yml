@@ -21,66 +21,30 @@ jobs:
           SDL_VIDEODRIVER: dummy
           SDL_AUDIODRIVER: dummy
 
-  build:
-    needs: test
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [windows-latest, macos-latest, ubuntu-22.04]
-    runs-on: ${{ matrix.os }}
+  version:
+    runs-on: ubuntu-latest
+    outputs:
+      ver: ${{ steps.v.outputs.ver }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - run: pip install -e ".[build]"
-
-      - name: Derive version (posix)
-        if: runner.os != 'Windows'
+      - id: v
+        name: Read version from pyproject.toml and verify the tag matches
         run: |
-          echo "VER=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
-          echo "${GITHUB_REF_NAME#v}" > assets/version.txt
-      - name: Derive version (windows)
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          $v = $env:GITHUB_REF_NAME -replace '^v',''
-          "VER=$v" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
-          Set-Content -Path assets/version.txt -Value $v -Encoding utf8
+          ver=$(python packaging/project_version.py)
+          if [ "v$ver" != "$GITHUB_REF_NAME" ]; then
+            echo "::error::tag $GITHUB_REF_NAME does not match pyproject.toml version (v$ver). Bump [project].version to match the tag."
+            exit 1
+          fi
+          echo "ver=$ver" >> "$GITHUB_OUTPUT"
 
-      - name: Build Windows (portable exe + installer)
-        if: matrix.os == 'windows-latest'
-        shell: pwsh
-        run: |
-          pyinstaller --onefile --windowed --noupx --name ChessShootout --icon assets/icons/icon.ico --add-data "assets;assets" --collect-data certifi --hidden-import certifi --exclude-module fastapi --exclude-module uvicorn --exclude-module starlette --exclude-module slowapi chessshootout/main.py
-          New-Item -ItemType Directory -Force -Path out | Out-Null
-          Move-Item -Force dist/ChessShootout.exe "out/ChessShootout-$env:VER-Portable.exe"
-          $env:CHESS_VERSION = $env:VER
-          pyinstaller --noconfirm chess.spec
-          choco install innosetup -y --no-progress
-          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" "/DAppVer=$env:VER" packaging\chess.iss
-
-      - name: Build macOS (.app -> .dmg)
-        if: matrix.os == 'macos-latest'
-        run: |
-          export CHESS_VERSION="$VER"
-          pyinstaller --noconfirm chess.spec
-          mkdir -p out
-          hdiutil create -volname "Chess Shootout" -srcfolder dist/ChessShootout.app -ov -format UDZO "out/ChessShootout-$VER.dmg"
-
-      - name: Build Linux (AppImage)
-        if: matrix.os == 'ubuntu-22.04'
-        run: |
-          export CHESS_VERSION="$VER"
-          pyinstaller --noconfirm chess.spec
-          packaging/build_appimage.sh
-          mkdir -p out
-          mv ChessShootout-x86_64.AppImage "out/ChessShootout-$VER-x86_64.AppImage"
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: dist-${{ matrix.os }}
-          path: out/
+  build:
+    needs: [test, version]
+    uses: ./.github/workflows/build.yml
+    with:
+      version: ${{ needs.version.outputs.ver }}
 
   release:
     needs: build

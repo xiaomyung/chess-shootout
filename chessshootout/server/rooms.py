@@ -8,7 +8,7 @@ from typing import Optional
 from uuid import uuid4
 
 from chessshootout.backend.backend import Backend
-from chessshootout.server.protocol import GRACE_SECONDS
+from chessshootout.server.protocol import GRACE_SECONDS, HEARTBEAT_TIMEOUT_SECONDS
 
 
 REMATCH_KEEP_ALIVE_SECONDS = 60
@@ -36,6 +36,8 @@ class PlayerSlot:
     country: Optional[str] = None
     connected: bool = False
     disconnected_at: Optional[float] = None
+    desync_active: bool = False
+    last_seen: float = 0.0
 
 
 @dataclass
@@ -214,15 +216,63 @@ class RoomManager:
         if slot is not None:
             slot.connected = True
             slot.disconnected_at = None
+            slot.desync_active = False
+            slot.last_seen = self._now()
 
     def mark_disconnected(self, room_id, color):
         room = self.get(room_id)
         if room is None:
             return
         slot = room.slot(color)
-        if slot is not None:
+        if slot is not None and slot.connected:
             slot.connected = False
             slot.disconnected_at = self._now()
+
+    def touch_seen(self, room_id, color):
+        room = self.get(room_id)
+        if room is None:
+            return
+        slot = room.slot(color)
+        if slot is not None:
+            slot.last_seen = self._now()
+
+    def heartbeat_timed_out_rooms(self):
+        now = self._now()
+        for room in list(self._active.values()):
+            if room.result is not None or room.first_move_at is None:
+                continue
+            for color in ("white", "black"):
+                slot = room.slot(color)
+                if (slot is not None and slot.connected
+                        and now - slot.last_seen >= HEARTBEAT_TIMEOUT_SECONDS):
+                    yield room, color
+
+    def in_progress_room_for(self, client_uuid):
+        room_id = self._uuid_to_room.get(client_uuid)
+        if room_id is None:
+            return None
+        room = self._active.get(room_id)
+        if room is None or room.result is not None:
+            return None
+        if not room.is_paired() or room.first_move_at is None:
+            return None
+        color = room.color_of(client_uuid)
+        if color is None:
+            return None
+        return room, color
+
+    def release_for_new_game(self, client_uuid):
+        room_id = self._uuid_to_room.get(client_uuid)
+        if room_id is None:
+            return
+        if room_id in self._active:
+            self._drop_room(room_id)
+            return
+        queued = self._find_in_queue(room_id)
+        if queued is not None:
+            tc = (queued.time_minutes, queued.increment_seconds)
+            self._queue[tc].remove(queued)
+        self._uuid_to_room.pop(client_uuid, None)
 
     def grace_expired_rooms(self):
         now = self._now()
@@ -235,15 +285,6 @@ class RoomManager:
                         and now - slot.disconnected_at >= GRACE_SECONDS):
                     yield room, color
 
-    def finalize_abandonment(self, room_id, abandoned_color):
-        room = self._active.get(room_id)
-        if room is None or room.result is not None:
-            return
-        winner = room.opp_color(abandoned_color)
-        room.result = ("abandonment", winner)
-        room.ended_at = self._now()
-        self._award_series(room, "abandonment", winner)
-
     def finalize_result(self, room_id, reason, winner_color=None):
         room = self._active.get(room_id)
         if room is None or room.result is not None:
@@ -254,7 +295,7 @@ class RoomManager:
 
     @staticmethod
     def _award_series(room, reason, winner_color):
-        if reason in ("aborted", "server_shutdown"):
+        if reason in ("aborted", "aborted_disconnect", "server_shutdown"):
             return
         scores = room.series_scores
         if winner_color in ("white", "black"):

@@ -1,10 +1,11 @@
 """URL builder unit tests. Live in transport.py post-M19; the client just delegates."""
 import asyncio
+import time
 
 import pytest
 
 from chessshootout.online.client import OnlineClient, PING_SAMPLE_WINDOW
-from chessshootout.online.transport import _UrlBuilder, _split_addr
+from chessshootout.online.transport import _UrlBuilder, _split_addr, WsConnectionClosed
 
 
 @pytest.mark.parametrize(
@@ -84,83 +85,61 @@ def test_get_ping_ms_window_caps_at_constant():
     assert client.get_ping_ms() == 17
 
 
-class _FakeWs:
-    def __init__(self, latencies):
-        self._latencies = list(latencies)
-        self.ping_calls = 0
+class _RecvWs:
+    def __init__(self, messages):
+        self._messages = list(messages)
 
-    async def ping(self):
-        self.ping_calls += 1
-        latency = self._latencies.pop(0)
-
-        async def _waiter():
-            return latency
-        return _waiter()
+    async def recv(self):
+        if self._messages:
+            return self._messages.pop(0)
+        raise WsConnectionClosed(None, None)
 
 
-def test_ping_loop_records_samples(monkeypatch):
-    """ws.ping() pong latencies are converted s->ms and pushed onto the rolling window."""
-    monkeypatch.setattr("chessshootout.online.client.PING_INTERVAL_SECONDS", 0.001)
-
+def test_pong_records_rtt_sample():
+    """A pong reply turns the time since the matching ping into a ping-ms sample."""
     client = OnlineClient()
-    fake_ws = _FakeWs([0.030, 0.045, 0.060])
-
-    async def _drive():
-        task = asyncio.create_task(client._ping_loop(fake_ws))
-        for _ in range(200):
-            await asyncio.sleep(0.001)
-            if len(client._ping_samples_ms) >= 3:
-                break
-        client._stop.set()
-        task.cancel()
-        try:
-            await task
-        except asyncio.CancelledError:
-            pass
-
-    asyncio.run(_drive())
-
-    assert list(client._ping_samples_ms)[:3] == pytest.approx([30.0, 45.0, 60.0])
-    assert client.get_ping_ms() in (40, 41, 42, 43, 44, 45)
+    client._last_ping_sent_at = time.monotonic() - 0.030
+    asyncio.run(client._recv_loop(_RecvWs([{"type": "pong"}])))
+    assert len(client._ping_samples_ms) == 1
+    assert client._ping_samples_ms[0] == pytest.approx(30.0, abs=20.0)
 
 
-def test_ping_loop_swallows_transient_ping_failures(monkeypatch):
-    """A raised ws.ping() is logged and skipped; the next successful ping still records."""
-    monkeypatch.setattr("chessshootout.online.client.PING_INTERVAL_SECONDS", 0.001)
-
-    class _FlakyWs:
-        def __init__(self):
-            self.calls = 0
-
-        async def ping(self):
-            self.calls += 1
-            if self.calls == 1:
-                raise RuntimeError("transient blip")
-
-            async def _waiter():
-                return 0.025
-            return _waiter()
-
+def test_pong_is_consumed_not_forwarded_as_event():
+    """A pong updates liveness/RTT but is not surfaced to the frontend; a move is."""
     client = OnlineClient()
-    fake_ws = _FlakyWs()
+    asyncio.run(client._recv_loop(
+        _RecvWs([{"type": "pong"}, {"type": "move_applied", "ply": 1}])))
+    events = []
+    while not client._inbound.empty():
+        events.append(client._inbound.get_nowait())
+    assert [e.type for e in events] == ["move_applied"]
+    assert client.seconds_since_server_msg() < 1.0
 
-    async def _drive():
-        task = asyncio.create_task(client._ping_loop(fake_ws))
-        for _ in range(200):
-            await asyncio.sleep(0.001)
-            if len(client._ping_samples_ms) >= 1:
-                break
-        client._stop.set()
-        task.cancel()
-        try:
-            await task
-        except asyncio.CancelledError:
-            pass
 
-    asyncio.run(_drive())
+def test_send_ping_records_send_time():
+    client = OnlineClient()
+    before = time.monotonic()
+    client.send_ping(5)
+    assert client._last_ping_sent_at >= before
 
-    assert client._ping_samples_ms[-1] == pytest.approx(25.0)
-    assert fake_ws.calls >= 2
+
+def test_is_server_silent_tracks_last_message():
+    client = OnlineClient()
+    assert client.is_server_silent() is False
+    client._last_server_msg_at = time.monotonic() - 1000
+    assert client.is_server_silent() is True
+    client._last_server_msg_at = time.monotonic()
+    assert client.is_server_silent() is False
+
+
+def test_adopt_timing_from_game_start_message():
+    """game_start carries the server's heartbeat interval + grace; the client adopts both."""
+    client = OnlineClient()
+    asyncio.run(client._recv_loop(_RecvWs([
+        {"type": "game_start", "heartbeat_interval_seconds": 4.5, "grace_seconds": 90.0},
+    ])))
+    assert client.heartbeat_interval() == 4.5
+    assert client._reconnect_total == 90.0
 
 
 def test_ws_session_clears_old_ping_samples_on_reconnect():

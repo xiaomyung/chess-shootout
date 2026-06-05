@@ -837,6 +837,28 @@ def test_clear_rearms_first_blood_and_resets_streak():
     assert em.callouts == []
 
 
+def test_clear_transients_resets_streak_but_keeps_first_blood():
+    """Undo/review jumps reset transient streak state but must NOT re-arm the
+    once-per-match first-blood latch."""
+    em = _em()
+    for i in range(3):
+        em.register_kill("white", Square(0, 4), 80, i)
+    em.clear_transients()
+    assert em._streak_color is None
+    assert em._streak_count == 0
+    assert em._first_blood_spent is True
+    assert em.callouts == []
+
+
+def test_first_blood_not_rearmed_after_undo():
+    """A capture after an undo (clear_transients) does not replay FIRST BLOOD."""
+    em = _em()
+    assert em.register_kill("white", Square(0, 4), 80, 0) == "first_blood"
+    em.clear_transients()
+    assert em.register_kill("black", Square(4, 4), 80, 10) != "first_blood"
+    assert em._first_blood_spent is True
+
+
 def test_hit_word_tag_anchors_to_the_captured_square():
     em = _em()
     for i in range(7):

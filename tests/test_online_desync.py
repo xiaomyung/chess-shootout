@@ -154,12 +154,70 @@ def test_dropped_broadcast_pushes_reconnecting_to_surviving_peer(client, monkeyp
             assert "connection_status" in seen_types
 
 
+def _ping(ply):
+    return {"version": PROTOCOL_VERSION, "type": "ping", "ply": ply}
+
+
+def test_ping_with_matching_ply_pongs_without_directive(client):
+    a, b = _paired_ws(client)
+    with client.websocket_connect(f"/ws/{a['room_id']}") as ws_w:
+        ws_w.send_text(json.dumps(_auth(a["session_token"])))
+        with client.websocket_connect(f"/ws/{b['room_id']}") as ws_b:
+            ws_b.send_text(json.dumps(_auth(b["session_token"])))
+            ws_w.receive_text()
+            ws_b.receive_text()
+            ws_w.send_text(json.dumps(_ping(0)))
+            msg = json.loads(ws_w.receive_text())
+            assert msg["type"] == "pong"
+
+
+def test_ping_with_wrong_ply_directs_resync_and_flags_opponent(client):
+    a, b = _paired_ws(client)
+    with client.websocket_connect(f"/ws/{a['room_id']}") as ws_w:
+        ws_w.send_text(json.dumps(_auth(a["session_token"])))
+        with client.websocket_connect(f"/ws/{b['room_id']}") as ws_b:
+            ws_b.send_text(json.dumps(_auth(b["session_token"])))
+            ws_w.receive_text()
+            ws_b.receive_text()
+            ws_w.send_text(json.dumps(_ping(7)))
+            got = {json.loads(ws_w.receive_text())["type"] for _ in range(2)}
+            assert got == {"pong", "resync_directive"}
+            status = json.loads(ws_b.receive_text())
+            assert status["type"] == "connection_status"
+            assert status["opp_state"] == "resyncing"
+
+
+def test_new_matchmake_abandons_in_progress_game(client):
+    a, b = _paired_ws(client)
+    with client.websocket_connect(f"/ws/{a['room_id']}") as ws_w:
+        ws_w.send_text(json.dumps(_auth(a["session_token"])))
+        with client.websocket_connect(f"/ws/{b['room_id']}") as ws_b:
+            ws_b.send_text(json.dumps(_auth(b["session_token"])))
+            ws_w.receive_text()
+            ws_b.receive_text()
+            ws_w.send_text(json.dumps(_move("e2", "e4")))
+            ws_w.receive_text()
+            ws_b.receive_text()
+            resp = _matchmake(client, uuid=ALICE, nickname="Alice", side="white")
+            assert "room_id" in resp
+            results = []
+            for _ in range(3):
+                msg = json.loads(ws_b.receive_text())
+                if msg["type"] == "result":
+                    results.append(msg)
+                    break
+            assert results and results[0]["reason"] == "abandonment"
+            assert results[0]["winner_color"] == "black"
+
+
 def _online_app():
     from chessshootout.frontend.frontend import Frontend
     app = Frontend(1000, 800)
     app.sound_manager = MagicMock()
     app.online_client = MagicMock()
     app.online_client.get_ping_ms.return_value = None
+    app.online_client.is_server_silent.return_value = False
+    app.online_client.heartbeat_interval.return_value = 2.0
     app.mode = ONLINE
     app.white_name = "Alice"
     app.black_name = "Bob"
@@ -250,50 +308,15 @@ def test_begin_resync_is_idempotent_during_inflight_request():
     assert app.online_client.request_state_sync.call_count == 1
 
 
-@pytest.mark.parametrize(
-    "server_ply, expected_mismatch_ply",
-    [
-        pytest.param(0, None, id="matching_ply_clears_mismatch_marker"),
-        pytest.param(2, 2, id="single_mismatch_only_records_debounce_marker"),
-    ],
-)
-def test_state_sync_first_beacon_does_not_resync(server_ply, expected_mismatch_ply):
-    """One beacon (matching, or a single divergence) never resyncs; it only debounces."""
+def test_resync_directive_triggers_resync():
+    """A server resync directive (sent when a heartbeat shows the client is behind)
+    drives the standard /resume recovery."""
+    from chessshootout.online.client import Event
     app = _online_app()
     app.online_client.state = "connected"
-    app._handle_state_sync({"ply": server_ply})
-    assert app._resyncing is False
-    assert app._last_beacon_mismatch_ply == expected_mismatch_ply
-    app.online_client.request_state_sync.assert_not_called()
-
-
-def test_state_sync_stable_mismatch_triggers_resync():
-    """The same divergence on two consecutive beacons is a real lost move."""
-    app = _online_app()
-    app.online_client.state = "connected"
-    app._handle_state_sync({"ply": 2})
-    app._handle_state_sync({"ply": 2})
+    app._handle_online_event(Event("resync_directive", {}))
     assert app._resyncing is True
-    app.online_client.send_resync.assert_called_once()
     app.online_client.request_state_sync.assert_called_once()
-
-
-def test_state_sync_ignored_while_reconnecting():
-    app = _online_app()
-    app.online_client.state = "reconnecting"
-    app._handle_state_sync({"ply": 5})
-    app._handle_state_sync({"ply": 5})
-    assert app._resyncing is False
-    assert app._last_beacon_mismatch_ply is None
-    app.online_client.request_state_sync.assert_not_called()
-
-
-def test_state_sync_ignored_while_resyncing():
-    app = _online_app()
-    app.online_client.state = "connected"
-    app._resyncing = True
-    app._handle_state_sync({"ply": 5})
-    app.online_client.request_state_sync.assert_not_called()
 
 
 def test_resyncing_shows_toast_each_frame():
@@ -310,11 +333,33 @@ def test_resyncing_self_heals_after_timeout():
     app = _online_app()
     app.online_client.state = "connected"
     app._resyncing = True
-    app._last_beacon_mismatch_ply = 3
     app._resync_started_at_ms = pg.time.get_ticks() - (RESYNC_TIMEOUT_MS + 1000)
     app._update_online_phase()
     assert app._resyncing is False
-    assert app._last_beacon_mismatch_ply is None
+
+
+def test_resync_timeout_escalates_to_reconnect():
+    """A resync that never lands escalates to a full reconnect, so the opponent's abandon
+    countdown starts and recovery runs through the standard reconnect path."""
+    from chessshootout.frontend.frontend import RESYNC_TIMEOUT_MS
+    app = _online_app()
+    app.online_client.state = "connected"
+    app._resyncing = True
+    app._resync_started_at_ms = pg.time.get_ticks() - (RESYNC_TIMEOUT_MS + 1000)
+    app._update_online_phase()
+    assert app._resyncing is False
+    app.online_client.force_reconnect.assert_called_once()
+
+
+def test_resync_timeout_no_escalation_when_already_reconnecting():
+    from chessshootout.frontend.frontend import RESYNC_TIMEOUT_MS
+    app = _online_app()
+    app.online_client.state = "reconnecting"
+    app._resyncing = True
+    app._resync_started_at_ms = pg.time.get_ticks() - (RESYNC_TIMEOUT_MS + 1000)
+    app._update_online_phase()
+    assert app._resyncing is False
+    app.online_client.force_reconnect.assert_not_called()
 
 
 def test_online_error_room_lost_clears_resyncing():
@@ -324,8 +369,34 @@ def test_online_error_room_lost_clears_resyncing():
     assert app._resyncing is False
 
 
-def test_opponent_resync_shows_toast():
-    from chessshootout.online.client import Event
+def test_opponent_resyncing_status_shows_toast():
+    """The server drives the opponent-resyncing indication via connection_status."""
     app = _online_app()
-    app._handle_online_event(Event("resync", {}))
+    app._handle_connection_status({"opp_state": "resyncing"})
     assert app.toast.message == "Opponent is resyncing…"
+    assert app._opp_disconnected_at_ms is None
+
+
+def test_heartbeat_sent_when_interval_elapsed():
+    app = _online_app()
+    app.online_client.state = "connected"
+    app._last_heartbeat_sent_ms = pg.time.get_ticks() - 5000
+    app._send_heartbeat_if_due()
+    app.online_client.send_ping.assert_called_once_with(len(app.match.move_history))
+
+
+def test_heartbeat_not_sent_before_interval():
+    app = _online_app()
+    app.online_client.state = "connected"
+    app._last_heartbeat_sent_ms = pg.time.get_ticks()
+    app._send_heartbeat_if_due()
+    app.online_client.send_ping.assert_not_called()
+
+
+def test_server_silence_escalates_to_reconnect():
+    app = _online_app()
+    app.online_client.state = "connected"
+    app.online_client.is_server_silent.return_value = True
+    app._send_heartbeat_if_due()
+    app.online_client.force_reconnect.assert_called_once()
+    app.online_client.send_ping.assert_not_called()

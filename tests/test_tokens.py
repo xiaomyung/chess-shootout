@@ -43,7 +43,7 @@ def test_base_palette_hex_values():
         assert pg.Color(getattr(Colors, attr))[:3] == pg.Color(hexval)[:3], attr
 
 
-@pytest.mark.parametrize("state", ["connected", "reconnecting", "disconnected", "unknown"])
+@pytest.mark.parametrize("state", ["connected", "reconnecting", "resyncing", "unknown"])
 def test_connection_dot_color_is_opaque_hex(state):
     assert pg.Color(getattr(Colors, "dot_" + state)).a == 255
 
@@ -76,9 +76,9 @@ def test_alpha_token_is_base_plus_alpha(token, base, alpha):
     assert getattr(Colors, token) == getattr(Colors, base) + alpha
 
 
-def test_reconnecting_dot_tracks_amber():
-    """The reconnecting dot reuses the amber knob (single source of truth)."""
-    assert Colors.dot_reconnecting == Colors.amber
+def test_resyncing_dot_tracks_amber():
+    """The resyncing dot reuses the amber knob (single source of truth)."""
+    assert Colors.dot_resyncing == Colors.amber
 
 
 def test_each_family_and_weight_loads():

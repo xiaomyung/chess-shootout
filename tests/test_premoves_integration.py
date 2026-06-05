@@ -844,6 +844,56 @@ def test_real_move_still_wins_when_local_piece_is_side_to_move(board):
     assert last.captured is not None and last.captured.type == PieceType.ROOK
 
 
+def test_recapture_premove_onto_own_piece_queues_online(board):
+    """Online (local_color=WHITE): premoving a rook onto a square holding your OWN live
+    piece (a recapture setup) must QUEUE, not just re-select the piece. Click-based path
+    used to switch focus online while it queued in local; this brings them to parity."""
+    setup_position(board, {
+        Square(7, 4): Piece(PieceType.KING, WHITE),
+        Square(0, 4): Piece(PieceType.KING, BLACK),
+        Square(4, 0): Piece(PieceType.ROOK, WHITE),
+        Square(4, 4): Piece(PieceType.PAWN, WHITE),
+    }, turn=BLACK)
+    board.match.local_color = WHITE
+    board.handle_click(Square(4, 0))
+    board.handle_click(Square(4, 4))
+    assert len(board.premoves) == 1
+    assert board.premoves[0].from_sq == Square(4, 0)
+    assert board.premoves[0].to_sq == Square(4, 4)
+    assert board.selected_square is None
+
+
+def test_recapture_premove_onto_own_piece_queues_local(board):
+    """Local (local_color=None) already queued the recapture — pin the parity."""
+    setup_position(board, {
+        Square(7, 4): Piece(PieceType.KING, WHITE),
+        Square(0, 4): Piece(PieceType.KING, BLACK),
+        Square(4, 0): Piece(PieceType.ROOK, WHITE),
+        Square(4, 4): Piece(PieceType.PAWN, WHITE),
+    }, turn=BLACK)
+    board.handle_click(Square(4, 0))
+    board.handle_click(Square(4, 4))
+    assert len(board.premoves) == 1
+    assert board.premoves[0].to_sq == Square(4, 4)
+
+
+def test_on_turn_click_own_piece_still_switches_focus_online(board):
+    """Regression: on YOUR turn, clicking another of your pieces still re-selects it
+    for a real move (the focus-switch path must survive the recapture-premove fix)."""
+    setup_position(board, {
+        Square(7, 4): Piece(PieceType.KING, WHITE),
+        Square(0, 4): Piece(PieceType.KING, BLACK),
+        Square(4, 0): Piece(PieceType.ROOK, WHITE),
+        Square(4, 7): Piece(PieceType.ROOK, WHITE),
+    }, turn=WHITE)
+    board.match.local_color = WHITE
+    board.handle_click(Square(4, 0))
+    assert board.selected_square == Square(4, 0)
+    board.handle_click(Square(4, 7))
+    assert board.selected_square == Square(4, 7)
+    assert board.premoves == []
+
+
 def test_online_opponent_turn_click_on_opp_piece_does_nothing_when_no_chain(board):
     setup_position(board, {
         Square(7, 4): Piece(PieceType.KING, WHITE),

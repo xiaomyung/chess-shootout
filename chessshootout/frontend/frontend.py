@@ -32,10 +32,11 @@ from chessshootout.frontend.modals.options import (
 from chessshootout.frontend.modals.help import HelpModal
 from chessshootout.frontend.modals.reconnecting import ReconnectingModal
 from chessshootout.frontend.visual.toast import Toast
-from chessshootout.frontend.visual.fonts import get_font
 from chessshootout.frontend.visual import backdrop
 from chessshootout.frontend.visual.effects import TAKEOVER_TOTAL_MS
-from chessshootout.frontend.window_chrome import WindowChrome, WINDOW_FLAGS
+from chessshootout.frontend.window_chrome import (
+    WindowChrome, WINDOW_FLAGS, MIN_WINDOW_WIDTH, MIN_WINDOW_HEIGHT,
+)
 from chessshootout.online.client import (
     OnlineClient, RECONNECT_TOTAL_SECONDS, fetch_resume, probe_active_game,
 )
@@ -79,6 +80,7 @@ RESULT_TEXT = {
     "draw_insufficient_material": ("Draw", "by insufficient material"),
     "draw_agreement": ("Draw", "by agreement"),
     "aborted": ("Game aborted", "no moves played"),
+    "aborted_disconnect": ("Game aborted", "opponent disconnected"),
     "server_shutdown": ("Game cancelled", "server shutting down"),
 }
 
@@ -167,9 +169,9 @@ MIN_MODAL_WIDTH = 360
 SAVED_PGN_TOAST_DURATION_MS = 3000
 RESYNC_TIMEOUT_MS = 8000
 RECONNECT_PROBE_INTERVAL_MS = 5000
+RECONNECT_PROBE_MAX_ATTEMPTS = 3
 
-MIN_WINDOW_WIDTH = 900
-MIN_WINDOW_HEIGHT = 500
+ONLINE_DEFAULT_TIME_MINUTES = 5
 
 WINDOW_TITLE = "Chess Shootout"
 
@@ -232,7 +234,7 @@ class Frontend(OnlineEventsMixin):
         self._series_scores = {}
         self._resyncing = False
         self._resync_started_at_ms = 0
-        self._last_beacon_mismatch_ply = None
+        self._last_heartbeat_sent_ms = 0
         self._last_give_time_at_ms = -GIVE_TIME_DEBOUNCE_MS
         self._first_move_deadline_ms = None
         self._opp_disconnected_at_ms = None
@@ -266,6 +268,7 @@ class Frontend(OnlineEventsMixin):
         self._last_reconnect_probe_ms = 0
         self._reconnect_probe_inflight = False
         self._reconnect_probe_gen = 0
+        self._reconnect_probe_attempts = 0
         self.audio_panel = AudioPanel(self.window, self.sound_manager)
         self.right_menu = RightMenu(self.window, self.match, {
             "undo": self._on_undo,
@@ -371,21 +374,28 @@ class Frontend(OnlineEventsMixin):
             return PieceColor.BLACK
         return PieceColor.WHITE
 
+    @staticmethod
+    def _is_white(color):
+        return color in (PieceColor.WHITE, "white")
+
     def _name_for_color(self, color):
-        is_white = color in (PieceColor.WHITE, "white")
-        return self.white_name if is_white else self.black_name
+        return self.white_name if self._is_white(color) else self.black_name
 
     def _country_for_color(self, color):
-        is_white = color in (PieceColor.WHITE, "white")
-        return self.white_country if is_white else self.black_country
+        return self.white_country if self._is_white(color) else self.black_country
 
     def _on_new_game(self):
+        if self.mode == SINGLE_SCREEN:
+            self._chosen_side = "black" if self._chosen_side == "white" else "white"
+            self.white_name, self.black_name = self.black_name, self.white_name
+            self.white_country, self.black_country = self.black_country, self.white_country
         self._reset_to_new_game()
         self.sound_manager.play_game_start()
 
     def _on_back_to_menu(self):
         self.mode = "menu"
         self._match_session_id = None
+        self._reconnect_probe_attempts = 0
         pg.display.set_caption(WINDOW_TITLE)
         if self.online_client is not None:
             self.online_client.disconnect()
@@ -653,8 +663,12 @@ class Frontend(OnlineEventsMixin):
     def _spawn_reconnect_probe(self):
         addr = env.get_server_addr()
         client_uuid = env.get_or_create_client_uuid()
-        if not addr or not client_uuid or self._reconnect_probe_inflight:
+        if (not addr or not client_uuid or self._reconnect_probe_inflight
+                or self._reconnect_probe_attempts >= RECONNECT_PROBE_MAX_ATTEMPTS):
             return
+        with self._pending_reconnect_lock:
+            if self._pending_reconnect is not None:
+                return
         self._last_reconnect_probe_ms = pg.time.get_ticks()
         self._reconnect_probe_inflight = True
         with self._pending_reconnect_lock:
@@ -677,6 +691,7 @@ class Frontend(OnlineEventsMixin):
                     return
                 if reclaim is None or resume is None:
                     self._pending_reconnect = None
+                    self._reconnect_probe_attempts += 1
                 else:
                     self._pending_reconnect = {
                         "addr": addr,
@@ -736,6 +751,7 @@ class Frontend(OnlineEventsMixin):
 
     def _on_start_game(self, config):
         env.set_last_mode(config["mode"])
+        env.set_nickname(config.get("nickname") or "")
         if config["mode"] == ONLINE:
             self._begin_online_flow(config)
             return
@@ -790,7 +806,7 @@ class Frontend(OnlineEventsMixin):
         request = {
             "nickname": (self._online_config.get("nickname") or "").strip() or "Player",
             "client_uuid": env.get_or_create_client_uuid(),
-            "time_minutes": self._online_config["time_minutes"] or 5,
+            "time_minutes": self._online_config["time_minutes"] or ONLINE_DEFAULT_TIME_MINUTES,
             "increment_seconds": self._online_config["increment_seconds"],
             "side_preference": self._online_config["side"],
             "country": env.get_country() or None,
@@ -803,7 +819,7 @@ class Frontend(OnlineEventsMixin):
         self._pending_game_start_payload = None
 
     def _search_labels(self):
-        minutes = self._online_config.get("time_minutes") or 5
+        minutes = self._online_config.get("time_minutes") or ONLINE_DEFAULT_TIME_MINUTES
         incr = self._online_config.get("increment_seconds", 0) or 0
         if minutes < 3:
             mode = "Bullet"
@@ -859,6 +875,7 @@ class Frontend(OnlineEventsMixin):
 
     def _return_to_menu_card(self):
         self.mode = "menu"
+        self._reconnect_probe_attempts = 0
         self.start_menu.show()
         self.menu_page.set_page(PAGE_CARD)
 
@@ -882,6 +899,7 @@ class Frontend(OnlineEventsMixin):
                     (pg.time.get_ticks() - self._wait_started_at_ms) // 1000)
         self.match_found_modal.update()
         self._track_local_online_state()
+        self._send_heartbeat_if_due()
         if (self.mode == ONLINE and self.current_result() is None
                 and self.online_client is not None
                 and self.online_client.state == "reconnecting"):
@@ -893,9 +911,26 @@ class Frontend(OnlineEventsMixin):
         if self._resyncing:
             if pg.time.get_ticks() - self._resync_started_at_ms > RESYNC_TIMEOUT_MS:
                 self._resyncing = False
-                self._last_beacon_mismatch_ply = None
+                if (self.online_client is not None
+                        and self.online_client.state == "connected"):
+                    log.info("resync timed out; escalating to reconnect")
+                    self.online_client.force_reconnect()
             else:
                 self.toast.show("Resyncing…")
+
+    def _send_heartbeat_if_due(self):
+        if (self.mode != ONLINE or self.online_client is None
+                or self.online_client.state != "connected"
+                or self.current_result() is not None):
+            return
+        if self.online_client.is_server_silent():
+            log.info("server heartbeat silent; escalating to reconnect")
+            self.online_client.force_reconnect()
+            return
+        now = pg.time.get_ticks()
+        if now - self._last_heartbeat_sent_ms >= self.online_client.heartbeat_interval() * 1000:
+            self._last_heartbeat_sent_ms = now
+            self.online_client.send_ping(len(self.match.move_history))
 
     def _track_local_online_state(self):
         current = self.online_client.state if self.online_client is not None else None
@@ -1156,7 +1191,7 @@ class Frontend(OnlineEventsMixin):
         self._strip_for_color(mover_color).flash_increment()
 
     def _strip_for_color(self, color):
-        is_white = color in (PieceColor.WHITE, "white")
+        is_white = self._is_white(color)
         top_is_white = self._strip_color_top() == PieceColor.WHITE
         return (self.player_strip_top if is_white == top_is_white
                 else self.player_strip_bottom)
@@ -1368,7 +1403,7 @@ class Frontend(OnlineEventsMixin):
         if elapsed is None:
             return
         alpha = min(RESULT_FADE_MAX_ALPHA,
-                      int(RESULT_FADE_MAX_ALPHA * elapsed / RESULT_FADE_MS))
+                    int(RESULT_FADE_MAX_ALPHA * elapsed / RESULT_FADE_MS))
         if alpha <= 0:
             return
         overlay = pg.Surface(self.window.get_size(), pg.SRCALPHA)
@@ -1607,9 +1642,6 @@ class Frontend(OnlineEventsMixin):
             strip_height,
         )
 
-        self.board.font = get_font(
-            int(board_size_px // self.board.board_guides_font_factor), bold=True,
-        )
         self.board.set_rect(board_rect)
         self.result_menu.set_rect(result_rect)
         self.confirm_modal.set_rect(result_modal_rect)

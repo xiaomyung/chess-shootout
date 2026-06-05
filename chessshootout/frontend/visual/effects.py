@@ -109,7 +109,7 @@ class EffectManager:
             self._art = gunfx.load_battle_art()
         return self._art
 
-    def clear(self):
+    def clear_transients(self):
         self.particles = []
         self.holes = []
         self.captures = []
@@ -125,6 +125,9 @@ class EffectManager:
         self._shake = None
         self._streak_color = None
         self._streak_count = 0
+
+    def clear(self):
+        self.clear_transients()
         self._first_blood_spent = False
 
     def cut(self, now=None):

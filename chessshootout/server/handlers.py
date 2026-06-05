@@ -11,10 +11,11 @@ from chessshootout.server import logging_setup
 from chessshootout.server.connections import broadcast, send
 from chessshootout.server.broadcasts import broadcast_game_start, finalize_and_broadcast
 from chessshootout.server.protocol import (
-    ClockSnapshot, DrawOfferedMessage, DrawResponseMessage, ErrorMessage,
-    GIVE_TIME_SECONDS, MoveAppliedMessage, MoveMessage, Reason,
-    RematchRequestMessage, RematchResponseMessage,
-    ResyncNoticeMessage, TakebackAppliedMessage, TakebackOfferedMessage,
+    ClockSnapshot, ConnectionStatusMessage, DrawOfferedMessage, DrawResponseMessage,
+    ErrorMessage, GIVE_TIME_SECONDS, MoveAppliedMessage, MoveMessage,
+    PingMessage, PongMessage, Reason,
+    RematchRequestMessage, RematchResponseMessage, ResyncDirectiveMessage,
+    TakebackAppliedMessage, TakebackOfferedMessage,
     TakebackResponseMessage, TimeGrantedMessage,
 )
 from chessshootout.server.sweep import RESULT_REASON_BY_GAME_RESULT
@@ -87,6 +88,7 @@ async def handle_move(app, websocket, room, color, raw):
         room.backend.promote(to_sq, promo_type)
     if room.first_move_at is None:
         room.first_move_at = app.state.now()
+    await clear_resyncing(connections, room, color)
     room.draw_offered_by = None
     room.takeback_offered_by = None
     san = room.backend.move_history[-1].san
@@ -257,14 +259,41 @@ async def handle_give_time(app, websocket, room, color, raw):
     return "granted" if added > 0 else "capped"
 
 
-async def handle_resync(app, websocket, room, color, raw):
-    connections = app.state.connections
-    if room.result is not None:
-        return "noop"
+async def _notify_opp_state(connections, room, color, state):
     opp_ws = connections.get_for_color(room, room.opp_color(color))
     if opp_ws is not None:
-        await send(opp_ws, ResyncNoticeMessage())
-    return "relayed"
+        await send(opp_ws, ConnectionStatusMessage(opp_state=state))
+
+
+async def set_resyncing(connections, room, color):
+    slot = room.slot(color)
+    if slot is not None and not slot.desync_active:
+        slot.desync_active = True
+        await _notify_opp_state(connections, room, color, "resyncing")
+
+
+async def clear_resyncing(connections, room, color):
+    slot = room.slot(color)
+    if slot is not None and slot.desync_active:
+        slot.desync_active = False
+        await _notify_opp_state(connections, room, color, "connected")
+
+
+async def handle_ping(app, websocket, room, color, raw):
+    connections = app.state.connections
+    try:
+        msg = PingMessage.model_validate_json(raw)
+    except ValidationError:
+        return "invalid_ping"
+    await send(connections.get_for_color(room, color), PongMessage())
+    if room.result is not None or room.backend is None:
+        return "ping"
+    if msg.ply != len(room.backend.move_history):
+        await set_resyncing(connections, room, color)
+        await send(connections.get_for_color(room, color), ResyncDirectiveMessage())
+    else:
+        await clear_resyncing(connections, room, color)
+    return "ping"
 
 
 HANDLERS = {
@@ -277,5 +306,5 @@ HANDLERS = {
     "takeback_request": handle_takeback_request,
     "takeback_response": handle_takeback_response,
     "give_time": handle_give_time,
-    "resync": handle_resync,
+    "ping": handle_ping,
 }

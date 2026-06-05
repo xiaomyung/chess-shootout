@@ -61,8 +61,8 @@ class Colors:
     icon_chip_bg = "#3e3c34"
 
     dot_connected = "#38d65b"
-    dot_reconnecting = amber
-    dot_disconnected = "#ff4d4d"
+    dot_resyncing = amber
+    dot_reconnecting = "#ff4d4d"
     dot_unknown = "#8c8c8c"
 
     avatar_slate_top = "#5a6473"

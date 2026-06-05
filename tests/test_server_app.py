@@ -326,9 +326,7 @@ async def test_clock_flag_during_play_broadcasts_timeout(app, clock):
 
 
 @pytest.mark.asyncio
-async def test_grace_expiry_yields_abandonment(app, clock):
-    """first_move_at set skips the abort window; grace expiry awards the opponent."""
-    rooms = app.state.rooms
+async def _paired_in_progress_room(rooms, clock):
     await rooms.enqueue(client_uuid=ALICE, nickname="A", session_token="ta",
                         time_minutes=5, increment_seconds=0, side_preference="white")
     await rooms.enqueue(client_uuid=BOB, nickname="B", session_token="tb",
@@ -336,10 +334,31 @@ async def test_grace_expiry_yields_abandonment(app, clock):
     room = list(rooms._active.values())[0]
     room.started_at = clock()
     room.first_move_at = clock()
+    room.white.connected = True
+    room.black.connected = True
+    return room
+
+
+async def test_grace_expiry_without_desync_awards_opponent(app, clock):
+    """A plain disconnect (no desync signalled) that never recovers is a deliberate
+    leave: the waiting player wins by abandonment."""
+    rooms = app.state.rooms
+    room = await _paired_in_progress_room(rooms, clock)
     rooms.mark_disconnected(room.room_id, "white")
     clock.advance(GRACE_SECONDS + 1)
     await _sweep(app)
     assert room.result == (Reason.ABANDONMENT, "black")
+
+
+async def test_grace_expiry_after_desync_aborts(app, clock):
+    """A disconnect while a desync was active aborts the game with no winner."""
+    rooms = app.state.rooms
+    room = await _paired_in_progress_room(rooms, clock)
+    room.white.desync_active = True
+    rooms.mark_disconnected(room.room_id, "white")
+    clock.advance(GRACE_SECONDS + 1)
+    await _sweep(app)
+    assert room.result == (Reason.ABORTED_DISCONNECT, None)
 
 
 @pytest.mark.asyncio

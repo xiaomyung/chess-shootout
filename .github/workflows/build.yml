@@ -1,0 +1,68 @@
+name: build
+
+on:
+  workflow_call:
+    inputs:
+      version:
+        required: true
+        type: string
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest, ubuntu-22.04]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -e ".[build]"
+
+      - name: Stamp version (posix)
+        if: runner.os != 'Windows'
+        run: |
+          echo "VER=${{ inputs.version }}" >> "$GITHUB_ENV"
+          echo "${{ inputs.version }}" > assets/version.txt
+      - name: Stamp version (windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          "VER=${{ inputs.version }}" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          Set-Content -Path assets/version.txt -Value "${{ inputs.version }}" -Encoding utf8
+
+      - name: Build Windows (portable exe + installer)
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: |
+          pyinstaller --onefile --windowed --noupx --name ChessShootout --icon assets/icons/icon.ico --add-data "assets;assets" --collect-data certifi --hidden-import certifi --exclude-module fastapi --exclude-module uvicorn --exclude-module starlette --exclude-module slowapi chessshootout/main.py
+          New-Item -ItemType Directory -Force -Path out | Out-Null
+          Move-Item -Force dist/ChessShootout.exe "out/ChessShootout-$env:VER-Portable.exe"
+          $env:CHESS_VERSION = $env:VER
+          pyinstaller --noconfirm chess.spec
+          choco install innosetup -y --no-progress
+          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" "/DAppVer=$env:VER" packaging\chess.iss
+
+      - name: Build macOS (.app -> .dmg)
+        if: matrix.os == 'macos-latest'
+        run: |
+          export CHESS_VERSION="$VER"
+          pyinstaller --noconfirm chess.spec
+          mkdir -p out
+          hdiutil create -volname "Chess Shootout" -srcfolder dist/ChessShootout.app -ov -format UDZO "out/ChessShootout-$VER.dmg"
+
+      - name: Build Linux (AppImage)
+        if: matrix.os == 'ubuntu-22.04'
+        run: |
+          export CHESS_VERSION="$VER"
+          pyinstaller --noconfirm chess.spec
+          packaging/build_appimage.sh
+          mkdir -p out
+          mv ChessShootout-x86_64.AppImage "out/ChessShootout-$VER-x86_64.AppImage"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist-${{ matrix.os }}
+          path: out/

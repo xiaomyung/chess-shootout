@@ -48,3 +48,27 @@ jobs:
 
       - name: Run pylama
         run: pylama chessshootout tests
+
+  version-bump:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Verify pyproject.toml version was bumped
+        run: |
+          git show '${{ github.event.pull_request.base.sha }}:pyproject.toml' > base_pyproject.toml
+          old=$(python packaging/project_version.py base_pyproject.toml)
+          new=$(python packaging/project_version.py)
+          echo "base version: $old   PR version: $new"
+          if [ "$old" = "$new" ]; then
+            echo "::error::pyproject.toml [project].version is still $new — every PR must bump it."
+            exit 1
+          fi

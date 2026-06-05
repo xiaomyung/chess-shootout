@@ -172,6 +172,35 @@ def test_server_addr_blank_is_noop_keeps_default(blank):
     assert env.get_server_addr() == "localhost:8000"
 
 
+def test_set_nickname_persists_round_trip():
+    env.set_nickname("Magnus")
+    assert env.get_nickname() == "Magnus"
+    assert os.environ["CHESS_NICKNAME"] == "Magnus"
+    assert "CHESS_NICKNAME=Magnus" in env._ENV_PATH.read_text()
+
+
+def test_set_nickname_strips_whitespace():
+    env.set_nickname("  Hikaru  ")
+    assert env.get_nickname() == "Hikaru"
+
+
+@pytest.mark.parametrize("blank", ["", "   ", None])
+def test_set_nickname_blank_is_noop(blank):
+    env.set_nickname("Fabiano")
+    env.set_nickname(blank)
+    assert env.get_nickname() == "Fabiano"
+    assert "CHESS_NICKNAME=Fabiano" in env._ENV_PATH.read_text()
+
+
+def test_set_nickname_replaces_existing_value_in_place():
+    env.set_nickname("First")
+    env.set_nickname("Second")
+    assert env.get_nickname() == "Second"
+    contents = env._ENV_PATH.read_text()
+    assert "CHESS_NICKNAME=Second" in contents
+    assert "First" not in contents
+
+
 def test_country_defaults_empty():
     assert env.get_country() == ""
 

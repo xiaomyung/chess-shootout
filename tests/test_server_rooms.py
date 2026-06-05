@@ -149,22 +149,42 @@ async def test_drop_player_starts_grace_timer(manager, clock):
 
 
 @pytest.mark.asyncio
-async def test_finalize_abandonment_sets_result(manager, clock):
+async def test_finalize_result_aborts_with_no_winner(manager, clock):
+    """A disconnect abort records a no-winner result and is idempotent (first sticks)."""
     clock.advance(12)
     await manager.enqueue(**_enqueue_kwargs("alice"))
     room = await manager.enqueue(**_enqueue_kwargs("bob"))
-    manager.finalize_abandonment(room.room_id, "white")
-    assert room.result == ("abandonment", "black")
+    manager.finalize_result(room.room_id, "aborted_disconnect")
+    assert room.result == ("aborted_disconnect", None)
     assert room.ended_at == 12.0
+    manager.finalize_result(room.room_id, "checkmate", winner_color="white")
+    assert room.result == ("aborted_disconnect", None)
 
 
 @pytest.mark.asyncio
-async def test_finalize_abandonment_idempotent(manager):
+async def test_in_progress_room_for_only_matches_started_unfinished_games(manager):
+    await manager.enqueue(**_enqueue_kwargs("alice"))
+    assert manager.in_progress_room_for("alice") is None
+    room = await manager.enqueue(**_enqueue_kwargs("bob"))
+    assert manager.in_progress_room_for("alice") is None
+    room.first_move_at = 1.0
+    in_prog = manager.in_progress_room_for("alice")
+    assert in_prog is not None
+    assert in_prog[0] is room
+    assert in_prog[1] == room.color_of("alice")
+    manager.finalize_result(room.room_id, "checkmate", winner_color="white")
+    assert manager.in_progress_room_for("alice") is None
+
+
+@pytest.mark.asyncio
+async def test_release_for_new_game_frees_active_and_queued_uuids(manager):
     await manager.enqueue(**_enqueue_kwargs("alice"))
     room = await manager.enqueue(**_enqueue_kwargs("bob"))
-    manager.finalize_abandonment(room.room_id, "white")
-    manager.finalize_abandonment(room.room_id, "black")
-    assert room.result == ("abandonment", "black")
+    manager.release_for_new_game("alice")
+    assert manager.get(room.room_id) is None
+    await manager.enqueue(**_enqueue_kwargs("alice"))
+    manager.release_for_new_game("bob")
+    await manager.enqueue(**_enqueue_kwargs("bob"))
 
 
 @pytest.mark.asyncio
@@ -300,12 +320,13 @@ async def test_series_scores_award_win_and_persist_across_rematch(manager):
 
 
 @pytest.mark.asyncio
-async def test_series_scores_award_on_abandonment(manager):
+async def test_series_scores_not_awarded_on_disconnect_abort(manager):
+    """A disconnect abort is neutral: no series point to either player."""
     await manager.enqueue(**_enqueue_kwargs("alice"))
     room = await manager.enqueue(**_enqueue_kwargs("bob"))
-    manager.finalize_abandonment(room.room_id, "white")
-    assert room.score_for("black") == 1.0
+    manager.finalize_result(room.room_id, "aborted_disconnect", None)
     assert room.score_for("white") == 0.0
+    assert room.score_for("black") == 0.0
 
 
 @pytest.mark.asyncio

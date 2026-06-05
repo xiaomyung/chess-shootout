@@ -30,7 +30,6 @@ def _draw_capsule(surf, p1, p2, width, color):
 
 
 class Board:
-    TEXT_PADDING_FRACTION = 0.006
     SIZE = 8
     FRAME_PAD_FRACTION = 0.055
     FRAME_PAD_MIN = 16
@@ -59,8 +58,6 @@ class Board:
         self.shot_callback = shot_callback
         self.announce_callback = announce_callback
         self.on_premove_queued = on_premove_queued
-        self.font = get_font(18, bold=True)
-        self.board_guides_font_factor = 50
 
         self.rect = pg.Rect(0, 0, 0, 0)
         self.frame_pad = 0
@@ -76,7 +73,6 @@ class Board:
         self.file_labels = "abcdefgh"
         self.file_labels_rendered = []
         self.rank_labels_rendered = []
-        self.text_padding = 0
 
         self.piece_images_original = {}
         self.piece_images_scaled = {}
@@ -587,7 +583,7 @@ class Board:
 
     def jump_to_review_ply(self, ply):
         self.cancel_animations()
-        self.effects.clear()
+        self.effects.clear_transients()
         self._target_ply = None
         history_len = len(self.match.move_history)
         if ply is None or ply >= history_len:
@@ -633,12 +629,8 @@ class Board:
         self.start_animation(move.from_sq, move.to_sq, move.piece,
                              on_complete=finish)
         if move.is_castle:
-            home_row = move.from_sq.row
-            rook_from, rook_to = (
-                (Square(home_row, 7), Square(home_row, 5))
-                if move.to_sq.col == 6
-                else (Square(home_row, 0), Square(home_row, 3))
-            )
+            rook_from, rook_to = self._castle_rook_squares(
+                move.from_sq.row, move.to_sq.col)
             rook_piece = Piece(PieceType.ROOK, move.piece.color)
             self.start_animation(rook_from, rook_to, rook_piece)
 
@@ -708,7 +700,6 @@ class Board:
         free_h = rect.height - 2 * self.frame_pad - used
         self.board_offset_x = rect.x + self.frame_pad + free_w // 2
         self.board_offset_y = rect.y + self.frame_pad + free_h // 2
-        self.text_padding = rect.width * self.TEXT_PADDING_FRACTION
         self.rescale_pieces()
         self._render_text()
         self._build_frame_surface()
@@ -903,6 +894,8 @@ class Board:
     def _should_switch_focus_to(self, square, grid, live_at_clicked, current_turn, local_color):
         if self.selected_square is None:
             return False
+        if not self._is_real_move_eligible(live_at_clicked, current_turn, local_color):
+            return False
         own_color = local_color if local_color is not None else current_turn
         selected_piece = grid[self.selected_square.row][self.selected_square.col]
         if selected_piece is None or selected_piece.color != own_color:
@@ -1012,30 +1005,27 @@ class Board:
         if entry.move.is_castle:
             self._start_castle_rook_animation(entry, from_sq)
 
+    @staticmethod
+    def _castle_rook_squares(home_row, king_to_col):
+        if king_to_col == 6:
+            return Square(home_row, 7), Square(home_row, 5)
+        return Square(home_row, 0), Square(home_row, 3)
+
     def _start_castle_rook_animation(self, entry, king_from_sq, on_complete=None):
-        home_row = king_from_sq.row
-        king_to_col = entry.move.to_sq.col
-        rook_from, rook_to = (
-            (Square(home_row, 7), Square(home_row, 5))
-            if king_to_col == 6
-            else (Square(home_row, 0), Square(home_row, 3))
-        )
+        rook_from, rook_to = self._castle_rook_squares(
+            king_from_sq.row, entry.move.to_sq.col)
         rook_piece = self.match.piece_at(rook_to)
         self.start_animation(rook_from, rook_to, rook_piece, on_complete=on_complete)
 
     def start_undo_animation(self, move):
-        self.effects.clear()
+        self.effects.clear_transients()
         moving_piece = self.match.piece_at(move.from_sq)
         if moving_piece is None:
             return
         self.start_animation(move.to_sq, move.from_sq, moving_piece)
         if move.is_castle:
-            home_row = move.from_sq.row
-            rook_post, rook_home = (
-                (Square(home_row, 5), Square(home_row, 7))
-                if move.to_sq.col == 6
-                else (Square(home_row, 3), Square(home_row, 0))
-            )
+            rook_home, rook_post = self._castle_rook_squares(
+                move.from_sq.row, move.to_sq.col)
             rook_piece = self.match.piece_at(rook_home)
             self.start_animation(rook_post, rook_home, rook_piece)
 

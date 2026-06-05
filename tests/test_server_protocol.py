@@ -3,7 +3,7 @@ from pydantic import ValidationError
 
 from chessshootout.server.protocol import (
     AuthMessage, ErrorMessage, GameStartMessage, MatchmakeRequest,
-    MoveMessage, PROTOCOL_VERSION, ResyncNoticeMessage, StateSyncMessage,
+    MoveMessage, PROTOCOL_VERSION, PingMessage, PongMessage, ResyncDirectiveMessage,
     normalize_country, normalize_nickname,
 )
 from tests.helpers import fake_uuid4
@@ -23,14 +23,14 @@ GAME_START = GameStartMessage(
     "msg, expected",
     [
         pytest.param(
-            StateSyncMessage(ply=7),
-            {"version": PROTOCOL_VERSION, "type": "state_sync", "ply": 7},
-            id="state_sync",
+            PingMessage(ply=7),
+            {"version": PROTOCOL_VERSION, "type": "ping", "ply": 7},
+            id="ping",
         ),
         pytest.param(
-            ResyncNoticeMessage(),
-            {"version": PROTOCOL_VERSION, "type": "resync"},
-            id="resync_notice",
+            ResyncDirectiveMessage(),
+            {"version": PROTOCOL_VERSION, "type": "resync_directive"},
+            id="resync_directive",
         ),
         pytest.param(
             GAME_START,
@@ -48,6 +48,8 @@ GAME_START = GameStartMessage(
                 "black_score": 0.0,
                 "white_country": None,
                 "black_country": None,
+                "heartbeat_interval_seconds": 2.0,
+                "grace_seconds": 60.0,
             },
             id="game_start",
         ),
@@ -64,8 +66,9 @@ def test_message_round_trip_matches_independent_wire_shape(msg, expected):
     [
         pytest.param(AuthMessage(session_token="t"), id="auth"),
         pytest.param(ErrorMessage(reason="version_mismatch"), id="error"),
-        pytest.param(StateSyncMessage(ply=0), id="state_sync"),
-        pytest.param(ResyncNoticeMessage(), id="resync"),
+        pytest.param(PingMessage(ply=0), id="ping"),
+        pytest.param(PongMessage(), id="pong"),
+        pytest.param(ResyncDirectiveMessage(), id="resync_directive"),
     ],
 )
 def test_messages_carry_protocol_version(msg):

@@ -169,6 +169,20 @@ def test_aborted_does_not_change_series():
     assert app._series_scores == {"Alice": 1, "Bob": 0}
 
 
+def test_disconnect_abort_is_neutral_result_with_its_own_text():
+    """A disconnect abort is a no-winner static result with a distinct modal subtitle and
+    leaves the series score untouched."""
+    app = _make_app()
+    app.mode = ONLINE
+    app.white_name = "Alice"
+    app.black_name = "Bob"
+    app._series_scores = {"Alice": 1, "Bob": 0}
+    app._handle_online_result({"reason": "aborted_disconnect"})
+    assert app.manual_result == "aborted_disconnect"
+    assert app.result_text() == ("Game aborted", "opponent disconnected")
+    assert app._series_scores == {"Alice": 1, "Bob": 0}
+
+
 def test_score_follows_player_through_color_swap_end_to_end():
     """Two games, same opponent. Game 1: I play white and win. Game 2: I play
     black. My nickname's score stays 1 regardless of the color I hold."""

@@ -42,6 +42,48 @@ def test_text_setter_puts_cursor_at_end(ti):
     assert ti.cursor == 5
 
 
+def test_click_then_type_does_not_swallow_first_char(ti):
+    """A single click leaves sel_anchor at the cursor; typing must collapse it so the
+    first inserted char isn't selected-then-wiped by the next char."""
+    ti.handle_click((ti.rect.x + ti.padding, ti.rect.centery))
+    ti.handle_key(_ev(pg.K_a, "a"))
+    ti.handle_key(_ev(pg.K_b, "b"))
+    assert ti.text == "ab"
+    assert ti._sel_range() is None
+
+
+def _commit_input(commits):
+    inp = TextInput(pg.display.get_surface(), max_chars=40,
+                    on_commit=lambda t: commits.append(t))
+    inp.set_rect(pg.Rect(50, 50, 300, 30))
+    return inp
+
+
+def test_on_commit_fires_on_blur():
+    commits = []
+    inp = _commit_input(commits)
+    inp.focused = True
+    inp.text = "alice"
+    inp.focused = False
+    assert commits == ["alice"]
+
+
+def test_on_commit_fires_on_enter():
+    commits = []
+    inp = _commit_input(commits)
+    inp.focused = True
+    inp.text = "bob"
+    inp.handle_key(_ev(pg.K_RETURN))
+    assert commits == ["bob"]
+
+
+def test_on_commit_not_fired_on_focus_gain():
+    commits = []
+    inp = _commit_input(commits)
+    inp.focused = True
+    assert commits == []
+
+
 def test_left_right_move_cursor(ti):
     ti.text = "abc"
     ti.handle_key(_ev(pg.K_LEFT))

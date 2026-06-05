@@ -75,7 +75,8 @@ class StartMenu:
         self.callbacks = callbacks
         self.visible = True
 
-        self.text_input = TextInput(window, max_chars=20, placeholder="Enter a nickname")
+        self.text_input = TextInput(window, max_chars=20, placeholder="Enter a nickname",
+                                    on_commit=lambda text: env.set_nickname(text))
         self.text_input.text = env.get_nickname()
 
         last_mode = env.get_last_mode()

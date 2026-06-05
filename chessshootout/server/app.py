@@ -15,7 +15,7 @@ from chessshootout.backend.utils import (
     PROMO_LETTER_BY_TYPE, coord_from_square,
 )
 from chessshootout.server import logging_setup
-from chessshootout.server.broadcasts import broadcast_game_start
+from chessshootout.server.broadcasts import broadcast_game_start, finalize_and_broadcast
 from chessshootout.server.connections import ConnectionRegistry, send
 from chessshootout.server.handlers import _clock_snapshot, dispatch
 from chessshootout.server.protocol import (
@@ -33,6 +33,7 @@ from chessshootout.server.sweep import Sweep
 
 CLOCK_TICK_INTERVAL_SECONDS = 0.1
 MAX_INBOUND_MESSAGE_BYTES = 4096
+DEFAULT_MAX_ROOMS = 100
 
 RECLAIM_PER_UUID_LIMIT_PER_MINUTE = 100
 RATE_LIMIT_PRUNE_THRESHOLD = 4096
@@ -83,7 +84,7 @@ class UuidRateLimiter:
         return True
 
 
-def create_app(*, now_provider=time.monotonic, max_rooms=100):
+def create_app(*, now_provider=time.monotonic, max_rooms=DEFAULT_MAX_ROOMS):
     rooms = RoomManager(now_provider=now_provider, max_rooms=max_rooms)
     connections = ConnectionRegistry()
     limiter = Limiter(key_func=get_remote_address)
@@ -158,6 +159,13 @@ def create_app(*, now_provider=time.monotonic, max_rooms=100):
         if body.time_minutes < 1 or body.increment_seconds < 0:
             raise HTTPException(status_code=422,
                                   detail={"reason": Reason.INVALID_TIME_CONTROL})
+        prior = rooms.in_progress_room_for(body.client_uuid)
+        if prior is not None:
+            prior_room, prior_color = prior
+            log.info("matchmake abandons room=%s color=%s", prior_room.room_id, prior_color)
+            await finalize_and_broadcast(rooms, connections, prior_room, Reason.ABANDONMENT,
+                                         winner_color=prior_room.opp_color(prior_color))
+            rooms.release_for_new_game(body.client_uuid)
         token = RoomManager.make_session_token()
         try:
             room = await rooms.enqueue(
@@ -220,6 +228,12 @@ def create_app(*, now_provider=time.monotonic, max_rooms=100):
         ]
         if room.backend is not None:
             room.backend.tick_clock()
+        if (connections.get_for_color(room, color) is not None
+                and slot is not None and not slot.desync_active):
+            slot.desync_active = True
+            opp_ws = connections.get_for_color(room, room.opp_color(color))
+            if opp_ws is not None:
+                await send(opp_ws, ConnectionStatusMessage(opp_state="resyncing"))
         return ResumeResponse(
             fen=export_fen(room.backend),
             move_history=history,
@@ -368,6 +382,7 @@ async def _ws_session(app, websocket, room_id):
             current_color = room.color_of(auth_uuid)
             if current_color is None:
                 break
+            rooms.touch_seen(auth_room.room_id, current_color)
             if not ws_rate_limiter.hit(auth_uuid):
                 await send(websocket, ErrorMessage(reason=Reason.RATE_LIMITED))
                 continue
@@ -377,7 +392,8 @@ async def _ws_session(app, websocket, room_id):
                       room.room_id, auth_uuid[:8], msg_type,
                       (app.state.now() - t0) * 1000.0, outcome)
     finally:
-        if connections.remove(auth_room.room_id, auth_uuid, websocket):
+        removed = connections.remove(auth_room.room_id, auth_uuid, websocket)
+        if removed or connections.get_for_color(auth_room, auth_color) is None:
             rooms.mark_disconnected(auth_room.room_id, auth_color)
             log.info("ws disconnected room=%s color=%s",
                      auth_room.room_id, auth_color)
