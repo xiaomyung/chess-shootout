@@ -253,11 +253,6 @@ is read from `pyproject.toml`, and the build **fails if the tag isn't
 `v<version>`** — so the tag and the package version can't drift. A hyphen marks
 a pre-release. Review the four artifacts, then **Publish**.
 
-To try real binaries *before* tagging, run the **dev-build** workflow
-(Actions → dev-build → Run workflow): it runs the same build and publishes the
-four artifacts to a private, maintainer-only **draft** pre-release
-(`v<version>-dev`) you can download and test locally.
-
 ## License
 
 **Source available, not open source.** Because it forbids commercial use, this
