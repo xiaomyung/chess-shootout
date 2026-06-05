@@ -1,4 +1,6 @@
 import asyncio
+import ipaddress
+import os
 import time
 from collections import defaultdict, deque
 from contextlib import asynccontextmanager
@@ -51,6 +53,41 @@ WS_CLOSE_INVALID_TOKEN = 4000
 WS_CLOSE_SERVER_SHUTDOWN = 4002
 WS_CLOSE_SUPERSEDED = 4003
 
+
+def _parse_trusted_proxies(raw):
+    networks = []
+    for part in raw.split(","):
+        part = part.strip()
+        if not part:
+            continue
+        try:
+            networks.append(ipaddress.ip_network(part, strict=False))
+        except ValueError:
+            continue
+    return networks
+
+
+TRUSTED_PROXIES = _parse_trusted_proxies(os.environ.get("TRUSTED_PROXIES", "127.0.0.1/32"))
+
+
+def _peer_trusted(peer, trusted):
+    try:
+        ip = ipaddress.ip_address(peer)
+    except ValueError:
+        return False
+    return any(ip in net for net in trusted)
+
+
+def client_ip_key(request, trusted=None):
+    trusted = TRUSTED_PROXIES if trusted is None else trusted
+    peer = get_remote_address(request)
+    if _peer_trusted(peer, trusted):
+        cf = request.headers.get("cf-connecting-ip")
+        if cf:
+            return cf.strip()
+    return peer
+
+
 log = logging_setup.get_logger("chess.server.app")
 
 
@@ -87,7 +124,7 @@ class UuidRateLimiter:
 def create_app(*, now_provider=time.monotonic, max_rooms=DEFAULT_MAX_ROOMS):
     rooms = RoomManager(now_provider=now_provider, max_rooms=max_rooms)
     connections = ConnectionRegistry()
-    limiter = Limiter(key_func=get_remote_address)
+    limiter = Limiter(key_func=client_ip_key)
     reclaim_limiter = UuidRateLimiter(
         RECLAIM_PER_UUID_LIMIT_PER_MINUTE, RECLAIM_WINDOW_SECONDS,
         now_provider=now_provider,
