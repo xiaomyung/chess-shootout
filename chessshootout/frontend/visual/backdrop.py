@@ -1,8 +1,41 @@
 import math
+import random
 
 import pygame as pg
 
 from chessshootout.frontend.visual.colors import Colors
+
+
+_DITHER_TILES = {}
+
+
+def _dither_tiles(t):
+    cached = _DITHER_TILES.get(t)
+    if cached is not None:
+        return cached
+    rng = random.Random(0x5EED)
+    add = bytearray(t * t * 3)
+    sub = bytearray(t * t * 3)
+    for i in range(t * t):
+        r = rng.random()
+        if r < 0.25:
+            add[i * 3] = add[i * 3 + 1] = add[i * 3 + 2] = 1
+        elif r < 0.5:
+            sub[i * 3] = sub[i * 3 + 1] = sub[i * 3 + 2] = 1
+    tiles = (pg.image.frombuffer(bytes(add), (t, t), "RGB").copy(),
+             pg.image.frombuffer(bytes(sub), (t, t), "RGB").copy())
+    _DITHER_TILES[t] = tiles
+    return tiles
+
+
+def dither(surf, t=128):
+    w, h = surf.get_size()
+    add, sub = _dither_tiles(t)
+    for x in range(0, w, t):
+        for y in range(0, h, t):
+            surf.blit(add, (x, y), special_flags=pg.BLEND_RGB_ADD)
+            surf.blit(sub, (x, y), special_flags=pg.BLEND_RGB_SUB)
+    return surf
 
 
 def radial_gradient(n, cx, cy, rx, ry, c0, c1, c2):
@@ -45,4 +78,4 @@ def arena_background(size, center=(0.5, 0.18)):
         a = int(13 * row / floor_h)
         pg.draw.line(floor, (fr, fg, fb, a), (0, row), (w, row))
     surf.blit(floor, (0, h - floor_h))
-    return surf
+    return dither(surf)
