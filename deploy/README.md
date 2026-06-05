@@ -186,29 +186,21 @@ covers the 10 s drain).
 ## Updating to a new version
 
 A version-bumped PR merging to master auto-publishes the new image to GHCR
-(`docker.yml`). Roll it out one of two ways — pull the published image, or rebuild
-it on the box if you deploy from a clone:
+(`docker.yml`). Updating is one command on the box:
 
-**Pull the published image (default install):**
 ```bash
 cd /srv/chess-shootout
-sed -i 's/^IMAGE_TAG=.*/IMAGE_TAG=2.1.1/' .env      # the new version
-docker compose --profile edge pull
-docker compose --profile edge up -d
+./deploy/update.sh            # update to the latest release
+./deploy/update.sh v2.1.5     # or roll to a specific release tag
 ```
 
-**Build on the box (clone-based install):**
-```bash
-cd /srv/chess-shootout
-git pull
-docker compose build
-docker compose --profile edge up -d
-```
+It pulls the matching CI-built (and trivy-scanned) image from GHCR, refreshes the
+compose file / Caddyfile from git, recreates **only `chess-server`** (Caddy is
+untouched) with the graceful `server_shutdown` drain, and prints the running
+version. It falls back to `sudo` automatically when your shell isn't in the
+`docker` group, so there's nothing to fiddle with.
 
-Either way only `chess-server` is recreated (Caddy is unchanged), and `up -d`
-triggers the graceful `server_shutdown` drain. With the systemd unit installed you
-can `sudo systemctl restart chess-server-compose` instead of `up -d`.
+**Rollback** is the same command with an earlier tag (`./deploy/update.sh v2.1.0`).
 
-**Rollback:** set `IMAGE_TAG` back to a prior version (or pin a full image
-`@sha256:` digest, which the weekly base-image rebuild can't move) and re-`up -d`.
-Pulling a pinned version tag also picks up the weekly base-image CVE rebuild.
+> Pulling requires read access to the GHCR package — either make it **Public**
+> (repo → Packages → Package settings) or `docker login ghcr.io` once on the box.
