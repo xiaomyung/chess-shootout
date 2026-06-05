@@ -73,6 +73,7 @@ services:
       - ALL
     cap_add:
       - NET_BIND_SERVICE
+      - DAC_READ_SEARCH
     security_opt:
       - no-new-privileges:true
     pids_limit: 256

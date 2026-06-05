@@ -5,12 +5,7 @@
 }
 
 chess.xiaomyung.com {
-	tls /run/secrets/cf_origin_cert /run/secrets/cf_origin_key {
-		client_auth {
-			mode require_and_verify
-			trust_pool file /run/secrets/cf_aop_ca
-		}
-	}
+	tls /run/secrets/cf_origin_cert /run/secrets/cf_origin_key
 	reverse_proxy chess-server:8000
 	encode zstd gzip
 	log {

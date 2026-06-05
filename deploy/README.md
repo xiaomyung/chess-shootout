@@ -11,7 +11,7 @@ Player ──wss:443──▶ Cloudflare (orange cloud, Full strict)
         UFW + DOCKER-USER: only Cloudflare ranges may reach :80/:443
                          │
                          ▼
-        caddy container :80/:443  ── Origin Cert + Authenticated Origin Pulls (mTLS)
+        caddy container :80/:443  ── Origin Cert (Authenticated Origin Pulls optional)
                          │  reverse_proxy chess-server:8000  (compose network)
                          ▼
         chess-server container  (uvicorn; 127.0.0.1:8000 host-published for debug only)
@@ -113,19 +113,30 @@ sudo apt-get install -y netfilter-persistent iptables-persistent
 sudo netfilter-persistent save
 ```
 
-This is **belt-and-suspenders** with Authenticated Origin Pulls (next step): the
-firewall blocks non-CF IPs, AOP rejects anything that isn't Cloudflare at the TLS
-layer even if the firewall is wrong.
+This is the primary "only Cloudflare reaches the origin" control.
 
-### 6. Cloudflare: enable Authenticated Origin Pulls
+### 6. (Optional) Authenticated Origin Pulls
 
-Dashboard → SSL/TLS → Origin Server → **Authenticated Origin Pulls** = On
-(zone-level). The Caddyfile already requires the CF client cert
-(`client_auth … trust_pool file /run/secrets/cf_aop_ca`).
+The shipped Caddyfile uses the Origin Certificate only — a standard Full-strict
+setup, same as a plain host Caddy. The `DOCKER-USER` firewall above already limits
+the origin to Cloudflare ranges. To add mTLS on top (so the origin also *verifies*
+that the client is Cloudflare):
 
-> **Maintenance note:** Cloudflare's AOP CA has rotated before. If origin pulls
-> start failing zone-wide, refresh `secrets/cf_aop_ca.pem` from Cloudflare and
-> `docker compose --profile edge restart caddy`.
+1. Enable **SSL/TLS → Origin Server → Authenticated Origin Pulls** (zone-level) in
+   Cloudflare.
+2. Wrap the Caddyfile's `tls` directive with a `client_auth` block:
+   ```
+   tls /run/secrets/cf_origin_cert /run/secrets/cf_origin_key {
+       client_auth {
+           mode require_and_verify
+           trust_pool file /run/secrets/cf_aop_ca
+       }
+   }
+   ```
+   then `docker compose --profile edge restart caddy`.
+
+> Cloudflare's AOP CA has rotated before; if origin pulls fail zone-wide after
+> enabling, refresh `secrets/cf_aop_ca.pem` from Cloudflare and restart caddy.
 
 ### 7. systemd unit + start
 
