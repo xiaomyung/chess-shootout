@@ -22,3 +22,6 @@ AppDir/
 *.egg-info/
 local_build/
 assets/version.txt
+secrets/
+chess-server.env
+uv.lock.bak

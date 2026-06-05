@@ -1,0 +1,15 @@
+{
+	servers {
+		protocols h1 h2
+	}
+}
+
+chess.xiaomyung.com {
+	tls /run/secrets/cf_origin_cert /run/secrets/cf_origin_key
+	reverse_proxy chess-server:8000
+	encode zstd gzip
+	log {
+		output stdout
+		format console
+	}
+}
