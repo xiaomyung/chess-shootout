@@ -70,3 +70,9 @@ def test_client_ip_key_defaults_to_module_trusted_proxies(monkeypatch):
     untrusted_req = make_request("8.8.8.8", {"cf-connecting-ip": "9.9.9.9"})
     assert client_ip_key(trusted_req) == "9.9.9.9"
     assert client_ip_key(untrusted_req) == "8.8.8.8"
+
+
+def test_client_ip_key_trusts_cf_header_from_loopback_under_default_config():
+    trusted = _parse_trusted_proxies("127.0.0.1/32")
+    req = make_request("127.0.0.1", {"cf-connecting-ip": "1.2.3.4"})
+    assert client_ip_key(req, trusted) == "1.2.3.4"
