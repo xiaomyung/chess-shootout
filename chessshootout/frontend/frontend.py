@@ -32,10 +32,11 @@ from chessshootout.frontend.modals.options import (
 from chessshootout.frontend.modals.help import HelpModal
 from chessshootout.frontend.modals.reconnecting import ReconnectingModal
 from chessshootout.frontend.visual.toast import Toast
-from chessshootout.frontend.visual.fonts import get_font
 from chessshootout.frontend.visual import backdrop
 from chessshootout.frontend.visual.effects import TAKEOVER_TOTAL_MS
-from chessshootout.frontend.window_chrome import WindowChrome, WINDOW_FLAGS
+from chessshootout.frontend.window_chrome import (
+    WindowChrome, WINDOW_FLAGS, MIN_WINDOW_WIDTH, MIN_WINDOW_HEIGHT,
+)
 from chessshootout.online.client import (
     OnlineClient, RECONNECT_TOTAL_SECONDS, fetch_resume, probe_active_game,
 )
@@ -170,8 +171,7 @@ RESYNC_TIMEOUT_MS = 8000
 RECONNECT_PROBE_INTERVAL_MS = 5000
 RECONNECT_PROBE_MAX_ATTEMPTS = 3
 
-MIN_WINDOW_WIDTH = 900
-MIN_WINDOW_HEIGHT = 500
+ONLINE_DEFAULT_TIME_MINUTES = 5
 
 WINDOW_TITLE = "Chess Shootout"
 
@@ -374,13 +374,15 @@ class Frontend(OnlineEventsMixin):
             return PieceColor.BLACK
         return PieceColor.WHITE
 
+    @staticmethod
+    def _is_white(color):
+        return color in (PieceColor.WHITE, "white")
+
     def _name_for_color(self, color):
-        is_white = color in (PieceColor.WHITE, "white")
-        return self.white_name if is_white else self.black_name
+        return self.white_name if self._is_white(color) else self.black_name
 
     def _country_for_color(self, color):
-        is_white = color in (PieceColor.WHITE, "white")
-        return self.white_country if is_white else self.black_country
+        return self.white_country if self._is_white(color) else self.black_country
 
     def _on_new_game(self):
         if self.mode == SINGLE_SCREEN:
@@ -804,7 +806,7 @@ class Frontend(OnlineEventsMixin):
         request = {
             "nickname": (self._online_config.get("nickname") or "").strip() or "Player",
             "client_uuid": env.get_or_create_client_uuid(),
-            "time_minutes": self._online_config["time_minutes"] or 5,
+            "time_minutes": self._online_config["time_minutes"] or ONLINE_DEFAULT_TIME_MINUTES,
             "increment_seconds": self._online_config["increment_seconds"],
             "side_preference": self._online_config["side"],
             "country": env.get_country() or None,
@@ -817,7 +819,7 @@ class Frontend(OnlineEventsMixin):
         self._pending_game_start_payload = None
 
     def _search_labels(self):
-        minutes = self._online_config.get("time_minutes") or 5
+        minutes = self._online_config.get("time_minutes") or ONLINE_DEFAULT_TIME_MINUTES
         incr = self._online_config.get("increment_seconds", 0) or 0
         if minutes < 3:
             mode = "Bullet"
@@ -1189,7 +1191,7 @@ class Frontend(OnlineEventsMixin):
         self._strip_for_color(mover_color).flash_increment()
 
     def _strip_for_color(self, color):
-        is_white = color in (PieceColor.WHITE, "white")
+        is_white = self._is_white(color)
         top_is_white = self._strip_color_top() == PieceColor.WHITE
         return (self.player_strip_top if is_white == top_is_white
                 else self.player_strip_bottom)
@@ -1401,7 +1403,7 @@ class Frontend(OnlineEventsMixin):
         if elapsed is None:
             return
         alpha = min(RESULT_FADE_MAX_ALPHA,
-                      int(RESULT_FADE_MAX_ALPHA * elapsed / RESULT_FADE_MS))
+                    int(RESULT_FADE_MAX_ALPHA * elapsed / RESULT_FADE_MS))
         if alpha <= 0:
             return
         overlay = pg.Surface(self.window.get_size(), pg.SRCALPHA)
@@ -1640,9 +1642,6 @@ class Frontend(OnlineEventsMixin):
             strip_height,
         )
 
-        self.board.font = get_font(
-            int(board_size_px // self.board.board_guides_font_factor), bold=True,
-        )
         self.board.set_rect(board_rect)
         self.result_menu.set_rect(result_rect)
         self.confirm_modal.set_rect(result_modal_rect)

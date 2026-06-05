@@ -4,7 +4,7 @@ import os
 import uvicorn
 
 from chessshootout.server import logging_setup
-from chessshootout.server.app import create_app
+from chessshootout.server.app import create_app, DEFAULT_MAX_ROOMS
 
 
 def _main():
@@ -14,7 +14,7 @@ def _main():
     parser.add_argument("--reload", action="store_true",
                         help="dev: auto-restart on source change")
     parser.add_argument("--max-rooms", type=int,
-                        default=int(os.environ.get("MAX_ROOMS", "100")))
+                        default=int(os.environ.get("MAX_ROOMS", str(DEFAULT_MAX_ROOMS))))
     args = parser.parse_args()
     logging_setup.configure()
     if args.reload:
@@ -29,7 +29,7 @@ def _main():
 
 
 def _app_factory():
-    return create_app(max_rooms=int(os.environ.get("CHESS_MAX_ROOMS", "100")))
+    return create_app(max_rooms=int(os.environ.get("CHESS_MAX_ROOMS", str(DEFAULT_MAX_ROOMS))))
 
 
 if __name__ == "__main__":

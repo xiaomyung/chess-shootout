@@ -33,6 +33,7 @@ from chessshootout.server.sweep import Sweep
 
 CLOCK_TICK_INTERVAL_SECONDS = 0.1
 MAX_INBOUND_MESSAGE_BYTES = 4096
+DEFAULT_MAX_ROOMS = 100
 
 RECLAIM_PER_UUID_LIMIT_PER_MINUTE = 100
 RATE_LIMIT_PRUNE_THRESHOLD = 4096
@@ -83,7 +84,7 @@ class UuidRateLimiter:
         return True
 
 
-def create_app(*, now_provider=time.monotonic, max_rooms=100):
+def create_app(*, now_provider=time.monotonic, max_rooms=DEFAULT_MAX_ROOMS):
     rooms = RoomManager(now_provider=now_provider, max_rooms=max_rooms)
     connections = ConnectionRegistry()
     limiter = Limiter(key_func=get_remote_address)

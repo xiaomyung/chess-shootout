@@ -350,11 +350,7 @@ def _paste_from_clipboard():
             )
         except (subprocess.SubprocessError, OSError):
             continue
-        try:
-            text = result.stdout.decode("utf-8", errors="replace")
-        except Exception:
-            continue
-        return _sanitise(text)
+        return _sanitise(result.stdout.decode("utf-8", errors="replace"))
     try:
         pg.scrap.init()
         raw = pg.scrap.get(pg.SCRAP_TEXT)

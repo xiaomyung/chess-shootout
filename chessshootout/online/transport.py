@@ -295,6 +295,3 @@ class ServerWebSocket:
             return json.loads(raw)
         except json.JSONDecodeError:
             return None
-
-    async def ping(self):
-        return await self._ws.ping()
