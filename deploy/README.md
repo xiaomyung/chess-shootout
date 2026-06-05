@@ -186,21 +186,24 @@ covers the 10 s drain).
 ## Updating to a new version
 
 A version-bumped PR merging to master auto-publishes the new image to GHCR
-(`docker.yml`). Updating is one command on the box:
+(`docker.yml`). Update to the latest release with one command on the box:
 
 ```bash
 cd /srv/chess-shootout
-./deploy/update.sh            # update to the latest release
-./deploy/update.sh v2.1.5     # or roll to a specific release tag
+./deploy/update.sh
 ```
 
-It pulls the matching CI-built (and trivy-scanned) image from GHCR, refreshes the
-compose file / Caddyfile from git, recreates **only `chess-server`** (Caddy is
-untouched) with the graceful `server_shutdown` drain, and prints the running
-version. It falls back to `sudo` automatically when your shell isn't in the
-`docker` group, so there's nothing to fiddle with.
+To pin a specific version, or to roll back, pass its release tag:
 
-**Rollback** is the same command with an earlier tag (`./deploy/update.sh v2.1.0`).
+```bash
+cd /srv/chess-shootout
+./deploy/update.sh v2.1.5
+```
 
-> Pulling requires read access to the GHCR package — either make it **Public**
-> (repo → Packages → Package settings) or `docker login ghcr.io` once on the box.
+The script pulls the matching CI-built (and trivy-scanned) image from GHCR, refreshes
+the compose file / Caddyfile from git, recreates only `chess-server` (Caddy untouched)
+with the graceful `server_shutdown` drain, and prints the running version. It falls back
+to `sudo` automatically when your shell isn't in the `docker` group.
+
+Pulling requires read access to the GHCR package — make it **Public** (repo → Packages →
+Package settings) or run `docker login ghcr.io` once on the box.
