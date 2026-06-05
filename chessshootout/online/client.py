@@ -37,7 +37,10 @@ class Event:
 def probe_active_game(addr, client_uuid, timeout=2.0):
     if not addr or not client_uuid:
         return None
-    transport = ServerTransport(addr)
+    try:
+        transport = ServerTransport(addr)
+    except TransportError:
+        return None
     response = transport.reclaim_blocking(client_uuid, timeout=timeout)
     if response is None:
         return None
@@ -88,12 +91,22 @@ class OnlineClient:
 
     def connect(self, addr, request):
         self._addr = addr
-        self._transport = ServerTransport(addr)
+        try:
+            self._transport = ServerTransport(addr)
+        except TransportError:
+            self._inbound.put(Event("error", {"reason": "server_unreachable"}))
+            self.state = "disconnected"
+            return
         self._spawn_loop_thread(self._async_main, request)
 
     def reconnect_to_existing(self, addr, room_id, session_token, resume_payload):
         self._addr = addr
-        self._transport = ServerTransport(addr)
+        try:
+            self._transport = ServerTransport(addr)
+        except TransportError:
+            self._inbound.put(Event("error", {"reason": "reconnect_failed"}))
+            self.state = "disconnected"
+            return
         self._room_id = room_id
         self._session_token = session_token
         self._game_active = True

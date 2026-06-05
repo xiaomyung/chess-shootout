@@ -71,7 +71,10 @@ def _split_addr(addr):
         rest = rest.split("/", 1)[0]
     if ":" in rest:
         host, port_s = rest.rsplit(":", 1)
-        port = int(port_s)
+        try:
+            port = int(port_s)
+        except ValueError as exc:
+            raise TransportError(f"invalid_address: {addr}") from exc
     else:
         host = rest
         port = None
