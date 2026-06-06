@@ -9,7 +9,7 @@ from chessshootout.infra import env
 from chessshootout.frontend.visual.animation import PieceAnimation
 from chessshootout.frontend.visual.colors import Colors
 from chessshootout.frontend.visual.draw import supersample
-from chessshootout.frontend.visual.effects import EffectManager
+from chessshootout.frontend.visual.effects import EffectManager, INTENSITY_SCALE
 from chessshootout.frontend.visual.icons import piece_png_path
 from chessshootout.domain.premoves import Premove, speculative_board
 from chessshootout.backend.pieces import PieceType, PieceColor, Piece, opponent_of
@@ -21,6 +21,17 @@ DRAG_GHOST_ALPHA_FRACTION = 0.30
 LIFT_SCALE = 0.2
 SHADOW_ALPHA = 90
 SHADOW_OFFSET_FRACTION = 0.04
+
+DRAG_K_SPRING = 90.0
+DRAG_C_DAMP = 9.0
+DRAG_K_FORCE = 0.045
+DRAG_RG_FRACTION = 0.30
+DRAG_TAU_VEL = 0.045
+DRAG_TAU_ACC = 0.060
+DRAG_TAU_LIFT = 0.10
+DRAG_DT_MAX = 0.05
+DRAG_SUBSTEP = 1.0 / 240.0
+DRAG_OMEGA_MAX = 60.0
 
 
 def _draw_capsule(surf, p1, p2, width, color):
@@ -295,6 +306,7 @@ class Board:
         self.effects.draw_over(self.window, now)
         self._draw_arrows()
         self._draw_promotion_picker()
+        self.update_drag_physics(now)
 
     def draw_drag_overlay(self):
         if self.review_ply is not None:
@@ -797,12 +809,11 @@ class Board:
         return geom["top_center"]
 
     def _begin_drag_physics(self, pos, now):
+        piece = self.match.piece_at(self.selected_square)
+        if piece is None:
+            return
         self.dragging_from = self.selected_square
         self._drag_cursor = pos
-        piece = self.match.piece_at(self.dragging_from)
-        if piece is None:
-            self._drag = None
-            return
         geom = self._sprite_geom.get((piece.type, piece.color))
         com = geom["center"] if geom else (self.cell_size / 2, self.cell_size / 2)
         grab = self._grab_local_for(self.dragging_from, self._press_pos, piece)
@@ -818,10 +829,64 @@ class Board:
             "accel": (0.0, 0.0),
             "last_cursor": pos,
             "last_tick": now,
-            "lift": 1.0,
+            "lift": 0.0,
             "reduced": env.get_reduce_motion(),
             "phase": "drag",
         }
+
+    def update_drag_physics(self, now):
+        if self.read_only or self.review_ply is not None:
+            return
+        d = self._drag
+        if d is None or d["reduced"]:
+            return
+        dt = (now - d["last_tick"]) / 1000.0
+        d["last_tick"] = now
+        if dt <= 0:
+            return
+        dt = min(dt, DRAG_DT_MAX)
+
+        cursor = d["cursor"]
+        last = d["last_cursor"]
+        raw_vx = (cursor[0] - last[0]) / dt
+        raw_vy = (cursor[1] - last[1]) / dt
+        d["last_cursor"] = cursor
+        prev_vx, prev_vy = d["vel"]
+        av = 1.0 - math.exp(-dt / DRAG_TAU_VEL)
+        vx = prev_vx + (raw_vx - prev_vx) * av
+        vy = prev_vy + (raw_vy - prev_vy) * av
+        raw_ax = (vx - prev_vx) / dt
+        raw_ay = (vy - prev_vy) / dt
+        d["vel"] = (vx, vy)
+        aa = 1.0 - math.exp(-dt / DRAG_TAU_ACC)
+        ax = d["accel"][0] + (raw_ax - d["accel"][0]) * aa
+        ay = d["accel"][1] + (raw_ay - d["accel"][1]) * aa
+        d["accel"] = (ax, ay)
+
+        al = 1.0 - math.exp(-dt / DRAG_TAU_LIFT)
+        d["lift"] += (1.0 - d["lift"]) * al
+
+        rlx, rly = d["r_local"]
+        rg = DRAG_RG_FRACTION * self.cell_size
+        inertia = rg * rg + rlx * rlx + rly * rly
+        k_force = DRAG_K_FORCE * INTENSITY_SCALE.get(env.get_effect_intensity(), 1.0)
+        n = max(1, math.ceil(dt / DRAG_SUBSTEP))
+        h = dt / n
+        theta = d["theta"]
+        omega = d["omega"]
+        for _ in range(n):
+            cos_t = math.cos(theta)
+            sin_t = math.sin(theta)
+            rx = rlx * cos_t - rly * sin_t
+            ry = rlx * sin_t + rly * cos_t
+            torque = rx * (-ay) - ry * (-ax)
+            forcing = k_force * torque / inertia
+            alpha = -DRAG_K_SPRING * sin_t - DRAG_C_DAMP * omega + forcing
+            omega += alpha * h
+            omega = max(-DRAG_OMEGA_MAX, min(DRAG_OMEGA_MAX, omega))
+            theta += omega * h
+        d["theta"] = theta
+        d["omega"] = omega
 
     def update_drag_motion(self, pos):
         if self.read_only:
