@@ -198,6 +198,8 @@ def test_dragged_piece_renders_ghost_on_origin(board):
     rect = board._cell_rect(6, 4)
     board.begin_press(rect.center)
     board.update_drag_motion((200, 200))
+    board._drag["entry"] = 1.0
+    board._drag["anchor"] = (200, 200)
     board.draw_board()
     board.draw_drag_overlay()
     drag_frame = win.copy()

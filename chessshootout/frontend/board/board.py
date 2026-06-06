@@ -28,6 +28,7 @@ DRAG_K_FORCE = 0.22
 DRAG_RG_FRACTION = 0.20
 DRAG_TAU_ACC = 0.025
 DRAG_TAU_LIFT = 0.10
+DRAG_TAU_ENTRY = 0.06
 DRAG_DT_MAX = 0.05
 DRAG_SUBSTEP = 1.0 / 240.0
 DRAG_OMEGA_MAX = 150.0
@@ -353,7 +354,7 @@ class Board:
             anchor = d["screen_center"]
         else:
             pivot_local = d["grab_local"]
-            anchor = d["cursor"]
+            anchor = d["anchor"]
             ghost = surface.copy()
             ghost.set_alpha(int(255 * DRAG_GHOST_ALPHA_FRACTION))
             origin_rect = self._cell_rect(self.dragging_from.row, self.dragging_from.col)
@@ -634,6 +635,18 @@ class Board:
     def cancel_animations(self):
         self.animations = []
 
+    def _clear_drag_state(self):
+        self._drag = None
+        self.dragging_from = None
+        self._drag_cursor = None
+
+    def cancel_drag_physics(self):
+        d = self._drag
+        self._clear_drag_state()
+        self._press_pos = None
+        if d is not None and d["phase"] == "settle" and d["on_settled"] is not None:
+            d["on_settled"]()
+
     def jump_to_review_ply(self, ply):
         self.cancel_animations()
         self.effects.clear_transients()
@@ -743,6 +756,7 @@ class Board:
             Colors.accent, self.CAPTURE_HITMARKER_THICKNESS)
 
     def set_rect(self, rect):
+        self.cancel_drag_physics()
         self.rect = pg.Rect(rect)
         self.effects.board_rect = pg.Rect(rect)
         self.frame_pad = max(int(rect.width * self.FRAME_PAD_FRACTION), self.FRAME_PAD_MIN)
@@ -826,8 +840,9 @@ class Board:
         geom = self._sprite_geom.get((piece.type, piece.color))
         com = geom["center"] if geom else (self.cell_size / 2, self.cell_size / 2)
         grab = self._grab_local_for(self.dragging_from, self._press_pos, piece)
+        rect = self._cell_rect(self.dragging_from.row, self.dragging_from.col)
+        entry_from = (rect.x + grab[0], rect.y + grab[1])
         self._drag = {
-            "from_sq": self.dragging_from,
             "piece": piece,
             "grab_local": grab,
             "com_local": com,
@@ -835,6 +850,9 @@ class Board:
             "theta": 0.0,
             "omega": 0.0,
             "cursor": pos,
+            "anchor": entry_from,
+            "entry_from": entry_from,
+            "entry": 0.0,
             "vel": (0.0, 0.0),
             "accel": (0.0, 0.0),
             "last_cursor": pos,
@@ -861,6 +879,10 @@ class Board:
 
         al = 1.0 - math.exp(-dt / DRAG_TAU_LIFT)
         d["lift"] += (1.0 - d["lift"]) * al
+        ae = 1.0 - math.exp(-dt / DRAG_TAU_ENTRY)
+        d["entry"] += (1.0 - d["entry"]) * ae
+        ef, cur, e = d["entry_from"], d["cursor"], d["entry"]
+        d["anchor"] = (ef[0] + (cur[0] - ef[0]) * e, ef[1] + (cur[1] - ef[1]) * e)
         if d["reduced"]:
             d["last_cursor"] = d["cursor"]
             return
@@ -910,10 +932,10 @@ class Board:
         zoom = 1.0 + LIFT_SCALE * d["lift"]
         rlx, rly = d["r_local"]
         off = pg.math.Vector2(zoom * rlx, zoom * rly).rotate(math.degrees(theta))
-        cursor = d["cursor"]
+        anchor = d["anchor"]
         d["phase"] = "settle"
         d["settle_to_sq"] = target_sq
-        d["start_center"] = (cursor[0] + off.x, cursor[1] + off.y)
+        d["start_center"] = (anchor[0] + off.x, anchor[1] + off.y)
         d["screen_center"] = d["start_center"]
         d["theta_target"] = round(theta / (2 * math.pi)) * (2 * math.pi)
         d["settle_start_ms"] = now
@@ -926,7 +948,8 @@ class Board:
         dt = max(0.0, min((now - d["last_tick"]) / 1000.0, DRAG_DT_MAX))
         d["last_tick"] = now
         dur = d["settle_dur_ms"]
-        t = 1.0 if dur <= 0 else min(max((now - d["settle_start_ms"]) / dur, 0.0), 1.0)
+        raw_t = 1.0 if dur <= 0 else (now - d["settle_start_ms"]) / dur
+        t = min(max(raw_t, 0.0), 1.0)
         e = 1.0 - (1.0 - t) ** 3
         target = self._cell_rect(d["settle_to_sq"].row, d["settle_to_sq"].col).center
         sc = d["start_center"]
@@ -947,13 +970,11 @@ class Board:
             al = 1.0 - math.exp(-dt / DRAG_TAU_LIFT)
             d["lift"] += (0.0 - d["lift"]) * al
         settled = abs(d["theta"] - tt) < 0.02 and abs(d["omega"]) < 0.1
-        full = t >= (DRAG_SETTLE_MAX_T if dur > 0 else 1.0)
+        full = raw_t >= DRAG_SETTLE_MAX_T
         if (t >= 1.0 and settled) or full:
             d["theta"] = tt
             cb = d["on_settled"]
-            self._drag = None
-            self.dragging_from = None
-            self._drag_cursor = None
+            self._clear_drag_state()
             self.last_animation_completed_at_ms = now
             if cb is not None:
                 cb()
@@ -987,9 +1008,7 @@ class Board:
                 and self._drag["phase"] == "drag"):
             self._begin_settle(self.dragging_from, None)
             return was_dragging
-        self.dragging_from = None
-        self._drag_cursor = None
-        self._drag = None
+        self._clear_drag_state()
         return was_dragging
 
     def queue_premove_from_drag(self, target_sq):
@@ -1272,9 +1291,7 @@ class Board:
         if attacker is None or victim is None or self.cell_size <= 0:
             self._on_capture_fire(entry, color, victim_sq)
             return False
-        self.dragging_from = None
-        self._drag_cursor = None
-        self._drag = None
+        self._clear_drag_state()
         occupied = {Square(r, c) for r, c in product(range(self.SIZE), repeat=2)
                     if self.match.piece_at(Square(r, c)) is not None}
         self.effects.capture(

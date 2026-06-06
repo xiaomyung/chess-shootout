@@ -1021,6 +1021,8 @@ def test_right_click_drag_premove_blocked_for_opp_piece_in_online(board):
 
 
 def test_right_click_drag_premove_chain_clears_when_drag_ends(board):
+    """After a premove is queued from a drag, releasing settles the held piece back to
+    its origin and the drag state clears once the glide completes."""
     setup_position(board, {
         Square(7, 4): Piece(PieceType.KING, WHITE),
         Square(0, 4): Piece(PieceType.KING, BLACK),
@@ -1029,7 +1031,6 @@ def test_right_click_drag_premove_chain_clears_when_drag_ends(board):
     _start_drag(board, Square(6, 4))
     board.queue_premove_from_drag(Square(4, 4))
     board.end_press()
-    # the held piece glides back to its origin, then drag state clears
     board.update_drag_physics(board._drag["settle_start_ms"] + 100000)
     assert board.dragging_from is None
     assert board._drag_cursor is None

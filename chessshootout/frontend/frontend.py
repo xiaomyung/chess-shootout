@@ -1158,6 +1158,7 @@ class Frontend(OnlineEventsMixin):
     def _on_flip(self):
         if self.current_result() is not None and not self.pgn_review:
             return
+        self.board.cancel_drag_physics()
         self.board.flipped = not self.board.flipped
 
     def _on_help(self):
