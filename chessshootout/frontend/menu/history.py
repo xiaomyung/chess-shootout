@@ -13,7 +13,7 @@ from chessshootout.frontend.visual.draw import (
 )
 from chessshootout.frontend.visual.fonts import get_display_font, get_font, get_mono_font
 from chessshootout.frontend.visual.icons import piece_png_path
-from chessshootout.frontend.visual.scroll_drag import ScrollView
+from chessshootout.frontend.visual.scroll_view import ScrollView
 from chessshootout.frontend.visual.widgets import build_shell
 
 

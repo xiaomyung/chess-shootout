@@ -6,7 +6,7 @@ from chessshootout.frontend.visual.colors import Colors
 from chessshootout.frontend.visual.draw import rounded_rect_surface
 from chessshootout.frontend.visual.emoji import emoji_surface
 from chessshootout.frontend.visual.fonts import get_display_font, get_font, get_mono_font
-from chessshootout.frontend.visual.scroll_drag import ScrollView
+from chessshootout.frontend.visual.scroll_view import ScrollView
 from chessshootout.frontend.visual.text_input import TextInput
 from chessshootout.frontend.visual.widgets import draw_button
 
@@ -143,9 +143,7 @@ class CountryPicker(BaseModal):
         self._scroll_px = max(0.0, min(self._scroll_px, max_px))
         gutter = SCROLLBAR_GUTTER if max_px > 0 else 0
         content_w = self._list_rect.width - gutter
-        first = int(self._scroll_px // self._row_h)
-        sub = self._scroll_px - first * self._row_h
-        n_draw = int((self._list_rect.height + sub) // self._row_h) + 1
+        first, sub, n_draw = self.scroll.row_window(self._list_rect, self._row_h)
         prev = self.window.get_clip()
         self.window.set_clip(self._list_rect)
         try:

@@ -6,7 +6,7 @@ from chessshootout.frontend.visual.colors import Colors
 from chessshootout.frontend.visual.draw import supersample, rounded_rect_surface
 from chessshootout.frontend.visual.emoji import emoji_surface
 from chessshootout.frontend.visual.fonts import get_display_font, get_font, get_mono_font
-from chessshootout.frontend.visual.scroll_drag import ScrollView
+from chessshootout.frontend.visual.scroll_view import ScrollView
 from chessshootout.frontend.visual.text_input import TextInput
 from chessshootout.frontend.visual.widgets import (
     draw_button, draw_button_row, draw_segmented, draw_toggle,
@@ -466,7 +466,7 @@ class OptionsBody:
         self.fonts = None
         self._scroll_px = 0.0
         self._content_h = 0
-        self.scroller = ScrollView(
+        self.scroll = ScrollView(
             lambda: self._scroll_px,
             self._store_scroll,
             lambda: (self.rect, self._content_h),
@@ -477,16 +477,16 @@ class OptionsBody:
         self._scroll_px = value
 
     @property
-    def scroll(self):
+    def scroll_offset(self):
         return self._scroll_px
 
     def set_sections(self, sections):
         self.sections = sections
         self._scroll_px = 0.0
-        self.scroller.cancel()
+        self.scroll.cancel()
 
     def draw(self, window, rect, fonts):
-        self.scroller.tick()
+        self.scroll.tick()
         self.rect = pg.Rect(rect)
         self.fonts = fonts
         self._scroll_px = max(0.0, min(self._scroll_px, self._max_scroll()))
@@ -506,7 +506,7 @@ class OptionsBody:
         y += ROW_PAD
         self._content_h = (y + self._scroll_px) - rect.y
         window.set_clip(prev)
-        self.scroller.draw_thumb(window)
+        self.scroll.draw_thumb(window)
 
     def _max_scroll(self):
         return max(0, self._content_h - self.rect.height)
@@ -521,7 +521,7 @@ class OptionsBody:
         return True
 
     def handle_scroll(self, pos, dy):
-        return self.scroller.handle_wheel(pos, dy)
+        return self.scroll.handle_wheel(pos, dy)
 
     def handle_press(self, pos):
         if not self.rect.collidepoint(pos):
@@ -530,13 +530,13 @@ class OptionsBody:
             for row in rows:
                 if row.contains_control(pos):
                     return False
-        return self.scroller.handle_press(pos) is not None
+        return self.scroll.handle_press(pos) is not None
 
     def handle_motion(self, pos):
-        return self.scroller.handle_motion(pos)
+        return self.scroll.handle_motion(pos)
 
     def handle_release(self, pos):
-        return self.scroller.handle_release()
+        return self.scroll.handle_release()
 
     def handle_key(self, event):
         for _, rows in self.sections:
@@ -574,7 +574,7 @@ class OptionsModal(BaseModal):
 
     def hide(self):
         self.visible = False
-        self.body.scroller.cancel()
+        self.body.scroll.cancel()
 
     def is_visible(self):
         return self.visible

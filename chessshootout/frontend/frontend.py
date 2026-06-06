@@ -1737,7 +1737,7 @@ class Frontend(OnlineEventsMixin):
         self.history_view.scroll.cancel()
         self.country_picker.scroll.cancel()
         self.directory_browser.scroll.cancel()
-        self.options_modal.body.scroller.cancel()
+        self.options_modal.body.scroll.cancel()
         self.help_modal.scroll.cancel()
 
     def _handle_left_drag_motion(self, pos):

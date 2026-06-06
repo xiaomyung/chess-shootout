@@ -209,9 +209,9 @@ def test_body_scroll_clamps():
     modal.show([("Many", rows)])
     modal.draw()
     modal.handle_scroll((modal.rect.centerx, modal.rect.centery), -5)
-    assert modal.body.scroll > 0
+    assert modal.body.scroll_offset > 0
     modal.handle_scroll((modal.rect.centerx, modal.rect.centery), 999)
-    assert modal.body.scroll == 0
+    assert modal.body.scroll_offset == 0
 
 
 def test_text_row_reports_typed_value():

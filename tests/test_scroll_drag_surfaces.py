@@ -151,7 +151,7 @@ def _options():
 def test_options_empty_space_arms_scroll():
     modal, _ = _options()
     body = modal.body
-    assert body.scroller.scrollable() is True
+    assert body.scroll.scrollable() is True
     assert modal.handle_press((body.rect.x + 4, body.rect.y + 20)) is True
 
 

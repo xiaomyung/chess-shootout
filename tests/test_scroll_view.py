@@ -14,7 +14,7 @@ import math
 import pygame as pg
 import pytest
 
-from chessshootout.frontend.visual.scroll_drag import (
+from chessshootout.frontend.visual.scroll_view import (
     FLING_FRICTION_TAU, FLING_MIN_VELOCITY, FLING_STOP_VELOCITY, ScrollView,
 )
 from chessshootout.frontend.visual.widgets import (

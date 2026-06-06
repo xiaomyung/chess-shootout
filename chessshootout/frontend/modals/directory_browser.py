@@ -9,7 +9,7 @@ from chessshootout.frontend.visual.draw import rounded_rect_surface
 from chessshootout.frontend.visual.emoji import blit_emoji
 from chessshootout.frontend.visual.fonts import get_display_font, get_font, get_mono_font
 from chessshootout.frontend.visual.icons import draw_eye, draw_file, draw_folder, draw_folder_plus
-from chessshootout.frontend.visual.scroll_drag import ScrollView
+from chessshootout.frontend.visual.scroll_view import ScrollView
 from chessshootout.frontend.visual.text_input import TextInput
 from chessshootout.frontend.visual.widgets import draw_button, fit_text_to_rect
 
@@ -53,10 +53,6 @@ class DirectoryBrowser(BaseModal):
 
     def _store_scroll(self, value):
         self._scroll_px = value
-
-    @property
-    def scroll_offset(self):
-        return int(self._scroll_px // self._row_h)
 
     def _on_rect_changed(self):
         h = max(self.rect.height, 1)
@@ -296,9 +292,7 @@ class DirectoryBrowser(BaseModal):
         gutter = 16 if max_px > 0 else 0
         content_w = self._list_rect.width - gutter
         rows = ([None] if self.creating else []) + self.entries
-        first = int(self._scroll_px // self._row_h)
-        sub = self._scroll_px - first * self._row_h
-        n_draw = int((self._list_rect.height + sub) // self._row_h) + 1
+        first, sub, n_draw = self.scroll.row_window(self._list_rect, self._row_h)
         prev_clip = self.window.get_clip()
         self.window.set_clip(self._list_rect)
         try:

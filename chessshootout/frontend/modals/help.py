@@ -2,7 +2,7 @@ import pygame as pg
 
 from chessshootout.frontend.visual.colors import Colors
 from chessshootout.frontend.modals.base import BaseModal, BUTTON_VPAD
-from chessshootout.frontend.visual.scroll_drag import ScrollView
+from chessshootout.frontend.visual.scroll_view import ScrollView
 from chessshootout.frontend.visual.widgets import draw_button_row, fit_text_to_rect
 from chessshootout.frontend.visual.fonts import get_font, get_mono_font
 
@@ -47,10 +47,6 @@ class HelpModal(BaseModal):
 
     def _store_scroll(self, value):
         self._scroll_px = value
-
-    @property
-    def scroll_offset(self):
-        return int(self._scroll_px // self._line_h)
 
     def set_rect(self, rect):
         win_w, win_h = self.window.get_size()
@@ -117,9 +113,7 @@ class HelpModal(BaseModal):
         self._content_px = len(HOTKEYS) * line_h
         max_px = max(0, self._content_px - rows_rect.height)
         self._scroll_px = max(0.0, min(self._scroll_px, max_px))
-        first = int(self._scroll_px // line_h)
-        sub = self._scroll_px - first * line_h
-        n_draw = int((rows_rect.height + sub) // line_h) + 1
+        first, sub, n_draw = self.scroll.row_window(rows_rect, line_h)
 
         prev_clip = self.window.get_clip()
         self.window.set_clip(rows_rect)

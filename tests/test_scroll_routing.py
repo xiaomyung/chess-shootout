@@ -112,6 +112,21 @@ def test_country_flick_suppresses_pick():
     assert app.country_picker.is_visible() is True
 
 
+def test_move_list_fling_through_dispatch_ticks_cleanly():
+    app = _game_app()
+    rm = app.right_menu
+    vp = rm._moves_viewport
+    rm.scroll.handle_press((vp.centerx, vp.bottom - 10), now_ms=0)
+    rm.scroll.handle_motion((vp.centerx, vp.bottom - 40), now_ms=16)
+    rm.scroll.handle_motion((vp.centerx, vp.y + 10), now_ms=32)
+    app._scroll_pressed = rm
+    app._mouse_left_released((vp.centerx, vp.y + 10))
+    assert app._scroll_pressed is None
+    assert rm.scroll._flinging is True
+    app.draw_frame()
+    app.draw_frame()
+
+
 def test_resize_cancels_active_gesture():
     app = _game_app()
     vp = app.right_menu._moves_viewport

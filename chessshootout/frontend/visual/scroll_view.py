@@ -51,6 +51,13 @@ class ScrollView:
         m = self._max_px()
         return (self._get() / m) if m else 0.0
 
+    def row_window(self, viewport, row_h):
+        offset = self._get()
+        first = int(offset // row_h)
+        sub = offset - first * row_h
+        n_draw = int((viewport.height + sub) // row_h) + 1
+        return first, sub, n_draw
+
     def is_active(self):
         return self._flinging or self._grab is not None or self._thumb is not None
 
