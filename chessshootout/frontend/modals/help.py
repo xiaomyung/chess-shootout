@@ -2,6 +2,7 @@ import pygame as pg
 
 from chessshootout.frontend.visual.colors import Colors
 from chessshootout.frontend.modals.base import BaseModal, BUTTON_VPAD
+from chessshootout.frontend.visual.scroll_drag import ScrollView
 from chessshootout.frontend.visual.widgets import draw_button_row, fit_text_to_rect
 from chessshootout.frontend.visual.fonts import get_font, get_mono_font
 
@@ -33,9 +34,23 @@ class HelpModal(BaseModal):
         super().__init__(window)
         self._visible = False
         self.button_rects = {}
-        self.scroll_offset = 0
-        self._max_scroll_offset = 0
+        self._scroll_px = 0.0
+        self._content_px = 0
+        self._line_h = 1
         self._rows_rect = pg.Rect(0, 0, 0, 0)
+        self.scroll = ScrollView(
+            lambda: self._scroll_px,
+            self._store_scroll,
+            lambda: (self._rows_rect, self._content_px),
+            wheel_step_px=lambda: self._line_h,
+        )
+
+    def _store_scroll(self, value):
+        self._scroll_px = value
+
+    @property
+    def scroll_offset(self):
+        return int(self._scroll_px // self._line_h)
 
     def set_rect(self, rect):
         win_w, win_h = self.window.get_size()
@@ -57,11 +72,13 @@ class HelpModal(BaseModal):
 
     def show(self):
         self._visible = True
-        self.scroll_offset = 0
+        self._scroll_px = 0.0
+        self.scroll.cancel()
 
     def hide(self):
         self._visible = False
         self.button_rects = {}
+        self.scroll.cancel()
 
     def is_visible(self):
         return self._visible
@@ -69,6 +86,7 @@ class HelpModal(BaseModal):
     def draw(self):
         if not self._visible or self.rect.width <= 0:
             return
+        self.scroll.tick()
         self.draw_shell()
         content = self.content_rect()
         pad = self.padding
@@ -94,10 +112,14 @@ class HelpModal(BaseModal):
         )
 
     def _draw_rows(self, rows_rect):
-        line_h = self.row_font.get_height() + ROW_PAD_Y
-        visible = max(rows_rect.height // line_h, 1)
-        self._max_scroll_offset = max(0, len(HOTKEYS) - visible)
-        self.scroll_offset = min(self.scroll_offset, self._max_scroll_offset)
+        self._line_h = self.row_font.get_height() + ROW_PAD_Y
+        line_h = self._line_h
+        self._content_px = len(HOTKEYS) * line_h
+        max_px = max(0, self._content_px - rows_rect.height)
+        self._scroll_px = max(0.0, min(self._scroll_px, max_px))
+        first = int(self._scroll_px // line_h)
+        sub = self._scroll_px - first * line_h
+        n_draw = int((rows_rect.height + sub) // line_h) + 1
 
         prev_clip = self.window.get_clip()
         self.window.set_clip(rows_rect)
@@ -105,10 +127,10 @@ class HelpModal(BaseModal):
             inner_w = rows_rect.width
             key_col_w = int(inner_w * 0.35)
             desc_col_w = inner_w - key_col_w - self.padding
-            start = self.scroll_offset
-            end = min(start + visible, len(HOTKEYS))
-            for i, (key, desc) in enumerate(HOTKEYS[start:end]):
-                row_y = rows_rect.y + i * line_h
+            shown = HOTKEYS[first:first + n_draw]
+            y0 = rows_rect.y - sub
+            for i, (key, desc) in enumerate(shown):
+                row_y = y0 + i * line_h
                 key_rect = pg.Rect(rows_rect.x, row_y, key_col_w, line_h)
                 desc_rect = pg.Rect(
                     rows_rect.x + key_col_w + self.padding, row_y,
@@ -128,7 +150,7 @@ class HelpModal(BaseModal):
                     desc_surf,
                     (desc_rect.x, desc_rect.centery - desc_surf.get_height() // 2),
                 )
-                if i < end - start - 1:
+                if i < len(shown) - 1:
                     sep_y = row_y + line_h - 1
                     pg.draw.line(
                         self.window, Colors.border,
@@ -136,6 +158,7 @@ class HelpModal(BaseModal):
                     )
         finally:
             self.window.set_clip(prev_clip)
+        self.scroll.draw_thumb(self.window)
 
     def handle_click(self, pos):
         if not self._visible:
@@ -149,11 +172,15 @@ class HelpModal(BaseModal):
     def handle_scroll(self, pos, dy):
         if not self._visible:
             return False
-        if not self._rows_rect.collidepoint(pos):
+        return self.scroll.handle_wheel(pos, dy)
+
+    def handle_press(self, pos):
+        if not self._visible:
             return False
-        if self._max_scroll_offset == 0:
-            return False
-        self.scroll_offset = max(
-            0, min(self.scroll_offset - dy, self._max_scroll_offset),
-        )
-        return True
+        return self.scroll.handle_press(pos) is not None
+
+    def handle_motion(self, pos):
+        return self.scroll.handle_motion(pos)
+
+    def handle_release(self, pos):
+        return self.scroll.handle_release()

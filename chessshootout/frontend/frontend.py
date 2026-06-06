@@ -307,6 +307,7 @@ class Frontend(OnlineEventsMixin):
         self.player_strip_top = PlayerStrip(self.window)
         self.player_strip_bottom = PlayerStrip(self.window)
         self.menu_battle = MenuBattle(self.window, sound_manager=self.sound_manager)
+        self._scroll_pressed = None
 
         self.match.new_game()
         self.board.load_assets()
@@ -1706,6 +1707,48 @@ class Frontend(OnlineEventsMixin):
         else:
             self.board.toggle_arrow(start, end)
 
+    def _blocking_modal_visible(self):
+        return (self.confirm_modal.is_visible() or self.wait_modal.is_visible()
+                or self.match_found_modal.is_visible() or self.reconnecting_modal.is_visible()
+                or self.fen_input_modal.is_visible() or self.options_modal.is_visible()
+                or self.help_modal.is_visible() or self.country_picker.is_visible()
+                or self.directory_browser.is_visible())
+
+    def _active_scrollable(self):
+        if (self.wait_modal.is_visible() or self.match_found_modal.is_visible()
+                or self.reconnecting_modal.is_visible() or self.fen_input_modal.is_visible()
+                or self.confirm_modal.is_visible() or self._result_modal_should_show()):
+            return None
+        if self.country_picker.is_visible():
+            return self.country_picker
+        if self.directory_browser.is_visible():
+            return self.directory_browser
+        if self.options_modal.is_visible():
+            return self.options_modal
+        if self.help_modal.is_visible():
+            return self.help_modal
+        if self.mode == "menu":
+            return self.menu_page
+        return self.right_menu
+
+    def _cancel_all_scroll(self):
+        self._scroll_pressed = None
+        self.right_menu.scroll.cancel()
+        self.history_view.scroll.cancel()
+        self.country_picker.scroll.cancel()
+        self.directory_browser.scroll.cancel()
+        self.options_modal.body.scroller.cancel()
+        self.help_modal.scroll.cancel()
+
+    def _handle_left_drag_motion(self, pos):
+        if self._scroll_pressed is not None:
+            if not self._scroll_pressed.is_visible():
+                self._scroll_pressed = None
+            elif self._scroll_pressed.handle_motion(pos):
+                return
+        if not self.audio_panel.handle_drag(pos, True):
+            self.board.update_drag_motion(pos)
+
     def mouse_left_clicked(self, pos):
         if self.chrome.handle_click(pos):
             return
@@ -1829,16 +1872,27 @@ class Frontend(OnlineEventsMixin):
             self.board.jump_to_review_ply(new_ply)
 
     def _mouse_left_pressed(self, pos):
+        scrollable = self._active_scrollable()
+        if scrollable is not None and scrollable.handle_press(pos):
+            self._scroll_pressed = scrollable
+            return
         self.mouse_left_clicked(pos)
         if (self.mode != "menu"
                 and pos[1] >= self.chrome.HEIGHT
                 and self.current_result() is None
                 and self.board.pending_promotion_square is None
-                and not self.confirm_modal.is_visible()):
+                and not self._blocking_modal_visible()):
             self.board.begin_press(pos)
 
     def _mouse_left_released(self, pos):
         self.audio_panel.end_drag()
+        if self._scroll_pressed is not None:
+            scrollable = self._scroll_pressed
+            self._scroll_pressed = None
+            dragged = scrollable.handle_release(pos)
+            if not dragged and scrollable.is_visible():
+                scrollable.handle_click(pos)
+            return
         was_dragging = self.board.dragging_from is not None
         if was_dragging:
             self.mouse_left_clicked(pos)
@@ -1891,22 +1945,12 @@ class Frontend(OnlineEventsMixin):
             elif event.type == pg.MOUSEMOTION:
                 self.chrome.update_cursor(event.pos)
                 if event.buttons[0]:
-                    if not self.audio_panel.handle_drag(event.pos, True):
-                        self.board.update_drag_motion(event.pos)
+                    self._handle_left_drag_motion(event.pos)
 
             elif event.type == pg.MOUSEWHEEL:
-                if self.country_picker.is_visible():
-                    self.country_picker.handle_scroll(pg.mouse.get_pos(), event.y)
-                elif self.directory_browser.is_visible():
-                    self.directory_browser.handle_scroll(pg.mouse.get_pos(), event.y)
-                elif self.options_modal.is_visible():
-                    self.options_modal.handle_scroll(pg.mouse.get_pos(), event.y)
-                elif self.help_modal.is_visible():
-                    self.help_modal.handle_scroll(pg.mouse.get_pos(), event.y)
-                elif self.mode == "menu":
-                    self.menu_page.handle_scroll(pg.mouse.get_pos(), event.y)
-                else:
-                    self.right_menu.handle_scroll(pg.mouse.get_pos(), event.y)
+                scrollable = self._active_scrollable()
+                if scrollable is not None:
+                    scrollable.handle_scroll(pg.mouse.get_pos(), event.y)
 
             elif event.type == pg.VIDEORESIZE:
                 w = max(event.w, MIN_WINDOW_WIDTH)
@@ -1915,4 +1959,5 @@ class Frontend(OnlineEventsMixin):
                     self.window = pg.display.set_mode((w, h), WINDOW_FLAGS)
                 self.window_width = w
                 self.window_height = h
+                self._cancel_all_scroll()
                 self._compute_layout()

@@ -297,17 +297,21 @@ def draw_chip_row(window, rect, options, selected_key, font, gap=5, locked=False
     return rects
 
 
-def draw_scroll_thumb(window, track_rect, total, visible, offset_fraction, last_activity_ms):
+def scroll_thumb_rect(track_rect, total, visible, offset_fraction):
     if total <= visible or track_rect.height <= 0:
-        return
-    if pg.time.get_ticks() - last_activity_ms > SCROLL_FADE_MS:
-        return
+        return None
     thumb_h = max(SCROLL_THUMB_MIN_HEIGHT, int(track_rect.height * visible / total))
     thumb_h = min(thumb_h, track_rect.height)
     thumb_y = track_rect.y + int((track_rect.height - thumb_h) * offset_fraction)
     thumb_x = track_rect.right - SCROLL_THUMB_RIGHT_OFFSET - SCROLL_THUMB_WIDTH
-    pg.draw.rect(
-        window, Colors.surface_hover,
-        pg.Rect(thumb_x, thumb_y, SCROLL_THUMB_WIDTH, thumb_h),
-        border_radius=SCROLL_THUMB_WIDTH // 2,
-    )
+    return pg.Rect(thumb_x, thumb_y, SCROLL_THUMB_WIDTH, thumb_h)
+
+
+def draw_scroll_thumb(window, track_rect, total, visible, offset_fraction, last_activity_ms):
+    if pg.time.get_ticks() - last_activity_ms > SCROLL_FADE_MS:
+        return
+    thumb = scroll_thumb_rect(track_rect, total, visible, offset_fraction)
+    if thumb is None:
+        return
+    pg.draw.rect(window, Colors.surface_hover, thumb,
+                 border_radius=SCROLL_THUMB_WIDTH // 2)
