@@ -250,14 +250,20 @@ def test_drag_blocked_during_pending_promotion(board):
 
 
 def test_end_press_clears_state(board):
+    """Releasing a drag without a committed move starts a settle that glides the piece
+    back home, then clears the drag state when the glide completes."""
     board.handle_click(Square(6, 4))
     board.begin_press((10, 10))
     board.update_drag_motion((50, 50))
     assert board.dragging_from == Square(6, 4)
     was_dragging = board.end_press()
     assert was_dragging is True
-    assert board.dragging_from is None
     assert board._press_pos is None
+    assert board._drag is not None and board._drag["phase"] == "settle"
+    board.update_drag_physics(board._drag["settle_start_ms"] + 100000)
+    assert board.dragging_from is None
+    assert board._drag_cursor is None
+    assert board._drag is None
 
 
 def test_drag_skips_origin_in_draw_pieces(board):

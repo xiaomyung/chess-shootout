@@ -1158,6 +1158,7 @@ class Frontend(OnlineEventsMixin):
     def _on_flip(self):
         if self.current_result() is not None and not self.pgn_review:
             return
+        self.board.cancel_drag_physics()
         self.board.flipped = not self.board.flipped
 
     def _on_help(self):
@@ -1255,6 +1256,7 @@ class Frontend(OnlineEventsMixin):
             self.player_strip_bottom.draw()
             self.right_menu.draw_menu()
             self.offer_banners.draw(self.board.rect)
+            self.board.draw_drag_overlay()
             self._update_result_pending()
             if not self.match_found_modal.is_visible():
                 show_modal = self._result_modal_should_show() and not self.pgn_review
