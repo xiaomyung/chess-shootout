@@ -13,7 +13,8 @@ from chessshootout.frontend.visual.draw import (
 )
 from chessshootout.frontend.visual.fonts import get_display_font, get_font, get_mono_font
 from chessshootout.frontend.visual.icons import piece_png_path
-from chessshootout.frontend.visual.widgets import build_shell, draw_scroll_thumb
+from chessshootout.frontend.visual.scroll_view import ScrollView
+from chessshootout.frontend.visual.widgets import build_shell
 
 
 FILTER_OPTIONS = [("All", "all"), ("Online", "online"), ("Bot", "bot"), ("Local", "local")]
@@ -107,14 +108,19 @@ class HistoryView:
         self.nickname = None
         self.filter = "all"
         self.expanded_match_id = None
-        self.scroll_offset = 0
+        self._scroll_px = 0.0
+        self.scroll = ScrollView(
+            lambda: self._scroll_px,
+            self._store_scroll,
+            lambda: (self._list_rect, self._content_h),
+            wheel_step_px=SCROLL_STEP,
+        )
         self._groups = []
         self._menu_rect = pg.Rect(0, 0, 0, 0)
         self._filter_rects = {}
         self._row_hits = []
         self._list_rect = pg.Rect(0, 0, 0, 0)
         self._content_h = 0
-        self._last_scroll_activity_ms = 0
         self._pawn_orig = None
         self._pawn_cache = {}
         self._arrow_cache = {}
@@ -189,16 +195,36 @@ class HistoryView:
             group.time_ago = format_relative_time(group.sort_key, now)
         self.filter = "all"
         self.expanded_match_id = None
-        self.scroll_offset = 0
+        self._scroll_px = 0.0
+        self.scroll.cancel()
         self.visible = True
 
     def hide(self):
         self.visible = False
+        self.scroll.cancel()
         self._groups = []
         self._row_hits = []
 
     def is_visible(self):
         return self.visible
+
+    def _store_scroll(self, value):
+        self._scroll_px = value
+
+    @property
+    def scroll_offset(self):
+        return self._scroll_px
+
+    def handle_press(self, pos):
+        if not self.visible:
+            return False
+        return self.scroll.handle_press(pos) is not None
+
+    def handle_motion(self, pos):
+        return self.scroll.handle_motion(pos)
+
+    def handle_release(self, pos):
+        return self.scroll.handle_release()
 
     def _visible_groups(self):
         if self.filter == "all":
@@ -215,6 +241,7 @@ class HistoryView:
     def draw(self):
         if not self.visible or self.rect.width <= 0:
             return
+        self.scroll.tick()
         x, w = self.rect.x, self.rect.width
         header_h = max(int(self._title_font.get_height() * 1.25), 34)
         self._draw_header(x, self.rect.y, w, header_h)
@@ -326,13 +353,13 @@ class HistoryView:
 
         self._content_h = sum(b[2] for b in blocks) + gap * len(blocks)
         max_offset = max(0, self._content_h - self._list_rect.height)
-        self.scroll_offset = max(0, min(self.scroll_offset, max_offset))
+        self._scroll_px = max(0.0, min(self._scroll_px, max_offset))
         row_w = self._list_rect.width - (SCROLLBAR_GUTTER if max_offset > 0 else 0)
 
         prev_clip = self.window.get_clip()
         self.window.set_clip(self._list_rect)
         try:
-            y = self._list_rect.y - self.scroll_offset
+            y = self._list_rect.y - self._scroll_px
             for group, expanded, block_h in blocks:
                 on_screen = (y + block_h >= self._list_rect.y
                              and y <= self._list_rect.bottom)
@@ -493,12 +520,7 @@ class HistoryView:
                               rect.centery - ko.get_height() // 2))
 
     def _draw_scroll_indicator(self):
-        max_offset = max(0, self._content_h - self._list_rect.height)
-        if max_offset == 0:
-            return
-        draw_scroll_thumb(self.window, self._list_rect, self._content_h,
-                          self._list_rect.height, self.scroll_offset / max_offset,
-                          self._last_scroll_activity_ms)
+        self.scroll.draw_thumb(self.window)
 
     def handle_click(self, pos):
         if not self.visible:
@@ -510,7 +532,8 @@ class HistoryView:
             if rect.collidepoint(pos):
                 self.filter = key
                 self.expanded_match_id = None
-                self.scroll_offset = 0
+                self._scroll_px = 0.0
+                self.scroll.cancel()
                 return True
         if self._list_rect.collidepoint(pos):
             for row_rect, action in self._row_hits:
@@ -525,11 +548,6 @@ class HistoryView:
         return self.rect.collidepoint(pos)
 
     def handle_scroll(self, pos, dy):
-        if not self.visible or not self._list_rect.collidepoint(pos):
+        if not self.visible:
             return False
-        max_offset = max(0, self._content_h - self._list_rect.height)
-        if max_offset == 0:
-            return False
-        self.scroll_offset = max(0, min(self.scroll_offset - dy * SCROLL_STEP, max_offset))
-        self._last_scroll_activity_ms = pg.time.get_ticks()
-        return True
+        return self.scroll.handle_wheel(pos, dy)

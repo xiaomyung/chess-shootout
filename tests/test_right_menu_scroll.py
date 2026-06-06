@@ -136,10 +136,10 @@ def test_handle_scroll_clamps(menu, initial_offset, direction, expected_fn):
 def test_handle_scroll_records_activity_timestamp(menu):
     play_n_moves(menu.backend, 200)
     menu.draw_menu()
-    assert menu._last_scroll_activity_ms == 0
+    assert menu.scroll.last_activity_ms == 0
     before = pg.time.get_ticks()
     menu.handle_scroll(menu.moves_rect.center, 1)
-    assert menu._last_scroll_activity_ms >= before
+    assert menu.scroll.last_activity_ms >= before
 
 
 def test_visible_rows_slice_reflects_scroll_offset(menu):
@@ -190,7 +190,7 @@ def test_indicator_fades_after_activity(menu, age_ms_fn, expect_drawn):
     play_n_moves(menu.backend, 200)
     menu.draw_menu()
     menu.handle_scroll(menu.moves_rect.center, 1)
-    menu._last_scroll_activity_ms = pg.time.get_ticks() - age_ms_fn()
+    menu.scroll.last_activity_ms = pg.time.get_ticks() - age_ms_fn()
     menu.draw_menu()
     thumb_pixels = _count_thumb_pixels(menu)
     if expect_drawn:
@@ -234,7 +234,7 @@ def test_reset_for_new_game_clears_scroll_state(menu):
     assert menu.scroll_offset == 0
     assert menu._total_rows == 0
     assert menu._last_seen_total_rows == 0
-    assert menu._last_scroll_activity_ms == 0
+    assert menu.scroll.last_activity_ms == 0
 
 
 class _StubBoard:

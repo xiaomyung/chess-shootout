@@ -9,8 +9,9 @@ from chessshootout.frontend.visual.draw import rounded_rect_surface
 from chessshootout.frontend.visual.emoji import blit_emoji
 from chessshootout.frontend.visual.fonts import get_display_font, get_font, get_mono_font
 from chessshootout.frontend.visual.icons import draw_eye, draw_file, draw_folder, draw_folder_plus
+from chessshootout.frontend.visual.scroll_view import ScrollView
 from chessshootout.frontend.visual.text_input import TextInput
-from chessshootout.frontend.visual.widgets import draw_button, draw_scroll_thumb, fit_text_to_rect
+from chessshootout.frontend.visual.widgets import draw_button, fit_text_to_rect
 
 
 ROW_ICON_BOX_W = 24
@@ -30,13 +31,18 @@ class DirectoryBrowser(BaseModal):
         self.creating = False
         self.on_select = None
         self.on_error = None
-        self.scroll_offset = 0
+        self._scroll_px = 0.0
+        self._content_px = 0
         self.new_folder_input = TextInput(window, max_chars=64, placeholder="new folder")
         self._row_rects = []
         self._list_rect = pg.Rect(0, 0, 0, 0)
-        self._max_visible = 0
         self._row_h = 1
-        self._last_scroll_activity_ms = 0
+        self.scroll = ScrollView(
+            lambda: self._scroll_px,
+            self._store_scroll,
+            lambda: (self._list_rect, self._content_px),
+            wheel_step_px=lambda: self._row_h,
+        )
         self._up_rect = pg.Rect(0, 0, 0, 0)
         self._newfolder_rect = pg.Rect(0, 0, 0, 0)
         self._hidden_rect = pg.Rect(0, 0, 0, 0)
@@ -44,6 +50,9 @@ class DirectoryBrowser(BaseModal):
         self._choose_rect = pg.Rect(0, 0, 0, 0)
         self._input_rect = pg.Rect(0, 0, 0, 0)
         self._on_rect_changed()
+
+    def _store_scroll(self, value):
+        self._scroll_px = value
 
     def _on_rect_changed(self):
         h = max(self.rect.height, 1)
@@ -72,6 +81,7 @@ class DirectoryBrowser(BaseModal):
     def hide(self):
         self.visible = False
         self.creating = False
+        self.scroll.cancel()
 
     def is_visible(self):
         return self.visible
@@ -94,7 +104,8 @@ class DirectoryBrowser(BaseModal):
             return ""
 
     def _reload(self):
-        self.scroll_offset = 0
+        self._scroll_px = 0.0
+        self.scroll.cancel()
         dirs, files = [], []
         try:
             for name in sorted(os.listdir(self.current), key=str.lower):
@@ -141,7 +152,8 @@ class DirectoryBrowser(BaseModal):
         self.creating = True
         self.new_folder_input.text = ""
         self.new_folder_input.focused = True
-        self.scroll_offset = 0
+        self._scroll_px = 0.0
+        self.scroll.cancel()
 
     def _cancel_creating(self):
         self.creating = False
@@ -165,6 +177,7 @@ class DirectoryBrowser(BaseModal):
     def draw(self):
         if not self.visible or self.rect.width <= 0:
             return
+        self.scroll.tick()
         self.draw_shell()
         r = self.rect
         pad = self.padding
@@ -173,10 +186,8 @@ class DirectoryBrowser(BaseModal):
         self._list_rect = pg.Rect(r.x + pad, list_top, r.width - 2 * pad,
                                   max(foot_top - int(pad * 0.4) - list_top, 1))
         self._row_h = self.row_font.get_height() + 16
-        self._max_visible = max(self._list_rect.height // self._row_h, 1)
-        rows = len(self.entries) + (1 if self.creating else 0)
-        max_offset = max(0, rows - self._max_visible)
-        self.scroll_offset = max(0, min(self.scroll_offset, max_offset))
+        rows_total = len(self.entries) + (1 if self.creating else 0)
+        self._content_px = rows_total * self._row_h
         self._draw_list()
 
     def _draw_header(self, r, pad):
@@ -276,18 +287,19 @@ class DirectoryBrowser(BaseModal):
     def _draw_list(self):
         self._row_rects = []
         self._input_rect = pg.Rect(0, 0, 0, 0)
-        rows_total = len(self.entries) + (1 if self.creating else 0)
-        max_offset = max(0, rows_total - self._max_visible)
-        gutter = 16 if max_offset else 0
+        max_px = max(0, self._content_px - self._list_rect.height)
+        self._scroll_px = max(0.0, min(self._scroll_px, max_px))
+        gutter = 16 if max_px > 0 else 0
         content_w = self._list_rect.width - gutter
+        rows = ([None] if self.creating else []) + self.entries
+        first, sub, n_draw = self.scroll.row_window(self._list_rect, self._row_h)
         prev_clip = self.window.get_clip()
         self.window.set_clip(self._list_rect)
         try:
             mouse_pos = pg.mouse.get_pos()
-            rows = ([None] if self.creating else []) + self.entries
-            visible = rows[self.scroll_offset:self.scroll_offset + self._max_visible]
-            for i, entry in enumerate(visible):
-                row_rect = pg.Rect(self._list_rect.x, self._list_rect.y + i * self._row_h,
+            y0 = self._list_rect.y - sub
+            for i, entry in enumerate(rows[first:first + n_draw]):
+                row_rect = pg.Rect(self._list_rect.x, y0 + i * self._row_h,
                                    content_w, self._row_h)
                 if entry is None:
                     self._draw_input_row(row_rect)
@@ -295,9 +307,7 @@ class DirectoryBrowser(BaseModal):
                     self._draw_entry_row(row_rect, entry, mouse_pos)
         finally:
             self.window.set_clip(prev_clip)
-        if max_offset:
-            draw_scroll_thumb(self.window, self._list_rect, rows_total, self._max_visible,
-                              self.scroll_offset / max_offset, self._last_scroll_activity_ms)
+        self.scroll.draw_thumb(self.window)
 
     def _draw_row_icon(self, icon_box, is_dir):
         char = "📁" if is_dir else "📄"
@@ -361,23 +371,29 @@ class DirectoryBrowser(BaseModal):
         if self._cancel_rect.collidepoint(pos):
             self.hide()
             return True
-        for row_rect, path, is_dir in self._row_rects:
-            if row_rect.collidepoint(pos):
-                if is_dir:
-                    self._enter(path)
-                return True
+        if self._list_rect.collidepoint(pos):
+            for row_rect, path, is_dir in self._row_rects:
+                if row_rect.collidepoint(pos):
+                    if is_dir:
+                        self._enter(path)
+                    return True
         return True
 
     def handle_scroll(self, pos, dy):
-        if not self.visible or not self._list_rect.collidepoint(pos):
+        if not self.visible:
             return False
-        rows_total = len(self.entries) + (1 if self.creating else 0)
-        max_offset = max(0, rows_total - self._max_visible)
-        if max_offset == 0:
+        return self.scroll.handle_wheel(pos, dy)
+
+    def handle_press(self, pos):
+        if not self.visible:
             return False
-        self.scroll_offset = max(0, min(self.scroll_offset - dy, max_offset))
-        self._last_scroll_activity_ms = pg.time.get_ticks()
-        return True
+        return self.scroll.handle_press(pos) is not None
+
+    def handle_motion(self, pos):
+        return self.scroll.handle_motion(pos)
+
+    def handle_release(self, pos):
+        return self.scroll.handle_release()
 
     def handle_key(self, event):
         if not self.visible or not self.creating:

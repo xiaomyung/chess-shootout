@@ -6,15 +6,17 @@ from chessshootout.frontend.visual.colors import Colors
 from chessshootout.frontend.visual.draw import supersample, rounded_rect_surface
 from chessshootout.frontend.visual.emoji import emoji_surface
 from chessshootout.frontend.visual.fonts import get_display_font, get_font, get_mono_font
+from chessshootout.frontend.visual.scroll_view import ScrollView
 from chessshootout.frontend.visual.text_input import TextInput
 from chessshootout.frontend.visual.widgets import (
-    draw_button, draw_button_row, draw_scroll_thumb, draw_segmented, draw_toggle,
+    draw_button, draw_button_row, draw_segmented, draw_toggle,
 )
 
 ROW_PAD = 12
 SECTION_GAP = 10
 SCROLLBAR_RESERVE = 14
 LABEL_GAP = 16
+OPTIONS_WHEEL_STEP = 30
 
 TOGGLE_W = 46
 TOGGLE_H = 24
@@ -93,6 +95,9 @@ class _Row:
     def handle_click(self, pos):
         return False
 
+    def contains_control(self, pos):
+        return False
+
     def handle_key(self, event):
         return False
 
@@ -120,10 +125,13 @@ class ToggleRow(_Row):
         return self._ctl.x
 
     def handle_click(self, pos):
-        if self._ctl.inflate(TOGGLE_HIT_PAD_X, TOGGLE_HIT_PAD_Y).collidepoint(pos):
+        if self.contains_control(pos):
             self.setter(not self.getter())
             return True
         return False
+
+    def contains_control(self, pos):
+        return self._ctl.inflate(TOGGLE_HIT_PAD_X, TOGGLE_HIT_PAD_Y).collidepoint(pos)
 
 
 class SegmentedRow(_Row):
@@ -163,6 +171,9 @@ class SegmentedRow(_Row):
                 self.setter(key)
                 return True
         return False
+
+    def contains_control(self, pos):
+        return any(r.collidepoint(pos) for r in self._rects.values())
 
 
 class SliderRow(_Row):
@@ -206,11 +217,14 @@ class SliderRow(_Row):
         self.setter(max(0.0, min(1.0, ratio)))
 
     def handle_click(self, pos):
-        if self._track.inflate(SLIDER_HIT_PAD_X, SLIDER_HIT_PAD_Y).collidepoint(pos):
+        if self.contains_control(pos):
             self._set_from_x(pos[0])
             self._dragging = True
             return True
         return False
+
+    def contains_control(self, pos):
+        return self._track.inflate(SLIDER_HIT_PAD_X, SLIDER_HIT_PAD_Y).collidepoint(pos)
 
 
 class SwatchRow(_Row):
@@ -260,6 +274,9 @@ class SwatchRow(_Row):
                 self.setter(key)
                 return True
         return False
+
+    def contains_control(self, pos):
+        return any(r.collidepoint(pos) for r, _ in self._rects.values())
 
 
 class _FieldRow(_Row):
@@ -336,6 +353,10 @@ class PathRow(_FieldRow):
         self.input.focused = False
         return False
 
+    def contains_control(self, pos):
+        return (self._change_rect.collidepoint(pos) or self._reset_rect.collidepoint(pos)
+                or self._field_rect.collidepoint(pos))
+
     def handle_key(self, event):
         return self.input.handle_key(event)
 
@@ -376,6 +397,9 @@ class TextRow(_FieldRow):
             return True
         self.input.focused = False
         return False
+
+    def contains_control(self, pos):
+        return self._field_rect.collidepoint(pos)
 
     def handle_key(self, event):
         return self.input.handle_key(event)
@@ -430,6 +454,9 @@ class CountryRow(_Row):
             return True
         return False
 
+    def contains_control(self, pos):
+        return self._ctl.collidepoint(pos)
+
 
 class OptionsBody:
 
@@ -437,21 +464,36 @@ class OptionsBody:
         self.sections = []
         self.rect = pg.Rect(0, 0, 0, 0)
         self.fonts = None
-        self.scroll = 0
+        self._scroll_px = 0.0
         self._content_h = 0
-        self._last_scroll_ms = 0
+        self.scroll = ScrollView(
+            lambda: self._scroll_px,
+            self._store_scroll,
+            lambda: (self.rect, self._content_h),
+            wheel_step_px=OPTIONS_WHEEL_STEP,
+        )
+
+    def _store_scroll(self, value):
+        self._scroll_px = value
+
+    @property
+    def scroll_offset(self):
+        return self._scroll_px
 
     def set_sections(self, sections):
         self.sections = sections
-        self.scroll = 0
+        self._scroll_px = 0.0
+        self.scroll.cancel()
 
     def draw(self, window, rect, fonts):
+        self.scroll.tick()
         self.rect = pg.Rect(rect)
         self.fonts = fonts
+        self._scroll_px = max(0.0, min(self._scroll_px, self._max_scroll()))
         prev = window.get_clip()
         window.set_clip(rect)
         row_w = rect.width - SCROLLBAR_RESERVE
-        y = rect.y - self.scroll
+        y = rect.y - self._scroll_px
         for label, rows in self.sections:
             window.blit(fonts.section.render(label.upper(), True, Colors.text_muted),
                         (rect.x, y + 6))
@@ -462,12 +504,9 @@ class OptionsBody:
                 y += h
             y += SECTION_GAP
         y += ROW_PAD
-        self._content_h = (y + self.scroll) - rect.y
+        self._content_h = (y + self._scroll_px) - rect.y
         window.set_clip(prev)
-        track = pg.Rect(rect.right - 6, rect.y, 6, rect.height)
-        offset_fraction = (self.scroll / self._max_scroll()) if self._max_scroll() else 0
-        draw_scroll_thumb(window, track, self._content_h, rect.height,
-                          offset_fraction, self._last_scroll_ms)
+        self.scroll.draw_thumb(window)
 
     def _max_scroll(self):
         return max(0, self._content_h - self.rect.height)
@@ -482,11 +521,22 @@ class OptionsBody:
         return True
 
     def handle_scroll(self, pos, dy):
-        if self._max_scroll() == 0:
+        return self.scroll.handle_wheel(pos, dy)
+
+    def handle_press(self, pos):
+        if not self.rect.collidepoint(pos):
             return False
-        self.scroll = max(0, min(self.scroll - dy * 30, self._max_scroll()))
-        self._last_scroll_ms = pg.time.get_ticks()
-        return True
+        for _, rows in self.sections:
+            for row in rows:
+                if row.contains_control(pos):
+                    return False
+        return self.scroll.handle_press(pos) is not None
+
+    def handle_motion(self, pos):
+        return self.scroll.handle_motion(pos)
+
+    def handle_release(self, pos):
+        return self.scroll.handle_release()
 
     def handle_key(self, event):
         for _, rows in self.sections:
@@ -524,6 +574,7 @@ class OptionsModal(BaseModal):
 
     def hide(self):
         self.visible = False
+        self.body.scroll.cancel()
 
     def is_visible(self):
         return self.visible
@@ -562,6 +613,17 @@ class OptionsModal(BaseModal):
         if not self.visible:
             return False
         return self.body.handle_scroll(pos, dy)
+
+    def handle_press(self, pos):
+        if not self.visible:
+            return False
+        return self.body.handle_press(pos)
+
+    def handle_motion(self, pos):
+        return self.body.handle_motion(pos)
+
+    def handle_release(self, pos):
+        return self.body.handle_release(pos)
 
     def handle_key(self, event):
         if not self.visible:

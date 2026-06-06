@@ -3,7 +3,8 @@ import pygame as pg
 from chessshootout.frontend.visual.colors import Colors
 from chessshootout.frontend.panels.audio import DEFAULT_BUTTON_COLUMNS
 from chessshootout.domain.pgn.generate import iter_move_pairs
-from chessshootout.frontend.visual.widgets import draw_button_row, draw_scroll_thumb, draw_pill
+from chessshootout.frontend.visual.scroll_view import ScrollView
+from chessshootout.frontend.visual.widgets import draw_button_row, draw_pill
 from chessshootout.server.protocol import GIVE_TIME_SECONDS
 from chessshootout.frontend.visual.fonts import get_font
 
@@ -66,7 +67,15 @@ class RightMenu:
         self.scroll_offset = 0
         self._total_rows = 0
         self._max_lines = 0
-        self._last_scroll_activity_ms = 0
+        self._line_h = 1
+        self._content_px = 0
+        self._moves_viewport = pg.Rect(0, 0, 0, 0)
+        self.scroll = ScrollView(
+            self._get_scroll_px,
+            self._set_scroll_px,
+            lambda: (self._moves_viewport, self._content_px),
+            wheel_step_px=lambda: self._line_h,
+        )
         self._move_cell_hits = []
         self._last_seen_total_rows = 0
         self._last_review_ply = None
@@ -74,6 +83,20 @@ class RightMenu:
     @property
     def backend(self):
         return getattr(self.match, "backend", self.match)
+
+    def _max_off_rows(self):
+        return max(0, self._total_rows - self._max_lines)
+
+    def _get_scroll_px(self):
+        return (self._max_off_rows() - self.scroll_offset) * self._line_h
+
+    def _set_scroll_px(self, px):
+        rows_from_top = round(px / self._line_h) if self._line_h else 0
+        self.scroll_offset = max(0, min(self._max_off_rows() - rows_from_top,
+                                        self._max_off_rows()))
+
+    def is_visible(self):
+        return True
 
     def set_rect(self, rect):
         self.font = get_font(max(int(rect.width / self.moves_font_factor), 10), mono=True)
@@ -137,13 +160,15 @@ class RightMenu:
         self.scroll_offset = 0
         self._total_rows = 0
         self._last_seen_total_rows = 0
-        self._last_scroll_activity_ms = 0
+        self.scroll.cancel()
+        self.scroll.last_activity_ms = 0
         self._last_review_ply = None
 
     OUTER_RADIUS = 10
     INNER_RADIUS = 8
 
     def draw_menu(self):
+        self.scroll.tick()
         pg.draw.rect(self.window, Colors.surface, self.outer_rect,
                      border_radius=self.OUTER_RADIUS)
         if self.game_info is not None and self.info_rect.height > 0:
@@ -151,7 +176,7 @@ class RightMenu:
         pg.draw.rect(self.window, Colors.surface_raised, self.moves_rect,
                      border_radius=self.INNER_RADIUS)
         self._draw_moves(self.moves_rect)
-        self._draw_scroll_indicator(self.moves_rect)
+        self.scroll.draw_thumb(self.window)
         self._draw_buttons(self.buttons_rect)
         if self.audio_panel is not None:
             rows = self.buttons_provider()
@@ -217,24 +242,31 @@ class RightMenu:
         return False
 
     def handle_scroll(self, pos, dy):
-        if not self.moves_rect.collidepoint(pos):
-            return False
-        max_offset = max(0, self._total_rows - self._max_lines)
-        if max_offset == 0:
-            return False
-        self.scroll_offset = max(0, min(self.scroll_offset + dy, max_offset))
-        self._last_scroll_activity_ms = pg.time.get_ticks()
-        return True
+        return self.scroll.handle_wheel(pos, dy)
+
+    def handle_press(self, pos):
+        return self.scroll.handle_press(pos) is not None
+
+    def handle_motion(self, pos):
+        return self.scroll.handle_motion(pos)
+
+    def handle_release(self, pos):
+        return self.scroll.handle_release()
 
     def _draw_moves(self, rect):
         history = self.match.move_history
         line_h = self.moves_font.get_linesize() + 2
+        self._line_h = line_h
         self._max_lines = max(int((rect.height - 2 * self.padding) // line_h), 0)
 
         pairs = list(iter_move_pairs(history))
         self._total_rows = len(pairs)
+        self._content_px = self._total_rows * line_h
+        self._moves_viewport = pg.Rect(rect.x, rect.y + self.padding, rect.width,
+                                       self._max_lines * line_h)
 
-        if (self._last_seen_total_rows
+        if (not self.scroll.is_active()
+                and self._last_seen_total_rows
                 and self._total_rows > self._last_seen_total_rows
                 and self.scroll_offset > 0):
             self.scroll_offset += self._total_rows - self._last_seen_total_rows
@@ -243,7 +275,8 @@ class RightMenu:
         max_offset = max(0, self._total_rows - self._max_lines)
         self.scroll_offset = min(self.scroll_offset, max_offset)
 
-        self._reveal_active_ply_on_nav()
+        if not self.scroll.is_active():
+            self._reveal_active_ply_on_nav()
 
         end = self._total_rows - self.scroll_offset
         start = max(0, end - self._max_lines)
@@ -316,20 +349,6 @@ class RightMenu:
             new_end = pair_idx + self._max_lines
         new_offset = self._total_rows - new_end
         return max(0, min(new_offset, max_offset))
-
-    def _draw_scroll_indicator(self, rect):
-        max_offset = max(0, self._total_rows - self._max_lines)
-        if max_offset == 0:
-            return
-        track_rect = pg.Rect(
-            rect.x, rect.y + self.padding,
-            rect.width, rect.height - 2 * self.padding,
-        )
-        offset_fraction = 1 - self.scroll_offset / max_offset
-        draw_scroll_thumb(
-            self.window, track_rect, self._total_rows, self._max_lines,
-            offset_fraction, self._last_scroll_activity_ms,
-        )
 
     def _draw_buttons(self, rect):
         rows = self.buttons_provider()

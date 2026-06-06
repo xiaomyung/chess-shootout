@@ -54,6 +54,27 @@ class MenuPage:
             return active.handle_scroll(pos, dy)
         return False
 
+    def handle_press(self, pos):
+        active = self._active()
+        if hasattr(active, "handle_press"):
+            return active.handle_press(pos)
+        return False
+
+    def handle_motion(self, pos):
+        active = self._active()
+        if hasattr(active, "handle_motion"):
+            return active.handle_motion(pos)
+        return False
+
+    def handle_release(self, pos):
+        active = self._active()
+        if hasattr(active, "handle_release"):
+            return active.handle_release(pos)
+        return False
+
+    def is_visible(self):
+        return True
+
     def handle_key(self, event):
         active = self._active()
         if hasattr(active, "handle_key"):
