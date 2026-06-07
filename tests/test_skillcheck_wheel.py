@@ -112,9 +112,9 @@ def test_arc_shrinks_each_rotation_to_a_floor():
     ch = WheelChallenge.from_seed("shrink")
     p = ch.period_ms
     assert ch.arc_width_at(0.0) == 60.0
-    assert ch.arc_width_at(p) == 55.0
-    assert ch.arc_width_at(p * 2) == 50.0
-    assert ch.arc_width_at(p * 11) == wheel.WHEEL_ARC_MIN_DEGREES
+    assert ch.arc_width_at(p) == 50.0
+    assert ch.arc_width_at(p * 2) == 40.0
+    assert ch.arc_width_at(p * 6) == wheel.WHEEL_ARC_MIN_DEGREES
     assert ch.arc_width_at(p * 50) == wheel.WHEEL_ARC_MIN_DEGREES
 
 
