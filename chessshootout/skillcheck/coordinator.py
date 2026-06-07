@@ -31,9 +31,9 @@ class SkillCheckCoordinator:
     def is_locked(self, from_sq, to_sq):
         return self.locks.is_locked(from_sq, to_sq)
 
-    def select(self, backend, from_sq, to_sq, promo_type=None):
+    def select(self, backend, from_sq, to_sq):
         if not self.enabled or self.locks.is_locked(from_sq, to_sq):
             return SkillCheckKind.NONE
         ply_index = len(backend.move_history)
         roll = ply_roll(self.seed, move_roll_key(ply_index, from_sq, to_sq))
-        return select_skillcheck(backend, from_sq, to_sq, roll, promo_type, self.locks)
+        return select_skillcheck(backend, from_sq, to_sq, roll, self.locks)

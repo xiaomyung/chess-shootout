@@ -9,6 +9,9 @@ class SkillCheckController:
     def draw(self, window):
         pass
 
+    def relayout(self, cell_rect):
+        pass
+
     @property
     def done(self):
         return False

@@ -38,6 +38,7 @@ class Colors:
 
     win = "#46d17f"
     loss = "#ff5a4f"
+    loss_glow = loss + "8c"
     check = "#ff3b3b"
     check_fill = check + "6b"
 

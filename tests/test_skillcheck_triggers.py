@@ -1,20 +1,19 @@
 """Trigger fact-extraction from a real Backend move + the per-turn move-lock.
 
 compute_facts probes a candidate move on a deepcopy and reports what fired:
-capture (with capturer/captured values), check (with checker value), checkmate,
-promotion (with the chosen piece's value), and whether the mover was forced.
+capture (with capturer/captured values), promotion (with the chosen piece's
+value), and whether the mover was forced. Checks and checkmates were removed --
+a non-capturing check or mate is a quiet move that never fires a skill-check.
 The lock-set forbids the exact (from, to) of a failed move for the turn; a
 forced count that drops to one (via locks) means the skill-check is skipped so a
 player is never stranded.
 """
 
-import pytest
-
 from chessshootout.skillcheck import triggers
 from chessshootout.skillcheck.locks import MoveLockSet
 from chessshootout.skillcheck.types import SkillCheckKind
-from chessshootout.skillcheck.weights import CAPTURE_GREATER
-from tests.helpers import B, BLACK, K, N, P, Q, R, WHITE, make_backend, piece, sq
+from chessshootout.skillcheck.weights import CAPTURE_WHEEL_SHARE
+from tests.helpers import BLACK, K, P, Q, R, WHITE, make_backend, piece, sq
 
 WHEEL = SkillCheckKind.WHEEL
 DUEL = SkillCheckKind.DUEL
@@ -32,7 +31,7 @@ def test_queen_takes_pawn_is_capture_C_greater_V():
     assert facts.is_capture is True
     assert facts.capturer_value == 9
     assert facts.captured_value == 1
-    assert facts.is_check is False
+    assert facts.is_promotion is False
 
 
 def test_pawn_takes_queen_is_capture_C_less_V():
@@ -46,42 +45,41 @@ def test_pawn_takes_queen_is_capture_C_less_V():
     assert facts.captured_value == 9
 
 
-# ---- check / checkmate facts ----------------------------------------------
+# ---- checks and checkmates never fire (removed for now) --------------------
 
-def test_rook_delivers_check():
+def test_non_capturing_check_does_not_fire():
     backend = make_backend({
         sq(7, 4): piece(K, WHITE), sq(0, 4): piece(K, BLACK),
         sq(7, 0): piece(R, WHITE),
     })
     facts = triggers.compute_facts(backend, sq(7, 0), sq(0, 0))
-    assert facts.is_check is True
-    assert facts.is_checkmate is False
-    assert facts.checker_value == 5
+    assert facts.is_capture is False
+    assert facts.is_promotion is False
+    for roll in (0.0, 0.25, 0.5, 0.75, 0.999):
+        assert triggers.select_skillcheck(backend, sq(7, 0), sq(0, 0), roll) == NONE
 
 
-def test_back_rank_checkmate():
+def test_back_rank_checkmate_does_not_fire():
     backend = make_backend({
         sq(7, 4): piece(K, WHITE), sq(0, 7): piece(K, BLACK),
         sq(1, 6): piece(P, BLACK), sq(1, 7): piece(P, BLACK),
         sq(7, 0): piece(R, WHITE),
     })
     facts = triggers.compute_facts(backend, sq(7, 0), sq(0, 0))
-    assert facts.is_checkmate is True
-    assert facts.is_check is False
-    assert facts.checker_value == 5
+    assert facts.is_capture is False
+    for roll in (0.0, 0.5, 0.999):
+        assert triggers.select_skillcheck(backend, sq(7, 0), sq(0, 0), roll) == NONE
 
 
 # ---- promotion facts -------------------------------------------------------
 
-@pytest.mark.parametrize("promo, value", [(Q, 9), (R, 5), (B, 3), (N, 3)])
-def test_quiet_promotion_by_chosen_piece(promo, value):
+def test_quiet_promotion_is_a_promotion_not_a_capture():
     backend = make_backend({
         sq(7, 4): piece(K, WHITE), sq(3, 4): piece(K, BLACK),
         sq(7, 7): piece(R, WHITE), sq(1, 0): piece(P, WHITE),
     })
-    facts = triggers.compute_facts(backend, sq(1, 0), sq(0, 0), promo_type=promo)
+    facts = triggers.compute_facts(backend, sq(1, 0), sq(0, 0))
     assert facts.is_promotion is True
-    assert facts.promo_value == value
     assert facts.is_capture is False
 
 
@@ -90,7 +88,7 @@ def test_capture_promotion_is_capture_not_promotion_weighting():
         sq(7, 4): piece(K, WHITE), sq(4, 4): piece(K, BLACK),
         sq(1, 1): piece(P, WHITE), sq(0, 0): piece(R, BLACK),
     })
-    facts = triggers.compute_facts(backend, sq(1, 1), sq(0, 0), promo_type=Q)
+    facts = triggers.compute_facts(backend, sq(1, 1), sq(0, 0))
     assert facts.is_capture is True
     assert facts.capturer_value == 1
     assert facts.captured_value == 5
@@ -105,8 +103,7 @@ def test_quiet_move_has_no_trigger():
         sq(7, 0): piece(R, WHITE),
     })
     facts = triggers.compute_facts(backend, sq(7, 4), sq(6, 4))
-    assert (facts.is_capture, facts.is_check, facts.is_checkmate, facts.is_promotion) \
-        == (False, False, False, False)
+    assert (facts.is_capture, facts.is_promotion) == (False, False)
 
 
 def test_illegal_move_returns_none():
@@ -155,7 +152,7 @@ def test_select_uses_capture_bracket():
     })
     assert triggers.select_skillcheck(backend, sq(4, 3), sq(3, 3), 0.0) == WHEEL
     assert triggers.select_skillcheck(backend, sq(4, 3), sq(3, 3), 0.99) == DUEL
-    assert CAPTURE_GREATER[WHEEL] == 0.30
+    assert CAPTURE_WHEEL_SHARE == 0.80
 
 
 def test_select_illegal_move_is_none():

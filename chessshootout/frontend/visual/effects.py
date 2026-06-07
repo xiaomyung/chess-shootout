@@ -24,6 +24,7 @@ SPARK_MS = (300, 600)
 SMOKE_MS = (700, 1100)
 CHECK_DROP_MS = 3000
 RECOIL_MS = 180
+MISS_HOLD_MS = 360
 BACK_OVERSHOOT = 1.70158
 
 SPARK_COUNT = 10
@@ -70,6 +71,8 @@ RAGDOLL_FALL_SHRINK = 0.3
 STREAK_LABELS = {2: "DOUBLE KILL", 3: "TRIPLE KILL", 4: "QUADRA KILL",
                  5: "RAMPAGE", 6: "UNSTOPPABLE", 7: "GODLIKE"}
 HIT_WORDS = ("BLAM", "BOOM", "POW", "BANG", "HEADSHOT", "BODIED", "WASTED")
+SKILL_ISSUE_TITLE = "SKILL ISSUE"
+SKILL_ISSUE_SUB = "GET GOOD, BRO"
 
 
 class EffectManager:
@@ -143,7 +146,7 @@ class EffectManager:
         self._shake = None
 
     def held_squares(self):
-        return {c["to_sq"] for c in self.captures}
+        return {c["to_sq"] for c in self.captures if not c.get("miss")}
 
     def _rnd(self, lo, hi):
         return lo + self.rng.random() * (hi - lo)
@@ -199,6 +202,29 @@ class EffectManager:
             "cell": cell_size, "power": power, "on_fire": on_fire, "on_slide": on_slide,
             "occupied": {s for s in (occupied or ()) if s not in (from_sq, victim_sq)},
         })
+
+    def miss(self, *, now_ms, attacker_type, from_sq, victim_sq, cell_size,
+             power="med", on_fire=None, occupied=None):
+        gun = gunfx.PIECE_GUN.get(attacker_type, "revolver")
+        weapon = self._weapon(gun, cell_size)
+        if self.reduce_motion or weapon is None:
+            self._skill_issue_callout(now_ms, cell_size)
+            if on_fire is not None:
+                on_fire()
+            return
+        self.captures.append({
+            "start": now_ms, "fire_at": now_ms + DRAW_MS + AIM_MS,
+            "fired": False, "gun": gun, "weapon": weapon,
+            "from_sq": from_sq, "victim_sq": victim_sq, "to_sq": victim_sq,
+            "attacker": None, "victim": None,
+            "cell": cell_size, "power": power, "on_fire": on_fire, "on_slide": None,
+            "occupied": {s for s in (occupied or ()) if s not in (from_sq, victim_sq)},
+            "miss": True,
+        })
+
+    def _skill_issue_callout(self, now, cell):
+        self._callout(now, SKILL_ISSUE_TITLE, SKILL_ISSUE_SUB, "xl", cell,
+                      Colors.loss, Colors.loss_glow)
 
     def check(self, *, now_ms, attacker_type, king_sq, from_sq, cell_size):
         if self.reduce_motion:
@@ -296,11 +322,16 @@ class EffectManager:
                                    "cell": c["cell"], "start": now, "dur": MUZZLE_MS})
         self._spawn_pellets(now, c)
         self.trigger_shake(now, c["power"])
+        if c.get("miss"):
+            self._skill_issue_callout(now, c["cell"])
 
     def _spawn_pellets(self, now, c):
         spec = gunfx.gun_spec(c["gun"])
         muzzle, _ = self._muzzle(c["weapon"], c["from_sq"], c["victim_sq"], c["cell"])
         tx, ty = self._center(c["victim_sq"])
+        miss = c.get("miss")
+        if miss:
+            tx, ty = self._miss_point(muzzle, tx, ty, c["cell"])
         base = math.atan2(ty - muzzle[1], tx - muzzle[0])
         f = c["cell"] / PROJECTILE_REF_CELL
         dist = math.hypot(tx - muzzle[0], ty - muzzle[1]) or 1.0
@@ -308,13 +339,23 @@ class EffectManager:
         self._bystanders = set(c["occupied"])
         for i, (ang, factor) in enumerate(gunfx.pellet_spread(spec, base, self._rnd)):
             sp = speed * factor
+            lead = i == 0 and not miss
             self.projectiles.append({
                 "x": muzzle[0], "y": muzzle[1],
                 "vx": math.cos(ang) * sp, "vy": math.sin(ang) * sp,
                 "color": spec.color, "size": max(spec.size * f, 2),
                 "len": max(spec.length * f, 6), "cell": c["cell"],
-                "lead": i == 0, "capture": c if i == 0 else None,
+                "lead": lead, "capture": c if lead else None,
                 "born": now, "max_ms": PROJECTILE_MAX_MS})
+
+    def _miss_point(self, muzzle, tx, ty, cell):
+        aim = math.atan2(ty - muzzle[1], tx - muzzle[0])
+        side = 1 if self.rng.random() < 0.5 else -1
+        perp = aim + math.pi / 2.0
+        off = cell * self._rnd(1.0, 1.6) * side
+        along = cell * self._rnd(-0.3, 0.6)
+        return (tx + math.cos(perp) * off + math.cos(aim) * along,
+                ty + math.sin(perp) * off + math.sin(aim) * along)
 
     def _impact(self, now, from_sq, victim_sq, victim, cell):
         self.particles.append({"kind": "impact", "victim_sq": victim_sq, "cell": cell,
@@ -373,6 +414,9 @@ class EffectManager:
                 c["fired"] = True
                 if c["on_fire"] is not None:
                     c["on_fire"]()
+        self.captures = [c for c in self.captures
+                         if not (c.get("miss") and c["fired"]
+                                 and now >= c["fire_at"] + MISS_HOLD_MS)]
         self._update_projectiles(now, dt)
         self.particles = [p for p in self.particles if now < p["start"] + p["dur"]]
         self.holes = [h for h in self.holes if now < h["start"] + h["dur"]]

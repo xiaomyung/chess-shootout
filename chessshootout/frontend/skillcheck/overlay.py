@@ -29,6 +29,10 @@ class SkillCheckOverlay:
         if self._controller is not None:
             self._controller.draw(window)
 
+    def relayout(self, cell_rect):
+        if self._controller is not None:
+            self._controller.relayout(cell_rect)
+
     def cancel(self):
         self._controller = None
         self._context = None

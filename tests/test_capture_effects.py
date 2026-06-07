@@ -37,9 +37,9 @@ from chessshootout.frontend.visual import gunfx
 from chessshootout.frontend.visual.effects import (
     AIM_MS, CALLOUT_LG_MS, CALLOUT_XL_MS, CHECK_DROP_MS, DRAW_MS, HIT_WORDS,
     HOLE_FADE_MS, HOLE_HOLD_MS, HOLE_IN_MS, INTENSITY_SCALE, KING_SHAKE_MS,
-    PROJECTILE_MAX_MS, PROJECTILE_TRAVEL_MS, RECOIL_MS, SHAKE_AMP, SHAKE_HARD_MS,
-    SHAKE_SOFT_MS, STREAK_LABELS, TAG_MS, TAKEOVER_PAUSE_MS, TAKEOVER_TOTAL_MS,
-    EffectManager,
+    MISS_HOLD_MS, PROJECTILE_MAX_MS, PROJECTILE_TRAVEL_MS, RECOIL_MS, SHAKE_AMP,
+    SHAKE_HARD_MS, SHAKE_SOFT_MS, STREAK_LABELS, TAG_MS, TAKEOVER_PAUSE_MS,
+    TAKEOVER_TOTAL_MS, EffectManager,
 )
 from chessshootout.frontend.visual.gunfx import GUNS, GunSpec, PIECE_GUN
 
@@ -270,6 +270,105 @@ def test_single_pellet_gun_fires_one_bullet_and_wounds_no_bystanders():
     assert len(em.projectiles) == 1, "a revolver fires a single bullet (no spread)"
     _run_until_resolved(em, c["fire_at"])
     assert em._piece_shakes == {}, "one straight bullet wounds no bystanders"
+
+
+# ---- skill-check miss: fire the gun but whiff -------------------------------
+
+def test_miss_fires_a_spread_then_whiffs_without_a_kill():
+    em = _em()
+    fired = []
+    em.miss(now_ms=1000, attacker_type="queen", from_sq=Square(7, 3),
+            victim_sq=Square(0, 3), cell_size=80, on_fire=lambda: fired.append(1))
+    assert len(em.captures) == 1
+    c = em.captures[0]
+    assert c["fire_at"] == 1000 + DRAW_MS + AIM_MS
+    assert Square(0, 3) not in em.held_squares(), "a miss never hides the still-standing victim"
+
+    em.update(c["fire_at"] - 1)
+    assert fired == [] and em.projectiles == [] and em.callouts == []
+
+    em.update(c["fire_at"])
+    assert fired == [1], "the gunshot callback fires with the muzzle flash"
+    assert len(em.projectiles) == GUNS["blunderbuss"].pellets, "the whole queen spread launches"
+    assert all(pr["capture"] is None for pr in em.projectiles), "no pellet can resolve a capture"
+    assert len(em.callouts) == 1 and em.callouts[0]["dur"] == CALLOUT_XL_MS
+
+    for t in range(c["fire_at"], c["fire_at"] + PROJECTILE_MAX_MS + 200, 16):
+        em.update(t)
+    kinds = {p["kind"] for p in em.particles}
+    assert {"impact", "blood", "ragdoll"}.isdisjoint(kinds), "nobody dies on a miss"
+
+
+def test_miss_capture_is_removed_after_its_hold():
+    em = _em()
+    em.miss(now_ms=0, attacker_type="rook", from_sq=Square(0, 0),
+            victim_sq=Square(0, 4), cell_size=80)
+    c = em.captures[0]
+    em.update(c["fire_at"])
+    assert em.captures, "the gun is still drawn through the recoil hold"
+    em.update(c["fire_at"] + MISS_HOLD_MS + 1)
+    assert em.captures == [], "after the hold the gun holsters"
+
+
+def test_miss_pellets_are_all_strays_that_can_wound_other_pieces():
+    em = _em()
+    bystander = Square(3, 0)
+    em.miss(now_ms=0, attacker_type="queen", from_sq=Square(7, 3),
+            victim_sq=Square(0, 3), cell_size=80,
+            occupied={Square(7, 3), Square(0, 3), bystander})
+    c = em.captures[0]
+    em.update(c["fire_at"])
+    assert em._bystanders == {bystander}, "the shooter and the missed victim are never self-hit"
+    assert all(not pr["lead"] for pr in em.projectiles), "no lead pellet — every shot is a stray"
+    assert all(pr["capture"] is None for pr in em.projectiles), "and none resolves a capture/kill"
+
+
+def test_a_stray_miss_pellet_wounds_a_bystander_but_it_survives():
+    em = _em()
+    bystander = Square(4, 4)
+    em.miss(now_ms=0, attacker_type="rook", from_sq=Square(7, 3),
+            victim_sq=Square(0, 3), cell_size=80,
+            occupied={Square(7, 3), Square(0, 3), bystander})
+    c = em.captures[0]
+    em.update(c["fire_at"])
+    pr = em.projectiles[0]
+    bx, by = em.geom(bystander)
+    pr["x"], pr["y"], pr["vx"], pr["vy"] = bx - 5, by, 400.0, 0.0
+    em.update(c["fire_at"] + 40)
+    kinds = {p["kind"] for p in em.particles}
+    assert "blood" in kinds and em._piece_shakes.get(bystander) is not None, "it bleeds and shakes"
+    assert "ragdoll" not in kinds and em.holes == [], "but it survives — no ragdoll, no bullet hole"
+
+
+def test_miss_point_clears_the_victim_square():
+    em = _em()
+    tx, ty = em.geom(Square(0, 3))
+    mx, my = em._miss_point((400.0, 750.0), tx, ty, 80)
+    assert math.hypot(mx - tx, my - ty) >= 80, "the aim point lands at least a cell off the victim"
+
+
+def test_reduce_motion_miss_taunts_and_fires_without_choreography():
+    em = _em(reduce_motion=True)
+    fired = []
+    em.miss(now_ms=0, attacker_type="pawn", from_sq=Square(6, 4),
+            victim_sq=Square(5, 4), cell_size=80, on_fire=lambda: fired.append(1))
+    assert em.captures == [], "no gun choreography under reduce-motion"
+    assert fired == [1]
+    assert len(em.callouts) == 1, "but the SKILL ISSUE taunt still shows"
+
+
+def test_miss_draw_paints_the_taunt_and_does_not_crash():
+    em = _em()
+    win = pg.display.get_surface()
+    win.fill((0, 0, 0))
+    em.miss(now_ms=0, attacker_type="queen", from_sq=Square(7, 3),
+            victim_sq=Square(0, 3), cell_size=80)
+    c = em.captures[0]
+    em.update(c["fire_at"])
+    em.draw_over(win, c["fire_at"] + 30)
+    assert any(win.get_at((x, y))[:3] != (0, 0, 0)
+               for x in range(280, 520, 4) for y in range(290, 390, 4)), \
+        "the SKILL ISSUE callout paints near the board centre"
 
 
 def test_piece_offset_jitters_a_wounded_piece():

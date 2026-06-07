@@ -370,6 +370,21 @@ def test_draw_frame_blocks_premove(setup):
     assert called[0] == 0
 
 
+def test_draw_frame_blocks_premove_during_capture_choreography():
+    app = _new_app()
+    app.board.last_animation_completed_at_ms = pg.time.get_ticks() - 10_000
+    app.board.effects.capture(
+        now_ms=pg.time.get_ticks(), attacker_type="queen",
+        attacker_surface=pg.Surface((40, 40), pg.SRCALPHA),
+        victim_surface=pg.Surface((40, 40), pg.SRCALPHA),
+        from_sq=Square(4, 3), victim_sq=Square(3, 3), to_sq=Square(3, 3), cell_size=80)
+    assert app.board.effects.captures, "a gun-fight choreography is in flight"
+    called = [0]
+    app.board.try_apply_next_premove = lambda: called.__setitem__(0, called[0] + 1) or False
+    app.draw_frame()
+    assert called[0] == 0, "premoves wait for the capture choreography to finish"
+
+
 def test_normal_move_then_premove_then_fire(board):
     board.handle_click(Square(6, 4))
     board.handle_click(Square(4, 4))

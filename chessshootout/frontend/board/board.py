@@ -76,6 +76,7 @@ class Board:
         self.announce_callback = announce_callback
         self.on_premove_queued = on_premove_queued
         self.skillcheck_gate = None
+        self.skillcheck_armed = None
         self.locked_targets = None
 
         self.rect = pg.Rect(0, 0, 0, 0)
@@ -98,6 +99,7 @@ class Board:
         self._sprite_geom = {}
         self.selected_square = None
         self.pending_promotion_square = None
+        self._promotion_from = None
         self.flipped = False
         self.animations = []
         self.effects = EffectManager()
@@ -165,7 +167,11 @@ class Board:
         if self.pending_promotion_square is None:
             return
         sq = self.pending_promotion_square
-        color = self.match.piece_at(sq).color
+        origin = self._promotion_from if self._promotion_from is not None else sq
+        pawn = self.match.piece_at(origin)
+        if pawn is None:
+            return
+        color = pawn.color
         opt = max(self.PROMOTION_OPTION_SIZE_MIN,
                   min(int(self.cell_size), self.PROMOTION_OPTION_SIZE_MAX))
         pad, gap, label_h = (self.PROMOTION_PANEL_PAD, self.PROMOTION_OPTION_GAP,
@@ -218,10 +224,30 @@ class Board:
         if self.pending_promotion_square is None:
             return
         sq = self.pending_promotion_square
+        if self._promotion_from is not None:
+            from_sq = self._promotion_from
+            self.pending_promotion_square = None
+            self._promotion_rects = {}
+            self._promotion_from = None
+            self._resolve_promotion_pick(from_sq, sq, ptype)
+            return
         self.match.promote(sq, ptype)
         self.pending_promotion_square = None
         self._promotion_rects = {}
         self._fire_move_landed()
+
+    def _resolve_promotion_pick(self, from_sq, to_sq, ptype):
+        if self.skillcheck_gate is not None and self.skillcheck_gate(from_sq, to_sq, ptype):
+            return
+        self.apply_gated_move(from_sq, to_sq, ptype)
+
+    def cancel_unapplied_promotion(self):
+        if self._promotion_from is None:
+            return False
+        self.pending_promotion_square = None
+        self._promotion_rects = {}
+        self._promotion_from = None
+        return True
 
     def pick_promotion_at(self, pos):
         if self.pending_promotion_square is None:
@@ -576,7 +602,7 @@ class Board:
             return
 
         now = pg.time.get_ticks()
-        hidden = {a.to_sq for a in self.animations}
+        hidden = {(a.from_sq if a.bump else a.to_sq) for a in self.animations}
         hidden |= self.effects.held_squares()
         if self.dragging_from is not None:
             hidden.add(self.dragging_from)
@@ -602,7 +628,7 @@ class Board:
         completed = []
         for a in self.animations:
             progress = a.progress(now)
-            eased = 1 - (1 - progress) ** 3
+            eased = math.sin(progress * math.pi) if a.bump else 1 - (1 - progress) ** 3
             fr = self._cell_rect(a.from_sq.row, a.from_sq.col)
             to = self._cell_rect(a.to_sq.row, a.to_sq.col)
             x = fr.x + (to.x - fr.x) * eased
@@ -624,7 +650,7 @@ class Board:
             return True
         return bool(self.animations)
 
-    def start_animation(self, from_sq, to_sq, piece, on_complete=None):
+    def start_animation(self, from_sq, to_sq, piece, on_complete=None, bump=False):
         self.animations.append(PieceAnimation(
             from_sq=from_sq,
             to_sq=to_sq,
@@ -632,6 +658,7 @@ class Board:
             start_ms=pg.time.get_ticks(),
             duration_ms=self.animation_duration_ms,
             on_complete=on_complete,
+            bump=bump,
         ))
 
     def cancel_animations(self):
@@ -1135,6 +1162,11 @@ class Board:
             self._queue_premove(from_sq, square, chain_from_piece)
             return
         if self._is_real_move_eligible(live_from_piece, current_turn, local_color):
+            if self._skillcheck_armed() and self._is_promotion_move(from_sq, square):
+                if self.locked_targets is not None and self.locked_targets(from_sq, square):
+                    return
+                self._begin_promotion_pick(from_sq, square)
+                return
             if self.skillcheck_gate is not None and self.skillcheck_gate(from_sq, square):
                 return
             result = self.match.try_move(from_sq, square)
@@ -1147,12 +1179,33 @@ class Board:
             return
         self._queue_premove(from_sq, square, spec_from_piece)
 
-    def apply_gated_move(self, from_sq, to_sq):
+    def apply_gated_move(self, from_sq, to_sq, promo_type=None):
         result = self.match.try_move(from_sq, to_sq)
         if not result.legal:
             return result
-        self._start_move_animation(from_sq, to_sq, result.promotion_required)
+        if result.promotion_required and promo_type is not None:
+            self.match.promote(to_sq, promo_type)
+            self._start_move_animation(from_sq, to_sq, promotion_required=False)
+        else:
+            self._start_move_animation(from_sq, to_sq, result.promotion_required)
         return result
+
+    def _skillcheck_armed(self):
+        return self.skillcheck_armed is not None and self.skillcheck_armed()
+
+    def _is_promotion_move(self, from_sq, to_sq):
+        piece = self.match.piece_at(from_sq)
+        if piece is None or piece.type != PieceType.PAWN:
+            return False
+        if to_sq.row not in (0, self.SIZE - 1):
+            return False
+        return to_sq in self.match.legal_moves_from(from_sq)
+
+    def _begin_promotion_pick(self, from_sq, to_sq):
+        self.selected_square = None
+        self._clear_drag_state()
+        self.pending_promotion_square = to_sq
+        self._promotion_from = from_sq
 
     def cell_rect(self, square):
         return self._cell_rect(square.row, square.col)
@@ -1234,15 +1287,21 @@ class Board:
                 or self.is_animating()):
             return False
         pm = self.premoves[0]
+        if self.skillcheck_gate is not None and self.skillcheck_gate(pm.from_sq, pm.to_sq):
+            self._consume_premove()
+            return False
         result = self.match.try_move(pm.from_sq, pm.to_sq)
         if not result.legal:
             self._clear_premoves()
             return False
+        self._consume_premove()
+        self._start_move_animation(pm.from_sq, pm.to_sq, result.promotion_required)
+        return True
+
+    def _consume_premove(self):
         self.premoves.pop(0)
         if not self.premoves:
             self.premove_color = None
-        self._start_move_animation(pm.from_sq, pm.to_sq, result.promotion_required)
-        return True
 
     def animate_remote_move(self, from_sq, to_sq):
         self._start_move_animation(from_sq, to_sq, promotion_required=False)
@@ -1329,20 +1388,22 @@ class Board:
             self._on_capture_fire(entry, color, victim_sq)
             return False
         self._clear_drag_state()
-        occupied = {Square(r, c) for r, c in product(range(self.SIZE), repeat=2)
-                    if self.match.piece_at(Square(r, c)) is not None}
         self.effects.capture(
             now_ms=pg.time.get_ticks(),
             attacker_type=moving_piece.type.value,
             attacker_surface=attacker, victim_surface=victim,
             from_sq=from_sq, victim_sq=victim_sq, to_sq=to_sq,
             cell_size=self.cell_size, power=self._capture_power(captured.type),
-            occupied=occupied,
+            occupied=self._occupied_squares(),
             on_fire=lambda: self._on_capture_fire(entry, color, victim_sq),
             on_slide=lambda: self.start_animation(from_sq, to_sq, moving_piece,
                                                   on_complete=on_complete),
         )
         return True
+
+    def _occupied_squares(self):
+        return {Square(r, c) for r, c in product(range(self.SIZE), repeat=2)
+                if self.match.piece_at(Square(r, c)) is not None}
 
     def _on_capture_fire(self, entry, color, victim_sq):
         key = self.effects.register_kill(color, victim_sq, self.cell_size, pg.time.get_ticks())
@@ -1350,6 +1411,38 @@ class Board:
             self.shot_callback(entry)
         if self.announce_callback is not None and key is not None:
             self.announce_callback(key)
+
+    def trigger_skillcheck_fail(self, from_sq, to_sq, on_fire=None):
+        piece = self.match.piece_at(from_sq)
+        if piece is None or self.cell_size <= 0:
+            return
+        victim_sq = self._capture_victim_square(piece, from_sq, to_sq)
+        if victim_sq is None:
+            self._start_bump_animation(from_sq, to_sq, piece)
+            return
+        self.effects.configure(env.get_reduce_motion(), env.get_effect_intensity())
+        victim = self.match.piece_at(victim_sq)
+        power = self._capture_power(victim.type) if victim is not None else "med"
+        fire_cb = (lambda: on_fire(piece.type)) if on_fire is not None else None
+        self.effects.miss(
+            now_ms=pg.time.get_ticks(),
+            attacker_type=piece.type.value,
+            from_sq=from_sq, victim_sq=victim_sq,
+            cell_size=self.cell_size, power=power,
+            occupied=self._occupied_squares(), on_fire=fire_cb)
+
+    def _capture_victim_square(self, piece, from_sq, to_sq):
+        if self.match.piece_at(to_sq) is not None:
+            return to_sq
+        if piece.type == PieceType.PAWN and from_sq.col != to_sq.col:
+            return Square(from_sq.row, to_sq.col)
+        return None
+
+    def _start_bump_animation(self, from_sq, to_sq, piece):
+        if env.get_reduce_motion():
+            return
+        self.cancel_animations()
+        self.start_animation(from_sq, to_sq, piece, bump=True)
 
     def show_surrender_flag(self, color):
         if self.cell_size <= 0:

@@ -16,6 +16,7 @@ import pytest
 
 from chessshootout.backend.pieces import Piece, PieceType, PieceColor
 from chessshootout.backend.utils import Square
+from chessshootout.domain.premoves import Premove
 from chessshootout.frontend.frontend import Frontend
 from chessshootout.frontend.skillcheck.overlay import SkillCheckOverlay
 from chessshootout.frontend.skillcheck.registry import build_controller
@@ -201,6 +202,293 @@ def test_failed_skillcheck_locks_move():
     assert app.skillcheck.is_locked(frm, to) is True
     assert app._skillcheck_gate(frm, to) is True
     assert app.skillcheck_overlay.is_active() is False
+
+
+def test_failed_skillcheck_fires_the_miss_fx():
+    app = Frontend(1100, 800)
+    _start_local(app, "shootout")
+    frm, to = _set_queen_takes_pawn(app)
+    app._on_skillcheck_done((frm, to), False)
+    fx = app.board.effects
+    fired = any(c.get("miss") for c in fx.captures) or bool(fx.callouts)
+    assert fired, "a failed skill-check fires the gun-and-miss FX"
+    assert fx.held_squares() == set(), "the victim stays on the board after a miss"
+
+
+def _shootout_with_wheel(app):
+    frm, to = _set_queen_takes_pawn(app)
+    app.skillcheck.reset(enabled=True, seed=_wheel_seed(app.match.backend, frm, to))
+    return frm, to
+
+
+def test_premoved_capture_defers_into_the_skillcheck():
+    app = Frontend(1100, 800)
+    _start_local(app, "shootout")
+    frm, to = _shootout_with_wheel(app)
+    app.board.premoves = [Premove(frm, to, app.match.piece_at(frm))]
+    app.board.premove_color = app.match.current_turn()
+    fired = app.board.try_apply_next_premove()
+    assert fired is False, "a premove that triggers a skill-check does not apply silently"
+    assert app.skillcheck_overlay.is_active() is True, "it defers into the wheel overlay"
+    assert app.board.premoves == [], "the lone premove is consumed into the skill-check"
+    assert len(app.match.move_history) == 0, "no ply lands until the skill-check resolves"
+
+
+def test_premove_chain_survives_a_won_skillcheck():
+    app = Frontend(1100, 800)
+    _start_local(app, "shootout")
+    frm, to = _shootout_with_wheel(app)
+    follow = Premove(Square(7, 4), Square(6, 4), app.match.piece_at(Square(7, 4)))
+    app.board.premoves = [Premove(frm, to, app.match.piece_at(frm)), follow]
+    app.board.premove_color = app.match.current_turn()
+    app.board.try_apply_next_premove()
+    assert app.skillcheck_overlay.is_active() is True
+    assert app.board.premoves == [follow], "the rest of the chain survives the deferral"
+    app._on_skillcheck_done((frm, to), True)
+    assert len(app.match.move_history) == 1, "the won move lands"
+    assert app.board.premoves == [follow], "and the chain lives on for the next turn"
+
+
+def test_premove_chain_is_dropped_on_a_failed_skillcheck():
+    app = Frontend(1100, 800)
+    _start_local(app, "shootout")
+    frm, to = _shootout_with_wheel(app)
+    follow = Premove(Square(7, 4), Square(6, 4), app.match.piece_at(Square(7, 4)))
+    app.board.premoves = [Premove(frm, to, app.match.piece_at(frm)), follow]
+    app.board.premove_color = app.match.current_turn()
+    app.board.try_apply_next_premove()
+    assert app.board.premoves == [follow]
+    app._on_skillcheck_done((frm, to), False)
+    assert len(app.match.move_history) == 0, "the failed move does not land"
+    assert app.skillcheck.is_locked(frm, to) is True
+    assert app.board.premoves == [], "a failed skill-check drops the rest of the chain"
+
+
+def test_failed_click_move_skillcheck_keeps_opponents_premove():
+    app = Frontend(1100, 800)
+    _start_local(app, "shootout")
+    frm, to = _set_queen_takes_pawn(app)
+    opp = Premove(Square(0, 4), Square(0, 5), app.match.piece_at(Square(0, 4)))
+    app.board.premoves = [opp]
+    app.board.premove_color = PieceColor.BLACK
+    app._on_skillcheck_done((frm, to), False)
+    assert app.board.premoves == [opp], "a failed skill-check must not wipe the opponent's premove"
+    assert app.skillcheck.is_locked(frm, to) is True
+
+
+# ---- promotion: picker before the wheel ------------------------------------
+
+def _set_white_pawn_promo(app):
+    b = app.match.backend
+    b._reset_state()
+    b.state[7][4] = Piece(PieceType.KING, PieceColor.WHITE)
+    b.state[0][0] = Piece(PieceType.KING, PieceColor.BLACK)
+    b.state[1][4] = Piece(PieceType.PAWN, PieceColor.WHITE)
+    b.turn = PieceColor.WHITE
+    b.move_history = []
+    b.position_counts = Counter()
+    b.position_counts[b._position_key()] = 1
+    return Square(1, 4), Square(0, 4)
+
+
+def _promo_seed(backend, frm, to, want):
+    for i in range(8000):
+        seed = "p{}".format(i)
+        roll = ply_roll(seed, move_roll_key(0, frm, to))
+        if select_skillcheck(backend, frm, to, roll) == want:
+            return seed
+    raise AssertionError("no promo seed for {}".format(want))
+
+
+def test_shootout_promotion_shows_picker_before_applying():
+    app = Frontend(1100, 800)
+    _start_local(app, "shootout")
+    frm, to = _set_white_pawn_promo(app)
+    app.skillcheck.reset(enabled=True, seed="seed")
+    app.board.handle_click(frm)
+    app.board.handle_click(to)
+    assert app.board.pending_promotion_square == to, "the piece picker comes up first"
+    assert app.board._promotion_from == frm
+    assert app.match.piece_at(frm) is not None, "nothing is applied until a piece is chosen"
+    assert app.match.piece_at(to) is None
+
+
+def test_shootout_promotion_always_fires_the_wheel():
+    app = Frontend(1100, 800)
+    _start_local(app, "shootout")
+    frm, to = _set_white_pawn_promo(app)
+    app.skillcheck.reset(enabled=True, seed="anything")
+    app.board.handle_click(frm)
+    app.board.handle_click(to)
+    app.board.pick_promotion(PieceType.ROOK)
+    assert app.skillcheck_overlay.is_active() is True, "promotions are 100% wheel now"
+    assert len(app.match.move_history) == 0, "nothing applies until the wheel resolves"
+
+
+def test_failed_promotion_skillcheck_promotes_nothing():
+    app = Frontend(1100, 800)
+    _start_local(app, "shootout")
+    frm, to = _set_white_pawn_promo(app)
+    app.skillcheck.reset(enabled=True, seed=_promo_seed(app.match.backend, frm, to,
+                                                        SkillCheckKind.WHEEL))
+    app.board.handle_click(frm)
+    app.board.handle_click(to)
+    app.board.pick_promotion(PieceType.ROOK)
+    assert app.skillcheck_overlay.is_active() is True
+    app._on_skillcheck_done((frm, to, PieceType.ROOK), False)
+    assert app.match.piece_at(frm).type == PieceType.PAWN, "a failed wheel promotes to nothing"
+    assert app.match.piece_at(to) is None
+    assert app.skillcheck.is_locked(frm, to) is True
+
+
+def test_won_promotion_skillcheck_uses_the_chosen_piece():
+    app = Frontend(1100, 800)
+    _start_local(app, "shootout")
+    frm, to = _set_white_pawn_promo(app)
+    app.skillcheck.reset(enabled=True, seed=_promo_seed(app.match.backend, frm, to,
+                                                        SkillCheckKind.WHEEL))
+    app.board.handle_click(frm)
+    app.board.handle_click(to)
+    app.board.pick_promotion(PieceType.ROOK)
+    app._on_skillcheck_done((frm, to, PieceType.ROOK), True)
+    assert app.match.piece_at(to).type == PieceType.ROOK, "a won wheel promotes to the chosen piece"
+
+
+def test_casual_promotion_keeps_the_classic_apply_then_pick_flow():
+    app = Frontend(1100, 800)
+    _start_local(app, "casual")
+    frm, to = _set_white_pawn_promo(app)
+    app.board.handle_click(frm)
+    app.board.handle_click(to)
+    assert app.board._promotion_from is None, "casual never uses the pick-first flow"
+    assert app.match.piece_at(to) is not None, "the move is applied first, then the picker shows"
+    assert app.match.piece_at(frm) is None
+
+
+def test_wheel_period_scales_with_capture_material():
+    from chessshootout.skillcheck.wheel import WHEEL_PERIOD_MS
+    app = Frontend(1100, 800)
+    _start_local(app, "shootout")
+    b = app.match.backend
+    b._reset_state()
+    b.state[7][4] = Piece(PieceType.KING, PieceColor.WHITE)
+    b.state[0][0] = Piece(PieceType.KING, PieceColor.BLACK)
+    b.state[4][3] = Piece(PieceType.QUEEN, PieceColor.WHITE)
+    b.state[3][3] = Piece(PieceType.PAWN, PieceColor.BLACK)
+    qxp = app._wheel_period(Square(4, 3), Square(3, 3), None)
+    b.state[4][3] = Piece(PieceType.PAWN, PieceColor.WHITE)
+    b.state[3][2] = Piece(PieceType.QUEEN, PieceColor.BLACK)
+    pxq = app._wheel_period(Square(4, 3), Square(3, 2), None)
+    assert qxp < WHEEL_PERIOD_MS < pxq, "strong-eats-weak spins faster, weak-eats-strong slower"
+
+
+def test_promotion_wheel_period_uses_the_chosen_piece():
+    from chessshootout.skillcheck.wheel import period_for_diff
+    app = Frontend(1100, 800)
+    _start_local(app, "shootout")
+    frm, to = _set_white_pawn_promo(app)
+    queen = app._wheel_period(frm, to, PieceType.QUEEN)
+    knight = app._wheel_period(frm, to, PieceType.KNIGHT)
+    assert queen == pytest.approx(period_for_diff(9))
+    assert knight == pytest.approx(period_for_diff(3))
+    assert queen < knight, "promoting to a queen is the hardest (fastest) wheel"
+
+
+def test_failed_non_capturing_promotion_bumps_instead_of_shooting():
+    app = Frontend(1100, 800)
+    _start_local(app, "shootout")
+    frm, to = _set_white_pawn_promo(app)
+    app.board.trigger_skillcheck_fail(frm, to)
+    assert any(a.bump for a in app.board.animations), "a quiet promotion lunges and bumps back"
+    assert app.board.effects.captures == [], "and never fires the gun (no victim to shoot)"
+
+
+def test_failed_capture_still_fires_the_gun_miss_not_a_bump():
+    app = Frontend(1100, 800)
+    _start_local(app, "shootout")
+    frm, to = _set_queen_takes_pawn(app)
+    app.board.trigger_skillcheck_fail(frm, to)
+    assert app.board.effects.captures, "a failed capture still fires the gun"
+    assert not any(a.bump for a in app.board.animations), "no bump when there is a victim"
+
+
+# ---- lifecycle teardown (bug-hunt fixes) -----------------------------------
+
+def test_undo_clears_skillcheck_locks():
+    app = Frontend(1100, 800)
+    _start_local(app, "shootout")
+    app.skillcheck.lock(Square(4, 3), Square(3, 3))
+    assert len(app.skillcheck.locks) == 1
+    app._on_undo()
+    assert len(app.skillcheck.locks) == 0, "a stale lock must not survive an undo"
+
+
+def test_reset_to_new_game_tears_down_skillcheck_state():
+    app = Frontend(1100, 800)
+    _start_local(app, "shootout")
+    app.skillcheck.lock(Square(4, 3), Square(3, 3))
+    ctrl = WheelController(WheelChallenge.from_seed("x"), pg.Rect(0, 0, 80, 80), now_ms=0)
+    app.skillcheck_overlay.start(ctrl, (Square(4, 3), Square(3, 3)), lambda c, landed: None)
+    app._reset_to_new_game()
+    assert app.skillcheck_overlay.is_active() is False, "reset cancels any in-flight overlay"
+    assert len(app.skillcheck.locks) == 0, "reset clears the lock set"
+
+
+def test_game_over_cancels_active_wheel_without_firing_its_move():
+    app = Frontend(1100, 800)
+    _start_local(app, "shootout")
+    landed = []
+    ctrl = WheelController(WheelChallenge.from_seed("x"), pg.Rect(0, 0, 80, 80), now_ms=0)
+    app.skillcheck_overlay.start(ctrl, (Square(4, 3), Square(3, 3)),
+                                 lambda c, won: landed.append(won))
+    app.manual_result = "white_wins_by_resignation"
+    app.draw_frame()
+    assert app.skillcheck_overlay.is_active() is False, "the wheel is cancelled when the game ends"
+    assert landed == [], "its on_done never fires a stale move into the finished game"
+
+
+def test_skillcheck_miss_aims_at_the_en_passant_pawn():
+    app = Frontend(1100, 800)
+    _start_local(app, "shootout")
+    b = app.match.backend
+    b._reset_state()
+    b.state[7][4] = Piece(PieceType.KING, PieceColor.WHITE)
+    b.state[0][4] = Piece(PieceType.KING, PieceColor.BLACK)
+    b.state[3][4] = Piece(PieceType.PAWN, PieceColor.WHITE)
+    b.state[3][3] = Piece(PieceType.PAWN, PieceColor.BLACK)
+    b.turn = PieceColor.WHITE
+    app.board.trigger_skillcheck_fail(Square(3, 4), Square(2, 3))
+    caps = app.board.effects.captures
+    assert caps, "the miss FX scheduled a gun choreography"
+    assert caps[0]["victim_sq"] == Square(3, 3), "the gun aims at the EP pawn, not the empty cell"
+
+
+def test_wheel_relayouts_when_the_board_moves():
+    app = Frontend(1100, 800)
+    _start_local(app, "shootout")
+    to_sq = Square(3, 3)
+    ctrl = WheelController(WheelChallenge.from_seed("x"), app.board.cell_rect(to_sq), now_ms=0)
+    app.skillcheck_overlay.start(ctrl, (Square(4, 3), to_sq), lambda c, landed: None)
+    app._skillcheck_target = to_sq
+    before = ctrl.center
+    app.window = pg.Surface((1700, 1100))
+    app._compute_layout()
+    assert ctrl.center == app.board.cell_rect(to_sq).center, "the dial re-anchors to the square"
+    assert ctrl.center != before, "a resize actually moved it"
+
+
+def test_premoved_quiet_move_still_fires_normally_in_shootout():
+    app = Frontend(1100, 800)
+    _start_local(app, "shootout")
+    frm, to = _set_queen_takes_pawn(app)
+    app.skillcheck.reset(enabled=True, seed="seed")
+    quiet_from, quiet_to = Square(7, 4), Square(6, 4)
+    app.board.premoves = [Premove(quiet_from, quiet_to, app.match.piece_at(quiet_from))]
+    app.board.premove_color = app.match.current_turn()
+    fired = app.board.try_apply_next_premove()
+    assert fired is True, "a non-triggering premove applies as before"
+    assert app.skillcheck_overlay.is_active() is False
+    assert len(app.match.move_history) == 1
 
 
 def test_landed_ply_clears_locks():

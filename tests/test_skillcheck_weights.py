@@ -1,9 +1,9 @@
-"""Weighted skill-check selection. The seeded roll picks none/wheel/duel in the
-locked proportions per trigger: capture brackets keyed on capturer-vs-captured
-value (C>V 0/30/70, C==V 50/25/25, C<V 80/15/5), value-scaled checks
-(70% duel / 30% wheel of the fire chance), a 10% checkmate duel, and wheel-only
-promotion. Capture takes precedence over check/promotion, a forced move never
-fires, and the per-ply RNG is deterministic + uniform.
+"""Weighted skill-check selection. Every capture and promotion fires 100%: a
+capture rolls a flat 80% wheel / 20% duel, a non-capturing promotion is
+wheel-only. Checks/checkmates never fire. A forced move never fires, capture
+takes precedence over promotion, and the per-ply RNG is deterministic + uniform.
+Wheel DIFFICULTY (needle speed) scales with capturer-vs-victim material in
+chessshootout/skillcheck/wheel.py, NOT the selection odds.
 
 Distribution tests sweep evenly-spaced rolls (i+0.5)/n through the deterministic
 selector, so observed proportions equal the cumulative distribution exactly to
@@ -53,60 +53,31 @@ def test_capture_summary_reexports_shared_values():
     assert reexport is PIECE_VALUES
 
 
-# ---- capture brackets ------------------------------------------------------
+# ---- capture: flat 80% wheel / 20% duel ------------------------------------
 
-@pytest.mark.parametrize(
-    "capturer, captured, expected",
-    [
-        pytest.param(9, 1, weights.CAPTURE_GREATER, id="queen_takes_pawn_C>V"),
-        pytest.param(5, 3, weights.CAPTURE_GREATER, id="rook_takes_minor_C>V"),
-        pytest.param(3, 3, weights.CAPTURE_EQUAL, id="bishop_takes_bishop_C==V"),
-        pytest.param(5, 5, weights.CAPTURE_EQUAL, id="rook_takes_rook_C==V"),
-        pytest.param(1, 9, weights.CAPTURE_LESSER, id="pawn_takes_queen_C<V"),
-        pytest.param(3, 5, weights.CAPTURE_LESSER, id="minor_takes_rook_C<V"),
-    ],
-)
-def test_capture_bracket_distribution(capturer, captured, expected):
-    facts = TriggerFacts(is_capture=True, capturer_value=capturer, captured_value=captured)
-    assert_dist(sweep(facts), expected)
+def test_capture_shares_are_eighty_twenty():
+    assert weights.CAPTURE_WHEEL_SHARE == 0.80
+    assert weights.CAPTURE_DUEL_SHARE == 0.20
 
 
-def test_capture_greater_is_seventy_percent_duel():
-    assert weights.CAPTURE_GREATER == {NONE: 0.0, WHEEL: 0.30, DUEL: 0.70}
+@pytest.mark.parametrize("cap, vic", [(9, 1), (3, 3), (1, 9)])
+def test_capture_always_fires_flat_eighty_twenty(cap, vic):
+    facts = TriggerFacts(is_capture=True, capturer_value=cap, captured_value=vic)
+    assert_dist(sweep(facts), {NONE: 0.0, WHEEL: 0.80, DUEL: 0.20})
 
 
-def test_capture_equal_is_fifty_fifty_split():
-    assert weights.CAPTURE_EQUAL == {NONE: 0.50, WHEEL: 0.25, DUEL: 0.25}
+def test_material_does_not_change_the_selection_odds():
+    big = sweep(TriggerFacts(is_capture=True, capturer_value=9, captured_value=1))
+    small = sweep(TriggerFacts(is_capture=True, capturer_value=1, captured_value=9))
+    assert big == small, "material drives the needle SPEED, never which check fires"
 
 
-def test_capture_lesser_rarely_fires():
-    assert weights.CAPTURE_LESSER == {NONE: 0.80, WHEEL: 0.15, DUEL: 0.05}
-
-
-# ---- precedence: capture wins over check / checkmate / promotion ------------
-
-def test_capture_takes_precedence_over_check():
-    facts = TriggerFacts(
-        is_capture=True, capturer_value=9, captured_value=1,
-        is_check=True, checker_value=9,
-    )
-    assert_dist(sweep(facts), weights.CAPTURE_GREATER)
-
-
-def test_capture_takes_precedence_over_checkmate():
-    facts = TriggerFacts(
-        is_capture=True, capturer_value=3, captured_value=3,
-        is_check=True, is_checkmate=True, checker_value=3,
-    )
-    assert_dist(sweep(facts), weights.CAPTURE_EQUAL)
-
+# ---- precedence: capture wins over promotion -------------------------------
 
 def test_capture_takes_precedence_over_promotion():
     facts = TriggerFacts(
-        is_capture=True, capturer_value=1, captured_value=5,
-        is_promotion=True, promo_value=9,
-    )
-    assert_dist(sweep(facts), weights.CAPTURE_LESSER)
+        is_capture=True, capturer_value=1, captured_value=5, is_promotion=True)
+    assert_dist(sweep(facts), {NONE: 0.0, WHEEL: 0.80, DUEL: 0.20})
 
 
 # ---- forced-move guard -----------------------------------------------------
@@ -115,58 +86,19 @@ def test_capture_takes_precedence_over_promotion():
     "facts",
     [
         TriggerFacts(is_capture=True, capturer_value=9, captured_value=1, is_forced=True),
-        TriggerFacts(is_check=True, checker_value=9, is_forced=True),
-        TriggerFacts(is_checkmate=True, is_forced=True),
-        TriggerFacts(is_promotion=True, promo_value=9, is_forced=True),
+        TriggerFacts(is_promotion=True, is_forced=True),
+        TriggerFacts(is_forced=True),
     ],
 )
 def test_forced_move_never_fires(facts):
     assert_dist(sweep(facts), {NONE: 1.0})
 
 
-# ---- checks scale by checker value, duel-heavy -----------------------------
+# ---- promotion: wheel-only -------------------------------------------------
 
-@pytest.mark.parametrize(
-    "checker_value, fire",
-    [(1, 0.15), (3, 0.25), (5, 0.35), (9, 0.50)],
-)
-def test_check_distribution_value_scaled(checker_value, fire):
-    facts = TriggerFacts(is_check=True, checker_value=checker_value)
-    expected = {NONE: 1 - fire, WHEEL: fire * 0.30, DUEL: fire * 0.70}
-    assert_dist(sweep(facts), expected)
-
-
-def test_check_is_duel_heavy():
-    assert weights.CHECK_DUEL_SHARE > weights.CHECK_WHEEL_SHARE
-    assert weights.CHECK_DUEL_SHARE + weights.CHECK_WHEEL_SHARE == pytest.approx(1.0)
-
-
-def test_unknown_checker_value_never_fires():
-    facts = TriggerFacts(is_check=True, checker_value=0)
-    assert_dist(sweep(facts), {NONE: 1.0})
-
-
-# ---- checkmate: 10% duel, never wheel --------------------------------------
-
-def test_checkmate_distribution():
-    facts = TriggerFacts(is_checkmate=True, is_check=True, checker_value=9)
-    assert_dist(sweep(facts), {NONE: 0.90, WHEEL: 0.0, DUEL: 0.10})
-
-
-# ---- promotion: wheel only, by chosen piece --------------------------------
-
-@pytest.mark.parametrize(
-    "promo_value, fire",
-    [(9, 0.60), (5, 0.40), (3, 0.20)],
-)
-def test_promotion_distribution_wheel_only(promo_value, fire):
-    facts = TriggerFacts(is_promotion=True, promo_value=promo_value)
-    assert_dist(sweep(facts), {NONE: 1 - fire, WHEEL: fire, DUEL: 0.0})
-
-
-def test_promotion_never_duels():
-    for promo_value in (3, 5, 9):
-        assert weights.promotion_distribution(promo_value)[DUEL] == 0.0
+def test_non_capturing_promotion_is_wheel_only():
+    assert_dist(sweep(TriggerFacts(is_promotion=True)), {NONE: 0.0, WHEEL: 1.0, DUEL: 0.0})
+    assert weights.PROMOTION_FIRE[DUEL] == 0.0
 
 
 # ---- quiet (non-triggering) move -------------------------------------------
@@ -178,21 +110,13 @@ def test_quiet_move_never_fires():
 # ---- selector correctness --------------------------------------------------
 
 def test_every_distribution_sums_to_one():
-    dists = [
-        weights.CAPTURE_GREATER, weights.CAPTURE_EQUAL, weights.CAPTURE_LESSER,
-        weights.checkmate_distribution(),
-        *[weights.check_distribution(v) for v in (1, 3, 5, 9)],
-        *[weights.promotion_distribution(v) for v in (3, 5, 9)],
-    ]
-    for dist in dists:
+    for dist in (weights.CAPTURE_FIRE, weights.PROMOTION_FIRE):
         assert sum(dist.values()) == pytest.approx(1.0)
 
 
-def test_roll_zero_picks_first_nonzero_kind():
-    equal = TriggerFacts(is_capture=True, capturer_value=3, captured_value=3)
-    assert weights.roll_skillcheck(equal, 0.0) == NONE
-    greater = TriggerFacts(is_capture=True, capturer_value=9, captured_value=1)
-    assert weights.roll_skillcheck(greater, 0.0) == WHEEL
+def test_roll_zero_picks_the_wheel_for_a_capture():
+    facts = TriggerFacts(is_capture=True, capturer_value=3, captured_value=3)
+    assert weights.roll_skillcheck(facts, 0.0) == WHEEL
 
 
 def test_roll_near_one_picks_last_kind():

@@ -7,6 +7,16 @@ WHEEL_ARC_SHRINK_PER_ROTATION = 10.0
 WHEEL_ARC_MIN_DEGREES = 5.0
 WHEEL_HUMAN_FLOOR_MS = 120.0
 WHEEL_RTT_CAP_MS = 200.0
+WHEEL_SPEED_PER_DIFF = 0.2
+WHEEL_SPEED_DIFF_DIVISOR = 4.0
+
+
+def needle_speed_mult(value_diff):
+    return 1.0 + WHEEL_SPEED_PER_DIFF * value_diff / WHEEL_SPEED_DIFF_DIVISOR
+
+
+def period_for_diff(value_diff):
+    return WHEEL_PERIOD_MS / needle_speed_mult(value_diff)
 
 
 def _seed_floats(seed):

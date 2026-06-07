@@ -13,6 +13,26 @@ from chessshootout.skillcheck import wheel
 from chessshootout.skillcheck.wheel import WheelChallenge
 
 
+# ---- needle speed scales with capturer-vs-victim material ------------------
+
+def test_needle_speed_mult_directions():
+    assert wheel.needle_speed_mult(0) == pytest.approx(1.0)
+    assert wheel.needle_speed_mult(8) == pytest.approx(1.4)
+    assert wheel.needle_speed_mult(-8) == pytest.approx(0.6)
+
+
+def test_strong_eats_weak_spins_faster_weak_eats_strong_slower():
+    base = wheel.WHEEL_PERIOD_MS
+    assert wheel.period_for_diff(8) < base, "queen takes pawn -> faster needle -> harder"
+    assert wheel.period_for_diff(-8) > base, "pawn takes queen -> slower needle -> easier"
+    assert wheel.period_for_diff(0) == pytest.approx(base)
+
+
+def test_needle_speed_stays_positive_across_chess_values():
+    for diff in range(-9, 10):
+        assert wheel.period_for_diff(diff) > 0.0
+
+
 def land_recv_ms(challenge, start_ms, half_rtt_ms=0.0, target_offset_deg=None):
     if target_offset_deg is None:
         target_offset_deg = challenge.arc_width_deg / 2.0

@@ -13,9 +13,5 @@ class TriggerFacts:
     is_capture: bool = False
     capturer_value: int = 0
     captured_value: int = 0
-    is_check: bool = False
-    is_checkmate: bool = False
-    checker_value: int = 0
     is_promotion: bool = False
-    promo_value: int = 0
     is_forced: bool = False
