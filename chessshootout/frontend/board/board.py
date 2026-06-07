@@ -764,7 +764,7 @@ class Board:
 
     def _draw_locked_marker(self, rect):
         s = int(self.cell_size)
-        radius = max(int(s * 0.30), 8)
+        radius = max(int(s * 0.16), 4)
         thickness = max(int(s * 0.05), 3)
 
         def render(surf, k):

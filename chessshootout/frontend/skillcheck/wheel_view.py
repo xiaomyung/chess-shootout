@@ -4,16 +4,15 @@ import pygame as pg
 
 from chessshootout.frontend.skillcheck.controller import SkillCheckController
 from chessshootout.frontend.visual.colors import Colors
+from chessshootout.frontend.visual.draw import rounded_rect_surface
 from chessshootout.frontend.visual.fonts import get_font
 from chessshootout.skillcheck.wheel import adjudicate
 
-WHEEL_DIAL_SCALE = 1.5
-WHEEL_RING_WIDTH = 5
-WHEEL_BAND_WIDTH = 13
-WHEEL_NEEDLE_WIDTH = 6
+WHEEL_DIAL_SCALE = 2.4
 WHEEL_RESULT_HOLD_MS = 380
-WHEEL_DEFAULT_DEADLINE_MS = 60000
-_ARC_STEPS = 48
+WHEEL_TIME_LIMIT_MS = 15000
+WHEEL_DEFAULT_DEADLINE_MS = WHEEL_TIME_LIMIT_MS
+_ARC_STEPS = 56
 
 
 def _rim_point(cx, cy, radius, deg):
@@ -51,13 +50,17 @@ class WheelController(SkillCheckController):
     def __init__(self, challenge, cell_rect, now_ms, deadline_ms=WHEEL_DEFAULT_DEADLINE_MS):
         self.challenge = challenge
         self.center = cell_rect.center
-        self.radius = max(30, int(cell_rect.width * WHEEL_DIAL_SCALE * 0.5))
+        self.radius = max(44, int(cell_rect.width * WHEEL_DIAL_SCALE * 0.5))
+        self.ring_w = max(4, int(self.radius * 0.07))
+        self.band_w = max(10, int(self.radius * 0.17))
+        self.needle_w = max(6, int(self.radius * 0.09))
+        self.hub_r = max(5, int(self.radius * 0.07))
         self.start_ms = now_ms
         self._now = now_ms
         self.deadline_ms = deadline_ms
         self._committed_at = None
         self._landed = None
-        self._hint_font = get_font(max(11, cell_rect.width // 6), bold=True)
+        self._hint_font = get_font(max(13, int(self.radius * 0.20)), bold=True)
 
     def handle_event(self, event):
         if self._committed_at is not None:
@@ -98,29 +101,49 @@ class WheelController(SkillCheckController):
     def draw(self, window):
         cx, cy = self.center
         radius = self.radius
-        size = radius * 2 + 10
-        disc = pg.Surface((size, size), pg.SRCALPHA)
-        pg.draw.circle(disc, pg.Color(Colors.bg + "ea"), (size // 2, size // 2), radius + 4)
-        window.blit(disc, (cx - size // 2, cy - size // 2))
-        pg.draw.circle(window, pg.Color(Colors.border_strong), (cx, cy), radius, WHEEL_RING_WIDTH)
-
         elapsed = self._frozen_elapsed()
+        outer = radius + 2 * self.ring_w + 6
+        size = outer * 2 + 8
+        disc = pg.Surface((size, size), pg.SRCALPHA)
+        pg.draw.circle(disc, pg.Color(Colors.bg + "ea"), (size // 2, size // 2), radius + 5)
+        window.blit(disc, (cx - size // 2, cy - size // 2))
+        pg.draw.circle(window, pg.Color(Colors.border_strong), (cx, cy), radius, self.ring_w)
+
+        if self._committed_at is None and self.deadline_ms > 0:
+            remaining = max(0.0, 1.0 - elapsed / self.deadline_ms)
+            if remaining > 0.0:
+                timer_color = Colors.loss if remaining <= 0.25 else Colors.amber
+                timer = _band_polygon(cx, cy, radius + self.ring_w + 2,
+                                      radius + 2 * self.ring_w + 2, 0.0, remaining * 360.0)
+                pg.draw.polygon(window, pg.Color(timer_color), timer)
+
         arc_width = self.challenge.arc_width_at(elapsed)
         arc_color = Colors.accent
         if self._committed_at is not None:
             arc_color = Colors.win if self._landed else Colors.loss
         band = _band_polygon(
-            cx, cy, radius - WHEEL_BAND_WIDTH, radius,
+            cx, cy, radius - self.band_w, radius,
             self.challenge.arc_start_deg,
             self.challenge.arc_start_deg + arc_width,
         )
         pg.draw.polygon(window, pg.Color(arc_color), band)
 
         needle = _needle_polygon(cx, cy, self.challenge.needle_deg(elapsed),
-                                 radius - 4, WHEEL_NEEDLE_WIDTH)
+                                 radius - self.ring_w - 2, self.needle_w)
         pg.draw.polygon(window, pg.Color(Colors.text), needle)
-        pg.draw.circle(window, pg.Color(Colors.text), (cx, cy), WHEEL_NEEDLE_WIDTH // 2 + 1)
+        pg.draw.circle(window, pg.Color(Colors.text), (cx, cy), self.hub_r)
 
         if self._committed_at is None:
-            hint = self._hint_font.render("SPACE / CLICK", True, pg.Color(Colors.text_dim))
-            window.blit(hint, hint.get_rect(center=(cx, cy + radius + 14)))
+            self._draw_hint_bubble(window, cx, cy + radius + 6)
+
+    def _draw_hint_bubble(self, window, cx, top):
+        label = self._hint_font.render("SPACE / CLICK", True, pg.Color(Colors.text))
+        pad_x, pad_y = 12, 6
+        bubble_w = label.get_width() + pad_x * 2
+        bubble_h = label.get_height() + pad_y * 2
+        bubble = rounded_rect_surface((bubble_w, bubble_h), bubble_h // 2,
+                                      Colors.surface_raised, border=Colors.border_strong,
+                                      border_width=1)
+        left = cx - bubble_w // 2
+        window.blit(bubble, (left, top))
+        window.blit(label, (left + pad_x, top + pad_y))
