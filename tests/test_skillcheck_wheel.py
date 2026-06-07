@@ -119,7 +119,7 @@ def test_arc_shrinks_each_rotation_to_a_floor():
 
 
 def test_needle_period_is_faster():
-    assert wheel.WHEEL_PERIOD_MS == 880.0
+    assert wheel.WHEEL_PERIOD_MS == 800.0
 
 
 def test_same_needle_angle_misses_after_the_arc_shrinks():
