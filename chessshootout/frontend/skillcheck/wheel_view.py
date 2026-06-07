@@ -8,7 +8,7 @@ from chessshootout.frontend.visual.draw import rounded_rect_surface
 from chessshootout.frontend.visual.fonts import get_font
 from chessshootout.skillcheck.wheel import adjudicate
 
-WHEEL_DIAL_SCALE = 2.4
+WHEEL_DIAL_SCALE = 1.0
 WHEEL_RESULT_HOLD_MS = 380
 WHEEL_TIME_LIMIT_MS = 15000
 WHEEL_DEFAULT_DEADLINE_MS = WHEEL_TIME_LIMIT_MS
@@ -50,7 +50,7 @@ class WheelController(SkillCheckController):
     def __init__(self, challenge, cell_rect, now_ms, deadline_ms=WHEEL_DEFAULT_DEADLINE_MS):
         self.challenge = challenge
         self.center = cell_rect.center
-        self.radius = max(44, int(cell_rect.width * WHEEL_DIAL_SCALE * 0.5))
+        self.radius = max(24, int(cell_rect.width * WHEEL_DIAL_SCALE * 0.5))
         self.ring_w = max(4, int(self.radius * 0.07))
         self.band_w = max(10, int(self.radius * 0.17))
         self.needle_w = max(6, int(self.radius * 0.09))
@@ -102,10 +102,10 @@ class WheelController(SkillCheckController):
         cx, cy = self.center
         radius = self.radius
         elapsed = self._frozen_elapsed()
-        outer = radius + 2 * self.ring_w + 6
-        size = outer * 2 + 8
+        timer_outer = radius + self.ring_w + 3
+        size = timer_outer * 2 + 8
         disc = pg.Surface((size, size), pg.SRCALPHA)
-        pg.draw.circle(disc, pg.Color(Colors.bg + "ea"), (size // 2, size // 2), radius + 5)
+        pg.draw.circle(disc, pg.Color(Colors.bg + "ea"), (size // 2, size // 2), radius + 4)
         window.blit(disc, (cx - size // 2, cy - size // 2))
         pg.draw.circle(window, pg.Color(Colors.border_strong), (cx, cy), radius, self.ring_w)
 
@@ -113,8 +113,7 @@ class WheelController(SkillCheckController):
             remaining = max(0.0, 1.0 - elapsed / self.deadline_ms)
             if remaining > 0.0:
                 timer_color = Colors.loss if remaining <= 0.25 else Colors.amber
-                timer = _band_polygon(cx, cy, radius + self.ring_w + 2,
-                                      radius + 2 * self.ring_w + 2, 0.0, remaining * 360.0)
+                timer = _band_polygon(cx, cy, radius + 3, timer_outer, 0.0, remaining * 360.0)
                 pg.draw.polygon(window, pg.Color(timer_color), timer)
 
         arc_width = self.challenge.arc_width_at(elapsed)
@@ -134,7 +133,7 @@ class WheelController(SkillCheckController):
         pg.draw.circle(window, pg.Color(Colors.text), (cx, cy), self.hub_r)
 
         if self._committed_at is None:
-            self._draw_hint_bubble(window, cx, cy + radius + 6)
+            self._draw_hint_bubble(window, cx, cy + timer_outer + 10)
 
     def _draw_hint_bubble(self, window, cx, top):
         label = self._hint_font.render("SPACE / CLICK", True, pg.Color(Colors.text))
