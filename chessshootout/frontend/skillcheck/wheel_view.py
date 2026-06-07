@@ -10,7 +10,7 @@ from chessshootout.skillcheck.wheel import adjudicate
 WHEEL_DIAL_SCALE = 1.5
 WHEEL_RING_WIDTH = 5
 WHEEL_BAND_WIDTH = 13
-WHEEL_NEEDLE_WIDTH = 4
+WHEEL_NEEDLE_WIDTH = 6
 WHEEL_RESULT_HOLD_MS = 380
 WHEEL_DEFAULT_DEADLINE_MS = 60000
 _ARC_STEPS = 48
@@ -30,6 +30,20 @@ def _band_polygon(cx, cy, inner, outer, deg_from, deg_to):
         deg = deg_to - (deg_to - deg_from) * i / _ARC_STEPS
         points.append(_rim_point(cx, cy, inner, deg))
     return points
+
+
+def _needle_polygon(cx, cy, deg, length, width):
+    angle = math.radians(deg - 90.0)
+    dx, dy = math.cos(angle), math.sin(angle)
+    px, py = -dy, dx
+    half = width / 2.0
+    tip_x, tip_y = cx + dx * length, cy + dy * length
+    return [
+        (cx + px * half, cy + py * half),
+        (tip_x + px * half, tip_y + py * half),
+        (tip_x - px * half, tip_y - py * half),
+        (cx - px * half, cy - py * half),
+    ]
 
 
 class WheelController(SkillCheckController):
@@ -77,9 +91,9 @@ class WheelController(SkillCheckController):
         self._landed = landed
         self._committed_at = self._now
 
-    def _needle_deg(self):
+    def _frozen_elapsed(self):
         frozen = self._committed_at if self._committed_at is not None else self._now
-        return self.challenge.needle_deg(frozen - self.start_ms)
+        return frozen - self.start_ms
 
     def draw(self, window):
         cx, cy = self.center
@@ -90,20 +104,23 @@ class WheelController(SkillCheckController):
         window.blit(disc, (cx - size // 2, cy - size // 2))
         pg.draw.circle(window, pg.Color(Colors.border_strong), (cx, cy), radius, WHEEL_RING_WIDTH)
 
+        elapsed = self._frozen_elapsed()
+        arc_width = self.challenge.arc_width_at(elapsed)
         arc_color = Colors.accent
         if self._committed_at is not None:
             arc_color = Colors.win if self._landed else Colors.loss
         band = _band_polygon(
             cx, cy, radius - WHEEL_BAND_WIDTH, radius,
             self.challenge.arc_start_deg,
-            self.challenge.arc_start_deg + self.challenge.arc_width_deg,
+            self.challenge.arc_start_deg + arc_width,
         )
         pg.draw.polygon(window, pg.Color(arc_color), band)
 
-        tip = _rim_point(cx, cy, radius - 4, self._needle_deg())
-        pg.draw.line(window, pg.Color(Colors.text), (cx, cy), tip, WHEEL_NEEDLE_WIDTH)
-        pg.draw.circle(window, pg.Color(Colors.text), (cx, cy), WHEEL_NEEDLE_WIDTH + 1)
+        needle = _needle_polygon(cx, cy, self.challenge.needle_deg(elapsed),
+                                 radius - 4, WHEEL_NEEDLE_WIDTH)
+        pg.draw.polygon(window, pg.Color(Colors.text), needle)
+        pg.draw.circle(window, pg.Color(Colors.text), (cx, cy), WHEEL_NEEDLE_WIDTH // 2 + 1)
 
         if self._committed_at is None:
-            hint = self._hint_font.render("TAP", True, pg.Color(Colors.text_dim))
+            hint = self._hint_font.render("SPACE / CLICK", True, pg.Color(Colors.text_dim))
             window.blit(hint, hint.get_rect(center=(cx, cy + radius + 14)))

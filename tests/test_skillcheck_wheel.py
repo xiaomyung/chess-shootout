@@ -101,10 +101,32 @@ def test_tap_outside_arc_fails():
 def test_half_rtt_compensation_credits_laggy_tap():
     ch = WheelChallenge.from_seed("room:42")
     half_rtt = 100.0
-    recv = land_recv_ms(ch, start_ms=0.0, half_rtt_ms=half_rtt,
-                        target_offset_deg=ch.arc_width_deg - 1.0)
+    recv = land_recv_ms(ch, start_ms=0.0, half_rtt_ms=half_rtt)
     assert wheel.adjudicate(ch, recv, start_ms=0.0, half_rtt_ms=half_rtt) is True
     assert wheel.adjudicate(ch, recv, start_ms=0.0, half_rtt_ms=0.0) is False
+
+
+# ---- sweet-spot shrinks each rotation --------------------------------------
+
+def test_arc_shrinks_each_rotation_to_a_floor():
+    ch = WheelChallenge.from_seed("shrink")
+    p = ch.period_ms
+    assert ch.arc_width_at(0.0) == 60.0
+    assert ch.arc_width_at(p) == 55.0
+    assert ch.arc_width_at(p * 2) == 50.0
+    assert ch.arc_width_at(p * 11) == wheel.WHEEL_ARC_MIN_DEGREES
+    assert ch.arc_width_at(p * 50) == wheel.WHEEL_ARC_MIN_DEGREES
+
+
+def test_needle_period_is_faster():
+    assert wheel.WHEEL_PERIOD_MS == 880.0
+
+
+def test_same_needle_angle_misses_after_the_arc_shrinks():
+    ch = WheelChallenge(arc_start_deg=0.0, arc_width_deg=60.0, period_ms=1000.0,
+                        start_angle_deg=0.0)
+    assert wheel.adjudicate(ch, recv_ms=161.0, start_ms=0.0) is True
+    assert wheel.adjudicate(ch, recv_ms=1161.0, start_ms=0.0) is False
 
 
 def test_rtt_compensation_is_capped():

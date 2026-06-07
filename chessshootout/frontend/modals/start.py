@@ -51,7 +51,7 @@ NATURAL_GHOST_H = 42
 NATURAL_RECON_H = 68
 NATURAL_SECTION_GAP = 15
 NATURAL_GAP_COUNT = 7
-MIN_MENU_SCALE = 0.5
+MIN_MENU_SCALE = 0.44
 
 WORDMARK_TOP = "CHESS"
 WORDMARK_BOTTOM = "SHOOTOUT"
@@ -218,13 +218,13 @@ class StartMenu:
                    + NATURAL_SECTION_GAP * (NATURAL_GAP_COUNT + recon))
         scale = min(1.0, max((rect.height - 44) / natural, MIN_MENU_SCALE))
         content_h = rect.height
-        for _ in range(8):
+        for _ in range(24):
             self._scale = scale
             self._apply_fonts(scale)
             content_h = self._layout(rect.y) - rect.y + int(22 * scale)
             if content_h <= rect.height or scale <= MIN_MENU_SCALE:
                 break
-            scale = max(MIN_MENU_SCALE, scale * rect.height / content_h)
+            scale = max(MIN_MENU_SCALE, scale * rect.height / content_h * 0.99)
 
         card_top = rect.y + max((rect.height - content_h) // 2, 0)
         if card_top != rect.y:
@@ -235,10 +235,10 @@ class StartMenu:
         self._build_footer()
 
     def _apply_fonts(self, s):
-        self.label_font = get_font(max(int(12 * s), 11), bold=True)
-        self.seg_font = get_font(max(int(14 * s), 12), bold=True)
-        self.chip_font = get_mono_font(max(int(14 * s), 12), bold=True)
-        self.button_font = get_font(max(int(14 * s), 12), bold=True)
+        self.label_font = get_font(max(int(12 * s), 12), bold=True)
+        self.seg_font = get_font(max(int(15 * s), 14), bold=True)
+        self.chip_font = get_mono_font(max(int(15 * s), 14), bold=True)
+        self.button_font = get_font(max(int(14 * s), 13), bold=True)
         self.wordmark_font = get_display_font(max(int(34 * s), 20))
         self.tagline_font = get_font(max(int(10 * s), 9), bold=True)
         self.start_font = get_display_font(max(int(22 * s), 15))
@@ -284,10 +284,11 @@ class StartMenu:
             self._recon_button_rect = pg.Rect(0, 0, 0, 0)
 
         self._nick_label_y = y
-        self._input_rect = pg.Rect(x, y + label_h + label_gap, w, int(42 * s))
+        self._input_rect = pg.Rect(x, y + label_h + label_gap, w, max(int(42 * s), 32))
         y = self._input_rect.bottom + gap
 
-        seg_h = int(44 * s)
+        seg_h = max(int(44 * s), 32)
+        chip_h = max(int(34 * s), 28)
         self._mode_label_pos = (x, y)
         self._mode_rect = pg.Rect(x, y + label_h + label_gap, w, seg_h)
         y = self._mode_rect.bottom + gap
@@ -301,18 +302,18 @@ class StartMenu:
         self._time_label_pos = (x, y)
         self._incr_label_pos = (x + col_w + col_gap, y)
         chips_y = y + label_h + label_gap
-        self._time_rect = pg.Rect(x, chips_y, col_w, int(34 * s))
-        self._incr_rect = pg.Rect(x + col_w + col_gap, chips_y, col_w, int(34 * s))
+        self._time_rect = pg.Rect(x, chips_y, col_w, chip_h)
+        self._incr_rect = pg.Rect(x + col_w + col_gap, chips_y, col_w, chip_h)
         y = self._time_rect.bottom + gap
 
         self._side_label_pos = (x, y)
         self._side_rect = pg.Rect(x, y + label_h + label_gap, w, seg_h)
         y = self._side_rect.bottom + gap
 
-        self._start_rect = pg.Rect(x, y, w, int(48 * s))
+        self._start_rect = pg.Rect(x, y, w, max(int(48 * s), 38))
         y = self._start_rect.bottom + gap
 
-        ghost_h = int(40 * s)
+        ghost_h = max(int(40 * s), 30)
         ghost_w = (w - col_gap) // 2
         self._history_rect = pg.Rect(x, y, ghost_w, ghost_h)
         self._fen_rect = pg.Rect(x + ghost_w + col_gap, y, w - ghost_w - col_gap, ghost_h)

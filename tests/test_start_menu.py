@@ -268,10 +268,11 @@ def test_side_cells_render_icons(menu):
 
 
 def test_card_fits_min_window_rect():
-    """At the 900x500 min-window card rect the whole card stays within bounds."""
+    """At the 900x600 min-window card rect (incl. the reconnect row) the whole
+    card stays within bounds with readable, floored control heights."""
     sm = StartMenu(pg.display.get_surface(), {"start_game": lambda c: None})
     sm.set_reconnect_available(True)
-    card = pg.Rect(0, 0, 440, 440)
+    card = pg.Rect(0, 0, 440, 518)
     sm.set_rect(card)
     sm.draw()
     assert sm._fen_rect.bottom <= card.bottom

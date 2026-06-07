@@ -14,6 +14,7 @@ HOTKEYS = [
     ("R", "Resign"),
     ("D", "Offer / accept draw"),
     ("Q  R  B  N", "Promotion picker (when shown)"),
+    ("Space / Click", "Fire the skill-check wheel (Shootout)"),
     ("← →", "Step through moves (review)"),
     ("Home", "Jump to first move (review)"),
     ("End", "Return to live play"),

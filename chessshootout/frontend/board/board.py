@@ -764,10 +764,12 @@ class Board:
 
     def _draw_locked_marker(self, rect):
         s = int(self.cell_size)
-        radius = max(int(s * 0.18), 5)
+        radius = max(int(s * 0.30), 8)
+        thickness = max(int(s * 0.05), 3)
 
         def render(surf, k):
-            pg.draw.circle(surf, Colors.text_muted, (s * k // 2, s * k // 2), radius * k)
+            pg.draw.circle(surf, Colors.text_muted, (s * k // 2, s * k // 2),
+                           radius * k, thickness * k)
 
         self.window.blit(supersample(s, render), rect.topleft)
 
