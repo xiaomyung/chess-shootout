@@ -18,7 +18,7 @@ HOTKEYS = [
     ("← →", "Step through moves (review)"),
     ("Home", "Jump to first move (review)"),
     ("End", "Return to live play"),
-    ("Esc", "Close window"),
+    ("Esc", "Back · close modal · resign · quit"),
 ]
 
 ROW_FONT_SIZE = 15

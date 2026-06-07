@@ -1079,6 +1079,57 @@ class Frontend(OnlineEventsMixin):
         self.match.undo()
         self.board.start_undo_animation(move)
 
+    def _handle_escape(self):
+        if self.skillcheck_overlay.is_active():
+            return
+        if self._dismiss_top_modal():
+            return
+        if self.mode == "menu":
+            if self.menu_page.page != PAGE_CARD:
+                self._on_menu_back()
+            else:
+                self._show_quit_modal()
+            return
+        if self.pgn_review or self.current_result() is not None:
+            self._on_back_to_menu()
+            return
+        self._on_resign()
+
+    def _dismiss_top_modal(self):
+        if self.options_modal.is_visible():
+            if self._on_close_settings() is not False:
+                self.options_modal.hide()
+            return True
+        for modal in (self.help_modal, self.fen_input_modal, self.country_picker,
+                      self.directory_browser):
+            if modal.is_visible():
+                modal.hide()
+                return True
+        if self.confirm_modal.is_visible():
+            self.confirm_modal.hide()
+            if self.mode == "menu":
+                self.start_menu.show()
+            return True
+        if self.wait_modal.is_visible():
+            self._on_online_cancel()
+            return True
+        if not self.offer_banners.is_empty():
+            self.offer_banners.clear()
+            return True
+        return False
+
+    def _show_quit_modal(self):
+        self.start_menu.hide()
+        self.confirm_modal.show(
+            "Quit the game?", on_yes=self._quit_app, on_no=self._cancel_quit,
+            yes_label="See ya!", no_label="Cancel")
+
+    def _quit_app(self):
+        self.running = False
+
+    def _cancel_quit(self):
+        self.start_menu.show()
+
     def _on_resign(self):
         if self.pgn_review or self.current_result() is not None:
             return
@@ -1952,7 +2003,7 @@ class Frontend(OnlineEventsMixin):
 
             elif event.type == pg.KEYDOWN:
                 if event.key == pg.K_ESCAPE:
-                    self.running = False
+                    self._handle_escape()
                     continue
                 if self.skillcheck_overlay.is_active():
                     self.skillcheck_overlay.handle_event(event)
