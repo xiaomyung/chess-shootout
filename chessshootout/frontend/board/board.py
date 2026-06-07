@@ -75,6 +75,8 @@ class Board:
         self.shot_callback = shot_callback
         self.announce_callback = announce_callback
         self.on_premove_queued = on_premove_queued
+        self.skillcheck_gate = None
+        self.locked_targets = None
 
         self.rect = pg.Rect(0, 0, 0, 0)
         self.frame_pad = 0
@@ -708,9 +710,18 @@ class Board:
             return []
         return self.match.legal_moves_from(self.selected_square)
 
+    def _is_target_locked(self, target):
+        return (self.locked_targets is not None
+                and self.selected_square is not None
+                and self.locked_targets(self.selected_square, target))
+
     def _draw_move_indicators(self):
         for target in self._selected_legal_targets():
-            if self.match.piece_at(target) is None:
+            if self.match.piece_at(target) is not None:
+                continue
+            if self._is_target_locked(target):
+                self._draw_locked_marker(self._cell_rect(target.row, target.col))
+            else:
                 self._draw_dot(self._cell_rect(target.row, target.col))
 
     def _draw_front_markers(self):
@@ -718,7 +729,10 @@ class Board:
         sel = self.selected_square
         for target in self._selected_legal_targets():
             if self.match.piece_at(target) is not None:
-                self._draw_capture_hitmarker(self._cell_rect(target.row, target.col))
+                if self._is_target_locked(target):
+                    self._draw_locked_marker(self._cell_rect(target.row, target.col))
+                else:
+                    self._draw_capture_hitmarker(self._cell_rect(target.row, target.col))
             elif ep is not None and target == ep and sel is not None:
                 mover = self.match.piece_at(sel)
                 if mover is not None and mover.type == PieceType.PAWN and target.col != sel.col:
@@ -745,6 +759,15 @@ class Board:
         def render(surf, k):
             pg.draw.circle(surf, Colors.move_indicator, (s * k // 2, s * k // 2),
                            radius * k, thickness * k)
+
+        self.window.blit(supersample(s, render), rect.topleft)
+
+    def _draw_locked_marker(self, rect):
+        s = int(self.cell_size)
+        radius = max(int(s * 0.18), 5)
+
+        def render(surf, k):
+            pg.draw.circle(surf, Colors.text_muted, (s * k // 2, s * k // 2), radius * k)
 
         self.window.blit(supersample(s, render), rect.topleft)
 
@@ -1110,6 +1133,8 @@ class Board:
             self._queue_premove(from_sq, square, chain_from_piece)
             return
         if self._is_real_move_eligible(live_from_piece, current_turn, local_color):
+            if self.skillcheck_gate is not None and self.skillcheck_gate(from_sq, square):
+                return
             result = self.match.try_move(from_sq, square)
             if not result.legal:
                 return
@@ -1119,6 +1144,16 @@ class Board:
         if spec_from_piece is None:
             return
         self._queue_premove(from_sq, square, spec_from_piece)
+
+    def apply_gated_move(self, from_sq, to_sq):
+        result = self.match.try_move(from_sq, to_sq)
+        if not result.legal:
+            return result
+        self._start_move_animation(from_sq, to_sq, result.promotion_required)
+        return result
+
+    def cell_rect(self, square):
+        return self._cell_rect(square.row, square.col)
 
     @staticmethod
     def _is_real_move_eligible(live_piece, current_turn, local_color):

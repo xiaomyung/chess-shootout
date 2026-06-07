@@ -17,6 +17,10 @@ from chessshootout.backend.fen import apply_fen
 from chessshootout.infra import countries, env
 from chessshootout.frontend.panels.audio import AudioPanel
 from chessshootout.frontend.board import Board
+from chessshootout.frontend.skillcheck.overlay import SkillCheckOverlay
+from chessshootout.frontend.skillcheck.registry import build_controller
+from chessshootout.skillcheck.coordinator import SkillCheckCoordinator
+from chessshootout.skillcheck.types import SkillCheckKind
 from chessshootout.frontend.menu.menu_battle import MenuBattle
 from chessshootout.domain.capture_summary import captured_by, material_advantage
 from chessshootout.domain.result_stats import compute_result_stats
@@ -249,6 +253,10 @@ class Frontend(OnlineEventsMixin):
                            on_premove_queued=self.sound_manager.play_premove_queued,
                            shot_callback=self._on_shot_fired,
                            announce_callback=self._on_kill_announced)
+        self.skillcheck = SkillCheckCoordinator()
+        self.skillcheck_overlay = SkillCheckOverlay()
+        self.board.skillcheck_gate = self._skillcheck_gate
+        self.board.locked_targets = self.skillcheck.is_locked
         self.result_menu = ResultMenu(self.window, {
             "new_game": self._on_new_game,
             "open_pgn": self._on_open_pgn,
@@ -785,6 +793,11 @@ class Frontend(OnlineEventsMixin):
             if config["time_minutes"] is not None else None
         )
 
+        variant = config.get("variant", "casual")
+        self.skillcheck.reset(
+            enabled=(variant == "shootout"),
+            seed="local-{}-{}".format(pg.time.get_ticks(), random.randint(0, 1 << 30)))
+
         self._ensure_local_session()
         self._reset_to_new_game()
         self.start_menu.hide()
@@ -1176,9 +1189,41 @@ class Frontend(OnlineEventsMixin):
             self.sound_manager.play_check()
             self.board.show_check_gun(entry)
         self._maybe_flash_increment_for(entry.move.piece.color)
+        self.skillcheck.clear_locks()
 
     def _on_shot_fired(self, entry):
         self.sound_manager.play_capture(entry.move.piece.type)
+
+    def _skillcheck_gate(self, from_sq, to_sq):
+        if self.skillcheck.is_locked(from_sq, to_sq) or self.skillcheck_overlay.is_active():
+            return True
+        kind = self.skillcheck.select(self.match.backend, from_sq, to_sq)
+        if kind == SkillCheckKind.NONE:
+            return False
+        seed = "{}:{}:{}{}{}{}:{}".format(
+            self.skillcheck.seed, len(self.match.move_history),
+            from_sq.row, from_sq.col, to_sq.row, to_sq.col, kind.value)
+        controller = build_controller(
+            kind, seed=seed, cell_rect=self.board.cell_rect(to_sq),
+            now_ms=pg.time.get_ticks(), deadline_ms=self._skillcheck_deadline_ms())
+        if controller is None:
+            return False
+        self.skillcheck_overlay.start(controller, (from_sq, to_sq), self._on_skillcheck_done)
+        return True
+
+    def _on_skillcheck_done(self, context, landed):
+        from_sq, to_sq = context
+        if landed:
+            self.board.apply_gated_move(from_sq, to_sq)
+        else:
+            self.skillcheck.lock(from_sq, to_sq)
+            self.board.selected_square = None
+
+    def _skillcheck_deadline_ms(self):
+        time_control = getattr(self, "_time_control", None)
+        if time_control is not None and time_control[0]:
+            return int(min(time_control[0] * 0.10, 60.0) * 1000)
+        return 60000
 
     def _on_kill_announced(self, key):
         if key == "hit":
@@ -1294,6 +1339,8 @@ class Frontend(OnlineEventsMixin):
         self.fen_input_modal.draw()
         self.confirm_modal.draw()
         self.toast.draw()
+        self.skillcheck_overlay.update(now)
+        self.skillcheck_overlay.draw(self.window)
         self._drain_online_inbound()
         self._update_online_phase()
 
@@ -1907,6 +1954,9 @@ class Frontend(OnlineEventsMixin):
                 if event.key == pg.K_ESCAPE:
                     self.running = False
                     continue
+                if self.skillcheck_overlay.is_active():
+                    self.skillcheck_overlay.handle_event(event)
+                    continue
                 if self.country_picker.is_visible():
                     self.country_picker.handle_key(event)
                     continue
@@ -1931,12 +1981,17 @@ class Frontend(OnlineEventsMixin):
                 self._handle_shortcut_key(event)
 
             elif event.type == pg.MOUSEBUTTONDOWN:
+                if self.skillcheck_overlay.is_active():
+                    self.skillcheck_overlay.handle_event(event)
+                    continue
                 if event.button == 1:
                     self._mouse_left_pressed(event.pos)
                 elif event.button == 3:
                     self._right_click_pressed(event.pos)
 
             elif event.type == pg.MOUSEBUTTONUP:
+                if self.skillcheck_overlay.is_active():
+                    continue
                 if event.button == 1:
                     self._mouse_left_released(event.pos)
                 elif event.button == 3:
