@@ -1096,10 +1096,6 @@ class Frontend(OnlineEventsMixin):
         self._on_resign()
 
     def _dismiss_top_modal(self):
-        if self.options_modal.is_visible():
-            if self._on_close_settings() is not False:
-                self.options_modal.hide()
-            return True
         for modal in (self.help_modal, self.fen_input_modal, self.country_picker,
                       self.directory_browser):
             if modal.is_visible():
@@ -1109,6 +1105,10 @@ class Frontend(OnlineEventsMixin):
             self.confirm_modal.hide()
             if self.mode == "menu":
                 self.start_menu.show()
+            return True
+        if self.options_modal.is_visible():
+            if self._on_close_settings() is not False:
+                self.options_modal.hide()
             return True
         if self.wait_modal.is_visible():
             self._on_online_cancel()
@@ -1121,7 +1121,7 @@ class Frontend(OnlineEventsMixin):
     def _show_quit_modal(self):
         self.start_menu.hide()
         self.confirm_modal.show(
-            "Quit the game?", on_yes=self._quit_app, on_no=self._cancel_quit,
+            "Leaving so soon?", on_yes=self._quit_app, on_no=self._cancel_quit,
             yes_label="See ya!", no_label="Cancel")
 
     def _quit_app(self):
