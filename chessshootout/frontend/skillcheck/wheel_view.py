@@ -12,6 +12,7 @@ WHEEL_DIAL_SCALE = 1.0
 WHEEL_RESULT_HOLD_MS = 380
 WHEEL_TIME_LIMIT_MS = 5000
 WHEEL_DEFAULT_DEADLINE_MS = WHEEL_TIME_LIMIT_MS
+WHEEL_TIMER_RAMP = 2.0
 _ARC_STEPS = 56
 
 
@@ -112,9 +113,10 @@ class WheelController(SkillCheckController):
         if self._committed_at is None and self.deadline_ms > 0:
             remaining = max(0.0, 1.0 - elapsed / self.deadline_ms)
             if remaining > 0.0:
-                timer_color = Colors.loss if remaining <= 0.25 else Colors.amber
+                blend = (1.0 - remaining) ** WHEEL_TIMER_RAMP
+                timer_color = pg.Color(Colors.amber).lerp(pg.Color(Colors.loss), blend)
                 timer = _band_polygon(cx, cy, radius + 3, timer_outer, 0.0, remaining * 360.0)
-                pg.draw.polygon(window, pg.Color(timer_color), timer)
+                pg.draw.polygon(window, timer_color, timer)
 
         arc_width = self.challenge.arc_width_at(elapsed)
         arc_color = Colors.accent
