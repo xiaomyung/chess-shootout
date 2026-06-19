@@ -91,6 +91,7 @@ def test_r_key_no_op_when_game_over():
 
 
 def _setup_promotion_pending(app, color):
+    app.skillcheck.enabled = False
     bk = app.backend
     bk.state = [[None] * 8 for _ in range(8)]
     bk.state[1 if color == PieceColor.WHITE else 6][0] = Piece(

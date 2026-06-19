@@ -191,7 +191,7 @@ def test_start_fires_callback_with_full_config(menu):
     sm.handle_click(sm._start_rect.center)
     assert len(called) == 1
     assert set(called[0]) == {"mode", "nickname", "time_minutes",
-                              "increment_seconds", "side", "variant"}
+                              "increment_seconds", "side"}
 
 
 @pytest.mark.parametrize("mode", [pytest.param("bot", id="bot"),

@@ -788,9 +788,8 @@ class Frontend(OnlineEventsMixin):
             if config["time_minutes"] is not None else None
         )
 
-        variant = config.get("variant", "casual")
         self.skillcheck.reset(
-            enabled=(variant == "shootout"),
+            enabled=True,
             seed="local-{}-{}".format(pg.time.get_ticks(), random.randint(0, 1 << 30)))
 
         self._ensure_local_session()

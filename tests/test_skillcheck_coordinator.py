@@ -19,7 +19,7 @@ def _queen_takes_pawn():
     })
 
 
-def test_casual_never_fires():
+def test_disabled_coordinator_never_fires():
     coord = SkillCheckCoordinator(enabled=False, seed="s")
     backend = _queen_takes_pawn()
     assert coord.select(backend, sq(4, 3), sq(3, 3)) == NONE

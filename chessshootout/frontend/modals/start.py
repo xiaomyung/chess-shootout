@@ -17,11 +17,6 @@ MODE_OPTIONS = [
     ("Online", ONLINE),
 ]
 
-VARIANT_OPTIONS = [
-    ("Shootout", "shootout"),
-    ("Casual", "casual"),
-]
-
 TIME_PAGES = [
     [("10", 10), ("15", 15), ("30", 30), ("∞", None)],
     [("1", 1), ("2", 2), ("3", 3), ("5", 5)],
@@ -43,14 +38,13 @@ TIME_PREV = "__prev__"
 NATURAL_BRAND_H = 124
 NATURAL_NICK_H = 64
 NATURAL_MODE_H = 66
-NATURAL_VARIANT_H = 66
 NATURAL_TIME_H = 54
 NATURAL_SIDE_H = 66
 NATURAL_START_H = 48
 NATURAL_GHOST_H = 42
 NATURAL_RECON_H = 68
 NATURAL_SECTION_GAP = 15
-NATURAL_GAP_COUNT = 7
+NATURAL_GAP_COUNT = 6
 MIN_MENU_SCALE = 0.44
 
 WORDMARK_TOP = "CHESS"
@@ -93,7 +87,6 @@ class StartMenu:
         self.selected_time_minutes = 10
         self.selected_increment_seconds = 5
         self.selected_side = "random"
-        self.selected_variant = "shootout"
         self.apply_default_time_settings()
         self._time_page = 0
 
@@ -127,8 +120,6 @@ class StartMenu:
         self._nick_label_y = 0
         self._mode_label_pos = (0, 0)
         self._mode_rect = pg.Rect(0, 0, 0, 0)
-        self._variant_label_pos = (0, 0)
-        self._variant_rect = pg.Rect(0, 0, 0, 0)
         self._time_label_pos = (0, 0)
         self._incr_label_pos = (0, 0)
         self._time_rect = pg.Rect(0, 0, 0, 0)
@@ -140,7 +131,6 @@ class StartMenu:
         self._fen_rect = pg.Rect(0, 0, 0, 0)
 
         self._mode_rects = {}
-        self._variant_rects = {}
         self._time_rects = {}
         self._incr_rects = {}
         self._side_rects = {}
@@ -206,13 +196,12 @@ class StartMenu:
             "time_minutes": self.selected_time_minutes,
             "increment_seconds": self.selected_increment_seconds,
             "side": self.selected_side,
-            "variant": self.selected_variant,
         }
 
     def set_rect(self, rect):
         self._avail = pg.Rect(rect)
         recon = 1 if self.reconnect_available else 0
-        natural = (NATURAL_BRAND_H + NATURAL_NICK_H + NATURAL_MODE_H + NATURAL_VARIANT_H
+        natural = (NATURAL_BRAND_H + NATURAL_NICK_H + NATURAL_MODE_H
                    + NATURAL_TIME_H + NATURAL_SIDE_H + NATURAL_START_H + NATURAL_GHOST_H
                    + recon * NATURAL_RECON_H
                    + NATURAL_SECTION_GAP * (NATURAL_GAP_COUNT + recon))
@@ -292,10 +281,6 @@ class StartMenu:
         self._mode_label_pos = (x, y)
         self._mode_rect = pg.Rect(x, y + label_h + label_gap, w, seg_h)
         y = self._mode_rect.bottom + gap
-
-        self._variant_label_pos = (x, y)
-        self._variant_rect = pg.Rect(x, y + label_h + label_gap, w, seg_h)
-        y = self._variant_rect.bottom + gap
 
         col_gap = int(12 * s)
         col_w = (w - col_gap) // 2
@@ -396,7 +381,7 @@ class StartMenu:
 
     def draw(self):
         if not self.visible:
-            self._mode_rects = self._variant_rects = {}
+            self._mode_rects = {}
             self._time_rects = self._incr_rects = self._side_rects = {}
             return
         r = self._outer
@@ -433,10 +418,6 @@ class StartMenu:
         self._draw_label("MODE", self._mode_label_pos)
         self._mode_rects = draw_segmented(self.window, self._mode_rect, MODE_OPTIONS,
                                           self.selected_mode, self.seg_font)
-
-        self._draw_label("VARIANT", self._variant_label_pos)
-        self._variant_rects = draw_segmented(self.window, self._variant_rect, VARIANT_OPTIONS,
-                                             self.selected_variant, self.seg_font)
 
         self._draw_label("TIME", self._time_label_pos)
         self._draw_label("INCREMENT", self._incr_label_pos)
@@ -597,10 +578,6 @@ class StartMenu:
         for key, br in self._mode_rects.items():
             if br.collidepoint(pos):
                 self.selected_mode = key
-                return True
-        for key, br in self._variant_rects.items():
-            if br.collidepoint(pos):
-                self.selected_variant = key
                 return True
         for key, br in self._time_rects.items():
             if br.collidepoint(pos):

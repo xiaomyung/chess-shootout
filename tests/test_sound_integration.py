@@ -190,6 +190,7 @@ def test_capture_plays_move_and_capture():
     keyed on the CAPTURING piece (queen), not the captured (pawn)."""
     app = make_app()
     app._on_start_game(base_config(time_minutes=None))
+    app.skillcheck.enabled = False
     setup_position(app, {
         Square(7, 4): Piece(PieceType.KING, PieceColor.WHITE),
         Square(0, 4): Piece(PieceType.KING, PieceColor.BLACK),
@@ -218,6 +219,7 @@ def test_capture_dispatches_capturing_piece_type(attacker_type, target_type):
     geometry; the target square is arranged so each attacker's capture is legal."""
     app = make_app()
     app._on_start_game(base_config(time_minutes=None))
+    app.skillcheck.enabled = False
     setup_position(app, {
         Square(7, 0): Piece(PieceType.KING, PieceColor.WHITE),
         Square(0, 0): Piece(PieceType.KING, PieceColor.BLACK),
@@ -385,6 +387,7 @@ def test_promotion_lands_no_sound_until_picker_chosen():
     no play_move while the picker is open, one play_move after queen is chosen."""
     app = make_app()
     app._on_start_game(base_config(time_minutes=None))
+    app.skillcheck.enabled = False
     setup_position(app, {
         Square(7, 4): Piece(PieceType.KING, PieceColor.WHITE),
         Square(0, 4): Piece(PieceType.KING, PieceColor.BLACK),

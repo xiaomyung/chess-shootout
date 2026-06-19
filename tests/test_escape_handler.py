@@ -36,7 +36,7 @@ def _app():
 
 def _start_game(app):
     app._on_start_game({"mode": "single_screen", "nickname": "alice", "side": "white",
-                        "time_minutes": 5, "increment_seconds": 0, "variant": "casual"})
+                        "time_minutes": 5, "increment_seconds": 0})
     app.draw_frame()
     return app
 

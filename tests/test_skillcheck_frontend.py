@@ -133,9 +133,9 @@ def test_registry_builds_wheel_controller():
 
 # ---- frontend gate integration ---------------------------------------------
 
-def _start_local(app, variant):
+def _start_local(app):
     app._on_start_game({"mode": "single_screen", "nickname": "alice", "side": "white",
-                        "time_minutes": 5, "increment_seconds": 0, "variant": variant})
+                        "time_minutes": 5, "increment_seconds": 0})
     app.draw_frame()
 
 
@@ -162,17 +162,9 @@ def _wheel_seed(backend, frm, to):
     raise AssertionError("no wheel seed")
 
 
-def test_casual_capture_does_not_gate():
-    app = Frontend(1100, 800)
-    _start_local(app, "casual")
-    frm, to = _set_queen_takes_pawn(app)
-    assert app._skillcheck_gate(frm, to) is False
-    assert app.skillcheck_overlay.is_active() is False
-
-
 def test_shootout_wheel_capture_defers_into_overlay():
     app = Frontend(1100, 800)
-    _start_local(app, "shootout")
+    _start_local(app)
     frm, to = _set_queen_takes_pawn(app)
     app.skillcheck.reset(enabled=True, seed=_wheel_seed(app.match.backend, frm, to))
     assert app._skillcheck_gate(frm, to) is True
@@ -181,7 +173,7 @@ def test_shootout_wheel_capture_defers_into_overlay():
 
 def test_won_skillcheck_applies_move():
     app = Frontend(1100, 800)
-    _start_local(app, "shootout")
+    _start_local(app)
     frm, to = _set_queen_takes_pawn(app)
     app._on_skillcheck_done((frm, to), True)
     assert len(app.match.move_history) == 1
@@ -190,7 +182,7 @@ def test_won_skillcheck_applies_move():
 
 def test_failed_skillcheck_locks_move():
     app = Frontend(1100, 800)
-    _start_local(app, "shootout")
+    _start_local(app)
     frm, to = _set_queen_takes_pawn(app)
     app._on_skillcheck_done((frm, to), False)
     assert len(app.match.move_history) == 0
@@ -201,7 +193,7 @@ def test_failed_skillcheck_locks_move():
 
 def test_failed_skillcheck_fires_the_miss_fx():
     app = Frontend(1100, 800)
-    _start_local(app, "shootout")
+    _start_local(app)
     frm, to = _set_queen_takes_pawn(app)
     app._on_skillcheck_done((frm, to), False)
     fx = app.board.effects
@@ -218,7 +210,7 @@ def _shootout_with_wheel(app):
 
 def test_premoved_capture_defers_into_the_skillcheck():
     app = Frontend(1100, 800)
-    _start_local(app, "shootout")
+    _start_local(app)
     frm, to = _shootout_with_wheel(app)
     app.board.premoves = [Premove(frm, to, app.match.piece_at(frm))]
     app.board.premove_color = app.match.current_turn()
@@ -231,7 +223,7 @@ def test_premoved_capture_defers_into_the_skillcheck():
 
 def test_premove_chain_survives_a_won_skillcheck():
     app = Frontend(1100, 800)
-    _start_local(app, "shootout")
+    _start_local(app)
     frm, to = _shootout_with_wheel(app)
     follow = Premove(Square(7, 4), Square(6, 4), app.match.piece_at(Square(7, 4)))
     app.board.premoves = [Premove(frm, to, app.match.piece_at(frm)), follow]
@@ -246,7 +238,7 @@ def test_premove_chain_survives_a_won_skillcheck():
 
 def test_premove_chain_is_dropped_on_a_failed_skillcheck():
     app = Frontend(1100, 800)
-    _start_local(app, "shootout")
+    _start_local(app)
     frm, to = _shootout_with_wheel(app)
     follow = Premove(Square(7, 4), Square(6, 4), app.match.piece_at(Square(7, 4)))
     app.board.premoves = [Premove(frm, to, app.match.piece_at(frm)), follow]
@@ -261,7 +253,7 @@ def test_premove_chain_is_dropped_on_a_failed_skillcheck():
 
 def test_failed_click_move_skillcheck_keeps_opponents_premove():
     app = Frontend(1100, 800)
-    _start_local(app, "shootout")
+    _start_local(app)
     frm, to = _set_queen_takes_pawn(app)
     opp = Premove(Square(0, 4), Square(0, 5), app.match.piece_at(Square(0, 4)))
     app.board.premoves = [opp]
@@ -297,7 +289,7 @@ def _promo_seed(backend, frm, to, want):
 
 def test_shootout_promotion_shows_picker_before_applying():
     app = Frontend(1100, 800)
-    _start_local(app, "shootout")
+    _start_local(app)
     frm, to = _set_white_pawn_promo(app)
     app.skillcheck.reset(enabled=True, seed="seed")
     app.board.handle_click(frm)
@@ -310,7 +302,7 @@ def test_shootout_promotion_shows_picker_before_applying():
 
 def test_shootout_promotion_always_fires_the_wheel():
     app = Frontend(1100, 800)
-    _start_local(app, "shootout")
+    _start_local(app)
     frm, to = _set_white_pawn_promo(app)
     app.skillcheck.reset(enabled=True, seed="anything")
     app.board.handle_click(frm)
@@ -322,7 +314,7 @@ def test_shootout_promotion_always_fires_the_wheel():
 
 def test_failed_promotion_skillcheck_promotes_nothing():
     app = Frontend(1100, 800)
-    _start_local(app, "shootout")
+    _start_local(app)
     frm, to = _set_white_pawn_promo(app)
     app.skillcheck.reset(enabled=True, seed=_promo_seed(app.match.backend, frm, to,
                                                         SkillCheckKind.WHEEL))
@@ -338,7 +330,7 @@ def test_failed_promotion_skillcheck_promotes_nothing():
 
 def test_won_promotion_skillcheck_uses_the_chosen_piece():
     app = Frontend(1100, 800)
-    _start_local(app, "shootout")
+    _start_local(app)
     frm, to = _set_white_pawn_promo(app)
     app.skillcheck.reset(enabled=True, seed=_promo_seed(app.match.backend, frm, to,
                                                         SkillCheckKind.WHEEL))
@@ -349,21 +341,10 @@ def test_won_promotion_skillcheck_uses_the_chosen_piece():
     assert app.match.piece_at(to).type == PieceType.ROOK, "a won wheel promotes to the chosen piece"
 
 
-def test_casual_promotion_keeps_the_classic_apply_then_pick_flow():
-    app = Frontend(1100, 800)
-    _start_local(app, "casual")
-    frm, to = _set_white_pawn_promo(app)
-    app.board.handle_click(frm)
-    app.board.handle_click(to)
-    assert app.board._promotion_from is None, "casual never uses the pick-first flow"
-    assert app.match.piece_at(to) is not None, "the move is applied first, then the picker shows"
-    assert app.match.piece_at(frm) is None
-
-
 def test_wheel_period_scales_with_capture_material():
     from chessshootout.skillcheck.wheel import WHEEL_PERIOD_MS
     app = Frontend(1100, 800)
-    _start_local(app, "shootout")
+    _start_local(app)
     b = app.match.backend
     b._reset_state()
     b.state[7][4] = Piece(PieceType.KING, PieceColor.WHITE)
@@ -380,7 +361,7 @@ def test_wheel_period_scales_with_capture_material():
 def test_promotion_wheel_period_uses_the_chosen_piece():
     from chessshootout.skillcheck.wheel import period_for_diff
     app = Frontend(1100, 800)
-    _start_local(app, "shootout")
+    _start_local(app)
     frm, to = _set_white_pawn_promo(app)
     queen = app._wheel_period(frm, to, PieceType.QUEEN)
     knight = app._wheel_period(frm, to, PieceType.KNIGHT)
@@ -391,7 +372,7 @@ def test_promotion_wheel_period_uses_the_chosen_piece():
 
 def test_failed_non_capturing_promotion_bumps_instead_of_shooting():
     app = Frontend(1100, 800)
-    _start_local(app, "shootout")
+    _start_local(app)
     frm, to = _set_white_pawn_promo(app)
     app.board.trigger_skillcheck_fail(frm, to)
     assert any(a.bump for a in app.board.animations), "a quiet promotion lunges and bumps back"
@@ -400,7 +381,7 @@ def test_failed_non_capturing_promotion_bumps_instead_of_shooting():
 
 def test_failed_capture_still_fires_the_gun_miss_not_a_bump():
     app = Frontend(1100, 800)
-    _start_local(app, "shootout")
+    _start_local(app)
     frm, to = _set_queen_takes_pawn(app)
     app.board.trigger_skillcheck_fail(frm, to)
     assert app.board.effects.captures, "a failed capture still fires the gun"
@@ -411,7 +392,7 @@ def test_failed_capture_still_fires_the_gun_miss_not_a_bump():
 
 def test_undo_clears_skillcheck_locks():
     app = Frontend(1100, 800)
-    _start_local(app, "shootout")
+    _start_local(app)
     app.skillcheck.lock(Square(4, 3), Square(3, 3))
     assert len(app.skillcheck.locks) == 1
     app._on_undo()
@@ -420,7 +401,7 @@ def test_undo_clears_skillcheck_locks():
 
 def test_reset_to_new_game_tears_down_skillcheck_state():
     app = Frontend(1100, 800)
-    _start_local(app, "shootout")
+    _start_local(app)
     app.skillcheck.lock(Square(4, 3), Square(3, 3))
     ctrl = WheelController(WheelChallenge.from_seed("x"), pg.Rect(0, 0, 80, 80), now_ms=0)
     app.skillcheck_overlay.start(ctrl, (Square(4, 3), Square(3, 3)), lambda c, landed: None)
@@ -431,7 +412,7 @@ def test_reset_to_new_game_tears_down_skillcheck_state():
 
 def test_game_over_cancels_active_wheel_without_firing_its_move():
     app = Frontend(1100, 800)
-    _start_local(app, "shootout")
+    _start_local(app)
     landed = []
     ctrl = WheelController(WheelChallenge.from_seed("x"), pg.Rect(0, 0, 80, 80), now_ms=0)
     app.skillcheck_overlay.start(ctrl, (Square(4, 3), Square(3, 3)),
@@ -444,7 +425,7 @@ def test_game_over_cancels_active_wheel_without_firing_its_move():
 
 def test_skillcheck_miss_aims_at_the_en_passant_pawn():
     app = Frontend(1100, 800)
-    _start_local(app, "shootout")
+    _start_local(app)
     b = app.match.backend
     b._reset_state()
     b.state[7][4] = Piece(PieceType.KING, PieceColor.WHITE)
@@ -460,7 +441,7 @@ def test_skillcheck_miss_aims_at_the_en_passant_pawn():
 
 def test_wheel_relayouts_when_the_board_moves():
     app = Frontend(1100, 800)
-    _start_local(app, "shootout")
+    _start_local(app)
     to_sq = Square(3, 3)
     ctrl = WheelController(WheelChallenge.from_seed("x"), app.board.cell_rect(to_sq), now_ms=0)
     app.skillcheck_overlay.start(ctrl, (Square(4, 3), to_sq), lambda c, landed: None)
@@ -474,7 +455,7 @@ def test_wheel_relayouts_when_the_board_moves():
 
 def test_premoved_quiet_move_still_fires_normally_in_shootout():
     app = Frontend(1100, 800)
-    _start_local(app, "shootout")
+    _start_local(app)
     frm, to = _set_queen_takes_pawn(app)
     app.skillcheck.reset(enabled=True, seed="seed")
     quiet_from, quiet_to = Square(7, 4), Square(6, 4)
@@ -488,7 +469,7 @@ def test_premoved_quiet_move_still_fires_normally_in_shootout():
 
 def test_landed_ply_clears_locks():
     app = Frontend(1100, 800)
-    _start_local(app, "shootout")
+    _start_local(app)
     frm, to = _set_queen_takes_pawn(app)
     app.skillcheck.lock(Square(7, 4), Square(6, 4))
     app.match.try_move(Square(4, 3), Square(3, 3))
@@ -498,7 +479,7 @@ def test_landed_ply_clears_locks():
 
 def test_board_marks_locked_target():
     app = Frontend(1100, 800)
-    _start_local(app, "shootout")
+    _start_local(app)
     frm, to = _set_queen_takes_pawn(app)
     app.skillcheck.lock(frm, to)
     app.board.selected_square = frm
