@@ -14,8 +14,6 @@ _KEY_LINE_RE = re.compile(r"^([A-Za-z_][A-Za-z0-9_]*)\s*=(.*)$")
 _DEFAULT_SERVER_ADDR = "localhost:8000"
 _DEFAULT_MASTER_VOLUME = 0.70
 _DEFAULT_MENU_VOLUME = 0.10
-_EFFECT_INTENSITIES = ("subtle", "balanced", "full")
-_DEFAULT_EFFECT_INTENSITY = "full"
 _THEMES = ("dark",)
 _DEFAULT_THEME = "dark"
 _DEFAULT_TIME_CONTROL = "10"
@@ -164,30 +162,6 @@ def get_menu_volume():
 
 def set_menu_volume(value):
     _set_volume("CHESS_MENU_VOLUME", value)
-
-
-def get_reduce_motion():
-    return os.environ.get("CHESS_REDUCE_MOTION") == "1"
-
-
-def set_reduce_motion(value):
-    serialized = "1" if value else "0"
-    os.environ["CHESS_REDUCE_MOTION"] = serialized
-    _persist("CHESS_REDUCE_MOTION", serialized)
-
-
-def get_effect_intensity():
-    value = os.environ.get("CHESS_EFFECT_INTENSITY")
-    if value in _EFFECT_INTENSITIES:
-        return value
-    return _DEFAULT_EFFECT_INTENSITY
-
-
-def set_effect_intensity(value):
-    if value not in _EFFECT_INTENSITIES:
-        value = _DEFAULT_EFFECT_INTENSITY
-    os.environ["CHESS_EFFECT_INTENSITY"] = value
-    _persist("CHESS_EFFECT_INTENSITY", value)
 
 
 def get_default_time_control():

@@ -498,7 +498,6 @@ class Frontend(OnlineEventsMixin):
             self.window, env.get_server_addr, placeholder="host or host:port")
         time_options = [(label, label) for label in env.TIME_CONTROL_VALUES]
         incr_options = [(label, label) for label in env.INCREMENT_VALUES]
-        intensity_options = [("Subtle", "subtle"), ("Balanced", "balanced"), ("Full", "full")]
         themes = [
             ("dark", "#7a818b", "#2f343b", False),
             ("wood", "#d8b483", "#8a5a3c", True),
@@ -518,13 +517,6 @@ class Frontend(OnlineEventsMixin):
                 ToggleRow("Mute all sound", "Silence every shot and callout",
                           lambda: not self.sound_manager.enabled,
                           lambda muted: self.sound_manager.set_enabled(not muted)),
-            ]),
-            ("Chaos", [
-                ToggleRow("Reduce motion", "Calm the shake, ragdolls and battle",
-                          env.get_reduce_motion, env.set_reduce_motion),
-                SegmentedRow("Effect intensity", "How loud the chaos gets",
-                             intensity_options, env.get_effect_intensity,
-                             env.set_effect_intensity),
             ]),
             ("Appearance", [
                 SwatchRow("Board theme", "More themes coming soon", themes,
@@ -1409,7 +1401,7 @@ class Frontend(OnlineEventsMixin):
                 self.menu_battle.begin_intro()
             self.menu_battle.set_avoid_rect(self.menu_page.avoid_rect())
             self.menu_battle.set_logo_rect(self.menu_page.logo_rect())
-            self.menu_battle.update(now, env.get_reduce_motion())
+            self.menu_battle.update(now)
             self.menu_battle.draw(self.window)
             self.menu_battle.draw_scrim(self.window)
         self._refresh_reconnect_button()

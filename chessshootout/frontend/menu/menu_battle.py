@@ -94,7 +94,6 @@ class MenuBattle:
         self.acc = {"qfire": 0.0, "talk": 1.5, "spawn": 0.0}
         self._last_ms = None
         self._initialized = False
-        self._reduced = False
         self._bg_cache = None
         self._scrim_cache = None
         self._queen_src = self._load_piece("queen", "white")
@@ -406,19 +405,11 @@ class MenuBattle:
         delta = (want - ent["aim"] + math.pi) % (2 * math.pi) - math.pi
         return abs(delta) < AIM_TOLERANCE
 
-    def update(self, now_ms, reduce_motion=False):
+    def update(self, now_ms):
         if self._last_ms is None:
             self._last_ms = now_ms
         dt = max(0.0, min(DT_MAX, (now_ms - self._last_ms) / 1000.0))
         self._last_ms = now_ms
-        if reduce_motion:
-            if not self._reduced:
-                self._suppress()
-            return
-        if self._reduced:
-            self._reduced = False
-            if self.rect.width > 0 and self.rect.height > 0:
-                self._spawn_initial()
         if self.queen is None:
             return
         if self._intro_active:
@@ -430,17 +421,6 @@ class MenuBattle:
         self._update_projectiles(dt, now_ms)
         self._update_drops(dt)
         self._prune(now_ms)
-
-    def _suppress(self):
-        self._reduced = True
-        self._intro_active = False
-        self._intro_start_ms = None
-        self._intro_land = None
-        self.queen = None
-        self.pawns = []
-        self.projectiles = []
-        self.particles = []
-        self.drops = []
 
     def _update_intro(self, dt, now_ms):
         if self._intro_start_ms is None:

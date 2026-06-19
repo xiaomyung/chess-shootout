@@ -28,11 +28,9 @@ MISS_HOLD_MS = 360
 BACK_OVERSHOOT = 1.70158
 
 SPARK_COUNT = 10
-SPARK_COUNT_RM = 4
 SMOKE_PUFFS = 3
 
 SHAKE_AMP = {"hard": 18, "med": 11, "soft": 6}
-INTENSITY_SCALE = {"subtle": 0.34, "balanced": 0.67, "full": 1.0}
 
 CALLOUT_LG_MS = 1150
 CALLOUT_XL_MS = 1500
@@ -99,13 +97,7 @@ class EffectManager:
         self._streak_color = None
         self._streak_count = 0
         self._first_blood_spent = False
-        self.reduce_motion = False
-        self.intensity = "full"
         self._shake = None
-
-    def configure(self, reduce_motion, intensity):
-        self.reduce_motion = bool(reduce_motion)
-        self.intensity = intensity if intensity in INTENSITY_SCALE else "full"
 
     def _ensure_art(self):
         if self._art is None:
@@ -154,9 +146,6 @@ class EffectManager:
     def _pick(self, seq):
         return seq[int(self.rng.random() * len(seq))]
 
-    def _count(self, n):
-        return max(1, int(round(n * INTENSITY_SCALE[self.intensity])))
-
     def _center(self, sq):
         return self.geom(sq)
 
@@ -187,7 +176,7 @@ class EffectManager:
                 on_fire=None, on_slide=None, occupied=None):
         gun = gunfx.PIECE_GUN.get(attacker_type, "revolver")
         weapon = self._weapon(gun, cell_size)
-        if self.reduce_motion or weapon is None:
+        if weapon is None:
             self._impact(now_ms, from_sq, victim_sq, victim_surface, cell_size)
             if on_fire is not None:
                 on_fire()
@@ -207,7 +196,7 @@ class EffectManager:
              power="med", on_fire=None, occupied=None):
         gun = gunfx.PIECE_GUN.get(attacker_type, "revolver")
         weapon = self._weapon(gun, cell_size)
-        if self.reduce_motion or weapon is None:
+        if weapon is None:
             self._skill_issue_callout(now_ms, cell_size)
             if on_fire is not None:
                 on_fire()
@@ -227,8 +216,6 @@ class EffectManager:
                       Colors.loss, Colors.loss_glow)
 
     def check(self, *, now_ms, attacker_type, king_sq, from_sq, cell_size):
-        if self.reduce_motion:
-            return
         self._king_shake = {"sq": king_sq, "start": now_ms, "dur": KING_SHAKE_MS,
                             "amp": max(int(cell_size * 0.05), 2)}
         gun = gunfx.PIECE_GUN.get(attacker_type, "revolver")
@@ -364,30 +351,27 @@ class EffectManager:
                                "start": now, "dur": BLOOD_MS})
         self.holes.append({"victim_sq": victim_sq, "cell": cell, "start": now,
                            "dur": HOLE_IN_MS + HOLE_HOLD_MS + HOLE_FADE_MS})
-        spark_n = SPARK_COUNT_RM if self.reduce_motion else self._count(SPARK_COUNT)
+        spark_n = SPARK_COUNT
         spark_size = max(int(cell * 0.06), 3)
         for _ in range(spark_n):
             self.particles.append({
                 "kind": "spark", "victim_sq": victim_sq, "ang": self._rnd(0, math.tau),
                 "dist": self._rnd(20, 70) * cell / 80.0, "size": spark_size,
                 "start": now, "dur": self._rnd(*SPARK_MS)})
-        if not self.reduce_motion:
-            for _ in range(SMOKE_PUFFS):
-                self.particles.append({
-                    "kind": "smoke", "victim_sq": victim_sq,
-                    "jx": self._rnd(-8, 8), "jy": self._rnd(-8, 8),
-                    "cell": cell, "start": now, "dur": self._rnd(*SMOKE_MS)})
-            if victim is not None:
-                aim = self._aim(from_sq, victim_sq)
-                self.particles.append({
-                    "kind": "ragdoll", "surf": victim, "victim_sq": victim_sq,
-                    "dir": 1 if math.cos(aim) >= 0 else -1,
-                    "start": now, "dur": RAGDOLL_MS})
+        for _ in range(SMOKE_PUFFS):
+            self.particles.append({
+                "kind": "smoke", "victim_sq": victim_sq,
+                "jx": self._rnd(-8, 8), "jy": self._rnd(-8, 8),
+                "cell": cell, "start": now, "dur": self._rnd(*SMOKE_MS)})
+        if victim is not None:
+            aim = self._aim(from_sq, victim_sq)
+            self.particles.append({
+                "kind": "ragdoll", "surf": victim, "victim_sq": victim_sq,
+                "dir": 1 if math.cos(aim) >= 0 else -1,
+                "start": now, "dur": RAGDOLL_MS})
 
     def trigger_shake(self, now, power):
-        if self.reduce_motion:
-            return
-        amp = SHAKE_AMP.get(power, 5) * INTENSITY_SCALE[self.intensity]
+        amp = SHAKE_AMP.get(power, 5)
         dur = SHAKE_HARD_MS if power == "hard" else SHAKE_SOFT_MS
         self._shake = {"start": now, "dur": dur, "amp": amp,
                        "seed": int(self.rng.random() * 1_000_000)}
@@ -481,7 +465,7 @@ class EffectManager:
         self.particles.append({"kind": "blood", "victim_sq": sq, "cell": cell,
                                "start": now, "dur": BLOOD_MS})
         spark_size = max(int(cell * 0.06), 3)
-        for _ in range(self._count(WOUND_SPARKS)):
+        for _ in range(WOUND_SPARKS):
             self.particles.append({
                 "kind": "spark", "victim_sq": sq, "ang": self._rnd(0, math.tau),
                 "dist": self._rnd(20, 70) * cell / 80.0, "size": spark_size,

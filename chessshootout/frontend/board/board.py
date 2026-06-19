@@ -5,11 +5,10 @@ import pygame as pg
 
 from chessshootout.backend.pseudo_legal import piece_can_pseudo_reach, king_square, checking_square
 from chessshootout.backend.utils import Square
-from chessshootout.infra import env
 from chessshootout.frontend.visual.animation import PieceAnimation
 from chessshootout.frontend.visual.colors import Colors
 from chessshootout.frontend.visual.draw import supersample
-from chessshootout.frontend.visual.effects import EffectManager, INTENSITY_SCALE
+from chessshootout.frontend.visual.effects import EffectManager
 from chessshootout.frontend.visual.icons import piece_png_path
 from chessshootout.domain.premoves import Premove, speculative_board
 from chessshootout.backend.pieces import PieceType, PieceColor, Piece, opponent_of
@@ -910,7 +909,6 @@ class Board:
             "last_cursor": pos,
             "last_tick": now,
             "lift": 0.0,
-            "reduced": env.get_reduce_motion(),
             "phase": "drag",
         }
 
@@ -935,9 +933,6 @@ class Board:
         d["entry"] += (1.0 - d["entry"]) * ae
         ef, cur, e = d["entry_from"], d["cursor"], d["entry"]
         d["anchor"] = (ef[0] + (cur[0] - ef[0]) * e, ef[1] + (cur[1] - ef[1]) * e)
-        if d["reduced"]:
-            d["last_cursor"] = d["cursor"]
-            return
 
         cursor = d["cursor"]
         last = d["last_cursor"]
@@ -956,7 +951,7 @@ class Board:
         rlx, rly = d["r_local"]
         rg = DRAG_RG_FRACTION * self.cell_size
         inertia = rg * rg + rlx * rlx + rly * rly
-        k_force = DRAG_K_FORCE * INTENSITY_SCALE.get(env.get_effect_intensity(), 1.0)
+        k_force = DRAG_K_FORCE
         n = max(1, math.ceil(dt / DRAG_SUBSTEP))
         h = dt / n
         theta = d["theta"]
@@ -992,8 +987,7 @@ class Board:
         d["theta_target"] = round(theta / (2 * math.pi)) * (2 * math.pi)
         d["settle_start_ms"] = now
         d["last_tick"] = now
-        dur = self.animation_duration_ms
-        d["settle_dur_ms"] = min(dur, 80) if d["reduced"] else dur
+        d["settle_dur_ms"] = self.animation_duration_ms
         d["on_settled"] = on_settled
 
     def _update_settle(self, d, now):
@@ -1381,7 +1375,6 @@ class Board:
         color = moving_piece.color.value
         victim_sq = (Square(from_sq.row, to_sq.col)
                      if entry.move.is_en_passant else to_sq)
-        self.effects.configure(env.get_reduce_motion(), env.get_effect_intensity())
         attacker = self.piece_images_scaled.get((moving_piece.type, moving_piece.color))
         victim = self.piece_images_scaled.get((captured.type, captured.color))
         if attacker is None or victim is None or self.cell_size <= 0:
@@ -1420,7 +1413,6 @@ class Board:
         if victim_sq is None:
             self._start_bump_animation(from_sq, to_sq, piece)
             return
-        self.effects.configure(env.get_reduce_motion(), env.get_effect_intensity())
         victim = self.match.piece_at(victim_sq)
         power = self._capture_power(victim.type) if victim is not None else "med"
         fire_cb = (lambda: on_fire(piece.type)) if on_fire is not None else None
@@ -1439,8 +1431,6 @@ class Board:
         return None
 
     def _start_bump_animation(self, from_sq, to_sq, piece):
-        if env.get_reduce_motion():
-            return
         self.cancel_animations()
         self.start_animation(from_sq, to_sq, piece, bump=True)
 
@@ -1452,7 +1442,6 @@ class Board:
             self.effects.raise_flag(king_sq, self.cell_size, pg.time.get_ticks())
 
     def show_checkmate_takeover(self, winner_label):
-        self.effects.configure(env.get_reduce_motion(), env.get_effect_intensity())
         now = pg.time.get_ticks()
         self.effects.start_takeover("CHECKMATE", winner_label, now)
         self.effects.trigger_shake(now, "hard")
@@ -1476,7 +1465,6 @@ class Board:
         checker = checking_square(self.match.state, king_sq, by_color)
         if checker is None:
             return
-        self.effects.configure(env.get_reduce_motion(), env.get_effect_intensity())
         self.effects.check(now_ms=pg.time.get_ticks(),
                            attacker_type=self.match.piece_at(checker).type.value,
                            king_sq=king_sq, from_sq=checker, cell_size=self.cell_size)

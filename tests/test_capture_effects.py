@@ -3,7 +3,7 @@
 Surfaces covered:
   * EffectManager (frontend/visual/effects.py) — the two-stage capture
     choreography (draw/aim -> fire -> travel -> impact), the board screen-shake
-    decay, the check gun-draw, reduce-motion / intensity gating, and the
+    decay, the check gun-draw, and the
     killstreak counter + announcer callouts (FIRST BLOOD -> DOUBLE..GODLIKE ->
     hit-word tags; same-side, resets on recapture). A fake `geom` resolver and an
     injected deterministic rng make every assertion reproducible across workers.
@@ -36,7 +36,7 @@ from chessshootout.frontend.frontend import Frontend
 from chessshootout.frontend.visual import gunfx
 from chessshootout.frontend.visual.effects import (
     AIM_MS, CALLOUT_LG_MS, CALLOUT_XL_MS, CHECK_DROP_MS, DRAW_MS, HIT_WORDS,
-    HOLE_FADE_MS, HOLE_HOLD_MS, HOLE_IN_MS, INTENSITY_SCALE, KING_SHAKE_MS,
+    HOLE_FADE_MS, HOLE_HOLD_MS, HOLE_IN_MS, KING_SHAKE_MS,
     MISS_HOLD_MS, PROJECTILE_MAX_MS, PROJECTILE_TRAVEL_MS, RECOIL_MS, SHAKE_AMP,
     SHAKE_HARD_MS, SHAKE_SOFT_MS, STREAK_LABELS, TAG_MS, TAKEOVER_PAUSE_MS,
     TAKEOVER_TOTAL_MS, EffectManager,
@@ -68,11 +68,10 @@ def _app():
     return app
 
 
-def _em(reduce_motion=False, intensity="full", seed=7):
+def _em(seed=7):
     em = EffectManager(rng=random.Random(seed))
     em.geom = lambda sq: (sq.col * 100 + 50, sq.row * 100 + 50)
     em.board_rect = pg.Rect(0, 0, 800, 800)
-    em.configure(reduce_motion, intensity)
     return em
 
 
@@ -107,24 +106,6 @@ def test_shake_decays_toward_end_of_window():
     early = max(abs(c) for c in em.shake_offset(int(SHAKE_HARD_MS * 0.05)))
     late = max(abs(c) for c in em.shake_offset(int(SHAKE_HARD_MS * 0.95)))
     assert late < early
-
-
-def test_reduce_motion_suppresses_shake():
-    em = _em(reduce_motion=True)
-    em.trigger_shake(0, "hard")
-    assert em._shake is None
-    assert em.shake_offset(10) == (0, 0)
-
-
-def test_intensity_scales_shake_amplitude():
-    full = _em(intensity="full")
-    full.trigger_shake(0, "hard")
-    subtle = _em(intensity="subtle")
-    subtle.trigger_shake(0, "hard")
-    assert full._shake["amp"] == pytest.approx(SHAKE_AMP["hard"] * 1.0)
-    assert subtle._shake["amp"] == pytest.approx(
-        SHAKE_AMP["hard"] * INTENSITY_SCALE["subtle"])
-    assert subtle._shake["amp"] < full._shake["amp"]
 
 
 def _run_until_resolved(em, start, step=16, limit=400):
@@ -189,21 +170,6 @@ def test_shake_triggers_on_fire_not_on_impact():
     em.update(c["fire_at"])
     assert em._shake is not None
     assert em._shake["start"] == c["fire_at"]
-
-
-def test_reduce_motion_capture_resolves_immediately_without_choreography():
-    em = _em(reduce_motion=True)
-    fired, slid = [], []
-    em.capture(now_ms=0, attacker_type="pawn", attacker_surface=_surf(),
-               victim_surface=_surf(), from_sq=Square(6, 4), victim_sq=Square(5, 4),
-               to_sq=Square(5, 4), cell_size=80,
-               on_fire=lambda: fired.append(1), on_slide=lambda: slid.append(1))
-    assert em.captures == []
-    assert fired == [1] and slid == [1]
-    kinds = {p["kind"] for p in em.particles}
-    assert "impact" in kinds
-    assert "ragdoll" not in kinds and "smoke" not in kinds
-    assert em._shake is None
 
 
 def test_en_passant_holds_destination_square():
@@ -345,16 +311,6 @@ def test_miss_point_clears_the_victim_square():
     tx, ty = em.geom(Square(0, 3))
     mx, my = em._miss_point((400.0, 750.0), tx, ty, 80)
     assert math.hypot(mx - tx, my - ty) >= 80, "the aim point lands at least a cell off the victim"
-
-
-def test_reduce_motion_miss_taunts_and_fires_without_choreography():
-    em = _em(reduce_motion=True)
-    fired = []
-    em.miss(now_ms=0, attacker_type="pawn", from_sq=Square(6, 4),
-            victim_sq=Square(5, 4), cell_size=80, on_fire=lambda: fired.append(1))
-    assert em.captures == [], "no gun choreography under reduce-motion"
-    assert fired == [1]
-    assert len(em.callouts) == 1, "but the SKILL ISSUE taunt still shows"
 
 
 def test_miss_draw_paints_the_taunt_and_does_not_crash():
@@ -522,13 +478,6 @@ def test_drop_motion_finishes_in_a_quarter_of_the_fade_window():
     assert EffectManager._drop_state(d, 100, 100, 0.0)[3] == 255
 
 
-def test_reduce_motion_suppresses_check_gun():
-    em = _em(reduce_motion=True)
-    em.check(now_ms=0, attacker_type="rook", king_sq=Square(0, 4),
-             from_sq=Square(0, 0), cell_size=80)
-    assert em._check_gun is None and em.drops == []
-
-
 def test_check_shakes_the_king_piece_horizontally():
     em = _em()
     em.check(now_ms=0, attacker_type="rook", king_sq=Square(0, 4),
@@ -544,14 +493,6 @@ def test_king_shake_only_affects_the_kings_square():
     em.check(now_ms=0, attacker_type="rook", king_sq=Square(0, 4),
              from_sq=Square(0, 0), cell_size=80)
     assert em.piece_offset(Square(3, 3), 40) == (0, 0)
-
-
-def test_reduce_motion_suppresses_the_king_shake():
-    em = _em(reduce_motion=True)
-    em.check(now_ms=0, attacker_type="rook", king_sq=Square(0, 4),
-             from_sq=Square(0, 0), cell_size=80)
-    assert em._king_shake is None
-    assert em.piece_offset(Square(0, 4), 40) == (0, 0)
 
 
 def test_cut_and_clear_end_the_king_shake():
@@ -735,12 +676,6 @@ def _place(board, pieces):
         grid[sq.row][sq.col] = piece
 
 
-def _no_motion(monkeypatch):
-    monkeypatch.setattr("chessshootout.frontend.board.board.env.get_reduce_motion", lambda: False)
-    monkeypatch.setattr("chessshootout.frontend.board.board.env.get_effect_intensity",
-                         lambda: "full")
-
-
 def _white_entry():
     return SimpleNamespace(move=SimpleNamespace(piece=SimpleNamespace(color=WHITE)))
 
@@ -775,8 +710,7 @@ def test_checking_square_skips_blocked_slider_finds_real_checker():
     assert checking_square(board.match.state, Square(0, 4), WHITE) == Square(4, 4)
 
 
-def test_show_check_gun_points_from_checker_to_king(monkeypatch):
-    _no_motion(monkeypatch)
+def test_show_check_gun_points_from_checker_to_king():
     board = _board()
     _place(board, {
         Square(0, 4): Piece(KING, BLACK),
@@ -790,8 +724,7 @@ def test_show_check_gun_points_from_checker_to_king(monkeypatch):
     assert held["victim_sq"] == Square(0, 4)
 
 
-def test_show_check_gun_noop_when_king_not_attacked(monkeypatch):
-    _no_motion(monkeypatch)
+def test_show_check_gun_noop_when_king_not_attacked():
     board = _board()
     _place(board, {
         Square(0, 0): Piece(KING, BLACK),
@@ -802,8 +735,7 @@ def test_show_check_gun_noop_when_king_not_attacked(monkeypatch):
     assert board.effects._check_gun is None
 
 
-def test_show_check_gun_noop_in_review_mode(monkeypatch):
-    _no_motion(monkeypatch)
+def test_show_check_gun_noop_in_review_mode():
     board = _board()
     _place(board, {
         Square(0, 4): Piece(KING, BLACK),
@@ -815,8 +747,7 @@ def test_show_check_gun_noop_in_review_mode(monkeypatch):
     assert board.effects._check_gun is None
 
 
-def test_kill_callout_fires_at_the_shot_not_at_move_start(monkeypatch):
-    _no_motion(monkeypatch)
+def test_kill_callout_fires_at_the_shot_not_at_move_start():
     board = _board()
     _place(board, {
         Square(7, 4): Piece(KING, WHITE),
@@ -837,8 +768,7 @@ def test_kill_callout_fires_at_the_shot_not_at_move_start(monkeypatch):
     assert len(board.effects.callouts) == 1
 
 
-def test_capture_routes_announcer_key_to_callback(monkeypatch):
-    _no_motion(monkeypatch)
+def test_capture_routes_announcer_key_to_callback():
     board = _board()
     keys = []
     board.announce_callback = keys.append
@@ -1116,8 +1046,7 @@ def test_board_show_surrender_flag_anchors_to_the_kings_square():
     assert [f["sq"] for f in board.effects.flags] == [Square(0, 4)]
 
 
-def test_board_show_checkmate_takeover_activates(monkeypatch):
-    _no_motion(monkeypatch)
+def test_board_show_checkmate_takeover_activates():
     board = _board()
     board.show_checkmate_takeover("WHITE")
     assert board.effects.has_takeover()
