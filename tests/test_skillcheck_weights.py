@@ -1,9 +1,8 @@
-"""Weighted skill-check selection. Every capture and promotion fires 100%: a
-capture rolls a flat 80% wheel / 20% duel, a non-capturing promotion is
-wheel-only. Checks/checkmates never fire. A forced move never fires, capture
-takes precedence over promotion, and the per-ply RNG is deterministic + uniform.
-Wheel DIFFICULTY (needle speed) scales with capturer-vs-victim material in
-chessshootout/skillcheck/wheel.py, NOT the selection odds.
+"""Weighted skill-check selection. Every capture and (non-capturing) promotion
+fires 100% wheel. Checks/checkmates never fire. A forced move never fires,
+capture takes precedence over promotion, and the per-ply RNG is deterministic +
+uniform. Wheel DIFFICULTY (needle speed) scales with capturer-vs-victim material
+in chessshootout/skillcheck/wheel.py, NOT the selection odds.
 
 Distribution tests sweep evenly-spaced rolls (i+0.5)/n through the deterministic
 selector, so observed proportions equal the cumulative distribution exactly to
@@ -21,7 +20,6 @@ from chessshootout.skillcheck.types import SkillCheckKind, TriggerFacts
 
 NONE = SkillCheckKind.NONE
 WHEEL = SkillCheckKind.WHEEL
-DUEL = SkillCheckKind.DUEL
 
 N = 20000
 
@@ -30,11 +28,11 @@ def sweep(facts):
     counts = Counter()
     for i in range(N):
         counts[weights.roll_skillcheck(facts, (i + 0.5) / N)] += 1
-    return {k: counts[k] / N for k in (NONE, WHEEL, DUEL)}
+    return {k: counts[k] / N for k in (NONE, WHEEL)}
 
 
 def assert_dist(observed, expected, tol=0.001):
-    for k in (NONE, WHEEL, DUEL):
+    for k in (NONE, WHEEL):
         assert observed[k] == pytest.approx(expected.get(k, 0.0), abs=tol)
 
 
@@ -53,17 +51,16 @@ def test_capture_summary_reexports_shared_values():
     assert reexport is PIECE_VALUES
 
 
-# ---- capture: flat 80% wheel / 20% duel ------------------------------------
+# ---- capture: 100% wheel ---------------------------------------------------
 
-def test_capture_shares_are_eighty_twenty():
-    assert weights.CAPTURE_WHEEL_SHARE == 0.80
-    assert weights.CAPTURE_DUEL_SHARE == 0.20
+def test_capture_share_is_full_wheel():
+    assert weights.CAPTURE_WHEEL_SHARE == 1.0
 
 
 @pytest.mark.parametrize("cap, vic", [(9, 1), (3, 3), (1, 9)])
-def test_capture_always_fires_flat_eighty_twenty(cap, vic):
+def test_capture_always_fires_the_wheel(cap, vic):
     facts = TriggerFacts(is_capture=True, capturer_value=cap, captured_value=vic)
-    assert_dist(sweep(facts), {NONE: 0.0, WHEEL: 0.80, DUEL: 0.20})
+    assert_dist(sweep(facts), {NONE: 0.0, WHEEL: 1.0})
 
 
 def test_material_does_not_change_the_selection_odds():
@@ -77,7 +74,7 @@ def test_material_does_not_change_the_selection_odds():
 def test_capture_takes_precedence_over_promotion():
     facts = TriggerFacts(
         is_capture=True, capturer_value=1, captured_value=5, is_promotion=True)
-    assert_dist(sweep(facts), {NONE: 0.0, WHEEL: 0.80, DUEL: 0.20})
+    assert_dist(sweep(facts), {NONE: 0.0, WHEEL: 1.0})
 
 
 # ---- forced-move guard -----------------------------------------------------
@@ -97,8 +94,7 @@ def test_forced_move_never_fires(facts):
 # ---- promotion: wheel-only -------------------------------------------------
 
 def test_non_capturing_promotion_is_wheel_only():
-    assert_dist(sweep(TriggerFacts(is_promotion=True)), {NONE: 0.0, WHEEL: 1.0, DUEL: 0.0})
-    assert weights.PROMOTION_FIRE[DUEL] == 0.0
+    assert_dist(sweep(TriggerFacts(is_promotion=True)), {NONE: 0.0, WHEEL: 1.0})
 
 
 # ---- quiet (non-triggering) move -------------------------------------------
@@ -119,9 +115,9 @@ def test_roll_zero_picks_the_wheel_for_a_capture():
     assert weights.roll_skillcheck(facts, 0.0) == WHEEL
 
 
-def test_roll_near_one_picks_last_kind():
+def test_roll_near_one_still_picks_the_wheel_for_a_capture():
     facts = TriggerFacts(is_capture=True, capturer_value=9, captured_value=1)
-    assert weights.roll_skillcheck(facts, 0.999999) == DUEL
+    assert weights.roll_skillcheck(facts, 0.999999) == WHEEL
 
 
 # ---- deterministic per-ply RNG ---------------------------------------------

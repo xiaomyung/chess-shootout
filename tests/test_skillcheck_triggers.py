@@ -16,7 +16,6 @@ from chessshootout.skillcheck.weights import CAPTURE_WHEEL_SHARE
 from tests.helpers import BLACK, K, P, Q, R, WHITE, make_backend, piece, sq
 
 WHEEL = SkillCheckKind.WHEEL
-DUEL = SkillCheckKind.DUEL
 NONE = SkillCheckKind.NONE
 
 
@@ -151,8 +150,8 @@ def test_select_uses_capture_bracket():
         sq(4, 3): piece(Q, WHITE), sq(3, 3): piece(P, BLACK),
     })
     assert triggers.select_skillcheck(backend, sq(4, 3), sq(3, 3), 0.0) == WHEEL
-    assert triggers.select_skillcheck(backend, sq(4, 3), sq(3, 3), 0.99) == DUEL
-    assert CAPTURE_WHEEL_SHARE == 0.80
+    assert triggers.select_skillcheck(backend, sq(4, 3), sq(3, 3), 0.99) == WHEEL
+    assert CAPTURE_WHEEL_SHARE == 1.0
 
 
 def test_select_illegal_move_is_none():

@@ -131,11 +131,6 @@ def test_registry_builds_wheel_controller():
     assert isinstance(ctrl, WheelController)
 
 
-def test_registry_returns_none_for_unbuilt_duel():
-    assert build_controller(SkillCheckKind.DUEL, seed="s", cell_rect=pg.Rect(0, 0, 80, 80),
-                            now_ms=0, deadline_ms=5000) is None
-
-
 # ---- frontend gate integration ---------------------------------------------
 
 def _start_local(app, variant):
