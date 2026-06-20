@@ -22,15 +22,16 @@ from chessshootout.server.connections import ConnectionRegistry, send
 from chessshootout.server.handlers import _clock_snapshot, dispatch
 from chessshootout.server.protocol import (
     AuthMessage, CancelMatchmakeRequest, ConnectionStatusMessage, ErrorMessage,
-    HealthResponse, HistoryEntryWire, MatchmakeRequest, MatchmakeResponse,
-    PROTOCOL_VERSION, Reason, ReclaimRequest, ReclaimResponse, ResultMessage,
-    ResumeRequest, ResumeResponse, is_uuid4,
+    HealthResponse, HistoryEntryWire, LockWire, MatchmakeRequest, MatchmakeResponse,
+    PROTOCOL_VERSION, PendingSkillCheckWire, Reason, ReclaimRequest, ReclaimResponse,
+    ResultMessage, ResumeRequest, ResumeResponse, is_uuid4,
 )
 from chessshootout.server.rooms import (
     AlreadyInGameError, InvalidTokenError, NotInRoomError, PAIRING_WAIT_SECONDS,
     RoomManager,
 )
 from chessshootout.server.sweep import Sweep
+from chessshootout.skillcheck.online import SKILLCHECK_DEADLINE_MS
 
 
 CLOCK_TICK_INTERVAL_SECONDS = 0.1
@@ -123,6 +124,10 @@ class UuidRateLimiter:
 
 def create_app(*, now_provider=time.monotonic, max_rooms=DEFAULT_MAX_ROOMS):
     rooms = RoomManager(now_provider=now_provider, max_rooms=max_rooms)
+
+    def now_ms():
+        return now_provider() * 1000.0
+
     connections = ConnectionRegistry()
     limiter = Limiter(key_func=client_ip_key)
     reclaim_limiter = UuidRateLimiter(
@@ -152,9 +157,10 @@ def create_app(*, now_provider=time.monotonic, max_rooms=DEFAULT_MAX_ROOMS):
     app.state.connections = connections
     app.state.limiter = limiter
     app.state.now = now_provider
+    app.state.now_ms = now_ms
     app.state.started_at = started_at
     app.state.reclaim_limiter = reclaim_limiter
-    app.state.sweep = Sweep(rooms, connections, now_provider)
+    app.state.sweep = Sweep(rooms, connections, now_provider, now_ms)
 
     @app.exception_handler(RateLimitExceeded)
     async def _rate_limit_handler(request, exc):
@@ -271,6 +277,9 @@ def create_app(*, now_provider=time.monotonic, max_rooms=DEFAULT_MAX_ROOMS):
             opp_ws = connections.get_for_color(room, room.opp_color(color))
             if opp_ws is not None:
                 await send(opp_ws, ConnectionStatusMessage(opp_state="resyncing"))
+        pending = _pending_skillcheck_wire(room, app.state.now_ms)
+        locks = [LockWire(from_sq=coord_from_square(frm), to_sq=coord_from_square(to))
+                 for frm, to in room.skillcheck_locks]
         return ResumeResponse(
             fen=export_fen(room.backend),
             move_history=history,
@@ -284,6 +293,8 @@ def create_app(*, now_provider=time.monotonic, max_rooms=DEFAULT_MAX_ROOMS):
             black_score=room.score_for("black"),
             white_country=room.white.country if room.white else None,
             black_country=room.black.country if room.black else None,
+            pending_skillcheck=pending,
+            skillcheck_locks=locks,
         )
 
     @app.post("/reclaim", response_model=ReclaimResponse)
@@ -336,6 +347,18 @@ def _promotion_letter(move):
     if move.promoted_to is None:
         return None
     return PROMO_LETTER_BY_TYPE.get(move.promoted_to)
+
+
+def _pending_skillcheck_wire(room, now_ms):
+    pending = room.pending_skillcheck
+    if pending is None:
+        return None
+    elapsed = max(0.0, now_ms() - pending.start_ms)
+    return PendingSkillCheckWire(
+        kind=pending.kind.value, seed=pending.seed, value_diff=pending.value_diff,
+        deadline_ms=SKILLCHECK_DEADLINE_MS, elapsed_ms=elapsed,
+        miss_count=pending.miss_count,
+    )
 
 
 async def _authenticate_ws(websocket, rooms, room_id):

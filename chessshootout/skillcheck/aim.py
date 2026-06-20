@@ -10,7 +10,6 @@ AIM_ROTATION_PERIOD_MS = 3700.0
 AIM_LOBE_FRACTION = 1.3
 AIM_HIT_RADIUS_FRAC = 0.40
 AIM_HIT_ASPECT = 0.6
-AIM_START_GAP_MS = 220.0
 AIM_START_JITTER = 0.06
 AIM_SWAY_STEP = 0.10
 AIM_SWAY_CAP = 1.7
@@ -88,7 +87,7 @@ class AimChallenge:
                 for i in range(samples + 1)]
 
     def piece_scale(self, elapsed_ms, miss_count=0):
-        p = min(1.0, (elapsed_ms / self.deadline_ms) * self.shrink_mult(miss_count))
+        p = min(1.0, (max(0.0, elapsed_ms) / self.deadline_ms) * self.shrink_mult(miss_count))
         return max(0.0, 1.0 - p ** AIM_SHRINK_EXP)
 
     def hit_radius(self, elapsed_ms, miss_count=0):

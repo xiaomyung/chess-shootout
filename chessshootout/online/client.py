@@ -185,6 +185,9 @@ class OnlineClient:
         self._last_ping_sent_at = time.monotonic()
         self._enqueue("send_ping", ply)
 
+    def send_skill_check_shot(self):
+        self._enqueue("send_skill_check_shot")
+
     def heartbeat_interval(self):
         return self._heartbeat_interval
 

@@ -1,5 +1,5 @@
 from chessshootout.server import logging_setup
-from chessshootout.server.broadcasts import finalize_and_broadcast
+from chessshootout.server.broadcasts import finalize_and_broadcast, resolve_skillcheck_fail
 from chessshootout.server.connections import send
 from chessshootout.server.protocol import (
     ConnectionStatusMessage, FIRST_MOVE_ABORT_SECONDS, Reason,
@@ -26,17 +26,30 @@ RESULT_REASON_BY_GAME_RESULT = {
 
 class Sweep:
 
-    def __init__(self, rooms, connections, now_provider):
+    def __init__(self, rooms, connections, now_provider, now_ms):
         self.rooms = rooms
         self.connections = connections
         self._now = now_provider
+        self._now_ms = now_ms
 
     async def step_all(self):
+        await self.step_skillcheck_deadline()
         await self.step_clock_and_first_move_abort()
         await self.step_heartbeat_timeout()
         await self.step_grace_expired()
         self.step_drop_orphans_and_post_result()
         self.rooms.gc_finished_rooms()
+
+    async def step_skillcheck_deadline(self):
+        now_ms = self._now_ms()
+        for room in list(self.rooms._active.values()):
+            pending = room.pending_skillcheck
+            if room.result is not None or pending is None:
+                continue
+            if now_ms > pending.expires_at_ms:
+                log.info("skillcheck deadline room=%s color=%s kind=%s",
+                         room.room_id, pending.color, pending.kind.value)
+                await resolve_skillcheck_fail(self.connections, room)
 
     async def step_heartbeat_timeout(self):
         for room, color in list(self.rooms.heartbeat_timed_out_rooms()):

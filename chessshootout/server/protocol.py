@@ -19,7 +19,7 @@ def _env_int(name, default):
         return default
 
 
-PROTOCOL_VERSION = 1
+PROTOCOL_VERSION = 2
 MAX_NICKNAME_LEN = 20
 GIVE_TIME_SECONDS = 15
 FIRST_MOVE_ABORT_SECONDS = 60
@@ -49,6 +49,8 @@ class Reason:
     INVALID_MOVE_FORMAT = "invalid_move_format"
     INVALID_TIME_CONTROL = "invalid_time_control"
     NOT_YOUR_TURN = "not_your_turn"
+    SKILLCHECK_PENDING = "skillcheck_pending"
+    MOVE_LOCKED = "move_locked"
     SESSION_EXPIRED = "session_expired"
     ALREADY_IN_GAME = "already_in_game"
     NOT_IN_ROOM = "not_in_room"
@@ -106,6 +108,22 @@ class HistoryEntryWire(BaseModel):
     to_sq: str
     promotion: Optional[Literal["q", "r", "b", "n"]] = None
     san: str
+
+
+class LockWire(BaseModel):
+    from_sq: str = Field(alias="from")
+    to_sq: str = Field(alias="to")
+
+    model_config = {"populate_by_name": True}
+
+
+class PendingSkillCheckWire(BaseModel):
+    kind: Literal["wheel", "aim"]
+    seed: str
+    value_diff: int
+    deadline_ms: float
+    elapsed_ms: float
+    miss_count: int = 0
 
 
 class MatchmakeRequest(_Base):
@@ -179,6 +197,8 @@ class ResumeResponse(_Base):
     black_country: Optional[str] = None
     heartbeat_interval_seconds: float = HEARTBEAT_INTERVAL_SECONDS
     grace_seconds: float = GRACE_SECONDS
+    pending_skillcheck: Optional[PendingSkillCheckWire] = None
+    skillcheck_locks: list[LockWire] = Field(default_factory=list)
 
 
 class ReclaimRequest(_Base):
@@ -261,6 +281,8 @@ class MoveAppliedMessage(_Base):
     san: str
     clock: ClockSnapshot
     ply: int
+    skill_check_kind: Optional[Literal["wheel", "aim"]] = None
+    skill_check_won: Optional[bool] = None
 
     model_config = {"populate_by_name": True}
 
@@ -309,6 +331,35 @@ class PongMessage(_Base):
 
 class ResyncDirectiveMessage(_Base):
     type: Literal["resync_directive"] = "resync_directive"
+
+
+class SkillCheckRequiredMessage(_Base):
+    type: Literal["skill_check_required"] = "skill_check_required"
+    kind: Literal["wheel", "aim"]
+    seed: str
+    value_diff: int
+    deadline_ms: float
+    miss_count: int = 0
+
+
+class SkillCheckShotMessage(_Base):
+    type: Literal["skill_check_shot"] = "skill_check_shot"
+
+    model_config = {"extra": "ignore"}
+
+
+class SkillCheckResultMessage(_Base):
+    type: Literal["skill_check_result"] = "skill_check_result"
+    won: bool
+    from_sq: str = Field(alias="from")
+    to_sq: str = Field(alias="to")
+
+    model_config = {"populate_by_name": True}
+
+
+class SkillCheckSpectateMessage(_Base):
+    type: Literal["skill_check_spectate"] = "skill_check_spectate"
+    kind: Literal["wheel", "aim"]
 
 
 class ErrorMessage(_Base):

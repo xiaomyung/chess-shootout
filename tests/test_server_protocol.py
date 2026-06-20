@@ -2,8 +2,11 @@ import pytest
 from pydantic import ValidationError
 
 from chessshootout.server.protocol import (
-    AuthMessage, ErrorMessage, GameStartMessage, MatchmakeRequest,
-    MoveMessage, PROTOCOL_VERSION, PingMessage, PongMessage, ResyncDirectiveMessage,
+    AuthMessage, ClockSnapshot, ErrorMessage, GameStartMessage, LockWire,
+    MatchmakeRequest, MoveAppliedMessage, MoveMessage, PROTOCOL_VERSION,
+    PendingSkillCheckWire, PingMessage, PongMessage, ResumeResponse,
+    ResyncDirectiveMessage, SkillCheckRequiredMessage, SkillCheckResultMessage,
+    SkillCheckShotMessage, SkillCheckSpectateMessage,
     normalize_country, normalize_nickname,
 )
 from tests.helpers import fake_uuid4
@@ -207,7 +210,7 @@ def test_game_start_carries_country():
 
 
 def test_move_message_uses_alias_for_from():
-    raw = {"type": "move", "version": 1, "from": "e2", "to": "e4", "promotion": None}
+    raw = {"type": "move", "version": PROTOCOL_VERSION, "from": "e2", "to": "e4", "promotion": None}
     msg = MoveMessage.model_validate(raw)
     assert msg.from_sq == "e2"
     assert msg.to_sq == "e4"
@@ -220,5 +223,85 @@ def test_move_message_uses_alias_for_from():
 
 def test_move_message_promotion_validated():
     with pytest.raises(ValidationError):
-        MoveMessage.model_validate({"type": "move", "version": 1,
+        MoveMessage.model_validate({"type": "move", "version": PROTOCOL_VERSION,
                                     "from": "e7", "to": "e8", "promotion": "x"})
+
+
+# ---- skill-check protocol (additive; PROTOCOL_VERSION bumped to 2) ----------
+
+def test_protocol_version_bumped_for_skillchecks():
+    assert PROTOCOL_VERSION == 2
+
+
+def test_skill_check_required_round_trips():
+    msg = SkillCheckRequiredMessage(kind="wheel", seed="abc", value_diff=8, deadline_ms=5000.0)
+    assert msg.model_dump() == {
+        "version": PROTOCOL_VERSION, "type": "skill_check_required",
+        "kind": "wheel", "seed": "abc", "value_diff": 8,
+        "deadline_ms": 5000.0, "miss_count": 0,
+    }
+    assert SkillCheckRequiredMessage.model_validate(msg.model_dump()) == msg
+
+
+def test_skill_check_required_rejects_unknown_kind():
+    with pytest.raises(ValidationError):
+        SkillCheckRequiredMessage(kind="duel", seed="x", value_diff=0, deadline_ms=5000.0)
+
+
+def test_skill_check_shot_has_no_input_payload():
+    msg = SkillCheckShotMessage()
+    assert msg.model_dump() == {"version": PROTOCOL_VERSION, "type": "skill_check_shot"}
+
+
+def test_skill_check_shot_ignores_injected_client_timestamp():
+    msg = SkillCheckShotMessage.model_validate(
+        {"type": "skill_check_shot", "version": PROTOCOL_VERSION, "client_fire_ms": 123})
+    assert not hasattr(msg, "client_fire_ms")
+    assert "client_fire_ms" not in msg.model_dump()
+
+
+def test_skill_check_result_uses_from_to_aliases():
+    msg = SkillCheckResultMessage.model_validate(
+        {"type": "skill_check_result", "won": False, "from": "e4", "to": "d5"})
+    assert (msg.won, msg.from_sq, msg.to_sq) == (False, "e4", "d5")
+    assert msg.model_dump(by_alias=True)["from"] == "e4"
+
+
+def test_skill_check_spectate_carries_only_kind():
+    msg = SkillCheckSpectateMessage(kind="aim")
+    assert set(msg.model_dump()) == {"version", "type", "kind"}, "no seed/value_diff/from/to leak"
+
+
+def test_move_applied_skillcheck_fields_default_none_and_round_trip():
+    base = dict(from_sq="e2", to_sq="e4", san="e4",
+                clock=ClockSnapshot(white_remaining=1.0, black_remaining=1.0, running_for="black"),
+                ply=1)
+    quiet = MoveAppliedMessage(**base)
+    assert quiet.skill_check_kind is None and quiet.skill_check_won is None
+    won = MoveAppliedMessage(**base, skill_check_kind="wheel", skill_check_won=True)
+    assert MoveAppliedMessage.model_validate(won.model_dump(by_alias=True)) == won
+
+
+def test_resume_response_pending_and_locks_default_empty():
+    resp = ResumeResponse(
+        fen="x", move_history=[],
+        clock=ClockSnapshot(white_remaining=1.0, black_remaining=1.0, running_for="white"),
+        your_color="white", white_name="A", black_name="B",
+        time_minutes=5, increment_seconds=0)
+    assert resp.pending_skillcheck is None
+    assert resp.skillcheck_locks == []
+
+
+def test_resume_response_carries_pending_and_locks_when_set():
+    pending = PendingSkillCheckWire(
+        kind="aim", seed="s", value_diff=3, deadline_ms=5000.0, elapsed_ms=1800.0, miss_count=1)
+    resp = ResumeResponse(
+        fen="x", move_history=[],
+        clock=ClockSnapshot(white_remaining=1.0, black_remaining=1.0, running_for="white"),
+        your_color="white", white_name="A", black_name="B",
+        time_minutes=5, increment_seconds=0,
+        pending_skillcheck=pending,
+        skillcheck_locks=[LockWire.model_validate({"from": "e4", "to": "d5"})])
+    reparsed = ResumeResponse.model_validate(resp.model_dump(by_alias=True))
+    assert reparsed.pending_skillcheck == pending
+    assert reparsed.skillcheck_locks[0].from_sq == "e4"

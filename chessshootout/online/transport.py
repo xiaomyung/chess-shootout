@@ -283,6 +283,9 @@ class ServerWebSocket:
     async def send_ping(self, ply):
         await self._send(PingMessage(ply=ply))
 
+    async def send_skill_check_shot(self):
+        await self._send_raw({"type": "skill_check_shot", "version": PROTOCOL_VERSION})
+
     async def _send(self, message):
         await self._ws.send(message.model_dump_json(by_alias=True))
 

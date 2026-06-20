@@ -1,11 +1,9 @@
 from chessshootout.skillcheck.locks import MoveLockSet
-from chessshootout.skillcheck.rng import ply_roll
+from chessshootout.skillcheck.rng import move_roll_key, ply_roll
 from chessshootout.skillcheck.triggers import select_skillcheck
 from chessshootout.skillcheck.types import SkillCheckKind
 
-
-def move_roll_key(ply_index, from_sq, to_sq):
-    return f"{ply_index}:{from_sq.row}{from_sq.col}:{to_sq.row}{to_sq.col}"
+__all__ = ["SkillCheckCoordinator", "move_roll_key"]
 
 
 class SkillCheckCoordinator:

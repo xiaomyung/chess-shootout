@@ -96,6 +96,9 @@ class FakeClock:
     def advance(self, dt):
         self.t += dt
 
+    def set(self, t):
+        self.t = t
+
 
 def fake_uuid4(seed):
     """Build a deterministic UUID4-shaped string from an integer seed.
