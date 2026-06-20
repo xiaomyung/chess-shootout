@@ -74,6 +74,26 @@ def test_offset_is_bounded_to_the_lobe_amplitude():
         assert math.hypot(fx, fy) <= amp + 1e-9
 
 
+def test_rotation_winds_forward_and_scales_with_misses():
+    ch = AimChallenge.from_seed("r")
+    base = ch.rotation_deg_at(0.0)
+    assert ch.rotation_deg_at(0.0) == pytest.approx(base)
+    assert ch.rotation_deg_at(500.0) > base, "the figure-8 keeps rotating over time"
+    assert ch.rotation_deg_at(500.0, 4) > ch.rotation_deg_at(500.0, 0), "a miss spins it faster"
+
+
+def test_path_offsets_traces_the_current_reticle_curve():
+    ch = AimChallenge.from_seed("p")
+    elapsed = 600.0
+    pts = ch.path_offsets(elapsed, 0, 64)
+    assert len(pts) == 65, "samples + 1 closes the curve back to the start"
+    amp = aim.AIM_LOBE_FRACTION / 2.0
+    for px, py in pts:
+        assert math.hypot(px, py) <= amp + 1e-9, "the drawn path stays inside the lobe envelope"
+    crossings = [p for p in pts if math.hypot(*p) < amp * 0.05]
+    assert len(crossings) >= 2, "the rendered 8 passes through its center twice"
+
+
 # ---- you cannot insta-win --------------------------------------------------
 
 def test_no_insta_win_at_appearance():
@@ -113,6 +133,28 @@ def test_hit_radius_starts_full_and_shrinks_to_zero():
     assert ch.hit_radius(ch.deadline_ms * 0.5) < ch.hit_radius(0.0)
     assert ch.hit_radius(ch.deadline_ms * 0.95) < ch.hit_radius(ch.deadline_ms * 0.5)
     assert ch.hit_radius(ch.deadline_ms) == pytest.approx(0.0)
+
+
+def test_hit_box_is_a_vertical_ellipse():
+    ch = AimChallenge.from_seed("ellipse")
+    rx, ry = ch.hit_radii(0.0)
+    assert rx < ry, "the horizontal diameter is the shorter one"
+    assert ry == pytest.approx(aim.AIM_HIT_RADIUS_FRAC), "the vertical diameter is unchanged"
+    assert rx == pytest.approx(aim.AIM_HIT_ASPECT * aim.AIM_HIT_RADIUS_FRAC)
+    reach = (rx + ry) / 2.0
+    assert ch.contains(0.0, reach, 0.0) is True, "that reach lands along the tall axis"
+    assert ch.contains(reach, 0.0, 0.0) is False, "but slips past sideways (narrower)"
+
+
+def test_hit_box_shrinks_on_both_axes_keeping_its_aspect():
+    ch = AimChallenge.from_seed("eshrink")
+    rx0, ry0 = ch.hit_radii(0.0)
+    rxh, ryh = ch.hit_radii(ch.deadline_ms * 0.6)
+    assert 0.0 < rxh < rx0 and 0.0 < ryh < ry0, "both axes shrink with the piece"
+    assert rxh / ryh == pytest.approx(rx0 / ry0), "the ellipse keeps its aspect as it shrinks"
+    rxe, rye = ch.hit_radii(ch.deadline_ms)
+    assert rxe == pytest.approx(0.0) and rye == pytest.approx(0.0)
+    assert ch.contains(0.0, 0.01, ch.deadline_ms) is False, "a fully shrunk box catches nothing"
 
 
 def test_same_offset_that_hits_early_misses_late():

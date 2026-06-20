@@ -35,6 +35,20 @@ DRAG_SETTLE_K = 400.0
 DRAG_SETTLE_C = 40.0
 DRAG_SETTLE_MAX_T = 2.0
 
+RESTORE_MS = 480
+RESTORE_DROP_FRAC = 0.8
+RESTORE_FALL_PORTION = 0.46
+RESTORE_FADE_PORTION = 0.36
+RESTORE_REBOUND_FRAC = 0.13
+RESTORE_SETTLE_DECAY = 4.0
+RESTORE_SETTLE_WAVES = 1.25
+RESTORE_ROCK_DEG = 7.5
+RESTORE_ROCK_WAVES = 1.15
+
+
+def _smoothstep(x):
+    return x * x * (3.0 - 2.0 * x)
+
 
 def _draw_capsule(surf, p1, p2, width, color):
     dx, dy = p2[0] - p1[0], p2[1] - p1[1]
@@ -99,8 +113,10 @@ class Board:
         self.selected_square = None
         self.pending_promotion_square = None
         self._promotion_from = None
+        self.aim_suppressed_square = None
         self.flipped = False
         self.animations = []
+        self._restore_anims = []
         self.effects = EffectManager()
         self.effects.geom = lambda sq: self._cell_rect(sq.row, sq.col).center
         self.animation_duration_ms = 180
@@ -334,6 +350,7 @@ class Board:
         self.draw_pieces()
         self._draw_front_markers()
         self._draw_animations()
+        self._draw_restores(now)
         self.effects.draw_over(self.window, now)
         self._draw_arrows()
         self._draw_promotion_picker()
@@ -603,6 +620,9 @@ class Board:
         now = pg.time.get_ticks()
         hidden = {(a.from_sq if a.bump else a.to_sq) for a in self.animations}
         hidden |= self.effects.held_squares()
+        hidden |= {a["sq"] for a in self._restore_anims}
+        if self.aim_suppressed_square is not None:
+            hidden.add(self.aim_suppressed_square)
         if self.dragging_from is not None:
             hidden.add(self.dragging_from)
         if self._drag is not None and self._drag["phase"] == "settle":
@@ -662,6 +682,7 @@ class Board:
 
     def cancel_animations(self):
         self.animations = []
+        self._restore_anims = []
 
     def _clear_drag_state(self):
         self._drag = None
@@ -1409,19 +1430,22 @@ class Board:
         piece = self.match.piece_at(from_sq)
         if piece is None or self.cell_size <= 0:
             return
+        now = pg.time.get_ticks()
         victim_sq = self._capture_victim_square(piece, from_sq, to_sq)
         if victim_sq is None:
             self._start_bump_animation(from_sq, to_sq, piece)
+            self.effects.swear(now, from_sq, self.cell_size)
             return
         victim = self.match.piece_at(victim_sq)
         power = self._capture_power(victim.type) if victim is not None else "med"
         fire_cb = (lambda: on_fire(piece.type)) if on_fire is not None else None
         self.effects.miss(
-            now_ms=pg.time.get_ticks(),
+            now_ms=now,
             attacker_type=piece.type.value,
             from_sq=from_sq, victim_sq=victim_sq,
             cell_size=self.cell_size, power=power,
             occupied=self._occupied_squares(), on_fire=fire_cb)
+        self.effects.swear(now, victim_sq, self.cell_size)
 
     def _capture_victim_square(self, piece, from_sq, to_sq):
         if self.match.piece_at(to_sq) is not None:
@@ -1433,6 +1457,56 @@ class Board:
     def _start_bump_animation(self, from_sq, to_sq, piece):
         self.cancel_animations()
         self.start_animation(from_sq, to_sq, piece, bump=True)
+
+    def restore_piece(self, square):
+        piece = self.match.piece_at(square)
+        if piece is None or self.cell_size <= 0:
+            return
+        surface = self.piece_images_scaled.get((piece.type, piece.color))
+        if surface is None:
+            return
+        self._restore_anims.append({"sq": square, "surf": surface,
+                                    "start": pg.time.get_ticks(), "dur": RESTORE_MS})
+
+    def _draw_restores(self, now):
+        survivors = []
+        for a in self._restore_anims:
+            t = (now - a["start"]) / a["dur"]
+            if t >= 1.0:
+                continue
+            survivors.append(a)
+            self._blit_restore(a, *self._restore_state(t))
+        self._restore_anims = survivors
+
+    def _blit_restore(self, a, dy, alpha, angle):
+        rect = self._cell_rect(a["sq"].row, a["sq"].col)
+        img = a["surf"]
+        top = rect.y + dy * self.cell_size
+        if angle == 0.0:
+            if alpha < 255:
+                img = img.copy()
+                img.set_alpha(alpha)
+            self.window.blit(img, (rect.x, top))
+            return
+        base = (rect.x + img.get_width() / 2.0, top + img.get_height())
+        rotated = pg.transform.rotozoom(img, angle, 1.0)
+        if alpha < 255:
+            rotated = rotated.copy()
+            rotated.set_alpha(alpha)
+        off = pg.math.Vector2(0.0, img.get_height() / 2.0).rotate(-angle)
+        self.window.blit(rotated, rotated.get_rect(center=(base[0] - off.x, base[1] - off.y)))
+
+    @staticmethod
+    def _restore_state(t):
+        alpha = int(255 * _smoothstep(min(t / RESTORE_FADE_PORTION, 1.0)))
+        if t < RESTORE_FALL_PORTION:
+            p = t / RESTORE_FALL_PORTION
+            return -RESTORE_DROP_FRAC * (1.0 - p * p), alpha, 0.0
+        q = (t - RESTORE_FALL_PORTION) / (1.0 - RESTORE_FALL_PORTION)
+        envelope = math.exp(-RESTORE_SETTLE_DECAY * q)
+        dy = -RESTORE_REBOUND_FRAC * envelope * math.sin(RESTORE_SETTLE_WAVES * 2.0 * math.pi * q)
+        angle = RESTORE_ROCK_DEG * envelope * math.sin(RESTORE_ROCK_WAVES * 2.0 * math.pi * q)
+        return dy, alpha, angle
 
     def show_surrender_flag(self, color):
         if self.cell_size <= 0:

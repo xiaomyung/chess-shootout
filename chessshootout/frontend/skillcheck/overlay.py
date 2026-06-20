@@ -33,6 +33,11 @@ class SkillCheckOverlay:
         if self._controller is not None:
             self._controller.relayout(cell_rect)
 
+    def set_board_rect(self, board_rect):
+        setter = getattr(self._controller, "set_board_rect", None)
+        if setter is not None:
+            setter(board_rect)
+
     def cancel(self):
         self._controller = None
         self._context = None

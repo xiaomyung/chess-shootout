@@ -21,7 +21,7 @@ from chessshootout.frontend.skillcheck.overlay import SkillCheckOverlay
 from chessshootout.frontend.skillcheck.registry import build_controller
 from chessshootout.skillcheck.coordinator import SkillCheckCoordinator
 from chessshootout.skillcheck.types import SkillCheckKind
-from chessshootout.skillcheck.wheel import WHEEL_PERIOD_MS, period_for_diff
+from chessshootout.skillcheck.wheel import period_for_diff
 from chessshootout.frontend.menu.menu_battle import MenuBattle
 from chessshootout.domain.capture_summary import captured_by, material_advantage
 from chessshootout.domain.result_stats import compute_result_stats
@@ -998,6 +998,7 @@ class Frontend(OnlineEventsMixin):
         self.board.effects.clear()
         self.board._clear_premoves()
         self.skillcheck_overlay.cancel()
+        self.board.aim_suppressed_square = None
         self.skillcheck.clear_locks()
         self.board.clear_annotations()
         self.board.end_press()
@@ -1251,38 +1252,70 @@ class Frontend(OnlineEventsMixin):
         kind = self.skillcheck.select(self.match.backend, from_sq, to_sq)
         if kind == SkillCheckKind.NONE:
             return False
+        target = self._skillcheck_render_square(kind, from_sq, to_sq)
+        diff = self._capture_value_diff(from_sq, to_sq, promo_type)
+        capturer = self.match.piece_at(from_sq)
         seed = "{}:{}:{}{}{}{}:{}".format(
             self.skillcheck.seed, len(self.match.move_history),
             from_sq.row, from_sq.col, to_sq.row, to_sq.col, kind.value)
         controller = build_controller(
-            kind, seed=seed, cell_rect=self.board.cell_rect(to_sq),
+            kind, seed=seed, cell_rect=self.board.cell_rect(target),
             now_ms=pg.time.get_ticks(), deadline_ms=self._skillcheck_deadline_ms(),
-            period_ms=self._wheel_period(from_sq, to_sq, promo_type))
+            period_ms=period_for_diff(diff), value_diff=diff,
+            victim_surface=self._victim_surface(target), board_rect=self.board.rect,
+            geom=lambda sq: self.board.cell_rect(sq).center, from_sq=from_sq,
+            victim_sq=target, attacker_type=capturer.type.value if capturer else None,
+            shot_sound=self._shot_sound_for(capturer))
         if controller is None:
             return False
-        self._skillcheck_target = to_sq
+        self._skillcheck_target = target
+        self.board.aim_suppressed_square = target if kind == SkillCheckKind.AIM else None
         self.skillcheck_overlay.start(
             controller, (from_sq, to_sq, promo_type), self._on_skillcheck_done)
         return True
 
-    def _wheel_period(self, from_sq, to_sq, promo_type):
+    def _skillcheck_render_square(self, kind, from_sq, to_sq):
+        if kind == SkillCheckKind.AIM:
+            capturer = self.match.piece_at(from_sq)
+            if capturer is not None:
+                victim_sq = self.board._capture_victim_square(capturer, from_sq, to_sq)
+                if victim_sq is not None:
+                    return victim_sq
+        return to_sq
+
+    def _victim_surface(self, square):
+        piece = self.match.piece_at(square)
+        if piece is None:
+            return None
+        return self.board.piece_images_scaled.get((piece.type, piece.color))
+
+    def _shot_sound_for(self, capturer):
+        if capturer is None:
+            return None
+        piece_type = capturer.type
+        return lambda: self.sound_manager.play_capture(piece_type)
+
+    def _capture_value_diff(self, from_sq, to_sq, promo_type):
         capturer = self.match.piece_at(from_sq)
         if capturer is None:
-            return WHEEL_PERIOD_MS
+            return 0
         victim_sq = self.board._capture_victim_square(capturer, from_sq, to_sq)
         if victim_sq is not None:
             victim = self.match.piece_at(victim_sq)
-            diff = PIECE_VALUES.get(capturer.type, 0) - (
+            return PIECE_VALUES.get(capturer.type, 0) - (
                 PIECE_VALUES.get(victim.type, 0) if victim is not None else 0)
-        elif promo_type is not None:
-            diff = PIECE_VALUES.get(promo_type, 0)
-        else:
-            diff = 0
-        return period_for_diff(diff)
+        if promo_type is not None:
+            return PIECE_VALUES.get(promo_type, 0)
+        return 0
+
+    def _wheel_period(self, from_sq, to_sq, promo_type):
+        return period_for_diff(self._capture_value_diff(from_sq, to_sq, promo_type))
 
     def _on_skillcheck_done(self, context, landed):
         from_sq, to_sq = context[0], context[1]
         promo_type = context[2] if len(context) > 2 else None
+        aim_victim = self.board.aim_suppressed_square
+        self.board.aim_suppressed_square = None
         if landed:
             self.board.apply_gated_move(from_sq, to_sq, promo_type)
         else:
@@ -1292,6 +1325,8 @@ class Frontend(OnlineEventsMixin):
                 self.board._clear_premoves()
             self.board.trigger_skillcheck_fail(from_sq, to_sq,
                                                on_fire=self._on_skillcheck_miss_fire)
+            if aim_victim is not None:
+                self.board.restore_piece(aim_victim)
 
     def _on_skillcheck_miss_fire(self, piece_type):
         self.sound_manager.play_capture(piece_type)
@@ -1421,6 +1456,7 @@ class Frontend(OnlineEventsMixin):
         if self.skillcheck_overlay.is_active() and (
                 self.mode == "menu" or self.current_result() is not None):
             self.skillcheck_overlay.cancel()
+            self.board.aim_suppressed_square = None
         self.skillcheck_overlay.update(now)
         self.skillcheck_overlay.draw(self.window)
         self._drain_online_inbound()
@@ -1801,6 +1837,7 @@ class Frontend(OnlineEventsMixin):
         self.player_strip_bottom.set_rect(bottom_strip_rect)
         if self.skillcheck_overlay.is_active() and self._skillcheck_target is not None:
             self.skillcheck_overlay.relayout(self.board.cell_rect(self._skillcheck_target))
+            self.skillcheck_overlay.set_board_rect(self.board.rect)
         self._refresh_capture_icons(strip_height)
 
     def _refresh_capture_icons(self, strip_height):

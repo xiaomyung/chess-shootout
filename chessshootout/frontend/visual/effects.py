@@ -69,6 +69,7 @@ RAGDOLL_FALL_SHRINK = 0.3
 STREAK_LABELS = {2: "DOUBLE KILL", 3: "TRIPLE KILL", 4: "QUADRA KILL",
                  5: "RAMPAGE", 6: "UNSTOPPABLE", 7: "GODLIKE"}
 HIT_WORDS = ("BLAM", "BOOM", "POW", "BANG", "HEADSHOT", "BODIED", "WASTED")
+SWEAR_WORDS = ("DAMN IT", "DANG!", "MISSED!", "ARGH!", "COME ON!", "SO CLOSE", "UGH")
 SKILL_ISSUE_TITLE = "SKILL ISSUE"
 SKILL_ISSUE_SUB = "GET GOOD, BRO"
 
@@ -193,11 +194,12 @@ class EffectManager:
         })
 
     def miss(self, *, now_ms, attacker_type, from_sq, victim_sq, cell_size,
-             power="med", on_fire=None, occupied=None):
+             power="med", on_fire=None, occupied=None, callout=True):
         gun = gunfx.PIECE_GUN.get(attacker_type, "revolver")
         weapon = self._weapon(gun, cell_size)
         if weapon is None:
-            self._skill_issue_callout(now_ms, cell_size)
+            if callout:
+                self._skill_issue_callout(now_ms, cell_size)
             if on_fire is not None:
                 on_fire()
             return
@@ -208,8 +210,11 @@ class EffectManager:
             "attacker": None, "victim": None,
             "cell": cell_size, "power": power, "on_fire": on_fire, "on_slide": None,
             "occupied": {s for s in (occupied or ()) if s not in (from_sq, victim_sq)},
-            "miss": True,
+            "miss": True, "callout": callout,
         })
+
+    def swear(self, now_ms, victim_sq, cell, text=None):
+        self._tag(now_ms, text or self._pick(SWEAR_WORDS), victim_sq, cell)
 
     def _skill_issue_callout(self, now, cell):
         self._callout(now, SKILL_ISSUE_TITLE, SKILL_ISSUE_SUB, "xl", cell,
@@ -309,7 +314,7 @@ class EffectManager:
                                    "cell": c["cell"], "start": now, "dur": MUZZLE_MS})
         self._spawn_pellets(now, c)
         self.trigger_shake(now, c["power"])
-        if c.get("miss"):
+        if c.get("miss") and c.get("callout", True):
             self._skill_issue_callout(now, c["cell"])
 
     def _spawn_pellets(self, now, c):

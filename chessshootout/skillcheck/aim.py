@@ -9,6 +9,7 @@ AIM_TRAVEL_PERIOD_MS = 1500.0
 AIM_ROTATION_PERIOD_MS = 3700.0
 AIM_LOBE_FRACTION = 1.3
 AIM_HIT_RADIUS_FRAC = 0.40
+AIM_HIT_ASPECT = 0.6
 AIM_START_GAP_MS = 220.0
 AIM_START_JITTER = 0.06
 AIM_SWAY_STEP = 0.10
@@ -63,16 +64,28 @@ class AimChallenge:
         return (self.phase0
                 + (elapsed_ms / self.travel_period_ms) * self.travel_mult(miss_count)) % 1.0
 
-    def reticle_offset(self, elapsed_ms, miss_count=0):
+    def rotation_deg_at(self, elapsed_ms, miss_count=0):
         mult = self.travel_mult(miss_count)
-        theta = 2.0 * math.pi * self.param_at(elapsed_ms, miss_count)
+        return self.rotation0_deg + 360.0 * (elapsed_ms / self.rotation_period_ms) * mult
+
+    def lobe_point(self, t):
+        theta = 2.0 * math.pi * t
         amp = _amplitude()
-        x = amp * math.cos(theta)
-        y = amp * math.sin(theta) * math.cos(theta)
-        rot = math.radians(self.rotation0_deg
-                           + 360.0 * (elapsed_ms / self.rotation_period_ms) * mult)
+        return (amp * math.cos(theta), amp * math.sin(theta) * math.cos(theta))
+
+    def _rotate(self, point, rot_deg):
+        rot = math.radians(rot_deg)
         cos_r, sin_r = math.cos(rot), math.sin(rot)
-        return (x * cos_r - y * sin_r, x * sin_r + y * cos_r)
+        return (point[0] * cos_r - point[1] * sin_r, point[0] * sin_r + point[1] * cos_r)
+
+    def reticle_offset(self, elapsed_ms, miss_count=0):
+        point = self.lobe_point(self.param_at(elapsed_ms, miss_count))
+        return self._rotate(point, self.rotation_deg_at(elapsed_ms, miss_count))
+
+    def path_offsets(self, elapsed_ms, miss_count, samples):
+        rot_deg = self.rotation_deg_at(elapsed_ms, miss_count)
+        return [self._rotate(self.lobe_point(i / samples), rot_deg)
+                for i in range(samples + 1)]
 
     def piece_scale(self, elapsed_ms, miss_count=0):
         p = min(1.0, (elapsed_ms / self.deadline_ms) * self.shrink_mult(miss_count))
@@ -81,9 +94,19 @@ class AimChallenge:
     def hit_radius(self, elapsed_ms, miss_count=0):
         return AIM_HIT_RADIUS_FRAC * self.piece_scale(elapsed_ms, miss_count)
 
+    def hit_radii(self, elapsed_ms, miss_count=0):
+        ry = self.hit_radius(elapsed_ms, miss_count)
+        return AIM_HIT_ASPECT * ry, ry
+
+    def contains(self, fx, fy, elapsed_ms, miss_count=0):
+        rx, ry = self.hit_radii(elapsed_ms, miss_count)
+        if rx <= 0.0 or ry <= 0.0:
+            return False
+        return (fx / rx) ** 2 + (fy / ry) ** 2 <= 1.0
+
     def on_target(self, elapsed_ms, miss_count=0):
         fx, fy = self.reticle_offset(elapsed_ms, miss_count)
-        return math.hypot(fx, fy) <= self.hit_radius(elapsed_ms, miss_count)
+        return self.contains(fx, fy, elapsed_ms, miss_count)
 
     def is_expired(self, elapsed_ms, miss_count=0):
         return self.piece_scale(elapsed_ms, miss_count) <= 0.0
