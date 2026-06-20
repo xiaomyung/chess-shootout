@@ -91,7 +91,7 @@ class AimController(SkillCheckController):
                       from_sq=self._from_sq, victim_sq=self._victim_sq,
                       cell_size=self.cell_size, power="soft",
                       on_fire=self._shot_sound, callout=False)
-        self._fx.swear(self._now, self._victim_sq, self.cell_size)
+        self._fx.swear(self._now, self._from_sq, self.cell_size)
 
     def update(self, now_ms):
         self._now = now_ms

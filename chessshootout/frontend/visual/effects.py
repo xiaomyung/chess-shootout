@@ -6,6 +6,7 @@ import pygame as pg
 from chessshootout.frontend.visual import gunfx
 from chessshootout.frontend.visual.gunfx import DT_MAX, RAGDOLL_MS
 from chessshootout.frontend.visual.colors import Colors
+from chessshootout.frontend.visual.draw import soft_blur, GLOW_BLUR_PASSES
 from chessshootout.frontend.visual.emoji import emoji_surface
 from chessshootout.frontend.visual.fonts import get_font, DISPLAY, SANS
 
@@ -35,6 +36,8 @@ SHAKE_AMP = {"hard": 18, "med": 11, "soft": 6}
 CALLOUT_LG_MS = 1150
 CALLOUT_XL_MS = 1500
 TAG_MS = 850
+GLOW_ALPHA = 175
+GLOW_PAD_FRAC = 0.5
 FLAG_POP_MS = 300
 KING_SHAKE_MS = 360
 TAKEOVER_PAUSE_MS = 1000
@@ -56,6 +59,7 @@ PROJECTILE_TRAVEL_MS = 260
 PROJECTILE_MAX_MS = 1400
 PIECE_SHAKE_AMP_FRAC = 0.06
 WOUND_SPARKS = 6
+WOUND_SWEAR_CHANCE = 0.5
 
 RAGDOLL_LAUNCH_FRAC = 0.45
 RAGDOLL_LAUNCH_X_FRAC = 1.6
@@ -467,6 +471,7 @@ class EffectManager:
             self.captures.remove(c)
 
     def _wound(self, now, sq, cell):
+        swears = self.rng.random() < WOUND_SWEAR_CHANCE
         self.particles.append({"kind": "blood", "victim_sq": sq, "cell": cell,
                                "start": now, "dur": BLOOD_MS})
         spark_size = max(int(cell * 0.06), 3)
@@ -477,6 +482,8 @@ class EffectManager:
                 "start": now, "dur": self._rnd(*SPARK_MS)})
         self._piece_shakes[sq] = {"start": now, "dur": SHAKE_SOFT_MS,
                                   "amp": max(int(cell * PIECE_SHAKE_AMP_FRAC), 2)}
+        if swears:
+            self.swear(now, sq, cell)
 
     def draw_holes(self, window, now):
         if self.geom is None:
@@ -706,16 +713,18 @@ class EffectManager:
         sw, sh = base.get_size()
         stroke_w = max(int(size_px * 0.03), 2)
         extrude = max(int(size_px * 0.06), 2)
-        glow_pad = max(int(size_px * 0.28), 6)
+        glow_pad = max(int(size_px * GLOW_PAD_FRAC), 8)
         pad = stroke_w + glow_pad + 4
         surf = pg.Surface((sw + pad * 2, sh + pad * 2 + extrude), pg.SRCALPHA)
         cx, cy = pad, pad
         glow_rgb = pg.Color(glow)[:3]
         gtext = font.render(text, True, (*glow_rgb, 255))
-        small = pg.transform.smoothscale(gtext, (max(sw // 5, 1), max(sh // 5, 1)))
-        blur = pg.transform.smoothscale(small, (sw + glow_pad * 2, sh + glow_pad * 2))
-        blur.fill((255, 255, 255, 150), special_flags=pg.BLEND_RGBA_MULT)
-        surf.blit(blur, (cx - glow_pad, cy - glow_pad))
+        gw, gh = gtext.get_size()
+        glow_layer = pg.Surface((gw + glow_pad * 2, gh + glow_pad * 2), pg.SRCALPHA)
+        glow_layer.blit(gtext, (glow_pad, glow_pad))
+        glow_layer = soft_blur(glow_layer, max(GLOW_BLUR_PASSES, int(math.log2(glow_pad))))
+        glow_layer.fill((255, 255, 255, GLOW_ALPHA), special_flags=pg.BLEND_RGBA_MULT)
+        surf.blit(glow_layer, (cx - glow_pad, cy - glow_pad))
         stroke_img = font.render(text, True, pg.Color(stroke))
         surf.blit(stroke_img, (cx, cy + extrude))
         for dx in (-stroke_w, 0, stroke_w):

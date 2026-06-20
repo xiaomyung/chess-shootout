@@ -1445,7 +1445,7 @@ class Board:
             from_sq=from_sq, victim_sq=victim_sq,
             cell_size=self.cell_size, power=power,
             occupied=self._occupied_squares(), on_fire=fire_cb)
-        self.effects.swear(now, victim_sq, self.cell_size)
+        self.effects.swear(now, from_sq, self.cell_size)
 
     def _capture_victim_square(self, piece, from_sq, to_sq):
         if self.match.piece_at(to_sq) is not None:

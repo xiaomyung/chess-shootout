@@ -474,6 +474,27 @@ def test_every_failed_check_makes_the_piece_swear():
     assert any(p.get("kind") == "tag" for p in fx.particles), "a failed wheel curses too"
 
 
+def test_failed_capture_swear_floats_over_the_attacker_not_the_victim():
+    app = Frontend(1100, 800)
+    _start_local(app)
+    frm, to = _set_queen_takes_pawn(app)
+    app.board.trigger_skillcheck_fail(frm, to)
+    tags = [p for p in app.board.effects.particles if p.get("kind") == "tag"]
+    assert tags, "a failed capture swears"
+    assert all(t["victim_sq"] == frm for t in tags), "the shooter (capturer) curses, not the victim"
+
+
+def test_aim_miss_swear_floats_over_the_attacker():
+    ctrl = AimController(_aim_centerable(), pg.Rect(0, 0, 80, 80), now_ms=0,
+                         geom=lambda sq: (sq.col * 80 + 40, sq.row * 80 + 40),
+                         from_sq=Square(6, 4), victim_sq=Square(3, 3), attacker_type="queen")
+    ctrl.update(10)
+    ctrl.handle_event(_tap())
+    tags = [p for p in ctrl._fx.particles if p.get("kind") == "tag"]
+    assert tags, "a miss spawns a swear"
+    assert tags[0]["victim_sq"] == Square(6, 4), "the shooter swears, not the target piece"
+
+
 # ---- fall-back-in restore (failed aim) -------------------------------------
 
 def test_failed_aim_drops_the_surviving_piece_back_in():

@@ -215,6 +215,33 @@ def test_stray_pellet_wounds_a_bystander_without_killing_it():
     assert bystander not in em._bystanders, "and the square won't be wounded twice"
 
 
+def test_wounded_bystander_swears_about_half_the_time():
+    em = _em()
+    sq = Square(4, 4)
+    for _ in range(400):
+        em._wound(0, sq, 80)
+    tags = _tags(em)
+    assert 160 < len(tags) < 240, "a piece hit by a stray bullet curses ~50% of the time"
+    assert all(t["victim_sq"] == sq for t in tags), "and the swear floats over the wounded piece"
+
+
+def test_soft_blur_stays_centered_no_directional_drift():
+    from chessshootout.frontend.visual.draw import soft_blur
+    w, h = 200, 120
+    surf = pg.Surface((w, h), pg.SRCALPHA)
+    pg.draw.rect(surf, (255, 0, 0, 255), pg.Rect(80, 48, 40, 24))
+    for passes in (3, 5, 6):
+        b = soft_blur(surf, passes)
+        cols = [sum(b.get_at((x, y))[3] for y in range(0, h, 2)) for x in range(w)]
+        rows = [sum(b.get_at((x, y))[3] for x in range(0, w, 2)) for y in range(h)]
+        cx = sum(x * cols[x] for x in range(w)) / sum(cols)
+        cy = sum(y * rows[y] for y in range(h)) / sum(rows)
+        assert abs(cx - 100) < 2.0, "blur must not drift sideways (cx={:.1f}, passes={})".format(
+            cx, passes)
+        assert abs(cy - 60) < 2.0, "blur must not drift vertically (cy={:.1f}, passes={})".format(
+            cy, passes)
+
+
 def test_lead_pellet_never_wounds_bystanders_only_the_victim_dies():
     em = _em()
     cx, cy = em.geom(Square(4, 4))
