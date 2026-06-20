@@ -126,16 +126,27 @@ def test_half_rtt_compensation_credits_laggy_tap():
     assert wheel.adjudicate(ch, recv, start_ms=0.0, half_rtt_ms=0.0) is False
 
 
-# ---- sweet-spot shrinks each rotation --------------------------------------
+# ---- sweet-spot shrinks smoothly, not in steps -----------------------------
 
-def test_arc_shrinks_each_rotation_to_a_floor():
+def test_arc_shrinks_continuously_to_a_floor():
     ch = WheelChallenge.from_seed("shrink")
     p = ch.period_ms
     assert ch.arc_width_at(0.0) == 60.0
-    assert ch.arc_width_at(p) == 50.0
-    assert ch.arc_width_at(p * 2) == 40.0
+    assert ch.arc_width_at(p * 0.25) == pytest.approx(57.5), "bleeds down mid-rotation, no step"
+    assert ch.arc_width_at(p * 0.5) == pytest.approx(55.0)
+    assert ch.arc_width_at(p) == pytest.approx(50.0)
+    assert ch.arc_width_at(p * 2) == pytest.approx(40.0)
     assert ch.arc_width_at(p * 6) == wheel.WHEEL_ARC_MIN_DEGREES
     assert ch.arc_width_at(p * 50) == wheel.WHEEL_ARC_MIN_DEGREES
+
+
+def test_arc_width_is_strictly_decreasing_until_the_floor():
+    ch = WheelChallenge.from_seed("mono")
+    p = ch.period_ms
+    widths = [ch.arc_width_at(p * i / 20.0) for i in range(109)]
+    for earlier, later in zip(widths, widths[1:]):
+        assert later < earlier, "the arc bleeds down every frame; no flat steps, never widens"
+    assert ch.arc_width_at(p * 6) == wheel.WHEEL_ARC_MIN_DEGREES, "and clamps at the floor"
 
 
 def test_needle_period_is_faster():

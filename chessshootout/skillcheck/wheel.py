@@ -47,7 +47,7 @@ class WheelChallenge:
         return (self.start_angle_deg + 360.0 * elapsed_ms / self.period_ms) % 360.0
 
     def arc_width_at(self, elapsed_ms):
-        rotations = int(max(elapsed_ms, 0.0) / self.period_ms)
+        rotations = max(elapsed_ms, 0.0) / self.period_ms
         shrunk = self.arc_width_deg - WHEEL_ARC_SHRINK_PER_ROTATION * rotations
         return max(WHEEL_ARC_MIN_DEGREES, shrunk)
 
