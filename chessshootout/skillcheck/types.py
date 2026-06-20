@@ -5,6 +5,7 @@ from enum import Enum
 class SkillCheckKind(Enum):
     NONE = "none"
     WHEEL = "wheel"
+    AIM = "aim"
 
 
 @dataclass(frozen=True)
