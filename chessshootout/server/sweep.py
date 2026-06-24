@@ -4,6 +4,8 @@ from chessshootout.server.connections import send
 from chessshootout.server.protocol import (
     ConnectionStatusMessage, FIRST_MOVE_ABORT_SECONDS, Reason,
 )
+from chessshootout.skillcheck import online
+from chessshootout.skillcheck.types import SkillCheckKind
 
 
 log = logging_setup.get_logger("chess.server.app")
@@ -46,7 +48,13 @@ class Sweep:
             pending = room.pending_skillcheck
             if room.result is not None or pending is None:
                 continue
-            if now_ms > pending.expires_at_ms:
+            expired = now_ms > pending.expires_at_ms
+            if not expired and pending.kind == SkillCheckKind.AIM:
+                challenge = online.challenge_from(
+                    pending.kind, pending.seed, pending.value_diff)
+                expired = online.aim_expired(
+                    challenge, now_ms - pending.start_ms, pending.miss_count)
+            if expired:
                 log.info("skillcheck deadline room=%s color=%s kind=%s",
                          room.room_id, pending.color, pending.kind.value)
                 await resolve_skillcheck_fail(self.connections, room)

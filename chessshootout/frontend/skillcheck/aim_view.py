@@ -1,12 +1,15 @@
 import pygame as pg
 
-from chessshootout.frontend.skillcheck.controller import SkillCheckController
+from chessshootout.frontend.skillcheck.controller import (
+    SkillCheckController, SKILLCHECK_RESULT_HOLD_MS)
 from chessshootout.frontend.visual.colors import Colors
 from chessshootout.frontend.visual.draw import supersample
 from chessshootout.frontend.visual.effects import EffectManager
 
 AIM_TIME_LIMIT_MS = 5000
 AIM_RESULT_HOLD_MS = 420
+AIM_MISS_FLASH_MS = 240
+AIM_SHOT_HOLD_MS = 120
 AIM_SCRIM_ALPHA = 206
 AIM_VIEW_SPAN = 2.6
 AIM_PATH_SAMPLES = 96
@@ -27,14 +30,22 @@ class AimController(SkillCheckController):
 
     def __init__(self, challenge, cell_rect, now_ms, deadline_ms=AIM_TIME_LIMIT_MS,
                  victim_surface=None, board_rect=None, geom=None, from_sq=None,
-                 victim_sq=None, attacker_type=None, shot_sound=None):
+                 victim_sq=None, attacker_type=None, shot_sound=None, on_shot=None,
+                 miss_count=0):
         self.challenge = challenge
         self.start_ms = now_ms
         self._now = now_ms
         self.deadline_ms = deadline_ms
-        self.miss_count = 0
+        self.miss_count = miss_count
+        self._on_shot = on_shot
+        self._online = on_shot is not None
         self._committed_at = None
+        self._resolved_at = None
         self._landed = None
+        self._last_miss_ms = None
+        self._shot_render = None
+        self._shot_offset = None
+        self._shot_held_until = None
         self._victim = victim_surface
         self.cell_size = 0
         self._from_sq = from_sq if from_sq is not None else _SHOOTER_KEY
@@ -82,27 +93,42 @@ class AimController(SkillCheckController):
 
     def _fire(self):
         elapsed = self._now - self.start_ms
-        if self.challenge.on_target(elapsed, self.miss_count):
+        if not self._online and self.challenge.on_target(elapsed, self.miss_count):
             self._landed = True
             self._committed_at = self._now
             return
+        self._shot_render = (elapsed, self.miss_count)
+        self._shot_offset = self.challenge.reticle_offset(elapsed, self.miss_count)
+        self._shot_held_until = self._now + AIM_SHOT_HOLD_MS
         self.miss_count += 1
+        self._last_miss_ms = self._now
         self._fx.miss(now_ms=self._now, attacker_type=self._attacker_type,
                       from_sq=self._from_sq, victim_sq=self._victim_sq,
                       cell_size=self.cell_size, power="soft",
                       on_fire=self._shot_sound, callout=False)
         self._fx.swear(self._now, self._from_sq, self.cell_size)
+        if self._online:
+            self._on_shot(elapsed)
+
+    def resolve(self, won):
+        self._landed = won
+        if self._committed_at is None:
+            self._committed_at = self._now
+        self._resolved_at = self._now
 
     def update(self, now_ms):
         self._now = now_ms
         self._fx.update(now_ms)
-        if self._committed_at is None and self.challenge.is_expired(
-                now_ms - self.start_ms, self.miss_count):
+        if (not self._online and self._committed_at is None
+                and self.challenge.is_expired(now_ms - self.start_ms, self.miss_count)):
             self._landed = False
             self._committed_at = now_ms
 
     @property
     def done(self):
+        if self._online:
+            return (self._resolved_at is not None
+                    and self._now - self._resolved_at >= SKILLCHECK_RESULT_HOLD_MS)
         return (self._committed_at is not None
                 and self._now - self._committed_at >= AIM_RESULT_HOLD_MS)
 
@@ -114,12 +140,18 @@ class AimController(SkillCheckController):
         frozen = self._committed_at if self._committed_at is not None else self._now
         return frozen - self.start_ms
 
+    def _render_state(self):
+        if (self._committed_at is not None and self._landed is not None
+                and self._shot_render is not None):
+            return self._shot_render
+        return self._frozen_elapsed(), self.miss_count
+
     def draw(self, window):
-        elapsed = self._frozen_elapsed()
+        elapsed, miss = self._render_state()
         self._draw_scrim(window)
         self._draw_spotlight(window)
-        self._draw_victim(window, elapsed)
-        self._draw_reticle(window, elapsed)
+        self._draw_victim(window, elapsed, miss)
+        self._draw_reticle(window, elapsed, miss)
         self._fx.draw_holes(window, self._now)
         self._fx.draw_over(window, self._now)
 
@@ -148,10 +180,10 @@ class AimController(SkillCheckController):
         glow = pg.transform.smoothscale(self._spotlight_base(), (2 * r, 2 * r))
         window.blit(glow, glow.get_rect(center=self.center))
 
-    def _draw_victim(self, window, elapsed):
+    def _draw_victim(self, window, elapsed, miss):
         if self._victim is None:
             return
-        scale = self.challenge.piece_scale(elapsed, self.miss_count)
+        scale = self.challenge.piece_scale(elapsed, miss)
         if scale <= 0.0:
             return
         w = max(int(self._victim.get_width() * scale), 1)
@@ -159,16 +191,34 @@ class AimController(SkillCheckController):
         img = pg.transform.smoothscale(self._victim, (w, h))
         window.blit(img, img.get_rect(center=self.center))
 
-    def _draw_reticle(self, window, elapsed):
-        won = self._committed_at is not None and self._landed
-        live = pg.Color(Colors.win if won else Colors.accent)
+    def _reticle_colors(self):
+        if self._committed_at is not None and self._landed is not None:
+            verdict = pg.Color(Colors.win if self._landed else Colors.loss)
+            return verdict, pg.Color(verdict)
+        live = pg.Color(Colors.accent)
+        cross_col = pg.Color(Colors.text)
+        if self._last_miss_ms is not None:
+            flash = max(0.0, 1.0 - (self._now - self._last_miss_ms) / AIM_MISS_FLASH_MS)
+            if flash > 0.0:
+                loss = pg.Color(Colors.loss)
+                live = live.lerp(loss, flash)
+                cross_col = cross_col.lerp(loss, flash)
+        return live, cross_col
+
+    def _crosshair_offset(self, elapsed, miss):
+        if (self._committed_at is None and self._shot_offset is not None
+                and self._now < self._shot_held_until):
+            return self._shot_offset
+        return self.challenge.reticle_offset(elapsed, miss)
+
+    def _draw_reticle(self, window, elapsed, miss):
+        live, cross_col = self._reticle_colors()
         path_col = live.lerp(pg.Color(Colors.bg), AIM_PATH_DIM)
-        cross_col = pg.Color(Colors.win if won else Colors.text)
         cell = self.cell_size
         span = max(int(cell * AIM_VIEW_SPAN), 8)
-        hit_rx, hit_ry = self.challenge.hit_radii(elapsed, self.miss_count)
-        ox, oy = self.challenge.reticle_offset(elapsed, self.miss_count)
-        path = (self.challenge.path_offsets(elapsed, self.miss_count, AIM_PATH_SAMPLES)
+        hit_rx, hit_ry = self.challenge.hit_radii(elapsed, miss)
+        ox, oy = self._crosshair_offset(elapsed, miss)
+        path = (self.challenge.path_offsets(elapsed, miss, AIM_PATH_SAMPLES)
                 if AIM_SHOW_PATH else None)
 
         def render(surf, k):

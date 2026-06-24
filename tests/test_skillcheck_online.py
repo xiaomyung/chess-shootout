@@ -52,19 +52,30 @@ def test_value_diff_capture_is_capturer_minus_captured():
     assert online.value_diff_for(facts) == -8
 
 
-def test_value_diff_noncapturing_promotion_uses_chosen_piece():
+def test_value_diff_promotion_scores_as_a_pawn_capturing_the_promoted_piece():
     facts = TriggerFacts(is_promotion=True)
-    assert online.value_diff_for(facts, "q") == PIECE_VALUES[PieceType.QUEEN]
-    assert online.value_diff_for(facts, "n") == PIECE_VALUES[PieceType.KNIGHT]
+    pawn = PIECE_VALUES[PieceType.PAWN]
+    assert online.value_diff_for(facts, "q") == pawn - PIECE_VALUES[PieceType.QUEEN]
+    assert online.value_diff_for(facts, "q") == -8, "queen promotion is as easy as pawn x queen"
+    assert online.value_diff_for(facts, "n") == pawn - PIECE_VALUES[PieceType.KNIGHT]
+    assert online.value_diff_for(facts, "n") == -2, "knight underpromotion is a bit harder"
 
 
-def test_value_diff_capturing_promotion_uses_the_capture_not_the_piece():
+def test_promotion_takes_precedence_over_the_landing_capture_for_value():
     facts = TriggerFacts(is_capture=True, capturer_value=1, captured_value=5, is_promotion=True)
-    assert online.value_diff_for(facts, "q") == -4, "a capturing promotion scores as the capture"
+    assert online.value_diff_for(facts, "q") == -8, \
+        "a capturing promotion scores as the piece it promotes to, not the piece it lands on"
 
 
 def test_value_diff_quiet_move_is_zero():
     assert online.value_diff_for(TriggerFacts()) == 0
+
+
+def test_promotion_value_drives_an_easy_slow_needle():
+    diff = online.value_diff_for(TriggerFacts(is_promotion=True), "q")
+    assert diff < 0
+    assert period_for_diff(diff) > period_for_diff(0), \
+        "promoting to a queen spins slower (easier) -- the same as a pawn taking a queen"
 
 
 def test_promo_value_maps_chars_through_piece_values():
@@ -131,13 +142,13 @@ def _never_arc():
                           start_angle_deg=0.0)
 
 
-def test_shot_elapsed_subtracts_full_rtt_and_quantizes_to_int():
-    e = online.shot_elapsed_ms(recv_ms=1500.7, start_ms=1000.0, credit_ms=100.0)
-    assert e == 400 and isinstance(e, int)
+def test_adjudicated_elapsed_uses_the_client_value_when_physically_plausible():
+    e = online.adjudicated_elapsed_ms(client_elapsed_ms=380.4, recv_ms=1500.0, start_ms=1000.0)
+    assert e == 380 and isinstance(e, int), "honest play is judged at exactly what the client saw"
 
 
-def test_shot_elapsed_clamps_negative_to_zero():
-    assert online.shot_elapsed_ms(recv_ms=1000.0, start_ms=1000.0, credit_ms=200.0) == 0
+def test_adjudicated_elapsed_floors_at_zero():
+    assert online.adjudicated_elapsed_ms(0.0, recv_ms=1000.0, start_ms=1000.0) == 0
 
 
 def test_shot_below_human_floor_never_wins_either_kind():
@@ -172,26 +183,29 @@ def test_is_past_deadline_boundary():
     assert online.is_past_deadline(online.SKILLCHECK_DEADLINE_MS + 0.1) is True
 
 
-# ---- rtt credit policy: session-min + cap, never inflatable -----------------
+# ---- bounded lag-comp: honest play exact, cheating capped to the lag window -
 
-def test_rtt_credit_is_session_min_not_latest():
-    assert online.rtt_credit_ms(rtt_at_issue_ms=200.0, session_min_ms=20.0) == 20.0
-
-
-def test_rtt_credit_capped():
-    assert online.rtt_credit_ms(5000.0, 5000.0) == online.SKILLCHECK_RTT_CAP_MS
+def test_a_too_late_claim_is_clamped_down_to_the_arrival_time():
+    # the player cannot have perceived MORE elapsed than the shot physically took to arrive
+    assert online.adjudicated_elapsed_ms(9999.0, recv_ms=1500.0, start_ms=1000.0) == 500
 
 
-def test_rtt_credit_clamps_negative_inputs_to_zero():
-    assert online.rtt_credit_ms(-50.0, -10.0) == 0.0
+def test_a_too_early_claim_is_clamped_up_to_the_lag_bound():
+    # raw = 1000, bound 200 -> earliest plausible perceived elapsed is raw - bound = 800
+    assert online.adjudicated_elapsed_ms(0.0, recv_ms=2000.0, start_ms=1000.0) == 800
 
 
-def test_rtt_inflation_cannot_buy_a_sub_floor_win():
-    challenge = _always_arc()
-    credit = online.rtt_credit_ms(rtt_at_issue_ms=200.0, session_min_ms=20.0)
-    elapsed = online.shot_elapsed_ms(recv_ms=120.0, start_ms=0.0, credit_ms=credit)
-    assert elapsed == 100, "a 20ms session-min credit, not 200, so a 120ms arrival stays sub-floor"
-    assert online.shot_wins(WHEEL, challenge, elapsed) is False
+def test_the_manipulable_window_is_exactly_the_lag_bound():
+    lo = online.adjudicated_elapsed_ms(-1e9, recv_ms=5000.0, start_ms=0.0)
+    hi = online.adjudicated_elapsed_ms(1e9, recv_ms=5000.0, start_ms=0.0)
+    assert hi - lo == int(online.SKILLCHECK_LAG_BOUND_MS), \
+        "a modded client can shift its effective time by at most the lag bound"
+
+
+def test_a_forged_early_claim_cannot_buy_a_sub_floor_win():
+    effective = online.adjudicated_elapsed_ms(0.0, recv_ms=119.0, start_ms=0.0)
+    assert effective == 0
+    assert online.shot_wins(WHEEL, _always_arc(), effective) is False, "sub-floor stays a loss"
 
 
 # ---- aim no longer crashes on a negative effective elapsed ------------------

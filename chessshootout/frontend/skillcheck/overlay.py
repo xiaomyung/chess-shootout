@@ -38,6 +38,10 @@ class SkillCheckOverlay:
         if setter is not None:
             setter(board_rect)
 
+    def resolve_online(self, won):
+        if self._controller is not None:
+            self._controller.resolve(won)
+
     def cancel(self):
         self._controller = None
         self._context = None

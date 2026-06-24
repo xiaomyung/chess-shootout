@@ -1,3 +1,6 @@
+SKILLCHECK_RESULT_HOLD_MS = 200
+
+
 class SkillCheckController:
 
     def handle_event(self, event):

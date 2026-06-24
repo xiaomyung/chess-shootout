@@ -2,7 +2,8 @@ import math
 
 import pygame as pg
 
-from chessshootout.frontend.skillcheck.controller import SkillCheckController
+from chessshootout.frontend.skillcheck.controller import (
+    SkillCheckController, SKILLCHECK_RESULT_HOLD_MS)
 from chessshootout.frontend.visual.colors import Colors
 from chessshootout.frontend.visual.draw import rounded_rect_surface, supersample
 from chessshootout.frontend.visual.fonts import get_font
@@ -48,14 +49,19 @@ def _needle_polygon(cx, cy, deg, length, width):
 
 class WheelController(SkillCheckController):
 
-    def __init__(self, challenge, cell_rect, now_ms, deadline_ms=WHEEL_DEFAULT_DEADLINE_MS):
+    def __init__(self, challenge, cell_rect, now_ms, deadline_ms=WHEEL_DEFAULT_DEADLINE_MS,
+                 on_shot=None):
         self.challenge = challenge
         self._apply_geometry(cell_rect)
         self.start_ms = now_ms
         self._now = now_ms
         self.deadline_ms = deadline_ms
         self._committed_at = None
+        self._resolved_at = None
         self._landed = None
+        self._on_shot = on_shot
+        self._online = on_shot is not None
+        self._fired_online = False
 
     def _apply_geometry(self, cell_rect):
         self.center = cell_rect.center
@@ -73,20 +79,38 @@ class WheelController(SkillCheckController):
         if self._committed_at is not None:
             return True
         if event.type == pg.MOUSEBUTTONDOWN and event.button == 1:
-            self._commit(self._landed_now())
+            self._fire()
             return True
         if event.type == pg.KEYDOWN and event.key in (pg.K_SPACE, pg.K_RETURN):
-            self._commit(self._landed_now())
+            self._fire()
             return True
         return False
 
+    def _fire(self):
+        if self._online:
+            self._fired_online = True
+            self._committed_at = self._now
+            self._on_shot(self._now - self.start_ms)
+            return
+        self._commit(self._landed_now())
+
+    def resolve(self, won):
+        self._landed = won
+        if self._committed_at is None:
+            self._committed_at = self._now
+        self._resolved_at = self._now
+
     def update(self, now_ms):
         self._now = now_ms
-        if self._committed_at is None and now_ms - self.start_ms >= self.deadline_ms:
+        if (not self._online and self._committed_at is None
+                and now_ms - self.start_ms >= self.deadline_ms):
             self._commit(False)
 
     @property
     def done(self):
+        if self._online:
+            return (self._resolved_at is not None
+                    and self._now - self._resolved_at >= SKILLCHECK_RESULT_HOLD_MS)
         return (self._committed_at is not None
                 and self._now - self._committed_at >= WHEEL_RESULT_HOLD_MS)
 
@@ -137,7 +161,7 @@ class WheelController(SkillCheckController):
 
             arc_width = self.challenge.arc_width_at(elapsed)
             arc_color = Colors.accent
-            if self._committed_at is not None:
+            if self._committed_at is not None and self._landed is not None:
                 arc_color = Colors.win if self._landed else Colors.loss
             band = _band_polygon(c, c, (self.radius - self.band_w) * k, radius,
                                  self.challenge.arc_start_deg,

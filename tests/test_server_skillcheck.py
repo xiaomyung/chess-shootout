@@ -122,10 +122,10 @@ def _aim_miss_elapsed(pending):
 
 async def _shoot_at(app, clock, room, color, elapsed_ms):
     start = room.pending_skillcheck.start_ms
-    target_now = (start + elapsed_ms) / 1000.0
-    clock.set(target_now)
+    clock.set((start + elapsed_ms) / 1000.0)
     ws = app.state.connections.get_for_color(room, color)
-    return await handle_skill_check_shot(app, ws, room, color, '{"type":"skill_check_shot"}')
+    raw = json.dumps({"type": "skill_check_shot", "client_elapsed_ms": elapsed_ms})
+    return await handle_skill_check_shot(app, ws, room, color, raw)
 
 
 # ---- the move gate ---------------------------------------------------------
@@ -469,3 +469,116 @@ async def test_resolve_fail_is_idempotent(app, clock):
     first = await resolve_skillcheck_fail(app.state.connections, room)
     second = await resolve_skillcheck_fail(app.state.connections, room)
     assert first is not None and second is None, "a second resolve finds pending already cleared"
+
+
+# ---- bounded lag-comp: the shot carries the client's rendered elapsed -------
+
+async def _shoot_claiming(app, clock, room, color, *, arrives_at_ms, claims_ms):
+    """A shot that physically lands at arrives_at_ms but reports claims_ms as the elapsed."""
+    clock.set((room.pending_skillcheck.start_ms + arrives_at_ms) / 1000.0)
+    ws = app.state.connections.get_for_color(room, color)
+    raw = json.dumps({"type": "skill_check_shot", "client_elapsed_ms": claims_ms})
+    return await handle_skill_check_shot(app, ws, room, color, raw)
+
+
+@pytest.mark.asyncio
+async def test_honest_shot_is_judged_at_the_clients_rendered_elapsed(app, clock):
+    room, ws_w, ws_b, frm, to = await _capture_room(app, clock, WHEEL)
+    await handle_move(app, ws_w, room, "white", _move_raw(frm, to))
+    win = _win_elapsed(room.pending_skillcheck)
+    out = await _shoot_at(app, clock, room, "white", win)
+    assert out.startswith("applied"), "the server judges the exact moment the player saw"
+
+
+@pytest.mark.asyncio
+async def test_network_lag_inside_the_bound_does_not_steal_a_clean_hit(app, clock):
+    room, ws_w, ws_b, frm, to = await _capture_room(app, clock, WHEEL)
+    await handle_move(app, ws_w, room, "white", _move_raw(frm, to))
+    win = _win_elapsed(room.pending_skillcheck)
+    # claims the visual win moment, but the packet lands 80ms later — still inside [raw-bound, raw]
+    out = await _shoot_claiming(app, clock, room, "white", arrives_at_ms=win + 80, claims_ms=win)
+    assert out.startswith("applied"), "latency inside the bound never steals a clean hit"
+
+
+@pytest.mark.asyncio
+async def test_a_too_early_claim_is_clamped_to_the_lag_bound(app, clock):
+    room, ws_w, ws_b, frm, to = await _capture_room(app, clock, WHEEL)
+    await handle_move(app, ws_w, room, "white", _move_raw(frm, to))
+    pending = room.pending_skillcheck
+    ch = online.challenge_from(pending.kind, pending.seed, pending.value_diff)
+    bounded = int(2000 - online.SKILLCHECK_LAG_BOUND_MS)
+    out = await _shoot_claiming(app, clock, room, "white", arrives_at_ms=2000, claims_ms=0.0)
+    expected = "applied" if online.shot_wins(WHEEL, ch, bounded, 0) else "skillcheck_fail"
+    assert out.split(":")[0] == expected.split(":")[0], \
+        "a forged-early claim is judged at raw-bound, never the impossible value it claimed"
+
+
+# ---- the required message + pending wire carry the move squares -------------
+
+@pytest.mark.asyncio
+async def test_required_message_carries_the_move_squares(app, clock):
+    room, ws_w, ws_b, frm, to = await _capture_room(app, clock, WHEEL)
+    await handle_move(app, ws_w, room, "white", _move_raw(frm, to))
+    req = ws_w.of_type("skill_check_required")[-1]
+    assert req["from"] == coord_from_square(frm)
+    assert req["to"] == coord_from_square(to)
+    assert req["promotion"] is None
+
+
+@pytest.mark.asyncio
+async def test_pending_wire_carries_squares_color_and_promotion(app, clock):
+    room, ws_w, ws_b, frm, to = await _capture_room(app, clock, AIM)
+    await handle_move(app, ws_w, room, "white", _move_raw(frm, to))
+    wire = _resume_payload(app, room, "white")
+    assert wire.from_sq == coord_from_square(frm)
+    assert wire.to_sq == coord_from_square(to)
+    assert wire.color == "white"
+    assert wire.promotion is None
+
+
+@pytest.mark.asyncio
+async def test_resume_wire_omits_a_pending_past_its_deadline(app, clock):
+    room, ws_w, ws_b, frm, to = await _capture_room(app, clock, WHEEL)
+    await handle_move(app, ws_w, room, "white", _move_raw(frm, to))
+    clock.advance((online.SKILLCHECK_DEADLINE_MS + 50) / 1000.0)
+    assert room.pending_skillcheck is not None, "the sweep has not run yet"
+    assert _resume_payload(app, room, "white") is None, \
+        "a reconnect must not re-hand an already-dead check"
+
+
+@pytest.mark.asyncio
+async def test_shot_and_sweep_in_the_same_tick_resolve_exactly_once(app, clock):
+    room, ws_w, ws_b, frm, to = await _capture_room(app, clock, WHEEL)
+    await handle_move(app, ws_w, room, "white", _move_raw(frm, to))
+    ws_b.sent.clear()
+    out = await _shoot_at(app, clock, room, "white", int(online.SKILLCHECK_DEADLINE_MS) + 10)
+    await app.state.sweep.step_skillcheck_deadline()
+    assert out == "skillcheck_fail"
+    assert len(ws_b.of_type("skill_check_result")) == 1, "exactly one fail broadcast"
+
+
+# ---- sweep aligns the AIM fail with the piece disappearing ------------------
+
+@pytest.mark.asyncio
+async def test_sweep_fails_an_aim_check_when_the_piece_has_shrunk(app, clock):
+    room, ws_w, ws_b, frm, to = await _capture_room(app, clock, AIM)
+    await handle_move(app, ws_w, room, "white", _move_raw(frm, to))
+    pending = room.pending_skillcheck
+    pending.miss_count = 8  # heavy misses -> the victim shrinks to 0 well before 5s
+    ch = online.challenge_from(pending.kind, pending.seed, pending.value_diff)
+    gone_at = next(e for e in range(200, int(online.SKILLCHECK_DEADLINE_MS))
+                   if online.aim_expired(ch, e, pending.miss_count))
+    assert gone_at < online.SKILLCHECK_DEADLINE_MS, "the shrink outruns the 5s deadline"
+    clock.set((pending.start_ms + gone_at + 1) / 1000.0)
+    await app.state.sweep.step_skillcheck_deadline()
+    assert room.pending_skillcheck is None, "the fail lands when the piece is gone, not at 5s"
+    assert (frm, to) in room.skillcheck_locks
+
+
+@pytest.mark.asyncio
+async def test_sweep_does_not_early_fail_an_aim_check_while_the_piece_remains(app, clock):
+    room, ws_w, ws_b, frm, to = await _capture_room(app, clock, AIM)
+    await handle_move(app, ws_w, room, "white", _move_raw(frm, to))
+    clock.advance(0.5)  # piece still large, well inside the deadline
+    await app.state.sweep.step_skillcheck_deadline()
+    assert room.pending_skillcheck is not None, "an on-screen aim check is not swept early"

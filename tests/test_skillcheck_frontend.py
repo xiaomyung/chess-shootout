@@ -21,16 +21,20 @@ from chessshootout.backend.pieces import Piece, PieceType, PieceColor
 from chessshootout.backend.utils import Square
 from chessshootout.domain.premoves import Premove
 from chessshootout.frontend.frontend import Frontend
-from chessshootout.frontend.skillcheck.aim_view import AimController, AIM_RESULT_HOLD_MS
+from chessshootout.frontend.skillcheck.aim_view import (
+    AimController, AIM_RESULT_HOLD_MS, AIM_MISS_FLASH_MS, AIM_SHOT_HOLD_MS)
+from chessshootout.frontend.skillcheck.controller import SKILLCHECK_RESULT_HOLD_MS
 from chessshootout.frontend.skillcheck.overlay import SkillCheckOverlay
 from chessshootout.frontend.skillcheck.registry import build_controller
 from chessshootout.frontend.skillcheck.wheel_view import WheelController, WHEEL_RESULT_HOLD_MS
+from chessshootout.frontend.visual.colors import Colors
 from chessshootout.skillcheck.aim import AimChallenge
 from chessshootout.skillcheck.coordinator import move_roll_key
 from chessshootout.skillcheck.rng import ply_roll
 from chessshootout.skillcheck.triggers import select_skillcheck
 from chessshootout.skillcheck.types import SkillCheckKind
-from chessshootout.skillcheck.wheel import WheelChallenge, WHEEL_HUMAN_FLOOR_MS
+from chessshootout.skillcheck.wheel import (
+    WheelChallenge, WHEEL_HUMAN_FLOOR_MS, placement_square)
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -260,6 +264,163 @@ def test_aim_relayout_reanchors_and_set_board_rect_updates_region():
     assert ctrl._board_rect == pg.Rect(10, 10, 700, 700)
 
 
+# ---- neutral (online) controller mode --------------------------------------
+
+def test_wheel_online_tap_sends_a_shot_and_never_resolves_locally():
+    shots = []
+    ctrl = WheelController(_always_in_arc(), pg.Rect(0, 0, 80, 80), now_ms=0,
+                           on_shot=lambda *a: shots.append(1))
+    ctrl.update(int(WHEEL_HUMAN_FLOOR_MS) + 50)
+    ctrl.handle_event(_tap())
+    assert shots == [1], "firing sends exactly one shot to the server"
+    assert ctrl.landed is None, "the client never paints its own verdict online"
+    assert ctrl.done is False
+
+
+def test_wheel_online_does_not_auto_fail_at_the_deadline():
+    ctrl = WheelController(_always_in_arc(), pg.Rect(0, 0, 80, 80), now_ms=0,
+                           deadline_ms=1500, on_shot=lambda *a: None)
+    ctrl.update(3000)
+    assert ctrl.landed is None, "the server sweep fails an unanswered wheel, not the client"
+    assert ctrl.done is False
+
+
+def test_wheel_online_is_still_one_shot():
+    shots = []
+    ctrl = WheelController(_always_in_arc(), pg.Rect(0, 0, 80, 80), now_ms=0,
+                           on_shot=lambda *a: shots.append(1))
+    ctrl.update(int(WHEEL_HUMAN_FLOOR_MS) + 50)
+    ctrl.handle_event(_tap())
+    ctrl.update(int(WHEEL_HUMAN_FLOOR_MS) + 80)
+    ctrl.handle_event(_tap())
+    assert shots == [1]
+
+
+def test_wheel_online_frozen_draw_does_not_crash():
+    ctrl = WheelController(_always_in_arc(), pg.Rect(40, 40, 80, 80), now_ms=0,
+                           on_shot=lambda *a: None)
+    ctrl.update(int(WHEEL_HUMAN_FLOOR_MS) + 50)
+    ctrl.handle_event(_tap())
+    ctrl.update(int(WHEEL_HUMAN_FLOOR_MS) + 60)
+    ctrl.draw(pg.display.get_surface())
+    assert ctrl.landed is None
+
+
+def test_aim_online_tap_is_optimistic_miss_never_a_local_win():
+    shots = []
+    ctrl = _aim_ctrl(on_shot=lambda *a: shots.append(1))
+    ctrl.update(375)
+    ctrl.handle_event(_tap())
+    assert shots == [1], "the shot goes to the server"
+    assert ctrl.landed is None, "even a geometrically on-target tap is only the server's to upgrade"
+    assert ctrl.miss_count == 1
+    fired = [c for c in ctrl._fx.captures if c.get("miss")]
+    assert fired and fired[0]["callout"] is False, "optimistic dry-fire feedback, no big verdict"
+
+
+def test_aim_online_does_not_self_fail_at_expiry():
+    ctrl = _aim_ctrl(on_shot=lambda *a: None)
+    ctrl.update(6000)
+    assert ctrl.landed is None, "the server decides expiry online"
+    assert ctrl.done is False
+
+
+def test_aim_online_post_expiry_draw_does_not_crash():
+    ctrl = AimController(_aim_centerable(), pg.Rect(40, 40, 80, 80), now_ms=0,
+                         victim_surface=pg.Surface((80, 80), pg.SRCALPHA),
+                         board_rect=pg.Rect(0, 0, 640, 640), on_shot=lambda *a: None)
+    ctrl.update(7000)
+    ctrl.draw(pg.display.get_surface())
+    assert ctrl.landed is None
+
+
+def test_aim_online_resume_seeds_the_miss_count():
+    ctrl = _aim_ctrl(on_shot=lambda *a: None, miss_count=2)
+    assert ctrl.miss_count == 2, "a resumed aim check restores the server's miss_count"
+
+
+def test_wheel_online_resolve_holds_the_verdict_then_finishes():
+    ctrl = WheelController(_always_in_arc(), pg.Rect(0, 0, 80, 80), now_ms=0,
+                           on_shot=lambda *a: None)
+    ctrl.update(300)
+    ctrl.handle_event(_tap())
+    ctrl.update(350)
+    ctrl.resolve(True)
+    assert ctrl.landed is True
+    assert ctrl.done is False, "the green verdict holds before the move applies"
+    ctrl.update(350 + SKILLCHECK_RESULT_HOLD_MS)
+    assert ctrl.done is True
+
+
+def test_aim_online_resolve_loss_holds_then_finishes():
+    ctrl = _aim_ctrl(on_shot=lambda *a: None)
+    ctrl.update(300)
+    ctrl.resolve(False)
+    assert ctrl.landed is False
+    assert ctrl.done is False
+    ctrl.update(300 + SKILLCHECK_RESULT_HOLD_MS)
+    assert ctrl.done is True
+
+
+def test_aim_miss_flashes_red_then_fades_to_normal():
+    ctrl = _aim_ctrl(on_shot=lambda *a: None)
+    ctrl.update(10)
+    ctrl.handle_event(_tap())
+    fresh, _ = ctrl._reticle_colors()
+    assert fresh != pg.Color(Colors.accent), "a fresh miss tints the reticle red"
+    ctrl.update(10 + AIM_MISS_FLASH_MS + 50)
+    faded, _ = ctrl._reticle_colors()
+    assert faded == pg.Color(Colors.accent), "the red flash fades back to normal color"
+
+
+def test_aim_online_locks_render_on_the_clicked_shot_not_the_resolve_time():
+    ctrl = _aim_ctrl(on_shot=lambda *a: None)
+    ctrl.update(800)
+    ctrl.handle_event(_tap())
+    assert ctrl._shot_render == (800, 0), "the click is captured at fire, pre-increment"
+    ctrl.update(1100)
+    ctrl.resolve(True)
+    assert ctrl._render_state() == (800, 0), \
+        "the crosshair locks on the clicked point, not where it drifted during the RTT"
+
+
+def test_wheel_online_freezes_the_needle_at_the_fire_not_the_resolve():
+    ctrl = WheelController(_always_in_arc(), pg.Rect(0, 0, 80, 80), now_ms=0,
+                           on_shot=lambda *a: None)
+    ctrl.update(400)
+    ctrl.handle_event(_tap())
+    assert ctrl._committed_at == 400
+    ctrl.update(700)
+    ctrl.resolve(True)
+    assert ctrl._frozen_elapsed() == 400, "resolve never moves the frozen needle"
+
+
+def test_aim_online_crosshair_holds_at_the_shot_then_resumes():
+    ctrl = _aim_ctrl(on_shot=lambda *a: None)
+    ctrl.update(800)
+    ctrl.handle_event(_tap())
+    held = ctrl._shot_offset
+    assert held is not None
+    ctrl.update(800 + 30)
+    e, m = ctrl._now - ctrl.start_ms, ctrl.miss_count
+    assert ctrl._crosshair_offset(e, m) == held, "the crosshair holds at the click — no teleport"
+    ctrl.update(800 + AIM_SHOT_HOLD_MS + 50)
+    e, m = ctrl._now - ctrl.start_ms, ctrl.miss_count
+    assert ctrl._crosshair_offset(e, m) == ctrl.challenge.reticle_offset(e, m), \
+        "after the hold (no verdict) the crosshair resumes the live figure-8 for the next shot"
+
+
+def test_aim_online_resolve_lands_on_the_held_point_with_no_snap():
+    ctrl = _aim_ctrl(on_shot=lambda *a: None)
+    ctrl.update(800)
+    ctrl.handle_event(_tap())
+    held = ctrl._shot_offset
+    ctrl.update(840)
+    ctrl.resolve(True)
+    elapsed, miss = ctrl._render_state()
+    assert ctrl._crosshair_offset(elapsed, miss) == held, "verdict lands on the shot point, no snap"
+
+
 # ---- frontend gate integration ---------------------------------------------
 
 def _start_local(app):
@@ -335,6 +496,162 @@ def _shootout_with_wheel(app):
     frm, to = _set_queen_takes_pawn(app)
     app.skillcheck.reset(enabled=True, seed=_wheel_seed(app.match.backend, frm, to))
     return frm, to
+
+
+# ---- wheel random placement (gate) -----------------------------------------
+
+def _render_wheel(app, frm, to, seed, value_diff=8):
+    return app._skillcheck_render_square(SkillCheckKind.WHEEL, seed, value_diff, frm, to)
+
+
+def _seed_where(app, frm, to, value_diff, relocates):
+    for i in range(6000):
+        seed = "seek-{}".format(i)
+        if (_render_wheel(app, frm, to, seed, value_diff) != to) == relocates:
+            return seed
+    raise AssertionError("no seed found")
+
+
+def test_wheel_relocates_to_a_random_on_board_square():
+    app = Frontend(1100, 800)
+    _start_local(app)
+    frm, to = _set_queen_takes_pawn(app)
+    target = _render_wheel(app, frm, to, _seed_where(app, frm, to, 8, relocates=True))
+    assert target != to
+    assert 0 <= target.row < app.board.SIZE and 0 <= target.col < app.board.SIZE
+
+
+def test_wheel_can_still_spawn_on_the_capture_square():
+    app = Frontend(1100, 800)
+    _start_local(app)
+    frm, to = _set_queen_takes_pawn(app)
+    assert _render_wheel(app, frm, to, _seed_where(app, frm, to, 8, relocates=False)) == to
+
+
+def test_relocated_wheel_never_lands_on_the_from_or_to_square():
+    app = Frontend(1100, 800)
+    _start_local(app)
+    frm, to = _set_queen_takes_pawn(app)
+    relocated = [t for i in range(400)
+                 if (t := _render_wheel(app, frm, to, "avoid-{}".format(i))) != to]
+    assert relocated, "at p=0.9 plenty of seeds relocate"
+    assert all(t != frm and t != to for t in relocated), "only the move's own squares are excluded"
+
+
+def test_relocated_wheel_may_sit_on_another_piece():
+    app = Frontend(1100, 800)
+    _start_local(app)
+    frm, to = _set_queen_takes_pawn(app)
+    landed_on_a_piece = any(
+        (t := _render_wheel(app, frm, to, "onpiece-{}".format(i))) != to
+        and app.match.piece_at(t) is not None for i in range(400))
+    assert landed_on_a_piece, "bystander squares are fair game; only from/to are excluded"
+
+
+def test_placement_excludes_only_the_from_and_to_squares():
+    app = Frontend(1100, 800)
+    _start_local(app)
+    frm, to = _set_white_ep_capture(app)
+    assert app._placement_exclusions(frm, to) == {(frm.row, frm.col), (to.row, to.col)}
+
+
+def test_gate_target_matches_the_pure_engine_placement():
+    app = Frontend(1100, 800)
+    _start_local(app)
+    frm, to = _set_queen_takes_pawn(app)
+    for i in range(200):
+        seed = "match-{}".format(i)
+        engine = placement_square(seed, 8, app._placement_exclusions(frm, to), app.board.SIZE)
+        target = _render_wheel(app, frm, to, seed)
+        assert target == (to if engine is None else Square(engine[0], engine[1]))
+
+
+def test_wheel_placement_is_deterministic_across_app_instances():
+    one = Frontend(1100, 800)
+    _start_local(one)
+    f1, t1 = _set_queen_takes_pawn(one)
+    two = Frontend(1100, 800)
+    _start_local(two)
+    f2, t2 = _set_queen_takes_pawn(two)
+    assert _render_wheel(one, f1, t1, "same") == _render_wheel(two, f2, t2, "same")
+
+
+def test_steady_aim_never_relocates_even_for_a_lopsided_trade():
+    app = Frontend(1100, 800)
+    _start_local(app)
+    frm, to = _set_queen_takes_pawn(app)
+    for i in range(200):
+        assert app._skillcheck_render_square(
+            SkillCheckKind.AIM, "aim-{}".format(i), 8, frm, to) == to
+
+
+def _wheel_seed_that_relocates(app, frm, to):
+    for i in range(8000):
+        seed = "wp{}".format(i)
+        roll = ply_roll(seed, move_roll_key(len(app.match.move_history), frm, to))
+        if select_skillcheck(app.match.backend, frm, to, roll) != SkillCheckKind.WHEEL:
+            continue
+        app.skillcheck.reset(enabled=True, seed=seed)
+        app._teardown_skillcheck_overlay()
+        app._skillcheck_gate(frm, to)
+        relocated = app._skillcheck_target != to
+        app._teardown_skillcheck_overlay()
+        if relocated:
+            return seed
+    raise AssertionError("no relocating wheel seed")
+
+
+def test_relocated_wheel_positions_the_dial_there_and_draws():
+    app = Frontend(1100, 800)
+    _start_local(app)
+    frm, to = _set_queen_takes_pawn(app)
+    app.skillcheck.reset(enabled=True, seed=_wheel_seed_that_relocates(app, frm, to))
+    assert app._skillcheck_gate(frm, to) is True
+    target = app._skillcheck_target
+    assert target != to
+    ctrl = app.skillcheck_overlay._controller
+    assert isinstance(ctrl, WheelController)
+    assert ctrl.center == app.board.cell_rect(target).center
+    assert app.board.aim_suppressed_square is None, "a wheel never suppresses a live square"
+    app.draw_frame()
+
+
+def test_relocated_wheel_win_applies_the_original_capture():
+    app = Frontend(1100, 800)
+    _start_local(app)
+    frm, to = _set_queen_takes_pawn(app)
+    app.skillcheck.reset(enabled=True, seed=_wheel_seed_that_relocates(app, frm, to))
+    app._skillcheck_gate(frm, to)
+    assert app._skillcheck_target != to, "the dial relocated away from the capture square"
+    assert app.skillcheck_overlay._context == (frm, to, None), "the move context keeps real squares"
+    app._on_skillcheck_done(app.skillcheck_overlay._context, True)
+    assert len(app.match.move_history) == 1
+    assert app.match.piece_at(to).type == PieceType.QUEEN, "the real capture lands on the victim"
+
+
+def test_queen_promotion_scores_value_like_a_pawn_taking_a_queen():
+    app = Frontend(1100, 800)
+    _start_local(app)
+    frm, to = _set_white_pawn_promo(app)
+    assert app._capture_value_diff(frm, to, PieceType.QUEEN) == -8
+    assert app._capture_value_diff(frm, to, PieceType.KNIGHT) == -2
+
+
+def test_capturing_promotion_value_diff_uses_the_promoted_piece_not_the_capture():
+    app = Frontend(1100, 800)
+    _start_local(app)
+    frm, to = _set_white_capture_promo(app)
+    assert app._capture_value_diff(frm, to, PieceType.QUEEN) == -8, \
+        "a pawn taking a rook and promoting to a queen scores by the queen, not the rook"
+
+
+def test_queen_promotion_wheel_rarely_relocates():
+    app = Frontend(1100, 800)
+    _start_local(app)
+    frm, to = _set_white_pawn_promo(app)
+    relocated = sum(
+        _render_wheel(app, frm, to, "pr{}".format(i), value_diff=-8) != to for i in range(2000))
+    assert 0 < relocated < 400, "a queen promotion relocates roughly a tenth of the time"
 
 
 def test_premoved_capture_defers_into_the_skillcheck():
@@ -690,9 +1007,9 @@ def test_promotion_wheel_period_uses_the_chosen_piece():
     frm, to = _set_white_pawn_promo(app)
     queen = app._wheel_period(frm, to, PieceType.QUEEN)
     knight = app._wheel_period(frm, to, PieceType.KNIGHT)
-    assert queen == pytest.approx(period_for_diff(9))
-    assert knight == pytest.approx(period_for_diff(3))
-    assert queen < knight, "promoting to a queen is the hardest (fastest) wheel"
+    assert queen == pytest.approx(period_for_diff(-8)), "queen promotion scores like pawn x queen"
+    assert knight == pytest.approx(period_for_diff(-2))
+    assert queen > knight, "promoting to a queen is the easiest (slowest) wheel"
 
 
 def test_failed_non_capturing_promotion_bumps_instead_of_shooting():

@@ -8,7 +8,7 @@ from chessshootout.skillcheck.wheel import (
 
 SKILLCHECK_DEADLINE_MS = 5000.0
 SKILLCHECK_HUMAN_FLOOR_MS = WHEEL_HUMAN_FLOOR_MS
-SKILLCHECK_RTT_CAP_MS = 200.0
+SKILLCHECK_LAG_BOUND_MS = 200.0
 
 _PROMO_TYPE = {
     "q": PieceType.QUEEN, "r": PieceType.ROOK,
@@ -23,10 +23,10 @@ def promo_value(promo_char):
 
 
 def value_diff_for(facts, promo_char=None):
+    if facts.is_promotion:
+        return PIECE_VALUES[PieceType.PAWN] - promo_value(promo_char)
     if facts.is_capture:
         return facts.capturer_value - facts.captured_value
-    if facts.is_promotion:
-        return promo_value(promo_char)
     return 0
 
 
@@ -45,12 +45,11 @@ def select_kind(secret, ply_index, backend, from_sq, to_sq, locks):
     return select_skillcheck(backend, from_sq, to_sq, roll, locks)
 
 
-def rtt_credit_ms(rtt_at_issue_ms, session_min_ms, cap_ms=SKILLCHECK_RTT_CAP_MS):
-    return min(max(rtt_at_issue_ms, 0.0), max(session_min_ms, 0.0), cap_ms)
-
-
-def shot_elapsed_ms(recv_ms, start_ms, credit_ms):
-    return int(max(0.0, (recv_ms - start_ms) - credit_ms))
+def adjudicated_elapsed_ms(client_elapsed_ms, recv_ms, start_ms,
+                           bound_ms=SKILLCHECK_LAG_BOUND_MS):
+    raw = recv_ms - start_ms
+    bounded = min(max(client_elapsed_ms, raw - bound_ms), raw)
+    return int(max(0.0, bounded))
 
 
 def is_past_deadline(elapsed_ms):

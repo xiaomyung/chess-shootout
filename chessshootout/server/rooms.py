@@ -40,7 +40,6 @@ class PlayerSlot:
     disconnected_at: Optional[float] = None
     desync_active: bool = False
     last_seen: float = 0.0
-    rtt_min_ms: Optional[float] = None
 
 
 @dataclass

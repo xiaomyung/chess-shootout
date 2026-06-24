@@ -124,6 +124,12 @@ class PendingSkillCheckWire(BaseModel):
     deadline_ms: float
     elapsed_ms: float
     miss_count: int = 0
+    from_sq: str = Field(alias="from")
+    to_sq: str = Field(alias="to")
+    promotion: Optional[Literal["q", "r", "b", "n"]] = None
+    color: Literal["white", "black"]
+
+    model_config = {"populate_by_name": True}
 
 
 class MatchmakeRequest(_Base):
@@ -340,10 +346,16 @@ class SkillCheckRequiredMessage(_Base):
     value_diff: int
     deadline_ms: float
     miss_count: int = 0
+    from_sq: str = Field(alias="from")
+    to_sq: str = Field(alias="to")
+    promotion: Optional[Literal["q", "r", "b", "n"]] = None
+
+    model_config = {"populate_by_name": True}
 
 
 class SkillCheckShotMessage(_Base):
     type: Literal["skill_check_shot"] = "skill_check_shot"
+    client_elapsed_ms: float = 0.0
 
     model_config = {"extra": "ignore"}
 

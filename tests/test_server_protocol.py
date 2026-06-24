@@ -234,23 +234,33 @@ def test_protocol_version_bumped_for_skillchecks():
 
 
 def test_skill_check_required_round_trips():
-    msg = SkillCheckRequiredMessage(kind="wheel", seed="abc", value_diff=8, deadline_ms=5000.0)
-    assert msg.model_dump() == {
-        "version": PROTOCOL_VERSION, "type": "skill_check_required",
-        "kind": "wheel", "seed": "abc", "value_diff": 8,
-        "deadline_ms": 5000.0, "miss_count": 0,
-    }
-    assert SkillCheckRequiredMessage.model_validate(msg.model_dump()) == msg
+    msg = SkillCheckRequiredMessage(
+        kind="wheel", seed="abc", value_diff=8, deadline_ms=5000.0,
+        from_sq="e4", to_sq="d5")
+    dumped = msg.model_dump(by_alias=True)
+    assert dumped["from"] == "e4" and dumped["to"] == "d5"
+    assert dumped["promotion"] is None and dumped["miss_count"] == 0
+    assert SkillCheckRequiredMessage.model_validate(dumped) == msg
+
+
+def test_skill_check_required_carries_promotion():
+    msg = SkillCheckRequiredMessage(
+        kind="wheel", seed="s", value_diff=9, deadline_ms=5000.0,
+        from_sq="e7", to_sq="e8", promotion="q")
+    assert msg.model_dump(by_alias=True)["promotion"] == "q"
 
 
 def test_skill_check_required_rejects_unknown_kind():
     with pytest.raises(ValidationError):
-        SkillCheckRequiredMessage(kind="duel", seed="x", value_diff=0, deadline_ms=5000.0)
+        SkillCheckRequiredMessage(kind="duel", seed="x", value_diff=0, deadline_ms=5000.0,
+                                  from_sq="e4", to_sq="d5")
 
 
-def test_skill_check_shot_has_no_input_payload():
-    msg = SkillCheckShotMessage()
-    assert msg.model_dump() == {"version": PROTOCOL_VERSION, "type": "skill_check_shot"}
+def test_skill_check_shot_carries_the_client_rendered_elapsed():
+    msg = SkillCheckShotMessage.model_validate(
+        {"type": "skill_check_shot", "version": PROTOCOL_VERSION, "client_elapsed_ms": 412.0})
+    assert msg.client_elapsed_ms == 412.0
+    assert SkillCheckShotMessage().client_elapsed_ms == 0.0, "absent -> 0, clamped to a loss"
 
 
 def test_skill_check_shot_ignores_injected_client_timestamp():
@@ -294,14 +304,18 @@ def test_resume_response_pending_and_locks_default_empty():
 
 def test_resume_response_carries_pending_and_locks_when_set():
     pending = PendingSkillCheckWire(
-        kind="aim", seed="s", value_diff=3, deadline_ms=5000.0, elapsed_ms=1800.0, miss_count=1)
+        kind="aim", seed="s", value_diff=3, deadline_ms=5000.0, elapsed_ms=1800.0,
+        miss_count=1, from_sq="e4", to_sq="d5", color="white")
     resp = ResumeResponse(
         fen="x", move_history=[],
         clock=ClockSnapshot(white_remaining=1.0, black_remaining=1.0, running_for="white"),
         your_color="white", white_name="A", black_name="B",
         time_minutes=5, increment_seconds=0,
         pending_skillcheck=pending,
-        skillcheck_locks=[LockWire.model_validate({"from": "e4", "to": "d5"})])
-    reparsed = ResumeResponse.model_validate(resp.model_dump(by_alias=True))
-    assert reparsed.pending_skillcheck == pending
-    assert reparsed.skillcheck_locks[0].from_sq == "e4"
+        skillcheck_locks=[LockWire(from_sq="e4", to_sq="d5")])
+    dumped = resp.model_dump()
+    assert dumped["skillcheck_locks"][0] == {"from_sq": "e4", "to_sq": "d5"}, \
+        "the client reads /resume via plain model_dump() — field-name keys, not aliases"
+    assert dumped["pending_skillcheck"]["from_sq"] == "e4"
+    assert dumped["pending_skillcheck"]["to_sq"] == "d5"
+    assert dumped["pending_skillcheck"]["color"] == "white"

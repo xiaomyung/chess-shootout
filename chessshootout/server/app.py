@@ -351,13 +351,16 @@ def _promotion_letter(move):
 
 def _pending_skillcheck_wire(room, now_ms):
     pending = room.pending_skillcheck
-    if pending is None:
+    if pending is None or now_ms() > pending.expires_at_ms:
         return None
     elapsed = max(0.0, now_ms() - pending.start_ms)
     return PendingSkillCheckWire(
         kind=pending.kind.value, seed=pending.seed, value_diff=pending.value_diff,
         deadline_ms=SKILLCHECK_DEADLINE_MS, elapsed_ms=elapsed,
         miss_count=pending.miss_count,
+        from_sq=coord_from_square(pending.from_sq),
+        to_sq=coord_from_square(pending.to_sq),
+        promotion=pending.promotion, color=pending.color,
     )
 
 

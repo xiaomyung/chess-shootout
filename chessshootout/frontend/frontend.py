@@ -20,8 +20,10 @@ from chessshootout.frontend.board import Board
 from chessshootout.frontend.skillcheck.overlay import SkillCheckOverlay
 from chessshootout.frontend.skillcheck.registry import build_controller
 from chessshootout.skillcheck.coordinator import SkillCheckCoordinator
+from chessshootout.skillcheck.online import SKILLCHECK_DEADLINE_MS
 from chessshootout.skillcheck.types import SkillCheckKind
-from chessshootout.skillcheck.wheel import period_for_diff
+from chessshootout.skillcheck.wheel import period_for_diff, placement_square
+from chessshootout.backend.utils import coord_from_square, PROMO_LETTER_BY_TYPE, Square
 from chessshootout.frontend.menu.menu_battle import MenuBattle
 from chessshootout.domain.capture_summary import captured_by, material_advantage
 from chessshootout.domain.result_stats import compute_result_stats
@@ -173,6 +175,7 @@ MIN_MODAL_WIDTH = 360
 
 SAVED_PGN_TOAST_DURATION_MS = 3000
 RESYNC_TIMEOUT_MS = 8000
+SKILLCHECK_WATCHDOG_SLACK_MS = 4000
 RECONNECT_PROBE_INTERVAL_MS = 5000
 RECONNECT_PROBE_MAX_ATTEMPTS = 3
 
@@ -206,7 +209,7 @@ class Frontend(OnlineEventsMixin):
 
     def __init__(self, window_width: int, window_height: int):
         self.running = True
-        self.target_fps = 60
+        self.target_fps = 300
         self.window_width = max(window_width, MIN_WINDOW_WIDTH)
         self.window_height = max(window_height, MIN_WINDOW_HEIGHT)
         self.window = pg.display.set_mode(
@@ -257,6 +260,11 @@ class Frontend(OnlineEventsMixin):
         self.skillcheck = SkillCheckCoordinator()
         self.skillcheck_overlay = SkillCheckOverlay()
         self._skillcheck_target = None
+        self._pending_online_move = None
+        self._online_skillcheck = None
+        self._online_spectate_kind = None
+        self._online_skillcheck_opened_ms = None
+        self._online_verdict_action = None
         self.board.skillcheck_gate = self._skillcheck_gate
         self.board.skillcheck_armed = lambda: self.skillcheck.enabled
         self.board.locked_targets = self.skillcheck.is_locked
@@ -925,6 +933,19 @@ class Frontend(OnlineEventsMixin):
                     self.online_client.force_reconnect()
             else:
                 self.toast.show("Resyncing…")
+        self._tick_skillcheck_watchdog()
+
+    def _tick_skillcheck_watchdog(self):
+        if (self._online_skillcheck is None
+                or self._online_skillcheck_opened_ms is None
+                or not self.skillcheck_overlay.is_active()):
+            return
+        elapsed = pg.time.get_ticks() - self._online_skillcheck_opened_ms
+        if elapsed > SKILLCHECK_DEADLINE_MS + SKILLCHECK_WATCHDOG_SLACK_MS:
+            log.warning("skillcheck verdict lost; resyncing")
+            self._teardown_skillcheck_overlay()
+            self._online_skillcheck = None
+            self._begin_resync()
 
     def _send_heartbeat_if_due(self):
         if (self.mode != ONLINE or self.online_client is None
@@ -934,6 +955,8 @@ class Frontend(OnlineEventsMixin):
         if self.online_client.is_server_silent():
             log.info("server heartbeat silent; escalating to reconnect")
             self.online_client.force_reconnect()
+            return
+        if self._online_verdict_action is not None:
             return
         now = pg.time.get_ticks()
         if now - self._last_heartbeat_sent_ms >= self.online_client.heartbeat_interval() * 1000:
@@ -1000,6 +1023,12 @@ class Frontend(OnlineEventsMixin):
         self.skillcheck_overlay.cancel()
         self.board.aim_suppressed_square = None
         self.skillcheck.clear_locks()
+        self._skillcheck_target = None
+        self._pending_online_move = None
+        self._online_skillcheck = None
+        self._online_spectate_kind = None
+        self._online_skillcheck_opened_ms = None
+        self._online_verdict_action = None
         self.board.clear_annotations()
         self.board.end_press()
         self.board.review_ply = None
@@ -1249,39 +1278,90 @@ class Frontend(OnlineEventsMixin):
     def _skillcheck_gate(self, from_sq, to_sq, promo_type=None):
         if self.skillcheck.is_locked(from_sq, to_sq) or self.skillcheck_overlay.is_active():
             return True
+        if self.mode == ONLINE:
+            return self._online_move_gate(from_sq, to_sq, promo_type)
         kind = self.skillcheck.select(self.match.backend, from_sq, to_sq)
         if kind == SkillCheckKind.NONE:
             return False
-        target = self._skillcheck_render_square(kind, from_sq, to_sq)
         diff = self._capture_value_diff(from_sq, to_sq, promo_type)
-        capturer = self.match.piece_at(from_sq)
         seed = "{}:{}:{}{}{}{}:{}".format(
             self.skillcheck.seed, len(self.match.move_history),
             from_sq.row, from_sq.col, to_sq.row, to_sq.col, kind.value)
+        return self._open_skillcheck_overlay(
+            kind, seed, diff, self._skillcheck_deadline_ms(),
+            from_sq, to_sq, promo_type, online=False)
+
+    def _online_move_gate(self, from_sq, to_sq, promo_type=None):
+        if to_sq not in self.match.legal_moves_from(from_sq):
+            return False
+        piece = self.match.piece_at(from_sq)
+        is_capture = self.board._capture_victim_square(piece, from_sq, to_sq) is not None
+        is_promotion = (piece.type == PieceType.PAWN
+                        and to_sq.row in (0, self.board.SIZE - 1))
+        if not (is_capture or is_promotion):
+            return False
+        promo_letter = PROMO_LETTER_BY_TYPE.get(promo_type) if promo_type is not None else None
+        if self.online_client is not None:
+            self.online_client.send_move(
+                coord_from_square(from_sq), coord_from_square(to_sq), promo_letter)
+        self._pending_online_move = (from_sq, to_sq, promo_type)
+        return True
+
+    def _open_skillcheck_overlay(self, kind, seed, value_diff, deadline_ms,
+                                 from_sq, to_sq, promo_type, *, online,
+                                 elapsed_ms=0, miss_count=0):
+        target = self._skillcheck_render_square(kind, seed, value_diff, from_sq, to_sq)
+        capturer = self.match.piece_at(from_sq)
         controller = build_controller(
             kind, seed=seed, cell_rect=self.board.cell_rect(target),
-            now_ms=pg.time.get_ticks(), deadline_ms=self._skillcheck_deadline_ms(),
-            period_ms=period_for_diff(diff), value_diff=diff,
+            now_ms=pg.time.get_ticks() - int(elapsed_ms), deadline_ms=deadline_ms,
+            period_ms=period_for_diff(value_diff), value_diff=value_diff,
             victim_surface=self._victim_surface(target), board_rect=self.board.rect,
             geom=lambda sq: self.board.cell_rect(sq).center, from_sq=from_sq,
             victim_sq=target, attacker_type=capturer.type.value if capturer else None,
-            shot_sound=self._shot_sound_for(capturer))
+            shot_sound=self._shot_sound_for(capturer),
+            on_shot=self._send_skillcheck_shot if online else None,
+            miss_count=miss_count)
         if controller is None:
             return False
         self._skillcheck_target = target
         self.board.aim_suppressed_square = target if kind == SkillCheckKind.AIM else None
-        self.skillcheck_overlay.start(
-            controller, (from_sq, to_sq, promo_type), self._on_skillcheck_done)
+        on_done = self._on_online_skillcheck_done if online else self._on_skillcheck_done
+        self.skillcheck_overlay.start(controller, (from_sq, to_sq, promo_type), on_done)
         return True
 
-    def _skillcheck_render_square(self, kind, from_sq, to_sq):
+    def _send_skillcheck_shot(self, client_elapsed_ms):
+        if self.online_client is not None:
+            self.online_client.send_skill_check_shot(client_elapsed_ms)
+
+    def _teardown_skillcheck_overlay(self):
+        self.skillcheck_overlay.cancel()
+        self.board.aim_suppressed_square = None
+        self._skillcheck_target = None
+        self._online_verdict_action = None
+
+    def _on_online_skillcheck_done(self, context, landed):
+        action = self._online_verdict_action
+        self._online_verdict_action = None
+        self.board.aim_suppressed_square = None
+        self._skillcheck_target = None
+        if action is not None:
+            action()
+
+    def _skillcheck_render_square(self, kind, seed, value_diff, from_sq, to_sq):
         if kind == SkillCheckKind.AIM:
             capturer = self.match.piece_at(from_sq)
             if capturer is not None:
                 victim_sq = self.board._capture_victim_square(capturer, from_sq, to_sq)
                 if victim_sq is not None:
                     return victim_sq
-        return to_sq
+            return to_sq
+        square = placement_square(seed, value_diff,
+                                  self._placement_exclusions(from_sq, to_sq), self.board.SIZE)
+        return Square(square[0], square[1]) if square is not None else to_sq
+
+    def _placement_exclusions(self, from_sq, to_sq):
+        return {(from_sq.row, from_sq.col), (to_sq.row, to_sq.col)}
 
     def _victim_surface(self, square):
         piece = self.match.piece_at(square)
@@ -1296,6 +1376,8 @@ class Frontend(OnlineEventsMixin):
         return lambda: self.sound_manager.play_capture(piece_type)
 
     def _capture_value_diff(self, from_sq, to_sq, promo_type):
+        if promo_type is not None:
+            return PIECE_VALUES[PieceType.PAWN] - PIECE_VALUES.get(promo_type, 0)
         capturer = self.match.piece_at(from_sq)
         if capturer is None:
             return 0
@@ -1304,8 +1386,6 @@ class Frontend(OnlineEventsMixin):
             victim = self.match.piece_at(victim_sq)
             return PIECE_VALUES.get(capturer.type, 0) - (
                 PIECE_VALUES.get(victim.type, 0) if victim is not None else 0)
-        if promo_type is not None:
-            return PIECE_VALUES.get(promo_type, 0)
         return 0
 
     def _wheel_period(self, from_sq, to_sq, promo_type):
@@ -1404,6 +1484,7 @@ class Frontend(OnlineEventsMixin):
         if (self.mode != "menu"
                 and self.current_result() is None
                 and post_animation_settled
+                and self._pending_online_move is None
                 and not self.skillcheck_overlay.is_active()):
             self.board.try_apply_next_premove()
 
@@ -1455,8 +1536,9 @@ class Frontend(OnlineEventsMixin):
         self.toast.draw()
         if self.skillcheck_overlay.is_active() and (
                 self.mode == "menu" or self.current_result() is not None):
-            self.skillcheck_overlay.cancel()
-            self.board.aim_suppressed_square = None
+            self._teardown_skillcheck_overlay()
+            self._online_skillcheck = None
+            self._online_spectate_kind = None
         self.skillcheck_overlay.update(now)
         self.skillcheck_overlay.draw(self.window)
         self._drain_online_inbound()
@@ -2103,6 +2185,8 @@ class Frontend(OnlineEventsMixin):
 
             elif event.type == pg.MOUSEBUTTONDOWN:
                 if self.skillcheck_overlay.is_active():
+                    if event.button == 1 and self.chrome.handle_click(event.pos):
+                        continue
                     self.skillcheck_overlay.handle_event(event)
                     continue
                 if event.button == 1:

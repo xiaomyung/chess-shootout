@@ -179,3 +179,111 @@ def test_in_arc_fraction_matches_arc_width():
     steps = 36000
     hits = sum(ch.in_arc(ch.needle_deg(ch.period_ms * i / steps)) for i in range(steps))
     assert hits / steps == pytest.approx(ch.arc_width_deg / 360.0, abs=0.002)
+
+
+# ---- seeded random placement (render-only difficulty) ----------------------
+# A capture can spawn the dial on a random board square instead of the capture
+# square. The chance scales with the same capturer-vs-victim material the needle
+# speed uses (centered 50/50, clamped 0.1..0.9), so a queen grabbing a pawn is
+# usually relocated (hard to find) and a pawn taking a queen rarely is. Position
+# is purely visual -- the needle/arc/timing math never reads it.
+
+def test_random_placement_prob_centered_and_matches_capture_table():
+    assert wheel.random_placement_prob(0) == pytest.approx(0.5), "knight x bishop -> 50/50"
+    assert wheel.random_placement_prob(8) == pytest.approx(0.9), "queen x pawn -> usually random"
+    assert wheel.random_placement_prob(-8) == pytest.approx(0.1), "pawn x queen -> rarely random"
+    assert wheel.random_placement_prob(4) == pytest.approx(0.7)
+    assert wheel.random_placement_prob(2) == pytest.approx(0.6)
+    assert wheel.random_placement_prob(-2) == pytest.approx(0.4)
+    assert wheel.random_placement_prob(-4) == pytest.approx(0.3)
+
+
+def test_random_placement_prob_mirrors_the_needle_speed_slope():
+    assert wheel.WHEEL_PLACEMENT_PER_DIFF == pytest.approx(
+        wheel.WHEEL_SPEED_PER_DIFF / wheel.WHEEL_SPEED_DIFF_DIVISOR), "same slope as the needle"
+    for diff in range(-8, 9):
+        assert wheel.random_placement_prob(diff) - 0.5 == pytest.approx(
+            wheel.WHEEL_PLACEMENT_PER_DIFF * diff)
+
+
+def test_random_placement_prob_is_clamped_both_ends():
+    assert wheel.random_placement_prob(50) == pytest.approx(wheel.WHEEL_PLACEMENT_MAX_PROB)
+    assert wheel.random_placement_prob(-50) == pytest.approx(wheel.WHEEL_PLACEMENT_MIN_PROB)
+
+
+def test_random_placement_prob_is_monotonic_increasing():
+    probs = [wheel.random_placement_prob(d) for d in range(-12, 13)]
+    for earlier, later in zip(probs, probs[1:]):
+        assert later >= earlier
+
+
+def test_placement_is_deterministic_for_seed_and_diff():
+    first = wheel.placement_square("seed-7", 6)
+    again = wheel.placement_square("seed-7", 6)
+    assert first == again
+    assert first is None or (len(first) == 2 and all(isinstance(v, int) for v in first))
+
+
+def test_relocates_exactly_when_the_seeded_roll_is_below_the_probability():
+    for i in range(300):
+        seed = f"roll:{i}"
+        roll = wheel._placement_floats(seed)[0]
+        relocated = wheel.placement_square(seed, 0) is not None
+        assert relocated == (roll < wheel.random_placement_prob(0))
+
+
+def test_relocation_rate_tracks_the_probability():
+    for diff, prob in [(8, 0.9), (4, 0.7), (0, 0.5), (-4, 0.3), (-8, 0.1)]:
+        n = 4000
+        relocated = sum(
+            wheel.placement_square(f"rate:{diff}:{i}", diff) is not None for i in range(n))
+        assert relocated / n == pytest.approx(prob, abs=0.03)
+
+
+def test_relocated_square_is_always_on_the_board():
+    for i in range(2000):
+        square = wheel.placement_square(f"board:{i}", 8)
+        if square is not None:
+            row, col = square
+            assert 0 <= row < 8 and 0 <= col < 8
+
+
+def test_excluded_squares_are_never_chosen():
+    excluded = {(3, 3), (4, 4), (2, 6), (0, 0)}
+    for i in range(2000):
+        square = wheel.placement_square(f"excl:{i}", 8, excluded)
+        if square is not None:
+            assert square not in excluded
+
+
+def test_excluding_the_natural_pick_shifts_to_a_different_allowed_square():
+    seed = next(f"shift:{i}" for i in range(1000)
+                if wheel.placement_square(f"shift:{i}", 8) is not None)
+    natural = wheel.placement_square(seed, 8)
+    shifted = wheel.placement_square(seed, 8, excluded={natural})
+    assert shifted is not None and shifted != natural
+
+
+def test_no_allowed_square_means_no_relocation():
+    full = {(row, col) for row in range(8) for col in range(8)}
+    seed = next(f"none:{i}" for i in range(1000)
+                if wheel.placement_square(f"none:{i}", 8) is not None)
+    assert wheel.placement_square(seed, 8, excluded=full) is None
+
+
+def test_relocations_spread_across_the_board():
+    squares = {wheel.placement_square(f"spread:{i}", 8) for i in range(800)}
+    squares.discard(None)
+    assert len(squares) > 24
+
+
+def test_board_size_bounds_the_relocated_square():
+    for i in range(2000):
+        square = wheel.placement_square(f"size:{i}", 8, board_size=4)
+        if square is not None:
+            row, col = square
+            assert 0 <= row < 4 and 0 <= col < 4
+
+
+def test_placement_uses_a_separate_hash_namespace_from_the_dial():
+    assert wheel._placement_floats("seed-q") != wheel._seed_floats("seed-q")

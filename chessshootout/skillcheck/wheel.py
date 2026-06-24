@@ -9,6 +9,10 @@ WHEEL_HUMAN_FLOOR_MS = 120.0
 WHEEL_RTT_CAP_MS = 200.0
 WHEEL_SPEED_PER_DIFF = 0.2
 WHEEL_SPEED_DIFF_DIVISOR = 4.0
+WHEEL_PLACEMENT_BASE_PROB = 0.5
+WHEEL_PLACEMENT_PER_DIFF = 0.05
+WHEEL_PLACEMENT_MIN_PROB = 0.1
+WHEEL_PLACEMENT_MAX_PROB = 0.9
 
 
 def needle_speed_mult(value_diff):
@@ -17,6 +21,30 @@ def needle_speed_mult(value_diff):
 
 def period_for_diff(value_diff):
     return WHEEL_PERIOD_MS / needle_speed_mult(value_diff)
+
+
+def random_placement_prob(value_diff):
+    prob = WHEEL_PLACEMENT_BASE_PROB + WHEEL_PLACEMENT_PER_DIFF * value_diff
+    return min(WHEEL_PLACEMENT_MAX_PROB, max(WHEEL_PLACEMENT_MIN_PROB, prob))
+
+
+def _placement_floats(seed):
+    digest = hashlib.sha256(f"place:{seed}".encode("utf-8")).digest()
+    roll = int.from_bytes(digest[0:8], "big") / 2.0 ** 64
+    pick = int.from_bytes(digest[8:16], "big") / 2.0 ** 64
+    return roll, pick
+
+
+def placement_square(seed, value_diff, excluded=(), board_size=8):
+    roll, pick = _placement_floats(seed)
+    if roll >= random_placement_prob(value_diff):
+        return None
+    blocked = set(excluded)
+    allowed = [(row, col) for row in range(board_size) for col in range(board_size)
+               if (row, col) not in blocked]
+    if not allowed:
+        return None
+    return allowed[int(pick * len(allowed)) % len(allowed)]
 
 
 def _seed_floats(seed):
