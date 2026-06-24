@@ -50,7 +50,7 @@ def _needle_polygon(cx, cy, deg, length, width):
 class WheelController(SkillCheckController):
 
     def __init__(self, challenge, cell_rect, now_ms, deadline_ms=WHEEL_DEFAULT_DEADLINE_MS,
-                 on_shot=None):
+                 on_shot=None, passive=False):
         self.challenge = challenge
         self._apply_geometry(cell_rect)
         self.start_ms = now_ms
@@ -60,8 +60,10 @@ class WheelController(SkillCheckController):
         self._resolved_at = None
         self._landed = None
         self._on_shot = on_shot
-        self._online = on_shot is not None
+        self._passive = passive
+        self._online = on_shot is not None or passive
         self._fired_online = False
+        self._frozen_override = None
 
     def _apply_geometry(self, cell_rect):
         self.center = cell_rect.center
@@ -76,6 +78,8 @@ class WheelController(SkillCheckController):
         self._apply_geometry(cell_rect)
 
     def handle_event(self, event):
+        if self._passive:
+            return False
         if self._committed_at is not None:
             return True
         if event.type == pg.MOUSEBUTTONDOWN and event.button == 1:
@@ -99,6 +103,10 @@ class WheelController(SkillCheckController):
         if self._committed_at is None:
             self._committed_at = self._now
         self._resolved_at = self._now
+
+    def spectate_shot(self, elapsed, miss_count, won):
+        self._frozen_override = elapsed
+        self._committed_at = self._now
 
     def update(self, now_ms):
         self._now = now_ms
@@ -126,6 +134,8 @@ class WheelController(SkillCheckController):
         self._committed_at = self._now
 
     def _frozen_elapsed(self):
+        if self._frozen_override is not None:
+            return self._frozen_override
         frozen = self._committed_at if self._committed_at is not None else self._now
         return frozen - self.start_ms
 
@@ -135,7 +145,7 @@ class WheelController(SkillCheckController):
         timer_outer = self.radius + self.ring_w + 3
         size = timer_outer * 2 + 8
         window.blit(self._render_dial(elapsed, size), (cx - size // 2, cy - size // 2))
-        if self._committed_at is None:
+        if self._committed_at is None and not self._passive:
             self._draw_hint_bubble(window, cx, cy, timer_outer)
 
     def _render_dial(self, elapsed, size):
@@ -150,7 +160,8 @@ class WheelController(SkillCheckController):
                 remaining = max(0.0, 1.0 - elapsed / self.deadline_ms)
                 if remaining > 0.0:
                     blend = (1.0 - remaining) ** WHEEL_TIMER_RAMP
-                    timer_color = pg.Color(Colors.amber).lerp(pg.Color(Colors.loss), blend)
+                    timer_base = Colors.spectate if self._passive else Colors.amber
+                    timer_color = pg.Color(timer_base).lerp(pg.Color(Colors.loss), blend)
                     inner, outer = (self.radius + 3) * k, (self.radius + self.ring_w + 3) * k
                     end_deg = remaining * 360.0
                     pg.draw.polygon(surf, timer_color,
@@ -160,7 +171,7 @@ class WheelController(SkillCheckController):
                         pg.draw.circle(surf, timer_color, _rim_point(c, c, cap_mid, cap_deg), cap_r)
 
             arc_width = self.challenge.arc_width_at(elapsed)
-            arc_color = Colors.accent
+            arc_color = Colors.spectate if self._passive else Colors.accent
             if self._committed_at is not None and self._landed is not None:
                 arc_color = Colors.win if self._landed else Colors.loss
             band = _band_polygon(c, c, (self.radius - self.band_w) * k, radius,

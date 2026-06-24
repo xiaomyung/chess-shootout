@@ -20,7 +20,8 @@ import pytest
 from chessshootout.backend.utils import coord_from_square
 from chessshootout.frontend.frontend import Frontend
 from chessshootout.online.client import Event
-from chessshootout.server.protocol import LockWire, PendingSkillCheckWire
+from chessshootout.server.protocol import (
+    LockWire, PendingSkillCheckWire, SkillCheckSpectateMessage)
 from chessshootout.skillcheck.types import SkillCheckKind
 from chessshootout.skillcheck.wheel import placement_square
 from tests.helpers import BLACK, K, P, Q, WHITE, make_backend, piece, sq
@@ -110,6 +111,13 @@ def _required_payload(frm, to, kind="wheel", promotion=None, value_diff=3,
         "from": coord_from_square(frm), "to": coord_from_square(to),
         "promotion": promotion,
     }
+
+
+def _spectate_payload(frm, to, kind="wheel", value_diff=3, promotion=None):
+    return SkillCheckSpectateMessage(
+        kind=kind, seed="seed-1", value_diff=value_diff, deadline_ms=5000.0,
+        from_sq=coord_from_square(frm), to_sq=coord_from_square(to),
+        promotion=promotion).model_dump(by_alias=True)
 
 
 # ---- the move HOLD gate ----------------------------------------------------
@@ -300,32 +308,66 @@ def test_a_result_for_a_different_move_is_ignored():
 
 # ---- spectating the opponent's check ---------------------------------------
 
-def test_spectate_shows_an_indicator_and_leaves_my_board_unlocked():
-    app = _online_app()
-    app._handle_skill_check_spectate({"kind": "aim"})
+def test_spectate_opens_a_passive_overlay_and_leaves_my_board_live():
+    app = _online_app("black")
+    frm, to = _capture_board(app)
+    app._handle_skill_check_spectate(_spectate_payload(frm, to, kind="aim"))
     assert app._online_spectate_kind == SkillCheckKind.AIM
-    assert not app.skillcheck_overlay.is_active(), "no overlay for the opponent's check"
+    assert app.skillcheck_overlay.is_active(), "the opponent's check is mirrored, not hidden"
+    assert app.skillcheck_overlay.is_passive(), "but read-only"
+    assert app._skillcheck_swallows_input() is False, "my board stays live for premoves"
     assert len(app.skillcheck.locks) == 0
 
 
-def test_opponent_fail_result_clears_the_spectate_without_locking_me():
-    app = _online_app()
-    app._handle_skill_check_spectate({"kind": "wheel"})
-    app._handle_skill_check_result(_result(sq(3, 3), sq(2, 3)))
-    assert app._online_spectate_kind is None
+def test_spectate_overlay_matches_the_pure_engine_render_square():
+    app = _online_app("black")
+    frm, to = _capture_board(app)
+    app._handle_skill_check_spectate(_spectate_payload(frm, to, kind="wheel", value_diff=8))
+    engine = placement_square("seed-1", 8, app._placement_exclusions(frm, to), app.board.SIZE)
+    assert app._skillcheck_target == (to if engine is None else sq(engine[0], engine[1])), \
+        "the spectator reconstructs the same relocated square as the mover"
+
+
+def test_spectate_shot_freezes_the_wheel_needle_at_the_relayed_elapsed():
+    app = _online_app("black")
+    frm, to = _capture_board(app)
+    app._handle_skill_check_spectate(_spectate_payload(frm, to, kind="wheel"))
+    app._handle_skill_check_spectate_shot({"elapsed_ms": 742.0, "miss_count": 0, "won": True})
+    assert app.skillcheck_overlay._controller._frozen_override == 742.0
+
+
+def test_spectate_aim_miss_relays_a_dry_shot_and_escalates():
+    app = _online_app("black")
+    frm, to = _capture_board(app)
+    app._handle_skill_check_spectate(_spectate_payload(frm, to, kind="aim"))
+    ctrl = app.skillcheck_overlay._controller
+    app._handle_skill_check_spectate_shot({"elapsed_ms": 300.0, "miss_count": 0, "won": False})
+    assert ctrl.miss_count == 1, "a relayed miss escalates the spectated reticle"
+    assert ctrl._shot_render == (300.0, 0), "frozen at the mover's fired position"
+
+
+def test_opponent_fail_result_holds_red_then_clears_without_locking_me():
+    app = _online_app("black")
+    frm, to = _capture_board(app)
+    app._handle_skill_check_spectate(_spectate_payload(frm, to, kind="wheel"))
+    app._handle_skill_check_result(_result(frm, to))
+    assert app._online_spectate_kind is None, "the verdict clears the spectate marker"
+    assert app.skillcheck_overlay.is_active(), "the red verdict holds before teardown"
+    _drive_verdict_hold(app)
+    assert not app.skillcheck_overlay.is_active()
     assert len(app.skillcheck.locks) == 0, "the spectator never locks its own board"
 
 
-def test_opponent_win_move_applied_clears_the_spectate_and_applies():
+def test_opponent_win_move_applied_holds_green_then_applies():
     app = _online_app("black")
-    app.match.backend = make_backend({
-        sq(7, 4): piece(K, WHITE), sq(0, 4): piece(K, BLACK),
-        sq(4, 3): piece(Q, WHITE), sq(3, 3): piece(P, BLACK),
-    }, turn=WHITE)
-    app._handle_skill_check_spectate({"kind": "wheel"})
-    app._handle_remote_move_applied(_move_applied(sq(4, 3), sq(3, 3), 1, kind="wheel", won=True))
+    frm, to = _capture_board(app)
+    app._handle_skill_check_spectate(_spectate_payload(frm, to, kind="wheel"))
+    app._handle_remote_move_applied(_move_applied(frm, to, 1, kind="wheel", won=True))
     assert app._online_spectate_kind is None
-    assert app.match.piece_at(sq(3, 3)) is not None, "the opponent's won capture is applied"
+    assert app.match.piece_at(to).color == BLACK, "the capture waits behind the green hold"
+    _drive_verdict_hold(app)
+    assert not app.skillcheck_overlay.is_active()
+    assert app.match.piece_at(to).color == WHITE, "the opponent's won capture then applies"
 
 
 # ---- resume re-open --------------------------------------------------------
@@ -365,12 +407,15 @@ def test_resume_reopens_my_pending_check_at_the_right_elapsed():
         "resume renders the same engine-seeded square as the live gate"
 
 
-def test_resume_of_an_opponent_pending_sets_spectate_not_an_overlay():
+def test_resume_of_an_opponent_pending_opens_a_passive_spectate_overlay():
     app = _online_app("white")
     pending = _pending_wire("aim", "d5", "d4", "black", elapsed_ms=500.0)
     app._handle_game_resumed(_resumed(pending=pending))
-    assert not app.skillcheck_overlay.is_active()
+    assert app.skillcheck_overlay.is_active()
+    assert app.skillcheck_overlay.is_passive()
     assert app._online_spectate_kind == SkillCheckKind.AIM
+    ctrl = app.skillcheck_overlay._controller
+    assert pg.time.get_ticks() - ctrl.start_ms == pytest.approx(500, abs=80), "back-dated start"
 
 
 def test_resume_applies_server_display_locks():
@@ -454,14 +499,33 @@ def test_reset_to_new_game_clears_every_online_field():
 
 # ---- dispatch wiring + local-branch sentinel -------------------------------
 
-def test_handle_online_event_routes_the_three_skillcheck_types():
+def test_handle_online_event_routes_required_to_the_overlay():
     app = _online_app()
     frm, to = _capture_board(app)
     app._skillcheck_gate(frm, to)
     app._handle_online_event(Event("skill_check_required", _required_payload(frm, to)))
     assert app._online_skillcheck is not None
-    app._handle_online_event(Event("skill_check_spectate", {"kind": "aim"}))
-    assert app._online_spectate_kind == SkillCheckKind.AIM
+
+
+def test_handle_online_event_routes_spectate_and_spectate_shot():
+    app = _online_app("black")
+    frm, to = _capture_board(app)
+    app._handle_online_event(
+        Event("skill_check_spectate", _spectate_payload(frm, to, kind="wheel")))
+    assert app._online_spectate_kind == SkillCheckKind.WHEEL
+    app._handle_online_event(Event(
+        "skill_check_spectate_shot", {"elapsed_ms": 800.0, "miss_count": 0, "won": True}))
+    assert app.skillcheck_overlay._controller._frozen_override == 800.0
+
+
+def test_escape_is_not_swallowed_while_spectating():
+    app = _online_app("black")
+    frm, to = _capture_board(app)
+    app._handle_skill_check_spectate(_spectate_payload(frm, to, kind="wheel"))
+    app._dismiss_top_modal = MagicMock(return_value=False)
+    app._on_resign = MagicMock()
+    app._handle_escape()
+    app._on_resign.assert_called_once()
 
 
 def test_titlebar_click_during_a_check_reaches_the_chrome_not_a_shot():

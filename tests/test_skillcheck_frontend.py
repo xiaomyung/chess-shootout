@@ -421,6 +421,138 @@ def test_aim_online_resolve_lands_on_the_held_point_with_no_snap():
     assert ctrl._crosshair_offset(elapsed, miss) == held, "verdict lands on the shot point, no snap"
 
 
+# ---- spectate (passive, read-only) controller mode -------------------------
+
+def _spectate_wheel(challenge=None):
+    return WheelController(challenge or _always_in_arc(), pg.Rect(0, 0, 80, 80),
+                           now_ms=0, passive=True)
+
+
+def _spectate_aim(**kw):
+    return AimController(_aim_centerable(), pg.Rect(0, 0, 80, 80), now_ms=0,
+                         victim_surface=pg.Surface((80, 80), pg.SRCALPHA),
+                         board_rect=pg.Rect(0, 0, 640, 640), passive=True, **kw)
+
+
+def test_passive_wheel_ignores_input_and_never_self_resolves():
+    ctrl = _spectate_wheel()
+    assert ctrl._passive is True and ctrl._online is True
+    assert ctrl.handle_event(_tap()) is False, "a spectator click does not drive the check"
+    ctrl.update(6000)
+    assert ctrl.landed is None and ctrl.done is False, "only the server verdict resolves it"
+
+
+def test_passive_wheel_shot_freezes_the_needle_at_the_relayed_elapsed():
+    ctrl = _spectate_wheel()
+    ctrl.update(1000)
+    ctrl.spectate_shot(742.0, 0, True)
+    assert ctrl._frozen_elapsed() == 742.0, "frozen where the mover fired, not on local time"
+    assert ctrl._committed_at is not None, "the spin stops on the relayed shot"
+
+
+def test_passive_wheel_resolve_holds_then_finishes():
+    ctrl = _spectate_wheel()
+    ctrl.update(500)
+    ctrl.spectate_shot(400.0, 0, True)
+    ctrl.resolve(True)
+    assert ctrl.landed is True and ctrl.done is False
+    ctrl.update(500 + SKILLCHECK_RESULT_HOLD_MS)
+    assert ctrl.done is True
+
+
+def test_passive_wheel_draw_does_not_crash():
+    ctrl = WheelController(_always_in_arc(), pg.Rect(40, 40, 80, 80), now_ms=0, passive=True)
+    ctrl.update(300)
+    ctrl.draw(pg.display.get_surface())
+    ctrl.spectate_shot(300.0, 0, False)
+    ctrl.draw(pg.display.get_surface())
+    assert ctrl.landed is None
+
+
+def test_passive_aim_ignores_input_and_never_self_resolves():
+    ctrl = _spectate_aim()
+    assert ctrl.handle_event(_tap()) is False
+    ctrl.update(7000)
+    assert ctrl.landed is None and ctrl.done is False
+
+
+def test_passive_aim_win_shot_freezes_without_a_dry_miss():
+    ctrl = _spectate_aim()
+    ctrl.update(900)
+    ctrl.spectate_shot(820.0, 0, True)
+    assert ctrl._shot_render == (820.0, 0), "frozen at the winning crosshair"
+    assert ctrl.miss_count == 0, "a win does not escalate"
+    assert not [c for c in ctrl._fx.captures if c.get("miss")], "a winning shot fires no dry-miss"
+
+
+def test_passive_aim_miss_shot_replays_the_dry_fire_and_escalates():
+    ctrl = _spectate_aim()
+    ctrl.update(600)
+    ctrl.spectate_shot(560.0, 0, False)
+    assert ctrl._shot_render == (560.0, 0), "frozen at the mover's fired position"
+    assert ctrl.miss_count == 1, "the relayed miss escalates the reticle"
+    fired = [c for c in ctrl._fx.captures if c.get("miss")]
+    assert fired and fired[0]["callout"] is False, "the same dry gun-miss the mover saw"
+
+
+def test_passive_aim_trusts_the_relayed_pre_shot_miss_count():
+    ctrl = _spectate_aim()
+    ctrl.update(600)
+    ctrl.spectate_shot(560.0, 3, False)
+    assert ctrl.miss_count == 4, "the spectator uses the server's pre-shot count + 1"
+
+
+def test_passive_aim_skips_the_board_scrim():
+    ctrl = _spectate_aim()
+    win = pg.Surface((640, 640), pg.SRCALPHA)
+    win.fill((1, 2, 3, 255))
+    ctrl._draw_scrim(win)
+    assert win.get_at((5, 5)) == pg.Color(1, 2, 3, 255), "no dimming scrim over the live board"
+
+
+def test_passive_aim_reticle_uses_the_spectate_hue():
+    ctrl = _spectate_aim()
+    ctrl.update(100)
+    live, _ = ctrl._reticle_colors()
+    assert live == pg.Color(Colors.spectate), "the opponent's check reads in the spectate hue"
+    mover = _aim_ctrl(on_shot=lambda *a: None)
+    mover.update(100)
+    live2, _ = mover._reticle_colors()
+    assert live2 == pg.Color(Colors.accent), "my own check stays in the accent hue"
+
+
+def test_passive_aim_draw_does_not_crash():
+    ctrl = _spectate_aim()
+    ctrl.update(400)
+    ctrl.draw(pg.display.get_surface())
+    ctrl.spectate_shot(380.0, 0, False)
+    ctrl.draw(pg.display.get_surface())
+    assert ctrl.landed is None
+
+
+def test_overlay_is_passive_only_for_a_spectate_controller():
+    overlay = SkillCheckOverlay()
+    overlay.start(WheelController(_always_in_arc(), pg.Rect(0, 0, 80, 80), now_ms=0),
+                  None, lambda *a: None)
+    assert overlay.is_passive() is False, "a playable check captures input"
+    overlay.cancel()
+    overlay.start(_spectate_wheel(), None, lambda *a: None)
+    assert overlay.is_passive() is True
+    overlay.spectate_shot(500.0, 0, True)
+    assert overlay._controller._frozen_override == 500.0, "the overlay relays the shot through"
+
+
+def test_registry_threads_passive_into_both_controllers():
+    w = build_controller(SkillCheckKind.WHEEL, seed="s", cell_rect=pg.Rect(0, 0, 80, 80),
+                         now_ms=0, deadline_ms=5000, passive=True)
+    assert w._passive is True
+    a = build_controller(SkillCheckKind.AIM, seed="s", cell_rect=pg.Rect(0, 0, 80, 80),
+                         now_ms=0, deadline_ms=5000, value_diff=4,
+                         victim_surface=pg.Surface((80, 80), pg.SRCALPHA),
+                         board_rect=pg.Rect(0, 0, 640, 640), passive=True)
+    assert a._passive is True
+
+
 # ---- frontend gate integration ---------------------------------------------
 
 def _start_local(app):

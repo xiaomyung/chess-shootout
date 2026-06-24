@@ -120,6 +120,14 @@ def _aim_miss_elapsed(pending):
     raise AssertionError("no aim-miss elapsed")
 
 
+def _wheel_loss_elapsed(pending):
+    ch = online.challenge_from(pending.kind, pending.seed, pending.value_diff)
+    for e in range(int(online.SKILLCHECK_HUMAN_FLOOR_MS), int(online.SKILLCHECK_DEADLINE_MS)):
+        if not online.shot_wins(WHEEL, ch, e, pending.miss_count):
+            return e
+    raise AssertionError("no losing wheel elapsed for the stored seed")
+
+
 async def _shoot_at(app, clock, room, color, elapsed_ms):
     start = room.pending_skillcheck.start_ms
     clock.set((start + elapsed_ms) / 1000.0)
@@ -152,14 +160,62 @@ async def test_capture_fires_check_and_does_not_mutate_the_board(app, clock):
 
 
 @pytest.mark.asyncio
-async def test_required_goes_to_mover_spectate_to_opponent(app, clock):
+async def test_required_to_mover_enriched_spectate_to_opponent(app, clock):
     room, ws_w, ws_b, frm, to = await _capture_room(app, clock, AIM)
     await handle_move(app, ws_w, room, "white", _move_raw(frm, to))
     assert ws_w.of_type("skill_check_required"), "mover gets the playable challenge"
     assert not ws_w.of_type("skill_check_spectate")
     spec = ws_b.of_type("skill_check_spectate")
     assert spec and spec[0]["kind"] == "aim"
-    assert "seed" not in spec[0], "the opponent never gets the geometry seed"
+    assert spec[0]["seed"] == room.pending_skillcheck.seed, "the opponent mirrors the real seed"
+    assert (spec[0]["from"], spec[0]["to"]) == ("d4", "d5"), "anchored at the move squares"
+    req = ws_w.of_type("skill_check_required")[0]
+    assert (req["seed"], req["value_diff"]) == (spec[0]["seed"], spec[0]["value_diff"]), \
+        "both sides reconstruct the identical challenge"
+
+
+@pytest.mark.asyncio
+async def test_shot_relays_the_winning_position_to_the_opponent(app, clock):
+    room, ws_w, ws_b, frm, to = await _capture_room(app, clock, WHEEL)
+    await handle_move(app, ws_w, room, "white", _move_raw(frm, to))
+    elapsed = _win_elapsed(room.pending_skillcheck)
+    await _shoot_at(app, clock, room, "white", elapsed)
+    relay = ws_b.of_type("skill_check_spectate_shot")
+    assert relay and relay[0]["won"] is True
+    assert relay[0]["miss_count"] == 0, "the pre-shot count the mover fired at"
+    assert relay[0]["elapsed_ms"] == elapsed, "the server-adjudicated position, not raw client time"
+
+
+@pytest.mark.asyncio
+async def test_shot_relays_an_aim_miss_to_the_opponent(app, clock):
+    room, ws_w, ws_b, frm, to = await _capture_room(app, clock, AIM)
+    await handle_move(app, ws_w, room, "white", _move_raw(frm, to))
+    out = await _shoot_at(app, clock, room, "white", _aim_miss_elapsed(room.pending_skillcheck))
+    assert out == "skillcheck_miss"
+    relay = ws_b.of_type("skill_check_spectate_shot")
+    assert relay and relay[0]["won"] is False
+    assert relay[0]["miss_count"] == 0, "relayed at the pre-increment count"
+    assert room.pending_skillcheck.miss_count == 1, "the server escalates after the relay"
+
+
+@pytest.mark.asyncio
+async def test_shot_relays_a_wheel_fail_to_the_opponent(app, clock):
+    room, ws_w, ws_b, frm, to = await _capture_room(app, clock, WHEEL)
+    await handle_move(app, ws_w, room, "white", _move_raw(frm, to))
+    out = await _shoot_at(app, clock, room, "white", _wheel_loss_elapsed(room.pending_skillcheck))
+    assert out == "skillcheck_fail"
+    relay = ws_b.of_type("skill_check_spectate_shot")
+    assert relay and relay[0]["won"] is False
+
+
+@pytest.mark.asyncio
+async def test_shot_relay_is_skipped_when_the_opponent_is_gone(app, clock):
+    room, ws_w, ws_b, frm, to = await _capture_room(app, clock, WHEEL)
+    await handle_move(app, ws_w, room, "white", _move_raw(frm, to))
+    app.state.connections.remove(room.room_id, room.black.client_uuid, ws_b)
+    out = await _shoot_at(app, clock, room, "white", _win_elapsed(room.pending_skillcheck))
+    assert out.startswith("applied"), "the win still resolves with no opponent to relay to"
+    assert not ws_b.of_type("skill_check_spectate_shot")
 
 
 @pytest.mark.asyncio
@@ -339,6 +395,7 @@ async def test_sweep_auto_fails_a_pending_check_at_the_deadline(app, clock):
     assert room.pending_skillcheck is None
     assert (frm, to) in room.skillcheck_locks
     assert room.result is None, "auto-fail locks the move; it does not end the game"
+    assert ws_b.of_type("skill_check_result"), "the spectator is told the check failed"
 
 
 @pytest.mark.asyncio

@@ -106,6 +106,8 @@ class OnlineEventsMixin:
             self._handle_skill_check_result(event.payload)
         elif event.type == "skill_check_spectate":
             self._handle_skill_check_spectate(event.payload)
+        elif event.type == "skill_check_spectate_shot":
+            self._handle_skill_check_spectate_shot(event.payload)
         elif event.type == "error":
             self._handle_online_error(event.payload)
 
@@ -279,15 +281,19 @@ class OnlineEventsMixin:
                 False, lambda: self._apply_online_fail(from_sq, to_sq, aim_victim))
             return
         if self._online_spectate_kind is not None:
-            self._online_spectate_kind = None
+            aim_victim = self.board.aim_suppressed_square
             self.toast.show("Opponent missed!")
+            self._begin_online_verdict(
+                False, lambda: self._apply_spectate_fail(from_sq, to_sq, aim_victim))
 
     def _is_my_open_check(self, from_sq, to_sq):
         return (self._online_skillcheck is not None
+                and self._online_spectate_kind is None
                 and self._online_skillcheck[:2] == (from_sq, to_sq))
 
     def _begin_online_verdict(self, won, action):
         self._online_skillcheck = None
+        self._online_spectate_kind = None
         self._online_verdict_action = action
         self.skillcheck_overlay.resolve_online(won)
 
@@ -298,27 +304,51 @@ class OnlineEventsMixin:
         if aim_victim is not None:
             self.board.restore_piece(aim_victim)
 
+    def _apply_spectate_fail(self, from_sq, to_sq, aim_victim):
+        self.board.trigger_skillcheck_fail(
+            from_sq, to_sq, on_fire=self._on_skillcheck_miss_fire)
+        if aim_victim is not None:
+            self.board.restore_piece(aim_victim)
+
     def _handle_skill_check_spectate(self, payload):
-        self._online_spectate_kind = SkillCheckKind(payload["kind"])
+        from_sq = square_from_coord(payload["from"])
+        to_sq = square_from_coord(payload["to"])
+        promo = payload.get("promotion")
+        promo_type = PROMO_TYPE_BY_LETTER.get(promo) if promo else None
+        kind = SkillCheckKind(payload["kind"])
+        self._open_spectate_overlay(
+            kind, payload["seed"], int(payload["value_diff"]),
+            float(payload["deadline_ms"]), from_sq, to_sq, promo_type)
         self.toast.show("Opponent is lining up a shot…")
+
+    def _handle_skill_check_spectate_shot(self, payload):
+        if self._online_spectate_kind is None:
+            return
+        self.skillcheck_overlay.spectate_shot(
+            float(payload["elapsed_ms"]), int(payload["miss_count"]),
+            bool(payload["won"]))
 
     def _restore_pending_skillcheck(self, pending):
         kind = SkillCheckKind(pending["kind"])
-        if pending["color"] != self._chosen_side:
-            self._online_spectate_kind = kind
-            self.toast.show("Opponent is lining up a shot…")
-            return
         from_sq = square_from_coord(pending["from_sq"])
         to_sq = square_from_coord(pending["to_sq"])
         promo = pending.get("promotion")
         promo_type = PROMO_TYPE_BY_LETTER.get(promo) if promo else None
         elapsed_ms = float(pending.get("elapsed_ms", 0.0))
+        miss_count = int(pending.get("miss_count", 0))
+        if pending["color"] != self._chosen_side:
+            self._open_spectate_overlay(
+                kind, pending["seed"], int(pending["value_diff"]),
+                float(pending["deadline_ms"]), from_sq, to_sq, promo_type,
+                elapsed_ms=elapsed_ms, miss_count=miss_count)
+            self.toast.show("Opponent is lining up a shot…")
+            return
         self._online_skillcheck = (from_sq, to_sq, promo_type, kind)
         self._online_skillcheck_opened_ms = pg.time.get_ticks() - int(elapsed_ms)
         self._open_skillcheck_overlay(
             kind, pending["seed"], int(pending["value_diff"]),
             float(pending["deadline_ms"]), from_sq, to_sq, promo_type, online=True,
-            elapsed_ms=elapsed_ms, miss_count=int(pending.get("miss_count", 0)))
+            elapsed_ms=elapsed_ms, miss_count=miss_count)
 
     def _clear_online_move_locks(self, from_sq, to_sq):
         if self.mode != ONLINE:
@@ -339,8 +369,10 @@ class OnlineEventsMixin:
                     True, lambda: self._apply_remote_move_payload(payload))
                 return
             if self._online_spectate_kind is not None:
-                self._online_spectate_kind = None
                 self.toast.show("Opponent nailed it!")
+                self._begin_online_verdict(
+                    True, lambda: self._apply_remote_move_payload(payload))
+                return
         self._apply_remote_move_payload(payload)
 
     def _apply_remote_move_payload(self, payload):

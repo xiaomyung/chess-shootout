@@ -31,14 +31,15 @@ class AimController(SkillCheckController):
     def __init__(self, challenge, cell_rect, now_ms, deadline_ms=AIM_TIME_LIMIT_MS,
                  victim_surface=None, board_rect=None, geom=None, from_sq=None,
                  victim_sq=None, attacker_type=None, shot_sound=None, on_shot=None,
-                 miss_count=0):
+                 miss_count=0, passive=False):
         self.challenge = challenge
         self.start_ms = now_ms
         self._now = now_ms
         self.deadline_ms = deadline_ms
         self.miss_count = miss_count
         self._on_shot = on_shot
-        self._online = on_shot is not None
+        self._passive = passive
+        self._online = on_shot is not None or passive
         self._committed_at = None
         self._resolved_at = None
         self._landed = None
@@ -81,6 +82,8 @@ class AimController(SkillCheckController):
         self._apply_geometry(cell_rect)
 
     def handle_event(self, event):
+        if self._passive:
+            return False
         if self._committed_at is not None:
             return True
         if event.type == pg.MOUSEBUTTONDOWN and event.button == 1:
@@ -97,24 +100,35 @@ class AimController(SkillCheckController):
             self._landed = True
             self._committed_at = self._now
             return
-        self._shot_render = (elapsed, self.miss_count)
-        self._shot_offset = self.challenge.reticle_offset(elapsed, self.miss_count)
+        self._replay_miss(elapsed, self.miss_count)
+        if self._online:
+            self._on_shot(elapsed)
+
+    def _replay_miss(self, elapsed, miss_count):
+        self._shot_render = (elapsed, miss_count)
+        self._shot_offset = self.challenge.reticle_offset(elapsed, miss_count)
         self._shot_held_until = self._now + AIM_SHOT_HOLD_MS
-        self.miss_count += 1
+        self.miss_count = miss_count + 1
         self._last_miss_ms = self._now
         self._fx.miss(now_ms=self._now, attacker_type=self._attacker_type,
                       from_sq=self._from_sq, victim_sq=self._victim_sq,
                       cell_size=self.cell_size, power="soft",
                       on_fire=self._shot_sound, callout=False)
         self._fx.swear(self._now, self._from_sq, self.cell_size)
-        if self._online:
-            self._on_shot(elapsed)
 
     def resolve(self, won):
         self._landed = won
         if self._committed_at is None:
             self._committed_at = self._now
         self._resolved_at = self._now
+
+    def spectate_shot(self, elapsed, miss_count, won):
+        if won:
+            self._shot_render = (elapsed, miss_count)
+            self._shot_offset = self.challenge.reticle_offset(elapsed, miss_count)
+            self._shot_held_until = self._now + AIM_SHOT_HOLD_MS
+            return
+        self._replay_miss(elapsed, miss_count)
 
     def update(self, now_ms):
         self._now = now_ms
@@ -156,7 +170,7 @@ class AimController(SkillCheckController):
         self._fx.draw_over(window, self._now)
 
     def _draw_scrim(self, window):
-        if self._board_rect is None:
+        if self._passive or self._board_rect is None:
             return
         scrim = pg.Surface(self._board_rect.size, pg.SRCALPHA)
         scrim.fill((*pg.Color(Colors.bg)[:3], AIM_SCRIM_ALPHA))
@@ -195,7 +209,7 @@ class AimController(SkillCheckController):
         if self._committed_at is not None and self._landed is not None:
             verdict = pg.Color(Colors.win if self._landed else Colors.loss)
             return verdict, pg.Color(verdict)
-        live = pg.Color(Colors.accent)
+        live = pg.Color(Colors.spectate if self._passive else Colors.accent)
         cross_col = pg.Color(Colors.text)
         if self._last_miss_ms is not None:
             flash = max(0.0, 1.0 - (self._now - self._last_miss_ms) / AIM_MISS_FLASH_MS)

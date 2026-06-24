@@ -13,6 +13,13 @@ class SkillCheckOverlay:
     def is_active(self):
         return self._controller is not None
 
+    def is_passive(self):
+        return getattr(self._controller, "_passive", False)
+
+    def spectate_shot(self, elapsed, miss_count, won):
+        if self._controller is not None:
+            self._controller.spectate_shot(elapsed, miss_count, won)
+
     def handle_event(self, event):
         if self._controller is None:
             return False

@@ -1108,7 +1108,7 @@ class Frontend(OnlineEventsMixin):
         self.board.start_undo_animation(move)
 
     def _handle_escape(self):
-        if self.skillcheck_overlay.is_active():
+        if self._skillcheck_swallows_input():
             return
         if self._dismiss_top_modal():
             return
@@ -1276,7 +1276,7 @@ class Frontend(OnlineEventsMixin):
         self.sound_manager.play_capture(entry.move.piece.type)
 
     def _skillcheck_gate(self, from_sq, to_sq, promo_type=None):
-        if self.skillcheck.is_locked(from_sq, to_sq) or self.skillcheck_overlay.is_active():
+        if self.skillcheck.is_locked(from_sq, to_sq) or self._skillcheck_swallows_input():
             return True
         if self.mode == ONLINE:
             return self._online_move_gate(from_sq, to_sq, promo_type)
@@ -1309,7 +1309,7 @@ class Frontend(OnlineEventsMixin):
 
     def _open_skillcheck_overlay(self, kind, seed, value_diff, deadline_ms,
                                  from_sq, to_sq, promo_type, *, online,
-                                 elapsed_ms=0, miss_count=0):
+                                 elapsed_ms=0, miss_count=0, passive=False):
         target = self._skillcheck_render_square(kind, seed, value_diff, from_sq, to_sq)
         capturer = self.match.piece_at(from_sq)
         controller = build_controller(
@@ -1320,8 +1320,8 @@ class Frontend(OnlineEventsMixin):
             geom=lambda sq: self.board.cell_rect(sq).center, from_sq=from_sq,
             victim_sq=target, attacker_type=capturer.type.value if capturer else None,
             shot_sound=self._shot_sound_for(capturer),
-            on_shot=self._send_skillcheck_shot if online else None,
-            miss_count=miss_count)
+            on_shot=None if passive else (self._send_skillcheck_shot if online else None),
+            miss_count=miss_count, passive=passive)
         if controller is None:
             return False
         self._skillcheck_target = target
@@ -1329,6 +1329,19 @@ class Frontend(OnlineEventsMixin):
         on_done = self._on_online_skillcheck_done if online else self._on_skillcheck_done
         self.skillcheck_overlay.start(controller, (from_sq, to_sq, promo_type), on_done)
         return True
+
+    def _open_spectate_overlay(self, kind, seed, value_diff, deadline_ms,
+                               from_sq, to_sq, promo_type, *, elapsed_ms=0, miss_count=0):
+        self._pending_online_move = None
+        self._online_skillcheck = (from_sq, to_sq, promo_type, kind)
+        self._online_spectate_kind = kind
+        self._online_skillcheck_opened_ms = pg.time.get_ticks() - int(elapsed_ms)
+        self._open_skillcheck_overlay(
+            kind, seed, value_diff, deadline_ms, from_sq, to_sq, promo_type,
+            online=True, passive=True, elapsed_ms=elapsed_ms, miss_count=miss_count)
+
+    def _skillcheck_swallows_input(self):
+        return self.skillcheck_overlay.is_active() and not self.skillcheck_overlay.is_passive()
 
     def _send_skillcheck_shot(self, client_elapsed_ms):
         if self.online_client is not None:
@@ -1485,7 +1498,7 @@ class Frontend(OnlineEventsMixin):
                 and self.current_result() is None
                 and post_animation_settled
                 and self._pending_online_move is None
-                and not self.skillcheck_overlay.is_active()):
+                and not self._skillcheck_swallows_input()):
             self.board.try_apply_next_premove()
 
         if self.mode != "menu":
@@ -2157,7 +2170,7 @@ class Frontend(OnlineEventsMixin):
                 if event.key == pg.K_ESCAPE:
                     self._handle_escape()
                     continue
-                if self.skillcheck_overlay.is_active():
+                if self._skillcheck_swallows_input():
                     self.skillcheck_overlay.handle_event(event)
                     continue
                 if self.country_picker.is_visible():
@@ -2184,7 +2197,7 @@ class Frontend(OnlineEventsMixin):
                 self._handle_shortcut_key(event)
 
             elif event.type == pg.MOUSEBUTTONDOWN:
-                if self.skillcheck_overlay.is_active():
+                if self._skillcheck_swallows_input():
                     if event.button == 1 and self.chrome.handle_click(event.pos):
                         continue
                     self.skillcheck_overlay.handle_event(event)
@@ -2195,7 +2208,7 @@ class Frontend(OnlineEventsMixin):
                     self._right_click_pressed(event.pos)
 
             elif event.type == pg.MOUSEBUTTONUP:
-                if self.skillcheck_overlay.is_active():
+                if self._skillcheck_swallows_input():
                     continue
                 if event.button == 1:
                     self._mouse_left_released(event.pos)

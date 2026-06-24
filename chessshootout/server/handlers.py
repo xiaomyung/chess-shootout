@@ -18,6 +18,7 @@ from chessshootout.server.protocol import (
     PingMessage, PongMessage, Reason,
     RematchRequestMessage, RematchResponseMessage, ResyncDirectiveMessage,
     SkillCheckRequiredMessage, SkillCheckShotMessage, SkillCheckSpectateMessage,
+    SkillCheckSpectateShotMessage,
     TakebackAppliedMessage, TakebackOfferedMessage,
     TakebackResponseMessage, TimeGrantedMessage,
 )
@@ -121,7 +122,11 @@ async def handle_move(app, websocket, room, color, raw):
         promotion=msg.promotion))
     opp_ws = connections.get_for_color(room, room.opp_color(color))
     if opp_ws is not None:
-        await send(opp_ws, SkillCheckSpectateMessage(kind=kind.value))
+        await send(opp_ws, SkillCheckSpectateMessage(
+            kind=kind.value, seed=seed, value_diff=value_diff,
+            deadline_ms=online.SKILLCHECK_DEADLINE_MS,
+            from_sq=coord_from_square(from_sq), to_sq=coord_from_square(to_sq),
+            promotion=msg.promotion))
     return f"skillcheck:{kind.value}"
 
 
@@ -172,11 +177,16 @@ async def handle_skill_check_shot(app, websocket, room, color, raw):
     recv_ms = app.state.now_ms()
     elapsed = online.adjudicated_elapsed_ms(msg.client_elapsed_ms, recv_ms, pending.start_ms)
     challenge = online.challenge_from(pending.kind, pending.seed, pending.value_diff)
+    won = online.shot_wins(pending.kind, challenge, elapsed, pending.miss_count)
     log.debug("skillcheck shot room=%s kind=%s raw_ms=%.1f client=%.1f effective=%d "
               "miss=%d subfloor=%s", room.room_id, pending.kind.value,
               recv_ms - pending.start_ms, msg.client_elapsed_ms, elapsed,
               pending.miss_count, elapsed < online.SKILLCHECK_HUMAN_FLOOR_MS)
-    if online.shot_wins(pending.kind, challenge, elapsed, pending.miss_count):
+    opp_ws = connections.get_for_color(room, room.opp_color(color))
+    if opp_ws is not None:
+        await send(opp_ws, SkillCheckSpectateShotMessage(
+            elapsed_ms=elapsed, miss_count=pending.miss_count, won=won))
+    if won:
         room.pending_skillcheck = None
         log.info("skillcheck won room=%s mover=%s kind=%s", room.room_id, color,
                  pending.kind.value)

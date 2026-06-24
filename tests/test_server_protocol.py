@@ -6,7 +6,7 @@ from chessshootout.server.protocol import (
     MatchmakeRequest, MoveAppliedMessage, MoveMessage, PROTOCOL_VERSION,
     PendingSkillCheckWire, PingMessage, PongMessage, ResumeResponse,
     ResyncDirectiveMessage, SkillCheckRequiredMessage, SkillCheckResultMessage,
-    SkillCheckShotMessage, SkillCheckSpectateMessage,
+    SkillCheckShotMessage, SkillCheckSpectateMessage, SkillCheckSpectateShotMessage,
     normalize_country, normalize_nickname,
 )
 from tests.helpers import fake_uuid4
@@ -277,9 +277,22 @@ def test_skill_check_result_uses_from_to_aliases():
     assert msg.model_dump(by_alias=True)["from"] == "e4"
 
 
-def test_skill_check_spectate_carries_only_kind():
-    msg = SkillCheckSpectateMessage(kind="aim")
-    assert set(msg.model_dump()) == {"version", "type", "kind"}, "no seed/value_diff/from/to leak"
+def test_skill_check_spectate_carries_the_full_challenge_with_from_to_aliases():
+    msg = SkillCheckSpectateMessage(
+        kind="aim", seed="abc", value_diff=3, deadline_ms=5000.0,
+        **{"from": "d4", "to": "d5"}, promotion=None)
+    assert (msg.kind, msg.seed, msg.value_diff) == ("aim", "abc", 3)
+    assert (msg.from_sq, msg.to_sq) == ("d4", "d5")
+    dumped = msg.model_dump(by_alias=True)
+    assert dumped["from"] == "d4" and dumped["to"] == "d5"
+
+
+def test_skill_check_spectate_shot_round_trips():
+    msg = SkillCheckSpectateShotMessage.model_validate(
+        {"type": "skill_check_spectate_shot", "elapsed_ms": 742.0,
+         "miss_count": 2, "won": False})
+    assert (msg.elapsed_ms, msg.miss_count, msg.won) == (742.0, 2, False)
+    assert msg.model_dump()["type"] == "skill_check_spectate_shot"
 
 
 def test_move_applied_skillcheck_fields_default_none_and_round_trip():

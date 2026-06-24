@@ -372,6 +372,21 @@ class SkillCheckResultMessage(_Base):
 class SkillCheckSpectateMessage(_Base):
     type: Literal["skill_check_spectate"] = "skill_check_spectate"
     kind: Literal["wheel", "aim"]
+    seed: str
+    value_diff: int
+    deadline_ms: float
+    from_sq: str = Field(alias="from")
+    to_sq: str = Field(alias="to")
+    promotion: Optional[Literal["q", "r", "b", "n"]] = None
+
+    model_config = {"populate_by_name": True}
+
+
+class SkillCheckSpectateShotMessage(_Base):
+    type: Literal["skill_check_spectate_shot"] = "skill_check_spectate_shot"
+    elapsed_ms: float
+    miss_count: int
+    won: bool
 
 
 class ErrorMessage(_Base):
