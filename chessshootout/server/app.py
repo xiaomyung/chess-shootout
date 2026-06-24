@@ -31,7 +31,6 @@ from chessshootout.server.rooms import (
     RoomManager,
 )
 from chessshootout.server.sweep import Sweep
-from chessshootout.skillcheck.online import SKILLCHECK_DEADLINE_MS
 
 
 CLOCK_TICK_INTERVAL_SECONDS = 0.1
@@ -360,7 +359,7 @@ def _pending_skillcheck_wire(room, now_ms):
     elapsed = max(0.0, now_ms() - pending.start_ms)
     return PendingSkillCheckWire(
         kind=pending.kind.value, seed=pending.seed, value_diff=pending.value_diff,
-        deadline_ms=SKILLCHECK_DEADLINE_MS, elapsed_ms=elapsed,
+        deadline_ms=pending.deadline_ms, elapsed_ms=elapsed,
         miss_count=pending.miss_count,
         from_sq=coord_from_square(pending.from_sq),
         to_sq=coord_from_square(pending.to_sq),

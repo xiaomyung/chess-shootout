@@ -715,3 +715,40 @@ async def test_reset_for_rematch_clears_the_skillcheck_log(app, clock):
     app.state.rooms.reset_for_rematch(room.room_id)
     assert room.skillcheck_log == []
     assert room.skillcheck_locks == set()
+
+
+# ---- the server-owned time cap ---------------------------------------------
+
+@pytest.mark.asyncio
+async def test_handle_move_stamps_the_tc_capped_deadline(app, clock):
+    room, ws_w, ws_b, frm, to = await _capture_room(app, clock, WHEEL)
+    await handle_move(app, ws_w, room, "white", _move_raw(frm, to))
+    pending = room.pending_skillcheck
+    assert pending.deadline_ms == online.SKILLCHECK_DEADLINE_MS, "5+0 -> the 5s base"
+    assert pending.expires_at_ms == pending.start_ms + pending.deadline_ms
+    req = ws_w.of_type("skill_check_required")[0]
+    spec = ws_b.of_type("skill_check_spectate")[0]
+    assert req["deadline_ms"] == pending.deadline_ms == spec["deadline_ms"]
+
+
+@pytest.mark.asyncio
+async def test_a_short_time_control_shrinks_the_check_deadline(app, clock):
+    room, ws_w, ws_b, frm, to = await _capture_room(app, clock, WHEEL)
+    room.time_minutes = 0.5  # 30s game -> 10% = 3s, below the 5s base
+    await handle_move(app, ws_w, room, "white", _move_raw(frm, to))
+    pending = room.pending_skillcheck
+    assert pending.deadline_ms == 3000.0
+    assert pending.expires_at_ms == pending.start_ms + 3000.0
+    assert ws_w.of_type("skill_check_required")[0]["deadline_ms"] == 3000.0
+
+
+@pytest.mark.asyncio
+async def test_a_shot_past_the_capped_deadline_fails_even_under_the_base(app, clock):
+    room, ws_w, ws_b, frm, to = await _capture_room(app, clock, WHEEL)
+    room.time_minutes = 0.5  # deadline 3000ms
+    await handle_move(app, ws_w, room, "white", _move_raw(frm, to))
+    out = await _shoot_at(app, clock, room, "white", 3500)  # past 3000 cap, under 5000 base
+    assert out == "skillcheck_fail"
+    assert room.pending_skillcheck is None
+    assert len(room.backend.move_history) == 0, "the move never lands past the capped deadline"
+    assert room.skillcheck_log == [SkillCheckOutcome(1, "wheel", False, "Qxd5")]

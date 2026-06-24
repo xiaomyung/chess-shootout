@@ -1383,3 +1383,13 @@ def test_loading_a_pgn_with_a_miss_populates_review_whiffs(tmp_path):
     app2 = Frontend(1100, 800)
     app2._load_pgn_from_path(str(path))
     assert app2._skillcheck_whiffs() == {5: [("Steady-Aim", "Bxc6")]}
+
+
+def test_local_skillcheck_deadline_is_tc_capped():
+    app = Frontend(1100, 800)
+    app._time_control = (300, 0)
+    assert app._skillcheck_deadline_ms() == 5000, "5+0 -> the 5s base"
+    app._time_control = (40, 0)
+    assert app._skillcheck_deadline_ms() == 4000, "a 40s game -> 10% = 4s"
+    app._time_control = None
+    assert app._skillcheck_deadline_ms() == 5000, "no clock -> the base"

@@ -10,6 +10,7 @@ from uuid import uuid4
 from chessshootout.backend.backend import Backend
 from chessshootout.backend.utils import Square
 from chessshootout.server.protocol import GRACE_SECONDS, HEARTBEAT_TIMEOUT_SECONDS
+from chessshootout.skillcheck.online import SKILLCHECK_DEADLINE_MS
 from chessshootout.skillcheck.types import SkillCheckKind
 
 
@@ -53,6 +54,7 @@ class PendingSkillCheck:
     value_diff: int
     start_ms: float
     expires_at_ms: float
+    deadline_ms: float = SKILLCHECK_DEADLINE_MS
     miss_count: int = 0
 
 

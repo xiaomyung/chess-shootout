@@ -20,7 +20,7 @@ from chessshootout.frontend.board import Board
 from chessshootout.frontend.skillcheck.overlay import SkillCheckOverlay
 from chessshootout.frontend.skillcheck.registry import build_controller
 from chessshootout.skillcheck.coordinator import SkillCheckCoordinator
-from chessshootout.skillcheck.online import SKILLCHECK_DEADLINE_MS
+from chessshootout.skillcheck.online import SKILLCHECK_DEADLINE_MS, skillcheck_deadline_ms
 from chessshootout.skillcheck.types import KIND_LABEL, SkillCheckKind, SkillCheckOutcome
 from chessshootout.skillcheck.wheel import period_for_diff, placement_square
 from chessshootout.backend.utils import coord_from_square, PROMO_LETTER_BY_TYPE, Square
@@ -1479,9 +1479,8 @@ class Frontend(OnlineEventsMixin):
 
     def _skillcheck_deadline_ms(self):
         time_control = getattr(self, "_time_control", None)
-        if time_control is not None and time_control[0]:
-            return int(min(time_control[0] * 0.10, 60.0) * 1000)
-        return 60000
+        initial = time_control[0] if time_control and time_control[0] else 0
+        return int(skillcheck_deadline_ms(initial))
 
     def _on_kill_announced(self, key):
         if key == "hit":

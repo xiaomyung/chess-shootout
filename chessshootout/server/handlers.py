@@ -107,24 +107,23 @@ async def handle_move(app, websocket, room, color, raw):
     value_diff = online.value_diff_for(facts, msg.promotion)
     seed = secrets.token_hex(16)
     start_ms = app.state.now_ms()
+    deadline_ms = online.skillcheck_deadline_ms(room.time_minutes * 60)
     room.pending_skillcheck = PendingSkillCheck(
         color=color, from_sq=from_sq, to_sq=to_sq, promotion=msg.promotion,
         kind=kind, seed=seed, value_diff=value_diff,
-        start_ms=start_ms, expires_at_ms=start_ms + online.SKILLCHECK_DEADLINE_MS,
+        start_ms=start_ms, expires_at_ms=start_ms + deadline_ms, deadline_ms=deadline_ms,
     )
     if room.first_move_at is None:
         room.first_move_at = app.state.now()
     log.info("skillcheck fired room=%s mover=%s kind=%s", room.room_id, color, kind.value)
     await send(connections.get_for_color(room, color), SkillCheckRequiredMessage(
-        kind=kind.value, seed=seed, value_diff=value_diff,
-        deadline_ms=online.SKILLCHECK_DEADLINE_MS,
+        kind=kind.value, seed=seed, value_diff=value_diff, deadline_ms=deadline_ms,
         from_sq=coord_from_square(from_sq), to_sq=coord_from_square(to_sq),
         promotion=msg.promotion))
     opp_ws = connections.get_for_color(room, room.opp_color(color))
     if opp_ws is not None:
         await send(opp_ws, SkillCheckSpectateMessage(
-            kind=kind.value, seed=seed, value_diff=value_diff,
-            deadline_ms=online.SKILLCHECK_DEADLINE_MS,
+            kind=kind.value, seed=seed, value_diff=value_diff, deadline_ms=deadline_ms,
             from_sq=coord_from_square(from_sq), to_sq=coord_from_square(to_sq),
             promotion=msg.promotion))
     return f"skillcheck:{kind.value}"
@@ -180,7 +179,8 @@ async def handle_skill_check_shot(app, websocket, room, color, raw):
     recv_ms = app.state.now_ms()
     elapsed = online.adjudicated_elapsed_ms(msg.client_elapsed_ms, recv_ms, pending.start_ms)
     challenge = online.challenge_from(pending.kind, pending.seed, pending.value_diff)
-    won = online.shot_wins(pending.kind, challenge, elapsed, pending.miss_count)
+    won = online.shot_wins(pending.kind, challenge, elapsed, pending.miss_count,
+                           pending.deadline_ms)
     log.debug("skillcheck shot room=%s kind=%s raw_ms=%.1f client=%.1f effective=%d "
               "miss=%d subfloor=%s", room.room_id, pending.kind.value,
               recv_ms - pending.start_ms, msg.client_elapsed_ms, elapsed,
@@ -196,7 +196,8 @@ async def handle_skill_check_shot(app, websocket, room, color, raw):
         return await _apply_move(app, room, color, pending.from_sq, pending.to_sq,
                                  pending.promotion, skill_kind=pending.kind.value,
                                  skill_won=True)
-    if pending.kind == SkillCheckKind.WHEEL or online.is_past_deadline(elapsed) \
+    if pending.kind == SkillCheckKind.WHEEL \
+            or online.is_past_deadline(elapsed, pending.deadline_ms) \
             or online.aim_expired(challenge, elapsed, pending.miss_count):
         log.info("skillcheck failed room=%s mover=%s kind=%s", room.room_id, color,
                  pending.kind.value)

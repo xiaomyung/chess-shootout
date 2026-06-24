@@ -215,3 +215,34 @@ def test_aim_piece_scale_no_crash_on_negative_elapsed():
     assert aim.piece_scale(-1000.0, 0) == aim.piece_scale(0.0, 0)
     assert isinstance(aim.on_target(-5.0, 0), bool)
     assert isinstance(aim.is_expired(-5.0, 0), bool)
+
+
+# ---- the server-owned skill-check time cap ---------------------------------
+
+@pytest.mark.parametrize("initial_seconds, expected", [
+    (300, 5000.0),     # 5+0: 10% = 30s, base 5s wins
+    (1800, 5000.0),    # 30+0: 10% = 180s, base 5s wins
+    (40, 4000.0),      # 40s game: 10% = 4s binds below the base
+    (20, 2000.0),      # 20s game: 10% = 2s
+    (0, 5000.0),       # no clock -> the base deadline
+])
+def test_skillcheck_deadline_ms_caps_at_min_base_tenth_and_ceiling(initial_seconds, expected):
+    assert online.skillcheck_deadline_ms(initial_seconds) == expected
+
+
+def test_skillcheck_deadline_never_exceeds_the_base_and_shrinks_for_fast_tc():
+    assert online.skillcheck_deadline_ms(600) == online.SKILLCHECK_DEADLINE_MS
+    assert online.skillcheck_deadline_ms(30) < online.SKILLCHECK_DEADLINE_MS
+    assert online.skillcheck_deadline_ms(30) == 30 * 0.10 * 1000.0
+
+
+def test_is_past_deadline_honors_a_capped_deadline():
+    assert online.is_past_deadline(3500, deadline_ms=3000.0) is True
+    assert online.is_past_deadline(3500) is False
+
+
+def test_shot_past_the_capped_deadline_never_wins():
+    ch = WheelChallenge(arc_start_deg=0.0, arc_width_deg=360.0, period_ms=800.0,
+                        start_angle_deg=0.0)
+    assert online.shot_wins(SkillCheckKind.WHEEL, ch, 3500, deadline_ms=3000.0) is False
+    assert online.shot_wins(SkillCheckKind.WHEEL, ch, 3500) is True

@@ -9,6 +9,16 @@ from chessshootout.skillcheck.wheel import (
 SKILLCHECK_DEADLINE_MS = 5000.0
 SKILLCHECK_HUMAN_FLOOR_MS = WHEEL_HUMAN_FLOOR_MS
 SKILLCHECK_LAG_BOUND_MS = 200.0
+SKILLCHECK_TIME_CAP_MS = 60000.0
+SKILLCHECK_TIME_FRACTION = 0.10
+
+
+def skillcheck_deadline_ms(initial_seconds):
+    if not initial_seconds:
+        return SKILLCHECK_DEADLINE_MS
+    tenth = initial_seconds * SKILLCHECK_TIME_FRACTION * 1000.0
+    return min(SKILLCHECK_DEADLINE_MS, tenth, SKILLCHECK_TIME_CAP_MS)
+
 
 _PROMO_TYPE = {
     "q": PieceType.QUEEN, "r": PieceType.ROOK,
@@ -52,12 +62,12 @@ def adjudicated_elapsed_ms(client_elapsed_ms, recv_ms, start_ms,
     return int(max(0.0, bounded))
 
 
-def is_past_deadline(elapsed_ms):
-    return elapsed_ms > SKILLCHECK_DEADLINE_MS
+def is_past_deadline(elapsed_ms, deadline_ms=SKILLCHECK_DEADLINE_MS):
+    return elapsed_ms > deadline_ms
 
 
-def shot_wins(kind, challenge, elapsed_ms, miss_count=0):
-    if elapsed_ms < SKILLCHECK_HUMAN_FLOOR_MS or is_past_deadline(elapsed_ms):
+def shot_wins(kind, challenge, elapsed_ms, miss_count=0, deadline_ms=SKILLCHECK_DEADLINE_MS):
+    if elapsed_ms < SKILLCHECK_HUMAN_FLOOR_MS or is_past_deadline(elapsed_ms, deadline_ms):
         return False
     if kind == SkillCheckKind.WHEEL:
         return challenge.in_arc_at(challenge.needle_deg(elapsed_ms), elapsed_ms)
