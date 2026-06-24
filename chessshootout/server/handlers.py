@@ -26,7 +26,7 @@ from chessshootout.server.rooms import PendingSkillCheck
 from chessshootout.server.sweep import RESULT_REASON_BY_GAME_RESULT
 from chessshootout.skillcheck import online
 from chessshootout.skillcheck.triggers import compute_facts
-from chessshootout.skillcheck.types import SkillCheckKind
+from chessshootout.skillcheck.types import SkillCheckKind, SkillCheckOutcome
 
 
 log = logging_setup.get_logger("chess.server.app")
@@ -149,6 +149,9 @@ async def _apply_move(app, room, color, from_sq, to_sq, promotion,
     room.draw_offered_by = None
     room.takeback_offered_by = None
     san = room.backend.move_history[-1].san
+    if skill_kind is not None:
+        room.skillcheck_log.append(SkillCheckOutcome(
+            len(room.backend.move_history), skill_kind, skill_won, san))
     log.info("move applied room=%s mover=%s san=%s", room.room_id, color, san)
     applied = MoveAppliedMessage(
         from_sq=coord_from_square(from_sq), to_sq=coord_from_square(to_sq),
@@ -329,7 +332,9 @@ async def handle_takeback_response(app, websocket, room, color, raw):
         return "self"
     if msg.accept:
         log.info("takeback accepted room=%s by=%s", room.room_id, color)
+        popped_ply = len(room.backend.move_history)
         room.backend.undo()
+        room.skillcheck_log = [e for e in room.skillcheck_log if e.ply < popped_ply]
         room.takeback_offered_by = None
         await broadcast(connections, room, TakebackAppliedMessage(
             fen=export_fen(room.backend),

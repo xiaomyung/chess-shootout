@@ -18,12 +18,15 @@ from chessshootout.backend.pieces import PieceColor, PieceType
 from chessshootout.backend.utils import Square, coord_from_square
 from chessshootout.server.app import create_app
 from chessshootout.server.broadcasts import resolve_skillcheck_fail
+from fastapi.testclient import TestClient
+
 from chessshootout.server.handlers import (
     handle_move, handle_ping, handle_skill_check_shot, handle_takeback_request,
+    handle_takeback_response,
 )
-from chessshootout.server.protocol import Reason
+from chessshootout.server.protocol import PROTOCOL_VERSION, Reason
 from chessshootout.skillcheck import online
-from chessshootout.skillcheck.types import SkillCheckKind
+from chessshootout.skillcheck.types import SkillCheckKind, SkillCheckOutcome
 from tests.helpers import FakeClock, fake_uuid4, make_backend, piece, sq
 
 ALICE = fake_uuid4(1)
@@ -639,3 +642,76 @@ async def test_sweep_does_not_early_fail_an_aim_check_while_the_piece_remains(ap
     clock.advance(0.5)  # piece still large, well inside the deadline
     await app.state.sweep.step_skillcheck_deadline()
     assert room.pending_skillcheck is not None, "an on-screen aim check is not swept early"
+
+
+# ---- the server-authoritative skill-check log -------------------------------
+
+@pytest.mark.asyncio
+async def test_won_check_appends_an_outcome_to_the_server_log(app, clock):
+    room, ws_w, ws_b, frm, to = await _capture_room(app, clock, WHEEL)
+    await handle_move(app, ws_w, room, "white", _move_raw(frm, to))
+    await _shoot_at(app, clock, room, "white", _win_elapsed(room.pending_skillcheck))
+    assert room.skillcheck_log == [SkillCheckOutcome(1, "wheel", True, "Qxd5")]
+
+
+@pytest.mark.asyncio
+async def test_failed_check_appends_a_fail_outcome_with_the_whiffed_san(app, clock):
+    room, ws_w, ws_b, frm, to = await _capture_room(app, clock, WHEEL)
+    await handle_move(app, ws_w, room, "white", _move_raw(frm, to))
+    await _shoot_at(app, clock, room, "white", _wheel_loss_elapsed(room.pending_skillcheck))
+    assert room.skillcheck_log == [SkillCheckOutcome(1, "wheel", False, "Qxd5")]
+    assert len(room.backend.move_history) == 0, "a failed check lands no ply"
+
+
+@pytest.mark.asyncio
+async def test_sweep_resolved_fail_also_records_the_outcome(app, clock):
+    room, ws_w, ws_b, frm, to = await _capture_room(app, clock, WHEEL)
+    await handle_move(app, ws_w, room, "white", _move_raw(frm, to))
+    await resolve_skillcheck_fail(app.state.connections, room)
+    assert room.skillcheck_log == [SkillCheckOutcome(1, "wheel", False, "Qxd5")]
+
+
+@pytest.mark.asyncio
+async def test_a_pending_check_is_absent_from_the_log_until_it_resolves(app, clock):
+    room, ws_w, ws_b, frm, to = await _capture_room(app, clock, WHEEL)
+    await handle_move(app, ws_w, room, "white", _move_raw(frm, to))
+    assert room.pending_skillcheck is not None
+    assert room.skillcheck_log == [], "an unresolved check is never recorded"
+    await _shoot_at(app, clock, room, "white", _win_elapsed(room.pending_skillcheck))
+    assert len(room.skillcheck_log) == 1, "recorded exactly once, at resolution"
+
+
+@pytest.mark.asyncio
+async def test_resume_endpoint_carries_the_skillcheck_log(app, clock):
+    room, ws_w, ws_b, frm, to = await _capture_room(app, clock, WHEEL)
+    await handle_move(app, ws_w, room, "white", _move_raw(frm, to))
+    await _shoot_at(app, clock, room, "white", _win_elapsed(room.pending_skillcheck))
+    resp = TestClient(app).post("/resume", json={
+        "version": PROTOCOL_VERSION, "room_id": room.room_id, "session_token": "ta"})
+    assert resp.status_code == 200
+    assert resp.json()["skillcheck_log"] == [
+        {"ply": 1, "kind": "wheel", "won": True, "san": "Qxd5"}]
+
+
+@pytest.mark.asyncio
+async def test_takeback_drops_the_outcomes_for_the_undone_ply(app, clock):
+    room, ws_w, ws_b, frm, to = await _capture_room(app, clock, WHEEL)
+    await handle_move(app, ws_w, room, "white", _move_raw(frm, to))
+    await _shoot_at(app, clock, room, "white", _win_elapsed(room.pending_skillcheck))
+    assert len(room.skillcheck_log) == 1 and len(room.backend.move_history) == 1
+    room.takeback_offered_by = "white"
+    raw = json.dumps({"type": "takeback_response", "accept": True})
+    await handle_takeback_response(app, ws_b, room, "black", raw)
+    assert room.skillcheck_log == [], "the undone ply's outcome is gone"
+    assert len(room.backend.move_history) == 0
+
+
+@pytest.mark.asyncio
+async def test_reset_for_rematch_clears_the_skillcheck_log(app, clock):
+    room = await _pair(app)
+    room.result = ("resignation", "white")
+    room.skillcheck_log = [SkillCheckOutcome(1, "wheel", True, "Qxd5")]
+    room.skillcheck_locks = {(Square(4, 3), Square(3, 3))}
+    app.state.rooms.reset_for_rematch(room.room_id)
+    assert room.skillcheck_log == []
+    assert room.skillcheck_locks == set()

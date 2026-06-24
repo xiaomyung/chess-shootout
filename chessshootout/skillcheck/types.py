@@ -8,6 +8,9 @@ class SkillCheckKind(Enum):
     AIM = "aim"
 
 
+KIND_LABEL = {"wheel": "Wheel", "aim": "Steady-Aim"}
+
+
 @dataclass(frozen=True)
 class TriggerFacts:
     is_capture: bool = False
@@ -15,3 +18,11 @@ class TriggerFacts:
     captured_value: int = 0
     is_promotion: bool = False
     is_forced: bool = False
+
+
+@dataclass(frozen=True)
+class SkillCheckOutcome:
+    ply: int
+    kind: str
+    won: bool
+    san: str = ""

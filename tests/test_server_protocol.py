@@ -6,8 +6,8 @@ from chessshootout.server.protocol import (
     MatchmakeRequest, MoveAppliedMessage, MoveMessage, PROTOCOL_VERSION,
     PendingSkillCheckWire, PingMessage, PongMessage, ResumeResponse,
     ResyncDirectiveMessage, SkillCheckRequiredMessage, SkillCheckResultMessage,
-    SkillCheckShotMessage, SkillCheckSpectateMessage, SkillCheckSpectateShotMessage,
-    normalize_country, normalize_nickname,
+    SkillCheckOutcomeWire, SkillCheckShotMessage, SkillCheckSpectateMessage,
+    SkillCheckSpectateShotMessage, normalize_country, normalize_nickname,
 )
 from tests.helpers import fake_uuid4
 
@@ -303,6 +303,41 @@ def test_move_applied_skillcheck_fields_default_none_and_round_trip():
     assert quiet.skill_check_kind is None and quiet.skill_check_won is None
     won = MoveAppliedMessage(**base, skill_check_kind="wheel", skill_check_won=True)
     assert MoveAppliedMessage.model_validate(won.model_dump(by_alias=True)) == won
+
+
+def test_skillcheck_outcome_wire_uses_plain_field_keys_no_alias():
+    wire = SkillCheckOutcomeWire(ply=7, kind="wheel", won=False, san="Rxe5")
+    dumped = wire.model_dump()
+    assert dumped == {"ply": 7, "kind": "wheel", "won": False, "san": "Rxe5"}
+    assert wire.model_dump(by_alias=True) == dumped, "no from/to alias, no version key"
+
+
+def test_skillcheck_outcome_wire_san_defaults_empty_for_wins():
+    assert SkillCheckOutcomeWire(ply=1, kind="aim", won=True).san == ""
+
+
+def test_resume_response_carries_the_skillcheck_log():
+    resp = ResumeResponse(
+        fen="x", move_history=[],
+        clock=ClockSnapshot(white_remaining=1.0, black_remaining=1.0, running_for="white"),
+        your_color="white", white_name="A", black_name="B",
+        time_minutes=5, increment_seconds=0,
+        skillcheck_log=[
+            SkillCheckOutcomeWire(ply=1, kind="wheel", won=True),
+            SkillCheckOutcomeWire(ply=2, kind="aim", won=False, san="Qxd5")])
+    dumped = resp.model_dump()
+    assert dumped["skillcheck_log"] == [
+        {"ply": 1, "kind": "wheel", "won": True, "san": ""},
+        {"ply": 2, "kind": "aim", "won": False, "san": "Qxd5"}]
+
+
+def test_resume_response_skillcheck_log_defaults_empty():
+    resp = ResumeResponse(
+        fen="x", move_history=[],
+        clock=ClockSnapshot(white_remaining=1.0, black_remaining=1.0, running_for="white"),
+        your_color="white", white_name="A", black_name="B",
+        time_minutes=5, increment_seconds=0)
+    assert resp.skillcheck_log == []
 
 
 def test_resume_response_pending_and_locks_default_empty():

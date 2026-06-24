@@ -171,6 +171,20 @@ class Backend:
             snapshot.undo()
         return snapshot.state
 
+    def preview_san(self, from_sq, to_sq, promo_letter=None):
+        piece = self.state[from_sq.row][from_sq.col]
+        if piece is None:
+            return ""
+        is_en_passant = self._is_en_passant_move(from_sq, to_sq, piece)
+        if is_en_passant:
+            captured = self.state[from_sq.row][to_sq.col]
+        else:
+            captured = self.state[to_sq.row][to_sq.col]
+        san = self._build_san(from_sq, to_sq, piece, captured, is_en_passant=is_en_passant)
+        if promo_letter is not None:
+            san += f"={promo_letter.upper()}"
+        return san
+
     def apply_san(self, san):
         san = san.rstrip("!?+#")
         if not san:

@@ -215,6 +215,7 @@ class OnlineEventsMixin:
         self.board.selected_square = None
         self.board._clear_premoves()
         self.board.clear_annotations()
+        self._apply_resumed_skillcheck_log(payload.get("skillcheck_log", []))
         self._restore_online_skillcheck_state(payload)
         self._resyncing = False
 
@@ -250,6 +251,7 @@ class OnlineEventsMixin:
             self._begin_resync()
             return
         if self.match.move_history:
+            self._drop_skillcheck_log_from(len(self.match.move_history))
             last = self.match.move_history[-1].move
             self.match.undo()
             self.board.start_undo_animation(last)
@@ -272,15 +274,20 @@ class OnlineEventsMixin:
             miss_count=int(payload.get("miss_count", 0)))
 
     def _handle_skill_check_result(self, payload):
+        if self._resyncing:
+            return
         from_sq = square_from_coord(payload["from"])
         to_sq = square_from_coord(payload["to"])
+        pending = self._online_skillcheck
         if self._is_my_open_check(from_sq, to_sq):
+            self._record_online_fail(pending, from_sq, to_sq)
             aim_victim = self.board.aim_suppressed_square
             self.board.selected_square = None
             self._begin_online_verdict(
                 False, lambda: self._apply_online_fail(from_sq, to_sq, aim_victim))
             return
         if self._online_spectate_kind is not None:
+            self._record_online_fail(pending, from_sq, to_sq)
             aim_victim = self.board.aim_suppressed_square
             self.toast.show("Opponent missed!")
             self._begin_online_verdict(
@@ -396,6 +403,11 @@ class OnlineEventsMixin:
         if result.legal:
             self.board.animate_remote_move(from_sq, to_sq)
             self._clear_online_move_locks(from_sq, to_sq)
+            kind = payload.get("skill_check_kind")
+            if kind is not None:
+                self._record_skillcheck(
+                    kind, bool(payload.get("skill_check_won")),
+                    payload.get("ply") or len(self.match.move_history))
         else:
             self._begin_resync()
 

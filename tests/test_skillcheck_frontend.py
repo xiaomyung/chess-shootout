@@ -32,7 +32,8 @@ from chessshootout.skillcheck.aim import AimChallenge
 from chessshootout.skillcheck.coordinator import move_roll_key
 from chessshootout.skillcheck.rng import ply_roll
 from chessshootout.skillcheck.triggers import select_skillcheck
-from chessshootout.skillcheck.types import SkillCheckKind
+from chessshootout.skillcheck.types import SkillCheckKind, SkillCheckOutcome
+from chessshootout.domain.pgn.generate import format_annotations
 from chessshootout.skillcheck.wheel import (
     WheelChallenge, WHEEL_HUMAN_FLOOR_MS, placement_square)
 
@@ -755,7 +756,8 @@ def test_relocated_wheel_win_applies_the_original_capture():
     app.skillcheck.reset(enabled=True, seed=_wheel_seed_that_relocates(app, frm, to))
     app._skillcheck_gate(frm, to)
     assert app._skillcheck_target != to, "the dial relocated away from the capture square"
-    assert app.skillcheck_overlay._context == (frm, to, None), "the move context keeps real squares"
+    assert app.skillcheck_overlay._context[:3] == (frm, to, None), \
+        "the move context keeps real squares"
     app._on_skillcheck_done(app.skillcheck_overlay._context, True)
     assert len(app.match.move_history) == 1
     assert app.match.piece_at(to).type == PieceType.QUEEN, "the real capture lands on the victim"
@@ -1259,3 +1261,125 @@ def test_board_marks_locked_target():
     app.board.selected_square = frm
     assert app.board._is_target_locked(to) is True
     assert app.board._is_target_locked(Square(5, 3)) is False
+
+
+def test_local_won_wheel_logs_the_outcome_for_pgn():
+    app = Frontend(1100, 800)
+    _start_local(app)
+    frm, to = _set_queen_takes_pawn(app)
+    app.skillcheck.reset(enabled=True, seed=_wheel_seed(app.match.backend, frm, to))
+    assert app._skillcheck_gate(frm, to) is True
+    app._on_skillcheck_done(app.skillcheck_overlay._context, True)
+    assert app._skillcheck_log == [SkillCheckOutcome(1, "wheel", True, "")]
+    assert format_annotations(app._skillcheck_log) == {1: "Wheel ✓"}
+
+
+def test_local_failed_wheel_logs_the_whiffed_move_san():
+    app = Frontend(1100, 800)
+    _start_local(app)
+    frm, to = _set_queen_takes_pawn(app)
+    app.skillcheck.reset(enabled=True, seed=_wheel_seed(app.match.backend, frm, to))
+    assert app._skillcheck_gate(frm, to) is True
+    app._on_skillcheck_done(app.skillcheck_overlay._context, False)
+    assert app._skillcheck_log == [SkillCheckOutcome(1, "wheel", False, "Qxd5")]
+    assert len(app.match.move_history) == 0, "a failed check lands no ply"
+    assert format_annotations(app._skillcheck_log) == {1: "Wheel ✗ Qxd5"}
+
+
+def test_local_won_check_lands_in_the_saved_pgn_text():
+    app = Frontend(1100, 800)
+    _start_local(app)
+    frm, to = _set_queen_takes_pawn(app)
+    app.skillcheck.reset(enabled=True, seed=_wheel_seed(app.match.backend, frm, to))
+    app._skillcheck_gate(frm, to)
+    app._on_skillcheck_done(app.skillcheck_overlay._context, True)
+    app.manual_result = "white_wins_by_resignation"
+    text = app._build_pgn_text()
+    assert "1. Qxd5 {Wheel ✓}" in text
+
+
+def test_undo_drops_only_the_undone_ply_and_dangling_fail():
+    app = Frontend(1100, 800)
+    _start_local(app)
+    app.skillcheck.reset(enabled=False)
+    app.match.backend.apply_san("e4")
+    app.match.backend.apply_san("e5")
+    app._skillcheck_log = [
+        SkillCheckOutcome(1, "wheel", True, ""),
+        SkillCheckOutcome(2, "aim", True, ""),
+        SkillCheckOutcome(3, "wheel", False, "Nxe4"),
+    ]
+    app._on_undo()
+    assert len(app.match.move_history) == 1
+    assert app._skillcheck_log == [SkillCheckOutcome(1, "wheel", True, "")]
+
+
+def test_reset_to_new_game_clears_the_skillcheck_log():
+    app = Frontend(1100, 800)
+    _start_local(app)
+    app._skillcheck_log = [SkillCheckOutcome(1, "wheel", True, "")]
+    app._reset_to_new_game()
+    assert app._skillcheck_log == []
+
+
+def test_skillcheck_whiffs_lists_only_fails_grouped_by_ply():
+    app = Frontend(1100, 800)
+    app._skillcheck_log = [
+        SkillCheckOutcome(3, "wheel", True, ""),
+        SkillCheckOutcome(5, "wheel", False, "Qxd6"),
+        SkillCheckOutcome(5, "aim", False, "Rxd6"),
+        SkillCheckOutcome(7, "aim", True, ""),
+    ]
+    assert app._skillcheck_whiffs() == {
+        5: [("Wheel", "Qxd6"), ("Steady-Aim", "Rxd6")]}, "wins excluded, fails grouped"
+
+
+def test_move_rows_insert_a_whiff_row_after_the_pair_that_whiffed():
+    app = Frontend(1100, 800)
+    _start_local(app)
+    app.skillcheck.reset(enabled=False)
+    for san in ["e4", "e5", "Nf3", "Nc6"]:
+        app.match.backend.apply_san(san)
+    rows = app.right_menu._build_move_rows(
+        app.match.move_history, {3: [("Wheel", "Qxd6")]})
+    assert [r[0] for r in rows] == ["pair", "pair", "whiff"]
+    assert rows[2] == ("whiff", ("Wheel", "Qxd6"), None), "ply 3 is white of the 2nd pair"
+
+
+def test_multiple_whiffs_one_ply_stack_one_per_row():
+    app = Frontend(1100, 800)
+    _start_local(app)
+    app.skillcheck.reset(enabled=False)
+    for san in ["e4", "e5", "Nf3", "Nc6"]:
+        app.match.backend.apply_san(san)
+    rows = app.right_menu._build_move_rows(
+        app.match.move_history, {3: [("Wheel", "Qxa2"), ("Steady-Aim", "Qxd4")]})
+    assert [r[0] for r in rows] == ["pair", "pair", "whiff", "whiff"]
+    assert rows[2] == ("whiff", ("Wheel", "Qxa2"), None)
+    assert rows[3] == ("whiff", ("Steady-Aim", "Qxd4"), None)
+
+
+def test_no_whiffs_means_no_extra_rows():
+    app = Frontend(1100, 800)
+    _start_local(app)
+    app.skillcheck.reset(enabled=False)
+    for san in ["e4", "e5"]:
+        app.match.backend.apply_san(san)
+    rows = app.right_menu._build_move_rows(app.match.move_history, {})
+    assert [r[0] for r in rows] == ["pair"]
+
+
+def test_loading_a_pgn_with_a_miss_populates_review_whiffs(tmp_path):
+    app = Frontend(1100, 800)
+    _start_local(app)
+    app.skillcheck.reset(enabled=False)
+    for san in ["e4", "e5", "Nf3", "Nc6", "Bb5"]:
+        app.match.backend.apply_san(san)
+    app._skillcheck_log = [SkillCheckOutcome(5, "aim", False, "Bxc6")]
+    app.manual_result = "white_wins_by_resignation"
+    text = app._build_pgn_text()
+    path = tmp_path / "g.pgn"
+    path.write_text(text)
+    app2 = Frontend(1100, 800)
+    app2._load_pgn_from_path(str(path))
+    assert app2._skillcheck_whiffs() == {5: [("Steady-Aim", "Bxc6")]}

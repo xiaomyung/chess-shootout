@@ -1,5 +1,6 @@
 from chessshootout.backend.fen import export_fen
 from chessshootout.backend.utils import coord_from_square
+from chessshootout.skillcheck.types import SkillCheckOutcome
 
 from chessshootout.server import logging_setup
 from chessshootout.server.connections import broadcast, send
@@ -22,6 +23,9 @@ async def resolve_skillcheck_fail(connections, room):
         return None
     room.pending_skillcheck = None
     room.skillcheck_locks.add((pending.from_sq, pending.to_sq))
+    room.skillcheck_log.append(SkillCheckOutcome(
+        len(room.backend.move_history) + 1, pending.kind.value, False,
+        room.backend.preview_san(pending.from_sq, pending.to_sq, pending.promotion)))
     await broadcast(connections, room, SkillCheckResultMessage(
         won=False,
         from_sq=coord_from_square(pending.from_sq),

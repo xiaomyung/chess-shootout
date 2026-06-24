@@ -33,7 +33,7 @@ class RightMenu:
 
     def __init__(self, window, match, callbacks, board=None,
                  buttons_provider=None, audio_panel=None,
-                 disabled_keys_provider=None):
+                 disabled_keys_provider=None, whiffs_provider=None):
         self.window = window
         self.match = match
         self.callbacks = callbacks
@@ -41,6 +41,8 @@ class RightMenu:
         self.buttons_provider = buttons_provider or (lambda: BUTTONS)
         self.audio_panel = audio_panel
         self.disabled_keys_provider = disabled_keys_provider or (lambda: set())
+        self.whiffs_provider = whiffs_provider or (lambda: {})
+        self._pair_to_row = {}
 
         self.padding = 10
         self.button_gap = 6
@@ -253,14 +255,31 @@ class RightMenu:
     def handle_release(self, pos):
         return self.scroll.handle_release()
 
+    def _build_move_rows(self, history, whiffs):
+        rows = []
+        self._pair_to_row = {}
+        for pair_idx, (number, white_entry, black_entry) in enumerate(iter_move_pairs(history)):
+            self._pair_to_row[pair_idx] = len(rows)
+            rows.append(("pair", pair_idx, number, white_entry, black_entry))
+            white_ply = pair_idx * 2 + 1
+            black_ply = pair_idx * 2 + 2 if black_entry is not None else None
+            white_whiffs = whiffs.get(white_ply) or []
+            black_whiffs = (whiffs.get(black_ply) or []) if black_ply is not None else []
+            for k in range(max(len(white_whiffs), len(black_whiffs))):
+                rows.append((
+                    "whiff",
+                    white_whiffs[k] if k < len(white_whiffs) else None,
+                    black_whiffs[k] if k < len(black_whiffs) else None))
+        return rows
+
     def _draw_moves(self, rect):
         history = self.match.move_history
         line_h = self.moves_font.get_linesize() + 2
         self._line_h = line_h
         self._max_lines = max(int((rect.height - 2 * self.padding) // line_h), 0)
 
-        pairs = list(iter_move_pairs(history))
-        self._total_rows = len(pairs)
+        rows = self._build_move_rows(history, self.whiffs_provider())
+        self._total_rows = len(rows)
         self._content_px = self._total_rows * line_h
         self._moves_viewport = pg.Rect(rect.x, rect.y + self.padding, rect.width,
                                        self._max_lines * line_h)
@@ -290,27 +309,44 @@ class RightMenu:
         inner_w = rect.width - 2 * self.padding
         cell_w = max((inner_w - prefix_w) // 2 - cell_pad, char_w * MOVE_MIN_CELL_CHARS)
 
-        for i, pair_idx in enumerate(range(start, end)):
-            number, white_entry, black_entry = pairs[pair_idx]
-            white_ply = pair_idx * 2 + 1
-            black_ply = pair_idx * 2 + 2 if black_entry is not None else None
-
+        for i, row_idx in enumerate(range(start, end)):
+            row = rows[row_idx]
             row_y = rect.y + self.padding + i * line_h
             row_x = rect.x + self.padding
+            white_x = row_x + prefix_w
+            black_x = white_x + cell_w + cell_pad
+            if row[0] == "whiff":
+                self._draw_whiff(white_x, row_y, cell_w, line_h, row[1])
+                self._draw_whiff(black_x, row_y, cell_w, line_h, row[2])
+                continue
+            _, pair_idx, number, white_entry, black_entry = row
+            white_ply = pair_idx * 2 + 1
+            black_ply = pair_idx * 2 + 2 if black_entry is not None else None
 
             prefix_surf = self.font.render(f"{number:>3}.", True, Colors.text_muted)
             self.window.blit(prefix_surf, (row_x, row_y + (line_h - prefix_surf.get_height()) // 2))
 
-            white_x = row_x + prefix_w
             white_cell = pg.Rect(white_x, row_y, cell_w, line_h)
             self._draw_move_cell(white_cell, white_entry, active_ply == white_ply)
             self._move_cell_hits.append((white_cell, white_ply))
 
             if black_entry is not None:
-                black_x = white_x + cell_w + cell_pad
                 black_cell = pg.Rect(black_x, row_y, cell_w, line_h)
                 self._draw_move_cell(black_cell, black_entry, active_ply == black_ply)
                 self._move_cell_hits.append((black_cell, black_ply))
+
+    def _draw_whiff(self, x, y, w, line_h, whiff):
+        if whiff is None:
+            return
+        surf = self.moves_font.render(whiff[1], True, pg.Color(Colors.loss))
+        surf.set_alpha(190)
+        max_w = w - 8
+        if surf.get_width() > max_w > 0:
+            surf = surf.subsurface(pg.Rect(0, 0, max_w, surf.get_height()))
+        self.window.blit(surf, (x + 4, y + (line_h - surf.get_height()) // 2))
+        strike_y = y + line_h // 2
+        pg.draw.line(self.window, pg.Color(Colors.loss),
+                     (x + 4, strike_y), (x + 4 + min(surf.get_width(), max_w), strike_y), 1)
 
     def _reveal_active_ply_on_nav(self):
         review_ply = self.board.review_ply if self.board is not None else None
@@ -320,7 +356,8 @@ class RightMenu:
         if review_ply is None or review_ply <= 0:
             return
         pair_idx = (review_ply - 1) // 2
-        self.scroll_offset = self._scroll_offset_to_show_pair(pair_idx)
+        self.scroll_offset = self._scroll_offset_to_show_row(
+            self._pair_to_row.get(pair_idx, pair_idx))
 
     def _draw_move_cell(self, rect, entry, active):
         if active:
@@ -335,18 +372,18 @@ class RightMenu:
             return self.board.review_ply
         return history_len
 
-    def _scroll_offset_to_show_pair(self, pair_idx):
+    def _scroll_offset_to_show_row(self, row_idx):
         if self._max_lines <= 0:
             return self.scroll_offset
         max_offset = max(0, self._total_rows - self._max_lines)
         end = self._total_rows - self.scroll_offset
         start = max(0, end - self._max_lines)
-        if start <= pair_idx < end:
+        if start <= row_idx < end:
             return self.scroll_offset
-        if pair_idx >= end:
-            new_end = pair_idx + 1
+        if row_idx >= end:
+            new_end = row_idx + 1
         else:
-            new_end = pair_idx + self._max_lines
+            new_end = row_idx + self._max_lines
         new_offset = self._total_rows - new_end
         return max(0, min(new_offset, max_offset))
 

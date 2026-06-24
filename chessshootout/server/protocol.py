@@ -132,6 +132,13 @@ class PendingSkillCheckWire(BaseModel):
     model_config = {"populate_by_name": True}
 
 
+class SkillCheckOutcomeWire(BaseModel):
+    ply: int
+    kind: Literal["wheel", "aim"]
+    won: bool
+    san: str = ""
+
+
 class MatchmakeRequest(_Base):
     nickname: str
     client_uuid: str
@@ -205,6 +212,7 @@ class ResumeResponse(_Base):
     grace_seconds: float = GRACE_SECONDS
     pending_skillcheck: Optional[PendingSkillCheckWire] = None
     skillcheck_locks: list[LockWire] = Field(default_factory=list)
+    skillcheck_log: list[SkillCheckOutcomeWire] = Field(default_factory=list)
 
 
 class ReclaimRequest(_Base):

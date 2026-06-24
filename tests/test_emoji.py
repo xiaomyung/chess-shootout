@@ -21,8 +21,10 @@ from chessshootout.infra.countries import CODES, flag_emoji
 UI_EMOJI = ["⚔️", "🎲", "🕑", "📋", "📁", "📄", "🏳️", "🤝", "↩️"]
 
 # Arrows rendered as plain text via get_font, never through the emoji helper -- they
-# are not color emoji and intentionally have no sprite.
-TEXT_GLYPHS = {"→", "←", "↑", "↓"}
+# are not color emoji and intentionally have no sprite. The check/cross marks are
+# PGN-text only: written verbatim into saved .pgn comments and drawn in-app as line
+# shapes (the move-list marker), never sprite-rendered.
+TEXT_GLYPHS = {"→", "←", "↑", "↓", "✓", "✗"}
 
 _SRC_ROOT = Path(__file__).resolve().parent.parent / "chessshootout"
 

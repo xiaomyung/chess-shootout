@@ -22,7 +22,7 @@ from chessshootout.frontend.frontend import Frontend
 from chessshootout.online.client import Event
 from chessshootout.server.protocol import (
     LockWire, PendingSkillCheckWire, SkillCheckSpectateMessage)
-from chessshootout.skillcheck.types import SkillCheckKind
+from chessshootout.skillcheck.types import SkillCheckKind, SkillCheckOutcome
 from chessshootout.skillcheck.wheel import placement_square
 from tests.helpers import BLACK, K, P, Q, WHITE, make_backend, piece, sq
 
@@ -372,13 +372,16 @@ def test_opponent_win_move_applied_holds_green_then_applies():
 
 # ---- resume re-open --------------------------------------------------------
 
-def _resumed(pending=None, locks=None):
+def _resumed(pending=None, locks=None, skillcheck_log=None):
     """Mirror the real /resume payload: model_dump() (field-name keys), like the client sees."""
-    return {
+    payload = {
         "move_history": [], "fen": "8/8/8/8/8/8/8/8 w - - 0 1",
         "clock": {"white_remaining": 300.0, "black_remaining": 300.0, "running_for": "white"},
         "pending_skillcheck": pending, "skillcheck_locks": locks or [],
     }
+    if skillcheck_log is not None:
+        payload["skillcheck_log"] = skillcheck_log
+    return payload
 
 
 def _pending_wire(kind, frm, to, color, *, elapsed_ms=0.0, miss_count=0, promo=None):
@@ -581,3 +584,121 @@ def test_local_shootout_still_takes_the_local_branch():
     assert held is True, "a local capture opens an overlay, not a server hold"
     assert app.skillcheck_overlay.is_active()
     assert app.online_client.sent_moves == [], "local play never touches the online client"
+
+
+# ---- the client-side skill-check log (PGN history) -------------------------
+
+def test_won_move_applied_records_the_outcome():
+    app = _online_app()
+    frm, to = _capture_board(app)
+    app._skillcheck_gate(frm, to)
+    app._handle_skill_check_required(_required_payload(frm, to, kind="wheel"))
+    app._handle_remote_move_applied(_move_applied(frm, to, 1, kind="wheel", won=True))
+    _drive_verdict_hold(app)
+    assert app._skillcheck_log == [SkillCheckOutcome(1, "wheel", True, "")]
+
+
+def test_a_duplicate_winning_echo_logs_the_outcome_once():
+    app = _online_app()
+    frm, to = _capture_board(app)
+    app._skillcheck_gate(frm, to)
+    app._handle_skill_check_required(_required_payload(frm, to))
+    first = _move_applied(frm, to, 1, kind="wheel", won=True)
+    app._handle_remote_move_applied(first)
+    _drive_verdict_hold(app)
+    app._handle_remote_move_applied(first)
+    assert app._skillcheck_log == [SkillCheckOutcome(1, "wheel", True, "")]
+
+
+def test_a_quiet_move_applied_records_nothing():
+    app = _online_app()
+    _capture_board(app)
+    app._handle_remote_move_applied(_move_applied(sq(6, 4), sq(4, 4), 1, san="e4"))
+    assert app._skillcheck_log == []
+
+
+def test_failed_result_records_the_whiffed_move_and_kind():
+    app = _online_app()
+    frm, to = _capture_board(app)
+    app._skillcheck_gate(frm, to)
+    app._handle_skill_check_required(_required_payload(frm, to, kind="wheel"))
+    app._handle_skill_check_result(_result(frm, to))
+    _drive_verdict_hold(app)
+    assert app._skillcheck_log == [SkillCheckOutcome(1, "wheel", False, "Qxd5")]
+
+
+def test_spectated_fail_records_the_opponents_whiff_with_the_spectate_kind():
+    app = _online_app("black")
+    frm, to = _capture_board(app)
+    app._handle_skill_check_spectate(_spectate_payload(frm, to, kind="aim"))
+    app._handle_skill_check_result(_result(frm, to))
+    _drive_verdict_hold(app)
+    assert app._skillcheck_log == [SkillCheckOutcome(1, "aim", False, "Qxd5")]
+
+
+def test_spectated_win_records_the_outcome():
+    app = _online_app("black")
+    frm, to = _capture_board(app)
+    app._handle_skill_check_spectate(_spectate_payload(frm, to, kind="wheel"))
+    app._handle_remote_move_applied(_move_applied(frm, to, 1, kind="wheel", won=True))
+    _drive_verdict_hold(app)
+    assert app._skillcheck_log == [SkillCheckOutcome(1, "wheel", True, "")]
+
+
+def test_skill_check_result_is_ignored_while_resyncing():
+    app = _online_app()
+    frm, to = _capture_board(app)
+    app._skillcheck_gate(frm, to)
+    app._handle_skill_check_required(_required_payload(frm, to))
+    app._resyncing = True
+    app._handle_skill_check_result(_result(frm, to))
+    assert app._skillcheck_log == [], "a fail during resync isn't logged; resume is authoritative"
+
+
+def test_resume_replaces_the_skillcheck_log_from_the_server():
+    app = _online_app("white")
+    app._skillcheck_log = [
+        SkillCheckOutcome(1, "wheel", True, ""),
+        SkillCheckOutcome(2, "aim", False, "Qxd5"),
+        SkillCheckOutcome(3, "wheel", True, "")]
+    wire = [{"ply": 1, "kind": "aim", "won": True, "san": ""},
+            {"ply": 2, "kind": "wheel", "won": False, "san": "Rxe5"}]
+    app._handle_game_resumed(_resumed(skillcheck_log=wire))
+    assert app._skillcheck_log == [
+        SkillCheckOutcome(1, "aim", True, ""),
+        SkillCheckOutcome(2, "wheel", False, "Rxe5")]
+
+
+def test_resume_without_a_log_key_clears_to_empty():
+    app = _online_app("white")
+    app._skillcheck_log = [SkillCheckOutcome(1, "wheel", True, "")]
+    app._handle_game_resumed(_resumed())
+    assert app._skillcheck_log == []
+
+
+def test_online_takeback_drops_the_undone_plys_outcome():
+    app = _online_app("white")
+    frm, to = _capture_board(app)
+    app._skillcheck_gate(frm, to)
+    app._handle_skill_check_required(_required_payload(frm, to))
+    app._handle_remote_move_applied(_move_applied(frm, to, 1, kind="wheel", won=True))
+    _drive_verdict_hold(app)
+    assert len(app.match.move_history) == 1 and len(app._skillcheck_log) == 1
+    app._handle_takeback_applied({
+        "ply": 0,
+        "clock": {"white_remaining": 300.0, "black_remaining": 300.0, "running_for": "white"}})
+    assert app._skillcheck_log == []
+
+
+def test_a_live_log_round_trips_through_the_resume_wire_unchanged():
+    app = _online_app("white")
+    frm, to = _capture_board(app)
+    app._skillcheck_gate(frm, to)
+    app._handle_skill_check_required(_required_payload(frm, to, kind="wheel"))
+    app._handle_remote_move_applied(_move_applied(frm, to, 1, kind="wheel", won=True))
+    _drive_verdict_hold(app)
+    live = list(app._skillcheck_log)
+    other = _online_app("black")
+    wire = [{"ply": e.ply, "kind": e.kind, "won": e.won, "san": e.san} for e in live]
+    other._handle_game_resumed(_resumed(skillcheck_log=wire))
+    assert other._skillcheck_log == live

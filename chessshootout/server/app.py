@@ -24,7 +24,7 @@ from chessshootout.server.protocol import (
     AuthMessage, CancelMatchmakeRequest, ConnectionStatusMessage, ErrorMessage,
     HealthResponse, HistoryEntryWire, LockWire, MatchmakeRequest, MatchmakeResponse,
     PROTOCOL_VERSION, PendingSkillCheckWire, Reason, ReclaimRequest, ReclaimResponse,
-    ResultMessage, ResumeRequest, ResumeResponse, is_uuid4,
+    ResultMessage, ResumeRequest, ResumeResponse, SkillCheckOutcomeWire, is_uuid4,
 )
 from chessshootout.server.rooms import (
     AlreadyInGameError, InvalidTokenError, NotInRoomError, PAIRING_WAIT_SECONDS,
@@ -280,6 +280,9 @@ def create_app(*, now_provider=time.monotonic, max_rooms=DEFAULT_MAX_ROOMS):
         pending = _pending_skillcheck_wire(room, app.state.now_ms)
         locks = [LockWire(from_sq=coord_from_square(frm), to_sq=coord_from_square(to))
                  for frm, to in room.skillcheck_locks]
+        skillcheck_log = [
+            SkillCheckOutcomeWire(ply=e.ply, kind=e.kind, won=e.won, san=e.san)
+            for e in room.skillcheck_log]
         return ResumeResponse(
             fen=export_fen(room.backend),
             move_history=history,
@@ -295,6 +298,7 @@ def create_app(*, now_provider=time.monotonic, max_rooms=DEFAULT_MAX_ROOMS):
             black_country=room.black.country if room.black else None,
             pending_skillcheck=pending,
             skillcheck_locks=locks,
+            skillcheck_log=skillcheck_log,
         )
 
     @app.post("/reclaim", response_model=ReclaimResponse)

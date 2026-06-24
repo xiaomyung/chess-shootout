@@ -76,6 +76,7 @@ class Room:
     series_scores: dict[str, float] = field(default_factory=dict)
     skillcheck_secret: str = ""
     skillcheck_locks: set = field(default_factory=set)
+    skillcheck_log: list = field(default_factory=list)
     pending_skillcheck: Optional[PendingSkillCheck] = None
     plies_ever: int = 0
 
@@ -364,6 +365,7 @@ class RoomManager:
         )
         room.skillcheck_secret = secrets.token_hex(16)
         room.skillcheck_locks = set()
+        room.skillcheck_log = []
         room.pending_skillcheck = None
         room.plies_ever = 0
         room.started_at = self._now()
