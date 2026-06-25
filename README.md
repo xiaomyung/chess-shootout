@@ -186,6 +186,11 @@ CHESS_MASTER_VOLUME=0.70    # 0.0–1.0; the in-game slider writes here
 two clients on one machine). The games folder is set from in-app **Options**
 and persisted as `CHESS_DATA_DIR`.
 
+With `CHESS_SERVER_ADDR` unset, the downloaded desktop app connects to the
+public server (`server.chess-shootout.com`) while a source checkout uses
+`localhost:8000`; set it — or use in-app **Options → Server** — to point at
+any host, such as a self-hosted server.
+
 ### In-game actions
 
 - **Resign** — opponent wins.
