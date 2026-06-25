@@ -11,7 +11,8 @@ from chessshootout.infra import countries
 _KEY_LINE_RE = re.compile(r"^([A-Za-z_][A-Za-z0-9_]*)\s*=(.*)$")
 
 
-_DEFAULT_SERVER_ADDR = "localhost:8000"
+_DEV_SERVER_ADDR = "localhost:8000"
+_PROD_SERVER_ADDR = "server.chess-shootout.com"
 _DEFAULT_MASTER_VOLUME = 0.70
 _DEFAULT_MENU_VOLUME = 0.10
 _THEMES = ("dark",)
@@ -57,8 +58,12 @@ def _coerce_to_uuid4(value):
     return f"{digest[0:8]}-{digest[8:12]}-{digest[12:16]}-{digest[16:20]}-{digest[20:32]}"
 
 
+def _default_server_addr():
+    return _PROD_SERVER_ADDR if paths.is_frozen() else _DEV_SERVER_ADDR
+
+
 def get_server_addr():
-    return os.environ.get("CHESS_SERVER_ADDR") or _DEFAULT_SERVER_ADDR
+    return os.environ.get("CHESS_SERVER_ADDR") or _default_server_addr()
 
 
 def set_server_addr(value):

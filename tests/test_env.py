@@ -203,6 +203,22 @@ def test_server_addr_blank_is_noop_keeps_default(blank):
     assert env.get_server_addr() == "localhost:8000"
 
 
+def test_server_addr_defaults_to_prod_when_frozen(monkeypatch):
+    monkeypatch.setattr("chessshootout.paths.is_frozen", lambda: True)
+    assert env.get_server_addr() == env._PROD_SERVER_ADDR == "server.chess-shootout.com"
+
+
+def test_server_addr_defaults_to_localhost_from_source(monkeypatch):
+    monkeypatch.setattr("chessshootout.paths.is_frozen", lambda: False)
+    assert env.get_server_addr() == "localhost:8000"
+
+
+def test_explicit_server_addr_overrides_frozen_default(monkeypatch):
+    monkeypatch.setattr("chessshootout.paths.is_frozen", lambda: True)
+    monkeypatch.setenv("CHESS_SERVER_ADDR", "192.168.1.5:8000")
+    assert env.get_server_addr() == "192.168.1.5:8000"
+
+
 def test_set_nickname_persists_round_trip():
     env.set_nickname("Magnus")
     assert env.get_nickname() == "Magnus"
