@@ -341,12 +341,15 @@ class RightMenu:
         surf = self.moves_font.render(whiff[1], True, pg.Color(Colors.loss))
         surf.set_alpha(190)
         max_w = w - 8
-        if surf.get_width() > max_w > 0:
-            surf = surf.subsurface(pg.Rect(0, 0, max_w, surf.get_height()))
-        self.window.blit(surf, (x + 4, y + (line_h - surf.get_height()) // 2))
+        draw_w = surf.get_width()
+        area = None
+        if draw_w > max_w > 0:
+            draw_w = max_w
+            area = pg.Rect(0, 0, max_w, surf.get_height())
+        self.window.blit(surf, (x + 4, y + (line_h - surf.get_height()) // 2), area=area)
         strike_y = y + line_h // 2
         pg.draw.line(self.window, pg.Color(Colors.loss),
-                     (x + 4, strike_y), (x + 4 + min(surf.get_width(), max_w), strike_y), 1)
+                     (x + 4, strike_y), (x + 4 + draw_w, strike_y), 1)
 
     def _reveal_active_ply_on_nav(self):
         review_ply = self.board.review_ply if self.board is not None else None
