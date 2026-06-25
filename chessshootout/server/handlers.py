@@ -113,8 +113,6 @@ async def handle_move(app, websocket, room, color, raw):
         kind=kind, seed=seed, value_diff=value_diff,
         start_ms=start_ms, expires_at_ms=start_ms + deadline_ms, deadline_ms=deadline_ms,
     )
-    if room.first_move_at is None:
-        room.first_move_at = app.state.now()
     log.info("skillcheck fired room=%s mover=%s kind=%s", room.room_id, color, kind.value)
     await send(connections.get_for_color(room, color), SkillCheckRequiredMessage(
         kind=kind.value, seed=seed, value_diff=value_diff, deadline_ms=deadline_ms,
@@ -189,6 +187,8 @@ async def handle_skill_check_shot(app, websocket, room, color, raw):
     if opp_ws is not None:
         await send(opp_ws, SkillCheckSpectateShotMessage(
             elapsed_ms=elapsed, miss_count=pending.miss_count, won=won))
+    if room.pending_skillcheck is not pending:
+        return "noop"
     if won:
         room.pending_skillcheck = None
         log.info("skillcheck won room=%s mover=%s kind=%s", room.room_id, color,
