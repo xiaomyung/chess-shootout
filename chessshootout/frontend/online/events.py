@@ -306,10 +306,7 @@ class OnlineEventsMixin:
 
     def _apply_online_fail(self, from_sq, to_sq, aim_victim):
         self.skillcheck.lock(from_sq, to_sq)
-        self.board.trigger_skillcheck_fail(
-            from_sq, to_sq, on_fire=self._on_skillcheck_miss_fire)
-        if aim_victim is not None:
-            self.board.restore_piece(aim_victim)
+        self._apply_spectate_fail(from_sq, to_sq, aim_victim)
 
     def _apply_spectate_fail(self, from_sq, to_sq, aim_victim):
         self.board.trigger_skillcheck_fail(

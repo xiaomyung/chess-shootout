@@ -1410,9 +1410,6 @@ class Frontend(OnlineEventsMixin):
                 PIECE_VALUES.get(victim.type, 0) if victim is not None else 0)
         return 0
 
-    def _wheel_period(self, from_sq, to_sq, promo_type):
-        return period_for_diff(self._capture_value_diff(from_sq, to_sq, promo_type))
-
     def _on_skillcheck_done(self, context, landed):
         from_sq, to_sq = context[0], context[1]
         promo_type = context[2] if len(context) > 2 else None

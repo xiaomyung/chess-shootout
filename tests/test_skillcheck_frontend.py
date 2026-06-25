@@ -1171,7 +1171,7 @@ def test_capturing_promotion_rolling_aim_shows_the_picker_first():
 
 
 def test_wheel_period_scales_with_capture_material():
-    from chessshootout.skillcheck.wheel import WHEEL_PERIOD_MS
+    from chessshootout.skillcheck.wheel import WHEEL_PERIOD_MS, period_for_diff
     app = Frontend(1100, 800)
     _start_local(app)
     b = app.match.backend
@@ -1180,10 +1180,10 @@ def test_wheel_period_scales_with_capture_material():
     b.state[0][0] = Piece(PieceType.KING, PieceColor.BLACK)
     b.state[4][3] = Piece(PieceType.QUEEN, PieceColor.WHITE)
     b.state[3][3] = Piece(PieceType.PAWN, PieceColor.BLACK)
-    qxp = app._wheel_period(Square(4, 3), Square(3, 3), None)
+    qxp = period_for_diff(app._capture_value_diff(Square(4, 3), Square(3, 3), None))
     b.state[4][3] = Piece(PieceType.PAWN, PieceColor.WHITE)
     b.state[3][2] = Piece(PieceType.QUEEN, PieceColor.BLACK)
-    pxq = app._wheel_period(Square(4, 3), Square(3, 2), None)
+    pxq = period_for_diff(app._capture_value_diff(Square(4, 3), Square(3, 2), None))
     assert qxp < WHEEL_PERIOD_MS < pxq, "strong-eats-weak spins faster, weak-eats-strong slower"
 
 
@@ -1192,8 +1192,8 @@ def test_promotion_wheel_period_uses_the_chosen_piece():
     app = Frontend(1100, 800)
     _start_local(app)
     frm, to = _set_white_pawn_promo(app)
-    queen = app._wheel_period(frm, to, PieceType.QUEEN)
-    knight = app._wheel_period(frm, to, PieceType.KNIGHT)
+    queen = period_for_diff(app._capture_value_diff(frm, to, PieceType.QUEEN))
+    knight = period_for_diff(app._capture_value_diff(frm, to, PieceType.KNIGHT))
     assert queen == pytest.approx(period_for_diff(-8)), "queen promotion scores like pawn x queen"
     assert knight == pytest.approx(period_for_diff(-2))
     assert queen > knight, "promoting to a queen is the easiest (slowest) wheel"
