@@ -3,12 +3,15 @@ import re
 from dataclasses import dataclass, field
 from datetime import datetime
 
+from chessshootout.skillcheck.types import KIND_LABEL
+
 
 @dataclass
 class ParsedPGN:
     headers: dict = field(default_factory=dict)
     moves: list = field(default_factory=list)
     result: str = "*"
+    move_comments: list = field(default_factory=list)
 
 
 @dataclass
@@ -29,11 +32,11 @@ class PgnSummary:
 
 
 _TAG_RE = re.compile(r'\[(\w+)\s+"([^"]*)"\]')
-_COMMENT_RE = re.compile(r"\{[^}]*\}")
-_VARIATION_RE = re.compile(r"\([^()]*\)")
-_RESULT_RE = re.compile(r"(1-0|0-1|1/2-1/2|\*)\s*$")
+_RESULT_TOKEN_RE = re.compile(r"^(1-0|0-1|1/2-1/2|\*)$")
 _MOVE_NUMBER_PREFIX = re.compile(r"^\d+\.+")
 _BARE_NUMBER_RE = re.compile(r"^\d+\.+$")
+_NOTE_TOKEN_RE = re.compile(r"^(Wheel|Steady-Aim)\s+(✓|✗)(?:\s+(\S+))?$")
+_KIND_BY_LABEL = {label: kind for kind, label in KIND_LABEL.items()}
 _FILENAME_TS_RE = re.compile(r"(\d{8})-(\d{6})")
 _CSMATCHID_RE = re.compile(
     r"^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
@@ -113,6 +116,61 @@ def format_relative_time(timestamp, now):
     return datetime.fromtimestamp(timestamp).strftime("%Y.%m.%d")
 
 
+def _split_body(body):
+    tokens = []
+    comments = []
+    depth = 0
+    cur = ""
+    i = 0
+    n = len(body)
+    while i < n:
+        ch = body[i]
+        if ch == "(":
+            if cur:
+                tokens.append(cur)
+                comments.append("")
+                cur = ""
+            depth += 1
+            i += 1
+            continue
+        if ch == ")":
+            if depth > 0:
+                depth -= 1
+            i += 1
+            continue
+        if depth > 0:
+            i += 1
+            continue
+        if ch == "{":
+            if cur:
+                tokens.append(cur)
+                comments.append("")
+                cur = ""
+            end = body.find("}", i)
+            if end == -1:
+                note = body[i + 1:].strip()
+                i = n
+            else:
+                note = body[i + 1:end].strip()
+                i = end + 1
+            if tokens:
+                comments[-1] = note
+            continue
+        if ch.isspace():
+            if cur:
+                tokens.append(cur)
+                comments.append("")
+                cur = ""
+            i += 1
+            continue
+        cur += ch
+        i += 1
+    if cur:
+        tokens.append(cur)
+        comments.append("")
+    return tokens, comments
+
+
 def parse_pgn(text):
     headers = parse_pgn_headers(text)
 
@@ -120,29 +178,37 @@ def parse_pgn(text):
     body_start = body_match[-1].end() if body_match else 0
     body = text[body_start:]
 
-    body = _COMMENT_RE.sub(" ", body)
-
-    while True:
-        new_body = _VARIATION_RE.sub(" ", body)
-        if new_body == body:
-            break
-        body = new_body
+    tokens, comments = _split_body(body)
 
     result = PGN_UNFINISHED
-    result_match = _RESULT_RE.search(body)
-    if result_match:
-        result = result_match.group(1)
-        body = body[: result_match.start()]
-
     moves = []
-    for token in body.split():
+    move_comments = []
+    for token, comment in zip(tokens, comments):
+        if _RESULT_TOKEN_RE.match(token):
+            result = token
+            continue
         if _BARE_NUMBER_RE.match(token):
             continue
         token = _MOVE_NUMBER_PREFIX.sub("", token)
         if token:
             moves.append(token)
+            move_comments.append(comment)
 
-    return ParsedPGN(headers=headers, moves=moves, result=result)
+    return ParsedPGN(headers=headers, moves=moves, result=result,
+                     move_comments=move_comments)
+
+
+def parse_comment(text):
+    events = []
+    for part in text.split(" · "):
+        match = _NOTE_TOKEN_RE.match(part.strip())
+        if match is None:
+            continue
+        kind = _KIND_BY_LABEL.get(match.group(1))
+        if kind is None:
+            continue
+        events.append((kind, match.group(2) == "✓", match.group(3) or ""))
+    return events
 
 
 def load_pgn_into_backend(backend, text):

@@ -13,6 +13,7 @@ class PieceAnimation:
     start_ms: int
     duration_ms: int
     on_complete: Optional[Callable[[], None]] = None
+    bump: bool = False
 
     def progress(self, now_ms):
         if self.duration_ms <= 0:

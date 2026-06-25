@@ -58,10 +58,10 @@ def _battle(seed=7, w=1000, h=700, card=pg.Rect(300, 130, 400, 440), top_inset=T
     return b
 
 
-def _run(b, steps, start=1000, step_ms=16, reduce_motion=False):
+def _run(b, steps, start=1000, step_ms=16):
     t = start
     for _ in range(steps):
-        b.update(t, reduce_motion=reduce_motion)
+        b.update(t)
         t += step_ms
     return t
 
@@ -124,15 +124,6 @@ def test_pawns_only_start_after_the_intro():
         b.update(t)
         t += 16
     assert b.pawns, "pawns should start coming once the queen has landed"
-
-
-def test_reduce_motion_clears_the_whole_battle():
-    b = _intro_battle()
-    b.update(1000, reduce_motion=True)
-    assert b.queen is None, "reduce-motion removes the queen"
-    assert b.pawns == [] and b.projectiles == [] and b.particles == [] and b.drops == [], \
-        "reduce-motion removes every fighter and effect, not just freezes them"
-    assert b._intro_active is False, "and there is no fly-in playing"
 
 
 def test_intro_queen_is_drawn_on_the_overlay():
@@ -809,17 +800,6 @@ def test_ko_counter_draws_behind_the_voicelines(monkeypatch):
         "the counter draws before (behind) the speech bubbles"
 
 
-def test_reduce_motion_removes_in_flight_projectiles():
-    b = _battle()
-    p = b.pawns[0]
-    p["x"], p["y"] = 500, 360
-    _aim_at(b, b.queen, p)
-    b._spawn_projectiles(b.queen, p, True, *b._muzzle_point(b.queen), True, 5000)
-    assert b.projectiles, "precondition: a projectile is mid-flight"
-    b.update(5016, reduce_motion=True)
-    assert b.projectiles == [], "reduce-motion clears projectiles, it does not freeze them"
-
-
 def test_firing_kicks_recoil_scaled_by_gun_strength():
     b = _battle()
     q = b.queen
@@ -961,27 +941,6 @@ def test_pawn_count_stays_within_max_and_fills_up():
         assert len(b.pawns) <= MAX_PAWNS
         peak = max(peak, len(b.pawns))
     assert peak >= MAX_PAWNS - 1, "spawning should fill up toward the max over a long run"
-
-
-def test_disabling_reduce_motion_restarts_from_the_intro():
-    b = _battle()
-    b.update(2000, reduce_motion=True)
-    assert b.queen is None
-    b.update(2100, reduce_motion=False)
-    assert b.queen is not None, "turning reduce-motion off respawns the queen"
-    assert b._intro_active is True, "the battle restarts from the fly-in intro (from the logo)"
-    assert b.pawns == [], "the field starts empty and repopulates as the intro finishes"
-
-
-def test_reduce_motion_still_paints_the_backdrop():
-    b = _battle()
-    b.update(1000, reduce_motion=True)
-    assert b.queen is None
-    surf = pg.display.get_surface()
-    surf.fill((0, 0, 0))
-    b.draw(surf)
-    assert len(_distinct_colors(surf, b.rect)) > 1, \
-        "the arena backdrop still renders even with the battle suppressed"
 
 
 def _distinct_colors(surf, rect, step=8):

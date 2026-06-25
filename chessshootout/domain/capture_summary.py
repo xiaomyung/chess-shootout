@@ -1,14 +1,5 @@
-from chessshootout.backend.pieces import PieceType, opponent_of
+from chessshootout.backend.pieces import PIECE_VALUES, PieceType, opponent_of
 
-
-PIECE_VALUES = {
-    PieceType.QUEEN: 9,
-    PieceType.ROOK: 5,
-    PieceType.BISHOP: 3,
-    PieceType.KNIGHT: 3,
-    PieceType.PAWN: 1,
-    PieceType.KING: 0,
-}
 
 CAPTURE_ORDER = [
     PieceType.QUEEN,

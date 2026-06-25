@@ -10,7 +10,7 @@ should be able to fail for a real reason.
 .venv/bin/pytest tests -n 8 -q                 # fast local loop
 .venv/bin/pytest tests -n auto -q              # match CI before pushing
 .venv/bin/pytest tests/test_san.py -v          # one file
-.venv/bin/pytest "tests/test_clock.py::test_add_time_caps[at_initial]" -v   # one case
+.venv/bin/pytest "tests/test_clock.py::test_add_time_caps[at_cap_returns_zero]" -v   # one case
 .venv/bin/pytest tests -n auto --cov --cov-report=term:skip-covered          # coverage (informational)
 .venv/bin/pylama chessshootout tests                                        # lint (≤100 cols)
 ```

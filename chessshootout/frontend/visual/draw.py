@@ -3,6 +3,7 @@ import math
 import pygame as pg
 
 SUPERSAMPLE = 4
+GLOW_BLUR_PASSES = 3
 
 
 def supersample(size, render, scale=SUPERSAMPLE):
@@ -11,6 +12,36 @@ def supersample(size, render, scale=SUPERSAMPLE):
     big = pg.Surface((size[0] * scale, size[1] * scale), pg.SRCALPHA)
     render(big, scale)
     return pg.transform.smoothscale(big, size)
+
+
+def _pyramid_blur(surface, passes):
+    w, h = surface.get_size()
+    factor = 1 << passes
+    pw, ph = -(-w // factor) * factor, -(-h // factor) * factor
+    ox, oy = (pw - w) // 2, (ph - h) // 2
+    work = surface
+    if (pw, ph) != (w, h):
+        work = pg.Surface((pw, ph), pg.SRCALPHA)
+        work.blit(surface, (ox, oy))
+    for _ in range(passes):
+        work = pg.transform.smoothscale(work, (work.get_width() // 2, work.get_height() // 2))
+    for _ in range(passes):
+        work = pg.transform.smoothscale(work, (work.get_width() * 2, work.get_height() * 2))
+    if (pw, ph) != (w, h):
+        return work.subsurface(pg.Rect(ox, oy, w, h)).copy()
+    return work
+
+
+def soft_blur(surface, passes=GLOW_BLUR_PASSES):
+    if passes <= 0:
+        return surface
+    forward = _pyramid_blur(surface, passes)
+    mirror = pg.transform.flip(
+        _pyramid_blur(pg.transform.flip(surface, True, True), passes), True, True)
+    forward.fill((128, 128, 128, 128), special_flags=pg.BLEND_RGBA_MULT)
+    mirror.fill((128, 128, 128, 128), special_flags=pg.BLEND_RGBA_MULT)
+    forward.blit(mirror, (0, 0), special_flags=pg.BLEND_RGBA_ADD)
+    return forward
 
 
 def infinity_surface(height, color):

@@ -17,6 +17,13 @@ from chessshootout.backend.fen import apply_fen
 from chessshootout.infra import countries, env
 from chessshootout.frontend.panels.audio import AudioPanel
 from chessshootout.frontend.board import Board
+from chessshootout.frontend.skillcheck.overlay import SkillCheckOverlay
+from chessshootout.frontend.skillcheck.registry import build_controller
+from chessshootout.skillcheck.coordinator import SkillCheckCoordinator
+from chessshootout.skillcheck.online import SKILLCHECK_DEADLINE_MS, skillcheck_deadline_ms
+from chessshootout.skillcheck.types import KIND_LABEL, SkillCheckKind, SkillCheckOutcome
+from chessshootout.skillcheck.wheel import period_for_diff, placement_square
+from chessshootout.backend.utils import coord_from_square, PROMO_LETTER_BY_TYPE, Square
 from chessshootout.frontend.menu.menu_battle import MenuBattle
 from chessshootout.domain.capture_summary import captured_by, material_advantage
 from chessshootout.domain.result_stats import compute_result_stats
@@ -56,10 +63,12 @@ from chessshootout.frontend.panels.right import (
 from chessshootout.frontend.modals.result import ResultMenu
 from chessshootout.frontend.audio.sound_manager import SoundManager
 from chessshootout.frontend.modals.start import StartMenu
-from chessshootout.domain.pgn.generate import generate_pgn, TIMEOUT_RESULTS
-from chessshootout.domain.pgn.load import load_pgn_into_backend, parse_time_control
+from chessshootout.domain.pgn.generate import (
+    format_annotations, generate_pgn, TIMEOUT_RESULTS)
+from chessshootout.domain.pgn.load import (
+    load_pgn_into_backend, parse_comment, parse_time_control)
 from chessshootout.paths import SOUNDS_DIR
-from chessshootout.backend.pieces import PieceColor, PieceType, opponent_of
+from chessshootout.backend.pieces import PIECE_VALUES, PieceColor, PieceType, opponent_of
 from chessshootout.server.protocol import (
     FIRST_MOVE_ABORT_SECONDS, GIVE_TIME_SECONDS, GRACE_SECONDS,
 )
@@ -168,6 +177,7 @@ MIN_MODAL_WIDTH = 360
 
 SAVED_PGN_TOAST_DURATION_MS = 3000
 RESYNC_TIMEOUT_MS = 8000
+SKILLCHECK_WATCHDOG_SLACK_MS = 4000
 RECONNECT_PROBE_INTERVAL_MS = 5000
 RECONNECT_PROBE_MAX_ATTEMPTS = 3
 
@@ -201,7 +211,7 @@ class Frontend(OnlineEventsMixin):
 
     def __init__(self, window_width: int, window_height: int):
         self.running = True
-        self.target_fps = 60
+        self.target_fps = 300
         self.window_width = max(window_width, MIN_WINDOW_WIDTH)
         self.window_height = max(window_height, MIN_WINDOW_HEIGHT)
         self.window = pg.display.set_mode(
@@ -249,6 +259,13 @@ class Frontend(OnlineEventsMixin):
                            on_premove_queued=self.sound_manager.play_premove_queued,
                            shot_callback=self._on_shot_fired,
                            announce_callback=self._on_kill_announced)
+        self.skillcheck = SkillCheckCoordinator()
+        self.skillcheck_overlay = SkillCheckOverlay()
+        self._clear_online_skillcheck_state()
+        self._skillcheck_log = []
+        self.board.skillcheck_gate = self._skillcheck_gate
+        self.board.skillcheck_armed = lambda: self.skillcheck.enabled
+        self.board.locked_targets = self.skillcheck.is_locked
         self.result_menu = ResultMenu(self.window, {
             "new_game": self._on_new_game,
             "open_pgn": self._on_open_pgn,
@@ -280,7 +297,8 @@ class Frontend(OnlineEventsMixin):
             "give_time": self._on_give_time,
         }, board=self.board, buttons_provider=self._right_menu_buttons,
             audio_panel=self.audio_panel,
-            disabled_keys_provider=self._right_menu_disabled_keys)
+            disabled_keys_provider=self._right_menu_disabled_keys,
+            whiffs_provider=self._skillcheck_whiffs)
         self.confirm_modal = ConfirmModal(self.window)
         self.history_view = HistoryView(self.window, on_open=self._load_pgn_from_path,
                                         on_back=self._on_menu_back)
@@ -487,7 +505,6 @@ class Frontend(OnlineEventsMixin):
             self.window, env.get_server_addr, placeholder="host or host:port")
         time_options = [(label, label) for label in env.TIME_CONTROL_VALUES]
         incr_options = [(label, label) for label in env.INCREMENT_VALUES]
-        intensity_options = [("Subtle", "subtle"), ("Balanced", "balanced"), ("Full", "full")]
         themes = [
             ("dark", "#7a818b", "#2f343b", False),
             ("wood", "#d8b483", "#8a5a3c", True),
@@ -507,13 +524,6 @@ class Frontend(OnlineEventsMixin):
                 ToggleRow("Mute all sound", "Silence every shot and callout",
                           lambda: not self.sound_manager.enabled,
                           lambda muted: self.sound_manager.set_enabled(not muted)),
-            ]),
-            ("Chaos", [
-                ToggleRow("Reduce motion", "Calm the shake, ragdolls and battle",
-                          env.get_reduce_motion, env.set_reduce_motion),
-                SegmentedRow("Effect intensity", "How loud the chaos gets",
-                             intensity_options, env.get_effect_intensity,
-                             env.set_effect_intensity),
             ]),
             ("Appearance", [
                 SwatchRow("Board theme", "More themes coming soon", themes,
@@ -648,6 +658,7 @@ class Frontend(OnlineEventsMixin):
             self.menu_page.set_page(PAGE_HISTORY)
             self.toast.show("Could not load PGN")
             return
+        self._rebuild_skillcheck_log(parsed.move_comments)
         self._pgn_result_tag = parsed.result
         self.white_name = parsed.headers.get("White", "Player 1")
         self.black_name = parsed.headers.get("Black", "Player 2")
@@ -785,6 +796,10 @@ class Frontend(OnlineEventsMixin):
             if config["time_minutes"] is not None else None
         )
 
+        self.skillcheck.reset(
+            enabled=True,
+            seed="local-{}-{}".format(pg.time.get_ticks(), random.randint(0, 1 << 30)))
+
         self._ensure_local_session()
         self._reset_to_new_game()
         self.start_menu.hide()
@@ -918,6 +933,18 @@ class Frontend(OnlineEventsMixin):
                     self.online_client.force_reconnect()
             else:
                 self.toast.show("Resyncing…")
+        self._tick_skillcheck_watchdog()
+
+    def _tick_skillcheck_watchdog(self):
+        if (self._online_skillcheck is None
+                or self._online_skillcheck_opened_ms is None
+                or not self.skillcheck_overlay.is_active()):
+            return
+        elapsed = pg.time.get_ticks() - self._online_skillcheck_opened_ms
+        if elapsed > SKILLCHECK_DEADLINE_MS + SKILLCHECK_WATCHDOG_SLACK_MS:
+            log.warning("skillcheck verdict lost; resyncing")
+            self._teardown_skillcheck_overlay()
+            self._begin_resync()
 
     def _send_heartbeat_if_due(self):
         if (self.mode != ONLINE or self.online_client is None
@@ -927,6 +954,8 @@ class Frontend(OnlineEventsMixin):
         if self.online_client.is_server_silent():
             log.info("server heartbeat silent; escalating to reconnect")
             self.online_client.force_reconnect()
+            return
+        if self._online_verdict_action is not None:
             return
         now = pg.time.get_ticks()
         if now - self._last_heartbeat_sent_ms >= self.online_client.heartbeat_interval() * 1000:
@@ -986,9 +1015,15 @@ class Frontend(OnlineEventsMixin):
         self.board.flipped = False
         self.board.selected_square = None
         self.board.pending_promotion_square = None
+        self.board._promotion_from = None
         self.board.cancel_animations()
         self.board.effects.clear()
         self.board._clear_premoves()
+        self.skillcheck_overlay.cancel()
+        self.board.aim_suppressed_square = None
+        self.skillcheck.clear_locks()
+        self._clear_online_skillcheck_state()
+        self._skillcheck_log = []
         self.board.clear_annotations()
         self.board.end_press()
         self.board.review_ply = None
@@ -1046,6 +1081,7 @@ class Frontend(OnlineEventsMixin):
             white_name=self.white_name, black_name=self.black_name,
             time_control=time_control, termination=termination,
             match_id=self._match_session_id,
+            annotations=format_annotations(self._skillcheck_log),
         )
 
     def _on_undo(self):
@@ -1056,15 +1092,68 @@ class Frontend(OnlineEventsMixin):
             return
         self.board.selected_square = None
         self.board._clear_premoves()
+        self.skillcheck.clear_locks()
         self.board.clear_annotations()
         self.board.review_ply = None
         self.board.cancel_animations()
         if not self.match.move_history:
             return
         self.sound_manager.play_undo()
+        self._drop_skillcheck_log_from(len(self.match.move_history))
         move = self.match.move_history[-1].move
         self.match.undo()
         self.board.start_undo_animation(move)
+
+    def _handle_escape(self):
+        if self._skillcheck_swallows_input():
+            return
+        if self._dismiss_top_modal():
+            return
+        if self.mode == "menu":
+            if self.menu_page.page != PAGE_CARD:
+                self._on_menu_back()
+            else:
+                self._show_quit_modal()
+            return
+        if self.pgn_review or self.current_result() is not None:
+            self._on_back_to_menu()
+            return
+        self._on_resign()
+
+    def _dismiss_top_modal(self):
+        for modal in (self.help_modal, self.fen_input_modal, self.country_picker,
+                      self.directory_browser):
+            if modal.is_visible():
+                modal.hide()
+                return True
+        if self.confirm_modal.is_visible():
+            self.confirm_modal.hide()
+            if self.mode == "menu":
+                self.start_menu.show()
+            return True
+        if self.options_modal.is_visible():
+            if self._on_close_settings() is not False:
+                self.options_modal.hide()
+            return True
+        if self.wait_modal.is_visible():
+            self._on_online_cancel()
+            return True
+        if not self.offer_banners.is_empty():
+            self.offer_banners.clear()
+            return True
+        return False
+
+    def _show_quit_modal(self):
+        self.start_menu.hide()
+        self.confirm_modal.show(
+            "Leaving so soon?", on_yes=self._quit_app, on_no=self._cancel_quit,
+            yes_label="See ya!", no_label="Cancel")
+
+    def _quit_app(self):
+        self.running = False
+
+    def _cancel_quit(self):
+        self.start_menu.show()
 
     def _on_resign(self):
         if self.pgn_review or self.current_result() is not None:
@@ -1153,6 +1242,8 @@ class Frontend(OnlineEventsMixin):
     def _auto_complete_pending_promotion(self):
         if self.board.pending_promotion_square is None:
             return
+        if self.board.cancel_unapplied_promotion():
+            return
         self.match.promote(self.board.pending_promotion_square, PieceType.QUEEN)
         self.board.pending_promotion_square = None
 
@@ -1176,9 +1267,217 @@ class Frontend(OnlineEventsMixin):
             self.sound_manager.play_check()
             self.board.show_check_gun(entry)
         self._maybe_flash_increment_for(entry.move.piece.color)
+        self.skillcheck.clear_locks()
 
     def _on_shot_fired(self, entry):
         self.sound_manager.play_capture(entry.move.piece.type)
+
+    def _skillcheck_gate(self, from_sq, to_sq, promo_type=None):
+        if self.skillcheck.is_locked(from_sq, to_sq) or self._skillcheck_swallows_input():
+            return True
+        if self.mode == ONLINE:
+            return self._online_move_gate(from_sq, to_sq, promo_type)
+        kind = self.skillcheck.select(self.match.backend, from_sq, to_sq)
+        if kind == SkillCheckKind.NONE:
+            return False
+        diff = self._capture_value_diff(from_sq, to_sq, promo_type)
+        seed = "{}:{}:{}{}{}{}:{}".format(
+            self.skillcheck.seed, len(self.match.move_history),
+            from_sq.row, from_sq.col, to_sq.row, to_sq.col, kind.value)
+        return self._open_skillcheck_overlay(
+            kind, seed, diff, self._skillcheck_deadline_ms(),
+            from_sq, to_sq, promo_type, online=False)
+
+    def _online_move_gate(self, from_sq, to_sq, promo_type=None):
+        if to_sq not in self.match.legal_moves_from(from_sq):
+            return False
+        piece = self.match.piece_at(from_sq)
+        is_capture = self.board._capture_victim_square(piece, from_sq, to_sq) is not None
+        is_promotion = (piece.type == PieceType.PAWN
+                        and to_sq.row in (0, self.board.SIZE - 1))
+        if not (is_capture or is_promotion):
+            return False
+        promo_letter = PROMO_LETTER_BY_TYPE.get(promo_type) if promo_type is not None else None
+        if self.online_client is not None:
+            self.online_client.send_move(
+                coord_from_square(from_sq), coord_from_square(to_sq), promo_letter)
+        self._pending_online_move = (from_sq, to_sq, promo_type)
+        return True
+
+    def _open_skillcheck_overlay(self, kind, seed, value_diff, deadline_ms,
+                                 from_sq, to_sq, promo_type, *, online,
+                                 elapsed_ms=0, miss_count=0, passive=False):
+        target = self._skillcheck_render_square(kind, seed, value_diff, from_sq, to_sq)
+        capturer = self.match.piece_at(from_sq)
+        controller = build_controller(
+            kind, seed=seed, cell_rect=self.board.cell_rect(target),
+            now_ms=pg.time.get_ticks() - int(elapsed_ms), deadline_ms=deadline_ms,
+            period_ms=period_for_diff(value_diff), value_diff=value_diff,
+            victim_surface=self._victim_surface(target), board_rect=self.board.rect,
+            geom=lambda sq: self.board.cell_rect(sq).center, from_sq=from_sq,
+            victim_sq=target, attacker_type=capturer.type.value if capturer else None,
+            shot_sound=self._shot_sound_for(capturer),
+            on_shot=None if passive else (self._send_skillcheck_shot if online else None),
+            miss_count=miss_count, passive=passive)
+        if controller is None:
+            return False
+        self._skillcheck_target = target
+        self.board.aim_suppressed_square = target if kind == SkillCheckKind.AIM else None
+        on_done = self._on_online_skillcheck_done if online else self._on_skillcheck_done
+        self.skillcheck_overlay.start(
+            controller, (from_sq, to_sq, promo_type, kind), on_done)
+        return True
+
+    def _open_spectate_overlay(self, kind, seed, value_diff, deadline_ms,
+                               from_sq, to_sq, promo_type, *, elapsed_ms=0, miss_count=0):
+        self._pending_online_move = None
+        self._online_skillcheck = (from_sq, to_sq, promo_type, kind)
+        self._online_spectate_kind = kind
+        self._online_skillcheck_opened_ms = pg.time.get_ticks() - int(elapsed_ms)
+        self._open_skillcheck_overlay(
+            kind, seed, value_diff, deadline_ms, from_sq, to_sq, promo_type,
+            online=True, passive=True, elapsed_ms=elapsed_ms, miss_count=miss_count)
+
+    def _skillcheck_swallows_input(self):
+        return self.skillcheck_overlay.is_active() and not self.skillcheck_overlay.is_passive()
+
+    def _send_skillcheck_shot(self, client_elapsed_ms):
+        if self.online_client is not None:
+            self.online_client.send_skill_check_shot(client_elapsed_ms)
+
+    def _clear_online_skillcheck_state(self):
+        self._skillcheck_target = None
+        self._pending_online_move = None
+        self._online_skillcheck = None
+        self._online_spectate_kind = None
+        self._online_skillcheck_opened_ms = None
+        self._online_verdict_action = None
+
+    def _teardown_skillcheck_overlay(self):
+        self.skillcheck_overlay.cancel()
+        self.board.aim_suppressed_square = None
+        self._skillcheck_target = None
+        self._online_skillcheck = None
+        self._online_spectate_kind = None
+        self._online_skillcheck_opened_ms = None
+        self._online_verdict_action = None
+
+    def _on_online_skillcheck_done(self, context, landed):
+        action = self._online_verdict_action
+        self._online_verdict_action = None
+        self.board.aim_suppressed_square = None
+        self._skillcheck_target = None
+        if action is not None:
+            action()
+
+    def _skillcheck_render_square(self, kind, seed, value_diff, from_sq, to_sq):
+        if kind == SkillCheckKind.AIM:
+            capturer = self.match.piece_at(from_sq)
+            if capturer is not None:
+                victim_sq = self.board._capture_victim_square(capturer, from_sq, to_sq)
+                if victim_sq is not None:
+                    return victim_sq
+            return to_sq
+        square = placement_square(seed, value_diff,
+                                  self._placement_exclusions(from_sq, to_sq), self.board.SIZE)
+        return Square(square[0], square[1]) if square is not None else to_sq
+
+    def _placement_exclusions(self, from_sq, to_sq):
+        return {(from_sq.row, from_sq.col), (to_sq.row, to_sq.col)}
+
+    def _victim_surface(self, square):
+        piece = self.match.piece_at(square)
+        if piece is None:
+            return None
+        return self.board.piece_images_scaled.get((piece.type, piece.color))
+
+    def _shot_sound_for(self, capturer):
+        if capturer is None:
+            return None
+        piece_type = capturer.type
+        return lambda: self.sound_manager.play_capture(piece_type)
+
+    def _capture_value_diff(self, from_sq, to_sq, promo_type):
+        if promo_type is not None:
+            return PIECE_VALUES[PieceType.PAWN] - PIECE_VALUES.get(promo_type, 0)
+        capturer = self.match.piece_at(from_sq)
+        if capturer is None:
+            return 0
+        victim_sq = self.board._capture_victim_square(capturer, from_sq, to_sq)
+        if victim_sq is not None:
+            victim = self.match.piece_at(victim_sq)
+            return PIECE_VALUES.get(capturer.type, 0) - (
+                PIECE_VALUES.get(victim.type, 0) if victim is not None else 0)
+        return 0
+
+    def _on_skillcheck_done(self, context, landed):
+        from_sq, to_sq = context[0], context[1]
+        promo_type = context[2] if len(context) > 2 else None
+        kind = context[3] if len(context) > 3 else None
+        aim_victim = self.board.aim_suppressed_square
+        self.board.aim_suppressed_square = None
+        if landed:
+            self.board.apply_gated_move(from_sq, to_sq, promo_type)
+            self._record_skillcheck(kind, True, len(self.match.move_history))
+        else:
+            promo_letter = PROMO_LETTER_BY_TYPE.get(promo_type) if promo_type else None
+            self._record_skillcheck(
+                kind, False, len(self.match.move_history) + 1,
+                self.match.backend.preview_san(from_sq, to_sq, promo_letter))
+            self.skillcheck.lock(from_sq, to_sq)
+            self.board.selected_square = None
+            if self.board.premove_color == self.match.current_turn():
+                self.board._clear_premoves()
+            self.board.trigger_skillcheck_fail(from_sq, to_sq,
+                                               on_fire=self._on_skillcheck_miss_fire)
+            if aim_victim is not None:
+                self.board.restore_piece(aim_victim)
+
+    def _on_skillcheck_miss_fire(self, piece_type):
+        self.sound_manager.play_capture(piece_type)
+
+    def _record_skillcheck(self, kind, won, ply, san=""):
+        if kind is None:
+            return
+        kind_value = kind.value if isinstance(kind, SkillCheckKind) else kind
+        self._skillcheck_log.append(SkillCheckOutcome(ply, kind_value, won, san))
+
+    def _drop_skillcheck_log_from(self, ply):
+        self._skillcheck_log = [e for e in self._skillcheck_log if e.ply < ply]
+
+    def _record_online_fail(self, pending, from_sq, to_sq):
+        if pending is None:
+            return
+        promo_type = pending[2]
+        promo_letter = PROMO_LETTER_BY_TYPE.get(promo_type) if promo_type else None
+        self._record_skillcheck(
+            pending[3], False, len(self.match.move_history) + 1,
+            self.match.backend.preview_san(from_sq, to_sq, promo_letter))
+
+    def _apply_resumed_skillcheck_log(self, wire):
+        self._skillcheck_log = [
+            SkillCheckOutcome(e["ply"], e["kind"], e["won"], e.get("san", ""))
+            for e in wire]
+
+    def _rebuild_skillcheck_log(self, move_comments):
+        self._skillcheck_log = []
+        for index, comment in enumerate(move_comments):
+            for kind, won, san in parse_comment(comment):
+                self._skillcheck_log.append(
+                    SkillCheckOutcome(index + 1, kind, won, san))
+
+    def _skillcheck_whiffs(self):
+        whiffs = {}
+        for outcome in self._skillcheck_log:
+            if not outcome.won:
+                whiffs.setdefault(outcome.ply, []).append(
+                    (KIND_LABEL.get(outcome.kind, outcome.kind), outcome.san))
+        return whiffs
+
+    def _skillcheck_deadline_ms(self):
+        time_control = getattr(self, "_time_control", None)
+        initial = time_control[0] if time_control and time_control[0] else 0
+        return int(skillcheck_deadline_ms(initial))
 
     def _on_kill_announced(self, key):
         if key == "hit":
@@ -1233,6 +1532,7 @@ class Frontend(OnlineEventsMixin):
         now = pg.time.get_ticks()
         post_animation_settled = (
             not self.board.is_animating()
+            and not self.board.effects.captures
             and now - self.board.last_animation_completed_at_ms >= AUTO_FLIP_DELAY_MS
         )
         if (self.mode == SINGLE_SCREEN
@@ -1245,7 +1545,9 @@ class Frontend(OnlineEventsMixin):
 
         if (self.mode != "menu"
                 and self.current_result() is None
-                and post_animation_settled):
+                and post_animation_settled
+                and self._pending_online_move is None
+                and not self._skillcheck_swallows_input()):
             self.board.try_apply_next_premove()
 
         if self.mode != "menu":
@@ -1276,7 +1578,7 @@ class Frontend(OnlineEventsMixin):
                 self.menu_battle.begin_intro()
             self.menu_battle.set_avoid_rect(self.menu_page.avoid_rect())
             self.menu_battle.set_logo_rect(self.menu_page.logo_rect())
-            self.menu_battle.update(now, env.get_reduce_motion())
+            self.menu_battle.update(now)
             self.menu_battle.draw(self.window)
             self.menu_battle.draw_scrim(self.window)
         self._refresh_reconnect_button()
@@ -1294,6 +1596,11 @@ class Frontend(OnlineEventsMixin):
         self.fen_input_modal.draw()
         self.confirm_modal.draw()
         self.toast.draw()
+        if self.skillcheck_overlay.is_active() and (
+                self.mode == "menu" or self.current_result() is not None):
+            self._teardown_skillcheck_overlay()
+        self.skillcheck_overlay.update(now)
+        self.skillcheck_overlay.draw(self.window)
         self._drain_online_inbound()
         self._update_online_phase()
 
@@ -1670,6 +1977,9 @@ class Frontend(OnlineEventsMixin):
         self.right_menu.set_rect(menu_rect)
         self.player_strip_top.set_rect(top_strip_rect)
         self.player_strip_bottom.set_rect(bottom_strip_rect)
+        if self.skillcheck_overlay.is_active() and self._skillcheck_target is not None:
+            self.skillcheck_overlay.relayout(self.board.cell_rect(self._skillcheck_target))
+            self.skillcheck_overlay.set_board_rect(self.board.rect)
         self._refresh_capture_icons(strip_height)
 
     def _refresh_capture_icons(self, strip_height):
@@ -1905,7 +2215,10 @@ class Frontend(OnlineEventsMixin):
 
             elif event.type == pg.KEYDOWN:
                 if event.key == pg.K_ESCAPE:
-                    self.running = False
+                    self._handle_escape()
+                    continue
+                if self._skillcheck_swallows_input():
+                    self.skillcheck_overlay.handle_event(event)
                     continue
                 if self.country_picker.is_visible():
                     self.country_picker.handle_key(event)
@@ -1931,12 +2244,19 @@ class Frontend(OnlineEventsMixin):
                 self._handle_shortcut_key(event)
 
             elif event.type == pg.MOUSEBUTTONDOWN:
+                if self._skillcheck_swallows_input():
+                    if event.button == 1 and self.chrome.handle_click(event.pos):
+                        continue
+                    self.skillcheck_overlay.handle_event(event)
+                    continue
                 if event.button == 1:
                     self._mouse_left_pressed(event.pos)
                 elif event.button == 3:
                     self._right_click_pressed(event.pos)
 
             elif event.type == pg.MOUSEBUTTONUP:
+                if self._skillcheck_swallows_input():
+                    continue
                 if event.button == 1:
                     self._mouse_left_released(event.pos)
                 elif event.button == 3:

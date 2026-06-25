@@ -7,6 +7,7 @@ from chessshootout.domain.match import ONLINE
 from chessshootout.backend.pieces import PieceColor
 from chessshootout.backend.utils import PROMO_TYPE_BY_LETTER, coord_from_square, square_from_coord
 from chessshootout.server.protocol import FIRST_MOVE_ABORT_SECONDS
+from chessshootout.skillcheck.types import SkillCheckKind
 
 
 log = logging.getLogger("chess.frontend")
@@ -56,6 +57,10 @@ ONLINE_GAME_STATE_REASONS = {
     "version_mismatch",
 }
 
+MOVE_REJECTION_REASONS = {
+    "invalid_move_format", "not_your_turn", "skillcheck_pending", "move_locked",
+}
+
 NOT_YOUR_TURN_TOASTS = {
     "takeback_request": "Take back is only available right after your move",
 }
@@ -95,11 +100,25 @@ class OnlineEventsMixin:
             self._handle_connection_status(event.payload)
         elif event.type == "resync_directive":
             self._begin_resync()
+        elif event.type == "skill_check_required":
+            self._handle_skill_check_required(event.payload)
+        elif event.type == "skill_check_result":
+            self._handle_skill_check_result(event.payload)
+        elif event.type == "skill_check_spectate":
+            self._handle_skill_check_spectate(event.payload)
+        elif event.type == "skill_check_spectate_shot":
+            self._handle_skill_check_spectate_shot(event.payload)
         elif event.type == "error":
             self._handle_online_error(event.payload)
 
     def _handle_online_error(self, payload):
         reason = payload.get("reason", "")
+        if self._pending_online_move is not None and reason in MOVE_REJECTION_REASONS:
+            self._pending_online_move = None
+            self.board.selected_square = None
+            if reason in ("invalid_move_format", "not_your_turn"):
+                self._begin_resync()
+            return
         if reason == "not_your_turn":
             label = NOT_YOUR_TURN_TOASTS.get(payload.get("msg_type"))
             if label is not None:
@@ -196,7 +215,20 @@ class OnlineEventsMixin:
         self.board.selected_square = None
         self.board._clear_premoves()
         self.board.clear_annotations()
+        self._apply_resumed_skillcheck_log(payload.get("skillcheck_log", []))
+        self._restore_online_skillcheck_state(payload)
         self._resyncing = False
+
+    def _restore_online_skillcheck_state(self, payload):
+        self._teardown_skillcheck_overlay()
+        self._pending_online_move = None
+        self.skillcheck.clear_locks()
+        for lock in payload.get("skillcheck_locks", []):
+            self.skillcheck.lock(square_from_coord(lock["from_sq"]),
+                                 square_from_coord(lock["to_sq"]))
+        pending = payload.get("pending_skillcheck")
+        if pending is not None:
+            self._restore_pending_skillcheck(pending)
 
     def _handle_time_granted(self, payload):
         self._apply_clock_snap(payload, default_to_existing=False)
@@ -217,19 +249,146 @@ class OnlineEventsMixin:
             self._begin_resync()
             return
         if self.match.move_history:
+            self._drop_skillcheck_log_from(len(self.match.move_history))
             last = self.match.move_history[-1].move
             self.match.undo()
             self.board.start_undo_animation(last)
             self.sound_manager.play_undo()
         self._apply_clock_snap(payload, default_to_existing=True)
 
+    def _handle_skill_check_required(self, payload):
+        if self._resyncing:
+            return
+        from_sq = square_from_coord(payload["from"])
+        to_sq = square_from_coord(payload["to"])
+        promo = payload.get("promotion")
+        promo_type = PROMO_TYPE_BY_LETTER.get(promo) if promo else None
+        kind = SkillCheckKind(payload["kind"])
+        self._pending_online_move = None
+        self._online_skillcheck = (from_sq, to_sq, promo_type, kind)
+        self._online_skillcheck_opened_ms = pg.time.get_ticks()
+        self._open_skillcheck_overlay(
+            kind, payload["seed"], int(payload["value_diff"]),
+            float(payload["deadline_ms"]), from_sq, to_sq, promo_type, online=True,
+            elapsed_ms=float(payload.get("elapsed_ms", 0.0)),
+            miss_count=int(payload.get("miss_count", 0)))
+
+    def _handle_skill_check_result(self, payload):
+        if self._resyncing:
+            return
+        from_sq = square_from_coord(payload["from"])
+        to_sq = square_from_coord(payload["to"])
+        pending = self._online_skillcheck
+        if self._is_my_open_check(from_sq, to_sq):
+            self._record_online_fail(pending, from_sq, to_sq)
+            aim_victim = self.board.aim_suppressed_square
+            self.board.selected_square = None
+            self._begin_online_verdict(
+                False, lambda: self._apply_online_fail(from_sq, to_sq, aim_victim))
+            return
+        if self._online_spectate_kind is not None:
+            self._record_online_fail(pending, from_sq, to_sq)
+            aim_victim = self.board.aim_suppressed_square
+            self.toast.show("Opponent missed!")
+            self._begin_online_verdict(
+                False, lambda: self._apply_spectate_fail(from_sq, to_sq, aim_victim))
+
+    def _is_my_open_check(self, from_sq, to_sq):
+        return (self._online_skillcheck is not None
+                and self._online_spectate_kind is None
+                and self._online_skillcheck[:2] == (from_sq, to_sq))
+
+    def _begin_online_verdict(self, won, action):
+        self._online_skillcheck = None
+        self._online_spectate_kind = None
+        self._online_verdict_action = action
+        self.skillcheck_overlay.resolve_online(won)
+
+    def _apply_online_fail(self, from_sq, to_sq, aim_victim):
+        self.skillcheck.lock(from_sq, to_sq)
+        self._apply_spectate_fail(from_sq, to_sq, aim_victim)
+
+    def _apply_spectate_fail(self, from_sq, to_sq, aim_victim):
+        self.board.trigger_skillcheck_fail(
+            from_sq, to_sq, on_fire=self._on_skillcheck_miss_fire)
+        if aim_victim is not None:
+            self.board.restore_piece(aim_victim)
+
+    def _handle_skill_check_spectate(self, payload):
+        if self._resyncing:
+            return
+        from_sq = square_from_coord(payload["from"])
+        to_sq = square_from_coord(payload["to"])
+        promo = payload.get("promotion")
+        promo_type = PROMO_TYPE_BY_LETTER.get(promo) if promo else None
+        kind = SkillCheckKind(payload["kind"])
+        self._open_spectate_overlay(
+            kind, payload["seed"], int(payload["value_diff"]),
+            float(payload["deadline_ms"]), from_sq, to_sq, promo_type)
+        self.toast.show("Opponent is lining up a shot…")
+
+    def _handle_skill_check_spectate_shot(self, payload):
+        if self._resyncing or self._online_spectate_kind is None:
+            return
+        self.skillcheck_overlay.spectate_shot(
+            float(payload["elapsed_ms"]), int(payload["miss_count"]),
+            bool(payload["won"]))
+
+    def _restore_pending_skillcheck(self, pending):
+        kind = SkillCheckKind(pending["kind"])
+        from_sq = square_from_coord(pending["from_sq"])
+        to_sq = square_from_coord(pending["to_sq"])
+        promo = pending.get("promotion")
+        promo_type = PROMO_TYPE_BY_LETTER.get(promo) if promo else None
+        elapsed_ms = float(pending.get("elapsed_ms", 0.0))
+        miss_count = int(pending.get("miss_count", 0))
+        if pending["color"] != self._chosen_side:
+            self._open_spectate_overlay(
+                kind, pending["seed"], int(pending["value_diff"]),
+                float(pending["deadline_ms"]), from_sq, to_sq, promo_type,
+                elapsed_ms=elapsed_ms, miss_count=miss_count)
+            self.toast.show("Opponent is lining up a shot…")
+            return
+        self._online_skillcheck = (from_sq, to_sq, promo_type, kind)
+        self._online_skillcheck_opened_ms = pg.time.get_ticks() - int(elapsed_ms)
+        self._open_skillcheck_overlay(
+            kind, pending["seed"], int(pending["value_diff"]),
+            float(pending["deadline_ms"]), from_sq, to_sq, promo_type, online=True,
+            elapsed_ms=elapsed_ms, miss_count=miss_count)
+
+    def _clear_online_move_locks(self, from_sq, to_sq):
+        if self.mode != ONLINE:
+            return
+        self.skillcheck.clear_locks()
+        if (self._pending_online_move is not None
+                and self._pending_online_move[:2] == (from_sq, to_sq)):
+            self._pending_online_move = None
+
     def _handle_remote_move_applied(self, payload):
         if self._resyncing:
             return
+        from_sq = square_from_coord(payload["from"])
+        to_sq = square_from_coord(payload["to"])
+        if payload.get("skill_check_kind") is not None:
+            if self._is_my_open_check(from_sq, to_sq):
+                self._begin_online_verdict(
+                    True, lambda: self._apply_remote_move_payload(payload))
+                return
+            if self._online_spectate_kind is not None:
+                self.toast.show("Opponent nailed it!")
+                self._begin_online_verdict(
+                    True, lambda: self._apply_remote_move_payload(payload))
+                return
+        self._apply_remote_move_payload(payload)
+
+    def _apply_remote_move_payload(self, payload):
+        from_sq = square_from_coord(payload["from"])
+        to_sq = square_from_coord(payload["to"])
         san = payload.get("san")
         last = self.match.move_history[-1] if self.match.move_history else None
         if last is not None and last.san == san:
             self._apply_clock_snap(payload, default_to_existing=True)
+            self._clear_online_move_locks(from_sq, to_sq)
             return
         server_ply = payload.get("ply")
         expected = len(self.match.move_history) + 1
@@ -237,18 +396,28 @@ class OnlineEventsMixin:
             self._begin_resync()
             return
         self._apply_clock_snap(payload, default_to_existing=True)
-        from_sq = square_from_coord(payload["from"])
-        to_sq = square_from_coord(payload["to"])
         promo = payload.get("promotion")
         promo_type = PROMO_TYPE_BY_LETTER.get(promo) if promo else None
         result = self.match.apply_remote_move(from_sq, to_sq, promo_type)
         if result.legal:
             self.board.animate_remote_move(from_sq, to_sq)
+            self._clear_online_move_locks(from_sq, to_sq)
+            kind = payload.get("skill_check_kind")
+            if kind is not None:
+                self._record_skillcheck(
+                    kind, bool(payload.get("skill_check_won")),
+                    payload.get("ply") or len(self.match.move_history))
         else:
             self._begin_resync()
 
     def _handle_online_result(self, payload):
         self.offer_banners.clear()
+        pending_action = self._online_verdict_action
+        self._online_verdict_action = None
+        if pending_action is not None:
+            pending_action()
+        self._teardown_skillcheck_overlay()
+        self._pending_online_move = None
         reason = payload.get("reason", "")
         winner = payload.get("winner_color")
         if reason in ONLINE_WIN_REASONS:
@@ -343,6 +512,7 @@ class OnlineEventsMixin:
         }
         self._opp_disconnected_at_ms = None
         self._local_disconnected_at_ms = None
+        self.skillcheck.reset(enabled=True, seed="online")
         self._reset_to_new_game()
         self.board.flipped = self._online_initial_flip
 

@@ -286,10 +286,7 @@ def test_game_resumed_clears_resync_gate():
     app._resyncing = True
     payload = {
         "fen": "rnbqkbnr/pppp1ppp/8/4p3/4P3/8/PPPP1PPP/RNBQKBNR w KQkq - 0 2",
-        "move_history": [
-            {"san": "e4", "from": "e2", "to": "e3"},
-            {"san": "e5", "from": "e7", "to": "e6"},
-        ],
+        "move_history": [{"san": "e4"}, {"san": "e5"}],
         "clock": {"white_remaining": 300.0, "black_remaining": 300.0,
                   "running_for": None},
     }

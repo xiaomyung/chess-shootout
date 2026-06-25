@@ -8,7 +8,10 @@ from typing import Optional
 from uuid import uuid4
 
 from chessshootout.backend.backend import Backend
+from chessshootout.backend.utils import Square
 from chessshootout.server.protocol import GRACE_SECONDS, HEARTBEAT_TIMEOUT_SECONDS
+from chessshootout.skillcheck.online import SKILLCHECK_DEADLINE_MS
+from chessshootout.skillcheck.types import SkillCheckKind
 
 
 REMATCH_KEEP_ALIVE_SECONDS = 60
@@ -41,6 +44,21 @@ class PlayerSlot:
 
 
 @dataclass
+class PendingSkillCheck:
+    color: str
+    from_sq: Square
+    to_sq: Square
+    promotion: Optional[str]
+    kind: SkillCheckKind
+    seed: str
+    value_diff: int
+    start_ms: float
+    expires_at_ms: float
+    deadline_ms: float = SKILLCHECK_DEADLINE_MS
+    miss_count: int = 0
+
+
+@dataclass
 class Room:
     room_id: str
     time_minutes: int
@@ -58,6 +76,11 @@ class Room:
     rematch_offered_by: set[str] = field(default_factory=set)
     result: Optional[tuple[str, str]] = None
     series_scores: dict[str, float] = field(default_factory=dict)
+    skillcheck_secret: str = ""
+    skillcheck_locks: set = field(default_factory=set)
+    skillcheck_log: list = field(default_factory=list)
+    pending_skillcheck: Optional[PendingSkillCheck] = None
+    plies_ever: int = 0
 
     def score_for(self, color):
         slot = self.slot(color)
@@ -141,6 +164,7 @@ class RoomManager:
                 room.backend.setup_clock(
                     time_minutes * 60, increment_seconds, now_provider=self._now,
                 )
+                room.skillcheck_secret = secrets.token_hex(16)
                 room.started_at = self._now()
                 self._uuid_to_room[client_uuid] = room.room_id
                 self._active[room.room_id] = room
@@ -291,6 +315,7 @@ class RoomManager:
             return
         room.result = (reason, winner_color)
         room.ended_at = self._now()
+        room.pending_skillcheck = None
         self._award_series(room, reason, winner_color)
 
     @staticmethod
@@ -340,6 +365,11 @@ class RoomManager:
         room.backend.setup_clock(
             room.time_minutes * 60, room.increment_seconds, now_provider=self._now,
         )
+        room.skillcheck_secret = secrets.token_hex(16)
+        room.skillcheck_locks = set()
+        room.skillcheck_log = []
+        room.pending_skillcheck = None
+        room.plies_ever = 0
         room.started_at = self._now()
         room.first_move_at = None
         room.ended_at = None

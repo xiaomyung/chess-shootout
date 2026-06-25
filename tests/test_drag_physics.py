@@ -217,19 +217,6 @@ def test_frame_rate_independent_within_tolerance():
     assert abs(run(16) - run(8)) < 0.15
 
 
-def test_reduced_motion_never_tilts(monkeypatch):
-    monkeypatch.setattr(board_mod.env, "get_reduce_motion", lambda: True)
-    bd, _, _ = _make_board()
-    _grab(bd, Square(7, 3), where="top")
-    assert bd._drag["reduced"] is True
-    t = 0
-    for i in range(40):
-        t += 16
-        bd._drag["cursor"] = (450 + 200 * (i % 2), 450)
-        bd.update_drag_physics(t)
-        assert bd._drag["theta"] == 0.0
-
-
 def test_grab_outside_piece_slides_in_without_flicking():
     bd, bk, _ = _make_board()
     sq = Square(6, 4)

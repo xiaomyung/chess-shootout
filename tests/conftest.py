@@ -67,3 +67,39 @@ def server():
         srv.should_exit = True
         thread.join(timeout=5)
         sock.close()
+
+
+@pytest.fixture
+def server_with_app():
+    """Same real uvicorn server, but also hands the test the app object so a
+    skill-check integration test can force a kind (set room.skillcheck_secret)
+    and inspect room.skillcheck_log directly. The protocol still flows over real
+    HTTP + WebSockets via OnlineClient."""
+    import socket
+    import threading
+    import time
+
+    import uvicorn
+
+    from chessshootout.server.app import create_app
+
+    app = create_app(max_rooms=8)
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    sock.bind(("127.0.0.1", 0))
+    port = sock.getsockname()[1]
+    config = uvicorn.Config(
+        app, log_level="warning", ws_ping_interval=20, ws_ping_timeout=30,
+    )
+    srv = uvicorn.Server(config)
+    thread = threading.Thread(target=lambda: srv.run(sockets=[sock]), daemon=True)
+    thread.start()
+    deadline = time.time() + SERVER_START_TIMEOUT_SECONDS
+    while not srv.started and time.time() < deadline:
+        time.sleep(0.02)
+    assert srv.started, "test uvicorn server did not start in time"
+    try:
+        yield port, app
+    finally:
+        srv.should_exit = True
+        thread.join(timeout=5)
+        sock.close()

@@ -2,9 +2,12 @@ import pytest
 from pydantic import ValidationError
 
 from chessshootout.server.protocol import (
-    AuthMessage, ErrorMessage, GameStartMessage, MatchmakeRequest,
-    MoveMessage, PROTOCOL_VERSION, PingMessage, PongMessage, ResyncDirectiveMessage,
-    normalize_country, normalize_nickname,
+    AuthMessage, ClockSnapshot, ErrorMessage, GameStartMessage, LockWire,
+    MatchmakeRequest, MoveAppliedMessage, MoveMessage, PROTOCOL_VERSION,
+    PendingSkillCheckWire, PingMessage, PongMessage, ResumeResponse,
+    ResyncDirectiveMessage, SkillCheckRequiredMessage, SkillCheckResultMessage,
+    SkillCheckOutcomeWire, SkillCheckShotMessage, SkillCheckSpectateMessage,
+    SkillCheckSpectateShotMessage, normalize_country, normalize_nickname,
 )
 from tests.helpers import fake_uuid4
 
@@ -207,7 +210,7 @@ def test_game_start_carries_country():
 
 
 def test_move_message_uses_alias_for_from():
-    raw = {"type": "move", "version": 1, "from": "e2", "to": "e4", "promotion": None}
+    raw = {"type": "move", "version": PROTOCOL_VERSION, "from": "e2", "to": "e4", "promotion": None}
     msg = MoveMessage.model_validate(raw)
     assert msg.from_sq == "e2"
     assert msg.to_sq == "e4"
@@ -220,5 +223,147 @@ def test_move_message_uses_alias_for_from():
 
 def test_move_message_promotion_validated():
     with pytest.raises(ValidationError):
-        MoveMessage.model_validate({"type": "move", "version": 1,
+        MoveMessage.model_validate({"type": "move", "version": PROTOCOL_VERSION,
                                     "from": "e7", "to": "e8", "promotion": "x"})
+
+
+# ---- skill-check protocol (additive; PROTOCOL_VERSION bumped to 2) ----------
+
+def test_protocol_version_bumped_for_skillchecks():
+    assert PROTOCOL_VERSION == 2
+
+
+def test_skill_check_required_round_trips():
+    msg = SkillCheckRequiredMessage(
+        kind="wheel", seed="abc", value_diff=8, deadline_ms=5000.0,
+        from_sq="e4", to_sq="d5")
+    dumped = msg.model_dump(by_alias=True)
+    assert dumped["from"] == "e4" and dumped["to"] == "d5"
+    assert dumped["promotion"] is None and dumped["miss_count"] == 0
+    assert SkillCheckRequiredMessage.model_validate(dumped) == msg
+
+
+def test_skill_check_required_carries_promotion():
+    msg = SkillCheckRequiredMessage(
+        kind="wheel", seed="s", value_diff=9, deadline_ms=5000.0,
+        from_sq="e7", to_sq="e8", promotion="q")
+    assert msg.model_dump(by_alias=True)["promotion"] == "q"
+
+
+def test_skill_check_required_rejects_unknown_kind():
+    with pytest.raises(ValidationError):
+        SkillCheckRequiredMessage(kind="duel", seed="x", value_diff=0, deadline_ms=5000.0,
+                                  from_sq="e4", to_sq="d5")
+
+
+def test_skill_check_shot_carries_the_client_rendered_elapsed():
+    msg = SkillCheckShotMessage.model_validate(
+        {"type": "skill_check_shot", "version": PROTOCOL_VERSION, "client_elapsed_ms": 412.0})
+    assert msg.client_elapsed_ms == 412.0
+    assert SkillCheckShotMessage().client_elapsed_ms == 0.0, "absent -> 0, clamped to a loss"
+
+
+def test_skill_check_shot_ignores_injected_client_timestamp():
+    msg = SkillCheckShotMessage.model_validate(
+        {"type": "skill_check_shot", "version": PROTOCOL_VERSION, "client_fire_ms": 123})
+    assert not hasattr(msg, "client_fire_ms")
+    assert "client_fire_ms" not in msg.model_dump()
+
+
+def test_skill_check_result_uses_from_to_aliases():
+    msg = SkillCheckResultMessage.model_validate(
+        {"type": "skill_check_result", "won": False, "from": "e4", "to": "d5"})
+    assert (msg.won, msg.from_sq, msg.to_sq) == (False, "e4", "d5")
+    assert msg.model_dump(by_alias=True)["from"] == "e4"
+
+
+def test_skill_check_spectate_carries_the_full_challenge_with_from_to_aliases():
+    msg = SkillCheckSpectateMessage(
+        kind="aim", seed="abc", value_diff=3, deadline_ms=5000.0,
+        **{"from": "d4", "to": "d5"}, promotion=None)
+    assert (msg.kind, msg.seed, msg.value_diff) == ("aim", "abc", 3)
+    assert (msg.from_sq, msg.to_sq) == ("d4", "d5")
+    dumped = msg.model_dump(by_alias=True)
+    assert dumped["from"] == "d4" and dumped["to"] == "d5"
+
+
+def test_skill_check_spectate_shot_round_trips():
+    msg = SkillCheckSpectateShotMessage.model_validate(
+        {"type": "skill_check_spectate_shot", "elapsed_ms": 742.0,
+         "miss_count": 2, "won": False})
+    assert (msg.elapsed_ms, msg.miss_count, msg.won) == (742.0, 2, False)
+    assert msg.model_dump()["type"] == "skill_check_spectate_shot"
+
+
+def test_move_applied_skillcheck_fields_default_none_and_round_trip():
+    base = dict(from_sq="e2", to_sq="e4", san="e4",
+                clock=ClockSnapshot(white_remaining=1.0, black_remaining=1.0, running_for="black"),
+                ply=1)
+    quiet = MoveAppliedMessage(**base)
+    assert quiet.skill_check_kind is None and quiet.skill_check_won is None
+    won = MoveAppliedMessage(**base, skill_check_kind="wheel", skill_check_won=True)
+    assert MoveAppliedMessage.model_validate(won.model_dump(by_alias=True)) == won
+
+
+def test_skillcheck_outcome_wire_uses_plain_field_keys_no_alias():
+    wire = SkillCheckOutcomeWire(ply=7, kind="wheel", won=False, san="Rxe5")
+    dumped = wire.model_dump()
+    assert dumped == {"ply": 7, "kind": "wheel", "won": False, "san": "Rxe5"}
+    assert wire.model_dump(by_alias=True) == dumped, "no from/to alias, no version key"
+
+
+def test_skillcheck_outcome_wire_san_defaults_empty_for_wins():
+    assert SkillCheckOutcomeWire(ply=1, kind="aim", won=True).san == ""
+
+
+def test_resume_response_carries_the_skillcheck_log():
+    resp = ResumeResponse(
+        fen="x", move_history=[],
+        clock=ClockSnapshot(white_remaining=1.0, black_remaining=1.0, running_for="white"),
+        your_color="white", white_name="A", black_name="B",
+        time_minutes=5, increment_seconds=0,
+        skillcheck_log=[
+            SkillCheckOutcomeWire(ply=1, kind="wheel", won=True),
+            SkillCheckOutcomeWire(ply=2, kind="aim", won=False, san="Qxd5")])
+    dumped = resp.model_dump()
+    assert dumped["skillcheck_log"] == [
+        {"ply": 1, "kind": "wheel", "won": True, "san": ""},
+        {"ply": 2, "kind": "aim", "won": False, "san": "Qxd5"}]
+
+
+def test_resume_response_skillcheck_log_defaults_empty():
+    resp = ResumeResponse(
+        fen="x", move_history=[],
+        clock=ClockSnapshot(white_remaining=1.0, black_remaining=1.0, running_for="white"),
+        your_color="white", white_name="A", black_name="B",
+        time_minutes=5, increment_seconds=0)
+    assert resp.skillcheck_log == []
+
+
+def test_resume_response_pending_and_locks_default_empty():
+    resp = ResumeResponse(
+        fen="x", move_history=[],
+        clock=ClockSnapshot(white_remaining=1.0, black_remaining=1.0, running_for="white"),
+        your_color="white", white_name="A", black_name="B",
+        time_minutes=5, increment_seconds=0)
+    assert resp.pending_skillcheck is None
+    assert resp.skillcheck_locks == []
+
+
+def test_resume_response_carries_pending_and_locks_when_set():
+    pending = PendingSkillCheckWire(
+        kind="aim", seed="s", value_diff=3, deadline_ms=5000.0, elapsed_ms=1800.0,
+        miss_count=1, from_sq="e4", to_sq="d5", color="white")
+    resp = ResumeResponse(
+        fen="x", move_history=[],
+        clock=ClockSnapshot(white_remaining=1.0, black_remaining=1.0, running_for="white"),
+        your_color="white", white_name="A", black_name="B",
+        time_minutes=5, increment_seconds=0,
+        pending_skillcheck=pending,
+        skillcheck_locks=[LockWire(from_sq="e4", to_sq="d5")])
+    dumped = resp.model_dump()
+    assert dumped["skillcheck_locks"][0] == {"from_sq": "e4", "to_sq": "d5"}, \
+        "the client reads /resume via plain model_dump() — field-name keys, not aliases"
+    assert dumped["pending_skillcheck"]["from_sq"] == "e4"
+    assert dumped["pending_skillcheck"]["to_sq"] == "d5"
+    assert dumped["pending_skillcheck"]["color"] == "white"

@@ -1,13 +1,25 @@
 # Chess Shootout
 
 A full-featured chess game built with [pygame](https://www.pygame.org/):
-a clean UI at rest with comedic **gun-fight** chaos in the moments — pieces
-blast each other off the board and an FPS-style announcer calls the
-killstreaks. Local hot-seat play, premoves, clocks, annotations, PGN
-auto-save and review, plus an authoritative server for online two-player
-matches.
+a clean UI at rest with comedic **gun-fight** chaos in the moments — every
+capture is won through a quick **skill-check**, pieces blast each other off the
+board, and an FPS-style announcer calls the killstreaks. Local hot-seat play,
+premoves, clocks, annotations, PGN auto-save and review, plus an authoritative
+server for online two-player matches.
 
 ## Features
+
+**Skill-checks — the *Shootout***
+- Every capture and promotion triggers a fast skill-check: win it and the move
+  lands; miss it and that move is locked for the turn, so you play something
+  else — no turn is forfeited. Two checks roll 50/50 per capture; promotions are
+  wheel-only.
+- **Timing wheel** — tap when the needle is inside the shrinking sweet-spot; it
+  spins faster the more material is at stake.
+- **Steady-Aim** — a crosshair auto-traces a figure-8 over the shrinking victim;
+  it is multi-shot, and every miss escalates the sway and shrink.
+- Online, the server adjudicates every shot and your opponent watches a live,
+  read-only mirror of the same minigame while their own board stays interactive.
 
 **Gameplay**
 - Complete rules engine: castling, en passant, promotion, threefold
@@ -27,14 +39,15 @@ matches.
   checkmate takeover, and a surrender flag.
 - Custom borderless window chrome — native drag, edge/corner resize, and a
   themed title bar on every screen.
-- Animated menu "battle" backdrop and themed result / online screens; a
-  reduce-motion toggle and effect-intensity control live in Options.
+- Animated menu "battle" backdrop and themed result / online screens.
 
 **PGN**
 - Every game auto-saves to `games/<prefix>-YYYYMMDD-HHMMSS.pgn` (`local`,
   `bot`, or `online`).
 - Load and review past games from the **History** menu; step through with
   the arrow keys.
+- Skill-check outcomes (hits and misses) are saved as standard `{comments}` and
+  replayed in review; the file still imports cleanly into other chess apps.
 - **Open PGN** in the result modal opens the file in your OS default app.
 
 **Online**
@@ -129,11 +142,12 @@ pyenv shell 3.12                  # `python3.12` now resolves for the venv step 
 | `R` | Resign / promote to rook (when a promotion is pending) |
 | `D` | Offer draw |
 | `Q` / `B` / `N` | Promote (queen / bishop / knight) |
+| `Space` / Click | Fire the active skill-check (Shootout) |
 | `Ctrl+Z` | Undo (online: takeback request) |
 | `←` / `→` | Step through review |
 | `Home` / `End` | Jump to ply 0 / live |
 | `?` | Open Help modal |
-| `Esc` | Close the window |
+| `Esc` | Context Back/Cancel — closes the top modal, else the quit / resign prompt (never the window) |
 
 ## Online play
 
@@ -217,8 +231,9 @@ the file when reporting a bug.
 
 ### Deployment
 
-See [deploy/README.md](deploy/README.md) for single-VPS systemd setup — the
-server listens directly on a public TCP port; no TLS, DNS, or reverse proxy.
+See [deploy/README.md](deploy/README.md) for the containerized single-VPS setup
+— a `docker compose` edge stack (the server plus a Caddy reverse proxy that
+terminates TLS) behind Cloudflare.
 
 ## Development
 

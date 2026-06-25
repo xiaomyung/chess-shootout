@@ -45,6 +45,7 @@ NATURAL_GHOST_H = 42
 NATURAL_RECON_H = 68
 NATURAL_SECTION_GAP = 15
 NATURAL_GAP_COUNT = 6
+MIN_MENU_SCALE = 0.44
 
 WORDMARK_TOP = "CHESS"
 WORDMARK_BOTTOM = "SHOOTOUT"
@@ -200,26 +201,20 @@ class StartMenu:
     def set_rect(self, rect):
         self._avail = pg.Rect(rect)
         recon = 1 if self.reconnect_available else 0
-        natural = (NATURAL_BRAND_H + NATURAL_NICK_H + NATURAL_MODE_H + NATURAL_TIME_H
-                   + NATURAL_SIDE_H + NATURAL_START_H + NATURAL_GHOST_H
+        natural = (NATURAL_BRAND_H + NATURAL_NICK_H + NATURAL_MODE_H
+                   + NATURAL_TIME_H + NATURAL_SIDE_H + NATURAL_START_H + NATURAL_GHOST_H
                    + recon * NATURAL_RECON_H
                    + NATURAL_SECTION_GAP * (NATURAL_GAP_COUNT + recon))
-        scale = min(1.0, max((rect.height - 44) / natural, 0.5))
-        self._scale = scale
-        s = scale
+        scale = min(1.0, max((rect.height - 44) / natural, MIN_MENU_SCALE))
+        content_h = rect.height
+        for _ in range(24):
+            self._scale = scale
+            self._apply_fonts(scale)
+            content_h = self._layout(rect.y) - rect.y + int(22 * scale)
+            if content_h <= rect.height or scale <= MIN_MENU_SCALE:
+                break
+            scale = max(MIN_MENU_SCALE, scale * rect.height / content_h * 0.99)
 
-        self.label_font = get_font(max(int(11 * s), 9), bold=True)
-        self.seg_font = get_font(max(int(13 * s), 10), bold=True)
-        self.chip_font = get_mono_font(max(int(13 * s), 10), bold=True)
-        self.button_font = get_font(max(int(13 * s), 10), bold=True)
-        self.wordmark_font = get_display_font(max(int(34 * s), 18))
-        self.tagline_font = get_font(max(int(10 * s), 8), bold=True)
-        self.start_font = get_display_font(max(int(22 * s), 14))
-        self.recon_font = get_font(max(int(12 * s), 9), bold=True)
-
-        pad = int(22 * s)
-        bottom = self._layout(rect.y)
-        content_h = bottom - rect.y + pad
         card_top = rect.y + max((rect.height - content_h) // 2, 0)
         if card_top != rect.y:
             self._layout(card_top)
@@ -227,6 +222,16 @@ class StartMenu:
         self._tile_cache = None
         self._start_cache = None
         self._build_footer()
+
+    def _apply_fonts(self, s):
+        self.label_font = get_font(max(int(12 * s), 12), bold=True)
+        self.seg_font = get_font(max(int(15 * s), 14), bold=True)
+        self.chip_font = get_mono_font(max(int(15 * s), 14), bold=True)
+        self.button_font = get_font(max(int(14 * s), 13), bold=True)
+        self.wordmark_font = get_display_font(max(int(34 * s), 20))
+        self.tagline_font = get_font(max(int(10 * s), 9), bold=True)
+        self.start_font = get_display_font(max(int(22 * s), 15))
+        self.recon_font = get_font(max(int(12 * s), 11), bold=True)
 
     def _layout(self, oy):
         rect = self._avail
@@ -268,10 +273,11 @@ class StartMenu:
             self._recon_button_rect = pg.Rect(0, 0, 0, 0)
 
         self._nick_label_y = y
-        self._input_rect = pg.Rect(x, y + label_h + label_gap, w, int(42 * s))
+        self._input_rect = pg.Rect(x, y + label_h + label_gap, w, max(int(42 * s), 32))
         y = self._input_rect.bottom + gap
 
-        seg_h = int(44 * s)
+        seg_h = max(int(44 * s), 32)
+        chip_h = max(int(34 * s), 28)
         self._mode_label_pos = (x, y)
         self._mode_rect = pg.Rect(x, y + label_h + label_gap, w, seg_h)
         y = self._mode_rect.bottom + gap
@@ -281,18 +287,18 @@ class StartMenu:
         self._time_label_pos = (x, y)
         self._incr_label_pos = (x + col_w + col_gap, y)
         chips_y = y + label_h + label_gap
-        self._time_rect = pg.Rect(x, chips_y, col_w, int(34 * s))
-        self._incr_rect = pg.Rect(x + col_w + col_gap, chips_y, col_w, int(34 * s))
+        self._time_rect = pg.Rect(x, chips_y, col_w, chip_h)
+        self._incr_rect = pg.Rect(x + col_w + col_gap, chips_y, col_w, chip_h)
         y = self._time_rect.bottom + gap
 
         self._side_label_pos = (x, y)
         self._side_rect = pg.Rect(x, y + label_h + label_gap, w, seg_h)
         y = self._side_rect.bottom + gap
 
-        self._start_rect = pg.Rect(x, y, w, int(48 * s))
+        self._start_rect = pg.Rect(x, y, w, max(int(48 * s), 38))
         y = self._start_rect.bottom + gap
 
-        ghost_h = int(40 * s)
+        ghost_h = max(int(40 * s), 30)
         ghost_w = (w - col_gap) // 2
         self._history_rect = pg.Rect(x, y, ghost_w, ghost_h)
         self._fen_rect = pg.Rect(x + ghost_w + col_gap, y, w - ghost_w - col_gap, ghost_h)
@@ -375,7 +381,8 @@ class StartMenu:
 
     def draw(self):
         if not self.visible:
-            self._mode_rects = self._time_rects = self._incr_rects = self._side_rects = {}
+            self._mode_rects = {}
+            self._time_rects = self._incr_rects = self._side_rects = {}
             return
         r = self._outer
         self.window.blit(rounded_rect_surface(r.size, 18, Colors.surface,

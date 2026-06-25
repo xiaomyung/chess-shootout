@@ -3,7 +3,8 @@ import pygame as pg
 from chessshootout.frontend.modals.base import BaseModal
 from chessshootout.frontend.panels.player_strip import format_clock
 from chessshootout.frontend.visual.colors import Colors
-from chessshootout.frontend.visual.draw import rounded_rect_surface, blit_centered, stroked_text
+from chessshootout.frontend.visual.draw import (
+    rounded_rect_surface, blit_centered, stroked_text, soft_blur)
 from chessshootout.frontend.visual.widgets import (
     draw_button_row, fit_text_to_rect, draw_series_chip)
 from chessshootout.frontend.visual.fonts import get_font, get_display_font
@@ -25,9 +26,7 @@ OUTCOME_COLOR = {
 
 
 def _glow_behind(text_surf, color):
-    w, h = text_surf.get_size()
-    small = pg.transform.smoothscale(text_surf, (max(w // 5, 1), max(h // 5, 1)))
-    glow = pg.transform.smoothscale(small, (w, h))
+    glow = soft_blur(text_surf)
     tint = pg.Surface(glow.get_size(), pg.SRCALPHA)
     tint.fill((*pg.Color(color)[:3], 130))
     glow.blit(tint, (0, 0), special_flags=pg.BLEND_RGBA_MULT)

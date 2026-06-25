@@ -190,3 +190,68 @@ def test_user_promotion_game_disambiguation():
     assert "Qcb4#" in pgn
     assert "8. Qff3" in pgn
     assert "11. Qcb4#" in pgn
+
+
+def _preview_and_real(piece_map, frm, to, promo_letter=None, promo_type=None, **kw):
+    preview = make_backend(piece_map, **kw).preview_san(frm, to, promo_letter)
+    bk = make_backend(piece_map, **kw)
+    res = bk.try_move(frm, to)
+    assert res.legal
+    if res.promotion_required:
+        bk.promote(to, promo_type)
+    real = bk.move_history[-1].san.rstrip("+#")
+    return preview, real
+
+
+def test_preview_san_pawn_capture_matches_real_apply():
+    pmap = {sq(4, 4): piece(P, WHITE), sq(3, 5): piece(P, BLACK), **CORNERS}
+    preview, real = _preview_and_real(pmap, sq(4, 4), sq(3, 5))
+    assert preview == "exf5"
+    assert preview == real
+
+
+def test_preview_san_piece_disambiguation_matches_real_apply():
+    pmap = {
+        sq(7, 1): piece(N, WHITE), sq(7, 3): piece(N, WHITE),
+        sq(7, 7): piece(K, WHITE), sq(0, 0): piece(K, BLACK),
+        sq(1, 0): piece(P, BLACK),
+    }
+    preview, real = _preview_and_real(pmap, sq(7, 1), sq(5, 2))
+    assert preview == "Nbc3"
+    assert preview == real
+
+
+def test_preview_san_en_passant_matches_real_apply():
+    pmap = {sq(3, 4): piece(P, WHITE), sq(3, 3): piece(P, BLACK), **CORNERS}
+    preview, real = _preview_and_real(pmap, sq(3, 4), sq(2, 3), ep_target=sq(2, 3))
+    assert preview == "exd6"
+    assert preview == real
+
+
+def test_preview_san_quiet_promotion_matches_real_apply():
+    pmap = {sq(1, 4): piece(P, WHITE), sq(7, 0): piece(K, WHITE), sq(0, 0): piece(K, BLACK)}
+    preview, real = _preview_and_real(pmap, sq(1, 4), sq(0, 4),
+                                      promo_letter="q", promo_type=Q)
+    assert preview == "e8=Q"
+    assert preview == real
+
+
+def test_preview_san_capture_promotion_matches_real_apply():
+    pmap = {
+        sq(1, 4): piece(P, WHITE), sq(0, 3): piece(R, BLACK),
+        sq(7, 0): piece(K, WHITE), sq(0, 0): piece(K, BLACK),
+    }
+    preview, real = _preview_and_real(pmap, sq(1, 4), sq(0, 3),
+                                      promo_letter="q", promo_type=Q)
+    assert preview == "exd8=Q"
+    assert preview == real
+
+
+def test_preview_san_does_not_mutate_board_or_history():
+    pmap = {sq(4, 4): piece(P, WHITE), sq(3, 5): piece(P, BLACK), **CORNERS}
+    bk = make_backend(pmap)
+    bk.preview_san(sq(4, 4), sq(3, 5))
+    assert bk.move_history == []
+    assert bk.piece_at(sq(4, 4)).type == P
+    assert bk.piece_at(sq(3, 5)).type == P
+    assert bk.turn == WHITE

@@ -8,8 +8,8 @@ from chessshootout.backend.utils import Square
 from chessshootout.domain.pgn.generate import generate_pgn
 from chessshootout.domain.pgn.load import (
     PgnSummary, extract_csmatchid, format_relative_time, group_by_csmatchid,
-    load_pgn_into_backend, parse_pgn, scan_pgn_summaries, summarize_pgn_file,
-    termination_reason, time_category,
+    load_pgn_into_backend, parse_comment, parse_pgn, scan_pgn_summaries,
+    summarize_pgn_file, termination_reason, time_category,
 )
 from tests.helpers import fake_uuid4
 
@@ -372,3 +372,69 @@ def test_time_category(tc, expected):
 def test_format_relative_time(delta, expected):
     now = 1_700_000_000.0
     assert format_relative_time(now - delta, now) == expected
+
+
+def test_parse_pgn_preserves_move_comments_aligned_to_moves():
+    text = ('[White "A"]\n[Black "B"]\n\n'
+            "1. e4 {Wheel ✓} e5 2. Nf3 {Wheel ✗ Rxe5 · Steady-Aim ✓} Nc6 3. Bb5 1-0")
+    parsed = parse_pgn(text)
+    assert parsed.moves == ["e4", "e5", "Nf3", "Nc6", "Bb5"]
+    assert parsed.move_comments == [
+        "Wheel ✓", "", "Wheel ✗ Rxe5 · Steady-Aim ✓", "", ""]
+    assert parsed.result == "1-0"
+
+
+def test_parse_pgn_no_comments_yields_all_empty_aligned():
+    parsed = parse_pgn('[White "A"]\n[Black "B"]\n\n1. e4 e5 2. Nf3 1-0')
+    assert parsed.moves == ["e4", "e5", "Nf3"]
+    assert parsed.move_comments == ["", "", ""]
+
+
+def test_multiword_comment_does_not_leak_into_moves_or_captures():
+    text = '[White "A"]\n[Black "B"]\n\n1. d4 {Wheel ✗ Rxe5} d5 *'
+    parsed = parse_pgn(text)
+    assert parsed.moves == ["d4", "d5"]
+    summary = summarize_pgn_file("local-x.pgn", text, 0.0, filename="local-x.pgn")
+    assert summary.white_captures == 0
+    assert summary.black_captures == 0
+
+
+def test_parse_pgn_strips_variations_but_keeps_real_comments():
+    text = '[White "A"]\n\n1. e4 {kept} (1. d4 {dropped} d5) e5 *'
+    parsed = parse_pgn(text)
+    assert parsed.moves == ["e4", "e5"]
+    assert parsed.move_comments == ["kept", ""]
+
+
+def test_parse_comment_round_trips_format_annotations():
+    assert parse_comment("Wheel ✓") == [("wheel", True, "")]
+    assert parse_comment("Steady-Aim ✗ Nxe5") == [("aim", False, "Nxe5")]
+    assert parse_comment("Wheel ✗ Rxe5 · Steady-Aim ✓") == [
+        ("wheel", False, "Rxe5"), ("aim", True, "")]
+
+
+def test_parse_comment_ignores_free_text():
+    assert parse_comment("good move") == []
+    assert parse_comment("") == []
+
+
+def test_whiffed_san_lives_in_a_comment_and_keeps_the_pgn_legal():
+    """The "stays legal in chess.com/lichess" guarantee: a check that FAILED writes its whiffed
+    SAN into the ply's {comment} — the move that actually landed (Nc6) stays in the sequence.
+    The whiffed SAN (Nxe5) must be in move_comments but absent from the move list, and the whole
+    movetext must still replay legally as a standard game."""
+    backend = Backend()
+    backend.new_game()
+    for san in ["e4", "e5", "Nf3", "Nc6"]:
+        assert backend.apply_san(san).legal
+    text = generate_pgn(backend.move_history, "white_wins",
+                        annotations={4: "Steady-Aim ✗ Nxe5"})
+    parsed = parse_pgn(text)
+    assert parsed.moves == ["e4", "e5", "Nf3", "Nc6"]
+    assert "Nxe5" not in parsed.moves, "the whiffed move never landed in the move sequence"
+    assert any("Nxe5" in comment for comment in parsed.move_comments), \
+        "but the whiffed SAN is preserved in the ply comment"
+    fresh = Backend()
+    reparsed, ok = load_pgn_into_backend(fresh, text)
+    assert ok is True, "a whiff-annotated PGN replays cleanly as standard chess"
+    assert [e.san for e in fresh.move_history] == ["e4", "e5", "Nf3", "Nc6"]

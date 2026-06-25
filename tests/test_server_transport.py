@@ -110,6 +110,12 @@ def test_resume_blocking_returns_typed_response(captured):
         "your_color": "white",
         "white_name": "Alice", "black_name": "Bob",
         "time_minutes": 5, "increment_seconds": 0,
+        "skillcheck_locks": [{"from": "e4", "to": "d5"}],
+        "pending_skillcheck": {
+            "kind": "aim", "seed": "s", "value_diff": 3, "deadline_ms": 5000.0,
+            "elapsed_ms": 100.0, "miss_count": 0, "from": "e4", "to": "d5",
+            "promotion": None, "color": "white",
+        },
     }
     transport = httpx.MockTransport(_make_handler(
         status_code=200, body=body, capture=captured,
@@ -119,6 +125,8 @@ def test_resume_blocking_returns_typed_response(captured):
         resp = st.resume_blocking(fake_uuid4(50), "tok-99")
     assert resp is not None
     assert resp.your_color == "white"
+    assert resp.skillcheck_locks[0].from_sq == "e4"
+    assert resp.pending_skillcheck.from_sq == "e4" and resp.pending_skillcheck.color == "white"
     assert captured[0]["method"] == "POST"
     assert captured[0]["url"].endswith("/resume")
 

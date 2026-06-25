@@ -9,7 +9,7 @@ from chessshootout.infra import env
 _ISOLATED_VARS = (
     "CHESS_SERVER_ADDR", "CHESS_NICKNAME", "CHESS_CLIENT_UUID",
     "CHESS_LAST_MODE", "CHESS_MASTER_VOLUME", "CHESS_MENU_VOLUME", "CHESS_DATA_DIR",
-    "CHESS_REDUCE_MOTION", "CHESS_EFFECT_INTENSITY", "CHESS_DEFAULT_TC",
+    "CHESS_DEFAULT_TC",
     "CHESS_DEFAULT_INCREMENT", "CHESS_THEME", "CHESS_COUNTRY",
 )
 
@@ -366,23 +366,6 @@ def test_env_default_path_derives_from_config_dir_not_file():
     src = pathlib.Path(env.__file__).read_text()
     assert "get_config_dir()" in src
     assert "Path(__file__)" not in src
-
-
-def test_reduce_motion_defaults_false_and_round_trips():
-    assert env.get_reduce_motion() is False
-    env.set_reduce_motion(True)
-    assert env.get_reduce_motion() is True
-    assert "CHESS_REDUCE_MOTION=1" in env._ENV_PATH.read_text()
-    env.set_reduce_motion(False)
-    assert env.get_reduce_motion() is False
-
-
-def test_effect_intensity_defaults_full_and_validates():
-    assert env.get_effect_intensity() == "full"
-    env.set_effect_intensity("subtle")
-    assert env.get_effect_intensity() == "subtle"
-    env.set_effect_intensity("bogus")
-    assert env.get_effect_intensity() == "full"
 
 
 def test_default_time_control_round_trips():

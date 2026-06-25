@@ -5,11 +5,10 @@ import pygame as pg
 
 from chessshootout.backend.pseudo_legal import piece_can_pseudo_reach, king_square, checking_square
 from chessshootout.backend.utils import Square
-from chessshootout.infra import env
 from chessshootout.frontend.visual.animation import PieceAnimation
 from chessshootout.frontend.visual.colors import Colors
 from chessshootout.frontend.visual.draw import supersample
-from chessshootout.frontend.visual.effects import EffectManager, INTENSITY_SCALE
+from chessshootout.frontend.visual.effects import EffectManager
 from chessshootout.frontend.visual.icons import piece_png_path
 from chessshootout.domain.premoves import Premove, speculative_board
 from chessshootout.backend.pieces import PieceType, PieceColor, Piece, opponent_of
@@ -35,6 +34,20 @@ DRAG_OMEGA_MAX = 150.0
 DRAG_SETTLE_K = 400.0
 DRAG_SETTLE_C = 40.0
 DRAG_SETTLE_MAX_T = 2.0
+
+RESTORE_MS = 480
+RESTORE_DROP_FRAC = 0.8
+RESTORE_FALL_PORTION = 0.46
+RESTORE_FADE_PORTION = 0.36
+RESTORE_REBOUND_FRAC = 0.13
+RESTORE_SETTLE_DECAY = 4.0
+RESTORE_SETTLE_WAVES = 1.25
+RESTORE_ROCK_DEG = 7.5
+RESTORE_ROCK_WAVES = 1.15
+
+
+def _smoothstep(x):
+    return x * x * (3.0 - 2.0 * x)
 
 
 def _draw_capsule(surf, p1, p2, width, color):
@@ -75,6 +88,9 @@ class Board:
         self.shot_callback = shot_callback
         self.announce_callback = announce_callback
         self.on_premove_queued = on_premove_queued
+        self.skillcheck_gate = None
+        self.skillcheck_armed = None
+        self.locked_targets = None
 
         self.rect = pg.Rect(0, 0, 0, 0)
         self.frame_pad = 0
@@ -96,8 +112,11 @@ class Board:
         self._sprite_geom = {}
         self.selected_square = None
         self.pending_promotion_square = None
+        self._promotion_from = None
+        self.aim_suppressed_square = None
         self.flipped = False
         self.animations = []
+        self._restore_anims = []
         self.effects = EffectManager()
         self.effects.geom = lambda sq: self._cell_rect(sq.row, sq.col).center
         self.animation_duration_ms = 180
@@ -163,7 +182,11 @@ class Board:
         if self.pending_promotion_square is None:
             return
         sq = self.pending_promotion_square
-        color = self.match.piece_at(sq).color
+        origin = self._promotion_from if self._promotion_from is not None else sq
+        pawn = self.match.piece_at(origin)
+        if pawn is None:
+            return
+        color = pawn.color
         opt = max(self.PROMOTION_OPTION_SIZE_MIN,
                   min(int(self.cell_size), self.PROMOTION_OPTION_SIZE_MAX))
         pad, gap, label_h = (self.PROMOTION_PANEL_PAD, self.PROMOTION_OPTION_GAP,
@@ -216,10 +239,30 @@ class Board:
         if self.pending_promotion_square is None:
             return
         sq = self.pending_promotion_square
+        if self._promotion_from is not None:
+            from_sq = self._promotion_from
+            self.pending_promotion_square = None
+            self._promotion_rects = {}
+            self._promotion_from = None
+            self._resolve_promotion_pick(from_sq, sq, ptype)
+            return
         self.match.promote(sq, ptype)
         self.pending_promotion_square = None
         self._promotion_rects = {}
         self._fire_move_landed()
+
+    def _resolve_promotion_pick(self, from_sq, to_sq, ptype):
+        if self.skillcheck_gate is not None and self.skillcheck_gate(from_sq, to_sq, ptype):
+            return
+        self.apply_gated_move(from_sq, to_sq, ptype)
+
+    def cancel_unapplied_promotion(self):
+        if self._promotion_from is None:
+            return False
+        self.pending_promotion_square = None
+        self._promotion_rects = {}
+        self._promotion_from = None
+        return True
 
     def pick_promotion_at(self, pos):
         if self.pending_promotion_square is None:
@@ -307,6 +350,7 @@ class Board:
         self.draw_pieces()
         self._draw_front_markers()
         self._draw_animations()
+        self._draw_restores(now)
         self.effects.draw_over(self.window, now)
         self._draw_arrows()
         self._draw_promotion_picker()
@@ -574,8 +618,11 @@ class Board:
             return
 
         now = pg.time.get_ticks()
-        hidden = {a.to_sq for a in self.animations}
+        hidden = {(a.from_sq if a.bump else a.to_sq) for a in self.animations}
         hidden |= self.effects.held_squares()
+        hidden |= {a["sq"] for a in self._restore_anims}
+        if self.aim_suppressed_square is not None:
+            hidden.add(self.aim_suppressed_square)
         if self.dragging_from is not None:
             hidden.add(self.dragging_from)
         if self._drag is not None and self._drag["phase"] == "settle":
@@ -600,7 +647,7 @@ class Board:
         completed = []
         for a in self.animations:
             progress = a.progress(now)
-            eased = 1 - (1 - progress) ** 3
+            eased = math.sin(progress * math.pi) if a.bump else 1 - (1 - progress) ** 3
             fr = self._cell_rect(a.from_sq.row, a.from_sq.col)
             to = self._cell_rect(a.to_sq.row, a.to_sq.col)
             x = fr.x + (to.x - fr.x) * eased
@@ -622,7 +669,7 @@ class Board:
             return True
         return bool(self.animations)
 
-    def start_animation(self, from_sq, to_sq, piece, on_complete=None):
+    def start_animation(self, from_sq, to_sq, piece, on_complete=None, bump=False):
         self.animations.append(PieceAnimation(
             from_sq=from_sq,
             to_sq=to_sq,
@@ -630,10 +677,12 @@ class Board:
             start_ms=pg.time.get_ticks(),
             duration_ms=self.animation_duration_ms,
             on_complete=on_complete,
+            bump=bump,
         ))
 
     def cancel_animations(self):
         self.animations = []
+        self._restore_anims = []
 
     def _clear_drag_state(self):
         self._drag = None
@@ -708,9 +757,18 @@ class Board:
             return []
         return self.match.legal_moves_from(self.selected_square)
 
+    def _is_target_locked(self, target):
+        return (self.locked_targets is not None
+                and self.selected_square is not None
+                and self.locked_targets(self.selected_square, target))
+
     def _draw_move_indicators(self):
         for target in self._selected_legal_targets():
-            if self.match.piece_at(target) is None:
+            if self.match.piece_at(target) is not None:
+                continue
+            if self._is_target_locked(target):
+                self._draw_locked_marker(self._cell_rect(target.row, target.col))
+            else:
                 self._draw_dot(self._cell_rect(target.row, target.col))
 
     def _draw_front_markers(self):
@@ -718,7 +776,10 @@ class Board:
         sel = self.selected_square
         for target in self._selected_legal_targets():
             if self.match.piece_at(target) is not None:
-                self._draw_capture_hitmarker(self._cell_rect(target.row, target.col))
+                if self._is_target_locked(target):
+                    self._draw_locked_marker(self._cell_rect(target.row, target.col))
+                else:
+                    self._draw_capture_hitmarker(self._cell_rect(target.row, target.col))
             elif ep is not None and target == ep and sel is not None:
                 mover = self.match.piece_at(sel)
                 if mover is not None and mover.type == PieceType.PAWN and target.col != sel.col:
@@ -744,6 +805,17 @@ class Board:
 
         def render(surf, k):
             pg.draw.circle(surf, Colors.move_indicator, (s * k // 2, s * k // 2),
+                           radius * k, thickness * k)
+
+        self.window.blit(supersample(s, render), rect.topleft)
+
+    def _draw_locked_marker(self, rect):
+        s = int(self.cell_size)
+        radius = max(int(s * 0.16), 4)
+        thickness = max(int(s * 0.05), 3)
+
+        def render(surf, k):
+            pg.draw.circle(surf, Colors.text_muted, (s * k // 2, s * k // 2),
                            radius * k, thickness * k)
 
         self.window.blit(supersample(s, render), rect.topleft)
@@ -858,7 +930,6 @@ class Board:
             "last_cursor": pos,
             "last_tick": now,
             "lift": 0.0,
-            "reduced": env.get_reduce_motion(),
             "phase": "drag",
         }
 
@@ -883,9 +954,6 @@ class Board:
         d["entry"] += (1.0 - d["entry"]) * ae
         ef, cur, e = d["entry_from"], d["cursor"], d["entry"]
         d["anchor"] = (ef[0] + (cur[0] - ef[0]) * e, ef[1] + (cur[1] - ef[1]) * e)
-        if d["reduced"]:
-            d["last_cursor"] = d["cursor"]
-            return
 
         cursor = d["cursor"]
         last = d["last_cursor"]
@@ -904,7 +972,7 @@ class Board:
         rlx, rly = d["r_local"]
         rg = DRAG_RG_FRACTION * self.cell_size
         inertia = rg * rg + rlx * rlx + rly * rly
-        k_force = DRAG_K_FORCE * INTENSITY_SCALE.get(env.get_effect_intensity(), 1.0)
+        k_force = DRAG_K_FORCE
         n = max(1, math.ceil(dt / DRAG_SUBSTEP))
         h = dt / n
         theta = d["theta"]
@@ -940,8 +1008,7 @@ class Board:
         d["theta_target"] = round(theta / (2 * math.pi)) * (2 * math.pi)
         d["settle_start_ms"] = now
         d["last_tick"] = now
-        dur = self.animation_duration_ms
-        d["settle_dur_ms"] = min(dur, 80) if d["reduced"] else dur
+        d["settle_dur_ms"] = self.animation_duration_ms
         d["on_settled"] = on_settled
 
     def _update_settle(self, d, now):
@@ -1110,6 +1177,13 @@ class Board:
             self._queue_premove(from_sq, square, chain_from_piece)
             return
         if self._is_real_move_eligible(live_from_piece, current_turn, local_color):
+            if self._skillcheck_armed() and self._is_promotion_move(from_sq, square):
+                if self.locked_targets is not None and self.locked_targets(from_sq, square):
+                    return
+                self._begin_promotion_pick(from_sq, square)
+                return
+            if self.skillcheck_gate is not None and self.skillcheck_gate(from_sq, square):
+                return
             result = self.match.try_move(from_sq, square)
             if not result.legal:
                 return
@@ -1119,6 +1193,37 @@ class Board:
         if spec_from_piece is None:
             return
         self._queue_premove(from_sq, square, spec_from_piece)
+
+    def apply_gated_move(self, from_sq, to_sq, promo_type=None):
+        result = self.match.try_move(from_sq, to_sq)
+        if not result.legal:
+            return result
+        if result.promotion_required and promo_type is not None:
+            self.match.promote(to_sq, promo_type)
+            self._start_move_animation(from_sq, to_sq, promotion_required=False)
+        else:
+            self._start_move_animation(from_sq, to_sq, result.promotion_required)
+        return result
+
+    def _skillcheck_armed(self):
+        return self.skillcheck_armed is not None and self.skillcheck_armed()
+
+    def _is_promotion_move(self, from_sq, to_sq):
+        piece = self.match.piece_at(from_sq)
+        if piece is None or piece.type != PieceType.PAWN:
+            return False
+        if to_sq.row not in (0, self.SIZE - 1):
+            return False
+        return to_sq in self.match.legal_moves_from(from_sq)
+
+    def _begin_promotion_pick(self, from_sq, to_sq):
+        self.selected_square = None
+        self._clear_drag_state()
+        self.pending_promotion_square = to_sq
+        self._promotion_from = from_sq
+
+    def cell_rect(self, square):
+        return self._cell_rect(square.row, square.col)
 
     @staticmethod
     def _is_real_move_eligible(live_piece, current_turn, local_color):
@@ -1197,15 +1302,21 @@ class Board:
                 or self.is_animating()):
             return False
         pm = self.premoves[0]
+        if self.skillcheck_gate is not None and self.skillcheck_gate(pm.from_sq, pm.to_sq):
+            self._consume_premove()
+            return False
         result = self.match.try_move(pm.from_sq, pm.to_sq)
         if not result.legal:
             self._clear_premoves()
             return False
+        self._consume_premove()
+        self._start_move_animation(pm.from_sq, pm.to_sq, result.promotion_required)
+        return True
+
+    def _consume_premove(self):
         self.premoves.pop(0)
         if not self.premoves:
             self.premove_color = None
-        self._start_move_animation(pm.from_sq, pm.to_sq, result.promotion_required)
-        return True
 
     def animate_remote_move(self, from_sq, to_sq):
         self._start_move_animation(from_sq, to_sq, promotion_required=False)
@@ -1285,27 +1396,28 @@ class Board:
         color = moving_piece.color.value
         victim_sq = (Square(from_sq.row, to_sq.col)
                      if entry.move.is_en_passant else to_sq)
-        self.effects.configure(env.get_reduce_motion(), env.get_effect_intensity())
         attacker = self.piece_images_scaled.get((moving_piece.type, moving_piece.color))
         victim = self.piece_images_scaled.get((captured.type, captured.color))
         if attacker is None or victim is None or self.cell_size <= 0:
             self._on_capture_fire(entry, color, victim_sq)
             return False
         self._clear_drag_state()
-        occupied = {Square(r, c) for r, c in product(range(self.SIZE), repeat=2)
-                    if self.match.piece_at(Square(r, c)) is not None}
         self.effects.capture(
             now_ms=pg.time.get_ticks(),
             attacker_type=moving_piece.type.value,
             attacker_surface=attacker, victim_surface=victim,
             from_sq=from_sq, victim_sq=victim_sq, to_sq=to_sq,
             cell_size=self.cell_size, power=self._capture_power(captured.type),
-            occupied=occupied,
+            occupied=self._occupied_squares(),
             on_fire=lambda: self._on_capture_fire(entry, color, victim_sq),
             on_slide=lambda: self.start_animation(from_sq, to_sq, moving_piece,
                                                   on_complete=on_complete),
         )
         return True
+
+    def _occupied_squares(self):
+        return {Square(r, c) for r, c in product(range(self.SIZE), repeat=2)
+                if self.match.piece_at(Square(r, c)) is not None}
 
     def _on_capture_fire(self, entry, color, victim_sq):
         key = self.effects.register_kill(color, victim_sq, self.cell_size, pg.time.get_ticks())
@@ -1313,6 +1425,88 @@ class Board:
             self.shot_callback(entry)
         if self.announce_callback is not None and key is not None:
             self.announce_callback(key)
+
+    def trigger_skillcheck_fail(self, from_sq, to_sq, on_fire=None):
+        piece = self.match.piece_at(from_sq)
+        if piece is None or self.cell_size <= 0:
+            return
+        now = pg.time.get_ticks()
+        victim_sq = self._capture_victim_square(piece, from_sq, to_sq)
+        if victim_sq is None:
+            self._start_bump_animation(from_sq, to_sq, piece)
+            self.effects.swear(now, from_sq, self.cell_size)
+            return
+        victim = self.match.piece_at(victim_sq)
+        power = self._capture_power(victim.type) if victim is not None else "med"
+        fire_cb = (lambda: on_fire(piece.type)) if on_fire is not None else None
+        self.effects.miss(
+            now_ms=now,
+            attacker_type=piece.type.value,
+            from_sq=from_sq, victim_sq=victim_sq,
+            cell_size=self.cell_size, power=power,
+            occupied=self._occupied_squares(), on_fire=fire_cb)
+        self.effects.swear(now, from_sq, self.cell_size)
+
+    def _capture_victim_square(self, piece, from_sq, to_sq):
+        if self.match.piece_at(to_sq) is not None:
+            return to_sq
+        if piece.type == PieceType.PAWN and from_sq.col != to_sq.col:
+            return Square(from_sq.row, to_sq.col)
+        return None
+
+    def _start_bump_animation(self, from_sq, to_sq, piece):
+        self.cancel_animations()
+        self.start_animation(from_sq, to_sq, piece, bump=True)
+
+    def restore_piece(self, square):
+        piece = self.match.piece_at(square)
+        if piece is None or self.cell_size <= 0:
+            return
+        surface = self.piece_images_scaled.get((piece.type, piece.color))
+        if surface is None:
+            return
+        self._restore_anims.append({"sq": square, "surf": surface,
+                                    "start": pg.time.get_ticks(), "dur": RESTORE_MS})
+
+    def _draw_restores(self, now):
+        survivors = []
+        for a in self._restore_anims:
+            t = (now - a["start"]) / a["dur"]
+            if t >= 1.0:
+                continue
+            survivors.append(a)
+            self._blit_restore(a, *self._restore_state(t))
+        self._restore_anims = survivors
+
+    def _blit_restore(self, a, dy, alpha, angle):
+        rect = self._cell_rect(a["sq"].row, a["sq"].col)
+        img = a["surf"]
+        top = rect.y + dy * self.cell_size
+        if angle == 0.0:
+            if alpha < 255:
+                img = img.copy()
+                img.set_alpha(alpha)
+            self.window.blit(img, (rect.x, top))
+            return
+        base = (rect.x + img.get_width() / 2.0, top + img.get_height())
+        rotated = pg.transform.rotozoom(img, angle, 1.0)
+        if alpha < 255:
+            rotated = rotated.copy()
+            rotated.set_alpha(alpha)
+        off = pg.math.Vector2(0.0, img.get_height() / 2.0).rotate(-angle)
+        self.window.blit(rotated, rotated.get_rect(center=(base[0] - off.x, base[1] - off.y)))
+
+    @staticmethod
+    def _restore_state(t):
+        alpha = int(255 * _smoothstep(min(t / RESTORE_FADE_PORTION, 1.0)))
+        if t < RESTORE_FALL_PORTION:
+            p = t / RESTORE_FALL_PORTION
+            return -RESTORE_DROP_FRAC * (1.0 - p * p), alpha, 0.0
+        q = (t - RESTORE_FALL_PORTION) / (1.0 - RESTORE_FALL_PORTION)
+        envelope = math.exp(-RESTORE_SETTLE_DECAY * q)
+        dy = -RESTORE_REBOUND_FRAC * envelope * math.sin(RESTORE_SETTLE_WAVES * 2.0 * math.pi * q)
+        angle = RESTORE_ROCK_DEG * envelope * math.sin(RESTORE_ROCK_WAVES * 2.0 * math.pi * q)
+        return dy, alpha, angle
 
     def show_surrender_flag(self, color):
         if self.cell_size <= 0:
@@ -1322,7 +1516,6 @@ class Board:
             self.effects.raise_flag(king_sq, self.cell_size, pg.time.get_ticks())
 
     def show_checkmate_takeover(self, winner_label):
-        self.effects.configure(env.get_reduce_motion(), env.get_effect_intensity())
         now = pg.time.get_ticks()
         self.effects.start_takeover("CHECKMATE", winner_label, now)
         self.effects.trigger_shake(now, "hard")
@@ -1346,7 +1539,6 @@ class Board:
         checker = checking_square(self.match.state, king_sq, by_color)
         if checker is None:
             return
-        self.effects.configure(env.get_reduce_motion(), env.get_effect_intensity())
         self.effects.check(now_ms=pg.time.get_ticks(),
                            attacker_type=self.match.piece_at(checker).type.value,
                            king_sq=king_sq, from_sq=checker, cell_size=self.cell_size)
