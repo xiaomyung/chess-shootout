@@ -1,15 +1,15 @@
-name: chess-shootout-server
+name: chess-shootout-gameserver
 
 services:
-  chess-server:
-    image: ghcr.io/xiaomyung/chess-shootout-server:${IMAGE_TAG:-latest}
+  gameserver:
+    image: ghcr.io/xiaomyung/chess-shootout-gameserver:${IMAGE_TAG:-latest}
     build:
       context: .
       dockerfile: Dockerfile
     restart: unless-stopped
     stop_grace_period: 10s
     env_file:
-      - path: ./chess-server.env
+      - path: ./gameserver.env
         required: false
     environment:
       HOST: "0.0.0.0"
@@ -22,7 +22,7 @@ services:
       chess-net:
         ipv4_address: 172.28.0.10
     volumes:
-      - chess-data:/data
+      - gameserver-data:/data
     read_only: true
     tmpfs:
       - /tmp
@@ -50,7 +50,7 @@ services:
     profiles: ["edge"]
     restart: unless-stopped
     depends_on:
-      chess-server:
+      gameserver:
         condition: service_healthy
     ports:
       - "80:80"
@@ -93,7 +93,7 @@ networks:
         - subnet: 172.28.0.0/16
 
 volumes:
-  chess-data:
+  gameserver-data:
   caddy-data:
   caddy-config:
 

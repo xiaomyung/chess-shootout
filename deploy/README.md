@@ -1,6 +1,6 @@
 # Deploying the server (containerized)
 
-The server runs as a `docker compose` **edge stack**: a hardened `chess-server`
+The server runs as a `docker compose` **edge stack**: a hardened `gameserver`
 container (uvicorn) plus a `caddy` container that terminates TLS and reverse-proxies
 to it, all behind Cloudflare.
 
@@ -11,9 +11,9 @@ Player ──wss:443──▶ Cloudflare (orange cloud, Full strict)
         DOCKER-USER firewall: only Cloudflare ranges reach :80/:443
                          ▼
         caddy container :80/:443  ── Origin Cert (Authenticated Origin Pulls optional)
-                         │  reverse_proxy chess-server:8000  (compose network)
+                         │  reverse_proxy gameserver:8000  (compose network)
                          ▼
-        chess-server container  (uvicorn; 127.0.0.1:8000 published for debug only)
+        gameserver container  (uvicorn; 127.0.0.1:8000 published for debug only)
 ```
 
 The server is **stateless** (in-memory rooms, no DB) — a restart loses in-flight
@@ -25,7 +25,7 @@ the local healthcheck only.
 - A Debian VPS and a domain proxied through Cloudflare (orange cloud).
 - Cloudflare **SSL/TLS mode = Full (strict)** with a **Cloudflare Origin Certificate**
   for the host (Dashboard → SSL/TLS → Origin Server → Create Certificate).
-- Read access to the image at `ghcr.io/xiaomyung/chess-shootout-server`: make the GHCR
+- Read access to the image at `ghcr.io/xiaomyung/chess-shootout-gameserver`: make the GHCR
   package **Public** (repo → Packages → Package settings), or `docker login ghcr.io`
   once on the box.
 
@@ -81,10 +81,10 @@ Create `.env` in the project dir — it selects which image runs:
 echo "IMAGE_TAG=latest" > .env
 ```
 
-Create `chess-server.env` — it is injected into the container:
+Create `gameserver.env` — it is injected into the container:
 
 ```bash
-cat > chess-server.env <<'EOF'
+cat > gameserver.env <<'EOF'
 HOST=0.0.0.0
 PORT=8000
 LOG_LEVEL=INFO
@@ -94,7 +94,7 @@ EOF
 
 `HOST=0.0.0.0` lets Caddy reach the app over the compose network. Do not set
 `LOG_FILE` (logs go to stdout). `TRUSTED_PROXIES` is set in `docker-compose.yml`, not
-here. Optional tunables you can add to `chess-server.env`: `GRACE_SECONDS=60`,
+here. Optional tunables you can add to `gameserver.env`: `GRACE_SECONDS=60`,
 `HEARTBEAT_INTERVAL_SECONDS=2`, `HEARTBEAT_MISS_LIMIT=3`.
 
 ### 5. Firewall: only Cloudflare may reach the origin
@@ -154,9 +154,9 @@ systemd integration (so `systemctl stop` triggers the graceful client drain), yo
 optionally install the bundled unit:
 
 ```bash
-sudo cp deploy/chess-server-compose.service.example /etc/systemd/system/chess-server-compose.service
+sudo cp deploy/gameserver-compose.service.example /etc/systemd/system/gameserver-compose.service
 sudo systemctl daemon-reload
-sudo systemctl enable --now chess-server-compose
+sudo systemctl enable --now gameserver-compose
 ```
 
 ### 7. (Optional) Authenticated Origin Pulls
@@ -203,7 +203,7 @@ cd /srv/chess-shootout
 ```
 
 The script pulls the matching CI-built (and trivy-scanned) image from GHCR, refreshes
-the compose file / Caddyfile from git, recreates only `chess-server` (Caddy untouched)
+the compose file / Caddyfile from git, recreates only `gameserver` (Caddy untouched)
 with the graceful `server_shutdown` drain, and prints the running version. It falls
 back to `sudo` automatically when your shell isn't in the `docker` group.
 

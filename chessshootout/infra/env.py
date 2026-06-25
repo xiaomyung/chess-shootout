@@ -164,6 +164,35 @@ def set_menu_volume(value):
     _set_volume("CHESS_MENU_VOLUME", value)
 
 
+def _get_bool(key, default):
+    raw = os.environ.get(key)
+    if not raw:
+        return default
+    return raw == "1"
+
+
+def _set_bool(key, value):
+    flag = "1" if value else "0"
+    os.environ[key] = flag
+    _persist(key, flag)
+
+
+def get_show_fps():
+    return _get_bool("CHESS_SHOW_FPS", True)
+
+
+def set_show_fps(value):
+    _set_bool("CHESS_SHOW_FPS", value)
+
+
+def get_show_ping():
+    return _get_bool("CHESS_SHOW_PING", True)
+
+
+def set_show_ping(value):
+    _set_bool("CHESS_SHOW_PING", value)
+
+
 def get_default_time_control():
     value = os.environ.get("CHESS_DEFAULT_TC") or _DEFAULT_TIME_CONTROL
     return value if value in TIME_CONTROL_VALUES else _DEFAULT_TIME_CONTROL

@@ -6,9 +6,9 @@ build:
 
 # Local app-only container (no TLS/Caddy), published on 127.0.0.1:8000.
 up:
-	docker compose up -d chess-server
+	docker compose up -d gameserver
 
-# Full edge stack (needs ./secrets/*.pem + ./chess-server.env).
+# Full edge stack (needs ./secrets/*.pem + ./gameserver.env).
 up-edge:
 	docker compose --profile edge up -d
 

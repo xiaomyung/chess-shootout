@@ -4,9 +4,9 @@
 	}
 }
 
-chess.xiaomyung.com {
+server.chess-shootout.com {
 	tls /run/secrets/cf_origin_cert /run/secrets/cf_origin_key
-	reverse_proxy chess-server:8000
+	reverse_proxy gameserver:8000
 	encode zstd gzip
 	log {
 		output stdout

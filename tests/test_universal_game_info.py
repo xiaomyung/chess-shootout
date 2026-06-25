@@ -63,8 +63,8 @@ def test_bot_mode_info():
 
 
 def test_online_initial_series_zero_zero():
-    """Online header carries the Online pill + TC + round; the scoreboard and
-    live ping drop into the extra lines below."""
+    """Online header carries the Online pill + TC + round; the scoreboard drops
+    into the single extra line below (ping moved to the window chrome)."""
     app = _make_app()
     app.mode = ONLINE
     app.white_name = "Alice"
@@ -73,8 +73,7 @@ def test_online_initial_series_zero_zero():
     info = app._compute_game_info()
     assert info["mode"] == "Online"
     assert info["time_control"] == "3+2"
-    assert info["lines"][0] == "Alice  0 – 0  Bob"
-    assert info["lines"][1] == "ping: —"
+    assert info["lines"] == ["Alice  0 – 0  Bob"]
 
 
 @pytest.mark.parametrize(
@@ -327,23 +326,29 @@ def test_menu_mode_returns_no_info():
     assert app._compute_game_info() is None
 
 
-@pytest.mark.parametrize(
-    "ping_value, expected_line",
-    [
-        pytest.param(42, "ping: 42 ms", id="has_samples"),
-        pytest.param(None, "ping: —", id="no_samples"),
-    ],
-)
-def test_online_ping_line(ping_value, expected_line):
+def test_settings_has_performance_section_wired_to_env():
+    from chessshootout.infra import env
+    app = _make_app()
+    sections = dict(app._build_settings_sections())
+    assert "Performance" in sections
+    rows = sections["Performance"]
+    assert [r.title for r in rows] == ["Show FPS", "Show ping"]
+    assert rows[0].getter is env.get_show_fps
+    assert rows[0].setter is env.set_show_fps
+    assert rows[1].getter is env.get_show_ping
+    assert rows[1].setter is env.set_show_ping
+
+
+def test_online_game_info_has_no_ping_line():
     app = _make_app()
     app.mode = ONLINE
     app.white_name = "A"
     app.black_name = "B"
     app._time_control = (60, 0)
-    fake = MagicMock()
-    fake.get_ping_ms.return_value = ping_value
-    app.online_client = fake
-    assert app._compute_game_info()["lines"][1] == expected_line
+    app.online_client = MagicMock()
+    lines = app._compute_game_info()["lines"]
+    assert len(lines) == 1
+    assert not any("ping" in line.lower() for line in lines)
 
 
 def _info_menu():
@@ -365,7 +370,7 @@ def test_right_menu_extra_lines_grow_info_height():
     rm.set_game_info({"mode": "Local", "time_control": "5+2", "round": 1, "lines": []})
     bare = rm.info_rect.height
     rm.set_game_info({"mode": "Online", "time_control": "5+2", "round": 1,
-                      "lines": ["A 0 - 0 B", "ping: —"]})
+                      "lines": ["A 0 - 0 B", "Game 2"]})
     assert rm.info_rect.height > bare
 
 

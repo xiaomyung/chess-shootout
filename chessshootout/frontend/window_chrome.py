@@ -9,7 +9,7 @@ import pygame as pg
 from chessshootout.paths import resource_path
 from chessshootout.frontend.visual.colors import Colors
 from chessshootout.frontend.visual.draw import supersample
-from chessshootout.frontend.visual.fonts import get_font
+from chessshootout.frontend.visual.fonts import get_font, get_mono_font
 
 log = logging.getLogger("chess.chrome")
 
@@ -91,6 +91,9 @@ class WindowChrome:
     LOGO_MARGIN_LEFT = 12
     WORDMARK_GAP = 9
     WORDMARK_FONT_PX = 13
+    STATS_FONT_PX = 11
+    STATS_GAP = 14
+    STATS_PAD = 16
     DOT_HOVER_LIGHTEN = 0.22
     DOT_GLYPH_DARKEN = 0.74
     DOT_GLYPH_INSET = 0.55
@@ -227,7 +230,7 @@ class WindowChrome:
             self._dot_rects[key] = rect
             x -= self.DOT_RADIUS * 2 + self.DOT_GAP
 
-    def draw(self):
+    def draw(self, fps=None, ping=None, show_fps=False, show_ping=False):
         self._w, self._h = self.window.get_size()
         self._layout_dots(self._w)
         bar = pg.Rect(0, 0, self._w, self.HEIGHT)
@@ -235,7 +238,41 @@ class WindowChrome:
         pg.draw.line(self.window, pg.Color(Colors.border),
                      (0, self.HEIGHT - 1), (self._w, self.HEIGHT - 1))
         self._draw_logo()
+        self._draw_stats(fps, ping, show_fps, show_ping)
         self._draw_dots()
+
+    def _wordmark_right_edge(self):
+        tile_right = self.LOGO_MARGIN_LEFT + self.LOGO_SIZE
+        if self._wordmark is None:
+            return tile_right
+        return (tile_right + self.WORDMARK_GAP
+                + self._wordmark.get_width() + self._wordmark_accent.get_width())
+
+    @staticmethod
+    def _stat_texts(fps, ping, show_fps, show_ping):
+        parts = []
+        if show_fps:
+            parts.append(f"{int(fps or 0)} FPS")
+        if show_ping:
+            parts.append(f"PING {ping} ms" if ping is not None else "PING — ms")
+        return parts
+
+    def _draw_stats(self, fps, ping, show_fps, show_ping):
+        parts = self._stat_texts(fps, ping, show_fps, show_ping)
+        if not parts or not self._dot_rects:
+            return
+        font = get_mono_font(self.STATS_FONT_PX, bold=True)
+        surfs = [font.render(text, True, pg.Color(Colors.text_dim)) for text in parts]
+        total_w = sum(s.get_width() for s in surfs) + self.STATS_GAP * (len(surfs) - 1)
+        right = min(rect.left for rect in self._dot_rects.values()) - self.STATS_PAD
+        left = right - total_w
+        if left < self._wordmark_right_edge() + self.STATS_PAD:
+            return
+        cy = self.HEIGHT // 2
+        x = left
+        for s in surfs:
+            self.window.blit(s, (x, cy - s.get_height() // 2))
+            x += s.get_width() + self.STATS_GAP
 
     def _load_logo(self):
         try:

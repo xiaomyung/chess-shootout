@@ -23,5 +23,5 @@ AppDir/
 local_build/
 assets/version.txt
 secrets/
-chess-server.env
+gameserver.env
 uv.lock.bak
