@@ -1,4 +1,5 @@
 import time
+from collections import OrderedDict
 
 import pygame as pg
 
@@ -21,6 +22,8 @@ FILTER_OPTIONS = [("All", "all"), ("Online", "online"), ("Bot", "bot"), ("Local"
 FILTER_TYPE = {"online": "Online", "bot": "Bot", "local": "Local"}
 SCROLL_STEP = 56
 SCROLLBAR_GUTTER = 14
+CARD_GAP = 9
+CARD_CACHE_MAX = 64
 
 CARD_RADIUS = 12
 CARD_INNER_PAD = 3
@@ -178,6 +181,10 @@ class HistoryView:
         self._gbadge_font = get_display_font(sz(12, 10))
         self._greason_font = get_font(sz(13, 10))
         self._gko_font = get_font(sz(10, 8), bold=True)
+        self._card_h = max(int(self._name_font.get_height()
+                               + self._sub_font.get_height() + 32), 64)
+        self._game_h = max(int(self._greason_font.get_height() * 1.9), 34)
+        self._card_cache = OrderedDict()
 
     def set_rect(self, rect):
         self.rect = pg.Rect(rect)
@@ -204,6 +211,7 @@ class HistoryView:
         self.scroll.cancel()
         self._groups = []
         self._row_hits = []
+        self._card_cache.clear()
 
     def is_visible(self):
         return self.visible
@@ -331,6 +339,15 @@ class HistoryView:
             self.window.blit(lab, (rect.x + STAT_CARD_INSET,
                                    rect.y + STAT_CARD_TOP + num.get_height() + 3))
 
+    def _compute_layout(self, groups):
+        blocks = []
+        for g in groups:
+            expanded = self.expanded_match_id == g.match_id and len(g.games) > 1
+            detail_h = len(g.games) * self._game_h if expanded else 0
+            blocks.append((g, expanded, self._card_h + detail_h))
+        content_h = sum(bh for _, _, bh in blocks) + CARD_GAP * len(blocks)
+        return blocks, content_h
+
     def _draw_list(self):
         self._row_hits = []
         groups = self._visible_groups()
@@ -342,19 +359,11 @@ class HistoryView:
             self._content_h = 0
             return
 
-        card_h = max(int(self._name_font.get_height() + self._sub_font.get_height() + 32), 64)
-        game_h = max(int(self._greason_font.get_height() * 1.9), 34)
-        gap = 9
-        blocks = []
-        for g in groups:
-            expanded = self.expanded_match_id == g.match_id and len(g.games) > 1
-            detail_h = len(g.games) * game_h if expanded else 0
-            blocks.append((g, expanded, card_h + detail_h))
-
-        self._content_h = sum(b[2] for b in blocks) + gap * len(blocks)
+        blocks, self._content_h = self._compute_layout(groups)
         max_offset = max(0, self._content_h - self._list_rect.height)
         self._scroll_px = max(0.0, min(self._scroll_px, max_offset))
         row_w = self._list_rect.width - (SCROLLBAR_GUTTER if max_offset > 0 else 0)
+        mouse = pg.mouse.get_pos()
 
         prev_clip = self.window.get_clip()
         self.window.set_clip(self._list_rect)
@@ -363,30 +372,56 @@ class HistoryView:
             for group, expanded, block_h in blocks:
                 on_screen = (y + block_h >= self._list_rect.y
                              and y <= self._list_rect.bottom)
-                card_rect = pg.Rect(self._list_rect.x, y, row_w, card_h)
+                card_rect = pg.Rect(self._list_rect.x, y, row_w, self._card_h)
                 if on_screen:
-                    self._draw_card(card_rect, group, block_h)
+                    self._blit_card(card_rect, group, block_h, expanded, mouse)
                 if len(group.games) > 1:
                     self._row_hits.append((card_rect, ("toggle", group.match_id)))
                 else:
                     self._row_hits.append((card_rect, ("open", group.games[0].path)))
                 if expanded:
                     for i, game in enumerate(group.games):
-                        row_rect = pg.Rect(self._list_rect.x, y + card_h + i * game_h,
-                                           row_w, game_h)
+                        row_rect = pg.Rect(self._list_rect.x, y + self._card_h + i * self._game_h,
+                                           row_w, self._game_h)
                         if on_screen:
                             self._draw_game_row(row_rect, group, game, i)
                         self._row_hits.append((row_rect, ("open", game.path)))
-                y += block_h + gap
+                y += block_h + CARD_GAP
         finally:
             self.window.set_clip(prev_clip)
         self._draw_scroll_indicator()
 
-    def _draw_card(self, rect, group, block_h):
+    def _blit_card(self, rect, group, block_h, expanded, mouse):
+        hovered = rect.collidepoint(mouse)
+        if expanded:
+            self._draw_card(rect, group, block_h, hovered)
+            return
+        surf = self._card_surface(group, rect.width, hovered)
+        self.window.blit(surf, rect.topleft)
+
+    def _card_surface(self, group, render_width, hovered):
+        key = (group.match_id or group.games[0].path, render_width, hovered)
+        surf = self._card_cache.get(key)
+        if surf is not None:
+            self._card_cache.move_to_end(key)
+            return surf
+        surf = pg.Surface((render_width, self._card_h), pg.SRCALPHA)
+        prev_window = self.window
+        self.window = surf
+        try:
+            self._draw_card(pg.Rect(0, 0, render_width, self._card_h),
+                            group, self._card_h, hovered)
+        finally:
+            self.window = prev_window
+        self._card_cache[key] = surf
+        if len(self._card_cache) > CARD_CACHE_MAX:
+            self._card_cache.popitem(last=False)
+        return surf
+
+    def _draw_card(self, rect, group, block_h, hovered):
         inner_x = rect.x + CARD_INNER_PAD
         inner_w = rect.width - CARD_INNER_PAD
         expanded = block_h > rect.height
-        hovered = rect.collidepoint(pg.mouse.get_pos())
         bg = Colors.surface_hover if hovered else Colors.surface
         self.window.blit(rounded_rect_surface((rect.width, block_h), CARD_RADIUS,
                                               _BADGE_COLOR[group.result]), rect.topleft)

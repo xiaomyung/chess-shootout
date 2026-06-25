@@ -137,7 +137,7 @@ def create_app(*, now_provider=time.monotonic, max_rooms=DEFAULT_MAX_ROOMS):
 
     @asynccontextmanager
     async def lifespan(app):
-        log.info("chess-server v%d listening (max_rooms=%d)", PROTOCOL_VERSION, max_rooms)
+        log.info("gameserver v%d listening (max_rooms=%d)", PROTOCOL_VERSION, max_rooms)
         sweep_task = asyncio.create_task(_sweep_loop(app))
         try:
             yield
@@ -175,7 +175,7 @@ def create_app(*, now_provider=time.monotonic, max_rooms=DEFAULT_MAX_ROOMS):
     @app.get("/")
     async def root():
         return {
-            "service": "chess-server",
+            "service": "gameserver",
             "version": PROTOCOL_VERSION,
             "endpoints": ["/healthz", "/matchmake", "/resume", "/reclaim", "/ws/{room_id}"],
         }

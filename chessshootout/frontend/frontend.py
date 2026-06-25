@@ -541,6 +541,12 @@ class Frontend(OnlineEventsMixin):
             ("Online", [
                 self._server_addr_row,
             ]),
+            ("Performance", [
+                ToggleRow("Show FPS", "Frame rate in the title bar",
+                          env.get_show_fps, env.set_show_fps),
+                ToggleRow("Show ping", "Network latency in the title bar",
+                          env.get_show_ping, env.set_show_ping),
+            ]),
         ]
 
     def _on_pick_country(self):
@@ -1505,7 +1511,10 @@ class Frontend(OnlineEventsMixin):
             self.check_events()
             self.window.fill("black")
             self.draw_frame()
-            self.chrome.draw()
+            ping = (self.online_client.get_ping_ms()
+                    if self.online_client is not None else None)
+            self.chrome.draw(fps=self.clock.get_fps(), ping=ping,
+                             show_fps=env.get_show_fps(), show_ping=env.get_show_ping())
             self.clock.tick(self.target_fps)
             pg.display.flip()
 
@@ -1623,7 +1632,6 @@ class Frontend(OnlineEventsMixin):
             info["lines"] = [
                 f"{self.white_name}  {_score_str(white_score)} – "
                 f"{_score_str(black_score)}  {self.black_name}",
-                self._format_ping_line(),
             ]
         return info
 
@@ -1637,11 +1645,6 @@ class Frontend(OnlineEventsMixin):
             return None
         initial, incr = self._time_control
         return f"{int(initial // 60)}+{int(incr)}"
-
-    def _format_ping_line(self):
-        ping = (self.online_client.get_ping_ms()
-                if self.online_client is not None else None)
-        return f"ping: {ping} ms" if ping is not None else "ping: —"
 
     def _update_player_strips(self):
         top_color = self._strip_color_top()

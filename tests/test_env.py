@@ -11,6 +11,7 @@ _ISOLATED_VARS = (
     "CHESS_LAST_MODE", "CHESS_MASTER_VOLUME", "CHESS_MENU_VOLUME", "CHESS_DATA_DIR",
     "CHESS_DEFAULT_TC",
     "CHESS_DEFAULT_INCREMENT", "CHESS_THEME", "CHESS_COUNTRY",
+    "CHESS_SHOW_FPS", "CHESS_SHOW_PING",
 )
 
 
@@ -153,6 +154,36 @@ def test_menu_volume_persists_round_trip_and_clamps():
     assert "CHESS_MENU_VOLUME" in env._ENV_PATH.read_text()
     env.set_menu_volume(1.8)
     assert env.get_menu_volume() == pytest.approx(1.0, abs=1e-3)
+
+
+@pytest.mark.parametrize("getter", ["get_show_fps", "get_show_ping"])
+def test_show_stats_default_on_when_unset(getter):
+    assert getattr(env, getter)() is True
+
+
+@pytest.mark.parametrize(
+    "getter, setter, key",
+    [
+        ("get_show_fps", "set_show_fps", "CHESS_SHOW_FPS"),
+        ("get_show_ping", "set_show_ping", "CHESS_SHOW_PING"),
+    ],
+)
+def test_show_stats_round_trip(getter, setter, key):
+    getattr(env, setter)(False)
+    assert getattr(env, getter)() is False
+    assert f"{key}=0" in env._ENV_PATH.read_text()
+    getattr(env, setter)(True)
+    assert getattr(env, getter)() is True
+    assert f"{key}=1" in env._ENV_PATH.read_text()
+
+
+@pytest.mark.parametrize("getter, key", [
+    ("get_show_fps", "CHESS_SHOW_FPS"),
+    ("get_show_ping", "CHESS_SHOW_PING"),
+])
+def test_show_stats_zero_reads_false_not_truthy(monkeypatch, getter, key):
+    monkeypatch.setenv(key, "0")
+    assert getattr(env, getter)() is False
 
 
 def test_server_addr_persists_round_trip():

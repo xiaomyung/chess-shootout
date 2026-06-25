@@ -50,6 +50,7 @@ ONLINE_TRANSIENT_REASON_LABELS = {
     "takeback_already_pending": "Takeback already pending",
     "no_takeback_available": "Nothing to take back",
     "rematch_already_pending": "Rematch already requested",
+    "already_in_game": "Already in a game",
 }
 
 ONLINE_GAME_STATE_REASONS = {

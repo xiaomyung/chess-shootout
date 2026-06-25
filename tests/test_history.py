@@ -10,7 +10,10 @@ os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
 import pygame as pg
 import pytest
 
-from chessshootout.frontend.menu.history import HistoryView
+import chessshootout.frontend.menu.history as histmod
+from chessshootout.frontend.menu.history import (
+    CARD_CACHE_MAX, CARD_GAP, SCROLLBAR_GUTTER, HistoryView,
+)
 from chessshootout.frontend.visual.colors import Colors
 from tests.helpers import fake_uuid4
 
@@ -227,3 +230,151 @@ def test_scroll_outside_list_returns_false(tmp_path):
 def test_history_does_not_handle_keys():
     view = HistoryView(pg.display.get_surface(), lambda p: None, lambda: None)
     assert not hasattr(view, "handle_key")
+
+
+def _surface_bytes(surface):
+    return pg.image.tostring(surface, "RGBA")
+
+
+def test_distinct_solo_games_get_distinct_cached_surfaces(tmp_path):
+    """Solo games have match_id=None; keying on match_id alone would collide and
+    blit the first card over all of them. The path fallback keeps them distinct."""
+    _write_pgn(tmp_path, "local-20260101-100000.pgn", white="alice", black="Bob", result="1-0")
+    _write_pgn(tmp_path, "local-20260101-100001.pgn", white="alice", black="Carl", result="0-1")
+    view = _view(tmp_path, nickname="alice")
+    view.draw()
+    assert len(view._groups) == 2
+    surfs = list(view._card_cache.values())
+    assert len(surfs) == 2
+    assert _surface_bytes(surfs[0]) != _surface_bytes(surfs[1])
+
+
+def test_compute_layout_heights_and_content(tmp_path):
+    mid = fake_uuid4(1)
+    _write_pgn(tmp_path, "online-20260101-100000.pgn", match_id=mid, result="1-0")
+    _write_pgn(tmp_path, "online-20260101-100001.pgn", match_id=mid, result="0-1")
+    _write_pgn(tmp_path, "local-20260101-090000.pgn")
+    view = _view(tmp_path)
+    blocks, content_h = view._compute_layout(view._groups)
+    assert all(block_h == view._card_h for _, _, block_h in blocks)
+    assert content_h == sum(block_h for _, _, block_h in blocks) + CARD_GAP * len(blocks)
+
+    multi = next(g for g in view._groups if len(g.games) > 1)
+    view.expanded_match_id = multi.match_id
+    blocks2, content_h2 = view._compute_layout(view._groups)
+    expanded_block = next(block_h for _, expanded, block_h in blocks2 if expanded)
+    assert expanded_block == view._card_h + len(multi.games) * view._game_h
+    assert content_h2 > content_h
+
+
+def test_card_cache_clears_on_rescale_and_hide(tmp_path):
+    _write_pgn(tmp_path, "local-20260101-100000.pgn")
+    view = _view(tmp_path)
+    view.draw()
+    assert len(view._card_cache) > 0
+    view.set_rect(pg.Rect(40, 60, 700, 700))
+    assert len(view._card_cache) == 0
+    view.draw()
+    assert len(view._card_cache) > 0
+    view.hide()
+    assert len(view._card_cache) == 0
+
+
+def test_card_cache_lru_bounded_when_scrolling_many(tmp_path):
+    for i in range(120):
+        _write_pgn(tmp_path, f"local-20260101-{100000 + i:06d}.pgn", white=f"p{i}")
+    view = _view(tmp_path)
+    view.draw()
+    for _ in range(300):
+        view.handle_scroll(view._list_rect.center, -1)
+        view.draw()
+    assert len(view._card_cache) <= CARD_CACHE_MAX
+
+
+def _count_rounded_rects(monkeypatch):
+    calls = {"n": 0}
+    orig = histmod.rounded_rect_surface
+
+    def wrapped(*args, **kwargs):
+        calls["n"] += 1
+        return orig(*args, **kwargs)
+
+    monkeypatch.setattr(histmod, "rounded_rect_surface", wrapped)
+    return calls
+
+
+def test_visible_cards_not_re_supersampled_each_frame(tmp_path, monkeypatch):
+    for i in range(40):
+        _write_pgn(tmp_path, f"local-20260101-{100000 + i:06d}.pgn", white=f"p{i}")
+    view = _view(tmp_path)
+    calls = _count_rounded_rects(monkeypatch)
+    view.draw()
+    cold = calls["n"]
+    calls["n"] = 0
+    view.draw()
+    warm = calls["n"]
+    assert warm < cold, "a warm frame must blit cached cards, not re-render them"
+
+
+def test_warm_frame_cost_independent_of_game_count(tmp_path_factory, monkeypatch):
+    def warm_calls(directory, n):
+        for i in range(n):
+            _write_pgn(directory, f"local-20260101-{100000 + i:06d}.pgn", white=f"p{i}")
+        view = _view(directory)
+        view.draw()
+        calls = _count_rounded_rects(monkeypatch)
+        view.draw()
+        monkeypatch.undo()
+        return calls["n"]
+
+    few = warm_calls(tmp_path_factory.mktemp("few"), 6)
+    many = warm_calls(tmp_path_factory.mktemp("many"), 80)
+    assert many <= few + 2
+
+
+def test_overflow_renders_cards_at_gutter_width(tmp_path):
+    for i in range(40):
+        _write_pgn(tmp_path, f"local-20260101-{100000 + i:06d}.pgn", white=f"p{i}")
+    view = _view(tmp_path)
+    view.draw()
+    widths = {s.get_width() for s in view._card_cache.values()}
+    assert widths == {view._list_rect.width - SCROLLBAR_GUTTER}
+
+
+def test_no_overflow_renders_cards_at_full_width(tmp_path):
+    _write_pgn(tmp_path, "local-20260101-100000.pgn")
+    view = _view(tmp_path)
+    view.draw()
+    widths = {s.get_width() for s in view._card_cache.values()}
+    assert widths == {view._list_rect.width}
+
+
+def test_expand_grows_content_height_on_next_frame(tmp_path):
+    mid = fake_uuid4(3)
+    _write_pgn(tmp_path, "online-20260101-100000.pgn", match_id=mid, result="1-0")
+    _write_pgn(tmp_path, "online-20260101-100001.pgn", match_id=mid, result="0-1")
+    for i in range(30):
+        _write_pgn(tmp_path, f"local-20260101-09{i:04d}.pgn", white=f"p{i}")
+    view = _view(tmp_path)
+    view.draw()
+    base = view._content_h
+    multi = next(g for g in view._groups if len(g.games) > 1)
+    view.expanded_match_id = multi.match_id
+    view.draw()
+    assert view._content_h > base
+
+
+def test_expanded_block_paints_surface_behind_detail_rows(tmp_path):
+    mid = fake_uuid4(7)
+    _write_pgn(tmp_path, "online-20260101-100000.pgn", match_id=mid, result="1-0")
+    _write_pgn(tmp_path, "online-20260101-100001.pgn", match_id=mid, result="0-1")
+    view = _view(tmp_path)
+    view.draw()
+    multi = next(g for g in view._groups if len(g.games) > 1)
+    view.expanded_match_id = multi.match_id
+    view.window.fill((0, 0, 0))
+    view.draw()
+    card_rect = view._row_hits[0][0]
+    behind = pg.Rect(card_rect.x + 8, card_rect.bottom + 2,
+                     card_rect.width - 24, view._game_h * 2 - 6)
+    assert _region_has_color(view.window, behind, Colors.surface_raised, tol=30)

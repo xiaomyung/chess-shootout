@@ -72,6 +72,15 @@ def _auth_msg(token):
     return {"version": PROTOCOL_VERSION, "type": "auth", "session_token": token}
 
 
+def test_root_manifest_names_the_gameserver(client):
+    r = client.get("/")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["service"] == "gameserver"
+    assert body["version"] == PROTOCOL_VERSION
+    assert "/ws/{room_id}" in body["endpoints"]
+
+
 def test_health_returns_zero_rooms_initially(client):
     """/healthz exposes status, rooms_active, queue_depth, uptime_s, version."""
     r = client.get("/healthz")

@@ -163,6 +163,54 @@ def test_toggle_maximize_no_op_when_chrome_disabled(chrome):
     assert chrome._is_maximized() is False
 
 
+@pytest.mark.parametrize(
+    "fps, ping, show_fps, show_ping, expected",
+    [
+        pytest.param(60.4, 32, True, True, ["60 FPS", "PING 32 ms"], id="both"),
+        pytest.param(144.9, None, True, True, ["144 FPS", "PING — ms"], id="ping_none"),
+        pytest.param(60, 12, True, False, ["60 FPS"], id="fps_only"),
+        pytest.param(60, 12, False, True, ["PING 12 ms"], id="ping_only"),
+        pytest.param(60, 12, False, False, [], id="both_off"),
+    ],
+)
+def test_stat_texts(fps, ping, show_fps, show_ping, expected):
+    assert WindowChrome._stat_texts(fps, ping, show_fps, show_ping) == expected
+
+
+def test_stats_order_fps_left_ping_rightmost():
+    assert WindowChrome._stat_texts(60, 32, True, True) == ["60 FPS", "PING 32 ms"]
+
+
+def _stats_band(chrome):
+    cy = chrome.HEIGHT // 2
+    right = min(rect.left for rect in chrome._dot_rects.values()) - chrome.STATS_PAD
+    left = chrome._wordmark_right_edge() + chrome.STATS_PAD
+    return [tuple(chrome.window.get_at((x, cy))) for x in range(left, right)]
+
+
+def test_stats_paint_band_when_enabled_and_clear_when_off(chrome):
+    chrome.window.fill("black")
+    chrome.draw(fps=60, ping=32, show_fps=False, show_ping=False)
+    off = _stats_band(chrome)
+    chrome.window.fill("black")
+    chrome.draw(fps=60, ping=32, show_fps=True, show_ping=True)
+    on = _stats_band(chrome)
+    assert on != off, "enabling stats should paint glyphs in the band left of the dots"
+    bg = pg.Color(Colors.titlebar_bg)
+    assert all(px[:3] == bg[:3] for px in off), "no stats should be drawn when toggled off"
+
+
+def test_stats_stay_left_of_dots(chrome):
+    chrome.window.fill("black")
+    chrome.draw(fps=60, ping=32, show_fps=True, show_ping=True)
+    cy = chrome.HEIGHT // 2
+    leftmost_dot = min(rect.left for rect in chrome._dot_rects.values())
+    bg = pg.Color(Colors.titlebar_bg)[:3]
+    band = [chrome.window.get_at((x, cy))[:3]
+            for x in range(leftmost_dot - chrome.STATS_PAD + 1, leftmost_dot)]
+    assert all(px == bg for px in band), "stats must not intrude into the dot padding"
+
+
 def test_layout_reserves_titlebar_and_keeps_board_playable_at_min_size():
     from chessshootout.infra import env
     env.init_paths()

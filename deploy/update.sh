@@ -3,7 +3,7 @@
 #   ./deploy/update.sh            # update to the latest release
 #   ./deploy/update.sh v2.1.5     # or roll to a specific release tag
 #
-# Pulls the CI-built, scanned image from GHCR and recreates the chess-server
+# Pulls the CI-built, scanned image from GHCR and recreates the gameserver
 # container; refreshes the compose file / Caddyfile from git. Falls back to sudo
 # automatically when the shell is not in the docker group.
 set -euo pipefail
@@ -31,7 +31,7 @@ main() {
     printf 'IMAGE_TAG=%s\n' "$tag" >> .env
   fi
 
-  $dc compose pull chess-server
+  $dc compose pull gameserver
   $dc compose --profile edge up -d
 
   sleep 3
