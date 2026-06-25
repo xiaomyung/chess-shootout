@@ -1,7 +1,7 @@
-import hashlib
 import math
 from dataclasses import dataclass
 
+from chessshootout.skillcheck.rng import seeded_floats
 from chessshootout.skillcheck.wheel import SKILLCHECK_DEADLINE_MS, needle_speed_mult
 
 AIM_DEADLINE_MS = SKILLCHECK_DEADLINE_MS
@@ -19,11 +19,7 @@ AIM_SHRINK_EXP = 2.5
 
 
 def _seed_floats(seed):
-    digest = hashlib.sha256("aim:{}".format(seed).encode("utf-8")).digest()
-    a = int.from_bytes(digest[0:8], "big") / 2.0 ** 64
-    b = int.from_bytes(digest[8:16], "big") / 2.0 ** 64
-    c = int.from_bytes(digest[16:24], "big") / 2.0 ** 64
-    return a, b, c
+    return seeded_floats("aim:{}".format(seed), 3)
 
 
 def _amplitude():

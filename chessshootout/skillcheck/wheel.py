@@ -1,5 +1,6 @@
-import hashlib
 from dataclasses import dataclass
+
+from chessshootout.skillcheck.rng import seeded_floats
 
 WHEEL_ARC_DEGREES = 60.0
 WHEEL_PERIOD_MS = 800.0
@@ -32,10 +33,7 @@ def random_placement_prob(value_diff):
 
 
 def _placement_floats(seed):
-    digest = hashlib.sha256(f"place:{seed}".encode("utf-8")).digest()
-    roll = int.from_bytes(digest[0:8], "big") / 2.0 ** 64
-    pick = int.from_bytes(digest[8:16], "big") / 2.0 ** 64
-    return roll, pick
+    return seeded_floats(f"place:{seed}", 2)
 
 
 def placement_square(seed, value_diff, excluded=(), board_size=8):
@@ -51,10 +49,7 @@ def placement_square(seed, value_diff, excluded=(), board_size=8):
 
 
 def _seed_floats(seed):
-    digest = hashlib.sha256(f"wheel:{seed}".encode("utf-8")).digest()
-    first = int.from_bytes(digest[0:8], "big") / 2.0 ** 64
-    second = int.from_bytes(digest[8:16], "big") / 2.0 ** 64
-    return first, second
+    return seeded_floats(f"wheel:{seed}", 2)
 
 
 @dataclass(frozen=True)
