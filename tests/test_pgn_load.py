@@ -416,3 +416,25 @@ def test_parse_comment_round_trips_format_annotations():
 def test_parse_comment_ignores_free_text():
     assert parse_comment("good move") == []
     assert parse_comment("") == []
+
+
+def test_whiffed_san_lives_in_a_comment_and_keeps_the_pgn_legal():
+    """The "stays legal in chess.com/lichess" guarantee: a check that FAILED writes its whiffed
+    SAN into the ply's {comment} — the move that actually landed (Nc6) stays in the sequence.
+    The whiffed SAN (Nxe5) must be in move_comments but absent from the move list, and the whole
+    movetext must still replay legally as a standard game."""
+    backend = Backend()
+    backend.new_game()
+    for san in ["e4", "e5", "Nf3", "Nc6"]:
+        assert backend.apply_san(san).legal
+    text = generate_pgn(backend.move_history, "white_wins",
+                        annotations={4: "Steady-Aim ✗ Nxe5"})
+    parsed = parse_pgn(text)
+    assert parsed.moves == ["e4", "e5", "Nf3", "Nc6"]
+    assert "Nxe5" not in parsed.moves, "the whiffed move never landed in the move sequence"
+    assert any("Nxe5" in comment for comment in parsed.move_comments), \
+        "but the whiffed SAN is preserved in the ply comment"
+    fresh = Backend()
+    reparsed, ok = load_pgn_into_backend(fresh, text)
+    assert ok is True, "a whiff-annotated PGN replays cleanly as standard chess"
+    assert [e.san for e in fresh.move_history] == ["e4", "e5", "Nf3", "Nc6"]

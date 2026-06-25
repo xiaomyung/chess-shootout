@@ -8,6 +8,7 @@ the shrinking piece doesn't ghost. Every failed check makes the piece swear. A
 landed ply clears the locks.
 """
 
+import math
 import os
 from collections import Counter
 
@@ -108,6 +109,41 @@ def test_wheel_draw_does_not_crash():
     ctrl.update(200)
     ctrl.draw(pg.display.get_surface())
     assert ctrl.done is False
+
+
+def _band_ring_hue(ctrl, surface):
+    """Walk the wheel's arc band radius and return the first painted hue we hit (the band
+    fills 360 deg here, so every spoke crosses it)."""
+    cx, cy = ctrl.center
+    r = ctrl.radius - ctrl.band_w // 2
+    for deg in range(0, 360, 3):
+        a = math.radians(deg - 90.0)
+        px, py = int(cx + r * math.cos(a)), int(cy + r * math.sin(a))
+        col = surface.get_at((px, py))
+        if col in (pg.Color(Colors.accent), pg.Color(Colors.spectate)):
+            return col
+    return None
+
+
+def test_wheel_draw_paints_the_dial_pixels():
+    """The dial is not a no-op draw: the hub paints text-color at the exact center, the band
+    paints the accent hue for a live check, and a passive (spectated) wheel swaps the band to
+    the spectate hue. Pixel-level, so replacing draw() with `pass` would fail this."""
+    surf = pg.Surface((300, 300), pg.SRCALPHA)
+    surf.fill((7, 8, 9, 255))
+    live = WheelController(_always_in_arc(), pg.Rect(100, 100, 80, 80), now_ms=0)
+    live.update(200)
+    live.draw(surf)
+    assert surf.get_at(live.center) == pg.Color(Colors.text), "the needle hub paints at center"
+    assert _band_ring_hue(live, surf) == pg.Color(Colors.accent), "a live wheel band is accent"
+
+    surf2 = pg.Surface((300, 300), pg.SRCALPHA)
+    surf2.fill((7, 8, 9, 255))
+    passive = WheelController(_always_in_arc(), pg.Rect(100, 100, 80, 80), now_ms=0, passive=True)
+    passive.update(200)
+    passive.draw(surf2)
+    assert _band_ring_hue(passive, surf2) == pg.Color(Colors.spectate), \
+        "a spectated wheel reads in the spectate hue, not the mover's accent"
 
 
 # ---- overlay host ----------------------------------------------------------
@@ -336,8 +372,18 @@ def test_aim_online_post_expiry_draw_does_not_crash():
 
 
 def test_aim_online_resume_seeds_the_miss_count():
+    """A resumed aim check restores the server's miss_count and the next dry-fire escalates
+    off that seed (3 -> 4), freezing the figure-8 on the seeded lobe — mirrors the spectate
+    3->4 path. A behavioral consequence, not a freshly-set constructor arg."""
     ctrl = _aim_ctrl(on_shot=lambda *a: None, miss_count=2)
-    assert ctrl.miss_count == 2, "a resumed aim check restores the server's miss_count"
+    ctrl.update(375)
+    ctrl.handle_event(_tap())
+    assert ctrl.miss_count == 3, "the seeded miss_count is the base the dry-fire escalates from"
+    assert ctrl._shot_render == (375, 2), "the shot freezes on the seeded (pre-increment) lobe"
+    assert ctrl._shot_offset == ctrl.challenge.reticle_offset(375, 2), \
+        "the frozen crosshair sits on the escalated lobe, not the fresh miss_count=0 figure-8"
+    assert ctrl._shot_offset != ctrl.challenge.reticle_offset(375, 1), \
+        "the seeded lobe differs from a lower escalation — the count really drove the geometry"
 
 
 def test_wheel_online_resolve_holds_the_verdict_then_finishes():
@@ -544,14 +590,21 @@ def test_overlay_is_passive_only_for_a_spectate_controller():
 
 
 def test_registry_threads_passive_into_both_controllers():
+    """passive=True must reach the controller through the registry, not just be stored:
+    a passive controller swallows no input and never self-resolves past its deadline. These
+    consequences are reachable only if the flag was actually wired into build_controller."""
     w = build_controller(SkillCheckKind.WHEEL, seed="s", cell_rect=pg.Rect(0, 0, 80, 80),
                          now_ms=0, deadline_ms=5000, passive=True)
-    assert w._passive is True
+    assert w.handle_event(_tap()) is False, "a registry-built passive wheel ignores the tap"
+    w.update(6000)
+    assert w.landed is None and w.done is False, "and never self-fails at the deadline"
     a = build_controller(SkillCheckKind.AIM, seed="s", cell_rect=pg.Rect(0, 0, 80, 80),
                          now_ms=0, deadline_ms=5000, value_diff=4,
                          victim_surface=pg.Surface((80, 80), pg.SRCALPHA),
                          board_rect=pg.Rect(0, 0, 640, 640), passive=True)
-    assert a._passive is True
+    assert a.handle_event(_tap()) is False, "a registry-built passive aim ignores the tap"
+    a.update(7000)
+    assert a.landed is None and a.done is False, "only the server verdict resolves a spectated aim"
 
 
 # ---- frontend gate integration ---------------------------------------------
@@ -1322,6 +1375,49 @@ def test_reset_to_new_game_clears_the_skillcheck_log():
     assert app._skillcheck_log == []
 
 
+def test_teardown_clears_the_full_online_overlay_tracking_set():
+    """Teardown must null EVERY overlay-tracking field, not the scattered subset it used to.
+    Before the divergence fix it left _online_skillcheck / _online_spectate_kind set, so a
+    later result still thought a check was open."""
+    app = Frontend(1100, 800)
+    _start_local(app)
+    frm, to = Square(4, 3), Square(3, 3)
+    app._skillcheck_target = to
+    app._online_skillcheck = (frm, to, None, SkillCheckKind.WHEEL)
+    app._online_spectate_kind = SkillCheckKind.AIM
+    app._online_skillcheck_opened_ms = 12345
+    app._online_verdict_action = lambda: None
+    app.board.aim_suppressed_square = to
+    app._teardown_skillcheck_overlay()
+    assert app._skillcheck_target is None
+    assert app._online_skillcheck is None
+    assert app._online_spectate_kind is None
+    assert app._online_skillcheck_opened_ms is None
+    assert app._online_verdict_action is None
+    assert app.board.aim_suppressed_square is None
+
+
+def test_clear_online_skillcheck_state_resets_all_six_transient_fields():
+    """The dedicated reset clears all six transient online fields including the held pending
+    move that teardown deliberately leaves alone."""
+    app = Frontend(1100, 800)
+    _start_local(app)
+    frm, to = Square(4, 3), Square(3, 3)
+    app._skillcheck_target = to
+    app._pending_online_move = (frm, to, None)
+    app._online_skillcheck = (frm, to, None, SkillCheckKind.WHEEL)
+    app._online_spectate_kind = SkillCheckKind.AIM
+    app._online_skillcheck_opened_ms = 999
+    app._online_verdict_action = lambda: None
+    app._clear_online_skillcheck_state()
+    assert app._skillcheck_target is None
+    assert app._pending_online_move is None
+    assert app._online_skillcheck is None
+    assert app._online_spectate_kind is None
+    assert app._online_skillcheck_opened_ms is None
+    assert app._online_verdict_action is None
+
+
 def test_skillcheck_whiffs_lists_only_fails_grouped_by_ply():
     app = Frontend(1100, 800)
     app._skillcheck_log = [
@@ -1369,6 +1465,51 @@ def test_no_whiffs_means_no_extra_rows():
     assert [r[0] for r in rows] == ["pair"]
 
 
+def test_black_only_whiff_row_has_an_empty_white_slot():
+    """A whiff on a black ply (ply 4 = black of the 2nd pair) renders the (label, san) in the
+    black slot and None in the white slot — the slot positioning, not just the presence."""
+    app = Frontend(1100, 800)
+    _start_local(app)
+    app.skillcheck.reset(enabled=False)
+    for san in ["e4", "e5", "Nf3", "Nc6"]:
+        app.match.backend.apply_san(san)
+    rows = app.right_menu._build_move_rows(
+        app.match.move_history, {4: [("Steady-Aim", "Rxe5")]})
+    assert [r[0] for r in rows] == ["pair", "pair", "whiff"]
+    assert rows[2] == ("whiff", None, ("Steady-Aim", "Rxe5"))
+
+
+def test_both_sides_whiff_same_pair_share_one_row():
+    """A white whiff (ply 3) and a black whiff (ply 4) on the same pair collapse into a single
+    whiff row carrying both slots — not two stacked rows."""
+    app = Frontend(1100, 800)
+    _start_local(app)
+    app.skillcheck.reset(enabled=False)
+    for san in ["e4", "e5", "Nf3", "Nc6"]:
+        app.match.backend.apply_san(san)
+    rows = app.right_menu._build_move_rows(
+        app.match.move_history, {3: [("Wheel", "Qxd5")], 4: [("Steady-Aim", "Rxe5")]})
+    assert [r[0] for r in rows] == ["pair", "pair", "whiff"]
+    assert rows[2] == ("whiff", ("Wheel", "Qxd5"), ("Steady-Aim", "Rxe5"))
+
+
+def test_whiff_on_a_non_final_pair_offsets_the_following_pairs_row_index():
+    """A whiff inserted after the first pair pushes the second pair down a row; _pair_to_row
+    must follow that offset so a later pair still maps to its real render row (not its index)."""
+    app = Frontend(1100, 800)
+    _start_local(app)
+    app.skillcheck.reset(enabled=False)
+    for san in ["e4", "e5", "Nf3", "Nc6"]:
+        app.match.backend.apply_san(san)
+    rows = app.right_menu._build_move_rows(
+        app.match.move_history, {1: [("Wheel", "Qxd5")]})
+    assert [r[0] for r in rows] == ["pair", "whiff", "pair"]
+    assert rows[1] == ("whiff", ("Wheel", "Qxd5"), None), "ply 1 is white of the 1st pair"
+    assert app.right_menu._pair_to_row == {0: 0, 1: 2}, "the 2nd pair shifts past the whiff row"
+    second = rows[app.right_menu._pair_to_row[1]]
+    assert second[0] == "pair" and second[1] == 1, "_pair_to_row[1] lands on the 2nd pair row"
+
+
 def test_loading_a_pgn_with_a_miss_populates_review_whiffs(tmp_path):
     app = Frontend(1100, 800)
     _start_local(app)
@@ -1383,6 +1524,32 @@ def test_loading_a_pgn_with_a_miss_populates_review_whiffs(tmp_path):
     app2 = Frontend(1100, 800)
     app2._load_pgn_from_path(str(path))
     assert app2._skillcheck_whiffs() == {5: [("Steady-Aim", "Bxc6")]}
+
+
+def test_two_event_ply_round_trips_through_the_saved_pgn_file(tmp_path):
+    """A single ply can carry two outcomes (a whiffed wheel + a landed steady-aim). They share
+    one ' · '-joined comment in the file; reloading must split it back into BOTH outcomes,
+    proving the separator is unambiguous through real file text."""
+    app = Frontend(1100, 800)
+    _start_local(app)
+    app.skillcheck.reset(enabled=False)
+    for san in ["e4", "e5", "Nf3", "Nc6", "Bb5"]:
+        app.match.backend.apply_san(san)
+    app._skillcheck_log = [
+        SkillCheckOutcome(4, "wheel", False, "Rxe5"),
+        SkillCheckOutcome(4, "aim", True, ""),
+    ]
+    app.manual_result = "white_wins_by_resignation"
+    text = app._build_pgn_text()
+    assert "Wheel ✗ Rxe5 · Steady-Aim ✓" in text, "both events join with the dot separator"
+    path = tmp_path / "two.pgn"
+    path.write_text(text)
+    app2 = Frontend(1100, 800)
+    app2._load_pgn_from_path(str(path))
+    assert app2._skillcheck_log == [
+        SkillCheckOutcome(4, "wheel", False, "Rxe5"),
+        SkillCheckOutcome(4, "aim", True, ""),
+    ], "the reloaded log reconstructs both events on ply 4"
 
 
 def test_local_skillcheck_deadline_is_tc_capped():

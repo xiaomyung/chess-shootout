@@ -24,7 +24,7 @@ from chessshootout.server.protocol import (
     LockWire, PendingSkillCheckWire, SkillCheckSpectateMessage)
 from chessshootout.skillcheck.types import SkillCheckKind, SkillCheckOutcome
 from chessshootout.skillcheck.wheel import placement_square
-from tests.helpers import BLACK, K, P, Q, WHITE, make_backend, piece, sq
+from tests.helpers import BLACK, K, P, Q, R, WHITE, make_backend, piece, sq
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -92,6 +92,24 @@ def _capture_board(app):
         sq(4, 3): piece(Q, WHITE), sq(3, 3): piece(P, BLACK),
     }, turn=WHITE)
     return sq(4, 3), sq(3, 3)
+
+
+def _promo_capture_board(app):
+    """White pawn e7, Black rook d8 — exd8=Q is a capturing promotion (preview SAN exd8=Q)."""
+    app.match.backend = make_backend({
+        sq(7, 4): piece(K, WHITE), sq(0, 0): piece(K, BLACK),
+        sq(1, 4): piece(P, WHITE), sq(0, 3): piece(R, BLACK),
+    }, turn=WHITE)
+    return sq(1, 4), sq(0, 3)
+
+
+def _ep_capture_board(app):
+    """White pawn e5, Black pawn d5, EP target d6 — exd6 is an en-passant capture (SAN exd6)."""
+    app.match.backend = make_backend({
+        sq(7, 4): piece(K, WHITE), sq(0, 4): piece(K, BLACK),
+        sq(3, 4): piece(P, WHITE), sq(3, 3): piece(P, BLACK),
+    }, turn=WHITE, ep_target=sq(2, 3))
+    return sq(3, 4), sq(2, 3)
 
 
 def _tap():
@@ -304,6 +322,28 @@ def test_a_result_for_a_different_move_is_ignored():
     app._handle_skill_check_result(_result(sq(1, 1), sq(2, 2)))
     assert app.skillcheck_overlay.is_active(), "a mismatched result never tears down my check"
     assert app._online_skillcheck is not None
+
+
+def test_spectate_collision_guard_routes_a_matching_result_to_the_spectate_branch():
+    """A spectated check sets BOTH _online_skillcheck and _online_spectate_kind on the SAME
+    squares (see _open_spectate_overlay). The _online_spectate_kind-is-None clause in
+    _is_my_open_check is the tie-breaker: a fail on those squares must take the SPECTATE
+    branch (show "Opponent missed!", never lock my own board), not the mover branch. Without
+    the guard the spectator would grey out a move it never made."""
+    app = _online_app("black")
+    frm, to = _capture_board(app)
+    app._handle_skill_check_spectate(_spectate_payload(frm, to, kind="wheel"))
+    assert app._online_skillcheck is not None and app._online_skillcheck[:2] == (frm, to), \
+        "spectate sets the open-check tuple on the same squares as the spectate marker"
+    assert app._online_spectate_kind is not None
+    assert app._is_my_open_check(frm, to) is False, "the guard refuses to claim it as mine"
+    app.toast.show = MagicMock()
+    app._handle_skill_check_result(_result(frm, to))
+    app.toast.show.assert_called_once_with("Opponent missed!")
+    _drive_verdict_hold(app)
+    assert not app.skillcheck.is_locked(frm, to), "the spectator never locks its own board"
+    assert app.match.piece_at(frm) is not None and app.match.piece_at(to) is not None, \
+        "no move applied; the spectated fail only ever animated the opponent's whiff"
 
 
 # ---- spectating the opponent's check ---------------------------------------
@@ -569,6 +609,41 @@ def test_heartbeat_is_suppressed_while_a_won_move_is_deferred_behind_the_hold():
     assert app.online_client.pings == 1, "the heartbeat resumes once the move has applied"
 
 
+def test_result_during_the_verdict_hold_flushes_the_won_movers_move():
+    """A move_applied(won) opens a 200ms verdict hold with a deferred apply action. If a result
+    arrives DURING that hold, _handle_online_result must flush the pending action BEFORE tearing
+    down the overlay — otherwise the winning capture is discarded (board a ply behind, the SAN
+    and the win-record lost). This is the A2 regression."""
+    app = _online_app()
+    frm, to = _capture_board(app)
+    app._skillcheck_gate(frm, to)
+    app._handle_skill_check_required(_required_payload(frm, to, kind="wheel"))
+    app._handle_remote_move_applied(_move_applied(frm, to, 1, kind="wheel", won=True))
+    assert app._online_verdict_action is not None, "the apply is deferred behind the hold"
+    assert len(app.match.move_history) == 0, "and has not applied yet"
+    app._handle_online_result({"reason": "resignation", "winner_color": "black"})
+    assert len(app.match.move_history) == 1, "the deferred capture is flushed, not discarded"
+    assert app.match.move_history[-1].san == "Qxd5", "and the real SAN lands"
+    assert app.match.piece_at(to) is not None and app.match.piece_at(frm) is None, "applied"
+    assert app._skillcheck_log == [SkillCheckOutcome(1, "wheel", True, "")], "the win is recorded"
+    assert app._online_verdict_action is None, "the pending action is consumed exactly once"
+
+
+def test_result_during_the_spectate_verdict_hold_flushes_the_opponents_move():
+    """Same flush on the spectator side: an opponent's won capture deferred behind the green
+    hold must still apply when a result lands mid-hold."""
+    app = _online_app("black")
+    frm, to = _capture_board(app)
+    app._handle_skill_check_spectate(_spectate_payload(frm, to, kind="wheel"))
+    app._handle_remote_move_applied(_move_applied(frm, to, 1, kind="wheel", won=True))
+    assert app._online_verdict_action is not None
+    assert app.match.piece_at(to).color == BLACK, "the capture waits behind the green hold"
+    app._handle_online_result({"reason": "resignation", "winner_color": "white"})
+    assert len(app.match.move_history) == 1, "the opponent's deferred capture is flushed"
+    assert app.match.piece_at(to).color == WHITE, "the won capture applied"
+    assert app._skillcheck_log == [SkillCheckOutcome(1, "wheel", True, "")]
+
+
 def test_local_shootout_still_takes_the_local_branch():
     app = Frontend(1000, 800)
     app.sound_manager = MagicMock()
@@ -627,6 +702,39 @@ def test_failed_result_records_the_whiffed_move_and_kind():
     assert app._skillcheck_log == [SkillCheckOutcome(1, "wheel", False, "Qxd5")]
 
 
+def test_failed_promotion_capture_logs_the_full_promotion_san():
+    """A whiffed capturing promotion records preview_san(from,to,'q') against the un-applied
+    board — the promotion suffix must survive (exd8=Q, not exd8)."""
+    app = _online_app()
+    frm, to = _promo_capture_board(app)
+    app._skillcheck_gate(frm, to, Q)
+    app._handle_skill_check_required(_required_payload(frm, to, kind="wheel", promotion="q"))
+    assert app._online_skillcheck[2] == Q, "the chosen promotion rides in the open-check tuple"
+    app._handle_skill_check_result(_result(frm, to))
+    _drive_verdict_hold(app)
+    assert app._skillcheck_log == [SkillCheckOutcome(1, "wheel", False, "exd8=Q")]
+    assert app.match.piece_at(frm).type == P, "the whiffed pawn never promoted nor moved"
+
+
+def test_failed_en_passant_capture_logs_the_ep_san():
+    """A whiffed en-passant capture logs the EP SAN (exd6) built from the un-applied board."""
+    app = _online_app()
+    frm, to = _ep_capture_board(app)
+    app._skillcheck_gate(frm, to)
+    app._handle_skill_check_required(_required_payload(frm, to, kind="aim"))
+    app._handle_skill_check_result(_result(frm, to))
+    _drive_verdict_hold(app)
+    assert app._skillcheck_log == [SkillCheckOutcome(1, "aim", False, "exd6")]
+
+
+def test_resumed_log_defaults_a_missing_san_to_empty():
+    """A winning outcome legitimately omits the san key on the wire; _apply_resumed_skillcheck_log
+    must default it to "" via .get, not KeyError."""
+    app = _online_app("white")
+    app._apply_resumed_skillcheck_log([{"ply": 1, "kind": "wheel", "won": True}])
+    assert app._skillcheck_log == [SkillCheckOutcome(1, "wheel", True, "")]
+
+
 def test_spectated_fail_records_the_opponents_whiff_with_the_spectate_kind():
     app = _online_app("black")
     frm, to = _capture_board(app)
@@ -653,6 +761,39 @@ def test_skill_check_result_is_ignored_while_resyncing():
     app._resyncing = True
     app._handle_skill_check_result(_result(frm, to))
     assert app._skillcheck_log == [], "a fail during resync isn't logged; resume is authoritative"
+
+
+def test_skill_check_required_is_ignored_while_resyncing():
+    """While resyncing, a stray skill_check_required must not open an overlay or claim an open
+    check — game_resumed reconstructs the authoritative pending state."""
+    app = _online_app()
+    frm, to = _capture_board(app)
+    app._skillcheck_gate(frm, to)
+    app._resyncing = True
+    app._handle_skill_check_required(_required_payload(frm, to))
+    assert not app.skillcheck_overlay.is_active(), "no overlay opens during a resync"
+    assert app._online_skillcheck is None, "no open-check state is set mid-resync"
+
+
+def test_skill_check_spectate_is_ignored_while_resyncing():
+    """Same resync gate for the opponent's check: no passive overlay, no spectate marker."""
+    app = _online_app("black")
+    frm, to = _capture_board(app)
+    app._resyncing = True
+    app._handle_skill_check_spectate(_spectate_payload(frm, to, kind="aim"))
+    assert not app.skillcheck_overlay.is_active(), "no spectate overlay opens during a resync"
+    assert app._online_spectate_kind is None, "no spectate marker is set mid-resync"
+
+
+def test_spectate_shot_is_ignored_while_resyncing():
+    """A spectate_shot arriving mid-resync is dropped (the existing _online_spectate_kind /
+    _resyncing guard) — the frozen-override stays unset."""
+    app = _online_app("black")
+    frm, to = _capture_board(app)
+    app._handle_skill_check_spectate(_spectate_payload(frm, to, kind="wheel"))
+    app._resyncing = True
+    app._handle_skill_check_spectate_shot({"elapsed_ms": 500.0, "miss_count": 0, "won": True})
+    assert app.skillcheck_overlay._controller._frozen_override is None, "the shot is dropped"
 
 
 def test_resume_replaces_the_skillcheck_log_from_the_server():

@@ -58,14 +58,54 @@ def _force_wheel(room):
     raise AssertionError("no wheel secret found")
 
 
+# How a win is made deterministic under real CI jitter:
+#   The client sleeps (E - SLEEP_LEAD_MS) then sends client_elapsed = E. The server
+#   adjudicates min(max(E, raw - lag_bound), raw), where raw is the real arrival gap.
+#   * if the packet lands at raw in [E, E+lag_bound]  -> scored EXACTLY E (the win moment)
+#   * if it lands a touch early, raw in [E - SLEEP_LEAD, E) -> scored at raw
+#   So we aim E at the TOP of the widest win window: a late-ish arrival is pinned to
+#   E (a win), and an early arrival down to (E - SLEEP_LEAD) still falls inside the
+#   window provided the window is at least SLEEP_LEAD wide. SLEEP_LEAD is kept small
+#   (30ms) and the wheel's opening arc is ~120ms wide, so both directions are safe.
+_SLEEP_LEAD_MS = 30
+
+
+def _widest_win_window(kind, ch, deadline):
+    best = None
+    e = int(online.SKILLCHECK_HUMAN_FLOOR_MS) + 1
+    end = int(deadline)
+    while e < end:
+        if online.shot_wins(kind, ch, e, 0, deadline):
+            start = e
+            while e < end and online.shot_wins(kind, ch, e, 0, deadline):
+                e += 1
+            if best is None or (e - 1 - start) > (best[1] - best[0]):
+                best = (start, e - 1)
+        else:
+            e += 1
+    return best
+
+
 def _winning_elapsed(req):
     kind = SkillCheckKind(req["kind"])
     ch = online.challenge_from(kind, req["seed"], int(req["value_diff"]))
     deadline = float(req["deadline_ms"])
-    for e in range(int(online.SKILLCHECK_HUMAN_FLOOR_MS) + 60, int(deadline) - 200):
-        if online.shot_wins(kind, ch, e, 0, deadline):
-            return e
-    raise AssertionError("no winning elapsed for the stored seed")
+    window = _widest_win_window(kind, ch, deadline)
+    assert window is not None, "no winning window for the stored seed"
+    lo, hi = window
+    assert hi - lo > _SLEEP_LEAD_MS, "the win window must absorb the sleep lead both ways"
+    return hi  # aim the shot at the top of the window
+
+
+def _force_aim(room):
+    frm, to = Square(4, 4), Square(3, 3)  # exd5
+    for i in range(8000):
+        secret = "force-aim-{}".format(i)
+        if online.select_kind(secret, room.plies_ever, room.backend, frm, to,
+                              room.skillcheck_locks) == SkillCheckKind.AIM:
+            room.skillcheck_secret = secret
+            return
+    raise AssertionError("no aim secret found")
 
 
 def _move(mover, a, b, frm, to):
@@ -74,11 +114,11 @@ def _move(mover, a, b, frm, to):
     assert _wait_for(b, "move_applied") is not None
 
 
-def _reach_capture(a, b, app):
+def _reach_capture(a, b, app, force=_force_wheel):
     _move(a, a, b, "e2", "e4")            # 1. e4 (white)
     _move(b, a, b, "d7", "d5")            # 1... d5 (black)
     room = _room(app)
-    _force_wheel(room)
+    force(room)
     a.send_move("e4", "d5")               # 2. exd5 -> fires the check
     req = _wait_for(a, "skill_check_required")
     spec = _wait_for(b, "skill_check_spectate")
@@ -103,7 +143,7 @@ def test_a_won_check_applies_the_move_and_records_the_win(server_with_app):
     a, b = _pair("localhost:{}".format(port), fake_uuid4(23), fake_uuid4(24))
     room, req, spec = _reach_capture(a, b, app)
     elapsed = _winning_elapsed(req)
-    time.sleep(elapsed / 1000.0)
+    time.sleep((elapsed - _SLEEP_LEAD_MS) / 1000.0)  # land in [E, E+lag_bound] -> scored at E
     a.send_skill_check_shot(elapsed)
     a_applied = _wait_for(a, "move_applied")
     b_applied = _wait_for(b, "move_applied")
@@ -138,12 +178,31 @@ def test_resume_after_a_won_check_carries_the_skillcheck_log(server_with_app):
     a, b = _pair(addr, fake_uuid4(27), fake_uuid4(28))
     room, req, spec = _reach_capture(a, b, app)
     elapsed = _winning_elapsed(req)
-    time.sleep(elapsed / 1000.0)
+    time.sleep((elapsed - _SLEEP_LEAD_MS) / 1000.0)  # land in [E, E+lag_bound] -> scored at E
     a.send_skill_check_shot(elapsed)
     assert _wait_for(a, "move_applied") is not None
     assert _wait_for(b, "move_applied") is not None
     payload = fetch_resume(addr, a._room_id, a._session_token)
     assert payload["skillcheck_log"] == [
         {"ply": 3, "kind": "wheel", "won": True, "san": "exd5"}]
+    a.disconnect()
+    b.disconnect()
+
+
+def test_resume_pending_uses_field_name_keys(server_with_app):
+    # the /resume HTTP channel serializes the pending check with PLAIN field names
+    # (from_sq/to_sq), NOT the WS `from`/`to` aliases. An alias leak here would feed
+    # the client a key it never reads on resume, silently breaking pending recovery.
+    port, app = server_with_app
+    addr = "localhost:{}".format(port)
+    a, b = _pair(addr, fake_uuid4(29), fake_uuid4(30))
+    room, req, spec = _reach_capture(a, b, app, force=_force_aim)
+    assert req["kind"] == "aim", "an aim check is held but deliberately left unresolved"
+    payload = fetch_resume(addr, a._room_id, a._session_token)
+    pending = payload["pending_skillcheck"]
+    assert pending is not None, "the live pending check rides the resume payload"
+    assert pending["from_sq"] == "e4", "field-name key carries the capture-from square"
+    assert pending["to_sq"] == "d5"
+    assert "from" not in pending and "to" not in pending, "no WS alias leaks into /resume"
     a.disconnect()
     b.disconnect()

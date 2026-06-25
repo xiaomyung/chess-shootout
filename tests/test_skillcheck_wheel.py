@@ -7,9 +7,14 @@ lag-switched one cannot widen the window, and an impossibly-early tap is rejecte
 Difficulty is exactly the arc fraction of the circle.
 """
 
+import os
+
+os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
+os.environ.setdefault("SDL_AUDIODRIVER", "dummy")
+
 import pytest
 
-from chessshootout.skillcheck import wheel
+from chessshootout.skillcheck import aim, online, wheel
 from chessshootout.skillcheck.wheel import WheelChallenge
 
 
@@ -31,6 +36,27 @@ def test_strong_eats_weak_spins_faster_weak_eats_strong_slower():
 def test_needle_speed_stays_positive_across_chess_values():
     for diff in range(-9, 10):
         assert wheel.period_for_diff(diff) > 0.0
+
+
+def test_needle_speed_mult_floors_so_the_period_never_divides_by_zero():
+    # an extreme negative value_diff would otherwise drive the multiplier non-positive
+    # (1 + 0.2 * -50 / 4 = -1.5) and period_for_diff would divide by zero / go negative.
+    assert wheel.needle_speed_mult(-50) == pytest.approx(wheel.WHEEL_SPEED_MULT_MIN)
+    assert wheel.needle_speed_mult(-1000) > 0.0, "the floor keeps the multiplier strictly positive"
+    assert wheel.period_for_diff(-50) == pytest.approx(
+        wheel.WHEEL_PERIOD_MS / wheel.WHEEL_SPEED_MULT_MIN), "the period stays finite at the floor"
+
+
+def test_the_floor_is_below_the_real_chess_range_so_it_never_perturbs_play():
+    # the clamp is a safety net, not a gameplay knob: across every real capture
+    # value_diff the unclamped formula already sits above the floor, so the floor
+    # changes nothing in actual play.
+    floor = wheel.WHEEL_SPEED_MULT_MIN
+    for diff in range(-9, 9):
+        raw = 1.0 + wheel.WHEEL_SPEED_PER_DIFF * diff / wheel.WHEEL_SPEED_DIFF_DIVISOR
+        assert raw > floor, "real diff {} is above the floor, never clamped".format(diff)
+        assert wheel.needle_speed_mult(diff) == pytest.approx(raw)
+    assert wheel.needle_speed_mult(-9) == pytest.approx(0.55), "the real minimum multiplier"
 
 
 def land_recv_ms(challenge, start_ms, half_rtt_ms=0.0, target_offset_deg=None):
@@ -95,6 +121,17 @@ def test_in_arc_center_and_edges():
     assert ch.in_arc(99.0) is False
 
 
+def test_in_arc_upper_edge_is_exclusive_half_open():
+    # the arc is the half-open interval [start, start+width): the exact upper edge
+    # is OUT. A `<` -> `<=` regression here would silently widen every sweet-spot
+    # by one boundary point on the security-critical adjudication path.
+    ch = WheelChallenge(arc_start_deg=100.0, arc_width_deg=60.0, period_ms=1000.0,
+                        start_angle_deg=0.0)
+    assert ch.in_arc(100.0) is True, "the lower edge is inclusive"
+    assert ch.in_arc(160.0) is False, "start + width is the exclusive upper edge"
+    assert ch.in_arc(159.99999) is True, "just inside the upper edge still counts"
+
+
 def test_in_arc_handles_wraparound():
     ch = WheelChallenge(arc_start_deg=350.0, arc_width_deg=40.0, period_ms=1000.0,
                         start_angle_deg=0.0)
@@ -149,8 +186,14 @@ def test_arc_width_is_strictly_decreasing_until_the_floor():
     assert ch.arc_width_at(p * 6) == wheel.WHEEL_ARC_MIN_DEGREES, "and clamps at the floor"
 
 
-def test_needle_period_is_faster():
-    assert wheel.WHEEL_PERIOD_MS == 800.0
+def test_one_period_is_exactly_one_full_revolution():
+    # WHEEL_PERIOD_MS is the time for the needle to sweep a full 360: pin that
+    # behavioural meaning rather than restating the literal constant.
+    ch = WheelChallenge(arc_start_deg=0.0, arc_width_deg=60.0,
+                        period_ms=wheel.WHEEL_PERIOD_MS, start_angle_deg=0.0)
+    assert ch.needle_deg(wheel.WHEEL_PERIOD_MS) == pytest.approx(ch.needle_deg(0.0))
+    assert ch.needle_deg(wheel.WHEEL_PERIOD_MS / 4.0) == pytest.approx(90.0)
+    assert ch.needle_deg(wheel.WHEEL_PERIOD_MS / 2.0) == pytest.approx(180.0)
 
 
 def test_same_needle_angle_misses_after_the_arc_shrinks():
@@ -287,3 +330,16 @@ def test_board_size_bounds_the_relocated_square():
 
 def test_placement_uses_a_separate_hash_namespace_from_the_dial():
     assert wheel._placement_floats("seed-q") != wheel._seed_floats("seed-q")
+
+
+# ---- the 5s deadline is single-sourced across every module -----------------
+# Wheel, aim, the online adjudicator, and the wheel_view frontend constant all
+# derive their time limit from one source. A future literal-copy that diverged
+# any of them (e.g. a 5000 hardcoded in one place) would fail here.
+
+def test_skillcheck_deadline_is_single_sourced_across_modules():
+    from chessshootout.frontend.skillcheck.wheel_view import WHEEL_TIME_LIMIT_MS
+
+    assert wheel.SKILLCHECK_DEADLINE_MS == online.SKILLCHECK_DEADLINE_MS
+    assert aim.AIM_DEADLINE_MS == wheel.SKILLCHECK_DEADLINE_MS
+    assert WHEEL_TIME_LIMIT_MS == wheel.SKILLCHECK_DEADLINE_MS

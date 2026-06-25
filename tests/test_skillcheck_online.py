@@ -13,6 +13,7 @@ from chessshootout.backend.pieces import PIECE_VALUES, PieceType
 from chessshootout.skillcheck import online
 from chessshootout.skillcheck.aim import AimChallenge
 from chessshootout.skillcheck.types import SkillCheckKind, TriggerFacts
+from chessshootout.skillcheck import wheel
 from chessshootout.skillcheck.wheel import WheelChallenge, period_for_diff
 from tests.helpers import BLACK, K, P, Q, WHITE, make_backend, piece, sq
 
@@ -107,6 +108,16 @@ def test_select_kind_differs_by_secret():
     assert kinds == {WHEEL, AIM}, "different secrets sweep both capture outcomes"
 
 
+def test_select_kind_varies_with_ply_index():
+    # the ply index is part of the roll key: the SAME secret/move on different plies
+    # genuinely re-rolls the kind. A bug dropping ply_index from move_roll_key would
+    # collapse this to a single constant kind for the whole game.
+    backend = _qxp()
+    kinds = {online.select_kind("s", p, backend, sq(4, 3), sq(3, 3), set())
+             for p in range(40)}
+    assert kinds == {WHEEL, AIM}, "the ply perturbs the roll -- both kinds appear over a game"
+
+
 def test_select_kind_unpredictable_without_the_secret():
     backend = _qxp()
     server = online.select_kind("server-secret", 7, backend, sq(4, 3), sq(3, 3), set())
@@ -178,6 +189,23 @@ def test_aim_shot_uses_miss_count_geometry():
     assert online.shot_wins(AIM, aim, elapsed, miss_count=0) is True
 
 
+def test_shot_wins_uses_the_shrinking_arc_not_the_full_arc():
+    # a fixed needle angle that sits INSIDE the full 60-degree arc but OUTSIDE the
+    # arc once it has shrunk after several rotations must read as a LOSS -- proving
+    # shot_wins adjudicates via in_arc_at (time-shrunk) and not the static in_arc.
+    ch = WheelChallenge(arc_start_deg=0.0, arc_width_deg=60.0, period_ms=1000.0,
+                        start_angle_deg=0.0)
+    elapsed = 4084  # ~4 rotations in: needle ~30deg, full arc 60, shrunk arc ~19
+    needle = ch.needle_deg(elapsed)
+    assert ch.in_arc(needle) is True, "the needle is inside the original 60-degree arc"
+    assert ch.in_arc_at(needle, elapsed) is False, "but outside the arc once it has shrunk"
+    assert online.shot_wins(WHEEL, ch, elapsed) is False, "so the shot loses on the shrunk arc"
+    # sanity: an EARLY pass through the same arc, before it shrinks, still wins.
+    early = next(e for e in range(int(online.SKILLCHECK_HUMAN_FLOOR_MS), 200)
+                 if ch.in_arc(ch.needle_deg(e)))
+    assert online.shot_wins(WHEEL, ch, early) is True
+
+
 def test_is_past_deadline_boundary():
     assert online.is_past_deadline(online.SKILLCHECK_DEADLINE_MS) is False
     assert online.is_past_deadline(online.SKILLCHECK_DEADLINE_MS + 0.1) is True
@@ -206,6 +234,27 @@ def test_a_forged_early_claim_cannot_buy_a_sub_floor_win():
     effective = online.adjudicated_elapsed_ms(0.0, recv_ms=119.0, start_ms=0.0)
     assert effective == 0
     assert online.shot_wins(WHEEL, _always_arc(), effective) is False, "sub-floor stays a loss"
+
+
+def test_adjudicated_elapsed_truncates_toward_floor_loss():
+    # int() truncation straddles the human floor: a 119.9ms render becomes 119
+    # (a sub-floor LOSS), while exactly 120.0 becomes 120 (at the floor, eligible).
+    # recv-start is kept tight (200ms) so the honest client value is what's judged,
+    # not the raw-bound clamp.
+    below = online.adjudicated_elapsed_ms(119.9, recv_ms=200.0, start_ms=0.0)
+    at = online.adjudicated_elapsed_ms(120.0, recv_ms=200.0, start_ms=0.0)
+    assert below == 119 and at == 120
+    assert below < online.SKILLCHECK_HUMAN_FLOOR_MS <= at
+    assert online.shot_wins(WHEEL, _always_arc(), below) is False, "119 truncates into a loss"
+    assert online.shot_wins(WHEEL, _always_arc(), at) is True, "120 clears the floor"
+
+
+def test_effective_elapsed_floors_a_forged_negative_rtt_to_zero_credit():
+    # a negative (forged) half-rtt must never be CREDITED as extra time: the
+    # compensation is floored to 0, so the elapsed equals the raw arrival gap.
+    assert wheel.effective_elapsed_ms(1000.0, 0.0, -500.0) == pytest.approx(1000.0)
+    # contrast: an honest positive rtt within the cap is subtracted as a credit.
+    assert wheel.effective_elapsed_ms(1000.0, 0.0, 150.0) == pytest.approx(850.0)
 
 
 # ---- aim no longer crashes on a negative effective elapsed ------------------

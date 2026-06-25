@@ -76,9 +76,13 @@ def test_offset_is_bounded_to_the_lobe_amplitude():
 
 def test_rotation_winds_forward_and_scales_with_misses():
     ch = AimChallenge.from_seed("r")
-    base = ch.rotation_deg_at(0.0)
-    assert ch.rotation_deg_at(0.0) == pytest.approx(base)
-    assert ch.rotation_deg_at(500.0) > base, "the figure-8 keeps rotating over time"
+    # at t=0 the rotation is exactly the seeded phase, and one full rotation period
+    # winds it through a single 360 turn (the per-period rate is 360 deg/period).
+    assert ch.rotation_deg_at(0.0) == pytest.approx(ch.rotation0_deg)
+    assert ch.rotation_deg_at(ch.rotation_period_ms) == pytest.approx(ch.rotation0_deg + 360.0)
+    assert ch.rotation_deg_at(ch.rotation_period_ms / 2.0) == pytest.approx(
+        ch.rotation0_deg + 180.0), "half a period is a half turn -- linear winding"
+    assert ch.rotation_deg_at(500.0) > ch.rotation0_deg, "the figure-8 keeps rotating over time"
     assert ch.rotation_deg_at(500.0, 4) > ch.rotation_deg_at(500.0, 0), "a miss spins it faster"
 
 
