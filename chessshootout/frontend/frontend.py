@@ -261,12 +261,7 @@ class Frontend(OnlineEventsMixin):
                            announce_callback=self._on_kill_announced)
         self.skillcheck = SkillCheckCoordinator()
         self.skillcheck_overlay = SkillCheckOverlay()
-        self._skillcheck_target = None
-        self._pending_online_move = None
-        self._online_skillcheck = None
-        self._online_spectate_kind = None
-        self._online_skillcheck_opened_ms = None
-        self._online_verdict_action = None
+        self._clear_online_skillcheck_state()
         self._skillcheck_log = []
         self.board.skillcheck_gate = self._skillcheck_gate
         self.board.skillcheck_armed = lambda: self.skillcheck.enabled
@@ -949,7 +944,6 @@ class Frontend(OnlineEventsMixin):
         if elapsed > SKILLCHECK_DEADLINE_MS + SKILLCHECK_WATCHDOG_SLACK_MS:
             log.warning("skillcheck verdict lost; resyncing")
             self._teardown_skillcheck_overlay()
-            self._online_skillcheck = None
             self._begin_resync()
 
     def _send_heartbeat_if_due(self):
@@ -1028,12 +1022,7 @@ class Frontend(OnlineEventsMixin):
         self.skillcheck_overlay.cancel()
         self.board.aim_suppressed_square = None
         self.skillcheck.clear_locks()
-        self._skillcheck_target = None
-        self._pending_online_move = None
-        self._online_skillcheck = None
-        self._online_spectate_kind = None
-        self._online_skillcheck_opened_ms = None
-        self._online_verdict_action = None
+        self._clear_online_skillcheck_state()
         self._skillcheck_log = []
         self.board.clear_annotations()
         self.board.end_press()
@@ -1356,10 +1345,21 @@ class Frontend(OnlineEventsMixin):
         if self.online_client is not None:
             self.online_client.send_skill_check_shot(client_elapsed_ms)
 
+    def _clear_online_skillcheck_state(self):
+        self._skillcheck_target = None
+        self._pending_online_move = None
+        self._online_skillcheck = None
+        self._online_spectate_kind = None
+        self._online_skillcheck_opened_ms = None
+        self._online_verdict_action = None
+
     def _teardown_skillcheck_overlay(self):
         self.skillcheck_overlay.cancel()
         self.board.aim_suppressed_square = None
         self._skillcheck_target = None
+        self._online_skillcheck = None
+        self._online_spectate_kind = None
+        self._online_skillcheck_opened_ms = None
         self._online_verdict_action = None
 
     def _on_online_skillcheck_done(self, context, landed):
@@ -1602,8 +1602,6 @@ class Frontend(OnlineEventsMixin):
         if self.skillcheck_overlay.is_active() and (
                 self.mode == "menu" or self.current_result() is not None):
             self._teardown_skillcheck_overlay()
-            self._online_skillcheck = None
-            self._online_spectate_kind = None
         self.skillcheck_overlay.update(now)
         self.skillcheck_overlay.draw(self.window)
         self._drain_online_inbound()

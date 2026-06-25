@@ -222,8 +222,6 @@ class OnlineEventsMixin:
     def _restore_online_skillcheck_state(self, payload):
         self._teardown_skillcheck_overlay()
         self._pending_online_move = None
-        self._online_skillcheck = None
-        self._online_spectate_kind = None
         self.skillcheck.clear_locks()
         for lock in payload.get("skillcheck_locks", []):
             self.skillcheck.lock(square_from_coord(lock["from_sq"]),
@@ -259,6 +257,8 @@ class OnlineEventsMixin:
         self._apply_clock_snap(payload, default_to_existing=True)
 
     def _handle_skill_check_required(self, payload):
+        if self._resyncing:
+            return
         from_sq = square_from_coord(payload["from"])
         to_sq = square_from_coord(payload["to"])
         promo = payload.get("promotion")
@@ -318,6 +318,8 @@ class OnlineEventsMixin:
             self.board.restore_piece(aim_victim)
 
     def _handle_skill_check_spectate(self, payload):
+        if self._resyncing:
+            return
         from_sq = square_from_coord(payload["from"])
         to_sq = square_from_coord(payload["to"])
         promo = payload.get("promotion")
@@ -329,7 +331,7 @@ class OnlineEventsMixin:
         self.toast.show("Opponent is lining up a shot…")
 
     def _handle_skill_check_spectate_shot(self, payload):
-        if self._online_spectate_kind is None:
+        if self._resyncing or self._online_spectate_kind is None:
             return
         self.skillcheck_overlay.spectate_shot(
             float(payload["elapsed_ms"]), int(payload["miss_count"]),
@@ -413,11 +415,12 @@ class OnlineEventsMixin:
 
     def _handle_online_result(self, payload):
         self.offer_banners.clear()
+        pending_action = self._online_verdict_action
+        self._online_verdict_action = None
+        if pending_action is not None:
+            pending_action()
         self._teardown_skillcheck_overlay()
-        self._online_skillcheck = None
-        self._online_spectate_kind = None
         self._pending_online_move = None
-        self._online_skillcheck_opened_ms = None
         reason = payload.get("reason", "")
         winner = payload.get("winner_color")
         if reason in ONLINE_WIN_REASONS:
