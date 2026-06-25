@@ -5,8 +5,9 @@ from chessshootout.frontend.skillcheck.controller import (
 from chessshootout.frontend.visual.colors import Colors
 from chessshootout.frontend.visual.draw import supersample
 from chessshootout.frontend.visual.effects import EffectManager
+from chessshootout.skillcheck.aim import AIM_DEADLINE_MS
 
-AIM_TIME_LIMIT_MS = 5000
+AIM_TIME_LIMIT_MS = AIM_DEADLINE_MS
 AIM_RESULT_HOLD_MS = 420
 AIM_MISS_FLASH_MS = 240
 AIM_SHOT_HOLD_MS = 120

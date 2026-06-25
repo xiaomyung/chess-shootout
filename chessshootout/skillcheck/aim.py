@@ -2,9 +2,9 @@ import hashlib
 import math
 from dataclasses import dataclass
 
-from chessshootout.skillcheck.wheel import needle_speed_mult
+from chessshootout.skillcheck.wheel import SKILLCHECK_DEADLINE_MS, needle_speed_mult
 
-AIM_DEADLINE_MS = 5000.0
+AIM_DEADLINE_MS = SKILLCHECK_DEADLINE_MS
 AIM_TRAVEL_PERIOD_MS = 1500.0
 AIM_ROTATION_PERIOD_MS = 3700.0
 AIM_LOBE_FRACTION = 1.3
@@ -16,8 +16,6 @@ AIM_SWAY_CAP = 1.7
 AIM_SHRINK_STEP = 0.10
 AIM_SHRINK_CAP = 1.7
 AIM_SHRINK_EXP = 2.5
-
-_CROSSINGS = (0.25, 0.75)
 
 
 def _seed_floats(seed):

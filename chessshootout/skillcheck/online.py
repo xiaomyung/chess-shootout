@@ -4,9 +4,8 @@ from chessshootout.skillcheck.rng import move_roll_key, ply_roll
 from chessshootout.skillcheck.triggers import select_skillcheck
 from chessshootout.skillcheck.types import SkillCheckKind
 from chessshootout.skillcheck.wheel import (
-    WHEEL_HUMAN_FLOOR_MS, WheelChallenge, period_for_diff)
+    SKILLCHECK_DEADLINE_MS, WHEEL_HUMAN_FLOOR_MS, WheelChallenge, period_for_diff)
 
-SKILLCHECK_DEADLINE_MS = 5000.0
 SKILLCHECK_HUMAN_FLOOR_MS = WHEEL_HUMAN_FLOOR_MS
 SKILLCHECK_LAG_BOUND_MS = 200.0
 SKILLCHECK_TIME_CAP_MS = 60000.0

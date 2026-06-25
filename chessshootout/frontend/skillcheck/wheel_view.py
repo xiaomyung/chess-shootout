@@ -7,11 +7,11 @@ from chessshootout.frontend.skillcheck.controller import (
 from chessshootout.frontend.visual.colors import Colors
 from chessshootout.frontend.visual.draw import rounded_rect_surface, supersample
 from chessshootout.frontend.visual.fonts import get_font
-from chessshootout.skillcheck.wheel import adjudicate
+from chessshootout.skillcheck.wheel import SKILLCHECK_DEADLINE_MS, adjudicate
 
 WHEEL_DIAL_SCALE = 1.0
 WHEEL_RESULT_HOLD_MS = 380
-WHEEL_TIME_LIMIT_MS = 5000
+WHEEL_TIME_LIMIT_MS = SKILLCHECK_DEADLINE_MS
 WHEEL_DEFAULT_DEADLINE_MS = WHEEL_TIME_LIMIT_MS
 WHEEL_TIMER_RAMP = 2.0
 _ARC_STEPS = 56
@@ -62,7 +62,6 @@ class WheelController(SkillCheckController):
         self._on_shot = on_shot
         self._passive = passive
         self._online = on_shot is not None or passive
-        self._fired_online = False
         self._frozen_override = None
 
     def _apply_geometry(self, cell_rect):
@@ -92,7 +91,6 @@ class WheelController(SkillCheckController):
 
     def _fire(self):
         if self._online:
-            self._fired_online = True
             self._committed_at = self._now
             self._on_shot(self._now - self.start_ms)
             return
