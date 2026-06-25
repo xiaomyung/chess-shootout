@@ -62,6 +62,12 @@ def test_value_diff_promotion_scores_as_a_pawn_capturing_the_promoted_piece():
     assert online.value_diff_for(facts, "n") == -2, "knight underpromotion is a bit harder"
 
 
+def test_value_diff_promotion_with_no_letter_defaults_to_queen():
+    facts = TriggerFacts(is_promotion=True)
+    assert online.value_diff_for(facts, None) == online.value_diff_for(facts, "q") == -8, \
+        "an omitted promotion scores as the applied queen, not pawn-0=+1"
+
+
 def test_promotion_takes_precedence_over_the_landing_capture_for_value():
     facts = TriggerFacts(is_capture=True, capturer_value=1, captured_value=5, is_promotion=True)
     assert online.value_diff_for(facts, "q") == -8, \

@@ -51,8 +51,9 @@ def compute_facts(backend, from_sq, to_sq, locked=None):
     )
 
 
-def select_skillcheck(backend, from_sq, to_sq, roll, locked=None):
-    facts = compute_facts(backend, from_sq, to_sq, locked)
+def select_skillcheck(backend, from_sq, to_sq, roll, locked=None, facts=None):
+    if facts is None:
+        facts = compute_facts(backend, from_sq, to_sq, locked)
     if facts is None:
         return SkillCheckKind.NONE
     return roll_skillcheck(facts, roll)

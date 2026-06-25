@@ -1,4 +1,5 @@
 from chessshootout.backend.pieces import PIECE_VALUES, PieceType
+from chessshootout.backend.utils import PROMO_TYPE_BY_LETTER
 from chessshootout.skillcheck.aim import AimChallenge
 from chessshootout.skillcheck.rng import move_roll_key, ply_roll
 from chessshootout.skillcheck.triggers import select_skillcheck
@@ -19,21 +20,15 @@ def skillcheck_deadline_ms(initial_seconds):
     return min(SKILLCHECK_DEADLINE_MS, tenth, SKILLCHECK_TIME_CAP_MS)
 
 
-_PROMO_TYPE = {
-    "q": PieceType.QUEEN, "r": PieceType.ROOK,
-    "b": PieceType.BISHOP, "n": PieceType.KNIGHT,
-}
-
-
 def promo_value(promo_char):
     if promo_char is None:
         return 0
-    return PIECE_VALUES.get(_PROMO_TYPE.get(promo_char), 0)
+    return PIECE_VALUES.get(PROMO_TYPE_BY_LETTER.get(promo_char), 0)
 
 
 def value_diff_for(facts, promo_char=None):
     if facts.is_promotion:
-        return PIECE_VALUES[PieceType.PAWN] - promo_value(promo_char)
+        return PIECE_VALUES[PieceType.PAWN] - promo_value(promo_char or "q")
     if facts.is_capture:
         return facts.capturer_value - facts.captured_value
     return 0
@@ -47,11 +42,11 @@ def challenge_from(kind, seed, value_diff):
     return None
 
 
-def select_kind(secret, ply_index, backend, from_sq, to_sq, locks):
+def select_kind(secret, ply_index, backend, from_sq, to_sq, locks, facts=None):
     if (from_sq, to_sq) in locks:
         return SkillCheckKind.NONE
     roll = ply_roll(secret, move_roll_key(ply_index, from_sq, to_sq))
-    return select_skillcheck(backend, from_sq, to_sq, roll, locks)
+    return select_skillcheck(backend, from_sq, to_sq, roll, locks, facts)
 
 
 def adjudicated_elapsed_ms(client_elapsed_ms, recv_ms, start_ms,

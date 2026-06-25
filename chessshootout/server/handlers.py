@@ -99,8 +99,8 @@ async def handle_move(app, websocket, room, color, raw):
         await send(connections.get_for_color(room, color),
                      ErrorMessage(reason=Reason.INVALID_MOVE_FORMAT))
         return "illegal"
-    kind = online.select_kind(room.skillcheck_secret, room.plies_ever,
-                              room.backend, from_sq, to_sq, room.skillcheck_locks)
+    kind = online.select_kind(room.skillcheck_secret, room.plies_ever, room.backend,
+                              from_sq, to_sq, room.skillcheck_locks, facts)
     if kind == SkillCheckKind.NONE:
         return await _apply_move(app, room, color, from_sq, to_sq, msg.promotion,
                                  skill_kind=None, skill_won=None)
