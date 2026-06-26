@@ -85,6 +85,11 @@ class ResultMenu(BaseModal):
     def set_rematch_offered(self, offered):
         self.rematch_offered = offered
 
+    def reset(self):
+        self.set_result(None, "draw", "")
+        self.button_rects = {}
+        self.rematch_offered = False
+
     def is_visible(self):
         return self.outcome is not None
 
