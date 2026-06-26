@@ -184,6 +184,87 @@ def test_new_game_clears_pending_result_state():
     assert app._result_first_seen_at_ms is None
 
 
+def _show_result_with_menu_center(app, result="white_wins"):
+    app.manual_result = result
+    app._update_result_pending()
+    app.board.effects.clear_takeover()
+    app._result_first_seen_at_ms = pg.time.get_ticks() - RESULT_MODAL_DELAY_MS - 1
+    assert app._result_modal_should_show() is True
+    app._compute_layout()
+    app._feed_result_menu()
+    app.result_menu.draw()
+    assert app.result_menu.is_visible() is True
+    assert app.result_menu.button_rects
+    return app.result_menu.button_rects["menu"].center
+
+
+def test_stale_result_menu_not_clickable_after_new_game():
+    """RC1: result-modal buttons must not survive into the next game. After finishing a
+    game and resetting, a board click landing on the old 'Menu' rect must not quit."""
+    app = _make_app()
+    menu_center = _show_result_with_menu_center(app)
+    app._reset_to_new_game()
+    assert app.result_menu.is_visible() is False
+    app.mouse_left_clicked(menu_center)
+    assert app.mode != "menu"
+
+
+def test_drag_release_after_game_over_skips_router():
+    """RC2: a drag whose release lands after the game ended must not re-dispatch the
+    click into the UI router (which would hit the result modal's Menu button)."""
+    app = _make_app()
+    app.board.dragging_from = Square(6, 4)
+    app.manual_result = "white_wins"
+    calls = []
+    app.mouse_left_clicked = lambda pos: calls.append(pos)
+    app._mouse_left_released((100, 100))
+    assert calls == []
+    assert app.board.dragging_from is None
+
+
+def test_drag_release_during_live_game_routes_click():
+    """RC2 guard must not regress a normal drag-move: with no result the release still
+    re-dispatches so a drag that delivers the game-ending move completes."""
+    app = _make_app()
+    app.board.dragging_from = Square(6, 4)
+    calls = []
+    app.mouse_left_clicked = lambda pos: calls.append(pos)
+    app._mouse_left_released((100, 100))
+    assert calls == [(100, 100)]
+
+
+def test_drag_release_after_game_over_does_not_quit_to_menu():
+    """RC2 end-to-end: releasing a dragged piece over the result modal's Menu button
+    right after a mid-drag game-end must not quit to menu."""
+    app = _make_app()
+    menu_center = _show_result_with_menu_center(app)
+    app.board.dragging_from = Square(6, 4)
+    app._mouse_left_released(menu_center)
+    assert app.mode != "menu"
+
+
+def test_legit_result_menu_button_still_quits():
+    """Regression: an intentional click on the visible result modal's Menu button must
+    still return to the menu."""
+    app = _make_app()
+    menu_center = _show_result_with_menu_center(app)
+    assert app.result_menu.is_visible() is True
+    app.mouse_left_clicked(menu_center)
+    assert app.mode == "menu"
+
+
+def test_result_modal_reappears_in_next_game():
+    """Regression: clearing the menu on new-game must not stop the modal showing when the
+    next game actually ends."""
+    app = _make_app()
+    _show_result_with_menu_center(app)
+    app._reset_to_new_game()
+    assert app.result_menu.is_visible() is False
+    _show_result_with_menu_center(app, result="black_wins")
+    assert app.result_menu.is_visible() is True
+    assert app.result_menu.button_rects
+
+
 def test_right_menu_buttons_disabled_after_result():
     app = _make_app()
     app.manual_result = "white_wins"

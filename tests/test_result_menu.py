@@ -153,6 +153,24 @@ def test_handle_click_fires_callback():
     assert fired == ["new_game"]
 
 
+def test_reset_hides_menu_and_clears_buttons():
+    """reset() returns the menu to its pristine, non-interactive state so stale
+    buttons from a finished game can never be clicked in the next game."""
+    menu = _make_menu()
+    menu.set_rect(pg.Rect(0, 0, 440, 418))
+    menu.set_result("VICTORY", "win", "Checkmate · 31 moves", _stats())
+    menu.set_rematch_offered(True)
+    menu.draw()
+    assert menu.is_visible() is True
+    assert menu.button_rects
+    menu_center = menu.button_rects["menu"].center
+    menu.reset()
+    assert menu.is_visible() is False
+    assert menu.button_rects == {}
+    assert menu.rematch_offered is False
+    assert menu.handle_click(menu_center) is False
+
+
 def test_online_rematch_offered_relabels_primary_but_keeps_key():
     """An incoming rematch request turns the result modal's primary button into
     Accept, still routed through the 'rematch' key so it accepts the offer."""

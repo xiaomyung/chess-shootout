@@ -1003,7 +1003,7 @@ class Frontend(OnlineEventsMixin):
         self._review_return_page = None
         self.offer_banners.clear()
         self._rematch_offered = False
-        self.result_menu.set_rematch_offered(False)
+        self.result_menu.reset()
         self.sound_manager.stop_all()
         self.manual_result = None
         self._flag_fall_played = False
@@ -2207,7 +2207,7 @@ class Frontend(OnlineEventsMixin):
                 scrollable.handle_click(pos)
             return
         was_dragging = self.board.dragging_from is not None
-        if was_dragging:
+        if was_dragging and self.current_result() is None:
             self.mouse_left_clicked(pos)
         self.board.end_press()
 
