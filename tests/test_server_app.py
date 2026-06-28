@@ -231,6 +231,65 @@ def test_full_short_game_e4_e5_resign(client):
             assert res_w["winner_color"] == "black"
 
 
+def _recv(ws):
+    return json.loads(ws.receive_text())
+
+
+def test_rematch_round_trip_swaps_colors_and_relays_move(client):
+    """End-to-end over real websockets: pair, finish a game, offer + accept a
+    rematch, and confirm colours swap and the first move of the new game flows."""
+    random.seed(0)
+    r1 = _matchmake(client, uuid=ALICE, side="white")
+    r2 = _matchmake(client, uuid=BOB, side="black")
+    with client.websocket_connect(f"/ws/{r1.json()['room_id']}") as ws_w:
+        ws_w.send_text(json.dumps(_auth_msg(r1.json()["session_token"])))
+        with client.websocket_connect(f"/ws/{r2.json()['room_id']}") as ws_b:
+            ws_b.send_text(json.dumps(_auth_msg(r2.json()["session_token"])))
+            _recv(ws_w)
+            _recv(ws_b)
+            ws_w.send_text(json.dumps({"version": PROTOCOL_VERSION, "type": "resign"}))
+            assert _recv(ws_w)["type"] == "result"
+            assert _recv(ws_b)["type"] == "result"
+            ws_b.send_text(json.dumps({"version": PROTOCOL_VERSION,
+                                        "type": "rematch_request"}))
+            assert _recv(ws_w)["type"] == "rematch_request"
+            ws_w.send_text(json.dumps({"version": PROTOCOL_VERSION,
+                                        "type": "rematch_response", "accept": True}))
+            gs_w = _recv(ws_w)
+            gs_b = _recv(ws_b)
+            assert gs_w["type"] == "game_start" and gs_w["rematch"] is True
+            assert gs_w["your_color"] == "black"
+            assert gs_b["your_color"] == "white"
+            ws_b.send_text(json.dumps({"version": PROTOCOL_VERSION, "type": "move",
+                                        "from": "e2", "to": "e4"}))
+            ap_b = _recv(ws_b)
+            ap_w = _recv(ws_w)
+            assert ap_b["type"] == "move_applied" and ap_b["san"] == "e4"
+            assert ap_w["from"] == "e2" and ap_w["to"] == "e4"
+
+
+def test_rematch_decline_notifies_offerer(client):
+    random.seed(0)
+    r1 = _matchmake(client, uuid=ALICE, side="white")
+    r2 = _matchmake(client, uuid=BOB, side="black")
+    with client.websocket_connect(f"/ws/{r1.json()['room_id']}") as ws_w:
+        ws_w.send_text(json.dumps(_auth_msg(r1.json()["session_token"])))
+        with client.websocket_connect(f"/ws/{r2.json()['room_id']}") as ws_b:
+            ws_b.send_text(json.dumps(_auth_msg(r2.json()["session_token"])))
+            _recv(ws_w)
+            _recv(ws_b)
+            ws_w.send_text(json.dumps({"version": PROTOCOL_VERSION, "type": "resign"}))
+            _recv(ws_w)
+            _recv(ws_b)
+            ws_w.send_text(json.dumps({"version": PROTOCOL_VERSION,
+                                        "type": "rematch_request"}))
+            assert _recv(ws_b)["type"] == "rematch_request"
+            ws_b.send_text(json.dumps({"version": PROTOCOL_VERSION,
+                                        "type": "rematch_response", "accept": False}))
+            upd = _recv(ws_w)
+            assert upd["type"] == "rematch_update" and upd["event"] == "declined"
+
+
 def test_out_of_turn_move_rejected(client):
     random.seed(0)
     r1 = _matchmake(client, uuid=ALICE, side="white")
