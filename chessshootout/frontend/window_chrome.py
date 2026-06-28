@@ -46,6 +46,14 @@ class _SDLPoint(ctypes.Structure):
     _fields_ = [("x", ctypes.c_int), ("y", ctypes.c_int)]
 
 
+class _SDLRect(ctypes.Structure):
+    _fields_ = [("x", ctypes.c_int), ("y", ctypes.c_int),
+                ("w", ctypes.c_int), ("h", ctypes.c_int)]
+
+
+DOUBLE_CLICK_MS = 350
+
+
 _HITTEST_CB = ctypes.CFUNCTYPE(
     ctypes.c_int, ctypes.c_void_p, ctypes.POINTER(_SDLPoint), ctypes.c_void_p
 )
@@ -98,7 +106,7 @@ class WindowChrome:
     DOT_GLYPH_DARKEN = 0.74
     DOT_GLYPH_INSET = 0.55
 
-    def __init__(self, window):
+    def __init__(self, window, on_resize=None):
         self.window = window
         self._w, self._h = window.get_size()
         self._dot_rects = {}
@@ -110,6 +118,10 @@ class WindowChrome:
         self._wordmark_accent = None
         self._logo_surf = None
         self._cursor = None
+        self._on_resize = on_resize
+        self._win_state = "normal"
+        self._restore_rect = None
+        self._last_title_click_ms = 0
         self._init_sdl()
 
     def _init_sdl(self):
@@ -161,6 +173,15 @@ class WindowChrome:
         self._sdl.SDL_MaximizeWindow.argtypes = [ctypes.c_void_p]
         self._sdl.SDL_RestoreWindow.argtypes = [ctypes.c_void_p]
         self._sdl.SDL_MinimizeWindow.argtypes = [ctypes.c_void_p]
+        self._sdl.SDL_GetWindowDisplayIndex.argtypes = [ctypes.c_void_p]
+        self._sdl.SDL_GetWindowDisplayIndex.restype = ctypes.c_int
+        self._sdl.SDL_GetDisplayUsableBounds.argtypes = [ctypes.c_int, ctypes.POINTER(_SDLRect)]
+        self._sdl.SDL_GetDisplayUsableBounds.restype = ctypes.c_int
+        self._sdl.SDL_GetDisplayBounds.argtypes = [ctypes.c_int, ctypes.POINTER(_SDLRect)]
+        self._sdl.SDL_GetDisplayBounds.restype = ctypes.c_int
+        self._sdl.SDL_GetWindowPosition.argtypes = [
+            ctypes.c_void_p, ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.c_int)]
+        self._sdl.SDL_SetWindowPosition.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_int]
 
     def _resize_code(self, x, y):
         w, h = self._w, self._h
@@ -348,6 +369,12 @@ class WindowChrome:
             if rect.collidepoint(pos):
                 self._activate(key)
                 return True
+        now = pg.time.get_ticks()
+        if now - self._last_title_click_ms <= DOUBLE_CLICK_MS:
+            self._last_title_click_ms = 0
+            self.toggle_maximize()
+        else:
+            self._last_title_click_ms = now
         return True
 
     def _activate(self, key):
@@ -356,7 +383,7 @@ class WindowChrome:
         elif key == "min":
             self._minimize()
         elif key == "max":
-            self._toggle_maximize()
+            self.toggle_maximize()
 
     def _is_maximized(self):
         if self._win_ptr is None:
@@ -370,13 +397,70 @@ class WindowChrome:
             except Exception:
                 log.warning("minimize failed", exc_info=True)
 
-    def _toggle_maximize(self):
+    def _display_bounds(self, usable):
         if self._win_ptr is None:
-            return
+            return None
         try:
-            if self._is_maximized():
-                self._sdl.SDL_RestoreWindow(self._win_ptr)
-            else:
-                self._sdl.SDL_MaximizeWindow(self._win_ptr)
+            idx = self._sdl.SDL_GetWindowDisplayIndex(self._win_ptr)
+            rect = _SDLRect()
+            fn = (self._sdl.SDL_GetDisplayUsableBounds if usable
+                  else self._sdl.SDL_GetDisplayBounds)
+            if fn(idx, ctypes.byref(rect)) != 0:
+                return None
+            return (rect.x, rect.y, rect.w, rect.h)
         except Exception:
-            log.warning("maximize toggle failed", exc_info=True)
+            return None
+
+    def _window_position(self):
+        x, y = ctypes.c_int(0), ctypes.c_int(0)
+        try:
+            self._sdl.SDL_GetWindowPosition(self._win_ptr, ctypes.byref(x), ctypes.byref(y))
+        except Exception:
+            return (0, 0)
+        return (x.value, y.value)
+
+    def _set_window_position(self, x, y):
+        try:
+            self._sdl.SDL_SetWindowPosition(self._win_ptr, x, y)
+        except Exception:
+            pass
+
+    def _fill_window(self, state, usable):
+        if self._win_ptr is None or self._on_resize is None:
+            return
+        if self._win_state == state:
+            self._restore_window()
+            return
+        bounds = self._display_bounds(usable)
+        if bounds is None:
+            return
+        if self._win_state == "normal":
+            self._restore_rect = (*self._window_position(), *self.window.get_size())
+        x, y, w, h = bounds
+        self._on_resize((w, h))
+        self._set_window_position(x, y)
+        self._win_state = state
+
+    def _restore_window(self):
+        if self._restore_rect is None or self._on_resize is None:
+            return
+        x, y, w, h = self._restore_rect
+        self._on_resize((w, h))
+        self._set_window_position(x, y)
+        self._restore_rect = None
+        self._win_state = "normal"
+
+    def toggle_maximize(self):
+        if os.name == "nt":
+            self._fill_window("maximized", usable=True)
+        elif self._win_ptr is not None:
+            try:
+                if self._is_maximized():
+                    self._sdl.SDL_RestoreWindow(self._win_ptr)
+                else:
+                    self._sdl.SDL_MaximizeWindow(self._win_ptr)
+            except Exception:
+                log.warning("maximize toggle failed", exc_info=True)
+
+    def toggle_fullscreen(self):
+        self._fill_window("fullscreen", usable=False)

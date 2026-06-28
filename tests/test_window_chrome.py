@@ -126,7 +126,9 @@ class _FakeSDL:
     def __init__(self, win_ptr_ret):
         self.SDL_GetWindowFromID = _FakeFn(win_ptr_ret)
         for name in ("SDL_GetWindowFlags", "SDL_SetWindowHitTest", "SDL_SetWindowMinimumSize",
-                     "SDL_MaximizeWindow", "SDL_RestoreWindow", "SDL_MinimizeWindow"):
+                     "SDL_MaximizeWindow", "SDL_RestoreWindow", "SDL_MinimizeWindow",
+                     "SDL_GetWindowDisplayIndex", "SDL_GetDisplayUsableBounds",
+                     "SDL_GetDisplayBounds", "SDL_GetWindowPosition", "SDL_SetWindowPosition"):
             setattr(self, name, _FakeFn(0))
 
 
@@ -155,12 +157,64 @@ def test_resolve_owning_sdl_disables_when_no_instance_owns_window(chrome, monkey
 
 
 def test_toggle_maximize_no_op_when_chrome_disabled(chrome):
-    """With no owning SDL2 instance the min/max actions must no-op, not crash."""
+    """With no owning SDL2 instance the min/max/fullscreen actions must no-op, not crash."""
     chrome._sdl = None
     chrome._win_ptr = None
-    chrome._toggle_maximize()
+    chrome.toggle_maximize()
+    chrome.toggle_fullscreen()
     chrome._minimize()
     assert chrome._is_maximized() is False
+
+
+def _stub_geometry(chrome, monkeypatch, bounds):
+    moved = []
+    monkeypatch.setattr(chrome, "_win_ptr", 0xABCD)
+    monkeypatch.setattr(chrome, "_display_bounds", lambda usable: bounds)
+    monkeypatch.setattr(chrome, "_window_position", lambda: (120, 90))
+    monkeypatch.setattr(chrome, "_set_window_position", lambda x, y: moved.append((x, y)))
+    return moved
+
+
+def test_fullscreen_toggle_stores_and_restores_rect(chrome, monkeypatch):
+    """F11 fills the monitor bounds, stashing the prior rect; toggling restores it."""
+    resized = []
+    chrome._on_resize = resized.append
+    prev_size = chrome.window.get_size()
+    moved = _stub_geometry(chrome, monkeypatch, (0, 0, 1920, 1080))
+    chrome.toggle_fullscreen()
+    assert chrome._win_state == "fullscreen"
+    assert resized[-1] == (1920, 1080)
+    assert moved[-1] == (0, 0)
+    assert chrome._restore_rect == (120, 90, *prev_size)
+    chrome.toggle_fullscreen()
+    assert chrome._win_state == "normal"
+    assert resized[-1] == prev_size
+    assert moved[-1] == (120, 90)
+    assert chrome._restore_rect is None
+
+
+def test_windows_maximize_uses_usable_bounds(chrome, monkeypatch):
+    """On Windows the green dot resizes to the work area (taskbar visible)."""
+    monkeypatch.setattr(os, "name", "nt")
+    resized = []
+    chrome._on_resize = resized.append
+    _stub_geometry(chrome, monkeypatch, (0, 0, 1920, 1040))
+    chrome.toggle_maximize()
+    assert chrome._win_state == "maximized"
+    assert resized[-1] == (1920, 1040)
+
+
+def test_double_click_titlebar_toggles_maximize(chrome, monkeypatch):
+    calls = []
+    monkeypatch.setattr(chrome, "toggle_maximize", lambda: calls.append(1))
+    chrome.draw()
+    pos = (chrome._w // 2, 4)
+    monkeypatch.setattr(pg.time, "get_ticks", lambda: 1000)
+    assert chrome.handle_click(pos) is True
+    assert calls == []
+    monkeypatch.setattr(pg.time, "get_ticks", lambda: 1000 + 100)
+    assert chrome.handle_click(pos) is True
+    assert calls == [1]
 
 
 @pytest.mark.parametrize(

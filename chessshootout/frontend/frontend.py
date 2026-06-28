@@ -222,7 +222,7 @@ class Frontend(OnlineEventsMixin):
             pg.display.set_icon(icon)
         except (pg.error, OSError):
             pass
-        self.chrome = WindowChrome(self.window)
+        self.chrome = WindowChrome(self.window, on_resize=self._apply_window_size)
         self.clock = pg.time.Clock()
 
         self.mode = "menu"
@@ -1856,6 +1856,16 @@ class Frontend(OnlineEventsMixin):
             return None, None
         return label, remaining
 
+    def _apply_window_size(self, size):
+        w = max(size[0], MIN_WINDOW_WIDTH)
+        h = max(size[1], MIN_WINDOW_HEIGHT)
+        self.window = pg.display.set_mode((w, h), WINDOW_FLAGS)
+        self.chrome.window = self.window
+        self.window_width = w
+        self.window_height = h
+        self._cancel_all_scroll()
+        self._compute_layout()
+
     def _compute_layout(self):
         window_width, window_height = self.window.get_size()
         top = WindowChrome.HEIGHT
@@ -2219,6 +2229,9 @@ class Frontend(OnlineEventsMixin):
             elif event.type == pg.KEYDOWN:
                 if event.key == pg.K_ESCAPE:
                     self._handle_escape()
+                    continue
+                if event.key == pg.K_F11:
+                    self.chrome.toggle_fullscreen()
                     continue
                 if self._skillcheck_swallows_input():
                     self.skillcheck_overlay.handle_event(event)
