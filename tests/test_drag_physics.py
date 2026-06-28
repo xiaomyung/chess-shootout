@@ -340,3 +340,56 @@ def test_set_rect_cancels_active_drag():
     assert bd._drag is not None
     bd.set_rect(pg.Rect(0, 0, 500, 500))
     assert bd._drag is None and bd.dragging_from is None
+
+
+def _kings():
+    return {
+        Square(0, 0): Piece(PieceType.KING, BLACK),
+        Square(7, 7): Piece(PieceType.KING, WHITE),
+    }
+
+
+def test_remote_move_during_drag_preserves_grab():
+    """The #3 fix: an opponent move landing mid-drag must NOT hijack the held
+    piece toward the opponent's destination."""
+    bd, bk, _ = _make_board()
+    _seed_position(bk, {
+        Square(6, 4): Piece(PieceType.PAWN, WHITE),
+        Square(0, 1): Piece(PieceType.KNIGHT, BLACK),
+        **_kings(),
+    }, turn=BLACK)
+    _grab(bd, Square(6, 4), where="center")
+    assert bd.dragging_from == Square(6, 4)
+    bk.try_move(Square(0, 1), Square(2, 2))
+    bd.animate_remote_move(Square(0, 1), Square(2, 2))
+    assert bd.dragging_from == Square(6, 4)
+    assert bd._drag is not None and bd._drag["phase"] == "drag"
+
+
+def test_remote_capture_elsewhere_keeps_grab():
+    bd, bk, _ = _make_board()
+    _seed_position(bk, {
+        Square(6, 4): Piece(PieceType.PAWN, WHITE),
+        Square(4, 0): Piece(PieceType.PAWN, WHITE),
+        Square(3, 1): Piece(PieceType.PAWN, BLACK),
+        **_kings(),
+    }, turn=BLACK)
+    _grab(bd, Square(6, 4), where="center")
+    bk.try_move(Square(3, 1), Square(4, 0))
+    bd.animate_remote_move(Square(3, 1), Square(4, 0))
+    assert bd.dragging_from == Square(6, 4)
+    assert bd._drag is not None and bd._drag["phase"] == "drag"
+
+
+def test_remote_capture_of_dragged_piece_snaps_back():
+    bd, bk, _ = _make_board()
+    _seed_position(bk, {
+        Square(4, 4): Piece(PieceType.PAWN, WHITE),
+        Square(3, 3): Piece(PieceType.PAWN, BLACK),
+        **_kings(),
+    }, turn=BLACK)
+    _grab(bd, Square(4, 4), where="center")
+    bk.try_move(Square(3, 3), Square(4, 4))
+    bd.animate_remote_move(Square(3, 3), Square(4, 4))
+    assert bd._drag is not None and bd._drag["phase"] == "settle"
+    assert bd._drag["settle_to_sq"] == Square(4, 4)

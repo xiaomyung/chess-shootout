@@ -22,7 +22,19 @@ def captured_by(history, color):
     return sorted(captured, key=CAPTURE_ORDER.index)
 
 
+def promotion_gain(history, color):
+    gain = 0
+    for entry in history:
+        move = entry.move
+        if move.promoted_to is not None and move.piece.color == color:
+            gain += PIECE_VALUES[move.promoted_to] - PIECE_VALUES[PieceType.PAWN]
+    return gain
+
+
+def material_for(history, color):
+    return (sum(PIECE_VALUES[t] for t in captured_by(history, color))
+            + promotion_gain(history, color))
+
+
 def material_advantage(history, color):
-    own = sum(PIECE_VALUES[t] for t in captured_by(history, color))
-    opp = sum(PIECE_VALUES[t] for t in captured_by(history, opponent_of(color)))
-    return own - opp
+    return material_for(history, color) - material_for(history, opponent_of(color))

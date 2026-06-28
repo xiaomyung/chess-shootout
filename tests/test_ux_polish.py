@@ -398,6 +398,45 @@ def test_material_advantage_after_queen_trade():
     assert material_advantage(backend.move_history, PieceColor.BLACK) == 0
 
 
+def _promo_backend(pawn_sq, extra=None):
+    backend = Backend()
+    backend.state = [[None] * 8 for _ in range(8)]
+    backend.state[0][0] = Piece(PieceType.KING, PieceColor.BLACK)
+    backend.state[7][7] = Piece(PieceType.KING, PieceColor.WHITE)
+    backend.state[pawn_sq.row][pawn_sq.col] = Piece(PieceType.PAWN, PieceColor.WHITE)
+    if extra is not None:
+        sq, piece = extra
+        backend.state[sq.row][sq.col] = piece
+    backend.turn = PieceColor.WHITE
+    backend.move_history = []
+    backend.position_counts = Counter()
+    backend.position_counts[backend._position_key()] = 1
+    return backend
+
+
+def test_material_advantage_after_promotion_to_queen():
+    backend = _promo_backend(Square(1, 4))
+    assert backend.try_move(Square(1, 4), Square(0, 4)).promotion_required
+    backend.promote(Square(0, 4), PieceType.QUEEN)
+    assert material_advantage(backend.move_history, PieceColor.WHITE) == 8
+    assert material_advantage(backend.move_history, PieceColor.BLACK) == -8
+
+
+def test_material_advantage_underpromotion_to_knight():
+    backend = _promo_backend(Square(1, 4))
+    assert backend.try_move(Square(1, 4), Square(0, 4)).promotion_required
+    backend.promote(Square(0, 4), PieceType.KNIGHT)
+    assert material_advantage(backend.move_history, PieceColor.WHITE) == 2
+
+
+def test_material_advantage_promotion_with_capture_counts_both():
+    backend = _promo_backend(
+        Square(1, 4), extra=(Square(0, 3), Piece(PieceType.ROOK, PieceColor.BLACK)))
+    assert backend.try_move(Square(1, 4), Square(0, 3)).promotion_required
+    backend.promote(Square(0, 3), PieceType.QUEEN)
+    assert material_advantage(backend.move_history, PieceColor.WHITE) == 13
+
+
 def test_player_strip_set_state_accepts_captures():
     from chessshootout.frontend.panels.player_strip import PlayerStrip
     strip = PlayerStrip(pg.display.get_surface())
