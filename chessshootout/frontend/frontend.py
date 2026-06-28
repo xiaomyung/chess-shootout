@@ -2294,7 +2294,6 @@ class Frontend(OnlineEventsMixin):
                 if self._skillcheck_swallows_input():
                     continue
                 if event.button == 1:
-                    self.chrome.clear_title_press()
                     self._mouse_left_released(event.pos)
                 elif event.button == 3:
                     self._right_click_released(event.pos)
@@ -2302,7 +2301,6 @@ class Frontend(OnlineEventsMixin):
             elif event.type == pg.MOUSEMOTION:
                 self.chrome.update_cursor(event.pos)
                 if event.buttons[0]:
-                    self.chrome.handle_title_motion(event.pos)
                     self._handle_left_drag_motion(event.pos)
 
             elif event.type == pg.MOUSEWHEEL:
@@ -2311,9 +2309,10 @@ class Frontend(OnlineEventsMixin):
                     scrollable.handle_scroll(pg.mouse.get_pos(), event.y)
 
             elif event.type == pg.VIDEORESIZE:
+                self.chrome.sync_state_from_window()
                 w = max(event.w, MIN_WINDOW_WIDTH)
                 h = max(event.h, MIN_WINDOW_HEIGHT)
-                if (w, h) != (event.w, event.h):
+                if (w, h) != (event.w, event.h) and self.chrome._win_state == "normal":
                     self.window = pg.display.set_mode((w, h), WINDOW_FLAGS)
                     self.chrome.window = self.window
                     self.chrome.reinit_sdl()
