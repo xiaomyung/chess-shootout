@@ -478,7 +478,7 @@ async def _ws_session(app, websocket, room_id):
                      auth_room.room_id, cur_color)
             opp_ws = connections.get_for_color(auth_room, auth_room.opp_color(cur_color))
             if opp_ws is not None:
-                if auth_room.result is None:
-                    await send(opp_ws, ConnectionStatusMessage(opp_state="reconnecting"))
-                else:
-                    await send(opp_ws, RematchUpdateMessage(event="opponent_reconnecting"))
+                msg = (ConnectionStatusMessage(opp_state="reconnecting")
+                       if auth_room.result is None
+                       else RematchUpdateMessage(event="opponent_reconnecting"))
+                await send(opp_ws, msg)

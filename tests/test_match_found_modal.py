@@ -50,6 +50,15 @@ def test_show_makes_visible_and_hide_clears():
     assert not m.is_visible()
 
 
+def test_rematch_defaults_false_and_show_carries_flag():
+    m = _modal()
+    assert m.rematch is False
+    m.show("alice", "bob", "white", on_done=lambda: None)
+    assert m.rematch is False
+    m.show("alice", "bob", "white", on_done=lambda: None, rematch=True)
+    assert m.rematch is True
+
+
 def test_countdown_decrements(monkeypatch):
     now = [1000]
     monkeypatch.setattr(pg.time, "get_ticks", lambda: now[0])

@@ -278,10 +278,6 @@ class RematchUpdateMessage(_Base):
     event: RematchUpdateEvent
 
 
-class LeftResultMessage(_Base):
-    type: Literal["left_result"] = "left_result"
-
-
 class TakebackResponseMessage(_Base):
     type: Literal["takeback_response"] = "takeback_response"
     accept: bool

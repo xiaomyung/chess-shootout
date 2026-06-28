@@ -7,7 +7,7 @@ from chessshootout.frontend.visual.fonts import get_font
 
 
 MIN_DURATION_MS = 5000
-DEFAULT_DURATION_MS = 5000
+DEFAULT_DURATION_MS = MIN_DURATION_MS
 FADE_OUT_MS = 300
 ENTER_MS = 200
 TOP_OFFSET_PX = 12
@@ -57,11 +57,6 @@ class Toast:
     def message(self):
         top = self._top()
         return top["message"] if top is not None else None
-
-    @property
-    def kind(self):
-        top = self._top()
-        return top["kind"] if top is not None else "info"
 
     def dismiss(self, key):
         self._bubbles = [b for b in self._bubbles if b["key"] != key]

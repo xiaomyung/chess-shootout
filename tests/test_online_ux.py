@@ -450,6 +450,20 @@ def test_rematch_update_declined_bubbles_and_returns_to_menu(frontend):
     assert frontend._rematch_offered is False
 
 
+def test_rematch_update_cancelled_clears_banner_and_keeps_client(frontend):
+    _arm_post_game(frontend, disconnect=lambda: None)
+    frontend._push_rematch_banner()
+    frontend.result_menu.set_rematch_offered(True)
+    assert not frontend.offer_banners.is_empty()
+    frontend._handle_rematch_update({"event": "cancelled"})
+    assert frontend.offer_banners.is_empty()
+    assert frontend._rematch_offered is False
+    assert frontend.result_menu.rematch_offered is False
+    assert frontend.toast.is_visible()
+    assert frontend.online_client is not None
+    assert frontend.mode == ONLINE
+
+
 def test_back_to_menu_keeps_client_and_reshows_banner_post_game(frontend):
     sent = []
     _arm_post_game(

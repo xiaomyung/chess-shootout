@@ -128,6 +128,10 @@ class Sweep:
         if ws is not None:
             await send(ws, RematchUpdateMessage(event=event))
 
+    async def _notify_both(self, room, event):
+        await self._notify_rematch(room, "white", event)
+        await self._notify_rematch(room, "black", event)
+
     async def step_post_game(self):
         now = self._now()
         for room in list(self.rooms._active.values()):
@@ -141,10 +145,7 @@ class Sweep:
                 continue
             present_color = "white" if white_present else "black"
             if room.ended_at is not None and now - room.ended_at >= REMATCH_ABSOLUTE_CAP_SECONDS:
-                await self._notify_rematch(room, present_color, "window_expired")
-                if white_present and black_present:
-                    await self._notify_rematch(room, room.opp_color(present_color),
-                                               "window_expired")
+                await self._notify_both(room, "window_expired")
                 log.info("drop room=%s reason=rematch_cap", room.room_id)
                 self.rooms.drop_room_now(room.room_id)
                 continue
@@ -159,14 +160,12 @@ class Sweep:
                     self.rooms.drop_room_now(room.room_id)
                 continue
             if not room.white.at_result and not room.black.at_result:
-                await self._notify_rematch(room, "white", "window_expired")
-                await self._notify_rematch(room, "black", "window_expired")
+                await self._notify_both(room, "window_expired")
                 log.info("drop room=%s reason=both_left_result", room.room_id)
                 self.rooms.drop_room_now(room.room_id)
                 continue
             last = room.last_rematch_activity_at or room.ended_at
             if last is not None and now - last >= REMATCH_IDLE_SECONDS:
-                await self._notify_rematch(room, "white", "window_expired")
-                await self._notify_rematch(room, "black", "window_expired")
+                await self._notify_both(room, "window_expired")
                 log.info("drop room=%s reason=rematch_idle", room.room_id)
                 self.rooms.drop_room_now(room.room_id)

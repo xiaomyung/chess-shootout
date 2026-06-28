@@ -47,7 +47,8 @@ from chessshootout.frontend.window_chrome import (
 from chessshootout.online.client import (
     OnlineClient, RECONNECT_TOTAL_SECONDS, fetch_resume, probe_active_game,
 )
-from chessshootout.frontend.online.events import ONLINE_HARD_FAILURE_LABELS, OnlineEventsMixin
+from chessshootout.frontend.online.events import (
+    ONLINE_HARD_FAILURE_LABELS, REMATCH_STATE_TOAST_KEY, OnlineEventsMixin)
 from chessshootout.frontend.panels.player_strip import (
     AUTO_END_RED_THRESHOLD_SECONDS, PlayerStrip,
 )
@@ -175,7 +176,6 @@ WAIT_HEIGHT_RATIO = 1.6
 MENU_FOOTER_RESERVE = 22
 MIN_MODAL_WIDTH = 360
 
-SAVED_PGN_TOAST_DURATION_MS = 3000
 RESYNC_TIMEOUT_MS = 8000
 SKILLCHECK_WATCHDOG_SLACK_MS = 4000
 RECONNECT_PROBE_INTERVAL_MS = 5000
@@ -888,7 +888,7 @@ class Frontend(OnlineEventsMixin):
         else:
             self.online_client.send_rematch_request()
             self.toast.show(f"Rematch sent — waiting for {self._opp_name()}…",
-                            key="rematch_state")
+                            key=REMATCH_STATE_TOAST_KEY)
 
     def _tear_down_online_session(self):
         if self.online_client is not None:
@@ -1070,7 +1070,7 @@ class Frontend(OnlineEventsMixin):
         with open(path, "w") as f:
             f.write(text)
         self._last_saved_pgn_path = path
-        self.toast.show(f"Saved {filename}", duration_ms=SAVED_PGN_TOAST_DURATION_MS)
+        self.toast.show(f"Saved {filename}")
         return path
 
     def _auto_save_prefix(self):

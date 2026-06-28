@@ -23,12 +23,9 @@ def captured_by(history, color):
 
 
 def promotion_gain(history, color):
-    gain = 0
-    for entry in history:
-        move = entry.move
-        if move.promoted_to is not None and move.piece.color == color:
-            gain += PIECE_VALUES[move.promoted_to] - PIECE_VALUES[PieceType.PAWN]
-    return gain
+    return sum(PIECE_VALUES[entry.move.promoted_to] - PIECE_VALUES[PieceType.PAWN]
+               for entry in history
+               if entry.move.promoted_to is not None and entry.move.piece.color == color)
 
 
 def material_for(history, color):

@@ -15,7 +15,7 @@ from chessshootout.server.handlers import (
 )
 from chessshootout.server.protocol import PROTOCOL_VERSION, Reason
 from chessshootout.server.rooms import (
-    POST_GAME_DISCONNECT_GRACE, REMATCH_IDLE_SECONDS,
+    POST_GAME_DISCONNECT_GRACE, REMATCH_ABSOLUTE_CAP_SECONDS, REMATCH_IDLE_SECONDS,
 )
 from tests.helpers import FakeClock, fake_uuid4
 
@@ -219,3 +219,15 @@ async def test_sweep_idle_drops_with_window_expired(app, clock):
     await app.state.sweep.step_post_game()
     assert rooms.rooms_active == 0
     assert "window_expired" in ws_a.events()
+    assert "window_expired" in ws_b.events()
+
+
+@pytest.mark.asyncio
+async def test_sweep_absolute_cap_drops_and_notifies_both_present(app, clock):
+    rooms = app.state.rooms
+    room, ws_a, ws_b = await _finished_room(app)
+    clock.advance(REMATCH_ABSOLUTE_CAP_SECONDS + 1)
+    await app.state.sweep.step_post_game()
+    assert rooms.rooms_active == 0
+    assert "window_expired" in ws_a.events()
+    assert "window_expired" in ws_b.events()
