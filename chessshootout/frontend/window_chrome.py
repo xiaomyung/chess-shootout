@@ -169,6 +169,7 @@ class WindowChrome:
             ctypes.c_void_p, ctypes.c_int, ctypes.c_int
         ]
         self._sdl.SDL_MinimizeWindow.argtypes = [ctypes.c_void_p]
+        self._sdl.SDL_RaiseWindow.argtypes = [ctypes.c_void_p]
 
     def _resize_code(self, x, y):
         w, h = self._w, self._h
@@ -395,6 +396,13 @@ class WindowChrome:
                 self._sdl.SDL_MinimizeWindow(self._win_ptr)
             except Exception:
                 log.warning("minimize failed", exc_info=True)
+
+    def raise_window(self):
+        if self._win_ptr is not None:
+            try:
+                self._sdl.SDL_RaiseWindow(self._win_ptr)
+            except Exception:
+                log.warning("raise window failed", exc_info=True)
 
     def toggle_fullscreen(self):
         if self._on_fullscreen is None:

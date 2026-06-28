@@ -1888,6 +1888,7 @@ class Frontend(OnlineEventsMixin):
             self.window = pg.display.set_mode(size, WINDOW_FLAGS)
         self.chrome.window = self.window
         self.chrome.reinit_sdl()
+        self.chrome.raise_window()
         self.window_width, self.window_height = self.window.get_size()
         self._cancel_all_scroll()
         self._compute_layout()

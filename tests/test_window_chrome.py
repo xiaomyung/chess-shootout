@@ -125,10 +125,8 @@ class _FakeSDL:
     a 0 return models the wrong-instance case (empty window registry)."""
     def __init__(self, win_ptr_ret):
         self.SDL_GetWindowFromID = _FakeFn(win_ptr_ret)
-        for name in ("SDL_GetWindowFlags", "SDL_SetWindowHitTest", "SDL_SetWindowMinimumSize",
-                     "SDL_MaximizeWindow", "SDL_RestoreWindow", "SDL_MinimizeWindow",
-                     "SDL_GetWindowDisplayIndex", "SDL_GetDisplayUsableBounds",
-                     "SDL_GetDisplayBounds", "SDL_GetWindowPosition", "SDL_SetWindowPosition"):
+        for name in ("SDL_SetWindowHitTest", "SDL_SetWindowMinimumSize",
+                     "SDL_MinimizeWindow", "SDL_RaiseWindow"):
             setattr(self, name, _FakeFn(0))
 
 
