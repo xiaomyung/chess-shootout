@@ -223,6 +223,7 @@ class Frontend(OnlineEventsMixin):
         except (pg.error, OSError):
             pass
         self.chrome = WindowChrome(self.window, on_fullscreen=self._apply_fullscreen)
+        self._pending_fullscreen = None
         self.clock = pg.time.Clock()
 
         self.mode = "menu"
@@ -1524,6 +1525,7 @@ class Frontend(OnlineEventsMixin):
     def run(self):
         while self.running:
             self.check_events()
+            self._commit_pending_fullscreen()
             self.window.fill("black")
             self.draw_frame()
             ping = (self.online_client.get_ping_ms()
@@ -1878,12 +1880,21 @@ class Frontend(OnlineEventsMixin):
                        self.window_height - WindowChrome.HEIGHT)
 
     def _apply_fullscreen(self, enable):
-        if bool(self.window.get_flags() & pg.FULLSCREEN) != enable:
-            try:
-                pg.display.toggle_fullscreen()
-            except pg.error:
-                log.warning("toggle_fullscreen not supported by this driver")
-        self.window = pg.display.get_surface()
+        self._pending_fullscreen = enable
+
+    def _commit_pending_fullscreen(self):
+        if self._pending_fullscreen is None:
+            return
+        enable = self._pending_fullscreen
+        self._pending_fullscreen = None
+        if enable:
+            self._windowed_size = self.window.get_size()
+            sizes = pg.display.get_desktop_sizes()
+            size = sizes[0] if sizes else self.window.get_size()
+            self.window = pg.display.set_mode(size, pg.FULLSCREEN)
+        else:
+            size = getattr(self, "_windowed_size", None) or (self.window_width, self.window_height)
+            self.window = pg.display.set_mode(size, WINDOW_FLAGS)
         self.chrome.window = self.window
         self.chrome.reinit_sdl()
         self.chrome.raise_window()
