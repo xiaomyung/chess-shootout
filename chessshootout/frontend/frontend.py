@@ -222,7 +222,7 @@ class Frontend(OnlineEventsMixin):
             pg.display.set_icon(icon)
         except (pg.error, OSError):
             pass
-        self.chrome = WindowChrome(self.window, on_resize=self._apply_window_size)
+        self.chrome = WindowChrome(self.window, on_fullscreen=self._apply_fullscreen)
         self.clock = pg.time.Clock()
 
         self.mode = "menu"
@@ -1877,13 +1877,18 @@ class Frontend(OnlineEventsMixin):
         return pg.Rect(0, WindowChrome.HEIGHT, self.window_width,
                        self.window_height - WindowChrome.HEIGHT)
 
-    def _apply_window_size(self, size):
-        w = max(size[0], MIN_WINDOW_WIDTH)
-        h = max(size[1], MIN_WINDOW_HEIGHT)
-        self.window = pg.display.set_mode((w, h), WINDOW_FLAGS)
+    def _apply_fullscreen(self, enable):
+        if enable:
+            self._windowed_size = self.window.get_size()
+            sizes = pg.display.get_desktop_sizes()
+            size = sizes[0] if sizes else self.window.get_size()
+            self.window = pg.display.set_mode(size, pg.FULLSCREEN)
+        else:
+            size = getattr(self, "_windowed_size", None) or (self.window_width, self.window_height)
+            self.window = pg.display.set_mode(size, WINDOW_FLAGS)
         self.chrome.window = self.window
-        self.window_width = w
-        self.window_height = h
+        self.chrome.reinit_sdl()
+        self.window_width, self.window_height = self.window.get_size()
         self._cancel_all_scroll()
         self._compute_layout()
 
@@ -2316,6 +2321,8 @@ class Frontend(OnlineEventsMixin):
                 h = max(event.h, MIN_WINDOW_HEIGHT)
                 if (w, h) != (event.w, event.h):
                     self.window = pg.display.set_mode((w, h), WINDOW_FLAGS)
+                    self.chrome.window = self.window
+                    self.chrome.reinit_sdl()
                 self.window_width = w
                 self.window_height = h
                 self._cancel_all_scroll()

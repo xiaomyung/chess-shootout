@@ -156,8 +156,8 @@ def test_resolve_owning_sdl_disables_when_no_instance_owns_window(chrome, monkey
     assert not chrome._win_ptr
 
 
-def test_fullscreen_no_op_when_chrome_disabled(chrome):
-    """With no owning SDL2 instance the fullscreen/minimize actions must no-op, not crash."""
+def test_fullscreen_no_op_without_callback(chrome):
+    """Without a fullscreen callback (or owning SDL2) the actions must no-op, not crash."""
     chrome._sdl = None
     chrome._win_ptr = None
     chrome.toggle_fullscreen()
@@ -165,42 +165,25 @@ def test_fullscreen_no_op_when_chrome_disabled(chrome):
     assert chrome._win_state == "normal"
 
 
-def _stub_geometry(chrome, monkeypatch, bounds):
-    moved = []
-    monkeypatch.setattr(chrome, "_win_ptr", 0xABCD)
-    monkeypatch.setattr(chrome, "_display_bounds", lambda usable: bounds)
-    monkeypatch.setattr(chrome, "_window_position", lambda: (120, 90))
-    monkeypatch.setattr(chrome, "_set_window_position", lambda x, y: moved.append((x, y)))
-    return moved
-
-
-def test_fullscreen_toggle_stores_and_restores_rect(chrome, monkeypatch):
-    """F11 fills the monitor bounds, stashing the prior rect; toggling restores it."""
-    resized = []
-    chrome._on_resize = resized.append
-    prev_size = chrome.window.get_size()
-    moved = _stub_geometry(chrome, monkeypatch, (0, 0, 1920, 1080))
+def test_toggle_fullscreen_invokes_callback_and_tracks_state():
+    surface = pg.display.get_surface()
+    calls = []
+    chrome = WindowChrome(surface, on_fullscreen=calls.append)
     chrome.toggle_fullscreen()
     assert chrome._win_state == "fullscreen"
-    assert resized[-1] == (1920, 1080)
-    assert moved[-1] == (0, 0)
-    assert chrome._restore_rect == (120, 90, *prev_size)
+    assert calls == [True]
     chrome.toggle_fullscreen()
     assert chrome._win_state == "normal"
-    assert resized[-1] == prev_size
-    assert moved[-1] == (120, 90)
-    assert chrome._restore_rect is None
+    assert calls == [True, False]
 
 
-def test_green_dot_goes_true_fullscreen(chrome, monkeypatch):
-    """The green dot (and F11) fill the full monitor bounds, covering the taskbar
-    (true fullscreen everywhere), not the work area."""
-    resized = []
-    chrome._on_resize = resized.append
-    _stub_geometry(chrome, monkeypatch, (0, 0, 1920, 1080))
+def test_green_dot_toggles_fullscreen():
+    surface = pg.display.get_surface()
+    calls = []
+    chrome = WindowChrome(surface, on_fullscreen=calls.append)
     chrome._activate("max")
     assert chrome._win_state == "fullscreen"
-    assert resized[-1] == (1920, 1080)
+    assert calls == [True]
 
 
 def test_fullscreen_titlebar_is_not_draggable(chrome):
