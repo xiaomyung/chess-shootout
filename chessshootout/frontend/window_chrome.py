@@ -410,3 +410,6 @@ class WindowChrome:
         enable = self._win_state != "fullscreen"
         self._win_state = "fullscreen" if enable else "normal"
         self._on_fullscreen(enable)
+
+    def set_state(self, fullscreen):
+        self._win_state = "fullscreen" if fullscreen else "normal"

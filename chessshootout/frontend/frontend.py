@@ -1878,18 +1878,17 @@ class Frontend(OnlineEventsMixin):
                        self.window_height - WindowChrome.HEIGHT)
 
     def _apply_fullscreen(self, enable):
-        if enable:
-            self._windowed_size = self.window.get_size()
-            sizes = pg.display.get_desktop_sizes()
-            size = sizes[0] if sizes else self.window.get_size()
-            self.window = pg.display.set_mode(size, pg.FULLSCREEN)
-        else:
-            size = getattr(self, "_windowed_size", None) or (self.window_width, self.window_height)
-            self.window = pg.display.set_mode(size, WINDOW_FLAGS)
+        if bool(self.window.get_flags() & pg.FULLSCREEN) != enable:
+            try:
+                pg.display.toggle_fullscreen()
+            except pg.error:
+                log.warning("toggle_fullscreen not supported by this driver")
+        self.window = pg.display.get_surface()
         self.chrome.window = self.window
         self.chrome.reinit_sdl()
         self.chrome.raise_window()
         self.window_width, self.window_height = self.window.get_size()
+        self.chrome.set_state(bool(self.window.get_flags() & pg.FULLSCREEN))
         self._cancel_all_scroll()
         self._compute_layout()
 
