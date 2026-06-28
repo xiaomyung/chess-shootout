@@ -373,14 +373,20 @@ def test_mode_change_relays_modal_rects_via_draw_frame(frontend):
     assert abs(frontend.wait_modal.rect.centerx - board_cx) <= 4
 
 
-def test_rematch_request_arms_result_modal_accept_and_toasts(frontend):
-    """An incoming rematch request flips the result modal's primary button to
-    Accept and shows a toast instead of a top-of-board banner."""
+def test_rematch_request_shows_banner_and_hides_initiate_button(frontend):
+    """An incoming rematch request pushes a persistent Accept/Deny banner and
+    flags the result modal to drop its initiate button (the banner is the affordance)."""
+    sent = []
+    frontend.online_client = SimpleNamespace(
+        send_rematch_response=lambda accept: sent.append(accept),
+        send_rematch_request=lambda: sent.append("req"),
+    )
+    frontend._chosen_side = "white"
+    frontend.white_name, frontend.black_name = "Me", "Them"
     frontend._handle_rematch_request()
     assert frontend._rematch_offered is True
     assert frontend.result_menu.rematch_offered is True
-    assert frontend.toast.is_visible()
-    assert frontend.offer_banners.is_empty()
+    assert not frontend.offer_banners.is_empty()
 
 
 def test_on_rematch_accepts_when_offered(frontend):
@@ -404,3 +410,64 @@ def test_on_rematch_requests_when_not_offered(frontend):
     frontend._rematch_offered = False
     frontend._on_rematch()
     assert sent == [("req",)]
+
+
+def _arm_post_game(frontend, **client):
+    frontend.online_client = SimpleNamespace(**client)
+    frontend.mode = ONLINE
+    frontend.manual_result = "draw_agreement"
+    frontend._chosen_side = "white"
+    frontend.white_name, frontend.black_name = "Me", "Them"
+
+
+def test_decline_rematch_sends_false_and_clears(frontend):
+    sent = []
+    frontend.online_client = SimpleNamespace(
+        send_rematch_response=lambda accept: sent.append(accept))
+    frontend._rematch_offered = True
+    frontend.result_menu.set_rematch_offered(True)
+    frontend._decline_rematch()
+    assert sent == [False]
+    assert frontend._rematch_offered is False
+    assert frontend.result_menu.rematch_offered is False
+
+
+def test_rematch_update_reconnecting_keeps_client(frontend):
+    _arm_post_game(frontend, disconnect=lambda: None)
+    frontend._handle_rematch_update({"event": "opponent_reconnecting"})
+    assert frontend.toast.is_visible()
+    assert frontend.online_client is not None
+    assert frontend.mode == ONLINE
+
+
+def test_rematch_update_declined_bubbles_and_returns_to_menu(frontend):
+    _arm_post_game(frontend, disconnect=lambda: None)
+    frontend._rematch_offered = True
+    frontend._handle_rematch_update({"event": "declined"})
+    assert frontend.toast.is_visible()
+    assert frontend.online_client is None
+    assert frontend.mode == "menu"
+    assert frontend._rematch_offered is False
+
+
+def test_back_to_menu_keeps_client_and_reshows_banner_post_game(frontend):
+    sent = []
+    _arm_post_game(
+        frontend,
+        send_left_result=lambda: sent.append("left"),
+        disconnect=lambda: sent.append("disc"),
+    )
+    frontend._rematch_offered = True
+    frontend._on_back_to_menu()
+    assert sent == ["left"]
+    assert frontend.online_client is not None
+    assert frontend.mode == "menu"
+    assert not frontend.offer_banners.is_empty()
+
+
+def test_match_found_rematch_uses_rematch_eyebrow(frontend):
+    frontend.match_found_modal.show("A", "B", "white", lambda: None,
+                                    seconds=3, rematch=True)
+    frontend.match_found_modal.window.fill((0, 0, 0))
+    frontend.match_found_modal.draw()
+    assert frontend.match_found_modal.rematch is True

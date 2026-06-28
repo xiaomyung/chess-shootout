@@ -53,6 +53,9 @@ class OfferBanners:
     def clear(self):
         self._banners = []
 
+    def dismiss(self, key):
+        self._banners = [b for b in self._banners if b["key"] != key]
+
     def is_empty(self):
         return not self._banners
 

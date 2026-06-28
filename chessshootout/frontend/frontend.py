@@ -412,11 +412,16 @@ class Frontend(OnlineEventsMixin):
         self.sound_manager.play_game_start()
 
     def _on_back_to_menu(self):
+        keep_online = (self.mode == ONLINE and self.online_client is not None
+                       and self.current_result() is not None)
+        had_rematch_offer = self._rematch_offered
         self.mode = "menu"
         self._match_session_id = None
         self._reconnect_probe_attempts = 0
         pg.display.set_caption(WINDOW_TITLE)
-        if self.online_client is not None:
+        if keep_online:
+            self.online_client.send_left_result()
+        elif self.online_client is not None:
             self.online_client.disconnect()
             self.online_client = None
         self.match.mode = SINGLE_SCREEN
@@ -437,6 +442,8 @@ class Frontend(OnlineEventsMixin):
             self._on_open_history()
         else:
             self.menu_page.set_page(PAGE_CARD)
+        if keep_online and had_rematch_offer:
+            self._reshow_rematch_banner()
 
     def _refresh_load_pgn_availability(self):
         self.start_menu.load_pgn_available = self._latest_pgn_path() is not None
@@ -824,6 +831,11 @@ class Frontend(OnlineEventsMixin):
         if not addr:
             self._on_online_cancel()
             return
+        if self.online_client is not None:
+            self.online_client.disconnect()
+            self.online_client = None
+        self.offer_banners.dismiss("rematch_request")
+        self._rematch_offered = False
         self.online_client = OnlineClient()
         request = {
             "nickname": (self._online_config.get("nickname") or "").strip() or "Player",
@@ -875,6 +887,8 @@ class Frontend(OnlineEventsMixin):
             self.online_client.send_rematch_response(True)
         else:
             self.online_client.send_rematch_request()
+            self.toast.show(f"Rematch sent — waiting for {self._opp_name()}…",
+                            key="rematch_state")
 
     def _tear_down_online_session(self):
         if self.online_client is not None:
@@ -953,9 +967,8 @@ class Frontend(OnlineEventsMixin):
             self._begin_resync()
 
     def _send_heartbeat_if_due(self):
-        if (self.mode != ONLINE or self.online_client is None
-                or self.online_client.state != "connected"
-                or self.current_result() is not None):
+        if (self.online_client is None
+                or self.online_client.state != "connected"):
             return
         if self.online_client.is_server_silent():
             log.info("server heartbeat silent; escalating to reconnect")
@@ -1145,6 +1158,8 @@ class Frontend(OnlineEventsMixin):
             self._on_online_cancel()
             return True
         if not self.offer_banners.is_empty():
+            if self._rematch_offered:
+                self._decline_rematch()
             self.offer_banners.clear()
             return True
         return False
@@ -1567,7 +1582,6 @@ class Frontend(OnlineEventsMixin):
             self.player_strip_top.draw()
             self.player_strip_bottom.draw()
             self.right_menu.draw_menu()
-            self.offer_banners.draw(self.board.rect)
             self.board.draw_drag_overlay()
             self._update_result_pending()
             if not self.match_found_modal.is_visible():
@@ -1595,6 +1609,7 @@ class Frontend(OnlineEventsMixin):
             self.menu_page.draw_foreground()
         if self.mode == "menu":
             self.menu_battle.draw_intro_overlay(self.window)
+        self.offer_banners.draw(self._banner_rect())
         self.options_modal.draw()
         self.directory_browser.draw()
         self.country_picker.draw()
@@ -1856,6 +1871,12 @@ class Frontend(OnlineEventsMixin):
             return None, None
         return label, remaining
 
+    def _banner_rect(self):
+        if self.mode != "menu":
+            return self.board.rect
+        return pg.Rect(0, WindowChrome.HEIGHT, self.window_width,
+                       self.window_height - WindowChrome.HEIGHT)
+
     def _apply_window_size(self, size):
         w = max(size[0], MIN_WINDOW_WIDTH)
         h = max(size[1], MIN_WINDOW_HEIGHT)
@@ -2109,10 +2130,10 @@ class Frontend(OnlineEventsMixin):
         if self.options_modal.is_visible():
             self.options_modal.handle_click(pos)
             return
+        if self.offer_banners.handle_click(pos):
+            return
         if self.mode == "menu":
             self.menu_page.handle_click(pos)
-            return
-        if self.offer_banners.handle_click(pos):
             return
         if self.result_menu.handle_click(pos):
             return

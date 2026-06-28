@@ -74,6 +74,7 @@ class OnlineClient:
         self.opp_state = "connected"
         self._in_queue = False
         self._game_active = False
+        self._post_game = False
         self._ping_samples_ms = deque(maxlen=PING_SAMPLE_WINDOW)
         self._heartbeat_interval = HEARTBEAT_INTERVAL_SECONDS
         self._reconnect_total = RECONNECT_TOTAL_SECONDS
@@ -171,6 +172,9 @@ class OnlineClient:
 
     def send_rematch_response(self, accept):
         self._enqueue("send_rematch_response", accept)
+
+    def send_left_result(self):
+        self._enqueue("send_left_result")
 
     def send_takeback_request(self):
         self._enqueue("send_takeback_request")
@@ -320,7 +324,7 @@ class OnlineClient:
     async def _run_session_with_reconnects(self):
         try:
             await self._run_ws_session()
-            while (not self._stop.is_set() and self._game_active
+            while (not self._stop.is_set() and (self._game_active or self._post_game)
                    and self._session_token is not None):
                 log.info("ws dropped mid-game; attempting reconnect")
                 self.state = "reconnecting"
@@ -434,8 +438,10 @@ class OnlineClient:
                 if msg_type == "game_start":
                     self._in_queue = False
                     self._game_active = True
+                    self._post_game = False
                 if msg_type == "result":
                     self._game_active = False
+                    self._post_game = True
                     log.info("ws result reason=%s winner=%s",
                              msg.get("reason"), msg.get("winner_color"))
                 if msg_type == "connection_status":
