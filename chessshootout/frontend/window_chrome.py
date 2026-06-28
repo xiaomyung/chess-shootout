@@ -400,13 +400,6 @@ class WindowChrome:
             except Exception:
                 log.warning("minimize failed", exc_info=True)
 
-    def raise_window(self):
-        if self._win_ptr is not None:
-            try:
-                self._sdl.SDL_RaiseWindow(self._win_ptr)
-            except Exception:
-                log.warning("raise window failed", exc_info=True)
-
     def apply_fullscreen(self, enable):
         if self._win_ptr is None:
             return False
@@ -425,6 +418,3 @@ class WindowChrome:
         enable = self._win_state != "fullscreen"
         self._win_state = "fullscreen" if enable else "normal"
         self._on_fullscreen(enable)
-
-    def set_state(self, fullscreen):
-        self._win_state = "fullscreen" if fullscreen else "normal"
