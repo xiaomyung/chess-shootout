@@ -156,14 +156,13 @@ def test_resolve_owning_sdl_disables_when_no_instance_owns_window(chrome, monkey
     assert not chrome._win_ptr
 
 
-def test_toggle_maximize_no_op_when_chrome_disabled(chrome):
-    """With no owning SDL2 instance the min/max/fullscreen actions must no-op, not crash."""
+def test_fullscreen_no_op_when_chrome_disabled(chrome):
+    """With no owning SDL2 instance the fullscreen/minimize actions must no-op, not crash."""
     chrome._sdl = None
     chrome._win_ptr = None
-    chrome.toggle_maximize()
     chrome.toggle_fullscreen()
     chrome._minimize()
-    assert chrome._is_maximized() is False
+    assert chrome._win_state == "normal"
 
 
 def _stub_geometry(chrome, monkeypatch, bounds):
@@ -193,20 +192,51 @@ def test_fullscreen_toggle_stores_and_restores_rect(chrome, monkeypatch):
     assert chrome._restore_rect is None
 
 
-def test_windows_maximize_uses_usable_bounds(chrome, monkeypatch):
-    """On Windows the green dot resizes to the work area (taskbar visible)."""
-    monkeypatch.setattr(os, "name", "nt")
+def test_green_dot_goes_true_fullscreen(chrome, monkeypatch):
+    """The green dot (and F11) fill the full monitor bounds, covering the taskbar
+    (true fullscreen everywhere), not the work area."""
     resized = []
     chrome._on_resize = resized.append
-    _stub_geometry(chrome, monkeypatch, (0, 0, 1920, 1040))
-    chrome.toggle_maximize()
-    assert chrome._win_state == "maximized"
-    assert resized[-1] == (1920, 1040)
+    _stub_geometry(chrome, monkeypatch, (0, 0, 1920, 1080))
+    chrome._activate("max")
+    assert chrome._win_state == "fullscreen"
+    assert resized[-1] == (1920, 1080)
 
 
-def test_double_click_titlebar_toggles_maximize(chrome, monkeypatch):
+def test_fullscreen_titlebar_is_not_draggable(chrome):
+    chrome._win_state = "fullscreen"
+    assert _hit(chrome, 500, 5) == _HITTEST_NORMAL
+
+
+def test_drag_on_fullscreen_titlebar_exits_fullscreen(chrome, monkeypatch):
     calls = []
-    monkeypatch.setattr(chrome, "toggle_maximize", lambda: calls.append(1))
+    monkeypatch.setattr(chrome, "toggle_fullscreen", lambda: calls.append(1))
+    chrome._win_state = "fullscreen"
+    chrome.draw()
+    pos = (chrome._w // 2, 5)
+    assert chrome.handle_click(pos) is True
+    assert chrome._fs_press_pos == pos
+    chrome.handle_title_motion((pos[0] + 30, pos[1]))
+    assert calls == [1]
+    assert chrome._fs_press_pos is None
+
+
+def test_tap_on_fullscreen_titlebar_does_not_exit(chrome, monkeypatch):
+    calls = []
+    monkeypatch.setattr(chrome, "toggle_fullscreen", lambda: calls.append(1))
+    chrome._win_state = "fullscreen"
+    chrome.draw()
+    pos = (chrome._w // 2, 5)
+    chrome.handle_click(pos)
+    chrome.handle_title_motion((pos[0] + 2, pos[1]))
+    assert calls == []
+    chrome.clear_title_press()
+    assert chrome._fs_press_pos is None
+
+
+def test_double_click_titlebar_toggles_fullscreen(chrome, monkeypatch):
+    calls = []
+    monkeypatch.setattr(chrome, "toggle_fullscreen", lambda: calls.append(1))
     chrome.draw()
     pos = (chrome._w // 2, 4)
     monkeypatch.setattr(pg.time, "get_ticks", lambda: 1000)

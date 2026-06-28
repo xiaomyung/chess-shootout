@@ -2295,6 +2295,7 @@ class Frontend(OnlineEventsMixin):
                 if self._skillcheck_swallows_input():
                     continue
                 if event.button == 1:
+                    self.chrome.clear_title_press()
                     self._mouse_left_released(event.pos)
                 elif event.button == 3:
                     self._right_click_released(event.pos)
@@ -2302,6 +2303,7 @@ class Frontend(OnlineEventsMixin):
             elif event.type == pg.MOUSEMOTION:
                 self.chrome.update_cursor(event.pos)
                 if event.buttons[0]:
+                    self.chrome.handle_title_motion(event.pos)
                     self._handle_left_drag_motion(event.pos)
 
             elif event.type == pg.MOUSEWHEEL:
