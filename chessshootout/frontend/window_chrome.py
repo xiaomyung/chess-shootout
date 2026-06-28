@@ -46,6 +46,7 @@ class _SDLPoint(ctypes.Structure):
 
 DOUBLE_CLICK_MS = 350
 FS_DRAG_EXIT_PX = 8
+_SDL_WINDOW_FULLSCREEN_DESKTOP = 0x00001001
 
 
 _HITTEST_CB = ctypes.CFUNCTYPE(
@@ -170,6 +171,8 @@ class WindowChrome:
         ]
         self._sdl.SDL_MinimizeWindow.argtypes = [ctypes.c_void_p]
         self._sdl.SDL_RaiseWindow.argtypes = [ctypes.c_void_p]
+        self._sdl.SDL_SetWindowFullscreen.argtypes = [ctypes.c_void_p, ctypes.c_uint32]
+        self._sdl.SDL_SetWindowFullscreen.restype = ctypes.c_int
 
     def _resize_code(self, x, y):
         w, h = self._w, self._h
@@ -403,6 +406,18 @@ class WindowChrome:
                 self._sdl.SDL_RaiseWindow(self._win_ptr)
             except Exception:
                 log.warning("raise window failed", exc_info=True)
+
+    def apply_fullscreen(self, enable):
+        if self._win_ptr is None:
+            return False
+        try:
+            flag = _SDL_WINDOW_FULLSCREEN_DESKTOP if enable else 0
+            self._sdl.SDL_SetWindowFullscreen(self._win_ptr, flag)
+            self._sdl.SDL_RaiseWindow(self._win_ptr)
+        except Exception:
+            log.warning("native fullscreen failed", exc_info=True)
+            return False
+        return True
 
     def toggle_fullscreen(self):
         if self._on_fullscreen is None:

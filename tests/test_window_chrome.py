@@ -126,7 +126,7 @@ class _FakeSDL:
     def __init__(self, win_ptr_ret):
         self.SDL_GetWindowFromID = _FakeFn(win_ptr_ret)
         for name in ("SDL_SetWindowHitTest", "SDL_SetWindowMinimumSize",
-                     "SDL_MinimizeWindow", "SDL_RaiseWindow"):
+                     "SDL_MinimizeWindow", "SDL_RaiseWindow", "SDL_SetWindowFullscreen"):
             setattr(self, name, _FakeFn(0))
 
 
@@ -182,6 +182,28 @@ def test_green_dot_toggles_fullscreen():
     chrome._activate("max")
     assert chrome._win_state == "fullscreen"
     assert calls == [True]
+
+
+def test_apply_fullscreen_toggles_sdl_flag_on_same_window():
+    """The no-recreation path: SDL_SetWindowFullscreen flips the desktop-fullscreen
+    flag on the existing window and raises it (to keep focus)."""
+    surface = pg.display.get_surface()
+    chrome = WindowChrome(surface)
+    sdl = _FakeSDL(0xABCD)
+    chrome._sdl = sdl
+    chrome._win_ptr = 0xABCD
+    assert chrome.apply_fullscreen(True) is True
+    assert sdl.SDL_SetWindowFullscreen.calls[-1] == (0xABCD, 0x00001001)
+    assert sdl.SDL_RaiseWindow.calls
+    assert chrome.apply_fullscreen(False) is True
+    assert sdl.SDL_SetWindowFullscreen.calls[-1] == (0xABCD, 0)
+
+
+def test_apply_fullscreen_false_without_handle():
+    surface = pg.display.get_surface()
+    chrome = WindowChrome(surface)
+    chrome._win_ptr = None
+    assert chrome.apply_fullscreen(True) is False
 
 
 def test_fullscreen_titlebar_is_not_draggable(chrome):

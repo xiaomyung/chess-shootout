@@ -223,7 +223,6 @@ class Frontend(OnlineEventsMixin):
         except (pg.error, OSError):
             pass
         self.chrome = WindowChrome(self.window, on_fullscreen=self._apply_fullscreen)
-        self._pending_fullscreen = None
         self.clock = pg.time.Clock()
 
         self.mode = "menu"
@@ -1525,7 +1524,6 @@ class Frontend(OnlineEventsMixin):
     def run(self):
         while self.running:
             self.check_events()
-            self._commit_pending_fullscreen()
             self.window.fill("black")
             self.draw_frame()
             ping = (self.online_client.get_ping_ms()
@@ -1880,13 +1878,14 @@ class Frontend(OnlineEventsMixin):
                        self.window_height - WindowChrome.HEIGHT)
 
     def _apply_fullscreen(self, enable):
-        self._pending_fullscreen = enable
-
-    def _commit_pending_fullscreen(self):
-        if self._pending_fullscreen is None:
+        if self.chrome.apply_fullscreen(enable):
+            self.window = pg.display.get_surface()
+            self.chrome.window = self.window
+            self.window_width, self.window_height = self.window.get_size()
+            self.chrome.set_state(enable)
+            self._cancel_all_scroll()
+            self._compute_layout()
             return
-        enable = self._pending_fullscreen
-        self._pending_fullscreen = None
         if enable:
             self._windowed_size = self.window.get_size()
             sizes = pg.display.get_desktop_sizes()
