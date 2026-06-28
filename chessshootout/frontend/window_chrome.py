@@ -44,6 +44,8 @@ class _SDLPoint(ctypes.Structure):
     _fields_ = [("x", ctypes.c_int), ("y", ctypes.c_int)]
 
 
+DOUBLE_CLICK_MS = 350
+FS_DRAG_EXIT_PX = 8
 _SDL_WINDOW_FULLSCREEN_DESKTOP = 0x00001001
 
 
@@ -113,6 +115,8 @@ class WindowChrome:
         self._cursor = None
         self._on_fullscreen = on_fullscreen
         self._win_state = "normal"
+        self._last_title_click_ms = 0
+        self._fs_press_pos = None
         self._init_sdl()
 
     def reinit_sdl(self):
@@ -169,8 +173,6 @@ class WindowChrome:
         self._sdl.SDL_RaiseWindow.argtypes = [ctypes.c_void_p]
         self._sdl.SDL_SetWindowFullscreen.argtypes = [ctypes.c_void_p, ctypes.c_uint32]
         self._sdl.SDL_SetWindowFullscreen.restype = ctypes.c_int
-        self._sdl.SDL_GetWindowFlags.argtypes = [ctypes.c_void_p]
-        self._sdl.SDL_GetWindowFlags.restype = ctypes.c_uint32
 
     def _resize_code(self, x, y):
         w, h = self._w, self._h
@@ -198,10 +200,11 @@ class WindowChrome:
     def _hit_test(self, win, area_ptr, data):
         x = area_ptr.contents.x
         y = area_ptr.contents.y
-        if self._win_state == "normal":
-            code = self._resize_code(x, y)
-            if code is not None:
-                return code
+        if self._win_state != "normal":
+            return _HITTEST_NORMAL
+        code = self._resize_code(x, y)
+        if code is not None:
+            return code
         if y < self.HEIGHT:
             for rect in self._dot_rects.values():
                 if rect.collidepoint(x, y):
@@ -359,7 +362,28 @@ class WindowChrome:
             if rect.collidepoint(pos):
                 self._activate(key)
                 return True
+        if self._win_state != "normal":
+            self._fs_press_pos = pos
+            return True
+        now = pg.time.get_ticks()
+        if now - self._last_title_click_ms <= DOUBLE_CLICK_MS:
+            self._last_title_click_ms = 0
+            self.toggle_fullscreen()
+        else:
+            self._last_title_click_ms = now
         return True
+
+    def handle_title_motion(self, pos):
+        if self._fs_press_pos is None:
+            return
+        dx = pos[0] - self._fs_press_pos[0]
+        dy = pos[1] - self._fs_press_pos[1]
+        if dx * dx + dy * dy >= FS_DRAG_EXIT_PX * FS_DRAG_EXIT_PX:
+            self._fs_press_pos = None
+            self.toggle_fullscreen()
+
+    def clear_title_press(self):
+        self._fs_press_pos = None
 
     def _activate(self, key):
         if key == "close":
@@ -375,16 +399,6 @@ class WindowChrome:
                 self._sdl.SDL_MinimizeWindow(self._win_ptr)
             except Exception:
                 log.warning("minimize failed", exc_info=True)
-
-    def sync_state_from_window(self):
-        if self._win_ptr is None:
-            return
-        try:
-            flags = self._sdl.SDL_GetWindowFlags(self._win_ptr)
-        except Exception:
-            return
-        self._win_state = ("fullscreen"
-                           if flags & _SDL_WINDOW_FULLSCREEN_DESKTOP else "normal")
 
     def apply_fullscreen(self, enable):
         if self._win_ptr is None:
