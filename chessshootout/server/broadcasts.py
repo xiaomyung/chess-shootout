@@ -34,7 +34,7 @@ async def resolve_skillcheck_fail(connections, room):
     return pending
 
 
-async def broadcast_game_start(connections, room, now):
+async def broadcast_game_start(connections, room, now, rematch=False):
     fen = export_fen(room.backend)
     started_seconds_ago = max(now() - (room.started_at or now()), 0.0)
     sent = []
@@ -54,6 +54,7 @@ async def broadcast_game_start(connections, room, now):
             black_score=room.score_for("black"),
             white_country=room.white.country if room.white else None,
             black_country=room.black.country if room.black else None,
+            rematch=rematch,
         ))
         sent.append(color)
     room.game_start_broadcast = True

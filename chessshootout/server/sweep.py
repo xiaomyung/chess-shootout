@@ -2,7 +2,10 @@ from chessshootout.server import logging_setup
 from chessshootout.server.broadcasts import finalize_and_broadcast, resolve_skillcheck_fail
 from chessshootout.server.connections import send
 from chessshootout.server.protocol import (
-    ConnectionStatusMessage, FIRST_MOVE_ABORT_SECONDS, Reason,
+    ConnectionStatusMessage, FIRST_MOVE_ABORT_SECONDS, Reason, RematchUpdateMessage,
+)
+from chessshootout.server.rooms import (
+    REMATCH_ABSOLUTE_CAP_SECONDS, REMATCH_IDLE_SECONDS, POST_GAME_DISCONNECT_GRACE,
 )
 from chessshootout.skillcheck import online
 from chessshootout.skillcheck.types import SkillCheckKind
@@ -39,7 +42,8 @@ class Sweep:
         await self.step_clock_and_first_move_abort()
         await self.step_heartbeat_timeout()
         await self.step_grace_expired()
-        self.step_drop_orphans_and_post_result()
+        self.step_drop_orphans_pre_game()
+        await self.step_post_game()
         self.rooms.gc_finished_rooms()
 
     async def step_skillcheck_deadline(self):
@@ -104,20 +108,65 @@ class Sweep:
                 await finalize_and_broadcast(self.rooms, self.connections, room,
                                              Reason.ABANDONMENT, winner_color=winner)
 
-    def step_drop_orphans_and_post_result(self):
+    def step_drop_orphans_pre_game(self):
         now = self._now()
         for room in list(self.rooms._active.values()):
+            if room.result is not None or room.first_move_at is not None:
+                continue
             white_present = (room.white is not None
                              and self.connections.get_for_color(room, "white") is not None)
             black_present = (room.black is not None
                              and self.connections.get_for_color(room, "black") is not None)
-            if (room.first_move_at is None
-                    and not white_present and not black_present
+            if (not white_present and not black_present
                     and room.started_at is not None
                     and now - room.started_at >= PREGAME_CONNECT_GRACE_SECONDS):
                 log.info("drop room=%s reason=both_disconnected_pre_game", room.room_id)
                 self.rooms.drop_room_now(room.room_id)
+
+    async def _notify_rematch(self, room, color, event):
+        ws = self.connections.get_for_color(room, color)
+        if ws is not None:
+            await send(ws, RematchUpdateMessage(event=event))
+
+    async def step_post_game(self):
+        now = self._now()
+        for room in list(self.rooms._active.values()):
+            if room.result is None:
                 continue
-            if room.result is not None and not (white_present and black_present):
-                log.info("drop room=%s reason=post_result_disconnect", room.room_id)
+            white_present = self.connections.get_for_color(room, "white") is not None
+            black_present = self.connections.get_for_color(room, "black") is not None
+            if not white_present and not black_present:
+                log.info("drop room=%s reason=both_disconnected_post_result", room.room_id)
+                self.rooms.drop_room_now(room.room_id)
+                continue
+            present_color = "white" if white_present else "black"
+            if room.ended_at is not None and now - room.ended_at >= REMATCH_ABSOLUTE_CAP_SECONDS:
+                await self._notify_rematch(room, present_color, "window_expired")
+                if white_present and black_present:
+                    await self._notify_rematch(room, room.opp_color(present_color),
+                                               "window_expired")
+                log.info("drop room=%s reason=rematch_cap", room.room_id)
+                self.rooms.drop_room_now(room.room_id)
+                continue
+            if not (white_present and black_present):
+                gone_color = "black" if white_present else "white"
+                gone = room.slot(gone_color)
+                if (gone is not None and gone.disconnected_at is not None
+                        and now - gone.disconnected_at >= POST_GAME_DISCONNECT_GRACE):
+                    await self._notify_rematch(room, present_color, "opponent_left")
+                    log.info("drop room=%s reason=rematch_grace_expired gone=%s",
+                             room.room_id, gone_color)
+                    self.rooms.drop_room_now(room.room_id)
+                continue
+            if not room.white.at_result and not room.black.at_result:
+                await self._notify_rematch(room, "white", "window_expired")
+                await self._notify_rematch(room, "black", "window_expired")
+                log.info("drop room=%s reason=both_left_result", room.room_id)
+                self.rooms.drop_room_now(room.room_id)
+                continue
+            last = room.last_rematch_activity_at or room.ended_at
+            if last is not None and now - last >= REMATCH_IDLE_SECONDS:
+                await self._notify_rematch(room, "white", "window_expired")
+                await self._notify_rematch(room, "black", "window_expired")
+                log.info("drop room=%s reason=rematch_idle", room.room_id)
                 self.rooms.drop_room_now(room.room_id)

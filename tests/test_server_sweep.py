@@ -105,10 +105,10 @@ async def test_sweep_step_drop_orphans_pre_game(sweep, app, clock):
     rooms = app.state.rooms
     await _pair(rooms)
     assert rooms.rooms_active == 1
-    sweep.step_drop_orphans_and_post_result()
+    sweep.step_drop_orphans_pre_game()
     assert rooms.rooms_active == 1
     clock.advance(PREGAME_CONNECT_GRACE_SECONDS)
-    sweep.step_drop_orphans_and_post_result()
+    sweep.step_drop_orphans_pre_game()
     assert rooms.rooms_active == 0
 
 
@@ -119,7 +119,7 @@ async def test_sweep_step_drop_orphans_skips_after_first_move(sweep, app, clock)
     rooms = app.state.rooms
     room = await _pair(rooms)
     room.first_move_at = clock()
-    sweep.step_drop_orphans_and_post_result()
+    sweep.step_drop_orphans_pre_game()
     assert rooms.rooms_active == 1
 
 
@@ -139,15 +139,19 @@ async def test_sweep_step_all_runs_in_documented_order(sweep, app, clock, monkey
     def _trace_drop():
         calls.append("drop_orphans")
 
+    async def _trace_post_game():
+        calls.append("post_game")
+
     monkeypatch.setattr(sweep, "step_clock_and_first_move_abort", _trace_clock)
     monkeypatch.setattr(sweep, "step_grace_expired", _trace_grace)
     monkeypatch.setattr(sweep, "step_heartbeat_timeout", _trace_heartbeat)
-    monkeypatch.setattr(sweep, "step_drop_orphans_and_post_result", _trace_drop)
+    monkeypatch.setattr(sweep, "step_drop_orphans_pre_game", _trace_drop)
+    monkeypatch.setattr(sweep, "step_post_game", _trace_post_game)
     monkeypatch.setattr(sweep.rooms, "gc_finished_rooms",
                         lambda: calls.append("gc"))
     await sweep.step_all()
     assert calls == ["clock_and_first_move", "heartbeat_timeout", "grace",
-                     "drop_orphans", "gc"]
+                     "drop_orphans", "post_game", "gc"]
 
 
 @pytest.mark.asyncio

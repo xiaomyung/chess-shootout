@@ -14,7 +14,9 @@ from chessshootout.skillcheck.online import SKILLCHECK_DEADLINE_MS
 from chessshootout.skillcheck.types import SkillCheckKind
 
 
-REMATCH_KEEP_ALIVE_SECONDS = 60
+REMATCH_IDLE_SECONDS = 300.0
+REMATCH_ABSOLUTE_CAP_SECONDS = 900.0
+POST_GAME_DISCONNECT_GRACE = GRACE_SECONDS
 PAIRING_WAIT_SECONDS = 30
 
 
@@ -41,6 +43,7 @@ class PlayerSlot:
     disconnected_at: Optional[float] = None
     desync_active: bool = False
     last_seen: float = 0.0
+    at_result: bool = False
 
 
 @dataclass
@@ -70,6 +73,7 @@ class Room:
     started_at: Optional[float] = None
     first_move_at: Optional[float] = None
     ended_at: Optional[float] = None
+    last_rematch_activity_at: Optional[float] = None
     game_start_broadcast: bool = False
     draw_offered_by: Optional[str] = None
     takeback_offered_by: Optional[str] = None
@@ -315,7 +319,11 @@ class RoomManager:
             return
         room.result = (reason, winner_color)
         room.ended_at = self._now()
+        room.last_rematch_activity_at = room.ended_at
         room.pending_skillcheck = None
+        for slot in (room.white, room.black):
+            if slot is not None:
+                slot.at_result = True
         self._award_series(room, reason, winner_color)
 
     @staticmethod
@@ -332,15 +340,33 @@ class RoomManager:
                 if slot is not None:
                     scores[slot.nickname] = scores.get(slot.nickname, 0.0) + 0.5
 
-    def gc_finished_rooms(self):
+    def finished_timed_out(self, room):
+        if room.result is None or room.ended_at is None:
+            return False
         now = self._now()
+        last = room.last_rematch_activity_at or room.ended_at
+        return (now - last >= REMATCH_IDLE_SECONDS
+                or now - room.ended_at >= REMATCH_ABSOLUTE_CAP_SECONDS)
+
+    def gc_finished_rooms(self):
         to_drop = [
             room_id for room_id, room in self._active.items()
-            if room.ended_at is not None
-            and now - room.ended_at >= REMATCH_KEEP_ALIVE_SECONDS
+            if self.finished_timed_out(room)
         ]
         for room_id in to_drop:
             self._drop_room(room_id)
+
+    def mark_rematch_activity(self, room):
+        room.last_rematch_activity_at = self._now()
+
+    def finished_room_for(self, client_uuid):
+        room_id = self._uuid_to_room.get(client_uuid)
+        if room_id is None:
+            return None
+        room = self._active.get(room_id)
+        if room is None or room.result is None:
+            return None
+        return room
 
     def drop_room_now(self, room_id):
         if room_id in self._active:
@@ -357,7 +383,7 @@ class RoomManager:
     def reset_for_rematch(self, room_id):
         room = self._active.get(room_id)
         if room is None or room.result is None:
-            return
+            return False
         old_white, old_black = room.white, room.black
         room.white, room.black = old_black, old_white
         room.backend = Backend()
@@ -373,11 +399,16 @@ class RoomManager:
         room.started_at = self._now()
         room.first_move_at = None
         room.ended_at = None
+        room.last_rematch_activity_at = None
         room.game_start_broadcast = False
         room.draw_offered_by = None
         room.takeback_offered_by = None
         room.rematch_offered_by = set()
         room.result = None
+        for slot in (room.white, room.black):
+            if slot is not None:
+                slot.at_result = False
+        return True
 
     @staticmethod
     def make_session_token():

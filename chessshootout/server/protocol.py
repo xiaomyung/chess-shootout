@@ -56,6 +56,8 @@ class Reason:
     NOT_IN_ROOM = "not_in_room"
     ROOM_FULL = "room_full"
     RATE_LIMITED = "rate_limited"
+    GAME_ALREADY_OVER = "game_already_over"
+    REMATCH_UNAVAILABLE = "rematch_unavailable"
 
     CHECKMATE = "checkmate"
     RESIGNATION = "resignation"
@@ -265,6 +267,21 @@ class RematchResponseMessage(_Base):
     accept: bool
 
 
+RematchUpdateEvent = Literal[
+    "declined", "cancelled", "window_expired",
+    "opponent_left", "opponent_reconnecting", "opponent_returned",
+]
+
+
+class RematchUpdateMessage(_Base):
+    type: Literal["rematch_update"] = "rematch_update"
+    event: RematchUpdateEvent
+
+
+class LeftResultMessage(_Base):
+    type: Literal["left_result"] = "left_result"
+
+
 class TakebackResponseMessage(_Base):
     type: Literal["takeback_response"] = "takeback_response"
     accept: bool
@@ -285,6 +302,7 @@ class GameStartMessage(_Base):
     black_country: Optional[str] = None
     heartbeat_interval_seconds: float = HEARTBEAT_INTERVAL_SECONDS
     grace_seconds: float = GRACE_SECONDS
+    rematch: bool = False
 
 
 class MoveAppliedMessage(_Base):

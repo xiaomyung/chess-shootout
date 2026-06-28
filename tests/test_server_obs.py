@@ -65,7 +65,7 @@ def _parse_dispatch_line(line):
 def test_handlers_dispatch_table_covers_all_known_message_types():
     expected = {
         "move", "resign", "draw_offer", "draw_response",
-        "rematch_request", "rematch_response",
+        "rematch_request", "rematch_response", "left_result",
         "takeback_request", "takeback_response",
         "give_time", "ping", "skill_check_shot",
     }
