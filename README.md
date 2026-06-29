@@ -37,8 +37,9 @@ server for online two-player matches.
   comic blood, and board screen-shake; each piece type fires its own shot.
 - FPS-style announcer with killstreaks (FIRST BLOOD → DOUBLE … GODLIKE), a
   checkmate takeover, and a surrender flag.
-- Custom borderless window chrome — native drag, edge/corner resize, and a
-  themed title bar on every screen.
+- Custom borderless window chrome — native drag, edge/corner resize, fullscreen
+  (`F11` or the green title-bar button), minimize, and a themed title bar on
+  every screen.
 - Animated menu "battle" backdrop and themed result / online screens.
 
 **PGN**
@@ -139,6 +140,7 @@ pyenv shell 3.12                  # `python3.12` now resolves for the venv step 
 | Key | Action |
 |---|---|
 | `F` | Flip board |
+| `F11` | Toggle fullscreen |
 | `R` | Resign / promote to rook (when a promotion is pending) |
 | `D` | Offer draw |
 | `Q` / `B` / `N` | Promote (queen / bishop / knight) |
