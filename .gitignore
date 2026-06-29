@@ -21,6 +21,7 @@ AppDir/
 *.AppImage
 *.egg-info/
 local_build/
+sound_staging/
 assets/version.txt
 secrets/
 gameserver.env

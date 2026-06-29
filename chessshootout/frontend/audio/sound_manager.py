@@ -25,7 +25,13 @@ ONESHOT_FADE_MS = 20
 
 GUNS_DIR = "guns"
 
+MOVE_DIR = "piece_moves"
+
 ANNOUNCER_DIR = "announcer"
+
+PIECE_MOVE_KEYS = tuple(sorted(PIECE_GUN))
+
+GUN_NAMES = tuple(sorted(set(PIECE_GUN.values())))
 
 ONE_SHOT_FILES = {
     "checkmate": "metal_pipe_falling.ogg",
@@ -48,7 +54,6 @@ ANNOUNCER_FILES = {
 }
 
 VARIANT_DIRS = {
-    "move": "piece_moves",
     "reload": f"{GUNS_DIR}/shotgun_reloads",
     "hit": f"{ANNOUNCER_DIR}/hits",
 }
@@ -76,15 +81,19 @@ class SoundManager:
 
         if not self.enabled:
             self._variants = {}
-            self._gun_shots = {}
+            self._move_default = []
+            self._move_pools = {}
+            self._gun_pools = {}
             self._oneshots = {}
             self._heartbeat_channel = None
             return
 
         sounds_dir = Path(sounds_dir)
-        self._variants = {key: self._load_variants(sounds_dir / rel)
+        self._variants = {key: self._load_pool(sounds_dir / rel)
                           for key, rel in VARIANT_DIRS.items()}
-        self._gun_shots = self._load_gun_shots(sounds_dir / GUNS_DIR)
+        self._move_default = self._load_pool(sounds_dir / MOVE_DIR)
+        self._move_pools = self._load_keyed_pools(sounds_dir / MOVE_DIR, PIECE_MOVE_KEYS)
+        self._gun_pools = self._load_gun_pools(sounds_dir / GUNS_DIR)
         self._oneshots = {key: self._safe_load(sounds_dir / rel)
                           for key, rel in {**ONE_SHOT_FILES, **ANNOUNCER_FILES}.items()}
         self._heartbeat_channel = (
@@ -92,15 +101,30 @@ class SoundManager:
             else self._reserve_channel(0)
         )
 
-    def _load_variants(self, dir_path):
+    def _load_pool(self, dir_path):
         if not dir_path.is_dir():
             return []
         return [s for p in sorted(dir_path.glob("*.ogg"))
                 if (s := self._safe_load(p)) is not None]
 
-    def _load_gun_shots(self, guns_dir):
-        return {gun: s for gun in sorted(set(PIECE_GUN.values()))
-                if (s := self._safe_load(guns_dir / f"{gun}_shot.ogg")) is not None}
+    def _load_keyed_pools(self, base_dir, keys):
+        pools = {}
+        for key in keys:
+            pool = self._load_pool(base_dir / key)
+            if pool:
+                pools[key] = pool
+        return pools
+
+    def _load_gun_pools(self, guns_dir):
+        pools = {}
+        for gun in GUN_NAMES:
+            pool = self._load_pool(guns_dir / gun)
+            if not pool:
+                single = self._safe_load(guns_dir / f"{gun}_shot.ogg")
+                pool = [single] if single is not None else []
+            if pool:
+                pools[gun] = pool
+        return pools
 
     @staticmethod
     def _safe_load(path):
@@ -137,23 +161,34 @@ class SoundManager:
     def _play_with_master(self, sound):
         self._play_at(sound, self.master_volume)
 
-    def play_menu_gun(self, gun):
-        if not self.enabled:
+    def _play_random_at(self, sounds, volume):
+        if not self.enabled or not sounds:
             return
-        sound = self._gun_shots.get(gun)
-        if sound is not None:
-            self._play_at(sound, self.master_volume * self.menu_volume)
+        self._play_at(random.choice(sounds), volume)
 
     def _play_random(self, sounds):
         if not self.enabled or not sounds:
             return
         self._play_with_master(random.choice(sounds))
 
-    def play_move(self):
-        self._play_random(self._variants.get("move", []))
+    def play_menu_gun(self, gun):
+        if not self.enabled:
+            return
+        self._play_random_at(self._gun_pools.get(gun) or [],
+                             self.master_volume * self.menu_volume)
 
-    def play_premove_queued(self):
-        self._play_random(self._variants.get("move", []))
+    def play_move(self, piece_type=None):
+        self._play_random(self._resolve_move_pool(piece_type))
+
+    def play_premove_queued(self, piece_type=None):
+        self.play_move(piece_type)
+
+    def _resolve_move_pool(self, piece_type):
+        if piece_type is not None:
+            pool = self._move_pools.get(piece_type.value)
+            if pool:
+                return pool
+        return self._move_default
 
     def play_check(self):
         self._play_random(self._variants.get("reload", []))
@@ -162,11 +197,10 @@ class SoundManager:
         if not self.enabled:
             return
         gun = PIECE_GUN.get(piece_type.value) if piece_type is not None else None
-        sound = self._gun_shots.get(gun)
-        if sound is None and self._gun_shots:
-            sound = next(iter(self._gun_shots.values()))
-        if sound is not None:
-            self._play_with_master(sound)
+        pool = self._gun_pools.get(gun)
+        if not pool and self._gun_pools:
+            pool = next(iter(self._gun_pools.values()))
+        self._play_random(pool or [])
 
     def play_checkmate(self):
         self._play_one_shot("checkmate")

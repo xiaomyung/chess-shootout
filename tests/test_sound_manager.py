@@ -65,43 +65,58 @@ PER_EVENT_PLAY_METHODS = [
 
 
 def test_loads_variants_and_oneshots(manager):
-    assert len(manager._variants["move"]) > 0
+    assert len(manager._move_default) > 0
     assert len(manager._variants["reload"]) > 0
     for key in ("checkmate", "undo", "game_start", "heartbeat", "castle",
                 "you_lose", "online_game_start"):
         assert manager._oneshots[key] is not None
 
 
-def test_loads_a_shot_for_every_gun(manager):
+def test_loads_a_pool_for_every_gun(manager):
     for gun in GUN_NAMES:
-        assert gun in manager._gun_shots
-        assert manager._gun_shots[gun] is not None
+        assert gun in manager._gun_pools
+        assert len(manager._gun_pools[gun]) >= 1
+        assert all(s is not None for s in manager._gun_pools[gun])
 
 
-def test_each_gun_shot_is_a_distinct_sound(manager):
-    sounds = [manager._gun_shots[g] for g in GUN_NAMES]
+def test_each_gun_pool_leads_with_a_distinct_sound(manager):
+    sounds = [manager._gun_pools[g][0] for g in GUN_NAMES]
     assert len(set(id(s) for s in sounds)) == len(GUN_NAMES)
 
 
-def test_gun_shots_empty_when_guns_dir_missing(tmp_path):
+def test_load_pool_has_no_count_cap(tmp_path, manager):
+    """_load_pool globs every *.ogg (sorted) with no cap, so reload/variant
+    pools grow as files are added."""
+    for i in range(9):
+        (tmp_path / f"{i:02d}.ogg").write_bytes(b"")
+    with patch.object(SoundManager, "_safe_load", side_effect=lambda p: MagicMock()):
+        pool = manager._load_pool(tmp_path)
+    assert len(pool) == 9
+
+
+def test_gun_pools_empty_when_guns_dir_missing(tmp_path):
     sm = SoundManager(tmp_path, heartbeat_channel=MagicMock(), master_volume=1.0)
-    assert sm._gun_shots == {}
+    assert sm._gun_pools == {}
 
 
 def test_disabled_manager_has_empty_state():
     sm = SoundManager(SOUNDS_DIR, enabled=False)
     assert sm._variants == {}
-    assert sm._gun_shots == {}
+    assert sm._move_default == []
+    assert sm._move_pools == {}
+    assert sm._gun_pools == {}
     assert sm._oneshots == {}
     assert sm._heartbeat_channel is None
 
 
 def test_construction_with_missing_variant_dirs_does_not_crash(tmp_path):
     sm = SoundManager(tmp_path, heartbeat_channel=MagicMock(), master_volume=1.0)
-    assert sm._variants["move"] == []
+    assert sm._move_default == []
+    assert sm._move_pools == {}
     assert sm._variants["reload"] == []
-    assert sm._gun_shots == {}
+    assert sm._gun_pools == {}
     sm.play_move()
+    sm.play_move(PieceType.QUEEN)
     sm.play_check()
     sm.play_capture(PieceType.PAWN)
 
@@ -128,24 +143,69 @@ def test_real_construction_reserves_channel_zero(tmp_path):
     set_reserved.assert_called_once_with(1)
 
 
-@pytest.mark.parametrize("method,variant_key", [
-    ("play_move", "move"),
-    ("play_check", "reload"),
-    ("play_premove_queued", "move"),
-])
-def test_random_dispatch_methods(manager, method, variant_key):
+def test_play_check_picks_a_random_reload(manager):
     target = MagicMock()
-    manager._variants[variant_key].insert(0, target)
+    manager._variants["reload"].insert(0, target)
     with patch.object(random, "choice", return_value=target):
-        getattr(manager, method)()
+        manager.play_check()
     target.play.assert_called_once_with(fade_ms=ONESHOT_FADE_MS)
 
 
-def test_play_capture_pawn_uses_the_revolver_shot(manager):
+def test_play_move_uses_the_piece_specific_pool(manager):
     target = MagicMock()
-    manager._gun_shots["revolver"] = target
+    manager._move_pools = {"queen": [target]}
+    manager.play_move(PieceType.QUEEN)
+    target.play.assert_called_once_with(fade_ms=ONESHOT_FADE_MS)
+
+
+def test_play_move_each_piece_picks_its_own_pool(manager):
+    targets = {}
+    for pt in (PieceType.PAWN, PieceType.KNIGHT, PieceType.BISHOP,
+               PieceType.ROOK, PieceType.QUEEN, PieceType.KING):
+        targets[pt] = MagicMock()
+        manager._move_pools[pt.value] = [targets[pt]]
+    for pt, target in targets.items():
+        manager.play_move(pt)
+        target.play.assert_called_once_with(fade_ms=ONESHOT_FADE_MS)
+
+
+def test_play_move_falls_back_to_default_when_piece_pool_empty(manager):
+    default = MagicMock()
+    manager._move_pools = {}
+    manager._move_default = [default]
+    manager.play_move(PieceType.QUEEN)
+    default.play.assert_called_once_with(fade_ms=ONESHOT_FADE_MS)
+
+
+def test_play_move_none_uses_default_pool(manager):
+    default = MagicMock()
+    manager._move_default = [default]
+    manager._move_pools = {"pawn": [MagicMock()]}
+    manager.play_move(None)
+    default.play.assert_called_once_with(fade_ms=ONESHOT_FADE_MS)
+
+
+def test_play_premove_queued_uses_piece_pool(manager):
+    target = MagicMock()
+    manager._move_pools = {"knight": [target]}
+    manager.play_premove_queued(PieceType.KNIGHT)
+    target.play.assert_called_once_with(fade_ms=ONESHOT_FADE_MS)
+
+
+def test_play_capture_pawn_uses_the_revolver_pool(manager):
+    target = MagicMock()
+    manager._gun_pools["revolver"] = [target]
     manager.play_capture(PieceType.PAWN)
     target.play.assert_called_once_with(fade_ms=ONESHOT_FADE_MS)
+
+
+def test_play_capture_picks_a_random_variant_from_the_gun_pool(manager):
+    a, b = MagicMock(), MagicMock()
+    manager._gun_pools["revolver"] = [a, b]
+    with patch.object(random, "choice", return_value=b):
+        manager.play_capture(PieceType.PAWN)
+    b.play.assert_called_once_with(fade_ms=ONESHOT_FADE_MS)
+    a.play.assert_not_called()
 
 
 def test_play_capture_each_piece_picks_its_gun(manager):
@@ -153,7 +213,7 @@ def test_play_capture_each_piece_picks_its_gun(manager):
     for pt in (PieceType.PAWN, PieceType.KNIGHT, PieceType.BISHOP,
                PieceType.ROOK, PieceType.QUEEN, PieceType.KING):
         targets[pt] = MagicMock()
-        manager._gun_shots[PIECE_GUN[pt.value]] = targets[pt]
+        manager._gun_pools[PIECE_GUN[pt.value]] = [targets[pt]]
     for pt, target in targets.items():
         manager.play_capture(pt)
         target.play.assert_called_once_with(fade_ms=ONESHOT_FADE_MS)
@@ -161,21 +221,21 @@ def test_play_capture_each_piece_picks_its_gun(manager):
 
 def test_play_capture_unknown_piece_falls_back_to_first(manager):
     fallback = MagicMock()
-    manager._gun_shots = {"revolver": fallback}
+    manager._gun_pools = {"revolver": [fallback]}
     manager.play_capture(None)
     fallback.play.assert_called_once_with(fade_ms=ONESHOT_FADE_MS)
 
 
 def test_play_capture_no_sounds_does_not_reach_playback(manager):
-    """play_capture with no loaded gun shots must not reach the real playback
-    path; loading one shot makes the same call play it."""
-    manager._gun_shots = {}
+    """play_capture with no loaded gun pools must not reach the real playback
+    path; loading one pool makes the same call play it."""
+    manager._gun_pools = {}
     with patch.object(manager, "_play_with_master") as play:
         manager.play_capture(PieceType.PAWN)
     play.assert_not_called()
 
     target = MagicMock()
-    manager._gun_shots = {"revolver": target}
+    manager._gun_pools = {"revolver": [target]}
     manager.play_capture(PieceType.PAWN)
     target.play.assert_called_once_with(fade_ms=ONESHOT_FADE_MS)
 
@@ -228,7 +288,8 @@ def test_play_hit_silent_when_no_hit_voices(manager):
 def test_play_menu_gun_uses_master_times_menu_volume(manager):
     manager.master_volume = 0.5
     manager.set_menu_volume(0.2)
-    target = manager._gun_shots["blunderbuss"] = MagicMock()
+    target = MagicMock()
+    manager._gun_pools["blunderbuss"] = [target]
     manager.play_menu_gun("blunderbuss")
     target.set_volume.assert_called_once_with(pytest.approx(0.1))
     target.play.assert_called_once_with(fade_ms=ONESHOT_FADE_MS)

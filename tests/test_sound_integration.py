@@ -179,7 +179,7 @@ def test_normal_move_plays_only_move():
     app.board.handle_click(Square(6, 4))
     app.board.handle_click(Square(4, 4))
     fire_animation(app)
-    app.sound_manager.play_move.assert_called_once()
+    app.sound_manager.play_move.assert_called_once_with(PieceType.PAWN)
     app.sound_manager.play_capture.assert_not_called()
     app.sound_manager.play_check.assert_not_called()
     app.sound_manager.play_checkmate.assert_not_called()

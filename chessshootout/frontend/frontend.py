@@ -1297,7 +1297,7 @@ class Frontend(OnlineEventsMixin):
         elif entry.move.is_castle:
             self.sound_manager.play_castle()
         else:
-            self.sound_manager.play_move()
+            self.sound_manager.play_move(entry.move.piece.type)
         if entry.gives_check and not entry.gives_checkmate:
             self.sound_manager.play_check()
             self.board.show_check_gun(entry)

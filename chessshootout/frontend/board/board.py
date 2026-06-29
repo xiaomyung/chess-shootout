@@ -1289,7 +1289,7 @@ class Board:
         self.premoves.append(Premove(from_sq, to_sq, piece))
         self.premove_color = piece.color
         if self.on_premove_queued is not None:
-            self.on_premove_queued()
+            self.on_premove_queued(piece.type)
 
     def _clear_premoves(self):
         self.premoves = []
