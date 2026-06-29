@@ -147,6 +147,10 @@ def test_r_during_promotion_picks_rook_not_resign():
     assert app.board.pending_promotion_square is None
 
 
+def test_fullscreen_hotkey_is_documented():
+    assert any(key == "F11" and "fullscreen" in label.lower() for key, label in HOTKEYS)
+
+
 def test_review_row_uses_real_arrow_glyphs():
     """Regression: the review-step row shows real left/right arrows.
 
