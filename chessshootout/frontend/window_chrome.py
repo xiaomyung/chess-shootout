@@ -416,5 +416,5 @@ class WindowChrome:
         if self._on_fullscreen is None:
             return
         enable = self._win_state != "fullscreen"
-        self._win_state = "fullscreen" if enable else "normal"
-        self._on_fullscreen(enable)
+        if self._on_fullscreen(enable):
+            self._win_state = "fullscreen" if enable else "normal"

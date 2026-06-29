@@ -42,7 +42,7 @@ class Toast:
                 return
         self._bubbles.append({
             "message": message, "kind": kind, "key": key,
-            "shown_at_ms": now, "duration_ms": duration, "y": None,
+            "enter_at_ms": now, "shown_at_ms": now, "duration_ms": duration, "y": None,
         })
 
     def _top(self, now=None):
@@ -73,8 +73,8 @@ class Toast:
         return any(self._active(b, now_ms) for b in self._bubbles)
 
     def _alpha(self, b, now):
-        age = now - b["shown_at_ms"]
-        remaining = b["duration_ms"] - age
+        age = now - b["enter_at_ms"]
+        remaining = b["duration_ms"] - (now - b["shown_at_ms"])
         fade_in = 255 if age >= ENTER_MS else int(255 * max(0, age) / ENTER_MS)
         if remaining >= FADE_OUT_MS:
             fade_out = 255

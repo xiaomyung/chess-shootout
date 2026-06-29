@@ -137,13 +137,29 @@ async def test_dead_room_accept_errors_no_game_start(app):
 
 
 @pytest.mark.asyncio
-async def test_decline_notifies_offerer_and_drops_room(app):
+async def test_decline_notifies_both_and_drops_room(app):
+    """The offerer hears 'declined'; the decliner hears 'window_expired' so they
+    leave the result screen too instead of stranding on the orphaned room."""
     rooms = app.state.rooms
     room, ws_a, ws_b = await _finished_room(app)
     await _offer(app, room, ws_a, ALICE)
     assert await _respond(app, room, ws_b, BOB, False) == "declined"
     assert "declined" in ws_a.events()
+    assert "window_expired" in ws_b.events()
     assert rooms.rooms_active == 0
+
+
+@pytest.mark.asyncio
+async def test_offerer_cannot_self_accept_rematch(app):
+    """An offerer accepting their own offer must be a no-op — not a forced restart
+    that yanks the opponent into a new game without consent."""
+    rooms = app.state.rooms
+    room, ws_a, ws_b = await _finished_room(app)
+    await _offer(app, room, ws_a, ALICE)
+    assert await _respond(app, room, ws_a, ALICE, True) == "noop"
+    assert rooms.rooms_active == 1
+    assert "game_start" not in ws_a.types()
+    assert "game_start" not in ws_b.types()
 
 
 @pytest.mark.asyncio

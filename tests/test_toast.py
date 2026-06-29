@@ -64,6 +64,30 @@ def test_same_message_refreshes_in_place(toast):
     assert toast._bubbles[0]["shown_at_ms"] >= first_at
 
 
+def test_fresh_bubble_fades_in_then_full(toast, monkeypatch):
+    monkeypatch.setattr(pg.time, "get_ticks", lambda: 1000)
+    toast.show("hi")
+    b = toast._bubbles[0]
+    assert toast._alpha(b, 1000) == 0
+    assert toast._alpha(b, 1000 + ENTER_MS // 2) == 127
+    assert toast._alpha(b, 1000 + ENTER_MS) == 255
+
+
+def test_refreshed_keyed_bubble_keeps_completed_fade_in(toast, monkeypatch):
+    """A keyed status toast re-shown every frame (e.g. 'Resyncing…') must keep its
+    fade-in complete; the regression reset the entrance clock each frame so it
+    rendered near-invisible the whole time."""
+    clock = [1000]
+    monkeypatch.setattr(pg.time, "get_ticks", lambda: clock[0])
+    toast.show("Resyncing…", key="resync")
+    b = toast._bubbles[0]
+    clock[0] += ENTER_MS
+    for _ in range(20):
+        clock[0] += 16
+        toast.show("Resyncing…", key="resync")
+        assert toast._alpha(b, clock[0]) == 255
+
+
 def test_distinct_messages_stack_newest_last(toast):
     toast.show("first")
     toast.show("second")

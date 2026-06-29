@@ -644,6 +644,7 @@ class Frontend(OnlineEventsMixin):
         except (ValueError, KeyError):
             return False
         self.mode = SINGLE_SCREEN
+        self._drop_post_game_online_session()
         self._time_control = None
         self._chosen_side = "white"
         self.white_name = "Player 1"
@@ -663,6 +664,7 @@ class Frontend(OnlineEventsMixin):
         with open(path) as f:
             text = f.read()
         self.mode = SINGLE_SCREEN
+        self._drop_post_game_online_session()
         self._time_control = None
         self._reset_to_new_game()
         parsed, ok = load_pgn_into_backend(self.match, text)
@@ -785,6 +787,7 @@ class Frontend(OnlineEventsMixin):
 
         self.mode = SINGLE_SCREEN
         self.match.local_color = None
+        self._drop_post_game_online_session()
 
         side = config["side"]
         if side == "random":
@@ -889,6 +892,17 @@ class Frontend(OnlineEventsMixin):
             self.online_client.send_rematch_request()
             self.toast.show(f"Rematch sent — waiting for {self._opp_name()}…",
                             key=REMATCH_STATE_TOAST_KEY)
+
+    def _drop_post_game_online_session(self):
+        if self.online_client is None:
+            return
+        self.online_client.disconnect()
+        self.online_client = None
+        self.result_menu.set_online_mode(False)
+        self._first_move_deadline_ms = None
+        self._opp_disconnected_at_ms = None
+        self._local_disconnected_at_ms = None
+        self._prev_online_state = None
 
     def _tear_down_online_session(self):
         if self.online_client is not None:
@@ -1879,12 +1893,13 @@ class Frontend(OnlineEventsMixin):
 
     def _apply_fullscreen(self, enable):
         if not self.chrome.apply_fullscreen(enable):
-            return
+            return False
         self.window = pg.display.get_surface()
         self.chrome.window = self.window
         self.window_width, self.window_height = self.window.get_size()
         self._cancel_all_scroll()
         self._compute_layout()
+        return True
 
     def _compute_layout(self):
         window_width, window_height = self.window.get_size()

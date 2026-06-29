@@ -207,8 +207,7 @@ class OnlineEventsMixin:
     def _end_rematch_window(self):
         self._clear_rematch_offer()
         self._tear_down_online_session()
-        if self.mode != "menu":
-            self._on_back_to_menu()
+        self._return_to_menu_card()
 
     def _handle_rematch_update(self, payload):
         event = payload.get("event", "")
@@ -480,6 +479,8 @@ class OnlineEventsMixin:
             self._begin_resync()
 
     def _handle_online_result(self, payload):
+        if self.manual_result is not None:
+            return
         self.offer_banners.clear()
         pending_action = self._online_verdict_action
         self._online_verdict_action = None

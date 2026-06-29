@@ -418,6 +418,7 @@ def _arm_post_game(frontend, **client):
     frontend.manual_result = "draw_agreement"
     frontend._chosen_side = "white"
     frontend.white_name, frontend.black_name = "Me", "Them"
+    frontend.start_menu.hide()
 
 
 def test_decline_rematch_sends_false_and_clears(frontend):
@@ -441,6 +442,8 @@ def test_rematch_update_reconnecting_keeps_client(frontend):
 
 
 def test_rematch_update_declined_bubbles_and_returns_to_menu(frontend):
+    """The declined/opponent-left/window-expired paths must re-show the start-menu
+    card; the old guard left the player on a blank, unresponsive backdrop."""
     _arm_post_game(frontend, disconnect=lambda: None)
     frontend._rematch_offered = True
     frontend._handle_rematch_update({"event": "declined"})
@@ -448,6 +451,43 @@ def test_rematch_update_declined_bubbles_and_returns_to_menu(frontend):
     assert frontend.online_client is None
     assert frontend.mode == "menu"
     assert frontend._rematch_offered is False
+    assert frontend.start_menu.is_visible()
+
+
+def test_rematch_update_window_expired_returns_to_menu(frontend):
+    _arm_post_game(frontend, disconnect=lambda: None)
+    frontend._handle_rematch_update({"event": "window_expired"})
+    assert frontend.online_client is None
+    assert frontend.mode == "menu"
+    assert frontend.start_menu.is_visible()
+
+
+def test_online_result_redelivery_does_not_double_count(frontend, monkeypatch):
+    """A reconnect re-delivers the result; the handler must be idempotent so the
+    series score (and PGN auto-save) only fire once per game."""
+    monkeypatch.setattr(frontend, "_auto_save_pgn", lambda: None)
+    frontend._chosen_side = "white"
+    frontend.white_name, frontend.black_name = "Me", "Them"
+    frontend._series_scores = {}
+    frontend.manual_result = None
+    payload = {"reason": "resignation", "winner_color": "white"}
+    frontend._handle_online_result(payload)
+    frontend._handle_online_result(payload)
+    assert frontend._series_scores["Me"] == 1.0
+    assert frontend.manual_result == "white_wins_by_resignation"
+
+
+def test_starting_fen_game_drops_lingering_online_client(frontend):
+    """A kept-alive post-game online socket must be torn down when a local game
+    starts, or its rematch banner / result leaks over the local game."""
+    disc = []
+    frontend.online_client = SimpleNamespace(disconnect=lambda: disc.append(True))
+    frontend.mode = "menu"
+    ok = frontend._start_game_from_fen(
+        "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1")
+    assert ok is True
+    assert disc == [True]
+    assert frontend.online_client is None
 
 
 def test_rematch_update_cancelled_clears_banner_and_keeps_client(frontend):

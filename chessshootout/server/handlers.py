@@ -308,14 +308,18 @@ async def handle_rematch_response(app, websocket, room, color, raw):
         return "invalid"
     if not room.rematch_offered_by:
         return "noop"
+    if color in room.rematch_offered_by:
+        return "noop"
     if msg.accept:
         log.info("rematch accepted room=%s by=%s", room.room_id, color)
         rooms.mark_rematch_activity(room)
         return await _restart_rematch(app, room, color)
     log.info("rematch declined room=%s by=%s", room.room_id, color)
-    offerer_ws = connections.get_for_color(room, room.opp_color(color))
-    if offerer_ws is not None:
-        await send(offerer_ws, RematchUpdateMessage(event="declined"))
+    for slot_color in ("white", "black"):
+        ws = connections.get_for_color(room, slot_color)
+        if ws is not None:
+            await send(ws, RematchUpdateMessage(
+                event="window_expired" if slot_color == color else "declined"))
     room.rematch_offered_by.clear()
     rooms.drop_room_now(room.room_id)
     return "declined"

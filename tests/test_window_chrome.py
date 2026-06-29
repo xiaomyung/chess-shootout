@@ -163,10 +163,17 @@ def test_fullscreen_no_op_without_callback(chrome):
     assert chrome._win_state == "normal"
 
 
+def _ok_fullscreen(calls):
+    def cb(enable):
+        calls.append(enable)
+        return True
+    return cb
+
+
 def test_toggle_fullscreen_invokes_callback_and_tracks_state():
     surface = pg.display.get_surface()
     calls = []
-    chrome = WindowChrome(surface, on_fullscreen=calls.append)
+    chrome = WindowChrome(surface, on_fullscreen=_ok_fullscreen(calls))
     chrome.toggle_fullscreen()
     assert chrome._win_state == "fullscreen"
     assert calls == [True]
@@ -178,9 +185,20 @@ def test_toggle_fullscreen_invokes_callback_and_tracks_state():
 def test_green_dot_toggles_fullscreen():
     surface = pg.display.get_surface()
     calls = []
-    chrome = WindowChrome(surface, on_fullscreen=calls.append)
+    chrome = WindowChrome(surface, on_fullscreen=_ok_fullscreen(calls))
     chrome._activate("max")
     assert chrome._win_state == "fullscreen"
+    assert calls == [True]
+
+
+def test_toggle_fullscreen_keeps_state_when_callback_fails():
+    """A failed apply (callback returns falsy) must not flip _win_state, or the
+    titlebar hit-test desyncs from the real window and drag/resize go dead."""
+    surface = pg.display.get_surface()
+    calls = []
+    chrome = WindowChrome(surface, on_fullscreen=lambda enable: calls.append(enable))
+    chrome.toggle_fullscreen()
+    assert chrome._win_state == "normal"
     assert calls == [True]
 
 
