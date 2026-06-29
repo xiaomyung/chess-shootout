@@ -5,7 +5,7 @@ import pytest
 from chessshootout.server.protocol import GRACE_SECONDS
 from chessshootout.server.rooms import (
     AlreadyInGameError, InvalidTokenError, NotInRoomError,
-    REMATCH_KEEP_ALIVE_SECONDS, RoomManager,
+    REMATCH_ABSOLUTE_CAP_SECONDS, REMATCH_IDLE_SECONDS, RoomManager,
 )
 from tests.helpers import FakeClock
 
@@ -210,19 +210,41 @@ async def test_reset_for_rematch_swaps_colors_and_clears_state(manager, clock):
     room.game_start_broadcast = True
     manager.finalize_result(room.room_id, "checkmate", winner_color="white")
     assert room.result is not None
+    assert room.white.at_result is True
+    assert room.black.at_result is True
+    assert room.last_rematch_activity_at == room.ended_at
 
-    manager.reset_for_rematch(room.room_id)
+    assert manager.reset_for_rematch(room.room_id) is True
     assert room.result is None
     assert room.draw_offered_by is None
     assert room.takeback_offered_by is None
     assert room.rematch_offered_by == set()
     assert room.game_start_broadcast is False
     assert room.ended_at is None
+    assert room.last_rematch_activity_at is None
     assert room.first_move_at is None
+    assert room.white.at_result is False
+    assert room.black.at_result is False
     assert room.white.client_uuid == pre_black_uuid
     assert room.black.client_uuid == pre_white_uuid
     assert len(room.backend.move_history) == 0
     assert room.backend.clock is not None
+
+
+@pytest.mark.asyncio
+async def test_reset_for_rematch_returns_false_when_room_gone(manager, clock):
+    await manager.enqueue(**_enqueue_kwargs("alice"))
+    room = await manager.enqueue(**_enqueue_kwargs("bob"))
+    manager.finalize_result(room.room_id, "checkmate", winner_color="white")
+    manager.drop_room_now(room.room_id)
+    assert manager.reset_for_rematch(room.room_id) is False
+
+
+@pytest.mark.asyncio
+async def test_reset_for_rematch_returns_false_when_not_finished(manager):
+    await manager.enqueue(**_enqueue_kwargs("alice"))
+    room = await manager.enqueue(**_enqueue_kwargs("bob"))
+    assert manager.reset_for_rematch(room.room_id) is False
 
 
 @pytest.mark.asyncio
@@ -254,11 +276,11 @@ async def test_rematch_swaps_country_with_player(manager, clock):
 
 
 @pytest.mark.asyncio
-async def test_gc_drops_finished_rooms_after_keep_alive(manager, clock):
+async def test_gc_drops_finished_rooms_after_idle(manager, clock):
     await manager.enqueue(**_enqueue_kwargs("alice"))
     room = await manager.enqueue(**_enqueue_kwargs("bob"))
     manager.finalize_result(room.room_id, "checkmate", winner_color="white")
-    clock.advance(REMATCH_KEEP_ALIVE_SECONDS - 1)
+    clock.advance(REMATCH_IDLE_SECONDS - 1)
     manager.gc_finished_rooms()
     assert manager.rooms_active == 1
     clock.advance(2)
@@ -266,6 +288,21 @@ async def test_gc_drops_finished_rooms_after_keep_alive(manager, clock):
     assert manager.rooms_active == 0
     new_room = await manager.enqueue(**_enqueue_kwargs("alice"))
     assert new_room.room_id != room.room_id
+
+
+@pytest.mark.asyncio
+async def test_gc_rematch_activity_extends_idle_until_cap(manager, clock):
+    await manager.enqueue(**_enqueue_kwargs("alice"))
+    room = await manager.enqueue(**_enqueue_kwargs("bob"))
+    manager.finalize_result(room.room_id, "checkmate", winner_color="white")
+    for _ in range(2):
+        clock.advance(REMATCH_IDLE_SECONDS - 1)
+        manager.mark_rematch_activity(room)
+        manager.gc_finished_rooms()
+        assert manager.rooms_active == 1
+    clock.advance(REMATCH_ABSOLUTE_CAP_SECONDS)
+    manager.gc_finished_rooms()
+    assert manager.rooms_active == 0
 
 
 @pytest.mark.asyncio

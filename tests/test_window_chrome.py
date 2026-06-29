@@ -125,8 +125,8 @@ class _FakeSDL:
     a 0 return models the wrong-instance case (empty window registry)."""
     def __init__(self, win_ptr_ret):
         self.SDL_GetWindowFromID = _FakeFn(win_ptr_ret)
-        for name in ("SDL_GetWindowFlags", "SDL_SetWindowHitTest", "SDL_SetWindowMinimumSize",
-                     "SDL_MaximizeWindow", "SDL_RestoreWindow", "SDL_MinimizeWindow"):
+        for name in ("SDL_SetWindowHitTest", "SDL_SetWindowMinimumSize",
+                     "SDL_MinimizeWindow", "SDL_RaiseWindow", "SDL_SetWindowFullscreen"):
             setattr(self, name, _FakeFn(0))
 
 
@@ -154,13 +154,118 @@ def test_resolve_owning_sdl_disables_when_no_instance_owns_window(chrome, monkey
     assert not chrome._win_ptr
 
 
-def test_toggle_maximize_no_op_when_chrome_disabled(chrome):
-    """With no owning SDL2 instance the min/max actions must no-op, not crash."""
+def test_fullscreen_no_op_without_callback(chrome):
+    """Without a fullscreen callback (or owning SDL2) the actions must no-op, not crash."""
     chrome._sdl = None
     chrome._win_ptr = None
-    chrome._toggle_maximize()
+    chrome.toggle_fullscreen()
     chrome._minimize()
-    assert chrome._is_maximized() is False
+    assert chrome._win_state == "normal"
+
+
+def _ok_fullscreen(calls):
+    def cb(enable):
+        calls.append(enable)
+        return True
+    return cb
+
+
+def test_toggle_fullscreen_invokes_callback_and_tracks_state():
+    surface = pg.display.get_surface()
+    calls = []
+    chrome = WindowChrome(surface, on_fullscreen=_ok_fullscreen(calls))
+    chrome.toggle_fullscreen()
+    assert chrome._win_state == "fullscreen"
+    assert calls == [True]
+    chrome.toggle_fullscreen()
+    assert chrome._win_state == "normal"
+    assert calls == [True, False]
+
+
+def test_green_dot_toggles_fullscreen():
+    surface = pg.display.get_surface()
+    calls = []
+    chrome = WindowChrome(surface, on_fullscreen=_ok_fullscreen(calls))
+    chrome._activate("max")
+    assert chrome._win_state == "fullscreen"
+    assert calls == [True]
+
+
+def test_toggle_fullscreen_keeps_state_when_callback_fails():
+    """A failed apply (callback returns falsy) must not flip _win_state, or the
+    titlebar hit-test desyncs from the real window and drag/resize go dead."""
+    surface = pg.display.get_surface()
+    calls = []
+    chrome = WindowChrome(surface, on_fullscreen=lambda enable: calls.append(enable))
+    chrome.toggle_fullscreen()
+    assert chrome._win_state == "normal"
+    assert calls == [True]
+
+
+def test_apply_fullscreen_toggles_sdl_flag_on_same_window():
+    """The no-recreation path: SDL_SetWindowFullscreen flips the desktop-fullscreen
+    flag on the existing window and raises it (to keep focus)."""
+    surface = pg.display.get_surface()
+    chrome = WindowChrome(surface)
+    sdl = _FakeSDL(0xABCD)
+    chrome._sdl = sdl
+    chrome._win_ptr = 0xABCD
+    assert chrome.apply_fullscreen(True) is True
+    assert sdl.SDL_SetWindowFullscreen.calls[-1] == (0xABCD, 0x00001001)
+    assert sdl.SDL_RaiseWindow.calls
+    assert chrome.apply_fullscreen(False) is True
+    assert sdl.SDL_SetWindowFullscreen.calls[-1] == (0xABCD, 0)
+
+
+def test_apply_fullscreen_false_without_handle():
+    surface = pg.display.get_surface()
+    chrome = WindowChrome(surface)
+    chrome._win_ptr = None
+    assert chrome.apply_fullscreen(True) is False
+
+
+def test_fullscreen_titlebar_is_not_draggable(chrome):
+    chrome._win_state = "fullscreen"
+    assert _hit(chrome, 500, 5) == _HITTEST_NORMAL
+
+
+def test_drag_on_fullscreen_titlebar_exits_fullscreen(chrome, monkeypatch):
+    calls = []
+    monkeypatch.setattr(chrome, "toggle_fullscreen", lambda: calls.append(1))
+    chrome._win_state = "fullscreen"
+    chrome.draw()
+    pos = (chrome._w // 2, 5)
+    assert chrome.handle_click(pos) is True
+    assert chrome._fs_press_pos == pos
+    chrome.handle_title_motion((pos[0] + 30, pos[1]))
+    assert calls == [1]
+    assert chrome._fs_press_pos is None
+
+
+def test_tap_on_fullscreen_titlebar_does_not_exit(chrome, monkeypatch):
+    calls = []
+    monkeypatch.setattr(chrome, "toggle_fullscreen", lambda: calls.append(1))
+    chrome._win_state = "fullscreen"
+    chrome.draw()
+    pos = (chrome._w // 2, 5)
+    chrome.handle_click(pos)
+    chrome.handle_title_motion((pos[0] + 2, pos[1]))
+    assert calls == []
+    chrome.clear_title_press()
+    assert chrome._fs_press_pos is None
+
+
+def test_double_click_titlebar_toggles_fullscreen(chrome, monkeypatch):
+    calls = []
+    monkeypatch.setattr(chrome, "toggle_fullscreen", lambda: calls.append(1))
+    chrome.draw()
+    pos = (chrome._w // 2, 4)
+    monkeypatch.setattr(pg.time, "get_ticks", lambda: 1000)
+    assert chrome.handle_click(pos) is True
+    assert calls == []
+    monkeypatch.setattr(pg.time, "get_ticks", lambda: 1000 + 100)
+    assert chrome.handle_click(pos) is True
+    assert calls == [1]
 
 
 @pytest.mark.parametrize(

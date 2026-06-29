@@ -450,6 +450,9 @@ async def test_server_websocket_send_methods_emit_typed_payloads():
     payload = json.loads(inner.sent[-1])
     assert payload["type"] == "rematch_response" and payload["accept"] is False
 
+    await ws.send_left_result()
+    assert json.loads(inner.sent[-1])["type"] == "left_result"
+
     await ws.send_takeback_request()
     assert json.loads(inner.sent[-1])["type"] == "takeback_request"
 

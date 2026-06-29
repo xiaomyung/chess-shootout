@@ -28,8 +28,6 @@ _HITTEST_RESIZE_BOTTOM = 7
 _HITTEST_RESIZE_BOTTOMLEFT = 8
 _HITTEST_RESIZE_LEFT = 9
 
-_SDL_WINDOW_MAXIMIZED = 0x00000080
-
 _RESIZE_CURSORS = {
     _HITTEST_RESIZE_TOPLEFT: pg.SYSTEM_CURSOR_SIZENWSE,
     _HITTEST_RESIZE_BOTTOMRIGHT: pg.SYSTEM_CURSOR_SIZENWSE,
@@ -44,6 +42,11 @@ _RESIZE_CURSORS = {
 
 class _SDLPoint(ctypes.Structure):
     _fields_ = [("x", ctypes.c_int), ("y", ctypes.c_int)]
+
+
+DOUBLE_CLICK_MS = 350
+FS_DRAG_EXIT_PX = 8
+_SDL_WINDOW_FULLSCREEN_DESKTOP = 0x00001001
 
 
 _HITTEST_CB = ctypes.CFUNCTYPE(
@@ -98,7 +101,7 @@ class WindowChrome:
     DOT_GLYPH_DARKEN = 0.74
     DOT_GLYPH_INSET = 0.55
 
-    def __init__(self, window):
+    def __init__(self, window, on_fullscreen=None):
         self.window = window
         self._w, self._h = window.get_size()
         self._dot_rects = {}
@@ -110,6 +113,16 @@ class WindowChrome:
         self._wordmark_accent = None
         self._logo_surf = None
         self._cursor = None
+        self._on_fullscreen = on_fullscreen
+        self._win_state = "normal"
+        self._last_title_click_ms = 0
+        self._fs_press_pos = None
+        self._init_sdl()
+
+    def reinit_sdl(self):
+        self._sdl = None
+        self._win_ptr = None
+        self._sdl_window = None
         self._init_sdl()
 
     def _init_sdl(self):
@@ -149,8 +162,6 @@ class WindowChrome:
                 return
 
     def _configure_sdl_functions(self):
-        self._sdl.SDL_GetWindowFlags.restype = ctypes.c_uint32
-        self._sdl.SDL_GetWindowFlags.argtypes = [ctypes.c_void_p]
         self._sdl.SDL_SetWindowHitTest.restype = ctypes.c_int
         self._sdl.SDL_SetWindowHitTest.argtypes = [
             ctypes.c_void_p, _HITTEST_CB, ctypes.c_void_p
@@ -158,9 +169,10 @@ class WindowChrome:
         self._sdl.SDL_SetWindowMinimumSize.argtypes = [
             ctypes.c_void_p, ctypes.c_int, ctypes.c_int
         ]
-        self._sdl.SDL_MaximizeWindow.argtypes = [ctypes.c_void_p]
-        self._sdl.SDL_RestoreWindow.argtypes = [ctypes.c_void_p]
         self._sdl.SDL_MinimizeWindow.argtypes = [ctypes.c_void_p]
+        self._sdl.SDL_RaiseWindow.argtypes = [ctypes.c_void_p]
+        self._sdl.SDL_SetWindowFullscreen.argtypes = [ctypes.c_void_p, ctypes.c_uint32]
+        self._sdl.SDL_SetWindowFullscreen.restype = ctypes.c_int
 
     def _resize_code(self, x, y):
         w, h = self._w, self._h
@@ -188,6 +200,8 @@ class WindowChrome:
     def _hit_test(self, win, area_ptr, data):
         x = area_ptr.contents.x
         y = area_ptr.contents.y
+        if self._win_state != "normal":
+            return _HITTEST_NORMAL
         code = self._resize_code(x, y)
         if code is not None:
             return code
@@ -348,7 +362,28 @@ class WindowChrome:
             if rect.collidepoint(pos):
                 self._activate(key)
                 return True
+        if self._win_state != "normal":
+            self._fs_press_pos = pos
+            return True
+        now = pg.time.get_ticks()
+        if now - self._last_title_click_ms <= DOUBLE_CLICK_MS:
+            self._last_title_click_ms = 0
+            self.toggle_fullscreen()
+        else:
+            self._last_title_click_ms = now
         return True
+
+    def handle_title_motion(self, pos):
+        if self._fs_press_pos is None:
+            return
+        dx = pos[0] - self._fs_press_pos[0]
+        dy = pos[1] - self._fs_press_pos[1]
+        if dx * dx + dy * dy >= FS_DRAG_EXIT_PX * FS_DRAG_EXIT_PX:
+            self._fs_press_pos = None
+            self.toggle_fullscreen()
+
+    def clear_title_press(self):
+        self._fs_press_pos = None
 
     def _activate(self, key):
         if key == "close":
@@ -356,12 +391,7 @@ class WindowChrome:
         elif key == "min":
             self._minimize()
         elif key == "max":
-            self._toggle_maximize()
-
-    def _is_maximized(self):
-        if self._win_ptr is None:
-            return False
-        return bool(self._sdl.SDL_GetWindowFlags(self._win_ptr) & _SDL_WINDOW_MAXIMIZED)
+            self.toggle_fullscreen()
 
     def _minimize(self):
         if self._win_ptr is not None:
@@ -370,13 +400,21 @@ class WindowChrome:
             except Exception:
                 log.warning("minimize failed", exc_info=True)
 
-    def _toggle_maximize(self):
+    def apply_fullscreen(self, enable):
         if self._win_ptr is None:
-            return
+            return False
         try:
-            if self._is_maximized():
-                self._sdl.SDL_RestoreWindow(self._win_ptr)
-            else:
-                self._sdl.SDL_MaximizeWindow(self._win_ptr)
+            flag = _SDL_WINDOW_FULLSCREEN_DESKTOP if enable else 0
+            self._sdl.SDL_SetWindowFullscreen(self._win_ptr, flag)
+            self._sdl.SDL_RaiseWindow(self._win_ptr)
         except Exception:
-            log.warning("maximize toggle failed", exc_info=True)
+            log.warning("native fullscreen failed", exc_info=True)
+            return False
+        return True
+
+    def toggle_fullscreen(self):
+        if self._on_fullscreen is None:
+            return
+        enable = self._win_state != "fullscreen"
+        if self._on_fullscreen(enable):
+            self._win_state = "fullscreen" if enable else "normal"

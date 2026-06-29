@@ -142,6 +142,27 @@ def test_adopt_timing_from_game_start_message():
     assert client._reconnect_total == 90.0
 
 
+def test_result_enters_post_game_so_socket_survives_for_rematch():
+    """After a result the game is no longer active but the post-game flag keeps the
+    reconnect/keepalive window open (so a rematch can still reach the client)."""
+    client = OnlineClient()
+    asyncio.run(client._recv_loop(_RecvWs([
+        {"type": "result", "reason": "checkmate", "winner_color": "white"},
+    ])))
+    assert client._game_active is False
+    assert client._post_game is True
+
+
+def test_game_start_clears_post_game_flag():
+    client = OnlineClient()
+    asyncio.run(client._recv_loop(_RecvWs([
+        {"type": "result", "reason": "checkmate", "winner_color": "white"},
+        {"type": "game_start"},
+    ])))
+    assert client._game_active is True
+    assert client._post_game is False
+
+
 def test_ws_session_clears_old_ping_samples_on_reconnect():
     """A fresh ws session must drop the previous link's RTTs from the rolling average."""
     client = OnlineClient()

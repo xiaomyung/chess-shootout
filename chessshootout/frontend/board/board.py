@@ -1336,11 +1336,15 @@ class Board:
             else self._fire_move_landed
         )
 
+        own_drag = self.dragging_from is not None and from_sq == self.dragging_from
+        if self.dragging_from is not None and not own_drag:
+            self._reanchor_drag_for_remote(entry, from_sq, to_sq)
+
         if entry.move.captured is not None and self._capture_choreography(
-                entry, from_sq, to_sq, moving_piece, on_complete):
+                entry, from_sq, to_sq, moving_piece, on_complete, clear_drag=own_drag):
             return
 
-        if self.dragging_from is not None:
+        if own_drag:
             self.last_animation_completed_at_ms = pg.time.get_ticks()
             if entry.move.is_castle:
                 self._begin_settle(to_sq, None)
@@ -1355,6 +1359,14 @@ class Board:
 
         if entry.move.is_castle:
             self._start_castle_rook_animation(entry, from_sq)
+
+    def _reanchor_drag_for_remote(self, entry, from_sq, to_sq):
+        if self._drag is None or entry.move.captured is None:
+            return
+        victim_sq = (Square(from_sq.row, to_sq.col)
+                     if entry.move.is_en_passant else to_sq)
+        if victim_sq == self.dragging_from:
+            self._begin_settle(self.dragging_from, None)
 
     @staticmethod
     def _castle_rook_squares(home_row, king_to_col):
@@ -1391,7 +1403,8 @@ class Board:
             return
         self.move_landed_callback(entry)
 
-    def _capture_choreography(self, entry, from_sq, to_sq, moving_piece, on_complete):
+    def _capture_choreography(self, entry, from_sq, to_sq, moving_piece, on_complete,
+                              clear_drag=True):
         captured = entry.move.captured
         color = moving_piece.color.value
         victim_sq = (Square(from_sq.row, to_sq.col)
@@ -1401,7 +1414,8 @@ class Board:
         if attacker is None or victim is None or self.cell_size <= 0:
             self._on_capture_fire(entry, color, victim_sq)
             return False
-        self._clear_drag_state()
+        if clear_drag:
+            self._clear_drag_state()
         self.effects.capture(
             now_ms=pg.time.get_ticks(),
             attacker_type=moving_piece.type.value,

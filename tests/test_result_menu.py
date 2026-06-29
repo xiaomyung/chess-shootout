@@ -171,9 +171,9 @@ def test_reset_hides_menu_and_clears_buttons():
     assert menu.handle_click(menu_center) is False
 
 
-def test_online_rematch_offered_relabels_primary_but_keeps_key():
-    """An incoming rematch request turns the result modal's primary button into
-    Accept, still routed through the 'rematch' key so it accepts the offer."""
+def test_online_rematch_offered_hides_initiate_button():
+    """An incoming rematch request hides the result modal's initiate button; the
+    drop-in banner carries Accept/Deny instead, avoiding a duplicate affordance."""
     callbacks = {"rematch": _no_op, "open_pgn": _no_op, "menu": _no_op}
     menu = ResultMenu(pg.display.get_surface(), callbacks)
     menu.set_rect(pg.Rect(0, 0, 440, 418))
@@ -183,5 +183,5 @@ def test_online_rematch_offered_relabels_primary_but_keeps_key():
     assert menu.rematch_offered is True
     menu.window.fill((0, 0, 0))
     menu.draw()
-    assert "rematch" in menu.button_rects
-    assert menu.handle_click(menu.button_rects["rematch"].center) is True
+    assert "rematch" not in menu.button_rects
+    assert "menu" in menu.button_rects

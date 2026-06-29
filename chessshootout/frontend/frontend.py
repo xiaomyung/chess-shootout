@@ -47,7 +47,8 @@ from chessshootout.frontend.window_chrome import (
 from chessshootout.online.client import (
     OnlineClient, RECONNECT_TOTAL_SECONDS, fetch_resume, probe_active_game,
 )
-from chessshootout.frontend.online.events import ONLINE_HARD_FAILURE_LABELS, OnlineEventsMixin
+from chessshootout.frontend.online.events import (
+    ONLINE_HARD_FAILURE_LABELS, REMATCH_STATE_TOAST_KEY, OnlineEventsMixin)
 from chessshootout.frontend.panels.player_strip import (
     AUTO_END_RED_THRESHOLD_SECONDS, PlayerStrip,
 )
@@ -175,7 +176,6 @@ WAIT_HEIGHT_RATIO = 1.6
 MENU_FOOTER_RESERVE = 22
 MIN_MODAL_WIDTH = 360
 
-SAVED_PGN_TOAST_DURATION_MS = 3000
 RESYNC_TIMEOUT_MS = 8000
 SKILLCHECK_WATCHDOG_SLACK_MS = 4000
 RECONNECT_PROBE_INTERVAL_MS = 5000
@@ -222,7 +222,7 @@ class Frontend(OnlineEventsMixin):
             pg.display.set_icon(icon)
         except (pg.error, OSError):
             pass
-        self.chrome = WindowChrome(self.window)
+        self.chrome = WindowChrome(self.window, on_fullscreen=self._apply_fullscreen)
         self.clock = pg.time.Clock()
 
         self.mode = "menu"
@@ -412,11 +412,16 @@ class Frontend(OnlineEventsMixin):
         self.sound_manager.play_game_start()
 
     def _on_back_to_menu(self):
+        keep_online = (self.mode == ONLINE and self.online_client is not None
+                       and self.current_result() is not None)
+        had_rematch_offer = self._rematch_offered
         self.mode = "menu"
         self._match_session_id = None
         self._reconnect_probe_attempts = 0
         pg.display.set_caption(WINDOW_TITLE)
-        if self.online_client is not None:
+        if keep_online:
+            self.online_client.send_left_result()
+        elif self.online_client is not None:
             self.online_client.disconnect()
             self.online_client = None
         self.match.mode = SINGLE_SCREEN
@@ -437,6 +442,8 @@ class Frontend(OnlineEventsMixin):
             self._on_open_history()
         else:
             self.menu_page.set_page(PAGE_CARD)
+        if keep_online and had_rematch_offer:
+            self._reshow_rematch_banner()
 
     def _refresh_load_pgn_availability(self):
         self.start_menu.load_pgn_available = self._latest_pgn_path() is not None
@@ -637,6 +644,7 @@ class Frontend(OnlineEventsMixin):
         except (ValueError, KeyError):
             return False
         self.mode = SINGLE_SCREEN
+        self._drop_post_game_online_session()
         self._time_control = None
         self._chosen_side = "white"
         self.white_name = "Player 1"
@@ -656,6 +664,7 @@ class Frontend(OnlineEventsMixin):
         with open(path) as f:
             text = f.read()
         self.mode = SINGLE_SCREEN
+        self._drop_post_game_online_session()
         self._time_control = None
         self._reset_to_new_game()
         parsed, ok = load_pgn_into_backend(self.match, text)
@@ -778,6 +787,7 @@ class Frontend(OnlineEventsMixin):
 
         self.mode = SINGLE_SCREEN
         self.match.local_color = None
+        self._drop_post_game_online_session()
 
         side = config["side"]
         if side == "random":
@@ -824,6 +834,11 @@ class Frontend(OnlineEventsMixin):
         if not addr:
             self._on_online_cancel()
             return
+        if self.online_client is not None:
+            self.online_client.disconnect()
+            self.online_client = None
+        self.offer_banners.dismiss("rematch_request")
+        self._rematch_offered = False
         self.online_client = OnlineClient()
         request = {
             "nickname": (self._online_config.get("nickname") or "").strip() or "Player",
@@ -875,6 +890,19 @@ class Frontend(OnlineEventsMixin):
             self.online_client.send_rematch_response(True)
         else:
             self.online_client.send_rematch_request()
+            self.toast.show(f"Rematch sent — waiting for {self._opp_name()}…",
+                            key=REMATCH_STATE_TOAST_KEY)
+
+    def _drop_post_game_online_session(self):
+        if self.online_client is None:
+            return
+        self.online_client.disconnect()
+        self.online_client = None
+        self.result_menu.set_online_mode(False)
+        self._first_move_deadline_ms = None
+        self._opp_disconnected_at_ms = None
+        self._local_disconnected_at_ms = None
+        self._prev_online_state = None
 
     def _tear_down_online_session(self):
         if self.online_client is not None:
@@ -953,9 +981,8 @@ class Frontend(OnlineEventsMixin):
             self._begin_resync()
 
     def _send_heartbeat_if_due(self):
-        if (self.mode != ONLINE or self.online_client is None
-                or self.online_client.state != "connected"
-                or self.current_result() is not None):
+        if (self.online_client is None
+                or self.online_client.state != "connected"):
             return
         if self.online_client.is_server_silent():
             log.info("server heartbeat silent; escalating to reconnect")
@@ -1057,7 +1084,7 @@ class Frontend(OnlineEventsMixin):
         with open(path, "w") as f:
             f.write(text)
         self._last_saved_pgn_path = path
-        self.toast.show(f"Saved {filename}", duration_ms=SAVED_PGN_TOAST_DURATION_MS)
+        self.toast.show(f"Saved {filename}")
         return path
 
     def _auto_save_prefix(self):
@@ -1145,6 +1172,8 @@ class Frontend(OnlineEventsMixin):
             self._on_online_cancel()
             return True
         if not self.offer_banners.is_empty():
+            if self._rematch_offered:
+                self._decline_rematch()
             self.offer_banners.clear()
             return True
         return False
@@ -1567,7 +1596,6 @@ class Frontend(OnlineEventsMixin):
             self.player_strip_top.draw()
             self.player_strip_bottom.draw()
             self.right_menu.draw_menu()
-            self.offer_banners.draw(self.board.rect)
             self.board.draw_drag_overlay()
             self._update_result_pending()
             if not self.match_found_modal.is_visible():
@@ -1595,6 +1623,7 @@ class Frontend(OnlineEventsMixin):
             self.menu_page.draw_foreground()
         if self.mode == "menu":
             self.menu_battle.draw_intro_overlay(self.window)
+        self.offer_banners.draw(self._banner_rect())
         self.options_modal.draw()
         self.directory_browser.draw()
         self.country_picker.draw()
@@ -1856,6 +1885,22 @@ class Frontend(OnlineEventsMixin):
             return None, None
         return label, remaining
 
+    def _banner_rect(self):
+        if self.mode != "menu":
+            return self.board.rect
+        return pg.Rect(0, WindowChrome.HEIGHT, self.window_width,
+                       self.window_height - WindowChrome.HEIGHT)
+
+    def _apply_fullscreen(self, enable):
+        if not self.chrome.apply_fullscreen(enable):
+            return False
+        self.window = pg.display.get_surface()
+        self.chrome.window = self.window
+        self.window_width, self.window_height = self.window.get_size()
+        self._cancel_all_scroll()
+        self._compute_layout()
+        return True
+
     def _compute_layout(self):
         window_width, window_height = self.window.get_size()
         top = WindowChrome.HEIGHT
@@ -2099,10 +2144,10 @@ class Frontend(OnlineEventsMixin):
         if self.options_modal.is_visible():
             self.options_modal.handle_click(pos)
             return
+        if self.offer_banners.handle_click(pos):
+            return
         if self.mode == "menu":
             self.menu_page.handle_click(pos)
-            return
-        if self.offer_banners.handle_click(pos):
             return
         if self.result_menu.handle_click(pos):
             return
@@ -2220,6 +2265,9 @@ class Frontend(OnlineEventsMixin):
                 if event.key == pg.K_ESCAPE:
                     self._handle_escape()
                     continue
+                if event.key == pg.K_F11:
+                    self.chrome.toggle_fullscreen()
+                    continue
                 if self._skillcheck_swallows_input():
                     self.skillcheck_overlay.handle_event(event)
                     continue
@@ -2261,6 +2309,7 @@ class Frontend(OnlineEventsMixin):
                 if self._skillcheck_swallows_input():
                     continue
                 if event.button == 1:
+                    self.chrome.clear_title_press()
                     self._mouse_left_released(event.pos)
                 elif event.button == 3:
                     self._right_click_released(event.pos)
@@ -2268,6 +2317,7 @@ class Frontend(OnlineEventsMixin):
             elif event.type == pg.MOUSEMOTION:
                 self.chrome.update_cursor(event.pos)
                 if event.buttons[0]:
+                    self.chrome.handle_title_motion(event.pos)
                     self._handle_left_drag_motion(event.pos)
 
             elif event.type == pg.MOUSEWHEEL:
@@ -2280,6 +2330,8 @@ class Frontend(OnlineEventsMixin):
                 h = max(event.h, MIN_WINDOW_HEIGHT)
                 if (w, h) != (event.w, event.h):
                     self.window = pg.display.set_mode((w, h), WINDOW_FLAGS)
+                    self.chrome.window = self.window
+                    self.chrome.reinit_sdl()
                 self.window_width = w
                 self.window_height = h
                 self._cancel_all_scroll()

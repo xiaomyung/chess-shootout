@@ -271,6 +271,9 @@ class ServerWebSocket:
     async def send_rematch_response(self, accept):
         await self._send(RematchResponseMessage(accept=accept))
 
+    async def send_left_result(self):
+        await self._send_raw({"type": "left_result", "version": PROTOCOL_VERSION})
+
     async def send_takeback_request(self):
         await self._send_raw({"type": "takeback_request", "version": PROTOCOL_VERSION})
 

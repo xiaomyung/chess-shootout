@@ -12,7 +12,7 @@ from chessshootout.frontend.visual.widgets import (
     draw_button, draw_button_row, draw_icon_button,
 )
 from chessshootout.frontend.visual.icons import draw_speaker
-from chessshootout.frontend.visual.toast import Toast
+from chessshootout.frontend.visual.toast import ENTER_MS as TOAST_ENTER_MS, Toast
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -84,17 +84,23 @@ def _band_has_color(surface, rgb):
     )
 
 
+def _settle_draw(toast, surface):
+    now = toast._bubbles[-1]["shown_at_ms"] + TOAST_ENTER_MS
+    for step in range(0, 500, 16):
+        surface.fill((0, 0, 0))
+        toast.draw(now + step)
+
+
 def test_toast_info_and_hype_use_distinct_backgrounds():
     surface = pg.display.get_surface()
     toast = Toast(surface)
-    surface.fill((0, 0, 0))
     toast.show("reconnected", kind="info")
-    toast.draw()
+    _settle_draw(toast, surface)
     assert _band_has_color(surface, pg.Color(Colors.surface)[:3])
 
-    surface.fill((0, 0, 0))
+    toast.hide()
     toast.show("first blood", kind="hype")
-    toast.draw()
+    _settle_draw(toast, surface)
     assert _band_has_color(surface, pg.Color(Colors.accent)[:3])
 
 
@@ -102,9 +108,8 @@ def test_toast_renders_below_top_inset():
     surface = pg.display.get_surface()
     toast = Toast(surface)
     toast.top_inset = 50
-    surface.fill((0, 0, 0))
     toast.show("synced", kind="info")
-    toast.draw()
+    _settle_draw(toast, surface)
     bg = pg.Color(Colors.surface)[:3]
 
     def band_has(y0, y1):

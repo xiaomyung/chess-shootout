@@ -32,13 +32,15 @@ class MatchFoundModal(BaseModal):
         self.me_country = ""
         self.opp_country = ""
         self.rating = "1500"
+        self.rematch = False
         self.on_done = None
         self._started_at = 0
         self._seconds = 3
         self._flag_cache = {}
 
     def show(self, white_name, black_name, your_color, on_done, seconds=3, rating="1500",
-             white_country="", black_country=""):
+             white_country="", black_country="", rematch=False):
+        self.rematch = rematch
         if your_color == "white":
             self.me_name, self.me_side, self.me_country = white_name, "white", white_country
             self.opp_name, self.opp_side, self.opp_country = black_name, "black", black_country
@@ -85,7 +87,8 @@ class MatchFoundModal(BaseModal):
         av = max(int(panel_w * 0.118), 44)
         letter_font = get_display_font(max(int(av * 0.42), 16))
 
-        eyebrow = eyebrow_font.render("MATCH FOUND", True, Colors.text_dim)
+        eyebrow_label = "REMATCH!" if self.rematch else "MATCH FOUND"
+        eyebrow = eyebrow_font.render(eyebrow_label, True, Colors.text_dim)
         vs_surf = emoji_surface("⚔️", max(int(panel_w * 0.08), 30))
         if vs_surf is None:
             vs_surf = stroked_text(vs_font, "VS", Colors.accent, Colors.outcome_stroke,

@@ -16,7 +16,8 @@ from chessshootout.server.protocol import (
     ClockSnapshot, ConnectionStatusMessage, DrawOfferedMessage, DrawResponseMessage,
     ErrorMessage, GIVE_TIME_SECONDS, MoveAppliedMessage, MoveMessage,
     PingMessage, PongMessage, Reason,
-    RematchRequestMessage, RematchResponseMessage, ResyncDirectiveMessage,
+    RematchRequestMessage, RematchResponseMessage, RematchUpdateMessage,
+    ResyncDirectiveMessage,
     SkillCheckRequiredMessage, SkillCheckShotMessage, SkillCheckSpectateMessage,
     SkillCheckSpectateShotMessage,
     TakebackAppliedMessage, TakebackOfferedMessage,
@@ -70,6 +71,8 @@ async def handle_move(app, websocket, room, color, raw):
     if room.backend is None:
         return "no_backend"
     if room.result is not None:
+        await send(connections.get_for_color(room, color),
+                     ErrorMessage(reason=Reason.GAME_ALREADY_OVER, msg_type="move"))
         return "already_over"
     if room.pending_skillcheck is not None:
         await send(connections.get_for_color(room, color),
@@ -257,19 +260,36 @@ async def handle_draw_response(app, websocket, room, color, raw):
     return "declined"
 
 
+async def _restart_rematch(app, room, color):
+    rooms = app.state.rooms
+    connections = app.state.connections
+    if not rooms.reset_for_rematch(room.room_id):
+        await send(connections.get_for_color(room, color),
+                     ErrorMessage(reason=Reason.REMATCH_UNAVAILABLE,
+                                    msg_type="rematch_response"))
+        return "unavailable"
+    log.info("rematch restart room=%s", room.room_id)
+    await broadcast_game_start(connections, room, app.state.now, rematch=True)
+    return "restarted"
+
+
 async def handle_rematch_request(app, websocket, room, color, raw):
     rooms = app.state.rooms
     connections = app.state.connections
     if room.result is None:
         return "noop"
+    slot = room.slot(color)
+    if slot is None or not slot.at_result:
+        await send(connections.get_for_color(room, color),
+                     ErrorMessage(reason=Reason.REMATCH_UNAVAILABLE,
+                                    msg_type="rematch_request"))
+        return "unavailable"
     if color in room.rematch_offered_by:
         return "duplicate"
     room.rematch_offered_by.add(color)
+    rooms.mark_rematch_activity(room)
     if len(room.rematch_offered_by) == 2:
-        log.info("rematch mutual — restart room=%s", room.room_id)
-        rooms.reset_for_rematch(room.room_id)
-        await broadcast_game_start(connections, room, app.state.now)
-        return "started"
+        return await _restart_rematch(app, room, color)
     log.info("rematch requested room=%s by=%s", room.room_id, color)
     opp_ws = connections.get_for_color(room, room.opp_color(color))
     if opp_ws is not None:
@@ -288,14 +308,37 @@ async def handle_rematch_response(app, websocket, room, color, raw):
         return "invalid"
     if not room.rematch_offered_by:
         return "noop"
+    if color in room.rematch_offered_by:
+        return "noop"
     if msg.accept:
         log.info("rematch accepted room=%s by=%s", room.room_id, color)
-        rooms.reset_for_rematch(room.room_id)
-        await broadcast_game_start(connections, room, app.state.now)
-        return "accepted"
+        rooms.mark_rematch_activity(room)
+        return await _restart_rematch(app, room, color)
     log.info("rematch declined room=%s by=%s", room.room_id, color)
+    for slot_color in ("white", "black"):
+        ws = connections.get_for_color(room, slot_color)
+        if ws is not None:
+            await send(ws, RematchUpdateMessage(
+                event="window_expired" if slot_color == color else "declined"))
     room.rematch_offered_by.clear()
+    rooms.drop_room_now(room.room_id)
     return "declined"
+
+
+async def handle_left_result(app, websocket, room, color, raw):
+    connections = app.state.connections
+    if room.result is None:
+        return "noop"
+    slot = room.slot(color)
+    if slot is None:
+        return "noop"
+    slot.at_result = False
+    if color in room.rematch_offered_by:
+        room.rematch_offered_by.discard(color)
+        opp_ws = connections.get_for_color(room, room.opp_color(color))
+        if opp_ws is not None:
+            await send(opp_ws, RematchUpdateMessage(event="cancelled"))
+    return "left_result"
 
 
 async def handle_takeback_request(app, websocket, room, color, raw):
@@ -411,6 +454,7 @@ HANDLERS = {
     "draw_response": handle_draw_response,
     "rematch_request": handle_rematch_request,
     "rematch_response": handle_rematch_response,
+    "left_result": handle_left_result,
     "takeback_request": handle_takeback_request,
     "takeback_response": handle_takeback_response,
     "give_time": handle_give_time,

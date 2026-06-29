@@ -24,6 +24,7 @@ from chessshootout.server.protocol import (
     AuthMessage, CancelMatchmakeRequest, ConnectionStatusMessage, ErrorMessage,
     HealthResponse, HistoryEntryWire, LockWire, MatchmakeRequest, MatchmakeResponse,
     PROTOCOL_VERSION, PendingSkillCheckWire, Reason, ReclaimRequest, ReclaimResponse,
+    RematchRequestMessage, RematchUpdateMessage,
     ResultMessage, ResumeRequest, ResumeResponse, SkillCheckOutcomeWire, is_uuid4,
 )
 from chessshootout.server.rooms import (
@@ -208,6 +209,15 @@ def create_app(*, now_provider=time.monotonic, max_rooms=DEFAULT_MAX_ROOMS):
             await finalize_and_broadcast(rooms, connections, prior_room, Reason.ABANDONMENT,
                                          winner_color=prior_room.opp_color(prior_color))
             rooms.release_for_new_game(body.client_uuid)
+        finished = rooms.finished_room_for(body.client_uuid)
+        if finished is not None:
+            fin_color = finished.color_of(body.client_uuid)
+            if fin_color is not None:
+                opp_ws = connections.get_for_color(finished, finished.opp_color(fin_color))
+                if opp_ws is not None:
+                    await send(opp_ws, RematchUpdateMessage(event="opponent_left"))
+            log.info("matchmake leaves finished room=%s", finished.room_id)
+            rooms.release_for_new_game(body.client_uuid)
         token = RoomManager.make_session_token()
         try:
             room = await rooms.enqueue(
@@ -256,9 +266,6 @@ def create_app(*, now_provider=time.monotonic, max_rooms=DEFAULT_MAX_ROOMS):
         if slot is None:
             log.info("resume rejected room=%s reason=session_expired", body.room_id)
             raise HTTPException(status_code=401, detail={"reason": Reason.SESSION_EXPIRED})
-        if room.result is not None:
-            log.info("resume rejected room=%s reason=game_already_over", body.room_id)
-            raise HTTPException(status_code=410, detail={"reason": room.result[0]})
         history = [
             HistoryEntryWire(
                 from_sq=coord_from_square(entry.move.from_sq),
@@ -311,10 +318,6 @@ def create_app(*, now_provider=time.monotonic, max_rooms=DEFAULT_MAX_ROOMS):
             room, color, new_token = await rooms.reclaim_session(body.client_uuid)
         except NotInRoomError:
             raise HTTPException(status_code=404, detail={"reason": Reason.NOT_IN_ROOM})
-        if room.result is not None:
-            log.info("reclaim rejected uuid=%s reason=game_already_over",
-                     body.client_uuid[:8])
-            raise HTTPException(status_code=410, detail={"reason": room.result[0]})
         log.info("reclaim ok uuid=%s room=%s color=%s",
                  body.client_uuid[:8], room.room_id, color)
         return ReclaimResponse(room_id=room.room_id, session_token=new_token)
@@ -418,7 +421,16 @@ async def _ws_session(app, websocket, room_id):
              room.room_id, auth_uuid[:8], color, room.is_paired(),
              connections.has_both(room))
 
-    if room.is_paired() and connections.has_both(room) and not room.game_start_broadcast:
+    if room.result is not None:
+        slot.at_result = True
+        reason, winner = room.result
+        await send(websocket, ResultMessage(reason=reason, winner_color=winner))
+        if room.opp_color(color) in room.rematch_offered_by:
+            await send(websocket, RematchRequestMessage())
+        opp_ws = connections.get_for_color(room, room.opp_color(color))
+        if opp_ws is not None:
+            await send(opp_ws, RematchUpdateMessage(event="opponent_returned"))
+    elif room.is_paired() and connections.has_both(room) and not room.game_start_broadcast:
         if room.started_at is None:
             room.started_at = app.state.now()
         await broadcast_game_start(connections, room, app.state.now)
@@ -459,10 +471,14 @@ async def _ws_session(app, websocket, room_id):
                       (app.state.now() - t0) * 1000.0, outcome)
     finally:
         removed = connections.remove(auth_room.room_id, auth_uuid, websocket)
-        if removed or connections.get_for_color(auth_room, auth_color) is None:
-            rooms.mark_disconnected(auth_room.room_id, auth_color)
+        cur_color = auth_room.color_of(auth_uuid) or auth_color
+        if removed or connections.get_for_color(auth_room, cur_color) is None:
+            rooms.mark_disconnected(auth_room.room_id, cur_color)
             log.info("ws disconnected room=%s color=%s",
-                     auth_room.room_id, auth_color)
-            opp_ws = connections.get_for_color(auth_room, auth_room.opp_color(auth_color))
-            if opp_ws is not None and auth_room.result is None:
-                await send(opp_ws, ConnectionStatusMessage(opp_state="reconnecting"))
+                     auth_room.room_id, cur_color)
+            opp_ws = connections.get_for_color(auth_room, auth_room.opp_color(cur_color))
+            if opp_ws is not None:
+                msg = (ConnectionStatusMessage(opp_state="reconnecting")
+                       if auth_room.result is None
+                       else RematchUpdateMessage(event="opponent_reconnecting"))
+                await send(opp_ws, msg)

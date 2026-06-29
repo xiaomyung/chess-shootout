@@ -53,6 +53,7 @@ GAME_START = GameStartMessage(
                 "black_country": None,
                 "heartbeat_interval_seconds": 2.0,
                 "grace_seconds": 60.0,
+                "rematch": False,
             },
             id="game_start",
         ),

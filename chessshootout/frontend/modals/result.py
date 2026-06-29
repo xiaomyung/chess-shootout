@@ -221,7 +221,7 @@ class ResultMenu(BaseModal):
         row = pg.Rect(content.x, content.bottom - btn_h, content.width, btn_h)
         buttons = ONLINE_BUTTONS if self.online_mode else BUTTONS
         if self.online_mode and self.rematch_offered:
-            buttons = [("Accept", "rematch")] + buttons[1:]
+            buttons = [b for b in ONLINE_BUTTONS if b[1] != "rematch"]
         self.button_rects = draw_button_row(
             self.window, row, buttons, self.button_font, gap,
             primary_keys={buttons[0][1]},

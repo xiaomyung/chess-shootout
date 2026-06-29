@@ -13,11 +13,14 @@ from chessshootout.skillcheck.types import SkillCheckKind
 log = logging.getLogger("chess.frontend")
 
 MATCH_FOUND_SECONDS = 3
+REMATCH_STATE_TOAST_KEY = "rematch_state"
 
 OFFER_BANNERS = {
     "draw_offered": ("🤝", "offers a draw", "Accept", "Decline", "send_draw_response"),
     "takeback_offered": ("↩️", "wants a takeback", "Allow", "Deny",
                          "send_takeback_response"),
+    "rematch_request": ("⚔️", "wants a rematch", "Accept", "Deny",
+                        "send_rematch_response"),
 }
 
 
@@ -51,6 +54,7 @@ ONLINE_TRANSIENT_REASON_LABELS = {
     "no_takeback_available": "Nothing to take back",
     "rematch_already_pending": "Rematch already requested",
     "already_in_game": "Already in a game",
+    "game_already_over": "This game has ended",
 }
 
 ONLINE_GAME_STATE_REASONS = {
@@ -91,6 +95,8 @@ class OnlineEventsMixin:
             self._push_offer_banner(event.type)
         elif event.type == "rematch_request":
             self._handle_rematch_request()
+        elif event.type == "rematch_update":
+            self._handle_rematch_update(event.payload)
         elif event.type == "takeback_applied":
             self._handle_takeback_applied(event.payload)
         elif event.type == "game_resumed":
@@ -127,6 +133,10 @@ class OnlineEventsMixin:
             return
         if reason in ONLINE_GAME_STATE_REASONS:
             return
+        if reason == "rematch_unavailable":
+            self.toast.show("Rematch no longer available", key=REMATCH_STATE_TOAST_KEY)
+            self._end_rematch_window()
+            return
         if reason == "room_lost":
             self._resyncing = False
             self.reconnecting_modal.hide()
@@ -157,17 +167,74 @@ class OnlineEventsMixin:
         else:
             self.toast.show("Server error")
 
-    def _handle_rematch_request(self):
+    def _opp_name(self):
+        opp_color = "black" if self._chosen_side == "white" else "white"
+        return self._name_for_color(opp_color)
+
+    def _push_rematch_banner(self):
         self._rematch_offered = True
+        icon, verb, ok_label, no_label, _ = OFFER_BANNERS["rematch_request"]
+        self.offer_banners.push(
+            "rematch_request", icon, self._opp_name(), verb, ok_label, no_label,
+            on_ok=self._accept_rematch, on_no=self._decline_rematch)
+
+    def _clear_rematch_offer(self):
+        self.offer_banners.dismiss("rematch_request")
+        self._rematch_offered = False
+        self.result_menu.set_rematch_offered(False)
+
+    def _handle_rematch_request(self):
+        if self.online_client is None:
+            return
+        self._push_rematch_banner()
         self.result_menu.set_rematch_offered(True)
-        self.toast.show("Opponent wants a rematch")
+        self.sound_manager.play_give_time()
+
+    def _reshow_rematch_banner(self):
+        if self.online_client is None:
+            return
+        self._push_rematch_banner()
+
+    def _accept_rematch(self):
+        if self.online_client is not None:
+            self.online_client.send_rematch_response(True)
+
+    def _decline_rematch(self):
+        self._clear_rematch_offer()
+        if self.online_client is not None:
+            self.online_client.send_rematch_response(False)
+
+    def _end_rematch_window(self):
+        self._clear_rematch_offer()
+        self._tear_down_online_session()
+        self._return_to_menu_card()
+
+    def _handle_rematch_update(self, payload):
+        event = payload.get("event", "")
+        opp = self._opp_name()
+        if event == "opponent_reconnecting":
+            self.toast.show(f"{opp} disconnected — waiting…", key=REMATCH_STATE_TOAST_KEY)
+            return
+        if event == "opponent_returned":
+            self.toast.show(f"{opp} is back", key=REMATCH_STATE_TOAST_KEY)
+            return
+        if event == "cancelled":
+            self._clear_rematch_offer()
+            self.toast.show(f"{opp} withdrew the rematch", key=REMATCH_STATE_TOAST_KEY)
+            return
+        labels = {
+            "declined": f"{opp} declined the rematch",
+            "opponent_left": f"{opp} left the game",
+            "window_expired": "Rematch window closed",
+        }
+        self.toast.show(labels.get(event, "Rematch ended"), key=REMATCH_STATE_TOAST_KEY)
+        self._end_rematch_window()
 
     def _push_offer_banner(self, event_type):
         if self.online_client is None:
             return
         icon, verb, ok_label, no_label, send_method = OFFER_BANNERS[event_type]
-        opp_color = "black" if self._chosen_side == "white" else "white"
-        opp_name = self._name_for_color(opp_color)
+        opp_name = self._opp_name()
         send_response = getattr(self.online_client, send_method)
         self.offer_banners.push(
             event_type, icon, opp_name, verb, ok_label, no_label,
@@ -412,6 +479,8 @@ class OnlineEventsMixin:
             self._begin_resync()
 
     def _handle_online_result(self, payload):
+        if self.manual_result is not None:
+            return
         self.offer_banners.clear()
         pending_action = self._online_verdict_action
         self._online_verdict_action = None
@@ -462,6 +531,7 @@ class OnlineEventsMixin:
             self._finish_match_found, seconds=MATCH_FOUND_SECONDS,
             white_country=payload.get("white_country") or "",
             black_country=payload.get("black_country") or "",
+            rematch=bool(payload.get("rematch")),
         )
         self.sound_manager.play_online_game_start()
 
@@ -490,6 +560,7 @@ class OnlineEventsMixin:
         pg.display.set_caption(f"Chess — vs {opp_name}")
         self.wait_modal.hide()
         self.confirm_modal.hide()
+        self.start_menu.hide()
         self.manual_result = None
         self.result_menu.set_online_mode(True)
         self.mode = ONLINE

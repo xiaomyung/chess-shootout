@@ -45,6 +45,9 @@ class FakeOnlineClient:
         self.state_syncs = 0
         self.pings = 0
 
+    def disconnect(self):
+        self.state = "disconnected"
+
     def send_ping(self, ply):
         self.pings += 1
 
@@ -650,6 +653,7 @@ def test_local_shootout_still_takes_the_local_branch():
     app.online_client = FakeOnlineClient()
     app._on_start_game({"mode": "single_screen", "nickname": "alice", "side": "white",
                         "time_minutes": 5, "increment_seconds": 0})
+    assert app.online_client is None, "starting a local game drops any lingering online client"
     app.skillcheck.seed = "force"
     app.match.backend = make_backend({
         sq(7, 4): piece(K, WHITE), sq(0, 4): piece(K, BLACK),
@@ -658,7 +662,6 @@ def test_local_shootout_still_takes_the_local_branch():
     held = app._skillcheck_gate(sq(4, 3), sq(3, 3))
     assert held is True, "a local capture opens an overlay, not a server hold"
     assert app.skillcheck_overlay.is_active()
-    assert app.online_client.sent_moves == [], "local play never touches the online client"
 
 
 # ---- the client-side skill-check log (PGN history) -------------------------
