@@ -1,6 +1,7 @@
-"""Toast stacked-queue: dedupe-by-key, independent >=5s timers, newest-on-top
-stacking, and that draw() paints only visible bubbles. Time is injected via
-draw(now_ms)/is_visible(now_ms) so the queue is driven deterministically."""
+"""Toast stacked-queue: dedupe-by-key, independent minimum-duration timers,
+newest-on-top stacking, a monotonic single fade-out, and that draw() paints only
+visible bubbles. Time is injected via draw(now_ms)/is_visible(now_ms) so the queue
+is driven deterministically."""
 
 import os
 
@@ -86,6 +87,20 @@ def test_refreshed_keyed_bubble_keeps_completed_fade_in(toast, monkeypatch):
         clock[0] += 16
         toast.show("Resyncing…", key="resync")
         assert toast._alpha(b, clock[0]) == 255
+
+
+def test_fade_out_is_monotonic_no_flicker(toast, monkeypatch):
+    """The fade-out must decrease monotonically; the old two-branch alpha dropped to
+    ~0 at the end of the shown period, flashed back to full, then faded again."""
+    monkeypatch.setattr(pg.time, "get_ticks", lambda: 1000)
+    toast.show("bye")
+    bub = toast._bubbles[0]
+    start = 1000 + bub["duration_ms"] - FADE_OUT_MS
+    end = 1000 + bub["duration_ms"] + FADE_OUT_MS
+    alphas = [toast._alpha(bub, t) for t in range(start, end + 1, 10)]
+    assert alphas[0] == 255
+    assert alphas[-1] == 0
+    assert all(x >= y for x, y in zip(alphas, alphas[1:]))
 
 
 def test_distinct_messages_stack_newest_last(toast):

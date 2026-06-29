@@ -6,7 +6,7 @@ from chessshootout.frontend.visual.colors import Colors
 from chessshootout.frontend.visual.fonts import get_font
 
 
-MIN_DURATION_MS = 5000
+MIN_DURATION_MS = 3000
 DEFAULT_DURATION_MS = MIN_DURATION_MS
 FADE_OUT_MS = 300
 ENTER_MS = 200
@@ -76,10 +76,8 @@ class Toast:
         age = now - b["enter_at_ms"]
         remaining = b["duration_ms"] - (now - b["shown_at_ms"])
         fade_in = 255 if age >= ENTER_MS else int(255 * max(0, age) / ENTER_MS)
-        if remaining >= FADE_OUT_MS:
+        if remaining >= 0:
             fade_out = 255
-        elif remaining > 0:
-            fade_out = int(255 * remaining / FADE_OUT_MS)
         else:
             fade_out = max(0, int(255 * (FADE_OUT_MS + remaining) / FADE_OUT_MS))
         return max(0, min(fade_in, fade_out))
