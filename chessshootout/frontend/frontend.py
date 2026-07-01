@@ -2307,7 +2307,8 @@ class Frontend(OnlineEventsMixin):
                 self.running = False
 
             elif event.type == pg.KEYDOWN:
-                self.sound_manager.play_ui_click()
+                if not self._skillcheck_swallows_input():
+                    self.sound_manager.play_ui_click()
                 if event.key == pg.K_ESCAPE:
                     self._handle_escape()
                     continue

@@ -782,6 +782,19 @@ def test_illegal_premove_target_plays_ui_click():
     app.sound_manager.play_ui_click.assert_called_once()
 
 
+def test_click_opponent_piece_online_plays_ui_click():
+    """Clicking an opponent's piece in an online game selects nothing; that no-op
+    must still play the typewriter click, not be mistaken for a real premove-select
+    and silenced (_premove_select propagates the failed selection as None)."""
+    app = make_app()
+    app._on_start_game(base_config(time_minutes=None))
+    app.match.local_color = PieceColor.WHITE
+    app.sound_manager.reset_mock()
+    app.mouse_left_clicked(_px(app, Square(1, 4)))   # black pawn e7 (opponent, no chain)
+    assert app.board.selected_square is None
+    app.sound_manager.play_ui_click.assert_called_once()
+
+
 def test_right_click_press_plays_ui_click():
     app = make_app()
     app._on_start_game(base_config(time_minutes=None))
@@ -811,6 +824,23 @@ def test_any_keyboard_press_plays_ui_click():
     pg.event.post(pg.event.Event(pg.KEYDOWN, {"key": pg.K_a, "mod": 0, "unicode": "a"}))
     app.check_events()
     app.sound_manager.play_ui_click.assert_called_once()
+
+
+def test_keyboard_during_skillcheck_is_silent():
+    """While a skill-check swallows input it owns its own audio (tick/beep/verdict);
+    a keydown must not layer the universal typewriter click over it — matching the
+    mouse path, which is already silent during a check. The event still reaches the
+    overlay."""
+    app = make_app()
+    app._on_start_game(base_config(time_minutes=None))
+    app._skillcheck_swallows_input = lambda: True
+    app.skillcheck_overlay.handle_event = MagicMock()
+    app.sound_manager.reset_mock()
+    pg.event.clear()
+    pg.event.post(pg.event.Event(pg.KEYDOWN, {"key": pg.K_SPACE, "mod": 0, "unicode": " "}))
+    app.check_events()
+    app.sound_manager.play_ui_click.assert_not_called()
+    app.skillcheck_overlay.handle_event.assert_called_once()
 
 
 def test_keyboard_flip_plays_click_and_flip():

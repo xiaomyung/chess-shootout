@@ -1192,8 +1192,7 @@ class Board:
         return "select" if selected else None
 
     def _premove_select(self, square, piece):
-        self._try_select_for_premove(square, piece)
-        return "premove"
+        return "premove" if self._try_select_for_premove(square, piece) else None
 
     def apply_gated_move(self, from_sq, to_sq, promo_type=None):
         result = self.match.try_move(from_sq, to_sq)
