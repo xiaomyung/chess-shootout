@@ -8,6 +8,7 @@ toast (not a modal).
 """
 import os
 from types import SimpleNamespace
+from unittest.mock import MagicMock
 
 os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
 os.environ.setdefault("SDL_AUDIODRIVER", "dummy")
@@ -387,6 +388,38 @@ def test_rematch_request_shows_banner_and_hides_initiate_button(frontend):
     assert frontend._rematch_offered is True
     assert frontend.result_menu.rematch_offered is True
     assert not frontend.offer_banners.is_empty()
+
+
+def test_draw_offer_banner_pops(frontend):
+    frontend.sound_manager = MagicMock()
+    frontend.online_client = SimpleNamespace(send_draw_response=lambda v: None)
+    frontend._push_offer_banner("draw_offered")
+    frontend.sound_manager.play_toast.assert_called_once()
+
+
+def test_takeback_offer_banner_pops(frontend):
+    frontend.sound_manager = MagicMock()
+    frontend.online_client = SimpleNamespace(send_takeback_response=lambda v: None)
+    frontend._push_offer_banner("takeback_offered")
+    frontend.sound_manager.play_toast.assert_called_once()
+
+
+def test_offer_accept_and_decline_pop_and_send(frontend):
+    frontend.sound_manager = MagicMock()
+    sent = []
+    frontend.online_client = SimpleNamespace(send_draw_response=sent.append)
+    captured = {}
+    frontend.offer_banners = MagicMock()
+    frontend.offer_banners.push = lambda *a, on_ok, on_no, **k: captured.update(ok=on_ok, no=on_no)
+    frontend._push_offer_banner("draw_offered")
+    frontend.sound_manager.reset_mock()
+    captured["ok"]()
+    frontend.sound_manager.play_toast.assert_called_once()
+    assert sent == [True]
+    frontend.sound_manager.reset_mock()
+    captured["no"]()
+    frontend.sound_manager.play_toast.assert_called_once()
+    assert sent == [True, False]
 
 
 def test_on_rematch_accepts_when_offered(frontend):

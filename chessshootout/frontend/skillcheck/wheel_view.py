@@ -3,7 +3,7 @@ import math
 import pygame as pg
 
 from chessshootout.frontend.skillcheck.controller import (
-    SkillCheckController, SKILLCHECK_RESULT_HOLD_MS)
+    SkillCheckController, SKILLCHECK_RESULT_HOLD_MS, EdgeTrigger)
 from chessshootout.frontend.visual.colors import Colors
 from chessshootout.frontend.visual.draw import rounded_rect_surface, supersample
 from chessshootout.frontend.visual.fonts import get_font
@@ -50,7 +50,7 @@ def _needle_polygon(cx, cy, deg, length, width):
 class WheelController(SkillCheckController):
 
     def __init__(self, challenge, cell_rect, now_ms, deadline_ms=WHEEL_DEFAULT_DEADLINE_MS,
-                 on_shot=None, passive=False):
+                 on_shot=None, passive=False, audio=None):
         self.challenge = challenge
         self._apply_geometry(cell_rect)
         self.start_ms = now_ms
@@ -63,6 +63,9 @@ class WheelController(SkillCheckController):
         self._passive = passive
         self._online = on_shot is not None or passive
         self._frozen_override = None
+        self._audio = audio
+        self._tick_edge = EdgeTrigger()
+        self._cue("play_skillcheck_appear")
 
     def _apply_geometry(self, cell_rect):
         self.center = cell_rect.center
@@ -101,6 +104,7 @@ class WheelController(SkillCheckController):
         if self._committed_at is None:
             self._committed_at = self._now
         self._resolved_at = self._now
+        self._emit_verdict()
 
     def spectate_shot(self, elapsed, miss_count, won):
         self._frozen_override = elapsed
@@ -108,6 +112,11 @@ class WheelController(SkillCheckController):
 
     def update(self, now_ms):
         self._now = now_ms
+        if self._committed_at is None:
+            elapsed = now_ms - self.start_ms
+            in_arc = self.challenge.in_arc_at(self.challenge.needle_deg(elapsed), elapsed)
+            if self._tick_edge.update(in_arc):
+                self._cue("play_wheel_tick")
         if (not self._online and self._committed_at is None
                 and now_ms - self.start_ms >= self.deadline_ms):
             self._commit(False)
@@ -130,6 +139,7 @@ class WheelController(SkillCheckController):
     def _commit(self, landed):
         self._landed = landed
         self._committed_at = self._now
+        self._emit_verdict()
 
     def _frozen_elapsed(self):
         if self._frozen_override is not None:

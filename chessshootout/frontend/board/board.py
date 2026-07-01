@@ -1115,14 +1115,14 @@ class Board:
 
     def handle_click(self, square):
         if self.read_only:
-            return
+            return None
         if self.review_ply is not None:
-            return
+            return None
         if self.is_animating():
-            return
+            return None
 
         if self.pending_promotion_square is not None:
-            return
+            return None
 
         grid = self._effective_grid()
         piece_at_clicked = grid[square.row][square.col]
@@ -1134,38 +1134,32 @@ class Board:
             chain_piece = self._premove_chain_piece(
                 piece_at_clicked, live_at_clicked, current_turn, local_color)
             if chain_piece is not None:
-                self._try_select_for_premove(square, chain_piece)
-                return
+                return self._premove_select(square, chain_piece)
             if self._is_real_move_eligible(live_at_clicked, current_turn, local_color):
-                self._try_select(square)
-                return
+                return self._select_signal(self._try_select(square))
             if piece_at_clicked is None:
                 resolved = self._resolve_chain_tip(square)
                 if resolved != square:
                     resolved_piece = grid[resolved.row][resolved.col]
                     if resolved_piece is not None:
                         if resolved_piece.color == current_turn:
-                            self._try_select(resolved)
-                        else:
-                            self._try_select_for_premove(resolved, resolved_piece)
-                        return
+                            return self._select_signal(self._try_select(resolved))
+                        return self._premove_select(resolved, resolved_piece)
                 if self.premoves:
                     self._clear_premoves()
-                return
-            self._try_select_for_premove(square, piece_at_clicked)
-            return
+                    return "premove"
+                return None
+            return self._premove_select(square, piece_at_clicked)
 
         if square == self.selected_square:
             self.selected_square = None
-            return
+            return None
 
         if self._should_switch_focus_to(square, grid, live_at_clicked, current_turn, local_color):
             self.selected_square = None
             if self._is_real_move_eligible(live_at_clicked, current_turn, local_color):
-                self._try_select(square)
-            else:
-                self._try_select_for_premove(square, live_at_clicked)
-            return
+                return self._select_signal(self._try_select(square))
+            return self._premove_select(square, live_at_clicked)
 
         from_sq = self.selected_square
         self.selected_square = None
@@ -1174,25 +1168,32 @@ class Board:
         chain_from_piece = self._premove_chain_piece(
             spec_from_piece, live_from_piece, current_turn, local_color)
         if chain_from_piece is not None:
-            self._queue_premove(from_sq, square, chain_from_piece)
-            return
+            return "premove" if self._queue_premove(from_sq, square, chain_from_piece) else None
         if self._is_real_move_eligible(live_from_piece, current_turn, local_color):
             if self._skillcheck_armed() and self._is_promotion_move(from_sq, square):
                 if self.locked_targets is not None and self.locked_targets(from_sq, square):
-                    return
+                    return None
                 self._begin_promotion_pick(from_sq, square)
-                return
+                return "promotion"
             if self.skillcheck_gate is not None and self.skillcheck_gate(from_sq, square):
-                return
+                return "skillcheck"
             result = self.match.try_move(from_sq, square)
             if not result.legal:
-                return
+                return None
             self._start_move_animation(from_sq, square, result.promotion_required)
-            return
+            return "move"
 
         if spec_from_piece is None:
-            return
-        self._queue_premove(from_sq, square, spec_from_piece)
+            return None
+        return "premove" if self._queue_premove(from_sq, square, spec_from_piece) else None
+
+    @staticmethod
+    def _select_signal(selected):
+        return "select" if selected else None
+
+    def _premove_select(self, square, piece):
+        self._try_select_for_premove(square, piece)
+        return "premove"
 
     def apply_gated_move(self, from_sq, to_sq, promo_type=None):
         result = self.match.try_move(from_sq, to_sq)
@@ -1274,22 +1275,24 @@ class Board:
     def _try_select_for_premove(self, square, piece):
         local_color = getattr(self.match, "local_color", None)
         if local_color is not None and piece.color != local_color:
-            return
+            return False
         if self.premove_color is not None and self.premove_color != piece.color:
             self._clear_premoves()
         self.selected_square = square
+        return True
 
     def _queue_premove(self, from_sq, to_sq, piece):
         if from_sq == to_sq:
-            return
+            return False
         if not piece_can_pseudo_reach(piece, from_sq, to_sq):
-            return
+            return False
         if self.premove_color is not None and self.premove_color != piece.color:
             self._clear_premoves()
         self.premoves.append(Premove(from_sq, to_sq, piece))
         self.premove_color = piece.color
         if self.on_premove_queued is not None:
             self.on_premove_queued(piece.type)
+        return True
 
     def _clear_premoves(self):
         self.premoves = []
@@ -1438,7 +1441,7 @@ class Board:
         if self.shot_callback is not None:
             self.shot_callback(entry)
         if self.announce_callback is not None and key is not None:
-            self.announce_callback(key)
+            self.announce_callback(key, entry.move.captured)
 
     def trigger_skillcheck_fail(self, from_sq, to_sq, on_fire=None):
         piece = self.match.piece_at(from_sq)
@@ -1560,13 +1563,14 @@ class Board:
     def _try_select(self, square):
         piece = self.match.piece_at(square)
         if piece is None:
-            return
+            return False
         if piece.color != self.match.current_turn():
-            return
+            return False
         local_color = getattr(self.match, "local_color", None)
         if local_color is not None and piece.color != local_color:
-            return
+            return False
         self.selected_square = square
+        return True
 
     def _draw_selection_highlight(self):
         if self.selected_square is None:

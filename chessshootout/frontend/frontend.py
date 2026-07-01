@@ -236,6 +236,7 @@ class Frontend(OnlineEventsMixin):
         self._time_control = None
         self.pgn_review = False
         self._flag_fall_played = False
+        self._click_sound_played = False
         self._game_bg_cache = None
         self._result_first_seen_at_ms = None
         self._pgn_result_tag = None
@@ -312,6 +313,7 @@ class Frontend(OnlineEventsMixin):
         self._server_addr_row = None
         self.toast = Toast(self.window)
         self.toast.top_inset = self.chrome.HEIGHT
+        self.toast.on_new = lambda: self.sound_manager.play_toast()
         self._last_saved_pgn_path = None
         self.wait_modal = WaitModal(self.window)
         self.match_found_modal = MatchFoundModal(self.window)
@@ -1287,6 +1289,7 @@ class Frontend(OnlineEventsMixin):
             return
         self.board.cancel_drag_physics()
         self.board.flipped = not self.board.flipped
+        self.sound_manager.play_flip()
 
     def _on_help(self):
         self.help_modal.show()
@@ -1353,7 +1356,7 @@ class Frontend(OnlineEventsMixin):
             victim_sq=target, attacker_type=capturer.type.value if capturer else None,
             shot_sound=self._shot_sound_for(capturer),
             on_shot=None if passive else (self._send_skillcheck_shot if online else None),
-            miss_count=miss_count, passive=passive)
+            miss_count=miss_count, passive=passive, audio=self.sound_manager)
         if controller is None:
             return False
         self._skillcheck_target = target
@@ -1375,6 +1378,16 @@ class Frontend(OnlineEventsMixin):
 
     def _skillcheck_swallows_input(self):
         return self.skillcheck_overlay.is_active() and not self.skillcheck_overlay.is_passive()
+
+    def _sync_aim_check_gun(self):
+        fx = self.board.effects
+        victim = self.board.aim_suppressed_square
+        if victim is not None and self.skillcheck_overlay.is_active():
+            fx.aim_victim = victim
+            fx.aim_victim_scale = self.skillcheck_overlay.aim_victim_scale()
+        else:
+            fx.aim_victim = None
+            fx.aim_victim_scale = 1.0
 
     def _send_skillcheck_shot(self, client_elapsed_ms):
         if self.online_client is not None:
@@ -1514,10 +1527,10 @@ class Frontend(OnlineEventsMixin):
         initial = time_control[0] if time_control and time_control[0] else 0
         return int(skillcheck_deadline_ms(initial))
 
-    def _on_kill_announced(self, key):
+    def _on_kill_announced(self, key, victim=None):
         if key == "hit":
-            self.sound_manager.play_hit()
-        else:
+            self.sound_manager.play_hit(victim.type if victim is not None else None)
+        elif self.current_result() is None:
             self.sound_manager.play_announcer(key)
 
     def _maybe_flash_increment_for(self, mover_color):
@@ -1589,6 +1602,7 @@ class Frontend(OnlineEventsMixin):
             self.board.try_apply_next_premove()
 
         if self.mode != "menu":
+            self._sync_aim_check_gun()
             self._draw_game_background()
             self.board.draw_board()
             self._update_player_strips()
@@ -1700,6 +1714,9 @@ class Frontend(OnlineEventsMixin):
         code = self.current_result()
         if code is None:
             return
+        if code.startswith("draw"):
+            self.sound_manager.play_draw()
+            return
         if code.startswith("white_wins"):
             winner, loser = PieceColor.WHITE, PieceColor.BLACK
         elif code.startswith("black_wins"):
@@ -1712,9 +1729,16 @@ class Frontend(OnlineEventsMixin):
             self.board.show_surrender_flag(loser)
         if is_mate:
             self.board.show_checkmate_takeover(winner.value.upper())
-            self.sound_manager.play_mate_sting()
-        if is_resign:
-            self.sound_manager.play_surrender()
+        if is_mate or is_resign:
+            if self._local_won(winner):
+                self.sound_manager.play_you_win()
+            elif is_resign:
+                self.sound_manager.play_surrender()
+            elif is_mate:
+                self.sound_manager.play_you_lose()
+
+    def _local_won(self, winner):
+        return self.mode != ONLINE or self.match.local_color == winner
 
     def _result_elapsed_ms(self):
         if self._result_first_seen_at_ms is None:
@@ -1764,8 +1788,12 @@ class Frontend(OnlineEventsMixin):
         clock = self.match.clock
         if clock is None or clock.flagged is None:
             return
-        self.sound_manager.play_flag_fall()
         self._flag_fall_played = True
+        local = self.match.local_color
+        if self.mode == ONLINE and local is not None and clock.flagged != local:
+            self.sound_manager.play_you_win()
+        else:
+            self.sound_manager.play_flag_fall()
 
     def _update_heartbeat(self):
         clock = self.match.clock
@@ -2043,14 +2071,18 @@ class Frontend(OnlineEventsMixin):
 
     def _right_click_pressed(self, pos):
         if self.mode == "menu" or self.current_result() is not None:
+            self.sound_manager.play_ui_click()
             return
         sq = self.board.cell_at(pos)
         if sq is None:
+            self.sound_manager.play_ui_click()
             return
         if self.board.dragging_from is not None:
-            self.board.queue_premove_from_drag(sq)
+            if not self.board.queue_premove_from_drag(sq):
+                self.sound_manager.play_ui_click()
             return
         self.board._right_drag_start_square = sq
+        self.sound_manager.play_ui_click()
 
     def _right_click_released(self, pos):
         start = self.board._right_drag_start_square
@@ -2107,7 +2139,13 @@ class Frontend(OnlineEventsMixin):
         if not self.audio_panel.handle_drag(pos, True):
             self.board.update_drag_motion(pos)
 
-    def mouse_left_clicked(self, pos):
+    def mouse_left_clicked(self, pos, *, ui_click=True):
+        self._click_sound_played = False
+        self._dispatch_left_click(pos)
+        if ui_click and not self._click_sound_played:
+            self.sound_manager.play_ui_click()
+
+    def _dispatch_left_click(self, pos):
         if self.chrome.handle_click(pos):
             return
         if (self.current_result() is not None
@@ -2157,12 +2195,17 @@ class Frontend(OnlineEventsMixin):
             return
         if self.board.pending_promotion_square is not None:
             self.board.pick_promotion_at(pos)
+            self._click_sound_played = True
             return
         square = self.board.cell_at(pos)
         if square is not None:
             if not self.board.is_square_annotated(square):
                 self.board.clear_annotations()
-            self.board.handle_click(square)
+            signal = self.board.handle_click(square)
+            if signal:
+                self._click_sound_played = True
+                if signal == "select":
+                    self.sound_manager.play_pickup()
 
     def _handle_shortcut_key(self, event):
         if self.help_modal.is_visible():
@@ -2253,8 +2296,10 @@ class Frontend(OnlineEventsMixin):
             return
         was_dragging = self.board.dragging_from is not None
         if was_dragging and self.current_result() is None:
-            self.mouse_left_clicked(pos)
+            self.mouse_left_clicked(pos, ui_click=False)
         self.board.end_press()
+        if was_dragging and self.current_result() is None:
+            self.sound_manager.play_drop()
 
     def check_events(self):
         for event in pg.event.get():
@@ -2262,6 +2307,7 @@ class Frontend(OnlineEventsMixin):
                 self.running = False
 
             elif event.type == pg.KEYDOWN:
+                self.sound_manager.play_ui_click()
                 if event.key == pg.K_ESCAPE:
                     self._handle_escape()
                     continue

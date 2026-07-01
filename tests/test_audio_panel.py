@@ -101,12 +101,12 @@ def test_play_disabled_does_nothing(sm):
     """Disabled is a true no-op; enabling re-arms the real play path."""
     calls = []
     sm._play_with_master = lambda sound: calls.append(sound)
-    assert sm._move_default
+    sm._slots["castle"] = [MagicMock()]
     sm.enabled = False
-    sm.play_move()
+    sm.play_castle()
     assert calls == []
     sm.enabled = True
-    sm.play_move()
+    sm.play_castle()
     assert len(calls) == 1
 
 

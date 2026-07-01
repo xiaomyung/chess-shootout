@@ -236,10 +236,17 @@ class OnlineEventsMixin:
         icon, verb, ok_label, no_label, send_method = OFFER_BANNERS[event_type]
         opp_name = self._opp_name()
         send_response = getattr(self.online_client, send_method)
+        self.sound_manager.play_toast()
+
+        def respond(value):
+            def fire():
+                self.sound_manager.play_toast()
+                send_response(value)
+            return fire
+
         self.offer_banners.push(
             event_type, icon, opp_name, verb, ok_label, no_label,
-            on_ok=lambda: send_response(True),
-            on_no=lambda: send_response(False),
+            on_ok=respond(True), on_no=respond(False),
         )
 
     def _apply_clock_snap(self, payload, *, default_to_existing):

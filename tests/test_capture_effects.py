@@ -798,7 +798,7 @@ def test_kill_callout_fires_at_the_shot_not_at_move_start():
 def test_capture_routes_announcer_key_to_callback():
     board = _board()
     keys = []
-    board.announce_callback = keys.append
+    board.announce_callback = lambda key, victim=None: keys.append(key)
     _place(board, {
         Square(7, 4): Piece(KING, WHITE),
         Square(0, 4): Piece(KING, BLACK),
