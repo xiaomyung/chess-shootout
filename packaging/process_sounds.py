@@ -25,8 +25,8 @@ Usage
 -----
   python packaging/process_sounds.py --list          # slots + targets
   python packaging/process_sounds.py                 # full clean rebuild + validate + attribution
-  python packaging/process_sounds.py move_queen guns # rebuild only these slots
-  python packaging/process_sounds.py --split raw.wav gun_revolver_pawn
+  python packaging/process_sounds.py move_queen gun_shotgun # rebuild only these slots
+  python packaging/process_sounds.py --split raw.wav gun_revolver
   python packaging/process_sounds.py --attribution   # only regenerate ATTRIBUTION.md
 """
 
@@ -175,12 +175,15 @@ def ffprobe_json(path):
     return json.loads(out)
 
 
-def ffprobe_duration(path):
-    data = ffprobe_json(path)
+def _duration_from(data):
     try:
         return float(data["format"]["duration"])
     except (KeyError, ValueError):
         return 0.0
+
+
+def ffprobe_duration(path):
+    return _duration_from(ffprobe_json(path))
 
 
 def _trim_filter():
@@ -307,11 +310,7 @@ def validate(outputs):
         streams = data.get("streams", [{}])
         rate = int(streams[0].get("sample_rate", 0)) if streams else 0
         ch = int(streams[0].get("channels", 0)) if streams else 0
-        dur = 0.0
-        try:
-            dur = float(data["format"]["duration"])
-        except (KeyError, ValueError):
-            pass
+        dur = _duration_from(data)
         if rate != SAMPLE_RATE:
             problems.append(f"rate={rate}")
         if ch != want_ch:
