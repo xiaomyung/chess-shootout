@@ -1,30 +1,33 @@
 #!/usr/bin/env python3
 """Offline sound-processing pipeline for Chess Shootout.
 
-Takes raw downloads (any format ffmpeg reads) and produces the final, normalized
-OGG assets under ``assets/sounds/`` exactly where SoundManager expects them.
+Registry-driven: the single source of truth for every slot is
+``chessshootout/frontend/audio/slots.py`` (imported below). Each slot maps a
+staging directory (``assets/sounds/_staging/prefinal/<src>/``) to a final asset
+directory (``assets/sounds/<dst>/``). Every slot is a *directory* of ``NN.ogg``
+variants -- 0 files -> nothing shipped (silent no-op at runtime), 1 -> single,
+N -> the runtime random pool. There is no one-shot/pool distinction here.
 
 Per file the pipeline:
   1. trims leading/trailing silence (skipped for seamless loops),
-  2. loudness-normalizes  -- short SFX to a -1.5 dBTP peak, sustained clips/loops
-     to -16 LUFS (two-pass) -- matching the existing shipped set,
-  3. encodes to OGG Vorbis and drops it at the right path.
+  2. loudness-normalizes -- short SFX to a -1.5 dBTP peak, sustained clips / loops
+     to -16 LUFS (two-pass),
+  3. resamples to 44.1 kHz and downmixes to mono (SFX) or keeps stereo (voice/music),
+  4. encodes to OGG Vorbis at qscale 6 and drops it at ``<dst>/NN.ogg``.
 
-Multi-sample source files (e.g. a recording with several gunshots) can be cut
-into separate clips first with ``--split``.
+After a full run it validates every output (rate / channels / duration / no
+clipping) and prints a per-slot summary; any FAIL exits non-zero. It also
+regenerates the ``## Sounds`` section of the repo-root ``ATTRIBUTION.md`` from the
+structured credit tables below (the two required CC-BY credits + the CC0
+courtesy list).
 
-Workflow
---------
-1. Drop raw downloads into ``sound_staging/<slot>/`` (one folder per slot id;
-   any filename, any format). For pool slots add as many files as you want --
-   they become 01.ogg, 02.ogg, ... For one-shot slots the first file wins.
-2. ``python packaging/process_sounds.py --list``        # show slots + targets
-3. ``python packaging/process_sounds.py --split raw.wav gun_revolver_pawn``
-                                                          # cut a multi-shot file
-4. ``python packaging/process_sounds.py``                # process every staged slot
-   or ``python packaging/process_sounds.py gun_revolver_pawn move_queen``
-
-``sound_staging/`` is gitignored; only the finished assets are committed.
+Usage
+-----
+  python packaging/process_sounds.py --list          # slots + targets
+  python packaging/process_sounds.py                 # full clean rebuild + validate + attribution
+  python packaging/process_sounds.py move_queen guns # rebuild only these slots
+  python packaging/process_sounds.py --split raw.wav gun_revolver_pawn
+  python packaging/process_sounds.py --attribution   # only regenerate ATTRIBUTION.md
 """
 
 import argparse
@@ -34,99 +37,124 @@ import shutil
 import subprocess
 import sys
 import tempfile
-from dataclasses import dataclass
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-ASSETS = REPO_ROOT / "assets" / "sounds"
-STAGING = REPO_ROOT / "sound_staging"
+sys.path.insert(0, str(REPO_ROOT))
 
+from chessshootout.frontend.audio.slots import SLOTS, SHORT, SUSTAINED, LOOP  # noqa: E402
+
+ASSETS = REPO_ROOT / "assets" / "sounds"
+STAGING = ASSETS / "_staging" / "prefinal"
+ATTRIBUTION_PATH = REPO_ROOT / "ATTRIBUTION.md"
+
+SAMPLE_RATE = 44100
 SUSTAINED_LUFS = -16.0
 PEAK_TP = -1.5            # dBTP ceiling for short SFX and the LUFS true-peak cap
 LRA = 11.0
 TRIM_THRESHOLD = "-50dB"
 SPLIT_SILENCE_DB = "-40dB"
-SPLIT_MIN_SILENCE = 0.18  # seconds of silence that separates two samples
-SPLIT_MIN_CLIP = 0.05     # discard fragments shorter than this
+SPLIT_MIN_SILENCE = 0.18
+SPLIT_MIN_CLIP = 0.05
 VORBIS_QSCALE = "6"
 
 LOUDNORM_BASE = f"loudnorm=I={SUSTAINED_LUFS}:TP={PEAK_TP}:LRA={LRA}"
-
 SOURCE_EXTS = (".wav", ".aif", ".aiff", ".flac", ".mp3", ".ogg", ".m4a", ".opus")
 
-# kind: "pool" -> out is a directory, files become NN.ogg
-#       "oneshot" -> out is a file path
-# profile: "short" (peak-normalize) | "sustained" (-16 LUFS) | "loop" (-16 LUFS, no trim)
-
-
-@dataclass(frozen=True)
-class Slot:
-    out: str
-    kind: str
-    profile: str
-
-
-GUN_SLOTS = {
-    "gun_revolver_pawn": "revolver",
-    "gun_handcannon_knight": "hand_cannon",
-    "gun_sniper_bishop": "lever_action",
-    "gun_shotgun_rook": "shotgun",
-    "gun_blunderbuss_queen": "blunderbuss",
-}
-
-MOVE_PIECES = ("pawn", "knight", "bishop", "rook", "queen", "king")
-
-ANNOUNCER_PHRASES = (
-    "first_blood", "double_kill", "triple_kill", "quadra_kill",
-    "rampage", "unstoppable", "godlike",
-)
-
-
-def _build_manifest():
-    m = {}
-    for slot, gun in GUN_SLOTS.items():
-        m[slot] = Slot(f"guns/{gun}", "pool", "short")
-    m["reload_check"] = Slot("guns/shotgun_reloads", "pool", "short")
-    for piece in MOVE_PIECES:
-        m[f"move_{piece}"] = Slot(f"piece_moves/{piece}", "pool", "short")
-    # special / lifecycle
-    m["castle"] = Slot("castle_sound.ogg", "oneshot", "short")
-    m["checkmate"] = Slot("metal_pipe_falling.ogg", "oneshot", "short")
-    m["undo"] = Slot("rewind.ogg", "oneshot", "short")
-    m["game_start"] = Slot("game_start.ogg", "oneshot", "sustained")
-    m["resign"] = Slot("surrender.ogg", "oneshot", "sustained")
-    m["draw"] = Slot("draw.ogg", "oneshot", "sustained")
-    m["you_lose"] = Slot("you_lose.ogg", "oneshot", "sustained")
-    # time
-    m["heartbeat"] = Slot("heartbeat.ogg", "oneshot", "loop")
-    m["give_time"] = Slot("give_time.ogg", "oneshot", "short")
-    # announcer
-    for phrase in ANNOUNCER_PHRASES:
-        m[f"announcer_{phrase}"] = Slot(f"announcer/{phrase}.ogg", "oneshot", "sustained")
-    m["announcer_hits"] = Slot("announcer/hits", "pool", "short")
-    # skill-check feedback
-    m["sc_appear"] = Slot("skillcheck_appear.ogg", "oneshot", "short")
-    m["wheel_tick"] = Slot("wheel_tick.ogg", "oneshot", "short")
-    m["sc_win"] = Slot("skillcheck_win.ogg", "oneshot", "short")
-    m["sc_miss"] = Slot("skillcheck_miss.ogg", "oneshot", "short")
-    m["aim_lock"] = Slot("aim_lock.ogg", "oneshot", "short")
-    m["aim_beep"] = Slot("aim_beep.ogg", "oneshot", "short")
-    m["swear"] = Slot("swears", "pool", "short")
-    # ui / board  (both ui_click candidates kept side by side for A/B; rename the
-    # winner to ui_click.ogg once chosen)
-    m["ui_click_typewriter"] = Slot("ui_click_typewriter.ogg", "oneshot", "short")
-    m["ui_click_hammer"] = Slot("ui_click_hammer.ogg", "oneshot", "short")
-    m["toast_pop"] = Slot("toast_pop.ogg", "oneshot", "short")
-    m["board_flip"] = Slot("flip_whoosh.ogg", "oneshot", "short")
-    m["pickup"] = Slot("pickup.ogg", "oneshot", "short")
-    m["drop"] = Slot("drop.ogg", "oneshot", "short")
-    return m
-
-
-MANIFEST = _build_manifest()
+# validation tolerances
+QUIET_PEAK_DB = -9.0     # short outputs quieter than this after peak-norm are suspicious
+CLIP_PEAK_DB = 0.0
 
 DRY_RUN = False
 
+
+# --------------------------------------------------------------------------
+# attribution (structured -- NOT parsed from prose)
+# --------------------------------------------------------------------------
+
+ATTRIBUTION_CC_BY = [
+    dict(who="jkerman", title="Old-school arena FPS announcer voice lines",
+         url="https://freesound.org/s/718360/", lic="CC BY 4.0",
+         used="announcer kill-streak calls; game-start / you-lose / you-win voice"),
+    dict(who="JavierZumer", title="retro shot blaster",
+         url="https://freesound.org/s/257232/", lic="CC BY 4.0",
+         used="king ray-gun capture (guns/ray_gun)"),
+]
+
+ATTRIBUTION_CC0 = [
+    dict(who="Kenney", title="Audio packs (Interface / UI / Impact / Digital / Sci-Fi / Voiceover)",
+         url="https://kenney.nl/assets/category:Audio",
+         used="piece moves, skill-check cues, UI clicks, ray-gun lasers, you-win callouts"),
+    dict(who="Dustyroom", title="Casual Game Sounds",
+         url="https://dustyroom.com/free-casual-game-sounds/", used="UI / feedback one-shots"),
+    dict(who="Ben Jaszczak, Brian Nelson, Kevin Heras, Matthew Nanney (submitted by bart)",
+         title="The Free Firearm Sound Library",
+         url="https://opengameart.org/content/the-free-firearm-sound-library",
+         used="pistol / cannon / rifle capture shots"),
+    dict(who="Signature Sounds", title="Bullet / Gun SFX (CC0)",
+         url="https://signaturesounds.org/store/p/bulletgun-sfx-cc0", used="foley / reload layers"),
+    dict(who="qubodup (Iwan Gabovitch)", title="Door Open, Door Close Set",
+         url="https://opengameart.org/content/door-open-door-close-set",
+         used="castle (open+close)"),
+    dict(who="bart", title="Heartbeat Sounds",
+         url="https://opengameart.org/content/heartbeat-sounds", used="low-time heartbeat loops"),
+    dict(who="thenotcheeseman", title="metal pipe fall",
+         url="https://freesound.org/s/679206/", used="checkmate"),
+    dict(who="craigsmith", title="R11-58 Loud Shotgun Blasts",
+         url="https://freesound.org/s/486060/", used="rook shotgun capture"),
+    dict(who="Zott820", title="Pump Action Shotgun Cycle",
+         url="https://freesound.org/s/370344/", used="check reload"),
+    dict(who="unfa", title="Oof (original)",
+         url="https://freesound.org/s/719053/", used="capture hit oof"),
+    dict(who="iampatrick", title="Video Game Character Grunt",
+         url="https://freesound.org/s/839522/", used="capture hit oof"),
+    dict(who="tonsil5", title="Grunt2 - Death Pain",
+         url="https://freesound.org/s/416838/", used="capture hit oof"),
+    dict(who="MadamVicious (mvVoiceActing)", title="Girl Taking Damage",
+         url="https://freesound.org/s/218190/", used="queen capture oof (female)"),
+]
+
+
+def _attribution_section():
+    lines = ["## Sounds", ""]
+    lines.append("Sound effects are CC0 unless listed under **Attribution required** below.")
+    lines.append("")
+    lines.append("### Attribution required (CC BY 4.0)")
+    lines.append("")
+    for e in ATTRIBUTION_CC_BY:
+        lines.append(f"- **{e['title']}** by {e['who']} -- {e['url']}")
+        lines.append(f"  License: {e['lic']} (https://creativecommons.org/licenses/by/4.0/). "
+                     f"Used for: {e['used']}.")
+    lines.append("")
+    lines.append("### Public domain (CC0 -- credited as a courtesy, not required)")
+    lines.append("")
+    for e in ATTRIBUTION_CC0:
+        lines.append(f"- **{e['title']}** by {e['who']} -- {e['url']} ({e['used']})")
+    lines.append("")
+    return "\n".join(lines)
+
+
+def write_attribution():
+    """Replace the ``## Sounds`` section (to EOF) of the repo-root ATTRIBUTION.md."""
+    section = _attribution_section()
+    if ATTRIBUTION_PATH.exists():
+        text = ATTRIBUTION_PATH.read_text()
+        head = text.split("## Sounds", 1)[0].rstrip()
+        new_text = f"{head}\n\n{section}\n"
+    else:
+        new_text = f"# Attribution\n\n{section}\n"
+    if DRY_RUN:
+        print(f"  would write ATTRIBUTION.md ({len(ATTRIBUTION_CC_BY)} CC-BY, "
+              f"{len(ATTRIBUTION_CC0)} CC0)")
+        return
+    ATTRIBUTION_PATH.write_text(new_text)
+    print(f"[attr] ATTRIBUTION.md updated ({len(ATTRIBUTION_CC_BY)} CC-BY + "
+          f"{len(ATTRIBUTION_CC0)} CC0)")
+
+
+# --------------------------------------------------------------------------
+# ffmpeg helpers
+# --------------------------------------------------------------------------
 
 def run(cmd, capture=False):
     if DRY_RUN:
@@ -138,14 +166,20 @@ def run(cmd, capture=False):
     return result.stdout if capture else ""
 
 
-def ffprobe_duration(path):
+def ffprobe_json(path):
     out = subprocess.run(
-        ["ffprobe", "-v", "error", "-show_entries", "format=duration",
-         "-of", "default=noprint_wrappers=1:nokey=1", str(path)],
-        check=True, text=True, stdout=subprocess.PIPE).stdout.strip()
+        ["ffprobe", "-v", "error", "-show_entries",
+         "stream=sample_rate,channels:format=duration",
+         "-of", "json", str(path)],
+        check=True, text=True, stdout=subprocess.PIPE).stdout
+    return json.loads(out)
+
+
+def ffprobe_duration(path):
+    data = ffprobe_json(path)
     try:
-        return float(out)
-    except ValueError:
+        return float(data["format"]["duration"])
+    except (KeyError, ValueError):
         return 0.0
 
 
@@ -172,23 +206,24 @@ def _measure_loudnorm(path, af_prefix):
     return json.loads(block.group(0)) if block else {}
 
 
-def _encode_ogg(in_path, out_path, af):
+def _encode_ogg(in_path, out_path, af, channels):
     cmd = ["ffmpeg", "-y", "-i", str(in_path)]
     if af:
         cmd += ["-af", af]
-    cmd += ["-c:a", "libvorbis", "-qscale:a", VORBIS_QSCALE, str(out_path)]
+    cmd += ["-ac", str(channels), "-ar", str(SAMPLE_RATE),
+            "-c:a", "libvorbis", "-qscale:a", VORBIS_QSCALE, str(out_path)]
     run(cmd)
 
 
-def process_one(src, out_path, profile):
+def process_one(src, out_path, profile, stereo):
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    trim = "" if profile == "loop" else _trim_filter()
+    channels = 2 if stereo else 1
+    trim = "" if profile == LOOP else _trim_filter()
 
-    if profile in ("sustained", "loop"):
+    if profile in (SUSTAINED, LOOP):
         prefix = f"{trim}," if trim else ""
         if DRY_RUN:
-            print(f"  measure loudnorm + encode {out_path.name}")
-            _encode_ogg(src, out_path, f"{prefix}{LOUDNORM_BASE}")
+            _encode_ogg(src, out_path, f"{prefix}{LOUDNORM_BASE}", channels)
             return
         s = _measure_loudnorm(src, prefix)
         measured = ""
@@ -196,7 +231,7 @@ def process_one(src, out_path, profile):
             measured = (f":measured_I={s['input_i']}:measured_TP={s['input_tp']}"
                         f":measured_LRA={s['input_lra']}:measured_thresh={s['input_thresh']}"
                         f":offset={s['target_offset']}:linear=true")
-        _encode_ogg(src, out_path, f"{prefix}{LOUDNORM_BASE}{measured}")
+        _encode_ogg(src, out_path, f"{prefix}{LOUDNORM_BASE}{measured}", channels)
         return
 
     # short: trim, then peak-normalize the trimmed audio to PEAK_TP.
@@ -204,48 +239,119 @@ def process_one(src, out_path, profile):
         trimmed = Path(td) / "trim.wav"
         run(["ffmpeg", "-y", "-i", str(src), "-af", trim, str(trimmed)])
         if DRY_RUN:
-            print(f"  peak-normalize + encode {out_path.name}")
-            _encode_ogg(src, out_path, trim)
+            _encode_ogg(src, out_path, trim, channels)
             return
         peak = _measure_peak_db(trimmed)
         gain = PEAK_TP - peak
-        _encode_ogg(trimmed, out_path, f"volume={gain:.2f}dB")
+        _encode_ogg(trimmed, out_path, f"volume={gain:.2f}dB", channels)
 
+
+# --------------------------------------------------------------------------
+# slot processing
+# --------------------------------------------------------------------------
 
 def staged_files(slot_dir):
     return sorted(p for p in slot_dir.iterdir()
                   if p.is_file() and p.suffix.lower() in SOURCE_EXTS)
 
 
+def clean_assets():
+    """Remove every child of assets/sounds except _staging (never rmtree ASSETS)."""
+    assert ASSETS.name == "sounds", ASSETS
+    for child in ASSETS.iterdir():
+        if child.name == "_staging":
+            continue
+        if child.is_dir():
+            shutil.rmtree(child)
+        else:
+            child.unlink()
+
+
 def process_slot(slot_id):
-    slot = MANIFEST[slot_id]
-    slot_dir = STAGING / slot_id
+    spec = SLOTS[slot_id]
+    slot_dir = STAGING / spec.src
+    out_dir = ASSETS / spec.dst
+    if out_dir.exists():
+        shutil.rmtree(out_dir)
     if not slot_dir.is_dir():
-        print(f"[skip] {slot_id}: no staging dir ({slot_dir.relative_to(REPO_ROOT)})")
-        return 0
+        print(f"[skip] {slot_id}: no staging dir ({spec.src}/)")
+        return []
     files = staged_files(slot_dir)
     if not files:
         print(f"[skip] {slot_id}: staging dir empty")
-        return 0
+        return []
+    print(f"[slot] {slot_id:24s} {spec.src}/ -> {spec.dst}/ "
+          f"({len(files)} file{'s' if len(files) != 1 else ''}, "
+          f"{spec.profile}, {'stereo' if spec.stereo else 'mono'})")
+    outputs = []
+    for i, src in enumerate(files, start=1):
+        out_path = out_dir / f"{i:02d}.ogg"
+        process_one(src, out_path, spec.profile, spec.stereo)
+        outputs.append((slot_id, out_path))
+    return outputs
 
-    if slot.kind == "pool":
-        out_dir = ASSETS / slot.out
-        print(f"[pool] {slot_id} -> {slot.out}/ ({len(files)} files)")
-        for i, src in enumerate(files, start=1):
-            process_one(src, out_dir / f"{i:02d}.ogg", slot.profile)
-        return len(files)
 
-    out_path = ASSETS / slot.out
-    if len(files) > 1:
-        print(f"[note] {slot_id}: {len(files)} staged, using first ({files[0].name})")
-    print(f"[one ] {slot_id} -> {slot.out}")
-    process_one(files[0], out_path, slot.profile)
-    return 1
+# --------------------------------------------------------------------------
+# validation
+# --------------------------------------------------------------------------
 
+def validate(outputs):
+    """ffprobe every output; return (rows, failures)."""
+    rows = []
+    failures = 0
+    for slot_id, out_path in outputs:
+        spec = SLOTS[slot_id]
+        want_ch = 2 if spec.stereo else 1
+        problems = []
+        data = ffprobe_json(out_path)
+        streams = data.get("streams", [{}])
+        rate = int(streams[0].get("sample_rate", 0)) if streams else 0
+        ch = int(streams[0].get("channels", 0)) if streams else 0
+        dur = 0.0
+        try:
+            dur = float(data["format"]["duration"])
+        except (KeyError, ValueError):
+            pass
+        if rate != SAMPLE_RATE:
+            problems.append(f"rate={rate}")
+        if ch != want_ch:
+            problems.append(f"ch={ch}!={want_ch}")
+        if dur <= 0:
+            problems.append("dur=0")
+        peak = _measure_peak_db(out_path)
+        if peak > CLIP_PEAK_DB:
+            problems.append(f"clip@{peak:.1f}")
+        if spec.profile == SHORT and peak < QUIET_PEAK_DB:
+            problems.append(f"quiet@{peak:.1f}")
+        status = "OK" if not problems else "FAIL " + ",".join(problems)
+        if problems:
+            failures += 1
+        rows.append((slot_id, out_path.name, rate, ch, round(dur, 3), round(peak, 1), status))
+    return rows, failures
+
+
+def print_validation(rows, failures):
+    print("\n=== validation ===")
+    by_slot = {}
+    for slot_id, name, rate, ch, dur, peak, status in rows:
+        by_slot.setdefault(slot_id, []).append((name, rate, ch, dur, peak, status))
+    for slot_id in sorted(by_slot):
+        entries = by_slot[slot_id]
+        bad = [e for e in entries if e[5] != "OK"]
+        mark = "OK" if not bad else "FAIL"
+        print(f"  [{mark:4s}] {slot_id:24s} {len(entries)} file(s)")
+        for name, rate, ch, dur, peak, status in entries:
+            if status != "OK":
+                print(f"          {name}: {status} (rate={rate} ch={ch} dur={dur} peak={peak})")
+    print(f"\n{len(rows)} output(s), {failures} failure(s).")
+
+
+# --------------------------------------------------------------------------
+# split (multi-sample source -> staging clips)
+# --------------------------------------------------------------------------
 
 def split_file(src, slot_id):
-    """Cut a multi-sample recording into the slot's staging dir on silence."""
-    if slot_id not in MANIFEST:
+    if slot_id not in SLOTS:
         sys.exit(f"unknown slot: {slot_id}")
     proc = subprocess.run(
         ["ffmpeg", "-i", str(src), "-af",
@@ -259,11 +365,10 @@ def split_file(src, slot_id):
             ends.append(t)
         else:
             starts.append(t)
-    total = ffprobe_duration(src)
-    ends.append(total)
+    ends.append(ffprobe_duration(src))
     segments = [(s, e) for s, e in zip(starts, ends) if e - s >= SPLIT_MIN_CLIP]
 
-    dest = STAGING / slot_id
+    dest = STAGING / SLOTS[slot_id].src
     dest.mkdir(parents=True, exist_ok=True)
     print(f"[split] {src.name} -> {len(segments)} clips in {dest.relative_to(REPO_ROOT)}/")
     for i, (s, e) in enumerate(segments, start=1):
@@ -274,17 +379,19 @@ def split_file(src, slot_id):
 def cmd_list():
     print(f"staging root: {STAGING}")
     print(f"assets root:  {ASSETS}\n")
-    for slot_id, slot in MANIFEST.items():
-        tag = "pool" if slot.kind == "pool" else "one "
-        print(f"  {slot_id:28s} [{tag}] {slot.profile:9s} -> {slot.out}")
+    for slot_id, spec in SLOTS.items():
+        chan = "stereo" if spec.stereo else "mono"
+        print(f"  {slot_id:24s} {spec.profile:9s} {chan:6s} {spec.src}/ -> {spec.dst}/")
 
 
 def main():
     global DRY_RUN
-    ap = argparse.ArgumentParser(description="Process raw sound downloads into game OGG assets.")
-    ap.add_argument("slots", nargs="*", help="slot ids to process (default: all staged)")
+    ap = argparse.ArgumentParser(description="Process staged sounds into game OGG assets.")
+    ap.add_argument("slots", nargs="*", help="slot ids to process (default: full clean rebuild)")
     ap.add_argument("--list", action="store_true", help="list slots and their targets")
     ap.add_argument("--dry-run", action="store_true", help="print actions without running ffmpeg")
+    ap.add_argument("--no-validate", action="store_true", help="skip post-processing validation")
+    ap.add_argument("--attribution", action="store_true", help="only regenerate ATTRIBUTION.md")
     ap.add_argument("--split", nargs=2, metavar=("FILE", "SLOT"),
                     help="cut a multi-sample FILE into SLOT's staging dir on silence")
     args = ap.parse_args()
@@ -296,19 +403,37 @@ def main():
     if args.list:
         cmd_list()
         return
+    if args.attribution:
+        write_attribution()
+        return
     if args.split:
         split_file(Path(args.split[0]), args.split[1])
         return
 
-    targets = args.slots or list(MANIFEST.keys())
-    unknown = [s for s in targets if s not in MANIFEST]
+    full_run = not args.slots
+    targets = args.slots or list(SLOTS.keys())
+    unknown = [s for s in targets if s not in SLOTS]
     if unknown:
         sys.exit(f"unknown slot(s): {', '.join(unknown)}")
 
-    total = 0
+    if full_run and not DRY_RUN:
+        clean_assets()
+
+    outputs = []
     for slot_id in targets:
-        total += process_slot(slot_id)
-    print(f"\nDone. {total} file(s) processed.")
+        outputs += process_slot(slot_id)
+    print(f"\nProcessed {len(outputs)} file(s) across {len(targets)} slot(s).")
+
+    failures = 0
+    if outputs and not args.no_validate and not DRY_RUN:
+        rows, failures = validate(outputs)
+        print_validation(rows, failures)
+
+    if full_run:
+        write_attribution()
+
+    if failures:
+        sys.exit(f"{failures} validation failure(s).")
 
 
 if __name__ == "__main__":

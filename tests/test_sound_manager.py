@@ -1,9 +1,13 @@
-"""SoundManager unit tests.
+"""SoundManager unit tests (unified slot model).
 
-Invariant under test: the *real* playback path (``_play_with_master`` ->
+Invariant under test: the real playback path (``_play_with_master`` ->
 ``Sound.play(fade_ms=...)`` for one-shots, ``_heartbeat_channel.play`` for the
-loop) is reached only when the manager is enabled and the matching sound list is
+loop) is reached only when the manager is enabled and the matching slot pool is
 non-empty. Disabled or empty must be a true no-op, never a silent play call.
+
+Every slot is a directory: 0 files -> silent no-op, 1 -> plays it, N -> random
+pool. Tests inject mocks into ``manager._slots[...]`` so they never depend on the
+processed asset tree existing (that is exercised by the integration suite).
 """
 
 import os
@@ -19,13 +23,13 @@ import pytest
 
 from chessshootout.frontend.audio.sound_manager import (
     SoundManager, HeartbeatConfig,
-    STATE_OFF, STATE_HEARTBEAT, ONESHOT_FADE_MS,
+    STATE_OFF, STATE_SLOW, STATE_FAST, ONESHOT_FADE_MS,
+)
+from chessshootout.frontend.audio.slots import (
+    SLOTS, PIECES, PIECE_GUN, move_slot, gun_slot, hit_slot,
 )
 from chessshootout.paths import SOUNDS_DIR
 from chessshootout.backend.pieces import PieceType
-from chessshootout.frontend.visual.gunfx import PIECE_GUN
-
-GUN_NAMES = ("revolver", "hand_cannon", "lever_action", "shotgun", "blunderbuss", "ray_gun")
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -44,49 +48,53 @@ def fake_channel():
 
 @pytest.fixture
 def manager(fake_channel):
-    return SoundManager(SOUNDS_DIR, heartbeat_channel=fake_channel, master_volume=1.0)
+    sm = SoundManager(SOUNDS_DIR, heartbeat_channel=fake_channel, master_volume=1.0)
+    sm._slots["heartbeat_slow"] = [MagicMock(name="hb_slow")]
+    sm._slots["heartbeat_fast"] = [MagicMock(name="hb_fast")]
+    return sm
 
 
-PER_EVENT_PLAY_METHODS = [
-    pytest.param("play_move", id="play_move"),
-    pytest.param("play_premove_queued", id="play_premove_queued"),
-    pytest.param("play_check", id="play_check"),
-    pytest.param("play_checkmate", id="play_checkmate"),
-    pytest.param("play_castle", id="play_castle"),
-    pytest.param("play_undo", id="play_undo"),
-    pytest.param("play_game_start", id="play_game_start"),
-    pytest.param("play_flag_fall", id="play_flag_fall"),
-    pytest.param("play_online_game_start", id="play_online_game_start"),
-    pytest.param("play_mate_sting", id="play_mate_sting"),
-    pytest.param("play_give_time", id="play_give_time"),
-    pytest.param("play_surrender", id="play_surrender"),
-    pytest.param("play_hit", id="play_hit"),
-]
+def _inject(manager, slot):
+    target = MagicMock(name=slot)
+    manager._slots[slot] = [target]
+    return target
 
 
-def test_loads_variants_and_oneshots(manager):
-    assert len(manager._move_default) > 0
-    assert len(manager._variants["reload"]) > 0
-    for key in ("checkmate", "undo", "game_start", "heartbeat", "castle",
-                "you_lose", "online_game_start"):
-        assert manager._oneshots[key] is not None
+# --------------------------------------------------------------------------
+# registry / consistency
+# --------------------------------------------------------------------------
+
+def test_slots_piece_gun_matches_gunfx():
+    from chessshootout.frontend.visual.gunfx import PIECE_GUN as GUNFX_PIECE_GUN
+    assert PIECE_GUN == GUNFX_PIECE_GUN
 
 
-def test_loads_a_pool_for_every_gun(manager):
-    for gun in GUN_NAMES:
-        assert gun in manager._gun_pools
-        assert len(manager._gun_pools[gun]) >= 1
-        assert all(s is not None for s in manager._gun_pools[gun])
+def test_registry_has_slot_for_every_piece_move_and_gun():
+    for piece in PIECES:
+        assert move_slot(piece) in SLOTS
+        assert gun_slot(piece) in SLOTS
 
 
-def test_each_gun_pool_leads_with_a_distinct_sound(manager):
-    sounds = [manager._gun_pools[g][0] for g in GUN_NAMES]
-    assert len(set(id(s) for s in sounds)) == len(GUN_NAMES)
+def test_registry_dst_paths_are_unique():
+    dsts = [spec.dst for spec in SLOTS.values()]
+    assert len(dsts) == len(set(dsts))
+
+
+def test_hit_slot_keys_queen_female_others_male():
+    assert hit_slot("queen") == "announcer_hits_queen"
+    for piece in ("pawn", "knight", "bishop", "rook", "king"):
+        assert hit_slot(piece) == "announcer_hits"
+
+
+# --------------------------------------------------------------------------
+# loader (0 / 1 / N)
+# --------------------------------------------------------------------------
+
+def test_load_pool_missing_dir_is_empty(tmp_path, manager):
+    assert manager._load_pool(tmp_path / "nope") == []
 
 
 def test_load_pool_has_no_count_cap(tmp_path, manager):
-    """_load_pool globs every *.ogg (sorted) with no cap, so reload/variant
-    pools grow as files are added."""
     for i in range(9):
         (tmp_path / f"{i:02d}.ogg").write_bytes(b"")
     with patch.object(SoundManager, "_safe_load", side_effect=lambda p: MagicMock()):
@@ -94,202 +102,183 @@ def test_load_pool_has_no_count_cap(tmp_path, manager):
     assert len(pool) == 9
 
 
-def test_gun_pools_empty_when_guns_dir_missing(tmp_path):
+def test_load_pool_is_sorted(tmp_path, manager):
+    for name in ("c.ogg", "a.ogg", "b.ogg"):
+        (tmp_path / name).write_bytes(b"")
+    seen = []
+    with patch.object(SoundManager, "_safe_load",
+                      side_effect=lambda p: seen.append(p.name) or MagicMock()):
+        manager._load_pool(tmp_path)
+    assert seen == ["a.ogg", "b.ogg", "c.ogg"]
+
+
+def test_construction_builds_a_slot_for_every_registry_entry(tmp_path):
     sm = SoundManager(tmp_path, heartbeat_channel=MagicMock(), master_volume=1.0)
-    assert sm._gun_pools == {}
+    assert set(sm._slots) == set(SLOTS)
+    assert all(pool == [] for pool in sm._slots.values())
 
 
-def test_disabled_manager_has_empty_state():
+def test_disabled_manager_has_empty_slots():
     sm = SoundManager(SOUNDS_DIR, enabled=False)
-    assert sm._variants == {}
-    assert sm._move_default == []
-    assert sm._move_pools == {}
-    assert sm._gun_pools == {}
-    assert sm._oneshots == {}
+    assert sm._slots == {}
     assert sm._heartbeat_channel is None
 
 
-def test_construction_with_missing_variant_dirs_does_not_crash(tmp_path):
-    sm = SoundManager(tmp_path, heartbeat_channel=MagicMock(), master_volume=1.0)
-    assert sm._move_default == []
-    assert sm._move_pools == {}
-    assert sm._variants["reload"] == []
-    assert sm._gun_pools == {}
-    sm.play_move()
-    sm.play_move(PieceType.QUEEN)
-    sm.play_check()
-    sm.play_capture(PieceType.PAWN)
+# --------------------------------------------------------------------------
+# _play + one-shot dispatch
+# --------------------------------------------------------------------------
+
+ONE_SHOT_DISPATCH = [
+    ("play_checkmate", "checkmate"),
+    ("play_castle", "castle"),
+    ("play_undo", "undo"),
+    ("play_game_start", "game_start"),
+    ("play_online_game_start", "online_game_start"),
+    ("play_give_time", "give_time"),
+    ("play_check", "reload_check"),
+    ("play_you_win", "you_win"),
+    ("play_you_lose", "you_lose"),
+    ("play_flag_fall", "you_lose"),
+    ("play_draw", "draw"),
+    ("play_surrender", "resign"),
+    ("play_toast", "toast"),
+    ("play_flip", "board_flip"),
+    ("play_pickup", "pickup"),
+    ("play_drop", "drop"),
+    ("play_swear", "swear"),
+    ("play_ui_click", "ui_click"),
+    ("play_skillcheck_appear", "sc_appear"),
+    ("play_skillcheck_win", "sc_win"),
+    ("play_skillcheck_miss", "sc_miss"),
+    ("play_wheel_tick", "wheel_tick"),
+    ("play_aim_lock", "aim_lock"),
+    ("play_aim_beep", "aim_beep"),
+]
 
 
-def test_construction_with_missing_oneshot_files_returns_none(tmp_path):
-    sm = SoundManager(tmp_path, heartbeat_channel=MagicMock(), master_volume=1.0)
-    for key in ("checkmate", "undo", "game_start", "you_lose", "online_game_start"):
-        assert sm._oneshots[key] is None
-
-
-def test_reserve_channel_marks_channel_as_reserved_in_pg_mixer():
-    """Reserving channel 0 keeps Sound auto-alloc on channels 1..N-1 so a
-    one-shot can't land on the heartbeat channel and be silenced by stop_all."""
-    with patch.object(pg.mixer, "set_reserved") as set_reserved:
-        SoundManager._reserve_channel(0)
-    set_reserved.assert_called_once_with(1)
-
-
-def test_real_construction_reserves_channel_zero(tmp_path):
-    """Building without an injected heartbeat channel reserves channel 0 so no
-    later Sound.play() picks it."""
-    with patch.object(pg.mixer, "set_reserved") as set_reserved:
-        SoundManager(tmp_path, master_volume=1.0)
-    set_reserved.assert_called_once_with(1)
-
-
-def test_play_check_picks_a_random_reload(manager):
-    target = MagicMock()
-    manager._variants["reload"].insert(0, target)
-    with patch.object(random, "choice", return_value=target):
-        manager.play_check()
+@pytest.mark.parametrize("method,slot", ONE_SHOT_DISPATCH,
+                         ids=[m for m, _ in ONE_SHOT_DISPATCH])
+def test_one_shot_dispatch_plays_its_slot(manager, method, slot):
+    target = _inject(manager, slot)
+    getattr(manager, method)()
     target.play.assert_called_once_with(fade_ms=ONESHOT_FADE_MS)
 
 
-def test_play_move_uses_the_piece_specific_pool(manager):
-    target = MagicMock()
-    manager._move_pools = {"queen": [target]}
-    manager.play_move(PieceType.QUEEN)
-    target.play.assert_called_once_with(fade_ms=ONESHOT_FADE_MS)
+@pytest.mark.parametrize("method,slot", ONE_SHOT_DISPATCH,
+                         ids=[m for m, _ in ONE_SHOT_DISPATCH])
+def test_one_shot_silent_when_slot_empty(manager, method, slot):
+    manager._slots[slot] = []
+    with patch.object(manager, "_play_with_master") as play:
+        getattr(manager, method)()
+    play.assert_not_called()
 
 
-def test_play_move_each_piece_picks_its_own_pool(manager):
-    targets = {}
-    for pt in (PieceType.PAWN, PieceType.KNIGHT, PieceType.BISHOP,
-               PieceType.ROOK, PieceType.QUEEN, PieceType.KING):
-        targets[pt] = MagicMock()
-        manager._move_pools[pt.value] = [targets[pt]]
-    for pt, target in targets.items():
-        manager.play_move(pt)
+def test_play_missing_slot_is_noop(manager):
+    with patch.object(manager, "_play_with_master") as play:
+        manager._play("no_such_slot")
+    play.assert_not_called()
+
+
+def test_play_picks_a_random_variant(manager):
+    a, b = MagicMock(), MagicMock()
+    manager._slots["checkmate"] = [a, b]
+    with patch.object(random, "choice", return_value=b):
+        manager.play_checkmate()
+    b.play.assert_called_once_with(fade_ms=ONESHOT_FADE_MS)
+    a.play.assert_not_called()
+
+
+# --------------------------------------------------------------------------
+# keyed move / gun / announcer / hit dispatch
+# --------------------------------------------------------------------------
+
+def test_play_move_each_piece_picks_its_slot(manager):
+    for piece in PieceType:
+        target = _inject(manager, move_slot(piece.value))
+        manager.play_move(piece)
         target.play.assert_called_once_with(fade_ms=ONESHOT_FADE_MS)
 
 
-def test_play_move_falls_back_to_default_when_piece_pool_empty(manager):
-    default = MagicMock()
-    manager._move_pools = {}
-    manager._move_default = [default]
-    manager.play_move(PieceType.QUEEN)
-    default.play.assert_called_once_with(fade_ms=ONESHOT_FADE_MS)
-
-
-def test_play_move_none_uses_default_pool(manager):
-    default = MagicMock()
-    manager._move_default = [default]
-    manager._move_pools = {"pawn": [MagicMock()]}
-    manager.play_move(None)
-    default.play.assert_called_once_with(fade_ms=ONESHOT_FADE_MS)
-
-
-def test_play_premove_queued_uses_piece_pool(manager):
-    target = MagicMock()
-    manager._move_pools = {"knight": [target]}
+def test_play_premove_queued_uses_piece_slot(manager):
+    target = _inject(manager, move_slot("knight"))
     manager.play_premove_queued(PieceType.KNIGHT)
     target.play.assert_called_once_with(fade_ms=ONESHOT_FADE_MS)
 
 
-def test_play_capture_pawn_uses_the_revolver_pool(manager):
-    target = MagicMock()
-    manager._gun_pools["revolver"] = [target]
+def test_play_move_none_is_noop(manager):
+    with patch.object(manager, "_play_with_master") as play:
+        manager.play_move(None)
+    play.assert_not_called()
+
+
+def test_play_capture_each_piece_picks_its_gun(manager):
+    for piece in PieceType:
+        target = _inject(manager, gun_slot(piece.value))
+        manager.play_capture(piece)
+        target.play.assert_called_once_with(fade_ms=ONESHOT_FADE_MS)
+
+
+def test_play_capture_pawn_uses_revolver_slot(manager):
+    target = _inject(manager, "gun_revolver")
     manager.play_capture(PieceType.PAWN)
     target.play.assert_called_once_with(fade_ms=ONESHOT_FADE_MS)
 
 
-def test_play_capture_picks_a_random_variant_from_the_gun_pool(manager):
+def test_play_capture_none_is_noop(manager):
+    with patch.object(manager, "_play_with_master") as play:
+        manager.play_capture(None)
+    play.assert_not_called()
+
+
+def test_play_capture_picks_random_variant(manager):
     a, b = MagicMock(), MagicMock()
-    manager._gun_pools["revolver"] = [a, b]
+    manager._slots["gun_revolver"] = [a, b]
     with patch.object(random, "choice", return_value=b):
         manager.play_capture(PieceType.PAWN)
     b.play.assert_called_once_with(fade_ms=ONESHOT_FADE_MS)
     a.play.assert_not_called()
 
 
-def test_play_capture_each_piece_picks_its_gun(manager):
-    targets = {}
-    for pt in (PieceType.PAWN, PieceType.KNIGHT, PieceType.BISHOP,
-               PieceType.ROOK, PieceType.QUEEN, PieceType.KING):
-        targets[pt] = MagicMock()
-        manager._gun_pools[PIECE_GUN[pt.value]] = [targets[pt]]
-    for pt, target in targets.items():
-        manager.play_capture(pt)
-        target.play.assert_called_once_with(fade_ms=ONESHOT_FADE_MS)
-
-
-def test_play_capture_unknown_piece_falls_back_to_first(manager):
-    fallback = MagicMock()
-    manager._gun_pools = {"revolver": [fallback]}
-    manager.play_capture(None)
-    fallback.play.assert_called_once_with(fade_ms=ONESHOT_FADE_MS)
-
-
-def test_play_capture_no_sounds_does_not_reach_playback(manager):
-    """play_capture with no loaded gun pools must not reach the real playback
-    path; loading one pool makes the same call play it."""
-    manager._gun_pools = {}
-    with patch.object(manager, "_play_with_master") as play:
-        manager.play_capture(PieceType.PAWN)
-    play.assert_not_called()
-
-    target = MagicMock()
-    manager._gun_pools = {"revolver": [target]}
-    manager.play_capture(PieceType.PAWN)
-    target.play.assert_called_once_with(fade_ms=ONESHOT_FADE_MS)
-
-
-@pytest.mark.parametrize("method,key", [
-    ("play_checkmate", "checkmate"),
-    ("play_undo", "undo"),
-    ("play_game_start", "game_start"),
-    ("play_castle", "castle"),
-    ("play_flag_fall", "you_lose"),
-    ("play_online_game_start", "online_game_start"),
-    ("play_mate_sting", "executed"),
-    ("play_give_time", "give_time"),
-    ("play_surrender", "surrender"),
-])
-def test_one_shot_dispatch(manager, method, key):
-    sound = manager._oneshots[key] = MagicMock()
-    getattr(manager, method)()
-    sound.play.assert_called_once_with(fade_ms=ONESHOT_FADE_MS)
-
-
-def test_announcer_slots_present_but_silent_until_files_added(manager):
-    for key in ("first_blood", "double_kill", "triple_kill", "quadra_kill",
-                "rampage", "unstoppable", "godlike"):
-        assert key in manager._oneshots
-        assert manager._oneshots[key] is None
-
-
 def test_play_announcer_dispatches_streak_key(manager):
-    target = manager._oneshots["double_kill"] = MagicMock()
+    target = _inject(manager, "announcer_double_kill")
     manager.play_announcer("double_kill")
     target.play.assert_called_once_with(fade_ms=ONESHOT_FADE_MS)
 
 
-def test_play_hit_picks_a_random_hit_voice(manager):
-    target = MagicMock()
-    manager._variants["hit"] = [target]
-    with patch.object(random, "choice", return_value=target):
-        manager.play_hit()
-    target.play.assert_called_once_with(fade_ms=ONESHOT_FADE_MS)
+def test_play_hit_queen_uses_female_pool(manager):
+    female = _inject(manager, "announcer_hits_queen")
+    male = _inject(manager, "announcer_hits")
+    manager.play_hit(PieceType.QUEEN)
+    female.play.assert_called_once_with(fade_ms=ONESHOT_FADE_MS)
+    male.play.assert_not_called()
 
 
-def test_play_hit_silent_when_no_hit_voices(manager):
-    manager._variants["hit"] = []
-    with patch.object(manager, "_play_with_master") as play:
-        manager.play_hit()
-    play.assert_not_called()
+@pytest.mark.parametrize("piece", [
+    PieceType.PAWN, PieceType.KNIGHT, PieceType.BISHOP,
+    PieceType.ROOK, PieceType.KING,
+])
+def test_play_hit_non_queen_uses_male_pool(manager, piece):
+    male = _inject(manager, "announcer_hits")
+    female = _inject(manager, "announcer_hits_queen")
+    manager.play_hit(piece)
+    male.play.assert_called_once_with(fade_ms=ONESHOT_FADE_MS)
+    female.play.assert_not_called()
 
+
+def test_play_hit_no_victim_uses_male_pool(manager):
+    male = _inject(manager, "announcer_hits")
+    manager.play_hit()
+    male.play.assert_called_once_with(fade_ms=ONESHOT_FADE_MS)
+
+
+# --------------------------------------------------------------------------
+# menu gun (master * menu volume)
+# --------------------------------------------------------------------------
 
 def test_play_menu_gun_uses_master_times_menu_volume(manager):
     manager.master_volume = 0.5
     manager.set_menu_volume(0.2)
-    target = MagicMock()
-    manager._gun_pools["blunderbuss"] = [target]
+    target = _inject(manager, "gun_blunderbuss")
     manager.play_menu_gun("blunderbuss")
     target.set_volume.assert_called_once_with(pytest.approx(0.1))
     target.play.assert_called_once_with(fade_ms=ONESHOT_FADE_MS)
@@ -312,14 +301,16 @@ def test_menu_volume_defaults_from_env(manager):
     assert 0.0 <= manager.menu_volume <= 1.0
 
 
+# --------------------------------------------------------------------------
+# enabled / disabled guards
+# --------------------------------------------------------------------------
+
 @pytest.mark.parametrize("enabled,sounds_nonempty,should_play", [
     pytest.param(False, True, False, id="disabled_with_sounds_no_op"),
     pytest.param(True, False, False, id="enabled_empty_list_no_op"),
     pytest.param(True, True, True, id="enabled_with_sounds_plays"),
 ])
 def test_play_random_helper_guards_both_branches(enabled, sounds_nonempty, should_play):
-    """_play_random plays exactly when enabled AND the list is non-empty;
-    either guard alone short-circuits before any Sound.play()."""
     sm = SoundManager(SOUNDS_DIR, enabled=enabled, master_volume=1.0,
                       heartbeat_channel=MagicMock())
     target = MagicMock()
@@ -330,34 +321,65 @@ def test_play_random_helper_guards_both_branches(enabled, sounds_nonempty, shoul
         target.play.assert_not_called()
 
 
-@pytest.mark.parametrize("method", PER_EVENT_PLAY_METHODS)
+DISABLED_NOOP_METHODS = [
+    "play_check", "play_checkmate", "play_castle", "play_undo",
+    "play_game_start", "play_flag_fall", "play_online_game_start",
+    "play_give_time", "play_surrender", "play_hit",
+    "play_you_win", "play_you_lose", "play_draw", "play_toast", "play_flip",
+    "play_pickup", "play_drop", "play_swear", "play_ui_click",
+    "play_skillcheck_appear", "play_skillcheck_win", "play_skillcheck_miss",
+    "play_wheel_tick", "play_aim_lock", "play_aim_beep",
+]
+
+
+@pytest.mark.parametrize("method", DISABLED_NOOP_METHODS)
 def test_disabled_manager_play_method_does_not_reach_playback(method):
-    """Every per-event play method on a disabled manager is a true no-op: the
-    real playback path (_play_with_master) is never reached."""
     sm = SoundManager(SOUNDS_DIR, enabled=False)
     with patch.object(sm, "_play_with_master") as play:
         getattr(sm, method)()
     play.assert_not_called()
 
 
-def test_disabled_manager_play_capture_does_not_reach_playback():
-    """play_capture takes the piece-type argument; on a disabled manager it
-    must also skip the real playback path."""
+def test_disabled_manager_keyed_methods_do_not_reach_playback():
     sm = SoundManager(SOUNDS_DIR, enabled=False)
     with patch.object(sm, "_play_with_master") as play:
+        sm.play_move(PieceType.QUEEN)
         sm.play_capture(PieceType.PAWN)
-        sm.play_capture()
+        sm.play_announcer("double_kill")
+        sm.play_hit(PieceType.QUEEN)
     play.assert_not_called()
 
 
 def test_disabled_manager_heartbeat_and_stop_all_touch_no_channel():
-    """update_heartbeat / stop_all on a disabled manager never touch a channel
-    (the disabled manager holds no heartbeat channel at all)."""
     sm = SoundManager(SOUNDS_DIR, enabled=False)
     assert sm._heartbeat_channel is None
     sm.update_heartbeat(0.05, paused=False)
     sm.stop_all()
     assert sm._state == STATE_OFF
+
+
+def test_reserve_channel_marks_channel_as_reserved_in_pg_mixer():
+    with patch.object(pg.mixer, "set_reserved") as set_reserved:
+        SoundManager._reserve_channel(0)
+    set_reserved.assert_called_once_with(1)
+
+
+def test_real_construction_reserves_channel_zero(tmp_path):
+    with patch.object(pg.mixer, "set_reserved") as set_reserved:
+        SoundManager(tmp_path, master_volume=1.0)
+    set_reserved.assert_called_once_with(1)
+
+
+# --------------------------------------------------------------------------
+# three-state heartbeat (OFF / SLOW / FAST)
+# --------------------------------------------------------------------------
+
+def _slow_fraction(cfg):
+    return (cfg.fast_fraction + cfg.start_fraction) / 2.0
+
+
+def _fast_fraction(cfg):
+    return cfg.fast_fraction / 2.0
 
 
 def test_heartbeat_starts_off(manager):
@@ -370,18 +392,23 @@ def test_heartbeat_off_above_threshold(manager, fake_channel):
     fake_channel.play.assert_not_called()
 
 
-def test_heartbeat_off_at_threshold_boundary(manager):
-    """fraction == start_fraction is the user-decided cutoff; either state is
-    acceptable exactly on it. Below-boundary triggering is asserted separately."""
-    manager.update_heartbeat(manager.heartbeat.start_fraction, paused=False)
-    assert manager._state in (STATE_OFF, STATE_HEARTBEAT)
+def test_heartbeat_slow_between_fast_and_start(manager, fake_channel):
+    manager.update_heartbeat(_slow_fraction(manager.heartbeat), paused=False)
+    assert manager._state == STATE_SLOW
+    played = fake_channel.play.call_args[0][0]
+    assert played is manager._slots["heartbeat_slow"][0]
 
 
-def test_heartbeat_on_below_threshold(manager, fake_channel):
-    manager.update_heartbeat(0.05, paused=False)
-    assert manager._state == STATE_HEARTBEAT
-    fake_channel.play.assert_called_once()
-    args, kwargs = fake_channel.play.call_args
+def test_heartbeat_fast_at_or_below_fast_fraction(manager, fake_channel):
+    manager.update_heartbeat(_fast_fraction(manager.heartbeat), paused=False)
+    assert manager._state == STATE_FAST
+    played = fake_channel.play.call_args[0][0]
+    assert played is manager._slots["heartbeat_fast"][0]
+
+
+def test_heartbeat_loop_kwargs(manager, fake_channel):
+    manager.update_heartbeat(_slow_fraction(manager.heartbeat), paused=False)
+    _, kwargs = fake_channel.play.call_args
     assert kwargs.get("loops") == -1
     assert kwargs.get("fade_ms") == manager.heartbeat.fade_in_ms
 
@@ -396,6 +423,46 @@ def test_heartbeat_off_when_fraction_none(manager):
     assert manager._state == STATE_OFF
 
 
+def test_heartbeat_slow_to_fast_swaps_loop_on_one_channel(manager, fake_channel):
+    manager.update_heartbeat(_slow_fraction(manager.heartbeat), paused=False)
+    fake_channel.play.reset_mock()
+    fake_channel.fadeout.reset_mock()
+    manager.update_heartbeat(_fast_fraction(manager.heartbeat), paused=False)
+    assert manager._state == STATE_FAST
+    played = fake_channel.play.call_args[0][0]
+    assert played is manager._slots["heartbeat_fast"][0]
+    fake_channel.fadeout.assert_not_called()
+
+
+def test_heartbeat_fast_to_slow_swaps_back(manager, fake_channel):
+    manager.update_heartbeat(_fast_fraction(manager.heartbeat), paused=False)
+    fake_channel.play.reset_mock()
+    fake_channel.fadeout.reset_mock()
+    manager.update_heartbeat(_slow_fraction(manager.heartbeat), paused=False)
+    assert manager._state == STATE_SLOW
+    played = fake_channel.play.call_args[0][0]
+    assert played is manager._slots["heartbeat_slow"][0]
+    fake_channel.fadeout.assert_not_called()
+
+
+def test_heartbeat_transition_to_off_fades(manager, fake_channel):
+    manager.update_heartbeat(_fast_fraction(manager.heartbeat), paused=False)
+    fake_channel.fadeout.reset_mock()
+    manager.update_heartbeat(0.5, paused=False)
+    assert manager._state == STATE_OFF
+    fake_channel.fadeout.assert_called_once_with(manager.heartbeat.fade_out_ms)
+
+
+def test_heartbeat_pause_then_resume(manager, fake_channel):
+    manager.update_heartbeat(_slow_fraction(manager.heartbeat), paused=False)
+    fake_channel.fadeout.reset_mock()
+    manager.update_heartbeat(_slow_fraction(manager.heartbeat), paused=True)
+    fake_channel.fadeout.assert_called_once()
+    fake_channel.play.reset_mock()
+    manager.update_heartbeat(_slow_fraction(manager.heartbeat), paused=False)
+    fake_channel.play.assert_called_once()
+
+
 @pytest.mark.parametrize("fraction_of,expected_of", [
     pytest.param(lambda c: c.start_fraction - 1e-9, lambda c: c.min_volume,
                  id="just_below_threshold_is_min"),
@@ -405,8 +472,6 @@ def test_heartbeat_off_when_fraction_none(manager):
                  id="halfway_lerps_to_midpoint"),
 ])
 def test_heartbeat_volume_lerps(manager, fake_channel, fraction_of, expected_of):
-    """Channel volume lerps linearly from min_volume at the threshold to
-    max_volume at an empty clock, scaled by master_volume (1.0 here)."""
     cfg = manager.heartbeat
     manager.update_heartbeat(fraction_of(cfg), paused=False)
     last_vol = fake_channel.set_volume.call_args[0][0]
@@ -420,34 +485,12 @@ def test_heartbeat_scaled_by_master_volume(manager, fake_channel):
     assert last_vol == pytest.approx(manager.heartbeat.max_volume * 0.5)
 
 
-def test_heartbeat_transition_to_off_fades(manager, fake_channel):
-    manager.update_heartbeat(0.05, paused=False)
-    fake_channel.fadeout.reset_mock()
-    manager.update_heartbeat(0.5, paused=False)
-    assert manager._state == STATE_OFF
-    fake_channel.fadeout.assert_called_once_with(manager.heartbeat.fade_out_ms)
-
-
-def test_heartbeat_pause_then_resume(manager, fake_channel):
-    manager.update_heartbeat(0.05, paused=False)
-    fake_channel.fadeout.reset_mock()
-    manager.update_heartbeat(0.05, paused=True)
-    fake_channel.fadeout.assert_called_once()
-    fake_channel.play.reset_mock()
-    manager.update_heartbeat(0.05, paused=False)
-    fake_channel.play.assert_called_once()
-
-
-def test_heartbeat_disabled_is_noop():
-    sm = SoundManager(SOUNDS_DIR, enabled=False)
-    sm.update_heartbeat(0.05, paused=False)
-    assert sm._state == STATE_OFF
-
-
 def test_custom_volume_bounds(fake_channel):
     cfg = HeartbeatConfig(min_volume=0.3, max_volume=0.7)
     sm = SoundManager(SOUNDS_DIR, heartbeat=cfg, heartbeat_channel=fake_channel,
                       master_volume=1.0)
+    sm._slots["heartbeat_slow"] = [MagicMock()]
+    sm._slots["heartbeat_fast"] = [MagicMock()]
     sm.update_heartbeat(cfg.start_fraction - 1e-9, paused=False)
     assert fake_channel.set_volume.call_args[0][0] == pytest.approx(0.3, abs=1e-3)
     sm.update_heartbeat(0.0, paused=False)
@@ -455,11 +498,17 @@ def test_custom_volume_bounds(fake_channel):
 
 
 def test_stop_all_fades_heartbeat(manager, fake_channel):
-    manager.update_heartbeat(0.05, paused=False)
+    manager.update_heartbeat(_fast_fraction(manager.heartbeat), paused=False)
     fake_channel.fadeout.reset_mock()
     manager.stop_all()
     fake_channel.fadeout.assert_called_once_with(manager.heartbeat.fade_out_ms)
     assert manager._state == STATE_OFF
+
+
+def test_heartbeat_disabled_is_noop():
+    sm = SoundManager(SOUNDS_DIR, enabled=False)
+    sm.update_heartbeat(0.05, paused=False)
+    assert sm._state == STATE_OFF
 
 
 def test_set_enabled_false_calls_stop_all_via_real_channel():
