@@ -216,7 +216,7 @@ def test_drag_release_after_game_over_skips_router():
     app.board.dragging_from = Square(6, 4)
     app.manual_result = "white_wins"
     calls = []
-    app.mouse_left_clicked = lambda pos: calls.append(pos)
+    app.mouse_left_clicked = lambda pos, **kwargs: calls.append(pos)
     app._mouse_left_released((100, 100))
     assert calls == []
     assert app.board.dragging_from is None
@@ -228,7 +228,7 @@ def test_drag_release_during_live_game_routes_click():
     app = _make_app()
     app.board.dragging_from = Square(6, 4)
     calls = []
-    app.mouse_left_clicked = lambda pos: calls.append(pos)
+    app.mouse_left_clicked = lambda pos, **kwargs: calls.append(pos)
     app._mouse_left_released((100, 100))
     assert calls == [(100, 100)]
 

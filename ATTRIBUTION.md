@@ -30,7 +30,28 @@ assets/fonts/OFL.txt (https://openfontlicense.org/).
 
 ## Sounds
 
-- **assets/sounds/guns/ray_gun_shot.ogg** — "retro shot blaster" by JavierZumer.
-  Source: https://freesound.org/s/257232/
-  License: CC BY 4.0 — https://creativecommons.org/licenses/by/4.0/
-  Changes: trimmed to ~0.65 s, loudness-matched to the other gun shots, re-encoded to OGG.
+Sound effects are CC0 unless listed under **Attribution required** below.
+
+### Attribution required (CC BY 4.0)
+
+- **Old-school arena FPS announcer voice lines** by jkerman -- https://freesound.org/s/718360/
+  License: CC BY 4.0 (https://creativecommons.org/licenses/by/4.0/). Used for: announcer kill-streak calls; game-start / you-lose / you-win voice.
+- **retro shot blaster** by JavierZumer -- https://freesound.org/s/257232/
+  License: CC BY 4.0 (https://creativecommons.org/licenses/by/4.0/). Used for: king ray-gun capture (guns/ray_gun).
+
+### Public domain (CC0 -- credited as a courtesy, not required)
+
+- **Audio packs (Interface / UI / Impact / Digital / Sci-Fi / Voiceover)** by Kenney -- https://kenney.nl/assets/category:Audio (piece moves, skill-check cues, UI clicks, ray-gun lasers, you-win callouts)
+- **Casual Game Sounds** by Dustyroom -- https://dustyroom.com/free-casual-game-sounds/ (UI / feedback one-shots)
+- **The Free Firearm Sound Library** by Ben Jaszczak, Brian Nelson, Kevin Heras, Matthew Nanney (submitted by bart) -- https://opengameart.org/content/the-free-firearm-sound-library (pistol / cannon / rifle capture shots)
+- **Bullet / Gun SFX (CC0)** by Signature Sounds -- https://signaturesounds.org/store/p/bulletgun-sfx-cc0 (foley / reload layers)
+- **Door Open, Door Close Set** by qubodup (Iwan Gabovitch) -- https://opengameart.org/content/door-open-door-close-set (castle (open+close))
+- **Heartbeat Sounds** by bart -- https://opengameart.org/content/heartbeat-sounds (low-time heartbeat loops)
+- **metal pipe fall** by thenotcheeseman -- https://freesound.org/s/679206/ (checkmate)
+- **R11-58 Loud Shotgun Blasts** by craigsmith -- https://freesound.org/s/486060/ (rook shotgun capture)
+- **Pump Action Shotgun Cycle** by Zott820 -- https://freesound.org/s/370344/ (check reload)
+- **Oof (original)** by unfa -- https://freesound.org/s/719053/ (capture hit oof)
+- **Video Game Character Grunt** by iampatrick -- https://freesound.org/s/839522/ (capture hit oof)
+- **Grunt2 - Death Pain** by tonsil5 -- https://freesound.org/s/416838/ (capture hit oof)
+- **Girl Taking Damage** by MadamVicious (mvVoiceActing) -- https://freesound.org/s/218190/ (queen capture oof (female))
+

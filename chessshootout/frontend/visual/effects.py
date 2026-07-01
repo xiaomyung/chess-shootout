@@ -94,6 +94,8 @@ class EffectManager:
         self.flags = []
         self._takeover = None
         self._check_gun = None
+        self.aim_victim = None
+        self.aim_victim_scale = 1.0
         self._king_shake = None
         self._piece_shakes = {}
         self._bystanders = set()
@@ -119,6 +121,8 @@ class EffectManager:
         self.flags = []
         self._takeover = None
         self._check_gun = None
+        self.aim_victim = None
+        self.aim_victim_scale = 1.0
         self._king_shake = None
         self._piece_shakes = {}
         self._bystanders = set()
@@ -657,16 +661,25 @@ class EffectManager:
         g = self._check_gun
         if g is None:
             return
+        scale = self.aim_victim_scale if g["from_sq"] == self.aim_victim else 1.0
+        if scale <= 0.02:
+            return
         t = now - g["start"]
         weapon = g["weapon"]
         fx, fy = self._center(g["from_sq"])
         aim = self._aim(g["from_sq"], g["victim_sq"])
-        pivot = (fx, fy - g["cell"] * GUN_PIVOT_RISE_FRAC)
+        pivot = (fx, fy - g["cell"] * GUN_PIVOT_RISE_FRAC * scale)
         if t < DRAW_MS:
             gunfx.draw_flourish(window, weapon["gun"], weapon["grip"], pivot, aim,
                                 t / DRAW_MS, gunfx.GUN_DRAW_SPINS_LAND)
-        else:
+        elif scale >= 0.999:
             gunfx.blit_aimed(window, weapon["gun"], weapon["grip"], pivot, aim)
+        else:
+            gun_img = pg.transform.smoothscale(
+                weapon["gun"], (max(int(weapon["gun"].get_width() * scale), 1),
+                                max(int(weapon["gun"].get_height() * scale), 1)))
+            grip = (weapon["grip"][0] * scale, weapon["grip"][1] * scale)
+            gunfx.blit_aimed(window, gun_img, grip, pivot, aim)
 
     @staticmethod
     def _drop_state(d, bx, by, t):

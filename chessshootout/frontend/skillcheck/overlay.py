@@ -16,6 +16,10 @@ class SkillCheckOverlay:
     def is_passive(self):
         return getattr(self._controller, "_passive", False)
 
+    def aim_victim_scale(self):
+        fn = getattr(self._controller, "victim_scale", None)
+        return fn() if fn is not None else 1.0
+
     def spectate_shot(self, elapsed, miss_count, won):
         if self._controller is not None:
             self._controller.spectate_shot(elapsed, miss_count, won)

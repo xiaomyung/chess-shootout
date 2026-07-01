@@ -6,12 +6,13 @@ import pygame as pg
 
 from chessshootout.infra import env
 from chessshootout.frontend.visual.clock_visual import LOW_TIME_FRACTION
-from chessshootout.frontend.visual.gunfx import PIECE_GUN
+from chessshootout.frontend.audio.slots import SLOTS, move_slot, gun_slot, hit_slot
 
 
 @dataclass
 class HeartbeatConfig:
     start_fraction: float = LOW_TIME_FRACTION
+    fast_fraction: float = 0.05
     min_volume: float = 0.10
     max_volume: float = 1.0
     fade_in_ms: int = 400
@@ -19,39 +20,10 @@ class HeartbeatConfig:
 
 
 STATE_OFF = "off"
-STATE_HEARTBEAT = "heartbeat"
+STATE_SLOW = "slow"
+STATE_FAST = "fast"
 
 ONESHOT_FADE_MS = 20
-
-GUNS_DIR = "guns"
-
-ANNOUNCER_DIR = "announcer"
-
-ONE_SHOT_FILES = {
-    "checkmate": "metal_pipe_falling.ogg",
-    "undo": "rewind.ogg",
-    "game_start": "game_start.ogg",
-    "heartbeat": "heartbeat.ogg",
-    "castle": "castle_sound.ogg",
-    "you_lose": "you_lose.ogg",
-    "online_game_start": "online_game_start.ogg",
-    "executed": "executed.ogg",
-    "give_time": "give_time.ogg",
-    "surrender": "surrender.ogg",
-}
-
-ANNOUNCER_FILES = {
-    key: f"{ANNOUNCER_DIR}/{key}.ogg" for key in (
-        "first_blood", "double_kill", "triple_kill", "quadra_kill",
-        "rampage", "unstoppable", "godlike",
-    )
-}
-
-VARIANT_DIRS = {
-    "move": "piece_moves",
-    "reload": f"{GUNS_DIR}/shotgun_reloads",
-    "hit": f"{ANNOUNCER_DIR}/hits",
-}
 
 
 def _clamp_volume(value):
@@ -75,32 +47,23 @@ class SoundManager:
         self._state = STATE_OFF
 
         if not self.enabled:
-            self._variants = {}
-            self._gun_shots = {}
-            self._oneshots = {}
+            self._slots = {}
             self._heartbeat_channel = None
             return
 
         sounds_dir = Path(sounds_dir)
-        self._variants = {key: self._load_variants(sounds_dir / rel)
-                          for key, rel in VARIANT_DIRS.items()}
-        self._gun_shots = self._load_gun_shots(sounds_dir / GUNS_DIR)
-        self._oneshots = {key: self._safe_load(sounds_dir / rel)
-                          for key, rel in {**ONE_SHOT_FILES, **ANNOUNCER_FILES}.items()}
+        self._slots = {name: self._load_pool(sounds_dir / spec.dst)
+                       for name, spec in SLOTS.items()}
         self._heartbeat_channel = (
             heartbeat_channel if heartbeat_channel is not None
             else self._reserve_channel(0)
         )
 
-    def _load_variants(self, dir_path):
+    def _load_pool(self, dir_path):
         if not dir_path.is_dir():
             return []
         return [s for p in sorted(dir_path.glob("*.ogg"))
                 if (s := self._safe_load(p)) is not None]
-
-    def _load_gun_shots(self, guns_dir):
-        return {gun: s for gun in sorted(set(PIECE_GUN.values()))
-                if (s := self._safe_load(guns_dir / f"{gun}_shot.ogg")) is not None}
 
     @staticmethod
     def _safe_load(path):
@@ -137,107 +100,151 @@ class SoundManager:
     def _play_with_master(self, sound):
         self._play_at(sound, self.master_volume)
 
-    def play_menu_gun(self, gun):
-        if not self.enabled:
+    def _play_random_at(self, sounds, volume):
+        if not self.enabled or not sounds:
             return
-        sound = self._gun_shots.get(gun)
-        if sound is not None:
-            self._play_at(sound, self.master_volume * self.menu_volume)
+        self._play_at(random.choice(sounds), volume)
 
     def _play_random(self, sounds):
         if not self.enabled or not sounds:
             return
         self._play_with_master(random.choice(sounds))
 
-    def play_move(self):
-        self._play_random(self._variants.get("move", []))
+    def _play(self, slot):
+        self._play_random(self._slots.get(slot, []))
 
-    def play_premove_queued(self):
-        self._play_random(self._variants.get("move", []))
+    def play_move(self, piece_type=None):
+        if piece_type is None:
+            return
+        self._play(move_slot(piece_type.value))
 
-    def play_check(self):
-        self._play_random(self._variants.get("reload", []))
+    def play_premove_queued(self, piece_type=None):
+        self.play_move(piece_type)
 
     def play_capture(self, piece_type=None):
-        if not self.enabled:
+        if piece_type is None:
             return
-        gun = PIECE_GUN.get(piece_type.value) if piece_type is not None else None
-        sound = self._gun_shots.get(gun)
-        if sound is None and self._gun_shots:
-            sound = next(iter(self._gun_shots.values()))
-        if sound is not None:
-            self._play_with_master(sound)
+        self._play(gun_slot(piece_type.value))
 
-    def play_checkmate(self):
-        self._play_one_shot("checkmate")
+    def play_menu_gun(self, gun):
+        self._play_random_at(self._slots.get(f"gun_{gun}", []),
+                             self.master_volume * self.menu_volume)
 
-    def play_castle(self):
-        self._play_one_shot("castle")
-
-    def play_undo(self):
-        self._play_one_shot("undo")
-
-    def play_game_start(self):
-        self._play_one_shot("game_start")
-
-    def play_flag_fall(self):
-        self._play_one_shot("you_lose")
-
-    def play_online_game_start(self):
-        self._play_one_shot("online_game_start")
+    def play_check(self):
+        self._play("reload_check")
 
     def play_announcer(self, key):
-        self._play_one_shot(key)
+        self._play(f"announcer_{key}")
 
-    def play_hit(self):
-        self._play_random(self._variants.get("hit", []))
+    def play_hit(self, victim=None):
+        slot = hit_slot(victim.value) if victim is not None else "announcer_hits"
+        self._play(slot)
 
-    def play_mate_sting(self):
-        self._play_one_shot("executed")
+    def play_checkmate(self):
+        self._play("checkmate")
+
+    def play_castle(self):
+        self._play("castle")
+
+    def play_undo(self):
+        self._play("undo")
+
+    def play_game_start(self):
+        self._play("game_start")
+
+    def play_online_game_start(self):
+        self._play("online_game_start")
 
     def play_give_time(self):
-        self._play_one_shot("give_time")
+        self._play("give_time")
+
+    def play_you_win(self):
+        self._play("you_win")
+
+    def play_you_lose(self):
+        self._play("you_lose")
+
+    def play_flag_fall(self):
+        self._play("you_lose")
+
+    def play_draw(self):
+        self._play("draw")
 
     def play_surrender(self):
-        self._play_one_shot("surrender")
+        self._play("resign")
 
-    def _play_one_shot(self, key):
-        if not self.enabled:
-            return
-        sound = self._oneshots.get(key)
-        if sound is not None:
-            self._play_with_master(sound)
+    def play_toast(self):
+        self._play("toast")
+
+    def play_flip(self):
+        self._play("board_flip")
+
+    def play_pickup(self):
+        self._play("pickup")
+
+    def play_drop(self):
+        self._play("drop")
+
+    def play_swear(self):
+        self._play("swear")
+
+    def play_ui_click(self):
+        self._play("ui_click")
+
+    def play_skillcheck_appear(self):
+        self._play("sc_appear")
+
+    def play_skillcheck_win(self):
+        self._play("sc_win")
+
+    def play_skillcheck_miss(self):
+        self._play("sc_miss")
+
+    def play_wheel_tick(self):
+        self._play("wheel_tick")
+
+    def play_aim_lock(self):
+        self._play("aim_lock")
+
+    def play_aim_beep(self):
+        self._play("aim_beep")
 
     def update_heartbeat(self, fraction_remaining, paused):
         if not self.enabled:
             return
         desired = self._desired_state(fraction_remaining, paused)
         self._transition_to(desired)
-        if desired == STATE_HEARTBEAT and self._heartbeat_channel is not None:
+        if desired in (STATE_SLOW, STATE_FAST) and self._heartbeat_channel is not None:
             self._heartbeat_channel.set_volume(self._heartbeat_volume(fraction_remaining))
 
     def _desired_state(self, fraction, paused):
         cfg = self.heartbeat
         if paused or fraction is None or fraction > cfg.start_fraction:
             return STATE_OFF
-        return STATE_HEARTBEAT
+        if fraction > cfg.fast_fraction:
+            return STATE_SLOW
+        return STATE_FAST
 
     def _transition_to(self, desired):
         if desired == self._state:
             return
         cfg = self.heartbeat
-        if desired == STATE_OFF and self._heartbeat_channel is not None:
-            self._heartbeat_channel.fadeout(cfg.fade_out_ms)
-        elif desired == STATE_HEARTBEAT:
-            self._start_heartbeat()
+        if desired == STATE_OFF:
+            if self._heartbeat_channel is not None:
+                self._heartbeat_channel.fadeout(cfg.fade_out_ms)
+        else:
+            self._start_heartbeat(desired)
         self._state = desired
 
-    def _start_heartbeat(self):
-        sound = self._oneshots.get("heartbeat")
-        if self._heartbeat_channel is None or sound is None:
+    def _start_heartbeat(self, state):
+        channel = self._heartbeat_channel
+        if channel is None:
             return
-        cfg = self.heartbeat
-        self._heartbeat_channel.play(sound, loops=-1, fade_ms=cfg.fade_in_ms)
+        slot = "heartbeat_fast" if state == STATE_FAST else "heartbeat_slow"
+        pool = self._slots.get(slot, [])
+        if not pool:
+            return
+        channel.play(random.choice(pool), loops=-1, fade_ms=self.heartbeat.fade_in_ms)
 
     def _heartbeat_volume(self, fraction):
         cfg = self.heartbeat

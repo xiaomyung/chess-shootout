@@ -11,6 +11,7 @@ landed ply clears the locks.
 import math
 import os
 from collections import Counter
+from unittest.mock import MagicMock
 
 os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
 os.environ.setdefault("SDL_AUDIODRIVER", "dummy")
@@ -1560,3 +1561,208 @@ def test_local_skillcheck_deadline_is_tc_capped():
     assert app._skillcheck_deadline_ms() == 4000, "a 40s game -> 10% = 4s"
     app._time_control = None
     assert app._skillcheck_deadline_ms() == 5000, "no clock -> the base"
+
+
+# ---- audio cues (appear/lock, tick/beep, verdict, swear, passive) ----------
+
+def _cued_wheel(audio=None, *, passive=False, on_shot=None):
+    if audio is None:
+        audio = MagicMock()
+    return WheelController(_always_in_arc(), pg.Rect(0, 0, 80, 80), now_ms=0,
+                           on_shot=on_shot, passive=passive, audio=audio)
+
+
+def _cued_aim(audio=None, *, passive=False, on_shot=None, miss_count=0):
+    if audio is None:
+        audio = MagicMock()
+    return AimController(AimChallenge.from_seed("seed-aim", 0), pg.Rect(0, 0, 80, 80),
+                         now_ms=0, on_shot=on_shot, passive=passive, audio=audio,
+                         miss_count=miss_count)
+
+
+def test_wheel_plays_appear_ding_once_at_ctor():
+    audio = MagicMock()
+    _cued_wheel(audio)
+    audio.play_skillcheck_appear.assert_called_once()
+    audio.play_aim_lock.assert_not_called()
+
+
+def test_aim_plays_lock_ding_once_at_ctor_not_appear():
+    audio = MagicMock()
+    _cued_aim(audio)
+    audio.play_aim_lock.assert_called_once()
+    audio.play_skillcheck_appear.assert_not_called()
+
+
+def test_wheel_passive_ctor_makes_no_cue():
+    audio = MagicMock()
+    _cued_wheel(audio, passive=True)
+    audio.play_skillcheck_appear.assert_not_called()
+
+
+def test_aim_passive_ctor_makes_no_cue():
+    audio = MagicMock()
+    _cued_aim(audio, passive=True)
+    audio.play_aim_lock.assert_not_called()
+
+
+def test_wheel_tick_fires_once_per_arc_entry():
+    audio = MagicMock()
+    c = _cued_wheel(audio)
+    audio.reset_mock()
+    seq = iter([False, True, True, False, True])
+    stub = MagicMock()
+    stub.needle_deg.return_value = 0.0
+    stub.in_arc_at.side_effect = lambda deg, elapsed: next(seq)
+    c.challenge = stub
+    for t in range(1, 6):
+        c.update(t)
+    assert audio.play_wheel_tick.call_count == 2
+
+
+def test_aim_beep_fires_once_per_target_entry():
+    audio = MagicMock()
+    c = _cued_aim(audio)
+    audio.reset_mock()
+    seq = iter([False, True, True, False, True])
+    stub = MagicMock()
+    stub.on_target.side_effect = lambda elapsed, miss: next(seq)
+    stub.is_expired.return_value = False
+    c.challenge = stub
+    for t in range(1, 6):
+        c.update(t)
+    assert audio.play_aim_beep.call_count == 2
+
+
+def test_wheel_local_commit_win_plays_win_once():
+    audio = MagicMock()
+    c = _cued_wheel(audio)
+    audio.reset_mock()
+    c._commit(True)
+    audio.play_skillcheck_win.assert_called_once()
+    audio.play_skillcheck_miss.assert_not_called()
+
+
+def test_wheel_local_commit_miss_plays_miss_once():
+    audio = MagicMock()
+    c = _cued_wheel(audio)
+    audio.reset_mock()
+    c._commit(False)
+    audio.play_skillcheck_miss.assert_called_once()
+    audio.play_skillcheck_win.assert_not_called()
+
+
+def test_wheel_online_resolve_win_plays_win():
+    audio = MagicMock()
+    c = _cued_wheel(audio, on_shot=lambda e: None)
+    audio.reset_mock()
+    c.resolve(True)
+    audio.play_skillcheck_win.assert_called_once()
+
+
+def test_wheel_passive_resolve_is_silent():
+    audio = MagicMock()
+    c = _cued_wheel(audio, passive=True)
+    audio.reset_mock()
+    c.resolve(True)
+    audio.play_skillcheck_win.assert_not_called()
+    audio.play_skillcheck_miss.assert_not_called()
+
+
+def test_aim_expiry_plays_miss_once():
+    audio = MagicMock()
+    c = _cued_aim(audio)
+    audio.reset_mock()
+    stub = MagicMock()
+    stub.on_target.return_value = False
+    stub.is_expired.return_value = True
+    c.challenge = stub
+    c.update(10)
+    audio.play_skillcheck_miss.assert_called_once()
+    audio.play_skillcheck_win.assert_not_called()
+
+
+def test_aim_online_resolve_win_plays_win():
+    audio = MagicMock()
+    c = _cued_aim(audio, on_shot=lambda e: None)
+    audio.reset_mock()
+    c.resolve(True)
+    audio.play_skillcheck_win.assert_called_once()
+
+
+def test_aim_local_miss_shot_plays_swear_once():
+    audio = MagicMock()
+    c = _cued_aim(audio)
+    audio.reset_mock()
+    c._replay_miss(100, 0)
+    audio.play_swear.assert_called_once()
+
+
+def test_aim_online_miss_shot_plays_no_swear():
+    audio = MagicMock()
+    c = _cued_aim(audio, on_shot=lambda e: None)
+    audio.reset_mock()
+    c._replay_miss(100, 0)
+    audio.play_swear.assert_not_called()
+
+
+def test_aim_passive_miss_shot_is_silent():
+    audio = MagicMock()
+    c = _cued_aim(audio, passive=True)
+    audio.reset_mock()
+    c._replay_miss(100, 0)
+    audio.play_swear.assert_not_called()
+
+
+# ---- check-gun scaling with the aim victim ---------------------------------
+
+def test_aim_victim_scale_tracks_challenge():
+    c = _cued_aim()
+    assert c.victim_scale() == c.challenge.piece_scale(*c._render_state())
+
+
+def test_local_timeout_after_a_miss_shows_gone_not_stale_shot():
+    """Local aim: after firing a miss then timing out, the result-hold shows the
+    expired (gone) piece, not a stale partial reappearance of the last shot."""
+    c = _cued_aim()
+    c._now = 500
+    c._replay_miss(500, 0)
+    assert c._shot_render is not None
+    c.update(10_000)
+    assert c._committed_at is not None and c._landed is False
+    elapsed, miss = c._render_state()
+    assert (elapsed, miss) != c._shot_render
+    assert c.challenge.piece_scale(elapsed, miss) <= 0.02
+
+
+def test_online_win_freezes_the_fired_shot():
+    """An online WIN pins the piece to the shot moment (matches local's instant
+    resolve) instead of the RTT-shrunk resolve moment."""
+    c = _cued_aim(on_shot=lambda e: None)
+    c._now = 500
+    c._replay_miss(500, 0)
+    c.resolve(True)
+    assert c._render_state() == c._shot_render
+
+
+def test_online_miss_shows_gone_not_stale_shot():
+    """An online MISS looks the same as a local miss: the piece is gone, not a
+    frozen partial reappearance of the last shot."""
+    c = _cued_aim(on_shot=lambda e: None)
+    c._now = 500
+    c._replay_miss(500, 0)
+    c._now = 10_000
+    c.resolve(False)
+    elapsed, miss = c._render_state()
+    assert (elapsed, miss) != c._shot_render
+    assert c.challenge.piece_scale(elapsed, miss) <= 0.02
+
+
+def test_overlay_aim_victim_scale_passthrough():
+    ov = SkillCheckOverlay()
+    assert ov.aim_victim_scale() == 1.0
+    ov._controller = _cued_wheel()
+    assert ov.aim_victim_scale() == 1.0
+    aim = _cued_aim()
+    ov._controller = aim
+    assert ov.aim_victim_scale() == aim.victim_scale()

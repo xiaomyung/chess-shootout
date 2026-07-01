@@ -27,6 +27,7 @@ class Toast:
         self.font = get_font(16, bold=True)
         self._bubbles = []
         self._last_ms = 0
+        self.on_new = None
 
     def show(self, message, duration_ms=None, kind="info", key=None):
         now = pg.time.get_ticks()
@@ -44,6 +45,8 @@ class Toast:
             "message": message, "kind": kind, "key": key,
             "enter_at_ms": now, "shown_at_ms": now, "duration_ms": duration, "y": None,
         })
+        if self.on_new is not None:
+            self.on_new()
 
     def _top(self, now=None):
         if now is None:

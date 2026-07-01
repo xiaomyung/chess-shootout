@@ -42,6 +42,22 @@ server for online two-player matches.
   every screen.
 - Animated menu "battle" backdrop and themed result / online screens.
 
+**Audio**
+- A distinct move sound per piece, and a distinct gun on a won capture check —
+  pawn revolver, knight hand-cannon, bishop lever-action, rook shotgun, queen
+  blunderbuss, king ray-gun — over a victim "oof" (the queen has her own).
+- Skill-check cues: a ding as the wheel or aim opens, a tick each time the
+  needle enters the sweet-spot or the crosshair crosses the target, and a
+  win/miss sting on resolve. Online, only your own check is audible — a
+  spectated opponent's is silent.
+- A universal typewriter click on every button, key, and empty-square press;
+  moves, pickups, and drops have their own sounds instead.
+- A two-stage low-time heartbeat that starts slow near 10% on the clock and
+  swaps to fast near 5%, riding a volume ramp as time runs out.
+- Announcer killstreaks and result voices (get-ready, you-win, you-lose, draw,
+  surrender), plus castle doors, undo rewind, board-flip whoosh, and toast pops.
+- Master and menu-gun volume sliders, persisted to `.env`.
+
 **PGN**
 - Every game auto-saves to `games/<prefix>-YYYYMMDD-HHMMSS.pgn` (`local`,
   `bot`, or `online`).

@@ -1,7 +1,7 @@
 import pygame as pg
 
 from chessshootout.frontend.skillcheck.controller import (
-    SkillCheckController, SKILLCHECK_RESULT_HOLD_MS)
+    SkillCheckController, SKILLCHECK_RESULT_HOLD_MS, EdgeTrigger)
 from chessshootout.frontend.visual.colors import Colors
 from chessshootout.frontend.visual.draw import supersample
 from chessshootout.frontend.visual.effects import EffectManager
@@ -32,7 +32,7 @@ class AimController(SkillCheckController):
     def __init__(self, challenge, cell_rect, now_ms, deadline_ms=AIM_TIME_LIMIT_MS,
                  victim_surface=None, board_rect=None, geom=None, from_sq=None,
                  victim_sq=None, attacker_type=None, shot_sound=None, on_shot=None,
-                 miss_count=0, passive=False):
+                 miss_count=0, passive=False, audio=None):
         self.challenge = challenge
         self.start_ms = now_ms
         self._now = now_ms
@@ -41,6 +41,8 @@ class AimController(SkillCheckController):
         self._on_shot = on_shot
         self._passive = passive
         self._online = on_shot is not None or passive
+        self._audio = audio
+        self._beep_edge = EdgeTrigger()
         self._committed_at = None
         self._resolved_at = None
         self._landed = None
@@ -61,6 +63,7 @@ class AimController(SkillCheckController):
         self._board_rect = None
         self.set_board_rect(board_rect)
         self._apply_geometry(cell_rect)
+        self._cue("play_aim_lock")
 
     def _apply_geometry(self, cell_rect):
         new_cell = max(int(cell_rect.width), 1)
@@ -100,6 +103,7 @@ class AimController(SkillCheckController):
         if not self._online and self.challenge.on_target(elapsed, self.miss_count):
             self._landed = True
             self._committed_at = self._now
+            self._emit_verdict()
             return
         self._replay_miss(elapsed, self.miss_count)
         if self._online:
@@ -116,12 +120,15 @@ class AimController(SkillCheckController):
                       cell_size=self.cell_size, power="soft",
                       on_fire=self._shot_sound, callout=False)
         self._fx.swear(self._now, self._from_sq, self.cell_size)
+        if not self._online:
+            self._cue("play_swear")
 
     def resolve(self, won):
         self._landed = won
         if self._committed_at is None:
             self._committed_at = self._now
         self._resolved_at = self._now
+        self._emit_verdict()
 
     def spectate_shot(self, elapsed, miss_count, won):
         if won:
@@ -134,10 +141,15 @@ class AimController(SkillCheckController):
     def update(self, now_ms):
         self._now = now_ms
         self._fx.update(now_ms)
+        if self._committed_at is None:
+            elapsed = now_ms - self.start_ms
+            if self._beep_edge.update(self.challenge.on_target(elapsed, self.miss_count)):
+                self._cue("play_aim_beep")
         if (not self._online and self._committed_at is None
                 and self.challenge.is_expired(now_ms - self.start_ms, self.miss_count)):
             self._landed = False
             self._committed_at = now_ms
+            self._emit_verdict()
 
     @property
     def done(self):
@@ -156,10 +168,14 @@ class AimController(SkillCheckController):
         return frozen - self.start_ms
 
     def _render_state(self):
-        if (self._committed_at is not None and self._landed is not None
+        if (self._online and self._landed and self._committed_at is not None
                 and self._shot_render is not None):
             return self._shot_render
         return self._frozen_elapsed(), self.miss_count
+
+    def victim_scale(self):
+        elapsed, miss = self._render_state()
+        return self.challenge.piece_scale(elapsed, miss)
 
     def draw(self, window):
         elapsed, miss = self._render_state()
