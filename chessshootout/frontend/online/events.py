@@ -495,17 +495,11 @@ class OnlineEventsMixin:
         if reason in ONLINE_WIN_REASONS:
             white_code, black_code = ONLINE_WIN_RESULT_BY_REASON[reason]
             self.manual_result = white_code if winner == "white" else black_code
-            winner_name = self._name_for_color(winner)
-            self._series_scores[winner_name] = (
-                self._series_scores.get(winner_name, 0.0) + 1
-            )
+            self._award_series_win(winner)
             return True
         if reason in ONLINE_DRAW_REASONS:
             self.manual_result = "draw_agreement"
-            for name in (self.white_name, self.black_name):
-                self._series_scores[name] = (
-                    self._series_scores.get(name, 0.0) + 0.5
-                )
+            self._award_series_draw()
             return True
         if reason in ONLINE_STATIC_RESULTS:
             self.manual_result = reason

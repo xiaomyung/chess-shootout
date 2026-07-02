@@ -24,10 +24,6 @@ _SNAP_STYLES = WS_MAXIMIZEBOX | WS_MINIMIZEBOX | WS_THICKFRAME
 
 
 def maximized_placement(monitor_rect, work_area):
-    """Pure. `monitor_rect` and `work_area` are (left, top, right, bottom) in
-    physical pixels. Returns (pos_x, pos_y, width, height) for WM_GETMINMAXINFO —
-    the position is relative to the monitor origin, and the size is the work area
-    (so a maximized borderless window leaves the taskbar visible)."""
     ml, mt, _mr, _mb = monitor_rect
     wl, wt, wr, wb = work_area
     return (wl - ml, wt - mt, wr - wl, wb - wt)
@@ -63,11 +59,6 @@ class _MONITORINFO(ctypes.Structure):
 
 
 class WindowsSnap:
-    """Give a borderless SDL window the Win32 styles + WndProc behaviour that make
-    Aero Snap / maximize work while keeping the frameless look and a taskbar-aware
-    maximize. Windows-only; every entry point is defensively guarded so a failure
-    silently leaves the window as SDL created it."""
-
     def __init__(self, hwnd, is_fullscreen):
         self._hwnd = hwnd
         self._is_fullscreen = is_fullscreen
@@ -110,9 +101,6 @@ class WindowsSnap:
             return False
 
     def apply_styles(self):
-        """(Re)apply the sizing/maximize styles. SDL wipes them on a fullscreen
-        round-trip (it rewrites GWL_STYLE, not the WndProc), so this is called again
-        after every fullscreen exit."""
         try:
             u = self._user32
             style = u.GetWindowLongPtrW(self._hwnd, GWL_STYLE)
@@ -140,11 +128,11 @@ class WindowsSnap:
     def _wndproc(self, hwnd, msg, wparam, lparam):
         try:
             if msg == WM_NCCALCSIZE and wparam:
-                return 0                                  # client area == window (borderless)
+                return 0
             if msg == WM_SIZE:
                 self.maximized = (wparam == SIZE_MAXIMIZED)
             if msg == WM_GETMINMAXINFO and not self._is_fullscreen():
-                result = self._call_orig(hwnd, msg, wparam, lparam)   # SDL sets ptMinTrackSize
+                result = self._call_orig(hwnd, msg, wparam, lparam)
                 self._clamp_maximize_to_work_area(hwnd, lparam)
                 return result
         except Exception:

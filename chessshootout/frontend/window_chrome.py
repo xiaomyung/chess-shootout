@@ -445,7 +445,7 @@ class WindowChrome:
             log.warning("native fullscreen failed", exc_info=True)
             return False
         if not enable and self._snap is not None:
-            self._snap.apply_styles()               # SDL wiped GWL_STYLE on the toggle
+            self._snap.apply_styles()
         return True
 
     def toggle_fullscreen(self):

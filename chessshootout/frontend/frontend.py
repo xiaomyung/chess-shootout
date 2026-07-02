@@ -996,16 +996,20 @@ class Frontend(OnlineEventsMixin):
         if now - self._result_await_since_ms < RESULT_CONFIRM_TIMEOUT_MS:
             return
         self.manual_result = engine_result
-        if engine_result.startswith("white_wins") or engine_result.startswith("black_wins"):
-            winner = "white" if engine_result.startswith("white_wins") else "black"
-            winner_name = self._name_for_color(winner)
-            self._series_scores[winner_name] = (
-                self._series_scores.get(winner_name, 0.0) + 1)
+        if engine_result.startswith(("white_wins", "black_wins")):
+            self._award_series_win(
+                "white" if engine_result.startswith("white_wins") else "black")
         elif engine_result.startswith("draw"):
-            for name in (self.white_name, self.black_name):
-                self._series_scores[name] = (
-                    self._series_scores.get(name, 0.0) + 0.5)
+            self._award_series_draw()
         log.info("promoted unconfirmed online result locally: %s", engine_result)
+
+    def _award_series_win(self, winner):
+        name = self._name_for_color(winner)
+        self._series_scores[name] = self._series_scores.get(name, 0.0) + 1
+
+    def _award_series_draw(self):
+        for name in (self.white_name, self.black_name):
+            self._series_scores[name] = self._series_scores.get(name, 0.0) + 0.5
 
     def _tick_skillcheck_watchdog(self):
         if (self._online_skillcheck is None
@@ -1119,8 +1123,6 @@ class Frontend(OnlineEventsMixin):
             if not (prior_partial and tag != "*"):
                 return self._last_saved_pgn_path
         text = self._build_pgn_text()
-        if text is None:
-            return None
         prefix = self._auto_save_prefix()
         os.makedirs(_games_dir(), exist_ok=True)
         path = self._last_saved_pgn_path
