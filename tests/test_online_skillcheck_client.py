@@ -51,6 +51,9 @@ class FakeOnlineClient:
     def send_ping(self, ply):
         self.pings += 1
 
+    def is_connected(self):
+        return self.state == "connected"
+
     def is_server_silent(self):
         return False
 

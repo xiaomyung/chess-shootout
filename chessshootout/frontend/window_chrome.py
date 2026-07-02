@@ -117,6 +117,7 @@ class WindowChrome:
         self._win_state = "normal"
         self._last_title_click_ms = 0
         self._fs_press_pos = None
+        self._snap = None
         self._init_sdl()
 
     def reinit_sdl(self):
@@ -146,6 +147,38 @@ class WindowChrome:
             log.warning("window chrome SDL hit-test unavailable", exc_info=True)
             self._sdl = None
             self._win_ptr = None
+        self._install_win_snap()
+
+    def _install_win_snap(self):
+        if os.name != "nt":
+            return
+        try:
+            hwnd = pg.display.get_wm_info().get("window")
+        except Exception:
+            hwnd = None
+        if not hwnd:
+            return
+        if self._snap is not None and self._snap._hwnd == hwnd:
+            self._snap.apply_styles()
+            return
+        if self._snap is not None:
+            self._snap.shutdown()
+            self._snap = None
+        try:
+            from chessshootout.frontend.win_snap import WindowsSnap
+            snap = WindowsSnap(hwnd, lambda: self._win_state == "fullscreen")
+            if snap.install():
+                self._snap = snap
+        except Exception:
+            log.warning("window snap unavailable", exc_info=True)
+
+    def shutdown(self):
+        if self._snap is not None:
+            self._snap.shutdown()
+            self._snap = None
+
+    def is_maximized(self):
+        return self._snap is not None and self._snap.maximized
 
     def _resolve_owning_sdl(self, win_id):
         for sdl in _iter_sdl_candidates():
@@ -202,9 +235,10 @@ class WindowChrome:
         y = area_ptr.contents.y
         if self._win_state != "normal":
             return _HITTEST_NORMAL
-        code = self._resize_code(x, y)
-        if code is not None:
-            return code
+        if not self.is_maximized():
+            code = self._resize_code(x, y)
+            if code is not None:
+                return code
         if y < self.HEIGHT:
             for rect in self._dot_rects.values():
                 if rect.collidepoint(x, y):
@@ -410,6 +444,8 @@ class WindowChrome:
         except Exception:
             log.warning("native fullscreen failed", exc_info=True)
             return False
+        if not enable and self._snap is not None:
+            self._snap.apply_styles()               # SDL wiped GWL_STYLE on the toggle
         return True
 
     def toggle_fullscreen(self):

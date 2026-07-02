@@ -215,6 +215,8 @@ class ResumeResponse(_Base):
     pending_skillcheck: Optional[PendingSkillCheckWire] = None
     skillcheck_locks: list[LockWire] = Field(default_factory=list)
     skillcheck_log: list[SkillCheckOutcomeWire] = Field(default_factory=list)
+    result_reason: Optional[str] = None
+    result_winner: Optional[Literal["white", "black"]] = None
 
 
 class ReclaimRequest(_Base):

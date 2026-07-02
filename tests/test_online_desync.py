@@ -187,6 +187,41 @@ def test_ping_with_wrong_ply_directs_resync_and_flags_opponent(client):
             assert status["opp_state"] == "resyncing"
 
 
+def test_reconnecting_client_gets_opponent_present_snapshot(client):
+    """On reconnect the server tells the returning client its opponent's real
+    presence, so a client that dropped can't be stuck showing the opponent red."""
+    a, b = _paired_ws(client)
+    with client.websocket_connect(f"/ws/{b['room_id']}") as ws_b:
+        ws_b.send_text(json.dumps(_auth(b["session_token"])))
+        with client.websocket_connect(f"/ws/{a['room_id']}") as ws_w:
+            ws_w.send_text(json.dumps(_auth(a["session_token"])))
+            ws_w.receive_text()                       # game_start
+            ws_b.receive_text()                       # game_start
+        # white dropped -> black is told "reconnecting"; drain it
+        assert json.loads(ws_b.receive_text())["type"] == "connection_status"
+        with client.websocket_connect(f"/ws/{a['room_id']}") as ws_w2:
+            ws_w2.send_text(json.dumps(_auth(a["session_token"])))
+            snap = json.loads(ws_w2.receive_text())
+            assert snap["type"] == "connection_status"
+            assert snap["opp_state"] == "connected", "opponent b is still here"
+
+
+def test_reconnecting_client_told_opponent_still_gone(client):
+    a, b = _paired_ws(client)
+    with client.websocket_connect(f"/ws/{a['room_id']}") as ws_w:
+        ws_w.send_text(json.dumps(_auth(a["session_token"])))
+        with client.websocket_connect(f"/ws/{b['room_id']}") as ws_b:
+            ws_b.send_text(json.dumps(_auth(b["session_token"])))
+            ws_w.receive_text()
+            ws_b.receive_text()                       # game started, both present
+        # black dropped inside; now white drops too
+    with client.websocket_connect(f"/ws/{a['room_id']}") as ws_w2:
+        ws_w2.send_text(json.dumps(_auth(a["session_token"])))
+        snap = json.loads(ws_w2.receive_text())
+        assert snap["type"] == "connection_status"
+        assert snap["opp_state"] == "reconnecting", "opponent is still gone"
+
+
 def test_new_matchmake_abandons_in_progress_game(client):
     a, b = _paired_ws(client)
     with client.websocket_connect(f"/ws/{a['room_id']}") as ws_w:

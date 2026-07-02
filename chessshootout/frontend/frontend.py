@@ -65,7 +65,7 @@ from chessshootout.frontend.modals.result import ResultMenu
 from chessshootout.frontend.audio.sound_manager import SoundManager
 from chessshootout.frontend.modals.start import StartMenu
 from chessshootout.domain.pgn.generate import (
-    format_annotations, generate_pgn, TIMEOUT_RESULTS)
+    format_annotations, generate_pgn, RESULT_CODES, TIMEOUT_RESULTS)
 from chessshootout.domain.pgn.load import (
     load_pgn_into_backend, parse_comment, parse_time_control)
 from chessshootout.paths import SOUNDS_DIR
@@ -178,6 +178,8 @@ MIN_MODAL_WIDTH = 360
 
 RESYNC_TIMEOUT_MS = 8000
 SKILLCHECK_WATCHDOG_SLACK_MS = 4000
+RESULT_CONFIRM_TIMEOUT_MS = 4000
+RECONNECT_MODAL_DEBOUNCE_MS = 500
 RECONNECT_PROBE_INTERVAL_MS = 5000
 RECONNECT_PROBE_MAX_ATTEMPTS = 3
 
@@ -315,6 +317,8 @@ class Frontend(OnlineEventsMixin):
         self.toast.top_inset = self.chrome.HEIGHT
         self.toast.on_new = lambda: self.sound_manager.play_toast()
         self._last_saved_pgn_path = None
+        self._last_saved_result_tag = None
+        self._result_await_since_ms = None
         self.wait_modal = WaitModal(self.window)
         self.match_found_modal = MatchFoundModal(self.window)
         self.reconnecting_modal = ReconnectingModal(self.window)
@@ -952,12 +956,16 @@ class Frontend(OnlineEventsMixin):
         self.match_found_modal.update()
         self._track_local_online_state()
         self._send_heartbeat_if_due()
-        if (self.mode == ONLINE and self.current_result() is None
-                and self.online_client is not None
-                and self.online_client.state == "reconnecting"):
-            if not self.reconnecting_modal.is_visible():
+        now = pg.time.get_ticks()
+        reconnecting = (self.mode == ONLINE and self.current_result() is None
+                        and self.online_client is not None
+                        and self.online_client.state == "reconnecting")
+        if reconnecting:
+            since = self._local_disconnected_at_ms
+            if (not self.reconnecting_modal.is_visible() and since is not None
+                    and now - since >= RECONNECT_MODAL_DEBOUNCE_MS):
                 self.reconnecting_modal.show(
-                    self._local_disconnected_at_ms, on_cancel=self._abandon_online_game)
+                    since, on_cancel=self._abandon_online_game)
         elif self.reconnecting_modal.is_visible():
             self.reconnecting_modal.hide()
         if self._resyncing:
@@ -970,6 +978,34 @@ class Frontend(OnlineEventsMixin):
             else:
                 self.toast.show("Resyncing…")
         self._tick_skillcheck_watchdog()
+        self._promote_unconfirmed_result_if_due()
+
+    def _promote_unconfirmed_result_if_due(self):
+        if (self.mode != ONLINE or self.online_client is None
+                or self._resyncing or self.manual_result is not None):
+            self._result_await_since_ms = None
+            return
+        engine_result = self.match.game_result()
+        if engine_result is None:
+            self._result_await_since_ms = None
+            return
+        now = pg.time.get_ticks()
+        if self._result_await_since_ms is None:
+            self._result_await_since_ms = now
+            return
+        if now - self._result_await_since_ms < RESULT_CONFIRM_TIMEOUT_MS:
+            return
+        self.manual_result = engine_result
+        if engine_result.startswith("white_wins") or engine_result.startswith("black_wins"):
+            winner = "white" if engine_result.startswith("white_wins") else "black"
+            winner_name = self._name_for_color(winner)
+            self._series_scores[winner_name] = (
+                self._series_scores.get(winner_name, 0.0) + 1)
+        elif engine_result.startswith("draw"):
+            for name in (self.white_name, self.black_name):
+                self._series_scores[name] = (
+                    self._series_scores.get(name, 0.0) + 0.5)
+        log.info("promoted unconfirmed online result locally: %s", engine_result)
 
     def _tick_skillcheck_watchdog(self):
         if (self._online_skillcheck is None
@@ -983,8 +1019,7 @@ class Frontend(OnlineEventsMixin):
             self._begin_resync()
 
     def _send_heartbeat_if_due(self):
-        if (self.online_client is None
-                or self.online_client.state != "connected"):
+        if self.online_client is None or not self.online_client.is_connected():
             return
         if self.online_client.is_server_silent():
             log.info("server heartbeat silent; escalating to reconnect")
@@ -1039,6 +1074,8 @@ class Frontend(OnlineEventsMixin):
         self._result_first_seen_at_ms = None
         self._pgn_result_tag = None
         self._last_saved_pgn_path = None
+        self._last_saved_result_tag = None
+        self._result_await_since_ms = None
         self.right_menu.reset_for_new_game()
         self.match.new_game()
         if self._time_control is not None:
@@ -1076,17 +1113,25 @@ class Frontend(OnlineEventsMixin):
     def _auto_save_pgn(self):
         if not self.match.move_history:
             return None
+        tag = RESULT_CODES.get(self.current_result(), "*")
+        if self._last_saved_pgn_path is not None:
+            prior_partial = self._last_saved_result_tag in (None, "*")
+            if not (prior_partial and tag != "*"):
+                return self._last_saved_pgn_path
         text = self._build_pgn_text()
         if text is None:
             return None
         prefix = self._auto_save_prefix()
         os.makedirs(_games_dir(), exist_ok=True)
-        filename = f"{prefix}-{datetime.now().strftime("%Y%m%d-%H%M%S")}.pgn"
-        path = os.path.join(_games_dir(), filename)
+        path = self._last_saved_pgn_path
+        if path is None or not os.path.exists(path):
+            filename = f"{prefix}-{datetime.now().strftime("%Y%m%d-%H%M%S")}.pgn"
+            path = os.path.join(_games_dir(), filename)
         with open(path, "w") as f:
             f.write(text)
         self._last_saved_pgn_path = path
-        self.toast.show(f"Saved {filename}")
+        self._last_saved_result_tag = tag
+        self.toast.show(f"Saved {os.path.basename(path)}")
         return path
 
     def _auto_save_prefix(self):
@@ -1107,8 +1152,6 @@ class Frontend(OnlineEventsMixin):
 
     def _build_pgn_text(self):
         result = self.current_result()
-        if result is None:
-            return None
         time_control = self._time_control
         termination = "Time forfeit" if result in TIMEOUT_RESULTS else None
         return generate_pgn(
@@ -1560,6 +1603,7 @@ class Frontend(OnlineEventsMixin):
             self.clock.tick(self.target_fps)
             pg.display.flip()
 
+        self.chrome.shutdown()
         pg.quit()
 
     def _menu_overlay_active(self):
@@ -1704,11 +1748,16 @@ class Frontend(OnlineEventsMixin):
         if self.current_result() is None or self.pgn_review:
             self._result_first_seen_at_ms = None
             return
+        if self.mode == ONLINE and (self.manual_result is None or self._resyncing):
+            return
         if self._result_first_seen_at_ms is None and self._move_visually_settled():
             self._result_first_seen_at_ms = pg.time.get_ticks()
-            self._trigger_result_effects()
-            if self.mode != ONLINE:
+            if RESULT_CODES.get(self.current_result()) is not None:
                 self._auto_save_pgn()
+            try:
+                self._trigger_result_effects()
+            except Exception:
+                log.exception("result effects failed")
 
     def _trigger_result_effects(self):
         code = self.current_result()

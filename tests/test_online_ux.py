@@ -19,7 +19,7 @@ import pytest
 from chessshootout.domain.match import ONLINE
 from chessshootout.frontend.frontend import (
     ANIM_MS_DEFAULT, ANIM_MS_MIN, ANIM_MS_MAX,
-    Frontend, compute_animation_ms,
+    Frontend, compute_animation_ms, RECONNECT_MODAL_DEBOUNCE_MS,
 )
 from chessshootout.frontend.visual.colors import Colors
 from chessshootout.frontend.modals.reconnecting import ReconnectingModal
@@ -115,37 +115,68 @@ def test_reconnecting_overlay_fills_board_rect_with_scrim():
     assert amber_pixels() > 0
 
 
-def test_reconnecting_overlay_appears_when_client_state_is_reconnecting(frontend):
-    frontend.mode = ONLINE
-    fake_client = SimpleNamespace(state="reconnecting")
-    frontend.online_client = fake_client
-    frontend._update_online_phase()
-    assert frontend.reconnecting_modal.is_visible()
-
-
-def test_reconnecting_overlay_hides_when_client_recovers(frontend):
-    frontend.mode = ONLINE
-    fake_client = SimpleNamespace(
+def _reconnecting_client():
+    ns = SimpleNamespace(
         state="reconnecting",
         is_server_silent=lambda: False,
         heartbeat_interval=lambda: 2.0,
         send_ping=lambda ply: None,
     )
-    frontend.online_client = fake_client
+    ns.is_connected = lambda: ns.state == "connected"
+    return ns
+
+
+def test_reconnecting_overlay_appears_after_debounce(frontend, monkeypatch):
+    fake_now = [10_000]
+    monkeypatch.setattr(pg.time, "get_ticks", lambda: fake_now[0])
+    frontend.mode = ONLINE
+    frontend.online_client = _reconnecting_client()
+    frontend._update_online_phase()                       # arms the debounce clock
+    assert not frontend.reconnecting_modal.is_visible(), "debounced, not shown instantly"
+    fake_now[0] += RECONNECT_MODAL_DEBOUNCE_MS + 50
     frontend._update_online_phase()
     assert frontend.reconnecting_modal.is_visible()
-    fake_client.state = "connected"
+
+
+def test_brief_blip_never_flashes_the_modal(frontend, monkeypatch):
+    fake_now = [10_000]
+    monkeypatch.setattr(pg.time, "get_ticks", lambda: fake_now[0])
+    frontend.mode = ONLINE
+    client = _reconnecting_client()
+    frontend.online_client = client
+    frontend._update_online_phase()
+    fake_now[0] += RECONNECT_MODAL_DEBOUNCE_MS - 100       # recover before the threshold
+    client.state = "connected"
     frontend._update_online_phase()
     assert not frontend.reconnecting_modal.is_visible()
 
 
-def test_reconnecting_overlay_cancel_calls_abandon(frontend, monkeypatch):
+def test_reconnecting_overlay_hides_immediately_on_recovery(frontend, monkeypatch):
+    fake_now = [10_000]
+    monkeypatch.setattr(pg.time, "get_ticks", lambda: fake_now[0])
     frontend.mode = ONLINE
+    client = _reconnecting_client()
+    frontend.online_client = client
+    frontend._update_online_phase()
+    fake_now[0] += RECONNECT_MODAL_DEBOUNCE_MS + 50
+    frontend._update_online_phase()
+    assert frontend.reconnecting_modal.is_visible()
+    client.state = "connected"
+    frontend._update_online_phase()
+    assert not frontend.reconnecting_modal.is_visible(), \
+        "hidden the moment the socket is back — no input-blocking linger"
+
+
+def test_reconnecting_overlay_cancel_calls_abandon(frontend, monkeypatch):
+    fake_now = [10_000]
+    monkeypatch.setattr(pg.time, "get_ticks", lambda: fake_now[0])
     abandoned = []
     monkeypatch.setattr(frontend, "_abandon_online_game",
                         lambda: abandoned.append(True))
-    fake_client = SimpleNamespace(state="reconnecting")
-    frontend.online_client = fake_client
+    frontend.mode = ONLINE
+    frontend.online_client = _reconnecting_client()
+    frontend._update_online_phase()
+    fake_now[0] += RECONNECT_MODAL_DEBOUNCE_MS + 50
     frontend._update_online_phase()
     frontend.reconnecting_modal.draw()
     frontend.reconnecting_modal.handle_click(
