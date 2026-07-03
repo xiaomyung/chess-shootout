@@ -7,10 +7,12 @@ skill-check PGN glyphs (U+2713 checkmark, U+2717 ballot-X, U+00B7 middle dot)
 or non-ASCII nicknames -> `UnicodeEncodeError` and a hard crash at game end.
 
 Two layers:
-  * `test_all_text_io_declares_encoding` -- an AST guard that fails if any
-    text-I/O call in the repo omits `encoding=`. This is the only check that
-    can catch a *future* regression on UTF-8 Linux CI (a behavioral test can't,
-    because Linux writes UTF-8 by default even without the keyword).
+  * `test_all_text_io_declares_encoding` -- an AST guard that fails if a bare
+    `open(...)`, `.read_text`/`.write_text`, or `*FileHandler` construction omits
+    `encoding=` (it intentionally does not chase `.open()` attribute calls, which
+    would collide with fd-level `os.open`). This is the only check that catches a
+    *future* regression on UTF-8 Linux CI (a behavioral test can't, because Linux
+    writes UTF-8 by default even without the keyword).
   * the hostile-locale subprocess tests -- run the real production writers under
     `LC_ALL=C` (which forces the ASCII codec, reproducing the Windows failure
     mode on Linux) and prove they emit UTF-8. Each has a no-`encoding` negative
@@ -35,13 +37,11 @@ _HANDLER_NAMES = {
 _ASCII_LOCALE = {"LC_ALL": "C", "LANG": "C", "LC_CTYPE": "C",
                  "PYTHONUTF8": "0", "PYTHONCOERCECLOCALE": "0"}
 
-# The skill-check comment shape that crashed the real game, plus a nickname that
-# spans cp1252-representable (Latin-1 o-umlaut) and cp1252-impossible (Cyrillic)
-# code points. Kept as \u escapes so DRIVER source stays pure ASCII -- under
+# The skill-check comment shape that crashed the real game. The DRIVER sources
+# below keep glyphs/nicknames as \u escapes so they stay pure ASCII -- under
 # LC_ALL=C the `python -c` argument itself is decoded as ASCII, so a raw glyph
 # in the source bytes would fail before the driver even runs.
 GLYPHS = "Steady-Aim ✗ Qxf7 · Wheel ✓"
-NICK = "Björn–Щ"
 
 
 def _has_encoding(call):
@@ -243,7 +243,7 @@ def test_bare_read_crashes_under_ascii_locale(tmp_path):
     assert "UnicodeDecodeError" in proc.stderr
 
 
-# --- .env read-modify-write (the read at env.py:249) --------------------------
+# --- .env read-modify-write (the read inside env._persist) --------------------
 
 _ENV_RMW_DRIVER = (
     "import sys\n"

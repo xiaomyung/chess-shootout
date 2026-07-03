@@ -75,6 +75,7 @@ def test_nickname_override_wins(monkeypatch):
     pytest.param("a  b", "a b", id="whitespace_collapsed"),
     pytest.param("emoji 😀 end", "emoji end", id="emoji_dropped"),
     pytest.param("x" * 30, "x" * 20, id="capped_at_max"),
+    pytest.param("x" * 19 + " york", "x" * 19, id="truncation_leaves_no_trailing_space"),
 ])
 def test_sanitize_nickname(raw, expected):
     assert env.sanitize_nickname(raw) == expected
@@ -91,7 +92,8 @@ def test_nickname_max_len_matches_server():
     assert env._NICKNAME_MAX_LEN == protocol.MAX_NICKNAME_LEN
 
 
-@pytest.mark.parametrize("raw", ["Magnus", "Bob Щ", "a  b", "José 123", "x" * 40])
+@pytest.mark.parametrize("raw", ["Magnus", "Bob Щ", "a  b", "José 123", "x" * 40,
+                                 "x" * 19 + " york"])
 def test_sanitized_nickname_is_accepted_by_server(raw):
     """Whatever the client keeps must pass the server's normalize_nickname unchanged,
     so a name typed locally never bounces at matchmake."""

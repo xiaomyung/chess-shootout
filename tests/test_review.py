@@ -560,7 +560,7 @@ def test_load_pgn_without_time_control_shows_infinity(tmp_path):
 
 def test_load_pgn_reads_utf8_glyphs_and_nonascii_names(tmp_path):
     """Review reads a UTF-8 PGN carrying skill-check glyphs and non-ASCII nicknames
-    (the frontend open at :670 declares encoding='utf-8'); on Windows a bare read
+    (the frontend _load_pgn_from_path open declares encoding='utf-8'); on Windows a bare read
     would UnicodeDecodeError here and crash."""
     pgn_path = tmp_path / "glyph.pgn"
     pgn_path.write_text(

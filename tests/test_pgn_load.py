@@ -328,7 +328,7 @@ def test_scan_pgn_summaries_excludes_non_pgn(tmp_path):
 
 def test_scan_pgn_summaries_includes_glyph_and_nonascii_pgn(tmp_path):
     """A skill-check online PGN carries {Wheel ✓} glyphs and may have a non-ASCII
-    nickname. The scan open at :314 declares encoding='utf-8'; on Windows a bare read
+    nickname. The scan_pgn_summaries open declares encoding='utf-8'; on Windows a bare read
     hit UnicodeDecodeError, got swallowed, and the game silently vanished from History."""
     (tmp_path / "online-20260101-100000.pgn").write_text(
         '[White "Щ"]\n[Black "b"]\n\n1. e4 e5 {Wheel ✓} *\n', encoding="utf-8")

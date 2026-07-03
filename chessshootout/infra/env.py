@@ -91,11 +91,12 @@ def set_country(code):
 
 def sanitize_nickname(raw):
     kept = "".join(c for c in (raw or "") if c.isascii() and c.isprintable())
-    return re.sub(r"\s+", " ", kept).strip()[:_NICKNAME_MAX_LEN]
+    return re.sub(r"\s+", " ", kept)[:_NICKNAME_MAX_LEN].strip()
 
 
 def _has_disallowed_nickname_chars(raw):
-    return any(not (c.isascii() and c.isprintable()) for c in (raw or ""))
+    raw = raw or ""
+    return not (raw.isascii() and raw.isprintable())
 
 
 def normalize_stored_nickname():
