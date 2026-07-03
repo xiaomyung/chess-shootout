@@ -165,6 +165,7 @@ RESULT_FADE_MAX_ALPHA = 140
 GIVE_TIME_DEBOUNCE_MS = 500
 GIVE_TIME_RATCHET_MS_SLOW = 150
 GIVE_TIME_RATCHET_MS_FAST = 55
+SETTINGS_WRITE_DELAY_MS = 400
 AUTO_END_GATE_FRACTION = 0.1
 
 ANIM_MS_DEFAULT = 180
@@ -227,6 +228,7 @@ class Frontend(OnlineEventsMixin):
         except (pg.error, OSError):
             pass
         self._pre_fullscreen_size = None
+        self._deferred_env_writes = {}
         self.chrome = WindowChrome(self.window, on_fullscreen=self._apply_fullscreen)
         self.clock = pg.time.Clock()
 
@@ -515,11 +517,28 @@ class Frontend(OnlineEventsMixin):
 
     def _set_master_volume(self, value):
         self.sound_manager.set_master_volume(value)
-        env.set_master_volume(value)
 
     def _set_menu_volume(self, value):
         self.sound_manager.set_menu_volume(value)
-        env.set_menu_volume(value)
+
+    def _commit_master_volume(self):
+        env.set_master_volume(self.sound_manager.master_volume)
+
+    def _commit_menu_volume(self):
+        env.set_menu_volume(self.sound_manager.menu_volume)
+
+    def _defer_env_write(self, key, commit):
+        self._deferred_env_writes[key] = (commit, pg.time.get_ticks() + SETTINGS_WRITE_DELAY_MS)
+
+    def _flush_deferred_env_writes(self, force=False):
+        if not self._deferred_env_writes:
+            return
+        now = pg.time.get_ticks()
+        for key in list(self._deferred_env_writes):
+            commit, due = self._deferred_env_writes[key]
+            if force or now >= due:
+                del self._deferred_env_writes[key]
+                commit()
 
     def _build_settings_sections(self):
         self._data_folder_row = PathRow(
@@ -545,9 +564,13 @@ class Frontend(OnlineEventsMixin):
             ]),
             ("Audio", [
                 SliderRow("Master volume", "", lambda: self.sound_manager.master_volume,
-                          self._set_master_volume, on_tick=self.sound_manager.play_ui_tick),
+                          self._set_master_volume, on_tick=self.sound_manager.play_ui_tick,
+                          on_release=lambda: self._defer_env_write(
+                              "master_volume", self._commit_master_volume)),
                 SliderRow("Menu volume", "", lambda: self.sound_manager.menu_volume,
-                          self._set_menu_volume, on_tick=self.sound_manager.play_ui_tick),
+                          self._set_menu_volume, on_tick=self.sound_manager.play_ui_tick,
+                          on_release=lambda: self._defer_env_write(
+                              "menu_volume", self._commit_menu_volume)),
                 ToggleRow("Mute all sound", "Silence every shot and callout",
                           lambda: not self.sound_manager.enabled,
                           lambda muted: self.sound_manager.set_enabled(not muted)),
@@ -1688,6 +1711,7 @@ class Frontend(OnlineEventsMixin):
             self.clock.tick(self.target_fps)
             pg.display.flip()
 
+        self._flush_deferred_env_writes(force=True)
         self.chrome.shutdown()
         pg.quit()
 
@@ -1722,6 +1746,7 @@ class Frontend(OnlineEventsMixin):
             self.match.tick_clock()
 
         self._update_give_time_hold()
+        self._flush_deferred_env_writes()
         self._maybe_play_flag_fall()
         self._update_heartbeat()
 

@@ -179,10 +179,11 @@ class SegmentedRow(_Row):
 
 class SliderRow(_Row):
 
-    def __init__(self, title, desc, getter, setter, on_tick=None):
+    def __init__(self, title, desc, getter, setter, on_tick=None, on_release=None):
         super().__init__(title, desc)
         self.getter = getter
         self.setter = setter
+        self.on_release = on_release
         self._track = pg.Rect(0, 0, 0, 0)
         self._dragging = False
         self._tick_gate = TickGate(on_tick)
@@ -193,6 +194,8 @@ class SliderRow(_Row):
                 self._set_from_x(pg.mouse.get_pos()[0])
             else:
                 self._dragging = False
+                if self.on_release is not None:
+                    self.on_release()
         value = max(0.0, min(1.0, self.getter()))
         readout = fonts.value.render(str(int(round(value * 100))), True, Colors.text_dim)
         window.blit(readout, (rect.right - readout.get_width(),

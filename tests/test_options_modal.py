@@ -239,3 +239,18 @@ def test_country_row_ignores_click_outside_control():
     _draw_row(row)
     assert row.handle_click((5, 5)) is False
     assert opened == []
+
+
+def test_slider_row_fires_on_release_when_drag_ends(monkeypatch):
+    """Volume persists on drag release (not every frame): on_release fires exactly
+    when _dragging goes True -> False."""
+    released = []
+    row = SliderRow("Volume", "", lambda: 0.5, lambda v: None,
+                    on_release=lambda: released.append(1))
+    _draw_row(row)
+    row.handle_click((row._track.centerx, row._track.centery))
+    assert row._dragging is True
+    monkeypatch.setattr(pg.mouse, "get_pressed", lambda *a, **k: (False, False, False))
+    _draw_row(row)
+    assert row._dragging is False
+    assert released == [1]
