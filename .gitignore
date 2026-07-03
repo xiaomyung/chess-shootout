@@ -25,3 +25,5 @@ assets/version.txt
 secrets/
 gameserver.env
 uv.lock.bak
+deploy/update.log
+assets/sounds/_staging/

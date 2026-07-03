@@ -5,6 +5,7 @@ import uvicorn
 
 from chessshootout.server import logging_setup
 from chessshootout.server.app import create_app, DEFAULT_MAX_ROOMS
+from chessshootout.infra.log_format import uvicorn_log_config
 
 
 def _main():
@@ -17,15 +18,16 @@ def _main():
                         default=int(os.environ.get("MAX_ROOMS", str(DEFAULT_MAX_ROOMS))))
     args = parser.parse_args()
     logging_setup.configure()
+    log_config = uvicorn_log_config()
     if args.reload:
         os.environ.setdefault("CHESS_MAX_ROOMS", str(args.max_rooms))
         uvicorn.run("chessshootout.server.__main__:_app_factory", host=args.host, port=args.port,
                     reload=True, factory=True,
-                    ws_ping_interval=None)
+                    ws_ping_interval=None, log_config=log_config)
     else:
         app = create_app(max_rooms=args.max_rooms)
         uvicorn.run(app, host=args.host, port=args.port,
-                    ws_ping_interval=None)
+                    ws_ping_interval=None, log_config=log_config)
 
 
 def _app_factory():

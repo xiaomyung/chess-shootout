@@ -41,10 +41,10 @@ Sound effects are CC0 unless listed under **Attribution required** below.
 
 ### Public domain (CC0 -- credited as a courtesy, not required)
 
-- **Audio packs (Interface / UI / Impact / Digital / Sci-Fi / Voiceover)** by Kenney -- https://kenney.nl/assets/category:Audio (piece moves, skill-check cues, UI clicks, ray-gun lasers, you-win callouts)
+- **Audio packs (Interface / UI / Impact / Digital / Sci-Fi / Voiceover)** by Kenney -- https://kenney.nl/assets/category:Audio (piece moves, skill-check cues, UI clicks, slider ticks, ray-gun lasers, you-win callouts)
 - **Casual Game Sounds** by Dustyroom -- https://dustyroom.com/free-casual-game-sounds/ (UI / feedback one-shots)
 - **The Free Firearm Sound Library** by Ben Jaszczak, Brian Nelson, Kevin Heras, Matthew Nanney (submitted by bart) -- https://opengameart.org/content/the-free-firearm-sound-library (pistol / cannon / rifle capture shots)
-- **Bullet / Gun SFX (CC0)** by Signature Sounds -- https://signaturesounds.org/store/p/bulletgun-sfx-cc0 (foley / reload layers)
+- **Bullet / Gun SFX (CC0)** by Signature Sounds -- https://signaturesounds.org/store/p/bulletgun-sfx-cc0 (foley / reload layers / give-time ratchet)
 - **Door Open, Door Close Set** by qubodup (Iwan Gabovitch) -- https://opengameart.org/content/door-open-door-close-set (castle (open+close))
 - **Heartbeat Sounds** by bart -- https://opengameart.org/content/heartbeat-sounds (low-time heartbeat loops)
 - **metal pipe fall** by thenotcheeseman -- https://freesound.org/s/679206/ (checkmate)

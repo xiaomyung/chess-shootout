@@ -14,7 +14,8 @@ from chessshootout.server.broadcasts import (
     broadcast_game_start, finalize_and_broadcast, resolve_skillcheck_fail)
 from chessshootout.server.protocol import (
     ClockSnapshot, ConnectionStatusMessage, DrawOfferedMessage, DrawResponseMessage,
-    ErrorMessage, GIVE_TIME_SECONDS, MoveAppliedMessage, MoveMessage,
+    ErrorMessage, GIVE_TIME_SECONDS, GIVE_TIME_TICK_MS, GiveTimeMessage,
+    MoveAppliedMessage, MoveMessage,
     PingMessage, PongMessage, Reason,
     RematchRequestMessage, RematchResponseMessage, RematchUpdateMessage,
     ResyncDirectiveMessage,
@@ -395,12 +396,18 @@ async def handle_give_time(app, websocket, room, color, raw):
     connections = app.state.connections
     if room.result is not None or room.backend is None or room.backend.clock is None:
         return "noop"
+    try:
+        hold_ms = GiveTimeMessage.model_validate_json(raw).hold_ms
+    except ValidationError:
+        hold_ms = 0
+    ticks = max(1, hold_ms // GIVE_TIME_TICK_MS)
     opp_color_str = room.opp_color(color)
     opp_piece_color = (
         PieceColor.WHITE if opp_color_str == "white" else PieceColor.BLACK
     )
-    added = room.backend.clock.add_time(opp_piece_color, GIVE_TIME_SECONDS)
-    log.info("give_time room=%s by=%s added=%.2f", room.room_id, color, added)
+    added = room.backend.clock.add_time(opp_piece_color, GIVE_TIME_SECONDS * ticks)
+    log.info("give_time room=%s by=%s hold_ms=%d ticks=%d added=%.2f",
+             room.room_id, color, hold_ms, ticks, added)
     await broadcast(connections, room, TimeGrantedMessage(
         granted_by=color, seconds_added=added,
         clock=_clock_snapshot(room.backend.clock),

@@ -71,7 +71,7 @@ from chessshootout.domain.pgn.load import (
 from chessshootout.paths import SOUNDS_DIR
 from chessshootout.backend.pieces import PIECE_VALUES, PieceColor, PieceType, opponent_of
 from chessshootout.server.protocol import (
-    FIRST_MOVE_ABORT_SECONDS, GIVE_TIME_SECONDS, GRACE_SECONDS,
+    FIRST_MOVE_ABORT_SECONDS, GIVE_TIME_SECONDS, GIVE_TIME_TICK_MS, GRACE_SECONDS,
 )
 
 
@@ -163,6 +163,8 @@ RESULT_TAKEOVER_MS = TAKEOVER_TOTAL_MS
 RESULT_FADE_MAX_ALPHA = 140
 
 GIVE_TIME_DEBOUNCE_MS = 500
+GIVE_TIME_RATCHET_MS_SLOW = 150
+GIVE_TIME_RATCHET_MS_FAST = 55
 AUTO_END_GATE_FRACTION = 0.1
 
 ANIM_MS_DEFAULT = 180
@@ -249,6 +251,13 @@ class Frontend(OnlineEventsMixin):
         self._resync_started_at_ms = 0
         self._last_heartbeat_sent_ms = 0
         self._last_give_time_at_ms = -GIVE_TIME_DEBOUNCE_MS
+        self._give_time_holding = False
+        self._give_time_hold_start_ms = 0
+        self._give_time_hold_last_tick_ms = 0
+        self._give_time_last_ratchet_ms = 0
+        self._give_time_hold_ticks = 0
+        self._give_time_hold_added = 0.0
+        self._give_time_hold_recipient = None
         self._first_move_deadline_ms = None
         self._opp_disconnected_at_ms = None
         self._local_disconnected_at_ms = None
@@ -535,9 +544,9 @@ class Frontend(OnlineEventsMixin):
             ]),
             ("Audio", [
                 SliderRow("Master volume", "", lambda: self.sound_manager.master_volume,
-                          self._set_master_volume),
+                          self._set_master_volume, on_tick=self.sound_manager.play_ui_tick),
                 SliderRow("Menu volume", "", lambda: self.sound_manager.menu_volume,
-                          self._set_menu_volume),
+                          self._set_menu_volume, on_tick=self.sound_manager.play_ui_tick),
                 ToggleRow("Mute all sound", "Silence every shot and callout",
                           lambda: not self.sound_manager.enabled,
                           lambda muted: self.sound_manager.set_enabled(not muted)),
@@ -1069,6 +1078,7 @@ class Frontend(OnlineEventsMixin):
         self._rematch_offered = False
         self.result_menu.reset()
         self.sound_manager.stop_all()
+        self._cancel_give_time_hold()
         self.manual_result = None
         self._flag_fall_played = False
         self._result_first_seen_at_ms = None
@@ -1282,21 +1292,93 @@ class Frontend(OnlineEventsMixin):
         self.board.clear_annotations()
 
     def _on_give_time(self):
+        if self._give_time_holding:
+            return
         if self.pgn_review or self.current_result() is not None:
+            return
+        if pg.time.get_ticks() - self._last_give_time_at_ms < GIVE_TIME_DEBOUNCE_MS:
             return
         clock = self.match.clock
         if clock is None or clock.flagged is not None:
             return
-        now = pg.time.get_ticks()
-        if now - self._last_give_time_at_ms < GIVE_TIME_DEBOUNCE_MS:
+        recipient = self._give_time_recipient()
+        if clock.initial_seconds - clock.remaining(recipient) <= 0:
+            self.toast.show(f"{self._name_for_color(recipient)} already at maximum time")
             return
+        now = pg.time.get_ticks()
+        self._give_time_holding = True
+        self._give_time_hold_start_ms = now
+        self._give_time_hold_last_tick_ms = now
+        self._give_time_last_ratchet_ms = now
+        self._give_time_hold_ticks = 0
+        self._give_time_hold_added = 0.0
+        self._give_time_hold_recipient = recipient
+
+    def _update_give_time_hold(self):
+        if not self._give_time_holding:
+            return
+        clock = self.match.clock
+        if (self.pgn_review or self.current_result() is not None
+                or self._resyncing or self.skillcheck_overlay.is_active()
+                or self._blocking_modal_visible()
+                or clock is None or clock.flagged is not None):
+            self._cancel_give_time_hold()
+            return
+        if not pg.mouse.get_pressed()[0] or not self._pointer_over_give_button():
+            self._end_give_time_hold()
+            return
+        now = pg.time.get_ticks()
+        recipient = self._give_time_hold_recipient
+        while now - self._give_time_hold_last_tick_ms >= GIVE_TIME_TICK_MS:
+            self._give_time_hold_last_tick_ms += GIVE_TIME_TICK_MS
+            added = clock.add_time(recipient, GIVE_TIME_SECONDS)
+            if added <= 0:
+                self._end_give_time_hold()
+                return
+            self._give_time_hold_added += added
+            self._give_time_hold_ticks += 1
+        self._maybe_play_give_ratchet(now, recipient, clock)
+
+    def _maybe_play_give_ratchet(self, now, recipient, clock):
+        fill = 1.0
+        if clock.initial_seconds > 0:
+            fill = min(1.0, clock.remaining(recipient) / clock.initial_seconds)
+        interval = (GIVE_TIME_RATCHET_MS_SLOW
+                    + (GIVE_TIME_RATCHET_MS_FAST - GIVE_TIME_RATCHET_MS_SLOW) * fill)
+        if now - self._give_time_last_ratchet_ms >= interval:
+            self._give_time_last_ratchet_ms = now
+            self.sound_manager.play_give_ratchet()
+
+    def _end_give_time_hold(self):
+        if not self._give_time_holding:
+            return
+        recipient = self._give_time_hold_recipient
+        now = pg.time.get_ticks()
+        hold_ms = now - self._give_time_hold_start_ms
+        clock = self.match.clock
+        if self._give_time_hold_ticks == 0 and clock is not None:
+            added = clock.add_time(recipient, GIVE_TIME_SECONDS)
+            if added > 0:
+                self._give_time_hold_added += added
+                self._give_time_hold_ticks = 1
+        total = self._give_time_hold_added
+        self._give_time_holding = False
+        self._give_time_hold_recipient = None
         self._last_give_time_at_ms = now
         if self.mode == ONLINE and self.online_client is not None:
-            self.online_client.send_give_time()
+            self.online_client.send_give_time(hold_ms)
             return
-        recipient = self._give_time_recipient()
-        added = clock.add_time(recipient, GIVE_TIME_SECONDS)
-        self._give_time_toast_for_giver(recipient, added)
+        self._give_time_toast_for_giver(recipient, total)
+
+    def _cancel_give_time_hold(self):
+        self._give_time_holding = False
+        self._give_time_hold_recipient = None
+        self._give_time_hold_ticks = 0
+        self._give_time_hold_added = 0.0
+
+    def _pointer_over_give_button(self):
+        rect = self.right_menu.button_rects.get("give_time")
+        return rect is not None and rect.collidepoint(pg.mouse.get_pos())
 
     def _give_time_recipient(self):
         if self.mode == ONLINE and self.match.local_color is not None:
@@ -1605,6 +1687,7 @@ class Frontend(OnlineEventsMixin):
             self.clock.tick(self.target_fps)
             pg.display.flip()
 
+        self.chrome.shutdown()
         pg.quit()
 
     def _menu_overlay_active(self):
@@ -1622,6 +1705,7 @@ class Frontend(OnlineEventsMixin):
         if self.mode != "menu" and self.current_result() is None:
             self.match.tick_clock()
 
+        self._update_give_time_hold()
         self._maybe_play_flag_fall()
         self._update_heartbeat()
 

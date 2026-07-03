@@ -82,7 +82,7 @@ def test_root_manifest_names_the_gameserver(client):
 
 
 def test_health_returns_zero_rooms_initially(client):
-    """/healthz exposes status, rooms_active, queue_depth, uptime_s, version."""
+    """/healthz exposes status, rooms_active, queue_depth, uptime_s, version, app_version."""
     r = client.get("/healthz")
     assert r.status_code == 200
     body = r.json()
@@ -91,6 +91,19 @@ def test_health_returns_zero_rooms_initially(client):
     assert body["queue_depth"] == 0
     assert body["uptime_s"] >= 0.0
     assert body["version"] == PROTOCOL_VERSION
+
+
+def test_health_reports_app_version_via_metadata(client):
+    """app_version is additive (protocol `version` int is unchanged) and resolves
+    from installed dist metadata. It is NOT asserted equal to the pyproject version:
+    an editable dev install freezes dist metadata at install time, so it can lag the
+    current pyproject value; only a fresh (Docker) wheel matches."""
+    from importlib.metadata import version as pkg_version
+
+    body = client.get("/healthz").json()
+    assert isinstance(body["app_version"], str)
+    assert body["app_version"] == pkg_version("chess-shootout")
+    assert isinstance(body["version"], int)
 
 
 def test_matchmake_returns_room_and_token(client):

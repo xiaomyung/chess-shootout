@@ -7,6 +7,7 @@ from chessshootout.frontend.visual.draw import supersample, rounded_rect_surface
 from chessshootout.frontend.visual.emoji import emoji_surface
 from chessshootout.frontend.visual.fonts import get_display_font, get_font, get_mono_font
 from chessshootout.frontend.visual.scroll_view import ScrollView
+from chessshootout.frontend.visual.slider_tick import TickGate
 from chessshootout.frontend.visual.text_input import TextInput
 from chessshootout.frontend.visual.widgets import (
     draw_button, draw_button_row, draw_segmented, draw_toggle,
@@ -178,12 +179,13 @@ class SegmentedRow(_Row):
 
 class SliderRow(_Row):
 
-    def __init__(self, title, desc, getter, setter):
+    def __init__(self, title, desc, getter, setter, on_tick=None):
         super().__init__(title, desc)
         self.getter = getter
         self.setter = setter
         self._track = pg.Rect(0, 0, 0, 0)
         self._dragging = False
+        self._tick_gate = TickGate(on_tick)
 
     def _draw_control(self, window, rect, fonts):
         if self._dragging:
@@ -213,11 +215,13 @@ class SliderRow(_Row):
     def _set_from_x(self, x):
         if self._track.width <= 0:
             return
-        ratio = (x - self._track.x) / self._track.width
-        self.setter(max(0.0, min(1.0, ratio)))
+        ratio = max(0.0, min(1.0, (x - self._track.x) / self._track.width))
+        self.setter(ratio)
+        self._tick_gate.feed(ratio, pg.time.get_ticks())
 
     def handle_click(self, pos):
         if self.contains_control(pos):
+            self._tick_gate.reset()
             self._set_from_x(pos[0])
             self._dragging = True
             return True

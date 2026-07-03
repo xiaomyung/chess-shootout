@@ -5,6 +5,7 @@ from chessshootout.frontend.visual.colors import Colors
 from chessshootout.frontend.visual.widgets import draw_icon_button
 from chessshootout.frontend.visual.icons import make_speaker_icon
 from chessshootout.frontend.visual.fonts import get_font
+from chessshootout.frontend.visual.slider_tick import TickGate
 
 
 DEFAULT_BUTTON_COLUMNS = 5
@@ -28,6 +29,7 @@ class AudioPanel:
         self.button_font = get_font(14, bold=True)
         self.button_font_factor = 28
         self._dragging_slider = False
+        self._tick_gate = TickGate(self.sound_manager.play_ui_tick)
 
     def set_rect(self, rect, *, button_font=None,
                  n_columns=DEFAULT_BUTTON_COLUMNS, gap=DEFAULT_BUTTON_GAP_PX):
@@ -112,6 +114,7 @@ class AudioPanel:
             self.sound_manager.set_enabled(not self.sound_manager.enabled)
             return True
         if self.slider_rect.collidepoint(pos):
+            self._tick_gate.reset()
             self._update_volume_from_pos(pos)
             self._dragging_slider = True
             return True
@@ -138,3 +141,4 @@ class AudioPanel:
         x = max(track.x, min(pos[0], track.right))
         ratio = (x - track.x) / track.width
         self.sound_manager.set_master_volume(ratio)
+        self._tick_gate.feed(ratio, pg.time.get_ticks())

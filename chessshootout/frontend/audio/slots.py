@@ -62,6 +62,7 @@ def _build_slots():
     slots["pickup"] = Slot("pickup", "ui/pickup")
     slots["drop"] = Slot("drop", "ui/drop")
     slots["board_flip"] = Slot("board_flip", "ui/board_flip")
+    slots["ui_tick"] = Slot("ui_tick", "ui/tick")
     slots["game_start"] = Slot("game_start", "lifecycle/game_start", SUSTAINED, True)
     slots["online_game_start"] = Slot(
         "online_game_start", "lifecycle/online_game_start", SUSTAINED, True)
@@ -75,6 +76,7 @@ def _build_slots():
     slots["heartbeat_slow"] = Slot("heartbeat_slow", "clock/heartbeat_slow", LOOP)
     slots["heartbeat_fast"] = Slot("heartbeat_fast", "clock/heartbeat_fast", LOOP)
     slots["give_time"] = Slot("give_time", "clock/give_time")
+    slots["give_ratchet"] = Slot("give_ratchet", "clock/give_ratchet")
     return slots
 
 

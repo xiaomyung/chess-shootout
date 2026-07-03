@@ -22,6 +22,8 @@ def _env_int(name, default):
 PROTOCOL_VERSION = 2
 MAX_NICKNAME_LEN = 20
 GIVE_TIME_SECONDS = 15
+GIVE_TIME_TICK_MS = 100
+GIVE_TIME_MAX_HOLD_MS = 600_000
 FIRST_MOVE_ABORT_SECONDS = 60
 GRACE_SECONDS = _env_float("GRACE_SECONDS", 60.0)
 HEARTBEAT_INTERVAL_SECONDS = _env_float("HEARTBEAT_INTERVAL_SECONDS", 2.0)
@@ -236,6 +238,7 @@ class ReclaimResponse(_Base):
 class HealthResponse(BaseModel):
     status: str = "ok"
     version: int = PROTOCOL_VERSION
+    app_version: str = ""
     rooms_active: int
     queue_depth: int = 0
     uptime_s: float = 0.0
@@ -336,6 +339,11 @@ class TakebackAppliedMessage(_Base):
     fen: str
     clock: ClockSnapshot
     ply: int
+
+
+class GiveTimeMessage(_Base):
+    type: Literal["give_time"] = "give_time"
+    hold_ms: int = Field(default=0, ge=0, le=GIVE_TIME_MAX_HOLD_MS)
 
 
 class TimeGrantedMessage(_Base):

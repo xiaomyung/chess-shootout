@@ -460,8 +460,9 @@ async def test_server_websocket_send_methods_emit_typed_payloads():
     payload = json.loads(inner.sent[-1])
     assert payload["type"] == "takeback_response" and payload["accept"] is True
 
-    await ws.send_give_time()
-    assert json.loads(inner.sent[-1])["type"] == "give_time"
+    await ws.send_give_time(300)
+    give = json.loads(inner.sent[-1])
+    assert give["type"] == "give_time" and give["hold_ms"] == 300
 
     await ws.send_ping(3)
     sent = json.loads(inner.sent[-1])

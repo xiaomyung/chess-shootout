@@ -191,6 +191,12 @@ class SoundManager:
     def play_ui_click(self):
         self._play("ui_click")
 
+    def play_ui_tick(self):
+        self._play("ui_tick")
+
+    def play_give_ratchet(self):
+        self._play("give_ratchet")
+
     def play_skillcheck_appear(self):
         self._play("sc_appear")
 

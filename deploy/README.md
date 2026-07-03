@@ -204,8 +204,10 @@ cd /srv/chess-shootout
 
 The script pulls the matching CI-built (and trivy-scanned) image from GHCR, refreshes
 the compose file / Caddyfile from git, recreates only `gameserver` (Caddy untouched)
-with the graceful `server_shutdown` drain, and prints the running version. It falls
-back to `sudo` automatically when your shell isn't in the `docker` group.
+with the graceful `server_shutdown` drain, and reports the installed version before and
+after (`was <ver>@<digest> -> now <ver>@<digest>`, read from `/healthz`). Each run is
+appended to `deploy/update.log` (UTC, gitignored). It falls back to `sudo` automatically
+when your shell isn't in the `docker` group.
 
 ## Operations
 
