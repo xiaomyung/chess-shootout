@@ -36,6 +36,8 @@ class Toast:
             key = message
         for b in self._bubbles:
             if b["key"] == key:
+                if b["message"] != message or b["kind"] != kind:
+                    b["text_surf"] = None
                 b["message"] = message
                 b["kind"] = kind
                 b["shown_at_ms"] = now

@@ -163,7 +163,7 @@ AUTO_FLIP_DELAY_MS = 200
 RESULT_FADE_MS = 400
 PERF_SAMPLE_COUNT = 240
 PERF_1PCT_PERCENTILE = 0.99
-PERF_1PCT_MIN_SAMPLES = 20
+PERF_1PCT_MIN_SAMPLES = 100
 PRESENT_SETTLE_MS = 120
 RESULT_MODAL_DELAY_MS = 500
 RESULT_TAKEOVER_MS = TAKEOVER_TOTAL_MS
@@ -256,7 +256,6 @@ class Frontend(OnlineEventsMixin):
         self._frame_times = deque(maxlen=PERF_SAMPLE_COUNT)
         self._last_work_ms = 0.0
         self._last_frame_start = None
-        self._last_clock_display = None
         self._result_cache_key = None
         self._result_cache = None
         self._result_first_seen_at_ms = None
@@ -1798,24 +1797,17 @@ class Frontend(OnlineEventsMixin):
         if self._needs_full_redraw(had_events):
             self._needs_full_present = False
             return None
-        rects = [pg.Rect(0, 0, self.window_width, self.chrome.HEIGHT)]
+        rects = [
+            pg.Rect(0, 0, self.window_width, self.chrome.HEIGHT),
+            self.player_strip_top.rect,
+            self.player_strip_bottom.rect,
+            self.right_menu.outer_rect,
+        ]
         now = pg.time.get_ticks()
         if (self.board.is_animating()
                 or now - self.board.last_animation_completed_at_ms < PRESENT_SETTLE_MS):
             rects.append(self.board.animation_dirty_rect())
-        clock_display = self._clock_display_key()
-        if clock_display != self._last_clock_display:
-            self._last_clock_display = clock_display
-            rects.append(self.player_strip_top.rect)
-            rects.append(self.player_strip_bottom.rect)
         return rects
-
-    def _clock_display_key(self):
-        clock = self.match.clock
-        if clock is None:
-            return None
-        return (round(clock.remaining(PieceColor.WHITE), 1),
-                round(clock.remaining(PieceColor.BLACK), 1))
 
     def _menu_overlay_active(self):
         return any(m.is_visible() for m in (

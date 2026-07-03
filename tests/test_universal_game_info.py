@@ -55,7 +55,7 @@ def test_chrome_stats_readouts_follow_toggles():
     from chessshootout.infra import env
     app = _make_app()
     _start_local(app)
-    for v in [3.0, 3.2, 5.0, 3.0, 3.1] * 6:
+    for v in [3.0, 3.2, 5.0, 3.0, 3.1] * 24:
         app._frame_times.append(v)
     app._last_work_ms = 2.4
     env.set_show_fps(True)
