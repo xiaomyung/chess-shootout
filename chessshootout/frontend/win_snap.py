@@ -11,7 +11,6 @@ WS_MINIMIZEBOX = 0x00020000
 WS_THICKFRAME = 0x00040000
 WM_SIZE = 0x0005
 WM_GETMINMAXINFO = 0x0024
-SIZE_MINIMIZED = 1
 SIZE_MAXIMIZED = 2
 SWP_NOSIZE = 0x0001
 SWP_NOMOVE = 0x0002
@@ -59,10 +58,9 @@ class _MONITORINFO(ctypes.Structure):
 
 
 class WindowsSnap:
-    def __init__(self, hwnd, is_fullscreen, on_size=None):
+    def __init__(self, hwnd, is_fullscreen):
         self._hwnd = hwnd
         self._is_fullscreen = is_fullscreen
-        self._on_size = on_size
         self._user32 = ctypes.windll.user32
         self._orig_wndproc = None
         self._wndproc_cb = None
@@ -128,15 +126,11 @@ class WindowsSnap:
 
     def _wndproc(self, hwnd, msg, wparam, lparam):
         try:
+            if msg == WM_SIZE:
+                self.maximized = (wparam == SIZE_MAXIMIZED)
             if msg == WM_GETMINMAXINFO and not self._is_fullscreen():
                 result = self._call_orig(hwnd, msg, wparam, lparam)
                 self._clamp_maximize_to_work_area(hwnd, lparam)
-                return result
-            if msg == WM_SIZE:
-                self.maximized = (wparam == SIZE_MAXIMIZED)
-                result = self._call_orig(hwnd, msg, wparam, lparam)
-                if wparam != SIZE_MINIMIZED and self._on_size is not None:
-                    self._on_size()
                 return result
         except Exception:
             log.debug("window snap wndproc error", exc_info=True)

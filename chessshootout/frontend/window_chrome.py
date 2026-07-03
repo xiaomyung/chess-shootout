@@ -100,9 +100,8 @@ class WindowChrome:
     DOT_GLYPH_DARKEN = 0.74
     DOT_GLYPH_INSET = 0.55
 
-    def __init__(self, window, on_fullscreen=None, on_live_resize=None):
+    def __init__(self, window, on_fullscreen=None):
         self.window = window
-        self._on_live_resize = on_live_resize
         self._w, self._h = window.get_size()
         self._dot_rects = {}
         self._sdl = None
@@ -165,8 +164,7 @@ class WindowChrome:
             self._snap = None
         try:
             from chessshootout.frontend.win_snap import WindowsSnap
-            snap = WindowsSnap(hwnd, lambda: self._win_state == "fullscreen",
-                               on_size=self._on_live_resize)
+            snap = WindowsSnap(hwnd, lambda: self._win_state == "fullscreen")
             if snap.install():
                 self._snap = snap
         except Exception:

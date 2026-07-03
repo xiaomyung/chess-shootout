@@ -226,10 +226,8 @@ class Frontend(OnlineEventsMixin):
             pg.display.set_icon(icon)
         except (pg.error, OSError):
             pass
-        self._in_live_resize = False
         self._pre_fullscreen_size = None
-        self.chrome = WindowChrome(self.window, on_fullscreen=self._apply_fullscreen,
-                                   on_live_resize=self._render_during_resize)
+        self.chrome = WindowChrome(self.window, on_fullscreen=self._apply_fullscreen)
         self.clock = pg.time.Clock()
 
         self.mode = "menu"
@@ -1701,40 +1699,21 @@ class Frontend(OnlineEventsMixin):
             self.help_modal, self.confirm_modal,
         ))
 
-    def _sync_window_surface(self, reinit=True):
+    def _sync_window_surface(self):
         win_w, win_h = pg.display.get_window_size()
         win_w = max(win_w, MIN_WINDOW_WIDTH)
         win_h = max(win_h, MIN_WINDOW_HEIGHT)
         if (win_w, win_h) != self.window.get_size():
             self.window = pg.display.set_mode((win_w, win_h), WINDOW_FLAGS)
             self.chrome.window = self.window
-            if reinit:
-                self.chrome.reinit_sdl()
+            self.chrome.reinit_sdl()
             self.window_width = win_w
             self.window_height = win_h
             self._cancel_all_scroll()
             self._compute_layout()
 
-    def _render_during_resize(self):
-        if self._in_live_resize or self.chrome.is_fullscreen():
-            return
-        self._in_live_resize = True
-        try:
-            self._sync_window_surface(reinit=False)
-            self.window.fill("black")
-            self.draw_frame()
-            ping = (self.online_client.get_ping_ms()
-                    if self.online_client is not None else None)
-            self.chrome.draw(fps=self.clock.get_fps(), ping=ping,
-                             show_fps=env.get_show_fps(), show_ping=env.get_show_ping())
-            pg.display.flip()
-        except Exception:
-            log.exception("live-resize render failed")
-        finally:
-            self._in_live_resize = False
-
     def draw_frame(self):
-        if os.name == "nt" and not self._in_live_resize and not self.chrome.is_fullscreen():
+        if os.name == "nt" and not self.chrome.is_fullscreen():
             self._sync_window_surface()
         if getattr(self, "_last_layout_mode", None) != self.mode:
             self._compute_layout()
