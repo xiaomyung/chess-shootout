@@ -353,6 +353,7 @@ class Frontend(OnlineEventsMixin):
         self.board.load_assets()
         self._compute_layout()
         self._refresh_load_pgn_availability()
+        self._settle_window()
         self._spawn_reconnect_probe()
 
         pg.display.set_caption(WINDOW_TITLE)
@@ -1722,6 +1723,15 @@ class Frontend(OnlineEventsMixin):
             self.match_found_modal, self.reconnecting_modal,
             self.help_modal, self.confirm_modal,
         ))
+
+    def _settle_window(self):
+        if os.name != "nt" or self.chrome.client_size() is None:
+            return
+        self.window = pg.display.set_mode((self.window_width, self.window_height), WINDOW_FLAGS)
+        self.chrome.window = self.window
+        self.chrome.reinit_sdl()
+        self.window_width, self.window_height = self.window.get_size()
+        self._compute_layout()
 
     def _sync_window_surface(self):
         size = self.chrome.client_size() or pg.display.get_window_size()
