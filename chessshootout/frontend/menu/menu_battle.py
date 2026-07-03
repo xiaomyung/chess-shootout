@@ -756,6 +756,13 @@ class MenuBattle:
         if not self._intro_active:
             self._draw_bubble(window, self.queen, now)
 
+    def _scaled_bold_font(self, size, attr):
+        cached = getattr(self, attr, None)
+        if cached is None or cached[0] != size:
+            cached = (size, get_font(size, bold=True))
+            setattr(self, attr, cached)
+        return cached[1]
+
     def _draw_ko_counter(self, window):
         q = self.queen
         if q is None or self._intro_active:
@@ -763,7 +770,7 @@ class MenuBattle:
         now = self._last_ms or 0
         scale = self.scale
         height = max(int(KO_HEIGHT_REF * scale), 16)
-        font = get_font(max(int(height * 0.3), 9), bold=True)
+        font = self._scaled_bold_font(max(int(height * 0.3), 9), "_ko_font")
         winking = now < q["ko_wink_until"]
         badge = build_ko_badge(q["kills"], font, height, winking)
         pad_x = max(int(7 * scale), 5)
@@ -1027,7 +1034,7 @@ class MenuBattle:
         else:
             bg, txt, border = Colors.bubble_pawn_bg, Colors.bubble_pawn_text, Colors.border_strong
         scale = self.scale
-        font = get_font(max(int(12 * scale), 9), bold=True)
+        font = self._scaled_bold_font(max(int(12 * scale), 9), "_bubble_font")
         pad_x, pad_y = int(11 * scale), int(6 * scale)
         tail = max(int(6 * scale), 3)
         line_gap = max(int(2 * scale), 1)
