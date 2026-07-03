@@ -1116,7 +1116,7 @@ class MenuBattle:
     def _background(self, size):
         if self._bg_cache is not None and self._bg_cache[0] == size:
             return self._bg_cache[1]
-        surf = backdrop.arena_background(size, (0.5, 0.18))
+        surf = backdrop.arena_background(size, (0.5, 0.18)).convert()
         self._bg_cache = (size, surf)
         return surf
 

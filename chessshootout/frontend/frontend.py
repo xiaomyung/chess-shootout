@@ -1739,7 +1739,6 @@ class Frontend(OnlineEventsMixin):
                 self._frame_times.append((frame_start - self._last_frame_start) * 1000.0)
             self._last_frame_start = frame_start
             had_events = self.check_events()
-            self.window.fill("black")
             self.draw_frame()
             self.chrome.draw(self._chrome_stats())
             work_before_present = time.perf_counter() - frame_start
@@ -2052,7 +2051,7 @@ class Frontend(OnlineEventsMixin):
         center = (bc[0] / w, bc[1] / h)
         key = (size, bc)
         if self._game_bg_cache is None or self._game_bg_cache[0] != key:
-            self._game_bg_cache = (key, backdrop.arena_background(size, center))
+            self._game_bg_cache = (key, backdrop.arena_background(size, center).convert())
         self.window.blit(self._game_bg_cache[1], (0, 0))
 
     def _draw_result_fade_overlay(self):

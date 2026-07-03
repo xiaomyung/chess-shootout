@@ -874,7 +874,7 @@ class Board:
         if gs <= 0:
             self._checkerboard_surf = None
             return
-        surf = pg.Surface((gs, gs))
+        surf = pg.Surface((gs, gs)).convert()
         cs = self.cell_size
         for r in range(self.SIZE):
             for c in range(self.SIZE):
