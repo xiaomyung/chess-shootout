@@ -5,15 +5,40 @@
 #
 # Pulls the CI-built, scanned image from GHCR and recreates the gameserver
 # container; refreshes the compose file / Caddyfile from git. Falls back to sudo
-# automatically when the shell is not in the docker group.
+# automatically when the shell is not in the docker group. Reports the installed
+# version before and after, and appends a UTC-timestamped record to
+# deploy/update.log.
 set -euo pipefail
+
+HEALTH_URL="http://127.0.0.1:8000/healthz"
+LOG_FILE="deploy/update.log"
+
+dc="docker"
+
+now_utc() { date -u '+%Y-%m-%d %H:%M:%S UTC'; }
+
+health_version() {
+  curl -fsS "$HEALTH_URL" 2>/dev/null \
+    | sed -n 's/.*"app_version":"\([^"]*\)".*/\1/p' || true
+}
+
+running_image_id() {
+  local cid
+  cid="$($dc compose ps -q gameserver 2>/dev/null || true)"
+  [ -n "$cid" ] || return 0
+  $dc inspect --format '{{.Image}}' "$cid" 2>/dev/null \
+    | sed 's/^sha256://' | cut -c1-12 || true
+}
 
 main() {
   local ref="${1:-}" tag
   cd "$(dirname "$0")/.."
 
-  local dc="docker"
   docker info >/dev/null 2>&1 || dc="sudo docker"
+
+  local old_ver old_digest
+  old_ver="$(health_version)"; : "${old_ver:=unknown}"
+  old_digest="$(running_image_id)"; : "${old_digest:=none}"
 
   git fetch --tags --prune origin
   if [ -n "$ref" ]; then
@@ -31,13 +56,28 @@ main() {
     printf 'IMAGE_TAG=%s\n' "$tag" >> .env
   fi
 
-  $dc compose pull gameserver
+  local pull_status="ok"
+  $dc compose pull gameserver || pull_status="failed"
   $dc compose --profile edge up -d
 
   sleep 3
-  printf '>> health: '
-  curl -fsS http://127.0.0.1:8000/healthz || printf '(starting...)'
-  printf '\n>> now running: %s\n' "$tag"
+  local health new_ver new_digest
+  if curl -fsS "$HEALTH_URL" >/dev/null 2>&1; then
+    health="ok"
+  else
+    health="unreachable"
+  fi
+  new_ver="$(health_version)"; : "${new_ver:=unknown}"
+  new_digest="$(running_image_id)"; : "${new_digest:=none}"
+
+  local outcome="ok"
+  { [ "$pull_status" = "ok" ] && [ "$health" = "ok" ]; } || outcome="check"
+
+  local summary
+  summary="was ${old_ver}@${old_digest} -> now ${new_ver}@${new_digest}"
+  summary="${summary} (tag=${tag} pull=${pull_status} health=${health})"
+  printf '>> %s\n' "$summary"
+  printf '%s | %-5s | %s\n' "$(now_utc)" "$outcome" "$summary" >> "$LOG_FILE"
 }
 
 main "$@"

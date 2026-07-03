@@ -539,3 +539,48 @@ def test_theme_defaults_dark_and_rejects_unknown():
     assert env.get_theme() == "dark"
     env.set_theme("dark")
     assert env.get_theme() == "dark"
+
+
+def _throw_denied(*_a, **_k):
+    raise PermissionError(5, "Access is denied")
+
+
+def test_atomic_write_retries_then_succeeds(tmp_path, monkeypatch):
+    """On Windows os.replace can transiently fail with WinError 5 (Access denied)
+    while AV/indexer holds a handle; _atomic_write retries and succeeds."""
+    monkeypatch.setattr(env, "_ENV_PATH", tmp_path / ".env")
+    monkeypatch.setattr(env, "_ATOMIC_WRITE_BACKOFF_S", 0)
+    real_replace = os.replace
+    calls = {"n": 0}
+
+    def flaky_replace(src, dst):
+        calls["n"] += 1
+        if calls["n"] < 3:
+            raise PermissionError(5, "Access is denied")
+        return real_replace(src, dst)
+
+    monkeypatch.setattr(env.os, "replace", flaky_replace)
+    env._atomic_write("CHESS_X=1\n")
+    assert calls["n"] == 3
+    assert (tmp_path / ".env").read_text(encoding="utf-8") == "CHESS_X=1\n"
+
+
+def test_atomic_write_gives_up_without_raising(tmp_path, monkeypatch):
+    """A persistently locked .env must not crash the app: give up, drop the write,
+    clean up the temp file."""
+    monkeypatch.setattr(env, "_ENV_PATH", tmp_path / ".env")
+    monkeypatch.setattr(env, "_ATOMIC_WRITE_BACKOFF_S", 0)
+    monkeypatch.setattr(env.os, "replace", _throw_denied)
+    env._atomic_write("CHESS_X=1\n")
+    assert not (tmp_path / ".env").exists()
+    assert list(tmp_path.glob(".env.tmp.*")) == []
+
+
+def test_set_volume_does_not_raise_when_env_locked(tmp_path, monkeypatch):
+    """The real crash path: dragging a volume slider on Windows persisted every
+    frame and a locked os.replace killed the app. set_master_volume must swallow it."""
+    monkeypatch.setattr(env, "_ENV_PATH", tmp_path / ".env")
+    monkeypatch.setattr(env, "_ATOMIC_WRITE_BACKOFF_S", 0)
+    monkeypatch.setattr(env.os, "replace", _throw_denied)
+    env.set_master_volume(0.5)
+    assert env.get_master_volume() == 0.5

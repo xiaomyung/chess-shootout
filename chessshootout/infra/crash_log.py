@@ -4,11 +4,10 @@ from datetime import datetime
 from pathlib import Path
 
 from chessshootout.paths import PROJECT_ROOT
+from chessshootout.infra.log_format import make_formatter
 
 
 CRASHLOG_DIR_NAME = "crashlogs"
-LOG_FORMAT = "%(asctime)s %(levelname)s %(name)s %(message)s"
-LOG_DATEFMT = "%H:%M:%S"
 
 
 class _ListHandler(logging.Handler):
@@ -31,7 +30,7 @@ def install_memory_handler(level=logging.DEBUG):
     global _active_handler
     handler = _ListHandler()
     handler.setLevel(level)
-    handler.setFormatter(logging.Formatter(LOG_FORMAT, datefmt=LOG_DATEFMT))
+    handler.setFormatter(make_formatter())
     logging.getLogger().addHandler(handler)
     _active_handler = handler
     return handler

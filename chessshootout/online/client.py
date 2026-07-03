@@ -183,8 +183,8 @@ class OnlineClient:
     def send_takeback_response(self, accept):
         self._enqueue("send_takeback_response", accept)
 
-    def send_give_time(self):
-        self._enqueue("send_give_time")
+    def send_give_time(self, hold_ms):
+        self._enqueue("send_give_time", hold_ms)
 
     def send_ping(self, ply):
         self._last_ping_sent_at = time.monotonic()

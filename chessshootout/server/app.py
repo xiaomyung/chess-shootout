@@ -4,6 +4,7 @@ import os
 import time
 from collections import defaultdict, deque
 from contextlib import asynccontextmanager
+from importlib.metadata import PackageNotFoundError, version as _pkg_version
 
 from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse, Response
@@ -37,6 +38,14 @@ from chessshootout.server.sweep import Sweep
 CLOCK_TICK_INTERVAL_SECONDS = 0.1
 MAX_INBOUND_MESSAGE_BYTES = 4096
 DEFAULT_MAX_ROOMS = 100
+
+
+def app_version():
+    try:
+        return _pkg_version("chess-shootout")
+    except PackageNotFoundError:
+        return ""
+
 
 RECLAIM_PER_UUID_LIMIT_PER_MINUTE = 100
 RATE_LIMIT_PRUNE_THRESHOLD = 4096
@@ -138,7 +147,8 @@ def create_app(*, now_provider=time.monotonic, max_rooms=DEFAULT_MAX_ROOMS):
 
     @asynccontextmanager
     async def lifespan(app):
-        log.info("gameserver v%d listening (max_rooms=%d)", PROTOCOL_VERSION, max_rooms)
+        log.info("gameserver v%d release=%s listening (max_rooms=%d)",
+                 PROTOCOL_VERSION, app_version() or "dev", max_rooms)
         sweep_task = asyncio.create_task(_sweep_loop(app))
         try:
             yield
@@ -188,6 +198,7 @@ def create_app(*, now_provider=time.monotonic, max_rooms=DEFAULT_MAX_ROOMS):
     @app.get("/healthz", response_model=HealthResponse)
     async def healthz():
         return HealthResponse(
+            app_version=app_version(),
             rooms_active=rooms.rooms_active,
             queue_depth=rooms.queue_depth,
             uptime_s=now_provider() - app.state.started_at,

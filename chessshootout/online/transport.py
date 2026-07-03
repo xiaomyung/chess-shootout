@@ -280,8 +280,9 @@ class ServerWebSocket:
     async def send_takeback_response(self, accept):
         await self._send(TakebackResponseMessage(accept=accept))
 
-    async def send_give_time(self):
-        await self._send_raw({"type": "give_time", "version": PROTOCOL_VERSION})
+    async def send_give_time(self, hold_ms):
+        await self._send_raw({"type": "give_time", "version": PROTOCOL_VERSION,
+                              "hold_ms": hold_ms})
 
     async def send_ping(self, ply):
         await self._send(PingMessage(ply=ply))

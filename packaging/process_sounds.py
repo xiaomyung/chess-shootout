@@ -84,7 +84,8 @@ ATTRIBUTION_CC_BY = [
 ATTRIBUTION_CC0 = [
     dict(who="Kenney", title="Audio packs (Interface / UI / Impact / Digital / Sci-Fi / Voiceover)",
          url="https://kenney.nl/assets/category:Audio",
-         used="piece moves, skill-check cues, UI clicks, ray-gun lasers, you-win callouts"),
+         used="piece moves, skill-check cues, UI clicks, slider ticks, ray-gun lasers, "
+              "you-win callouts"),
     dict(who="Dustyroom", title="Casual Game Sounds",
          url="https://dustyroom.com/free-casual-game-sounds/", used="UI / feedback one-shots"),
     dict(who="Ben Jaszczak, Brian Nelson, Kevin Heras, Matthew Nanney (submitted by bart)",
@@ -92,7 +93,8 @@ ATTRIBUTION_CC0 = [
          url="https://opengameart.org/content/the-free-firearm-sound-library",
          used="pistol / cannon / rifle capture shots"),
     dict(who="Signature Sounds", title="Bullet / Gun SFX (CC0)",
-         url="https://signaturesounds.org/store/p/bulletgun-sfx-cc0", used="foley / reload layers"),
+         url="https://signaturesounds.org/store/p/bulletgun-sfx-cc0",
+         used="foley / reload layers / give-time ratchet"),
     dict(who="qubodup (Iwan Gabovitch)", title="Door Open, Door Close Set",
          url="https://opengameart.org/content/door-open-door-close-set",
          used="castle (open+close)"),

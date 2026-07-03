@@ -7,6 +7,7 @@ import pygame as pg
 
 from chessshootout import paths
 from chessshootout.infra import env, crash_log
+from chessshootout.infra.log_format import configure_basic
 from chessshootout.frontend.frontend import Frontend
 
 
@@ -22,11 +23,7 @@ def _parse_args():
 
 def main():
     args = _parse_args()
-    logging.basicConfig(
-        level=os.environ.get("LOG_LEVEL", "INFO").upper(),
-        format="%(asctime)s %(levelname)s %(name)s %(message)s",
-        datefmt="%H:%M:%S",
-    )
+    configure_basic(os.environ.get("LOG_LEVEL", "INFO").upper())
     handler = crash_log.install_memory_handler()
     log = logging.getLogger("chess.main")
     log.info("client starting pid=%s", os.getpid())

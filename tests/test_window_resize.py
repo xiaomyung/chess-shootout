@@ -84,3 +84,30 @@ def test_videoresize_clamps_to_minimum(ev_w, ev_h, exp_w, exp_h):
     app.check_events()
     assert app.window_width == exp_w
     assert app.window_height == exp_h
+
+
+def test_sync_reallocates_surface_when_os_window_grew(monkeypatch):
+    """The Windows fix: when the OS reports a larger window than the current
+    surface (native maximize / edge-drag), _sync_window_surface re-set_modes so
+    the surface matches (else content renders small with black/striped margins)."""
+    app = Frontend(1000, 800)
+    monkeypatch.setattr(pg.display, "get_window_size", lambda: (1400, 900))
+    app._sync_window_surface()
+    assert app.window.get_size() == (1400, 900)
+    assert (app.window_width, app.window_height) == (1400, 900)
+
+
+def test_sync_is_noop_when_surface_already_matches(monkeypatch):
+    app = Frontend(1000, 800)
+    monkeypatch.setattr(pg.display, "get_window_size", lambda: app.window.get_size())
+    calls = []
+    monkeypatch.setattr(app, "_compute_layout", lambda: calls.append(1))
+    app._sync_window_surface()
+    assert calls == []
+
+
+def test_sync_clamps_reported_size_to_minimum(monkeypatch):
+    app = Frontend(1000, 800)
+    monkeypatch.setattr(pg.display, "get_window_size", lambda: (200, 150))
+    app._sync_window_surface()
+    assert app.window.get_size() == (MIN_WINDOW_WIDTH, MIN_WINDOW_HEIGHT)

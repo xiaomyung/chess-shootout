@@ -3,7 +3,7 @@ for HTTP and WS interactions with the server.
 
 Strategy:
 - HTTP tests use httpx.MockTransport routed through ServerTransport's
-  _http_client constructor arg, so we hit a hand-rolled fake handler
+  http_client constructor arg, so we hit a hand-rolled fake handler
   rather than spinning up uvicorn for each case. That keeps coverage
   fast and lets us assert the wire-level method/path/body shape.
 - WS tests use the real in-process server (the `server` fixture in
@@ -460,8 +460,9 @@ async def test_server_websocket_send_methods_emit_typed_payloads():
     payload = json.loads(inner.sent[-1])
     assert payload["type"] == "takeback_response" and payload["accept"] is True
 
-    await ws.send_give_time()
-    assert json.loads(inner.sent[-1])["type"] == "give_time"
+    await ws.send_give_time(300)
+    give = json.loads(inner.sent[-1])
+    assert give["type"] == "give_time" and give["hold_ms"] == 300
 
     await ws.send_ping(3)
     sent = json.loads(inner.sent[-1])

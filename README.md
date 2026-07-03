@@ -37,9 +37,10 @@ server for online two-player matches.
   comic blood, and board screen-shake; each piece type fires its own shot.
 - FPS-style announcer with killstreaks (FIRST BLOOD → DOUBLE … GODLIKE), a
   checkmate takeover, and a surrender flag.
-- Custom borderless window chrome — native drag, edge/corner resize, fullscreen
-  (`F11` or the green title-bar button), minimize, and a themed title bar on
-  every screen.
+- Custom borderless window chrome — native drag, edge/corner resize, snap and
+  taskbar-aware maximize (Windows Aero-Snap / drag-to-top; handled by the window
+  manager on Linux), fullscreen (`F11` or the green title-bar button), minimize,
+  and a themed title bar on every screen.
 - Animated menu "battle" backdrop and themed result / online screens.
 
 **Audio**
@@ -165,6 +166,7 @@ pyenv shell 3.12                  # `python3.12` now resolves for the venv step 
 | `←` / `→` | Step through review |
 | `Home` / `End` | Jump to ply 0 / live |
 | `?` | Open Help modal |
+| Hold **Give 15s** | Ramp the opponent's clock up to the starting time |
 | `Esc` | Context Back/Cancel — closes the top modal, else the quit / resign prompt (never the window) |
 
 ## Online play
@@ -215,8 +217,10 @@ any host, such as a self-hosted server.
 - **Draw** (on your turn) — opponent gets Accept/Decline; mutual offers auto-agree.
 - **Undo / takeback** — only right after your own move, while the opponent is
   on the clock; on accept, one ply rolls back and the clocks restore.
-- **Give 15 sec** — adds 15 s to the opponent's clock, capped at the starting
-  time control (debounced against double-clicks).
+- **Give 15 sec** — tops up the opponent's clock; **tap** for +15 s or **hold**
+  the button to keep adding 15 s every 0.1 s until it reaches the starting time
+  control. Online, the total is server-authoritative and the clock reconciles on
+  the grant.
 - **Rematch** (from the result modal) — the same room restarts with swapped
   colors; the series score follows the players, not the colors.
 

@@ -83,6 +83,30 @@ def test_hit_test_regions(chrome):
     assert _hit(chrome, 500, 699) == _HITTEST_RESIZE_BOTTOM
 
 
+def test_win_snap_is_noop_off_windows(chrome):
+    assert chrome._snap is None
+    chrome.shutdown()
+    assert chrome._snap is None
+
+
+def test_hit_test_resize_edges_active_when_not_maximized(chrome):
+    chrome._w, chrome._h = 1000, 700
+    chrome._layout_dots(1000)
+    assert chrome._is_maximized() is False
+    assert _hit(chrome, 1, 1) == _HITTEST_RESIZE_TOPLEFT
+    assert _hit(chrome, 500, 699) == _HITTEST_RESIZE_BOTTOM
+
+
+def test_maximized_suppresses_resize_hit_zones(chrome):
+    import types
+    chrome._w, chrome._h = 1000, 700
+    chrome._layout_dots(1000)
+    chrome._snap = types.SimpleNamespace(maximized=True)
+    assert chrome._is_maximized() is True
+    assert _hit(chrome, 1, 1) == _HITTEST_DRAGGABLE
+    assert _hit(chrome, 500, 699) == _HITTEST_NORMAL
+
+
 def test_cursor_for_resize_edges_and_dots(chrome):
     chrome._w, chrome._h = 1000, 700
     chrome._layout_dots(1000)
@@ -255,17 +279,17 @@ def test_tap_on_fullscreen_titlebar_does_not_exit(chrome, monkeypatch):
     assert chrome._fs_press_pos is None
 
 
-def test_double_click_titlebar_toggles_fullscreen(chrome, monkeypatch):
+def test_normal_titlebar_click_does_not_toggle_fullscreen(chrome, monkeypatch):
+    """The double-click-to-fullscreen affordance was removed: the title area is
+    OS-draggable in normal state, so pygame never received the click and it never
+    fired. A title click in normal state is consumed but must not toggle."""
     calls = []
     monkeypatch.setattr(chrome, "toggle_fullscreen", lambda: calls.append(1))
     chrome.draw()
     pos = (chrome._w // 2, 4)
-    monkeypatch.setattr(pg.time, "get_ticks", lambda: 1000)
+    assert chrome.handle_click(pos) is True
     assert chrome.handle_click(pos) is True
     assert calls == []
-    monkeypatch.setattr(pg.time, "get_ticks", lambda: 1000 + 100)
-    assert chrome.handle_click(pos) is True
-    assert calls == [1]
 
 
 @pytest.mark.parametrize(

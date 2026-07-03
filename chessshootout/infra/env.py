@@ -1,6 +1,8 @@
 import hashlib
+import logging
 import os
 import re
+import time
 import uuid
 
 from dotenv import load_dotenv
@@ -8,7 +10,11 @@ from dotenv import load_dotenv
 from chessshootout import paths
 from chessshootout.infra import countries
 
+log = logging.getLogger("chess.env")
+
 _KEY_LINE_RE = re.compile(r"^([A-Za-z_][A-Za-z0-9_]*)\s*=(.*)$")
+_ATOMIC_WRITE_RETRIES = 5
+_ATOMIC_WRITE_BACKOFF_S = 0.03
 
 
 _DEV_SERVER_ADDR = "localhost:8000"
@@ -309,4 +315,15 @@ def _atomic_write(body):
     _ENV_PATH.parent.mkdir(parents=True, exist_ok=True)
     tmp_path = _ENV_PATH.with_suffix(_ENV_PATH.suffix + f".tmp.{os.getpid()}")
     tmp_path.write_text(body, encoding="utf-8")
-    os.replace(tmp_path, _ENV_PATH)
+    for attempt in range(_ATOMIC_WRITE_RETRIES):
+        try:
+            os.replace(tmp_path, _ENV_PATH)
+            return
+        except PermissionError:
+            if attempt < _ATOMIC_WRITE_RETRIES - 1:
+                time.sleep(_ATOMIC_WRITE_BACKOFF_S)
+    log.warning("could not persist %s (file locked); this write was dropped", _ENV_PATH)
+    try:
+        tmp_path.unlink()
+    except OSError:
+        pass
