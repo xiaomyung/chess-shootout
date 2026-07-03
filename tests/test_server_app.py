@@ -5,13 +5,13 @@ import pytest
 from fastapi.testclient import TestClient
 
 from chessshootout.server.app import PROTOCOL_VERSION, create_app
+from chessshootout.server.connections import ConnectionRegistry
+from chessshootout.server.protocol import FIRST_MOVE_ABORT_SECONDS, GRACE_SECONDS, Reason
+from tests.helpers import FakeClock, fake_uuid4
 
 
 async def _sweep(app):
     await app.state.sweep.step_all()
-from chessshootout.server.connections import ConnectionRegistry
-from chessshootout.server.protocol import FIRST_MOVE_ABORT_SECONDS, GRACE_SECONDS, Reason
-from tests.helpers import FakeClock, fake_uuid4
 
 
 def test_registry_add_returns_displaced_socket():

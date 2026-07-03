@@ -116,6 +116,7 @@ class WindowChrome:
         self._win_state = "normal"
         self._fs_press_pos = None
         self._snap = None
+        self._snap_hwnd = None
         self._init_sdl()
 
     def reinit_sdl(self):
@@ -156,17 +157,19 @@ class WindowChrome:
             hwnd = None
         if not hwnd:
             return
-        if self._snap is not None and self._snap._hwnd == hwnd:
+        if self._snap is not None and self._snap_hwnd == hwnd:
             self._snap.apply_styles()
             return
         if self._snap is not None:
             self._snap.shutdown()
             self._snap = None
+            self._snap_hwnd = None
         try:
             from chessshootout.frontend.win_snap import WindowsSnap
             snap = WindowsSnap(hwnd, lambda: self._win_state == "fullscreen")
             if snap.install():
                 self._snap = snap
+                self._snap_hwnd = hwnd
         except Exception:
             log.warning("window snap unavailable", exc_info=True)
 
@@ -174,6 +177,7 @@ class WindowChrome:
         if self._snap is not None:
             self._snap.shutdown()
             self._snap = None
+            self._snap_hwnd = None
 
     def is_fullscreen(self):
         return self._win_state == "fullscreen"

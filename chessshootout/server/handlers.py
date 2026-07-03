@@ -399,7 +399,7 @@ async def handle_give_time(app, websocket, room, color, raw):
     try:
         hold_ms = GiveTimeMessage.model_validate_json(raw).hold_ms
     except ValidationError:
-        hold_ms = 0
+        return "invalid"
     ticks = max(1, hold_ms // GIVE_TIME_TICK_MS)
     opp_color_str = room.opp_color(color)
     opp_piece_color = (

@@ -3,7 +3,7 @@ for HTTP and WS interactions with the server.
 
 Strategy:
 - HTTP tests use httpx.MockTransport routed through ServerTransport's
-  _http_client constructor arg, so we hit a hand-rolled fake handler
+  http_client constructor arg, so we hit a hand-rolled fake handler
   rather than spinning up uvicorn for each case. That keeps coverage
   fast and lets us assert the wire-level method/path/body shape.
 - WS tests use the real in-process server (the `server` fixture in

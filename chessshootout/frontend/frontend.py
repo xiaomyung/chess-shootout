@@ -1091,7 +1091,7 @@ class Frontend(OnlineEventsMixin):
         clock = self.match.clock
         if clock is None or clock.flagged is not None:
             disabled.add("give_time")
-        if pg.time.get_ticks() - self._last_give_time_at_ms < GIVE_TIME_DEBOUNCE_MS:
+        if self._give_time_on_cooldown():
             disabled.add("give_time")
         return disabled
 
@@ -1316,19 +1316,22 @@ class Frontend(OnlineEventsMixin):
         self.board._clear_premoves()
         self.board.clear_annotations()
 
+    def _give_time_on_cooldown(self):
+        return pg.time.get_ticks() - self._last_give_time_at_ms < GIVE_TIME_DEBOUNCE_MS
+
     def _on_give_time(self):
         if self._give_time_holding:
             return
         if self.pgn_review or self.current_result() is not None:
             return
-        if pg.time.get_ticks() - self._last_give_time_at_ms < GIVE_TIME_DEBOUNCE_MS:
+        if self._give_time_on_cooldown():
             return
         clock = self.match.clock
         if clock is None or clock.flagged is not None:
             return
         recipient = self._give_time_recipient()
         if clock.initial_seconds - clock.remaining(recipient) <= 0:
-            self.toast.show(f"{self._name_for_color(recipient)} already at maximum time")
+            self._give_time_toast_for_giver(recipient, 0)
             return
         now = pg.time.get_ticks()
         self._give_time_holding = True
@@ -1724,12 +1727,15 @@ class Frontend(OnlineEventsMixin):
             self.help_modal, self.confirm_modal,
         ))
 
+    def _recreate_window_surface(self, w, h):
+        self.window = pg.display.set_mode((w, h), WINDOW_FLAGS)
+        self.chrome.window = self.window
+        self.chrome.reinit_sdl()
+
     def _settle_window(self):
         if os.name != "nt" or self.chrome.client_size() is None:
             return
-        self.window = pg.display.set_mode((self.window_width, self.window_height), WINDOW_FLAGS)
-        self.chrome.window = self.window
-        self.chrome.reinit_sdl()
+        self._recreate_window_surface(self.window_width, self.window_height)
         self.window_width, self.window_height = self.window.get_size()
         self._compute_layout()
 
@@ -1742,9 +1748,7 @@ class Frontend(OnlineEventsMixin):
                 log.info("resize-sync win32=%s gws=%s surf=%s -> set_mode(%d,%d)",
                          self.chrome.client_size(), pg.display.get_window_size(),
                          self.window.get_size(), win_w, win_h)
-            self.window = pg.display.set_mode((win_w, win_h), WINDOW_FLAGS)
-            self.chrome.window = self.window
-            self.chrome.reinit_sdl()
+            self._recreate_window_surface(win_w, win_h)
             self.window_width = win_w
             self.window_height = win_h
             self._cancel_all_scroll()
@@ -2578,9 +2582,7 @@ class Frontend(OnlineEventsMixin):
                 w = max(event.w, MIN_WINDOW_WIDTH)
                 h = max(event.h, MIN_WINDOW_HEIGHT)
                 if os.name == "nt" or (w, h) != (event.w, event.h):
-                    self.window = pg.display.set_mode((w, h), WINDOW_FLAGS)
-                    self.chrome.window = self.window
-                    self.chrome.reinit_sdl()
+                    self._recreate_window_surface(w, h)
                 self.window_width = w
                 self.window_height = h
                 self._cancel_all_scroll()
