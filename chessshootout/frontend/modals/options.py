@@ -3,6 +3,7 @@ import pygame as pg
 from chessshootout.infra import countries
 from chessshootout.frontend.modals.base import BaseModal
 from chessshootout.frontend.visual.colors import Colors
+from chessshootout.frontend.visual.cache import render_text
 from chessshootout.frontend.visual.draw import supersample, rounded_rect_surface
 from chessshootout.frontend.visual.emoji import emoji_surface
 from chessshootout.frontend.visual.fonts import get_display_font, get_font, get_mono_font
@@ -85,9 +86,9 @@ class _Row:
         x = rect.x
         y = rect.y + ROW_PAD
         avail = max(max_right - x, 1)
-        _blit_clip(window, fonts.title.render(self.title, True, Colors.text), (x, y), avail)
+        _blit_clip(window, render_text(fonts.title, self.title, Colors.text), (x, y), avail)
         if self.desc:
-            _blit_clip(window, fonts.desc.render(self.desc, True, Colors.text_muted),
+            _blit_clip(window, render_text(fonts.desc, self.desc, Colors.text_muted),
                        (x, y + fonts.title.get_height() + 2), avail)
 
     def _draw_control(self, window, rect, fonts):
@@ -144,6 +145,7 @@ class SegmentedRow(_Row):
         self.setter = setter
         self.mono = mono
         self._rects = {}
+        self._mono_font = None
 
     def _seg_h(self, fonts):
         return max(fonts.button.get_height() + 12, 28)
@@ -155,14 +157,19 @@ class SegmentedRow(_Row):
     def draw(self, window, rect, fonts):
         x = rect.x
         y = rect.y + ROW_PAD
-        window.blit(fonts.title.render(self.title, True, Colors.text), (x, y))
+        window.blit(render_text(fonts.title, self.title, Colors.text), (x, y))
         yy = y + fonts.title.get_height() + 2
         if self.desc:
-            window.blit(fonts.desc.render(self.desc, True, Colors.text_muted), (x, yy))
+            window.blit(render_text(fonts.desc, self.desc, Colors.text_muted), (x, yy))
             yy += fonts.desc.get_height() + 2
         yy += 8
-        font = (get_mono_font(max(int(fonts.button.get_height() * 0.82), 14))
-                if self.mono else fonts.button)
+        if self.mono:
+            size = max(int(fonts.button.get_height() * 0.82), 14)
+            if self._mono_font is None or self._mono_font[0] != size:
+                self._mono_font = (size, get_mono_font(size))
+            font = self._mono_font[1]
+        else:
+            font = fonts.button
         sr = pg.Rect(x, yy, rect.width, self._seg_h(fonts))
         self._rects = draw_segmented(window, sr, self.options, self.getter(), font)
 
@@ -249,10 +256,10 @@ class SwatchRow(_Row):
     def draw(self, window, rect, fonts):
         x = rect.x
         y = rect.y + ROW_PAD
-        window.blit(fonts.title.render(self.title, True, Colors.text), (x, y))
+        window.blit(render_text(fonts.title, self.title, Colors.text), (x, y))
         yy = y + fonts.title.get_height() + 2
         if self.desc:
-            window.blit(fonts.desc.render(self.desc, True, Colors.text_muted), (x, yy))
+            window.blit(render_text(fonts.desc, self.desc, Colors.text_muted), (x, yy))
             yy += fonts.desc.get_height() + 6
         self._rects = {}
         sw_w, sw_h, gap = 42, 30, 10
@@ -266,8 +273,8 @@ class SwatchRow(_Row):
                             r.topleft)
             if locked:
                 soon_font = get_font(max(int(sw_h * 0.38), 9), bold=True)
-                shadow = soon_font.render("SOON", True, Colors.bg)
-                tag = soon_font.render("SOON", True, Colors.text)
+                shadow = render_text(soon_font, "SOON", Colors.bg)
+                tag = render_text(soon_font, "SOON", Colors.text)
                 tx = r.centerx - tag.get_width() / 2
                 ty = r.centery - tag.get_height() / 2
                 window.blit(shadow, (tx + 1, ty + 1))
@@ -315,10 +322,10 @@ class PathRow(_FieldRow):
     def draw(self, window, rect, fonts):
         x = rect.x
         y = rect.y + ROW_PAD
-        window.blit(fonts.title.render(self.title, True, Colors.text), (x, y))
+        window.blit(render_text(fonts.title, self.title, Colors.text), (x, y))
         yy = y + fonts.title.get_height() + 2
         if self.desc:
-            window.blit(fonts.desc.render(self.desc, True, Colors.text_muted), (x, yy))
+            window.blit(render_text(fonts.desc, self.desc, Colors.text_muted), (x, yy))
             yy += fonts.desc.get_height() + 2
         yy += 10
         if not self.input.focused and self.input.text != str(self.value_getter()):
@@ -328,7 +335,7 @@ class PathRow(_FieldRow):
         gap = 8
         self._reset_rect = pg.Rect(rect.right - btn_w, yy, btn_w, field_h)
         self._change_rect = pg.Rect(self._reset_rect.x - gap - btn_w, yy, btn_w, field_h)
-        suffix_surf = fonts.value.render(self.suffix, True, Colors.text_muted) if self.suffix \
+        suffix_surf = render_text(fonts.value, self.suffix, Colors.text_muted) if self.suffix \
             else None
         suffix_w = suffix_surf.get_width() + 6 if suffix_surf else 0
         field_right = self._change_rect.x - gap - suffix_w
@@ -382,10 +389,10 @@ class TextRow(_FieldRow):
     def draw(self, window, rect, fonts):
         x = rect.x
         y = rect.y + ROW_PAD
-        window.blit(fonts.title.render(self.title, True, Colors.text), (x, y))
+        window.blit(render_text(fonts.title, self.title, Colors.text), (x, y))
         yy = y + fonts.title.get_height() + 2
         if self.desc:
-            window.blit(fonts.desc.render(self.desc, True, Colors.text_muted), (x, yy))
+            window.blit(render_text(fonts.desc, self.desc, Colors.text_muted), (x, yy))
             yy += fonts.desc.get_height() + 2
         yy += 10
         if not self.input.focused and self.input.text != str(self.value_getter()):
@@ -436,7 +443,7 @@ class CountryRow(_Row):
         h = max(fonts.value.get_height() + 14, 30)
         inner, gap = 12, 8
         flag = self._flag(code, max(fonts.value.get_height(), 14))
-        chev = fonts.button.render("›", True, Colors.text_muted)
+        chev = render_text(fonts.button, "›", Colors.text_muted)
         text_surf = fonts.value.render(label, True, Colors.text if code else Colors.text_muted)
         flag_w = (flag.get_width() + gap) if flag is not None else 0
         desired = 2 * inner + flag_w + text_surf.get_width() + 10 + chev.get_width()
@@ -502,7 +509,7 @@ class OptionsBody:
         row_w = rect.width - SCROLLBAR_RESERVE
         y = rect.y - self._scroll_px
         for label, rows in self.sections:
-            window.blit(fonts.section.render(label.upper(), True, Colors.text_muted),
+            window.blit(render_text(fonts.section, label.upper(), Colors.text_muted),
                         (rect.x, y + 6))
             y += fonts.section.get_height() + 8
             for row in rows:
@@ -591,7 +598,7 @@ class OptionsModal(BaseModal):
             return
         self.draw_shell()
         content = self.content_rect()
-        title_surf = self.title_font.render("OPTIONS", True, Colors.text)
+        title_surf = render_text(self.title_font, "OPTIONS", Colors.text)
         self.window.blit(title_surf, (content.centerx - title_surf.get_width() / 2, content.y))
         title_bottom = content.y + title_surf.get_height() + self.padding
 

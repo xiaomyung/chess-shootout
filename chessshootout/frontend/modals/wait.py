@@ -102,18 +102,26 @@ class WaitModal(BaseModal):
         dot = circle_surface(max(int(size * 0.12), 6), Colors.accent)
         self.window.blit(dot, (cx - dot.get_width() / 2, cy - dot.get_height() / 2))
 
+    def _fonts(self, panel_w):
+        if getattr(self, "_fonts_w", None) != panel_w:
+            self._fonts_w = panel_w
+            self._title_font = get_display_font(max(int(panel_w * 0.06), 20))
+            self._sub_font = get_font(max(int(panel_w * 0.03), 12), bold=False)
+            self._mode_font = get_font(max(int(panel_w * 0.024), 9), bold=True)
+            self._tc_font = get_mono_font(max(int(panel_w * 0.034), 13), bold=True)
+            self._elapsed_font = get_mono_font(max(int(panel_w * 0.03), 11))
+            self._button_font = get_font(max(int(panel_w * 0.034), 13), bold=True)
+        return (self._title_font, self._sub_font, self._mode_font,
+                self._tc_font, self._elapsed_font, self._button_font)
+
     def draw(self):
         if not self._visible or self.rect.width <= 0:
             self.button_rects = {}
             return
         pad = self.padding
         panel_w = min(self.rect.width, MODAL_MAX_WIDTH)
-        title_font = get_display_font(max(int(panel_w * 0.06), 20))
-        sub_font = get_font(max(int(panel_w * 0.03), 12), bold=False)
-        mode_font = get_font(max(int(panel_w * 0.024), 9), bold=True)
-        tc_font = get_mono_font(max(int(panel_w * 0.034), 13), bold=True)
-        elapsed_font = get_mono_font(max(int(panel_w * 0.03), 11))
-        button_font = get_font(max(int(panel_w * 0.034), 13), bold=True)
+        (title_font, sub_font, mode_font, tc_font,
+         elapsed_font, button_font) = self._fonts(panel_w)
         radar = min(68, max(int(panel_w * 0.15), 52))
 
         title = title_font.render("SEARCHING…", True, Colors.text)

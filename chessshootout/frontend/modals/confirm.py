@@ -71,6 +71,14 @@ class ConfirmModal(BaseModal):
     def is_visible(self):
         return self.title is not None
 
+    def _fonts(self, panel_w):
+        if getattr(self, "_fonts_w", None) != panel_w:
+            self._fonts_w = panel_w
+            self._title_font = get_display_font(max(int(panel_w * 0.07), 22))
+            self._sub_font = get_font(max(int(panel_w * 0.032), 13), bold=False)
+            self._button_font = get_font(max(int(panel_w * 0.034), 13), bold=True)
+        return self._title_font, self._sub_font, self._button_font
+
     def draw(self):
         if not self.is_visible() or self.rect.width <= 0:
             self.button_rects = {}
@@ -78,9 +86,7 @@ class ConfirmModal(BaseModal):
         pad = self.padding
         panel_w = min(self.rect.width, MODAL_MAX_WIDTH)
         inner_w = panel_w - 2 * pad
-        title_font = get_display_font(max(int(panel_w * 0.07), 22))
-        sub_font = get_font(max(int(panel_w * 0.032), 13), bold=False)
-        button_font = get_font(max(int(panel_w * 0.034), 13), bold=True)
+        title_font, sub_font, button_font = self._fonts(panel_w)
         btn_h = max(int(panel_w * 0.11), 40)
 
         title_surf = fit_text_to_rect(

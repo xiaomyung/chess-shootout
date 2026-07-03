@@ -1,8 +1,11 @@
 import pygame as pg
 
+from chessshootout.frontend.visual.cache import new_cache, memoized_surface
 from chessshootout.frontend.visual.colors import Colors
 from chessshootout.frontend.visual.draw import supersample
 from chessshootout.frontend.visual.fonts import get_font
+
+_RAIL_CACHE = new_cache()
 
 
 DEFAULT_PADDING = 12
@@ -68,15 +71,17 @@ class BaseModal:
     def _rail_surface(self, intent, width):
         start, end = INTENT_RAIL.get(intent, (Colors.accent, Colors.accent))
 
-        def render(surf, k):
-            w, _ = surf.get_size()
-            railpx = int(MODAL_RAIL * k)
-            c0, c1 = pg.Color(start), pg.Color(end)
-            for x in range(w):
-                surf.fill(c0.lerp(c1, x / max(w - 1, 1)), pg.Rect(x, 0, 1, railpx))
-            mask = pg.Surface(surf.get_size(), pg.SRCALPHA)
-            pg.draw.rect(mask, (255, 255, 255, 255), mask.get_rect(),
-                         border_top_left_radius=int(MODAL_RADIUS * k),
-                         border_top_right_radius=int(MODAL_RADIUS * k))
-            surf.blit(mask, (0, 0), special_flags=pg.BLEND_RGBA_MULT)
-        return supersample((width, MODAL_RADIUS), render)
+        def build():
+            def render(surf, k):
+                w, _ = surf.get_size()
+                railpx = int(MODAL_RAIL * k)
+                c0, c1 = pg.Color(start), pg.Color(end)
+                for x in range(w):
+                    surf.fill(c0.lerp(c1, x / max(w - 1, 1)), pg.Rect(x, 0, 1, railpx))
+                mask = pg.Surface(surf.get_size(), pg.SRCALPHA)
+                pg.draw.rect(mask, (255, 255, 255, 255), mask.get_rect(),
+                             border_top_left_radius=int(MODAL_RADIUS * k),
+                             border_top_right_radius=int(MODAL_RADIUS * k))
+                surf.blit(mask, (0, 0), special_flags=pg.BLEND_RGBA_MULT)
+            return supersample((width, MODAL_RADIUS), render)
+        return memoized_surface(_RAIL_CACHE, (intent, width, str(start), str(end)), build)

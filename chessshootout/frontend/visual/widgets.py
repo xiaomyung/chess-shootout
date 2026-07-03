@@ -3,7 +3,7 @@ import math
 import pygame as pg
 
 from chessshootout.frontend.visual.colors import Colors
-from chessshootout.frontend.visual.cache import render_text
+from chessshootout.frontend.visual.cache import render_text, new_cache, memoized_surface
 from chessshootout.frontend.visual.draw import (
     supersample, rounded_rect_surface, infinity_surface, blit_centered,
 )
@@ -218,19 +218,27 @@ def draw_button_row(window, rect, buttons, font, gap, disabled_keys=None,
     return button_rects
 
 
+_TOGGLE_CACHE = new_cache()
+
+
 def draw_toggle(window, rect, fraction):
     fraction = max(0.0, min(1.0, fraction))
-    track = pg.Color(Colors.surface_active).lerp(pg.Color(Colors.accent), fraction)
+    quant = round(fraction, 2)
+    key = (rect.width, rect.height, quant)
 
-    def render(surf, k):
-        w, h = surf.get_size()
-        pg.draw.rect(surf, track, surf.get_rect(), border_radius=h // 2)
-        pad = max(int(h * 0.16), 2)
-        knob_d = h - 2 * pad
-        knob_x = pad + (w - 2 * pad - knob_d) * fraction
-        pg.draw.circle(surf, pg.Color(Colors.text),
-                       (int(knob_x + knob_d / 2), h // 2), int(knob_d / 2))
-    window.blit(supersample(rect.size, render, scale=6), rect.topleft)
+    def build():
+        track = pg.Color(Colors.surface_active).lerp(pg.Color(Colors.accent), quant)
+
+        def render(surf, k):
+            w, h = surf.get_size()
+            pg.draw.rect(surf, track, surf.get_rect(), border_radius=h // 2)
+            pad = max(int(h * 0.16), 2)
+            knob_d = h - 2 * pad
+            knob_x = pad + (w - 2 * pad - knob_d) * quant
+            pg.draw.circle(surf, pg.Color(Colors.text),
+                           (int(knob_x + knob_d / 2), h // 2), int(knob_d / 2))
+        return supersample(rect.size, render, scale=6)
+    window.blit(memoized_surface(_TOGGLE_CACHE, key, build), rect.topleft)
 
 
 def draw_segmented(window, rect, options, selected_key, font, gap=3):

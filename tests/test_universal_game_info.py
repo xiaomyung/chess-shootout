@@ -63,16 +63,16 @@ def test_chrome_stats_readouts_follow_toggles():
     env.set_show_1pct_low(True)
     env.set_show_frametime(True)
     parts = app._chrome_stats()
-    assert any(p.endswith("FPS") for p in parts)
-    assert any(p.startswith("avg ") for p in parts)
-    assert any(p.startswith("min ") for p in parts)
-    assert any(p.startswith("1%low ") for p in parts)
-    assert any(p.endswith(" ms") for p in parts)
+    assert any(p.startswith("FPS ") for p in parts)
+    assert any(p.startswith("AVG ") for p in parts)
+    assert any(p.startswith("MIN ") for p in parts)
+    assert any(p.startswith("1%LOW ") for p in parts)
+    assert any(p.startswith("FRAME ") and p.endswith("ms") for p in parts)
 
     env.set_show_frame_stats(False)
     env.set_show_1pct_low(False)
     env.set_show_frametime(False)
-    assert app._chrome_stats() == [f"{int(app.clock.get_fps())} FPS"]
+    assert app._chrome_stats() == [f"FPS {int(app.clock.get_fps())}"]
 
 
 def test_current_result_memo_resets_on_new_game():

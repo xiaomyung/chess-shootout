@@ -1748,21 +1748,22 @@ class Frontend(OnlineEventsMixin):
     def _chrome_stats(self):
         parts = []
         if env.get_show_fps():
-            parts.append(f"{int(self.clock.get_fps())} FPS")
+            parts.append(f"FPS {int(self.clock.get_fps())}")
         if env.get_show_frame_stats() and self._frame_times:
             ordered = sorted(self._frame_times)
             avg = sum(ordered) / len(ordered)
-            parts.append(f"avg {1000.0 / avg:.0f}")
-            parts.append(f"min {1000.0 / ordered[-1]:.0f}")
+            parts.append(f"AVG {1000.0 / avg:.0f}")
+            parts.append(f"MIN {1000.0 / ordered[-1]:.0f}")
         if env.get_show_1pct_low() and len(self._frame_times) >= 20:
             ordered = sorted(self._frame_times)
             p99 = ordered[int(len(ordered) * 0.99) - 1]
-            parts.append(f"1%low {1000.0 / p99:.0f}")
+            parts.append(f"1%LOW {1000.0 / p99:.0f}")
         if env.get_show_frametime() and self._frame_times:
-            parts.append(f"{self._frame_times[-1]:.1f} ms")
-        if env.get_show_ping() and self.online_client is not None:
-            ping = self.online_client.get_ping_ms()
-            parts.append(f"PING {ping} ms" if ping is not None else "PING — ms")
+            parts.append(f"FRAME {self._frame_times[-1]:.1f}ms")
+        if env.get_show_ping():
+            ping = (self.online_client.get_ping_ms()
+                    if self.online_client is not None else None)
+            parts.append(f"PING {ping}ms" if ping is not None else "PING —")
         return parts
 
     def _present(self, had_events):
