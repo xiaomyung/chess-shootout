@@ -251,6 +251,8 @@ class Frontend(OnlineEventsMixin):
         self._game_bg_cache = None
         self._needs_full_present = True
         self._frame_times = deque(maxlen=PERF_SAMPLE_COUNT)
+        self._last_work_ms = 0.0
+        self._last_frame_start = None
         self._last_clock_display = None
         self._result_cache_key = None
         self._result_cache = None
@@ -1729,6 +1731,9 @@ class Frontend(OnlineEventsMixin):
     def run(self):
         while self.running:
             frame_start = time.perf_counter()
+            if self._last_frame_start is not None:
+                self._frame_times.append((frame_start - self._last_frame_start) * 1000.0)
+            self._last_frame_start = frame_start
             had_events = self.check_events()
             self.window.fill("black")
             self.draw_frame()
@@ -1737,8 +1742,8 @@ class Frontend(OnlineEventsMixin):
             self.clock.tick(self.target_fps)
             present_start = time.perf_counter()
             self._present(had_events)
-            work_ms = (work_before_present + time.perf_counter() - present_start) * 1000.0
-            self._frame_times.append(work_ms)
+            self._last_work_ms = (
+                work_before_present + time.perf_counter() - present_start) * 1000.0
 
         self._flush_deferred_env_writes(force=True)
         self.chrome.shutdown()
@@ -1758,8 +1763,8 @@ class Frontend(OnlineEventsMixin):
             ordered = sorted(self._frame_times)
             p99 = ordered[int(len(ordered) * 0.99) - 1]
             parts.append(f"1%LOW {1000.0 / p99:.0f}")
-        if env.get_show_frametime() and self._frame_times:
-            parts.append(f"FRAME {self._frame_times[-1]:.1f}ms")
+        if env.get_show_frametime():
+            parts.append(f"FRAME {self._last_work_ms:.1f}ms")
         if env.get_show_ping():
             ping = (self.online_client.get_ping_ms()
                     if self.online_client is not None else None)
