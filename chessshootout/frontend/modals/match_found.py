@@ -74,18 +74,27 @@ class MatchFoundModal(BaseModal):
         elapsed = (pg.time.get_ticks() - self._started_at) / 1000.0
         return max(self._seconds - int(elapsed), 1)
 
+    def _fonts(self, panel_w):
+        if getattr(self, "_fonts_w", None) != panel_w:
+            self._fonts_w = panel_w
+            av = max(int(panel_w * 0.118), 44)
+            self._eyebrow_font = get_font(max(int(panel_w * 0.028), 11), bold=True)
+            self._name_font = get_font(max(int(panel_w * 0.032), 13), bold=True)
+            self._rating_font = get_mono_font(max(int(panel_w * 0.025), 10))
+            self._vs_font = get_display_font(max(int(panel_w * 0.06), 22))
+            self._cd_font = get_font(max(int(panel_w * 0.028), 11), bold=True)
+            self._letter_font = get_display_font(max(int(av * 0.42), 16))
+        return (self._eyebrow_font, self._name_font, self._rating_font,
+                self._vs_font, self._cd_font, self._letter_font)
+
     def draw(self):
         if not self._active or self.rect.width <= 0:
             return
         pad = self.padding
         panel_w = min(self.rect.width, MODAL_MAX_WIDTH)
-        eyebrow_font = get_font(max(int(panel_w * 0.028), 11), bold=True)
-        name_font = get_font(max(int(panel_w * 0.032), 13), bold=True)
-        rating_font = get_mono_font(max(int(panel_w * 0.025), 10))
-        vs_font = get_display_font(max(int(panel_w * 0.06), 22))
-        cd_font = get_font(max(int(panel_w * 0.028), 11), bold=True)
+        (eyebrow_font, name_font, rating_font, vs_font,
+         cd_font, letter_font) = self._fonts(panel_w)
         av = max(int(panel_w * 0.118), 44)
-        letter_font = get_display_font(max(int(av * 0.42), 16))
 
         eyebrow_label = "REMATCH!" if self.rematch else "MATCH FOUND"
         eyebrow = eyebrow_font.render(eyebrow_label, True, Colors.text_dim)

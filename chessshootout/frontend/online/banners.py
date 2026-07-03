@@ -67,12 +67,17 @@ class OfferBanners:
                         btn_font.get_height() + 2 * BTN_PAD_Y)
         return content_h + 2 * PAD_V
 
+    def _fonts(self):
+        if getattr(self, "_name_font", None) is None:
+            self._name_font = get_font(13, bold=True)
+            self._verb_font = get_font(13, bold=True)
+            self._btn_font = get_font(12, bold=True)
+        return self._name_font, self._verb_font, self._btn_font
+
     def draw(self, board_rect):
         if not self._banners or board_rect.width <= 0:
             return
-        name_font = get_font(13, bold=True)
-        verb_font = get_font(13, bold=True)
-        btn_font = get_font(12, bold=True)
+        name_font, verb_font, btn_font = self._fonts()
         h = self._banner_height(name_font, btn_font)
         now = pg.time.get_ticks()
         prev_clip = self.window.get_clip()

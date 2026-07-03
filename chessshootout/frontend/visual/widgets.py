@@ -3,6 +3,7 @@ import math
 import pygame as pg
 
 from chessshootout.frontend.visual.colors import Colors
+from chessshootout.frontend.visual.cache import render_text, new_cache, memoized_surface
 from chessshootout.frontend.visual.draw import (
     supersample, rounded_rect_surface, infinity_surface, blit_centered,
 )
@@ -41,18 +42,23 @@ def build_shell(w, h, winking=False):
     return supersample((max(w, 1), max(h, 1)), render)
 
 
+_KO_BADGE_CACHE = new_cache()
+
+
 def build_ko_badge(count, font, height, winking=False):
-    shell_w = max(int(height * 0.16), 4)
-    shell_h = max(int(height * 0.42), 7)
-    gap = max(int(height * 0.12), 3)
-    text = font.render(f"{count} KO", True,
-                       pg.Color(Colors.amber if winking else Colors.text_muted))
-    th = text.get_height()
-    h = max(shell_h, th)
-    surf = pg.Surface((shell_w + gap + text.get_width(), h), pg.SRCALPHA)
-    surf.blit(build_shell(shell_w, shell_h, winking), (0, (h - shell_h) // 2))
-    surf.blit(text, (shell_w + gap, (h - th) // 2))
-    return surf
+    def build():
+        shell_w = max(int(height * 0.16), 4)
+        shell_h = max(int(height * 0.42), 7)
+        gap = max(int(height * 0.12), 3)
+        text = font.render(f"{count} KO", True,
+                           pg.Color(Colors.amber if winking else Colors.text_muted))
+        th = text.get_height()
+        h = max(shell_h, th)
+        surf = pg.Surface((shell_w + gap + text.get_width(), h), pg.SRCALPHA)
+        surf.blit(build_shell(shell_w, shell_h, winking), (0, (h - shell_h) // 2))
+        surf.blit(text, (shell_w + gap, (h - th) // 2))
+        return surf
+    return memoized_surface(_KO_BADGE_CACHE, (count, height, winking), build)
 
 
 def build_avatar(size, top, bottom):
@@ -174,6 +180,9 @@ def draw_icon_button(window, rect, icon_fn, force_pressed=False, disabled=False,
     icon_fn(window, rect)
 
 
+_GEAR_CACHE = new_cache()
+
+
 def draw_gear(window, rect):
     def render(surf, k):
         w, h = surf.get_size()
@@ -195,7 +204,8 @@ def draw_gear(window, rect):
         hole_r = r * 0.40
         pg.draw.circle(surf, Colors.text, (int(cx), int(cy)), int(r), width=int(r - hole_r))
 
-    window.blit(supersample((max(rect.width, 1), max(rect.height, 1)), render, scale=8),
+    size = (max(rect.width, 1), max(rect.height, 1))
+    window.blit(memoized_surface(_GEAR_CACHE, size, lambda: supersample(size, render, scale=8)),
                 rect.topleft)
 
 
@@ -217,19 +227,27 @@ def draw_button_row(window, rect, buttons, font, gap, disabled_keys=None,
     return button_rects
 
 
+_TOGGLE_CACHE = new_cache()
+
+
 def draw_toggle(window, rect, fraction):
     fraction = max(0.0, min(1.0, fraction))
-    track = pg.Color(Colors.surface_active).lerp(pg.Color(Colors.accent), fraction)
+    quant = round(fraction, 2)
+    key = (rect.width, rect.height, quant)
 
-    def render(surf, k):
-        w, h = surf.get_size()
-        pg.draw.rect(surf, track, surf.get_rect(), border_radius=h // 2)
-        pad = max(int(h * 0.16), 2)
-        knob_d = h - 2 * pad
-        knob_x = pad + (w - 2 * pad - knob_d) * fraction
-        pg.draw.circle(surf, pg.Color(Colors.text),
-                       (int(knob_x + knob_d / 2), h // 2), int(knob_d / 2))
-    window.blit(supersample(rect.size, render, scale=6), rect.topleft)
+    def build():
+        track = pg.Color(Colors.surface_active).lerp(pg.Color(Colors.accent), quant)
+
+        def render(surf, k):
+            w, h = surf.get_size()
+            pg.draw.rect(surf, track, surf.get_rect(), border_radius=h // 2)
+            pad = max(int(h * 0.16), 2)
+            knob_d = h - 2 * pad
+            knob_x = pad + (w - 2 * pad - knob_d) * quant
+            pg.draw.circle(surf, pg.Color(Colors.text),
+                           (int(knob_x + knob_d / 2), h // 2), int(knob_d / 2))
+        return supersample(rect.size, render, scale=6)
+    window.blit(memoized_surface(_TOGGLE_CACHE, key, build), rect.topleft)
 
 
 def draw_segmented(window, rect, options, selected_key, font, gap=3):
@@ -255,7 +273,7 @@ def draw_segmented(window, rect, options, selected_key, font, gap=3):
         if label == "∞":
             glyph = infinity_surface(int(sr.height * 0.42), color)
         else:
-            glyph = fit_text_to_rect(font.render(label, True, color), sr, padding=3)
+            glyph = fit_text_to_rect(render_text(font, label, color), sr, padding=3)
         window.blit(glyph, (sr.centerx - glyph.get_width() / 2,
                             sr.centery - glyph.get_height() / 2))
         rects[key] = sr
@@ -290,7 +308,7 @@ def draw_chip_row(window, rect, options, selected_key, font, gap=5, locked=False
         if label == "∞":
             glyph = infinity_surface(int(cr.height * 0.42), color)
         else:
-            glyph = fit_text_to_rect(font.render(label, True, color), cr, padding=3)
+            glyph = fit_text_to_rect(render_text(font, label, color), cr, padding=3)
         window.blit(glyph, (cr.centerx - glyph.get_width() // 2,
                             cr.centery - glyph.get_height() // 2))
         rects[key] = cr

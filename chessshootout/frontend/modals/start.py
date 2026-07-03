@@ -4,6 +4,7 @@ from chessshootout import paths
 from chessshootout.domain.match import SINGLE_SCREEN, BOT, ONLINE
 from chessshootout.infra import env
 from chessshootout.frontend.visual.colors import Colors
+from chessshootout.frontend.visual.cache import render_text
 from chessshootout.frontend.visual.draw import rounded_rect_surface, supersample
 from chessshootout.frontend.visual.emoji import blit_emoji, emoji_surface
 from chessshootout.frontend.visual.fonts import get_display_font, get_font, get_mono_font
@@ -381,7 +382,7 @@ class StartMenu:
             self.window.blit(press, pos)
         elif hovered:
             self.window.blit(glow, pos)
-        label = self.start_font.render("START", True, Colors.on_accent)
+        label = render_text(self.start_font, "START", Colors.on_accent)
         self.window.blit(label, (self._start_rect.centerx - label.get_width() // 2,
                                  self._start_rect.centery + dy - label.get_height() // 2))
 
@@ -404,13 +405,13 @@ class StartMenu:
                                             -int(gear.height * 0.44)))
 
         self.window.blit(self._brand_tile(), self._tile_rect.topleft)
-        top_surf = self.wordmark_font.render(WORDMARK_TOP, True, Colors.text)
+        top_surf = render_text(self.wordmark_font, WORDMARK_TOP, Colors.text)
         self.window.blit(top_surf, (self._wordmark_top[0] - top_surf.get_width() // 2,
                                     self._wordmark_top[1]))
-        bot_surf = self.wordmark_font.render(WORDMARK_BOTTOM, True, Colors.accent)
+        bot_surf = render_text(self.wordmark_font, WORDMARK_BOTTOM, Colors.accent)
         self.window.blit(bot_surf, (self._wordmark_bottom[0] - bot_surf.get_width() // 2,
                                     self._wordmark_bottom[1]))
-        tag_surf = self.tagline_font.render(TAGLINE, True, Colors.text_muted)
+        tag_surf = render_text(self.tagline_font, TAGLINE, Colors.text_muted)
         self.window.blit(tag_surf, (self._tagline_pos[0] - tag_surf.get_width() // 2,
                                     self._tagline_pos[1]))
 
@@ -451,7 +452,7 @@ class StartMenu:
         return page + [("←", TIME_PREV)]
 
     def _draw_label(self, text, pos):
-        self.window.blit(self.label_font.render(text, True, Colors.text_muted), pos)
+        self.window.blit(render_text(self.label_font, text, Colors.text_muted), pos)
 
     def _draw_recon(self):
         fill = pg.Color(Colors.amber).lerp(pg.Color(Colors.surface_raised), 0.84)

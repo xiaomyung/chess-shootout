@@ -2,6 +2,8 @@ import math
 
 import pygame as pg
 
+from chessshootout.frontend.visual.cache import new_cache, memoized_surface
+
 SUPERSAMPLE = 4
 GLOW_BLUR_PASSES = 3
 
@@ -44,39 +46,44 @@ def soft_blur(surface, passes=GLOW_BLUR_PASSES):
     return forward
 
 
+_INFINITY_CACHE = new_cache()
+
+
 def infinity_surface(height, color):
     h = max(int(height), 6)
     w = int(h * 1.7)
     th = max(h * 0.2, 3.0)
 
-    def render(surf, k):
-        big_w, big_h = surf.get_size()
-        cx, cy = big_w / 2, big_h / 2
-        ax, ay = big_w * 0.355, big_h * 0.275
-        lw = max(int(th * k), 2)
-        n = 140
-        pts = []
-        for i in range(n):
-            t = 2 * math.pi * i / n
-            d = 1 + math.sin(t) ** 2
-            pts.append((cx + ax * math.cos(t) / d,
-                        cy + ay * math.sin(t) * math.cos(t) / d / 0.3536))
-        pg.draw.lines(surf, pg.Color(color), True, pts, lw)
-    return supersample((w, h), render, scale=8)
+    def build():
+        def render(surf, k):
+            big_w, big_h = surf.get_size()
+            cx, cy = big_w / 2, big_h / 2
+            ax, ay = big_w * 0.355, big_h * 0.275
+            lw = max(int(th * k), 2)
+            n = 140
+            pts = []
+            for i in range(n):
+                t = 2 * math.pi * i / n
+                d = 1 + math.sin(t) ** 2
+                pts.append((cx + ax * math.cos(t) / d,
+                            cy + ay * math.sin(t) * math.cos(t) / d / 0.3536))
+            pg.draw.lines(surf, pg.Color(color), True, pts, lw)
+        return supersample((w, h), render, scale=8)
+    return memoized_surface(_INFINITY_CACHE, (h, str(color)), build)
 
 
-_CIRCLE_CACHE = {}
+_CIRCLE_CACHE = new_cache()
 
 
 def circle_surface(diameter, color):
     d = max(int(diameter), 1)
-    key = (d, color)
-    if key not in _CIRCLE_CACHE:
+
+    def build():
         def render(surf, k):
             r = surf.get_width() / 2
             pg.draw.circle(surf, pg.Color(color), (r, r), r)
-        _CIRCLE_CACHE[key] = supersample(d, render)
-    return _CIRCLE_CACHE[key]
+        return supersample(d, render)
+    return memoized_surface(_CIRCLE_CACHE, (d, color), build)
 
 
 def stroked_text(font, text, fill, stroke, sw):
@@ -97,11 +104,20 @@ def blit_centered(surface, text, center):
     surface.blit(text, (round(center[0] - ink.centerx), round(center[1] - ink.centery)))
 
 
+_ROUNDED_RECT_CACHE = new_cache()
+
+
 def rounded_rect_surface(size, radius, fill, border=None, border_width=1):
-    def render(surf, k):
-        r = max(int(radius * k), 1)
-        pg.draw.rect(surf, pg.Color(fill), surf.get_rect(), border_radius=r)
-        if border is not None:
-            pg.draw.rect(surf, pg.Color(border), surf.get_rect(),
-                         width=max(int(border_width * k), 1), border_radius=r)
-    return supersample(size, render)
+    size_key = size if isinstance(size, int) else tuple(size)
+    key = (size_key, int(radius), str(fill), None if border is None else str(border),
+           border_width)
+
+    def build():
+        def render(surf, k):
+            r = max(int(radius * k), 1)
+            pg.draw.rect(surf, pg.Color(fill), surf.get_rect(), border_radius=r)
+            if border is not None:
+                pg.draw.rect(surf, pg.Color(border), surf.get_rect(),
+                             width=max(int(border_width * k), 1), border_radius=r)
+        return supersample(size, render)
+    return memoized_surface(_ROUNDED_RECT_CACHE, key, build)

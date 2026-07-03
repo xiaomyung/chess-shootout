@@ -37,6 +37,77 @@ def _start_local(app, time_minutes=5, incr=2):
     })
 
 
+def test_current_result_reacts_to_clock_flag():
+    """A flagged clock must end the game even though a timeout changes neither
+    move_history length nor manual_result. current_result() is memoized, so its
+    cache key has to include the clock flag or the game never ends (v2.5.0 bug)."""
+    from chessshootout.backend.pieces import PieceColor
+    app = _make_app()
+    _start_local(app, time_minutes=5, incr=2)
+    assert app.current_result() is None
+    app.match.clock.flagged = PieceColor.BLACK
+    assert app.current_result() == "white_wins_on_time"
+    app.match.clock.flagged = PieceColor.WHITE
+    assert app.current_result() == "black_wins_on_time"
+
+
+def test_chrome_stats_readouts_follow_toggles():
+    from chessshootout.infra import env
+    app = _make_app()
+    _start_local(app)
+    for v in [3.0, 3.2, 5.0, 3.0, 3.1] * 24:
+        app._frame_times.append(v)
+    app._last_work_ms = 2.4
+    env.set_show_fps(True)
+    env.set_show_ping(False)
+    env.set_show_frame_stats(True)
+    env.set_show_1pct_low(True)
+    env.set_show_frametime(True)
+    parts = app._chrome_stats()
+    assert any(p.startswith("FPS ") for p in parts)
+    assert any(p.startswith("AVG ") for p in parts)
+    assert any(p.startswith("MIN ") for p in parts)
+    assert any(p.startswith("1%LOW ") for p in parts)
+    assert any(p.startswith("FRAME ") and p.endswith("ms") for p in parts)
+
+    env.set_show_frame_stats(False)
+    env.set_show_1pct_low(False)
+    env.set_show_frametime(False)
+    assert app._chrome_stats() == [f"FPS {int(app.clock.get_fps())}"]
+
+
+def test_current_result_recomputes_when_position_changes_at_same_length(monkeypatch):
+    """The memo key must track the actual position, not just move count. An undo
+    followed by a different move returns to the same length but a different
+    position (e.g. an online takeback + replacement) and must re-evaluate."""
+    from chessshootout.backend.utils import Square
+    app = _make_app()
+    _start_local(app, time_minutes=None, incr=0)
+    backend = app.match.backend
+    calls = []
+    real = backend.game_result
+    monkeypatch.setattr(backend, "game_result",
+                        lambda: (calls.append(1), real())[1])
+    backend.try_move(Square(6, 4), Square(4, 4))
+    app.current_result()
+    backend.undo()
+    backend.try_move(Square(6, 3), Square(4, 3))
+    before = len(calls)
+    app.current_result()
+    assert len(calls) > before
+
+
+def test_current_result_memo_resets_on_new_game():
+    """A flagged/finished game must not leak its cached result into the next."""
+    from chessshootout.backend.pieces import PieceColor
+    app = _make_app()
+    _start_local(app, time_minutes=5, incr=2)
+    app.match.clock.flagged = PieceColor.WHITE
+    assert app.current_result() == "black_wins_on_time"
+    _start_local(app, time_minutes=5, incr=2)
+    assert app.current_result() is None
+
+
 @pytest.mark.parametrize(
     "time_minutes, incr, tc",
     [
@@ -332,11 +403,20 @@ def test_settings_has_performance_section_wired_to_env():
     sections = dict(app._build_settings_sections())
     assert "Performance" in sections
     rows = sections["Performance"]
-    assert [r.title for r in rows] == ["Show FPS", "Show ping"]
-    assert rows[0].getter is env.get_show_fps
-    assert rows[0].setter is env.set_show_fps
-    assert rows[1].getter is env.get_show_ping
-    assert rows[1].setter is env.set_show_ping
+    assert [r.title for r in rows] == [
+        "Show FPS", "Show avg / min FPS", "Show 1% low FPS",
+        "Show frame time", "Show ping",
+    ]
+    wiring = {
+        "Show FPS": (env.get_show_fps, env.set_show_fps),
+        "Show avg / min FPS": (env.get_show_frame_stats, env.set_show_frame_stats),
+        "Show 1% low FPS": (env.get_show_1pct_low, env.set_show_1pct_low),
+        "Show frame time": (env.get_show_frametime, env.set_show_frametime),
+        "Show ping": (env.get_show_ping, env.set_show_ping),
+    }
+    for row in rows:
+        getter, setter = wiring[row.title]
+        assert row.getter is getter and row.setter is setter
 
 
 def test_online_game_info_has_no_ping_line():

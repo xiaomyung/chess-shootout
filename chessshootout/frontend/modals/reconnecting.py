@@ -72,6 +72,15 @@ class ReconnectingModal(BaseModal):
         elapsed = (pg.time.get_ticks() - self._disconnected_at_ms) / 1000.0
         return RECONNECT_TOTAL_SECONDS - elapsed
 
+    def _fonts(self, scale):
+        if getattr(self, "_fonts_scale", None) != scale:
+            self._fonts_scale = scale
+            self._heading_font = get_display_font(max(int(HEADING_REF * scale), 16))
+            self._sub_font = get_font(max(int(SUB_REF * scale), 11), bold=False)
+            self._cd_font = get_mono_font(max(int(COUNTDOWN_REF * scale), 18), bold=True)
+            self._button_font = get_font(max(int(BUTTON_REF * scale), 12), bold=True)
+        return self._heading_font, self._sub_font, self._cd_font, self._button_font
+
     def draw(self):
         if not self._visible or self.rect.width <= 0:
             self.button_rects = {}
@@ -83,10 +92,7 @@ class ReconnectingModal(BaseModal):
 
         scale = min(1.0, min(rect.width, rect.height) / REF_DIAG)
         spinner = max(int(SPINNER_REF * scale), 30)
-        heading_font = get_display_font(max(int(HEADING_REF * scale), 16))
-        sub_font = get_font(max(int(SUB_REF * scale), 11), bold=False)
-        cd_font = get_mono_font(max(int(COUNTDOWN_REF * scale), 18), bold=True)
-        button_font = get_font(max(int(BUTTON_REF * scale), 12), bold=True)
+        heading_font, sub_font, cd_font, button_font = self._fonts(scale)
 
         heading = heading_font.render("RECONNECTING…", True, Colors.text)
         sub = sub_font.render("Hang tight, restoring your game", True, Colors.text_dim)

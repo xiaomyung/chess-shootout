@@ -348,7 +348,11 @@ class PlayerStrip:
 
     def _draw_clock(self, pad, av_size):
         text = format_clock(self.clock_seconds)
-        surf = self.clock_font.render(text, True, self._clock_text_color())
+        color = self._clock_text_color()
+        key = (text, color, self.clock_font)
+        if getattr(self, "_clock_cache", None) is None or self._clock_cache[0] != key:
+            self._clock_cache = (key, self.clock_font.render(text, True, color))
+        surf = self._clock_cache[1]
         hpad = max(int(self.rect.height * 0.22), 8)
         min_w = max(int(self.rect.height * 2.0), 70)
         box_w = max(surf.get_width() + 2 * hpad, min_w)

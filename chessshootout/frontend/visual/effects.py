@@ -146,6 +146,14 @@ class EffectManager:
         self.particles = []
         self._shake = None
 
+    def is_active(self):
+        return bool(
+            self.particles or self.holes or self.captures or self.projectiles
+            or self.drops or self.callouts or self.flags or self._piece_shakes
+            or self._bystanders or self._takeover is not None
+            or self._check_gun is not None or self._king_shake is not None
+            or self._shake is not None)
+
     def held_squares(self):
         return {c["to_sq"] for c in self.captures if not c.get("miss")}
 
