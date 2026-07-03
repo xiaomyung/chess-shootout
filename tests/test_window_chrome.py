@@ -42,15 +42,12 @@ def _hit(chrome, x, y):
 @pytest.mark.skipif(os.name == "nt", reason="off-Windows no-op guard")
 def test_win_snap_is_noop_off_windows(chrome):
     assert chrome._snap is None
-    assert chrome.is_maximized() is False
     chrome.shutdown()                       # safe with nothing attached
     assert chrome._snap is None
 
 
-@pytest.mark.skipif(os.name == "nt", reason="off-Windows: no native maximized state")
-def test_hit_test_still_resizes_when_not_maximized(chrome):
-    assert chrome.is_maximized() is False
-    assert _hit(chrome, 1, 1) == 2          # _HITTEST_RESIZE_TOPLEFT edge still active
+def test_hit_test_resize_edges_stay_active(chrome):
+    assert _hit(chrome, 1, 1) == 2          # _HITTEST_RESIZE_TOPLEFT edge still routed
 
 
 def test_titlebar_renders_background_and_border(chrome):

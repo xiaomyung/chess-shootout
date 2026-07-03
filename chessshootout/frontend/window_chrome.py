@@ -177,9 +177,6 @@ class WindowChrome:
             self._snap.shutdown()
             self._snap = None
 
-    def is_maximized(self):
-        return self._snap is not None and self._snap.maximized
-
     def _resolve_owning_sdl(self, win_id):
         for sdl in _iter_sdl_candidates():
             try:
@@ -235,10 +232,9 @@ class WindowChrome:
         y = area_ptr.contents.y
         if self._win_state != "normal":
             return _HITTEST_NORMAL
-        if not self.is_maximized():
-            code = self._resize_code(x, y)
-            if code is not None:
-                return code
+        code = self._resize_code(x, y)
+        if code is not None:
+            return code
         if y < self.HEIGHT:
             for rect in self._dot_rects.values():
                 if rect.collidepoint(x, y):

@@ -9,10 +9,7 @@ GWLP_WNDPROC = -4
 WS_MAXIMIZEBOX = 0x00010000
 WS_MINIMIZEBOX = 0x00020000
 WS_THICKFRAME = 0x00040000
-WM_NCCALCSIZE = 0x0083
 WM_GETMINMAXINFO = 0x0024
-WM_SIZE = 0x0005
-SIZE_MAXIMIZED = 2
 SWP_NOSIZE = 0x0001
 SWP_NOMOVE = 0x0002
 SWP_NOZORDER = 0x0004
@@ -65,7 +62,6 @@ class WindowsSnap:
         self._user32 = ctypes.windll.user32
         self._orig_wndproc = None
         self._wndproc_cb = None
-        self.maximized = False
         self._configure_signatures()
 
     def _configure_signatures(self):
@@ -127,10 +123,6 @@ class WindowsSnap:
 
     def _wndproc(self, hwnd, msg, wparam, lparam):
         try:
-            if msg == WM_NCCALCSIZE and wparam:
-                return 0
-            if msg == WM_SIZE:
-                self.maximized = (wparam == SIZE_MAXIMIZED)
             if msg == WM_GETMINMAXINFO and not self._is_fullscreen():
                 result = self._call_orig(hwnd, msg, wparam, lparam)
                 self._clamp_maximize_to_work_area(hwnd, lparam)
