@@ -10,8 +10,10 @@ WS_MAXIMIZEBOX = 0x00010000
 WS_MINIMIZEBOX = 0x00020000
 WS_THICKFRAME = 0x00040000
 WM_SIZE = 0x0005
+WM_ERASEBKGND = 0x0014
 WM_GETMINMAXINFO = 0x0024
 SIZE_MAXIMIZED = 2
+BLACK_BRUSH = 4
 SWP_NOSIZE = 0x0001
 SWP_NOMOVE = 0x0002
 SWP_NOZORDER = 0x0004
@@ -83,6 +85,9 @@ class WindowsSnap:
         u.MonitorFromWindow.restype = ctypes.c_void_p
         u.MonitorFromWindow.argtypes = [ctypes.c_void_p, ctypes.c_uint]
         u.GetMonitorInfoW.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
+        u.GetClientRect.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
+        u.FillRect.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p]
+        u.FillRect.restype = ctypes.c_int
 
     def install(self):
         if _WNDPROC is None:
@@ -126,6 +131,9 @@ class WindowsSnap:
 
     def _wndproc(self, hwnd, msg, wparam, lparam):
         try:
+            if msg == WM_ERASEBKGND:
+                self._fill_black(hwnd, wparam)
+                return 1
             if msg == WM_SIZE:
                 self.maximized = (wparam == SIZE_MAXIMIZED)
             if msg == WM_GETMINMAXINFO and not self._is_fullscreen():
@@ -135,6 +143,15 @@ class WindowsSnap:
         except Exception:
             log.debug("window snap wndproc error", exc_info=True)
         return self._call_orig(hwnd, msg, wparam, lparam)
+
+    def _fill_black(self, hwnd, hdc):
+        try:
+            rect = _RECT()
+            self._user32.GetClientRect(hwnd, ctypes.byref(rect))
+            brush = ctypes.windll.gdi32.GetStockObject(BLACK_BRUSH)
+            self._user32.FillRect(hdc, ctypes.byref(rect), brush)
+        except Exception:
+            log.debug("window snap erase-bg fill failed", exc_info=True)
 
     def _clamp_maximize_to_work_area(self, hwnd, lparam):
         try:
