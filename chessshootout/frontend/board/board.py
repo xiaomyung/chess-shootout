@@ -6,6 +6,7 @@ import pygame as pg
 from chessshootout.backend.pseudo_legal import piece_can_pseudo_reach, king_square, checking_square
 from chessshootout.backend.utils import Square
 from chessshootout.frontend.visual.animation import PieceAnimation
+from chessshootout.frontend.visual.cache import new_cache, memoized_surface
 from chessshootout.frontend.visual.colors import Colors
 from chessshootout.frontend.visual.draw import supersample
 from chessshootout.frontend.visual.effects import EffectManager
@@ -14,6 +15,9 @@ from chessshootout.domain.premoves import Premove, speculative_board
 from chessshootout.backend.pieces import PieceType, PieceColor, Piece, opponent_of
 from chessshootout.frontend.visual.fonts import get_font, DISPLAY
 
+
+_OVERLAY_CACHE = new_cache()
+_MARKER_CACHE = new_cache()
 
 DRAG_THRESHOLD_PX = 6
 DRAG_GHOST_ALPHA_FRACTION = 0.30
@@ -99,6 +103,9 @@ class Board:
         self.board_offset_y = 0
         self._promotion_rects = {}
         self._frame_surf = None
+        self._checkerboard_surf = None
+        self._check_squares_key = None
+        self._check_squares = []
         self._arrow_cache = None
         self._shake_dx = 0
         self._shake_dy = 0
@@ -294,11 +301,6 @@ class Board:
                 "top_center": (bbox.centerx, bbox.top),
             }
 
-    def draw_cell(self, row, col):
-        rect = self._cell_rect(row, col)
-        color = Colors.white_tile if (row + col) % 2 == 0 else Colors.black_tile
-        pg.draw.rect(self.window, color, rect)
-
     def _draw_vertical_guides(self):
         gutter_cx = (self.rect.x + self.board_offset_x) // 2
         for visual_row in range(self.SIZE):
@@ -329,8 +331,10 @@ class Board:
         if self._frame_surf is not None:
             self.window.blit(self._frame_surf,
                              (self.rect.x + self._shake_dx, self.rect.y + self._shake_dy))
-        for row, col in product(range(self.SIZE), repeat=2):
-            self.draw_cell(row, col)
+        if self._checkerboard_surf is not None:
+            self.window.blit(self._checkerboard_surf,
+                             (self.board_offset_x + self._shake_dx,
+                              self.board_offset_y + self._shake_dy))
         if self.review_ply is not None:
             self._draw_last_move_highlight()
             self._draw_vertical_guides()
@@ -360,6 +364,28 @@ class Board:
             return
         self._draw_dragged_piece()
 
+    def _cell_overlay(self, color):
+        cs = int(self.cell_size)
+
+        def build():
+            surf = pg.Surface((cs, cs), pg.SRCALPHA)
+            surf.fill(color)
+            return surf
+        return memoized_surface(_OVERLAY_CACHE, (cs, color), build)
+
+    def _in_check_king_squares(self):
+        key = (len(self.match.move_history), self.match.current_turn())
+        if key != self._check_squares_key:
+            self._check_squares_key = key
+            result = []
+            for row, col in product(range(self.SIZE), repeat=2):
+                piece = self.match.piece_at(Square(row, col))
+                if (piece is not None and piece.type == PieceType.KING
+                        and self.match.is_in_check(piece.color)):
+                    result.append(Square(row, col))
+            self._check_squares = result
+        return self._check_squares
+
     def _draw_last_move_highlight(self):
         history = self.match.move_history
         if not history:
@@ -372,9 +398,7 @@ class Board:
             move = history[-1].move
         for sq in (move.from_sq, move.to_sq):
             rect = self._cell_rect(sq.row, sq.col)
-            overlay = pg.Surface((rect.width, rect.height), pg.SRCALPHA)
-            overlay.fill(Colors.last_move)
-            self.window.blit(overlay, rect.topleft)
+            self.window.blit(self._cell_overlay(Colors.last_move), rect.topleft)
 
     def _blit_lifted(self, surface, pivot_local, screen_pivot, angle_deg, zoom):
         rotated = pg.transform.rotozoom(surface, angle_deg, zoom)
@@ -419,15 +443,11 @@ class Board:
                     continue
                 seen.add(sq)
                 rect = self._cell_rect(sq.row, sq.col)
-                overlay = pg.Surface((rect.width, rect.height), pg.SRCALPHA)
-                overlay.fill(Colors.premove)
-                self.window.blit(overlay, rect.topleft)
+                self.window.blit(self._cell_overlay(Colors.premove), rect.topleft)
         chain_tip = self._active_chain_tip()
         if chain_tip is not None:
             rect = self._cell_rect(chain_tip.row, chain_tip.col)
-            overlay = pg.Surface((rect.width, rect.height), pg.SRCALPHA)
-            overlay.fill(Colors.premove_chain_tip)
-            self.window.blit(overlay, rect.topleft)
+            self.window.blit(self._cell_overlay(Colors.premove_chain_tip), rect.topleft)
 
     def _active_chain_tip(self):
         active_sq = self.dragging_from or self.selected_square
@@ -464,9 +484,7 @@ class Board:
     def _draw_annotation_highlights(self):
         for sq in self.highlighted_squares:
             rect = self._cell_rect(sq.row, sq.col)
-            overlay = pg.Surface((rect.width, rect.height), pg.SRCALPHA)
-            overlay.fill(Colors.annotation_highlight)
-            self.window.blit(overlay, rect.topleft)
+            self.window.blit(self._cell_overlay(Colors.annotation_highlight), rect.topleft)
 
     def _draw_arrows(self):
         if self.cell_size <= 0:
@@ -580,26 +598,22 @@ class Board:
             done += seglens[i]
 
     def _draw_check_highlight(self):
-        for row, col in product(range(self.SIZE), repeat=2):
-            piece = self.match.piece_at(Square(row, col))
-            if piece is None or piece.type != PieceType.KING:
-                continue
-            if self.match.is_in_check(piece.color):
-                rect = self._cell_rect(row, col)
-                wash = pg.Surface((rect.width, rect.height), pg.SRCALPHA)
-                wash.fill(Colors.check_fill)
-                self.window.blit(wash, rect.topleft)
-                pg.draw.rect(self.window, Colors.check, rect, 3)
+        for sq in self._in_check_king_squares():
+            rect = self._cell_rect(sq.row, sq.col)
+            self.window.blit(self._cell_overlay(Colors.check_fill), rect.topleft)
+            pg.draw.rect(self.window, Colors.check, rect, 3)
 
     def _draw_hitmarker(self, rect, size, color, thick):
-        def render(surf, k):
-            u = size * k / 40.0
-            tw = max(int(thick * u), 2)
-            for (x1, y1), (x2, y2) in (((7, 7), (14.5, 14.5)), ((33, 7), (25.5, 14.5)),
-                                       ((7, 33), (14.5, 25.5)), ((33, 33), (25.5, 25.5))):
-                _draw_capsule(surf, (x1 * u, y1 * u), (x2 * u, y2 * u), tw, color)
-        self.window.blit(supersample(size, render),
-                         (rect.centerx - size // 2, rect.centery - size // 2))
+        def build():
+            def render(surf, k):
+                u = size * k / 40.0
+                tw = max(int(thick * u), 2)
+                for (x1, y1), (x2, y2) in (((7, 7), (14.5, 14.5)), ((33, 7), (25.5, 14.5)),
+                                           ((7, 33), (14.5, 25.5)), ((33, 33), (25.5, 25.5))):
+                    _draw_capsule(surf, (x1 * u, y1 * u), (x2 * u, y2 * u), tw, color)
+            return supersample(size, render)
+        surf = memoized_surface(_MARKER_CACHE, (size, color, thick, "hit"), build)
+        self.window.blit(surf, (rect.centerx - size // 2, rect.centery - size // 2))
 
     def draw_pieces(self):
         if self.review_ply is not None:
@@ -668,6 +682,20 @@ class Board:
         if self._drag is not None and self._drag["phase"] == "settle":
             return True
         return bool(self.animations)
+
+    def is_dragging(self):
+        return self._drag is not None or self.dragging_from is not None
+
+    def animation_dirty_rect(self):
+        if not self.animations:
+            return pg.Rect(self.rect)
+        pad = int(self.cell_size)
+        region = None
+        for a in self.animations:
+            span = self._cell_rect(a.from_sq.row, a.from_sq.col).union(
+                self._cell_rect(a.to_sq.row, a.to_sq.col)).inflate(pad, pad)
+            region = span if region is None else region.union(span)
+        return region.clip(self.rect) if region is not None else pg.Rect(self.rect)
 
     def start_animation(self, from_sq, to_sq, piece, on_complete=None, bump=False):
         self.animations.append(PieceAnimation(
@@ -786,39 +814,31 @@ class Board:
                     captured = Square(sel.row, target.col)
                     self._draw_capture_hitmarker(self._cell_rect(captured.row, captured.col))
         now = pg.time.get_ticks()
-        for row, col in product(range(self.SIZE), repeat=2):
-            sq = Square(row, col)
-            piece = self.match.piece_at(sq)
-            if (piece is not None and piece.type == PieceType.KING
-                    and self.match.is_in_check(piece.color)):
-                dx, dy = self.effects.piece_offset(sq, now)
-                self._draw_hitmarker(
-                    self._cell_rect(row, col).move(dx, dy),
-                    max(int(self.cell_size * self.KING_HITMARKER_SIZE_FACTOR),
-                        self.HITMARKER_SIZE_MIN),
-                    Colors.accent, self.KING_HITMARKER_THICKNESS)
+        for sq in self._in_check_king_squares():
+            dx, dy = self.effects.piece_offset(sq, now)
+            self._draw_hitmarker(
+                self._cell_rect(sq.row, sq.col).move(dx, dy),
+                max(int(self.cell_size * self.KING_HITMARKER_SIZE_FACTOR),
+                    self.HITMARKER_SIZE_MIN),
+                Colors.accent, self.KING_HITMARKER_THICKNESS)
+
+    def _marker_dot_surface(self, color):
+        s = int(self.cell_size)
+        radius = max(int(s * 0.16), 4)
+        thickness = max(int(s * 0.05), 3)
+
+        def build():
+            def render(surf, k):
+                pg.draw.circle(surf, color, (s * k // 2, s * k // 2),
+                               radius * k, thickness * k)
+            return supersample(s, render)
+        return memoized_surface(_MARKER_CACHE, (s, color, "dot"), build)
 
     def _draw_dot(self, rect):
-        s = int(self.cell_size)
-        radius = max(int(s * 0.16), 4)
-        thickness = max(int(s * 0.05), 3)
-
-        def render(surf, k):
-            pg.draw.circle(surf, Colors.move_indicator, (s * k // 2, s * k // 2),
-                           radius * k, thickness * k)
-
-        self.window.blit(supersample(s, render), rect.topleft)
+        self.window.blit(self._marker_dot_surface(Colors.move_indicator), rect.topleft)
 
     def _draw_locked_marker(self, rect):
-        s = int(self.cell_size)
-        radius = max(int(s * 0.16), 4)
-        thickness = max(int(s * 0.05), 3)
-
-        def render(surf, k):
-            pg.draw.circle(surf, Colors.text_muted, (s * k // 2, s * k // 2),
-                           radius * k, thickness * k)
-
-        self.window.blit(supersample(s, render), rect.topleft)
+        self.window.blit(self._marker_dot_surface(Colors.text_muted), rect.topleft)
 
     def _draw_capture_hitmarker(self, rect):
         self._draw_hitmarker(
@@ -842,6 +862,20 @@ class Board:
         self.rescale_pieces()
         self._render_text()
         self._build_frame_surface()
+        self._build_checkerboard_surface()
+
+    def _build_checkerboard_surface(self):
+        gs = self.cell_size * self.SIZE
+        if gs <= 0:
+            self._checkerboard_surf = None
+            return
+        surf = pg.Surface((gs, gs))
+        cs = self.cell_size
+        for r in range(self.SIZE):
+            for c in range(self.SIZE):
+                color = Colors.white_tile if (r + c) % 2 == 0 else Colors.black_tile
+                pg.draw.rect(surf, color, pg.Rect(c * cs, r * cs, cs, cs))
+        self._checkerboard_surf = surf
 
     def _build_frame_surface(self):
         if self.rect.width <= 0 or self.rect.height <= 0:

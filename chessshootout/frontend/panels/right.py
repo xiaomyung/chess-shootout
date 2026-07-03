@@ -7,6 +7,7 @@ from chessshootout.frontend.visual.scroll_view import ScrollView
 from chessshootout.frontend.visual.widgets import draw_button_row, draw_pill
 from chessshootout.server.protocol import GIVE_TIME_SECONDS
 from chessshootout.frontend.visual.fonts import get_font
+from chessshootout.frontend.visual.cache import render_text
 
 
 BUTTONS = [
@@ -199,12 +200,12 @@ class RightMenu:
             cx = self._draw_mode_pill(mode.upper(), cx, cy) + 10
         tc = info.get("time_control")
         if tc:
-            tc_surf = self.font.render(tc, True, Colors.text)
+            tc_surf = render_text(self.font, tc, Colors.text)
             self.window.blit(tc_surf, (cx, cy - tc_surf.get_height() / 2))
             cx += tc_surf.get_width() + 10
         rnd = info.get("round")
         if rnd:
-            rnd_surf = self.round_font.render(f"ROUND {rnd}", True, Colors.text_muted)
+            rnd_surf = render_text(self.round_font, f"ROUND {rnd}", Colors.text_muted)
             sep_x = rect.right - rnd_surf.get_width() - 12
             pg.draw.line(self.window, Colors.border,
                          (sep_x, cy - rnd_surf.get_height() // 2),
@@ -213,7 +214,7 @@ class RightMenu:
                                         cy - rnd_surf.get_height() / 2))
         line_h = self._info_line_height()
         for i, line in enumerate(info.get("lines", [])):
-            surf = self.font.render(line, True, Colors.text_dim)
+            surf = render_text(self.font, line, Colors.text_dim)
             max_w = rect.width
             if surf.get_width() > max_w > 0:
                 surf = surf.subsurface(pg.Rect(0, 0, max_w, surf.get_height()))
@@ -323,7 +324,7 @@ class RightMenu:
             white_ply = pair_idx * 2 + 1
             black_ply = pair_idx * 2 + 2 if black_entry is not None else None
 
-            prefix_surf = self.font.render(f"{number:>3}.", True, Colors.text_muted)
+            prefix_surf = render_text(self.font, f"{number:>3}.", Colors.text_muted)
             self.window.blit(prefix_surf, (row_x, row_y + (line_h - prefix_surf.get_height()) // 2))
 
             white_cell = pg.Rect(white_x, row_y, cell_w, line_h)
@@ -367,7 +368,7 @@ class RightMenu:
             pg.draw.rect(self.window, Colors.surface_active, rect, border_radius=4)
             pg.draw.rect(self.window, Colors.accent, rect, width=1, border_radius=4)
         color = Colors.text if active else Colors.text_dim
-        surf = self.moves_font.render(entry.san, True, color)
+        surf = render_text(self.moves_font, entry.san, color)
         self.window.blit(surf, (rect.x + 4, rect.centery - surf.get_height() / 2))
 
     def _active_ply(self, history_len):

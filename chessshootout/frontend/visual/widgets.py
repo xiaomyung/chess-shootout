@@ -3,6 +3,7 @@ import math
 import pygame as pg
 
 from chessshootout.frontend.visual.colors import Colors
+from chessshootout.frontend.visual.cache import render_text
 from chessshootout.frontend.visual.draw import (
     supersample, rounded_rect_surface, infinity_surface, blit_centered,
 )
@@ -255,7 +256,7 @@ def draw_segmented(window, rect, options, selected_key, font, gap=3):
         if label == "∞":
             glyph = infinity_surface(int(sr.height * 0.42), color)
         else:
-            glyph = fit_text_to_rect(font.render(label, True, color), sr, padding=3)
+            glyph = fit_text_to_rect(render_text(font, label, color), sr, padding=3)
         window.blit(glyph, (sr.centerx - glyph.get_width() / 2,
                             sr.centery - glyph.get_height() / 2))
         rects[key] = sr
@@ -290,7 +291,7 @@ def draw_chip_row(window, rect, options, selected_key, font, gap=5, locked=False
         if label == "∞":
             glyph = infinity_surface(int(cr.height * 0.42), color)
         else:
-            glyph = fit_text_to_rect(font.render(label, True, color), cr, padding=3)
+            glyph = fit_text_to_rect(render_text(font, label, color), cr, padding=3)
         window.blit(glyph, (cr.centerx - glyph.get_width() // 2,
                             cr.centery - glyph.get_height() // 2))
         rects[key] = cr

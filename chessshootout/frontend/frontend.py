@@ -40,6 +40,7 @@ from chessshootout.frontend.modals.help import HelpModal
 from chessshootout.frontend.modals.reconnecting import ReconnectingModal
 from chessshootout.frontend.visual.toast import Toast
 from chessshootout.frontend.visual import backdrop
+from chessshootout.frontend.visual import cache
 from chessshootout.frontend.visual.effects import TAKEOVER_TOTAL_MS
 from chessshootout.frontend.window_chrome import (
     WindowChrome, WINDOW_FLAGS, MIN_WINDOW_WIDTH, MIN_WINDOW_HEIGHT,
@@ -245,6 +246,10 @@ class Frontend(OnlineEventsMixin):
         self._flag_fall_played = False
         self._click_sound_played = False
         self._game_bg_cache = None
+        self._needs_full_present = True
+        self._last_clock_display = None
+        self._result_cache_key = None
+        self._result_cache = None
         self._result_first_seen_at_ms = None
         self._pgn_result_tag = None
         self._match_session_id = None
@@ -363,7 +368,11 @@ class Frontend(OnlineEventsMixin):
         return self.match.backend
 
     def current_result(self):
-        return self.manual_result or self.match.game_result()
+        key = (len(self.match.move_history), self.manual_result)
+        if key != self._result_cache_key:
+            self._result_cache_key = key
+            self._result_cache = self.manual_result or self.match.game_result()
+        return self._result_cache
 
     def result_text(self):
         code = self.current_result()
@@ -1705,7 +1714,7 @@ class Frontend(OnlineEventsMixin):
 
     def run(self):
         while self.running:
-            self.check_events()
+            had_events = self.check_events()
             self.window.fill("black")
             self.draw_frame()
             ping = (self.online_client.get_ping_ms()
@@ -1713,11 +1722,51 @@ class Frontend(OnlineEventsMixin):
             self.chrome.draw(fps=self.clock.get_fps(), ping=ping,
                              show_fps=env.get_show_fps(), show_ping=env.get_show_ping())
             self.clock.tick(self.target_fps)
-            pg.display.flip()
+            self._present(had_events)
 
         self._flush_deferred_env_writes(force=True)
         self.chrome.shutdown()
+        cache.clear_all()
         pg.quit()
+
+    def _present(self, had_events):
+        rects = self._present_rects(had_events)
+        if rects is None:
+            pg.display.flip()
+        else:
+            pg.display.update(rects)
+
+    def _present_rects(self, had_events):
+        if (had_events or self._needs_full_present or self.mode == "menu"
+                or self._menu_overlay_active() or self.toast.is_visible()
+                or not self.offer_banners.is_empty()
+                or self.skillcheck_overlay.is_active()
+                or self.current_result() is not None
+                or self._give_time_holding
+                or self.board.is_dragging()
+                or self.board.effects.is_active()
+                or self.board._restore_anims
+                or self.board.pending_promotion_square is not None):
+            self._needs_full_present = False
+            return None
+        rects = [pg.Rect(0, 0, self.window_width, self.chrome.HEIGHT)]
+        now = pg.time.get_ticks()
+        if (self.board.is_animating()
+                or now - self.board.last_animation_completed_at_ms < 120):
+            rects.append(self.board.animation_dirty_rect())
+        clock_display = self._clock_display_key()
+        if clock_display != self._last_clock_display:
+            self._last_clock_display = clock_display
+            rects.append(self.player_strip_top.rect)
+            rects.append(self.player_strip_bottom.rect)
+        return rects
+
+    def _clock_display_key(self):
+        clock = self.match.clock
+        if clock is None:
+            return None
+        return (round(clock.remaining(PieceColor.WHITE), 1),
+                round(clock.remaining(PieceColor.BLACK), 1))
 
     def _menu_overlay_active(self):
         return any(m.is_visible() for m in (
@@ -1845,7 +1894,9 @@ class Frontend(OnlineEventsMixin):
         self._update_online_phase()
 
     def _refresh_game_info(self):
-        self.right_menu.set_game_info(self._compute_game_info())
+        info = self._compute_game_info()
+        if info != self.right_menu.game_info:
+            self.right_menu.set_game_info(info)
 
     def _compute_game_info(self):
         if self.mode == "menu":
@@ -2256,6 +2307,7 @@ class Frontend(OnlineEventsMixin):
         self.directory_browser.set_rect(wide_overlay_rect)
         self.country_picker.set_rect(wide_overlay_rect)
         self._last_layout_mode = self.mode
+        self._needs_full_present = True
         self.right_menu.set_rect(menu_rect)
         self.player_strip_top.set_rect(top_strip_rect)
         self.player_strip_bottom.set_rect(bottom_strip_rect)
@@ -2508,7 +2560,8 @@ class Frontend(OnlineEventsMixin):
             self.sound_manager.play_drop()
 
     def check_events(self):
-        for event in pg.event.get():
+        events = pg.event.get()
+        for event in events:
             if event.type == pg.QUIT:
                 self.running = False
 
@@ -2587,3 +2640,4 @@ class Frontend(OnlineEventsMixin):
                 self.window_height = h
                 self._cancel_all_scroll()
                 self._compute_layout()
+        return bool(events)
