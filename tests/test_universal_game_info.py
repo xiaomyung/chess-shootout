@@ -37,6 +37,31 @@ def _start_local(app, time_minutes=5, incr=2):
     })
 
 
+def test_current_result_reacts_to_clock_flag():
+    """A flagged clock must end the game even though a timeout changes neither
+    move_history length nor manual_result. current_result() is memoized, so its
+    cache key has to include the clock flag or the game never ends (v2.5.0 bug)."""
+    from chessshootout.backend.pieces import PieceColor
+    app = _make_app()
+    _start_local(app, time_minutes=5, incr=2)
+    assert app.current_result() is None
+    app.match.clock.flagged = PieceColor.BLACK
+    assert app.current_result() == "white_wins_on_time"
+    app.match.clock.flagged = PieceColor.WHITE
+    assert app.current_result() == "black_wins_on_time"
+
+
+def test_current_result_memo_resets_on_new_game():
+    """A flagged/finished game must not leak its cached result into the next."""
+    from chessshootout.backend.pieces import PieceColor
+    app = _make_app()
+    _start_local(app, time_minutes=5, incr=2)
+    app.match.clock.flagged = PieceColor.WHITE
+    assert app.current_result() == "black_wins_on_time"
+    _start_local(app, time_minutes=5, incr=2)
+    assert app.current_result() is None
+
+
 @pytest.mark.parametrize(
     "time_minutes, incr, tc",
     [

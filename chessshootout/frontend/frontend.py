@@ -368,7 +368,9 @@ class Frontend(OnlineEventsMixin):
         return self.match.backend
 
     def current_result(self):
-        key = (len(self.match.move_history), self.manual_result)
+        clock = self.match.clock
+        flagged = clock.flagged if clock is not None else None
+        key = (len(self.match.move_history), self.manual_result, flagged)
         if key != self._result_cache_key:
             self._result_cache_key = key
             self._result_cache = self.manual_result or self.match.game_result()
@@ -1115,6 +1117,8 @@ class Frontend(OnlineEventsMixin):
         self._cancel_give_time_hold()
         self.manual_result = None
         self._flag_fall_played = False
+        self._result_cache_key = None
+        self._result_cache = None
         self._result_first_seen_at_ms = None
         self._pgn_result_tag = None
         self._last_saved_pgn_path = None
