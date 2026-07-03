@@ -206,6 +206,12 @@ CHESS_MASTER_VOLUME=0.70    # 0.0–1.0; the in-game slider writes here
 two clients on one machine). The games folder is set from in-app **Options**
 and persisted as `CHESS_DATA_DIR`.
 
+**Options → Performance** toggles a title-bar diagnostic overlay: FPS, rolling
+average / minimum FPS, 1% low (the stutter metric), and per-frame render time in
+milliseconds. Each is an independent switch (`CHESS_SHOW_FPS`,
+`CHESS_SHOW_FRAME_STATS`, `CHESS_SHOW_1PCT_LOW`, `CHESS_SHOW_FRAMETIME`,
+`CHESS_SHOW_PING`).
+
 With `CHESS_SERVER_ADDR` unset, the downloaded desktop app connects to the
 public server (`server.chess-shootout.com`) while a source checkout uses
 `localhost:8000`; set it — or use in-app **Options → Server** — to point at
