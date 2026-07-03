@@ -109,6 +109,7 @@ class WindowChrome:
         self._sdl_window = None
         self._cb = None
         self._wordmark = None
+        self._stats_font = None
         self._wordmark_accent = None
         self._logo_surf = None
         self._cursor = None
@@ -288,7 +289,7 @@ class WindowChrome:
             self._dot_rects[key] = rect
             x -= self.DOT_RADIUS * 2 + self.DOT_GAP
 
-    def draw(self, fps=None, ping=None, show_fps=False, show_ping=False):
+    def draw(self, stats=None):
         self._w, self._h = self.window.get_size()
         self._layout_dots(self._w)
         bar = pg.Rect(0, 0, self._w, self.HEIGHT)
@@ -296,7 +297,7 @@ class WindowChrome:
         pg.draw.line(self.window, pg.Color(Colors.border),
                      (0, self.HEIGHT - 1), (self._w, self.HEIGHT - 1))
         self._draw_logo()
-        self._draw_stats(fps, ping, show_fps, show_ping)
+        self._draw_stats(stats or [])
         self._draw_dots()
 
     def _wordmark_right_edge(self):
@@ -306,21 +307,13 @@ class WindowChrome:
         return (tile_right + self.WORDMARK_GAP
                 + self._wordmark.get_width() + self._wordmark_accent.get_width())
 
-    @staticmethod
-    def _stat_texts(fps, ping, show_fps, show_ping):
-        parts = []
-        if show_fps:
-            parts.append(f"{int(fps or 0)} FPS")
-        if show_ping:
-            parts.append(f"PING {ping} ms" if ping is not None else "PING — ms")
-        return parts
-
-    def _draw_stats(self, fps, ping, show_fps, show_ping):
-        parts = self._stat_texts(fps, ping, show_fps, show_ping)
+    def _draw_stats(self, parts):
         if not parts or not self._dot_rects:
             return
-        font = get_mono_font(self.STATS_FONT_PX, bold=True)
-        surfs = [font.render(text, True, pg.Color(Colors.text_dim)) for text in parts]
+        if self._stats_font is None:
+            self._stats_font = get_mono_font(self.STATS_FONT_PX, bold=True)
+        surfs = [self._stats_font.render(text, True, pg.Color(Colors.text_dim))
+                 for text in parts]
         total_w = sum(s.get_width() for s in surfs) + self.STATS_GAP * (len(surfs) - 1)
         right = min(rect.left for rect in self._dot_rects.values()) - self.STATS_PAD
         left = right - total_w

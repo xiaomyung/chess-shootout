@@ -292,24 +292,6 @@ def test_normal_titlebar_click_does_not_toggle_fullscreen(chrome, monkeypatch):
     assert calls == []
 
 
-@pytest.mark.parametrize(
-    "fps, ping, show_fps, show_ping, expected",
-    [
-        pytest.param(60.4, 32, True, True, ["60 FPS", "PING 32 ms"], id="both"),
-        pytest.param(144.9, None, True, True, ["144 FPS", "PING — ms"], id="ping_none"),
-        pytest.param(60, 12, True, False, ["60 FPS"], id="fps_only"),
-        pytest.param(60, 12, False, True, ["PING 12 ms"], id="ping_only"),
-        pytest.param(60, 12, False, False, [], id="both_off"),
-    ],
-)
-def test_stat_texts(fps, ping, show_fps, show_ping, expected):
-    assert WindowChrome._stat_texts(fps, ping, show_fps, show_ping) == expected
-
-
-def test_stats_order_fps_left_ping_rightmost():
-    assert WindowChrome._stat_texts(60, 32, True, True) == ["60 FPS", "PING 32 ms"]
-
-
 def _stats_band(chrome):
     cy = chrome.HEIGHT // 2
     right = min(rect.left for rect in chrome._dot_rects.values()) - chrome.STATS_PAD
@@ -319,10 +301,10 @@ def _stats_band(chrome):
 
 def test_stats_paint_band_when_enabled_and_clear_when_off(chrome):
     chrome.window.fill("black")
-    chrome.draw(fps=60, ping=32, show_fps=False, show_ping=False)
+    chrome.draw([])
     off = _stats_band(chrome)
     chrome.window.fill("black")
-    chrome.draw(fps=60, ping=32, show_fps=True, show_ping=True)
+    chrome.draw(["60 FPS", "PING 32 ms"])
     on = _stats_band(chrome)
     assert on != off, "enabling stats should paint glyphs in the band left of the dots"
     bg = pg.Color(Colors.titlebar_bg)
@@ -331,7 +313,7 @@ def test_stats_paint_band_when_enabled_and_clear_when_off(chrome):
 
 def test_stats_stay_left_of_dots(chrome):
     chrome.window.fill("black")
-    chrome.draw(fps=60, ping=32, show_fps=True, show_ping=True)
+    chrome.draw(["60 FPS", "PING 32 ms"])
     cy = chrome.HEIGHT // 2
     leftmost_dot = min(rect.left for rect in chrome._dot_rects.values())
     bg = pg.Color(Colors.titlebar_bg)[:3]

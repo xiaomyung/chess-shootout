@@ -225,6 +225,30 @@ def set_show_ping(value):
     _set_bool("CHESS_SHOW_PING", value)
 
 
+def get_show_frame_stats():
+    return _get_bool("CHESS_SHOW_FRAME_STATS", False)
+
+
+def set_show_frame_stats(value):
+    _set_bool("CHESS_SHOW_FRAME_STATS", value)
+
+
+def get_show_1pct_low():
+    return _get_bool("CHESS_SHOW_1PCT_LOW", False)
+
+
+def set_show_1pct_low(value):
+    _set_bool("CHESS_SHOW_1PCT_LOW", value)
+
+
+def get_show_frametime():
+    return _get_bool("CHESS_SHOW_FRAMETIME", False)
+
+
+def set_show_frametime(value):
+    _set_bool("CHESS_SHOW_FRAMETIME", value)
+
+
 def get_default_time_control():
     value = os.environ.get("CHESS_DEFAULT_TC") or _DEFAULT_TIME_CONTROL
     return value if value in TIME_CONTROL_VALUES else _DEFAULT_TIME_CONTROL

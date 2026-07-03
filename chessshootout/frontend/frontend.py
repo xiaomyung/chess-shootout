@@ -6,7 +6,9 @@ import shutil
 import subprocess
 import sys
 import threading
+import time
 import uuid
+from collections import deque
 from datetime import datetime
 
 import pygame as pg
@@ -159,6 +161,7 @@ STRIP_GAP_RATIO = 0.015
 
 AUTO_FLIP_DELAY_MS = 200
 RESULT_FADE_MS = 400
+PERF_SAMPLE_COUNT = 240
 RESULT_MODAL_DELAY_MS = 500
 RESULT_TAKEOVER_MS = TAKEOVER_TOTAL_MS
 RESULT_FADE_MAX_ALPHA = 140
@@ -247,6 +250,7 @@ class Frontend(OnlineEventsMixin):
         self._click_sound_played = False
         self._game_bg_cache = None
         self._needs_full_present = True
+        self._frame_times = deque(maxlen=PERF_SAMPLE_COUNT)
         self._last_clock_display = None
         self._result_cache_key = None
         self._result_cache = None
@@ -606,6 +610,12 @@ class Frontend(OnlineEventsMixin):
             ("Performance", [
                 ToggleRow("Show FPS", "Frame rate in the title bar",
                           env.get_show_fps, env.set_show_fps),
+                ToggleRow("Show avg / min FPS", "Rolling render-rate over recent frames",
+                          env.get_show_frame_stats, env.set_show_frame_stats),
+                ToggleRow("Show 1% low FPS", "Worst-1% frames — the stutter metric",
+                          env.get_show_1pct_low, env.set_show_1pct_low),
+                ToggleRow("Show frame time", "Milliseconds of render work per frame",
+                          env.get_show_frametime, env.set_show_frametime),
                 ToggleRow("Show ping", "Network latency in the title bar",
                           env.get_show_ping, env.set_show_ping),
             ]),
@@ -1718,20 +1728,42 @@ class Frontend(OnlineEventsMixin):
 
     def run(self):
         while self.running:
+            frame_start = time.perf_counter()
             had_events = self.check_events()
             self.window.fill("black")
             self.draw_frame()
-            ping = (self.online_client.get_ping_ms()
-                    if self.online_client is not None else None)
-            self.chrome.draw(fps=self.clock.get_fps(), ping=ping,
-                             show_fps=env.get_show_fps(), show_ping=env.get_show_ping())
+            self.chrome.draw(self._chrome_stats())
+            work_before_present = time.perf_counter() - frame_start
             self.clock.tick(self.target_fps)
+            present_start = time.perf_counter()
             self._present(had_events)
+            work_ms = (work_before_present + time.perf_counter() - present_start) * 1000.0
+            self._frame_times.append(work_ms)
 
         self._flush_deferred_env_writes(force=True)
         self.chrome.shutdown()
         cache.clear_all()
         pg.quit()
+
+    def _chrome_stats(self):
+        parts = []
+        if env.get_show_fps():
+            parts.append(f"{int(self.clock.get_fps())} FPS")
+        if env.get_show_frame_stats() and self._frame_times:
+            ordered = sorted(self._frame_times)
+            avg = sum(ordered) / len(ordered)
+            parts.append(f"avg {1000.0 / avg:.0f}")
+            parts.append(f"min {1000.0 / ordered[-1]:.0f}")
+        if env.get_show_1pct_low() and len(self._frame_times) >= 20:
+            ordered = sorted(self._frame_times)
+            p99 = ordered[int(len(ordered) * 0.99) - 1]
+            parts.append(f"1%low {1000.0 / p99:.0f}")
+        if env.get_show_frametime() and self._frame_times:
+            parts.append(f"{self._frame_times[-1]:.1f} ms")
+        if env.get_show_ping() and self.online_client is not None:
+            ping = self.online_client.get_ping_ms()
+            parts.append(f"PING {ping} ms" if ping is not None else "PING — ms")
+        return parts
 
     def _present(self, had_events):
         rects = self._present_rects(had_events)

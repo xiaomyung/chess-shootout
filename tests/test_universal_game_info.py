@@ -51,6 +51,30 @@ def test_current_result_reacts_to_clock_flag():
     assert app.current_result() == "black_wins_on_time"
 
 
+def test_chrome_stats_readouts_follow_toggles():
+    from chessshootout.infra import env
+    app = _make_app()
+    _start_local(app)
+    for v in [3.0, 3.2, 5.0, 3.0, 3.1] * 6:
+        app._frame_times.append(v)
+    env.set_show_fps(True)
+    env.set_show_ping(False)
+    env.set_show_frame_stats(True)
+    env.set_show_1pct_low(True)
+    env.set_show_frametime(True)
+    parts = app._chrome_stats()
+    assert any(p.endswith("FPS") for p in parts)
+    assert any(p.startswith("avg ") for p in parts)
+    assert any(p.startswith("min ") for p in parts)
+    assert any(p.startswith("1%low ") for p in parts)
+    assert any(p.endswith(" ms") for p in parts)
+
+    env.set_show_frame_stats(False)
+    env.set_show_1pct_low(False)
+    env.set_show_frametime(False)
+    assert app._chrome_stats() == [f"{int(app.clock.get_fps())} FPS"]
+
+
 def test_current_result_memo_resets_on_new_game():
     """A flagged/finished game must not leak its cached result into the next."""
     from chessshootout.backend.pieces import PieceColor
@@ -357,11 +381,20 @@ def test_settings_has_performance_section_wired_to_env():
     sections = dict(app._build_settings_sections())
     assert "Performance" in sections
     rows = sections["Performance"]
-    assert [r.title for r in rows] == ["Show FPS", "Show ping"]
-    assert rows[0].getter is env.get_show_fps
-    assert rows[0].setter is env.set_show_fps
-    assert rows[1].getter is env.get_show_ping
-    assert rows[1].setter is env.set_show_ping
+    assert [r.title for r in rows] == [
+        "Show FPS", "Show avg / min FPS", "Show 1% low FPS",
+        "Show frame time", "Show ping",
+    ]
+    wiring = {
+        "Show FPS": (env.get_show_fps, env.set_show_fps),
+        "Show avg / min FPS": (env.get_show_frame_stats, env.set_show_frame_stats),
+        "Show 1% low FPS": (env.get_show_1pct_low, env.set_show_1pct_low),
+        "Show frame time": (env.get_show_frametime, env.set_show_frametime),
+        "Show ping": (env.get_show_ping, env.set_show_ping),
+    }
+    for row in rows:
+        getter, setter = wiring[row.title]
+        assert row.getter is getter and row.setter is setter
 
 
 def test_online_game_info_has_no_ping_line():
