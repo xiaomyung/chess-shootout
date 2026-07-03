@@ -305,6 +305,8 @@ def create_app(*, now_provider=time.monotonic, max_rooms=DEFAULT_MAX_ROOMS):
             pending_skillcheck=pending,
             skillcheck_locks=locks,
             skillcheck_log=skillcheck_log,
+            result_reason=room.result[0] if room.result else None,
+            result_winner=room.result[1] if room.result else None,
         )
 
     @app.post("/reclaim", response_model=ReclaimResponse)
@@ -438,6 +440,9 @@ async def _ws_session(app, websocket, room_id):
         opp_ws = connections.get_for_color(room, room.opp_color(color))
         if opp_ws is not None:
             await send(opp_ws, ConnectionStatusMessage(opp_state="connected"))
+        if room.game_start_broadcast:
+            await send(websocket, ConnectionStatusMessage(
+                opp_state="connected" if opp_ws is not None else "reconnecting"))
 
     ws_rate_limiter = UuidRateLimiter(
         WS_MESSAGES_PER_SECOND, WS_RATE_WINDOW_SECONDS,
@@ -449,6 +454,10 @@ async def _ws_session(app, websocket, room_id):
             try:
                 raw = await websocket.receive_text()
             except WebSocketDisconnect:
+                break
+            except RuntimeError as exc:
+                log.debug("ws recv on superseded/closed socket room=%s color=%s: %s",
+                          room.room_id, color, exc)
                 break
             except Exception as exc:
                 log.warning("ws recv unexpected exc room=%s color=%s exc=%r",

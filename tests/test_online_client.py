@@ -1,10 +1,12 @@
 """URL builder unit tests. Live in transport.py post-M19; the client just delegates."""
 import asyncio
 import time
+from types import SimpleNamespace
 
 import pytest
 
-from chessshootout.online.client import OnlineClient, PING_SAMPLE_WINDOW
+from chessshootout.online.client import (
+    OnlineClient, PING_SAMPLE_WINDOW, RECONNECT_BACKOFF_MAX_SECONDS)
 from chessshootout.online.transport import _UrlBuilder, _split_addr, WsConnectionClosed
 
 
@@ -169,3 +171,79 @@ def test_ws_session_clears_old_ping_samples_on_reconnect():
     client._ping_samples_ms.extend([100.0, 110.0, 120.0])
     client._ping_samples_ms.clear()
     assert client.get_ping_ms() is None
+
+
+def test_is_connected_requires_both_state_and_socket():
+    client = OnlineClient()
+    client.state = "connected"
+    client._ws = None
+    assert client.is_connected() is False, "state alone is not enough — the socket is gone"
+    client._ws = object()
+    assert client.is_connected() is True
+    client.state = "reconnecting"
+    assert client.is_connected() is False
+
+
+class _ClosedWs:
+    async def recv(self):
+        raise WsConnectionClosed(None, None)
+
+    async def close(self):
+        pass
+
+
+def test_ws_session_refreshes_liveness_and_opp_state_on_connect():
+    """The storm root cause: a reconnect must reset the silence timer (against the OLD
+    session's timestamp) and clear the self-set opp_state, so the heartbeat check
+    doesn't instantly force another reconnect."""
+    client = OnlineClient()
+    client._room_id, client._session_token = "r", "t"
+    client._outbound = asyncio.Queue()
+    client._last_server_msg_at = time.monotonic() - 1000.0    # stale from the dead session
+    client.opp_state = "reconnecting"
+
+    client._transport = SimpleNamespace(
+        ws_connect=lambda room, token: _closed_ws_coro())
+    asyncio.run(client._run_ws_session())
+
+    assert client.is_server_silent() is False, "silence timer reset on connect"
+    assert client.opp_state == "connected", "opp_state no longer stuck reconnecting"
+    assert client.state == "connected"
+
+
+async def _closed_ws_coro():
+    return _ClosedWs()
+
+
+def test_resume_backoff_grows_and_is_bounded(monkeypatch):
+    client = OnlineClient()
+    client._room_id = "00000000-0000-4000-8000-000000000000"
+    client._session_token = "tok"
+    client._reconnect_total = 60.0
+    sleeps = []
+
+    async def fake_sleep(d):
+        sleeps.append(d)
+
+    monkeypatch.setattr(asyncio, "sleep", fake_sleep)
+
+    class _Http:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *a):
+            return False
+
+    calls = {"n": 0}
+
+    async def resume_async(body, http):
+        calls["n"] += 1
+        return None if calls["n"] <= 4 else SimpleNamespace(model_dump=lambda: {"ok": True})
+
+    client._transport = SimpleNamespace(
+        make_async_http=lambda: _Http(), resume_async=resume_async)
+    result = asyncio.run(client._resume_with_retries())
+
+    assert result == {"ok": True}
+    assert sleeps == [2, 4, 8, 8], "exponential backoff, capped at the max"
+    assert max(sleeps) <= RECONNECT_BACKOFF_MAX_SECONDS

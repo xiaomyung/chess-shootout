@@ -36,6 +36,7 @@ ONLINE_DRAW_REASONS = {
     "draw_fifty_move", "draw_insufficient_material",
 }
 ONLINE_STATIC_RESULTS = {"aborted", "aborted_disconnect", "server_shutdown"}
+SAVE_ON_STATIC_RESULTS = {"aborted_disconnect", "server_shutdown"}
 
 ONLINE_HARD_FAILURE_REASONS = {
     "server_unreachable", "reconnect_failed", "room_full",
@@ -139,6 +140,7 @@ class OnlineEventsMixin:
             return
         if reason == "room_lost":
             self._resyncing = False
+            self._auto_save_pgn()
             self.reconnecting_modal.hide()
             self.offer_banners.clear()
             self.confirm_modal.show(
@@ -290,6 +292,7 @@ class OnlineEventsMixin:
         self.board.selected_square = None
         self.board._clear_premoves()
         self.board.clear_annotations()
+        self._adopt_resumed_result(payload)
         self._apply_resumed_skillcheck_log(payload.get("skillcheck_log", []))
         self._restore_online_skillcheck_state(payload)
         self._resyncing = False
@@ -485,42 +488,54 @@ class OnlineEventsMixin:
         else:
             self._begin_resync()
 
-    def _handle_online_result(self, payload):
+    def _apply_online_result(self, reason, winner):
         if self.manual_result is not None:
-            return
-        self.offer_banners.clear()
-        pending_action = self._online_verdict_action
-        self._online_verdict_action = None
-        if pending_action is not None:
-            pending_action()
-        self._teardown_skillcheck_overlay()
-        self._pending_online_move = None
-        reason = payload.get("reason", "")
-        winner = payload.get("winner_color")
+            return False
         if reason in ONLINE_WIN_REASONS:
             white_code, black_code = ONLINE_WIN_RESULT_BY_REASON[reason]
             self.manual_result = white_code if winner == "white" else black_code
-            winner_name = self._name_for_color(winner)
-            self._series_scores[winner_name] = (
-                self._series_scores.get(winner_name, 0.0) + 1
-            )
-        elif reason in ONLINE_DRAW_REASONS:
+            self._award_series_win(winner)
+            return True
+        if reason in ONLINE_DRAW_REASONS:
             self.manual_result = "draw_agreement"
-            for name in (self.white_name, self.black_name):
-                self._series_scores[name] = (
-                    self._series_scores.get(name, 0.0) + 0.5
-                )
-        elif reason in ONLINE_STATIC_RESULTS:
+            self._award_series_draw()
+            return True
+        if reason in ONLINE_STATIC_RESULTS:
             self.manual_result = reason
-        if self.manual_result is not None:
-            self._result_first_seen_at_ms = None
-            self._first_move_deadline_ms = None
-            self._opp_disconnected_at_ms = None
-            self._local_disconnected_at_ms = None
-            if reason == "timeout":
-                self.sound_manager.play_flag_fall()
-            if reason not in ONLINE_STATIC_RESULTS:
+            return True
+        return False
+
+    def _adopt_resumed_result(self, payload):
+        reason = payload.get("result_reason") or ""
+        if self._apply_online_result(reason, payload.get("result_winner")):
+            if reason in SAVE_ON_STATIC_RESULTS:
                 self._auto_save_pgn()
+
+    def _handle_online_result(self, payload):
+        if self.manual_result is not None:
+            return
+        reason = payload.get("reason", "")
+        if not self._apply_online_result(reason, payload.get("winner_color")):
+            return
+        self._first_move_deadline_ms = None
+        self._opp_disconnected_at_ms = None
+        self._local_disconnected_at_ms = None
+        self.offer_banners.clear()
+        self._pending_online_move = None
+        pending_action = self._online_verdict_action
+        self._online_verdict_action = None
+        try:
+            if pending_action is not None:
+                pending_action()
+            self._teardown_skillcheck_overlay()
+        except Exception:
+            log.exception("online result verdict/teardown failed")
+            self._begin_resync()
+        if reason == "timeout" and not self._flag_fall_played:
+            self._flag_fall_played = True
+            self.sound_manager.play_flag_fall()
+        if reason in SAVE_ON_STATIC_RESULTS:
+            self._auto_save_pgn()
 
     def _begin_match_found_transition(self, payload):
         if self._pending_game_start_payload is not None:

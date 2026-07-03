@@ -25,6 +25,7 @@ SERVER_FULL_RETRIES = 3
 SERVER_FULL_BACKOFF_SECONDS = 1.5
 RECONNECT_TOTAL_SECONDS = GRACE_SECONDS
 RECONNECT_INTERVAL_SECONDS = 2
+RECONNECT_BACKOFF_MAX_SECONDS = 8
 PING_SAMPLE_WINDOW = 5
 
 
@@ -200,6 +201,9 @@ class OnlineClient:
             return 0.0
         return time.monotonic() - self._last_server_msg_at
 
+    def is_connected(self):
+        return self.state == "connected" and self._ws is not None
+
     def is_server_silent(self):
         return self.seconds_since_server_msg() > self._heartbeat_interval * HEARTBEAT_MISS_LIMIT
 
@@ -328,7 +332,6 @@ class OnlineClient:
                    and self._session_token is not None):
                 log.info("ws dropped mid-game; attempting reconnect")
                 self.state = "reconnecting"
-                self.opp_state = "reconnecting"
                 resumed = await self._resume_with_retries()
                 if resumed is self.ROOM_LOST:
                     log.warning("reconnect: server alive but room gone")
@@ -354,12 +357,14 @@ class OnlineClient:
             self.state = "disconnected"
 
     async def _resume_with_retries(self):
-        deadline = asyncio.get_running_loop().time() + self._reconnect_total
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + self._reconnect_total
+        backoff = RECONNECT_INTERVAL_SECONDS
         body = ResumeRequest(
             room_id=self._room_id, session_token=self._session_token,
         )
         async with self._transport.make_async_http() as http:
-            while asyncio.get_running_loop().time() < deadline and not self._stop.is_set():
+            while loop.time() < deadline and not self._stop.is_set():
                 try:
                     response = await self._transport.resume_async(body, http)
                 except FatalResumeError:
@@ -369,7 +374,11 @@ class OnlineClient:
                     return None
                 if response is not None:
                     return response.model_dump()
-                await asyncio.sleep(RECONNECT_INTERVAL_SECONDS)
+                remaining = deadline - loop.time()
+                if remaining <= 0:
+                    break
+                await asyncio.sleep(min(backoff, remaining))
+                backoff = min(backoff * 2, RECONNECT_BACKOFF_MAX_SECONDS)
         return None
 
     async def _matchmake_with_retries(self, request):
@@ -398,6 +407,8 @@ class OnlineClient:
     async def _run_ws_session(self):
         ws = await self._transport.ws_connect(self._room_id, self._session_token)
         self._ws = ws
+        self._last_server_msg_at = time.monotonic()
+        self.opp_state = "connected"
         self.state = "connected"
         self._ping_samples_ms.clear()
         recv_task = asyncio.create_task(self._recv_loop(ws))
