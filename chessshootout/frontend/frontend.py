@@ -1724,9 +1724,9 @@ class Frontend(OnlineEventsMixin):
         ))
 
     def _sync_window_surface(self):
-        win_w, win_h = pg.display.get_window_size()
-        win_w = max(win_w, MIN_WINDOW_WIDTH)
-        win_h = max(win_h, MIN_WINDOW_HEIGHT)
+        size = self.chrome.client_size() or pg.display.get_window_size()
+        win_w = max(size[0], MIN_WINDOW_WIDTH)
+        win_h = max(size[1], MIN_WINDOW_HEIGHT)
         if (win_w, win_h) != self.window.get_size():
             self.window = pg.display.set_mode((win_w, win_h), WINDOW_FLAGS)
             self.chrome.window = self.window

@@ -115,6 +115,15 @@ class WindowsSnap:
         except Exception:
             log.warning("window snap style apply failed", exc_info=True)
 
+    def client_size(self):
+        try:
+            rect = _RECT()
+            if not self._user32.GetClientRect(self._hwnd, ctypes.byref(rect)):
+                return None
+            return (rect.right - rect.left, rect.bottom - rect.top)
+        except Exception:
+            return None
+
     def shutdown(self):
         if self._orig_wndproc:
             try:

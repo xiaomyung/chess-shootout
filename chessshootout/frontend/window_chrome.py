@@ -178,6 +178,11 @@ class WindowChrome:
     def is_fullscreen(self):
         return self._win_state == "fullscreen"
 
+    def client_size(self):
+        if self._snap is None:
+            return None
+        return self._snap.client_size()
+
     def _is_maximized(self):
         return self._snap is not None and self._snap.maximized
 
