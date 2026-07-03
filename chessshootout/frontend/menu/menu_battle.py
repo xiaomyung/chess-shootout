@@ -8,6 +8,7 @@ from chessshootout import paths
 from chessshootout.frontend.visual import gunfx
 from chessshootout.frontend.visual import backdrop
 from chessshootout.frontend.visual.gunfx import DT_MAX, GUN_DRAW_SPINS_LAND, RAGDOLL_MS
+from chessshootout.frontend.visual.cache import render_text
 from chessshootout.frontend.visual.colors import Colors
 from chessshootout.frontend.visual.fonts import get_font
 from chessshootout.frontend.visual.widgets import build_ko_badge, KO_WINK_MS
@@ -1054,7 +1055,7 @@ class MenuBattle:
             ckey = (round(scale, 3), mw // 16)
             if ckey not in cache:
                 lines = self._wrap_words(bub["text"], font, mw)
-                surfs = [font.render(line, True, pg.Color(txt)) for line in lines]
+                surfs = [render_text(font, line, pg.Color(txt)) for line in lines]
                 tw = max(s.get_width() for s in surfs)
                 th = sum(s.get_height() for s in surfs) + line_gap * (len(surfs) - 1)
                 cache[ckey] = (surfs, tw + 2 * pad_x, th + 2 * pad_y)

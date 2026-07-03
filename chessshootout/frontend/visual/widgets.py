@@ -42,18 +42,23 @@ def build_shell(w, h, winking=False):
     return supersample((max(w, 1), max(h, 1)), render)
 
 
+_KO_BADGE_CACHE = new_cache()
+
+
 def build_ko_badge(count, font, height, winking=False):
-    shell_w = max(int(height * 0.16), 4)
-    shell_h = max(int(height * 0.42), 7)
-    gap = max(int(height * 0.12), 3)
-    text = font.render(f"{count} KO", True,
-                       pg.Color(Colors.amber if winking else Colors.text_muted))
-    th = text.get_height()
-    h = max(shell_h, th)
-    surf = pg.Surface((shell_w + gap + text.get_width(), h), pg.SRCALPHA)
-    surf.blit(build_shell(shell_w, shell_h, winking), (0, (h - shell_h) // 2))
-    surf.blit(text, (shell_w + gap, (h - th) // 2))
-    return surf
+    def build():
+        shell_w = max(int(height * 0.16), 4)
+        shell_h = max(int(height * 0.42), 7)
+        gap = max(int(height * 0.12), 3)
+        text = font.render(f"{count} KO", True,
+                           pg.Color(Colors.amber if winking else Colors.text_muted))
+        th = text.get_height()
+        h = max(shell_h, th)
+        surf = pg.Surface((shell_w + gap + text.get_width(), h), pg.SRCALPHA)
+        surf.blit(build_shell(shell_w, shell_h, winking), (0, (h - shell_h) // 2))
+        surf.blit(text, (shell_w + gap, (h - th) // 2))
+        return surf
+    return memoized_surface(_KO_BADGE_CACHE, (count, height, winking), build)
 
 
 def build_avatar(size, top, bottom):
