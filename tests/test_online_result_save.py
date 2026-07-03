@@ -153,27 +153,25 @@ def test_online_capture_mate_saves_full_game_with_result(tmp_path, monkeypatch):
 
 def test_online_mate_saved_via_watchdog_when_result_message_is_missed(tmp_path, monkeypatch):
     """The reconnect-storm case: move_applied lands the mate but the `result`
-    message never arrives. The local-promotion watchdog must recover + save."""
+    message never arrives. The local-promotion path must recover + save."""
     app = _online_app(tmp_path, monkeypatch)
     _land_capture_mate(app)
     _settle(app)
-    # No result message delivered. Frame loop must NOT save yet (server-authoritative).
-    app._update_result_pending()
-    assert app._last_saved_pgn_path is None
     fake_now = [10_000]
     monkeypatch.setattr(pg.time, "get_ticks", lambda: fake_now[0])
-    app._update_online_phase()                       # arms the await timer
+    app._update_result_pending()                     # arms await; no save (server-authoritative)
+    assert app._last_saved_pgn_path is None
     assert app.manual_result is None
     fake_now[0] += RESULT_CONFIRM_TIMEOUT_MS + 100
-    app._update_online_phase()                       # promotes the position-proved result
+    app._update_result_pending()                     # promotes the position-proved result
     assert app.manual_result == "white_wins"
-    app._update_result_pending()
+    app._update_result_pending()                     # now saves
     text = _saved_text(app)
     assert "Qxg7#" in text and '[Result "1-0"]' in text
 
 
 def test_watchdog_awards_score_for_on_time_win(tmp_path, monkeypatch):
-    """A locally-flagged clock produces a *_on_time result; the watchdog must still
+    """A locally-flagged clock produces a *_on_time result; promotion must still
     credit the winner's series score (the suffix must not be missed)."""
     app = _online_app(tmp_path, monkeypatch)
     app.match.try_move(sq(6, 4), sq(4, 4))            # e4, so there's a game to save
@@ -181,11 +179,40 @@ def test_watchdog_awards_score_for_on_time_win(tmp_path, monkeypatch):
     assert app.match.game_result() == "white_wins_on_time"
     fake_now = [10_000]
     monkeypatch.setattr(pg.time, "get_ticks", lambda: fake_now[0])
-    app._update_online_phase()
+    app._update_result_pending()
     fake_now[0] += RESULT_CONFIRM_TIMEOUT_MS + 100
-    app._update_online_phase()
+    app._update_result_pending()
     assert app.manual_result == "white_wins_on_time"
     assert app._series_scores.get("alice") == 1.0, "on-time win still scores"
+
+
+def test_online_result_saves_before_the_move_animation_settles(tmp_path, monkeypatch):
+    """The save must not wait for the capture animation — otherwise closing the
+    window mid-animation would lose the game."""
+    app = _online_app(tmp_path, monkeypatch)
+    _land_capture_mate(app)
+    app._handle_online_result({"reason": "checkmate", "winner_color": "white"})
+    assert app.board.is_animating() or app.board.effects.captures, "still animating"
+    app._update_result_pending()
+    assert app._last_saved_pgn_path is not None, "saved despite the unsettled board"
+
+
+def test_finished_game_resume_does_not_replay_result_effects(tmp_path, monkeypatch):
+    """A transient reconnect to an already-finished game must not re-fire the win
+    sound / checkmate takeover (the result latch must survive the resume)."""
+    app = _online_app(tmp_path, monkeypatch)
+    _land_capture_mate(app)
+    app._handle_online_result({"reason": "checkmate", "winner_color": "white"})
+    _settle(app)
+    app._update_result_pending()                     # latches + fires effects once
+    assert app._result_first_seen_at_ms is not None
+    latch = app._result_first_seen_at_ms
+    app._handle_game_resumed({
+        "move_history": [{"san": s} for s in SCHOLARS_MATE],
+        "fen": "", "result_reason": "checkmate", "result_winner": "white",
+        "skillcheck_log": [], "skillcheck_locks": [], "pending_skillcheck": None,
+    })
+    assert app._result_first_seen_at_ms == latch, "resume must not re-arm the effects"
 
 
 def test_resumed_static_result_saves_partial(tmp_path, monkeypatch):
@@ -206,9 +233,9 @@ def test_watchdog_does_not_fire_before_timeout(tmp_path, monkeypatch):
     _land_capture_mate(app)
     fake_now = [10_000]
     monkeypatch.setattr(pg.time, "get_ticks", lambda: fake_now[0])
-    app._update_online_phase()
+    app._update_result_pending()
     fake_now[0] += RESULT_CONFIRM_TIMEOUT_MS - 500
-    app._update_online_phase()
+    app._update_result_pending()
     assert app.manual_result is None, "must give the server result time to arrive on high ping"
 
 

@@ -292,7 +292,6 @@ class OnlineEventsMixin:
         self.board.selected_square = None
         self.board._clear_premoves()
         self.board.clear_annotations()
-        self._result_first_seen_at_ms = None
         self._adopt_resumed_result(payload)
         self._apply_resumed_skillcheck_log(payload.get("skillcheck_log", []))
         self._restore_online_skillcheck_state(payload)

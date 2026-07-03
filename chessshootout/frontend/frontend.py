@@ -978,23 +978,15 @@ class Frontend(OnlineEventsMixin):
             else:
                 self.toast.show("Resyncing…")
         self._tick_skillcheck_watchdog()
-        self._promote_unconfirmed_result_if_due()
 
-    def _promote_unconfirmed_result_if_due(self):
-        if (self.mode != ONLINE or self.online_client is None
-                or self._resyncing or self.manual_result is not None):
-            self._result_await_since_ms = None
-            return
-        engine_result = self.match.game_result()
-        if engine_result is None:
-            self._result_await_since_ms = None
-            return
+    def _promote_awaited_result(self, engine_result):
         now = pg.time.get_ticks()
         if self._result_await_since_ms is None:
             self._result_await_since_ms = now
             return
         if now - self._result_await_since_ms < RESULT_CONFIRM_TIMEOUT_MS:
             return
+        self._result_await_since_ms = None
         self.manual_result = engine_result
         if engine_result.startswith(("white_wins", "black_wins")):
             self._award_series_win(
@@ -1119,18 +1111,22 @@ class Frontend(OnlineEventsMixin):
             return None
         tag = RESULT_CODES.get(self.current_result(), "*")
         if self._last_saved_pgn_path is not None:
-            prior_partial = self._last_saved_result_tag in (None, "*")
-            if not (prior_partial and tag != "*"):
+            already_final = self._last_saved_result_tag not in (None, "*")
+            if already_final or tag == "*":
                 return self._last_saved_pgn_path
         text = self._build_pgn_text()
         prefix = self._auto_save_prefix()
-        os.makedirs(_games_dir(), exist_ok=True)
         path = self._last_saved_pgn_path
-        if path is None or not os.path.exists(path):
-            filename = f"{prefix}-{datetime.now().strftime("%Y%m%d-%H%M%S")}.pgn"
-            path = os.path.join(_games_dir(), filename)
-        with open(path, "w") as f:
-            f.write(text)
+        try:
+            os.makedirs(_games_dir(), exist_ok=True)
+            if path is None or not os.path.exists(path):
+                filename = f"{prefix}-{datetime.now().strftime("%Y%m%d-%H%M%S")}.pgn"
+                path = os.path.join(_games_dir(), filename)
+            with open(path, "w") as f:
+                f.write(text)
+        except OSError:
+            log.exception("pgn auto-save failed")
+            return None
         self._last_saved_pgn_path = path
         self._last_saved_result_tag = tag
         self.toast.show(f"Saved {os.path.basename(path)}")
@@ -1747,15 +1743,21 @@ class Frontend(OnlineEventsMixin):
         return not self.board.is_animating() and not self.board.effects.captures
 
     def _update_result_pending(self):
-        if self.current_result() is None or self.pgn_review:
+        result = self.current_result()
+        if result is None or self.pgn_review:
             self._result_first_seen_at_ms = None
+            self._result_await_since_ms = None
             return
-        if self.mode == ONLINE and (self.manual_result is None or self._resyncing):
+        if self.mode == ONLINE and self.manual_result is None:
+            if not self._resyncing:
+                self._promote_awaited_result(result)
             return
+        if self.mode == ONLINE and self._resyncing:
+            return
+        if RESULT_CODES.get(result) is not None:
+            self._auto_save_pgn()
         if self._result_first_seen_at_ms is None and self._move_visually_settled():
             self._result_first_seen_at_ms = pg.time.get_ticks()
-            if RESULT_CODES.get(self.current_result()) is not None:
-                self._auto_save_pgn()
             try:
                 self._trigger_result_effects()
             except Exception:
