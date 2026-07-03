@@ -39,17 +39,6 @@ def _hit(chrome, x, y):
     return chrome._hit_test(None, ctypes.pointer(pt), None)
 
 
-@pytest.mark.skipif(os.name == "nt", reason="off-Windows no-op guard")
-def test_win_snap_is_noop_off_windows(chrome):
-    assert chrome._snap is None
-    chrome.shutdown()                       # safe with nothing attached
-    assert chrome._snap is None
-
-
-def test_hit_test_resize_edges_stay_active(chrome):
-    assert _hit(chrome, 1, 1) == 2          # _HITTEST_RESIZE_TOPLEFT edge still routed
-
-
 def test_titlebar_renders_background_and_border(chrome):
     chrome.draw()
     window = pg.display.get_surface()

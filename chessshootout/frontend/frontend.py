@@ -1601,7 +1601,6 @@ class Frontend(OnlineEventsMixin):
             self.clock.tick(self.target_fps)
             pg.display.flip()
 
-        self.chrome.shutdown()
         pg.quit()
 
     def _menu_overlay_active(self):
