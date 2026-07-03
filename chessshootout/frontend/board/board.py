@@ -374,7 +374,9 @@ class Board:
         return memoized_surface(_OVERLAY_CACHE, (cs, color), build)
 
     def _in_check_king_squares(self):
-        key = (len(self.match.move_history), self.match.current_turn())
+        history = self.match.move_history
+        last_move = history[-1].move if history else None
+        key = (len(history), last_move)
         if key != self._check_squares_key:
             self._check_squares_key = key
             result = []
@@ -685,6 +687,9 @@ class Board:
 
     def is_dragging(self):
         return self._drag is not None or self.dragging_from is not None
+
+    def is_restoring(self):
+        return bool(self._restore_anims)
 
     def animation_dirty_rect(self):
         if not self.animations:

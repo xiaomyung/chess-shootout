@@ -4,7 +4,7 @@ from chessshootout.paths import resource_path
 from chessshootout.frontend.visual.cache import new_cache, memoized_surface
 
 _BASE = {}
-_SCALED = new_cache()
+_SCALED_CACHE = new_cache()
 
 _REGIONAL_A = 0x1F1E6
 _REGIONAL_Z = 0x1F1FF
@@ -47,7 +47,7 @@ def emoji_surface(char, size):
     def build():
         scale = size / h
         return pg.transform.smoothscale(base, (max(int(w * scale), 1), size))
-    return memoized_surface(_SCALED, (char, size), build)
+    return memoized_surface(_SCALED_CACHE, (char, size), build)
 
 
 def blit_emoji(window, char, center, size):

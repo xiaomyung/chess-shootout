@@ -162,6 +162,9 @@ STRIP_GAP_RATIO = 0.015
 AUTO_FLIP_DELAY_MS = 200
 RESULT_FADE_MS = 400
 PERF_SAMPLE_COUNT = 240
+PERF_1PCT_PERCENTILE = 0.99
+PERF_1PCT_MIN_SAMPLES = 20
+PRESENT_SETTLE_MS = 120
 RESULT_MODAL_DELAY_MS = 500
 RESULT_TAKEOVER_MS = TAKEOVER_TOTAL_MS
 RESULT_FADE_MAX_ALPHA = 140
@@ -376,7 +379,9 @@ class Frontend(OnlineEventsMixin):
     def current_result(self):
         clock = self.match.clock
         flagged = clock.flagged if clock is not None else None
-        key = (len(self.match.move_history), self.manual_result, flagged)
+        history = self.match.move_history
+        last_move = history[-1].move if history else None
+        key = (len(history), last_move, self.manual_result, flagged)
         if key != self._result_cache_key:
             self._result_cache_key = key
             self._result_cache = self.manual_result or self.match.game_result()
@@ -1752,16 +1757,15 @@ class Frontend(OnlineEventsMixin):
 
     def _chrome_stats(self):
         parts = []
+        ordered = sorted(self._frame_times) if self._frame_times else []
         if env.get_show_fps():
             parts.append(f"FPS {int(self.clock.get_fps())}")
-        if env.get_show_frame_stats() and self._frame_times:
-            ordered = sorted(self._frame_times)
+        if env.get_show_frame_stats() and ordered:
             avg = sum(ordered) / len(ordered)
             parts.append(f"AVG {1000.0 / avg:.0f}")
             parts.append(f"MIN {1000.0 / ordered[-1]:.0f}")
-        if env.get_show_1pct_low() and len(self._frame_times) >= 20:
-            ordered = sorted(self._frame_times)
-            p99 = ordered[int(len(ordered) * 0.99) - 1]
+        if env.get_show_1pct_low() and len(ordered) >= PERF_1PCT_MIN_SAMPLES:
+            p99 = ordered[int(len(ordered) * PERF_1PCT_PERCENTILE) - 1]
             parts.append(f"1%LOW {1000.0 / p99:.0f}")
         if env.get_show_frametime():
             parts.append(f"FRAME {self._last_work_ms:.1f}ms")
@@ -1778,8 +1782,8 @@ class Frontend(OnlineEventsMixin):
         else:
             pg.display.update(rects)
 
-    def _present_rects(self, had_events):
-        if (had_events or self._needs_full_present or self.mode == "menu"
+    def _needs_full_redraw(self, had_events):
+        return (had_events or self._needs_full_present or self.mode == "menu"
                 or self._menu_overlay_active() or self.toast.is_visible()
                 or not self.offer_banners.is_empty()
                 or self.skillcheck_overlay.is_active()
@@ -1787,14 +1791,17 @@ class Frontend(OnlineEventsMixin):
                 or self._give_time_holding
                 or self.board.is_dragging()
                 or self.board.effects.is_active()
-                or self.board._restore_anims
-                or self.board.pending_promotion_square is not None):
+                or self.board.is_restoring()
+                or self.board.pending_promotion_square is not None)
+
+    def _present_rects(self, had_events):
+        if self._needs_full_redraw(had_events):
             self._needs_full_present = False
             return None
         rects = [pg.Rect(0, 0, self.window_width, self.chrome.HEIGHT)]
         now = pg.time.get_ticks()
         if (self.board.is_animating()
-                or now - self.board.last_animation_completed_at_ms < 120):
+                or now - self.board.last_animation_completed_at_ms < PRESENT_SETTLE_MS):
             rects.append(self.board.animation_dirty_rect())
         clock_display = self._clock_display_key()
         if clock_display != self._last_clock_display:

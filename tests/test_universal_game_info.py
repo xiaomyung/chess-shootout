@@ -76,6 +76,27 @@ def test_chrome_stats_readouts_follow_toggles():
     assert app._chrome_stats() == [f"FPS {int(app.clock.get_fps())}"]
 
 
+def test_current_result_recomputes_when_position_changes_at_same_length(monkeypatch):
+    """The memo key must track the actual position, not just move count. An undo
+    followed by a different move returns to the same length but a different
+    position (e.g. an online takeback + replacement) and must re-evaluate."""
+    from chessshootout.backend.utils import Square
+    app = _make_app()
+    _start_local(app, time_minutes=None, incr=0)
+    backend = app.match.backend
+    calls = []
+    real = backend.game_result
+    monkeypatch.setattr(backend, "game_result",
+                        lambda: (calls.append(1), real())[1])
+    backend.try_move(Square(6, 4), Square(4, 4))
+    app.current_result()
+    backend.undo()
+    backend.try_move(Square(6, 3), Square(4, 3))
+    before = len(calls)
+    app.current_result()
+    assert len(calls) > before
+
+
 def test_current_result_memo_resets_on_new_game():
     """A flagged/finished game must not leak its cached result into the next."""
     from chessshootout.backend.pieces import PieceColor

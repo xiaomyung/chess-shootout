@@ -1,4 +1,3 @@
-from collections import OrderedDict
 from weakref import WeakKeyDictionary
 
 _REGISTRY = []
@@ -32,29 +31,6 @@ def memoized_surface(cache, key, build):
         surf = build()
         cache[key] = surf
     return surf
-
-
-class LruSurfaceCache:
-
-    def __init__(self, capacity):
-        self.capacity = max(int(capacity), 1)
-        self._data = OrderedDict()
-        _REGISTRY.append(self._data)
-
-    def get_or_build(self, key, build):
-        data = self._data
-        surf = data.get(key)
-        if surf is not None:
-            data.move_to_end(key)
-            return surf
-        surf = build()
-        data[key] = surf
-        while len(data) > self.capacity:
-            data.popitem(last=False)
-        return surf
-
-    def clear(self):
-        self._data.clear()
 
 
 def clear_all():

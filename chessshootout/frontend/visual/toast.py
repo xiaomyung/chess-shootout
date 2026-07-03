@@ -91,9 +91,9 @@ class Toast:
         text_color = Colors.on_accent if hype else Colors.text_dim
         bg_color = pg.Color(Colors.accent if hype else Colors.surface)
         border_color = pg.Color(Colors.accent_hi if hype else Colors.border)
-        if b.get("_text") is None:
-            b["_text"] = self.font.render(label, True, text_color)
-        text_surf = b["_text"].copy()
+        if b.get("text_surf") is None:
+            b["text_surf"] = self.font.render(label, True, text_color)
+        text_surf = b["text_surf"].copy()
         spark_d = text_surf.get_height() // 2 if hype else 0
         spark_gap = spark_d + SPARK_GAP_PX if hype else 0
         w = text_surf.get_width() + 2 * PADDING_X + spark_gap
