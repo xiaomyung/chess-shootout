@@ -311,7 +311,7 @@ def scan_pgn_summaries(directory, pattern):
         if not os.path.isfile(path):
             continue
         try:
-            with open(path) as f:
+            with open(path, encoding="utf-8") as f:
                 text = f.read()
             mtime = os.path.getmtime(path)
         except (OSError, UnicodeDecodeError):

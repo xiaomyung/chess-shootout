@@ -19,6 +19,7 @@ _THEMES = ("dark",)
 _DEFAULT_THEME = "dark"
 _DEFAULT_TIME_CONTROL = "10"
 _DEFAULT_INCREMENT = "5"
+_NICKNAME_MAX_LEN = 20
 TIME_CONTROL_VALUES = ("1", "3", "5", "10", "15", "∞")
 INCREMENT_VALUES = ("0", "2", "5", "10", "15")
 
@@ -43,7 +44,7 @@ def set_overrides(*, client_uuid=None, nickname=None):
     if client_uuid is not None:
         _uuid_override = _coerce_to_uuid4(client_uuid)
     if nickname is not None:
-        _nickname_override = nickname
+        _nickname_override = sanitize_nickname(nickname)
 
 
 def _coerce_to_uuid4(value):
@@ -88,14 +89,33 @@ def set_country(code):
         _persist_delete("CHESS_COUNTRY")
 
 
+def sanitize_nickname(raw):
+    kept = "".join(c for c in (raw or "") if c.isascii() and c.isprintable())
+    return re.sub(r"\s+", " ", kept).strip()[:_NICKNAME_MAX_LEN]
+
+
+def _has_disallowed_nickname_chars(raw):
+    return any(not (c.isascii() and c.isprintable()) for c in (raw or ""))
+
+
+def normalize_stored_nickname():
+    raw = os.environ.get("CHESS_NICKNAME") or ""
+    if not _has_disallowed_nickname_chars(raw):
+        return False
+    clean = sanitize_nickname(raw)
+    os.environ["CHESS_NICKNAME"] = clean
+    _persist("CHESS_NICKNAME", clean)
+    return True
+
+
 def get_nickname():
     if _nickname_override:
         return _nickname_override
-    return os.environ.get("CHESS_NICKNAME") or ""
+    return sanitize_nickname(os.environ.get("CHESS_NICKNAME"))
 
 
 def set_nickname(value):
-    value = (value or "").strip()
+    value = sanitize_nickname(value)
     if not value:
         return
     os.environ["CHESS_NICKNAME"] = value
@@ -246,7 +266,7 @@ def set_theme(value):
 
 
 def _persist(key, value):
-    existing = _ENV_PATH.read_text() if _ENV_PATH.exists() else ""
+    existing = _ENV_PATH.read_text(encoding="utf-8") if _ENV_PATH.exists() else ""
     out_lines = []
     replaced = False
     for line in existing.splitlines():
@@ -272,7 +292,7 @@ def _persist_delete(key):
     if not _ENV_PATH.exists():
         return
     out_lines = []
-    for line in _ENV_PATH.read_text().splitlines():
+    for line in _ENV_PATH.read_text(encoding="utf-8").splitlines():
         stripped = line.strip()
         if not stripped or stripped.startswith("#"):
             out_lines.append(line)
@@ -287,5 +307,5 @@ def _persist_delete(key):
 def _atomic_write(body):
     _ENV_PATH.parent.mkdir(parents=True, exist_ok=True)
     tmp_path = _ENV_PATH.with_suffix(_ENV_PATH.suffix + f".tmp.{os.getpid()}")
-    tmp_path.write_text(body)
+    tmp_path.write_text(body, encoding="utf-8")
     os.replace(tmp_path, _ENV_PATH)

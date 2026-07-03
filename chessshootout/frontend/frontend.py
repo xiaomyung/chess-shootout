@@ -282,6 +282,7 @@ class Frontend(OnlineEventsMixin):
             "reconnect": self._on_reconnect_active_game,
             "options": self._on_open_options,
             "open_url": _open_with_default_app,
+            "toast": lambda msg: self.toast.show(msg),
         })
         self._pending_reconnect = None
         self._pending_reconnect_lock = threading.Lock()
@@ -316,6 +317,9 @@ class Frontend(OnlineEventsMixin):
         self.toast = Toast(self.window)
         self.toast.top_inset = self.chrome.HEIGHT
         self.toast.on_new = lambda: self.sound_manager.play_toast()
+        if env.normalize_stored_nickname():
+            self.start_menu.text_input.text = env.get_nickname()
+            self.toast.show("Your nickname contained non ASCII symbols, I cleaned them :3")
         self._last_saved_pgn_path = None
         self._last_saved_result_tag = None
         self._result_await_since_ms = None
@@ -667,7 +671,7 @@ class Frontend(OnlineEventsMixin):
         return True
 
     def _load_pgn_from_path(self, path):
-        with open(path) as f:
+        with open(path, encoding="utf-8") as f:
             text = f.read()
         self.mode = SINGLE_SCREEN
         self._drop_post_game_online_session()
@@ -1122,9 +1126,9 @@ class Frontend(OnlineEventsMixin):
             if path is None or not os.path.exists(path):
                 filename = f"{prefix}-{datetime.now().strftime("%Y%m%d-%H%M%S")}.pgn"
                 path = os.path.join(_games_dir(), filename)
-            with open(path, "w") as f:
+            with open(path, "w", encoding="utf-8") as f:
                 f.write(text)
-        except OSError:
+        except (OSError, UnicodeError):
             log.exception("pgn auto-save failed")
             return None
         self._last_saved_pgn_path = path

@@ -482,7 +482,7 @@ def test_load_pgn_button_enabled_when_pgn_exists(tmp_path, monkeypatch):
     games_dir = tmp_path / "games"
     games_dir.mkdir()
     (games_dir / "game-20250101-120000.pgn").write_text(
-        '[White "A"]\n[Black "B"]\n\n1. e4 e5 *\n'
+        '[White "A"]\n[Black "B"]\n\n1. e4 e5 *\n', encoding="utf-8"
     )
     monkeypatch.setenv("CHESS_DATA_DIR", str(tmp_path))
     app = _new_menu_app()
@@ -494,9 +494,9 @@ def test_load_pgn_picks_most_recent_by_mtime(tmp_path, monkeypatch):
     games_dir = tmp_path / "games"
     games_dir.mkdir()
     older = games_dir / "game-old.pgn"
-    older.write_text('[White "A"]\n\n1. e4 e5 *\n')
+    older.write_text('[White "A"]\n\n1. e4 e5 *\n', encoding="utf-8")
     newer = games_dir / "game-new.pgn"
-    newer.write_text('[White "A"]\n\n1. d4 d5 *\n')
+    newer.write_text('[White "A"]\n\n1. d4 d5 *\n', encoding="utf-8")
     os.utime(older, (1_000, 1_000))
     os.utime(newer, (2_000, 2_000))
     monkeypatch.setenv("CHESS_DATA_DIR", str(tmp_path))
@@ -518,7 +518,7 @@ def test_history_and_fen_ghosts_below_start():
 
 def test_load_pgn_from_path_loads_game(tmp_path):
     pgn_path = tmp_path / "test.pgn"
-    pgn_path.write_text('[White "A"]\n[Black "B"]\n\n1. e4 e5 2. Nf3 Nc6 *\n')
+    pgn_path.write_text('[White "A"]\n[Black "B"]\n\n1. e4 e5 2. Nf3 Nc6 *\n', encoding="utf-8")
     app = _new_app()
     app._load_pgn_from_path(str(pgn_path))
     assert len(app.backend.move_history) == 4
@@ -531,7 +531,7 @@ def test_load_pgn_populates_names_and_time_control(tmp_path):
     pgn_path = tmp_path / "named.pgn"
     pgn_path.write_text(
         '[White "alice"]\n[Black "bob"]\n[Result "1-0"]\n[TimeControl "600+5"]\n\n'
-        "1. e4 e5 1-0\n"
+        "1. e4 e5 1-0\n", encoding="utf-8"
     )
     app = _new_app()
     app._load_pgn_from_path(str(pgn_path))
@@ -548,7 +548,7 @@ def test_load_pgn_populates_names_and_time_control(tmp_path):
 def test_load_pgn_without_time_control_shows_infinity(tmp_path):
     pgn_path = tmp_path / "noclock.pgn"
     pgn_path.write_text(
-        '[White "A"]\n[Black "B"]\n[Result "0-1"]\n\n1. e4 e5 0-1\n'
+        '[White "A"]\n[Black "B"]\n[Result "0-1"]\n\n1. e4 e5 0-1\n', encoding="utf-8"
     )
     app = _new_app()
     app._load_pgn_from_path(str(pgn_path))
@@ -558,9 +558,27 @@ def test_load_pgn_without_time_control_shows_infinity(tmp_path):
     }
 
 
+def test_load_pgn_reads_utf8_glyphs_and_nonascii_names(tmp_path):
+    """Review reads a UTF-8 PGN carrying skill-check glyphs and non-ASCII nicknames
+    (the frontend open at :670 declares encoding='utf-8'); on Windows a bare read
+    would UnicodeDecodeError here and crash."""
+    pgn_path = tmp_path / "glyph.pgn"
+    pgn_path.write_text(
+        '[White "Björn"]\n[Black "Щ"]\n[Result "1-0"]\n\n'
+        "1. e4 e5 2. Bc4 Nc6 3. Qh5 Nf6 4. Qxf7# {Wheel ✓} 1-0\n",
+        encoding="utf-8",
+    )
+    app = _new_app()
+    app._load_pgn_from_path(str(pgn_path))
+    assert app.pgn_review is True
+    assert app.white_name == "Björn"
+    assert app.black_name == "Щ"
+    assert len(app.backend.move_history) == 7
+
+
 def _load_test_pgn(app, tmp_path):
     pgn_path = tmp_path / "test.pgn"
-    pgn_path.write_text('[White "A"]\n[Black "B"]\n\n1. e4 e5 2. Nf3 Nc6 *\n')
+    pgn_path.write_text('[White "A"]\n[Black "B"]\n\n1. e4 e5 2. Nf3 Nc6 *\n', encoding="utf-8")
     app._load_pgn_from_path(str(pgn_path))
 
 

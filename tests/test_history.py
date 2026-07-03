@@ -32,7 +32,7 @@ def _write_pgn(directory, name, *, white="alice", black="Bob", result="1-0",
                f'[Result "{result}"]', f'[TimeControl "{tc}"]']
     if match_id:
         headers.append(f'[CSMatchId "{match_id}"]')
-    (directory / name).write_text("\n".join(headers) + "\n\n" + body + "\n")
+    (directory / name).write_text("\n".join(headers) + "\n\n" + body + "\n", encoding="utf-8")
 
 
 def _view(directory, nickname="alice", on_open=None, on_back=None):

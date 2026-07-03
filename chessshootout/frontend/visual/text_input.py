@@ -14,9 +14,12 @@ DOUBLE_CLICK_PX = 6
 class TextInput:
 
     def __init__(self, window, max_chars=20, placeholder="nickname", mono=False,
-                 bg=None, radius=4, rest_align="start", on_commit=None):
+                 bg=None, radius=4, rest_align="start", on_commit=None,
+                 ascii_only=False, on_reject=None):
         self.window = window
         self.max_chars = max_chars
+        self.ascii_only = ascii_only
+        self.on_reject = on_reject
         self.on_commit = on_commit
         self.placeholder = placeholder
         self.mono = mono
@@ -132,6 +135,11 @@ class TextInput:
         return True
 
     def _insert(self, text):
+        if self.ascii_only:
+            filtered = "".join(ch for ch in text if ch.isascii() and ch.isprintable())
+            if filtered != text and self.on_reject is not None:
+                self.on_reject()
+            text = filtered
         self._delete_selection()
         self.sel_anchor = None
         room = self.max_chars - len(self._text)

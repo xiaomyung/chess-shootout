@@ -23,7 +23,7 @@ def attach_rotating_file_handler(path, *, level="INFO",
                                    max_bytes=ROTATING_MAX_BYTES,
                                    backup_count=ROTATING_BACKUP_COUNT):
     handler = logging.handlers.RotatingFileHandler(
-        path, maxBytes=max_bytes, backupCount=backup_count,
+        path, maxBytes=max_bytes, backupCount=backup_count, encoding="utf-8",
     )
     handler.setLevel(level if isinstance(level, int) else level.upper())
     handler.setFormatter(logging.Formatter(LOG_FORMAT, datefmt=LOG_DATEFMT))

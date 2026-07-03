@@ -23,7 +23,7 @@ def test_resource_path_joins_under_asset_base(monkeypatch):
 
 def test_app_version_reads_bundled_file(monkeypatch, tmp_path):
     version_file = tmp_path / "version.txt"
-    version_file.write_text("1.2.3\n")
+    version_file.write_text("1.2.3\n", encoding="utf-8")
     monkeypatch.setattr(paths, "resource_path", lambda *parts: version_file)
     assert paths.get_app_version() == "1.2.3"
 

@@ -32,7 +32,7 @@ def _names(browser):
 
 def test_lists_dirs_and_files_without_parent_row(tmp_path):
     (tmp_path / "sub").mkdir()
-    (tmp_path / "game.pgn").write_text("x")
+    (tmp_path / "game.pgn").write_text("x", encoding="utf-8")
     browser = _browser()
     browser.show(str(tmp_path), on_select=lambda p: None)
     names = _names(browser)
@@ -49,7 +49,7 @@ def test_meta_reports_item_count_and_size(tmp_path):
     sub.mkdir()
     (sub / "one").mkdir()
     (sub / "two").mkdir()
-    (tmp_path / "game.pgn").write_text("y" * 4096)
+    (tmp_path / "game.pgn").write_text("y" * 4096, encoding="utf-8")
     browser = _browser()
     browser.show(str(tmp_path), on_select=lambda p: None)
     by_name = {e[0]: e[3] for e in browser.entries}
@@ -121,7 +121,7 @@ def test_empty_new_folder_name_cancels(tmp_path):
 
 def test_draw_records_a_row_rect_per_entry(tmp_path):
     (tmp_path / "sub").mkdir()
-    (tmp_path / "game.pgn").write_text("x")
+    (tmp_path / "game.pgn").write_text("x", encoding="utf-8")
     browser = _browser()
     browser.show(str(tmp_path), on_select=lambda p: None)
     browser.draw()
@@ -145,7 +145,7 @@ def test_draw_creating_lays_out_inline_input_row(tmp_path):
 
 def test_click_dir_row_navigates_click_file_row_does_not(tmp_path):
     (tmp_path / "sub").mkdir()
-    (tmp_path / "game.pgn").write_text("x")
+    (tmp_path / "game.pgn").write_text("x", encoding="utf-8")
     browser = _browser()
     browser.show(str(tmp_path), on_select=lambda p: None)
     browser.draw()

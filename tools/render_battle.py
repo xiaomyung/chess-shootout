@@ -58,7 +58,7 @@ def main():
                                        os.path.join(out_dir, stem + ".png")))
         manifest["flashes"][gun] = variants
 
-    with open(MANIFEST, "w") as fh:
+    with open(MANIFEST, "w", encoding="utf-8") as fh:
         json.dump(manifest, fh, indent=2, sort_keys=True)
     print(f"rendered {len(manifest['guns'])} guns + "
           f"{sum(len(v) for v in manifest['flashes'].values())} flashes")

@@ -35,7 +35,7 @@ PIECES_PNG_DIR = resource_path("assets", "pieces_png")
 
 def get_app_version():
     try:
-        return resource_path("assets", "version.txt").read_text().strip()
+        return resource_path("assets", "version.txt").read_text(encoding="utf-8").strip()
     except OSError:
         return ""
 
@@ -116,7 +116,7 @@ def is_writable_dir(directory):
         return False
     probe = os.path.join(directory, ".chess_write_test")
     try:
-        with open(probe, "w"):
+        with open(probe, "w", encoding="utf-8"):
             pass
         os.remove(probe)
     except OSError:

@@ -44,17 +44,17 @@ def test_move_pgns_relocates_and_renames_collisions(tmp_path):
     src.mkdir()
     dst = tmp_path / "new"
     dst.mkdir()
-    (src / "a.pgn").write_text("1")
-    (src / "b.pgn").write_text("2")
-    (dst / "a.pgn").write_text("existing")
+    (src / "a.pgn").write_text("1", encoding="utf-8")
+    (src / "b.pgn").write_text("2", encoding="utf-8")
+    (dst / "a.pgn").write_text("existing", encoding="utf-8")
     assert app._move_pgns(str(src), str(dst)) is True
     names = sorted(os.listdir(dst))
     assert "a.pgn" in names
     assert "a-1.pgn" in names
     assert "b.pgn" in names
-    assert (dst / "a.pgn").read_text() == "existing"
-    assert (dst / "a-1.pgn").read_text() == "1"
-    assert (dst / "b.pgn").read_text() == "2"
+    assert (dst / "a.pgn").read_text(encoding="utf-8") == "existing"
+    assert (dst / "a-1.pgn").read_text(encoding="utf-8") == "1"
+    assert (dst / "b.pgn").read_text(encoding="utf-8") == "2"
     assert not os.path.isdir(src)
 
 
@@ -62,14 +62,14 @@ def test_move_pgns_keeps_old_dir_when_non_pgn_present(tmp_path):
     app = _app()
     src = tmp_path / "old"
     src.mkdir()
-    (src / "a.pgn").write_text("1")
-    (src / "notes.txt").write_text("keep me")
+    (src / "a.pgn").write_text("1", encoding="utf-8")
+    (src / "notes.txt").write_text("keep me", encoding="utf-8")
     assert app._move_pgns(str(src), str(tmp_path / "new")) is True
     assert os.path.isdir(src)
     assert (src / "notes.txt").exists()
-    assert (src / "notes.txt").read_text() == "keep me"
+    assert (src / "notes.txt").read_text(encoding="utf-8") == "keep me"
     assert not (src / "a.pgn").exists()
-    assert (tmp_path / "new" / "a.pgn").read_text() == "1"
+    assert (tmp_path / "new" / "a.pgn").read_text(encoding="utf-8") == "1"
 
 
 def test_move_pgns_failure_returns_false(tmp_path, monkeypatch):
@@ -77,7 +77,7 @@ def test_move_pgns_failure_returns_false(tmp_path, monkeypatch):
     app = _app()
     src = tmp_path / "old"
     src.mkdir()
-    (src / "a.pgn").write_text("1")
+    (src / "a.pgn").write_text("1", encoding="utf-8")
 
     def boom(*a, **k):
         raise OSError("disk full")
@@ -105,7 +105,7 @@ def test_change_with_games_prompts_then_moves(tmp_path, monkeypatch):
     """Games present: prompt, then 'Move' relocates them and commits the new dir."""
     cur = tmp_path / "cur"
     (cur / "games").mkdir(parents=True)
-    (cur / "games" / "g.pgn").write_text("x")
+    (cur / "games" / "g.pgn").write_text("x", encoding="utf-8")
     monkeypatch.setenv("CHESS_DATA_DIR", str(cur))
     app = _app()
     new = tmp_path / "new"
@@ -113,7 +113,7 @@ def test_change_with_games_prompts_then_moves(tmp_path, monkeypatch):
     app._apply_data_folder_change(str(new))
     assert app.confirm_modal.is_visible() is True
     _draw_then_click_confirm(app, "yes")
-    assert (new / "games" / "g.pgn").read_text() == "x"
+    assert (new / "games" / "g.pgn").read_text(encoding="utf-8") == "x"
     assert not (cur / "games").exists()
     assert str(paths.get_data_dir()) == str(new)
 
@@ -122,7 +122,7 @@ def test_change_with_games_dont_move_leaves_them(tmp_path, monkeypatch):
     """'Don't move' still commits the new dir but leaves the old games in place."""
     cur = tmp_path / "cur"
     (cur / "games").mkdir(parents=True)
-    (cur / "games" / "g.pgn").write_text("x")
+    (cur / "games" / "g.pgn").write_text("x", encoding="utf-8")
     monkeypatch.setenv("CHESS_DATA_DIR", str(cur))
     app = _app()
     new = tmp_path / "new"
@@ -138,7 +138,7 @@ def test_change_with_games_cancel_aborts(tmp_path, monkeypatch):
     """'Cancel' (the extra button) aborts: nothing moves and the data dir is unchanged."""
     cur = tmp_path / "cur"
     (cur / "games").mkdir(parents=True)
-    (cur / "games" / "g.pgn").write_text("x")
+    (cur / "games" / "g.pgn").write_text("x", encoding="utf-8")
     monkeypatch.setenv("CHESS_DATA_DIR", str(cur))
     app = _app()
     new = tmp_path / "new"

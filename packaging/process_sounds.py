@@ -138,7 +138,7 @@ def write_attribution():
     """Replace the ``## Sounds`` section (to EOF) of the repo-root ATTRIBUTION.md."""
     section = _attribution_section()
     if ATTRIBUTION_PATH.exists():
-        text = ATTRIBUTION_PATH.read_text()
+        text = ATTRIBUTION_PATH.read_text(encoding="utf-8")
         head = text.split("## Sounds", 1)[0].rstrip()
         new_text = f"{head}\n\n{section}\n"
     else:
@@ -147,7 +147,7 @@ def write_attribution():
         print(f"  would write ATTRIBUTION.md ({len(ATTRIBUTION_CC_BY)} CC-BY, "
               f"{len(ATTRIBUTION_CC0)} CC0)")
         return
-    ATTRIBUTION_PATH.write_text(new_text)
+    ATTRIBUTION_PATH.write_text(new_text, encoding="utf-8")
     print(f"[attr] ATTRIBUTION.md updated ({len(ATTRIBUTION_CC_BY)} CC-BY + "
           f"{len(ATTRIBUTION_CC0)} CC0)")
 
@@ -160,7 +160,7 @@ def run(cmd, capture=False):
     if DRY_RUN:
         print("  $", " ".join(str(c) for c in cmd))
         return ""
-    result = subprocess.run(cmd, check=True, text=True,
+    result = subprocess.run(cmd, check=True, text=True, encoding="utf-8",
                             stdout=subprocess.PIPE if capture else None,
                             stderr=subprocess.PIPE)
     return result.stdout if capture else ""
@@ -171,7 +171,7 @@ def ffprobe_json(path):
         ["ffprobe", "-v", "error", "-show_entries",
          "stream=sample_rate,channels:format=duration",
          "-of", "json", str(path)],
-        check=True, text=True, stdout=subprocess.PIPE).stdout
+        check=True, text=True, encoding="utf-8", stdout=subprocess.PIPE).stdout
     return json.loads(out)
 
 
@@ -195,7 +195,7 @@ def _trim_filter():
 def _measure_peak_db(path):
     proc = subprocess.run(
         ["ffmpeg", "-i", str(path), "-af", "volumedetect", "-f", "null", "-"],
-        check=True, text=True, stderr=subprocess.PIPE)
+        check=True, text=True, encoding="utf-8", stderr=subprocess.PIPE)
     match = re.search(r"max_volume:\s*(-?\d+(?:\.\d+)?) dB", proc.stderr)
     return float(match.group(1)) if match else 0.0
 
@@ -204,7 +204,7 @@ def _measure_loudnorm(path, af_prefix):
     af = f"{af_prefix}{LOUDNORM_BASE}:print_format=json"
     proc = subprocess.run(
         ["ffmpeg", "-i", str(path), "-af", af, "-f", "null", "-"],
-        check=True, text=True, stderr=subprocess.PIPE)
+        check=True, text=True, encoding="utf-8", stderr=subprocess.PIPE)
     block = re.search(r"\{[^{}]*\"input_i\"[^{}]*\}", proc.stderr, re.DOTALL)
     return json.loads(block.group(0)) if block else {}
 
@@ -355,7 +355,7 @@ def split_file(src, slot_id):
     proc = subprocess.run(
         ["ffmpeg", "-i", str(src), "-af",
          f"silencedetect=noise={SPLIT_SILENCE_DB}:d={SPLIT_MIN_SILENCE}", "-f", "null", "-"],
-        check=True, text=True, stderr=subprocess.PIPE)
+        check=True, text=True, encoding="utf-8", stderr=subprocess.PIPE)
     starts = [0.0]
     ends = []
     for m in re.finditer(r"silence_(start|end):\s*(-?\d+(?:\.\d+)?)", proc.stderr):
