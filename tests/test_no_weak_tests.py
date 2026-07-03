@@ -92,7 +92,7 @@ def _calls_assertion_helper(node):
 
 
 def _scan_file(path):
-    tree = ast.parse(path.read_text(), filename=str(path))
+    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
     weak = {}
     for fn in _iter_test_funcs(tree):
         real, banned = _classify_asserts(fn)

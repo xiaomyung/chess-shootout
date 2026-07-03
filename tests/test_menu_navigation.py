@@ -89,7 +89,7 @@ def test_intro_overlay_draws_behind_menu_modals(monkeypatch):
 
 def test_unloadable_pgn_restores_menu(tmp_path):
     bad = tmp_path / "broken.pgn"
-    bad.write_text('[White "x"]\n\n1. e4 zz9 *')
+    bad.write_text('[White "x"]\n\n1. e4 zz9 *', encoding="utf-8")
     app = make_app()
     app._load_pgn_from_path(str(bad))
     assert app.mode == "menu"
@@ -99,7 +99,7 @@ def test_unloadable_pgn_restores_menu(tmp_path):
 
 def test_review_from_history_returns_to_history(tmp_path):
     good = tmp_path / "local-20260101-120000.pgn"
-    good.write_text(_valid_pgn_text())
+    good.write_text(_valid_pgn_text(), encoding="utf-8")
     app = make_app()
     app._load_pgn_from_path(str(good))
     assert app.pgn_review is True
@@ -110,7 +110,7 @@ def test_review_from_history_returns_to_history(tmp_path):
 
 def test_fresh_game_after_review_returns_to_card(tmp_path):
     good = tmp_path / "local-20260101-120000.pgn"
-    good.write_text(_valid_pgn_text())
+    good.write_text(_valid_pgn_text(), encoding="utf-8")
     app = make_app()
     app._load_pgn_from_path(str(good))
     app._on_start_game({

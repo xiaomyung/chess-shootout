@@ -72,7 +72,7 @@ def test_write_crash_log_filename_is_timestamped(tmp_path):
 def test_crash_log_content_includes(tmp_path, log_buffer, state, expected_substrings):
     """Each section header and rendered line lands verbatim in the file."""
     path = write_crash_log(ValueError("x"), log_buffer, state, root=tmp_path)
-    content = path.read_text()
+    content = path.read_text(encoding="utf-8")
     for fragment in expected_substrings:
         assert fragment in content
 
@@ -83,7 +83,7 @@ def test_crash_log_includes_traceback(tmp_path):
         raise RuntimeError("kaboom")
     except RuntimeError as exc:
         path = write_crash_log(exc, [], {}, root=tmp_path)
-    content = path.read_text()
+    content = path.read_text(encoding="utf-8")
     assert "== Traceback ==" in content
     assert "RuntimeError" in content
     assert "kaboom" in content
@@ -96,7 +96,7 @@ def test_crash_log_section_order_is_traceback_state_logs(tmp_path):
         raise ValueError("ordered")
     except ValueError as exc:
         path = write_crash_log(exc, buffer, state, root=tmp_path)
-    content = path.read_text()
+    content = path.read_text(encoding="utf-8")
     i_tb = content.index("== Traceback ==")
     i_state = content.index("== State at crash ==")
     i_logs = content.index("== Logs ==")
@@ -199,7 +199,7 @@ def test_end_to_end_handler_drains_into_crash_log(tmp_path, isolated_root_logger
     except RuntimeError as exc:
         path = write_crash_log(exc, handler.buffer, {"mode": "menu"},
                                root=tmp_path)
-    content = path.read_text()
+    content = path.read_text(encoding="utf-8")
     assert "step-1-ok" in content
     assert "step-2-suspicious" in content
     assert "step-3-broken" in content

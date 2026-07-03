@@ -104,7 +104,7 @@ def test_fonts_are_not_cached():
 
 
 def test_fonts_py_has_no_cache_decorator():
-    src = pathlib.Path(fonts.__file__).read_text()
+    src = pathlib.Path(fonts.__file__).read_text(encoding="utf-8")
     assert "lru_cache" not in src and "@cache" not in src
 
 

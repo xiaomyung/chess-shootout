@@ -314,16 +314,27 @@ def test_group_by_csmatchid_preserves_first_appearance_order():
 
 
 def test_scan_pgn_summaries_sorts_newest_first(tmp_path):
-    (tmp_path / "local-20260101-100000.pgn").write_text('[White "a"]\n\n1. e4 *')
-    (tmp_path / "local-20260101-200000.pgn").write_text('[White "b"]\n\n1. d4 *')
+    (tmp_path / "local-20260101-100000.pgn").write_text('[White "a"]\n\n1. e4 *', encoding="utf-8")
+    (tmp_path / "local-20260101-200000.pgn").write_text('[White "b"]\n\n1. d4 *', encoding="utf-8")
     summaries = scan_pgn_summaries(str(tmp_path), "*.pgn")
     assert [s.white for s in summaries] == ["b", "a"]
 
 
 def test_scan_pgn_summaries_excludes_non_pgn(tmp_path):
-    (tmp_path / "local-20260101-100000.pgn").write_text('[White "a"]\n\n1. e4 *')
-    (tmp_path / "notes.txt").write_text("not a game")
+    (tmp_path / "local-20260101-100000.pgn").write_text('[White "a"]\n\n1. e4 *', encoding="utf-8")
+    (tmp_path / "notes.txt").write_text("not a game", encoding="utf-8")
     assert len(scan_pgn_summaries(str(tmp_path), "*.pgn")) == 1
+
+
+def test_scan_pgn_summaries_includes_glyph_and_nonascii_pgn(tmp_path):
+    """A skill-check online PGN carries {Wheel ✓} glyphs and may have a non-ASCII
+    nickname. The scan_pgn_summaries open declares encoding='utf-8'; on Windows a bare read
+    hit UnicodeDecodeError, got swallowed, and the game silently vanished from History."""
+    (tmp_path / "online-20260101-100000.pgn").write_text(
+        '[White "Щ"]\n[Black "b"]\n\n1. e4 e5 {Wheel ✓} *\n', encoding="utf-8")
+    summaries = scan_pgn_summaries(str(tmp_path), "*.pgn")
+    assert len(summaries) == 1
+    assert summaries[0].white == "Щ"
 
 
 def test_summarize_counts_captures_per_color():

@@ -1521,7 +1521,7 @@ def test_loading_a_pgn_with_a_miss_populates_review_whiffs(tmp_path):
     app.manual_result = "white_wins_by_resignation"
     text = app._build_pgn_text()
     path = tmp_path / "g.pgn"
-    path.write_text(text)
+    path.write_text(text, encoding="utf-8")
     app2 = Frontend(1100, 800)
     app2._load_pgn_from_path(str(path))
     assert app2._skillcheck_whiffs() == {5: [("Steady-Aim", "Bxc6")]}
@@ -1544,7 +1544,7 @@ def test_two_event_ply_round_trips_through_the_saved_pgn_file(tmp_path):
     text = app._build_pgn_text()
     assert "Wheel ✗ Rxe5 · Steady-Aim ✓" in text, "both events join with the dot separator"
     path = tmp_path / "two.pgn"
-    path.write_text(text)
+    path.write_text(text, encoding="utf-8")
     app2 = Frontend(1100, 800)
     app2._load_pgn_from_path(str(path))
     assert app2._skillcheck_log == [

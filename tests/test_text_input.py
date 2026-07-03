@@ -70,6 +70,60 @@ def test_handle_click_inside_focuses(ti):
     assert ti.focused is True
 
 
+def test_ascii_only_strips_nonascii_on_insert():
+    inp = TextInput(pg.display.get_surface(), ascii_only=True)
+    inp.set_rect(pg.Rect(0, 0, 200, 30))
+    inp._insert("héllo Щ!")
+    assert inp.text == "hllo !"
+
+
+def test_ascii_only_rejects_nonascii_typed():
+    inp = TextInput(pg.display.get_surface(), ascii_only=True)
+    inp.set_rect(pg.Rect(0, 0, 200, 30))
+    inp.focused = True
+    for ch in "aЩb":
+        inp.handle_key(make_key_event(pg.K_UNKNOWN, unicode=ch))
+    assert inp.text == "ab"
+
+
+def test_default_field_still_accepts_nonascii(ti):
+    """Non-nickname fields (data-folder path, new-folder name) must keep accepting
+    unicode -- only the nickname field opts into ascii_only."""
+    ti.focused = True
+    for ch in "Jösé":
+        ti.handle_key(make_key_event(pg.K_UNKNOWN, unicode=ch))
+    assert ti.text == "Jösé"
+
+
+def test_ascii_only_fires_on_reject_when_chars_dropped():
+    calls = []
+    inp = TextInput(pg.display.get_surface(), ascii_only=True,
+                    on_reject=lambda: calls.append(1))
+    inp.set_rect(pg.Rect(0, 0, 200, 30))
+    inp._insert("aЩb")
+    assert inp.text == "ab"
+    assert calls == [1]
+
+
+def test_ascii_only_no_reject_for_clean_ascii():
+    calls = []
+    inp = TextInput(pg.display.get_surface(), ascii_only=True,
+                    on_reject=lambda: calls.append(1))
+    inp.set_rect(pg.Rect(0, 0, 200, 30))
+    inp._insert("clean")
+    assert inp.text == "clean"
+    assert calls == []
+
+
+def test_no_reject_when_not_ascii_only():
+    calls = []
+    inp = TextInput(pg.display.get_surface(), on_reject=lambda: calls.append(1))
+    inp.set_rect(pg.Rect(0, 0, 200, 30))
+    inp._insert("Щ")
+    assert inp.text == "Щ"
+    assert calls == []
+
+
 def test_handle_click_outside_unfocuses(ti):
     ti.focused = True
     consumed = ti.handle_click((10, 10))

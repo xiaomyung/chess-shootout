@@ -128,7 +128,7 @@ def _settle(app):
 
 def _saved_text(app):
     assert app._last_saved_pgn_path is not None, "a PGN was saved"
-    with open(app._last_saved_pgn_path) as f:
+    with open(app._last_saved_pgn_path, encoding="utf-8") as f:
         return f.read()
 
 
@@ -149,6 +149,54 @@ def test_online_capture_mate_saves_full_game_with_result(tmp_path, monkeypatch):
     assert "Qxg7#" in text, "the mating ply is in the saved PGN (not truncated)"
     assert '[Result "1-0"]' in text
     assert len(_pgn_files(tmp_path)) == 1
+
+
+def test_online_capture_mate_writes_utf8_bytes(tmp_path, monkeypatch):
+    """The Windows crash site: the mate PGN embeds a skill-check glyph ({Wheel ✓}).
+    _auto_save_pgn must emit UTF-8 bytes on every platform, never the locale codec."""
+    app = _online_app(tmp_path, monkeypatch)
+    _land_capture_mate(app)
+    app._handle_online_result({"reason": "checkmate", "winner_color": "white"})
+    _settle(app)
+    app._update_result_pending()
+    text = _saved_text(app)
+    assert "{Wheel ✓}" in text
+    with open(app._last_saved_pgn_path, "rb") as f:
+        data = f.read()
+    assert "✓".encode("utf-8") in data
+    assert data.decode("utf-8") == text
+    assert data.decode("cp1252", errors="replace") != text
+
+
+def test_auto_save_survives_surrogate_nickname_without_crashing(tmp_path, monkeypatch):
+    """A lone surrogate in a nickname (Windows argv/env surrogateescape) is not
+    UTF-8 encodable even with encoding='utf-8'; the save must degrade to None via the
+    widened except, not take down the app mid-frame. A clean save still works after."""
+    app = _online_app(tmp_path, monkeypatch)
+    _land_capture_mate(app)
+    app._handle_online_result({"reason": "checkmate", "winner_color": "white"})
+    _settle(app)
+    app.white_name = "bad\udce9name"
+    app._last_saved_pgn_path = None
+    app._last_saved_result_tag = None
+    assert app._auto_save_pgn() is None
+    app.white_name = "alice"
+    app._last_saved_pgn_path = None
+    app._last_saved_result_tag = None
+    assert app._auto_save_pgn() is not None
+
+
+def test_startup_toasts_when_stored_nickname_needs_sanitizing(tmp_path, monkeypatch):
+    """A legacy .env carrying a non-ASCII nickname is cleaned on launch (persisted +
+    the start-menu field refreshed) and the player is told via a toast."""
+    from chessshootout.infra import env
+    monkeypatch.setattr(env, "_ENV_PATH", tmp_path / ".env")
+    monkeypatch.setenv("CHESS_NICKNAME", "Bob Щ")
+    monkeypatch.setenv("CHESS_DATA_DIR", str(tmp_path))
+    app = Frontend(1000, 800)
+    messages = [b["message"] for b in app.toast._bubbles]
+    assert "Your nickname contained non ASCII symbols, I cleaned them :3" in messages
+    assert app.start_menu.text_input.text == "Bob"
 
 
 def test_online_mate_saved_via_watchdog_when_result_message_is_missed(tmp_path, monkeypatch):

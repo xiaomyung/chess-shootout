@@ -485,7 +485,7 @@ def test_only_transport_module_imports_httpx_or_websockets():
                 path = os.path.join(root, name)
                 if path.endswith(os.path.join("online", "transport.py")):
                     continue
-                with open(path) as f:
+                with open(path, encoding="utf-8") as f:
                     if bad_pattern.search(f.read()):
                         offenders.append(path)
     assert offenders == [], (

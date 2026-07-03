@@ -48,6 +48,26 @@ def make_key_event(key, unicode=""):
     return pg.event.Event(pg.KEYDOWN, {"key": key, "unicode": unicode, "mod": 0})
 
 
+def test_nickname_field_toasts_on_nonascii(monkeypatch):
+    _clean_env(monkeypatch)
+    toasts = []
+    sm = StartMenu(pg.display.get_surface(),
+                   {"start_game": lambda c: None, "toast": toasts.append})
+    sm.text_input._insert("Щ")
+    assert sm.text_input.text == ""
+    assert toasts == ["Please use ASCII symbols only"]
+
+
+def test_nickname_field_no_toast_on_ascii(monkeypatch):
+    _clean_env(monkeypatch)
+    toasts = []
+    sm = StartMenu(pg.display.get_surface(),
+                   {"start_game": lambda c: None, "toast": toasts.append})
+    sm.text_input._insert("Bob")
+    assert sm.text_input.text == "Bob"
+    assert toasts == []
+
+
 def test_applies_mappable_env_default_time(monkeypatch):
     _clean_env(monkeypatch)
     monkeypatch.setenv("CHESS_DEFAULT_TC", "15")

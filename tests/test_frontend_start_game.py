@@ -267,7 +267,7 @@ def test_auto_save_writes_headers_with_names_and_time_control(tmp_path, monkeypa
     files = list((tmp_path / "games").glob("*.pgn"))
     assert len(files) == 1
     assert files[0].name.startswith("local-")
-    content = files[0].read_text()
+    content = files[0].read_text(encoding="utf-8")
     assert '[White "alice"]' in content
     assert '[Black "Player 2"]' in content
     assert '[TimeControl "300+2"]' in content
@@ -282,7 +282,7 @@ def test_auto_save_marks_time_forfeit_on_timeout(tmp_path, monkeypatch):
     monkeypatch.setenv("CHESS_DATA_DIR", str(tmp_path))
     app._auto_save_pgn()
     files = list((tmp_path / "games").glob("*.pgn"))
-    content = files[0].read_text()
+    content = files[0].read_text(encoding="utf-8")
     assert '[Termination "Time forfeit"]' in content
     assert '[Result "0-1"]' in content
 
@@ -435,7 +435,7 @@ def test_saved_local_pgn_contains_match_session_id(tmp_path, monkeypatch):
     app.backend.try_move(Square(6, 4), Square(4, 4))
     app.manual_result = "white_wins"
     app._auto_save_pgn()
-    content = list((tmp_path / "games").glob("*.pgn"))[0].read_text()
+    content = list((tmp_path / "games").glob("*.pgn"))[0].read_text(encoding="utf-8")
     assert extract_csmatchid(parse_pgn_headers(content)) == app._match_session_id
 
 

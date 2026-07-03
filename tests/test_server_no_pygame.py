@@ -17,7 +17,7 @@ def test_server_and_backend_never_import_pygame_or_frontend():
                 if not name.endswith(".py"):
                     continue
                 path = os.path.join(root, name)
-                with open(path) as f:
+                with open(path, encoding="utf-8") as f:
                     if IMPORT_PATTERN.search(f.read()):
                         offenders.append(path)
     assert offenders == [], (

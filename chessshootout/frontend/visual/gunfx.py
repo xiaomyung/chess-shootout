@@ -163,7 +163,7 @@ def load_battle_art():
     data = {"guns": {}, "flashes": {}}
     try:
         manifest = paths.resource_path("assets", "battle_png", "battle_manifest.json")
-        with open(manifest) as fh:
+        with open(manifest, encoding="utf-8") as fh:
             man = json.load(fh)
     except (OSError, ValueError):
         return data

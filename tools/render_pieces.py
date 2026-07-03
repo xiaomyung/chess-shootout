@@ -164,20 +164,20 @@ def main():
             stem = f"{piece_type}_{color}"
             svg_path = os.path.join(SVG_DIR, stem + ".svg")
             if piece_type in HANDCRAFTED:
-                with open(svg_path) as fh:
+                with open(svg_path, encoding="utf-8") as fh:
                     svg = fh.read()
             else:
                 svg = piece_svg(piece_type, color)
-                with open(svg_path, "w") as fh:
+                with open(svg_path, "w", encoding="utf-8") as fh:
                     fh.write(svg)
             cairosvg.svg2png(bytestring=svg.encode(), write_to=os.path.join(PNG_DIR, stem + ".png"),
                              output_width=PIECE_PX, output_height=PIECE_PX)
-    with open(os.path.join(SVG_DIR, "app_icon.svg"), "w") as fh:
+    with open(os.path.join(SVG_DIR, "app_icon.svg"), "w", encoding="utf-8") as fh:
         fh.write(app_icon_svg())
     cairosvg.svg2png(bytestring=app_icon_svg().encode(),
                      write_to=os.path.join(ICON_DIR, "icon.png"),
                      output_width=ICON_PX, output_height=ICON_PX)
-    with open(os.path.join(SVG_DIR, "brand_mark.svg"), "w") as fh:
+    with open(os.path.join(SVG_DIR, "brand_mark.svg"), "w", encoding="utf-8") as fh:
         fh.write(brand_mark_svg())
     cairosvg.svg2png(bytestring=brand_mark_svg().encode(),
                      write_to=os.path.join(ICON_DIR, "brand_mark.png"),

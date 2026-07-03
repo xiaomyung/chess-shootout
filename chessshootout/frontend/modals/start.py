@@ -77,7 +77,8 @@ class StartMenu:
         self.visible = True
 
         self.text_input = TextInput(window, max_chars=20, placeholder="Enter a nickname",
-                                    on_commit=lambda text: env.set_nickname(text))
+                                    on_commit=lambda text: env.set_nickname(text),
+                                    ascii_only=True, on_reject=self._notify_ascii_only)
         self.text_input.text = env.get_nickname()
 
         last_mode = env.get_last_mode()
@@ -156,6 +157,11 @@ class StartMenu:
 
         self.load_pgn_available = False
         self.reconnect_available = False
+
+    def _notify_ascii_only(self):
+        cb = self.callbacks.get("toast")
+        if cb:
+            cb("Please use ASCII symbols only")
 
     def apply_default_time_settings(self):
         minutes = env.default_time_minutes()

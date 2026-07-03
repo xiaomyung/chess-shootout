@@ -37,7 +37,7 @@ def test_attach_rotating_file_handler_writes_to_path(tmp_path,
     log.info("matchmake ok room=room-x uuid=abcd1234")
     for h in isolated_root_logger.handlers:
         h.flush()
-    contents = path.read_text()
+    contents = path.read_text(encoding="utf-8")
     assert "matchmake ok" in contents
     assert "room=room-x" in contents
 
@@ -130,7 +130,7 @@ def test_existing_log_lines_use_kv_style_after_prefix():
         path = module.__file__
         if path is None:
             continue
-        with open(path) as f:
+        with open(path, encoding="utf-8") as f:
             sources.append(f.read())
     blob = "\n".join(sources)
     assert "room=%s" in blob

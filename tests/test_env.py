@@ -68,6 +68,88 @@ def test_nickname_override_wins(monkeypatch):
     assert env.get_nickname() == "FromCLI"
 
 
+@pytest.mark.parametrize("raw, expected", [
+    pytest.param("Magnus", "Magnus", id="ascii_unchanged"),
+    pytest.param("Щёлк", "", id="all_cyrillic_dropped"),
+    pytest.param("Bob Щ", "Bob", id="mixed_keeps_ascii"),
+    pytest.param("a  b", "a b", id="whitespace_collapsed"),
+    pytest.param("emoji 😀 end", "emoji end", id="emoji_dropped"),
+    pytest.param("x" * 30, "x" * 20, id="capped_at_max"),
+    pytest.param("x" * 19 + " york", "x" * 19, id="truncation_leaves_no_trailing_space"),
+])
+def test_sanitize_nickname(raw, expected):
+    assert env.sanitize_nickname(raw) == expected
+
+
+def test_sanitize_nickname_none_is_empty():
+    assert env.sanitize_nickname(None) == ""
+
+
+def test_nickname_max_len_matches_server():
+    """Client cap must equal the server's, or a locally-typed 20-char name could be
+    rejected online. Drift guard for the mirrored constant."""
+    from chessshootout.server import protocol
+    assert env._NICKNAME_MAX_LEN == protocol.MAX_NICKNAME_LEN
+
+
+@pytest.mark.parametrize("raw", ["Magnus", "Bob Щ", "a  b", "José 123", "x" * 40,
+                                 "x" * 19 + " york"])
+def test_sanitized_nickname_is_accepted_by_server(raw):
+    """Whatever the client keeps must pass the server's normalize_nickname unchanged,
+    so a name typed locally never bounces at matchmake."""
+    from chessshootout.server import protocol
+    clean = env.sanitize_nickname(raw)
+    if clean:
+        assert protocol.normalize_nickname(clean) == clean
+
+
+def test_set_nickname_strips_nonascii_before_persist():
+    env.set_nickname("Bob Щ")
+    assert env.get_nickname() == "Bob"
+    assert "CHESS_NICKNAME=Bob" in env._ENV_PATH.read_text(encoding="utf-8")
+
+
+def test_set_nickname_all_nonascii_is_noop():
+    env.set_nickname("Щёлк")
+    assert env.get_nickname() == ""
+    assert not env._ENV_PATH.exists()
+
+
+def test_get_nickname_sanitizes_legacy_env_value(monkeypatch):
+    monkeypatch.setenv("CHESS_NICKNAME", "Ana Щ")
+    assert env.get_nickname() == "Ana"
+
+
+def test_set_overrides_sanitizes_nickname():
+    env.set_overrides(nickname="Игорь Bob")
+    assert env.get_nickname() == "Bob"
+
+
+def test_normalize_stored_nickname_rewrites_dirty(monkeypatch):
+    monkeypatch.setenv("CHESS_NICKNAME", "Bob Щ")
+    assert env.normalize_stored_nickname() is True
+    assert os.environ["CHESS_NICKNAME"] == "Bob"
+    assert "CHESS_NICKNAME=Bob" in env._ENV_PATH.read_text(encoding="utf-8")
+
+
+def test_normalize_stored_nickname_clean_is_noop(monkeypatch):
+    monkeypatch.setenv("CHESS_NICKNAME", "Bob")
+    assert env.normalize_stored_nickname() is False
+    assert not env._ENV_PATH.exists()
+
+
+def test_normalize_stored_nickname_all_nonascii_clears(monkeypatch):
+    monkeypatch.setenv("CHESS_NICKNAME", "Щёлк")
+    assert env.normalize_stored_nickname() is True
+    assert os.environ["CHESS_NICKNAME"] == ""
+
+
+def test_normalize_stored_nickname_idempotent(monkeypatch):
+    monkeypatch.setenv("CHESS_NICKNAME", "Ann Щ")
+    assert env.normalize_stored_nickname() is True
+    assert env.normalize_stored_nickname() is False
+
+
 def test_get_or_create_client_uuid_generates_when_unset():
     """A fresh launch mints a real uuid4 and caches it for the next call."""
     fresh = env.get_or_create_client_uuid()
@@ -78,7 +160,7 @@ def test_get_or_create_client_uuid_generates_when_unset():
 
 def test_get_or_create_client_uuid_persists_to_env_file():
     first = env.get_or_create_client_uuid()
-    contents = env._ENV_PATH.read_text()
+    contents = env._ENV_PATH.read_text(encoding="utf-8")
     assert "CHESS_CLIENT_UUID" in contents
     assert first in contents
 
@@ -97,13 +179,13 @@ def test_get_or_create_client_uuid_honors_override():
 def test_set_last_mode_persists_to_env_file():
     env.set_last_mode("online")
     assert env.get_last_mode() == "online"
-    contents = env._ENV_PATH.read_text()
+    contents = env._ENV_PATH.read_text(encoding="utf-8")
     assert "CHESS_LAST_MODE" in contents
     assert "online" in contents
 
 
 def test_load_reads_env_file_when_present(monkeypatch):
-    env._ENV_PATH.write_text("CHESS_SERVER_ADDR=test.example.com\n")
+    env._ENV_PATH.write_text("CHESS_SERVER_ADDR=test.example.com\n", encoding="utf-8")
     env.load()
     assert env.get_server_addr() == "test.example.com"
 
@@ -132,7 +214,7 @@ def test_master_volume_falls_back_to_default(monkeypatch, raw):
 def test_master_volume_persists_round_trip():
     env.set_master_volume(0.42)
     assert env.get_master_volume() == pytest.approx(0.42, abs=1e-3)
-    contents = env._ENV_PATH.read_text()
+    contents = env._ENV_PATH.read_text(encoding="utf-8")
     assert "CHESS_MASTER_VOLUME" in contents
 
 
@@ -151,7 +233,7 @@ def test_menu_volume_falls_back_to_default(monkeypatch, raw):
 def test_menu_volume_persists_round_trip_and_clamps():
     env.set_menu_volume(0.35)
     assert env.get_menu_volume() == pytest.approx(0.35, abs=1e-3)
-    assert "CHESS_MENU_VOLUME" in env._ENV_PATH.read_text()
+    assert "CHESS_MENU_VOLUME" in env._ENV_PATH.read_text(encoding="utf-8")
     env.set_menu_volume(1.8)
     assert env.get_menu_volume() == pytest.approx(1.0, abs=1e-3)
 
@@ -171,10 +253,10 @@ def test_show_stats_default_on_when_unset(getter):
 def test_show_stats_round_trip(getter, setter, key):
     getattr(env, setter)(False)
     assert getattr(env, getter)() is False
-    assert f"{key}=0" in env._ENV_PATH.read_text()
+    assert f"{key}=0" in env._ENV_PATH.read_text(encoding="utf-8")
     getattr(env, setter)(True)
     assert getattr(env, getter)() is True
-    assert f"{key}=1" in env._ENV_PATH.read_text()
+    assert f"{key}=1" in env._ENV_PATH.read_text(encoding="utf-8")
 
 
 @pytest.mark.parametrize("getter, key", [
@@ -189,7 +271,7 @@ def test_show_stats_zero_reads_false_not_truthy(monkeypatch, getter, key):
 def test_server_addr_persists_round_trip():
     env.set_server_addr("chess.example.com:9000")
     assert env.get_server_addr() == "chess.example.com:9000"
-    assert "CHESS_SERVER_ADDR" in env._ENV_PATH.read_text()
+    assert "CHESS_SERVER_ADDR" in env._ENV_PATH.read_text(encoding="utf-8")
 
 
 def test_server_addr_strips_whitespace():
@@ -223,7 +305,7 @@ def test_set_nickname_persists_round_trip():
     env.set_nickname("Magnus")
     assert env.get_nickname() == "Magnus"
     assert os.environ["CHESS_NICKNAME"] == "Magnus"
-    assert "CHESS_NICKNAME=Magnus" in env._ENV_PATH.read_text()
+    assert "CHESS_NICKNAME=Magnus" in env._ENV_PATH.read_text(encoding="utf-8")
 
 
 def test_set_nickname_strips_whitespace():
@@ -236,14 +318,14 @@ def test_set_nickname_blank_is_noop(blank):
     env.set_nickname("Fabiano")
     env.set_nickname(blank)
     assert env.get_nickname() == "Fabiano"
-    assert "CHESS_NICKNAME=Fabiano" in env._ENV_PATH.read_text()
+    assert "CHESS_NICKNAME=Fabiano" in env._ENV_PATH.read_text(encoding="utf-8")
 
 
 def test_set_nickname_replaces_existing_value_in_place():
     env.set_nickname("First")
     env.set_nickname("Second")
     assert env.get_nickname() == "Second"
-    contents = env._ENV_PATH.read_text()
+    contents = env._ENV_PATH.read_text(encoding="utf-8")
     assert "CHESS_NICKNAME=Second" in contents
     assert "First" not in contents
 
@@ -255,7 +337,7 @@ def test_country_defaults_empty():
 def test_country_persists_round_trip():
     env.set_country("RO")
     assert env.get_country() == "RO"
-    assert "CHESS_COUNTRY" in env._ENV_PATH.read_text()
+    assert "CHESS_COUNTRY" in env._ENV_PATH.read_text(encoding="utf-8")
 
 
 def test_country_normalizes_case_and_whitespace():
@@ -268,7 +350,7 @@ def test_country_clears_on_blank_and_removes_key():
     env.set_country("")
     assert env.get_country() == ""
     assert "CHESS_COUNTRY" not in os.environ
-    assert "CHESS_COUNTRY" not in env._ENV_PATH.read_text()
+    assert "CHESS_COUNTRY" not in env._ENV_PATH.read_text(encoding="utf-8")
 
 
 @pytest.mark.parametrize("bad", ["usa", "1", "ZZ", "longstring"])
@@ -299,10 +381,10 @@ def test_persist_preserves_comments_and_unrelated_keys():
         "\n"
         "# nickname comment\n"
         "CHESS_NICKNAME=Magnus\n"
-        "CHESS_LAST_MODE=online\n"
+        "CHESS_LAST_MODE=online\n", encoding="utf-8"
     )
     env.set_master_volume(0.42)
-    contents = env._ENV_PATH.read_text()
+    contents = env._ENV_PATH.read_text(encoding="utf-8")
     assert "# server addr comment" in contents
     assert "CHESS_SERVER_ADDR=chess.example.com" in contents
     assert "# nickname comment" in contents
@@ -316,10 +398,10 @@ def test_persist_replaces_existing_key_in_place():
     env._ENV_PATH.write_text(
         "CHESS_LAST_MODE=online\n"
         "CHESS_MASTER_VOLUME=0.300\n"
-        "CHESS_NICKNAME=Magnus\n"
+        "CHESS_NICKNAME=Magnus\n", encoding="utf-8"
     )
     env.set_master_volume(0.800)
-    lines = env._ENV_PATH.read_text().splitlines()
+    lines = env._ENV_PATH.read_text(encoding="utf-8").splitlines()
     assert any("CHESS_MASTER_VOLUME=0.800" in line for line in lines)
     assert lines[-1] == "CHESS_NICKNAME=Magnus"
 
@@ -329,10 +411,10 @@ def test_persist_drops_malformed_lines():
     env._ENV_PATH.write_text(
         "CHESS_LAST_MODE=online\n"
         "CHESS_MASTER_VOLUME=0.5\n"
-        "0.5\n"
+        "0.5\n", encoding="utf-8"
     )
     env.set_master_volume(0.7)
-    contents = env._ENV_PATH.read_text()
+    contents = env._ENV_PATH.read_text(encoding="utf-8")
     assert "0.5\n" not in contents.replace("=0.5\n", "")
     assert contents.count("CHESS_MASTER_VOLUME=") == 1
     assert "CHESS_MASTER_VOLUME=0.700" in contents
@@ -340,15 +422,15 @@ def test_persist_drops_malformed_lines():
 
 def test_persist_writes_unquoted_values():
     env.set_master_volume(0.65)
-    contents = env._ENV_PATH.read_text()
+    contents = env._ENV_PATH.read_text(encoding="utf-8")
     assert "CHESS_MASTER_VOLUME=0.650" in contents
     assert "CHESS_MASTER_VOLUME='0.650'" not in contents
 
 
 def test_persist_appends_new_key_when_absent():
-    env._ENV_PATH.write_text("# only a comment\nCHESS_LAST_MODE=online\n")
+    env._ENV_PATH.write_text("# only a comment\nCHESS_LAST_MODE=online\n", encoding="utf-8")
     env.set_master_volume(0.5)
-    contents = env._ENV_PATH.read_text()
+    contents = env._ENV_PATH.read_text(encoding="utf-8")
     assert "# only a comment" in contents
     assert "CHESS_LAST_MODE=online" in contents
     assert "CHESS_MASTER_VOLUME=0.500" in contents
@@ -380,14 +462,14 @@ def test_set_overrides_coercion_is_deterministic_per_alias():
 def test_set_data_dir_persists_and_reads():
     env.set_data_dir("/tmp/mygames")
     assert env.get_data_dir_override() == "/tmp/mygames"
-    assert "CHESS_DATA_DIR=/tmp/mygames" in env._ENV_PATH.read_text()
+    assert "CHESS_DATA_DIR=/tmp/mygames" in env._ENV_PATH.read_text(encoding="utf-8")
 
 
 def test_set_data_dir_none_clears_override():
     env.set_data_dir("/tmp/mygames")
     env.set_data_dir(None)
     assert env.get_data_dir_override() == ""
-    contents = env._ENV_PATH.read_text() if env._ENV_PATH.exists() else ""
+    contents = env._ENV_PATH.read_text(encoding="utf-8") if env._ENV_PATH.exists() else ""
     assert "CHESS_DATA_DIR" not in contents
 
 
@@ -410,7 +492,7 @@ def test_env_default_path_derives_from_config_dir_not_file():
     so a Path(__file__)-relative default resolves inside the package and drops a
     stray chessshootout/.env. The default must derive from get_config_dir()."""
     import pathlib
-    src = pathlib.Path(env.__file__).read_text()
+    src = pathlib.Path(env.__file__).read_text(encoding="utf-8")
     assert "get_config_dir()" in src
     assert "Path(__file__)" not in src
 
@@ -419,14 +501,14 @@ def test_default_time_control_round_trips():
     assert env.get_default_time_control() == "10"
     env.set_default_time_control("3")
     assert env.get_default_time_control() == "3"
-    assert "CHESS_DEFAULT_TC=3" in env._ENV_PATH.read_text()
+    assert "CHESS_DEFAULT_TC=3" in env._ENV_PATH.read_text(encoding="utf-8")
 
 
 def test_default_increment_round_trips():
     assert env.get_default_increment() == "5"
     env.set_default_increment("2")
     assert env.get_default_increment() == "2"
-    assert "CHESS_DEFAULT_INCREMENT=2" in env._ENV_PATH.read_text()
+    assert "CHESS_DEFAULT_INCREMENT=2" in env._ENV_PATH.read_text(encoding="utf-8")
 
 
 def test_default_time_control_rejects_unknown_value():

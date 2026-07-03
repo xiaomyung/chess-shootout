@@ -89,5 +89,5 @@ def write_crash_log(exc, log_buffer, state, *, root=None):
     else:
         parts.append("(no log records captured)")
 
-    path.write_text("\n".join(parts) + "\n")
+    path.write_text("\n".join(parts) + "\n", encoding="utf-8")
     return path
