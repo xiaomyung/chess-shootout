@@ -1698,7 +1698,22 @@ class Frontend(OnlineEventsMixin):
             self.help_modal, self.confirm_modal,
         ))
 
+    def _sync_window_surface(self):
+        win_w, win_h = pg.display.get_window_size()
+        win_w = max(win_w, MIN_WINDOW_WIDTH)
+        win_h = max(win_h, MIN_WINDOW_HEIGHT)
+        if (win_w, win_h) != self.window.get_size():
+            self.window = pg.display.set_mode((win_w, win_h), WINDOW_FLAGS)
+            self.chrome.window = self.window
+            self.chrome.reinit_sdl()
+            self.window_width = win_w
+            self.window_height = win_h
+            self._cancel_all_scroll()
+            self._compute_layout()
+
     def draw_frame(self):
+        if os.name == "nt":
+            self._sync_window_surface()
         if getattr(self, "_last_layout_mode", None) != self.mode:
             self._compute_layout()
 
@@ -2515,7 +2530,7 @@ class Frontend(OnlineEventsMixin):
             elif event.type == pg.VIDEORESIZE:
                 w = max(event.w, MIN_WINDOW_WIDTH)
                 h = max(event.h, MIN_WINDOW_HEIGHT)
-                if (w, h) != (event.w, event.h):
+                if os.name == "nt" or (w, h) != (event.w, event.h):
                     self.window = pg.display.set_mode((w, h), WINDOW_FLAGS)
                     self.chrome.window = self.window
                     self.chrome.reinit_sdl()
