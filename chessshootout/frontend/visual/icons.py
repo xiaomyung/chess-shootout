@@ -4,8 +4,16 @@ import os
 import pygame as pg
 
 from chessshootout.paths import PIECES_PNG_DIR
+from chessshootout.frontend.visual.cache import new_cache, memoized_surface
 from chessshootout.frontend.visual.colors import Colors
 from chessshootout.frontend.visual.draw import supersample
+
+_ICON_CACHE = new_cache()
+
+
+def _blit_icon(window, rect, side, key, build):
+    window.blit(memoized_surface(_ICON_CACHE, key, build),
+                (rect.centerx - side // 2, rect.centery - side // 2))
 
 
 def piece_png_path(piece):
@@ -34,7 +42,8 @@ def draw_speaker(window, rect, color, muted=False):
                 cx, cy = 11.5 * u, 12 * u
                 pg.draw.arc(surf, col, pg.Rect(cx - r, cy - r, 2 * r, 2 * r), -0.7, 0.7, lw)
 
-    window.blit(supersample(side, render), (rect.centerx - side // 2, rect.centery - side // 2))
+    _blit_icon(window, rect, side, ("speaker", side, str(color), muted),
+               lambda: supersample(side, render))
 
 
 def make_speaker_icon(muted):
@@ -66,7 +75,8 @@ def draw_folder(window, rect, color):
         u = side * k / 24.0
         pg.draw.polygon(surf, col, [(x * u, y * u) for x, y in _FOLDER_BODY])
 
-    window.blit(supersample(side, render), (rect.centerx - side // 2, rect.centery - side // 2))
+    _blit_icon(window, rect, side, ("folder", side, str(color)),
+               lambda: supersample(side, render))
 
 
 def draw_file(window, rect, color):
@@ -81,7 +91,8 @@ def draw_file(window, rect, color):
         pg.draw.polygon(surf, col, [(x * u, y * u) for x, y in _FILE_BODY])
         pg.draw.polygon(surf, fold, [(x * u, y * u) for x, y in _FILE_FOLD])
 
-    window.blit(supersample(side, render), (rect.centerx - side // 2, rect.centery - side // 2))
+    _blit_icon(window, rect, side, ("file", side, str(color)),
+               lambda: supersample(side, render))
 
 
 _FOLDER_OUTLINE = [(3.5, 8), (3.5, 7), (4.4, 6.2), (8.6, 6.2), (10.6, 8.2),
@@ -108,8 +119,8 @@ def draw_folder_plus(window, rect, color):
         pg.draw.line(surf, col, (12 * u, 11 * u), (12 * u, 16 * u), lw)
         pg.draw.line(surf, col, (9.5 * u, 13.5 * u), (14.5 * u, 13.5 * u), lw)
 
-    window.blit(supersample(side, render, scale=6),
-                (rect.centerx - side // 2, rect.centery - side // 2))
+    _blit_icon(window, rect, side, ("folder_plus", side, str(color)),
+               lambda: supersample(side, render, scale=6))
 
 
 def draw_eye(window, rect, color, off=False):
@@ -132,5 +143,5 @@ def draw_eye(window, rect, color, off=False):
         if off:
             pg.draw.line(surf, col, (3.5 * u, 4.5 * u), (20.5 * u, 19.5 * u), lw)
 
-    window.blit(supersample(side, render, scale=6),
-                (rect.centerx - side // 2, rect.centery - side // 2))
+    _blit_icon(window, rect, side, ("eye", side, str(color), off),
+               lambda: supersample(side, render, scale=6))

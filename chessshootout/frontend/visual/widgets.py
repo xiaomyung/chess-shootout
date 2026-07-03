@@ -175,6 +175,9 @@ def draw_icon_button(window, rect, icon_fn, force_pressed=False, disabled=False,
     icon_fn(window, rect)
 
 
+_GEAR_CACHE = new_cache()
+
+
 def draw_gear(window, rect):
     def render(surf, k):
         w, h = surf.get_size()
@@ -196,7 +199,8 @@ def draw_gear(window, rect):
         hole_r = r * 0.40
         pg.draw.circle(surf, Colors.text, (int(cx), int(cy)), int(r), width=int(r - hole_r))
 
-    window.blit(supersample((max(rect.width, 1), max(rect.height, 1)), render, scale=8),
+    size = (max(rect.width, 1), max(rect.height, 1))
+    window.blit(memoized_surface(_GEAR_CACHE, size, lambda: supersample(size, render, scale=8)),
                 rect.topleft)
 
 

@@ -1,8 +1,10 @@
 import pygame as pg
 
 from chessshootout.paths import resource_path
+from chessshootout.frontend.visual.cache import new_cache, memoized_surface
 
 _BASE = {}
+_SCALED = new_cache()
 
 _REGIONAL_A = 0x1F1E6
 _REGIONAL_Z = 0x1F1FF
@@ -41,8 +43,11 @@ def emoji_surface(char, size):
     w, h = base.get_size()
     if h <= 0:
         return None
-    scale = size / h
-    return pg.transform.smoothscale(base, (max(int(w * scale), 1), size))
+
+    def build():
+        scale = size / h
+        return pg.transform.smoothscale(base, (max(int(w * scale), 1), size))
+    return memoized_surface(_SCALED, (char, size), build)
 
 
 def blit_emoji(window, char, center, size):
