@@ -104,6 +104,14 @@ collected between gw0 and gwN". Use fixed literals — never build argvalues fro
 `uuid.uuid4()`, `random`, the clock, or unsorted `set`/`dict` iteration (sort if you
 must). Verify a parametrize change with `pytest tests -n auto`, not just `-n0`.
 
+A pixel-colour assertion must sample a **surface the test owns** (`pg.Surface(...)`
+it filled and drew onto), never the shared app display surface after driving the
+full app. Two tests in a worker share one `pg.display`, so a neighbour can leave it
+in a state that makes the sampled pixel wrong — and because xdist bucketing shifts
+when files are added, it passes locally and flakes only in CI. Build the minimal
+inputs (a stub board, a real `Clock`) and draw the one element under test onto your
+own surface.
+
 ## Worked examples (before → after)
 
 **Collapse a cluster** — ten near-identical material checks become one table:

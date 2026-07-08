@@ -42,6 +42,11 @@ server for online two-player matches.
   manager on Linux), fullscreen (`F11` or the green title-bar button), minimize,
   and a themed title bar on every screen.
 - Animated menu "battle" backdrop and themed result / online screens.
+- Focus mode (`H`, the board-seam arrow, or `Esc` to exit) collapses the in-game
+  UI to just the board, which grows to a centered square. **Options → Focus mode
+  → "Show in focus"** picks what stays on the board: a slim per-player **Time
+  Line** on the top/bottom edges that depletes with each clock (default), the
+  full player strips, or nothing.
 
 **Audio**
 - A distinct move sound per piece, and a distinct gun on a won capture check —
@@ -168,7 +173,7 @@ pyenv shell 3.12                  # `python3.12` now resolves for the venv step 
 | `Home` / `End` | Jump to ply 0 / live |
 | `?` | Open Help modal |
 | Hold **Give 15s** | Ramp the opponent's clock up to the starting time |
-| `Esc` | Context Back/Cancel — closes the top modal, else the quit / resign prompt (never the window) |
+| `Esc` | Context Back/Cancel — closes the top modal, else exits focus mode, else the quit / resign prompt (never the window) |
 
 ## Online play
 
