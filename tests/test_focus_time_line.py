@@ -1,6 +1,9 @@
-"""TimeLine (focus/time_line.py) renders the depleting per-clock bar with the
+"""TimeLine (focus/time_line.py) paints the depleting per-clock bar with the
 right state color: orange for the mover, gray for the waiter, red under 10%.
-Guards the extraction of the draw out of Frontend by pixel-sampling the bar."""
+
+Drawn onto an owned Surface with a stub board + real Clock so the color guard is
+deterministic on any platform — pixel-sampling the shared app display surface is
+xdist-order-fragile (a neighbor can leave it in a polluted state)."""
 
 import os
 
@@ -10,17 +13,29 @@ os.environ.setdefault("SDL_AUDIODRIVER", "dummy")
 import pygame as pg
 import pytest
 
+from chessshootout.backend.clock import Clock
+from chessshootout.backend.pieces import PieceColor
+from chessshootout.frontend.focus.time_line import TimeLine
 from chessshootout.frontend.visual.colors import Colors
 from chessshootout.frontend.visual.clock_visual import LOW_TIME_FRACTION
-from tests.focus_helpers import make_app, start_game, install_clock, FakeClock, collapse
 
 
 @pytest.fixture(scope="module", autouse=True)
 def _pg():
     pg.init()
-    pg.display.set_mode((1000, 800))
     yield
     pg.quit()
+
+
+class _Board:
+    SIZE = 8
+
+    def __init__(self, rect, flipped=False):
+        self.rect = rect
+        self.cell_size = rect.width / self.SIZE
+        self.board_offset_x = rect.left
+        self.board_offset_y = rect.top
+        self.flipped = flipped
 
 
 def _rgb(color):
@@ -28,39 +43,42 @@ def _rgb(color):
     return (c.r, c.g, c.b)
 
 
-def _sample(app, rect):
-    return tuple(app.window.get_at((rect.centerx, rect.centery)))[:3]
+def _clock(white=300.0, black=300.0, initial=300.0):
+    clk = Clock.create(initial, 0, now_provider=lambda: 0.0)
+    clk.white_remaining = white
+    clk.black_remaining = black
+    return clk
 
 
-def _focus_line_game():
-    clock = FakeClock()
-    app = make_app()
-    mp = pytest.MonkeyPatch()
-    install_clock(mp, clock)
-    start_game(app, minutes=5)
-    collapse(app, clock)
-    app.draw_frame()
-    return app, mp
+def _draw(board, clock, mover, fill=(9, 9, 9)):
+    surf = pg.Surface((400, 400))
+    surf.fill(fill)
+    TimeLine().draw(surf, board, clock, mover, board.rect)
+    return surf
+
+
+def _sample(surf, rect):
+    return tuple(surf.get_at((rect.centerx, rect.centery)))[:3]
 
 
 def test_mover_line_is_accent_waiter_is_muted():
-    app, mp = _focus_line_game()
-    try:
-        top, bottom = app.time_line.rects_for(app.board, app.board.rect)
-        assert not app.board.flipped
-        assert _sample(app, bottom) == _rgb(Colors.accent)
-        assert _sample(app, top) == _rgb(Colors.text_muted)
-    finally:
-        mp.undo()
+    board = _Board(pg.Rect(0, 10, 380, 380))
+    top, bottom = TimeLine().rects_for(board, board.rect)
+    surf = _draw(board, _clock(), PieceColor.WHITE)
+    assert _sample(surf, bottom) == _rgb(Colors.accent)
+    assert _sample(surf, top) == _rgb(Colors.text_muted)
 
 
 def test_low_time_line_turns_red():
-    app, mp = _focus_line_game()
-    try:
-        clock = app.match.clock
-        clock.white_remaining = clock.initial_seconds * (LOW_TIME_FRACTION / 2)
-        app.draw_frame()
-        _top, bottom = app.time_line.rects_for(app.board, app.board.rect)
-        assert _sample(app, bottom) == _rgb(Colors.check)
-    finally:
-        mp.undo()
+    board = _Board(pg.Rect(0, 10, 380, 380))
+    low = 300.0 * (LOW_TIME_FRACTION / 2)
+    _top, bottom = TimeLine().rects_for(board, board.rect)
+    surf = _draw(board, _clock(white=low), PieceColor.WHITE)
+    assert _sample(surf, bottom) == _rgb(Colors.check)
+
+
+def test_flip_swaps_which_edge_is_the_mover():
+    board = _Board(pg.Rect(0, 10, 380, 380), flipped=True)
+    top, _bottom = TimeLine().rects_for(board, board.rect)
+    surf = _draw(board, _clock(), PieceColor.WHITE)
+    assert _sample(surf, top) == _rgb(Colors.accent)
