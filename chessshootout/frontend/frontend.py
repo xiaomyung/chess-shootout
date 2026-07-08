@@ -47,6 +47,7 @@ from chessshootout.frontend.visual.effects import TAKEOVER_TOTAL_MS
 from chessshootout.frontend.focus import layout as focus_layout
 from chessshootout.frontend.focus.arrow import (
     FocusArrow, FOCUS_EDGE_ZONE_PX, FOCUS_ARROW_D, LONG_AGO_MS)
+from chessshootout.frontend.focus.time_line import TimeLine
 from chessshootout.frontend.focus.transition import FocusTransition
 from chessshootout.frontend.window_chrome import (
     WindowChrome, WINDOW_FLAGS, MIN_WINDOW_WIDTH, MIN_WINDOW_HEIGHT,
@@ -59,7 +60,6 @@ from chessshootout.frontend.online.events import (
 from chessshootout.frontend.panels.player_strip import (
     AUTO_END_RED_THRESHOLD_SECONDS, PlayerStrip,
 )
-from chessshootout.frontend.visual.colors import Colors
 from chessshootout.frontend.modals.wait import WaitModal
 from chessshootout.frontend.modals.match_found import MatchFoundModal
 from chessshootout.frontend.online.banners import OfferBanners
@@ -162,8 +162,6 @@ FOCUS_OFF_LINGER_MS = 2000
 FOCUS_HINT_MS = 1600
 FOCUS_EDGE_ARROW_MARGIN = 16
 FOCUS_ARROW_OFF_GAP = 6
-FOCUS_LINE_TRACK_ALPHA = 46
-FOCUS_LINE_LOW_FRACTION = 0.10
 RIGHT_PANEL_WIDTH = 360
 BOARD_AREA_MARGIN = 12
 STRIP_MARGIN = 5
@@ -375,6 +373,7 @@ class Frontend(OnlineEventsMixin):
         self.focus_mode = False
         self.focus_transition = None
         self.focus_arrow = FocusArrow()
+        self.time_line = TimeLine()
         self._focus_click_consumed = False
         self._focus_panel_hover_ms = LONG_AGO_MS
         self._focus_hint_until_ms = 0
@@ -1279,59 +1278,11 @@ class Frontend(OnlineEventsMixin):
         self.focus_arrow.update(now, shown, anchor, mp, False)
         self.focus_arrow.draw(self.window)
 
-    def _time_line_rects(self):
-        return self._time_line_rects_for(self.board.rect)
-
-    def _time_line_rects_for(self, board_rect):
-        b = self.board
-        grid = b.cell_size * b.SIZE
-        sx = board_rect.width / b.rect.width if b.rect.width else 1.0
-        sy = board_rect.height / b.rect.height if b.rect.height else 1.0
-        grid_top = board_rect.top + (b.board_offset_y - b.rect.top) * sy
-        grid_bottom = board_rect.top + (b.board_offset_y + grid - b.rect.top) * sy
-        grid_left = board_rect.left + (b.board_offset_x - b.rect.left) * sx
-        grid_w = int(grid * sx)
-        return focus_layout.time_line_rects(
-            board_rect, int(grid_top), int(grid_bottom), int(grid_left), grid_w)
-
     def _draw_time_lines(self, board_rect=None, alpha=1.0):
         if self._focus_show() != "line" or self._time_control is None:
             return
-        clock = self.match.clock
-        if clock is None:
-            return
-        top_rect, bottom_rect = self._time_line_rects_for(board_rect or self.board.rect)
-        mover = self.match.current_turn()
-        bottom_color = PieceColor.BLACK if self.board.flipped else PieceColor.WHITE
-        top_color = PieceColor.WHITE if self.board.flipped else PieceColor.BLACK
-        self._draw_time_line(top_rect, clock, top_color, mover, alpha)
-        self._draw_time_line(bottom_rect, clock, bottom_color, mover, alpha)
-
-    def _draw_time_line(self, rect, clock, color, mover, alpha):
-        if alpha <= 0.01 or rect.width < 1 or rect.height < 1:
-            return
-        initial = clock.initial_seconds
-        frac = max(0.0, min(clock.remaining(color) / initial, 1.0)) if initial > 0 else 0.0
-        if frac < FOCUS_LINE_LOW_FRACTION:
-            base = Colors.check
-        elif color == mover:
-            base = Colors.accent
-        else:
-            base = Colors.text_muted
-        chip = pg.Surface(rect.size, pg.SRCALPHA)
-        area = pg.Rect(0, 0, rect.width, rect.height)
-        radius = rect.height // 2
-        track = pg.Color(Colors.surface_active)
-        track.a = int(FOCUS_LINE_TRACK_ALPHA * alpha)
-        pg.draw.rect(chip, track, area, border_radius=radius)
-        fill_w = int(rect.width * frac)
-        if fill_w > 0:
-            fill = pg.Rect(0, 0, fill_w, rect.height)
-            fill.center = area.center
-            col = pg.Color(base)
-            col.a = int(255 * alpha)
-            pg.draw.rect(chip, col, fill, border_radius=radius)
-        self.window.blit(chip, rect.topleft)
+        self.time_line.draw(self.window, self.board, self.match.clock,
+                            self.match.current_turn(), board_rect or self.board.rect, alpha)
 
     def _on_open_pgn(self):
         path = self._last_saved_pgn_path
@@ -1980,7 +1931,7 @@ class Frontend(OnlineEventsMixin):
         if self.focus_arrow.is_visible():
             rects.append(self.focus_arrow.dirty_rect())
         if self.focus_mode and self._focus_show() == "line":
-            top_line, bottom_line = self._time_line_rects()
+            top_line, bottom_line = self.time_line.rects_for(self.board, self.board.rect)
             rects.extend([top_line, bottom_line])
         return rects
 
