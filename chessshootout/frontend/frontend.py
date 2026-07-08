@@ -1212,6 +1212,8 @@ class Frontend(OnlineEventsMixin):
     def _toggle_focus(self, on):
         if self.focus_transition is not None:
             return
+        if self.skillcheck_overlay.is_active() and self.current_result() is None:
+            return
         if on == self.focus_mode:
             return
         if on and not self._focus_available():
@@ -1243,6 +1245,8 @@ class Frontend(OnlineEventsMixin):
             self.focus_transition = None
         self.focus_mode = False
         self.focus_arrow.reset()
+        self._focus_panel_hover_ms = LONG_AGO_MS
+        self._focus_hint_until_ms = 0
         self._compute_layout()
         self._needs_full_present = True
 
@@ -2012,9 +2016,11 @@ class Frontend(OnlineEventsMixin):
             self.board.try_apply_next_premove()
 
         if self.mode != "menu":
-            if (self.current_result() is not None and self.focus_mode
-                    and self.focus_transition is None):
-                self._toggle_focus(False)
+            if self.current_result() is not None and self.focus_mode:
+                if self.focus_transition is None:
+                    self._toggle_focus(False)
+                elif self.focus_transition.collapsing:
+                    self._force_focus_off_instant()
             if self.focus_transition is not None:
                 tr = self.focus_transition
                 tr.draw(now)
@@ -2042,6 +2048,8 @@ class Frontend(OnlineEventsMixin):
                 self.focus_arrow.update(now, reveal, anchor, mp, True)
                 self.focus_arrow.draw(self.window)
                 self.board.draw_drag_overlay()
+                if self.board.effects.has_takeover():
+                    self.board.effects.draw_takeover(self.window, now)
                 self._update_result_pending()
             else:
                 self._sync_aim_check_gun()
@@ -2586,6 +2594,8 @@ class Frontend(OnlineEventsMixin):
             return self.help_modal
         if self.mode == "menu":
             return self.menu_page
+        if self.focus_mode or self.focus_transition is not None:
+            return None
         return self.right_menu
 
     def _cancel_all_scroll(self):

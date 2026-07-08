@@ -11,7 +11,7 @@ import pygame as pg
 import pytest
 
 from chessshootout.frontend.visual.colors import Colors
-from chessshootout.frontend.focus.time_line import FOCUS_LINE_LOW_FRACTION
+from chessshootout.frontend.visual.clock_visual import LOW_TIME_FRACTION
 from tests.focus_helpers import make_app, start_game, install_clock, FakeClock, collapse
 
 
@@ -58,7 +58,7 @@ def test_low_time_line_turns_red():
     app, mp = _focus_line_game()
     try:
         clock = app.match.clock
-        clock.white_remaining = clock.initial_seconds * (FOCUS_LINE_LOW_FRACTION / 2)
+        clock.white_remaining = clock.initial_seconds * (LOW_TIME_FRACTION / 2)
         app.draw_frame()
         _top, bottom = app.time_line.rects_for(app.board, app.board.rect)
         assert _sample(app, bottom) == _rgb(Colors.check)

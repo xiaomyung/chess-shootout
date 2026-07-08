@@ -220,3 +220,13 @@ def test_center_x_overrides_window_center():
     t.draw(now_ms=_shown_now(t), center_x=250)
     surf, (x, _y) = win.calls[-1]
     assert abs((x + surf.get_width() / 2) - 250) <= 1
+
+
+def test_board_centered_toast_clamped_on_window():
+    win = _RecWin(600, 600)
+    t = Toast(win)
+    t.show("a fairly long toast message that is wide enough to overflow the left edge")
+    t.draw(now_ms=_shown_now(t), center_x=90)
+    surf, (x, _y) = win.calls[-1]
+    assert x >= 0
+    assert x + surf.get_width() <= win.get_width() or surf.get_width() > win.get_width()

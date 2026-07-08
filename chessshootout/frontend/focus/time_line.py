@@ -2,10 +2,10 @@ import pygame as pg
 
 from chessshootout.backend.pieces import PieceColor
 from chessshootout.frontend.focus import layout as focus_layout
+from chessshootout.frontend.visual.clock_visual import LOW_TIME_FRACTION
 from chessshootout.frontend.visual.colors import Colors
 
 FOCUS_LINE_TRACK_ALPHA = 46
-FOCUS_LINE_LOW_FRACTION = 0.10
 
 
 class TimeLine:
@@ -35,7 +35,7 @@ class TimeLine:
             return
         initial = clock.initial_seconds
         frac = max(0.0, min(clock.remaining(color) / initial, 1.0)) if initial > 0 else 0.0
-        if frac < FOCUS_LINE_LOW_FRACTION:
+        if frac < LOW_TIME_FRACTION:
             base = Colors.check
         elif color == mover:
             base = Colors.accent

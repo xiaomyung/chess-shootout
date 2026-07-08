@@ -39,9 +39,11 @@ class _Elem:
         a = int(self.a0 + (self.a1 - self.a0) * e)
         if a <= 0:
             return
-        surf = pg.transform.smoothscale(self.snap, r.size)
-        if a < 255:
-            surf.set_alpha(a)
+        if r.size == self.snap.get_size():
+            surf = self.snap
+        else:
+            surf = pg.transform.smoothscale(self.snap, r.size)
+        surf.set_alpha(a if a < 255 else None)
         window.blit(surf, r.topleft)
 
 

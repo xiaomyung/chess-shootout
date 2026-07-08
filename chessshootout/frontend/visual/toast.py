@@ -132,5 +132,7 @@ class Toast:
             if b["y"] is None:
                 b["y"] = float(target_y - surf.get_height())
             b["y"] += (target_y - b["y"]) * smooth
-            self.window.blit(surf, (int(cx - surf.get_width() / 2), int(b["y"])))
+            x = int(cx - surf.get_width() / 2)
+            x = max(0, min(x, self.window.get_width() - surf.get_width()))
+            self.window.blit(surf, (x, int(b["y"])))
             y_cursor += surf.get_height() + STACK_GAP_PX
