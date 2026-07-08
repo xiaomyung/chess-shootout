@@ -44,6 +44,11 @@ from chessshootout.frontend.visual.toast import Toast
 from chessshootout.frontend.visual import backdrop
 from chessshootout.frontend.visual import cache
 from chessshootout.frontend.visual.effects import TAKEOVER_TOTAL_MS
+from chessshootout.frontend.focus import layout as focus_layout
+from chessshootout.frontend.focus.arrow import (
+    FocusArrow, FOCUS_EDGE_ZONE_PX, FOCUS_ARROW_D, LONG_AGO_MS)
+from chessshootout.frontend.focus.time_line import TimeLine
+from chessshootout.frontend.focus.transition import FocusTransition
 from chessshootout.frontend.window_chrome import (
     WindowChrome, WINDOW_FLAGS, MIN_WINDOW_WIDTH, MIN_WINDOW_HEIGHT,
 )
@@ -153,6 +158,10 @@ MODE_PILL_LABELS = {
 }
 
 
+FOCUS_OFF_LINGER_MS = 2000
+FOCUS_HINT_MS = 1600
+FOCUS_EDGE_ARROW_MARGIN = 16
+FOCUS_ARROW_OFF_GAP = 6
 RIGHT_PANEL_WIDTH = 360
 BOARD_AREA_MARGIN = 12
 STRIP_MARGIN = 5
@@ -361,6 +370,14 @@ class Frontend(OnlineEventsMixin):
         self.player_strip_bottom = PlayerStrip(self.window)
         self.menu_battle = MenuBattle(self.window, sound_manager=self.sound_manager)
         self._scroll_pressed = None
+        self.focus_mode = False
+        self.focus_transition = None
+        self.focus_arrow = FocusArrow()
+        self.time_line = TimeLine()
+        self._focus_click_consumed = False
+        self._focus_panel_hover_ms = LONG_AGO_MS
+        self._focus_hint_until_ms = 0
+        self._focus_prev_mode = "menu"
 
         self.match.new_game()
         self.board.load_assets()
@@ -600,6 +617,13 @@ class Frontend(OnlineEventsMixin):
             ("Appearance", [
                 SwatchRow("Board theme", "More themes coming soon", themes,
                           env.get_theme, env.set_theme),
+            ]),
+            ("Focus mode", [
+                SegmentedRow("Show in focus",
+                             "What stays on screen when the panel is hidden",
+                             [("Nothing", "nothing"), ("Time Line", "line"),
+                              ("Full strips", "strips")],
+                             env.get_focus_show, env.set_focus_show),
             ]),
             ("Game", [
                 SegmentedRow("Default time", "Minutes on the clock, or untimed",
@@ -1123,6 +1147,7 @@ class Frontend(OnlineEventsMixin):
         return disabled
 
     def _reset_to_new_game(self):
+        self._force_focus_off_instant()
         self.pgn_review = False
         self.board.read_only = False
         self._review_return_page = None
@@ -1165,6 +1190,103 @@ class Frontend(OnlineEventsMixin):
         self.board.review_ply = None
         self.confirm_modal.hide()
         self._last_turn_for_flip = None
+
+    def _focus_show(self):
+        return env.get_focus_show()
+
+    def _focus_available(self):
+        return (self.mode != "menu"
+                and not self.pgn_review
+                and self.current_result() is None
+                and not self.skillcheck_overlay.is_active()
+                and not self.board.is_dragging()
+                and self.board.pending_promotion_square is None
+                and not self._menu_overlay_active())
+
+    def _focus_arrow_allowed(self):
+        return (not self.pgn_review
+                and self.current_result() is None
+                and not self.skillcheck_overlay.is_active()
+                and not self._menu_overlay_active())
+
+    def _toggle_focus(self, on):
+        if self.focus_transition is not None:
+            return
+        if self.skillcheck_overlay.is_active() and self.current_result() is None:
+            return
+        if on == self.focus_mode:
+            return
+        if on and not self._focus_available():
+            return
+        self.board.cancel_drag_physics()
+        self.focus_transition = FocusTransition(self)
+        if on:
+            self.focus_transition.begin_collapse(self._focus_show())
+        else:
+            self.focus_transition.begin_expand(self._focus_show())
+        self.focus_arrow.reset()
+        self._needs_full_present = True
+
+    def _finalize_focus_transition(self):
+        self.focus_transition = None
+        self._needs_full_present = True
+
+    def _abort_transition_for_resize(self):
+        if self.focus_transition is not None:
+            self.focus_transition.cancel()
+            self.focus_transition = None
+            self._needs_full_present = True
+
+    def _force_focus_off_instant(self):
+        if not self.focus_mode and self.focus_transition is None:
+            return
+        if self.focus_transition is not None:
+            self.focus_transition.cancel()
+            self.focus_transition = None
+        self.focus_mode = False
+        self.focus_arrow.reset()
+        self._focus_panel_hover_ms = LONG_AGO_MS
+        self._focus_hint_until_ms = 0
+        self._compute_layout()
+        self._needs_full_present = True
+
+    def _draw_game_children(self):
+        self._sync_aim_check_gun()
+        self._draw_game_background()
+        self.board.draw_board()
+        self._update_player_strips()
+        self._refresh_game_info()
+        self.player_strip_top.draw()
+        self.player_strip_bottom.draw()
+        self.right_menu.draw_menu()
+
+    def _focus_edge_zone_rect(self):
+        board_r = self.board.rect
+        w = self.window.get_width()
+        return pg.Rect(w - FOCUS_EDGE_ZONE_PX, board_r.top, FOCUS_EDGE_ZONE_PX, board_r.height)
+
+    def _focus_arrow_off_anchor(self):
+        x = self.right_menu.outer_rect.x - FOCUS_ARROW_D // 2 - FOCUS_ARROW_OFF_GAP
+        return (x, self.board.rect.centery)
+
+    def _update_focus_arrow_off(self, now):
+        if not self._focus_arrow_allowed():
+            self.focus_arrow.reset()
+            return
+        mp = pg.mouse.get_pos()
+        if self.right_menu.outer_rect.collidepoint(mp):
+            self._focus_panel_hover_ms = now
+        anchor = self._focus_arrow_off_anchor()
+        shown = (now < self._focus_hint_until_ms
+                 or now - self._focus_panel_hover_ms < FOCUS_OFF_LINGER_MS)
+        self.focus_arrow.update(now, shown, anchor, mp, False)
+        self.focus_arrow.draw(self.window)
+
+    def _draw_time_lines(self, board_rect=None, alpha=1.0):
+        if self._focus_show() != "line" or self._time_control is None:
+            return
+        self.time_line.draw(self.window, self.board, self.match.clock,
+                            self.match.current_turn(), board_rect or self.board.rect, alpha)
 
     def _on_open_pgn(self):
         path = self._last_saved_pgn_path
@@ -1261,6 +1383,9 @@ class Frontend(OnlineEventsMixin):
             return
         if self.pgn_review or self.current_result() is not None:
             self._on_back_to_menu()
+            return
+        if self.focus_mode or self.focus_transition is not None:
+            self._toggle_focus(False)
             return
         self._on_resign()
 
@@ -1782,6 +1907,7 @@ class Frontend(OnlineEventsMixin):
 
     def _needs_full_redraw(self, had_events):
         return (had_events or self._needs_full_present or self.mode == "menu"
+                or self.focus_transition is not None
                 or self._menu_overlay_active() or self.toast.is_visible()
                 or not self.offer_banners.is_empty()
                 or self.skillcheck_overlay.is_active()
@@ -1806,6 +1932,11 @@ class Frontend(OnlineEventsMixin):
         if (self.board.is_animating()
                 or now - self.board.last_animation_completed_at_ms < PRESENT_SETTLE_MS):
             rects.append(self.board.animation_dirty_rect())
+        if self.focus_arrow.is_visible():
+            rects.append(self.focus_arrow.dirty_rect())
+        if self.focus_mode and self._focus_show() == "line":
+            top_line, bottom_line = self.time_line.rects_for(self.board, self.board.rect)
+            rects.extend([top_line, bottom_line])
         return rects
 
     def _menu_overlay_active(self):
@@ -1841,6 +1972,7 @@ class Frontend(OnlineEventsMixin):
             self.window_width = win_w
             self.window_height = win_h
             self._cancel_all_scroll()
+            self._abort_transition_for_resize()
             self._compute_layout()
 
     def draw_frame(self):
@@ -1848,6 +1980,11 @@ class Frontend(OnlineEventsMixin):
             self._sync_window_surface()
         if getattr(self, "_last_layout_mode", None) != self.mode:
             self._compute_layout()
+        if self.mode == "menu" and (self.focus_mode or self.focus_transition is not None):
+            self._force_focus_off_instant()
+        if self.mode != "menu" and self._focus_prev_mode == "menu":
+            self._focus_hint_until_ms = pg.time.get_ticks() + FOCUS_HINT_MS
+        self._focus_prev_mode = self.mode
 
         if self.mode != "menu" and self.current_result() is None:
             self.match.tick_clock()
@@ -1879,26 +2016,63 @@ class Frontend(OnlineEventsMixin):
             self.board.try_apply_next_premove()
 
         if self.mode != "menu":
-            self._sync_aim_check_gun()
-            self._draw_game_background()
-            self.board.draw_board()
-            self._update_player_strips()
-            self._refresh_game_info()
-            self.player_strip_top.draw()
-            self.player_strip_bottom.draw()
-            self.right_menu.draw_menu()
-            self.board.draw_drag_overlay()
-            self._update_result_pending()
-            if not self.match_found_modal.is_visible():
-                show_modal = self._result_modal_should_show() and not self.pgn_review
-                if not show_modal and self.board.effects.has_takeover():
+            if self.current_result() is not None and self.focus_mode:
+                if self.focus_transition is None:
+                    self._toggle_focus(False)
+                elif self.focus_transition.collapsing:
+                    self._force_focus_off_instant()
+            if self.focus_transition is not None:
+                tr = self.focus_transition
+                tr.draw(now)
+                if self._focus_show() == "line" and tr.cur_board_rect is not None:
+                    alpha = tr.cur_e if tr.collapsing else 1.0 - tr.cur_e
+                    self._draw_time_lines(tr.cur_board_rect, alpha)
+                if tr.done(now):
+                    self._finalize_focus_transition()
+            elif self.focus_mode:
+                self._sync_aim_check_gun()
+                self._draw_game_background()
+                self.board.draw_board()
+                show = self._focus_show()
+                if show == "strips":
+                    self._update_player_strips()
+                    self.player_strip_top.draw()
+                    self.player_strip_bottom.draw()
+                elif show == "line":
+                    self._draw_time_lines()
+                mp = pg.mouse.get_pos()
+                zone = self._focus_edge_zone_rect()
+                reveal = self._focus_arrow_allowed() and zone.collidepoint(mp)
+                anchor = (self.window.get_width() - FOCUS_EDGE_ARROW_MARGIN - FOCUS_ARROW_D // 2,
+                          self.board.rect.centery)
+                self.focus_arrow.update(now, reveal, anchor, mp, True)
+                self.focus_arrow.draw(self.window)
+                self.board.draw_drag_overlay()
+                if self.board.effects.has_takeover():
                     self.board.effects.draw_takeover(self.window, now)
-                else:
-                    self._draw_result_fade_overlay()
-                if show_modal:
-                    self.board.effects.clear_takeover()
-                    self._feed_result_menu()
-                    self.result_menu.draw()
+                self._update_result_pending()
+            else:
+                self._sync_aim_check_gun()
+                self._draw_game_background()
+                self.board.draw_board()
+                self._update_player_strips()
+                self._refresh_game_info()
+                self.player_strip_top.draw()
+                self.player_strip_bottom.draw()
+                self._update_focus_arrow_off(now)
+                self.right_menu.draw_menu()
+                self.board.draw_drag_overlay()
+                self._update_result_pending()
+                if not self.match_found_modal.is_visible():
+                    show_modal = self._result_modal_should_show() and not self.pgn_review
+                    if not show_modal and self.board.effects.has_takeover():
+                        self.board.effects.draw_takeover(self.window, now)
+                    else:
+                        self._draw_result_fade_overlay()
+                    if show_modal:
+                        self.board.effects.clear_takeover()
+                        self._feed_result_menu()
+                        self.result_menu.draw()
         entering_menu = self.mode == "menu" and self._prev_battle_mode != "menu"
         self._prev_battle_mode = self.mode
         if self.mode == "menu":
@@ -1924,7 +2098,7 @@ class Frontend(OnlineEventsMixin):
         self.help_modal.draw()
         self.fen_input_modal.draw()
         self.confirm_modal.draw()
-        self.toast.draw()
+        self.toast.draw(center_x=None if self.mode == "menu" else self.board.rect.centerx)
         if self.skillcheck_overlay.is_active() and (
                 self.mode == "menu" or self.current_result() is not None):
             self._teardown_skillcheck_overlay()
@@ -2233,24 +2407,25 @@ class Frontend(OnlineEventsMixin):
         panel_w = min(RIGHT_PANEL_WIDTH, int(window_width * PANEL_WIDTH_RATIO))
         board_area_w = max(window_width - panel_w, 200)
 
-        stack_factor = 1 + 2 * (STRIP_HEIGHT_RATIO + STRIP_GAP_RATIO)
-        h_budget = board_area_w - 2 * BOARD_AREA_MARGIN
-        v_budget = (avail_height - 2 * BOARD_AREA_MARGIN) / stack_factor
-        board_size_px = max(min(h_budget, v_budget), 240)
-
-        strip_height = board_size_px * STRIP_HEIGHT_RATIO
-        strip_gap = board_size_px * STRIP_GAP_RATIO
-        stack_h = board_size_px + 2 * (strip_height + strip_gap)
+        board_size_px, strip_height, strip_gap, stack_h = focus_layout.square_stack(
+            board_area_w, avail_height, True, STRIP_HEIGHT_RATIO, STRIP_GAP_RATIO,
+            BOARD_AREA_MARGIN)
 
         board_x = (board_area_w - board_size_px) / 2
         board_y = top + (avail_height - stack_h) / 2 + strip_height + strip_gap
 
-        board_rect = pg.Rect(
-            board_x,
-            board_y,
-            board_size_px,
-            board_size_px
-        )
+        board_rect = pg.Rect(board_x, board_y, board_size_px, board_size_px)
+        focus_strip_override = None
+        if self.focus_mode:
+            board_rect = focus_layout.focus_square(
+                (window_width, window_height), top, self._focus_show())
+            board_x, board_y = board_rect.x, board_rect.y
+            board_size_px = board_rect.width
+            if self._focus_show() == "strips":
+                sh, sg = focus_layout.focus_strip_metrics(
+                    (window_width, window_height), top)
+                focus_strip_override = focus_layout.focus_strip_rects(
+                    board_rect, sh, sg)
 
         cell_size = board_size_px / self.board.SIZE
         result_width = min(440, board_size_px * 0.92)
@@ -2324,6 +2499,8 @@ class Frontend(OnlineEventsMixin):
             strip_w,
             strip_height,
         )
+        if focus_strip_override is not None:
+            top_strip_rect, bottom_strip_rect = focus_strip_override
 
         self.board.set_rect(board_rect)
         self.result_menu.set_rect(result_rect)
@@ -2417,6 +2594,8 @@ class Frontend(OnlineEventsMixin):
             return self.help_modal
         if self.mode == "menu":
             return self.menu_page
+        if self.focus_mode or self.focus_transition is not None:
+            return None
         return self.right_menu
 
     def _cancel_all_scroll(self):
@@ -2445,6 +2624,8 @@ class Frontend(OnlineEventsMixin):
 
     def _dispatch_left_click(self, pos):
         if self.chrome.handle_click(pos):
+            return
+        if self.focus_transition is not None:
             return
         if (self.current_result() is not None
                 and self._result_first_seen_at_ms is not None
@@ -2485,9 +2666,15 @@ class Frontend(OnlineEventsMixin):
         if self.mode == "menu":
             self.menu_page.handle_click(pos)
             return
-        if self.result_menu.handle_click(pos):
+        if (self.focus_arrow.is_visible() and self._focus_arrow_allowed()
+                and self.focus_arrow.handle_click(pos)):
+            self._toggle_focus(not self.focus_mode)
+            self._focus_click_consumed = True
+            self._click_sound_played = True
             return
-        if self.right_menu.handle_click(pos):
+        if not self.focus_mode and self.result_menu.handle_click(pos):
+            return
+        if not self.focus_mode and self.right_menu.handle_click(pos):
             return
         if self.current_result() is not None:
             return
@@ -2513,6 +2700,9 @@ class Frontend(OnlineEventsMixin):
             return True
         if self.confirm_modal.is_visible():
             return False
+        if event.key == pg.K_h:
+            self._toggle_focus(not self.focus_mode)
+            return True
         if getattr(event, "unicode", "") == "?":
             self.help_modal.show()
             return True
@@ -2571,6 +2761,7 @@ class Frontend(OnlineEventsMixin):
             self.board.jump_to_review_ply(new_ply)
 
     def _mouse_left_pressed(self, pos):
+        self._focus_click_consumed = False
         scrollable = self._active_scrollable()
         if scrollable is not None and scrollable.handle_press(pos):
             self._scroll_pressed = scrollable
@@ -2580,7 +2771,9 @@ class Frontend(OnlineEventsMixin):
                 and pos[1] >= self.chrome.HEIGHT
                 and self.current_result() is None
                 and self.board.pending_promotion_square is None
-                and not self._blocking_modal_visible()):
+                and not self._blocking_modal_visible()
+                and not self._focus_click_consumed
+                and self.focus_transition is None):
             self.board.begin_press(pos)
 
     def _mouse_left_released(self, pos):
@@ -2679,5 +2872,6 @@ class Frontend(OnlineEventsMixin):
                 self.window_width = w
                 self.window_height = h
                 self._cancel_all_scroll()
+                self._abort_transition_for_resize()
                 self._compute_layout()
         return bool(events)

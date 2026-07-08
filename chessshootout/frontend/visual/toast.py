@@ -115,7 +115,7 @@ class Toast:
         overlay.blit(text_surf, (PADDING_X + spark_gap, h // 2 - text_surf.get_height() // 2))
         return overlay
 
-    def draw(self, now_ms=None):
+    def draw(self, now_ms=None, center_x=None):
         now = pg.time.get_ticks() if now_ms is None else now_ms
         self._bubbles = [b for b in self._bubbles if self._active(b, now)]
         if not self._bubbles:
@@ -124,7 +124,7 @@ class Toast:
         dt = min(MAX_FRAME_DT_MS, max(0, now - self._last_ms))
         self._last_ms = now
         smooth = 1.0 - math.exp(-dt / SETTLE_TAU_MS) if dt > 0 else 0.0
-        win_w = self.window.get_width()
+        cx = self.window.get_width() / 2 if center_x is None else center_x
         y_cursor = self.top_inset + TOP_OFFSET_PX
         for b in reversed(self._bubbles):
             surf = self._render_bubble(b, now)
@@ -132,5 +132,7 @@ class Toast:
             if b["y"] is None:
                 b["y"] = float(target_y - surf.get_height())
             b["y"] += (target_y - b["y"]) * smooth
-            self.window.blit(surf, ((win_w - surf.get_width()) // 2, int(b["y"])))
+            x = int(cx - surf.get_width() / 2)
+            x = max(0, min(x, self.window.get_width() - surf.get_width()))
+            self.window.blit(surf, (x, int(b["y"])))
             y_cursor += surf.get_height() + STACK_GAP_PX

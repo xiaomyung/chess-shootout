@@ -118,7 +118,8 @@ def test_modal_not_shown_when_no_result():
     assert app._result_modal_should_show() is False
 
 
-def test_fade_alpha_starts_low_and_grows_to_max():
+def test_fade_alpha_starts_low_and_grows_to_max(monkeypatch):
+    monkeypatch.setattr(pg.time, "get_ticks", lambda: 10_000_000)
     app = _make_app()
     app.manual_result = "white_wins"
     app._update_result_pending()

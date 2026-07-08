@@ -186,3 +186,47 @@ def test_keyed_update_refreshes_cached_text(toast):
     toast.show("second message", key="k")
     assert bubble["text_surf"] is None
     assert bubble["message"] == "second message"
+
+
+class _RecWin:
+    def __init__(self, w=800, h=600):
+        self._w = w
+        self.calls = []
+
+    def get_width(self):
+        return self._w
+
+    def blit(self, surf, pos):
+        self.calls.append((surf, pos))
+
+
+def _shown_now(t):
+    return t._bubbles[0]["shown_at_ms"] + ENTER_MS
+
+
+def test_default_center_is_window_center():
+    win = _RecWin(800, 600)
+    t = Toast(win)
+    t.show("hi")
+    t.draw(now_ms=_shown_now(t))
+    surf, (x, _y) = win.calls[-1]
+    assert abs((x + surf.get_width() / 2) - 400) <= 1
+
+
+def test_center_x_overrides_window_center():
+    win = _RecWin(800, 600)
+    t = Toast(win)
+    t.show("hi")
+    t.draw(now_ms=_shown_now(t), center_x=250)
+    surf, (x, _y) = win.calls[-1]
+    assert abs((x + surf.get_width() / 2) - 250) <= 1
+
+
+def test_board_centered_toast_clamped_on_window():
+    win = _RecWin(600, 600)
+    t = Toast(win)
+    t.show("a fairly long toast message that is wide enough to overflow the left edge")
+    t.draw(now_ms=_shown_now(t), center_x=90)
+    surf, (x, _y) = win.calls[-1]
+    assert x >= 0
+    assert x + surf.get_width() <= win.get_width() or surf.get_width() > win.get_width()
