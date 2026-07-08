@@ -4,6 +4,7 @@ from chessshootout.frontend.visual import backdrop
 from chessshootout.frontend.visual import gunfx
 
 FOCUS_TRANSITION_MS = 230.0
+STRIP_SLIDE_CLEAR_PX = 4
 
 
 def _lerp_rect(a, b, t):
@@ -84,9 +85,9 @@ class FocusTransition:
             elems.append(_Elem(_grab(window, focus_bot), focus_bot, focus_bot, 0, 255))
         else:
             elems.append(_Elem(norm_top_snap, norm_top,
-                               norm_top.move(0, -norm_top.height - 4), 255, 0))
+                               norm_top.move(0, -norm_top.height - STRIP_SLIDE_CLEAR_PX), 255, 0))
             elems.append(_Elem(norm_bot_snap, norm_bot,
-                               norm_bot.move(0, norm_bot.height + 4), 255, 0))
+                               norm_bot.move(0, norm_bot.height + STRIP_SLIDE_CLEAR_PX), 255, 0))
         elems.append(_Elem(panel_snap, panel_home,
                            panel_home.move(panel_home.width, 0), 255, 0))
         self.elems = elems
@@ -120,9 +121,11 @@ class FocusTransition:
             elems.append(_Elem(_grab(window, norm_bot), norm_bot, norm_bot, 0, 255))
         else:
             elems.append(_Elem(_grab(window, norm_top),
-                               norm_top.move(0, -norm_top.height - 4), norm_top, 0, 255))
+                               norm_top.move(0, -norm_top.height - STRIP_SLIDE_CLEAR_PX), norm_top,
+                               0, 255))
             elems.append(_Elem(_grab(window, norm_bot),
-                               norm_bot.move(0, norm_bot.height + 4), norm_bot, 0, 255))
+                               norm_bot.move(0, norm_bot.height + STRIP_SLIDE_CLEAR_PX), norm_bot,
+                               0, 255))
         elems.append(_Elem(panel_snap, panel_home.move(panel_home.width, 0),
                            panel_home, 0, 255))
         self.elems = elems
@@ -132,9 +135,6 @@ class FocusTransition:
         w, h = window.get_size()
         center = (dest_board.centerx / w, dest_board.centery / h)
         self.bg = backdrop.arena_background((w, h), center).convert()
-
-    def is_active(self):
-        return True
 
     def done(self, now):
         return now - self.start_ms >= FOCUS_TRANSITION_MS

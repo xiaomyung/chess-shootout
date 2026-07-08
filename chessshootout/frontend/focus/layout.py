@@ -43,22 +43,20 @@ def _clamp_inside(rect, w, h, top):
     return rect
 
 
-def focus_square(window_size, top, show_mode, strip_h_ratio, strip_gap_ratio):
+def focus_square(window_size, top, show_mode):
     w, h = window_size
     avail = h - top
-    if show_mode == "strips":
-        board_size, sh, sg, stack_h = square_stack(
-            w, avail, True, FOCUS_STRIP_H_RATIO, FOCUS_STRIP_GAP_RATIO, FOCUS_STRIP_MARGIN)
-    else:
-        board_size, sh, sg, stack_h = square_stack(
-            w, avail, False, strip_h_ratio, strip_gap_ratio, FOCUS_MARGIN)
+    reserve = show_mode == "strips"
+    margin = FOCUS_STRIP_MARGIN if reserve else FOCUS_MARGIN
+    board_size, sh, sg, stack_h = square_stack(
+        w, avail, reserve, FOCUS_STRIP_H_RATIO, FOCUS_STRIP_GAP_RATIO, margin)
     board_x = (w - board_size) / 2
     board_y = top + (avail - stack_h) / 2 + sh + sg
     rect = pg.Rect(int(board_x), int(board_y), int(board_size), int(board_size))
     return _clamp_inside(rect, w, h, top)
 
 
-def focus_strip_metrics(window_size, top, strip_h_ratio, strip_gap_ratio):
+def focus_strip_metrics(window_size, top):
     w, h = window_size
     _, sh, sg, _ = square_stack(
         w, h - top, True, FOCUS_STRIP_H_RATIO, FOCUS_STRIP_GAP_RATIO, FOCUS_STRIP_MARGIN)

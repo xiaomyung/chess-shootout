@@ -45,7 +45,8 @@ from chessshootout.frontend.visual import backdrop
 from chessshootout.frontend.visual import cache
 from chessshootout.frontend.visual.effects import TAKEOVER_TOTAL_MS
 from chessshootout.frontend.focus import layout as focus_layout
-from chessshootout.frontend.focus.arrow import FocusArrow, FOCUS_EDGE_ZONE_PX, FOCUS_ARROW_D
+from chessshootout.frontend.focus.arrow import (
+    FocusArrow, FOCUS_EDGE_ZONE_PX, FOCUS_ARROW_D, LONG_AGO_MS)
 from chessshootout.frontend.focus.transition import FocusTransition
 from chessshootout.frontend.window_chrome import (
     WindowChrome, WINDOW_FLAGS, MIN_WINDOW_WIDTH, MIN_WINDOW_HEIGHT,
@@ -160,6 +161,7 @@ MODE_PILL_LABELS = {
 FOCUS_OFF_LINGER_MS = 2000
 FOCUS_HINT_MS = 1600
 FOCUS_EDGE_ARROW_MARGIN = 16
+FOCUS_ARROW_OFF_GAP = 6
 FOCUS_LINE_TRACK_ALPHA = 46
 FOCUS_LINE_LOW_FRACTION = 0.10
 RIGHT_PANEL_WIDTH = 360
@@ -374,7 +376,7 @@ class Frontend(OnlineEventsMixin):
         self.focus_transition = None
         self.focus_arrow = FocusArrow()
         self._focus_click_consumed = False
-        self._focus_panel_hover_ms = -100000
+        self._focus_panel_hover_ms = LONG_AGO_MS
         self._focus_hint_until_ms = 0
         self._focus_prev_mode = "menu"
 
@@ -1261,7 +1263,7 @@ class Frontend(OnlineEventsMixin):
         return pg.Rect(w - FOCUS_EDGE_ZONE_PX, board_r.top, FOCUS_EDGE_ZONE_PX, board_r.height)
 
     def _focus_arrow_off_anchor(self):
-        x = self.right_menu.outer_rect.x - FOCUS_ARROW_D // 2 - 6
+        x = self.right_menu.outer_rect.x - FOCUS_ARROW_D // 2 - FOCUS_ARROW_OFF_GAP
         return (x, self.board.rect.centery)
 
     def _update_focus_arrow_off(self, now):
@@ -1272,9 +1274,8 @@ class Frontend(OnlineEventsMixin):
         if self.right_menu.outer_rect.collidepoint(mp):
             self._focus_panel_hover_ms = now
         anchor = self._focus_arrow_off_anchor()
-        shown = anchor is not None and (
-            now < self._focus_hint_until_ms
-            or now - self._focus_panel_hover_ms < FOCUS_OFF_LINGER_MS)
+        shown = (now < self._focus_hint_until_ms
+                 or now - self._focus_panel_hover_ms < FOCUS_OFF_LINGER_MS)
         self.focus_arrow.update(now, shown, anchor, mp, False)
         self.focus_arrow.draw(self.window)
 
@@ -2458,14 +2459,12 @@ class Frontend(OnlineEventsMixin):
         focus_strip_override = None
         if self.focus_mode:
             board_rect = focus_layout.focus_square(
-                (window_width, window_height), top, self._focus_show(),
-                STRIP_HEIGHT_RATIO, STRIP_GAP_RATIO)
+                (window_width, window_height), top, self._focus_show())
             board_x, board_y = board_rect.x, board_rect.y
             board_size_px = board_rect.width
             if self._focus_show() == "strips":
                 sh, sg = focus_layout.focus_strip_metrics(
-                    (window_width, window_height), top,
-                    STRIP_HEIGHT_RATIO, STRIP_GAP_RATIO)
+                    (window_width, window_height), top)
                 focus_strip_override = focus_layout.focus_strip_rects(
                     board_rect, sh, sg)
 

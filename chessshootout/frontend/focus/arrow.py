@@ -16,6 +16,8 @@ FOCUS_ARROW_HOVER_SCALE = 1.14
 FOCUS_EDGE_ZONE_PX = 60
 FOCUS_ARROW_IDLE_ALPHA = 210
 FOCUS_ARROW_HOVER_ALPHA = 255
+FOCUS_ARROW_HIT_SLOP = 10
+LONG_AGO_MS = -100000.0
 _SS = 4
 
 
@@ -24,9 +26,9 @@ class FocusArrow:
     def __init__(self):
         self._focus_on = False
         self._shown = False
-        self._slide_start = -100000.0
+        self._slide_start = LONG_AGO_MS
         self._hovering = False
-        self._hover_start = -100000.0
+        self._hover_start = LONG_AGO_MS
         self._visible = False
         self._bounds = pg.Rect(0, 0, 0, 0)
         self._prev_bounds = pg.Rect(0, 0, 0, 0)
@@ -79,15 +81,18 @@ class FocusArrow:
         return e if self._shown else 1.0 - e
 
     def hit_test(self, pos):
-        return self.is_visible() and self._bounds.inflate(10, 10).collidepoint(pos)
+        return (self.is_visible()
+                and self._bounds.inflate(FOCUS_ARROW_HIT_SLOP, FOCUS_ARROW_HIT_SLOP)
+                .collidepoint(pos))
 
     def handle_click(self, pos):
         return self.hit_test(pos)
 
     def dirty_rect(self):
-        r = self._bounds.inflate(10, 10) if self._bounds.width > 0 else pg.Rect(0, 0, 0, 0)
+        slop = FOCUS_ARROW_HIT_SLOP
+        r = self._bounds.inflate(slop, slop) if self._bounds.width > 0 else pg.Rect(0, 0, 0, 0)
         if self._prev_bounds.width > 0:
-            r = r.union(self._prev_bounds.inflate(10, 10))
+            r = r.union(self._prev_bounds.inflate(slop, slop))
         return r
 
     def draw(self, window):

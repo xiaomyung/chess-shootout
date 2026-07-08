@@ -11,7 +11,6 @@ import pygame as pg
 import pytest
 
 from chessshootout.frontend.focus import layout as fl
-from chessshootout.frontend import frontend as F
 from chessshootout.frontend.window_chrome import WindowChrome
 from tests.focus_helpers import FakeClock, make_app, start_game, install_clock, finish_transition
 
@@ -25,8 +24,7 @@ def _pg():
 
 
 def _focus_rect(app):
-    return fl.focus_square(app.window.get_size(), WindowChrome.HEIGHT,
-                           app._focus_show(), F.STRIP_HEIGHT_RATIO, F.STRIP_GAP_RATIO)
+    return fl.focus_square(app.window.get_size(), WindowChrome.HEIGHT, app._focus_show())
 
 
 def test_collapse_reaches_focus(monkeypatch):

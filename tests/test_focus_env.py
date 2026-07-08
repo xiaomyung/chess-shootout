@@ -1,5 +1,7 @@
 """CHESS_FOCUS_SHOW round-trips and persists like the other string settings."""
 
+import os
+
 import pytest
 
 from chessshootout.infra import env
@@ -18,7 +20,6 @@ def test_default_is_line():
 
 @pytest.mark.parametrize("value", ["nothing", "line", "strips"])
 def test_round_trip(value):
-    import os
     env.set_focus_show(value)
     assert env.get_focus_show() == value
     assert os.environ["CHESS_FOCUS_SHOW"] == value
