@@ -28,6 +28,8 @@ _DEFAULT_INCREMENT = "5"
 _NICKNAME_MAX_LEN = 20
 TIME_CONTROL_VALUES = ("1", "3", "5", "10", "15", "∞")
 INCREMENT_VALUES = ("0", "2", "5", "10", "15")
+_FOCUS_SHOW_VALUES = ("nothing", "line", "strips")
+_DEFAULT_FOCUS_SHOW = "line"
 
 _ENV_PATH = paths.get_config_dir() / ".env"
 
@@ -294,6 +296,20 @@ def set_theme(value):
         value = _DEFAULT_THEME
     os.environ["CHESS_THEME"] = value
     _persist("CHESS_THEME", value)
+
+
+def get_focus_show():
+    value = os.environ.get("CHESS_FOCUS_SHOW")
+    if value in _FOCUS_SHOW_VALUES:
+        return value
+    return _DEFAULT_FOCUS_SHOW
+
+
+def set_focus_show(value):
+    if value not in _FOCUS_SHOW_VALUES:
+        value = _DEFAULT_FOCUS_SHOW
+    os.environ["CHESS_FOCUS_SHOW"] = value
+    _persist("CHESS_FOCUS_SHOW", value)
 
 
 def _persist(key, value):

@@ -10,6 +10,7 @@ from chessshootout.frontend.visual.fonts import get_font, get_mono_font
 HOTKEYS = [
     ("?", "Open this help"),
     ("F", "Flip board"),
+    ("H", "Focus mode (hide panels)"),
     ("F11", "Toggle fullscreen"),
     ("Ctrl+Z", "Undo move"),
     ("R", "Resign"),

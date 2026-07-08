@@ -157,6 +157,7 @@ pyenv shell 3.12                  # `python3.12` now resolves for the venv step 
 | Key | Action |
 |---|---|
 | `F` | Flip board |
+| `H` | Focus mode — collapse the UI to just the board (live game only) |
 | `F11` | Toggle fullscreen |
 | `R` | Resign / promote to rook (when a promotion is pending) |
 | `D` | Offer draw |
