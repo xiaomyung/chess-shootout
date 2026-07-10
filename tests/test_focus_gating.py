@@ -67,7 +67,7 @@ def test_blocked_during_passive_spectate_skillcheck():
                                  passive=True)
     app.skillcheck_overlay.start(controller, ("f", "t"), lambda c, landed: None)
     assert app.skillcheck_overlay.is_active() is True
-    assert app._skillcheck_swallows_input() is False
+    assert app.skillcheck_session._skillcheck_swallows_input() is False
     _assert_blocked(app)
 
 

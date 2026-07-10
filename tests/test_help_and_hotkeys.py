@@ -1,6 +1,6 @@
 """Help modal + R/D + Q/R/B/N hotkeys.
 
-Drives keys through Frontend._handle_shortcut_key / _handle_promotion_key to
+Drives keys through Frontend.input_router._handle_shortcut_key / _handle_promotion_key to
 verify resign/draw open the right confirm prompt and a pending promotion both
 consumes the piece key and shadows the resign hotkey. The any-key-closes-help
 behavior is dispatched earlier, by the modal registry inside check_events, so
@@ -52,7 +52,7 @@ def test_help_modal_starts_hidden():
 
 def test_question_mark_opens_help():
     app = _make_app()
-    app._handle_shortcut_key(_key_event(pg.K_SLASH, unicode="?"))
+    app.input_router._handle_shortcut_key(_key_event(pg.K_SLASH, unicode="?"))
     assert app.help_modal.is_visible() is True
 
 
@@ -62,7 +62,7 @@ def test_any_key_closes_help():
     app = _make_app()
     app.help_modal.show()
     pg.event.post(_key_event(pg.K_a))
-    app.check_events()
+    app.input_router.check_events()
     assert app.help_modal.is_visible() is False
 
 
@@ -82,7 +82,7 @@ def test_help_modal_close_button_hides_it():
 ])
 def test_action_hotkey_opens_confirm(key, title, yes_label):
     app = _make_app()
-    app._handle_shortcut_key(_key_event(key))
+    app.input_router._handle_shortcut_key(_key_event(key))
     assert app.confirm_modal.is_visible() is True
     assert app.confirm_modal.title == title
     assert app.confirm_modal.yes_label == yes_label
@@ -91,7 +91,7 @@ def test_action_hotkey_opens_confirm(key, title, yes_label):
 def test_r_key_no_op_when_game_over():
     app = _make_app()
     app.manual_result = "white_wins"
-    app._handle_shortcut_key(_key_event(pg.K_r))
+    app.input_router._handle_shortcut_key(_key_event(pg.K_r))
     assert app.confirm_modal.is_visible() is False
 
 
@@ -128,7 +128,7 @@ def _setup_promotion_pending(app, color):
 def test_promotion_hotkey_picks_piece(key, expected):
     app = _make_app()
     dst = _setup_promotion_pending(app, PieceColor.WHITE)
-    handled = app._handle_shortcut_key(_key_event(key))
+    handled = app.input_router._handle_shortcut_key(_key_event(key))
     assert handled is True
     assert app.board.pending_promotion_square is None
     promoted = app.backend.state[dst.row][dst.col]
@@ -139,7 +139,7 @@ def test_promotion_hotkey_picks_piece(key, expected):
 def test_promotion_hotkey_no_op_when_no_pending_promotion():
     """With nothing to promote, Q falls through (_handle_promotion_key returns False)."""
     app = _make_app()
-    handled = app._handle_promotion_key(_key_event(pg.K_q))
+    handled = app.input_router._handle_promotion_key(_key_event(pg.K_q))
     assert handled is False
 
 
@@ -147,7 +147,7 @@ def test_r_during_promotion_picks_rook_not_resign():
     """Promotion picker takes priority over the resign hotkey when active."""
     app = _make_app()
     _setup_promotion_pending(app, PieceColor.WHITE)
-    app._handle_shortcut_key(_key_event(pg.K_r))
+    app.input_router._handle_shortcut_key(_key_event(pg.K_r))
     assert app.confirm_modal.is_visible() is False
     assert app.board.pending_promotion_square is None
 
@@ -160,7 +160,7 @@ def test_confirm_modal_blocks_promotion_hotkey():
     dst = _setup_promotion_pending(app, PieceColor.WHITE)
     app.confirm_modal.show("Tap out?", on_yes=lambda: None)
     history_before = list(app.match.move_history)
-    handled = app._handle_shortcut_key(_key_event(pg.K_q))
+    handled = app.input_router._handle_shortcut_key(_key_event(pg.K_q))
     assert handled is False
     assert app.board.pending_promotion_square == dst
     assert app.match.move_history == history_before

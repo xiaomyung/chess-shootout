@@ -47,7 +47,7 @@ def test_move_pgns_relocates_and_renames_collisions(tmp_path):
     (src / "a.pgn").write_text("1", encoding="utf-8")
     (src / "b.pgn").write_text("2", encoding="utf-8")
     (dst / "a.pgn").write_text("existing", encoding="utf-8")
-    assert app._move_pgns(str(src), str(dst)) is True
+    assert app.settings._move_pgns(str(src), str(dst)) is True
     names = sorted(os.listdir(dst))
     assert "a.pgn" in names
     assert "a-1.pgn" in names
@@ -64,7 +64,7 @@ def test_move_pgns_keeps_old_dir_when_non_pgn_present(tmp_path):
     src.mkdir()
     (src / "a.pgn").write_text("1", encoding="utf-8")
     (src / "notes.txt").write_text("keep me", encoding="utf-8")
-    assert app._move_pgns(str(src), str(tmp_path / "new")) is True
+    assert app.settings._move_pgns(str(src), str(tmp_path / "new")) is True
     assert os.path.isdir(src)
     assert (src / "notes.txt").exists()
     assert (src / "notes.txt").read_text(encoding="utf-8") == "keep me"
@@ -82,8 +82,8 @@ def test_move_pgns_failure_returns_false(tmp_path, monkeypatch):
     def boom(*a, **k):
         raise OSError("disk full")
 
-    monkeypatch.setattr("chessshootout.frontend.frontend.shutil.move", boom)
-    assert app._move_pgns(str(src), str(tmp_path / "new")) is False
+    monkeypatch.setattr("chessshootout.frontend.settings.shutil.move", boom)
+    assert app.settings._move_pgns(str(src), str(tmp_path / "new")) is False
     assert (src / "a.pgn").exists()
     assert os.path.isdir(src)
 
@@ -96,7 +96,7 @@ def test_change_with_no_games_commits_immediately(tmp_path, monkeypatch):
     app = _app()
     new = tmp_path / "new"
     new.mkdir()
-    app._apply_data_folder_change(str(new))
+    app.settings._apply_data_folder_change(str(new))
     assert app.confirm_modal.is_visible() is False
     assert str(paths.get_data_dir()) == str(new)
 
@@ -110,7 +110,7 @@ def test_change_with_games_prompts_then_moves(tmp_path, monkeypatch):
     app = _app()
     new = tmp_path / "new"
     new.mkdir()
-    app._apply_data_folder_change(str(new))
+    app.settings._apply_data_folder_change(str(new))
     assert app.confirm_modal.is_visible() is True
     _draw_then_click_confirm(app, "yes")
     assert (new / "games" / "g.pgn").read_text(encoding="utf-8") == "x"
@@ -127,7 +127,7 @@ def test_change_with_games_dont_move_leaves_them(tmp_path, monkeypatch):
     app = _app()
     new = tmp_path / "new"
     new.mkdir()
-    app._apply_data_folder_change(str(new))
+    app.settings._apply_data_folder_change(str(new))
     _draw_then_click_confirm(app, "no")
     assert (cur / "games" / "g.pgn").exists()
     assert not (new / "games" / "g.pgn").exists()
@@ -143,7 +143,7 @@ def test_change_with_games_cancel_aborts(tmp_path, monkeypatch):
     app = _app()
     new = tmp_path / "new"
     new.mkdir()
-    app._apply_data_folder_change(str(new))
+    app.settings._apply_data_folder_change(str(new))
     _draw_then_click_confirm(app, "extra")
     assert (cur / "games" / "g.pgn").exists()
     assert not (new / "games").exists()
@@ -156,7 +156,7 @@ def test_reset_clears_override(tmp_path, monkeypatch):
     custom.mkdir()
     monkeypatch.setenv("CHESS_DATA_DIR", str(custom))
     app = _app()
-    app._on_reset_data_folder()
+    app.settings._on_reset_data_folder()
     if app.confirm_modal.is_visible():
         _draw_then_click_confirm(app, "no")
     assert env.get_data_dir_override() == ""
@@ -166,7 +166,7 @@ def test_menu_hidden_while_overlay_modal_open():
     """An open overlay modal hides the menu; closing it brings the menu back."""
     app = _app()
     assert app._menu_overlay_active() is False
-    app._on_open_options()
+    app.settings._on_open_options()
     assert app._menu_overlay_active() is True
     app.options_modal.hide()
     assert app._menu_overlay_active() is False
@@ -180,7 +180,7 @@ def test_options_close_applies_default_time_to_menu(monkeypatch):
     app.start_menu.selected_increment_seconds = 2
     monkeypatch.setenv("CHESS_DEFAULT_TC", "15")
     monkeypatch.setenv("CHESS_DEFAULT_INCREMENT", "10")
-    assert app._on_close_settings() is True
+    assert app.settings._on_close_settings() is True
     assert app.start_menu.selected_time_minutes == 15
     assert app.start_menu.selected_increment_seconds == 10
 
@@ -189,10 +189,10 @@ def test_menu_click_routes_to_options_not_start_menu(monkeypatch):
     """With the options modal open, clicks route to it and never reach start_menu."""
     app = _app()
     assert app.mode == "menu"
-    app._on_open_options()
+    app.settings._on_open_options()
     app.draw_frame()
     received = []
     monkeypatch.setattr(app.start_menu, "handle_click", lambda pos: received.append(pos))
-    app.mouse_left_clicked((10, 10))
+    app.input_router.mouse_left_clicked((10, 10))
     assert received == []
     assert app.options_modal.is_visible() is True

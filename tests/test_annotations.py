@@ -204,14 +204,14 @@ def test_right_click_down_on_board_sets_drag_start():
     sq = Square(6, 4)
     rect = app.board._cell_rect(sq.row, sq.col)
     post_event(pg.MOUSEBUTTONDOWN, button=3, pos=rect.center)
-    app.check_events()
+    app.input_router.check_events()
     assert app.board.annotations._right_drag_start_square == sq
 
 
 def test_right_click_down_off_board_no_drag_start():
     app = make_app()
     post_event(pg.MOUSEBUTTONDOWN, button=3, pos=(2000, 2000))
-    app.check_events()
+    app.input_router.check_events()
     assert app.board.annotations._right_drag_start_square is None
 
 
@@ -223,10 +223,10 @@ def test_right_click_during_left_drag_does_not_start_highlight():
     other_sq = Square(2, 2)
     rect = app.board._cell_rect(other_sq.row, other_sq.col)
     post_event(pg.MOUSEBUTTONDOWN, button=3, pos=rect.center)
-    app.check_events()
+    app.input_router.check_events()
     assert app.board.annotations._right_drag_start_square is None
     post_event(pg.MOUSEBUTTONUP, button=3, pos=rect.center)
-    app.check_events()
+    app.input_router.check_events()
     assert other_sq not in app.board.highlighted_squares
 
 
@@ -236,7 +236,7 @@ def test_right_click_release_same_square_toggles_highlight():
     rect = app.board._cell_rect(sq.row, sq.col)
     post_event(pg.MOUSEBUTTONDOWN, button=3, pos=rect.center)
     post_event(pg.MOUSEBUTTONUP, button=3, pos=rect.center)
-    app.check_events()
+    app.input_router.check_events()
     assert sq in app.board.highlighted_squares
     assert app.board.annotations._right_drag_start_square is None
 
@@ -249,7 +249,7 @@ def test_right_click_release_different_square_creates_arrow():
     b_rect = app.board._cell_rect(b.row, b.col)
     post_event(pg.MOUSEBUTTONDOWN, button=3, pos=a_rect.center)
     post_event(pg.MOUSEBUTTONUP, button=3, pos=b_rect.center)
-    app.check_events()
+    app.input_router.check_events()
     assert (a, b) in app.board.arrows
     assert app.board.annotations._right_drag_start_square is None
 
@@ -260,7 +260,7 @@ def test_right_click_release_off_board_cancels():
     a_rect = app.board._cell_rect(a.row, a.col)
     post_event(pg.MOUSEBUTTONDOWN, button=3, pos=a_rect.center)
     post_event(pg.MOUSEBUTTONUP, button=3, pos=(2000, 2000))
-    app.check_events()
+    app.input_router.check_events()
     assert app.board.highlighted_squares == set()
     assert app.board.arrows == []
     assert app.board.annotations._right_drag_start_square is None
@@ -274,7 +274,7 @@ def test_right_click_on_already_highlighted_removes_it():
     rect = app.board._cell_rect(sq.row, sq.col)
     post_event(pg.MOUSEBUTTONDOWN, button=3, pos=rect.center)
     post_event(pg.MOUSEBUTTONUP, button=3, pos=rect.center)
-    app.check_events()
+    app.input_router.check_events()
     assert sq not in app.board.highlighted_squares
 
 
@@ -287,7 +287,7 @@ def test_right_click_drag_twice_toggles_arrow_off():
     for _ in range(2):
         post_event(pg.MOUSEBUTTONDOWN, button=3, pos=a_rect.center)
         post_event(pg.MOUSEBUTTONUP, button=3, pos=b_rect.center)
-        app.check_events()
+        app.input_router.check_events()
     assert (a, b) not in app.board.arrows
 
 
@@ -298,7 +298,7 @@ def test_right_click_in_menu_mode_is_noop():
     rect = app.board._cell_rect(0, 0)
     post_event(pg.MOUSEBUTTONDOWN, button=3, pos=rect.center)
     post_event(pg.MOUSEBUTTONUP, button=3, pos=rect.center)
-    app.check_events()
+    app.input_router.check_events()
     assert app.board.highlighted_squares == set()
 
 
@@ -307,7 +307,7 @@ def test_left_click_neutral_square_clears_annotations():
     app.board.toggle_highlight(Square(4, 4))
     rect = app.board._cell_rect(7, 7)
     post_event(pg.MOUSEBUTTONDOWN, button=1, pos=rect.center)
-    app.check_events()
+    app.input_router.check_events()
     assert app.board.highlighted_squares == set()
 
 
@@ -317,7 +317,7 @@ def test_left_click_on_highlighted_square_preserves_annotations():
     app.board.toggle_highlight(sq)
     rect = app.board._cell_rect(sq.row, sq.col)
     post_event(pg.MOUSEBUTTONDOWN, button=1, pos=rect.center)
-    app.check_events()
+    app.input_router.check_events()
     assert sq in app.board.highlighted_squares
 
 
@@ -336,7 +336,7 @@ def test_left_click_on_arrow_endpoint_preserves(clicked_endpoint):
     target = a if clicked_endpoint == "from" else b
     rect = app.board._cell_rect(target.row, target.col)
     post_event(pg.MOUSEBUTTONDOWN, button=1, pos=rect.center)
-    app.check_events()
+    app.input_router.check_events()
     assert (a, b) in app.board.arrows
 
 
@@ -344,7 +344,7 @@ def test_left_click_off_board_does_not_clear():
     app = make_app()
     app.board.toggle_highlight(Square(4, 4))
     post_event(pg.MOUSEBUTTONDOWN, button=1, pos=(2000, 2000))
-    app.check_events()
+    app.input_router.check_events()
     assert Square(4, 4) in app.board.highlighted_squares
 
 

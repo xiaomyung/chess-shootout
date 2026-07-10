@@ -139,7 +139,7 @@ def test_banner_does_not_block_board_clicks():
         on_ok=lambda: None, on_no=lambda: None)
     app.draw_frame()
     center = app.board._cell_rect(6, 4).center
-    app.mouse_left_clicked(center)
+    app.input_router.mouse_left_clicked(center)
     assert app.board.selected_square == Square(6, 4)
 
 

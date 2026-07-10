@@ -46,44 +46,44 @@ def _game_app(n_moves=200):
 
 def test_active_scrollable_menu_then_game():
     app = Frontend(1000, 800)
-    assert app._active_scrollable() is app.menu_page
+    assert app.input_router._active_scrollable() is app.menu_page
     app._on_start_game(_config())
-    assert app._active_scrollable() is app.right_menu
+    assert app.input_router._active_scrollable() is app.right_menu
 
 
 def test_active_scrollable_prefers_visible_modal():
     app = _game_app()
     app.help_modal.show()
-    assert app._active_scrollable() is app.help_modal
+    assert app.input_router._active_scrollable() is app.help_modal
     app.help_modal.hide()
     app.country_picker.show("US", lambda c: None)
-    assert app._active_scrollable() is app.country_picker
+    assert app.input_router._active_scrollable() is app.country_picker
 
 
 def test_active_scrollable_none_behind_blocking_modal():
     app = _game_app()
     app.confirm_modal.show("Sure?", lambda: None)
-    assert app._active_scrollable() is None
+    assert app.input_router._active_scrollable() is None
 
 
 def test_move_list_drag_scrolls_without_board_drag():
     app = _game_app()
     vp = app.right_menu._moves_viewport
     before = app.right_menu.scroll_offset
-    app._mouse_left_pressed((vp.centerx, vp.y + 20))
-    assert app._scroll_pressed is app.right_menu
-    app._handle_left_drag_motion((vp.centerx, vp.bottom - 10))
-    app._mouse_left_released((vp.centerx, vp.bottom - 10))
+    app.input_router._mouse_left_pressed((vp.centerx, vp.y + 20))
+    assert app.input_router._scroll_pressed is app.right_menu
+    app.input_router._handle_left_drag_motion((vp.centerx, vp.bottom - 10))
+    app.input_router._mouse_left_released((vp.centerx, vp.bottom - 10))
     assert app.right_menu.scroll_offset != before
     assert app.board.dragging_from is None
-    assert app._scroll_pressed is None
+    assert app.input_router._scroll_pressed is None
 
 
 def test_move_list_tap_jumps_to_ply():
     app = _game_app()
     cell_rect, ply = app.right_menu._move_cell_hits[0]
-    app._mouse_left_pressed(cell_rect.center)
-    app._mouse_left_released(cell_rect.center)
+    app.input_router._mouse_left_pressed(cell_rect.center)
+    app.input_router._mouse_left_released(cell_rect.center)
     assert app.board.review_ply == ply
 
 
@@ -93,8 +93,8 @@ def test_country_tap_picks_on_release():
     app.country_picker.show("US", lambda c: picked.append(c))
     app.draw_frame()
     row_rect, code = app.country_picker._row_rects[3]
-    app._mouse_left_pressed(row_rect.center)
-    app._mouse_left_released(row_rect.center)
+    app.input_router._mouse_left_pressed(row_rect.center)
+    app.input_router._mouse_left_released(row_rect.center)
     assert picked == [code]
     assert app.country_picker.is_visible() is False
 
@@ -105,9 +105,9 @@ def test_country_flick_suppresses_pick():
     app.country_picker.show("US", lambda c: picked.append(c))
     app.draw_frame()
     lr = app.country_picker._list_rect
-    app._mouse_left_pressed((lr.centerx, lr.y + 160))
-    app._handle_left_drag_motion((lr.centerx, lr.y + 40))
-    app._mouse_left_released((lr.centerx, lr.y + 40))
+    app.input_router._mouse_left_pressed((lr.centerx, lr.y + 160))
+    app.input_router._handle_left_drag_motion((lr.centerx, lr.y + 40))
+    app.input_router._mouse_left_released((lr.centerx, lr.y + 40))
     assert picked == []
     assert app.country_picker.is_visible() is True
 
@@ -119,9 +119,9 @@ def test_move_list_fling_through_dispatch_ticks_cleanly():
     rm.scroll.handle_press((vp.centerx, vp.bottom - 10), now_ms=0)
     rm.scroll.handle_motion((vp.centerx, vp.bottom - 40), now_ms=16)
     rm.scroll.handle_motion((vp.centerx, vp.y + 10), now_ms=32)
-    app._scroll_pressed = rm
-    app._mouse_left_released((vp.centerx, vp.y + 10))
-    assert app._scroll_pressed is None
+    app.input_router._scroll_pressed = rm
+    app.input_router._mouse_left_released((vp.centerx, vp.y + 10))
+    assert app.input_router._scroll_pressed is None
     assert rm.scroll._flinging is True
     app.draw_frame()
     app.draw_frame()
@@ -130,10 +130,10 @@ def test_move_list_fling_through_dispatch_ticks_cleanly():
 def test_resize_cancels_active_gesture():
     app = _game_app()
     vp = app.right_menu._moves_viewport
-    app._mouse_left_pressed((vp.centerx, vp.y + 20))
-    app._handle_left_drag_motion((vp.centerx, vp.y + 80))
-    assert app._scroll_pressed is app.right_menu
+    app.input_router._mouse_left_pressed((vp.centerx, vp.y + 20))
+    app.input_router._handle_left_drag_motion((vp.centerx, vp.y + 80))
+    assert app.input_router._scroll_pressed is app.right_menu
     pg.event.post(pg.event.Event(pg.VIDEORESIZE, {"w": 900, "h": 700}))
-    app.check_events()
-    assert app._scroll_pressed is None
+    app.input_router.check_events()
+    assert app.input_router._scroll_pressed is None
     assert app.right_menu.scroll.is_active() is False

@@ -41,11 +41,11 @@ def test_h_toggles_focus(monkeypatch):
     app = start_game(make_app())
     clock = FakeClock()
     install_clock(monkeypatch, clock)
-    assert app._handle_shortcut_key(_key(pg.K_h)) is True
+    assert app.input_router._handle_shortcut_key(_key(pg.K_h)) is True
     assert app.focus_transition is not None
     finish_transition(app, clock)
     assert app.focus_mode is True
-    app._handle_shortcut_key(_key(pg.K_h))
+    app.input_router._handle_shortcut_key(_key(pg.K_h))
     finish_transition(app, clock)
     assert app.focus_mode is False
 
@@ -53,7 +53,7 @@ def test_h_toggles_focus(monkeypatch):
 def test_h_does_nothing_in_review():
     app = start_game(make_app())
     app.pgn_review = True
-    app._handle_shortcut_key(_key(pg.K_h))
+    app.input_router._handle_shortcut_key(_key(pg.K_h))
     assert app.focus_transition is None
     assert app.focus_mode is False
 
@@ -63,7 +63,7 @@ def test_escape_exits_focus_before_resign(monkeypatch):
     clock = FakeClock()
     install_clock(monkeypatch, clock)
     collapse(app, clock)
-    app._handle_escape()
+    app.input_router._handle_escape()
     assert app.focus_transition is not None
     assert app.focus_transition.collapsing is False
     assert app.confirm_modal.is_visible() is False
@@ -75,7 +75,7 @@ def test_escape_closes_modal_before_focus(monkeypatch):
     install_clock(monkeypatch, clock)
     collapse(app, clock)
     app.help_modal.show()
-    app._handle_escape()
+    app.input_router._handle_escape()
     assert app.help_modal.is_visible() is False
     assert app.focus_mode is True
     assert app.focus_transition is None
@@ -88,7 +88,7 @@ def test_arrow_click_wins_over_board(monkeypatch):
     hits = []
     orig = app.board.handle_click
     app.board.handle_click = lambda sq: hits.append(sq) or orig(sq)
-    app._dispatch_left_click(center)
+    app.input_router._dispatch_left_click(center)
     assert app.focus_transition is not None
     assert hits == []
 
@@ -96,8 +96,8 @@ def test_arrow_click_wins_over_board(monkeypatch):
 def test_board_press_suppressed_after_arrow_click(monkeypatch):
     app, _ = _revealed_off_app(monkeypatch)
     center = app.focus_arrow._bounds.center
-    app._mouse_left_pressed(center)
-    assert app._focus_click_consumed is True
+    app.input_router._mouse_left_pressed(center)
+    assert app.input_router._focus_click_consumed is True
     assert app.board.dragging_from is None
 
 
@@ -109,7 +109,7 @@ def test_right_menu_not_clickable_in_focus(monkeypatch):
     calls = []
     app.right_menu.handle_click = lambda pos: calls.append(pos) or False
     panel = app.right_menu.outer_rect
-    app._dispatch_left_click((panel.centerx, panel.centery))
+    app.input_router._dispatch_left_click((panel.centerx, panel.centery))
     assert calls == []
     assert app.confirm_modal.is_visible() is False
 
@@ -121,7 +121,7 @@ def test_click_ignored_during_transition(monkeypatch):
     app._toggle_focus(True)
     hits = []
     app.board.handle_click = lambda sq: hits.append(sq)
-    app._dispatch_left_click(app.board.rect.center)
+    app.input_router._dispatch_left_click(app.board.rect.center)
     assert hits == []
     assert app.focus_transition is not None
 

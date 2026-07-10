@@ -49,7 +49,7 @@ def _fade_probe_after_white(app):
 
 def test_no_result_keeps_first_seen_none():
     app = _make_app()
-    app._update_result_pending()
+    app.result_flow._update_result_pending()
     assert app._result_first_seen_at_ms is None
 
 
@@ -57,7 +57,7 @@ def test_first_seen_captured_when_result_appears():
     app = _make_app()
     app.manual_result = "white_wins"
     before = pg.time.get_ticks()
-    app._update_result_pending()
+    app.result_flow._update_result_pending()
     assert app._result_first_seen_at_ms is not None
     assert app._result_first_seen_at_ms >= before
 
@@ -65,19 +65,19 @@ def test_first_seen_captured_when_result_appears():
 def test_first_seen_resets_when_result_clears():
     app = _make_app()
     app.manual_result = "white_wins"
-    app._update_result_pending()
+    app.result_flow._update_result_pending()
     assert app._result_first_seen_at_ms is not None
     app.manual_result = None
-    app._update_result_pending()
+    app.result_flow._update_result_pending()
     assert app._result_first_seen_at_ms is None
 
 
 def test_first_seen_does_not_reset_on_subsequent_frames():
     app = _make_app()
     app.manual_result = "white_wins"
-    app._update_result_pending()
+    app.result_flow._update_result_pending()
     captured = app._result_first_seen_at_ms
-    app._update_result_pending()
+    app.result_flow._update_result_pending()
     assert app._result_first_seen_at_ms == captured
 
 
@@ -91,24 +91,24 @@ def test_online_result_defers_first_seen_until_board_settles():
     app._handle_online_result({"reason": "checkmate", "winner_color": "white"})
     assert app.manual_result == "white_wins"
     assert app._result_first_seen_at_ms is None
-    app._update_result_pending()
+    app.result_flow._update_result_pending()
     assert app._result_first_seen_at_ms is None
     app.board.effects.captures = []
-    app._update_result_pending()
+    app.result_flow._update_result_pending()
     assert app._result_first_seen_at_ms is not None
 
 
 def test_modal_hidden_immediately_after_result():
     app = _make_app()
     app.manual_result = "white_wins"
-    app._update_result_pending()
+    app.result_flow._update_result_pending()
     assert app._result_modal_should_show() is False
 
 
 def test_modal_shows_after_delay_elapses():
     app = _make_app()
     app.manual_result = "white_wins_on_time"
-    app._update_result_pending()
+    app.result_flow._update_result_pending()
     app._result_first_seen_at_ms = pg.time.get_ticks() - RESULT_MODAL_DELAY_MS - 1
     assert app._result_modal_should_show() is True
 
@@ -122,7 +122,7 @@ def test_fade_alpha_starts_low_and_grows_to_max(monkeypatch):
     monkeypatch.setattr(pg.time, "get_ticks", lambda: 10_000_000)
     app = _make_app()
     app.manual_result = "white_wins"
-    app._update_result_pending()
+    app.result_flow._update_result_pending()
 
     app._result_first_seen_at_ms = pg.time.get_ticks()
     assert app._result_elapsed_ms() == 0
@@ -150,7 +150,7 @@ def test_fade_overlay_no_op_when_no_result():
     assert app._result_first_seen_at_ms is None
 
     app.manual_result = "white_wins"
-    app._update_result_pending()
+    app.result_flow._update_result_pending()
     app._result_first_seen_at_ms = pg.time.get_ticks() - RESULT_FADE_MS - 100
     darkened = _fade_probe_after_white(app)
     assert darkened.r == darkened.g == darkened.b == 255 - RESULT_FADE_MAX_ALPHA
@@ -160,26 +160,26 @@ def test_fade_overlay_no_op_when_no_result():
 def test_click_during_fade_window_skips_to_modal():
     app = _make_app()
     app.manual_result = "white_wins"
-    app._update_result_pending()
+    app.result_flow._update_result_pending()
     assert app._result_modal_should_show() is False
-    app.mouse_left_clicked((100, 100))
+    app.input_router.mouse_left_clicked((100, 100))
     assert app._result_modal_should_show() is True
 
 
 def test_click_outside_fade_window_does_not_alter_state():
     app = _make_app()
     app.manual_result = "white_wins_on_time"
-    app._update_result_pending()
+    app.result_flow._update_result_pending()
     app._result_first_seen_at_ms = pg.time.get_ticks() - RESULT_MODAL_DELAY_MS - 100
     captured = app._result_first_seen_at_ms
-    app.mouse_left_clicked((100, 100))
+    app.input_router.mouse_left_clicked((100, 100))
     assert app._result_first_seen_at_ms == captured
 
 
 def test_new_game_clears_pending_result_state():
     app = _make_app()
     app.manual_result = "white_wins"
-    app._update_result_pending()
+    app.result_flow._update_result_pending()
     assert app._result_first_seen_at_ms is not None
     app._reset_to_new_game()
     assert app._result_first_seen_at_ms is None
@@ -187,12 +187,12 @@ def test_new_game_clears_pending_result_state():
 
 def _show_result_with_menu_center(app, result="white_wins"):
     app.manual_result = result
-    app._update_result_pending()
+    app.result_flow._update_result_pending()
     app.board.effects.clear_takeover()
     app._result_first_seen_at_ms = pg.time.get_ticks() - RESULT_MODAL_DELAY_MS - 1
     assert app._result_modal_should_show() is True
     app._compute_layout()
-    app._feed_result_menu()
+    app.result_flow._feed_result_menu()
     app.result_menu.draw()
     assert app.result_menu.is_visible() is True
     assert app.result_menu.button_rects
@@ -206,7 +206,7 @@ def test_stale_result_menu_not_clickable_after_new_game():
     menu_center = _show_result_with_menu_center(app)
     app._reset_to_new_game()
     assert app.result_menu.is_visible() is False
-    app.mouse_left_clicked(menu_center)
+    app.input_router.mouse_left_clicked(menu_center)
     assert app.mode != "menu"
 
 
@@ -217,8 +217,8 @@ def test_drag_release_after_game_over_skips_router():
     app.board.dragging_from = Square(6, 4)
     app.manual_result = "white_wins"
     calls = []
-    app.mouse_left_clicked = lambda pos, **kwargs: calls.append(pos)
-    app._mouse_left_released((100, 100))
+    app.input_router.mouse_left_clicked = lambda pos, **kwargs: calls.append(pos)
+    app.input_router._mouse_left_released((100, 100))
     assert calls == []
     assert app.board.dragging_from is None
 
@@ -229,8 +229,8 @@ def test_drag_release_during_live_game_routes_click():
     app = _make_app()
     app.board.dragging_from = Square(6, 4)
     calls = []
-    app.mouse_left_clicked = lambda pos, **kwargs: calls.append(pos)
-    app._mouse_left_released((100, 100))
+    app.input_router.mouse_left_clicked = lambda pos, **kwargs: calls.append(pos)
+    app.input_router._mouse_left_released((100, 100))
     assert calls == [(100, 100)]
 
 
@@ -240,7 +240,7 @@ def test_drag_release_after_game_over_does_not_quit_to_menu():
     app = _make_app()
     menu_center = _show_result_with_menu_center(app)
     app.board.dragging_from = Square(6, 4)
-    app._mouse_left_released(menu_center)
+    app.input_router._mouse_left_released(menu_center)
     assert app.mode != "menu"
 
 
@@ -250,7 +250,7 @@ def test_legit_result_menu_button_still_quits():
     app = _make_app()
     menu_center = _show_result_with_menu_center(app)
     assert app.result_menu.is_visible() is True
-    app.mouse_left_clicked(menu_center)
+    app.input_router.mouse_left_clicked(menu_center)
     assert app.mode == "menu"
 
 

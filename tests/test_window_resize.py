@@ -81,7 +81,7 @@ def test_videoresize_clamps_to_minimum(ev_w, ev_h, exp_w, exp_h):
     app = Frontend(MIN_WINDOW_WIDTH + 100, MIN_WINDOW_HEIGHT + 200)
     event = pg.event.Event(pg.VIDEORESIZE, {"w": ev_w, "h": ev_h, "size": (ev_w, ev_h)})
     pg.event.post(event)
-    app.check_events()
+    app.input_router.check_events()
     assert app.window_width == exp_w
     assert app.window_height == exp_h
 

@@ -1146,11 +1146,11 @@ def test_result_sequence_waits_for_capture_choreography(monkeypatch):
     app = _app()
     monkeypatch.setattr(app, "current_result", lambda: "white_wins")
     app.board.effects.captures = [{"in_flight": True}]
-    app._update_result_pending()
+    app.result_flow._update_result_pending()
     assert app._result_first_seen_at_ms is None
     assert not app.board.effects.has_takeover()
     app.board.effects.captures = []
-    app._update_result_pending()
+    app.result_flow._update_result_pending()
     assert app._result_first_seen_at_ms is not None
     assert app.board.effects.has_takeover()
 
@@ -1158,7 +1158,7 @@ def test_result_sequence_waits_for_capture_choreography(monkeypatch):
 def test_result_modal_waits_longer_while_a_takeover_plays(monkeypatch):
     app = _app()
     monkeypatch.setattr(app, "current_result", lambda: "white_wins")
-    app._update_result_pending()
+    app.result_flow._update_result_pending()
     assert app.board.effects.has_takeover()
     app._result_first_seen_at_ms = pg.time.get_ticks() - 600
     assert app._result_modal_should_show() is False

@@ -123,7 +123,7 @@ def test_confirm_blocks_promotion_key_end_to_end():
 
     pg.event.clear()
     pg.event.post(pg.event.Event(pg.KEYDOWN, {"key": pg.K_q, "unicode": "q", "mod": 0}))
-    app.check_events()
+    app.input_router.check_events()
 
     assert app.board.pending_promotion_square == dst
     assert app.match.move_history == history_before
@@ -144,7 +144,7 @@ def test_confirm_over_help_receives_the_click_help_stays_open_behind():
 
     app.confirm_modal.draw()
     yes_rect = app.confirm_modal.button_rects["yes"]
-    app.mouse_left_clicked(yes_rect.center)
+    app.input_router.mouse_left_clicked(yes_rect.center)
 
     assert app.manual_result is not None
     assert app.confirm_modal.is_visible() is False
@@ -158,7 +158,7 @@ def test_esc_dismisses_confirm_before_help_when_both_open():
     assert app.confirm_modal.is_visible() is True
     assert app.help_modal.is_visible() is True
 
-    app._handle_escape()
+    app.input_router._handle_escape()
 
     assert app.confirm_modal.is_visible() is False
     assert app.help_modal.is_visible() is True
@@ -179,7 +179,7 @@ def test_click_inside_is_consumed_never_reaches_the_board(name):
     OPENERS[name](app)
     app.board.handle_click = MagicMock()
     spec = next(s for s in app._modal_registry if s.obj is getattr(app, name))
-    app._dispatch_left_click(spec.obj.rect.center)
+    app.input_router._dispatch_left_click(spec.obj.rect.center)
     app.board.handle_click.assert_not_called()
 
 
@@ -189,9 +189,9 @@ def test_active_scrollable_matches_the_spec_flag(name):
     OPENERS[name](app)
     spec = next(s for s in app._modal_registry if s.obj is getattr(app, name))
     if spec.scrollable:
-        assert app._active_scrollable() is spec.obj
+        assert app.input_router._active_scrollable() is spec.obj
     else:
-        assert app._active_scrollable() is None
+        assert app.input_router._active_scrollable() is None
 
 
 @pytest.mark.parametrize("name", MODAL_NAMES)
@@ -202,7 +202,7 @@ def test_cancel_all_scroll_stops_an_in_progress_grab(name):
     if not spec.scrollable:
         pytest.skip(f"{name} is not a scrollable registry entry")
     spec.obj.scroll.handle_press(spec.obj.rect.center)
-    app._cancel_all_scroll()
+    app.input_router._cancel_all_scroll()
     assert spec.obj.scroll.is_active() is False
 
 
@@ -228,7 +228,7 @@ def test_esc_dismisses_only_the_topmost_of_two_stacked(top_name, under_name):
     assert getattr(app, top_name).is_visible() is True
     assert getattr(app, under_name).is_visible() is True
 
-    app._handle_escape()
+    app.input_router._handle_escape()
 
     assert getattr(app, top_name).is_visible() is False
     assert getattr(app, under_name).is_visible() is True
@@ -238,5 +238,5 @@ def test_esc_dismisses_only_the_topmost_of_two_stacked(top_name, under_name):
 def test_esc_does_not_dismiss_non_dismissable_modals(name):
     app = _app()
     OPENERS[name](app)
-    app._handle_escape()
+    app.input_router._handle_escape()
     assert getattr(app, name).is_visible() is True

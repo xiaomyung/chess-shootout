@@ -110,7 +110,7 @@ class FocusTransition:
         f.focus_mode = False
         f._compute_layout()
         normal_board = pg.Rect(f.board.rect)
-        f._draw_game_children()
+        f._draw_game_scene(show_panel=True, show_strips=True)
         norm_top = pg.Rect(f.player_strip_top.rect)
         norm_bot = pg.Rect(f.player_strip_bottom.rect)
         panel_home = pg.Rect(f.right_menu.outer_rect)

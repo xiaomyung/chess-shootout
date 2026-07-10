@@ -120,8 +120,9 @@ class OnlineEventsMixin:
 
     def _handle_online_error(self, payload):
         reason = payload.get("reason", "")
-        if self._pending_online_move is not None and reason in MOVE_REJECTION_REASONS:
-            self._pending_online_move = None
+        pending_move = self.skillcheck_session._pending_online_move
+        if pending_move is not None and reason in MOVE_REJECTION_REASONS:
+            self.skillcheck_session._pending_online_move = None
             self.board.selected_square = None
             if reason in ("invalid_move_format", "not_your_turn"):
                 self._begin_resync()
@@ -139,7 +140,7 @@ class OnlineEventsMixin:
             return
         if reason == "room_lost":
             self._resyncing = False
-            self._auto_save_pgn()
+            self.result_flow._auto_save_pgn()
             self.reconnecting_modal.hide()
             self.offer_banners.clear()
             self.confirm_modal.show(
@@ -292,13 +293,13 @@ class OnlineEventsMixin:
         self.board.clear_premoves()
         self.board.clear_annotations()
         self._adopt_resumed_result(payload)
-        self._apply_resumed_skillcheck_log(payload.get("skillcheck_log", []))
+        self.skillcheck_session._apply_resumed_skillcheck_log(payload.get("skillcheck_log", []))
         self._restore_online_skillcheck_state(payload)
         self._resyncing = False
 
     def _restore_online_skillcheck_state(self, payload):
-        self._teardown_skillcheck_overlay()
-        self._pending_online_move = None
+        self.skillcheck_session._teardown_skillcheck_overlay()
+        self.skillcheck_session._pending_online_move = None
         self.skillcheck.clear_locks()
         for lock in payload.get("skillcheck_locks", []):
             self.skillcheck.lock(square_from_coord(lock["from_sq"]),
@@ -313,9 +314,9 @@ class OnlineEventsMixin:
         granted_by = payload.get("granted_by")
         recipient_color = "black" if granted_by == "white" else "white"
         if granted_by == self._chosen_side:
-            self._give_time_toast_for_giver(recipient_color, added)
+            self.give_time._give_time_toast_for_giver(recipient_color, added)
         else:
-            self._give_time_toast_for_receiver(granted_by, added)
+            self.give_time._give_time_toast_for_receiver(granted_by, added)
 
     def _handle_takeback_applied(self, payload):
         if self._resyncing:
@@ -326,7 +327,7 @@ class OnlineEventsMixin:
             self._begin_resync()
             return
         if self.match.move_history:
-            self._drop_skillcheck_log_from(len(self.match.move_history))
+            self.skillcheck_session._drop_skillcheck_log_from(len(self.match.move_history))
             last = self.match.move_history[-1].move
             self.match.undo()
             self.board.start_undo_animation(last)
@@ -341,10 +342,10 @@ class OnlineEventsMixin:
         promo = payload.get("promotion")
         promo_type = PROMO_TYPE_BY_LETTER.get(promo) if promo else None
         kind = SkillCheckKind(payload["kind"])
-        self._pending_online_move = None
-        self._online_skillcheck = (from_sq, to_sq, promo_type, kind)
-        self._online_skillcheck_opened_ms = pg.time.get_ticks()
-        self._open_skillcheck_overlay(
+        self.skillcheck_session._pending_online_move = None
+        self.skillcheck_session._online_skillcheck = (from_sq, to_sq, promo_type, kind)
+        self.skillcheck_session._online_skillcheck_opened_ms = pg.time.get_ticks()
+        self.skillcheck_session._open_skillcheck_overlay(
             kind, payload["seed"], int(payload["value_diff"]),
             float(payload["deadline_ms"]), from_sq, to_sq, promo_type, online=True,
             elapsed_ms=float(payload.get("elapsed_ms", 0.0)),
@@ -355,30 +356,30 @@ class OnlineEventsMixin:
             return
         from_sq = square_from_coord(payload["from"])
         to_sq = square_from_coord(payload["to"])
-        pending = self._online_skillcheck
+        pending = self.skillcheck_session._online_skillcheck
         if self._is_my_open_check(from_sq, to_sq):
-            self._record_online_fail(pending, from_sq, to_sq)
+            self.skillcheck_session._record_online_fail(pending, from_sq, to_sq)
             aim_victim = self.board.aim_suppressed_square
             self.board.selected_square = None
             self._begin_online_verdict(
                 False, lambda: self._apply_online_fail(from_sq, to_sq, aim_victim))
             return
-        if self._online_spectate_kind is not None:
-            self._record_online_fail(pending, from_sq, to_sq)
+        if self.skillcheck_session._online_spectate_kind is not None:
+            self.skillcheck_session._record_online_fail(pending, from_sq, to_sq)
             aim_victim = self.board.aim_suppressed_square
             self.toast.show("Opponent missed!")
             self._begin_online_verdict(
                 False, lambda: self._apply_spectate_fail(from_sq, to_sq, aim_victim))
 
     def _is_my_open_check(self, from_sq, to_sq):
-        return (self._online_skillcheck is not None
-                and self._online_spectate_kind is None
-                and self._online_skillcheck[:2] == (from_sq, to_sq))
+        return (self.skillcheck_session._online_skillcheck is not None
+                and self.skillcheck_session._online_spectate_kind is None
+                and self.skillcheck_session._online_skillcheck[:2] == (from_sq, to_sq))
 
     def _begin_online_verdict(self, won, action):
-        self._online_skillcheck = None
-        self._online_spectate_kind = None
-        self._online_verdict_action = action
+        self.skillcheck_session._online_skillcheck = None
+        self.skillcheck_session._online_spectate_kind = None
+        self.skillcheck_session._online_verdict_action = action
         self.skillcheck_overlay.resolve_online(won)
 
     def _apply_online_fail(self, from_sq, to_sq, aim_victim):
@@ -387,7 +388,7 @@ class OnlineEventsMixin:
 
     def _apply_spectate_fail(self, from_sq, to_sq, aim_victim):
         self.board.trigger_skillcheck_fail(
-            from_sq, to_sq, on_fire=self._on_skillcheck_miss_fire)
+            from_sq, to_sq, on_fire=self.skillcheck_session._on_skillcheck_miss_fire)
         if aim_victim is not None:
             self.board.restore_piece(aim_victim)
 
@@ -399,13 +400,13 @@ class OnlineEventsMixin:
         promo = payload.get("promotion")
         promo_type = PROMO_TYPE_BY_LETTER.get(promo) if promo else None
         kind = SkillCheckKind(payload["kind"])
-        self._open_spectate_overlay(
+        self.skillcheck_session._open_spectate_overlay(
             kind, payload["seed"], int(payload["value_diff"]),
             float(payload["deadline_ms"]), from_sq, to_sq, promo_type)
         self.toast.show("Opponent is lining up a shot…")
 
     def _handle_skill_check_spectate_shot(self, payload):
-        if self._resyncing or self._online_spectate_kind is None:
+        if self._resyncing or self.skillcheck_session._online_spectate_kind is None:
             return
         self.skillcheck_overlay.spectate_shot(
             float(payload["elapsed_ms"]), int(payload["miss_count"]),
@@ -420,15 +421,15 @@ class OnlineEventsMixin:
         elapsed_ms = float(pending.get("elapsed_ms", 0.0))
         miss_count = int(pending.get("miss_count", 0))
         if pending["color"] != self._chosen_side:
-            self._open_spectate_overlay(
+            self.skillcheck_session._open_spectate_overlay(
                 kind, pending["seed"], int(pending["value_diff"]),
                 float(pending["deadline_ms"]), from_sq, to_sq, promo_type,
                 elapsed_ms=elapsed_ms, miss_count=miss_count)
             self.toast.show("Opponent is lining up a shot…")
             return
-        self._online_skillcheck = (from_sq, to_sq, promo_type, kind)
-        self._online_skillcheck_opened_ms = pg.time.get_ticks() - int(elapsed_ms)
-        self._open_skillcheck_overlay(
+        self.skillcheck_session._online_skillcheck = (from_sq, to_sq, promo_type, kind)
+        self.skillcheck_session._online_skillcheck_opened_ms = pg.time.get_ticks() - int(elapsed_ms)
+        self.skillcheck_session._open_skillcheck_overlay(
             kind, pending["seed"], int(pending["value_diff"]),
             float(pending["deadline_ms"]), from_sq, to_sq, promo_type, online=True,
             elapsed_ms=elapsed_ms, miss_count=miss_count)
@@ -437,9 +438,9 @@ class OnlineEventsMixin:
         if self.mode != ONLINE:
             return
         self.skillcheck.clear_locks()
-        if (self._pending_online_move is not None
-                and self._pending_online_move[:2] == (from_sq, to_sq)):
-            self._pending_online_move = None
+        if (self.skillcheck_session._pending_online_move is not None
+                and self.skillcheck_session._pending_online_move[:2] == (from_sq, to_sq)):
+            self.skillcheck_session._pending_online_move = None
 
     def _handle_remote_move_applied(self, payload):
         if self._resyncing:
@@ -451,7 +452,7 @@ class OnlineEventsMixin:
                 self._begin_online_verdict(
                     True, lambda: self._apply_remote_move_payload(payload))
                 return
-            if self._online_spectate_kind is not None:
+            if self.skillcheck_session._online_spectate_kind is not None:
                 self.toast.show("Opponent nailed it!")
                 self._begin_online_verdict(
                     True, lambda: self._apply_remote_move_payload(payload))
@@ -482,7 +483,7 @@ class OnlineEventsMixin:
             self._clear_online_move_locks(from_sq, to_sq)
             kind = payload.get("skill_check_kind")
             if kind is not None:
-                self._record_skillcheck(
+                self.skillcheck_session._record_skillcheck(
                     kind, bool(payload.get("skill_check_won")),
                     payload.get("ply") or len(self.match.move_history))
         else:
@@ -500,7 +501,7 @@ class OnlineEventsMixin:
             self.manual_result = reason
         else:
             return False
-        self._on_result_final(self.manual_result)
+        self.result_flow._on_result_final(self.manual_result)
         return True
 
     def _adopt_resumed_result(self, payload):
@@ -517,13 +518,13 @@ class OnlineEventsMixin:
         self._opp_disconnected_at_ms = None
         self._local_disconnected_at_ms = None
         self.offer_banners.clear()
-        self._pending_online_move = None
-        pending_action = self._online_verdict_action
-        self._online_verdict_action = None
+        self.skillcheck_session._pending_online_move = None
+        pending_action = self.skillcheck_session._online_verdict_action
+        self.skillcheck_session._online_verdict_action = None
         try:
             if pending_action is not None:
                 pending_action()
-            self._teardown_skillcheck_overlay()
+            self.skillcheck_session._teardown_skillcheck_overlay()
         except Exception:
             log.exception("online result verdict/teardown failed")
             self._begin_resync()
@@ -594,7 +595,7 @@ class OnlineEventsMixin:
         self.match.on_local_move_applied = self._on_local_move_applied
         self._match_session_id = self._session_id_for_online()
         self._series_pair = tuple(sorted([payload["white_name"], payload["black_name"]]))
-        self._series_scores = {
+        self.result_flow._series_scores = {
             payload["white_name"]: float(payload.get("white_score", 0.0)),
             payload["black_name"]: float(payload.get("black_score", 0.0)),
         }

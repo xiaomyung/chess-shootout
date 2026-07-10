@@ -529,16 +529,16 @@ def test_rematch_update_window_expired_returns_to_menu(frontend):
 def test_online_result_redelivery_does_not_double_count(frontend, monkeypatch):
     """A reconnect re-delivers the result; the handler must be idempotent so the
     series score (and PGN auto-save) only fire once per game."""
-    monkeypatch.setattr(frontend, "_auto_save_pgn", lambda: None)
+    monkeypatch.setattr(frontend.result_flow, "_auto_save_pgn", lambda: None)
     frontend.mode = ONLINE
     frontend._chosen_side = "white"
     frontend.white_name, frontend.black_name = "Me", "Them"
-    frontend._series_scores = {}
+    frontend.result_flow._series_scores = {}
     frontend.manual_result = None
     payload = {"reason": "resignation", "winner_color": "white"}
     frontend._handle_online_result(payload)
     frontend._handle_online_result(payload)
-    assert frontend._series_scores["Me"] == 1.0
+    assert frontend.result_flow._series_scores["Me"] == 1.0
     assert frontend.manual_result == "white_wins_by_resignation"
 
 

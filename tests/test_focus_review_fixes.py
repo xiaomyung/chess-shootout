@@ -29,16 +29,16 @@ def test_scrollable_is_gated_off_in_focus_and_transition():
     with pytest.MonkeyPatch().context() as mp:
         install_clock(mp, clock)
         start_game(app)
-        assert app._active_scrollable() is app.right_menu
+        assert app.input_router._active_scrollable() is app.right_menu
         app._toggle_focus(True)
         assert app.focus_transition is not None
-        assert app._active_scrollable() is None
+        assert app.input_router._active_scrollable() is None
         finish = clock
         for _ in range(12):
             finish.advance(40)
             app.draw_frame()
         assert app.focus_mode and app.focus_transition is None
-        assert app._active_scrollable() is None
+        assert app.input_router._active_scrollable() is None
 
 
 def test_toggle_blocked_while_skillcheck_overlay_active():

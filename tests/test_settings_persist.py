@@ -34,38 +34,38 @@ def app():
 def test_defer_does_not_commit_before_the_delay(app, monkeypatch):
     fired = []
     monkeypatch.setattr(pg.time, "get_ticks", lambda: 1000)
-    app._defer_env_write("master_volume", lambda: fired.append(1))
+    app.settings._defer_env_write("master_volume", lambda: fired.append(1))
     monkeypatch.setattr(pg.time, "get_ticks", lambda: 1100)
-    app._flush_deferred_env_writes()
+    app.settings._flush_deferred_env_writes()
     assert fired == []
 
 
 def test_deferred_write_commits_after_the_delay(app, monkeypatch):
-    from chessshootout.frontend.frontend import SETTINGS_WRITE_DELAY_MS
+    from chessshootout.frontend.settings import SETTINGS_WRITE_DELAY_MS
     fired = []
     monkeypatch.setattr(pg.time, "get_ticks", lambda: 1000)
-    app._defer_env_write("master_volume", lambda: fired.append(1))
+    app.settings._defer_env_write("master_volume", lambda: fired.append(1))
     monkeypatch.setattr(pg.time, "get_ticks", lambda: 1000 + SETTINGS_WRITE_DELAY_MS)
-    app._flush_deferred_env_writes()
+    app.settings._flush_deferred_env_writes()
     assert fired == [1]
 
 
 def test_repeat_release_same_key_coalesces_to_one_write(app, monkeypatch):
-    from chessshootout.frontend.frontend import SETTINGS_WRITE_DELAY_MS
+    from chessshootout.frontend.settings import SETTINGS_WRITE_DELAY_MS
     fired = []
     monkeypatch.setattr(pg.time, "get_ticks", lambda: 1000)
-    app._defer_env_write("master_volume", lambda: fired.append("a"))
+    app.settings._defer_env_write("master_volume", lambda: fired.append("a"))
     monkeypatch.setattr(pg.time, "get_ticks", lambda: 1200)
-    app._defer_env_write("master_volume", lambda: fired.append("b"))
+    app.settings._defer_env_write("master_volume", lambda: fired.append("b"))
     monkeypatch.setattr(pg.time, "get_ticks", lambda: 1200 + SETTINGS_WRITE_DELAY_MS)
-    app._flush_deferred_env_writes()
+    app.settings._flush_deferred_env_writes()
     assert fired == ["b"]
 
 
 def test_force_flush_commits_pending_immediately(app, monkeypatch):
     fired = []
     monkeypatch.setattr(pg.time, "get_ticks", lambda: 1000)
-    app._defer_env_write("master_volume", lambda: fired.append(1))
-    app._flush_deferred_env_writes(force=True)
+    app.settings._defer_env_write("master_volume", lambda: fired.append(1))
+    app.settings._flush_deferred_env_writes(force=True)
     assert fired == [1]
-    assert app._deferred_env_writes == {}
+    assert app.settings._deferred_env_writes == {}

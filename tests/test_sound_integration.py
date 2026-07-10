@@ -664,7 +664,7 @@ def test_click_select_plays_pickup_no_ui_click():
     app = make_app()
     app._on_start_game(base_config(time_minutes=None))
     app.sound_manager.reset_mock()
-    app.mouse_left_clicked(_px(app, Square(6, 4)))
+    app.input_router.mouse_left_clicked(_px(app, Square(6, 4)))
     app.sound_manager.play_pickup.assert_called_once()
     app.sound_manager.play_ui_click.assert_not_called()
 
@@ -673,7 +673,7 @@ def test_click_empty_square_plays_ui_click():
     app = make_app()
     app._on_start_game(base_config(time_minutes=None))
     app.sound_manager.reset_mock()
-    app.mouse_left_clicked(_px(app, Square(4, 4)))
+    app.input_router.mouse_left_clicked(_px(app, Square(4, 4)))
     app.sound_manager.play_ui_click.assert_called_once()
     app.sound_manager.play_pickup.assert_not_called()
 
@@ -681,9 +681,9 @@ def test_click_empty_square_plays_ui_click():
 def test_click_move_target_no_ui_click_plays_move():
     app = make_app()
     app._on_start_game(base_config(time_minutes=None))
-    app.mouse_left_clicked(_px(app, Square(6, 4)))
+    app.input_router.mouse_left_clicked(_px(app, Square(6, 4)))
     app.sound_manager.reset_mock()
-    app.mouse_left_clicked(_px(app, Square(4, 4)))
+    app.input_router.mouse_left_clicked(_px(app, Square(4, 4)))
     app.sound_manager.play_ui_click.assert_not_called()
     fire_animation(app)
     app.sound_manager.play_move.assert_called_once()
@@ -692,9 +692,9 @@ def test_click_move_target_no_ui_click_plays_move():
 def test_click_deselect_plays_ui_click():
     app = make_app()
     app._on_start_game(base_config(time_minutes=None))
-    app.mouse_left_clicked(_px(app, Square(6, 4)))
+    app.input_router.mouse_left_clicked(_px(app, Square(6, 4)))
     app.sound_manager.reset_mock()
-    app.mouse_left_clicked(_px(app, Square(6, 4)))
+    app.input_router.mouse_left_clicked(_px(app, Square(6, 4)))
     app.sound_manager.play_ui_click.assert_called_once()
 
 
@@ -702,7 +702,7 @@ def test_menu_click_plays_ui_click():
     app = make_app()
     app.mode = "menu"
     app.sound_manager.reset_mock()
-    app.mouse_left_clicked((500, 400))
+    app.input_router.mouse_left_clicked((500, 400))
     app.sound_manager.play_ui_click.assert_called_once()
 
 
@@ -712,7 +712,7 @@ def test_click_during_promotion_no_ui_click():
     app.board.pending_promotion_square = Square(0, 4)
     app.board.pick_promotion_at = lambda pos: None
     app.sound_manager.reset_mock()
-    app.mouse_left_clicked(_px(app, Square(0, 4)))
+    app.input_router.mouse_left_clicked(_px(app, Square(0, 4)))
     app.sound_manager.play_ui_click.assert_not_called()
 
 
@@ -724,7 +724,7 @@ def test_drag_release_plays_drop():
     app.board.selected_square = Square(6, 4)
     app.board.dragging_from = Square(6, 4)
     app.sound_manager.reset_mock()
-    app._mouse_left_released(_px(app, Square(4, 4)))
+    app.input_router._mouse_left_released(_px(app, Square(4, 4)))
     app.sound_manager.play_drop.assert_called_once()
     app.sound_manager.play_ui_click.assert_not_called()
 
@@ -735,7 +735,7 @@ def test_drag_release_cancel_suppresses_ui_click_still_drops():
     app.board.selected_square = Square(6, 4)
     app.board.dragging_from = Square(6, 4)
     app.sound_manager.reset_mock()
-    app._mouse_left_released(_px(app, Square(6, 4)))
+    app.input_router._mouse_left_released(_px(app, Square(6, 4)))
     app.sound_manager.play_ui_click.assert_not_called()
     app.sound_manager.play_drop.assert_called_once()
 
@@ -744,7 +744,7 @@ def test_non_drag_release_does_not_drop():
     app = make_app()
     app._on_start_game(base_config(time_minutes=None))
     app.sound_manager.reset_mock()
-    app._mouse_left_released(_px(app, Square(4, 4)))
+    app.input_router._mouse_left_released(_px(app, Square(4, 4)))
     app.sound_manager.play_drop.assert_not_called()
 
 
@@ -755,15 +755,15 @@ def test_premove_making_and_chaining_is_silent():
     typewriter nor the pickup (disturbing during rapid premove setup)."""
     app = make_app()
     app._on_start_game(base_config(time_minutes=None))
-    app.mouse_left_clicked(_px(app, Square(6, 4)))
-    app.mouse_left_clicked(_px(app, Square(4, 4)))
+    app.input_router.mouse_left_clicked(_px(app, Square(6, 4)))
+    app.input_router.mouse_left_clicked(_px(app, Square(4, 4)))
     app.board.cancel_animations()
     app.sound_manager.reset_mock()
-    app.mouse_left_clicked(_px(app, Square(7, 6)))   # premove-select knight g1
-    app.mouse_left_clicked(_px(app, Square(5, 5)))   # premove-queue g1-f3
-    app.mouse_left_clicked(_px(app, Square(5, 5)))   # chain-select f3
-    app.mouse_left_clicked(_px(app, Square(3, 4)))   # chain-queue f3-e5
-    app.mouse_left_clicked(_px(app, Square(3, 0)))   # empty click clears premoves
+    app.input_router.mouse_left_clicked(_px(app, Square(7, 6)))   # premove-select knight g1
+    app.input_router.mouse_left_clicked(_px(app, Square(5, 5)))   # premove-queue g1-f3
+    app.input_router.mouse_left_clicked(_px(app, Square(5, 5)))   # chain-select f3
+    app.input_router.mouse_left_clicked(_px(app, Square(3, 4)))   # chain-queue f3-e5
+    app.input_router.mouse_left_clicked(_px(app, Square(3, 0)))   # empty click clears premoves
     app.sound_manager.play_ui_click.assert_not_called()
     app.sound_manager.play_pickup.assert_not_called()
 
@@ -773,12 +773,14 @@ def test_illegal_premove_target_plays_ui_click():
     one plays the typewriter (legal premoves stay silent)."""
     app = make_app()
     app._on_start_game(base_config(time_minutes=None))
-    app.mouse_left_clicked(_px(app, Square(6, 4)))
-    app.mouse_left_clicked(_px(app, Square(4, 4)))
+    app.input_router.mouse_left_clicked(_px(app, Square(6, 4)))
+    app.input_router.mouse_left_clicked(_px(app, Square(4, 4)))
     app.board.cancel_animations()
     app.sound_manager.reset_mock()
-    app.mouse_left_clicked(_px(app, Square(7, 6)))   # premove-select knight g1 (silent)
-    app.mouse_left_clicked(_px(app, Square(4, 4)))   # illegal target e4 -> typewriter
+    # premove-select knight g1 (silent)
+    app.input_router.mouse_left_clicked(_px(app, Square(7, 6)))
+    # illegal target e4 -> typewriter
+    app.input_router.mouse_left_clicked(_px(app, Square(4, 4)))
     app.sound_manager.play_ui_click.assert_called_once()
 
 
@@ -790,7 +792,8 @@ def test_click_opponent_piece_online_plays_ui_click():
     app._on_start_game(base_config(time_minutes=None))
     app.match.local_color = PieceColor.WHITE
     app.sound_manager.reset_mock()
-    app.mouse_left_clicked(_px(app, Square(1, 4)))   # black pawn e7 (opponent, no chain)
+    # black pawn e7 (opponent, no chain)
+    app.input_router.mouse_left_clicked(_px(app, Square(1, 4)))
     assert app.board.selected_square is None
     app.sound_manager.play_ui_click.assert_called_once()
 
@@ -802,7 +805,7 @@ def test_right_click_press_plays_ui_click():
     pg.event.clear()
     pg.event.post(pg.event.Event(pg.MOUSEBUTTONDOWN,
                                  {"button": 3, "pos": _px(app, Square(4, 4))}))
-    app.check_events()
+    app.input_router.check_events()
     app.sound_manager.play_ui_click.assert_called_once()
 
 
@@ -812,7 +815,7 @@ def test_right_click_in_menu_plays_ui_click():
     app.sound_manager.reset_mock()
     pg.event.clear()
     pg.event.post(pg.event.Event(pg.MOUSEBUTTONDOWN, {"button": 3, "pos": (500, 400)}))
-    app.check_events()
+    app.input_router.check_events()
     app.sound_manager.play_ui_click.assert_called_once()
 
 
@@ -822,7 +825,7 @@ def test_any_keyboard_press_plays_ui_click():
     app.sound_manager.reset_mock()
     pg.event.clear()
     pg.event.post(pg.event.Event(pg.KEYDOWN, {"key": pg.K_a, "mod": 0, "unicode": "a"}))
-    app.check_events()
+    app.input_router.check_events()
     app.sound_manager.play_ui_click.assert_called_once()
 
 
@@ -833,12 +836,12 @@ def test_keyboard_during_skillcheck_is_silent():
     overlay."""
     app = make_app()
     app._on_start_game(base_config(time_minutes=None))
-    app._skillcheck_swallows_input = lambda: True
+    app.skillcheck_session._skillcheck_swallows_input = lambda: True
     app.skillcheck_overlay.handle_event = MagicMock()
     app.sound_manager.reset_mock()
     pg.event.clear()
     pg.event.post(pg.event.Event(pg.KEYDOWN, {"key": pg.K_SPACE, "mod": 0, "unicode": " "}))
-    app.check_events()
+    app.input_router.check_events()
     app.sound_manager.play_ui_click.assert_not_called()
     app.skillcheck_overlay.handle_event.assert_called_once()
 
@@ -849,6 +852,6 @@ def test_keyboard_flip_plays_click_and_flip():
     app.sound_manager.reset_mock()
     pg.event.clear()
     pg.event.post(pg.event.Event(pg.KEYDOWN, {"key": pg.K_f, "mod": 0, "unicode": "f"}))
-    app.check_events()
+    app.input_router.check_events()
     app.sound_manager.play_ui_click.assert_called_once()
     app.sound_manager.play_flip.assert_called_once()

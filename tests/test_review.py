@@ -238,7 +238,7 @@ def test_left_arrow_steps_back_no_animation():
     app = _new_app()
     _play_e4_e5_nf3(app)
     event = pg.event.Event(pg.KEYDOWN, key=pg.K_LEFT, mod=0)
-    app._handle_shortcut_key(event)
+    app.input_router._handle_shortcut_key(event)
     assert app.board.review_ply == 2
     assert app.board.animations == []
 
@@ -248,7 +248,7 @@ def test_right_arrow_steps_forward_with_animation():
     _play_e4_e5_nf3(app)
     app.board.review_ply = 1
     event = pg.event.Event(pg.KEYDOWN, key=pg.K_RIGHT, mod=0)
-    app._handle_shortcut_key(event)
+    app.input_router._handle_shortcut_key(event)
     assert app.board.review_ply == 1
     assert len(app.board.animations) >= 1
     fire_animation(app.board)
@@ -260,7 +260,7 @@ def test_right_arrow_to_last_ply_animates_to_live():
     _play_e4_e5_nf3(app)
     app.board.review_ply = 2
     event = pg.event.Event(pg.KEYDOWN, key=pg.K_RIGHT, mod=0)
-    app._handle_shortcut_key(event)
+    app.input_router._handle_shortcut_key(event)
     assert len(app.board.animations) >= 1
     fire_animation(app.board)
     assert app.board.review_ply is None
@@ -279,11 +279,11 @@ def test_spamming_right_arrow_advances_each_press():
         app.backend.try_move(from_sq, to_sq)
     app.board.review_ply = 0
     event = pg.event.Event(pg.KEYDOWN, key=pg.K_RIGHT, mod=0)
-    app._handle_shortcut_key(event)
+    app.input_router._handle_shortcut_key(event)
     assert app.board._target_ply == 1
-    app._handle_shortcut_key(event)
+    app.input_router._handle_shortcut_key(event)
     assert app.board._target_ply == 2
-    app._handle_shortcut_key(event)
+    app.input_router._handle_shortcut_key(event)
     assert app.board._target_ply == 3
     fire_animation(app.board)
     assert app.board.review_ply == 3
@@ -310,7 +310,7 @@ def test_home_jumps_to_ply_zero():
     app = _new_app()
     _play_e4_e5_nf3(app)
     event = pg.event.Event(pg.KEYDOWN, key=pg.K_HOME, mod=0)
-    app._handle_shortcut_key(event)
+    app.input_router._handle_shortcut_key(event)
     assert app.board.review_ply == 0
 
 
@@ -319,7 +319,7 @@ def test_end_returns_to_live():
     _play_e4_e5_nf3(app)
     app.board.review_ply = 0
     event = pg.event.Event(pg.KEYDOWN, key=pg.K_END, mod=0)
-    app._handle_shortcut_key(event)
+    app.input_router._handle_shortcut_key(event)
     assert app.board.review_ply is None
 
 
@@ -331,10 +331,10 @@ def test_home_during_animation_lands_on_zero_not_yanked_back():
     _play_e4_e5_nf3(app)
     app.board.review_ply = 0
     right_event = pg.event.Event(pg.KEYDOWN, key=pg.K_RIGHT, mod=0)
-    app._handle_shortcut_key(right_event)
+    app.input_router._handle_shortcut_key(right_event)
     assert app.board.animations, "the Right arrow started an animation"
     home_event = pg.event.Event(pg.KEYDOWN, key=pg.K_HOME, mod=0)
-    app._handle_shortcut_key(home_event)
+    app.input_router._handle_shortcut_key(home_event)
     assert app.board.review_ply == 0
     assert app.board._target_ply is None
     assert app.board.animations == []
@@ -347,10 +347,10 @@ def test_end_during_animation_returns_to_live_not_yanked_back():
     _play_e4_e5_nf3(app)
     app.board.review_ply = 0
     right_event = pg.event.Event(pg.KEYDOWN, key=pg.K_RIGHT, mod=0)
-    app._handle_shortcut_key(right_event)
+    app.input_router._handle_shortcut_key(right_event)
     assert app.board.animations, "the Right arrow started an animation"
     end_event = pg.event.Event(pg.KEYDOWN, key=pg.K_END, mod=0)
-    app._handle_shortcut_key(end_event)
+    app.input_router._handle_shortcut_key(end_event)
     assert app.board.review_ply is None
     assert app.board._target_ply is None
     assert app.board.animations == []
@@ -359,7 +359,7 @@ def test_end_during_animation_returns_to_live_not_yanked_back():
 def test_home_noop_when_history_empty():
     app = _new_app()
     event = pg.event.Event(pg.KEYDOWN, key=pg.K_HOME, mod=0)
-    app._handle_shortcut_key(event)
+    app.input_router._handle_shortcut_key(event)
     assert app.board.review_ply is None
 
 
@@ -395,7 +395,7 @@ def test_esc_does_not_modify_review_ply():
     _play_e4_e5_nf3(app)
     app.board.review_ply = 1
     event = pg.event.Event(pg.KEYDOWN, key=pg.K_ESCAPE, mod=0)
-    app._handle_shortcut_key(event)
+    app.input_router._handle_shortcut_key(event)
     assert app.board.review_ply == 1
 
 
@@ -404,14 +404,14 @@ def test_left_does_not_overflow():
     _play_e4_e5_nf3(app)
     app.board.review_ply = 0
     event = pg.event.Event(pg.KEYDOWN, key=pg.K_LEFT, mod=0)
-    app._handle_shortcut_key(event)
+    app.input_router._handle_shortcut_key(event)
     assert app.board.review_ply == 0
 
 
 def test_arrows_noop_when_history_empty():
     app = _new_app()
     event = pg.event.Event(pg.KEYDOWN, key=pg.K_LEFT, mod=0)
-    app._handle_shortcut_key(event)
+    app.input_router._handle_shortcut_key(event)
     assert app.board.review_ply is None
 
 
@@ -844,7 +844,7 @@ def test_ctrl_z_does_not_undo_in_pgn_review(tmp_path):
     _load_test_pgn(app, tmp_path)
     history_before = len(app.backend.move_history)
     event = pg.event.Event(pg.KEYDOWN, key=pg.K_z, mod=pg.KMOD_CTRL)
-    app._handle_shortcut_key(event)
+    app.input_router._handle_shortcut_key(event)
     assert len(app.backend.move_history) == history_before
 
 
@@ -923,8 +923,8 @@ def test_click_with_annotations_while_browsing_takes_two_clicks_to_live():
     _play_e4_e5_nf3(app)
     app.board.jump_to_review_ply(1)
     app.board.toggle_arrow(Square(4, 0), Square(4, 4))
-    app.mouse_left_clicked(_empty_square_pos(app))
+    app.input_router.mouse_left_clicked(_empty_square_pos(app))
     assert app.board.arrows == []
     assert app.board.review_ply == 1
-    app.mouse_left_clicked(_empty_square_pos(app))
+    app.input_router.mouse_left_clicked(_empty_square_pos(app))
     assert app.board.review_ply is None

@@ -45,13 +45,13 @@ def _start_game(app):
 
 def test_escape_never_closes_window_in_menu():
     app = _app()
-    app._handle_escape()
+    app.input_router._handle_escape()
     assert app.running is True
 
 
 def test_escape_never_closes_window_in_game():
     app = _start_game(_app())
-    app._handle_escape()
+    app.input_router._handle_escape()
     assert app.running is True
 
 
@@ -59,7 +59,7 @@ def test_escape_never_closes_window_in_game():
 
 def test_menu_card_escape_opens_quit_prompt():
     app = _app()
-    app._handle_escape()
+    app.input_router._handle_escape()
     assert app.confirm_modal.is_visible() is True
     assert app.start_menu.visible is False
     assert app.running is True
@@ -67,15 +67,15 @@ def test_menu_card_escape_opens_quit_prompt():
 
 def test_quit_prompt_see_ya_quits():
     app = _app()
-    app._handle_escape()
-    app._quit_app()
+    app.input_router._handle_escape()
+    app.input_router._quit_app()
     assert app.running is False
 
 
 def test_second_escape_dismisses_quit_prompt_and_restores_menu():
     app = _app()
-    app._handle_escape()
-    app._handle_escape()
+    app.input_router._handle_escape()
+    app.input_router._handle_escape()
     assert app.confirm_modal.is_visible() is False
     assert app.start_menu.visible is True
     assert app.running is True
@@ -86,7 +86,7 @@ def test_second_escape_dismisses_quit_prompt_and_restores_menu():
 def test_menu_history_escape_returns_to_card():
     app = _app()
     app.menu_page.set_page(PAGE_HISTORY)
-    app._handle_escape()
+    app.input_router._handle_escape()
     assert app.menu_page.page == PAGE_CARD
 
 
@@ -94,15 +94,15 @@ def test_menu_history_escape_returns_to_card():
 
 def test_game_escape_opens_resign_prompt():
     app = _start_game(_app())
-    app._handle_escape()
+    app.input_router._handle_escape()
     assert app.confirm_modal.is_visible() is True
     assert app.running is True
 
 
 def test_second_escape_dismisses_resign_prompt():
     app = _start_game(_app())
-    app._handle_escape()
-    app._handle_escape()
+    app.input_router._handle_escape()
+    app.input_router._handle_escape()
     assert app.confirm_modal.is_visible() is False
 
 
@@ -111,14 +111,14 @@ def test_second_escape_dismisses_resign_prompt():
 def test_finished_game_escape_returns_to_menu():
     app = _start_game(_app())
     app.manual_result = "white_wins_by_resignation"
-    app._handle_escape()
+    app.input_router._handle_escape()
     assert app.mode == "menu"
 
 
 def test_review_escape_returns_to_menu():
     app = _start_game(_app())
     app.pgn_review = True
-    app._handle_escape()
+    app.input_router._handle_escape()
     assert app.mode == "menu"
 
 
@@ -127,7 +127,7 @@ def test_review_escape_returns_to_menu():
 def test_help_modal_escape_closes_modal_not_resign():
     app = _start_game(_app())
     app.help_modal.show()
-    app._handle_escape()
+    app.input_router._handle_escape()
     assert app.help_modal.is_visible() is False
     assert app.confirm_modal.is_visible() is False
 
@@ -138,14 +138,14 @@ def test_file_browser_over_options_closes_before_options(tmp_path):
     from chessshootout.infra import env
     env._ENV_PATH = tmp_path / ".env"
     app = _app()
-    app._on_open_options()
+    app.settings._on_open_options()
     assert app.options_modal.is_visible() is True
     app.directory_browser.show(str(tmp_path), lambda p: None)
     assert app.directory_browser.is_visible() is True
-    app._handle_escape()
+    app.input_router._handle_escape()
     assert app.directory_browser.is_visible() is False
     assert app.options_modal.is_visible() is True
-    app._handle_escape()
+    app.input_router._handle_escape()
     assert app.options_modal.is_visible() is False
 
 
@@ -153,10 +153,10 @@ def test_country_picker_over_options_closes_before_options(tmp_path):
     from chessshootout.infra import env
     env._ENV_PATH = tmp_path / ".env"
     app = _app()
-    app._on_open_options()
+    app.settings._on_open_options()
     app.country_picker.show("US", lambda c: None)
     assert app.country_picker.is_visible() is True
-    app._handle_escape()
+    app.input_router._handle_escape()
     assert app.country_picker.is_visible() is False
     assert app.options_modal.is_visible() is True
 
@@ -167,7 +167,7 @@ def test_active_skillcheck_swallows_escape():
     app = _start_game(_app())
     controller = WheelController(WheelChallenge.from_seed("x"), pg.Rect(0, 0, 80, 80), 0)
     app.skillcheck_overlay.start(controller, ("f", "t"), lambda c, landed: None)
-    app._handle_escape()
+    app.input_router._handle_escape()
     assert app.skillcheck_overlay.is_active() is True
     assert app.confirm_modal.is_visible() is False
     assert app.running is True

@@ -172,7 +172,7 @@ def test_resign_modal_yes_completes_resign():
     app._on_resign()
     app.draw_frame()
     yes_rect = app.confirm_modal.button_rects["yes"]
-    app.mouse_left_clicked(yes_rect.center)
+    app.input_router.mouse_left_clicked(yes_rect.center)
     assert app.confirm_modal.is_visible() is False
     assert app.manual_result == "black_wins_by_resignation"
 
@@ -182,7 +182,7 @@ def test_resign_modal_no_keeps_game_active():
     app._on_resign()
     app.draw_frame()
     no_rect = app.confirm_modal.button_rects["no"]
-    app.mouse_left_clicked(no_rect.center)
+    app.input_router.mouse_left_clicked(no_rect.center)
     assert app.confirm_modal.is_visible() is False
     assert app.manual_result is None
 
@@ -192,7 +192,7 @@ def test_resign_blocks_other_clicks_while_modal_open():
     app = _new_app()
     app._on_resign()
     app.draw_frame()
-    app.mouse_left_clicked((50, 50))
+    app.input_router.mouse_left_clicked((50, 50))
     assert app.board.selected_square is None
 
 
@@ -208,7 +208,7 @@ def test_draw_modal_yes_completes_draw():
     app._on_draw()
     app.draw_frame()
     yes_rect = app.confirm_modal.button_rects["yes"]
-    app.mouse_left_clicked(yes_rect.center)
+    app.input_router.mouse_left_clicked(yes_rect.center)
     assert app.manual_result == "draw_agreement"
 
 
@@ -299,10 +299,10 @@ def test_drag_and_drop_executes_legal_move():
     app = _new_app()
     e2_rect = app.board._cell_rect(6, 4)
     e4_rect = app.board._cell_rect(4, 4)
-    app._mouse_left_pressed(e2_rect.center)
+    app.input_router._mouse_left_pressed(e2_rect.center)
     midpoint = (e4_rect.centerx, e2_rect.centery - DRAG_THRESHOLD_PX * 4)
     app.board.update_drag_motion(midpoint)
-    app._mouse_left_released(e4_rect.center)
+    app.input_router._mouse_left_released(e4_rect.center)
     fire_animation(app.board)
     assert len(app.backend.move_history) == 1
     last = app.backend.move_history[-1].move
@@ -315,9 +315,9 @@ def test_drag_drop_skips_slide_animation():
     app = _new_app()
     e2_rect = app.board._cell_rect(6, 4)
     e4_rect = app.board._cell_rect(4, 4)
-    app._mouse_left_pressed(e2_rect.center)
+    app.input_router._mouse_left_pressed(e2_rect.center)
     app.board.update_drag_motion(e4_rect.center)
-    app._mouse_left_released(e4_rect.center)
+    app.input_router._mouse_left_released(e4_rect.center)
     assert len(app.backend.move_history) == 1
     assert app.board.animations == []
 
@@ -327,8 +327,8 @@ def test_click_click_still_animates():
     app = _new_app()
     e2_rect = app.board._cell_rect(6, 4)
     e4_rect = app.board._cell_rect(4, 4)
-    app.mouse_left_clicked(e2_rect.center)
-    app.mouse_left_clicked(e4_rect.center)
+    app.input_router.mouse_left_clicked(e2_rect.center)
+    app.input_router.mouse_left_clicked(e4_rect.center)
     assert len(app.backend.move_history) == 1
     assert len(app.board.animations) == 1
 
@@ -336,9 +336,9 @@ def test_click_click_still_animates():
 def test_drag_below_threshold_falls_back_to_click_click():
     app = _new_app()
     e2_rect = app.board._cell_rect(6, 4)
-    app._mouse_left_pressed(e2_rect.center)
+    app.input_router._mouse_left_pressed(e2_rect.center)
     app.board.update_drag_motion((e2_rect.centerx + 1, e2_rect.centery))
-    app._mouse_left_released((e2_rect.centerx + 1, e2_rect.centery))
+    app.input_router._mouse_left_released((e2_rect.centerx + 1, e2_rect.centery))
     assert app.board.selected_square == Square(6, 4)
     assert len(app.backend.move_history) == 0
 
@@ -513,7 +513,7 @@ def test_f_key_flips_board():
     app = _new_app()
     initial = app.board.flipped
     event = pg.event.Event(pg.KEYDOWN, key=pg.K_f, mod=0)
-    app._handle_shortcut_key(event)
+    app.input_router._handle_shortcut_key(event)
     assert app.board.flipped != initial
 
 
@@ -524,7 +524,7 @@ def test_ctrl_z_undoes_last_move():
     fire_animation(app.board)
     assert len(app.backend.move_history) == 1
     event = pg.event.Event(pg.KEYDOWN, key=pg.K_z, mod=pg.KMOD_CTRL)
-    app._handle_shortcut_key(event)
+    app.input_router._handle_shortcut_key(event)
     assert len(app.backend.move_history) == 0
 
 
@@ -534,7 +534,7 @@ def test_z_without_ctrl_does_not_undo():
     app.board.handle_click(Square(4, 4))
     fire_animation(app.board)
     event = pg.event.Event(pg.KEYDOWN, key=pg.K_z, mod=0)
-    handled = app._handle_shortcut_key(event)
+    handled = app.input_router._handle_shortcut_key(event)
     assert handled is False
     assert len(app.backend.move_history) == 1
 
@@ -544,7 +544,7 @@ def test_shortcuts_blocked_while_confirm_modal_open():
     app._on_resign()
     initial_flipped = app.board.flipped
     event = pg.event.Event(pg.KEYDOWN, key=pg.K_f, mod=0)
-    handled = app._handle_shortcut_key(event)
+    handled = app.input_router._handle_shortcut_key(event)
     assert handled is False
     assert app.board.flipped == initial_flipped
 
@@ -552,4 +552,4 @@ def test_shortcuts_blocked_while_confirm_modal_open():
 def test_unrelated_key_returns_false():
     app = _new_app()
     event = pg.event.Event(pg.KEYDOWN, key=pg.K_q, mod=0)
-    assert app._handle_shortcut_key(event) is False
+    assert app.input_router._handle_shortcut_key(event) is False

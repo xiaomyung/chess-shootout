@@ -10,12 +10,12 @@ import pygame as pg
 import pytest
 
 from chessshootout.frontend.focus import layout as fl
-from chessshootout.frontend import frontend as F
+from chessshootout.frontend import layout as L
 from chessshootout.frontend.window_chrome import WindowChrome
 
 TOP = WindowChrome.HEIGHT
-SHR = F.STRIP_HEIGHT_RATIO
-SGR = F.STRIP_GAP_RATIO
+SHR = L.STRIP_HEIGHT_RATIO
+SGR = L.STRIP_GAP_RATIO
 
 
 @pytest.fixture(scope="module", autouse=True)

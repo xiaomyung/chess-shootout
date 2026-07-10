@@ -23,7 +23,8 @@ import pytest
 
 from chessshootout import paths
 from chessshootout.backend.utils import coord_from_square
-from chessshootout.frontend.frontend import AUTOSAVE_THROTTLE_MS, Frontend
+from chessshootout.frontend.frontend import Frontend
+from chessshootout.frontend.result_flow import AUTOSAVE_THROTTLE_MS
 from chessshootout.online.client import Event
 from tests.helpers import B, BLACK, K, P, Q, WHITE, make_backend, piece, sq
 
@@ -159,25 +160,25 @@ def test_hard_os_error_tries_the_fallback_dir_then_latches(tmp_path, monkeypatch
         attempted_dirs.append(os.path.normpath(str(directory)))
         return None
 
-    app._reserve_pgn_path = failing_reserve
+    app.result_flow._reserve_pgn_path = failing_reserve
     _e4(app)
-    assert app._auto_save_pgn() is None
+    assert app.result_flow._auto_save_pgn() is None
     assert len(attempted_dirs) == 2, "both the primary AND the fallback dir were tried"
     assert os.path.normpath(str(paths.get_games_dir())) in attempted_dirs
     assert os.path.normpath(str(fallback_dir / paths.GAMES_SUBDIR)) in attempted_dirs
-    assert app._save_failed is True
+    assert app.result_flow._save_failed is True
 
 
 def test_hard_os_error_shows_the_toast_exactly_once(tmp_path, monkeypatch):
     app = _local_app(tmp_path, monkeypatch)
     monkeypatch.setattr(paths, "get_fallback_data_dir", lambda: tmp_path / "fallback")
-    app._reserve_pgn_path = lambda directory, prefix: None
+    app.result_flow._reserve_pgn_path = lambda directory, prefix: None
     shown = []
     monkeypatch.setattr(app.toast, "show", lambda msg, *a, **k: shown.append(msg))
     _e4(app)
-    app._auto_save_pgn()
+    app.result_flow._auto_save_pgn()
     _e5(app)
-    app._auto_save_pgn()
+    app.result_flow._auto_save_pgn()
     error_toasts = [m for m in shown if "Could not save PGN" in m]
     assert len(error_toasts) == 1
 
@@ -185,18 +186,18 @@ def test_hard_os_error_shows_the_toast_exactly_once(tmp_path, monkeypatch):
 def test_latch_stops_the_incremental_driver_from_retrying_every_frame(tmp_path, monkeypatch):
     app = _local_app(tmp_path, monkeypatch)
     monkeypatch.setattr(paths, "get_fallback_data_dir", lambda: tmp_path / "fallback")
-    app._reserve_pgn_path = lambda directory, prefix: None
+    app.result_flow._reserve_pgn_path = lambda directory, prefix: None
     _e4(app)
-    app._auto_save_pgn()
-    assert app._save_failed is True
+    app.result_flow._auto_save_pgn()
+    assert app.result_flow._save_failed is True
 
     calls = []
-    monkeypatch.setattr(app, "_auto_save_pgn", lambda: calls.append(1))
+    monkeypatch.setattr(app.result_flow, "_auto_save_pgn", lambda: calls.append(1))
     _e5(app)
     now = [5_000_000]
     monkeypatch.setattr(pg.time, "get_ticks", lambda: now[0])
-    app._autosave_last_write_ms = now[0] - AUTOSAVE_THROTTLE_MS
-    app._update_incremental_autosave()
+    app.result_flow._autosave_last_write_ms = now[0] - AUTOSAVE_THROTTLE_MS
+    app.result_flow._update_incremental_autosave()
     assert calls == [], "the latch keeps the per-frame incremental driver from retrying"
 
 
@@ -205,9 +206,9 @@ def test_latch_stops_the_incremental_driver_from_retrying_every_frame(tmp_path, 
 def test_latch_never_blocks_the_finalize_save(tmp_path, monkeypatch):
     app = _local_app(tmp_path, monkeypatch)
     _e4(app)
-    app._save_failed = True
+    app.result_flow._save_failed = True
     app.manual_result = "white_wins_by_resignation"
-    app._on_result_final(app.manual_result)
+    app.result_flow._on_result_final(app.manual_result)
     files = _pgn_files(tmp_path)
     assert len(files) == 1, "finalize always gets a fresh attempt, latch or not"
     assert '[Result "1-0"]' in files[0].read_text(encoding="utf-8")
@@ -230,16 +231,17 @@ def test_permission_error_on_replace_is_skipped_without_latching(tmp_path, monke
     monkeypatch.setattr(os, "replace", flaky_replace)
     now = [3_000_000]
     monkeypatch.setattr(pg.time, "get_ticks", lambda: now[0])
-    app._autosave_last_write_ms = now[0] - AUTOSAVE_THROTTLE_MS
-    app._update_incremental_autosave()
-    assert app._save_failed is False, "PermissionError on replace is transient, not latched"
+    app.result_flow._autosave_last_write_ms = now[0] - AUTOSAVE_THROTTLE_MS
+    app.result_flow._update_incremental_autosave()
+    assert app.result_flow._save_failed is False, \
+        "PermissionError on replace is transient, not latched"
     files = _pgn_files(tmp_path)
     assert len(files) == 1, "the path is reserved even though the content write failed"
     assert files[0].read_text(encoding="utf-8") == ""
 
     _e5(app)
     now[0] += AUTOSAVE_THROTTLE_MS
-    app._update_incremental_autosave()
+    app.result_flow._update_incremental_autosave()
     files = _pgn_files(tmp_path)
     assert len(files) == 1, "the same reserved file, no duplicate"
     text = files[0].read_text(encoding="utf-8")
@@ -266,7 +268,7 @@ def test_esc_during_result_confirm_window_saves_via_handle_escape(tmp_path, monk
     _capture_mate_board(app)
     app.match.try_move(sq(7, 6), sq(1, 6))
     assert app.current_result() == "white_wins"
-    app._handle_escape()
+    app.input_router._handle_escape()
     files = _pgn_files(tmp_path)
     assert len(files) == 1
     assert '[Result "1-0"]' in files[0].read_text(encoding="utf-8")
@@ -348,17 +350,17 @@ class _FrozenDatetime(datetime):
 
 
 def test_filename_collision_within_one_second_gets_dash2_suffix(tmp_path, monkeypatch):
-    monkeypatch.setattr("chessshootout.frontend.frontend.datetime", _FrozenDatetime)
+    monkeypatch.setattr("chessshootout.frontend.result_flow.datetime", _FrozenDatetime)
 
     app1 = _local_app(tmp_path, monkeypatch)
     _e4(app1)
     app1.manual_result = "white_wins_by_resignation"
-    path1 = app1._auto_save_pgn()
+    path1 = app1.result_flow._auto_save_pgn()
 
     app2 = _local_app(tmp_path, monkeypatch)
     _e4(app2)
     app2.manual_result = "black_wins_by_resignation"
-    path2 = app2._auto_save_pgn()
+    path2 = app2.result_flow._auto_save_pgn()
 
     assert path1 != path2
     assert os.path.basename(path2).endswith("-2.pgn")
@@ -413,7 +415,7 @@ def test_incremental_autosave_writes_star_tag_throttled_then_finalizes(tmp_path,
 
     assert _pgn_files(tmp_path) == [], "nothing written before any ply lands"
     _e4(app)
-    app._update_incremental_autosave()
+    app.result_flow._update_incremental_autosave()
     files = _pgn_files(tmp_path)
     assert len(files) == 1
     text = files[0].read_text(encoding="utf-8")
@@ -422,18 +424,18 @@ def test_incremental_autosave_writes_star_tag_throttled_then_finalizes(tmp_path,
 
     _e5(app)
     now[0] += AUTOSAVE_THROTTLE_MS - 100
-    app._update_incremental_autosave()
+    app.result_flow._update_incremental_autosave()
     text = files[0].read_text(encoding="utf-8")
     assert "e4 e5" not in text, "throttled: no write within 1s of the previous one"
 
     now[0] += 200
-    app._update_incremental_autosave()
+    app.result_flow._update_incremental_autosave()
     text = files[0].read_text(encoding="utf-8")
     assert "e4 e5" in text
     assert '[Result "*"]' in text
 
     app.manual_result = "white_wins_by_resignation"
-    app._on_result_final(app.manual_result)
+    app.result_flow._on_result_final(app.manual_result)
     text = files[0].read_text(encoding="utf-8")
     assert '[Result "1-0"]' in text
     assert len(_pgn_files(tmp_path)) == 1, "the finalize rewrites the same file"
@@ -443,7 +445,7 @@ def test_incremental_autosave_skips_when_result_already_showing(tmp_path, monkey
     app = _local_app(tmp_path, monkeypatch)
     _e4(app)
     app.manual_result = "white_wins_by_resignation"
-    app._update_incremental_autosave()
+    app.result_flow._update_incremental_autosave()
     assert _pgn_files(tmp_path) == [], "a finished game is the finalize path's job, not this one"
 
 
@@ -453,5 +455,5 @@ def test_incremental_autosave_skips_in_pgn_review(tmp_path, monkeypatch):
     app.pgn_review = True
     now = [4_000_000]
     monkeypatch.setattr(pg.time, "get_ticks", lambda: now[0])
-    app._update_incremental_autosave()
+    app.result_flow._update_incremental_autosave()
     assert _pgn_files(tmp_path) == []
