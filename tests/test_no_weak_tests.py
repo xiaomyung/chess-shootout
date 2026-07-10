@@ -104,12 +104,12 @@ def _scan_file(path):
 
 def _collect_weak():
     found = {}
-    for path in sorted(TESTS_DIR.glob("test_*.py")):
+    for path in sorted(TESTS_DIR.rglob("test_*.py")):
         if path.name in SKIP_FILES:
             continue
         weak = _scan_file(path)
         if weak:
-            found[path.name] = weak
+            found[str(path.relative_to(TESTS_DIR))] = weak
     return found
 
 

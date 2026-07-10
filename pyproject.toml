@@ -68,7 +68,7 @@ max_line_length = 100
 ignore = "E127"
 
 [[tool.pylama.files]]
-path = "tests/*"
+path = "tests/**"
 ignore = "E402"
 
 [tool.coverage.run]

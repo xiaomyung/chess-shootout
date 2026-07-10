@@ -110,6 +110,33 @@ def fake_uuid4(seed):
     )
 
 
+def make_app(w=1000, h=800, *, mock_sound=True):
+    """Build a bare single-screen Frontend at the given window size.
+
+    Does not start a game -- pair with start_single_screen() for that.
+    mock_sound=True (default) replaces sound_manager with a MagicMock so
+    tests don't touch the real mixer; pass False to keep the real one.
+    """
+    from unittest.mock import MagicMock
+
+    from chessshootout.frontend.frontend import Frontend
+
+    app = Frontend(w, h)
+    if mock_sound:
+        app.sound_manager = MagicMock()
+    return app
+
+
+def start_single_screen(app, *, nickname="alice", side="white",
+                         time_minutes=5, increment_seconds=0):
+    """Start a local single-screen game on an existing Frontend."""
+    app._on_start_game({
+        "mode": "single_screen", "nickname": nickname, "side": side,
+        "time_minutes": time_minutes, "increment_seconds": increment_seconds,
+    })
+    return app
+
+
 def assert_pixel_color(surface, x, y, expected, tol=0):
     """Assert a surface pixel matches an expected RGB color within tolerance.
 
