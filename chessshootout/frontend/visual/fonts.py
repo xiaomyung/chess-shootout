@@ -17,14 +17,18 @@ _FONT_FILES = {
 
 _SYS_FALLBACK = {DISPLAY: "Arial", SANS: "Arial", MONO: "monospace"}
 
+_FONT_PATHS = {
+    key: str(resource_path("assets", "fonts", name)) for key, name in _FONT_FILES.items()
+}
+
 
 def get_font(size, bold=False, mono=False, family=None):
     size = max(int(size), 1)
     if family is None:
         family = MONO if mono else SANS
-    name = _FONT_FILES[(family, bool(bold))]
+    key = (family, bool(bold))
     try:
-        return pg.font.Font(str(resource_path("assets", "fonts", name)), size)
+        return pg.font.Font(_FONT_PATHS[key], size)
     except (OSError, pg.error):
         return pg.font.SysFont(_SYS_FALLBACK[family], size, bold=bold)
 

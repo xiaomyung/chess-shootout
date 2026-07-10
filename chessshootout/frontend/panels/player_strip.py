@@ -91,6 +91,7 @@ class PlayerStrip:
         self.ko_font = get_font(10, bold=True)
         self.letter_font = get_font(18, family=DISPLAY)
         self.auto_end_font = get_font(11, bold=True)
+        self._give_time_float_font = get_font(11, bold=True, mono=True)
         self.icons = {}
         self._avatar_cache = None
         self._flag_cache = None
@@ -111,6 +112,8 @@ class PlayerStrip:
         self.auto_end_font = get_font(
             max(int(ih * 0.42 * AUTO_END_BADGE_FONT_SCALE), 9), bold=True)
         self.tooltip_font = get_font(max(int(ih * 0.34), 11), bold=True)
+        self._give_time_float_font = get_font(
+            max(int(h * 0.24), 11), bold=True, mono=True)
         self._avatar_cache = None
 
     def set_piece_icons(self, icons):
@@ -394,8 +397,7 @@ class PlayerStrip:
         if alpha <= 0:
             return
         text = f"+0:{int(self._give_time_amount):02d}"
-        float_font = get_font(max(int(self.rect.height * 0.24), 11), bold=True, mono=True)
-        surf = float_font.render(text, True, Colors.clock_increment_flash)
+        surf = self._give_time_float_font.render(text, True, Colors.clock_increment_flash)
         surf.set_alpha(alpha)
         rise = int(GIVE_TIME_FLOAT_RISE_PX - GIVE_TIME_FLOAT_TRAVEL_PX * progress)
         self.window.blit(surf, (clock_rect.centerx - surf.get_width() / 2,

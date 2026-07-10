@@ -107,6 +107,43 @@ def test_maximized_suppresses_resize_hit_zones(chrome):
     assert _hit(chrome, 500, 699) == _HITTEST_NORMAL
 
 
+def test_smooth_dot_sprite_is_cached_per_color(chrome, monkeypatch):
+    import chessshootout.frontend.window_chrome as window_chrome_module
+    window_chrome_module._DOT_CACHE.clear()
+    calls = []
+    real_supersample = window_chrome_module.supersample
+
+    def counting_supersample(*args, **kwargs):
+        calls.append(1)
+        return real_supersample(*args, **kwargs)
+
+    monkeypatch.setattr(window_chrome_module, "supersample", counting_supersample)
+    chrome._draw_smooth_dot((50, 50), Colors.amber)
+    chrome._draw_smooth_dot((60, 60), Colors.amber)
+    assert len(calls) == 1, "same color must reuse the cached dot sprite"
+    chrome._draw_smooth_dot((70, 70), Colors.win)
+    assert len(calls) == 2, "a different color must build a distinct sprite"
+
+
+def test_dot_glyph_sprite_is_cached_per_key(chrome, monkeypatch):
+    import chessshootout.frontend.window_chrome as window_chrome_module
+    window_chrome_module._DOT_GLYPH_CACHE.clear()
+    calls = []
+    real_supersample = window_chrome_module.supersample
+
+    def counting_supersample(*args, **kwargs):
+        calls.append(1)
+        return real_supersample(*args, **kwargs)
+
+    monkeypatch.setattr(window_chrome_module, "supersample", counting_supersample)
+    base = pg.Color(Colors.amber)
+    chrome._dot_glyph("min", base)
+    chrome._dot_glyph("min", base)
+    assert len(calls) == 1, "same glyph key must reuse the cached glyph sprite"
+    chrome._dot_glyph("max", base)
+    assert len(calls) == 2, "a different glyph key must build a distinct sprite"
+
+
 def test_cursor_for_resize_edges_and_dots(chrome):
     chrome._w, chrome._h = 1000, 700
     chrome._layout_dots(1000)

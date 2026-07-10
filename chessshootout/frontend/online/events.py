@@ -477,6 +477,7 @@ class OnlineEventsMixin:
         promo_type = PROMO_TYPE_BY_LETTER.get(promo) if promo else None
         result = self.match.apply_remote_move(from_sq, to_sq, promo_type)
         if result.legal:
+            self._first_move_deadline_ms = None
             self.board.animate_remote_move(from_sq, to_sq)
             self._clear_online_move_locks(from_sq, to_sq)
             kind = payload.get("skill_check_kind")

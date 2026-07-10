@@ -243,12 +243,15 @@ class SliderRow(_Row):
 
 class SwatchRow(_Row):
 
+    SWATCH_H = 30
+
     def __init__(self, title, desc, swatches, getter, setter):
         super().__init__(title, desc)
         self.swatches = swatches
         self.getter = getter
         self.setter = setter
         self._rects = {}
+        self.soon_font = get_font(max(int(self.SWATCH_H * 0.38), 9), bold=True)
 
     def height(self, fonts):
         return super().height(fonts) + 38
@@ -262,7 +265,7 @@ class SwatchRow(_Row):
             window.blit(render_text(fonts.desc, self.desc, Colors.text_muted), (x, yy))
             yy += fonts.desc.get_height() + 6
         self._rects = {}
-        sw_w, sw_h, gap = 42, 30, 10
+        sw_w, sw_h, gap = 42, self.SWATCH_H, 10
         sx = x
         for key, top, bottom, locked in self.swatches:
             r = pg.Rect(sx, yy, sw_w, sw_h)
@@ -272,9 +275,8 @@ class SwatchRow(_Row):
                                                  border=Colors.accent, border_width=2),
                             r.topleft)
             if locked:
-                soon_font = get_font(max(int(sw_h * 0.38), 9), bold=True)
-                shadow = render_text(soon_font, "SOON", Colors.bg)
-                tag = render_text(soon_font, "SOON", Colors.text)
+                shadow = render_text(self.soon_font, "SOON", Colors.bg)
+                tag = render_text(self.soon_font, "SOON", Colors.text)
                 tx = r.centerx - tag.get_width() / 2
                 ty = r.centery - tag.get_height() / 2
                 window.blit(shadow, (tx + 1, ty + 1))

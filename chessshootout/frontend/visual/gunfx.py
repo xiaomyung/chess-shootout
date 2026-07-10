@@ -5,6 +5,7 @@ from dataclasses import dataclass
 import pygame as pg
 
 from chessshootout import paths
+from chessshootout.frontend.visual import cache
 from chessshootout.frontend.visual.colors import Colors
 
 
@@ -70,25 +71,34 @@ def pellet_spread(spec, base, rnd):
     return out
 
 
-def draw_bullet(window, head, ux, uy, color, size, length):
-    hx, hy = head
-    size = max(size, 2)
-    tx, ty = hx - ux * length, hy - uy * length
+_BULLET_CACHE = cache.new_size_cache()
+
+
+def _build_bullet_layer(color, size, length):
     pad = int(size + 4)
-    minx, miny = min(hx, tx) - pad, min(hy, ty) - pad
-    w = max(int(abs(hx - tx) + 2 * pad), 1)
-    h = max(int(abs(hy - ty) + 2 * pad), 1)
-    layer = pg.Surface((w, h), pg.SRCALPHA)
-    head_l = (hx - minx, hy - miny)
-    tail_l = (tx - minx, ty - miny)
+    half = int(length + pad)
+    dim = 2 * half
+    layer = pg.Surface((dim, dim), pg.SRCALPHA)
+    center = (half, half)
+    tail = (half - length, half)
     rgb = pg.Color(color)[:3]
     if length > 1:
-        pg.draw.line(layer, (*rgb, 90), tail_l, head_l, max(int(size * 1.6), 3))
-        pg.draw.line(layer, (*rgb, 255), tail_l, head_l, max(int(size * 0.7), 2))
-    pg.draw.circle(layer, (*rgb, 255), (int(head_l[0]), int(head_l[1])), int(size / 2) + 1)
-    pg.draw.circle(layer, (*pg.Color(Colors.text)[:3], 235),
-                   (int(head_l[0]), int(head_l[1])), max(int(size / 3), 1))
-    window.blit(layer, (minx, miny))
+        pg.draw.line(layer, (*rgb, 90), tail, center, max(int(size * 1.6), 3))
+        pg.draw.line(layer, (*rgb, 255), tail, center, max(int(size * 0.7), 2))
+    pg.draw.circle(layer, (*rgb, 255), center, int(size / 2) + 1)
+    pg.draw.circle(layer, (*pg.Color(Colors.text)[:3], 235), center, max(int(size / 3), 1))
+    return layer
+
+
+def draw_bullet(window, head, ux, uy, color, size, length):
+    size_q = max(round(size), 2)
+    length_q = max(round(length), 0)
+    key = (color, size_q, length_q)
+    base = cache.memoized_surface(
+        _BULLET_CACHE, key, lambda: _build_bullet_layer(color, size_q, length_q))
+    angle = math.degrees(math.atan2(-uy, ux))
+    img = pg.transform.rotate(base, angle)
+    window.blit(img, img.get_rect(center=head))
 
 
 def smoothstep(x):

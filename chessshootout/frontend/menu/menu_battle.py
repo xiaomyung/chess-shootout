@@ -8,7 +8,7 @@ from chessshootout import paths
 from chessshootout.frontend.visual import gunfx
 from chessshootout.frontend.visual import backdrop
 from chessshootout.frontend.visual.gunfx import DT_MAX, GUN_DRAW_SPINS_LAND, RAGDOLL_MS
-from chessshootout.frontend.visual.cache import render_text
+from chessshootout.frontend.visual.cache import render_text, new_cache, memoized_surface
 from chessshootout.frontend.visual.colors import Colors
 from chessshootout.frontend.visual.fonts import get_font
 from chessshootout.frontend.visual.widgets import build_ko_badge, KO_WINK_MS
@@ -69,6 +69,32 @@ BUBBLE_FADE_OUT_MS = 240
 SCRIM_N = 64
 SCRIM_INNER_ALPHA = 74
 SCRIM_OUTER_ALPHA = 180
+
+_HITMARK_CACHE = new_cache()
+_MENU_SPARK_CACHE = new_cache()
+
+
+def _hitmark_sprite(spread, length, thick):
+    def build():
+        diag = 0.7071
+        size = int((spread + length) * 2 + thick * 2)
+        layer = pg.Surface((size, size), pg.SRCALPHA)
+        c = size / 2
+        col = pg.Color(Colors.amber_hi)
+        for dx, dy in ((1, 1), (-1, 1), (1, -1), (-1, -1)):
+            inner = (c + dx * spread * diag, c + dy * spread * diag)
+            outer = (c + dx * (spread + length) * diag, c + dy * (spread + length) * diag)
+            pg.draw.line(layer, col, inner, outer, thick)
+        return layer
+    return memoized_surface(_HITMARK_CACHE, (spread, length, thick), build)
+
+
+def _menu_spark_sprite(size, color):
+    def build():
+        surf = pg.Surface((size, size), pg.SRCALPHA)
+        surf.fill(pg.Color(color))
+        return surf
+    return memoized_surface(_MENU_SPARK_CACHE, (size, color), build)
 
 
 class MenuBattle:
@@ -924,7 +950,7 @@ class MenuBattle:
         prog = (now - drop["start"]) / drop["dur"]
         if prog >= 1.0:
             return
-        img = pg.transform.rotozoom(drop["img"], drop["angle"], 1.0).copy()
+        img = pg.transform.rotozoom(drop["img"], drop["angle"], 1.0)
         img.set_alpha(int(255 * (1.0 - prog)))
         ox, oy = self.rect.topleft
         window.blit(img, img.get_rect(center=(ox + drop["x"], oy + drop["y"])))
@@ -960,18 +986,12 @@ class MenuBattle:
         alpha = int(255 * (1 - prog))
         if alpha <= 0:
             return
-        spread = (5 + 16 * prog) * self.scale
-        length = 8 * self.scale
+        spread = round((5 + 16 * prog) * self.scale)
+        length = round(8 * self.scale, 1)
         thick = max(int(3 * self.scale), 2)
-        diag = 0.7071
-        size = int((spread + length) * 2 + thick * 2)
-        layer = pg.Surface((size, size), pg.SRCALPHA)
-        c = size / 2
-        col = (*pg.Color(Colors.amber_hi)[:3], alpha)
-        for dx, dy in ((1, 1), (-1, 1), (1, -1), (-1, -1)):
-            inner = (c + dx * spread * diag, c + dy * spread * diag)
-            outer = (c + dx * (spread + length) * diag, c + dy * (spread + length) * diag)
-            pg.draw.line(layer, col, inner, outer, thick)
+        layer = _hitmark_sprite(spread, length, thick)
+        layer.set_alpha(alpha)
+        c = layer.get_width() / 2
         window.blit(layer, (x - c, y - c))
 
     def _draw_spark(self, window, x, y, p, prog):
@@ -979,8 +999,8 @@ class MenuBattle:
         sy = y + p["vy"] * prog
         alpha = int(255 * (1 - prog))
         size = max(int(5 * self.scale), 2)
-        layer = pg.Surface((size, size), pg.SRCALPHA)
-        layer.fill((*pg.Color(p.get("color", Colors.amber_hi))[:3], max(0, alpha)))
+        layer = _menu_spark_sprite(size, p.get("color", Colors.amber_hi))
+        layer.set_alpha(max(0, alpha))
         window.blit(layer, (sx, sy))
 
     @staticmethod
@@ -1071,7 +1091,7 @@ class MenuBattle:
         bx = max(above_lw, min(cx - bw / 2, above_rw - bw))
         by = top - tail - bh
         if self._fits_above(pg.Rect(bx, by, bw, bh)):
-            self._blit_bubble(window, surfs, bx, by, bw, bh, tail, "down",
+            self._blit_bubble(bub, window, surfs, bx, by, bw, bh, tail, "down",
                               cx, top, bg, border, alpha, pad_x, pad_y, line_gap)
             return
 
@@ -1079,38 +1099,45 @@ class MenuBattle:
             edge_x = cx + half_w
             surfs, bw, bh = measure(rw - edge_x - tail - 2 * pad_x)
             by = max(self.top_inset + 4, min(body_y - bh / 2, self.rect.bottom - bh - 4))
-            self._blit_bubble(window, surfs, edge_x + tail, by, bw, bh, tail, "left",
+            self._blit_bubble(bub, window, surfs, edge_x + tail, by, bw, bh, tail, "left",
                               edge_x, body_y, bg, border, alpha, pad_x, pad_y, line_gap)
         else:
             edge_x = cx - half_w
             surfs, bw, bh = measure(edge_x - tail - lw - 2 * pad_x)
             by = max(self.top_inset + 4, min(body_y - bh / 2, self.rect.bottom - bh - 4))
-            self._blit_bubble(window, surfs, edge_x - tail - bw, by, bw, bh, tail, "right",
+            self._blit_bubble(bub, window, surfs, edge_x - tail - bw, by, bw, bh, tail, "right",
                               edge_x, body_y, bg, border, alpha, pad_x, pad_y, line_gap)
 
-    def _blit_bubble(self, window, surfs, bx, by, bw, bh, tail, direction,
+    def _blit_bubble(self, bub, window, surfs, bx, by, bw, bh, tail, direction,
                      anchor_x, anchor_y, bg, border, alpha, pad_x, pad_y, line_gap):
-        layer = pg.Surface((int(bw) + 2 * tail, int(bh) + 2 * tail), pg.SRCALPHA)
-        body = pg.Rect(tail, tail, int(bw), int(bh))
-        radius = max(int(10 * self.scale), 4)
-        pg.draw.rect(layer, pg.Color(bg), body, border_radius=radius)
-        pg.draw.rect(layer, pg.Color(border), body, 1, border_radius=radius)
-        if direction in ("down", "up"):
-            tip = max(body.left + tail, min(int(anchor_x - bx) + tail, body.right - tail))
-            edge = body.bottom if direction == "down" else body.top
-            point = (tip, edge + tail) if direction == "down" else (tip, edge - tail)
-            pg.draw.polygon(layer, pg.Color(bg),
-                            [(tip - tail, edge), (tip + tail, edge), point])
+        key = (id(surfs), direction, round(bw, 2), round(bh, 2), round(tail, 2),
+               round(anchor_x - bx, 2), round(anchor_y - by, 2))
+        cached = bub.get("_layer")
+        if cached is not None and cached[0] == key:
+            layer = cached[1]
         else:
-            tip = max(body.top + tail, min(int(anchor_y - by) + tail, body.bottom - tail))
-            edge = body.left if direction == "left" else body.right
-            point = (edge - tail, tip) if direction == "left" else (edge + tail, tip)
-            pg.draw.polygon(layer, pg.Color(bg),
-                            [(edge, tip - tail), (edge, tip + tail), point])
-        y = body.y + pad_y
-        for surf in surfs:
-            layer.blit(surf, (body.x + pad_x, y))
-            y += surf.get_height() + line_gap
+            layer = pg.Surface((int(bw) + 2 * tail, int(bh) + 2 * tail), pg.SRCALPHA)
+            body = pg.Rect(tail, tail, int(bw), int(bh))
+            radius = max(int(10 * self.scale), 4)
+            pg.draw.rect(layer, pg.Color(bg), body, border_radius=radius)
+            pg.draw.rect(layer, pg.Color(border), body, 1, border_radius=radius)
+            if direction in ("down", "up"):
+                tip = max(body.left + tail, min(int(anchor_x - bx) + tail, body.right - tail))
+                edge = body.bottom if direction == "down" else body.top
+                point = (tip, edge + tail) if direction == "down" else (tip, edge - tail)
+                pg.draw.polygon(layer, pg.Color(bg),
+                                [(tip - tail, edge), (tip + tail, edge), point])
+            else:
+                tip = max(body.top + tail, min(int(anchor_y - by) + tail, body.bottom - tail))
+                edge = body.left if direction == "left" else body.right
+                point = (edge - tail, tip) if direction == "left" else (edge + tail, tip)
+                pg.draw.polygon(layer, pg.Color(bg),
+                                [(edge, tip - tail), (edge, tip + tail), point])
+            y = body.y + pad_y
+            for surf in surfs:
+                layer.blit(surf, (body.x + pad_x, y))
+                y += surf.get_height() + line_gap
+            bub["_layer"] = (key, layer)
         layer.set_alpha(int(alpha * 255))
         window.blit(layer, (bx - tail, by - tail))
 

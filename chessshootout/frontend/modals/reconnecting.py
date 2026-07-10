@@ -6,6 +6,7 @@ from chessshootout.frontend.modals.base import BaseModal
 from chessshootout.online.client import RECONNECT_TOTAL_SECONDS
 from chessshootout.frontend.panels.player_strip import format_countdown
 from chessshootout.frontend.visual.colors import Colors
+from chessshootout.frontend.visual.cache import new_cache, memoized_surface, render_text
 from chessshootout.frontend.visual.draw import supersample
 from chessshootout.frontend.visual.widgets import draw_button_row
 from chessshootout.frontend.visual.fonts import (
@@ -26,23 +27,32 @@ BUTTON_REF = 15
 GAP_REF = 16
 BUTTON_HEIGHT_REF = 46
 
+_RING_CACHE = new_cache()
+
+
+def _ring_base(size, color):
+    def build():
+        def render(surf, k):
+            s = surf.get_width()
+            c = (s / 2, s / 2)
+            stroke = max(int(SPINNER_STROKE * k), 2)
+            pg.draw.circle(surf, pg.Color(color), c, s / 2)
+            pg.draw.circle(surf, (0, 0, 0, 0), c, s / 2 - stroke)
+            base = math.radians(-90)
+            g = math.radians(SPINNER_GAP_DEG)
+            a0, a1 = base - g / 2, base + g / 2
+            wedge = [c]
+            for i in range(13):
+                a = a0 + (a1 - a0) * i / 12
+                wedge.append((c[0] + s * math.cos(a), c[1] + s * math.sin(a)))
+            pg.draw.polygon(surf, (0, 0, 0, 0), wedge)
+        return supersample(int(size), render)
+    return memoized_surface(_RING_CACHE, (int(size), color), build)
+
 
 def _ring_surface(size, color, angle_deg):
-    def render(surf, k):
-        s = surf.get_width()
-        c = (s / 2, s / 2)
-        stroke = max(int(SPINNER_STROKE * k), 2)
-        pg.draw.circle(surf, pg.Color(color), c, s / 2)
-        pg.draw.circle(surf, (0, 0, 0, 0), c, s / 2 - stroke)
-        base = math.radians(-90 + angle_deg)
-        g = math.radians(SPINNER_GAP_DEG)
-        a0, a1 = base - g / 2, base + g / 2
-        wedge = [c]
-        for i in range(13):
-            a = a0 + (a1 - a0) * i / 12
-            wedge.append((c[0] + s * math.cos(a), c[1] + s * math.sin(a)))
-        pg.draw.polygon(surf, (0, 0, 0, 0), wedge)
-    return supersample(int(size), render)
+    base = _ring_base(size, color)
+    return pg.transform.rotozoom(base, -angle_deg, 1.0)
 
 
 class ReconnectingModal(BaseModal):
@@ -95,9 +105,9 @@ class ReconnectingModal(BaseModal):
         spinner = max(int(SPINNER_REF * scale), 30)
         heading_font, sub_font, cd_font, button_font = self._fonts(scale)
 
-        heading = heading_font.render("RECONNECTING…", True, Colors.text)
-        sub = sub_font.render("Hang tight, restoring your game", True, Colors.text_dim)
-        cd = cd_font.render(format_countdown(self._remaining()), True, Colors.amber_hi)
+        heading = render_text(heading_font, "RECONNECTING…", Colors.text)
+        sub = render_text(sub_font, "Hang tight, restoring your game", Colors.text_dim)
+        cd = render_text(cd_font, format_countdown(self._remaining()), Colors.amber_hi)
 
         g = max(int(GAP_REF * scale), 8)
         btn_h = max(int(BUTTON_HEIGHT_REF * scale), 30)

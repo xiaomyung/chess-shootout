@@ -4,6 +4,7 @@ import random
 import pygame as pg
 
 from chessshootout.frontend.visual import gunfx
+from chessshootout.frontend.visual import cache
 from chessshootout.frontend.visual.gunfx import DT_MAX, RAGDOLL_MS
 from chessshootout.frontend.visual.colors import Colors
 from chessshootout.frontend.visual.draw import soft_blur, GLOW_BLUR_PASSES
@@ -27,6 +28,8 @@ CHECK_DROP_MS = 3000
 RECOIL_MS = 180
 MISS_HOLD_MS = 360
 BACK_OVERSHOOT = 1.70158
+CALLOUT_ROTATION_DEG = -3.0
+TAG_ROTATION_DEG = -6.0
 
 SPARK_COUNT = 10
 SMOKE_PUFFS = 3
@@ -76,6 +79,62 @@ HIT_WORDS = ("BLAM", "BOOM", "POW", "BANG", "HEADSHOT", "BODIED", "WASTED")
 SWEAR_WORDS = ("DAMN IT", "DANG!", "MISSED!", "ARGH!", "COME ON!", "SO CLOSE", "UGH")
 SKILL_ISSUE_TITLE = "SKILL ISSUE"
 SKILL_ISSUE_SUB = "GET GOOD, BRO"
+
+_IMPACT_RING_CACHE = cache.new_cache()
+_BLOOD_CACHE = cache.new_cache()
+_SPARK_CACHE = cache.new_cache()
+_SMOKE_CACHE = cache.new_cache()
+_HOLE_CACHE = cache.new_cache()
+_TAKEOVER_BG_CACHE = cache.new_size_cache()
+
+
+def _impact_ring_sprite(r, stroke):
+    def build():
+        layer = pg.Surface((2 * r + 8, 2 * r + 8), pg.SRCALPHA)
+        pg.draw.circle(layer, pg.Color(Colors.amber_hi), (r + 4, r + 4), r, stroke)
+        return layer
+    return cache.memoized_surface(_IMPACT_RING_CACHE, (r, stroke), build)
+
+
+def _blood_sprite(r):
+    def build():
+        layer = pg.Surface((2 * r + 2, 2 * r + 2), pg.SRCALPHA)
+        pg.draw.circle(layer, pg.Color(Colors.blood), (r + 1, r + 1), r)
+        pg.draw.circle(layer, pg.Color(Colors.blood_dark), (r + 1, r + 1), int(r * 0.6))
+        return layer
+    return cache.memoized_surface(_BLOOD_CACHE, r, build)
+
+
+def _spark_sprite(size):
+    def build():
+        surf = pg.Surface((size, size), pg.SRCALPHA)
+        surf.fill(pg.Color(Colors.amber_hi))
+        return surf
+    return cache.memoized_surface(_SPARK_CACHE, size, build)
+
+
+def _smoke_sprite(r):
+    def build():
+        layer = pg.Surface((2 * r, 2 * r), pg.SRCALPHA)
+        pg.draw.circle(layer, pg.Color(Colors.smoke), (r, r), r)
+        return layer
+    return cache.memoized_surface(_SMOKE_CACHE, r, build)
+
+
+def _hole_sprite(r):
+    def build():
+        layer = pg.Surface((2 * r + 4, 2 * r + 4), pg.SRCALPHA)
+        pg.draw.circle(layer, pg.Color(Colors.bullet_hole), (r + 2, r + 2), r)
+        return layer
+    return cache.memoized_surface(_HOLE_CACHE, r, build)
+
+
+def _takeover_bg_sprite(w, h):
+    def build():
+        surf = pg.Surface((w, h))
+        surf.fill(pg.Color(Colors.takeover_bg))
+        return surf
+    return cache.memoized_surface(_TAKEOVER_BG_CACHE, (w, h), build)
 
 
 class EffectManager:
@@ -188,6 +247,9 @@ class EffectManager:
             self._weapon_cache[key] = gunfx.build_weapon(art, gun, cell * gunfx.GUN_LEN_RATIO)
         return self._weapon_cache[key]
 
+    def clear_weapon_cache(self):
+        self._weapon_cache.clear()
+
     def capture(self, *, now_ms, attacker_type, attacker_surface, victim_surface,
                 from_sq, victim_sq, to_sq, cell_size, power="med",
                 on_fire=None, on_slide=None, occupied=None):
@@ -299,6 +361,7 @@ class EffectManager:
     def _callout(self, now, text, sub, size, cell, fill, glow):
         size_px = max(int(cell * (1.9 if size == "xl" else 1.3)), 24)
         surf = self._build_callout_surface(text, sub, size_px, fill, glow)
+        surf = pg.transform.rotozoom(surf, CALLOUT_ROTATION_DEG, 1.0)
         dur = CALLOUT_XL_MS if size == "xl" else CALLOUT_LG_MS
         self.callouts = [{"surf": surf, "start": now, "dur": dur}]
 
@@ -306,6 +369,7 @@ class EffectManager:
         size_px = max(int(cell * 0.45), 12)
         surf, _ = self._build_text_fx(text, size_px, Colors.amber_hi, Colors.tag_stroke,
                                       Colors.amber_glow)
+        surf = pg.transform.rotozoom(surf, TAG_ROTATION_DEG, 1.0)
         self.particles.append({"kind": "tag", "surf": surf, "victim_sq": victim_sq,
                                "cell": cell, "start": now, "dur": TAG_MS})
 
@@ -313,7 +377,7 @@ class EffectManager:
         self.flags = [{"sq": sq, "cell": cell, "start": now_ms}]
 
     def start_takeover(self, reason, winner_label, now_ms):
-        self._takeover = {"reason": reason, "winner": winner_label, "start": now_ms, "h": None}
+        self._takeover = {"reason": reason, "winner": winner_label, "start": now_ms, "wh": None}
 
     def has_takeover(self):
         return self._takeover is not None
@@ -591,9 +655,9 @@ class EffectManager:
         if r < 1:
             return
         alpha = int(230 * (1 - prog))
-        layer = pg.Surface((2 * r + 8, 2 * r + 8), pg.SRCALPHA)
-        pg.draw.circle(layer, (*pg.Color(Colors.amber_hi)[:3], alpha), (r + 4, r + 4), r,
-                       max(int(p["cell"] * 0.045), 2))
+        stroke = max(int(p["cell"] * 0.045), 2)
+        layer = _impact_ring_sprite(r, stroke)
+        layer.set_alpha(alpha)
         cx, cy = self._center(p["victim_sq"])
         window.blit(layer, (cx - r - 4, cy - r - 4))
 
@@ -606,10 +670,8 @@ class EffectManager:
         if r < 1:
             return
         alpha = int(217 * (1 - prog))
-        layer = pg.Surface((2 * r + 2, 2 * r + 2), pg.SRCALPHA)
-        pg.draw.circle(layer, (*pg.Color(Colors.blood)[:3], alpha), (r + 1, r + 1), r)
-        pg.draw.circle(layer, (*pg.Color(Colors.blood_dark)[:3], alpha), (r + 1, r + 1),
-                       int(r * 0.6))
+        layer = _blood_sprite(r)
+        layer.set_alpha(alpha)
         cx, cy = self._center(p["victim_sq"])
         window.blit(layer, (cx - r - 1, cy - r - 1))
 
@@ -623,8 +685,8 @@ class EffectManager:
         y = cy + math.sin(p["ang"]) * dist + 6 * prog
         alpha = int(255 * (1 - prog))
         s = p["size"]
-        surf = pg.Surface((s, s), pg.SRCALPHA)
-        surf.fill((*pg.Color(Colors.amber_hi)[:3], alpha))
+        surf = _spark_sprite(s)
+        surf.set_alpha(alpha)
         window.blit(surf, (x - s / 2, y - s / 2))
 
     def _draw_smoke(self, window, p, now):
@@ -635,8 +697,8 @@ class EffectManager:
         if r < 1:
             return
         alpha = int(130 * (1 - prog))
-        layer = pg.Surface((2 * r, 2 * r), pg.SRCALPHA)
-        pg.draw.circle(layer, (*pg.Color(Colors.smoke)[:3], alpha), (r, r), r)
+        layer = _smoke_sprite(r)
+        layer.set_alpha(alpha)
         cx, cy = self._center(p["victim_sq"])
         window.blit(layer, (cx + p["jx"] - r, cy + p["jy"] - p["cell"] * 0.9 * prog - r))
 
@@ -660,7 +722,6 @@ class EffectManager:
             scl = 1.0 - RAGDOLL_FALL_SHRINK * t
         img = pg.transform.rotozoom(p["surf"], rot, max(scl, 0.1))
         if alpha < 255:
-            img = img.copy()
             img.fill((255, 255, 255, max(alpha, 0)), special_flags=pg.BLEND_RGBA_MULT)
         cx, cy = self._center(p["victim_sq"])
         window.blit(img, img.get_rect(center=(cx + tx, cy + ty)))
@@ -703,7 +764,7 @@ class EffectManager:
             return
         bx, by = self._center(d["from_sq"])
         x, y, angle, alpha = self._drop_state(d, bx, by, t)
-        img = pg.transform.rotozoom(d["img"], angle, 1.0).copy()
+        img = pg.transform.rotozoom(d["img"], angle, 1.0)
         img.set_alpha(alpha)
         window.blit(img, img.get_rect(center=(x, y)))
 
@@ -721,8 +782,8 @@ class EffectManager:
         r = int(h["cell"] * 0.26 * scale / 2)
         if r < 1 or alpha <= 0:
             return
-        layer = pg.Surface((2 * r + 4, 2 * r + 4), pg.SRCALPHA)
-        pg.draw.circle(layer, (*pg.Color(Colors.bullet_hole)[:3], max(alpha, 0)), (r + 2, r + 2), r)
+        layer = _hole_sprite(r)
+        layer.set_alpha(max(alpha, 0))
         cx, cy = self._center(h["victim_sq"])
         window.blit(layer, (cx - r - 2, cy - r - 2))
 
@@ -789,10 +850,8 @@ class EffectManager:
         if not 0.0 <= prog < 1.0:
             return
         scale, alpha = self._callout_anim(prog)
-        img = pg.transform.rotozoom(c["surf"], -3.0, scale)
-        if alpha < 255:
-            img = img.copy()
-            img.fill((255, 255, 255, max(alpha, 0)), special_flags=pg.BLEND_RGBA_MULT)
+        img = pg.transform.smoothscale_by(c["surf"], scale)
+        img.set_alpha(max(alpha, 0))
         cx = self.board_rect.centerx
         cy = self.board_rect.y + int(self.board_rect.height * 0.42)
         window.blit(img, img.get_rect(center=(cx, cy)))
@@ -810,10 +869,8 @@ class EffectManager:
         if not 0.0 <= prog < 1.0:
             return
         rise, scale, alpha = self._tag_anim(prog)
-        img = pg.transform.rotozoom(p["surf"], -6.0, scale)
-        if alpha < 255:
-            img = img.copy()
-            img.fill((255, 255, 255, max(alpha, 0)), special_flags=pg.BLEND_RGBA_MULT)
+        img = pg.transform.smoothscale_by(p["surf"], scale)
+        img.set_alpha(max(alpha, 0))
         cx, cy = self._center(p["victim_sq"])
         window.blit(img, img.get_rect(center=(cx, cy - rise * p["cell"] * 0.8)))
 
@@ -855,7 +912,7 @@ class EffectManager:
         tk["sub"] = sub_font.render((tk["winner"] + " WINS").upper(), True,
                                     pg.Color(Colors.amber_hi))
         tk["bar"] = self._takeover_bar(int(w * 0.86), max(int(h * 0.013), 4))
-        tk["h"] = h
+        tk["wh"] = (w, h)
 
     @staticmethod
     def _blit_alpha(window, surf, topleft, alpha):
@@ -880,10 +937,10 @@ class EffectManager:
         fade = 1.0 - out
         bg_in = min(t / TAKEOVER_BG_MS, 1.0)
         bg_alpha = int((TAKEOVER_BG_ALPHA - (TAKEOVER_BG_ALPHA - TAKEOVER_BG_SETTLE) * out) * bg_in)
-        overlay = pg.Surface((w, h), pg.SRCALPHA)
-        overlay.fill((*pg.Color(Colors.takeover_bg)[:3], max(bg_alpha, 0)))
+        overlay = _takeover_bg_sprite(w, h)
+        overlay.set_alpha(max(bg_alpha, 0))
         window.blit(overlay, (0, 0))
-        if tk["h"] != h:
+        if tk["wh"] != (w, h):
             self._build_takeover_surfaces(tk, w, h)
         main, sub, bar = tk["main"], tk["sub"], tk["bar"]
         cx, cy = w // 2, int(h * 0.45)
@@ -906,14 +963,19 @@ class EffectManager:
             m_scale, m_alpha = 1.0, 255
         m_scale += 0.12 * out
         m_alpha = int(m_alpha * fade)
-        img = pg.transform.rotozoom(main, 0.0, m_scale)
-        if m_alpha < 255:
-            img = img.copy()
-            img.fill((255, 255, 255, max(m_alpha, 0)), special_flags=pg.BLEND_RGBA_MULT)
-        window.blit(img, img.get_rect(center=(cx, cy)))
+        if m_scale == 1.0 and m_alpha == 255:
+            window.blit(main, main.get_rect(center=(cx, cy)))
+        else:
+            img = pg.transform.rotozoom(main, 0.0, m_scale)
+            if m_alpha < 255:
+                img.fill((255, 255, 255, max(m_alpha, 0)), special_flags=pg.BLEND_RGBA_MULT)
+            window.blit(img, img.get_rect(center=(cx, cy)))
         s_alpha = int(min(max(t - TAKEOVER_SUB_DELAY_MS, 0) / float(TAKEOVER_SUB_DELAY_MS),
                           1.0) * 255 * fade)
-        if s_alpha > 0:
+        sub_pos = (cx, cy + main.get_height() // 2 + sub.get_height())
+        if s_alpha >= 255:
+            window.blit(sub, sub.get_rect(center=sub_pos))
+        elif s_alpha > 0:
             s = sub.copy()
             s.fill((255, 255, 255, s_alpha), special_flags=pg.BLEND_RGBA_MULT)
-            window.blit(s, s.get_rect(center=(cx, cy + main.get_height() // 2 + sub.get_height())))
+            window.blit(s, s.get_rect(center=sub_pos))

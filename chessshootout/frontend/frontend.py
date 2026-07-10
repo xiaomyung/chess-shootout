@@ -229,6 +229,8 @@ def compute_animation_ms(initial_seconds):
 
 log = logging.getLogger("chess.frontend")
 
+_RESULT_FADE_CACHE = cache.new_size_cache()
+
 
 class Frontend(OnlineEventsMixin):
 
@@ -269,6 +271,7 @@ class Frontend(OnlineEventsMixin):
         self._last_frame_start = None
         self._result_cache_key = None
         self._result_cache = None
+        self._strip_memo = {}
         self._result_first_seen_at_ms = None
         self._pgn_result_tag = None
         self._match_session_id = None
@@ -1178,6 +1181,7 @@ class Frontend(OnlineEventsMixin):
         self._flag_fall_played = False
         self._result_cache_key = None
         self._result_cache = None
+        self._strip_memo = {}
         self._result_first_seen_at_ms = None
         self._pgn_result_tag = None
         self._last_saved_pgn_path = None
@@ -1746,6 +1750,7 @@ class Frontend(OnlineEventsMixin):
         self.help_modal.show()
 
     def _on_move_landed(self, entry):
+        self._first_move_deadline_ms = None
         if entry.gives_checkmate:
             self.sound_manager.play_checkmate()
         elif entry.move.is_castle:
@@ -2025,7 +2030,8 @@ class Frontend(OnlineEventsMixin):
 
     def _chrome_stats(self):
         parts = []
-        ordered = sorted(self._frame_times) if self._frame_times else []
+        need_sorted = env.get_show_frame_stats() or env.get_show_1pct_low()
+        ordered = sorted(self._frame_times) if need_sorted and self._frame_times else []
         if env.get_show_fps():
             parts.append(f"FPS {int(self.clock.get_fps())}")
         if env.get_show_frame_stats() and ordered:
@@ -2363,6 +2369,13 @@ class Frontend(OnlineEventsMixin):
             self._game_bg_cache = (key, backdrop.arena_background(size, center).convert())
         self.window.blit(self._game_bg_cache[1], (0, 0))
 
+    def _result_fade_surface(self, size):
+        def build():
+            surf = pg.Surface(size)
+            surf.fill((0, 0, 0))
+            return surf
+        return cache.memoized_surface(_RESULT_FADE_CACHE, size, build)
+
     def _draw_result_fade_overlay(self):
         elapsed = self._result_elapsed_ms()
         if elapsed is None:
@@ -2371,8 +2384,8 @@ class Frontend(OnlineEventsMixin):
                     int(RESULT_FADE_MAX_ALPHA * elapsed / RESULT_FADE_MS))
         if alpha <= 0:
             return
-        overlay = pg.Surface(self.window.get_size(), pg.SRCALPHA)
-        overlay.fill((0, 0, 0, alpha))
+        overlay = self._result_fade_surface(self.window.get_size())
+        overlay.set_alpha(alpha)
         self.window.blit(overlay, (0, 0))
 
     def _skip_result_fade(self):
@@ -2436,6 +2449,19 @@ class Frontend(OnlineEventsMixin):
             return 0.0
         return remaining / total
 
+    def _strip_capture_summary(self, color):
+        key = (len(self.match.move_history), self.board.review_ply, color)
+        cached = self._strip_memo.get(color)
+        if cached is not None and cached[0] == key:
+            return cached[1], cached[2]
+        history = self.match.move_history
+        if self.board.review_ply is not None:
+            history = history[:self.board.review_ply]
+        captured = captured_by(history, color)
+        advantage = material_advantage(history, color)
+        self._strip_memo[color] = (key, captured, advantage)
+        return captured, advantage
+
     def _strip_state(self, color, turn, over):
         name = self._name_for_color(color)
         seconds = (self.match.clock.remaining(color)
@@ -2443,11 +2469,7 @@ class Frontend(OnlineEventsMixin):
         initial_seconds = (self.match.clock.initial_seconds
                            if self.match.clock is not None else None)
         active = (color == turn) and not over
-        history = self.match.move_history
-        if self.board.review_ply is not None:
-            history = history[:self.board.review_ply]
-        captured = captured_by(history, color)
-        advantage = material_advantage(history, color)
+        captured, advantage = self._strip_capture_summary(color)
         connection_state = None
         if (self.mode == ONLINE and self.online_client is not None
                 and self.match.local_color is not None
@@ -2476,8 +2498,6 @@ class Frontend(OnlineEventsMixin):
     def _compute_auto_end(self, color, over):
         if (self.mode != ONLINE or over or self.match.local_color is None):
             return None, None
-        if self.match.move_history:
-            self._first_move_deadline_ms = None
         now = pg.time.get_ticks()
         is_local = (color == self.match.local_color)
         if is_local and self._local_disconnected_at_ms is not None:
@@ -2537,6 +2557,10 @@ class Frontend(OnlineEventsMixin):
 
     def _compute_layout(self):
         window_width, window_height = self.window.get_size()
+        size = (window_width, window_height)
+        if size != getattr(self, "_last_layout_size", None):
+            self._last_layout_size = size
+            cache.clear_size_keyed()
         top = WindowChrome.HEIGHT
         avail_height = window_height - top
         panel_w = min(RIGHT_PANEL_WIDTH, int(window_width * PANEL_WIDTH_RATIO))

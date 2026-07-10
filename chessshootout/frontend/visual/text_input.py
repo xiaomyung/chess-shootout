@@ -3,6 +3,7 @@ import subprocess
 
 import pygame as pg
 
+from chessshootout.frontend.visual.cache import render_text
 from chessshootout.frontend.visual.colors import Colors
 from chessshootout.frontend.visual.fonts import get_font, get_mono_font
 
@@ -39,6 +40,7 @@ class TextInput:
         self._last_click_ms = -DOUBLE_CLICK_MS
         self._last_click_x = 0
         self._dragging = False
+        self._cursor_width_cache = None
 
     @property
     def text(self):
@@ -77,6 +79,7 @@ class TextInput:
 
     def _touch(self):
         self._last_action_ms = pg.time.get_ticks()
+        self._cursor_width_cache = None
 
     def _sel_range(self):
         if self.sel_anchor is None or self.sel_anchor == self.cursor:
@@ -286,7 +289,12 @@ class TextInput:
                 self._dragging = False
 
         field_w = self._field_width()
-        cursor_x = self.font.size(self._text[:self.cursor])[0]
+        cursor_key = (self._text, self.cursor)
+        if self._cursor_width_cache is not None and self._cursor_width_cache[0] == cursor_key:
+            cursor_x = self._cursor_width_cache[1]
+        else:
+            cursor_x = self.font.size(self._text[:self.cursor])[0]
+            self._cursor_width_cache = (cursor_key, cursor_x)
         if not self._focused:
             if self.rest_align == "end":
                 self.scroll = max(0, self.font.size(self._text)[0] - field_w)
@@ -312,10 +320,10 @@ class TextInput:
             band.fill(pg.Color(Colors.text_selection))
             self.window.blit(band, (sx, cy - glyph_h / 2))
         if self._text:
-            surf = self.font.render(self._text, True, Colors.text)
+            surf = render_text(self.font, self._text, Colors.text)
             self.window.blit(surf, (base_x, cy - surf.get_height() / 2))
         elif not self._focused:
-            surf = self.font.render(self.placeholder, True, Colors.border)
+            surf = render_text(self.font, self.placeholder, Colors.border)
             self.window.blit(surf, (self.rect.x + self.padding, cy - surf.get_height() / 2))
         if self._cursor_visible():
             cx = base_x + cursor_x

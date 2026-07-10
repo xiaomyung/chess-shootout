@@ -6,7 +6,9 @@ import pygame as pg
 from chessshootout.backend.pseudo_legal import piece_can_pseudo_reach, king_square, checking_square
 from chessshootout.backend.utils import Square
 from chessshootout.frontend.visual.animation import PieceAnimation
-from chessshootout.frontend.visual.cache import new_cache, memoized_surface
+from chessshootout.frontend.visual.cache import (
+    new_cache, new_size_cache, memoized_surface, render_text,
+)
 from chessshootout.frontend.visual.colors import Colors
 from chessshootout.frontend.visual.draw import supersample
 from chessshootout.frontend.visual.effects import EffectManager
@@ -17,6 +19,7 @@ from chessshootout.frontend.visual.fonts import get_font, DISPLAY
 
 
 _OVERLAY_CACHE = new_cache()
+_PROMO_OPTION_CACHE = new_size_cache()
 _MARKER_CACHE = new_cache()
 
 DRAG_THRESHOLD_PX = 6
@@ -140,6 +143,10 @@ class Board:
         self.review_ply = None
         self._target_ply = None
         self.read_only = False
+        self._promo_label_font = get_font(
+            max(int(self.PROMOTION_LABEL_HEIGHT * 0.8), 12), family=DISPLAY)
+        self._promo_hotkey_font = get_font(9, bold=True, mono=True)
+        self._promo_tag_font = get_font(8, bold=True)
 
     @property
     def backend(self):
@@ -184,6 +191,13 @@ class Board:
         (PieceType.BISHOP, "B", "SNIPER"), (PieceType.KNIGHT, "N", "WILDCARD"),
     ]
 
+    def _promo_option_sprite(self, ptype, color, opt):
+        key = (ptype, color, opt)
+        return memoized_surface(
+            _PROMO_OPTION_CACHE, key,
+            lambda: pg.transform.smoothscale(
+                self.piece_images_original[(ptype, color)], (opt, opt)))
+
     def _draw_promotion_picker(self):
         self._promotion_rects = {}
         if self.pending_promotion_square is None:
@@ -214,8 +228,7 @@ class Board:
         panel = pg.Rect(x, y, panel_w, panel_h)
         pg.draw.rect(self.window, Colors.surface_raised, panel, border_radius=12)
         pg.draw.rect(self.window, Colors.accent, panel, 1, border_radius=12)
-        label = get_font(max(int(label_h * 0.8), 12), family=DISPLAY).render(
-            "UPGRADE", True, Colors.accent_hi)
+        label = render_text(self._promo_label_font, "UPGRADE", Colors.accent_hi)
         self.window.blit(label, (panel.centerx - label.get_width() // 2, panel.y + pad - 2))
         mouse = pg.mouse.get_pos()
         cells_y = panel.y + pad + label_h + self.PROMOTION_LABEL_OPTION_GAP
@@ -226,15 +239,13 @@ class Board:
                          cell, border_radius=11)
             pg.draw.rect(self.window, Colors.accent if hovered else Colors.border,
                          cell, 1, border_radius=11)
-            img = pg.transform.smoothscale(self.piece_images_original[(ptype, color)], (opt, opt))
+            img = self._promo_option_sprite(ptype, color, opt)
             self.window.blit(img, cell.topleft)
-            hk = get_font(max(int(opt * 0.18), 9), bold=True, mono=True).render(
-                hotkey, True, Colors.text_muted)
+            hk = render_text(self._promo_hotkey_font, hotkey, Colors.text_muted)
             self.window.blit(hk, (cell.right - hk.get_width() - 3,
                                   cell.bottom - hk.get_height() - 2))
             if hovered:
-                tag_surf = get_font(max(int(opt * 0.14), 8), bold=True).render(
-                    tag, True, Colors.on_accent)
+                tag_surf = render_text(self._promo_tag_font, tag, Colors.on_accent)
                 tag_rect = pg.Rect(0, 0, tag_surf.get_width() + 8, tag_surf.get_height() + 4)
                 tag_rect.center = (cell.centerx, cell.y - 6)
                 pg.draw.rect(self.window, Colors.amber, tag_rect, border_radius=7)
@@ -874,7 +885,14 @@ class Board:
         self.effects.board_rect = pg.Rect(rect)
         self.frame_pad = max(int(rect.width * self.FRAME_PAD_FRACTION), self.FRAME_PAD_MIN)
         inner = rect.width - 2 * self.frame_pad
-        self.cell_size = max(inner // self.SIZE, 1)
+        cell_size = max(inner // self.SIZE, 1)
+        if cell_size != self.cell_size:
+            self.effects.clear_weapon_cache()
+            opt = max(self.PROMOTION_OPTION_SIZE_MIN,
+                      min(int(cell_size), self.PROMOTION_OPTION_SIZE_MAX))
+            self._promo_hotkey_font = get_font(max(int(opt * 0.18), 9), bold=True, mono=True)
+            self._promo_tag_font = get_font(max(int(opt * 0.14), 8), bold=True)
+        self.cell_size = cell_size
         used = self.cell_size * self.SIZE
         free_w = rect.width - 2 * self.frame_pad - used
         free_h = rect.height - 2 * self.frame_pad - used

@@ -1,6 +1,7 @@
 from weakref import WeakKeyDictionary
 
 _REGISTRY = []
+_SIZE_REGISTRY = []
 
 _TEXT_CACHE = WeakKeyDictionary()
 _REGISTRY.append(_TEXT_CACHE)
@@ -25,6 +26,13 @@ def new_cache():
     return cache
 
 
+def new_size_cache():
+    cache = {}
+    _REGISTRY.append(cache)
+    _SIZE_REGISTRY.append(cache)
+    return cache
+
+
 def memoized_surface(cache, key, build):
     surf = cache.get(key)
     if surf is None:
@@ -35,4 +43,9 @@ def memoized_surface(cache, key, build):
 
 def clear_all():
     for cache in _REGISTRY:
+        cache.clear()
+
+
+def clear_size_keyed():
+    for cache in _SIZE_REGISTRY:
         cache.clear()

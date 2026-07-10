@@ -34,6 +34,7 @@ from chessshootout.backend.utils import Square
 from chessshootout.frontend.board import Board
 from chessshootout.frontend.frontend import Frontend
 from chessshootout.frontend.visual import gunfx
+from chessshootout.frontend.visual import effects as effects_module
 from chessshootout.frontend.visual.effects import (
     AIM_MS, CALLOUT_LG_MS, CALLOUT_XL_MS, CHECK_DROP_MS, DRAW_MS, HIT_WORDS,
     HOLE_FADE_MS, HOLE_HOLD_MS, HOLE_IN_MS, KING_SHAKE_MS,
@@ -1163,3 +1164,70 @@ def test_result_modal_waits_longer_while_a_takeover_plays(monkeypatch):
     assert app._result_modal_should_show() is False
     app._result_first_seen_at_ms = pg.time.get_ticks() - (TAKEOVER_TOTAL_MS + 50)
     assert app._result_modal_should_show() is True
+
+
+def test_takeover_rebuild_keys_on_width_change_not_just_height():
+    em = _em()
+    em.start_takeover("CHECKMATE", "WHITE", 0)
+    win_a = pg.Surface((800, 600), pg.SRCALPHA)
+    em.draw_takeover(win_a, TAKEOVER_PAUSE_MS + 200)
+    first_bar_width = em._takeover["bar"].get_width()
+
+    win_b = pg.Surface((1200, 600), pg.SRCALPHA)
+    em.draw_takeover(win_b, TAKEOVER_PAUSE_MS + 220)
+    second_bar_width = em._takeover["bar"].get_width()
+
+    assert second_bar_width != first_bar_width, (
+        "a width-only resize (same height) must rebuild the takeover surfaces; "
+        "keying the rebuild on height alone leaves the bar sized for the old width")
+    assert second_bar_width == pytest.approx(int(1200 * 0.86), abs=1)
+
+
+def test_particle_sprites_are_cached_by_geometry():
+    a = effects_module._impact_ring_sprite(10, 3)
+    b = effects_module._impact_ring_sprite(10, 3)
+    c = effects_module._impact_ring_sprite(11, 3)
+    assert a is b, "same (r, stroke) must reuse the cached impact-ring sprite"
+    assert a is not c, "a different radius must build a distinct sprite"
+
+    a = effects_module._blood_sprite(8)
+    b = effects_module._blood_sprite(8)
+    assert a is b, "same radius must reuse the cached blood sprite"
+
+    a = effects_module._spark_sprite(6)
+    b = effects_module._spark_sprite(6)
+    assert a is b, "same size must reuse the cached spark sprite"
+
+    a = effects_module._smoke_sprite(14)
+    b = effects_module._smoke_sprite(14)
+    assert a is b, "same radius must reuse the cached smoke sprite"
+
+    a = effects_module._hole_sprite(9)
+    b = effects_module._hole_sprite(9)
+    assert a is b, "same radius must reuse the cached bullet-hole sprite"
+
+
+def test_draw_bullet_tracer_sprite_is_cached_per_color_size_length(monkeypatch):
+    gunfx._BULLET_CACHE.clear()
+    surf = pg.Surface((200, 200), pg.SRCALPHA)
+    calls = []
+    real_build = gunfx._build_bullet_layer
+
+    def counting_build(color, size, length):
+        calls.append((color, size, length))
+        return real_build(color, size, length)
+
+    monkeypatch.setattr(gunfx, "_build_bullet_layer", counting_build)
+    color = GUNS["shotgun"].color
+    gunfx.draw_bullet(surf, (40, 40), 1.0, 0.0, color, 6, 24)
+    gunfx.draw_bullet(surf, (40, 40), 0.0, 1.0, color, 6, 24)
+    gunfx.draw_bullet(surf, (40, 40), -1.0, 0.0, color, 6, 24)
+    gunfx.draw_bullet(surf, (40, 40), 0.0, -1.0, color, 6, 24)
+    assert len(calls) == 1, "the tracer base sprite must not depend on shot direction"
+
+    gunfx.draw_bullet(surf, (40, 40), 1.0, 0.0, color, 6.1, 24.4)
+    gunfx.draw_bullet(surf, (40, 40), 1.0, 0.0, color, 5.6, 23.6)
+    assert len(calls) == 1, "size/length must be quantized so near-duplicates share a sprite"
+
+    gunfx.draw_bullet(surf, (40, 40), 1.0, 0.0, color, 9, 24)
+    assert len(calls) == 2, "a materially different size must build a distinct sprite"

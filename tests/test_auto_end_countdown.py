@@ -117,12 +117,79 @@ def test_compute_auto_end_label_and_remaining(
 
 
 def test_abort_clears_on_first_move(monkeypatch):
-    """The first played ply nulls the abort deadline as a side effect."""
+    """Landing the first ply nulls the abort deadline (Frontend._on_move_landed),
+    not a side effect of querying the strip/auto-end state."""
     app = _online_app()
     app._first_move_deadline_ms = ABORT_WINDOW_MS
     monkeypatch.setattr(pg.time, "get_ticks", lambda: 30_000)
     app.match.try_move(Square(6, 4), Square(4, 4))
+    app._on_move_landed(app.match.move_history[-1])
     assert _strip(app, PieceColor.WHITE)["auto_end_label"] is None
+    assert app._first_move_deadline_ms is None
+
+
+def test_compute_auto_end_alone_does_not_clear_the_deadline(monkeypatch):
+    """Querying auto-end state (_strip_state/_compute_auto_end) is read-only now;
+    only the real move-landed transition clears _first_move_deadline_ms."""
+    app = _online_app()
+    app._first_move_deadline_ms = ABORT_WINDOW_MS
+    monkeypatch.setattr(pg.time, "get_ticks", lambda: 30_000)
+    app.match.try_move(Square(6, 4), Square(4, 4))
+    _strip(app, PieceColor.WHITE)
+    assert app._first_move_deadline_ms == ABORT_WINDOW_MS
+
+
+def test_remote_move_applied_clears_first_move_deadline(monkeypatch):
+    """The remote move-applied path (events.py) also clears the deadline, so an
+    opponent's first move lands the same reset as a local first move."""
+    app = _online_app()
+    app._first_move_deadline_ms = ABORT_WINDOW_MS
+    monkeypatch.setattr(pg.time, "get_ticks", lambda: 30_000)
+    payload = {"from": "e2", "to": "e4", "san": "e4", "ply": 1, "clock": {}}
+    app._handle_remote_move_applied(payload)
+    assert app._resyncing is False
+    assert app._first_move_deadline_ms is None
+
+
+@pytest.mark.parametrize("show_mode", ["nothing", "line", "strips"])
+def test_first_move_deadline_clears_via_move_landed_in_every_focus_show_mode(
+    monkeypatch, show_mode,
+):
+    """Regression for the focus-mode gap: _update_player_strips (and the old
+    _compute_auto_end reset it used to carry) never runs in focus 'nothing'/'line'
+    show modes, so the deadline must clear at the real move-landed transition
+    regardless of whether strips are drawn, and the heartbeat fraction must stop
+    folding in the abort window once it does."""
+    app = _online_app()
+    app._time_control = (300, 0)
+    app.match.setup_clock(300, 0)
+    app.online_client.drain_inbound.return_value = []
+    app.focus_mode = True
+    monkeypatch.setattr(app, "_focus_show", lambda: show_mode)
+    monkeypatch.setattr(pg.time, "get_ticks", lambda: 30_000)
+    app._first_move_deadline_ms = ABORT_WINDOW_MS
+
+    strips_calls = []
+    real_update = app._update_player_strips
+
+    def spy():
+        strips_calls.append(True)
+        real_update()
+
+    monkeypatch.setattr(app, "_update_player_strips", spy)
+    app.draw_frame()
+    if show_mode == "strips":
+        assert strips_calls
+    else:
+        assert not strips_calls
+    assert app._first_move_deadline_ms == ABORT_WINDOW_MS
+
+    app.match.try_move(Square(6, 4), Square(4, 4))
+    app._on_move_landed(app.match.move_history[-1])
+    assert app._first_move_deadline_ms is None
+    assert app._auto_end_heartbeat_fraction() is None
+
+    app.draw_frame()
     assert app._first_move_deadline_ms is None
 
 

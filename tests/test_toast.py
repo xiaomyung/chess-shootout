@@ -176,15 +176,16 @@ def test_draw_paints_only_when_visible(toast, show_first, expect_painted):
 
 
 def test_keyed_update_refreshes_cached_text(toast):
-    """A keyed toast that renders once caches its text surface; updating the
-    message for the same key must invalidate that cache or the bubble shows the
-    stale first message forever (rematch-state toast cycles one key)."""
+    """A keyed toast that renders once caches its composed bubble overlay;
+    updating the message for the same key must invalidate that cache or the
+    bubble shows the stale first message forever (rematch-state toast cycles
+    one key)."""
     toast.show("first message", key="k")
     bubble = toast._bubbles[0]
     toast._render_bubble(bubble, pg.time.get_ticks())
-    assert bubble["text_surf"] is not None
+    assert bubble["overlay"] is not None
     toast.show("second message", key="k")
-    assert bubble["text_surf"] is None
+    assert bubble["overlay"] is None
     assert bubble["message"] == "second message"
 
 

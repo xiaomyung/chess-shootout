@@ -528,6 +528,38 @@ def test_strip_state_captures_track_review_ply():
     assert state["advantage"] == 1
 
 
+def test_strip_capture_summary_memo_hits_until_history_or_ply_changes(monkeypatch):
+    """The (len(history), review_ply, color) memo added for strip-draw perf must
+    skip recomputation on a repeat call and only recompute when the ply lands or
+    review_ply moves — otherwise the point of the cache is lost."""
+    import chessshootout.frontend.frontend as frontend_module
+
+    app = _new_app()
+    app.backend.try_move(Square(6, 4), Square(4, 4))
+    app.backend.try_move(Square(1, 3), Square(3, 3))
+    app.backend.try_move(Square(4, 4), Square(3, 3))
+
+    calls = []
+    real_captured_by = frontend_module.captured_by
+
+    def counting_captured_by(history, color):
+        calls.append(color)
+        return real_captured_by(history, color)
+
+    monkeypatch.setattr(frontend_module, "captured_by", counting_captured_by)
+
+    app._strip_capture_summary(PieceColor.WHITE)
+    app._strip_capture_summary(PieceColor.WHITE)
+    assert len(calls) == 1, "an unchanged (history, review_ply, color) key must not recompute"
+
+    app.board.review_ply = 2
+    app._strip_capture_summary(PieceColor.WHITE)
+    assert len(calls) == 2, "moving review_ply must invalidate the memo"
+
+    app._strip_capture_summary(PieceColor.BLACK)
+    assert len(calls) == 3, "a different color is a different memo slot"
+
+
 def test_last_move_highlight_in_review_targets_reviewed_move():
     """At review ply N the highlight marks move N (history[N-1]); at ply 0 nothing."""
     app = _new_app()

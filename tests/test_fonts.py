@@ -5,8 +5,6 @@ SDL_ttf handle freed by pg.quit(); reusing it after a re-init segfaults. Fonts
 are rebuilt on resize, not per frame, so a fresh font per call is cheap.
 """
 
-from pathlib import Path
-
 import pygame as pg
 import pytest
 
@@ -65,6 +63,16 @@ def test_bundled_font_files_exist():
 
 
 def test_falls_back_to_sysfont_when_bundled_missing(monkeypatch):
-    """When the bundled TTF can't load, get_font returns a SysFont Font instead."""
-    monkeypatch.setattr(fonts, "resource_path", lambda *p: Path("/no/such/font.ttf"))
+    """When the resolved TTF path can't load, get_font returns a SysFont Font instead.
+
+    Paths are resolved once at module import (fonts._FONT_PATHS), not per call, so
+    the fallback is exercised by patching the precomputed path, not resource_path.
+    """
+    monkeypatch.setitem(fonts._FONT_PATHS, (fonts.SANS, False), "/no/such/font.ttf")
     assert isinstance(fonts.get_font(18), pg.font.Font)
+
+
+def test_font_paths_precomputed_for_every_family_bold_combo():
+    assert set(fonts._FONT_PATHS) == set(fonts._FONT_FILES)
+    for key, name in fonts._FONT_FILES.items():
+        assert fonts._FONT_PATHS[key] == str(paths.resource_path("assets", "fonts", name))
