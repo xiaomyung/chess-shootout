@@ -24,11 +24,13 @@ from chessshootout.backend.utils import Square
 from chessshootout.domain.premoves import Premove
 from chessshootout.frontend.frontend import Frontend
 from chessshootout.frontend.skillcheck.aim_view import (
-    AimController, AIM_RESULT_HOLD_MS, AIM_MISS_FLASH_MS, AIM_SHOT_HOLD_MS)
+    AimController, AIM_CROSS_LW_FRAC, AIM_RING_LW_FRAC, AIM_RESULT_HOLD_MS,
+    AIM_MISS_FLASH_MS, AIM_SHOT_HOLD_MS, _spotlight_surface)
 from chessshootout.frontend.skillcheck.controller import SKILLCHECK_RESULT_HOLD_MS
 from chessshootout.frontend.skillcheck.overlay import SkillCheckOverlay
 from chessshootout.frontend.skillcheck.registry import build_controller
-from chessshootout.frontend.skillcheck.wheel_view import WheelController, WHEEL_RESULT_HOLD_MS
+from chessshootout.frontend.skillcheck.wheel_view import (
+    WheelController, WHEEL_RESULT_HOLD_MS, _clamp_bubble_left, _needle_polygon)
 from chessshootout.frontend.visual.colors import Colors
 from chessshootout.skillcheck.aim import AimChallenge
 from chessshootout.skillcheck.coordinator import move_roll_key
@@ -37,7 +39,7 @@ from chessshootout.skillcheck.triggers import select_skillcheck
 from chessshootout.skillcheck.types import SkillCheckKind, SkillCheckOutcome
 from chessshootout.domain.pgn.generate import format_annotations
 from chessshootout.skillcheck.wheel import (
-    WheelChallenge, WHEEL_HUMAN_FLOOR_MS, placement_square)
+    WheelChallenge, WHEEL_HUMAN_FLOOR_MS, adjudicate, placement_square)
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -145,6 +147,111 @@ def test_wheel_draw_paints_the_dial_pixels():
     passive.draw(surf2)
     assert _band_ring_hue(passive, surf2) == pg.Color(Colors.spectate), \
         "a spectated wheel reads in the spectate hue, not the mover's accent"
+
+
+def test_render_needle_pixel_matches_the_adjudication_angle_convention():
+    """The rendered needle must sit at the exact pixel angle the engine used to decide the
+    tap won -- same zero direction, same rotation sense. A silent drift here (e.g. a sign
+    flip or a different zero-reference between wheel.py and wheel_view.py) would let the
+    dial visually lie about which taps land."""
+    ch = WheelChallenge(arc_start_deg=10.0, arc_width_deg=40.0, period_ms=3600.0,
+                        start_angle_deg=0.0)
+    elapsed = 121.0
+    needle_deg = ch.needle_deg(elapsed)
+    assert adjudicate(ch, elapsed, 0.0) is True, "sanity: this elapsed is a genuine win"
+    ctrl = WheelController(ch, pg.Rect(100, 100, 160, 160), now_ms=0)
+    ctrl.update(int(elapsed))
+    surf = pg.Surface((400, 400), pg.SRCALPHA)
+    surf.fill((7, 8, 9, 255))
+    ctrl.draw(surf)
+    cx, cy = ctrl.center
+    needle_len = ctrl.radius - ctrl.ring_w - 2
+    a = math.radians(needle_deg - 90.0)
+    px = int(cx + needle_len * 0.6 * math.cos(a))
+    py = int(cy + needle_len * 0.6 * math.sin(a))
+    assert surf.get_at((px, py)) == pg.Color(Colors.text), \
+        "the pixel the engine says is a winning tap sits under the drawn needle"
+
+
+# ---- wheel dial geometry: unified radius-anchored model --------------------
+# ring_w/band_w/needle_w/hub_r are all round(radius * fraction) (floor-clamped only
+# for tiny radii), replacing the old scheme where every element sat on a hard pixel
+# floor across almost the whole practical window range. r=49 is the pinned anchor:
+# it must reproduce today's approved look pixel-for-pixel.
+
+_WHEEL_GEOMETRY_FRACS = {"ring_w": 0.08, "band_w": 0.20, "needle_w": 0.12, "hub_r": 0.10}
+
+
+def _wheel_at_cell(cell):
+    return WheelController(_always_in_arc(), pg.Rect(0, 0, cell, cell), now_ms=0)
+
+
+@pytest.mark.parametrize("cell,expected_radius", [(60, 28), (99, 49), (170, 86)])
+def test_geometry_ratios_track_the_anchor_fractions_at_min_default_and_fullscreen(
+        cell, expected_radius):
+    ctrl = _wheel_at_cell(cell)
+    assert ctrl.radius == expected_radius
+    for attr, frac in _WHEEL_GEOMETRY_FRACS.items():
+        ratio = getattr(ctrl, attr) / ctrl.radius
+        assert ratio == pytest.approx(frac, abs=0.6 / ctrl.radius), \
+            "{} drifted more than one rounding step off its anchor fraction".format(attr)
+
+
+def test_default_radius_reproduces_todays_approved_pixel_values(monkeypatch):
+    from chessshootout.frontend.skillcheck import wheel_view as wheel_view_module
+    sizes = []
+    real_get_font = wheel_view_module.get_font
+    monkeypatch.setattr(wheel_view_module, "get_font", lambda size, **kw: (
+        sizes.append(size), real_get_font(size, **kw))[1])
+    ctrl = _wheel_at_cell(99)
+    assert ctrl.radius == 49
+    assert (ctrl.ring_w, ctrl.band_w, ctrl.needle_w, ctrl.hub_r) == (4, 10, 6, 5)
+    assert sizes[-1] == 13, "the hint font must still request today's approved 13pt at r=49"
+
+
+def test_needle_tip_is_narrower_than_the_shaft_no_more_full_width_overshoot():
+    ctrl = _wheel_at_cell(99)
+    assert ctrl.needle_tip_w < ctrl.needle_w
+    assert ctrl.needle_tip_w == max(2, round(ctrl.needle_w * 0.30))
+
+
+def test_needle_polygon_tapers_and_its_cap_sits_exactly_at_the_needle_length():
+    cx, cy, deg, length, base_w, tip_w = 100.0, 100.0, 0.0, 40.0, 10.0, 3.0
+    base_a, tip_a, tip_b, base_b = _needle_polygon(cx, cy, deg, length, base_w, tip_w)
+    base_width = math.hypot(base_a[0] - base_b[0], base_a[1] - base_b[1])
+    tip_width = math.hypot(tip_a[0] - tip_b[0], tip_a[1] - tip_b[1])
+    assert base_width == pytest.approx(base_w)
+    assert tip_width == pytest.approx(tip_w)
+    assert tip_width < base_width, "the polygon actually tapers, it is not a constant-width quad"
+    tip_center = ((tip_a[0] + tip_b[0]) / 2.0, (tip_a[1] + tip_b[1]) / 2.0)
+    assert math.hypot(tip_center[0] - cx, tip_center[1] - cy) == pytest.approx(length), \
+        "the tip cap is centered exactly at needle_len, the old half-shaft-width overshoot is gone"
+
+
+def test_footprint_stays_within_budget_at_a_small_window_cell():
+    cell = 57
+    ctrl = _wheel_at_cell(cell)
+    timer_outer = ctrl.radius + ctrl.ring_w + ctrl.timer_gap
+    footprint = timer_outer * 2 + 8
+    assert footprint <= 1.20 * cell + 2, "the dial must not blow its footprint budget"
+
+
+def test_hint_bubble_left_clamps_inside_the_window():
+    assert _clamp_bubble_left(-200, 150, 600) == 4, "clamps off the left edge"
+    assert _clamp_bubble_left(700, 150, 600) == 600 - 150 - 4, "clamps off the right edge"
+    assert _clamp_bubble_left(200, 150, 600) == 200, "leaves an already-on-screen bubble alone"
+
+
+def test_hint_bubble_draw_stays_inside_the_window_for_a_column_zero_wheel():
+    ctrl = WheelController(_always_in_arc(), pg.Rect(-40, 300, 99, 99), now_ms=0)
+    window = pg.Surface((600, 600), pg.SRCALPHA)
+    ctrl._draw_hint_bubble(window, ctrl.center[0], ctrl.center[1],
+                           ctrl.radius + ctrl.ring_w + ctrl.timer_gap)
+    border = pg.Color(Colors.border_strong)
+    painted_cols = [x for x in range(window.get_width())
+                    if any(window.get_at((x, y)) == border for y in range(window.get_height()))]
+    assert painted_cols, "the bubble actually drew something"
+    assert min(painted_cols) >= 4, "the bubble never bleeds off the left edge of the window"
 
 
 # ---- overlay host ----------------------------------------------------------
@@ -300,6 +407,62 @@ def test_aim_relayout_reanchors_and_set_board_rect_updates_region():
     assert ctrl.center == (250, 250)
     ctrl.set_board_rect(pg.Rect(10, 10, 700, 700))
     assert ctrl._board_rect == pg.Rect(10, 10, 700, 700)
+
+
+# ---- aim view geometry: resample-once + native-radius spotlight ------------
+
+def test_aim_victim_resamples_once_per_size_not_per_relayout(monkeypatch):
+    calls = []
+    real_smoothscale = pg.transform.smoothscale
+
+    def spy(surface, size):
+        calls.append(size)
+        return real_smoothscale(surface, size)
+
+    monkeypatch.setattr(pg.transform, "smoothscale", spy)
+    victim = pg.Surface((80, 80), pg.SRCALPHA)
+    ctrl = AimController(_aim_centerable(), pg.Rect(0, 0, 80, 80), now_ms=0,
+                         victim_surface=victim, board_rect=pg.Rect(0, 0, 640, 640))
+    assert calls == [], "the first cell_rect matches the victim's native size -- no resample"
+    for size in (160, 80, 160, 200, 160):
+        ctrl.relayout(pg.Rect(0, 0, size, size))
+    assert len(calls) == 2, \
+        "only the two distinct new sizes (160, 200) ever trigger a real resample"
+    assert ctrl._victim.get_size() == (160, 160)
+
+
+def test_aim_victim_relayout_never_cumulatively_rescales(monkeypatch):
+    real_smoothscale = pg.transform.smoothscale
+    calls = []
+    monkeypatch.setattr(pg.transform, "smoothscale", lambda s, sz: (
+        calls.append(sz), real_smoothscale(s, sz))[1])
+    victim = pg.Surface((80, 80), pg.SRCALPHA)
+    ctrl = AimController(_aim_centerable(), pg.Rect(0, 0, 80, 80), now_ms=0,
+                         victim_surface=victim, board_rect=pg.Rect(0, 0, 640, 640))
+    ctrl.relayout(pg.Rect(0, 0, 160, 160))
+    first = ctrl._victim
+    ctrl.relayout(pg.Rect(0, 0, 80, 80))
+    ctrl.relayout(pg.Rect(0, 0, 160, 160))
+    second = ctrl._victim
+    assert second is first, "the same target size returns the cached resample, not a fresh chain"
+    assert len(calls) == 1, "only one real resample happened despite bouncing through 3 sizes"
+
+
+def test_spotlight_surface_size_matches_its_radius():
+    assert _spotlight_surface(45).get_size() == (90, 90)
+    assert _spotlight_surface(10).get_size() == (20, 20)
+
+
+def test_spotlight_surface_is_cached_by_radius():
+    assert _spotlight_surface(45) is _spotlight_surface(45)
+
+
+def test_aim_stroke_width_fracs_reproduce_the_old_fixed_pixel_widths_at_anchor_cell():
+    cell = 99.6
+    assert max(1, round(cell * AIM_CROSS_LW_FRAC)) == 2, \
+        "the old fixed 2.4px cross/reticle stroke rounded to 2px at the approved default"
+    assert max(1, round(cell * AIM_RING_LW_FRAC)) == 2, \
+        "the old fixed 2px hit-ring/path stroke is unchanged at the approved default"
 
 
 # ---- neutral (online) controller mode --------------------------------------

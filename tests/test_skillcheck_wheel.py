@@ -163,6 +163,28 @@ def test_half_rtt_compensation_credits_laggy_tap():
     assert wheel.adjudicate(ch, recv, start_ms=0.0, half_rtt_ms=0.0) is False
 
 
+# ---- angle convention is pinned exactly (render and adjudication must agree
+# on the same zero direction / rotation sense, or the dial would visually lie
+# about which taps win) -------------------------------------------------------
+
+def test_needle_deg_and_verdict_are_pinned_at_known_elapsed_values():
+    ch = WheelChallenge(arc_start_deg=10.0, arc_width_deg=60.0, period_ms=3600.0,
+                        start_angle_deg=0.0)
+    assert ch.needle_deg(121.0) == pytest.approx(12.1)
+    assert wheel.adjudicate(ch, recv_ms=121.0, start_ms=0.0) is True
+    assert ch.needle_deg(3500.0) == pytest.approx(350.0)
+    assert wheel.adjudicate(ch, recv_ms=3500.0, start_ms=0.0) is False
+
+
+def test_needle_deg_is_pinned_at_a_negative_going_start_angle():
+    # start_angle_deg is itself a seeded value in [0, 360); pin a non-zero start
+    # so a future sign flip in the winding direction cannot slip through unnoticed.
+    ch = WheelChallenge(arc_start_deg=0.0, arc_width_deg=360.0, period_ms=3600.0,
+                        start_angle_deg=200.0)
+    assert ch.needle_deg(0.0) == pytest.approx(200.0)
+    assert ch.needle_deg(1800.0) == pytest.approx(20.0), "wraps forward through 360, not backward"
+
+
 # ---- sweet-spot shrinks smoothly, not in steps -----------------------------
 
 def test_arc_shrinks_continuously_to_a_floor():
