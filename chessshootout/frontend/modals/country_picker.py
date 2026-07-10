@@ -6,7 +6,7 @@ from chessshootout.frontend.visual.colors import Colors
 from chessshootout.frontend.visual.draw import rounded_rect_surface
 from chessshootout.frontend.visual.emoji import emoji_surface
 from chessshootout.frontend.visual.fonts import get_display_font, get_font, get_mono_font
-from chessshootout.frontend.visual.scroll_view import ScrollView
+from chessshootout.frontend.visual.scroll_view import ScrollHost, ScrollView
 from chessshootout.frontend.visual.text_input import TextInput
 from chessshootout.frontend.visual.widgets import draw_button
 
@@ -18,11 +18,10 @@ ROW_FLAG_GAP = 12
 ROW_CODE_INSET = 10
 
 
-class CountryPicker(BaseModal):
+class CountryPicker(BaseModal, ScrollHost):
 
     def __init__(self, window):
         super().__init__(window)
-        self.visible = False
         self.on_pick = None
         self.current = ""
         self._scroll_px = 0.0
@@ -45,13 +44,6 @@ class CountryPicker(BaseModal):
         self._flag_cache = {}
         self._on_rect_changed()
 
-    def _store_scroll(self, value):
-        self._scroll_px = value
-
-    @property
-    def scroll_offset(self):
-        return int(self._scroll_px // self._row_h)
-
     def _on_rect_changed(self):
         h = max(self.rect.height, 1)
         self.padding = max(int(self.rect.width * 0.032), 12)
@@ -69,15 +61,12 @@ class CountryPicker(BaseModal):
         self._scroll_px = 0.0
         self.scroll.cancel()
         self._apply_filter()
-        self.visible = True
+        super().show()
 
     def hide(self):
-        self.visible = False
+        super().hide()
         self.search.focused = False
         self.scroll.cancel()
-
-    def is_visible(self):
-        return self.visible
 
     def _apply_filter(self):
         raw = self.search.text.strip()
@@ -202,22 +191,6 @@ class CountryPicker(BaseModal):
                     self._pick(code)
                     return True
         return True
-
-    def handle_scroll(self, pos, dy):
-        if not self.visible:
-            return False
-        return self.scroll.handle_wheel(pos, dy)
-
-    def handle_press(self, pos):
-        if not self.visible:
-            return False
-        return self.scroll.handle_press(pos) is not None
-
-    def handle_motion(self, pos):
-        return self.scroll.handle_motion(pos)
-
-    def handle_release(self, pos):
-        return self.scroll.handle_release()
 
     def handle_key(self, event):
         if not self.visible:

@@ -31,6 +31,7 @@ from chessshootout.domain.capture_summary import captured_by, material_advantage
 from chessshootout.domain.result_stats import compute_result_stats
 from chessshootout.frontend.menu.menu_page import MenuPage, PAGE_CARD, PAGE_HISTORY
 from chessshootout.frontend.menu.history import HistoryView
+from chessshootout.frontend.modal_registry import ModalSpec
 from chessshootout.frontend.modals.confirm import ConfirmModal
 from chessshootout.frontend.modals.directory_browser import DirectoryBrowser
 from chessshootout.frontend.modals.country_picker import CountryPicker
@@ -368,6 +369,17 @@ class Frontend(OnlineEventsMixin):
         self.match_found_modal = MatchFoundModal(self.window)
         self.reconnecting_modal = ReconnectingModal(self.window)
         self.offer_banners = OfferBanners(self.window)
+        self._modal_registry = [
+            ModalSpec(self.confirm_modal, on_dismiss=self._dismiss_confirm),
+            ModalSpec(self.help_modal),
+            ModalSpec(self.fen_input_modal),
+            ModalSpec(self.wait_modal, on_dismiss=self._on_online_cancel),
+            ModalSpec(self.match_found_modal, esc_dismiss=False),
+            ModalSpec(self.reconnecting_modal, esc_dismiss=False),
+            ModalSpec(self.country_picker),
+            ModalSpec(self.directory_browser),
+            ModalSpec(self.options_modal, on_dismiss=self._dismiss_options),
+        ]
         self._wait_started_at_ms = None
         self._match_found_at_ms = None
         self._pending_game_start_payload = None
@@ -1515,24 +1527,26 @@ class Frontend(OnlineEventsMixin):
             return
         self._on_resign()
 
+    def _dismiss_confirm(self):
+        self.confirm_modal.hide()
+        if self.mode == "menu":
+            self.start_menu.show()
+
+    def _dismiss_options(self):
+        if self._on_close_settings() is not False:
+            self.options_modal.hide()
+
+    def _top_visible_modal(self):
+        for spec in self._modal_registry:
+            if spec.obj.is_visible():
+                return spec
+        return None
+
     def _dismiss_top_modal(self):
-        for modal in (self.help_modal, self.fen_input_modal, self.country_picker,
-                      self.directory_browser):
-            if modal.is_visible():
-                modal.hide()
+        for spec in self._modal_registry:
+            if spec.esc_dismiss and spec.obj.is_visible():
+                spec.on_dismiss()
                 return True
-        if self.confirm_modal.is_visible():
-            self.confirm_modal.hide()
-            if self.mode == "menu":
-                self.start_menu.show()
-            return True
-        if self.options_modal.is_visible():
-            if self._on_close_settings() is not False:
-                self.options_modal.hide()
-            return True
-        if self.wait_modal.is_visible():
-            self._on_online_cancel()
-            return True
         if not self.offer_banners.is_empty():
             if self._rematch_offered:
                 self._decline_rematch()
@@ -1630,7 +1644,7 @@ class Frontend(OnlineEventsMixin):
         clock = self.match.clock
         if (self.pgn_review or self.current_result() is not None
                 or self._resyncing or self.skillcheck_overlay.is_active()
-                or self._blocking_modal_visible()
+                or self._menu_overlay_active()
                 or clock is None or clock.flagged is not None):
             self._cancel_give_time_hold()
             return
@@ -2071,12 +2085,7 @@ class Frontend(OnlineEventsMixin):
         return rects
 
     def _menu_overlay_active(self):
-        return any(m.is_visible() for m in (
-            self.options_modal, self.directory_browser, self.country_picker,
-            self.fen_input_modal, self.wait_modal,
-            self.match_found_modal, self.reconnecting_modal,
-            self.help_modal, self.confirm_modal,
-        ))
+        return any(spec.obj.is_visible() for spec in self._modal_registry)
 
     def _recreate_window_surface(self, w, h):
         self.window = pg.display.set_mode((w, h), WINDOW_FLAGS)
@@ -2222,15 +2231,8 @@ class Frontend(OnlineEventsMixin):
         if self.mode == "menu":
             self.menu_battle.draw_intro_overlay(self.window)
         self.offer_banners.draw(self._banner_rect())
-        self.options_modal.draw()
-        self.directory_browser.draw()
-        self.country_picker.draw()
-        self.wait_modal.draw()
-        self.match_found_modal.draw()
-        self.reconnecting_modal.draw()
-        self.help_modal.draw()
-        self.fen_input_modal.draw()
-        self.confirm_modal.draw()
+        for spec in reversed(self._modal_registry):
+            spec.obj.draw()
         self.toast.draw(center_x=None if self.mode == "menu" else self.board.rect.centerx)
         if self.skillcheck_overlay.is_active() and (
                 self.mode == "menu" or self.current_result() is not None):
@@ -2705,26 +2707,12 @@ class Frontend(OnlineEventsMixin):
         else:
             self.board.toggle_arrow(start, end)
 
-    def _blocking_modal_visible(self):
-        return (self.confirm_modal.is_visible() or self.wait_modal.is_visible()
-                or self.match_found_modal.is_visible() or self.reconnecting_modal.is_visible()
-                or self.fen_input_modal.is_visible() or self.options_modal.is_visible()
-                or self.help_modal.is_visible() or self.country_picker.is_visible()
-                or self.directory_browser.is_visible())
-
     def _active_scrollable(self):
-        if (self.wait_modal.is_visible() or self.match_found_modal.is_visible()
-                or self.reconnecting_modal.is_visible() or self.fen_input_modal.is_visible()
-                or self.confirm_modal.is_visible() or self._result_modal_should_show()):
+        top = self._top_visible_modal()
+        if top is not None:
+            return top.obj if top.scrollable else None
+        if self._result_modal_should_show():
             return None
-        if self.country_picker.is_visible():
-            return self.country_picker
-        if self.directory_browser.is_visible():
-            return self.directory_browser
-        if self.options_modal.is_visible():
-            return self.options_modal
-        if self.help_modal.is_visible():
-            return self.help_modal
         if self.mode == "menu":
             return self.menu_page
         if self.focus_mode or self.focus_transition is not None:
@@ -2735,10 +2723,9 @@ class Frontend(OnlineEventsMixin):
         self._scroll_pressed = None
         self.right_menu.scroll.cancel()
         self.history_view.scroll.cancel()
-        self.country_picker.scroll.cancel()
-        self.directory_browser.scroll.cancel()
-        self.options_modal.body.scroll.cancel()
-        self.help_modal.scroll.cancel()
+        for spec in self._modal_registry:
+            if spec.scrollable:
+                spec.obj.scroll.cancel()
 
     def _handle_left_drag_motion(self, pos):
         if self._scroll_pressed is not None:
@@ -2765,34 +2752,9 @@ class Frontend(OnlineEventsMixin):
                 and not self._result_modal_should_show()):
             self._skip_result_fade()
             return
-        if self.help_modal.is_visible():
-            self.help_modal.handle_click(pos)
-            return
-        if self.fen_input_modal.is_visible():
-            self.fen_input_modal.handle_click(pos)
-            return
-        if self.wait_modal.handle_click(pos):
-            return
-        if self.wait_modal.is_visible():
-            return
-        if self.match_found_modal.is_visible():
-            return
-        if self.reconnecting_modal.handle_click(pos):
-            return
-        if self.reconnecting_modal.is_visible():
-            return
-        if self.country_picker.is_visible():
-            self.country_picker.handle_click(pos)
-            return
-        if self.directory_browser.is_visible():
-            self.directory_browser.handle_click(pos)
-            return
-        if self.confirm_modal.handle_click(pos):
-            return
-        if self.confirm_modal.is_visible():
-            return
-        if self.options_modal.is_visible():
-            self.options_modal.handle_click(pos)
+        top = self._top_visible_modal()
+        if top is not None:
+            top.obj.handle_click(pos)
             return
         if self.offer_banners.handle_click(pos):
             return
@@ -2826,13 +2788,10 @@ class Frontend(OnlineEventsMixin):
                     self.sound_manager.play_pickup()
 
     def _handle_shortcut_key(self, event):
-        if self.help_modal.is_visible():
-            self.help_modal.hide()
-            return True
+        if self._menu_overlay_active():
+            return False
         if self._handle_promotion_key(event):
             return True
-        if self.confirm_modal.is_visible():
-            return False
         if event.key == pg.K_h:
             self._toggle_focus(not self.focus_mode)
             return True
@@ -2898,7 +2857,7 @@ class Frontend(OnlineEventsMixin):
                 and pos[1] >= self.chrome.HEIGHT
                 and self.current_result() is None
                 and self.board.pending_promotion_square is None
-                and not self._blocking_modal_visible()
+                and not self._menu_overlay_active()
                 and not self._focus_click_consumed
                 and self.focus_transition is None):
             self.board.begin_press(pos)
@@ -2937,23 +2896,10 @@ class Frontend(OnlineEventsMixin):
                 if self._skillcheck_swallows_input():
                     self.skillcheck_overlay.handle_event(event)
                     continue
-                if self.country_picker.is_visible():
-                    self.country_picker.handle_key(event)
-                    continue
-                if self.directory_browser.is_visible():
-                    self.directory_browser.handle_key(event)
-                    continue
-                if self.options_modal.is_visible():
-                    self.options_modal.handle_key(event)
-                    continue
-                if self.wait_modal.is_visible():
-                    continue
-                if self.match_found_modal.is_visible():
-                    continue
-                if self.reconnecting_modal.is_visible():
-                    continue
-                if self.fen_input_modal.is_visible():
-                    self.fen_input_modal.handle_key(event)
+                top = self._top_visible_modal()
+                if top is not None:
+                    if top.handles_keys:
+                        top.obj.handle_key(event)
                     continue
                 if self.mode == "menu":
                     self.menu_page.handle_key(event)

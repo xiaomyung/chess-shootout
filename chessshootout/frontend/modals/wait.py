@@ -7,7 +7,9 @@ from chessshootout.frontend.panels.player_strip import format_countdown
 from chessshootout.frontend.visual.colors import Colors
 from chessshootout.frontend.visual.draw import supersample, rounded_rect_surface, circle_surface
 from chessshootout.frontend.visual.widgets import draw_button_row
-from chessshootout.frontend.visual.fonts import get_display_font, get_font, get_mono_font
+from chessshootout.frontend.visual.fonts import (
+    fonts_for_width, get_display_font, get_font, get_mono_font,
+)
 
 
 RADAR_SWEEP_MS = 1400
@@ -52,15 +54,15 @@ class WaitModal(BaseModal):
 
     def __init__(self, window):
         super().__init__(window)
-        self._visible = False
         self.mode_label = ""
         self.tc_text = ""
         self.elapsed = 0
         self.on_cancel = None
         self.button_rects = {}
+        self._font_cache = {}
 
     def show(self, mode_label, tc_text, on_cancel):
-        self._visible = True
+        super().show()
         self.mode_label = mode_label
         self.tc_text = tc_text
         self.elapsed = 0
@@ -70,12 +72,9 @@ class WaitModal(BaseModal):
         self.elapsed = seconds
 
     def hide(self):
-        self._visible = False
+        super().hide()
         self.on_cancel = None
         self.button_rects = {}
-
-    def is_visible(self):
-        return self._visible
 
     def _draw_radar(self, cx, cy, size):
         now = pg.time.get_ticks()
@@ -103,19 +102,20 @@ class WaitModal(BaseModal):
         self.window.blit(dot, (cx - dot.get_width() / 2, cy - dot.get_height() / 2))
 
     def _fonts(self, panel_w):
-        if getattr(self, "_fonts_w", None) != panel_w:
-            self._fonts_w = panel_w
-            self._title_font = get_display_font(max(int(panel_w * 0.06), 20))
-            self._sub_font = get_font(max(int(panel_w * 0.03), 12), bold=False)
-            self._mode_font = get_font(max(int(panel_w * 0.024), 9), bold=True)
-            self._tc_font = get_mono_font(max(int(panel_w * 0.034), 13), bold=True)
-            self._elapsed_font = get_mono_font(max(int(panel_w * 0.03), 11))
-            self._button_font = get_font(max(int(panel_w * 0.034), 13), bold=True)
-        return (self._title_font, self._sub_font, self._mode_font,
-                self._tc_font, self._elapsed_font, self._button_font)
+        return fonts_for_width(self._font_cache, panel_w, self._build_fonts)
+
+    def _build_fonts(self, panel_w):
+        return (
+            get_display_font(max(int(panel_w * 0.06), 20)),
+            get_font(max(int(panel_w * 0.03), 12), bold=False),
+            get_font(max(int(panel_w * 0.024), 9), bold=True),
+            get_mono_font(max(int(panel_w * 0.034), 13), bold=True),
+            get_mono_font(max(int(panel_w * 0.03), 11)),
+            get_font(max(int(panel_w * 0.034), 13), bold=True),
+        )
 
     def draw(self):
-        if not self._visible or self.rect.width <= 0:
+        if not self.visible or self.rect.width <= 0:
             self.button_rects = {}
             return
         pad = self.padding
@@ -169,7 +169,7 @@ class WaitModal(BaseModal):
             self.window, row, [("Cancel search", "cancel")], button_font, pad)
 
     def handle_click(self, pos):
-        if not self._visible:
+        if not self.visible:
             return False
         for key, br in self.button_rects.items():
             if br.collidepoint(pos):

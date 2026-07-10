@@ -4,7 +4,7 @@ from chessshootout.frontend.modals.base import BaseModal, MODAL_MAX_WIDTH, MODAL
 from chessshootout.frontend.visual.colors import Colors
 from chessshootout.frontend.visual.draw import rounded_rect_surface
 from chessshootout.frontend.visual.emoji import blit_emoji
-from chessshootout.frontend.visual.fonts import get_display_font, get_font
+from chessshootout.frontend.visual.fonts import fonts_for_width, get_display_font, get_font
 from chessshootout.frontend.visual.widgets import draw_button_row, fit_text_to_rect
 
 
@@ -46,6 +46,7 @@ class ConfirmModal(BaseModal):
         self.extra_label = "Cancel"
         self.button_rects = {}
         self._panel = pg.Rect(0, 0, 0, 0)
+        self._font_cache = {}
 
     def show(self, title, on_yes, on_no=None, yes_label="Confirm", no_label="Cancel",
              on_extra=None, extra_label="Cancel", sub="", danger=False, emoji=None):
@@ -72,12 +73,14 @@ class ConfirmModal(BaseModal):
         return self.title is not None
 
     def _fonts(self, panel_w):
-        if getattr(self, "_fonts_w", None) != panel_w:
-            self._fonts_w = panel_w
-            self._title_font = get_display_font(max(int(panel_w * 0.07), 22))
-            self._sub_font = get_font(max(int(panel_w * 0.032), 13), bold=False)
-            self._button_font = get_font(max(int(panel_w * 0.034), 13), bold=True)
-        return self._title_font, self._sub_font, self._button_font
+        return fonts_for_width(self._font_cache, panel_w, self._build_fonts)
+
+    def _build_fonts(self, panel_w):
+        return (
+            get_display_font(max(int(panel_w * 0.07), 22)),
+            get_font(max(int(panel_w * 0.032), 13), bold=False),
+            get_font(max(int(panel_w * 0.034), 13), bold=True),
+        )
 
     def draw(self):
         if not self.is_visible() or self.rect.width <= 0:

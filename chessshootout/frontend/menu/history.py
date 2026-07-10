@@ -14,7 +14,7 @@ from chessshootout.frontend.visual.draw import (
 )
 from chessshootout.frontend.visual.fonts import get_display_font, get_font, get_mono_font
 from chessshootout.frontend.visual.icons import piece_png_path
-from chessshootout.frontend.visual.scroll_view import ScrollView
+from chessshootout.frontend.visual.scroll_view import ScrollHost, ScrollView
 from chessshootout.frontend.visual.widgets import build_shell
 
 
@@ -100,7 +100,7 @@ def build_match_groups(summaries, nickname):
             for mid, games in group_by_csmatchid(summaries)]
 
 
-class HistoryView:
+class HistoryView(ScrollHost):
 
     def __init__(self, window, on_open, on_back):
         self.window = window
@@ -215,24 +215,6 @@ class HistoryView:
 
     def is_visible(self):
         return self.visible
-
-    def _store_scroll(self, value):
-        self._scroll_px = value
-
-    @property
-    def scroll_offset(self):
-        return self._scroll_px
-
-    def handle_press(self, pos):
-        if not self.visible:
-            return False
-        return self.scroll.handle_press(pos) is not None
-
-    def handle_motion(self, pos):
-        return self.scroll.handle_motion(pos)
-
-    def handle_release(self, pos):
-        return self.scroll.handle_release()
 
     def _visible_groups(self):
         if self.filter == "all":
@@ -581,8 +563,3 @@ class HistoryView:
                     self.on_open(value)
                 return True
         return self.rect.collidepoint(pos)
-
-    def handle_scroll(self, pos, dy):
-        if not self.visible:
-            return False
-        return self.scroll.handle_wheel(pos, dy)

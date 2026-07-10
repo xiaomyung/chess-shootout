@@ -5,8 +5,6 @@ from chessshootout.frontend.visual.fonts import get_font
 
 class BasePanel:
 
-    consumes_clicks_when_visible = False
-
     def __init__(self, window):
         self.window = window
         self.rect = pg.Rect(0, 0, 0, 0)

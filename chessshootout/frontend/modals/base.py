@@ -23,12 +23,11 @@ INTENT_RAIL = {
 
 class BaseModal:
 
-    consumes_clicks_when_visible = True
-
     def __init__(self, window):
         self.window = window
         self.rect = pg.Rect(0, 0, 0, 0)
         self.padding = DEFAULT_PADDING
+        self.visible = False
 
     def set_rect(self, rect):
         self.rect = pg.Rect(rect)
@@ -41,8 +40,14 @@ class BaseModal:
         size = max(int(self.rect.height / factor), min_size)
         return get_font(size, bold=bold)
 
+    def show(self):
+        self.visible = True
+
+    def hide(self):
+        self.visible = False
+
     def is_visible(self):
-        return False
+        return self.visible
 
     def draw(self):
         pass

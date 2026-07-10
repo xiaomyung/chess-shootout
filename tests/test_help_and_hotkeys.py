@@ -1,8 +1,10 @@
 """Help modal + R/D + Q/R/B/N hotkeys.
 
 Drives keys through Frontend._handle_shortcut_key / _handle_promotion_key to
-verify the help modal toggles, resign/draw open the right confirm prompt, and a
-pending promotion both consumes the piece key and shadows the resign hotkey.
+verify resign/draw open the right confirm prompt and a pending promotion both
+consumes the piece key and shadows the resign hotkey. The any-key-closes-help
+behavior is dispatched earlier, by the modal registry inside check_events, so
+that one test drives a real KEYDOWN through check_events instead.
 """
 
 import os
@@ -55,9 +57,12 @@ def test_question_mark_opens_help():
 
 
 def test_any_key_closes_help():
+    """The modal registry (not _handle_shortcut_key) owns this now: help.handle_key
+    hides unconditionally, and check_events reaches it before _handle_shortcut_key."""
     app = _make_app()
     app.help_modal.show()
-    app._handle_shortcut_key(_key_event(pg.K_a))
+    pg.event.post(_key_event(pg.K_a))
+    app.check_events()
     assert app.help_modal.is_visible() is False
 
 
@@ -145,6 +150,21 @@ def test_r_during_promotion_picks_rook_not_resign():
     app._handle_shortcut_key(_key_event(pg.K_r))
     assert app.confirm_modal.is_visible() is False
     assert app.board.pending_promotion_square is None
+
+
+def test_confirm_modal_blocks_promotion_hotkey():
+    """Regression: Q/R/B/N used to reach _handle_promotion_key before the
+    confirm-modal guard, so a promotion could be applied behind an open
+    resign-confirm modal. The guard now runs first."""
+    app = _make_app()
+    dst = _setup_promotion_pending(app, PieceColor.WHITE)
+    app.confirm_modal.show("Tap out?", on_yes=lambda: None)
+    history_before = list(app.match.move_history)
+    handled = app._handle_shortcut_key(_key_event(pg.K_q))
+    assert handled is False
+    assert app.board.pending_promotion_square == dst
+    assert app.match.move_history == history_before
+    assert app.backend.state[dst.row][dst.col].type == PieceType.PAWN
 
 
 def test_fullscreen_hotkey_is_documented():

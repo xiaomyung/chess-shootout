@@ -35,3 +35,10 @@ def get_display_font(size, bold=False):
 
 def get_mono_font(size, bold=False):
     return get_font(size, bold=bold, family=MONO)
+
+
+def fonts_for_width(cache, width, build):
+    if cache.get("width") != width:
+        cache["width"] = width
+        cache["fonts"] = build(width)
+    return cache["fonts"]
