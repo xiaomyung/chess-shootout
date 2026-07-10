@@ -98,7 +98,7 @@ def set_country(code):
 
 
 def sanitize_nickname(raw):
-    kept = "".join(c for c in (raw or "") if c.isascii() and c.isprintable())
+    kept = "".join(c for c in (raw or "") if c.isascii() and c.isprintable() and c != "#")
     return re.sub(r"\s+", " ", kept)[:_NICKNAME_MAX_LEN].strip()
 
 
@@ -136,7 +136,11 @@ def get_or_create_client_uuid():
         return _uuid_override
     existing = os.environ.get("CHESS_CLIENT_UUID")
     if existing:
-        return existing
+        coerced = _coerce_to_uuid4(existing)
+        if coerced != existing:
+            os.environ["CHESS_CLIENT_UUID"] = coerced
+            _persist("CHESS_CLIENT_UUID", coerced)
+        return coerced
     fresh = str(uuid.uuid4())
     os.environ["CHESS_CLIENT_UUID"] = fresh
     _persist("CHESS_CLIENT_UUID", fresh)
@@ -318,9 +322,7 @@ def _persist(key, value):
             out_lines.append(line)
             continue
         match = _KEY_LINE_RE.match(stripped)
-        if match is None:
-            continue
-        if match.group(1) == key:
+        if match is not None and match.group(1) == key:
             out_lines.append(f"{key}={value}")
             replaced = True
         else:

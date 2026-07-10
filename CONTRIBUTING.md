@@ -69,3 +69,12 @@ rotating file handler). The desktop client keeps every level-DEBUG-and-up
 record in an in-memory ring buffer (`infra/crash_log.py`) regardless of what
 the console shows, so a crash report is enriched with the INFO breadcrumbs
 that led up to it even though nothing was written to disk along the way.
+
+## Versioning
+
+Every pull request must bump `[project].version` in `pyproject.toml` — a CI
+job blocks merges where it's unchanged from the base branch. Run `make bump`
+(`uv version --bump patch`) to bump the patch version and update `uv.lock`'s
+`chess-shootout` entry together in one atomic step. A version-only bump can
+also be done by hand: edit both files' version strings to match; no `uv`
+required.

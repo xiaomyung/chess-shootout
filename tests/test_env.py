@@ -1,6 +1,8 @@
 import logging
 import os
+import re
 import uuid
+from pathlib import Path
 
 import pytest
 
@@ -76,6 +78,9 @@ def test_nickname_override_wins(monkeypatch):
     pytest.param("emoji 😀 end", "emoji end", id="emoji_dropped"),
     pytest.param("x" * 30, "x" * 20, id="capped_at_max"),
     pytest.param("x" * 19 + " york", "x" * 19, id="truncation_leaves_no_trailing_space"),
+    pytest.param("John #1", "John 1", id="hash_dropped"),
+    pytest.param("#leading", "leading", id="leading_hash_dropped"),
+    pytest.param("trailing#", "trailing", id="trailing_hash_dropped"),
 ])
 def test_sanitize_nickname(raw, expected):
     assert env.sanitize_nickname(raw) == expected
@@ -113,6 +118,19 @@ def test_set_nickname_all_nonascii_is_noop():
     env.set_nickname("Щёлк")
     assert env.get_nickname() == ""
     assert not env._ENV_PATH.exists()
+
+
+def test_nickname_with_hash_round_trips_through_real_dotenv_loader(monkeypatch):
+    """An unquoted value containing ' #' truncates at the '#' under python-dotenv
+    (it reads as an inline comment) -- sanitize_nickname strips '#' so nothing
+    persisted can ever hit that truncation. Reload through the real loader, not
+    just os.environ, to prove the file on disk round-trips correctly."""
+    env.set_nickname("John #1")
+    persisted = env.get_nickname()
+    assert persisted == "John 1"
+    monkeypatch.delenv("CHESS_NICKNAME", raising=False)
+    env.load()
+    assert env.get_nickname() == persisted
 
 
 def test_get_nickname_sanitizes_legacy_env_value(monkeypatch):
@@ -166,14 +184,48 @@ def test_get_or_create_client_uuid_persists_to_env_file():
 
 
 def test_get_or_create_client_uuid_returns_existing(monkeypatch):
-    monkeypatch.setenv("CHESS_CLIENT_UUID", "fixed-uuid")
-    assert env.get_or_create_client_uuid() == "fixed-uuid"
+    valid = "00000000-0000-4000-8000-000000000042"
+    monkeypatch.setenv("CHESS_CLIENT_UUID", valid)
+    assert env.get_or_create_client_uuid() == valid
 
 
 def test_get_or_create_client_uuid_honors_override():
     canonical = "00000000-0000-4000-8000-000000000099"
     env.set_overrides(client_uuid=canonical)
     assert env.get_or_create_client_uuid() == canonical
+
+
+def test_get_or_create_client_uuid_coerces_hand_edited_non_uuid4(monkeypatch):
+    """A stored CHESS_CLIENT_UUID that isn't a valid uuid4 (hand-edited .env,
+    or a leftover debug alias) must be coerced the same way the CLI
+    --client-uuid path already is, or the client 422s the server validator."""
+    monkeypatch.setenv("CHESS_CLIENT_UUID", "not-a-uuid4")
+    from chessshootout.server.protocol import is_uuid4
+    coerced = env.get_or_create_client_uuid()
+    assert is_uuid4(coerced)
+    assert coerced != "not-a-uuid4"
+    assert os.environ["CHESS_CLIENT_UUID"] == coerced
+    assert coerced in env._ENV_PATH.read_text(encoding="utf-8")
+
+
+def test_get_or_create_client_uuid_coercion_is_stable_and_persists_once(monkeypatch, caplog):
+    monkeypatch.setenv("CHESS_CLIENT_UUID", "not-a-uuid4")
+    with caplog.at_level(logging.INFO, logger="chess.env"):
+        first = env.get_or_create_client_uuid()
+        second = env.get_or_create_client_uuid()
+    assert first == second
+    persisted_lines = [r.getMessage() for r in caplog.records
+                        if "setting persisted key=CHESS_CLIENT_UUID" in r.getMessage()]
+    assert len(persisted_lines) == 1
+
+
+def test_get_or_create_client_uuid_valid_uuid4_is_not_repersisted(monkeypatch, caplog):
+    valid = "00000000-0000-4000-8000-000000000042"
+    monkeypatch.setenv("CHESS_CLIENT_UUID", valid)
+    with caplog.at_level(logging.INFO, logger="chess.env"):
+        result = env.get_or_create_client_uuid()
+    assert result == valid
+    assert not any("setting persisted" in r.getMessage() for r in caplog.records)
 
 
 def test_set_last_mode_persists_to_env_file():
@@ -406,8 +458,11 @@ def test_persist_replaces_existing_key_in_place():
     assert lines[-1] == "CHESS_NICKNAME=Magnus"
 
 
-def test_persist_drops_malformed_lines():
-    """A stray fragment lacking a `KEY=` prefix is dropped on the first persist."""
+def test_persist_preserves_malformed_lines():
+    """A stray fragment lacking a `KEY=` prefix survives a persist -- matching
+    _persist_delete, which already preserves lines it doesn't recognize (a
+    hand-edited .env may carry comments-without-#, export statements, or other
+    content the app doesn't own)."""
     env._ENV_PATH.write_text(
         "CHESS_LAST_MODE=online\n"
         "CHESS_MASTER_VOLUME=0.5\n"
@@ -415,8 +470,24 @@ def test_persist_drops_malformed_lines():
     )
     env.set_master_volume(0.7)
     contents = env._ENV_PATH.read_text(encoding="utf-8")
-    assert "0.5\n" not in contents.replace("=0.5\n", "")
+    assert "0.5\n" in contents
     assert contents.count("CHESS_MASTER_VOLUME=") == 1
+    assert "CHESS_MASTER_VOLUME=0.700" in contents
+
+
+def test_persist_preserves_foreign_line_on_unrelated_write():
+    """A line _persist doesn't own (not a comment, not a recognized KEY=VALUE)
+    must survive an unrelated settings write -- the write shouldn't silently
+    destroy content it doesn't understand."""
+    env._ENV_PATH.write_text(
+        "CHESS_LAST_MODE=online\n"
+        "some hand-typed note that isn't KEY=VALUE\n"
+        "export SOMETHING_ELSE\n", encoding="utf-8"
+    )
+    env.set_master_volume(0.7)
+    contents = env._ENV_PATH.read_text(encoding="utf-8")
+    assert "some hand-typed note that isn't KEY=VALUE" in contents
+    assert "export SOMETHING_ELSE" in contents
     assert "CHESS_MASTER_VOLUME=0.700" in contents
 
 
@@ -616,3 +687,29 @@ def test_set_country_empty_logs_the_deleted_key(caplog):
         env.set_country("")
     lines = [r.getMessage() for r in caplog.records if "setting persisted" in r.getMessage()]
     assert lines == ["setting persisted key=CHESS_COUNTRY (deleted)"]
+
+
+_CHESS_KEY_RE = re.compile(r'"(CHESS_[A-Z0-9_]+)"')
+_SRC_ROOT = Path(env.__file__).resolve().parent.parent.parent / "chessshootout"
+_ENV_EXAMPLE = Path(env.__file__).resolve().parent.parent.parent / ".env.example"
+
+
+def _client_chess_env_keys():
+    keys = set()
+    for path in _SRC_ROOT.rglob("*.py"):
+        if "server" in path.relative_to(_SRC_ROOT).parts:
+            continue
+        keys.update(_CHESS_KEY_RE.findall(path.read_text(encoding="utf-8")))
+    return keys
+
+
+def test_every_client_chess_env_key_is_documented_in_env_example():
+    """Drift guard: any CHESS_* key read/written anywhere in the client code
+    (chessshootout/, excluding the server-only subpackage -- server config
+    lives in the deploy gameserver.env, not this client template) must have an
+    entry in .env.example, or a player has no way to discover it exists."""
+    keys = _client_chess_env_keys()
+    assert keys
+    example = _ENV_EXAMPLE.read_text(encoding="utf-8")
+    missing = {key for key in keys if key not in example}
+    assert not missing

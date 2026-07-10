@@ -49,7 +49,7 @@ def _is_onefile():
 
 
 def is_portable():
-    return is_frozen() and _is_onefile()
+    return is_frozen() and sys.platform == "win32" and _is_onefile()
 
 
 def _portable_dir():

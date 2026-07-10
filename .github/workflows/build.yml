@@ -37,10 +37,12 @@ jobs:
         if: matrix.os == 'windows-latest'
         shell: pwsh
         run: |
-          pyinstaller --onefile --windowed --noupx --name ChessShootout --icon assets/icons/icon.ico --add-data "assets;assets" --collect-data certifi --hidden-import certifi --exclude-module fastapi --exclude-module uvicorn --exclude-module starlette --exclude-module slowapi chessshootout/main.py
+          $env:CHESS_VERSION = $env:VER
+          $env:CHESS_ONEFILE = "1"
+          pyinstaller --noconfirm chess.spec
           New-Item -ItemType Directory -Force -Path out | Out-Null
           Move-Item -Force dist/ChessShootout.exe "out/ChessShootout-$env:VER-Portable.exe"
-          $env:CHESS_VERSION = $env:VER
+          Remove-Item Env:\CHESS_ONEFILE
           pyinstaller --noconfirm chess.spec
           choco install innosetup -y --no-progress
           & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" "/DAppVer=$env:VER" packaging\chess.iss

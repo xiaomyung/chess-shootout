@@ -1,8 +1,12 @@
-.PHONY: build up up-edge down logs loadtest update
+.PHONY: build up up-edge down logs loadtest update bump
 
 # Build the server image via compose.
 build:
 	docker compose build
+
+# Bump [project].version (patch) and keep uv.lock in sync; run once per PR.
+bump:
+	uv version --bump patch
 
 # Local app-only container (no TLS/Caddy), published on 127.0.0.1:8000.
 up:

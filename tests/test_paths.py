@@ -84,8 +84,10 @@ def test_frozen_override_still_wins(monkeypatch):
 
 def test_portable_onefile_beats_override_and_default(monkeypatch, tmp_path):
     """Onefile _MEIPASS lives outside the exe dir, so data lands in ./data/ beside
-    the exe and wins over any CHESS_DATA_DIR override."""
+    the exe and wins over any CHESS_DATA_DIR override. Portable onefile only ships
+    on Windows."""
     exe = tmp_path / "ChessShootout-1.0.0-Portable.exe"
+    monkeypatch.setattr(sys, "platform", "win32", raising=False)
     monkeypatch.setattr(sys, "frozen", True, raising=False)
     monkeypatch.setattr(sys, "executable", str(exe), raising=False)
     monkeypatch.setattr(sys, "_MEIPASS", "/tmp/_MEI_onefile", raising=False)
@@ -110,4 +112,20 @@ def test_onedir_install_is_not_portable(monkeypatch, tmp_path):
 
 def test_source_is_not_portable(monkeypatch):
     monkeypatch.setattr(sys, "frozen", False, raising=False)
+    assert paths.is_portable() is False
+
+
+def test_macos_app_bundle_is_not_portable(monkeypatch, tmp_path):
+    """PyInstaller 6 relocates sys._MEIPASS to Contents/Frameworks on macOS while
+    the exe sits in Contents/MacOS -- outside the exe dir, same as a genuine
+    onefile build. Without a platform check, _is_onefile() would return True
+    and the .dmg app would store data INSIDE the read-only bundle. Portable
+    onefile is a Windows-only distribution shape."""
+    contents = tmp_path / "ChessShootout.app" / "Contents"
+    (contents / "Frameworks").mkdir(parents=True)
+    (contents / "MacOS").mkdir(parents=True)
+    monkeypatch.setattr(sys, "platform", "darwin", raising=False)
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+    monkeypatch.setattr(sys, "executable", str(contents / "MacOS" / "ChessShootout"), raising=False)
+    monkeypatch.setattr(sys, "_MEIPASS", str(contents / "Frameworks"), raising=False)
     assert paths.is_portable() is False
