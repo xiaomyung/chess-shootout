@@ -147,12 +147,14 @@ def fit_text_to_rect(text_surface, rect, padding=BUTTON_LABEL_PADDING_PX):
     if tw <= max_w and th <= max_h:
         return text_surface
     key = (id(text_surface), max_w, max_h)
-
-    def build():
-        scale = min(max_w / tw, max_h / th)
-        new_size = (max(int(tw * scale), 1), max(int(th * scale), 1))
-        return pg.transform.smoothscale(text_surface, new_size)
-    return memoized_surface(_FIT_TEXT_CACHE, key, build)
+    entry = _FIT_TEXT_CACHE.get(key)
+    if entry is not None and entry[0] is text_surface:
+        return entry[1]
+    scale = min(max_w / tw, max_h / th)
+    new_size = (max(int(tw * scale), 1), max(int(th * scale), 1))
+    fitted = pg.transform.smoothscale(text_surface, new_size)
+    _FIT_TEXT_CACHE[key] = (text_surface, fitted)
+    return fitted
 
 
 def _hover_state(rect):

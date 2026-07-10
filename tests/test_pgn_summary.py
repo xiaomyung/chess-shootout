@@ -14,7 +14,7 @@ from tests.helpers import fake_uuid4
     pytest.param("0-1", "alice", ("-", "loss"), id="my_loss"),
     pytest.param("1/2-1/2", "alice", ("=", "neutral"), id="my_draw"),
     pytest.param("1-0", "carl", ("W", "neutral"), id="spectator_white_won"),
-    pytest.param("0-1", "carl", ("B", "neutral"), id="spectator_black_won"),
+    pytest.param("0-1", "carl", ("L", "neutral"), id="spectator_black_won"),
     pytest.param("1/2-1/2", "carl", ("=", "neutral"), id="spectator_draw"),
 ])
 def test_result_mark_returns_perspective_symbol_and_semantic_code(result_code, nick, expected):

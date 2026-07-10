@@ -42,14 +42,22 @@ CHIP_RADIUS = 15
 TYPE_PILL_PAD_X = 16
 TYPE_PILL_PAD_Y = 5
 
-_BADGE_TEXT = {"win": "W", "loss": "L", "draw": "½"}
-_BADGE_COLOR = {"win": Colors.win, "loss": Colors.loss,
-                "draw": Colors.text_dim}
+_BADGE_TEXT = {"win": "W", "loss": "L", "draw": "½",
+               "spec_win": "W", "spec_loss": "L"}
+_BADGE_COLOR = {"win": Colors.win, "loss": Colors.loss, "draw": Colors.text_dim,
+                "spec_win": Colors.text_dim, "spec_loss": Colors.text_dim}
+_NEUTRAL_BADGES = {"draw", "spec_win", "spec_loss"}
 
 
 def _game_outcome(game, nickname):
-    _, code = result_mark(game.result_code, game.white, game.black, nickname)
-    return "draw" if code == "neutral" else code
+    symbol, code = result_mark(game.result_code, game.white, game.black, nickname)
+    if code != "neutral":
+        return code
+    if symbol == "W":
+        return "spec_win"
+    if symbol == "L":
+        return "spec_loss"
+    return "draw"
 
 
 def _game_ko(game, nickname):
@@ -85,6 +93,12 @@ class MatchGroup:
             return "win"
         if losses > wins:
             return "loss"
+        spec_wins = self.outcomes.count("spec_win")
+        spec_losses = self.outcomes.count("spec_loss")
+        if spec_wins > spec_losses:
+            return "spec_win"
+        if spec_losses > spec_wins:
+            return "spec_loss"
         return "draw"
 
 
@@ -219,7 +233,7 @@ class HistoryView(ScrollHost):
         groups = self._visible_groups()
         return (sum(1 for g in groups if g.result == "win"),
                 sum(1 for g in groups if g.result == "loss"),
-                sum(1 for g in groups if g.result == "draw"))
+                sum(1 for g in groups if g.result in _NEUTRAL_BADGES))
 
     def draw(self):
         if not self.visible or self.rect.width <= 0:
@@ -428,7 +442,7 @@ class HistoryView(ScrollHost):
 
     def _draw_badge(self, rect, result, font, radius):
         color = _BADGE_COLOR[result]
-        if result == "draw":
+        if result in _NEUTRAL_BADGES:
             bg, border, ink = Colors.surface_hover, Colors.border, Colors.text_dim
         else:
             bg, border, ink = color + "26", color + "5c", color

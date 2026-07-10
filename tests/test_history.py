@@ -145,6 +145,22 @@ def test_non_participant_game_buckets_as_neutral(tmp_path):
     assert view._stats() == (0, 0, 1)
 
 
+def test_non_participant_decisive_game_shows_gray_white_perspective_letter(tmp_path):
+    """A spectator game keeps a W/L letter from White's perspective but stays
+    in the neutral gray bucket — it never counts as the viewer's win or loss."""
+    _write_pgn(tmp_path, "online-20260101-100000.pgn", white="carl", black="dave", result="1-0")
+    _write_pgn(tmp_path, "online-20260101-110000.pgn", white="carl", black="dave", result="0-1")
+    view = _view(tmp_path, nickname="alice")
+    outcomes = sorted(o for g in view._groups for o in g.outcomes)
+    assert outcomes == ["spec_loss", "spec_win"]
+    from chessshootout.frontend.menu.history import _BADGE_TEXT, _BADGE_COLOR
+    from chessshootout.frontend.visual.colors import Colors
+    assert _BADGE_TEXT["spec_win"] == "W"
+    assert _BADGE_TEXT["spec_loss"] == "L"
+    assert _BADGE_COLOR["spec_win"] == Colors.text_dim
+    assert _BADGE_COLOR["spec_loss"] == Colors.text_dim
+
+
 def test_count_equals_win_loss_draw_sum(tmp_path):
     mid = fake_uuid4(7)
     _write_pgn(tmp_path, "online-20260101-100000.pgn", white="alice", result="1-0", match_id=mid)

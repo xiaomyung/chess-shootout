@@ -175,3 +175,22 @@ def test_wrap_words_caps_at_max_lines_and_drops_the_remainder():
 def test_wrap_words_empty_text_returns_the_text_as_a_single_line():
     font = get_font(12, bold=True)
     assert wrap_words("", font, 100) == [""]
+
+
+def test_fit_text_to_rect_never_serves_another_surfaces_fit():
+    """The fit cache keys on id(); ids are reused after GC, so a stale entry
+    must be rejected when its source surface is not the caller's surface."""
+    from chessshootout.frontend.visual import widgets
+    font = get_font(20)
+    wide = pg.Rect(0, 0, 30, 14)
+    first = font.render("15", True, pg.Color("white"))
+    fitted_first = widgets.fit_text_to_rect(first, wide, padding=3)
+    stale_key = (id(first), max(wide.width - 6, 1), max(wide.height - 6, 1))
+    assert widgets._FIT_TEXT_CACHE[stale_key][1] is fitted_first
+
+    impostor = font.render("5", True, pg.Color("white"))
+    impostor_key = (id(impostor), max(wide.width - 6, 1), max(wide.height - 6, 1))
+    widgets._FIT_TEXT_CACHE[impostor_key] = (first, fitted_first)
+    served = widgets.fit_text_to_rect(impostor, wide, padding=3)
+    assert served is not fitted_first
+    assert widgets._FIT_TEXT_CACHE[impostor_key][0] is impostor

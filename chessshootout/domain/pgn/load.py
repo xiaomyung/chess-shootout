@@ -282,7 +282,7 @@ def summarize_pgn_file(path, text, mtime, filename=None):
     )
 
 
-_SPECTATOR_SYMBOLS = {PGN_WHITE_WIN: "W", PGN_BLACK_WIN: "B"}
+_SPECTATOR_SYMBOLS = {PGN_WHITE_WIN: "W", PGN_BLACK_WIN: "L"}
 
 
 def result_mark(result_code, white, black, nickname):
