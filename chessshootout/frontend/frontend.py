@@ -10,6 +10,7 @@ import pygame as pg
 
 from chessshootout import paths
 from chessshootout.domain.match import Match, SINGLE_SCREEN, BOT, ONLINE
+from chessshootout.backend.backend import Backend
 from chessshootout.backend.fen import apply_fen
 from chessshootout.infra import countries, env
 from chessshootout.frontend.panels.audio import AudioPanel
@@ -66,7 +67,9 @@ from chessshootout.frontend.panels.right import (
 from chessshootout.frontend.modals.result import ResultMenu
 from chessshootout.frontend.audio.sound_manager import SoundManager
 from chessshootout.frontend.modals.start import StartMenu
-from chessshootout.domain.pgn.load import load_pgn_into_backend, parse_time_control
+from chessshootout.domain.pgn.load import (
+    load_pgn_into_backend, parse_time_control, format_time_control,
+)
 from chessshootout.paths import SOUNDS_DIR
 from chessshootout.backend.pieces import PieceColor, PieceType, opponent_of
 from chessshootout.server.protocol import FIRST_MOVE_ABORT_SECONDS, GRACE_SECONDS
@@ -75,7 +78,6 @@ from chessshootout.server.protocol import FIRST_MOVE_ABORT_SECONDS, GRACE_SECOND
 OPPONENT_NAME_FOR_MODE = {
     SINGLE_SCREEN: "Player 2",
     BOT: "Bot",
-    ONLINE: "Opponent",
 }
 
 PLACEHOLDER_RATING = "1500"
@@ -163,6 +165,7 @@ class Frontend(OnlineEventsMixin):
         self.black_country = ""
         self._chosen_side = "white"
         self._time_control = None
+        self._online_config = None
         self.pgn_review = False
         self._flag_fall_played = False
         self._game_bg_cache = None
@@ -395,7 +398,7 @@ class Frontend(OnlineEventsMixin):
 
     def _start_game_from_fen(self, fen):
         try:
-            apply_fen(self.match.backend, fen)
+            apply_fen(Backend(), fen)
         except (ValueError, KeyError):
             return False
         self.mode = SINGLE_SCREEN
@@ -604,7 +607,7 @@ class Frontend(OnlineEventsMixin):
     def _restart_online_search(self):
         log.info("restarting online search")
         self._tear_down_online_session()
-        if getattr(self, "_online_config", None) is not None:
+        if self._online_config is not None:
             self._begin_online_flow(self._online_config)
         else:
             self._return_to_menu_card()
@@ -1208,7 +1211,7 @@ class Frontend(OnlineEventsMixin):
     def _compute_game_info(self):
         if self.mode == "menu":
             return None
-        tc = self._format_time_control() or "∞"
+        tc = format_time_control(self._time_control) or "∞"
         rnd = self._current_round()
         if self.pgn_review:
             return {"mode": "Review", "time_control": tc, "round": rnd,
@@ -1228,12 +1231,6 @@ class Frontend(OnlineEventsMixin):
         total = (self.result_flow._series_scores.get(self.white_name, 0.0)
                  + self.result_flow._series_scores.get(self.black_name, 0.0))
         return int(total) + 1
-
-    def _format_time_control(self):
-        if self._time_control is None:
-            return None
-        initial, incr = self._time_control
-        return f"{int(initial // 60)}+{int(incr)}"
 
     def _update_player_strips(self):
         top_color = self._strip_color_top()

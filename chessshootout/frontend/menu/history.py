@@ -5,7 +5,7 @@ import pygame as pg
 
 from chessshootout.backend.pieces import Piece, PieceColor, PieceType
 from chessshootout.domain.pgn.load import (
-    NO_CLOCK_LABEL, format_relative_time, group_by_csmatchid, scan_pgn_summaries,
+    NO_CLOCK_LABEL, format_relative_time, group_by_csmatchid, result_mark, scan_pgn_summaries,
     time_category,
 )
 from chessshootout.frontend.visual.colors import Colors
@@ -48,15 +48,8 @@ _BADGE_COLOR = {"win": Colors.win, "loss": Colors.loss,
 
 
 def _game_outcome(game, nickname):
-    if nickname == game.black:
-        won, lost = "0-1", "1-0"
-    else:
-        won, lost = "1-0", "0-1"
-    if game.result_code == won:
-        return "win"
-    if game.result_code == lost:
-        return "loss"
-    return "draw"
+    _, code = result_mark(game.result_code, game.white, game.black, nickname)
+    return "draw" if code == "neutral" else code
 
 
 def _game_ko(game, nickname):

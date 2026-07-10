@@ -137,10 +137,12 @@ def test_drawn_match_counts_as_draw(tmp_path):
     assert view._stats() == (0, 0, 1)
 
 
-def test_non_participant_game_buckets_by_white_perspective(tmp_path):
+def test_non_participant_game_buckets_as_neutral(tmp_path):
+    """A game between two other players is neither a win nor a loss for the
+    viewer, regardless of which side won — it counts as neutral (draw bucket)."""
     _write_pgn(tmp_path, "online-20260101-100000.pgn", white="carl", black="dave", result="1-0")
     view = _view(tmp_path, nickname="alice")
-    assert view._stats() == (1, 0, 0)
+    assert view._stats() == (0, 0, 1)
 
 
 def test_count_equals_win_loss_draw_sum(tmp_path):

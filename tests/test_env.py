@@ -40,7 +40,6 @@ def _isolate_env(tmp_path, monkeypatch):
         pytest.param("get_server_addr", "localhost:8000", id="server_addr_defaults_localhost"),
         pytest.param("get_nickname", "", id="nickname_defaults_empty"),
         pytest.param("get_last_mode", "", id="last_mode_defaults_empty"),
-        pytest.param("get_data_dir_override", "", id="data_dir_override_defaults_empty"),
     ],
 )
 def test_getter_returns_default_when_unset(getter, default):
@@ -461,14 +460,14 @@ def test_set_overrides_coercion_is_deterministic_per_alias():
 
 def test_set_data_dir_persists_and_reads():
     env.set_data_dir("/tmp/mygames")
-    assert env.get_data_dir_override() == "/tmp/mygames"
+    assert os.environ.get("CHESS_DATA_DIR") == "/tmp/mygames"
     assert "CHESS_DATA_DIR=/tmp/mygames" in env._ENV_PATH.read_text(encoding="utf-8")
 
 
 def test_set_data_dir_none_clears_override():
     env.set_data_dir("/tmp/mygames")
     env.set_data_dir(None)
-    assert env.get_data_dir_override() == ""
+    assert os.environ.get("CHESS_DATA_DIR") is None
     contents = env._ENV_PATH.read_text(encoding="utf-8") if env._ENV_PATH.exists() else ""
     assert "CHESS_DATA_DIR" not in contents
 

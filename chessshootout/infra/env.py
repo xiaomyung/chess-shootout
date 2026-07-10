@@ -152,10 +152,6 @@ def set_last_mode(mode):
     _persist("CHESS_LAST_MODE", mode)
 
 
-def get_data_dir_override():
-    return os.environ.get("CHESS_DATA_DIR") or ""
-
-
 def set_data_dir(path):
     if path:
         os.environ["CHESS_DATA_DIR"] = path

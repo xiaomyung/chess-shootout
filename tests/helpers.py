@@ -43,11 +43,6 @@ def piece(piece_type, color):
     return Piece(piece_type, color)
 
 
-def kings_only(white_king=sq(7, 4), black_king=sq(0, 4)):
-    """Two-king minimal board. Helpful baseline for many tests."""
-    return {white_king: piece(K, WHITE), black_king: piece(K, BLACK)}
-
-
 def play_moves(backend, moves):
     """Play a list of (from, to) tuples. Asserts each is legal. Returns last MoveResult."""
     last = None

@@ -2,7 +2,9 @@ import pygame as pg
 
 from chessshootout.backend.pieces import PieceColor
 from chessshootout.infra.countries import flag_emoji, name_for
-from chessshootout.frontend.visual.clock_visual import LOW_TIME_FRACTION
+from chessshootout.frontend.visual.clock_visual import (
+    LOW_TIME_FRACTION, format_clock, format_countdown,
+)
 from chessshootout.frontend.visual.colors import Colors
 from chessshootout.frontend.visual.draw import rounded_rect_surface, blit_centered, circle_surface
 from chessshootout.frontend.visual.emoji import emoji_surface
@@ -28,27 +30,6 @@ TOOLTIP_RADIUS = 6
 TOOLTIP_RISE_PX = 5
 TOOLTIP_GAP_PX = 5
 TOOLTIP_EDGE_MARGIN_PX = 2
-
-
-def format_clock(seconds):
-    if seconds is None:
-        return "∞"
-    if seconds < 0:
-        seconds = 0
-    if seconds < 30:
-        total_tenths = int(seconds * 10)
-        minutes, rem = divmod(total_tenths, 600)
-        secs, tenths = divmod(rem, 10)
-        return f"{minutes}:{secs:02d}.{tenths}"
-    total = int(seconds)
-    minutes, secs = divmod(total, 60)
-    return f"{minutes}:{secs:02d}"
-
-
-def format_countdown(seconds):
-    seconds = max(0, int(seconds))
-    minutes, secs = divmod(seconds, 60)
-    return f"{minutes}:{secs:02d}"
 
 
 def give_time_float_alpha(progress):

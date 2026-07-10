@@ -3,7 +3,7 @@ import math
 import pygame as pg
 
 from chessshootout.frontend.modals.base import BaseModal, MODAL_MAX_WIDTH, MODAL_RAIL
-from chessshootout.frontend.panels.player_strip import format_countdown
+from chessshootout.frontend.visual.clock_visual import format_countdown
 from chessshootout.frontend.visual.colors import Colors
 from chessshootout.frontend.visual.draw import supersample, rounded_rect_surface, circle_surface
 from chessshootout.frontend.visual.widgets import draw_button_row

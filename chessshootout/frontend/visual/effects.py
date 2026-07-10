@@ -7,7 +7,7 @@ from chessshootout.frontend.visual import gunfx
 from chessshootout.frontend.visual import cache
 from chessshootout.frontend.visual.gunfx import DT_MAX, RAGDOLL_MS
 from chessshootout.frontend.visual.colors import Colors
-from chessshootout.frontend.visual.draw import soft_blur, GLOW_BLUR_PASSES
+from chessshootout.frontend.visual.draw import soft_blur, smoothstep, GLOW_BLUR_PASSES
 from chessshootout.frontend.visual.emoji import emoji_surface
 from chessshootout.frontend.visual.fonts import get_font, DISPLAY, SANS
 
@@ -608,7 +608,7 @@ class EffectManager:
         if elapsed < 0 or elapsed >= RECOIL_MS:
             return 0.0, 0.0
         r = (gunfx.gun_spec(gun).recoil * weapon["scale"]
-             * (1.0 - gunfx.smoothstep(elapsed / RECOIL_MS)))
+             * (1.0 - smoothstep(elapsed / RECOIL_MS)))
         return -math.cos(aim) * r, -math.sin(aim) * r
 
     def _draw_particle(self, window, p, now):

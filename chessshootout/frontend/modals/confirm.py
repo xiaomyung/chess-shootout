@@ -5,29 +5,12 @@ from chessshootout.frontend.visual.colors import Colors
 from chessshootout.frontend.visual.draw import rounded_rect_surface
 from chessshootout.frontend.visual.emoji import blit_emoji
 from chessshootout.frontend.visual.fonts import fonts_for_width, get_display_font, get_font
-from chessshootout.frontend.visual.widgets import draw_button_row, fit_text_to_rect
+from chessshootout.frontend.visual.widgets import draw_button_row, fit_text_to_rect, wrap_words
 
 
 TITLE_SUB_GAP = 8
 TITLE_TILE_RADIUS = 13
-
-
-def _wrap_words(text, font, max_w, max_lines=3):
-    words = text.split()
-    lines = []
-    line = ""
-    for word in words:
-        trial = f"{line} {word}".strip()
-        if line and font.size(trial)[0] > max_w:
-            lines.append(line)
-            line = word
-            if len(lines) >= max_lines:
-                break
-        else:
-            line = trial
-    if line and len(lines) < max_lines:
-        lines.append(line)
-    return lines
+SUB_MAX_LINES = 3
 
 
 class ConfirmModal(BaseModal):
@@ -95,7 +78,7 @@ class ConfirmModal(BaseModal):
         title_surf = fit_text_to_rect(
             title_font.render(self.title.upper(), True, Colors.text),
             pg.Rect(0, 0, inner_w, title_font.get_height()))
-        sub_lines = _wrap_words(self.sub, sub_font, inner_w) if self.sub else []
+        sub_lines = wrap_words(self.sub, sub_font, inner_w, SUB_MAX_LINES) if self.sub else []
         line_h = sub_font.get_linesize()
 
         icon_side = max(int(panel_w * 0.12), 40) if self.emoji else 0

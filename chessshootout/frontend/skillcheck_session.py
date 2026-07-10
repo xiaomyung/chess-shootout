@@ -242,6 +242,6 @@ class SkillcheckSession:
         return whiffs
 
     def _skillcheck_deadline_ms(self):
-        time_control = getattr(self.frontend, "_time_control", None)
+        time_control = self.frontend._time_control
         initial = time_control[0] if time_control and time_control[0] else 0
         return int(skillcheck_deadline_ms(initial))

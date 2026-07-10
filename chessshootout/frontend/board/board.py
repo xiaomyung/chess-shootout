@@ -12,7 +12,7 @@ from chessshootout.frontend.visual.cache import (
     new_cache, new_size_cache, memoized_surface, render_text,
 )
 from chessshootout.frontend.visual.colors import Colors
-from chessshootout.frontend.visual.draw import supersample
+from chessshootout.frontend.visual.draw import supersample, smoothstep
 from chessshootout.frontend.visual.effects import EffectManager
 from chessshootout.frontend.visual.icons import piece_png_path
 from chessshootout.domain.premoves import Premove, speculative_board
@@ -33,10 +33,6 @@ RESTORE_SETTLE_DECAY = 4.0
 RESTORE_SETTLE_WAVES = 1.25
 RESTORE_ROCK_DEG = 7.5
 RESTORE_ROCK_WAVES = 1.15
-
-
-def _smoothstep(x):
-    return x * x * (3.0 - 2.0 * x)
 
 
 def _draw_capsule(surf, p1, p2, width, color):
@@ -1254,7 +1250,7 @@ class Board:
 
     @staticmethod
     def _restore_state(t):
-        alpha = int(255 * _smoothstep(min(t / RESTORE_FADE_PORTION, 1.0)))
+        alpha = int(255 * smoothstep(min(t / RESTORE_FADE_PORTION, 1.0)))
         if t < RESTORE_FALL_PORTION:
             p = t / RESTORE_FALL_PORTION
             return -RESTORE_DROP_FRAC * (1.0 - p * p), alpha, 0.0

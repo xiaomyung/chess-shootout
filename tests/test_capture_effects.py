@@ -34,6 +34,7 @@ from chessshootout.backend.utils import Square
 from chessshootout.frontend.board import Board
 from chessshootout.frontend.frontend import Frontend
 from chessshootout.frontend.visual import gunfx
+from chessshootout.frontend.visual import draw
 from chessshootout.frontend.visual import effects as effects_module
 from chessshootout.frontend.visual.effects import (
     AIM_MS, CALLOUT_LG_MS, CALLOUT_XL_MS, CHECK_DROP_MS, DRAW_MS, HIT_WORDS,
@@ -590,9 +591,9 @@ def test_gun_specs_are_frozen():
 
 
 def test_smoothstep_clamps_and_midpoint():
-    assert gunfx.smoothstep(-3) == 0.0
-    assert gunfx.smoothstep(5) == 1.0
-    assert gunfx.smoothstep(0.5) == pytest.approx(0.5)
+    assert draw.smoothstep(-3) == 0.0
+    assert draw.smoothstep(5) == 1.0
+    assert draw.smoothstep(0.5) == pytest.approx(0.5)
 
 
 def test_weapon_scale_folds_in_spec_scale():

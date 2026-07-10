@@ -28,7 +28,6 @@ def resource_path(*parts):
     return get_asset_base().joinpath(*parts)
 
 
-PROJECT_ROOT = get_asset_base()
 SOUNDS_DIR = resource_path("assets", "sounds")
 PIECES_PNG_DIR = resource_path("assets", "pieces_png")
 
@@ -38,10 +37,6 @@ def get_app_version():
         return resource_path("assets", "version.txt").read_text(encoding="utf-8").strip()
     except OSError:
         return ""
-
-
-def _source_root():
-    return _repo_root()
 
 
 def _exe_dir():
@@ -64,19 +59,19 @@ def _portable_dir():
 def _default_config_dir():
     if is_frozen():
         return Path(platformdirs.user_config_dir(APP_NAME, APP_AUTHOR))
-    return _source_root()
+    return _repo_root()
 
 
 def _default_data_dir():
     if is_frozen():
         return Path(platformdirs.user_data_dir(APP_NAME, APP_AUTHOR))
-    return _source_root()
+    return _repo_root()
 
 
 def _default_log_dir():
     if is_frozen():
         return Path(platformdirs.user_log_dir(APP_NAME, APP_AUTHOR))
-    return _source_root()
+    return _repo_root()
 
 
 def get_config_dir():

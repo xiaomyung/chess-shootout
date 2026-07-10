@@ -6,6 +6,10 @@ import pygame as pg
 from chessshootout.frontend.visual.colors import Colors
 
 
+SCALE_MIN = 0.85
+SCALE_MAX = 1.5
+SCALE_REF_HEIGHT = 760.0
+
 _DITHER_TILES = {}
 
 
@@ -54,7 +58,7 @@ def radial_gradient(n, cx, cy, rx, ry, c0, c1, c2):
 
 
 def grid_step(h):
-    scale = max(0.85, min(1.5, h / 760.0))
+    scale = max(SCALE_MIN, min(SCALE_MAX, h / SCALE_REF_HEIGHT))
     return max(int(64 * scale), 32)
 
 

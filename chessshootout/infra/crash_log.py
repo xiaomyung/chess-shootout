@@ -4,7 +4,7 @@ from collections import deque
 from datetime import datetime
 from pathlib import Path
 
-from chessshootout.paths import PROJECT_ROOT
+from chessshootout import paths
 from chessshootout.infra.log_format import make_formatter
 
 
@@ -65,7 +65,7 @@ def gather_state(frontend):
 
 
 def write_crash_log(exc, log_buffer, state, *, root=None):
-    base = Path(root) if root is not None else PROJECT_ROOT
+    base = Path(root) if root is not None else paths.get_log_dir()
     crashlogs_dir = base / CRASHLOG_DIR_NAME
     crashlogs_dir.mkdir(parents=True, exist_ok=True)
     filename = f"{datetime.now().strftime('%Y%m%d-%H%M%S')}.txt"

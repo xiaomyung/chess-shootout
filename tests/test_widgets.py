@@ -12,6 +12,7 @@ from chessshootout.frontend.visual.widgets import (
     BUTTON_LABEL_PADDING_PX,
     draw_button, draw_button_row,
     fit_text_to_rect,
+    wrap_words,
 )
 
 
@@ -148,3 +149,29 @@ def test_draw_button_scales_long_label_to_fit(monkeypatch):
     assert len(text_scales) == 1
     scaled_w, _ = text_scales[0]
     assert scaled_w <= rect.width - 2 * BUTTON_LABEL_PADDING_PX
+
+
+def test_wrap_words_keeps_each_word_on_its_own_line_at_min_width():
+    lines = wrap_words("alpha beta gamma", get_font(12, bold=True), 1)
+    assert lines == ["alpha", "beta", "gamma"]
+
+
+def test_wrap_words_does_not_split_a_single_word():
+    font = get_font(12, bold=True)
+    assert wrap_words("supercalifragilistic", font, 1) == ["supercalifragilistic"]
+
+
+def test_wrap_words_stays_one_line_when_width_is_ample():
+    font = get_font(12, bold=True)
+    assert wrap_words("short text here", font, 10000) == ["short text here"]
+
+
+def test_wrap_words_caps_at_max_lines_and_drops_the_remainder():
+    font = get_font(12, bold=True)
+    lines = wrap_words("alpha beta gamma delta", font, 1, max_lines=2)
+    assert lines == ["alpha", "beta"]
+
+
+def test_wrap_words_empty_text_returns_the_text_as_a_single_line():
+    font = get_font(12, bold=True)
+    assert wrap_words("", font, 100) == [""]

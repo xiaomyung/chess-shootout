@@ -4,7 +4,7 @@ import pygame as pg
 
 from chessshootout.frontend.modals.base import BaseModal
 from chessshootout.online.client import RECONNECT_TOTAL_SECONDS
-from chessshootout.frontend.panels.player_strip import format_countdown
+from chessshootout.frontend.visual.clock_visual import format_countdown
 from chessshootout.frontend.visual.colors import Colors
 from chessshootout.frontend.visual.cache import new_cache, memoized_surface, render_text
 from chessshootout.frontend.visual.draw import supersample

@@ -1,9 +1,8 @@
-"""BaseModal / BasePanel share set_rect/font scaffolding.
+"""BaseModal's set_rect/font scaffolding plus its visibility contract.
 
-Both copy the rect on set_rect, fire _on_rect_changed, and size fonts off rect
-height with a min_size floor. BaseModal additionally owns a real `visible`
-attribute plus default show()/hide()/is_visible() — BasePanel has no visibility
-concept at all.
+set_rect copies the rect and fires _on_rect_changed; fonts scale off rect
+height with a min_size floor; show()/hide()/is_visible() flip a real
+`visible` attribute.
 """
 
 import os
@@ -14,7 +13,6 @@ import pygame as pg
 import pytest
 
 from chessshootout.frontend.modals.base import BaseModal
-from chessshootout.frontend.panels.base import BasePanel
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -30,18 +28,16 @@ def window():
     return pg.display.get_surface()
 
 
-@pytest.mark.parametrize("cls", [BaseModal, BasePanel])
-def test_base_widget_default_contract(window, cls):
-    """Both bases share an empty rect + inert handle_click."""
-    widget = cls(window)
-    assert widget.rect == pg.Rect(0, 0, 0, 0)
-    assert widget.rect.size == (0, 0)
-    assert widget.handle_click((0, 0)) is False
-    assert widget.handle_click((50, 50)) is False
+def test_base_modal_default_contract(window):
+    """Empty rect + inert handle_click out of the box."""
+    modal = BaseModal(window)
+    assert modal.rect == pg.Rect(0, 0, 0, 0)
+    assert modal.rect.size == (0, 0)
+    assert modal.handle_click((0, 0)) is False
+    assert modal.handle_click((50, 50)) is False
 
 
 def test_base_modal_is_hidden_by_default(window):
-    """BaseModal defines is_visible (panels do not); the unconfigured default is hidden."""
     assert BaseModal(window).is_visible() is False
 
 
@@ -55,13 +51,6 @@ def test_base_modal_show_hide_toggle_visible(window):
     modal.hide()
     assert modal.visible is False
     assert modal.is_visible() is False
-
-
-def test_base_panel_has_no_visibility_concept(window):
-    """BasePanel never gained a visible flag — panels aren't shown/hidden like modals."""
-    panel = BasePanel(window)
-    assert not hasattr(panel, "visible")
-    assert not hasattr(panel, "is_visible")
 
 
 def test_base_modal_set_rect_stores_a_copy(window):
@@ -103,15 +92,3 @@ def test_base_modal_font_respects_min_size(window):
     raw = modal.font(factor=4, min_size=1).get_height()
     assert floored >= 18
     assert floored > raw
-
-
-def test_base_panel_set_rect_and_font(window):
-    """Panel stores its rect verbatim and sizes fonts off height once above the floor."""
-    panel = BasePanel(window)
-    panel.set_rect(pg.Rect(0, 0, 100, 200))
-    assert panel.rect == pg.Rect(0, 0, 100, 200)
-    tall = panel.font(factor=10, min_size=12).get_height()
-    panel.set_rect(pg.Rect(0, 0, 100, 100))
-    short = panel.font(factor=10, min_size=12).get_height()
-    assert tall >= 12
-    assert tall > short

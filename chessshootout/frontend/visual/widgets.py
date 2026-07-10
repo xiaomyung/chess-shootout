@@ -118,6 +118,25 @@ def draw_series_chip(window, center, name_a, name_b, score, name_font, score_fon
     return pg.Rect(x0, y0, w, h)
 
 
+def wrap_words(text, font, max_w, max_lines=None):
+    words = text.split()
+    if not words:
+        return [text]
+    lines = []
+    cur = words[0]
+    for word in words[1:]:
+        trial = f"{cur} {word}"
+        if font.size(trial)[0] <= max_w:
+            cur = trial
+        else:
+            lines.append(cur)
+            cur = word
+            if max_lines is not None and len(lines) >= max_lines:
+                return lines
+    lines.append(cur)
+    return lines
+
+
 _FIT_TEXT_CACHE = new_size_cache()
 
 

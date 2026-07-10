@@ -7,6 +7,7 @@ import pygame as pg
 from chessshootout import paths
 from chessshootout.frontend.visual import cache
 from chessshootout.frontend.visual.colors import Colors
+from chessshootout.frontend.visual.draw import smoothstep
 
 
 GUN_DRAW_SPINS_LAND = 5
@@ -18,10 +19,8 @@ DT_MAX = 0.05
 
 @dataclass(frozen=True)
 class GunSpec:
-    name: str
     scale: float = 1.0
     recoil: float = RECOIL_DEFAULT
-    style: str = "bullet"
     speed: float = 1066.0
     size: float = 5.0
     length: float = 12.0
@@ -31,19 +30,19 @@ class GunSpec:
 
 
 GUNS = {
-    "revolver": GunSpec("revolver", scale=0.363, recoil=4, style="bullet",
+    "revolver": GunSpec(scale=0.363, recoil=4,
                         speed=1066, size=5, length=12, color=Colors.amber_hi),
-    "lever_action": GunSpec("lever_action", scale=1.0, recoil=7, style="bullet",
+    "lever_action": GunSpec(scale=1.0, recoil=7,
                             speed=1170, size=5, length=17, color=Colors.amber_hi),
-    "hand_cannon": GunSpec("hand_cannon", scale=0.50, recoil=9, style="slug",
+    "hand_cannon": GunSpec(scale=0.50, recoil=9,
                            speed=780, size=9, length=13, color=Colors.amber),
-    "shotgun": GunSpec("shotgun", scale=1.0, recoil=10, style="pellet",
+    "shotgun": GunSpec(scale=1.0, recoil=10,
                        speed=936, size=4, length=8, pellets=6, spread=0.16,
                        color=Colors.amber_hi),
-    "blunderbuss": GunSpec("blunderbuss", scale=1.0, recoil=12, style="pellet",
+    "blunderbuss": GunSpec(scale=1.0, recoil=12,
                            speed=728, size=4, length=7, pellets=8, spread=0.26,
                            color=Colors.amber_hi),
-    "ray_gun": GunSpec("ray_gun", scale=0.33, recoil=4, style="bolt",
+    "ray_gun": GunSpec(scale=0.33, recoil=4,
                        speed=1300, size=6, length=28, color=Colors.accent),
 }
 
@@ -99,11 +98,6 @@ def draw_bullet(window, head, ux, uy, color, size, length):
     angle = math.degrees(math.atan2(-uy, ux))
     img = pg.transform.rotate(base, angle)
     window.blit(img, img.get_rect(center=head))
-
-
-def smoothstep(x):
-    x = max(0.0, min(1.0, x))
-    return x * x * (3 - 2 * x)
 
 
 def aimed(image, pivot_img, target_img, aim):

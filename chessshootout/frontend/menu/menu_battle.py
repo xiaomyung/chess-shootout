@@ -10,13 +10,10 @@ from chessshootout.frontend.visual import backdrop
 from chessshootout.frontend.visual.gunfx import DT_MAX, GUN_DRAW_SPINS_LAND, RAGDOLL_MS
 from chessshootout.frontend.visual.cache import render_text, new_cache, memoized_surface
 from chessshootout.frontend.visual.colors import Colors
+from chessshootout.frontend.visual.draw import smoothstep
 from chessshootout.frontend.visual.fonts import get_font
-from chessshootout.frontend.visual.widgets import build_ko_badge, KO_WINK_MS
+from chessshootout.frontend.visual.widgets import build_ko_badge, wrap_words, KO_WINK_MS
 
-
-SCALE_MIN = 0.85
-SCALE_MAX = 1.5
-SCALE_REF_HEIGHT = 760.0
 
 ROUTE_MARGIN = 22
 MAX_PAWNS = 15
@@ -147,7 +144,8 @@ class MenuBattle:
     def set_rect(self, rect):
         rect = pg.Rect(rect)
         self.rect = rect
-        self.scale = max(SCALE_MIN, min(SCALE_MAX, rect.height / SCALE_REF_HEIGHT))
+        self.scale = max(backdrop.SCALE_MIN,
+                         min(backdrop.SCALE_MAX, rect.height / backdrop.SCALE_REF_HEIGHT))
         self._build_art()
         self._build_shadows()
         self._build_weapons()
@@ -285,18 +283,6 @@ class MenuBattle:
             if cost < best_cost:
                 best_cost, best = cost, (cx, cy)
         return best
-
-    def _in_obstacle(self, x, y):
-        return self._point_in(self.obstacle, x, y)
-
-    def _avoid(self, x, y):
-        return self._push_out(self.obstacle, x, y)
-
-    def _seg_hits_rect(self, ax, ay, bx, by):
-        return self._seg_hits(self.obstacle, ax, ay, bx, by)
-
-    def _route_target(self, px, py, tx, ty):
-        return self._route(self.obstacle, px, py, tx, ty)
 
     def _rand_waypoint(self, o=None):
         w, h = self.rect.width, self.rect.height
@@ -665,7 +651,7 @@ class MenuBattle:
             sp = speed * factor
             self.projectiles.append({
                 "x": mx, "y": my, "vx": math.cos(ang) * sp, "vy": math.sin(ang) * sp,
-                "style": spec.style, "size": spec.size * self.scale,
+                "size": spec.size * self.scale,
                 "len": spec.length * self.scale, "color": spec.color,
                 "is_queen": is_queen, "born": now_ms, "max_ms": PROJECTILE_MAX_MS})
 
@@ -845,15 +831,15 @@ class MenuBattle:
         land = self._intro_land or (self.rect.width * 0.5, self.rect.height * 0.6)
         h = art["h"]
         logo_fit = (self._logo_rect.height * 0.92 / h) if self._logo_rect.height > 0 else 0.5
-        fly = gunfx.smoothstep((t - 0.1) / 0.9)
+        fly = smoothstep((t - 0.1) / 0.9)
         end_cx, end_cy = land[0], land[1] - h / 2
         cx = lx + (end_cx - lx) * fly
         cy = ly + (end_cy - ly) * fly - math.sin(fly * math.pi) * INTRO_ARC * self.scale
-        grow = gunfx.smoothstep(t / 0.35)
+        grow = smoothstep(t / 0.35)
         s = logo_fit + (1.0 - logo_fit) * grow
         sprite = pg.transform.smoothscale(
             art["normal"], (max(int(art["w"] * s), 1), max(int(h * s), 1))).copy()
-        g = int(255 * (1.0 - INTRO_DIM * gunfx.smoothstep(t)))
+        g = int(255 * (1.0 - INTRO_DIM * smoothstep(t)))
         sprite.fill((g, g, g, 255), special_flags=pg.BLEND_RGBA_MULT)
         flip = max(0.0, min(1.0, (t - 0.35) / 0.65))
         if flip:
@@ -1003,21 +989,6 @@ class MenuBattle:
         layer.set_alpha(max(0, alpha))
         window.blit(layer, (sx, sy))
 
-    @staticmethod
-    def _wrap_words(text, font, max_w):
-        words = text.split()
-        if not words:
-            return [text]
-        lines, cur = [], words[0]
-        for word in words[1:]:
-            if font.size(cur + " " + word)[0] <= max_w:
-                cur += " " + word
-            else:
-                lines.append(cur)
-                cur = word
-        lines.append(cur)
-        return lines
-
     def _fits_above(self, rect):
         if rect.top < self.rect.y + self.top_inset + 4:
             return False
@@ -1074,7 +1045,7 @@ class MenuBattle:
             cache = bub.setdefault("_wrap", {})
             ckey = (round(scale, 3), mw // 16)
             if ckey not in cache:
-                lines = self._wrap_words(bub["text"], font, mw)
+                lines = wrap_words(bub["text"], font, mw)
                 surfs = [render_text(font, line, pg.Color(txt)) for line in lines]
                 tw = max(s.get_width() for s in surfs)
                 th = sum(s.get_height() for s in surfs) + line_gap * (len(surfs) - 1)

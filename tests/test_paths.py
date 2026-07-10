@@ -7,7 +7,7 @@ from chessshootout import paths
 def test_source_mode_defaults(monkeypatch):
     monkeypatch.setattr(sys, "frozen", False, raising=False)
     monkeypatch.delenv("CHESS_DATA_DIR", raising=False)
-    root = paths._source_root()
+    root = paths._repo_root()
     assert paths.get_asset_base() == root
     assert paths.get_config_dir() == root
     assert paths.get_data_dir() == root
@@ -17,7 +17,7 @@ def test_source_mode_defaults(monkeypatch):
 
 def test_resource_path_joins_under_asset_base(monkeypatch):
     monkeypatch.setattr(sys, "frozen", False, raising=False)
-    expected = paths._source_root() / "assets" / "fonts" / "x.ttf"
+    expected = paths._repo_root() / "assets" / "fonts" / "x.ttf"
     assert paths.resource_path("assets", "fonts", "x.ttf") == expected
 
 
@@ -39,8 +39,8 @@ def test_override_changes_only_data_dir(monkeypatch):
     monkeypatch.setenv("CHESS_DATA_DIR", "/tmp/cd")
     assert paths.get_data_dir() == Path("/tmp/cd")
     assert paths.get_games_dir() == Path("/tmp/cd/games")
-    assert paths.get_config_dir() == paths._source_root()
-    assert paths.get_log_dir() == paths._source_root()
+    assert paths.get_config_dir() == paths._repo_root()
+    assert paths.get_log_dir() == paths._repo_root()
 
 
 def test_override_expands_user(monkeypatch):

@@ -6,10 +6,10 @@ import pygame as pg
 import pytest
 
 from chessshootout.backend.pieces import PieceType, PieceColor
+from chessshootout.frontend.visual.clock_visual import format_clock, format_countdown
 from chessshootout.frontend.visual.colors import Colors
 from chessshootout.frontend.panels.player_strip import (
-    GIVE_TIME_FLOAT_MS, PlayerStrip, format_clock, format_countdown,
-    give_time_float_alpha,
+    GIVE_TIME_FLOAT_MS, PlayerStrip, give_time_float_alpha,
 )
 
 

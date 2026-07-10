@@ -20,7 +20,7 @@ import pytest
 
 from chessshootout.online.transport import (
     FatalResumeError, SchemaVersionMismatch, ServerTransport, ServerWebSocket,
-    TransportError, TransportHTTPError,
+    TransportHTTPError,
 )
 from chessshootout.server.protocol import (
     HealthResponse, MatchmakeRequest, MatchmakeResponse, PROTOCOL_VERSION,
@@ -57,22 +57,6 @@ def fake_http(captured):
     ))
     with httpx.Client(transport=transport) as client:
         yield client
-
-
-def test_healthz_hits_get_path(captured):
-    body = {"status": "ok", "version": PROTOCOL_VERSION,
-            "rooms_active": 7, "queue_depth": 2, "uptime_s": 99.9}
-    transport = httpx.MockTransport(_make_handler(
-        status_code=200, body=body, capture=captured,
-    ))
-    with httpx.Client(transport=transport) as client:
-        st = ServerTransport("localhost:8000", http_client=client)
-        resp = st.healthz()
-    assert isinstance(resp, HealthResponse)
-    assert resp.rooms_active == 7
-    assert resp.queue_depth == 2
-    assert captured[0]["method"] == "GET"
-    assert captured[0]["url"].endswith("/healthz")
 
 
 def test_reclaim_blocking_returns_typed_response(captured):
@@ -131,40 +115,15 @@ def test_resume_blocking_returns_typed_response(captured):
     assert captured[0]["url"].endswith("/resume")
 
 
-@pytest.mark.parametrize(
-    "status_code, body, expected_exc, expected_status",
-    [
-        pytest.param(500, {"reason": "boom"}, TransportHTTPError, 500,
-                     id="unknown_5xx_raises_http_error"),
-        pytest.param(400, {"reason": Reason.VERSION_MISMATCH},
-                     SchemaVersionMismatch, None,
-                     id="version_mismatch_reason_raises_schema_mismatch"),
-    ],
-)
-def test_sync_http_error_status_maps_to_exception(
-    captured, status_code, body, expected_exc, expected_status,
-):
-    """Sync _parse_response: VERSION_MISMATCH reason short-circuits to
-    SchemaVersionMismatch; any other >=400 surfaces TransportHTTPError."""
-    transport = httpx.MockTransport(_make_handler(
-        status_code=status_code, body=body, capture=captured,
-    ))
-    with httpx.Client(transport=transport) as client:
-        st = ServerTransport("localhost:8000", http_client=client)
-        with pytest.raises(expected_exc) as info:
-            st.healthz()
-    if expected_status is not None:
-        assert info.value.status_code == expected_status
-
-
-def test_network_failure_surfaces_transport_error():
+def test_reclaim_blocking_returns_none_on_network_failure():
+    """_sync_request wraps a connection failure in TransportError; reclaim_blocking
+    catches it and reports it the same way as any other unreachable-server case."""
     def boom(request):
         raise httpx.ConnectError("nope")
     transport = httpx.MockTransport(boom)
     with httpx.Client(transport=transport) as client:
         st = ServerTransport("localhost:8000", http_client=client)
-        with pytest.raises(TransportError):
-            st.healthz()
+        assert st.reclaim_blocking(ALICE) is None
 
 
 @pytest.mark.asyncio
@@ -263,15 +222,20 @@ async def test_resume_async_5xx_returns_none_for_retry():
 
 
 @pytest.mark.asyncio
-async def test_healthz_async_returns_typed_response():
+async def test_healthz_async_returns_typed_response(captured):
     body = {"status": "ok", "version": PROTOCOL_VERSION,
             "rooms_active": 1, "queue_depth": 0, "uptime_s": 1.5}
-    transport = httpx.MockTransport(_make_handler(status_code=200, body=body))
+    transport = httpx.MockTransport(_make_handler(
+        status_code=200, body=body, capture=captured,
+    ))
     async with httpx.AsyncClient(transport=transport) as http:
         st = ServerTransport("localhost:8000")
         resp = await st.healthz_async(http)
-    assert resp is not None
+    assert isinstance(resp, HealthResponse)
     assert resp.rooms_active == 1
+    assert resp.queue_depth == 0
+    assert captured[0]["method"] == "GET"
+    assert captured[0]["url"].endswith("/healthz")
 
 
 @pytest.mark.asyncio

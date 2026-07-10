@@ -22,7 +22,6 @@ from chessshootout.frontend.menu.menu_battle import (
     WEAPON_SWITCH_MIN, WEAPON_SWITCH_MAX, GUN_DRAW_SEC, PROJECTILE_MAX_MS,
 )
 from chessshootout.frontend.visual.colors import Colors
-from chessshootout.frontend.visual.fonts import get_font
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -246,7 +245,7 @@ def test_weapon_swap_drops_the_old_gun():
 def test_initial_pawns_spawn_outside_the_card():
     b = _battle()
     for p in b.pawns:
-        assert not b._in_obstacle(p["x"], p["y"]), "a pawn spawned under the card"
+        assert not b._point_in(b.obstacle, p["x"], p["y"]), "a pawn spawned under the card"
 
 
 def test_set_avoid_rect_pushes_existing_entities_out():
@@ -256,8 +255,8 @@ def test_set_avoid_rect_pushes_existing_entities_out():
     b.queen["x"], b.queen["y"] = new_card.center
     b.pawns[0]["x"], b.pawns[0]["y"] = new_card.center
     b.set_avoid_rect(new_card)
-    assert not b._in_obstacle(b.queen["x"], b.queen["y"])
-    assert not b._in_obstacle(b.pawns[0]["x"], b.pawns[0]["y"])
+    assert not b._point_in(b.obstacle, b.queen["x"], b.queen["y"])
+    assert not b._point_in(b.obstacle, b.pawns[0]["x"], b.pawns[0]["y"])
 
 
 def test_set_rect_rescales_without_respawning():
@@ -274,8 +273,8 @@ def test_set_rect_rescales_without_respawning():
 def test_in_obstacle_inside_vs_outside():
     b = _battle()
     cx, cy = b.avoid_rect.center
-    assert b._in_obstacle(cx, cy) is True
-    assert b._in_obstacle(10, 10) is False
+    assert b._point_in(b.obstacle, cx, cy) is True
+    assert b._point_in(b.obstacle, 10, 10) is False
 
 
 def test_avoid_pushes_inside_point_to_nearest_edge():
@@ -283,28 +282,28 @@ def test_avoid_pushes_inside_point_to_nearest_edge():
     o = b.obstacle
     near_left_x = o[0] + 5
     mid_y = (o[1] + o[3]) / 2
-    out_x, out_y = b._avoid(near_left_x, mid_y)
+    out_x, out_y = b._push_out(o, near_left_x, mid_y)
     assert out_x == o[0]
     assert out_y == mid_y
 
 
 def test_avoid_leaves_outside_point_untouched():
     b = _battle()
-    assert b._avoid(5, 5) == (5, 5)
+    assert b._push_out(b.obstacle, 5, 5) == (5, 5)
 
 
 def test_seg_hits_rect_detects_crossing():
     b = _battle()
     cx, cy = b.avoid_rect.center
-    assert b._seg_hits_rect(0, cy, b.rect.width, cy) is True
-    assert b._seg_hits_rect(0, 5, b.rect.width, 5) is False
+    assert b._seg_hits(b.obstacle, 0, cy, b.rect.width, cy) is True
+    assert b._seg_hits(b.obstacle, 0, 5, b.rect.width, 5) is False
 
 
 def test_route_target_rounds_a_corner_when_blocked():
     b = _battle()
     o = b.obstacle
     cy = (o[1] + o[3]) / 2
-    target = b._route_target(0, cy, b.rect.width, cy)
+    target = b._route(o, 0, cy, b.rect.width, cy)
     assert tuple(target) != (b.rect.width, cy)
     corners = {(o[0] - 22, o[1] - 22), (o[2] + 22, o[1] - 22),
                (o[2] + 22, o[3] + 22), (o[0] - 22, o[3] + 22)}
@@ -323,7 +322,7 @@ def test_waypoints_stay_in_the_queens_reachable_band():
 
 def test_route_target_goes_straight_when_clear():
     b = _battle()
-    assert b._route_target(0, 5, 200, 5) == (200, 5)
+    assert b._route(b.obstacle, 0, 5, 200, 5) == (200, 5)
 
 
 def test_no_obstacle_when_avoid_rect_empty():
@@ -331,7 +330,7 @@ def test_no_obstacle_when_avoid_rect_empty():
     b.set_rect(pg.Rect(0, 0, 800, 600))
     b.set_avoid_rect(pg.Rect(0, 0, 0, 0))
     assert b.obstacle is None
-    assert b._avoid(400, 300) == (400, 300)
+    assert b._push_out(b.obstacle, 400, 300) == (400, 300)
 
 
 def test_entity_obstacle_expands_by_full_model_extent():
@@ -1124,21 +1123,6 @@ def test_renders_without_piece_art():
     win.fill((0, 0, 0))
     b.draw(win)
     assert len(_distinct_colors(win, win.get_rect())) > 5
-
-
-def test_wrap_words_keeps_each_word_on_its_own_line_at_min_width():
-    lines = MenuBattle._wrap_words("alpha beta gamma", get_font(12, bold=True), 1)
-    assert lines == ["alpha", "beta", "gamma"]
-
-
-def test_wrap_words_does_not_split_a_single_word():
-    font = get_font(12, bold=True)
-    assert MenuBattle._wrap_words("supercalifragilistic", font, 1) == ["supercalifragilistic"]
-
-
-def test_wrap_words_stays_one_line_when_width_is_ample():
-    font = get_font(12, bold=True)
-    assert MenuBattle._wrap_words("short text here", font, 10000) == ["short text here"]
 
 
 def _amber_in_band(window, y0, y1):

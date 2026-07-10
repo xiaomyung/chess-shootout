@@ -159,7 +159,7 @@ def test_reset_clears_override(tmp_path, monkeypatch):
     app.settings._on_reset_data_folder()
     if app.confirm_modal.is_visible():
         _draw_then_click_confirm(app, "no")
-    assert env.get_data_dir_override() == ""
+    assert os.environ.get("CHESS_DATA_DIR") is None
 
 
 def test_menu_hidden_while_overlay_modal_open():
