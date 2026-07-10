@@ -66,7 +66,10 @@ server for online two-player matches.
 
 **PGN**
 - Every game auto-saves to `games/<prefix>-YYYYMMDD-HHMMSS.pgn` (`local`,
-  `bot`, or `online`).
+  `bot`, or `online`), continuously while you play — an in-progress game is
+  kept on disk with `[Result "*"]` and finalized when it ends, so a crash or
+  disconnect can't lose it. If the games folder isn't writable you get a
+  toast and the save falls back to the OS data directory.
 - Load and review past games from the **History** menu; step through with
   the arrow keys.
 - Skill-check outcomes (hits and misses) are saved as standard `{comments}` and
