@@ -2,7 +2,8 @@ from chessshootout.server import logging_setup
 from chessshootout.server.broadcasts import finalize_and_broadcast, resolve_skillcheck_fail
 from chessshootout.server.connections import send
 from chessshootout.server.protocol import (
-    ConnectionStatusMessage, FIRST_MOVE_ABORT_SECONDS, Reason, RematchUpdateMessage,
+    ConnectionStatusMessage, FIRST_MOVE_ABORT_SECONDS, GRACE_SECONDS, Reason,
+    RematchUpdateMessage,
 )
 from chessshootout.server.rooms import (
     REMATCH_ABSOLUTE_CAP_SECONDS, REMATCH_IDLE_SECONDS, POST_GAME_DISCONNECT_GRACE,
@@ -48,11 +49,11 @@ class Sweep:
 
     async def step_skillcheck_deadline(self):
         now_ms = self._now_ms()
-        for room in list(self.rooms._active.values()):
+        for room in self.rooms.active_rooms():
             pending = room.pending_skillcheck
             if room.result is not None or pending is None:
                 continue
-            expired = now_ms > pending.expires_at_ms
+            expired = pending.is_expired(now_ms)
             if not expired and pending.kind == SkillCheckKind.AIM:
                 challenge = online.challenge_from(
                     pending.kind, pending.seed, pending.value_diff)
@@ -61,7 +62,7 @@ class Sweep:
             if expired:
                 log.info("skillcheck deadline room=%s color=%s kind=%s",
                          room.room_id, pending.color, pending.kind.value)
-                await resolve_skillcheck_fail(self.connections, room)
+                await resolve_skillcheck_fail(self.rooms, self.connections, room)
 
     async def step_heartbeat_timeout(self):
         for room, color in list(self.rooms.heartbeat_timed_out_rooms()):
@@ -72,7 +73,7 @@ class Sweep:
                 await send(opp_ws, ConnectionStatusMessage(opp_state="reconnecting"))
 
     async def step_clock_and_first_move_abort(self):
-        for room in list(self.rooms._active.values()):
+        for room in self.rooms.active_rooms():
             if room.result is not None:
                 continue
             backend = room.backend
@@ -96,8 +97,14 @@ class Sweep:
 
     async def step_grace_expired(self):
         for room, gone_color in list(self.rooms.grace_expired_rooms()):
+            if room.result is not None:
+                continue
             slot = room.slot(gone_color)
-            if slot is not None and slot.desync_active:
+            if slot is None or slot.disconnected_at is None:
+                continue
+            if self._now() - slot.disconnected_at < GRACE_SECONDS:
+                continue
+            if slot.desync_active:
                 log.info("aborted room=%s reason=desync gone=%s", room.room_id, gone_color)
                 await finalize_and_broadcast(self.rooms, self.connections, room,
                                              Reason.ABORTED_DISCONNECT)
@@ -110,7 +117,7 @@ class Sweep:
 
     def step_drop_orphans_pre_game(self):
         now = self._now()
-        for room in list(self.rooms._active.values()):
+        for room in self.rooms.active_rooms():
             if room.result is not None or room.first_move_at is not None:
                 continue
             white_present = (room.white is not None
@@ -134,7 +141,7 @@ class Sweep:
 
     async def step_post_game(self):
         now = self._now()
-        for room in list(self.rooms._active.values()):
+        for room in self.rooms.active_rooms():
             if room.result is None:
                 continue
             white_present = self.connections.get_for_color(room, "white") is not None

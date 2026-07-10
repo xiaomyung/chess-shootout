@@ -7,7 +7,7 @@ GC) so we drive each independently without the full asyncio loop.
 import pytest
 
 from chessshootout.server.app import create_app
-from chessshootout.server.protocol import HEARTBEAT_TIMEOUT_SECONDS, Reason
+from chessshootout.server.protocol import GRACE_SECONDS, HEARTBEAT_TIMEOUT_SECONDS, Reason
 from chessshootout.server.sweep import PREGAME_CONNECT_GRACE_SECONDS
 from tests.helpers import FakeClock, fake_uuid4
 
@@ -96,6 +96,60 @@ async def test_sweep_step_grace_expired_after_desync_aborts(sweep, app, clock):
     clock.advance(61)
     await sweep.step_grace_expired()
     assert room.result == (Reason.ABORTED_DISCONNECT, None)
+
+
+CARL = fake_uuid4(3)
+DAVE = fake_uuid4(4)
+
+
+@pytest.mark.asyncio
+async def test_sweep_step_grace_expired_revalidates_a_reconnect_that_lands_mid_pass(
+    sweep, app, clock,
+):
+    """grace_expired_rooms() snapshots eagerly, then the loop awaits a broadcast
+    per room -- if a reconnect for a LATER room in the batch lands during an
+    earlier room's await, that later room must not be steamrolled by the stale
+    snapshot read. A fake socket on room_a's present side reconnects room_b's
+    gone player as a side effect of being sent room_a's own result broadcast,
+    which is exactly the kind of state change a truly concurrent task could
+    cause mid-await."""
+    rooms = app.state.rooms
+    connections = app.state.connections
+
+    room_a = await _pair(rooms)
+    room_a.started_at = clock()
+    room_a.first_move_at = clock()
+    room_a.white.connected = True
+    room_a.black.connected = True
+
+    await rooms.enqueue(client_uuid=CARL, nickname="C", session_token="tc",
+                        time_minutes=5, increment_seconds=0, side_preference="white")
+    room_b = await rooms.enqueue(client_uuid=DAVE, nickname="D", session_token="td",
+                                 time_minutes=5, increment_seconds=0, side_preference="black")
+    room_b.started_at = clock()
+    room_b.first_move_at = clock()
+    room_b.white.connected = True
+    room_b.black.connected = True
+
+    rooms.mark_disconnected(room_a.room_id, "white")
+    rooms.mark_disconnected(room_b.room_id, "white")
+    clock.advance(GRACE_SECONDS + 1)
+
+    class ReconnectingWS:
+        def __init__(self):
+            self.sent = []
+
+        async def send_json(self, payload):
+            self.sent.append(payload)
+            rooms.mark_connected(room_b.room_id, "white")
+
+    connections.add(room_a.room_id, room_a.black.client_uuid, ReconnectingWS())
+
+    await sweep.step_grace_expired()
+
+    assert room_a.result == (Reason.ABANDONMENT, "black")
+    assert room_b.result is None, "the reconnect that landed mid-pass must be honored"
+    assert room_b.white.connected is True
 
 
 @pytest.mark.asyncio

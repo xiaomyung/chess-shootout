@@ -4,7 +4,7 @@ import random
 import pytest
 from fastapi.testclient import TestClient
 
-from chessshootout.server.app import PROTOCOL_VERSION, create_app
+from chessshootout.server.app import PROTOCOL_VERSION, WS_CLOSE_SUPERSEDED, create_app
 from chessshootout.server.connections import ConnectionRegistry
 from chessshootout.server.protocol import FIRST_MOVE_ABORT_SECONDS, GRACE_SECONDS, Reason
 from tests.helpers import FakeClock, fake_uuid4
@@ -357,6 +357,27 @@ def test_takeback_request_off_turn_tags_msg_type(client):
             assert err["msg_type"] == "takeback_request"
 
 
+def test_takeback_request_with_no_moves_played_rejected_with_reason(client):
+    """Black (not on move at the start) requests a takeback before any move has
+    landed -- there is nothing to undo, and the client-mapped reason must ride
+    along instead of a silent no-op."""
+    random.seed(0)
+    r1 = _matchmake(client, uuid=ALICE, side="white")
+    r2 = _matchmake(client, uuid=BOB, side="black")
+    with client.websocket_connect(f"/ws/{r1.json()['room_id']}") as ws_w:
+        ws_w.send_text(json.dumps(_auth_msg(r1.json()["session_token"])))
+        with client.websocket_connect(f"/ws/{r2.json()['room_id']}") as ws_b:
+            ws_b.send_text(json.dumps(_auth_msg(r2.json()["session_token"])))
+            ws_w.receive_text()
+            ws_b.receive_text()
+            ws_b.send_text(json.dumps({"version": PROTOCOL_VERSION,
+                                        "type": "takeback_request"}))
+            err = json.loads(ws_b.receive_text())
+            assert err["type"] == "error"
+            assert err["reason"] == Reason.NO_TAKEBACK_AVAILABLE
+            assert err["msg_type"] == "takeback_request"
+
+
 def test_invalid_move_format_rejected(client):
     random.seed(0)
     r1 = _matchmake(client, uuid=ALICE, side="white")
@@ -467,3 +488,46 @@ async def test_resume_ticks_clock_before_snapshotting(app, client, clock):
     snap = r.json()["clock"]
     assert snap["white_remaining"] == pytest.approx(initial_white - 7, abs=0.01)
     assert snap["running_for"] == "white"
+
+
+class _FakeOldSocket:
+    def __init__(self):
+        self.closed_with = None
+
+    async def close(self, code=1000):
+        self.closed_with = code
+
+
+@pytest.mark.asyncio
+async def test_reclaim_closes_a_still_registered_old_socket(app, client):
+    """A reclaim while the previous socket is still registered must revoke it
+    (mirrors the WS_CLOSE_SUPERSEDED pattern already used when a fresh
+    connection displaces an old one) -- otherwise the stale socket keeps
+    working on the rotated-out session token."""
+    rooms = app.state.rooms
+    connections = app.state.connections
+    await rooms.enqueue(client_uuid=ALICE, nickname="A", session_token="ta",
+                        time_minutes=5, increment_seconds=0, side_preference="white")
+    room = await rooms.enqueue(client_uuid=BOB, nickname="B", session_token="tb",
+                               time_minutes=5, increment_seconds=0, side_preference="black")
+    old_ws = _FakeOldSocket()
+    connections.add(room.room_id, ALICE, old_ws)
+
+    r = client.post("/reclaim", json={"version": PROTOCOL_VERSION, "client_uuid": ALICE})
+
+    assert r.status_code == 200
+    assert r.json()["session_token"] != "ta"
+    assert old_ws.closed_with == WS_CLOSE_SUPERSEDED
+
+
+@pytest.mark.asyncio
+async def test_reclaim_with_no_live_socket_is_a_clean_noop(app, client):
+    rooms = app.state.rooms
+    await rooms.enqueue(client_uuid=ALICE, nickname="A", session_token="ta",
+                        time_minutes=5, increment_seconds=0, side_preference="white")
+    await rooms.enqueue(client_uuid=BOB, nickname="B", session_token="tb",
+                        time_minutes=5, increment_seconds=0, side_preference="black")
+
+    r = client.post("/reclaim", json={"version": PROTOCOL_VERSION, "client_uuid": ALICE})
+
+    assert r.status_code == 200

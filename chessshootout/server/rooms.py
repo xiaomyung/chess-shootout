@@ -60,6 +60,9 @@ class PendingSkillCheck:
     deadline_ms: float = SKILLCHECK_DEADLINE_MS
     miss_count: int = 0
 
+    def is_expired(self, now_ms):
+        return now_ms > self.expires_at_ms
+
 
 @dataclass
 class Room:
@@ -131,6 +134,9 @@ class RoomManager:
     @property
     def queue_depth(self):
         return sum(len(q) for q in self._queue.values())
+
+    def active_rooms(self):
+        return list(self._active.values())
 
     def get(self, room_id):
         if room_id in self._active:
@@ -316,7 +322,7 @@ class RoomManager:
     def finalize_result(self, room_id, reason, winner_color=None):
         room = self._active.get(room_id)
         if room is None or room.result is not None:
-            return
+            return False
         room.result = (reason, winner_color)
         room.ended_at = self._now()
         room.last_rematch_activity_at = room.ended_at
@@ -325,6 +331,7 @@ class RoomManager:
             if slot is not None:
                 slot.at_result = True
         self._award_series(room, reason, winner_color)
+        return True
 
     @staticmethod
     def _award_series(room, reason, winner_color):

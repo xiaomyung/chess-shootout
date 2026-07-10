@@ -351,6 +351,39 @@ def test_resume_response_pending_and_locks_default_empty():
     assert resp.skillcheck_locks == []
 
 
+def test_skillcheck_wire_messages_are_byte_identical_after_the_shared_base_refactor():
+    """Pins the exact wire shape of the three skill-check messages that share a
+    kind/seed/value_diff/deadline_ms/from/to/promotion geometry base, against
+    literals captured from the pre-refactor (independently defined) models --
+    so factoring out the shared base can never silently change what goes over
+    the wire."""
+    pending = PendingSkillCheckWire(
+        kind="aim", seed="seed123", value_diff=5, deadline_ms=5000.0, elapsed_ms=1200.0,
+        miss_count=2, from_sq="e4", to_sq="d5", promotion="q", color="white")
+    required = SkillCheckRequiredMessage(
+        kind="wheel", seed="seedreq", value_diff=-3, deadline_ms=4000.0, miss_count=1,
+        from_sq="a7", to_sq="b8", promotion="n")
+    spectate = SkillCheckSpectateMessage(
+        kind="aim", seed="seedspec", value_diff=0, deadline_ms=3000.0,
+        from_sq="c2", to_sq="c3", promotion=None)
+
+    assert pending.model_dump(by_alias=True) == {
+        "kind": "aim", "seed": "seed123", "value_diff": 5, "deadline_ms": 5000.0,
+        "elapsed_ms": 1200.0, "miss_count": 2, "from": "e4", "to": "d5",
+        "promotion": "q", "color": "white",
+    }
+    assert required.model_dump(by_alias=True) == {
+        "version": PROTOCOL_VERSION, "type": "skill_check_required",
+        "kind": "wheel", "seed": "seedreq", "value_diff": -3, "deadline_ms": 4000.0,
+        "miss_count": 1, "from": "a7", "to": "b8", "promotion": "n",
+    }
+    assert spectate.model_dump(by_alias=True) == {
+        "version": PROTOCOL_VERSION, "type": "skill_check_spectate",
+        "kind": "aim", "seed": "seedspec", "value_diff": 0, "deadline_ms": 3000.0,
+        "from": "c2", "to": "c3", "promotion": None,
+    }
+
+
 def test_resume_response_carries_pending_and_locks_when_set():
     pending = PendingSkillCheckWire(
         kind="aim", seed="s", value_diff=3, deadline_ms=5000.0, elapsed_ms=1800.0,

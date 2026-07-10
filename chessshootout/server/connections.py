@@ -34,6 +34,9 @@ class ConnectionRegistry:
             return None
         return self._by_room.get(room.room_id, {}).get(slot.client_uuid)
 
+    def get_for_uuid(self, room_id, client_uuid):
+        return self._by_room.get(room_id, {}).get(client_uuid)
+
     def has_both(self, room):
         if not room.is_paired():
             return False
@@ -64,7 +67,7 @@ async def send(ws, message):
         return False
 
 
-async def broadcast(connections, room, message):
+async def broadcast(rooms, connections, room, message):
     failed = []
     for color, ws in list(connections.all_for_room(room)):
         if not await send(ws, message):
@@ -74,6 +77,7 @@ async def broadcast(connections, room, message):
         slot = room.slot(color)
         if slot is not None:
             connections.remove(room.room_id, slot.client_uuid, ws)
+        rooms.mark_disconnected(room.room_id, color)
         opp_color = room.opp_color(color)
         if opp_color in failed_colors:
             continue

@@ -162,6 +162,27 @@ async def test_finalize_result_aborts_with_no_winner(manager, clock):
 
 
 @pytest.mark.asyncio
+async def test_finalize_result_reports_whether_it_applied(manager):
+    """The return value tells a racing caller (e.g. resign vs. mate landing at the
+    same instant) whether IT won the state, so it knows whether to broadcast."""
+    await manager.enqueue(**_enqueue_kwargs("alice"))
+    room = await manager.enqueue(**_enqueue_kwargs("bob"))
+    assert manager.finalize_result(room.room_id, "checkmate", winner_color="white") is True
+    assert manager.finalize_result(room.room_id, "resignation", winner_color="black") is False
+    assert manager.finalize_result("no-such-room", "checkmate", winner_color="white") is False
+
+
+@pytest.mark.asyncio
+async def test_active_rooms_returns_an_iteration_safe_snapshot(manager):
+    await manager.enqueue(**_enqueue_kwargs("alice"))
+    room = await manager.enqueue(**_enqueue_kwargs("bob"))
+    snapshot = manager.active_rooms()
+    assert snapshot == [room]
+    assert isinstance(snapshot, list), \
+        "callers mutate rooms while iterating; a live view would break"
+
+
+@pytest.mark.asyncio
 async def test_in_progress_room_for_only_matches_started_unfinished_games(manager):
     await manager.enqueue(**_enqueue_kwargs("alice"))
     assert manager.in_progress_room_for("alice") is None

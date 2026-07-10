@@ -597,8 +597,8 @@ async def test_resume_seed_is_identical_across_repeated_resumes(app, clock):
 async def test_resolve_fail_is_idempotent(app, clock):
     room, ws_w, ws_b, frm, to = await _capture_room(app, clock, WHEEL)
     await handle_move(app, ws_w, room, "white", _move_raw(frm, to))
-    first = await resolve_skillcheck_fail(app.state.connections, room)
-    second = await resolve_skillcheck_fail(app.state.connections, room)
+    first = await resolve_skillcheck_fail(app.state.rooms, app.state.connections, room)
+    second = await resolve_skillcheck_fail(app.state.rooms, app.state.connections, room)
     assert first is not None and second is None, "a second resolve finds pending already cleared"
 
 
@@ -675,6 +675,52 @@ async def test_resume_wire_omits_a_pending_past_its_deadline(app, clock):
     assert room.pending_skillcheck is not None, "the sweep has not run yet"
     assert _resume_payload(app, room, "white") is None, \
         "a reconnect must not re-hand an already-dead check"
+
+
+@pytest.mark.asyncio
+async def test_handle_move_agrees_with_resume_at_the_expiry_boundary(app, clock):
+    """/resume's view (no pending once now_ms > expires_at_ms) and handle_move's
+    move gate must agree at the identical boundary instant, even inside the
+    up-to-100ms window before the sweep next ticks. handle_move now resolves
+    the expired check inline (the same resolve_skillcheck_fail the sweep would
+    use) instead of rejecting a retry of the SAME move as still-pending -- the
+    retry is judged fresh, against the now-current lock, and rejected as
+    locked rather than pending."""
+    room, ws_w, ws_b, frm, to = await _capture_room(app, clock, WHEEL)
+    await handle_move(app, ws_w, room, "white", _move_raw(frm, to))
+    clock.advance((online.SKILLCHECK_DEADLINE_MS + 50) / 1000.0)
+    assert room.pending_skillcheck is not None, "the sweep has not run yet"
+    assert _resume_payload(app, room, "white") is None, "resume already treats it as gone"
+
+    out = await handle_move(app, ws_w, room, "white", _move_raw(frm, to))
+
+    assert out == "locked", "the expired check resolves as a proper fail before the retry is judged"
+    assert room.pending_skillcheck is None
+    assert room.skillcheck_log == [SkillCheckOutcome(1, "wheel", False, "Qxd5")], \
+        "the miss consequence is still recorded, not silently skipped"
+    assert ws_b.of_type("skill_check_result"), "the opponent still hears the check resolved"
+
+
+@pytest.mark.asyncio
+async def test_handle_move_applies_a_different_move_after_an_expired_unswept_pending(app, clock):
+    room, ws_w, ws_b, frm, to = await _capture_room(app, clock, WHEEL)
+    await handle_move(app, ws_w, room, "white", _move_raw(frm, to))
+    clock.advance((online.SKILLCHECK_DEADLINE_MS + 50) / 1000.0)
+
+    out = await handle_move(app, ws_w, room, "white", _move_raw(Square(7, 4), Square(6, 4)))
+
+    assert out == "applied", "handle_move now agrees with resume instead of rejecting as pending"
+    assert len(room.backend.move_history) == 1
+
+
+@pytest.mark.asyncio
+async def test_handle_move_still_blocks_a_genuinely_live_pending_check(app, clock):
+    room, ws_w, ws_b, frm, to = await _capture_room(app, clock, WHEEL)
+    await handle_move(app, ws_w, room, "white", _move_raw(frm, to))
+    before = room.pending_skillcheck
+    out = await handle_move(app, ws_w, room, "white", _move_raw(Square(7, 4), Square(6, 4)))
+    assert out == "pending"
+    assert room.pending_skillcheck is before
 
 
 @pytest.mark.asyncio
@@ -796,7 +842,7 @@ async def test_failed_check_appends_a_fail_outcome_with_the_whiffed_san(app, clo
 async def test_sweep_resolved_fail_also_records_the_outcome(app, clock):
     room, ws_w, ws_b, frm, to = await _capture_room(app, clock, WHEEL)
     await handle_move(app, ws_w, room, "white", _move_raw(frm, to))
-    await resolve_skillcheck_fail(app.state.connections, room)
+    await resolve_skillcheck_fail(app.state.rooms, app.state.connections, room)
     assert room.skillcheck_log == [SkillCheckOutcome(1, "wheel", False, "Qxd5")]
 
 

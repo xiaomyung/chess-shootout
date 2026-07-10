@@ -331,6 +331,12 @@ def create_app(*, now_provider=time.monotonic, max_rooms=DEFAULT_MAX_ROOMS):
             room, color, new_token = await rooms.reclaim_session(body.client_uuid)
         except NotInRoomError:
             raise HTTPException(status_code=404, detail={"reason": Reason.NOT_IN_ROOM})
+        old_ws = connections.get_for_uuid(room.room_id, body.client_uuid)
+        if old_ws is not None:
+            try:
+                await old_ws.close(code=WS_CLOSE_SUPERSEDED)
+            except (RuntimeError, WebSocketDisconnect) as exc:
+                log.debug("ws close on reclaim failed: %s", exc)
         log.info("reclaim ok uuid=%s room=%s color=%s",
                  body.client_uuid[:8], room.room_id, color)
         return ReclaimResponse(room_id=room.room_id, session_token=new_token)
@@ -370,7 +376,7 @@ def _promotion_letter(move):
 
 def _pending_skillcheck_wire(room, now_ms):
     pending = room.pending_skillcheck
-    if pending is None or now_ms() > pending.expires_at_ms:
+    if pending is None or pending.is_expired(now_ms()):
         return None
     elapsed = max(0.0, now_ms() - pending.start_ms)
     return PendingSkillCheckWire(

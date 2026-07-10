@@ -150,6 +150,58 @@ async def test_decline_notifies_both_and_drops_room(app):
 
 
 @pytest.mark.asyncio
+async def test_duplicate_rematch_request_gets_error_feedback(app):
+    room, ws_a, ws_b = await _finished_room(app)
+    assert await _offer(app, room, ws_a, ALICE) == "offered"
+    assert await _offer(app, room, ws_a, ALICE) == "duplicate"
+    errs = [m for m in ws_a.sent if m.get("type") == "error"]
+    assert errs and errs[-1]["reason"] == Reason.REMATCH_ALREADY_PENDING
+    assert errs[-1]["msg_type"] == "rematch_request"
+
+
+class _RaceThenClearWS(FakeWS):
+    """Simulates the opponent's own concurrent action (a decline, a self-accept
+    race, etc.) already invalidating our just-sent offer by the time our own
+    `await send(...)` for it returns."""
+
+    def __init__(self, room, offering_color):
+        super().__init__()
+        self._room = room
+        self._offering_color = offering_color
+
+    async def send_json(self, data):
+        await super().send_json(data)
+        self._room.rematch_offered_by.discard(self._offering_color)
+
+
+@pytest.mark.asyncio
+async def test_stray_rematch_banner_is_corrected_if_offer_invalidated_mid_await(app):
+    """REGRESSION: after `await send(opp_ws, RematchRequestMessage())` yields,
+    the opponent's own concurrent action may have already cleared our offer
+    (game restarted, or they declined) -- without the post-await re-check the
+    opponent is left staring at a stale 'wants a rematch' banner. With it, a
+    corrective 'cancelled' event follows immediately."""
+    room, ws_a, _ = await _finished_room(app, connect_b=False)
+    alice_color = room.color_of(ALICE)
+    racing = _RaceThenClearWS(room, alice_color)
+    app.state.connections.add(room.room_id, BOB, racing)
+
+    out = await _offer(app, room, ws_a, ALICE)
+
+    assert out == "offered"
+    assert racing.types() == ["rematch_request", "rematch_update"]
+    assert racing.events() == ["cancelled"], \
+        "the opponent must get a corrective cancel, not a stray live banner"
+
+
+@pytest.mark.asyncio
+async def test_rematch_offer_sends_no_corrective_cancel_in_the_normal_case(app):
+    room, ws_a, ws_b = await _finished_room(app)
+    await _offer(app, room, ws_a, ALICE)
+    assert ws_b.types() == ["rematch_request"], "no stray corrective when nothing raced"
+
+
+@pytest.mark.asyncio
 async def test_offerer_cannot_self_accept_rematch(app):
     """An offerer accepting their own offer must be a no-op — not a forced restart
     that yanks the opponent into a new game without consent."""
