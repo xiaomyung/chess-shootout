@@ -73,7 +73,7 @@ from chessshootout.frontend.modals.result import ResultMenu
 from chessshootout.frontend.audio.sound_manager import SoundManager
 from chessshootout.frontend.modals.start import StartMenu
 from chessshootout.domain.pgn.generate import (
-    format_annotations, generate_pgn, RESULT_CODES, TIMEOUT_RESULTS)
+    format_annotations, generate_pgn, RESULT_CODES)
 from chessshootout.domain.pgn.load import (
     load_pgn_into_backend, parse_comment, parse_time_control)
 from chessshootout.paths import SOUNDS_DIR
@@ -183,6 +183,7 @@ GIVE_TIME_RATCHET_MS_SLOW = 150
 GIVE_TIME_RATCHET_MS_FAST = 55
 SETTINGS_WRITE_DELAY_MS = 400
 AUTO_END_GATE_FRACTION = 0.1
+AUTOSAVE_THROTTLE_MS = 1000
 
 ANIM_MS_DEFAULT = 180
 ANIM_MS_MIN = 140
@@ -272,6 +273,11 @@ class Frontend(OnlineEventsMixin):
         self._match_session_id = None
         self._review_return_page = None
         self._series_scores = {}
+        self._series_score_awarded = False
+        self._save_failed = False
+        self._save_error_toast_shown = False
+        self._autosave_last_write_ms = -AUTOSAVE_THROTTLE_MS
+        self._autosave_last_ply = 0
         self._resyncing = False
         self._resync_started_at_ms = 0
         self._last_heartbeat_sent_ms = 0
@@ -354,6 +360,7 @@ class Frontend(OnlineEventsMixin):
         if env.normalize_stored_nickname():
             self.start_menu.text_input.text = env.get_nickname()
             self.toast.show("Your nickname contained non ASCII symbols, I cleaned them :3")
+        self._probe_games_dir_writable()
         self._last_saved_pgn_path = None
         self._last_saved_result_tag = None
         self._result_await_since_ms = None
@@ -473,6 +480,10 @@ class Frontend(OnlineEventsMixin):
         self.sound_manager.play_game_start()
 
     def _on_back_to_menu(self):
+        if not self.pgn_review:
+            pending_result = self.current_result()
+            if pending_result is not None:
+                self._finalize_result(pending_result)
         keep_online = (self.mode == ONLINE and self.online_client is not None
                        and self.current_result() is not None)
         had_rematch_offer = self._rematch_offered
@@ -1000,6 +1011,7 @@ class Frontend(OnlineEventsMixin):
         self._prev_online_state = None
 
     def _tear_down_online_session(self):
+        self._auto_save_pgn()
         if self.online_client is not None:
             self.online_client.disconnect()
             self.online_client = None
@@ -1075,13 +1087,7 @@ class Frontend(OnlineEventsMixin):
             return
         if now - self._result_await_since_ms < RESULT_CONFIRM_TIMEOUT_MS:
             return
-        self._result_await_since_ms = None
-        self.manual_result = engine_result
-        if engine_result.startswith(("white_wins", "black_wins")):
-            self._award_series_win(
-                "white" if engine_result.startswith("white_wins") else "black")
-        elif engine_result.startswith("draw"):
-            self._award_series_draw()
+        self._finalize_result(engine_result)
         log.info("promoted unconfirmed online result locally: %s", engine_result)
 
     def _award_series_win(self, winner):
@@ -1165,6 +1171,11 @@ class Frontend(OnlineEventsMixin):
         self._last_saved_pgn_path = None
         self._last_saved_result_tag = None
         self._result_await_since_ms = None
+        self._series_score_awarded = False
+        self._save_failed = False
+        self._save_error_toast_shown = False
+        self._autosave_last_write_ms = -AUTOSAVE_THROTTLE_MS
+        self._autosave_last_ply = 0
         self.right_menu.reset_for_new_game()
         self.match.new_game()
         if self._time_control is not None:
@@ -1296,30 +1307,111 @@ class Frontend(OnlineEventsMixin):
         if not _open_with_default_app(path):
             self.toast.show("Could not open PGN")
 
+    def _probe_games_dir_writable(self):
+        games_dir = _games_dir()
+        try:
+            os.makedirs(games_dir, exist_ok=True)
+        except OSError:
+            self.toast.show("Games folder isn't writable — check your data folder")
+            return
+        if not paths.is_writable_dir(games_dir):
+            self.toast.show("Games folder isn't writable — check your data folder")
+
+    def _show_save_error_toast_once(self):
+        if self._save_error_toast_shown:
+            return
+        self._save_error_toast_shown = True
+        self.toast.show("Could not save PGN — check games folder")
+
+    def _remove_quietly(self, path):
+        try:
+            os.remove(path)
+        except OSError:
+            pass
+
+    def _reserve_pgn_path(self, directory, prefix):
+        try:
+            os.makedirs(directory, exist_ok=True)
+        except OSError:
+            log.exception("pgn autosave: could not create games dir %s", directory)
+            return None
+        stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+        for suffix in range(1, 1000):
+            name = (f"{prefix}-{stamp}.pgn" if suffix == 1
+                    else f"{prefix}-{stamp}-{suffix}.pgn")
+            candidate = os.path.join(directory, name)
+            try:
+                with open(candidate, "x", encoding="utf-8"):
+                    pass
+                return candidate
+            except FileExistsError:
+                continue
+            except OSError:
+                log.exception("pgn autosave: could not reserve %s", candidate)
+                return None
+        return None
+
+    def _write_pgn_atomic(self, path, text):
+        directory = os.path.dirname(path)
+        tmp_path = os.path.join(directory, f".{os.path.basename(path)}.tmp")
+        try:
+            with open(tmp_path, "w", encoding="utf-8") as f:
+                f.write(text)
+        except (OSError, UnicodeError):
+            log.exception("pgn autosave: could not write %s", path)
+            self._remove_quietly(tmp_path)
+            return "hard_failure"
+        try:
+            os.replace(tmp_path, path)
+        except PermissionError:
+            log.debug("pgn autosave: replace skipped (permission) for %s", path)
+            self._remove_quietly(tmp_path)
+            return "permission_transient"
+        except OSError:
+            log.exception("pgn autosave: could not replace %s", path)
+            self._remove_quietly(tmp_path)
+            return "hard_failure"
+        return "ok"
+
+    def _commit_pgn_write(self, directory, prefix, text):
+        path = self._last_saved_pgn_path
+        if path is None or os.path.dirname(path) != os.path.normpath(directory):
+            path = self._reserve_pgn_path(directory, prefix)
+            if path is None:
+                return "hard_failure"
+            self._last_saved_pgn_path = path
+        return self._write_pgn_atomic(path, text)
+
     def _auto_save_pgn(self):
         if not self.match.move_history:
             return None
         tag = RESULT_CODES.get(self.current_result(), "*")
         if self._last_saved_pgn_path is not None:
             already_final = self._last_saved_result_tag not in (None, "*")
-            if already_final or tag == "*":
+            if already_final:
                 return self._last_saved_pgn_path
         text = self._build_pgn_text()
         prefix = self._auto_save_prefix()
-        path = self._last_saved_pgn_path
-        try:
-            os.makedirs(_games_dir(), exist_ok=True)
-            if path is None or not os.path.exists(path):
-                filename = f"{prefix}-{datetime.now().strftime("%Y%m%d-%H%M%S")}.pgn"
-                path = os.path.join(_games_dir(), filename)
-            with open(path, "w", encoding="utf-8") as f:
-                f.write(text)
-        except (OSError, UnicodeError):
-            log.exception("pgn auto-save failed")
+        primary_dir = _games_dir()
+        outcome = self._commit_pgn_write(primary_dir, prefix, text)
+        if outcome == "hard_failure":
+            self._show_save_error_toast_once()
+            fallback_dir = str(paths.get_fallback_data_dir() / paths.GAMES_SUBDIR)
+            if os.path.normpath(fallback_dir) == os.path.normpath(primary_dir):
+                self._save_failed = True
+                return None
+            self._last_saved_pgn_path = None
+            outcome = self._commit_pgn_write(fallback_dir, prefix, text)
+            if outcome != "ok":
+                self._save_failed = True
+                return None
+        if outcome != "ok":
             return None
-        self._last_saved_pgn_path = path
+        self._save_failed = False
+        path = self._last_saved_pgn_path
         self._last_saved_result_tag = tag
-        self.toast.show(f"Saved {os.path.basename(path)}")
+        if tag != "*":
+            self.toast.show(f"Saved {os.path.basename(path)}")
         return path
 
     def _auto_save_prefix(self):
@@ -1328,6 +1420,41 @@ class Frontend(OnlineEventsMixin):
         if self.mode == BOT:
             return "bot"
         return "local"
+
+    def _update_incremental_autosave(self):
+        if (self.mode == "menu" or self.pgn_review or self._save_failed
+                or self.current_result() is not None):
+            return
+        ply_count = len(self.match.move_history)
+        if ply_count == 0 or ply_count == self._autosave_last_ply:
+            return
+        now = pg.time.get_ticks()
+        if now - self._autosave_last_write_ms < AUTOSAVE_THROTTLE_MS:
+            return
+        self._autosave_last_write_ms = now
+        self._autosave_last_ply = ply_count
+        self._auto_save_pgn()
+
+    def _on_result_final(self, code):
+        if code is None:
+            return
+        if not self._series_score_awarded and self.mode == ONLINE:
+            if code.startswith("white_wins"):
+                self._award_series_win("white")
+                self._series_score_awarded = True
+            elif code.startswith("black_wins"):
+                self._award_series_win("black")
+                self._series_score_awarded = True
+            elif code.startswith("draw"):
+                self._award_series_draw()
+                self._series_score_awarded = True
+        self._auto_save_pgn()
+
+    def _finalize_result(self, code):
+        self._result_await_since_ms = None
+        if self.manual_result is None:
+            self.manual_result = code
+        self._on_result_final(code)
 
     def _ensure_local_session(self):
         if self._match_session_id is None:
@@ -1341,11 +1468,10 @@ class Frontend(OnlineEventsMixin):
     def _build_pgn_text(self):
         result = self.current_result()
         time_control = self._time_control
-        termination = "Time forfeit" if result in TIMEOUT_RESULTS else None
         return generate_pgn(
             self.match.move_history, result,
             white_name=self.white_name, black_name=self.black_name,
-            time_control=time_control, termination=termination,
+            time_control=time_control,
             match_id=self._match_session_id,
             annotations=format_annotations(self._skillcheck_log),
         )
@@ -1449,6 +1575,7 @@ class Frontend(OnlineEventsMixin):
         )
         self.board._clear_premoves()
         self.board.clear_annotations()
+        self._on_result_final(self.manual_result)
 
     def _on_draw(self):
         if self.pgn_review or self.current_result() is not None:
@@ -1469,6 +1596,7 @@ class Frontend(OnlineEventsMixin):
         self.manual_result = "draw_agreement"
         self.board._clear_premoves()
         self.board.clear_annotations()
+        self._on_result_final(self.manual_result)
 
     def _give_time_on_cooldown(self):
         return pg.time.get_ticks() - self._last_give_time_at_ms < GIVE_TIME_DEBOUNCE_MS
@@ -1677,6 +1805,7 @@ class Frontend(OnlineEventsMixin):
 
     def _open_spectate_overlay(self, kind, seed, value_diff, deadline_ms,
                                from_sq, to_sq, promo_type, *, elapsed_ms=0, miss_count=0):
+        self.board.jump_to_review_ply(None)
         self._pending_online_move = None
         self._online_skillcheck = (from_sq, to_sq, promo_type, kind)
         self._online_spectate_kind = kind
@@ -1873,6 +2002,8 @@ class Frontend(OnlineEventsMixin):
             self._last_work_ms = (
                 work_before_present + time.perf_counter() - present_start) * 1000.0
 
+        if not self.pgn_review and self.current_result() is not None:
+            self._auto_save_pgn()
         self._flush_deferred_env_writes(force=True)
         self.chrome.shutdown()
         cache.clear_all()
@@ -1985,6 +2116,8 @@ class Frontend(OnlineEventsMixin):
         if self.mode != "menu" and self._focus_prev_mode == "menu":
             self._focus_hint_until_ms = pg.time.get_ticks() + FOCUS_HINT_MS
         self._focus_prev_mode = self.mode
+
+        self._drain_online_inbound()
 
         if self.mode != "menu" and self.current_result() is None:
             self.match.tick_clock()
@@ -2104,7 +2237,6 @@ class Frontend(OnlineEventsMixin):
             self._teardown_skillcheck_overlay()
         self.skillcheck_overlay.update(now)
         self.skillcheck_overlay.draw(self.window)
-        self._drain_online_inbound()
         self._update_online_phase()
 
     def _refresh_game_info(self):
@@ -2154,6 +2286,7 @@ class Frontend(OnlineEventsMixin):
         return not self.board.is_animating() and not self.board.effects.captures
 
     def _update_result_pending(self):
+        self._update_incremental_autosave()
         result = self.current_result()
         if result is None or self.pgn_review:
             self._result_first_seen_at_ms = None
@@ -2166,7 +2299,7 @@ class Frontend(OnlineEventsMixin):
         if self.mode == ONLINE and self._resyncing:
             return
         if RESULT_CODES.get(result) is not None:
-            self._auto_save_pgn()
+            self._on_result_final(result)
         if self._result_first_seen_at_ms is None and self._move_visually_settled():
             self._result_first_seen_at_ms = pg.time.get_ticks()
             try:
@@ -2684,7 +2817,7 @@ class Frontend(OnlineEventsMixin):
             return
         square = self.board.cell_at(pos)
         if square is not None:
-            if not self.board.is_square_annotated(square):
+            if self.board.review_ply is None and not self.board.is_square_annotated(square):
                 self.board.clear_annotations()
             signal = self.board.handle_click(square)
             if signal:
@@ -2725,11 +2858,10 @@ class Frontend(OnlineEventsMixin):
             self._step_review(1)
             return True
         if event.key == pg.K_HOME:
-            if self.match.move_history:
-                self.board.review_ply = 0
+            self.board.jump_to_review_ply(0)
             return True
         if event.key == pg.K_END:
-            self.board.review_ply = None
+            self.board.jump_to_review_ply(None)
             return True
         return False
 
@@ -2746,12 +2878,7 @@ class Frontend(OnlineEventsMixin):
         history_len = len(self.match.move_history)
         if history_len == 0:
             return
-        if self.board._target_ply is not None:
-            current = self.board._target_ply
-        elif self.board.review_ply is not None:
-            current = self.board.review_ply
-        else:
-            current = history_len
+        current = self.board.review_anchor(history_len)
         new_ply = max(0, min(history_len, current + delta))
         if new_ply == current:
             return

@@ -36,7 +36,6 @@ ONLINE_DRAW_REASONS = {
     "draw_fifty_move", "draw_insufficient_material",
 }
 ONLINE_STATIC_RESULTS = {"aborted", "aborted_disconnect", "server_shutdown"}
-SAVE_ON_STATIC_RESULTS = {"aborted_disconnect", "server_shutdown"}
 
 ONLINE_HARD_FAILURE_REASONS = {
     "server_unreachable", "reconnect_failed", "room_full",
@@ -494,22 +493,18 @@ class OnlineEventsMixin:
         if reason in ONLINE_WIN_REASONS:
             white_code, black_code = ONLINE_WIN_RESULT_BY_REASON[reason]
             self.manual_result = white_code if winner == "white" else black_code
-            self._award_series_win(winner)
-            return True
-        if reason in ONLINE_DRAW_REASONS:
-            self.manual_result = "draw_agreement"
-            self._award_series_draw()
-            return True
-        if reason in ONLINE_STATIC_RESULTS:
+        elif reason in ONLINE_DRAW_REASONS:
             self.manual_result = reason
-            return True
-        return False
+        elif reason in ONLINE_STATIC_RESULTS:
+            self.manual_result = reason
+        else:
+            return False
+        self._on_result_final(self.manual_result)
+        return True
 
     def _adopt_resumed_result(self, payload):
         reason = payload.get("result_reason") or ""
-        if self._apply_online_result(reason, payload.get("result_winner")):
-            if reason in SAVE_ON_STATIC_RESULTS:
-                self._auto_save_pgn()
+        self._apply_online_result(reason, payload.get("result_winner"))
 
     def _handle_online_result(self, payload):
         if self.manual_result is not None:
@@ -534,8 +529,6 @@ class OnlineEventsMixin:
         if reason == "timeout" and not self._flag_fall_played:
             self._flag_fall_played = True
             self.sound_manager.play_flag_fall()
-        if reason in SAVE_ON_STATIC_RESULTS:
-            self._auto_save_pgn()
 
     def _begin_match_found_transition(self, payload):
         if self._pending_game_start_payload is not None:

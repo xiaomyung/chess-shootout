@@ -337,10 +337,13 @@ class Board:
                               self.board_offset_y + self._shake_dy))
         if self.review_ply is not None:
             self._draw_last_move_highlight()
+            self._draw_annotation_highlights()
             self._draw_vertical_guides()
             self._draw_horizontal_guides()
             self.draw_pieces()
             self._draw_animations()
+            self._draw_arrows()
+            self._draw_review_cue()
             return
         self._draw_check_highlight()
         self._draw_premove_highlights()
@@ -487,6 +490,12 @@ class Board:
         for sq in self.highlighted_squares:
             rect = self._cell_rect(sq.row, sq.col)
             self.window.blit(self._cell_overlay(Colors.annotation_highlight), rect.topleft)
+
+    def _draw_review_cue(self):
+        if self.read_only or self._frame_surf is None:
+            return
+        pg.draw.rect(self.window, pg.Color(Colors.accent), self.rect, 2,
+                     border_radius=self.FRAME_RADIUS)
 
     def _draw_arrows(self):
         if self.cell_size <= 0:
@@ -738,6 +747,13 @@ class Board:
             self.review_ply = None
         else:
             self.review_ply = max(0, ply)
+
+    def review_anchor(self, history_len):
+        if self._target_ply is not None:
+            return self._target_ply
+        if self.review_ply is not None:
+            return self.review_ply
+        return history_len
 
     def _snap_in_flight_review_animation(self):
         if self._target_ply is None:
@@ -1143,10 +1159,12 @@ class Board:
 
     def cell_at(self, pos):
         x, y = pos
-        col = int((x - self.board_offset_x) / self.cell_size)
-        row = int((y - self.board_offset_y) / self.cell_size)
-        if not (0 <= col < self.SIZE and 0 <= row < self.SIZE):
+        fcol = (x - self.board_offset_x) / self.cell_size
+        frow = (y - self.board_offset_y) / self.cell_size
+        if not (0 <= fcol < self.SIZE and 0 <= frow < self.SIZE):
             return None
+        col = int(fcol)
+        row = int(frow)
         if self.flipped:
             row = self.SIZE - 1 - row
             col = self.SIZE - 1 - col
@@ -1156,6 +1174,10 @@ class Board:
         if self.read_only:
             return None
         if self.review_ply is not None:
+            if self.highlighted_squares or self.arrows:
+                self.clear_annotations()
+            else:
+                self.jump_to_review_ply(None)
             return None
         if self.is_animating():
             return None

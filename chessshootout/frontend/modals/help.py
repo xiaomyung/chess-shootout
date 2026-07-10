@@ -18,8 +18,8 @@ HOTKEYS = [
     ("Hold Give 15s", "Ramp the opponent's clock up to the starting time"),
     ("Q  R  B  N", "Promotion picker (when shown)"),
     ("Space / Click", "Fire the skill-check wheel (Shootout)"),
-    ("← →", "Step through moves (review)"),
-    ("Home", "Jump to first move (review)"),
+    ("← →", "Step through moves (also during live games)"),
+    ("Home", "Jump to first move (also during live games)"),
     ("End", "Return to live play"),
     ("Esc", "Back · close modal · resign · quit"),
 ]

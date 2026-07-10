@@ -530,6 +530,7 @@ def test_online_result_redelivery_does_not_double_count(frontend, monkeypatch):
     """A reconnect re-delivers the result; the handler must be idempotent so the
     series score (and PGN auto-save) only fire once per game."""
     monkeypatch.setattr(frontend, "_auto_save_pgn", lambda: None)
+    frontend.mode = ONLINE
     frontend._chosen_side = "white"
     frontend.white_name, frontend.black_name = "Me", "Them"
     frontend._series_scores = {}

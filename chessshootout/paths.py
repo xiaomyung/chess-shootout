@@ -100,6 +100,10 @@ def get_default_data_dir():
     return _default_data_dir()
 
 
+def get_fallback_data_dir():
+    return Path(platformdirs.user_data_dir(APP_NAME, APP_AUTHOR))
+
+
 def get_log_dir():
     if is_portable():
         return _portable_dir()

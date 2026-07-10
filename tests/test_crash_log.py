@@ -19,7 +19,8 @@ os.environ.setdefault("SDL_AUDIODRIVER", "dummy")
 import pytest
 
 from chessshootout.infra.crash_log import (
-    CRASHLOG_DIR_NAME, gather_state, install_memory_handler, write_crash_log,
+    CRASHLOG_BUFFER_MAXLEN, CRASHLOG_DIR_NAME, _ListHandler, gather_state,
+    install_memory_handler, write_crash_log,
 )
 
 
@@ -138,16 +139,31 @@ def test_install_memory_handler_uses_canonical_format(isolated_root_logger):
     assert "chess.test_format" in line
 
 
-def test_install_memory_handler_buffer_unbounded(isolated_root_logger):
-    """Buffer is intentionally unbounded — every record stays, no LRU eviction."""
+def test_install_memory_handler_buffer_is_capped_at_the_default_maxlen(isolated_root_logger):
+    """The production entry point wires up the module's default cap so a
+    long-running session can't grow the buffer forever."""
     handler = install_memory_handler()
+    assert handler.buffer.maxlen == CRASHLOG_BUFFER_MAXLEN
     isolated_root_logger.setLevel(logging.DEBUG)
     log = logging.getLogger("chess.test_volume")
     log.setLevel(logging.DEBUG)
     for i in range(500):
         log.info("burst-%d", i)
     burst_lines = [L for L in handler.buffer if "burst-" in L]
-    assert len(burst_lines) == 500
+    assert len(burst_lines) == 500, "well under the cap, nothing evicted yet"
+
+
+def test_list_handler_evicts_oldest_once_past_maxlen():
+    """A small maxlen exercises the eviction boundary cheaply (no need to log
+    20000 real records): once full, appending drops the oldest entry."""
+    handler = _ListHandler(maxlen=3)
+    handler.setFormatter(logging.Formatter("%(message)s"))
+    for i in range(5):
+        record = logging.LogRecord(
+            "chess.test_evict", logging.INFO, __file__, 1, f"line-{i}", None, None)
+        handler.emit(record)
+    assert len(handler.buffer) == 3
+    assert list(handler.buffer) == ["line-2", "line-3", "line-4"]
 
 
 def test_gather_state_extracts_all_known_fields():

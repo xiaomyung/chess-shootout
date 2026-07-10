@@ -644,6 +644,36 @@ def test_cell_at_is_unaffected_by_shake():
     assert board.cell_at(center) == Square(4, 4)
 
 
+def test_cell_at_rejects_one_pixel_left_of_grid():
+    """Regression: int() truncates a small negative fcol toward 0, so a click
+    in the frame gutter used to hit-test as column 0 instead of missing."""
+    board = _board()
+    y = board.board_offset_y + board.cell_size // 2
+    assert board.cell_at((board.board_offset_x - 1, y)) is None
+
+
+def test_cell_at_rejects_one_pixel_above_grid():
+    board = _board()
+    x = board.board_offset_x + board.cell_size // 2
+    assert board.cell_at((x, board.board_offset_y - 1)) is None
+
+
+def test_cell_at_gutter_rejection_holds_when_flipped():
+    board = _board()
+    board.flipped = True
+    y = board.board_offset_y + board.cell_size // 2
+    x = board.board_offset_x + board.cell_size // 2
+    assert board.cell_at((board.board_offset_x - 1, y)) is None
+    assert board.cell_at((x, board.board_offset_y - 1)) is None
+
+
+def test_cell_at_still_resolves_in_bounds_click_at_grid_edge_when_flipped():
+    board = _board()
+    board.flipped = True
+    center = board._cell_rect_base(4, 4).center
+    assert board.cell_at(center) == Square(4, 4)
+
+
 def test_draw_board_pulls_active_shake_offset(monkeypatch):
     board = _board()
     board.review_ply = None

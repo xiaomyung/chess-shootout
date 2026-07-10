@@ -23,6 +23,28 @@ def _isolate_env_file(tmp_path_factory, monkeypatch):
     monkeypatch.setattr(env, "_ENV_PATH", tmp_path_factory.mktemp("envcfg") / ".env")
 
 
+@pytest.fixture(autouse=True)
+def _isolate_games_dir(tmp_path_factory, monkeypatch):
+    """Keep every test off the real games/ folder and the real platformdirs
+    user-data folder.
+
+    With incremental autosave, any draw_frame()/_update_result_pending() call
+    during a live (or just-finished) game can write a PGN. A test that never
+    overrides CHESS_DATA_DIR would otherwise default to the source root (not
+    frozen) and litter the real repo's games/ directory. A test's own
+    monkeypatch.setenv("CHESS_DATA_DIR", ...) still wins — it runs later, inside
+    the test body, after this fixture has already set up. The save pipeline's
+    OSError fallback writes to paths.get_fallback_data_dir() (the real
+    platformdirs user-data dir, deliberately CHESS_DATA_DIR-immune) — that must
+    be isolated too, or a save-failure test litters the developer's real
+    ~/.local/share (or platform equivalent).
+    """
+    from chessshootout import paths
+    monkeypatch.setenv("CHESS_DATA_DIR", str(tmp_path_factory.mktemp("gamesdir")))
+    monkeypatch.setattr(
+        paths, "get_fallback_data_dir", lambda: tmp_path_factory.mktemp("fallbackdir"))
+
+
 @pytest.fixture
 def server():
     """Real uvicorn server on a socket pre-bound here and handed over still open.

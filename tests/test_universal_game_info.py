@@ -299,14 +299,15 @@ def test_online_win_result_subtitle_reports_actual_reason(reason, winner, expect
 
 @pytest.mark.parametrize("draw_reason,expected", [
     pytest.param("draw_agreement", ("Draw", "by agreement"), id="agreement"),
-    pytest.param("draw_stalemate", ("Draw", "by agreement"), id="stalemate"),
-    pytest.param("draw_repetition", ("Draw", "by agreement"), id="repetition"),
-    pytest.param("draw_fifty_move", ("Draw", "by agreement"), id="fifty_move"),
-    pytest.param("draw_insufficient_material", ("Draw", "by agreement"), id="insufficient"),
+    pytest.param("draw_stalemate", ("Draw", "by stalemate"), id="stalemate"),
+    pytest.param("draw_repetition", ("Draw", "by threefold repetition"), id="repetition"),
+    pytest.param("draw_fifty_move", ("Draw", "by fifty-move rule"), id="fifty_move"),
+    pytest.param("draw_insufficient_material", ("Draw", "by insufficient material"),
+                 id="insufficient"),
 ])
 def test_online_draw_result_subtitle(draw_reason, expected):
-    """All online draws are flattened to manual_result="draw_agreement" by the
-    existing handler; subtitle reflects that."""
+    """Each online draw reason keeps its own subtitle (manual_result=reason) instead
+    of collapsing every draw to "by agreement"."""
     app = _make_app()
     app.mode = ONLINE
     app.white_name = "Alice"

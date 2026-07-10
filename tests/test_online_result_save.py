@@ -201,7 +201,11 @@ def test_startup_toasts_when_stored_nickname_needs_sanitizing(tmp_path, monkeypa
 
 def test_online_mate_saved_via_watchdog_when_result_message_is_missed(tmp_path, monkeypatch):
     """The reconnect-storm case: move_applied lands the mate but the `result`
-    message never arrives. The local-promotion path must recover + save."""
+    message never arrives. The local-promotion path must recover + save.
+
+    The save must land on the SAME frame that promotes the result (result
+    adoption, not the next painted frame) — no extra _update_result_pending()
+    call is needed between promotion and the save landing on disk."""
     app = _online_app(tmp_path, monkeypatch)
     _land_capture_mate(app)
     _settle(app)
@@ -211,9 +215,8 @@ def test_online_mate_saved_via_watchdog_when_result_message_is_missed(tmp_path, 
     assert app._last_saved_pgn_path is None
     assert app.manual_result is None
     fake_now[0] += RESULT_CONFIRM_TIMEOUT_MS + 100
-    app._update_result_pending()                     # promotes the position-proved result
+    app._update_result_pending()                     # promotes AND saves in the same call
     assert app.manual_result == "white_wins"
-    app._update_result_pending()                     # now saves
     text = _saved_text(app)
     assert "Qxg7#" in text and '[Result "1-0"]' in text
 

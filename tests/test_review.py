@@ -144,10 +144,41 @@ def test_draw_pieces_uses_historical_grid_in_review_mode():
     assert (6, 4) in blitted
 
 
-def test_review_disables_handle_click(board):
+def test_review_click_in_live_game_snaps_to_live_and_never_selects(board):
+    board.match.try_move(Square(6, 4), Square(4, 4))
     board.review_ply = 0
-    board.handle_click(Square(6, 4))
+    signal = board.handle_click(Square(6, 4))
+    assert signal is None
     assert board.selected_square is None
+    assert board.review_ply is None
+
+
+@pytest.mark.parametrize(
+    "annotate",
+    [
+        pytest.param(lambda b: b.toggle_highlight(Square(3, 3)), id="highlight"),
+        pytest.param(lambda b: b.toggle_arrow(Square(6, 4), Square(4, 4)), id="arrow"),
+    ],
+)
+def test_review_click_with_annotations_clears_them_and_stays_at_ply(board, annotate):
+    board.match.try_move(Square(6, 4), Square(4, 4))
+    board.review_ply = 0
+    annotate(board)
+    signal = board.handle_click(Square(6, 4))
+    assert signal is None
+    assert board.review_ply == 0
+    assert board.highlighted_squares == set()
+    assert board.arrows == []
+
+
+def test_review_click_on_read_only_board_stays_inert(board):
+    board.match.try_move(Square(6, 4), Square(4, 4))
+    board.review_ply = 0
+    board.read_only = True
+    signal = board.handle_click(Square(6, 4))
+    assert signal is None
+    assert board.selected_square is None
+    assert board.review_ply == 0
 
 
 def test_review_disables_drag_motion(board):
@@ -292,8 +323,74 @@ def test_end_returns_to_live():
     assert app.board.review_ply is None
 
 
+def test_home_during_animation_lands_on_zero_not_yanked_back():
+    """Regression: Home used to raw-assign review_ply without cancelling an
+    in-flight animate_review_ply, so its on_complete callback later overwrote
+    the Home jump. Right then Home mid-animation must land squarely on 0."""
+    app = _new_app()
+    _play_e4_e5_nf3(app)
+    app.board.review_ply = 0
+    right_event = pg.event.Event(pg.KEYDOWN, key=pg.K_RIGHT, mod=0)
+    app._handle_shortcut_key(right_event)
+    assert app.board.animations, "the Right arrow started an animation"
+    home_event = pg.event.Event(pg.KEYDOWN, key=pg.K_HOME, mod=0)
+    app._handle_shortcut_key(home_event)
+    assert app.board.review_ply == 0
+    assert app.board._target_ply is None
+    assert app.board.animations == []
+
+
+def test_end_during_animation_returns_to_live_not_yanked_back():
+    """Same regression as Home, but for End: a live player stranded mid-review
+    by a stale animation callback used to get pulled back out of live play."""
+    app = _new_app()
+    _play_e4_e5_nf3(app)
+    app.board.review_ply = 0
+    right_event = pg.event.Event(pg.KEYDOWN, key=pg.K_RIGHT, mod=0)
+    app._handle_shortcut_key(right_event)
+    assert app.board.animations, "the Right arrow started an animation"
+    end_event = pg.event.Event(pg.KEYDOWN, key=pg.K_END, mod=0)
+    app._handle_shortcut_key(end_event)
+    assert app.board.review_ply is None
+    assert app.board._target_ply is None
+    assert app.board.animations == []
+
+
+def test_home_noop_when_history_empty():
+    app = _new_app()
+    event = pg.event.Event(pg.KEYDOWN, key=pg.K_HOME, mod=0)
+    app._handle_shortcut_key(event)
+    assert app.board.review_ply is None
+
+
+def test_review_anchor_prefers_target_ply_while_animating():
+    app = _new_app()
+    _play_e4_e5_nf3(app)
+    app.board.review_ply = 1
+    app.board.animate_review_ply(2)
+    assert app.board.review_anchor(len(app.backend.move_history)) == 2
+
+
+def test_review_anchor_uses_review_ply_when_idle():
+    app = _new_app()
+    _play_e4_e5_nf3(app)
+    app.board.review_ply = 1
+    assert app.board.review_anchor(len(app.backend.move_history)) == 1
+
+
+def test_review_anchor_returns_history_len_when_live():
+    app = _new_app()
+    _play_e4_e5_nf3(app)
+    history_len = len(app.backend.move_history)
+    assert app.board.review_ply is None
+    assert app.board._target_ply is None
+    assert app.board.review_anchor(history_len) == history_len
+
+
 def test_esc_does_not_modify_review_ply():
-    """Esc closes the window; it must NOT affect review state."""
+    """Esc is a context Back/Cancel (closes the top modal, else exits focus mode,
+    else the quit/resign prompt, else back to menu) and never closes the window
+    directly; it must NOT affect review state."""
     app = _new_app()
     _play_e4_e5_nf3(app)
     app.board.review_ply = 1
@@ -734,3 +831,68 @@ def _new_menu_app():
     app = Frontend(1500, 800)
     app.sound_manager = MagicMock()
     return app
+
+
+def _draw_review_board(board, *, highlight=None, arrow=None, read_only=False):
+    board.review_ply = 1
+    board.read_only = read_only
+    if highlight is not None:
+        board.toggle_highlight(highlight)
+    if arrow is not None:
+        board.toggle_arrow(*arrow)
+    board.window.fill((0, 0, 0))
+    board.draw_board()
+
+
+def test_review_branch_draws_annotation_highlight(board):
+    board.backend.try_move(Square(6, 4), Square(4, 4))
+    sq = Square(4, 4)
+    _draw_review_board(board)
+    rect = board._cell_rect(sq.row, sq.col)
+    before = board.window.get_at(rect.center)
+    _draw_review_board(board, highlight=sq)
+    after = board.window.get_at(rect.center)
+    assert before != after
+
+
+def test_review_branch_draws_annotation_arrow(board):
+    board.backend.try_move(Square(6, 4), Square(4, 4))
+    _draw_review_board(board)
+    mid = board._cell_rect(4, 2).center
+    before = board.window.get_at(mid)
+    _draw_review_board(board, arrow=(Square(4, 0), Square(4, 4)))
+    after = board.window.get_at(mid)
+    assert before != after
+
+
+def test_review_cue_recolors_frame_border_when_browsing_live(board):
+    from chessshootout.frontend.visual.colors import Colors
+    board.backend.try_move(Square(6, 4), Square(4, 4))
+    _draw_review_board(board)
+    top_edge = (board.rect.centerx, board.rect.y)
+    assert board.window.get_at(top_edge) == pg.Color(Colors.accent)
+
+
+def test_review_cue_absent_on_read_only_board(board):
+    from chessshootout.frontend.visual.colors import Colors
+    board.backend.try_move(Square(6, 4), Square(4, 4))
+    _draw_review_board(board, read_only=True)
+    top_edge = (board.rect.centerx, board.rect.y)
+    assert board.window.get_at(top_edge) != pg.Color(Colors.accent)
+
+
+def _empty_square_pos(app):
+    rect = app.board._cell_rect(4, 2)
+    return rect.center
+
+
+def test_click_with_annotations_while_browsing_takes_two_clicks_to_live():
+    app = _new_app()
+    _play_e4_e5_nf3(app)
+    app.board.jump_to_review_ply(1)
+    app.board.toggle_arrow(Square(4, 0), Square(4, 4))
+    app.mouse_left_clicked(_empty_square_pos(app))
+    assert app.board.arrows == []
+    assert app.board.review_ply == 1
+    app.mouse_left_clicked(_empty_square_pos(app))
+    assert app.board.review_ply is None

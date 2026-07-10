@@ -365,6 +365,16 @@ def test_spectate_opens_a_passive_overlay_and_leaves_my_board_live():
     assert len(app.skillcheck.locks) == 0
 
 
+def test_spectate_overlay_clears_a_browsed_review_ply():
+    """A spectated check must never draw over a browsed historical position:
+    opening it snaps the local board back to live first."""
+    app = _online_app("black")
+    frm, to = _capture_board(app)
+    app.board.review_ply = 0
+    app._handle_skill_check_spectate(_spectate_payload(frm, to, kind="wheel"))
+    assert app.board.review_ply is None
+
+
 def test_spectate_overlay_matches_the_pure_engine_render_square():
     app = _online_app("black")
     frm, to = _capture_board(app)

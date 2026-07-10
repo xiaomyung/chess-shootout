@@ -1,5 +1,6 @@
 import logging
 import traceback
+from collections import deque
 from datetime import datetime
 from pathlib import Path
 
@@ -8,13 +9,14 @@ from chessshootout.infra.log_format import make_formatter
 
 
 CRASHLOG_DIR_NAME = "crashlogs"
+CRASHLOG_BUFFER_MAXLEN = 20000
 
 
 class _ListHandler(logging.Handler):
 
-    def __init__(self):
+    def __init__(self, maxlen=CRASHLOG_BUFFER_MAXLEN):
         super().__init__()
-        self.buffer = []
+        self.buffer = deque(maxlen=maxlen)
 
     def emit(self, record):
         try:
