@@ -705,7 +705,7 @@ def test_arrows_render_from_base_rect_not_shaken():
         board._draw_arrows()
     finally:
         board._cell_rect = orig
-    assert board._arrow_cache is not None
+    assert board.annotations._arrow_cache is not None
 
 
 def test_promotion_popover_anchors_to_base_rect():

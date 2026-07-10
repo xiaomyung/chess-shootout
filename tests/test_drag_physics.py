@@ -13,7 +13,7 @@ os.environ.setdefault("SDL_AUDIODRIVER", "dummy")
 import pygame as pg
 import pytest
 
-import chessshootout.frontend.board.board as board_mod
+import chessshootout.frontend.board.drag as drag_mod
 from chessshootout.frontend.board import Board
 from chessshootout.backend.backend import Backend
 from chessshootout.backend.utils import Square
@@ -57,17 +57,17 @@ def _grab(bd, sq, where="top"):
     geom = bd._sprite_geom[(bd.match.piece_at(sq).type, bd.match.piece_at(sq).color)]
     rect = bd._cell_rect(sq.row, sq.col)
     local = geom["top_center"] if where == "top" else geom["center"]
-    bd._press_pos = (rect.x + local[0], rect.y + local[1])
-    bd._begin_drag_physics(bd._press_pos, 0)
+    bd.drag._press_pos = (rect.x + local[0], rect.y + local[1])
+    bd.drag._begin_drag_physics(bd.drag._press_pos, 0)
 
 
 def _cursor_to(bd, sq):
     rect = bd._cell_rect(sq.row, sq.col)
-    bd._drag["cursor"] = (rect.centerx, rect.centery)
+    bd.drag._drag["cursor"] = (rect.centerx, rect.centery)
 
 
 def _finish_settle(bd):
-    bd.update_drag_physics(bd._drag["settle_start_ms"] + 100000)
+    bd.update_drag_physics(bd.drag._drag["settle_start_ms"] + 100000)
 
 
 def _smoothstep(x):
@@ -84,14 +84,14 @@ def _drag_sweep(bd, dist_px, dur_ms, hold_ms=1200, step=16):
     n = max(1, int(dur_ms / step))
     for i in range(n + 1):
         t += step
-        bd._drag["cursor"] = (cx + dist_px * _smoothstep(i / n), cy)
+        bd.drag._drag["cursor"] = (cx + dist_px * _smoothstep(i / n), cy)
         bd.update_drag_physics(t)
-        peak = max(peak, abs(bd._drag["theta"]))
+        peak = max(peak, abs(bd.drag._drag["theta"]))
     for _ in range(int(hold_ms / step)):
         t += step
-        bd._drag["cursor"] = (cx + dist_px, cy)
+        bd.drag._drag["cursor"] = (cx + dist_px, cy)
         bd.update_drag_physics(t)
-        peak = max(peak, abs(bd._drag["theta"]))
+        peak = max(peak, abs(bd.drag._drag["theta"]))
     return peak
 
 
@@ -110,7 +110,7 @@ def test_grab_on_opaque_pixel_is_exact():
     geom = bd._sprite_geom[(piece.type, piece.color)]
     rect = bd._cell_rect(sq.row, sq.col)
     press = (rect.x + geom["center"][0], rect.y + geom["center"][1])
-    assert bd._grab_local_for(sq, press, piece) == tuple(geom["center"])
+    assert bd.drag._grab_local_for(sq, press, piece) == tuple(geom["center"])
 
 
 @pytest.mark.parametrize("press_offset", [
@@ -124,7 +124,7 @@ def test_grab_outside_visible_art_uses_top_center(press_offset):
     geom = bd._sprite_geom[(piece.type, piece.color)]
     rect = bd._cell_rect(sq.row, sq.col)
     press = None if press_offset is None else (rect.x + press_offset[0], rect.y + press_offset[1])
-    assert bd._grab_local_for(sq, press, piece) == geom["top_center"]
+    assert bd.drag._grab_local_for(sq, press, piece) == geom["top_center"]
 
 
 def test_grab_local_is_flip_invariant():
@@ -133,11 +133,11 @@ def test_grab_local_is_flip_invariant():
     piece = bk.piece_at(sq)
     geom = bd._sprite_geom[(piece.type, piece.color)]
     rect = bd._cell_rect(sq.row, sq.col)
-    upright = bd._grab_local_for(sq, (rect.x + geom["center"][0],
+    upright = bd.drag._grab_local_for(sq, (rect.x + geom["center"][0],
                                       rect.y + geom["center"][1]), piece)
     bd.flipped = True
     frect = bd._cell_rect(sq.row, sq.col)
-    flipped = bd._grab_local_for(sq, (frect.x + geom["center"][0],
+    flipped = bd.drag._grab_local_for(sq, (frect.x + geom["center"][0],
                                       frect.y + geom["center"][1]), piece)
     assert upright == flipped
 
@@ -145,16 +145,16 @@ def test_grab_local_is_flip_invariant():
 def test_begin_drag_on_empty_square_leaves_no_state():
     bd, _, _ = _make_board()
     bd.selected_square = Square(4, 4)
-    bd._press_pos = (100, 100)
-    bd._begin_drag_physics((100, 100), 0)
+    bd.drag._press_pos = (100, 100)
+    bd.drag._begin_drag_physics((100, 100), 0)
     assert bd.dragging_from is None
-    assert bd._drag is None
+    assert bd.drag._drag is None
 
 
 def test_grab_records_com_and_lever_arm():
     bd, bk, _ = _make_board()
     _grab(bd, Square(6, 4), where="top")
-    d = bd._drag
+    d = bd.drag._drag
     com = bd._sprite_geom[(d["piece"].type, d["piece"].color)]["center"]
     assert d["com_local"] == tuple(com)
     assert d["r_local"] == (com[0] - d["grab_local"][0], com[1] - d["grab_local"][1])
@@ -163,15 +163,15 @@ def test_grab_records_com_and_lever_arm():
 def test_settles_to_upright_when_cursor_holds_still():
     bd, _, _ = _make_board()
     _grab(bd, Square(7, 3), where="top")
-    bd._drag["theta"] = 0.6
-    cursor = bd._drag["cursor"]
+    bd.drag._drag["theta"] = 0.6
+    cursor = bd.drag._drag["cursor"]
     t = 0
     for _ in range(120):
         t += 16
-        bd._drag["cursor"] = cursor
+        bd.drag._drag["cursor"] = cursor
         bd.update_drag_physics(t)
-    assert abs(bd._drag["theta"]) < 0.05
-    assert abs(bd._drag["omega"]) < 0.3
+    assert abs(bd.drag._drag["theta"]) < 0.05
+    assert abs(bd.drag._drag["omega"]) < 0.3
 
 
 def test_bounded_and_finite_under_violent_input():
@@ -180,10 +180,10 @@ def test_bounded_and_finite_under_violent_input():
     t = 0
     for i in range(80):
         t += 16
-        bd._drag["cursor"] = (450 + (300 if i % 2 else -300), 450 + (200 if i % 3 else -150))
+        bd.drag._drag["cursor"] = (450 + (300 if i % 2 else -300), 450 + (200 if i % 3 else -150))
         bd.update_drag_physics(t)
-        assert math.isfinite(bd._drag["theta"])
-        assert abs(bd._drag["omega"]) <= board_mod.DRAG_OMEGA_MAX + 1e-6
+        assert math.isfinite(bd.drag._drag["theta"])
+        assert abs(bd.drag._drag["omega"]) <= drag_mod.DRAG_OMEGA_MAX + 1e-6
 
 
 def test_hard_flick_can_exceed_a_full_rotation():
@@ -211,9 +211,9 @@ def test_frame_rate_independent_within_tolerance():
         while t < 500:
             t += step
             x = 450 + 45 * math.sin(2 * math.pi * (t / 500.0))
-            bd._drag["cursor"] = (x, 450)
+            bd.drag._drag["cursor"] = (x, 450)
             bd.update_drag_physics(t)
-        return bd._drag["theta"]
+        return bd.drag._drag["theta"]
     assert abs(run(16) - run(8)) < 0.15
 
 
@@ -224,12 +224,12 @@ def test_grab_outside_piece_slides_in_without_flicking():
     geom = bd._sprite_geom[(piece.type, piece.color)]
     bd.handle_click(sq)
     rect = bd._cell_rect(sq.row, sq.col)
-    bd._press_pos = (rect.x + 1, rect.y + 1)
-    bd._begin_drag_physics((200, 200), 0)
+    bd.drag._press_pos = (rect.x + 1, rect.y + 1)
+    bd.drag._begin_drag_physics((200, 200), 0)
     rest = (rect.x + geom["top_center"][0], rect.y + geom["top_center"][1])
-    assert bd._drag["anchor"] == rest
+    assert bd.drag._drag["anchor"] == rest
     bd.update_drag_physics(16)
-    ax, _ = bd._drag["anchor"]
+    ax, _ = bd.drag._drag["anchor"]
     lo, hi = sorted((200, rest[0]))
     assert lo < ax < hi
     assert abs(ax - 200) > 5
@@ -237,7 +237,7 @@ def test_grab_outside_piece_slides_in_without_flicking():
     for _ in range(30):
         t += 16
         bd.update_drag_physics(t)
-    assert abs(bd._drag["anchor"][0] - 200) < 2 and abs(bd._drag["anchor"][1] - 200) < 2
+    assert abs(bd.drag._drag["anchor"][0] - 200) < 2 and abs(bd.drag._drag["anchor"][1] - 200) < 2
 
 
 def test_legal_drag_starts_settle_then_lands():
@@ -247,11 +247,11 @@ def test_legal_drag_starts_settle_then_lands():
     _cursor_to(bd, e4)
     bd.handle_click(e4)
     bd.end_press()
-    assert bd._drag is not None and bd._drag["phase"] == "settle"
-    assert bd._drag["settle_to_sq"] == e4
+    assert bd.drag._drag is not None and bd.drag._drag["phase"] == "settle"
+    assert bd.drag._drag["settle_to_sq"] == e4
     assert bd.is_animating() is True
     _finish_settle(bd)
-    assert bd._drag is None and bd.dragging_from is None
+    assert bd.drag._drag is None and bd.dragging_from is None
     assert bd.is_animating() is False
     assert len(landed) == 1
     assert bk.piece_at(e4) is not None and bk.piece_at(e2) is None
@@ -264,11 +264,11 @@ def test_illegal_drag_settles_back_to_origin():
     _cursor_to(bd, e5)
     bd.handle_click(e5)
     bd.end_press()
-    assert bd._drag is not None and bd._drag["phase"] == "settle"
-    assert bd._drag["settle_to_sq"] == e2
-    assert bd._drag["on_settled"] is None
+    assert bd.drag._drag is not None and bd.drag._drag["phase"] == "settle"
+    assert bd.drag._drag["settle_to_sq"] == e2
+    assert bd.drag._drag["on_settled"] is None
     _finish_settle(bd)
-    assert bd._drag is None and bd.dragging_from is None
+    assert bd.drag._drag is None and bd.dragging_from is None
     assert len(landed) == 0 and bk.piece_at(e2) is not None
 
 
@@ -284,7 +284,7 @@ def test_promotion_drag_defers_picker_until_landing():
     _cursor_to(bd, e8)
     bd.handle_click(e8)
     bd.end_press()
-    assert bd._drag["phase"] == "settle" and bd._drag["settle_to_sq"] == e8
+    assert bd.drag._drag["phase"] == "settle" and bd.drag._drag["settle_to_sq"] == e8
     assert bd.pending_promotion_square is None
     _finish_settle(bd)
     assert bd.pending_promotion_square == e8
@@ -314,11 +314,11 @@ def test_settle_completes_within_cap_even_with_large_spin():
     _cursor_to(bd, e4)
     bd.handle_click(e4)
     bd.end_press()
-    bd._drag["omega"] = 40.0
-    dur = bd._drag["settle_dur_ms"]
-    start = bd._drag["settle_start_ms"]
-    bd.update_drag_physics(start + int(dur * board_mod.DRAG_SETTLE_MAX_T) + 1)
-    assert bd._drag is None
+    bd.drag._drag["omega"] = 40.0
+    dur = bd.drag._drag["settle_dur_ms"]
+    start = bd.drag._drag["settle_start_ms"]
+    bd.update_drag_physics(start + int(dur * drag_mod.DRAG_SETTLE_MAX_T) + 1)
+    assert bd.drag._drag is None
 
 
 def test_cancel_drag_physics_fires_pending_landing():
@@ -328,18 +328,18 @@ def test_cancel_drag_physics_fires_pending_landing():
     _cursor_to(bd, e4)
     bd.handle_click(e4)
     bd.end_press()
-    assert bd._drag["phase"] == "settle"
+    assert bd.drag._drag["phase"] == "settle"
     bd.cancel_drag_physics()
-    assert bd._drag is None and bd.dragging_from is None
+    assert bd.drag._drag is None and bd.dragging_from is None
     assert len(landed) == 1
 
 
 def test_set_rect_cancels_active_drag():
     bd, _, _ = _make_board()
     _grab(bd, Square(6, 4), where="center")
-    assert bd._drag is not None
+    assert bd.drag._drag is not None
     bd.set_rect(pg.Rect(0, 0, 500, 500))
-    assert bd._drag is None and bd.dragging_from is None
+    assert bd.drag._drag is None and bd.dragging_from is None
 
 
 def _kings():
@@ -363,7 +363,7 @@ def test_remote_move_during_drag_preserves_grab():
     bk.try_move(Square(0, 1), Square(2, 2))
     bd.animate_remote_move(Square(0, 1), Square(2, 2))
     assert bd.dragging_from == Square(6, 4)
-    assert bd._drag is not None and bd._drag["phase"] == "drag"
+    assert bd.drag._drag is not None and bd.drag._drag["phase"] == "drag"
 
 
 def test_remote_capture_elsewhere_keeps_grab():
@@ -378,7 +378,7 @@ def test_remote_capture_elsewhere_keeps_grab():
     bk.try_move(Square(3, 1), Square(4, 0))
     bd.animate_remote_move(Square(3, 1), Square(4, 0))
     assert bd.dragging_from == Square(6, 4)
-    assert bd._drag is not None and bd._drag["phase"] == "drag"
+    assert bd.drag._drag is not None and bd.drag._drag["phase"] == "drag"
 
 
 def test_remote_capture_of_dragged_piece_snaps_back():
@@ -391,5 +391,5 @@ def test_remote_capture_of_dragged_piece_snaps_back():
     _grab(bd, Square(4, 4), where="center")
     bk.try_move(Square(3, 3), Square(4, 4))
     bd.animate_remote_move(Square(3, 3), Square(4, 4))
-    assert bd._drag is not None and bd._drag["phase"] == "settle"
-    assert bd._drag["settle_to_sq"] == Square(4, 4)
+    assert bd.drag._drag is not None and bd.drag._drag["phase"] == "settle"
+    assert bd.drag._drag["settle_to_sq"] == Square(4, 4)

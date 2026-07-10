@@ -13,6 +13,7 @@ from chessshootout.backend.backend import Backend
 from chessshootout.backend.pieces import Piece, PieceColor, PieceType
 from chessshootout.backend.utils import Square
 from chessshootout.frontend.board import Board
+from chessshootout.frontend.board.annotations import Annotations
 from chessshootout.frontend.visual.colors import Colors
 
 
@@ -78,18 +79,18 @@ def _arrow_marks_cells(board, squares):
     win = board.window
 
     def snapshot():
-        board._arrow_cache = None
+        board.annotations._arrow_cache = None
         win.fill((0, 0, 0))
         board.draw_board()
         return {sq: pg.image.tobytes(win.subsurface(_arrow_region(board, sq)), "RGB")
                 for sq in squares}
 
     with_arrows = snapshot()
-    arrows, drag = board.arrows, board._right_drag_start_square
-    board.arrows, board._right_drag_start_square = [], None
+    arrows, drag = board.arrows, board.annotations._right_drag_start_square
+    board.arrows, board.annotations._right_drag_start_square = [], None
     without = snapshot()
-    board.arrows, board._right_drag_start_square = arrows, drag
-    board._arrow_cache = None
+    board.arrows, board.annotations._right_drag_start_square = arrows, drag
+    board.annotations._arrow_cache = None
     return {sq: with_arrows[sq] != without[sq] for sq in squares}
 
 
@@ -187,11 +188,11 @@ def test_is_square_annotated_neutral_returns_false(board):
 def test_clear_annotations_empties_state(board):
     board.toggle_highlight(Square(4, 4))
     board.toggle_arrow(Square(6, 0), Square(4, 0))
-    board._right_drag_start_square = Square(2, 2)
+    board.annotations._right_drag_start_square = Square(2, 2)
     board.clear_annotations()
     assert board.highlighted_squares == set()
     assert board.arrows == []
-    assert board._right_drag_start_square is None
+    assert board.annotations._right_drag_start_square is None
 
 
 def post_event(event_type, **kwargs):
@@ -204,14 +205,14 @@ def test_right_click_down_on_board_sets_drag_start():
     rect = app.board._cell_rect(sq.row, sq.col)
     post_event(pg.MOUSEBUTTONDOWN, button=3, pos=rect.center)
     app.check_events()
-    assert app.board._right_drag_start_square == sq
+    assert app.board.annotations._right_drag_start_square == sq
 
 
 def test_right_click_down_off_board_no_drag_start():
     app = make_app()
     post_event(pg.MOUSEBUTTONDOWN, button=3, pos=(2000, 2000))
     app.check_events()
-    assert app.board._right_drag_start_square is None
+    assert app.board.annotations._right_drag_start_square is None
 
 
 def test_right_click_during_left_drag_does_not_start_highlight():
@@ -223,7 +224,7 @@ def test_right_click_during_left_drag_does_not_start_highlight():
     rect = app.board._cell_rect(other_sq.row, other_sq.col)
     post_event(pg.MOUSEBUTTONDOWN, button=3, pos=rect.center)
     app.check_events()
-    assert app.board._right_drag_start_square is None
+    assert app.board.annotations._right_drag_start_square is None
     post_event(pg.MOUSEBUTTONUP, button=3, pos=rect.center)
     app.check_events()
     assert other_sq not in app.board.highlighted_squares
@@ -237,7 +238,7 @@ def test_right_click_release_same_square_toggles_highlight():
     post_event(pg.MOUSEBUTTONUP, button=3, pos=rect.center)
     app.check_events()
     assert sq in app.board.highlighted_squares
-    assert app.board._right_drag_start_square is None
+    assert app.board.annotations._right_drag_start_square is None
 
 
 def test_right_click_release_different_square_creates_arrow():
@@ -250,7 +251,7 @@ def test_right_click_release_different_square_creates_arrow():
     post_event(pg.MOUSEBUTTONUP, button=3, pos=b_rect.center)
     app.check_events()
     assert (a, b) in app.board.arrows
-    assert app.board._right_drag_start_square is None
+    assert app.board.annotations._right_drag_start_square is None
 
 
 def test_right_click_release_off_board_cancels():
@@ -262,7 +263,7 @@ def test_right_click_release_off_board_cancels():
     app.check_events()
     assert app.board.highlighted_squares == set()
     assert app.board.arrows == []
-    assert app.board._right_drag_start_square is None
+    assert app.board.annotations._right_drag_start_square is None
 
 
 def test_right_click_on_already_highlighted_removes_it():
@@ -518,7 +519,7 @@ def test_draw_knight_arrow_renders_with_elbow(board, dr, dc):
     so the from-, corner-, and to-squares all gain arrow pixels."""
     center = Square(4, 4)
     target = Square(center.row + dr, center.col + dc)
-    corner = Board._knight_arrow_corner(center, target)
+    corner = Annotations._knight_arrow_corner(center, target)
     board.toggle_arrow(center, target)
     marks = _arrow_marks_cells(board, [center, corner, target])
     assert marks[center] and marks[corner] and marks[target]
@@ -541,7 +542,7 @@ def test_arrow_overlap_does_not_double_alpha(board, from_sq, to_sq):
     max_a = pg.Color(Colors.annotation_arrow).a
     assert max_a < 255
     layer = pg.Surface(board.rect.size, pg.SRCALPHA)
-    board._render_arrow(layer, 1, from_sq, to_sq, Colors.annotation_arrow)
+    board.annotations._render_arrow(layer, 1, from_sq, to_sq, Colors.annotation_arrow)
     w, h = layer.get_size()
     peak = max(layer.get_at((x, y)).a for x in range(w) for y in range(h))
     assert peak == max_a, f"overlap summed alpha to {peak}, expected exactly {max_a}"
@@ -570,12 +571,12 @@ def test_arrow_overlap_does_not_double_alpha(board, from_sq, to_sq):
     ],
 )
 def test_knight_arrow_corner(from_sq, to_sq, expected):
-    assert Board._knight_arrow_corner(from_sq, to_sq) == expected
+    assert Annotations._knight_arrow_corner(from_sq, to_sq) == expected
 
 
 def test_draw_drag_preview_arrow_no_drag_is_noop(board, monkeypatch):
     """No drag start -> nothing is rendered (no caps, no head, no shaft)."""
-    board._right_drag_start_square = None
+    board.annotations._right_drag_start_square = None
     circle_centers, arrow_tips, line_segments = _spy_arrow_geometry(monkeypatch)
     board._draw_arrows()
     assert circle_centers == []
@@ -588,7 +589,7 @@ def test_draw_drag_preview_arrow_with_active_drag(board, monkeypatch):
     square under the mouse."""
     start = Square(6, 4)
     end = Square(4, 4)
-    board._right_drag_start_square = start
+    board.annotations._right_drag_start_square = start
     monkeypatch.setattr(pg.mouse, "get_pos", lambda: _cell_center(board, end))
     marks = _arrow_marks_cells(board, [start, end])
     assert marks[start] and marks[end]
@@ -597,7 +598,7 @@ def test_draw_drag_preview_arrow_with_active_drag(board, monkeypatch):
 def test_draw_drag_preview_arrow_same_square_is_noop(board, monkeypatch):
     """Hovering back over the start square previews nothing."""
     start = Square(6, 4)
-    board._right_drag_start_square = start
+    board.annotations._right_drag_start_square = start
     monkeypatch.setattr(pg.mouse, "get_pos", lambda: _cell_center(board, start))
     circle_centers, arrow_tips, line_segments = _spy_arrow_geometry(monkeypatch)
     board._draw_arrows()
@@ -617,7 +618,7 @@ def test_draw_full_board_with_annotations_renders_all_layers(board, monkeypatch)
     arrow_from, arrow_to = Square(6, 4), Square(4, 4)
     board.toggle_arrow(arrow_from, arrow_to)
     drag_start, drag_end = Square(0, 0), Square(2, 2)
-    board._right_drag_start_square = drag_start
+    board.annotations._right_drag_start_square = drag_start
     monkeypatch.setattr(pg.mouse, "get_pos", lambda: _cell_center(board, drag_end))
     marks = _arrow_marks_cells(board, [arrow_from, arrow_to, drag_start, drag_end])
     assert all(marks.values())

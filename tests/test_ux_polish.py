@@ -218,7 +218,7 @@ def test_drag_threshold_constant_is_six():
 
 def test_begin_press_records_position(board):
     board.begin_press((100, 100))
-    assert board._press_pos == (100, 100)
+    assert board.drag._press_pos == (100, 100)
 
 
 def test_motion_below_threshold_does_not_start_drag(board):
@@ -258,12 +258,12 @@ def test_end_press_clears_state(board):
     assert board.dragging_from == Square(6, 4)
     was_dragging = board.end_press()
     assert was_dragging is True
-    assert board._press_pos is None
-    assert board._drag is not None and board._drag["phase"] == "settle"
-    board.update_drag_physics(board._drag["settle_start_ms"] + 100000)
+    assert board.drag._press_pos is None
+    assert board.drag._drag is not None and board.drag._drag["phase"] == "settle"
+    board.update_drag_physics(board.drag._drag["settle_start_ms"] + 100000)
     assert board.dragging_from is None
-    assert board._drag_cursor is None
-    assert board._drag is None
+    assert board.drag._drag_cursor is None
+    assert board.drag._drag is None
 
 
 def test_drag_skips_origin_in_draw_pieces(board):
@@ -284,15 +284,15 @@ def test_dragged_piece_renders_at_cursor(board):
     board.handle_click(Square(6, 4))
     board.begin_press((10, 10))
     board.update_drag_motion((123, 234))
-    board._draw_dragged_piece()
-    assert board._drag_cursor == (123, 234)
+    board.drag._draw_dragged_piece()
+    assert board.drag._drag_cursor == (123, 234)
 
 
 def test_dragged_piece_no_op_without_drag_state(board):
     """Without dragging_from, the dragged-piece draw is a no-op even with a cursor set."""
     assert board.dragging_from is None
-    board._drag_cursor = (10, 10)
-    board._draw_dragged_piece()
+    board.drag._drag_cursor = (10, 10)
+    board.drag._draw_dragged_piece()
 
 
 def test_drag_and_drop_executes_legal_move():

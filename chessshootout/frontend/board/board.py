@@ -5,6 +5,8 @@ import pygame as pg
 
 from chessshootout.backend.pseudo_legal import piece_can_pseudo_reach, king_square, checking_square
 from chessshootout.backend.utils import Square
+from chessshootout.frontend.board.annotations import Annotations
+from chessshootout.frontend.board.drag import DragPhysics
 from chessshootout.frontend.visual.animation import PieceAnimation
 from chessshootout.frontend.visual.cache import (
     new_cache, new_size_cache, memoized_surface, render_text,
@@ -21,26 +23,6 @@ from chessshootout.frontend.visual.fonts import get_font, DISPLAY
 _OVERLAY_CACHE = new_cache()
 _PROMO_OPTION_CACHE = new_size_cache()
 _MARKER_CACHE = new_cache()
-
-DRAG_THRESHOLD_PX = 6
-DRAG_GHOST_ALPHA_FRACTION = 0.30
-LIFT_SCALE = 0.2
-SHADOW_ALPHA = 90
-SHADOW_OFFSET_FRACTION = 0.04
-
-DRAG_K_SPRING = 90.0
-DRAG_C_DAMP = 6.0
-DRAG_K_FORCE = 0.22
-DRAG_RG_FRACTION = 0.20
-DRAG_TAU_ACC = 0.025
-DRAG_TAU_LIFT = 0.10
-DRAG_TAU_ENTRY = 0.06
-DRAG_DT_MAX = 0.05
-DRAG_SUBSTEP = 1.0 / 240.0
-DRAG_OMEGA_MAX = 150.0
-DRAG_SETTLE_K = 400.0
-DRAG_SETTLE_C = 40.0
-DRAG_SETTLE_MAX_T = 2.0
 
 RESTORE_MS = 480
 RESTORE_DROP_FRAC = 0.8
@@ -109,7 +91,6 @@ class Board:
         self._checkerboard_surf = None
         self._check_squares_key = None
         self._check_squares = []
-        self._arrow_cache = None
         self._shake_dx = 0
         self._shake_dy = 0
 
@@ -133,13 +114,9 @@ class Board:
         self.last_animation_completed_at_ms = 0
         self.premoves = []
         self.premove_color = None
-        self.highlighted_squares = set()
-        self.arrows = []
-        self._right_drag_start_square = None
-        self._press_pos = None
+        self.annotations = Annotations(self)
         self.dragging_from = None
-        self._drag_cursor = None
-        self._drag = None
+        self.drag = DragPhysics(self)
         self.review_ply = None
         self._target_ply = None
         self.read_only = False
@@ -152,6 +129,35 @@ class Board:
     def backend(self):
         inner = getattr(self.match, "backend", None)
         return inner if inner is not None else self.match
+
+    @property
+    def highlighted_squares(self):
+        return self.annotations.highlighted_squares
+
+    @highlighted_squares.setter
+    def highlighted_squares(self, value):
+        self.annotations.highlighted_squares = value
+
+    @property
+    def arrows(self):
+        return self.annotations.arrows
+
+    @arrows.setter
+    def arrows(self, value):
+        self.annotations.arrows = value
+
+    def reset_for_new_game(self):
+        self.flipped = False
+        self.selected_square = None
+        self.pending_promotion_square = None
+        self._promotion_from = None
+        self.cancel_animations()
+        self.effects.clear()
+        self.clear_premoves()
+        self.aim_suppressed_square = None
+        self.clear_annotations()
+        self.end_press()
+        self.review_ply = None
 
     def _render_text(self):
         size = max(int(self.cell_size * 0.30), 11) if self.cell_size else 13
@@ -374,9 +380,7 @@ class Board:
         self._draw_promotion_picker()
 
     def draw_drag_overlay(self):
-        if self.review_ply is not None:
-            return
-        self._draw_dragged_piece()
+        self.drag.draw_drag_overlay()
 
     def _cell_overlay(self, color):
         cs = int(self.cell_size)
@@ -416,39 +420,6 @@ class Board:
             rect = self._cell_rect(sq.row, sq.col)
             self.window.blit(self._cell_overlay(Colors.last_move), rect.topleft)
 
-    def _blit_lifted(self, surface, pivot_local, screen_pivot, angle_deg, zoom):
-        rotated = pg.transform.rotozoom(surface, angle_deg, zoom)
-        w, h = surface.get_size()
-        sw, sh = w * zoom, h * zoom
-        offset = pg.math.Vector2(pivot_local[0] * zoom - sw / 2,
-                                 pivot_local[1] * zoom - sh / 2).rotate(-angle_deg)
-        center = (screen_pivot[0] - offset.x, screen_pivot[1] - offset.y)
-        self.window.blit(rotated, rotated.get_rect(center=center))
-
-    def _draw_dragged_piece(self):
-        d = self._drag
-        if d is None:
-            return
-        piece = d["piece"]
-        surface = self.piece_images_scaled[(piece.type, piece.color)]
-        angle_deg = -math.degrees(d["theta"])
-        zoom = 1.0 + LIFT_SCALE * d["lift"]
-        if d["phase"] == "settle":
-            pivot_local = d["com_local"]
-            anchor = d["screen_center"]
-        else:
-            pivot_local = d["grab_local"]
-            anchor = d["anchor"]
-            ghost = surface.copy()
-            ghost.set_alpha(int(255 * DRAG_GHOST_ALPHA_FRACTION))
-            origin_rect = self._cell_rect(self.dragging_from.row, self.dragging_from.col)
-            self.window.blit(ghost, origin_rect.topleft)
-        shadow = surface.copy()
-        shadow.fill((0, 0, 0, SHADOW_ALPHA), special_flags=pg.BLEND_RGBA_MULT)
-        shadow_anchor = (anchor[0], anchor[1] + SHADOW_OFFSET_FRACTION * self.cell_size)
-        self._blit_lifted(shadow, pivot_local, shadow_anchor, angle_deg, zoom)
-        self._blit_lifted(surface, pivot_local, anchor, angle_deg, zoom)
-
     def _draw_premove_highlights(self):
         if not self.premoves:
             return
@@ -478,29 +449,25 @@ class Board:
         return None
 
     def toggle_highlight(self, sq):
-        self.highlighted_squares ^= {sq}
+        self.annotations.toggle_highlight(sq)
 
     def toggle_arrow(self, from_sq, to_sq):
-        arrow = (from_sq, to_sq)
-        if arrow in self.arrows:
-            self.arrows.remove(arrow)
-        else:
-            self.arrows.append(arrow)
+        self.annotations.toggle_arrow(from_sq, to_sq)
 
     def is_square_annotated(self, sq):
-        return sq in self.highlighted_squares or any(
-            sq in (from_sq, to_sq) for from_sq, to_sq in self.arrows
-        )
+        return self.annotations.is_square_annotated(sq)
 
     def clear_annotations(self):
-        self.highlighted_squares = set()
-        self.arrows = []
-        self._right_drag_start_square = None
+        self.annotations.clear()
+
+    def begin_right_press(self, pos):
+        return self.annotations.begin_right_press(pos)
+
+    def end_right_press(self, pos):
+        self.annotations.end_right_press(pos)
 
     def _draw_annotation_highlights(self):
-        for sq in self.highlighted_squares:
-            rect = self._cell_rect(sq.row, sq.col)
-            self.window.blit(self._cell_overlay(Colors.annotation_highlight), rect.topleft)
+        self.annotations._draw_annotation_highlights()
 
     def _draw_review_cue(self):
         if self.read_only or self._frame_surf is None:
@@ -509,115 +476,7 @@ class Board:
                      border_radius=self.FRAME_RADIUS)
 
     def _draw_arrows(self):
-        if self.cell_size <= 0:
-            self._arrow_cache = None
-            return
-        items = [(fr, to, Colors.annotation_arrow) for fr, to in self.arrows]
-        if self._right_drag_start_square is not None:
-            end_sq = self.cell_at(pg.mouse.get_pos())
-            if end_sq is not None and end_sq != self._right_drag_start_square:
-                items.append((self._right_drag_start_square, end_sq,
-                              Colors.annotation_arrow_preview))
-        if not items:
-            self._arrow_cache = None
-            return
-        key = (tuple(items), self.cell_size, self.board_offset_x,
-               self.board_offset_y, self.flipped, self.rect.size)
-        if self._arrow_cache is None or self._arrow_cache[0] != key:
-            def render(layer, scale):
-                for fr, to, color in items:
-                    self._render_arrow(layer, scale, fr, to, color)
-            self._arrow_cache = (key, supersample(self.rect.size, render))
-        self.window.blit(self._arrow_cache[1], self.rect.topleft)
-
-    @staticmethod
-    def _knight_arrow_corner(from_sq, to_sq):
-        dr = to_sq.row - from_sq.row
-        dc = to_sq.col - from_sq.col
-        if {abs(dr), abs(dc)} != {1, 2}:
-            return None
-        if abs(dr) == 2:
-            return Square(to_sq.row, from_sq.col)
-        return Square(from_sq.row, to_sq.col)
-
-    def _render_arrow(self, layer, scale, from_sq, to_sq, color):
-        def pt(sq):
-            r = self._cell_rect_base(sq.row, sq.col)
-            return ((r.centerx - self.rect.x) * scale, (r.centery - self.rect.y) * scale)
-
-        from_pos = pt(from_sq)
-        to_pos = pt(to_sq)
-        width = max(int(self.cell_size * 0.16), 5) * scale
-        head_size = max(int(self.cell_size * 0.38), 8) * scale
-        base = pg.Color(color)
-        rgb = (base.r, base.g, base.b)
-        max_a = base.a
-
-        corner_sq = self._knight_arrow_corner(from_sq, to_sq)
-        shaft_origin = pt(corner_sq) if corner_sq is not None else from_pos
-
-        angle = math.atan2(to_pos[1] - shaft_origin[1], to_pos[0] - shaft_origin[0])
-        shaft_end = (
-            to_pos[0] - head_size * 0.55 * math.cos(angle),
-            to_pos[1] - head_size * 0.55 * math.sin(angle),
-        )
-        head_half = math.radians(150)
-        head_left = (to_pos[0] + head_size * math.cos(angle + head_half),
-                     to_pos[1] + head_size * math.sin(angle + head_half))
-        head_right = (to_pos[0] + head_size * math.cos(angle - head_half),
-                      to_pos[1] + head_size * math.sin(angle - head_half))
-
-        pts = [from_pos] + ([shaft_origin] if corner_sq is not None else []) + [shaft_end]
-        head = [to_pos, head_left, head_right]
-        pad = width + 4
-        xs = [p[0] for p in pts + head]
-        ys = [p[1] for p in pts + head]
-        ox, oy = min(xs) - pad, min(ys) - pad
-        w = max(int(max(xs) + pad - ox), 1)
-        h = max(int(max(ys) + pad - oy), 1)
-        arrow = pg.Surface((w, h), pg.SRCALPHA)
-        self._draw_shaft(arrow, rgb, max_a, [(x - ox, y - oy) for x, y in pts], width)
-        pg.draw.polygon(arrow, (*rgb, max_a), [(x - ox, y - oy) for x, y in head])
-        layer.blit(arrow, (int(ox), int(oy)))
-
-    @staticmethod
-    def _gradient_capsule(rgb, length, width, a0, a1):
-        length = max(int(length), 1)
-        width = max(int(width), 1)
-        cols = min(length, 64)
-        strip = pg.Surface((cols, width), pg.SRCALPHA)
-        for x in range(cols):
-            t = x / max(cols - 1, 1)
-            pg.draw.line(strip, (*rgb, int(a0 + (a1 - a0) * t)), (x, 0), (x, width - 1))
-        bar = pg.transform.smoothscale(strip, (length, width))
-        mask = pg.Surface((length, width), pg.SRCALPHA)
-        pg.draw.rect(mask, (255, 255, 255, 255), mask.get_rect(), border_radius=width // 2)
-        bar.blit(mask, (0, 0), special_flags=pg.BLEND_RGBA_MULT)
-        return bar
-
-    def _draw_shaft(self, surf, rgb, max_a, pts, width):
-        seglens = [math.hypot(pts[i + 1][0] - pts[i][0], pts[i + 1][1] - pts[i][1])
-                   for i in range(len(pts) - 1)]
-        total = sum(seglens) or 1
-        n = len(pts)
-        done = 0.0
-        ext = width / 2
-        for i in range(n - 1):
-            ax, ay = pts[i]
-            bx, by = pts[i + 1]
-            seg = seglens[i] or 1
-            dx, dy = (bx - ax) / seg, (by - ay) / seg
-            if i > 0:
-                ax, ay = ax - dx * ext, ay - dy * ext
-            if i < n - 2:
-                bx, by = bx + dx * ext, by + dy * ext
-            a0 = max_a * (0.45 + 0.5 * (done / total))
-            a1 = max_a * (0.45 + 0.5 * ((done + seglens[i]) / total))
-            cap = self._gradient_capsule(rgb, math.hypot(bx - ax, by - ay), width, a0, a1)
-            rotated = pg.transform.rotate(cap, -math.degrees(math.atan2(by - ay, bx - ax)))
-            surf.blit(rotated, rotated.get_rect(center=((ax + bx) / 2, (ay + by) / 2)),
-                      special_flags=pg.BLEND_RGBA_MAX)
-            done += seglens[i]
+        self.annotations._draw_arrows()
 
     def _draw_check_highlight(self):
         for sq in self._in_check_king_squares():
@@ -661,8 +520,9 @@ class Board:
             hidden.add(self.aim_suppressed_square)
         if self.dragging_from is not None:
             hidden.add(self.dragging_from)
-        if self._drag is not None and self._drag["phase"] == "settle":
-            hidden.add(self._drag["settle_to_sq"])
+        settle_sq = self.drag.settle_target()
+        if settle_sq is not None:
+            hidden.add(settle_sq)
         for row, col in product(range(self.SIZE), repeat=2):
             sq = Square(row, col)
             if sq in hidden:
@@ -701,12 +561,12 @@ class Board:
                 a.on_complete()
 
     def is_animating(self):
-        if self._drag is not None and self._drag["phase"] == "settle":
+        if self.drag.is_settling():
             return True
         return bool(self.animations)
 
     def is_dragging(self):
-        return self._drag is not None or self.dragging_from is not None
+        return self.drag.is_dragging()
 
     def is_restoring(self):
         return bool(self._restore_anims)
@@ -737,17 +597,8 @@ class Board:
         self.animations = []
         self._restore_anims = []
 
-    def _clear_drag_state(self):
-        self._drag = None
-        self.dragging_from = None
-        self._drag_cursor = None
-
     def cancel_drag_physics(self):
-        d = self._drag
-        self._clear_drag_state()
-        self._press_pos = None
-        if d is not None and d["phase"] == "settle" and d["on_settled"] is not None:
-            d["on_settled"]()
+        self.drag.cancel_drag_physics()
 
     def jump_to_review_ply(self, ply):
         self.cancel_animations()
@@ -958,198 +809,16 @@ class Board:
         surf.blit(ticks, (0, 0))
 
     def begin_press(self, pos):
-        self._press_pos = pos
-
-    def _grab_local_for(self, from_sq, press_pos, piece):
-        geom = self._sprite_geom.get((piece.type, piece.color))
-        if geom is None:
-            return (self.cell_size / 2, self.cell_size / 2)
-        if press_pos is None:
-            return geom["top_center"]
-        rect = self._cell_rect(from_sq.row, from_sq.col)
-        local = (press_pos[0] - rect.x, press_pos[1] - rect.y)
-        surface = self.piece_images_scaled[(piece.type, piece.color)]
-        w, h = surface.get_size()
-        inside = 0 <= local[0] < w and 0 <= local[1] < h
-        if inside and geom["bbox"].collidepoint(local) and \
-                surface.get_at((int(local[0]), int(local[1]))).a > 0:
-            return local
-        return geom["top_center"]
-
-    def _begin_drag_physics(self, pos, now):
-        piece = self.match.piece_at(self.selected_square)
-        if piece is None:
-            return
-        self.dragging_from = self.selected_square
-        self._drag_cursor = pos
-        geom = self._sprite_geom.get((piece.type, piece.color))
-        com = geom["center"] if geom else (self.cell_size / 2, self.cell_size / 2)
-        grab = self._grab_local_for(self.dragging_from, self._press_pos, piece)
-        rect = self._cell_rect(self.dragging_from.row, self.dragging_from.col)
-        entry_from = (rect.x + grab[0], rect.y + grab[1])
-        self._drag = {
-            "piece": piece,
-            "grab_local": grab,
-            "com_local": com,
-            "r_local": (com[0] - grab[0], com[1] - grab[1]),
-            "theta": 0.0,
-            "omega": 0.0,
-            "cursor": pos,
-            "anchor": entry_from,
-            "entry_from": entry_from,
-            "entry": 0.0,
-            "vel": (0.0, 0.0),
-            "accel": (0.0, 0.0),
-            "last_cursor": pos,
-            "last_tick": now,
-            "lift": 0.0,
-            "phase": "drag",
-        }
+        self.drag.begin_press(pos)
 
     def update_drag_physics(self, now):
-        if self.read_only or self.review_ply is not None:
-            return
-        d = self._drag
-        if d is None:
-            return
-        if d["phase"] == "settle":
-            self._update_settle(d, now)
-            return
-        dt = (now - d["last_tick"]) / 1000.0
-        d["last_tick"] = now
-        if dt <= 0:
-            return
-        dt = min(dt, DRAG_DT_MAX)
-
-        al = 1.0 - math.exp(-dt / DRAG_TAU_LIFT)
-        d["lift"] += (1.0 - d["lift"]) * al
-        ae = 1.0 - math.exp(-dt / DRAG_TAU_ENTRY)
-        d["entry"] += (1.0 - d["entry"]) * ae
-        ef, cur, e = d["entry_from"], d["cursor"], d["entry"]
-        d["anchor"] = (ef[0] + (cur[0] - ef[0]) * e, ef[1] + (cur[1] - ef[1]) * e)
-
-        cursor = d["cursor"]
-        last = d["last_cursor"]
-        raw_vx = (cursor[0] - last[0]) / dt
-        raw_vy = (cursor[1] - last[1]) / dt
-        d["last_cursor"] = cursor
-        prev_vx, prev_vy = d["vel"]
-        raw_ax = (raw_vx - prev_vx) / dt
-        raw_ay = (raw_vy - prev_vy) / dt
-        d["vel"] = (raw_vx, raw_vy)
-        aa = 1.0 - math.exp(-dt / DRAG_TAU_ACC)
-        ax = d["accel"][0] + (raw_ax - d["accel"][0]) * aa
-        ay = d["accel"][1] + (raw_ay - d["accel"][1]) * aa
-        d["accel"] = (ax, ay)
-
-        rlx, rly = d["r_local"]
-        rg = DRAG_RG_FRACTION * self.cell_size
-        inertia = rg * rg + rlx * rlx + rly * rly
-        k_force = DRAG_K_FORCE
-        n = max(1, math.ceil(dt / DRAG_SUBSTEP))
-        h = dt / n
-        theta = d["theta"]
-        omega = d["omega"]
-        for _ in range(n):
-            cos_t = math.cos(theta)
-            sin_t = math.sin(theta)
-            rx = rlx * cos_t - rly * sin_t
-            ry = rlx * sin_t + rly * cos_t
-            torque = rx * (-ay) - ry * (-ax)
-            forcing = k_force * torque / inertia
-            alpha = -DRAG_K_SPRING * sin_t - DRAG_C_DAMP * omega + forcing
-            omega += alpha * h
-            omega = max(-DRAG_OMEGA_MAX, min(DRAG_OMEGA_MAX, omega))
-            theta += omega * h
-        d["theta"] = theta
-        d["omega"] = omega
-
-    def _begin_settle(self, target_sq, on_settled):
-        d = self._drag
-        if d is None:
-            return
-        now = pg.time.get_ticks()
-        theta = d["theta"]
-        zoom = 1.0 + LIFT_SCALE * d["lift"]
-        rlx, rly = d["r_local"]
-        off = pg.math.Vector2(zoom * rlx, zoom * rly).rotate(math.degrees(theta))
-        anchor = d["anchor"]
-        d["phase"] = "settle"
-        d["settle_to_sq"] = target_sq
-        d["start_center"] = (anchor[0] + off.x, anchor[1] + off.y)
-        d["screen_center"] = d["start_center"]
-        d["theta_target"] = round(theta / (2 * math.pi)) * (2 * math.pi)
-        d["settle_start_ms"] = now
-        d["last_tick"] = now
-        d["settle_dur_ms"] = self.animation_duration_ms
-        d["on_settled"] = on_settled
-
-    def _update_settle(self, d, now):
-        dt = max(0.0, min((now - d["last_tick"]) / 1000.0, DRAG_DT_MAX))
-        d["last_tick"] = now
-        dur = d["settle_dur_ms"]
-        raw_t = 1.0 if dur <= 0 else (now - d["settle_start_ms"]) / dur
-        t = min(max(raw_t, 0.0), 1.0)
-        e = 1.0 - (1.0 - t) ** 3
-        target = self._cell_rect(d["settle_to_sq"].row, d["settle_to_sq"].col).center
-        sc = d["start_center"]
-        d["screen_center"] = (sc[0] + (target[0] - sc[0]) * e,
-                              sc[1] + (target[1] - sc[1]) * e)
-        tt = d["theta_target"]
-        if dt > 0:
-            n = max(1, math.ceil(dt / DRAG_SUBSTEP))
-            h = dt / n
-            theta = d["theta"]
-            omega = d["omega"]
-            for _ in range(n):
-                alpha = -DRAG_SETTLE_K * (theta - tt) - DRAG_SETTLE_C * omega
-                omega += alpha * h
-                theta += omega * h
-            d["theta"] = theta
-            d["omega"] = omega
-            al = 1.0 - math.exp(-dt / DRAG_TAU_LIFT)
-            d["lift"] += (0.0 - d["lift"]) * al
-        settled = abs(d["theta"] - tt) < 0.02 and abs(d["omega"]) < 0.1
-        full = raw_t >= DRAG_SETTLE_MAX_T
-        if (t >= 1.0 and settled) or full:
-            d["theta"] = tt
-            cb = d["on_settled"]
-            self._clear_drag_state()
-            self.last_animation_completed_at_ms = now
-            if cb is not None:
-                cb()
+        self.drag.update_drag_physics(now)
 
     def update_drag_motion(self, pos):
-        if self.read_only:
-            return
-        if self._press_pos is None or self.selected_square is None:
-            return
-        if self.pending_promotion_square is not None:
-            return
-        if self.review_ply is not None:
-            return
-        if self.dragging_from is not None:
-            self._drag_cursor = pos
-            if self._drag is not None:
-                self._drag["cursor"] = pos
-            return
-        dx = pos[0] - self._press_pos[0]
-        dy = pos[1] - self._press_pos[1]
-        if dx * dx + dy * dy < DRAG_THRESHOLD_PX * DRAG_THRESHOLD_PX:
-            return
-        self._begin_drag_physics(pos, pg.time.get_ticks())
+        self.drag.update_drag_motion(pos)
 
     def end_press(self):
-        was_dragging = self.dragging_from is not None
-        self._press_pos = None
-        if self._drag is not None and self._drag["phase"] == "settle":
-            return was_dragging
-        if (was_dragging and self._drag is not None
-                and self._drag["phase"] == "drag"):
-            self._begin_settle(self.dragging_from, None)
-            return was_dragging
-        self._clear_drag_state()
-        return was_dragging
+        return self.drag.end_press()
 
     def queue_premove_from_drag(self, target_sq):
         if self.read_only or self.review_ply is not None:
@@ -1225,7 +894,7 @@ class Board:
                             return self._select_signal(self._try_select(resolved))
                         return self._premove_select(resolved, resolved_piece)
                 if self.premoves:
-                    self._clear_premoves()
+                    self.clear_premoves()
                     return "premove"
                 return None
             return self._premove_select(square, piece_at_clicked)
@@ -1297,7 +966,7 @@ class Board:
 
     def _begin_promotion_pick(self, from_sq, to_sq):
         self.selected_square = None
-        self._clear_drag_state()
+        self.drag.clear_drag_state()
         self.pending_promotion_square = to_sq
         self._promotion_from = from_sq
 
@@ -1355,7 +1024,7 @@ class Board:
         if local_color is not None and piece.color != local_color:
             return False
         if self.premove_color is not None and self.premove_color != piece.color:
-            self._clear_premoves()
+            self.clear_premoves()
         self.selected_square = square
         return True
 
@@ -1365,14 +1034,14 @@ class Board:
         if not piece_can_pseudo_reach(piece, from_sq, to_sq):
             return False
         if self.premove_color is not None and self.premove_color != piece.color:
-            self._clear_premoves()
+            self.clear_premoves()
         self.premoves.append(Premove(from_sq, to_sq, piece))
         self.premove_color = piece.color
         if self.on_premove_queued is not None:
             self.on_premove_queued(piece.type)
         return True
 
-    def _clear_premoves(self):
+    def clear_premoves(self):
         self.premoves = []
         self.premove_color = None
 
@@ -1388,7 +1057,7 @@ class Board:
             return False
         result = self.match.try_move(pm.from_sq, pm.to_sq)
         if not result.legal:
-            self._clear_premoves()
+            self.clear_premoves()
             return False
         self._consume_premove()
         self._start_move_animation(pm.from_sq, pm.to_sq, result.promotion_required)
@@ -1419,7 +1088,7 @@ class Board:
 
         own_drag = self.dragging_from is not None and from_sq == self.dragging_from
         if self.dragging_from is not None and not own_drag:
-            self._reanchor_drag_for_remote(entry, from_sq, to_sq)
+            self.drag.reanchor_for_remote(entry, from_sq, to_sq)
 
         if entry.move.captured is not None and self._capture_choreography(
                 entry, from_sq, to_sq, moving_piece, on_complete, clear_drag=own_drag):
@@ -1428,10 +1097,10 @@ class Board:
         if own_drag:
             self.last_animation_completed_at_ms = pg.time.get_ticks()
             if entry.move.is_castle:
-                self._begin_settle(to_sq, None)
+                self.drag.begin_settle(to_sq, None)
                 self._start_castle_rook_animation(entry, from_sq, on_complete=on_complete)
-            elif self._drag is not None:
-                self._begin_settle(to_sq, on_complete)
+            elif self.drag.is_active():
+                self.drag.begin_settle(to_sq, on_complete)
             else:
                 on_complete()
             return
@@ -1440,14 +1109,6 @@ class Board:
 
         if entry.move.is_castle:
             self._start_castle_rook_animation(entry, from_sq)
-
-    def _reanchor_drag_for_remote(self, entry, from_sq, to_sq):
-        if self._drag is None or entry.move.captured is None:
-            return
-        victim_sq = (Square(from_sq.row, to_sq.col)
-                     if entry.move.is_en_passant else to_sq)
-        if victim_sq == self.dragging_from:
-            self._begin_settle(self.dragging_from, None)
 
     @staticmethod
     def _castle_rook_squares(home_row, king_to_col):
@@ -1496,7 +1157,7 @@ class Board:
             self._on_capture_fire(entry, color, victim_sq)
             return False
         if clear_drag:
-            self._clear_drag_state()
+            self.drag.clear_drag_state()
         self.effects.capture(
             now_ms=pg.time.get_ticks(),
             attacker_type=moving_piece.type.value,
@@ -1526,7 +1187,7 @@ class Board:
         if piece is None or self.cell_size <= 0:
             return
         now = pg.time.get_ticks()
-        victim_sq = self._capture_victim_square(piece, from_sq, to_sq)
+        victim_sq = self.capture_victim_square(piece, from_sq, to_sq)
         if victim_sq is None:
             self._start_bump_animation(from_sq, to_sq, piece)
             self.effects.swear(now, from_sq, self.cell_size)
@@ -1542,7 +1203,7 @@ class Board:
             occupied=self._occupied_squares(), on_fire=fire_cb)
         self.effects.swear(now, from_sq, self.cell_size)
 
-    def _capture_victim_square(self, piece, from_sq, to_sq):
+    def capture_victim_square(self, piece, from_sq, to_sq):
         if self.match.piece_at(to_sq) is not None:
             return to_sq
         if piece.type == PieceType.PAWN and from_sq.col != to_sq.col:

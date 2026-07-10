@@ -1200,21 +1200,11 @@ class Frontend(OnlineEventsMixin):
             self.board.animation_duration_ms = compute_animation_ms(initial)
         else:
             self.board.animation_duration_ms = ANIM_MS_DEFAULT
-        self.board.flipped = False
-        self.board.selected_square = None
-        self.board.pending_promotion_square = None
-        self.board._promotion_from = None
-        self.board.cancel_animations()
-        self.board.effects.clear()
-        self.board._clear_premoves()
+        self.board.reset_for_new_game()
         self.skillcheck_overlay.cancel()
-        self.board.aim_suppressed_square = None
         self.skillcheck.clear_locks()
         self._clear_online_skillcheck_state()
         self._skillcheck_log = []
-        self.board.clear_annotations()
-        self.board.end_press()
-        self.board.review_ply = None
         self.confirm_modal.hide()
         self._last_turn_for_flip = None
 
@@ -1499,7 +1489,7 @@ class Frontend(OnlineEventsMixin):
             self.online_client.send_takeback_request()
             return
         self.board.selected_square = None
-        self.board._clear_premoves()
+        self.board.clear_premoves()
         self.skillcheck.clear_locks()
         self.board.clear_annotations()
         self.board.review_ply = None
@@ -1591,7 +1581,7 @@ class Frontend(OnlineEventsMixin):
             "black_wins_by_resignation" if loser == PieceColor.WHITE
             else "white_wins_by_resignation"
         )
-        self.board._clear_premoves()
+        self.board.clear_premoves()
         self.board.clear_annotations()
         self._on_result_final(self.manual_result)
 
@@ -1612,7 +1602,7 @@ class Frontend(OnlineEventsMixin):
             return
         self._auto_complete_pending_promotion()
         self.manual_result = "draw_agreement"
-        self.board._clear_premoves()
+        self.board.clear_premoves()
         self.board.clear_annotations()
         self._on_result_final(self.manual_result)
 
@@ -1786,7 +1776,7 @@ class Frontend(OnlineEventsMixin):
         if to_sq not in self.match.legal_moves_from(from_sq):
             return False
         piece = self.match.piece_at(from_sq)
-        is_capture = self.board._capture_victim_square(piece, from_sq, to_sq) is not None
+        is_capture = self.board.capture_victim_square(piece, from_sq, to_sq) is not None
         is_promotion = (piece.type == PieceType.PAWN
                         and to_sq.row in (0, self.board.SIZE - 1))
         if not (is_capture or is_promotion):
@@ -1879,7 +1869,7 @@ class Frontend(OnlineEventsMixin):
         if kind == SkillCheckKind.AIM:
             capturer = self.match.piece_at(from_sq)
             if capturer is not None:
-                victim_sq = self.board._capture_victim_square(capturer, from_sq, to_sq)
+                victim_sq = self.board.capture_victim_square(capturer, from_sq, to_sq)
                 if victim_sq is not None:
                     return victim_sq
             return to_sq
@@ -1908,7 +1898,7 @@ class Frontend(OnlineEventsMixin):
         capturer = self.match.piece_at(from_sq)
         if capturer is None:
             return 0
-        victim_sq = self.board._capture_victim_square(capturer, from_sq, to_sq)
+        victim_sq = self.board.capture_victim_square(capturer, from_sq, to_sq)
         if victim_sq is not None:
             victim = self.match.piece_at(victim_sq)
             return PIECE_VALUES.get(capturer.type, 0) - (
@@ -1932,7 +1922,7 @@ class Frontend(OnlineEventsMixin):
             self.skillcheck.lock(from_sq, to_sq)
             self.board.selected_square = None
             if self.board.premove_color == self.match.current_turn():
-                self.board._clear_premoves()
+                self.board.clear_premoves()
             self.board.trigger_skillcheck_fail(from_sq, to_sq,
                                                on_fire=self._on_skillcheck_miss_fire)
             if aim_victim is not None:
@@ -2715,21 +2705,13 @@ class Frontend(OnlineEventsMixin):
             if not self.board.queue_premove_from_drag(sq):
                 self.sound_manager.play_ui_click()
             return
-        self.board._right_drag_start_square = sq
+        self.board.begin_right_press(pos)
         self.sound_manager.play_ui_click()
 
     def _right_click_released(self, pos):
-        start = self.board._right_drag_start_square
-        self.board._right_drag_start_square = None
-        if self.mode == "menu" or start is None:
+        if self.mode == "menu":
             return
-        end = self.board.cell_at(pos)
-        if end is None:
-            return
-        if end == start:
-            self.board.toggle_highlight(start)
-        else:
-            self.board.toggle_arrow(start, end)
+        self.board.end_right_press(pos)
 
     def _active_scrollable(self):
         top = self._top_visible_modal()

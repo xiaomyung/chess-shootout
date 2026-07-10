@@ -328,7 +328,7 @@ def test_premove_highlight_renders_every_square_for_chained_premoves(board):
 
 
 def test_premove_highlight_renders_nothing_when_queue_empty(board):
-    board._clear_premoves()
+    board.clear_premoves()
     assert _highlighted_squares(board) == set()
 
 
@@ -572,7 +572,7 @@ def test_premove_then_undo_reverts_real_move_and_queue_persists_only_via_real_un
     board.handle_click(Square(6, 0))
     board.handle_click(Square(4, 0))
     assert len(board.premoves) == 1
-    board._clear_premoves()
+    board.clear_premoves()
     board.backend.undo()
     assert board.premoves == []
     assert len(board.backend.move_history) == 0
@@ -928,7 +928,7 @@ def _start_drag(board, sq):
     cell = board.cell_size
     cx = sq.col * cell + board.board_offset_x + cell // 2
     cy = sq.row * cell + board.board_offset_y + cell // 2
-    board._press_pos = (cx - 50, cy - 50)
+    board.drag._press_pos = (cx - 50, cy - 50)
     board.update_drag_motion((cx, cy))
 
 
@@ -955,7 +955,7 @@ def test_right_click_during_drag_keeps_dragging_for_chain(board):
     _start_drag(board, Square(6, 4))
     board.queue_premove_from_drag(Square(4, 4))
     assert board.dragging_from == Square(6, 4)
-    assert board._drag_cursor is not None
+    assert board.drag._drag_cursor is not None
     assert board._resolve_chain_tip(board.dragging_from) == Square(4, 4)
 
 
@@ -1046,9 +1046,9 @@ def test_right_click_drag_premove_chain_clears_when_drag_ends(board):
     _start_drag(board, Square(6, 4))
     board.queue_premove_from_drag(Square(4, 4))
     board.end_press()
-    board.update_drag_physics(board._drag["settle_start_ms"] + 100000)
+    board.update_drag_physics(board.drag._drag["settle_start_ms"] + 100000)
     assert board.dragging_from is None
-    assert board._drag_cursor is None
+    assert board.drag._drag_cursor is None
 
 
 def test_premove_immediately_after_other_premove_fires(board):

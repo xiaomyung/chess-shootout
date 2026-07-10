@@ -289,7 +289,7 @@ class OnlineEventsMixin:
             self._apply_clock_snap(payload, default_to_existing=False)
         self.board.cancel_animations()
         self.board.selected_square = None
-        self.board._clear_premoves()
+        self.board.clear_premoves()
         self.board.clear_annotations()
         self._adopt_resumed_result(payload)
         self._apply_resumed_skillcheck_log(payload.get("skillcheck_log", []))
