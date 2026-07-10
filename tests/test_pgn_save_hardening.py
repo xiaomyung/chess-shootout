@@ -201,6 +201,30 @@ def test_latch_stops_the_incremental_driver_from_retrying_every_frame(tmp_path, 
     assert calls == [], "the latch keeps the per-frame incremental driver from retrying"
 
 
+def test_hard_failure_finalize_retries_once_per_result_code(tmp_path, monkeypatch):
+    app = _local_app(tmp_path, monkeypatch)
+    monkeypatch.setattr(paths, "get_fallback_data_dir", lambda: tmp_path / "fallback")
+    app.result_flow._reserve_pgn_path = lambda directory, prefix: None
+    _e4(app)
+
+    calls = []
+    real = app.result_flow._auto_save_pgn
+
+    def counting():
+        calls.append(1)
+        return real()
+
+    monkeypatch.setattr(app.result_flow, "_auto_save_pgn", counting)
+    app.result_flow._on_result_final("white_wins_by_resignation")
+    assert app.result_flow._save_failed is True
+    app.result_flow._on_result_final("white_wins_by_resignation")
+    app.result_flow._on_result_final("white_wins_by_resignation")
+    assert len(calls) == 1
+
+    app.result_flow._on_result_final("white_wins")
+    assert len(calls) == 2
+
+
 # ---- latch never blocks the finalize save -----------------------------------
 
 def test_latch_never_blocks_the_finalize_save(tmp_path, monkeypatch):

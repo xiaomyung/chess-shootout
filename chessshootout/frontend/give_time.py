@@ -1,9 +1,13 @@
+import logging
+
 import pygame as pg
 
 from chessshootout.domain.match import ONLINE
 from chessshootout.backend.pieces import opponent_of
 from chessshootout.server.protocol import GIVE_TIME_SECONDS, GIVE_TIME_TICK_MS
 
+
+log = logging.getLogger("chess.frontend")
 
 GIVE_TIME_DEBOUNCE_MS = 500
 GIVE_TIME_RATCHET_MS_SLOW = 150
@@ -130,6 +134,7 @@ class GiveTimeHold:
         if added <= 0:
             frontend.toast.show(f"{name} already at maximum time")
         else:
+            log.info("give time granted seconds=%.1f", added)
             frontend._strip_for_color(recipient_color).flash_increment(added)
             frontend.toast.show(f"Gave {int(round(added))} sec to {name}")
             frontend.sound_manager.play_give_time()
@@ -138,6 +143,7 @@ class GiveTimeHold:
         frontend = self.frontend
         if added <= 0:
             return
+        log.info("give time received seconds=%.1f", added)
         if frontend.match.local_color is not None:
             frontend._strip_for_color(frontend.match.local_color).flash_increment(added)
         name = frontend._name_for_color(giver_color)

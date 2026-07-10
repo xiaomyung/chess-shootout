@@ -329,6 +329,7 @@ def _persist(key, value):
         out_lines.append(f"{key}={value}")
     body = "\n".join(out_lines) + "\n"
     _atomic_write(body)
+    log.info("setting persisted key=%s", key)
 
 
 def _persist_delete(key):
@@ -345,6 +346,7 @@ def _persist_delete(key):
             continue
         out_lines.append(line)
     _atomic_write(("\n".join(out_lines) + "\n") if out_lines else "")
+    log.info("setting persisted key=%s (deleted)", key)
 
 
 def _atomic_write(body):

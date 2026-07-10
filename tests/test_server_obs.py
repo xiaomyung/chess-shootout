@@ -106,6 +106,37 @@ def test_dispatch_debug_log_reports_move_room_type_and_outcome(client, caplog):
     assert float(move_fields["latency_ms"]) >= 0.0
 
 
+def test_matchmake_logs_room_created_then_room_paired_with_both_short_uuids(client, caplog):
+    with caplog.at_level(logging.INFO, logger="chess.server.app"):
+        r1 = _matchmake(client, uuid=ALICE, side="white")
+        room_id = r1.json()["room_id"]
+        assert any(
+            f"room created room={room_id} uuid={ALICE[:8]}" in r.getMessage()
+            for r in caplog.records), "first player logs a room-created breadcrumb"
+        r2 = _matchmake(client, uuid=BOB, side="black")
+        assert r2.json()["room_id"] == room_id
+    paired = [r.getMessage() for r in caplog.records if r.getMessage().startswith("room paired")]
+    assert paired, "pairing must log a dedicated breadcrumb"
+    assert f"room={room_id}" in paired[0]
+    assert ALICE[:8] in paired[0]
+    assert BOB[:8] in paired[0]
+
+
+def test_resume_logs_served_with_ply_count(client, caplog):
+    r1 = _matchmake(client, uuid=ALICE, side="white")
+    _matchmake(client, uuid=BOB, side="black")
+    room_id = r1.json()["room_id"]
+    token = r1.json()["session_token"]
+    with caplog.at_level(logging.INFO, logger="chess.server.app"):
+        resp = client.post("/resume", json={
+            "version": PROTOCOL_VERSION, "room_id": room_id, "session_token": token,
+        })
+    assert resp.status_code == 200
+    served = [r.getMessage() for r in caplog.records
+              if r.getMessage().startswith("resume served")]
+    assert served == [f"resume served room={room_id} color=white ply=0"]
+
+
 def test_per_ws_rate_limit_constant_is_documented():
     """Pin the documented 30/sec WS threshold so the limiter can't drift silently."""
     assert WS_MESSAGES_PER_SECOND == 30

@@ -246,7 +246,11 @@ def create_app(*, now_provider=time.monotonic, max_rooms=DEFAULT_MAX_ROOMS):
                 log.warning("matchmake rejected reason=server_full")
                 raise HTTPException(status_code=503, detail={"reason": Reason.ROOM_FULL})
             raise
-        log.info("matchmake ok room=%s paired=%s", room.room_id, room.is_paired())
+        if room.is_paired():
+            log.info("room paired room=%s white=%s black=%s", room.room_id,
+                     room.white.client_uuid[:8], room.black.client_uuid[:8])
+        else:
+            log.info("room created room=%s uuid=%s", room.room_id, body.client_uuid[:8])
         return MatchmakeResponse(room_id=room.room_id, session_token=token)
 
     @app.delete("/matchmake")
@@ -300,6 +304,7 @@ def create_app(*, now_provider=time.monotonic, max_rooms=DEFAULT_MAX_ROOMS):
         skillcheck_log = [
             SkillCheckOutcomeWire(ply=e.ply, kind=e.kind, won=e.won, san=e.san)
             for e in room.skillcheck_log]
+        log.info("resume served room=%s color=%s ply=%d", body.room_id, color, len(history))
         return ResumeResponse(
             fen=export_fen(room.backend),
             move_history=history,

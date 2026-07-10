@@ -411,6 +411,7 @@ class Frontend(OnlineEventsMixin):
         self.black_country = countries.random_code()
         self.match.mode = SINGLE_SCREEN
         self.match.local_color = None
+        log.info("game start mode=fen")
         self._ensure_local_session()
         self._reset_to_new_game()
         apply_fen(self.match.backend, fen)
@@ -419,6 +420,7 @@ class Frontend(OnlineEventsMixin):
         return True
 
     def _load_pgn_from_path(self, path):
+        log.info("pgn load path=%s", path)
         with open(path, encoding="utf-8") as f:
             text = f.read()
         self.mode = SINGLE_SCREEN
@@ -427,6 +429,7 @@ class Frontend(OnlineEventsMixin):
         self._reset_to_new_game()
         parsed, ok = load_pgn_into_backend(self.match, text)
         if not ok:
+            log.warning("pgn load failed path=%s", path)
             self.mode = "menu"
             self.menu_page.set_page(PAGE_HISTORY)
             self.toast.show("Could not load PGN")
@@ -485,6 +488,8 @@ class Frontend(OnlineEventsMixin):
             enabled=True,
             seed="local-{}-{}".format(pg.time.get_ticks(), random.randint(0, 1 << 30)))
 
+        log.info("game start mode=%s side=%s tc=%s white=%s black=%s",
+                 config["mode"], side, self._time_control, self.white_name, self.black_name)
         self._ensure_local_session()
         self._reset_to_new_game()
         self.start_menu.hide()
@@ -556,8 +561,10 @@ class Frontend(OnlineEventsMixin):
         if self._rematch_offered:
             self._rematch_offered = False
             self.result_menu.set_rematch_offered(False)
+            log.info("rematch response sent accepted=True")
             self.online_client.send_rematch_response(True)
         else:
+            log.info("rematch requested")
             self.online_client.send_rematch_request()
             self.toast.show(f"Rematch sent — waiting for {self._opp_name()}…",
                             key=REMATCH_STATE_TOAST_KEY)
@@ -573,7 +580,8 @@ class Frontend(OnlineEventsMixin):
         self._local_disconnected_at_ms = None
         self._prev_online_state = None
 
-    def _tear_down_online_session(self):
+    def _tear_down_online_session(self, reason="unspecified"):
+        log.info("online session teardown reason=%s", reason)
         self.result_flow._auto_save_pgn()
         if self.online_client is not None:
             self.online_client.disconnect()
@@ -600,13 +608,11 @@ class Frontend(OnlineEventsMixin):
         self.menu_page.set_page(PAGE_CARD)
 
     def _abandon_online_game(self):
-        log.info("abandoning online game (reconnect cancelled)")
-        self._tear_down_online_session()
+        self._tear_down_online_session("reconnect_cancelled")
         self._return_to_menu_card()
 
     def _restart_online_search(self):
-        log.info("restarting online search")
-        self._tear_down_online_session()
+        self._tear_down_online_session("restart_search")
         if self._online_config is not None:
             self._begin_online_flow(self._online_config)
         else:
@@ -717,9 +723,11 @@ class Frontend(OnlineEventsMixin):
         self.result_flow._last_saved_pgn_path = None
         self.result_flow._last_saved_result_tag = None
         self.result_flow._result_await_since_ms = None
+        self.result_flow._result_logged = False
         self.result_flow._series_score_awarded = False
         self.result_flow._save_failed = False
         self.result_flow._save_error_toast_shown = False
+        self.result_flow._final_save_attempted_for = None
         self.result_flow._autosave_last_write_ms = -AUTOSAVE_THROTTLE_MS
         self.result_flow._autosave_last_ply = 0
         self.right_menu.reset_for_new_game()
@@ -763,6 +771,7 @@ class Frontend(OnlineEventsMixin):
             return
         if on and not self._focus_available():
             return
+        log.info("focus mode toggled on=%s", on)
         self.board.cancel_drag_physics()
         self.focus_transition = FocusTransition(self)
         if on:
@@ -862,6 +871,7 @@ class Frontend(OnlineEventsMixin):
         if not self.board_interactive():
             return
         if self.mode == ONLINE and self.online_client is not None:
+            log.info("takeback requested")
             self.online_client.send_takeback_request()
             return
         self.board.selected_square = None
@@ -872,6 +882,7 @@ class Frontend(OnlineEventsMixin):
         self.board.cancel_animations()
         if not self.match.move_history:
             return
+        log.info("undo ply=%d", len(self.match.move_history))
         self.sound_manager.play_undo()
         self.skillcheck_session._drop_skillcheck_log_from(len(self.match.move_history))
         move = self.match.move_history[-1].move
@@ -916,6 +927,7 @@ class Frontend(OnlineEventsMixin):
         if self.current_result() is not None:
             return
         if self.mode == ONLINE and self.online_client is not None:
+            log.info("draw offer sent")
             self.online_client.send_draw_offer()
             return
         self._auto_complete_pending_promotion()

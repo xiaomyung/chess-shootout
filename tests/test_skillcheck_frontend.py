@@ -8,6 +8,7 @@ the shrinking piece doesn't ghost. Every failed check makes the piece swear. A
 landed ply clears the locks.
 """
 
+import logging
 import math
 import os
 from collections import Counter
@@ -840,6 +841,32 @@ def test_failed_skillcheck_fires_the_miss_fx():
     fired = any(c.get("miss") for c in fx.captures) or bool(fx.callouts)
     assert fired, "a failed skill-check fires the gun-and-miss FX"
     assert fx.held_squares() == set(), "the victim stays on the board after a miss"
+
+
+def test_won_skillcheck_logs_resolved_with_kind_ply_and_outcome(caplog):
+    app = Frontend(1100, 800)
+    _start_local(app)
+    frm, to = _set_queen_takes_pawn(app)
+    with caplog.at_level(logging.INFO, logger="chess.frontend"):
+        app.skillcheck_session._on_skillcheck_done((frm, to, None, SkillCheckKind.WHEEL), True)
+    resolved = [r.getMessage() for r in caplog.records if "skillcheck resolved" in r.getMessage()]
+    assert resolved, "a landed check must log its resolution"
+    assert "kind=wheel" in resolved[0]
+    assert "ply=1" in resolved[0]
+    assert "won=True" in resolved[0]
+
+
+def test_failed_skillcheck_logs_resolved_and_the_move_lock(caplog):
+    app = Frontend(1100, 800)
+    _start_local(app)
+    frm, to = _set_queen_takes_pawn(app)
+    with caplog.at_level(logging.INFO, logger="chess.frontend"):
+        app.skillcheck_session._on_skillcheck_done((frm, to, None, SkillCheckKind.AIM), False)
+    messages = [r.getMessage() for r in caplog.records]
+    resolved = [m for m in messages if "skillcheck resolved" in m]
+    locked = [m for m in messages if "skillcheck move locked" in m]
+    assert resolved and "kind=aim" in resolved[0] and "won=False" in resolved[0]
+    assert locked, "a whiffed check must log that the move got locked"
 
 
 def _shootout_with_wheel(app):

@@ -1,3 +1,4 @@
+import logging
 import os
 import uuid
 
@@ -583,3 +584,35 @@ def test_set_volume_does_not_raise_when_env_locked(tmp_path, monkeypatch):
     monkeypatch.setattr(env.os, "replace", _throw_denied)
     env.set_master_volume(0.5)
     assert env.get_master_volume() == 0.5
+
+
+def test_set_nickname_logs_only_the_key_never_the_value(caplog):
+    """Persisted-setting breadcrumbs must never leak a nickname into the logs."""
+    with caplog.at_level(logging.INFO, logger="chess.env"):
+        env.set_nickname("TopSecretHandle")
+    lines = [r.getMessage() for r in caplog.records if "setting persisted" in r.getMessage()]
+    assert lines == ["setting persisted key=CHESS_NICKNAME"]
+    assert "TopSecretHandle" not in " ".join(lines)
+
+
+def test_get_or_create_client_uuid_logs_only_the_key_never_the_value(caplog):
+    with caplog.at_level(logging.INFO, logger="chess.env"):
+        fresh = env.get_or_create_client_uuid()
+    lines = [r.getMessage() for r in caplog.records if "setting persisted" in r.getMessage()]
+    assert lines == ["setting persisted key=CHESS_CLIENT_UUID"]
+    assert fresh not in " ".join(lines)
+
+
+def test_set_theme_logs_the_key_for_a_non_sensitive_setting(caplog):
+    with caplog.at_level(logging.INFO, logger="chess.env"):
+        env.set_theme("dark")
+    lines = [r.getMessage() for r in caplog.records if "setting persisted" in r.getMessage()]
+    assert lines == ["setting persisted key=CHESS_THEME"]
+
+
+def test_set_country_empty_logs_the_deleted_key(caplog):
+    env.set_country("us")
+    with caplog.at_level(logging.INFO, logger="chess.env"):
+        env.set_country("")
+    lines = [r.getMessage() for r in caplog.records if "setting persisted" in r.getMessage()]
+    assert lines == ["setting persisted key=CHESS_COUNTRY (deleted)"]

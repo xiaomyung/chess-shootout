@@ -139,6 +139,7 @@ class OnlineEventsMixin:
             self._end_rematch_window()
             return
         if reason == "room_lost":
+            log.warning("online room lost — server restarted mid-game")
             self._resyncing = False
             self.result_flow._auto_save_pgn()
             self.reconnecting_modal.hide()
@@ -151,6 +152,7 @@ class OnlineEventsMixin:
             )
             return
         if reason in ONLINE_HARD_FAILURE_REASONS or reason.startswith("http_"):
+            log.warning("online hard failure reason=%s", reason)
             self._resyncing = False
             self.wait_modal.hide()
             self.match_found_modal.hide()
@@ -188,6 +190,7 @@ class OnlineEventsMixin:
     def _handle_rematch_request(self):
         if self.online_client is None:
             return
+        log.info("rematch offer received")
         self._push_rematch_banner()
         self.result_menu.set_rematch_offered(True)
         self.sound_manager.play_give_time()
@@ -199,20 +202,23 @@ class OnlineEventsMixin:
 
     def _accept_rematch(self):
         if self.online_client is not None:
+            log.info("rematch response sent accepted=True")
             self.online_client.send_rematch_response(True)
 
     def _decline_rematch(self):
         self._clear_rematch_offer()
         if self.online_client is not None:
+            log.info("rematch response sent accepted=False")
             self.online_client.send_rematch_response(False)
 
     def _end_rematch_window(self):
         self._clear_rematch_offer()
-        self._tear_down_online_session()
+        self._tear_down_online_session("rematch_window_closed")
         self._return_to_menu_card()
 
     def _handle_rematch_update(self, payload):
         event = payload.get("event", "")
+        log.info("rematch update event=%s", event)
         opp = self._opp_name()
         if event == "opponent_reconnecting":
             self.toast.show(f"{opp} disconnected — waiting…", key=REMATCH_STATE_TOAST_KEY)
@@ -238,10 +244,12 @@ class OnlineEventsMixin:
         icon, verb, ok_label, no_label, send_method = OFFER_BANNERS[event_type]
         opp_name = self._opp_name()
         send_response = getattr(self.online_client, send_method)
+        log.info("offer received type=%s from=%s", event_type, opp_name)
         self.sound_manager.play_toast()
 
         def respond(value):
             def fire():
+                log.info("offer responded type=%s accepted=%s", event_type, value)
                 self.sound_manager.play_toast()
                 send_response(value)
             return fire
@@ -332,6 +340,7 @@ class OnlineEventsMixin:
             self.match.undo()
             self.board.start_undo_animation(last)
             self.sound_manager.play_undo()
+            log.info("takeback applied ply=%d", len(self.match.move_history))
         self._apply_clock_snap(payload, default_to_existing=True)
 
     def _handle_skill_check_required(self, payload):
@@ -384,6 +393,8 @@ class OnlineEventsMixin:
 
     def _apply_online_fail(self, from_sq, to_sq, aim_victim):
         self.skillcheck.lock(from_sq, to_sq)
+        log.info("skillcheck move locked from=%s to=%s online=True",
+                 coord_from_square(from_sq), coord_from_square(to_sq))
         self._apply_spectate_fail(from_sq, to_sq, aim_victim)
 
     def _apply_spectate_fail(self, from_sq, to_sq, aim_victim):
@@ -543,6 +554,8 @@ class OnlineEventsMixin:
             (FIRST_MOVE_ABORT_SECONDS - elapsed) * 1000
         )
         self.wait_modal.hide()
+        room_id = self.online_client.room_id if self.online_client is not None else None
+        log.info("match found room=%s side=%s", room_id, payload.get("your_color"))
         self.match_found_modal.show(
             payload["white_name"], payload["black_name"], payload["your_color"],
             self._finish_match_found, seconds=MATCH_FOUND_SECONDS,
@@ -573,7 +586,9 @@ class OnlineEventsMixin:
     def _start_online_game(self, payload):
         opp_name = (payload.get("white_name") if payload.get("your_color") == "black"
                     else payload.get("black_name"))
-        log.info("game start as %s vs %s", payload.get("your_color"), opp_name)
+        log.info("game start mode=online side=%s vs=%s tc=%s+%s",
+                 payload.get("your_color"), opp_name,
+                 payload.get("time_minutes"), payload.get("increment_seconds"))
         pg.display.set_caption(f"Chess — vs {opp_name}")
         self.wait_modal.hide()
         self.confirm_modal.hide()

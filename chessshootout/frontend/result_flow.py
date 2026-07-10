@@ -94,6 +94,8 @@ class ResultFlow:
         self._last_saved_pgn_path = None
         self._last_saved_result_tag = None
         self._result_await_since_ms = None
+        self._result_logged = False
+        self._final_save_attempted_for = None
 
     def current_result(self):
         frontend = self.frontend
@@ -361,7 +363,13 @@ class ResultFlow:
             elif code.startswith("draw"):
                 self._award_series_draw()
                 self._series_score_awarded = True
-        self._auto_save_pgn()
+        path = None
+        if not self._save_failed or self._final_save_attempted_for != code:
+            self._final_save_attempted_for = code
+            path = self._auto_save_pgn()
+        if not self._result_logged:
+            self._result_logged = True
+            log.info("game end result=%s saved=%s", code, path or "false")
 
     def _finalize_result(self, code):
         frontend = self.frontend

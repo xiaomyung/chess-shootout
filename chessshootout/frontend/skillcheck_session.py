@@ -1,3 +1,5 @@
+import logging
+
 import pygame as pg
 
 from chessshootout.domain.match import ONLINE
@@ -10,11 +12,15 @@ from chessshootout.skillcheck.types import KIND_LABEL, SkillCheckKind, SkillChec
 from chessshootout.skillcheck.wheel import period_for_diff, placement_square
 
 
+log = logging.getLogger("chess.frontend")
+
+
 class SkillcheckSession:
 
     def __init__(self, frontend):
         self.frontend = frontend
         self._skillcheck_log = []
+        self._skillcheck_fired_at_ms = None
         self._clear_online_skillcheck_state()
 
     def _skillcheck_gate(self, from_sq, to_sq, promo_type=None):
@@ -69,6 +75,10 @@ class SkillcheckSession:
             miss_count=miss_count, passive=passive, audio=frontend.sound_manager)
         if controller is None:
             return False
+        ply = len(frontend.match.move_history) + 1
+        self._skillcheck_fired_at_ms = pg.time.get_ticks() - int(elapsed_ms)
+        log.info("skillcheck fired kind=%s ply=%d online=%s passive=%s",
+                 kind.value, ply, online, passive)
         self._skillcheck_target = target
         frontend.board.aim_suppressed_square = target if kind == SkillCheckKind.AIM else None
         on_done = self._on_online_skillcheck_done if online else self._on_skillcheck_done
@@ -192,6 +202,8 @@ class SkillcheckSession:
                 kind, False, len(frontend.match.move_history) + 1,
                 frontend.match.backend.preview_san(from_sq, to_sq, promo_letter))
             frontend.skillcheck.lock(from_sq, to_sq)
+            log.info("skillcheck move locked from=%s to=%s",
+                     coord_from_square(from_sq), coord_from_square(to_sq))
             frontend.board.selected_square = None
             if frontend.board.premove_color == frontend.match.current_turn():
                 frontend.board.clear_premoves()
@@ -207,6 +219,10 @@ class SkillcheckSession:
         if kind is None:
             return
         kind_value = kind.value if isinstance(kind, SkillCheckKind) else kind
+        elapsed_ms = (pg.time.get_ticks() - self._skillcheck_fired_at_ms
+                      if self._skillcheck_fired_at_ms is not None else None)
+        log.info("skillcheck resolved kind=%s ply=%d won=%s elapsed_ms=%s",
+                 kind_value, ply, won, elapsed_ms)
         self._skillcheck_log.append(SkillCheckOutcome(ply, kind_value, won, san))
 
     def _drop_skillcheck_log_from(self, ply):

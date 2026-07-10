@@ -85,6 +85,7 @@ class ReconnectProbe:
             self._pending_reconnect = None
         if pending is None:
             return
+        log.info("reconnect: resume begin room=%s", pending["room_id"])
         frontend.start_menu.set_reconnect_available(False)
         resume = fetch_resume(
             pending["addr"], pending["room_id"], pending["session_token"],
@@ -101,6 +102,7 @@ class ReconnectProbe:
                 yes_label="Retry", no_label="Cancel",
             )
             return
+        log.info("reconnect: resume ok room=%s", pending["room_id"])
         nickname = (resume["white_name"] if resume["your_color"] == "white"
                     else resume["black_name"])
         frontend.start_menu.text_input.text = nickname

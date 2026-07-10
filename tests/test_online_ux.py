@@ -6,6 +6,7 @@ seconds before the game starts, the reconnecting on-board overlay surfaces
 only while the client is reconnecting mid-game, and transient errors show a
 toast (not a modal).
 """
+import logging
 import os
 from types import SimpleNamespace
 from unittest.mock import MagicMock
@@ -530,6 +531,35 @@ def test_rematch_update_window_expired_returns_to_menu(frontend):
     assert frontend.online_client is None
     assert frontend.mode == "menu"
     assert frontend.start_menu.is_visible()
+
+
+def test_rematch_update_declined_logs_the_teardown_reason(frontend, caplog):
+    _arm_post_game(frontend, disconnect=lambda: None)
+    frontend._rematch_offered = True
+    with caplog.at_level(logging.INFO, logger="chess.frontend"):
+        frontend._handle_rematch_update({"event": "declined"})
+    lines = [r.getMessage() for r in caplog.records
+             if r.getMessage().startswith("online session teardown")]
+    assert lines == ["online session teardown reason=rematch_window_closed"]
+
+
+def test_abandon_online_game_logs_the_teardown_reason(frontend, caplog):
+    frontend.online_client = SimpleNamespace(disconnect=lambda: None)
+    with caplog.at_level(logging.INFO, logger="chess.frontend"):
+        frontend._abandon_online_game()
+    lines = [r.getMessage() for r in caplog.records
+             if r.getMessage().startswith("online session teardown")]
+    assert lines == ["online session teardown reason=reconnect_cancelled"]
+
+
+def test_restart_online_search_logs_the_teardown_reason(frontend, caplog):
+    frontend.online_client = SimpleNamespace(disconnect=lambda: None)
+    frontend._online_config = None
+    with caplog.at_level(logging.INFO, logger="chess.frontend"):
+        frontend._restart_online_search()
+    lines = [r.getMessage() for r in caplog.records
+             if r.getMessage().startswith("online session teardown")]
+    assert lines == ["online session teardown reason=restart_search"]
 
 
 def test_online_result_redelivery_does_not_double_count(frontend, monkeypatch):
