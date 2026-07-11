@@ -31,12 +31,11 @@ def test_return_to_menu_clears_focus(monkeypatch):
     clock = FakeTicks()
     install_clock(monkeypatch, clock)
     collapse(app, clock)
-    app.mode = "menu"
+    app.switch_to("menu")
     app.draw_frame()
     assert app.focus_mode is False
     assert app.focus_transition is None
-    app.mode = "single_screen"
-    app._compute_layout()
+    app.switch_to("game", mode="single_screen")
     assert app.board.rect == normal
 
 

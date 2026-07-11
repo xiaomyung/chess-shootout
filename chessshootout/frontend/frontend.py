@@ -41,6 +41,9 @@ from chessshootout.frontend.focus.time_line import TimeLine
 from chessshootout.frontend.focus.transition import FocusTransition
 from chessshootout.frontend.input_router import InputRouter
 from chessshootout.frontend.layout import compute_layout
+from chessshootout.frontend.screens.base import assert_plain_payload
+from chessshootout.frontend.screens.menu import MenuScreen
+from chessshootout.frontend.screens.game import GameScreen
 from chessshootout.frontend.window_chrome import (
     WindowChrome, WINDOW_FLAGS, MIN_WINDOW_WIDTH, MIN_WINDOW_HEIGHT,
 )
@@ -277,6 +280,11 @@ class Frontend(OnlineEventsMixin):
         self._focus_panel_hover_ms = LONG_AGO_MS
         self._focus_hint_until_ms = 0
         self._focus_prev_mode = "menu"
+        self._entering_menu = False
+        self._pending_nav = None
+
+        self.screens = {"menu": MenuScreen(self), "game": GameScreen(self)}
+        self.screen = self.screens["menu"]
 
         self.match.new_game()
         self.board.load_assets()
@@ -286,6 +294,30 @@ class Frontend(OnlineEventsMixin):
         self.reconnect_probe._spawn_reconnect_probe()
 
         pg.display.set_caption(WINDOW_TITLE)
+
+    def switch_to(self, name, **payload):
+        if name not in self.screens:
+            raise KeyError(f"unknown screen: {name!r}")
+        assert_plain_payload(payload)
+        mode = payload.get("mode", name)
+        self.screen.exit()
+        self.screen = self.screens[name]
+        self.mode = mode
+        self.screen.enter(**payload)
+        self._compute_layout()
+
+    def request_nav(self, nav):
+        if self._pending_nav is not None:
+            log.warning("nav intent overwritten: %s -> %s",
+                        self._pending_nav.name, nav.name)
+        self._pending_nav = nav
+
+    def _execute_pending_nav(self):
+        if self._pending_nav is None:
+            return
+        nav = self._pending_nav
+        self._pending_nav = None
+        self.switch_to(nav.name, **nav.payload)
 
     @property
     def backend(self):
@@ -342,7 +374,7 @@ class Frontend(OnlineEventsMixin):
         keep_online = (self.mode == ONLINE and self.online_client is not None
                        and self.current_result() is not None)
         had_rematch_offer = self._rematch_offered
-        self.mode = "menu"
+        self.switch_to("menu")
         self._match_session_id = None
         self.reconnect_probe._reconnect_probe_attempts = 0
         pg.display.set_caption(WINDOW_TITLE)
@@ -401,7 +433,7 @@ class Frontend(OnlineEventsMixin):
             apply_fen(Backend(), fen)
         except (ValueError, KeyError):
             return False
-        self.mode = SINGLE_SCREEN
+        self.switch_to("game", mode=SINGLE_SCREEN)
         self._drop_post_game_online_session()
         self._time_control = None
         self._chosen_side = "white"
@@ -423,14 +455,14 @@ class Frontend(OnlineEventsMixin):
         log.info("pgn load path=%s", path)
         with open(path, encoding="utf-8") as f:
             text = f.read()
-        self.mode = SINGLE_SCREEN
+        self.switch_to("game", mode=SINGLE_SCREEN)
         self._drop_post_game_online_session()
         self._time_control = None
         self._reset_to_new_game()
         parsed, ok = load_pgn_into_backend(self.match, text)
         if not ok:
             log.warning("pgn load failed path=%s", path)
-            self.mode = "menu"
+            self.switch_to("menu")
             self.menu_page.set_page(PAGE_HISTORY)
             self.toast.show("Could not load PGN")
             return
@@ -457,7 +489,7 @@ class Frontend(OnlineEventsMixin):
         if config["mode"] != SINGLE_SCREEN:
             return
 
-        self.mode = SINGLE_SCREEN
+        self.switch_to("game", mode=SINGLE_SCREEN)
         self.match.local_color = None
         self._drop_post_game_online_session()
 
@@ -596,13 +628,13 @@ class Frontend(OnlineEventsMixin):
         self.result_menu.set_online_mode(False)
         self.match.mode = SINGLE_SCREEN
         self.match.local_color = None
-        self.mode = "menu"
+        self.switch_to("menu")
         pg.display.set_caption(WINDOW_TITLE)
         self._reset_to_new_game()
         self._refresh_load_pgn_availability()
 
     def _return_to_menu_card(self):
-        self.mode = "menu"
+        self.switch_to("menu")
         self.reconnect_probe._reconnect_probe_attempts = 0
         self.start_menu.show()
         self.menu_page.set_page(PAGE_CARD)
@@ -1000,6 +1032,7 @@ class Frontend(OnlineEventsMixin):
             self._last_frame_start = frame_start
             had_events = self.input_router.check_events()
             self.draw_frame()
+            self._execute_pending_nav()
             self.chrome.draw(self._chrome_stats())
             work_before_present = time.perf_counter() - frame_start
             self.clock.tick(self.target_fps)
@@ -1149,61 +1182,16 @@ class Frontend(OnlineEventsMixin):
                 and not self.skillcheck_session._skillcheck_swallows_input()):
             self.board.try_apply_next_premove()
 
-        if self.mode != "menu":
-            if self.current_result() is not None and self.focus_mode:
-                if self.focus_transition is None:
-                    self._toggle_focus(False)
-                elif self.focus_transition.collapsing:
-                    self._force_focus_off_instant()
-            if self.focus_transition is not None:
-                tr = self.focus_transition
-                tr.draw(now)
-                if self._focus_show() == "line" and tr.cur_board_rect is not None:
-                    alpha = tr.cur_e if tr.collapsing else 1.0 - tr.cur_e
-                    self._draw_time_lines(tr.cur_board_rect, alpha)
-                if tr.done(now):
-                    self._finalize_focus_transition()
-            elif self.focus_mode:
-                show = self._focus_show()
-                self._draw_game_scene(
-                    show_panel=False, show_strips=(show == "strips"),
-                    arrow_hook=lambda: self._draw_focus_edge_arrow(now),
-                    after_board=self._draw_time_lines if show == "line" else None)
-                self.board.draw_drag_overlay()
-                if self.board.effects.has_takeover():
-                    self.board.effects.draw_takeover(self.window, now)
-                self.result_flow._update_result_pending()
-            else:
-                self._draw_game_scene(
-                    show_panel=True, show_strips=True,
-                    arrow_hook=lambda: self._update_focus_arrow_off(now))
-                self.board.draw_drag_overlay()
-                self.result_flow._update_result_pending()
-                if not self.match_found_modal.is_visible():
-                    show_modal = self._result_modal_should_show() and not self.pgn_review
-                    if not show_modal and self.board.effects.has_takeover():
-                        self.board.effects.draw_takeover(self.window, now)
-                    else:
-                        self._draw_result_fade_overlay()
-                    if show_modal:
-                        self.board.effects.clear_takeover()
-                        self.result_flow._feed_result_menu()
-                        self.result_menu.draw()
-        entering_menu = self.mode == "menu" and self._prev_battle_mode != "menu"
+        nav = self.screen.update(now)
+        if nav is not None:
+            self.request_nav(nav)
+
+        self._entering_menu = self.mode == "menu" and self._prev_battle_mode != "menu"
         self._prev_battle_mode = self.mode
-        if self.mode == "menu":
-            if entering_menu and self.menu_page.page == PAGE_CARD:
-                self.menu_battle.begin_intro()
-            self.menu_battle.set_avoid_rect(self.menu_page.avoid_rect())
-            self.menu_battle.set_logo_rect(self.menu_page.logo_rect())
-            self.menu_battle.update(now)
-            self.menu_battle.draw(self.window)
-            self.menu_battle.draw_scrim(self.window)
         self.reconnect_probe._refresh_reconnect_button()
-        if self.mode == "menu" and not self._menu_overlay_active():
-            self.menu_page.draw_foreground()
-        if self.mode == "menu":
-            self.menu_battle.draw_intro_overlay(self.window)
+
+        self.screen.draw()
+
         self.offer_banners.draw(self._banner_rect())
         for spec in reversed(self._modal_registry):
             spec.obj.draw()

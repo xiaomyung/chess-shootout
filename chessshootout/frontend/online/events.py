@@ -595,7 +595,7 @@ class OnlineEventsMixin:
         self.start_menu.hide()
         self.manual_result = None
         self.result_menu.set_online_mode(True)
-        self.mode = ONLINE
+        self.switch_to("game", mode=ONLINE)
         self._online_initial_flip = (payload["your_color"] == "black")
         self._chosen_side = payload["your_color"]
         self.white_name = payload["white_name"]

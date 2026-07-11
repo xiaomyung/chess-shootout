@@ -30,7 +30,7 @@ def _online_app():
     app.online_client.state = "connected"
     app.online_client.opp_state = "connected"
     app.online_client.get_ping_ms.return_value = None
-    app.mode = ONLINE
+    app.switch_to("game", mode=ONLINE)
     app.white_name = "Alice"
     app.black_name = "Bob"
     app._chosen_side = "white"

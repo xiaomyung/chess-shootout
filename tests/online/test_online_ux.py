@@ -351,10 +351,10 @@ def test_menu_mode_skips_board_draw(frontend, monkeypatch):
     drew = []
     monkeypatch.setattr(frontend.board, "draw_board",
                         lambda: drew.append(True))
-    frontend.mode = "menu"
+    frontend.switch_to("menu")
     frontend.draw_frame()
     assert drew == []
-    frontend.mode = "single_screen"
+    frontend.switch_to("game", mode="single_screen")
     frontend.draw_frame()
     assert drew == [True]
 
@@ -394,11 +394,10 @@ def test_game_mode_centers_flex_modals_on_board(frontend):
 
 def test_mode_change_relays_modal_rects_via_draw_frame(frontend):
     from chessshootout.domain.match import SINGLE_SCREEN
-    frontend.mode = "menu"
-    frontend._compute_layout()
+    frontend.switch_to("menu")
     win_w, _ = frontend.window.get_size()
     assert abs(frontend.wait_modal.rect.centerx - win_w / 2) <= 1
-    frontend.mode = SINGLE_SCREEN
+    frontend.switch_to("game", mode=SINGLE_SCREEN)
     frontend.draw_frame()
     board_cx = _board_centerx(frontend.board)
     assert abs(frontend.wait_modal.rect.centerx - board_cx) <= 4

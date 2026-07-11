@@ -290,6 +290,10 @@ class InputRouter:
         for event in events:
             if event.type == pg.QUIT:
                 frontend.running = False
+                continue
+
+            if frontend._pending_nav is not None:
+                continue
 
             elif event.type == pg.KEYDOWN:
                 if not frontend.skillcheck_session._skillcheck_swallows_input():
