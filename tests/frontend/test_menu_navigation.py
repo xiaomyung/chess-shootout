@@ -1,11 +1,10 @@
-"""Frontend menu navigation: the History button swaps the menu foreground to the History
-page (the battle keeps running behind it and its avoid-rect follows the page), Back returns to
-the card, review opened from History returns to History, and an unloadable PGN restores the
-menu instead of stranding a blank board."""
+"""Frontend menu navigation: the History button swaps the active screen to HistoryScreen
+(the battle keeps running behind it and its avoid-rect follows the active screen), Back
+returns to the menu card, review opened from History returns to History, and an unloadable
+PGN restores the History screen instead of stranding a blank board."""
 
 
 from tests.conftest import pygame_display
-from chessshootout.frontend.menu.menu_page import PAGE_CARD, PAGE_HISTORY
 from chessshootout.domain.pgn.generate import generate_pgn
 from chessshootout.backend.backend import Backend
 from tests.helpers import make_app as _shared_make_app
@@ -30,15 +29,19 @@ def _valid_pgn_text():
 def test_load_pgn_opens_history_page():
     app = make_app()
     app._on_open_history()
-    assert app.menu_page.page == PAGE_HISTORY
+    app._execute_pending_nav()
+    assert app.screen.name == "history"
+    assert app.mode == "menu"
     assert app.history_view.is_visible() is True
 
 
 def test_back_returns_to_card():
     app = make_app()
     app._on_open_history()
+    app._execute_pending_nav()
     app._on_menu_back()
-    assert app.menu_page.page == PAGE_CARD
+    app._execute_pending_nav()
+    assert app.screen.name == "menu"
     assert app.history_view.is_visible() is False
 
 
@@ -57,6 +60,7 @@ def test_battle_avoid_rect_follows_active_page():
     app.draw_frame()
     assert app.menu_battle.avoid_rect == app.start_menu._outer
     app._on_open_history()
+    app._execute_pending_nav()
     app.draw_frame()
     assert app.menu_battle.avoid_rect == app.history_view.rect
 
@@ -83,7 +87,7 @@ def test_unloadable_pgn_restores_menu(tmp_path):
     app = make_app()
     app._load_pgn_from_path(str(bad))
     assert app.mode == "menu"
-    assert app.menu_page.page == PAGE_HISTORY
+    assert app.screen.name == "history"
     assert app.toast.message == "Could not load PGN"
 
 
@@ -93,9 +97,10 @@ def test_review_from_history_returns_to_history(tmp_path):
     app = make_app()
     app._load_pgn_from_path(str(good))
     assert app.pgn_review is True
-    assert app._review_return_page == PAGE_HISTORY
+    assert app._review_return_page == "history"
     app._on_back_to_menu()
-    assert app.menu_page.page == PAGE_HISTORY
+    app._execute_pending_nav()
+    assert app.screen.name == "history"
 
 
 def test_fresh_game_after_review_returns_to_card(tmp_path):
@@ -109,4 +114,4 @@ def test_fresh_game_after_review_returns_to_card(tmp_path):
     })
     assert app._review_return_page is None
     app._on_back_to_menu()
-    assert app.menu_page.page == PAGE_CARD
+    assert app.screen.name == "menu"

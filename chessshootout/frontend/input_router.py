@@ -1,10 +1,14 @@
+import logging
 import os
 
 import pygame as pg
 
 from chessshootout.backend.pieces import PieceType
-from chessshootout.frontend.menu.menu_page import PAGE_CARD
+from chessshootout.frontend.screens.base import Nav
 from chessshootout.frontend.window_chrome import MIN_WINDOW_WIDTH, MIN_WINDOW_HEIGHT
+
+
+log = logging.getLogger("chess.frontend")
 
 
 PROMOTION_KEYS = {
@@ -30,9 +34,10 @@ class InputRouter:
         if self._dismiss_top_modal():
             return
         if frontend.mode == "menu":
-            if frontend.menu_page.page != PAGE_CARD:
-                frontend._on_menu_back()
-            else:
+            result = frontend.screen.escape()
+            if isinstance(result, Nav):
+                frontend.request_nav(result)
+            elif not result:
                 self._show_quit_modal()
             return
         if not frontend.board_interactive():
@@ -111,7 +116,7 @@ class InputRouter:
         if frontend._result_modal_should_show():
             return None
         if frontend.mode == "menu":
-            return frontend.menu_page
+            return frontend.screen.active_scrollable()
         if frontend.focus_mode or frontend.focus_transition is not None:
             return None
         return frontend.right_menu
@@ -160,7 +165,9 @@ class InputRouter:
         if frontend.offer_banners.handle_click(pos):
             return
         if frontend.mode == "menu":
-            frontend.menu_page.handle_click(pos)
+            result = frontend.screen.handle_click(pos)
+            if isinstance(result, Nav):
+                frontend.request_nav(result)
             return
         if (frontend.focus_arrow.is_visible() and frontend._focus_arrow_allowed()
                 and frontend.focus_arrow.handle_click(pos)):
@@ -287,15 +294,17 @@ class InputRouter:
     def check_events(self):
         frontend = self.frontend
         events = pg.event.get()
+        dropped = 0
         for event in events:
             if event.type == pg.QUIT:
                 frontend.running = False
                 continue
 
             if frontend._pending_nav is not None:
+                dropped += 1
                 continue
 
-            elif event.type == pg.KEYDOWN:
+            if event.type == pg.KEYDOWN:
                 if not frontend.skillcheck_session._skillcheck_swallows_input():
                     frontend.sound_manager.play_ui_click()
                 if event.key == pg.K_ESCAPE:
@@ -313,7 +322,9 @@ class InputRouter:
                         top.obj.handle_key(event)
                     continue
                 if frontend.mode == "menu":
-                    frontend.menu_page.handle_key(event)
+                    result = frontend.screen.handle_key(event)
+                    if isinstance(result, Nav):
+                        frontend.request_nav(result)
                     continue
                 self._handle_shortcut_key(event)
 
@@ -358,4 +369,7 @@ class InputRouter:
                 self._cancel_all_scroll()
                 frontend._abort_transition_for_resize()
                 frontend._compute_layout()
+        if dropped:
+            log.debug("dropped %d stale events pending nav %s",
+                      dropped, frontend._pending_nav.name)
         return bool(events)

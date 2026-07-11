@@ -49,6 +49,7 @@ def test_screen_base_contract_defaults():
     assert screen.app is app
     assert screen.name == ""
     assert screen.uses_battle_backdrop is False
+    assert screen.legacy_mode is None
     assert screen.enter() is None
     assert screen.exit() is None
     assert screen.update(0) is None
@@ -57,6 +58,9 @@ def test_screen_base_contract_defaults():
     assert screen.on_resize() is None
     assert screen.handle_click((0, 0)) is False
     assert screen.handle_key(None) is False
+    assert screen.handle_press((0, 0)) is False
+    assert screen.handle_motion((0, 0)) is False
+    assert screen.handle_release((0, 0)) is False
     assert screen.active_scrollable() is None
     assert screen.escape() is False
     assert screen.modals() == []
@@ -111,6 +115,35 @@ def test_request_nav_overwrite_last_wins():
     assert app.mode == "menu"
 
 
+def test_switch_to_logs_full_lifecycle(caplog):
+    app = make_app()
+    with caplog.at_level(logging.DEBUG, logger="chess.frontend"):
+        app.switch_to("game", mode="single_screen")
+    messages = [r.getMessage() for r in caplog.records]
+    assert "screen switch menu -> game mode=single_screen" in messages
+    assert "screen exited menu" in messages
+    assert "screen entered game payload_keys=['mode']" in messages
+    infos = [r for r in caplog.records if r.levelno == logging.INFO]
+    assert any("screen switch" in r.getMessage() for r in infos)
+
+
+def test_stale_event_drop_logs_count(caplog):
+    app = make_app()
+
+    def fake_handle_key(event):
+        app.request_nav(Nav("game", {"mode": "single_screen"}))
+
+    app.screen.handle_key = fake_handle_key
+    pg.event.clear()
+    pg.event.post(pg.event.Event(pg.KEYDOWN, {"key": pg.K_a, "mod": 0, "unicode": "a"}))
+    pg.event.post(pg.event.Event(pg.KEYDOWN, {"key": pg.K_b, "mod": 0, "unicode": "b"}))
+    pg.event.post(pg.event.Event(pg.KEYDOWN, {"key": pg.K_c, "mod": 0, "unicode": "c"}))
+    with caplog.at_level(logging.DEBUG, logger="chess.frontend"):
+        app.input_router.check_events()
+    assert any("dropped 2 stale events pending nav game" == r.getMessage()
+               for r in caplog.records)
+
+
 def test_request_nav_overwrite_logs_warning(caplog):
     app = make_app()
     with caplog.at_level(logging.WARNING, logger="chess.frontend"):
@@ -127,7 +160,7 @@ def test_stale_event_dropped_after_nav_queued_mid_frame():
         calls.append(event.key)
         app.request_nav(Nav("game", {"mode": "single_screen"}))
 
-    app.menu_page.handle_key = fake_handle_key
+    app.screen.handle_key = fake_handle_key
     pg.event.clear()
     pg.event.post(pg.event.Event(pg.KEYDOWN, {"key": pg.K_a, "mod": 0, "unicode": "a"}))
     pg.event.post(pg.event.Event(pg.KEYDOWN, {"key": pg.K_b, "mod": 0, "unicode": "b"}))
@@ -143,7 +176,7 @@ def test_quit_event_survives_stale_event_drop():
     def fake_handle_key(event):
         app.request_nav(Nav("game", {"mode": "single_screen"}))
 
-    app.menu_page.handle_key = fake_handle_key
+    app.screen.handle_key = fake_handle_key
     pg.event.clear()
     pg.event.post(pg.event.Event(pg.KEYDOWN, {"key": pg.K_a, "mod": 0, "unicode": "a"}))
     pg.event.post(pg.event.Event(pg.QUIT, {}))

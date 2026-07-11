@@ -20,7 +20,6 @@ from chessshootout.skillcheck.coordinator import SkillCheckCoordinator
 from chessshootout.skillcheck.online import SKILLCHECK_DEADLINE_MS
 from chessshootout.frontend.menu.menu_battle import MenuBattle
 from chessshootout.domain.capture_summary import captured_by, material_advantage
-from chessshootout.frontend.menu.menu_page import MenuPage, PAGE_CARD, PAGE_HISTORY
 from chessshootout.frontend.menu.history import HistoryView
 from chessshootout.frontend.modal_registry import ModalSpec
 from chessshootout.frontend.modals.confirm import ConfirmModal
@@ -41,9 +40,10 @@ from chessshootout.frontend.focus.time_line import TimeLine
 from chessshootout.frontend.focus.transition import FocusTransition
 from chessshootout.frontend.input_router import InputRouter
 from chessshootout.frontend.layout import compute_layout
-from chessshootout.frontend.screens.base import assert_plain_payload
+from chessshootout.frontend.screens.base import Nav, assert_plain_payload
 from chessshootout.frontend.screens.menu import MenuScreen
 from chessshootout.frontend.screens.game import GameScreen
+from chessshootout.frontend.screens.history import HistoryScreen
 from chessshootout.frontend.window_chrome import (
     WindowChrome, WINDOW_FLAGS, MIN_WINDOW_WIDTH, MIN_WINDOW_HEIGHT,
 )
@@ -189,7 +189,7 @@ class Frontend(OnlineEventsMixin):
         self._opp_disconnected_at_ms = None
         self._local_disconnected_at_ms = None
         self._prev_online_state = None
-        self._prev_battle_mode = None
+        self._prev_screen_used_backdrop = False
 
         self.match = Match()
         self.sound_manager = SoundManager(SOUNDS_DIR, enabled=pg.mixer.get_init() is not None)
@@ -236,7 +236,6 @@ class Frontend(OnlineEventsMixin):
         self.confirm_modal = ConfirmModal(self.window)
         self.history_view = HistoryView(self.window, on_open=self._load_pgn_from_path,
                                         on_back=self._on_menu_back)
-        self.menu_page = MenuPage(self.window, self.start_menu, self.history_view)
         self.help_modal = HelpModal(self.window)
         self.fen_input_modal = FenInputModal(self.window)
         self.options_modal = OptionsModal(self.window)
@@ -280,10 +279,13 @@ class Frontend(OnlineEventsMixin):
         self._focus_panel_hover_ms = LONG_AGO_MS
         self._focus_hint_until_ms = 0
         self._focus_prev_mode = "menu"
-        self._entering_menu = False
         self._pending_nav = None
 
-        self.screens = {"menu": MenuScreen(self), "game": GameScreen(self)}
+        self.screens = {
+            "menu": MenuScreen(self),
+            "game": GameScreen(self),
+            "history": HistoryScreen(self),
+        }
         self.screen = self.screens["menu"]
 
         self.match.new_game()
@@ -299,11 +301,16 @@ class Frontend(OnlineEventsMixin):
         if name not in self.screens:
             raise KeyError(f"unknown screen: {name!r}")
         assert_plain_payload(payload)
-        mode = payload.get("mode", name)
-        self.screen.exit()
-        self.screen = self.screens[name]
+        screen = self.screens[name]
+        mode = payload.get("mode") or screen.legacy_mode or name
+        previous = self.screen
+        log.info("screen switch %s -> %s mode=%s", previous.name, name, mode)
+        previous.exit()
+        log.debug("screen exited %s", previous.name)
+        self.screen = screen
         self.mode = mode
-        self.screen.enter(**payload)
+        screen.enter(**payload)
+        log.debug("screen entered %s payload_keys=%s", name, sorted(payload))
         self._compute_layout()
 
     def request_nav(self, nav):
@@ -311,6 +318,7 @@ class Frontend(OnlineEventsMixin):
             log.warning("nav intent overwritten: %s -> %s",
                         self._pending_nav.name, nav.name)
         self._pending_nav = nav
+        log.debug("nav queued %s", nav.name)
 
     def _execute_pending_nav(self):
         if self._pending_nav is None:
@@ -392,15 +400,13 @@ class Frontend(OnlineEventsMixin):
         self._opp_disconnected_at_ms = None
         self._local_disconnected_at_ms = None
         self._prev_online_state = None
-        return_page = self._review_return_page or PAGE_CARD
+        return_screen = self._review_return_page or "menu"
         self._review_return_page = None
         self._reset_to_new_game()
         self._refresh_load_pgn_availability()
         self.start_menu.show()
-        if return_page == PAGE_HISTORY:
+        if return_screen == "history":
             self._on_open_history()
-        else:
-            self.menu_page.set_page(PAGE_CARD)
         if keep_online and had_rematch_offer:
             self._reshow_rematch_banner()
 
@@ -419,11 +425,11 @@ class Frontend(OnlineEventsMixin):
             on_open=self._load_pgn_from_path,
             nickname=env.get_nickname(),
         )
-        self.menu_page.set_page(PAGE_HISTORY)
+        self.request_nav(Nav("history"))
 
     def _on_menu_back(self):
         self.history_view.hide()
-        self.menu_page.set_page(PAGE_CARD)
+        self.request_nav(Nav("menu"))
 
     def _on_open_fen_modal(self):
         self.fen_input_modal.show(on_submit=self._start_game_from_fen)
@@ -462,8 +468,7 @@ class Frontend(OnlineEventsMixin):
         parsed, ok = load_pgn_into_backend(self.match, text)
         if not ok:
             log.warning("pgn load failed path=%s", path)
-            self.switch_to("menu")
-            self.menu_page.set_page(PAGE_HISTORY)
+            self.switch_to("history")
             self.toast.show("Could not load PGN")
             return
         self.skillcheck_session._rebuild_skillcheck_log(parsed.move_comments)
@@ -477,7 +482,7 @@ class Frontend(OnlineEventsMixin):
             self.board.review_ply = 0
         self.pgn_review = True
         self.board.read_only = True
-        self._review_return_page = PAGE_HISTORY
+        self._review_return_page = "history"
         self.start_menu.hide()
 
     def _on_start_game(self, config):
@@ -637,7 +642,6 @@ class Frontend(OnlineEventsMixin):
         self.switch_to("menu")
         self.reconnect_probe._reconnect_probe_attempts = 0
         self.start_menu.show()
-        self.menu_page.set_page(PAGE_CARD)
 
     def _abandon_online_game(self):
         self._tear_down_online_session("reconnect_cancelled")
@@ -1031,6 +1035,7 @@ class Frontend(OnlineEventsMixin):
                 self._frame_times.append((frame_start - self._last_frame_start) * 1000.0)
             self._last_frame_start = frame_start
             had_events = self.input_router.check_events()
+            self._execute_pending_nav()
             self.draw_frame()
             self._execute_pending_nav()
             self.chrome.draw(self._chrome_stats())
@@ -1186,11 +1191,20 @@ class Frontend(OnlineEventsMixin):
         if nav is not None:
             self.request_nav(nav)
 
-        self._entering_menu = self.mode == "menu" and self._prev_battle_mode != "menu"
-        self._prev_battle_mode = self.mode
         self.reconnect_probe._refresh_reconnect_button()
 
+        if self.screen.uses_battle_backdrop:
+            if self.screen.name == "menu" and not self._prev_screen_used_backdrop:
+                self.menu_battle.begin_intro()
+            self.menu_battle.update(now)
+            self.menu_battle.draw(self.window)
+            self.menu_battle.draw_scrim(self.window)
+        self._prev_screen_used_backdrop = self.screen.uses_battle_backdrop
+
         self.screen.draw()
+
+        if self.screen.uses_battle_backdrop:
+            self.menu_battle.draw_intro_overlay(self.window)
 
         self.offer_banners.draw(self._banner_rect())
         for spec in reversed(self._modal_registry):
@@ -1496,10 +1510,11 @@ class Frontend(OnlineEventsMixin):
         self.wait_modal.set_rect(r.flex_rect)
         self.match_found_modal.set_rect(r.flex_rect)
         self.reconnecting_modal.set_rect(r.board_rect)
-        self.menu_page.set_rect(r.window_rect, r.top, r.start_rect)
+        self.start_menu.set_rect(r.start_rect)
+        for screen in self.screens.values():
+            screen.relayout(size)
         self.menu_battle.top_inset = r.top
         self.menu_battle.set_rect(r.window_rect)
-        self.menu_battle.set_avoid_rect(self.menu_page.avoid_rect())
         self.help_modal.set_rect(r.result_rect)
         self.fen_input_modal.set_rect(r.flex_rect)
         self.options_modal.set_rect(r.options_rect)

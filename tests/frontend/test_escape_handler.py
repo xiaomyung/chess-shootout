@@ -9,7 +9,6 @@ opens the resign prompt.
 import pygame as pg
 
 from tests.conftest import pygame_display
-from chessshootout.frontend.menu.menu_page import PAGE_CARD, PAGE_HISTORY
 from chessshootout.frontend.skillcheck.wheel_view import WheelController
 from chessshootout.skillcheck.wheel import WheelChallenge
 from tests.helpers import make_app, start_single_screen
@@ -68,9 +67,12 @@ def test_second_escape_dismisses_quit_prompt_and_restores_menu():
 
 def test_menu_history_escape_returns_to_card():
     app = _app()
-    app.menu_page.set_page(PAGE_HISTORY)
+    app.switch_to("history")
     app.input_router._handle_escape()
-    assert app.menu_page.page == PAGE_CARD
+    assert app._pending_nav is not None
+    assert app._pending_nav.name == "menu"
+    app._execute_pending_nav()
+    assert app.screen.name == "menu"
 
 
 def test_game_escape_opens_resign_prompt():
