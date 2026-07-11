@@ -241,13 +241,14 @@ def _online_app():
     from chessshootout.frontend.frontend import Frontend
     app = Frontend(1000, 800)
     app.sound_manager = MagicMock()
-    app.online_client = MagicMock()
-    app.online_client.get_ping_ms.return_value = None
-    app.online_client.is_server_silent.return_value = False
-    app.online_client.heartbeat_interval.return_value = 2.0
+    app.coordinator.client = MagicMock()
+    app.coordinator.client.get_ping_ms.return_value = None
+    app.coordinator.client.is_server_silent.return_value = False
+    app.coordinator.client.heartbeat_interval.return_value = 2.0
     app.mode = ONLINE
-    app.white_name = "Alice"
-    app.black_name = "Bob"
+    app.coordinator.subscribe(app.game)
+    app.game.white_name = "Alice"
+    app.game.black_name = "Bob"
     app.match.mode = ONLINE
     app.match.local_color = PieceColor.WHITE
     return app
@@ -257,9 +258,9 @@ def test_remote_move_with_correct_ply_applies():
     app = _online_app()
     payload = {"from": "e2", "to": "e4", "san": "e4", "ply": 1,
                "clock": {}}
-    app._handle_remote_move_applied(payload)
-    assert app._resyncing is False
-    app.online_client.request_state_sync.assert_not_called()
+    app.coordinator._handle_remote_move_applied(payload)
+    assert app.coordinator._resyncing is False
+    app.coordinator.client.request_state_sync.assert_not_called()
     assert len(app.match.move_history) == 1
 
 
@@ -268,9 +269,9 @@ def test_remote_move_with_skipped_ply_triggers_resync():
     app = _online_app()
     payload = {"from": "e7", "to": "e5", "san": "e5", "ply": 3,
                "clock": {}}
-    app._handle_remote_move_applied(payload)
-    assert app._resyncing is True
-    app.online_client.request_state_sync.assert_called_once()
+    app.coordinator._handle_remote_move_applied(payload)
+    assert app.coordinator._resyncing is True
+    app.coordinator.client.request_state_sync.assert_called_once()
     assert len(app.match.move_history) == 0
 
 
@@ -279,20 +280,20 @@ def test_remote_move_with_illegal_payload_triggers_resync():
     app = _online_app()
     payload = {"from": "e3", "to": "e4", "san": "e4", "ply": 1,
                "clock": {}}
-    app._handle_remote_move_applied(payload)
-    assert app._resyncing is True
-    app.online_client.request_state_sync.assert_called_once()
+    app.coordinator._handle_remote_move_applied(payload)
+    assert app.coordinator._resyncing is True
+    app.coordinator.client.request_state_sync.assert_called_once()
 
 
 def test_resync_gate_drops_subsequent_move_applied():
     """A held gate drops the move without applying it or firing a new request."""
     app = _online_app()
-    app._resyncing = True
+    app.coordinator._resyncing = True
     payload = {"from": "e2", "to": "e4", "san": "e4", "ply": 1,
                "clock": {}}
-    app._handle_remote_move_applied(payload)
+    app.coordinator._handle_remote_move_applied(payload)
     assert len(app.match.move_history) == 0
-    app.online_client.request_state_sync.assert_not_called()
+    app.coordinator.client.request_state_sync.assert_not_called()
 
 
 def test_takeback_applied_with_skipped_ply_triggers_resync():
@@ -301,35 +302,35 @@ def test_takeback_applied_with_skipped_ply_triggers_resync():
     app = _online_app()
     app.match.try_move(Square(6, 4), Square(4, 4))
     payload = {"clock": {}, "fen": "", "ply": 5}
-    app._handle_takeback_applied(payload)
-    assert app._resyncing is True
-    app.online_client.request_state_sync.assert_called_once()
+    app.coordinator._handle_takeback_applied(payload)
+    assert app.coordinator._resyncing is True
+    app.coordinator.client.request_state_sync.assert_called_once()
 
 
 def test_game_resumed_clears_resync_gate():
     app = _online_app()
-    app._time_control = (300, 0)
+    app.game._time_control = (300, 0)
     app.match.setup_clock(300, 0)
-    app._resyncing = True
+    app.coordinator._resyncing = True
     payload = {
         "fen": "rnbqkbnr/pppp1ppp/8/4p3/4P3/8/PPPP1PPP/RNBQKBNR w KQkq - 0 2",
         "move_history": [{"san": "e4"}, {"san": "e5"}],
         "clock": {"white_remaining": 300.0, "black_remaining": 300.0,
                   "running_for": None},
     }
-    app._handle_game_resumed(payload)
-    assert app._resyncing is False
+    app.coordinator._handle_game_resumed(payload)
+    assert app.coordinator._resyncing is False
     assert len(app.match.move_history) == 2
 
 
 def test_begin_resync_is_idempotent_during_inflight_request():
     """The in-flight flag suppresses duplicate requests across repeated calls."""
     app = _online_app()
-    app._begin_resync()
-    app._begin_resync()
-    app._begin_resync()
-    assert app._resyncing is True
-    assert app.online_client.request_state_sync.call_count == 1
+    app.coordinator._begin_resync()
+    app.coordinator._begin_resync()
+    app.coordinator._begin_resync()
+    assert app.coordinator._resyncing is True
+    assert app.coordinator.client.request_state_sync.call_count == 1
 
 
 def test_resync_directive_triggers_resync():
@@ -337,90 +338,90 @@ def test_resync_directive_triggers_resync():
     drives the standard /resume recovery."""
     from chessshootout.online.client import Event
     app = _online_app()
-    app.online_client.state = "connected"
-    app._handle_online_event(Event("resync_directive", {}))
-    assert app._resyncing is True
-    app.online_client.request_state_sync.assert_called_once()
+    app.coordinator.client.state = "connected"
+    app.coordinator._handle_online_event(Event("resync_directive", {}))
+    assert app.coordinator._resyncing is True
+    app.coordinator.client.request_state_sync.assert_called_once()
 
 
 def test_resyncing_shows_toast_each_frame():
     app = _online_app()
-    app.online_client.state = "connected"
-    app._resyncing = True
-    app._resync_started_at_ms = pg.time.get_ticks()
-    app._update_online_phase()
+    app.coordinator.client.state = "connected"
+    app.coordinator._resyncing = True
+    app.coordinator._resync_started_at_ms = pg.time.get_ticks()
+    app.coordinator._update_online_phase()
     assert app.toast.message == "Resyncing…"
 
 
 def test_resyncing_self_heals_after_timeout():
-    from chessshootout.frontend.frontend import RESYNC_TIMEOUT_MS
+    from chessshootout.frontend.online_coordinator import RESYNC_TIMEOUT_MS
     app = _online_app()
-    app.online_client.state = "connected"
-    app._resyncing = True
-    app._resync_started_at_ms = pg.time.get_ticks() - (RESYNC_TIMEOUT_MS + 1000)
-    app._update_online_phase()
-    assert app._resyncing is False
+    app.coordinator.client.state = "connected"
+    app.coordinator._resyncing = True
+    app.coordinator._resync_started_at_ms = pg.time.get_ticks() - (RESYNC_TIMEOUT_MS + 1000)
+    app.coordinator._update_online_phase()
+    assert app.coordinator._resyncing is False
 
 
 def test_resync_timeout_escalates_to_reconnect():
     """A resync that never lands escalates to a full reconnect, so the opponent's abandon
     countdown starts and recovery runs through the standard reconnect path."""
-    from chessshootout.frontend.frontend import RESYNC_TIMEOUT_MS
+    from chessshootout.frontend.online_coordinator import RESYNC_TIMEOUT_MS
     app = _online_app()
-    app.online_client.state = "connected"
-    app._resyncing = True
-    app._resync_started_at_ms = pg.time.get_ticks() - (RESYNC_TIMEOUT_MS + 1000)
-    app._update_online_phase()
-    assert app._resyncing is False
-    app.online_client.force_reconnect.assert_called_once()
+    app.coordinator.client.state = "connected"
+    app.coordinator._resyncing = True
+    app.coordinator._resync_started_at_ms = pg.time.get_ticks() - (RESYNC_TIMEOUT_MS + 1000)
+    app.coordinator._update_online_phase()
+    assert app.coordinator._resyncing is False
+    app.coordinator.client.force_reconnect.assert_called_once()
 
 
 def test_resync_timeout_no_escalation_when_already_reconnecting():
-    from chessshootout.frontend.frontend import RESYNC_TIMEOUT_MS
+    from chessshootout.frontend.online_coordinator import RESYNC_TIMEOUT_MS
     app = _online_app()
-    app.online_client.state = "reconnecting"
-    app._resyncing = True
-    app._resync_started_at_ms = pg.time.get_ticks() - (RESYNC_TIMEOUT_MS + 1000)
-    app._update_online_phase()
-    assert app._resyncing is False
-    app.online_client.force_reconnect.assert_not_called()
+    app.coordinator.client.state = "reconnecting"
+    app.coordinator._resyncing = True
+    app.coordinator._resync_started_at_ms = pg.time.get_ticks() - (RESYNC_TIMEOUT_MS + 1000)
+    app.coordinator._update_online_phase()
+    assert app.coordinator._resyncing is False
+    app.coordinator.client.force_reconnect.assert_not_called()
 
 
 def test_online_error_room_lost_clears_resyncing():
     app = _online_app()
-    app._resyncing = True
-    app._handle_online_error({"reason": "room_lost"})
-    assert app._resyncing is False
+    app.coordinator._resyncing = True
+    app.coordinator._handle_online_error({"reason": "room_lost"})
+    assert app.coordinator._resyncing is False
 
 
 def test_opponent_resyncing_status_shows_toast():
     """The server drives the opponent-resyncing indication via connection_status."""
     app = _online_app()
-    app._handle_connection_status({"opp_state": "resyncing"})
+    app.coordinator._handle_connection_status({"opp_state": "resyncing"})
     assert app.toast.message == "Opponent is resyncing…"
-    assert app._opp_disconnected_at_ms is None
+    assert app.game._opp_disconnected_at_ms is None
 
 
 def test_heartbeat_sent_when_interval_elapsed():
     app = _online_app()
-    app.online_client.state = "connected"
-    app._last_heartbeat_sent_ms = pg.time.get_ticks() - 5000
-    app._send_heartbeat_if_due()
-    app.online_client.send_ping.assert_called_once_with(len(app.match.move_history))
+    app.coordinator.client.state = "connected"
+    app.coordinator._last_heartbeat_sent_ms = pg.time.get_ticks() - 5000
+    app.coordinator._send_heartbeat_if_due()
+    app.coordinator.client.send_ping.assert_called_once_with(len(app.match.move_history))
 
 
 def test_heartbeat_not_sent_before_interval():
     app = _online_app()
-    app.online_client.state = "connected"
-    app._last_heartbeat_sent_ms = pg.time.get_ticks()
-    app._send_heartbeat_if_due()
-    app.online_client.send_ping.assert_not_called()
+    app.coordinator.client.state = "connected"
+    app.coordinator._last_heartbeat_sent_ms = pg.time.get_ticks()
+    app.coordinator._send_heartbeat_if_due()
+    app.coordinator.client.send_ping.assert_not_called()
 
 
 def test_server_silence_escalates_to_reconnect():
     app = _online_app()
-    app.online_client.state = "connected"
-    app.online_client.is_server_silent.return_value = True
-    app._send_heartbeat_if_due()
-    app.online_client.force_reconnect.assert_called_once()
-    app.online_client.send_ping.assert_not_called()
+    app.coordinator.client.state = "connected"
+    app.coordinator.client.is_server_silent.return_value = True
+    app.coordinator._send_heartbeat_if_due()
+    app.coordinator.client.force_reconnect.assert_called_once()
+    app.coordinator.client.send_ping.assert_not_called()

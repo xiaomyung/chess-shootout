@@ -183,7 +183,7 @@ def test_hold_cancelled_on_abort_state(monkeypatch, abort):
     app.give_time._on_give_time()
     assert app.give_time._give_time_holding
     if abort == "resync":
-        app._resyncing = True
+        app.coordinator._resyncing = True
     elif abort == "skillcheck":
         monkeypatch.setattr(app.skillcheck_overlay, "is_active", lambda: True)
     elif abort == "result":
@@ -246,8 +246,8 @@ def test_online_hold_sends_one_message_on_release_with_hold_ms():
     app.match.clock.start()
     app.match.clock.black_remaining = 100.0
     _hold_give_time(app, hold_ms=500)
-    app.online_client.send_give_time.assert_called_once()
-    (hold_ms_arg,) = app.online_client.send_give_time.call_args.args
+    app.coordinator.client.send_give_time.assert_called_once()
+    (hold_ms_arg,) = app.coordinator.client.send_give_time.call_args.args
     assert hold_ms_arg == 500
     assert not app.give_time._give_time_holding
 
@@ -264,20 +264,20 @@ def test_online_hold_does_not_send_until_release():
          mock.patch.object(app.give_time, "_pointer_over_give_button", return_value=True), \
          mock.patch("pygame.time.get_ticks", return_value=start + 300):
         app.give_time._update_give_time_hold()
-    app.online_client.send_give_time.assert_not_called()
+    app.coordinator.client.send_give_time.assert_not_called()
     with mock.patch("pygame.mouse.get_pressed", return_value=(False, False, False)), \
          mock.patch("pygame.time.get_ticks", return_value=start + 300):
         app.give_time._update_give_time_hold()
-    app.online_client.send_give_time.assert_called_once()
+    app.coordinator.client.send_give_time.assert_called_once()
 
 
 def _online_app():
     app = _make_app()
-    app.online_client = MagicMock()
-    app.mode = ONLINE
-    app.white_name = "Alice"
-    app.black_name = "Bob"
-    app._chosen_side = "white"
+    app.coordinator._start_online_game({
+        "white_name": "Alice", "black_name": "Bob", "your_color": "white",
+        "time_minutes": 5, "increment_seconds": 0,
+    })
+    app.coordinator.client = MagicMock()
     app.match.mode = ONLINE
     app.match.local_color = PieceColor.WHITE
     return app
@@ -296,7 +296,7 @@ def test_time_granted_routes_toast(monkeypatch, granted_by, seconds_added, expec
     app = _online_app()
     toast_calls = []
     monkeypatch.setattr(app.toast, "show", lambda msg, **kw: toast_calls.append(msg))
-    app._handle_time_granted({
+    app.coordinator._handle_time_granted({
         "granted_by": granted_by, "seconds_added": seconds_added, "clock": {},
     })
     assert toast_calls == expected_toasts

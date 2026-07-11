@@ -67,10 +67,10 @@ class InputRouter:
             if spec.esc_dismiss and spec.obj.is_visible():
                 spec.on_dismiss()
                 return True
-        if not frontend.offer_banners.is_empty():
-            if frontend._rematch_offered:
-                frontend._decline_rematch()
-            frontend.offer_banners.clear()
+        if not frontend.coordinator.offer_banners.is_empty():
+            if frontend.coordinator._rematch_offered:
+                frontend.coordinator._decline_rematch()
+            frontend.coordinator.offer_banners.clear()
             return True
         return False
 
@@ -163,7 +163,7 @@ class InputRouter:
         if top is not None:
             top.obj.handle_click(pos)
             return
-        if frontend.offer_banners.handle_click(pos):
+        if frontend.coordinator.offer_banners.handle_click(pos):
             return
         if frontend.mode == "menu":
             result = frontend.screen.handle_click(pos)

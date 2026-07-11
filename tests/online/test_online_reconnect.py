@@ -23,7 +23,7 @@ from tests.conftest import pygame_display
 from chessshootout.domain.match import ONLINE
 from chessshootout.backend.pieces import PieceColor
 from chessshootout.frontend.frontend import Frontend
-from chessshootout.frontend.reconnect_probe import RECONNECT_PROBE_MAX_ATTEMPTS
+from chessshootout.frontend.online_coordinator import RECONNECT_PROBE_MAX_ATTEMPTS
 
 
 _pygame_init = pygame_display(1000, 800)
@@ -66,14 +66,14 @@ def resume_payload(
 def test_handle_game_resumed_applies_server_clock_snapshot(app):
     """Mid-game drop: replay SANs, build the clock from the existing
     _time_control, then overwrite remainders + side-to-move from the snapshot."""
-    app._time_control = (300, 2)
+    app.game._time_control = (300, 2)
     app.match.local_color = PieceColor.WHITE
     payload = resume_payload(
         move_history=("e4", "e5"),
         white_remaining=240.0, black_remaining=180.0, running_for="white",
     )
 
-    app._handle_game_resumed(payload)
+    app.coordinator._handle_game_resumed(payload)
 
     assert app.match.clock is not None
     assert app.match.clock.increment_seconds == 2.0
@@ -87,13 +87,13 @@ def test_handle_game_resumed_applies_server_clock_snapshot(app):
 def test_handle_game_resumed_does_not_reset_clock_to_initial(app):
     """A fresh clock starts at initial_seconds (300); applying the snapshot must
     land on the server value, never the fresh-start value."""
-    app._time_control = (300, 0)
+    app.game._time_control = (300, 0)
     app.match.local_color = PieceColor.WHITE
     payload = resume_payload(
         white_remaining=42.0, black_remaining=17.0, running_for="black",
     )
 
-    app._handle_game_resumed(payload)
+    app.coordinator._handle_game_resumed(payload)
 
     assert app.match.clock.white_remaining == pytest.approx(42.0)
     assert app.match.clock.black_remaining == pytest.approx(17.0)
@@ -115,9 +115,9 @@ def test_on_reconnect_active_game_sets_up_online_state_and_clock(app, monkeypatc
         white_remaining=200.0, black_remaining=210.0, running_for="black",
         time_minutes=5, increment_seconds=2,
     )
-    monkeypatch.setattr("chessshootout.frontend.reconnect_probe.fetch_resume",
+    monkeypatch.setattr("chessshootout.frontend.online_coordinator.fetch_resume",
                         lambda *a, **kw: fresh)
-    app.reconnect_probe._pending_reconnect = {
+    app.coordinator._pending_reconnect = {
         "addr": "localhost:8000",
         "room_id": "room-x",
         "session_token": "tok",
@@ -126,17 +126,17 @@ def test_on_reconnect_active_game_sets_up_online_state_and_clock(app, monkeypatc
         ),
     }
 
-    app.reconnect_probe._on_reconnect_active_game()
+    app.coordinator._on_reconnect_active_game()
 
     assert app.mode == ONLINE
-    assert app._time_control == (300, 2)
+    assert app.game._time_control == (300, 2)
     assert app.match.local_color == PieceColor.BLACK
     assert [e.san for e in app.match.move_history] == ["d4", "d5", "c4"]
     assert app.match.clock is not None
     assert app.match.clock.white_remaining == pytest.approx(200.0)
     assert app.match.clock.black_remaining == pytest.approx(210.0)
     assert app.match.clock.running_for == PieceColor.BLACK
-    assert app.reconnect_probe._pending_reconnect is None
+    assert app.coordinator._pending_reconnect is None
 
 
 def test_on_reconnect_active_game_refetches_resume_to_avoid_drift(app, monkeypatch):
@@ -154,14 +154,14 @@ def test_on_reconnect_active_game_refetches_resume_to_avoid_drift(app, monkeypat
             white_remaining=42.0, black_remaining=42.0, running_for="white",
         )
 
-    monkeypatch.setattr("chessshootout.frontend.reconnect_probe.fetch_resume", _fetch)
-    app.reconnect_probe._pending_reconnect = {
+    monkeypatch.setattr("chessshootout.frontend.online_coordinator.fetch_resume", _fetch)
+    app.coordinator._pending_reconnect = {
         "addr": "localhost:8000",
         "room_id": "room-y",
         "session_token": "tok",
         "resume": resume_payload(),
     }
-    app.reconnect_probe._on_reconnect_active_game()
+    app.coordinator._on_reconnect_active_game()
     assert calls == [("localhost:8000", "room-y", "tok")]
     assert app.match.clock.white_remaining == pytest.approx(42.0)
 
@@ -173,7 +173,7 @@ def test_on_reconnect_active_game_failed_refetch_restores_pending(app, monkeypat
         "chessshootout.online.client.OnlineClient.reconnect_to_existing",
         lambda self, *a, **kw: None,
     )
-    monkeypatch.setattr("chessshootout.frontend.reconnect_probe.fetch_resume",
+    monkeypatch.setattr("chessshootout.frontend.online_coordinator.fetch_resume",
                         lambda *a, **kw: None)
     pending = {
         "addr": "localhost:8000",
@@ -181,10 +181,10 @@ def test_on_reconnect_active_game_failed_refetch_restores_pending(app, monkeypat
         "session_token": "tok",
         "resume": resume_payload(),
     }
-    app.reconnect_probe._pending_reconnect = dict(pending)
-    app.reconnect_probe._on_reconnect_active_game()
+    app.coordinator._pending_reconnect = dict(pending)
+    app.coordinator._on_reconnect_active_game()
     assert app.mode != ONLINE
-    assert app.reconnect_probe._pending_reconnect == pending
+    assert app.coordinator._pending_reconnect == pending
     assert app.start_menu.reconnect_available
     assert app.confirm_modal.is_visible()
 
@@ -192,11 +192,11 @@ def test_on_reconnect_active_game_failed_refetch_restores_pending(app, monkeypat
 def test_on_reconnect_active_game_no_pending_is_noop(app):
     """Clicking Reconnect after the pending entry was cleared must not crash or
     flip mode."""
-    app.reconnect_probe._pending_reconnect = None
+    app.coordinator._pending_reconnect = None
     prior_mode = app.mode
-    app.reconnect_probe._on_reconnect_active_game()
+    app.coordinator._on_reconnect_active_game()
     assert app.mode == prior_mode
-    assert app.reconnect_probe._pending_reconnect is None
+    assert app.coordinator._pending_reconnect is None
 
 
 def test_async_main_resume_does_not_queue_legacy_events():
@@ -226,36 +226,36 @@ def test_async_main_resume_does_not_queue_legacy_events():
 
 
 def test_probe_worker_increments_attempts_on_no_room(app, monkeypatch):
-    monkeypatch.setattr("chessshootout.frontend.reconnect_probe.probe_active_game",
+    monkeypatch.setattr("chessshootout.frontend.online_coordinator.probe_active_game",
                         lambda addr, uuid: None)
-    app.reconnect_probe._reconnect_probe_attempts = 0
-    gen = app.reconnect_probe._reconnect_probe_gen
-    app.reconnect_probe._reconnect_probe_worker("addr", "uuid", gen)
-    assert app.reconnect_probe._reconnect_probe_attempts == 1
-    assert app.reconnect_probe._pending_reconnect is None
+    app.coordinator._reconnect_probe_attempts = 0
+    gen = app.coordinator._reconnect_probe_gen
+    app.coordinator._reconnect_probe_worker("addr", "uuid", gen)
+    assert app.coordinator._reconnect_probe_attempts == 1
+    assert app.coordinator._pending_reconnect is None
 
 
 def test_probe_worker_sets_pending_and_keeps_attempts_on_room_found(app, monkeypatch):
-    monkeypatch.setattr("chessshootout.frontend.reconnect_probe.probe_active_game",
+    monkeypatch.setattr("chessshootout.frontend.online_coordinator.probe_active_game",
                         lambda addr, uuid: {"room_id": "r", "session_token": "t"})
-    monkeypatch.setattr("chessshootout.frontend.reconnect_probe.fetch_resume",
+    monkeypatch.setattr("chessshootout.frontend.online_coordinator.fetch_resume",
                         lambda addr, room, token: {"fen": ""})
-    app.reconnect_probe._reconnect_probe_attempts = 0
-    gen = app.reconnect_probe._reconnect_probe_gen
-    app.reconnect_probe._reconnect_probe_worker("addr", "uuid", gen)
-    assert app.reconnect_probe._pending_reconnect is not None
-    assert app.reconnect_probe._reconnect_probe_attempts == 0
+    app.coordinator._reconnect_probe_attempts = 0
+    gen = app.coordinator._reconnect_probe_gen
+    app.coordinator._reconnect_probe_worker("addr", "uuid", gen)
+    assert app.coordinator._pending_reconnect is not None
+    assert app.coordinator._reconnect_probe_attempts == 0
 
 
 def test_spawn_stops_after_max_attempts(app, monkeypatch):
     started = []
     monkeypatch.setattr("threading.Thread",
                         lambda *a, **k: started.append(1) or MagicMock())
-    app.reconnect_probe._reconnect_probe_gen += 1
-    app.reconnect_probe._reconnect_probe_inflight = False
-    app.reconnect_probe._pending_reconnect = None
-    app.reconnect_probe._reconnect_probe_attempts = RECONNECT_PROBE_MAX_ATTEMPTS
-    app.reconnect_probe._spawn_reconnect_probe()
+    app.coordinator._reconnect_probe_gen += 1
+    app.coordinator._reconnect_probe_inflight = False
+    app.coordinator._pending_reconnect = None
+    app.coordinator._reconnect_probe_attempts = RECONNECT_PROBE_MAX_ATTEMPTS
+    app.coordinator._spawn_reconnect_probe()
     assert started == []
 
 
@@ -263,16 +263,16 @@ def test_spawn_stops_when_room_already_pending(app, monkeypatch):
     started = []
     monkeypatch.setattr("threading.Thread",
                         lambda *a, **k: started.append(1) or MagicMock())
-    app.reconnect_probe._reconnect_probe_gen += 1
-    app.reconnect_probe._reconnect_probe_inflight = False
-    app.reconnect_probe._reconnect_probe_attempts = 0
-    app.reconnect_probe._pending_reconnect = {"room_id": "r"}
-    app.reconnect_probe._spawn_reconnect_probe()
+    app.coordinator._reconnect_probe_gen += 1
+    app.coordinator._reconnect_probe_inflight = False
+    app.coordinator._reconnect_probe_attempts = 0
+    app.coordinator._pending_reconnect = {"room_id": "r"}
+    app.coordinator._spawn_reconnect_probe()
     assert started == []
 
 
 def test_back_to_menu_resets_probe_attempts(app):
-    app.reconnect_probe._reconnect_probe_gen += 1
-    app.reconnect_probe._reconnect_probe_attempts = RECONNECT_PROBE_MAX_ATTEMPTS
+    app.coordinator._reconnect_probe_gen += 1
+    app.coordinator._reconnect_probe_attempts = RECONNECT_PROBE_MAX_ATTEMPTS
     app._on_back_to_menu()
-    assert app.reconnect_probe._reconnect_probe_attempts == 0
+    assert app.coordinator._reconnect_probe_attempts == 0

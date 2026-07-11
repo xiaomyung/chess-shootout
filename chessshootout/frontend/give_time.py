@@ -61,7 +61,7 @@ class GiveTimeHold:
             return
         clock = screen.match.clock
         if (screen.current_result() is not None
-                or self.app._resyncing or screen.skillcheck_overlay.is_active()
+                or self.app.coordinator._resyncing or screen.skillcheck_overlay.is_active()
                 or self.app._menu_overlay_active()
                 or clock is None or clock.flagged is not None):
             self._cancel_give_time_hold()
@@ -108,8 +108,8 @@ class GiveTimeHold:
         self._give_time_holding = False
         self._give_time_hold_recipient = None
         self._last_give_time_at_ms = now
-        if self.app.mode == ONLINE and self.app.online_client is not None:
-            self.app.online_client.send_give_time(hold_ms)
+        if self.app.mode == ONLINE and self.app.coordinator.client is not None:
+            self.app.coordinator.client.send_give_time(hold_ms)
             return
         self._give_time_toast_for_giver(recipient, total)
 

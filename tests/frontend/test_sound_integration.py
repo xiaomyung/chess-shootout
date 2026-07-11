@@ -128,7 +128,7 @@ def test_takeback_applied_plays_undo_sound():
     app.board.handle_click(Square(4, 4))
     app.board.cancel_animations()
     app.sound_manager.reset_mock()
-    app._handle_takeback_applied({"clock": {}})
+    app.game.on_takeback({"clock": {}})
     app.sound_manager.play_undo.assert_called_once()
 
 
@@ -138,7 +138,7 @@ def test_takeback_applied_with_empty_history_does_not_play_undo():
     app = make_app()
     app._on_start_game(base_config(time_minutes=None))
     app.sound_manager.reset_mock()
-    app._handle_takeback_applied({"clock": {}})
+    app.game.on_takeback({"clock": {}})
     app.sound_manager.play_undo.assert_not_called()
 
 

@@ -166,7 +166,7 @@ def test_gather_state_extracts_all_known_fields():
     fe = SimpleNamespace(
         mode="online",
         match=SimpleNamespace(move_history=[1, 2, 3]),
-        online_client=SimpleNamespace(state="connected"),
+        coordinator=SimpleNamespace(client=SimpleNamespace(state="connected")),
         window=SimpleNamespace(get_size=lambda: (1200, 800)),
     )
     state = gather_state(fe)
@@ -178,7 +178,8 @@ def test_gather_state_extracts_all_known_fields():
 
 def test_gather_state_handles_missing_match_and_client():
     """Early-init crashes (no match / no client) must not raise."""
-    fe = SimpleNamespace(mode="menu", match=None, online_client=None,
+    fe = SimpleNamespace(mode="menu", match=None,
+                         coordinator=SimpleNamespace(client=None),
                          window=SimpleNamespace(get_size=lambda: (900, 600)))
     state = gather_state(fe)
     assert state["mode"] == "menu"

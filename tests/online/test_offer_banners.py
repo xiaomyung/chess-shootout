@@ -124,7 +124,7 @@ def _start_local(app):
 def test_banner_does_not_block_board_clicks():
     app = Frontend(1000, 800)
     _start_local(app)
-    app.offer_banners.push(
+    app.coordinator.offer_banners.push(
         "draw_offered", "🤝", "bob", "offers a draw", "Accept", "Decline",
         on_ok=lambda: None, on_no=lambda: None)
     app.draw_frame()
@@ -135,7 +135,7 @@ def test_banner_does_not_block_board_clicks():
 
 def test_banner_does_not_gate_menu_overlay():
     app = Frontend(1000, 800)
-    app.offer_banners.push(
+    app.coordinator.offer_banners.push(
         "draw_offered", "🤝", "bob", "offers a draw", "Accept", "Decline",
         on_ok=lambda: None, on_no=lambda: None)
     assert app._menu_overlay_active() is False

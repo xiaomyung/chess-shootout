@@ -139,7 +139,7 @@ def test_start_game_bot_mode_returns_early_without_starting():
     assert app.mode == pre_mode == "menu"
     assert app.backend.clock is None
     assert app.start_menu.is_visible() is True
-    assert app.online_client is None
+    assert app.coordinator.client is None
 
 
 def test_start_game_online_mode_starts_matchmaking_without_starting_game(monkeypatch):
@@ -154,8 +154,8 @@ def test_start_game_online_mode_starts_matchmaking_without_starting_game(monkeyp
     assert app.mode == "menu"
     assert app.backend.clock is None
     assert app.start_menu.is_visible() is False
-    assert app.online_client is not None
-    assert app.wait_modal.is_visible() is True
+    assert app.coordinator.client is not None
+    assert app.coordinator.wait_modal.is_visible() is True
     assert connected and connected[0][0] == env.get_server_addr()
 
 
@@ -303,7 +303,7 @@ def test_open_pgn_invokes_default_app(tmp_path, monkeypatch):
     app.result_flow._auto_save_pgn()
     captured = {}
     monkeypatch.setattr(
-        "chessshootout.frontend.result_flow._open_with_default_app",
+        "chessshootout.frontend.result_flow.open_with_default_app",
         lambda path: captured.setdefault("path", path) or True,
     )
     app.result_flow._on_open_pgn()
@@ -325,7 +325,7 @@ def test_open_pgn_warns_on_open_failure(tmp_path, monkeypatch):
     app.manual_result = "white_wins"
     app.result_flow._auto_save_pgn()
     monkeypatch.setattr(
-        "chessshootout.frontend.result_flow._open_with_default_app", lambda _path: False,
+        "chessshootout.frontend.result_flow.open_with_default_app", lambda _path: False,
     )
     app.result_flow._on_open_pgn()
     assert app.toast.message == "Could not open PGN"
@@ -391,8 +391,8 @@ def test_fen_start_mints_match_session_id():
 def test_online_match_session_uses_room_id():
     app = make_app()
     room = fake_uuid4(2)
-    app.online_client = _StubClient(room)
-    app._start_online_game(_online_payload())
+    app.coordinator.client = _StubClient(room)
+    app.coordinator._start_online_game(_online_payload())
     assert app._match_session_id == room
 
 
@@ -400,24 +400,24 @@ def test_online_rematch_same_room_keeps_match_session_id():
     """A rematch re-enters _start_online_game with the same room; the id is stable."""
     app = make_app()
     room = fake_uuid4(4)
-    app.online_client = _StubClient(room)
-    app._start_online_game(_online_payload())
-    app._start_online_game(_online_payload())
+    app.coordinator.client = _StubClient(room)
+    app.coordinator._start_online_game(_online_payload())
+    app.coordinator._start_online_game(_online_payload())
     assert app._match_session_id == room
 
 
 def test_online_game_start_threads_countries_to_state():
     app = make_app()
-    app.online_client = _StubClient(fake_uuid4(6))
-    app._start_online_game(_online_payload(white_country="US", black_country="RO"))
+    app.coordinator.client = _StubClient(fake_uuid4(6))
+    app.coordinator._start_online_game(_online_payload(white_country="US", black_country="RO"))
     assert app.white_country == "US"
     assert app.black_country == "RO"
 
 
 def test_online_game_start_without_countries_defaults_blank():
     app = make_app()
-    app.online_client = _StubClient(fake_uuid4(7))
-    app._start_online_game(_online_payload())
+    app.coordinator.client = _StubClient(fake_uuid4(7))
+    app.coordinator._start_online_game(_online_payload())
     assert app.white_country == ""
     assert app.black_country == ""
 

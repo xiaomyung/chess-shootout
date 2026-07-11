@@ -2,15 +2,14 @@ import logging
 
 import pygame as pg
 
-from chessshootout import paths
 from chessshootout.backend.pieces import PieceColor, opponent_of
 from chessshootout.domain.capture_summary import captured_by, material_advantage
 from chessshootout.domain.match import Match, SINGLE_SCREEN
 from chessshootout.domain.pgn.load import (
-    format_time_control, latest_pgn_in_dir, load_pgn_into_backend, parse_comment,
-    parse_time_control,
+    format_time_control, load_pgn_into_backend, parse_comment, parse_time_control,
 )
 from chessshootout.infra import env
+from chessshootout.infra.open_external import open_with_default_app
 from chessshootout.frontend.board import Board
 from chessshootout.frontend.layout import compute_layout
 from chessshootout.frontend.modals.help import HOTKEYS
@@ -44,6 +43,7 @@ class ReviewScreen(Screen):
         self._return_to = "history"
         self._skillcheck_log = []
         self._bg_cache = None
+        self._pgn_path = None
 
         self.match = Match()
         self.board = Board(window, self.match)
@@ -64,6 +64,7 @@ class ReviewScreen(Screen):
     def enter(self, **payload):
         self._return_to = payload.get("return_to", "history")
         path = payload["pgn_path"]
+        self._pgn_path = path
         text = self._read_pgn(path)
         if text is None:
             self._fail(path, "could not read file")
@@ -179,18 +180,8 @@ class ReviewScreen(Screen):
         self.app.sound_manager.play_flip()
 
     def _on_open_pgn(self):
-        self.app.directory_browser.show(
-            str(paths.get_games_dir()),
-            on_select=self._on_pgn_folder_picked,
-            on_error=self.app.toast.show,
-        )
-
-    def _on_pgn_folder_picked(self, folder):
-        path = latest_pgn_in_dir(folder)
-        if path is None:
-            self.app.toast.show("No PGN files in that folder")
-            return
-        self.app.request_nav(Nav("review", {"pgn_path": path, "return_to": self._return_to}))
+        if not open_with_default_app(self._pgn_path):
+            self.app.toast.show("Could not open PGN")
 
     def _compute_game_info(self):
         tc = format_time_control(self._time_control) or "∞"

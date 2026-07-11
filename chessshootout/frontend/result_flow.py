@@ -1,8 +1,5 @@
 import logging
 import os
-import shutil
-import subprocess
-import sys
 from datetime import datetime
 
 import pygame as pg
@@ -12,6 +9,7 @@ from chessshootout.domain.match import BOT, ONLINE
 from chessshootout.domain.result_stats import compute_result_stats
 from chessshootout.domain.pgn.generate import format_annotations, generate_pgn, RESULT_CODES
 from chessshootout.backend.pieces import PieceColor
+from chessshootout.infra.open_external import open_with_default_app
 
 
 log = logging.getLogger("chess.frontend")
@@ -37,36 +35,6 @@ RESULT_TEXT = {
     "aborted_disconnect": ("Game aborted", "opponent disconnected"),
     "server_shutdown": ("Game cancelled", "server shutting down"),
 }
-
-
-def _open_with_default_app(path):
-    if sys.platform == "darwin":
-        candidates = [["open", path]]
-    elif sys.platform.startswith("win"):
-        try:
-            os.startfile(path)
-            return True
-        except OSError:
-            return False
-    else:
-        candidates = [
-            ["xdg-open", path],
-            ["gio", "open", path],
-        ]
-    for cmd in candidates:
-        if shutil.which(cmd[0]) is None:
-            continue
-        try:
-            subprocess.Popen(
-                cmd,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                start_new_session=True,
-            )
-            return True
-        except OSError:
-            continue
-    return False
 
 
 def _score_str(score):
@@ -175,10 +143,10 @@ class ResultFlow:
             self._result_await_since_ms = None
             return
         if self.app.mode == ONLINE and screen.manual_result is None:
-            if not self.app._resyncing:
+            if not self.app.coordinator._resyncing:
                 self._promote_awaited_result(result)
             return
-        if self.app.mode == ONLINE and self.app._resyncing:
+        if self.app.mode == ONLINE and self.app.coordinator._resyncing:
             return
         if RESULT_CODES.get(result) is not None:
             self._on_result_final(result)
@@ -212,7 +180,7 @@ class ResultFlow:
         if path is None or not os.path.exists(path):
             self.app.toast.show("No saved PGN")
             return
-        if not _open_with_default_app(path):
+        if not open_with_default_app(path):
             self.app.toast.show("Could not open PGN")
 
     def _probe_games_dir_writable(self):

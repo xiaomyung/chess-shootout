@@ -38,10 +38,12 @@ OPENERS = {
         "Sure?", on_yes=lambda: None, on_no=lambda: None),
     "help_modal": lambda app: app.help_modal.show(HOTKEYS),
     "fen_input_modal": lambda app: app.fen_input_modal.show(on_submit=lambda t: True),
-    "wait_modal": lambda app: app.wait_modal.show("Blitz", "5 + 0", on_cancel=lambda: None),
-    "match_found_modal": lambda app: app.match_found_modal.show(
+    "wait_modal": lambda app: app.coordinator.wait_modal.show(
+        "Blitz", "5 + 0", on_cancel=lambda: None),
+    "match_found_modal": lambda app: app.coordinator.match_found_modal.show(
         "White", "Black", "white", on_done=lambda: None),
-    "reconnecting_modal": lambda app: app.reconnecting_modal.show(0, on_cancel=lambda: None),
+    "reconnecting_modal": lambda app: app.coordinator.reconnecting_modal.show(
+        0, on_cancel=lambda: None),
     "country_picker": lambda app: app.country_picker.show("US", lambda c: None),
     "directory_browser": lambda app: app.directory_browser.show(
         os.path.expanduser("~"), on_select=lambda p: None),
@@ -58,6 +60,13 @@ REGISTRY_PRIORITY_ORDER = [
 
 NON_DISMISSABLE = {"match_found_modal", "reconnecting_modal"}
 
+COORDINATOR_MODALS = {"wait_modal", "match_found_modal", "reconnecting_modal"}
+
+
+def _modal(app, name):
+    return getattr(app.coordinator if name in COORDINATOR_MODALS else app, name)
+
+
 ADJACENT_DISMISSABLE_PAIRS = [
     (a, b) for a, b in zip(REGISTRY_PRIORITY_ORDER, REGISTRY_PRIORITY_ORDER[1:])
     if a not in NON_DISMISSABLE and b not in NON_DISMISSABLE
@@ -67,7 +76,7 @@ ADJACENT_DISMISSABLE_PAIRS = [
 def test_registry_priority_order():
     app = _app()
     names = [
-        next(n for n in MODAL_NAMES if getattr(app, n) is spec.obj)
+        next(n for n in MODAL_NAMES if _modal(app, n) is spec.obj)
         for spec in app._modal_registry
     ]
     assert names == REGISTRY_PRIORITY_ORDER
@@ -157,7 +166,7 @@ def test_esc_dismisses_confirm_before_help_when_both_open():
 def test_show_makes_it_visible(name):
     app = _app()
     OPENERS[name](app)
-    assert getattr(app, name).is_visible() is True
+    assert _modal(app, name).is_visible() is True
 
 
 @pytest.mark.parametrize("name", MODAL_NAMES)
@@ -165,7 +174,7 @@ def test_click_inside_is_consumed_never_reaches_the_board(name):
     app = _app()
     OPENERS[name](app)
     app.board.handle_click = MagicMock()
-    spec = next(s for s in app._modal_registry if s.obj is getattr(app, name))
+    spec = next(s for s in app._modal_registry if s.obj is _modal(app, name))
     app.input_router._dispatch_left_click(spec.obj.rect.center)
     app.board.handle_click.assert_not_called()
 
@@ -174,7 +183,7 @@ def test_click_inside_is_consumed_never_reaches_the_board(name):
 def test_active_scrollable_matches_the_spec_flag(name):
     app = _app()
     OPENERS[name](app)
-    spec = next(s for s in app._modal_registry if s.obj is getattr(app, name))
+    spec = next(s for s in app._modal_registry if s.obj is _modal(app, name))
     if spec.scrollable:
         assert app.input_router._active_scrollable() is spec.obj
     else:
@@ -185,7 +194,7 @@ def test_active_scrollable_matches_the_spec_flag(name):
 def test_cancel_all_scroll_stops_an_in_progress_grab(name):
     app = _app()
     OPENERS[name](app)
-    spec = next(s for s in app._modal_registry if s.obj is getattr(app, name))
+    spec = next(s for s in app._modal_registry if s.obj is _modal(app, name))
     if not spec.scrollable:
         pytest.skip(f"{name} is not a scrollable registry entry")
     spec.obj.scroll.handle_press(spec.obj.rect.center)
@@ -199,12 +208,12 @@ def test_draw_frame_does_not_raise_with_this_modal_open(name):
     OPENERS[name](app)
     app.draw_frame()
     if name == "reconnecting_modal":
-        assert app.reconnecting_modal.is_visible() is False, (
+        assert app.coordinator.reconnecting_modal.is_visible() is False, (
             "_update_online_phase syncs it off outside an actual online "
             "reconnect (mode != ONLINE here) — a pre-existing behavior, not "
             "something the registry changed")
     else:
-        assert getattr(app, name).is_visible() is True
+        assert _modal(app, name).is_visible() is True
 
 
 @pytest.mark.parametrize("top_name, under_name", ADJACENT_DISMISSABLE_PAIRS)
@@ -212,13 +221,13 @@ def test_esc_dismisses_only_the_topmost_of_two_stacked(top_name, under_name):
     app = _app()
     OPENERS[under_name](app)
     OPENERS[top_name](app)
-    assert getattr(app, top_name).is_visible() is True
-    assert getattr(app, under_name).is_visible() is True
+    assert _modal(app, top_name).is_visible() is True
+    assert _modal(app, under_name).is_visible() is True
 
     app.input_router._handle_escape()
 
-    assert getattr(app, top_name).is_visible() is False
-    assert getattr(app, under_name).is_visible() is True
+    assert _modal(app, top_name).is_visible() is False
+    assert _modal(app, under_name).is_visible() is True
 
 
 @pytest.mark.parametrize("name", sorted(NON_DISMISSABLE))
@@ -226,4 +235,4 @@ def test_esc_does_not_dismiss_non_dismissable_modals(name):
     app = _app()
     OPENERS[name](app)
     app.input_router._handle_escape()
-    assert getattr(app, name).is_visible() is True
+    assert _modal(app, name).is_visible() is True

@@ -17,6 +17,12 @@ from tests.frontend.focus_helpers import make_app, start_game, install_clock, Fa
 BOARD_MODALS = ("confirm_modal", "help_modal", "wait_modal",
                 "fen_input_modal", "match_found_modal", "reconnecting_modal")
 
+COORDINATOR_MODALS = ("wait_modal", "match_found_modal", "reconnecting_modal")
+
+
+def _modal(app, name):
+    return getattr(app.coordinator if name in COORDINATOR_MODALS else app, name)
+
 
 _pg = pygame_display(1000, 800)
 
@@ -31,7 +37,7 @@ def test_board_modals_center_on_focus_board():
         assert app.focus_mode
         bc = app.board.rect.center
         for name in BOARD_MODALS:
-            modal = getattr(app, name)
+            modal = _modal(app, name)
             assert abs(modal.rect.centerx - bc[0]) <= 2, name
             assert abs(modal.rect.centery - bc[1]) <= 2, name
         assert abs(app.result_menu.rect.centerx - bc[0]) <= 2

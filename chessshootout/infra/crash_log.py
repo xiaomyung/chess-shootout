@@ -53,7 +53,8 @@ def gather_state(frontend):
         state["move_history_len"] = len(history) if history is not None else None
     else:
         state["move_history_len"] = None
-    online_client = getattr(frontend, "online_client", None)
+    coordinator = getattr(frontend, "coordinator", None)
+    online_client = getattr(coordinator, "client", None) if coordinator is not None else None
     state["online_state"] = (
         getattr(online_client, "state", None) if online_client is not None else None
     )

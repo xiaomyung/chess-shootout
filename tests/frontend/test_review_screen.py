@@ -279,3 +279,27 @@ def test_game_help_shows_the_full_list():
     app.input_router._handle_shortcut_key(_key(pg.K_SLASH, unicode="?"))
     assert app.help_modal.is_visible() is True
     assert app.help_modal.rows == HOTKEYS
+
+
+def test_open_pgn_button_opens_the_loaded_file(tmp_path, monkeypatch):
+    path = _write_pgn(tmp_path, "test.pgn")
+    app = make_app()
+    _enter_review(app, path)
+    captured = {}
+    monkeypatch.setattr(
+        "chessshootout.frontend.screens.review.open_with_default_app",
+        lambda p: captured.setdefault("path", p) or True,
+    )
+    app.review._on_open_pgn()
+    assert captured["path"] == str(path)
+
+
+def test_open_pgn_button_toasts_on_failure(tmp_path, monkeypatch):
+    path = _write_pgn(tmp_path, "test.pgn")
+    app = make_app()
+    _enter_review(app, path)
+    monkeypatch.setattr(
+        "chessshootout.frontend.screens.review.open_with_default_app", lambda p: False,
+    )
+    app.review._on_open_pgn()
+    assert app.toast.message == "Could not open PGN"

@@ -73,7 +73,7 @@ def test_online_result_defers_first_seen_until_board_settles():
     app.mode = "online"
     app.white_name, app.black_name = "alice", "bob"
     app.board.effects.captures = [object()]
-    app._handle_online_result({"reason": "checkmate", "winner_color": "white"})
+    app.coordinator._handle_online_result({"reason": "checkmate", "winner_color": "white"})
     assert app.manual_result == "white_wins"
     assert app._result_first_seen_at_ms is None
     app.result_flow._update_result_pending()

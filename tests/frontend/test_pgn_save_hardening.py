@@ -98,8 +98,8 @@ def _online_app(tmp_path, monkeypatch, your_color="white"):
     monkeypatch.setenv("CHESS_DATA_DIR", str(tmp_path))
     app = Frontend(1000, 800)
     app.sound_manager = MagicMock()
-    app.online_client = FakeOnlineClient()
-    app._start_online_game({
+    app.coordinator.client = FakeOnlineClient()
+    app.coordinator._start_online_game({
         "white_name": "alice", "black_name": "bob", "your_color": your_color,
         "time_minutes": 5, "increment_seconds": 0,
         "white_country": "", "black_country": "",
@@ -321,7 +321,7 @@ def test_esc_during_result_confirm_window_saves_via_handle_escape(tmp_path, monk
 def test_tear_down_online_session_saves_a_midgame_partial(tmp_path, monkeypatch):
     app = _online_app(tmp_path, monkeypatch)
     _e4(app)
-    app._tear_down_online_session()
+    app.coordinator._tear_down_online_session()
     files = _pgn_files(tmp_path)
     assert len(files) == 1
     assert '[Result "*"]' in files[0].read_text(encoding="utf-8")
@@ -329,14 +329,14 @@ def test_tear_down_online_session_saves_a_midgame_partial(tmp_path, monkeypatch)
 
 def test_tear_down_online_session_is_a_no_op_on_empty_history(tmp_path, monkeypatch):
     app = _online_app(tmp_path, monkeypatch)
-    app._tear_down_online_session()
+    app.coordinator._tear_down_online_session()
     assert _pgn_files(tmp_path) == []
 
 
 def test_result_drained_and_saved_within_a_single_draw_frame_call(tmp_path, monkeypatch):
     app = _online_app(tmp_path, monkeypatch)
     _e4(app)
-    app.online_client.queue(Event("result", {
+    app.coordinator.client.queue(Event("result", {
         "reason": "resignation", "winner_color": "white"}))
     app.draw_frame()
     assert app.manual_result == "white_wins_by_resignation"
@@ -353,7 +353,7 @@ def test_drain_reorder_skillcheck_required_still_opens_the_overlay_same_frame(
         sq(4, 3): piece(Q, WHITE), sq(3, 3): piece(P, BLACK),
     }, turn=WHITE)
     frm, to = sq(4, 3), sq(3, 3)
-    app.online_client.queue(Event("skill_check_required", {
+    app.coordinator.client.queue(Event("skill_check_required", {
         "kind": "wheel", "seed": "s1", "value_diff": 8, "deadline_ms": 5000.0,
         "elapsed_ms": 0.0, "miss_count": 0,
         "from": coord_from_square(frm), "to": coord_from_square(to),
@@ -365,9 +365,9 @@ def test_drain_reorder_skillcheck_required_still_opens_the_overlay_same_frame(
 
 def test_drain_reorder_offer_banner_still_shows_the_same_frame(tmp_path, monkeypatch):
     app = _online_app(tmp_path, monkeypatch)
-    app.online_client.queue(Event("draw_offered", {}))
+    app.coordinator.client.queue(Event("draw_offered", {}))
     app.draw_frame()
-    assert not app.offer_banners.is_empty()
+    assert not app.coordinator.offer_banners.is_empty()
 
 
 class _FrozenDatetime(datetime):
@@ -423,7 +423,7 @@ def test_local_draw_agreement_saves_immediately_without_a_follow_up_frame(tmp_pa
 def test_online_stalemate_keeps_its_own_reason_not_agreement(tmp_path, monkeypatch):
     app = _online_app(tmp_path, monkeypatch)
     _e4(app)
-    app._handle_online_result({"reason": "draw_stalemate"})
+    app.coordinator._handle_online_result({"reason": "draw_stalemate"})
     assert app.manual_result == "draw_stalemate"
     assert app.result_text() == ("Draw", "by stalemate")
     files = _pgn_files(tmp_path)
