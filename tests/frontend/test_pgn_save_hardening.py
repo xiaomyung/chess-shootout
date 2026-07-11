@@ -318,17 +318,6 @@ def test_esc_during_result_confirm_window_saves_via_handle_escape(tmp_path, monk
     assert '[Result "1-0"]' in files[0].read_text(encoding="utf-8")
 
 
-def test_pgn_review_back_to_menu_does_not_resave_the_reviewed_game(tmp_path, monkeypatch):
-    """A loaded PGN under review can carry a terminal position; leaving review
-    must not spawn a fresh autosave file for it."""
-    app = _local_app(tmp_path, monkeypatch)
-    _capture_mate_board(app)
-    app.match.try_move(sq(7, 6), sq(1, 6))
-    app.pgn_review = True
-    app._on_back_to_menu()
-    assert _pgn_files(tmp_path) == []
-
-
 def test_tear_down_online_session_saves_a_midgame_partial(tmp_path, monkeypatch):
     app = _online_app(tmp_path, monkeypatch)
     _e4(app)
@@ -481,13 +470,3 @@ def test_incremental_autosave_skips_when_result_already_showing(tmp_path, monkey
     app.manual_result = "white_wins_by_resignation"
     app.result_flow._update_incremental_autosave()
     assert _pgn_files(tmp_path) == [], "a finished game is the finalize path's job, not this one"
-
-
-def test_incremental_autosave_skips_in_pgn_review(tmp_path, monkeypatch):
-    app = _local_app(tmp_path, monkeypatch)
-    _e4(app)
-    app.pgn_review = True
-    now = [4_000_000]
-    monkeypatch.setattr(pg.time, "get_ticks", lambda: now[0])
-    app.result_flow._update_incremental_autosave()
-    assert _pgn_files(tmp_path) == []

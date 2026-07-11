@@ -170,7 +170,7 @@ class ResultFlow:
         screen = self.screen
         self._update_incremental_autosave()
         result = self.app.current_result()
-        if result is None or screen.pgn_review:
+        if result is None:
             screen._result_first_seen_at_ms = None
             self._result_await_since_ms = None
             return
@@ -329,7 +329,7 @@ class ResultFlow:
 
     def _update_incremental_autosave(self):
         screen = self.screen
-        if (self.app.mode == "menu" or screen.pgn_review or self._save_failed
+        if (self.app.mode == "menu" or self._save_failed
                 or self.app.current_result() is not None):
             return
         ply_count = len(screen.match.move_history)

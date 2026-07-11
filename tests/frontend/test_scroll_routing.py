@@ -10,6 +10,7 @@ from tests.conftest import pygame_display
 from chessshootout.backend.pieces import Piece, PieceType, PieceColor
 from chessshootout.backend.utils import Square, Move, HistoryEntry
 from chessshootout.frontend.frontend import Frontend
+from chessshootout.frontend.modals.help import HOTKEYS
 
 
 _pygame_init = pygame_display(1000, 800)
@@ -45,7 +46,7 @@ def test_active_scrollable_menu_then_game():
 
 def test_active_scrollable_prefers_visible_modal():
     app = _game_app()
-    app.help_modal.show()
+    app.help_modal.show(HOTKEYS)
     assert app.input_router._active_scrollable() is app.help_modal
     app.help_modal.hide()
     app.country_picker.show("US", lambda c: None)

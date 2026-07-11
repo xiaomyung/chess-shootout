@@ -60,7 +60,7 @@ class GiveTimeHold:
         if not self._give_time_holding:
             return
         clock = screen.match.clock
-        if (screen.pgn_review or screen.current_result() is not None
+        if (screen.current_result() is not None
                 or self.app._resyncing or screen.skillcheck_overlay.is_active()
                 or self.app._menu_overlay_active()
                 or clock is None or clock.flagged is not None):

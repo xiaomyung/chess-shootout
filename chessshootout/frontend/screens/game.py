@@ -18,7 +18,6 @@ from chessshootout.frontend.panels.right import (
     RightMenu,
     BUTTONS as RIGHT_MENU_BUTTONS,
     UNTIMED_BUTTONS as RIGHT_MENU_UNTIMED_BUTTONS,
-    REVIEW_BUTTONS as RIGHT_MENU_REVIEW_BUTTONS,
 )
 from chessshootout.frontend.panels.player_strip import PlayerStrip
 from chessshootout.frontend.modals.result import ResultMenu
@@ -96,12 +95,10 @@ class GameScreen(Screen):
         self.black_country = ""
         self._chosen_side = "white"
         self._time_control = None
-        self.pgn_review = False
         self._flag_fall_played = False
         self._game_bg_cache = None
         self._strip_memo = {}
         self._result_first_seen_at_ms = None
-        self._pgn_result_tag = None
         self._match_session_id = None
         self._last_turn_for_flip = None
         self._first_move_deadline_ms = None
@@ -310,7 +307,7 @@ class GameScreen(Screen):
             self.board.draw_drag_overlay()
             self.result_flow._update_result_pending()
             if not app.match_found_modal.is_visible():
-                show_modal = self._result_modal_should_show() and not self.pgn_review
+                show_modal = self._result_modal_should_show()
                 if not show_modal and self.board.effects.has_takeover():
                     self.board.effects.draw_takeover(self.window, now)
                 else:
@@ -333,7 +330,7 @@ class GameScreen(Screen):
         return self.app.mode != "menu" and self.app.current_result() is None
 
     def board_interactive(self):
-        return not self.pgn_review and self.app.current_result() is None
+        return self.app.current_result() is None
 
     def _draw_game_scene(self, *, show_panel, show_strips, arrow_hook=None, after_board=None):
         self.skillcheck_session._sync_aim_check_gun()
@@ -374,9 +371,6 @@ class GameScreen(Screen):
             return None
         tc = format_time_control(self._time_control) or "∞"
         rnd = self._current_round()
-        if self.pgn_review:
-            return {"mode": "Review", "time_control": tc, "round": rnd,
-                    "lines": [self._pgn_result_tag or "*"]}
         pill = "Bot" if self.app.mode == BOT else VARIANT_PILL_LABELS.get(self.variant, "Local")
         info = {"mode": pill, "time_control": tc, "round": rnd, "lines": []}
         if self.variant == "online":
@@ -461,7 +455,7 @@ class GameScreen(Screen):
         return self.app.mode != ONLINE or self.match.local_color == winner
 
     def _on_flip(self):
-        if self.app.current_result() is not None and not self.pgn_review:
+        if self.app.current_result() is not None:
             return
         self.board.cancel_drag_physics()
         self.board.flipped = not self.board.flipped
@@ -685,15 +679,11 @@ class GameScreen(Screen):
         return label, remaining
 
     def _right_menu_buttons(self):
-        if self.pgn_review:
-            return RIGHT_MENU_REVIEW_BUTTONS
         if self.match.clock is None:
             return RIGHT_MENU_UNTIMED_BUTTONS
         return RIGHT_MENU_BUTTONS
 
     def _right_menu_disabled_keys(self):
-        if self.pgn_review:
-            return set()
         if self.app.current_result() is not None:
             return {"undo", "resign", "draw", "flip", "give_time"}
         disabled = set()
@@ -711,9 +701,6 @@ class GameScreen(Screen):
     def _reset_to_new_game(self):
         app = self.app
         self._force_focus_off_instant()
-        self.pgn_review = False
-        self.board.read_only = False
-        app._review_return_page = None
         app.offer_banners.clear()
         app._rematch_offered = False
         self.result_menu.reset()
@@ -725,7 +712,6 @@ class GameScreen(Screen):
         self.result_flow._result_cache = None
         self._strip_memo = {}
         self._result_first_seen_at_ms = None
-        self._pgn_result_tag = None
         self.result_flow._last_saved_pgn_path = None
         self.result_flow._last_saved_result_tag = None
         self.result_flow._result_await_since_ms = None

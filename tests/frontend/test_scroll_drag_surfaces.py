@@ -13,7 +13,7 @@ from chessshootout.backend.pieces import Piece, PieceType, PieceColor
 from chessshootout.backend.utils import Square, Move, HistoryEntry
 from chessshootout.frontend.modals.country_picker import CountryPicker
 from chessshootout.frontend.modals.directory_browser import DirectoryBrowser
-from chessshootout.frontend.modals.help import HelpModal
+from chessshootout.frontend.modals.help import HelpModal, HOTKEYS
 from chessshootout.frontend.modals.options import OptionsModal, ToggleRow
 from chessshootout.frontend.panels.right import RightMenu
 
@@ -97,7 +97,7 @@ def test_directory_tap_is_not_a_drag():
 def _help():
     hm = HelpModal(pg.display.get_surface())
     hm.set_rect(pg.Rect(0, 0, 320, 280))
-    hm.show()
+    hm.show(HOTKEYS)
     hm.draw()
     return hm
 

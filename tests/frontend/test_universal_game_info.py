@@ -353,34 +353,6 @@ def test_engine_result_subtitle_reports_actual_reason(engine_result, expected):
     assert app.result_text() == expected
 
 
-@pytest.mark.parametrize(
-    "result_tag, shown",
-    [
-        pytest.param("1-0", "1-0", id="result_tag"),
-        pytest.param(None, "*", id="star_fallback"),
-    ],
-)
-def test_pgn_review_info(result_tag, shown):
-    """PGN review shows a Review pill + TC and surfaces the result tag (or "*"
-    fallback) as the single extra line."""
-    app = _make_app()
-    _start_local(app)
-    app._pgn_result_tag = result_tag
-    app.pgn_review = True
-    assert app._compute_game_info() == {
-        "mode": "Review", "time_control": "5+2", "round": 1, "lines": [shown],
-    }
-
-
-def test_pgn_review_inline_result_suppresses_modal():
-    app = _make_app()
-    _start_local(app)
-    app.manual_result = "white_wins"
-    app.pgn_review = True
-    app.result_flow._update_result_pending()
-    assert app._result_first_seen_at_ms is None
-
-
 def test_menu_mode_returns_no_info():
     app = _make_app()
     assert app.mode == "menu"

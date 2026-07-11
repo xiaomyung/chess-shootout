@@ -14,6 +14,7 @@ import pygame as pg
 import pytest
 
 from tests.conftest import pygame_display
+from chessshootout.frontend.modals.help import HOTKEYS
 from tests.helpers import make_app, start_single_screen
 
 
@@ -35,7 +36,7 @@ def _start_game(app):
 OPENERS = {
     "confirm_modal": lambda app: app.confirm_modal.show(
         "Sure?", on_yes=lambda: None, on_no=lambda: None),
-    "help_modal": lambda app: app.help_modal.show(),
+    "help_modal": lambda app: app.help_modal.show(HOTKEYS),
     "fen_input_modal": lambda app: app.fen_input_modal.show(on_submit=lambda t: True),
     "wait_modal": lambda app: app.wait_modal.show("Blitz", "5 + 0", on_cancel=lambda: None),
     "match_found_modal": lambda app: app.match_found_modal.show(
@@ -125,7 +126,7 @@ def test_confirm_over_help_receives_the_click_help_stays_open_behind():
     even though confirm draws on top of them. A click on confirm's own button
     must land, and help (still open behind) must be untouched."""
     app = _start_game(_app())
-    app.help_modal.show()
+    app.help_modal.show(HOTKEYS)
     app._on_resign()
     assert app.confirm_modal.is_visible() is True
     assert app.help_modal.is_visible() is True
@@ -141,7 +142,7 @@ def test_confirm_over_help_receives_the_click_help_stays_open_behind():
 
 def test_esc_dismisses_confirm_before_help_when_both_open():
     app = _start_game(_app())
-    app.help_modal.show()
+    app.help_modal.show(HOTKEYS)
     app._on_resign()
     assert app.confirm_modal.is_visible() is True
     assert app.help_modal.is_visible() is True

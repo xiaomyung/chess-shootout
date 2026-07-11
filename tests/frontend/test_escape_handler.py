@@ -2,13 +2,14 @@
 immediately. Priority: an active skill-check swallows it; any open modal closes
 (the quit/resign confirm, help, fen, country, directory, options, offer banners,
 search); on the main-menu card it raises a 'Quit the game?' prompt; a menu
-sub-page or review or a finished game returns to the main menu; a live game
+sub-page or a finished game returns to the main menu; a live game
 opens the resign prompt.
 """
 
 import pygame as pg
 
 from tests.conftest import pygame_display
+from chessshootout.frontend.modals.help import HOTKEYS
 from chessshootout.frontend.skillcheck.wheel_view import WheelController
 from chessshootout.skillcheck.wheel import WheelChallenge
 from tests.helpers import make_app, start_single_screen
@@ -96,16 +97,9 @@ def test_finished_game_escape_returns_to_menu():
     assert app.mode == "menu"
 
 
-def test_review_escape_returns_to_menu():
-    app = _start_game(_app())
-    app.pgn_review = True
-    app.input_router._handle_escape()
-    assert app.mode == "menu"
-
-
 def test_help_modal_escape_closes_modal_not_resign():
     app = _start_game(_app())
-    app.help_modal.show()
+    app.help_modal.show(HOTKEYS)
     app.input_router._handle_escape()
     assert app.help_modal.is_visible() is False
     assert app.confirm_modal.is_visible() is False

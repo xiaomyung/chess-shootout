@@ -6,6 +6,7 @@ import pygame as pg
 
 from tests.conftest import pygame_display
 from chessshootout.frontend.focus.arrow import FocusArrow
+from chessshootout.frontend.modals.help import HOTKEYS
 from tests.frontend.focus_helpers import (
     FakeTicks, make_app, start_game, install_clock, finish_transition, collapse,
 )
@@ -41,14 +42,6 @@ def test_h_toggles_focus(monkeypatch):
     assert app.focus_mode is False
 
 
-def test_h_does_nothing_in_review():
-    app = start_game(make_app())
-    app.pgn_review = True
-    app.input_router._handle_shortcut_key(_key(pg.K_h))
-    assert app.focus_transition is None
-    assert app.focus_mode is False
-
-
 def test_escape_exits_focus_before_resign(monkeypatch):
     app = start_game(make_app())
     clock = FakeTicks()
@@ -65,7 +58,7 @@ def test_escape_closes_modal_before_focus(monkeypatch):
     clock = FakeTicks()
     install_clock(monkeypatch, clock)
     collapse(app, clock)
-    app.help_modal.show()
+    app.help_modal.show(HOTKEYS)
     app.input_router._handle_escape()
     assert app.help_modal.is_visible() is False
     assert app.focus_mode is True

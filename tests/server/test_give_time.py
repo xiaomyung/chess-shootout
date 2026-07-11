@@ -175,16 +175,14 @@ def test_hold_cancelled_on_new_game():
     assert not app.give_time._give_time_holding
 
 
-@pytest.mark.parametrize("abort", ["review", "resync", "skillcheck", "result"])
+@pytest.mark.parametrize("abort", ["resync", "skillcheck", "result"])
 def test_hold_cancelled_on_abort_state(monkeypatch, abort):
     app = _make_app()
     _start_local(app)
     app.match.clock.white_remaining = 100.0
     app.give_time._on_give_time()
     assert app.give_time._give_time_holding
-    if abort == "review":
-        app.pgn_review = True
-    elif abort == "resync":
+    if abort == "resync":
         app._resyncing = True
     elif abort == "skillcheck":
         monkeypatch.setattr(app.skillcheck_overlay, "is_active", lambda: True)

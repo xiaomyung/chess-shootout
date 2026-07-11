@@ -1,4 +1,3 @@
-import glob
 import logging
 import os
 import random
@@ -24,7 +23,7 @@ from chessshootout.frontend.modals.country_picker import CountryPicker
 from chessshootout.frontend.modals.fen_input import FenInputModal
 from chessshootout.frontend.modals.options import OptionsModal
 from chessshootout.frontend.settings import SettingsController
-from chessshootout.frontend.modals.help import HelpModal
+from chessshootout.frontend.modals.help import HelpModal, HOTKEYS
 from chessshootout.frontend.modals.reconnecting import ReconnectingModal
 from chessshootout.frontend.visual.toast import Toast
 from chessshootout.frontend.visual import cache
@@ -34,6 +33,7 @@ from chessshootout.frontend.screens.base import Nav, assert_plain_payload
 from chessshootout.frontend.screens.menu import MenuScreen
 from chessshootout.frontend.screens.game import GameScreen
 from chessshootout.frontend.screens.history import HistoryScreen
+from chessshootout.frontend.screens.review import ReviewScreen
 from chessshootout.frontend.window_chrome import (
     WindowChrome, WINDOW_FLAGS, WINDOW_TITLE, MIN_WINDOW_WIDTH, MIN_WINDOW_HEIGHT,
 )
@@ -47,7 +47,7 @@ from chessshootout.frontend.modals.match_found import MatchFoundModal
 from chessshootout.frontend.online.banners import OfferBanners
 from chessshootout.frontend.audio.sound_manager import SoundManager
 from chessshootout.frontend.modals.start import StartMenu
-from chessshootout.domain.pgn.load import load_pgn_into_backend, parse_time_control
+from chessshootout.domain.pgn.load import latest_pgn_in_dir
 from chessshootout.paths import SOUNDS_DIR
 from chessshootout.server.protocol import FIRST_MOVE_ABORT_SECONDS, GRACE_SECONDS
 
@@ -102,7 +102,6 @@ class Frontend(OnlineEventsMixin):
         self._resyncing = False
         self._resync_started_at_ms = 0
         self._last_heartbeat_sent_ms = 0
-        self._review_return_page = None
         self._prev_screen_used_backdrop = False
         self._focus_prev_mode = "menu"
 
@@ -119,7 +118,7 @@ class Frontend(OnlineEventsMixin):
         })
         self.audio_panel = AudioPanel(self.window, self.sound_manager)
         self.confirm_modal = ConfirmModal(self.window)
-        self.history_view = HistoryView(self.window, on_open=self._load_pgn_from_path,
+        self.history_view = HistoryView(self.window, on_open=self._open_pgn_review,
                                         on_back=self._on_menu_back)
         self.help_modal = HelpModal(self.window)
         self.fen_input_modal = FenInputModal(self.window)
@@ -159,14 +158,17 @@ class Frontend(OnlineEventsMixin):
         self.menu = MenuScreen(self)
         self.game = GameScreen(self)
         self.history = HistoryScreen(self)
+        self.review = ReviewScreen(self)
         self.screens = {
             "menu": self.menu,
             "game": self.game,
             "history": self.history,
+            "review": self.review,
         }
         self.screen = self.screens["menu"]
 
         self.game.board.load_assets()
+        self.review.board.load_assets()
         self._compute_layout()
         self._refresh_load_pgn_availability()
         self._settle_window()
@@ -320,14 +322,6 @@ class Frontend(OnlineEventsMixin):
         self.game._time_control = value
 
     @property
-    def pgn_review(self):
-        return self.game.pgn_review
-
-    @pgn_review.setter
-    def pgn_review(self, value):
-        self.game.pgn_review = value
-
-    @property
     def manual_result(self):
         return self.game.manual_result
 
@@ -350,14 +344,6 @@ class Frontend(OnlineEventsMixin):
     @_result_first_seen_at_ms.setter
     def _result_first_seen_at_ms(self, value):
         self.game._result_first_seen_at_ms = value
-
-    @property
-    def _pgn_result_tag(self):
-        return self.game._pgn_result_tag
-
-    @_pgn_result_tag.setter
-    def _pgn_result_tag(self, value):
-        self.game._pgn_result_tag = value
 
     @property
     def _match_session_id(self):
@@ -532,24 +518,10 @@ class Frontend(OnlineEventsMixin):
     def backend(self):
         return self.match.backend
 
-    def phase(self):
-        if self.wait_modal.is_visible():
-            return "searching"
-        if self.match_found_modal.is_visible():
-            return "match_found"
-        if self.mode == "menu":
-            return "menu"
-        if self.pgn_review or self.board.read_only:
-            return "review"
-        if self.current_result() is not None:
-            return "finished"
-        return "playing"
-
     def _on_back_to_menu(self):
-        if not self.pgn_review:
-            pending_result = self.current_result()
-            if pending_result is not None:
-                self.result_flow._finalize_result(pending_result)
+        pending_result = self.current_result()
+        if pending_result is not None:
+            self.result_flow._finalize_result(pending_result)
         keep_online = (self.mode == ONLINE and self.online_client is not None
                        and self.current_result() is not None)
         had_rematch_offer = self._rematch_offered
@@ -571,18 +543,14 @@ class Frontend(OnlineEventsMixin):
         self._opp_disconnected_at_ms = None
         self._local_disconnected_at_ms = None
         self._prev_online_state = None
-        return_screen = self._review_return_page or "menu"
-        self._review_return_page = None
         self._reset_to_new_game()
         self._refresh_load_pgn_availability()
         self.start_menu.show()
-        if return_screen == "history":
-            self._on_open_history()
         if keep_online and had_rematch_offer:
             self._reshow_rematch_banner()
 
     def _on_help(self):
-        self.help_modal.show()
+        self.help_modal.show(HOTKEYS)
 
     def _session_id_for_online(self):
         if self.online_client is not None and self.online_client.room_id:
@@ -593,15 +561,12 @@ class Frontend(OnlineEventsMixin):
         self.start_menu.load_pgn_available = self._latest_pgn_path() is not None
 
     def _latest_pgn_path(self):
-        files = glob.glob(os.path.join(_games_dir(), "*.pgn"))
-        if not files:
-            return None
-        return max(files, key=os.path.getmtime)
+        return latest_pgn_in_dir(_games_dir())
 
     def _on_open_history(self):
         self.history_view.show(
             _games_dir(), "*.pgn",
-            on_open=self._load_pgn_from_path,
+            on_open=self._open_pgn_review,
             nickname=env.get_nickname(),
         )
         self.request_nav(Nav("history"))
@@ -626,33 +591,8 @@ class Frontend(OnlineEventsMixin):
         self.start_menu.hide()
         return True
 
-    def _load_pgn_from_path(self, path):
-        log.info("pgn load path=%s", path)
-        with open(path, encoding="utf-8") as f:
-            text = f.read()
-        self.switch_to("game", mode=SINGLE_SCREEN)
-        self._drop_post_game_online_session()
-        self._time_control = None
-        self._reset_to_new_game()
-        parsed, ok = load_pgn_into_backend(self.match, text)
-        if not ok:
-            log.warning("pgn load failed path=%s", path)
-            self.switch_to("history")
-            self.toast.show("Could not load PGN")
-            return
-        self.skillcheck_session._rebuild_skillcheck_log(parsed.move_comments)
-        self._pgn_result_tag = parsed.result
-        self.white_name = parsed.headers.get("White", "Player 1")
-        self.black_name = parsed.headers.get("Black", "Player 2")
-        self.white_country = ""
-        self.black_country = ""
-        self._time_control = parse_time_control(parsed.headers.get("TimeControl", "-"))
-        if self.match.move_history:
-            self.board.review_ply = 0
-        self.pgn_review = True
-        self.board.read_only = True
-        self._review_return_page = "history"
-        self.start_menu.hide()
+    def _open_pgn_review(self, path):
+        self.request_nav(Nav("review", {"pgn_path": str(path), "return_to": "history"}))
 
     def _on_start_game(self, config):
         env.set_last_mode(config["mode"])
@@ -888,7 +828,7 @@ class Frontend(OnlineEventsMixin):
             self._last_work_ms = (
                 work_before_present + time.perf_counter() - present_start) * 1000.0
 
-        if not self.pgn_review and self.current_result() is not None:
+        if self.current_result() is not None:
             self.result_flow._auto_save_pgn()
         self.settings._flush_deferred_env_writes(force=True)
         self.chrome.shutdown()

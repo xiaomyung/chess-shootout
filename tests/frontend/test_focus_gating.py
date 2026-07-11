@@ -1,4 +1,4 @@
-"""_toggle_focus(True) is a no-op unless focus is available: not in menu / review /
+"""_toggle_focus(True) is a no-op unless focus is available: not in menu /
 finished game / active skill-check (passive spectate included) / pending promotion /
 blocking modal / active drag."""
 
@@ -6,6 +6,7 @@ import pygame as pg
 
 from tests.conftest import pygame_display
 from chessshootout.backend.utils import Square
+from chessshootout.frontend.modals.help import HOTKEYS
 from chessshootout.frontend.skillcheck.wheel_view import WheelController
 from chessshootout.skillcheck.wheel import WheelChallenge
 from tests.frontend.focus_helpers import make_app, start_game
@@ -27,13 +28,6 @@ def test_available_in_live_game():
 
 def test_blocked_in_menu():
     app = make_app()
-    _assert_blocked(app)
-
-
-def test_blocked_in_review():
-    app = start_game(make_app())
-    app.pgn_review = True
-    assert app._focus_available() is False
     _assert_blocked(app)
 
 
@@ -69,7 +63,7 @@ def test_blocked_with_pending_promotion():
 
 def test_blocked_with_blocking_modal():
     app = start_game(make_app())
-    app.help_modal.show()
+    app.help_modal.show(HOTKEYS)
     _assert_blocked(app)
 
 

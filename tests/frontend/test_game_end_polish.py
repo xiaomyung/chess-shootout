@@ -265,14 +265,6 @@ def test_right_menu_buttons_active_during_normal_play():
     assert app._right_menu_disabled_keys() == {"give_time"}
 
 
-def test_right_menu_buttons_active_in_pgn_review():
-    """Review renders REVIEW_BUTTONS, so nothing extra is disabled."""
-    app = _make_app()
-    app.manual_result = "white_wins"
-    app.pgn_review = True
-    assert app._right_menu_disabled_keys() == set()
-
-
 def test_undo_no_op_after_result():
     app = _make_app()
     app.board.handle_click(Square(6, 4))
@@ -290,12 +282,3 @@ def test_flip_no_op_after_result():
     app.manual_result = "white_wins"
     app._on_flip()
     assert app.board.flipped == flipped_before
-
-
-def test_flip_works_in_pgn_review_even_with_result():
-    app = _make_app()
-    app.manual_result = "white_wins"
-    app.pgn_review = True
-    flipped_before = app.board.flipped
-    app._on_flip()
-    assert app.board.flipped != flipped_before

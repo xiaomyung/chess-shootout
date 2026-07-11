@@ -3,7 +3,6 @@ import logging
 import pygame as pg
 
 from chessshootout.domain.match import ONLINE
-from chessshootout.domain.pgn.load import parse_comment
 from chessshootout.backend.pieces import PIECE_VALUES, PieceType
 from chessshootout.backend.utils import PROMO_LETTER_BY_TYPE, Square, coord_from_square
 from chessshootout.frontend.skillcheck.registry import build_controller
@@ -242,13 +241,6 @@ class SkillcheckSession:
         self._skillcheck_log = [
             SkillCheckOutcome(e["ply"], e["kind"], e["won"], e.get("san", ""))
             for e in wire]
-
-    def _rebuild_skillcheck_log(self, move_comments):
-        self._skillcheck_log = []
-        for index, comment in enumerate(move_comments):
-            for kind, won, san in parse_comment(comment):
-                self._skillcheck_log.append(
-                    SkillCheckOutcome(index + 1, kind, won, san))
 
     def _skillcheck_whiffs(self):
         whiffs = {}

@@ -46,7 +46,7 @@ def test_any_key_closes_help():
     """The modal registry (not _handle_shortcut_key) owns this now: help.handle_key
     hides unconditionally, and check_events reaches it before _handle_shortcut_key."""
     app = _make_app()
-    app.help_modal.show()
+    app.help_modal.show(HOTKEYS)
     pg.event.post(_key_event(pg.K_a))
     app.input_router.check_events()
     assert app.help_modal.is_visible() is False
@@ -54,7 +54,7 @@ def test_any_key_closes_help():
 
 def test_help_modal_close_button_hides_it():
     app = _make_app()
-    app.help_modal.show()
+    app.help_modal.show(HOTKEYS)
     app.help_modal.draw()
     close_rect = app.help_modal.button_rects.get("close")
     assert close_rect is not None
@@ -171,7 +171,7 @@ def test_review_row_uses_real_arrow_glyphs():
     assert any("←" in key and "→" in key for key, _ in HOTKEYS)
     modal = HelpModal(pg.display.get_surface())
     modal.set_rect(pg.Rect(200, 150, 420, 420))
-    modal.show()
+    modal.show(HOTKEYS)
     modal.draw()
     tofu = pg.image.tobytes(
         modal.key_font.render(chr(0xE000), True, (255, 255, 255)), "RGBA")

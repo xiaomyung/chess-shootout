@@ -21,7 +21,7 @@ UNTIMED_BUTTONS = [
 ]
 
 REVIEW_BUTTONS = [
-    [("Menu", "menu"), ("Flip", "flip"), ("?", "help")],
+    [("Menu", "menu"), ("Flip", "flip"), ("Open PGN", "open_pgn")],
 ]
 
 INFO_HEADER_PAD = 12

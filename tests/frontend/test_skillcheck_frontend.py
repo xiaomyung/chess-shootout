@@ -1681,8 +1681,9 @@ def test_loading_a_pgn_with_a_miss_populates_review_whiffs(tmp_path):
     path = tmp_path / "g.pgn"
     path.write_text(text, encoding="utf-8")
     app2 = Frontend(1100, 800)
-    app2._load_pgn_from_path(str(path))
-    assert app2.skillcheck_session._skillcheck_whiffs() == {5: [("Steady-Aim", "Bxc6")]}
+    app2._open_pgn_review(str(path))
+    app2._execute_pending_nav()
+    assert app2.review._skillcheck_whiffs() == {5: [("Steady-Aim", "Bxc6")]}
 
 
 def test_two_event_ply_round_trips_through_the_saved_pgn_file(tmp_path):
@@ -1704,8 +1705,9 @@ def test_two_event_ply_round_trips_through_the_saved_pgn_file(tmp_path):
     path = tmp_path / "two.pgn"
     path.write_text(text, encoding="utf-8")
     app2 = Frontend(1100, 800)
-    app2._load_pgn_from_path(str(path))
-    assert app2.skillcheck_session._skillcheck_log == [
+    app2._open_pgn_review(str(path))
+    app2._execute_pending_nav()
+    assert app2.review._skillcheck_log == [
         SkillCheckOutcome(4, "wheel", False, "Rxe5"),
         SkillCheckOutcome(4, "aim", True, ""),
     ], "the reloaded log reconstructs both events on ply 4"

@@ -4,6 +4,7 @@ import os
 import pygame as pg
 
 from chessshootout.backend.pieces import PieceType
+from chessshootout.frontend.modals.help import HOTKEYS
 from chessshootout.frontend.screens.base import Nav
 from chessshootout.frontend.window_chrome import MIN_WINDOW_WIDTH, MIN_WINDOW_HEIGHT
 
@@ -205,7 +206,7 @@ class InputRouter:
             frontend._toggle_focus(not frontend.focus_mode)
             return True
         if getattr(event, "unicode", "") == "?":
-            frontend.help_modal.show()
+            frontend.help_modal.show(HOTKEYS)
             return True
         if event.key == pg.K_f:
             frontend._on_flip()

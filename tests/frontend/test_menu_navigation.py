@@ -81,11 +81,13 @@ def test_intro_overlay_draws_behind_menu_modals(monkeypatch):
         "and behind every other menu modal"
 
 
-def test_unloadable_pgn_restores_menu(tmp_path):
+def test_unloadable_pgn_restores_history(tmp_path):
     bad = tmp_path / "broken.pgn"
     bad.write_text('[White "x"]\n\n1. e4 zz9 *', encoding="utf-8")
     app = make_app()
-    app._load_pgn_from_path(str(bad))
+    app._open_pgn_review(str(bad))
+    app._execute_pending_nav()
+    app._execute_pending_nav()
     assert app.mode == "menu"
     assert app.screen.name == "history"
     assert app.toast.message == "Could not load PGN"
@@ -95,10 +97,10 @@ def test_review_from_history_returns_to_history(tmp_path):
     good = tmp_path / "local-20260101-120000.pgn"
     good.write_text(_valid_pgn_text(), encoding="utf-8")
     app = make_app()
-    app._load_pgn_from_path(str(good))
-    assert app.pgn_review is True
-    assert app._review_return_page == "history"
-    app._on_back_to_menu()
+    app._open_pgn_review(str(good))
+    app._execute_pending_nav()
+    assert app.screen.name == "review"
+    app.review._on_menu()
     app._execute_pending_nav()
     assert app.screen.name == "history"
 
@@ -107,11 +109,13 @@ def test_fresh_game_after_review_returns_to_card(tmp_path):
     good = tmp_path / "local-20260101-120000.pgn"
     good.write_text(_valid_pgn_text(), encoding="utf-8")
     app = make_app()
-    app._load_pgn_from_path(str(good))
+    app._open_pgn_review(str(good))
+    app._execute_pending_nav()
+    assert app.screen.name == "review"
     app._on_start_game({
         "mode": "single_screen", "nickname": "alice",
         "time_minutes": 5, "increment_seconds": 0, "side": "white",
     })
-    assert app._review_return_page is None
+    assert app.screen.name == "game"
     app._on_back_to_menu()
     assert app.screen.name == "menu"
