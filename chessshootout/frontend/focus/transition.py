@@ -1,7 +1,7 @@
 import pygame as pg
 
 from chessshootout.frontend.visual import backdrop
-from chessshootout.frontend.visual import gunfx
+from chessshootout.frontend.visual.draw import smoothstep
 
 FOCUS_TRANSITION_MS = 230.0
 STRIP_SLIDE_CLEAR_PX = 4
@@ -110,7 +110,7 @@ class FocusTransition:
         f.focus_mode = False
         f._compute_layout()
         normal_board = pg.Rect(f.board.rect)
-        f._draw_game_children()
+        f._draw_game_scene(show_panel=True, show_strips=True)
         norm_top = pg.Rect(f.player_strip_top.rect)
         norm_bot = pg.Rect(f.player_strip_bottom.rect)
         panel_home = pg.Rect(f.right_menu.outer_rect)
@@ -148,7 +148,7 @@ class FocusTransition:
     def draw(self, now):
         window = self.frontend.window
         q = min(max((now - self.start_ms) / FOCUS_TRANSITION_MS, 0.0), 1.0)
-        e = gunfx.smoothstep(q)
+        e = smoothstep(q)
         self.cur_e = e
         if self.bg is not None:
             window.blit(self.bg, (0, 0))

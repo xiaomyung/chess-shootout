@@ -16,6 +16,11 @@ def supersample(size, render, scale=SUPERSAMPLE):
     return pg.transform.smoothscale(big, size)
 
 
+def smoothstep(x):
+    x = max(0.0, min(1.0, x))
+    return x * x * (3 - 2 * x)
+
+
 def _pyramid_blur(surface, passes):
     w, h = surface.get_size()
     factor = 1 << passes

@@ -1,9 +1,12 @@
 import math
+from weakref import WeakKeyDictionary
 
 import pygame as pg
 
 from chessshootout.frontend.visual.colors import Colors
-from chessshootout.frontend.visual.cache import render_text, new_cache, memoized_surface
+from chessshootout.frontend.visual.cache import (
+    render_text, new_cache, memoized_surface,
+)
 from chessshootout.frontend.visual.draw import (
     supersample, rounded_rect_surface, infinity_surface, blit_centered,
 )
@@ -83,7 +86,7 @@ def build_avatar(size, top, bottom):
 
 def draw_pill(window, text, x, cy, font, text_color=Colors.amber_hi,
               bg=Colors.mode_pill_bg, border=Colors.mode_pill_border):
-    surf = font.render(text, True, text_color)
+    surf = render_text(font, text, text_color)
     pad_x = max(int(surf.get_height() * 0.6), 5)
     w = surf.get_width() + 2 * pad_x
     h = surf.get_height() + PILL_PAD_Y
@@ -96,9 +99,9 @@ def draw_pill(window, text, x, cy, font, text_color=Colors.amber_hi,
 
 def draw_series_chip(window, center, name_a, name_b, score, name_font, score_font,
                      pad_x=12, pad_y=6, gap=10):
-    a = name_font.render(name_a, True, Colors.text_dim)
-    b = name_font.render(name_b, True, Colors.text_dim)
-    sc = score_font.render(score, True, Colors.amber_hi)
+    a = render_text(name_font, name_a, Colors.text_dim)
+    b = render_text(name_font, name_b, Colors.text_dim)
+    sc = render_text(score_font, score, Colors.amber_hi)
     h = max(a.get_height(), b.get_height(), sc.get_height()) + 2 * pad_y
     w = a.get_width() + sc.get_width() + b.get_width() + 2 * gap + 2 * pad_x
     chip = rounded_rect_surface((w, h), h // 2, Colors.surface,
@@ -116,15 +119,48 @@ def draw_series_chip(window, center, name_a, name_b, score, name_font, score_fon
     return pg.Rect(x0, y0, w, h)
 
 
+def wrap_words(text, font, max_w, max_lines=None):
+    words = text.split()
+    if not words:
+        return [text]
+    lines = []
+    cur = words[0]
+    for word in words[1:]:
+        trial = f"{cur} {word}"
+        if font.size(trial)[0] <= max_w:
+            cur = trial
+        else:
+            lines.append(cur)
+            cur = word
+            if max_lines is not None and len(lines) >= max_lines:
+                return lines
+    lines.append(cur)
+    return lines
+
+
+_FIT_TEXT_CACHE = WeakKeyDictionary()
+
+
 def fit_text_to_rect(text_surface, rect, padding=BUTTON_LABEL_PADDING_PX):
     max_w = max(rect.width - 2 * padding, 1)
     max_h = max(rect.height - 2 * padding, 1)
     tw, th = text_surface.get_size()
     if tw <= max_w and th <= max_h:
         return text_surface
+    key = (max_w, max_h)
+    by_size = _FIT_TEXT_CACHE.get(text_surface)
+    if by_size is not None:
+        fitted = by_size.get(key)
+        if fitted is not None:
+            return fitted
+    else:
+        by_size = {}
+        _FIT_TEXT_CACHE[text_surface] = by_size
     scale = min(max_w / tw, max_h / th)
     new_size = (max(int(tw * scale), 1), max(int(th * scale), 1))
-    return pg.transform.smoothscale(text_surface, new_size)
+    fitted = pg.transform.smoothscale(text_surface, new_size)
+    by_size[key] = fitted
+    return fitted
 
 
 def _hover_state(rect):
@@ -156,7 +192,7 @@ def draw_button(window, rect, label, font, force_pressed=False, disabled=False,
         border = Colors.accent if (selected and not disabled) else Colors.border
     window.blit(rounded_rect_surface(rect.size, BUTTON_RADIUS, bg, border=border,
                                      border_width=1), rect.topleft)
-    text = fit_text_to_rect(font.render(label, True, text_color), rect)
+    text = fit_text_to_rect(render_text(font, label, text_color), rect)
     window.blit(
         text,
         (rect.centerx - text.get_width() / 2, rect.centery - text.get_height() / 2),

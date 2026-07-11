@@ -247,12 +247,11 @@ def parse_time_control(value):
 NO_CLOCK_LABEL = "No clock"
 
 
-def _format_time_control(value):
-    tc = parse_time_control(value)
+def format_time_control(tc):
     if tc is None:
-        return NO_CLOCK_LABEL
+        return None
     initial, incr = tc
-    return f"{initial // 60}+{incr}"
+    return f"{int(initial // 60)}+{int(incr)}"
 
 
 def summarize_pgn_file(path, text, mtime, filename=None):
@@ -262,7 +261,8 @@ def summarize_pgn_file(path, text, mtime, filename=None):
     headers = parsed.headers
     time_str, sort_key = _format_time_from_filename(filename, mtime)
     type_label = _TYPE_LABELS.get(filename.split("-", 1)[0], "—")
-    time_control = _format_time_control(headers.get("TimeControl", "-"))
+    parsed_tc = parse_time_control(headers.get("TimeControl", "-"))
+    time_control = format_time_control(parsed_tc) or NO_CLOCK_LABEL
     last_san = parsed.moves[-1] if parsed.moves else ""
     return PgnSummary(
         path=path,
@@ -282,7 +282,7 @@ def summarize_pgn_file(path, text, mtime, filename=None):
     )
 
 
-_SPECTATOR_SYMBOLS = {PGN_WHITE_WIN: "W", PGN_BLACK_WIN: "B"}
+_SPECTATOR_SYMBOLS = {PGN_WHITE_WIN: "W", PGN_BLACK_WIN: "L"}
 
 
 def result_mark(result_code, white, black, nickname):

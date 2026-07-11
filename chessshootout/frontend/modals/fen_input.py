@@ -14,7 +14,6 @@ class FenInputModal(BaseModal):
 
     def __init__(self, window):
         super().__init__(window)
-        self._visible = False
         self.on_submit = None
         self.error = ""
         self.button_rects = {}
@@ -30,26 +29,23 @@ class FenInputModal(BaseModal):
         self.button_font = self.font(factor=14, min_size=12, bold=True)
 
     def show(self, on_submit):
-        self._visible = True
+        super().show()
         self.on_submit = on_submit
         self.error = ""
         self.text_input.text = ""
         self.text_input.focused = True
 
     def hide(self):
-        self._visible = False
+        super().hide()
         self.on_submit = None
         self.text_input.focused = False
         self.button_rects = {}
-
-    def is_visible(self):
-        return self._visible
 
     def set_error(self, msg):
         self.error = msg
 
     def draw(self):
-        if not self._visible or self.rect.width <= 0:
+        if not self.visible or self.rect.width <= 0:
             return
         self.draw_shell()
         content = self.content_rect()
@@ -88,7 +84,7 @@ class FenInputModal(BaseModal):
         )
 
     def handle_click(self, pos):
-        if not self._visible:
+        if not self.visible:
             return False
         if self.text_input.rect.collidepoint(pos):
             self.text_input.focused = True
@@ -104,7 +100,7 @@ class FenInputModal(BaseModal):
         return True
 
     def handle_key(self, event):
-        if not self._visible:
+        if not self.visible:
             return False
         if event.key == pg.K_RETURN:
             self._submit()

@@ -7,7 +7,7 @@ from chessshootout.frontend.visual.cache import render_text
 from chessshootout.frontend.visual.draw import supersample, rounded_rect_surface
 from chessshootout.frontend.visual.emoji import emoji_surface
 from chessshootout.frontend.visual.fonts import get_display_font, get_font, get_mono_font
-from chessshootout.frontend.visual.scroll_view import ScrollView
+from chessshootout.frontend.visual.scroll_view import ScrollHost, ScrollView
 from chessshootout.frontend.visual.slider_tick import TickGate
 from chessshootout.frontend.visual.text_input import TextInput
 from chessshootout.frontend.visual.widgets import (
@@ -243,12 +243,15 @@ class SliderRow(_Row):
 
 class SwatchRow(_Row):
 
+    SWATCH_H = 30
+
     def __init__(self, title, desc, swatches, getter, setter):
         super().__init__(title, desc)
         self.swatches = swatches
         self.getter = getter
         self.setter = setter
         self._rects = {}
+        self.soon_font = get_font(max(int(self.SWATCH_H * 0.38), 9), bold=True)
 
     def height(self, fonts):
         return super().height(fonts) + 38
@@ -262,7 +265,7 @@ class SwatchRow(_Row):
             window.blit(render_text(fonts.desc, self.desc, Colors.text_muted), (x, yy))
             yy += fonts.desc.get_height() + 6
         self._rects = {}
-        sw_w, sw_h, gap = 42, 30, 10
+        sw_w, sw_h, gap = 42, self.SWATCH_H, 10
         sx = x
         for key, top, bottom, locked in self.swatches:
             r = pg.Rect(sx, yy, sw_w, sw_h)
@@ -272,9 +275,8 @@ class SwatchRow(_Row):
                                                  border=Colors.accent, border_width=2),
                             r.topleft)
             if locked:
-                soon_font = get_font(max(int(sw_h * 0.38), 9), bold=True)
-                shadow = render_text(soon_font, "SOON", Colors.bg)
-                tag = render_text(soon_font, "SOON", Colors.text)
+                shadow = render_text(self.soon_font, "SOON", Colors.bg)
+                tag = render_text(self.soon_font, "SOON", Colors.text)
                 tx = r.centerx - tag.get_width() / 2
                 ty = r.centery - tag.get_height() / 2
                 window.blit(shadow, (tx + 1, ty + 1))
@@ -472,7 +474,7 @@ class CountryRow(_Row):
         return self._ctl.collidepoint(pos)
 
 
-class OptionsBody:
+class OptionsBody(ScrollHost):
 
     def __init__(self):
         self.sections = []
@@ -487,12 +489,8 @@ class OptionsBody:
             wheel_step_px=OPTIONS_WHEEL_STEP,
         )
 
-    def _store_scroll(self, value):
-        self._scroll_px = value
-
-    @property
-    def scroll_offset(self):
-        return self._scroll_px
+    def is_visible(self):
+        return True
 
     def set_sections(self, sections):
         self.sections = sections
@@ -534,9 +532,6 @@ class OptionsBody:
                     return True
         return True
 
-    def handle_scroll(self, pos, dy):
-        return self.scroll.handle_wheel(pos, dy)
-
     def handle_press(self, pos):
         if not self.rect.collidepoint(pos):
             return False
@@ -544,13 +539,7 @@ class OptionsBody:
             for row in rows:
                 if row.contains_control(pos):
                     return False
-        return self.scroll.handle_press(pos) is not None
-
-    def handle_motion(self, pos):
-        return self.scroll.handle_motion(pos)
-
-    def handle_release(self, pos):
-        return self.scroll.handle_release()
+        return super().handle_press(pos)
 
     def handle_key(self, event):
         for _, rows in self.sections:
@@ -560,11 +549,10 @@ class OptionsBody:
         return False
 
 
-class OptionsModal(BaseModal):
+class OptionsModal(BaseModal, ScrollHost):
 
     def __init__(self, window):
         super().__init__(window)
-        self.visible = False
         self.on_close = None
         self.body = OptionsBody()
         self._close_rect = pg.Rect(0, 0, 0, 0)
@@ -581,17 +569,18 @@ class OptionsModal(BaseModal):
             button=self.font(28, min_size=11),
         )
 
+    @property
+    def scroll(self):
+        return self.body.scroll
+
     def show(self, sections, on_close=None):
         self.body.set_sections(sections)
         self.on_close = on_close
-        self.visible = True
+        super().show()
 
     def hide(self):
-        self.visible = False
+        super().hide()
         self.body.scroll.cancel()
-
-    def is_visible(self):
-        return self.visible
 
     def draw(self):
         if not self.visible or self.rect.width <= 0:
@@ -623,21 +612,10 @@ class OptionsModal(BaseModal):
         self.body.handle_click(pos)
         return True
 
-    def handle_scroll(self, pos, dy):
-        if not self.visible:
-            return False
-        return self.body.handle_scroll(pos, dy)
-
     def handle_press(self, pos):
         if not self.visible:
             return False
         return self.body.handle_press(pos)
-
-    def handle_motion(self, pos):
-        return self.body.handle_motion(pos)
-
-    def handle_release(self, pos):
-        return self.body.handle_release(pos)
 
     def handle_key(self, event):
         if not self.visible:

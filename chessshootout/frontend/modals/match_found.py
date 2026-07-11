@@ -5,7 +5,9 @@ from chessshootout.frontend.modals.base import BaseModal, MODAL_MAX_WIDTH, MODAL
 from chessshootout.frontend.visual.colors import Colors
 from chessshootout.frontend.visual.draw import stroked_text
 from chessshootout.frontend.visual.emoji import emoji_surface
-from chessshootout.frontend.visual.fonts import get_display_font, get_font, get_mono_font
+from chessshootout.frontend.visual.fonts import (
+    fonts_for_width, get_display_font, get_font, get_mono_font,
+)
 from chessshootout.frontend.visual.widgets import build_avatar, fit_text_to_rect
 
 
@@ -24,7 +26,6 @@ class MatchFoundModal(BaseModal):
 
     def __init__(self, window):
         super().__init__(window)
-        self._active = False
         self.me_name = ""
         self.opp_name = ""
         self.me_side = "white"
@@ -37,6 +38,7 @@ class MatchFoundModal(BaseModal):
         self._started_at = 0
         self._seconds = 3
         self._flag_cache = {}
+        self._font_cache = {}
 
     def show(self, white_name, black_name, your_color, on_done, seconds=3, rating="1500",
              white_country="", black_country="", rematch=False):
@@ -51,17 +53,14 @@ class MatchFoundModal(BaseModal):
         self.on_done = on_done
         self._seconds = seconds
         self._started_at = pg.time.get_ticks()
-        self._active = True
+        super().show()
 
     def hide(self):
-        self._active = False
+        super().hide()
         self.on_done = None
 
-    def is_visible(self):
-        return self._active
-
     def update(self):
-        if not self._active:
+        if not self.visible:
             return
         elapsed = (pg.time.get_ticks() - self._started_at) / 1000.0
         if elapsed >= self._seconds:
@@ -75,20 +74,21 @@ class MatchFoundModal(BaseModal):
         return max(self._seconds - int(elapsed), 1)
 
     def _fonts(self, panel_w):
-        if getattr(self, "_fonts_w", None) != panel_w:
-            self._fonts_w = panel_w
-            av = max(int(panel_w * 0.118), 44)
-            self._eyebrow_font = get_font(max(int(panel_w * 0.028), 11), bold=True)
-            self._name_font = get_font(max(int(panel_w * 0.032), 13), bold=True)
-            self._rating_font = get_mono_font(max(int(panel_w * 0.025), 10))
-            self._vs_font = get_display_font(max(int(panel_w * 0.06), 22))
-            self._cd_font = get_font(max(int(panel_w * 0.028), 11), bold=True)
-            self._letter_font = get_display_font(max(int(av * 0.42), 16))
-        return (self._eyebrow_font, self._name_font, self._rating_font,
-                self._vs_font, self._cd_font, self._letter_font)
+        return fonts_for_width(self._font_cache, panel_w, self._build_fonts)
+
+    def _build_fonts(self, panel_w):
+        av = max(int(panel_w * 0.118), 44)
+        return (
+            get_font(max(int(panel_w * 0.028), 11), bold=True),
+            get_font(max(int(panel_w * 0.032), 13), bold=True),
+            get_mono_font(max(int(panel_w * 0.025), 10)),
+            get_display_font(max(int(panel_w * 0.06), 22)),
+            get_font(max(int(panel_w * 0.028), 11), bold=True),
+            get_display_font(max(int(av * 0.42), 16)),
+        )
 
     def draw(self):
-        if not self._active or self.rect.width <= 0:
+        if not self.visible or self.rect.width <= 0:
             return
         pad = self.padding
         panel_w = min(self.rect.width, MODAL_MAX_WIDTH)

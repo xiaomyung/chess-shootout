@@ -5,7 +5,9 @@ from dataclasses import dataclass
 import pygame as pg
 
 from chessshootout import paths
+from chessshootout.frontend.visual import cache
 from chessshootout.frontend.visual.colors import Colors
+from chessshootout.frontend.visual.draw import smoothstep
 
 
 GUN_DRAW_SPINS_LAND = 5
@@ -17,10 +19,8 @@ DT_MAX = 0.05
 
 @dataclass(frozen=True)
 class GunSpec:
-    name: str
     scale: float = 1.0
     recoil: float = RECOIL_DEFAULT
-    style: str = "bullet"
     speed: float = 1066.0
     size: float = 5.0
     length: float = 12.0
@@ -30,19 +30,19 @@ class GunSpec:
 
 
 GUNS = {
-    "revolver": GunSpec("revolver", scale=0.363, recoil=4, style="bullet",
+    "revolver": GunSpec(scale=0.363, recoil=4,
                         speed=1066, size=5, length=12, color=Colors.amber_hi),
-    "lever_action": GunSpec("lever_action", scale=1.0, recoil=7, style="bullet",
+    "lever_action": GunSpec(scale=1.0, recoil=7,
                             speed=1170, size=5, length=17, color=Colors.amber_hi),
-    "hand_cannon": GunSpec("hand_cannon", scale=0.50, recoil=9, style="slug",
+    "hand_cannon": GunSpec(scale=0.50, recoil=9,
                            speed=780, size=9, length=13, color=Colors.amber),
-    "shotgun": GunSpec("shotgun", scale=1.0, recoil=10, style="pellet",
+    "shotgun": GunSpec(scale=1.0, recoil=10,
                        speed=936, size=4, length=8, pellets=6, spread=0.16,
                        color=Colors.amber_hi),
-    "blunderbuss": GunSpec("blunderbuss", scale=1.0, recoil=12, style="pellet",
+    "blunderbuss": GunSpec(scale=1.0, recoil=12,
                            speed=728, size=4, length=7, pellets=8, spread=0.26,
                            color=Colors.amber_hi),
-    "ray_gun": GunSpec("ray_gun", scale=0.33, recoil=4, style="bolt",
+    "ray_gun": GunSpec(scale=0.33, recoil=4,
                        speed=1300, size=6, length=28, color=Colors.accent),
 }
 
@@ -70,30 +70,34 @@ def pellet_spread(spec, base, rnd):
     return out
 
 
-def draw_bullet(window, head, ux, uy, color, size, length):
-    hx, hy = head
-    size = max(size, 2)
-    tx, ty = hx - ux * length, hy - uy * length
+_BULLET_CACHE = cache.new_size_cache()
+
+
+def _build_bullet_layer(color, size, length):
     pad = int(size + 4)
-    minx, miny = min(hx, tx) - pad, min(hy, ty) - pad
-    w = max(int(abs(hx - tx) + 2 * pad), 1)
-    h = max(int(abs(hy - ty) + 2 * pad), 1)
-    layer = pg.Surface((w, h), pg.SRCALPHA)
-    head_l = (hx - minx, hy - miny)
-    tail_l = (tx - minx, ty - miny)
+    half = int(length + pad)
+    dim = 2 * half
+    layer = pg.Surface((dim, dim), pg.SRCALPHA)
+    center = (half, half)
+    tail = (half - length, half)
     rgb = pg.Color(color)[:3]
     if length > 1:
-        pg.draw.line(layer, (*rgb, 90), tail_l, head_l, max(int(size * 1.6), 3))
-        pg.draw.line(layer, (*rgb, 255), tail_l, head_l, max(int(size * 0.7), 2))
-    pg.draw.circle(layer, (*rgb, 255), (int(head_l[0]), int(head_l[1])), int(size / 2) + 1)
-    pg.draw.circle(layer, (*pg.Color(Colors.text)[:3], 235),
-                   (int(head_l[0]), int(head_l[1])), max(int(size / 3), 1))
-    window.blit(layer, (minx, miny))
+        pg.draw.line(layer, (*rgb, 90), tail, center, max(int(size * 1.6), 3))
+        pg.draw.line(layer, (*rgb, 255), tail, center, max(int(size * 0.7), 2))
+    pg.draw.circle(layer, (*rgb, 255), center, int(size / 2) + 1)
+    pg.draw.circle(layer, (*pg.Color(Colors.text)[:3], 235), center, max(int(size / 3), 1))
+    return layer
 
 
-def smoothstep(x):
-    x = max(0.0, min(1.0, x))
-    return x * x * (3 - 2 * x)
+def draw_bullet(window, head, ux, uy, color, size, length):
+    size_q = max(round(size), 2)
+    length_q = max(round(length), 0)
+    key = (color, size_q, length_q)
+    base = cache.memoized_surface(
+        _BULLET_CACHE, key, lambda: _build_bullet_layer(color, size_q, length_q))
+    angle = math.degrees(math.atan2(-uy, ux))
+    img = pg.transform.rotate(base, angle)
+    window.blit(img, img.get_rect(center=head))
 
 
 def aimed(image, pivot_img, target_img, aim):

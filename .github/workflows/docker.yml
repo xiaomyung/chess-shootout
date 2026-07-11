@@ -3,7 +3,6 @@ name: docker
 on:
   push:
     branches: [master]
-    tags: ["v*"]
   workflow_dispatch:
   schedule:
     - cron: "27 4 * * 1"

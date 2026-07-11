@@ -5,7 +5,7 @@ import pygame as pg
 
 from chessshootout.backend.pieces import Piece, PieceColor, PieceType
 from chessshootout.domain.pgn.load import (
-    NO_CLOCK_LABEL, format_relative_time, group_by_csmatchid, scan_pgn_summaries,
+    NO_CLOCK_LABEL, format_relative_time, group_by_csmatchid, result_mark, scan_pgn_summaries,
     time_category,
 )
 from chessshootout.frontend.visual.colors import Colors
@@ -14,7 +14,7 @@ from chessshootout.frontend.visual.draw import (
 )
 from chessshootout.frontend.visual.fonts import get_display_font, get_font, get_mono_font
 from chessshootout.frontend.visual.icons import piece_png_path
-from chessshootout.frontend.visual.scroll_view import ScrollView
+from chessshootout.frontend.visual.scroll_view import ScrollHost, ScrollView
 from chessshootout.frontend.visual.widgets import build_shell
 
 
@@ -42,20 +42,21 @@ CHIP_RADIUS = 15
 TYPE_PILL_PAD_X = 16
 TYPE_PILL_PAD_Y = 5
 
-_BADGE_TEXT = {"win": "W", "loss": "L", "draw": "½"}
-_BADGE_COLOR = {"win": Colors.win, "loss": Colors.loss,
-                "draw": Colors.text_dim}
+_BADGE_TEXT = {"win": "W", "loss": "L", "draw": "½",
+               "spec_win": "W", "spec_loss": "L"}
+_BADGE_COLOR = {"win": Colors.win, "loss": Colors.loss, "draw": Colors.text_dim,
+                "spec_win": Colors.text_dim, "spec_loss": Colors.text_dim}
+_NEUTRAL_BADGES = {"draw", "spec_win", "spec_loss"}
 
 
 def _game_outcome(game, nickname):
-    if nickname == game.black:
-        won, lost = "0-1", "1-0"
-    else:
-        won, lost = "1-0", "0-1"
-    if game.result_code == won:
-        return "win"
-    if game.result_code == lost:
-        return "loss"
+    symbol, code = result_mark(game.result_code, game.white, game.black, nickname)
+    if code != "neutral":
+        return code
+    if symbol == "W":
+        return "spec_win"
+    if symbol == "L":
+        return "spec_loss"
     return "draw"
 
 
@@ -92,6 +93,12 @@ class MatchGroup:
             return "win"
         if losses > wins:
             return "loss"
+        spec_wins = self.outcomes.count("spec_win")
+        spec_losses = self.outcomes.count("spec_loss")
+        if spec_wins > spec_losses:
+            return "spec_win"
+        if spec_losses > spec_wins:
+            return "spec_loss"
         return "draw"
 
 
@@ -100,7 +107,7 @@ def build_match_groups(summaries, nickname):
             for mid, games in group_by_csmatchid(summaries)]
 
 
-class HistoryView:
+class HistoryView(ScrollHost):
 
     def __init__(self, window, on_open, on_back):
         self.window = window
@@ -216,24 +223,6 @@ class HistoryView:
     def is_visible(self):
         return self.visible
 
-    def _store_scroll(self, value):
-        self._scroll_px = value
-
-    @property
-    def scroll_offset(self):
-        return self._scroll_px
-
-    def handle_press(self, pos):
-        if not self.visible:
-            return False
-        return self.scroll.handle_press(pos) is not None
-
-    def handle_motion(self, pos):
-        return self.scroll.handle_motion(pos)
-
-    def handle_release(self, pos):
-        return self.scroll.handle_release()
-
     def _visible_groups(self):
         if self.filter == "all":
             return self._groups
@@ -244,7 +233,7 @@ class HistoryView:
         groups = self._visible_groups()
         return (sum(1 for g in groups if g.result == "win"),
                 sum(1 for g in groups if g.result == "loss"),
-                sum(1 for g in groups if g.result == "draw"))
+                sum(1 for g in groups if g.result in _NEUTRAL_BADGES))
 
     def draw(self):
         if not self.visible or self.rect.width <= 0:
@@ -453,7 +442,7 @@ class HistoryView:
 
     def _draw_badge(self, rect, result, font, radius):
         color = _BADGE_COLOR[result]
-        if result == "draw":
+        if result in _NEUTRAL_BADGES:
             bg, border, ink = Colors.surface_hover, Colors.border, Colors.text_dim
         else:
             bg, border, ink = color + "26", color + "5c", color
@@ -581,8 +570,3 @@ class HistoryView:
                     self.on_open(value)
                 return True
         return self.rect.collidepoint(pos)
-
-    def handle_scroll(self, pos, dy):
-        if not self.visible:
-            return False
-        return self.scroll.handle_wheel(pos, dy)

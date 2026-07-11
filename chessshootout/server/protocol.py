@@ -60,6 +60,8 @@ class Reason:
     RATE_LIMITED = "rate_limited"
     GAME_ALREADY_OVER = "game_already_over"
     REMATCH_UNAVAILABLE = "rematch_unavailable"
+    REMATCH_ALREADY_PENDING = "rematch_already_pending"
+    NO_TAKEBACK_AVAILABLE = "no_takeback_available"
 
     CHECKMATE = "checkmate"
     RESIGNATION = "resignation"
@@ -121,19 +123,22 @@ class LockWire(BaseModel):
     model_config = {"populate_by_name": True}
 
 
-class PendingSkillCheckWire(BaseModel):
+class _SkillCheckGeometryBase(BaseModel):
     kind: Literal["wheel", "aim"]
     seed: str
     value_diff: int
     deadline_ms: float
-    elapsed_ms: float
-    miss_count: int = 0
     from_sq: str = Field(alias="from")
     to_sq: str = Field(alias="to")
     promotion: Optional[Literal["q", "r", "b", "n"]] = None
-    color: Literal["white", "black"]
 
     model_config = {"populate_by_name": True}
+
+
+class PendingSkillCheckWire(_SkillCheckGeometryBase):
+    elapsed_ms: float
+    miss_count: int = 0
+    color: Literal["white", "black"]
 
 
 class SkillCheckOutcomeWire(BaseModel):
@@ -371,18 +376,9 @@ class ResyncDirectiveMessage(_Base):
     type: Literal["resync_directive"] = "resync_directive"
 
 
-class SkillCheckRequiredMessage(_Base):
+class SkillCheckRequiredMessage(_SkillCheckGeometryBase, _Base):
     type: Literal["skill_check_required"] = "skill_check_required"
-    kind: Literal["wheel", "aim"]
-    seed: str
-    value_diff: int
-    deadline_ms: float
     miss_count: int = 0
-    from_sq: str = Field(alias="from")
-    to_sq: str = Field(alias="to")
-    promotion: Optional[Literal["q", "r", "b", "n"]] = None
-
-    model_config = {"populate_by_name": True}
 
 
 class SkillCheckShotMessage(_Base):
@@ -401,17 +397,8 @@ class SkillCheckResultMessage(_Base):
     model_config = {"populate_by_name": True}
 
 
-class SkillCheckSpectateMessage(_Base):
+class SkillCheckSpectateMessage(_SkillCheckGeometryBase, _Base):
     type: Literal["skill_check_spectate"] = "skill_check_spectate"
-    kind: Literal["wheel", "aim"]
-    seed: str
-    value_diff: int
-    deadline_ms: float
-    from_sq: str = Field(alias="from")
-    to_sq: str = Field(alias="to")
-    promotion: Optional[Literal["q", "r", "b", "n"]] = None
-
-    model_config = {"populate_by_name": True}
 
 
 class SkillCheckSpectateShotMessage(_Base):

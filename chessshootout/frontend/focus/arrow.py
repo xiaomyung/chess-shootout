@@ -2,8 +2,8 @@ import math
 
 import pygame as pg
 
-from chessshootout.frontend.visual import gunfx
 from chessshootout.frontend.visual.colors import Colors
+from chessshootout.frontend.visual.draw import smoothstep
 
 FOCUS_ARROW_D = 34
 FOCUS_ARROW_REVEAL_MS = 200.0
@@ -66,7 +66,7 @@ class FocusArrow:
         if hovering != self._hovering:
             self._hovering = hovering
             self._hover_start = now
-        hv = gunfx.smoothstep((now - self._hover_start) / FOCUS_ARROW_HOVER_MS)
+        hv = smoothstep((now - self._hover_start) / FOCUS_ARROW_HOVER_MS)
         hv = hv if self._hovering else 1.0 - hv
         scale = 1.0 + (FOCUS_ARROW_HOVER_SCALE - 1.0) * hv
         sized = pg.Rect(0, 0, int(FOCUS_ARROW_D * scale), int(FOCUS_ARROW_D * scale))
@@ -77,7 +77,7 @@ class FocusArrow:
 
     def _slide_progress(self, now):
         dur = FOCUS_ARROW_REVEAL_MS if self._shown else FOCUS_ARROW_HIDE_MS
-        e = gunfx.smoothstep((now - self._slide_start) / dur)
+        e = smoothstep((now - self._slide_start) / dur)
         return e if self._shown else 1.0 - e
 
     def hit_test(self, pos):

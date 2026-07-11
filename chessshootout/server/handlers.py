@@ -68,6 +68,7 @@ async def dispatch(app, websocket, room, color, raw):
 
 
 async def handle_move(app, websocket, room, color, raw):
+    rooms = app.state.rooms
     connections = app.state.connections
     if room.backend is None:
         return "no_backend"
@@ -75,7 +76,13 @@ async def handle_move(app, websocket, room, color, raw):
         await send(connections.get_for_color(room, color),
                      ErrorMessage(reason=Reason.GAME_ALREADY_OVER, msg_type="move"))
         return "already_over"
-    if room.pending_skillcheck is not None:
+    pending = room.pending_skillcheck
+    if pending is not None and pending.is_expired(app.state.now_ms()):
+        await resolve_skillcheck_fail(rooms, connections, room)
+        if room.result is not None:
+            return "already_over"
+        pending = None
+    if pending is not None:
         await send(connections.get_for_color(room, color),
                      ErrorMessage(reason=Reason.SKILLCHECK_PENDING, msg_type="move"))
         return "pending"
@@ -160,7 +167,7 @@ async def _apply_move(app, room, color, from_sq, to_sq, promotion,
         ply=len(room.backend.move_history),
         skill_check_kind=skill_kind, skill_check_won=skill_won,
     )
-    await broadcast(connections, room, applied)
+    await broadcast(rooms, connections, room, applied)
     game_result = room.backend.game_result()
     if game_result in RESULT_REASON_BY_GAME_RESULT:
         reason, winner = RESULT_REASON_BY_GAME_RESULT[game_result]
@@ -170,6 +177,7 @@ async def _apply_move(app, room, color, from_sq, to_sq, promotion,
 
 
 async def handle_skill_check_shot(app, websocket, room, color, raw):
+    rooms = app.state.rooms
     connections = app.state.connections
     pending = room.pending_skillcheck
     if room.result is not None or pending is None or color != pending.color:
@@ -205,7 +213,7 @@ async def handle_skill_check_shot(app, websocket, room, color, raw):
             or online.aim_expired(challenge, elapsed, pending.miss_count):
         log.info("skillcheck failed room=%s mover=%s kind=%s", room.room_id, color,
                  pending.kind.value)
-        await resolve_skillcheck_fail(connections, room)
+        await resolve_skillcheck_fail(rooms, connections, room)
         return "skillcheck_fail"
     pending.miss_count += 1
     return "skillcheck_miss"
@@ -286,6 +294,9 @@ async def handle_rematch_request(app, websocket, room, color, raw):
                                     msg_type="rematch_request"))
         return "unavailable"
     if color in room.rematch_offered_by:
+        await send(connections.get_for_color(room, color),
+                     ErrorMessage(reason=Reason.REMATCH_ALREADY_PENDING,
+                                    msg_type="rematch_request"))
         return "duplicate"
     room.rematch_offered_by.add(color)
     rooms.mark_rematch_activity(room)
@@ -295,6 +306,8 @@ async def handle_rematch_request(app, websocket, room, color, raw):
     opp_ws = connections.get_for_color(room, room.opp_color(color))
     if opp_ws is not None:
         await send(opp_ws, RematchRequestMessage())
+        if color not in room.rematch_offered_by:
+            await send(opp_ws, RematchUpdateMessage(event="cancelled"))
     return "offered"
 
 
@@ -355,6 +368,9 @@ async def handle_takeback_request(app, websocket, room, color, raw):
                                     msg_type="takeback_request"))
         return "not_your_turn"
     if not room.backend.move_history:
+        await send(connections.get_for_color(room, color),
+                     ErrorMessage(reason=Reason.NO_TAKEBACK_AVAILABLE,
+                                    msg_type="takeback_request"))
         return "no_moves"
     log.info("takeback requested room=%s by=%s", room.room_id, color)
     room.takeback_offered_by = color
@@ -364,6 +380,7 @@ async def handle_takeback_request(app, websocket, room, color, raw):
 
 
 async def handle_takeback_response(app, websocket, room, color, raw):
+    rooms = app.state.rooms
     connections = app.state.connections
     if room.result is not None or room.takeback_offered_by is None:
         return "noop"
@@ -381,7 +398,7 @@ async def handle_takeback_response(app, websocket, room, color, raw):
         room.backend.undo()
         room.skillcheck_log = [e for e in room.skillcheck_log if e.ply < popped_ply]
         room.takeback_offered_by = None
-        await broadcast(connections, room, TakebackAppliedMessage(
+        await broadcast(rooms, connections, room, TakebackAppliedMessage(
             fen=export_fen(room.backend),
             clock=_clock_snapshot(room.backend.clock),
             ply=len(room.backend.move_history),
@@ -393,6 +410,7 @@ async def handle_takeback_response(app, websocket, room, color, raw):
 
 
 async def handle_give_time(app, websocket, room, color, raw):
+    rooms = app.state.rooms
     connections = app.state.connections
     if room.result is not None or room.backend is None or room.backend.clock is None:
         return "noop"
@@ -408,7 +426,7 @@ async def handle_give_time(app, websocket, room, color, raw):
     added = room.backend.clock.add_time(opp_piece_color, GIVE_TIME_SECONDS * ticks)
     log.info("give_time room=%s by=%s hold_ms=%d ticks=%d added=%.2f",
              room.room_id, color, hold_ms, ticks, added)
-    await broadcast(connections, room, TimeGrantedMessage(
+    await broadcast(rooms, connections, room, TimeGrantedMessage(
         granted_by=color, seconds_added=added,
         clock=_clock_snapshot(room.backend.clock),
     ))

@@ -1,3 +1,8 @@
+import os
+
+os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
+os.environ.setdefault("SDL_AUDIODRIVER", "dummy")
+
 import sys
 from pathlib import Path
 
@@ -9,6 +14,42 @@ if str(ROOT) not in sys.path:
 
 
 SERVER_START_TIMEOUT_SECONDS = 15
+
+
+def pygame_display(w=1000, h=800):
+    """Build a module-scoped autouse fixture that inits pygame, sets the
+    display to (w, h) for the module, and tears back down at module end.
+
+    Single source for the pg.init()/set_mode/yield/pg.quit() shape that used
+    to be copy-pasted per file. Usage in a test module:
+    `_pygame_init = pygame_display(900, 500)`.
+    """
+    @pytest.fixture(scope="module", autouse=True)
+    def _fixture():
+        import pygame as pg
+        pg.init()
+        pg.display.set_mode((w, h))
+        yield
+        pg.quit()
+
+    return _fixture
+
+
+@pytest.fixture(scope="module", autouse=True)
+def _clear_render_caches_per_module():
+    """Release cached surfaces after each test module.
+
+    The module-level widget caches in frontend/visual/cache.py (text, icon,
+    rounded-rect, per-size result-fade/bullet/promo-option surfaces, ...) are
+    process-lifetime globals shared by every test that imports them. Left
+    alone across a full worker's ~140 modules they accumulate one entry per
+    distinct (font, text, size, ...) key ever rendered in the whole run.
+    Clearing at each module boundary bounds that growth to roughly one
+    module's worth of surfaces at a time instead of the whole suite's.
+    """
+    yield
+    from chessshootout.frontend.visual import cache
+    cache.clear_all()
 
 
 @pytest.fixture(autouse=True)
@@ -23,50 +64,38 @@ def _isolate_env_file(tmp_path_factory, monkeypatch):
     monkeypatch.setattr(env, "_ENV_PATH", tmp_path_factory.mktemp("envcfg") / ".env")
 
 
-@pytest.fixture
-def server():
-    """Real uvicorn server on a socket pre-bound here and handed over still open.
+@pytest.fixture(autouse=True)
+def _isolate_games_dir(tmp_path_factory, monkeypatch):
+    """Keep every test off the real games/ folder and the real platformdirs
+    user-data folder.
 
-    The previous pattern (bind to port 0, close the socket, pass the bare port
-    number to uvicorn) left a window in which the kernel could reassign that
-    port to another concurrently-starting test server before uvicorn re-bound
-    it. Under xdist that TOCTOU race occasionally left a server unable to bind,
-    so its clients' matchmake calls were refused and the game_start broadcast
-    never arrived (both clients saw None). It was worse on Windows, whose
-    SO_REUSEADDR semantics let a second bind hijack the port. Handing over the
-    already-bound socket removes the window entirely and guarantees the port is
-    live before the test body runs.
+    With incremental autosave, any draw_frame()/_update_result_pending() call
+    during a live (or just-finished) game can write a PGN. A test that never
+    overrides CHESS_DATA_DIR would otherwise default to the source root (not
+    frozen) and litter the real repo's games/ directory. A test's own
+    monkeypatch.setenv("CHESS_DATA_DIR", ...) still wins — it runs later, inside
+    the test body, after this fixture has already set up. The save pipeline's
+    OSError fallback writes to paths.get_fallback_data_dir() (the real
+    platformdirs user-data dir, deliberately CHESS_DATA_DIR-immune) — that must
+    be isolated too, or a save-failure test litters the developer's real
+    ~/.local/share (or platform equivalent).
     """
-    import socket
-    import threading
-    import time
+    from chessshootout import paths
+    monkeypatch.setenv("CHESS_DATA_DIR", str(tmp_path_factory.mktemp("gamesdir")))
+    monkeypatch.setattr(
+        paths, "get_fallback_data_dir", lambda: tmp_path_factory.mktemp("fallbackdir"))
 
-    import uvicorn
 
-    from chessshootout.server.app import create_app
+@pytest.fixture
+def server(server_with_app):
+    """Real uvicorn server, port only.
 
-    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    sock.bind(("127.0.0.1", 0))
-    port = sock.getsockname()[1]
-    config = uvicorn.Config(
-        create_app(max_rooms=8), log_level="warning",
-        ws_ping_interval=20, ws_ping_timeout=30,
-    )
-    srv = uvicorn.Server(config)
-    thread = threading.Thread(
-        target=lambda: srv.run(sockets=[sock]), daemon=True,
-    )
-    thread.start()
-    deadline = time.time() + SERVER_START_TIMEOUT_SECONDS
-    while not srv.started and time.time() < deadline:
-        time.sleep(0.02)
-    assert srv.started, "test uvicorn server did not start in time"
-    try:
-        yield port
-    finally:
-        srv.should_exit = True
-        thread.join(timeout=5)
-        sock.close()
+    A thin wrapper over server_with_app (same real-uvicorn startup/teardown)
+    for the majority of callers that only need the port and never touch the
+    app object directly.
+    """
+    port, _app = server_with_app
+    yield port
 
 
 @pytest.fixture

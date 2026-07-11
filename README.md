@@ -66,7 +66,10 @@ server for online two-player matches.
 
 **PGN**
 - Every game auto-saves to `games/<prefix>-YYYYMMDD-HHMMSS.pgn` (`local`,
-  `bot`, or `online`).
+  `bot`, or `online`), continuously while you play — an in-progress game is
+  kept on disk with `[Result "*"]` and finalized when it ends, so a crash or
+  disconnect can't lose it. If the games folder isn't writable you get a
+  toast and the save falls back to the OS data directory.
 - Load and review past games from the **History** menu; step through with
   the arrow keys.
 - Skill-check outcomes (hits and misses) are saved as standard `{comments}` and
@@ -169,8 +172,8 @@ pyenv shell 3.12                  # `python3.12` now resolves for the venv step 
 | `Q` / `B` / `N` | Promote (queen / bishop / knight) |
 | `Space` / Click | Fire the active skill-check (Shootout) |
 | `Ctrl+Z` | Undo (online: takeback request) |
-| `←` / `→` | Step through review |
-| `Home` / `End` | Jump to ply 0 / live |
+| `←` / `→` | Step through moves (also during live games) |
+| `Home` / `End` | Jump to ply 0 / return to live play |
 | `?` | Open Help modal |
 | Hold **Give 15s** | Ramp the opponent's clock up to the starting time |
 | `Esc` | Context Back/Cancel — closes the top modal, else exits focus mode, else the quit / resign prompt (never the window) |

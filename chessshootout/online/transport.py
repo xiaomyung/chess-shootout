@@ -143,23 +143,6 @@ class ServerTransport:
             raise TransportError(str(exc)) from exc
         return r
 
-    def _parse_response(self, response, model):
-        if response.status_code >= 400:
-            reason = _safe_error_reason(response) or f"http_{response.status_code}"
-            if reason == Reason.VERSION_MISMATCH:
-                raise SchemaVersionMismatch(reason)
-            raise TransportHTTPError(response.status_code, reason)
-        if model is None:
-            return None
-        try:
-            return model.model_validate(response.json())
-        except (ValueError, json.JSONDecodeError) as exc:
-            raise TransportError(f"invalid_response_body: {exc}") from exc
-
-    def healthz(self) -> HealthResponse:
-        r = self._sync_request("GET", "/healthz")
-        return self._parse_response(r, HealthResponse)
-
     def reclaim_blocking(self, client_uuid, *, timeout=2.0) -> Optional[ReclaimResponse]:
         body = ReclaimRequest(client_uuid=client_uuid).model_dump()
         try:

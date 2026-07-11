@@ -9,8 +9,8 @@ should be able to fail for a real reason.
 ```bash
 .venv/bin/pytest tests -n 8 -q                 # fast local loop
 .venv/bin/pytest tests -n auto -q              # match CI before pushing
-.venv/bin/pytest tests/test_san.py -v          # one file
-.venv/bin/pytest "tests/test_clock.py::test_add_time_caps[at_cap_returns_zero]" -v   # one case
+.venv/bin/pytest tests/backend/test_san.py -v  # one file
+.venv/bin/pytest "tests/backend/test_clock.py::test_add_time_caps[at_cap_returns_zero]" -v   # one case
 .venv/bin/pytest tests -n auto --cov --cov-report=term:skip-covered          # coverage (informational)
 .venv/bin/pylama chessshootout tests                                        # lint (≤100 cols)
 ```
@@ -18,6 +18,55 @@ should be able to fail for a real reason.
 Do **not** run the suite while a chess server is live on `:8000` (the per-process
 reconnect probe floods its rate limit). `perft(3)` must read `8902` — it is the
 strongest single regression for the move engine.
+
+## Directory layout
+
+Tests mirror the source layout, five dirs under `tests/`:
+
+- `tests/backend/` — the pure chess engine (`chessshootout/backend/`) and the
+  pygame-free `chessshootout/skillcheck/` package (wheel/aim geometry,
+  triggers, weights, coordinator, the cross-side `online` adjudication
+  surface — a peer of `backend/`, imported by both server and frontend, not
+  to be confused with the client-side `chessshootout/online` package below).
+- `tests/frontend/` — pygame UI: board, panels, modals, menu, visual/, the
+  `frontend/skillcheck/` view layer, focus mode, audio dispatch. Flat — no
+  `tests/frontend/board/` subdirs.
+- `tests/server/` — the `chessshootout/server/` package (FastAPI app,
+  handlers, rooms, sweep, protocol).
+- `tests/online/` — client-side online multiplayer: the top-level
+  `chessshootout/online/` package (`OnlineClient`, `ServerTransport`) plus
+  `chessshootout/frontend/online/` (banners, the events mixin).
+- `tests/infra/` — cross-cutting app lifecycle/config: `paths`, `env`,
+  `countries`, `icons`, `log_format`, `crash_log`, `migration`, `utf8`, plus
+  whole-repo static guards (`imports`, `logging_hygiene`,
+  `server_no_pygame`) that scan the source tree rather than exercise one
+  module.
+
+**Where does a new test go?** By the primary module under test — what the
+asserts verify, not an incidental import. A file that drives a real
+`Frontend`/`Board` belongs in `frontend/` even if it also touches
+`backend`/`domain` setup; a file that is pygame-free and asserts on
+`chessshootout.online.*`/`chessshootout.server.*` belongs in `online/`/
+`server/` respectively; a whole-repo static scan (import-boundary guard,
+pygame-free guard) belongs in `infra/`.
+
+Stays at `tests/` root (their `__file__`-relative paths depend on it, or they
+are meta-guards that scan every dir): `conftest.py`, `helpers.py`,
+`test_no_weak_tests.py`, `README.md`, `__init__.py`. Each of the five
+subdirs has its own `__init__.py`; `tests/server/conftest.py` additionally
+holds the server `clock`/`app`/`client` fixture trio + `ALICE`/`BOB` +
+`auth_msg` (server-only — `client`/`app` there are FastAPI-flavored, distinct
+from a `Frontend` a client-side test might build under the same names).
+
+A guard that walks the source tree by path (`test_only_transport_module_...`,
+`test_server_and_backend_never_import_pygame_or_frontend`, the emoji/log
+hygiene scans) must anchor its root off an **imported package's `__file__`**
+(`Path(chessshootout.__file__).resolve().parent[.parent]`), never off its own
+`__file__` — the nesting depth from `tests/<dir>/test_x.py` to the repo root
+differs from the old flat `tests/test_x.py`, and a stale two-`dirname()` walk
+silently scans zero files instead of failing loudly. Each such guard also
+asserts a minimum scanned-file count, so a future path break fails loud
+instead of passing green over an empty walk.
 
 ## Naming
 
@@ -76,11 +125,22 @@ Type hints and full docstrings everywhere are a separate later pass — not requ
 ## Fixtures and helpers
 
 - Pure data / builders → `tests/helpers.py` (imported explicitly, e.g. `make_backend`,
-  `sq`, `play_*`). Assertion helpers are named `assert_*` / `expect_*` (or `_assert_*`)
+  `sq`, `play_*`, `make_app`/`start_single_screen` for a single-screen `Frontend`).
+  Assertion helpers are named `assert_*` / `expect_*` (or `_assert_*`)
   so the weak-test guard recognizes them.
-- Stateful resources → fixtures in `tests/conftest.py` (e.g. the real-uvicorn `server`,
-  a headless pygame display, a temp PGN file).
-- Don't duplicate a builder across files — add it to `helpers.py` once.
+- Stateful resources → fixtures in `tests/conftest.py` (e.g. the real-uvicorn `server`
+  / `server_with_app`, `pygame_display(w, h)` — a factory that builds a
+  module-scoped autouse pygame-init fixture; assign its result to a module-level
+  name, e.g. `_pygame_init = pygame_display(900, 500)`).
+- `tests/frontend/focus_helpers.py` is the focus-mode test suite's own shared
+  builder (`make_app`, `start_game`, `FakeTicks` — a `pg.time.get_ticks()`
+  millisecond stand-in, distinct from `helpers.FakeClock`'s server-side seconds
+  clock) — import it as `from tests.frontend.focus_helpers import ...`.
+- `tests/server/conftest.py` holds the server-only `clock`/`app`/`client` fixture
+  trio, `ALICE`/`BOB`, and `auth_msg` — auto-scoped to `tests/server/` so it
+  can't shadow a client-side test's own `app`/`client` names.
+- Don't duplicate a builder across files — add it to `helpers.py` (or the
+  relevant subdir's `conftest.py`) once.
 
 ## Weak-test ban
 

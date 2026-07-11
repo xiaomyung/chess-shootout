@@ -15,6 +15,32 @@ FLING_MAX_DT = 0.05
 THUMB_HIT_PAD_X = 10
 
 
+class ScrollHost:
+
+    def _store_scroll(self, value):
+        self._scroll_px = value
+
+    @property
+    def scroll_offset(self):
+        return self._scroll_px
+
+    def handle_scroll(self, pos, dy):
+        if not self.is_visible():
+            return False
+        return self.scroll.handle_wheel(pos, dy)
+
+    def handle_press(self, pos):
+        if not self.is_visible():
+            return False
+        return self.scroll.handle_press(pos) is not None
+
+    def handle_motion(self, pos):
+        return self.scroll.handle_motion(pos)
+
+    def handle_release(self, pos):
+        return self.scroll.handle_release()
+
+
 class ScrollView:
 
     def __init__(self, get_offset_px, set_offset_px, get_metrics, *, wheel_step_px):

@@ -2,7 +2,9 @@ import pygame as pg
 
 from chessshootout.backend.pieces import PieceColor
 from chessshootout.infra.countries import flag_emoji, name_for
-from chessshootout.frontend.visual.clock_visual import LOW_TIME_FRACTION
+from chessshootout.frontend.visual.clock_visual import (
+    LOW_TIME_FRACTION, format_clock, format_countdown,
+)
 from chessshootout.frontend.visual.colors import Colors
 from chessshootout.frontend.visual.draw import rounded_rect_surface, blit_centered, circle_surface
 from chessshootout.frontend.visual.emoji import emoji_surface
@@ -28,27 +30,6 @@ TOOLTIP_RADIUS = 6
 TOOLTIP_RISE_PX = 5
 TOOLTIP_GAP_PX = 5
 TOOLTIP_EDGE_MARGIN_PX = 2
-
-
-def format_clock(seconds):
-    if seconds is None:
-        return "∞"
-    if seconds < 0:
-        seconds = 0
-    if seconds < 30:
-        total_tenths = int(seconds * 10)
-        minutes, rem = divmod(total_tenths, 600)
-        secs, tenths = divmod(rem, 10)
-        return f"{minutes}:{secs:02d}.{tenths}"
-    total = int(seconds)
-    minutes, secs = divmod(total, 60)
-    return f"{minutes}:{secs:02d}"
-
-
-def format_countdown(seconds):
-    seconds = max(0, int(seconds))
-    minutes, secs = divmod(seconds, 60)
-    return f"{minutes}:{secs:02d}"
 
 
 def give_time_float_alpha(progress):
@@ -91,6 +72,7 @@ class PlayerStrip:
         self.ko_font = get_font(10, bold=True)
         self.letter_font = get_font(18, family=DISPLAY)
         self.auto_end_font = get_font(11, bold=True)
+        self._give_time_float_font = get_font(11, bold=True, mono=True)
         self.icons = {}
         self._avatar_cache = None
         self._flag_cache = None
@@ -111,6 +93,8 @@ class PlayerStrip:
         self.auto_end_font = get_font(
             max(int(ih * 0.42 * AUTO_END_BADGE_FONT_SCALE), 9), bold=True)
         self.tooltip_font = get_font(max(int(ih * 0.34), 11), bold=True)
+        self._give_time_float_font = get_font(
+            max(int(h * 0.24), 11), bold=True, mono=True)
         self._avatar_cache = None
 
     def set_piece_icons(self, icons):
@@ -394,8 +378,7 @@ class PlayerStrip:
         if alpha <= 0:
             return
         text = f"+0:{int(self._give_time_amount):02d}"
-        float_font = get_font(max(int(self.rect.height * 0.24), 11), bold=True, mono=True)
-        surf = float_font.render(text, True, Colors.clock_increment_flash)
+        surf = self._give_time_float_font.render(text, True, Colors.clock_increment_flash)
         surf.set_alpha(alpha)
         rise = int(GIVE_TIME_FLOAT_RISE_PX - GIVE_TIME_FLOAT_TRAVEL_PX * progress)
         self.window.blit(surf, (clock_rect.centerx - surf.get_width() / 2,

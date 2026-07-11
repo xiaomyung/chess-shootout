@@ -4,17 +4,42 @@ import pygame as pg
 
 from chessshootout.frontend.skillcheck.controller import (
     SkillCheckController, SKILLCHECK_RESULT_HOLD_MS, EdgeTrigger)
+from chessshootout.frontend.visual.cache import new_cache, memoized_surface
 from chessshootout.frontend.visual.colors import Colors
 from chessshootout.frontend.visual.draw import rounded_rect_surface, supersample
 from chessshootout.frontend.visual.fonts import get_font
 from chessshootout.skillcheck.wheel import SKILLCHECK_DEADLINE_MS, adjudicate
 
-WHEEL_DIAL_SCALE = 1.0
 WHEEL_RESULT_HOLD_MS = 380
 WHEEL_TIME_LIMIT_MS = SKILLCHECK_DEADLINE_MS
 WHEEL_DEFAULT_DEADLINE_MS = WHEEL_TIME_LIMIT_MS
 WHEEL_TIMER_RAMP = 2.0
 _ARC_STEPS = 56
+
+WHEEL_MIN_RADIUS = 24
+WHEEL_RING_FRAC = 0.08
+WHEEL_MIN_RING_W = 2
+WHEEL_BAND_FRAC = 0.20
+WHEEL_MIN_BAND_W = 3
+WHEEL_NEEDLE_FRAC = 0.12
+WHEEL_MIN_NEEDLE_W = 2
+WHEEL_HUB_FRAC = 0.10
+WHEEL_MIN_HUB_R = 2
+WHEEL_NEEDLE_TIP_FRAC = 0.30
+WHEEL_MIN_NEEDLE_TIP_W = 2
+WHEEL_TIMER_GAP_FRAC = 0.06
+WHEEL_MIN_TIMER_GAP = 1
+WHEEL_BACKDROP_PAD_FRAC = 0.08
+WHEEL_HINT_FONT_FRAC = 0.26
+WHEEL_MIN_HINT_FONT = 10
+WHEEL_HINT_PAD_X_FRAC = 0.24
+WHEEL_HINT_PAD_Y_FRAC = 0.12
+WHEEL_HINT_GAP_FRAC = 0.20
+WHEEL_FOOTPRINT_CELL_FRAC = 1.20
+WHEEL_SURFACE_MARGIN_PX = 8
+WHEEL_FOOTPRINT_DENOM = 2 * (1 + WHEEL_RING_FRAC + WHEEL_TIMER_GAP_FRAC)
+
+_WHEEL_STATIC_CACHE = new_cache()
 
 
 def _rim_point(cx, cy, radius, deg):
@@ -33,17 +58,21 @@ def _band_polygon(cx, cy, inner, outer, deg_from, deg_to):
     return points
 
 
-def _needle_polygon(cx, cy, deg, length, width):
+def _clamp_bubble_left(left, bubble_w, window_w):
+    return max(4, min(left, window_w - bubble_w - 4))
+
+
+def _needle_polygon(cx, cy, deg, length, base_w, tip_w):
     angle = math.radians(deg - 90.0)
     dx, dy = math.cos(angle), math.sin(angle)
     px, py = -dy, dx
-    half = width / 2.0
+    base_half, tip_half = base_w / 2.0, tip_w / 2.0
     tip_x, tip_y = cx + dx * length, cy + dy * length
     return [
-        (cx + px * half, cy + py * half),
-        (tip_x + px * half, tip_y + py * half),
-        (tip_x - px * half, tip_y - py * half),
-        (cx - px * half, cy - py * half),
+        (cx + px * base_half, cy + py * base_half),
+        (tip_x + px * tip_half, tip_y + py * tip_half),
+        (tip_x - px * tip_half, tip_y - py * tip_half),
+        (cx - px * base_half, cy - py * base_half),
     ]
 
 
@@ -69,12 +98,23 @@ class WheelController(SkillCheckController):
 
     def _apply_geometry(self, cell_rect):
         self.center = cell_rect.center
-        self.radius = max(24, int(cell_rect.width * WHEEL_DIAL_SCALE * 0.5))
-        self.ring_w = max(4, int(self.radius * 0.07))
-        self.band_w = max(10, int(self.radius * 0.17))
-        self.needle_w = max(6, int(self.radius * 0.09))
-        self.hub_r = max(5, int(self.radius * 0.07))
-        self._hint_font = get_font(max(13, int(self.radius * 0.20)), bold=True)
+        cell = cell_rect.width
+        self.radius = max(WHEEL_MIN_RADIUS, round(
+            (cell * WHEEL_FOOTPRINT_CELL_FRAC - WHEEL_SURFACE_MARGIN_PX) / WHEEL_FOOTPRINT_DENOM))
+        r = self.radius
+        self.ring_w = max(WHEEL_MIN_RING_W, round(r * WHEEL_RING_FRAC))
+        self.band_w = max(WHEEL_MIN_BAND_W, round(r * WHEEL_BAND_FRAC))
+        self.needle_w = max(WHEEL_MIN_NEEDLE_W, round(r * WHEEL_NEEDLE_FRAC))
+        self.hub_r = max(WHEEL_MIN_HUB_R, round(r * WHEEL_HUB_FRAC))
+        self.needle_tip_w = max(
+            WHEEL_MIN_NEEDLE_TIP_W, round(self.needle_w * WHEEL_NEEDLE_TIP_FRAC))
+        self.timer_gap = max(WHEEL_MIN_TIMER_GAP, round(r * WHEEL_TIMER_GAP_FRAC))
+        self.backdrop_pad = round(r * WHEEL_BACKDROP_PAD_FRAC)
+        self._hint_font = get_font(
+            max(WHEEL_MIN_HINT_FONT, round(r * WHEEL_HINT_FONT_FRAC)), bold=True)
+        self._hint_pad_x = round(r * WHEEL_HINT_PAD_X_FRAC)
+        self._hint_pad_y = round(r * WHEEL_HINT_PAD_Y_FRAC)
+        self._hint_gap = round(r * WHEEL_HINT_GAP_FRAC)
 
     def relayout(self, cell_rect):
         self._apply_geometry(cell_rect)
@@ -150,19 +190,31 @@ class WheelController(SkillCheckController):
     def draw(self, window):
         cx, cy = self.center
         elapsed = self._frozen_elapsed()
-        timer_outer = self.radius + self.ring_w + 3
-        size = timer_outer * 2 + 8
+        timer_outer = self.radius + self.ring_w + self.timer_gap
+        size = timer_outer * 2 + WHEEL_SURFACE_MARGIN_PX
         window.blit(self._render_dial(elapsed, size), (cx - size // 2, cy - size // 2))
         if self._committed_at is None and not self._passive:
             self._draw_hint_bubble(window, cx, cy, timer_outer)
 
     def _render_dial(self, elapsed, size):
+        layer = self._static_layer(size).copy()
+        layer.blit(self._render_dynamic(elapsed, size), (0, 0))
+        return layer
+
+    def _static_layer(self, size):
+        def build():
+            def render(surf, k):
+                c = surf.get_width() / 2.0
+                pg.draw.circle(surf, pg.Color(Colors.bg + "ea"), (c, c),
+                               (self.radius + self.backdrop_pad) * k)
+                pg.draw.circle(surf, pg.Color(Colors.border_strong), (c, c), self.radius * k,
+                               max(int(self.ring_w * k), 1))
+            return supersample((size, size), render)
+        return memoized_surface(_WHEEL_STATIC_CACHE, self.radius, build)
+
+    def _render_dynamic(self, elapsed, size):
         def render(surf, k):
             c = surf.get_width() / 2.0
-            radius = self.radius * k
-            pg.draw.circle(surf, pg.Color(Colors.bg + "ea"), (c, c), (self.radius + 4) * k)
-            pg.draw.circle(surf, pg.Color(Colors.border_strong), (c, c), radius,
-                           max(int(self.ring_w * k), 1))
 
             if self._committed_at is None and self.deadline_ms > 0:
                 remaining = max(0.0, 1.0 - elapsed / self.deadline_ms)
@@ -170,7 +222,8 @@ class WheelController(SkillCheckController):
                     blend = (1.0 - remaining) ** WHEEL_TIMER_RAMP
                     timer_base = Colors.spectate if self._passive else Colors.amber
                     timer_color = pg.Color(timer_base).lerp(pg.Color(Colors.loss), blend)
-                    inner, outer = (self.radius + 3) * k, (self.radius + self.ring_w + 3) * k
+                    inner = (self.radius + self.timer_gap) * k
+                    outer = (self.radius + self.ring_w + self.timer_gap) * k
                     end_deg = remaining * 360.0
                     pg.draw.polygon(surf, timer_color,
                                     _band_polygon(c, c, inner, outer, 0.0, end_deg))
@@ -182,7 +235,7 @@ class WheelController(SkillCheckController):
             arc_color = Colors.spectate if self._passive else Colors.accent
             if self._committed_at is not None and self._landed is not None:
                 arc_color = Colors.win if self._landed else Colors.loss
-            band = _band_polygon(c, c, (self.radius - self.band_w) * k, radius,
+            band = _band_polygon(c, c, (self.radius - self.band_w) * k, self.radius * k,
                                  self.challenge.arc_start_deg,
                                  self.challenge.arc_start_deg + arc_width)
             pg.draw.polygon(surf, pg.Color(arc_color), band)
@@ -190,24 +243,25 @@ class WheelController(SkillCheckController):
             needle_len = (self.radius - self.ring_w - 2) * k
             needle_deg = self.challenge.needle_deg(elapsed)
             pg.draw.polygon(surf, pg.Color(Colors.text),
-                            _needle_polygon(c, c, needle_deg, needle_len, self.needle_w * k))
+                            _needle_polygon(c, c, needle_deg, needle_len,
+                                            self.needle_w * k, self.needle_tip_w * k))
             pg.draw.circle(surf, pg.Color(Colors.text),
-                           _rim_point(c, c, needle_len, needle_deg), self.needle_w * k / 2.0)
+                           _rim_point(c, c, needle_len, needle_deg), self.needle_tip_w * k / 2.0)
             pg.draw.circle(surf, pg.Color(Colors.text), (c, c), max(self.hub_r * k, 1))
 
         return supersample((size, size), render)
 
     def _draw_hint_bubble(self, window, cx, cy, timer_outer):
         label = self._hint_font.render("SPACE / CLICK", True, pg.Color(Colors.text))
-        pad_x, pad_y = 12, 6
+        pad_x, pad_y = self._hint_pad_x, self._hint_pad_y
         bubble_w = label.get_width() + pad_x * 2
         bubble_h = label.get_height() + pad_y * 2
         bubble = rounded_rect_surface((bubble_w, bubble_h), bubble_h // 2,
                                       Colors.surface_raised, border=Colors.border_strong,
                                       border_width=1)
-        left = cx - bubble_w // 2
-        top = cy + timer_outer + 10
+        left = _clamp_bubble_left(cx - bubble_w // 2, bubble_w, window.get_width())
+        top = cy + timer_outer + self._hint_gap
         if top + bubble_h > window.get_height():
-            top = cy - timer_outer - 10 - bubble_h
+            top = cy - timer_outer - self._hint_gap - bubble_h
         window.blit(bubble, (left, top))
         window.blit(label, (left + pad_x, top + pad_y))

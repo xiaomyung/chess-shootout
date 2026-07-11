@@ -37,7 +37,7 @@ class Toast:
         for b in self._bubbles:
             if b["key"] == key:
                 if b["message"] != message or b["kind"] != kind:
-                    b["text_surf"] = None
+                    b["overlay"] = None
                 b["message"] = message
                 b["kind"] = kind
                 b["shown_at_ms"] = now
@@ -88,29 +88,29 @@ class Toast:
         return max(0, min(fade_in, fade_out))
 
     def _render_bubble(self, b, now):
+        if b.get("overlay") is None:
+            b["overlay"] = self._build_bubble_overlay(b)
+        overlay = b["overlay"]
+        overlay.set_alpha(self._alpha(b, now))
+        return overlay
+
+    def _build_bubble_overlay(self, b):
         hype = b["kind"] == "hype"
         label = b["message"].upper() if hype else b["message"]
         text_color = Colors.on_accent if hype else Colors.text_dim
         bg_color = pg.Color(Colors.accent if hype else Colors.surface)
         border_color = pg.Color(Colors.accent_hi if hype else Colors.border)
-        if b.get("text_surf") is None:
-            b["text_surf"] = self.font.render(label, True, text_color)
-        text_surf = b["text_surf"].copy()
+        text_surf = self.font.render(label, True, text_color)
         spark_d = text_surf.get_height() // 2 if hype else 0
         spark_gap = spark_d + SPARK_GAP_PX if hype else 0
         w = text_surf.get_width() + 2 * PADDING_X + spark_gap
         h = text_surf.get_height() + 2 * PADDING_Y
         radius = h // 2
-        alpha = self._alpha(b, now)
         overlay = pg.Surface((w, h), pg.SRCALPHA)
-        bg_color.a = alpha
-        border_color.a = alpha
         pg.draw.rect(overlay, bg_color, overlay.get_rect(), border_radius=radius)
         pg.draw.rect(overlay, border_color, overlay.get_rect(), 1, border_radius=radius)
-        text_surf.set_alpha(alpha)
         if hype:
             spark = pg.Color(Colors.on_accent)
-            spark.a = alpha
             pg.draw.circle(overlay, spark, (PADDING_X + spark_d // 2, h // 2), spark_d // 2)
         overlay.blit(text_surf, (PADDING_X + spark_gap, h // 2 - text_surf.get_height() // 2))
         return overlay

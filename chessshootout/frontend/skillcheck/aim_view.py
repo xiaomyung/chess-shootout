@@ -2,6 +2,7 @@ import pygame as pg
 
 from chessshootout.frontend.skillcheck.controller import (
     SkillCheckController, SKILLCHECK_RESULT_HOLD_MS, EdgeTrigger)
+from chessshootout.frontend.visual.cache import new_cache, memoized_surface
 from chessshootout.frontend.visual.colors import Colors
 from chessshootout.frontend.visual.draw import supersample
 from chessshootout.frontend.visual.effects import EffectManager
@@ -21,10 +22,26 @@ AIM_RETICLE_R_FRAC = 0.09
 AIM_PATH_DIM = 0.42
 AIM_SPOTLIGHT_FRAC = 1.25
 AIM_SPOTLIGHT_ALPHA = 70
-AIM_SPOTLIGHT_BASE_R = 72
+AIM_CROSS_LW_FRAC = 0.024
+AIM_RING_LW_FRAC = 0.02
 
 _VICTIM_KEY = "victim"
 _SHOOTER_KEY = "shooter"
+
+_SPOTLIGHT_CACHE = new_cache()
+
+
+def _spotlight_surface(r):
+    def build():
+        surf = pg.Surface((2 * r, 2 * r), pg.SRCALPHA)
+        rgb = pg.Color(Colors.amber)[:3]
+        for i in range(r):
+            radius = r - i
+            edge = radius / r
+            pg.draw.circle(surf, (*rgb, int(AIM_SPOTLIGHT_ALPHA * (1.0 - edge) ** 2)),
+                           (r, r), radius)
+        return surf
+    return memoized_surface(_SPOTLIGHT_CACHE, r, build)
 
 
 class AimController(SkillCheckController):
@@ -50,7 +67,10 @@ class AimController(SkillCheckController):
         self._shot_render = None
         self._shot_offset = None
         self._shot_held_until = None
+        self._victim_orig = victim_surface
+        self._victim_orig_cell = max(int(cell_rect.width), 1)
         self._victim = victim_surface
+        self._victim_cache = {}
         self.cell_size = 0
         self._from_sq = from_sq if from_sq is not None else _SHOOTER_KEY
         self._victim_sq = victim_sq if victim_sq is not None else _VICTIM_KEY
@@ -59,7 +79,6 @@ class AimController(SkillCheckController):
         self._fx = EffectManager()
         self._geom = geom if geom is not None else (lambda key: self.center)
         self._fx.geom = self._geom
-        self._glow_base = None
         self._board_rect = None
         self.set_board_rect(board_rect)
         self._apply_geometry(cell_rect)
@@ -67,12 +86,23 @@ class AimController(SkillCheckController):
 
     def _apply_geometry(self, cell_rect):
         new_cell = max(int(cell_rect.width), 1)
-        if self._victim is not None and self.cell_size and new_cell != self.cell_size:
-            w = max(int(self._victim.get_width() * new_cell / self.cell_size), 1)
-            h = max(int(self._victim.get_height() * new_cell / self.cell_size), 1)
-            self._victim = pg.transform.smoothscale(self._victim, (w, h))
+        if self._victim_orig is not None:
+            self._victim = self._scaled_victim(new_cell)
         self.center = cell_rect.center
         self.cell_size = new_cell
+
+    def _scaled_victim(self, new_cell):
+        if new_cell == self._victim_orig_cell:
+            return self._victim_orig
+        cached = self._victim_cache.get(new_cell)
+        if cached is not None:
+            return cached
+        scale = new_cell / self._victim_orig_cell
+        w = max(round(self._victim_orig.get_width() * scale), 1)
+        h = max(round(self._victim_orig.get_height() * scale), 1)
+        surf = pg.transform.smoothscale(self._victim_orig, (w, h))
+        self._victim_cache[new_cell] = surf
+        return surf
 
     def set_board_rect(self, board_rect):
         if board_rect is None:
@@ -193,22 +223,9 @@ class AimController(SkillCheckController):
         scrim.fill((*pg.Color(Colors.bg)[:3], AIM_SCRIM_ALPHA))
         window.blit(scrim, self._board_rect.topleft)
 
-    def _spotlight_base(self):
-        if self._glow_base is None:
-            r = AIM_SPOTLIGHT_BASE_R
-            surf = pg.Surface((2 * r, 2 * r), pg.SRCALPHA)
-            rgb = pg.Color(Colors.amber)[:3]
-            for i in range(r):
-                radius = r - i
-                edge = radius / r
-                pg.draw.circle(surf, (*rgb, int(AIM_SPOTLIGHT_ALPHA * (1.0 - edge) ** 2)),
-                               (r, r), radius)
-            self._glow_base = surf
-        return self._glow_base
-
     def _draw_spotlight(self, window):
         r = max(int(self.cell_size * AIM_SPOTLIGHT_FRAC), 8)
-        glow = pg.transform.smoothscale(self._spotlight_base(), (2 * r, 2 * r))
+        glow = _spotlight_surface(r)
         window.blit(glow, glow.get_rect(center=self.center))
 
     def _draw_victim(self, window, elapsed, miss):
@@ -251,20 +268,23 @@ class AimController(SkillCheckController):
         ox, oy = self._crosshair_offset(elapsed, miss)
         path = (self.challenge.path_offsets(elapsed, miss, AIM_PATH_SAMPLES)
                 if AIM_SHOW_PATH else None)
+        cross_lw_base = max(1, round(cell * AIM_CROSS_LW_FRAC))
+        ring_lw_base = max(1, round(cell * AIM_RING_LW_FRAC))
 
         def render(surf, k):
             c = surf.get_width() / 2.0
+            ring_lw = max(int(ring_lw_base * k), 1)
             if path is not None:
                 pts = [(c + px * cell * k, c + py * cell * k) for px, py in path]
-                pg.draw.lines(surf, path_col, False, pts, max(int(2 * k), 1))
+                pg.draw.lines(surf, path_col, False, pts, ring_lw)
             if hit_rx > 0.0 and hit_ry > 0.0:
                 ring = pg.Rect(0, 0, int(2 * hit_rx * cell * k), int(2 * hit_ry * cell * k))
                 ring.center = (int(c), int(c))
-                pg.draw.ellipse(surf, live, ring, max(int(2 * k), 1))
+                pg.draw.ellipse(surf, live, ring, ring_lw)
             rx, ry = c + ox * cell * k, c + oy * cell * k
             arm = AIM_CROSS_ARM_FRAC * cell * k
             gap = AIM_CROSS_GAP_FRAC * cell * k
-            lw = max(int(2.4 * k), 1)
+            lw = max(int(cross_lw_base * k), 1)
             for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)):
                 pg.draw.line(surf, cross_col, (rx + dx * gap, ry + dy * gap),
                              (rx + dx * (gap + arm), ry + dy * (gap + arm)), lw)

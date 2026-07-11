@@ -1,7 +1,7 @@
 import pygame as pg
 
 from chessshootout.frontend.modals.base import BaseModal
-from chessshootout.frontend.panels.player_strip import format_clock
+from chessshootout.frontend.visual.clock_visual import format_clock
 from chessshootout.frontend.visual.colors import Colors
 from chessshootout.frontend.visual.draw import (
     rounded_rect_surface, blit_centered, stroked_text, soft_blur)

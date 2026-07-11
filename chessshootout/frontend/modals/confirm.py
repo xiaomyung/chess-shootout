@@ -4,30 +4,13 @@ from chessshootout.frontend.modals.base import BaseModal, MODAL_MAX_WIDTH, MODAL
 from chessshootout.frontend.visual.colors import Colors
 from chessshootout.frontend.visual.draw import rounded_rect_surface
 from chessshootout.frontend.visual.emoji import blit_emoji
-from chessshootout.frontend.visual.fonts import get_display_font, get_font
-from chessshootout.frontend.visual.widgets import draw_button_row, fit_text_to_rect
+from chessshootout.frontend.visual.fonts import fonts_for_width, get_display_font, get_font
+from chessshootout.frontend.visual.widgets import draw_button_row, fit_text_to_rect, wrap_words
 
 
 TITLE_SUB_GAP = 8
 TITLE_TILE_RADIUS = 13
-
-
-def _wrap_words(text, font, max_w, max_lines=3):
-    words = text.split()
-    lines = []
-    line = ""
-    for word in words:
-        trial = f"{line} {word}".strip()
-        if line and font.size(trial)[0] > max_w:
-            lines.append(line)
-            line = word
-            if len(lines) >= max_lines:
-                break
-        else:
-            line = trial
-    if line and len(lines) < max_lines:
-        lines.append(line)
-    return lines
+SUB_MAX_LINES = 3
 
 
 class ConfirmModal(BaseModal):
@@ -46,6 +29,7 @@ class ConfirmModal(BaseModal):
         self.extra_label = "Cancel"
         self.button_rects = {}
         self._panel = pg.Rect(0, 0, 0, 0)
+        self._font_cache = {}
 
     def show(self, title, on_yes, on_no=None, yes_label="Confirm", no_label="Cancel",
              on_extra=None, extra_label="Cancel", sub="", danger=False, emoji=None):
@@ -72,12 +56,14 @@ class ConfirmModal(BaseModal):
         return self.title is not None
 
     def _fonts(self, panel_w):
-        if getattr(self, "_fonts_w", None) != panel_w:
-            self._fonts_w = panel_w
-            self._title_font = get_display_font(max(int(panel_w * 0.07), 22))
-            self._sub_font = get_font(max(int(panel_w * 0.032), 13), bold=False)
-            self._button_font = get_font(max(int(panel_w * 0.034), 13), bold=True)
-        return self._title_font, self._sub_font, self._button_font
+        return fonts_for_width(self._font_cache, panel_w, self._build_fonts)
+
+    def _build_fonts(self, panel_w):
+        return (
+            get_display_font(max(int(panel_w * 0.07), 22)),
+            get_font(max(int(panel_w * 0.032), 13), bold=False),
+            get_font(max(int(panel_w * 0.034), 13), bold=True),
+        )
 
     def draw(self):
         if not self.is_visible() or self.rect.width <= 0:
@@ -92,7 +78,7 @@ class ConfirmModal(BaseModal):
         title_surf = fit_text_to_rect(
             title_font.render(self.title.upper(), True, Colors.text),
             pg.Rect(0, 0, inner_w, title_font.get_height()))
-        sub_lines = _wrap_words(self.sub, sub_font, inner_w) if self.sub else []
+        sub_lines = wrap_words(self.sub, sub_font, inner_w, SUB_MAX_LINES) if self.sub else []
         line_h = sub_font.get_linesize()
 
         icon_side = max(int(panel_w * 0.12), 40) if self.emoji else 0

@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "chess-shootout"
-version = "2.6.0"
+version = "2.7.0"
 description = "Full-featured local and online chess built with pygame"
 readme = "README.md"
 requires-python = ">=3.12,<3.13"
@@ -68,7 +68,7 @@ max_line_length = 100
 ignore = "E127"
 
 [[tool.pylama.files]]
-path = "tests/*"
+path = "tests/**"
 ignore = "E402"
 
 [tool.coverage.run]

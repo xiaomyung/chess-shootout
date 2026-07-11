@@ -9,7 +9,7 @@ from chessshootout.frontend.visual.draw import rounded_rect_surface
 from chessshootout.frontend.visual.emoji import blit_emoji
 from chessshootout.frontend.visual.fonts import get_display_font, get_font, get_mono_font
 from chessshootout.frontend.visual.icons import draw_eye, draw_file, draw_folder, draw_folder_plus
-from chessshootout.frontend.visual.scroll_view import ScrollView
+from chessshootout.frontend.visual.scroll_view import ScrollHost, ScrollView
 from chessshootout.frontend.visual.text_input import TextInput
 from chessshootout.frontend.visual.widgets import draw_button, fit_text_to_rect
 
@@ -20,11 +20,10 @@ ROW_TEXT_INSET = 8
 ROW_META_INSET = 10
 
 
-class DirectoryBrowser(BaseModal):
+class DirectoryBrowser(BaseModal, ScrollHost):
 
     def __init__(self, window):
         super().__init__(window)
-        self.visible = False
         self.current = os.path.expanduser("~")
         self.entries = []
         self.show_hidden = False
@@ -51,9 +50,6 @@ class DirectoryBrowser(BaseModal):
         self._input_rect = pg.Rect(0, 0, 0, 0)
         self._on_rect_changed()
 
-    def _store_scroll(self, value):
-        self._scroll_px = value
-
     def _on_rect_changed(self):
         h = max(self.rect.height, 1)
         self.padding = max(int(self.rect.width * 0.032), 12)
@@ -76,15 +72,12 @@ class DirectoryBrowser(BaseModal):
         self.creating = False
         self.new_folder_input.text = ""
         self._reload()
-        self.visible = True
+        super().show()
 
     def hide(self):
-        self.visible = False
+        super().hide()
         self.creating = False
         self.scroll.cancel()
-
-    def is_visible(self):
-        return self.visible
 
     @staticmethod
     def _human_size(size):
@@ -378,22 +371,6 @@ class DirectoryBrowser(BaseModal):
                         self._enter(path)
                     return True
         return True
-
-    def handle_scroll(self, pos, dy):
-        if not self.visible:
-            return False
-        return self.scroll.handle_wheel(pos, dy)
-
-    def handle_press(self, pos):
-        if not self.visible:
-            return False
-        return self.scroll.handle_press(pos) is not None
-
-    def handle_motion(self, pos):
-        return self.scroll.handle_motion(pos)
-
-    def handle_release(self, pos):
-        return self.scroll.handle_release()
 
     def handle_key(self, event):
         if not self.visible or not self.creating:

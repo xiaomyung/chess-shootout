@@ -7,9 +7,13 @@ import os
 import pygame as pg
 
 from chessshootout.paths import resource_path
+from chessshootout.frontend.visual.cache import new_cache, memoized_surface
 from chessshootout.frontend.visual.colors import Colors
 from chessshootout.frontend.visual.draw import supersample
 from chessshootout.frontend.visual.fonts import get_font, get_mono_font
+
+_DOT_CACHE = new_cache()
+_DOT_GLYPH_CACHE = new_cache()
 
 log = logging.getLogger("chess.chrome")
 
@@ -367,30 +371,34 @@ class WindowChrome:
                     (rect.centerx - self.DOT_RADIUS, rect.centery - self.DOT_RADIUS))
 
     def _draw_smooth_dot(self, center, color):
-        def render(surf, k):
-            pg.draw.circle(surf, pg.Color(color),
-                           (self.DOT_RADIUS * k, self.DOT_RADIUS * k), self.DOT_RADIUS * k)
-        dot = supersample(self.DOT_RADIUS * 2, render)
+        def build():
+            def render(surf, k):
+                pg.draw.circle(surf, pg.Color(color),
+                               (self.DOT_RADIUS * k, self.DOT_RADIUS * k), self.DOT_RADIUS * k)
+            return supersample(self.DOT_RADIUS * 2, render)
+        dot = memoized_surface(_DOT_CACHE, str(color), build)
         self.window.blit(dot, (center[0] - self.DOT_RADIUS, center[1] - self.DOT_RADIUS))
 
     def _dot_glyph(self, key, base):
-        dark = base.lerp(pg.Color(0, 0, 0), self.DOT_GLYPH_DARKEN)
+        def build():
+            dark = base.lerp(pg.Color(0, 0, 0), self.DOT_GLYPH_DARKEN)
 
-        def render(surf, k):
-            d = self.DOT_RADIUS * 2 * k
-            c = d / 2
-            g = self.DOT_RADIUS * k * self.DOT_GLYPH_INSET
-            lw = max(int(1.5 * k), 2)
-            if key == "min":
-                pg.draw.line(surf, dark, (c - g, c), (c + g, c), lw)
-            elif key == "max":
-                box = pg.Rect(0, 0, round(2 * g), round(2 * g))
-                box.center = (round(c), round(c))
-                pg.draw.rect(surf, dark, box, lw)
-            else:
-                pg.draw.line(surf, dark, (c - g, c - g), (c + g, c + g), lw)
-                pg.draw.line(surf, dark, (c - g, c + g), (c + g, c - g), lw)
-        return supersample(self.DOT_RADIUS * 2, render, scale=8)
+            def render(surf, k):
+                d = self.DOT_RADIUS * 2 * k
+                c = d / 2
+                g = self.DOT_RADIUS * k * self.DOT_GLYPH_INSET
+                lw = max(int(1.5 * k), 2)
+                if key == "min":
+                    pg.draw.line(surf, dark, (c - g, c), (c + g, c), lw)
+                elif key == "max":
+                    box = pg.Rect(0, 0, round(2 * g), round(2 * g))
+                    box.center = (round(c), round(c))
+                    pg.draw.rect(surf, dark, box, lw)
+                else:
+                    pg.draw.line(surf, dark, (c - g, c - g), (c + g, c + g), lw)
+                    pg.draw.line(surf, dark, (c - g, c + g), (c + g, c - g), lw)
+            return supersample(self.DOT_RADIUS * 2, render, scale=8)
+        return memoized_surface(_DOT_GLYPH_CACHE, key, build)
 
     def handle_click(self, pos):
         if pos[1] >= self.HEIGHT:

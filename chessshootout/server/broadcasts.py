@@ -12,12 +12,15 @@ log = logging_setup.get_logger("chess.server.app")
 
 
 async def finalize_and_broadcast(rooms, connections, room, reason, winner_color=None):
-    rooms.finalize_result(room.room_id, reason, winner_color=winner_color)
-    await broadcast(connections, room,
-                    ResultMessage(reason=reason, winner_color=winner_color))
+    applied = rooms.finalize_result(room.room_id, reason, winner_color=winner_color)
+    if not applied:
+        return
+    result_reason, result_winner = room.result
+    await broadcast(rooms, connections, room,
+                    ResultMessage(reason=result_reason, winner_color=result_winner))
 
 
-async def resolve_skillcheck_fail(connections, room):
+async def resolve_skillcheck_fail(rooms, connections, room):
     pending = room.pending_skillcheck
     if pending is None:
         return None
@@ -26,7 +29,7 @@ async def resolve_skillcheck_fail(connections, room):
     room.skillcheck_log.append(SkillCheckOutcome(
         len(room.backend.move_history) + 1, pending.kind.value, False,
         room.backend.preview_san(pending.from_sq, pending.to_sq, pending.promotion)))
-    await broadcast(connections, room, SkillCheckResultMessage(
+    await broadcast(rooms, connections, room, SkillCheckResultMessage(
         won=False,
         from_sq=coord_from_square(pending.from_sq),
         to_sq=coord_from_square(pending.to_sq),

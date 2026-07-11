@@ -2,7 +2,7 @@ import pygame as pg
 
 from chessshootout.frontend.visual.colors import Colors
 from chessshootout.frontend.modals.base import BaseModal, BUTTON_VPAD
-from chessshootout.frontend.visual.scroll_view import ScrollView
+from chessshootout.frontend.visual.scroll_view import ScrollHost, ScrollView
 from chessshootout.frontend.visual.widgets import draw_button_row, fit_text_to_rect
 from chessshootout.frontend.visual.fonts import get_font, get_mono_font
 
@@ -18,8 +18,8 @@ HOTKEYS = [
     ("Hold Give 15s", "Ramp the opponent's clock up to the starting time"),
     ("Q  R  B  N", "Promotion picker (when shown)"),
     ("Space / Click", "Fire the skill-check wheel (Shootout)"),
-    ("← →", "Step through moves (review)"),
-    ("Home", "Jump to first move (review)"),
+    ("← →", "Step through moves (also during live games)"),
+    ("Home", "Jump to first move (also during live games)"),
     ("End", "Return to live play"),
     ("Esc", "Back · close modal · resign · quit"),
 ]
@@ -32,11 +32,10 @@ MIN_WIDTH = 320
 MIN_HEIGHT = 280
 
 
-class HelpModal(BaseModal):
+class HelpModal(BaseModal, ScrollHost):
 
     def __init__(self, window):
         super().__init__(window)
-        self._visible = False
         self.button_rects = {}
         self._scroll_px = 0.0
         self._content_px = 0
@@ -48,9 +47,6 @@ class HelpModal(BaseModal):
             lambda: (self._rows_rect, self._content_px),
             wheel_step_px=lambda: self._line_h,
         )
-
-    def _store_scroll(self, value):
-        self._scroll_px = value
 
     def set_rect(self, rect):
         win_w, win_h = self.window.get_size()
@@ -71,20 +67,17 @@ class HelpModal(BaseModal):
         self.button_font = get_font(BUTTON_FONT_SIZE, bold=True)
 
     def show(self):
-        self._visible = True
+        super().show()
         self._scroll_px = 0.0
         self.scroll.cancel()
 
     def hide(self):
-        self._visible = False
+        super().hide()
         self.button_rects = {}
         self.scroll.cancel()
 
-    def is_visible(self):
-        return self._visible
-
     def draw(self):
-        if not self._visible or self.rect.width <= 0:
+        if not self.visible or self.rect.width <= 0:
             return
         self.scroll.tick()
         self.draw_shell()
@@ -159,7 +152,7 @@ class HelpModal(BaseModal):
         self.scroll.draw_thumb(self.window)
 
     def handle_click(self, pos):
-        if not self._visible:
+        if not self.visible:
             return False
         for key, br in self.button_rects.items():
             if br.collidepoint(pos):
@@ -167,18 +160,8 @@ class HelpModal(BaseModal):
                 return True
         return False
 
-    def handle_scroll(self, pos, dy):
-        if not self._visible:
+    def handle_key(self, event):
+        if not self.visible:
             return False
-        return self.scroll.handle_wheel(pos, dy)
-
-    def handle_press(self, pos):
-        if not self._visible:
-            return False
-        return self.scroll.handle_press(pos) is not None
-
-    def handle_motion(self, pos):
-        return self.scroll.handle_motion(pos)
-
-    def handle_release(self, pos):
-        return self.scroll.handle_release()
+        self.hide()
+        return True

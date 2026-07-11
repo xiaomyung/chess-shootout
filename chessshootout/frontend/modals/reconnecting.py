@@ -4,11 +4,14 @@ import pygame as pg
 
 from chessshootout.frontend.modals.base import BaseModal
 from chessshootout.online.client import RECONNECT_TOTAL_SECONDS
-from chessshootout.frontend.panels.player_strip import format_countdown
+from chessshootout.frontend.visual.clock_visual import format_countdown
 from chessshootout.frontend.visual.colors import Colors
+from chessshootout.frontend.visual.cache import new_cache, memoized_surface, render_text
 from chessshootout.frontend.visual.draw import supersample
 from chessshootout.frontend.visual.widgets import draw_button_row
-from chessshootout.frontend.visual.fonts import get_display_font, get_font, get_mono_font
+from chessshootout.frontend.visual.fonts import (
+    fonts_for_width, get_display_font, get_font, get_mono_font,
+)
 
 
 SPINNER_STROKE = 3
@@ -24,47 +27,53 @@ BUTTON_REF = 15
 GAP_REF = 16
 BUTTON_HEIGHT_REF = 46
 
+_RING_CACHE = new_cache()
+
+
+def _ring_base(size, color):
+    def build():
+        def render(surf, k):
+            s = surf.get_width()
+            c = (s / 2, s / 2)
+            stroke = max(int(SPINNER_STROKE * k), 2)
+            pg.draw.circle(surf, pg.Color(color), c, s / 2)
+            pg.draw.circle(surf, (0, 0, 0, 0), c, s / 2 - stroke)
+            base = math.radians(-90)
+            g = math.radians(SPINNER_GAP_DEG)
+            a0, a1 = base - g / 2, base + g / 2
+            wedge = [c]
+            for i in range(13):
+                a = a0 + (a1 - a0) * i / 12
+                wedge.append((c[0] + s * math.cos(a), c[1] + s * math.sin(a)))
+            pg.draw.polygon(surf, (0, 0, 0, 0), wedge)
+        return supersample(int(size), render)
+    return memoized_surface(_RING_CACHE, (int(size), color), build)
+
 
 def _ring_surface(size, color, angle_deg):
-    def render(surf, k):
-        s = surf.get_width()
-        c = (s / 2, s / 2)
-        stroke = max(int(SPINNER_STROKE * k), 2)
-        pg.draw.circle(surf, pg.Color(color), c, s / 2)
-        pg.draw.circle(surf, (0, 0, 0, 0), c, s / 2 - stroke)
-        base = math.radians(-90 + angle_deg)
-        g = math.radians(SPINNER_GAP_DEG)
-        a0, a1 = base - g / 2, base + g / 2
-        wedge = [c]
-        for i in range(13):
-            a = a0 + (a1 - a0) * i / 12
-            wedge.append((c[0] + s * math.cos(a), c[1] + s * math.sin(a)))
-        pg.draw.polygon(surf, (0, 0, 0, 0), wedge)
-    return supersample(int(size), render)
+    base = _ring_base(size, color)
+    return pg.transform.rotozoom(base, -angle_deg, 1.0)
 
 
 class ReconnectingModal(BaseModal):
 
     def __init__(self, window):
         super().__init__(window)
-        self._visible = False
         self.on_cancel = None
         self._disconnected_at_ms = None
         self.button_rects = {}
+        self._font_cache = {}
 
     def show(self, disconnected_at_ms, on_cancel):
-        self._visible = True
+        super().show()
         self._disconnected_at_ms = disconnected_at_ms
         self.on_cancel = on_cancel
 
     def hide(self):
-        self._visible = False
+        super().hide()
         self.on_cancel = None
         self._disconnected_at_ms = None
         self.button_rects = {}
-
-    def is_visible(self):
-        return self._visible
 
     def _remaining(self):
         if self._disconnected_at_ms is None:
@@ -73,16 +82,18 @@ class ReconnectingModal(BaseModal):
         return RECONNECT_TOTAL_SECONDS - elapsed
 
     def _fonts(self, scale):
-        if getattr(self, "_fonts_scale", None) != scale:
-            self._fonts_scale = scale
-            self._heading_font = get_display_font(max(int(HEADING_REF * scale), 16))
-            self._sub_font = get_font(max(int(SUB_REF * scale), 11), bold=False)
-            self._cd_font = get_mono_font(max(int(COUNTDOWN_REF * scale), 18), bold=True)
-            self._button_font = get_font(max(int(BUTTON_REF * scale), 12), bold=True)
-        return self._heading_font, self._sub_font, self._cd_font, self._button_font
+        return fonts_for_width(self._font_cache, scale, self._build_fonts)
+
+    def _build_fonts(self, scale):
+        return (
+            get_display_font(max(int(HEADING_REF * scale), 16)),
+            get_font(max(int(SUB_REF * scale), 11), bold=False),
+            get_mono_font(max(int(COUNTDOWN_REF * scale), 18), bold=True),
+            get_font(max(int(BUTTON_REF * scale), 12), bold=True),
+        )
 
     def draw(self):
-        if not self._visible or self.rect.width <= 0:
+        if not self.visible or self.rect.width <= 0:
             self.button_rects = {}
             return
         rect = self.rect
@@ -94,9 +105,9 @@ class ReconnectingModal(BaseModal):
         spinner = max(int(SPINNER_REF * scale), 30)
         heading_font, sub_font, cd_font, button_font = self._fonts(scale)
 
-        heading = heading_font.render("RECONNECTING…", True, Colors.text)
-        sub = sub_font.render("Hang tight, restoring your game", True, Colors.text_dim)
-        cd = cd_font.render(format_countdown(self._remaining()), True, Colors.amber_hi)
+        heading = render_text(heading_font, "RECONNECTING…", Colors.text)
+        sub = render_text(sub_font, "Hang tight, restoring your game", Colors.text_dim)
+        cd = render_text(cd_font, format_countdown(self._remaining()), Colors.amber_hi)
 
         g = max(int(GAP_REF * scale), 8)
         btn_h = max(int(BUTTON_HEIGHT_REF * scale), 30)
@@ -123,7 +134,7 @@ class ReconnectingModal(BaseModal):
             self.window, row, [("Abandon game", "abandon")], button_font, self.padding)
 
     def handle_click(self, pos):
-        if not self._visible:
+        if not self.visible:
             return False
         for key, br in self.button_rects.items():
             if br.collidepoint(pos):
