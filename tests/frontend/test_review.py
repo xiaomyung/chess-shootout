@@ -521,7 +521,7 @@ def test_strip_capture_summary_memo_hits_until_history_or_ply_changes(monkeypatc
     """The (len(history), review_ply, color) memo added for strip-draw perf must
     skip recomputation on a repeat call and only recompute when the ply lands or
     review_ply moves — otherwise the point of the cache is lost."""
-    import chessshootout.frontend.frontend as frontend_module
+    import chessshootout.frontend.screens.game as game_module
 
     app = _new_app()
     app.backend.try_move(Square(6, 4), Square(4, 4))
@@ -529,13 +529,13 @@ def test_strip_capture_summary_memo_hits_until_history_or_ply_changes(monkeypatc
     app.backend.try_move(Square(4, 4), Square(3, 3))
 
     calls = []
-    real_captured_by = frontend_module.captured_by
+    real_captured_by = game_module.captured_by
 
     def counting_captured_by(history, color):
         calls.append(color)
         return real_captured_by(history, color)
 
-    monkeypatch.setattr(frontend_module, "captured_by", counting_captured_by)
+    monkeypatch.setattr(game_module, "captured_by", counting_captured_by)
 
     app._strip_capture_summary(PieceColor.WHITE)
     app._strip_capture_summary(PieceColor.WHITE)

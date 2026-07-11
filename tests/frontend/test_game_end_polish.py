@@ -9,7 +9,7 @@ import pygame as pg
 
 from tests.conftest import pygame_display
 from chessshootout.backend.utils import Square
-from chessshootout.frontend.frontend import (
+from chessshootout.frontend.screens.game import (
     RESULT_FADE_MS, RESULT_FADE_MAX_ALPHA, RESULT_MODAL_DELAY_MS,
 )
 from tests.helpers import make_app, start_single_screen

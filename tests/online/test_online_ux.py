@@ -15,9 +15,9 @@ import pytest
 
 from tests.conftest import pygame_display
 from chessshootout.domain.match import ONLINE
-from chessshootout.frontend.frontend import (
-    ANIM_MS_DEFAULT, ANIM_MS_MIN, ANIM_MS_MAX,
-    Frontend, compute_animation_ms, RECONNECT_MODAL_DEBOUNCE_MS,
+from chessshootout.frontend.frontend import Frontend, RECONNECT_MODAL_DEBOUNCE_MS
+from chessshootout.frontend.screens.game import (
+    ANIM_MS_DEFAULT, ANIM_MS_MIN, ANIM_MS_MAX, compute_animation_ms,
 )
 from chessshootout.frontend.visual.colors import Colors
 from chessshootout.frontend.modals.reconnecting import ReconnectingModal

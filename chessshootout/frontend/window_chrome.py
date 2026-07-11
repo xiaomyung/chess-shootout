@@ -20,6 +20,7 @@ log = logging.getLogger("chess.chrome")
 WINDOW_FLAGS = pg.NOFRAME | pg.RESIZABLE
 MIN_WINDOW_WIDTH = 900
 MIN_WINDOW_HEIGHT = 600
+WINDOW_TITLE = "Chess Shootout"
 
 _HITTEST_NORMAL = 0
 _HITTEST_DRAGGABLE = 1

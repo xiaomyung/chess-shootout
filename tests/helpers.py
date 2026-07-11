@@ -129,7 +129,12 @@ def make_app(w=1000, h=800, *, mock_sound=True):
 
 def start_single_screen(app, *, nickname="alice", side="white",
                          time_minutes=5, increment_seconds=0):
-    """Start a local single-screen game on an existing Frontend."""
+    """Start a local single-screen game on an existing Frontend.
+
+    Drives the same request_nav path the real start-menu callback uses;
+    _on_start_game queues the Nav and executes it immediately so this stays
+    synchronous for callers.
+    """
     app._on_start_game({
         "mode": "single_screen", "nickname": nickname, "side": side,
         "time_minutes": time_minutes, "increment_seconds": increment_seconds,

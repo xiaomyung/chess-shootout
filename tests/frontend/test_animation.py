@@ -296,7 +296,7 @@ def test_last_animation_completed_at_ms_unchanged_on_cancel(board):
 
 def test_auto_flip_blocked_during_post_animation_delay():
     """Auto-flip is suppressed for AUTO_FLIP_DELAY_MS after a slide lands."""
-    from chessshootout.frontend.frontend import AUTO_FLIP_DELAY_MS
+    from chessshootout.frontend.screens.game import AUTO_FLIP_DELAY_MS
     app = _start_game()
     app.board.handle_click(Square(6, 4))
     app.board.handle_click(Square(4, 4))

@@ -13,7 +13,7 @@ from tests.conftest import pygame_display
 from chessshootout.backend.utils import Square
 from chessshootout.backend.pieces import PieceColor
 from chessshootout.infra import countries, env
-from chessshootout.frontend.frontend import OPPONENT_NAME_FOR_MODE
+from chessshootout.frontend.screens.game import OPPONENT_NAME_FOR_MODE
 from chessshootout.online.client import OnlineClient
 from chessshootout.domain.pgn.load import extract_csmatchid, parse_pgn_headers
 from tests.helpers import fake_uuid4

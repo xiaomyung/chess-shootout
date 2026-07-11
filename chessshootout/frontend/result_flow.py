@@ -81,8 +81,9 @@ def _score_str(score):
 
 class ResultFlow:
 
-    def __init__(self, frontend):
-        self.frontend = frontend
+    def __init__(self, screen):
+        self.screen = screen
+        self.app = screen.app
         self._result_cache_key = None
         self._result_cache = None
         self._series_scores = {}
@@ -98,49 +99,48 @@ class ResultFlow:
         self._final_save_attempted_for = None
 
     def current_result(self):
-        frontend = self.frontend
-        clock = frontend.match.clock
+        screen = self.screen
+        clock = screen.match.clock
         flagged = clock.flagged if clock is not None else None
-        history = frontend.match.move_history
+        history = screen.match.move_history
         last_move = history[-1].move if history else None
-        key = (len(history), last_move, frontend.manual_result, flagged)
+        key = (len(history), last_move, screen.manual_result, flagged)
         if key != self._result_cache_key:
             self._result_cache_key = key
-            self._result_cache = frontend.manual_result or frontend.match.game_result()
+            self._result_cache = screen.manual_result or screen.match.game_result()
         return self._result_cache
 
     def result_text(self):
-        code = self.frontend.current_result()
+        code = self.app.current_result()
         if code is None:
             return None
         return RESULT_TEXT.get(code)
 
     def _feed_result_menu(self):
-        frontend = self.frontend
-        code = self.frontend.current_result()
-        text = self.frontend.result_text()
+        screen = self.screen
+        code = self.app.current_result()
+        text = self.result_text()
         if code is None or text is None:
-            frontend.result_menu.set_result(None, "draw", "")
+            screen.result_menu.set_result(None, "draw", "")
             return
         title, reason = text
         word, intent = self._outcome_word_intent(code, title)
-        moves = (len(frontend.match.move_history) + 1) // 2
+        moves = (len(screen.match.move_history) + 1) // 2
         full_reason = f"{reason} · {moves} moves" if reason else f"{moves} moves"
         subject = self._result_subject_color(code)
-        stats = compute_result_stats(frontend.match.move_history, frontend.match.clock, subject)
-        frontend.result_menu.set_result(word, intent, full_reason, stats)
-        if frontend.mode == ONLINE:
-            frontend.result_menu.set_series(
-                frontend.white_name, frontend.black_name,
-                _score_str(self._series_scores.get(frontend.white_name, 0.0)),
-                _score_str(self._series_scores.get(frontend.black_name, 0.0)))
+        stats = compute_result_stats(screen.match.move_history, screen.match.clock, subject)
+        screen.result_menu.set_result(word, intent, full_reason, stats)
+        if self.app.mode == ONLINE:
+            screen.result_menu.set_series(
+                screen.white_name, screen.black_name,
+                _score_str(self._series_scores.get(screen.white_name, 0.0)),
+                _score_str(self._series_scores.get(screen.black_name, 0.0)))
         else:
-            frontend.result_menu.set_series(None, None, None, None)
+            screen.result_menu.set_series(None, None, None, None)
 
     def _perspective_color(self):
-        frontend = self.frontend
-        if frontend.mode in (ONLINE, BOT):
-            return frontend.match.local_color
+        if self.app.mode in (ONLINE, BOT):
+            return self.screen.match.local_color
         return None
 
     def _outcome_word_intent(self, code, title):
@@ -163,29 +163,29 @@ class ResultFlow:
         return PieceColor.WHITE
 
     def _move_visually_settled(self):
-        board = self.frontend.board
+        board = self.screen.board
         return not board.is_animating() and not board.effects.captures
 
     def _update_result_pending(self):
-        frontend = self.frontend
+        screen = self.screen
         self._update_incremental_autosave()
-        result = self.frontend.current_result()
-        if result is None or frontend.pgn_review:
-            frontend._result_first_seen_at_ms = None
+        result = self.app.current_result()
+        if result is None or screen.pgn_review:
+            screen._result_first_seen_at_ms = None
             self._result_await_since_ms = None
             return
-        if frontend.mode == ONLINE and frontend.manual_result is None:
-            if not frontend._resyncing:
+        if self.app.mode == ONLINE and screen.manual_result is None:
+            if not self.app._resyncing:
                 self._promote_awaited_result(result)
             return
-        if frontend.mode == ONLINE and frontend._resyncing:
+        if self.app.mode == ONLINE and self.app._resyncing:
             return
         if RESULT_CODES.get(result) is not None:
             self._on_result_final(result)
-        if frontend._result_first_seen_at_ms is None and self._move_visually_settled():
-            frontend._result_first_seen_at_ms = pg.time.get_ticks()
+        if screen._result_first_seen_at_ms is None and self._move_visually_settled():
+            screen._result_first_seen_at_ms = pg.time.get_ticks()
             try:
-                frontend._trigger_result_effects()
+                screen._trigger_result_effects()
             except Exception:
                 log.exception("result effects failed")
 
@@ -200,40 +200,36 @@ class ResultFlow:
         log.info("promoted unconfirmed online result locally: %s", engine_result)
 
     def _award_series_win(self, winner):
-        frontend = self.frontend
-        name = frontend._name_for_color(winner)
+        name = self.screen._name_for_color(winner)
         self._series_scores[name] = self._series_scores.get(name, 0.0) + 1
 
     def _award_series_draw(self):
-        frontend = self.frontend
-        for name in (frontend.white_name, frontend.black_name):
+        for name in (self.screen.white_name, self.screen.black_name):
             self._series_scores[name] = self._series_scores.get(name, 0.0) + 0.5
 
     def _on_open_pgn(self):
-        frontend = self.frontend
         path = self._last_saved_pgn_path
         if path is None or not os.path.exists(path):
-            frontend.toast.show("No saved PGN")
+            self.app.toast.show("No saved PGN")
             return
         if not _open_with_default_app(path):
-            frontend.toast.show("Could not open PGN")
+            self.app.toast.show("Could not open PGN")
 
     def _probe_games_dir_writable(self):
-        frontend = self.frontend
         games_dir = str(paths.get_games_dir())
         try:
             os.makedirs(games_dir, exist_ok=True)
         except OSError:
-            frontend.toast.show("Games folder isn't writable — check your data folder")
+            self.app.toast.show("Games folder isn't writable — check your data folder")
             return
         if not paths.is_writable_dir(games_dir):
-            frontend.toast.show("Games folder isn't writable — check your data folder")
+            self.app.toast.show("Games folder isn't writable — check your data folder")
 
     def _show_save_error_toast_once(self):
         if self._save_error_toast_shown:
             return
         self._save_error_toast_shown = True
-        self.frontend.toast.show("Could not save PGN — check games folder")
+        self.app.toast.show("Could not save PGN — check games folder")
 
     def _remove_quietly(self, path):
         try:
@@ -295,10 +291,10 @@ class ResultFlow:
         return self._write_pgn_atomic(path, text)
 
     def _auto_save_pgn(self):
-        frontend = self.frontend
-        if not frontend.match.move_history:
+        screen = self.screen
+        if not screen.match.move_history:
             return None
-        tag = RESULT_CODES.get(self.frontend.current_result(), "*")
+        tag = RESULT_CODES.get(self.app.current_result(), "*")
         if self._last_saved_pgn_path is not None:
             already_final = self._last_saved_result_tag not in (None, "*")
             if already_final:
@@ -323,23 +319,20 @@ class ResultFlow:
         path = self._last_saved_pgn_path
         self._last_saved_result_tag = tag
         if tag != "*":
-            frontend.toast.show(f"Saved {os.path.basename(path)}")
+            self.app.toast.show(f"Saved {os.path.basename(path)}")
         return path
 
     def _auto_save_prefix(self):
-        frontend = self.frontend
-        if frontend.mode == ONLINE:
-            return "online"
-        if frontend.mode == BOT:
+        if self.app.mode == BOT:
             return "bot"
-        return "local"
+        return "online" if self.screen.variant == "online" else "local"
 
     def _update_incremental_autosave(self):
-        frontend = self.frontend
-        if (frontend.mode == "menu" or frontend.pgn_review or self._save_failed
-                or self.frontend.current_result() is not None):
+        screen = self.screen
+        if (self.app.mode == "menu" or screen.pgn_review or self._save_failed
+                or self.app.current_result() is not None):
             return
-        ply_count = len(frontend.match.move_history)
+        ply_count = len(screen.match.move_history)
         if ply_count == 0 or ply_count == self._autosave_last_ply:
             return
         now = pg.time.get_ticks()
@@ -352,7 +345,7 @@ class ResultFlow:
     def _on_result_final(self, code):
         if code is None:
             return
-        if not self._series_score_awarded and self.frontend.mode == ONLINE:
+        if not self._series_score_awarded and self.app.mode == ONLINE:
             if code.startswith("white_wins"):
                 self._award_series_win("white")
                 self._series_score_awarded = True
@@ -371,20 +364,20 @@ class ResultFlow:
             log.info("game end result=%s saved=%s", code, path or "false")
 
     def _finalize_result(self, code):
-        frontend = self.frontend
+        screen = self.screen
         self._result_await_since_ms = None
-        if frontend.manual_result is None:
-            frontend.manual_result = code
+        if screen.manual_result is None:
+            screen.manual_result = code
         self._on_result_final(code)
 
     def _build_pgn_text(self):
-        frontend = self.frontend
-        result = self.frontend.current_result()
-        time_control = frontend._time_control
+        screen = self.screen
+        result = self.app.current_result()
+        time_control = screen._time_control
         return generate_pgn(
-            frontend.match.move_history, result,
-            white_name=frontend.white_name, black_name=frontend.black_name,
+            screen.match.move_history, result,
+            white_name=screen.white_name, black_name=screen.black_name,
             time_control=time_control,
-            match_id=frontend._match_session_id,
-            annotations=format_annotations(frontend.skillcheck_session._skillcheck_log),
+            match_id=screen._match_session_id,
+            annotations=format_annotations(screen.skillcheck_session._skillcheck_log),
         )

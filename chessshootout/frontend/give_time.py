@@ -16,8 +16,9 @@ GIVE_TIME_RATCHET_MS_FAST = 55
 
 class GiveTimeHold:
 
-    def __init__(self, frontend):
-        self.frontend = frontend
+    def __init__(self, screen):
+        self.screen = screen
+        self.app = screen.app
         self._last_give_time_at_ms = -GIVE_TIME_DEBOUNCE_MS
         self._give_time_holding = False
         self._give_time_hold_start_ms = 0
@@ -31,14 +32,14 @@ class GiveTimeHold:
         return pg.time.get_ticks() - self._last_give_time_at_ms < GIVE_TIME_DEBOUNCE_MS
 
     def _on_give_time(self):
-        frontend = self.frontend
+        screen = self.screen
         if self._give_time_holding:
             return
-        if not frontend.board_interactive():
+        if not screen.board_interactive():
             return
         if self._give_time_on_cooldown():
             return
-        clock = frontend.match.clock
+        clock = screen.match.clock
         if clock is None or clock.flagged is not None:
             return
         recipient = self._give_time_recipient()
@@ -55,13 +56,13 @@ class GiveTimeHold:
         self._give_time_hold_recipient = recipient
 
     def _update_give_time_hold(self):
-        frontend = self.frontend
+        screen = self.screen
         if not self._give_time_holding:
             return
-        clock = frontend.match.clock
-        if (frontend.pgn_review or frontend.current_result() is not None
-                or frontend._resyncing or frontend.skillcheck_overlay.is_active()
-                or frontend._menu_overlay_active()
+        clock = screen.match.clock
+        if (screen.pgn_review or screen.current_result() is not None
+                or self.app._resyncing or screen.skillcheck_overlay.is_active()
+                or self.app._menu_overlay_active()
                 or clock is None or clock.flagged is not None):
             self._cancel_give_time_hold()
             return
@@ -88,16 +89,16 @@ class GiveTimeHold:
                     + (GIVE_TIME_RATCHET_MS_FAST - GIVE_TIME_RATCHET_MS_SLOW) * fill)
         if now - self._give_time_last_ratchet_ms >= interval:
             self._give_time_last_ratchet_ms = now
-            self.frontend.sound_manager.play_give_ratchet()
+            self.app.sound_manager.play_give_ratchet()
 
     def _end_give_time_hold(self):
-        frontend = self.frontend
+        screen = self.screen
         if not self._give_time_holding:
             return
         recipient = self._give_time_hold_recipient
         now = pg.time.get_ticks()
         hold_ms = now - self._give_time_hold_start_ms
-        clock = frontend.match.clock
+        clock = screen.match.clock
         if self._give_time_hold_ticks == 0 and clock is not None:
             added = clock.add_time(recipient, GIVE_TIME_SECONDS)
             if added > 0:
@@ -107,8 +108,8 @@ class GiveTimeHold:
         self._give_time_holding = False
         self._give_time_hold_recipient = None
         self._last_give_time_at_ms = now
-        if frontend.mode == ONLINE and frontend.online_client is not None:
-            frontend.online_client.send_give_time(hold_ms)
+        if self.app.mode == ONLINE and self.app.online_client is not None:
+            self.app.online_client.send_give_time(hold_ms)
             return
         self._give_time_toast_for_giver(recipient, total)
 
@@ -119,33 +120,33 @@ class GiveTimeHold:
         self._give_time_hold_added = 0.0
 
     def _pointer_over_give_button(self):
-        rect = self.frontend.right_menu.button_rects.get("give_time")
+        rect = self.screen.right_menu.button_rects.get("give_time")
         return rect is not None and rect.collidepoint(pg.mouse.get_pos())
 
     def _give_time_recipient(self):
-        frontend = self.frontend
-        if frontend.mode == ONLINE and frontend.match.local_color is not None:
-            return opponent_of(frontend.match.local_color)
-        return frontend.match.current_turn()
+        screen = self.screen
+        if self.app.mode == ONLINE and screen.match.local_color is not None:
+            return opponent_of(screen.match.local_color)
+        return screen.match.current_turn()
 
     def _give_time_toast_for_giver(self, recipient_color, added):
-        frontend = self.frontend
-        name = frontend._name_for_color(recipient_color)
+        screen = self.screen
+        name = screen._name_for_color(recipient_color)
         if added <= 0:
-            frontend.toast.show(f"{name} already at maximum time")
+            self.app.toast.show(f"{name} already at maximum time")
         else:
             log.info("give time granted seconds=%.1f", added)
-            frontend._strip_for_color(recipient_color).flash_increment(added)
-            frontend.toast.show(f"Gave {int(round(added))} sec to {name}")
-            frontend.sound_manager.play_give_time()
+            screen._strip_for_color(recipient_color).flash_increment(added)
+            self.app.toast.show(f"Gave {int(round(added))} sec to {name}")
+            self.app.sound_manager.play_give_time()
 
     def _give_time_toast_for_receiver(self, giver_color, added):
-        frontend = self.frontend
+        screen = self.screen
         if added <= 0:
             return
         log.info("give time received seconds=%.1f", added)
-        if frontend.match.local_color is not None:
-            frontend._strip_for_color(frontend.match.local_color).flash_increment(added)
-        name = frontend._name_for_color(giver_color)
-        frontend.toast.show(f"{name} gave you {int(round(added))} seconds")
-        frontend.sound_manager.play_give_time()
+        if screen.match.local_color is not None:
+            screen._strip_for_color(screen.match.local_color).flash_increment(added)
+        name = screen._name_for_color(giver_color)
+        self.app.toast.show(f"{name} gave you {int(round(added))} seconds")
+        self.app.sound_manager.play_give_time()

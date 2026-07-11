@@ -1,51 +1,849 @@
+import logging
+import random
+import uuid
+
 import pygame as pg
 
+from chessshootout.backend.fen import apply_fen
+from chessshootout.domain.match import Match, SINGLE_SCREEN, BOT, ONLINE
+from chessshootout.domain.capture_summary import captured_by, material_advantage
+from chessshootout.domain.pgn.load import format_time_control
+from chessshootout.backend.pieces import PieceColor, PieceType, opponent_of
+from chessshootout.infra import countries, env
+from chessshootout.frontend.board import Board
 from chessshootout.frontend.screens.base import Screen
+from chessshootout.frontend.skillcheck.overlay import SkillCheckOverlay
+from chessshootout.skillcheck.coordinator import SkillCheckCoordinator
+from chessshootout.frontend.panels.right import (
+    RightMenu,
+    BUTTONS as RIGHT_MENU_BUTTONS,
+    UNTIMED_BUTTONS as RIGHT_MENU_UNTIMED_BUTTONS,
+    REVIEW_BUTTONS as RIGHT_MENU_REVIEW_BUTTONS,
+)
+from chessshootout.frontend.panels.player_strip import PlayerStrip
+from chessshootout.frontend.modals.result import ResultMenu
+from chessshootout.frontend.focus.arrow import (
+    FocusArrow, FOCUS_EDGE_ZONE_PX, FOCUS_ARROW_D, LONG_AGO_MS,
+)
+from chessshootout.frontend.focus.time_line import TimeLine
+from chessshootout.frontend.focus.transition import FocusTransition
+from chessshootout.frontend.layout import compute_layout
+from chessshootout.frontend.visual import backdrop
+from chessshootout.frontend.visual import cache
+from chessshootout.frontend.visual.effects import TAKEOVER_TOTAL_MS
+from chessshootout.frontend.result_flow import (
+    ResultFlow, AUTOSAVE_THROTTLE_MS, RESULT_TEXT, _score_str,
+)
+from chessshootout.frontend.skillcheck_session import SkillcheckSession
+from chessshootout.frontend.give_time import GiveTimeHold
+from chessshootout.frontend.window_chrome import WINDOW_TITLE
+from chessshootout.server.protocol import FIRST_MOVE_ABORT_SECONDS, GRACE_SECONDS
+from chessshootout.online.client import RECONNECT_TOTAL_SECONDS
+
+
+log = logging.getLogger("chess.frontend")
+
+OPPONENT_NAME_FOR_MODE = {
+    SINGLE_SCREEN: "Player 2",
+    BOT: "Bot",
+}
+
+PLACEHOLDER_RATING = "1500"
+
+VARIANT_PILL_LABELS = {
+    "local": "Local",
+    "online": "Online",
+}
+
+FOCUS_OFF_LINGER_MS = 2000
+FOCUS_EDGE_ARROW_MARGIN = 16
+FOCUS_ARROW_OFF_GAP = 6
+
+AUTO_FLIP_DELAY_MS = 200
+RESULT_FADE_MS = 400
+RESULT_MODAL_DELAY_MS = 500
+RESULT_TAKEOVER_MS = TAKEOVER_TOTAL_MS
+RESULT_FADE_MAX_ALPHA = 140
+
+AUTO_END_GATE_FRACTION = 0.1
+
+ANIM_MS_DEFAULT = 180
+ANIM_MS_MIN = 140
+ANIM_MS_MAX = 280
+ANIM_MS_PER_SECOND = 0.5
+
+_RESULT_FADE_CACHE = cache.new_size_cache()
+
+
+def compute_animation_ms(initial_seconds):
+    if initial_seconds is None or initial_seconds <= 0:
+        return ANIM_MS_DEFAULT
+    return max(ANIM_MS_MIN, min(ANIM_MS_MAX, int(initial_seconds * ANIM_MS_PER_SECOND)))
 
 
 class GameScreen(Screen):
 
     name = "game"
 
+    def __init__(self, app):
+        super().__init__(app)
+        window = app.window
+
+        self.manual_result = None
+        self.white_name = "Player 1"
+        self.black_name = "Player 2"
+        self.white_country = ""
+        self.black_country = ""
+        self._chosen_side = "white"
+        self._time_control = None
+        self.pgn_review = False
+        self._flag_fall_played = False
+        self._game_bg_cache = None
+        self._strip_memo = {}
+        self._result_first_seen_at_ms = None
+        self._pgn_result_tag = None
+        self._match_session_id = None
+        self._last_turn_for_flip = None
+        self._first_move_deadline_ms = None
+        self._opp_disconnected_at_ms = None
+        self._local_disconnected_at_ms = None
+        self._prev_online_state = None
+
+        self.match = Match()
+        self.board = Board(window, self.match,
+                           move_landed_callback=self._on_move_landed,
+                           on_premove_queued=app.sound_manager.play_premove_queued,
+                           shot_callback=self._on_shot_fired,
+                           announce_callback=self._on_kill_announced)
+        self.skillcheck = SkillCheckCoordinator()
+        self.skillcheck_overlay = SkillCheckOverlay()
+        self.skillcheck_session = SkillcheckSession(self)
+        self.board.skillcheck_gate = self.skillcheck_session._skillcheck_gate
+        self.board.skillcheck_armed = lambda: self.skillcheck.enabled
+        self.board.locked_targets = self.skillcheck.is_locked
+
+        self.result_flow = ResultFlow(self)
+        self.give_time = GiveTimeHold(self)
+
+        self.result_menu = ResultMenu(window, {
+            "new_game": app._on_new_game,
+            "open_pgn": self.result_flow._on_open_pgn,
+            "menu": app._on_back_to_menu,
+            "rematch": app._on_rematch,
+        })
+        self.right_menu = RightMenu(window, self.match, {
+            "undo": self._on_undo,
+            "resign": self._on_resign,
+            "draw": self._on_draw,
+            "flip": self._on_flip,
+            "menu": app._on_back_to_menu,
+            "help": app._on_help,
+            "give_time": self.give_time._on_give_time,
+        }, board=self.board, buttons_provider=self._right_menu_buttons,
+            audio_panel=app.audio_panel,
+            disabled_keys_provider=self._right_menu_disabled_keys,
+            whiffs_provider=self.skillcheck_session._skillcheck_whiffs)
+        self.player_strip_top = PlayerStrip(window)
+        self.player_strip_bottom = PlayerStrip(window)
+
+        self.focus_mode = False
+        self.focus_transition = None
+        self.focus_arrow = FocusArrow()
+        self.time_line = TimeLine()
+        self._focus_panel_hover_ms = LONG_AGO_MS
+        self._focus_hint_until_ms = 0
+
+        self.result_flow._probe_games_dir_writable()
+
+    @property
+    def window(self):
+        return self.app.window
+
+    @property
+    def variant(self):
+        return "online" if self.app.mode == ONLINE else "local"
+
+    def _compute_layout(self):
+        self.app._compute_layout()
+
+    def enter(self, **payload):
+        fen = payload.get("fen")
+        side = payload.get("side")
+        if side is not None or fen is not None:
+            self._chosen_side = "white"
+            self.white_name = "Player 1"
+            self.black_name = "Player 2"
+            self.white_country = env.get_country()
+            self.black_country = countries.random_code()
+            self._time_control = None
+            self._ensure_local_session()
+        if side is not None:
+            self._apply_start_config(payload)
+        self._reset_to_new_game()
+        if fen is not None:
+            apply_fen(self.match.backend, fen)
+        log.info("game enter variant=%s tc=%s side=%s",
+                 self.variant, self._time_control, self._chosen_side)
+
+    def _apply_start_config(self, payload):
+        self._chosen_side = payload["side"]
+        nickname = (payload.get("nickname") or "").strip() or "Player 1"
+        opponent_name = OPPONENT_NAME_FOR_MODE[SINGLE_SCREEN]
+        self.white_name, self.black_name = (
+            (nickname, opponent_name) if self._chosen_side == "white"
+            else (opponent_name, nickname)
+        )
+        my_country = env.get_country()
+        opp_country = countries.random_code()
+        self.white_country, self.black_country = (
+            (my_country, opp_country) if self._chosen_side == "white"
+            else (opp_country, my_country)
+        )
+        time_minutes = payload.get("time_minutes")
+        increment_seconds = payload.get("increment_seconds")
+        self._time_control = (
+            (time_minutes * 60, increment_seconds) if time_minutes is not None else None
+        )
+        self.skillcheck.reset(
+            enabled=True,
+            seed="local-{}-{}".format(pg.time.get_ticks(), random.randint(0, 1 << 30)))
+
+    def exit(self):
+        did_focus = self.focus_mode or self.focus_transition is not None
+        if did_focus:
+            self._force_focus_off_instant()
+        was_dragging = self.board.is_dragging()
+        self.board.cancel_drag_physics()
+        self.board.end_press()
+        had_premoves = bool(self.board.premoves)
+        self.board.clear_premoves()
+        had_annotations = bool(self.board.highlighted_squares or self.board.arrows)
+        self.board.clear_annotations()
+        overlay_active = self.skillcheck_overlay.is_active()
+        if overlay_active:
+            self.skillcheck_session._teardown_skillcheck_overlay()
+        pg.display.set_caption(WINDOW_TITLE)
+        if did_focus or was_dragging or had_premoves or had_annotations or overlay_active:
+            log.debug(
+                "game exit teardown focus=%s drag=%s premoves=%s annotations=%s skillcheck=%s",
+                did_focus, was_dragging, had_premoves, had_annotations, overlay_active)
+
+    def update(self, now):
+        if self.game_live():
+            self.match.tick_clock()
+        post_animation_settled = (
+            not self.board.is_animating()
+            and not self.board.effects.captures
+            and now - self.board.last_animation_completed_at_ms >= AUTO_FLIP_DELAY_MS
+        )
+        if (self.app.mode == SINGLE_SCREEN
+                and self.app.current_result() is None
+                and post_animation_settled):
+            current = self.match.current_turn()
+            if current != self._last_turn_for_flip:
+                self.board.flipped = (current == PieceColor.BLACK)
+                self._last_turn_for_flip = current
+        if (self.game_live()
+                and post_animation_settled
+                and self.skillcheck_session._pending_online_move is None
+                and not self.skillcheck_session._skillcheck_swallows_input()):
+            self.board.try_apply_next_premove()
+        return None
+
+    def relayout(self, size):
+        window_width, window_height = size
+        r = compute_layout(
+            window_width, window_height, mode=self.app.mode, focus_mode=self.focus_mode,
+            focus_show=self.app._focus_show(), board_size=self.board.SIZE)
+        self.board.set_rect(r.board_rect)
+        self.right_menu.set_rect(r.menu_rect)
+        self.player_strip_top.set_rect(r.top_strip_rect)
+        self.player_strip_bottom.set_rect(r.bottom_strip_rect)
+        self.result_menu.set_rect(r.result_rect)
+        skillcheck_target = self.skillcheck_session._skillcheck_target
+        if self.skillcheck_overlay.is_active() and skillcheck_target is not None:
+            self.skillcheck_overlay.relayout(self.board.cell_rect(skillcheck_target))
+            self.skillcheck_overlay.set_board_rect(self.board.rect)
+        self._refresh_capture_icons(r.strip_height)
+
+    def _refresh_capture_icons(self, strip_height):
+        if not self.board.piece_images_original:
+            return
+        target = max(int(strip_height * 0.42), 1)
+        icons = {
+            key: pg.transform.smoothscale(surface, (target, target))
+            for key, surface in self.board.piece_images_original.items()
+        }
+        self.player_strip_top.set_piece_icons(icons)
+        self.player_strip_bottom.set_piece_icons(icons)
+
     def draw(self):
         app = self.app
         now = pg.time.get_ticks()
-        if app.current_result() is not None and app.focus_mode:
-            if app.focus_transition is None:
-                app._toggle_focus(False)
-            elif app.focus_transition.collapsing:
-                app._force_focus_off_instant()
-        if app.focus_transition is not None:
-            tr = app.focus_transition
+        if self.app.current_result() is not None and self.focus_mode:
+            if self.focus_transition is None:
+                self._toggle_focus(False)
+            elif self.focus_transition.collapsing:
+                self._force_focus_off_instant()
+        if self.focus_transition is not None:
+            tr = self.focus_transition
             tr.draw(now)
-            if app._focus_show() == "line" and tr.cur_board_rect is not None:
+            if self.app._focus_show() == "line" and tr.cur_board_rect is not None:
                 alpha = tr.cur_e if tr.collapsing else 1.0 - tr.cur_e
-                app._draw_time_lines(tr.cur_board_rect, alpha)
+                self._draw_time_lines(tr.cur_board_rect, alpha)
             if tr.done(now):
-                app._finalize_focus_transition()
-        elif app.focus_mode:
-            show = app._focus_show()
-            app._draw_game_scene(
+                self._finalize_focus_transition()
+        elif self.focus_mode:
+            show = self.app._focus_show()
+            self._draw_game_scene(
                 show_panel=False, show_strips=(show == "strips"),
-                arrow_hook=lambda: app._draw_focus_edge_arrow(now),
-                after_board=app._draw_time_lines if show == "line" else None)
-            app.board.draw_drag_overlay()
-            if app.board.effects.has_takeover():
-                app.board.effects.draw_takeover(app.window, now)
-            app.result_flow._update_result_pending()
+                arrow_hook=lambda: self._draw_focus_edge_arrow(now),
+                after_board=self._draw_time_lines if show == "line" else None)
+            self.board.draw_drag_overlay()
+            if self.board.effects.has_takeover():
+                self.board.effects.draw_takeover(self.window, now)
+            self.result_flow._update_result_pending()
         else:
-            app._draw_game_scene(
+            self._draw_game_scene(
                 show_panel=True, show_strips=True,
-                arrow_hook=lambda: app._update_focus_arrow_off(now))
-            app.board.draw_drag_overlay()
-            app.result_flow._update_result_pending()
+                arrow_hook=lambda: self._update_focus_arrow_off(now))
+            self.board.draw_drag_overlay()
+            self.result_flow._update_result_pending()
             if not app.match_found_modal.is_visible():
-                show_modal = app._result_modal_should_show() and not app.pgn_review
-                if not show_modal and app.board.effects.has_takeover():
-                    app.board.effects.draw_takeover(app.window, now)
+                show_modal = self._result_modal_should_show() and not self.pgn_review
+                if not show_modal and self.board.effects.has_takeover():
+                    self.board.effects.draw_takeover(self.window, now)
                 else:
-                    app._draw_result_fade_overlay()
+                    self._draw_result_fade_overlay()
                 if show_modal:
-                    app.board.effects.clear_takeover()
-                    app.result_flow._feed_result_menu()
-                    app.result_menu.draw()
+                    self.board.effects.clear_takeover()
+                    self.result_flow._feed_result_menu()
+                    self.result_menu.draw()
+
+    def current_result(self):
+        return self.result_flow.current_result()
+
+    def result_text(self):
+        code = self.app.current_result()
+        if code is None:
+            return None
+        return RESULT_TEXT.get(code)
+
+    def game_live(self):
+        return self.app.mode != "menu" and self.app.current_result() is None
+
+    def board_interactive(self):
+        return not self.pgn_review and self.app.current_result() is None
+
+    def _draw_game_scene(self, *, show_panel, show_strips, arrow_hook=None, after_board=None):
+        self.skillcheck_session._sync_aim_check_gun()
+        self._draw_game_background()
+        self.board.draw_board()
+        if after_board is not None:
+            after_board()
+        if show_strips:
+            self.app._update_player_strips()
+            self.player_strip_top.draw()
+            self.player_strip_bottom.draw()
+        if show_panel:
+            self._refresh_game_info()
+        if arrow_hook is not None:
+            arrow_hook()
+        if show_panel:
+            self.right_menu.draw_menu()
+
+    def _draw_game_background(self):
+        size = self.window.get_size()
+        w, h = size
+        if w <= 0 or h <= 0:
+            return
+        bc = self.board.rect.center
+        center = (bc[0] / w, bc[1] / h)
+        key = (size, bc)
+        if self._game_bg_cache is None or self._game_bg_cache[0] != key:
+            self._game_bg_cache = (key, backdrop.arena_background(size, center).convert())
+        self.window.blit(self._game_bg_cache[1], (0, 0))
+
+    def _refresh_game_info(self):
+        info = self._compute_game_info()
+        if info != self.right_menu.game_info:
+            self.right_menu.set_game_info(info)
+
+    def _compute_game_info(self):
+        if self.app.mode == "menu":
+            return None
+        tc = format_time_control(self._time_control) or "∞"
+        rnd = self._current_round()
+        if self.pgn_review:
+            return {"mode": "Review", "time_control": tc, "round": rnd,
+                    "lines": [self._pgn_result_tag or "*"]}
+        pill = "Bot" if self.app.mode == BOT else VARIANT_PILL_LABELS.get(self.variant, "Local")
+        info = {"mode": pill, "time_control": tc, "round": rnd, "lines": []}
+        if self.variant == "online":
+            white_score = self.result_flow._series_scores.get(self.white_name, 0.0)
+            black_score = self.result_flow._series_scores.get(self.black_name, 0.0)
+            info["lines"] = [
+                f"{self.white_name}  {_score_str(white_score)} – "
+                f"{_score_str(black_score)}  {self.black_name}",
+            ]
+        return info
+
+    def _current_round(self):
+        total = (self.result_flow._series_scores.get(self.white_name, 0.0)
+                 + self.result_flow._series_scores.get(self.black_name, 0.0))
+        return int(total) + 1
+
+    def _result_elapsed_ms(self):
+        if self._result_first_seen_at_ms is None:
+            return None
+        return pg.time.get_ticks() - self._result_first_seen_at_ms
+
+    def _result_modal_should_show(self):
+        elapsed = self._result_elapsed_ms()
+        if elapsed is None:
+            return False
+        delay = RESULT_TAKEOVER_MS if self.board.effects.has_takeover() else RESULT_MODAL_DELAY_MS
+        return elapsed >= delay
+
+    def _result_fade_surface(self, size):
+        def build():
+            surf = pg.Surface(size)
+            surf.fill((0, 0, 0))
+            return surf
+        return cache.memoized_surface(_RESULT_FADE_CACHE, size, build)
+
+    def _draw_result_fade_overlay(self):
+        elapsed = self._result_elapsed_ms()
+        if elapsed is None:
+            return
+        alpha = min(RESULT_FADE_MAX_ALPHA,
+                    int(RESULT_FADE_MAX_ALPHA * elapsed / RESULT_FADE_MS))
+        if alpha <= 0:
+            return
+        overlay = self._result_fade_surface(self.window.get_size())
+        overlay.set_alpha(alpha)
+        self.window.blit(overlay, (0, 0))
+
+    def _skip_result_fade(self):
+        if self._result_first_seen_at_ms is None:
+            return
+        self.board.effects.clear_takeover()
+        self._result_first_seen_at_ms = pg.time.get_ticks() - RESULT_MODAL_DELAY_MS
+
+    def _trigger_result_effects(self):
+        code = self.app.current_result()
+        if code is None:
+            return
+        if code.startswith("draw"):
+            self.app.sound_manager.play_draw()
+            return
+        if code.startswith("white_wins"):
+            winner, loser = PieceColor.WHITE, PieceColor.BLACK
+        elif code.startswith("black_wins"):
+            winner, loser = PieceColor.BLACK, PieceColor.WHITE
+        else:
+            return
+        is_mate = code in ("white_wins", "black_wins")
+        is_resign = code.endswith("_by_resignation")
+        if is_mate or is_resign:
+            self.board.show_surrender_flag(loser)
+        if is_mate:
+            self.board.show_checkmate_takeover(winner.value.upper())
+        if is_mate or is_resign:
+            if self._local_won(winner):
+                self.app.sound_manager.play_you_win()
+            elif is_resign:
+                self.app.sound_manager.play_surrender()
+            elif is_mate:
+                self.app.sound_manager.play_you_lose()
+
+    def _local_won(self, winner):
+        return self.app.mode != ONLINE or self.match.local_color == winner
+
+    def _on_flip(self):
+        if self.app.current_result() is not None and not self.pgn_review:
+            return
+        self.board.cancel_drag_physics()
+        self.board.flipped = not self.board.flipped
+        self.app.sound_manager.play_flip()
+
+    def _on_resign(self):
+        if not self.board_interactive():
+            return
+        self.app.confirm_modal.show(
+            "Tap out?", on_yes=self._perform_resign,
+            sub="The pieces are watching.",
+            yes_label="I'm done", no_label="Keep fighting", danger=True, emoji="🏳️",
+        )
+
+    def _perform_resign(self):
+        if self.app.current_result() is not None:
+            return
+        if self.app.mode == ONLINE and self.app.online_client is not None:
+            self.app.online_client.send_resign()
+            return
+        loser = self.match.current_turn()
+        self._auto_complete_pending_promotion()
+        self.manual_result = (
+            "black_wins_by_resignation" if loser == PieceColor.WHITE
+            else "white_wins_by_resignation"
+        )
+        self.board.clear_premoves()
+        self.board.clear_annotations()
+        self.result_flow._on_result_final(self.manual_result)
+
+    def _on_draw(self):
+        if not self.board_interactive():
+            return
+        self.app.confirm_modal.show(
+            "Offer a draw?", on_yes=self._perform_draw,
+            sub="Propose splitting the point. No shots fired, no glory either.",
+            yes_label="Offer draw", no_label="Nevermind", emoji="🤝",
+        )
+
+    def _perform_draw(self):
+        if self.app.current_result() is not None:
+            return
+        if self.app.mode == ONLINE and self.app.online_client is not None:
+            log.info("draw offer sent")
+            self.app.online_client.send_draw_offer()
+            return
+        self._auto_complete_pending_promotion()
+        self.manual_result = "draw_agreement"
+        self.board.clear_premoves()
+        self.board.clear_annotations()
+        self.result_flow._on_result_final(self.manual_result)
+
+    def _auto_complete_pending_promotion(self):
+        if self.board.pending_promotion_square is None:
+            return
+        if self.board.cancel_unapplied_promotion():
+            return
+        self.match.promote(self.board.pending_promotion_square, PieceType.QUEEN)
+        self.board.pending_promotion_square = None
+
+    def _on_undo(self):
+        if not self.board_interactive():
+            return
+        if self.app.mode == ONLINE and self.app.online_client is not None:
+            log.info("takeback requested")
+            self.app.online_client.send_takeback_request()
+            return
+        self.board.selected_square = None
+        self.board.clear_premoves()
+        self.skillcheck.clear_locks()
+        self.board.clear_annotations()
+        self.board.review_ply = None
+        self.board.cancel_animations()
+        if not self.match.move_history:
+            return
+        log.info("undo ply=%d", len(self.match.move_history))
+        self.app.sound_manager.play_undo()
+        self.skillcheck_session._drop_skillcheck_log_from(len(self.match.move_history))
+        move = self.match.move_history[-1].move
+        self.match.undo()
+        self.board.start_undo_animation(move)
+
+    def _on_move_landed(self, entry):
+        self._first_move_deadline_ms = None
+        if entry.gives_checkmate:
+            self.app.sound_manager.play_checkmate()
+        elif entry.move.is_castle:
+            self.app.sound_manager.play_castle()
+        else:
+            self.app.sound_manager.play_move(entry.move.piece.type)
+        if entry.gives_check and not entry.gives_checkmate:
+            self.app.sound_manager.play_check()
+            self.board.show_check_gun(entry)
+        self._maybe_flash_increment_for(entry.move.piece.color)
+        self.skillcheck.clear_locks()
+
+    def _on_shot_fired(self, entry):
+        self.app.sound_manager.play_capture(entry.move.piece.type)
+
+    def _on_kill_announced(self, key, victim=None):
+        if key == "hit":
+            self.app.sound_manager.play_hit(victim.type if victim is not None else None)
+        elif self.app.current_result() is None:
+            self.app.sound_manager.play_announcer(key)
+
+    def _maybe_flash_increment_for(self, mover_color):
+        clock = self.match.clock
+        if clock is None or clock.increment_seconds <= 0:
+            return
+        self._strip_for_color(mover_color).flash_increment()
+
+    @staticmethod
+    def _is_white(color):
+        return color in (PieceColor.WHITE, "white")
+
+    def _name_for_color(self, color):
+        return self.white_name if self._is_white(color) else self.black_name
+
+    def _country_for_color(self, color):
+        return self.white_country if self._is_white(color) else self.black_country
+
+    def _strip_for_color(self, color):
+        is_white = self._is_white(color)
+        top_is_white = self._strip_color_top() == PieceColor.WHITE
+        return (self.player_strip_top if is_white == top_is_white
+                else self.player_strip_bottom)
+
+    def _strip_color_top(self):
+        return PieceColor.WHITE if self.board.flipped else PieceColor.BLACK
+
+    def _update_player_strips(self):
+        top_color = self._strip_color_top()
+        bottom_color = opponent_of(top_color)
+        turn = self.match.current_turn()
+        over = self.app.current_result() is not None
+        self.player_strip_top.set_state(**self._strip_state(top_color, turn, over))
+        self.player_strip_bottom.set_state(**self._strip_state(bottom_color, turn, over))
+
+    def _strip_capture_summary(self, color):
+        key = (len(self.match.move_history), self.board.review_ply, color)
+        cached = self._strip_memo.get(color)
+        if cached is not None and cached[0] == key:
+            return cached[1], cached[2]
+        history = self.match.move_history
+        if self.board.review_ply is not None:
+            history = history[:self.board.review_ply]
+        captured = captured_by(history, color)
+        advantage = material_advantage(history, color)
+        self._strip_memo[color] = (key, captured, advantage)
+        return captured, advantage
+
+    def _strip_state(self, color, turn, over):
+        name = self._name_for_color(color)
+        seconds = (self.match.clock.remaining(color)
+                   if self.match.clock is not None else None)
+        initial_seconds = (self.match.clock.initial_seconds
+                           if self.match.clock is not None else None)
+        active = (color == turn) and not over
+        captured, advantage = self._strip_capture_summary(color)
+        connection_state = None
+        app = self.app
+        if (app.mode == ONLINE and app.online_client is not None
+                and self.match.local_color is not None
+                and color != self.match.local_color):
+            connection_state = app.online_client.opp_state
+        auto_end_label, auto_end_seconds = self._compute_auto_end(color, over)
+        is_bot = app.mode == BOT and name == OPPONENT_NAME_FOR_MODE[BOT]
+        return {
+            "name": name,
+            "player_color": color,
+            "is_bot": is_bot,
+            "rating": PLACEHOLDER_RATING,
+            "clock_seconds": seconds,
+            "active": active,
+            "captured": captured,
+            "advantage": advantage,
+            "captured_color": opponent_of(color),
+            "ko_count": len(captured),
+            "connection_state": connection_state,
+            "country": self._country_for_color(color),
+            "clock_initial_seconds": initial_seconds,
+            "auto_end_label": auto_end_label,
+            "auto_end_seconds": auto_end_seconds,
+        }
+
+    def _compute_auto_end(self, color, over):
+        if (self.app.mode != ONLINE or over or self.match.local_color is None):
+            return None, None
+        now = pg.time.get_ticks()
+        is_local = (color == self.match.local_color)
+        if is_local and self._local_disconnected_at_ms is not None:
+            return self._auto_end_remaining(
+                "Aborting in", self._local_disconnected_at_ms,
+                RECONNECT_TOTAL_SECONDS, now,
+            )
+        if (not is_local
+                and self._opp_disconnected_at_ms is not None):
+            return self._auto_end_remaining(
+                "Abandon in", self._opp_disconnected_at_ms, GRACE_SECONDS, now,
+            )
+        if (color == self.match.current_turn()
+                and not self.match.move_history
+                and self._first_move_deadline_ms is not None):
+            remaining_ms = self._first_move_deadline_ms - now
+            if remaining_ms <= 0:
+                return None, None
+            remaining = remaining_ms / 1000.0
+            elapsed = FIRST_MOVE_ABORT_SECONDS - remaining
+            if elapsed < AUTO_END_GATE_FRACTION * FIRST_MOVE_ABORT_SECONDS:
+                return None, None
+            return "Abort in", remaining
+        return None, None
+
+    def _auto_end_remaining(self, label, snap_ms, total_seconds, now_ms):
+        elapsed = (now_ms - snap_ms) / 1000.0
+        if elapsed < AUTO_END_GATE_FRACTION * total_seconds:
+            return None, None
+        remaining = total_seconds - elapsed
+        if remaining <= 0:
+            return None, None
+        return label, remaining
+
+    def _right_menu_buttons(self):
+        if self.pgn_review:
+            return RIGHT_MENU_REVIEW_BUTTONS
+        if self.match.clock is None:
+            return RIGHT_MENU_UNTIMED_BUTTONS
+        return RIGHT_MENU_BUTTONS
+
+    def _right_menu_disabled_keys(self):
+        if self.pgn_review:
+            return set()
+        if self.app.current_result() is not None:
+            return {"undo", "resign", "draw", "flip", "give_time"}
+        disabled = set()
+        clock = self.match.clock
+        if clock is None or clock.flagged is not None:
+            disabled.add("give_time")
+        if self.give_time._give_time_on_cooldown():
+            disabled.add("give_time")
+        return disabled
+
+    def _ensure_local_session(self):
+        if self._match_session_id is None:
+            self._match_session_id = str(uuid.uuid4())
+
+    def _reset_to_new_game(self):
+        app = self.app
+        self._force_focus_off_instant()
+        self.pgn_review = False
+        self.board.read_only = False
+        app._review_return_page = None
+        app.offer_banners.clear()
+        app._rematch_offered = False
+        self.result_menu.reset()
+        app.sound_manager.stop_all()
+        self.give_time._cancel_give_time_hold()
+        self.manual_result = None
+        self._flag_fall_played = False
+        self.result_flow._result_cache_key = None
+        self.result_flow._result_cache = None
+        self._strip_memo = {}
+        self._result_first_seen_at_ms = None
+        self._pgn_result_tag = None
+        self.result_flow._last_saved_pgn_path = None
+        self.result_flow._last_saved_result_tag = None
+        self.result_flow._result_await_since_ms = None
+        self.result_flow._result_logged = False
+        self.result_flow._series_score_awarded = False
+        self.result_flow._save_failed = False
+        self.result_flow._save_error_toast_shown = False
+        self.result_flow._final_save_attempted_for = None
+        self.result_flow._autosave_last_write_ms = -AUTOSAVE_THROTTLE_MS
+        self.result_flow._autosave_last_ply = 0
+        self.right_menu.reset_for_new_game()
+        self.match.new_game()
+        self.match.mode = ONLINE if self.variant == "online" else SINGLE_SCREEN
+        if self._time_control is not None:
+            initial, incr = self._time_control
+            self.match.setup_clock(initial, incr)
+            self.board.animation_duration_ms = compute_animation_ms(initial)
+        else:
+            self.board.animation_duration_ms = ANIM_MS_DEFAULT
+        self.board.reset_for_new_game()
+        self.skillcheck_overlay.cancel()
+        self.skillcheck.clear_locks()
+        self.skillcheck_session._clear_online_skillcheck_state()
+        self.skillcheck_session._skillcheck_log = []
+        app.confirm_modal.hide()
+        self._last_turn_for_flip = None
+
+    def _focus_show(self):
+        return env.get_focus_show()
+
+    def _focus_available(self):
+        return (self.app.mode != "menu"
+                and self.board_interactive()
+                and not self.skillcheck_overlay.is_active()
+                and not self.board.is_dragging()
+                and self.board.pending_promotion_square is None
+                and not self.app._menu_overlay_active())
+
+    def _focus_arrow_allowed(self):
+        return (self.board_interactive()
+                and not self.skillcheck_overlay.is_active()
+                and not self.app._menu_overlay_active())
+
+    def _toggle_focus(self, on):
+        if self.focus_transition is not None:
+            return
+        if self.skillcheck_overlay.is_active() and self.app.current_result() is None:
+            return
+        if on == self.focus_mode:
+            return
+        if on and not self._focus_available():
+            return
+        log.info("focus mode toggled on=%s", on)
+        self.board.cancel_drag_physics()
+        self.focus_transition = FocusTransition(self)
+        if on:
+            self.focus_transition.begin_collapse(self.app._focus_show())
+        else:
+            self.focus_transition.begin_expand(self.app._focus_show())
+        self.focus_arrow.reset()
+        self.app._needs_full_present = True
+
+    def _finalize_focus_transition(self):
+        self.focus_transition = None
+        self.app._needs_full_present = True
+
+    def _abort_transition_for_resize(self):
+        if self.focus_transition is not None:
+            self.focus_transition.cancel()
+            self.focus_transition = None
+            self.app._needs_full_present = True
+
+    def _force_focus_off_instant(self):
+        if not self.focus_mode and self.focus_transition is None:
+            return
+        if self.focus_transition is not None:
+            self.focus_transition.cancel()
+            self.focus_transition = None
+        self.focus_mode = False
+        self.focus_arrow.reset()
+        self._focus_panel_hover_ms = LONG_AGO_MS
+        self._focus_hint_until_ms = 0
+        self.app._compute_layout()
+        self.app._needs_full_present = True
+
+    def _focus_edge_zone_rect(self):
+        board_r = self.board.rect
+        w = self.window.get_width()
+        return pg.Rect(w - FOCUS_EDGE_ZONE_PX, board_r.top, FOCUS_EDGE_ZONE_PX, board_r.height)
+
+    def _focus_arrow_off_anchor(self):
+        x = self.right_menu.outer_rect.x - FOCUS_ARROW_D // 2 - FOCUS_ARROW_OFF_GAP
+        return (x, self.board.rect.centery)
+
+    def _update_focus_arrow_off(self, now):
+        if not self._focus_arrow_allowed():
+            self.focus_arrow.reset()
+            return
+        mp = pg.mouse.get_pos()
+        if self.right_menu.outer_rect.collidepoint(mp):
+            self._focus_panel_hover_ms = now
+        anchor = self._focus_arrow_off_anchor()
+        shown = (now < self._focus_hint_until_ms
+                 or now - self._focus_panel_hover_ms < FOCUS_OFF_LINGER_MS)
+        self.focus_arrow.update(now, shown, anchor, mp, False)
+        self.focus_arrow.draw(self.window)
+
+    def _draw_focus_edge_arrow(self, now):
+        mp = pg.mouse.get_pos()
+        zone = self._focus_edge_zone_rect()
+        reveal = self._focus_arrow_allowed() and zone.collidepoint(mp)
+        anchor = (self.window.get_width() - FOCUS_EDGE_ARROW_MARGIN - FOCUS_ARROW_D // 2,
+                  self.board.rect.centery)
+        self.focus_arrow.update(now, reveal, anchor, mp, True)
+        self.focus_arrow.draw(self.window)
+
+    def _draw_time_lines(self, board_rect=None, alpha=1.0):
+        if self.app._focus_show() != "line" or self._time_control is None:
+            return
+        self.time_line.draw(self.window, self.board, self.match.clock,
+                            self.match.current_turn(), board_rect or self.board.rect, alpha)
