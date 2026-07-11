@@ -47,6 +47,34 @@ def test_construction_defaults(ti):
     assert ti.placeholder == "nickname"
 
 
+def test_resize_to_a_new_font_size_invalidates_the_cursor_cache(ti):
+    """set_rect swaps the font when the rect height changes; the cursor-x cache
+    keys only on (text, cursor), so it must be dropped on a font-size change or
+    the caret draws at stale old-font metrics until the next keystroke."""
+    ti.text = "hello"
+    ti.focused = True
+    ti.draw()  # populate the cache at the 30px-rect font
+    assert ti._cursor_width_cache is not None
+    small_cursor_x = ti._cursor_width_cache[1]
+
+    ti.set_rect(pg.Rect(50, 50, 200, 80))  # taller rect -> larger font
+    assert ti._cursor_width_cache is None, "a font-size change drops the stale cursor_x"
+
+    ti.draw()
+    big_cursor_x = ti._cursor_width_cache[1]
+    assert big_cursor_x > small_cursor_x, "cursor_x recomputes under the new, larger font"
+
+
+def test_set_rect_at_the_same_height_keeps_the_cursor_cache(ti):
+    ti.text = "hello"
+    ti.focused = True
+    ti.draw()
+    cached = ti._cursor_width_cache
+    assert cached is not None
+    ti.set_rect(pg.Rect(10, 10, 400, 30))  # width changes, height (font size) does not
+    assert ti._cursor_width_cache is cached, "an unchanged font size keeps the warm cache"
+
+
 def test_mono_flag_uses_monospace_font():
     from chessshootout.frontend.visual.fonts import get_mono_font
     inp = TextInput(pg.display.get_surface(), mono=True)

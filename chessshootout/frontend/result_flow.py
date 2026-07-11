@@ -313,7 +313,6 @@ class ResultFlow:
             if os.path.normpath(fallback_dir) == os.path.normpath(primary_dir):
                 self._save_failed = True
                 return None
-            self._last_saved_pgn_path = None
             outcome = self._commit_pgn_write(fallback_dir, prefix, text)
             if outcome != "ok":
                 self._save_failed = True

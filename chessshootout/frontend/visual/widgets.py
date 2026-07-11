@@ -1,10 +1,11 @@
 import math
+from weakref import WeakKeyDictionary
 
 import pygame as pg
 
 from chessshootout.frontend.visual.colors import Colors
 from chessshootout.frontend.visual.cache import (
-    render_text, new_cache, new_size_cache, memoized_surface,
+    render_text, new_cache, memoized_surface,
 )
 from chessshootout.frontend.visual.draw import (
     supersample, rounded_rect_surface, infinity_surface, blit_centered,
@@ -137,7 +138,7 @@ def wrap_words(text, font, max_w, max_lines=None):
     return lines
 
 
-_FIT_TEXT_CACHE = new_size_cache()
+_FIT_TEXT_CACHE = WeakKeyDictionary()
 
 
 def fit_text_to_rect(text_surface, rect, padding=BUTTON_LABEL_PADDING_PX):
@@ -146,14 +147,19 @@ def fit_text_to_rect(text_surface, rect, padding=BUTTON_LABEL_PADDING_PX):
     tw, th = text_surface.get_size()
     if tw <= max_w and th <= max_h:
         return text_surface
-    key = (id(text_surface), max_w, max_h)
-    entry = _FIT_TEXT_CACHE.get(key)
-    if entry is not None and entry[0] is text_surface:
-        return entry[1]
+    key = (max_w, max_h)
+    by_size = _FIT_TEXT_CACHE.get(text_surface)
+    if by_size is not None:
+        fitted = by_size.get(key)
+        if fitted is not None:
+            return fitted
+    else:
+        by_size = {}
+        _FIT_TEXT_CACHE[text_surface] = by_size
     scale = min(max_w / tw, max_h / th)
     new_size = (max(int(tw * scale), 1), max(int(th * scale), 1))
     fitted = pg.transform.smoothscale(text_surface, new_size)
-    _FIT_TEXT_CACHE[key] = (text_surface, fitted)
+    by_size[key] = fitted
     return fitted
 
 

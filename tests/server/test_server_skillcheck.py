@@ -16,7 +16,7 @@ import pytest
 
 from chessshootout.backend.pieces import PieceColor, PieceType
 from chessshootout.backend.utils import Square, coord_from_square
-from chessshootout.server.broadcasts import resolve_skillcheck_fail
+from chessshootout.server.broadcasts import finalize_and_broadcast, resolve_skillcheck_fail
 from fastapi.testclient import TestClient
 
 from chessshootout.server.handlers import (
@@ -671,6 +671,47 @@ async def test_handle_move_applies_a_different_move_after_an_expired_unswept_pen
 
     assert out == "applied", "handle_move now agrees with resume instead of rejecting as pending"
     assert len(room.backend.move_history) == 1
+
+
+class _FinalizingWS(RecordingWS):
+    """A socket that, on receiving the inline expired-check resolve broadcast,
+    simulates a concurrent resign/flag finalize landing during
+    resolve_skillcheck_fail's await -- exactly the interleave two real handler
+    tasks on the shared loop would produce."""
+
+    def __init__(self, rooms, connections, room):
+        super().__init__()
+        self._rooms = rooms
+        self._connections = connections
+        self._room = room
+        self._fired = False
+
+    async def send_json(self, payload):
+        self.sent.append(payload)
+        if not self._fired and payload.get("type") == "skill_check_result":
+            self._fired = True
+            await finalize_and_broadcast(self._rooms, self._connections, self._room,
+                                         Reason.RESIGNATION, winner_color="black")
+
+
+@pytest.mark.asyncio
+async def test_move_after_expired_pending_bails_when_the_game_finalizes_mid_resolve(app, clock):
+    # REGRESSION: handle_move resolves an expired-but-unswept check inline via
+    # resolve_skillcheck_fail, which awaits a broadcast. If a concurrent finalize
+    # (resign/flag) lands during that await, handle_move must re-read room.result
+    # and bail -- never apply a fresh ply onto an already-finalized game.
+    room, ws_w, ws_b, frm, to = await _capture_room(app, clock, WHEEL)
+    await handle_move(app, ws_w, room, "white", _move_raw(frm, to))
+    finalizing = _FinalizingWS(app.state.rooms, app.state.connections, room)
+    app.state.connections.add(room.room_id, room.black.client_uuid, finalizing)
+    clock.advance((online.SKILLCHECK_DEADLINE_MS + 50) / 1000.0)  # expired, unswept
+
+    out = await handle_move(app, ws_w, room, "white", _move_raw(Square(7, 4), Square(6, 4)))
+
+    assert out == "already_over", "a finalize during the inline resolve preempts the retry"
+    assert room.result == (Reason.RESIGNATION, "black")
+    assert len(room.backend.move_history) == 0, "no ply lands on an already-finalized game"
+    assert not ws_w.of_type("move_applied"), "no move_applied is broadcast after the result"
 
 
 @pytest.mark.asyncio

@@ -33,6 +33,7 @@ class TextInput:
         self._focused = False
         self.rect = pg.Rect(0, 0, 0, 0)
         self.font_factor = 1.6
+        self._font_size = 16
         self.font = self._font(16)
         self.padding = 8
         self.scroll = 0
@@ -75,7 +76,10 @@ class TextInput:
     def set_rect(self, rect):
         self.rect = pg.Rect(rect)
         size = max(int(rect.height / self.font_factor), 10)
-        self.font = self._font(size)
+        if size != self._font_size:
+            self._font_size = size
+            self.font = self._font(size)
+            self._cursor_width_cache = None
 
     def _touch(self):
         self._last_action_ms = pg.time.get_ticks()

@@ -159,6 +159,42 @@ def test_hard_os_error_tries_the_fallback_dir_then_latches(tmp_path, monkeypatch
     assert app.result_flow._save_failed is True
 
 
+def test_unwritable_primary_reuses_one_fallback_file_across_incremental_writes(
+        tmp_path, monkeypatch):
+    """When the primary games dir stays unwritable but the fallback is fine, the
+    incremental driver must keep updating ONE fallback file, not reserve a fresh
+    timestamped file every throttled tick (which orphaned N-1 partial PGNs)."""
+    app = _local_app(tmp_path, monkeypatch)
+    fallback_dir = tmp_path / "fallback"
+    monkeypatch.setattr(paths, "get_fallback_data_dir", lambda: fallback_dir)
+    primary = os.path.normpath(str(paths.get_games_dir()))
+    real_reserve = app.result_flow._reserve_pgn_path
+
+    def reserve(directory, prefix):
+        if os.path.normpath(str(directory)) == primary:
+            return None  # the primary games dir is unwritable all game
+        return real_reserve(directory, prefix)
+
+    app.result_flow._reserve_pgn_path = reserve
+    now = [2_000_000]
+    monkeypatch.setattr(pg.time, "get_ticks", lambda: now[0])
+
+    _e4(app)
+    app.result_flow._update_incremental_autosave()
+    _e5(app)
+    now[0] += AUTOSAVE_THROTTLE_MS + 100
+    app.result_flow._update_incremental_autosave()
+    app.match.try_move(sq(6, 3), sq(4, 3))  # a third ply (d4)
+    now[0] += AUTOSAVE_THROTTLE_MS + 100
+    app.result_flow._update_incremental_autosave()
+
+    fallback_games = list((fallback_dir / paths.GAMES_SUBDIR).glob("*.pgn"))
+    assert len(fallback_games) == 1, "one fallback file, reused across ticks — not one per ply"
+    assert _pgn_files(tmp_path) == [], "nothing lands in the unwritable primary dir"
+    text = fallback_games[0].read_text(encoding="utf-8")
+    assert "e4 e5" in text and '[Result "*"]' in text
+
+
 def test_hard_os_error_shows_the_toast_exactly_once(tmp_path, monkeypatch):
     app = _local_app(tmp_path, monkeypatch)
     monkeypatch.setattr(paths, "get_fallback_data_dir", lambda: tmp_path / "fallback")

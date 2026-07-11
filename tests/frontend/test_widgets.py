@@ -1,8 +1,11 @@
+import gc
+
 import pygame as pg
 import pytest
 
 from tests.conftest import pygame_display
 from chessshootout.frontend.visual import widgets
+from chessshootout.frontend.visual.cache import render_text
 from chessshootout.frontend.visual.colors import Colors
 from chessshootout.frontend.visual.fonts import get_font
 from chessshootout.frontend.visual.widgets import (
@@ -23,6 +26,32 @@ def font():
 
 def _button_fill_pixel(surface, rect):
     return surface.get_at((rect.x + 8, rect.centery))[:3]
+
+
+def test_fit_text_to_rect_does_not_pin_transient_source_surfaces():
+    """Modal callers pass a fresh font.render() surface every frame. The fit
+    cache must hold those weakly so they are freed once the caller drops them --
+    an id-keyed strong-ref dict leaked one pinned surface per overflowing row
+    per frame (unbounded until a window resize)."""
+    font = get_font(20, bold=True)
+    rect = pg.Rect(0, 0, 12, 12)  # tiny -> every label overflows and gets scaled
+    for i in range(40):
+        surf = font.render(f"overflowing label {i}", True, (255, 255, 255))
+        fit_text_to_rect(surf, rect)
+        del surf
+    gc.collect()
+    assert len(widgets._FIT_TEXT_CACHE) == 0, \
+        "transient source surfaces are weakly held, never pinned"
+
+
+def test_fit_text_to_rect_reuses_the_fitted_surface_for_a_stable_source():
+    font = get_font(20, bold=True)
+    rect = pg.Rect(0, 0, 12, 12)
+    src = render_text(font, "one stable overflowing label", (255, 255, 255))
+    first = fit_text_to_rect(src, rect)
+    second = fit_text_to_rect(src, rect)
+    assert first is second, "a stable (cached) source reuses its fitted surface"
+    assert first is not src, "an overflowing label is scaled, not returned as-is"
 
 
 def test_build_ko_badge_paints_and_winks_amber(font):
@@ -170,19 +199,19 @@ def test_wrap_words_empty_text_returns_the_text_as_a_single_line():
 
 
 def test_fit_text_to_rect_never_serves_another_surfaces_fit():
-    """The fit cache keys on id(); ids are reused after GC, so a stale entry
-    must be rejected when its source surface is not the caller's surface."""
-    from chessshootout.frontend.visual import widgets
+    """Each source surface owns an isolated entry keyed by the surface itself,
+    so one source's fitted result is never served for another -- the weak-keyed
+    cache designs out the id-reuse collision the old id-keyed cache had to guard
+    against."""
     font = get_font(20)
     wide = pg.Rect(0, 0, 30, 14)
+    size_key = (max(wide.width - 6, 1), max(wide.height - 6, 1))
     first = font.render("15", True, pg.Color("white"))
+    second = font.render("5", True, pg.Color("white"))
     fitted_first = widgets.fit_text_to_rect(first, wide, padding=3)
-    stale_key = (id(first), max(wide.width - 6, 1), max(wide.height - 6, 1))
-    assert widgets._FIT_TEXT_CACHE[stale_key][1] is fitted_first
-
-    impostor = font.render("5", True, pg.Color("white"))
-    impostor_key = (id(impostor), max(wide.width - 6, 1), max(wide.height - 6, 1))
-    widgets._FIT_TEXT_CACHE[impostor_key] = (first, fitted_first)
-    served = widgets.fit_text_to_rect(impostor, wide, padding=3)
-    assert served is not fitted_first
-    assert widgets._FIT_TEXT_CACHE[impostor_key][0] is impostor
+    fitted_second = widgets.fit_text_to_rect(second, wide, padding=3)
+    assert widgets._FIT_TEXT_CACHE[first][size_key] is fitted_first
+    assert widgets._FIT_TEXT_CACHE[second][size_key] is fitted_second
+    assert fitted_first is not fitted_second, "distinct sources never share a fit"
+    assert widgets.fit_text_to_rect(first, wide, padding=3) is fitted_first, \
+        "the first source keeps reusing its own cached fit"

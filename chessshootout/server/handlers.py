@@ -79,6 +79,8 @@ async def handle_move(app, websocket, room, color, raw):
     pending = room.pending_skillcheck
     if pending is not None and pending.is_expired(app.state.now_ms()):
         await resolve_skillcheck_fail(rooms, connections, room)
+        if room.result is not None:
+            return "already_over"
         pending = None
     if pending is not None:
         await send(connections.get_for_color(room, color),

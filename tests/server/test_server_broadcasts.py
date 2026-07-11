@@ -117,3 +117,5 @@ async def test_broadcast_send_failure_to_an_already_disconnected_slot_is_a_noop(
                     ResultMessage(reason=Reason.RESIGNATION, winner_color="black"))
 
     assert room.white.connected is False
+    assert room.white.disconnected_at is None, \
+        "the guard leaves the never-connected slot's timer untouched (no fresh stamp)"
