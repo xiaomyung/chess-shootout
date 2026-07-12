@@ -74,7 +74,8 @@ server for online two-player matches.
   the arrow keys.
 - Skill-check outcomes (hits and misses) are saved as standard `{comments}` and
   replayed in review; the file still imports cleanly into other chess apps.
-- **Open PGN** in the result modal opens the file in your OS default app.
+- **Open PGN** — from the result modal, or the **Open PGN** button while
+  reviewing a game — opens the file in your OS default app.
 
 **Online**
 - Authoritative FastAPI + WebSocket server that runs the same engine as the

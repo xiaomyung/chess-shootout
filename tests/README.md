@@ -28,9 +28,10 @@ Tests mirror the source layout, five dirs under `tests/`:
   triggers, weights, coordinator, the cross-side `online` adjudication
   surface — a peer of `backend/`, imported by both server and frontend, not
   to be confused with the client-side `chessshootout/online` package below).
-- `tests/frontend/` — pygame UI: board, panels, modals, menu, visual/, the
-  `frontend/skillcheck/` view layer, focus mode, audio dispatch. Flat — no
-  `tests/frontend/board/` subdirs.
+- `tests/frontend/` — pygame UI: the `Frontend` shell and its four screens
+  (`menu`/`game`/`history`/`review`, see "Screens" below), board, panels,
+  modals, visual/, the `frontend/skillcheck/` view layer, focus mode, audio
+  dispatch. Flat — no `tests/frontend/board/` subdirs.
 - `tests/server/` — the `chessshootout/server/` package (FastAPI app,
   handlers, rooms, sweep, protocol).
 - `tests/online/` — client-side online multiplayer: the top-level
@@ -67,6 +68,46 @@ differs from the old flat `tests/test_x.py`, and a stale two-`dirname()` walk
 silently scans zero files instead of failing loudly. Each such guard also
 asserts a minimum scanned-file count, so a future path break fails loud
 instead of passing green over an empty walk.
+
+## Screens
+
+`Frontend` is a thin shell around four independent screens
+(`chessshootout/frontend/screens/{menu,game,history,review}.py`), each
+implementing a common `Screen` contract (`enter`/`exit`/`draw`/`handle_*`/
+`escape`/`modals`/...). Navigation is a `Nav(name, payload)` intent run
+through `Frontend.switch_to`, which calls a real `exit()` then `enter()` —
+no test should hand-roll a screen swap by poking `app.screen` directly.
+
+- `tests/frontend/test_screen_guards.py` — static AST guards on the shell:
+  no screen imports a sibling screen, `online_coordinator.py` imports
+  nothing from `screens` except `screens.base` (where `Nav` lives),
+  `chessshootout.frontend` has no import cycles, `input_router.py` never
+  references a game-specific identifier (`board`, `right_menu`,
+  `result_menu`, `skillcheck`, `focus_` — it dispatches through the `Screen`
+  contract only), and every `Nav(...)` call site imports the canonical `Nav`
+  from `screens.base`.
+- `tests/frontend/test_screen_lifecycle.py` — the runtime matrix: enter/exit
+  idempotence per screen, a table of real nav paths (menu↔game, a
+  menu→history→review→history→menu round trip, a FEN start, a game→game
+  self-switch rematch, an online match-found handoff), harmless input on an
+  exited/inactive screen, a modal opened on one screen not drawing after
+  switching away, and `VIDEORESIZE` mid-transition/mid-drag/mid-animation.
+- `tests/infra/test_logging_hygiene.py` pins two invariants across every
+  screen: `test_scripted_local_session_info_lines_match_the_allowlist` runs
+  a full menu→game→resign→history→review→quit session and asserts every
+  `chess.*` INFO line matches `INFO_ALLOWLIST_PREFIXES` (add a prefix there
+  when a screen gains a new story-beat log line, per CONTRIBUTING.md's
+  logging levels); `test_idle_draw_frame_emits_no_log_records_on_every_screen`
+  asserts an idle `draw_frame()` emits zero log records on menu, game,
+  history, and review alike — a per-frame log leak on any one screen fails it.
+
+**Adding a new screen or a test for one:** tests go in
+`tests/frontend/test_<name>_screen.py`, driven through `make_app()` +
+`switch_to`/`request_nav` — never construct a screen directly or reach into
+`app.screen` by hand. Cover at minimum `enter`/`exit`, `escape()`, and a
+`draw_frame()` smoke. A screen that imports a sibling screen module fails
+`test_screen_guards.py` by design — route shared state through
+`OnlineCoordinator` or `screens.base` instead.
 
 ## Naming
 
@@ -125,9 +166,13 @@ Type hints and full docstrings everywhere are a separate later pass — not requ
 ## Fixtures and helpers
 
 - Pure data / builders → `tests/helpers.py` (imported explicitly, e.g. `make_backend`,
-  `sq`, `play_*`, `make_app`/`start_single_screen` for a single-screen `Frontend`).
-  Assertion helpers are named `assert_*` / `expect_*` (or `_assert_*`)
-  so the weak-test guard recognizes them.
+  `sq`, `play_*`, `make_app()`/`start_single_screen()`). `make_app()` boots a
+  real `Frontend` shell — every screen constructed, sitting on `MenuScreen` —
+  never a partial or screen-less double. `start_single_screen()` drives the
+  real `switch_to("game", ...)` path into a local hot-seat game (the
+  `"single_screen"` game *mode*, unrelated to the `frontend/screens/` package
+  — see "Screens" below). Assertion helpers are named `assert_*` / `expect_*`
+  (or `_assert_*`) so the weak-test guard recognizes them.
 - Stateful resources → fixtures in `tests/conftest.py` (e.g. the real-uvicorn `server`
   / `server_with_app`, `pygame_display(w, h)` — a factory that builds a
   module-scoped autouse pygame-init fixture; assign its result to a module-level
