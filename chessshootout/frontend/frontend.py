@@ -13,7 +13,7 @@ from chessshootout.backend.fen import apply_fen
 from chessshootout.infra import env
 from chessshootout.frontend.panels.audio import AudioPanel
 from chessshootout.frontend.menu.menu_battle import MenuBattle
-from chessshootout.frontend.menu.history import HistoryView
+from chessshootout.frontend.panels.history_view import HistoryView
 from chessshootout.frontend.modal_registry import ModalSpec
 from chessshootout.frontend.modals.confirm import ConfirmModal
 from chessshootout.frontend.modals.country_picker import CountryPicker
@@ -37,7 +37,7 @@ from chessshootout.infra.open_external import open_with_default_app
 from chessshootout.frontend.game.variant import Variant
 from chessshootout.frontend.online_coordinator import OnlineCoordinator
 from chessshootout.frontend.audio.sound_manager import SoundManager
-from chessshootout.frontend.modals.start import StartMenu
+from chessshootout.frontend.menu.start import StartMenu
 from chessshootout.domain.pgn.load import latest_pgn_in_dir
 
 

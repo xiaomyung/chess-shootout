@@ -13,13 +13,13 @@ from chessshootout.frontend.audio.sound_manager import SoundManager
 from chessshootout.frontend.board import Board, DRAG_THRESHOLD_PX
 from chessshootout.frontend.modals.base import BaseModal
 from chessshootout.frontend.modals.confirm import ConfirmModal
-from chessshootout.frontend.menu.history import HistoryView
+from chessshootout.frontend.panels.history_view import HistoryView
 from chessshootout.frontend.modals.help import HelpModal
 from chessshootout.frontend.modals.match_found import MatchFoundModal
 from chessshootout.frontend.panels.banners import OfferBanners
 from chessshootout.frontend.modals.options import OptionsModal
 from chessshootout.frontend.modals.result import ResultMenu
-from chessshootout.frontend.modals.start import StartMenu
+from chessshootout.frontend.menu.start import StartMenu
 from chessshootout.frontend.modals.wait import WaitModal
 from chessshootout.online.client import OnlineClient
 from chessshootout.frontend.panels.audio import AudioPanel

@@ -133,7 +133,7 @@ def test_start_menu_fen_button(selected_mode, expected_opened):
         "start_game": lambda cfg: None,
         "fen": lambda: captured.setdefault("opened", True),
     }
-    from chessshootout.frontend.modals.start import StartMenu
+    from chessshootout.frontend.menu.start import StartMenu
     sm = StartMenu(pg.display.get_surface(), callbacks)
     sm.set_rect(pg.Rect(100, 50, 600, 700))
     sm.selected_mode = selected_mode

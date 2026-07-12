@@ -10,7 +10,7 @@ import pygame as pg
 import pytest
 
 from tests.conftest import pygame_display
-from chessshootout.frontend.modals.start import StartMenu
+from chessshootout.frontend.menu.start import StartMenu
 
 
 _pygame_init = pygame_display(1000, 800)
