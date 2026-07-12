@@ -16,6 +16,7 @@ import pygame as pg
 import pytest
 
 from tests.conftest import pygame_display
+from chessshootout.backend.pieces import PieceColor
 from chessshootout.backend.utils import Square
 from tests.helpers import make_app, start_single_screen
 
@@ -292,3 +293,81 @@ def test_return_to_menu_from_game_still_switches():
     app.coordinator._return_to_menu_card()
     assert app.screen is app.menu
     assert app.start_menu.is_visible() is True
+
+
+def test_every_send_goes_through_the_coordinator_not_around_it():
+    """The client's lifecycle (connect/disconnect/reconnect/retain-for-rematch) is the
+    coordinator's job, so nothing else may hold a reference to it. Six sends used to
+    reach past the coordinator into .client and re-implement the None check in three
+    modules; a guard here is cheaper than finding the seventh by hand."""
+    import ast
+    import os
+    import chessshootout
+
+    root = os.path.dirname(os.path.abspath(chessshootout.__file__))
+    coordinator_path = os.path.join(root, "frontend", "online_coordinator.py")
+    scanned = 0
+    offenders = []
+    for dirpath, _, filenames in os.walk(os.path.join(root, "frontend")):
+        if "__pycache__" in dirpath:
+            continue
+        for filename in sorted(filenames):
+            if not filename.endswith(".py"):
+                continue
+            path = os.path.join(dirpath, filename)
+            if path == coordinator_path:
+                continue
+            scanned += 1
+            with open(path, encoding="utf-8") as f:
+                tree = ast.parse(f.read(), filename=path)
+            for node in ast.walk(tree):
+                if (isinstance(node, ast.Attribute)
+                        and isinstance(node.value, ast.Attribute)
+                        and node.value.attr == "coordinator"
+                        and node.attr == "client"):
+                    offenders.append(f"{os.path.relpath(path, root)}:{node.lineno}")
+    assert scanned >= 25, f"only scanned {scanned} frontend files, guard root is likely wrong"
+    assert offenders == [], (
+        f"reach past the coordinator to its client: {offenders} — add a send_* facade "
+        f"on OnlineCoordinator instead")
+
+
+def test_send_facades_are_inert_with_no_client():
+    app = make_app(1000, 800)
+    assert app.coordinator.client is None
+
+    assert app.coordinator.send_resign() is False
+    assert app.coordinator.send_draw_offer() is False
+    assert app.coordinator.send_takeback_request() is False
+    app.coordinator.send_give_time(1500)
+    app.coordinator.send_skill_check_shot(120.0)
+    app.coordinator.send_move("e2", "e4", None)
+    assert app.coordinator.is_connected() is False
+    assert app.coordinator.opponent_state() is None
+    assert app.coordinator.ping_ms() is None
+
+
+def test_unbind_clears_every_field_that_gates_online_behaviour():
+    """Four call sites cleared four different subsets of the same nine fields, and they
+    had drifted — a teardown left _first_move_deadline_ms and the disconnect stamps set.
+    They are inert once variant is back to local, but only because of that; one unbind
+    now clears the whole set."""
+    app = make_app(1000, 800)
+    game = app.game
+    game.variant = "online"
+    game.match.local_color = PieceColor.WHITE
+    game.match.on_local_move_applied = lambda *a: None
+    game._first_move_deadline_ms = 12345
+    game._opp_disconnected_at_ms = 6789
+    game._local_disconnected_at_ms = 4321
+    app.coordinator._prev_online_state = "reconnecting"
+
+    app.coordinator.unbind_game_from_online()
+
+    assert game.variant == "local"
+    assert game.match.local_color is None
+    assert game.match.on_local_move_applied is None
+    assert game._first_move_deadline_ms is None
+    assert game._opp_disconnected_at_ms is None
+    assert game._local_disconnected_at_ms is None
+    assert app.coordinator._prev_online_state is None

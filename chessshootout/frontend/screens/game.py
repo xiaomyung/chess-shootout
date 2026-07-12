@@ -1016,8 +1016,7 @@ class GameScreen(Screen):
     def _perform_resign(self):
         if self.current_result() is not None:
             return
-        if self.variant == Variant.ONLINE and self.app.coordinator.client is not None:
-            self.app.coordinator.client.send_resign()
+        if self.variant == Variant.ONLINE and self.app.coordinator.send_resign():
             return
         loser = self.match.current_turn()
         self._auto_complete_pending_promotion()
@@ -1041,9 +1040,7 @@ class GameScreen(Screen):
     def _perform_draw(self):
         if self.current_result() is not None:
             return
-        if self.variant == Variant.ONLINE and self.app.coordinator.client is not None:
-            log.info("draw offer sent")
-            self.app.coordinator.client.send_draw_offer()
+        if self.variant == Variant.ONLINE and self.app.coordinator.send_draw_offer():
             return
         self._auto_complete_pending_promotion()
         self.manual_result = "draw_agreement"
@@ -1062,9 +1059,7 @@ class GameScreen(Screen):
     def _on_undo(self):
         if not self.board_interactive():
             return
-        if self.variant == Variant.ONLINE and self.app.coordinator.client is not None:
-            log.info("takeback requested")
-            self.app.coordinator.client.send_takeback_request()
+        if self.variant == Variant.ONLINE and self.app.coordinator.send_takeback_request():
             return
         self.board.selected_square = None
         self.board.clear_premoves()
@@ -1150,10 +1145,10 @@ class GameScreen(Screen):
         captured, advantage = self._strip_capture_summary(color)
         connection_state = None
         app = self.app
-        if (self.variant == Variant.ONLINE and app.coordinator.client is not None
+        if (self.variant == Variant.ONLINE and app.coordinator.is_connected()
                 and self.match.local_color is not None
                 and color != self.match.local_color):
-            connection_state = app.coordinator.client.opp_state
+            connection_state = app.coordinator.opponent_state()
         auto_end_label, auto_end_seconds = self._compute_auto_end(color, over)
         is_bot = self.variant == Variant.BOT and name == OPPONENT_NAME_FOR_MODE[BOT]
         return {

@@ -121,9 +121,50 @@ class OnlineCoordinator:
             return
         getattr(subscriber, method_name)(payload)
 
+    def is_connected(self):
+        return self.client is not None
+
+    def opponent_state(self):
+        return self.client.opp_state if self.client is not None else None
+
+    def ping_ms(self):
+        return self.client.get_ping_ms() if self.client is not None else None
+
     def send_local_move(self, from_sq, to_sq, promotion):
         if self.client is not None:
             self.client.send_move(coord_from_square(from_sq), coord_from_square(to_sq), promotion)
+
+    def send_move(self, from_coord, to_coord, promo_letter):
+        if self.client is not None:
+            self.client.send_move(from_coord, to_coord, promo_letter)
+
+    def send_resign(self):
+        if self.client is None:
+            return False
+        self.client.send_resign()
+        return True
+
+    def send_draw_offer(self):
+        if self.client is None:
+            return False
+        log.info("draw offer sent")
+        self.client.send_draw_offer()
+        return True
+
+    def send_takeback_request(self):
+        if self.client is None:
+            return False
+        log.info("takeback requested")
+        self.client.send_takeback_request()
+        return True
+
+    def send_give_time(self, hold_ms):
+        if self.client is not None:
+            self.client.send_give_time(hold_ms)
+
+    def send_skill_check_shot(self, client_elapsed_ms):
+        if self.client is not None:
+            self.client.send_skill_check_shot(client_elapsed_ms)
 
     def _drain_online_inbound(self):
         if self.client is None:
@@ -494,21 +535,41 @@ class OnlineCoordinator:
         incr = self._online_config.get("increment_seconds", 0) or 0
         return time_category_for_minutes(minutes), f"{minutes} + {incr}"
 
-    def _on_online_cancel(self):
-        log.info("online flow cancel")
+    def _drop_client(self, *, cancel_queue=False):
         self._resyncing = False
-        if self.client is not None:
+        if self.client is None:
+            return
+        if cancel_queue:
             self.client.cancel_queue()
-            self.client = None
-        game = self.app.game
-        game.match.on_local_move_applied = None
-        game.right_menu.set_game_info(None)
+        else:
+            self.client.disconnect()
+        self.client = None
+
+    def _clear_search_state(self):
         self.wait_modal.hide()
         self.match_found_modal.hide()
-        self.offer_banners.clear()
         self._wait_started_at_ms = None
         self._match_found_at_ms = None
         self._pending_game_start_payload = None
+
+    def unbind_game_from_online(self):
+        game = self.app.game
+        game.variant = Variant.LOCAL
+        game.match.local_color = None
+        game.match.on_local_move_applied = None
+        game.right_menu.set_game_info(None)
+        game.result_menu.set_online_mode(False)
+        game._first_move_deadline_ms = None
+        game._opp_disconnected_at_ms = None
+        game._local_disconnected_at_ms = None
+        self._prev_online_state = None
+
+    def _on_online_cancel(self):
+        log.info("online flow cancel")
+        self._drop_client(cancel_queue=True)
+        self.unbind_game_from_online()
+        self._clear_search_state()
+        self.offer_banners.clear()
         self._return_to_menu_card()
 
     def _on_rematch(self):
@@ -528,34 +589,18 @@ class OnlineCoordinator:
     def _drop_post_game_online_session(self):
         if self.client is None:
             return
-        self._resyncing = False
-        self.client.disconnect()
-        self.client = None
-        game = self.app.game
-        game.result_menu.set_online_mode(False)
-        game._first_move_deadline_ms = None
-        game._opp_disconnected_at_ms = None
-        game._local_disconnected_at_ms = None
-        self._prev_online_state = None
+        self._drop_client()
+        self.unbind_game_from_online()
 
     def _tear_down_online_session(self, reason="unspecified"):
         log.info("online session teardown reason=%s", reason)
         game = self.app.game
         game.result_flow.auto_save_pgn()
-        self._resyncing = False
-        if self.client is not None:
-            self.client.disconnect()
-            self.client = None
+        self._drop_client()
         self.reconnecting_modal.hide()
-        self.match_found_modal.hide()
+        self._clear_search_state()
         self.offer_banners.clear()
-        self._pending_game_start_payload = None
-        self._match_found_at_ms = None
-        game.match.on_local_move_applied = None
-        game.right_menu.set_game_info(None)
-        game.result_menu.set_online_mode(False)
-        game.variant = Variant.LOCAL
-        game.match.local_color = None
+        self.unbind_game_from_online()
         self.app.switch_to("menu")
         game._reset_to_new_game()
         self.app._refresh_load_pgn_availability()

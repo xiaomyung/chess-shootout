@@ -2,6 +2,8 @@ import logging
 
 import pygame as pg
 
+from chessshootout.frontend.game.variant import Variant
+
 from chessshootout.backend.pieces import opponent_of
 from chessshootout.server.protocol import GIVE_TIME_SECONDS, GIVE_TIME_TICK_MS
 
@@ -107,8 +109,8 @@ class GiveTimeHold:
         self.give_time_holding = False
         self._give_time_hold_recipient = None
         self._last_give_time_at_ms = now
-        if self.screen.variant == "online" and self.app.coordinator.client is not None:
-            self.app.coordinator.client.send_give_time(hold_ms)
+        if self.screen.variant == Variant.ONLINE and self.app.coordinator.is_connected():
+            self.app.coordinator.send_give_time(hold_ms)
             return
         self.give_time_toast_for_giver(recipient, total)
 

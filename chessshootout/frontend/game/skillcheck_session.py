@@ -51,9 +51,8 @@ class SkillcheckSession:
         if not (is_capture or is_promotion):
             return False
         promo_letter = PROMO_LETTER_BY_TYPE.get(promo_type) if promo_type is not None else None
-        if self.app.coordinator.client is not None:
-            self.app.coordinator.client.send_move(
-                coord_from_square(from_sq), coord_from_square(to_sq), promo_letter)
+        self.app.coordinator.send_move(
+            coord_from_square(from_sq), coord_from_square(to_sq), promo_letter)
         self.pending_online_move = (from_sq, to_sq, promo_type)
         return True
 
@@ -114,8 +113,7 @@ class SkillcheckSession:
             fx.aim_victim_scale = 1.0
 
     def _send_skillcheck_shot(self, client_elapsed_ms):
-        if self.app.coordinator.client is not None:
-            self.app.coordinator.client.send_skill_check_shot(client_elapsed_ms)
+        self.app.coordinator.send_skill_check_shot(client_elapsed_ms)
 
     def clear_online_skillcheck_state(self):
         self.skillcheck_target = None

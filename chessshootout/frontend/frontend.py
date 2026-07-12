@@ -181,22 +181,15 @@ class Frontend:
         pending_result = self.game.current_result()
         if pending_result is not None:
             self.game.result_flow.finalize_result(pending_result)
-        keep_online = (self.game.variant == Variant.ONLINE and self.coordinator.client is not None
+        keep_online = (self.game.variant == Variant.ONLINE
+                       and self.coordinator.is_connected()
                        and self.game.current_result() is not None)
         had_rematch_offer = self.coordinator._rematch_offered
         self.switch_to("menu")
         self.game._match_session_id = None
         self.coordinator._reconnect_probe_attempts = 0
         self.coordinator.retain_for_rematch(keep_online)
-        self.game.variant = Variant.LOCAL
-        self.game.match.local_color = None
-        self.game.match.on_local_move_applied = None
-        self.game.right_menu.set_game_info(None)
-        self.game.result_menu.set_online_mode(False)
-        self.game._first_move_deadline_ms = None
-        self.game._opp_disconnected_at_ms = None
-        self.game._local_disconnected_at_ms = None
-        self.coordinator._prev_online_state = None
+        self.coordinator.unbind_game_from_online()
         self.game._reset_to_new_game()
         self._refresh_load_pgn_availability()
         if keep_online and had_rematch_offer:
@@ -317,8 +310,7 @@ class Frontend:
         if env.get_show_frametime():
             parts.append(f"FRAME {self._last_work_ms:.1f}ms")
         if env.get_show_ping():
-            ping = (self.coordinator.client.get_ping_ms()
-                    if self.coordinator.client is not None else None)
+            ping = self.coordinator.ping_ms()
             parts.append(f"PING {ping}ms" if ping is not None else "PING —")
         return parts
 
