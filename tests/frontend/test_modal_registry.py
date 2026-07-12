@@ -270,15 +270,16 @@ def test_esc_does_not_dismiss_non_dismissable_modals(name):
 
 
 def test_menu_owned_modal_left_open_does_not_gate_the_game_screen():
-    """D: a visible menu-owned modal (fen_input) must not block/gate game-screen
-    behavior once the app has switched screens — only the active screen's
-    modals() are merged into the blocking predicate."""
+    """D: a menu-owned modal (fen_input) left open must not block/gate game-screen
+    behavior once the app has switched screens — MenuScreen.exit() hides its own
+    modals, and only the active screen's modals() are merged into the blocking
+    predicate anyway."""
     app = _app()
     app.menu.fen_input_modal.show(on_submit=lambda t: True)
     assert app.menu.fen_input_modal.is_visible() is True
     _start_game(app)
     assert app.screen is app.game
-    assert app.menu.fen_input_modal.is_visible() is True
+    assert app.menu.fen_input_modal.is_visible() is False
     assert app._blocking_modal_visible() is False
     before = list(app.game.match.move_history)
     from chessshootout.backend.utils import Square
@@ -289,10 +290,10 @@ def test_menu_owned_modal_left_open_does_not_gate_the_game_screen():
 
 def test_inactive_screens_modals_are_excluded_from_active_specs():
     """D: screen-owned modals stop drawing/dismissing once their screen isn't
-    the active one — the merge only pulls in app.screen.modals(). fen_input
-    stays technically .is_visible() (nobody hid it), but leaving the menu
-    screen drops it from the merged draw/dismiss list entirely; help_modal
-    only enters that list once the game screen is the active one."""
+    the active one — the merge only pulls in app.screen.modals(). Leaving the
+    menu screen both hides fen_input (exit()) and drops it from the merged
+    draw/dismiss list; help_modal only enters that list once the game screen is
+    the active one."""
     app = _app()
     app.menu.fen_input_modal.show(on_submit=lambda t: True)
     specs_objs_before = [spec.obj for spec in app._active_modal_specs()]
@@ -300,7 +301,7 @@ def test_inactive_screens_modals_are_excluded_from_active_specs():
     assert app.help_modal not in specs_objs_before
 
     _start_game(app)
-    assert app.menu.fen_input_modal.is_visible() is True
+    assert app.menu.fen_input_modal.is_visible() is False
     specs_objs_after = [spec.obj for spec in app._active_modal_specs()]
     assert app.menu.fen_input_modal not in specs_objs_after
     assert app.help_modal in specs_objs_after

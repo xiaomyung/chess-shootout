@@ -47,12 +47,12 @@ class SoundManager:
         self._state = STATE_OFF
         self._slots = {}
 
+        self._sounds_dir = Path(sounds_dir)
+
         if not self.enabled:
-            self._sounds_dir = None
             self._heartbeat_channel = None
             return
 
-        self._sounds_dir = Path(sounds_dir)
         self._heartbeat_channel = (
             heartbeat_channel if heartbeat_channel is not None
             else self._reserve_channel(0)

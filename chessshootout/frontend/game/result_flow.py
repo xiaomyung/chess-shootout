@@ -51,12 +51,16 @@ class ResultFlow:
     def __init__(self, screen):
         self.screen = screen
         self.app = screen.app
+        self._series_scores = {}
+        self.reset_for_new_game()
+
+    def reset_for_new_game(self):
         self._result_cache_key = None
         self._result_cache = None
-        self._series_scores = {}
         self._series_score_awarded = False
         self._save_failed = False
         self._save_error_toast_shown = False
+        self._save_dir = None
         self._autosave_last_write_ms = -AUTOSAVE_THROTTLE_MS
         self._autosave_last_ply = 0
         self._last_saved_pgn_path = None
@@ -250,12 +254,18 @@ class ResultFlow:
 
     def _commit_pgn_write(self, directory, prefix, text):
         path = self._last_saved_pgn_path
+        reserved = False
         if path is None or os.path.dirname(path) != os.path.normpath(directory):
             path = self._reserve_pgn_path(directory, prefix)
             if path is None:
                 return "hard_failure"
+            reserved = True
             self._last_saved_pgn_path = path
-        return self._write_pgn_atomic(path, text)
+        outcome = self._write_pgn_atomic(path, text)
+        if outcome == "hard_failure" and reserved:
+            self._remove_quietly(path)
+            self._last_saved_pgn_path = None
+        return outcome
 
     def _auto_save_pgn(self):
         screen = self.screen
@@ -268,7 +278,7 @@ class ResultFlow:
                 return self._last_saved_pgn_path
         text = self._build_pgn_text()
         prefix = self._auto_save_prefix()
-        primary_dir = str(paths.get_games_dir())
+        primary_dir = self._save_dir or str(paths.get_games_dir())
         outcome = self._commit_pgn_write(primary_dir, prefix, text)
         if outcome == "hard_failure":
             self._show_save_error_toast_once()
@@ -280,6 +290,7 @@ class ResultFlow:
             if outcome != "ok":
                 self._save_failed = True
                 return None
+            self._save_dir = fallback_dir
         if outcome != "ok":
             return None
         self._save_failed = False

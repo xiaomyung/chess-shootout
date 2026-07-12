@@ -3,6 +3,7 @@ import os
 
 import pygame as pg
 
+from chessshootout.frontend.modal_registry import dismiss_topmost
 from chessshootout.frontend.screens.base import Nav
 from chessshootout.frontend.window_chrome import MIN_WINDOW_WIDTH, MIN_WINDOW_HEIGHT
 
@@ -19,6 +20,8 @@ class InputRouter:
 
     def _handle_escape(self):
         frontend = self.frontend
+        if frontend.screen.swallows_input():
+            return
         if self._dismiss_top_modal():
             return
         result = frontend.screen.escape()
@@ -39,10 +42,8 @@ class InputRouter:
 
     def _dismiss_top_modal(self):
         frontend = self.frontend
-        for spec in frontend._active_modal_specs():
-            if spec.esc_dismiss and spec.obj.is_visible():
-                spec.on_dismiss()
-                return True
+        if dismiss_topmost(frontend._active_modal_specs()):
+            return True
         if not frontend.coordinator.offer_banners.is_empty():
             if frontend.coordinator._rematch_offered:
                 frontend.coordinator._decline_rematch()

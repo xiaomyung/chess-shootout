@@ -324,6 +324,10 @@ class OnlineCoordinator:
 
     def _handle_game_resumed(self, payload):
         game = self.app.game
+        if game.variant != "online":
+            log.info("resume ignored — no active online game")
+            self._resyncing = False
+            return
         game.match.new_game()
         for entry in payload.get("move_history", []):
             result = game.match.apply_san(entry["san"])
@@ -499,6 +503,7 @@ class OnlineCoordinator:
 
     def _on_online_cancel(self):
         log.info("online flow cancel")
+        self._resyncing = False
         if self.client is not None:
             self.client.cancel_queue()
             self.client = None
@@ -530,6 +535,7 @@ class OnlineCoordinator:
     def _drop_post_game_online_session(self):
         if self.client is None:
             return
+        self._resyncing = False
         self.client.disconnect()
         self.client = None
         game = self.app.game
@@ -543,6 +549,7 @@ class OnlineCoordinator:
         log.info("online session teardown reason=%s", reason)
         game = self.app.game
         game.result_flow._auto_save_pgn()
+        self._resyncing = False
         if self.client is not None:
             self.client.disconnect()
             self.client = None
@@ -579,6 +586,7 @@ class OnlineCoordinator:
             self._return_to_menu_card()
 
     def retain_for_rematch(self, keep_online):
+        self._resyncing = False
         if keep_online:
             self.client.send_left_result()
         elif self.client is not None:

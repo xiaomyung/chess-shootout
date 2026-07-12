@@ -21,7 +21,7 @@ from chessshootout.domain.pgn.generate import generate_pgn
 from chessshootout.frontend.modals.help import HOTKEYS
 from chessshootout.frontend.screens.base import Nav
 from chessshootout.frontend.screens.review import REVIEW_HOTKEY_KEYS, REVIEW_HOTKEYS
-from tests.helpers import make_app as _shared_make_app, start_single_screen
+from tests.helpers import make_app as _shared_make_app, sq, start_single_screen
 
 
 _pygame_init = pygame_display(1000, 800)
@@ -314,3 +314,62 @@ def test_open_pgn_button_toasts_on_failure(tmp_path, monkeypatch):
     )
     app.review._on_open_pgn()
     assert app.toast.message == "Could not open PGN"
+
+
+def test_right_click_highlights_and_arrows_still_work_in_review(tmp_path):
+    """Master's PGN review reused the game board, so right-drag annotations worked
+    there. ReviewScreen owns its own board and has to forward the gesture itself."""
+    app = _enter_review(make_app(), _write_pgn(tmp_path, "annot.pgn"))
+    board = app.review.board
+    e4 = board.cell_rect(sq(4, 4)).center
+    d5 = board.cell_rect(sq(3, 3)).center
+
+    app.review.handle_right_press(e4)
+    app.review.handle_right_release(e4)
+    assert sq(4, 4) in board.highlighted_squares
+
+    app.review.handle_right_press(e4)
+    app.review.handle_right_release(d5)
+    assert (sq(4, 4), sq(3, 3)) in board.arrows
+
+
+def test_review_annotations_do_not_survive_exit(tmp_path):
+    app = _enter_review(make_app(), _write_pgn(tmp_path, "annot2.pgn"))
+    board = app.review.board
+    center = board.cell_rect(sq(4, 4)).center
+    app.review.handle_right_press(center)
+    app.review.handle_right_release(center)
+    assert board.highlighted_squares
+
+    app.switch_to("history")
+
+    assert board.highlighted_squares == set()
+    assert board.arrows == []
+
+
+def test_review_board_is_read_only_clicking_two_squares_plays_no_move(tmp_path):
+    """The read-only flag is the only thing standing between a reviewer and
+    editing the game they loaded — nothing else in ReviewScreen.handle_click
+    stops a from/to click pair from landing a move."""
+    app = _enter_review(make_app(), _write_pgn(tmp_path, "ro.pgn"))
+    board = app.review.board
+    assert board.read_only is True
+    before = [e.san for e in app.review.match.move_history]
+
+    app.review.handle_click(board.cell_rect(sq(6, 4)).center)
+    app.review.handle_click(board.cell_rect(sq(4, 4)).center)
+
+    assert [e.san for e in app.review.match.move_history] == before
+    assert board.selected_square is None
+
+
+def test_review_without_a_time_control_shows_infinity(tmp_path):
+    """ReviewScreen has its own _compute_game_info, separate from GameScreen's."""
+    path = _write_pgn(tmp_path, "notc.pgn", time_control="-")
+    app = _enter_review(make_app(), path)
+    assert app.review.right_menu.game_info["time_control"] == "∞"
+
+
+def test_review_with_a_time_control_shows_it(tmp_path):
+    app = _enter_review(make_app(), _write_pgn(tmp_path, "tc.pgn", time_control="600+5"))
+    assert app.review.right_menu.game_info["time_control"] == "10+5"

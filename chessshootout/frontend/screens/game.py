@@ -36,9 +36,7 @@ from chessshootout.frontend.layout import compute_layout
 from chessshootout.frontend.visual import backdrop
 from chessshootout.frontend.visual import cache
 from chessshootout.frontend.visual.effects import TAKEOVER_TOTAL_MS
-from chessshootout.frontend.game.result_flow import (
-    ResultFlow, AUTOSAVE_THROTTLE_MS, RESULT_TEXT, _score_str,
-)
+from chessshootout.frontend.game.result_flow import ResultFlow, RESULT_TEXT, _score_str
 from chessshootout.frontend.game.skillcheck_session import SkillcheckSession
 from chessshootout.frontend.game.give_time import GiveTimeHold
 from chessshootout.server.protocol import FIRST_MOVE_ABORT_SECONDS, GRACE_SECONDS
@@ -133,7 +131,6 @@ class GameScreen(Screen):
         self._first_move_deadline_ms = None
         self._opp_disconnected_at_ms = None
         self._local_disconnected_at_ms = None
-        self._click_sound_played = False
         self._focus_click_consumed = False
 
         self.match = Match()
@@ -538,6 +535,7 @@ class GameScreen(Screen):
             elapsed_ms=elapsed_ms, miss_count=miss_count)
 
     def exit(self):
+        super().exit()
         self.app.coordinator.unsubscribe(self)
         did_focus = self.focus_mode or self.focus_transition is not None
         if did_focus:
@@ -1265,20 +1263,9 @@ class GameScreen(Screen):
         self.give_time._cancel_give_time_hold()
         self.manual_result = None
         self._flag_fall_played = False
-        self.result_flow._result_cache_key = None
-        self.result_flow._result_cache = None
         self._strip_memo = {}
         self._result_first_seen_at_ms = None
-        self.result_flow._last_saved_pgn_path = None
-        self.result_flow._last_saved_result_tag = None
-        self.result_flow._result_await_since_ms = None
-        self.result_flow._result_logged = False
-        self.result_flow._series_score_awarded = False
-        self.result_flow._save_failed = False
-        self.result_flow._save_error_toast_shown = False
-        self.result_flow._final_save_attempted_for = None
-        self.result_flow._autosave_last_write_ms = -AUTOSAVE_THROTTLE_MS
-        self.result_flow._autosave_last_ply = 0
+        self.result_flow.reset_for_new_game()
         self.right_menu.reset_for_new_game()
         self.match.new_game()
         self.match.mode = {"online": ONLINE, "bot": BOT}.get(self.variant, SINGLE_SCREEN)

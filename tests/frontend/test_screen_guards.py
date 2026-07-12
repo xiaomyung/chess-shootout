@@ -37,8 +37,6 @@ REPO_ROOT = os.path.dirname(PACKAGE_ROOT)
 FRONTEND_ROOT = os.path.join(PACKAGE_ROOT, "frontend")
 SCREENS_ROOT = os.path.join(FRONTEND_ROOT, "screens")
 
-CONCRETE_SCREENS = {"menu", "game", "history", "review"}
-
 
 def _iter_py_files(root):
     for dirpath, _, filenames in os.walk(root):
@@ -47,6 +45,16 @@ def _iter_py_files(root):
         for name in sorted(filenames):
             if name.endswith(".py"):
                 yield os.path.join(dirpath, name)
+
+
+def _discover_concrete_screens():
+    """Read the screen list off disk, not off a literal: a hardcoded set means a
+    fifth screen silently opts out of every guard below."""
+    return {os.path.basename(path)[:-3] for path in _iter_py_files(SCREENS_ROOT)
+            if os.path.basename(path)[:-3] not in ("__init__", "base")}
+
+
+CONCRETE_SCREENS = _discover_concrete_screens()
 
 
 def _module_name(path):

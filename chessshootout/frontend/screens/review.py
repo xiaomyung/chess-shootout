@@ -99,6 +99,7 @@ class ReviewScreen(Screen):
         self.app.request_nav(Nav(self._return_to))
 
     def exit(self):
+        super().exit()
         self.board.jump_to_review_ply(None)
         self.board.reset_for_new_game()
         self.right_menu.reset_for_new_game()
@@ -130,6 +131,16 @@ class ReviewScreen(Screen):
         if square is not None:
             self.board.handle_click(square)
         return False
+
+    def handle_right_press(self, pos):
+        if self.board.cell_at(pos) is not None:
+            self.board.begin_right_press(pos)
+        self.app.sound_manager.play_ui_click()
+        return True
+
+    def handle_right_release(self, pos):
+        self.board.end_right_press(pos)
+        return True
 
     def handle_key(self, event):
         if event.key == pg.K_LEFT:

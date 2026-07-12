@@ -178,3 +178,25 @@ def test_esc_matrix_per_screen_escape_return_values():
     review_app.review._return_to = "history"
     result = review_app.review.escape()
     assert result == Nav("history")
+
+
+def test_skillcheck_swallow_beats_the_global_modal_and_banner_pass():
+    """The swallow guard sits ABOVE _dismiss_top_modal, not below it. With it
+    below, an Esc pressed mid-skill-check fell through to the global dismiss pass
+    and silently cleared the opponent's pending offer banner (auto-declining a
+    rematch) before GameScreen.escape() ever got to swallow it."""
+    from unittest.mock import MagicMock
+
+    app = _start_game(_app())
+    app.coordinator.client = MagicMock()
+    app.coordinator._push_offer_banner("draw_offered")
+    assert app.coordinator.offer_banners.is_empty() is False
+    app.help_modal.show(HOTKEYS)
+
+    controller = WheelController(WheelChallenge.from_seed("x"), pg.Rect(0, 0, 80, 80), 0)
+    app.game.skillcheck_overlay.start(controller, ("f", "t"), lambda c, landed: None)
+    app.input_router._handle_escape()
+
+    assert app.coordinator.offer_banners.is_empty() is False, "the offer survives"
+    assert app.help_modal.is_visible() is True, "and so does the modal under it"
+    assert app.game.skillcheck_overlay.is_active() is True

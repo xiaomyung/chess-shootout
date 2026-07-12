@@ -518,3 +518,115 @@ def test_game_end_log_reports_failed_when_the_save_latch_was_hit(tmp_path, monke
     assert game_end_lines == ["game end result=white_wins_by_resignation saved=failed"]
     error_lines = [r for r in caplog.records if r.levelno >= logging.ERROR]
     assert len(error_lines) == 1, "exactly one breadcrumb from the failure site, not duplicated"
+
+
+def test_write_failure_on_a_fresh_reservation_leaves_no_orphan_file(tmp_path, monkeypatch):
+    """A dir that accepts the `open(..., "x")` reservation but rejects the write
+    (disk full / quota) must not leave the 0-byte reserved file behind, and must
+    not leave _last_saved_pgn_path pointing at it — Open PGN would launch an
+    empty file and the next tick would reserve yet another one."""
+    app = _local_app(tmp_path, monkeypatch)
+    fallback_dir = tmp_path / "fallback"
+    monkeypatch.setattr(paths, "get_fallback_data_dir", lambda: fallback_dir)
+    primary = os.path.normpath(str(paths.get_games_dir()))
+
+    def write(path, text):
+        if os.path.dirname(path) == primary:
+            return "hard_failure"
+        return "ok"
+
+    app.game.result_flow._write_pgn_atomic = write
+    _e4(app)
+    saved = app.game.result_flow._auto_save_pgn()
+
+    assert saved is not None, "the fallback dir still took the game"
+    assert _pgn_files(tmp_path) == [], "no orphan 0-byte file in the primary dir"
+    assert os.path.dirname(saved) == os.path.normpath(str(fallback_dir / paths.GAMES_SUBDIR))
+
+
+def test_a_dir_that_reserves_but_cannot_write_does_not_scatter_the_game(tmp_path, monkeypatch):
+    """The primary dir reserving fine but failing every write used to make the
+    save flow ping-pong: a fresh 0-byte file in the primary AND a fresh fallback
+    PGN on every throttled tick, scattering one game across N files. Once the
+    fallback takes a write, it must stay latched for the rest of the game."""
+    app = _local_app(tmp_path, monkeypatch)
+    fallback_dir = tmp_path / "fallback"
+    monkeypatch.setattr(paths, "get_fallback_data_dir", lambda: fallback_dir)
+    primary = os.path.normpath(str(paths.get_games_dir()))
+    real_write = app.game.result_flow._write_pgn_atomic
+
+    def write(path, text):
+        if os.path.dirname(path) == primary:
+            return "hard_failure"
+        return real_write(path, text)
+
+    app.game.result_flow._write_pgn_atomic = write
+    now = [2_000_000]
+    monkeypatch.setattr(pg.time, "get_ticks", lambda: now[0])
+
+    _e4(app)
+    app.game.result_flow._update_incremental_autosave()
+    _e5(app)
+    now[0] += AUTOSAVE_THROTTLE_MS + 100
+    app.game.result_flow._update_incremental_autosave()
+    app.game.match.try_move(sq(6, 3), sq(4, 3))
+    now[0] += AUTOSAVE_THROTTLE_MS + 100
+    app.game.result_flow._update_incremental_autosave()
+
+    fallback_games = list((fallback_dir / paths.GAMES_SUBDIR).glob("*.pgn"))
+    assert len(fallback_games) == 1, "one file for the whole game, not one per tick"
+    assert _pgn_files(tmp_path) == [], "and no 0-byte orphans piling up in the primary"
+    assert "d4" in fallback_games[0].read_text(encoding="utf-8")
+
+
+def test_open_pgn_after_a_total_save_failure_does_not_launch_an_empty_file(
+        tmp_path, monkeypatch):
+    """_last_saved_pgn_path must not survive a failed write of a file this flow
+    itself just reserved: os.path.exists() would be True for the 0-byte stub and
+    Open PGN would hand an empty file to the OS instead of toasting."""
+    app = _local_app(tmp_path, monkeypatch)
+    monkeypatch.setattr(paths, "get_fallback_data_dir", lambda: tmp_path / "fallback")
+    app.game.result_flow._write_pgn_atomic = lambda path, text: "hard_failure"
+    opened = []
+    monkeypatch.setattr("chessshootout.frontend.game.result_flow.open_with_default_app",
+                        lambda path: opened.append(path) or True)
+    toasts = []
+    monkeypatch.setattr(app.toast, "show", lambda msg, *a, **k: toasts.append(msg))
+
+    _e4(app)
+    assert app.game.result_flow._auto_save_pgn() is None
+    assert app.game.result_flow._save_failed is True
+    assert app.game.result_flow._last_saved_pgn_path is None
+
+    app.game.result_flow._on_open_pgn()
+    assert opened == [], "nothing was handed to the OS"
+    assert "No saved PGN" in toasts
+
+
+def test_resume_after_back_to_menu_does_not_rewrite_the_game_as_a_local_pgn(
+        tmp_path, monkeypatch):
+    """The post-game rematch window keeps the socket alive while _on_back_to_menu
+    flips game.variant to "local" and clears _last_saved_pgn_path. A transient WS
+    drop in that window makes the client re-/resume and push game_resumed; with no
+    active online game to rebuild, the handler must drop it — otherwise it replays
+    the finished game into the inactive GameScreen, re-finalizes it, and saves a
+    SECOND copy under the local- prefix."""
+    app = _online_app(tmp_path, monkeypatch)
+    _e4(app)
+    _e5(app)
+    app.game.on_result({"reason": "resignation", "winner_color": "white"})
+    app._on_back_to_menu()
+    online_pgns = [p.name for p in _pgn_files(tmp_path)]
+    assert len(online_pgns) == 1 and online_pgns[0].startswith("online-")
+
+    app.coordinator._handle_game_resumed({
+        "fen": "",
+        "move_history": [{"san": "e4"}, {"san": "e5"}],
+        "clock": {"white_remaining": 300.0, "black_remaining": 300.0, "running_for": None},
+        "result_reason": "resignation",
+        "result_winner": "white",
+    })
+
+    assert [p.name for p in _pgn_files(tmp_path)] == online_pgns, "no second PGN"
+    assert app.game.match.move_history == [], "the inactive game screen stays reset"
+    assert app.screen is app.menu

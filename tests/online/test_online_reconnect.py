@@ -66,6 +66,7 @@ def resume_payload(
 def test_handle_game_resumed_applies_server_clock_snapshot(app):
     """Mid-game drop: replay SANs, build the clock from the existing
     _time_control, then overwrite remainders + side-to-move from the snapshot."""
+    app.game.variant = "online"
     app.game._time_control = (300, 2)
     app.game.match.local_color = PieceColor.WHITE
     payload = resume_payload(
@@ -87,6 +88,7 @@ def test_handle_game_resumed_applies_server_clock_snapshot(app):
 def test_handle_game_resumed_does_not_reset_clock_to_initial(app):
     """A fresh clock starts at initial_seconds (300); applying the snapshot must
     land on the server value, never the fresh-start value."""
+    app.game.variant = "online"
     app.game._time_control = (300, 0)
     app.game.match.local_color = PieceColor.WHITE
     payload = resume_payload(

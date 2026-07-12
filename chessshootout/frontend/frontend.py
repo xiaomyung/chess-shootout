@@ -416,7 +416,7 @@ class Frontend:
         self.game.skillcheck_overlay.draw(self.window)
 
     def _banner_rect(self):
-        if self.screen is not self.menu:
+        if self.screen is self.game:
             return self.game.board.rect
         return pg.Rect(0, WindowChrome.HEIGHT, self.window_width,
                        self.window_height - WindowChrome.HEIGHT)

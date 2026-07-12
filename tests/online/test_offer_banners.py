@@ -151,3 +151,24 @@ def test_banner_slides_down_into_view():
     ob.draw(BOARD)
     assert ob._banners[0]["ok_rect"].top > top_at_push
     assert ob._banners[0]["ok_rect"].top >= BOARD.top
+
+
+def test_banner_rect_follows_the_board_only_on_the_game_screen():
+    """Banners anchor to the board while a game is on screen and to the whole
+    window everywhere else. History used to live inside the old "menu" mode and so
+    got the window rect; keying off `screen is not menu` handed it (and review) the
+    hidden game board's rect instead."""
+    from tests.helpers import make_app
+    from chessshootout.frontend.window_chrome import WindowChrome
+
+    app = make_app(1000, 800)
+    full = pg.Rect(0, WindowChrome.HEIGHT, app.window_width,
+                   app.window_height - WindowChrome.HEIGHT)
+
+    assert app._banner_rect() == full
+
+    app.switch_to("game")
+    assert app._banner_rect() == app.game.board.rect
+
+    app.switch_to("history")
+    assert app._banner_rect() == full

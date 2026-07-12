@@ -44,7 +44,8 @@ class Screen:
         pass
 
     def exit(self):
-        pass
+        for spec in self.modals():
+            spec.obj.hide()
 
     def update(self, now):
         return None

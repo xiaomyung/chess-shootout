@@ -248,11 +248,16 @@ def test_dirty_rects_game_returns_a_list_on_a_settled_frame():
     assert isinstance(rects, list)
 
 
-def test_dirty_rects_menu_history_review_return_none():
+def test_dirty_rects_menu_history_review_return_none(tmp_path):
     app = make_app()
     assert app.menu.dirty_rects() is None
     app.switch_to("history")
     assert app.history.dirty_rects() is None
+    pgn = tmp_path / "d.pgn"
+    pgn.write_text('[White "a"]\n[Black "b"]\n[Result "1-0"]\n\n1. e4 e5 1-0\n',
+                   encoding="utf-8")
+    app.switch_to("review", pgn_path=str(pgn), return_to="history")
+    assert app.review.dirty_rects() is None
 
 
 def test_resize_sync_debug_breadcrumb_is_debug_not_info(monkeypatch, caplog):
@@ -268,3 +273,16 @@ def test_resize_sync_debug_breadcrumb_is_debug_not_info(monkeypatch, caplog):
     lines = [r for r in caplog.records if "resize-sync" in r.getMessage()]
     assert len(lines) == 1
     assert lines[0].levelno == logging.DEBUG
+
+
+def test_every_screen_module_on_disk_is_registered_in_the_shell():
+    """test_screen_guards discovers the screen list from screens/*.py rather than
+    a hardcoded literal, so a fifth screen can't opt out of the guards. That
+    discovery only means something if it matches the shell's own registry — a
+    module that exists but was never registered (or vice versa) means one of the
+    two is lying about what the screens are."""
+    from tests.frontend.test_screen_guards import CONCRETE_SCREENS
+
+    app = make_app()
+    assert set(app.screens) == CONCRETE_SCREENS
+    assert {screen.name for screen in app.screens.values()} == CONCRETE_SCREENS

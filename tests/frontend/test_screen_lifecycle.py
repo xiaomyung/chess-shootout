@@ -182,7 +182,7 @@ def test_help_modal_shown_on_game_is_not_drawn_after_switch_to_menu():
     app.draw_frame()
 
     assert drawn == []
-    assert app.help_modal.is_visible() is True, "still logically open, just no longer drawn"
+    assert app.help_modal.is_visible() is False, "exit() hides the screen's own modals"
     assert app.help_modal not in [spec.obj for spec in app._active_modal_specs()]
 
 
@@ -199,7 +199,7 @@ def test_help_modal_shown_on_review_is_not_drawn_after_switch_to_history(tmp_pat
     app.draw_frame()
 
     assert drawn == []
-    assert app.help_modal.is_visible() is True
+    assert app.help_modal.is_visible() is False
 
 
 # --- resize mid-anything ------------------------------------------------------
@@ -269,3 +269,61 @@ def test_videoresize_mid_review_animation_does_not_crash(tmp_path):
 
     app.draw_frame()
     assert app.review.board.rect.width > 0
+
+
+# --- a screen's own modals must not outlive it ---------------------------------
+
+def test_help_left_open_on_the_game_screen_does_not_re_arm_on_the_next_game():
+    """help_modal is shared between game and review and is per-screen, so it is
+    neither drawn nor blocking on the menu — it just sits there .is_visible().
+    Re-entering a help-owning screen used to pull that stale modal straight back
+    into the blocking predicate and kill all board input on a brand-new game."""
+    app = make_app()
+    app.switch_to("game")
+    app.help_modal.show([("Esc", "Back")])
+
+    app.switch_to("menu")
+    app.switch_to("game")
+
+    assert app.help_modal.is_visible() is False
+    assert app._blocking_modal_visible() is False
+
+
+def test_help_left_open_on_review_does_not_re_arm_on_the_next_review(tmp_path):
+    app = make_app()
+    pgn = _write_pgn(tmp_path)
+    app.switch_to("review", pgn_path=str(pgn), return_to="history")
+    app.help_modal.show([("Esc", "Back")])
+
+    app.switch_to("history")
+    app.switch_to("review", pgn_path=str(pgn), return_to="history")
+
+    assert app.help_modal.is_visible() is False
+    assert app._blocking_modal_visible() is False
+
+
+def test_fen_input_left_open_on_the_menu_does_not_re_arm_on_the_next_menu():
+    app = make_app()
+    app.menu.fen_input_modal.show(on_submit=lambda text: True)
+
+    app.switch_to("game")
+    app.switch_to("menu")
+
+    assert app.menu.fen_input_modal.is_visible() is False
+    assert app._blocking_modal_visible() is False
+
+
+@pytest.mark.parametrize("name", ["menu", "game", "history", "review"])
+def test_exit_hides_every_modal_the_screen_owns(name, tmp_path):
+    """Whatever a screen returns from modals(), exit() hides it. Lives in the base
+    Screen, so a fifth screen gets the guarantee without opting in."""
+    app = make_app()
+    app.switch_to(name, **_entry_payload(name, tmp_path))
+    screen = app.screens[name]
+    hidden = []
+    for spec in screen.modals():
+        spec.obj.hide = lambda obj=spec.obj: hidden.append(obj)
+
+    screen.exit()
+
+    assert hidden == [spec.obj for spec in screen.modals()]

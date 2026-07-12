@@ -530,3 +530,18 @@ def test_set_enabled_true_does_not_stop():
     sm.set_enabled(True)
     assert stopped == []
     assert sm.enabled is True
+
+
+def test_unmuting_a_manager_built_without_a_mixer_can_still_load_slots():
+    """Frontend builds the manager with enabled=pg.mixer.get_init() is not None, so
+    a box with no audio device gets enabled=False. The user can still hit the mute
+    toggle (audio panel / options), which flips enabled back on — lazy slot loading
+    then dereferences _sounds_dir, so it must never have been None."""
+    sm = SoundManager(SOUNDS_DIR, enabled=False)
+    assert sm._sounds_dir is not None
+
+    sm.set_enabled(True)
+    sm.preload()
+
+    assert sm._slot_pool("checkmate") is not None
+    sm.play_checkmate()

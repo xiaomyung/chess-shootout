@@ -246,8 +246,8 @@ def _online_app():
     app.coordinator.client.get_ping_ms.return_value = None
     app.coordinator.client.is_server_silent.return_value = False
     app.coordinator.client.heartbeat_interval.return_value = 2.0
-    app.mode = ONLINE
     app.coordinator.subscribe(app.game)
+    app.game.variant = "online"
     app.game.white_name = "Alice"
     app.game.black_name = "Bob"
     app.game.match.mode = ONLINE
@@ -453,3 +453,45 @@ def test_server_silence_logs_a_warning_not_an_info(caplog):
     lines = [r for r in caplog.records if "heartbeat silent" in r.getMessage()]
     assert len(lines) == 1
     assert lines[0].levelno == logging.WARNING
+
+
+def test_resync_gate_does_not_outlive_the_session_it_belongs_to():
+    """_resyncing gates give-time holds and result promotion and drives a
+    per-frame "Resyncing…" toast. Dropping the client without clearing it left a
+    phantom toast on the start menu and, if the next match paired inside the 8 s
+    window, silently gated the new game."""
+    for drop in ("_tear_down_online_session", "_on_online_cancel"):
+        app = _online_app()
+        app.coordinator._begin_resync()
+        assert app.coordinator._resyncing is True
+
+        getattr(app.coordinator, drop)()
+
+        assert app.coordinator._resyncing is False, drop
+
+
+def test_resync_gate_is_cleared_when_the_socket_is_kept_for_a_rematch():
+    app = _online_app()
+    app.coordinator._begin_resync()
+
+    app.coordinator.retain_for_rematch(True)
+
+    assert app.coordinator._resyncing is False
+
+
+def test_resume_with_no_active_online_game_is_dropped_and_clears_the_gate():
+    """The post-game rematch window keeps the socket alive after the user is back
+    on the menu (variant flipped to "local"). A late /resume reply there has no
+    live game to rebuild — it must not replay moves into the inactive screen."""
+    app = _online_app()
+    app.game.variant = "local"
+    app.coordinator._begin_resync()
+
+    app.coordinator._handle_game_resumed({
+        "fen": "",
+        "move_history": [{"san": "e4"}, {"san": "e5"}],
+        "clock": {},
+    })
+
+    assert app.game.match.move_history == []
+    assert app.coordinator._resyncing is False
