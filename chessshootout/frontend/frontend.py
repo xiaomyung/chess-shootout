@@ -360,9 +360,9 @@ class Frontend:
         win_h = max(size[1], MIN_WINDOW_HEIGHT)
         if (win_w, win_h) != self.window.get_size():
             if os.environ.get("CHESS_DEBUG_RESIZE"):
-                log.info("resize-sync win32=%s gws=%s surf=%s -> set_mode(%d,%d)",
-                         self.chrome.client_size(), pg.display.get_window_size(),
-                         self.window.get_size(), win_w, win_h)
+                log.debug("resize-sync win32=%s gws=%s surf=%s -> set_mode(%d,%d)",
+                          self.chrome.client_size(), pg.display.get_window_size(),
+                          self.window.get_size(), win_w, win_h)
             self._recreate_window_surface(win_w, win_h)
             self.window_width = win_w
             self.window_height = win_h

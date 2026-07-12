@@ -6,6 +6,7 @@ request_state_sync, and gates every further move_applied/takeback behind the
 `_resyncing` flag until _handle_game_resumed clears it.
 """
 import json
+import logging
 import random
 
 from unittest.mock import MagicMock
@@ -376,6 +377,21 @@ def test_resync_timeout_escalates_to_reconnect():
     app.coordinator.client.force_reconnect.assert_called_once()
 
 
+def test_resync_timeout_escalation_logs_a_warning_not_an_info(caplog):
+    """Escalating a stuck resync to a full reconnect is a degraded path, not a
+    routine state transition — it must not read as just another INFO line."""
+    from chessshootout.frontend.online_coordinator import RESYNC_TIMEOUT_MS
+    app = _online_app()
+    app.coordinator.client.state = "connected"
+    app.coordinator._resyncing = True
+    app.coordinator._resync_started_at_ms = pg.time.get_ticks() - (RESYNC_TIMEOUT_MS + 1000)
+    with caplog.at_level(logging.INFO, logger="chess.frontend"):
+        app.coordinator._update_online_phase()
+    lines = [r for r in caplog.records if "resync timed out" in r.getMessage()]
+    assert len(lines) == 1
+    assert lines[0].levelno == logging.WARNING
+
+
 def test_resync_timeout_no_escalation_when_already_reconnecting():
     from chessshootout.frontend.online_coordinator import RESYNC_TIMEOUT_MS
     app = _online_app()
@@ -425,3 +441,15 @@ def test_server_silence_escalates_to_reconnect():
     app.coordinator._send_heartbeat_if_due()
     app.coordinator.client.force_reconnect.assert_called_once()
     app.coordinator.client.send_ping.assert_not_called()
+
+
+def test_server_silence_logs_a_warning_not_an_info(caplog):
+    """A missed heartbeat is a degraded connection, not routine chatter."""
+    app = _online_app()
+    app.coordinator.client.state = "connected"
+    app.coordinator.client.is_server_silent.return_value = True
+    with caplog.at_level(logging.INFO, logger="chess.frontend"):
+        app.coordinator._send_heartbeat_if_due()
+    lines = [r for r in caplog.records if "heartbeat silent" in r.getMessage()]
+    assert len(lines) == 1
+    assert lines[0].levelno == logging.WARNING

@@ -10,6 +10,7 @@ backstops (_on_back_to_menu force-promotes an unconfirmed online result before
 leaving; draw_frame drains inbound online events before _update_result_pending
 so a result queued the same frame the player quits is still saved).
 """
+import logging
 import os
 
 from datetime import datetime
@@ -470,3 +471,50 @@ def test_incremental_autosave_skips_when_result_already_showing(tmp_path, monkey
     app.game.manual_result = "white_wins_by_resignation"
     app.game.result_flow._update_incremental_autosave()
     assert _pgn_files(tmp_path) == [], "a finished game is the finalize path's job, not this one"
+
+
+def test_game_end_log_reports_the_saved_path_on_success(tmp_path, monkeypatch, caplog):
+    app = _local_app(tmp_path, monkeypatch)
+    _e4(app)
+    with caplog.at_level(logging.INFO, logger="chess.frontend"):
+        app.game._perform_resign()
+    path = app.game.result_flow._last_saved_pgn_path
+    assert path is not None
+    lines = [r.getMessage() for r in caplog.records if r.getMessage().startswith("game end")]
+    assert lines == [f"game end result=white_wins_by_resignation saved={path}"]
+
+
+def test_game_end_log_reports_skipped_no_moves_when_history_is_empty(
+        tmp_path, monkeypatch, caplog):
+    """The real-user bug this replaces: an immediate resign with no moves
+    played used to log `saved=false`, which read like a failure — it wasn't,
+    there was simply nothing to save."""
+    app = _local_app(tmp_path, monkeypatch)
+    with caplog.at_level(logging.INFO, logger="chess.frontend"):
+        app.game._perform_resign()
+    assert app.game.match.move_history == []
+    assert _pgn_files(tmp_path) == []
+    lines = [r.getMessage() for r in caplog.records if r.getMessage().startswith("game end")]
+    assert lines == ["game end result=black_wins_by_resignation saved=skipped reason=no_moves"]
+
+
+def test_game_end_log_reports_failed_when_the_save_latch_was_hit(tmp_path, monkeypatch, caplog):
+    """A hard OS error already gets its own ERROR breadcrumb (log.exception at
+    the failure site, inside the real _reserve_pgn_path — nothing here is
+    mocked away) — the game-end line must say saved=failed without re-logging
+    a second error for the same fault."""
+    app = _local_app(tmp_path, monkeypatch)
+    monkeypatch.setattr(paths, "get_fallback_data_dir", paths.get_data_dir)
+    games_dir = paths.get_games_dir()
+    if games_dir.is_dir():
+        games_dir.rmdir()
+    games_dir.write_text("not a directory", encoding="utf-8")
+    _e4(app)
+    with caplog.at_level(logging.DEBUG, logger="chess.frontend"):
+        app.game._perform_resign()
+    assert app.game.result_flow._save_failed is True
+    game_end_lines = [r.getMessage() for r in caplog.records
+                      if r.getMessage().startswith("game end")]
+    assert game_end_lines == ["game end result=white_wins_by_resignation saved=failed"]
+    error_lines = [r for r in caplog.records if r.levelno >= logging.ERROR]
+    assert len(error_lines) == 1, "exactly one breadcrumb from the failure site, not duplicated"

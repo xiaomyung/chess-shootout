@@ -14,6 +14,7 @@ Two reconnect paths land here:
    board + clock back to the starting position with full time.
 """
 
+import logging
 from unittest.mock import MagicMock
 
 import pygame as pg
@@ -276,3 +277,63 @@ def test_back_to_menu_resets_probe_attempts(app):
     app.coordinator._reconnect_probe_attempts = RECONNECT_PROBE_MAX_ATTEMPTS
     app._on_back_to_menu()
     assert app.coordinator._reconnect_probe_attempts == 0
+
+
+def test_spawn_reconnect_probe_logs_a_debug_attempt_not_an_info_line(app, monkeypatch, caplog):
+    """The /reclaim probe fires every 5s while idle on the menu — it must stay
+    at DEBUG, never INFO, or it becomes the same per-probe noise the httpx
+    silencing is fixing on the transport side."""
+    monkeypatch.setattr("threading.Thread", lambda *a, **k: MagicMock())
+    app.coordinator._reconnect_probe_gen += 1
+    app.coordinator._reconnect_probe_inflight = False
+    app.coordinator._pending_reconnect = None
+    app.coordinator._reconnect_probe_attempts = 0
+    with caplog.at_level(logging.DEBUG, logger="chess.frontend"):
+        app.coordinator._spawn_reconnect_probe()
+    debug_lines = [r for r in caplog.records if "reclaim probe attempt" in r.getMessage()]
+    assert len(debug_lines) == 1
+    assert debug_lines[0].levelno == logging.DEBUG
+    assert not any(r.levelno == logging.INFO and "reclaim probe" in r.getMessage()
+                   for r in caplog.records)
+
+
+def test_probe_worker_logs_nothing_on_a_routine_miss(app, monkeypatch, caplog):
+    """No reclaimable game found (the common case, e.g. no server or a fresh
+    client) must not log anything — this is the exact noise pattern the real
+    user session showed (~8 repeated /reclaim probes with nothing to say)."""
+    monkeypatch.setattr("chessshootout.frontend.online_coordinator.probe_active_game",
+                        lambda addr, uuid: None)
+    gen = app.coordinator._reconnect_probe_gen
+    with caplog.at_level(logging.DEBUG, logger="chess.frontend"):
+        app.coordinator._reconnect_probe_worker("addr", "uuid", gen)
+    assert caplog.records == []
+
+
+def test_probe_worker_logs_info_only_on_the_reclaim_available_transition(app, monkeypatch, caplog):
+    monkeypatch.setattr("chessshootout.frontend.online_coordinator.probe_active_game",
+                        lambda addr, uuid: {"room_id": "r-1", "session_token": "t"})
+    monkeypatch.setattr("chessshootout.frontend.online_coordinator.fetch_resume",
+                        lambda addr, room, token: {"fen": ""})
+    gen = app.coordinator._reconnect_probe_gen
+    with caplog.at_level(logging.DEBUG, logger="chess.frontend"):
+        app.coordinator._reconnect_probe_worker("addr", "uuid", gen)
+    info_lines = [r for r in caplog.records if r.levelno == logging.INFO]
+    assert len(info_lines) == 1
+    assert info_lines[0].getMessage() == "reclaim available room=r-1"
+
+
+def test_probe_worker_does_not_relog_reclaim_available_while_still_pending(
+        app, monkeypatch, caplog):
+    """A steady state where a reclaimable game is already known must not
+    re-announce it every 5s poll — only the None -> available transition
+    is a state change worth an INFO line."""
+    monkeypatch.setattr("chessshootout.frontend.online_coordinator.probe_active_game",
+                        lambda addr, uuid: {"room_id": "r-1", "session_token": "t"})
+    monkeypatch.setattr("chessshootout.frontend.online_coordinator.fetch_resume",
+                        lambda addr, room, token: {"fen": ""})
+    gen = app.coordinator._reconnect_probe_gen
+    app.coordinator._reconnect_probe_worker("addr", "uuid", gen)
+    caplog.clear()
+    with caplog.at_level(logging.DEBUG, logger="chess.frontend"):
+        app.coordinator._reconnect_probe_worker("addr", "uuid", gen)
+    assert not any(r.levelno == logging.INFO for r in caplog.records)

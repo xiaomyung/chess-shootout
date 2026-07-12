@@ -239,3 +239,18 @@ def test_dirty_rects_menu_history_review_return_none():
     assert app.menu.dirty_rects() is None
     app.switch_to("history")
     assert app.history.dirty_rects() is None
+
+
+def test_resize_sync_debug_breadcrumb_is_debug_not_info(monkeypatch, caplog):
+    """A drag-resize can call _sync_window_surface every frame; even under the
+    opt-in CHESS_DEBUG_RESIZE flag its breadcrumb must stay at DEBUG so it
+    can't spam an INFO-level session log."""
+    app = make_app()
+    monkeypatch.setenv("CHESS_DEBUG_RESIZE", "1")
+    other_size = (app.window.get_size()[0] + 50, app.window.get_size()[1])
+    monkeypatch.setattr(pg.display, "get_window_size", lambda: other_size)
+    with caplog.at_level(logging.DEBUG, logger="chess.frontend"):
+        app._sync_window_surface()
+    lines = [r for r in caplog.records if "resize-sync" in r.getMessage()]
+    assert len(lines) == 1
+    assert lines[0].levelno == logging.DEBUG

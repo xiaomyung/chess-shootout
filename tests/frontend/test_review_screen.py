@@ -8,6 +8,7 @@ covered by test_review.py.
 """
 
 import glob
+import logging
 import os
 
 import pygame as pg
@@ -153,6 +154,17 @@ def test_load_failure_missing_file_returns_to_menu(tmp_path):
     _enter_review(app, missing, return_to="menu")
     assert app.screen.name == "menu"
     assert app.toast.message == "Could not load PGN"
+
+
+def test_load_failure_logs_a_warning_with_the_path_and_reason(tmp_path, caplog):
+    missing = tmp_path / "nope.pgn"
+    app = make_app()
+    with caplog.at_level(logging.INFO, logger="chess.frontend"):
+        _enter_review(app, missing, return_to="menu")
+    lines = [r for r in caplog.records if r.getMessage().startswith("review enter")]
+    assert len(lines) == 1
+    assert lines[0].levelno == logging.WARNING
+    assert lines[0].getMessage() == f"review enter path={missing} failed: could not read file"
 
 
 def test_self_switch_reload_shows_the_new_pgn(tmp_path):

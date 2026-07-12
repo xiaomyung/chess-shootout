@@ -328,7 +328,14 @@ class ResultFlow:
             path = self._auto_save_pgn()
         if not self._result_logged:
             self._result_logged = True
-            log.info("game end result=%s saved=%s", code, path or "false")
+            log.info("game end result=%s saved=%s", code, self._save_state_str(path))
+
+    def _save_state_str(self, path):
+        if path is not None:
+            return path
+        if not self.screen.match.move_history:
+            return "skipped reason=no_moves"
+        return "failed"
 
     def _finalize_result(self, code):
         screen = self.screen

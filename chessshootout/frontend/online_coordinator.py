@@ -596,7 +596,7 @@ class OnlineCoordinator:
         if self.client is None or not self.client.is_connected():
             return
         if self.client.is_server_silent():
-            log.info("server heartbeat silent; escalating to reconnect")
+            log.warning("server heartbeat silent; escalating to reconnect")
             self.client.force_reconnect()
             return
         game = self.app.game
@@ -686,7 +686,7 @@ class OnlineCoordinator:
             if pg.time.get_ticks() - self._resync_started_at_ms > RESYNC_TIMEOUT_MS:
                 self._resyncing = False
                 if self.client is not None and self.client.state == "connected":
-                    log.info("resync timed out; escalating to reconnect")
+                    log.warning("resync timed out; escalating to reconnect")
                     self.client.force_reconnect()
             else:
                 self.app.toast.show("Resyncing…")
@@ -706,6 +706,7 @@ class OnlineCoordinator:
         with self._pending_reconnect_lock:
             self._reconnect_probe_gen += 1
             gen = self._reconnect_probe_gen
+        log.debug("reclaim probe attempt addr=%s gen=%d", addr, gen)
         thread = threading.Thread(
             target=self._reconnect_probe_worker,
             args=(addr, client_uuid, gen),
@@ -725,11 +726,14 @@ class OnlineCoordinator:
                     self._pending_reconnect = None
                     self._reconnect_probe_attempts += 1
                 else:
+                    became_available = self._pending_reconnect is None
                     self._pending_reconnect = {
                         "addr": addr,
                         "room_id": reclaim["room_id"],
                         "session_token": reclaim["session_token"],
                     }
+                    if became_available:
+                        log.info("reclaim available room=%s", reclaim["room_id"])
         finally:
             self._reconnect_probe_inflight = False
 
