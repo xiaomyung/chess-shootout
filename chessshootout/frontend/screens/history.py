@@ -39,6 +39,9 @@ class HistoryScreen(Screen):
     def active_scrollable(self):
         return self.app.history_view
 
+    def scrollables(self):
+        return [self.app.history_view]
+
     def escape(self):
         return Nav("menu")
 

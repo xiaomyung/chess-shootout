@@ -161,6 +161,9 @@ class ReviewScreen(Screen):
     def modals(self):
         return [ModalSpec(self.app.help_modal)]
 
+    def scrollables(self):
+        return [self.right_menu]
+
     def caption(self):
         return ""
 

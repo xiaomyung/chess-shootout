@@ -117,6 +117,20 @@ def test_request_nav_overwrite_last_wins():
     assert app.screen.name == "menu"
 
 
+def test_switch_to_rejects_a_non_plain_payload_end_to_end():
+    app = make_app()
+    with pytest.raises(TypeError, match="cb"):
+        app.switch_to("game", cb=lambda: None)
+    assert app.screen.name == "menu"
+
+
+def test_request_nav_then_execute_pending_nav_rejects_a_non_plain_payload():
+    app = make_app()
+    app.request_nav(Nav("game", {"cb": lambda: None}))
+    with pytest.raises(TypeError, match="cb"):
+        app._execute_pending_nav()
+
+
 def test_switch_to_logs_full_lifecycle(caplog):
     app = make_app()
     with caplog.at_level(logging.DEBUG, logger="chess.frontend"):

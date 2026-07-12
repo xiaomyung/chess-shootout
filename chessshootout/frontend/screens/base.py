@@ -94,6 +94,9 @@ class Screen:
     def modals(self):
         return []
 
+    def scrollables(self):
+        return []
+
     def dirty_rects(self):
         return None
 
