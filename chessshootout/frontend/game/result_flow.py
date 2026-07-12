@@ -8,6 +8,7 @@ from chessshootout import paths
 from chessshootout.domain.result_stats import compute_result_stats
 from chessshootout.domain.pgn.generate import format_annotations, generate_pgn, RESULT_CODES
 from chessshootout.backend.pieces import PieceColor
+from chessshootout.frontend.game.variant import Variant
 from chessshootout.frontend.pgn_open import open_pgn_or_toast
 
 
@@ -36,7 +37,7 @@ RESULT_TEXT = {
 }
 
 
-def _score_str(score):
+def score_str(score):
     int_part = int(score)
     has_half = score - int_part >= 0.5 - 1e-9
     if int_part == 0 and has_half:
@@ -51,7 +52,7 @@ class ResultFlow:
     def __init__(self, screen):
         self.screen = screen
         self.app = screen.app
-        self._series_scores = {}
+        self.series_scores = {}
         self.reset_for_new_game()
 
     def reset_for_new_game(self):
@@ -87,7 +88,7 @@ class ResultFlow:
             return None
         return RESULT_TEXT.get(code)
 
-    def _feed_result_menu(self):
+    def feed_result_menu(self):
         screen = self.screen
         code = screen.current_result()
         text = self.result_text()
@@ -101,16 +102,16 @@ class ResultFlow:
         subject = self._result_subject_color(code)
         stats = compute_result_stats(screen.match.move_history, screen.match.clock, subject)
         screen.result_menu.set_result(word, intent, full_reason, stats)
-        if screen.variant == "online":
+        if screen.variant == Variant.ONLINE:
             screen.result_menu.set_series(
                 screen.white_name, screen.black_name,
-                _score_str(self._series_scores.get(screen.white_name, 0.0)),
-                _score_str(self._series_scores.get(screen.black_name, 0.0)))
+                score_str(self.series_scores.get(screen.white_name, 0.0)),
+                score_str(self.series_scores.get(screen.black_name, 0.0)))
         else:
             screen.result_menu.set_series(None, None, None, None)
 
     def _perspective_color(self):
-        if self.screen.variant in ("online", "bot"):
+        if self.screen.variant in (Variant.ONLINE, Variant.BOT):
             return self.screen.match.local_color
         return None
 
@@ -137,7 +138,7 @@ class ResultFlow:
         board = self.screen.board
         return not board.is_animating() and not board.effects.captures
 
-    def _update_result_pending(self):
+    def update_result_pending(self):
         screen = self.screen
         self._update_incremental_autosave()
         result = screen.current_result()
@@ -145,14 +146,14 @@ class ResultFlow:
             screen._result_first_seen_at_ms = None
             self._result_await_since_ms = None
             return
-        if screen.variant == "online" and screen.manual_result is None:
+        if screen.variant == Variant.ONLINE and screen.manual_result is None:
             if not self.app.coordinator._resyncing:
                 self._promote_awaited_result(result)
             return
-        if screen.variant == "online" and self.app.coordinator._resyncing:
+        if screen.variant == Variant.ONLINE and self.app.coordinator._resyncing:
             return
         if RESULT_CODES.get(result) is not None:
-            self._on_result_final(result)
+            self.on_result_final(result)
         if screen._result_first_seen_at_ms is None and self._move_visually_settled():
             screen._result_first_seen_at_ms = pg.time.get_ticks()
             try:
@@ -167,21 +168,21 @@ class ResultFlow:
             return
         if now - self._result_await_since_ms < RESULT_CONFIRM_TIMEOUT_MS:
             return
-        self._finalize_result(engine_result)
+        self.finalize_result(engine_result)
         log.info("promoted unconfirmed online result locally: %s", engine_result)
 
     def _award_series_win(self, winner):
         name = self.screen._name_for_color(winner)
-        self._series_scores[name] = self._series_scores.get(name, 0.0) + 1
+        self.series_scores[name] = self.series_scores.get(name, 0.0) + 1
 
     def _award_series_draw(self):
         for name in (self.screen.white_name, self.screen.black_name):
-            self._series_scores[name] = self._series_scores.get(name, 0.0) + 0.5
+            self.series_scores[name] = self.series_scores.get(name, 0.0) + 0.5
 
-    def _on_open_pgn(self):
+    def on_open_pgn(self):
         open_pgn_or_toast(self.app.toast, self._last_saved_pgn_path)
 
-    def _probe_games_dir_writable(self):
+    def probe_games_dir_writable(self):
         games_dir = str(paths.get_games_dir())
         try:
             os.makedirs(games_dir, exist_ok=True)
@@ -262,7 +263,7 @@ class ResultFlow:
             self._last_saved_pgn_path = None
         return outcome
 
-    def _auto_save_pgn(self):
+    def auto_save_pgn(self):
         screen = self.screen
         if not screen.match.move_history:
             return None
@@ -311,12 +312,12 @@ class ResultFlow:
             return
         self._autosave_last_write_ms = now
         self._autosave_last_ply = ply_count
-        self._auto_save_pgn()
+        self.auto_save_pgn()
 
-    def _on_result_final(self, code):
+    def on_result_final(self, code):
         if code is None:
             return
-        if not self._series_score_awarded and self.screen.variant == "online":
+        if not self._series_score_awarded and self.screen.variant == Variant.ONLINE:
             if code.startswith("white_wins"):
                 self._award_series_win("white")
                 self._series_score_awarded = True
@@ -329,7 +330,7 @@ class ResultFlow:
         path = None
         if not self._save_failed or self._final_save_attempted_for != code:
             self._final_save_attempted_for = code
-            path = self._auto_save_pgn()
+            path = self.auto_save_pgn()
         if not self._result_logged:
             self._result_logged = True
             log.info("game end result=%s saved=%s", code, self._save_state_str(path))
@@ -341,12 +342,12 @@ class ResultFlow:
             return "skipped reason=no_moves"
         return "failed"
 
-    def _finalize_result(self, code):
+    def finalize_result(self, code):
         screen = self.screen
         self._result_await_since_ms = None
         if screen.manual_result is None:
             screen.manual_result = code
-        self._on_result_final(code)
+        self.on_result_final(code)
 
     def _build_pgn_text(self):
         screen = self.screen
@@ -357,5 +358,5 @@ class ResultFlow:
             white_name=screen.white_name, black_name=screen.black_name,
             time_control=time_control,
             match_id=screen._match_session_id,
-            annotations=format_annotations(screen.skillcheck_session._skillcheck_log),
+            annotations=format_annotations(screen.skillcheck_session.skillcheck_log),
         )

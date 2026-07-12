@@ -34,6 +34,7 @@ from chessshootout.frontend.window_chrome import (
     WindowChrome, WINDOW_FLAGS, WINDOW_TITLE, MIN_WINDOW_WIDTH, MIN_WINDOW_HEIGHT,
 )
 from chessshootout.infra.open_external import open_with_default_app
+from chessshootout.frontend.game.variant import Variant
 from chessshootout.frontend.online_coordinator import OnlineCoordinator
 from chessshootout.frontend.audio.sound_manager import SoundManager
 from chessshootout.frontend.modals.start import StartMenu
@@ -179,15 +180,15 @@ class Frontend:
     def _on_back_to_menu(self):
         pending_result = self.game.current_result()
         if pending_result is not None:
-            self.game.result_flow._finalize_result(pending_result)
-        keep_online = (self.game.variant == "online" and self.coordinator.client is not None
+            self.game.result_flow.finalize_result(pending_result)
+        keep_online = (self.game.variant == Variant.ONLINE and self.coordinator.client is not None
                        and self.game.current_result() is not None)
         had_rematch_offer = self.coordinator._rematch_offered
         self.switch_to("menu")
         self.game._match_session_id = None
         self.coordinator._reconnect_probe_attempts = 0
         self.coordinator.retain_for_rematch(keep_online)
-        self.game.variant = "local"
+        self.game.variant = Variant.LOCAL
         self.game.match.local_color = None
         self.game.match.on_local_move_applied = None
         self.game.right_menu.set_game_info(None)
@@ -202,7 +203,7 @@ class Frontend:
             self.coordinator._reshow_rematch_banner()
 
     def _on_new_game(self):
-        if self.game.variant == "local":
+        if self.game.variant == Variant.LOCAL:
             self.game._chosen_side = (
                 "black" if self.game._chosen_side == "white" else "white")
             self.game.white_name, self.game.black_name = (
@@ -380,7 +381,7 @@ class Frontend:
         now = pg.time.get_ticks()
         self.coordinator.update(now)
 
-        self.game.give_time._update_give_time_hold()
+        self.game.give_time.update_give_time_hold()
         self.settings._flush_deferred_env_writes()
 
         nav = self.screen.update(now)

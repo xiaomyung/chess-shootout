@@ -106,7 +106,7 @@ def _move_applied(frm, to, ply, *, kind="wheel", won=True, san="Qxg7#"):
 def _land_capture_mate(app):
     """Drive gate -> required -> move_applied(won) -> verdict hold so Qxg7# lands."""
     frm, to = _capture_mate_board(app)
-    app.game.skillcheck_session._skillcheck_gate(frm, to)
+    app.game.skillcheck_session.skillcheck_gate(frm, to)
     app.coordinator._handle_skill_check_required(_required_payload(frm, to))
     app.coordinator._handle_remote_move_applied(_move_applied(frm, to, 1))
     app.game.skillcheck_overlay.update(pg.time.get_ticks() + 500)  # run the deferred apply
@@ -134,7 +134,7 @@ def test_online_capture_mate_saves_full_game_with_result(tmp_path, monkeypatch):
     assert app.game.match.game_result() == "white_wins", "the mate landed"
     app.coordinator._handle_online_result({"reason": "checkmate", "winner_color": "white"})
     _settle(app)
-    app.game.result_flow._update_result_pending()
+    app.game.result_flow.update_result_pending()
     text = _saved_text(app)
     assert "Qxg7#" in text, "the mating ply is in the saved PGN (not truncated)"
     assert '[Result "1-0"]' in text
@@ -148,7 +148,7 @@ def test_online_capture_mate_writes_utf8_bytes(tmp_path, monkeypatch):
     _land_capture_mate(app)
     app.coordinator._handle_online_result({"reason": "checkmate", "winner_color": "white"})
     _settle(app)
-    app.game.result_flow._update_result_pending()
+    app.game.result_flow.update_result_pending()
     text = _saved_text(app)
     assert "{Wheel ✓}" in text
     with open(app.game.result_flow._last_saved_pgn_path, "rb") as f:
@@ -169,11 +169,11 @@ def test_auto_save_survives_surrogate_nickname_without_crashing(tmp_path, monkey
     app.game.white_name = "bad\udce9name"
     app.game.result_flow._last_saved_pgn_path = None
     app.game.result_flow._last_saved_result_tag = None
-    assert app.game.result_flow._auto_save_pgn() is None
+    assert app.game.result_flow.auto_save_pgn() is None
     app.game.white_name = "alice"
     app.game.result_flow._last_saved_pgn_path = None
     app.game.result_flow._last_saved_result_tag = None
-    assert app.game.result_flow._auto_save_pgn() is not None
+    assert app.game.result_flow.auto_save_pgn() is not None
 
 
 def test_startup_toasts_when_stored_nickname_needs_sanitizing(tmp_path, monkeypatch):
@@ -201,11 +201,11 @@ def test_online_mate_saved_via_watchdog_when_result_message_is_missed(tmp_path, 
     _settle(app)
     fake_now = [10_000]
     monkeypatch.setattr(pg.time, "get_ticks", lambda: fake_now[0])
-    app.game.result_flow._update_result_pending()  # arms await; no save (server-authoritative)
+    app.game.result_flow.update_result_pending()  # arms await; no save (server-authoritative)
     assert app.game.result_flow._last_saved_pgn_path is None
     assert app.game.manual_result is None
     fake_now[0] += RESULT_CONFIRM_TIMEOUT_MS + 100
-    app.game.result_flow._update_result_pending()  # promotes AND saves in the same call
+    app.game.result_flow.update_result_pending()  # promotes AND saves in the same call
     assert app.game.manual_result == "white_wins"
     text = _saved_text(app)
     assert "Qxg7#" in text and '[Result "1-0"]' in text
@@ -220,11 +220,11 @@ def test_watchdog_awards_score_for_on_time_win(tmp_path, monkeypatch):
     assert app.game.match.game_result() == "white_wins_on_time"
     fake_now = [10_000]
     monkeypatch.setattr(pg.time, "get_ticks", lambda: fake_now[0])
-    app.game.result_flow._update_result_pending()
+    app.game.result_flow.update_result_pending()
     fake_now[0] += RESULT_CONFIRM_TIMEOUT_MS + 100
-    app.game.result_flow._update_result_pending()
+    app.game.result_flow.update_result_pending()
     assert app.game.manual_result == "white_wins_on_time"
-    assert app.game.result_flow._series_scores.get("alice") == 1.0, "on-time win still scores"
+    assert app.game.result_flow.series_scores.get("alice") == 1.0, "on-time win still scores"
 
 
 def test_online_result_saves_before_the_move_animation_settles(tmp_path, monkeypatch):
@@ -234,7 +234,7 @@ def test_online_result_saves_before_the_move_animation_settles(tmp_path, monkeyp
     _land_capture_mate(app)
     app.coordinator._handle_online_result({"reason": "checkmate", "winner_color": "white"})
     assert app.game.board.is_animating() or app.game.board.effects.captures, "still animating"
-    app.game.result_flow._update_result_pending()
+    app.game.result_flow.update_result_pending()
     assert app.game.result_flow._last_saved_pgn_path is not None, \
         "saved despite the unsettled board"
 
@@ -246,7 +246,7 @@ def test_finished_game_resume_does_not_replay_result_effects(tmp_path, monkeypat
     _land_capture_mate(app)
     app.coordinator._handle_online_result({"reason": "checkmate", "winner_color": "white"})
     _settle(app)
-    app.game.result_flow._update_result_pending()                     # latches + fires effects once
+    app.game.result_flow.update_result_pending()                     # latches + fires effects once
     assert app.game._result_first_seen_at_ms is not None
     latch = app.game._result_first_seen_at_ms
     app.coordinator._handle_game_resumed({
@@ -275,27 +275,27 @@ def test_watchdog_does_not_fire_before_timeout(tmp_path, monkeypatch):
     _land_capture_mate(app)
     fake_now = [10_000]
     monkeypatch.setattr(pg.time, "get_ticks", lambda: fake_now[0])
-    app.game.result_flow._update_result_pending()
+    app.game.result_flow.update_result_pending()
     fake_now[0] += RESULT_CONFIRM_TIMEOUT_MS - 500
-    app.game.result_flow._update_result_pending()
+    app.game.result_flow.update_result_pending()
     assert app.game.manual_result is None, "must give the server result time to arrive on high ping"
 
 
 def test_verdict_failure_still_sets_result_and_resyncs_without_truncating(tmp_path, monkeypatch):
     app = _online_app(tmp_path, monkeypatch)
     frm, to = _capture_mate_board(app)
-    app.game.skillcheck_session._skillcheck_gate(frm, to)
+    app.game.skillcheck_session.skillcheck_gate(frm, to)
     app.coordinator._handle_skill_check_required(_required_payload(frm, to))
     app.coordinator._handle_remote_move_applied(_move_applied(frm, to, 1))
     # The deferred apply blows up when the result forces it early.
-    app.game.skillcheck_session._online_verdict_action = (
+    app.game.skillcheck_session.online_verdict_action = (
         lambda: (_ for _ in ()).throw(RuntimeError("boom")))
     app.coordinator._handle_online_result({"reason": "checkmate", "winner_color": "white"})
     assert app.game.manual_result == "white_wins", \
         "truth (result) is set before the fragile visuals"
     assert app.coordinator._resyncing is True, "the apply failure escalates to a resync"
     _settle(app)
-    app.game.result_flow._update_result_pending()
+    app.game.result_flow.update_result_pending()
     assert app.game.result_flow._last_saved_pgn_path is None, "no truncated save while resyncing"
 
 
@@ -305,10 +305,10 @@ SCHOLARS_MATE = ["e4", "e5", "Bc4", "Bc5", "Qh5", "Nf6", "Qxf7#"]
 def test_resync_recovery_saves_the_complete_game(tmp_path, monkeypatch):
     app = _online_app(tmp_path, monkeypatch)
     frm, to = _capture_mate_board(app)
-    app.game.skillcheck_session._skillcheck_gate(frm, to)
+    app.game.skillcheck_session.skillcheck_gate(frm, to)
     app.coordinator._handle_skill_check_required(_required_payload(frm, to))
     app.coordinator._handle_remote_move_applied(_move_applied(frm, to, 1))
-    app.game.skillcheck_session._online_verdict_action = (
+    app.game.skillcheck_session.online_verdict_action = (
         lambda: (_ for _ in ()).throw(RuntimeError("boom")))
     app.coordinator._handle_online_result({"reason": "checkmate", "winner_color": "white"})
     # Server state-sync returns the full move list + the authoritative result.
@@ -320,7 +320,7 @@ def test_resync_recovery_saves_the_complete_game(tmp_path, monkeypatch):
     assert app.coordinator._resyncing is False
     assert app.game.manual_result == "white_wins"
     _settle(app)
-    app.game.result_flow._update_result_pending()
+    app.game.result_flow.update_result_pending()
     text = _saved_text(app)
     assert "Qxf7#" in text and '[Result "1-0"]' in text
     assert len(_pgn_files(tmp_path)) == 1
@@ -332,11 +332,11 @@ def test_result_redelivery_saves_once_and_scores_once(tmp_path, monkeypatch):
     result = {"reason": "checkmate", "winner_color": "white"}
     app.coordinator._handle_online_result(result)
     _settle(app)
-    app.game.result_flow._update_result_pending()
+    app.game.result_flow.update_result_pending()
     app.coordinator._handle_online_result(result)                # reconnect re-delivery
-    app.game.result_flow._update_result_pending()
+    app.game.result_flow.update_result_pending()
     assert len(_pgn_files(tmp_path)) == 1, "one file despite re-delivery"
-    assert app.game.result_flow._series_scores.get("alice") == 1.0, "scored exactly once"
+    assert app.game.result_flow.series_scores.get("alice") == 1.0, "scored exactly once"
 
 
 def _one_quiet_move(app):
@@ -351,12 +351,12 @@ def _one_quiet_move(app):
 def test_partial_star_upgrades_to_decisive_result(tmp_path, monkeypatch):
     app = _online_app(tmp_path, monkeypatch)
     _one_quiet_move(app)
-    app.game.result_flow._auto_save_pgn()  # forced partial save (result None -> *)
+    app.game.result_flow.auto_save_pgn()  # forced partial save (result None -> *)
     assert app.game.result_flow._last_saved_result_tag == "*"
     first = app.game.result_flow._last_saved_pgn_path
     assert '[Result "*"]' in _saved_text(app)
     app.game.manual_result = "white_wins_by_resignation"
-    app.game.result_flow._auto_save_pgn()
+    app.game.result_flow.auto_save_pgn()
     assert app.game.result_flow._last_saved_pgn_path == first, \
         "overwrites the same file, no duplicate"
     assert '[Result "1-0"]' in _saved_text(app)
@@ -395,6 +395,6 @@ def test_local_capture_mate_still_saves(tmp_path, monkeypatch):
     app.game.match.try_move(sq(7, 6), sq(1, 6))
     assert app.game.match.game_result() == "white_wins"
     _settle(app)
-    app.game.result_flow._update_result_pending()
+    app.game.result_flow.update_result_pending()
     text = _saved_text(app)
     assert "Qxg7#" in text and '[Result "1-0"]' in text

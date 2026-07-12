@@ -29,6 +29,12 @@ RECONNECT_BACKOFF_MAX_SECONDS = 8
 PING_SAMPLE_WINDOW = 5
 
 
+class ClientReason:
+    SERVER_UNREACHABLE = "server_unreachable"
+    RECONNECT_FAILED = "reconnect_failed"
+    ROOM_LOST = "room_lost"
+
+
 @dataclass
 class Event:
     type: str
@@ -96,7 +102,7 @@ class OnlineClient:
         try:
             self._transport = ServerTransport(addr)
         except TransportError:
-            self._inbound.put(Event("error", {"reason": "server_unreachable"}))
+            self._inbound.put(Event("error", {"reason": ClientReason.SERVER_UNREACHABLE}))
             self.state = "disconnected"
             return
         self._spawn_loop_thread(self._async_main, request)
@@ -106,7 +112,7 @@ class OnlineClient:
         try:
             self._transport = ServerTransport(addr)
         except TransportError:
-            self._inbound.put(Event("error", {"reason": "reconnect_failed"}))
+            self._inbound.put(Event("error", {"reason": ClientReason.RECONNECT_FAILED}))
             self.state = "disconnected"
             return
         self._room_id = room_id
@@ -232,15 +238,16 @@ class OnlineClient:
                     health = await self._transport.healthz_async(http)
             except Exception:
                 health = None
-            reason = "room_lost" if health is not None else "reconnect_failed"
+            reason = (ClientReason.ROOM_LOST if health is not None
+                      else ClientReason.RECONNECT_FAILED)
             self._inbound.put(Event("error", {"reason": reason}))
             return
         except Exception as exc:
             log.warning("state-sync failed: %s", exc)
-            self._inbound.put(Event("error", {"reason": "reconnect_failed"}))
+            self._inbound.put(Event("error", {"reason": ClientReason.RECONNECT_FAILED}))
             return
         if response is None:
-            self._inbound.put(Event("error", {"reason": "reconnect_failed"}))
+            self._inbound.put(Event("error", {"reason": ClientReason.RECONNECT_FAILED}))
             return
         log.info("state-sync ok room=%s ply=%d",
                  self._room_id, len(response.move_history))
@@ -335,11 +342,11 @@ class OnlineClient:
                 resumed = await self._resume_with_retries()
                 if resumed is self.ROOM_LOST:
                     log.warning("reconnect: server alive but room gone")
-                    self._inbound.put(Event("error", {"reason": "room_lost"}))
+                    self._inbound.put(Event("error", {"reason": ClientReason.ROOM_LOST}))
                     break
                 if not resumed:
                     log.warning("reconnect gave up")
-                    self._inbound.put(Event("error", {"reason": "reconnect_failed"}))
+                    self._inbound.put(Event("error", {"reason": ClientReason.RECONNECT_FAILED}))
                     break
                 log.info("reconnect succeeded; resuming game")
                 self._adopt_timing(resumed)

@@ -42,17 +42,17 @@ def _hold_give_time(app, hold_ms=0, *, over=True):
     frame-driven tick loop as if held for `hold_ms`, then release. Mirrors the
     real draw_frame poll (mouse pressed + pointer over the button rect). A
     hold_ms of 0 is a tap (the tap-floor gives one 15s tick)."""
-    app.game.give_time._on_give_time()
-    if not app.game.give_time._give_time_holding:
+    app.game.give_time.on_give_time()
+    if not app.game.give_time.give_time_holding:
         return
     start = app.game.give_time._give_time_hold_start_ms
     with mock.patch("pygame.mouse.get_pressed", return_value=(True, False, False)), \
          mock.patch.object(app.game.give_time, "_pointer_over_give_button", return_value=over), \
          mock.patch("pygame.time.get_ticks", return_value=start + hold_ms):
-        app.game.give_time._update_give_time_hold()
+        app.game.give_time.update_give_time_hold()
     with mock.patch("pygame.mouse.get_pressed", return_value=(False, False, False)), \
          mock.patch("pygame.time.get_ticks", return_value=start + hold_ms):
-        app.game.give_time._update_give_time_hold()
+        app.game.give_time.update_give_time_hold()
 
 
 def test_local_tap_gives_15_to_active_clock_side():
@@ -61,7 +61,7 @@ def test_local_tap_gives_15_to_active_clock_side():
     app.game.match.clock.white_remaining = 100.0
     _hold_give_time(app, hold_ms=0)
     assert app.game.match.clock.white_remaining == 115.0
-    assert not app.game.give_time._give_time_holding
+    assert not app.game.give_time.give_time_holding
 
 
 def test_local_hold_ramps_15_per_100ms():
@@ -78,7 +78,7 @@ def test_local_hold_caps_at_initial_seconds():
     app.game.match.clock.white_remaining = 150.0
     _hold_give_time(app, hold_ms=5000)
     assert app.game.match.clock.white_remaining == 180.0
-    assert not app.game.give_time._give_time_holding
+    assert not app.game.give_time.give_time_holding
 
 
 def test_local_tap_after_first_move_gives_time_to_black():
@@ -99,8 +99,8 @@ def test_local_cooldown_blocks_immediate_second_hold():
     app.game.match.clock.white_remaining = 100.0
     _hold_give_time(app, hold_ms=0)
     assert app.game.match.clock.white_remaining == 115.0
-    app.game.give_time._on_give_time()
-    assert not app.game.give_time._give_time_holding
+    app.game.give_time.on_give_time()
+    assert not app.game.give_time.give_time_holding
     assert app.game.match.clock.white_remaining == 115.0
 
 
@@ -138,8 +138,8 @@ def test_local_at_max_starts_no_hold():
     app = _make_app()
     _start_local(app)
     app.game.match.clock.white_remaining = 180.0
-    app.game.give_time._on_give_time()
-    assert not app.game.give_time._give_time_holding
+    app.game.give_time.on_give_time()
+    assert not app.game.give_time.give_time_holding
 
 
 def test_local_noop_when_no_clock():
@@ -149,9 +149,9 @@ def test_local_noop_when_no_clock():
         "time_minutes": None, "increment_seconds": 0,
         "side": "white",
     })
-    app.game.give_time._on_give_time()
+    app.game.give_time.on_give_time()
     assert app.game.match.clock is None
-    assert not app.game.give_time._give_time_holding
+    assert not app.game.give_time.give_time_holding
 
 
 def test_local_noop_when_game_over():
@@ -162,17 +162,17 @@ def test_local_noop_when_game_over():
     before = app.game.match.clock.white_remaining
     _hold_give_time(app, hold_ms=0)
     assert app.game.match.clock.white_remaining == before
-    assert not app.game.give_time._give_time_holding
+    assert not app.game.give_time.give_time_holding
 
 
 def test_hold_cancelled_on_new_game():
     app = _make_app()
     _start_local(app)
     app.game.match.clock.white_remaining = 100.0
-    app.game.give_time._on_give_time()
-    assert app.game.give_time._give_time_holding
+    app.game.give_time.on_give_time()
+    assert app.game.give_time.give_time_holding
     app.game._reset_to_new_game()
-    assert not app.game.give_time._give_time_holding
+    assert not app.game.give_time.give_time_holding
 
 
 @pytest.mark.parametrize("abort", ["resync", "skillcheck", "result"])
@@ -180,8 +180,8 @@ def test_hold_cancelled_on_abort_state(monkeypatch, abort):
     app = _make_app()
     _start_local(app)
     app.game.match.clock.white_remaining = 100.0
-    app.game.give_time._on_give_time()
-    assert app.game.give_time._give_time_holding
+    app.game.give_time.on_give_time()
+    assert app.game.give_time.give_time_holding
     if abort == "resync":
         app.coordinator._resyncing = True
     elif abort == "skillcheck":
@@ -190,8 +190,8 @@ def test_hold_cancelled_on_abort_state(monkeypatch, abort):
         app.game.manual_result = "white_wins_by_resignation"
     with mock.patch("pygame.mouse.get_pressed", return_value=(True, False, False)), \
          mock.patch.object(app.game.give_time, "_pointer_over_give_button", return_value=True):
-        app.game.give_time._update_give_time_hold()
-    assert not app.game.give_time._give_time_holding
+        app.game.give_time.update_give_time_hold()
+    assert not app.game.give_time.give_time_holding
     assert app.game.match.clock.white_remaining == 100.0
 
 
@@ -249,7 +249,7 @@ def test_online_hold_sends_one_message_on_release_with_hold_ms():
     app.coordinator.client.send_give_time.assert_called_once()
     (hold_ms_arg,) = app.coordinator.client.send_give_time.call_args.args
     assert hold_ms_arg == 500
-    assert not app.game.give_time._give_time_holding
+    assert not app.game.give_time.give_time_holding
 
 
 def test_online_hold_does_not_send_until_release():
@@ -257,17 +257,17 @@ def test_online_hold_does_not_send_until_release():
     app.game.match.setup_clock(300, 0)
     app.game.match.clock.start()
     app.game.match.clock.black_remaining = 100.0
-    app.game.give_time._on_give_time()
-    assert app.game.give_time._give_time_holding
+    app.game.give_time.on_give_time()
+    assert app.game.give_time.give_time_holding
     start = app.game.give_time._give_time_hold_start_ms
     with mock.patch("pygame.mouse.get_pressed", return_value=(True, False, False)), \
          mock.patch.object(app.game.give_time, "_pointer_over_give_button", return_value=True), \
          mock.patch("pygame.time.get_ticks", return_value=start + 300):
-        app.game.give_time._update_give_time_hold()
+        app.game.give_time.update_give_time_hold()
     app.coordinator.client.send_give_time.assert_not_called()
     with mock.patch("pygame.mouse.get_pressed", return_value=(False, False, False)), \
          mock.patch("pygame.time.get_ticks", return_value=start + 300):
-        app.game.give_time._update_give_time_hold()
+        app.game.give_time.update_give_time_hold()
     app.coordinator.client.send_give_time.assert_called_once()
 
 

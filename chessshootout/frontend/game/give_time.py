@@ -19,7 +19,7 @@ class GiveTimeHold:
         self.screen = screen
         self.app = screen.app
         self._last_give_time_at_ms = -GIVE_TIME_DEBOUNCE_MS
-        self._give_time_holding = False
+        self.give_time_holding = False
         self._give_time_hold_start_ms = 0
         self._give_time_hold_last_tick_ms = 0
         self._give_time_last_ratchet_ms = 0
@@ -27,26 +27,26 @@ class GiveTimeHold:
         self._give_time_hold_added = 0.0
         self._give_time_hold_recipient = None
 
-    def _give_time_on_cooldown(self):
+    def give_time_on_cooldown(self):
         return pg.time.get_ticks() - self._last_give_time_at_ms < GIVE_TIME_DEBOUNCE_MS
 
-    def _on_give_time(self):
+    def on_give_time(self):
         screen = self.screen
-        if self._give_time_holding:
+        if self.give_time_holding:
             return
         if not screen.board_interactive():
             return
-        if self._give_time_on_cooldown():
+        if self.give_time_on_cooldown():
             return
         clock = screen.match.clock
         if clock is None or clock.flagged is not None:
             return
         recipient = self._give_time_recipient()
         if clock.initial_seconds - clock.remaining(recipient) <= 0:
-            self._give_time_toast_for_giver(recipient, 0)
+            self.give_time_toast_for_giver(recipient, 0)
             return
         now = pg.time.get_ticks()
-        self._give_time_holding = True
+        self.give_time_holding = True
         self._give_time_hold_start_ms = now
         self._give_time_hold_last_tick_ms = now
         self._give_time_last_ratchet_ms = now
@@ -54,16 +54,16 @@ class GiveTimeHold:
         self._give_time_hold_added = 0.0
         self._give_time_hold_recipient = recipient
 
-    def _update_give_time_hold(self):
+    def update_give_time_hold(self):
         screen = self.screen
-        if not self._give_time_holding:
+        if not self.give_time_holding:
             return
         clock = screen.match.clock
         if (screen.current_result() is not None
                 or self.app.coordinator._resyncing or screen.skillcheck_overlay.is_active()
                 or self.app._blocking_modal_visible()
                 or clock is None or clock.flagged is not None):
-            self._cancel_give_time_hold()
+            self.cancel_give_time_hold()
             return
         if not pg.mouse.get_pressed()[0] or not self._pointer_over_give_button():
             self._end_give_time_hold()
@@ -92,7 +92,7 @@ class GiveTimeHold:
 
     def _end_give_time_hold(self):
         screen = self.screen
-        if not self._give_time_holding:
+        if not self.give_time_holding:
             return
         recipient = self._give_time_hold_recipient
         now = pg.time.get_ticks()
@@ -104,16 +104,16 @@ class GiveTimeHold:
                 self._give_time_hold_added += added
                 self._give_time_hold_ticks = 1
         total = self._give_time_hold_added
-        self._give_time_holding = False
+        self.give_time_holding = False
         self._give_time_hold_recipient = None
         self._last_give_time_at_ms = now
         if self.screen.variant == "online" and self.app.coordinator.client is not None:
             self.app.coordinator.client.send_give_time(hold_ms)
             return
-        self._give_time_toast_for_giver(recipient, total)
+        self.give_time_toast_for_giver(recipient, total)
 
-    def _cancel_give_time_hold(self):
-        self._give_time_holding = False
+    def cancel_give_time_hold(self):
+        self.give_time_holding = False
         self._give_time_hold_recipient = None
         self._give_time_hold_ticks = 0
         self._give_time_hold_added = 0.0
@@ -128,7 +128,7 @@ class GiveTimeHold:
             return opponent_of(screen.match.local_color)
         return screen.match.current_turn()
 
-    def _give_time_toast_for_giver(self, recipient_color, added):
+    def give_time_toast_for_giver(self, recipient_color, added):
         screen = self.screen
         name = screen._name_for_color(recipient_color)
         if added <= 0:
@@ -139,7 +139,7 @@ class GiveTimeHold:
             self.app.toast.show(f"Gave {int(round(added))} sec to {name}")
             self.app.sound_manager.play_give_time()
 
-    def _give_time_toast_for_receiver(self, giver_color, added):
+    def give_time_toast_for_receiver(self, giver_color, added):
         screen = self.screen
         if added <= 0:
             return

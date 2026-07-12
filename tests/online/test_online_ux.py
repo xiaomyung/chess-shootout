@@ -557,16 +557,16 @@ def test_restart_online_search_logs_the_teardown_reason(frontend, caplog):
 def test_online_result_redelivery_does_not_double_count(frontend, monkeypatch):
     """A reconnect re-delivers the result; the handler must be idempotent so the
     series score (and PGN auto-save) only fire once per game."""
-    monkeypatch.setattr(frontend.game.result_flow, "_auto_save_pgn", lambda: None)
+    monkeypatch.setattr(frontend.game.result_flow, "auto_save_pgn", lambda: None)
     frontend.game.variant = "online"
     frontend.game._chosen_side = "white"
     frontend.game.white_name, frontend.game.black_name = "Me", "Them"
-    frontend.game.result_flow._series_scores = {}
+    frontend.game.result_flow.series_scores = {}
     frontend.game.manual_result = None
     payload = {"reason": "resignation", "winner_color": "white"}
     frontend.coordinator._handle_online_result(payload)
     frontend.coordinator._handle_online_result(payload)
-    assert frontend.game.result_flow._series_scores["Me"] == 1.0
+    assert frontend.game.result_flow.series_scores["Me"] == 1.0
     assert frontend.game.manual_result == "white_wins_by_resignation"
 
 

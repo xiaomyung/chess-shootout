@@ -153,7 +153,7 @@ def test_series_score_formatting(white_score, black_score, expected):
     app.game.white_name = "Alice"
     app.game.black_name = "Bob"
     app.game._time_control = (60, 0)
-    app.game.result_flow._series_scores = {"Alice": white_score, "Bob": black_score}
+    app.game.result_flow.series_scores = {"Alice": white_score, "Bob": black_score}
     info = app.game._compute_game_info()
     assert info["lines"][0] == expected
     assert info["time_control"] == "1+0"
@@ -164,13 +164,13 @@ def test_series_seeded_from_server_scores():
     game_start payload, overwriting any stale local tally (so a reconnect can't
     desync the count)."""
     app = _make_app()
-    app.game.result_flow._series_scores = {"A": 2, "C": 1}
+    app.game.result_flow.series_scores = {"A": 2, "C": 1}
     app.coordinator._start_online_game({
         "your_color": "white", "white_name": "A", "black_name": "B",
         "time_minutes": 3, "increment_seconds": 0,
         "white_score": 1.0, "black_score": 0.5,
     })
-    assert app.game.result_flow._series_scores == {"A": 1.0, "B": 0.5}
+    assert app.game.result_flow.series_scores == {"A": 1.0, "B": 0.5}
 
 
 def test_series_seeded_keyed_by_player_through_color_swap():
@@ -182,7 +182,7 @@ def test_series_seeded_keyed_by_player_through_color_swap():
         "time_minutes": 3, "increment_seconds": 0,
         "white_score": 0.0, "black_score": 1.0,
     })
-    assert app.game.result_flow._series_scores == {"A": 1.0, "B": 0.0}
+    assert app.game.result_flow.series_scores == {"A": 1.0, "B": 0.0}
     assert app.game._compute_game_info()["lines"][0] == "B  0 – 1  A"
 
 
@@ -198,9 +198,9 @@ def test_series_increments_on_win(winner_color, expected_scores):
     app.switch_to("game", variant=ONLINE)
     app.game.white_name = "Alice"
     app.game.black_name = "Bob"
-    app.game.result_flow._series_scores = {"Alice": 0.0, "Bob": 0.0}
+    app.game.result_flow.series_scores = {"Alice": 0.0, "Bob": 0.0}
     app.coordinator._handle_online_result({"reason": "checkmate", "winner_color": winner_color})
-    assert app.game.result_flow._series_scores == expected_scores
+    assert app.game.result_flow.series_scores == expected_scores
 
 
 def test_series_increments_on_draw():
@@ -208,9 +208,9 @@ def test_series_increments_on_draw():
     app.switch_to("game", variant=ONLINE)
     app.game.white_name = "Alice"
     app.game.black_name = "Bob"
-    app.game.result_flow._series_scores = {"Alice": 0.0, "Bob": 0.0}
+    app.game.result_flow.series_scores = {"Alice": 0.0, "Bob": 0.0}
     app.coordinator._handle_online_result({"reason": "draw_repetition"})
-    assert app.game.result_flow._series_scores == {"Alice": 0.5, "Bob": 0.5}
+    assert app.game.result_flow.series_scores == {"Alice": 0.5, "Bob": 0.5}
 
 
 def test_aborted_does_not_change_series():
@@ -218,9 +218,9 @@ def test_aborted_does_not_change_series():
     app.switch_to("game", variant=ONLINE)
     app.game.white_name = "Alice"
     app.game.black_name = "Bob"
-    app.game.result_flow._series_scores = {"Alice": 1, "Bob": 0}
+    app.game.result_flow.series_scores = {"Alice": 1, "Bob": 0}
     app.coordinator._handle_online_result({"reason": "aborted"})
-    assert app.game.result_flow._series_scores == {"Alice": 1, "Bob": 0}
+    assert app.game.result_flow.series_scores == {"Alice": 1, "Bob": 0}
 
 
 def test_disconnect_abort_is_neutral_result_with_its_own_text():
@@ -230,11 +230,11 @@ def test_disconnect_abort_is_neutral_result_with_its_own_text():
     app.switch_to("game", variant=ONLINE)
     app.game.white_name = "Alice"
     app.game.black_name = "Bob"
-    app.game.result_flow._series_scores = {"Alice": 1, "Bob": 0}
+    app.game.result_flow.series_scores = {"Alice": 1, "Bob": 0}
     app.coordinator._handle_online_result({"reason": "aborted_disconnect"})
     assert app.game.manual_result == "aborted_disconnect"
     assert app.game.result_flow.result_text() == ("Game aborted", "opponent disconnected")
-    assert app.game.result_flow._series_scores == {"Alice": 1, "Bob": 0}
+    assert app.game.result_flow.series_scores == {"Alice": 1, "Bob": 0}
 
 
 def test_score_follows_player_through_color_swap_end_to_end():
@@ -246,15 +246,15 @@ def test_score_follows_player_through_color_swap_end_to_end():
         "time_minutes": 3, "increment_seconds": 0,
     })
     app.coordinator._handle_online_result({"reason": "checkmate", "winner_color": "white"})
-    assert app.game.result_flow._series_scores["Me"] == 1
-    assert app.game.result_flow._series_scores["Friend"] == 0.0
+    assert app.game.result_flow.series_scores["Me"] == 1
+    assert app.game.result_flow.series_scores["Friend"] == 0.0
     app.coordinator._start_online_game({
         "your_color": "black", "white_name": "Friend", "black_name": "Me",
         "time_minutes": 3, "increment_seconds": 0,
         "white_score": 0.0, "black_score": 1.0,
     })
-    assert app.game.result_flow._series_scores["Me"] == 1
-    assert app.game.result_flow._series_scores["Friend"] == 0.0
+    assert app.game.result_flow.series_scores["Me"] == 1
+    assert app.game.result_flow.series_scores["Friend"] == 0.0
     assert app.game._compute_game_info()["lines"][0] == "Friend  0 – 1  Me"
 
 
@@ -275,7 +275,7 @@ def test_online_win_result_subtitle_reports_actual_reason(reason, winner, expect
     app.switch_to("game", variant=ONLINE)
     app.game.white_name = "Alice"
     app.game.black_name = "Bob"
-    app.game.result_flow._series_scores = {"Alice": 0.0, "Bob": 0.0}
+    app.game.result_flow.series_scores = {"Alice": 0.0, "Bob": 0.0}
     app.coordinator._handle_online_result({"reason": reason, "winner_color": winner})
     assert app.game.result_flow.result_text() == expected
 
@@ -295,7 +295,7 @@ def test_online_draw_result_subtitle(draw_reason, expected):
     app.switch_to("game", variant=ONLINE)
     app.game.white_name = "Alice"
     app.game.black_name = "Bob"
-    app.game.result_flow._series_scores = {"Alice": 0.0, "Bob": 0.0}
+    app.game.result_flow.series_scores = {"Alice": 0.0, "Bob": 0.0}
     app.coordinator._handle_online_result({"reason": draw_reason})
     assert app.game.result_flow.result_text() == expected
 

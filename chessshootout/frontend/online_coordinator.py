@@ -7,17 +7,21 @@ import pygame as pg
 from chessshootout.backend.fen import apply_fen
 from chessshootout.backend.utils import coord_from_square, square_from_coord
 from chessshootout.domain.match import ONLINE
+from chessshootout.domain.pgn.load import time_category_for_minutes
 from chessshootout.frontend.modals.match_found import MatchFoundModal
 from chessshootout.frontend.modals.reconnecting import ReconnectingModal
 from chessshootout.frontend.modals.wait import WaitModal
 from chessshootout.frontend.panels.banners import OfferBanners
 from chessshootout.frontend.panels.player_strip import AUTO_END_RED_THRESHOLD_SECONDS
+from chessshootout.frontend.game.variant import Variant
 from chessshootout.frontend.screens.base import Nav
 from chessshootout.infra import env
 from chessshootout.online.client import (
-    OnlineClient, RECONNECT_TOTAL_SECONDS, fetch_resume, probe_active_game,
+    ClientReason, OnlineClient, RECONNECT_TOTAL_SECONDS, fetch_resume, probe_active_game,
 )
-from chessshootout.server.protocol import FIRST_MOVE_ABORT_SECONDS, GRACE_SECONDS
+from chessshootout.server.protocol import (
+    FIRST_MOVE_ABORT_SECONDS, GRACE_SECONDS, Reason,
+)
 from chessshootout.skillcheck.online import SKILLCHECK_DEADLINE_MS
 
 
@@ -43,33 +47,30 @@ OFFER_BANNERS = {
                         "send_rematch_response"),
 }
 
-ONLINE_HARD_FAILURE_REASONS = {
-    "server_unreachable", "reconnect_failed", "room_full",
+ONLINE_HARD_FAILURE_LABELS = {
+    ClientReason.SERVER_UNREACHABLE: "Server unreachable",
+    ClientReason.RECONNECT_FAILED: "Could not reconnect",
+    Reason.ROOM_FULL: "Server is full",
 }
 
-ONLINE_HARD_FAILURE_LABELS = {
-    "server_unreachable": "Server unreachable",
-    "reconnect_failed": "Could not reconnect",
-    "room_full": "Server is full",
-}
+ONLINE_HARD_FAILURE_REASONS = frozenset(ONLINE_HARD_FAILURE_LABELS)
 
 ONLINE_TRANSIENT_REASON_LABELS = {
-    "rate_limited": "Slow down a bit",
-    "draw_offer_already_pending": "Draw offer already pending",
-    "takeback_already_pending": "Takeback already pending",
-    "no_takeback_available": "Nothing to take back",
-    "rematch_already_pending": "Rematch already requested",
-    "already_in_game": "Already in a game",
-    "game_already_over": "This game has ended",
+    Reason.RATE_LIMITED: "Slow down a bit",
+    Reason.NO_TAKEBACK_AVAILABLE: "Nothing to take back",
+    Reason.REMATCH_ALREADY_PENDING: "Rematch already requested",
+    Reason.ALREADY_IN_GAME: "Already in a game",
+    Reason.GAME_ALREADY_OVER: "This game has ended",
 }
 
 ONLINE_GAME_STATE_REASONS = {
-    "not_your_turn", "invalid_move_format", "invalid_message",
-    "version_mismatch",
+    Reason.NOT_YOUR_TURN, Reason.INVALID_MOVE_FORMAT, Reason.INVALID_MESSAGE,
+    Reason.VERSION_MISMATCH,
 }
 
 MOVE_REJECTION_REASONS = {
-    "invalid_move_format", "not_your_turn", "skillcheck_pending", "move_locked",
+    Reason.INVALID_MOVE_FORMAT, Reason.NOT_YOUR_TURN, Reason.SKILLCHECK_PENDING,
+    Reason.MOVE_LOCKED,
 }
 
 NOT_YOUR_TURN_TOASTS = {
@@ -170,28 +171,28 @@ class OnlineCoordinator:
     def _handle_online_error(self, payload):
         reason = payload.get("reason", "")
         game = self.app.game
-        pending_move = game.skillcheck_session._pending_online_move
+        pending_move = game.skillcheck_session.pending_online_move
         if pending_move is not None and reason in MOVE_REJECTION_REASONS:
-            game.skillcheck_session._pending_online_move = None
+            game.skillcheck_session.pending_online_move = None
             game.board.selected_square = None
-            if reason in ("invalid_move_format", "not_your_turn"):
+            if reason in (Reason.INVALID_MOVE_FORMAT, Reason.NOT_YOUR_TURN):
                 self._begin_resync()
             return
-        if reason == "not_your_turn":
+        if reason == Reason.NOT_YOUR_TURN:
             label = NOT_YOUR_TURN_TOASTS.get(payload.get("msg_type"))
             if label is not None:
                 self.app.toast.show(label)
             return
         if reason in ONLINE_GAME_STATE_REASONS:
             return
-        if reason == "rematch_unavailable":
+        if reason == Reason.REMATCH_UNAVAILABLE:
             self.app.toast.show("Rematch no longer available", key=REMATCH_STATE_TOAST_KEY)
             self._end_rematch_window()
             return
-        if reason == "room_lost":
+        if reason == ClientReason.ROOM_LOST:
             log.warning("online room lost — server restarted mid-game")
             self._resyncing = False
-            game.result_flow._auto_save_pgn()
+            game.result_flow.auto_save_pgn()
             self.reconnecting_modal.hide()
             self.offer_banners.clear()
             self.app.confirm_modal.show(
@@ -322,7 +323,7 @@ class OnlineCoordinator:
 
     def _handle_game_resumed(self, payload):
         game = self.app.game
-        if game.variant != "online":
+        if game.variant != Variant.ONLINE:
             log.info("resume ignored — no active online game")
             self._resyncing = False
             return
@@ -342,7 +343,7 @@ class OnlineCoordinator:
         game.board.clear_premoves()
         game.board.clear_annotations()
         game._adopt_resumed_result(payload)
-        game.skillcheck_session._apply_resumed_skillcheck_log(payload.get("skillcheck_log", []))
+        game.skillcheck_session.apply_resumed_skillcheck_log(payload.get("skillcheck_log", []))
         game._restore_online_skillcheck_state(payload)
         self._resyncing = False
 
@@ -367,7 +368,7 @@ class OnlineCoordinator:
         to_sq = square_from_coord(payload["to"])
         if game._is_my_open_check(from_sq, to_sq):
             self._forward_board_event("on_skillcheck_required", payload)
-        elif game.skillcheck_session._online_spectate_kind is not None:
+        elif game.skillcheck_session.online_spectate_kind is not None:
             self._forward_board_event("on_spectate", payload)
 
     def _handle_skill_check_spectate(self, payload):
@@ -376,7 +377,7 @@ class OnlineCoordinator:
         self._forward_board_event("on_spectate", payload)
 
     def _handle_skill_check_spectate_shot(self, payload):
-        if self._resyncing or self.app.game.skillcheck_session._online_spectate_kind is None:
+        if self._resyncing or self.app.game.skillcheck_session.online_spectate_kind is None:
             return
         self._forward_board_event("on_spectate", payload)
 
@@ -491,13 +492,7 @@ class OnlineCoordinator:
     def _search_labels(self):
         minutes = self._online_config.get("time_minutes") or ONLINE_DEFAULT_TIME_MINUTES
         incr = self._online_config.get("increment_seconds", 0) or 0
-        if minutes < 3:
-            mode = "Bullet"
-        elif minutes < 10:
-            mode = "Blitz"
-        else:
-            mode = "Rapid"
-        return mode, f"{minutes} + {incr}"
+        return time_category_for_minutes(minutes), f"{minutes} + {incr}"
 
     def _on_online_cancel(self):
         log.info("online flow cancel")
@@ -546,7 +541,7 @@ class OnlineCoordinator:
     def _tear_down_online_session(self, reason="unspecified"):
         log.info("online session teardown reason=%s", reason)
         game = self.app.game
-        game.result_flow._auto_save_pgn()
+        game.result_flow.auto_save_pgn()
         self._resyncing = False
         if self.client is not None:
             self.client.disconnect()
@@ -559,7 +554,7 @@ class OnlineCoordinator:
         game.match.on_local_move_applied = None
         game.right_menu.set_game_info(None)
         game.result_menu.set_online_mode(False)
-        game.variant = "local"
+        game.variant = Variant.LOCAL
         game.match.local_color = None
         self.app.switch_to("menu")
         game._reset_to_new_game()
@@ -609,7 +604,7 @@ class OnlineCoordinator:
             self.client.force_reconnect()
             return
         game = self.app.game
-        if game.skillcheck_session._online_verdict_action is not None:
+        if game.skillcheck_session.online_verdict_action is not None:
             return
         now = pg.time.get_ticks()
         if now - self._last_heartbeat_sent_ms >= self.client.heartbeat_interval() * 1000:
@@ -633,7 +628,7 @@ class OnlineCoordinator:
 
     def _auto_end_heartbeat_fraction(self):
         game = self.app.game
-        if game.variant != "online":
+        if game.variant != Variant.ONLINE:
             return None
         now = pg.time.get_ticks()
         candidates = []
@@ -660,14 +655,14 @@ class OnlineCoordinator:
 
     def _tick_skillcheck_watchdog(self):
         session = self.app.game.skillcheck_session
-        if (session._online_skillcheck is None
-                or session._online_skillcheck_opened_ms is None
+        if (session.online_skillcheck is None
+                or session.online_skillcheck_opened_ms is None
                 or not self.app.game.skillcheck_overlay.is_active()):
             return
-        elapsed = pg.time.get_ticks() - session._online_skillcheck_opened_ms
+        elapsed = pg.time.get_ticks() - session.online_skillcheck_opened_ms
         if elapsed > SKILLCHECK_DEADLINE_MS + SKILLCHECK_WATCHDOG_SLACK_MS:
             log.warning("skillcheck verdict lost; resyncing")
-            session._teardown_skillcheck_overlay()
+            session.teardown_skillcheck_overlay()
             self._begin_resync()
 
     def _update_online_phase(self):
@@ -680,7 +675,7 @@ class OnlineCoordinator:
         self._send_heartbeat_if_due()
         now = pg.time.get_ticks()
         game = self.app.game
-        reconnecting = (game.variant == "online" and game.current_result() is None
+        reconnecting = (game.variant == Variant.ONLINE and game.current_result() is None
                         and self.client is not None
                         and self.client.state == "reconnecting")
         if reconnecting:

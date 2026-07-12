@@ -34,7 +34,7 @@ def _fade_probe_after_white(app):
 
 def test_no_result_keeps_first_seen_none():
     app = _make_app()
-    app.game.result_flow._update_result_pending()
+    app.game.result_flow.update_result_pending()
     assert app.game._result_first_seen_at_ms is None
 
 
@@ -42,7 +42,7 @@ def test_first_seen_captured_when_result_appears():
     app = _make_app()
     app.game.manual_result = "white_wins"
     before = pg.time.get_ticks()
-    app.game.result_flow._update_result_pending()
+    app.game.result_flow.update_result_pending()
     assert app.game._result_first_seen_at_ms is not None
     assert app.game._result_first_seen_at_ms >= before
 
@@ -50,19 +50,19 @@ def test_first_seen_captured_when_result_appears():
 def test_first_seen_resets_when_result_clears():
     app = _make_app()
     app.game.manual_result = "white_wins"
-    app.game.result_flow._update_result_pending()
+    app.game.result_flow.update_result_pending()
     assert app.game._result_first_seen_at_ms is not None
     app.game.manual_result = None
-    app.game.result_flow._update_result_pending()
+    app.game.result_flow.update_result_pending()
     assert app.game._result_first_seen_at_ms is None
 
 
 def test_first_seen_does_not_reset_on_subsequent_frames():
     app = _make_app()
     app.game.manual_result = "white_wins"
-    app.game.result_flow._update_result_pending()
+    app.game.result_flow.update_result_pending()
     captured = app.game._result_first_seen_at_ms
-    app.game.result_flow._update_result_pending()
+    app.game.result_flow.update_result_pending()
     assert app.game._result_first_seen_at_ms == captured
 
 
@@ -76,24 +76,24 @@ def test_online_result_defers_first_seen_until_board_settles():
     app.coordinator._handle_online_result({"reason": "checkmate", "winner_color": "white"})
     assert app.game.manual_result == "white_wins"
     assert app.game._result_first_seen_at_ms is None
-    app.game.result_flow._update_result_pending()
+    app.game.result_flow.update_result_pending()
     assert app.game._result_first_seen_at_ms is None
     app.game.board.effects.captures = []
-    app.game.result_flow._update_result_pending()
+    app.game.result_flow.update_result_pending()
     assert app.game._result_first_seen_at_ms is not None
 
 
 def test_modal_hidden_immediately_after_result():
     app = _make_app()
     app.game.manual_result = "white_wins"
-    app.game.result_flow._update_result_pending()
+    app.game.result_flow.update_result_pending()
     assert app.game._result_modal_should_show() is False
 
 
 def test_modal_shows_after_delay_elapses():
     app = _make_app()
     app.game.manual_result = "white_wins_on_time"
-    app.game.result_flow._update_result_pending()
+    app.game.result_flow.update_result_pending()
     app.game._result_first_seen_at_ms = pg.time.get_ticks() - RESULT_MODAL_DELAY_MS - 1
     assert app.game._result_modal_should_show() is True
 
@@ -107,7 +107,7 @@ def test_fade_alpha_starts_low_and_grows_to_max(monkeypatch):
     monkeypatch.setattr(pg.time, "get_ticks", lambda: 10_000_000)
     app = _make_app()
     app.game.manual_result = "white_wins"
-    app.game.result_flow._update_result_pending()
+    app.game.result_flow.update_result_pending()
 
     app.game._result_first_seen_at_ms = pg.time.get_ticks()
     assert app.game._result_elapsed_ms() == 0
@@ -135,7 +135,7 @@ def test_fade_overlay_no_op_when_no_result():
     assert app.game._result_first_seen_at_ms is None
 
     app.game.manual_result = "white_wins"
-    app.game.result_flow._update_result_pending()
+    app.game.result_flow.update_result_pending()
     app.game._result_first_seen_at_ms = pg.time.get_ticks() - RESULT_FADE_MS - 100
     darkened = _fade_probe_after_white(app)
     assert darkened.r == darkened.g == darkened.b == 255 - RESULT_FADE_MAX_ALPHA
@@ -145,7 +145,7 @@ def test_fade_overlay_no_op_when_no_result():
 def test_click_during_fade_window_skips_to_modal():
     app = _make_app()
     app.game.manual_result = "white_wins"
-    app.game.result_flow._update_result_pending()
+    app.game.result_flow.update_result_pending()
     assert app.game._result_modal_should_show() is False
     app.input_router.mouse_left_clicked((100, 100))
     assert app.game._result_modal_should_show() is True
@@ -154,7 +154,7 @@ def test_click_during_fade_window_skips_to_modal():
 def test_click_outside_fade_window_does_not_alter_state():
     app = _make_app()
     app.game.manual_result = "white_wins_on_time"
-    app.game.result_flow._update_result_pending()
+    app.game.result_flow.update_result_pending()
     app.game._result_first_seen_at_ms = pg.time.get_ticks() - RESULT_MODAL_DELAY_MS - 100
     captured = app.game._result_first_seen_at_ms
     app.input_router.mouse_left_clicked((100, 100))
@@ -164,7 +164,7 @@ def test_click_outside_fade_window_does_not_alter_state():
 def test_new_game_clears_pending_result_state():
     app = _make_app()
     app.game.manual_result = "white_wins"
-    app.game.result_flow._update_result_pending()
+    app.game.result_flow.update_result_pending()
     assert app.game._result_first_seen_at_ms is not None
     app.game._reset_to_new_game()
     assert app.game._result_first_seen_at_ms is None
@@ -172,12 +172,12 @@ def test_new_game_clears_pending_result_state():
 
 def _show_result_with_menu_center(app, result="white_wins"):
     app.game.manual_result = result
-    app.game.result_flow._update_result_pending()
+    app.game.result_flow.update_result_pending()
     app.game.board.effects.clear_takeover()
     app.game._result_first_seen_at_ms = pg.time.get_ticks() - RESULT_MODAL_DELAY_MS - 1
     assert app.game._result_modal_should_show() is True
     app._compute_layout()
-    app.game.result_flow._feed_result_menu()
+    app.game.result_flow.feed_result_menu()
     app.game.result_menu.draw()
     assert app.game.result_menu.is_visible() is True
     assert app.game.result_menu.button_rects

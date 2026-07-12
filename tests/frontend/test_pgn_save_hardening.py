@@ -153,7 +153,7 @@ def test_hard_os_error_tries_the_fallback_dir_then_latches(tmp_path, monkeypatch
 
     app.game.result_flow._reserve_pgn_path = failing_reserve
     _e4(app)
-    assert app.game.result_flow._auto_save_pgn() is None
+    assert app.game.result_flow.auto_save_pgn() is None
     assert len(attempted_dirs) == 2, "both the primary AND the fallback dir were tried"
     assert os.path.normpath(str(paths.get_games_dir())) in attempted_dirs
     assert os.path.normpath(str(fallback_dir / paths.GAMES_SUBDIR)) in attempted_dirs
@@ -203,9 +203,9 @@ def test_hard_os_error_shows_the_toast_exactly_once(tmp_path, monkeypatch):
     shown = []
     monkeypatch.setattr(app.toast, "show", lambda msg, *a, **k: shown.append(msg))
     _e4(app)
-    app.game.result_flow._auto_save_pgn()
+    app.game.result_flow.auto_save_pgn()
     _e5(app)
-    app.game.result_flow._auto_save_pgn()
+    app.game.result_flow.auto_save_pgn()
     error_toasts = [m for m in shown if "Could not save PGN" in m]
     assert len(error_toasts) == 1
 
@@ -215,11 +215,11 @@ def test_latch_stops_the_incremental_driver_from_retrying_every_frame(tmp_path, 
     monkeypatch.setattr(paths, "get_fallback_data_dir", lambda: tmp_path / "fallback")
     app.game.result_flow._reserve_pgn_path = lambda directory, prefix: None
     _e4(app)
-    app.game.result_flow._auto_save_pgn()
+    app.game.result_flow.auto_save_pgn()
     assert app.game.result_flow._save_failed is True
 
     calls = []
-    monkeypatch.setattr(app.game.result_flow, "_auto_save_pgn", lambda: calls.append(1))
+    monkeypatch.setattr(app.game.result_flow, "auto_save_pgn", lambda: calls.append(1))
     _e5(app)
     now = [5_000_000]
     monkeypatch.setattr(pg.time, "get_ticks", lambda: now[0])
@@ -235,20 +235,20 @@ def test_hard_failure_finalize_retries_once_per_result_code(tmp_path, monkeypatc
     _e4(app)
 
     calls = []
-    real = app.game.result_flow._auto_save_pgn
+    real = app.game.result_flow.auto_save_pgn
 
     def counting():
         calls.append(1)
         return real()
 
-    monkeypatch.setattr(app.game.result_flow, "_auto_save_pgn", counting)
-    app.game.result_flow._on_result_final("white_wins_by_resignation")
+    monkeypatch.setattr(app.game.result_flow, "auto_save_pgn", counting)
+    app.game.result_flow.on_result_final("white_wins_by_resignation")
     assert app.game.result_flow._save_failed is True
-    app.game.result_flow._on_result_final("white_wins_by_resignation")
-    app.game.result_flow._on_result_final("white_wins_by_resignation")
+    app.game.result_flow.on_result_final("white_wins_by_resignation")
+    app.game.result_flow.on_result_final("white_wins_by_resignation")
     assert len(calls) == 1
 
-    app.game.result_flow._on_result_final("white_wins")
+    app.game.result_flow.on_result_final("white_wins")
     assert len(calls) == 2
 
 
@@ -257,7 +257,7 @@ def test_latch_never_blocks_the_finalize_save(tmp_path, monkeypatch):
     _e4(app)
     app.game.result_flow._save_failed = True
     app.game.manual_result = "white_wins_by_resignation"
-    app.game.result_flow._on_result_final(app.game.manual_result)
+    app.game.result_flow.on_result_final(app.game.manual_result)
     files = _pgn_files(tmp_path)
     assert len(files) == 1, "finalize always gets a fresh attempt, latch or not"
     assert '[Result "1-0"]' in files[0].read_text(encoding="utf-8")
@@ -385,12 +385,12 @@ def test_filename_collision_within_one_second_gets_dash2_suffix(tmp_path, monkey
     app1 = _local_app(tmp_path, monkeypatch)
     _e4(app1)
     app1.game.manual_result = "white_wins_by_resignation"
-    path1 = app1.game.result_flow._auto_save_pgn()
+    path1 = app1.game.result_flow.auto_save_pgn()
 
     app2 = _local_app(tmp_path, monkeypatch)
     _e4(app2)
     app2.game.manual_result = "black_wins_by_resignation"
-    path2 = app2.game.result_flow._auto_save_pgn()
+    path2 = app2.game.result_flow.auto_save_pgn()
 
     assert path1 != path2
     assert os.path.basename(path2).endswith("-2.pgn")
@@ -459,7 +459,7 @@ def test_incremental_autosave_writes_star_tag_throttled_then_finalizes(tmp_path,
     assert '[Result "*"]' in text
 
     app.game.manual_result = "white_wins_by_resignation"
-    app.game.result_flow._on_result_final(app.game.manual_result)
+    app.game.result_flow.on_result_final(app.game.manual_result)
     text = files[0].read_text(encoding="utf-8")
     assert '[Result "1-0"]' in text
     assert len(_pgn_files(tmp_path)) == 1, "the finalize rewrites the same file"
@@ -537,7 +537,7 @@ def test_write_failure_on_a_fresh_reservation_leaves_no_orphan_file(tmp_path, mo
 
     app.game.result_flow._write_pgn_atomic = write
     _e4(app)
-    saved = app.game.result_flow._auto_save_pgn()
+    saved = app.game.result_flow.auto_save_pgn()
 
     assert saved is not None, "the fallback dir still took the game"
     assert _pgn_files(tmp_path) == [], "no orphan 0-byte file in the primary dir"
@@ -594,11 +594,11 @@ def test_open_pgn_after_a_total_save_failure_does_not_launch_an_empty_file(
     monkeypatch.setattr(app.toast, "show", lambda msg, *a, **k: toasts.append(msg))
 
     _e4(app)
-    assert app.game.result_flow._auto_save_pgn() is None
+    assert app.game.result_flow.auto_save_pgn() is None
     assert app.game.result_flow._save_failed is True
     assert app.game.result_flow._last_saved_pgn_path is None
 
-    app.game.result_flow._on_open_pgn()
+    app.game.result_flow.on_open_pgn()
     assert opened == [], "nothing was handed to the OS"
     assert "No saved PGN" in toasts
 

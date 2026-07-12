@@ -116,7 +116,7 @@ def test_result_with_no_subscriber_still_saves_and_scores(tmp_path, monkeypatch)
 
     assert app.game.manual_result == "white_wins_by_resignation"
     assert app.game.result_flow._last_saved_pgn_path is not None
-    assert app.game.result_flow._series_scores["alice"] == 1.0
+    assert app.game.result_flow.series_scores["alice"] == 1.0
 
 
 def test_offer_and_connection_status_never_require_a_subscriber():

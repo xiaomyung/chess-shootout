@@ -817,7 +817,7 @@ def test_keyboard_during_skillcheck_is_silent():
     overlay."""
     app = make_app()
     app._on_start_game(base_config(time_minutes=None))
-    app.game.skillcheck_session._skillcheck_swallows_input = lambda: True
+    app.game.skillcheck_session.skillcheck_swallows_input = lambda: True
     app.game.skillcheck_overlay.handle_event = MagicMock()
     app.sound_manager.reset_mock()
     pg.event.clear()

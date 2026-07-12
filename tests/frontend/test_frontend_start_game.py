@@ -257,7 +257,7 @@ def test_auto_save_writes_headers_with_names_and_time_control(tmp_path, monkeypa
     monkeypatch.setenv("CHESS_DATA_DIR", str(tmp_path))
     app.game.match.backend.try_move(Square(6, 4), Square(4, 4))
     app.game.manual_result = "white_wins"
-    app.game.result_flow._auto_save_pgn()
+    app.game.result_flow.auto_save_pgn()
     files = list((tmp_path / "games").glob("*.pgn"))
     assert len(files) == 1
     assert files[0].name.startswith("local-")
@@ -274,7 +274,7 @@ def test_auto_save_marks_time_forfeit_on_timeout(tmp_path, monkeypatch):
     app.game.match.backend.clock.flagged = PieceColor.WHITE
     app.game.match.backend.clock.white_remaining = 0
     monkeypatch.setenv("CHESS_DATA_DIR", str(tmp_path))
-    app.game.result_flow._auto_save_pgn()
+    app.game.result_flow.auto_save_pgn()
     files = list((tmp_path / "games").glob("*.pgn"))
     content = files[0].read_text(encoding="utf-8")
     assert '[Termination "Time forfeit"]' in content
@@ -287,7 +287,7 @@ def test_auto_save_records_path_and_shows_toast(tmp_path, monkeypatch):
     app.game.match.backend.try_move(Square(6, 4), Square(4, 4))
     monkeypatch.setenv("CHESS_DATA_DIR", str(tmp_path))
     app.game.manual_result = "white_wins"
-    path = app.game.result_flow._auto_save_pgn()
+    path = app.game.result_flow.auto_save_pgn()
     assert path is not None
     assert app.game.result_flow._last_saved_pgn_path == path
     assert app.toast.is_visible() is True
@@ -300,20 +300,20 @@ def test_open_pgn_invokes_default_app(tmp_path, monkeypatch):
     app.game.match.backend.try_move(Square(6, 4), Square(4, 4))
     monkeypatch.setenv("CHESS_DATA_DIR", str(tmp_path))
     app.game.manual_result = "white_wins"
-    app.game.result_flow._auto_save_pgn()
+    app.game.result_flow.auto_save_pgn()
     captured = {}
     monkeypatch.setattr(
         "chessshootout.frontend.pgn_open.open_with_default_app",
         lambda path: captured.setdefault("path", path) or True,
     )
-    app.game.result_flow._on_open_pgn()
+    app.game.result_flow.on_open_pgn()
     assert captured["path"] == app.game.result_flow._last_saved_pgn_path
 
 
 def test_open_pgn_no_op_when_no_saved_path():
     app = make_app()
     app._on_start_game(base_config())
-    app.game.result_flow._on_open_pgn()
+    app.game.result_flow.on_open_pgn()
     assert app.toast.message == "No saved PGN"
 
 
@@ -323,11 +323,11 @@ def test_open_pgn_warns_on_open_failure(tmp_path, monkeypatch):
     app.game.match.backend.try_move(Square(6, 4), Square(4, 4))
     monkeypatch.setenv("CHESS_DATA_DIR", str(tmp_path))
     app.game.manual_result = "white_wins"
-    app.game.result_flow._auto_save_pgn()
+    app.game.result_flow.auto_save_pgn()
     monkeypatch.setattr(
         "chessshootout.frontend.pgn_open.open_with_default_app", lambda _path: False,
     )
-    app.game.result_flow._on_open_pgn()
+    app.game.result_flow.on_open_pgn()
     assert app.toast.message == "Could not open PGN"
 
 
@@ -430,7 +430,7 @@ def test_saved_local_pgn_contains_match_session_id(tmp_path, monkeypatch):
     monkeypatch.setenv("CHESS_DATA_DIR", str(tmp_path))
     app.game.match.backend.try_move(Square(6, 4), Square(4, 4))
     app.game.manual_result = "white_wins"
-    app.game.result_flow._auto_save_pgn()
+    app.game.result_flow.auto_save_pgn()
     content = list((tmp_path / "games").glob("*.pgn"))[0].read_text(encoding="utf-8")
     assert extract_csmatchid(parse_pgn_headers(content)) == app.game._match_session_id
 
@@ -447,7 +447,7 @@ def test_auto_save_filename_prefix_per_mode(tmp_path, monkeypatch, variant_value
     monkeypatch.setenv("CHESS_DATA_DIR", str(tmp_path))
     app.game.variant = variant_value
     app.game.manual_result = "white_wins"
-    app.game.result_flow._auto_save_pgn()
+    app.game.result_flow.auto_save_pgn()
     files = list((tmp_path / "games").glob("*.pgn"))
     assert files
     assert files[0].name.startswith(f"{expected_prefix}-")

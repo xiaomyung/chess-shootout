@@ -778,7 +778,7 @@ def test_shootout_wheel_capture_defers_into_overlay():
     _start_local(app)
     frm, to = _set_queen_takes_pawn(app)
     app.game.skillcheck.reset(enabled=True, seed=_wheel_seed(app.game.match.backend, frm, to))
-    assert app.game.skillcheck_session._skillcheck_gate(frm, to) is True
+    assert app.game.skillcheck_session.skillcheck_gate(frm, to) is True
     assert app.game.skillcheck_overlay.is_active() is True
 
 
@@ -798,7 +798,7 @@ def test_failed_skillcheck_locks_move():
     app.game.skillcheck_session._on_skillcheck_done((frm, to), False)
     assert len(app.game.match.move_history) == 0
     assert app.game.skillcheck.is_locked(frm, to) is True
-    assert app.game.skillcheck_session._skillcheck_gate(frm, to) is True
+    assert app.game.skillcheck_session.skillcheck_gate(frm, to) is True
     assert app.game.skillcheck_overlay.is_active() is False
 
 
@@ -940,10 +940,10 @@ def _wheel_seed_that_relocates(app, frm, to):
         if select_skillcheck(app.game.match.backend, frm, to, roll) != SkillCheckKind.WHEEL:
             continue
         app.game.skillcheck.reset(enabled=True, seed=seed)
-        app.game.skillcheck_session._teardown_skillcheck_overlay()
-        app.game.skillcheck_session._skillcheck_gate(frm, to)
-        relocated = app.game.skillcheck_session._skillcheck_target != to
-        app.game.skillcheck_session._teardown_skillcheck_overlay()
+        app.game.skillcheck_session.teardown_skillcheck_overlay()
+        app.game.skillcheck_session.skillcheck_gate(frm, to)
+        relocated = app.game.skillcheck_session.skillcheck_target != to
+        app.game.skillcheck_session.teardown_skillcheck_overlay()
         if relocated:
             return seed
     raise AssertionError("no relocating wheel seed")
@@ -954,8 +954,8 @@ def test_relocated_wheel_positions_the_dial_there_and_draws():
     _start_local(app)
     frm, to = _set_queen_takes_pawn(app)
     app.game.skillcheck.reset(enabled=True, seed=_wheel_seed_that_relocates(app, frm, to))
-    assert app.game.skillcheck_session._skillcheck_gate(frm, to) is True
-    target = app.game.skillcheck_session._skillcheck_target
+    assert app.game.skillcheck_session.skillcheck_gate(frm, to) is True
+    target = app.game.skillcheck_session.skillcheck_target
     assert target != to
     ctrl = app.game.skillcheck_overlay._controller
     assert isinstance(ctrl, WheelController)
@@ -969,8 +969,8 @@ def test_relocated_wheel_win_applies_the_original_capture():
     _start_local(app)
     frm, to = _set_queen_takes_pawn(app)
     app.game.skillcheck.reset(enabled=True, seed=_wheel_seed_that_relocates(app, frm, to))
-    app.game.skillcheck_session._skillcheck_gate(frm, to)
-    assert app.game.skillcheck_session._skillcheck_target != to, \
+    app.game.skillcheck_session.skillcheck_gate(frm, to)
+    assert app.game.skillcheck_session.skillcheck_target != to, \
         "the dial relocated away from the capture square"
     assert app.game.skillcheck_overlay._context[:3] == (frm, to, None), \
         "the move context keeps real squares"
@@ -1090,10 +1090,10 @@ def test_shootout_aim_capture_targets_the_victim_square():
     _start_local(app)
     frm, to = _set_queen_takes_pawn(app)
     app.game.skillcheck.reset(enabled=True, seed=_aim_seed(app.game.match.backend, frm, to))
-    assert app.game.skillcheck_session._skillcheck_gate(frm, to) is True
+    assert app.game.skillcheck_session.skillcheck_gate(frm, to) is True
     assert app.game.skillcheck_overlay.is_active() is True
     assert isinstance(app.game.skillcheck_overlay._controller, AimController)
-    assert app.game.skillcheck_session._skillcheck_target == to, \
+    assert app.game.skillcheck_session.skillcheck_target == to, \
         "the aim renders over the victim square"
     assert app.game.board.aim_suppressed_square == to, "the live victim is hidden so it can't ghost"
 
@@ -1103,8 +1103,8 @@ def test_aim_capture_targets_the_en_passant_pawn():
     _start_local(app)
     frm, to = _set_white_ep_capture(app)
     app.game.skillcheck.reset(enabled=True, seed=_aim_seed(app.game.match.backend, frm, to))
-    assert app.game.skillcheck_session._skillcheck_gate(frm, to) is True
-    assert app.game.skillcheck_session._skillcheck_target == Square(3, 3), \
+    assert app.game.skillcheck_session.skillcheck_gate(frm, to) is True
+    assert app.game.skillcheck_session.skillcheck_target == Square(3, 3), \
         "aim renders over the EP pawn, not empty cell"
     assert app.game.board.aim_suppressed_square == Square(3, 3)
 
@@ -1114,7 +1114,7 @@ def test_won_aim_capture_applies_the_move_and_clears_suppress():
     _start_local(app)
     frm, to = _set_queen_takes_pawn(app)
     app.game.skillcheck.reset(enabled=True, seed=_aim_seed(app.game.match.backend, frm, to))
-    app.game.skillcheck_session._skillcheck_gate(frm, to)
+    app.game.skillcheck_session.skillcheck_gate(frm, to)
     assert app.game.board.aim_suppressed_square == to
     app.game.skillcheck_session._on_skillcheck_done((frm, to), True)
     assert len(app.game.match.move_history) == 1
@@ -1128,7 +1128,7 @@ def test_failed_aim_clears_suppress_and_swears():
     _start_local(app)
     frm, to = _set_queen_takes_pawn(app)
     app.game.skillcheck.reset(enabled=True, seed=_aim_seed(app.game.match.backend, frm, to))
-    app.game.skillcheck_session._skillcheck_gate(frm, to)
+    app.game.skillcheck_session.skillcheck_gate(frm, to)
     app.game.skillcheck_session._on_skillcheck_done((frm, to), False)
     assert app.game.board.aim_suppressed_square is None
     assert app.game.skillcheck.is_locked(frm, to) is True
@@ -1170,7 +1170,7 @@ def test_failed_aim_drops_the_surviving_piece_back_in():
     _start_local(app)
     frm, to = _set_queen_takes_pawn(app)
     app.game.skillcheck.reset(enabled=True, seed=_aim_seed(app.game.match.backend, frm, to))
-    app.game.skillcheck_session._skillcheck_gate(frm, to)
+    app.game.skillcheck_session.skillcheck_gate(frm, to)
     assert app.game.board.aim_suppressed_square == to
     app.game.skillcheck_session._on_skillcheck_done((frm, to), False)
     assert any(a["sq"] == to for a in app.game.board._restore_anims), \
@@ -1182,7 +1182,7 @@ def test_failed_wheel_never_drops_a_piece_in():
     _start_local(app)
     frm, to = _set_queen_takes_pawn(app)
     app.game.skillcheck.reset(enabled=True, seed=_wheel_seed(app.game.match.backend, frm, to))
-    app.game.skillcheck_session._skillcheck_gate(frm, to)
+    app.game.skillcheck_session.skillcheck_gate(frm, to)
     assert app.game.board.aim_suppressed_square is None, "a wheel never suppresses the live piece"
     app.game.skillcheck_session._on_skillcheck_done((frm, to), False)
     assert app.game.board._restore_anims == [], \
@@ -1333,7 +1333,7 @@ def test_capturing_promotion_rolling_aim_shows_the_picker_first():
     app.game.board.pick_promotion(PieceType.QUEEN)
     assert app.game.skillcheck_overlay.is_active() is True
     assert isinstance(app.game.skillcheck_overlay._controller, AimController)
-    assert app.game.skillcheck_session._skillcheck_target == to, \
+    assert app.game.skillcheck_session.skillcheck_target == to, \
         "the aim renders over the captured piece"
 
 
@@ -1444,7 +1444,7 @@ def test_wheel_relayouts_when_the_board_moves():
     to_sq = Square(3, 3)
     ctrl = WheelController(WheelChallenge.from_seed("x"), app.game.board.cell_rect(to_sq), now_ms=0)
     app.game.skillcheck_overlay.start(ctrl, (Square(4, 3), to_sq), lambda c, landed: None)
-    app.game.skillcheck_session._skillcheck_target = to_sq
+    app.game.skillcheck_session.skillcheck_target = to_sq
     before = ctrl.center
     app.window = pg.Surface((1700, 1100))
     app._compute_layout()
@@ -1492,10 +1492,10 @@ def test_local_won_wheel_logs_the_outcome_for_pgn():
     _start_local(app)
     frm, to = _set_queen_takes_pawn(app)
     app.game.skillcheck.reset(enabled=True, seed=_wheel_seed(app.game.match.backend, frm, to))
-    assert app.game.skillcheck_session._skillcheck_gate(frm, to) is True
+    assert app.game.skillcheck_session.skillcheck_gate(frm, to) is True
     app.game.skillcheck_session._on_skillcheck_done(app.game.skillcheck_overlay._context, True)
-    assert app.game.skillcheck_session._skillcheck_log == [SkillCheckOutcome(1, "wheel", True, "")]
-    assert format_annotations(app.game.skillcheck_session._skillcheck_log) == {1: "Wheel ✓"}
+    assert app.game.skillcheck_session.skillcheck_log == [SkillCheckOutcome(1, "wheel", True, "")]
+    assert format_annotations(app.game.skillcheck_session.skillcheck_log) == {1: "Wheel ✓"}
 
 
 def test_local_failed_wheel_logs_the_whiffed_move_san():
@@ -1503,12 +1503,12 @@ def test_local_failed_wheel_logs_the_whiffed_move_san():
     _start_local(app)
     frm, to = _set_queen_takes_pawn(app)
     app.game.skillcheck.reset(enabled=True, seed=_wheel_seed(app.game.match.backend, frm, to))
-    assert app.game.skillcheck_session._skillcheck_gate(frm, to) is True
+    assert app.game.skillcheck_session.skillcheck_gate(frm, to) is True
     app.game.skillcheck_session._on_skillcheck_done(app.game.skillcheck_overlay._context, False)
-    assert app.game.skillcheck_session._skillcheck_log == [
+    assert app.game.skillcheck_session.skillcheck_log == [
         SkillCheckOutcome(1, "wheel", False, "Qxd5")]
     assert len(app.game.match.move_history) == 0, "a failed check lands no ply"
-    assert format_annotations(app.game.skillcheck_session._skillcheck_log) == {1: "Wheel ✗ Qxd5"}
+    assert format_annotations(app.game.skillcheck_session.skillcheck_log) == {1: "Wheel ✗ Qxd5"}
 
 
 def test_local_won_check_lands_in_the_saved_pgn_text():
@@ -1516,7 +1516,7 @@ def test_local_won_check_lands_in_the_saved_pgn_text():
     _start_local(app)
     frm, to = _set_queen_takes_pawn(app)
     app.game.skillcheck.reset(enabled=True, seed=_wheel_seed(app.game.match.backend, frm, to))
-    app.game.skillcheck_session._skillcheck_gate(frm, to)
+    app.game.skillcheck_session.skillcheck_gate(frm, to)
     app.game.skillcheck_session._on_skillcheck_done(app.game.skillcheck_overlay._context, True)
     app.game.manual_result = "white_wins_by_resignation"
     text = app.game.result_flow._build_pgn_text()
@@ -1529,22 +1529,22 @@ def test_undo_drops_only_the_undone_ply_and_dangling_fail():
     app.game.skillcheck.reset(enabled=False)
     app.game.match.backend.apply_san("e4")
     app.game.match.backend.apply_san("e5")
-    app.game.skillcheck_session._skillcheck_log = [
+    app.game.skillcheck_session.skillcheck_log = [
         SkillCheckOutcome(1, "wheel", True, ""),
         SkillCheckOutcome(2, "aim", True, ""),
         SkillCheckOutcome(3, "wheel", False, "Nxe4"),
     ]
     app.game._on_undo()
     assert len(app.game.match.move_history) == 1
-    assert app.game.skillcheck_session._skillcheck_log == [SkillCheckOutcome(1, "wheel", True, "")]
+    assert app.game.skillcheck_session.skillcheck_log == [SkillCheckOutcome(1, "wheel", True, "")]
 
 
 def test_reset_to_new_game_clears_the_skillcheck_log():
     app = Frontend(1100, 800)
     _start_local(app)
-    app.game.skillcheck_session._skillcheck_log = [SkillCheckOutcome(1, "wheel", True, "")]
+    app.game.skillcheck_session.skillcheck_log = [SkillCheckOutcome(1, "wheel", True, "")]
     app.game._reset_to_new_game()
-    assert app.game.skillcheck_session._skillcheck_log == []
+    assert app.game.skillcheck_session.skillcheck_log == []
 
 
 def test_teardown_clears_the_full_online_overlay_tracking_set():
@@ -1554,18 +1554,18 @@ def test_teardown_clears_the_full_online_overlay_tracking_set():
     app = Frontend(1100, 800)
     _start_local(app)
     frm, to = Square(4, 3), Square(3, 3)
-    app.game.skillcheck_session._skillcheck_target = to
-    app.game.skillcheck_session._online_skillcheck = (frm, to, None, SkillCheckKind.WHEEL)
-    app.game.skillcheck_session._online_spectate_kind = SkillCheckKind.AIM
-    app.game.skillcheck_session._online_skillcheck_opened_ms = 12345
-    app.game.skillcheck_session._online_verdict_action = lambda: None
+    app.game.skillcheck_session.skillcheck_target = to
+    app.game.skillcheck_session.online_skillcheck = (frm, to, None, SkillCheckKind.WHEEL)
+    app.game.skillcheck_session.online_spectate_kind = SkillCheckKind.AIM
+    app.game.skillcheck_session.online_skillcheck_opened_ms = 12345
+    app.game.skillcheck_session.online_verdict_action = lambda: None
     app.game.board.aim_suppressed_square = to
-    app.game.skillcheck_session._teardown_skillcheck_overlay()
-    assert app.game.skillcheck_session._skillcheck_target is None
-    assert app.game.skillcheck_session._online_skillcheck is None
-    assert app.game.skillcheck_session._online_spectate_kind is None
-    assert app.game.skillcheck_session._online_skillcheck_opened_ms is None
-    assert app.game.skillcheck_session._online_verdict_action is None
+    app.game.skillcheck_session.teardown_skillcheck_overlay()
+    assert app.game.skillcheck_session.skillcheck_target is None
+    assert app.game.skillcheck_session.online_skillcheck is None
+    assert app.game.skillcheck_session.online_spectate_kind is None
+    assert app.game.skillcheck_session.online_skillcheck_opened_ms is None
+    assert app.game.skillcheck_session.online_verdict_action is None
     assert app.game.board.aim_suppressed_square is None
 
 
@@ -1575,30 +1575,30 @@ def test_clear_online_skillcheck_state_resets_all_six_transient_fields():
     app = Frontend(1100, 800)
     _start_local(app)
     frm, to = Square(4, 3), Square(3, 3)
-    app.game.skillcheck_session._skillcheck_target = to
-    app.game.skillcheck_session._pending_online_move = (frm, to, None)
-    app.game.skillcheck_session._online_skillcheck = (frm, to, None, SkillCheckKind.WHEEL)
-    app.game.skillcheck_session._online_spectate_kind = SkillCheckKind.AIM
-    app.game.skillcheck_session._online_skillcheck_opened_ms = 999
-    app.game.skillcheck_session._online_verdict_action = lambda: None
-    app.game.skillcheck_session._clear_online_skillcheck_state()
-    assert app.game.skillcheck_session._skillcheck_target is None
-    assert app.game.skillcheck_session._pending_online_move is None
-    assert app.game.skillcheck_session._online_skillcheck is None
-    assert app.game.skillcheck_session._online_spectate_kind is None
-    assert app.game.skillcheck_session._online_skillcheck_opened_ms is None
-    assert app.game.skillcheck_session._online_verdict_action is None
+    app.game.skillcheck_session.skillcheck_target = to
+    app.game.skillcheck_session.pending_online_move = (frm, to, None)
+    app.game.skillcheck_session.online_skillcheck = (frm, to, None, SkillCheckKind.WHEEL)
+    app.game.skillcheck_session.online_spectate_kind = SkillCheckKind.AIM
+    app.game.skillcheck_session.online_skillcheck_opened_ms = 999
+    app.game.skillcheck_session.online_verdict_action = lambda: None
+    app.game.skillcheck_session.clear_online_skillcheck_state()
+    assert app.game.skillcheck_session.skillcheck_target is None
+    assert app.game.skillcheck_session.pending_online_move is None
+    assert app.game.skillcheck_session.online_skillcheck is None
+    assert app.game.skillcheck_session.online_spectate_kind is None
+    assert app.game.skillcheck_session.online_skillcheck_opened_ms is None
+    assert app.game.skillcheck_session.online_verdict_action is None
 
 
 def test_skillcheck_whiffs_lists_only_fails_grouped_by_ply():
     app = Frontend(1100, 800)
-    app.game.skillcheck_session._skillcheck_log = [
+    app.game.skillcheck_session.skillcheck_log = [
         SkillCheckOutcome(3, "wheel", True, ""),
         SkillCheckOutcome(5, "wheel", False, "Qxd6"),
         SkillCheckOutcome(5, "aim", False, "Rxd6"),
         SkillCheckOutcome(7, "aim", True, ""),
     ]
-    assert app.game.skillcheck_session._skillcheck_whiffs() == {
+    assert app.game.skillcheck_session.skillcheck_whiffs() == {
         5: [("Wheel", "Qxd6"), ("Steady-Aim", "Rxd6")]}, "wins excluded, fails grouped"
 
 
@@ -1689,7 +1689,7 @@ def test_loading_a_pgn_with_a_miss_populates_review_whiffs(tmp_path):
     app.game.skillcheck.reset(enabled=False)
     for san in ["e4", "e5", "Nf3", "Nc6", "Bb5"]:
         app.game.match.backend.apply_san(san)
-    app.game.skillcheck_session._skillcheck_log = [SkillCheckOutcome(5, "aim", False, "Bxc6")]
+    app.game.skillcheck_session.skillcheck_log = [SkillCheckOutcome(5, "aim", False, "Bxc6")]
     app.game.manual_result = "white_wins_by_resignation"
     text = app.game.result_flow._build_pgn_text()
     path = tmp_path / "g.pgn"
@@ -1709,7 +1709,7 @@ def test_two_event_ply_round_trips_through_the_saved_pgn_file(tmp_path):
     app.game.skillcheck.reset(enabled=False)
     for san in ["e4", "e5", "Nf3", "Nc6", "Bb5"]:
         app.game.match.backend.apply_san(san)
-    app.game.skillcheck_session._skillcheck_log = [
+    app.game.skillcheck_session.skillcheck_log = [
         SkillCheckOutcome(4, "wheel", False, "Rxe5"),
         SkillCheckOutcome(4, "aim", True, ""),
     ]
