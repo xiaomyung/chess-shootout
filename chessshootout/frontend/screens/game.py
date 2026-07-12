@@ -303,6 +303,26 @@ class GameScreen(Screen):
         else:
             self.give_time.give_time_toast_for_receiver(granted_by, added)
 
+    def on_resume(self, payload):
+        self.match.new_game()
+        for entry in payload.get("move_history", []):
+            result = self.match.apply_san(entry["san"])
+            if not result.legal:
+                log.warning("resume: SAN replay failed at %r", entry.get("san"))
+                apply_fen(self.match.backend, payload["fen"])
+                break
+        if self._time_control is not None:
+            initial, incr = self._time_control
+            self.match.setup_clock(initial, incr)
+            self._apply_clock_snap(payload, default_to_existing=False)
+        self.board.cancel_animations()
+        self.board.selected_square = None
+        self.board.clear_premoves()
+        self.board.clear_annotations()
+        self._adopt_resumed_result(payload)
+        self.skillcheck_session.apply_resumed_skillcheck_log(payload.get("skillcheck_log", []))
+        self._restore_online_skillcheck_state(payload)
+
     def on_takeback(self, payload):
         server_ply = payload.get("ply")
         expected = len(self.match.move_history) - 1

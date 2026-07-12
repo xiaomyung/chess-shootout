@@ -371,3 +371,41 @@ def test_unbind_clears_every_field_that_gates_online_behaviour():
     assert game._opp_disconnected_at_ms is None
     assert game._local_disconnected_at_ms is None
     assert app.coordinator._prev_online_state is None
+
+
+def test_resume_goes_through_the_subscriber_protocol():
+    """game_resumed is the biggest board-level event there is — it rebuilds the whole
+    match. It used to be the ONE event the coordinator applied itself, reaching into
+    GameScreen's match/board/skillcheck_session directly while the other eight went
+    through the typed subscriber. It now goes through on_resume like the rest."""
+    app = make_app(1000, 800)
+    app.game.variant = "online"
+    app.game._time_control = (300, 0)
+    app.coordinator.subscribe(app.game)
+    seen = []
+    app.game.on_resume = lambda payload: seen.append(payload)
+
+    payload = {"fen": "", "move_history": [{"san": "e4"}], "clock": {}}
+    app.coordinator._handle_game_resumed(payload)
+
+    assert seen == [payload]
+    assert app.coordinator._resyncing is False
+
+
+def test_resume_with_an_inactive_game_screen_still_reaches_the_game():
+    """Same fallback the result path has: app.game exists even when it is not the
+    active screen, so a resume for a live online game is never dropped just because
+    nobody is subscribed."""
+    app = make_app(1000, 800)
+    app.game.variant = "online"
+    app.game._time_control = (300, 0)
+    assert app.coordinator._subscriber is None
+
+    app.coordinator._handle_game_resumed({
+        "fen": "",
+        "move_history": [{"san": "e4"}, {"san": "e5"}],
+        "clock": {"white_remaining": 111.0, "black_remaining": 99.0, "running_for": None},
+    })
+
+    assert [e.san for e in app.game.match.move_history] == ["e4", "e5"]
+    assert app.game.match.clock.white_remaining == 111.0

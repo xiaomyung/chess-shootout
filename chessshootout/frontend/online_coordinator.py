@@ -4,7 +4,6 @@ import uuid
 
 import pygame as pg
 
-from chessshootout.backend.fen import apply_fen
 from chessshootout.backend.utils import coord_from_square, square_from_coord
 from chessshootout.domain.match import ONLINE
 from chessshootout.domain.pgn.load import time_category_for_minutes
@@ -368,24 +367,8 @@ class OnlineCoordinator:
             log.info("resume ignored — no active online game")
             self._resyncing = False
             return
-        game.match.new_game()
-        for entry in payload.get("move_history", []):
-            result = game.match.apply_san(entry["san"])
-            if not result.legal:
-                log.warning("resume: SAN replay failed at %r", entry.get("san"))
-                apply_fen(game.match.backend, payload["fen"])
-                break
-        if game._time_control is not None:
-            initial, incr = game._time_control
-            game.match.setup_clock(initial, incr)
-            game._apply_clock_snap(payload, default_to_existing=False)
-        game.board.cancel_animations()
-        game.board.selected_square = None
-        game.board.clear_premoves()
-        game.board.clear_annotations()
-        game._adopt_resumed_result(payload)
-        game.skillcheck_session.apply_resumed_skillcheck_log(payload.get("skillcheck_log", []))
-        game._restore_online_skillcheck_state(payload)
+        target = self._subscriber if self._subscriber is not None else game
+        target.on_resume(payload)
         self._resyncing = False
 
     def _handle_time_granted(self, payload):
