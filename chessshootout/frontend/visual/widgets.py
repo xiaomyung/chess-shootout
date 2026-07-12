@@ -369,3 +369,30 @@ def draw_scroll_thumb(window, track_rect, total, visible, offset_fraction, last_
         return
     pg.draw.rect(window, Colors.surface_hover, thumb,
                  border_radius=SCROLL_THUMB_WIDTH // 2)
+
+
+def avatar_palette(white):
+    if white:
+        return (pg.Color(Colors.amber), pg.Color(Colors.accent),
+                pg.Color(Colors.on_accent))
+    return (pg.Color(Colors.avatar_slate_top), pg.Color(Colors.avatar_slate_bottom),
+            pg.Color(Colors.avatar_letter_dark))
+
+
+class AvatarBadge:
+
+    def __init__(self):
+        self._cache = None
+
+    def reset(self):
+        self._cache = None
+
+    def draw(self, window, rect, name, font, palette):
+        top, bottom, letter_color = palette
+        key = (rect.width, top.r, top.g, top.b, bottom.r, bottom.g, bottom.b)
+        if self._cache is None or self._cache[0] != key:
+            self._cache = (key, build_avatar(rect.width, top, bottom))
+        window.blit(self._cache[1], rect.topleft)
+        glyph = font.render(name[:1].upper() if name else "?", True, letter_color)
+        window.blit(glyph, (rect.centerx - glyph.get_width() / 2,
+                            rect.centery - glyph.get_height() / 2))

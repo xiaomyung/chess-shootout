@@ -9,11 +9,14 @@ from chessshootout.frontend.visual.colors import Colors
 from chessshootout.frontend.visual.draw import rounded_rect_surface, blit_centered, circle_surface
 from chessshootout.frontend.visual.emoji import emoji_surface
 from chessshootout.frontend.visual.fonts import get_font, DISPLAY
-from chessshootout.frontend.visual.widgets import build_avatar, build_ko_badge, KO_WINK_MS
+from chessshootout.frontend.visual.widgets import (
+    AvatarBadge, avatar_palette, build_ko_badge, KO_WINK_MS,
+)
 
 
 AUTO_END_RED_THRESHOLD_SECONDS = 10
 AUTO_END_BADGE_FONT_SCALE = 0.75
+
 GIVE_TIME_FLASH_MS = 520
 GIVE_TIME_FLASH_PEAK_ALPHA = 150
 GIVE_TIME_FLOAT_MS = 1000
@@ -30,6 +33,14 @@ TOOLTIP_RADIUS = 6
 TOOLTIP_RISE_PX = 5
 TOOLTIP_GAP_PX = 5
 TOOLTIP_EDGE_MARGIN_PX = 2
+
+
+def is_white(color):
+    return color in (PieceColor.WHITE, "white")
+
+
+def top_strip_color(flipped):
+    return PieceColor.WHITE if flipped else PieceColor.BLACK
 
 
 def give_time_float_alpha(progress):
@@ -74,7 +85,7 @@ class PlayerStrip:
         self.auto_end_font = get_font(11, bold=True)
         self._give_time_float_font = get_font(11, bold=True, mono=True)
         self.icons = {}
-        self._avatar_cache = None
+        self._avatar = AvatarBadge()
         self._flag_cache = None
         self._flag_rect = pg.Rect(0, 0, 0, 0)
         self._tooltip_alpha = 0.0
@@ -95,7 +106,7 @@ class PlayerStrip:
         self.tooltip_font = get_font(max(int(ih * 0.34), 11), bold=True)
         self._give_time_float_font = get_font(
             max(int(h * 0.24), 11), bold=True, mono=True)
-        self._avatar_cache = None
+        self._avatar.reset()
 
     def set_piece_icons(self, icons):
         self.icons = icons
@@ -163,27 +174,9 @@ class PlayerStrip:
         self._draw_give_time_float(clock_rect)
         self._draw_flag_tooltip()
 
-    def _avatar_colors(self):
-        if self.player_color in (PieceColor.WHITE, "white") and not self.is_bot:
-            return (pg.Color(Colors.amber), pg.Color(Colors.accent),
-                    pg.Color(Colors.on_accent))
-        return (pg.Color(Colors.avatar_slate_top), pg.Color(Colors.avatar_slate_bottom),
-                pg.Color(Colors.avatar_letter_dark))
-
     def _draw_avatar(self, rect):
-        top, bottom, letter_color = self._avatar_colors()
-        letter = (self.name[:1].upper() if self.name else "?")
-        key = (rect.width, top.r, top.g, top.b, bottom.r, bottom.g, bottom.b)
-        if self._avatar_cache is None or self._avatar_cache[0] != key:
-            self._avatar_cache = (key, self._build_avatar(rect.width, top, bottom))
-        self.window.blit(self._avatar_cache[1], rect.topleft)
-        glyph = self.letter_font.render(letter, True, letter_color)
-        self.window.blit(glyph, (rect.centerx - glyph.get_width() / 2,
-                                 rect.centery - glyph.get_height() / 2))
-
-    @staticmethod
-    def _build_avatar(size, top, bottom):
-        return build_avatar(size, top, bottom)
+        self._avatar.draw(self.window, rect, self.name, self.letter_font,
+                          avatar_palette(is_white(self.player_color) and not self.is_bot))
 
     def _flag_surface(self, height):
         char = flag_emoji(self.country)

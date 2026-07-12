@@ -25,6 +25,8 @@ _PROMO_OPTION_CACHE = new_size_cache()
 _MARKER_CACHE = new_cache()
 _PIECE_IMAGE_CACHE = new_cache()
 
+CAPTURE_ICON_FRACTION = 0.42
+
 RESTORE_MS = 480
 RESTORE_DROP_FRAC = 0.8
 RESTORE_FALL_PORTION = 0.46
@@ -615,6 +617,34 @@ class Board:
         if self.review_ply is not None:
             return self.review_ply
         return history_len
+
+    def step_review(self, delta):
+        history_len = len(self.match.move_history)
+        if history_len == 0:
+            return
+        current = self.review_anchor(history_len)
+        new_ply = max(0, min(history_len, current + delta))
+        if new_ply == current:
+            return
+        if delta > 0:
+            self.animate_review_ply(new_ply)
+        else:
+            self.jump_to_review_ply(new_ply)
+
+    def reviewed_history(self):
+        history = self.match.move_history
+        if self.review_ply is None:
+            return history
+        return history[:self.review_ply]
+
+    def scaled_capture_icons(self, strip_height):
+        if not self.piece_images_original:
+            return None
+        size = max(int(strip_height * CAPTURE_ICON_FRACTION), 1)
+        return {
+            key: pg.transform.smoothscale(surface, (size, size))
+            for key, surface in self.piece_images_original.items()
+        }
 
     def _snap_in_flight_review_animation(self):
         if self._target_ply is None:

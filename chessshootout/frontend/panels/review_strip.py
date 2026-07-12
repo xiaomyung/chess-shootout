@@ -3,7 +3,8 @@ import pygame as pg
 from chessshootout.backend.pieces import PieceColor
 from chessshootout.frontend.visual.colors import Colors
 from chessshootout.frontend.visual.fonts import get_font, DISPLAY
-from chessshootout.frontend.visual.widgets import build_avatar
+from chessshootout.frontend.panels.player_strip import is_white
+from chessshootout.frontend.visual.widgets import AvatarBadge, avatar_palette
 
 
 class ReviewStrip:
@@ -20,7 +21,7 @@ class ReviewStrip:
         self.name_font = get_font(14, bold=True)
         self.advantage_font = get_font(12, bold=True)
         self.letter_font = get_font(18, family=DISPLAY)
-        self._avatar_cache = None
+        self._avatar = AvatarBadge()
 
     def set_rect(self, rect):
         self.rect = pg.Rect(rect)
@@ -29,7 +30,7 @@ class ReviewStrip:
         self.name_font = get_font(max(int(ih * 0.42), 11), bold=True)
         self.advantage_font = get_font(max(int(ih * 0.26), 8), bold=True)
         self.letter_font = get_font(max(int(ih * 0.5), 11), family=DISPLAY)
-        self._avatar_cache = None
+        self._avatar.reset()
 
     def set_piece_icons(self, icons):
         self.icons = icons
@@ -58,23 +59,9 @@ class ReviewStrip:
 
         pg.draw.rect(self.window, Colors.border, self.rect, width=1, border_radius=radius)
 
-    def _avatar_colors(self):
-        if self.player_color in (PieceColor.WHITE, "white"):
-            return (pg.Color(Colors.amber), pg.Color(Colors.accent),
-                    pg.Color(Colors.on_accent))
-        return (pg.Color(Colors.avatar_slate_top), pg.Color(Colors.avatar_slate_bottom),
-                pg.Color(Colors.avatar_letter_dark))
-
     def _draw_avatar(self, rect):
-        top, bottom, letter_color = self._avatar_colors()
-        letter = self.name[:1].upper() if self.name else "?"
-        key = (rect.width, top.r, top.g, top.b, bottom.r, bottom.g, bottom.b)
-        if self._avatar_cache is None or self._avatar_cache[0] != key:
-            self._avatar_cache = (key, build_avatar(rect.width, top, bottom))
-        self.window.blit(self._avatar_cache[1], rect.topleft)
-        glyph = self.letter_font.render(letter, True, letter_color)
-        self.window.blit(glyph, (rect.centerx - glyph.get_width() / 2,
-                                 rect.centery - glyph.get_height() / 2))
+        self._avatar.draw(self.window, rect, self.name, self.letter_font,
+                          avatar_palette(is_white(self.player_color)))
 
     def _draw_name_and_captures(self, x, ih):
         top_y = self.rect.y + max(int(self.rect.height * 0.18), 4)

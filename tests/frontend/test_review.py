@@ -10,7 +10,7 @@ from chessshootout.backend.backend import Backend
 from chessshootout.backend.pieces import PieceColor, PieceType
 from chessshootout.backend.utils import Square
 from chessshootout.frontend.board import Board
-from tests.helpers import make_app, start_single_screen
+from tests.helpers import make_app, sq, start_single_screen
 
 
 _pygame_init = pygame_display(1500, 800)
@@ -743,3 +743,39 @@ def test_click_with_annotations_while_browsing_takes_two_clicks_to_live():
     assert app.game.board.review_ply == 1
     app.input_router.mouse_left_clicked(_empty_square_pos(app))
     assert app.game.board.review_ply is None
+
+
+def test_step_review_is_one_implementation_shared_by_both_boards():
+    """Review stepping used to be copy-pasted into GameScreen and ReviewScreen.
+    It is Board's own state (review_ply / _target_ply), so it lives on Board and
+    both screens drive the same code."""
+    app = make_app(1000, 800)
+    start_single_screen(app)
+    board = app.game.board
+    board.match.try_move(sq(6, 4), sq(4, 4))
+    board.match.try_move(sq(1, 4), sq(3, 4))
+
+    board.step_review(-1)
+    assert board.review_ply == 1
+    board.step_review(-1)
+    assert board.review_ply == 0
+    board.step_review(-1)
+    assert board.review_ply == 0, "clamped at the first ply"
+
+    board.jump_to_review_ply(None)
+    board.step_review(1)
+    assert board.review_ply is None, "already live, nothing to step forward into"
+
+
+def test_reviewed_history_slices_at_the_browsed_ply():
+    app = make_app(1000, 800)
+    start_single_screen(app)
+    board = app.game.board
+    board.match.try_move(sq(6, 4), sq(4, 4))
+    board.match.try_move(sq(1, 4), sq(3, 4))
+
+    assert len(board.reviewed_history()) == 2
+    board.jump_to_review_ply(1)
+    assert [e.san for e in board.reviewed_history()] == ["e4"]
+    board.jump_to_review_ply(None)
+    assert len(board.reviewed_history()) == 2

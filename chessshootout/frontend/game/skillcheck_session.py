@@ -6,7 +6,7 @@ from chessshootout.backend.pieces import PIECE_VALUES, PieceType
 from chessshootout.backend.utils import PROMO_LETTER_BY_TYPE, Square, coord_from_square
 from chessshootout.frontend.skillcheck.registry import build_controller
 from chessshootout.skillcheck.online import skillcheck_deadline_ms
-from chessshootout.skillcheck.types import KIND_LABEL, SkillCheckKind, SkillCheckOutcome
+from chessshootout.skillcheck.types import SkillCheckKind, SkillCheckOutcome, whiffs_by_ply
 from chessshootout.skillcheck.wheel import period_for_diff, placement_square
 
 
@@ -242,12 +242,7 @@ class SkillcheckSession:
             for e in wire]
 
     def _skillcheck_whiffs(self):
-        whiffs = {}
-        for outcome in self._skillcheck_log:
-            if not outcome.won:
-                whiffs.setdefault(outcome.ply, []).append(
-                    (KIND_LABEL.get(outcome.kind, outcome.kind), outcome.san))
-        return whiffs
+        return whiffs_by_ply(self._skillcheck_log)
 
     def _skillcheck_deadline_ms(self):
         time_control = self.screen._time_control

@@ -2,7 +2,7 @@ import logging
 
 import pygame as pg
 
-from chessshootout.backend.pieces import PieceColor, opponent_of
+from chessshootout.backend.pieces import opponent_of
 from chessshootout.domain.capture_summary import captured_by, material_advantage
 from chessshootout.domain.match import Match
 from chessshootout.domain.pgn.load import (
@@ -13,12 +13,13 @@ from chessshootout.frontend.board import Board
 from chessshootout.frontend.layout import compute_layout
 from chessshootout.frontend.modal_registry import ModalSpec
 from chessshootout.frontend.modals.help import HOTKEYS
+from chessshootout.frontend.panels.player_strip import is_white, top_strip_color
 from chessshootout.frontend.panels.right import RightMenu, REVIEW_BUTTONS
 from chessshootout.frontend.panels.review_strip import ReviewStrip
 from chessshootout.frontend.pgn_open import open_pgn_or_toast
 from chessshootout.frontend.screens.base import Nav, Screen
-from chessshootout.frontend.visual import backdrop
-from chessshootout.skillcheck.types import KIND_LABEL, SkillCheckOutcome
+from chessshootout.frontend.visual.backdrop import ArenaBackdrop
+from chessshootout.skillcheck.types import SkillCheckOutcome, whiffs_by_ply
 
 
 log = logging.getLogger("chess.frontend")
@@ -41,8 +42,8 @@ class ReviewScreen(Screen):
         self._pgn_result_tag = None
         self._return_to = "history"
         self._skillcheck_log = []
-        self._bg_cache = None
         self._pgn_path = None
+        self.backdrop = ArenaBackdrop()
 
         self.match = Match()
         self.board = Board(window, self.match)
@@ -104,7 +105,7 @@ class ReviewScreen(Screen):
         self.right_menu.reset_for_new_game()
 
     def draw(self):
-        self._draw_background()
+        self.backdrop.draw(self.window, self.board.rect)
         self.board.draw_board()
         self.board.draw_drag_overlay()
         self._update_strips()
@@ -143,10 +144,10 @@ class ReviewScreen(Screen):
 
     def handle_key(self, event):
         if event.key == pg.K_LEFT:
-            self._step(-1)
+            self.board.step_review(-1)
             return True
         if event.key == pg.K_RIGHT:
-            self._step(1)
+            self.board.step_review(1)
             return True
         if event.key == pg.K_HOME:
             self.board.jump_to_review_ply(0)
@@ -177,19 +178,6 @@ class ReviewScreen(Screen):
     def debug_state(self):
         return {"pgn_path": self._pgn_path, "review_ply": self.board.review_ply}
 
-    def _step(self, delta):
-        history_len = len(self.match.move_history)
-        if history_len == 0:
-            return
-        current = self.board.review_anchor(history_len)
-        new_ply = max(0, min(history_len, current + delta))
-        if new_ply == current:
-            return
-        if delta > 0:
-            self.board.animate_review_ply(new_ply)
-        else:
-            self.board.jump_to_review_ply(new_ply)
-
     def _on_menu(self):
         self.app.request_nav(Nav(self._return_to))
 
@@ -206,44 +194,30 @@ class ReviewScreen(Screen):
         return {"mode": "Review", "time_control": tc, "lines": [self._pgn_result_tag or "*"]}
 
     def _refresh_capture_icons(self, strip_height):
-        if not self.board.piece_images_original:
+        icons = self.board.scaled_capture_icons(strip_height)
+        if icons is None:
             return
-        target = max(int(strip_height * 0.42), 1)
-        icons = {
-            key: pg.transform.smoothscale(surface, (target, target))
-            for key, surface in self.board.piece_images_original.items()
-        }
         self.strip_top.set_piece_icons(icons)
         self.strip_bottom.set_piece_icons(icons)
 
-    def _strip_color_top(self):
-        return PieceColor.WHITE if self.board.flipped else PieceColor.BLACK
-
     def _update_strips(self):
-        top_color = self._strip_color_top()
+        top_color = top_strip_color(self.board.flipped)
         bottom_color = opponent_of(top_color)
         self.strip_top.set_state(**self._strip_state(top_color))
         self.strip_bottom.set_state(**self._strip_state(bottom_color))
 
     def _name_for_color(self, color):
-        is_white = color in (PieceColor.WHITE, "white")
-        return self.white_name if is_white else self.black_name
+        return self.white_name if is_white(color) else self.black_name
 
     def _strip_state(self, color):
-        captured, advantage = self._capture_summary(color)
+        history = self.board.reviewed_history()
         return {
             "name": self._name_for_color(color),
             "player_color": color,
-            "captured": captured,
-            "advantage": advantage,
+            "captured": captured_by(history, color),
+            "advantage": material_advantage(history, color),
             "captured_color": opponent_of(color),
         }
-
-    def _capture_summary(self, color):
-        history = self.match.move_history
-        if self.board.review_ply is not None:
-            history = history[:self.board.review_ply]
-        return captured_by(history, color), material_advantage(history, color)
 
     def _rebuild_skillcheck_log(self, move_comments):
         self._skillcheck_log = []
@@ -252,21 +226,4 @@ class ReviewScreen(Screen):
                 self._skillcheck_log.append(SkillCheckOutcome(index + 1, kind, won, san))
 
     def _skillcheck_whiffs(self):
-        whiffs = {}
-        for outcome in self._skillcheck_log:
-            if not outcome.won:
-                whiffs.setdefault(outcome.ply, []).append(
-                    (KIND_LABEL.get(outcome.kind, outcome.kind), outcome.san))
-        return whiffs
-
-    def _draw_background(self):
-        size = self.window.get_size()
-        w, h = size
-        if w <= 0 or h <= 0:
-            return
-        bc = self.board.rect.center
-        center = (bc[0] / w, bc[1] / h)
-        key = (size, bc)
-        if self._bg_cache is None or self._bg_cache[0] != key:
-            self._bg_cache = (key, backdrop.arena_background(size, center).convert())
-        self.window.blit(self._bg_cache[1], (0, 0))
+        return whiffs_by_ply(self._skillcheck_log)

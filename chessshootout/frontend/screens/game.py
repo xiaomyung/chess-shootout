@@ -1,6 +1,7 @@
 import logging
 import random
 import uuid
+from typing import NamedTuple
 
 import pygame as pg
 
@@ -10,7 +11,7 @@ from chessshootout.domain.capture_summary import captured_by, material_advantage
 from chessshootout.domain.pgn.load import format_time_control
 from chessshootout.backend.pieces import PieceColor, PieceType, opponent_of
 from chessshootout.backend.utils import (
-    PROMO_TYPE_BY_LETTER, coord_from_square, square_from_coord,
+    PROMO_TYPE_BY_LETTER, Square, coord_from_square, square_from_coord,
 )
 from chessshootout.infra import countries, env
 from chessshootout.frontend.board import Board
@@ -25,7 +26,9 @@ from chessshootout.frontend.panels.right import (
     BUTTONS as RIGHT_MENU_BUTTONS,
     UNTIMED_BUTTONS as RIGHT_MENU_UNTIMED_BUTTONS,
 )
-from chessshootout.frontend.panels.player_strip import PlayerStrip
+from chessshootout.frontend.panels.player_strip import (
+    PlayerStrip, is_white, top_strip_color,
+)
 from chessshootout.frontend.modals.result import ResultMenu
 from chessshootout.frontend.focus.arrow import (
     FocusArrow, FOCUS_EDGE_ZONE_PX, FOCUS_ARROW_D, LONG_AGO_MS,
@@ -33,8 +36,8 @@ from chessshootout.frontend.focus.arrow import (
 from chessshootout.frontend.focus.time_line import TimeLine
 from chessshootout.frontend.focus.transition import FocusTransition
 from chessshootout.frontend.layout import compute_layout
-from chessshootout.frontend.visual import backdrop
 from chessshootout.frontend.visual import cache
+from chessshootout.frontend.visual.backdrop import ArenaBackdrop
 from chessshootout.frontend.visual.effects import TAKEOVER_TOTAL_MS
 from chessshootout.frontend.game.result_flow import ResultFlow, _score_str
 from chessshootout.frontend.game.skillcheck_session import SkillcheckSession
@@ -100,6 +103,16 @@ ANIM_MS_PER_SECOND = 0.5
 _RESULT_FADE_CACHE = cache.new_size_cache()
 
 
+class OnlineCheck(NamedTuple):
+    kind: SkillCheckKind
+    seed: str
+    value_diff: int
+    deadline_ms: float
+    from_sq: Square
+    to_sq: Square
+    promo_type: PieceType | None
+
+
 def compute_animation_ms(initial_seconds):
     if initial_seconds is None or initial_seconds <= 0:
         return ANIM_MS_DEFAULT
@@ -123,10 +136,10 @@ class GameScreen(Screen):
         self._chosen_side = "white"
         self._time_control = None
         self._flag_fall_played = False
-        self._game_bg_cache = None
         self._strip_memo = {}
         self._result_first_seen_at_ms = None
         self._match_session_id = None
+        self.backdrop = ArenaBackdrop()
         self._last_turn_for_flip = None
         self._first_move_deadline_ms = None
         self._opp_disconnected_at_ms = None
@@ -347,24 +360,38 @@ class GameScreen(Screen):
         else:
             self._resolve_my_skillcheck_failure(payload)
 
-    def _open_my_skillcheck(self, payload):
-        from_sq = square_from_coord(payload["from"])
-        to_sq = square_from_coord(payload["to"])
+    @staticmethod
+    def _decode_squares(payload):
+        return square_from_coord(payload["from"]), square_from_coord(payload["to"])
+
+    @staticmethod
+    def _decode_check(payload):
         promo = payload.get("promotion")
-        promo_type = PROMO_TYPE_BY_LETTER.get(promo) if promo else None
-        kind = SkillCheckKind(payload["kind"])
-        self.skillcheck_session._pending_online_move = None
-        self.skillcheck_session._online_skillcheck = (from_sq, to_sq, promo_type, kind)
-        self.skillcheck_session._online_skillcheck_opened_ms = pg.time.get_ticks()
-        self.skillcheck_session._open_skillcheck_overlay(
-            kind, payload["seed"], int(payload["value_diff"]),
-            float(payload["deadline_ms"]), from_sq, to_sq, promo_type, online=True,
+        from_sq, to_sq = GameScreen._decode_squares(payload)
+        return OnlineCheck(
+            kind=SkillCheckKind(payload["kind"]),
+            seed=payload["seed"],
+            value_diff=int(payload["value_diff"]),
+            deadline_ms=float(payload["deadline_ms"]),
+            from_sq=from_sq,
+            to_sq=to_sq,
+            promo_type=PROMO_TYPE_BY_LETTER.get(promo) if promo else None,
+        )
+
+    def _open_my_skillcheck(self, payload):
+        check = self._decode_check(payload)
+        session = self.skillcheck_session
+        session._pending_online_move = None
+        session._online_skillcheck = (
+            check.from_sq, check.to_sq, check.promo_type, check.kind)
+        session._online_skillcheck_opened_ms = pg.time.get_ticks()
+        session._open_skillcheck_overlay(
+            *check, online=True,
             elapsed_ms=float(payload.get("elapsed_ms", 0.0)),
             miss_count=int(payload.get("miss_count", 0)))
 
     def _resolve_my_skillcheck_failure(self, payload):
-        from_sq = square_from_coord(payload["from"])
-        to_sq = square_from_coord(payload["to"])
+        from_sq, to_sq = self._decode_squares(payload)
         pending = self.skillcheck_session._online_skillcheck
         self.skillcheck_session._record_online_fail(pending, from_sq, to_sq)
         aim_victim = self.board.aim_suppressed_square
@@ -381,19 +408,11 @@ class GameScreen(Screen):
             self._spectate_shot(payload)
 
     def _open_spectated_skillcheck(self, payload):
-        from_sq = square_from_coord(payload["from"])
-        to_sq = square_from_coord(payload["to"])
-        promo = payload.get("promotion")
-        promo_type = PROMO_TYPE_BY_LETTER.get(promo) if promo else None
-        kind = SkillCheckKind(payload["kind"])
-        self.skillcheck_session._open_spectate_overlay(
-            kind, payload["seed"], int(payload["value_diff"]),
-            float(payload["deadline_ms"]), from_sq, to_sq, promo_type)
+        self.skillcheck_session._open_spectate_overlay(*self._decode_check(payload))
         self.app.toast.show("Opponent is lining up a shot…")
 
     def _resolve_spectated_skillcheck_failure(self, payload):
-        from_sq = square_from_coord(payload["from"])
-        to_sq = square_from_coord(payload["to"])
+        from_sq, to_sq = self._decode_squares(payload)
         pending = self.skillcheck_session._online_skillcheck
         self.skillcheck_session._record_online_fail(pending, from_sq, to_sq)
         aim_victim = self.board.aim_suppressed_square
@@ -608,13 +627,9 @@ class GameScreen(Screen):
         self._refresh_capture_icons(r.strip_height)
 
     def _refresh_capture_icons(self, strip_height):
-        if not self.board.piece_images_original:
+        icons = self.board.scaled_capture_icons(strip_height)
+        if icons is None:
             return
-        target = max(int(strip_height * 0.42), 1)
-        icons = {
-            key: pg.transform.smoothscale(surface, (target, target))
-            for key, surface in self.board.piece_images_original.items()
-        }
         self.player_strip_top.set_piece_icons(icons)
         self.player_strip_bottom.set_piece_icons(icons)
 
@@ -765,10 +780,10 @@ class GameScreen(Screen):
             self._on_undo()
             return True
         if event.key == pg.K_LEFT:
-            self._step_review(-1)
+            self.board.step_review(-1)
             return True
         if event.key == pg.K_RIGHT:
-            self._step_review(1)
+            self.board.step_review(1)
             return True
         if event.key == pg.K_HOME:
             self.board.jump_to_review_ply(0)
@@ -786,19 +801,6 @@ class GameScreen(Screen):
             return False
         self.board.pick_promotion(chosen)
         return True
-
-    def _step_review(self, delta):
-        history_len = len(self.match.move_history)
-        if history_len == 0:
-            return
-        current = self.board.review_anchor(history_len)
-        new_ply = max(0, min(history_len, current + delta))
-        if new_ply == current:
-            return
-        if delta > 0:
-            self.board.animate_review_ply(new_ply)
-        else:
-            self.board.jump_to_review_ply(new_ply)
 
     def handle_click(self, pos):
         self._focus_click_consumed = False
@@ -897,16 +899,7 @@ class GameScreen(Screen):
             self.right_menu.draw_menu()
 
     def _draw_game_background(self):
-        size = self.window.get_size()
-        w, h = size
-        if w <= 0 or h <= 0:
-            return
-        bc = self.board.rect.center
-        center = (bc[0] / w, bc[1] / h)
-        key = (size, bc)
-        if self._game_bg_cache is None or self._game_bg_cache[0] != key:
-            self._game_bg_cache = (key, backdrop.arena_background(size, center).convert())
-        self.window.blit(self._game_bg_cache[1], (0, 0))
+        self.backdrop.draw(self.window, self.board.rect)
 
     def _refresh_game_info(self):
         info = self._compute_game_info()
@@ -1114,27 +1107,19 @@ class GameScreen(Screen):
             return
         self._strip_for_color(mover_color).flash_increment()
 
-    @staticmethod
-    def _is_white(color):
-        return color in (PieceColor.WHITE, "white")
-
     def _name_for_color(self, color):
-        return self.white_name if self._is_white(color) else self.black_name
+        return self.white_name if is_white(color) else self.black_name
 
     def _country_for_color(self, color):
-        return self.white_country if self._is_white(color) else self.black_country
+        return self.white_country if is_white(color) else self.black_country
 
     def _strip_for_color(self, color):
-        is_white = self._is_white(color)
-        top_is_white = self._strip_color_top() == PieceColor.WHITE
-        return (self.player_strip_top if is_white == top_is_white
+        top_is_white = top_strip_color(self.board.flipped) == PieceColor.WHITE
+        return (self.player_strip_top if is_white(color) == top_is_white
                 else self.player_strip_bottom)
 
-    def _strip_color_top(self):
-        return PieceColor.WHITE if self.board.flipped else PieceColor.BLACK
-
     def _update_player_strips(self):
-        top_color = self._strip_color_top()
+        top_color = top_strip_color(self.board.flipped)
         bottom_color = opponent_of(top_color)
         turn = self.match.current_turn()
         over = self.current_result() is not None
@@ -1146,9 +1131,7 @@ class GameScreen(Screen):
         cached = self._strip_memo.get(color)
         if cached is not None and cached[0] == key:
             return cached[1], cached[2]
-        history = self.match.move_history
-        if self.board.review_ply is not None:
-            history = history[:self.board.review_ply]
+        history = self.board.reviewed_history()
         captured = captured_by(history, color)
         advantage = material_advantage(history, color)
         self._strip_memo[color] = (key, captured, advantage)
