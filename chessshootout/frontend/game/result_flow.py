@@ -296,9 +296,7 @@ class ResultFlow:
         return path
 
     def _auto_save_prefix(self):
-        if self.screen.variant == "bot":
-            return "bot"
-        return "online" if self.screen.variant == "online" else "local"
+        return self.screen.variant
 
     def _update_incremental_autosave(self):
         screen = self.screen

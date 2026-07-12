@@ -30,7 +30,6 @@ REVIEW_HOTKEYS = [row for row in HOTKEYS if row[0] in REVIEW_HOTKEY_KEYS]
 class ReviewScreen(Screen):
 
     name = "review"
-    uses_battle_backdrop = False
 
     def __init__(self, app):
         super().__init__(app)
@@ -174,9 +173,6 @@ class ReviewScreen(Screen):
 
     def scrollables(self):
         return [self.right_menu]
-
-    def caption(self):
-        return ""
 
     def debug_state(self):
         return {"pgn_path": self._pgn_path, "review_ply": self.board.review_ply}

@@ -233,7 +233,7 @@ def test_disconnect_abort_is_neutral_result_with_its_own_text():
     app.game.result_flow._series_scores = {"Alice": 1, "Bob": 0}
     app.coordinator._handle_online_result({"reason": "aborted_disconnect"})
     assert app.game.manual_result == "aborted_disconnect"
-    assert app.game.result_text() == ("Game aborted", "opponent disconnected")
+    assert app.game.result_flow.result_text() == ("Game aborted", "opponent disconnected")
     assert app.game.result_flow._series_scores == {"Alice": 1, "Bob": 0}
 
 
@@ -277,7 +277,7 @@ def test_online_win_result_subtitle_reports_actual_reason(reason, winner, expect
     app.game.black_name = "Bob"
     app.game.result_flow._series_scores = {"Alice": 0.0, "Bob": 0.0}
     app.coordinator._handle_online_result({"reason": reason, "winner_color": winner})
-    assert app.game.result_text() == expected
+    assert app.game.result_flow.result_text() == expected
 
 
 @pytest.mark.parametrize("draw_reason,expected", [
@@ -297,7 +297,7 @@ def test_online_draw_result_subtitle(draw_reason, expected):
     app.game.black_name = "Bob"
     app.game.result_flow._series_scores = {"Alice": 0.0, "Bob": 0.0}
     app.coordinator._handle_online_result({"reason": draw_reason})
-    assert app.game.result_text() == expected
+    assert app.game.result_flow.result_text() == expected
 
 
 def test_local_resignation_subtitle_reports_resignation():
@@ -306,7 +306,7 @@ def test_local_resignation_subtitle_reports_resignation():
     app = _make_app()
     _start_local(app)
     app.game._perform_resign()
-    assert app.game.result_text() == ("Black wins", "by resignation")
+    assert app.game.result_flow.result_text() == ("Black wins", "by resignation")
 
 
 def test_single_screen_result_uses_winner_perspective_not_stale_local_color():
@@ -344,7 +344,7 @@ def test_engine_result_subtitle_reports_actual_reason(engine_result, expected):
     app = _make_app()
     _start_local(app)
     app.game.match.backend.game_result = lambda: engine_result
-    assert app.game.result_text() == expected
+    assert app.game.result_flow.result_text() == expected
 
 
 def test_menu_mode_returns_no_info():

@@ -38,7 +38,6 @@ from chessshootout.frontend.online_coordinator import OnlineCoordinator
 from chessshootout.frontend.audio.sound_manager import SoundManager
 from chessshootout.frontend.modals.start import StartMenu
 from chessshootout.domain.pgn.load import latest_pgn_in_dir
-from chessshootout.paths import SOUNDS_DIR
 
 
 PERF_SAMPLE_COUNT = 240
@@ -89,7 +88,7 @@ class Frontend:
         self._last_frame_start = None
         self._prev_screen_used_backdrop = False
 
-        self.sound_manager = SoundManager(SOUNDS_DIR, enabled=pg.mixer.get_init() is not None)
+        self.sound_manager = SoundManager(paths.SOUNDS_DIR, enabled=pg.mixer.get_init() is not None)
         self.coordinator = OnlineCoordinator(self)
         self.start_menu = StartMenu(self.window, {
             "start_game": self._on_start_game,

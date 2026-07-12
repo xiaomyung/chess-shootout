@@ -134,9 +134,7 @@ class OnlineCoordinator:
                 log.exception("online event handler failed")
 
     def _handle_online_event(self, event):
-        if event.type == "matchmake_response":
-            return
-        elif event.type == "game_start":
+        if event.type == "game_start":
             self._begin_match_found_transition(event.payload)
         elif event.type == "move_applied":
             self._handle_remote_move_applied(event.payload)
@@ -753,9 +751,7 @@ class OnlineCoordinator:
                 and pg.time.get_ticks() - self._last_reconnect_probe_ms
                 >= RECONNECT_PROBE_INTERVAL_MS):
             self._spawn_reconnect_probe()
-        with self._pending_reconnect_lock:
-            available = self._pending_reconnect is not None
-        self.app.start_menu.set_reconnect_available(available)
+        self.app.start_menu.set_reconnect_available(self.reconnect_available())
 
     def reconnect_available(self):
         with self._pending_reconnect_lock:

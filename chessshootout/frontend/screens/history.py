@@ -56,9 +56,3 @@ class HistoryScreen(Screen):
 
     def escape(self):
         return Nav("menu")
-
-    def caption(self):
-        return ""
-
-    def debug_state(self):
-        return {}

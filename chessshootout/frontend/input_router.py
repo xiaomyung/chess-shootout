@@ -61,13 +61,12 @@ class InputRouter:
     def _cancel_all_scroll(self):
         frontend = self.frontend
         self._scroll_pressed = None
-        for screen in frontend.screens.values():
-            for scrollable in screen.scrollables():
-                scrollable.scroll.cancel()
         for spec in frontend._modal_registry:
             if spec.scrollable:
                 spec.obj.scroll.cancel()
         for screen in frontend.screens.values():
+            for scrollable in screen.scrollables():
+                scrollable.scroll.cancel()
             for spec in screen.modals():
                 if spec.scrollable:
                     spec.obj.scroll.cancel()

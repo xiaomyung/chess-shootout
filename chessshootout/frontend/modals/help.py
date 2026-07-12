@@ -37,7 +37,7 @@ class HelpModal(BaseModal, ScrollHost):
     def __init__(self, window):
         super().__init__(window)
         self.button_rects = {}
-        self.rows = HOTKEYS
+        self.rows = []
         self._scroll_px = 0.0
         self._content_px = 0
         self._line_h = 1

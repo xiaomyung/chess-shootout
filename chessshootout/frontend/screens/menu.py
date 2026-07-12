@@ -54,9 +54,3 @@ class MenuScreen(Screen):
 
     def modals(self):
         return [ModalSpec(self.fen_input_modal)]
-
-    def caption(self):
-        return ""
-
-    def debug_state(self):
-        return {}

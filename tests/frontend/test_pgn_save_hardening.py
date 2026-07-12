@@ -426,7 +426,7 @@ def test_online_stalemate_keeps_its_own_reason_not_agreement(tmp_path, monkeypat
     _e4(app)
     app.coordinator._handle_online_result({"reason": "draw_stalemate"})
     assert app.game.manual_result == "draw_stalemate"
-    assert app.game.result_text() == ("Draw", "by stalemate")
+    assert app.game.result_flow.result_text() == ("Draw", "by stalemate")
     files = _pgn_files(tmp_path)
     assert len(files) == 1
     assert '[Result "1/2-1/2"]' in files[0].read_text(encoding="utf-8")

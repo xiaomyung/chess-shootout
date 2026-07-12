@@ -36,7 +36,7 @@ from chessshootout.frontend.layout import compute_layout
 from chessshootout.frontend.visual import backdrop
 from chessshootout.frontend.visual import cache
 from chessshootout.frontend.visual.effects import TAKEOVER_TOTAL_MS
-from chessshootout.frontend.game.result_flow import ResultFlow, RESULT_TEXT, _score_str
+from chessshootout.frontend.game.result_flow import ResultFlow, _score_str
 from chessshootout.frontend.game.skillcheck_session import SkillcheckSession
 from chessshootout.frontend.game.give_time import GiveTimeHold
 from chessshootout.server.protocol import FIRST_MOVE_ABORT_SECONDS, GRACE_SECONDS
@@ -190,8 +190,8 @@ class GameScreen(Screen):
         fen = payload.get("fen")
         side = payload.get("side")
         your_color = payload.get("your_color")
-        self.variant = payload.get("variant") or ("online" if your_color is not None
-                                                    else "local")
+        self.variant = payload.get("variant") or (
+            "online" if your_color is not None else "local")
         if side is not None or fen is not None:
             self._chosen_side = "white"
             self.white_name = "Player 1"
@@ -488,9 +488,7 @@ class GameScreen(Screen):
         if reason in ONLINE_WIN_REASONS:
             white_code, black_code = ONLINE_WIN_RESULT_BY_REASON[reason]
             self.manual_result = white_code if winner == "white" else black_code
-        elif reason in ONLINE_DRAW_REASONS:
-            self.manual_result = reason
-        elif reason in ONLINE_STATIC_RESULTS:
+        elif reason in ONLINE_DRAW_REASONS or reason in ONLINE_STATIC_RESULTS:
             self.manual_result = reason
         else:
             return False
@@ -665,12 +663,6 @@ class GameScreen(Screen):
 
     def current_result(self):
         return self.result_flow.current_result()
-
-    def result_text(self):
-        code = self.current_result()
-        if code is None:
-            return None
-        return RESULT_TEXT.get(code)
 
     def game_live(self):
         return self.current_result() is None
