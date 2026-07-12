@@ -29,24 +29,24 @@ def test_steady_focus_draws(monkeypatch, size, show):
     clock = FakeTicks()
     install_clock(monkeypatch, clock)
     collapse(app, clock)
-    assert app.focus_mode is True
+    assert app.game.focus_mode is True
     app.draw_frame()
-    assert app._focus_show() == show
+    assert app.game._focus_show() == show
 
 
 def test_transition_frames_draw(monkeypatch):
     app = start_game(make_app())
     clock = FakeTicks()
     install_clock(monkeypatch, clock)
-    app._toggle_focus(True)
+    app.game._toggle_focus(True)
     clock.advance(40)
     app.draw_frame()
-    assert app.focus_transition is not None
+    assert app.game.focus_transition is not None
     finish_transition(app, clock)
-    app._toggle_focus(False)
+    app.game._toggle_focus(False)
     clock.advance(40)
     app.draw_frame()
-    assert app.focus_transition is not None
+    assert app.game.focus_transition is not None
     finish_transition(app, clock)
 
 
@@ -57,12 +57,12 @@ def test_off_arrow_present_region(monkeypatch):
     for _ in range(10):
         clock.advance(35)
         app.draw_frame()
-    assert app.focus_arrow.is_visible() is True
+    assert app.game.focus_arrow.is_visible() is True
     app._needs_full_present = False
     app.toast.hide()
     assert app._needs_full_redraw(False) is False
     rects = app._present_rects(False)
-    arrow = app.focus_arrow.dirty_rect()
+    arrow = app.game.focus_arrow.dirty_rect()
     assert any(r.contains(arrow) or r == arrow for r in rects)
 
 
@@ -70,7 +70,7 @@ def test_transition_forces_full_redraw(monkeypatch):
     app = start_game(make_app())
     clock = FakeTicks()
     install_clock(monkeypatch, clock)
-    app._toggle_focus(True)
+    app.game._toggle_focus(True)
     clock.advance(40)
     app.draw_frame()
     assert app._needs_full_redraw(False) is True

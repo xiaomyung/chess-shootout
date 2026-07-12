@@ -20,15 +20,15 @@ def test_scrollable_is_gated_off_in_focus_and_transition():
     with pytest.MonkeyPatch().context() as mp:
         install_clock(mp, clock)
         start_game(app)
-        assert app.input_router._active_scrollable() is app.right_menu
-        app._toggle_focus(True)
-        assert app.focus_transition is not None
+        assert app.input_router._active_scrollable() is app.game.right_menu
+        app.game._toggle_focus(True)
+        assert app.game.focus_transition is not None
         assert app.input_router._active_scrollable() is None
         finish = clock
         for _ in range(12):
             finish.advance(40)
             app.draw_frame()
-        assert app.focus_mode and app.focus_transition is None
+        assert app.game.focus_mode and app.game.focus_transition is None
         assert app.input_router._active_scrollable() is None
 
 
@@ -38,10 +38,10 @@ def test_toggle_blocked_while_skillcheck_overlay_active():
     with pytest.MonkeyPatch().context() as mp:
         install_clock(mp, clock)
         start_game(app)
-        mp.setattr(app.skillcheck_overlay, "is_active", lambda: True)
-        app._toggle_focus(True)
-        assert app.focus_mode is False
-        assert app.focus_transition is None
+        mp.setattr(app.game.skillcheck_overlay, "is_active", lambda: True)
+        app.game._toggle_focus(True)
+        assert app.game.focus_mode is False
+        assert app.game.focus_transition is None
 
 
 def test_force_off_instant_clears_linger_timers():
@@ -51,9 +51,9 @@ def test_force_off_instant_clears_linger_timers():
         install_clock(mp, clock)
         start_game(app)
         collapse(app, clock)
-        app._focus_panel_hover_ms = 5_000_000
-        app._focus_hint_until_ms = 5_000_000
-        app._force_focus_off_instant()
-        assert app.focus_mode is False
-        assert app._focus_panel_hover_ms == LONG_AGO_MS
-        assert app._focus_hint_until_ms == 0
+        app.game._focus_panel_hover_ms = 5_000_000
+        app.game._focus_hint_until_ms = 5_000_000
+        app.game._force_focus_off_instant()
+        assert app.game.focus_mode is False
+        assert app.game._focus_panel_hover_ms == LONG_AGO_MS
+        assert app.game._focus_hint_until_ms == 0

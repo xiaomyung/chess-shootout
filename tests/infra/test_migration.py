@@ -159,11 +159,11 @@ def test_reset_clears_override(tmp_path, monkeypatch):
 def test_menu_hidden_while_overlay_modal_open():
     """An open overlay modal hides the menu; closing it brings the menu back."""
     app = _app()
-    assert app._menu_overlay_active() is False
+    assert app._blocking_modal_visible() is False
     app.settings._on_open_options()
-    assert app._menu_overlay_active() is True
+    assert app._blocking_modal_visible() is True
     app.options_modal.hide()
-    assert app._menu_overlay_active() is False
+    assert app._blocking_modal_visible() is False
 
 
 def test_options_close_applies_default_time_to_menu(monkeypatch):
@@ -182,7 +182,7 @@ def test_options_close_applies_default_time_to_menu(monkeypatch):
 def test_menu_click_routes_to_options_not_start_menu(monkeypatch):
     """With the options modal open, clicks route to it and never reach start_menu."""
     app = _app()
-    assert app.mode == "menu"
+    assert app.screen is app.menu
     app.settings._on_open_options()
     app.draw_frame()
     received = []

@@ -30,7 +30,7 @@ def _entry(san):
 def _game_app(n_moves=200):
     app = Frontend(1000, 800)
     app._on_start_game(_config())
-    app.match.backend.move_history = [_entry(f"a{i % 8 + 1}") for i in range(n_moves)]
+    app.game.match.backend.move_history = [_entry(f"a{i % 8 + 1}") for i in range(n_moves)]
     app.draw_frame()
     return app
 
@@ -41,14 +41,19 @@ def test_active_scrollable_menu_then_game():
     app.switch_to("history")
     assert app.input_router._active_scrollable() is app.history_view
     app._on_start_game(_config())
-    assert app.input_router._active_scrollable() is app.right_menu
+    assert app.input_router._active_scrollable() is app.game.right_menu
 
 
-def test_active_scrollable_prefers_visible_modal():
+def test_active_scrollable_prefers_visible_modal_on_game_screen():
     app = _game_app()
     app.help_modal.show(HOTKEYS)
     assert app.input_router._active_scrollable() is app.help_modal
-    app.help_modal.hide()
+
+
+def test_active_scrollable_prefers_visible_modal_on_menu_screen():
+    """country_picker is a global modal (it opens from inside options), so it
+    scrolls from any screen."""
+    app = Frontend(1000, 800)
     app.country_picker.show("US", lambda c: None)
     assert app.input_router._active_scrollable() is app.country_picker
 
@@ -61,27 +66,27 @@ def test_active_scrollable_none_behind_blocking_modal():
 
 def test_move_list_drag_scrolls_without_board_drag():
     app = _game_app()
-    vp = app.right_menu._moves_viewport
-    before = app.right_menu.scroll_offset
+    vp = app.game.right_menu._moves_viewport
+    before = app.game.right_menu.scroll_offset
     app.input_router._mouse_left_pressed((vp.centerx, vp.y + 20))
-    assert app.input_router._scroll_pressed is app.right_menu
+    assert app.input_router._scroll_pressed is app.game.right_menu
     app.input_router._handle_left_drag_motion((vp.centerx, vp.bottom - 10))
     app.input_router._mouse_left_released((vp.centerx, vp.bottom - 10))
-    assert app.right_menu.scroll_offset != before
-    assert app.board.dragging_from is None
+    assert app.game.right_menu.scroll_offset != before
+    assert app.game.board.dragging_from is None
     assert app.input_router._scroll_pressed is None
 
 
 def test_move_list_tap_jumps_to_ply():
     app = _game_app()
-    cell_rect, ply = app.right_menu._move_cell_hits[0]
+    cell_rect, ply = app.game.right_menu._move_cell_hits[0]
     app.input_router._mouse_left_pressed(cell_rect.center)
     app.input_router._mouse_left_released(cell_rect.center)
-    assert app.board.review_ply == ply
+    assert app.game.board.review_ply == ply
 
 
 def test_country_tap_picks_on_release():
-    app = _game_app()
+    app = Frontend(1000, 800)
     picked = []
     app.country_picker.show("US", lambda c: picked.append(c))
     app.draw_frame()
@@ -93,7 +98,7 @@ def test_country_tap_picks_on_release():
 
 
 def test_country_flick_suppresses_pick():
-    app = _game_app()
+    app = Frontend(1000, 800)
     picked = []
     app.country_picker.show("US", lambda c: picked.append(c))
     app.draw_frame()
@@ -107,7 +112,7 @@ def test_country_flick_suppresses_pick():
 
 def test_move_list_fling_through_dispatch_ticks_cleanly():
     app = _game_app()
-    rm = app.right_menu
+    rm = app.game.right_menu
     vp = rm._moves_viewport
     rm.scroll.handle_press((vp.centerx, vp.bottom - 10), now_ms=0)
     rm.scroll.handle_motion((vp.centerx, vp.bottom - 40), now_ms=16)
@@ -122,11 +127,11 @@ def test_move_list_fling_through_dispatch_ticks_cleanly():
 
 def test_resize_cancels_active_gesture():
     app = _game_app()
-    vp = app.right_menu._moves_viewport
+    vp = app.game.right_menu._moves_viewport
     app.input_router._mouse_left_pressed((vp.centerx, vp.y + 20))
     app.input_router._handle_left_drag_motion((vp.centerx, vp.y + 80))
-    assert app.input_router._scroll_pressed is app.right_menu
+    assert app.input_router._scroll_pressed is app.game.right_menu
     pg.event.post(pg.event.Event(pg.VIDEORESIZE, {"w": 900, "h": 700}))
     app.input_router.check_events()
     assert app.input_router._scroll_pressed is None
-    assert app.right_menu.scroll.is_active() is False
+    assert app.game.right_menu.scroll.is_active() is False

@@ -1,5 +1,5 @@
-"""HistoryScreen: a first-class screen wrapping HistoryView, sharing the "menu" legacy mode
-so it inherits the same input gating as the menu card, running the battle backdrop behind it
+"""HistoryScreen: a first-class screen wrapping HistoryView, inheriting the same
+input gating as the menu card, running the battle backdrop behind it
 (paused on the game screen, never re-triggering the intro fly-in on a menu<->history hop), and
 laying out the wide capped-width history rect from window size + the fixed chrome inset."""
 
@@ -12,11 +12,11 @@ from tests.helpers import make_app, start_single_screen
 _pygame_init = pygame_display(1000, 800)
 
 
-def test_switch_to_history_sets_screen_name_and_legacy_mode():
+def test_switch_to_history_sets_screen_name():
     app = make_app()
     app.switch_to("history")
     assert app.screen.name == "history"
-    assert app.mode == "menu"
+    assert app.screen is app.history
 
 
 def test_history_escape_navigates_back_to_menu():

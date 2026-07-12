@@ -163,27 +163,31 @@ def test_list_handler_evicts_oldest_once_past_maxlen():
 
 
 def test_gather_state_extracts_all_known_fields():
+    screen = SimpleNamespace(
+        name="game",
+        debug_state=lambda: {"move_history_len": 3, "variant": "online"},
+    )
     fe = SimpleNamespace(
-        mode="online",
-        match=SimpleNamespace(move_history=[1, 2, 3]),
+        screen=screen,
         coordinator=SimpleNamespace(client=SimpleNamespace(state="connected")),
         window=SimpleNamespace(get_size=lambda: (1200, 800)),
     )
     state = gather_state(fe)
-    assert state["mode"] == "online"
+    assert state["screen"] == "game"
     assert state["move_history_len"] == 3
+    assert state["variant"] == "online"
     assert state["online_state"] == "connected"
     assert state["window_size"] == (1200, 800)
 
 
 def test_gather_state_handles_missing_match_and_client():
-    """Early-init crashes (no match / no client) must not raise."""
-    fe = SimpleNamespace(mode="menu", match=None,
+    """Early-init crashes (no client, screen with no game state) must not raise."""
+    screen = SimpleNamespace(name="menu", debug_state=lambda: {})
+    fe = SimpleNamespace(screen=screen,
                          coordinator=SimpleNamespace(client=None),
                          window=SimpleNamespace(get_size=lambda: (900, 600)))
     state = gather_state(fe)
-    assert state["mode"] == "menu"
-    assert state["move_history_len"] is None
+    assert state["screen"] == "menu"
     assert state["online_state"] is None
     assert state["window_size"] == (900, 600)
 
@@ -192,8 +196,7 @@ def test_gather_state_tolerates_completely_blank_object():
     """A bare namespace (no attrs) yields all-None rather than blowing up."""
     state = gather_state(SimpleNamespace())
     assert state == {
-        "mode": None,
-        "move_history_len": None,
+        "screen": None,
         "online_state": None,
         "window_size": None,
     }

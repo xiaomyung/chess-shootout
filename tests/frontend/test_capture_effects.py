@@ -1103,58 +1103,58 @@ def test_board_show_checkmate_takeover_activates():
 
 def test_checkmate_result_triggers_takeover_and_loser_flag(monkeypatch):
     app = _app()
-    monkeypatch.setattr(app, "current_result", lambda: "white_wins")
-    app._trigger_result_effects()
-    assert app.board.effects.has_takeover()
-    assert [f["sq"] for f in app.board.effects.flags] == [Square(0, 4)]
+    monkeypatch.setattr(app.game, "current_result", lambda: "white_wins")
+    app.game._trigger_result_effects()
+    assert app.game.board.effects.has_takeover()
+    assert [f["sq"] for f in app.game.board.effects.flags] == [Square(0, 4)]
 
 
 def test_resignation_raises_flag_without_takeover(monkeypatch):
     app = _app()
-    monkeypatch.setattr(app, "current_result", lambda: "black_wins_by_resignation")
-    app._trigger_result_effects()
-    assert not app.board.effects.has_takeover()
-    assert [f["sq"] for f in app.board.effects.flags] == [Square(7, 4)]
+    monkeypatch.setattr(app.game, "current_result", lambda: "black_wins_by_resignation")
+    app.game._trigger_result_effects()
+    assert not app.game.board.effects.has_takeover()
+    assert [f["sq"] for f in app.game.board.effects.flags] == [Square(7, 4)]
 
 
 def test_timeout_win_raises_no_flag_and_no_takeover(monkeypatch):
     app = _app()
-    monkeypatch.setattr(app, "current_result", lambda: "white_wins_on_time")
-    app._trigger_result_effects()
-    assert not app.board.effects.has_takeover()
-    assert app.board.effects.flags == []
+    monkeypatch.setattr(app.game, "current_result", lambda: "white_wins_on_time")
+    app.game._trigger_result_effects()
+    assert not app.game.board.effects.has_takeover()
+    assert app.game.board.effects.flags == []
 
 
 def test_draw_triggers_no_win_effects(monkeypatch):
     app = _app()
-    monkeypatch.setattr(app, "current_result", lambda: "draw_agreement")
-    app._trigger_result_effects()
-    assert not app.board.effects.has_takeover()
-    assert app.board.effects.flags == []
+    monkeypatch.setattr(app.game, "current_result", lambda: "draw_agreement")
+    app.game._trigger_result_effects()
+    assert not app.game.board.effects.has_takeover()
+    assert app.game.board.effects.flags == []
 
 
 def test_result_sequence_waits_for_capture_choreography(monkeypatch):
     app = _app()
-    monkeypatch.setattr(app, "current_result", lambda: "white_wins")
-    app.board.effects.captures = [{"in_flight": True}]
-    app.result_flow._update_result_pending()
-    assert app._result_first_seen_at_ms is None
-    assert not app.board.effects.has_takeover()
-    app.board.effects.captures = []
-    app.result_flow._update_result_pending()
-    assert app._result_first_seen_at_ms is not None
-    assert app.board.effects.has_takeover()
+    monkeypatch.setattr(app.game, "current_result", lambda: "white_wins")
+    app.game.board.effects.captures = [{"in_flight": True}]
+    app.game.result_flow._update_result_pending()
+    assert app.game._result_first_seen_at_ms is None
+    assert not app.game.board.effects.has_takeover()
+    app.game.board.effects.captures = []
+    app.game.result_flow._update_result_pending()
+    assert app.game._result_first_seen_at_ms is not None
+    assert app.game.board.effects.has_takeover()
 
 
 def test_result_modal_waits_longer_while_a_takeover_plays(monkeypatch):
     app = _app()
-    monkeypatch.setattr(app, "current_result", lambda: "white_wins")
-    app.result_flow._update_result_pending()
-    assert app.board.effects.has_takeover()
-    app._result_first_seen_at_ms = pg.time.get_ticks() - 600
-    assert app._result_modal_should_show() is False
-    app._result_first_seen_at_ms = pg.time.get_ticks() - (TAKEOVER_TOTAL_MS + 50)
-    assert app._result_modal_should_show() is True
+    monkeypatch.setattr(app.game, "current_result", lambda: "white_wins")
+    app.game.result_flow._update_result_pending()
+    assert app.game.board.effects.has_takeover()
+    app.game._result_first_seen_at_ms = pg.time.get_ticks() - 600
+    assert app.game._result_modal_should_show() is False
+    app.game._result_first_seen_at_ms = pg.time.get_ticks() - (TAKEOVER_TOTAL_MS + 50)
+    assert app.game._result_modal_should_show() is True
 
 
 def test_takeover_rebuild_keys_on_width_change_not_just_height():

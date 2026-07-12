@@ -6,14 +6,13 @@ import pygame as pg
 
 from chessshootout.backend.fen import apply_fen
 from chessshootout.backend.utils import coord_from_square, square_from_coord
-from chessshootout.domain.match import ONLINE, SINGLE_SCREEN
+from chessshootout.domain.match import ONLINE
 from chessshootout.frontend.modals.match_found import MatchFoundModal
 from chessshootout.frontend.modals.reconnecting import ReconnectingModal
 from chessshootout.frontend.modals.wait import WaitModal
 from chessshootout.frontend.online.banners import OfferBanners
 from chessshootout.frontend.panels.player_strip import AUTO_END_RED_THRESHOLD_SECONDS
 from chessshootout.frontend.screens.base import Nav
-from chessshootout.frontend.window_chrome import WINDOW_TITLE
 from chessshootout.infra import env
 from chessshootout.online.client import (
     OnlineClient, RECONNECT_TOTAL_SECONDS, fetch_resume, probe_active_game,
@@ -439,7 +438,6 @@ class OnlineCoordinator:
         self.app.confirm_modal.hide()
         self.app.start_menu.hide()
         nav_payload = {
-            "mode": ONLINE,
             "your_color": payload["your_color"],
             "white_name": payload["white_name"],
             "black_name": payload["black_name"],
@@ -556,17 +554,15 @@ class OnlineCoordinator:
         game.match.on_local_move_applied = None
         game.right_menu.set_game_info(None)
         game.result_menu.set_online_mode(False)
-        game.match.mode = SINGLE_SCREEN
+        game.variant = "local"
         game.match.local_color = None
         self.app.switch_to("menu")
-        pg.display.set_caption(WINDOW_TITLE)
         game._reset_to_new_game()
         self.app._refresh_load_pgn_availability()
 
     def _return_to_menu_card(self):
         self.app.switch_to("menu")
         self._reconnect_probe_attempts = 0
-        self.app.start_menu.show()
 
     def _abandon_online_game(self):
         self._tear_down_online_session("reconnect_cancelled")
@@ -614,7 +610,7 @@ class OnlineCoordinator:
     def _update_heartbeat(self):
         game = self.app.game
         clock = game.match.clock
-        paused = (self.app.mode == "menu" or game.current_result() is not None
+        paused = (self.app.screen is not self.app.game or game.current_result() is not None
                   or clock is None)
         if paused or clock.initial_seconds <= 0:
             fraction = None
@@ -627,9 +623,9 @@ class OnlineCoordinator:
         self.app.sound_manager.update_heartbeat(fraction, paused)
 
     def _auto_end_heartbeat_fraction(self):
-        if self.app.mode != ONLINE:
-            return None
         game = self.app.game
+        if game.variant != "online":
+            return None
         now = pg.time.get_ticks()
         candidates = []
         for snap_ms, total in (
@@ -675,7 +671,7 @@ class OnlineCoordinator:
         self._send_heartbeat_if_due()
         now = pg.time.get_ticks()
         game = self.app.game
-        reconnecting = (self.app.mode == ONLINE and game.current_result() is None
+        reconnecting = (game.variant == "online" and game.current_result() is None
                         and self.client is not None
                         and self.client.state == "reconnecting")
         if reconnecting:
@@ -738,7 +734,7 @@ class OnlineCoordinator:
             self._reconnect_probe_inflight = False
 
     def _refresh_reconnect_button(self):
-        if (self.app.mode == "menu" and self.client is None
+        if (self.app.screen is self.app.menu and self.client is None
                 and pg.time.get_ticks() - self._last_reconnect_probe_ms
                 >= RECONNECT_PROBE_INTERVAL_MS):
             self._spawn_reconnect_probe()

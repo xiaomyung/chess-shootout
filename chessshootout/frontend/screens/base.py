@@ -36,7 +36,6 @@ class Screen:
 
     name = ""
     uses_battle_backdrop = False
-    legacy_mode = None
 
     def __init__(self, app):
         self.app = app
@@ -73,6 +72,18 @@ class Screen:
 
     def handle_release(self, pos):
         return False
+
+    def handle_right_press(self, pos):
+        return False
+
+    def handle_right_release(self, pos):
+        return False
+
+    def swallows_input(self):
+        return False
+
+    def forward_swallowed_event(self, event):
+        pass
 
     def active_scrollable(self):
         return None

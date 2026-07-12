@@ -190,123 +190,123 @@ def post_event(event_type, **kwargs):
 def test_right_click_down_on_board_sets_drag_start():
     app = make_app()
     sq = Square(6, 4)
-    rect = app.board._cell_rect(sq.row, sq.col)
+    rect = app.game.board._cell_rect(sq.row, sq.col)
     post_event(pg.MOUSEBUTTONDOWN, button=3, pos=rect.center)
     app.input_router.check_events()
-    assert app.board.annotations._right_drag_start_square == sq
+    assert app.game.board.annotations._right_drag_start_square == sq
 
 
 def test_right_click_down_off_board_no_drag_start():
     app = make_app()
     post_event(pg.MOUSEBUTTONDOWN, button=3, pos=(2000, 2000))
     app.input_router.check_events()
-    assert app.board.annotations._right_drag_start_square is None
+    assert app.game.board.annotations._right_drag_start_square is None
 
 
 def test_right_click_during_left_drag_does_not_start_highlight():
     """Right-click is reserved for premove chaining during a left-drag; it must
     NOT register a highlight start, even when the chain extension is rejected."""
     app = make_app()
-    app.board.dragging_from = Square(6, 4)
+    app.game.board.dragging_from = Square(6, 4)
     other_sq = Square(2, 2)
-    rect = app.board._cell_rect(other_sq.row, other_sq.col)
+    rect = app.game.board._cell_rect(other_sq.row, other_sq.col)
     post_event(pg.MOUSEBUTTONDOWN, button=3, pos=rect.center)
     app.input_router.check_events()
-    assert app.board.annotations._right_drag_start_square is None
+    assert app.game.board.annotations._right_drag_start_square is None
     post_event(pg.MOUSEBUTTONUP, button=3, pos=rect.center)
     app.input_router.check_events()
-    assert other_sq not in app.board.highlighted_squares
+    assert other_sq not in app.game.board.highlighted_squares
 
 
 def test_right_click_release_same_square_toggles_highlight():
     app = make_app()
     sq = Square(6, 4)
-    rect = app.board._cell_rect(sq.row, sq.col)
+    rect = app.game.board._cell_rect(sq.row, sq.col)
     post_event(pg.MOUSEBUTTONDOWN, button=3, pos=rect.center)
     post_event(pg.MOUSEBUTTONUP, button=3, pos=rect.center)
     app.input_router.check_events()
-    assert sq in app.board.highlighted_squares
-    assert app.board.annotations._right_drag_start_square is None
+    assert sq in app.game.board.highlighted_squares
+    assert app.game.board.annotations._right_drag_start_square is None
 
 
 def test_right_click_release_different_square_creates_arrow():
     app = make_app()
     a = Square(6, 4)
     b = Square(4, 4)
-    a_rect = app.board._cell_rect(a.row, a.col)
-    b_rect = app.board._cell_rect(b.row, b.col)
+    a_rect = app.game.board._cell_rect(a.row, a.col)
+    b_rect = app.game.board._cell_rect(b.row, b.col)
     post_event(pg.MOUSEBUTTONDOWN, button=3, pos=a_rect.center)
     post_event(pg.MOUSEBUTTONUP, button=3, pos=b_rect.center)
     app.input_router.check_events()
-    assert (a, b) in app.board.arrows
-    assert app.board.annotations._right_drag_start_square is None
+    assert (a, b) in app.game.board.arrows
+    assert app.game.board.annotations._right_drag_start_square is None
 
 
 def test_right_click_release_off_board_cancels():
     app = make_app()
     a = Square(6, 4)
-    a_rect = app.board._cell_rect(a.row, a.col)
+    a_rect = app.game.board._cell_rect(a.row, a.col)
     post_event(pg.MOUSEBUTTONDOWN, button=3, pos=a_rect.center)
     post_event(pg.MOUSEBUTTONUP, button=3, pos=(2000, 2000))
     app.input_router.check_events()
-    assert app.board.highlighted_squares == set()
-    assert app.board.arrows == []
-    assert app.board.annotations._right_drag_start_square is None
+    assert app.game.board.highlighted_squares == set()
+    assert app.game.board.arrows == []
+    assert app.game.board.annotations._right_drag_start_square is None
 
 
 def test_right_click_on_already_highlighted_removes_it():
     app = make_app()
     sq = Square(6, 4)
-    app.board.toggle_highlight(sq)
-    assert sq in app.board.highlighted_squares
-    rect = app.board._cell_rect(sq.row, sq.col)
+    app.game.board.toggle_highlight(sq)
+    assert sq in app.game.board.highlighted_squares
+    rect = app.game.board._cell_rect(sq.row, sq.col)
     post_event(pg.MOUSEBUTTONDOWN, button=3, pos=rect.center)
     post_event(pg.MOUSEBUTTONUP, button=3, pos=rect.center)
     app.input_router.check_events()
-    assert sq not in app.board.highlighted_squares
+    assert sq not in app.game.board.highlighted_squares
 
 
 def test_right_click_drag_twice_toggles_arrow_off():
     app = make_app()
     a = Square(6, 4)
     b = Square(4, 4)
-    a_rect = app.board._cell_rect(a.row, a.col)
-    b_rect = app.board._cell_rect(b.row, b.col)
+    a_rect = app.game.board._cell_rect(a.row, a.col)
+    b_rect = app.game.board._cell_rect(b.row, b.col)
     for _ in range(2):
         post_event(pg.MOUSEBUTTONDOWN, button=3, pos=a_rect.center)
         post_event(pg.MOUSEBUTTONUP, button=3, pos=b_rect.center)
         app.input_router.check_events()
-    assert (a, b) not in app.board.arrows
+    assert (a, b) not in app.game.board.arrows
 
 
 def test_right_click_in_menu_mode_is_noop():
     from chessshootout.frontend.frontend import Frontend
     app = Frontend(900, 500)
     app.sound_manager = MagicMock()
-    rect = app.board._cell_rect(0, 0)
+    rect = app.game.board._cell_rect(0, 0)
     post_event(pg.MOUSEBUTTONDOWN, button=3, pos=rect.center)
     post_event(pg.MOUSEBUTTONUP, button=3, pos=rect.center)
     app.input_router.check_events()
-    assert app.board.highlighted_squares == set()
+    assert app.game.board.highlighted_squares == set()
 
 
 def test_left_click_neutral_square_clears_annotations():
     app = make_app()
-    app.board.toggle_highlight(Square(4, 4))
-    rect = app.board._cell_rect(7, 7)
+    app.game.board.toggle_highlight(Square(4, 4))
+    rect = app.game.board._cell_rect(7, 7)
     post_event(pg.MOUSEBUTTONDOWN, button=1, pos=rect.center)
     app.input_router.check_events()
-    assert app.board.highlighted_squares == set()
+    assert app.game.board.highlighted_squares == set()
 
 
 def test_left_click_on_highlighted_square_preserves_annotations():
     app = make_app()
     sq = Square(4, 4)
-    app.board.toggle_highlight(sq)
-    rect = app.board._cell_rect(sq.row, sq.col)
+    app.game.board.toggle_highlight(sq)
+    rect = app.game.board._cell_rect(sq.row, sq.col)
     post_event(pg.MOUSEBUTTONDOWN, button=1, pos=rect.center)
     app.input_router.check_events()
-    assert sq in app.board.highlighted_squares
+    assert sq in app.game.board.highlighted_squares
 
 
 @pytest.mark.parametrize(
@@ -320,20 +320,20 @@ def test_left_click_on_arrow_endpoint_preserves(clicked_endpoint):
     app = make_app()
     a = Square(6, 4)
     b = Square(4, 4)
-    app.board.toggle_arrow(a, b)
+    app.game.board.toggle_arrow(a, b)
     target = a if clicked_endpoint == "from" else b
-    rect = app.board._cell_rect(target.row, target.col)
+    rect = app.game.board._cell_rect(target.row, target.col)
     post_event(pg.MOUSEBUTTONDOWN, button=1, pos=rect.center)
     app.input_router.check_events()
-    assert (a, b) in app.board.arrows
+    assert (a, b) in app.game.board.arrows
 
 
 def test_left_click_off_board_does_not_clear():
     app = make_app()
-    app.board.toggle_highlight(Square(4, 4))
+    app.game.board.toggle_highlight(Square(4, 4))
     post_event(pg.MOUSEBUTTONDOWN, button=1, pos=(2000, 2000))
     app.input_router.check_events()
-    assert Square(4, 4) in app.board.highlighted_squares
+    assert Square(4, 4) in app.game.board.highlighted_squares
 
 
 def test_normal_move_clears_annotations(board):
@@ -399,44 +399,44 @@ def test_premove_fire_clears_annotations(board):
 
 def test_undo_clears_annotations():
     app = make_app()
-    app.board.handle_click(Square(6, 4))
-    app.board.handle_click(Square(4, 4))
-    fire_animation(app.board)
-    app.board.toggle_highlight(Square(0, 0))
-    app.board.toggle_arrow(Square(6, 0), Square(4, 0))
-    app._on_undo()
-    assert app.board.highlighted_squares == set()
-    assert app.board.arrows == []
+    app.game.board.handle_click(Square(6, 4))
+    app.game.board.handle_click(Square(4, 4))
+    fire_animation(app.game.board)
+    app.game.board.toggle_highlight(Square(0, 0))
+    app.game.board.toggle_arrow(Square(6, 0), Square(4, 0))
+    app.game._on_undo()
+    assert app.game.board.highlighted_squares == set()
+    assert app.game.board.arrows == []
 
 
 def test_resign_clears_annotations():
     app = make_app()
-    app.board.toggle_highlight(Square(0, 0))
-    app._perform_resign()
-    assert app.board.highlighted_squares == set()
+    app.game.board.toggle_highlight(Square(0, 0))
+    app.game._perform_resign()
+    assert app.game.board.highlighted_squares == set()
 
 
 def test_draw_clears_annotations():
     app = make_app()
-    app.board.toggle_arrow(Square(6, 0), Square(4, 0))
-    app._perform_draw()
-    assert app.board.arrows == []
+    app.game.board.toggle_arrow(Square(6, 0), Square(4, 0))
+    app.game._perform_draw()
+    assert app.game.board.arrows == []
 
 
 def test_new_game_clears_annotations():
     app = make_app()
-    app.board.toggle_highlight(Square(4, 4))
-    app.board.toggle_arrow(Square(6, 0), Square(4, 0))
+    app.game.board.toggle_highlight(Square(4, 4))
+    app.game.board.toggle_arrow(Square(6, 0), Square(4, 0))
     app._on_new_game()
-    assert app.board.highlighted_squares == set()
-    assert app.board.arrows == []
+    assert app.game.board.highlighted_squares == set()
+    assert app.game.board.arrows == []
 
 
 def test_back_to_menu_clears_annotations():
     app = make_app()
-    app.board.toggle_highlight(Square(4, 4))
+    app.game.board.toggle_highlight(Square(4, 4))
     app._on_back_to_menu()
-    assert app.board.highlighted_squares == set()
+    assert app.game.board.highlighted_squares == set()
 
 
 def test_draw_annotation_highlights_renders_each_square(board, monkeypatch):

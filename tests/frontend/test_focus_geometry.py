@@ -21,7 +21,7 @@ def _normal_board_width(w, h):
     from chessshootout.frontend.frontend import Frontend
     app = Frontend(w, h)
     app.draw_frame()
-    return app.board.rect.width
+    return app.game.board.rect.width
 
 
 @pytest.mark.parametrize("size", [(1000, 800), (1600, 900), (1200, 1000)])

@@ -4,7 +4,7 @@ import pygame as pg
 
 from chessshootout.backend.pieces import PieceColor, opponent_of
 from chessshootout.domain.capture_summary import captured_by, material_advantage
-from chessshootout.domain.match import Match, SINGLE_SCREEN
+from chessshootout.domain.match import Match
 from chessshootout.domain.pgn.load import (
     format_time_control, load_pgn_into_backend, parse_comment, parse_time_control,
 )
@@ -12,6 +12,7 @@ from chessshootout.infra import env
 from chessshootout.infra.open_external import open_with_default_app
 from chessshootout.frontend.board import Board
 from chessshootout.frontend.layout import compute_layout
+from chessshootout.frontend.modal_registry import ModalSpec
 from chessshootout.frontend.modals.help import HOTKEYS
 from chessshootout.frontend.panels.right import RightMenu, REVIEW_BUTTONS
 from chessshootout.frontend.panels.review_strip import ReviewStrip
@@ -30,7 +31,6 @@ class ReviewScreen(Screen):
 
     name = "review"
     uses_battle_backdrop = False
-    legacy_mode = "menu"
 
     def __init__(self, app):
         super().__init__(app)
@@ -115,7 +115,7 @@ class ReviewScreen(Screen):
     def relayout(self, size):
         window_width, window_height = size
         r = compute_layout(
-            window_width, window_height, mode=SINGLE_SCREEN, focus_mode=False,
+            window_width, window_height, mode=self.name, focus_mode=False,
             focus_show=env.get_focus_show(), board_size=self.board.SIZE)
         self.board.set_rect(r.board_rect)
         self.right_menu.set_rect(r.menu_rect)
@@ -157,6 +157,15 @@ class ReviewScreen(Screen):
 
     def escape(self):
         return Nav(self._return_to)
+
+    def modals(self):
+        return [ModalSpec(self.app.help_modal)]
+
+    def caption(self):
+        return ""
+
+    def debug_state(self):
+        return {"pgn_path": self._pgn_path, "review_ply": self.board.review_ply}
 
     def _step(self, delta):
         history_len = len(self.match.move_history)

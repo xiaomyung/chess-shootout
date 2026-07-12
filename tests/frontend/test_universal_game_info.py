@@ -6,7 +6,7 @@ import pygame as pg
 import pytest
 
 from tests.conftest import pygame_display
-from chessshootout.domain.match import BOT, ONLINE
+from chessshootout.domain.match import ONLINE
 from chessshootout.frontend.visual.colors import Colors
 from tests.helpers import make_app as _make_app_at
 
@@ -33,11 +33,11 @@ def test_current_result_reacts_to_clock_flag():
     from chessshootout.backend.pieces import PieceColor
     app = _make_app()
     _start_local(app, time_minutes=5, incr=2)
-    assert app.current_result() is None
-    app.match.clock.flagged = PieceColor.BLACK
-    assert app.current_result() == "white_wins_on_time"
-    app.match.clock.flagged = PieceColor.WHITE
-    assert app.current_result() == "black_wins_on_time"
+    assert app.game.current_result() is None
+    app.game.match.clock.flagged = PieceColor.BLACK
+    assert app.game.current_result() == "white_wins_on_time"
+    app.game.match.clock.flagged = PieceColor.WHITE
+    assert app.game.current_result() == "black_wins_on_time"
 
 
 def test_chrome_stats_readouts_follow_toggles():
@@ -72,17 +72,17 @@ def test_current_result_recomputes_when_position_changes_at_same_length(monkeypa
     from chessshootout.backend.utils import Square
     app = _make_app()
     _start_local(app, time_minutes=None, incr=0)
-    backend = app.match.backend
+    backend = app.game.match.backend
     calls = []
     real = backend.game_result
     monkeypatch.setattr(backend, "game_result",
                         lambda: (calls.append(1), real())[1])
     backend.try_move(Square(6, 4), Square(4, 4))
-    app.current_result()
+    app.game.current_result()
     backend.undo()
     backend.try_move(Square(6, 3), Square(4, 3))
     before = len(calls)
-    app.current_result()
+    app.game.current_result()
     assert len(calls) > before
 
 
@@ -91,10 +91,10 @@ def test_current_result_memo_resets_on_new_game():
     from chessshootout.backend.pieces import PieceColor
     app = _make_app()
     _start_local(app, time_minutes=5, incr=2)
-    app.match.clock.flagged = PieceColor.WHITE
-    assert app.current_result() == "black_wins_on_time"
+    app.game.match.clock.flagged = PieceColor.WHITE
+    assert app.game.current_result() == "black_wins_on_time"
     _start_local(app, time_minutes=5, incr=2)
-    assert app.current_result() is None
+    assert app.game.current_result() is None
 
 
 @pytest.mark.parametrize(
@@ -108,16 +108,16 @@ def test_single_screen_info(time_minutes, incr, tc):
     """Local mode: a Local pill, the time control, round 1, no extra lines."""
     app = _make_app()
     _start_local(app, time_minutes=time_minutes, incr=incr)
-    assert app._compute_game_info() == {
+    assert app.game._compute_game_info() == {
         "mode": "Local", "time_control": tc, "round": 1, "lines": [],
     }
 
 
 def test_bot_mode_info():
     app = _make_app()
-    app.mode = BOT
+    app.switch_to("game", variant="bot")
     app.game._time_control = (180, 0)
-    assert app._compute_game_info() == {
+    assert app.game._compute_game_info() == {
         "mode": "Bot", "time_control": "3+0", "round": 1, "lines": [],
     }
 
@@ -126,11 +126,11 @@ def test_online_initial_series_zero_zero():
     """Online header carries the Online pill + TC + round; the scoreboard drops
     into the single extra line below (ping moved to the window chrome)."""
     app = _make_app()
-    app.mode = ONLINE
+    app.switch_to("game", variant=ONLINE)
     app.game.white_name = "Alice"
     app.game.black_name = "Bob"
     app.game._time_control = (180, 2)
-    info = app._compute_game_info()
+    info = app.game._compute_game_info()
     assert info["mode"] == "Online"
     assert info["time_control"] == "3+2"
     assert info["lines"] == ["Alice  0 – 0  Bob"]
@@ -149,12 +149,12 @@ def test_online_initial_series_zero_zero():
 )
 def test_series_score_formatting(white_score, black_score, expected):
     app = _make_app()
-    app.mode = ONLINE
+    app.switch_to("game", variant=ONLINE)
     app.game.white_name = "Alice"
     app.game.black_name = "Bob"
     app.game._time_control = (60, 0)
-    app.result_flow._series_scores = {"Alice": white_score, "Bob": black_score}
-    info = app._compute_game_info()
+    app.game.result_flow._series_scores = {"Alice": white_score, "Bob": black_score}
+    info = app.game._compute_game_info()
     assert info["lines"][0] == expected
     assert info["time_control"] == "1+0"
 
@@ -164,13 +164,13 @@ def test_series_seeded_from_server_scores():
     game_start payload, overwriting any stale local tally (so a reconnect can't
     desync the count)."""
     app = _make_app()
-    app.result_flow._series_scores = {"A": 2, "C": 1}
+    app.game.result_flow._series_scores = {"A": 2, "C": 1}
     app.coordinator._start_online_game({
         "your_color": "white", "white_name": "A", "black_name": "B",
         "time_minutes": 3, "increment_seconds": 0,
         "white_score": 1.0, "black_score": 0.5,
     })
-    assert app.result_flow._series_scores == {"A": 1.0, "B": 0.5}
+    assert app.game.result_flow._series_scores == {"A": 1.0, "B": 0.5}
 
 
 def test_series_seeded_keyed_by_player_through_color_swap():
@@ -182,8 +182,8 @@ def test_series_seeded_keyed_by_player_through_color_swap():
         "time_minutes": 3, "increment_seconds": 0,
         "white_score": 0.0, "black_score": 1.0,
     })
-    assert app.result_flow._series_scores == {"A": 1.0, "B": 0.0}
-    assert app._compute_game_info()["lines"][0] == "B  0 – 1  A"
+    assert app.game.result_flow._series_scores == {"A": 1.0, "B": 0.0}
+    assert app.game._compute_game_info()["lines"][0] == "B  0 – 1  A"
 
 
 @pytest.mark.parametrize(
@@ -195,46 +195,46 @@ def test_series_seeded_keyed_by_player_through_color_swap():
 )
 def test_series_increments_on_win(winner_color, expected_scores):
     app = _make_app()
-    app.mode = ONLINE
+    app.switch_to("game", variant=ONLINE)
     app.game.white_name = "Alice"
     app.game.black_name = "Bob"
-    app.result_flow._series_scores = {"Alice": 0.0, "Bob": 0.0}
+    app.game.result_flow._series_scores = {"Alice": 0.0, "Bob": 0.0}
     app.coordinator._handle_online_result({"reason": "checkmate", "winner_color": winner_color})
-    assert app.result_flow._series_scores == expected_scores
+    assert app.game.result_flow._series_scores == expected_scores
 
 
 def test_series_increments_on_draw():
     app = _make_app()
-    app.mode = ONLINE
+    app.switch_to("game", variant=ONLINE)
     app.game.white_name = "Alice"
     app.game.black_name = "Bob"
-    app.result_flow._series_scores = {"Alice": 0.0, "Bob": 0.0}
+    app.game.result_flow._series_scores = {"Alice": 0.0, "Bob": 0.0}
     app.coordinator._handle_online_result({"reason": "draw_repetition"})
-    assert app.result_flow._series_scores == {"Alice": 0.5, "Bob": 0.5}
+    assert app.game.result_flow._series_scores == {"Alice": 0.5, "Bob": 0.5}
 
 
 def test_aborted_does_not_change_series():
     app = _make_app()
-    app.mode = ONLINE
+    app.switch_to("game", variant=ONLINE)
     app.game.white_name = "Alice"
     app.game.black_name = "Bob"
-    app.result_flow._series_scores = {"Alice": 1, "Bob": 0}
+    app.game.result_flow._series_scores = {"Alice": 1, "Bob": 0}
     app.coordinator._handle_online_result({"reason": "aborted"})
-    assert app.result_flow._series_scores == {"Alice": 1, "Bob": 0}
+    assert app.game.result_flow._series_scores == {"Alice": 1, "Bob": 0}
 
 
 def test_disconnect_abort_is_neutral_result_with_its_own_text():
     """A disconnect abort is a no-winner static result with a distinct modal subtitle and
     leaves the series score untouched."""
     app = _make_app()
-    app.mode = ONLINE
+    app.switch_to("game", variant=ONLINE)
     app.game.white_name = "Alice"
     app.game.black_name = "Bob"
-    app.result_flow._series_scores = {"Alice": 1, "Bob": 0}
+    app.game.result_flow._series_scores = {"Alice": 1, "Bob": 0}
     app.coordinator._handle_online_result({"reason": "aborted_disconnect"})
-    assert app.manual_result == "aborted_disconnect"
-    assert app.result_text() == ("Game aborted", "opponent disconnected")
-    assert app.result_flow._series_scores == {"Alice": 1, "Bob": 0}
+    assert app.game.manual_result == "aborted_disconnect"
+    assert app.game.result_text() == ("Game aborted", "opponent disconnected")
+    assert app.game.result_flow._series_scores == {"Alice": 1, "Bob": 0}
 
 
 def test_score_follows_player_through_color_swap_end_to_end():
@@ -246,16 +246,16 @@ def test_score_follows_player_through_color_swap_end_to_end():
         "time_minutes": 3, "increment_seconds": 0,
     })
     app.coordinator._handle_online_result({"reason": "checkmate", "winner_color": "white"})
-    assert app.result_flow._series_scores["Me"] == 1
-    assert app.result_flow._series_scores["Friend"] == 0.0
+    assert app.game.result_flow._series_scores["Me"] == 1
+    assert app.game.result_flow._series_scores["Friend"] == 0.0
     app.coordinator._start_online_game({
         "your_color": "black", "white_name": "Friend", "black_name": "Me",
         "time_minutes": 3, "increment_seconds": 0,
         "white_score": 0.0, "black_score": 1.0,
     })
-    assert app.result_flow._series_scores["Me"] == 1
-    assert app.result_flow._series_scores["Friend"] == 0.0
-    assert app._compute_game_info()["lines"][0] == "Friend  0 – 1  Me"
+    assert app.game.result_flow._series_scores["Me"] == 1
+    assert app.game.result_flow._series_scores["Friend"] == 0.0
+    assert app.game._compute_game_info()["lines"][0] == "Friend  0 – 1  Me"
 
 
 @pytest.mark.parametrize("reason,winner,expected", [
@@ -272,12 +272,12 @@ def test_online_win_result_subtitle_reports_actual_reason(reason, winner, expect
     """Bug 4: every online win used to render "by resignation" because
     _handle_online_result flattened all win reasons to bare white_wins."""
     app = _make_app()
-    app.mode = ONLINE
+    app.switch_to("game", variant=ONLINE)
     app.game.white_name = "Alice"
     app.game.black_name = "Bob"
-    app.result_flow._series_scores = {"Alice": 0.0, "Bob": 0.0}
+    app.game.result_flow._series_scores = {"Alice": 0.0, "Bob": 0.0}
     app.coordinator._handle_online_result({"reason": reason, "winner_color": winner})
-    assert app.result_text() == expected
+    assert app.game.result_text() == expected
 
 
 @pytest.mark.parametrize("draw_reason,expected", [
@@ -292,12 +292,12 @@ def test_online_draw_result_subtitle(draw_reason, expected):
     """Each online draw reason keeps its own subtitle (manual_result=reason) instead
     of collapsing every draw to "by agreement"."""
     app = _make_app()
-    app.mode = ONLINE
+    app.switch_to("game", variant=ONLINE)
     app.game.white_name = "Alice"
     app.game.black_name = "Bob"
-    app.result_flow._series_scores = {"Alice": 0.0, "Bob": 0.0}
+    app.game.result_flow._series_scores = {"Alice": 0.0, "Bob": 0.0}
     app.coordinator._handle_online_result({"reason": draw_reason})
-    assert app.result_text() == expected
+    assert app.game.result_text() == expected
 
 
 def test_local_resignation_subtitle_reports_resignation():
@@ -305,8 +305,8 @@ def test_local_resignation_subtitle_reports_resignation():
     "by checkmate"."""
     app = _make_app()
     _start_local(app)
-    app._perform_resign()
-    assert app.result_text() == ("Black wins", "by resignation")
+    app.game._perform_resign()
+    assert app.game.result_text() == ("Black wins", "by resignation")
 
 
 def test_single_screen_result_uses_winner_perspective_not_stale_local_color():
@@ -315,19 +315,20 @@ def test_single_screen_result_uses_winner_perspective_not_stale_local_color():
     from chessshootout.backend.pieces import PieceColor
     app = _make_app()
     _start_local(app)
-    app.match.local_color = PieceColor.BLACK
-    assert app.result_flow._result_subject_color("white_wins_by_resignation") == PieceColor.WHITE
-    assert app.result_flow._outcome_word_intent("white_wins_by_resignation", "White wins") \
+    app.game.match.local_color = PieceColor.BLACK
+    assert (app.game.result_flow._result_subject_color("white_wins_by_resignation")
+            == PieceColor.WHITE)
+    assert app.game.result_flow._outcome_word_intent("white_wins_by_resignation", "White wins") \
         == ("White wins".upper(), "win")
-    assert app.result_flow._result_subject_color("black_wins") == PieceColor.BLACK
+    assert app.game.result_flow._result_subject_color("black_wins") == PieceColor.BLACK
 
 
 def test_single_screen_start_resets_local_color():
     from chessshootout.backend.pieces import PieceColor
     app = _make_app()
-    app.match.local_color = PieceColor.WHITE
+    app.game.match.local_color = PieceColor.WHITE
     _start_local(app)
-    assert app.match.local_color is None
+    assert app.game.match.local_color is None
 
 
 @pytest.mark.parametrize(
@@ -342,14 +343,14 @@ def test_engine_result_subtitle_reports_actual_reason(engine_result, expected):
     the engine produces them); compound codes carry the explicit reason."""
     app = _make_app()
     _start_local(app)
-    app.match.backend.game_result = lambda: engine_result
-    assert app.result_text() == expected
+    app.game.match.backend.game_result = lambda: engine_result
+    assert app.game.result_text() == expected
 
 
 def test_menu_mode_returns_no_info():
     app = _make_app()
-    assert app.mode == "menu"
-    assert app._compute_game_info() is None
+    assert app.screen is app.menu
+    assert app.game._compute_game_info() is None
 
 
 def test_settings_has_performance_section_wired_to_env():
@@ -376,12 +377,12 @@ def test_settings_has_performance_section_wired_to_env():
 
 def test_online_game_info_has_no_ping_line():
     app = _make_app()
-    app.mode = ONLINE
+    app.switch_to("game", variant=ONLINE)
     app.game.white_name = "A"
     app.game.black_name = "B"
     app.game._time_control = (60, 0)
     app.coordinator.client = MagicMock()
-    lines = app._compute_game_info()["lines"]
+    lines = app.game._compute_game_info()["lines"]
     assert len(lines) == 1
     assert not any("ping" in line.lower() for line in lines)
 

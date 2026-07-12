@@ -2,7 +2,6 @@ import logging
 
 import pygame as pg
 
-from chessshootout.domain.match import ONLINE
 from chessshootout.backend.pieces import opponent_of
 from chessshootout.server.protocol import GIVE_TIME_SECONDS, GIVE_TIME_TICK_MS
 
@@ -62,7 +61,7 @@ class GiveTimeHold:
         clock = screen.match.clock
         if (screen.current_result() is not None
                 or self.app.coordinator._resyncing or screen.skillcheck_overlay.is_active()
-                or self.app._menu_overlay_active()
+                or self.app._blocking_modal_visible()
                 or clock is None or clock.flagged is not None):
             self._cancel_give_time_hold()
             return
@@ -108,7 +107,7 @@ class GiveTimeHold:
         self._give_time_holding = False
         self._give_time_hold_recipient = None
         self._last_give_time_at_ms = now
-        if self.app.mode == ONLINE and self.app.coordinator.client is not None:
+        if self.screen.variant == "online" and self.app.coordinator.client is not None:
             self.app.coordinator.client.send_give_time(hold_ms)
             return
         self._give_time_toast_for_giver(recipient, total)
@@ -125,7 +124,7 @@ class GiveTimeHold:
 
     def _give_time_recipient(self):
         screen = self.screen
-        if self.app.mode == ONLINE and screen.match.local_color is not None:
+        if screen.variant == "online" and screen.match.local_color is not None:
             return opponent_of(screen.match.local_color)
         return screen.match.current_turn()
 

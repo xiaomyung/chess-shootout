@@ -2,7 +2,6 @@ import logging
 
 import pygame as pg
 
-from chessshootout.domain.match import ONLINE
 from chessshootout.backend.pieces import PIECE_VALUES, PieceType
 from chessshootout.backend.utils import PROMO_LETTER_BY_TYPE, Square, coord_from_square
 from chessshootout.frontend.skillcheck.registry import build_controller
@@ -27,7 +26,7 @@ class SkillcheckSession:
         screen = self.screen
         if screen.skillcheck.is_locked(from_sq, to_sq) or self._skillcheck_swallows_input():
             return True
-        if self.app.mode == ONLINE:
+        if screen.variant == "online":
             return self._online_move_gate(from_sq, to_sq, promo_type)
         kind = screen.skillcheck.select(screen.match.backend, from_sq, to_sq)
         if kind == SkillCheckKind.NONE:

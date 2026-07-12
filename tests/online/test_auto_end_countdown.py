@@ -12,7 +12,7 @@ import pygame as pg
 import pytest
 
 from tests.conftest import pygame_display
-from chessshootout.domain.match import BOT, ONLINE, SINGLE_SCREEN
+from chessshootout.domain.match import ONLINE
 from chessshootout.backend.pieces import PieceColor
 from chessshootout.backend.utils import Square
 from chessshootout.frontend.frontend import Frontend
@@ -31,13 +31,13 @@ def _online_app():
     app.coordinator.client.state = "connected"
     app.coordinator.client.opp_state = "connected"
     app.coordinator.client.get_ping_ms.return_value = None
-    app.switch_to("game", mode=ONLINE)
+    app.switch_to("game", variant=ONLINE)
     app.coordinator.subscribe(app.game)
     app.game.white_name = "Alice"
     app.game.black_name = "Bob"
     app.game._chosen_side = "white"
-    app.match.mode = ONLINE
-    app.match.local_color = PieceColor.WHITE
+    app.game.match.mode = ONLINE
+    app.game.match.local_color = PieceColor.WHITE
     app.game._first_move_deadline_ms = None
     app.game._opp_disconnected_at_ms = None
     app.game._local_disconnected_at_ms = None
@@ -45,8 +45,8 @@ def _online_app():
 
 
 def _strip(app, color):
-    over = app.current_result() is not None
-    return app._strip_state(color, app.match.current_turn(), over)
+    over = app.game.current_result() is not None
+    return app.game._strip_state(color, app.game.match.current_turn(), over)
 
 
 ABORT_WINDOW_MS = FIRST_MOVE_ABORT_SECONDS * 1000
@@ -96,7 +96,7 @@ def test_compute_auto_end_label_and_remaining(
 ):
     """Reconnect > abandon > abort cascade plus the 10 % visibility gate."""
     app = _online_app()
-    app.match.local_color = local_color
+    app.game.match.local_color = local_color
     app.game._first_move_deadline_ms = first_move_deadline_ms
     app.game._opp_disconnected_at_ms = opp_disconnected_at_ms
     app.game._local_disconnected_at_ms = local_disconnected_at_ms
@@ -116,8 +116,8 @@ def test_abort_clears_on_first_move(monkeypatch):
     app = _online_app()
     app.game._first_move_deadline_ms = ABORT_WINDOW_MS
     monkeypatch.setattr(pg.time, "get_ticks", lambda: 30_000)
-    app.match.try_move(Square(6, 4), Square(4, 4))
-    app._on_move_landed(app.match.move_history[-1])
+    app.game.match.try_move(Square(6, 4), Square(4, 4))
+    app.game._on_move_landed(app.game.match.move_history[-1])
     assert _strip(app, PieceColor.WHITE)["auto_end_label"] is None
     assert app.game._first_move_deadline_ms is None
 
@@ -128,7 +128,7 @@ def test_compute_auto_end_alone_does_not_clear_the_deadline(monkeypatch):
     app = _online_app()
     app.game._first_move_deadline_ms = ABORT_WINDOW_MS
     monkeypatch.setattr(pg.time, "get_ticks", lambda: 30_000)
-    app.match.try_move(Square(6, 4), Square(4, 4))
+    app.game.match.try_move(Square(6, 4), Square(4, 4))
     _strip(app, PieceColor.WHITE)
     assert app.game._first_move_deadline_ms == ABORT_WINDOW_MS
 
@@ -156,21 +156,21 @@ def test_first_move_deadline_clears_via_move_landed_in_every_focus_show_mode(
     folding in the abort window once it does."""
     app = _online_app()
     app.game._time_control = (300, 0)
-    app.match.setup_clock(300, 0)
+    app.game.match.setup_clock(300, 0)
     app.coordinator.client.drain_inbound.return_value = []
-    app.focus_mode = True
-    monkeypatch.setattr(app, "_focus_show", lambda: show_mode)
+    app.game.focus_mode = True
+    monkeypatch.setattr(app.game, "_focus_show", lambda: show_mode)
     monkeypatch.setattr(pg.time, "get_ticks", lambda: 30_000)
     app.game._first_move_deadline_ms = ABORT_WINDOW_MS
 
     strips_calls = []
-    real_update = app._update_player_strips
+    real_update = app.game._update_player_strips
 
     def spy():
         strips_calls.append(True)
         real_update()
 
-    monkeypatch.setattr(app, "_update_player_strips", spy)
+    monkeypatch.setattr(app.game, "_update_player_strips", spy)
     app.draw_frame()
     if show_mode == "strips":
         assert strips_calls
@@ -178,8 +178,8 @@ def test_first_move_deadline_clears_via_move_landed_in_every_focus_show_mode(
         assert not strips_calls
     assert app.game._first_move_deadline_ms == ABORT_WINDOW_MS
 
-    app.match.try_move(Square(6, 4), Square(4, 4))
-    app._on_move_landed(app.match.move_history[-1])
+    app.game.match.try_move(Square(6, 4), Square(4, 4))
+    app.game._on_move_landed(app.game.match.move_history[-1])
     assert app.game._first_move_deadline_ms is None
     assert app.coordinator._auto_end_heartbeat_fraction() is None
 
@@ -187,13 +187,13 @@ def test_first_move_deadline_clears_via_move_landed_in_every_focus_show_mode(
     assert app.game._first_move_deadline_ms is None
 
 
-@pytest.mark.parametrize("mode", [
-    pytest.param(SINGLE_SCREEN, id="single_screen"),
-    pytest.param(BOT, id="bot"),
+@pytest.mark.parametrize("variant", [
+    pytest.param("local", id="single_screen"),
+    pytest.param("bot", id="bot"),
 ])
-def test_offline_mode_never_emits_badge(monkeypatch, mode):
+def test_offline_mode_never_emits_badge(monkeypatch, variant):
     app = _online_app()
-    app.mode = mode
+    app.game.variant = variant
     monkeypatch.setattr(pg.time, "get_ticks", lambda: 30_000)
     app.game._first_move_deadline_ms = ABORT_WINDOW_MS
     app.game._opp_disconnected_at_ms = 0

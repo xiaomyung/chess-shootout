@@ -53,7 +53,7 @@ def test_menu_card_escape_opens_quit_prompt():
 def test_quit_prompt_see_ya_quits():
     app = _app()
     app.input_router._handle_escape()
-    app.input_router._quit_app()
+    app.menu._quit_app()
     assert app.running is False
 
 
@@ -92,9 +92,9 @@ def test_second_escape_dismisses_resign_prompt():
 
 def test_finished_game_escape_returns_to_menu():
     app = _start_game(_app())
-    app.manual_result = "white_wins_by_resignation"
+    app.game.manual_result = "white_wins_by_resignation"
     app.input_router._handle_escape()
-    assert app.mode == "menu"
+    assert app.screen is app.menu
 
 
 def test_help_modal_escape_closes_modal_not_resign():
@@ -120,7 +120,11 @@ def test_file_browser_over_options_closes_before_options(tmp_path):
     assert app.options_modal.is_visible() is False
 
 
-def test_country_picker_over_options_closes_before_options(tmp_path):
+def test_country_picker_dismisses_before_the_options_modal_underneath(tmp_path):
+    """The country picker opens from inside the options modal and draws above it,
+    so it is a GLOBAL modal registered ahead of options — Esc must peel the
+    picker first and leave options visible underneath, exactly like the
+    directory browser that shares the same nesting."""
     from chessshootout.infra import env
     env._ENV_PATH = tmp_path / ".env"
     app = _app()
@@ -130,13 +134,47 @@ def test_country_picker_over_options_closes_before_options(tmp_path):
     app.input_router._handle_escape()
     assert app.country_picker.is_visible() is False
     assert app.options_modal.is_visible() is True
+    app.input_router._handle_escape()
+    assert app.options_modal.is_visible() is False
 
 
 def test_active_skillcheck_swallows_escape():
     app = _start_game(_app())
     controller = WheelController(WheelChallenge.from_seed("x"), pg.Rect(0, 0, 80, 80), 0)
-    app.skillcheck_overlay.start(controller, ("f", "t"), lambda c, landed: None)
+    app.game.skillcheck_overlay.start(controller, ("f", "t"), lambda c, landed: None)
     app.input_router._handle_escape()
-    assert app.skillcheck_overlay.is_active() is True
+    assert app.game.skillcheck_overlay.is_active() is True
     assert app.confirm_modal.is_visible() is False
     assert app.running is True
+
+
+def test_esc_matrix_per_screen_escape_return_values():
+    """Consolidated per-screen Esc behavior table (task G pin): menu shows the
+    quit prompt and swallows the press (True); a live game opens the resign
+    confirm (True); a finished game navigates home directly (True, no Nav —
+    _on_back_to_menu runs synchronously); history and review hand back a Nav
+    to their own return target."""
+    from chessshootout.frontend.screens.base import Nav
+
+    menu_app = _app()
+    assert menu_app.menu.escape() is True
+    assert menu_app.confirm_modal.is_visible() is True
+
+    game_app = _start_game(_app())
+    assert game_app.game.escape() is True
+    assert game_app.confirm_modal.is_visible() is True
+
+    finished_app = _start_game(_app())
+    finished_app.game.manual_result = "white_wins_by_resignation"
+    assert finished_app.game.escape() is True
+    assert finished_app.screen is finished_app.menu
+
+    history_app = _app()
+    history_app.switch_to("history")
+    result = history_app.history.escape()
+    assert result == Nav("menu")
+
+    review_app = _app()
+    review_app.review._return_to = "history"
+    result = review_app.review.escape()
+    assert result == Nav("history")

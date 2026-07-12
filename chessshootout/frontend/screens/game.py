@@ -14,6 +14,8 @@ from chessshootout.backend.utils import (
 )
 from chessshootout.infra import countries, env
 from chessshootout.frontend.board import Board
+from chessshootout.frontend.modal_registry import ModalSpec
+from chessshootout.frontend.modals.help import HOTKEYS
 from chessshootout.frontend.screens.base import Screen
 from chessshootout.frontend.skillcheck.overlay import SkillCheckOverlay
 from chessshootout.skillcheck.coordinator import SkillCheckCoordinator
@@ -39,7 +41,6 @@ from chessshootout.frontend.result_flow import (
 )
 from chessshootout.frontend.skillcheck_session import SkillcheckSession
 from chessshootout.frontend.give_time import GiveTimeHold
-from chessshootout.frontend.window_chrome import WINDOW_TITLE
 from chessshootout.server.protocol import FIRST_MOVE_ABORT_SECONDS, GRACE_SECONDS
 from chessshootout.online.client import RECONNECT_TOTAL_SECONDS
 
@@ -55,12 +56,22 @@ PLACEHOLDER_RATING = "1500"
 
 VARIANT_PILL_LABELS = {
     "local": "Local",
+    "bot": "Bot",
     "online": "Online",
+}
+
+PROMOTION_KEYS = {
+    pg.K_q: PieceType.QUEEN,
+    pg.K_r: PieceType.ROOK,
+    pg.K_b: PieceType.BISHOP,
+    pg.K_n: PieceType.KNIGHT,
 }
 
 FOCUS_OFF_LINGER_MS = 2000
 FOCUS_EDGE_ARROW_MARGIN = 16
 FOCUS_ARROW_OFF_GAP = 6
+FOCUS_HINT_MS = 1600
+PRESENT_SETTLE_MS = 120
 
 AUTO_FLIP_DELAY_MS = 200
 RESULT_FADE_MS = 400
@@ -105,6 +116,7 @@ class GameScreen(Screen):
         super().__init__(app)
         window = app.window
 
+        self.variant = "local"
         self.manual_result = None
         self.white_name = "Player 1"
         self.black_name = "Player 2"
@@ -121,6 +133,8 @@ class GameScreen(Screen):
         self._first_move_deadline_ms = None
         self._opp_disconnected_at_ms = None
         self._local_disconnected_at_ms = None
+        self._click_sound_played = False
+        self._focus_click_consumed = False
 
         self.match = Match()
         self.board = Board(window, self.match,
@@ -172,10 +186,6 @@ class GameScreen(Screen):
     def window(self):
         return self.app.window
 
-    @property
-    def variant(self):
-        return "online" if self.app.mode == ONLINE else "local"
-
     def _compute_layout(self):
         self.app._compute_layout()
 
@@ -183,6 +193,8 @@ class GameScreen(Screen):
         fen = payload.get("fen")
         side = payload.get("side")
         your_color = payload.get("your_color")
+        self.variant = payload.get("variant") or ("online" if your_color is not None
+                                                    else "local")
         if side is not None or fen is not None:
             self._chosen_side = "white"
             self.white_name = "Player 1"
@@ -201,6 +213,7 @@ class GameScreen(Screen):
         if your_color is not None:
             self.board.flipped = (your_color == "black")
             self.app.coordinator.subscribe(self)
+        self._focus_hint_until_ms = pg.time.get_ticks() + FOCUS_HINT_MS
         log.info("game enter variant=%s tc=%s side=%s",
                  self.variant, self._time_control, self._chosen_side)
 
@@ -247,9 +260,6 @@ class GameScreen(Screen):
         self._local_disconnected_at_ms = None
         self.skillcheck.reset(enabled=True, seed="online")
         self.result_menu.set_online_mode(True)
-        opp_name = (payload["white_name"] if payload["your_color"] == "black"
-                    else payload["black_name"])
-        pg.display.set_caption(f"Chess — vs {opp_name}")
 
     def _on_local_move_applied(self, from_sq, to_sq, promotion):
         self.app.coordinator.send_local_move(from_sq, to_sq, promotion)
@@ -399,7 +409,7 @@ class GameScreen(Screen):
             float(payload["elapsed_ms"]), int(payload["miss_count"]), bool(payload["won"]))
 
     def _clear_online_move_locks(self, from_sq, to_sq):
-        if self.app.mode != ONLINE:
+        if self.variant != "online":
             return
         self.skillcheck.clear_locks()
         if (self.skillcheck_session._pending_online_move is not None
@@ -542,13 +552,15 @@ class GameScreen(Screen):
         overlay_active = self.skillcheck_overlay.is_active()
         if overlay_active:
             self.skillcheck_session._teardown_skillcheck_overlay()
-        pg.display.set_caption(WINDOW_TITLE)
         if did_focus or was_dragging or had_premoves or had_annotations or overlay_active:
             log.debug(
                 "game exit teardown focus=%s drag=%s premoves=%s annotations=%s skillcheck=%s",
                 did_focus, was_dragging, had_premoves, had_annotations, overlay_active)
 
     def update(self, now):
+        if self.skillcheck_overlay.is_active() and self.current_result() is not None:
+            self.skillcheck_session._teardown_skillcheck_overlay()
+        self._maybe_play_flag_fall()
         if self.game_live():
             self.match.tick_clock()
         post_animation_settled = (
@@ -556,8 +568,8 @@ class GameScreen(Screen):
             and not self.board.effects.captures
             and now - self.board.last_animation_completed_at_ms >= AUTO_FLIP_DELAY_MS
         )
-        if (self.app.mode == SINGLE_SCREEN
-                and self.app.current_result() is None
+        if (self.variant == "local"
+                and self.current_result() is None
                 and post_animation_settled):
             current = self.match.current_turn()
             if current != self._last_turn_for_flip:
@@ -570,11 +582,24 @@ class GameScreen(Screen):
             self.board.try_apply_next_premove()
         return None
 
+    def _maybe_play_flag_fall(self):
+        if self._flag_fall_played:
+            return
+        clock = self.match.clock
+        if clock is None or clock.flagged is None:
+            return
+        self._flag_fall_played = True
+        local = self.match.local_color
+        if self.variant == "online" and local is not None and clock.flagged != local:
+            self.app.sound_manager.play_you_win()
+        else:
+            self.app.sound_manager.play_flag_fall()
+
     def relayout(self, size):
         window_width, window_height = size
         r = compute_layout(
-            window_width, window_height, mode=self.app.mode, focus_mode=self.focus_mode,
-            focus_show=self.app._focus_show(), board_size=self.board.SIZE)
+            window_width, window_height, mode=self.name, focus_mode=self.focus_mode,
+            focus_show=self._focus_show(), board_size=self.board.SIZE)
         self.board.set_rect(r.board_rect)
         self.right_menu.set_rect(r.menu_rect)
         self.player_strip_top.set_rect(r.top_strip_rect)
@@ -600,7 +625,7 @@ class GameScreen(Screen):
     def draw(self):
         app = self.app
         now = pg.time.get_ticks()
-        if self.app.current_result() is not None and self.focus_mode:
+        if self.current_result() is not None and self.focus_mode:
             if self.focus_transition is None:
                 self._toggle_focus(False)
             elif self.focus_transition.collapsing:
@@ -608,13 +633,13 @@ class GameScreen(Screen):
         if self.focus_transition is not None:
             tr = self.focus_transition
             tr.draw(now)
-            if self.app._focus_show() == "line" and tr.cur_board_rect is not None:
+            if self._focus_show() == "line" and tr.cur_board_rect is not None:
                 alpha = tr.cur_e if tr.collapsing else 1.0 - tr.cur_e
                 self._draw_time_lines(tr.cur_board_rect, alpha)
             if tr.done(now):
                 self._finalize_focus_transition()
         elif self.focus_mode:
-            show = self.app._focus_show()
+            show = self._focus_show()
             self._draw_game_scene(
                 show_panel=False, show_strips=(show == "strips"),
                 arrow_hook=lambda: self._draw_focus_edge_arrow(now),
@@ -644,16 +669,222 @@ class GameScreen(Screen):
         return self.result_flow.current_result()
 
     def result_text(self):
-        code = self.app.current_result()
+        code = self.current_result()
         if code is None:
             return None
         return RESULT_TEXT.get(code)
 
     def game_live(self):
-        return self.app.mode != "menu" and self.app.current_result() is None
+        return self.current_result() is None
 
     def board_interactive(self):
-        return self.app.current_result() is None
+        return self.current_result() is None
+
+    def swallows_input(self):
+        return self.skillcheck_session._skillcheck_swallows_input()
+
+    def forward_swallowed_event(self, event):
+        self.skillcheck_overlay.handle_event(event)
+
+    def modals(self):
+        return [ModalSpec(self.app.help_modal)]
+
+    def caption(self):
+        if self.variant == "online":
+            opp_name = self.white_name if self._chosen_side == "black" else self.black_name
+            return f"Chess — vs {opp_name}"
+        return ""
+
+    def debug_state(self):
+        return {
+            "move_history_len": len(self.match.move_history),
+            "result": self.current_result(),
+            "variant": self.variant,
+            "review_ply": self.board.review_ply,
+            "focus_mode": self.focus_mode,
+            "match_session_id": self._match_session_id,
+        }
+
+    def dirty_rects(self):
+        if (self.focus_transition is not None
+                or self.skillcheck_overlay.is_active()
+                or self.current_result() is not None
+                or self.give_time._give_time_holding
+                or self.board.is_dragging()
+                or self.board.effects.is_active()
+                or self.board.is_restoring()
+                or self.board.pending_promotion_square is not None):
+            return None
+        rects = [
+            self.player_strip_top.rect,
+            self.player_strip_bottom.rect,
+            self.right_menu.outer_rect,
+        ]
+        now = pg.time.get_ticks()
+        if (self.board.is_animating()
+                or now - self.board.last_animation_completed_at_ms < PRESENT_SETTLE_MS):
+            rects.append(self.board.animation_dirty_rect())
+        if self.focus_arrow.is_visible():
+            rects.append(self.focus_arrow.dirty_rect())
+        if self.focus_mode and self._focus_show() == "line":
+            top_line, bottom_line = self.time_line.rects_for(self.board, self.board.rect)
+            rects.extend([top_line, bottom_line])
+        return rects
+
+    def escape(self):
+        if self.swallows_input():
+            return True
+        if not self.board_interactive():
+            self.app._on_back_to_menu()
+            return True
+        if self.focus_mode or self.focus_transition is not None:
+            self._toggle_focus(False)
+            return True
+        self._on_resign()
+        return True
+
+    def active_scrollable(self):
+        if self._result_modal_should_show():
+            return None
+        if self.focus_mode or self.focus_transition is not None:
+            return None
+        return self.right_menu
+
+    def handle_key(self, event):
+        if self._handle_promotion_key(event):
+            return True
+        if event.key == pg.K_h:
+            self._toggle_focus(not self.focus_mode)
+            return True
+        if getattr(event, "unicode", "") == "?":
+            self.app.help_modal.show(HOTKEYS)
+            return True
+        if event.key == pg.K_f:
+            self._on_flip()
+            return True
+        if event.key == pg.K_r:
+            self._on_resign()
+            return True
+        if event.key == pg.K_d:
+            self._on_draw()
+            return True
+        if event.key == pg.K_z and (event.mod & pg.KMOD_CTRL):
+            self._on_undo()
+            return True
+        if event.key == pg.K_LEFT:
+            self._step_review(-1)
+            return True
+        if event.key == pg.K_RIGHT:
+            self._step_review(1)
+            return True
+        if event.key == pg.K_HOME:
+            self.board.jump_to_review_ply(0)
+            return True
+        if event.key == pg.K_END:
+            self.board.jump_to_review_ply(None)
+            return True
+        return False
+
+    def _handle_promotion_key(self, event):
+        if self.board.pending_promotion_square is None:
+            return False
+        chosen = PROMOTION_KEYS.get(event.key)
+        if chosen is None:
+            return False
+        self.board.pick_promotion(chosen)
+        return True
+
+    def _step_review(self, delta):
+        history_len = len(self.match.move_history)
+        if history_len == 0:
+            return
+        current = self.board.review_anchor(history_len)
+        new_ply = max(0, min(history_len, current + delta))
+        if new_ply == current:
+            return
+        if delta > 0:
+            self.board.animate_review_ply(new_ply)
+        else:
+            self.board.jump_to_review_ply(new_ply)
+
+    def handle_click(self, pos):
+        self._focus_click_consumed = False
+        if self.focus_transition is not None:
+            return False
+        if (self.current_result() is not None
+                and self._result_first_seen_at_ms is not None
+                and not self._result_modal_should_show()):
+            self._skip_result_fade()
+            return False
+        if (self.focus_arrow.is_visible() and self._focus_arrow_allowed()
+                and self.focus_arrow.handle_click(pos)):
+            self._toggle_focus(not self.focus_mode)
+            self._focus_click_consumed = True
+            self.app.input_router._click_sound_played = True
+            return True
+        if not self.focus_mode and self.result_menu.handle_click(pos):
+            return True
+        if not self.focus_mode and self.right_menu.handle_click(pos):
+            return True
+        if self.current_result() is not None:
+            return False
+        if self.board.pending_promotion_square is not None:
+            self.board.pick_promotion_at(pos)
+            self.app.input_router._click_sound_played = True
+            return True
+        square = self.board.cell_at(pos)
+        if square is not None:
+            if self.board.review_ply is None and not self.board.is_square_annotated(square):
+                self.board.clear_annotations()
+            signal = self.board.handle_click(square)
+            if signal:
+                self.app.input_router._click_sound_played = True
+                if signal == "select":
+                    self.app.sound_manager.play_pickup()
+                return True
+        return False
+
+    def handle_press(self, pos):
+        if (self.current_result() is None
+                and self.board.pending_promotion_square is None
+                and not self._focus_click_consumed
+                and self.focus_transition is None):
+            self.board.begin_press(pos)
+            return True
+        return False
+
+    def handle_motion(self, pos):
+        self.board.update_drag_motion(pos)
+        return True
+
+    def handle_release(self, pos):
+        was_dragging = self.board.dragging_from is not None
+        if was_dragging and self.current_result() is None:
+            self.app.input_router.mouse_left_clicked(pos, ui_click=False)
+        self.board.end_press()
+        if was_dragging and self.current_result() is None:
+            self.app.sound_manager.play_drop()
+        return True
+
+    def handle_right_press(self, pos):
+        if self.current_result() is not None:
+            self.app.sound_manager.play_ui_click()
+            return True
+        sq = self.board.cell_at(pos)
+        if sq is None:
+            self.app.sound_manager.play_ui_click()
+            return True
+        if self.board.dragging_from is not None:
+            if not self.board.queue_premove_from_drag(sq):
+                self.app.sound_manager.play_ui_click()
+            return True
+        self.board.begin_right_press(pos)
+        self.app.sound_manager.play_ui_click()
+        return True
+
+    def handle_right_release(self, pos):
+        self.board.end_right_press(pos)
+        return True
 
     def _draw_game_scene(self, *, show_panel, show_strips, arrow_hook=None, after_board=None):
         self.skillcheck_session._sync_aim_check_gun()
@@ -662,7 +893,7 @@ class GameScreen(Screen):
         if after_board is not None:
             after_board()
         if show_strips:
-            self.app._update_player_strips()
+            self._update_player_strips()
             self.player_strip_top.draw()
             self.player_strip_bottom.draw()
         if show_panel:
@@ -690,11 +921,11 @@ class GameScreen(Screen):
             self.right_menu.set_game_info(info)
 
     def _compute_game_info(self):
-        if self.app.mode == "menu":
+        if self.app.screen is not self:
             return None
         tc = format_time_control(self._time_control) or "∞"
         rnd = self._current_round()
-        pill = "Bot" if self.app.mode == BOT else VARIANT_PILL_LABELS.get(self.variant, "Local")
+        pill = VARIANT_PILL_LABELS.get(self.variant, "Local")
         info = {"mode": pill, "time_control": tc, "round": rnd, "lines": []}
         if self.variant == "online":
             white_score = self.result_flow._series_scores.get(self.white_name, 0.0)
@@ -748,7 +979,7 @@ class GameScreen(Screen):
         self._result_first_seen_at_ms = pg.time.get_ticks() - RESULT_MODAL_DELAY_MS
 
     def _trigger_result_effects(self):
-        code = self.app.current_result()
+        code = self.current_result()
         if code is None:
             return
         if code.startswith("draw"):
@@ -775,10 +1006,10 @@ class GameScreen(Screen):
                 self.app.sound_manager.play_you_lose()
 
     def _local_won(self, winner):
-        return self.app.mode != ONLINE or self.match.local_color == winner
+        return self.variant != "online" or self.match.local_color == winner
 
     def _on_flip(self):
-        if self.app.current_result() is not None:
+        if self.current_result() is not None:
             return
         self.board.cancel_drag_physics()
         self.board.flipped = not self.board.flipped
@@ -794,9 +1025,9 @@ class GameScreen(Screen):
         )
 
     def _perform_resign(self):
-        if self.app.current_result() is not None:
+        if self.current_result() is not None:
             return
-        if self.app.mode == ONLINE and self.app.coordinator.client is not None:
+        if self.variant == "online" and self.app.coordinator.client is not None:
             self.app.coordinator.client.send_resign()
             return
         loser = self.match.current_turn()
@@ -819,9 +1050,9 @@ class GameScreen(Screen):
         )
 
     def _perform_draw(self):
-        if self.app.current_result() is not None:
+        if self.current_result() is not None:
             return
-        if self.app.mode == ONLINE and self.app.coordinator.client is not None:
+        if self.variant == "online" and self.app.coordinator.client is not None:
             log.info("draw offer sent")
             self.app.coordinator.client.send_draw_offer()
             return
@@ -842,7 +1073,7 @@ class GameScreen(Screen):
     def _on_undo(self):
         if not self.board_interactive():
             return
-        if self.app.mode == ONLINE and self.app.coordinator.client is not None:
+        if self.variant == "online" and self.app.coordinator.client is not None:
             log.info("takeback requested")
             self.app.coordinator.client.send_takeback_request()
             return
@@ -881,7 +1112,7 @@ class GameScreen(Screen):
     def _on_kill_announced(self, key, victim=None):
         if key == "hit":
             self.app.sound_manager.play_hit(victim.type if victim is not None else None)
-        elif self.app.current_result() is None:
+        elif self.current_result() is None:
             self.app.sound_manager.play_announcer(key)
 
     def _maybe_flash_increment_for(self, mover_color):
@@ -913,7 +1144,7 @@ class GameScreen(Screen):
         top_color = self._strip_color_top()
         bottom_color = opponent_of(top_color)
         turn = self.match.current_turn()
-        over = self.app.current_result() is not None
+        over = self.current_result() is not None
         self.player_strip_top.set_state(**self._strip_state(top_color, turn, over))
         self.player_strip_bottom.set_state(**self._strip_state(bottom_color, turn, over))
 
@@ -940,12 +1171,12 @@ class GameScreen(Screen):
         captured, advantage = self._strip_capture_summary(color)
         connection_state = None
         app = self.app
-        if (app.mode == ONLINE and app.coordinator.client is not None
+        if (self.variant == "online" and app.coordinator.client is not None
                 and self.match.local_color is not None
                 and color != self.match.local_color):
             connection_state = app.coordinator.client.opp_state
         auto_end_label, auto_end_seconds = self._compute_auto_end(color, over)
-        is_bot = app.mode == BOT and name == OPPONENT_NAME_FOR_MODE[BOT]
+        is_bot = self.variant == "bot" and name == OPPONENT_NAME_FOR_MODE[BOT]
         return {
             "name": name,
             "player_color": color,
@@ -965,7 +1196,7 @@ class GameScreen(Screen):
         }
 
     def _compute_auto_end(self, color, over):
-        if (self.app.mode != ONLINE or over or self.match.local_color is None):
+        if (self.variant != "online" or over or self.match.local_color is None):
             return None, None
         now = pg.time.get_ticks()
         is_local = (color == self.match.local_color)
@@ -1007,7 +1238,7 @@ class GameScreen(Screen):
         return RIGHT_MENU_BUTTONS
 
     def _right_menu_disabled_keys(self):
-        if self.app.current_result() is not None:
+        if self.current_result() is not None:
             return {"undo", "resign", "draw", "flip", "give_time"}
         disabled = set()
         clock = self.match.clock
@@ -1047,7 +1278,7 @@ class GameScreen(Screen):
         self.result_flow._autosave_last_ply = 0
         self.right_menu.reset_for_new_game()
         self.match.new_game()
-        self.match.mode = ONLINE if self.variant == "online" else SINGLE_SCREEN
+        self.match.mode = {"online": ONLINE, "bot": BOT}.get(self.variant, SINGLE_SCREEN)
         if self._time_control is not None:
             initial, incr = self._time_control
             self.match.setup_clock(initial, incr)
@@ -1066,22 +1297,22 @@ class GameScreen(Screen):
         return env.get_focus_show()
 
     def _focus_available(self):
-        return (self.app.mode != "menu"
+        return (self.app.screen is self
                 and self.board_interactive()
                 and not self.skillcheck_overlay.is_active()
                 and not self.board.is_dragging()
                 and self.board.pending_promotion_square is None
-                and not self.app._menu_overlay_active())
+                and not self.app._blocking_modal_visible())
 
     def _focus_arrow_allowed(self):
         return (self.board_interactive()
                 and not self.skillcheck_overlay.is_active()
-                and not self.app._menu_overlay_active())
+                and not self.app._blocking_modal_visible())
 
     def _toggle_focus(self, on):
         if self.focus_transition is not None:
             return
-        if self.skillcheck_overlay.is_active() and self.app.current_result() is None:
+        if self.skillcheck_overlay.is_active() and self.current_result() is None:
             return
         if on == self.focus_mode:
             return
@@ -1091,15 +1322,18 @@ class GameScreen(Screen):
         self.board.cancel_drag_physics()
         self.focus_transition = FocusTransition(self)
         if on:
-            self.focus_transition.begin_collapse(self.app._focus_show())
+            self.focus_transition.begin_collapse(self._focus_show())
         else:
-            self.focus_transition.begin_expand(self.app._focus_show())
+            self.focus_transition.begin_expand(self._focus_show())
         self.focus_arrow.reset()
         self.app._needs_full_present = True
 
     def _finalize_focus_transition(self):
         self.focus_transition = None
         self.app._needs_full_present = True
+
+    def on_resize(self):
+        self._abort_transition_for_resize()
 
     def _abort_transition_for_resize(self):
         if self.focus_transition is not None:
@@ -1152,7 +1386,7 @@ class GameScreen(Screen):
         self.focus_arrow.draw(self.window)
 
     def _draw_time_lines(self, board_rect=None, alpha=1.0):
-        if self.app._focus_show() != "line" or self._time_control is None:
+        if self._focus_show() != "line" or self._time_control is None:
             return
         self.time_line.draw(self.window, self.board, self.match.clock,
                             self.match.current_turn(), board_rect or self.board.rect, alpha)

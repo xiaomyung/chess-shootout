@@ -16,9 +16,8 @@ from chessshootout.frontend.menu.menu_battle import MenuBattle
 from chessshootout.frontend.menu.history import HistoryView
 from chessshootout.frontend.modal_registry import ModalSpec
 from chessshootout.frontend.modals.confirm import ConfirmModal
-from chessshootout.frontend.modals.directory_browser import DirectoryBrowser
 from chessshootout.frontend.modals.country_picker import CountryPicker
-from chessshootout.frontend.modals.fen_input import FenInputModal
+from chessshootout.frontend.modals.directory_browser import DirectoryBrowser
 from chessshootout.frontend.modals.options import OptionsModal
 from chessshootout.frontend.settings import SettingsController
 from chessshootout.frontend.modals.help import HelpModal, HOTKEYS
@@ -45,9 +44,6 @@ from chessshootout.paths import SOUNDS_DIR
 PERF_SAMPLE_COUNT = 240
 PERF_1PCT_PERCENTILE = 0.99
 PERF_1PCT_MIN_SAMPLES = 100
-PRESENT_SETTLE_MS = 120
-
-FOCUS_HINT_MS = 1600
 
 
 def _games_dir():
@@ -77,13 +73,11 @@ class Frontend:
         self.chrome = WindowChrome(self.window, on_fullscreen=self._apply_fullscreen)
         self.clock = pg.time.Clock()
 
-        self.mode = "menu"
         self._needs_full_present = True
         self._frame_times = deque(maxlen=PERF_SAMPLE_COUNT)
         self._last_work_ms = 0.0
         self._last_frame_start = None
         self._prev_screen_used_backdrop = False
-        self._focus_prev_mode = "menu"
 
         self.sound_manager = SoundManager(SOUNDS_DIR, enabled=pg.mixer.get_init() is not None)
         self.coordinator = OnlineCoordinator(self)
@@ -101,10 +95,9 @@ class Frontend:
         self.history_view = HistoryView(self.window, on_open=self._open_pgn_review,
                                         on_back=self._on_menu_back)
         self.help_modal = HelpModal(self.window)
-        self.fen_input_modal = FenInputModal(self.window)
         self.options_modal = OptionsModal(self.window)
-        self.directory_browser = DirectoryBrowser(self.window)
         self.country_picker = CountryPicker(self.window)
+        self.directory_browser = DirectoryBrowser(self.window)
         self.toast = Toast(self.window)
         self.toast.top_inset = self.chrome.HEIGHT
         self.toast.on_new = lambda: self.sound_manager.play_toast()
@@ -114,8 +107,6 @@ class Frontend:
         self.input_router = InputRouter(self)
         self._modal_registry = [
             ModalSpec(self.confirm_modal, on_dismiss=self.input_router._dismiss_confirm),
-            ModalSpec(self.help_modal),
-            ModalSpec(self.fen_input_modal),
             ModalSpec(self.coordinator.wait_modal, on_dismiss=self.coordinator._on_online_cancel),
             ModalSpec(self.coordinator.match_found_modal, esc_dismiss=False),
             ModalSpec(self.coordinator.reconnecting_modal, esc_dismiss=False),
@@ -152,16 +143,15 @@ class Frontend:
             raise KeyError(f"unknown screen: {name!r}")
         assert_plain_payload(payload)
         screen = self.screens[name]
-        mode = payload.get("mode") or screen.legacy_mode or name
         previous = self.screen
-        log.info("screen switch %s -> %s mode=%s", previous.name, name, mode)
+        log.info("screen switch %s -> %s", previous.name, name)
         previous.exit()
         log.debug("screen exited %s", previous.name)
         self.screen = screen
-        self.mode = mode
         screen.enter(**payload)
         log.debug("screen entered %s payload_keys=%s", name, sorted(payload))
         self._compute_layout()
+        pg.display.set_caption(screen.caption() or WINDOW_TITLE)
 
     def request_nav(self, nav):
         if self._pending_nav is not None:
@@ -177,309 +167,41 @@ class Frontend:
         self._pending_nav = None
         self.switch_to(nav.name, **nav.payload)
 
-    @property
-    def match(self):
-        return self.game.match
-
-    @property
-    def board(self):
-        return self.game.board
-
-    @property
-    def right_menu(self):
-        return self.game.right_menu
-
-    @property
-    def result_menu(self):
-        return self.game.result_menu
-
-    @property
-    def player_strip_top(self):
-        return self.game.player_strip_top
-
-    @property
-    def player_strip_bottom(self):
-        return self.game.player_strip_bottom
-
-    @property
-    def result_flow(self):
-        return self.game.result_flow
-
-    @property
-    def skillcheck_session(self):
-        return self.game.skillcheck_session
-
-    @property
-    def give_time(self):
-        return self.game.give_time
-
-    @property
-    def skillcheck(self):
-        return self.game.skillcheck
-
-    @property
-    def skillcheck_overlay(self):
-        return self.game.skillcheck_overlay
-
-    @property
-    def focus_mode(self):
-        return self.game.focus_mode
-
-    @focus_mode.setter
-    def focus_mode(self, value):
-        self.game.focus_mode = value
-
-    @property
-    def focus_transition(self):
-        return self.game.focus_transition
-
-    @property
-    def focus_arrow(self):
-        return self.game.focus_arrow
-
-    @property
-    def time_line(self):
-        return self.game.time_line
-
-    @property
-    def white_name(self):
-        return self.game.white_name
-
-    @white_name.setter
-    def white_name(self, value):
-        self.game.white_name = value
-
-    @property
-    def black_name(self):
-        return self.game.black_name
-
-    @black_name.setter
-    def black_name(self, value):
-        self.game.black_name = value
-
-    @property
-    def white_country(self):
-        return self.game.white_country
-
-    @white_country.setter
-    def white_country(self, value):
-        self.game.white_country = value
-
-    @property
-    def black_country(self):
-        return self.game.black_country
-
-    @black_country.setter
-    def black_country(self, value):
-        self.game.black_country = value
-
-    @property
-    def _chosen_side(self):
-        return self.game._chosen_side
-
-    @_chosen_side.setter
-    def _chosen_side(self, value):
-        self.game._chosen_side = value
-
-    @property
-    def _time_control(self):
-        return self.game._time_control
-
-    @_time_control.setter
-    def _time_control(self, value):
-        self.game._time_control = value
-
-    @property
-    def manual_result(self):
-        return self.game.manual_result
-
-    @manual_result.setter
-    def manual_result(self, value):
-        self.game.manual_result = value
-
-    @property
-    def _flag_fall_played(self):
-        return self.game._flag_fall_played
-
-    @_flag_fall_played.setter
-    def _flag_fall_played(self, value):
-        self.game._flag_fall_played = value
-
-    @property
-    def _result_first_seen_at_ms(self):
-        return self.game._result_first_seen_at_ms
-
-    @_result_first_seen_at_ms.setter
-    def _result_first_seen_at_ms(self, value):
-        self.game._result_first_seen_at_ms = value
-
-    @property
-    def _match_session_id(self):
-        return self.game._match_session_id
-
-    @_match_session_id.setter
-    def _match_session_id(self, value):
-        self.game._match_session_id = value
-
-    @property
-    def _focus_hint_until_ms(self):
-        return self.game._focus_hint_until_ms
-
-    @_focus_hint_until_ms.setter
-    def _focus_hint_until_ms(self, value):
-        self.game._focus_hint_until_ms = value
-
-    @property
-    def _focus_panel_hover_ms(self):
-        return self.game._focus_panel_hover_ms
-
-    @_focus_panel_hover_ms.setter
-    def _focus_panel_hover_ms(self, value):
-        self.game._focus_panel_hover_ms = value
-
-    def current_result(self):
-        return self.game.current_result()
-
-    def result_text(self):
-        return self.game.result_text()
-
-    def game_live(self):
-        return self.game.game_live()
-
-    def board_interactive(self):
-        return self.game.board_interactive()
-
-    def _reset_to_new_game(self):
+    def _on_back_to_menu(self):
+        pending_result = self.game.current_result()
+        if pending_result is not None:
+            self.game.result_flow._finalize_result(pending_result)
+        keep_online = (self.game.variant == "online" and self.coordinator.client is not None
+                       and self.game.current_result() is not None)
+        had_rematch_offer = self.coordinator._rematch_offered
+        self.switch_to("menu")
+        self.game._match_session_id = None
+        self.coordinator._reconnect_probe_attempts = 0
+        self.coordinator.retain_for_rematch(keep_online)
+        self.game.variant = "local"
+        self.game.match.local_color = None
+        self.game.match.on_local_move_applied = None
+        self.game.right_menu.set_game_info(None)
+        self.game.result_menu.set_online_mode(False)
+        self.game._first_move_deadline_ms = None
+        self.game._opp_disconnected_at_ms = None
+        self.game._local_disconnected_at_ms = None
+        self.coordinator._prev_online_state = None
         self.game._reset_to_new_game()
-
-    def _name_for_color(self, color):
-        return self.game._name_for_color(color)
-
-    def _strip_for_color(self, color):
-        return self.game._strip_for_color(color)
-
-    def _toggle_focus(self, on):
-        self.game._toggle_focus(on)
-
-    def _force_focus_off_instant(self):
-        self.game._force_focus_off_instant()
-
-    def _abort_transition_for_resize(self):
-        self.game._abort_transition_for_resize()
-
-    def _focus_show(self):
-        return self.game._focus_show()
-
-    def _focus_available(self):
-        return self.game._focus_available()
-
-    def _focus_arrow_allowed(self):
-        return self.game._focus_arrow_allowed()
-
-    def _result_modal_should_show(self):
-        return self.game._result_modal_should_show()
-
-    def _result_elapsed_ms(self):
-        return self.game._result_elapsed_ms()
-
-    def _draw_result_fade_overlay(self):
-        self.game._draw_result_fade_overlay()
-
-    def _skip_result_fade(self):
-        self.game._skip_result_fade()
-
-    def _focus_edge_zone_rect(self):
-        return self.game._focus_edge_zone_rect()
-
-    def _trigger_result_effects(self):
-        self.game._trigger_result_effects()
-
-    def _local_won(self, winner):
-        return self.game._local_won(winner)
-
-    def _on_flip(self):
-        self.game._on_flip()
-
-    def _on_resign(self):
-        self.game._on_resign()
-
-    def _perform_resign(self):
-        self.game._perform_resign()
-
-    def _on_draw(self):
-        self.game._on_draw()
-
-    def _perform_draw(self):
-        self.game._perform_draw()
-
-    def _on_undo(self):
-        self.game._on_undo()
-
-    def _on_move_landed(self, entry):
-        self.game._on_move_landed(entry)
-
-    def _on_kill_announced(self, key, victim=None):
-        self.game._on_kill_announced(key, victim=victim)
-
-    def _update_player_strips(self):
-        self.game._update_player_strips()
-
-    def _strip_state(self, color, turn, over):
-        return self.game._strip_state(color, turn, over)
-
-    def _strip_capture_summary(self, color):
-        return self.game._strip_capture_summary(color)
-
-    def _compute_game_info(self):
-        return self.game._compute_game_info()
-
-    def _right_menu_buttons(self):
-        return self.game._right_menu_buttons()
-
-    def _right_menu_disabled_keys(self):
-        return self.game._right_menu_disabled_keys()
+        self._refresh_load_pgn_availability()
+        if keep_online and had_rematch_offer:
+            self.coordinator._reshow_rematch_banner()
 
     def _on_new_game(self):
-        if self.mode == SINGLE_SCREEN:
+        if self.game.variant == "local":
             self.game._chosen_side = (
                 "black" if self.game._chosen_side == "white" else "white")
             self.game.white_name, self.game.black_name = (
                 self.game.black_name, self.game.white_name)
             self.game.white_country, self.game.black_country = (
                 self.game.black_country, self.game.white_country)
-        self._reset_to_new_game()
+        self.game._reset_to_new_game()
         self.sound_manager.play_game_start()
-
-    @property
-    def backend(self):
-        return self.match.backend
-
-    def _on_back_to_menu(self):
-        pending_result = self.current_result()
-        if pending_result is not None:
-            self.result_flow._finalize_result(pending_result)
-        keep_online = (self.mode == ONLINE and self.coordinator.client is not None
-                       and self.current_result() is not None)
-        had_rematch_offer = self.coordinator._rematch_offered
-        self.switch_to("menu")
-        self._match_session_id = None
-        self.coordinator._reconnect_probe_attempts = 0
-        pg.display.set_caption(WINDOW_TITLE)
-        self.coordinator.retain_for_rematch(keep_online)
-        self.match.mode = SINGLE_SCREEN
-        self.match.local_color = None
-        self.match.on_local_move_applied = None
-        self.right_menu.set_game_info(None)
-        self.result_menu.set_online_mode(False)
-        self.game._first_move_deadline_ms = None
-        self.game._opp_disconnected_at_ms = None
-        self.game._local_disconnected_at_ms = None
-        self.coordinator._prev_online_state = None
-        self._reset_to_new_game()
-        self._refresh_load_pgn_availability()
-        self.start_menu.show()
-        if keep_online and had_rematch_offer:
-            self.coordinator._reshow_rematch_banner()
 
     def _on_help(self):
         self.help_modal.show(HOTKEYS)
@@ -503,18 +225,18 @@ class Frontend:
         self.request_nav(Nav("menu"))
 
     def _on_open_fen_modal(self):
-        self.fen_input_modal.show(on_submit=self._start_game_from_fen)
+        self.menu.fen_input_modal.show(on_submit=self._start_game_from_fen)
 
     def _start_game_from_fen(self, fen):
         try:
             apply_fen(Backend(), fen)
         except (ValueError, KeyError):
             return False
-        self.match.local_color = None
+        self.game.match.local_color = None
         self.coordinator._drop_post_game_online_session()
-        self.request_nav(Nav("game", {"mode": SINGLE_SCREEN, "fen": fen}))
+        self.request_nav(Nav("game", {"fen": fen}))
         self._execute_pending_nav()
-        self.fen_input_modal.hide()
+        self.menu.fen_input_modal.hide()
         self.start_menu.hide()
         return True
 
@@ -534,13 +256,12 @@ class Frontend:
         if side == "random":
             side = random.choice(["white", "black"])
 
-        self.match.local_color = None
+        self.game.match.local_color = None
         self.coordinator._drop_post_game_online_session()
 
         log.info("game start mode=%s side=%s tc=%s+%s",
                  config["mode"], side, config["time_minutes"], config["increment_seconds"])
         self.request_nav(Nav("game", {
-            "mode": SINGLE_SCREEN,
             "side": side,
             "nickname": config.get("nickname") or "",
             "time_minutes": config["time_minutes"],
@@ -605,41 +326,21 @@ class Frontend:
             pg.display.update(rects)
 
     def _needs_full_redraw(self, had_events):
-        return (had_events or self._needs_full_present or self.mode == "menu"
-                or self.focus_transition is not None
-                or self._menu_overlay_active() or self.toast.is_visible()
-                or not self.coordinator.offer_banners.is_empty()
-                or self.skillcheck_overlay.is_active()
-                or self.current_result() is not None
-                or self.give_time._give_time_holding
-                or self.board.is_dragging()
-                or self.board.effects.is_active()
-                or self.board.is_restoring()
-                or self.board.pending_promotion_square is not None)
+        return (had_events or self._needs_full_present or self._blocking_modal_visible()
+                or self.toast.is_visible() or not self.coordinator.offer_banners.is_empty()
+                or self.screen.dirty_rects() is None)
 
     def _present_rects(self, had_events):
         if self._needs_full_redraw(had_events):
             self._needs_full_present = False
             return None
-        rects = [
-            pg.Rect(0, 0, self.window_width, self.chrome.HEIGHT),
-            self.player_strip_top.rect,
-            self.player_strip_bottom.rect,
-            self.right_menu.outer_rect,
-        ]
-        now = pg.time.get_ticks()
-        if (self.board.is_animating()
-                or now - self.board.last_animation_completed_at_ms < PRESENT_SETTLE_MS):
-            rects.append(self.board.animation_dirty_rect())
-        if self.focus_arrow.is_visible():
-            rects.append(self.focus_arrow.dirty_rect())
-        if self.focus_mode and self._focus_show() == "line":
-            top_line, bottom_line = self.time_line.rects_for(self.board, self.board.rect)
-            rects.extend([top_line, bottom_line])
-        return rects
+        return [pg.Rect(0, 0, self.window_width, self.chrome.HEIGHT)] + self.screen.dirty_rects()
 
-    def _menu_overlay_active(self):
-        return any(spec.obj.is_visible() for spec in self._modal_registry)
+    def _active_modal_specs(self):
+        return list(self._modal_registry) + self.screen.modals()
+
+    def _blocking_modal_visible(self):
+        return any(spec.obj.is_visible() for spec in self._active_modal_specs())
 
     def _recreate_window_surface(self, w, h):
         self.window = pg.display.set_mode((w, h), WINDOW_FLAGS)
@@ -666,26 +367,18 @@ class Frontend:
             self.window_width = win_w
             self.window_height = win_h
             self.input_router._cancel_all_scroll()
-            self._abort_transition_for_resize()
+            self.screen.on_resize()
             self._compute_layout()
 
     def draw_frame(self):
         if os.name == "nt" and not self.chrome.is_fullscreen():
             self._sync_window_surface()
-        if getattr(self, "_last_layout_mode", None) != self.mode:
-            self._compute_layout()
-        if self.mode == "menu" and (self.focus_mode or self.focus_transition is not None):
-            self._force_focus_off_instant()
-        if self.mode != "menu" and self._focus_prev_mode == "menu":
-            self._focus_hint_until_ms = pg.time.get_ticks() + FOCUS_HINT_MS
-        self._focus_prev_mode = self.mode
 
         now = pg.time.get_ticks()
         self.coordinator.update(now)
 
-        self.give_time._update_give_time_hold()
+        self.game.give_time._update_give_time_hold()
         self.settings._flush_deferred_env_writes()
-        self._maybe_play_flag_fall()
 
         nav = self.screen.update(now)
         if nav is not None:
@@ -705,31 +398,16 @@ class Frontend:
             self.menu_battle.draw_intro_overlay(self.window)
 
         self.coordinator.offer_banners.draw(self._banner_rect())
-        for spec in reversed(self._modal_registry):
+        for spec in reversed(self._active_modal_specs()):
             spec.obj.draw()
-        self.toast.draw(center_x=None if self.mode == "menu" else self.board.rect.centerx)
-        if self.skillcheck_overlay.is_active() and (
-                self.mode == "menu" or self.current_result() is not None):
-            self.skillcheck_session._teardown_skillcheck_overlay()
-        self.skillcheck_overlay.update(now)
-        self.skillcheck_overlay.draw(self.window)
-
-    def _maybe_play_flag_fall(self):
-        if self._flag_fall_played or self.mode == "menu":
-            return
-        clock = self.match.clock
-        if clock is None or clock.flagged is None:
-            return
-        self._flag_fall_played = True
-        local = self.match.local_color
-        if self.mode == ONLINE and local is not None and clock.flagged != local:
-            self.sound_manager.play_you_win()
-        else:
-            self.sound_manager.play_flag_fall()
+        self.toast.draw(
+            center_x=self.game.board.rect.centerx if self.screen is self.game else None)
+        self.game.skillcheck_overlay.update(now)
+        self.game.skillcheck_overlay.draw(self.window)
 
     def _banner_rect(self):
-        if self.mode != "menu":
-            return self.board.rect
+        if self.screen is not self.menu:
+            return self.game.board.rect
         return pg.Rect(0, WindowChrome.HEIGHT, self.window_width,
                        self.window_height - WindowChrome.HEIGHT)
 
@@ -756,23 +434,23 @@ class Frontend:
         if size != getattr(self, "_last_layout_size", None):
             self._last_layout_size = size
             cache.clear_size_keyed()
+        board_visible_mode = "game" if self.screen is self.game else "menu"
         r = compute_layout(
-            window_width, window_height, mode=self.mode, focus_mode=self.focus_mode,
-            focus_show=self._focus_show(), board_size=self.board.SIZE)
+            window_width, window_height, mode=board_visible_mode,
+            focus_mode=self.game.focus_mode, focus_show=self.game._focus_show(),
+            board_size=self.game.board.SIZE)
 
         self.confirm_modal.set_rect(r.result_modal_rect)
         self.coordinator.wait_modal.set_rect(r.flex_rect)
         self.coordinator.match_found_modal.set_rect(r.flex_rect)
         self.coordinator.reconnecting_modal.set_rect(r.board_rect)
         self.start_menu.set_rect(r.start_rect)
+        self.help_modal.set_rect(r.result_rect)
         for screen in self.screens.values():
             screen.relayout(size)
         self.menu_battle.top_inset = r.top
         self.menu_battle.set_rect(r.window_rect)
-        self.help_modal.set_rect(r.result_rect)
-        self.fen_input_modal.set_rect(r.flex_rect)
         self.options_modal.set_rect(r.options_rect)
-        self.directory_browser.set_rect(r.wide_overlay_rect)
         self.country_picker.set_rect(r.wide_overlay_rect)
-        self._last_layout_mode = self.mode
+        self.directory_browser.set_rect(r.wide_overlay_rect)
         self._needs_full_present = True

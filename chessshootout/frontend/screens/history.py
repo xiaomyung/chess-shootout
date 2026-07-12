@@ -13,7 +13,6 @@ class HistoryScreen(Screen):
 
     name = "history"
     uses_battle_backdrop = True
-    legacy_mode = "menu"
 
     def relayout(self, size):
         window_rect = pg.Rect(0, 0, size[0], size[1])
@@ -31,7 +30,7 @@ class HistoryScreen(Screen):
 
     def draw(self):
         app = self.app
-        if not app._menu_overlay_active():
+        if not app._blocking_modal_visible():
             app.history_view.draw()
 
     def handle_click(self, pos):
@@ -42,3 +41,9 @@ class HistoryScreen(Screen):
 
     def escape(self):
         return Nav("menu")
+
+    def caption(self):
+        return ""
+
+    def debug_state(self):
+        return {}

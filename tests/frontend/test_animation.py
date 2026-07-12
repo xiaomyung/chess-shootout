@@ -187,12 +187,12 @@ def test_promotion_picker_deferred_until_animation_completes(board):
 def test_undo_starts_reverse_animation_via_frontend():
     """Undo plays the last move backward: anim from = move's to_sq, to = from_sq."""
     app = _start_game()
-    app.board.handle_click(Square(6, 4))
-    app.board.handle_click(Square(4, 4))
-    app.board.cancel_animations()
-    app._on_undo()
-    assert app.board.is_animating()
-    a = app.board.animations[0]
+    app.game.board.handle_click(Square(6, 4))
+    app.game.board.handle_click(Square(4, 4))
+    app.game.board.cancel_animations()
+    app.game._on_undo()
+    assert app.game.board.is_animating()
+    a = app.game.board.animations[0]
     assert a.from_sq == Square(4, 4)
     assert a.to_sq == Square(6, 4)
     assert a.piece.type == PieceType.PAWN
@@ -201,37 +201,37 @@ def test_undo_starts_reverse_animation_via_frontend():
 def test_undo_during_forward_animation_replaces_with_reverse():
     """Undo mid-slide drops the in-flight forward anim and starts a reverse one."""
     app = _start_game()
-    app.board.handle_click(Square(6, 4))
-    app.board.handle_click(Square(4, 4))
-    assert app.board.is_animating()
-    forward = app.board.animations[0]
-    app._on_undo()
-    assert app.board.is_animating()
-    assert app.board.animations[0] is not forward
-    assert app.board.animations[0].from_sq == Square(4, 4)
+    app.game.board.handle_click(Square(6, 4))
+    app.game.board.handle_click(Square(4, 4))
+    assert app.game.board.is_animating()
+    forward = app.game.board.animations[0]
+    app.game._on_undo()
+    assert app.game.board.is_animating()
+    assert app.game.board.animations[0] is not forward
+    assert app.game.board.animations[0].from_sq == Square(4, 4)
 
 
 def test_undo_castle_triggers_two_reverse_animations():
     """Undoing O-O reverses both king (g1->e1) and rook (f1->h1)."""
     app = _start_game()
-    backend = app.backend
+    backend = app.game.match.backend
     _seed_white_castle(backend)
-    app.board.handle_click(Square(7, 4))
-    app.board.handle_click(Square(7, 6))
-    app.board.cancel_animations()
-    app._on_undo()
-    kinds = sorted(a.piece.type.name for a in app.board.animations)
+    app.game.board.handle_click(Square(7, 4))
+    app.game.board.handle_click(Square(7, 6))
+    app.game.board.cancel_animations()
+    app.game._on_undo()
+    kinds = sorted(a.piece.type.name for a in app.game.board.animations)
     assert kinds == ["KING", "ROOK"]
-    king_anim = next(a for a in app.board.animations if a.piece.type == PieceType.KING)
-    rook_anim = next(a for a in app.board.animations if a.piece.type == PieceType.ROOK)
+    king_anim = next(a for a in app.game.board.animations if a.piece.type == PieceType.KING)
+    rook_anim = next(a for a in app.game.board.animations if a.piece.type == PieceType.ROOK)
     assert (king_anim.from_sq, king_anim.to_sq) == (Square(7, 6), Square(7, 4))
     assert (rook_anim.from_sq, rook_anim.to_sq) == (Square(7, 5), Square(7, 7))
 
 
 def test_undo_with_empty_history_is_a_noop():
     app = _start_game()
-    app._on_undo()
-    assert not app.board.is_animating()
+    app.game._on_undo()
+    assert not app.game.board.is_animating()
 
 
 @pytest.mark.parametrize(
@@ -245,26 +245,26 @@ def test_undo_clears_selection(make_move):
     """Undo always nulls the active selection, with or without a move to pop."""
     app = _start_game()
     if make_move:
-        app.board.handle_click(Square(6, 4))
-        app.board.handle_click(Square(4, 4))
-        app.board.cancel_animations()
-        assert len(app.match.move_history) == 1
-    app.board.handle_click(Square(6, 0))
-    assert app.board.selected_square == Square(6, 0)
-    app._on_undo()
-    assert app.board.selected_square is None
+        app.game.board.handle_click(Square(6, 4))
+        app.game.board.handle_click(Square(4, 4))
+        app.game.board.cancel_animations()
+        assert len(app.game.match.move_history) == 1
+    app.game.board.handle_click(Square(6, 0))
+    assert app.game.board.selected_square == Square(6, 0)
+    app.game._on_undo()
+    assert app.game.board.selected_square is None
     if make_move:
-        assert len(app.match.move_history) == 0
+        assert len(app.game.match.move_history) == 0
 
 
 def test_undo_no_op_when_manual_result_set():
     """Undo is fully blocked after game end: no move pop, no selection mutation."""
     app = _start_game()
-    app.manual_result = "white_wins"
-    app.board.selected_square = Square(6, 4)
-    app._on_undo()
-    assert app.manual_result == "white_wins"
-    assert app.board.selected_square == Square(6, 4)
+    app.game.manual_result = "white_wins"
+    app.game.board.selected_square = Square(6, 4)
+    app.game._on_undo()
+    assert app.game.manual_result == "white_wins"
+    assert app.game.board.selected_square == Square(6, 4)
 
 
 def test_last_animation_completed_at_ms_initial_zero(board):
@@ -298,14 +298,14 @@ def test_auto_flip_blocked_during_post_animation_delay():
     """Auto-flip is suppressed for AUTO_FLIP_DELAY_MS after a slide lands."""
     from chessshootout.frontend.screens.game import AUTO_FLIP_DELAY_MS
     app = _start_game()
-    app.board.handle_click(Square(6, 4))
-    app.board.handle_click(Square(4, 4))
-    app.board.animations[0].start_ms = pg.time.get_ticks() - 10_000
+    app.game.board.handle_click(Square(6, 4))
+    app.game.board.handle_click(Square(4, 4))
+    app.game.board.animations[0].start_ms = pg.time.get_ticks() - 10_000
     app.draw_frame()
-    assert not app.board.is_animating()
-    app.board.last_animation_completed_at_ms = pg.time.get_ticks()
+    assert not app.game.board.is_animating()
+    app.game.board.last_animation_completed_at_ms = pg.time.get_ticks()
     app.draw_frame()
-    assert app.board.flipped is False
-    app.board.last_animation_completed_at_ms = pg.time.get_ticks() - AUTO_FLIP_DELAY_MS - 50
+    assert app.game.board.flipped is False
+    app.game.board.last_animation_completed_at_ms = pg.time.get_ticks() - AUTO_FLIP_DELAY_MS - 50
     app.draw_frame()
-    assert app.board.flipped is True
+    assert app.game.board.flipped is True

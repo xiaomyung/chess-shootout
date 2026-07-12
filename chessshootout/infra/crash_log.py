@@ -46,13 +46,10 @@ def get_memory_buffer():
 
 def gather_state(frontend):
     state = {}
-    state["mode"] = getattr(frontend, "mode", None)
-    match = getattr(frontend, "match", None)
-    if match is not None:
-        history = getattr(match, "move_history", None)
-        state["move_history_len"] = len(history) if history is not None else None
-    else:
-        state["move_history_len"] = None
+    screen = getattr(frontend, "screen", None)
+    state["screen"] = getattr(screen, "name", None)
+    if screen is not None:
+        state.update(screen.debug_state())
     coordinator = getattr(frontend, "coordinator", None)
     online_client = getattr(coordinator, "client", None) if coordinator is not None else None
     state["online_state"] = (

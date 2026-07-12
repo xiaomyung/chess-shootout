@@ -44,7 +44,7 @@ def test_enter_applies_start_config_and_resets_match():
 
 def test_enter_with_fen_applies_position():
     app = _make_app()
-    app.request_nav(Nav("game", {"mode": SINGLE_SCREEN, "fen": SPARSE_FEN}))
+    app.request_nav(Nav("game", {"fen": SPARSE_FEN}))
     app._execute_pending_nav()
     game = app.game
     assert game.match.move_history == []
@@ -54,7 +54,7 @@ def test_enter_with_fen_applies_position():
 
 def test_online_variant_drives_match_mode_and_pill():
     app = _make_app()
-    app.switch_to("game", mode=ONLINE)
+    app.switch_to("game", variant=ONLINE)
     game = app.game
     assert game.variant == "online"
     assert game.match.mode == ONLINE
@@ -90,8 +90,8 @@ def test_back_to_menu_end_to_end_saves_and_exits_screen_clean(tmp_path, monkeypa
     app = Frontend(1000, 800)
     app.sound_manager = MagicMock()
     start_single_screen(app, time_minutes=None)
-    app.match.try_move(Square(6, 4), Square(4, 4))
-    app.manual_result = "white_wins_by_resignation"
+    app.game.match.try_move(Square(6, 4), Square(4, 4))
+    app.game.manual_result = "white_wins_by_resignation"
 
     app._on_back_to_menu()
 
@@ -104,7 +104,7 @@ def test_back_to_menu_end_to_end_saves_and_exits_screen_clean(tmp_path, monkeypa
 def test_enter_is_idempotent_baseline_across_two_consecutive_enters():
     app = _make_app()
     start_single_screen(app, nickname="dana", side="white", time_minutes=5)
-    app.match.try_move(Square(6, 4), Square(4, 4))
+    app.game.match.try_move(Square(6, 4), Square(4, 4))
     assert len(app.game.match.move_history) == 1
 
     start_single_screen(app, nickname="erin", side="white", time_minutes=5)

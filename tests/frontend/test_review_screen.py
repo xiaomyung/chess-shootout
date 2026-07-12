@@ -82,7 +82,6 @@ def test_open_review_from_history_via_real_open_call(tmp_path):
     app._execute_pending_nav()
 
     assert app.screen.name == "review"
-    assert app.mode == "menu"
     assert app.review.board.review_ply == 0
     assert app.review.white_name == "alice"
     assert app.review.black_name == "bob"
@@ -257,9 +256,9 @@ def test_game_screen_unaffected_by_review_screen_existing(tmp_path):
         "time_minutes": 5, "increment_seconds": 0, "side": "white",
     })
     assert app.screen.name == "game"
-    assert app.board.review_ply is None
-    assert app.board is not app.review.board
-    assert app.match is not app.review.match
+    assert app.game.board.review_ply is None
+    assert app.game.board is not app.review.board
+    assert app.game.match is not app.review.match
 
 
 def test_review_help_shows_navigation_subset(tmp_path):
@@ -276,7 +275,7 @@ def test_review_help_shows_navigation_subset(tmp_path):
 
 def test_game_help_shows_the_full_list():
     app = start_single_screen(make_app())
-    app.input_router._handle_shortcut_key(_key(pg.K_SLASH, unicode="?"))
+    app.game.handle_key(_key(pg.K_SLASH, unicode="?"))
     assert app.help_modal.is_visible() is True
     assert app.help_modal.rows == HOTKEYS
 

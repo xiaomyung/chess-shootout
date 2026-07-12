@@ -14,7 +14,6 @@ import pygame as pg
 import pytest
 
 from chessshootout.backend.utils import Square
-from chessshootout.domain.match import ONLINE
 from chessshootout.backend.pieces import Piece, PieceColor, PieceType
 from tests.helpers import make_app as _shared_make_app
 
@@ -94,11 +93,11 @@ def test_back_to_menu_does_not_play_game_start():
 def test_undo_plays_rewind():
     app = make_app()
     app._on_start_game(base_config(time_minutes=None))
-    app.board.handle_click(Square(6, 4))
-    app.board.handle_click(Square(4, 4))
-    app.board.cancel_animations()
+    app.game.board.handle_click(Square(6, 4))
+    app.game.board.handle_click(Square(4, 4))
+    app.game.board.cancel_animations()
     app.sound_manager.reset_mock()
-    app._on_undo()
+    app.game._on_undo()
     app.sound_manager.play_undo.assert_called_once()
 
 
@@ -106,16 +105,16 @@ def test_undo_with_empty_history_does_not_play_undo():
     app = make_app()
     app._on_start_game(base_config(time_minutes=None))
     app.sound_manager.reset_mock()
-    app._on_undo()
+    app.game._on_undo()
     app.sound_manager.play_undo.assert_not_called()
 
 
 def test_undo_with_manual_result_does_not_play_undo():
     app = make_app()
     app._on_start_game(base_config(time_minutes=None))
-    app.manual_result = "white_wins"
+    app.game.manual_result = "white_wins"
     app.sound_manager.reset_mock()
-    app._on_undo()
+    app.game._on_undo()
     app.sound_manager.play_undo.assert_not_called()
 
 
@@ -124,9 +123,9 @@ def test_takeback_applied_plays_undo_sound():
     same as a local undo."""
     app = make_app()
     app._on_start_game(base_config(time_minutes=None))
-    app.board.handle_click(Square(6, 4))
-    app.board.handle_click(Square(4, 4))
-    app.board.cancel_animations()
+    app.game.board.handle_click(Square(6, 4))
+    app.game.board.handle_click(Square(4, 4))
+    app.game.board.cancel_animations()
     app.sound_manager.reset_mock()
     app.game.on_takeback({"clock": {}})
     app.sound_manager.play_undo.assert_called_once()
@@ -143,7 +142,7 @@ def test_takeback_applied_with_empty_history_does_not_play_undo():
 
 
 def fire_animation(app):
-    em = app.board.effects
+    em = app.game.board.effects
     for c in list(em.captures):
         c["fire_at"] = 0
     now = pg.time.get_ticks()
@@ -151,13 +150,13 @@ def fire_animation(app):
         em.update(now + i * 16)
         if not em.captures:
             break
-    if app.board.animations:
-        app.board.animations[0].start_ms = pg.time.get_ticks() - 10_000
-        app.board._draw_animations()
+    if app.game.board.animations:
+        app.game.board.animations[0].start_ms = pg.time.get_ticks() - 10_000
+        app.game.board._draw_animations()
 
 
 def setup_position(app, piece_map, turn=PieceColor.WHITE):
-    backend = app.backend
+    backend = app.game.match.backend
     backend.state = [[None] * 8 for _ in range(8)]
     for sq, piece in piece_map.items():
         backend.state[sq.row][sq.col] = piece
@@ -171,8 +170,8 @@ def test_normal_move_plays_only_move():
     app = make_app()
     app._on_start_game(base_config(time_minutes=None))
     app.sound_manager.reset_mock()
-    app.board.handle_click(Square(6, 4))
-    app.board.handle_click(Square(4, 4))
+    app.game.board.handle_click(Square(6, 4))
+    app.game.board.handle_click(Square(4, 4))
     fire_animation(app)
     app.sound_manager.play_move.assert_called_once_with(PieceType.PAWN)
     app.sound_manager.play_capture.assert_not_called()
@@ -185,7 +184,7 @@ def test_capture_plays_move_and_capture():
     keyed on the CAPTURING piece (queen), not the captured (pawn)."""
     app = make_app()
     app._on_start_game(base_config(time_minutes=None))
-    app.skillcheck.enabled = False
+    app.game.skillcheck.enabled = False
     setup_position(app, {
         Square(7, 4): Piece(PieceType.KING, PieceColor.WHITE),
         Square(0, 4): Piece(PieceType.KING, PieceColor.BLACK),
@@ -193,8 +192,8 @@ def test_capture_plays_move_and_capture():
         Square(4, 7): Piece(PieceType.PAWN, PieceColor.BLACK),
     })
     app.sound_manager.reset_mock()
-    app.board.handle_click(Square(4, 4))
-    app.board.handle_click(Square(4, 7))
+    app.game.board.handle_click(Square(4, 4))
+    app.game.board.handle_click(Square(4, 7))
     fire_animation(app)
     app.sound_manager.play_move.assert_called_once()
     app.sound_manager.play_capture.assert_called_once_with(PieceType.QUEEN)
@@ -214,7 +213,7 @@ def test_capture_dispatches_capturing_piece_type(attacker_type, target_type):
     geometry; the target square is arranged so each attacker's capture is legal."""
     app = make_app()
     app._on_start_game(base_config(time_minutes=None))
-    app.skillcheck.enabled = False
+    app.game.skillcheck.enabled = False
     setup_position(app, {
         Square(7, 0): Piece(PieceType.KING, PieceColor.WHITE),
         Square(0, 0): Piece(PieceType.KING, PieceColor.BLACK),
@@ -222,22 +221,22 @@ def test_capture_dispatches_capturing_piece_type(attacker_type, target_type):
         Square(3, 4): Piece(target_type, PieceColor.BLACK),
     })
     if attacker_type == PieceType.PAWN:
-        app.backend.state[3][4] = None
-        app.backend.state[3][5] = Piece(target_type, PieceColor.BLACK)
+        app.game.match.backend.state[3][4] = None
+        app.game.match.backend.state[3][5] = Piece(target_type, PieceColor.BLACK)
         from_sq, to_sq = Square(4, 4), Square(3, 5)
     elif attacker_type == PieceType.KNIGHT:
-        app.backend.state[3][4] = None
-        app.backend.state[2][3] = Piece(target_type, PieceColor.BLACK)
+        app.game.match.backend.state[3][4] = None
+        app.game.match.backend.state[2][3] = Piece(target_type, PieceColor.BLACK)
         from_sq, to_sq = Square(4, 4), Square(2, 3)
     elif attacker_type == PieceType.BISHOP:
-        app.backend.state[3][4] = None
-        app.backend.state[2][6] = Piece(target_type, PieceColor.BLACK)
+        app.game.match.backend.state[3][4] = None
+        app.game.match.backend.state[2][6] = Piece(target_type, PieceColor.BLACK)
         from_sq, to_sq = Square(4, 4), Square(2, 6)
     else:
         from_sq, to_sq = Square(4, 4), Square(3, 4)
     app.sound_manager.reset_mock()
-    app.board.handle_click(from_sq)
-    app.board.handle_click(to_sq)
+    app.game.board.handle_click(from_sq)
+    app.game.board.handle_click(to_sq)
     fire_animation(app)
     app.sound_manager.play_capture.assert_called_once_with(attacker_type)
 
@@ -251,8 +250,8 @@ def test_check_plays_move_and_check():
         Square(4, 0): Piece(PieceType.ROOK, PieceColor.WHITE),
     })
     app.sound_manager.reset_mock()
-    app.board.handle_click(Square(4, 0))
-    app.board.handle_click(Square(0, 0))
+    app.game.board.handle_click(Square(4, 0))
+    app.game.board.handle_click(Square(0, 0))
     fire_animation(app)
     app.sound_manager.play_move.assert_called_once()
     app.sound_manager.play_check.assert_called_once()
@@ -270,8 +269,8 @@ def test_checkmate_plays_only_checkmate_no_move():
         Square(0, 7): Piece(PieceType.KING, PieceColor.BLACK),
     })
     app.sound_manager.reset_mock()
-    app.board.handle_click(Square(2, 0))
-    app.board.handle_click(Square(0, 0))
+    app.game.board.handle_click(Square(2, 0))
+    app.game.board.handle_click(Square(0, 0))
     fire_animation(app)
     app.sound_manager.play_checkmate.assert_called_once()
     app.sound_manager.play_move.assert_not_called()
@@ -287,13 +286,13 @@ def test_castle_kingside_plays_castle_sound_not_move():
         Square(7, 7): Piece(PieceType.ROOK, PieceColor.WHITE),
         Square(0, 4): Piece(PieceType.KING, PieceColor.BLACK),
     })
-    app.backend.castling_rights = {"WK": True, "WQ": False, "BK": False, "BQ": False}
+    app.game.match.backend.castling_rights = {"WK": True, "WQ": False, "BK": False, "BQ": False}
     app.sound_manager.reset_mock()
-    app.board.handle_click(Square(7, 4))
-    app.board.handle_click(Square(7, 6))
-    for a in list(app.board.animations):
+    app.game.board.handle_click(Square(7, 4))
+    app.game.board.handle_click(Square(7, 6))
+    for a in list(app.game.board.animations):
         a.start_ms = pg.time.get_ticks() - 10_000
-    app.board._draw_animations()
+    app.game.board._draw_animations()
     app.sound_manager.play_castle.assert_called_once()
     app.sound_manager.play_move.assert_not_called()
     app.sound_manager.play_capture.assert_not_called()
@@ -309,13 +308,13 @@ def test_castle_queenside_plays_castle_sound():
         Square(7, 0): Piece(PieceType.ROOK, PieceColor.WHITE),
         Square(0, 4): Piece(PieceType.KING, PieceColor.BLACK),
     })
-    app.backend.castling_rights = {"WK": False, "WQ": True, "BK": False, "BQ": False}
+    app.game.match.backend.castling_rights = {"WK": False, "WQ": True, "BK": False, "BQ": False}
     app.sound_manager.reset_mock()
-    app.board.handle_click(Square(7, 4))
-    app.board.handle_click(Square(7, 2))
-    for a in list(app.board.animations):
+    app.game.board.handle_click(Square(7, 4))
+    app.game.board.handle_click(Square(7, 2))
+    for a in list(app.game.board.animations):
         a.start_ms = pg.time.get_ticks() - 10_000
-    app.board._draw_animations()
+    app.game.board._draw_animations()
     app.sound_manager.play_castle.assert_called_once()
     app.sound_manager.play_move.assert_not_called()
 
@@ -330,13 +329,13 @@ def test_castle_with_check_plays_castle_and_check():
         Square(7, 0): Piece(PieceType.ROOK, PieceColor.WHITE),
         Square(0, 3): Piece(PieceType.KING, PieceColor.BLACK),
     })
-    app.backend.castling_rights = {"WK": False, "WQ": True, "BK": False, "BQ": False}
+    app.game.match.backend.castling_rights = {"WK": False, "WQ": True, "BK": False, "BQ": False}
     app.sound_manager.reset_mock()
-    app.board.handle_click(Square(7, 4))
-    app.board.handle_click(Square(7, 2))
-    for a in list(app.board.animations):
+    app.game.board.handle_click(Square(7, 4))
+    app.game.board.handle_click(Square(7, 2))
+    for a in list(app.game.board.animations):
         a.start_ms = pg.time.get_ticks() - 10_000
-    app.board._draw_animations()
+    app.game.board._draw_animations()
     app.sound_manager.play_castle.assert_called_once()
     app.sound_manager.play_check.assert_called_once()
     app.sound_manager.play_move.assert_not_called()
@@ -353,25 +352,25 @@ def test_castle_dispatch_fires_only_once_for_two_animations():
         Square(7, 7): Piece(PieceType.ROOK, PieceColor.WHITE),
         Square(0, 4): Piece(PieceType.KING, PieceColor.BLACK),
     })
-    app.backend.castling_rights = {"WK": True, "WQ": False, "BK": False, "BQ": False}
+    app.game.match.backend.castling_rights = {"WK": True, "WQ": False, "BK": False, "BQ": False}
     app.sound_manager.reset_mock()
-    app.board.handle_click(Square(7, 4))
-    app.board.handle_click(Square(7, 6))
-    assert len(app.board.animations) == 2
-    for a in list(app.board.animations):
+    app.game.board.handle_click(Square(7, 4))
+    app.game.board.handle_click(Square(7, 6))
+    assert len(app.game.board.animations) == 2
+    for a in list(app.game.board.animations):
         a.start_ms = pg.time.get_ticks() - 10_000
-    app.board._draw_animations()
+    app.game.board._draw_animations()
     assert app.sound_manager.play_castle.call_count == 1
 
 
 def test_reverse_animation_does_not_fire_dispatch():
     app = make_app()
     app._on_start_game(base_config(time_minutes=None))
-    app.board.handle_click(Square(6, 4))
-    app.board.handle_click(Square(4, 4))
+    app.game.board.handle_click(Square(6, 4))
+    app.game.board.handle_click(Square(4, 4))
     fire_animation(app)
     app.sound_manager.reset_mock()
-    app._on_undo()
+    app.game._on_undo()
     fire_animation(app)
     app.sound_manager.play_move.assert_not_called()
     app.sound_manager.play_capture.assert_not_called()
@@ -382,19 +381,19 @@ def test_promotion_lands_no_sound_until_picker_chosen():
     no play_move while the picker is open, one play_move after queen is chosen."""
     app = make_app()
     app._on_start_game(base_config(time_minutes=None))
-    app.skillcheck.enabled = False
+    app.game.skillcheck.enabled = False
     setup_position(app, {
         Square(7, 4): Piece(PieceType.KING, PieceColor.WHITE),
         Square(0, 4): Piece(PieceType.KING, PieceColor.BLACK),
         Square(1, 0): Piece(PieceType.PAWN, PieceColor.WHITE),
     })
     app.sound_manager.reset_mock()
-    app.board.handle_click(Square(1, 0))
-    app.board.handle_click(Square(0, 0))
+    app.game.board.handle_click(Square(1, 0))
+    app.game.board.handle_click(Square(0, 0))
     fire_animation(app)
     app.sound_manager.play_move.assert_not_called()
-    assert app.board.pending_promotion_square == Square(0, 0)
-    app.board.pick_promotion(PieceType.QUEEN)
+    assert app.game.board.pending_promotion_square == Square(0, 0)
+    app.game.board.pick_promotion(PieceType.QUEEN)
     app.sound_manager.play_move.assert_called_once()
 
 
@@ -422,7 +421,7 @@ def test_draw_frame_in_game_with_clock_not_paused():
 def test_draw_frame_after_manual_result_paused_true():
     app = make_app()
     app._on_start_game(base_config())
-    app.manual_result = "white_wins"
+    app.game.manual_result = "white_wins"
     app.sound_manager.reset_mock()
     app.draw_frame()
     fraction, paused = app.sound_manager.update_heartbeat.call_args[0]
@@ -433,8 +432,8 @@ def test_draw_frame_after_manual_result_paused_true():
 def test_draw_frame_after_engine_timeout_paused_true():
     app = make_app()
     app._on_start_game(base_config())
-    app.backend.clock.flagged = PieceColor.WHITE
-    app.backend.clock.white_remaining = 0
+    app.game.match.backend.clock.flagged = PieceColor.WHITE
+    app.game.match.backend.clock.white_remaining = 0
     app.sound_manager.reset_mock()
     app.draw_frame()
     fraction, paused = app.sound_manager.update_heartbeat.call_args[0]
@@ -456,7 +455,7 @@ def test_draw_frame_fraction_reflects_side_to_move():
     with tolerance for the clock running between events."""
     app = make_app()
     app._on_start_game(base_config(time_minutes=5))
-    app.backend.clock.white_remaining = 60.0
+    app.game.match.backend.clock.white_remaining = 60.0
     app.sound_manager.reset_mock()
     app.draw_frame()
     fraction, paused = app.sound_manager.update_heartbeat.call_args[0]
@@ -467,8 +466,8 @@ def test_draw_result_plays_draw_not_you_win():
     app = make_app()
     app._on_start_game(base_config(time_minutes=None))
     app.sound_manager.reset_mock()
-    app.current_result = lambda: "draw_stalemate"
-    app._trigger_result_effects()
+    app.game.current_result = lambda: "draw_stalemate"
+    app.game._trigger_result_effects()
     app.sound_manager.play_draw.assert_called_once()
     app.sound_manager.play_you_win.assert_not_called()
 
@@ -477,8 +476,8 @@ def test_mate_win_plays_you_win_not_draw():
     app = make_app()
     app._on_start_game(base_config(time_minutes=None))
     app.sound_manager.reset_mock()
-    app.current_result = lambda: "white_wins"
-    app._trigger_result_effects()
+    app.game.current_result = lambda: "white_wins"
+    app.game._trigger_result_effects()
     app.sound_manager.play_you_win.assert_called_once()
     app.sound_manager.play_draw.assert_not_called()
 
@@ -489,8 +488,8 @@ def test_resign_win_plays_you_win_not_surrender():
     app = make_app()
     app._on_start_game(base_config(time_minutes=None))
     app.sound_manager.reset_mock()
-    app.current_result = lambda: "white_wins_by_resignation"
-    app._trigger_result_effects()
+    app.game.current_result = lambda: "white_wins_by_resignation"
+    app.game._trigger_result_effects()
     app.sound_manager.play_you_win.assert_called_once()
     app.sound_manager.play_surrender.assert_not_called()
 
@@ -502,8 +501,8 @@ def test_flag_result_plays_no_result_voice():
     app = make_app()
     app._on_start_game(base_config(time_minutes=None))
     app.sound_manager.reset_mock()
-    app.current_result = lambda: "black_wins_on_time"
-    app._trigger_result_effects()
+    app.game.current_result = lambda: "black_wins_on_time"
+    app.game._trigger_result_effects()
     app.sound_manager.play_you_win.assert_not_called()
     app.sound_manager.play_surrender.assert_not_called()
 
@@ -514,8 +513,8 @@ def test_kill_announcer_suppressed_once_game_over():
     app = make_app()
     app._on_start_game(base_config(time_minutes=None))
     app.sound_manager.reset_mock()
-    app.current_result = lambda: "white_wins"
-    app._on_kill_announced("first_blood")
+    app.game.current_result = lambda: "white_wins"
+    app.game._on_kill_announced("first_blood")
     app.sound_manager.play_announcer.assert_not_called()
 
 
@@ -523,7 +522,7 @@ def test_kill_announcer_plays_while_game_live():
     app = make_app()
     app._on_start_game(base_config(time_minutes=None))
     app.sound_manager.reset_mock()
-    app._on_kill_announced("first_blood")
+    app.game._on_kill_announced("first_blood")
     app.sound_manager.play_announcer.assert_called_once_with("first_blood")
 
 
@@ -531,8 +530,8 @@ def test_hit_oof_still_plays_when_game_over():
     app = make_app()
     app._on_start_game(base_config(time_minutes=None))
     app.sound_manager.reset_mock()
-    app.current_result = lambda: "white_wins"
-    app._on_kill_announced("hit", Piece(PieceType.PAWN, PieceColor.BLACK))
+    app.game.current_result = lambda: "white_wins"
+    app.game._on_kill_announced("hit", Piece(PieceType.PAWN, PieceColor.BLACK))
     app.sound_manager.play_hit.assert_called_once()
 
 
@@ -541,11 +540,11 @@ def test_online_resigner_hears_surrender_not_you_win():
     only; the winner hears you_win only (never both to one listener)."""
     app = make_app()
     app._on_start_game(base_config(time_minutes=None))
-    app.mode = ONLINE
-    app.match.local_color = PieceColor.BLACK
+    app.game.variant = "online"
+    app.game.match.local_color = PieceColor.BLACK
     app.sound_manager.reset_mock()
-    app.current_result = lambda: "white_wins_by_resignation"
-    app._trigger_result_effects()
+    app.game.current_result = lambda: "white_wins_by_resignation"
+    app.game._trigger_result_effects()
     app.sound_manager.play_surrender.assert_called_once()
     app.sound_manager.play_you_win.assert_not_called()
 
@@ -553,17 +552,17 @@ def test_online_resigner_hears_surrender_not_you_win():
 def test_local_won_local_mode_is_always_true():
     app = make_app()
     app._on_start_game(base_config(time_minutes=None))
-    assert app._local_won(PieceColor.WHITE) is True
-    assert app._local_won(PieceColor.BLACK) is True
+    assert app.game._local_won(PieceColor.WHITE) is True
+    assert app.game._local_won(PieceColor.BLACK) is True
 
 
 def test_local_won_online_matches_local_color():
     app = make_app()
     app._on_start_game(base_config(time_minutes=None))
-    app.mode = ONLINE
-    app.match.local_color = PieceColor.WHITE
-    assert app._local_won(PieceColor.WHITE) is True
-    assert app._local_won(PieceColor.BLACK) is False
+    app.game.variant = "online"
+    app.game.match.local_color = PieceColor.WHITE
+    assert app.game._local_won(PieceColor.WHITE) is True
+    assert app.game._local_won(PieceColor.BLACK) is False
 
 
 def test_online_mate_loser_plays_you_lose_not_you_win():
@@ -571,11 +570,11 @@ def test_online_mate_loser_plays_you_lose_not_you_win():
     you_win; on a resign the loser hears surrender instead."""
     app = make_app()
     app._on_start_game(base_config(time_minutes=None))
-    app.mode = ONLINE
-    app.match.local_color = PieceColor.BLACK
+    app.game.variant = "online"
+    app.game.match.local_color = PieceColor.BLACK
     app.sound_manager.reset_mock()
-    app.current_result = lambda: "white_wins"
-    app._trigger_result_effects()
+    app.game.current_result = lambda: "white_wins"
+    app.game._trigger_result_effects()
     app.sound_manager.play_you_win.assert_not_called()
     app.sound_manager.play_you_lose.assert_called_once()
     app.sound_manager.play_surrender.assert_not_called()
@@ -584,12 +583,12 @@ def test_online_mate_loser_plays_you_lose_not_you_win():
 def test_online_flag_loser_hears_you_lose():
     app = make_app()
     app._on_start_game(base_config(time_minutes=1))
-    app.mode = ONLINE
-    app.match.local_color = PieceColor.WHITE
-    app.match.clock.flagged = PieceColor.WHITE
-    app._flag_fall_played = False
+    app.game.variant = "online"
+    app.game.match.local_color = PieceColor.WHITE
+    app.game.match.clock.flagged = PieceColor.WHITE
+    app.game._flag_fall_played = False
     app.sound_manager.reset_mock()
-    app._maybe_play_flag_fall()
+    app.game._maybe_play_flag_fall()
     app.sound_manager.play_flag_fall.assert_called_once()
     app.sound_manager.play_you_win.assert_not_called()
 
@@ -597,12 +596,12 @@ def test_online_flag_loser_hears_you_lose():
 def test_online_flag_winner_hears_you_win_not_defeat():
     app = make_app()
     app._on_start_game(base_config(time_minutes=1))
-    app.mode = ONLINE
-    app.match.local_color = PieceColor.WHITE
-    app.match.clock.flagged = PieceColor.BLACK
-    app._flag_fall_played = False
+    app.game.variant = "online"
+    app.game.match.local_color = PieceColor.WHITE
+    app.game.match.clock.flagged = PieceColor.BLACK
+    app.game._flag_fall_played = False
     app.sound_manager.reset_mock()
-    app._maybe_play_flag_fall()
+    app.game._maybe_play_flag_fall()
     app.sound_manager.play_you_win.assert_called_once()
     app.sound_manager.play_flag_fall.assert_not_called()
 
@@ -610,10 +609,10 @@ def test_online_flag_winner_hears_you_win_not_defeat():
 def test_single_screen_flag_plays_flag_fall():
     app = make_app()
     app._on_start_game(base_config(time_minutes=1))
-    app.match.clock.flagged = PieceColor.WHITE
-    app._flag_fall_played = False
+    app.game.match.clock.flagged = PieceColor.WHITE
+    app.game._flag_fall_played = False
     app.sound_manager.reset_mock()
-    app._maybe_play_flag_fall()
+    app.game._maybe_play_flag_fall()
     app.sound_manager.play_flag_fall.assert_called_once()
 
 
@@ -621,7 +620,7 @@ def test_manual_flip_plays_flip():
     app = make_app()
     app._on_start_game(base_config(time_minutes=None))
     app.sound_manager.reset_mock()
-    app._on_flip()
+    app.game._on_flip()
     app.sound_manager.play_flip.assert_called_once()
 
 
@@ -643,7 +642,7 @@ def test_keyed_toast_reshow_is_silent():
 
 
 def _px(app, sq):
-    return app.board.cell_rect(sq).center
+    return app.game.board.cell_rect(sq).center
 
 
 def test_click_select_plays_pickup_no_ui_click():
@@ -686,7 +685,7 @@ def test_click_deselect_plays_ui_click():
 
 def test_menu_click_plays_ui_click():
     app = make_app()
-    app.mode = "menu"
+    assert app.screen is app.menu
     app.sound_manager.reset_mock()
     app.input_router.mouse_left_clicked((500, 400))
     app.sound_manager.play_ui_click.assert_called_once()
@@ -695,8 +694,8 @@ def test_menu_click_plays_ui_click():
 def test_click_during_promotion_no_ui_click():
     app = make_app()
     app._on_start_game(base_config(time_minutes=None))
-    app.board.pending_promotion_square = Square(0, 4)
-    app.board.pick_promotion_at = lambda pos: None
+    app.game.board.pending_promotion_square = Square(0, 4)
+    app.game.board.pick_promotion_at = lambda pos: None
     app.sound_manager.reset_mock()
     app.input_router.mouse_left_clicked(_px(app, Square(0, 4)))
     app.sound_manager.play_ui_click.assert_not_called()
@@ -705,8 +704,8 @@ def test_click_during_promotion_no_ui_click():
 def test_drag_release_plays_drop():
     app = make_app()
     app._on_start_game(base_config(time_minutes=None))
-    app.board.selected_square = Square(6, 4)
-    app.board.dragging_from = Square(6, 4)
+    app.game.board.selected_square = Square(6, 4)
+    app.game.board.dragging_from = Square(6, 4)
     app.sound_manager.reset_mock()
     app.input_router._mouse_left_released(_px(app, Square(4, 4)))
     app.sound_manager.play_drop.assert_called_once()
@@ -716,8 +715,8 @@ def test_drag_release_plays_drop():
 def test_drag_release_cancel_suppresses_ui_click_still_drops():
     app = make_app()
     app._on_start_game(base_config(time_minutes=None))
-    app.board.selected_square = Square(6, 4)
-    app.board.dragging_from = Square(6, 4)
+    app.game.board.selected_square = Square(6, 4)
+    app.game.board.dragging_from = Square(6, 4)
     app.sound_manager.reset_mock()
     app.input_router._mouse_left_released(_px(app, Square(6, 4)))
     app.sound_manager.play_ui_click.assert_not_called()
@@ -739,7 +738,7 @@ def test_premove_making_and_chaining_is_silent():
     app._on_start_game(base_config(time_minutes=None))
     app.input_router.mouse_left_clicked(_px(app, Square(6, 4)))
     app.input_router.mouse_left_clicked(_px(app, Square(4, 4)))
-    app.board.cancel_animations()
+    app.game.board.cancel_animations()
     app.sound_manager.reset_mock()
     app.input_router.mouse_left_clicked(_px(app, Square(7, 6)))   # premove-select knight g1
     app.input_router.mouse_left_clicked(_px(app, Square(5, 5)))   # premove-queue g1-f3
@@ -757,7 +756,7 @@ def test_illegal_premove_target_plays_ui_click():
     app._on_start_game(base_config(time_minutes=None))
     app.input_router.mouse_left_clicked(_px(app, Square(6, 4)))
     app.input_router.mouse_left_clicked(_px(app, Square(4, 4)))
-    app.board.cancel_animations()
+    app.game.board.cancel_animations()
     app.sound_manager.reset_mock()
     # premove-select knight g1 (silent)
     app.input_router.mouse_left_clicked(_px(app, Square(7, 6)))
@@ -772,11 +771,11 @@ def test_click_opponent_piece_online_plays_ui_click():
     and silenced (_premove_select propagates the failed selection as None)."""
     app = make_app()
     app._on_start_game(base_config(time_minutes=None))
-    app.match.local_color = PieceColor.WHITE
+    app.game.match.local_color = PieceColor.WHITE
     app.sound_manager.reset_mock()
     # black pawn e7 (opponent, no chain)
     app.input_router.mouse_left_clicked(_px(app, Square(1, 4)))
-    assert app.board.selected_square is None
+    assert app.game.board.selected_square is None
     app.sound_manager.play_ui_click.assert_called_once()
 
 
@@ -793,7 +792,7 @@ def test_right_click_press_plays_ui_click():
 
 def test_right_click_in_menu_plays_ui_click():
     app = make_app()
-    app.mode = "menu"
+    assert app.screen is app.menu
     app.sound_manager.reset_mock()
     pg.event.clear()
     pg.event.post(pg.event.Event(pg.MOUSEBUTTONDOWN, {"button": 3, "pos": (500, 400)}))
@@ -818,14 +817,14 @@ def test_keyboard_during_skillcheck_is_silent():
     overlay."""
     app = make_app()
     app._on_start_game(base_config(time_minutes=None))
-    app.skillcheck_session._skillcheck_swallows_input = lambda: True
-    app.skillcheck_overlay.handle_event = MagicMock()
+    app.game.skillcheck_session._skillcheck_swallows_input = lambda: True
+    app.game.skillcheck_overlay.handle_event = MagicMock()
     app.sound_manager.reset_mock()
     pg.event.clear()
     pg.event.post(pg.event.Event(pg.KEYDOWN, {"key": pg.K_SPACE, "mod": 0, "unicode": " "}))
     app.input_router.check_events()
     app.sound_manager.play_ui_click.assert_not_called()
-    app.skillcheck_overlay.handle_event.assert_called_once()
+    app.game.skillcheck_overlay.handle_event.assert_called_once()
 
 
 def test_keyboard_flip_plays_click_and_flip():

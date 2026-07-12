@@ -78,7 +78,7 @@ def _online_app(tmp_path, monkeypatch, your_color="white"):
 
 def _capture_mate_board(app):
     """White Qg1, Bb2 (defends g7), Ka1; Black Kh8, pawn g7. Qxg7# is a capture-mate."""
-    app.match.backend = make_backend({
+    app.game.match.backend = make_backend({
         sq(0, 7): piece(K, BLACK), sq(1, 6): piece(P, BLACK),
         sq(7, 6): piece(Q, WHITE), sq(6, 1): piece(B, WHITE),
         sq(7, 0): piece(K, WHITE),
@@ -106,21 +106,21 @@ def _move_applied(frm, to, ply, *, kind="wheel", won=True, san="Qxg7#"):
 def _land_capture_mate(app):
     """Drive gate -> required -> move_applied(won) -> verdict hold so Qxg7# lands."""
     frm, to = _capture_mate_board(app)
-    app.skillcheck_session._skillcheck_gate(frm, to)
+    app.game.skillcheck_session._skillcheck_gate(frm, to)
     app.coordinator._handle_skill_check_required(_required_payload(frm, to))
     app.coordinator._handle_remote_move_applied(_move_applied(frm, to, 1))
-    app.skillcheck_overlay.update(pg.time.get_ticks() + 500)  # run the deferred apply
+    app.game.skillcheck_overlay.update(pg.time.get_ticks() + 500)  # run the deferred apply
     return frm, to
 
 
 def _settle(app):
-    app.board.cancel_animations()
-    app.board.effects.clear()
+    app.game.board.cancel_animations()
+    app.game.board.effects.clear()
 
 
 def _saved_text(app):
-    assert app.result_flow._last_saved_pgn_path is not None, "a PGN was saved"
-    with open(app.result_flow._last_saved_pgn_path, encoding="utf-8") as f:
+    assert app.game.result_flow._last_saved_pgn_path is not None, "a PGN was saved"
+    with open(app.game.result_flow._last_saved_pgn_path, encoding="utf-8") as f:
         return f.read()
 
 
@@ -131,10 +131,10 @@ def _pgn_files(tmp_path):
 def test_online_capture_mate_saves_full_game_with_result(tmp_path, monkeypatch):
     app = _online_app(tmp_path, monkeypatch)
     _land_capture_mate(app)
-    assert app.match.game_result() == "white_wins", "the mate landed"
+    assert app.game.match.game_result() == "white_wins", "the mate landed"
     app.coordinator._handle_online_result({"reason": "checkmate", "winner_color": "white"})
     _settle(app)
-    app.result_flow._update_result_pending()
+    app.game.result_flow._update_result_pending()
     text = _saved_text(app)
     assert "Qxg7#" in text, "the mating ply is in the saved PGN (not truncated)"
     assert '[Result "1-0"]' in text
@@ -148,10 +148,10 @@ def test_online_capture_mate_writes_utf8_bytes(tmp_path, monkeypatch):
     _land_capture_mate(app)
     app.coordinator._handle_online_result({"reason": "checkmate", "winner_color": "white"})
     _settle(app)
-    app.result_flow._update_result_pending()
+    app.game.result_flow._update_result_pending()
     text = _saved_text(app)
     assert "{Wheel ✓}" in text
-    with open(app.result_flow._last_saved_pgn_path, "rb") as f:
+    with open(app.game.result_flow._last_saved_pgn_path, "rb") as f:
         data = f.read()
     assert "✓".encode("utf-8") in data
     assert data.decode("utf-8") == text
@@ -167,13 +167,13 @@ def test_auto_save_survives_surrogate_nickname_without_crashing(tmp_path, monkey
     app.coordinator._handle_online_result({"reason": "checkmate", "winner_color": "white"})
     _settle(app)
     app.game.white_name = "bad\udce9name"
-    app.result_flow._last_saved_pgn_path = None
-    app.result_flow._last_saved_result_tag = None
-    assert app.result_flow._auto_save_pgn() is None
+    app.game.result_flow._last_saved_pgn_path = None
+    app.game.result_flow._last_saved_result_tag = None
+    assert app.game.result_flow._auto_save_pgn() is None
     app.game.white_name = "alice"
-    app.result_flow._last_saved_pgn_path = None
-    app.result_flow._last_saved_result_tag = None
-    assert app.result_flow._auto_save_pgn() is not None
+    app.game.result_flow._last_saved_pgn_path = None
+    app.game.result_flow._last_saved_result_tag = None
+    assert app.game.result_flow._auto_save_pgn() is not None
 
 
 def test_startup_toasts_when_stored_nickname_needs_sanitizing(tmp_path, monkeypatch):
@@ -201,12 +201,12 @@ def test_online_mate_saved_via_watchdog_when_result_message_is_missed(tmp_path, 
     _settle(app)
     fake_now = [10_000]
     monkeypatch.setattr(pg.time, "get_ticks", lambda: fake_now[0])
-    app.result_flow._update_result_pending()  # arms await; no save (server-authoritative)
-    assert app.result_flow._last_saved_pgn_path is None
-    assert app.manual_result is None
+    app.game.result_flow._update_result_pending()  # arms await; no save (server-authoritative)
+    assert app.game.result_flow._last_saved_pgn_path is None
+    assert app.game.manual_result is None
     fake_now[0] += RESULT_CONFIRM_TIMEOUT_MS + 100
-    app.result_flow._update_result_pending()  # promotes AND saves in the same call
-    assert app.manual_result == "white_wins"
+    app.game.result_flow._update_result_pending()  # promotes AND saves in the same call
+    assert app.game.manual_result == "white_wins"
     text = _saved_text(app)
     assert "Qxg7#" in text and '[Result "1-0"]' in text
 
@@ -215,16 +215,16 @@ def test_watchdog_awards_score_for_on_time_win(tmp_path, monkeypatch):
     """A locally-flagged clock produces a *_on_time result; promotion must still
     credit the winner's series score (the suffix must not be missed)."""
     app = _online_app(tmp_path, monkeypatch)
-    app.match.try_move(sq(6, 4), sq(4, 4))            # e4, so there's a game to save
-    app.match.clock.flagged = BLACK                   # black flags -> white wins on time
-    assert app.match.game_result() == "white_wins_on_time"
+    app.game.match.try_move(sq(6, 4), sq(4, 4))            # e4, so there's a game to save
+    app.game.match.clock.flagged = BLACK                   # black flags -> white wins on time
+    assert app.game.match.game_result() == "white_wins_on_time"
     fake_now = [10_000]
     monkeypatch.setattr(pg.time, "get_ticks", lambda: fake_now[0])
-    app.result_flow._update_result_pending()
+    app.game.result_flow._update_result_pending()
     fake_now[0] += RESULT_CONFIRM_TIMEOUT_MS + 100
-    app.result_flow._update_result_pending()
-    assert app.manual_result == "white_wins_on_time"
-    assert app.result_flow._series_scores.get("alice") == 1.0, "on-time win still scores"
+    app.game.result_flow._update_result_pending()
+    assert app.game.manual_result == "white_wins_on_time"
+    assert app.game.result_flow._series_scores.get("alice") == 1.0, "on-time win still scores"
 
 
 def test_online_result_saves_before_the_move_animation_settles(tmp_path, monkeypatch):
@@ -233,9 +233,10 @@ def test_online_result_saves_before_the_move_animation_settles(tmp_path, monkeyp
     app = _online_app(tmp_path, monkeypatch)
     _land_capture_mate(app)
     app.coordinator._handle_online_result({"reason": "checkmate", "winner_color": "white"})
-    assert app.board.is_animating() or app.board.effects.captures, "still animating"
-    app.result_flow._update_result_pending()
-    assert app.result_flow._last_saved_pgn_path is not None, "saved despite the unsettled board"
+    assert app.game.board.is_animating() or app.game.board.effects.captures, "still animating"
+    app.game.result_flow._update_result_pending()
+    assert app.game.result_flow._last_saved_pgn_path is not None, \
+        "saved despite the unsettled board"
 
 
 def test_finished_game_resume_does_not_replay_result_effects(tmp_path, monkeypatch):
@@ -245,15 +246,15 @@ def test_finished_game_resume_does_not_replay_result_effects(tmp_path, monkeypat
     _land_capture_mate(app)
     app.coordinator._handle_online_result({"reason": "checkmate", "winner_color": "white"})
     _settle(app)
-    app.result_flow._update_result_pending()                     # latches + fires effects once
-    assert app._result_first_seen_at_ms is not None
-    latch = app._result_first_seen_at_ms
+    app.game.result_flow._update_result_pending()                     # latches + fires effects once
+    assert app.game._result_first_seen_at_ms is not None
+    latch = app.game._result_first_seen_at_ms
     app.coordinator._handle_game_resumed({
         "move_history": [{"san": s} for s in SCHOLARS_MATE],
         "fen": "", "result_reason": "checkmate", "result_winner": "white",
         "skillcheck_log": [], "skillcheck_locks": [], "pending_skillcheck": None,
     })
-    assert app._result_first_seen_at_ms == latch, "resume must not re-arm the effects"
+    assert app.game._result_first_seen_at_ms == latch, "resume must not re-arm the effects"
 
 
 def test_resumed_static_result_saves_partial(tmp_path, monkeypatch):
@@ -265,7 +266,7 @@ def test_resumed_static_result_saves_partial(tmp_path, monkeypatch):
         "fen": "", "result_reason": "aborted_disconnect", "result_winner": None,
         "skillcheck_log": [], "skillcheck_locks": [], "pending_skillcheck": None,
     })
-    assert app.manual_result == "aborted_disconnect"
+    assert app.game.manual_result == "aborted_disconnect"
     assert '[Result "*"]' in _saved_text(app)
 
 
@@ -274,27 +275,28 @@ def test_watchdog_does_not_fire_before_timeout(tmp_path, monkeypatch):
     _land_capture_mate(app)
     fake_now = [10_000]
     monkeypatch.setattr(pg.time, "get_ticks", lambda: fake_now[0])
-    app.result_flow._update_result_pending()
+    app.game.result_flow._update_result_pending()
     fake_now[0] += RESULT_CONFIRM_TIMEOUT_MS - 500
-    app.result_flow._update_result_pending()
-    assert app.manual_result is None, "must give the server result time to arrive on high ping"
+    app.game.result_flow._update_result_pending()
+    assert app.game.manual_result is None, "must give the server result time to arrive on high ping"
 
 
 def test_verdict_failure_still_sets_result_and_resyncs_without_truncating(tmp_path, monkeypatch):
     app = _online_app(tmp_path, monkeypatch)
     frm, to = _capture_mate_board(app)
-    app.skillcheck_session._skillcheck_gate(frm, to)
+    app.game.skillcheck_session._skillcheck_gate(frm, to)
     app.coordinator._handle_skill_check_required(_required_payload(frm, to))
     app.coordinator._handle_remote_move_applied(_move_applied(frm, to, 1))
     # The deferred apply blows up when the result forces it early.
-    app.skillcheck_session._online_verdict_action = (
+    app.game.skillcheck_session._online_verdict_action = (
         lambda: (_ for _ in ()).throw(RuntimeError("boom")))
     app.coordinator._handle_online_result({"reason": "checkmate", "winner_color": "white"})
-    assert app.manual_result == "white_wins", "truth (result) is set before the fragile visuals"
+    assert app.game.manual_result == "white_wins", \
+        "truth (result) is set before the fragile visuals"
     assert app.coordinator._resyncing is True, "the apply failure escalates to a resync"
     _settle(app)
-    app.result_flow._update_result_pending()
-    assert app.result_flow._last_saved_pgn_path is None, "no truncated save while resyncing"
+    app.game.result_flow._update_result_pending()
+    assert app.game.result_flow._last_saved_pgn_path is None, "no truncated save while resyncing"
 
 
 SCHOLARS_MATE = ["e4", "e5", "Bc4", "Bc5", "Qh5", "Nf6", "Qxf7#"]
@@ -303,10 +305,10 @@ SCHOLARS_MATE = ["e4", "e5", "Bc4", "Bc5", "Qh5", "Nf6", "Qxf7#"]
 def test_resync_recovery_saves_the_complete_game(tmp_path, monkeypatch):
     app = _online_app(tmp_path, monkeypatch)
     frm, to = _capture_mate_board(app)
-    app.skillcheck_session._skillcheck_gate(frm, to)
+    app.game.skillcheck_session._skillcheck_gate(frm, to)
     app.coordinator._handle_skill_check_required(_required_payload(frm, to))
     app.coordinator._handle_remote_move_applied(_move_applied(frm, to, 1))
-    app.skillcheck_session._online_verdict_action = (
+    app.game.skillcheck_session._online_verdict_action = (
         lambda: (_ for _ in ()).throw(RuntimeError("boom")))
     app.coordinator._handle_online_result({"reason": "checkmate", "winner_color": "white"})
     # Server state-sync returns the full move list + the authoritative result.
@@ -316,9 +318,9 @@ def test_resync_recovery_saves_the_complete_game(tmp_path, monkeypatch):
         "skillcheck_log": [], "skillcheck_locks": [], "pending_skillcheck": None,
     })
     assert app.coordinator._resyncing is False
-    assert app.manual_result == "white_wins"
+    assert app.game.manual_result == "white_wins"
     _settle(app)
-    app.result_flow._update_result_pending()
+    app.game.result_flow._update_result_pending()
     text = _saved_text(app)
     assert "Qxf7#" in text and '[Result "1-0"]' in text
     assert len(_pgn_files(tmp_path)) == 1
@@ -330,32 +332,33 @@ def test_result_redelivery_saves_once_and_scores_once(tmp_path, monkeypatch):
     result = {"reason": "checkmate", "winner_color": "white"}
     app.coordinator._handle_online_result(result)
     _settle(app)
-    app.result_flow._update_result_pending()
+    app.game.result_flow._update_result_pending()
     app.coordinator._handle_online_result(result)                # reconnect re-delivery
-    app.result_flow._update_result_pending()
+    app.game.result_flow._update_result_pending()
     assert len(_pgn_files(tmp_path)) == 1, "one file despite re-delivery"
-    assert app.result_flow._series_scores.get("alice") == 1.0, "scored exactly once"
+    assert app.game.result_flow._series_scores.get("alice") == 1.0, "scored exactly once"
 
 
 def _one_quiet_move(app):
     """A legal 1-ply game with no result (kings + a pushed pawn)."""
-    app.match.backend = make_backend({
+    app.game.match.backend = make_backend({
         sq(0, 4): piece(K, BLACK), sq(7, 4): piece(K, WHITE), sq(6, 4): piece(P, WHITE),
     }, turn=WHITE)
-    app.match.try_move(sq(6, 4), sq(4, 4))            # e4
-    assert app.current_result() is None
+    app.game.match.try_move(sq(6, 4), sq(4, 4))            # e4
+    assert app.game.current_result() is None
 
 
 def test_partial_star_upgrades_to_decisive_result(tmp_path, monkeypatch):
     app = _online_app(tmp_path, monkeypatch)
     _one_quiet_move(app)
-    app.result_flow._auto_save_pgn()  # forced partial save (result None -> *)
-    assert app.result_flow._last_saved_result_tag == "*"
-    first = app.result_flow._last_saved_pgn_path
+    app.game.result_flow._auto_save_pgn()  # forced partial save (result None -> *)
+    assert app.game.result_flow._last_saved_result_tag == "*"
+    first = app.game.result_flow._last_saved_pgn_path
     assert '[Result "*"]' in _saved_text(app)
-    app.manual_result = "white_wins_by_resignation"
-    app.result_flow._auto_save_pgn()
-    assert app.result_flow._last_saved_pgn_path == first, "overwrites the same file, no duplicate"
+    app.game.manual_result = "white_wins_by_resignation"
+    app.game.result_flow._auto_save_pgn()
+    assert app.game.result_flow._last_saved_pgn_path == first, \
+        "overwrites the same file, no duplicate"
     assert '[Result "1-0"]' in _saved_text(app)
     assert len(_pgn_files(tmp_path)) == 1
 
@@ -371,10 +374,11 @@ def test_server_shutdown_saves_partial_but_first_move_abort_does_not(tmp_path, m
     app = _online_app(tmp_path, monkeypatch)
     _one_quiet_move(app)
     app.coordinator._handle_online_result({"reason": "server_shutdown"})
-    assert app.result_flow._last_saved_pgn_path is not None, "server_shutdown with moves saves"
+    assert app.game.result_flow._last_saved_pgn_path is not None, "server_shutdown with moves saves"
     app2 = _online_app(tmp_path, monkeypatch)         # fresh, 0 moves
     app2.coordinator._handle_online_result({"reason": "aborted"})
-    assert app2.result_flow._last_saved_pgn_path is None, "an empty first-move abort is not saved"
+    assert app2.game.result_flow._last_saved_pgn_path is None, \
+        "an empty first-move abort is not saved"
 
 
 def test_local_capture_mate_still_saves(tmp_path, monkeypatch):
@@ -382,15 +386,15 @@ def test_local_capture_mate_still_saves(tmp_path, monkeypatch):
     app = Frontend(1000, 800)
     app.sound_manager = MagicMock()
     app.mode = SINGLE_SCREEN
-    app.match.new_game()
-    app.match.backend = make_backend({
+    app.game.match.new_game()
+    app.game.match.backend = make_backend({
         sq(0, 7): piece(K, BLACK), sq(1, 6): piece(P, BLACK),
         sq(7, 6): piece(Q, WHITE), sq(6, 1): piece(B, WHITE),
         sq(7, 0): piece(K, WHITE),
     }, turn=WHITE)
-    app.match.try_move(sq(7, 6), sq(1, 6))
-    assert app.match.game_result() == "white_wins"
+    app.game.match.try_move(sq(7, 6), sq(1, 6))
+    assert app.game.match.game_result() == "white_wins"
     _settle(app)
-    app.result_flow._update_result_pending()
+    app.game.result_flow._update_result_pending()
     text = _saved_text(app)
     assert "Qxg7#" in text and '[Result "1-0"]' in text

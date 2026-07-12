@@ -3,8 +3,8 @@
 Two reconnect paths land here:
 
 1. Mid-game ws-drop. The OnlineClient already holds a `_time_control` and
-   the Frontend is in ONLINE mode, so `_handle_game_resumed` is enough on
-   its own — replay SANs + apply the server's clock snapshot.
+   the GameScreen's variant is already "online", so `_handle_game_resumed`
+   is enough on its own — replay SANs + apply the server's clock snapshot.
 2. App-restart resume. The user clicks the start-menu Reconnect button on
    a fresh process. `_on_reconnect_active_game` now drives the full setup
    synchronously: `_start_online_game(resume)` followed by
@@ -20,7 +20,6 @@ import pygame as pg
 import pytest
 
 from tests.conftest import pygame_display
-from chessshootout.domain.match import ONLINE
 from chessshootout.backend.pieces import PieceColor
 from chessshootout.frontend.frontend import Frontend
 from chessshootout.frontend.online_coordinator import RECONNECT_PROBE_MAX_ATTEMPTS
@@ -67,7 +66,7 @@ def test_handle_game_resumed_applies_server_clock_snapshot(app):
     """Mid-game drop: replay SANs, build the clock from the existing
     _time_control, then overwrite remainders + side-to-move from the snapshot."""
     app.game._time_control = (300, 2)
-    app.match.local_color = PieceColor.WHITE
+    app.game.match.local_color = PieceColor.WHITE
     payload = resume_payload(
         move_history=("e4", "e5"),
         white_remaining=240.0, black_remaining=180.0, running_for="white",
@@ -75,31 +74,31 @@ def test_handle_game_resumed_applies_server_clock_snapshot(app):
 
     app.coordinator._handle_game_resumed(payload)
 
-    assert app.match.clock is not None
-    assert app.match.clock.increment_seconds == 2.0
-    assert app.match.clock.white_remaining == 240.0
-    assert app.match.clock.black_remaining == 180.0
-    assert app.match.clock.running_for == PieceColor.WHITE
-    assert [e.san for e in app.match.move_history] == ["e4", "e5"]
-    assert app.match.current_turn() == PieceColor.WHITE
+    assert app.game.match.clock is not None
+    assert app.game.match.clock.increment_seconds == 2.0
+    assert app.game.match.clock.white_remaining == 240.0
+    assert app.game.match.clock.black_remaining == 180.0
+    assert app.game.match.clock.running_for == PieceColor.WHITE
+    assert [e.san for e in app.game.match.move_history] == ["e4", "e5"]
+    assert app.game.match.current_turn() == PieceColor.WHITE
 
 
 def test_handle_game_resumed_does_not_reset_clock_to_initial(app):
     """A fresh clock starts at initial_seconds (300); applying the snapshot must
     land on the server value, never the fresh-start value."""
     app.game._time_control = (300, 0)
-    app.match.local_color = PieceColor.WHITE
+    app.game.match.local_color = PieceColor.WHITE
     payload = resume_payload(
         white_remaining=42.0, black_remaining=17.0, running_for="black",
     )
 
     app.coordinator._handle_game_resumed(payload)
 
-    assert app.match.clock.white_remaining == pytest.approx(42.0)
-    assert app.match.clock.black_remaining == pytest.approx(17.0)
-    assert app.match.clock.running_for == PieceColor.BLACK
-    assert app.match.clock.white_remaining != 300.0
-    assert app.match.move_history == []
+    assert app.game.match.clock.white_remaining == pytest.approx(42.0)
+    assert app.game.match.clock.black_remaining == pytest.approx(17.0)
+    assert app.game.match.clock.running_for == PieceColor.BLACK
+    assert app.game.match.clock.white_remaining != 300.0
+    assert app.game.match.move_history == []
 
 
 def test_on_reconnect_active_game_sets_up_online_state_and_clock(app, monkeypatch):
@@ -128,14 +127,15 @@ def test_on_reconnect_active_game_sets_up_online_state_and_clock(app, monkeypatc
 
     app.coordinator._on_reconnect_active_game()
 
-    assert app.mode == ONLINE
+    assert app.screen is app.game
+    assert app.game.variant == "online"
     assert app.game._time_control == (300, 2)
-    assert app.match.local_color == PieceColor.BLACK
-    assert [e.san for e in app.match.move_history] == ["d4", "d5", "c4"]
-    assert app.match.clock is not None
-    assert app.match.clock.white_remaining == pytest.approx(200.0)
-    assert app.match.clock.black_remaining == pytest.approx(210.0)
-    assert app.match.clock.running_for == PieceColor.BLACK
+    assert app.game.match.local_color == PieceColor.BLACK
+    assert [e.san for e in app.game.match.move_history] == ["d4", "d5", "c4"]
+    assert app.game.match.clock is not None
+    assert app.game.match.clock.white_remaining == pytest.approx(200.0)
+    assert app.game.match.clock.black_remaining == pytest.approx(210.0)
+    assert app.game.match.clock.running_for == PieceColor.BLACK
     assert app.coordinator._pending_reconnect is None
 
 
@@ -163,7 +163,7 @@ def test_on_reconnect_active_game_refetches_resume_to_avoid_drift(app, monkeypat
     }
     app.coordinator._on_reconnect_active_game()
     assert calls == [("localhost:8000", "room-y", "tok")]
-    assert app.match.clock.white_remaining == pytest.approx(42.0)
+    assert app.game.match.clock.white_remaining == pytest.approx(42.0)
 
 
 def test_on_reconnect_active_game_failed_refetch_restores_pending(app, monkeypatch):
@@ -183,7 +183,7 @@ def test_on_reconnect_active_game_failed_refetch_restores_pending(app, monkeypat
     }
     app.coordinator._pending_reconnect = dict(pending)
     app.coordinator._on_reconnect_active_game()
-    assert app.mode != ONLINE
+    assert app.screen is app.menu
     assert app.coordinator._pending_reconnect == pending
     assert app.start_menu.reconnect_available
     assert app.confirm_modal.is_visible()
@@ -191,11 +191,11 @@ def test_on_reconnect_active_game_failed_refetch_restores_pending(app, monkeypat
 
 def test_on_reconnect_active_game_no_pending_is_noop(app):
     """Clicking Reconnect after the pending entry was cleared must not crash or
-    flip mode."""
+    flip screen."""
     app.coordinator._pending_reconnect = None
-    prior_mode = app.mode
+    prior_screen = app.screen
     app.coordinator._on_reconnect_active_game()
-    assert app.mode == prior_mode
+    assert app.screen is prior_screen
     assert app.coordinator._pending_reconnect is None
 
 

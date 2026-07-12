@@ -256,23 +256,24 @@ def test_illegal_fire_leaves_board_responsive(board):
 
 
 @pytest.mark.parametrize(
-    "action",
+    "target, action",
     [
-        pytest.param("_on_undo", id="undo"),
-        pytest.param("_perform_resign", id="resign"),
-        pytest.param("_perform_draw", id="draw"),
-        pytest.param("_on_new_game", id="reset"),
-        pytest.param("_on_back_to_menu", id="back_to_menu"),
+        pytest.param("game", "_on_undo", id="undo"),
+        pytest.param("game", "_perform_resign", id="resign"),
+        pytest.param("game", "_perform_draw", id="draw"),
+        pytest.param("app", "_on_new_game", id="reset"),
+        pytest.param("app", "_on_back_to_menu", id="back_to_menu"),
     ],
 )
-def test_frontend_action_clears_premove_queue(action):
+def test_frontend_action_clears_premove_queue(target, action):
     app = _new_app()
-    app.backend.turn = BLACK
-    app.board.handle_click(Square(6, 4))
-    app.board.handle_click(Square(4, 4))
-    assert len(app.board.premoves) == 1
-    getattr(app, action)()
-    assert app.board.premoves == []
+    app.game.match.backend.turn = BLACK
+    app.game.board.handle_click(Square(6, 4))
+    app.game.board.handle_click(Square(4, 4))
+    assert len(app.game.board.premoves) == 1
+    obj = app.game if target == "game" else app
+    getattr(obj, action)()
+    assert app.game.board.premoves == []
 
 
 def test_move_indicators_suppressed_for_premove_selection(board):
@@ -321,9 +322,10 @@ def test_premove_highlight_renders_nothing_when_queue_empty(board):
 def test_draw_frame_invokes_try_apply_next_premove():
     app = _new_app()
     called = [0]
-    original = app.board.try_apply_next_premove
-    app.board.try_apply_next_premove = lambda: called.__setitem__(0, called[0] + 1) or original()
-    app.board.last_animation_completed_at_ms = pg.time.get_ticks() - 10_000
+    original = app.game.board.try_apply_next_premove
+    app.game.board.try_apply_next_premove = (
+        lambda: called.__setitem__(0, called[0] + 1) or original())
+    app.game.board.last_animation_completed_at_ms = pg.time.get_ticks() - 10_000
     app.draw_frame()
     assert called[0] >= 1
 
@@ -332,17 +334,17 @@ def test_draw_frame_invokes_try_apply_next_premove():
     "setup",
     [
         pytest.param(
-            lambda app: setattr(app, "manual_result", "white_wins"),
+            lambda app: setattr(app.game, "manual_result", "white_wins"),
             id="game_over",
         ),
         pytest.param(
-            lambda app: app.board.start_animation(
+            lambda app: app.game.board.start_animation(
                 Square(6, 4), Square(4, 4), Piece(PieceType.PAWN, WHITE)),
             id="animation_in_flight",
         ),
         pytest.param(
             lambda app: setattr(
-                app.board, "last_animation_completed_at_ms", pg.time.get_ticks()),
+                app.game.board, "last_animation_completed_at_ms", pg.time.get_ticks()),
             id="post_animation_delay",
         ),
     ],
@@ -351,22 +353,22 @@ def test_draw_frame_blocks_premove(setup):
     app = _new_app()
     setup(app)
     called = [0]
-    app.board.try_apply_next_premove = lambda: called.__setitem__(0, called[0] + 1) or False
+    app.game.board.try_apply_next_premove = lambda: called.__setitem__(0, called[0] + 1) or False
     app.draw_frame()
     assert called[0] == 0
 
 
 def test_draw_frame_blocks_premove_during_capture_choreography():
     app = _new_app()
-    app.board.last_animation_completed_at_ms = pg.time.get_ticks() - 10_000
-    app.board.effects.capture(
+    app.game.board.last_animation_completed_at_ms = pg.time.get_ticks() - 10_000
+    app.game.board.effects.capture(
         now_ms=pg.time.get_ticks(), attacker_type="queen",
         attacker_surface=pg.Surface((40, 40), pg.SRCALPHA),
         victim_surface=pg.Surface((40, 40), pg.SRCALPHA),
         from_sq=Square(4, 3), victim_sq=Square(3, 3), to_sq=Square(3, 3), cell_size=80)
-    assert app.board.effects.captures, "a gun-fight choreography is in flight"
+    assert app.game.board.effects.captures, "a gun-fight choreography is in flight"
     called = [0]
-    app.board.try_apply_next_premove = lambda: called.__setitem__(0, called[0] + 1) or False
+    app.game.board.try_apply_next_premove = lambda: called.__setitem__(0, called[0] + 1) or False
     app.draw_frame()
     assert called[0] == 0, "premoves wait for the capture choreography to finish"
 
@@ -493,20 +495,20 @@ def test_swap_premove_color_clears_old_queue(board):
 
 def test_premove_fire_during_active_drawframe_loop():
     app = _new_app()
-    app.board.handle_click(Square(6, 4))
-    app.board.handle_click(Square(4, 4))
-    fire_animation(app.board)
-    app.board.handle_click(Square(7, 6))
-    app.board.handle_click(Square(5, 5))
-    assert len(app.board.premoves) == 1
-    app.board.handle_click(Square(1, 4))
-    app.board.handle_click(Square(3, 4))
-    fire_animation(app.board)
-    app.board.last_animation_completed_at_ms = pg.time.get_ticks() - 10_000
+    app.game.board.handle_click(Square(6, 4))
+    app.game.board.handle_click(Square(4, 4))
+    fire_animation(app.game.board)
+    app.game.board.handle_click(Square(7, 6))
+    app.game.board.handle_click(Square(5, 5))
+    assert len(app.game.board.premoves) == 1
+    app.game.board.handle_click(Square(1, 4))
+    app.game.board.handle_click(Square(3, 4))
+    fire_animation(app.game.board)
+    app.game.board.last_animation_completed_at_ms = pg.time.get_ticks() - 10_000
     app.draw_frame()
-    fire_animation(app.board)
-    assert app.board.premoves == []
-    last_entry = app.backend.move_history[-1]
+    fire_animation(app.game.board)
+    assert app.game.board.premoves == []
+    last_entry = app.game.match.backend.move_history[-1]
     assert last_entry.move.from_sq == Square(7, 6)
     assert last_entry.move.to_sq == Square(5, 5)
 

@@ -98,7 +98,7 @@ def test_enter_key_triggers_submit(modal):
 def test_fen_button_opens_modal():
     app = _make_app()
     app._on_open_fen_modal()
-    assert app.fen_input_modal.is_visible() is True
+    assert app.menu.fen_input_modal.is_visible() is True
 
 
 def test_valid_fen_starts_single_screen_game():
@@ -106,8 +106,9 @@ def test_valid_fen_starts_single_screen_game():
     fen = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
     ok = app._start_game_from_fen(fen)
     assert ok is True
-    assert app.mode == SINGLE_SCREEN
-    assert app.fen_input_modal.is_visible() is False
+    assert app.screen is app.game
+    assert app.game.variant == "local"
+    assert app.menu.fen_input_modal.is_visible() is False
     assert app.start_menu.is_visible() is False
 
 
@@ -116,7 +117,7 @@ def test_invalid_fen_returns_false_and_keeps_modal_open():
     app._on_open_fen_modal()
     ok = app._start_game_from_fen("not-a-fen")
     assert ok is False
-    assert app.fen_input_modal.is_visible() is True
+    assert app.menu.fen_input_modal.is_visible() is True
 
 
 @pytest.mark.parametrize(

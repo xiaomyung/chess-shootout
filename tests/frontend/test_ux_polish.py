@@ -147,55 +147,55 @@ def test_confirm_modal_click_outside_buttons_does_nothing():
 
 def test_resign_button_shows_modal_and_does_not_resign():
     app = _new_app()
-    app._on_resign()
+    app.game._on_resign()
     assert app.confirm_modal.is_visible() is True
-    assert app.manual_result is None
+    assert app.game.manual_result is None
 
 
 def test_resign_modal_yes_completes_resign():
     """White on turn resigns -> compound code so subtitle reads 'by resignation'."""
     app = _new_app()
-    app._on_resign()
+    app.game._on_resign()
     app.draw_frame()
     yes_rect = app.confirm_modal.button_rects["yes"]
     app.input_router.mouse_left_clicked(yes_rect.center)
     assert app.confirm_modal.is_visible() is False
-    assert app.manual_result == "black_wins_by_resignation"
+    assert app.game.manual_result == "black_wins_by_resignation"
 
 
 def test_resign_modal_no_keeps_game_active():
     app = _new_app()
-    app._on_resign()
+    app.game._on_resign()
     app.draw_frame()
     no_rect = app.confirm_modal.button_rects["no"]
     app.input_router.mouse_left_clicked(no_rect.center)
     assert app.confirm_modal.is_visible() is False
-    assert app.manual_result is None
+    assert app.game.manual_result is None
 
 
 def test_resign_blocks_other_clicks_while_modal_open():
     """With the confirm modal up, board clicks must not select a piece."""
     app = _new_app()
-    app._on_resign()
+    app.game._on_resign()
     app.draw_frame()
     app.input_router.mouse_left_clicked((50, 50))
-    assert app.board.selected_square is None
+    assert app.game.board.selected_square is None
 
 
 def test_draw_button_shows_modal_and_does_not_draw():
     app = _new_app()
-    app._on_draw()
+    app.game._on_draw()
     assert app.confirm_modal.is_visible() is True
-    assert app.manual_result is None
+    assert app.game.manual_result is None
 
 
 def test_draw_modal_yes_completes_draw():
     app = _new_app()
-    app._on_draw()
+    app.game._on_draw()
     app.draw_frame()
     yes_rect = app.confirm_modal.button_rects["yes"]
     app.input_router.mouse_left_clicked(yes_rect.center)
-    assert app.manual_result == "draw_agreement"
+    assert app.game.manual_result == "draw_agreement"
 
 
 def test_drag_threshold_constant_is_six():
@@ -283,15 +283,15 @@ def test_dragged_piece_no_op_without_drag_state(board):
 
 def test_drag_and_drop_executes_legal_move():
     app = _new_app()
-    e2_rect = app.board._cell_rect(6, 4)
-    e4_rect = app.board._cell_rect(4, 4)
+    e2_rect = app.game.board._cell_rect(6, 4)
+    e4_rect = app.game.board._cell_rect(4, 4)
     app.input_router._mouse_left_pressed(e2_rect.center)
     midpoint = (e4_rect.centerx, e2_rect.centery - DRAG_THRESHOLD_PX * 4)
-    app.board.update_drag_motion(midpoint)
+    app.game.board.update_drag_motion(midpoint)
     app.input_router._mouse_left_released(e4_rect.center)
-    fire_animation(app.board)
-    assert len(app.backend.move_history) == 1
-    last = app.backend.move_history[-1].move
+    fire_animation(app.game.board)
+    assert len(app.game.match.backend.move_history) == 1
+    last = app.game.match.backend.move_history[-1].move
     assert last.from_sq == Square(6, 4)
     assert last.to_sq == Square(4, 4)
 
@@ -299,34 +299,34 @@ def test_drag_and_drop_executes_legal_move():
 def test_drag_drop_skips_slide_animation():
     """A drag-landed move queues no slide animation -- the drag already showed arrival."""
     app = _new_app()
-    e2_rect = app.board._cell_rect(6, 4)
-    e4_rect = app.board._cell_rect(4, 4)
+    e2_rect = app.game.board._cell_rect(6, 4)
+    e4_rect = app.game.board._cell_rect(4, 4)
     app.input_router._mouse_left_pressed(e2_rect.center)
-    app.board.update_drag_motion(e4_rect.center)
+    app.game.board.update_drag_motion(e4_rect.center)
     app.input_router._mouse_left_released(e4_rect.center)
-    assert len(app.backend.move_history) == 1
-    assert app.board.animations == []
+    assert len(app.game.match.backend.move_history) == 1
+    assert app.game.board.animations == []
 
 
 def test_click_click_still_animates():
     """Counter-test to drag-drop: a two-click (non-drag) move DOES animate."""
     app = _new_app()
-    e2_rect = app.board._cell_rect(6, 4)
-    e4_rect = app.board._cell_rect(4, 4)
+    e2_rect = app.game.board._cell_rect(6, 4)
+    e4_rect = app.game.board._cell_rect(4, 4)
     app.input_router.mouse_left_clicked(e2_rect.center)
     app.input_router.mouse_left_clicked(e4_rect.center)
-    assert len(app.backend.move_history) == 1
-    assert len(app.board.animations) == 1
+    assert len(app.game.match.backend.move_history) == 1
+    assert len(app.game.board.animations) == 1
 
 
 def test_drag_below_threshold_falls_back_to_click_click():
     app = _new_app()
-    e2_rect = app.board._cell_rect(6, 4)
+    e2_rect = app.game.board._cell_rect(6, 4)
     app.input_router._mouse_left_pressed(e2_rect.center)
-    app.board.update_drag_motion((e2_rect.centerx + 1, e2_rect.centery))
+    app.game.board.update_drag_motion((e2_rect.centerx + 1, e2_rect.centery))
     app.input_router._mouse_left_released((e2_rect.centerx + 1, e2_rect.centery))
-    assert app.board.selected_square == Square(6, 4)
-    assert len(app.backend.move_history) == 0
+    assert app.game.board.selected_square == Square(6, 4)
+    assert len(app.game.match.backend.move_history) == 0
 
 
 def test_captured_by_empty_at_start():
@@ -497,45 +497,47 @@ def test_player_strip_advantage_negative_not_rendered(board):
 
 def test_f_key_flips_board():
     app = _new_app()
-    initial = app.board.flipped
+    initial = app.game.board.flipped
     event = pg.event.Event(pg.KEYDOWN, key=pg.K_f, mod=0)
-    app.input_router._handle_shortcut_key(event)
-    assert app.board.flipped != initial
+    app.game.handle_key(event)
+    assert app.game.board.flipped != initial
 
 
 def test_ctrl_z_undoes_last_move():
     app = _new_app()
-    app.board.handle_click(Square(6, 4))
-    app.board.handle_click(Square(4, 4))
-    fire_animation(app.board)
-    assert len(app.backend.move_history) == 1
+    app.game.board.handle_click(Square(6, 4))
+    app.game.board.handle_click(Square(4, 4))
+    fire_animation(app.game.board)
+    assert len(app.game.match.backend.move_history) == 1
     event = pg.event.Event(pg.KEYDOWN, key=pg.K_z, mod=pg.KMOD_CTRL)
-    app.input_router._handle_shortcut_key(event)
-    assert len(app.backend.move_history) == 0
+    app.game.handle_key(event)
+    assert len(app.game.match.backend.move_history) == 0
 
 
 def test_z_without_ctrl_does_not_undo():
     app = _new_app()
-    app.board.handle_click(Square(6, 4))
-    app.board.handle_click(Square(4, 4))
-    fire_animation(app.board)
+    app.game.board.handle_click(Square(6, 4))
+    app.game.board.handle_click(Square(4, 4))
+    fire_animation(app.game.board)
     event = pg.event.Event(pg.KEYDOWN, key=pg.K_z, mod=0)
-    handled = app.input_router._handle_shortcut_key(event)
+    handled = app.game.handle_key(event)
     assert handled is False
-    assert len(app.backend.move_history) == 1
+    assert len(app.game.match.backend.move_history) == 1
 
 
 def test_shortcuts_blocked_while_confirm_modal_open():
+    """The confirm-modal guard now runs in the router's check_events, before
+    frontend.screen.handle_key is ever reached."""
     app = _new_app()
-    app._on_resign()
-    initial_flipped = app.board.flipped
-    event = pg.event.Event(pg.KEYDOWN, key=pg.K_f, mod=0)
-    handled = app.input_router._handle_shortcut_key(event)
-    assert handled is False
-    assert app.board.flipped == initial_flipped
+    app.game._on_resign()
+    initial_flipped = app.game.board.flipped
+    pg.event.clear()
+    pg.event.post(pg.event.Event(pg.KEYDOWN, {"key": pg.K_f, "mod": 0, "unicode": "f"}))
+    app.input_router.check_events()
+    assert app.game.board.flipped == initial_flipped
 
 
 def test_unrelated_key_returns_false():
     app = _new_app()
     event = pg.event.Event(pg.KEYDOWN, key=pg.K_q, mod=0)
-    assert app.input_router._handle_shortcut_key(event) is False
+    assert app.game.handle_key(event) is False

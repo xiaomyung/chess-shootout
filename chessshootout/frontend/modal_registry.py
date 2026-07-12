@@ -18,3 +18,11 @@ class ModalSpec:
     @property
     def handles_keys(self):
         return hasattr(self.obj, "handle_key")
+
+
+def dismiss_topmost(specs):
+    for spec in specs:
+        if spec.esc_dismiss and spec.obj.is_visible():
+            spec.on_dismiss()
+            return True
+    return False

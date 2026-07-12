@@ -31,7 +31,6 @@ def test_load_pgn_opens_history_page():
     app._on_open_history()
     app._execute_pending_nav()
     assert app.screen.name == "history"
-    assert app.mode == "menu"
     assert app.history_view.is_visible() is True
 
 
@@ -48,7 +47,7 @@ def test_back_returns_to_card():
 def test_battle_keeps_running_behind_a_menu_modal(monkeypatch):
     app = make_app()
     app._on_open_fen_modal()
-    assert app._menu_overlay_active() is True
+    assert app._blocking_modal_visible() is True
     calls = []
     monkeypatch.setattr(app.menu_battle, "update", lambda *a, **k: calls.append("u"))
     app.draw_frame()
@@ -88,7 +87,6 @@ def test_unloadable_pgn_restores_history(tmp_path):
     app._open_pgn_review(str(bad))
     app._execute_pending_nav()
     app._execute_pending_nav()
-    assert app.mode == "menu"
     assert app.screen.name == "history"
     assert app.toast.message == "Could not load PGN"
 

@@ -17,7 +17,6 @@ import pytest
 
 from tests.conftest import pygame_display
 from chessshootout.backend.utils import Square
-from chessshootout.domain.match import ONLINE
 from tests.helpers import make_app, start_single_screen
 
 
@@ -104,7 +103,7 @@ def test_result_with_no_subscriber_still_saves_and_scores(tmp_path, monkeypatch)
     subscribed to receive it."""
     monkeypatch.setenv("CHESS_DATA_DIR", str(tmp_path))
     app = _wired_app()
-    app.match.try_move(Square(6, 4), Square(4, 4))
+    app.game.match.try_move(Square(6, 4), Square(4, 4))
     app.coordinator.unsubscribe(app.game)
     assert app.coordinator._subscriber is None
 
@@ -140,7 +139,7 @@ def test_match_found_transition_ends_with_a_subscribed_online_game_screen():
     app.coordinator._finish_match_found()
 
     assert app.screen.name == "game"
-    assert app.mode == ONLINE
+    assert app.game.variant == "online"
     assert app.game._chosen_side == "black"
     assert app.game.white_name == "alice"
     assert app.game.black_name == "bob"
@@ -173,7 +172,7 @@ def test_rematch_from_menu_window_end_to_end():
     app.coordinator._finish_match_found()
 
     assert app.screen.name == "game"
-    assert app.mode == ONLINE
+    assert app.game.variant == "online"
     assert app.game._chosen_side == "black"
     assert app.coordinator._subscriber is app.game
 
@@ -223,7 +222,7 @@ def test_coordinator_update_runs_before_screen_update(monkeypatch):
 def test_game_screen_on_app_exit_flushes_a_pending_result(tmp_path, monkeypatch):
     monkeypatch.setenv("CHESS_DATA_DIR", str(tmp_path))
     app = start_single_screen(make_app(1000, 800))
-    app.match.try_move(Square(6, 4), Square(4, 4))
+    app.game.match.try_move(Square(6, 4), Square(4, 4))
     app.game.manual_result = "white_wins_by_resignation"
     assert app.game.result_flow._last_saved_pgn_path is None
 

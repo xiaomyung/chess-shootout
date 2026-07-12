@@ -3,21 +3,11 @@ import os
 
 import pygame as pg
 
-from chessshootout.backend.pieces import PieceType
-from chessshootout.frontend.modals.help import HOTKEYS
 from chessshootout.frontend.screens.base import Nav
 from chessshootout.frontend.window_chrome import MIN_WINDOW_WIDTH, MIN_WINDOW_HEIGHT
 
 
 log = logging.getLogger("chess.frontend")
-
-
-PROMOTION_KEYS = {
-    pg.K_q: PieceType.QUEEN,
-    pg.K_r: PieceType.ROOK,
-    pg.K_b: PieceType.BISHOP,
-    pg.K_n: PieceType.KNIGHT,
-}
 
 
 class InputRouter:
@@ -26,44 +16,30 @@ class InputRouter:
         self.frontend = frontend
         self._scroll_pressed = None
         self._click_sound_played = False
-        self._focus_click_consumed = False
 
     def _handle_escape(self):
         frontend = self.frontend
-        if frontend.skillcheck_session._skillcheck_swallows_input():
-            return
         if self._dismiss_top_modal():
             return
-        if frontend.mode == "menu":
-            result = frontend.screen.escape()
-            if isinstance(result, Nav):
-                frontend.request_nav(result)
-            elif not result:
-                self._show_quit_modal()
-            return
-        if not frontend.board_interactive():
-            frontend._on_back_to_menu()
-            return
-        if frontend.focus_mode or frontend.focus_transition is not None:
-            frontend._toggle_focus(False)
-            return
-        frontend._on_resign()
+        result = frontend.screen.escape()
+        if isinstance(result, Nav):
+            frontend.request_nav(result)
 
     def _dismiss_confirm(self):
         frontend = self.frontend
         frontend.confirm_modal.hide()
-        if frontend.mode == "menu":
+        if frontend.screen is frontend.menu:
             frontend.start_menu.show()
 
     def _top_visible_modal(self):
-        for spec in self.frontend._modal_registry:
+        for spec in self.frontend._active_modal_specs():
             if spec.obj.is_visible():
                 return spec
         return None
 
     def _dismiss_top_modal(self):
         frontend = self.frontend
-        for spec in frontend._modal_registry:
+        for spec in frontend._active_modal_specs():
             if spec.esc_dismiss and spec.obj.is_visible():
                 spec.on_dismiss()
                 return True
@@ -74,62 +50,26 @@ class InputRouter:
             return True
         return False
 
-    def _show_quit_modal(self):
-        frontend = self.frontend
-        frontend.start_menu.hide()
-        frontend.confirm_modal.show(
-            "Leaving so soon?", on_yes=self._quit_app, on_no=self._cancel_quit,
-            yes_label="See ya!", no_label="Cancel")
-
-    def _quit_app(self):
-        self.frontend.running = False
-
-    def _cancel_quit(self):
-        self.frontend.start_menu.show()
-
-    def _right_click_pressed(self, pos):
-        frontend = self.frontend
-        if frontend.mode == "menu" or frontend.current_result() is not None:
-            frontend.sound_manager.play_ui_click()
-            return
-        sq = frontend.board.cell_at(pos)
-        if sq is None:
-            frontend.sound_manager.play_ui_click()
-            return
-        if frontend.board.dragging_from is not None:
-            if not frontend.board.queue_premove_from_drag(sq):
-                frontend.sound_manager.play_ui_click()
-            return
-        frontend.board.begin_right_press(pos)
-        frontend.sound_manager.play_ui_click()
-
-    def _right_click_released(self, pos):
-        frontend = self.frontend
-        if frontend.mode == "menu":
-            return
-        frontend.board.end_right_press(pos)
-
     def _active_scrollable(self):
         frontend = self.frontend
         top = self._top_visible_modal()
         if top is not None:
             return top.obj if top.scrollable else None
-        if frontend._result_modal_should_show():
-            return None
-        if frontend.mode == "menu":
-            return frontend.screen.active_scrollable()
-        if frontend.focus_mode or frontend.focus_transition is not None:
-            return None
-        return frontend.right_menu
+        return frontend.screen.active_scrollable()
 
     def _cancel_all_scroll(self):
         frontend = self.frontend
         self._scroll_pressed = None
-        frontend.right_menu.scroll.cancel()
+        frontend.game.right_menu.scroll.cancel()
+        frontend.review.right_menu.scroll.cancel()
         frontend.history_view.scroll.cancel()
         for spec in frontend._modal_registry:
             if spec.scrollable:
                 spec.obj.scroll.cancel()
+        for screen in frontend.screens.values():
+            for spec in screen.modals():
+                if spec.scrollable:
+                    spec.obj.scroll.cancel()
 
     def _handle_left_drag_motion(self, pos):
         frontend = self.frontend
@@ -139,7 +79,7 @@ class InputRouter:
             elif self._scroll_pressed.handle_motion(pos):
                 return
         if not frontend.audio_panel.handle_drag(pos, True):
-            frontend.board.update_drag_motion(pos)
+            frontend.screen.handle_motion(pos)
 
     def mouse_left_clicked(self, pos, *, ui_click=True):
         frontend = self.frontend
@@ -152,128 +92,25 @@ class InputRouter:
         frontend = self.frontend
         if frontend.chrome.handle_click(pos):
             return
-        if frontend.focus_transition is not None:
-            return
-        if (frontend.current_result() is not None
-                and frontend._result_first_seen_at_ms is not None
-                and not frontend._result_modal_should_show()):
-            frontend._skip_result_fade()
-            return
         top = self._top_visible_modal()
         if top is not None:
             top.obj.handle_click(pos)
             return
         if frontend.coordinator.offer_banners.handle_click(pos):
             return
-        if frontend.mode == "menu":
-            result = frontend.screen.handle_click(pos)
-            if isinstance(result, Nav):
-                frontend.request_nav(result)
-            return
-        if (frontend.focus_arrow.is_visible() and frontend._focus_arrow_allowed()
-                and frontend.focus_arrow.handle_click(pos)):
-            frontend._toggle_focus(not frontend.focus_mode)
-            self._focus_click_consumed = True
-            self._click_sound_played = True
-            return
-        if not frontend.focus_mode and frontend.result_menu.handle_click(pos):
-            return
-        if not frontend.focus_mode and frontend.right_menu.handle_click(pos):
-            return
-        if frontend.current_result() is not None:
-            return
-        if frontend.board.pending_promotion_square is not None:
-            frontend.board.pick_promotion_at(pos)
-            self._click_sound_played = True
-            return
-        square = frontend.board.cell_at(pos)
-        if square is not None:
-            if frontend.board.review_ply is None and not frontend.board.is_square_annotated(square):
-                frontend.board.clear_annotations()
-            signal = frontend.board.handle_click(square)
-            if signal:
-                self._click_sound_played = True
-                if signal == "select":
-                    frontend.sound_manager.play_pickup()
-
-    def _handle_shortcut_key(self, event):
-        frontend = self.frontend
-        if frontend._menu_overlay_active():
-            return False
-        if self._handle_promotion_key(event):
-            return True
-        if event.key == pg.K_h:
-            frontend._toggle_focus(not frontend.focus_mode)
-            return True
-        if getattr(event, "unicode", "") == "?":
-            frontend.help_modal.show(HOTKEYS)
-            return True
-        if event.key == pg.K_f:
-            frontend._on_flip()
-            return True
-        if event.key == pg.K_r:
-            frontend._on_resign()
-            return True
-        if event.key == pg.K_d:
-            frontend._on_draw()
-            return True
-        if event.key == pg.K_z and (event.mod & pg.KMOD_CTRL):
-            frontend._on_undo()
-            return True
-        if event.key == pg.K_LEFT:
-            self._step_review(-1)
-            return True
-        if event.key == pg.K_RIGHT:
-            self._step_review(1)
-            return True
-        if event.key == pg.K_HOME:
-            frontend.board.jump_to_review_ply(0)
-            return True
-        if event.key == pg.K_END:
-            frontend.board.jump_to_review_ply(None)
-            return True
-        return False
-
-    def _handle_promotion_key(self, event):
-        frontend = self.frontend
-        if frontend.board.pending_promotion_square is None:
-            return False
-        chosen = PROMOTION_KEYS.get(event.key)
-        if chosen is None:
-            return False
-        frontend.board.pick_promotion(chosen)
-        return True
-
-    def _step_review(self, delta):
-        frontend = self.frontend
-        history_len = len(frontend.match.move_history)
-        if history_len == 0:
-            return
-        current = frontend.board.review_anchor(history_len)
-        new_ply = max(0, min(history_len, current + delta))
-        if new_ply == current:
-            return
-        if delta > 0:
-            frontend.board.animate_review_ply(new_ply)
-        else:
-            frontend.board.jump_to_review_ply(new_ply)
+        result = frontend.screen.handle_click(pos)
+        if isinstance(result, Nav):
+            frontend.request_nav(result)
 
     def _mouse_left_pressed(self, pos):
         frontend = self.frontend
-        self._focus_click_consumed = False
         scrollable = self._active_scrollable()
         if scrollable is not None and scrollable.handle_press(pos):
             self._scroll_pressed = scrollable
             return
         self.mouse_left_clicked(pos)
-        if (frontend.mode != "menu"
-                and pos[1] >= frontend.chrome.HEIGHT
-                and frontend.current_result() is None
-                and frontend.board.pending_promotion_square is None
-                and not frontend._menu_overlay_active()
-                and not self._focus_click_consumed
-                and frontend.focus_transition is None):
-            frontend.board.begin_press(pos)
+        if pos[1] >= frontend.chrome.HEIGHT and not frontend._blocking_modal_visible():
+            frontend.screen.handle_press(pos)
 
     def _mouse_left_released(self, pos):
         frontend = self.frontend
@@ -285,12 +122,7 @@ class InputRouter:
             if not dragged and scrollable.is_visible():
                 scrollable.handle_click(pos)
             return
-        was_dragging = frontend.board.dragging_from is not None
-        if was_dragging and frontend.current_result() is None:
-            self.mouse_left_clicked(pos, ui_click=False)
-        frontend.board.end_press()
-        if was_dragging and frontend.current_result() is None:
-            frontend.sound_manager.play_drop()
+        frontend.screen.handle_release(pos)
 
     def check_events(self):
         frontend = self.frontend
@@ -306,7 +138,7 @@ class InputRouter:
                 continue
 
             if event.type == pg.KEYDOWN:
-                if not frontend.skillcheck_session._skillcheck_swallows_input():
+                if not frontend.screen.swallows_input():
                     frontend.sound_manager.play_ui_click()
                 if event.key == pg.K_ESCAPE:
                     self._handle_escape()
@@ -314,40 +146,38 @@ class InputRouter:
                 if event.key == pg.K_F11:
                     frontend.chrome.toggle_fullscreen()
                     continue
-                if frontend.skillcheck_session._skillcheck_swallows_input():
-                    frontend.skillcheck_overlay.handle_event(event)
+                if frontend.screen.swallows_input():
+                    frontend.screen.forward_swallowed_event(event)
                     continue
                 top = self._top_visible_modal()
                 if top is not None:
                     if top.handles_keys:
                         top.obj.handle_key(event)
                     continue
-                if frontend.mode == "menu":
-                    result = frontend.screen.handle_key(event)
-                    if isinstance(result, Nav):
-                        frontend.request_nav(result)
-                    continue
-                self._handle_shortcut_key(event)
+                result = frontend.screen.handle_key(event)
+                if isinstance(result, Nav):
+                    frontend.request_nav(result)
 
             elif event.type == pg.MOUSEBUTTONDOWN:
-                if frontend.skillcheck_session._skillcheck_swallows_input():
+                if frontend.screen.swallows_input():
                     if event.button == 1 and frontend.chrome.handle_click(event.pos):
                         continue
-                    frontend.skillcheck_overlay.handle_event(event)
+                    frontend.screen.forward_swallowed_event(event)
                     continue
                 if event.button == 1:
                     self._mouse_left_pressed(event.pos)
                 elif event.button == 3:
-                    self._right_click_pressed(event.pos)
+                    if not frontend.screen.handle_right_press(event.pos):
+                        frontend.sound_manager.play_ui_click()
 
             elif event.type == pg.MOUSEBUTTONUP:
-                if frontend.skillcheck_session._skillcheck_swallows_input():
+                if frontend.screen.swallows_input():
                     continue
                 if event.button == 1:
                     frontend.chrome.clear_title_press()
                     self._mouse_left_released(event.pos)
                 elif event.button == 3:
-                    self._right_click_released(event.pos)
+                    frontend.screen.handle_right_release(event.pos)
 
             elif event.type == pg.MOUSEMOTION:
                 frontend.chrome.update_cursor(event.pos)
@@ -368,7 +198,7 @@ class InputRouter:
                 frontend.window_width = w
                 frontend.window_height = h
                 self._cancel_all_scroll()
-                frontend._abort_transition_for_resize()
+                frontend.screen.on_resize()
                 frontend._compute_layout()
         if dropped:
             log.debug("dropped %d stale events pending nav %s",

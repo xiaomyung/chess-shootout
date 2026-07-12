@@ -1,10 +1,11 @@
 """Help modal + R/D + Q/R/B/N hotkeys.
 
-Drives keys through Frontend.input_router._handle_shortcut_key / _handle_promotion_key to
-verify resign/draw open the right confirm prompt and a pending promotion both
-consumes the piece key and shadows the resign hotkey. The any-key-closes-help
-behavior is dispatched earlier, by the modal registry inside check_events, so
-that one test drives a real KEYDOWN through check_events instead.
+Drives keys through GameScreen.handle_key / _handle_promotion_key to verify
+resign/draw open the right confirm prompt and a pending promotion both
+consumes the piece key and shadows the resign hotkey. The confirm-modal guard
+and the any-key-closes-help behavior are dispatched earlier by the router's
+check_events (before frontend.screen.handle_key is ever reached), so those
+tests drive a real KEYDOWN through check_events instead.
 """
 
 from collections import Counter
@@ -31,6 +32,12 @@ def _key_event(key, unicode="", mod=0):
     return pg.event.Event(pg.KEYDOWN, {"key": key, "unicode": unicode, "mod": mod})
 
 
+def _dispatch(app, event):
+    pg.event.clear()
+    pg.event.post(event)
+    app.input_router.check_events()
+
+
 def test_help_modal_starts_hidden():
     app = _make_app()
     assert app.help_modal.is_visible() is False
@@ -38,17 +45,17 @@ def test_help_modal_starts_hidden():
 
 def test_question_mark_opens_help():
     app = _make_app()
-    app.input_router._handle_shortcut_key(_key_event(pg.K_SLASH, unicode="?"))
+    app.game.handle_key(_key_event(pg.K_SLASH, unicode="?"))
     assert app.help_modal.is_visible() is True
 
 
 def test_any_key_closes_help():
-    """The modal registry (not _handle_shortcut_key) owns this now: help.handle_key
-    hides unconditionally, and check_events reaches it before _handle_shortcut_key."""
+    """The modal registry (not GameScreen.handle_key) owns this now: help's
+    handle_key hides unconditionally, and check_events reaches it before
+    frontend.screen.handle_key."""
     app = _make_app()
     app.help_modal.show(HOTKEYS)
-    pg.event.post(_key_event(pg.K_a))
-    app.input_router.check_events()
+    _dispatch(app, _key_event(pg.K_a))
     assert app.help_modal.is_visible() is False
 
 
@@ -68,7 +75,7 @@ def test_help_modal_close_button_hides_it():
 ])
 def test_action_hotkey_opens_confirm(key, title, yes_label):
     app = _make_app()
-    app.input_router._handle_shortcut_key(_key_event(key))
+    app.game.handle_key(_key_event(key))
     assert app.confirm_modal.is_visible() is True
     assert app.confirm_modal.title == title
     assert app.confirm_modal.yes_label == yes_label
@@ -76,14 +83,14 @@ def test_action_hotkey_opens_confirm(key, title, yes_label):
 
 def test_r_key_no_op_when_game_over():
     app = _make_app()
-    app.manual_result = "white_wins"
-    app.input_router._handle_shortcut_key(_key_event(pg.K_r))
+    app.game.manual_result = "white_wins"
+    app.game.handle_key(_key_event(pg.K_r))
     assert app.confirm_modal.is_visible() is False
 
 
 def _setup_promotion_pending(app, color):
-    app.skillcheck.enabled = False
-    bk = app.backend
+    app.game.skillcheck.enabled = False
+    bk = app.game.match.backend
     bk.state = [[None] * 8 for _ in range(8)]
     bk.state[1 if color == PieceColor.WHITE else 6][0] = Piece(
         PieceType.PAWN, color)
@@ -95,13 +102,13 @@ def _setup_promotion_pending(app, color):
     bk.position_counts[bk._position_key()] = 1
     src = Square(1 if color == PieceColor.WHITE else 6, 0)
     dst = Square(0 if color == PieceColor.WHITE else 7, 0)
-    app.board.handle_click(src)
-    app.board.handle_click(dst)
-    if app.board.is_animating():
-        for a in list(app.board.animations):
+    app.game.board.handle_click(src)
+    app.game.board.handle_click(dst)
+    if app.game.board.is_animating():
+        for a in list(app.game.board.animations):
             a.start_ms = pg.time.get_ticks() - 10_000
-        app.board._draw_animations()
-    assert app.board.pending_promotion_square == dst
+        app.game.board._draw_animations()
+    assert app.game.board.pending_promotion_square == dst
     return dst
 
 
@@ -114,10 +121,10 @@ def _setup_promotion_pending(app, color):
 def test_promotion_hotkey_picks_piece(key, expected):
     app = _make_app()
     dst = _setup_promotion_pending(app, PieceColor.WHITE)
-    handled = app.input_router._handle_shortcut_key(_key_event(key))
+    handled = app.game.handle_key(_key_event(key))
     assert handled is True
-    assert app.board.pending_promotion_square is None
-    promoted = app.backend.state[dst.row][dst.col]
+    assert app.game.board.pending_promotion_square is None
+    promoted = app.game.match.backend.state[dst.row][dst.col]
     assert promoted.type == expected
     assert promoted.color == PieceColor.WHITE
 
@@ -125,7 +132,7 @@ def test_promotion_hotkey_picks_piece(key, expected):
 def test_promotion_hotkey_no_op_when_no_pending_promotion():
     """With nothing to promote, Q falls through (_handle_promotion_key returns False)."""
     app = _make_app()
-    handled = app.input_router._handle_promotion_key(_key_event(pg.K_q))
+    handled = app.game._handle_promotion_key(_key_event(pg.K_q))
     assert handled is False
 
 
@@ -133,24 +140,24 @@ def test_r_during_promotion_picks_rook_not_resign():
     """Promotion picker takes priority over the resign hotkey when active."""
     app = _make_app()
     _setup_promotion_pending(app, PieceColor.WHITE)
-    app.input_router._handle_shortcut_key(_key_event(pg.K_r))
+    app.game.handle_key(_key_event(pg.K_r))
     assert app.confirm_modal.is_visible() is False
-    assert app.board.pending_promotion_square is None
+    assert app.game.board.pending_promotion_square is None
 
 
 def test_confirm_modal_blocks_promotion_hotkey():
     """Regression: Q/R/B/N used to reach _handle_promotion_key before the
     confirm-modal guard, so a promotion could be applied behind an open
-    resign-confirm modal. The guard now runs first."""
+    resign-confirm modal. The router's check_events forwards keys to the
+    topmost visible modal and never reaches screen.handle_key at all."""
     app = _make_app()
     dst = _setup_promotion_pending(app, PieceColor.WHITE)
     app.confirm_modal.show("Tap out?", on_yes=lambda: None)
-    history_before = list(app.match.move_history)
-    handled = app.input_router._handle_shortcut_key(_key_event(pg.K_q))
-    assert handled is False
-    assert app.board.pending_promotion_square == dst
-    assert app.match.move_history == history_before
-    assert app.backend.state[dst.row][dst.col].type == PieceType.PAWN
+    history_before = list(app.game.match.move_history)
+    _dispatch(app, _key_event(pg.K_q))
+    assert app.game.board.pending_promotion_square == dst
+    assert app.game.match.move_history == history_before
+    assert app.game.match.backend.state[dst.row][dst.col].type == PieceType.PAWN
 
 
 def test_fullscreen_hotkey_is_documented():

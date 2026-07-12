@@ -90,7 +90,7 @@ def test_finished_game_result_final_logs_exactly_once_across_many_frames(
     install_clock(monkeypatch, clock)
     app = start_game(make_app())
     capture_chess_logs.records.clear()
-    app._perform_resign()
+    app.game._perform_resign()
     for _ in range(120):
         clock.advance(16)
         app.draw_frame()

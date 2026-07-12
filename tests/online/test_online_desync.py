@@ -249,8 +249,8 @@ def _online_app():
     app.coordinator.subscribe(app.game)
     app.game.white_name = "Alice"
     app.game.black_name = "Bob"
-    app.match.mode = ONLINE
-    app.match.local_color = PieceColor.WHITE
+    app.game.match.mode = ONLINE
+    app.game.match.local_color = PieceColor.WHITE
     return app
 
 
@@ -261,7 +261,7 @@ def test_remote_move_with_correct_ply_applies():
     app.coordinator._handle_remote_move_applied(payload)
     assert app.coordinator._resyncing is False
     app.coordinator.client.request_state_sync.assert_not_called()
-    assert len(app.match.move_history) == 1
+    assert len(app.game.match.move_history) == 1
 
 
 def test_remote_move_with_skipped_ply_triggers_resync():
@@ -272,7 +272,7 @@ def test_remote_move_with_skipped_ply_triggers_resync():
     app.coordinator._handle_remote_move_applied(payload)
     assert app.coordinator._resyncing is True
     app.coordinator.client.request_state_sync.assert_called_once()
-    assert len(app.match.move_history) == 0
+    assert len(app.game.match.move_history) == 0
 
 
 def test_remote_move_with_illegal_payload_triggers_resync():
@@ -292,7 +292,7 @@ def test_resync_gate_drops_subsequent_move_applied():
     payload = {"from": "e2", "to": "e4", "san": "e4", "ply": 1,
                "clock": {}}
     app.coordinator._handle_remote_move_applied(payload)
-    assert len(app.match.move_history) == 0
+    assert len(app.game.match.move_history) == 0
     app.coordinator.client.request_state_sync.assert_not_called()
 
 
@@ -300,7 +300,7 @@ def test_takeback_applied_with_skipped_ply_triggers_resync():
     """Local has 1 ply but server's post-takeback ply 5 is impossible without misses."""
     from chessshootout.backend.utils import Square
     app = _online_app()
-    app.match.try_move(Square(6, 4), Square(4, 4))
+    app.game.match.try_move(Square(6, 4), Square(4, 4))
     payload = {"clock": {}, "fen": "", "ply": 5}
     app.coordinator._handle_takeback_applied(payload)
     assert app.coordinator._resyncing is True
@@ -310,7 +310,7 @@ def test_takeback_applied_with_skipped_ply_triggers_resync():
 def test_game_resumed_clears_resync_gate():
     app = _online_app()
     app.game._time_control = (300, 0)
-    app.match.setup_clock(300, 0)
+    app.game.match.setup_clock(300, 0)
     app.coordinator._resyncing = True
     payload = {
         "fen": "rnbqkbnr/pppp1ppp/8/4p3/4P3/8/PPPP1PPP/RNBQKBNR w KQkq - 0 2",
@@ -320,7 +320,7 @@ def test_game_resumed_clears_resync_gate():
     }
     app.coordinator._handle_game_resumed(payload)
     assert app.coordinator._resyncing is False
-    assert len(app.match.move_history) == 2
+    assert len(app.game.match.move_history) == 2
 
 
 def test_begin_resync_is_idempotent_during_inflight_request():
@@ -407,7 +407,7 @@ def test_heartbeat_sent_when_interval_elapsed():
     app.coordinator.client.state = "connected"
     app.coordinator._last_heartbeat_sent_ms = pg.time.get_ticks() - 5000
     app.coordinator._send_heartbeat_if_due()
-    app.coordinator.client.send_ping.assert_called_once_with(len(app.match.move_history))
+    app.coordinator.client.send_ping.assert_called_once_with(len(app.game.match.move_history))
 
 
 def test_heartbeat_not_sent_before_interval():
