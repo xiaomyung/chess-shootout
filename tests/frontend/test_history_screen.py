@@ -116,3 +116,32 @@ def test_draw_frame_smoke_on_history_screen():
     app.switch_to("history")
     assert app.screen.name == "history"
     app.draw_frame()
+
+
+def test_history_screen_populates_itself_on_enter(tmp_path, monkeypatch):
+    """HistoryScreen must be self-sufficient: switch_to("history") alone has to
+    render the saved-games list. The shell used to prime history_view.show(...)
+    inside _on_open_history BEFORE navigating, so entering the screen by any other
+    route (Esc back from review, a direct switch_to) landed on an empty view."""
+    monkeypatch.setenv("CHESS_DATA_DIR", str(tmp_path))
+    games = tmp_path / "games"
+    games.mkdir()
+    (games / "local-1.pgn").write_text(
+        '[White "alice"]\n[Black "bob"]\n[Result "1-0"]\n\n1. e4 e5 1-0\n', encoding="utf-8")
+    app = make_app()
+
+    app.switch_to("history")
+
+    assert app.history_view.is_visible() is True
+    assert app.history_view._groups, "the screen loaded the games dir itself"
+
+
+def test_history_screen_hides_its_view_on_exit(tmp_path, monkeypatch):
+    monkeypatch.setenv("CHESS_DATA_DIR", str(tmp_path))
+    app = make_app()
+    app.switch_to("history")
+    assert app.history_view.is_visible() is True
+
+    app.switch_to("menu")
+
+    assert app.history_view.is_visible() is False

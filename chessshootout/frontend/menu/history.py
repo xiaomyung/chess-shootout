@@ -198,9 +198,7 @@ class HistoryView(ScrollHost):
         if rect.width > 0:
             self._rescale(max(min(rect.width / 860, 1.0), 0.72))
 
-    def show(self, directory, pattern, on_open=None, nickname=None):
-        if on_open is not None:
-            self.on_open = on_open
+    def show(self, directory, pattern, nickname=None):
         self.nickname = nickname
         self._groups = build_match_groups(
             scan_pgn_summaries(directory, pattern), nickname)

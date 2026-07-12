@@ -117,7 +117,7 @@ class OnlineCoordinator:
         subscriber = self._subscriber
         if subscriber is None:
             log.error("board-level event %s arrived with no subscriber", method_name)
-        assert subscriber is not None, f"{method_name} arrived with no subscriber"
+            return
         getattr(subscriber, method_name)(payload)
 
     def send_local_move(self, from_sq, to_sq, promotion):

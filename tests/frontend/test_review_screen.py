@@ -298,7 +298,7 @@ def test_open_pgn_button_opens_the_loaded_file(tmp_path, monkeypatch):
     _enter_review(app, path)
     captured = {}
     monkeypatch.setattr(
-        "chessshootout.frontend.screens.review.open_with_default_app",
+        "chessshootout.frontend.pgn_open.open_with_default_app",
         lambda p: captured.setdefault("path", p) or True,
     )
     app.review._on_open_pgn()
@@ -310,7 +310,7 @@ def test_open_pgn_button_toasts_on_failure(tmp_path, monkeypatch):
     app = make_app()
     _enter_review(app, path)
     monkeypatch.setattr(
-        "chessshootout.frontend.screens.review.open_with_default_app", lambda p: False,
+        "chessshootout.frontend.pgn_open.open_with_default_app", lambda p: False,
     )
     app.review._on_open_pgn()
     assert app.toast.message == "Could not open PGN"
@@ -373,3 +373,32 @@ def test_review_without_a_time_control_shows_infinity(tmp_path):
 def test_review_with_a_time_control_shows_it(tmp_path):
     app = _enter_review(make_app(), _write_pgn(tmp_path, "tc.pgn", time_control="600+5"))
     assert app.review.right_menu.game_info["time_control"] == "10+5"
+
+
+def test_review_help_lists_every_key_review_actually_handles(tmp_path):
+    """The help subset is key-filtered off the shared HOTKEYS table, so a key the
+    screen handles but forgets to list is invisible — including `?`, the key that
+    opens the modal you are reading."""
+    app = _enter_review(make_app(), _write_pgn(tmp_path, "help.pgn"))
+    app.review.handle_key(_key(pg.K_QUESTION, "?"))
+    listed = {row[0] for row in app.help_modal.rows}
+
+    assert "?" in listed
+    assert "F11" in listed
+    assert {"← →", "Home", "End", "F", "Esc"} <= listed
+
+
+def test_review_open_pgn_toasts_when_the_file_is_gone(tmp_path, monkeypatch):
+    """Review and the result menu now share one Open-PGN policy: a path that no
+    longer exists toasts "No saved PGN" instead of handing a dead path to the OS."""
+    path = _write_pgn(tmp_path, "vanishing.pgn")
+    app = _enter_review(make_app(), path)
+    opened = []
+    monkeypatch.setattr("chessshootout.frontend.pgn_open.open_with_default_app",
+                        lambda p: opened.append(p) or True)
+    os.remove(path)
+
+    app.review._on_open_pgn()
+
+    assert opened == []
+    assert app.toast.message == "No saved PGN"

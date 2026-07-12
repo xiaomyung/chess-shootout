@@ -303,7 +303,7 @@ def test_open_pgn_invokes_default_app(tmp_path, monkeypatch):
     app.game.result_flow._auto_save_pgn()
     captured = {}
     monkeypatch.setattr(
-        "chessshootout.frontend.game.result_flow.open_with_default_app",
+        "chessshootout.frontend.pgn_open.open_with_default_app",
         lambda path: captured.setdefault("path", path) or True,
     )
     app.game.result_flow._on_open_pgn()
@@ -325,7 +325,7 @@ def test_open_pgn_warns_on_open_failure(tmp_path, monkeypatch):
     app.game.manual_result = "white_wins"
     app.game.result_flow._auto_save_pgn()
     monkeypatch.setattr(
-        "chessshootout.frontend.game.result_flow.open_with_default_app", lambda _path: False,
+        "chessshootout.frontend.pgn_open.open_with_default_app", lambda _path: False,
     )
     app.game.result_flow._on_open_pgn()
     assert app.toast.message == "Could not open PGN"

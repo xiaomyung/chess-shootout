@@ -77,12 +77,16 @@ def test_unsubscribe_is_always_safe():
     assert app.coordinator._subscriber is None
 
 
-def test_board_level_event_with_no_subscriber_asserts(caplog):
+def test_board_level_event_with_no_subscriber_is_dropped_and_logged(caplog):
+    """A board-level event with nobody listening is impossible by design, so it is
+    an ERROR — but it must not take the frame down with it. _drain_online_inbound
+    already swallows every handler exception, so raising here only ever degraded
+    into "log it and carry on" anyway; doing that explicitly is the same behavior
+    with one strategy instead of two."""
     app = make_app(1000, 800)
     assert app.coordinator._subscriber is None
     with caplog.at_level(logging.ERROR, logger="chess.frontend"):
-        with pytest.raises(AssertionError):
-            app.coordinator._forward_board_event("on_remote_move", {"from": "e2", "to": "e4"})
+        app.coordinator._forward_board_event("on_remote_move", {"from": "e2", "to": "e4"})
     assert any("no subscriber" in r.getMessage() for r in caplog.records)
 
 
@@ -90,10 +94,11 @@ def test_board_level_event_with_no_subscriber_asserts(caplog):
     "on_remote_move", "on_skillcheck_required", "on_takeback",
     "on_give_time", "on_spectate",
 ])
-def test_every_board_level_method_is_gated_by_the_subscriber_assert(method_name):
+def test_every_board_level_method_is_gated_by_the_subscriber_check(method_name, caplog):
     app = make_app(1000, 800)
-    with pytest.raises(AssertionError):
+    with caplog.at_level(logging.ERROR, logger="chess.frontend"):
         app.coordinator._forward_board_event(method_name, {})
+    assert any("no subscriber" in r.getMessage() for r in caplog.records)
 
 
 def test_result_with_no_subscriber_still_saves_and_scores(tmp_path, monkeypatch):

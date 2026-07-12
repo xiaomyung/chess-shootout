@@ -1,5 +1,7 @@
 import pygame as pg
 
+from chessshootout import paths
+from chessshootout.infra import env
 from chessshootout.frontend.screens.base import Nav, Screen
 from chessshootout.frontend.window_chrome import WindowChrome
 
@@ -8,11 +10,21 @@ WIDE_MARGIN = 28
 WIDE_MAX_WIDTH = 860
 TOP_MARGIN = 16
 
+PGN_PATTERN = "*.pgn"
+
 
 class HistoryScreen(Screen):
 
     name = "history"
     uses_battle_backdrop = True
+
+    def enter(self, **payload):
+        self.app.history_view.show(
+            str(paths.get_games_dir()), PGN_PATTERN, nickname=env.get_nickname())
+
+    def exit(self):
+        super().exit()
+        self.app.history_view.hide()
 
     def relayout(self, size):
         window_rect = pg.Rect(0, 0, size[0], size[1])

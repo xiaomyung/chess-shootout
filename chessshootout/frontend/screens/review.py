@@ -9,13 +9,13 @@ from chessshootout.domain.pgn.load import (
     format_time_control, load_pgn_into_backend, parse_comment, parse_time_control,
 )
 from chessshootout.infra import env
-from chessshootout.infra.open_external import open_with_default_app
 from chessshootout.frontend.board import Board
 from chessshootout.frontend.layout import compute_layout
 from chessshootout.frontend.modal_registry import ModalSpec
 from chessshootout.frontend.modals.help import HOTKEYS
 from chessshootout.frontend.panels.right import RightMenu, REVIEW_BUTTONS
 from chessshootout.frontend.panels.review_strip import ReviewStrip
+from chessshootout.frontend.pgn_open import open_pgn_or_toast
 from chessshootout.frontend.screens.base import Nav, Screen
 from chessshootout.frontend.visual import backdrop
 from chessshootout.skillcheck.types import KIND_LABEL, SkillCheckOutcome
@@ -23,7 +23,7 @@ from chessshootout.skillcheck.types import KIND_LABEL, SkillCheckOutcome
 
 log = logging.getLogger("chess.frontend")
 
-REVIEW_HOTKEY_KEYS = ("← →", "Home", "End", "F", "Esc")
+REVIEW_HOTKEY_KEYS = ("?", "← →", "Home", "End", "F", "F11", "Esc")
 REVIEW_HOTKEYS = [row for row in HOTKEYS if row[0] in REVIEW_HOTKEY_KEYS]
 
 
@@ -203,8 +203,7 @@ class ReviewScreen(Screen):
         self.app.sound_manager.play_flip()
 
     def _on_open_pgn(self):
-        if not open_with_default_app(self._pgn_path):
-            self.app.toast.show("Could not open PGN")
+        open_pgn_or_toast(self.app.toast, self._pgn_path)
 
     def _compute_game_info(self):
         tc = format_time_control(self._time_control) or "∞"

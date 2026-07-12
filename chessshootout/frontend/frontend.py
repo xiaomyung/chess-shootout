@@ -223,15 +223,9 @@ class Frontend:
         return latest_pgn_in_dir(_games_dir())
 
     def _on_open_history(self):
-        self.history_view.show(
-            _games_dir(), "*.pgn",
-            on_open=self._open_pgn_review,
-            nickname=env.get_nickname(),
-        )
         self.request_nav(Nav("history"))
 
     def _on_menu_back(self):
-        self.history_view.hide()
         self.request_nav(Nav("menu"))
 
     def _on_open_fen_modal(self):

@@ -8,7 +8,7 @@ from chessshootout import paths
 from chessshootout.domain.result_stats import compute_result_stats
 from chessshootout.domain.pgn.generate import format_annotations, generate_pgn, RESULT_CODES
 from chessshootout.backend.pieces import PieceColor
-from chessshootout.infra.open_external import open_with_default_app
+from chessshootout.frontend.pgn_open import open_pgn_or_toast
 
 
 log = logging.getLogger("chess.frontend")
@@ -179,12 +179,7 @@ class ResultFlow:
             self._series_scores[name] = self._series_scores.get(name, 0.0) + 0.5
 
     def _on_open_pgn(self):
-        path = self._last_saved_pgn_path
-        if path is None or not os.path.exists(path):
-            self.app.toast.show("No saved PGN")
-            return
-        if not open_with_default_app(path):
-            self.app.toast.show("Could not open PGN")
+        open_pgn_or_toast(self.app.toast, self._last_saved_pgn_path)
 
     def _probe_games_dir_writable(self):
         games_dir = str(paths.get_games_dir())

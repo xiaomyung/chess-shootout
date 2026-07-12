@@ -588,7 +588,7 @@ def test_open_pgn_after_a_total_save_failure_does_not_launch_an_empty_file(
     monkeypatch.setattr(paths, "get_fallback_data_dir", lambda: tmp_path / "fallback")
     app.game.result_flow._write_pgn_atomic = lambda path, text: "hard_failure"
     opened = []
-    monkeypatch.setattr("chessshootout.frontend.game.result_flow.open_with_default_app",
+    monkeypatch.setattr("chessshootout.frontend.pgn_open.open_with_default_app",
                         lambda path: opened.append(path) or True)
     toasts = []
     monkeypatch.setattr(app.toast, "show", lambda msg, *a, **k: toasts.append(msg))
