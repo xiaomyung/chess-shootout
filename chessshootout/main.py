@@ -42,6 +42,7 @@ def main():
     app = None
     try:
         app = Frontend(window_width, window_height)
+        app.sound_manager.preload()
         log.info("frontend ready window=%dx%d", window_width, window_height)
         app.run()
     except Exception as exc:

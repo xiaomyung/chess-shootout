@@ -45,19 +45,32 @@ class SoundManager:
         )
         self.heartbeat = heartbeat or HeartbeatConfig()
         self._state = STATE_OFF
+        self._slots = {}
 
         if not self.enabled:
-            self._slots = {}
+            self._sounds_dir = None
             self._heartbeat_channel = None
             return
 
-        sounds_dir = Path(sounds_dir)
-        self._slots = {name: self._load_pool(sounds_dir / spec.dst)
-                       for name, spec in SLOTS.items()}
+        self._sounds_dir = Path(sounds_dir)
         self._heartbeat_channel = (
             heartbeat_channel if heartbeat_channel is not None
             else self._reserve_channel(0)
         )
+
+    def preload(self):
+        for name in SLOTS:
+            self._slot_pool(name)
+
+    def _slot_pool(self, name):
+        if not self.enabled:
+            return []
+        pool = self._slots.get(name)
+        if pool is None:
+            spec = SLOTS.get(name)
+            pool = self._load_pool(self._sounds_dir / spec.dst) if spec else []
+            self._slots[name] = pool
+        return pool
 
     def _load_pool(self, dir_path):
         if not dir_path.is_dir():
@@ -111,7 +124,7 @@ class SoundManager:
         self._play_with_master(random.choice(sounds))
 
     def _play(self, slot):
-        self._play_random(self._slots.get(slot, []))
+        self._play_random(self._slot_pool(slot))
 
     def play_move(self, piece_type=None):
         if piece_type is None:
@@ -127,7 +140,7 @@ class SoundManager:
         self._play(gun_slot(piece_type.value))
 
     def play_menu_gun(self, gun):
-        self._play_random_at(self._slots.get(f"gun_{gun}", []),
+        self._play_random_at(self._slot_pool(f"gun_{gun}"),
                              self.master_volume * self.menu_volume)
 
     def play_check(self):
@@ -247,7 +260,7 @@ class SoundManager:
         if channel is None:
             return
         slot = "heartbeat_fast" if state == STATE_FAST else "heartbeat_slow"
-        pool = self._slots.get(slot, [])
+        pool = self._slot_pool(slot)
         if not pool:
             return
         channel.play(random.choice(pool), loops=-1, fade_ms=self.heartbeat.fade_in_ms)

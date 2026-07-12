@@ -23,6 +23,7 @@ from chessshootout.frontend.visual.fonts import get_font, DISPLAY
 _OVERLAY_CACHE = new_cache()
 _PROMO_OPTION_CACHE = new_size_cache()
 _MARKER_CACHE = new_cache()
+_PIECE_IMAGE_CACHE = new_cache()
 
 RESTORE_MS = 480
 RESTORE_DROP_FRAC = 0.8
@@ -171,8 +172,10 @@ class Board:
         for piece_color in PieceColor:
             for piece_type in PieceType:
                 piece = Piece(piece_type, piece_color)
-                image = pg.image.load(piece_png_path(piece)).convert_alpha()
-                self.piece_images_original[(piece_type, piece_color)] = image
+                key = (piece_type, piece_color)
+                self.piece_images_original[key] = memoized_surface(
+                    _PIECE_IMAGE_CACHE, key,
+                    lambda p=piece: pg.image.load(piece_png_path(p)).convert_alpha())
 
     def _cell_rect_base(self, row, col):
         if self.flipped:

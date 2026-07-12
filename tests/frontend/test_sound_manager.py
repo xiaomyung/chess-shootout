@@ -99,10 +99,46 @@ def test_load_pool_is_sorted(tmp_path, manager):
     assert seen == ["a.ogg", "b.ogg", "c.ogg"]
 
 
-def test_construction_builds_a_slot_for_every_registry_entry(tmp_path):
+def test_construction_does_not_eagerly_load_any_slot(tmp_path):
+    """Loading is lazy per slot: construction alone (which happens on every
+    make_app()/Frontend, most of which immediately swap in a mock manager)
+    must do no disk work at all."""
     sm = SoundManager(tmp_path, heartbeat_channel=MagicMock(), master_volume=1.0)
+    assert sm._slots == {}
+
+
+def test_preload_builds_every_slot_so_first_play_never_hits_disk(tmp_path):
+    """The real app calls preload() at startup: first playback mid-game must
+    never pay ogg-decode latency (a first-capture frame hitch)."""
+    sm = SoundManager(tmp_path, heartbeat_channel=MagicMock(), master_volume=1.0)
+    sm.preload()
     assert set(sm._slots) == set(SLOTS)
-    assert all(pool == [] for pool in sm._slots.values())
+
+
+def test_slot_pool_lazily_builds_every_registry_entry(tmp_path):
+    sm = SoundManager(tmp_path, heartbeat_channel=MagicMock(), master_volume=1.0)
+    for name in SLOTS:
+        assert sm._slot_pool(name) == []
+    assert set(sm._slots) == set(SLOTS)
+
+
+def test_slot_pool_only_loads_once_per_slot(tmp_path):
+    sm = SoundManager(tmp_path, heartbeat_channel=MagicMock(), master_volume=1.0)
+    with patch.object(sm, "_load_pool", wraps=sm._load_pool) as load_pool:
+        sm._slot_pool("checkmate")
+        sm._slot_pool("checkmate")
+    load_pool.assert_called_once()
+
+
+def test_slot_pool_unknown_name_is_empty(tmp_path):
+    sm = SoundManager(tmp_path, heartbeat_channel=MagicMock(), master_volume=1.0)
+    assert sm._slot_pool("no_such_slot") == []
+
+
+def test_slot_pool_disabled_manager_never_touches_disk():
+    sm = SoundManager(SOUNDS_DIR, enabled=False)
+    assert sm._slot_pool("checkmate") == []
+    assert sm._slots == {}
 
 
 def test_disabled_manager_has_empty_slots():

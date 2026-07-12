@@ -53,6 +53,18 @@ def _games_dir():
 log = logging.getLogger("chess.frontend")
 
 
+_ICON_CACHE = cache.new_cache()
+
+
+def _load_window_icon():
+    def build():
+        try:
+            return pg.image.load(str(paths.resource_path("assets", "icons", "icon.png")))
+        except (pg.error, OSError):
+            return None
+    return cache.memoized_surface(_ICON_CACHE, "icon", build)
+
+
 class Frontend:
 
     def __init__(self, window_width: int, window_height: int):
@@ -63,11 +75,9 @@ class Frontend:
         self.window = pg.display.set_mode(
             (self.window_width, self.window_height), WINDOW_FLAGS)
         pg.key.set_repeat(400, 35)
-        try:
-            icon = pg.image.load(str(paths.resource_path("assets", "icons", "icon.png")))
+        icon = _load_window_icon()
+        if icon is not None:
             pg.display.set_icon(icon)
-        except (pg.error, OSError):
-            pass
         self._pre_fullscreen_size = None
         self.settings = SettingsController(self)
         self.chrome = WindowChrome(self.window, on_fullscreen=self._apply_fullscreen)
