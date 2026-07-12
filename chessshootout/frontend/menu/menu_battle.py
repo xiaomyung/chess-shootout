@@ -69,6 +69,7 @@ SCRIM_OUTER_ALPHA = 180
 
 _HITMARK_CACHE = new_cache()
 _MENU_SPARK_CACHE = new_cache()
+_BATTLE_PIECE_SRC_CACHE = new_cache()
 
 
 def _hitmark_sprite(spread, length, thick):
@@ -128,12 +129,14 @@ class MenuBattle:
         self._weapons = {}
 
     def _load_piece(self, piece_type, color):
-        try:
-            path = paths.resource_path("assets", "pieces_png", f"{piece_type}_{color}.png")
-            img = pg.image.load(str(path)).convert_alpha()
-            return img.subsurface(img.get_bounding_rect()).copy()
-        except (pg.error, FileNotFoundError, OSError):
-            return None
+        def build():
+            try:
+                path = paths.resource_path("assets", "pieces_png", f"{piece_type}_{color}.png")
+                img = pg.image.load(str(path)).convert_alpha()
+                return img.subsurface(img.get_bounding_rect()).copy()
+            except (pg.error, FileNotFoundError, OSError):
+                return None
+        return memoized_surface(_BATTLE_PIECE_SRC_CACHE, (piece_type, color), build)
 
     def _rnd(self, lo, hi):
         return lo + self.rng.random() * (hi - lo)

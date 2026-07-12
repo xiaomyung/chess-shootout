@@ -7,7 +7,7 @@ import pygame as pg
 
 from chessshootout import paths
 from chessshootout.infra import env, crash_log
-from chessshootout.infra.log_format import configure_basic
+from chessshootout.infra.log_format import configure_basic, silence_third_party_loggers
 from chessshootout.frontend.frontend import Frontend
 
 
@@ -24,6 +24,7 @@ def _parse_args():
 def main():
     args = _parse_args()
     configure_basic(os.environ.get("LOG_LEVEL", "INFO").upper())
+    silence_third_party_loggers()
     handler = crash_log.install_memory_handler()
     log = logging.getLogger("chess.main")
     log.info("client starting pid=%s", os.getpid())
@@ -41,6 +42,7 @@ def main():
     app = None
     try:
         app = Frontend(window_width, window_height)
+        app.sound_manager.preload()
         log.info("frontend ready window=%dx%d", window_width, window_height)
         app.run()
     except Exception as exc:

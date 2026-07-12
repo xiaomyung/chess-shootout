@@ -26,3 +26,12 @@ class SkillCheckOutcome:
     kind: str
     won: bool
     san: str = ""
+
+
+def whiffs_by_ply(outcomes):
+    whiffs = {}
+    for outcome in outcomes:
+        if not outcome.won:
+            whiffs.setdefault(outcome.ply, []).append(
+                (KIND_LABEL.get(outcome.kind, outcome.kind), outcome.san))
+    return whiffs

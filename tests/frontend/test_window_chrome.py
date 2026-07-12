@@ -356,5 +356,5 @@ def test_layout_reserves_titlebar_and_keeps_board_playable_at_min_size():
     env.init_paths()
     from chessshootout.frontend.frontend import Frontend
     app = Frontend(900, 500)
-    assert app.board.board_offset_y >= app.chrome.HEIGHT - 1
-    assert app.board.cell_size > 40
+    assert app.game.board.board_offset_y >= app.chrome.HEIGHT - 1
+    assert app.game.board.cell_size > 40

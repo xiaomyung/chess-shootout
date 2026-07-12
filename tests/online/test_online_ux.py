@@ -14,14 +14,14 @@ import pygame as pg
 import pytest
 
 from tests.conftest import pygame_display
-from chessshootout.domain.match import ONLINE
-from chessshootout.frontend.frontend import (
-    ANIM_MS_DEFAULT, ANIM_MS_MIN, ANIM_MS_MAX,
-    Frontend, compute_animation_ms, RECONNECT_MODAL_DEBOUNCE_MS,
+from chessshootout.frontend.frontend import Frontend
+from chessshootout.frontend.online_coordinator import RECONNECT_MODAL_DEBOUNCE_MS
+from chessshootout.frontend.screens.game import (
+    ANIM_MS_DEFAULT, ANIM_MS_MIN, ANIM_MS_MAX, compute_animation_ms,
 )
 from chessshootout.frontend.visual.colors import Colors
 from chessshootout.frontend.modals.reconnecting import ReconnectingModal
-from chessshootout.frontend.online.events import (
+from chessshootout.frontend.online_coordinator import (
     MATCH_FOUND_SECONDS, NOT_YOUR_TURN_TOASTS, ONLINE_HARD_FAILURE_LABELS,
     ONLINE_HARD_FAILURE_REASONS, ONLINE_TRANSIENT_REASON_LABELS,
 )
@@ -60,9 +60,9 @@ def test_compute_animation_ms(seconds, expected):
     ],
 )
 def test_reset_to_new_game_sets_anim_ms(frontend, time_control, expected):
-    frontend._time_control = time_control
-    frontend._reset_to_new_game()
-    assert frontend.board.animation_duration_ms == expected
+    frontend.game._time_control = time_control
+    frontend.game._reset_to_new_game()
+    assert frontend.game.board.animation_duration_ms == expected
 
 
 def test_reconnecting_modal_starts_hidden():
@@ -122,41 +122,42 @@ def _reconnecting_client():
 def test_reconnecting_overlay_appears_after_debounce(frontend, monkeypatch):
     fake_now = [10_000]
     monkeypatch.setattr(pg.time, "get_ticks", lambda: fake_now[0])
-    frontend.mode = ONLINE
-    frontend.online_client = _reconnecting_client()
-    frontend._update_online_phase()                       # arms the debounce clock
-    assert not frontend.reconnecting_modal.is_visible(), "debounced, not shown instantly"
+    frontend.game.variant = "online"
+    frontend.coordinator.client = _reconnecting_client()
+    frontend.coordinator._update_online_phase()                       # arms the debounce clock
+    assert not frontend.coordinator.reconnecting_modal.is_visible(), \
+        "debounced, not shown instantly"
     fake_now[0] += RECONNECT_MODAL_DEBOUNCE_MS + 50
-    frontend._update_online_phase()
-    assert frontend.reconnecting_modal.is_visible()
+    frontend.coordinator._update_online_phase()
+    assert frontend.coordinator.reconnecting_modal.is_visible()
 
 
 def test_brief_blip_never_flashes_the_modal(frontend, monkeypatch):
     fake_now = [10_000]
     monkeypatch.setattr(pg.time, "get_ticks", lambda: fake_now[0])
-    frontend.mode = ONLINE
+    frontend.game.variant = "online"
     client = _reconnecting_client()
-    frontend.online_client = client
-    frontend._update_online_phase()
+    frontend.coordinator.client = client
+    frontend.coordinator._update_online_phase()
     fake_now[0] += RECONNECT_MODAL_DEBOUNCE_MS - 100       # recover before the threshold
     client.state = "connected"
-    frontend._update_online_phase()
-    assert not frontend.reconnecting_modal.is_visible()
+    frontend.coordinator._update_online_phase()
+    assert not frontend.coordinator.reconnecting_modal.is_visible()
 
 
 def test_reconnecting_overlay_hides_immediately_on_recovery(frontend, monkeypatch):
     fake_now = [10_000]
     monkeypatch.setattr(pg.time, "get_ticks", lambda: fake_now[0])
-    frontend.mode = ONLINE
+    frontend.game.variant = "online"
     client = _reconnecting_client()
-    frontend.online_client = client
-    frontend._update_online_phase()
+    frontend.coordinator.client = client
+    frontend.coordinator._update_online_phase()
     fake_now[0] += RECONNECT_MODAL_DEBOUNCE_MS + 50
-    frontend._update_online_phase()
-    assert frontend.reconnecting_modal.is_visible()
+    frontend.coordinator._update_online_phase()
+    assert frontend.coordinator.reconnecting_modal.is_visible()
     client.state = "connected"
-    frontend._update_online_phase()
-    assert not frontend.reconnecting_modal.is_visible(), \
+    frontend.coordinator._update_online_phase()
+    assert not frontend.coordinator.reconnecting_modal.is_visible(), \
         "hidden the moment the socket is back — no input-blocking linger"
 
 
@@ -164,16 +165,16 @@ def test_reconnecting_overlay_cancel_calls_abandon(frontend, monkeypatch):
     fake_now = [10_000]
     monkeypatch.setattr(pg.time, "get_ticks", lambda: fake_now[0])
     abandoned = []
-    monkeypatch.setattr(frontend, "_abandon_online_game",
+    monkeypatch.setattr(frontend.coordinator, "_abandon_online_game",
                         lambda: abandoned.append(True))
-    frontend.mode = ONLINE
-    frontend.online_client = _reconnecting_client()
-    frontend._update_online_phase()
+    frontend.game.variant = "online"
+    frontend.coordinator.client = _reconnecting_client()
+    frontend.coordinator._update_online_phase()
     fake_now[0] += RECONNECT_MODAL_DEBOUNCE_MS + 50
-    frontend._update_online_phase()
-    frontend.reconnecting_modal.draw()
-    frontend.reconnecting_modal.handle_click(
-        frontend.reconnecting_modal.button_rects["abandon"].center,
+    frontend.coordinator._update_online_phase()
+    frontend.coordinator.reconnecting_modal.draw()
+    frontend.coordinator.reconnecting_modal.handle_click(
+        frontend.coordinator.reconnecting_modal.button_rects["abandon"].center,
     )
     assert abandoned == [True]
 
@@ -181,55 +182,57 @@ def test_reconnecting_overlay_cancel_calls_abandon(frontend, monkeypatch):
 def test_wait_modal_elapsed_tracks_search_time(frontend, monkeypatch):
     fake_now = [10000]
     monkeypatch.setattr(pg.time, "get_ticks", lambda: fake_now[0])
-    frontend.wait_modal.show("Rapid", "10 + 5", on_cancel=lambda: None)
-    frontend._wait_started_at_ms = fake_now[0]
+    frontend.coordinator.wait_modal.show("Rapid", "10 + 5", on_cancel=lambda: None)
+    frontend.coordinator._wait_started_at_ms = fake_now[0]
     fake_now[0] += 7 * 1000
-    frontend._update_online_phase()
-    assert frontend.wait_modal.elapsed == 7
+    frontend.coordinator._update_online_phase()
+    assert frontend.coordinator.wait_modal.elapsed == 7
     fake_now[0] += 60 * 1000
-    frontend._update_online_phase()
-    assert frontend.wait_modal.elapsed == 67
+    frontend.coordinator._update_online_phase()
+    assert frontend.coordinator.wait_modal.elapsed == 67
 
 
 def test_match_found_reveal_holds_then_starts_game(frontend, monkeypatch):
     fake_now = [50000]
     monkeypatch.setattr(pg.time, "get_ticks", lambda: fake_now[0])
     started = []
-    monkeypatch.setattr(frontend, "_start_online_game",
+    monkeypatch.setattr(frontend.coordinator, "_start_online_game",
                         lambda payload: started.append(payload))
-    frontend.wait_modal.show("Rapid", "10 + 5", on_cancel=lambda: None)
-    frontend._wait_started_at_ms = fake_now[0]
+    frontend.coordinator.wait_modal.show("Rapid", "10 + 5", on_cancel=lambda: None)
+    frontend.coordinator._wait_started_at_ms = fake_now[0]
 
     payload = {"your_color": "white", "white_name": "A", "black_name": "B",
                "time_minutes": 5, "increment_seconds": 0}
-    frontend._begin_match_found_transition(payload)
+    frontend.coordinator._begin_match_found_transition(payload)
 
-    assert frontend.match_found_modal.is_visible()
-    assert not frontend.wait_modal.is_visible()
+    assert frontend.coordinator.match_found_modal.is_visible()
+    assert not frontend.coordinator.wait_modal.is_visible()
     fake_now[0] += MATCH_FOUND_SECONDS * 1000 - 50
-    frontend._update_online_phase()
+    frontend.coordinator._update_online_phase()
     assert started == []
-    assert frontend.match_found_modal.is_visible()
+    assert frontend.coordinator.match_found_modal.is_visible()
 
     fake_now[0] += 100
-    frontend._update_online_phase()
+    frontend.coordinator._update_online_phase()
     assert started == [payload]
-    assert not frontend.match_found_modal.is_visible()
+    assert not frontend.coordinator.match_found_modal.is_visible()
     fake_now[0] += 1000
-    frontend._update_online_phase()
+    frontend.coordinator._update_online_phase()
     assert started == [payload]
 
 
 def test_match_found_transition_plays_online_game_start_sound(frontend):
     plays = []
     frontend.sound_manager.play_online_game_start = lambda: plays.append(True)
-    frontend.wait_modal.show("Rapid", "10 + 5", on_cancel=lambda: None)
-    frontend._wait_started_at_ms = pg.time.get_ticks()
-    frontend._begin_match_found_transition({"your_color": "white",
-                                            "white_name": "A",
-                                            "black_name": "B",
-                                            "time_minutes": 5,
-                                            "increment_seconds": 0})
+    frontend.coordinator.wait_modal.show("Rapid", "10 + 5", on_cancel=lambda: None)
+    frontend.coordinator._wait_started_at_ms = pg.time.get_ticks()
+    frontend.coordinator._begin_match_found_transition({
+        "your_color": "white",
+        "white_name": "A",
+        "black_name": "B",
+        "time_minutes": 5,
+        "increment_seconds": 0,
+    })
     assert plays == [True]
 
 
@@ -251,7 +254,7 @@ def test_hard_failure_shows_confirm_modal_with_friendly_label(
 ):
     """Hard failures surface a confirm modal with readable text (no raw engine
     code in the title) and never eat the event into a toast."""
-    frontend._handle_online_error({"reason": reason})
+    frontend.coordinator._handle_online_error({"reason": reason})
     assert frontend.confirm_modal.is_visible()
     assert frontend.confirm_modal.title == expected_title
     assert reason not in frontend.confirm_modal.title
@@ -260,9 +263,9 @@ def test_hard_failure_shows_confirm_modal_with_friendly_label(
 
 def test_room_lost_shows_new_search_modal(frontend, monkeypatch):
     restart_calls = []
-    monkeypatch.setattr(frontend, "_restart_online_search",
+    monkeypatch.setattr(frontend.coordinator, "_restart_online_search",
                         lambda: restart_calls.append(True))
-    frontend._handle_online_error({"reason": "room_lost"})
+    frontend.coordinator._handle_online_error({"reason": "room_lost"})
     assert frontend.confirm_modal.is_visible()
     assert "Server restarted" in frontend.confirm_modal.title
     assert frontend.confirm_modal.yes_label == "New Search"
@@ -275,9 +278,9 @@ def test_room_lost_shows_new_search_modal(frontend, monkeypatch):
 
 def test_room_lost_cancel_returns_to_menu(frontend, monkeypatch):
     abandoned = []
-    monkeypatch.setattr(frontend, "_abandon_online_game",
+    monkeypatch.setattr(frontend.coordinator, "_abandon_online_game",
                         lambda: abandoned.append(True))
-    frontend._handle_online_error({"reason": "room_lost"})
+    frontend.coordinator._handle_online_error({"reason": "room_lost"})
     frontend.confirm_modal.draw()
     frontend.confirm_modal.handle_click(
         frontend.confirm_modal.button_rects["no"].center,
@@ -305,7 +308,7 @@ def test_room_lost_cancel_returns_to_menu(frontend, monkeypatch):
     ],
 )
 def test_transient_error_shows_toast_not_modal(frontend, reason, expected_message):
-    frontend._handle_online_error({"reason": reason})
+    frontend.coordinator._handle_online_error({"reason": reason})
     assert frontend.toast.is_visible()
     assert frontend.toast.message == expected_message
     assert not frontend.confirm_modal.is_visible()
@@ -322,7 +325,7 @@ def test_transient_error_shows_toast_not_modal(frontend, reason, expected_messag
 def test_not_your_turn_without_known_msg_type_stays_silent(frontend, payload):
     """A not_your_turn reply with no recognised msg_type is purely defensive
     (the client already gates by turn) — it must show neither modal nor toast."""
-    frontend._handle_online_error(payload)
+    frontend.coordinator._handle_online_error(payload)
     assert not frontend.confirm_modal.is_visible()
     assert not frontend.toast.is_visible()
 
@@ -336,7 +339,7 @@ def test_not_your_turn_without_known_msg_type_stays_silent(frontend, payload):
 def test_not_your_turn_with_known_msg_type_shows_toast(frontend, msg_type):
     """When the rejected action is tagged with a msg_type the client knows, a
     friendly toast explains why it was rejected — and no modal pops."""
-    frontend._handle_online_error({"reason": "not_your_turn", "msg_type": msg_type})
+    frontend.coordinator._handle_online_error({"reason": "not_your_turn", "msg_type": msg_type})
     assert frontend.toast.is_visible()
     assert frontend.toast.message == NOT_YOUR_TURN_TOASTS[msg_type]
     assert not frontend.confirm_modal.is_visible()
@@ -349,12 +352,12 @@ def test_hard_failure_set_is_well_formed():
 
 def test_menu_mode_skips_board_draw(frontend, monkeypatch):
     drew = []
-    monkeypatch.setattr(frontend.board, "draw_board",
+    monkeypatch.setattr(frontend.game.board, "draw_board",
                         lambda: drew.append(True))
-    frontend.mode = "menu"
+    frontend.switch_to("menu")
     frontend.draw_frame()
     assert drew == []
-    frontend.mode = "single_screen"
+    frontend.switch_to("game", mode="single_screen")
     frontend.draw_frame()
     assert drew == [True]
 
@@ -370,12 +373,12 @@ def test_start_menu_centered_on_window_not_board(frontend):
 
 
 def test_menu_mode_centers_flex_modals_on_window(frontend):
-    frontend.mode = "menu"
+    assert frontend.screen is frontend.menu
     frontend._compute_layout()
     win_w, _ = frontend.window.get_size()
-    assert abs(frontend.fen_input_modal.rect.centerx - win_w / 2) <= 1
-    assert abs(frontend.wait_modal.rect.centerx - win_w / 2) <= 1
-    assert abs(frontend.match_found_modal.rect.centerx - win_w / 2) <= 1
+    assert abs(frontend.menu.fen_input_modal.rect.centerx - win_w / 2) <= 1
+    assert abs(frontend.coordinator.wait_modal.rect.centerx - win_w / 2) <= 1
+    assert abs(frontend.coordinator.match_found_modal.rect.centerx - win_w / 2) <= 1
 
 
 def _board_centerx(board):
@@ -383,65 +386,62 @@ def _board_centerx(board):
 
 
 def test_game_mode_centers_flex_modals_on_board(frontend):
-    from chessshootout.domain.match import SINGLE_SCREEN
-    frontend.mode = SINGLE_SCREEN
+    frontend.switch_to("game")
     frontend._compute_layout()
-    board_cx = _board_centerx(frontend.board)
-    assert abs(frontend.fen_input_modal.rect.centerx - board_cx) <= 4
-    assert abs(frontend.wait_modal.rect.centerx - board_cx) <= 4
-    assert abs(frontend.match_found_modal.rect.centerx - board_cx) <= 4
+    board_cx = _board_centerx(frontend.game.board)
+    assert abs(frontend.coordinator.wait_modal.rect.centerx - board_cx) <= 4
+    assert abs(frontend.coordinator.match_found_modal.rect.centerx - board_cx) <= 4
 
 
 def test_mode_change_relays_modal_rects_via_draw_frame(frontend):
-    from chessshootout.domain.match import SINGLE_SCREEN
-    frontend.mode = "menu"
-    frontend._compute_layout()
+    frontend.switch_to("menu")
     win_w, _ = frontend.window.get_size()
-    assert abs(frontend.wait_modal.rect.centerx - win_w / 2) <= 1
-    frontend.mode = SINGLE_SCREEN
+    assert abs(frontend.coordinator.wait_modal.rect.centerx - win_w / 2) <= 1
+    frontend.switch_to("game")
     frontend.draw_frame()
-    board_cx = _board_centerx(frontend.board)
-    assert abs(frontend.wait_modal.rect.centerx - board_cx) <= 4
+    board_cx = _board_centerx(frontend.game.board)
+    assert abs(frontend.coordinator.wait_modal.rect.centerx - board_cx) <= 4
 
 
 def test_rematch_request_shows_banner_and_hides_initiate_button(frontend):
     """An incoming rematch request pushes a persistent Accept/Deny banner and
     flags the result modal to drop its initiate button (the banner is the affordance)."""
     sent = []
-    frontend.online_client = SimpleNamespace(
+    frontend.coordinator.client = SimpleNamespace(
         send_rematch_response=lambda accept: sent.append(accept),
         send_rematch_request=lambda: sent.append("req"),
     )
-    frontend._chosen_side = "white"
-    frontend.white_name, frontend.black_name = "Me", "Them"
-    frontend._handle_rematch_request()
-    assert frontend._rematch_offered is True
-    assert frontend.result_menu.rematch_offered is True
-    assert not frontend.offer_banners.is_empty()
+    frontend.game._chosen_side = "white"
+    frontend.game.white_name, frontend.game.black_name = "Me", "Them"
+    frontend.coordinator._handle_rematch_request()
+    assert frontend.coordinator._rematch_offered is True
+    assert frontend.game.result_menu.rematch_offered is True
+    assert not frontend.coordinator.offer_banners.is_empty()
 
 
 def test_draw_offer_banner_pops(frontend):
     frontend.sound_manager = MagicMock()
-    frontend.online_client = SimpleNamespace(send_draw_response=lambda v: None)
-    frontend._push_offer_banner("draw_offered")
+    frontend.coordinator.client = SimpleNamespace(send_draw_response=lambda v: None)
+    frontend.coordinator._push_offer_banner("draw_offered")
     frontend.sound_manager.play_toast.assert_called_once()
 
 
 def test_takeback_offer_banner_pops(frontend):
     frontend.sound_manager = MagicMock()
-    frontend.online_client = SimpleNamespace(send_takeback_response=lambda v: None)
-    frontend._push_offer_banner("takeback_offered")
+    frontend.coordinator.client = SimpleNamespace(send_takeback_response=lambda v: None)
+    frontend.coordinator._push_offer_banner("takeback_offered")
     frontend.sound_manager.play_toast.assert_called_once()
 
 
 def test_offer_accept_and_decline_pop_and_send(frontend):
     frontend.sound_manager = MagicMock()
     sent = []
-    frontend.online_client = SimpleNamespace(send_draw_response=sent.append)
+    frontend.coordinator.client = SimpleNamespace(send_draw_response=sent.append)
     captured = {}
-    frontend.offer_banners = MagicMock()
-    frontend.offer_banners.push = lambda *a, on_ok, on_no, **k: captured.update(ok=on_ok, no=on_no)
-    frontend._push_offer_banner("draw_offered")
+    frontend.coordinator.offer_banners = MagicMock()
+    frontend.coordinator.offer_banners.push = (
+        lambda *a, on_ok, on_no, **k: captured.update(ok=on_ok, no=on_no))
+    frontend.coordinator._push_offer_banner("draw_offered")
     frontend.sound_manager.reset_mock()
     captured["ok"]()
     frontend.sound_manager.play_toast.assert_called_once()
@@ -454,101 +454,101 @@ def test_offer_accept_and_decline_pop_and_send(frontend):
 
 def test_on_rematch_accepts_when_offered(frontend):
     sent = []
-    frontend.online_client = SimpleNamespace(
+    frontend.coordinator.client = SimpleNamespace(
         send_rematch_response=lambda accept: sent.append(("resp", accept)),
         send_rematch_request=lambda: sent.append(("req",)))
-    frontend._rematch_offered = True
-    frontend.result_menu.set_rematch_offered(True)
-    frontend._on_rematch()
+    frontend.coordinator._rematch_offered = True
+    frontend.game.result_menu.set_rematch_offered(True)
+    frontend.coordinator._on_rematch()
     assert sent == [("resp", True)]
-    assert frontend._rematch_offered is False
-    assert frontend.result_menu.rematch_offered is False
+    assert frontend.coordinator._rematch_offered is False
+    assert frontend.game.result_menu.rematch_offered is False
 
 
 def test_on_rematch_requests_when_not_offered(frontend):
     sent = []
-    frontend.online_client = SimpleNamespace(
+    frontend.coordinator.client = SimpleNamespace(
         send_rematch_response=lambda accept: sent.append(("resp", accept)),
         send_rematch_request=lambda: sent.append(("req",)))
-    frontend._rematch_offered = False
-    frontend._on_rematch()
+    frontend.coordinator._rematch_offered = False
+    frontend.coordinator._on_rematch()
     assert sent == [("req",)]
 
 
 def _arm_post_game(frontend, **client):
-    frontend.online_client = SimpleNamespace(**client)
-    frontend.mode = ONLINE
-    frontend.manual_result = "draw_agreement"
-    frontend._chosen_side = "white"
-    frontend.white_name, frontend.black_name = "Me", "Them"
+    frontend.coordinator.client = SimpleNamespace(**client)
+    frontend.game.variant = "online"
+    frontend.game.manual_result = "draw_agreement"
+    frontend.game._chosen_side = "white"
+    frontend.game.white_name, frontend.game.black_name = "Me", "Them"
     frontend.start_menu.hide()
 
 
 def test_decline_rematch_sends_false_and_clears(frontend):
     sent = []
-    frontend.online_client = SimpleNamespace(
+    frontend.coordinator.client = SimpleNamespace(
         send_rematch_response=lambda accept: sent.append(accept))
-    frontend._rematch_offered = True
-    frontend.result_menu.set_rematch_offered(True)
-    frontend._decline_rematch()
+    frontend.coordinator._rematch_offered = True
+    frontend.game.result_menu.set_rematch_offered(True)
+    frontend.coordinator._decline_rematch()
     assert sent == [False]
-    assert frontend._rematch_offered is False
-    assert frontend.result_menu.rematch_offered is False
+    assert frontend.coordinator._rematch_offered is False
+    assert frontend.game.result_menu.rematch_offered is False
 
 
 def test_rematch_update_reconnecting_keeps_client(frontend):
     _arm_post_game(frontend, disconnect=lambda: None)
-    frontend._handle_rematch_update({"event": "opponent_reconnecting"})
+    frontend.coordinator._handle_rematch_update({"event": "opponent_reconnecting"})
     assert frontend.toast.is_visible()
-    assert frontend.online_client is not None
-    assert frontend.mode == ONLINE
+    assert frontend.coordinator.client is not None
+    assert frontend.game.variant == "online"
 
 
 def test_rematch_update_declined_bubbles_and_returns_to_menu(frontend):
     """The declined/opponent-left/window-expired paths must re-show the start-menu
     card; the old guard left the player on a blank, unresponsive backdrop."""
     _arm_post_game(frontend, disconnect=lambda: None)
-    frontend._rematch_offered = True
-    frontend._handle_rematch_update({"event": "declined"})
+    frontend.coordinator._rematch_offered = True
+    frontend.coordinator._handle_rematch_update({"event": "declined"})
     assert frontend.toast.is_visible()
-    assert frontend.online_client is None
-    assert frontend.mode == "menu"
-    assert frontend._rematch_offered is False
+    assert frontend.coordinator.client is None
+    assert frontend.screen is frontend.menu
+    assert frontend.coordinator._rematch_offered is False
     assert frontend.start_menu.is_visible()
 
 
 def test_rematch_update_window_expired_returns_to_menu(frontend):
     _arm_post_game(frontend, disconnect=lambda: None)
-    frontend._handle_rematch_update({"event": "window_expired"})
-    assert frontend.online_client is None
-    assert frontend.mode == "menu"
+    frontend.coordinator._handle_rematch_update({"event": "window_expired"})
+    assert frontend.coordinator.client is None
+    assert frontend.screen is frontend.menu
     assert frontend.start_menu.is_visible()
 
 
 def test_rematch_update_declined_logs_the_teardown_reason(frontend, caplog):
     _arm_post_game(frontend, disconnect=lambda: None)
-    frontend._rematch_offered = True
+    frontend.coordinator._rematch_offered = True
     with caplog.at_level(logging.INFO, logger="chess.frontend"):
-        frontend._handle_rematch_update({"event": "declined"})
+        frontend.coordinator._handle_rematch_update({"event": "declined"})
     lines = [r.getMessage() for r in caplog.records
              if r.getMessage().startswith("online session teardown")]
     assert lines == ["online session teardown reason=rematch_window_closed"]
 
 
 def test_abandon_online_game_logs_the_teardown_reason(frontend, caplog):
-    frontend.online_client = SimpleNamespace(disconnect=lambda: None)
+    frontend.coordinator.client = SimpleNamespace(disconnect=lambda: None)
     with caplog.at_level(logging.INFO, logger="chess.frontend"):
-        frontend._abandon_online_game()
+        frontend.coordinator._abandon_online_game()
     lines = [r.getMessage() for r in caplog.records
              if r.getMessage().startswith("online session teardown")]
     assert lines == ["online session teardown reason=reconnect_cancelled"]
 
 
 def test_restart_online_search_logs_the_teardown_reason(frontend, caplog):
-    frontend.online_client = SimpleNamespace(disconnect=lambda: None)
+    frontend.coordinator.client = SimpleNamespace(disconnect=lambda: None)
     frontend._online_config = None
     with caplog.at_level(logging.INFO, logger="chess.frontend"):
-        frontend._restart_online_search()
+        frontend.coordinator._restart_online_search()
     lines = [r.getMessage() for r in caplog.records
              if r.getMessage().startswith("online session teardown")]
     assert lines == ["online session teardown reason=restart_search"]
@@ -557,44 +557,44 @@ def test_restart_online_search_logs_the_teardown_reason(frontend, caplog):
 def test_online_result_redelivery_does_not_double_count(frontend, monkeypatch):
     """A reconnect re-delivers the result; the handler must be idempotent so the
     series score (and PGN auto-save) only fire once per game."""
-    monkeypatch.setattr(frontend.result_flow, "_auto_save_pgn", lambda: None)
-    frontend.mode = ONLINE
-    frontend._chosen_side = "white"
-    frontend.white_name, frontend.black_name = "Me", "Them"
-    frontend.result_flow._series_scores = {}
-    frontend.manual_result = None
+    monkeypatch.setattr(frontend.game.result_flow, "auto_save_pgn", lambda: None)
+    frontend.game.variant = "online"
+    frontend.game._chosen_side = "white"
+    frontend.game.white_name, frontend.game.black_name = "Me", "Them"
+    frontend.game.result_flow.series_scores = {}
+    frontend.game.manual_result = None
     payload = {"reason": "resignation", "winner_color": "white"}
-    frontend._handle_online_result(payload)
-    frontend._handle_online_result(payload)
-    assert frontend.result_flow._series_scores["Me"] == 1.0
-    assert frontend.manual_result == "white_wins_by_resignation"
+    frontend.coordinator._handle_online_result(payload)
+    frontend.coordinator._handle_online_result(payload)
+    assert frontend.game.result_flow.series_scores["Me"] == 1.0
+    assert frontend.game.manual_result == "white_wins_by_resignation"
 
 
 def test_starting_fen_game_drops_lingering_online_client(frontend):
     """A kept-alive post-game online socket must be torn down when a local game
     starts, or its rematch banner / result leaks over the local game."""
     disc = []
-    frontend.online_client = SimpleNamespace(disconnect=lambda: disc.append(True))
-    frontend.mode = "menu"
+    frontend.coordinator.client = SimpleNamespace(disconnect=lambda: disc.append(True))
+    assert frontend.screen is frontend.menu
     ok = frontend._start_game_from_fen(
         "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1")
     assert ok is True
     assert disc == [True]
-    assert frontend.online_client is None
+    assert frontend.coordinator.client is None
 
 
 def test_rematch_update_cancelled_clears_banner_and_keeps_client(frontend):
     _arm_post_game(frontend, disconnect=lambda: None)
-    frontend._push_rematch_banner()
-    frontend.result_menu.set_rematch_offered(True)
-    assert not frontend.offer_banners.is_empty()
-    frontend._handle_rematch_update({"event": "cancelled"})
-    assert frontend.offer_banners.is_empty()
-    assert frontend._rematch_offered is False
-    assert frontend.result_menu.rematch_offered is False
+    frontend.coordinator._push_rematch_banner()
+    frontend.game.result_menu.set_rematch_offered(True)
+    assert not frontend.coordinator.offer_banners.is_empty()
+    frontend.coordinator._handle_rematch_update({"event": "cancelled"})
+    assert frontend.coordinator.offer_banners.is_empty()
+    assert frontend.coordinator._rematch_offered is False
+    assert frontend.game.result_menu.rematch_offered is False
     assert frontend.toast.is_visible()
-    assert frontend.online_client is not None
-    assert frontend.mode == ONLINE
+    assert frontend.coordinator.client is not None
+    assert frontend.game.variant == "online"
 
 
 def test_back_to_menu_keeps_client_and_reshows_banner_post_game(frontend):
@@ -604,17 +604,17 @@ def test_back_to_menu_keeps_client_and_reshows_banner_post_game(frontend):
         send_left_result=lambda: sent.append("left"),
         disconnect=lambda: sent.append("disc"),
     )
-    frontend._rematch_offered = True
+    frontend.coordinator._rematch_offered = True
     frontend._on_back_to_menu()
     assert sent == ["left"]
-    assert frontend.online_client is not None
-    assert frontend.mode == "menu"
-    assert not frontend.offer_banners.is_empty()
+    assert frontend.coordinator.client is not None
+    assert frontend.screen is frontend.menu
+    assert not frontend.coordinator.offer_banners.is_empty()
 
 
 def test_match_found_rematch_uses_rematch_eyebrow(frontend):
-    frontend.match_found_modal.show("A", "B", "white", lambda: None,
-                                    seconds=3, rematch=True)
-    frontend.match_found_modal.window.fill((0, 0, 0))
-    frontend.match_found_modal.draw()
-    assert frontend.match_found_modal.rematch is True
+    frontend.coordinator.match_found_modal.show(
+        "A", "B", "white", lambda: None, seconds=3, rematch=True)
+    frontend.coordinator.match_found_modal.window.fill((0, 0, 0))
+    frontend.coordinator.match_found_modal.draw()
+    assert frontend.coordinator.match_found_modal.rematch is True

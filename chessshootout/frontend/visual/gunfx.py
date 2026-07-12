@@ -163,7 +163,14 @@ def _load_png(*parts):
         return None
 
 
+_BATTLE_ART_CACHE = cache.new_cache()
+
+
 def load_battle_art():
+    return cache.memoized_surface(_BATTLE_ART_CACHE, "art", _build_battle_art)
+
+
+def _build_battle_art():
     data = {"guns": {}, "flashes": {}}
     try:
         manifest = paths.resource_path("assets", "battle_png", "battle_manifest.json")

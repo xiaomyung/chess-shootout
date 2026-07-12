@@ -5,6 +5,8 @@ import time
 LOG_FORMAT = "%(asctime)s.%(msecs)03d %(levelname)-8s %(name)s %(message)s"
 LOG_DATEFMT = "%Y-%m-%d %H:%M:%S"
 
+THIRD_PARTY_QUIET_LOGGERS = ("httpx", "httpcore")
+
 
 class UtcFormatter(logging.Formatter):
     converter = staticmethod(time.gmtime)
@@ -21,6 +23,11 @@ def configure_basic(level):
         handler = logging.StreamHandler()
         handler.setFormatter(make_formatter())
         root.addHandler(handler)
+
+
+def silence_third_party_loggers():
+    for name in THIRD_PARTY_QUIET_LOGGERS:
+        logging.getLogger(name).setLevel(logging.WARNING)
 
 
 def uvicorn_log_config():

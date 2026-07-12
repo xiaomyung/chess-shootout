@@ -108,3 +108,21 @@ def test_applying_uvicorn_config_does_not_disable_app_logger(clean_root):
     app_log.setLevel(logging.INFO)
     logging.config.dictConfig(log_format.uvicorn_log_config())
     assert app_log.disabled is False
+
+
+def test_silence_third_party_loggers_raises_httpx_and_httpcore_to_warning():
+    """httpx (and its httpcore transport) log every single request at INFO —
+    without this, a real client session logs ~8 lines of pure wire noise per
+    /reclaim probe. The client entry point calls this once at startup; the
+    server never does (it doesn't use httpx internally)."""
+    httpx_log = logging.getLogger("httpx")
+    httpcore_log = logging.getLogger("httpcore")
+    httpx_log.setLevel(logging.DEBUG)
+    httpcore_log.setLevel(logging.DEBUG)
+    log_format.silence_third_party_loggers()
+    assert httpx_log.level == logging.WARNING
+    assert httpcore_log.level == logging.WARNING
+
+
+def test_third_party_quiet_loggers_list_names_httpx_and_httpcore():
+    assert set(log_format.THIRD_PARTY_QUIET_LOGGERS) == {"httpx", "httpcore"}

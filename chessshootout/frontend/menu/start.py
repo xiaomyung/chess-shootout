@@ -4,7 +4,7 @@ from chessshootout import paths
 from chessshootout.domain.match import SINGLE_SCREEN, BOT, ONLINE
 from chessshootout.infra import env
 from chessshootout.frontend.visual.colors import Colors
-from chessshootout.frontend.visual.cache import render_text
+from chessshootout.frontend.visual.cache import new_cache, memoized_surface, render_text
 from chessshootout.frontend.visual.draw import rounded_rect_surface, supersample
 from chessshootout.frontend.visual.emoji import blit_emoji, emoji_surface
 from chessshootout.frontend.visual.fonts import get_display_font, get_font, get_mono_font
@@ -70,6 +70,30 @@ def footer_prefix_text():
     return FOOTER_PREFIX.format(label=label)
 
 
+_STARTMENU_ART_CACHE = new_cache()
+
+
+def _load_side_image(color):
+    def build():
+        try:
+            img = pg.image.load(
+                str(paths.resource_path("assets", "pieces_png", f"pawn_{color}.png")))
+            return img.convert_alpha()
+        except (pg.error, OSError):
+            return None
+    return memoized_surface(_STARTMENU_ART_CACHE, ("side", color), build)
+
+
+def _load_brand_mark():
+    def build():
+        try:
+            return pg.image.load(
+                str(paths.resource_path("assets", "icons", "brand_mark.png"))).convert_alpha()
+        except (pg.error, OSError):
+            return None
+    return memoized_surface(_STARTMENU_ART_CACHE, "brand_mark", build)
+
+
 class StartMenu:
 
     def __init__(self, window, callbacks):
@@ -92,19 +116,8 @@ class StartMenu:
         self.apply_default_time_settings()
         self._time_page = 0
 
-        self._side_imgs = {}
-        for color in ("white", "black"):
-            try:
-                img = pg.image.load(
-                    str(paths.resource_path("assets", "pieces_png", f"pawn_{color}.png")))
-                self._side_imgs[color] = img.convert_alpha()
-            except (pg.error, OSError):
-                self._side_imgs[color] = None
-        try:
-            self._brand_mark = pg.image.load(
-                str(paths.resource_path("assets", "icons", "brand_mark.png"))).convert_alpha()
-        except (pg.error, OSError):
-            self._brand_mark = None
+        self._side_imgs = {color: _load_side_image(color) for color in ("white", "black")}
+        self._brand_mark = _load_brand_mark()
 
         self._outer = pg.Rect(0, 0, 0, 0)
         self._scale = 1.0

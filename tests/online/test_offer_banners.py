@@ -9,7 +9,7 @@ import pygame as pg
 from tests.conftest import pygame_display
 from chessshootout.backend.utils import Square
 from chessshootout.frontend.frontend import Frontend
-from chessshootout.frontend.online.banners import OfferBanners
+from chessshootout.frontend.panels.banners import OfferBanners
 from chessshootout.frontend.visual.colors import Colors
 
 
@@ -124,21 +124,21 @@ def _start_local(app):
 def test_banner_does_not_block_board_clicks():
     app = Frontend(1000, 800)
     _start_local(app)
-    app.offer_banners.push(
+    app.coordinator.offer_banners.push(
         "draw_offered", "🤝", "bob", "offers a draw", "Accept", "Decline",
         on_ok=lambda: None, on_no=lambda: None)
     app.draw_frame()
-    center = app.board._cell_rect(6, 4).center
+    center = app.game.board._cell_rect(6, 4).center
     app.input_router.mouse_left_clicked(center)
-    assert app.board.selected_square == Square(6, 4)
+    assert app.game.board.selected_square == Square(6, 4)
 
 
 def test_banner_does_not_gate_menu_overlay():
     app = Frontend(1000, 800)
-    app.offer_banners.push(
+    app.coordinator.offer_banners.push(
         "draw_offered", "🤝", "bob", "offers a draw", "Accept", "Decline",
         on_ok=lambda: None, on_no=lambda: None)
-    assert app._menu_overlay_active() is False
+    assert app._blocking_modal_visible() is False
 
 
 def test_banner_slides_down_into_view():
@@ -151,3 +151,24 @@ def test_banner_slides_down_into_view():
     ob.draw(BOARD)
     assert ob._banners[0]["ok_rect"].top > top_at_push
     assert ob._banners[0]["ok_rect"].top >= BOARD.top
+
+
+def test_banner_rect_follows_the_board_only_on_the_game_screen():
+    """Banners anchor to the board while a game is on screen and to the whole
+    window everywhere else. History used to live inside the old "menu" mode and so
+    got the window rect; keying off `screen is not menu` handed it (and review) the
+    hidden game board's rect instead."""
+    from tests.helpers import make_app
+    from chessshootout.frontend.window_chrome import WindowChrome
+
+    app = make_app(1000, 800)
+    full = pg.Rect(0, WindowChrome.HEIGHT, app.window_width,
+                   app.window_height - WindowChrome.HEIGHT)
+
+    assert app._banner_rect() == full
+
+    app.switch_to("game")
+    assert app._banner_rect() == app.game.board.rect
+
+    app.switch_to("history")
+    assert app._banner_rect() == full

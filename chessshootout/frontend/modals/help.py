@@ -37,6 +37,7 @@ class HelpModal(BaseModal, ScrollHost):
     def __init__(self, window):
         super().__init__(window)
         self.button_rects = {}
+        self.rows = []
         self._scroll_px = 0.0
         self._content_px = 0
         self._line_h = 1
@@ -66,8 +67,9 @@ class HelpModal(BaseModal, ScrollHost):
         self.key_font = get_mono_font(ROW_FONT_SIZE)
         self.button_font = get_font(BUTTON_FONT_SIZE, bold=True)
 
-    def show(self):
+    def show(self, rows):
         super().show()
+        self.rows = rows
         self._scroll_px = 0.0
         self.scroll.cancel()
 
@@ -107,7 +109,7 @@ class HelpModal(BaseModal, ScrollHost):
     def _draw_rows(self, rows_rect):
         self._line_h = self.row_font.get_height() + ROW_PAD_Y
         line_h = self._line_h
-        self._content_px = len(HOTKEYS) * line_h
+        self._content_px = len(self.rows) * line_h
         max_px = max(0, self._content_px - rows_rect.height)
         self._scroll_px = max(0.0, min(self._scroll_px, max_px))
         first, sub, n_draw = self.scroll.row_window(rows_rect, line_h)
@@ -118,7 +120,7 @@ class HelpModal(BaseModal, ScrollHost):
             inner_w = rows_rect.width
             key_col_w = int(inner_w * 0.35)
             desc_col_w = inner_w - key_col_w - self.padding
-            shown = HOTKEYS[first:first + n_draw]
+            shown = self.rows[first:first + n_draw]
             y0 = rows_rect.y - sub
             for i, (key, desc) in enumerate(shown):
                 row_y = y0 + i * line_h

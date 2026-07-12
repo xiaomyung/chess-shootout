@@ -5,9 +5,9 @@ rows, opens a game into review on click, and returns to the card via its Menu bu
 
 import pygame as pg
 
-import chessshootout.frontend.menu.history as histmod
+import chessshootout.frontend.panels.history_view as histmod
 from tests.conftest import pygame_display
-from chessshootout.frontend.menu.history import (
+from chessshootout.frontend.panels.history_view import (
     CARD_CACHE_MAX, CARD_GAP, SCROLLBAR_GUTTER, HistoryView,
 )
 from chessshootout.frontend.visual.colors import Colors
@@ -144,7 +144,7 @@ def test_non_participant_decisive_game_shows_gray_white_perspective_letter(tmp_p
     view = _view(tmp_path, nickname="alice")
     outcomes = sorted(o for g in view._groups for o in g.outcomes)
     assert outcomes == ["spec_loss", "spec_win"]
-    from chessshootout.frontend.menu.history import _BADGE_TEXT, _BADGE_COLOR
+    from chessshootout.frontend.panels.history_view import _BADGE_TEXT, _BADGE_COLOR
     from chessshootout.frontend.visual.colors import Colors
     assert _BADGE_TEXT["spec_win"] == "W"
     assert _BADGE_TEXT["spec_loss"] == "L"

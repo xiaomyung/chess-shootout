@@ -83,3 +83,21 @@ def arena_background(size, center=(0.5, 0.18)):
         pg.draw.line(floor, (fr, fg, fb, a), (0, row), (w, row))
     surf.blit(floor, (0, h - floor_h))
     return dither(surf)
+
+
+class ArenaBackdrop:
+
+    def __init__(self):
+        self._cache = None
+
+    def draw(self, window, board_rect):
+        size = window.get_size()
+        w, h = size
+        if w <= 0 or h <= 0:
+            return
+        center = board_rect.center
+        key = (size, center)
+        if self._cache is None or self._cache[0] != key:
+            surface = arena_background(size, (center[0] / w, center[1] / h))
+            self._cache = (key, surface.convert())
+        window.blit(self._cache[1], (0, 0))

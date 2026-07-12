@@ -1,3 +1,4 @@
+import glob
 import os
 import re
 from dataclasses import dataclass, field
@@ -30,6 +31,9 @@ class PgnSummary:
     reason: str = ""
     category: str = "Casual"
 
+
+BULLET_MAX_MINUTES = 3
+BLITZ_MAX_MINUTES = 10
 
 _TAG_RE = re.compile(r'\[(\w+)\s+"([^"]*)"\]')
 _RESULT_TOKEN_RE = re.compile(r"^(1-0|0-1|1/2-1/2|\*)$")
@@ -87,6 +91,14 @@ def termination_reason(result_code, termination, last_san):
     return "Unfinished"
 
 
+def time_category_for_minutes(minutes):
+    if minutes < BULLET_MAX_MINUTES:
+        return "Bullet"
+    if minutes < BLITZ_MAX_MINUTES:
+        return "Blitz"
+    return "Rapid"
+
+
 def time_category(time_control_text):
     if not time_control_text or "+" not in time_control_text:
         return "Casual"
@@ -94,11 +106,7 @@ def time_category(time_control_text):
         minutes = int(time_control_text.split("+")[0])
     except ValueError:
         return "Casual"
-    if minutes < 3:
-        return "Bullet"
-    if minutes < 10:
-        return "Blitz"
-    return "Rapid"
+    return time_category_for_minutes(minutes)
 
 
 def format_relative_time(timestamp, now):
@@ -232,6 +240,13 @@ def _format_time_from_filename(filename, mtime):
         except ValueError:
             pass
     return datetime.fromtimestamp(mtime).strftime("%Y.%m.%d %H:%M:%S"), mtime
+
+
+def latest_pgn_in_dir(directory):
+    files = glob.glob(os.path.join(directory, "*.pgn"))
+    if not files:
+        return None
+    return max(files, key=os.path.getmtime)
 
 
 def parse_time_control(value):

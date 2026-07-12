@@ -45,10 +45,10 @@ def finish_transition(app, clock, step=40):
 
 
 def collapse(app, clock):
-    app._toggle_focus(True)
+    app.game._toggle_focus(True)
     finish_transition(app, clock)
 
 
 def expand(app, clock):
-    app._toggle_focus(False)
+    app.game._toggle_focus(False)
     finish_transition(app, clock)

@@ -5,6 +5,7 @@ from chessshootout.domain.match import Match
 from chessshootout.backend.pieces import PieceType, PieceColor
 from chessshootout.backend.utils import Square
 from chessshootout.frontend.board import Board
+from chessshootout.frontend.board import board as board_module
 from chessshootout.frontend.visual.colors import Colors
 
 
@@ -170,3 +171,47 @@ def test_flipped_cell_rect_mirrors():
     board.flipped = True
     flipped = board._cell_rect(0, 0)
     assert normal.topleft != flipped.topleft
+
+
+def test_load_assets_shares_piece_surfaces_across_boards():
+    """piece_images_original is populated from a process-wide cache keyed on
+    (type, color), so a second Board.load_assets() call (the review board in
+    Frontend, or a second test's Board) reuses the same decoded Surface
+    instead of re-reading the PNG from disk."""
+    board_module._PIECE_IMAGE_CACHE.clear()
+    win = pg.display.get_surface()
+    match = Match()
+    match.new_game()
+    key = (PieceType.QUEEN, PieceColor.WHITE)
+
+    first = Board(win, match)
+    first.load_assets()
+    second = Board(win, match)
+    second.load_assets()
+
+    assert first.piece_images_original[key] is second.piece_images_original[key]
+    assert len(board_module._PIECE_IMAGE_CACHE) == len(PieceType) * len(PieceColor)
+
+
+def test_piece_image_cache_survives_a_pygame_reinit_cycle():
+    """Unlike pygame Fonts (SDL_ttf handles freed by pg.quit()), decoded image
+    Surfaces stay valid after a display quit/init cycle in the dummy driver --
+    which is exactly what happens at every test-module boundary in the suite.
+    This pins the assumption the piece-image cache relies on to safely live
+    across those boundaries."""
+    win = pg.display.get_surface()
+    match = Match()
+    match.new_game()
+    board = Board(win, match)
+    board.load_assets()
+    key = (PieceType.QUEEN, PieceColor.WHITE)
+    cached = board.piece_images_original[key]
+    before = [cached.get_at((x, x)) for x in range(0, cached.get_width(), 64)]
+
+    pg.quit()
+    pg.init()
+    pg.display.set_mode((780, 780))
+
+    after = [cached.get_at((x, x)) for x in range(0, cached.get_width(), 64)]
+    assert after == before
+    assert sum(sum(px) for px in after) > 0, "pixel data must not have gone blank/garbage"
