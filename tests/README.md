@@ -36,7 +36,7 @@ Tests mirror the source layout, five dirs under `tests/`:
   handlers, rooms, sweep, protocol).
 - `tests/online/` — client-side online multiplayer: the top-level
   `chessshootout/online/` package (`OnlineClient`, `ServerTransport`) plus
-  `chessshootout/frontend/online/` (banners, the events mixin).
+  `chessshootout/frontend/online_coordinator.py` and the offer banners.
 - `tests/infra/` — cross-cutting app lifecycle/config: `paths`, `env`,
   `countries`, `icons`, `log_format`, `crash_log`, `migration`, `utf8`, plus
   whole-repo static guards (`imports`, `logging_hygiene`,

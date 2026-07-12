@@ -16,7 +16,7 @@ from chessshootout.frontend.modals.confirm import ConfirmModal
 from chessshootout.frontend.menu.history import HistoryView
 from chessshootout.frontend.modals.help import HelpModal
 from chessshootout.frontend.modals.match_found import MatchFoundModal
-from chessshootout.frontend.online.banners import OfferBanners
+from chessshootout.frontend.panels.banners import OfferBanners
 from chessshootout.frontend.modals.options import OptionsModal
 from chessshootout.frontend.modals.result import ResultMenu
 from chessshootout.frontend.modals.start import StartMenu

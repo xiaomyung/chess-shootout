@@ -33,8 +33,8 @@ frame — a per-frame function is allowed a guarded error-path log.exception."""
 FRAME_FUNCTIONS = {
     "chessshootout/frontend/frontend.py": ["draw_frame"],
     "chessshootout/frontend/board/board.py": ["draw_board", "update_drag_physics"],
-    "chessshootout/frontend/result_flow.py": ["_update_result_pending"],
-    "chessshootout/frontend/give_time.py": ["_update_give_time_hold"],
+    "chessshootout/frontend/game/result_flow.py": ["_update_result_pending"],
+    "chessshootout/frontend/game/give_time.py": ["_update_give_time_hold"],
 }
 
 

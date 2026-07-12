@@ -10,7 +10,7 @@ from chessshootout.domain.match import ONLINE
 from chessshootout.frontend.modals.match_found import MatchFoundModal
 from chessshootout.frontend.modals.reconnecting import ReconnectingModal
 from chessshootout.frontend.modals.wait import WaitModal
-from chessshootout.frontend.online.banners import OfferBanners
+from chessshootout.frontend.panels.banners import OfferBanners
 from chessshootout.frontend.panels.player_strip import AUTO_END_RED_THRESHOLD_SECONDS
 from chessshootout.frontend.screens.base import Nav
 from chessshootout.infra import env
@@ -561,7 +561,10 @@ class OnlineCoordinator:
         self.app._refresh_load_pgn_availability()
 
     def _return_to_menu_card(self):
-        self.app.switch_to("menu")
+        if self.app.screen is self.app.menu:
+            self.app.start_menu.show()
+        else:
+            self.app.switch_to("menu")
         self._reconnect_probe_attempts = 0
 
     def _abandon_online_game(self):

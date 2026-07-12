@@ -266,3 +266,24 @@ def test_run_teardown_fans_out_on_app_exit_to_every_screen_and_the_coordinator(m
     app.run()
 
     assert set(calls) == {"menu", "game", "history", "review", "coordinator"}
+
+
+def test_search_cancel_on_menu_does_not_self_switch(caplog):
+    """Cancelling matchmaking happens ON the menu screen (the wait modal covers
+    it) — _return_to_menu_card must re-show the start card without a pointless
+    menu -> menu exit/enter cycle polluting the lifecycle log."""
+    app = make_app(1000, 800)
+    app.start_menu.hide()
+    menu = app.screen
+    with caplog.at_level(logging.INFO, logger="chess.frontend"):
+        app.coordinator._return_to_menu_card()
+    assert app.screen is menu
+    assert app.start_menu.is_visible() is True
+    assert not any("screen switch" in r.getMessage() for r in caplog.records)
+
+
+def test_return_to_menu_from_game_still_switches():
+    app = start_single_screen(make_app(1000, 800))
+    app.coordinator._return_to_menu_card()
+    assert app.screen is app.menu
+    assert app.start_menu.is_visible() is True

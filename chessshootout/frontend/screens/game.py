@@ -36,11 +36,11 @@ from chessshootout.frontend.layout import compute_layout
 from chessshootout.frontend.visual import backdrop
 from chessshootout.frontend.visual import cache
 from chessshootout.frontend.visual.effects import TAKEOVER_TOTAL_MS
-from chessshootout.frontend.result_flow import (
+from chessshootout.frontend.game.result_flow import (
     ResultFlow, AUTOSAVE_THROTTLE_MS, RESULT_TEXT, _score_str,
 )
-from chessshootout.frontend.skillcheck_session import SkillcheckSession
-from chessshootout.frontend.give_time import GiveTimeHold
+from chessshootout.frontend.game.skillcheck_session import SkillcheckSession
+from chessshootout.frontend.game.give_time import GiveTimeHold
 from chessshootout.server.protocol import FIRST_MOVE_ABORT_SECONDS, GRACE_SECONDS
 from chessshootout.online.client import RECONNECT_TOTAL_SECONDS
 

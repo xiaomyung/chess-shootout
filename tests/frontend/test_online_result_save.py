@@ -18,7 +18,7 @@ from tests.conftest import pygame_display
 from chessshootout.backend.utils import coord_from_square
 from chessshootout.domain.match import SINGLE_SCREEN
 from chessshootout.frontend.frontend import Frontend
-from chessshootout.frontend.result_flow import RESULT_CONFIRM_TIMEOUT_MS
+from chessshootout.frontend.game.result_flow import RESULT_CONFIRM_TIMEOUT_MS
 from tests.helpers import BLACK, B, K, P, Q, WHITE, make_backend, piece, sq
 
 

@@ -9,7 +9,7 @@ import pygame as pg
 from tests.conftest import pygame_display
 from chessshootout.backend.utils import Square
 from chessshootout.frontend.frontend import Frontend
-from chessshootout.frontend.online.banners import OfferBanners
+from chessshootout.frontend.panels.banners import OfferBanners
 from chessshootout.frontend.visual.colors import Colors
 
 

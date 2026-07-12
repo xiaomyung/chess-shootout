@@ -22,7 +22,7 @@ from tests.conftest import pygame_display
 from chessshootout import paths
 from chessshootout.backend.utils import coord_from_square
 from chessshootout.frontend.frontend import Frontend
-from chessshootout.frontend.result_flow import AUTOSAVE_THROTTLE_MS
+from chessshootout.frontend.game.result_flow import AUTOSAVE_THROTTLE_MS
 from chessshootout.online.client import Event
 from tests.helpers import B, BLACK, K, P, Q, WHITE, make_backend, piece, sq
 
@@ -380,7 +380,7 @@ class _FrozenDatetime(datetime):
 
 
 def test_filename_collision_within_one_second_gets_dash2_suffix(tmp_path, monkeypatch):
-    monkeypatch.setattr("chessshootout.frontend.result_flow.datetime", _FrozenDatetime)
+    monkeypatch.setattr("chessshootout.frontend.game.result_flow.datetime", _FrozenDatetime)
 
     app1 = _local_app(tmp_path, monkeypatch)
     _e4(app1)
