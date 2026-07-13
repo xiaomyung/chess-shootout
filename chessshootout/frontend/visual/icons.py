@@ -145,3 +145,159 @@ def draw_eye(window, rect, color, off=False):
 
     _blit_icon(window, rect, side, ("eye", side, str(color), off),
                lambda: supersample(side, render, scale=6))
+
+
+_PLAY_TRIANGLE = [(8, 5), (8, 19), (19, 12)]
+
+
+def draw_play(window, rect, color):
+    side = _icon_side(rect)
+    if side < 4:
+        return
+    col = pg.Color(color)
+
+    def render(surf, k):
+        u = side * k / 24.0
+        pg.draw.polygon(surf, col, [(x * u, y * u) for x, y in _PLAY_TRIANGLE])
+
+    _blit_icon(window, rect, side, ("play", side, str(color)),
+               lambda: supersample(side, render))
+
+
+def draw_clock(window, rect, color):
+    side = _icon_side(rect, 0.82)
+    if side < 6:
+        return
+    col = pg.Color(color)
+
+    def render(surf, k):
+        u = side * k / 24.0
+        lw = max(int(1.7 * u), 2)
+        cx, cy, r = 12 * u, 12.5 * u, 8 * u
+        pg.draw.circle(surf, col, (int(cx), int(cy)), int(r), width=lw)
+        pg.draw.line(surf, col, (cx, cy), (cx, cy - r * 0.62), lw)
+        pg.draw.line(surf, col, (cx, cy), (cx + r * 0.48, cy + r * 0.24), lw)
+
+    _blit_icon(window, rect, side, ("clock", side, str(color)),
+               lambda: supersample(side, render, scale=6))
+
+
+_MEDAL_RIBBON_L = [(9, 15), (9, 21), (12, 18.5)]
+_MEDAL_RIBBON_R = [(15, 15), (15, 21), (12, 18.5)]
+
+
+def draw_medal(window, rect, color):
+    side = _icon_side(rect, 0.82)
+    if side < 6:
+        return
+    col = pg.Color(color)
+
+    def render(surf, k):
+        u = side * k / 24.0
+        lw = max(int(1.6 * u), 2)
+        cx, cy, r = 12 * u, 9.5 * u, 6 * u
+        pg.draw.circle(surf, col, (int(cx), int(cy)), int(r), width=lw)
+        pg.draw.polygon(surf, col, [
+            (cx, cy - r * 0.5), (cx + r * 0.5, cy), (cx, cy + r * 0.5), (cx - r * 0.5, cy)])
+        pg.draw.polygon(surf, col, [(x * u, y * u) for x, y in _MEDAL_RIBBON_L])
+        pg.draw.polygon(surf, col, [(x * u, y * u) for x, y in _MEDAL_RIBBON_R])
+
+    _blit_icon(window, rect, side, ("medal", side, str(color)),
+               lambda: supersample(side, render, scale=6))
+
+
+def draw_swords(window, rect, color):
+    side = _icon_side(rect, 0.86)
+    if side < 6:
+        return
+    col = pg.Color(color)
+
+    def render(surf, k):
+        u = side * k / 24.0
+        lw = max(int(1.8 * u), 2)
+        pg.draw.line(surf, col, (5 * u, 5 * u), (19 * u, 19 * u), lw)
+        pg.draw.line(surf, col, (19 * u, 5 * u), (5 * u, 19 * u), lw)
+        guard = 2.6 * u
+        pg.draw.line(surf, col, (12 * u - guard, 12 * u - guard * 0.35),
+                     (12 * u + guard, 12 * u + guard * 0.35), lw)
+        pg.draw.line(surf, col, (12 * u - guard, 12 * u + guard * 0.35),
+                     (12 * u + guard, 12 * u - guard * 0.35), lw)
+        pg.draw.circle(surf, col, (int(5 * u), int(19 * u)), int(1.6 * u))
+        pg.draw.circle(surf, col, (int(19 * u), int(19 * u)), int(1.6 * u))
+
+    _blit_icon(window, rect, side, ("swords", side, str(color)),
+               lambda: supersample(side, render, scale=6))
+
+
+def draw_people(window, rect, color):
+    side = _icon_side(rect, 0.82)
+    if side < 6:
+        return
+    col = pg.Color(color)
+
+    def render(surf, k):
+        u = side * k / 24.0
+        lw = max(int(1.6 * u), 2)
+        pg.draw.circle(surf, col, (int(8 * u), int(8.5 * u)), int(2.6 * u), width=lw)
+        pg.draw.arc(surf, col, pg.Rect(2 * u, 11 * u, 12 * u, 11 * u), 0.15,
+                    math.pi - 0.15, lw)
+        pg.draw.circle(surf, col, (int(15.5 * u), int(9.5 * u)), int(3.2 * u), width=lw)
+        pg.draw.arc(surf, col, pg.Rect(8.5 * u, 12.3 * u, 14 * u, 12 * u), 0.1,
+                    math.pi - 0.1, lw)
+
+    _blit_icon(window, rect, side, ("people", side, str(color)),
+               lambda: supersample(side, render, scale=6))
+
+
+def draw_gear(window, rect, color):
+    side = _icon_side(rect, 0.86)
+    if side < 6:
+        return
+    col = pg.Color(color)
+
+    def render(surf, k):
+        u = side * k / 24.0
+        cx, cy = 12 * u, 12 * u
+        r0, r1 = 5.2 * u, 8.4 * u
+        hw_base, hw_tip = 1.9 * u, 1.0 * u
+        teeth = 8
+        for i in range(teeth):
+            a = math.tau * i / teeth
+            dx, dy = math.cos(a), math.sin(a)
+            px, py = -dy, dx
+            pg.draw.polygon(surf, col, [
+                (cx + dx * r0 + px * hw_base, cy + dy * r0 + py * hw_base),
+                (cx + dx * r0 - px * hw_base, cy + dy * r0 - py * hw_base),
+                (cx + dx * r1 - px * hw_tip, cy + dy * r1 - py * hw_tip),
+                (cx + dx * r1 + px * hw_tip, cy + dy * r1 + py * hw_tip),
+            ])
+        hole_r = 2.1 * u
+        pg.draw.circle(surf, col, (int(cx), int(cy)), int(r0), width=int(r0 - hole_r))
+
+    _blit_icon(window, rect, side, ("gear", side, str(color)),
+               lambda: supersample(side, render, scale=6))
+
+
+def draw_reticle(window, rect, color, alpha=255):
+    side = _icon_side(rect, 0.9)
+    if side < 6:
+        return
+    col = pg.Color(color)
+
+    def render(surf, k):
+        u = side * k / 24.0
+        cx, cy = 12 * u, 12 * u
+        r = 7 * u
+        lw = max(int(1.6 * u), 2)
+        pg.draw.circle(surf, col, (int(cx), int(cy)), int(r), width=lw)
+        tick, gap = 3.2 * u, 1.6 * u
+        for dx, dy in ((0, -1), (0, 1), (-1, 0), (1, 0)):
+            x0, y0 = cx + dx * (r + gap), cy + dy * (r + gap)
+            x1, y1 = cx + dx * (r + gap + tick), cy + dy * (r + gap + tick)
+            pg.draw.line(surf, col, (x0, y0), (x1, y1), lw)
+        pg.draw.circle(surf, col, (int(cx), int(cy)), max(int(1.6 * u), 2))
+
+    surf = memoized_surface(_ICON_CACHE, ("reticle", side, str(color)),
+                             lambda: supersample(side, render, scale=6))
+    surf.set_alpha(max(0, min(255, int(alpha))))
+    window.blit(surf, (rect.centerx - side // 2, rect.centery - side // 2))

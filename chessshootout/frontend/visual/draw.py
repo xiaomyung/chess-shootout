@@ -126,3 +126,35 @@ def rounded_rect_surface(size, radius, fill, border=None, border_width=1):
                              width=max(int(border_width * k), 1), border_radius=r)
         return supersample(size, render)
     return memoized_surface(_ROUNDED_RECT_CACHE, key, build)
+
+
+_CUT_RECT_CACHE = new_cache()
+_CUT_CORNERS = ("tl", "tr", "br", "bl")
+
+
+def _cut_rect_points(w, h, cut, corners):
+    c = max(0.0, min(cut, w / 2, h / 2))
+    pts = []
+    pts += [(0, c), (c, 0)] if "tl" in corners and c > 0 else [(0, 0)]
+    pts += [(w - c, 0), (w, c)] if "tr" in corners and c > 0 else [(w, 0)]
+    pts += [(w, h - c), (w - c, h)] if "br" in corners and c > 0 else [(w, h)]
+    pts += [(c, h), (0, h - c)] if "bl" in corners and c > 0 else [(0, h)]
+    return pts
+
+
+def cut_rect_surface(size, cut, fill, border=None, border_width=1, corners=("tr",)):
+    size_key = size if isinstance(size, int) else tuple(size)
+    corner_key = tuple(c for c in _CUT_CORNERS if c in corners)
+    key = (size_key, int(cut), str(fill), None if border is None else str(border),
+           border_width, corner_key)
+
+    def build():
+        def render(surf, k):
+            w, h = surf.get_size()
+            pts = _cut_rect_points(w, h, cut * k, corners)
+            pg.draw.polygon(surf, pg.Color(fill), pts)
+            if border is not None:
+                pg.draw.polygon(surf, pg.Color(border), pts,
+                                width=max(int(border_width * k), 1))
+        return supersample(size, render)
+    return memoized_surface(_CUT_RECT_CACHE, key, build)
