@@ -93,7 +93,7 @@ def _import_targets(tree):
 
 def test_no_screen_module_imports_a_sibling_screen_module():
     files = [p for p in _iter_py_files(SCREENS_ROOT) if not p.endswith("__init__.py")]
-    assert len(files) >= 5, f"only found {len(files)} screen files, guard root is likely wrong"
+    assert len(files) >= 4, f"only found {len(files)} screen files, guard root is likely wrong"
     offenders = []
     for path in files:
         stem = os.path.splitext(os.path.basename(path))[0]

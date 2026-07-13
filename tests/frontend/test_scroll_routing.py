@@ -38,7 +38,7 @@ def _game_app(n_moves=200):
 def test_active_scrollable_menu_then_game():
     app = Frontend(1000, 800)
     assert app.input_router._active_scrollable() is None
-    app.switch_to("history")
+    app.menu.goto_history()
     assert app.input_router._active_scrollable() is app.history_view
     app._on_start_game(_config())
     assert app.input_router._active_scrollable() is app.game.right_menu

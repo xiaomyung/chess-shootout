@@ -40,7 +40,7 @@ class ReviewScreen(Screen):
         self.black_name = "Player 2"
         self._time_control = None
         self._pgn_result_tag = None
-        self._return_to = "history"
+        self._return_to = "menu"
         self._skillcheck_log = []
         self._pgn_path = None
         self.backdrop = ArenaBackdrop()
@@ -62,7 +62,7 @@ class ReviewScreen(Screen):
         return self.app.window
 
     def enter(self, **payload):
-        self._return_to = payload.get("return_to", "history")
+        self._return_to = payload.get("return_to", "menu")
         path = payload["pgn_path"]
         self._pgn_path = path
         text = self._read_pgn(path)

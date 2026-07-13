@@ -66,14 +66,12 @@ def test_second_escape_dismisses_quit_prompt_and_restores_menu():
     assert app.running is True
 
 
-def test_menu_history_escape_returns_to_card():
+def test_menu_history_view_escape_returns_to_play_view():
     app = _app()
-    app.switch_to("history")
+    app.menu.goto_history()
     app.input_router._handle_escape()
-    assert app._pending_nav is not None
-    assert app._pending_nav.name == "menu"
-    app._execute_pending_nav()
     assert app.screen.name == "menu"
+    assert app.menu._active_view == "play"
 
 
 def test_game_escape_opens_resign_prompt():
@@ -169,15 +167,15 @@ def test_esc_matrix_per_screen_escape_return_values():
     assert finished_app.game.escape() is True
     assert finished_app.screen is finished_app.menu
 
-    history_app = _app()
-    history_app.switch_to("history")
-    result = history_app.history.escape()
-    assert result == Nav("menu")
+    menu_history_app = _app()
+    menu_history_app.menu.goto_history()
+    assert menu_history_app.menu.escape() is True
+    assert menu_history_app.menu._active_view == "play"
 
     review_app = _app()
-    review_app.review._return_to = "history"
+    review_app.review._return_to = "menu"
     result = review_app.review.escape()
-    assert result == Nav("history")
+    assert result == Nav("menu")
 
 
 def test_skillcheck_swallow_beats_the_global_modal_and_banner_pass():

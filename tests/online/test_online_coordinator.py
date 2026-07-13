@@ -271,7 +271,7 @@ def test_run_teardown_fans_out_on_app_exit_to_every_screen_and_the_coordinator(m
 
     app.run()
 
-    assert set(calls) == {"menu", "game", "history", "review", "coordinator"}
+    assert set(calls) == {"menu", "game", "review", "coordinator"}
 
 
 def test_search_cancel_on_menu_does_not_self_switch(caplog):

@@ -65,7 +65,7 @@ def _captures_pgn(tmp_path, name="captures.pgn"):
     return path
 
 
-def _enter_review(app, path, return_to="history"):
+def _enter_review(app, path, return_to="menu"):
     app.request_nav(Nav("review", {"pgn_path": str(path), "return_to": return_to}))
     app._execute_pending_nav()
     app._execute_pending_nav()
@@ -76,8 +76,8 @@ def test_open_review_from_history_via_real_open_call(tmp_path):
     path = _write_pgn(tmp_path, "local-20260101-120000.pgn")
     app = make_app()
     app._on_open_history()
-    app._execute_pending_nav()
-    assert app.screen.name == "history"
+    assert app.screen.name == "menu"
+    assert app.menu._active_view == "history"
 
     app._open_pgn_review(str(path))
     app._execute_pending_nav()
@@ -101,12 +101,11 @@ def test_review_never_writes_a_pgn(tmp_path):
     assert glob.glob(os.path.join(str(paths.get_games_dir()), "*.pgn")) == []
 
 
-def test_esc_on_review_returns_to_history_end_to_end(tmp_path):
+def test_esc_on_review_returns_to_the_remembered_history_view_end_to_end(tmp_path):
     path = _write_pgn(tmp_path, "test.pgn")
     app = make_app()
     app._on_open_history()
-    app._execute_pending_nav()
-    _enter_review(app, path, return_to="history")
+    _enter_review(app, path, return_to="menu")
     assert app.screen.name == "review"
 
     pg.event.clear()
@@ -114,17 +113,20 @@ def test_esc_on_review_returns_to_history_end_to_end(tmp_path):
     app.input_router.check_events()
     app._execute_pending_nav()
 
-    assert app.screen.name == "history"
+    assert app.screen.name == "menu"
+    assert app.menu._active_view == "history"
 
 
-def test_menu_button_returns_to_history(tmp_path):
+def test_menu_button_returns_to_the_remembered_history_view(tmp_path):
     path = _write_pgn(tmp_path, "test.pgn")
     app = make_app()
-    _enter_review(app, path, return_to="history")
+    app._on_open_history()
+    _enter_review(app, path, return_to="menu")
     assert app.screen.name == "review"
     app.review._on_menu()
     app._execute_pending_nav()
-    assert app.screen.name == "history"
+    assert app.screen.name == "menu"
+    assert app.menu._active_view == "history"
 
 
 def test_return_to_menu_variant(tmp_path):
@@ -139,12 +141,12 @@ def test_return_to_menu_variant(tmp_path):
     assert app.screen.name == "menu"
 
 
-def test_load_failure_toasts_and_returns_to_history(tmp_path):
+def test_load_failure_toasts_and_returns_to_menu(tmp_path):
     bad = tmp_path / "broken.pgn"
     bad.write_text('[White "x"]\n\n1. e4 zz9 *', encoding="utf-8")
     app = make_app()
-    _enter_review(app, bad, return_to="history")
-    assert app.screen.name == "history"
+    _enter_review(app, bad, return_to="menu")
+    assert app.screen.name == "menu"
     assert app.toast.message == "Could not load PGN"
 
 
@@ -341,7 +343,7 @@ def test_review_annotations_do_not_survive_exit(tmp_path):
     app.review.handle_right_release(center)
     assert board.highlighted_squares
 
-    app.switch_to("history")
+    app.switch_to("menu")
 
     assert board.highlighted_squares == set()
     assert board.arrows == []

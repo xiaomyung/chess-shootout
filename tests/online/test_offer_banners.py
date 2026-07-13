@@ -170,5 +170,5 @@ def test_banner_rect_follows_the_board_only_on_the_game_screen():
     app.switch_to("game")
     assert app._banner_rect() == app.game.board.rect
 
-    app.switch_to("history")
+    app.switch_to("menu")
     assert app._banner_rect() == full

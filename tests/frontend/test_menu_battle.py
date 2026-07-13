@@ -4,6 +4,11 @@ The battle is driven by an injected `random.Random(seed)` and explicit
 millisecond timestamps, so every test below is reproducible across xdist
 workers. Rendering tests assert real pixels (entities over the gradient
 backdrop, the scrim darkening the edges) rather than bare draw() calls.
+
+There is no entrance fly-in: the queen exists the instant the arena is
+sized. The battle dodges a LIST of panels (a menu may show a left nav rail,
+a right rail, and a centre card at once), so every reader considers every
+avoid rect. Multi-rect coverage lives alongside the single-rect ports.
 """
 
 import math
@@ -11,7 +16,6 @@ import random
 from unittest.mock import MagicMock
 
 import pygame as pg
-import pytest
 
 from tests.conftest import pygame_display
 from chessshootout.frontend.menu.menu_battle import (
@@ -26,24 +30,27 @@ _pygame_init = pygame_display(1000, 700)
 
 TITLEBAR = 40
 INITIAL_PAWNS = 5
+CENTER_CARD = pg.Rect(300, 130, 400, 440)
+LEFT_RAIL = pg.Rect(0, TITLEBAR, 216, 700 - TITLEBAR)
 
 
-def _intro_battle(seed=7, w=1000, h=700, card=pg.Rect(300, 130, 400, 440),
-                  logo=pg.Rect(470, 60, 52, 52), top_inset=TITLEBAR):
-    """A freshly-launched battle, still playing the entrance intro."""
+def _battle(seed=7, w=1000, h=700, card=CENTER_CARD, top_inset=TITLEBAR):
+    """A running battle: queen already on the field, pawns spawned, one avoid card."""
     b = MenuBattle(pg.display.get_surface(), rng=random.Random(seed))
     b.top_inset = top_inset
     b.set_rect(pg.Rect(0, 0, w, h))
-    b.set_avoid_rect(card)
-    b.set_logo_rect(logo)
+    b.set_avoid_rect(pg.Rect(card))
+    for _ in range(INITIAL_PAWNS):
+        b._spawn_pawn(True)
     return b
 
 
-def _battle(seed=7, w=1000, h=700, card=pg.Rect(300, 130, 400, 440), top_inset=TITLEBAR):
-    """A running battle with the intro already finished and pawns on the field."""
-    b = _intro_battle(seed=seed, w=w, h=h, card=card, top_inset=top_inset)
-    b._intro_active = False
-    b._intro_t = 1.0
+def _multi_battle(seed=7, w=1000, h=700, rects=(LEFT_RAIL, CENTER_CARD), top_inset=TITLEBAR):
+    """A running battle dodging several panels at once."""
+    b = MenuBattle(pg.display.get_surface(), rng=random.Random(seed))
+    b.top_inset = top_inset
+    b.set_rect(pg.Rect(0, 0, w, h))
+    b.set_avoid_rects([pg.Rect(r) for r in rects])
     for _ in range(INITIAL_PAWNS):
         b._spawn_pawn(True)
     return b
@@ -64,75 +71,14 @@ def test_running_battle_has_queen_and_pawns():
     assert all(p["alive"] for p in b.pawns)
 
 
-def test_launch_starts_in_intro_with_no_pawns():
-    b = _intro_battle()
-    assert b._intro_active is True
-    assert b.pawns == []
-
-
-def test_intro_holds_in_the_logo_during_the_start_grace():
-    b = _intro_battle()
-    b.update(1000)
-    b.update(1200)
-    assert b._intro_t == 0.0, "the queen should sit in the logo during the start grace"
-    b.update(1800)
-    assert b._intro_t > 0.0, "the fly-in begins after the grace"
-
-
-def test_intro_finishes_lands_queen_and_says_a_oneliner():
-    from chessshootout.frontend.menu.menu_battle import INTRO_LINES
-    b = _intro_battle()
-    t = 1000
-    while b._intro_active and t < 1000 + 200 * 16:
-        b.update(t)
-        t += 16
-    assert b._intro_active is False, "the intro should finish"
-    assert b.queen["bubble"] is not None
-    assert b.queen["bubble"]["text"] in INTRO_LINES, "the queen should drop a one-liner on landing"
-
-
-@pytest.mark.parametrize("seed", range(10), ids=lambda s: f"seed_{s}")
-def test_queen_lands_fully_inside_the_window_box(seed):
-    b = _intro_battle(seed=seed)
-    t = 1000
-    while b._intro_active and t < 1000 + 300 * 16:
-        b.update(t)
-        t += 16
-    assert not b._intro_active, "the intro should finish"
-    assert b._fully_in_window(b.queen), \
-        "the queen must land with her whole body inside the window"
-
-
-def test_pawns_only_start_after_the_intro():
-    b = _intro_battle()
-    t = 1000
-    for _ in range(40):
-        b.update(t)
-        t += 16
-        if b._intro_active:
-            assert b.pawns == [], "no pawns should appear while the queen is still flying in"
-    for _ in range(260):
-        b.update(t)
-        t += 16
-    assert b.pawns, "pawns should start coming once the queen has landed"
-
-
-def test_intro_queen_is_drawn_on_the_overlay():
-    b = _intro_battle(logo=pg.Rect(450, 300, 60, 60))
-    b.update(1000)
-    b.update(1016)
-    win = pg.display.get_surface()
-    win.fill((0, 0, 0))
-    b.draw_intro_overlay(win)
-    lit = any(win.get_at((x, y))[:3] != (0, 0, 0)
-              for x in range(440, 525) for y in range(285, 365))
-    assert lit, "the flying queen should be drawn on the intro overlay near the logo"
-
-
-def test_landing_arms_the_gun_draw_flourish():
-    b = _intro_battle()
-    b._finish_intro(5000)
-    assert b.queen["draw_anim"] == GUN_DRAW_SEC
+def test_queen_exists_immediately_after_sizing_with_no_intro():
+    b = MenuBattle(pg.display.get_surface(), rng=random.Random(3))
+    b.top_inset = TITLEBAR
+    b.set_rect(pg.Rect(0, 0, 1000, 700))
+    b.set_avoid_rects([CENTER_CARD])
+    assert b.queen is not None, "the queen spawns the instant the arena is sized"
+    assert b.queen["wp"] is not None, "she starts with a waypoint to walk toward"
+    assert not hasattr(b, "_intro_active"), "the fly-in machinery is gone"
 
 
 def test_gun_draw_flourish_decays_to_zero():
@@ -237,7 +183,7 @@ def test_weapon_swap_drops_the_old_gun():
 def test_initial_pawns_spawn_outside_the_card():
     b = _battle()
     for p in b.pawns:
-        assert not b._point_in(b.obstacle, p["x"], p["y"]), "a pawn spawned under the card"
+        assert not b._point_in_any(b.obstacles, p["x"], p["y"]), "a pawn spawned under the card"
 
 
 def test_set_avoid_rect_pushes_existing_entities_out():
@@ -247,8 +193,23 @@ def test_set_avoid_rect_pushes_existing_entities_out():
     b.queen["x"], b.queen["y"] = new_card.center
     b.pawns[0]["x"], b.pawns[0]["y"] = new_card.center
     b.set_avoid_rect(new_card)
-    assert not b._point_in(b.obstacle, b.queen["x"], b.queen["y"])
-    assert not b._point_in(b.obstacle, b.pawns[0]["x"], b.pawns[0]["y"])
+    assert not b._point_in_any(b.obstacles, b.queen["x"], b.queen["y"])
+    assert not b._point_in_any(b.obstacles, b.pawns[0]["x"], b.pawns[0]["y"])
+
+
+def test_set_avoid_rect_is_a_single_element_shim_for_set_avoid_rects():
+    b = _battle()
+    b.set_avoid_rect(pg.Rect(120, 140, 200, 160))
+    assert len(b.avoid_rects) == 1
+    assert b.avoid_rects[0] == pg.Rect(120, 140, 200, 160)
+    assert len(b.obstacles) == 1
+
+
+def test_set_avoid_rects_keeps_only_non_empty_rects():
+    b = _battle()
+    b.set_avoid_rects([pg.Rect(0, 0, 0, 0), CENTER_CARD, pg.Rect(10, 10, 0, 50)])
+    assert b.avoid_rects == [CENTER_CARD], "empty rects are dropped, real panels kept"
+    assert len(b.obstacles) == 1
 
 
 def test_set_rect_rescales_without_respawning():
@@ -264,14 +225,14 @@ def test_set_rect_rescales_without_respawning():
 
 def test_in_obstacle_inside_vs_outside():
     b = _battle()
-    cx, cy = b.avoid_rect.center
-    assert b._point_in(b.obstacle, cx, cy) is True
-    assert b._point_in(b.obstacle, 10, 10) is False
+    cx, cy = b.avoid_rects[0].center
+    assert b._point_in_any(b.obstacles, cx, cy) is True
+    assert b._point_in_any(b.obstacles, 10, 10) is False
 
 
 def test_avoid_pushes_inside_point_to_nearest_edge():
     b = _battle()
-    o = b.obstacle
+    o = b.obstacles[0]
     near_left_x = o[0] + 5
     mid_y = (o[1] + o[3]) / 2
     out_x, out_y = b._push_out(o, near_left_x, mid_y)
@@ -281,30 +242,65 @@ def test_avoid_pushes_inside_point_to_nearest_edge():
 
 def test_avoid_leaves_outside_point_untouched():
     b = _battle()
-    assert b._push_out(b.obstacle, 5, 5) == (5, 5)
+    assert b._push_out(b.obstacles[0], 5, 5) == (5, 5)
+
+
+def test_push_out_all_settles_a_corner_between_two_panels():
+    """A point wedged in the corner where two panels overlap is walked out of both
+    over successive passes (one push into a neighbour, the next out again)."""
+    top_left = pg.Rect(100, 200, 150, 150)
+    bottom_right = pg.Rect(230, 320, 150, 150)
+    b = _multi_battle(rects=(top_left, bottom_right))
+    b.pawns = []
+    obstacles = b.obstacles
+    x, y = 240, 335
+    assert b._point_in_any(obstacles, x, y), "the seed point is inside the corner overlap"
+    x, y = b._push_out_all(obstacles, x, y)
+    assert not b._point_in_any(obstacles, x, y), "push-out clears every overlapping panel"
 
 
 def test_seg_hits_rect_detects_crossing():
     b = _battle()
-    cx, cy = b.avoid_rect.center
-    assert b._seg_hits(b.obstacle, 0, cy, b.rect.width, cy) is True
-    assert b._seg_hits(b.obstacle, 0, 5, b.rect.width, 5) is False
+    cx, cy = b.avoid_rects[0].center
+    assert b._seg_hits(b.obstacles[0], 0, cy, b.rect.width, cy) is True
+    assert b._seg_hits(b.obstacles[0], 0, 5, b.rect.width, 5) is False
+
+
+def test_seg_hits_any_reports_a_crossing_of_any_panel():
+    b = _multi_battle()
+    rail, card = b.obstacles
+    cy = (card[1] + card[3]) / 2
+    assert b._seg_hits_any(b.obstacles, 0, cy, b.rect.width, cy) is True
+    assert b._seg_hits_any(b.obstacles, 260, 5, 280, 6) is False, "the gap above both is clear"
 
 
 def test_route_target_rounds_a_corner_when_blocked():
     b = _battle()
-    o = b.obstacle
+    o = b.obstacles[0]
     cy = (o[1] + o[3]) / 2
-    target = b._route(o, 0, cy, b.rect.width, cy)
+    target = b._route(b.obstacles, 0, cy, b.rect.width, cy)
     assert tuple(target) != (b.rect.width, cy)
     corners = {(o[0] - 22, o[1] - 22), (o[2] + 22, o[1] - 22),
                (o[2] + 22, o[3] + 22), (o[0] - 22, o[3] + 22)}
     assert tuple(target) in corners
 
 
+def test_route_rounds_the_first_panel_it_hits():
+    """When the straight line crosses two panels, it routes around the nearer one."""
+    near = pg.Rect(200, 250, 120, 200)
+    far = pg.Rect(600, 250, 120, 200)
+    b = _multi_battle(rects=(near, far))
+    no = b.obstacles[0]
+    cy = (no[1] + no[3]) / 2
+    target = b._route(b.obstacles, 0, cy, b.rect.width, cy)
+    corners = {(no[0] - 22, no[1] - 22), (no[2] + 22, no[1] - 22),
+               (no[2] + 22, no[3] + 22), (no[0] - 22, no[3] + 22)}
+    assert tuple(target) in corners, "routing rounds the first (nearer) panel"
+
+
 def test_waypoints_stay_in_the_queens_reachable_band():
     b = _battle()
-    qo = b._entity_obstacle(b.queen)
+    qo = b._entity_obstacles(b.queen)
     ymin = b.top_inset + b.queen["sprite_h"]
     for _ in range(300):
         wp = b._rand_waypoint(qo)
@@ -312,24 +308,37 @@ def test_waypoints_stay_in_the_queens_reachable_band():
         assert wp[1] <= b.rect.height + 0.01
 
 
+def test_rand_waypoint_avoids_every_panel():
+    """Rejection sampling never returns a point inside any panel it is handed."""
+    rail = pg.Rect(0, TITLEBAR, 200, 700 - TITLEBAR)
+    card = pg.Rect(430, 200, 240, 280)
+    b = _multi_battle(rects=(rail, card))
+    qo = b._entity_obstacles(b.queen)
+    assert len(qo) == 2
+    for _ in range(300):
+        wp = b._rand_waypoint(qo)
+        assert not b._point_in_any(qo, wp[0], wp[1]), "a waypoint landed inside a panel"
+
+
 def test_route_target_goes_straight_when_clear():
     b = _battle()
-    assert b._route(b.obstacle, 0, 5, 200, 5) == (200, 5)
+    assert b._route(b.obstacles, 0, 5, 200, 5) == (200, 5)
 
 
 def test_no_obstacle_when_avoid_rect_empty():
     b = MenuBattle(pg.display.get_surface(), rng=random.Random(1))
     b.set_rect(pg.Rect(0, 0, 800, 600))
     b.set_avoid_rect(pg.Rect(0, 0, 0, 0))
-    assert b.obstacle is None
-    assert b._push_out(b.obstacle, 400, 300) == (400, 300)
+    assert b.obstacles == []
+    assert b._push_out_all([], 400, 300) == (400, 300)
+    assert b._point_in_any([], 400, 300) is False
 
 
 def test_entity_obstacle_expands_by_full_model_extent():
     b = _battle(card=pg.Rect(400, 250, 300, 200))
-    o = b.obstacle
+    o = b.obstacles[0]
     q = b.queen
-    qo = b._entity_obstacle(q)
+    qo = b._entity_obstacles(q)[0]
     hw = b._art["queen"]["w"] / 2
     assert qo[0] == o[0] - hw
     assert qo[2] == o[2] + hw
@@ -339,15 +348,27 @@ def test_entity_obstacle_expands_by_full_model_extent():
 
 def test_full_model_rect_does_not_overlap_the_card():
     b = _battle(card=pg.Rect(400, 250, 300, 200))
-    o = b.obstacle
+    o = b.obstacles[0]
     q = b.queen
     art_w = b._art["queen"]["w"]
     q["x"], q["y"] = o[0] + 5, (o[1] + o[3]) / 2
-    q["x"], q["y"] = b._push_out(b._entity_obstacle(q), q["x"], q["y"])
+    q["x"], q["y"] = b._push_out_all(b._entity_obstacles(q), q["x"], q["y"])
     left, right = q["x"] - art_w / 2, q["x"] + art_w / 2
     top, bottom = q["y"] - q["sprite_h"], q["y"]
     overlaps = left < o[2] and right > o[0] and top < o[3] and bottom > o[1]
     assert not overlaps, "the queen's whole model rect must clear the card"
+
+
+def test_set_avoid_rects_pushes_entities_out_of_every_panel():
+    b = _battle()
+    b.queen["x"], b.queen["y"] = CENTER_CARD.center
+    b.pawns[0]["x"], b.pawns[0]["y"] = 180, 400
+    b.set_avoid_rects([LEFT_RAIL, CENTER_CARD])
+    assert len(b.obstacles) == 2
+    for ent in (b.queen, b.pawns[0]):
+        assert not b._point_in_any(b._entity_obstacles(ent), ent["x"], ent["y"]), \
+            "the entity's full-model rect still clips a panel"
+        assert not b._point_in_any(b.obstacles, ent["x"], ent["y"])
 
 
 def test_idle_queen_rerolls_waypoint_after_two_seconds():
@@ -355,7 +376,7 @@ def test_idle_queen_rerolls_waypoint_after_two_seconds():
     q = b.queen
     q["anchor_x"], q["anchor_y"], q["anchor_ms"] = q["x"], q["y"], 1000
     q["wp"] = [q["x"], q["y"]]
-    b._unstick_queen(1000 + IDLE_TIMEOUT_MS + 1, b._entity_obstacle(q))
+    b._unstick_queen(1000 + IDLE_TIMEOUT_MS + 1, b._entity_obstacles(q))
     assert q["anchor_ms"] == 1000 + IDLE_TIMEOUT_MS + 1
     assert q["wp"] != [q["x"], q["y"]], "an idle queen should pick a fresh waypoint"
 
@@ -365,7 +386,7 @@ def test_idle_queen_holds_waypoint_before_timeout():
     q = b.queen
     q["anchor_x"], q["anchor_y"], q["anchor_ms"] = q["x"], q["y"], 1000
     q["wp"] = [10.0, 10.0]
-    b._unstick_queen(1000 + IDLE_TIMEOUT_MS - 200, b._entity_obstacle(q))
+    b._unstick_queen(1000 + IDLE_TIMEOUT_MS - 200, b._entity_obstacles(q))
     assert q["wp"] == [10.0, 10.0]
 
 
@@ -374,7 +395,7 @@ def test_moving_queen_resets_idle_anchor():
     q = b.queen
     q["anchor_x"], q["anchor_y"], q["anchor_ms"] = q["x"], q["y"], 1000
     q["x"] += IDLE_RADIUS + 50
-    b._unstick_queen(5000, b._entity_obstacle(q))
+    b._unstick_queen(5000, b._entity_obstacles(q))
     assert q["anchor_x"] == q["x"]
     assert q["anchor_ms"] == 5000
 
@@ -689,30 +710,14 @@ def test_a_kill_bumps_the_ko_counter_into_its_amber_wink():
     assert b.queen["ko_wink_until"] > 5000, "a kill bumps the counter into the amber wink"
 
 
-def test_begin_intro_resets_the_ko_counter():
-    b = _battle()
-    b.queen["kills"], b.queen["ko_wink_until"] = 7, 10 ** 9
-    b.begin_intro()
-    assert b.queen["kills"] == 0 and b.queen["ko_wink_until"] == 0
-
-
-def test_ko_counter_draws_above_the_queen_after_the_intro():
+def test_ko_counter_draws_above_the_queen():
     b = _battle()
     b.pawns = []
     b.queen["x"], b.queen["y"], b.queen["kills"] = 500, 400, 3
     surf = pg.display.get_surface()
     surf.fill((0, 0, 0))
     b._draw_ko_counter(surf)
-    assert _drew_anything(surf), "the counter shows once the queen has landed"
-
-
-def test_ko_counter_hidden_during_the_intro():
-    b = _intro_battle()
-    b.queen["x"], b.queen["y"], b.queen["kills"] = 500, 400, 3
-    surf = pg.display.get_surface()
-    surf.fill((0, 0, 0))
-    b._draw_ko_counter(surf)
-    assert not _drew_anything(surf), "the counter is hidden until the queen lands"
+    assert _drew_anything(surf), "the counter shows above the queen"
 
 
 def test_ko_counter_is_centered_above_the_head():
@@ -737,7 +742,16 @@ def test_fits_above_rejects_top_edge_and_the_card_hitbox():
     b = _battle()
     assert b._fits_above(pg.Rect(40, b.rect.y + b.top_inset + 20, 60, 20)) is True
     assert b._fits_above(pg.Rect(40, b.rect.y + b.top_inset - 5, 60, 20)) is False
-    assert b._fits_above(pg.Rect(b.avoid_rect.x + 10, b.avoid_rect.y + 10, 40, 20)) is False
+    card = b.avoid_rects[0]
+    assert b._fits_above(pg.Rect(card.x + 10, card.y + 10, 40, 20)) is False
+
+
+def test_fits_above_rejects_a_hit_on_any_panel():
+    b = _multi_battle()
+    rail, card = b.avoid_rects
+    assert b._fits_above(pg.Rect(card.x + 10, card.y + 10, 40, 20)) is False
+    assert b._fits_above(pg.Rect(rail.x + 10, rail.y + 10, 40, 20)) is False
+    assert b._fits_above(pg.Rect(250, card.y + 10, 30, 20)) is True, "the gap above clears both"
 
 
 def test_prefer_right_picks_the_side_with_more_room():
@@ -770,7 +784,7 @@ def test_ko_counter_dodges_the_menu_card_hitbox():
     """Head tucked under the menu card (no room above): the badge dodges the card hitbox."""
     b = _battle()
     b.pawns = []
-    card = b.avoid_rect
+    card = b.avoid_rects[0]
     b.queen["x"], b.queen["kills"] = card.centerx, 3
     b.queen["y"] = card.bottom + b.queen["sprite_h"]
     surf = pg.display.get_surface()
@@ -778,6 +792,22 @@ def test_ko_counter_dodges_the_menu_card_hitbox():
     b._draw_ko_counter(surf)
     assert _drew_anything(surf), "the badge still renders"
     assert not _drew_anything(surf, card), "it avoids the menu card hitbox, not just the top edge"
+
+
+def test_ko_counter_dodges_a_second_panel():
+    """A second panel on the right forces the badge aside; it must clear both panels."""
+    card = pg.Rect(300, 130, 400, 440)
+    right = pg.Rect(520, 560, 260, 160)
+    b = _multi_battle(rects=(card, right))
+    b.pawns = []
+    q = b.queen
+    q["x"], q["y"], q["kills"] = 500, 685, 3
+    surf = pg.display.get_surface()
+    surf.fill((0, 0, 0))
+    b._draw_ko_counter(surf)
+    assert _drew_anything(surf), "the badge still renders"
+    assert not _drew_anything(surf, card), "it dodges the centre card"
+    assert not _drew_anything(surf, right), "and the second panel that forced it aside"
 
 
 def test_ko_counter_draws_behind_the_voicelines(monkeypatch):
@@ -874,22 +904,35 @@ def test_update_moves_the_queen():
     assert (b.queen["x"], b.queen["y"]) != (qx, qy)
 
 
-def _model_clears_card(b, ent):
-    o = b.obstacle
+def _model_clears_all(b, ent):
     w = b._art[ent["kind"]]["w"]
     left, right = ent["x"] - w / 2, ent["x"] + w / 2
     top, bottom = ent["y"] - ent["sprite_h"], ent["y"]
-    return not (left < o[2] and right > o[0] and top < o[3] and bottom > o[1])
+    for o in b.obstacles:
+        if left < o[2] and right > o[0] and top < o[3] and bottom > o[1]:
+            return False
+    return True
 
 
 def test_entities_full_models_stay_out_of_the_card_during_play():
     b = _battle()
     for _ in range(200):
         b.update(b._last_ms + 16 if b._last_ms else 1000)
-        assert _model_clears_card(b, b.queen)
+        assert _model_clears_all(b, b.queen)
         for p in b.pawns:
             if p["alive"]:
-                assert _model_clears_card(b, p)
+                assert _model_clears_all(b, p)
+
+
+def test_full_models_clear_every_panel_during_play():
+    b = _multi_battle()
+    assert len(b.obstacles) == 2
+    for _ in range(200):
+        b.update(b._last_ms + 16 if b._last_ms else 1000)
+        assert _model_clears_all(b, b.queen), "the queen's full model clips a panel mid-play"
+        for p in b.pawns:
+            if p["alive"]:
+                assert _model_clears_all(b, p), "a pawn's full model clips a panel mid-play"
 
 
 def test_firing_creates_flash_and_projectiles():
@@ -1140,3 +1183,18 @@ def test_bubble_near_titlebar_shifts_below_it():
     b.draw(win)
     assert not _amber_in_band(win, 0, b.top_inset)
     assert _amber_in_band(win, b.top_inset, b.top_inset + 90)
+
+
+def test_speech_bubble_dodges_every_panel():
+    """A left rail and a centre card flank the queen; her bubble tucks into the gap between,
+    overlapping neither panel."""
+    b = _multi_battle(rects=(LEFT_RAIL, CENTER_CARD))
+    q = b.queen
+    q["x"], q["y"] = 258, 400
+    b._say(q, "GG", "queen", 1000)
+    surf = pg.display.get_surface()
+    surf.fill((0, 0, 0))
+    b._draw_bubble(surf, q, 1300)
+    assert _drew_anything(surf), "the bubble renders"
+    assert not _drew_anything(surf, LEFT_RAIL), "the bubble dodges the left rail"
+    assert not _drew_anything(surf, CENTER_CARD), "the bubble dodges the centre card"

@@ -29,7 +29,6 @@ from chessshootout.frontend.layout import compute_layout
 from chessshootout.frontend.screens.base import Nav, assert_plain_payload
 from chessshootout.frontend.screens.menu import MenuScreen
 from chessshootout.frontend.screens.game import GameScreen
-from chessshootout.frontend.screens.history import HistoryScreen
 from chessshootout.frontend.screens.review import ReviewScreen
 from chessshootout.frontend.window_chrome import (
     WindowChrome, WINDOW_FLAGS, WINDOW_TITLE, MIN_WINDOW_WIDTH, MIN_WINDOW_HEIGHT,
@@ -88,7 +87,6 @@ class Frontend:
         self._frame_times = deque(maxlen=PERF_SAMPLE_COUNT)
         self._last_work_ms = 0.0
         self._last_frame_start = None
-        self._prev_screen_used_backdrop = False
 
         self.sound_manager = SoundManager(paths.SOUNDS_DIR, enabled=pg.mixer.get_init() is not None)
         self.coordinator = OnlineCoordinator(self)
@@ -130,12 +128,10 @@ class Frontend:
 
         self.menu = MenuScreen(self)
         self.game = GameScreen(self)
-        self.history = HistoryScreen(self)
         self.review = ReviewScreen(self)
         self.screens = {
             "menu": self.menu,
             "game": self.game,
-            "history": self.history,
             "review": self.review,
         }
         self.screen = self.screens["menu"]
@@ -217,10 +213,10 @@ class Frontend:
         return latest_pgn_in_dir(_games_dir())
 
     def _on_open_history(self):
-        self.request_nav(Nav("history"))
+        self.menu.goto_history()
 
     def _on_menu_back(self):
-        self.request_nav(Nav("menu"))
+        self.menu.goto_view("play")
 
     def _on_open_fen_modal(self):
         self.menu.fen_input_modal.show(on_submit=self._start_game_from_fen)
@@ -239,7 +235,7 @@ class Frontend:
         return True
 
     def _open_pgn_review(self, path):
-        self.request_nav(Nav("review", {"pgn_path": str(path), "return_to": "history"}))
+        self.request_nav(Nav("review", {"pgn_path": str(path), "return_to": "menu"}))
 
     def _on_start_game(self, config):
         env.set_last_mode(config["mode"])
@@ -389,17 +385,11 @@ class Frontend:
             self.request_nav(nav)
 
         if self.screen.uses_battle_backdrop:
-            if self.screen.name == "menu" and not self._prev_screen_used_backdrop:
-                self.menu_battle.begin_intro()
             self.menu_battle.update(now)
             self.menu_battle.draw(self.window)
             self.menu_battle.draw_scrim(self.window)
-        self._prev_screen_used_backdrop = self.screen.uses_battle_backdrop
 
         self.screen.draw()
-
-        if self.screen.uses_battle_backdrop:
-            self.menu_battle.draw_intro_overlay(self.window)
 
         self.coordinator.offer_banners.draw(self._banner_rect())
         for spec in reversed(self._active_modal_specs()):

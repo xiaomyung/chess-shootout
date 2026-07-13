@@ -113,14 +113,13 @@ def _write_review_pgn(tmp_path):
 
 
 def _enter_history(app):
-    app._on_open_history()
-    app._execute_pending_nav()
+    app.menu.goto_history()
     app.draw_frame()
     return app
 
 
 def _enter_review(app, path):
-    app.request_nav(Nav("review", {"pgn_path": str(path), "return_to": "history"}))
+    app.request_nav(Nav("review", {"pgn_path": str(path), "return_to": "menu"}))
     app._execute_pending_nav()
     app.draw_frame()
     return app
@@ -138,6 +137,7 @@ def _online_ish(app):
 
 
 def _idle_frame_offenders(app, clock, capture, n=100, step=16):
+    app.coordinator._last_reconnect_probe_ms = clock()
     capture.records.clear()
     for _ in range(n):
         clock.advance(step)
@@ -174,6 +174,7 @@ INFO_ALLOWLIST_PREFIXES = (
     "frontend ready",
     "setting persisted",
     "screen switch",
+    "menu view",
     "game start",
     "game enter",
     "game end",
@@ -271,9 +272,9 @@ def test_scripted_local_session_info_lines_match_the_allowlist(
     for expected_prefix in (
         "screen switch menu -> game", "game start mode=single_screen",
         "game enter variant=local", "game end result=",
-        "screen switch game -> menu", "screen switch menu -> history",
-        "screen switch history -> review", "review enter path=",
-        "screen switch review -> history",
+        "screen switch game -> menu", "menu view play -> history",
+        "screen switch menu -> review", "review enter path=",
+        "screen switch review -> menu",
     ):
         assert any(m.startswith(expected_prefix) for m in messages), (
             f"expected story beat missing: {expected_prefix!r} not in {messages}")
