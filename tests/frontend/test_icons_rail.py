@@ -3,13 +3,13 @@ import pytest
 
 from tests.conftest import pygame_display
 from chessshootout.frontend.visual.icons import (
-    draw_clock, draw_gear, draw_medal, draw_people, draw_play, draw_reticle, draw_swords,
+    draw_clock, draw_gear, draw_medal, draw_people, draw_play, draw_reticle, draw_shield,
 )
 
 
 _pygame_init = pygame_display(80, 80)
 
-ICON_FNS = [draw_play, draw_clock, draw_medal, draw_swords, draw_people, draw_gear]
+ICON_FNS = [draw_play, draw_clock, draw_medal, draw_shield, draw_people, draw_gear]
 
 
 def _owned_surface(size=40):

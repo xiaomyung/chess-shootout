@@ -6,6 +6,8 @@ import pygame as pg
 RAIL_W = 216
 RIGHT_W = 312
 MARGIN = 24
+HERO_PAD_LEFT = 48
+HERO_GAP_RIGHT = 24
 SUBVIEW_MAX_W = 860
 SCALE_MIN = 0.72
 SCALE_MAX = 1.0
@@ -29,10 +31,11 @@ def compute_menu_layout(window_width, window_height, top):
     scale = max(SCALE_MIN, min(SCALE_MAX, scale))
 
     rail_rect = pg.Rect(0, top, RAIL_W, avail_h)
-    right_rail_rect = pg.Rect(window_width - MARGIN, top, 0, avail_h)
+    right_rail_rect = pg.Rect(window_width - RIGHT_W - MARGIN, top + MARGIN,
+                              RIGHT_W, max(avail_h - 2 * MARGIN, 1))
 
-    hero_left = RAIL_W + MARGIN
-    hero_right = window_width - RIGHT_W - MARGIN
+    hero_left = RAIL_W + round(HERO_PAD_LEFT * scale)
+    hero_right = right_rail_rect.left - round(HERO_GAP_RIGHT * scale)
     hero_rect = pg.Rect(hero_left, top + MARGIN, max(hero_right - hero_left, 1),
                         max(avail_h - 2 * MARGIN, 1))
 

@@ -206,26 +206,22 @@ def draw_medal(window, rect, color):
                lambda: supersample(side, render, scale=6))
 
 
-def draw_swords(window, rect, color):
-    side = _icon_side(rect, 0.86)
+_SHIELD_BODY = [(5, 4), (19, 4), (19, 11.5), (12, 21), (5, 11.5)]
+
+
+def draw_shield(window, rect, color):
+    side = _icon_side(rect, 0.82)
     if side < 6:
         return
     col = pg.Color(color)
 
     def render(surf, k):
         u = side * k / 24.0
-        lw = max(int(1.8 * u), 2)
-        pg.draw.line(surf, col, (5 * u, 5 * u), (19 * u, 19 * u), lw)
-        pg.draw.line(surf, col, (19 * u, 5 * u), (5 * u, 19 * u), lw)
-        guard = 2.6 * u
-        pg.draw.line(surf, col, (12 * u - guard, 12 * u - guard * 0.35),
-                     (12 * u + guard, 12 * u + guard * 0.35), lw)
-        pg.draw.line(surf, col, (12 * u - guard, 12 * u + guard * 0.35),
-                     (12 * u + guard, 12 * u - guard * 0.35), lw)
-        pg.draw.circle(surf, col, (int(5 * u), int(19 * u)), int(1.6 * u))
-        pg.draw.circle(surf, col, (int(19 * u), int(19 * u)), int(1.6 * u))
+        lw = max(int(1.7 * u), 2)
+        _stroke(surf, col, [(x * u, y * u) for x, y in _SHIELD_BODY], True, lw)
+        pg.draw.line(surf, col, (12 * u, 7 * u), (12 * u, 15 * u), lw)
 
-    _blit_icon(window, rect, side, ("swords", side, str(color)),
+    _blit_icon(window, rect, side, ("shield", side, str(color)),
                lambda: supersample(side, render, scale=6))
 
 

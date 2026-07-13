@@ -8,7 +8,9 @@ import pygame as pg
 from tests.conftest import pygame_display
 from chessshootout import paths
 from chessshootout.frontend.menu.layout import compute_menu_layout
-from chessshootout.frontend.menu.rail import CREDIT_URL, MenuRail, OPTIONS_ROW, ROWS
+from chessshootout.frontend.menu.rail import (
+    CREDIT_URL, ICON_PAD, ICON_SIDE, LABEL_GAP, MenuRail, OPTIONS_ROW, ROWS,
+)
 from chessshootout.frontend.visual.colors import Colors
 from tests.helpers import assert_pixel_color, make_app
 
@@ -48,8 +50,32 @@ def test_active_row_fills_raised_and_stays_flat_when_inactive():
     assert_pixel_color(surf, active.x + 5, active.y + 5, Colors.surface_raised, tol=8)
 
     inactive = rail._row_rects["armory"]
-    assert surf.get_at((inactive.x + 5, inactive.y + 4))[:3] == (0, 0, 0), \
-        "an inactive row paints no fill"
+    assert_pixel_color(surf, inactive.x + 5, inactive.y + 4, Colors.surface, tol=4), \
+        "an inactive row paints no box of its own, just the rail's own panel fill"
+
+
+def test_active_row_border_is_neutral_not_accent():
+    rail, _ = _rail()
+    rail.set_active("history", 0)
+    surf = pg.display.get_surface()
+    surf.fill((0, 0, 0))
+    rail.draw(surf, 10_000)
+
+    active = rail._row_rects["history"]
+    r, g, b = surf.get_at((active.right - 2, active.centery))[:3]
+    assert not (r > 40 and r > b + 15 and r >= g), \
+        "the active row's own border must not carry the accent's warm tint"
+
+
+def test_rail_panel_is_a_solid_opaque_column():
+    rail, _ = _rail()
+    surf = pg.display.get_surface()
+    surf.fill((0, 0, 0))
+    rail.draw(surf, 0)
+
+    below_last_row = rail._row_rects["history"].bottom + 20
+    assert_pixel_color(surf, rail.rect.centerx, below_last_row, Colors.surface, tol=4)
+    assert_pixel_color(surf, rail.rect.right - 1, rail.rect.centery, Colors.border, tol=12)
 
 
 def test_reticle_slides_from_the_old_row_to_the_new_one():
@@ -77,10 +103,9 @@ def _has_warm_tint(surf, rect):
 
 def test_reticle_sits_at_the_row_left_edge_not_the_right():
     """v2.9.0: the crosshair moved from a right-edge dot to a left-edge
-    reticle that straddles the row's own left boundary. The row's own accent
-    border also paints warm pixels at its right edge, so the regression guard
+    reticle that straddles the row's own left boundary. The regression guard
     checks the margin strictly outside the row (where only a reticle, never
-    the row itself, can paint) rather than fighting that overlap."""
+    the row itself, can paint)."""
     rail, _ = _rail()
     surf = pg.display.get_surface()
     surf.fill((0, 0, 0))
@@ -95,11 +120,53 @@ def test_reticle_sits_at_the_row_left_edge_not_the_right():
         "nothing should paint past the row's right edge anymore"
 
 
+def test_reticle_is_a_visible_crosshair_not_a_tiny_dot():
+    rail, _ = _rail()
+    surf = pg.display.get_surface()
+    surf.fill((0, 0, 0))
+    rail.draw(surf, 0)
+
+    row = rail._row_rects["play"]
+    band = pg.Rect(row.x - 15, row.y, 30, row.height)
+    warm_pixels = 0
+    for x in range(band.x, band.right):
+        for y in range(band.y, band.bottom):
+            if not surf.get_rect().collidepoint((x, y)):
+                continue
+            r, g, b = surf.get_at((x, y))[:3]
+            if r > 40 and r > b + 15 and r >= g:
+                warm_pixels += 1
+    assert warm_pixels > 28, \
+        "the reticle must read as a clearly visible crosshair, not a clipped dot"
+
+
+def test_icon_and_label_share_the_same_x_active_or_not():
+    rail, _ = _rail()
+    rail.set_active("history", 0)
+    surf = pg.display.get_surface()
+    surf.fill((0, 0, 0))
+    rail.draw(surf, 0)
+
+    icon_x = rail._row_rects["play"].x + max(int(ICON_PAD * rail.scale), 24)
+    label_x = icon_x + max(int(ICON_SIDE * rail.scale), 14) + max(int(LABEL_GAP * rail.scale), 4)
+
+    def painted(row_key, x):
+        row = rail._row_rects[row_key]
+        return any(
+            surf.get_at((x, y))[:3] != (0, 0, 0)
+            for y in range(row.y, row.bottom)
+        )
+
+    for key in ("history", "play", "battlepass", "social"):
+        assert painted(key, icon_x + 1), f"icon column empty for {key}"
+        assert painted(key, label_x + 1), f"label column empty for {key}"
+
+
 def test_footer_shows_the_display_version():
     rail, _ = _rail()
     version = paths.get_app_version()
-    label = ("v" + version) if version else "(dev)"
-    assert rail._version_text == "Chess Shootout " + label
+    expected = f"v{version} · dev" if version else "dev"
+    assert rail._version_text == expected
     assert rail._version_surf is not None
 
 

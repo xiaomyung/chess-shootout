@@ -1001,6 +1001,25 @@ def test_background_gradient_is_lit_at_top_center():
     assert top_center > bottom_corner, "the radial backdrop should be brightest near top-centre"
 
 
+def test_menu_backdrop_draws_the_faint_prototype_grid():
+    """The menu arena carries the prototype's faint grid — a denser-than-default
+    step whose barely-lighter lines measurably lighten the arena over a gridless
+    fill (same seeded gradient + dither, so only the grid differs)."""
+    from chessshootout.frontend.menu.menu_battle import GRID_STEP, GRID_STEP_MIN
+    from chessshootout.frontend.visual import backdrop
+    b = _battle(w=1000, h=700)
+    step = max(int(GRID_STEP * b.scale), GRID_STEP_MIN)
+    assert step < backdrop.grid_step(700), "the menu grid is denser than the in-game default"
+
+    def energy(surf):
+        return sum(sum(surf.get_at((x, y))[:3])
+                   for y in range(0, 700, 4) for x in range(0, 1000, 4))
+
+    lit = b._background((1000, 700))
+    gridless = backdrop.arena_background((1000, 700), grid=10 ** 4)
+    assert energy(lit) > energy(gridless), "the faint grid lightens the arena over a gridless fill"
+
+
 def test_projectile_draws_a_streak_at_its_position():
     b = _battle()
     win = pg.display.get_surface()

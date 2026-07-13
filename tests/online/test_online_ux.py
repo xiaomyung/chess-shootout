@@ -362,16 +362,17 @@ def test_menu_mode_skips_board_draw(frontend, monkeypatch):
     assert drew == [True]
 
 
-def test_play_hero_sits_in_the_hero_column(frontend):
-    """The play hero clears the left rail and is centered inside its hero
-    column, not the whole window (the rail owns the left edge now)."""
+def test_play_hero_lays_out_open_in_the_hero_column(frontend):
+    """No card: the hero content lays out open across its column, left-aligned and
+    clearing the left rail, with the CTA spanning the full column width."""
     frontend.draw_frame()
     layout = frontend.menu._menu_layout
-    panel = frontend.menu.play_view.content_rect()
-    assert panel.left >= layout.rail_rect.right
-    assert abs(panel.centerx - layout.hero_rect.centerx) <= 1
-    assert panel.top >= layout.hero_rect.top
-    assert panel.bottom <= layout.hero_rect.bottom
+    hero = frontend.menu.play_view
+    assert layout.hero_rect.left >= layout.rail_rect.right
+    assert hero._title_pos[0] == layout.hero_rect.x
+    assert hero._cta_rect.x == layout.hero_rect.x
+    assert hero._cta_rect.width == layout.hero_rect.width
+    assert hero._cta_rect.bottom <= layout.hero_rect.bottom
 
 
 def test_menu_mode_centers_flex_modals_on_window(frontend):

@@ -90,7 +90,7 @@ class MenuScreen(Screen):
     def update(self, now):
         self.views[self._active_view].update(now)
         layout = self._menu_layout
-        rects = [layout.rail_rect, layout.right_rail_rect]
+        rects = [layout.rail_rect]
         rects += self.views[self._active_view].avoid_rects()
         self.app.menu_battle.set_avoid_rects(rects)
 

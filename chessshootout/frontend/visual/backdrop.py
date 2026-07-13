@@ -62,12 +62,12 @@ def grid_step(h):
     return max(int(64 * scale), 32)
 
 
-def arena_background(size, center=(0.5, 0.18)):
+def arena_background(size, center=(0.5, 0.18), grid=None):
     w, h = size
     grad = radial_gradient(128, center[0], center[1], 1.2, 0.8,
                            Colors.battle_bg_hi, Colors.battle_bg, Colors.battle_bg_edge)
     surf = pg.transform.smoothscale(grad, size)
-    step = grid_step(h)
+    step = grid if grid is not None else grid_step(h)
     grid = pg.Surface(size, pg.SRCALPHA)
     line = (*pg.Color(Colors.battle_grid)[:3], 6)
     for gx in range(0, w, step):

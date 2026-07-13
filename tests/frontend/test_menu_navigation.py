@@ -120,8 +120,15 @@ def test_battle_keeps_running_behind_a_menu_modal(monkeypatch):
 def test_battle_avoids_the_rail_and_the_active_views_panels():
     app = make_app()
     app.draw_frame()
-    assert app.menu._menu_layout.rail_rect in app.menu_battle.avoid_rects
-    assert app.menu.play_view.content_rect() in app.menu_battle.avoid_rects
+    battle = app.menu_battle
+    hero = app.menu.play_view
+    assert app.menu._menu_layout.rail_rect in battle.avoid_rects
+    # the hero's real drawn blocks are the obstacles now, not a single card
+    assert hero._title_block in battle.avoid_rects
+    assert hero._chips_block in battle.avoid_rects
+    assert any(r.contains(hero._cta_rect) for r in battle.avoid_rects)
+    # the empty right column no longer blocks the battle (P4 fills it with cards)
+    assert app.menu._menu_layout.right_rail_rect not in battle.avoid_rects
 
     app.menu.goto_history()
     app.draw_frame()

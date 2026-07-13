@@ -9,7 +9,7 @@ does NOT auto-close, exit() cancels them)."""
 import pytest
 
 from tests.conftest import pygame_display
-from chessshootout.frontend.menu.hero import COMING_SOON, PlayView
+from chessshootout.frontend.menu.hero import COMING_SOON, CTA_BOTTOM, RECON_GAP, PlayView
 from chessshootout.infra import env
 from tests.helpers import make_app
 
@@ -221,10 +221,10 @@ def test_clicking_the_side_chip_closes_an_open_time_popover(app, hero):
 
 def test_summary_chips_are_content_sized_and_left_aligned(hero):
     """v2.9.0: no more half-width wells — chips hug their own content and sit
-    side by side, not stretched across the hero card."""
+    side by side, left-packed against the open hero column (no card)."""
     gap = hero._s(12)
     assert hero._side_chip.x == hero._time_chip.right + gap
-    assert hero._time_chip.right + hero._side_chip.width < hero._panel.right
+    assert hero._time_chip.right + hero._side_chip.width < hero._hero_rect.right
 
 
 def test_side_chip_width_tracks_the_selected_label(app, hero):
@@ -236,8 +236,56 @@ def test_side_chip_width_tracks_the_selected_label(app, hero):
     assert hero._side_chip.width < random_width
 
 
-def test_time_popover_stays_within_the_hero_card_when_it_fits(app, hero):
+def test_time_popover_stays_within_the_hero_column_when_it_fits(app, hero):
     app.menu.handle_click(hero._time_chip.center)
-    assert hero._time_popover.width <= hero._panel.width
-    assert hero._time_popover.left >= hero._panel.left
-    assert hero._time_popover.right <= hero._panel.right
+    assert hero._time_popover.width <= hero._hero_rect.width
+    assert hero._time_popover.left >= hero._hero_rect.left
+    assert hero._time_popover.right <= hero._hero_rect.right
+
+
+def test_hero_lays_out_open_with_no_card(app, hero):
+    """The restructured hero draws nothing across the open middle — content sits
+    directly on the backdrop, so a mid-column point below the chips and above the
+    CTA is untouched by the view's draw pass (there is no panel behind it)."""
+    hero_rect = hero._hero_rect
+    sentinel = (7, 137, 213)
+    window = app.window
+    window.fill(sentinel)
+    hero.draw(window, app.menu._menu_layout)
+    mid_y = (hero._side_chip.bottom + hero._cta_rect.top) // 2
+    assert window.get_at((hero_rect.centerx, mid_y))[:3] == sentinel
+
+
+def test_title_sits_at_the_hero_column_top_left(hero):
+    assert hero._title_pos[0] == hero._hero_rect.x
+    assert hero._title_pos[1] < hero._time_chip.y
+    assert hero._tagline_pos[0] == hero._hero_rect.x
+    assert hero._tagline_pos[1] > hero._title_pos[1]
+
+
+def test_cta_is_full_width_and_pinned_to_the_hero_bottom(hero):
+    """The CTA is the dominant anchor: full hero-column width, hugging the bottom
+    of the column below the vast open middle."""
+    assert hero._cta_rect.x == hero._hero_rect.x
+    assert hero._cta_rect.width == hero._hero_rect.width
+    assert hero._cta_rect.bottom <= hero._hero_rect.bottom
+    assert hero._hero_rect.bottom - hero._cta_rect.bottom <= hero._s(CTA_BOTTOM) + 1
+    assert hero._cta_rect.top > hero._side_chip.bottom
+
+
+def test_fen_link_sits_above_the_bottom_pinned_cta(hero):
+    """With the CTA pinned to the bottom, the FEN link has no room below it, so it
+    rides just above the CTA (right-aligned in the hero column)."""
+    hero.selected_mode = "single_screen"
+    assert hero._fen_above is True
+    assert hero._fen_rect.bottom <= hero._cta_rect.top
+
+
+def test_reconnect_banner_shifts_the_title_block_down(app, hero):
+    """The armed banner takes the title's slot at the top of the column, pushing
+    the title (and everything below it) down by the banner height plus a gap."""
+    base_title_y = hero._title_pos[1]
+    app.menu.set_reconnect_available(True)
+    assert hero._recon_rect.top < hero._title_pos[1]
+    assert hero._title_pos[1] == pytest.approx(
+        base_title_y + hero._recon_rect.height + hero._s(RECON_GAP), abs=1)

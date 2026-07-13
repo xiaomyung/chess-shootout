@@ -59,6 +59,8 @@ BUBBLE_FADE_OUT_MS = 240
 SCRIM_N = 64
 SCRIM_INNER_ALPHA = 74
 SCRIM_OUTER_ALPHA = 180
+GRID_STEP = 44
+GRID_STEP_MIN = 28
 
 _HITMARK_CACHE = new_cache()
 _MENU_SPARK_CACHE = new_cache()
@@ -1027,7 +1029,8 @@ class MenuBattle:
     def _background(self, size):
         if self._bg_cache is not None and self._bg_cache[0] == size:
             return self._bg_cache[1]
-        surf = backdrop.arena_background(size, (0.5, 0.18)).convert()
+        step = max(int(GRID_STEP * self.scale), GRID_STEP_MIN)
+        surf = backdrop.arena_background(size, (0.5, 0.18), grid=step).convert()
         self._bg_cache = (size, surf)
         return surf
 
