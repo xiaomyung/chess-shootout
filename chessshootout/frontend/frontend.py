@@ -33,11 +33,9 @@ from chessshootout.frontend.screens.review import ReviewScreen
 from chessshootout.frontend.window_chrome import (
     WindowChrome, WINDOW_FLAGS, WINDOW_TITLE, MIN_WINDOW_WIDTH, MIN_WINDOW_HEIGHT,
 )
-from chessshootout.infra.open_external import open_with_default_app
 from chessshootout.frontend.game.variant import Variant
 from chessshootout.frontend.online_coordinator import OnlineCoordinator
 from chessshootout.frontend.audio.sound_manager import SoundManager
-from chessshootout.frontend.menu.start import StartMenu
 from chessshootout.domain.pgn.load import latest_pgn_in_dir
 
 
@@ -90,19 +88,9 @@ class Frontend:
 
         self.sound_manager = SoundManager(paths.SOUNDS_DIR, enabled=pg.mixer.get_init() is not None)
         self.coordinator = OnlineCoordinator(self)
-        self.start_menu = StartMenu(self.window, {
-            "start_game": self._on_start_game,
-            "load_pgn": self._on_open_history,
-            "fen": self._on_open_fen_modal,
-            "reconnect": self.coordinator.reconnect,
-            "options": self.settings._on_open_options,
-            "open_url": open_with_default_app,
-            "toast": lambda msg: self.toast.show(msg),
-        })
         self.audio_panel = AudioPanel(self.window, self.sound_manager)
         self.confirm_modal = ConfirmModal(self.window)
-        self.history_view = HistoryView(self.window, on_open=self._open_pgn_review,
-                                        on_back=self._on_menu_back)
+        self.history_view = HistoryView(self.window, on_open=self._open_pgn_review)
         self.help_modal = HelpModal(self.window)
         self.options_modal = OptionsModal(self.window)
         self.country_picker = CountryPicker(self.window)
@@ -111,7 +99,6 @@ class Frontend:
         self.toast.top_inset = self.chrome.HEIGHT
         self.toast.on_new = lambda: self.sound_manager.play_toast()
         if env.normalize_stored_nickname():
-            self.start_menu.text_input.text = env.get_nickname()
             self.toast.show("Your nickname contained non ASCII symbols, I cleaned them :3")
         self.input_router = InputRouter(self)
         self._modal_registry = [
@@ -207,16 +194,10 @@ class Frontend:
         self.help_modal.show(HOTKEYS)
 
     def _refresh_load_pgn_availability(self):
-        self.start_menu.load_pgn_available = self._latest_pgn_path() is not None
+        self.menu.set_load_pgn_available(self._latest_pgn_path() is not None)
 
     def _latest_pgn_path(self):
         return latest_pgn_in_dir(_games_dir())
-
-    def _on_open_history(self):
-        self.menu.goto_history()
-
-    def _on_menu_back(self):
-        self.menu.goto_view("play")
 
     def _on_open_fen_modal(self):
         self.menu.fen_input_modal.show(on_submit=self._start_game_from_fen)
@@ -231,7 +212,7 @@ class Frontend:
         self.request_nav(Nav("game", {"fen": fen}))
         self._execute_pending_nav()
         self.menu.fen_input_modal.hide()
-        self.start_menu.hide()
+        self.menu.hide_card()
         return True
 
     def _open_pgn_review(self, path):
@@ -262,7 +243,7 @@ class Frontend:
             "increment_seconds": config["increment_seconds"],
         }))
         self._execute_pending_nav()
-        self.start_menu.hide()
+        self.menu.hide_card()
         self.sound_manager.play_game_start()
 
     def run(self):
@@ -438,7 +419,6 @@ class Frontend:
         self.coordinator.wait_modal.set_rect(r.flex_rect)
         self.coordinator.match_found_modal.set_rect(r.flex_rect)
         self.coordinator.reconnecting_modal.set_rect(r.board_rect)
-        self.start_menu.set_rect(r.start_rect)
         self.help_modal.set_rect(r.result_rect)
         for screen in self.screens.values():
             screen.relayout(size)

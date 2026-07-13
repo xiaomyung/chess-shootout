@@ -109,10 +109,9 @@ def build_match_groups(summaries, nickname):
 
 class HistoryView(ScrollHost):
 
-    def __init__(self, window, on_open, on_back):
+    def __init__(self, window, on_open):
         self.window = window
         self.on_open = on_open
-        self.on_back = on_back
         self.rect = pg.Rect(0, 0, 0, 0)
         self.visible = False
         self.nickname = None
@@ -126,7 +125,6 @@ class HistoryView(ScrollHost):
             wheel_step_px=SCROLL_STEP,
         )
         self._groups = []
-        self._menu_rect = pg.Rect(0, 0, 0, 0)
         self._filter_rects = {}
         self._row_hits = []
         self._list_rect = pg.Rect(0, 0, 0, 0)
@@ -158,8 +156,6 @@ class HistoryView(ScrollHost):
                 w, h = surf.get_size()
                 if pointing == "down":
                     pts = [(w * 0.18, h * 0.34), (w * 0.82, h * 0.34), (w * 0.5, h * 0.7)]
-                elif pointing == "left":
-                    pts = [(w * 0.66, h * 0.16), (w * 0.66, h * 0.84), (w * 0.26, h * 0.5)]
                 else:
                     pts = [(w * 0.34, h * 0.16), (w * 0.34, h * 0.84), (w * 0.74, h * 0.5)]
                 pg.draw.polygon(surf, pg.Color(color), pts)
@@ -250,23 +246,8 @@ class HistoryView(ScrollHost):
 
     def _draw_header(self, x, y, w, h):
         cy = y + h // 2
-        self._menu_rect = pg.Rect(x, cy - 16, 92, 32)
-        hovered = self._menu_rect.collidepoint(pg.mouse.get_pos())
-        bg = Colors.surface_hover if hovered else Colors.surface_raised
-        fg = Colors.text if hovered else Colors.text_dim
-        self.window.blit(rounded_rect_surface(self._menu_rect.size, 8, bg,
-                                              border=Colors.border, border_width=1),
-                         self._menu_rect.topleft)
-        arrow = self._arrow(max(int(self._menu_font.get_height() * 0.8), 9), fg, "left")
-        menu_surf = self._menu_font.render("Menu", True, fg)
-        gap = 6
-        start_x = self._menu_rect.centerx - (arrow.get_width() + gap + menu_surf.get_width()) // 2
-        self.window.blit(arrow, (start_x, cy - arrow.get_height() // 2))
-        self.window.blit(menu_surf, (start_x + arrow.get_width() + gap,
-                                     cy - menu_surf.get_height() // 2))
-
         title = self._title_font.render("HISTORY", True, Colors.text)
-        self.window.blit(title, (self._menu_rect.right + 16, cy - title.get_height() // 2))
+        self.window.blit(title, (x, cy - title.get_height() // 2))
 
         right = x + w
         right = self._draw_filters(right, cy)
@@ -547,9 +528,6 @@ class HistoryView(ScrollHost):
     def handle_click(self, pos):
         if not self.visible:
             return False
-        if self._menu_rect.collidepoint(pos):
-            self.on_back()
-            return True
         for key, rect in self._filter_rects.items():
             if rect.collidepoint(pos):
                 self.filter = key

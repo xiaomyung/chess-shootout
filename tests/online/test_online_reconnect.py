@@ -188,7 +188,7 @@ def test_on_reconnect_active_game_failed_refetch_restores_pending(app, monkeypat
     app.coordinator._on_reconnect_active_game()
     assert app.screen is app.menu
     assert app.coordinator._pending_reconnect == pending
-    assert app.start_menu.reconnect_available
+    assert app.menu.play_view.reconnect_available
     assert app.confirm_modal.is_visible()
 
 

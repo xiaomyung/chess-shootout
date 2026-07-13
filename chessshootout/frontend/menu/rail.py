@@ -153,7 +153,7 @@ class MenuRail:
             return
         y = int(self._reticle_tween.value(now_ms))
         size = max(int(icon_side * 0.7), 12)
-        cx = self._row_rects[self.active].right - max(int(14 * self.scale), 9)
+        cx = self._row_rects[self.active].x
         pulse = 0.5 + 0.5 * math.sin(now_ms / RETICLE_PULSE_MS * math.tau)
         alpha = int(150 + 90 * pulse)
         draw_reticle(window, pg.Rect(cx - size // 2, y - size // 2, size, size),

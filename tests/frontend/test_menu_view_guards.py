@@ -2,7 +2,7 @@
 
 Mirrors the screen guards in test_screen_guards.py, one directory down:
 
-1. No concrete menu view module (play_host/history_host/stubs) imports a SIBLING
+1. No concrete menu view module (hero/history_host/stubs) imports a SIBLING
    view module -- views never reach across to each other. The shared MenuView
    base lives in menu/view.py (a leaf), which every view legitimately imports.
 2. menu/shell.py::build_views is the SINGLE registration point: shell is the only
@@ -24,7 +24,7 @@ FRONTEND_ROOT = os.path.join(PACKAGE_ROOT, "frontend")
 MENU_ROOT = os.path.join(FRONTEND_ROOT, "menu")
 MENU_SCREEN = os.path.join(FRONTEND_ROOT, "screens", "menu.py")
 
-VIEW_MODULES = ("play_host", "history_host", "stubs")
+VIEW_MODULES = ("hero", "history_host", "stubs")
 
 
 def _view_module(name):

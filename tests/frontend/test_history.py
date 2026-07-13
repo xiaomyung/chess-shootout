@@ -1,7 +1,8 @@
 """The History page: it scans saved PGNs, groups them into matches by CSMatchId (rematches
 stack, idless games stay solo), renders the match summary (W/L/D counted per match), match
 cards with filters + a perspective-aware KO score, expands multi-game matches into per-game
-rows, opens a game into review on click, and returns to the card via its Menu button."""
+rows, and opens a game into review on click. Navigation back to Play lives on the rail, not
+on this view."""
 
 import pygame as pg
 
@@ -26,9 +27,8 @@ def _write_pgn(directory, name, *, white="alice", black="Bob", result="1-0",
     (directory / name).write_text("\n".join(headers) + "\n\n" + body + "\n", encoding="utf-8")
 
 
-def _view(directory, nickname="alice", on_open=None, on_back=None):
-    view = HistoryView(pg.display.get_surface(), on_open or (lambda p: None),
-                       on_back or (lambda: None))
+def _view(directory, nickname="alice", on_open=None):
+    view = HistoryView(pg.display.get_surface(), on_open or (lambda p: None))
     view.set_rect(pg.Rect(40, 60, 840, 700))
     view.show(str(directory), "*.pgn", nickname=nickname)
     return view
@@ -49,11 +49,20 @@ def _hit_for(view, kind):
 
 
 def test_hidden_before_show():
-    assert HistoryView(pg.display.get_surface(), lambda p: None, lambda: None).is_visible() is False
+    assert HistoryView(pg.display.get_surface(), lambda p: None).is_visible() is False
 
 
 def test_show_makes_visible(tmp_path):
     assert _view(tmp_path).is_visible() is True
+
+
+def test_no_back_button_on_the_rail_hosted_view(tmp_path):
+    """Rail navigation replaced the in-card back button (v2.9.0) — the view
+    must carry neither the hitbox nor the callback it used to fire."""
+    view = _view(tmp_path)
+    view.draw()
+    assert not hasattr(view, "_menu_rect")
+    assert not hasattr(view, "on_back")
 
 
 def test_rematch_games_group_into_one_card(tmp_path):
@@ -91,14 +100,6 @@ def test_multi_game_card_expands_then_opens_a_game(tmp_path):
     game_rect, path = _hit_for(view, "open")[0]
     view.handle_click(game_rect.center)
     assert opened == [path]
-
-
-def test_menu_button_invokes_on_back(tmp_path):
-    fired = []
-    view = _view(tmp_path, on_back=lambda: fired.append(1))
-    view.draw()
-    assert view.handle_click(view._menu_rect.center) is True
-    assert fired == [1]
 
 
 def test_filter_chip_restricts_groups(tmp_path):
@@ -237,7 +238,7 @@ def test_scroll_outside_list_returns_false(tmp_path):
 
 
 def test_history_does_not_handle_keys():
-    view = HistoryView(pg.display.get_surface(), lambda p: None, lambda: None)
+    view = HistoryView(pg.display.get_surface(), lambda p: None)
     assert not hasattr(view, "handle_key")
 
 

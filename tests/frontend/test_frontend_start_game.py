@@ -59,7 +59,7 @@ def test_start_game_single_screen_white_side():
     assert app.game.white_name == "alice"
     assert app.game.black_name == "Player 2"
     assert app.game.variant == "local"
-    assert app.start_menu.is_visible() is False
+    assert app.menu.card_visible() is False
     assert app.game.match.backend.clock is not None
     assert app.game.match.backend.clock.initial_seconds == 300
     assert app.game.match.backend.clock.increment_seconds == 2
@@ -138,7 +138,7 @@ def test_start_game_bot_mode_returns_early_without_starting():
     app._on_start_game(base_config(mode="bot"))
     assert app.screen is app.menu
     assert app.game.match.backend.clock is None
-    assert app.start_menu.is_visible() is True
+    assert app.menu.card_visible() is True
     assert app.coordinator.client is None
 
 
@@ -153,7 +153,7 @@ def test_start_game_online_mode_starts_matchmaking_without_starting_game(monkeyp
     app._on_start_game(base_config(mode="online"))
     assert app.screen is app.menu
     assert app.game.match.backend.clock is None
-    assert app.start_menu.is_visible() is False
+    assert app.menu.card_visible() is False
     assert app.coordinator.client is not None
     assert app.coordinator.wait_modal.is_visible() is True
     assert connected and connected[0][0] == env.get_server_addr()

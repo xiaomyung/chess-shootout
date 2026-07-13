@@ -591,9 +591,9 @@ def test_load_pgn_button_disabled_when_no_pgn(tmp_path, monkeypatch):
     """An empty data dir leaves the Load PGN button disabled."""
     monkeypatch.setenv("CHESS_DATA_DIR", str(tmp_path))
     app = _new_menu_app()
-    app.start_menu.show()
+    app.menu.show_card()
     app._refresh_load_pgn_availability()
-    assert app.start_menu.load_pgn_available is False
+    assert app.menu._load_pgn_available is False
 
 
 def test_load_pgn_button_enabled_when_pgn_exists(tmp_path, monkeypatch):
@@ -605,7 +605,7 @@ def test_load_pgn_button_enabled_when_pgn_exists(tmp_path, monkeypatch):
     monkeypatch.setenv("CHESS_DATA_DIR", str(tmp_path))
     app = _new_menu_app()
     app._refresh_load_pgn_availability()
-    assert app.start_menu.load_pgn_available is True
+    assert app.menu._load_pgn_available is True
 
 
 def test_load_pgn_picks_most_recent_by_mtime(tmp_path, monkeypatch):
@@ -622,16 +622,6 @@ def test_load_pgn_picks_most_recent_by_mtime(tmp_path, monkeypatch):
     path = app._latest_pgn_path()
     assert path is not None
     assert path.endswith("game-new.pgn")
-
-
-def test_history_and_fen_ghosts_below_start():
-    app = _new_app()
-    app.start_menu.show()
-    app.start_menu.draw()
-    sm = app.start_menu
-    assert sm._history_rect.x < sm._fen_rect.x
-    assert abs(sm._history_rect.width - sm._fen_rect.width) <= 2
-    assert sm._history_rect.top >= sm._start_rect.bottom
 
 
 def _flat_button_keys(rows):

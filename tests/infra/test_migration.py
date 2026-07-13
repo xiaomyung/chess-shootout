@@ -170,13 +170,13 @@ def test_options_close_applies_default_time_to_menu(monkeypatch):
     """Closing Settings re-applies the persisted default time/increment to the
     start-menu selection, overriding whatever was picked there before."""
     app = _app()
-    app.start_menu.selected_time_minutes = 5
-    app.start_menu.selected_increment_seconds = 2
+    app.menu.play_view.selected_time_minutes = 5
+    app.menu.play_view.selected_increment_seconds = 2
     monkeypatch.setenv("CHESS_DEFAULT_TC", "15")
     monkeypatch.setenv("CHESS_DEFAULT_INCREMENT", "10")
     assert app.settings._on_close_settings() is True
-    assert app.start_menu.selected_time_minutes == 15
-    assert app.start_menu.selected_increment_seconds == 10
+    assert app.menu.play_view.selected_time_minutes == 15
+    assert app.menu.play_view.selected_increment_seconds == 10
 
 
 def test_menu_click_routes_to_options_not_start_menu(monkeypatch):
@@ -186,7 +186,7 @@ def test_menu_click_routes_to_options_not_start_menu(monkeypatch):
     app.settings._on_open_options()
     app.draw_frame()
     received = []
-    monkeypatch.setattr(app.start_menu, "handle_click", lambda pos: received.append(pos))
+    monkeypatch.setattr(app.menu.play_view, "handle_click", lambda pos: received.append(pos))
     app.input_router.mouse_left_clicked((10, 10))
     assert received == []
     assert app.options_modal.is_visible() is True

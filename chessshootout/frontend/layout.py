@@ -26,7 +26,6 @@ class LayoutRects:
     result_rect: pg.Rect
     result_modal_rect: pg.Rect
     flex_rect: pg.Rect
-    start_rect: pg.Rect
     wide_overlay_rect: pg.Rect
     options_rect: pg.Rect
     menu_rect: pg.Rect
@@ -81,12 +80,6 @@ def compute_layout(window_width, window_height, *, mode, focus_mode, focus_show,
     usable_menu_h = max(avail_height - MENU_FOOTER_RESERVE, 200)
     start_width = min(440, window_width - 24)
     start_height = min(max(usable_menu_h - 24, 200), 660)
-    start_rect = pg.Rect(
-        window_width / 2 - start_width / 2,
-        top + usable_menu_h / 2 - start_height / 2,
-        start_width,
-        start_height
-    )
 
     wide_overlay_width = min(window_width * 0.9, 1100)
     wide_overlay_height = min(window_height * 0.85, 760)
@@ -149,7 +142,6 @@ def compute_layout(window_width, window_height, *, mode, focus_mode, focus_show,
         result_rect=result_rect,
         result_modal_rect=result_modal_rect,
         flex_rect=flex_rect,
-        start_rect=start_rect,
         wide_overlay_rect=wide_overlay_rect,
         options_rect=options_rect,
         menu_rect=menu_rect,

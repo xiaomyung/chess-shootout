@@ -46,7 +46,7 @@ def test_menu_card_escape_opens_quit_prompt():
     app = _app()
     app.input_router._handle_escape()
     assert app.confirm_modal.is_visible() is True
-    assert app.start_menu.visible is False
+    assert app.menu.card_visible() is False
     assert app.running is True
 
 
@@ -62,7 +62,7 @@ def test_second_escape_dismisses_quit_prompt_and_restores_menu():
     app.input_router._handle_escape()
     app.input_router._handle_escape()
     assert app.confirm_modal.is_visible() is False
-    assert app.start_menu.visible is True
+    assert app.menu.card_visible() is True
     assert app.running is True
 
 

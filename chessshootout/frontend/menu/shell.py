@@ -1,5 +1,5 @@
 from chessshootout.frontend.menu.view import MenuView
-from chessshootout.frontend.menu.play_host import PlayView
+from chessshootout.frontend.menu.hero import PlayView
 from chessshootout.frontend.menu.history_host import HistoryMenuView
 from chessshootout.frontend.menu.stubs import ArmoryView, BattlePassView, SocialView
 

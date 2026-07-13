@@ -75,7 +75,7 @@ def _enter_review(app, path, return_to="menu"):
 def test_open_review_from_history_via_real_open_call(tmp_path):
     path = _write_pgn(tmp_path, "local-20260101-120000.pgn")
     app = make_app()
-    app._on_open_history()
+    app.menu.goto_history()
     assert app.screen.name == "menu"
     assert app.menu._active_view == "history"
 
@@ -104,7 +104,7 @@ def test_review_never_writes_a_pgn(tmp_path):
 def test_esc_on_review_returns_to_the_remembered_history_view_end_to_end(tmp_path):
     path = _write_pgn(tmp_path, "test.pgn")
     app = make_app()
-    app._on_open_history()
+    app.menu.goto_history()
     _enter_review(app, path, return_to="menu")
     assert app.screen.name == "review"
 
@@ -120,7 +120,7 @@ def test_esc_on_review_returns_to_the_remembered_history_view_end_to_end(tmp_pat
 def test_menu_button_returns_to_the_remembered_history_view(tmp_path):
     path = _write_pgn(tmp_path, "test.pgn")
     app = make_app()
-    app._on_open_history()
+    app.menu.goto_history()
     _enter_review(app, path, return_to="menu")
     assert app.screen.name == "review"
     app.review._on_menu()

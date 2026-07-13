@@ -5,7 +5,6 @@ import uuid
 import pygame as pg
 
 from chessshootout.backend.utils import coord_from_square, square_from_coord
-from chessshootout.domain.match import ONLINE
 from chessshootout.domain.pgn.load import time_category_for_minutes
 from chessshootout.frontend.modals.match_found import MatchFoundModal
 from chessshootout.frontend.modals.reconnecting import ReconnectingModal
@@ -463,7 +462,7 @@ class OnlineCoordinator:
                  payload.get("time_minutes"), payload.get("increment_seconds"))
         self.wait_modal.hide()
         self.app.confirm_modal.hide()
-        self.app.start_menu.hide()
+        self.app.menu.hide_card()
         nav_payload = {
             "your_color": payload["your_color"],
             "white_name": payload["white_name"],
@@ -484,7 +483,7 @@ class OnlineCoordinator:
                  config.get("time_minutes"), config.get("increment_seconds"),
                  config.get("side"))
         self._online_config = config
-        self.app.start_menu.hide()
+        self.app.menu.hide_card()
         self._on_server_addr_connect(env.get_server_addr())
 
     def _on_server_addr_connect(self, addr):
@@ -590,7 +589,7 @@ class OnlineCoordinator:
 
     def _return_to_menu_card(self):
         if self.app.screen is self.app.menu:
-            self.app.start_menu.show()
+            self.app.menu.show_card()
         else:
             self.app.switch_to("menu")
         self._reconnect_probe_attempts = 0
@@ -774,7 +773,7 @@ class OnlineCoordinator:
                 and pg.time.get_ticks() - self._last_reconnect_probe_ms
                 >= RECONNECT_PROBE_INTERVAL_MS):
             self._spawn_reconnect_probe()
-        self.app.start_menu.set_reconnect_available(self.reconnect_available())
+        self.app.menu.set_reconnect_available(self.reconnect_available())
 
     def reconnect_available(self):
         with self._pending_reconnect_lock:
@@ -791,7 +790,7 @@ class OnlineCoordinator:
         if pending is None:
             return
         log.info("reconnect: resume begin room=%s", pending["room_id"])
-        self.app.start_menu.set_reconnect_available(False)
+        self.app.menu.set_reconnect_available(False)
         resume = fetch_resume(
             pending["addr"], pending["room_id"], pending["session_token"],
         )
@@ -799,7 +798,7 @@ class OnlineCoordinator:
             log.warning("reconnect: fresh /resume failed; restoring pending entry")
             with self._pending_reconnect_lock:
                 self._pending_reconnect = pending
-            self.app.start_menu.set_reconnect_available(True)
+            self.app.menu.set_reconnect_available(True)
             self.app.confirm_modal.show(
                 ONLINE_HARD_FAILURE_LABELS["reconnect_failed"],
                 on_yes=self._on_reconnect_active_game,
@@ -808,20 +807,14 @@ class OnlineCoordinator:
             )
             return
         log.info("reconnect: resume ok room=%s", pending["room_id"])
-        nickname = (resume["white_name"] if resume["your_color"] == "white"
-                    else resume["black_name"])
-        self.app.start_menu.text_input.text = nickname
-        self.app.start_menu.selected_mode = ONLINE
-        self.app.start_menu.selected_time_minutes = resume["time_minutes"]
-        self.app.start_menu.selected_increment_seconds = resume["increment_seconds"]
-        self.app.start_menu.selected_side = resume["your_color"]
+        self.app.menu.apply_resume_config(resume)
         self.client = OnlineClient()
         self._start_online_game(resume)
         self._handle_game_resumed(resume)
         self.client.reconnect_to_existing(
             pending["addr"], pending["room_id"], pending["session_token"], resume,
         )
-        self.app.start_menu.hide()
+        self.app.menu.hide_card()
 
     def update(self, now):
         self._drain_online_inbound()

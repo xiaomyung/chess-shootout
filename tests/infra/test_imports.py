@@ -19,7 +19,8 @@ from chessshootout.frontend.modals.match_found import MatchFoundModal
 from chessshootout.frontend.panels.banners import OfferBanners
 from chessshootout.frontend.modals.options import OptionsModal
 from chessshootout.frontend.modals.result import ResultMenu
-from chessshootout.frontend.menu.start import StartMenu
+from chessshootout.frontend.menu.hero import PlayView
+from chessshootout.frontend.menu.time_picker import TimePicker
 from chessshootout.frontend.modals.wait import WaitModal
 from chessshootout.online.client import OnlineClient
 from chessshootout.frontend.panels.audio import AudioPanel
@@ -37,7 +38,7 @@ from chessshootout.frontend.visual.widgets import draw_button, draw_button_row
 
 @pytest.mark.parametrize("symbol", [
     SoundManager, Board, BaseModal, ConfirmModal, HistoryView, HelpModal,
-    MatchFoundModal, OfferBanners, OptionsModal, ResultMenu, StartMenu,
+    MatchFoundModal, OfferBanners, OptionsModal, ResultMenu, PlayView, TimePicker,
     WaitModal, OnlineClient, AudioPanel, PlayerStrip, RightMenu,
     PieceAnimation, Colors, TextInput, Toast,
 ])

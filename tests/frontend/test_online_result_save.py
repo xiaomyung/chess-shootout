@@ -177,8 +177,8 @@ def test_auto_save_survives_surrogate_nickname_without_crashing(tmp_path, monkey
 
 
 def test_startup_toasts_when_stored_nickname_needs_sanitizing(tmp_path, monkeypatch):
-    """A legacy .env carrying a non-ASCII nickname is cleaned on launch (persisted +
-    the start-menu field refreshed) and the player is told via a toast."""
+    """A legacy .env carrying a non-ASCII nickname is cleaned on launch (persisted to
+    env, read back by the play hero) and the player is told via a toast."""
     from chessshootout.infra import env
     monkeypatch.setattr(env, "_ENV_PATH", tmp_path / ".env")
     monkeypatch.setenv("CHESS_NICKNAME", "Bob Щ")
@@ -186,7 +186,7 @@ def test_startup_toasts_when_stored_nickname_needs_sanitizing(tmp_path, monkeypa
     app = Frontend(1000, 800)
     messages = [b["message"] for b in app.toast._bubbles]
     assert "Your nickname contained non ASCII symbols, I cleaned them :3" in messages
-    assert app.start_menu.text_input.text == "Bob"
+    assert env.get_nickname() == "Bob"
 
 
 def test_online_mate_saved_via_watchdog_when_result_message_is_missed(tmp_path, monkeypatch):

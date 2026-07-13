@@ -2,7 +2,7 @@
 
 Invariant: the FEN modal mirrors BaseModal show/hide visibility, validates
 through its on_submit callback (falsy return -> "Invalid FEN" error), and the
-start menu's "From FEN" button is inert while a search/online game is selected.
+play hero's "Start from FEN" link is inert while an online game is selected.
 """
 
 import pygame as pg
@@ -109,7 +109,7 @@ def test_valid_fen_starts_single_screen_game():
     assert app.screen is app.game
     assert app.game.variant == "local"
     assert app.menu.fen_input_modal.is_visible() is False
-    assert app.start_menu.is_visible() is False
+    assert app.menu.card_visible() is False
 
 
 def test_invalid_fen_returns_false_and_keeps_modal_open():
@@ -123,21 +123,14 @@ def test_invalid_fen_returns_false_and_keeps_modal_open():
 @pytest.mark.parametrize(
     "selected_mode, expected_opened",
     [
-        pytest.param("online", None, id="online_mode_disables_fen_button"),
-        pytest.param(SINGLE_SCREEN, True, id="local_mode_emits_fen_callback"),
+        pytest.param("online", False, id="online_mode_disables_fen_link"),
+        pytest.param(SINGLE_SCREEN, True, id="local_mode_opens_fen_modal"),
     ],
 )
-def test_start_menu_fen_button(selected_mode, expected_opened):
-    captured = {}
-    callbacks = {
-        "start_game": lambda cfg: None,
-        "fen": lambda: captured.setdefault("opened", True),
-    }
-    from chessshootout.frontend.menu.start import StartMenu
-    sm = StartMenu(pg.display.get_surface(), callbacks)
-    sm.set_rect(pg.Rect(100, 50, 600, 700))
-    sm.selected_mode = selected_mode
-    sm.show()
-    sm.draw()
-    sm.handle_click(sm._fen_rect.center)
-    assert captured.get("opened") is expected_opened
+def test_play_hero_fen_link(selected_mode, expected_opened):
+    app = _make_app()
+    app.draw_frame()
+    hero = app.menu.play_view
+    hero.selected_mode = selected_mode
+    app.menu.handle_click(hero._fen_rect.center)
+    assert app.menu.fen_input_modal.is_visible() is expected_opened

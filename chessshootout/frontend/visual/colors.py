@@ -81,6 +81,9 @@ class Colors:
     bubble_pawn_bg = "#20242c"
     bubble_pawn_text = "#cfd6e0"
 
+    dial_border = "#39424f"
+    dial_star = "#2a313d"
+
     shell_red = "#c0392b"
     shell_red_hi = "#e0573f"
     shell_brass = "#e8c34a"

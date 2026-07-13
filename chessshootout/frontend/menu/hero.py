@@ -1,0 +1,576 @@
+import math
+
+import pygame as pg
+
+from chessshootout import paths
+from chessshootout.domain.match import SINGLE_SCREEN, BOT, ONLINE
+from chessshootout.infra import env
+from chessshootout.frontend.menu.time_picker import CHAMBERS, INCREMENTS, TimePicker
+from chessshootout.frontend.menu.view import MenuView
+from chessshootout.frontend.visual.cache import new_cache, memoized_surface, render_text
+from chessshootout.frontend.visual.colors import Colors
+from chessshootout.frontend.visual.draw import (
+    chevron_surface, cut_rect_surface, dashed_rounded_rect_surface, infinity_surface)
+from chessshootout.frontend.visual.emoji import blit_emoji
+from chessshootout.frontend.visual.fonts import get_display_font, get_font, get_mono_font
+from chessshootout.frontend.visual.icons import draw_clock
+
+
+TITLE = "READY UP."
+TAGLINE = "PAWNS GET WHAT THEY DESERVE"
+COMING_SOON = "Coming soon."
+COMING_SOON_KEY = "coming_soon"
+
+MODE_CHIPS = (
+    ("Local", SINGLE_SCREEN, False),
+    ("Online", ONLINE, False),
+    ("Bot", BOT, True),
+    ("Puzzles", "puzzles", True),
+)
+SELECTABLE_MODES = (SINGLE_SCREEN, ONLINE)
+
+SIDE_OPTIONS = (
+    ("White", "white"),
+    ("Random", "random"),
+    ("Black", "black"),
+)
+
+HERO_MAX_W = 460
+PANEL_CUT = 14
+CHIP_CUT = 8
+GAP = 14
+PAD = 22
+TITLE_H = 56
+TAGLINE_H = 16
+CHIP_H = 44
+CTA_H = 54
+LINK_H = 24
+RECON_H = 50
+TIME_POPOVER_W = 340
+TIME_POPOVER_H = 190
+SIDE_POPOVER_W = 190
+SIDE_ROW_H = 40
+
+SUMMARY_CHIP_PAD_X = 12
+SUMMARY_CHIP_GAP = 7
+SUMMARY_CHIP_ICON = 16
+SUMMARY_CHIP_CHEVRON = 11
+SIDE_ICON_SPREAD = 1.55
+DASH_LEN = 5
+DASH_GAP = 4
+
+
+_HERO_ART_CACHE = new_cache()
+
+
+def _side_image(color):
+    def build():
+        try:
+            img = pg.image.load(
+                str(paths.resource_path("assets", "pieces_png", f"pawn_{color}.png")))
+            return img.convert_alpha()
+        except (pg.error, OSError):
+            return None
+    return memoized_surface(_HERO_ART_CACHE, ("side", color), build)
+
+
+class PlayView(MenuView):
+
+    name = "play"
+
+    def __init__(self, app):
+        super().__init__(app)
+        self.visible = True
+        self.reconnect_available = False
+        last_mode = env.get_last_mode()
+        self.selected_mode = last_mode if last_mode in SELECTABLE_MODES else SINGLE_SCREEN
+        self.selected_time_minutes = 10
+        self.selected_increment_seconds = 5
+        self.selected_side = "random"
+        self.apply_default_time_settings()
+
+        self._picker = TimePicker(on_change=self._on_picker_change,
+                                  on_tick=app.sound_manager.play_ui_tick)
+        self._time_open = False
+        self._side_open = False
+
+        self._menu_layout = None
+        self._scale = 1.0
+        self._panel = pg.Rect(0, 0, 0, 0)
+        self._recon_rect = pg.Rect(0, 0, 0, 0)
+        self._recon_button = pg.Rect(0, 0, 0, 0)
+        self._title_pos = (0, 0)
+        self._tagline_pos = (0, 0)
+        self._mode_rects = {}
+        self._time_chip = pg.Rect(0, 0, 0, 0)
+        self._side_chip = pg.Rect(0, 0, 0, 0)
+        self._cta_rect = pg.Rect(0, 0, 0, 0)
+        self._fen_rect = pg.Rect(0, 0, 0, 0)
+        self._time_popover = pg.Rect(0, 0, 0, 0)
+        self._side_popover = pg.Rect(0, 0, 0, 0)
+        self._side_rects = {}
+
+        self._title_font = get_display_font(TITLE_H)
+        self._tagline_font = get_font(11, bold=True)
+        self._chip_font = get_font(13, bold=True)
+        self._value_font = get_mono_font(13, bold=True)
+        self._cta_font = get_display_font(26)
+        self._link_font = get_font(12, bold=True)
+        self._recon_font = get_font(12, bold=True)
+
+    def show(self):
+        self.visible = True
+
+    def hide(self):
+        self.visible = False
+        self._close_popovers()
+
+    def is_visible(self):
+        return self.visible
+
+    def enter(self, payload=None):
+        self.show()
+
+    def exit(self):
+        self._close_popovers()
+        self.hide()
+
+    def content_rect(self):
+        return self._panel
+
+    def apply_default_time_settings(self):
+        minutes = env.default_time_minutes()
+        if minutes in [value for value, _ in CHAMBERS]:
+            self.selected_time_minutes = minutes
+        seconds = env.default_increment_seconds()
+        if seconds in INCREMENTS:
+            self.selected_increment_seconds = seconds
+        if self.selected_time_minutes is None:
+            self.selected_increment_seconds = 0
+
+    def apply_resume_config(self, resume):
+        self.selected_mode = ONLINE
+        self.selected_time_minutes = resume["time_minutes"]
+        self.selected_increment_seconds = resume["increment_seconds"]
+        self.selected_side = resume["your_color"]
+
+    def set_reconnect_available(self, available):
+        if self.reconnect_available == available:
+            return
+        self.reconnect_available = available
+        if self._menu_layout is not None:
+            self._relayout()
+
+    def cta_label(self):
+        return "FIND MATCH" if self.selected_mode == ONLINE else "START MATCH"
+
+    def build_config(self):
+        return {
+            "mode": self.selected_mode,
+            "nickname": env.get_nickname(),
+            "time_minutes": self.selected_time_minutes,
+            "increment_seconds": self.selected_increment_seconds,
+            "side": self.selected_side,
+        }
+
+    def _on_picker_change(self):
+        self.selected_time_minutes = self._picker.selected_minutes
+        self.selected_increment_seconds = self._picker.selected_increment
+        if self._menu_layout is not None:
+            self._relayout()
+
+    def relayout(self, menu_layout):
+        self._menu_layout = menu_layout
+        self._scale = menu_layout.scale
+        self._relayout()
+
+    def _s(self, value):
+        return max(int(value * self._scale), 1)
+
+    def _relayout(self):
+        layout = self._menu_layout
+        hero = layout.hero_rect
+        w = min(hero.width, self._s(HERO_MAX_W))
+        pad = self._s(PAD)
+        gap = self._s(GAP)
+        inner_w = w - 2 * pad
+        self._fit_fonts()
+        recon = self._s(RECON_H) + gap if self.reconnect_available else 0
+        content = (recon + self._s(TITLE_H) + self._s(TAGLINE_H) + gap
+                   + self._s(CHIP_H) + gap + self._s(CHIP_H) + gap
+                   + self._s(CTA_H) + gap + self._s(LINK_H) + 2 * pad)
+        top = hero.y + max((hero.height - content) // 2, 0)
+        x = hero.centerx - w // 2
+        self._panel = pg.Rect(x, top, w, content)
+        y = top + pad
+        if self.reconnect_available:
+            self._recon_rect = pg.Rect(x + pad, y, inner_w, self._s(RECON_H))
+            btn_w = self._s(92)
+            self._recon_button = pg.Rect(self._recon_rect.right - self._s(12) - btn_w,
+                                         self._recon_rect.y + self._s(8),
+                                         btn_w, self._s(RECON_H) - self._s(16))
+            y = self._recon_rect.bottom + gap
+        else:
+            self._recon_rect = pg.Rect(0, 0, 0, 0)
+            self._recon_button = pg.Rect(0, 0, 0, 0)
+        self._title_pos = (x + pad, y)
+        y += self._s(TITLE_H)
+        self._tagline_pos = (x + pad, y)
+        y += self._s(TAGLINE_H) + gap
+        self._layout_mode_chips(x + pad, y, inner_w)
+        y += self._s(CHIP_H) + gap
+        self._layout_summary_chips(x + pad, y)
+        y += self._s(CHIP_H) + gap
+        self._cta_rect = pg.Rect(x + pad, y, inner_w, self._s(CTA_H))
+        y += self._s(CTA_H) + gap
+        self._fen_rect = pg.Rect(x + pad, y, inner_w, self._s(LINK_H))
+        self._layout_popovers()
+
+    def _fit_fonts(self):
+        self._title_font = get_display_font(self._s(TITLE_H - 8))
+        self._tagline_font = get_font(self._s(11), bold=True)
+        self._chip_font = get_font(self._s(13), bold=True)
+        self._value_font = get_mono_font(self._s(13), bold=True)
+        self._cta_font = get_display_font(self._s(26))
+        self._link_font = get_font(self._s(12), bold=True)
+        self._recon_font = get_font(self._s(12), bold=True)
+
+    def _layout_mode_chips(self, x, y, inner_w):
+        gap = self._s(8)
+        count = len(MODE_CHIPS)
+        cw = (inner_w - gap * (count - 1)) / count
+        self._mode_rects = {}
+        for i, (_, key, _locked) in enumerate(MODE_CHIPS):
+            self._mode_rects[key] = pg.Rect(round(x + i * (cw + gap)), y,
+                                            round(cw), self._s(CHIP_H))
+
+    def _time_value_surface(self):
+        if self.selected_time_minutes is None:
+            return infinity_surface(self._value_font.get_height(), Colors.amber_hi)
+        text = f"{self.selected_time_minutes}+{self.selected_increment_seconds}"
+        return render_text(self._value_font, text, Colors.amber_hi)
+
+    def _side_label_text(self):
+        return {"white": "WHITE", "random": "RANDOM", "black": "BLACK"}[self.selected_side]
+
+    def _side_icon_width(self, icon_size):
+        if self.selected_side == "random":
+            return round(icon_size * SIDE_ICON_SPREAD)
+        return icon_size
+
+    def _layout_summary_chips(self, x, y):
+        pad = self._s(SUMMARY_CHIP_PAD_X)
+        gap = self._s(SUMMARY_CHIP_GAP)
+        icon = self._s(SUMMARY_CHIP_ICON)
+        chevron = self._s(SUMMARY_CHIP_CHEVRON)
+        h = self._s(CHIP_H)
+        chip_gap = self._s(12)
+
+        value = self._time_value_surface()
+        time_w = pad + icon + gap + value.get_width() + gap + chevron + pad
+        self._time_chip = pg.Rect(x, y, time_w, h)
+
+        label = render_text(self._chip_font, self._side_label_text(), Colors.text)
+        side_icon_w = self._side_icon_width(icon)
+        side_w = pad + side_icon_w + gap + label.get_width() + gap + chevron + pad
+        self._side_chip = pg.Rect(x + time_w + chip_gap, y, side_w, h)
+
+    def _clamp_popover_x(self, centerx, pw, win_w):
+        if pw <= self._panel.width:
+            lo, hi = self._panel.left, self._panel.right - pw
+        else:
+            lo, hi = 4, win_w - pw - 4
+        return min(max(centerx - pw // 2, lo), hi)
+
+    def _layout_popovers(self):
+        win_w, win_h = self.app.window.get_size()
+        top_limit = self.app.chrome.HEIGHT
+        pw, ph = self._s(TIME_POPOVER_W), self._s(TIME_POPOVER_H)
+        px = self._clamp_popover_x(self._time_chip.centerx, pw, win_w)
+        py = self._time_chip.bottom + self._s(8)
+        if py + ph > win_h - 4:
+            py = max(self._time_chip.top - self._s(8) - ph, top_limit + 4)
+        self._time_popover = pg.Rect(px, py, pw, ph)
+        pad = self._s(14)
+        self._picker.set_rect(self._time_popover.inflate(-2 * pad, -2 * pad))
+
+        sw = self._s(SIDE_POPOVER_W)
+        rows = len(SIDE_OPTIONS)
+        sh = self._s(SIDE_ROW_H) * rows + self._s(8) * (rows + 1)
+        sx = self._clamp_popover_x(self._side_chip.centerx, sw, win_w)
+        sy = self._side_chip.bottom + self._s(8)
+        if sy + sh > win_h - 4:
+            sy = max(self._side_chip.top - self._s(8) - sh, top_limit + 4)
+        self._side_popover = pg.Rect(sx, sy, sw, sh)
+        self._side_rects = {}
+        ry = sy + self._s(8)
+        for _, key in SIDE_OPTIONS:
+            self._side_rects[key] = pg.Rect(sx + self._s(8), ry, sw - self._s(16),
+                                            self._s(SIDE_ROW_H))
+            ry += self._s(SIDE_ROW_H) + self._s(8)
+
+    def _close_popovers(self):
+        self._time_open = False
+        self._side_open = False
+
+    def escape(self):
+        if self._time_open or self._side_open:
+            self._close_popovers()
+            return True
+        return False
+
+    def update(self, now):
+        if self._time_open:
+            self._picker.update(now)
+
+    def avoid_rects(self):
+        if self.visible and self._panel.width > 0:
+            return [self._panel]
+        return []
+
+    def handle_click(self, pos):
+        if not self.visible:
+            return False
+        if self._time_open:
+            if self._time_popover.collidepoint(pos):
+                self._picker.handle_click(pos)
+            else:
+                self._close_popovers()
+            return True
+        if self._side_open:
+            if self._side_popover.collidepoint(pos):
+                self._handle_side_click(pos)
+            else:
+                self._close_popovers()
+            return True
+        return self._handle_hero_click(pos)
+
+    def _handle_hero_click(self, pos):
+        if self.reconnect_available and self._recon_button.collidepoint(pos):
+            self.app.coordinator.reconnect()
+            return True
+        for label, key, locked in MODE_CHIPS:
+            if self._mode_rects[key].collidepoint(pos):
+                if locked:
+                    self.app.toast.show(COMING_SOON, key=COMING_SOON_KEY)
+                else:
+                    self.selected_mode = key
+                return True
+        if self._time_chip.collidepoint(pos):
+            self._picker.set_selection(self.selected_time_minutes,
+                                       self.selected_increment_seconds)
+            self._time_open = True
+            return True
+        if self._side_chip.collidepoint(pos):
+            self._side_open = True
+            return True
+        if self._cta_rect.collidepoint(pos):
+            self.app._on_start_game(self.build_config())
+            return True
+        if self.selected_mode != ONLINE and self._fen_rect.collidepoint(pos):
+            self.app._on_open_fen_modal()
+            return True
+        return False
+
+    def _handle_side_click(self, pos):
+        for key, rect in self._side_rects.items():
+            if rect.collidepoint(pos):
+                self.selected_side = key
+                if self._menu_layout is not None:
+                    self._relayout()
+                return
+
+    def handle_key(self, event):
+        return False
+
+    def draw(self, window, menu_layout):
+        if not self.visible:
+            return
+        window.blit(cut_rect_surface(self._panel.size, self._s(PANEL_CUT), Colors.surface,
+                                     border=Colors.border_strong, border_width=1,
+                                     corners=("tr", "bl")), self._panel.topleft)
+        if self.reconnect_available:
+            self._draw_recon(window)
+        window.blit(render_text(self._title_font, TITLE, Colors.text), self._title_pos)
+        window.blit(render_text(self._tagline_font, TAGLINE, Colors.text_muted),
+                    self._tagline_pos)
+        self._draw_mode_chips(window)
+        self._draw_time_chip(window)
+        self._draw_side_chip(window)
+        self._draw_cta(window)
+        if self.selected_mode != ONLINE:
+            self._draw_fen_link(window)
+        if self._time_open:
+            self._draw_time_popover(window)
+        elif self._side_open:
+            self._draw_side_popover(window)
+
+    def _draw_recon(self, window):
+        fill = pg.Color(Colors.amber).lerp(pg.Color(Colors.surface_raised), 0.84)
+        window.blit(cut_rect_surface(self._recon_rect.size, self._s(CHIP_CUT), fill,
+                                     border=Colors.amber, border_width=1,
+                                     corners=("tr", "bl")), self._recon_rect.topleft)
+        dot = max(self._s(4), 3)
+        pg.draw.circle(window, Colors.amber,
+                       (self._recon_rect.x + self._s(14), self._recon_rect.centery), dot)
+        text = render_text(self._recon_font, "You have a game in progress", Colors.text)
+        window.blit(text, (self._recon_rect.x + self._s(26),
+                           self._recon_rect.centery - text.get_height() // 2))
+        window.blit(cut_rect_surface(self._recon_button.size, self._s(6), Colors.surface,
+                                     border=Colors.amber, border_width=1, corners=("tr", "bl")),
+                    self._recon_button.topleft)
+        label = render_text(self._recon_font, "Reconnect", Colors.amber_hi)
+        window.blit(label, (self._recon_button.centerx - label.get_width() // 2,
+                            self._recon_button.centery - label.get_height() // 2))
+
+    def _draw_mode_chips(self, window):
+        mouse = pg.mouse.get_pos()
+        for label, key, locked in MODE_CHIPS:
+            rect = self._mode_rects[key]
+            if locked:
+                window.blit(dashed_rounded_rect_surface(
+                    rect.size, self._s(7), Colors.border, border_width=1,
+                    dash=self._s(DASH_LEN), gap=self._s(DASH_GAP), fill=Colors.surface),
+                    rect.topleft)
+                text = render_text(self._chip_font, label, Colors.text_muted)
+                lock_h = self._s(12)
+                gap = self._s(4)
+                total = lock_h + gap + text.get_width()
+                lx = rect.centerx - total // 2
+                self._draw_lock(window, lx + lock_h // 2, rect.centery, lock_h,
+                                Colors.text_muted)
+                window.blit(text, (lx + lock_h + gap, rect.centery - text.get_height() // 2))
+                continue
+            selected = key == self.selected_mode
+            hovered = rect.collidepoint(mouse)
+            fill = Colors.surface_raised if selected else (
+                Colors.surface_hover if hovered else Colors.surface)
+            border = Colors.accent if selected else Colors.border
+            color = Colors.text if selected or hovered else Colors.text_dim
+            window.blit(cut_rect_surface(rect.size, self._s(CHIP_CUT), fill,
+                                         border=border, border_width=1, corners=("tr", "bl")),
+                        rect.topleft)
+            text = render_text(self._chip_font, label, color)
+            window.blit(text, (rect.centerx - text.get_width() // 2,
+                               rect.centery - text.get_height() // 2))
+
+    def _draw_lock(self, window, cx, cy, h, color):
+        body_w = max(int(h * 0.72), 4)
+        body_h = max(int(h * 0.5), 3)
+        body = pg.Rect(cx - body_w // 2, cy - body_h // 2 + int(h * 0.14), body_w, body_h)
+        pg.draw.rect(window, color, body, border_radius=max(int(h * 0.12), 1))
+        sr = max(int(body_w * 0.3), 2)
+        pg.draw.arc(window, color, pg.Rect(cx - sr, body.top - sr, 2 * sr, 2 * sr),
+                    0.25, math.pi - 0.25, max(int(h * 0.12), 2))
+
+    def _draw_time_chip(self, window):
+        rect = self._time_chip
+        fill = pg.Color(Colors.amber).lerp(pg.Color(Colors.surface_raised), 0.84)
+        window.blit(cut_rect_surface(rect.size, self._s(CHIP_CUT), fill,
+                                     border=Colors.amber, border_width=1, corners=("tr",)),
+                    rect.topleft)
+        pad = self._s(SUMMARY_CHIP_PAD_X)
+        gap = self._s(SUMMARY_CHIP_GAP)
+        icon = self._s(SUMMARY_CHIP_ICON)
+        icon_rect = pg.Rect(rect.x + pad, rect.y, icon, rect.height)
+        draw_clock(window, icon_rect, Colors.amber_hi)
+        value = self._time_value_surface()
+        window.blit(value, (icon_rect.right + gap, rect.centery - value.get_height() // 2))
+        chevron = chevron_surface(self._s(SUMMARY_CHIP_CHEVRON), Colors.amber_hi,
+                                  up=self._time_open)
+        window.blit(chevron, (rect.right - pad - chevron.get_width(),
+                              rect.centery - chevron.get_height() // 2))
+
+    def _draw_side_chip(self, window):
+        rect = self._side_chip
+        hovered = rect.collidepoint(pg.mouse.get_pos())
+        border = Colors.accent if self._side_open else (
+            Colors.border_strong if hovered else Colors.border)
+        fill = Colors.surface_hover if hovered else Colors.surface
+        window.blit(cut_rect_surface(rect.size, self._s(CHIP_CUT), fill,
+                                     border=border, border_width=1, corners=("tr",)),
+                    rect.topleft)
+        pad = self._s(SUMMARY_CHIP_PAD_X)
+        gap = self._s(SUMMARY_CHIP_GAP)
+        icon = self._s(SUMMARY_CHIP_ICON)
+        icon_w = self._side_icon_width(icon)
+        self._draw_summary_side_icon(window, rect.x + pad, rect.centery, icon)
+        label = render_text(self._chip_font, self._side_label_text(), Colors.text)
+        window.blit(label, (rect.x + pad + icon_w + gap,
+                            rect.centery - label.get_height() // 2))
+        chevron = chevron_surface(self._s(SUMMARY_CHIP_CHEVRON), Colors.text_dim,
+                                  up=self._side_open)
+        window.blit(chevron, (rect.right - pad - chevron.get_width(),
+                              rect.centery - chevron.get_height() // 2))
+
+    def _draw_summary_side_icon(self, window, x, cy, size):
+        if self.selected_side == "random":
+            step = round(size * (SIDE_ICON_SPREAD - 1.0))
+            self._blit_pawn(window, x + size // 2, cy, size, "white")
+            self._blit_pawn(window, x + step + size // 2, cy, size, "black")
+        else:
+            self._blit_pawn(window, x + size // 2, cy, size, self.selected_side)
+
+    def _blit_pawn(self, window, cx, cy, size, color):
+        img = _side_image(color)
+        if img is not None:
+            scaled = pg.transform.smoothscale(img, (size, size))
+            window.blit(scaled, (cx - size // 2, cy - size // 2))
+
+    def _draw_cta(self, window):
+        hovered = self._cta_rect.collidepoint(pg.mouse.get_pos())
+        fill = Colors.accent_hi if hovered else Colors.accent
+        window.blit(cut_rect_surface(self._cta_rect.size, self._s(CHIP_CUT), fill,
+                                     corners=("tr", "bl")), self._cta_rect.topleft)
+        text = render_text(self._cta_font, self.cta_label(), Colors.on_accent)
+        window.blit(text, (self._cta_rect.centerx - text.get_width() // 2,
+                           self._cta_rect.centery - text.get_height() // 2))
+
+    def _draw_fen_link(self, window):
+        hovered = self._fen_rect.collidepoint(pg.mouse.get_pos())
+        color = Colors.text_dim if hovered else Colors.text_muted
+        text = render_text(self._link_font, "Start from FEN", color)
+        window.blit(text, (self._fen_rect.centerx - text.get_width() // 2,
+                           self._fen_rect.centery - text.get_height() // 2))
+
+    def _draw_time_popover(self, window):
+        window.blit(cut_rect_surface(self._time_popover.size, self._s(PANEL_CUT),
+                                     Colors.surface_raised, border=Colors.border_strong,
+                                     border_width=1, corners=("tr", "bl")),
+                    self._time_popover.topleft)
+        self._picker.draw(window, pg.time.get_ticks())
+
+    def _draw_side_popover(self, window):
+        window.blit(cut_rect_surface(self._side_popover.size, self._s(PANEL_CUT),
+                                     Colors.surface_raised, border=Colors.border_strong,
+                                     border_width=1, corners=("tr", "bl")),
+                    self._side_popover.topleft)
+        mouse = pg.mouse.get_pos()
+        for label, key in SIDE_OPTIONS:
+            rect = self._side_rects[key]
+            selected = key == self.selected_side
+            hovered = rect.collidepoint(mouse)
+            fill = Colors.surface_active if selected else (
+                Colors.surface_hover if hovered else Colors.surface)
+            border = Colors.accent if selected else Colors.border
+            window.blit(cut_rect_surface(rect.size, self._s(6), fill, border=border,
+                                         border_width=1, corners=("tr", "bl")), rect.topleft)
+            self._draw_side_icon(window, rect, key)
+            color = Colors.text if selected or hovered else Colors.text_dim
+            text = render_text(self._chip_font, label, color)
+            window.blit(text, (rect.x + self._s(44), rect.centery - text.get_height() // 2))
+
+    def _draw_side_icon(self, window, rect, key):
+        size = int(rect.height * 0.7)
+        cx = rect.x + self._s(22)
+        cy = rect.centery
+        if key == "random":
+            if not blit_emoji(window, "🎲", (cx, cy), size):
+                pg.draw.rect(window, Colors.text_dim,
+                             pg.Rect(cx - size // 2, cy - size // 2, size, size), 1,
+                             border_radius=4)
+            return
+        img = _side_image(key)
+        if img is not None:
+            scaled = pg.transform.smoothscale(img, (size, size))
+            window.blit(scaled, (cx - size // 2, cy - size // 2))

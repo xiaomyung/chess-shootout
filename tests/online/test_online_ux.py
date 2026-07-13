@@ -362,14 +362,16 @@ def test_menu_mode_skips_board_draw(frontend, monkeypatch):
     assert drew == [True]
 
 
-def test_start_menu_centered_on_window_not_board(frontend):
-    rect = frontend.start_menu._outer
-    win_w, win_h = frontend.window.get_size()
-    top = frontend.chrome.HEIGHT
-    content_center_y = top + (win_h - top - 22) / 2
-    assert abs(rect.centerx - win_w / 2) <= 1
-    assert abs(rect.centery - content_center_y) <= 1
-    assert rect.bottom < frontend.start_menu._footer_link_rect.top
+def test_play_hero_sits_in_the_hero_column(frontend):
+    """The play hero clears the left rail and is centered inside its hero
+    column, not the whole window (the rail owns the left edge now)."""
+    frontend.draw_frame()
+    layout = frontend.menu._menu_layout
+    panel = frontend.menu.play_view.content_rect()
+    assert panel.left >= layout.rail_rect.right
+    assert abs(panel.centerx - layout.hero_rect.centerx) <= 1
+    assert panel.top >= layout.hero_rect.top
+    assert panel.bottom <= layout.hero_rect.bottom
 
 
 def test_menu_mode_centers_flex_modals_on_window(frontend):
@@ -481,7 +483,7 @@ def _arm_post_game(frontend, **client):
     frontend.game.manual_result = "draw_agreement"
     frontend.game._chosen_side = "white"
     frontend.game.white_name, frontend.game.black_name = "Me", "Them"
-    frontend.start_menu.hide()
+    frontend.menu.hide_card()
 
 
 def test_decline_rematch_sends_false_and_clears(frontend):
@@ -514,7 +516,7 @@ def test_rematch_update_declined_bubbles_and_returns_to_menu(frontend):
     assert frontend.coordinator.client is None
     assert frontend.screen is frontend.menu
     assert frontend.coordinator._rematch_offered is False
-    assert frontend.start_menu.is_visible()
+    assert frontend.menu.card_visible()
 
 
 def test_rematch_update_window_expired_returns_to_menu(frontend):
@@ -522,7 +524,7 @@ def test_rematch_update_window_expired_returns_to_menu(frontend):
     frontend.coordinator._handle_rematch_update({"event": "window_expired"})
     assert frontend.coordinator.client is None
     assert frontend.screen is frontend.menu
-    assert frontend.start_menu.is_visible()
+    assert frontend.menu.card_visible()
 
 
 def test_rematch_update_declined_logs_the_teardown_reason(frontend, caplog):

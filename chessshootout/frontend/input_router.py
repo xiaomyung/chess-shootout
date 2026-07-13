@@ -32,7 +32,7 @@ class InputRouter:
         frontend = self.frontend
         frontend.confirm_modal.hide()
         if frontend.screen is frontend.menu:
-            frontend.start_menu.show()
+            frontend.menu.show_card()
 
     def _top_visible_modal(self):
         for spec in self.frontend._active_modal_specs():

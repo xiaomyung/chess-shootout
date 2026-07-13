@@ -121,7 +121,7 @@ def test_battle_avoids_the_rail_and_the_active_views_panels():
     app = make_app()
     app.draw_frame()
     assert app.menu._menu_layout.rail_rect in app.menu_battle.avoid_rects
-    assert app.start_menu.outer_rect() in app.menu_battle.avoid_rects
+    assert app.menu.play_view.content_rect() in app.menu_battle.avoid_rects
 
     app.menu.goto_history()
     app.draw_frame()

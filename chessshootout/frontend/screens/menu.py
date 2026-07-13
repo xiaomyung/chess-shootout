@@ -29,6 +29,40 @@ class MenuScreen(Screen):
         self.rail = MenuRail(app.window, {"open_url": open_with_default_app})
         self._active_view = "play"
         self._menu_layout = None
+        self._load_pgn_available = False
+
+    @property
+    def play_view(self):
+        return self.views["play"]
+
+    def show_card(self):
+        self.play_view.show()
+
+    def hide_card(self):
+        self.play_view.hide()
+
+    def card_visible(self):
+        return self.play_view.is_visible()
+
+    def set_reconnect_available(self, available):
+        self.play_view.set_reconnect_available(available)
+
+    def apply_default_time_settings(self):
+        self.play_view.apply_default_time_settings()
+
+    def apply_resume_config(self, resume):
+        color = resume["your_color"]
+        self.set_nickname(resume["white_name"] if color == "white" else resume["black_name"])
+        self.play_view.apply_resume_config(resume)
+
+    def set_nickname(self, text):
+        env.set_nickname(text)
+
+    def build_play_config(self):
+        return self.play_view.build_config()
+
+    def set_load_pgn_available(self, available):
+        self._load_pgn_available = available
 
     def enter(self, **payload):
         self._activate(payload.get("view") or self._active_view)
@@ -95,7 +129,7 @@ class MenuScreen(Screen):
         if self._active_view != "play":
             self.goto_view("play")
             return True
-        self.app.start_menu.hide()
+        self.hide_card()
         self.app.confirm_modal.show(
             "Leaving so soon?", on_yes=self._quit_app, on_no=self._cancel_quit,
             yes_label="See ya!", no_label="Cancel")
@@ -125,7 +159,7 @@ class MenuScreen(Screen):
         self.app.running = False
 
     def _cancel_quit(self):
-        self.app.start_menu.show()
+        self.show_card()
 
     def modals(self):
         return [ModalSpec(self.fen_input_modal)]

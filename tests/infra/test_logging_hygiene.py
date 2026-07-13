@@ -239,7 +239,7 @@ def _run_scripted_local_session(tmp_path):
     assert saved_path is not None
 
     app._on_back_to_menu()
-    app._on_open_history()
+    app.menu.goto_history()
     app._execute_pending_nav()
     app._open_pgn_review(saved_path)
     app._execute_pending_nav()

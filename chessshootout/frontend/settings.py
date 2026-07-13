@@ -34,7 +34,7 @@ class SettingsController:
             return False
         if self._server_addr_row is not None:
             env.set_server_addr(self._server_addr_row.current_text())
-        self.frontend.start_menu.apply_default_time_settings()
+        self.frontend.menu.apply_default_time_settings()
         return True
 
     def _validate_data_folder_on_close(self):

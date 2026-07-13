@@ -64,6 +64,37 @@ def test_reticle_slides_from_the_old_row_to_the_new_one():
     assert abs(rail.reticle_y(5000) - history_cy) < 1, "and settles on it"
 
 
+def _has_warm_tint(surf, rect):
+    for x in range(rect.x, rect.right):
+        for y in range(rect.y, rect.bottom, 2):
+            if not surf.get_rect().collidepoint((x, y)):
+                continue
+            r, g, b = surf.get_at((x, y))[:3]
+            if r > 40 and r > b + 15 and r >= g:
+                return True
+    return False
+
+
+def test_reticle_sits_at_the_row_left_edge_not_the_right():
+    """v2.9.0: the crosshair moved from a right-edge dot to a left-edge
+    reticle that straddles the row's own left boundary. The row's own accent
+    border also paints warm pixels at its right edge, so the regression guard
+    checks the margin strictly outside the row (where only a reticle, never
+    the row itself, can paint) rather than fighting that overlap."""
+    rail, _ = _rail()
+    surf = pg.display.get_surface()
+    surf.fill((0, 0, 0))
+    rail.draw(surf, 0)
+
+    row = rail._row_rects["play"]
+    outside_left = pg.Rect(row.x - 9, row.y, 8, row.height)
+    outside_right = pg.Rect(row.right + 1, row.y, 10, row.height)
+    assert _has_warm_tint(surf, outside_left), \
+        "the reticle must straddle and paint past the row's left edge"
+    assert not _has_warm_tint(surf, outside_right), \
+        "nothing should paint past the row's right edge anymore"
+
+
 def test_footer_shows_the_display_version():
     rail, _ = _rail()
     version = paths.get_app_version()
