@@ -10,7 +10,7 @@ HERO_PAD_LEFT = 48
 HERO_GAP_RIGHT = 24
 SUBVIEW_MAX_W = 860
 SCALE_MIN = 0.72
-SCALE_MAX = 1.0
+SCALE_MAX = 1.15
 SCALE_REF_W = 1280
 SCALE_REF_H = 764
 
@@ -25,17 +25,21 @@ class MenuLayout:
     subview_rect: pg.Rect
 
 
-def compute_menu_layout(window_width, window_height, top):
+def compute_menu_layout(window_width, window_height, top, right_rail=False):
     avail_h = max(window_height - top, 1)
     scale = min(window_width / SCALE_REF_W, avail_h / SCALE_REF_H)
     scale = max(SCALE_MIN, min(SCALE_MAX, scale))
 
     rail_rect = pg.Rect(0, top, RAIL_W, avail_h)
-    right_rail_rect = pg.Rect(window_width - RIGHT_W - MARGIN, top + MARGIN,
-                              RIGHT_W, max(avail_h - 2 * MARGIN, 1))
+    if right_rail:
+        right_rail_rect = pg.Rect(window_width - RIGHT_W - MARGIN, top + MARGIN,
+                                  RIGHT_W, max(avail_h - 2 * MARGIN, 1))
+        hero_right = right_rail_rect.left - round(HERO_GAP_RIGHT * scale)
+    else:
+        right_rail_rect = pg.Rect(window_width, top + MARGIN, 0, max(avail_h - 2 * MARGIN, 1))
+        hero_right = window_width - MARGIN
 
     hero_left = RAIL_W + round(HERO_PAD_LEFT * scale)
-    hero_right = right_rail_rect.left - round(HERO_GAP_RIGHT * scale)
     hero_rect = pg.Rect(hero_left, top + MARGIN, max(hero_right - hero_left, 1),
                         max(avail_h - 2 * MARGIN, 1))
 

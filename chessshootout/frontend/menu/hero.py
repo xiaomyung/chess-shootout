@@ -41,7 +41,7 @@ TITLE_CAP_H = 56
 TAGLINE_FONT = 11
 TAGLINE_TRACK = 2
 TAGLINE_H = 16
-TAGLINE_GAP = 12
+TAGLINE_GAP = 26
 MODE_GAP = 30
 CHIP_H = 44
 CHIP_CUT = 8
@@ -56,8 +56,8 @@ LINK_H = 24
 FEN_GAP = 10
 RECON_H = 46
 RECON_GAP = 12
-TIME_POPOVER_W = 340
-TIME_POPOVER_H = 190
+TIME_POPOVER_W = 560
+TIME_POPOVER_H = 360
 SIDE_POPOVER_W = 190
 SIDE_ROW_H = 40
 
@@ -211,6 +211,10 @@ class PlayView(MenuView):
         self._menu_layout = menu_layout
         self._scale = menu_layout.scale
         self._relayout()
+        if self._time_open:
+            self._layout_time_popover()
+        elif self._side_open:
+            self._layout_side_popover()
 
     def _s(self, value):
         return max(int(value * self._scale), 1)
@@ -246,7 +250,6 @@ class PlayView(MenuView):
         cta_bottom = hero.bottom - self._s(CTA_BOTTOM)
         self._cta_rect = pg.Rect(x, cta_bottom - cta_h, w, cta_h)
         self._layout_fen_link()
-        self._layout_popovers()
 
     def _fit_fonts(self):
         self._title_font = get_display_font(self._s(TITLE_FONT))
@@ -296,6 +299,21 @@ class PlayView(MenuView):
             return round(icon_size * SIDE_ICON_SPREAD)
         return icon_size
 
+    def _max_time_value_w(self):
+        widest = infinity_surface(self._value_font.get_height(), Colors.amber_hi).get_width()
+        for minutes, _ in CHAMBERS:
+            if minutes is None:
+                continue
+            for inc in INCREMENTS:
+                text = f"{minutes}+{inc}"
+                widest = max(widest, render_text(self._value_font, text,
+                                                 Colors.amber_hi).get_width())
+        return widest
+
+    def _max_side_label_w(self):
+        return max(render_text(self._chip_font, label, Colors.text).get_width()
+                   for label in ("WHITE", "RANDOM", "BLACK"))
+
     def _layout_summary_chips(self, x, y):
         pad = self._s(SUMMARY_CHIP_PAD_X)
         gap = self._s(SUMMARY_CHIP_GAP)
@@ -304,13 +322,11 @@ class PlayView(MenuView):
         h = self._s(CHIP_H)
         chip_gap = self._s(SUMMARY_CHIP_SPACING)
 
-        value = self._time_value_surface()
-        time_w = pad + icon + gap + value.get_width() + gap + chevron + pad
+        time_w = pad + icon + gap + self._max_time_value_w() + gap + chevron + pad
         self._time_chip = pg.Rect(x, y, time_w, h)
 
-        label = render_text(self._chip_font, self._side_label_text(), Colors.text)
-        side_icon_w = self._side_icon_width(icon)
-        side_w = pad + side_icon_w + gap + label.get_width() + gap + chevron + pad
+        side_icon_w = round(icon * SIDE_ICON_SPREAD)
+        side_w = pad + side_icon_w + gap + self._max_side_label_w() + gap + chevron + pad
         self._side_chip = pg.Rect(x + time_w + chip_gap, y, side_w, h)
 
     def _layout_chips_block(self):
@@ -338,7 +354,7 @@ class PlayView(MenuView):
             lo, hi = 4, win_w - pw - 4
         return min(max(centerx - pw // 2, lo), hi)
 
-    def _layout_popovers(self):
+    def _layout_time_popover(self):
         win_w, win_h = self.app.window.get_size()
         top_limit = self.app.chrome.HEIGHT
         pw, ph = self._s(TIME_POPOVER_W), self._s(TIME_POPOVER_H)
@@ -350,6 +366,9 @@ class PlayView(MenuView):
         pad = self._s(14)
         self._picker.set_rect(self._time_popover.inflate(-2 * pad, -2 * pad))
 
+    def _layout_side_popover(self):
+        win_w, win_h = self.app.window.get_size()
+        top_limit = self.app.chrome.HEIGHT
         sw = self._s(SIDE_POPOVER_W)
         rows = len(SIDE_OPTIONS)
         sh = self._s(SIDE_ROW_H) * rows + self._s(8) * (rows + 1)
@@ -364,6 +383,16 @@ class PlayView(MenuView):
             self._side_rects[key] = pg.Rect(sx + self._s(8), ry, sw - self._s(16),
                                             self._s(SIDE_ROW_H))
             ry += self._s(SIDE_ROW_H) + self._s(8)
+
+    def _open_time_popover(self):
+        self._picker.set_selection(self.selected_time_minutes,
+                                   self.selected_increment_seconds)
+        self._time_open = True
+        self._layout_time_popover()
+
+    def _open_side_popover(self):
+        self._side_open = True
+        self._layout_side_popover()
 
     def _close_popovers(self):
         self._time_open = False
@@ -422,12 +451,10 @@ class PlayView(MenuView):
                     self.selected_mode = key
                 return True
         if self._time_chip.collidepoint(pos):
-            self._picker.set_selection(self.selected_time_minutes,
-                                       self.selected_increment_seconds)
-            self._time_open = True
+            self._open_time_popover()
             return True
         if self._side_chip.collidepoint(pos):
-            self._side_open = True
+            self._open_side_popover()
             return True
         if self._cta_rect.collidepoint(pos):
             self.app._on_start_game(self.build_config())

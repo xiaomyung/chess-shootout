@@ -9,7 +9,7 @@ from tests.conftest import pygame_display
 from chessshootout import paths
 from chessshootout.frontend.menu.layout import compute_menu_layout
 from chessshootout.frontend.menu.rail import (
-    CREDIT_URL, ICON_PAD, ICON_SIDE, LABEL_GAP, MenuRail, OPTIONS_ROW, ROWS,
+    CREDIT_URL, ICON_X, LABEL_X, MenuRail, OPTIONS_ROW, RETICLE_INSET, ROWS,
 )
 from chessshootout.frontend.visual.colors import Colors
 from tests.helpers import assert_pixel_color, make_app
@@ -101,23 +101,25 @@ def _has_warm_tint(surf, rect):
     return False
 
 
-def test_reticle_sits_at_the_row_left_edge_not_the_right():
-    """v2.9.0: the crosshair moved from a right-edge dot to a left-edge
-    reticle that straddles the row's own left boundary. The regression guard
-    checks the margin strictly outside the row (where only a reticle, never
-    the row itself, can paint)."""
+def test_reticle_sits_inside_the_row_near_its_left_edge():
+    """cp1: the crosshair now sits FULLY inside the active row, anchored just in
+    from its left edge, so it can never be clipped by the rail/window edge. The
+    guard checks it paints inside the row but past neither edge."""
     rail, _ = _rail()
     surf = pg.display.get_surface()
     surf.fill((0, 0, 0))
     rail.draw(surf, 0)
 
     row = rail._row_rects["play"]
-    outside_left = pg.Rect(row.x - 9, row.y, 8, row.height)
+    outside_left = pg.Rect(row.x - 10, row.y, 9, row.height)
+    inside_left = pg.Rect(row.x + 2, row.y, 30, row.height)
     outside_right = pg.Rect(row.right + 1, row.y, 10, row.height)
-    assert _has_warm_tint(surf, outside_left), \
-        "the reticle must straddle and paint past the row's left edge"
+    assert not _has_warm_tint(surf, outside_left), \
+        "the reticle must not paint past the row's left edge anymore"
+    assert _has_warm_tint(surf, inside_left), \
+        "the reticle sits just inside the row's own left edge"
     assert not _has_warm_tint(surf, outside_right), \
-        "nothing should paint past the row's right edge anymore"
+        "nothing should paint past the row's right edge"
 
 
 def test_reticle_is_a_visible_crosshair_not_a_tiny_dot():
@@ -127,7 +129,8 @@ def test_reticle_is_a_visible_crosshair_not_a_tiny_dot():
     rail.draw(surf, 0)
 
     row = rail._row_rects["play"]
-    band = pg.Rect(row.x - 15, row.y, 30, row.height)
+    cx = row.x + max(int(RETICLE_INSET * rail.scale), 12)
+    band = pg.Rect(cx - 16, row.y, 32, row.height)
     warm_pixels = 0
     for x in range(band.x, band.right):
         for y in range(band.y, band.bottom):
@@ -147,8 +150,8 @@ def test_icon_and_label_share_the_same_x_active_or_not():
     surf.fill((0, 0, 0))
     rail.draw(surf, 0)
 
-    icon_x = rail._row_rects["play"].x + max(int(ICON_PAD * rail.scale), 24)
-    label_x = icon_x + max(int(ICON_SIDE * rail.scale), 14) + max(int(LABEL_GAP * rail.scale), 4)
+    icon_x = rail.rect.x + max(int(ICON_X * rail.scale), 40)
+    label_x = rail.rect.x + max(int(LABEL_X * rail.scale), 62)
 
     def painted(row_key, x):
         row = rail._row_rects[row_key]
@@ -162,12 +165,12 @@ def test_icon_and_label_share_the_same_x_active_or_not():
         assert painted(key, label_x + 1), f"label column empty for {key}"
 
 
-def test_footer_shows_the_display_version():
+def test_footer_shows_the_display_version_on_one_line():
     rail, _ = _rail()
     version = paths.get_app_version()
-    expected = f"v{version} · dev" if version else "dev"
-    assert rail._version_text == expected
-    assert rail._version_surf is not None
+    expected = f"v{version} · by " if version else "dev · by "
+    assert rail._footer_prefix == expected
+    assert rail._footer_prefix_surf is not None
 
 
 def test_credit_link_click_opens_the_site():

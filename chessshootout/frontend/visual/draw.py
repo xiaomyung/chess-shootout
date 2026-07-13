@@ -132,13 +132,15 @@ _CUT_RECT_CACHE = new_cache()
 _CUT_CORNERS = ("tl", "tr", "br", "bl")
 
 
-def _cut_rect_points(w, h, cut, corners):
-    c = max(0.0, min(cut, w / 2, h / 2))
+def _cut_rect_points(left, top, right, bottom, cut, corners):
+    c = max(0.0, min(cut, (right - left) / 2, (bottom - top) / 2))
     pts = []
-    pts += [(0, c), (c, 0)] if "tl" in corners and c > 0 else [(0, 0)]
-    pts += [(w - c, 0), (w, c)] if "tr" in corners and c > 0 else [(w, 0)]
-    pts += [(w, h - c), (w - c, h)] if "br" in corners and c > 0 else [(w, h)]
-    pts += [(c, h), (0, h - c)] if "bl" in corners and c > 0 else [(0, h)]
+    pts += [(left, top + c), (left + c, top)] if "tl" in corners and c > 0 else [(left, top)]
+    pts += [(right - c, top), (right, top + c)] if "tr" in corners and c > 0 else [(right, top)]
+    pts += [(right, bottom - c), (right - c, bottom)] if "br" in corners and c > 0 \
+        else [(right, bottom)]
+    pts += [(left + c, bottom), (left, bottom - c)] if "bl" in corners and c > 0 \
+        else [(left, bottom)]
     return pts
 
 
@@ -151,11 +153,16 @@ def cut_rect_surface(size, cut, fill, border=None, border_width=1, corners=("tr"
     def build():
         def render(surf, k):
             w, h = surf.get_size()
-            pts = _cut_rect_points(w, h, cut * k, corners)
-            pg.draw.polygon(surf, pg.Color(fill), pts)
-            if border is not None:
-                pg.draw.polygon(surf, pg.Color(border), pts,
-                                width=max(int(border_width * k), 1))
+            if border is None:
+                pg.draw.polygon(surf, pg.Color(fill),
+                                _cut_rect_points(0, 0, w, h, cut * k, corners))
+                return
+            bw = max(border_width * k, 1.0)
+            pg.draw.polygon(surf, pg.Color(border),
+                            _cut_rect_points(0, 0, w, h, cut * k, corners))
+            inner_cut = max(cut * k - bw * 1.414, 0.0)
+            pg.draw.polygon(surf, pg.Color(fill),
+                            _cut_rect_points(bw, bw, w - bw, h - bw, inner_cut, corners))
         return supersample(size, render)
     return memoized_surface(_CUT_RECT_CACHE, key, build)
 

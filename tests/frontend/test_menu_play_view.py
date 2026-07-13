@@ -219,21 +219,41 @@ def test_clicking_the_side_chip_closes_an_open_time_popover(app, hero):
     assert hero._side_open is True
 
 
-def test_summary_chips_are_content_sized_and_left_aligned(hero):
-    """v2.9.0: no more half-width wells — chips hug their own content and sit
-    side by side, left-packed against the open hero column (no card)."""
+def test_summary_chips_are_fixed_width_and_left_packed(hero):
+    """cp1: chips are sized to their WIDEST possible content and sit side by
+    side, left-packed against the open hero column, so selection never resizes
+    them."""
     gap = hero._s(12)
     assert hero._side_chip.x == hero._time_chip.right + gap
     assert hero._time_chip.right + hero._side_chip.width < hero._hero_rect.right
 
 
-def test_side_chip_width_tracks_the_selected_label(app, hero):
-    """RANDOM renders two pawn icons plus a longer word than WHITE/BLACK, so
-    its chip must be wider — width is recomputed on every selection change."""
+def test_side_chip_width_is_fixed_across_selection(app, hero):
+    """cp1 (was: width tracked the label). The side chip is pinned to the widest
+    label (RANDOM) so the chips row never jumps when an option is picked."""
     app.menu.handle_click(hero._side_chip.center)
     random_width = hero._side_chip.width
     app.menu.handle_click(hero._side_rects["white"].center)
-    assert hero._side_chip.width < random_width
+    assert hero.selected_side == "white"
+    assert hero._side_chip.width == random_width
+
+
+def test_side_popover_and_chips_are_frozen_on_selection(app, hero):
+    """cp1: the side popover's rect and the chips row are computed on open and
+    frozen — clicking an option must not move or resize either."""
+    app.menu.handle_click(hero._side_chip.center)
+    popover_before = hero._side_popover.copy()
+    time_chip_before = hero._time_chip.copy()
+    side_chip_before = hero._side_chip.copy()
+    rows_before = {k: r.copy() for k, r in hero._side_rects.items()}
+
+    app.menu.handle_click(hero._side_rects["white"].center)
+
+    assert hero._side_popover == popover_before
+    assert hero._time_chip == time_chip_before
+    assert hero._side_chip == side_chip_before
+    assert {k: r.copy() for k, r in hero._side_rects.items()} == rows_before
+    assert hero._side_open is True
 
 
 def test_time_popover_stays_within_the_hero_column_when_it_fits(app, hero):

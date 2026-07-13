@@ -29,13 +29,15 @@ ROW_CUT = 8
 ROW_PAD = 14
 ROW_GAP = 10
 ROW_Y_OFFSET = 14
-ICON_PAD = 38
-ICON_SIDE = 18
-LABEL_GAP = 7
+ICON_X = 56
+ICON_SIDE = 22
+LABEL_X = 84
 LABEL_FONT_SIZE = 15
 RETICLE_SLIDE_MS = 260
 RETICLE_PULSE_MS = 900
-RETICLE_SIZE = 22
+RETICLE_SIZE = 28
+RETICLE_INSET = 20
+RETICLE_ALPHA_FLOOR = 190
 
 
 class MenuRail:
@@ -49,11 +51,10 @@ class MenuRail:
         self._row_rects = {}
         self._reticle_tween = None
         self._label_font = get_font(13, bold=True)
-        self._version_font = get_mono_font(10)
-        self._credit_font = get_font(11, bold=True)
-        self._version_text = ""
-        self._version_surf = None
-        self._version_pos = (0, 0)
+        self._footer_font = get_mono_font(10)
+        self._footer_prefix = ""
+        self._footer_prefix_surf = None
+        self._footer_prefix_pos = (0, 0)
         self._credit_surf = None
         self._credit_rect = pg.Rect(0, 0, 0, 0)
         self._credit_hitbox = pg.Rect(0, 0, 0, 0)
@@ -62,8 +63,7 @@ class MenuRail:
         self.rect = pg.Rect(rect)
         self.scale = scale
         self._label_font = get_font(max(int(LABEL_FONT_SIZE * scale), 12), bold=True)
-        self._version_font = get_mono_font(max(int(11 * scale), 9))
-        self._credit_font = get_font(max(int(11 * scale), 9), bold=True)
+        self._footer_font = get_mono_font(max(int(11 * scale), 9))
         pad = max(int(ROW_PAD * scale), 9)
         row_h = max(int(46 * scale), 34)
         gap = max(int(ROW_GAP * scale), 6)
@@ -87,18 +87,19 @@ class MenuRail:
 
     def _build_footer(self, x, w, footer_h):
         version = paths.get_app_version()
-        self._version_text = f"v{version} · dev" if version else "dev"
-        self._version_surf = render_text(self._version_font, self._version_text,
-                                         Colors.text_dim)
-        self._credit_surf = render_text(self._credit_font, CREDIT_TEXT, Colors.text_muted)
+        version_label = f"v{version}" if version else "dev"
+        self._footer_prefix = f"{version_label} · by "
+        self._footer_prefix_surf = render_text(self._footer_font, self._footer_prefix,
+                                               Colors.text_muted)
+        self._credit_surf = render_text(self._footer_font, CREDIT_TEXT, Colors.text_dim)
         base_y = self.rect.bottom - max(int(14 * self.scale), 8)
-        credit_h = self._credit_surf.get_height()
-        credit_y = base_y - credit_h
-        self._credit_rect = pg.Rect(x, credit_y, self._credit_surf.get_width(), credit_h)
-        self._credit_hitbox = self._credit_rect.inflate(max(int(10 * self.scale), 6),
-                                                        max(int(10 * self.scale), 6))
-        version_h = self._version_surf.get_height()
-        self._version_pos = (x, credit_y - max(int(4 * self.scale), 2) - version_h)
+        line_h = max(self._footer_prefix_surf.get_height(), self._credit_surf.get_height())
+        line_y = base_y - line_h
+        self._footer_prefix_pos = (x, line_y)
+        credit_x = x + self._footer_prefix_surf.get_width()
+        self._credit_rect = pg.Rect(credit_x, line_y, self._credit_surf.get_width(), line_h)
+        self._credit_hitbox = self._credit_rect.inflate(max(int(8 * self.scale), 4),
+                                                        max(int(8 * self.scale), 4))
 
     def set_active(self, name, now_ms):
         if name == self.active:
@@ -132,9 +133,9 @@ class MenuRail:
                      (self.rect.right - 1, self.rect.bottom - 1))
         mouse = pg.mouse.get_pos()
         cut = max(int(ROW_CUT * self.scale), 5)
-        icon_side = max(int(ICON_SIDE * self.scale), 14)
-        icon_pad = max(int(ICON_PAD * self.scale), 24)
-        label_gap = max(int(LABEL_GAP * self.scale), 4)
+        icon_side = max(int(ICON_SIDE * self.scale), 16)
+        icon_x = self.rect.x + max(int(ICON_X * self.scale), 40)
+        label_x = self.rect.x + max(int(LABEL_X * self.scale), 62)
         for key, label, icon_fn in ROWS + (OPTIONS_ROW,):
             rect = self._row_rects[key]
             active = key == self.active
@@ -150,11 +151,10 @@ class MenuRail:
                 icon_color, text_color = Colors.text, Colors.text
             else:
                 icon_color, text_color = Colors.text_dim, Colors.text_dim
-            icon_rect = pg.Rect(rect.x + icon_pad, rect.y, icon_side, rect.height)
+            icon_rect = pg.Rect(icon_x, rect.y, icon_side, rect.height)
             icon_fn(window, icon_rect, icon_color)
             label_surf = render_text(self._label_font, label, text_color)
-            window.blit(label_surf, (icon_rect.right + label_gap,
-                                     rect.centery - label_surf.get_height() // 2))
+            window.blit(label_surf, (label_x, rect.centery - label_surf.get_height() // 2))
         self._draw_reticle(window, now_ms)
         self._draw_footer(window)
 
@@ -162,17 +162,17 @@ class MenuRail:
         if self._reticle_tween is None:
             return
         y = int(self._reticle_tween.value(now_ms))
-        size = max(int(RETICLE_SIZE * self.scale), 16)
-        cx = self._row_rects[self.active].x
+        size = max(int(RETICLE_SIZE * self.scale), 20)
+        cx = self._row_rects[self.active].x + max(int(RETICLE_INSET * self.scale), 12)
         pulse = 0.5 + 0.5 * math.sin(now_ms / RETICLE_PULSE_MS * math.tau)
-        alpha = int(150 + 90 * pulse)
+        alpha = int(RETICLE_ALPHA_FLOOR + (255 - RETICLE_ALPHA_FLOOR) * pulse)
         draw_reticle(window, pg.Rect(cx - size // 2, y - size // 2, size, size),
                      Colors.accent, alpha=alpha)
 
     def _draw_footer(self, window):
-        if self._version_surf is None:
+        if self._footer_prefix_surf is None:
             return
-        window.blit(self._version_surf, self._version_pos)
+        window.blit(self._footer_prefix_surf, self._footer_prefix_pos)
         window.blit(self._credit_surf, self._credit_rect.topleft)
         hovered = self._credit_hitbox.collidepoint(pg.mouse.get_pos())
         underline = Colors.text if hovered else Colors.text_dim

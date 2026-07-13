@@ -4,8 +4,7 @@ import pygame as pg
 
 from chessshootout.frontend.visual.cache import render_text
 from chessshootout.frontend.visual.colors import Colors
-from chessshootout.frontend.visual.draw import (
-    dashed_rounded_rect_surface, infinity_surface, supersample)
+from chessshootout.frontend.visual.draw import infinity_surface, supersample
 from chessshootout.frontend.visual.fonts import get_display_font, get_mono_font
 from chessshootout.frontend.visual.tween import Tween
 
@@ -19,39 +18,42 @@ ROTATION_MS = 220
 TURRET_SWING_MS = 260
 SETTLE_MS = 90
 
-DISC_MARGIN_FRAC = 0.20
+DISC_MARGIN_FRAC = 0.34
 CHAMBER_RING_FRAC = 0.58
-CHAMBER_RADIUS_FRAC = 0.22
-CHAMBER_BORE_FRAC = 0.58
-FLUTE_RING_FRAC = 0.82
-FLUTE_RADIUS_FRAC = 0.11
-STAR_RADIUS_FRAC = 0.16
+CHAMBER_RADIUS_FRAC = 0.25
+SCALLOP_RING_FRAC = 1.05
+SCALLOP_RADIUS_FRAC = 0.23
+STAR_RADIUS_FRAC = 0.15
 STAR_INNER_FRAC = 0.44
-PIN_RADIUS_FRAC = 0.10
-HAMMER_TIP_FRAC = 0.90
-HAMMER_BASE_FRAC = 1.12
-HAMMER_HALF_FRAC = 0.16
-CHAMBER_FONT_FRAC = 0.26
+PIN_RADIUS_FRAC = 0.07
+HAMMER_TIP_FRAC = 0.98
+HAMMER_BASE_FRAC = 1.20
+HAMMER_HALF_FRAC = 0.14
+CHAMBER_FONT_FRAC = 0.20
 
-TURRET_SIZE_FRAC = 0.75
-TURRET_RING_FRAC = 0.94
-TURRET_RING_DASH_FRAC = 0.11
-TURRET_RING_GAP_FRAC = 0.09
-TURRET_LABEL_RING_FRAC = 0.94
-TURRET_LABEL_R_FRAC = 0.15
-TURRET_BUBBLE_R_FRAC = 0.22
-TURRET_NEEDLE_FRAC = 0.80
+TURRET_SIZE_FRAC = 0.78
+TURRET_KNOB_FRAC = 0.60
+TURRET_KNURL_TEETH = 36
+TURRET_KNURL_LEN_FRAC = 0.06
+TURRET_TICK_RING_FRAC = 0.98
+TURRET_TICK_COUNT = 40
+TURRET_TICK_MINOR_FRAC = 0.05
+TURRET_TICK_MAJOR_FRAC = 0.12
+TURRET_LABEL_RING_FRAC = 1.22
+TURRET_BUBBLE_R_FRAC = 0.20
+TURRET_NEEDLE_FRAC = 0.56
 TURRET_NEEDLE_WIDTH_FRAC = 0.05
-TURRET_VALUE_FONT_FRAC = 0.34
-TURRET_LABEL_FONT_FRAC = 0.24
-TURRET_CAPTION_FONT_FRAC = 0.13
-TURRET_CAPTION_GAP_FRAC = 0.22
+TURRET_HUB_FRAC = 0.05
+TURRET_VALUE_FONT_FRAC = 0.24
+TURRET_LABEL_FONT_FRAC = 0.20
+TURRET_CAPTION_FONT_FRAC = 0.14
+TURRET_CAPTION_Y_FRAC = 1.30
 TURRET_SPREAD_DEG = 72.0
 TURRET_BASE_DEG = -144.0
 TURRET_DEAD_ALPHA = 90
 
-READOUT_LABEL_FONT_FRAC = 0.22
-READOUT_VALUE_FONT_FRAC = 0.34
+READOUT_LABEL_FONT_FRAC = 0.20
+READOUT_VALUE_FONT_FRAC = 0.30
 READOUT_INSET_FRAC = 0.10
 
 
@@ -134,7 +136,7 @@ class TimePicker:
         readout_h = max(int(rect.height * 0.16), 1)
         dial_h = rect.height - readout_h
         half = rect.width / 2.0
-        self._radius = max(min(half, dial_h) / 2.0 * 0.88, 8.0)
+        self._radius = max(min(half, dial_h) / (2.0 * (1.0 + DISC_MARGIN_FRAC)), 8.0)
         self._turret_radius = self._radius * TURRET_SIZE_FRAC
         cy = rect.y + dial_h / 2.0
         self._drum_center = (rect.x + half / 2.0, cy)
@@ -262,16 +264,14 @@ class TimePicker:
         def render(surf, k):
             c = surf.get_width() / 2.0
             r = self._radius * k
-            pg.draw.circle(surf, pg.Color(Colors.surface_raised), (c, c), r)
-            pg.draw.circle(surf, pg.Color(Colors.dial_border), (c, c), r,
-                           max(int(1 * k), 1))
+            lw = max(int(1 * k), 1)
+            pg.draw.circle(surf, pg.Color(Colors.surface_active), (c, c), r)
+            pg.draw.circle(surf, pg.Color(Colors.dial_border), (c, c), r, lw)
             for i in range(CHAMBER_COUNT):
-                fx, fy = _pt(c, c, r * FLUTE_RING_FRAC,
+                sx, sy = _pt(c, c, r * SCALLOP_RING_FRAC,
                              (i + 0.5) * CHAMBER_STEP_DEG + rotation)
-                fr = r * FLUTE_RADIUS_FRAC
-                pg.draw.circle(surf, pg.Color(Colors.battle_bg), (fx, fy), fr)
-                pg.draw.circle(surf, pg.Color(Colors.dial_border), (fx, fy), fr,
-                               max(int(1 * k), 1))
+                pg.draw.circle(surf, pg.Color(Colors.surface_raised), (sx, sy),
+                               r * SCALLOP_RADIUS_FRAC)
             pg.draw.polygon(surf, pg.Color(Colors.dial_star),
                             _star_points(c, c, r * STAR_RADIUS_FRAC,
                                          r * STAR_RADIUS_FRAC * STAR_INNER_FRAC, rotation))
@@ -279,16 +279,12 @@ class TimePicker:
                 cx, cy = _pt(c, c, r * CHAMBER_RING_FRAC, i * CHAMBER_STEP_DEG + rotation)
                 cr = r * CHAMBER_RADIUS_FRAC
                 sel = i == self._min_index
-                pg.draw.circle(surf, pg.Color(Colors.bg), (cx, cy), cr)
-                pg.draw.circle(surf, pg.Color(Colors.surface), (cx, cy),
-                               cr * CHAMBER_BORE_FRAC)
+                pg.draw.circle(surf, pg.Color(Colors.battle_bg), (cx, cy), cr)
                 border = Colors.accent if sel else Colors.dial_border
                 pg.draw.circle(surf, pg.Color(border), (cx, cy), cr,
                                max(int((2.0 if sel else 1.0) * k), 1))
-            pg.draw.circle(surf, pg.Color(Colors.dial_border), (c, c),
-                           r * PIN_RADIUS_FRAC)
-            pg.draw.circle(surf, pg.Color(Colors.bg), (c, c), r * PIN_RADIUS_FRAC,
-                           max(int(1 * k), 1))
+            pg.draw.circle(surf, pg.Color(Colors.battle_bg), (c, c), r * PIN_RADIUS_FRAC)
+            pg.draw.circle(surf, pg.Color(Colors.dial_border), (c, c), r * PIN_RADIUS_FRAC, lw)
             base_y = c - r * HAMMER_BASE_FRAC
             base_half = r * HAMMER_HALF_FRAC
             pg.draw.polygon(surf, pg.Color(Colors.accent),
@@ -302,41 +298,64 @@ class TimePicker:
             cx, cy = self.chamber_center(i)
             sel = i == self._min_index
             label = CHAMBERS[i][1]
-            color = Colors.text if sel else Colors.text_muted
+            color = Colors.text if sel else Colors.text_dim
             if label == "∞":
-                glyph = infinity_surface(self._chamber_font.get_height() * 0.7, color)
+                glyph = infinity_surface(self._chamber_font.get_height() * 0.8, color)
                 surface.blit(glyph, (cx - glyph.get_width() / 2, cy - glyph.get_height() / 2))
             else:
                 surf = render_text(self._chamber_font, label, color)
                 surface.blit(surf, (cx - surf.get_width() / 2, cy - surf.get_height() / 2))
 
-    def _draw_turret_ring(self, surface):
+    def _draw_turret_dial(self, surface):
         tr = self._turret_radius
-        ring_d = max(int(round(tr * TURRET_RING_FRAC * 2)), 2)
-        ring = dashed_rounded_rect_surface(
-            ring_d, ring_d // 2, Colors.border_strong, border_width=2,
-            dash=max(int(tr * TURRET_RING_DASH_FRAC), 2),
-            gap=max(int(tr * TURRET_RING_GAP_FRAC), 2))
+        size = self._footprint(tr)
+
+        def render(surf, k):
+            c = surf.get_width() / 2.0
+            r = tr * k
+            lw = max(int(1 * k), 1)
+            ring_r = r * TURRET_TICK_RING_FRAC
+            for t in range(TURRET_TICK_COUNT):
+                deg = t * 360.0 / TURRET_TICK_COUNT
+                pg.draw.line(surf, pg.Color(Colors.dial_border),
+                             _pt(c, c, ring_r - r * TURRET_TICK_MINOR_FRAC, deg),
+                             _pt(c, c, ring_r, deg), lw)
+            for i in range(len(INCREMENTS)):
+                deg = TURRET_BASE_DEG + i * TURRET_SPREAD_DEG
+                pg.draw.line(surf, pg.Color(Colors.border_strong),
+                             _pt(c, c, ring_r - r * TURRET_TICK_MAJOR_FRAC, deg),
+                             _pt(c, c, ring_r, deg), max(lw, int(2 * k)))
+            knob_r = r * TURRET_KNOB_FRAC
+            knurl = r * TURRET_KNURL_LEN_FRAC
+            for t in range(TURRET_KNURL_TEETH):
+                deg = t * 360.0 / TURRET_KNURL_TEETH
+                pg.draw.line(surf, pg.Color(Colors.dial_border),
+                             _pt(c, c, knob_r - knurl * 0.5, deg),
+                             _pt(c, c, knob_r + knurl * 0.5, deg), lw)
+            pg.draw.circle(surf, pg.Color(Colors.surface_raised), (c, c), knob_r)
+            pg.draw.circle(surf, pg.Color(Colors.dial_border), (c, c), knob_r, lw)
+
+        dial = supersample((size, size), render)
         if self._turret_dead():
-            ring = ring.copy()
-            ring.set_alpha(TURRET_DEAD_ALPHA)
+            dial = dial.copy()
+            dial.set_alpha(TURRET_DEAD_ALPHA)
         cx, cy = self._turret_center
-        surface.blit(ring, (cx - ring_d / 2, cy - ring_d / 2))
+        surface.blit(dial, (cx - size / 2, cy - size / 2))
 
     def _draw_turret_needle(self, surface):
+        if self._turret_dead():
+            return
         tr = self._turret_radius
         size = self._footprint(tr)
         angle = self._turret_angle
-        dead = self._turret_dead()
 
         def render(surf, k):
-            if dead:
-                return
             c = surf.get_width() / 2.0
             r = tr * k
             tip = _pt(c, c, r * TURRET_NEEDLE_FRAC, angle)
             lw = max(int(r * TURRET_NEEDLE_WIDTH_FRAC), 2)
             pg.draw.line(surf, pg.Color(Colors.amber), (c, c), tip, lw)
+            pg.draw.circle(surf, pg.Color(Colors.amber), (c, c), max(int(r * TURRET_HUB_FRAC), 2))
 
         needle = supersample((size, size), render)
         cx, cy = self._turret_center
@@ -344,32 +363,34 @@ class TimePicker:
 
     def _draw_turret_labels(self, surface):
         dead = self._turret_dead()
+        tr = self._turret_radius
         for i, inc in enumerate(INCREMENTS):
             rect = self._turret_label_rect(i)
             sel = i == self._inc_index and not dead
             if sel:
-                bw = max(int(self._turret_radius * 0.05), 1)
+                bw = max(int(tr * 0.04), 1)
                 pg.draw.circle(surface, pg.Color(Colors.surface_raised), rect.center,
                                rect.width / 2)
                 pg.draw.circle(surface, pg.Color(Colors.amber), rect.center,
                                rect.width / 2, bw)
-            color = Colors.amber_hi if sel else Colors.text_muted
+            color = Colors.amber_hi if sel else (
+                Colors.text_muted if dead else Colors.text_dim)
             surf = render_text(self._label_font, str(inc), color)
             surface.blit(surf, (rect.centerx - surf.get_width() / 2,
                                 rect.centery - surf.get_height() / 2))
 
     def _draw_turret(self, surface):
-        self._draw_turret_ring(surface)
+        self._draw_turret_dial(surface)
         self._draw_turret_needle(surface)
         self._draw_turret_labels(surface)
         cx, cy = self._turret_center
+        dead = self._turret_dead()
         value = render_text(self._value_font, f"+{self.selected_increment}s",
-                            Colors.amber_hi if not self._turret_dead() else Colors.text_muted)
+                            Colors.text_muted if dead else Colors.amber_hi)
         surface.blit(value, (cx - value.get_width() / 2, cy - value.get_height() / 2))
         caption = render_text(self._caption_font, "INCREMENT · CLICK TO RATCHET",
                               Colors.text_muted)
-        cap_y = cy + self._turret_radius * TURRET_RING_FRAC + self._turret_radius * (
-            TURRET_CAPTION_GAP_FRAC)
+        cap_y = cy + self._turret_radius * TURRET_CAPTION_Y_FRAC
         surface.blit(caption, (cx - caption.get_width() / 2, cap_y))
 
     def _draw_readout(self, surface):
