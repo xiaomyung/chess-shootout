@@ -23,6 +23,7 @@ from chessshootout.frontend.settings import SettingsController
 from chessshootout.frontend.modals.help import HelpModal, HOTKEYS
 from chessshootout.frontend.visual.toast import Toast
 from chessshootout.frontend.visual import cache
+from chessshootout.frontend.frame_pacer import FramePacer
 from chessshootout.frontend.input_router import InputRouter
 from chessshootout.frontend.layout import compute_layout
 from chessshootout.frontend.screens.base import Nav, assert_plain_payload
@@ -81,7 +82,7 @@ class Frontend:
         self._pre_fullscreen_size = None
         self.settings = SettingsController(self)
         self.chrome = WindowChrome(self.window, on_fullscreen=self._apply_fullscreen)
-        self.clock = pg.time.Clock()
+        self.pacer = FramePacer(self.target_fps)
 
         self._needs_full_present = True
         self._frame_times = deque(maxlen=PERF_SAMPLE_COUNT)
@@ -280,7 +281,7 @@ class Frontend:
             self._execute_pending_nav()
             self.chrome.draw(self._chrome_stats())
             work_before_present = time.perf_counter() - frame_start
-            self.clock.tick(self.target_fps)
+            self.pacer.wait()
             present_start = time.perf_counter()
             self._present(had_events)
             self._last_work_ms = (
@@ -294,12 +295,19 @@ class Frontend:
         cache.clear_all()
         pg.quit()
 
+    def _current_fps(self):
+        recent = list(self._frame_times)[-10:]
+        if len(recent) < 2:
+            return 0.0
+        avg = sum(recent) / len(recent)
+        return 1000.0 / avg
+
     def _chrome_stats(self):
         parts = []
         need_sorted = env.get_show_frame_stats() or env.get_show_1pct_low()
         ordered = sorted(self._frame_times) if need_sorted and self._frame_times else []
         if env.get_show_fps():
-            parts.append(f"FPS {int(self.clock.get_fps())}")
+            parts.append(f"FPS {int(self._current_fps())}")
         if env.get_show_frame_stats() and ordered:
             avg = sum(ordered) / len(ordered)
             parts.append(f"AVG {1000.0 / avg:.0f}")

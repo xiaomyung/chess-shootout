@@ -62,7 +62,9 @@ def test_chrome_stats_readouts_follow_toggles():
     env.set_show_frame_stats(False)
     env.set_show_1pct_low(False)
     env.set_show_frametime(False)
-    assert app._chrome_stats() == [f"FPS {int(app.clock.get_fps())}"]
+    recent = list(app._frame_times)[-10:]
+    expected_fps = 1000.0 / (sum(recent) / len(recent))
+    assert app._chrome_stats() == [f"FPS {int(expected_fps)}"]
 
 
 def test_current_result_recomputes_when_position_changes_at_same_length(monkeypatch):
