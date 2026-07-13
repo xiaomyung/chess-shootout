@@ -123,13 +123,14 @@ def test_battle_avoids_the_rail_and_the_active_views_panels():
     battle = app.menu_battle
     hero = app.menu.play_view
     assert app.menu._menu_layout.rail_rect in battle.avoid_rects
-    # the hero's real drawn blocks are the obstacles now, not a single card
-    assert hero._title_block in battle.avoid_rects
+    # cp2: only the chips row is a collider now — the title, CTA and FEN link draw
+    # over the battle, so entities pass freely behind them (they are NOT avoided)
     assert hero._chips_block in battle.avoid_rects
-    assert any(r.contains(hero._cta_rect) for r in battle.avoid_rects)
+    assert hero._title_block not in battle.avoid_rects
+    assert not any(r.contains(hero._cta_rect) for r in battle.avoid_rects)
     # the empty right column no longer blocks the battle (P4 fills it with cards)
     assert app.menu._menu_layout.right_rail_rect not in battle.avoid_rects
 
     app.menu.goto_history()
     app.draw_frame()
-    assert app.history_view.rect in app.menu_battle.avoid_rects
+    assert app.history_view.rect not in app.menu_battle.avoid_rects

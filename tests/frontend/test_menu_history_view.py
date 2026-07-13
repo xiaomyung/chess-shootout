@@ -1,8 +1,9 @@
 """History is now a MenuScreen sub-view: HistoryMenuView wraps the existing
 HistoryView (unchanged logic). It populates on view enter, lays out into the
 capped subview rect, routes its scrollable, opens review with the menu return
-target; navigation back to Play lives on the rail, not on this view. The menu
-battle avoids its panel."""
+target; navigation back to Play lives on the rail, not on this view. The battle
+plays freely behind the opaque history panel (no collider) — only the rail is
+avoided."""
 
 from tests.conftest import pygame_display
 from chessshootout.backend.backend import Backend
@@ -102,8 +103,11 @@ def test_open_review_from_history_uses_the_menu_return_target(tmp_path):
     assert app.menu._active_view == "history"
 
 
-def test_menu_battle_avoids_the_history_panel():
+def test_menu_battle_plays_freely_behind_the_history_panel():
     app = make_app()
     app.menu.goto_history()
     app.draw_frame()
-    assert app.history_view.rect in app.menu_battle.avoid_rects
+    assert app.history_view.rect not in app.menu_battle.avoid_rects, \
+        "the opaque history panel needs no collider — the battle plays behind it"
+    assert app.menu._menu_layout.rail_rect in app.menu_battle.avoid_rects, \
+        "the rail is still avoided"

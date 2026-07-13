@@ -90,6 +90,53 @@ def test_reticle_slides_from_the_old_row_to_the_new_one():
     assert abs(rail.reticle_y(5000) - history_cy) < 1, "and settles on it"
 
 
+def test_reticle_starts_from_the_current_row_not_the_centre_on_switch():
+    """cp2 regression: goto_view = set_active then relayout (set_rect + set_active).
+    The slide must BEGIN at the old row, never at a stale mid/centre y. set_rect no
+    longer retargets with its own clock, so the double call can't shove it forward."""
+    rail, _ = _rail()  # active = play
+    layout = compute_menu_layout(1000, 800, 36)
+    play_cy = rail._row_rects["play"].centery
+    rail.set_active("history", 1000)
+    rail.set_rect(layout.rail_rect, layout.scale)
+    rail.set_active("history", 1000)
+    assert abs(rail.reticle_y(1000) - play_cy) < 1.5, "the slide begins at the play row"
+
+
+def test_reticle_slide_stays_continuous_across_a_mid_slide_switch():
+    """cp2: switching tabs mid-slide retargets from the CURRENT interpolated
+    position — the y at the switch instant is unchanged (no jump)."""
+    rail, _ = _rail()
+    play_cy = rail._row_rects["play"].centery
+    history_cy = rail._row_rects["history"].centery
+    social_cy = rail._row_rects["social"].centery
+    rail.set_active("history", 0)
+    mid = rail.reticle_y(130)
+    assert play_cy < mid < history_cy
+    rail.set_active("social", 130)
+    assert abs(rail.reticle_y(130) - mid) < 1.0, "no jump at the mid-slide switch"
+    assert abs(rail.reticle_y(5000) - social_cy) < 1, "settles on the newly-picked row"
+
+
+def test_reticle_survives_a_mid_slide_relayout():
+    """cp2: a same-geometry relayout mid-slide remaps position without restarting
+    the animation from elsewhere."""
+    rail, _ = _rail()
+    layout = compute_menu_layout(1000, 800, 36)
+    rail.set_active("history", 0)
+    mid = rail.reticle_y(130)
+    rail.set_rect(layout.rail_rect, layout.scale)
+    assert abs(rail.reticle_y(130) - mid) < 1.0
+
+
+def test_double_set_active_same_row_is_a_noop():
+    rail, _ = _rail()
+    rail.set_active("history", 0)
+    y1 = rail.reticle_y(60)
+    rail.set_active("history", 60)
+    assert rail.reticle_y(60) == y1, "re-selecting the active row must not perturb the slide"
+
+
 def _has_warm_tint(surf, rect):
     for x in range(rect.x, rect.right):
         for y in range(rect.y, rect.bottom, 2):

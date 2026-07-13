@@ -33,4 +33,4 @@ class HistoryMenuView(MenuView):
         return [self.app.history_view]
 
     def avoid_rects(self):
-        return [self.app.history_view.rect]
+        return []

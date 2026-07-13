@@ -6,12 +6,14 @@ the CTA label swap, defaults seeding + the options-close sync, and the
 view-owned time/side popovers (click-outside / Esc / re-click close, selection
 does NOT auto-close, exit() cancels them)."""
 
+import pygame as pg
 import pytest
 
 from tests.conftest import pygame_display
 from chessshootout.frontend.menu.hero import COMING_SOON, CTA_BOTTOM, RECON_GAP, PlayView
+from chessshootout.frontend.visual.colors import Colors
 from chessshootout.infra import env
-from tests.helpers import make_app
+from tests.helpers import assert_pixel_color, make_app
 
 
 _pygame_init = pygame_display(1000, 800)
@@ -110,6 +112,7 @@ def test_mode_chip_click_selects_unlocked_mode(app, hero):
 def test_locked_chip_toasts_coming_soon(app, hero):
     app.menu.handle_click(hero._mode_rects["bot"].center)
     assert hero.selected_mode != "bot"
+    assert COMING_SOON == "Hold ya horses, I am cooking that..."
     assert app.toast.message == COMING_SOON
 
 
@@ -295,10 +298,89 @@ def test_cta_is_full_width_and_pinned_to_the_hero_bottom(hero):
 
 def test_fen_link_sits_above_the_bottom_pinned_cta(hero):
     """With the CTA pinned to the bottom, the FEN link has no room below it, so it
-    rides just above the CTA (right-aligned in the hero column)."""
+    rides just above the CTA (left-aligned at the hero column left edge)."""
     hero.selected_mode = "single_screen"
     assert hero._fen_above is True
     assert hero._fen_rect.bottom <= hero._cta_rect.top
+
+
+def test_fen_link_is_left_aligned_at_the_hero_column_left(app, hero):
+    """cp2: the FEN link moved from right- to left-aligned, sitting at the hero
+    column's left edge."""
+    hero.selected_mode = "single_screen"
+    window = app.window
+    window.fill((0, 0, 0))
+    hero.draw(window, app.menu._menu_layout)
+    fen = hero._fen_rect
+
+    def painted(band):
+        band = band.clip(window.get_rect())
+        return any(window.get_at((x, y))[:3] != (0, 0, 0)
+                   for x in range(band.x, band.right)
+                   for y in range(band.y, band.bottom))
+
+    left_band = pg.Rect(fen.x, fen.y, 70, fen.height)
+    right_band = pg.Rect(fen.right - 70, fen.y, 70, fen.height)
+    assert painted(left_band), "the FEN link text sits at the hero column's left edge"
+    assert not painted(right_band), "and no longer hugs the right edge"
+
+
+def test_hover_flag_toggles_on_synthetic_motion(hero):
+    assert hero._hover_target is None
+    assert hero.handle_motion(hero._cta_rect.center) is True
+    assert hero._hover_target == "cta"
+    hero.handle_motion((0, 0))
+    assert hero._hover_target is None
+
+
+def test_hover_flag_tracks_an_unlocked_mode_chip(hero):
+    hero.handle_motion(hero._mode_rects["online"].center)
+    assert hero._hover_target == "mode:online"
+
+
+def test_locked_chip_ignores_hover(hero):
+    hero.handle_motion(hero._mode_rects["bot"].center)
+    assert hero._hover_target is None
+
+
+def test_hover_and_press_are_inert_while_a_popover_is_open(app, hero):
+    app.menu.handle_click(hero._time_chip.center)
+    assert hero._time_open is True
+    assert hero.handle_motion(hero._cta_rect.center) is False
+    assert hero._hover_target is None
+    assert hero.handle_press(hero._cta_rect.center) is False
+    assert hero._press_target is None
+
+
+def test_press_flag_set_on_press_and_cleared_on_release(hero):
+    assert hero.handle_press(hero._cta_rect.center) is True
+    assert hero._press_target == "cta"
+    assert hero.handle_release(hero._cta_rect.center) is True
+    assert hero._press_target is None
+
+
+def test_press_off_target_returns_false_and_sets_nothing(hero):
+    assert hero.handle_press((0, 0)) is False
+    assert hero._press_target is None
+
+
+def test_menu_screen_routes_motion_press_release_to_the_active_view(app, hero):
+    app.menu.handle_motion(hero._cta_rect.center)
+    assert hero._hover_target == "cta"
+    app.menu.handle_press(hero._cta_rect.center)
+    assert hero._press_target == "cta"
+    app.menu.handle_release(hero._cta_rect.center)
+    assert hero._press_target is None
+
+
+def test_cta_press_fill_swaps_to_the_press_color(app, hero):
+    hero.handle_motion(hero._cta_rect.center)
+    hero.handle_press(hero._cta_rect.center)
+    window = app.window
+    window.fill((0, 0, 0))
+    hero.draw(window, app.menu._menu_layout)
+    assert_pixel_color(window, hero._cta_rect.x + 30, hero._cta_rect.centery,
+                       Colors.accent_press, tol=10)
 
 
 def test_reconnect_banner_shifts_the_title_block_down(app, hero):

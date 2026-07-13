@@ -23,6 +23,15 @@ class MenuView:
     def handle_click(self, pos):
         return False
 
+    def handle_press(self, pos):
+        return False
+
+    def handle_motion(self, pos):
+        return False
+
+    def handle_release(self, pos):
+        return False
+
     def handle_key(self, event):
         return False
 

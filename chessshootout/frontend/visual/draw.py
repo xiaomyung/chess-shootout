@@ -153,16 +153,17 @@ def cut_rect_surface(size, cut, fill, border=None, border_width=1, corners=("tr"
     def build():
         def render(surf, k):
             w, h = surf.get_size()
+            outer_cut = int(round(cut * k))
             if border is None:
                 pg.draw.polygon(surf, pg.Color(fill),
-                                _cut_rect_points(0, 0, w, h, cut * k, corners))
+                                _cut_rect_points(0, 0, w, h, outer_cut, corners))
                 return
-            bw = max(border_width * k, 1.0)
+            bi = max(int(round(border_width * k)), 1)
             pg.draw.polygon(surf, pg.Color(border),
-                            _cut_rect_points(0, 0, w, h, cut * k, corners))
-            inner_cut = max(cut * k - bw * 1.414, 0.0)
+                            _cut_rect_points(0, 0, w, h, outer_cut, corners))
+            inner_cut = max(outer_cut - int(round(bi * (2.0 - 1.41421356))), 0)
             pg.draw.polygon(surf, pg.Color(fill),
-                            _cut_rect_points(bw, bw, w - bw, h - bw, inner_cut, corners))
+                            _cut_rect_points(bi, bi, w - bi, h - bi, inner_cut, corners))
         return supersample(size, render)
     return memoized_surface(_CUT_RECT_CACHE, key, build)
 

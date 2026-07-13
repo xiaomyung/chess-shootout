@@ -10,7 +10,8 @@ import pytest
 
 from tests.conftest import pygame_display
 from chessshootout.frontend.menu.time_picker import (
-    CHAMBER_RADIUS_FRAC, INCREMENTS, ROTATION_MS, SETTLE_MS, TimePicker)
+    CHAMBER_RING_FRAC, CHAMBERS, CHAMBER_RADIUS_FRAC, CHAMBER_STEP_DEG,
+    DRAG_CLICK_THRESHOLD_DEG, INCREMENTS, ROTATION_MS, SEAT_POP_MS, SETTLE_MS, TimePicker)
 from chessshootout.frontend.visual.colors import Colors
 
 
@@ -163,3 +164,187 @@ def test_update_advances_a_rotation_tween():
     start = p._rotation
     p.update((ROTATION_MS + SETTLE_MS) // 2)
     assert p._rotation != start
+
+
+def test_wheel_over_the_drum_spins_settles_and_selects_once_with_ticks():
+    ticks = []
+    changes = []
+    p = TimePicker(on_change=lambda: changes.append(1), on_tick=lambda: ticks.append(1))
+    p.set_rect(pg.Rect(0, 0, 300, 190))
+    p.set_selection(10, 5)
+    assert p.handle_scroll(p._drum_center, 3) is True
+    assert p._spinning is True
+    t = 0
+    for _ in range(3000):
+        t += 16
+        p.update(t)
+        if not p._spinning and p._rot_tween is None:
+            break
+    assert p._spinning is False, "momentum decays and the drum settles"
+    assert p.selected_minutes in [v for v, _ in CHAMBERS]
+    assert len(changes) == 1, "the config change fires exactly once, on settle"
+    assert len(ticks) > 0, "the ratchet ticks while spinning"
+
+
+def test_wheel_off_the_drum_is_ignored():
+    p = _picker(10, 5)
+    assert p.handle_scroll((2, 2), 1) is False
+    assert p._spinning is False
+
+
+def test_a_click_cancels_an_in_progress_spin():
+    p = _picker(10, 5)
+    p.handle_scroll(p._drum_center, 4)
+    assert p._spinning is True
+    p.handle_click(p.chamber_center(2))
+    assert p._spinning is False
+    _settle(p)
+    assert p.selected_minutes == 5
+
+
+def test_turret_wheel_steps_through_increments_and_clamps_at_the_top():
+    p = _picker(10, 5)
+    assert p.handle_scroll(p._turret_center, 1) is True
+    assert p.selected_increment == 10
+    assert p.handle_scroll(p._turret_center, 1) is True
+    assert p.selected_increment == 15
+    assert p.handle_scroll(p._turret_center, 1) is True
+    assert p.selected_increment == 15, "no wraparound past the top step"
+
+
+def test_turret_wheel_clamps_at_the_bottom():
+    p = _picker(10, 0)
+    assert p.handle_scroll(p._turret_center, -1) is True
+    assert p.selected_increment == 0, "no wraparound past the bottom step"
+
+
+def test_turret_wheel_direction_matches_up_next_down_previous():
+    p = _picker(10, 5)
+    p.handle_scroll(p._turret_center, 1)
+    assert p.selected_increment == 10, "wheel up steps to the next value"
+    p.handle_scroll(p._turret_center, -1)
+    assert p.selected_increment == 5, "wheel down steps back to the previous value"
+
+
+def test_turret_wheel_plays_a_tick_through_the_existing_gate():
+    ticks = []
+    p = TimePicker(on_tick=lambda: ticks.append(1))
+    p.set_rect(pg.Rect(0, 0, 300, 190))
+    p.set_selection(10, 5)
+    p.handle_scroll(p._turret_center, 1)
+    assert len(ticks) == 1
+
+
+def test_turret_wheel_ignored_when_dead():
+    p = _picker(10, 10)
+    p.handle_click(p.chamber_center(6))
+    _settle(p)
+    assert p._turret_dead() is True
+    before = p._inc_index
+    assert p.handle_scroll(p._turret_center, 1) is True
+    assert p._inc_index == before
+
+
+def test_seat_pop_tween_fires_once_on_click_settle():
+    p = _picker(10, 5)
+    p.handle_click(p.chamber_center(0))
+    assert p._seat_pop_tween is None
+    _settle(p)
+    assert p._seat_pop_tween is not None
+    assert p._seat_pop_index == p._min_index
+    p.update(ROTATION_MS + SETTLE_MS + 10 + SEAT_POP_MS + 10)
+    assert p._seat_pop_tween is None, "the pop itself expires and clears"
+
+
+def test_seat_pop_does_not_fire_for_a_noop_reselect():
+    p = _picker(10, 5)
+    p.handle_click(p.chamber_center(3))
+    _settle(p)
+    assert p._seat_pop_tween is None, "no rotation settle happened, so no seating"
+
+
+def test_seat_pop_also_fires_on_inertia_settle():
+    p = TimePicker()
+    p.set_rect(pg.Rect(0, 0, 300, 190))
+    p.set_selection(10, 5)
+    p.handle_scroll(p._drum_center, 3)
+    t = 0
+    for _ in range(3000):
+        t += 16
+        p.update(t)
+        if not p._spinning and p._rot_tween is None:
+            break
+    assert p._seat_pop_tween is not None
+
+
+def _angle_pos(picker, deg):
+    rad = math.radians(deg - 90.0)
+    radius = picker._radius * CHAMBER_RING_FRAC
+    cx, cy = picker._drum_center
+    return (cx + radius * math.cos(rad), cy + radius * math.sin(rad))
+
+
+def test_press_in_the_drum_arms_a_drag_and_cancels_any_spin():
+    p = _picker(10, 5)
+    p.handle_scroll(p._drum_center, 4)
+    assert p._spinning is True
+    assert p.handle_press(_angle_pos(p, 0), now_ms=0) is True
+    assert p._drag_active is True
+    assert p._spinning is False
+
+
+def test_press_outside_the_drum_does_not_arm_a_drag():
+    p = _picker(10, 5)
+    assert p.handle_press(p._turret_center, now_ms=0) is False
+    assert p._drag_active is False
+
+
+def test_drag_rotates_the_drum_live_and_ticks_chamber_crossings():
+    ticks = []
+    p = TimePicker(on_tick=lambda: ticks.append(1))
+    p.set_rect(pg.Rect(0, 0, 300, 190))
+    p.set_selection(10, 5)
+    start_rotation = p._rotation
+    p.handle_press(_angle_pos(p, 0), now_ms=0)
+    for i in range(1, 9):
+        p.handle_motion(_angle_pos(p, i * CHAMBER_STEP_DEG * 0.6), now_ms=i * 4)
+    assert p._rotation != start_rotation
+    assert abs(p._drag_total_delta) >= DRAG_CLICK_THRESHOLD_DEG
+    assert len(ticks) > 0, "chamber boundary crossings tick while dragging"
+
+
+def test_drag_release_above_threshold_flings_settles_and_selects_once():
+    changes = []
+    p = TimePicker(on_change=lambda: changes.append(1))
+    p.set_rect(pg.Rect(0, 0, 300, 190))
+    p.set_selection(10, 5)
+    p.handle_press(_angle_pos(p, 0), now_ms=0)
+    for i in range(1, 8):
+        p.handle_motion(_angle_pos(p, i * 23.0), now_ms=i * 5)
+    assert p.handle_release(_angle_pos(p, 7 * 23.0), now_ms=40) is True
+    assert p._spinning is True
+    t = 40
+    for _ in range(3000):
+        t += 16
+        p.update(t)
+        if not p._spinning and p._rot_tween is None:
+            break
+    assert p._spinning is False, "momentum decays and the drum settles"
+    assert p.selected_minutes in [v for v, _ in CHAMBERS]
+    assert p._min_index != 3, "the fling carried it to a different chamber"
+    assert len(changes) == 1, "the config change fires exactly once, on settle"
+
+
+def test_sub_threshold_drag_release_reports_as_a_click():
+    p = _picker(10, 5)
+    target = p.chamber_center(5)
+    assert p.handle_press(target, now_ms=0) is True
+    nudged = (target[0] + 1, target[1])
+    p.handle_motion(nudged, now_ms=8)
+    assert abs(p._drag_total_delta) < DRAG_CLICK_THRESHOLD_DEG
+    dragged = p.handle_release(nudged, now_ms=16)
+    assert dragged is False, "a tap-sized drag is reported back as a plain click"
+    assert p._spinning is False
+    p.handle_click(nudged)
+    _settle(p)
+    assert p.selected_minutes == 30

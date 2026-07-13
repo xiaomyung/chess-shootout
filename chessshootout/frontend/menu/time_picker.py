@@ -6,6 +6,7 @@ from chessshootout.frontend.visual.cache import render_text
 from chessshootout.frontend.visual.colors import Colors
 from chessshootout.frontend.visual.draw import infinity_surface, supersample
 from chessshootout.frontend.visual.fonts import get_display_font, get_mono_font
+from chessshootout.frontend.visual.slider_tick import TickGate
 from chessshootout.frontend.visual.tween import Tween
 
 
@@ -17,6 +18,18 @@ CHAMBER_STEP_DEG = 360.0 / CHAMBER_COUNT
 ROTATION_MS = 220
 TURRET_SWING_MS = 260
 SETTLE_MS = 90
+SPIN_SETTLE_MS = 170
+SPIN_FRICTION_TAU = 0.4
+WHEEL_IMPULSE_DEG_PER_S = 150.0
+SPIN_STOP_DEG_PER_S = 12.0
+SPIN_MAX_DT = 0.05
+
+DRAG_CLICK_THRESHOLD_DEG = 3.5
+DRAG_VELOCITY_EMA_ALPHA = 0.35
+DRAG_MAX_VELOCITY_DEG_PER_S = 2000.0
+
+SEAT_POP_SCALE = 1.18
+SEAT_POP_MS = 150
 
 DISC_MARGIN_FRAC = 0.34
 CHAMBER_RING_FRAC = 0.58
@@ -42,8 +55,8 @@ TURRET_TICK_MAJOR_FRAC = 0.12
 TURRET_LABEL_RING_FRAC = 1.22
 TURRET_BUBBLE_R_FRAC = 0.20
 TURRET_NEEDLE_FRAC = 0.56
-TURRET_NEEDLE_WIDTH_FRAC = 0.05
-TURRET_HUB_FRAC = 0.05
+TURRET_NEEDLE_INNER_FRAC = 0.30
+TURRET_NEEDLE_BASE_HALF_FRAC = 0.06
 TURRET_VALUE_FONT_FRAC = 0.24
 TURRET_LABEL_FONT_FRAC = 0.20
 TURRET_CAPTION_FONT_FRAC = 0.14
@@ -89,6 +102,18 @@ class TimePicker:
         self._rot_target = self._rotation
         self._rot_steps = 0
         self._rot_ticks = 0
+        self._spinning = False
+        self._spin_vel = 0.0
+        self._spin_last_ms = None
+        self._spin_tick_gate = TickGate(on_tick)
+        self._drag_active = False
+        self._drag_last_pointer_angle = 0.0
+        self._drag_total_delta = 0.0
+        self._drag_last_ms = None
+        self._drag_vel = 0.0
+        self._drag_vsampled = False
+        self._seat_pop_tween = None
+        self._seat_pop_index = self._min_index
         self._turret_angle = TURRET_BASE_DEG + self._inc_index * TURRET_SPREAD_DEG
         self._turret_tween = None
         self._now = 0
@@ -117,6 +142,11 @@ class TimePicker:
             self._inc_index = INCREMENTS.index(increment)
         self._rotation = -self._min_index * CHAMBER_STEP_DEG
         self._rot_tween = None
+        self._spinning = False
+        self._spin_vel = 0.0
+        self._drag_active = False
+        self._seat_pop_tween = None
+        self._seat_pop_index = self._min_index
         self._turret_angle = TURRET_BASE_DEG + self._inc_index * TURRET_SPREAD_DEG
         self._turret_tween = None
 
@@ -177,10 +207,98 @@ class TimePicker:
         side = self._turret_radius * TURRET_BUBBLE_R_FRAC * 2
         return pg.Rect(cx - side / 2, cy - side / 2, side, side)
 
-    def handle_click(self, pos):
+    def _in_drum(self, pos):
         dx = pos[0] - self._drum_center[0]
         dy = pos[1] - self._drum_center[1]
-        if dx * dx + dy * dy <= (self._radius * 1.08) ** 2:
+        return dx * dx + dy * dy <= (self._radius * 1.08) ** 2
+
+    def _in_turret(self, pos):
+        dx = pos[0] - self._turret_center[0]
+        dy = pos[1] - self._turret_center[1]
+        return dx * dx + dy * dy <= (self._turret_radius * 1.05) ** 2
+
+    def _pointer_angle(self, pos):
+        dx = pos[0] - self._drum_center[0]
+        dy = pos[1] - self._drum_center[1]
+        return math.degrees(math.atan2(dy, dx)) + 90.0
+
+    def is_visible(self):
+        return True
+
+    def _now_ms(self, now_ms):
+        return pg.time.get_ticks() if now_ms is None else now_ms
+
+    def handle_press(self, pos, now_ms=None):
+        if not self._in_drum(pos):
+            return False
+        self._spinning = False
+        self._spin_vel = 0.0
+        self._rot_tween = None
+        self._drag_active = True
+        self._drag_last_pointer_angle = self._pointer_angle(pos)
+        self._drag_total_delta = 0.0
+        self._drag_last_ms = None
+        self._drag_vel = 0.0
+        self._drag_vsampled = False
+        self._spin_tick_gate.reset()
+        return True
+
+    def handle_motion(self, pos, now_ms=None):
+        if not self._drag_active:
+            return False
+        now = self._now_ms(now_ms)
+        angle = self._pointer_angle(pos)
+        delta = ((angle - self._drag_last_pointer_angle + 180.0) % 360.0) - 180.0
+        self._drag_last_pointer_angle = angle
+        self._rotation += delta
+        self._drag_total_delta += delta
+        self._feed_spin_tick(now)
+        if self._drag_last_ms is not None:
+            dt = (now - self._drag_last_ms) / 1000.0
+            if dt > 0:
+                inst = delta / dt
+                if self._drag_vsampled:
+                    self._drag_vel += (inst - self._drag_vel) * DRAG_VELOCITY_EMA_ALPHA
+                else:
+                    self._drag_vel = inst
+                    self._drag_vsampled = True
+        self._drag_last_ms = now
+        return True
+
+    def handle_release(self, pos, now_ms=None):
+        if not self._drag_active:
+            return False
+        self._drag_active = False
+        dragged = abs(self._drag_total_delta) >= DRAG_CLICK_THRESHOLD_DEG
+        if dragged:
+            vel = self._drag_vel if self._drag_vsampled else 0.0
+            vel = max(-DRAG_MAX_VELOCITY_DEG_PER_S, min(vel, DRAG_MAX_VELOCITY_DEG_PER_S))
+            self._spinning = True
+            self._spin_vel = vel
+            self._spin_last_ms = None
+            self._spin_tick_gate.reset()
+        return dragged
+
+    def handle_scroll(self, pos, notches):
+        if self._in_drum(pos):
+            self._spinning = True
+            self._spin_vel += notches * WHEEL_IMPULSE_DEG_PER_S
+            self._spin_last_ms = None
+            self._rot_tween = None
+            self._spin_tick_gate.reset()
+            return True
+        if self._in_turret(pos):
+            if not self._turret_dead() and notches != 0:
+                step = 1 if notches > 0 else -1
+                self._select_increment_clamped(self._inc_index + step)
+            return True
+        return False
+
+    def handle_click(self, pos):
+        self._spinning = False
+        self._spin_vel = 0.0
+        self._drag_active = False
+        if self._in_drum(pos):
             self._select_minutes(self._nearest_chamber(pos))
             return True
         if self._turret_dead():
@@ -189,9 +307,7 @@ class TimePicker:
             if self._turret_label_rect(i).collidepoint(pos):
                 self._select_increment(i)
                 return True
-        tx = pos[0] - self._turret_center[0]
-        ty = pos[1] - self._turret_center[1]
-        if tx * tx + ty * ty <= (self._turret_radius * 1.05) ** 2:
+        if self._in_turret(pos):
             self._select_increment((self._inc_index + 1) % len(INCREMENTS))
             return True
         return False
@@ -222,6 +338,12 @@ class TimePicker:
         self._emit_tick()
         self._changed()
 
+    def _select_increment_clamped(self, index):
+        index = max(0, min(len(INCREMENTS) - 1, index))
+        if index == self._inc_index:
+            return
+        self._select_increment(index)
+
     def _changed(self):
         if self._on_change is not None:
             self._on_change()
@@ -230,8 +352,42 @@ class TimePicker:
         if self._on_tick is not None:
             self._on_tick()
 
+    def _feed_spin_tick(self, now):
+        idx = round(-self._rotation / CHAMBER_STEP_DEG)
+        self._spin_tick_gate.feed((idx % 100) / 100.0, now)
+
+    def _settle_from_spin(self):
+        index = round(-self._rotation / CHAMBER_STEP_DEG) % CHAMBER_COUNT
+        base_target = -index * CHAMBER_STEP_DEG
+        delta = ((base_target - self._rotation + 180.0) % 360.0) - 180.0
+        self._rot_start = self._rotation
+        self._rot_target = self._rotation + delta
+        self._rot_steps = int(round(abs(delta) / CHAMBER_STEP_DEG))
+        self._rot_ticks = 0
+        self._rot_tween = Tween(self._rotation, self._rot_target, SPIN_SETTLE_MS, self._now)
+        changed = index != self._min_index
+        self._min_index = index
+        if self.selected_minutes is None:
+            self._inc_index = 0
+            self._turret_angle = TURRET_BASE_DEG
+            self._turret_tween = None
+        if changed:
+            self._changed()
+
     def update(self, now):
         self._now = now
+        if self._spinning:
+            if self._spin_last_ms is None:
+                self._spin_last_ms = now
+            dt = min(max(0.0, (now - self._spin_last_ms) / 1000.0), SPIN_MAX_DT)
+            self._spin_last_ms = now
+            self._rotation += self._spin_vel * dt
+            self._feed_spin_tick(now)
+            self._spin_vel *= math.exp(-dt / SPIN_FRICTION_TAU)
+            if abs(self._spin_vel) < SPIN_STOP_DEG_PER_S:
+                self._spinning = False
+                self._spin_vel = 0.0
+                self._settle_from_spin()
         if self._rot_tween is not None:
             self._rotation = self._rot_tween.value(now)
             crossed = int(round(abs(self._rotation - self._rot_start) / CHAMBER_STEP_DEG))
@@ -242,6 +398,10 @@ class TimePicker:
             if self._rot_tween.done(now):
                 self._rotation = self._rot_target
                 self._rot_tween = None
+                self._seat_pop_tween = Tween(SEAT_POP_SCALE, 1.0, SEAT_POP_MS, now)
+                self._seat_pop_index = self._min_index
+        if self._seat_pop_tween is not None and self._seat_pop_tween.done(now):
+            self._seat_pop_tween = None
         if self._turret_tween is not None:
             self._turret_angle = self._turret_tween.value(now)
             if self._turret_tween.done(now):
@@ -270,8 +430,7 @@ class TimePicker:
             for i in range(CHAMBER_COUNT):
                 sx, sy = _pt(c, c, r * SCALLOP_RING_FRAC,
                              (i + 0.5) * CHAMBER_STEP_DEG + rotation)
-                pg.draw.circle(surf, pg.Color(Colors.surface_raised), (sx, sy),
-                               r * SCALLOP_RADIUS_FRAC)
+                pg.draw.circle(surf, (0, 0, 0, 0), (sx, sy), r * SCALLOP_RADIUS_FRAC)
             pg.draw.polygon(surf, pg.Color(Colors.dial_star),
                             _star_points(c, c, r * STAR_RADIUS_FRAC,
                                          r * STAR_RADIUS_FRAC * STAR_INNER_FRAC, rotation))
@@ -301,10 +460,19 @@ class TimePicker:
             color = Colors.text if sel else Colors.text_dim
             if label == "∞":
                 glyph = infinity_surface(self._chamber_font.get_height() * 0.8, color)
-                surface.blit(glyph, (cx - glyph.get_width() / 2, cy - glyph.get_height() / 2))
             else:
-                surf = render_text(self._chamber_font, label, color)
-                surface.blit(surf, (cx - surf.get_width() / 2, cy - surf.get_height() / 2))
+                glyph = render_text(self._chamber_font, label, color)
+            scale = 1.0
+            if self._seat_pop_tween is not None and i == self._seat_pop_index:
+                scale = self._seat_pop_tween.value(self._now)
+            self._blit_chamber_glyph(surface, glyph, cx, cy, scale)
+
+    def _blit_chamber_glyph(self, surface, glyph, cx, cy, scale):
+        if scale != 1.0:
+            w = max(round(glyph.get_width() * scale), 1)
+            h = max(round(glyph.get_height() * scale), 1)
+            glyph = pg.transform.smoothscale(glyph, (w, h))
+        surface.blit(glyph, (cx - glyph.get_width() / 2, cy - glyph.get_height() / 2))
 
     def _draw_turret_dial(self, surface):
         tr = self._turret_radius
@@ -352,10 +520,17 @@ class TimePicker:
         def render(surf, k):
             c = surf.get_width() / 2.0
             r = tr * k
-            tip = _pt(c, c, r * TURRET_NEEDLE_FRAC, angle)
-            lw = max(int(r * TURRET_NEEDLE_WIDTH_FRAC), 2)
-            pg.draw.line(surf, pg.Color(Colors.amber), (c, c), tip, lw)
-            pg.draw.circle(surf, pg.Color(Colors.amber), (c, c), max(int(r * TURRET_HUB_FRAC), 2))
+            rad = math.radians(angle - 90.0)
+            dirx, diry = math.cos(rad), math.sin(rad)
+            perpx, perpy = -diry, dirx
+            hw = r * TURRET_NEEDLE_BASE_HALF_FRAC
+            base_x = c + r * TURRET_NEEDLE_INNER_FRAC * dirx
+            base_y = c + r * TURRET_NEEDLE_INNER_FRAC * diry
+            tipx = c + r * TURRET_NEEDLE_FRAC * dirx
+            tipy = c + r * TURRET_NEEDLE_FRAC * diry
+            pg.draw.polygon(surf, pg.Color(Colors.amber),
+                            [(base_x + perpx * hw, base_y + perpy * hw),
+                             (base_x - perpx * hw, base_y - perpy * hw), (tipx, tipy)])
 
         needle = supersample((size, size), render)
         cx, cy = self._turret_center

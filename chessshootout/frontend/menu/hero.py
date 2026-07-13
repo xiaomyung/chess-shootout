@@ -18,7 +18,7 @@ from chessshootout.frontend.visual.icons import draw_clock
 
 TITLE = "READY UP."
 TAGLINE = "PAWNS GET WHAT THEY DESERVE"
-COMING_SOON = "Coming soon."
+COMING_SOON = "Hold ya horses, I am cooking that..."
 COMING_SOON_KEY = "coming_soon"
 
 MODE_CHIPS = (
@@ -56,8 +56,8 @@ LINK_H = 24
 FEN_GAP = 10
 RECON_H = 46
 RECON_GAP = 12
-TIME_POPOVER_W = 560
-TIME_POPOVER_H = 360
+TIME_POPOVER_W = 644
+TIME_POPOVER_H = 414
 SIDE_POPOVER_W = 190
 SIDE_ROW_H = 40
 
@@ -71,6 +71,7 @@ DASH_LEN = 5
 DASH_GAP = 4
 LOCK_H = 12
 LOCK_GAP = 4
+PRESS_OFFSET_PX = 1
 
 
 _HERO_ART_CACHE = new_cache()
@@ -140,6 +141,8 @@ class PlayView(MenuView):
         self._time_popover = pg.Rect(0, 0, 0, 0)
         self._side_popover = pg.Rect(0, 0, 0, 0)
         self._side_rects = {}
+        self._hover_target = None
+        self._press_target = None
 
         self._title_font = get_display_font(TITLE_FONT)
         self._tagline_font = get_mono_font(TAGLINE_FONT, bold=True)
@@ -155,6 +158,8 @@ class PlayView(MenuView):
     def hide(self):
         self.visible = False
         self._close_popovers()
+        self._hover_target = None
+        self._press_target = None
 
     def is_visible(self):
         return self.visible
@@ -408,14 +413,15 @@ class PlayView(MenuView):
         if self._time_open:
             self._picker.update(now)
 
+    def active_scrollable(self, pos=None):
+        return self._picker if self._time_open else None
+
     def avoid_rects(self):
         if not self.visible or self._hero_rect.width <= 0:
             return []
-        rects = [self._title_block, self._chips_block]
+        rects = [self._chips_block]
         if self.reconnect_available and self._recon_rect.width > 0:
             rects.append(self._recon_rect)
-        fen_shown = self.selected_mode != ONLINE and self._fen_rect.width > 0
-        rects.append(self._cta_rect.union(self._fen_rect) if fen_shown else self._cta_rect)
         if self._time_open:
             rects.append(self._time_popover)
         elif self._side_open:
@@ -428,6 +434,7 @@ class PlayView(MenuView):
         if self._time_open:
             if self._time_popover.collidepoint(pos):
                 self._picker.handle_click(pos)
+                self.app.input_router._click_sound_played = True
             else:
                 self._close_popovers()
             return True
@@ -472,6 +479,41 @@ class PlayView(MenuView):
                     self._relayout()
                 return
 
+    def _hover_hit(self, pos):
+        if self._cta_rect.collidepoint(pos):
+            return "cta"
+        for label, key, locked in MODE_CHIPS:
+            if locked:
+                continue
+            if self._mode_rects[key].collidepoint(pos):
+                return f"mode:{key}"
+        if self._time_chip.collidepoint(pos):
+            return "time"
+        if self._side_chip.collidepoint(pos):
+            return "side"
+        return None
+
+    def handle_press(self, pos):
+        if not self.visible or self._time_open or self._side_open:
+            return False
+        target = self._hover_hit(pos)
+        if target is None:
+            return False
+        self._press_target = target
+        return True
+
+    def handle_motion(self, pos):
+        if not self.visible or self._time_open or self._side_open:
+            self._hover_target = None
+            return False
+        self._hover_target = self._hover_hit(pos)
+        return True
+
+    def handle_release(self, pos):
+        had_press = self._press_target is not None
+        self._press_target = None
+        return had_press
+
     def handle_key(self, event):
         return False
 
@@ -512,7 +554,6 @@ class PlayView(MenuView):
                             self._recon_button.centery - label.get_height() // 2))
 
     def _draw_mode_chips(self, window):
-        mouse = pg.mouse.get_pos()
         for label, key, locked in MODE_CHIPS:
             rect = self._mode_rects[key]
             if locked:
@@ -530,7 +571,9 @@ class PlayView(MenuView):
                 window.blit(text, (lx + lock_h + gap, rect.centery - text.get_height() // 2))
                 continue
             selected = key == self.selected_mode
-            hovered = rect.collidepoint(mouse)
+            target = f"mode:{key}"
+            hovered = self._hover_target == target
+            pressed = self._press_target == target and hovered
             fill = Colors.surface_raised if selected else (
                 Colors.surface_hover if hovered else Colors.surface)
             border = Colors.accent if selected else Colors.border
@@ -539,8 +582,9 @@ class PlayView(MenuView):
                                          border=border, border_width=1, corners=("tr", "bl")),
                         rect.topleft)
             text = render_text(self._chip_font, label, color)
+            offset = self._s(PRESS_OFFSET_PX) if pressed else 0
             window.blit(text, (rect.centerx - text.get_width() // 2,
-                               rect.centery - text.get_height() // 2))
+                               rect.centery - text.get_height() // 2 + offset))
 
     def _draw_lock(self, window, cx, cy, h, color):
         body_w = max(int(h * 0.72), 4)
@@ -553,25 +597,31 @@ class PlayView(MenuView):
 
     def _draw_time_chip(self, window):
         rect = self._time_chip
-        fill = pg.Color(Colors.amber).lerp(pg.Color(Colors.surface_raised), 0.84)
+        hovered = self._hover_target == "time"
+        pressed = self._press_target == "time" and hovered
+        fill = Colors.surface_hover if hovered else (
+            pg.Color(Colors.amber).lerp(pg.Color(Colors.surface_raised), 0.84))
         window.blit(cut_rect_surface(rect.size, self._s(CHIP_CUT), fill,
                                      border=Colors.amber, border_width=1, corners=("tr",)),
                     rect.topleft)
         pad = self._s(SUMMARY_CHIP_PAD_X)
         gap = self._s(SUMMARY_CHIP_GAP)
         icon = self._s(SUMMARY_CHIP_ICON)
-        icon_rect = pg.Rect(rect.x + pad, rect.y, icon, rect.height)
+        offset = self._s(PRESS_OFFSET_PX) if pressed else 0
+        icon_rect = pg.Rect(rect.x + pad, rect.y + offset, icon, rect.height)
         draw_clock(window, icon_rect, Colors.amber_hi)
         value = self._time_value_surface()
-        window.blit(value, (icon_rect.right + gap, rect.centery - value.get_height() // 2))
+        window.blit(value, (icon_rect.right + gap,
+                            rect.centery - value.get_height() // 2 + offset))
         chevron = chevron_surface(self._s(SUMMARY_CHIP_CHEVRON), Colors.amber_hi,
                                   up=self._time_open)
         window.blit(chevron, (rect.right - pad - chevron.get_width(),
-                              rect.centery - chevron.get_height() // 2))
+                              rect.centery - chevron.get_height() // 2 + offset))
 
     def _draw_side_chip(self, window):
         rect = self._side_chip
-        hovered = rect.collidepoint(pg.mouse.get_pos())
+        hovered = self._hover_target == "side"
+        pressed = self._press_target == "side" and hovered
         border = Colors.accent if self._side_open else (
             Colors.border_strong if hovered else Colors.border)
         fill = Colors.surface_hover if hovered else Colors.surface
@@ -582,14 +632,15 @@ class PlayView(MenuView):
         gap = self._s(SUMMARY_CHIP_GAP)
         icon = self._s(SUMMARY_CHIP_ICON)
         icon_w = self._side_icon_width(icon)
-        self._draw_summary_side_icon(window, rect.x + pad, rect.centery, icon)
+        offset = self._s(PRESS_OFFSET_PX) if pressed else 0
+        self._draw_summary_side_icon(window, rect.x + pad, rect.centery + offset, icon)
         label = render_text(self._chip_font, self._side_label_text(), Colors.text)
         window.blit(label, (rect.x + pad + icon_w + gap,
-                            rect.centery - label.get_height() // 2))
+                            rect.centery - label.get_height() // 2 + offset))
         chevron = chevron_surface(self._s(SUMMARY_CHIP_CHEVRON), Colors.text_dim,
                                   up=self._side_open)
         window.blit(chevron, (rect.right - pad - chevron.get_width(),
-                              rect.centery - chevron.get_height() // 2))
+                              rect.centery - chevron.get_height() // 2 + offset))
 
     def _draw_summary_side_icon(self, window, x, cy, size):
         if self.selected_side == "random":
@@ -606,23 +657,22 @@ class PlayView(MenuView):
             window.blit(scaled, (cx - size // 2, cy - size // 2))
 
     def _draw_cta(self, window):
-        hovered = self._cta_rect.collidepoint(pg.mouse.get_pos())
-        fill = Colors.accent_hi if hovered else Colors.accent
+        hovered = self._hover_target == "cta"
+        pressed = self._press_target == "cta" and hovered
+        fill = Colors.accent_press if pressed else (
+            Colors.accent_hi if hovered else Colors.accent)
         window.blit(cut_rect_surface(self._cta_rect.size, self._s(CTA_CUT), fill,
                                      corners=("tr", "bl")), self._cta_rect.topleft)
         text = render_text(self._cta_font, self.cta_label(), Colors.on_accent)
+        offset = self._s(PRESS_OFFSET_PX) if pressed else 0
         window.blit(text, (self._cta_rect.centerx - text.get_width() // 2,
-                           self._cta_rect.centery - text.get_height() // 2))
+                           self._cta_rect.centery - text.get_height() // 2 + offset))
 
     def _draw_fen_link(self, window):
         hovered = self._fen_rect.collidepoint(pg.mouse.get_pos())
         color = Colors.text_dim if hovered else Colors.text_muted
         text = render_text(self._link_font, "Start from FEN", color)
-        if self._fen_above:
-            x = self._fen_rect.right - text.get_width()
-        else:
-            x = self._fen_rect.centerx - text.get_width() // 2
-        window.blit(text, (x, self._fen_rect.centery - text.get_height() // 2))
+        window.blit(text, (self._fen_rect.x, self._fen_rect.centery - text.get_height() // 2))
 
     def _draw_time_popover(self, window):
         window.blit(cut_rect_surface(self._time_popover.size, self._s(CTA_CUT),

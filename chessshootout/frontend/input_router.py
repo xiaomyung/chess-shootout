@@ -184,6 +184,9 @@ class InputRouter:
                 if event.buttons[0]:
                     frontend.chrome.handle_title_motion(event.pos)
                     self._handle_left_drag_motion(event.pos)
+                elif (event.pos[1] >= frontend.chrome.HEIGHT
+                        and not frontend._blocking_modal_visible()):
+                    frontend.screen.handle_motion(event.pos)
 
             elif event.type == pg.MOUSEWHEEL:
                 scrollable = self._active_scrollable()

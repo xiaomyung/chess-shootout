@@ -35,3 +35,7 @@ class Tween:
         self._start = self.value(now_ms)
         self._target = new_target
         self._begin_ms = now_ms
+
+    def remap(self, transform):
+        self._start = transform(self._start)
+        self._target = transform(self._target)

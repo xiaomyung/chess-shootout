@@ -114,6 +114,15 @@ class MenuScreen(Screen):
     def handle_key(self, event):
         return self.views[self._active_view].handle_key(event)
 
+    def handle_press(self, pos):
+        return self.views[self._active_view].handle_press(pos)
+
+    def handle_motion(self, pos):
+        return self.views[self._active_view].handle_motion(pos)
+
+    def handle_release(self, pos):
+        return self.views[self._active_view].handle_release(pos)
+
     def active_scrollable(self):
         return self.views[self._active_view].active_scrollable()
 

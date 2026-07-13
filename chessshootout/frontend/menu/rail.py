@@ -30,7 +30,7 @@ ROW_PAD = 14
 ROW_GAP = 10
 ROW_Y_OFFSET = 14
 ICON_X = 56
-ICON_SIDE = 22
+ICON_SIDE = 24
 LABEL_X = 84
 LABEL_FONT_SIZE = 15
 RETICLE_SLIDE_MS = 260
@@ -60,6 +60,7 @@ class MenuRail:
         self._credit_hitbox = pg.Rect(0, 0, 0, 0)
 
     def set_rect(self, rect, scale):
+        old_rects = self._row_rects
         self.rect = pg.Rect(rect)
         self.scale = scale
         self._label_font = get_font(max(int(LABEL_FONT_SIZE * scale), 12), bold=True)
@@ -77,15 +78,26 @@ class MenuRail:
         footer_h = max(int(46 * scale), 34)
         opt_y = rect.bottom - footer_h - row_h - max(int(10 * scale), 6)
         self._row_rects["options"] = pg.Rect(x, opt_y, w, row_h)
-        self._build_footer(x, w, footer_h)
-        target = self._row_rects[self.active].centery
-        now = pg.time.get_ticks()
-        if self._reticle_tween is None:
-            self._reticle_tween = Tween(target, target, RETICLE_SLIDE_MS, now)
-        else:
-            self._reticle_tween.retarget(target, now)
+        self._build_footer(footer_h)
+        self._remap_reticle(old_rects)
 
-    def _build_footer(self, x, w, footer_h):
+    def _remap_reticle(self, old_rects):
+        target = self._row_rects[self.active].centery
+        if self._reticle_tween is None:
+            self._reticle_tween = Tween(target, target, RETICLE_SLIDE_MS, 0)
+            return
+        first_key, second_key = ROWS[0][0], ROWS[1][0]
+        if not old_rects or first_key not in old_rects:
+            self._reticle_tween.remap(lambda _y: target)
+            return
+        old_top = old_rects[first_key].centery
+        old_pitch = old_rects[second_key].centery - old_top
+        new_top = self._row_rects[first_key].centery
+        new_pitch = self._row_rects[second_key].centery - new_top
+        factor = new_pitch / old_pitch if old_pitch else 1.0
+        self._reticle_tween.remap(lambda y: new_top + (y - old_top) * factor)
+
+    def _build_footer(self, footer_h):
         version = paths.get_app_version()
         version_label = f"v{version}" if version else "dev"
         self._footer_prefix = f"{version_label} · by "
@@ -95,8 +107,10 @@ class MenuRail:
         base_y = self.rect.bottom - max(int(14 * self.scale), 8)
         line_h = max(self._footer_prefix_surf.get_height(), self._credit_surf.get_height())
         line_y = base_y - line_h
-        self._footer_prefix_pos = (x, line_y)
-        credit_x = x + self._footer_prefix_surf.get_width()
+        total_w = self._footer_prefix_surf.get_width() + self._credit_surf.get_width()
+        start_x = self.rect.x + (self.rect.width - total_w) // 2
+        self._footer_prefix_pos = (start_x, line_y)
+        credit_x = start_x + self._footer_prefix_surf.get_width()
         self._credit_rect = pg.Rect(credit_x, line_y, self._credit_surf.get_width(), line_h)
         self._credit_hitbox = self._credit_rect.inflate(max(int(8 * self.scale), 4),
                                                         max(int(8 * self.scale), 4))
