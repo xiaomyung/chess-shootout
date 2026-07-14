@@ -20,6 +20,7 @@ from chessshootout.frontend.panels.banners import OfferBanners
 from chessshootout.frontend.modals.options import OptionsModal
 from chessshootout.frontend.modals.result import ResultMenu
 from chessshootout.frontend.menu.hero import PlayView
+from chessshootout.frontend.menu.profile_view import ProfileView
 from chessshootout.frontend.menu.time_picker import TimePicker
 from chessshootout.frontend.modals.wait import WaitModal
 from chessshootout.online.client import OnlineClient
@@ -38,8 +39,8 @@ from chessshootout.frontend.visual.widgets import draw_button, draw_button_row
 
 @pytest.mark.parametrize("symbol", [
     SoundManager, Board, BaseModal, ConfirmModal, HistoryView, HelpModal,
-    MatchFoundModal, OfferBanners, OptionsModal, ResultMenu, PlayView, TimePicker,
-    WaitModal, OnlineClient, AudioPanel, PlayerStrip, RightMenu,
+    MatchFoundModal, OfferBanners, OptionsModal, ResultMenu, PlayView, ProfileView,
+    TimePicker, WaitModal, OnlineClient, AudioPanel, PlayerStrip, RightMenu,
     PieceAnimation, Colors, TextInput, Toast,
 ])
 def test_public_class_is_importable(symbol):

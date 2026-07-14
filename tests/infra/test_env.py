@@ -15,6 +15,7 @@ _ISOLATED_VARS = (
     "CHESS_DEFAULT_TC",
     "CHESS_DEFAULT_INCREMENT", "CHESS_THEME", "CHESS_COUNTRY",
     "CHESS_SHOW_FPS", "CHESS_SHOW_PING", "CHESS_FOCUS_SHOW",
+    "CHESS_NEWS_URL", "CHESS_PROFILE_HINT_SHOWN",
 )
 
 
@@ -380,6 +381,26 @@ def test_set_nickname_replaces_existing_value_in_place():
     contents = env._ENV_PATH.read_text(encoding="utf-8")
     assert "CHESS_NICKNAME=Second" in contents
     assert "First" not in contents
+
+
+def test_news_url_defaults_to_the_shipped_constant():
+    assert env.get_news_url() == env._DEFAULT_NEWS_URL
+    assert env.get_news_url().startswith("https://")
+
+
+def test_news_url_reads_env_override(monkeypatch):
+    monkeypatch.setenv("CHESS_NEWS_URL", "https://example.com/news.json")
+    assert env.get_news_url() == "https://example.com/news.json"
+
+
+def test_profile_hint_shown_defaults_false():
+    assert env.get_profile_hint_shown() is False
+
+
+def test_profile_hint_shown_persists_round_trip():
+    env.set_profile_hint_shown()
+    assert env.get_profile_hint_shown() is True
+    assert "CHESS_PROFILE_HINT_SHOWN=1" in env._ENV_PATH.read_text(encoding="utf-8")
 
 
 def test_country_defaults_empty():

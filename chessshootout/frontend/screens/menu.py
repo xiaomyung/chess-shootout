@@ -7,6 +7,7 @@ from chessshootout.infra.open_external import open_with_default_app
 from chessshootout.frontend.layout import compute_layout
 from chessshootout.frontend.menu.layout import compute_menu_layout
 from chessshootout.frontend.menu.rail import MenuRail
+from chessshootout.frontend.menu.rail_cards import CardStack
 from chessshootout.frontend.menu.shell import build_views
 from chessshootout.frontend.modal_registry import ModalSpec
 from chessshootout.frontend.modals.fen_input import FenInputModal
@@ -27,6 +28,8 @@ class MenuScreen(Screen):
         self.fen_input_modal = FenInputModal(app.window)
         self.views = build_views(app)
         self.rail = MenuRail(app.window, {"open_url": open_with_default_app})
+        self.card_stack = CardStack(app)
+        self.card_stack.refresh()
         self._active_view = "play"
         self._menu_layout = None
         self._load_pgn_available = False
@@ -71,15 +74,20 @@ class MenuScreen(Screen):
         self._active_view = name
         self.views[name].enter()
         self.rail.set_active(name, pg.time.get_ticks())
+        if name == "play":
+            self.card_stack.refresh()
 
     def exit(self):
         super().exit()
         self.views[self._active_view].exit()
 
     def relayout(self, size):
-        self._menu_layout = compute_menu_layout(size[0], size[1], WindowChrome.HEIGHT)
+        right_rail = self._active_view == "play"
+        self._menu_layout = compute_menu_layout(
+            size[0], size[1], WindowChrome.HEIGHT, right_rail=right_rail)
         self.rail.set_rect(self._menu_layout.rail_rect, self._menu_layout.scale)
         self.rail.set_active(self._active_view, pg.time.get_ticks())
+        self.card_stack.set_rect(self._menu_layout.right_rail_rect, self._menu_layout.scale)
         for view in self.views.values():
             view.relayout(self._menu_layout)
         r = compute_layout(
@@ -90,7 +98,7 @@ class MenuScreen(Screen):
     def update(self, now):
         self.views[self._active_view].update(now)
         layout = self._menu_layout
-        rects = [layout.rail_rect]
+        rects = [layout.rail_rect, layout.right_rail_rect]
         rects += self.views[self._active_view].avoid_rects()
         self.app.menu_battle.set_avoid_rects(rects)
 
@@ -101,6 +109,8 @@ class MenuScreen(Screen):
         now = pg.time.get_ticks()
         self.rail.draw(app.window, now)
         self.views[self._active_view].draw(app.window, self._menu_layout)
+        if self._active_view == "play":
+            self.card_stack.draw(app.window, now)
 
     def handle_click(self, pos):
         row = self.rail.hit_test(pos)
@@ -108,6 +118,8 @@ class MenuScreen(Screen):
             self._on_rail_row(row)
             return True
         if self.rail.handle_footer_click(pos):
+            return True
+        if self._active_view == "play" and self.card_stack.handle_click(pos):
             return True
         return self.views[self._active_view].handle_click(pos)
 
@@ -124,10 +136,17 @@ class MenuScreen(Screen):
         return self.views[self._active_view].handle_release(pos)
 
     def active_scrollable(self):
-        return self.views[self._active_view].active_scrollable()
+        if self._active_view != "play":
+            return self.views[self._active_view].active_scrollable()
+        picker = self.views["play"].active_scrollable()
+        if picker is not None:
+            return picker
+        if self.card_stack.scroll.scrollable():
+            return self.card_stack
+        return None
 
     def scrollables(self):
-        result = []
+        result = [self.card_stack]
         for view in self.views.values():
             result.extend(view.scrollables())
         return result
@@ -153,6 +172,8 @@ class MenuScreen(Screen):
         self._active_view = name
         self.views[name].enter()
         self.rail.set_active(name, pg.time.get_ticks())
+        if name == "play":
+            self.card_stack.refresh()
         self.app._compute_layout()
 
     def goto_history(self):

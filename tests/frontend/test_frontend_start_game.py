@@ -13,6 +13,7 @@ from tests.conftest import pygame_display
 from chessshootout.backend.utils import Square
 from chessshootout.backend.pieces import PieceColor
 from chessshootout.infra import countries, env
+from chessshootout.frontend.frontend import Frontend
 from chessshootout.frontend.screens.game import OPPONENT_NAME_FOR_MODE
 from chessshootout.online.client import OnlineClient
 from chessshootout.domain.pgn.load import extract_csmatchid, parse_pgn_headers
@@ -475,3 +476,27 @@ def test_settings_close_persists_server_address(monkeypatch):
     app.settings._server_addr_row.input.text = "chess.example.com:9000"
     assert app.settings._on_close_settings() is True
     assert saved == ["chess.example.com:9000"]
+
+
+def test_first_run_profile_hint_toasts_once_when_the_flag_is_unset(monkeypatch):
+    """v2.9.0: a brand-new install (flag never set) sees a one-time hype toast
+    pointing at Profile, and the flag is persisted immediately so it never
+    fires again."""
+    monkeypatch.delenv("CHESS_PROFILE_HINT_SHOWN", raising=False)
+    assert env.get_profile_hint_shown() is False
+
+    app = Frontend(1000, 800)
+
+    messages = [b["message"] for b in app.toast._bubbles]
+    assert "Set your name in Profile >" in messages
+    assert env.get_profile_hint_shown() is True
+
+
+def test_first_run_profile_hint_does_not_repeat_once_the_flag_is_persisted(monkeypatch):
+    monkeypatch.delenv("CHESS_PROFILE_HINT_SHOWN", raising=False)
+    env.set_profile_hint_shown()
+
+    app = Frontend(1000, 800)
+
+    messages = [b["message"] for b in app.toast._bubbles]
+    assert "Set your name in Profile >" not in messages

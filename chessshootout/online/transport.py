@@ -24,6 +24,7 @@ log = logging.getLogger("chess.client.transport")
 
 
 HTTP_TIMEOUT_SECONDS = 5.0
+NEWS_TIMEOUT_SECONDS = 5.0
 
 
 _TLS_CONTEXT = ssl.create_default_context(cafile=certifi.where())
@@ -47,6 +48,19 @@ class TransportHTTPError(TransportError):
 
 class FatalResumeError(TransportError):
     pass
+
+
+def fetch_news(url, *, timeout=NEWS_TIMEOUT_SECONDS):
+    try:
+        r = httpx.get(url, timeout=timeout, verify=_TLS_CONTEXT)
+    except (httpx.HTTPError, httpx.TimeoutException) as exc:
+        raise TransportError(str(exc)) from exc
+    if r.status_code != 200:
+        raise TransportHTTPError(r.status_code, f"http_{r.status_code}")
+    try:
+        return r.json()
+    except json.JSONDecodeError as exc:
+        raise TransportError(f"invalid_json: {exc}") from exc
 
 
 def _looks_like_ip_or_localhost(host):

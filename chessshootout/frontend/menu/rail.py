@@ -82,9 +82,12 @@ class MenuRail:
         self._remap_reticle(old_rects)
 
     def _remap_reticle(self, old_rects):
-        target = self._row_rects[self.active].centery
+        target = self._row_rects[self.active].centery if self.active in self._row_rects else None
         if self._reticle_tween is None:
-            self._reticle_tween = Tween(target, target, RETICLE_SLIDE_MS, 0)
+            seed = target if target is not None else self._row_rects[ROWS[0][0]].centery
+            self._reticle_tween = Tween(seed, seed, RETICLE_SLIDE_MS, 0)
+            return
+        if target is None:
             return
         first_key, second_key = ROWS[0][0], ROWS[1][0]
         if not old_rects or first_key not in old_rects:
@@ -173,7 +176,7 @@ class MenuRail:
         self._draw_footer(window)
 
     def _draw_reticle(self, window, now_ms):
-        if self._reticle_tween is None:
+        if self._reticle_tween is None or self.active not in self._row_rects:
             return
         y = int(self._reticle_tween.value(now_ms))
         size = max(int(RETICLE_SIZE * self.scale), 20)

@@ -37,6 +37,7 @@ from chessshootout.frontend.game.variant import Variant
 from chessshootout.frontend.online_coordinator import OnlineCoordinator
 from chessshootout.frontend.audio.sound_manager import SoundManager
 from chessshootout.domain.pgn.load import latest_pgn_in_dir
+from chessshootout.online.news import NewsClient
 
 
 PERF_SAMPLE_COUNT = 240
@@ -100,6 +101,10 @@ class Frontend:
         self.toast.on_new = lambda: self.sound_manager.play_toast()
         if env.normalize_stored_nickname():
             self.toast.show("Your nickname contained non ASCII symbols, I cleaned them :3")
+        if not env.get_profile_hint_shown():
+            env.set_profile_hint_shown()
+            self.toast.show("Set your name in Profile >", kind="hype")
+        self.news_client = NewsClient()
         self.input_router = InputRouter(self)
         self._modal_registry = [
             ModalSpec(self.confirm_modal, on_dismiss=self.input_router._dismiss_confirm),
@@ -129,6 +134,7 @@ class Frontend:
         self._refresh_load_pgn_availability()
         self._settle_window()
         self.coordinator._spawn_reconnect_probe()
+        self.news_client.fetch_once()
 
         pg.display.set_caption(WINDOW_TITLE)
 

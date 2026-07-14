@@ -19,6 +19,7 @@ _ATOMIC_WRITE_BACKOFF_S = 0.03
 
 _DEV_SERVER_ADDR = "localhost:8000"
 _PROD_SERVER_ADDR = "server.chess-shootout.com"
+_DEFAULT_NEWS_URL = "https://xiaomyung.github.io/chess-shootout/news.json"
 _DEFAULT_MASTER_VOLUME = 0.70
 _DEFAULT_MENU_VOLUME = 0.10
 _THEMES = ("dark",)
@@ -81,6 +82,10 @@ def set_server_addr(value):
         return
     os.environ["CHESS_SERVER_ADDR"] = value
     _persist("CHESS_SERVER_ADDR", value)
+
+
+def get_news_url():
+    return os.environ.get("CHESS_NEWS_URL") or _DEFAULT_NEWS_URL
 
 
 def get_country():
@@ -249,6 +254,14 @@ def get_show_frametime():
 
 def set_show_frametime(value):
     _set_bool("CHESS_SHOW_FRAMETIME", value)
+
+
+def get_profile_hint_shown():
+    return _get_bool("CHESS_PROFILE_HINT_SHOWN", False)
+
+
+def set_profile_hint_shown():
+    _set_bool("CHESS_PROFILE_HINT_SHOWN", True)
 
 
 def get_default_time_control():

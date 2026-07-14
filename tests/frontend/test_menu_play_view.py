@@ -259,11 +259,29 @@ def test_side_popover_and_chips_are_frozen_on_selection(app, hero):
     assert hero._side_open is True
 
 
-def test_time_popover_stays_within_the_hero_column_when_it_fits(app, hero):
+def test_time_popover_stays_within_the_hero_column_when_it_fits():
+    """P4 narrows the hero column with the right rail's cards, so the 1000x800
+    module window (used by every other test here) no longer has room for the
+    popover's fixed pixel width to sit inside the column -- it legitimately
+    falls back to window-relative clamping there. Use a wide enough window to
+    exercise the in-column-fit branch this test actually pins."""
+    app = make_app(1600, 1000)
+    app.draw_frame()
+    hero = app.menu.play_view
     app.menu.handle_click(hero._time_chip.center)
     assert hero._time_popover.width <= hero._hero_rect.width
     assert hero._time_popover.left >= hero._hero_rect.left
     assert hero._time_popover.right <= hero._hero_rect.right
+
+
+def test_time_popover_falls_back_to_window_relative_clamping_when_it_does_not_fit(app, hero):
+    """At the narrower 1000x800 module window the right rail's cards leave the
+    hero column too narrow for the popover's fixed pixel width -- it must
+    still land fully on screen instead of overflowing or crashing."""
+    app.menu.handle_click(hero._time_chip.center)
+    assert hero._time_popover.width > hero._hero_rect.width
+    assert hero._time_popover.left >= 0
+    assert hero._time_popover.right <= app.window_width
 
 
 def test_hero_lays_out_open_with_no_card(app, hero):
