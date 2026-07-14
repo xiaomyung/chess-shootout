@@ -21,7 +21,7 @@ log = logging.getLogger("chess.frontend")
 
 MENU_RISE_MS = 520
 MENU_RISE_PX = 20
-VIEW_RISE_MS = 140
+VIEW_RISE_MS = 280
 VIEW_RISE_PX = 10
 RAIL_SLIDE_MS = 200
 

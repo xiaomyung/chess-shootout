@@ -30,8 +30,8 @@ ROW_PAD = 14
 ROW_GAP = 10
 ROW_Y_OFFSET = 14
 ICON_X = 56
-ICON_SIDE = 24
-LABEL_X = 84
+ICON_SIDE = 29
+LABEL_X = 89
 LABEL_FONT_SIZE = 15
 FOOTER_FONT_SIZE = 13
 FOOTER_FONT_FLOOR = 11
@@ -143,9 +143,9 @@ class MenuRail:
                      (self.rect.right - 1, self.rect.bottom - 1))
         mouse = pg.mouse.get_pos()
         cut = max(int(ROW_CUT * self.scale), 5)
-        icon_side = max(int(ICON_SIDE * self.scale), 16)
+        icon_side = max(int(ICON_SIDE * self.scale), 19)
         icon_x = self.rect.x + max(int(ICON_X * self.scale), 40)
-        label_x = self.rect.x + max(int(LABEL_X * self.scale), 62)
+        label_x = self.rect.x + max(int(LABEL_X * self.scale), 63)
         for key, label, icon_fn in ROWS + (OPTIONS_ROW,):
             rect = self._row_rects[key]
             active = key == self.active
