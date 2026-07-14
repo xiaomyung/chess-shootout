@@ -168,12 +168,15 @@ def test_update_advances_a_rotation_tween():
 
 
 def test_wheel_over_the_drum_spins_settles_and_selects_once_with_ticks():
+    # 2 notches: travel = tau * (v0 - stop) must land BETWEEN chambers, not wrap
+    # back onto the start (3 notches did exactly that once SPIN_FRICTION_TAU grew
+    # past ~0.8 -- travel is tau-coupled, so pick the impulse from the physics).
     ticks = []
     changes = []
     p = TimePicker(on_change=lambda: changes.append(1), on_tick=lambda: ticks.append(1))
     p.set_rect(pg.Rect(0, 0, 300, 190))
     p.set_selection(10, 5)
-    assert p.handle_scroll(p._drum_center, 3) is True
+    assert p.handle_scroll(p._drum_center, 2) is True
     assert p._spinning is True
     t = 0
     for _ in range(3000):
