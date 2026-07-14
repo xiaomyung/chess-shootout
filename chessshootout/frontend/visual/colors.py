@@ -56,9 +56,6 @@ class Colors:
     premove = "#e0556e8c"
     premove_chain_tip = "#ff6b8ad9"
 
-    modal_rail_win_end = "#8fe6b4"
-    modal_rail_loss_end = "#ff9a6b"
-    modal_rail_draw_end = "#c2cad6"
     outcome_stroke = "#120804"
     tag_stroke = "#1a1206"
     icon_chip_bg = "#3e3c34"

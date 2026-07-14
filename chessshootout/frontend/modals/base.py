@@ -15,9 +15,9 @@ MODAL_MAX_WIDTH = 440
 BUTTON_VPAD = 16
 
 INTENT_RAIL = {
-    "win": (Colors.win, Colors.modal_rail_win_end),
-    "loss": (Colors.loss, Colors.modal_rail_loss_end),
-    "draw": (Colors.text_dim, Colors.modal_rail_draw_end),
+    "win": Colors.win,
+    "loss": Colors.loss,
+    "draw": Colors.text_dim,
 }
 
 
@@ -75,22 +75,17 @@ class BaseModal:
         self.window.blit(self._rail_surface(intent, r.width), r.topleft)
 
     def _rail_surface(self, intent, width):
-        start, end = INTENT_RAIL.get(intent, (Colors.accent, Colors.accent))
+        color = INTENT_RAIL.get(intent, Colors.accent)
 
         def build():
             def render(surf, k):
                 w, h = surf.get_size()
                 cutk = MODAL_CUT * k
                 railk = MODAL_RAIL * k
-                c0, c1 = pg.Color(start), pg.Color(end)
-                for x in range(w):
-                    surf.fill(c0.lerp(c1, x / max(w - 1, 1)), pg.Rect(x, 0, 1, h))
                 diag = railk * 1.41421356
-                mask = pg.Surface((w, h), pg.SRCALPHA)
-                pg.draw.polygon(mask, (255, 255, 255, 255),
+                pg.draw.polygon(surf, pg.Color(color),
                                 [(0, 0), (w - cutk, 0), (w, cutk), (w, cutk + diag),
                                  (w - cutk + railk * (1.0 - 1.41421356), railk),
                                  (0, railk)])
-                surf.blit(mask, (0, 0), special_flags=pg.BLEND_RGBA_MULT)
             return supersample((width, MODAL_CUT + MODAL_RAIL * 2), render)
-        return memoized_surface(_RAIL_CACHE, (intent, width, str(start), str(end)), build)
+        return memoized_surface(_RAIL_CACHE, (intent, width, str(color)), build)
