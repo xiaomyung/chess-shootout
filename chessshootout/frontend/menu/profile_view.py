@@ -2,25 +2,23 @@ import pygame as pg
 
 from chessshootout import paths
 from chessshootout.infra import countries, env
-from chessshootout.domain.pgn.load import scan_pgn_summaries
-from chessshootout.frontend.menu.view import MenuView
-from chessshootout.frontend.panels.history_view import build_match_groups
+from chessshootout.frontend.menu.view import (
+    MenuView, draw_subview_title, scale_floor, seeded_avatar_palette, subview_title_top)
+from chessshootout.frontend.panels.history_view import PGN_PATTERN, load_match_groups
 from chessshootout.frontend.visual.cache import render_text
 from chessshootout.frontend.visual.colors import Colors
 from chessshootout.frontend.visual.draw import cut_rect_surface
 from chessshootout.frontend.visual.emoji import emoji_surface
 from chessshootout.frontend.visual.fonts import DISPLAY, get_display_font, get_font, get_mono_font
 from chessshootout.frontend.visual.text_input import TextInput
-from chessshootout.frontend.visual.widgets import AvatarBadge, avatar_palette
+from chessshootout.frontend.visual.widgets import AvatarBadge
 
 
-PGN_PATTERN = "*.pgn"
 NICKNAME_REJECT_TOAST = "Please use ASCII symbols only"
 NICKNAME_MAX_CHARS = 20
 
-TITLE_TOP_FRAC = 0.05
 AVATAR_SIZE = 64
-PANEL_CUT = 8
+CARD_CUT = 8
 ROW_H = 52
 STAT_GAP = 10
 STAT_H = 66
@@ -54,8 +52,8 @@ class ProfileView(MenuView):
         self._nickname_input.focused = False
 
     def _refresh_stats(self):
-        groups = build_match_groups(
-            scan_pgn_summaries(str(paths.get_games_dir()), PGN_PATTERN), env.get_nickname())
+        groups = load_match_groups(
+            str(paths.get_games_dir()), PGN_PATTERN, env.get_nickname())
         self._wins = sum(1 for g in groups if g.result == "win")
         self._losses = sum(1 for g in groups if g.result == "loss")
         self._draws = sum(1 for g in groups if g.result == "draw")
@@ -71,7 +69,7 @@ class ProfileView(MenuView):
         env.set_country(code)
 
     def _s(self, value, floor=1):
-        return max(int(value * self._scale), floor)
+        return scale_floor(value, self._scale, floor)
 
     def relayout(self, menu_layout):
         self._rect = pg.Rect(menu_layout.subview_rect)
@@ -80,27 +78,27 @@ class ProfileView(MenuView):
 
     def _layout_rows(self):
         rect = self._rect
-        title_top = rect.y + int(rect.height * TITLE_TOP_FRAC)
+        title_top = subview_title_top(rect)
         self._title_top = title_top
         self._title_font = get_display_font(self._s(28, 20))
         top = title_top + self._title_font.get_height() + self._s(20, 12)
-        panel_h = self._s(ROW_H, 40) * 2
-        panel = pg.Rect(rect.x, top, rect.width, panel_h)
+        card_h = self._s(ROW_H, 40) * 2
+        card = pg.Rect(rect.x, top, rect.width, card_h)
         av_size = self._s(AVATAR_SIZE, 44)
         pad = self._s(18, 12)
-        self._identity_panel = panel
-        self._avatar_rect = pg.Rect(panel.x + pad, panel.centery - av_size // 2,
+        self._identity_card = card
+        self._avatar_rect = pg.Rect(card.x + pad, card.centery - av_size // 2,
                                     av_size, av_size)
         input_x = self._avatar_rect.right + self._s(16, 10)
-        input_w = panel.width - (input_x - panel.x) - pad
+        input_w = card.width - (input_x - card.x) - pad
         input_h = self._s(34, 26)
-        self._nickname_rect = pg.Rect(input_x, panel.y + self._s(14, 10), input_w, input_h)
+        self._nickname_rect = pg.Rect(input_x, card.y + self._s(14, 10), input_w, input_h)
         self._nickname_input.set_rect(self._nickname_rect)
         country_y = self._nickname_rect.bottom + self._s(10, 6)
         self._country_rect = pg.Rect(input_x, country_y, input_w,
-                                     panel.bottom - self._s(14, 10) - country_y)
+                                     card.bottom - self._s(14, 10) - country_y)
 
-        stats_top = panel.bottom + self._s(24, 16)
+        stats_top = card.bottom + self._s(24, 16)
         stat_w = (rect.width - 3 * self._s(STAT_GAP, 8)) / 4
         self._stat_rects = []
         for i in range(4):
@@ -119,20 +117,18 @@ class ProfileView(MenuView):
         rect = self._rect
         if rect.width <= 0:
             return
-        title = render_text(self._title_font, "PROFILE", Colors.text)
-        window.blit(title, (rect.x, self._title_top))
-        self._draw_identity_panel(window)
+        draw_subview_title(window, self._title_font, "PROFILE", rect.x, self._title_top)
+        self._draw_identity_card(window)
         self._draw_stats(window)
         self._draw_uuid(window)
 
-    def _draw_identity_panel(self, window):
-        window.blit(cut_rect_surface(self._identity_panel.size, self._s(PANEL_CUT, 6),
+    def _draw_identity_card(self, window):
+        window.blit(cut_rect_surface(self._identity_card.size, self._s(CARD_CUT, 6),
                                      Colors.surface, border=Colors.border, border_width=1,
-                                     corners=("tr", "bl")), self._identity_panel.topleft)
+                                     corners=("tr", "bl")), self._identity_card.topleft)
         nickname = env.get_nickname()
-        if self._avatar_palette is None or self._avatar_palette_seed != nickname:
-            self._avatar_palette_seed = nickname
-            self._avatar_palette = avatar_palette(nickname)
+        self._avatar_palette_seed, self._avatar_palette = seeded_avatar_palette(
+            nickname, self._avatar_palette_seed, self._avatar_palette)
         self._avatar.draw(window, self._avatar_rect, nickname or "?",
                           self._avatar_letter_font, self._avatar_palette)
         self._nickname_input.draw(window)

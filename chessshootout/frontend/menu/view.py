@@ -1,3 +1,29 @@
+from chessshootout.frontend.visual.cache import render_text
+from chessshootout.frontend.visual.colors import Colors
+from chessshootout.frontend.visual.widgets import avatar_palette
+
+
+TITLE_TOP_FRAC = 0.05
+
+
+def scale_floor(value, scale, floor=1):
+    return max(int(value * scale), floor)
+
+
+def subview_title_top(rect):
+    return rect.y + int(rect.height * TITLE_TOP_FRAC)
+
+
+def draw_subview_title(window, font, text, x, top):
+    window.blit(render_text(font, text, Colors.text), (x, top))
+
+
+def seeded_avatar_palette(nickname, cached_seed, cached_palette):
+    if cached_palette is None or cached_seed != nickname:
+        return nickname, avatar_palette(nickname)
+    return cached_seed, cached_palette
+
+
 class MenuView:
 
     name = ""

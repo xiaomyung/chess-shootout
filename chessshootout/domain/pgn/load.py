@@ -65,10 +65,7 @@ WEEK = 604800
 
 
 def parse_pgn_headers(text):
-    headers = {}
-    for m in _TAG_RE.finditer(text):
-        headers[m.group(1)] = m.group(2)
-    return headers
+    return {m.group(1): m.group(2) for m in _TAG_RE.finditer(text)}
 
 
 def extract_csmatchid(headers):

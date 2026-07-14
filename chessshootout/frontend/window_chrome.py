@@ -49,7 +49,7 @@ class _SDLPoint(ctypes.Structure):
     _fields_ = [("x", ctypes.c_int), ("y", ctypes.c_int)]
 
 
-FS_DRAG_EXIT_PX = 8
+_FS_DRAG_EXIT_PX = 8
 _SDL_WINDOW_FULLSCREEN_DESKTOP = 0x00001001
 
 
@@ -427,7 +427,7 @@ class WindowChrome:
             return
         dx = pos[0] - self._fs_press_pos[0]
         dy = pos[1] - self._fs_press_pos[1]
-        if dx * dx + dy * dy >= FS_DRAG_EXIT_PX * FS_DRAG_EXIT_PX:
+        if dx * dx + dy * dy >= _FS_DRAG_EXIT_PX * _FS_DRAG_EXIT_PX:
             self._fs_press_pos = None
             self.toggle_fullscreen()
 

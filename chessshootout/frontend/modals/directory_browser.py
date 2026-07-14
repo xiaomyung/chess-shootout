@@ -19,6 +19,8 @@ ROW_ICON_INSET = 6
 ROW_TEXT_INSET = 8
 ROW_META_INSET = 10
 TOOL_CUT = 4
+ROW_VPAD = 16
+SCROLLBAR_GUTTER = 16
 
 
 class DirectoryBrowser(BaseModal, ScrollHost):
@@ -92,7 +94,7 @@ class DirectoryBrowser(BaseModal, ScrollHost):
         try:
             if is_dir:
                 count = sum(1 for _ in os.scandir(path))
-                return f"{count} item" + ("" if count == 1 else "s")
+                return f"{count} item{'' if count == 1 else 's'}"
             return self._human_size(os.path.getsize(path))
         except OSError:
             return ""
@@ -179,7 +181,7 @@ class DirectoryBrowser(BaseModal, ScrollHost):
         foot_top = self._draw_footer(r, pad)
         self._list_rect = pg.Rect(r.x + pad, list_top, r.width - 2 * pad,
                                   max(foot_top - int(pad * 0.4) - list_top, 1))
-        self._row_h = self.row_font.get_height() + 16
+        self._row_h = self.row_font.get_height() + ROW_VPAD
         rows_total = len(self.entries) + (1 if self.creating else 0)
         self._content_px = rows_total * self._row_h
         self._draw_list()
@@ -286,7 +288,7 @@ class DirectoryBrowser(BaseModal, ScrollHost):
         self._input_rect = pg.Rect(0, 0, 0, 0)
         max_px = max(0, self._content_px - self._list_rect.height)
         self._scroll_px = max(0.0, min(self._scroll_px, max_px))
-        gutter = 16 if max_px > 0 else 0
+        gutter = SCROLLBAR_GUTTER if max_px > 0 else 0
         content_w = self._list_rect.width - gutter
         rows = ([None] if self.creating else []) + self.entries
         first, sub, n_draw = self.scroll.row_window(self._list_rect, self._row_h)

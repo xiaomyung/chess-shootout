@@ -9,6 +9,7 @@ from chessshootout.frontend.visual.colors import Colors
 SCALE_MIN = 0.85
 SCALE_MAX = 1.5
 SCALE_REF_HEIGHT = 760.0
+DITHER_SEED = 0x5EED
 
 _DITHER_TILES = {}
 
@@ -17,7 +18,7 @@ def _dither_tiles(t):
     cached = _DITHER_TILES.get(t)
     if cached is not None:
         return cached
-    rng = random.Random(0x5EED)
+    rng = random.Random(DITHER_SEED)
     add = bytearray(t * t * 3)
     sub = bytearray(t * t * 3)
     for i in range(t * t):

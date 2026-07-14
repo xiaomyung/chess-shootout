@@ -1,9 +1,7 @@
 from chessshootout import paths
 from chessshootout.infra import env
 from chessshootout.frontend.menu.view import MenuView
-
-
-PGN_PATTERN = "*.pgn"
+from chessshootout.frontend.panels.history_view import PGN_PATTERN
 
 
 class HistoryMenuView(MenuView):

@@ -443,6 +443,13 @@ class MenuBattle:
                 d["spin"] = 0.0
 
     def _step(self, dt, now_ms):
+        alive = [p for p in self.pawns if p["alive"]]
+        self._step_queen(dt, now_ms, alive)
+        self._step_pawns(dt, now_ms, alive)
+        self._step_spawns(dt)
+        self._step_dialogue(dt, now_ms, alive)
+
+    def _step_queen(self, dt, now_ms, alive):
         q = self.queen
         qo = self._entity_obstacles(q)
         if (q["wp"] is None or self._point_in_any(qo, q["wp"][0], q["wp"][1])
@@ -468,7 +475,6 @@ class MenuBattle:
                     self._start_gun_flourish(q, GUN_DRAW_SEC, GUN_DRAW_SPINS_SWAP, True)
             q["weapon_switch"] = self._rnd(WEAPON_SWITCH_MIN, WEAPON_SWITCH_MAX)
 
-        alive = [p for p in self.pawns if p["alive"]]
         targets = [p for p in alive if self._visible(p)]
         nearest, nd = None, 1e9
         for p in targets:
@@ -484,6 +490,8 @@ class MenuBattle:
             self.acc["qfire"] = self._rnd(0.23, 0.53)
             self._fire(q, nearest, True, now_ms)
 
+    def _step_pawns(self, dt, now_ms, alive):
+        q = self.queen
         for p in alive:
             po = self._entity_obstacles(p)
             if p.get("emerging") and self._visible_with(p, po):
@@ -511,16 +519,18 @@ class MenuBattle:
                     self._fire(p, q, False, now_ms)
         self._separate_pawns()
 
+    def _step_spawns(self, dt):
         self.acc["spawn"] -= dt
         while self.acc["spawn"] <= 0 and len(self.pawns) < MAX_PAWNS:
             self.acc["spawn"] += self._rnd(0.18, 0.42)
             self._spawn_pawn(False)
 
+    def _step_dialogue(self, dt, now_ms, alive):
         self.acc["talk"] -= dt
         if self.acc["talk"] <= 0:
             self.acc["talk"] = self._rnd(2.4, 4.6)
             if self.rng.random() < 0.5 or not alive:
-                self._say(q, self._pick(QUEEN_LINES), "queen", now_ms)
+                self._say(self.queen, self._pick(QUEEN_LINES), "queen", now_ms)
             else:
                 self._say(self._pick(alive), self._pick(PAWN_LINES), "pawn", now_ms)
 

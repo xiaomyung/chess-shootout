@@ -443,7 +443,7 @@ def test_offer_accept_and_decline_pop_and_send(frontend):
     captured = {}
     frontend.coordinator.offer_banners = MagicMock()
     frontend.coordinator.offer_banners.push = (
-        lambda *a, on_ok, on_no, **k: captured.update(ok=on_ok, no=on_no))
+        lambda *a, on_yes, on_no, **k: captured.update(ok=on_yes, no=on_no))
     frontend.coordinator._push_offer_banner("draw_offered")
     frontend.sound_manager.reset_mock()
     captured["ok"]()

@@ -1,6 +1,5 @@
 import json
 import logging
-import os
 import threading
 from datetime import datetime
 
@@ -14,6 +13,8 @@ log = logging.getLogger("chess.client.news")
 CACHE_FILENAME = "news_cache.json"
 
 NEWS_MAX_ITEMS = 20
+
+NEWS_DATE_FORMAT = "%Y-%m-%d"
 
 
 def _cache_path():
@@ -35,7 +36,7 @@ def _coerce_item(raw):
 
 def _sort_key(item):
     try:
-        return datetime.strptime(item["date"], "%Y-%m-%d")
+        return datetime.strptime(item["date"], NEWS_DATE_FORMAT)
     except ValueError:
         return datetime.min
 
@@ -43,30 +44,23 @@ def _sort_key(item):
 def parse_news_items(raw):
     if not isinstance(raw, list):
         return []
-    items = [item for item in (_coerce_item(entry) for entry in raw) if item is not None]
+    items = [item for entry in raw if (item := _coerce_item(entry)) is not None]
     items.sort(key=_sort_key, reverse=True)
     return items[:NEWS_MAX_ITEMS]
 
 
 def format_news_date(date_str):
     try:
-        return datetime.strptime(date_str, "%Y-%m-%d").strftime("%b %d").upper()
+        return datetime.strptime(date_str, NEWS_DATE_FORMAT).strftime("%b %d").upper()
     except ValueError:
         return date_str
 
 
 def _atomic_write_json(path, data):
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp_path = path.with_name(path.name + f".tmp.{os.getpid()}")
     try:
-        tmp_path.write_text(json.dumps(data), encoding="utf-8")
-        os.replace(tmp_path, path)
+        env.atomic_write_text(path, json.dumps(data))
     except OSError:
         log.debug("news cache write failed", exc_info=True)
-        try:
-            tmp_path.unlink()
-        except OSError:
-            pass
 
 
 def _load_cache(path):

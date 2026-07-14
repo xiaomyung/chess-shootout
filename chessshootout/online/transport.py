@@ -10,10 +10,10 @@ import websockets
 from websockets.exceptions import ConnectionClosed
 
 from chessshootout.server.protocol import (
-    AuthMessage, CancelMatchmakeRequest, DrawResponseMessage, HealthResponse,
-    MatchmakeRequest, MatchmakeResponse, MoveMessage, PingMessage, PROTOCOL_VERSION,
-    Reason, ReclaimRequest, ReclaimResponse, RematchRequestMessage,
-    RematchResponseMessage, ResumeRequest, ResumeResponse,
+    AuthMessage, CancelMatchmakeRequest, DrawResponseMessage, GiveTimeMessage,
+    HealthResponse, MatchmakeRequest, MatchmakeResponse, MoveMessage, PingMessage,
+    PROTOCOL_VERSION, Reason, ReclaimRequest, ReclaimResponse, RematchRequestMessage,
+    RematchResponseMessage, ResumeRequest, ResumeResponse, SkillCheckShotMessage,
     TakebackResponseMessage,
 )
 
@@ -25,6 +25,9 @@ log = logging.getLogger("chess.client.transport")
 
 HTTP_TIMEOUT_SECONDS = 5.0
 NEWS_TIMEOUT_SECONDS = 5.0
+RECLAIM_TIMEOUT_SECONDS = 2.0
+WS_PING_INTERVAL_SECONDS = 20
+WS_PING_TIMEOUT_SECONDS = 30
 
 
 _TLS_CONTEXT = ssl.create_default_context(cafile=certifi.where())
@@ -157,33 +160,28 @@ class ServerTransport:
             raise TransportError(str(exc)) from exc
         return r
 
-    def reclaim_blocking(self, client_uuid, *, timeout=2.0) -> Optional[ReclaimResponse]:
-        body = ReclaimRequest(client_uuid=client_uuid).model_dump()
+    def _blocking_post(self, path, body, response_model, timeout=HTTP_TIMEOUT_SECONDS):
         try:
-            r = self._sync_request("POST", "/reclaim", json_body=body, timeout=timeout)
+            r = self._sync_request("POST", path, json_body=body, timeout=timeout)
         except TransportError:
             return None
         if r.status_code != 200:
             return None
         try:
-            return ReclaimResponse.model_validate(r.json())
+            return response_model.model_validate(r.json())
         except (ValueError, json.JSONDecodeError):
             return None
+
+    def reclaim_blocking(self, client_uuid, *,
+                         timeout=RECLAIM_TIMEOUT_SECONDS) -> Optional[ReclaimResponse]:
+        body = ReclaimRequest(client_uuid=client_uuid).model_dump()
+        return self._blocking_post("/reclaim", body, ReclaimResponse, timeout)
 
     def resume_blocking(self, room_id, session_token) -> Optional[ResumeResponse]:
         body = ResumeRequest(
             room_id=room_id, session_token=session_token,
         ).model_dump()
-        try:
-            r = self._sync_request("POST", "/resume", json_body=body)
-        except TransportError:
-            return None
-        if r.status_code != 200:
-            return None
-        try:
-            return ResumeResponse.model_validate(r.json())
-        except (ValueError, json.JSONDecodeError):
-            return None
+        return self._blocking_post("/resume", body, ResumeResponse)
 
     async def healthz_async(self, http) -> Optional[HealthResponse]:
         url = self._url.http("/healthz")
@@ -231,7 +229,8 @@ class ServerTransport:
         url = self._url.ws(f"/ws/{room_id}")
         log.info("ws connecting %s", url)
         tls = _TLS_CONTEXT if self._url.ws_scheme == "wss" else None
-        ws = await websockets.connect(url, ssl=tls, ping_interval=20, ping_timeout=30)
+        ws = await websockets.connect(url, ssl=tls, ping_interval=WS_PING_INTERVAL_SECONDS,
+                                      ping_timeout=WS_PING_TIMEOUT_SECONDS)
         await ws.send(AuthMessage(session_token=session_token).model_dump_json())
         return ServerWebSocket(ws)
 
@@ -245,7 +244,7 @@ class ServerWebSocket:
         try:
             await self._ws.close()
         except Exception:
-            pass
+            log.debug("ws close failed", exc_info=True)
 
     async def send_move(self, from_sq, to_sq, promotion=None):
         msg = MoveMessage(
@@ -278,15 +277,13 @@ class ServerWebSocket:
         await self._send(TakebackResponseMessage(accept=accept))
 
     async def send_give_time(self, hold_ms):
-        await self._send_raw({"type": "give_time", "version": PROTOCOL_VERSION,
-                              "hold_ms": hold_ms})
+        await self._send(GiveTimeMessage(hold_ms=hold_ms))
 
     async def send_ping(self, ply):
         await self._send(PingMessage(ply=ply))
 
     async def send_skill_check_shot(self, client_elapsed_ms):
-        await self._send_raw({"type": "skill_check_shot", "version": PROTOCOL_VERSION,
-                              "client_elapsed_ms": client_elapsed_ms})
+        await self._send(SkillCheckShotMessage(client_elapsed_ms=client_elapsed_ms))
 
     async def _send(self, message):
         await self._ws.send(message.model_dump_json(by_alias=True))

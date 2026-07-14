@@ -4,7 +4,7 @@ from chessshootout import paths
 from chessshootout.domain.match import SINGLE_SCREEN, BOT, ONLINE
 from chessshootout.infra import env
 from chessshootout.frontend.menu.time_picker import CHAMBERS, INCREMENTS, TimePicker
-from chessshootout.frontend.menu.view import MenuView
+from chessshootout.frontend.menu.view import MenuView, scale_floor
 from chessshootout.frontend.visual.cache import (
     memoized_surface, new_cache, new_size_cache, render_text)
 from chessshootout.frontend.visual.colors import Colors
@@ -306,7 +306,7 @@ class PlayView(MenuView):
             self._layout_side_popover()
 
     def _s(self, value):
-        return max(int(value * self._scale), 1)
+        return scale_floor(value, self._scale)
 
     def _relayout(self):
         hero = self._menu_layout.hero_rect
@@ -857,10 +857,10 @@ class PlayView(MenuView):
         if anim.mode == "open":
             self._draw_side_popover(window)
             return
-        scratch = self._render_side_popover_scratch(now)
+        scratch = self._render_side_popover_scratch()
         self._blit_popover_anim(window, scratch, self._side_popover, anim, now)
 
-    def _render_side_popover_scratch(self, now):
+    def _render_side_popover_scratch(self):
         rect = self._side_popover
         scratch = self._popover_scratch("side", rect.size)
         scratch.fill((0, 0, 0, 0))

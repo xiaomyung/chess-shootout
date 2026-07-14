@@ -44,12 +44,12 @@ class OfferBanners:
         self.window = window
         self._banners = []
 
-    def push(self, key, icon, name, verb, ok_label, no_label, on_ok, on_no):
+    def push(self, key, icon, name, verb, yes_label, no_label, on_yes, on_no):
         self._banners = [b for b in self._banners if b["key"] != key]
         self._banners.append({
             "key": key, "icon": icon, "name": name, "verb": verb,
-            "ok_label": ok_label, "no_label": no_label,
-            "on_ok": on_ok, "on_no": on_no,
+            "yes_label": yes_label, "no_label": no_label,
+            "on_yes": on_yes, "on_no": on_no,
             "pushed_at": pg.time.get_ticks(), "leaving_at": None,
             "ok_rect": pg.Rect(0, 0, 0, 0), "no_rect": pg.Rect(0, 0, 0, 0),
         })
@@ -113,7 +113,7 @@ class OfferBanners:
         verb_surf = verb_font.render(f" {b['verb']}", True, Colors.text)
         msg_w = name_surf.get_width() + verb_surf.get_width()
         no_surf = _button_surface(b["no_label"], btn_font, False)
-        ok_surf = _button_surface(b["ok_label"], btn_font, True)
+        ok_surf = _button_surface(b["yes_label"], btn_font, True)
         acts_w = no_surf.get_width() + ACTS_GAP + ok_surf.get_width()
         w = PAD_L + ICON_SIZE + GAP + msg_w + GAP + acts_w + PAD_R
         x = board_rect.centerx - w / 2
@@ -150,7 +150,7 @@ class OfferBanners:
                 continue
             if b["ok_rect"].collidepoint(pos):
                 b["leaving_at"] = pg.time.get_ticks()
-                b["on_ok"]()
+                b["on_yes"]()
                 return True
             if b["no_rect"].collidepoint(pos):
                 b["leaving_at"] = pg.time.get_ticks()

@@ -21,7 +21,7 @@ class SettingsController:
         self._data_folder_row = None
         self._server_addr_row = None
 
-    def _commit_options_exit(self):
+    def commit_options_exit(self):
         self._validate_data_folder_on_exit()
         if self._server_addr_row is not None:
             env.set_server_addr(self._server_addr_row.current_text())
@@ -67,7 +67,7 @@ class SettingsController:
                 del self._deferred_env_writes[key]
                 commit()
 
-    def _build_settings_sections(self):
+    def build_settings_sections(self):
         window = self.frontend.window
         sound_manager = self.frontend.sound_manager
         self._data_folder_row = PathRow(
@@ -172,10 +172,7 @@ class SettingsController:
         new_games = os.path.join(new_dir, paths.GAMES_SUBDIR)
         if move_from is not None and not self._move_pgns(move_from, new_games):
             return
-        if to_default:
-            env.set_data_dir(None)
-        else:
-            env.set_data_dir(new_dir)
+        env.set_data_dir(None if to_default else new_dir)
         self.frontend.toast.show("Data folder updated")
 
     def _move_pgns(self, src, dst):

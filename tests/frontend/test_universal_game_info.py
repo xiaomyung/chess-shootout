@@ -386,7 +386,7 @@ def test_menu_mode_returns_no_info():
 def test_settings_has_performance_section_wired_to_env():
     from chessshootout.infra import env
     app = _make_app()
-    sections = dict(app.settings._build_settings_sections())
+    sections = dict(app.settings.build_settings_sections())
     assert "Performance" in sections
     rows = sections["Performance"]
     assert [r.title for r in rows] == [

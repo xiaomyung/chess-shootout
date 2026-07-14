@@ -14,7 +14,7 @@ from chessshootout.backend.utils import Square, Move, HistoryEntry
 from chessshootout.frontend.modals.country_picker import CountryPicker
 from chessshootout.frontend.modals.directory_browser import DirectoryBrowser
 from chessshootout.frontend.modals.help import HelpModal, HOTKEYS
-from chessshootout.frontend.menu.options_rows import OptionsBody, ToggleRow, _Fonts
+from chessshootout.frontend.menu.options_rows import OptionsBody, ToggleRow, Fonts
 from chessshootout.frontend.panels.right import RightMenu
 from chessshootout.frontend.visual.fonts import get_font, get_mono_font
 
@@ -120,8 +120,8 @@ def test_help_draws_a_thumb_when_overflowing():
 
 
 def _options_fonts():
-    return _Fonts(get_font(14, bold=True), get_font(11), get_font(10, bold=True),
-                  get_mono_font(12), get_font(13, bold=True))
+    return Fonts(get_font(14, bold=True), get_font(11), get_font(10, bold=True),
+                 get_mono_font(12), get_font(13, bold=True))
 
 
 def _options():

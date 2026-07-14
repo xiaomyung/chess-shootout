@@ -6,6 +6,10 @@ from chessshootout.frontend.visual.cache import new_cache, memoized_surface
 
 SUPERSAMPLE = 4
 GLOW_BLUR_PASSES = 3
+SQRT2 = 1.41421356
+
+_HALF_RGBA_MULT = (128, 128, 128, 128)
+_CUT_BORDER_SCALE = 1.25
 
 
 def supersample(size, render, scale=SUPERSAMPLE):
@@ -45,8 +49,8 @@ def soft_blur(surface, passes=GLOW_BLUR_PASSES):
     forward = _pyramid_blur(surface, passes)
     mirror = pg.transform.flip(
         _pyramid_blur(pg.transform.flip(surface, True, True), passes), True, True)
-    forward.fill((128, 128, 128, 128), special_flags=pg.BLEND_RGBA_MULT)
-    mirror.fill((128, 128, 128, 128), special_flags=pg.BLEND_RGBA_MULT)
+    forward.fill(_HALF_RGBA_MULT, special_flags=pg.BLEND_RGBA_MULT)
+    mirror.fill(_HALF_RGBA_MULT, special_flags=pg.BLEND_RGBA_MULT)
     forward.blit(mirror, (0, 0), special_flags=pg.BLEND_RGBA_ADD)
     return forward
 
@@ -161,7 +165,7 @@ def cut_rect_surface(size, cut, fill, border=None, border_width=1, corners=("tr"
             bi = max(int(round(border_width * k)), 1)
             pg.draw.polygon(surf, pg.Color(border),
                             _cut_rect_points(0, 0, w, h, outer_cut, corners))
-            inner_cut = max(outer_cut - int(round(bi * (2.0 - 1.41421356 * 1.25))), 0)
+            inner_cut = max(outer_cut - int(round(bi * (2.0 - SQRT2 * _CUT_BORDER_SCALE))), 0)
             pg.draw.polygon(surf, pg.Color(fill),
                             _cut_rect_points(bi, bi, w - bi, h - bi, inner_cut, corners))
         return supersample(size, render)

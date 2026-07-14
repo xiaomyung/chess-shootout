@@ -34,7 +34,7 @@ class TextInput:
         self.rect = pg.Rect(0, 0, 0, 0)
         self.font_factor = 1.6
         self._font_size = 16
-        self.font = self._font(16)
+        self.font = self._font(self._font_size)
         self.padding = 8
         self.scroll = 0
         self._last_action_ms = 0

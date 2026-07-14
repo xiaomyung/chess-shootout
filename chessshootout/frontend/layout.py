@@ -33,6 +33,10 @@ class LayoutRects:
     window_rect: pg.Rect
 
 
+def centered_rect(cx, cy, w, h):
+    return pg.Rect(cx - w / 2, cy - h / 2, w, h)
+
+
 def compute_layout(window_width, window_height, *, mode, focus_mode, focus_show, board_size):
     window_rect = pg.Rect(0, 0, window_width, window_height)
     top = WindowChrome.HEIGHT
@@ -61,20 +65,14 @@ def compute_layout(window_width, window_height, *, mode, focus_mode, focus_show,
     result_width = min(440, board_size_px * 0.92)
     result_height = min(int(result_width * RESULT_HEIGHT_RATIO),
                         avail_height - 2 * BOARD_AREA_MARGIN)
-    result_rect = pg.Rect(
-        board_x + board_size_px / 2 - result_width / 2,
-        board_y + board_size_px / 2 - result_height / 2,
-        result_width,
-        result_height
-    )
+    result_rect = centered_rect(
+        board_x + board_size_px / 2, board_y + board_size_px / 2,
+        result_width, result_height)
     wait_width = max(result_width, MIN_MODAL_WIDTH)
     wait_height = max(cell_size * WAIT_HEIGHT_RATIO, 200)
-    wait_rect = pg.Rect(
-        board_x + board_size_px / 2 - wait_width / 2,
-        board_y + board_size_px / 2 - wait_height / 2,
-        wait_width,
-        wait_height,
-    )
+    wait_rect = centered_rect(
+        board_x + board_size_px / 2, board_y + board_size_px / 2,
+        wait_width, wait_height)
 
     usable_menu_h = max(avail_height - MENU_FOOTER_RESERVE, 200)
     start_width = min(440, window_width - 24)
@@ -82,21 +80,15 @@ def compute_layout(window_width, window_height, *, mode, focus_mode, focus_show,
 
     wide_overlay_width = min(window_width * 0.9, 1100)
     wide_overlay_height = min(window_height * 0.85, 760)
-    wide_overlay_rect = pg.Rect(
-        window_width / 2 - wide_overlay_width / 2,
-        top + avail_height / 2 - wide_overlay_height / 2,
-        wide_overlay_width,
-        wide_overlay_height,
-    )
+    wide_overlay_rect = centered_rect(
+        window_width / 2, top + avail_height / 2,
+        wide_overlay_width, wide_overlay_height)
 
     menu_modal_width = min(start_width, max(result_width, MIN_MODAL_WIDTH))
     menu_modal_height = min(start_height, max(cell_size * WAIT_HEIGHT_RATIO, 200))
-    menu_modal_rect = pg.Rect(
-        window_width / 2 - menu_modal_width / 2,
-        top + avail_height / 2 - menu_modal_height / 2,
-        menu_modal_width,
-        menu_modal_height,
-    )
+    menu_modal_rect = centered_rect(
+        window_width / 2, top + avail_height / 2,
+        menu_modal_width, menu_modal_height)
 
     board_visible = mode != "menu"
     flex_rect = wait_rect if board_visible else menu_modal_rect

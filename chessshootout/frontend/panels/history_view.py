@@ -18,6 +18,8 @@ from chessshootout.frontend.visual.scroll_view import ScrollHost, ScrollView
 from chessshootout.frontend.visual.widgets import build_shell
 
 
+PGN_PATTERN = "*.pgn"
+
 FILTER_OPTIONS = [("All", "all"), ("Online", "online"), ("Bot", "bot"), ("Local", "local")]
 FILTER_TYPE = {"online": "Online", "bot": "Bot", "local": "Local"}
 SCROLL_STEP = 56
@@ -102,6 +104,10 @@ class MatchGroup:
 def build_match_groups(summaries, nickname):
     return [MatchGroup(mid, games, nickname)
             for mid, games in group_by_csmatchid(summaries)]
+
+
+def load_match_groups(directory, pattern, nickname):
+    return build_match_groups(scan_pgn_summaries(directory, pattern), nickname)
 
 
 class HistoryView(ScrollHost):
@@ -196,8 +202,7 @@ class HistoryView(ScrollHost):
 
     def show(self, directory, pattern, nickname=None):
         self.nickname = nickname
-        self._groups = build_match_groups(
-            scan_pgn_summaries(directory, pattern), nickname)
+        self._groups = load_match_groups(directory, pattern, nickname)
         now = time.time()
         for group in self._groups:
             group.time_ago = format_relative_time(group.sort_key, now)

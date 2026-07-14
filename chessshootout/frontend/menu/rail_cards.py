@@ -4,19 +4,19 @@ import pygame as pg
 
 from chessshootout import paths
 from chessshootout.infra import countries, env
-from chessshootout.domain.pgn.load import format_relative_time, scan_pgn_summaries
-from chessshootout.frontend.panels.history_view import build_match_groups
+from chessshootout.domain.pgn.load import format_relative_time
+from chessshootout.frontend.menu.view import scale_floor, seeded_avatar_palette
+from chessshootout.frontend.panels.history_view import PGN_PATTERN, load_match_groups
 from chessshootout.frontend.visual.cache import render_text
 from chessshootout.frontend.visual.colors import Colors
 from chessshootout.frontend.visual.draw import chevron_surface, cut_rect_surface
 from chessshootout.frontend.visual.emoji import emoji_surface
 from chessshootout.frontend.visual.fonts import get_font, get_mono_font
 from chessshootout.frontend.visual.scroll_view import ScrollHost, ScrollView
-from chessshootout.frontend.visual.widgets import avatar_palette, draw_avatar, wrap_words
+from chessshootout.frontend.visual.widgets import draw_avatar, wrap_words
 from chessshootout.online.news import format_news_date
 
 
-PGN_PATTERN = "*.pgn"
 RECENT_MATCHES_LIMIT = 3
 NEWS_BODY_MAX_LINES = 4
 
@@ -66,7 +66,7 @@ class CardStack(ScrollHost):
         self._news_items = []
         self._news_generation = -1
         self._open = None
-        self._blocks = []
+        self._cards = []
         self._content_h = 0
         self._scroll_px = 0.0
         self.scroll = ScrollView(
@@ -83,10 +83,12 @@ class CardStack(ScrollHost):
     def is_visible(self):
         return True
 
+    def news_generation(self):
+        return self._news_generation
+
     def refresh(self):
         nickname = env.get_nickname()
-        groups = build_match_groups(
-            scan_pgn_summaries(str(paths.get_games_dir()), PGN_PATTERN), nickname)
+        groups = load_match_groups(str(paths.get_games_dir()), PGN_PATTERN, nickname)
         now = time.time()
         for group in groups:
             group.time_ago = format_relative_time(group.sort_key, now)
@@ -106,7 +108,7 @@ class CardStack(ScrollHost):
         return keys
 
     def _s(self, value, floor=1):
-        return max(int(value * self._scale), floor)
+        return scale_floor(value, self._scale, floor)
 
     def set_rect(self, rect, scale):
         self._rect = pg.Rect(rect)
@@ -129,7 +131,7 @@ class CardStack(ScrollHost):
     def _news_body_lines(self, item, max_w):
         return wrap_words(item["body"], self._news_body_font, max_w, NEWS_BODY_MAX_LINES)
 
-    def _block_height(self, key):
+    def _card_height(self, key):
         if key == "profile":
             return self._s(PROFILE_H, 56)
         header_h = self._s(HEADER_H, 34)
@@ -153,16 +155,16 @@ class CardStack(ScrollHost):
 
     def _compute_layout(self):
         if not self._fonts_ready or self._rect.width <= 0:
-            self._blocks = []
+            self._cards = []
             self._content_h = 0
             return
-        blocks = []
+        cards = []
         y = 0
         for key in self._visible_card_keys():
-            h = self._block_height(key)
-            blocks.append((key, y, h))
+            h = self._card_height(key)
+            cards.append((key, y, h))
             y += h + self._s(CARD_GAP, 8)
-        self._blocks = blocks
+        self._cards = cards
         self._content_h = max(y - self._s(CARD_GAP, 8), 0)
 
     def draw(self, window, now_ms):
@@ -175,7 +177,7 @@ class CardStack(ScrollHost):
         window.set_clip(self._rect)
         try:
             mouse = pg.mouse.get_pos()
-            for key, y, h in self._blocks:
+            for key, y, h in self._cards:
                 top = self._rect.y + y - self._scroll_px
                 if top + h < self._rect.y or top > self._rect.bottom:
                     continue
@@ -206,9 +208,8 @@ class CardStack(ScrollHost):
         av_size = self._s(AVATAR_SIZE, 30)
         av_rect = pg.Rect(rect.x + pad, rect.centery - av_size // 2, av_size, av_size)
         nickname = env.get_nickname()
-        if self._profile_avatar_palette is None or self._profile_avatar_seed != nickname:
-            self._profile_avatar_seed = nickname
-            self._profile_avatar_palette = avatar_palette(nickname)
+        self._profile_avatar_seed, self._profile_avatar_palette = seeded_avatar_palette(
+            nickname, self._profile_avatar_seed, self._profile_avatar_palette)
         draw_avatar(window, av_rect, nickname, self._avatar_font,
                     *self._profile_avatar_palette)
         x = av_rect.right + self._s(12, 8)
@@ -361,36 +362,36 @@ class CardStack(ScrollHost):
     def handle_click(self, pos):
         if not self._rect.collidepoint(pos):
             return False
-        for key, y, h in self._blocks:
+        for key, y, h in self._cards:
             top = self._rect.y + y - self._scroll_px
-            block_rect = pg.Rect(self._rect.x, round(top), self._rect.width, h)
-            if not block_rect.collidepoint(pos):
+            card_rect = pg.Rect(self._rect.x, round(top), self._rect.width, h)
+            if not card_rect.collidepoint(pos):
                 continue
-            return self._handle_block_click(key, block_rect, pos)
+            return self._handle_card_click(key, card_rect, pos)
         return True
 
-    def _handle_block_click(self, key, block_rect, pos):
+    def _handle_card_click(self, key, card_rect, pos):
         if key == "profile":
             self.app.menu.goto_view("profile")
             return True
-        header = pg.Rect(block_rect.x, block_rect.y, block_rect.width, self._s(HEADER_H, 34))
+        header = pg.Rect(card_rect.x, card_rect.y, card_rect.width, self._s(HEADER_H, 34))
         if header.collidepoint(pos):
             self._toggle(key)
             return True
         if key == "recent" and self._open == "recent":
-            self._handle_recent_body_click(block_rect, header, pos)
+            self._handle_recent_body_click(card_rect, header, pos)
         return True
 
-    def _handle_recent_body_click(self, block_rect, header, pos):
+    def _handle_recent_body_click(self, card_rect, header, pos):
         row_h = self._s(BODY_ROW_H, 32)
         y = header.bottom
         for group in self._recent_groups:
-            row = pg.Rect(block_rect.x, y, block_rect.width, row_h)
+            row = pg.Rect(card_rect.x, y, card_rect.width, row_h)
             if row.collidepoint(pos):
                 self.app._open_pgn_review(group.games[0].path)
                 return
             y += row_h
-        footer = pg.Rect(block_rect.x, y, block_rect.width, self._s(FOOTER_H, 24))
+        footer = pg.Rect(card_rect.x, y, card_rect.width, self._s(FOOTER_H, 24))
         if footer.collidepoint(pos):
             self.app.menu.goto_history()
 

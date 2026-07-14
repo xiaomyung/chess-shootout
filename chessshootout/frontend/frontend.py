@@ -46,6 +46,9 @@ STAT_SLOT_1PCT = 9
 STAT_SLOT_FRAME = 13
 STAT_SLOT_PING = 10
 
+KEY_REPEAT_DELAY_MS = 400
+KEY_REPEAT_INTERVAL_MS = 35
+
 
 def _stat_slot(label, value, width):
     return f"{label} {value}".ljust(width)
@@ -75,7 +78,7 @@ class Frontend:
         self.window_height = max(window_height, MIN_WINDOW_HEIGHT)
         self.window = pg.display.set_mode(
             (self.window_width, self.window_height), WINDOW_FLAGS)
-        pg.key.set_repeat(400, 35)
+        pg.key.set_repeat(KEY_REPEAT_DELAY_MS, KEY_REPEAT_INTERVAL_MS)
         icon = _load_window_icon()
         if icon is not None:
             pg.display.set_icon(icon)
@@ -329,6 +332,12 @@ class Frontend:
         self.chrome.window = self.window
         self.chrome.reinit_sdl()
 
+    def _finish_resize(self, w, h):
+        self.window_width = w
+        self.window_height = h
+        self.input_router._cancel_all_scroll()
+        self._compute_layout()
+
     def _settle_window(self):
         if os.name != "nt" or self.chrome.client_size() is None:
             return
@@ -346,11 +355,8 @@ class Frontend:
                           self.chrome.client_size(), pg.display.get_window_size(),
                           self.window.get_size(), win_w, win_h)
             self._recreate_window_surface(win_w, win_h)
-            self.window_width = win_w
-            self.window_height = win_h
-            self.input_router._cancel_all_scroll()
             self.screen.on_resize()
-            self._compute_layout()
+            self._finish_resize(win_w, win_h)
 
     def draw_frame(self):
         if os.name == "nt" and not self.chrome.is_fullscreen():
@@ -413,9 +419,7 @@ class Frontend:
         w = max(size[0], MIN_WINDOW_WIDTH)
         h = max(size[1], MIN_WINDOW_HEIGHT)
         self._recreate_window_surface(w, h)
-        self.window_width, self.window_height = self.window.get_size()
-        self.input_router._cancel_all_scroll()
-        self._compute_layout()
+        self._finish_resize(*self.window.get_size())
 
     def _apply_fullscreen(self, enable):
         if enable and not self.chrome.is_fullscreen():
@@ -429,9 +433,7 @@ class Frontend:
             self.chrome.reinit_sdl()
             self._pre_fullscreen_size = None
         self.chrome.window = self.window
-        self.window_width, self.window_height = self.window.get_size()
-        self.input_router._cancel_all_scroll()
-        self._compute_layout()
+        self._finish_resize(*self.window.get_size())
         return True
 
     def _compute_layout(self):

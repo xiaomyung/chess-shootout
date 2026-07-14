@@ -2,8 +2,9 @@ import pygame as pg
 
 from chessshootout.frontend.visual.cache import new_cache, memoized_surface
 from chessshootout.frontend.visual.colors import Colors
-from chessshootout.frontend.visual.draw import cut_rect_surface, supersample
+from chessshootout.frontend.visual.draw import SQRT2, cut_rect_surface, supersample
 from chessshootout.frontend.visual.fonts import get_font
+
 
 _RAIL_CACHE = new_cache()
 
@@ -82,10 +83,10 @@ class BaseModal:
                 w, h = surf.get_size()
                 cutk = MODAL_CUT * k
                 railk = MODAL_RAIL * k
-                diag = railk * 1.41421356
+                diag = railk * SQRT2
                 pg.draw.polygon(surf, pg.Color(color),
                                 [(0, 0), (w - cutk, 0), (w, cutk), (w, cutk + diag),
-                                 (w - cutk + railk * (1.0 - 1.41421356), railk),
+                                 (w - cutk + railk * (1.0 - SQRT2), railk),
                                  (0, railk)])
             return supersample((width, MODAL_CUT + MODAL_RAIL * 2), render)
         return memoized_surface(_RAIL_CACHE, (intent, width, str(color)), build)

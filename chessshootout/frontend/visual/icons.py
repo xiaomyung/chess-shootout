@@ -10,6 +10,14 @@ from chessshootout.frontend.visual.draw import supersample
 
 _ICON_CACHE = new_cache()
 
+ICON_GRID = 24.0
+ICON_SUPERSAMPLE = 6
+
+_ICON_FOOTPRINT_MEDIUM = 0.82
+_ICON_FOOTPRINT_LARGE = 0.86
+_ICON_STROKE_FACTOR = 1.7
+_ICON_STROKE_FACTOR_THIN = 1.6
+
 
 def _blit_icon(window, rect, side, key, build):
     window.blit(memoized_surface(_ICON_CACHE, key, build),
@@ -30,7 +38,7 @@ def draw_speaker(window, rect, color, muted=False):
     col = pg.Color(color)
 
     def render(surf, k):
-        u = side * k / 24.0
+        u = side * k / ICON_GRID
         pg.draw.polygon(surf, col, [(x * u, y * u) for x, y in _SPEAKER_BODY])
         lw = max(int(1.8 * u), 2)
         if muted:
@@ -72,7 +80,7 @@ def draw_folder(window, rect, color):
     col = pg.Color(color)
 
     def render(surf, k):
-        u = side * k / 24.0
+        u = side * k / ICON_GRID
         pg.draw.polygon(surf, col, [(x * u, y * u) for x, y in _FOLDER_BODY])
 
     _blit_icon(window, rect, side, ("folder", side, str(color)),
@@ -87,7 +95,7 @@ def draw_file(window, rect, color):
     fold = col.lerp(pg.Color(Colors.bg), 0.55)
 
     def render(surf, k):
-        u = side * k / 24.0
+        u = side * k / ICON_GRID
         pg.draw.polygon(surf, col, [(x * u, y * u) for x, y in _FILE_BODY])
         pg.draw.polygon(surf, fold, [(x * u, y * u) for x, y in _FILE_FOLD])
 
@@ -107,31 +115,31 @@ def _stroke(surf, col, pts, closed, lw):
 
 
 def draw_folder_plus(window, rect, color):
-    side = _icon_side(rect, 0.86)
+    side = _icon_side(rect, _ICON_FOOTPRINT_LARGE)
     if side < 6:
         return
     col = pg.Color(color)
 
     def render(surf, k):
-        u = side * k / 24.0
-        lw = max(int(1.7 * u), 2)
+        u = side * k / ICON_GRID
+        lw = max(int(_ICON_STROKE_FACTOR * u), 2)
         _stroke(surf, col, [(x * u, y * u) for x, y in _FOLDER_OUTLINE], True, lw)
         pg.draw.line(surf, col, (12 * u, 11 * u), (12 * u, 16 * u), lw)
         pg.draw.line(surf, col, (9.5 * u, 13.5 * u), (14.5 * u, 13.5 * u), lw)
 
     _blit_icon(window, rect, side, ("folder_plus", side, str(color)),
-               lambda: supersample(side, render, scale=6))
+               lambda: supersample(side, render, scale=ICON_SUPERSAMPLE))
 
 
 def draw_eye(window, rect, color, off=False):
-    side = _icon_side(rect, 0.86)
+    side = _icon_side(rect, _ICON_FOOTPRINT_LARGE)
     if side < 6:
         return
     col = pg.Color(color)
 
     def render(surf, k):
-        u = side * k / 24.0
-        lw = max(int(1.7 * u), 2)
+        u = side * k / ICON_GRID
+        lw = max(int(_ICON_STROKE_FACTOR * u), 2)
         x0, x1, cy, amp, n = 3 * u, 21 * u, 12 * u, 4.7 * u, 24
         top = [(x0 + (x1 - x0) * i / n, cy - amp * math.sin(math.pi * i / n))
                for i in range(n + 1)]
@@ -144,7 +152,7 @@ def draw_eye(window, rect, color, off=False):
             pg.draw.line(surf, col, (3.5 * u, 4.5 * u), (20.5 * u, 19.5 * u), lw)
 
     _blit_icon(window, rect, side, ("eye", side, str(color), off),
-               lambda: supersample(side, render, scale=6))
+               lambda: supersample(side, render, scale=ICON_SUPERSAMPLE))
 
 
 _PLAY_TRIANGLE = [(8, 5), (8, 19), (19, 12)]
@@ -157,7 +165,7 @@ def draw_play(window, rect, color):
     col = pg.Color(color)
 
     def render(surf, k):
-        u = side * k / 24.0
+        u = side * k / ICON_GRID
         pg.draw.polygon(surf, col, [(x * u, y * u) for x, y in _PLAY_TRIANGLE])
 
     _blit_icon(window, rect, side, ("play", side, str(color)),
@@ -165,21 +173,21 @@ def draw_play(window, rect, color):
 
 
 def draw_clock(window, rect, color):
-    side = _icon_side(rect, 0.82)
+    side = _icon_side(rect, _ICON_FOOTPRINT_MEDIUM)
     if side < 6:
         return
     col = pg.Color(color)
 
     def render(surf, k):
-        u = side * k / 24.0
-        lw = max(int(1.7 * u), 2)
+        u = side * k / ICON_GRID
+        lw = max(int(_ICON_STROKE_FACTOR * u), 2)
         cx, cy, r = 12 * u, 12.5 * u, 8 * u
         pg.draw.circle(surf, col, (int(cx), int(cy)), int(r), width=lw)
         pg.draw.line(surf, col, (cx, cy), (cx, cy - r * 0.62), lw)
         pg.draw.line(surf, col, (cx, cy), (cx + r * 0.48, cy + r * 0.24), lw)
 
     _blit_icon(window, rect, side, ("clock", side, str(color)),
-               lambda: supersample(side, render, scale=6))
+               lambda: supersample(side, render, scale=ICON_SUPERSAMPLE))
 
 
 _MEDAL_RIBBON_L = [(9, 15), (9, 21), (12, 18.5)]
@@ -187,14 +195,14 @@ _MEDAL_RIBBON_R = [(15, 15), (15, 21), (12, 18.5)]
 
 
 def draw_medal(window, rect, color):
-    side = _icon_side(rect, 0.82)
+    side = _icon_side(rect, _ICON_FOOTPRINT_MEDIUM)
     if side < 6:
         return
     col = pg.Color(color)
 
     def render(surf, k):
-        u = side * k / 24.0
-        lw = max(int(1.6 * u), 2)
+        u = side * k / ICON_GRID
+        lw = max(int(_ICON_STROKE_FACTOR_THIN * u), 2)
         cx, cy, r = 12 * u, 9.5 * u, 6 * u
         pg.draw.circle(surf, col, (int(cx), int(cy)), int(r), width=lw)
         pg.draw.polygon(surf, col, [
@@ -203,37 +211,37 @@ def draw_medal(window, rect, color):
         pg.draw.polygon(surf, col, [(x * u, y * u) for x, y in _MEDAL_RIBBON_R])
 
     _blit_icon(window, rect, side, ("medal", side, str(color)),
-               lambda: supersample(side, render, scale=6))
+               lambda: supersample(side, render, scale=ICON_SUPERSAMPLE))
 
 
 _SHIELD_BODY = [(5, 4), (19, 4), (19, 11.5), (12, 21), (5, 11.5)]
 
 
 def draw_shield(window, rect, color):
-    side = _icon_side(rect, 0.82)
+    side = _icon_side(rect, _ICON_FOOTPRINT_MEDIUM)
     if side < 6:
         return
     col = pg.Color(color)
 
     def render(surf, k):
-        u = side * k / 24.0
-        lw = max(int(1.7 * u), 2)
+        u = side * k / ICON_GRID
+        lw = max(int(_ICON_STROKE_FACTOR * u), 2)
         _stroke(surf, col, [(x * u, y * u) for x, y in _SHIELD_BODY], True, lw)
         pg.draw.line(surf, col, (12 * u, 7 * u), (12 * u, 15 * u), lw)
 
     _blit_icon(window, rect, side, ("shield", side, str(color)),
-               lambda: supersample(side, render, scale=6))
+               lambda: supersample(side, render, scale=ICON_SUPERSAMPLE))
 
 
 def draw_people(window, rect, color):
-    side = _icon_side(rect, 0.82)
+    side = _icon_side(rect, _ICON_FOOTPRINT_MEDIUM)
     if side < 6:
         return
     col = pg.Color(color)
 
     def render(surf, k):
-        u = side * k / 24.0
-        lw = max(int(1.6 * u), 2)
+        u = side * k / ICON_GRID
+        lw = max(int(_ICON_STROKE_FACTOR_THIN * u), 2)
         pg.draw.circle(surf, col, (int(8 * u), int(8.5 * u)), int(2.6 * u), width=lw)
         pg.draw.arc(surf, col, pg.Rect(2 * u, 11 * u, 12 * u, 11 * u), 0.15,
                     math.pi - 0.15, lw)
@@ -242,17 +250,17 @@ def draw_people(window, rect, color):
                     math.pi - 0.1, lw)
 
     _blit_icon(window, rect, side, ("people", side, str(color)),
-               lambda: supersample(side, render, scale=6))
+               lambda: supersample(side, render, scale=ICON_SUPERSAMPLE))
 
 
 def draw_gear(window, rect, color):
-    side = _icon_side(rect, 0.86)
+    side = _icon_side(rect, _ICON_FOOTPRINT_LARGE)
     if side < 6:
         return
     col = pg.Color(color)
 
     def render(surf, k):
-        u = side * k / 24.0
+        u = side * k / ICON_GRID
         cx, cy = 12 * u, 12 * u
         r0, r1 = 5.2 * u, 8.4 * u
         hw_base, hw_tip = 1.9 * u, 1.0 * u
@@ -271,7 +279,7 @@ def draw_gear(window, rect, color):
         pg.draw.circle(surf, col, (int(cx), int(cy)), int(r0), width=int(r0 - hole_r))
 
     _blit_icon(window, rect, side, ("gear", side, str(color)),
-               lambda: supersample(side, render, scale=6))
+               lambda: supersample(side, render, scale=ICON_SUPERSAMPLE))
 
 
 def draw_reticle(window, rect, color, alpha=255):
@@ -281,10 +289,10 @@ def draw_reticle(window, rect, color, alpha=255):
     col = pg.Color(color)
 
     def render(surf, k):
-        u = side * k / 24.0
+        u = side * k / ICON_GRID
         cx, cy = 12 * u, 12 * u
         r = 7 * u
-        lw = max(int(1.6 * u), 2)
+        lw = max(int(_ICON_STROKE_FACTOR_THIN * u), 2)
         pg.draw.circle(surf, col, (int(cx), int(cy)), int(r), width=lw)
         tick, gap = 3.2 * u, 1.6 * u
         for dx, dy in ((0, -1), (0, 1), (-1, 0), (1, 0)):
@@ -294,6 +302,6 @@ def draw_reticle(window, rect, color, alpha=255):
         pg.draw.circle(surf, col, (int(cx), int(cy)), max(int(1.6 * u), 2))
 
     surf = memoized_surface(_ICON_CACHE, ("reticle", side, str(color)),
-                             lambda: supersample(side, render, scale=6))
+                             lambda: supersample(side, render, scale=ICON_SUPERSAMPLE))
     surf.set_alpha(max(0, min(255, int(alpha))))
     window.blit(surf, (rect.centerx - side // 2, rect.centery - side // 2))

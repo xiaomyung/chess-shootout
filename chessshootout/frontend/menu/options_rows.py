@@ -50,7 +50,7 @@ RESET_PAD_X = 10
 FIELD_LEFT_FRAC = 0.40
 
 
-class _Fonts:
+class Fonts:
     __slots__ = ("title", "desc", "section", "value", "button")
 
     def __init__(self, title, desc, section, value, button):

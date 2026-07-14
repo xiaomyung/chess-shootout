@@ -250,7 +250,8 @@ class OnlineCoordinator:
             self.wait_modal.hide()
             self.match_found_modal.hide()
             self.offer_banners.clear()
-            label = ONLINE_HARD_FAILURE_LABELS.get(reason, "Server unreachable")
+            label = ONLINE_HARD_FAILURE_LABELS.get(
+                reason, ONLINE_HARD_FAILURE_LABELS[ClientReason.SERVER_UNREACHABLE])
             self.app.confirm_modal.show(
                 label,
                 on_yes=self._restart_online_search,
@@ -271,15 +272,16 @@ class OnlineCoordinator:
 
     def _push_rematch_banner(self):
         self._rematch_offered = True
-        icon, verb, ok_label, no_label, _ = OFFER_BANNERS["rematch_request"]
+        icon, verb, yes_label, no_label, _ = OFFER_BANNERS["rematch_request"]
         self.offer_banners.push(
-            "rematch_request", icon, self._opp_name(), verb, ok_label, no_label,
-            on_ok=self._accept_rematch, on_no=self._decline_rematch)
+            "rematch_request", icon, self._opp_name(), verb, yes_label, no_label,
+            on_yes=self._accept_rematch, on_no=self._decline_rematch)
 
     def _clear_rematch_offer(self):
+        game = self.app.game
         self.offer_banners.dismiss("rematch_request")
         self._rematch_offered = False
-        self.app.game.result_menu.set_rematch_offered(False)
+        game.result_menu.set_rematch_offered(False)
 
     def _handle_rematch_request(self):
         if self.client is None:
@@ -335,7 +337,7 @@ class OnlineCoordinator:
     def _push_offer_banner(self, event_type):
         if self.client is None:
             return
-        icon, verb, ok_label, no_label, send_method = OFFER_BANNERS[event_type]
+        icon, verb, yes_label, no_label, send_method = OFFER_BANNERS[event_type]
         opp_name = self._opp_name()
         send_response = getattr(self.client, send_method)
         log.info("offer received type=%s from=%s", event_type, opp_name)
@@ -350,8 +352,8 @@ class OnlineCoordinator:
             return fire
 
         self.offer_banners.push(
-            event_type, icon, opp_name, verb, ok_label, no_label,
-            on_ok=respond(True), on_no=respond(False),
+            event_type, icon, opp_name, verb, yes_label, no_label,
+            on_yes=respond(True), on_no=respond(False),
         )
 
     def _begin_resync(self):
@@ -565,9 +567,10 @@ class OnlineCoordinator:
     def _on_rematch(self):
         if self.client is None:
             return
+        game = self.app.game
         if self._rematch_offered:
             self._rematch_offered = False
-            self.app.game.result_menu.set_rematch_offered(False)
+            game.result_menu.set_rematch_offered(False)
             log.info("rematch response sent accepted=True")
             self.client.send_rematch_response(True)
         else:
@@ -700,10 +703,10 @@ class OnlineCoordinator:
             self._begin_resync()
 
     def _update_online_phase(self):
-        if self.wait_modal.is_visible() and self._match_found_at_ms is None:
-            if self._wait_started_at_ms is not None:
-                self.wait_modal.set_elapsed(
-                    (pg.time.get_ticks() - self._wait_started_at_ms) // 1000)
+        if (self.wait_modal.is_visible() and self._match_found_at_ms is None
+                and self._wait_started_at_ms is not None):
+            self.wait_modal.set_elapsed(
+                (pg.time.get_ticks() - self._wait_started_at_ms) // 1000)
         self.match_found_modal.update()
         self._track_local_online_state()
         self._send_heartbeat_if_due()
@@ -807,7 +810,7 @@ class OnlineCoordinator:
                 self._pending_reconnect = pending
             self.app.menu.set_reconnect_available(True)
             self.app.confirm_modal.show(
-                ONLINE_HARD_FAILURE_LABELS["reconnect_failed"],
+                ONLINE_HARD_FAILURE_LABELS[ClientReason.RECONNECT_FAILED],
                 on_yes=self._on_reconnect_active_game,
                 on_no=lambda: None,
                 yes_label="Retry", no_label="Cancel",

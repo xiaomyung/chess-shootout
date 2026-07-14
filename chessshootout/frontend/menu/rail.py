@@ -3,6 +3,7 @@ import math
 import pygame as pg
 
 from chessshootout import paths
+from chessshootout.frontend.menu.view import scale_floor
 from chessshootout.frontend.visual.cache import render_text
 from chessshootout.frontend.visual.colors import Colors
 from chessshootout.frontend.visual.draw import cut_rect_surface
@@ -29,6 +30,8 @@ ROW_CUT = 8
 ROW_PAD = 14
 ROW_GAP = 10
 ROW_Y_OFFSET = 14
+ROW_H = 46
+ROW_MIN_H = 34
 ICON_X = 48
 ICON_SIDE = 35
 LABEL_X = 83
@@ -64,43 +67,41 @@ class MenuRail:
         old_rects = self._row_rects
         self.rect = pg.Rect(rect)
         self.scale = scale
-        self._label_font = get_font(max(int(LABEL_FONT_SIZE * scale), 12), bold=True)
-        self._footer_font = get_mono_font(max(int(FOOTER_FONT_SIZE * scale), FOOTER_FONT_FLOOR))
-        pad = max(int(ROW_PAD * scale), 9)
-        row_h = max(int(46 * scale), 34)
-        gap = max(int(ROW_GAP * scale), 6)
+        self._label_font = get_font(scale_floor(LABEL_FONT_SIZE, scale, 12), bold=True)
+        self._footer_font = get_mono_font(scale_floor(FOOTER_FONT_SIZE, scale, FOOTER_FONT_FLOOR))
+        pad = scale_floor(ROW_PAD, scale, 9)
+        row_h = scale_floor(ROW_H, scale, ROW_MIN_H)
+        gap = scale_floor(ROW_GAP, scale, 6)
         x = rect.x + pad
         w = rect.width - 2 * pad
-        y = rect.y + max(int(ROW_Y_OFFSET * scale), 8)
+        y = rect.y + scale_floor(ROW_Y_OFFSET, scale, 8)
         self._row_rects = {}
         for key, _, _ in ROWS:
             self._row_rects[key] = pg.Rect(x, y, w, row_h)
             y += row_h + gap
-        footer_h = max(int(46 * scale), 34)
-        opt_y = rect.bottom - footer_h - row_h - max(int(10 * scale), 6)
+        footer_h = scale_floor(ROW_H, scale, ROW_MIN_H)
+        opt_y = rect.bottom - footer_h - row_h - scale_floor(10, scale, 6)
         self._row_rects["options"] = pg.Rect(x, opt_y, w, row_h)
-        self._build_footer(footer_h)
+        self._build_footer()
         self._remap_reticle(old_rects)
 
     def _remap_reticle(self, old_rects):
         if self.active not in self._row_rects:
             return
-        target = self._row_rects[self.active].centery
-        if self._reticle_tween is None:
-            self._reticle_tween = Tween(target, target, RETICLE_SLIDE_MS, 0)
+        row_rect = self._row_rects[self.active]
+        if self._reticle_tween is not None and old_rects.get(self.active) == row_rect:
             return
-        if old_rects.get(self.active) == self._row_rects[self.active]:
-            return
+        target = row_rect.centery
         self._reticle_tween = Tween(target, target, RETICLE_SLIDE_MS, 0)
 
-    def _build_footer(self, footer_h):
+    def _build_footer(self):
         version = paths.get_app_version()
         version_label = f"v{version}" if version else "dev"
         self._footer_prefix = f"{version_label} · by "
         self._footer_prefix_surf = render_text(self._footer_font, self._footer_prefix,
                                                Colors.text_muted)
         self._credit_surf = render_text(self._footer_font, CREDIT_TEXT, Colors.text_dim)
-        base_y = self.rect.bottom - max(int(14 * self.scale), 8)
+        base_y = self.rect.bottom - scale_floor(14, self.scale, 8)
         line_h = max(self._footer_prefix_surf.get_height(), self._credit_surf.get_height())
         line_y = base_y - line_h
         total_w = self._footer_prefix_surf.get_width() + self._credit_surf.get_width()
@@ -108,8 +109,8 @@ class MenuRail:
         self._footer_prefix_pos = (start_x, line_y)
         credit_x = start_x + self._footer_prefix_surf.get_width()
         self._credit_rect = pg.Rect(credit_x, line_y, self._credit_surf.get_width(), line_h)
-        self._credit_hitbox = self._credit_rect.inflate(max(int(8 * self.scale), 4),
-                                                        max(int(8 * self.scale), 4))
+        self._credit_hitbox = self._credit_rect.inflate(scale_floor(8, self.scale, 4),
+                                                        scale_floor(8, self.scale, 4))
 
     def set_active(self, name, now_ms):
         if name == self.active:
@@ -124,10 +125,8 @@ class MenuRail:
         return self._reticle_tween.value(now_ms)
 
     def hit_test(self, pos):
-        for key in list(self._row_rects):
-            if self._row_rects[key].collidepoint(pos):
-                return key
-        return None
+        return next((key for key, rect in self._row_rects.items() if rect.collidepoint(pos)),
+                    None)
 
     def handle_footer_click(self, pos):
         if self._credit_hitbox.collidepoint(pos):
@@ -142,10 +141,10 @@ class MenuRail:
         pg.draw.line(window, pg.Color(Colors.border), (self.rect.right - 1, self.rect.top),
                      (self.rect.right - 1, self.rect.bottom - 1))
         mouse = pg.mouse.get_pos()
-        cut = max(int(ROW_CUT * self.scale), 5)
-        icon_side = max(int(ICON_SIDE * self.scale), 19)
-        icon_x = self.rect.x + max(int(ICON_X * self.scale), 40)
-        label_x = self.rect.x + max(int(LABEL_X * self.scale), 63)
+        cut = scale_floor(ROW_CUT, self.scale, 5)
+        icon_side = scale_floor(ICON_SIDE, self.scale, 19)
+        icon_x = self.rect.x + scale_floor(ICON_X, self.scale, 40)
+        label_x = self.rect.x + scale_floor(LABEL_X, self.scale, 63)
         for key, label, icon_fn in ROWS + (OPTIONS_ROW,):
             rect = self._row_rects[key]
             active = key == self.active
@@ -172,8 +171,8 @@ class MenuRail:
         if self._reticle_tween is None or self.active not in self._row_rects:
             return
         y = int(self._reticle_tween.value(now_ms))
-        size = max(int(RETICLE_SIZE * self.scale), 20)
-        cx = self._row_rects[self.active].x + max(int(RETICLE_INSET * self.scale), 12)
+        size = scale_floor(RETICLE_SIZE, self.scale, 20)
+        cx = self._row_rects[self.active].x + scale_floor(RETICLE_INSET, self.scale, 12)
         pulse = 0.5 + 0.5 * math.sin(now_ms / RETICLE_PULSE_MS * math.tau)
         alpha = int(RETICLE_ALPHA_FLOOR + (255 - RETICLE_ALPHA_FLOOR) * pulse)
         draw_reticle(window, pg.Rect(cx - size // 2, y - size // 2, size, size),

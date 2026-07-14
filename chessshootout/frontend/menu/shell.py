@@ -12,8 +12,6 @@ VIEW_ORDER = ["play", "battlepass", "armory", "social", "history"]
 
 
 def build_views(app):
-    views = {}
-    for view in (PlayView(app), BattlePassView(app), ArmoryView(app),
-                 SocialView(app), HistoryMenuView(app), ProfileView(app), OptionsView(app)):
-        views[view.name] = view
-    return views
+    views = (PlayView(app), BattlePassView(app), ArmoryView(app),
+             SocialView(app), HistoryMenuView(app), ProfileView(app), OptionsView(app))
+    return {view.name: view for view in views}

@@ -216,6 +216,18 @@ def _set_bool(key, value):
     _persist(key, flag)
 
 
+def _get_enum(key, values, default):
+    value = os.environ.get(key)
+    return value if value in values else default
+
+
+def _set_enum(key, value, values, default):
+    if value not in values:
+        value = default
+    os.environ[key] = value
+    _persist(key, value)
+
+
 def get_show_fps():
     return _get_bool("CHESS_SHOW_FPS", True)
 
@@ -265,27 +277,19 @@ def set_profile_hint_shown():
 
 
 def get_default_time_control():
-    value = os.environ.get("CHESS_DEFAULT_TC") or _DEFAULT_TIME_CONTROL
-    return value if value in TIME_CONTROL_VALUES else _DEFAULT_TIME_CONTROL
+    return _get_enum("CHESS_DEFAULT_TC", TIME_CONTROL_VALUES, _DEFAULT_TIME_CONTROL)
 
 
 def set_default_time_control(value):
-    if value not in TIME_CONTROL_VALUES:
-        value = _DEFAULT_TIME_CONTROL
-    os.environ["CHESS_DEFAULT_TC"] = value
-    _persist("CHESS_DEFAULT_TC", value)
+    _set_enum("CHESS_DEFAULT_TC", value, TIME_CONTROL_VALUES, _DEFAULT_TIME_CONTROL)
 
 
 def get_default_increment():
-    value = os.environ.get("CHESS_DEFAULT_INCREMENT") or _DEFAULT_INCREMENT
-    return value if value in INCREMENT_VALUES else _DEFAULT_INCREMENT
+    return _get_enum("CHESS_DEFAULT_INCREMENT", INCREMENT_VALUES, _DEFAULT_INCREMENT)
 
 
 def set_default_increment(value):
-    if value not in INCREMENT_VALUES:
-        value = _DEFAULT_INCREMENT
-    os.environ["CHESS_DEFAULT_INCREMENT"] = value
-    _persist("CHESS_DEFAULT_INCREMENT", value)
+    _set_enum("CHESS_DEFAULT_INCREMENT", value, INCREMENT_VALUES, _DEFAULT_INCREMENT)
 
 
 def default_time_minutes():
@@ -298,37 +302,25 @@ def default_increment_seconds():
 
 
 def get_focus_show():
-    value = os.environ.get("CHESS_FOCUS_SHOW")
-    if value in _FOCUS_SHOW_VALUES:
-        return value
-    return _DEFAULT_FOCUS_SHOW
+    return _get_enum("CHESS_FOCUS_SHOW", _FOCUS_SHOW_VALUES, _DEFAULT_FOCUS_SHOW)
 
 
 def set_focus_show(value):
-    if value not in _FOCUS_SHOW_VALUES:
-        value = _DEFAULT_FOCUS_SHOW
-    os.environ["CHESS_FOCUS_SHOW"] = value
-    _persist("CHESS_FOCUS_SHOW", value)
+    _set_enum("CHESS_FOCUS_SHOW", value, _FOCUS_SHOW_VALUES, _DEFAULT_FOCUS_SHOW)
 
 
 def get_launch_mode():
-    value = os.environ.get("CHESS_LAUNCH_MODE")
-    if value in _LAUNCH_MODE_VALUES:
-        return value
-    return _DEFAULT_LAUNCH_MODE
+    return _get_enum("CHESS_LAUNCH_MODE", _LAUNCH_MODE_VALUES, _DEFAULT_LAUNCH_MODE)
 
 
 def set_launch_mode(value):
-    if value not in _LAUNCH_MODE_VALUES:
-        value = _DEFAULT_LAUNCH_MODE
-    os.environ["CHESS_LAUNCH_MODE"] = value
-    _persist("CHESS_LAUNCH_MODE", value)
+    _set_enum("CHESS_LAUNCH_MODE", value, _LAUNCH_MODE_VALUES, _DEFAULT_LAUNCH_MODE)
 
 
-def _persist(key, value):
+def _rewrite_lines(key, replacement):
     existing = _ENV_PATH.read_text(encoding="utf-8") if _ENV_PATH.exists() else ""
     out_lines = []
-    replaced = False
+    matched = False
     for line in existing.splitlines():
         stripped = line.strip()
         if not stripped or stripped.startswith("#"):
@@ -336,47 +328,49 @@ def _persist(key, value):
             continue
         match = _KEY_LINE_RE.match(stripped)
         if match is not None and match.group(1) == key:
-            out_lines.append(f"{key}={value}")
-            replaced = True
+            matched = True
+            if replacement is not None:
+                out_lines.append(replacement)
         else:
             out_lines.append(line)
+    return out_lines, matched
+
+
+def _persist(key, value):
+    out_lines, replaced = _rewrite_lines(key, f"{key}={value}")
     if not replaced:
         out_lines.append(f"{key}={value}")
-    body = "\n".join(out_lines) + "\n"
-    _atomic_write(body)
+    _atomic_write("\n".join(out_lines) + "\n")
     log.info("setting persisted key=%s", key)
 
 
 def _persist_delete(key):
     if not _ENV_PATH.exists():
         return
-    out_lines = []
-    for line in _ENV_PATH.read_text(encoding="utf-8").splitlines():
-        stripped = line.strip()
-        if not stripped or stripped.startswith("#"):
-            out_lines.append(line)
-            continue
-        match = _KEY_LINE_RE.match(stripped)
-        if match is not None and match.group(1) == key:
-            continue
-        out_lines.append(line)
+    out_lines, _ = _rewrite_lines(key, None)
     _atomic_write(("\n".join(out_lines) + "\n") if out_lines else "")
     log.info("setting persisted key=%s (deleted)", key)
 
 
-def _atomic_write(body):
-    _ENV_PATH.parent.mkdir(parents=True, exist_ok=True)
-    tmp_path = _ENV_PATH.with_suffix(_ENV_PATH.suffix + f".tmp.{os.getpid()}")
-    tmp_path.write_text(body, encoding="utf-8")
-    for attempt in range(_ATOMIC_WRITE_RETRIES):
+def atomic_write_text(path, text, *, retries=1, backoff_s=0.0):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path = path.with_name(path.name + f".tmp.{os.getpid()}")
+    tmp_path.write_text(text, encoding="utf-8")
+    for attempt in range(retries):
         try:
-            os.replace(tmp_path, _ENV_PATH)
-            return
+            os.replace(tmp_path, path)
+            return True
         except PermissionError:
-            if attempt < _ATOMIC_WRITE_RETRIES - 1:
-                time.sleep(_ATOMIC_WRITE_BACKOFF_S)
-    log.warning("could not persist %s (file locked); this write was dropped", _ENV_PATH)
+            if attempt < retries - 1:
+                time.sleep(backoff_s)
     try:
         tmp_path.unlink()
     except OSError:
         pass
+    return False
+
+
+def _atomic_write(body):
+    if not atomic_write_text(_ENV_PATH, body, retries=_ATOMIC_WRITE_RETRIES,
+                             backoff_s=_ATOMIC_WRITE_BACKOFF_S):
+        log.warning("could not persist %s (file locked); this write was dropped", _ENV_PATH)

@@ -208,10 +208,8 @@ class TimePicker:
         self._turret_sweep_steps = 0
 
     def _chamber_index_for(self, minutes):
-        for i, (value, _) in enumerate(CHAMBERS):
-            if value == minutes:
-                return i
-        return self._min_index
+        return next((i for i, (value, _) in enumerate(CHAMBERS) if value == minutes),
+                    self._min_index)
 
     def readout_text(self):
         if self.selected_minutes is None:
@@ -255,13 +253,10 @@ class TimePicker:
                    index * CHAMBER_STEP_DEG + self._rotation)
 
     def _nearest_chamber(self, pos):
-        best, best_d = 0, None
-        for i in range(CHAMBER_COUNT):
+        def sq_dist(i):
             cx, cy = self.chamber_center(i)
-            d = (cx - pos[0]) ** 2 + (cy - pos[1]) ** 2
-            if best_d is None or d < best_d:
-                best, best_d = i, d
-        return best
+            return (cx - pos[0]) ** 2 + (cy - pos[1]) ** 2
+        return min(range(CHAMBER_COUNT), key=sq_dist)
 
     def _turret_label_rect(self, i):
         cx, cy = _pt(self._turret_center[0], self._turret_center[1],
@@ -494,46 +489,61 @@ class TimePicker:
 
     def update(self, now):
         self._now = now
-        if self._spinning:
-            if self._spin_last_ms is None:
-                self._spin_last_ms = now
-            dt = min(max(0.0, (now - self._spin_last_ms) / 1000.0), SPIN_MAX_DT)
+        self._update_spin(now)
+        self._update_rotation_tween(now)
+        self._update_seat_pop(now)
+        self._update_turret_tween(now)
+
+    def _update_spin(self, now):
+        if not self._spinning:
+            return
+        if self._spin_last_ms is None:
             self._spin_last_ms = now
-            self._rotation += self._spin_vel * dt
-            self._feed_spin_tick(now)
-            self._spin_vel *= math.exp(-dt / SPIN_FRICTION_TAU)
-            if abs(self._spin_vel) < SPIN_STOP_DEG_PER_S:
-                self._spinning = False
-                self._spin_vel = 0.0
-                self._settle_from_spin()
-        if self._rot_tween is not None:
-            self._rotation = self._rot_tween.value(now)
-            crossed = int(round(abs(self._rotation - self._rot_start) / CHAMBER_STEP_DEG))
-            crossed = min(crossed, self._rot_steps)
-            while self._rot_ticks < crossed:
-                self._rot_ticks += 1
-                self._emit_tick()
-            if self._rot_tween.done(now):
-                self._rotation = self._rot_target
-                self._rot_tween = None
-                self._seat_pop_tween = Tween(SEAT_POP_SCALE, 1.0, SEAT_POP_MS, now)
-                self._seat_pop_index = self._min_index
+        dt = min(max(0.0, (now - self._spin_last_ms) / 1000.0), SPIN_MAX_DT)
+        self._spin_last_ms = now
+        self._rotation += self._spin_vel * dt
+        self._feed_spin_tick(now)
+        self._spin_vel *= math.exp(-dt / SPIN_FRICTION_TAU)
+        if abs(self._spin_vel) < SPIN_STOP_DEG_PER_S:
+            self._spinning = False
+            self._spin_vel = 0.0
+            self._settle_from_spin()
+
+    def _update_rotation_tween(self, now):
+        if self._rot_tween is None:
+            return
+        self._rotation = self._rot_tween.value(now)
+        crossed = int(round(abs(self._rotation - self._rot_start) / CHAMBER_STEP_DEG))
+        crossed = min(crossed, self._rot_steps)
+        while self._rot_ticks < crossed:
+            self._rot_ticks += 1
+            self._emit_tick()
+        if self._rot_tween.done(now):
+            self._rotation = self._rot_target
+            self._rot_tween = None
+            self._seat_pop_tween = Tween(SEAT_POP_SCALE, 1.0, SEAT_POP_MS, now)
+            self._seat_pop_index = self._min_index
+
+    def _update_seat_pop(self, now):
         if self._seat_pop_tween is not None and self._seat_pop_tween.done(now):
             self._seat_pop_tween = None
-        if self._turret_tween is not None:
-            self._turret_angle = self._turret_tween.value(now)
+
+    def _update_turret_tween(self, now):
+        if self._turret_tween is None:
+            return
+        self._turret_angle = self._turret_tween.value(now)
+        if self._turret_sweep_steps > 0:
+            crossed = min(int(round(abs(self._turret_angle - self._turret_sweep_start)
+                                    / TURRET_SPREAD_DEG)), self._turret_sweep_steps)
+            while self._turret_sweep_ticks < crossed:
+                self._turret_sweep_ticks += 1
+                self._emit_ratchet()
+        if self._turret_tween.done(now):
+            self._turret_tween = None
             if self._turret_sweep_steps > 0:
-                crossed = min(int(round(abs(self._turret_angle - self._turret_sweep_start)
-                                        / TURRET_SPREAD_DEG)), self._turret_sweep_steps)
-                while self._turret_sweep_ticks < crossed:
-                    self._turret_sweep_ticks += 1
-                    self._emit_ratchet()
-            if self._turret_tween.done(now):
-                self._turret_tween = None
-                if self._turret_sweep_steps > 0:
-                    self._settle_turret_roulette()
-                else:
-                    self._turret_angle = TURRET_BASE_DEG + self._inc_index * TURRET_SPREAD_DEG
+                self._settle_turret_roulette()
+            else:
+                self._turret_angle = TURRET_BASE_DEG + self._inc_index * TURRET_SPREAD_DEG
 
     def draw(self, surface, now):
         self.update(now)

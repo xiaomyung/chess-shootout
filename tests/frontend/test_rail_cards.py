@@ -52,10 +52,10 @@ def _refresh(app):
 
 
 def _block_rect(stack, key):
-    for k, y, h in stack._blocks:
+    for k, y, h in stack._cards:
         if k == key:
             return pg.Rect(stack._rect.x, stack._rect.y + y, stack._rect.width, h)
-    raise AssertionError(f"{key} card not visible: {[b[0] for b in stack._blocks]}")
+    raise AssertionError(f"{key} card not visible: {[b[0] for b in stack._cards]}")
 
 
 def test_all_cards_start_collapsed(stack):

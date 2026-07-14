@@ -1,5 +1,5 @@
 """Draw/takeback/rematch offer banners: top-of-board pills that replace the old
-offer confirm-modal. They stack, dedupe by key, fire on_ok/on_no on a button
+offer confirm-modal. They stack, dedupe by key, fire on_yes/on_no on a button
 click and remove themselves, and — crucially — they do NOT block the board: a
 click outside the buttons falls through to the game (verified through the real
 click cascade)."""
@@ -23,7 +23,7 @@ def _banners():
 
 def _push(ob, key="draw_offered", ok=None, no=None):
     ob.push(key, "🤝", "bob", "offers a draw", "Accept", "Decline",
-            on_ok=ok or (lambda: None), on_no=no or (lambda: None))
+            on_yes=ok or (lambda: None), on_no=no or (lambda: None))
 
 
 def _settle(ob):
@@ -41,7 +41,7 @@ def test_push_adds_and_dedupes_by_key():
     _push(ob)
     assert ob.count() == 1
     ob.push("takeback_offered", "↩️", "bob", "wants a takeback", "Allow", "Deny",
-            on_ok=lambda: None, on_no=lambda: None)
+            on_yes=lambda: None, on_no=lambda: None)
     assert ob.count() == 2
 
 
@@ -157,7 +157,7 @@ def test_banner_does_not_block_board_clicks():
     _start_local(app)
     app.coordinator.offer_banners.push(
         "draw_offered", "🤝", "bob", "offers a draw", "Accept", "Decline",
-        on_ok=lambda: None, on_no=lambda: None)
+        on_yes=lambda: None, on_no=lambda: None)
     app.draw_frame()
     center = app.game.board._cell_rect(6, 4).center
     app.input_router.mouse_left_clicked(center)
@@ -168,7 +168,7 @@ def test_banner_does_not_gate_menu_overlay():
     app = Frontend(1000, 800)
     app.coordinator.offer_banners.push(
         "draw_offered", "🤝", "bob", "offers a draw", "Accept", "Decline",
-        on_ok=lambda: None, on_no=lambda: None)
+        on_yes=lambda: None, on_no=lambda: None)
     assert app._blocking_modal_visible() is False
 
 

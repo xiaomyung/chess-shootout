@@ -15,7 +15,7 @@ from chessshootout import paths
 from chessshootout.infra import env
 from chessshootout.frontend.menu.options_rows import (
     OptionsBody, PathRow, TextRow, ToggleRow, SegmentedRow, NotchRow,
-    NOTCH_COUNT, NOTCH_CELL_W, NOTCH_GAP, _Fonts, _elide_left, _fitting_ellipsis,
+    NOTCH_COUNT, NOTCH_CELL_W, NOTCH_GAP, Fonts, _elide_left, _fitting_ellipsis,
 )
 from chessshootout.frontend.visual.colors import Colors
 from chessshootout.frontend.visual.fonts import get_font, get_mono_font
@@ -36,8 +36,8 @@ def _isolate_env(tmp_path_factory, monkeypatch):
 
 
 def _fonts():
-    return _Fonts(get_font(14, bold=True), get_font(11), get_font(10, bold=True),
-                  get_mono_font(12), get_font(13, bold=True))
+    return Fonts(get_font(14, bold=True), get_font(11), get_font(10, bold=True),
+                 get_mono_font(12), get_font(13, bold=True))
 
 
 def _draw_row(row, rect=pg.Rect(40, 40, 420, 56)):

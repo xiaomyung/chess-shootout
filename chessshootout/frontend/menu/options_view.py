@@ -1,13 +1,11 @@
 import pygame as pg
 
-from chessshootout.frontend.menu.options_rows import OptionsBody, _Fonts
-from chessshootout.frontend.menu.view import MenuView
-from chessshootout.frontend.visual.cache import render_text
-from chessshootout.frontend.visual.colors import Colors
+from chessshootout.frontend.menu.options_rows import Fonts, OptionsBody
+from chessshootout.frontend.menu.view import (
+    MenuView, draw_subview_title, scale_floor, subview_title_top)
 from chessshootout.frontend.visual.fonts import get_display_font, get_font, get_mono_font
 
 
-TITLE_TOP_FRAC = 0.05
 TITLE_FONT_BASE = 28
 TITLE_FONT_FLOOR = 20
 TITLE_GAP = 20
@@ -29,17 +27,17 @@ class OptionsView(MenuView):
         self._fonts_cache = None
 
     def enter(self, payload=None):
-        self.body.set_sections(self.app.settings._build_settings_sections())
+        self.body.set_sections(self.app.settings.build_settings_sections())
 
     def exit(self):
-        self.app.settings._commit_options_exit()
+        self.app.settings.commit_options_exit()
 
     def _s(self, value, floor=1):
-        return max(int(value * self._scale), floor)
+        return scale_floor(value, self._scale, floor)
 
     def _fonts(self):
         if self._fonts_cache is None:
-            self._fonts_cache = _Fonts(
+            self._fonts_cache = Fonts(
                 title=get_font(self._s(15, 12), bold=True),
                 desc=get_font(self._s(12, 10)),
                 section=get_mono_font(self._s(11, 10), bold=True),
@@ -53,7 +51,7 @@ class OptionsView(MenuView):
         self._scale = menu_layout.scale
         self._fonts_cache = None
         self._title_font = get_display_font(self._s(TITLE_FONT_BASE, TITLE_FONT_FLOOR))
-        self._title_top = self._rect.y + int(self._rect.height * TITLE_TOP_FRAC)
+        self._title_top = subview_title_top(self._rect)
         body_top = self._title_top + self._title_font.get_height() \
             + self._s(TITLE_GAP, TITLE_GAP_FLOOR)
         self._body_rect = pg.Rect(self._rect.x, body_top, self._rect.width,
@@ -63,8 +61,7 @@ class OptionsView(MenuView):
         rect = self._rect
         if rect.width <= 0:
             return
-        title = render_text(self._title_font, "OPTIONS", Colors.text)
-        window.blit(title, (rect.x, self._title_top))
+        draw_subview_title(window, self._title_font, "OPTIONS", rect.x, self._title_top)
         if self._body_rect.height <= 0:
             return
         self.body.draw(window, self._body_rect, self._fonts())

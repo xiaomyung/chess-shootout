@@ -38,7 +38,7 @@ class MatchFoundModal(BaseModal):
         self._flag_cache = {}
         self._font_cache = {}
 
-    def show(self, white_name, black_name, your_color, on_done, seconds=3, rating="1500",
+    def show(self, white_name, black_name, your_color, on_done, seconds=3,
              white_country="", black_country="", rematch=False):
         self.rematch = rematch
         if your_color == "white":
@@ -47,7 +47,6 @@ class MatchFoundModal(BaseModal):
         else:
             self.me_name, self.me_side, self.me_country = black_name, "black", black_country
             self.opp_name, self.opp_side, self.opp_country = white_name, "white", white_country
-        self.rating = rating
         self.on_done = on_done
         self._seconds = seconds
         self._started_at = pg.time.get_ticks()

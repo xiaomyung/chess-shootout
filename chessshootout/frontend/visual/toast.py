@@ -82,10 +82,8 @@ class Toast:
         age = now - b["enter_at_ms"]
         remaining = b["duration_ms"] - (now - b["shown_at_ms"])
         fade_in = 255 if age >= ENTER_MS else int(255 * max(0, age) / ENTER_MS)
-        if remaining >= 0:
-            fade_out = 255
-        else:
-            fade_out = max(0, int(255 * (FADE_OUT_MS + remaining) / FADE_OUT_MS))
+        fade_out = 255 if remaining >= 0 else max(
+            0, int(255 * (FADE_OUT_MS + remaining) / FADE_OUT_MS))
         return max(0, min(fade_in, fade_out))
 
     def _render_bubble(self, b, now):

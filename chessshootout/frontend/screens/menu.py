@@ -71,14 +71,8 @@ class MenuScreen(Screen):
 
     def apply_resume_config(self, resume):
         color = resume["your_color"]
-        self.set_nickname(resume["white_name"] if color == "white" else resume["black_name"])
+        env.set_nickname(resume["white_name"] if color == "white" else resume["black_name"])
         self.play_view.apply_resume_config(resume)
-
-    def set_nickname(self, text):
-        env.set_nickname(text)
-
-    def build_play_config(self):
-        return self.play_view.build_config()
 
     def enter(self, **payload):
         self._activate(payload.get("view") or self._active_view)
@@ -123,7 +117,7 @@ class MenuScreen(Screen):
     def update(self, now):
         self.views[self._active_view].update(now)
         if (self._active_view == "play"
-                and self.app.news_client.generation() != self.card_stack._news_generation):
+                and self.app.news_client.generation() != self.card_stack.news_generation()):
             self.card_stack.refresh()
         layout = self._menu_layout
         rects = [layout.rail_rect, layout.right_rail_full_rect]
@@ -150,7 +144,7 @@ class MenuScreen(Screen):
             self._draw_rail_slide(window, now)
             return
         t = self._transition_tween.value(now)
-        scratch = self._ensure_scratch()
+        scratch = self._ensure_scratch("_scratch")
         scratch.fill((0, 0, 0, 0))
         if self._transition_kind == "screen":
             self._draw_rail(scratch, now)
@@ -187,7 +181,7 @@ class MenuScreen(Screen):
             panel = self._menu_layout.right_rail_full_rect
             if panel.width > 0:
                 dx = int((1.0 - t) * (window.get_width() - panel.x))
-                scratch = self._ensure_rail_scratch()
+                scratch = self._ensure_scratch("_rail_scratch")
                 scratch.fill((0, 0, 0, 0))
                 self._draw_right_rail_panel(scratch)
                 self.card_stack.draw(scratch, now)
@@ -218,23 +212,19 @@ class MenuScreen(Screen):
             self._rail_slide_origin = None
             self._rail_slide_tween = None
 
-    def _ensure_rail_scratch(self):
-        size = self.app.window.get_size()
-        if self._rail_scratch is None or self._rail_scratch.get_size() != size:
-            self._rail_scratch = pg.Surface(size, pg.SRCALPHA)
-        return self._rail_scratch
-
     def _end_rail_slide(self):
         self._rail_slide_mode = "none"
         self._rail_slide_tween = None
         self._rail_slide_snapshot = None
         self._rail_slide_origin = None
 
-    def _ensure_scratch(self):
+    def _ensure_scratch(self, attr):
         size = self.app.window.get_size()
-        if self._scratch is None or self._scratch.get_size() != size:
-            self._scratch = pg.Surface(size, pg.SRCALPHA)
-        return self._scratch
+        current = getattr(self, attr)
+        if current is None or current.get_size() != size:
+            current = pg.Surface(size, pg.SRCALPHA)
+            setattr(self, attr, current)
+        return current
 
     def _draw_right_rail_panel(self, window):
         panel = self._menu_layout.right_rail_full_rect
@@ -325,4 +315,4 @@ class MenuScreen(Screen):
         return [ModalSpec(self.fen_input_modal)]
 
     def on_app_exit(self):
-        self.app.settings._commit_options_exit()
+        self.app.settings.commit_options_exit()

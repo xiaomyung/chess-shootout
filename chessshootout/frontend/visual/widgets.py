@@ -404,3 +404,46 @@ class AvatarBadge:
         glyph = font.render(name[:1].upper() if name else "?", True, letter_color)
         window.blit(glyph, (rect.centerx - glyph.get_width() / 2,
                             rect.centery - glyph.get_height() / 2))
+
+
+class StripAvatar:
+
+    def __init__(self):
+        self._badge = AvatarBadge()
+        self._palette = None
+        self._seed = None
+
+    def reset(self):
+        self._badge.reset()
+
+    def draw(self, window, rect, name, font):
+        if self._palette is None or self._seed != name:
+            self._seed = name
+            self._palette = avatar_palette(name)
+        self._badge.draw(window, rect, name, font, self._palette)
+
+
+def strip_frame_metrics(h):
+    pad = max(int(h * 0.16), 4)
+    radius = max(int(h * 0.17), 5)
+    av_size = max(h - 2 * pad, 1)
+    gap = max(int(h * 0.18), 6)
+    return pad, radius, av_size, gap
+
+
+def draw_captured_row(window, icons, captured, captured_color, x, cy, right, ih):
+    cursor = x
+    last_right = x
+    size = max(int(ih * 0.5), 6)
+    for piece_type in captured:
+        icon = icons.get((piece_type, captured_color))
+        if icon is None:
+            continue
+        if icon.get_height() != size:
+            icon = pg.transform.smoothscale(icon, (size, size))
+        if cursor + icon.get_width() > right:
+            break
+        window.blit(icon, (cursor, cy - icon.get_height() / 2))
+        last_right = cursor + icon.get_width()
+        cursor += icon.get_width() - icon.get_width() // 3
+    return last_right
