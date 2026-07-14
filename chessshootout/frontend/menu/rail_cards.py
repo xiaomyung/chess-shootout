@@ -64,6 +64,7 @@ class CardStack(ScrollHost):
         self._scale = 1.0
         self._recent_groups = []
         self._news_items = []
+        self._news_generation = -1
         self._open = None
         self._blocks = []
         self._content_h = 0
@@ -89,6 +90,7 @@ class CardStack(ScrollHost):
             group.time_ago = format_relative_time(group.sort_key, now)
         self._recent_groups = groups[:RECENT_MATCHES_LIMIT]
         self._news_items = self.app.news_client.items()
+        self._news_generation = self.app.news_client.generation()
         if self._open not in self._visible_card_keys():
             self._open = None
         self._compute_layout()

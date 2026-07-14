@@ -428,6 +428,41 @@ def test_rotation_change_rebuilds_the_drum_layer(monkeypatch):
     assert calls, "a rotation/selection change must invalidate the drum cache"
 
 
+def _spy_fonts(monkeypatch):
+    calls = []
+    real_mono = time_picker.get_mono_font
+    real_display = time_picker.get_display_font
+
+    def mono(*args, **kwargs):
+        calls.append("mono")
+        return real_mono(*args, **kwargs)
+
+    def display(*args, **kwargs):
+        calls.append("display")
+        return real_display(*args, **kwargs)
+
+    monkeypatch.setattr(time_picker, "get_mono_font", mono)
+    monkeypatch.setattr(time_picker, "get_display_font", display)
+    return calls
+
+
+def test_same_size_move_reuses_fonts_and_still_repositions(monkeypatch):
+    p = _picker(10, 5)
+    before_center = p._drum_center
+    calls = _spy_fonts(monkeypatch)
+    p.set_rect(p.rect.move(40, 25))
+    assert calls == [], "a position-only set_rect must not rebuild any size-derived font"
+    assert p.rect.topleft == (40, 25)
+    assert p._drum_center != before_center, "position-only move still repositions the dials"
+
+
+def test_resize_rebuilds_the_fonts(monkeypatch):
+    p = _picker(10, 5)
+    calls = _spy_fonts(monkeypatch)
+    p.set_rect(pg.Rect(0, 0, 480, 300))
+    assert calls, "a genuine size change must rebuild the size-derived fonts"
+
+
 def test_resize_changes_the_footprint_and_rebuilds(monkeypatch):
     p = _picker(10, 5)
     surface = pg.Surface((300, 190))

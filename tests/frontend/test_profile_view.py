@@ -104,6 +104,23 @@ def test_lifetime_stats_correctness_against_fixture_pgns(app, tmp_path):
     assert view._kos == 2
 
 
+def test_spectated_games_count_as_neither_win_loss_nor_draw(app, tmp_path):
+    env.set_nickname("alice")
+    _write_pgn(tmp_path, "local-20260101-120000.pgn", "alice", "bob", "1-0",
+               "1. e4 d5 2. exd5")
+    _write_pgn(tmp_path, "local-20260104-120000.pgn", "carl", "dave", "1-0",
+               "1. e4 e5")
+    _write_pgn(tmp_path, "local-20260105-120000.pgn", "carl", "dave", "0-1",
+               "1. e4 e5")
+
+    app.menu.goto_view("profile")
+    view = app.menu.views["profile"]
+
+    assert view._wins == 1
+    assert view._losses == 0
+    assert view._draws == 0
+
+
 def test_client_uuid_shown_read_only(app, monkeypatch):
     app.menu.goto_view("profile")
     uid = env.get_or_create_client_uuid()

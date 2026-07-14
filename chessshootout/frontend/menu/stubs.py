@@ -25,13 +25,16 @@ class StubView(MenuView):
     def relayout(self, menu_layout):
         self._rect = pg.Rect(menu_layout.subview_rect)
         self._scale = menu_layout.scale
+        self._title_font = get_display_font(max(int(42 * self._scale), 24))
+        self._body_font = get_font(max(int(15 * self._scale), 12), bold=True)
+        self._button_font = get_font(max(int(13 * self._scale), 11), bold=True)
 
     def draw(self, window, menu_layout):
         rect = self._rect
         scale = self._scale
-        title_font = get_display_font(max(int(42 * scale), 24))
-        body_font = get_font(max(int(15 * scale), 12), bold=True)
-        button_font = get_font(max(int(13 * scale), 11), bold=True)
+        title_font = self._title_font
+        body_font = self._body_font
+        button_font = self._button_font
 
         title = render_text(title_font, self.title, Colors.text)
         ty = rect.y + int(rect.height * 0.32)

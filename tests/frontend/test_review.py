@@ -1,5 +1,3 @@
-import os
-
 from unittest.mock import MagicMock
 
 import pygame as pg
@@ -587,43 +585,6 @@ def test_active_row_highlight_follows_review_ply():
     assert app.game.right_menu._active_ply(3) == 1
 
 
-def test_load_pgn_button_disabled_when_no_pgn(tmp_path, monkeypatch):
-    """An empty data dir leaves the Load PGN button disabled."""
-    monkeypatch.setenv("CHESS_DATA_DIR", str(tmp_path))
-    app = _new_menu_app()
-    app.menu.show_card()
-    app._refresh_load_pgn_availability()
-    assert app.menu._load_pgn_available is False
-
-
-def test_load_pgn_button_enabled_when_pgn_exists(tmp_path, monkeypatch):
-    games_dir = tmp_path / "games"
-    games_dir.mkdir()
-    (games_dir / "game-20250101-120000.pgn").write_text(
-        '[White "A"]\n[Black "B"]\n\n1. e4 e5 *\n', encoding="utf-8"
-    )
-    monkeypatch.setenv("CHESS_DATA_DIR", str(tmp_path))
-    app = _new_menu_app()
-    app._refresh_load_pgn_availability()
-    assert app.menu._load_pgn_available is True
-
-
-def test_load_pgn_picks_most_recent_by_mtime(tmp_path, monkeypatch):
-    games_dir = tmp_path / "games"
-    games_dir.mkdir()
-    older = games_dir / "game-old.pgn"
-    older.write_text('[White "A"]\n\n1. e4 e5 *\n', encoding="utf-8")
-    newer = games_dir / "game-new.pgn"
-    newer.write_text('[White "A"]\n\n1. d4 d5 *\n', encoding="utf-8")
-    os.utime(older, (1_000, 1_000))
-    os.utime(newer, (2_000, 2_000))
-    monkeypatch.setenv("CHESS_DATA_DIR", str(tmp_path))
-    app = _new_menu_app()
-    path = app._latest_pgn_path()
-    assert path is not None
-    assert path.endswith("game-new.pgn")
-
-
 def _flat_button_keys(rows):
     return {key for row in rows for _, key in row}
 
@@ -660,13 +621,6 @@ def _new_timed_app():
     app._on_start_game({"mode": "single_screen", "nickname": "a",
                         "time_minutes": 5, "increment_seconds": 0,
                         "side": "white"})
-    return app
-
-
-def _new_menu_app():
-    from chessshootout.frontend.frontend import Frontend
-    app = Frontend(1500, 800)
-    app.sound_manager = MagicMock()
     return app
 
 

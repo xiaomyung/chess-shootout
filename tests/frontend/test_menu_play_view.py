@@ -639,3 +639,42 @@ def test_side_chip_reclick_mid_close_reopens_cleanly(monkeypatch, app, hero):
     app.menu.handle_click(hero._side_chip.center)
     assert hero._side_open is True
     assert hero._side_anim.mode == "opening"
+
+
+def _spy_smoothscale(monkeypatch):
+    calls = []
+    real = pg.transform.smoothscale
+
+    def spy(surf, size):
+        calls.append(size)
+        return real(surf, size)
+
+    monkeypatch.setattr(pg.transform, "smoothscale", spy)
+    return calls
+
+
+def test_summary_side_icon_reuses_the_cached_scaled_pawn(app, hero, monkeypatch):
+    """The always-visible summary side chip must not re-smoothscale the pawn art on
+    every frame -- the scaled surface is memoized per (color, size)."""
+    calls = _spy_smoothscale(monkeypatch)
+    window = app.window
+    hero.draw(window, app.menu._menu_layout)
+    calls.clear()
+    for _ in range(5):
+        hero.draw(window, app.menu._menu_layout)
+    assert calls == [], "repeated frames reuse the cached scaled pawn, no re-scaling"
+
+
+def test_side_tile_art_reuses_the_cached_scaled_pawn(monkeypatch, app, hero):
+    """The open side popover's WHITE/BLACK tiles must not re-smoothscale their pawn
+    art on every frame either -- same per (color, size) memoization."""
+    clock = _freeze(monkeypatch)
+    _open_and_settle(app, hero, clock, hero._side_chip)
+    assert hero._side_anim.mode == "open"
+    calls = _spy_smoothscale(monkeypatch)
+    window = app.window
+    hero.draw(window, app.menu._menu_layout)
+    calls.clear()
+    for _ in range(5):
+        hero.draw(window, app.menu._menu_layout)
+    assert calls == [], "the open side popover reuses cached scaled tile pawns"

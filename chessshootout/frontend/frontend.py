@@ -35,7 +35,6 @@ from chessshootout.frontend.window_chrome import (
 from chessshootout.frontend.game.variant import Variant
 from chessshootout.frontend.online_coordinator import OnlineCoordinator
 from chessshootout.frontend.audio.sound_manager import SoundManager
-from chessshootout.domain.pgn.load import latest_pgn_in_dir
 from chessshootout.online.news import NewsClient
 
 
@@ -50,10 +49,6 @@ STAT_SLOT_PING = 10
 
 def _stat_slot(label, value, width):
     return f"{label} {value}".ljust(width)
-
-
-def _games_dir():
-    return str(paths.get_games_dir())
 
 
 log = logging.getLogger("chess.frontend")
@@ -137,7 +132,6 @@ class Frontend:
         self.game.board.load_assets()
         self.review.board.load_assets()
         self._compute_layout()
-        self._refresh_load_pgn_availability()
         self._settle_window()
         self.coordinator._spawn_reconnect_probe()
         self.news_client.fetch_once()
@@ -187,7 +181,6 @@ class Frontend:
         self.coordinator.retain_for_rematch(keep_online)
         self.coordinator.unbind_game_from_online()
         self.game._reset_to_new_game()
-        self._refresh_load_pgn_availability()
         if keep_online and had_rematch_offer:
             self.coordinator._reshow_rematch_banner()
 
@@ -204,12 +197,6 @@ class Frontend:
 
     def _on_help(self):
         self.help_modal.show(HOTKEYS)
-
-    def _refresh_load_pgn_availability(self):
-        self.menu.set_load_pgn_available(self._latest_pgn_path() is not None)
-
-    def _latest_pgn_path(self):
-        return latest_pgn_in_dir(_games_dir())
 
     def _on_open_fen_modal(self):
         self.menu.fen_input_modal.show(on_submit=self._start_game_from_fen)
@@ -408,14 +395,27 @@ class Frontend:
             self._maximize_window()
 
     def _maximize_window(self):
-        if not self.chrome.maximize():
-            sizes = pg.display.get_desktop_sizes()
-            if not sizes:
-                return
-            w = max(sizes[0][0], MIN_WINDOW_WIDTH)
-            h = max(sizes[0][1], MIN_WINDOW_HEIGHT)
-            self._recreate_window_surface(w, h)
-            self.window_width, self.window_height = self.window.get_size()
+        if self.chrome.maximize():
+            self._settle_maximized()
+            return
+        sizes = pg.display.get_desktop_sizes()
+        if not sizes:
+            return
+        w = max(sizes[0][0], MIN_WINDOW_WIDTH)
+        h = max(sizes[0][1], MIN_WINDOW_HEIGHT)
+        self._recreate_window_surface(w, h)
+        self.window_width, self.window_height = self.window.get_size()
+
+    def _settle_maximized(self):
+        size = self.chrome.client_size()
+        if size is None:
+            return
+        w = max(size[0], MIN_WINDOW_WIDTH)
+        h = max(size[1], MIN_WINDOW_HEIGHT)
+        self._recreate_window_surface(w, h)
+        self.window_width, self.window_height = self.window.get_size()
+        self.input_router._cancel_all_scroll()
+        self._compute_layout()
 
     def _apply_fullscreen(self, enable):
         if enable and not self.chrome.is_fullscreen():

@@ -678,7 +678,7 @@ class MenuBattle:
     def _projectile_hit(self, pr):
         if pr["is_queen"]:
             for p in self.pawns:
-                if p["alive"] and self._hits_hitbox(pr, p):
+                if p["alive"] and self._visible(p) and self._hits_hitbox(pr, p):
                     return p
             return None
         return self.queen if self._hits_hitbox(pr, self.queen) else None

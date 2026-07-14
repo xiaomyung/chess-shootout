@@ -1,11 +1,6 @@
 OUT_BACK_OVERSHOOT = 1.70158
 
 
-def smoothstep(x):
-    x = max(0.0, min(1.0, x))
-    return x * x * (3 - 2 * x)
-
-
 def out_cubic(x):
     x = max(0.0, min(1.0, x))
     return 1 - (1 - x) ** 3
@@ -35,7 +30,3 @@ class Tween:
         self._start = self.value(now_ms)
         self._target = new_target
         self._begin_ms = now_ms
-
-    def remap(self, transform):
-        self._start = transform(self._start)
-        self._target = transform(self._target)

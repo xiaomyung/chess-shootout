@@ -1,6 +1,7 @@
 import pytest
 
-from chessshootout.frontend.visual.tween import Tween, out_back, out_cubic, smoothstep
+from chessshootout.frontend.visual.draw import smoothstep
+from chessshootout.frontend.visual.tween import Tween, out_back, out_cubic
 
 
 @pytest.mark.parametrize("ease", [smoothstep, out_cubic, out_back])

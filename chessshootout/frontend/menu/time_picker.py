@@ -219,7 +219,9 @@ class TimePicker:
         return f"{self.selected_minutes}+{self.selected_increment}"
 
     def set_rect(self, rect):
-        self.rect = pg.Rect(rect)
+        rect = pg.Rect(rect)
+        resized = rect.size != self.rect.size
+        self.rect = rect
         readout_h = max(int(rect.height * 0.16), 1)
         dial_h = rect.height - readout_h
         half = rect.width / 2.0
@@ -229,6 +231,10 @@ class TimePicker:
         self._drum_center = (rect.x + half / 2.0, cy)
         self._turret_center = (rect.right - half / 2.0, cy)
         self._readout_rect = pg.Rect(rect.x, rect.bottom - readout_h, rect.width, readout_h)
+        if resized:
+            self._fit_fonts()
+
+    def _fit_fonts(self):
         r = self._radius
         tr = self._turret_radius
         self._label_font = get_mono_font(max(int(tr * TURRET_LABEL_FONT_FRAC), 1), bold=True)

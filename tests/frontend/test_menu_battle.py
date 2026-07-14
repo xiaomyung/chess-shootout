@@ -818,7 +818,7 @@ def test_hit_projectile_collides_with_the_hitbox_and_lands():
     b = _battle()
     b.pawns = [b.pawns[0]]
     p = b.pawns[0]
-    p["x"], p["y"] = 500, 360
+    p["x"], p["y"] = 800, 360
     b.queen["weapon"] = "revolver"
     _aim_at(b, b.queen, p)
     b.projectiles.clear()
@@ -860,7 +860,7 @@ def test_every_queen_pellet_kills_any_pawn_it_lands_on():
     b = _battle()
     b.pawns = [b.pawns[0]]
     victim = b.pawns[0]
-    victim["x"], victim["y"] = 400, 360
+    victim["x"], victim["y"] = 800, 360
     b.particles.clear()
     b.projectiles = [_pellet_at(*b._body_point(victim))]
     b._update_projectiles(0.016, 5016)
@@ -874,8 +874,8 @@ def test_a_single_shot_can_drop_multiple_pawns():
     b = _battle()
     b.pawns = b.pawns[:2]
     near, far = b.pawns
-    near["x"], near["y"] = 300, 300
-    far["x"], far["y"] = 650, 420
+    near["x"], near["y"] = 120, 300
+    far["x"], far["y"] = 850, 420
     b.projectiles = [_pellet_at(*b._body_point(near)), _pellet_at(*b._body_point(far))]
     b._update_projectiles(0.016, 5016)
     assert near["dying"] and far["dying"], "each pellet kills the pawn it lands on"
@@ -910,6 +910,39 @@ def test_pawn_pellet_strikes_the_queen_not_other_pawns():
     b.projectiles = [_pellet_at(*b._body_point(bystander), is_queen=False)]
     b._update_projectiles(0.016, 5016)
     assert bystander["alive"] is True, "a pawn's bullet passes through other pawns"
+
+
+def test_covered_pawn_survives_a_projectile_crossing_its_hitbox():
+    """A pellet crossing the hitbox of a pawn hidden under a rail must not land -- the
+    hit path used to check only alive + hitbox, so a bullet crossing the rail could kill
+    a pawn currently hidden beneath it (walking in, or emerged then re-covered)."""
+    b = _battle(card=LEFT_RAIL)
+    b.pawns = [b.pawns[0]]
+    victim = b.pawns[0]
+    o = b.obstacles[0]
+    victim["x"], victim["y"] = (o[0] + o[2]) / 2, (o[1] + o[3]) / 2
+    assert not b._visible(victim), "the seed pawn sits hidden under the rail"
+    b.particles.clear()
+    b.projectiles = [_pellet_at(*b._body_point(victim))]
+    b._update_projectiles(0.016, 5016)
+    assert victim["alive"] is True and victim["dying"] is False, \
+        "a pellet crossing a hidden pawn's hitbox must not kill it"
+    assert not any(pt["kind"] == "hitmark" for pt in b.particles), \
+        "and must not land a hitmarker on it either"
+
+
+def test_uncovered_pawn_still_dies_to_the_same_pellet():
+    """Same shot, same pawn, just clear of the rail: the pellet lands as normal."""
+    b = _battle(card=LEFT_RAIL)
+    b.pawns = [b.pawns[0]]
+    victim = b.pawns[0]
+    victim["x"], victim["y"] = 500, 400
+    assert b._visible(victim), "the seed pawn sits clear of the rail"
+    b.particles.clear()
+    b.projectiles = [_pellet_at(*b._body_point(victim))]
+    b._update_projectiles(0.016, 5016)
+    assert victim["dying"] is True, "a pellet landing on a visible pawn still kills it"
+    assert any(pt["kind"] == "hitmark" for pt in b.particles)
 
 
 def _drew_anything(surf, rect=None):

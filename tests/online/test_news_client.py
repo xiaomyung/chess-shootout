@@ -5,12 +5,16 @@ Every test injects a fake `fetch_news` — zero real network."""
 
 import json
 import logging
+from datetime import date, timedelta
+
+import httpx
+import pytest
 
 from chessshootout.online import news
 from chessshootout.online.news import (
-    NewsClient, format_news_date, parse_news_items,
+    NEWS_MAX_ITEMS, NewsClient, format_news_date, parse_news_items,
 )
-from chessshootout.online.transport import TransportError
+from chessshootout.online.transport import TransportError, fetch_news
 
 
 def test_parse_skips_items_missing_required_fields():
@@ -56,6 +60,58 @@ def test_parse_puts_unparseable_dates_last():
     ]
     items = parse_news_items(raw)
     assert [item["title"] for item in items] == ["Real", "Weird"]
+
+
+def test_parse_caps_at_news_max_items_keeping_the_newest():
+    base = date(2020, 1, 1)
+    raw = [
+        {"title": f"item-{i}", "body": "B",
+         "date": (base + timedelta(days=i)).strftime("%Y-%m-%d")}
+        for i in range(500)
+    ]
+    items = parse_news_items(raw)
+    assert len(items) == NEWS_MAX_ITEMS
+    expected = [f"item-{i}" for i in range(499, 499 - NEWS_MAX_ITEMS, -1)]
+    assert [item["title"] for item in items] == expected
+
+
+def test_fetch_news_wraps_malformed_url_as_transport_error(monkeypatch):
+    def boom(url, **kwargs):
+        raise httpx.InvalidURL("malformed url")
+    monkeypatch.setattr(httpx, "get", boom)
+    with pytest.raises(TransportError):
+        fetch_news("https://[::1")
+
+
+def test_generation_starts_at_zero(tmp_path):
+    client = NewsClient(url="fake://x", cache_path=tmp_path / "cache.json")
+    assert client.generation() == 0
+
+
+def test_generation_increments_when_items_are_replaced(monkeypatch, tmp_path):
+    client = NewsClient(url="fake://x", cache_path=tmp_path / "cache.json")
+    monkeypatch.setattr(news, "fetch_news",
+                        lambda url: [{"title": "Fresh", "body": "B", "date": "2026-07-14"}])
+    before = client.generation()
+    client._fetch_worker()
+    assert client.generation() == before + 1
+
+
+def test_generation_stays_put_when_items_are_not_replaced(monkeypatch, tmp_path):
+    cache_path = tmp_path / "cache.json"
+    cache_path.write_text(json.dumps(
+        [{"title": "Kept", "body": "B", "date": "2026-01-01"}]), encoding="utf-8")
+    client = NewsClient(url="fake://x", cache_path=cache_path)
+    before = client.generation()
+
+    monkeypatch.setattr(news, "fetch_news", lambda url: [])
+    client._fetch_worker()
+    assert client.generation() == before
+
+    monkeypatch.setattr(news, "fetch_news",
+                        lambda url: (_ for _ in ()).throw(TransportError("boom")))
+    client._fetch_worker()
+    assert client.generation() == before
 
 
 def test_format_news_date_absolute_style():

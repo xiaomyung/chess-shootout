@@ -3,6 +3,8 @@
 raised to the floor; adequate inputs pass through untouched; one dimension can clamp
 while the other does not."""
 
+import types
+
 import pygame as pg
 import pytest
 
@@ -149,3 +151,49 @@ def test_maximize_window_uses_chrome_sdl_channel(monkeypatch):
     app._maximize_window()
     assert calls == ["max"]
     assert app.window.get_size() == (1000, 800)
+
+
+class _MaximizingChrome:
+    """A chrome whose native maximize succeeds and whose client_size() reports the
+    grown OS window (as WindowsSnap does via GetClientRect)."""
+
+    def __init__(self, client_size):
+        self.window = None
+        self._client_size = client_size
+
+    def maximize(self):
+        return True
+
+    def client_size(self):
+        return self._client_size
+
+    def reinit_sdl(self):
+        pass
+
+
+def test_maximize_launch_adopts_real_client_size_and_settle_keeps_it(monkeypatch):
+    """Maximized launch on Windows: chrome.maximize() succeeds and the OS grows the
+    window past the constructor size. The maximizer must adopt that real client size
+    into surface + dims + layout, and the subsequent _settle_window pass must NOT
+    shrink it back to the stale constructor size (the reported launch-mode bug)."""
+    app = Frontend(1000, 800)
+    app.chrome = _MaximizingChrome((1400, 900))
+
+    app._maximize_window()
+    assert app.window.get_size() == (1400, 900)
+    assert (app.window_width, app.window_height) == (1400, 900)
+    assert app._last_layout_size == (1400, 900)
+
+    recreated = []
+    real_recreate = app._recreate_window_surface
+
+    def spy_recreate(w, h):
+        recreated.append((w, h))
+        real_recreate(w, h)
+
+    monkeypatch.setattr(app, "_recreate_window_surface", spy_recreate)
+    monkeypatch.setattr("chessshootout.frontend.frontend.os", types.SimpleNamespace(name="nt"))
+    app._settle_window()
+    assert recreated == [(1400, 900)], "settle must re-set_mode at the maximized size, not shrink"
+    assert app.window.get_size() == (1400, 900)
+    assert (app.window_width, app.window_height) == (1400, 900)

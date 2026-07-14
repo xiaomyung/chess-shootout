@@ -146,9 +146,10 @@ def test_notch_row_fill_paints_accent_cells_up_to_value():
 
 
 # SwatchRow (the board-theme picker) was retired in v2.9.0: theme/customization
-# moves to the Armory battle pass, so it left the settings UI entirely (CHESS_THEME
-# env plumbing stays — the engine still reads it). The two swatch draw/click tests
-# were removed with the widget; the Display section's Launch mode row replaces it.
+# moves to the Armory battle pass, so it left the settings UI entirely (the
+# CHESS_THEME env plumbing was removed along with it, its last consumer). The
+# two swatch draw/click tests were removed with the widget; the Display
+# section's Launch mode row replaces it.
 
 
 def test_left_elide_prepends_ellipsis_and_preserves_the_exact_tail():

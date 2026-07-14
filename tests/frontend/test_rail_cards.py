@@ -15,6 +15,7 @@ from chessshootout.frontend.menu.rail_cards import (
 )
 from chessshootout.frontend.visual.colors import Colors
 from chessshootout.infra import env
+from chessshootout.online.news import NewsClient
 from tests.helpers import assert_pixel_color, make_app
 
 
@@ -185,6 +186,29 @@ def test_news_card_expanded_shows_newest_plus_headlines(app, stack):
     stack._toggle("news")
     assert stack._open == "news"
     app.draw_frame()  # renders without crashing: newest expanded + 2 headline rows
+
+
+def test_news_arriving_after_construction_surfaces_via_update(app, tmp_path, stack):
+    """Cold-cache landing: the async fetch replaces NewsClient's items and bumps
+    its generation counter after the menu is already built. MenuScreen.update()
+    watches that counter and re-refreshes the card stack in place — the news card
+    appears on the live Play view with no tab switch."""
+    fresh = NewsClient(url="unused://", cache_path=tmp_path / "news.json")
+    app.news_client = fresh
+    stack.refresh()
+    assert app.menu._active_view == "play"
+    assert "news" not in stack._visible_card_keys()
+
+    with fresh._lock:
+        fresh._items = [{"title": "Breaking", "body": "B", "date": "2026-07-14"}]
+        fresh._generation += 1
+    assert "news" not in stack._visible_card_keys(), \
+        "the fetch landing alone must not refresh the card stack"
+
+    app.menu.update(0)
+
+    assert "news" in stack._visible_card_keys()
+    assert stack._news_summary() == "Breaking"
 
 
 def test_news_summary_shows_newest_title_when_collapsed(app, stack):

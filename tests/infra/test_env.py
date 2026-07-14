@@ -13,7 +13,7 @@ _ISOLATED_VARS = (
     "CHESS_SERVER_ADDR", "CHESS_NICKNAME", "CHESS_CLIENT_UUID",
     "CHESS_LAST_MODE", "CHESS_MASTER_VOLUME", "CHESS_MENU_VOLUME", "CHESS_DATA_DIR",
     "CHESS_DEFAULT_TC",
-    "CHESS_DEFAULT_INCREMENT", "CHESS_THEME", "CHESS_COUNTRY",
+    "CHESS_DEFAULT_INCREMENT", "CHESS_COUNTRY",
     "CHESS_SHOW_FPS", "CHESS_SHOW_PING", "CHESS_FOCUS_SHOW",
     "CHESS_NEWS_URL", "CHESS_PROFILE_HINT_SHOWN", "CHESS_LAUNCH_MODE",
 )
@@ -625,14 +625,6 @@ def test_default_increment_seconds_parses_value():
     assert env.default_increment_seconds() == 10
 
 
-def test_theme_defaults_dark_and_rejects_unknown():
-    assert env.get_theme() == "dark"
-    env.set_theme("wood")
-    assert env.get_theme() == "dark"
-    env.set_theme("dark")
-    assert env.get_theme() == "dark"
-
-
 def test_launch_mode_defaults_windowed_and_validates():
     """The window opens where the player left it: windowed (default), maximized,
     or fullscreen. Anything unrecognised falls back to windowed."""
@@ -709,13 +701,6 @@ def test_get_or_create_client_uuid_logs_only_the_key_never_the_value(caplog):
     lines = [r.getMessage() for r in caplog.records if "setting persisted" in r.getMessage()]
     assert lines == ["setting persisted key=CHESS_CLIENT_UUID"]
     assert fresh not in " ".join(lines)
-
-
-def test_set_theme_logs_the_key_for_a_non_sensitive_setting(caplog):
-    with caplog.at_level(logging.INFO, logger="chess.env"):
-        env.set_theme("dark")
-    lines = [r.getMessage() for r in caplog.records if "setting persisted" in r.getMessage()]
-    assert lines == ["setting persisted key=CHESS_THEME"]
 
 
 def test_set_country_empty_logs_the_deleted_key(caplog):

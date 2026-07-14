@@ -40,7 +40,6 @@ class MenuScreen(Screen):
         self.card_stack.refresh()
         self._active_view = "play"
         self._menu_layout = None
-        self._load_pgn_available = False
         self._transition_kind = "none"
         self._transition_duration = 0
         self._transition_tween = None
@@ -80,9 +79,6 @@ class MenuScreen(Screen):
 
     def build_play_config(self):
         return self.play_view.build_config()
-
-    def set_load_pgn_available(self, available):
-        self._load_pgn_available = available
 
     def enter(self, **payload):
         self._activate(payload.get("view") or self._active_view)
@@ -126,6 +122,9 @@ class MenuScreen(Screen):
 
     def update(self, now):
         self.views[self._active_view].update(now)
+        if (self._active_view == "play"
+                and self.app.news_client.generation() != self.card_stack._news_generation):
+            self.card_stack.refresh()
         layout = self._menu_layout
         rects = [layout.rail_rect, layout.right_rail_full_rect]
         rects += self.views[self._active_view].avoid_rects()

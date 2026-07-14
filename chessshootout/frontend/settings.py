@@ -176,7 +176,6 @@ class SettingsController:
             env.set_data_dir(None)
         else:
             env.set_data_dir(new_dir)
-        self.frontend._refresh_load_pgn_availability()
         self.frontend.toast.show("Data folder updated")
 
     def _move_pgns(self, src, dst):

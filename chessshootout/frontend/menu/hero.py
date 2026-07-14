@@ -7,7 +7,8 @@ from chessshootout.domain.match import SINGLE_SCREEN, BOT, ONLINE
 from chessshootout.infra import env
 from chessshootout.frontend.menu.time_picker import CHAMBERS, INCREMENTS, TimePicker
 from chessshootout.frontend.menu.view import MenuView
-from chessshootout.frontend.visual.cache import new_cache, memoized_surface, render_text
+from chessshootout.frontend.visual.cache import (
+    memoized_surface, new_cache, new_size_cache, render_text)
 from chessshootout.frontend.visual.colors import Colors
 from chessshootout.frontend.visual.draw import (
     chevron_surface, circle_surface, cut_rect_surface, dashed_rounded_rect_surface,
@@ -90,6 +91,7 @@ PRESS_OFFSET_PX = 1
 
 
 _HERO_ART_CACHE = new_cache()
+_HERO_SCALED_CACHE = new_size_cache()
 
 
 def _side_image(color):
@@ -101,6 +103,15 @@ def _side_image(color):
         except (pg.error, OSError):
             return None
     return memoized_surface(_HERO_ART_CACHE, ("side", color), build)
+
+
+def _scaled_side_image(color, size):
+    def build():
+        img = _side_image(color)
+        if img is None:
+            return None
+        return pg.transform.smoothscale(img, (size, size))
+    return memoized_surface(_HERO_SCALED_CACHE, (color, size), build)
 
 
 def _tracked_surface(font, text, color, tracking):
@@ -726,9 +737,8 @@ class PlayView(MenuView):
             self._blit_pawn(window, x + size // 2, cy, size, self.selected_side)
 
     def _blit_pawn(self, window, cx, cy, size, color):
-        img = _side_image(color)
-        if img is not None:
-            scaled = pg.transform.smoothscale(img, (size, size))
+        scaled = _scaled_side_image(color, size)
+        if scaled is not None:
             window.blit(scaled, (cx - size // 2, cy - size // 2))
 
     def _draw_cta(self, window):
@@ -795,9 +805,8 @@ class PlayView(MenuView):
                              pg.Rect(cx - size // 2, cy - size // 2, size, size), 1,
                              border_radius=4)
             return
-        img = _side_image(key)
-        if img is not None:
-            scaled = pg.transform.smoothscale(img, (size, size))
+        scaled = _scaled_side_image(key, size)
+        if scaled is not None:
             window.blit(scaled, (cx - size // 2, cy - size // 2))
 
     def _draw_side_readout(self, window):

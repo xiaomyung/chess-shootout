@@ -56,7 +56,7 @@ class ProfileView(MenuView):
             scan_pgn_summaries(str(paths.get_games_dir()), PGN_PATTERN), env.get_nickname())
         self._wins = sum(1 for g in groups if g.result == "win")
         self._losses = sum(1 for g in groups if g.result == "loss")
-        self._draws = len(groups) - self._wins - self._losses
+        self._draws = sum(1 for g in groups if g.result == "draw")
         self._kos = sum(g.ko_you for g in groups)
 
     def _commit_nickname(self, text):

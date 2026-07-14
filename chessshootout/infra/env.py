@@ -22,8 +22,6 @@ _PROD_SERVER_ADDR = "server.chess-shootout.com"
 _DEFAULT_NEWS_URL = "https://xiaomyung.github.io/chess-shootout/news.json"
 _DEFAULT_MASTER_VOLUME = 0.70
 _DEFAULT_MENU_VOLUME = 0.10
-_THEMES = ("dark",)
-_DEFAULT_THEME = "dark"
 _DEFAULT_TIME_CONTROL = "10"
 _DEFAULT_INCREMENT = "5"
 _NICKNAME_MAX_LEN = 20
@@ -297,20 +295,6 @@ def default_time_minutes():
 
 def default_increment_seconds():
     return int(get_default_increment())
-
-
-def get_theme():
-    value = os.environ.get("CHESS_THEME")
-    if value in _THEMES:
-        return value
-    return _DEFAULT_THEME
-
-
-def set_theme(value):
-    if value not in _THEMES:
-        value = _DEFAULT_THEME
-    os.environ["CHESS_THEME"] = value
-    _persist("CHESS_THEME", value)
 
 
 def get_focus_show():

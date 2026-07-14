@@ -585,7 +585,6 @@ class OnlineCoordinator:
         self.unbind_game_from_online()
         self.app.switch_to("menu")
         game._reset_to_new_game()
-        self.app._refresh_load_pgn_availability()
 
     def _return_to_menu_card(self):
         if self.app.screen is self.app.menu:
