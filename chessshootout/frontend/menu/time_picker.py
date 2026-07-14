@@ -78,6 +78,17 @@ NEEDLE_CACHE_CAP = 16
 _DRUM_CACHE = new_size_cache()
 _TURRET_DIAL_CACHE = new_size_cache()
 _TURRET_NEEDLE_CACHE = new_size_cache()
+_TURRET_BUBBLE_CACHE = new_size_cache()
+
+
+def _turret_bubble_surface(diameter, ring_w):
+    def build():
+        def render(surf, k):
+            r = surf.get_width() / 2.0
+            pg.draw.circle(surf, pg.Color(Colors.surface_raised), (r, r), r)
+            pg.draw.circle(surf, pg.Color(Colors.amber), (r, r), r, max(int(ring_w * k), 1))
+        return supersample((diameter, diameter), render, scale=8)
+    return memoized_surface(_TURRET_BUBBLE_CACHE, (diameter, ring_w), build)
 
 
 def _quantize(value, step):
@@ -584,10 +595,9 @@ class TimePicker:
             sel = i == self._inc_index and not dead
             if sel:
                 bw = max(int(tr * 0.04), 1)
-                pg.draw.circle(surface, pg.Color(Colors.surface_raised), rect.center,
-                               rect.width / 2)
-                pg.draw.circle(surface, pg.Color(Colors.amber), rect.center,
-                               rect.width / 2, bw)
+                d = max(int(round(rect.width)), 1)
+                bubble = _turret_bubble_surface(d, bw)
+                surface.blit(bubble, (rect.centerx - d / 2, rect.centery - d / 2))
             color = Colors.amber_hi if sel else (
                 Colors.text_muted if dead else Colors.text_dim)
             surf = render_text(self._label_font, str(inc), color)

@@ -68,8 +68,7 @@ class Colors:
     dot_reconnecting = "#ff4d4d"
     dot_unknown = "#8c8c8c"
 
-    avatar_slate_top = "#5a6473"
-    avatar_slate_bottom = "#2c323d"
+    avatar_slate = "#454e5c"
     avatar_letter_dark = "#e7ebf1"
 
     battle_bg = "#0d0f14"

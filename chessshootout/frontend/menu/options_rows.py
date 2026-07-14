@@ -228,6 +228,7 @@ class SegmentedRow(_Row):
         self.variant = variant
         self._rects = {}
         self._mono_font = None
+        self._layout_cache = None
 
     def _seg_h(self, fonts):
         return max(fonts.button.get_height() + 12, SEG_MIN_H)
@@ -244,13 +245,19 @@ class SegmentedRow(_Row):
         return self._mono_font[1]
 
     def _layout(self, font, h):
+        key = (id(font), h)
+        if self._layout_cache is not None and self._layout_cache[0] == key:
+            return self._layout_cache[1]
         if self.variant == "cells":
             cell_w = max(h, max(_seg_glyph(font, label, Colors.text_dim).get_width()
                                 for label, _ in self.options) + 2 * CELL_PAD_X)
-            return [cell_w] * len(self.options), CELL_CUT, CELL_GAP
-        widths = [_seg_glyph(font, label, Colors.text_dim).get_width() + 2 * SEG_PAD_X
-                  for label, _ in self.options]
-        return widths, SEG_CUT, SEG_GAP
+            result = ([cell_w] * len(self.options), CELL_CUT, CELL_GAP)
+        else:
+            widths = [_seg_glyph(font, label, Colors.text_dim).get_width() + 2 * SEG_PAD_X
+                      for label, _ in self.options]
+            result = (widths, SEG_CUT, SEG_GAP)
+        self._layout_cache = (key, result)
+        return result
 
     def _draw_control(self, window, rect, fonts):
         font = self._font(fonts)
@@ -301,6 +308,7 @@ class PathRow(_Row):
         self._change_rect = pg.Rect(0, 0, 0, 0)
         self._reset_rect = pg.Rect(0, 0, 0, 0)
         self._field_rect = pg.Rect(0, 0, 0, 0)
+        self._rest_cache = None
 
     def _control_h(self, fonts):
         return FIELD_H
@@ -339,8 +347,12 @@ class PathRow(_Row):
         suffix_surf = render_text(fonts.value, self.suffix, Colors.text_dim) \
             if self.suffix else None
         suffix_w = suffix_surf.get_width() if suffix_surf else 0
-        path_text = _elide_left(fonts.value, self.input.text, max(fr.width - suffix_w, 1))
-        path_surf = render_text(fonts.value, path_text, Colors.text_muted)
+        avail = max(fr.width - suffix_w, 1)
+        key = (id(fonts.value), self.input.text, avail)
+        if self._rest_cache is None or self._rest_cache[0] != key:
+            path_text = _elide_left(fonts.value, self.input.text, avail)
+            self._rest_cache = (key, render_text(fonts.value, path_text, Colors.text_muted))
+        path_surf = self._rest_cache[1]
         total = path_surf.get_width() + suffix_w
         prev = window.get_clip()
         window.set_clip(fr.clip(prev) if prev is not None else fr)

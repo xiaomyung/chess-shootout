@@ -152,7 +152,8 @@ class MenuBattle:
             self._size_entity(self.queen)
             for p in self.pawns:
                 self._size_entity(p)
-            self._clamp_queen_to_window()
+            self._reconcile_entities()
+            self._cull_out_of_bounds()
             self.queen["wp"] = self._rand_waypoint()
 
     def set_avoid_rects(self, rects):
@@ -517,18 +518,33 @@ class MenuBattle:
             else:
                 self._say(self._pick(alive), self._pick(PAWN_LINES), "pawn", now_ms)
 
-    def _window_clamped(self, x, y):
-        art = self._entity_art("queen")
-        hw = (art["w"] if art else QUEEN_BASE_H * self.scale) / 2
-        h = self.queen["sprite_h"]
-        return (max(hw, min(self.rect.width - hw, x)),
-                max(self.top_inset + h, min(float(self.rect.height), y)))
+    def _clamp_entity_to_field(self, ent):
+        art = self._entity_art(ent["kind"])
+        base = QUEEN_BASE_H if ent["kind"] == "queen" else PAWN_BASE_H
+        hw = (art["w"] if art else base * self.scale) / 2
+        h = ent["sprite_h"]
+        ent["x"] = max(hw, min(self.rect.width - hw, ent["x"]))
+        ent["y"] = max(self.top_inset + h, min(float(self.rect.height), ent["y"]))
 
     def _clamp_queen_to_window(self):
-        q = self.queen
-        if q is None:
-            return
-        q["x"], q["y"] = self._window_clamped(q["x"], q["y"])
+        if self.queen is not None:
+            self._clamp_entity_to_field(self.queen)
+
+    def _reconcile_entities(self):
+        for ent in (self.queen, *self.pawns):
+            if ent is None:
+                continue
+            ent["x"], ent["y"] = self._push_out_all(
+                self._entity_obstacles(ent), ent["x"], ent["y"],
+                exclude_top=ent["kind"] == "queen")
+            self._clamp_entity_to_field(ent)
+
+    def _cull_out_of_bounds(self):
+        self.projectiles = [pr for pr in self.projectiles
+                            if not self._off_screen(pr["x"], pr["y"])]
+        self.particles = [p for p in self.particles
+                          if not self._off_screen(p["x"], p["y"])]
+        self.drops = [d for d in self.drops if not self._off_screen(d["x"], d["y"])]
 
     def _fully_in_window(self, ent):
         art = self._entity_art(ent["kind"])

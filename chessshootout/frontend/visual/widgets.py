@@ -8,7 +8,7 @@ from chessshootout.frontend.visual.cache import (
     render_text, new_cache, memoized_surface,
 )
 from chessshootout.frontend.visual.draw import (
-    supersample, rounded_rect_surface, infinity_surface, blit_centered,
+    supersample, rounded_rect_surface, infinity_surface, blit_centered, cut_rect_surface,
 )
 
 
@@ -23,6 +23,7 @@ SEGMENT_RADIUS = 8
 SEGMENT_INNER_RADIUS = 6
 CHIP_RADIUS = 7
 KO_WINK_MS = 520
+AVATAR_CUT_FRAC = 0.16
 
 
 def build_shell(w, h, winking=False):
@@ -64,24 +65,17 @@ def build_ko_badge(count, font, height, winking=False):
     return memoized_surface(_KO_BADGE_CACHE, (count, height, winking), build)
 
 
-def build_avatar(size, top, bottom):
+def build_flat_avatar(size, fill):
     size = max(int(size), 1)
-    radius = max(int(size * 0.22), 2)
-    top = pg.Color(top)
-    bottom = pg.Color(bottom)
+    cut = max(int(size * AVATAR_CUT_FRAC), 2)
+    return cut_rect_surface((size, size), cut, fill, corners=("tr", "bl"))
 
-    def render(surf, k):
-        w = surf.get_width()
-        for y in range(w):
-            t = y / max(w - 1, 1)
-            surf.fill(top.lerp(bottom, t), pg.Rect(0, y, w, 1))
-        mask = pg.Surface((w, w), pg.SRCALPHA)
-        pg.draw.rect(mask, (255, 255, 255, 255), mask.get_rect(),
-                     border_radius=int(radius * k))
-        surf.blit(mask, (0, 0), special_flags=pg.BLEND_RGBA_MULT)
-        pg.draw.rect(surf, (0, 0, 0, 80), surf.get_rect(),
-                     width=max(int(k), 1), border_radius=int(radius * k))
-    return supersample(size, render)
+
+def draw_avatar(window, rect, name, font, fill, letter_color):
+    window.blit(build_flat_avatar(rect.width, fill), rect.topleft)
+    glyph = font.render(name[:1].upper() if name else "?", True, letter_color)
+    window.blit(glyph, (rect.centerx - glyph.get_width() / 2,
+                        rect.centery - glyph.get_height() / 2))
 
 
 def draw_pill(window, text, x, cy, font, text_color=Colors.amber_hi,
@@ -373,10 +367,8 @@ def draw_scroll_thumb(window, track_rect, total, visible, offset_fraction, last_
 
 def avatar_palette(white):
     if white:
-        return (pg.Color(Colors.amber), pg.Color(Colors.accent),
-                pg.Color(Colors.on_accent))
-    return (pg.Color(Colors.avatar_slate_top), pg.Color(Colors.avatar_slate_bottom),
-            pg.Color(Colors.avatar_letter_dark))
+        return (pg.Color(Colors.accent), pg.Color(Colors.on_accent))
+    return (pg.Color(Colors.avatar_slate), pg.Color(Colors.avatar_letter_dark))
 
 
 class AvatarBadge:
@@ -388,10 +380,10 @@ class AvatarBadge:
         self._cache = None
 
     def draw(self, window, rect, name, font, palette):
-        top, bottom, letter_color = palette
-        key = (rect.width, top.r, top.g, top.b, bottom.r, bottom.g, bottom.b)
+        fill, letter_color = palette
+        key = (rect.width, str(fill))
         if self._cache is None or self._cache[0] != key:
-            self._cache = (key, build_avatar(rect.width, top, bottom))
+            self._cache = (key, build_flat_avatar(rect.width, fill))
         window.blit(self._cache[1], rect.topleft)
         glyph = font.render(name[:1].upper() if name else "?", True, letter_color)
         window.blit(glyph, (rect.centerx - glyph.get_width() / 2,

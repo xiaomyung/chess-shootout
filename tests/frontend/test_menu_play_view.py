@@ -10,7 +10,9 @@ import pygame as pg
 import pytest
 
 from tests.conftest import pygame_display
-from chessshootout.frontend.menu.hero import COMING_SOON, CTA_BOTTOM, RECON_GAP, PlayView
+from chessshootout.frontend.menu import hero as hero_mod
+from chessshootout.frontend.menu.hero import (
+    COMING_SOON, CTA_BOTTOM, RECON_GAP, SIDE_OPTIONS, PlayView)
 from chessshootout.frontend.visual.colors import Colors
 from chessshootout.infra import env
 from tests.helpers import assert_pixel_color, make_app
@@ -257,6 +259,42 @@ def test_side_popover_and_chips_are_frozen_on_selection(app, hero):
     assert hero._side_chip == side_chip_before
     assert {k: r.copy() for k, r in hero._side_rects.items()} == rows_before
     assert hero._side_open is True
+
+
+def test_side_popover_lays_out_three_square_tiles_in_a_row(app, hero):
+    """r4: WHITE / RANDOM / BLACK are three square tiles side by side, with a
+    readout strip spanning the panel width below them."""
+    app.menu.handle_click(hero._side_chip.center)
+    tiles = [hero._side_rects[key] for _, key in SIDE_OPTIONS]
+    assert {t.y for t in tiles} == {tiles[0].y}, "tiles share one row"
+    assert [t.x for t in tiles] == sorted(t.x for t in tiles), "tiles run left to right"
+    for t in tiles:
+        assert abs(t.width - t.height) <= 1, "tiles are square"
+    assert hero._side_readout.width == hero._side_popover.width
+    assert hero._side_readout.top >= tiles[0].bottom, "readout sits below the tiles"
+    assert hero._side_readout.bottom <= hero._side_popover.bottom
+
+
+def test_side_readout_renders_label_then_selected_value(app, hero, monkeypatch):
+    """r4: the bottom strip mirrors CHAMBERED — a dim 'SIDE' label then the
+    selected value, big and bright, on the right."""
+    app.menu.handle_click(hero._side_chip.center)
+    app.menu.handle_click(hero._side_rects["black"].center)
+    calls = []
+    real = hero_mod.render_text
+    monkeypatch.setattr(hero_mod, "render_text",
+                        lambda f, t, c: calls.append((t, str(c))) or real(f, t, c))
+    hero._draw_side_readout(app.window)
+    assert [t for t, _ in calls] == ["SIDE", "BLACK"]
+    assert calls[0][1] == str(Colors.text_muted), "SIDE is the dim label"
+    assert calls[1][1] == str(Colors.text), "the selected value is bright"
+
+
+def test_side_tile_click_selects_and_does_not_auto_close(app, hero):
+    app.menu.handle_click(hero._side_chip.center)
+    app.menu.handle_click(hero._side_rects["white"].center)
+    assert hero.selected_side == "white"
+    assert hero._side_open is True, "picking a side keeps the popover open"
 
 
 def test_time_popover_stays_within_the_hero_column_when_it_fits():

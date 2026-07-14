@@ -8,7 +8,7 @@ from chessshootout.frontend.visual.emoji import emoji_surface
 from chessshootout.frontend.visual.fonts import (
     fonts_for_width, get_display_font, get_font, get_mono_font,
 )
-from chessshootout.frontend.visual.widgets import build_avatar, fit_text_to_rect
+from chessshootout.frontend.visual.widgets import build_flat_avatar, fit_text_to_rect
 
 
 FLAG_NAME_GAP = 7
@@ -18,8 +18,8 @@ NAME_RATING_GAP = 2
 
 def _avatar_colors(side):
     if side in (Colors.text, "white", "w"):
-        return (Colors.amber, Colors.accent, Colors.on_accent)
-    return (Colors.avatar_slate_top, Colors.avatar_slate_bottom, Colors.avatar_letter_dark)
+        return (Colors.accent, Colors.on_accent)
+    return (Colors.avatar_slate, Colors.avatar_letter_dark)
 
 
 class MatchFoundModal(BaseModal):
@@ -152,8 +152,8 @@ class MatchFoundModal(BaseModal):
 
     def _draw_card(self, cx, y, av, side_w, card_h, name, side, country, name_font,
                    rating_font, letter_font):
-        top, bottom, letter_color = _avatar_colors(side)
-        self.window.blit(build_avatar(av, top, bottom), (cx - av / 2, y))
+        fill, letter_color = _avatar_colors(side)
+        self.window.blit(build_flat_avatar(av, fill), (cx - av / 2, y))
         letter = (name[:1].upper() if name else "?")
         glyph = letter_font.render(letter, True, letter_color)
         self.window.blit(glyph, (cx - glyph.get_width() / 2,

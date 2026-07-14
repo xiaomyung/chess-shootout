@@ -101,6 +101,7 @@ class WindowChrome:
     STATS_FONT_PX = 11
     STATS_GAP = 14
     STATS_PAD = 16
+    STATS_SEP_HEIGHT_FRAC = 0.6
     DOT_HOVER_LIGHTEN = 0.22
     DOT_GLYPH_DARKEN = 0.74
     DOT_GLYPH_INSET = 0.55
@@ -326,10 +327,18 @@ class WindowChrome:
         if left < self._wordmark_right_edge() + self.STATS_PAD:
             return
         cy = self.HEIGHT // 2
+        sep_half = int(self.HEIGHT * self.STATS_SEP_HEIGHT_FRAC) // 2
+        sep_color = pg.Color(Colors.border)
         x = left
-        for s in surfs:
+        for i, (part, s) in enumerate(zip(parts, surfs)):
             self.window.blit(s, (x, cy - s.get_height() // 2))
-            x += s.get_width() + self.STATS_GAP
+            visible_right = x + self._stats_font.size(part.rstrip())[0]
+            next_x = x + s.get_width() + self.STATS_GAP
+            if i < len(surfs) - 1:
+                sep_x = (visible_right + next_x) // 2
+                pg.draw.line(self.window, sep_color, (sep_x, cy - sep_half),
+                             (sep_x, cy + sep_half))
+            x = next_x
 
     def _load_logo(self):
         try:

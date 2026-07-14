@@ -158,32 +158,36 @@ def test_active_clock_border_stays_neutral(strip):
     assert strip._clock_border_color() == Colors.border
 
 
-def _avatar_top_pixel(strip):
+def _avatar_pixels(strip):
     pad = max(int(strip.rect.height * 0.16), 4)
     av = strip.rect.height - 2 * pad
-    return strip.window.get_at(
-        (strip.rect.x + pad + av // 2, strip.rect.y + pad + max(3, av // 6)))
+    cx = strip.rect.x + pad + av // 2
+    top = strip.window.get_at((cx, strip.rect.y + pad + max(3, av // 6)))
+    bottom = strip.window.get_at((cx, strip.rect.y + pad + av - max(3, av // 6)))
+    return top, bottom
 
 
-def test_white_avatar_is_warm_amber(strip):
+def test_white_avatar_is_flat_accent(strip):
     strip.set_state("Alice", 60.0, False, player_color=PieceColor.WHITE)
     _draw(strip)
-    px = _avatar_top_pixel(strip)
-    assert px.r > 180 and px.r > px.b, "white avatar top should be warm amber→accent"
+    top, bottom = _avatar_pixels(strip)
+    assert top.r > 180 and top.r > top.b, "white avatar should be warm accent"
+    assert top == bottom, "flat avatar has no gradient (top matches bottom)"
 
 
 def test_black_avatar_is_cool_slate(strip):
     strip.set_state("Bob", 60.0, False, player_color=PieceColor.BLACK)
     _draw(strip)
-    px = _avatar_top_pixel(strip)
-    assert px.b >= px.r, "black avatar should be cool slate, not warm"
+    top, bottom = _avatar_pixels(strip)
+    assert top.b >= top.r, "black avatar should be cool slate, not warm"
+    assert top == bottom, "flat avatar has no gradient (top matches bottom)"
 
 
 def test_bot_avatar_uses_slate_even_when_white(strip):
     strip.set_state("Bot", 60.0, False, player_color=PieceColor.WHITE, is_bot=True)
     _draw(strip)
-    px = _avatar_top_pixel(strip)
-    assert px.b >= px.r, "bot avatar is slate regardless of board color"
+    top, _ = _avatar_pixels(strip)
+    assert top.b >= top.r, "bot avatar is slate regardless of board color"
 
 
 def test_rating_pill_drawn(strip):

@@ -10,7 +10,8 @@ from chessshootout.frontend.menu.view import MenuView
 from chessshootout.frontend.visual.cache import new_cache, memoized_surface, render_text
 from chessshootout.frontend.visual.colors import Colors
 from chessshootout.frontend.visual.draw import (
-    chevron_surface, cut_rect_surface, dashed_rounded_rect_surface, infinity_surface)
+    chevron_surface, circle_surface, cut_rect_surface, dashed_rounded_rect_surface,
+    infinity_surface)
 from chessshootout.frontend.visual.emoji import blit_emoji
 from chessshootout.frontend.visual.fonts import get_display_font, get_font, get_mono_font
 from chessshootout.frontend.visual.icons import draw_clock
@@ -58,8 +59,18 @@ RECON_H = 46
 RECON_GAP = 12
 TIME_POPOVER_W = 644
 TIME_POPOVER_H = 414
-SIDE_POPOVER_W = 190
-SIDE_ROW_H = 40
+SIDE_POPOVER_PAD = 18
+SIDE_TILE = 110
+SIDE_TILE_GAP = 14
+SIDE_TILE_CUT = 10
+SIDE_TILE_ART_FRAC = 0.46
+SIDE_TILE_ART_CY_FRAC = 0.40
+SIDE_TILE_LABEL_BOTTOM = 15
+SIDE_READOUT_H = 42
+SIDE_READOUT_GAP = 12
+SIDE_READOUT_INSET = 14
+SIDE_READOUT_LABEL_FONT = 10
+SIDE_READOUT_VALUE_FONT = 15
 
 SUMMARY_CHIP_PAD_X = 12
 SUMMARY_CHIP_GAP = 7
@@ -140,6 +151,7 @@ class PlayView(MenuView):
         self._fen_above = True
         self._time_popover = pg.Rect(0, 0, 0, 0)
         self._side_popover = pg.Rect(0, 0, 0, 0)
+        self._side_readout = pg.Rect(0, 0, 0, 0)
         self._side_rects = {}
         self._hover_target = None
         self._press_target = None
@@ -151,6 +163,8 @@ class PlayView(MenuView):
         self._cta_font = get_display_font(CTA_FONT)
         self._link_font = get_font(12, bold=True)
         self._recon_font = get_font(12, bold=True)
+        self._side_readout_label_font = get_mono_font(SIDE_READOUT_LABEL_FONT, bold=True)
+        self._side_readout_value_font = get_mono_font(SIDE_READOUT_VALUE_FONT, bold=True)
 
     def show(self):
         self.visible = True
@@ -264,6 +278,8 @@ class PlayView(MenuView):
         self._cta_font = get_display_font(self._s(CTA_FONT))
         self._link_font = get_font(self._s(12), bold=True)
         self._recon_font = get_font(self._s(12), bold=True)
+        self._side_readout_label_font = get_mono_font(self._s(SIDE_READOUT_LABEL_FONT), bold=True)
+        self._side_readout_value_font = get_mono_font(self._s(SIDE_READOUT_VALUE_FONT), bold=True)
 
     def _layout_title_block(self):
         x, top = self._title_pos
@@ -380,18 +396,24 @@ class PlayView(MenuView):
         self._picker.set_rect(self._time_popover.inflate(-2 * pad, -2 * pad))
 
     def _layout_side_popover(self):
-        rows = len(SIDE_OPTIONS)
-        base_h = self._s(SIDE_ROW_H) * rows + self._s(8) * (rows + 1)
+        base_w = 2 * SIDE_POPOVER_PAD + 3 * SIDE_TILE + 2 * SIDE_TILE_GAP
+        base_h = (SIDE_POPOVER_PAD + SIDE_TILE + SIDE_READOUT_GAP
+                  + SIDE_READOUT_H + SIDE_POPOVER_PAD)
         self._side_popover, shrink = self._fit_popover(
-            self._s(SIDE_POPOVER_W), base_h, self._side_chip.x, self._side_chip)
-        pad = max(int(self._s(8) * shrink), 3)
-        row_h = max(int(self._s(SIDE_ROW_H) * shrink), 1)
+            self._s(base_w), self._s(base_h), self._side_chip.x, self._side_chip)
+        pad = max(int(self._s(SIDE_POPOVER_PAD) * shrink), 3)
+        gap = max(int(self._s(SIDE_TILE_GAP) * shrink), 2)
+        readout_h = max(int(self._s(SIDE_READOUT_H) * shrink), 1)
+        tile = max(int((self._side_popover.width - 2 * pad - 2 * gap) / 3), 1)
+        row_w = 3 * tile + 2 * gap
+        x = self._side_popover.x + (self._side_popover.width - row_w) // 2
+        ty = self._side_popover.y + pad
         self._side_rects = {}
-        ry = self._side_popover.y + pad
         for _, key in SIDE_OPTIONS:
-            self._side_rects[key] = pg.Rect(self._side_popover.x + pad, ry,
-                                            self._side_popover.width - 2 * pad, row_h)
-            ry += row_h + pad
+            self._side_rects[key] = pg.Rect(x, ty, tile, tile)
+            x += tile + gap
+        self._side_readout = pg.Rect(self._side_popover.x, self._side_popover.bottom - pad
+                                     - readout_h, self._side_popover.width, readout_h)
 
     def _open_time_popover(self):
         self._picker.set_selection(self.selected_time_minutes,
@@ -544,9 +566,10 @@ class PlayView(MenuView):
         window.blit(cut_rect_surface(self._recon_rect.size, self._s(CHIP_CUT), fill,
                                      border=Colors.amber, border_width=1,
                                      corners=("tr", "bl")), self._recon_rect.topleft)
-        dot = max(self._s(4), 3)
-        pg.draw.circle(window, Colors.amber,
-                       (self._recon_rect.x + self._s(16), self._recon_rect.centery), dot)
+        dot_d = max(self._s(4), 3) * 2
+        window.blit(circle_surface(dot_d, Colors.amber),
+                    (self._recon_rect.x + self._s(16) - dot_d // 2,
+                     self._recon_rect.centery - dot_d // 2))
         text = render_text(self._recon_font, "You have a game in progress", Colors.text)
         window.blit(text, (self._recon_rect.x + self._s(30),
                            self._recon_rect.centery - text.get_height() // 2))
@@ -691,24 +714,33 @@ class PlayView(MenuView):
                                      border_width=1, corners=("tr", "bl")),
                     self._side_popover.topleft)
         mouse = pg.mouse.get_pos()
+        pressed = pg.mouse.get_pressed()[0]
         for label, key in SIDE_OPTIONS:
-            rect = self._side_rects[key]
-            selected = key == self.selected_side
-            hovered = rect.collidepoint(mouse)
-            fill = Colors.surface_active if selected else (
-                Colors.surface_hover if hovered else Colors.surface)
-            border = Colors.accent if selected else Colors.border
-            window.blit(cut_rect_surface(rect.size, self._s(6), fill, border=border,
-                                         border_width=1, corners=("tr", "bl")), rect.topleft)
-            self._draw_side_icon(window, rect, key)
-            color = Colors.text if selected or hovered else Colors.text_dim
-            text = render_text(self._chip_font, label, color)
-            window.blit(text, (rect.x + self._s(44), rect.centery - text.get_height() // 2))
+            self._draw_side_tile(window, key, label, mouse, pressed)
+        self._draw_side_readout(window)
 
-    def _draw_side_icon(self, window, rect, key):
-        size = int(rect.height * 0.7)
-        cx = rect.x + self._s(22)
-        cy = rect.centery
+    def _draw_side_tile(self, window, key, label, mouse, mouse_down):
+        rect = self._side_rects[key]
+        selected = key == self.selected_side
+        hovered = rect.collidepoint(mouse)
+        pressed = hovered and mouse_down
+        fill = Colors.surface_raised if selected else (
+            Colors.surface_hover if hovered else Colors.surface)
+        border = Colors.accent if selected else Colors.border
+        window.blit(cut_rect_surface(rect.size, self._s(SIDE_TILE_CUT), fill, border=border,
+                                     border_width=1, corners=("tr", "bl")), rect.topleft)
+        offset = self._s(PRESS_OFFSET_PX) if pressed else 0
+        self._draw_side_tile_art(window, rect, key, offset)
+        color = Colors.text if selected or hovered else Colors.text_dim
+        text = render_text(self._chip_font, label, color)
+        window.blit(text, (rect.centerx - text.get_width() // 2,
+                           rect.bottom - self._s(SIDE_TILE_LABEL_BOTTOM)
+                           - text.get_height() + offset))
+
+    def _draw_side_tile_art(self, window, rect, key, offset):
+        size = max(int(rect.width * SIDE_TILE_ART_FRAC), 1)
+        cx = rect.centerx
+        cy = rect.y + int(rect.height * SIDE_TILE_ART_CY_FRAC) + offset
         if key == "random":
             if not blit_emoji(window, "🎲", (cx, cy), size):
                 pg.draw.rect(window, Colors.text_dim,
@@ -719,3 +751,14 @@ class PlayView(MenuView):
         if img is not None:
             scaled = pg.transform.smoothscale(img, (size, size))
             window.blit(scaled, (cx - size // 2, cy - size // 2))
+
+    def _draw_side_readout(self, window):
+        rect = self._side_readout
+        pg.draw.line(window, Colors.border_strong, (rect.x + self._s(SIDE_READOUT_INSET),
+                     rect.y), (rect.right - self._s(SIDE_READOUT_INSET), rect.y))
+        inset = self._s(SIDE_READOUT_INSET)
+        label = render_text(self._side_readout_label_font, "SIDE", Colors.text_muted)
+        value = render_text(self._side_readout_value_font, self._side_label_text(), Colors.text)
+        window.blit(label, (rect.x + inset, rect.centery - label.get_height() // 2))
+        window.blit(value, (rect.right - inset - value.get_width(),
+                            rect.centery - value.get_height() // 2))

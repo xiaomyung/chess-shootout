@@ -42,6 +42,14 @@ from chessshootout.online.news import NewsClient
 PERF_SAMPLE_COUNT = 240
 PERF_1PCT_PERCENTILE = 0.99
 PERF_1PCT_MIN_SAMPLES = 100
+STAT_SLOT_FPS = 7
+STAT_SLOT_1PCT = 9
+STAT_SLOT_FRAME = 13
+STAT_SLOT_PING = 10
+
+
+def _stat_slot(label, value, width):
+    return f"{label} {value}".ljust(width)
 
 
 def _games_dir():
@@ -288,19 +296,20 @@ class Frontend:
         need_sorted = env.get_show_frame_stats() or env.get_show_1pct_low()
         ordered = sorted(self._frame_times) if need_sorted and self._frame_times else []
         if env.get_show_fps():
-            parts.append(f"FPS {int(self._current_fps()):>4}")
+            parts.append(_stat_slot("FPS", int(self._current_fps()), STAT_SLOT_FPS))
         if env.get_show_frame_stats() and ordered:
             avg = sum(ordered) / len(ordered)
-            parts.append(f"AVG {1000.0 / avg:>4.0f}")
-            parts.append(f"MIN {1000.0 / ordered[-1]:>4.0f}")
+            parts.append(_stat_slot("AVG", f"{1000.0 / avg:.0f}", STAT_SLOT_FPS))
+            parts.append(_stat_slot("MIN", f"{1000.0 / ordered[-1]:.0f}", STAT_SLOT_FPS))
         if env.get_show_1pct_low() and len(ordered) >= PERF_1PCT_MIN_SAMPLES:
             p99 = ordered[int(len(ordered) * PERF_1PCT_PERCENTILE) - 1]
-            parts.append(f"1%LOW {1000.0 / p99:>4.0f}")
+            parts.append(_stat_slot("1%LOW", f"{1000.0 / p99:.0f}", STAT_SLOT_1PCT))
         if env.get_show_frametime():
-            parts.append(f"FRAME {self._last_work_ms:>5.1f}ms")
+            parts.append(_stat_slot("FRAME", f"{self._last_work_ms:.1f}ms", STAT_SLOT_FRAME))
         if env.get_show_ping():
             ping = self.coordinator.ping_ms()
-            parts.append(f"PING {ping:>4}ms" if ping is not None else f"PING {'—':>6}")
+            value = f"{ping}ms" if ping is not None else "—"
+            parts.append(_stat_slot("PING", value, STAT_SLOT_PING))
         return parts
 
     def _present(self, had_events):

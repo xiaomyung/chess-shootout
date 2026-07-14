@@ -1,14 +1,14 @@
 """The match-found VS reveal: a non-dismissable centered modal that holds for a
 short countdown, then fires on_done (which the frontend wires to starting the
 game). Verifies the countdown math, the one-shot completion, the win-rail/accent/
-amber palette of the reveal, and the shared gradient-avatar builder it relies on."""
+amber palette of the reveal, and the shared flat-avatar builder it relies on."""
 
 import pygame as pg
 
 from tests.conftest import pygame_display
 from chessshootout.frontend.modals.match_found import MatchFoundModal
 from chessshootout.frontend.visual.colors import Colors
-from chessshootout.frontend.visual.widgets import build_avatar
+from chessshootout.frontend.visual.widgets import build_flat_avatar
 from tests.helpers import assert_pixel_color
 
 
@@ -86,8 +86,10 @@ def test_draw_paints_win_rail_accent_and_amber():
     win.fill((0, 0, 0))
     m.draw()
     assert _near_count(win, m.rect, Colors.win) > 0
-    assert _near_count(win, m.rect, Colors.accent) > 0
-    assert _near_count(win, m.rect, Colors.amber) > 0
+    assert _near_count(win, m.rect, Colors.accent) > 0, \
+        "the flat white-side avatar paints the reveal accent"
+    assert _near_count(win, m.rect, Colors.amber_hi) > 0, \
+        "the countdown number keeps the amber cue"
 
 
 def test_handle_click_is_non_dismissable():
@@ -97,11 +99,12 @@ def test_handle_click_is_non_dismissable():
     assert m.is_visible()
 
 
-def test_build_avatar_white_side_is_amber_to_accent_gradient():
-    av = build_avatar(52, Colors.amber, Colors.accent)
+def test_flat_avatar_is_a_solid_accent_fill_no_gradient():
+    av = build_flat_avatar(52, Colors.accent)
     assert av.get_size() == (52, 52)
-    assert_pixel_color(av, 26, 3, Colors.amber, tol=30)
-    assert_pixel_color(av, 26, 48, Colors.accent, tol=30)
+    assert_pixel_color(av, 26, 6, Colors.accent, tol=30)
+    assert_pixel_color(av, 26, 46, Colors.accent, tol=30), \
+        "flat avatar is one solid fill top-to-bottom (no gradient)"
 
 
 def test_show_maps_country_to_each_side():

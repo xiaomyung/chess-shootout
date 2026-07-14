@@ -371,6 +371,45 @@ def test_set_avoid_rects_pushes_entities_out_of_every_panel():
         assert not b._point_in_any(b.obstacles, ent["x"], ent["y"])
 
 
+def _in_field(b, ent):
+    w = b._art[ent["kind"]]["w"]
+    return (ent["x"] - w / 2 >= -0.01 and ent["x"] + w / 2 <= b.rect.width + 0.01
+            and ent["y"] - ent["sprite_h"] >= b.top_inset - 0.01
+            and ent["y"] <= b.rect.height + 0.01)
+
+
+def test_set_avoid_rects_evicts_entities_outside_avoid_and_inside_field():
+    """r4: a fresh avoid set that lands on the entities pushes them out of every
+    panel and leaves them inside the field bounds."""
+    b = _battle()
+    b.queen["x"], b.queen["y"] = CENTER_CARD.center
+    b.pawns[0]["x"], b.pawns[0]["y"] = CENTER_CARD.center
+    b.set_avoid_rects([LEFT_RAIL, CENTER_CARD])
+    for ent in (b.queen, b.pawns[0]):
+        assert not b._point_in_any(b._entity_obstacles(ent), ent["x"], ent["y"])
+        assert _in_field(b, ent)
+
+
+def test_set_rect_shrink_clamps_stale_entities_back_into_the_field():
+    """r4: fullscreen->windowed shrinks the arena; entities stranded outside the
+    new bounds get clamped back in instead of floating off into the rails."""
+    b = _battle(w=1600, h=1000)
+    b.queen["x"], b.queen["y"] = 1550, 980
+    b.pawns[0]["x"], b.pawns[0]["y"] = 1500, 950
+    b.set_rect(pg.Rect(0, 0, 700, 500))
+    assert _in_field(b, b.queen), "the queen is clamped into the shrunk field"
+    assert _in_field(b, b.pawns[0]), "a stranded pawn is clamped into the shrunk field"
+
+
+def test_set_rect_shrink_culls_out_of_bounds_projectiles_and_drops():
+    b = _battle(w=1600, h=1000)
+    b.projectiles = [{"x": 1500, "y": 950, "vx": 0.0, "vy": 0.0}]
+    b.drops = [{"x": 1500, "y": 950, "start": 0, "dur": 3000}]
+    b.set_rect(pg.Rect(0, 0, 700, 500))
+    assert b.projectiles == [], "projectiles beyond the shrunk field are culled"
+    assert b.drops == [], "drops beyond the shrunk field are culled"
+
+
 def test_idle_queen_rerolls_waypoint_after_two_seconds():
     b = _battle()
     q = b.queen
