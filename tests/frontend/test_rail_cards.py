@@ -13,7 +13,9 @@ from tests.conftest import pygame_display
 from chessshootout.frontend.menu.rail_cards import (
     AVATAR_SIZE, BODY_ROW_H, FOOTER_H, HEADER_H, PAD_X,
 )
+from chessshootout.frontend.screens.menu import VIEW_RISE_MS
 from chessshootout.frontend.visual.colors import Colors
+from chessshootout.frontend.visual.widgets import avatar_palette
 from chessshootout.infra import env
 from chessshootout.online.news import NewsClient
 from tests.helpers import assert_pixel_color, make_app
@@ -246,11 +248,11 @@ def _profile_avatar_rect(stack):
     return pg.Rect(block.x + pad, block.centery - av // 2, av, av)
 
 
-def test_profile_avatar_is_a_flat_accent_tile_not_a_gradient(app, stack):
+def test_profile_avatar_is_a_flat_tile_not_a_gradient(app, stack):
     """cp3: the right-rail avatar was a blurry vertical gradient blob, off the
-    flat-fill card language. It is now a crisp flat accent tile with a dark bold
+    flat-fill card language. It is now a crisp flat tile with a dark bold
     letter — a flat fill means top and mid sample the SAME colour (a gradient
-    would not), and that colour is the accent."""
+    would not), and that colour comes from the nickname-seeded avatar palette."""
     env.set_nickname("alice")
     _refresh(app)
     app.draw_frame()
@@ -259,7 +261,44 @@ def test_profile_avatar_is_a_flat_accent_tile_not_a_gradient(app, stack):
     top = win.get_at((av.x + 3, av.y + av.height // 4))[:3]
     mid = win.get_at((av.x + 3, av.centery))[:3]
     assert top == mid, "flat fill: no vertical gradient across the avatar tile"
-    assert_pixel_color(win, av.x + 3, av.centery, Colors.accent, tol=12)
+    expected_fill, _ = avatar_palette("alice")
+    assert_pixel_color(win, av.x + 3, av.centery, expected_fill, tol=12)
+
+
+def test_profile_avatar_color_is_stable_for_the_same_nickname(app, stack):
+    env.set_nickname("carol")
+    _refresh(app)
+    app.draw_frame()
+    av = _profile_avatar_rect(stack)
+    win = pg.display.get_surface()
+    first = win.get_at((av.x + 3, av.centery))[:3]
+    _refresh(app)
+    app.draw_frame()
+    second = win.get_at((av.x + 3, av.centery))[:3]
+    assert first == second, "the same nickname always maps to the same avatar color"
+
+
+def test_rail_and_profile_view_avatars_agree_for_the_same_nickname(app, stack, monkeypatch):
+    env.set_nickname("dave")
+    _refresh(app)
+    app.draw_frame()
+    av = _profile_avatar_rect(stack)
+    win = pg.display.get_surface()
+    rail_color = win.get_at((av.x + 3, av.centery))[:3]
+
+    app.menu.goto_view("profile")
+    holder = {"ms": pg.time.get_ticks()}
+    monkeypatch.setattr(pg.time, "get_ticks", lambda: holder["ms"])
+    app.draw_frame()
+    holder["ms"] += VIEW_RISE_MS + 1
+    app.draw_frame()
+    view = app.menu.views["profile"]
+    profile_rect = view._avatar_rect
+    profile_color = win.get_at(
+        (profile_rect.x + 3, profile_rect.centery))[:3]
+
+    assert rail_color == profile_color, \
+        "rail card and profile view resolve the same avatar color for the same nickname"
 
 
 def test_profile_avatar_draws_a_dark_letter_on_the_tile(app, stack):

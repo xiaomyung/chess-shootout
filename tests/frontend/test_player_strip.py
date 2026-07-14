@@ -8,6 +8,7 @@ from chessshootout.frontend.visual.colors import Colors
 from chessshootout.frontend.panels.player_strip import (
     GIVE_TIME_FLOAT_MS, PlayerStrip, give_time_float_alpha,
 )
+from chessshootout.frontend.visual.widgets import avatar_palette
 
 
 _pygame_init = pygame_display(900, 400)
@@ -167,33 +168,42 @@ def _avatar_pixels(strip):
     return top, bottom
 
 
-def test_white_avatar_is_flat_accent(strip):
+def test_avatar_fill_matches_the_palette_seeded_by_the_displayed_name(strip):
     strip.set_state("Alice", 60.0, False, player_color=PieceColor.WHITE)
     _draw(strip)
     top, bottom = _avatar_pixels(strip)
-    assert top.r > 180 and top.r > top.b, "white avatar should be warm accent"
+    expected_fill, _ = avatar_palette("Alice")
+    assert (top.r, top.g, top.b) == (expected_fill.r, expected_fill.g, expected_fill.b)
     assert top == bottom, "flat avatar has no gradient (top matches bottom)"
 
 
-def test_black_avatar_matches_white_avatar(strip):
+def test_avatar_color_differs_for_a_different_name_regardless_of_side(strip):
     strip.set_state("Alice", 60.0, False, player_color=PieceColor.WHITE)
     _draw(strip)
     white_top, _ = _avatar_pixels(strip)
     strip.set_state("Bob", 60.0, False, player_color=PieceColor.BLACK)
     _draw(strip)
     black_top, black_bottom = _avatar_pixels(strip)
-    assert black_top == white_top, "one shared avatar palette regardless of side"
+    assert black_top != white_top, "different display names seed different avatar colors"
     assert black_top == black_bottom, "flat avatar has no gradient (top matches bottom)"
 
 
-def test_bot_avatar_matches_human_avatar(strip):
+def test_avatar_color_is_stable_across_redraws_for_the_same_name(strip):
     strip.set_state("Alice", 60.0, False, player_color=PieceColor.WHITE)
     _draw(strip)
-    human_top, _ = _avatar_pixels(strip)
+    first_top, _ = _avatar_pixels(strip)
+    strip.set_state("Alice", 61.0, True, player_color=PieceColor.WHITE)
+    _draw(strip)
+    second_top, _ = _avatar_pixels(strip)
+    assert first_top == second_top, "same name keeps the same avatar color across redraws"
+
+
+def test_bot_avatar_seeds_from_its_own_display_name(strip):
     strip.set_state("Bot", 60.0, False, player_color=PieceColor.WHITE, is_bot=True)
     _draw(strip)
     bot_top, _ = _avatar_pixels(strip)
-    assert bot_top == human_top, "bot avatar uses the same shared palette as a human's"
+    expected_fill, _ = avatar_palette("Bot")
+    assert (bot_top.r, bot_top.g, bot_top.b) == (expected_fill.r, expected_fill.g, expected_fill.b)
 
 
 def test_rating_pill_drawn(strip):
@@ -386,7 +396,7 @@ def test_tooltip_resets_alpha_when_country_absent(strip):
 
 
 def test_active_black_strip_shows_accent_inactive_does_not(strip):
-    """The avatar fill is one shared warm-accent palette regardless of side, so
+    """The avatar fill is seeded from the display name, not turn state, so
     the discriminator for the active 'whose turn' cue is the border stroke, not
     the avatar. Sample a band at the bottom edge, clear of the avatar/clock
     content, to isolate the border stroke color."""

@@ -31,6 +31,8 @@ class MatchFoundModal(BaseModal):
         self.rating = "1500"
         self.rematch = False
         self.on_done = None
+        self.me_palette = None
+        self.opp_palette = None
         self._started_at = 0
         self._seconds = 3
         self._flag_cache = {}
@@ -49,6 +51,8 @@ class MatchFoundModal(BaseModal):
         self.on_done = on_done
         self._seconds = seconds
         self._started_at = pg.time.get_ticks()
+        self.me_palette = avatar_palette(self.me_name)
+        self.opp_palette = avatar_palette(self.opp_name)
         super().show()
 
     def hide(self):
@@ -123,9 +127,9 @@ class MatchFoundModal(BaseModal):
         gap = max(int(panel_w * 0.027), 12)
         side_w = (content.width - vs_surf.get_width() - 2 * gap) / 2
         self._draw_card(content.x + side_w / 2, y, av, side_w, card_h, self.me_name,
-                        self.me_country, name_font, rating_font, letter_font)
+                        self.me_country, name_font, rating_font, letter_font, self.me_palette)
         self._draw_card(content.right - side_w / 2, y, av, side_w, card_h, self.opp_name,
-                        self.opp_country, name_font, rating_font, letter_font)
+                        self.opp_country, name_font, rating_font, letter_font, self.opp_palette)
         self.window.blit(vs_surf, (content.centerx - vs_surf.get_width() / 2,
                                    y + (card_h - vs_surf.get_height()) / 2))
         y += vs_block_h + g_vs_bottom
@@ -147,8 +151,8 @@ class MatchFoundModal(BaseModal):
         return self._flag_cache[key]
 
     def _draw_card(self, cx, y, av, side_w, card_h, name, country, name_font,
-                   rating_font, letter_font):
-        fill, letter_color = avatar_palette()
+                   rating_font, letter_font, palette):
+        fill, letter_color = palette
         self.window.blit(build_flat_avatar(av, fill), (cx - av / 2, y))
         letter = (name[:1].upper() if name else "?")
         glyph = letter_font.render(letter, True, letter_color)

@@ -10,6 +10,8 @@ import pytest
 
 from tests.conftest import pygame_display
 from chessshootout.frontend.menu.profile_view import NICKNAME_REJECT_TOAST
+from chessshootout.frontend.screens.menu import VIEW_RISE_MS
+from chessshootout.frontend.visual.widgets import avatar_palette
 from chessshootout.infra import env
 from tests.helpers import make_app
 
@@ -140,6 +142,41 @@ def test_client_uuid_shown_read_only(app, monkeypatch):
     assert any(uid in text for text in captured), "the client uuid must be visible somewhere"
     assert env.get_nickname() == before_nickname, "drawing must never mutate state"
     assert env.get_country() == before_country
+
+
+def _settle_view_transition(app, monkeypatch):
+    holder = {"ms": pg.time.get_ticks()}
+    monkeypatch.setattr(pg.time, "get_ticks", lambda: holder["ms"])
+    app.draw_frame()
+    holder["ms"] += VIEW_RISE_MS + 1
+    app.draw_frame()
+
+
+def test_avatar_color_matches_the_palette_seeded_by_the_nickname(app, view, monkeypatch):
+    env.set_nickname("Hikaru")
+    app.menu.goto_view("profile")
+    _settle_view_transition(app, monkeypatch)
+    win = pg.display.get_surface()
+    rect = view._avatar_rect
+    pixel = win.get_at((rect.x + 3, rect.centery))[:3]
+    expected_fill, _ = avatar_palette("Hikaru")
+    assert pixel == (expected_fill.r, expected_fill.g, expected_fill.b)
+
+
+def test_avatar_color_changes_when_the_nickname_changes(app, view, monkeypatch):
+    win = pg.display.get_surface()
+    app.menu.goto_view("profile")
+
+    env.set_nickname("Hikaru")
+    _settle_view_transition(app, monkeypatch)
+    rect = view._avatar_rect
+    first = win.get_at((rect.x + 3, rect.centery))[:3]
+
+    env.set_nickname("Magnus")
+    app.draw_frame()
+    second = win.get_at((rect.x + 3, rect.centery))[:3]
+
+    assert first != second, "the avatar re-seeds when the nickname changes"
 
 
 def test_esc_from_profile_returns_to_play(app):

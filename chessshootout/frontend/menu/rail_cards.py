@@ -77,6 +77,8 @@ class CardStack(ScrollHost):
         )
         self._flag_cache = {}
         self._fonts_ready = False
+        self._profile_avatar_palette = None
+        self._profile_avatar_seed = None
 
     def is_visible(self):
         return True
@@ -203,7 +205,12 @@ class CardStack(ScrollHost):
         pad = self._s(PAD_X, 10)
         av_size = self._s(AVATAR_SIZE, 30)
         av_rect = pg.Rect(rect.x + pad, rect.centery - av_size // 2, av_size, av_size)
-        draw_avatar(window, av_rect, env.get_nickname(), self._avatar_font, *avatar_palette())
+        nickname = env.get_nickname()
+        if self._profile_avatar_palette is None or self._profile_avatar_seed != nickname:
+            self._profile_avatar_seed = nickname
+            self._profile_avatar_palette = avatar_palette(nickname)
+        draw_avatar(window, av_rect, nickname, self._avatar_font,
+                    *self._profile_avatar_palette)
         x = av_rect.right + self._s(12, 8)
         nickname = env.get_nickname() or "Set nickname"
         color = Colors.text if env.get_nickname() else Colors.text_muted

@@ -36,6 +36,8 @@ class ProfileView(MenuView):
         self._scale = 1.0
         self._wins = self._losses = self._draws = self._kos = 0
         self._avatar = AvatarBadge()
+        self._avatar_palette = None
+        self._avatar_palette_seed = None
         self._flag_cache = {}
         self._nickname_rect = pg.Rect(0, 0, 0, 0)
         self._country_rect = pg.Rect(0, 0, 0, 0)
@@ -127,8 +129,12 @@ class ProfileView(MenuView):
         window.blit(cut_rect_surface(self._identity_panel.size, self._s(PANEL_CUT, 6),
                                      Colors.surface, border=Colors.border, border_width=1,
                                      corners=("tr", "bl")), self._identity_panel.topleft)
-        self._avatar.draw(window, self._avatar_rect, env.get_nickname() or "?",
-                          self._avatar_letter_font, avatar_palette())
+        nickname = env.get_nickname()
+        if self._avatar_palette is None or self._avatar_palette_seed != nickname:
+            self._avatar_palette_seed = nickname
+            self._avatar_palette = avatar_palette(nickname)
+        self._avatar.draw(window, self._avatar_rect, nickname or "?",
+                          self._avatar_letter_font, self._avatar_palette)
         self._nickname_input.draw(window)
         self._draw_country_row(window)
 

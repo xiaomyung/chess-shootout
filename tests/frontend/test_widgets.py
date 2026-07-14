@@ -1,4 +1,5 @@
 import gc
+import hashlib
 
 import pygame as pg
 import pytest
@@ -9,7 +10,9 @@ from chessshootout.frontend.visual.cache import render_text
 from chessshootout.frontend.visual.colors import Colors
 from chessshootout.frontend.visual.fonts import get_font
 from chessshootout.frontend.visual.widgets import (
+    AVATAR_COLOR_POOL,
     BUTTON_LABEL_PADDING_PX,
+    avatar_palette,
     draw_button, draw_button_row,
     fit_text_to_rect,
     wrap_words,
@@ -215,6 +218,49 @@ def test_fit_text_to_rect_never_serves_another_surfaces_fit():
     assert fitted_first is not fitted_second, "distinct sources never share a fit"
     assert widgets.fit_text_to_rect(first, wide, padding=3) is fitted_first, \
         "the first source keeps reusing its own cached fit"
+
+
+def test_avatar_palette_is_stable_for_the_same_seed():
+    first = avatar_palette("alice")
+    second = avatar_palette("alice")
+    assert first == second
+
+
+def test_avatar_palette_matches_an_independently_computed_sha1_index():
+    seed = "queen-of-hearts"
+    digest = hashlib.sha1(seed.encode("utf-8")).hexdigest()
+    expected_index = int(digest, 16) % len(AVATAR_COLOR_POOL)
+    fill, letter = avatar_palette(seed)
+    assert fill == pg.Color(AVATAR_COLOR_POOL[expected_index])
+    assert letter == pg.Color(Colors.on_accent)
+
+
+def test_avatar_palette_spreads_different_seeds_across_the_pool():
+    alice_fill, _ = avatar_palette("alice")
+    bob_fill, _ = avatar_palette("bob")
+    assert alice_fill != bob_fill
+
+
+def test_avatar_palette_empty_or_none_seed_falls_back_to_the_first_pool_color():
+    empty_fill, empty_letter = avatar_palette("")
+    none_fill, none_letter = avatar_palette(None)
+    assert empty_fill == pg.Color(AVATAR_COLOR_POOL[0])
+    assert none_fill == pg.Color(AVATAR_COLOR_POOL[0])
+    assert empty_letter == pg.Color(Colors.on_accent)
+    assert none_letter == pg.Color(Colors.on_accent)
+
+
+def test_avatar_color_pool_entries_are_valid_hex_and_pair_with_on_accent():
+    assert len(AVATAR_COLOR_POOL) >= 8
+    for hexcolor in AVATAR_COLOR_POOL:
+        assert hexcolor.startswith("#") and len(hexcolor) == 7
+        int(hexcolor[1:], 16)
+    seen = set()
+    for i in range(len(AVATAR_COLOR_POOL) * 4):
+        fill, letter = avatar_palette(f"seed-{i}")
+        assert letter == pg.Color(Colors.on_accent)
+        seen.add(str(fill))
+    assert len(seen) == len(AVATAR_COLOR_POOL), "enough seeds to touch every pool color"
 
 
 def test_cut_button_wears_the_notch_and_the_default_stays_rounded():

@@ -44,6 +44,15 @@ class Colors:
     check = "#ff3b3b"
     check_fill = check + "6b"
 
+    avatar_orange = accent
+    avatar_amber = amber
+    avatar_teal = "#23b8a6"
+    avatar_green = "#3ecb7e"
+    avatar_blue = "#4a90e2"
+    avatar_violet = "#8f6fe8"
+    avatar_rose = "#e85a86"
+    avatar_cyan = "#29c2d9"
+
     white_tile = "#828b99"
     black_tile = "#2e333b"
     board_frame = "#0a0c0f"

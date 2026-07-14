@@ -1,3 +1,4 @@
+import hashlib
 import math
 from weakref import WeakKeyDictionary
 
@@ -371,8 +372,19 @@ def draw_scroll_thumb(window, track_rect, total, visible, offset_fraction, last_
                  border_radius=SCROLL_THUMB_WIDTH // 2)
 
 
-def avatar_palette():
-    return (pg.Color(Colors.accent), pg.Color(Colors.on_accent))
+AVATAR_COLOR_POOL = (
+    Colors.avatar_orange, Colors.avatar_amber, Colors.avatar_teal, Colors.avatar_green,
+    Colors.avatar_blue, Colors.avatar_violet, Colors.avatar_rose, Colors.avatar_cyan,
+)
+
+
+def avatar_palette(seed):
+    if not seed:
+        fill = AVATAR_COLOR_POOL[0]
+    else:
+        digest = hashlib.sha1(seed.encode("utf-8")).hexdigest()
+        fill = AVATAR_COLOR_POOL[int(digest, 16) % len(AVATAR_COLOR_POOL)]
+    return (pg.Color(fill), pg.Color(Colors.on_accent))
 
 
 class AvatarBadge:

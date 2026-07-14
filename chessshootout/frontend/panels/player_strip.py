@@ -86,6 +86,8 @@ class PlayerStrip:
         self._give_time_float_font = get_font(11, bold=True, mono=True)
         self.icons = {}
         self._avatar = AvatarBadge()
+        self._avatar_palette = None
+        self._avatar_palette_seed = None
         self._flag_cache = None
         self._flag_rect = pg.Rect(0, 0, 0, 0)
         self._tooltip_alpha = 0.0
@@ -175,7 +177,10 @@ class PlayerStrip:
         self._draw_flag_tooltip()
 
     def _draw_avatar(self, rect):
-        self._avatar.draw(self.window, rect, self.name, self.letter_font, avatar_palette())
+        if self._avatar_palette is None or self._avatar_palette_seed != self.name:
+            self._avatar_palette_seed = self.name
+            self._avatar_palette = avatar_palette(self.name)
+        self._avatar.draw(self.window, rect, self.name, self.letter_font, self._avatar_palette)
 
     def _flag_surface(self, height):
         char = flag_emoji(self.country)

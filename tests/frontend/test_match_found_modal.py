@@ -8,7 +8,7 @@ import pygame as pg
 from tests.conftest import pygame_display
 from chessshootout.frontend.modals.match_found import MatchFoundModal
 from chessshootout.frontend.visual.colors import Colors
-from chessshootout.frontend.visual.widgets import build_flat_avatar
+from chessshootout.frontend.visual.widgets import avatar_palette, build_flat_avatar
 from tests.helpers import assert_pixel_color
 
 
@@ -79,17 +79,28 @@ def test_update_fires_on_done_once_at_zero(monkeypatch):
     assert fired == [1]
 
 
-def test_draw_paints_win_rail_accent_and_amber():
+def test_draw_paints_win_rail_seeded_avatars_and_amber():
     win = pg.display.get_surface()
     m = _modal()
     m.show("Alice", "Bob", "white", on_done=lambda: None, seconds=3)
     win.fill((0, 0, 0))
     m.draw()
     assert _near_count(win, m.rect, Colors.win) > 0
-    assert _near_count(win, m.rect, Colors.accent) > 0, \
-        "the flat white-side avatar paints the reveal accent"
+    me_fill, _ = avatar_palette("Alice")
+    opp_fill, _ = avatar_palette("Bob")
+    assert _near_count(win, m.rect, me_fill) > 0, \
+        "the flat me-side avatar paints its name-seeded palette color"
+    assert _near_count(win, m.rect, opp_fill) > 0, \
+        "the flat opponent-side avatar paints its name-seeded palette color"
     assert _near_count(win, m.rect, Colors.amber_hi) > 0, \
         "the countdown number keeps the amber cue"
+
+
+def test_show_resolves_each_side_palette_from_its_own_name():
+    m = _modal()
+    m.show("Alice", "Bob", "white", on_done=lambda: None, seconds=3)
+    assert m.me_palette == avatar_palette("Alice")
+    assert m.opp_palette == avatar_palette("Bob")
 
 
 def test_handle_click_is_non_dismissable():

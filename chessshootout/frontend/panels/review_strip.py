@@ -21,6 +21,8 @@ class ReviewStrip:
         self.advantage_font = get_font(12, bold=True)
         self.letter_font = get_font(18, family=DISPLAY)
         self._avatar = AvatarBadge()
+        self._avatar_palette = None
+        self._avatar_palette_seed = None
 
     def set_rect(self, rect):
         self.rect = pg.Rect(rect)
@@ -59,7 +61,10 @@ class ReviewStrip:
         pg.draw.rect(self.window, Colors.border, self.rect, width=1, border_radius=radius)
 
     def _draw_avatar(self, rect):
-        self._avatar.draw(self.window, rect, self.name, self.letter_font, avatar_palette())
+        if self._avatar_palette is None or self._avatar_palette_seed != self.name:
+            self._avatar_palette_seed = self.name
+            self._avatar_palette = avatar_palette(self.name)
+        self._avatar.draw(self.window, rect, self.name, self.letter_font, self._avatar_palette)
 
     def _draw_name_and_captures(self, x, ih):
         top_y = self.rect.y + max(int(self.rect.height * 0.18), 4)
