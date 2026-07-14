@@ -1,8 +1,9 @@
 """Menu shell navigation: the rail swaps sub-views (logged "menu view a -> b"),
 Esc walks non-Play -> Play -> quit confirm, the menu remembers its active view
 across a screen round-trip, review opened from history returns to the history
-view, and the battle keeps running behind menu modals while avoiding the rail +
-the active view's panels."""
+view, and the battle keeps running behind menu modals while avoiding the rail
++ the history view's panel -- the play view's chips and popovers contribute no
+avoid rects at all, so battle entities fight freely behind them."""
 
 import logging
 
@@ -137,9 +138,9 @@ def test_battle_avoids_the_rail_and_the_active_views_panels():
     battle = app.menu_battle
     hero = app.menu.play_view
     assert app.menu._menu_layout.rail_rect in battle.avoid_rects
-    # cp2: only the chips row is a collider now — the title, CTA and FEN link draw
-    # over the battle, so entities pass freely behind them (they are NOT avoided)
-    assert hero._chips_block in battle.avoid_rects
+    # cp2: the play view contributes no colliders at all -- chips, title, CTA and
+    # FEN link all draw over the battle, so entities fight freely behind them
+    assert hero.avoid_rects() == []
     assert hero._title_block not in battle.avoid_rects
     assert not any(r.contains(hero._cta_rect) for r in battle.avoid_rects)
     # cp2: the full right rail column (opaque panel, edge-to-edge, chrome-to-bottom)
@@ -150,3 +151,21 @@ def test_battle_avoids_the_rail_and_the_active_views_panels():
     app.menu.goto_history()
     app.draw_frame()
     assert app.history_view.rect not in app.menu_battle.avoid_rects
+
+
+def test_play_view_avoid_rects_stay_empty_with_a_popover_open():
+    """The scope grew past just the chip row: an OPEN time/side popover used to
+    add its own collider too. Neither does anymore -- the battle roams and fires
+    straight through an open popover panel exactly as it does through the chips."""
+    app = make_app()
+    hero = app.menu.play_view
+    app.draw_frame()
+
+    app.menu.handle_click(hero._time_chip.center)
+    assert hero._time_open is True
+    assert hero.avoid_rects() == []
+
+    app.menu.handle_click(hero._title_pos)
+    app.menu.handle_click(hero._side_chip.center)
+    assert hero._side_open is True
+    assert hero.avoid_rects() == []

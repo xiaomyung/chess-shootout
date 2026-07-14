@@ -4,7 +4,15 @@ payload contract, side selection (incl. the online side_preference path), the
 FEN link visibility gate, reconnect banner arm/disarm, the locked-chip toast,
 the CTA label swap, defaults seeding + the options-close sync, and the
 view-owned time/side popovers (click-outside / Esc / re-click close, selection
-does NOT auto-close, exit() cancels them)."""
+does NOT auto-close, exit() cancels them).
+
+Popover open/close is animated (fade + scale, out of a shared _PopoverAnim
+state machine): the tween arms on open()/close() but only STARTS on the first
+draw() after arming (see test_menu_transitions.py for why -- a long pre-frame
+gap must not swallow the animation), a CLOSING popover keeps drawing (faded)
+even though its logical open-flag has already flipped, clicks during that
+closing window do not reach popover contents, and a chip re-click mid-close
+restarts the open tween from scratch rather than reversing in place."""
 
 import pygame as pg
 import pytest
@@ -12,7 +20,8 @@ import pytest
 from tests.conftest import pygame_display
 from chessshootout.frontend.menu import hero as hero_mod
 from chessshootout.frontend.menu.hero import (
-    COMING_SOON, CTA_BOTTOM, RECON_GAP, SIDE_OPTIONS, PlayView)
+    COMING_SOON, CTA_BOTTOM, POPOVER_CLOSE_MS, POPOVER_OPEN_MS, RECON_GAP, SIDE_OPTIONS,
+    SUMMARY_CHIP_ICON, PlayView)
 from chessshootout.frontend.visual.colors import Colors
 from chessshootout.infra import env
 from tests.helpers import assert_pixel_color, make_app
@@ -465,3 +474,168 @@ def test_reconnect_banner_shifts_the_title_block_down(app, hero):
     assert hero._recon_rect.top < hero._title_pos[1]
     assert hero._title_pos[1] == pytest.approx(
         base_title_y + hero._recon_rect.height + hero._s(RECON_GAP), abs=1)
+
+
+def test_clock_icon_is_doubled_in_size():
+    assert SUMMARY_CHIP_ICON == 32
+
+
+def _freeze(monkeypatch):
+    holder = {"ms": 100_000}
+    monkeypatch.setattr(pg.time, "get_ticks", lambda: holder["ms"])
+    return holder
+
+
+def _open_and_settle(app, hero, clock, chip):
+    app.menu.handle_click(chip.center)
+    hero.draw(app.window, app.menu._menu_layout)
+    clock["ms"] += POPOVER_OPEN_MS + 1
+    hero.draw(app.window, app.menu._menu_layout)
+
+
+def test_time_popover_open_arms_the_tween_lazily_on_first_draw(monkeypatch, app, hero):
+    _freeze(monkeypatch)
+    app.menu.handle_click(hero._time_chip.center)
+    assert hero._time_anim.mode == "opening"
+    assert hero._time_anim._scale_tween is None, \
+        "armed but not started -- the tween must anchor on the first draw"
+
+    hero.draw(app.window, app.menu._menu_layout)
+    assert hero._time_anim._scale_tween is not None
+
+
+def test_time_popover_open_settles_to_the_idle_open_mode(monkeypatch, app, hero):
+    clock = _freeze(monkeypatch)
+    _open_and_settle(app, hero, clock, hero._time_chip)
+    assert hero._time_anim.mode == "open"
+
+
+def test_time_popover_closing_still_draws_but_blocks_clicks(monkeypatch, app, hero):
+    clock = _freeze(monkeypatch)
+    window = app.window
+    _open_and_settle(app, hero, clock, hero._time_chip)
+
+    app.menu.handle_click(hero._title_pos)
+    assert hero._time_open is False
+    hero.draw(window, app.menu._menu_layout)
+    assert hero._time_anim.mode == "closing"
+
+    clock["ms"] += POPOVER_CLOSE_MS // 2
+    sentinel = (7, 137, 213)
+    window.fill(sentinel)
+    hero.draw(window, app.menu._menu_layout)
+    assert hero._time_anim.mode == "closing"
+    probe = hero._time_popover.center
+    assert window.get_at(probe)[:3] != sentinel, \
+        "a closing popover keeps drawing (faded) instead of vanishing instantly"
+
+    before = hero.selected_time_minutes
+    app.menu.handle_click(hero._picker.chamber_center(5))
+    assert hero.selected_time_minutes == before, \
+        "the popover is logically closed -- clicks inside it must not land"
+
+
+def test_time_popover_disappears_once_the_close_duration_elapses(monkeypatch, app, hero):
+    clock = _freeze(monkeypatch)
+    window = app.window
+    _open_and_settle(app, hero, clock, hero._time_chip)
+
+    app.menu.handle_click(hero._title_pos)
+    hero.draw(window, app.menu._menu_layout)
+    probe = hero._time_popover.center
+
+    clock["ms"] += POPOVER_CLOSE_MS + 1
+    sentinel = (7, 137, 213)
+    window.fill(sentinel)
+    hero.draw(window, app.menu._menu_layout)
+    assert hero._time_anim.mode == "closed"
+    assert window.get_at(probe)[:3] == sentinel
+
+
+def test_time_chip_reclick_mid_close_reopens_cleanly(monkeypatch, app, hero):
+    clock = _freeze(monkeypatch)
+    window = app.window
+    _open_and_settle(app, hero, clock, hero._time_chip)
+
+    app.menu.handle_click(hero._title_pos)
+    hero.draw(window, app.menu._menu_layout)
+    assert hero._time_anim.mode == "closing"
+
+    app.menu.handle_click(hero._time_chip.center)
+    assert hero._time_open is True
+    assert hero._time_anim.mode == "opening", \
+        "reopening mid-close restarts the open tween from scratch"
+
+
+def test_escape_closes_the_time_popover_with_animation_and_is_not_consumed_twice(
+        monkeypatch, app, hero):
+    clock = _freeze(monkeypatch)
+    _open_and_settle(app, hero, clock, hero._time_chip)
+
+    assert hero.escape() is True
+    assert hero._time_open is False
+    assert hero._time_anim.mode == "closing"
+    assert hero.escape() is False, "a second Esc mid-close must not be swallowed again"
+
+
+def test_relayout_mid_open_snaps_the_anim_instead_of_continuing_it(monkeypatch, app, hero):
+    _freeze(monkeypatch)
+    app.menu.handle_click(hero._time_chip.center)
+    hero.draw(app.window, app.menu._menu_layout)
+    assert hero._time_anim.mode == "opening"
+
+    app.menu.relayout((900, 700))
+
+    assert hero._time_anim.mode == "open"
+
+
+def test_side_popover_closing_still_draws_but_blocks_clicks(monkeypatch, app, hero):
+    clock = _freeze(monkeypatch)
+    window = app.window
+    _open_and_settle(app, hero, clock, hero._side_chip)
+
+    app.menu.handle_click(hero._title_pos)
+    hero.draw(window, app.menu._menu_layout)
+    assert hero._side_anim.mode == "closing"
+
+    clock["ms"] += POPOVER_CLOSE_MS // 2
+    sentinel = (7, 137, 213)
+    window.fill(sentinel)
+    hero.draw(window, app.menu._menu_layout)
+    probe = hero._side_popover.center
+    assert window.get_at(probe)[:3] != sentinel
+
+    before = hero.selected_side
+    app.menu.handle_click(hero._side_rects["black"].center)
+    assert hero.selected_side == before
+
+
+def test_side_popover_disappears_once_the_close_duration_elapses(monkeypatch, app, hero):
+    clock = _freeze(monkeypatch)
+    window = app.window
+    _open_and_settle(app, hero, clock, hero._side_chip)
+
+    app.menu.handle_click(hero._title_pos)
+    hero.draw(window, app.menu._menu_layout)
+    probe = hero._side_popover.center
+
+    clock["ms"] += POPOVER_CLOSE_MS + 1
+    sentinel = (7, 137, 213)
+    window.fill(sentinel)
+    hero.draw(window, app.menu._menu_layout)
+    assert hero._side_anim.mode == "closed"
+    assert window.get_at(probe)[:3] == sentinel
+
+
+def test_side_chip_reclick_mid_close_reopens_cleanly(monkeypatch, app, hero):
+    clock = _freeze(monkeypatch)
+    window = app.window
+    _open_and_settle(app, hero, clock, hero._side_chip)
+
+    app.menu.handle_click(hero._title_pos)
+    hero.draw(window, app.menu._menu_layout)
+    assert hero._side_anim.mode == "closing"
+
+    app.menu.handle_click(hero._side_chip.center)
+    assert hero._side_open is True
+    assert hero._side_anim.mode == "opening"

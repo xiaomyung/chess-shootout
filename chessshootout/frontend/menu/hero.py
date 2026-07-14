@@ -15,6 +15,7 @@ from chessshootout.frontend.visual.draw import (
 from chessshootout.frontend.visual.emoji import blit_emoji
 from chessshootout.frontend.visual.fonts import get_display_font, get_font, get_mono_font
 from chessshootout.frontend.visual.icons import draw_clock
+from chessshootout.frontend.visual.tween import Tween, out_back, out_cubic
 
 
 TITLE = "READY UP."
@@ -59,6 +60,9 @@ RECON_H = 46
 RECON_GAP = 12
 TIME_POPOVER_W = 644
 TIME_POPOVER_H = 414
+POPOVER_OPEN_MS = 160
+POPOVER_CLOSE_MS = 120
+POPOVER_OPEN_SCALE = 0.92
 SIDE_POPOVER_PAD = 18
 SIDE_TILE = 110
 SIDE_TILE_GAP = 14
@@ -74,7 +78,7 @@ SIDE_READOUT_VALUE_FONT = 15
 
 SUMMARY_CHIP_PAD_X = 12
 SUMMARY_CHIP_GAP = 7
-SUMMARY_CHIP_ICON = 16
+SUMMARY_CHIP_ICON = 32
 SUMMARY_CHIP_CHEVRON = 11
 SUMMARY_CHIP_SPACING = 12
 SIDE_ICON_SPREAD = 1.55
@@ -114,6 +118,60 @@ def _tracked_surface(font, text, color, tracking):
     return memoized_surface(_HERO_ART_CACHE, key, build)
 
 
+class _PopoverAnim:
+
+    def __init__(self):
+        self.mode = "closed"
+        self._scale_tween = None
+        self._alpha_tween = None
+
+    def open(self):
+        self.mode = "opening"
+        self._scale_tween = None
+        self._alpha_tween = None
+
+    def close(self):
+        if self.mode == "closed":
+            return
+        self.mode = "closing"
+        self._scale_tween = None
+        self._alpha_tween = None
+
+    def snap(self):
+        if self.mode == "opening":
+            self.mode = "open"
+        elif self.mode == "closing":
+            self.mode = "closed"
+        self._scale_tween = None
+        self._alpha_tween = None
+
+    def advance(self, now):
+        if self.mode == "opening":
+            if self._scale_tween is None:
+                self._scale_tween = Tween(
+                    POPOVER_OPEN_SCALE, 1.0, POPOVER_OPEN_MS, now, ease=out_back)
+                self._alpha_tween = Tween(0.0, 255.0, POPOVER_OPEN_MS, now, ease=out_cubic)
+            if self._scale_tween.done(now):
+                self.mode = "open"
+                self._scale_tween = None
+                self._alpha_tween = None
+        elif self.mode == "closing":
+            if self._scale_tween is None:
+                self._scale_tween = Tween(
+                    1.0, POPOVER_OPEN_SCALE, POPOVER_CLOSE_MS, now, ease=out_cubic)
+                self._alpha_tween = Tween(255.0, 0.0, POPOVER_CLOSE_MS, now, ease=out_cubic)
+            if self._scale_tween.done(now):
+                self.mode = "closed"
+                self._scale_tween = None
+                self._alpha_tween = None
+
+    def scale(self, now):
+        return self._scale_tween.value(now) if self._scale_tween is not None else 1.0
+
+    def alpha(self, now):
+        return int(self._alpha_tween.value(now)) if self._alpha_tween is not None else 255
+
+
 class PlayView(MenuView):
 
     name = "play"
@@ -134,6 +192,9 @@ class PlayView(MenuView):
                                   on_ratchet=app.sound_manager.play_turret_ratchet)
         self._time_open = False
         self._side_open = False
+        self._time_anim = _PopoverAnim()
+        self._side_anim = _PopoverAnim()
+        self._popover_scratches = {}
 
         self._menu_layout = None
         self._scale = 1.0
@@ -143,7 +204,6 @@ class PlayView(MenuView):
         self._title_pos = (0, 0)
         self._tagline_pos = (0, 0)
         self._title_block = pg.Rect(0, 0, 0, 0)
-        self._chips_block = pg.Rect(0, 0, 0, 0)
         self._mode_rects = {}
         self._time_chip = pg.Rect(0, 0, 0, 0)
         self._side_chip = pg.Rect(0, 0, 0, 0)
@@ -231,6 +291,8 @@ class PlayView(MenuView):
         self._menu_layout = menu_layout
         self._scale = menu_layout.scale
         self._relayout()
+        self._time_anim.snap()
+        self._side_anim.snap()
         if self._time_open:
             self._layout_time_popover()
         elif self._side_open:
@@ -264,7 +326,6 @@ class PlayView(MenuView):
         self._layout_mode_chips(x, mode_y)
         summary_y = mode_y + self._s(CHIP_H) + self._s(SUMMARY_GAP)
         self._layout_summary_chips(x, summary_y)
-        self._layout_chips_block()
 
         cta_h = self._s(CTA_H)
         cta_bottom = hero.bottom - self._s(CTA_BOTTOM)
@@ -351,12 +412,6 @@ class PlayView(MenuView):
         side_w = pad + side_icon_w + gap + self._max_side_label_w() + gap + chevron + pad
         self._side_chip = pg.Rect(x + time_w + chip_gap, y, side_w, h)
 
-    def _layout_chips_block(self):
-        block = self._time_chip.union(self._side_chip)
-        for rect in self._mode_rects.values():
-            block = block.union(rect)
-        self._chips_block = block
-
     def _layout_fen_link(self):
         x = self._hero_rect.x
         w = self._hero_rect.width
@@ -420,13 +475,19 @@ class PlayView(MenuView):
         self._picker.set_selection(self.selected_time_minutes,
                                    self.selected_increment_seconds)
         self._time_open = True
+        self._time_anim.open()
         self._layout_time_popover()
 
     def _open_side_popover(self):
         self._side_open = True
+        self._side_anim.open()
         self._layout_side_popover()
 
     def _close_popovers(self):
+        if self._time_open:
+            self._time_anim.close()
+        if self._side_open:
+            self._side_anim.close()
         self._time_open = False
         self._side_open = False
 
@@ -442,18 +503,6 @@ class PlayView(MenuView):
 
     def active_scrollable(self, pos=None):
         return self._picker if self._time_open else None
-
-    def avoid_rects(self):
-        if not self.visible or self._hero_rect.width <= 0:
-            return []
-        rects = [self._chips_block]
-        if self.reconnect_available and self._recon_rect.width > 0:
-            rects.append(self._recon_rect)
-        if self._time_open:
-            rects.append(self._time_popover)
-        elif self._side_open:
-            rects.append(self._side_popover)
-        return rects
 
     def handle_click(self, pos):
         if not self.visible:
@@ -557,10 +606,8 @@ class PlayView(MenuView):
         self._draw_cta(window)
         if self.selected_mode != ONLINE:
             self._draw_fen_link(window)
-        if self._time_open:
-            self._draw_time_popover(window)
-        elif self._side_open:
-            self._draw_side_popover(window)
+        self._draw_time_popover_layer(window)
+        self._draw_side_popover_layer(window)
 
     def _draw_recon(self, window):
         fill = pg.Color(Colors.amber).lerp(pg.Color(Colors.surface_raised), 0.84)
@@ -763,3 +810,85 @@ class PlayView(MenuView):
         window.blit(label, (rect.x + inset, rect.centery - label.get_height() // 2))
         window.blit(value, (rect.right - inset - value.get_width(),
                             rect.centery - value.get_height() // 2))
+
+    def _popover_scratch(self, key, size):
+        cached = self._popover_scratches.get(key)
+        if cached is not None and cached.get_size() == tuple(size):
+            return cached
+        scratch = pg.Surface(size, pg.SRCALPHA)
+        self._popover_scratches[key] = scratch
+        return scratch
+
+    def _blit_popover_anim(self, window, scratch, rect, anim, now):
+        scale = anim.scale(now)
+        alpha = anim.alpha(now)
+        w = max(int(rect.width * scale), 1)
+        h = max(int(rect.height * scale), 1)
+        scaled = pg.transform.smoothscale(scratch, (w, h))
+        scaled.set_alpha(alpha)
+        window.blit(scaled, rect.topleft)
+
+    def _draw_time_popover_layer(self, window):
+        anim = self._time_anim
+        if anim.mode == "closed":
+            return
+        now = pg.time.get_ticks()
+        anim.advance(now)
+        if anim.mode == "closed":
+            return
+        if anim.mode == "open":
+            self._draw_time_popover(window)
+            return
+        scratch = self._render_time_popover_scratch(now)
+        self._blit_popover_anim(window, scratch, self._time_popover, anim, now)
+
+    def _render_time_popover_scratch(self, now):
+        rect = self._time_popover
+        scratch = self._popover_scratch("time", rect.size)
+        scratch.fill((0, 0, 0, 0))
+        dx, dy = -rect.x, -rect.y
+        local_rect = rect.move(dx, dy)
+        scratch.blit(cut_rect_surface(local_rect.size, self._s(CTA_CUT),
+                                      Colors.surface_raised, border=Colors.border_strong,
+                                      border_width=1, corners=("tr", "bl")),
+                     local_rect.topleft)
+        self._picker.set_rect(self._picker.rect.move(dx, dy))
+        self._picker.draw(scratch, now)
+        self._layout_time_popover()
+        return scratch
+
+    def _draw_side_popover_layer(self, window):
+        anim = self._side_anim
+        if anim.mode == "closed":
+            return
+        now = pg.time.get_ticks()
+        anim.advance(now)
+        if anim.mode == "closed":
+            return
+        if anim.mode == "open":
+            self._draw_side_popover(window)
+            return
+        scratch = self._render_side_popover_scratch(now)
+        self._blit_popover_anim(window, scratch, self._side_popover, anim, now)
+
+    def _render_side_popover_scratch(self, now):
+        rect = self._side_popover
+        scratch = self._popover_scratch("side", rect.size)
+        scratch.fill((0, 0, 0, 0))
+        dx, dy = -rect.x, -rect.y
+        self._side_popover = rect.move(dx, dy)
+        for key, tile in list(self._side_rects.items()):
+            self._side_rects[key] = tile.move(dx, dy)
+        self._side_readout = self._side_readout.move(dx, dy)
+        mouse = pg.mouse.get_pos()
+        local_mouse = (mouse[0] + dx, mouse[1] + dy)
+        pressed = pg.mouse.get_pressed()[0]
+        scratch.blit(cut_rect_surface(self._side_popover.size, self._s(CTA_CUT),
+                                      Colors.surface_raised, border=Colors.border_strong,
+                                      border_width=1, corners=("tr", "bl")),
+                     self._side_popover.topleft)
+        for label, key in SIDE_OPTIONS:
+            self._draw_side_tile(scratch, key, label, local_mouse, pressed)
+        self._draw_side_readout(scratch)
+        self._layout_side_popover()
+        return scratch

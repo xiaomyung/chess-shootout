@@ -162,6 +162,8 @@ class MenuBattle:
         self._compute_obstacles()
         if self.queen is not None:
             for ent in (self.queen, *self.pawns):
+                if ent.get("emerging"):
+                    continue
                 ent["x"], ent["y"] = self._push_out_all(
                     self._entity_obstacles(ent), ent["x"], ent["y"],
                     exclude_top=ent["kind"] == "queen")
@@ -354,6 +356,7 @@ class MenuBattle:
         self._size_entity(p)
         if initial:
             p["x"], p["y"] = self._push_out_all(self._entity_obstacles(p), p["x"], p["y"])
+        p["emerging"] = not initial
         self.pawns.append(p)
 
     def _body_point(self, ent):
@@ -467,7 +470,7 @@ class MenuBattle:
             q["weapon_switch"] = self._rnd(WEAPON_SWITCH_MIN, WEAPON_SWITCH_MAX)
 
         alive = [p for p in self.pawns if p["alive"]]
-        targets = [p for p in alive if self._fully_in_window(p)]
+        targets = [p for p in alive if self._visible(p)]
         nearest, nd = None, 1e9
         for p in targets:
             d = math.hypot(p["x"] - q["x"], p["y"] - q["y"])
@@ -484,7 +487,10 @@ class MenuBattle:
 
         for p in alive:
             po = self._entity_obstacles(p)
-            rx, ry = self._route(po, p["x"], p["y"], q["x"], q["y"])
+            if p.get("emerging") and self._visible_with(p, po):
+                p["emerging"] = False
+            emerging = p.get("emerging", False)
+            rx, ry = self._route(() if emerging else po, p["x"], p["y"], q["x"], q["y"])
             dx, dy = rx - p["x"], ry - p["y"]
             rd = math.hypot(dx, dy) or 1.0
             qx, qy = q["x"] - p["x"], q["y"] - p["y"]
@@ -495,10 +501,11 @@ class MenuBattle:
                 p["y"] += (dy / rd) * p["speed"] * dt
             else:
                 p["x"] -= (qx / qd) * p["speed"] * 0.3 * dt
-            p["x"], p["y"] = self._push_out_all(po, p["x"], p["y"])
+            if not emerging:
+                p["x"], p["y"] = self._push_out_all(po, p["x"], p["y"])
             p["recoil"] -= p["recoil"] * min(1.0, dt * RECOIL_RECOVER)
             self._aim_gun(p, q, dt)
-            if self._fully_in_window(p):
+            if self._visible_with(p, po):
                 p["fire"] -= dt
                 if p["fire"] <= 0 and self._aligned(p, q):
                     p["fire"] = self._rnd(2.2, 4.6)
@@ -532,7 +539,7 @@ class MenuBattle:
 
     def _reconcile_entities(self):
         for ent in (self.queen, *self.pawns):
-            if ent is None:
+            if ent is None or ent.get("emerging"):
                 continue
             ent["x"], ent["y"] = self._push_out_all(
                 self._entity_obstacles(ent), ent["x"], ent["y"],
@@ -553,6 +560,13 @@ class MenuBattle:
         return (ent["x"] - hw >= 0 and ent["x"] + hw <= self.rect.width
                 and ent["y"] - ent["sprite_h"] >= self.top_inset
                 and ent["y"] <= self.rect.height)
+
+    def _visible_with(self, ent, obstacles):
+        return (self._fully_in_window(ent)
+                and not self._point_in_any(obstacles, ent["x"], ent["y"]))
+
+    def _visible(self, ent):
+        return self._visible_with(ent, self._entity_obstacles(ent))
 
     def _separate_pawns(self):
         art = self._entity_art("pawn")
@@ -577,6 +591,8 @@ class MenuBattle:
                     a["y"] -= s * shift
                     b["y"] += s * shift
         for p in movers:
+            if p.get("emerging"):
+                continue
             p["x"], p["y"] = self._push_out_all(self._entity_obstacles(p), p["x"], p["y"])
 
     def _unstick_queen(self, now_ms, qo):
@@ -790,7 +806,12 @@ class MenuBattle:
             base = QUEEN_BASE_H if ent["kind"] == "queen" else PAWN_BASE_H
             w = art["w"] if art else int(base * self.scale)
             h = ent["sprite_h"]
-            color = pg.Color("lime") if ent["kind"] == "queen" else pg.Color("yellow")
+            if ent["kind"] == "queen":
+                color = pg.Color("lime")
+            elif ent.get("emerging"):
+                color = pg.Color("orange")
+            else:
+                color = pg.Color("yellow")
             pg.draw.rect(window, color,
                          pg.Rect(ox + ent["x"] - w / 2, oy + ent["y"] - h, w, h), 2)
 

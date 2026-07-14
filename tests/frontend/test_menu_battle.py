@@ -93,7 +93,7 @@ def test_queen_does_not_fire_while_drawing_the_gun():
     b = _battle()
     b.pawns = [b.pawns[0]]
     p = b.pawns[0]
-    p["x"], p["y"], p["fire"] = 500, 360, 99
+    p["x"], p["y"], p["fire"] = 800, 360, 99
     _aim_at(b, b.queen, p)
     b.queen["draw_anim"] = 0.5
     b.acc["qfire"] = -1
@@ -390,6 +390,177 @@ def test_set_avoid_rects_evicts_entities_outside_avoid_and_inside_field():
         assert _in_field(b, ent)
 
 
+def _emerging_pawn_at(b, x, y):
+    """Spawn a walk-in (emerging) pawn and park it at (x, y)."""
+    b._spawn_pawn(False)
+    p = b.pawns[-1]
+    p["x"], p["y"] = x, y
+    return p
+
+
+def test_walk_in_pawn_is_emerging_but_an_initial_pawn_is_not():
+    """A one-way membrane: pawns that walk in from off-screen carry an `emerging` pass
+    that lets them cross a rail zone inward; initial in-field pawns never get it."""
+    b = _battle()
+    assert b.pawns[0]["emerging"] is False, "an initial pawn spawns already in the field"
+    b._spawn_pawn(False)
+    assert b.pawns[-1]["emerging"] is True, "a walk-in pawn starts emerging"
+
+
+def test_emerging_pawn_under_a_rail_is_not_evicted_by_set_avoid_rects():
+    b = _battle(card=LEFT_RAIL)
+    o = b.obstacles[0]
+    p = _emerging_pawn_at(b, (o[0] + o[2]) / 2, (o[1] + o[3]) / 2)
+    assert b._point_in_any(b._entity_obstacles(p), p["x"], p["y"]), "the seed sits under the rail"
+    before = (p["x"], p["y"])
+    b.set_avoid_rects([LEFT_RAIL])
+    assert (p["x"], p["y"]) == before, "an emerging pawn is exempt from set_avoid_rects eviction"
+    assert b._point_in_any(b._entity_obstacles(p), p["x"], p["y"]), "it stays under the rail"
+
+
+def test_emerging_pawn_under_a_rail_is_not_reconciled_by_set_rect():
+    b = _battle(card=LEFT_RAIL)
+    o = b.obstacles[0]
+    p = _emerging_pawn_at(b, (o[0] + o[2]) / 2, (o[1] + o[3]) / 2)
+    before = (p["x"], p["y"])
+    b.set_rect(pg.Rect(0, 0, 1000, 700))
+    assert (p["x"], p["y"]) == before, "an emerging pawn is exempt from set_rect reconcile"
+
+
+def test_emerging_pawn_crosses_the_rail_toward_the_queen():
+    """Stepped through the left rail toward an open-field queen, the pawn only ever
+    progresses inward -- no push-back -- and drops the flag once fully clear."""
+    b = _battle(card=LEFT_RAIL)
+    b.pawns = []
+    b.acc["spawn"], b.acc["qfire"] = 1e9, 1e9
+    o = b.obstacles[0]
+    b.queen["x"], b.queen["y"] = 700, (o[1] + o[3]) / 2
+    p = _emerging_pawn_at(b, -60, (o[1] + o[3]) / 2)
+    p["speed"] = 200
+    xs = [p["x"]]
+    for i in range(120):
+        b._step(0.016, 5000 + i * 16)
+        xs.append(p["x"])
+        if not p["emerging"]:
+            break
+    assert all(x1 >= x0 - 0.01 for x0, x1 in zip(xs, xs[1:])), "no push-back while emerging"
+    assert max(xs) > o[2], "the pawn walked out past the right edge of the rail"
+    assert p["emerging"] is False, "it stops emerging once fully clear of the rail"
+
+
+def test_settled_pawn_drops_the_flag_and_is_then_evicted_like_the_queen():
+    b = _battle(card=LEFT_RAIL)
+    b.pawns = []
+    b.acc["spawn"], b.acc["qfire"] = 1e9, 1e9
+    o = b.obstacles[0]
+    b.queen["x"], b.queen["y"] = 700, (o[1] + o[3]) / 2
+    p = _emerging_pawn_at(b, -60, (o[1] + o[3]) / 2)
+    p["speed"] = 300
+    for i in range(200):
+        b._step(0.016, 5000 + i * 16)
+        if not p["emerging"]:
+            break
+    assert p["emerging"] is False, "the pawn finished emerging"
+    p["x"], p["y"] = (o[0] + o[2]) / 2, (o[1] + o[3]) / 2
+    b.set_avoid_rects([LEFT_RAIL])
+    assert not b._point_in_any(b._entity_obstacles(p), p["x"], p["y"]), \
+        "a settled pawn is evicted when a rail lands on it, like any non-emerging entity"
+
+
+def test_queen_is_never_emerging_and_still_evicts_from_a_rail():
+    b = _battle()
+    assert b.queen.get("emerging") in (None, False), "the queen never emerges"
+    b.queen["x"], b.queen["y"] = CENTER_CARD.center
+    b.set_avoid_rects([CENTER_CARD])
+    assert not b._point_in_any(b._entity_obstacles(b.queen), b.queen["x"], b.queen["y"])
+
+
+def test_emerge_degrades_to_normal_with_no_rails():
+    """No avoid rects: a walk-in pawn drops its flag the instant it is fully in the
+    window -- nothing to cross -- matching the rails-hidden behaviour."""
+    b = MenuBattle(pg.display.get_surface(), rng=random.Random(1))
+    b.top_inset = TITLEBAR
+    b.set_rect(pg.Rect(0, 0, 1000, 700))
+    b.set_avoid_rects([])
+    b.acc["spawn"], b.acc["qfire"] = 1e9, 1e9
+    b.queen["x"], b.queen["y"] = 500, 400
+    p = _emerging_pawn_at(b, -60, 400)
+    p["speed"] = 300
+    for i in range(200):
+        b._step(0.016, 5000 + i * 16)
+        if not p["emerging"]:
+            break
+    assert p["emerging"] is False, "with no rail the flag drops once inside the window"
+    assert b._fully_in_window(p)
+
+
+def test_queen_does_not_target_or_fire_at_a_pawn_hidden_under_a_rail():
+    b = _battle(card=LEFT_RAIL)
+    b.pawns = [b.pawns[0]]
+    b.acc["spawn"] = 1e9
+    p = b.pawns[0]
+    o = b.obstacles[0]
+    p["x"], p["y"], p["fire"], p["emerging"] = (o[0] + o[2]) / 2, (o[1] + o[3]) / 2, 99, True
+    assert not b._visible(p), "a pawn under the rail is not visible"
+    _aim_at(b, b.queen, p)
+    b.acc["qfire"] = -1
+    b.projectiles.clear()
+    b.particles.clear()
+    b._step(0.0, 5000)
+    assert b.projectiles == [], "the queen must not shoot a pawn hidden under a rail"
+    assert not any(pt["kind"] == "flash" for pt in b.particles), "and never muzzle-flashes at it"
+
+
+def test_pawn_hidden_under_a_rail_does_not_fire_at_the_queen():
+    b = _battle(card=LEFT_RAIL)
+    b.pawns = [b.pawns[0]]
+    b.acc["spawn"] = 1e9
+    p = b.pawns[0]
+    o = b.obstacles[0]
+    p["x"], p["y"], p["fire"], p["emerging"] = (o[0] + o[2]) / 2, (o[1] + o[3]) / 2, -1, True
+    _aim_at(b, p, b.queen)
+    b.acc["qfire"] = 99
+    b.projectiles.clear()
+    b._step(0.0, 5000)
+    assert b.projectiles == [], "a pawn hidden under a rail must not fire at the queen"
+
+
+def test_visibility_keys_off_live_obstacles_not_the_emerging_flag():
+    """The gate reads the live obstacle set: a rail currently covering a spot hides
+    whatever is there even with emerging already False, so rails sliding in/out on a
+    view switch take effect the same frame."""
+    b = _battle(card=LEFT_RAIL)
+    p = b.pawns[0]
+    o = b.obstacles[0]
+    p["x"], p["y"], p["emerging"] = (o[0] + o[2]) / 2, (o[1] + o[3]) / 2, False
+    assert not b._visible(p), "under a live rail the pawn is hidden regardless of the flag"
+    b.set_avoid_rects([])
+    assert b._visible(p), "with the rail gone the same spot is visible again"
+
+
+def test_pawn_becomes_shootable_and_can_fire_once_it_emerges():
+    b = _battle(card=LEFT_RAIL)
+    b.pawns = [b.pawns[0]]
+    b.acc["spawn"] = 1e9
+    p = b.pawns[0]
+    o = b.obstacles[0]
+    p["x"], p["y"], p["emerging"] = o[2] + b._art["pawn"]["w"], 400, False
+    assert b._visible(p), "clear of the rail the pawn is visible"
+    b.queen["x"], b.queen["y"], p["fire"] = 700, 400, 99
+    _aim_at(b, b.queen, p)
+    b.acc["qfire"] = -1
+    b.projectiles.clear()
+    b._step(0.0, 5000)
+    assert b.projectiles, "once clear of the rail the queen can shoot the emerged pawn"
+    b.pawns = [p]
+    p["x"], p["y"], p["fire"] = o[2] + b._art["pawn"]["w"], 400, -1
+    _aim_at(b, p, b.queen)
+    b.acc["qfire"] = 99
+    b.projectiles.clear()
+    b._step(0.0, 5000)
+    assert b.projectiles, "an emerged pawn fires at the queen like any other"
+
+
 def test_set_rect_shrink_clamps_stale_entities_back_into_the_field():
     """r4: fullscreen->windowed shrinks the arena; entities stranded outside the
     new bounds get clamped back in instead of floating off into the rails."""
@@ -521,7 +692,7 @@ def test_queen_fires_at_fully_onscreen_pawn():
     b = _battle()
     b.pawns = [b.pawns[0]]
     p = b.pawns[0]
-    p["x"], p["y"], p["fire"] = 500, 360, 99
+    p["x"], p["y"], p["fire"] = 800, 360, 99
     _aim_at(b, b.queen, p)
     b.acc["qfire"] = -1
     b.projectiles.clear()
@@ -533,7 +704,7 @@ def test_queen_holds_fire_until_aimed_at_the_pawn():
     b = _battle()
     b.pawns = [b.pawns[0]]
     p = b.pawns[0]
-    p["x"], p["y"], p["fire"] = 500, 360, 99
+    p["x"], p["y"], p["fire"] = 800, 360, 99
     _aim_at(b, b.queen, p)
     b.queen["aim"] += 1.5
     b.acc["qfire"] = -1
@@ -573,7 +744,7 @@ def test_projectile_flies_along_the_barrel():
     b = _battle()
     b.pawns = [b.pawns[0]]
     p = b.pawns[0]
-    p["x"], p["y"], p["fire"] = 500, 360, 99
+    p["x"], p["y"], p["fire"] = 800, 360, 99
     _aim_at(b, b.queen, p)
     b.acc["qfire"] = -1
     b.projectiles.clear()
@@ -973,7 +1144,7 @@ def test_entities_full_models_stay_out_of_the_card_during_play():
         b.update(b._last_ms + 16 if b._last_ms else 1000)
         assert _model_clears_all(b, b.queen)
         for p in b.pawns:
-            if p["alive"]:
+            if p["alive"] and not p.get("emerging"):
                 assert _model_clears_all(b, p)
 
 
@@ -984,7 +1155,7 @@ def test_full_models_clear_every_panel_during_play():
         b.update(b._last_ms + 16 if b._last_ms else 1000)
         assert _model_clears_all(b, b.queen), "the queen's full model clips a panel mid-play"
         for p in b.pawns:
-            if p["alive"]:
+            if p["alive"] and not p.get("emerging"):
                 assert _model_clears_all(b, p), "a pawn's full model clips a panel mid-play"
 
 
@@ -1186,7 +1357,7 @@ def test_queen_switch_timer_resets_into_range_and_changes_weapon():
 def test_flash_particle_records_weapon_and_valid_index():
     b = _battle()
     b.pawns = [b.pawns[0]]
-    b.pawns[0]["x"], b.pawns[0]["y"], b.pawns[0]["fire"] = 500, 360, 99
+    b.pawns[0]["x"], b.pawns[0]["y"], b.pawns[0]["fire"] = 800, 360, 99
     b.queen["weapon"] = "shotgun"
     _aim_at(b, b.queen, b.pawns[0])
     b.acc["qfire"] = -1
