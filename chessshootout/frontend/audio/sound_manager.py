@@ -183,7 +183,7 @@ class SoundManager:
     def play_draw(self):
         self._play("draw")
 
-    def play_surrender(self):
+    def play_resign(self):
         self._play("resign")
 
     def play_toast(self):

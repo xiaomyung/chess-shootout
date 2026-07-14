@@ -24,7 +24,7 @@ FRONTEND_ROOT = os.path.join(PACKAGE_ROOT, "frontend")
 MENU_ROOT = os.path.join(FRONTEND_ROOT, "menu")
 MENU_SCREEN = os.path.join(FRONTEND_ROOT, "screens", "menu.py")
 
-VIEW_MODULES = ("hero", "history_host", "options_view", "profile_view", "stubs")
+VIEW_MODULES = ("play_view", "history_host", "options_view", "profile_view", "stubs")
 
 
 def _view_module(name):

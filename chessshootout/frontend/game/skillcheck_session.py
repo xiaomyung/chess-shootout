@@ -14,7 +14,7 @@ from chessshootout.skillcheck.wheel import period_for_diff, placement_square
 log = logging.getLogger("chess.frontend")
 
 
-class SkillcheckSession:
+class SkillCheckSession:
 
     def __init__(self, screen):
         self.screen = screen

@@ -8,7 +8,7 @@ from chessshootout.frontend.panels.history_view import PGN_PATTERN, load_match_g
 from chessshootout.frontend.visual.cache import render_text
 from chessshootout.frontend.visual.colors import Colors
 from chessshootout.frontend.visual.draw import cut_rect_surface
-from chessshootout.frontend.visual.emoji import emoji_surface
+from chessshootout.frontend.visual.emoji import flag_surface
 from chessshootout.frontend.visual.fonts import DISPLAY, get_display_font, get_font, get_mono_font
 from chessshootout.frontend.visual.text_input import TextInput
 from chessshootout.frontend.visual.widgets import AvatarBadge
@@ -36,7 +36,6 @@ class ProfileView(MenuView):
         self._avatar = AvatarBadge()
         self._avatar_palette = None
         self._avatar_palette_seed = None
-        self._flag_cache = {}
         self._nickname_rect = pg.Rect(0, 0, 0, 0)
         self._country_rect = pg.Rect(0, 0, 0, 0)
         self._nickname_input = TextInput(
@@ -153,14 +152,7 @@ class ProfileView(MenuView):
         window.blit(label_surf, (x, rect.centery - label_surf.get_height() // 2))
 
     def _flag_surface(self, code):
-        char = countries.flag_emoji(code)
-        if not char:
-            return None
-        size = self._s(15, 11)
-        key = (char, size)
-        if key not in self._flag_cache:
-            self._flag_cache[key] = emoji_surface(char, size)
-        return self._flag_cache[key]
+        return flag_surface(code, self._s(15, 11))
 
     def _draw_stats(self, window):
         cards = ((self._wins, "WINS", Colors.win), (self._losses, "LOSSES", Colors.loss),

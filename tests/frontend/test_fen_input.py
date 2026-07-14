@@ -109,7 +109,7 @@ def test_valid_fen_starts_single_screen_game():
     assert app.screen is app.game
     assert app.game.variant == "local"
     assert app.menu.fen_input_modal.is_visible() is False
-    assert app.menu.card_visible() is False
+    assert app.menu.play_view_visible() is False
 
 
 def test_invalid_fen_returns_false_and_keeps_modal_open():

@@ -4,7 +4,7 @@ from chessshootout.infra import countries
 from chessshootout.frontend.modals.base import BaseModal, MODAL_RAIL
 from chessshootout.frontend.visual.colors import Colors
 from chessshootout.frontend.visual.draw import rounded_rect_surface
-from chessshootout.frontend.visual.emoji import emoji_surface
+from chessshootout.frontend.visual.emoji import flag_surface
 from chessshootout.frontend.visual.fonts import get_display_font, get_font, get_mono_font
 from chessshootout.frontend.visual.scroll_view import ScrollHost, ScrollView
 from chessshootout.frontend.visual.text_input import TextInput
@@ -41,7 +41,6 @@ class CountryPicker(BaseModal, ScrollHost):
             lambda: (self._list_rect, self._content_px),
             wheel_step_px=lambda: self._row_h,
         )
-        self._flag_cache = {}
         self._on_rect_changed()
 
     def _on_rect_changed(self):
@@ -86,15 +85,6 @@ class CountryPicker(BaseModal, ScrollHost):
             rows.append(("", "No flag"))
         rows.extend(self._filtered)
         return rows
-
-    def _flag_for(self, code, size):
-        char = countries.flag_emoji(code)
-        if not char:
-            return None
-        key = (char, size)
-        if key not in self._flag_cache:
-            self._flag_cache[key] = emoji_surface(char, size)
-        return self._flag_cache[key]
 
     def draw(self):
         if not self.visible or self.rect.width <= 0:
@@ -158,7 +148,7 @@ class CountryPicker(BaseModal, ScrollHost):
             pg.draw.rect(self.window, Colors.surface_hover, row_rect, border_radius=8)
         x = row_rect.x + ROW_FLAG_INSET
         flag_size = max(int(self._row_h * 0.5), 12)
-        flag = self._flag_for(code, flag_size)
+        flag = flag_surface(code, flag_size)
         if flag is not None:
             self.window.blit(flag, (x, row_rect.centery - flag.get_height() // 2))
         x += flag_size + ROW_FLAG_GAP

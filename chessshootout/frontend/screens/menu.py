@@ -54,13 +54,13 @@ class MenuScreen(Screen):
     def play_view(self):
         return self.views["play"]
 
-    def show_card(self):
+    def show_play_view(self):
         self.play_view.show()
 
-    def hide_card(self):
+    def hide_play_view(self):
         self.play_view.hide()
 
-    def card_visible(self):
+    def play_view_visible(self):
         return self.play_view.is_visible()
 
     def set_reconnect_available(self, available):
@@ -237,7 +237,7 @@ class MenuScreen(Screen):
     def handle_click(self, pos):
         row = self.rail.hit_test(pos)
         if row is not None:
-            self.app.input_router._click_sound_played = True
+            self.app.input_router.suppress_click_sound()
             if row != self._active_view:
                 self.app.sound_manager.play_rail_click()
             self.goto_view(row)

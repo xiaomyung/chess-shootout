@@ -279,12 +279,12 @@ def test_search_cancel_on_menu_does_not_self_switch(caplog):
     it) — _return_to_menu_card must re-show the start card without a pointless
     menu -> menu exit/enter cycle polluting the lifecycle log."""
     app = make_app(1000, 800)
-    app.menu.hide_card()
+    app.menu.hide_play_view()
     menu = app.screen
     with caplog.at_level(logging.INFO, logger="chess.frontend"):
         app.coordinator._return_to_menu_card()
     assert app.screen is menu
-    assert app.menu.card_visible() is True
+    assert app.menu.play_view_visible() is True
     assert not any("screen switch" in r.getMessage() for r in caplog.records)
 
 
@@ -292,7 +292,7 @@ def test_return_to_menu_from_game_still_switches():
     app = start_single_screen(make_app(1000, 800))
     app.coordinator._return_to_menu_card()
     assert app.screen is app.menu
-    assert app.menu.card_visible() is True
+    assert app.menu.play_view_visible() is True
 
 
 def test_every_send_goes_through_the_coordinator_not_around_it():

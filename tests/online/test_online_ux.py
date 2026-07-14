@@ -74,7 +74,7 @@ def test_reconnecting_modal_show_makes_visible_and_caches_callback():
     m = ReconnectingModal(pg.display.get_surface())
     m.set_rect(pg.Rect(0, 0, 400, 400))
     cancelled = []
-    m.show(pg.time.get_ticks(), on_cancel=lambda: cancelled.append(True))
+    m.show(pg.time.get_ticks(), on_abandon=lambda: cancelled.append(True))
     assert m.is_visible()
     m.draw()
     m.handle_click(m.button_rects["abandon"].center)
@@ -88,7 +88,7 @@ def test_reconnecting_overlay_fills_board_rect_with_scrim():
     m = ReconnectingModal(win)
     rect = pg.Rect(0, 0, 420, 360)
     m.set_rect(rect)
-    m.show(pg.time.get_ticks(), on_cancel=lambda: None)
+    m.show(pg.time.get_ticks(), on_abandon=lambda: None)
 
     win.fill((0, 0, 0))
     m.draw()
@@ -484,7 +484,7 @@ def _arm_post_game(frontend, **client):
     frontend.game.manual_result = "draw_agreement"
     frontend.game._chosen_side = "white"
     frontend.game.white_name, frontend.game.black_name = "Me", "Them"
-    frontend.menu.hide_card()
+    frontend.menu.hide_play_view()
 
 
 def test_decline_rematch_sends_false_and_clears(frontend):
@@ -517,7 +517,7 @@ def test_rematch_update_declined_bubbles_and_returns_to_menu(frontend):
     assert frontend.coordinator.client is None
     assert frontend.screen is frontend.menu
     assert frontend.coordinator._rematch_offered is False
-    assert frontend.menu.card_visible()
+    assert frontend.menu.play_view_visible()
 
 
 def test_rematch_update_window_expired_returns_to_menu(frontend):
@@ -525,7 +525,7 @@ def test_rematch_update_window_expired_returns_to_menu(frontend):
     frontend.coordinator._handle_rematch_update({"event": "window_expired"})
     assert frontend.coordinator.client is None
     assert frontend.screen is frontend.menu
-    assert frontend.menu.card_visible()
+    assert frontend.menu.play_view_visible()
 
 
 def test_rematch_update_declined_logs_the_teardown_reason(frontend, caplog):

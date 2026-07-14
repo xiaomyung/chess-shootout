@@ -472,7 +472,7 @@ class OnlineCoordinator:
                  payload.get("time_minutes"), payload.get("increment_seconds"))
         self.wait_modal.hide()
         self.app.confirm_modal.hide()
-        self.app.menu.hide_card()
+        self.app.menu.hide_play_view()
         nav_payload = {
             "your_color": payload["your_color"],
             "white_name": payload["white_name"],
@@ -493,7 +493,7 @@ class OnlineCoordinator:
                  config.get("time_minutes"), config.get("increment_seconds"),
                  config.get("side"))
         self._online_config = config
-        self.app.menu.hide_card()
+        self.app.menu.hide_play_view()
         self._on_server_addr_connect(env.get_server_addr())
 
     def _on_server_addr_connect(self, addr):
@@ -599,7 +599,7 @@ class OnlineCoordinator:
 
     def _return_to_menu_card(self):
         if self.app.screen is self.app.menu:
-            self.app.menu.show_card()
+            self.app.menu.show_play_view()
         else:
             self.app.switch_to("menu")
         self._reconnect_probe_attempts = 0
@@ -720,7 +720,7 @@ class OnlineCoordinator:
             if (not self.reconnecting_modal.is_visible() and since is not None
                     and now - since >= RECONNECT_MODAL_DEBOUNCE_MS):
                 self.reconnecting_modal.show(
-                    since, on_cancel=self._abandon_online_game)
+                    since, on_abandon=self._abandon_online_game)
         elif self.reconnecting_modal.is_visible():
             self.reconnecting_modal.hide()
         if self._resyncing:
@@ -824,7 +824,7 @@ class OnlineCoordinator:
         self.client.reconnect_to_existing(
             pending["addr"], pending["room_id"], pending["session_token"], resume,
         )
-        self.app.menu.hide_card()
+        self.app.menu.hide_play_view()
 
     def update(self, now):
         self._drain_online_inbound()

@@ -1,5 +1,5 @@
 from chessshootout.frontend.menu.view import MenuView
-from chessshootout.frontend.menu.hero import PlayView
+from chessshootout.frontend.menu.play_view import PlayView
 from chessshootout.frontend.menu.history_host import HistoryMenuView
 from chessshootout.frontend.menu.options_view import OptionsView
 from chessshootout.frontend.menu.profile_view import ProfileView

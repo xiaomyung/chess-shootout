@@ -292,12 +292,12 @@ def set_default_increment(value):
     _set_enum("CHESS_DEFAULT_INCREMENT", value, INCREMENT_VALUES, _DEFAULT_INCREMENT)
 
 
-def default_time_minutes():
+def get_default_time_minutes():
     value = get_default_time_control()
     return None if value == "∞" else int(value)
 
 
-def default_increment_seconds():
+def get_default_increment_seconds():
     return int(get_default_increment())
 
 

@@ -254,10 +254,10 @@ class PlayView(MenuView):
         self.hide()
 
     def apply_default_time_settings(self):
-        minutes = env.default_time_minutes()
+        minutes = env.get_default_time_minutes()
         if minutes in [value for value, _ in CHAMBERS]:
             self.selected_time_minutes = minutes
-        seconds = env.default_increment_seconds()
+        seconds = env.get_default_increment_seconds()
         if seconds in INCREMENTS:
             self.selected_increment_seconds = seconds
         if self.selected_time_minutes is None:
@@ -515,7 +515,7 @@ class PlayView(MenuView):
         if self._time_open:
             if self._time_popover.collidepoint(pos):
                 self._picker.handle_click(pos)
-                self.app.input_router._click_sound_played = True
+                self.app.input_router.suppress_click_sound()
             else:
                 self._close_popovers()
             return True
@@ -739,18 +739,17 @@ class PlayView(MenuView):
         text = render_text(self._link_font, "Start from FEN", color)
         window.blit(text, (self._fen_rect.x, self._fen_rect.centery - text.get_height() // 2))
 
+    def _popover_panel(self, size):
+        return cut_rect_surface(size, self._s(CTA_CUT), Colors.surface_raised,
+                                border=Colors.border_strong, border_width=1,
+                                corners=("tr", "bl"))
+
     def _draw_time_popover(self, window):
-        window.blit(cut_rect_surface(self._time_popover.size, self._s(CTA_CUT),
-                                     Colors.surface_raised, border=Colors.border_strong,
-                                     border_width=1, corners=("tr", "bl")),
-                    self._time_popover.topleft)
+        window.blit(self._popover_panel(self._time_popover.size), self._time_popover.topleft)
         self._picker.draw(window, pg.time.get_ticks())
 
     def _draw_side_popover(self, window):
-        window.blit(cut_rect_surface(self._side_popover.size, self._s(CTA_CUT),
-                                     Colors.surface_raised, border=Colors.border_strong,
-                                     border_width=1, corners=("tr", "bl")),
-                    self._side_popover.topleft)
+        window.blit(self._popover_panel(self._side_popover.size), self._side_popover.topleft)
         mouse = pg.mouse.get_pos()
         pressed = pg.mouse.get_pressed()[0]
         for label, key in SIDE_OPTIONS:
@@ -837,10 +836,7 @@ class PlayView(MenuView):
         scratch.fill((0, 0, 0, 0))
         dx, dy = -rect.x, -rect.y
         local_rect = rect.move(dx, dy)
-        scratch.blit(cut_rect_surface(local_rect.size, self._s(CTA_CUT),
-                                      Colors.surface_raised, border=Colors.border_strong,
-                                      border_width=1, corners=("tr", "bl")),
-                     local_rect.topleft)
+        scratch.blit(self._popover_panel(local_rect.size), local_rect.topleft)
         self._picker.set_rect(self._picker.rect.move(dx, dy))
         self._picker.draw(scratch, now)
         self._layout_time_popover()
@@ -872,10 +868,7 @@ class PlayView(MenuView):
         mouse = pg.mouse.get_pos()
         local_mouse = (mouse[0] + dx, mouse[1] + dy)
         pressed = pg.mouse.get_pressed()[0]
-        scratch.blit(cut_rect_surface(self._side_popover.size, self._s(CTA_CUT),
-                                      Colors.surface_raised, border=Colors.border_strong,
-                                      border_width=1, corners=("tr", "bl")),
-                     self._side_popover.topleft)
+        scratch.blit(self._popover_panel(self._side_popover.size), self._side_popover.topleft)
         for label, key in SIDE_OPTIONS:
             self._draw_side_tile(scratch, key, label, local_mouse, pressed)
         self._draw_side_readout(scratch)

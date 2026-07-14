@@ -18,7 +18,7 @@ from chessshootout.frontend.modals.help import HelpModal
 from chessshootout.frontend.modals.match_found import MatchFoundModal
 from chessshootout.frontend.panels.banners import OfferBanners
 from chessshootout.frontend.modals.result import ResultMenu
-from chessshootout.frontend.menu.hero import PlayView
+from chessshootout.frontend.menu.play_view import PlayView
 from chessshootout.frontend.menu.options_view import OptionsView
 from chessshootout.frontend.menu.profile_view import ProfileView
 from chessshootout.frontend.menu.time_picker import TimePicker

@@ -3,14 +3,14 @@ import time
 import pygame as pg
 
 from chessshootout import paths
-from chessshootout.infra import countries, env
+from chessshootout.infra import env
 from chessshootout.domain.pgn.load import format_relative_time
 from chessshootout.frontend.menu.view import scale_floor, seeded_avatar_palette
 from chessshootout.frontend.panels.history_view import PGN_PATTERN, load_match_groups
 from chessshootout.frontend.visual.cache import render_text
 from chessshootout.frontend.visual.colors import Colors
 from chessshootout.frontend.visual.draw import chevron_surface, cut_rect_surface
-from chessshootout.frontend.visual.emoji import emoji_surface
+from chessshootout.frontend.visual.emoji import flag_surface
 from chessshootout.frontend.visual.fonts import get_font, get_mono_font
 from chessshootout.frontend.visual.scroll_view import ScrollHost, ScrollView
 from chessshootout.frontend.visual.widgets import draw_avatar, wrap_words
@@ -75,7 +75,6 @@ class CardStack(ScrollHost):
             lambda: (self._rect, self._content_h),
             wheel_step_px=BODY_ROW_H,
         )
-        self._flag_cache = {}
         self._fonts_ready = False
         self._profile_avatar_palette = None
         self._profile_avatar_seed = None
@@ -233,14 +232,7 @@ class CardStack(ScrollHost):
         return pg.transform.rotate(up, -90)
 
     def _flag_surface(self, code):
-        char = countries.flag_emoji(code)
-        if not char:
-            return None
-        size = self._s(FLAG_SIZE, 11)
-        key = (char, size)
-        if key not in self._flag_cache:
-            self._flag_cache[key] = emoji_surface(char, size)
-        return self._flag_cache[key]
+        return flag_surface(code, self._s(FLAG_SIZE, 11))
 
     def _draw_header(self, window, rect, title, summary, expanded, hovered):
         self._draw_panel(window, rect, hovered)
@@ -397,6 +389,6 @@ class CardStack(ScrollHost):
 
     def _toggle(self, key):
         self._open = None if self._open == key else key
-        self.app.input_router._click_sound_played = True
+        self.app.input_router.suppress_click_sound()
         self.app.sound_manager.play_card_toggle()
         self._compute_layout()

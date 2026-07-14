@@ -183,7 +183,7 @@ def test_help_modal_shown_on_game_is_not_drawn_after_switch_to_menu():
 
     assert drawn == []
     assert app.help_modal.is_visible() is False, "exit() hides the screen's own modals"
-    assert app.help_modal not in [spec.obj for spec in app._active_modal_specs()]
+    assert app.help_modal not in [spec.modal for spec in app._active_modal_specs()]
 
 
 def test_help_modal_shown_on_review_is_not_drawn_after_switch_to_history(tmp_path):
@@ -322,11 +322,11 @@ def test_exit_hides_every_modal_the_screen_owns(name, tmp_path):
     screen = app.screens[name]
     hidden = []
     for spec in screen.modals():
-        spec.obj.hide = lambda obj=spec.obj: hidden.append(obj)
+        spec.modal.hide = lambda obj=spec.modal: hidden.append(obj)
 
     screen.exit()
 
-    assert hidden == [spec.obj for spec in screen.modals()]
+    assert hidden == [spec.modal for spec in screen.modals()]
 
 
 # --- menu sub-view lifecycle (menu is now a shell hosting swappable views) ----

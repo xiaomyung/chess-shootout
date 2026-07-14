@@ -40,7 +40,7 @@ from chessshootout.frontend.visual import cache
 from chessshootout.frontend.visual.backdrop import ArenaBackdrop
 from chessshootout.frontend.visual.effects import TAKEOVER_TOTAL_MS
 from chessshootout.frontend.game.result_flow import ResultFlow, score_str
-from chessshootout.frontend.game.skillcheck_session import SkillcheckSession
+from chessshootout.frontend.game.skillcheck_session import SkillCheckSession
 from chessshootout.frontend.game.give_time import GiveTimeHold
 from chessshootout.frontend.game.variant import MATCH_MODE_BY_VARIANT, Variant
 from chessshootout.server.protocol import FIRST_MOVE_ABORT_SECONDS, GRACE_SECONDS, Reason
@@ -157,7 +157,7 @@ class GameScreen(Screen):
                            announce_callback=self._on_kill_announced)
         self.skillcheck = SkillCheckCoordinator()
         self.skillcheck_overlay = SkillCheckOverlay()
-        self.skillcheck_session = SkillcheckSession(self)
+        self.skillcheck_session = SkillCheckSession(self)
         self.board.skillcheck_gate = self.skillcheck_session.skillcheck_gate
         self.board.skillcheck_armed = lambda: self.skillcheck.enabled
         self.board.locked_targets = self.skillcheck.is_locked
@@ -299,9 +299,9 @@ class GameScreen(Screen):
         granted_by = payload.get("granted_by")
         recipient_color = "black" if granted_by == "white" else "white"
         if granted_by == self._chosen_side:
-            self.give_time.give_time_toast_for_giver(recipient_color, added)
+            self.give_time.toast_for_giver(recipient_color, added)
         else:
-            self.give_time.give_time_toast_for_receiver(granted_by, added)
+            self.give_time.toast_for_receiver(granted_by, added)
 
     def on_resume(self, payload):
         self.match.new_game()
@@ -732,7 +732,7 @@ class GameScreen(Screen):
         return (self.focus_transition is not None
                 or self.skillcheck_overlay.is_active()
                 or self.current_result() is not None
-                or self.give_time.give_time_holding
+                or self.give_time.holding
                 or self.board.is_dragging()
                 or self.board.effects.is_active()
                 or self.board.is_restoring()
@@ -833,7 +833,7 @@ class GameScreen(Screen):
                 and self.focus_arrow.handle_click(pos)):
             self._toggle_focus(not self.focus_mode)
             self._focus_click_consumed = True
-            self.app.input_router._click_sound_played = True
+            self.app.input_router.suppress_click_sound()
             return True
         if not self.focus_mode and self.result_menu.handle_click(pos):
             return True
@@ -843,7 +843,7 @@ class GameScreen(Screen):
             return False
         if self.board.pending_promotion_square is not None:
             self.board.pick_promotion_at(pos)
-            self.app.input_router._click_sound_played = True
+            self.app.input_router.suppress_click_sound()
             return True
         square = self.board.cell_at(pos)
         if square is None:
@@ -852,7 +852,7 @@ class GameScreen(Screen):
             self.board.clear_annotations()
         signal = self.board.handle_click(square)
         if signal:
-            self.app.input_router._click_sound_played = True
+            self.app.input_router.suppress_click_sound()
             if signal == "select":
                 self.app.sound_manager.play_pickup()
             return True
@@ -1006,7 +1006,7 @@ class GameScreen(Screen):
             if self._local_won(winner):
                 self.app.sound_manager.play_you_win()
             elif is_resign:
-                self.app.sound_manager.play_surrender()
+                self.app.sound_manager.play_resign()
             elif is_mate:
                 self.app.sound_manager.play_you_lose()
 
@@ -1234,7 +1234,7 @@ class GameScreen(Screen):
         clock = self.match.clock
         if clock is None or clock.flagged is not None:
             disabled.add("give_time")
-        if self.give_time.give_time_on_cooldown():
+        if self.give_time.on_cooldown():
             disabled.add("give_time")
         return disabled
 

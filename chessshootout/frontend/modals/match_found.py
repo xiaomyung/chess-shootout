@@ -1,10 +1,9 @@
 import pygame as pg
 
-from chessshootout.infra.countries import flag_emoji
 from chessshootout.frontend.modals.base import BaseModal, MODAL_MAX_WIDTH, MODAL_RAIL
 from chessshootout.frontend.visual.colors import Colors
 from chessshootout.frontend.visual.draw import stroked_text
-from chessshootout.frontend.visual.emoji import emoji_surface
+from chessshootout.frontend.visual.emoji import emoji_surface, flag_surface
 from chessshootout.frontend.visual.fonts import (
     fonts_for_width, get_display_font, get_font, get_mono_font,
 )
@@ -35,7 +34,6 @@ class MatchFoundModal(BaseModal):
         self.opp_palette = None
         self._started_at = 0
         self._seconds = 3
-        self._flag_cache = {}
         self._font_cache = {}
 
     def show(self, white_name, black_name, your_color, on_done, seconds=3,
@@ -140,15 +138,6 @@ class MatchFoundModal(BaseModal):
         self.window.blit(label, (cx, y))
         self.window.blit(number, (cx + label.get_width(), y))
 
-    def _flag(self, country, size):
-        char = flag_emoji(country)
-        if not char:
-            return None
-        key = (char, size)
-        if key not in self._flag_cache:
-            self._flag_cache[key] = emoji_surface(char, size)
-        return self._flag_cache[key]
-
     def _draw_card(self, cx, y, av, side_w, card_h, name, country, name_font,
                    rating_font, letter_font, palette):
         fill, letter_color = palette
@@ -157,7 +146,7 @@ class MatchFoundModal(BaseModal):
         glyph = letter_font.render(letter, True, letter_color)
         self.window.blit(glyph, (cx - glyph.get_width() / 2,
                                  y + av / 2 - glyph.get_height() / 2))
-        flag = self._flag(country, name_font.get_height())
+        flag = flag_surface(country, name_font.get_height())
         flag_w = (flag.get_width() + FLAG_NAME_GAP) if flag is not None else 0
         name_surf = name_font.render(name, True, Colors.text)
         name_surf = fit_text_to_rect(

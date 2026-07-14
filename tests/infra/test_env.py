@@ -615,14 +615,14 @@ def test_default_increment_rejects_unknown_value():
 
 def test_default_time_minutes_parses_value_and_infinity():
     env.set_default_time_control("15")
-    assert env.default_time_minutes() == 15
+    assert env.get_default_time_minutes() == 15
     env.set_default_time_control("∞")
-    assert env.default_time_minutes() is None
+    assert env.get_default_time_minutes() is None
 
 
 def test_default_increment_seconds_parses_value():
     env.set_default_increment("10")
-    assert env.default_increment_seconds() == 10
+    assert env.get_default_increment_seconds() == 10
 
 
 def test_launch_mode_defaults_windowed_and_validates():

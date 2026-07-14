@@ -18,8 +18,8 @@ import pygame as pg
 import pytest
 
 from tests.conftest import pygame_display
-from chessshootout.frontend.menu import hero as hero_mod
-from chessshootout.frontend.menu.hero import (
+from chessshootout.frontend.menu import play_view as play_view_mod
+from chessshootout.frontend.menu.play_view import (
     COMING_SOON, CTA_BOTTOM, POPOVER_CLOSE_MS, POPOVER_OPEN_MS, RECON_GAP, SIDE_OPTIONS,
     SUMMARY_CHIP_ICON, PlayView)
 from chessshootout.frontend.visual.colors import Colors
@@ -290,8 +290,8 @@ def test_side_readout_renders_label_then_selected_value(app, hero, monkeypatch):
     app.menu.handle_click(hero._side_chip.center)
     app.menu.handle_click(hero._side_rects["black"].center)
     calls = []
-    real = hero_mod.render_text
-    monkeypatch.setattr(hero_mod, "render_text",
+    real = play_view_mod.render_text
+    monkeypatch.setattr(play_view_mod, "render_text",
                         lambda f, t, c: calls.append((t, str(c))) or real(f, t, c))
     hero._draw_side_readout(app.window)
     assert [t for t, _ in calls] == ["SIDE", "BLACK"]

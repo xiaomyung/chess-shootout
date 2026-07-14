@@ -214,7 +214,7 @@ class Frontend:
         self.request_nav(Nav("game", {"fen": fen}))
         self._execute_pending_nav()
         self.menu.fen_input_modal.hide()
-        self.menu.hide_card()
+        self.menu.hide_play_view()
         return True
 
     def _open_pgn_review(self, path):
@@ -245,7 +245,7 @@ class Frontend:
             "increment_seconds": config["increment_seconds"],
         }))
         self._execute_pending_nav()
-        self.menu.hide_card()
+        self.menu.hide_play_view()
         self.sound_manager.play_game_start()
 
     def run(self):
@@ -325,7 +325,7 @@ class Frontend:
         return list(self._modal_registry) + self.screen.modals()
 
     def _blocking_modal_visible(self):
-        return any(spec.obj.is_visible() for spec in self._active_modal_specs())
+        return any(spec.modal.is_visible() for spec in self._active_modal_specs())
 
     def _recreate_window_surface(self, w, h):
         self.window = pg.display.set_mode((w, h), WINDOW_FLAGS)
@@ -381,7 +381,7 @@ class Frontend:
 
         self.coordinator.offer_banners.draw(self._banner_rect())
         for spec in reversed(self._active_modal_specs()):
-            spec.obj.draw()
+            spec.modal.draw()
         self.toast.draw(
             center_x=self.game.board.rect.centerx if self.screen is self.game else None)
         self.game.skillcheck_overlay.update(now)

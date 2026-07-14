@@ -64,7 +64,7 @@ def test_play_view_escape_opens_the_quit_confirm():
     assert app.menu._active_view == "play"
     assert app.menu.escape() is True
     assert app.confirm_modal.is_visible() is True
-    assert app.menu.card_visible() is True
+    assert app.menu.play_view_visible() is True
 
 
 def test_menu_remembers_its_active_view_across_a_screen_roundtrip():
