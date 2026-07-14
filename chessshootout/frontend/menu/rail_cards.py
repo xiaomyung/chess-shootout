@@ -60,7 +60,6 @@ class CardStack(ScrollHost):
 
     def __init__(self, app):
         self.app = app
-        self.window = app.window
         self._rect = pg.Rect(0, 0, 0, 0)
         self._scale = 1.0
         self._recent_groups = []

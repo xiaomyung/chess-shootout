@@ -101,7 +101,7 @@ No Python needed — grab the file for your OS from the
 
 Games, settings, and logs live in a per-user location (`%APPDATA%`,
 `~/Library/Application Support`, `~/.local/share`); change the games folder
-anytime from the in-app **Options** (gear, top-right of the menu). The Windows
+anytime from the in-app **Options** (bottom of the left nav rail). The Windows
 **portable** build is the exception — it keeps everything in a `data/` folder
 beside the executable, so the whole app stays self-contained.
 
@@ -173,7 +173,7 @@ pyenv shell 3.12                  # `python3.12` now resolves for the venv step 
 | `Q` / `B` / `N` | Promote (queen / bishop / knight) |
 | `Space` / Click | Fire the active skill-check (Shootout) |
 | `Ctrl+Z` | Undo (online: takeback request) |
-| `←` / `→` | Step through moves (also during live games) |
+| Left / Right | Step through moves (also during live games) |
 | `Home` / `End` | Jump to ply 0 / return to live play |
 | `?` | Open Help modal |
 | Hold **Give 15s** | Ramp the opponent's clock up to the starting time |
@@ -195,10 +195,11 @@ python -m chessshootout.main --client-uuid bob   --nickname Bob     # terminal 3
 a deterministic UUID4 client-side so the server's validator accepts it. Real
 clients auto-generate and persist a UUID4 on first launch.
 
-In each client pick **Online**, choose time control and side, hit **Start
-Search**, and confirm the server address (`<ip>` defaults to port 8000, or
-`<ip>:<port>`; `localhost` for local play). When a second player joins with
-the same time control, both see "Match found!" and the game begins.
+In each client pick **Online**, choose time control and side, then hit
+**FIND MATCH** (the server address is set beforehand via **Options → Server**
+— `<ip>` defaults to port 8000, or `<ip>:<port>`; `localhost` for local play).
+When a second player joins with the same time control, both see "Match
+found!" and the game begins.
 
 ### Settings (`.env`)
 

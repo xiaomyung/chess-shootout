@@ -44,8 +44,7 @@ RETICLE_ALPHA_FLOOR = 190
 
 class MenuRail:
 
-    def __init__(self, window, callbacks):
-        self.window = window
+    def __init__(self, callbacks):
         self.callbacks = callbacks
         self.rect = pg.Rect(0, 0, 0, 0)
         self.scale = 1.0

@@ -21,10 +21,9 @@ _pygame_init = pygame_display(1000, 800)
 
 
 def _rail():
-    surf = pg.display.get_surface()
     layout = compute_menu_layout(1000, 800, 36)
     opened = []
-    rail = MenuRail(surf, {"open_url": lambda url: opened.append(url)})
+    rail = MenuRail({"open_url": lambda url: opened.append(url)})
     rail.set_rect(layout.rail_rect, layout.scale)
     return rail, opened
 
@@ -168,8 +167,7 @@ def test_reticle_lands_on_the_target_row_when_resized_mid_slide():
 def test_reticle_stays_on_the_active_row_across_a_fullscreen_sized_relayout():
     """cp3 core repro: a 900x600 -> 2560x1440 relayout (F11 fullscreen) keeps the
     crosshair pinned to the active row, not floating mid-rail."""
-    surf = pg.display.get_surface()
-    rail = MenuRail(surf, {"open_url": lambda url: None})
+    rail = MenuRail({"open_url": lambda url: None})
     small = compute_menu_layout(900, 600, 36)
     rail.set_rect(small.rail_rect, small.scale)
     rail.set_active("armory", 0)

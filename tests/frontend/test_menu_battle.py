@@ -36,7 +36,7 @@ LEFT_RAIL = pg.Rect(0, TITLEBAR, 216, 700 - TITLEBAR)
 
 def _battle(seed=7, w=1000, h=700, card=CENTER_CARD, top_inset=TITLEBAR):
     """A running battle: queen already on the field, pawns spawned, one avoid card."""
-    b = MenuBattle(pg.display.get_surface(), rng=random.Random(seed))
+    b = MenuBattle(rng=random.Random(seed))
     b.top_inset = top_inset
     b.set_rect(pg.Rect(0, 0, w, h))
     b.set_avoid_rect(pg.Rect(card))
@@ -47,7 +47,7 @@ def _battle(seed=7, w=1000, h=700, card=CENTER_CARD, top_inset=TITLEBAR):
 
 def _multi_battle(seed=7, w=1000, h=700, rects=(LEFT_RAIL, CENTER_CARD), top_inset=TITLEBAR):
     """A running battle dodging several panels at once."""
-    b = MenuBattle(pg.display.get_surface(), rng=random.Random(seed))
+    b = MenuBattle(rng=random.Random(seed))
     b.top_inset = top_inset
     b.set_rect(pg.Rect(0, 0, w, h))
     b.set_avoid_rects([pg.Rect(r) for r in rects])
@@ -72,7 +72,7 @@ def test_running_battle_has_queen_and_pawns():
 
 
 def test_queen_exists_immediately_after_sizing_with_no_intro():
-    b = MenuBattle(pg.display.get_surface(), rng=random.Random(3))
+    b = MenuBattle(rng=random.Random(3))
     b.top_inset = TITLEBAR
     b.set_rect(pg.Rect(0, 0, 1000, 700))
     b.set_avoid_rects([CENTER_CARD])
@@ -326,7 +326,7 @@ def test_route_target_goes_straight_when_clear():
 
 
 def test_no_obstacle_when_avoid_rect_empty():
-    b = MenuBattle(pg.display.get_surface(), rng=random.Random(1))
+    b = MenuBattle(rng=random.Random(1))
     b.set_rect(pg.Rect(0, 0, 800, 600))
     b.set_avoid_rect(pg.Rect(0, 0, 0, 0))
     assert b.obstacles == []
@@ -478,7 +478,7 @@ def test_queen_is_never_emerging_and_still_evicts_from_a_rail():
 def test_emerge_degrades_to_normal_with_no_rails():
     """No avoid rects: a walk-in pawn drops its flag the instant it is fully in the
     window -- nothing to cross -- matching the rails-hidden behaviour."""
-    b = MenuBattle(pg.display.get_surface(), rng=random.Random(1))
+    b = MenuBattle(rng=random.Random(1))
     b.top_inset = TITLEBAR
     b.set_rect(pg.Rect(0, 0, 1000, 700))
     b.set_avoid_rects([])
@@ -1039,7 +1039,7 @@ def test_ko_counter_draws_behind_the_voicelines(monkeypatch):
     order = []
     monkeypatch.setattr(b, "_draw_ko_counter", lambda *a: order.append("ko"))
     monkeypatch.setattr(b, "_draw_bubble", lambda *a: order.append("bubble"))
-    b.draw(b.window)
+    b.draw(pg.display.get_surface())
     assert "ko" in order and "bubble" in order
     assert order.index("ko") < order.index("bubble"), \
         "the counter draws before (behind) the speech bubbles"
@@ -1381,7 +1381,7 @@ def test_flash_index_is_uniform_over_many_shots():
 
 
 def test_draw_is_noop_before_set_rect():
-    b = MenuBattle(pg.display.get_surface(), rng=random.Random(1))
+    b = MenuBattle(rng=random.Random(1))
     win = pg.display.get_surface()
     win.fill((9, 9, 9))
     b.update(1000)
@@ -1391,7 +1391,7 @@ def test_draw_is_noop_before_set_rect():
 
 
 def test_renders_without_piece_art():
-    b = MenuBattle(pg.display.get_surface(), rng=random.Random(2))
+    b = MenuBattle(rng=random.Random(2))
     b._queen_src = None
     b._pawn_src = None
     b.set_rect(pg.Rect(0, 0, 900, 600))

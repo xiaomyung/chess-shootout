@@ -387,7 +387,7 @@ def test_review_help_lists_every_key_review_actually_handles(tmp_path):
 
     assert "?" in listed
     assert "F11" in listed
-    assert {"← →", "Home", "End", "F", "Esc"} <= listed
+    assert {"Left / Right", "Home", "End", "F", "Esc"} <= listed
 
 
 def test_review_open_pgn_toasts_when_the_file_is_gone(tmp_path, monkeypatch):

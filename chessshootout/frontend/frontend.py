@@ -120,7 +120,7 @@ class Frontend:
             ModalSpec(self.country_picker),
             ModalSpec(self.directory_browser),
         ]
-        self.menu_battle = MenuBattle(self.window, sound_manager=self.sound_manager)
+        self.menu_battle = MenuBattle(sound_manager=self.sound_manager)
         self._pending_nav = None
 
         self.menu = MenuScreen(self)

@@ -35,7 +35,7 @@ class MenuScreen(Screen):
         super().__init__(app)
         self.fen_input_modal = FenInputModal(app.window)
         self.views = build_views(app)
-        self.rail = MenuRail(app.window, {"open_url": open_with_default_app})
+        self.rail = MenuRail({"open_url": open_with_default_app})
         self.card_stack = CardStack(app)
         self.card_stack.refresh()
         self._active_view = "play"

@@ -24,7 +24,7 @@ from chessshootout.skillcheck.types import SkillCheckOutcome, whiffs_by_ply
 
 log = logging.getLogger("chess.frontend")
 
-REVIEW_HOTKEY_KEYS = ("?", "← →", "Home", "End", "F", "F11", "Esc")
+REVIEW_HOTKEY_KEYS = ("?", "Left / Right", "Home", "End", "F", "F11", "Esc")
 REVIEW_HOTKEYS = [row for row in HOTKEYS if row[0] in REVIEW_HOTKEY_KEYS]
 
 

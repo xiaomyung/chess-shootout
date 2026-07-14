@@ -91,8 +91,7 @@ def _menu_spark_sprite(size, color):
 
 
 class MenuBattle:
-    def __init__(self, window, rng=None, sound_manager=None):
-        self.window = window
+    def __init__(self, rng=None, sound_manager=None):
         self.rng = rng or random.Random()
         self.sound_manager = sound_manager
         self.rect = pg.Rect(0, 0, 0, 0)
