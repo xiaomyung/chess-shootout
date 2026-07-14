@@ -20,6 +20,7 @@ MENU_REDESIGN_SLOTS = {
     "drum_tick": "ui/drum_tick",
     "turret_ratchet": "ui/turret_ratchet",
     "card_toggle": "ui/card_toggle",
+    "rail_click": "ui/rail_click",
     "focus_action": "ui/focus_action",
 }
 

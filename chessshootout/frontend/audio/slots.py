@@ -66,6 +66,7 @@ def _build_slots():
     slots["drum_tick"] = Slot("drum_tick", "ui/drum_tick")
     slots["turret_ratchet"] = Slot("turret_ratchet", "ui/turret_ratchet")
     slots["card_toggle"] = Slot("card_toggle", "ui/card_toggle")
+    slots["rail_click"] = Slot("rail_click", "ui/rail_click")
     slots["focus_action"] = Slot("focus_action", "ui/focus_action")
     slots["game_start"] = Slot("game_start", "lifecycle/game_start", SUSTAINED, True)
     slots["online_game_start"] = Slot(

@@ -291,3 +291,25 @@ def test_options_row_switches_to_the_options_view_via_the_menu_screen():
     row_rect = app.menu.rail._row_rects["options"]
     app.menu.handle_click(row_rect.center)
     assert app.menu._active_view == "options"
+
+
+def test_rail_row_click_plays_the_special_sound_and_mutes_the_generic_click():
+    """The left-rail tabs own their click audio: the dedicated rail_click fires on a
+    real switch, nothing on the already-active row, and BOTH cases raise the router's
+    _click_sound_played flag so the generic ui_click never stacks on top (the user
+    explicitly kept the special sound and killed the generic one here)."""
+    app = make_app()
+    app.draw_frame()
+    assert app.menu._active_view == "play"
+
+    app.input_router._click_sound_played = False
+    play_row = app.menu.rail._row_rects["play"]
+    app.menu.handle_click(play_row.center)
+    app.sound_manager.play_rail_click.assert_not_called()
+    assert app.input_router._click_sound_played is True
+
+    app.input_router._click_sound_played = False
+    history_row = app.menu.rail._row_rects["history"]
+    app.menu.handle_click(history_row.center)
+    app.sound_manager.play_rail_click.assert_called_once()
+    assert app.input_router._click_sound_played is True

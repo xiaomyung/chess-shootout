@@ -248,6 +248,9 @@ class MenuScreen(Screen):
     def handle_click(self, pos):
         row = self.rail.hit_test(pos)
         if row is not None:
+            self.app.input_router._click_sound_played = True
+            if row != self._active_view:
+                self.app.sound_manager.play_rail_click()
             self.goto_view(row)
             return True
         if self.rail.handle_footer_click(pos):
