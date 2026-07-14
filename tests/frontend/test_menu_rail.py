@@ -1,7 +1,7 @@
 """Left nav rail: row hit-tests, active-row visual state (real pixels on the
 owned surface), the crosshair reticle sliding on a view change (tween retarget),
-the footer version line + credit link callback, and the Options row opening the
-global options modal through the MenuScreen."""
+the footer version line + credit link callback, and the Options row switching
+to the options sub-view through the MenuScreen exactly like any other row."""
 
 import pygame as pg
 
@@ -232,9 +232,9 @@ def test_footer_click_off_the_link_is_ignored():
     assert opened == []
 
 
-def test_options_row_opens_the_options_modal_via_the_menu_screen():
+def test_options_row_switches_to_the_options_view_via_the_menu_screen():
     app = make_app()
     app.draw_frame()
-    options_rect = app.menu.rail._row_rects["options"]
-    app.menu.handle_click(options_rect.center)
-    assert app.options_modal.is_visible() is True
+    row_rect = app.menu.rail._row_rects["options"]
+    app.menu.handle_click(row_rect.center)
+    assert app.menu._active_view == "options"

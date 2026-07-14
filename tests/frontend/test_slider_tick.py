@@ -78,7 +78,7 @@ def test_tickgate_clamps_out_of_range_ratio():
 
 
 def test_slider_row_drag_emits_ui_tick():
-    from chessshootout.frontend.modals.options import SliderRow
+    from chessshootout.frontend.menu.options_rows import SliderRow
     sm = MagicMock()
     store = [0.0]
     row = SliderRow("Vol", "", lambda: store[0], lambda v: store.__setitem__(0, v),
@@ -92,7 +92,7 @@ def test_slider_row_drag_emits_ui_tick():
 
 
 def test_slider_row_without_on_tick_is_silent_and_constructs_positionally():
-    from chessshootout.frontend.modals.options import SliderRow
+    from chessshootout.frontend.menu.options_rows import SliderRow
     store = [0.0]
     row = SliderRow("Vol", "", lambda: store[0], lambda v: store.__setitem__(0, v))
     row._track = pg.Rect(0, 0, 100, 10)

@@ -115,7 +115,7 @@ class MenuScreen(Screen):
     def handle_click(self, pos):
         row = self.rail.hit_test(pos)
         if row is not None:
-            self._on_rail_row(row)
+            self.goto_view(row)
             return True
         if self.rail.handle_footer_click(pos):
             return True
@@ -179,12 +179,6 @@ class MenuScreen(Screen):
     def goto_history(self):
         self.goto_view("history")
 
-    def _on_rail_row(self, row):
-        if row == "options":
-            self.app.settings._on_open_options()
-            return
-        self.goto_view(row)
-
     def _quit_app(self):
         self.app.running = False
 
@@ -193,3 +187,6 @@ class MenuScreen(Screen):
 
     def modals(self):
         return [ModalSpec(self.fen_input_modal)]
+
+    def on_app_exit(self):
+        self.app.settings._commit_options_exit()

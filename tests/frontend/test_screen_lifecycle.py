@@ -331,7 +331,7 @@ def test_exit_hides_every_modal_the_screen_owns(name, tmp_path):
 
 # --- menu sub-view lifecycle (menu is now a shell hosting swappable views) ----
 
-MENU_VIEWS = ["play", "battlepass", "armory", "social", "history", "profile"]
+MENU_VIEWS = ["play", "battlepass", "armory", "social", "history", "profile", "options"]
 
 
 @pytest.mark.parametrize("view", MENU_VIEWS)
@@ -350,7 +350,7 @@ def test_menu_subview_enter_exit_reenter_is_idempotent(view):
 def test_menu_subview_switching_matrix_draws_cleanly():
     app = make_app()
     for name in ("play", "history", "battlepass", "armory", "social", "profile",
-                 "history", "play"):
+                 "options", "history", "play"):
         app.menu.goto_view(name)
         assert app.menu._active_view == name
         app.draw_frame()

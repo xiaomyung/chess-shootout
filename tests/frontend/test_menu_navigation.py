@@ -42,19 +42,10 @@ def test_goto_view_to_the_same_view_is_a_noop(caplog):
 def test_rail_hit_test_routes_each_nav_row():
     app = make_app()
     app.draw_frame()
-    for row in ("battlepass", "armory", "social", "history", "play"):
+    for row in ("battlepass", "armory", "social", "history", "options", "play"):
         rect = app.menu.rail._row_rects[row]
         app.menu.handle_click(rect.center)
         assert app.menu._active_view == row
-
-
-def test_options_rail_row_opens_the_options_modal_without_switching_view():
-    app = make_app()
-    app.draw_frame()
-    rect = app.menu.rail._row_rects["options"]
-    app.menu.handle_click(rect.center)
-    assert app.options_modal.is_visible() is True
-    assert app.menu._active_view == "play"
 
 
 def test_stub_view_escape_returns_to_play():

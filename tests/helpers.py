@@ -115,7 +115,10 @@ def make_app(w=1000, h=800, *, mock_sound=True):
 
     Does not start a game -- pair with start_single_screen() for that.
     mock_sound=True (default) replaces sound_manager with a MagicMock so
-    tests don't touch the real mixer; pass False to keep the real one.
+    tests don't touch the real mixer; pass False to keep the real one. The
+    mock seeds master_volume/menu_volume/enabled with plausible values so
+    widgets that read them (e.g. the Options volume sliders) don't choke on
+    an unconfigured MagicMock during a plain draw_frame().
     """
     from unittest.mock import MagicMock
 
@@ -123,7 +126,7 @@ def make_app(w=1000, h=800, *, mock_sound=True):
 
     app = Frontend(w, h)
     if mock_sound:
-        app.sound_manager = MagicMock()
+        app.sound_manager = MagicMock(master_volume=1.0, menu_volume=1.0, enabled=True)
     return app
 
 

@@ -1,9 +1,9 @@
 """Escape is now a context-aware Back/Cancel that NEVER closes the window
 immediately. Priority: an active skill-check swallows it; any open modal closes
-(the quit/resign confirm, help, fen, country, directory, options, offer banners,
+(the quit/resign confirm, help, fen, country, directory, offer banners,
 search); on the main-menu card it raises a 'Quit the game?' prompt; a menu
-sub-page or a finished game returns to the main menu; a live game
-opens the resign prompt.
+sub-page (including Options, now a view rather than a modal) or a finished
+game returns to the main menu; a live game opens the resign prompt.
 """
 
 import pygame as pg
@@ -101,39 +101,6 @@ def test_help_modal_escape_closes_modal_not_resign():
     app.input_router._handle_escape()
     assert app.help_modal.is_visible() is False
     assert app.confirm_modal.is_visible() is False
-
-
-def test_file_browser_over_options_closes_before_options(tmp_path):
-    from chessshootout.infra import env
-    env._ENV_PATH = tmp_path / ".env"
-    app = _app()
-    app.settings._on_open_options()
-    assert app.options_modal.is_visible() is True
-    app.directory_browser.show(str(tmp_path), lambda p: None)
-    assert app.directory_browser.is_visible() is True
-    app.input_router._handle_escape()
-    assert app.directory_browser.is_visible() is False
-    assert app.options_modal.is_visible() is True
-    app.input_router._handle_escape()
-    assert app.options_modal.is_visible() is False
-
-
-def test_country_picker_dismisses_before_the_options_modal_underneath(tmp_path):
-    """The country picker opens from inside the options modal and draws above it,
-    so it is a GLOBAL modal registered ahead of options — Esc must peel the
-    picker first and leave options visible underneath, exactly like the
-    directory browser that shares the same nesting."""
-    from chessshootout.infra import env
-    env._ENV_PATH = tmp_path / ".env"
-    app = _app()
-    app.settings._on_open_options()
-    app.country_picker.show("US", lambda c: None)
-    assert app.country_picker.is_visible() is True
-    app.input_router._handle_escape()
-    assert app.country_picker.is_visible() is False
-    assert app.options_modal.is_visible() is True
-    app.input_router._handle_escape()
-    assert app.options_modal.is_visible() is False
 
 
 def test_active_skillcheck_swallows_escape():

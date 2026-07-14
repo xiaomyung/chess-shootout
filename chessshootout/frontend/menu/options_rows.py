@@ -1,18 +1,14 @@
 import pygame as pg
 
-from chessshootout.infra import countries
-from chessshootout.frontend.modals.base import BaseModal
-from chessshootout.frontend.visual.colors import Colors
 from chessshootout.frontend.visual.cache import render_text
+from chessshootout.frontend.visual.colors import Colors
 from chessshootout.frontend.visual.draw import supersample, rounded_rect_surface
-from chessshootout.frontend.visual.emoji import emoji_surface
-from chessshootout.frontend.visual.fonts import get_display_font, get_font, get_mono_font
+from chessshootout.frontend.visual.fonts import get_font, get_mono_font
 from chessshootout.frontend.visual.scroll_view import ScrollHost, ScrollView
 from chessshootout.frontend.visual.slider_tick import TickGate
 from chessshootout.frontend.visual.text_input import TextInput
-from chessshootout.frontend.visual.widgets import (
-    draw_button, draw_button_row, draw_segmented, draw_toggle,
-)
+from chessshootout.frontend.visual.widgets import draw_button, draw_segmented, draw_toggle
+
 
 ROW_PAD = 12
 SECTION_GAP = 10
@@ -421,59 +417,6 @@ class TextRow(_FieldRow):
         return self.input.handle_key(event)
 
 
-class CountryRow(_Row):
-
-    def __init__(self, title, desc, get_code, on_open):
-        super().__init__(title, desc)
-        self.get_code = get_code
-        self.on_open = on_open
-        self._ctl = pg.Rect(0, 0, 0, 0)
-        self._flag_cache = None
-
-    def _flag(self, code, size):
-        char = countries.flag_emoji(code)
-        if not char:
-            return None
-        key = (char, size)
-        if self._flag_cache is None or self._flag_cache[0] != key:
-            self._flag_cache = (key, emoji_surface(char, size))
-        return self._flag_cache[1]
-
-    def _draw_control(self, window, rect, fonts):
-        code = countries.normalize(self.get_code())
-        label = code if code else "None"
-        h = max(fonts.value.get_height() + 14, 30)
-        inner, gap = 12, 8
-        flag = self._flag(code, max(fonts.value.get_height(), 14))
-        chev = render_text(fonts.button, "›", Colors.text_muted)
-        text_surf = fonts.value.render(label, True, Colors.text if code else Colors.text_muted)
-        flag_w = (flag.get_width() + gap) if flag is not None else 0
-        desired = 2 * inner + flag_w + text_surf.get_width() + 10 + chev.get_width()
-        w = min(desired, max(int(rect.width * 0.6), 90))
-        self._ctl = pg.Rect(rect.right - w, rect.centery - h // 2, w, h)
-        window.blit(rounded_rect_surface((w, h), max(h // 4, 6), Colors.surface_hover),
-                    self._ctl.topleft)
-        window.blit(chev, (self._ctl.right - inner - chev.get_width(),
-                           self._ctl.centery - chev.get_height() // 2))
-        x = self._ctl.x + inner
-        if flag is not None:
-            window.blit(flag, (x, self._ctl.centery - flag.get_height() // 2))
-            x += flag.get_width() + gap
-        text_max = (self._ctl.right - inner - chev.get_width() - 10) - x
-        _blit_clip(window, text_surf, (x, self._ctl.centery - text_surf.get_height() // 2),
-                   text_max)
-        return self._ctl.x
-
-    def handle_click(self, pos):
-        if self._ctl.collidepoint(pos):
-            self.on_open()
-            return True
-        return False
-
-    def contains_control(self, pos):
-        return self._ctl.collidepoint(pos)
-
-
 class OptionsBody(ScrollHost):
 
     def __init__(self):
@@ -547,77 +490,3 @@ class OptionsBody(ScrollHost):
                 if row.handle_key(event):
                     return True
         return False
-
-
-class OptionsModal(BaseModal, ScrollHost):
-
-    def __init__(self, window):
-        super().__init__(window)
-        self.on_close = None
-        self.body = OptionsBody()
-        self._close_rect = pg.Rect(0, 0, 0, 0)
-        self.button_rects = {}
-        self._on_rect_changed()
-
-    def _on_rect_changed(self):
-        self.title_font = get_display_font(max(int(self.rect.height * 0.05), 20))
-        self.fonts = _Fonts(
-            title=self.font(22, min_size=13),
-            desc=self.font(30, min_size=10, bold=False),
-            section=self.font(34, min_size=9),
-            value=get_mono_font(max(int(self.rect.height * 0.028), 11)),
-            button=self.font(28, min_size=11),
-        )
-
-    @property
-    def scroll(self):
-        return self.body.scroll
-
-    def show(self, sections, on_close=None):
-        self.body.set_sections(sections)
-        self.on_close = on_close
-        super().show()
-
-    def hide(self):
-        super().hide()
-        self.body.scroll.cancel()
-
-    def draw(self):
-        if not self.visible or self.rect.width <= 0:
-            return
-        self.draw_shell()
-        content = self.content_rect()
-        title_surf = render_text(self.title_font, "OPTIONS", Colors.text)
-        self.window.blit(title_surf, (content.centerx - title_surf.get_width() / 2, content.y))
-        title_bottom = content.y + title_surf.get_height() + self.padding
-
-        btn_h = max(int(self.rect.height * 0.09), 30)
-        close_row = pg.Rect(content.x, content.bottom - btn_h, content.width, btn_h)
-        self.button_rects = draw_button_row(
-            self.window, close_row, [("Close", "close")], self.fonts.button, self.padding,
-            primary_keys={"close"})
-
-        body_rect = pg.Rect(content.x, title_bottom, content.width,
-                            close_row.y - self.padding - title_bottom)
-        self.body.draw(self.window, body_rect, self.fonts)
-
-    def handle_click(self, pos):
-        if not self.visible:
-            return False
-        if self.button_rects.get("close") and self.button_rects["close"].collidepoint(pos):
-            if self.on_close is not None and self.on_close() is False:
-                return True
-            self.hide()
-            return True
-        self.body.handle_click(pos)
-        return True
-
-    def handle_press(self, pos):
-        if not self.visible:
-            return False
-        return self.body.handle_press(pos)
-
-    def handle_key(self, event):
-        if not self.visible:
-            return False
-        return self.body.handle_key(event)

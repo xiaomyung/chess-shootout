@@ -1,7 +1,7 @@
 """The modal system is now two-tier: Frontend._modal_registry holds the GLOBAL
-modals (confirm, wait/match_found/reconnecting, directory_browser, options);
-each screen additionally owns its own modals() (menu: fen_input + country
-picker, game/review: help). Frontend._active_modal_specs() merges global ∪ the
+modals (confirm, wait/match_found/reconnecting, country_picker, directory_browser);
+each screen additionally owns its own modals() (menu: fen_input, game/review:
+help). Frontend._active_modal_specs() merges global ∪ the
 active screen's modals(), global first, and that merged, ordered list drives
 the click cascade, KEYDOWN forwarding, Esc-dismiss, _blocking_modal_visible,
 _active_scrollable, and the reversed draw order. This file pins two drift bugs
@@ -58,14 +58,13 @@ OPENERS = {
     "country_picker": lambda app: app.country_picker.show("US", lambda c: None),
     "directory_browser": lambda app: app.directory_browser.show(
         os.path.expanduser("~"), on_select=lambda p: None),
-    "options_modal": lambda app: app.options_modal.show([], on_close=lambda: True),
 }
 
 MODAL_NAMES = list(OPENERS)
 
 GLOBAL_PRIORITY_ORDER = [
     "confirm_modal", "wait_modal", "match_found_modal", "reconnecting_modal",
-    "country_picker", "directory_browser", "options_modal",
+    "country_picker", "directory_browser",
 ]
 
 NON_DISMISSABLE = {"match_found_modal", "reconnecting_modal"}

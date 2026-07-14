@@ -27,7 +27,6 @@ class LayoutRects:
     result_modal_rect: pg.Rect
     flex_rect: pg.Rect
     wide_overlay_rect: pg.Rect
-    options_rect: pg.Rect
     menu_rect: pg.Rect
     top_strip_rect: pg.Rect
     bottom_strip_rect: pg.Rect
@@ -127,14 +126,6 @@ def compute_layout(window_width, window_height, *, mode, focus_mode, focus_show,
     if focus_strip_override is not None:
         top_strip_rect, bottom_strip_rect = focus_strip_override
 
-    options_width = min(int(window_width * 0.7), 520)
-    options_height = min(int(window_height * 0.82), 620)
-    options_rect = pg.Rect(
-        window_width / 2 - options_width / 2,
-        top + avail_height / 2 - options_height / 2,
-        options_width, options_height,
-    )
-
     return LayoutRects(
         top=top,
         strip_height=strip_height,
@@ -143,7 +134,6 @@ def compute_layout(window_width, window_height, *, mode, focus_mode, focus_show,
         result_modal_rect=result_modal_rect,
         flex_rect=flex_rect,
         wide_overlay_rect=wide_overlay_rect,
-        options_rect=options_rect,
         menu_rect=menu_rect,
         top_strip_rect=top_strip_rect,
         bottom_strip_rect=bottom_strip_rect,

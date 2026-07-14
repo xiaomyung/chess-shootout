@@ -467,14 +467,14 @@ def test_start_game_persists_nickname(monkeypatch, mode_value):
 
 
 def test_settings_close_persists_server_address(monkeypatch):
-    """Editing the Settings server field and closing persists it via env, so the
-    next matchmake + reconnect probe target the last-used server."""
+    """Editing the Options server field and leaving the view persists it via
+    env, so the next matchmake + reconnect probe target the last-used server."""
     app = make_app()
     saved = []
     monkeypatch.setattr(env, "set_server_addr", lambda v: saved.append(v))
-    app.settings._on_open_options()
+    app.menu.goto_view("options")
     app.settings._server_addr_row.input.text = "chess.example.com:9000"
-    assert app.settings._on_close_settings() is True
+    app.menu.goto_view("play")
     assert saved == ["chess.example.com:9000"]
 
 

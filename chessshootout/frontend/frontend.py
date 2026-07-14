@@ -18,7 +18,6 @@ from chessshootout.frontend.modal_registry import ModalSpec
 from chessshootout.frontend.modals.confirm import ConfirmModal
 from chessshootout.frontend.modals.country_picker import CountryPicker
 from chessshootout.frontend.modals.directory_browser import DirectoryBrowser
-from chessshootout.frontend.modals.options import OptionsModal
 from chessshootout.frontend.settings import SettingsController
 from chessshootout.frontend.modals.help import HelpModal, HOTKEYS
 from chessshootout.frontend.visual.toast import Toast
@@ -93,7 +92,6 @@ class Frontend:
         self.confirm_modal = ConfirmModal(self.window)
         self.history_view = HistoryView(self.window, on_open=self._open_pgn_review)
         self.help_modal = HelpModal(self.window)
-        self.options_modal = OptionsModal(self.window)
         self.country_picker = CountryPicker(self.window)
         self.directory_browser = DirectoryBrowser(self.window)
         self.toast = Toast(self.window)
@@ -113,7 +111,6 @@ class Frontend:
             ModalSpec(self.coordinator.reconnecting_modal, esc_dismiss=False),
             ModalSpec(self.country_picker),
             ModalSpec(self.directory_browser),
-            ModalSpec(self.options_modal, on_dismiss=self.settings._dismiss_options),
         ]
         self.menu_battle = MenuBattle(self.window, sound_manager=self.sound_manager)
         self._pending_nav = None
@@ -430,7 +427,6 @@ class Frontend:
             screen.relayout(size)
         self.menu_battle.top_inset = r.top
         self.menu_battle.set_rect(r.window_rect)
-        self.options_modal.set_rect(r.options_rect)
         self.country_picker.set_rect(r.wide_overlay_rect)
         self.directory_browser.set_rect(r.wide_overlay_rect)
         self._needs_full_present = True

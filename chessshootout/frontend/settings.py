@@ -5,8 +5,8 @@ import pygame as pg
 
 from chessshootout import paths
 from chessshootout.infra import env
-from chessshootout.frontend.modals.options import (
-    CountryRow, PathRow, TextRow, ToggleRow, SliderRow, SegmentedRow, SwatchRow,
+from chessshootout.frontend.menu.options_rows import (
+    PathRow, TextRow, ToggleRow, SliderRow, SegmentedRow, SwatchRow,
 )
 
 
@@ -21,36 +21,26 @@ class SettingsController:
         self._data_folder_row = None
         self._server_addr_row = None
 
-    def _on_open_options(self):
-        self.frontend.options_modal.show(self._build_settings_sections(),
-                                         on_close=self._on_close_settings)
-
-    def _dismiss_options(self):
-        if self._on_close_settings() is not False:
-            self.frontend.options_modal.hide()
-
-    def _on_close_settings(self):
-        if not self._validate_data_folder_on_close():
-            return False
+    def _commit_options_exit(self):
+        self._validate_data_folder_on_exit()
         if self._server_addr_row is not None:
             env.set_server_addr(self._server_addr_row.current_text())
         self.frontend.menu.apply_default_time_settings()
-        return True
+        self._flush_deferred_env_writes(force=True)
 
-    def _validate_data_folder_on_close(self):
+    def _validate_data_folder_on_exit(self):
         if self._data_folder_row is None:
-            return True
+            return
         typed = self._data_folder_row.current_text()
         if not typed:
-            return True
+            return
         typed = os.path.abspath(os.path.expanduser(typed))
         if os.path.normpath(typed) == os.path.normpath(str(paths.get_data_dir())):
-            return True
+            return
         if not paths.is_writable_dir(typed):
             self.frontend.toast.show("That folder isn't writable")
-            return False
+            return
         self._apply_data_folder_change(typed)
-        return True
 
     def _set_master_volume(self, value):
         self.frontend.sound_manager.set_master_volume(value)
@@ -97,10 +87,6 @@ class SettingsController:
             ("ice", "#b4c2d4", "#4a5a72", True),
         ]
         return [
-            ("Profile", [
-                CountryRow("Country", "Shows your flag on the player strip",
-                           env.get_country, self._on_pick_country),
-            ]),
             ("Audio", [
                 SliderRow("Master volume", "", lambda: sound_manager.master_volume,
                           self._set_master_volume, on_tick=sound_manager.play_ui_tick,
@@ -150,12 +136,6 @@ class SettingsController:
                           env.get_show_ping, env.set_show_ping),
             ]),
         ]
-
-    def _on_pick_country(self):
-        self.frontend.country_picker.show(env.get_country(), self._apply_country_choice)
-
-    def _apply_country_choice(self, code):
-        env.set_country(code)
 
     def _on_change_data_folder(self):
         self.frontend.directory_browser.show(
