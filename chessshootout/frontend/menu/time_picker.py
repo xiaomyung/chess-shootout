@@ -1,4 +1,5 @@
 import math
+import random
 
 import pygame as pg
 
@@ -25,6 +26,10 @@ WHEEL_IMPULSE_DEG_PER_S = 150.0
 SPIN_STOP_DEG_PER_S = 12.0
 SPIN_MAX_DT = 0.05
 
+ROULETTE_MIN_DEG_PER_S = 640.0
+ROULETTE_MAX_DEG_PER_S = 1700.0
+TURRET_ROULETTE_MS = 700
+
 DRAG_CLICK_THRESHOLD_DEG = 3.5
 DRAG_VELOCITY_EMA_ALPHA = 0.35
 DRAG_MAX_VELOCITY_DEG_PER_S = 2800.0
@@ -35,6 +40,8 @@ SEAT_POP_MS = 150
 DISC_MARGIN_FRAC = 0.34
 CHAMBER_RING_FRAC = 0.58
 CHAMBER_RADIUS_FRAC = 0.25
+DRUM_GRAB_RADIUS_FRAC = 1.18
+HUB_HIT_RADIUS_FRAC = 0.30
 SCALLOP_RING_FRAC = 1.05
 SCALLOP_RADIUS_FRAC = 0.23
 STAR_RADIUS_FRAC = 0.15
@@ -155,6 +162,10 @@ class TimePicker:
         self._seat_pop_index = self._min_index
         self._turret_angle = TURRET_BASE_DEG + self._inc_index * TURRET_SPREAD_DEG
         self._turret_tween = None
+        self._turret_pending_index = self._inc_index
+        self._turret_sweep_start = self._turret_angle
+        self._turret_sweep_steps = 0
+        self._turret_sweep_ticks = 0
         self._now = 0
         self._label_font = get_mono_font(11, bold=True)
         self._value_font = get_display_font(18)
@@ -188,6 +199,8 @@ class TimePicker:
         self._seat_pop_index = self._min_index
         self._turret_angle = TURRET_BASE_DEG + self._inc_index * TURRET_SPREAD_DEG
         self._turret_tween = None
+        self._turret_pending_index = self._inc_index
+        self._turret_sweep_steps = 0
 
     def _chamber_index_for(self, minutes):
         for i, (value, _) in enumerate(CHAMBERS):
@@ -251,6 +264,16 @@ class TimePicker:
         dy = pos[1] - self._drum_center[1]
         return dx * dx + dy * dy <= (self._radius * 1.08) ** 2
 
+    def _in_drum_grab(self, pos):
+        dx = pos[0] - self._drum_center[0]
+        dy = pos[1] - self._drum_center[1]
+        return dx * dx + dy * dy <= (self._radius * DRUM_GRAB_RADIUS_FRAC) ** 2
+
+    def _in_hub(self, pos):
+        dx = pos[0] - self._drum_center[0]
+        dy = pos[1] - self._drum_center[1]
+        return dx * dx + dy * dy <= (self._radius * HUB_HIT_RADIUS_FRAC) ** 2
+
     def _in_turret(self, pos):
         dx = pos[0] - self._turret_center[0]
         dy = pos[1] - self._turret_center[1]
@@ -268,7 +291,7 @@ class TimePicker:
         return pg.time.get_ticks() if now_ms is None else now_ms
 
     def handle_press(self, pos, now_ms=None):
-        if not self._in_drum(pos):
+        if not self._in_drum_grab(pos):
             return False
         self._spinning = False
         self._spin_vel = 0.0
@@ -319,7 +342,7 @@ class TimePicker:
         return dragged
 
     def handle_scroll(self, pos, notches):
-        if self._in_drum(pos):
+        if self._in_drum_grab(pos):
             self._spinning = True
             self._spin_vel += notches * WHEEL_IMPULSE_DEG_PER_S
             self._spin_last_ms = None
@@ -337,6 +360,9 @@ class TimePicker:
         self._spinning = False
         self._spin_vel = 0.0
         self._drag_active = False
+        if self._in_hub(pos):
+            self._start_roulette()
+            return True
         if self._in_drum(pos):
             self._select_minutes(self._nearest_chamber(pos))
             return True
@@ -364,18 +390,58 @@ class TimePicker:
         self._rot_tween = Tween(self._rotation, self._rot_target,
                                 ROTATION_MS + SETTLE_MS, self._now)
         if self.selected_minutes is None:
-            self._inc_index = 0
-            self._turret_angle = TURRET_BASE_DEG
-            self._turret_tween = None
+            self._deaden_turret()
         self._changed()
 
     def _select_increment(self, index):
         self._inc_index = index
+        self._turret_pending_index = index
+        self._turret_sweep_steps = 0
         self._turret_tween = Tween(
             self._turret_angle, TURRET_BASE_DEG + index * TURRET_SPREAD_DEG,
             TURRET_SWING_MS, self._now)
         self._emit_ratchet()
         self._changed()
+
+    def _deaden_turret(self):
+        self._inc_index = 0
+        self._turret_pending_index = 0
+        self._turret_sweep_steps = 0
+        self._turret_angle = TURRET_BASE_DEG
+        self._turret_tween = None
+
+    def _start_roulette(self):
+        self._start_drum_roulette()
+        self._start_turret_roulette()
+
+    def _start_drum_roulette(self):
+        self._spinning = True
+        self._spin_vel = random.choice((-1.0, 1.0)) * random.uniform(
+            ROULETTE_MIN_DEG_PER_S, ROULETTE_MAX_DEG_PER_S)
+        self._spin_last_ms = None
+        self._rot_tween = None
+        self._spin_tick_gate.reset()
+
+    def _start_turret_roulette(self):
+        index = random.randrange(len(INCREMENTS))
+        direction = random.choice((-1.0, 1.0))
+        base = TURRET_BASE_DEG + index * TURRET_SPREAD_DEG
+        start = self._turret_angle
+        travel = ((base - start) * direction) % 360.0 + 360.0
+        self._turret_pending_index = index
+        self._turret_sweep_start = start
+        self._turret_sweep_steps = max(int(round(travel / TURRET_SPREAD_DEG)), 1)
+        self._turret_sweep_ticks = 0
+        self._turret_tween = Tween(start, start + direction * travel,
+                                   TURRET_ROULETTE_MS, self._now)
+
+    def _settle_turret_roulette(self):
+        self._turret_sweep_steps = 0
+        changed = self._turret_pending_index != self._inc_index
+        self._inc_index = self._turret_pending_index
+        self._turret_angle = TURRET_BASE_DEG + self._inc_index * TURRET_SPREAD_DEG
+        if changed:
+            self._changed()
 
     def _select_increment_clamped(self, index):
         index = max(0, min(len(INCREMENTS) - 1, index))
@@ -411,9 +477,7 @@ class TimePicker:
         changed = index != self._min_index
         self._min_index = index
         if self.selected_minutes is None:
-            self._inc_index = 0
-            self._turret_angle = TURRET_BASE_DEG
-            self._turret_tween = None
+            self._deaden_turret()
         if changed:
             self._changed()
 
@@ -447,9 +511,18 @@ class TimePicker:
             self._seat_pop_tween = None
         if self._turret_tween is not None:
             self._turret_angle = self._turret_tween.value(now)
+            if self._turret_sweep_steps > 0:
+                crossed = min(int(round(abs(self._turret_angle - self._turret_sweep_start)
+                                        / TURRET_SPREAD_DEG)), self._turret_sweep_steps)
+                while self._turret_sweep_ticks < crossed:
+                    self._turret_sweep_ticks += 1
+                    self._emit_ratchet()
             if self._turret_tween.done(now):
-                self._turret_angle = TURRET_BASE_DEG + self._inc_index * TURRET_SPREAD_DEG
                 self._turret_tween = None
+                if self._turret_sweep_steps > 0:
+                    self._settle_turret_roulette()
+                else:
+                    self._turret_angle = TURRET_BASE_DEG + self._inc_index * TURRET_SPREAD_DEG
 
     def draw(self, surface, now):
         self.update(now)

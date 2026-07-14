@@ -12,7 +12,8 @@ from tests.conftest import pygame_display
 import chessshootout.frontend.menu.time_picker as time_picker
 from chessshootout.frontend.menu.time_picker import (
     CHAMBER_RING_FRAC, CHAMBERS, CHAMBER_RADIUS_FRAC, CHAMBER_STEP_DEG,
-    DRAG_CLICK_THRESHOLD_DEG, INCREMENTS, ROTATION_MS, SEAT_POP_MS, SETTLE_MS, TimePicker)
+    DRAG_CLICK_THRESHOLD_DEG, INCREMENTS, ROTATION_MS, ROULETTE_MAX_DEG_PER_S,
+    ROULETTE_MIN_DEG_PER_S, HUB_HIT_RADIUS_FRAC, SEAT_POP_MS, SETTLE_MS, TimePicker)
 from chessshootout.frontend.visual.colors import Colors
 
 
@@ -488,3 +489,133 @@ def test_turret_needle_cache_stays_bounded_during_a_swing():
         p._turret_angle = i * 1.3
         p._draw_turret_needle(surface)
     assert len(time_picker._TURRET_NEEDLE_CACHE) <= time_picker.NEEDLE_CACHE_CAP
+
+
+# --- extractor-hub roulette ------------------------------------------------
+# Pressing the central star hub free-spins the drum at a random speed and the
+# physics landing (no pre-picked chamber) is the roll; the turret sweeps to a
+# pre-picked increment in parallel. The impulse range is derived from the drum
+# friction: travel ~= tau * (v0 - v_stop) with tau = SPIN_FRICTION_TAU (0.85)
+# and v_stop = SPIN_STOP_DEG_PER_S (12). ROULETTE_MIN_DEG_PER_S = 640 gives
+# 0.85 * (640 - 12) = 533.8 deg ~= 1.48 revs; ROULETTE_MAX_DEG_PER_S = 1700
+# gives 0.85 * (1700 - 12) = 1434.8 deg ~= 3.99 revs -- so every roll travels
+# between ~1.5 and ~4 full turns of the seven-chamber drum (pitch 360/7).
+
+
+def _seed_roulette(monkeypatch, speed, direction=1.0, turret_index=0):
+    monkeypatch.setattr(time_picker.random, "uniform", lambda a, b: speed)
+    monkeypatch.setattr(time_picker.random, "choice",
+                        lambda seq: seq[1] if direction > 0 else seq[0])
+    monkeypatch.setattr(time_picker.random, "randrange", lambda n: turret_index)
+
+
+def _run_to_rest(p):
+    t = 0
+    for _ in range(4000):
+        t += 16
+        p.update(t)
+        if not p._spinning and p._rot_tween is None and p._turret_tween is None:
+            break
+    return t
+
+
+def test_hub_click_spins_the_drum_at_a_roulette_speed():
+    p = _picker(10, 5)
+    assert p.handle_click(p._drum_center) is True
+    assert p._spinning is True
+    assert ROULETTE_MIN_DEG_PER_S <= abs(p._spin_vel) <= ROULETTE_MAX_DEG_PER_S
+
+
+def test_hub_click_does_not_select_instantly_or_count_as_a_chamber():
+    p = _picker(10, 5)
+    before_min, before_inc = p._min_index, p._inc_index
+    assert p.handle_click(p._drum_center) is True
+    assert p._min_index == before_min, "the roll is undecided until the drum settles"
+    assert p._inc_index == before_inc, "the turret result is deferred to its landing"
+    assert p._rot_tween is None, "a hub click starts a free spin, not a chamber snap"
+    assert p._spinning is True
+
+
+def test_hub_zone_clears_the_chamber_bores():
+    assert HUB_HIT_RADIUS_FRAC < CHAMBER_RING_FRAC - CHAMBER_RADIUS_FRAC, \
+        "the hub trigger must not overlap the bore ring at 0.58R"
+
+
+def test_chamber_click_outside_the_hub_still_selects():
+    p = _picker(10, 5)
+    p.handle_click(p.chamber_center(6))
+    _settle(p)
+    assert p.selected_minutes is None
+
+
+def test_hub_roulette_settles_on_a_valid_chamber_and_notifies_once(monkeypatch):
+    changes = []
+    p = TimePicker(on_change=lambda: changes.append(1))
+    p.set_rect(pg.Rect(0, 0, 300, 190))
+    p.set_selection(10, 5)
+    _seed_roulette(monkeypatch, ROULETTE_MIN_DEG_PER_S, direction=1.0, turret_index=2)
+    p.handle_click(p._drum_center)
+    _run_to_rest(p)
+    assert p.selected_minutes in [v for v, _ in CHAMBERS]
+    assert p._min_index != 3, "the physics carried the drum off the starting chamber"
+    assert changes == [1], "the drum settle notifies exactly once"
+    assert p._seat_pop_tween is not None, "the landing reuses the seat-pop"
+
+
+def test_hub_roulette_sweeps_the_turret_with_ratchet_ticks(monkeypatch):
+    ratchets = []
+    p = TimePicker(on_ratchet=lambda: ratchets.append(1))
+    p.set_rect(pg.Rect(0, 0, 300, 190))
+    p.set_selection(10, 5)
+    _seed_roulette(monkeypatch, ROULETTE_MIN_DEG_PER_S, direction=1.0, turret_index=4)
+    p.handle_click(p._drum_center)
+    _run_to_rest(p)
+    assert p.selected_increment == INCREMENTS[4]
+    assert len(ratchets) > 1, "the needle ratchets past several detents on its pass"
+
+
+def test_hub_roulette_infinity_landing_forces_zero_increment(monkeypatch):
+    p = _picker(10, 5)
+    _seed_roulette(monkeypatch, 1500.0, direction=1.0, turret_index=4)
+    p.handle_click(p._drum_center)
+    _run_to_rest(p)
+    assert p.selected_minutes is None
+    assert p.selected_increment == 0, "infinity deadening wins over the turret roll"
+    assert p._inc_index == 0
+
+
+def test_reclick_mid_spin_restarts_the_roulette_cleanly(monkeypatch):
+    changes = []
+    p = TimePicker(on_change=lambda: changes.append(1))
+    p.set_rect(pg.Rect(0, 0, 300, 190))
+    p.set_selection(10, 5)
+    _seed_roulette(monkeypatch, ROULETTE_MIN_DEG_PER_S, direction=1.0, turret_index=2)
+    p.handle_click(p._drum_center)
+    for t in range(16, 200, 16):
+        p.update(t)
+    assert p._spinning is True
+    p.handle_click(p._drum_center)
+    assert p._spinning is True
+    assert ROULETTE_MIN_DEG_PER_S <= abs(p._spin_vel) <= ROULETTE_MAX_DEG_PER_S
+    _run_to_rest(p)
+    assert p.selected_minutes in [v for v, _ in CHAMBERS]
+    assert changes == [1], "one settle notification survives the restart"
+
+
+def _fringe_point(p, frac):
+    cx, cy = p._drum_center
+    return (cx, cy - p._radius * frac)
+
+
+def test_drum_grab_fringe_drags_and_spins_while_a_click_selects_nothing():
+    fringe = _fringe_point(_picker(10, 5), 1.12)
+    p = _picker(10, 5)
+    assert p.handle_press(fringe, now_ms=0) is True, "the fringe just outside arms a drag"
+    assert p._drag_active is True
+    p = _picker(10, 5)
+    assert p.handle_scroll(fringe, 1) is True, "a wheel over the fringe spins the drum"
+    assert p._spinning is True
+    p = _picker(10, 5)
+    before = p._min_index
+    assert p.handle_click(fringe) is False, "a plain click on the fringe selects nothing"
+    assert p._min_index == before
