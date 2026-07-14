@@ -119,8 +119,10 @@ def test_battle_avoids_the_rail_and_the_active_views_panels():
     assert hero._chips_block in battle.avoid_rects
     assert hero._title_block not in battle.avoid_rects
     assert not any(r.contains(hero._cta_rect) for r in battle.avoid_rects)
-    # P4: the right rail is now full of cards, so it collides like the left rail
-    assert app.menu._menu_layout.right_rail_rect in battle.avoid_rects
+    # cp2: the full right rail column (opaque panel, edge-to-edge, chrome-to-bottom)
+    # is the collider now -- like the left rail -- so entities/KO/bubbles never enter it
+    assert app.menu._menu_layout.right_rail_full_rect in battle.avoid_rects
+    assert app.menu._menu_layout.right_rail_rect not in battle.avoid_rects
 
     app.menu.goto_history()
     app.draw_frame()

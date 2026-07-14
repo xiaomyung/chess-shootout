@@ -6,7 +6,7 @@ import pygame as pg
 from chessshootout import paths
 from chessshootout.infra import env
 from chessshootout.frontend.menu.options_rows import (
-    PathRow, TextRow, ToggleRow, SliderRow, SegmentedRow, SwatchRow,
+    PathRow, TextRow, ToggleRow, NotchRow, SegmentedRow, SwatchRow,
 )
 
 
@@ -88,14 +88,14 @@ class SettingsController:
         ]
         return [
             ("Audio", [
-                SliderRow("Master volume", "", lambda: sound_manager.master_volume,
-                          self._set_master_volume, on_tick=sound_manager.play_ui_tick,
-                          on_release=lambda: self._defer_env_write(
-                              "master_volume", self._commit_master_volume)),
-                SliderRow("Menu volume", "", lambda: sound_manager.menu_volume,
-                          self._set_menu_volume, on_tick=sound_manager.play_ui_tick,
-                          on_release=lambda: self._defer_env_write(
-                              "menu_volume", self._commit_menu_volume)),
+                NotchRow("Master volume", "", lambda: sound_manager.master_volume,
+                         self._set_master_volume, on_tick=sound_manager.play_ui_tick,
+                         on_release=lambda: self._defer_env_write(
+                             "master_volume", self._commit_master_volume)),
+                NotchRow("Menu volume", "", lambda: sound_manager.menu_volume,
+                         self._set_menu_volume, on_tick=sound_manager.play_ui_tick,
+                         on_release=lambda: self._defer_env_write(
+                             "menu_volume", self._commit_menu_volume)),
                 ToggleRow("Mute all sound", "Silence every shot and callout",
                           lambda: not sound_manager.enabled,
                           lambda muted: sound_manager.set_enabled(not muted)),
@@ -114,10 +114,10 @@ class SettingsController:
             ("Game", [
                 SegmentedRow("Default time", "Minutes on the clock, or untimed",
                              time_options, env.get_default_time_control,
-                             env.set_default_time_control, mono=True),
+                             env.set_default_time_control, mono=True, variant="cells"),
                 SegmentedRow("Default increment", "Seconds added each move",
                              incr_options, env.get_default_increment,
-                             env.set_default_increment, mono=True),
+                             env.set_default_increment, mono=True, variant="cells"),
                 self._data_folder_row,
             ]),
             ("Online", [

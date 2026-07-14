@@ -352,42 +352,46 @@ class PlayView(MenuView):
             self._fen_rect = pg.Rect(x, self._cta_rect.top - self._s(FEN_GAP) - link_h, w, link_h)
             self._fen_above = True
 
-    def _clamp_popover_x(self, centerx, pw, win_w):
-        if pw <= self._hero_rect.width:
-            lo, hi = self._hero_rect.left, self._hero_rect.right - pw
-        else:
-            lo, hi = 4, win_w - pw - 4
-        return min(max(centerx - pw // 2, lo), hi)
-
-    def _layout_time_popover(self):
+    def _fit_popover(self, base_w, base_h, anchor_left, chip):
         win_w, win_h = self.app.window.get_size()
         top_limit = self.app.chrome.HEIGHT
-        pw, ph = self._s(TIME_POPOVER_W), self._s(TIME_POPOVER_H)
-        px = self._clamp_popover_x(self._time_chip.centerx, pw, win_w)
-        py = self._time_chip.bottom + self._s(8)
-        if py + ph > win_h - 4:
-            py = max(self._time_chip.top - self._s(8) - ph, top_limit + 4)
-        self._time_popover = pg.Rect(px, py, pw, ph)
-        pad = self._s(14)
+        hero = self._hero_rect
+        gap = self._s(8)
+        below = (win_h - 4) - (chip.bottom + gap)
+        above = (chip.top - gap) - (top_limit + 4)
+        avail_v = max(below, above, 1)
+        avail_w = max(hero.width, 1)
+        shrink = min(1.0, avail_w / base_w, avail_v / base_h)
+        pw = min(int(base_w * shrink), avail_w)
+        ph = int(base_h * shrink)
+        px = min(max(anchor_left, hero.left), hero.right - pw)
+        px = min(max(px, 4), win_w - pw - 4)
+        if chip.bottom + gap + ph <= win_h - 4:
+            py = chip.bottom + gap
+        else:
+            py = max(chip.top - gap - ph, top_limit + 4)
+        return pg.Rect(px, py, max(pw, 1), max(ph, 1)), shrink
+
+    def _layout_time_popover(self):
+        self._time_popover, shrink = self._fit_popover(
+            self._s(TIME_POPOVER_W), self._s(TIME_POPOVER_H),
+            self._hero_rect.x, self._time_chip)
+        pad = max(int(self._s(14) * shrink), 4)
         self._picker.set_rect(self._time_popover.inflate(-2 * pad, -2 * pad))
 
     def _layout_side_popover(self):
-        win_w, win_h = self.app.window.get_size()
-        top_limit = self.app.chrome.HEIGHT
-        sw = self._s(SIDE_POPOVER_W)
         rows = len(SIDE_OPTIONS)
-        sh = self._s(SIDE_ROW_H) * rows + self._s(8) * (rows + 1)
-        sx = self._clamp_popover_x(self._side_chip.centerx, sw, win_w)
-        sy = self._side_chip.bottom + self._s(8)
-        if sy + sh > win_h - 4:
-            sy = max(self._side_chip.top - self._s(8) - sh, top_limit + 4)
-        self._side_popover = pg.Rect(sx, sy, sw, sh)
+        base_h = self._s(SIDE_ROW_H) * rows + self._s(8) * (rows + 1)
+        self._side_popover, shrink = self._fit_popover(
+            self._s(SIDE_POPOVER_W), base_h, self._side_chip.x, self._side_chip)
+        pad = max(int(self._s(8) * shrink), 3)
+        row_h = max(int(self._s(SIDE_ROW_H) * shrink), 1)
         self._side_rects = {}
-        ry = sy + self._s(8)
+        ry = self._side_popover.y + pad
         for _, key in SIDE_OPTIONS:
-            self._side_rects[key] = pg.Rect(sx + self._s(8), ry, sw - self._s(16),
-                                            self._s(SIDE_ROW_H))
-            ry += self._s(SIDE_ROW_H) + self._s(8)
+            self._side_rects[key] = pg.Rect(self._side_popover.x + pad, ry,
+                                            self._side_popover.width - 2 * pad, row_h)
+            ry += row_h + pad
 
     def _open_time_popover(self):
         self._picker.set_selection(self.selected_time_minutes,

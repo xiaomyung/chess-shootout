@@ -4,7 +4,6 @@ from chessshootout.frontend.menu.options_rows import OptionsBody, _Fonts
 from chessshootout.frontend.menu.view import MenuView
 from chessshootout.frontend.visual.cache import render_text
 from chessshootout.frontend.visual.colors import Colors
-from chessshootout.frontend.visual.draw import cut_rect_surface
 from chessshootout.frontend.visual.fonts import get_display_font, get_font, get_mono_font
 
 
@@ -13,10 +12,6 @@ TITLE_FONT_BASE = 28
 TITLE_FONT_FLOOR = 20
 TITLE_GAP = 20
 TITLE_GAP_FLOOR = 12
-PANEL_CUT = 8
-PANEL_CUT_FLOOR = 6
-PANEL_PAD = 18
-PANEL_PAD_FLOOR = 10
 
 
 class OptionsView(MenuView):
@@ -45,7 +40,7 @@ class OptionsView(MenuView):
         return _Fonts(
             title=get_font(self._s(15, 12), bold=True),
             desc=get_font(self._s(12, 10)),
-            section=get_font(self._s(11, 10), bold=True),
+            section=get_mono_font(self._s(11, 10), bold=True),
             value=get_mono_font(self._s(13, 11)),
             button=get_font(self._s(12, 11), bold=True),
         )
@@ -68,13 +63,7 @@ class OptionsView(MenuView):
         window.blit(title, (rect.x, self._title_top))
         if self._body_rect.height <= 0:
             return
-        window.blit(cut_rect_surface(self._body_rect.size, self._s(PANEL_CUT, PANEL_CUT_FLOOR),
-                                     Colors.surface_raised, border=Colors.border,
-                                     border_width=1, corners=("tr", "bl")),
-                    self._body_rect.topleft)
-        pad = self._s(PANEL_PAD, PANEL_PAD_FLOOR)
-        content_rect = self._body_rect.inflate(-2 * pad, -2 * pad)
-        self.body.draw(window, content_rect, self._fonts())
+        self.body.draw(window, self._body_rect, self._fonts())
 
     def handle_click(self, pos):
         return self.body.handle_click(pos)

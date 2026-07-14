@@ -12,6 +12,7 @@ from chessshootout.frontend.menu.shell import build_views
 from chessshootout.frontend.modal_registry import ModalSpec
 from chessshootout.frontend.modals.fen_input import FenInputModal
 from chessshootout.frontend.screens.base import Screen
+from chessshootout.frontend.visual.colors import Colors
 from chessshootout.frontend.window_chrome import WindowChrome
 
 
@@ -98,7 +99,7 @@ class MenuScreen(Screen):
     def update(self, now):
         self.views[self._active_view].update(now)
         layout = self._menu_layout
-        rects = [layout.rail_rect, layout.right_rail_rect]
+        rects = [layout.rail_rect, layout.right_rail_full_rect]
         rects += self.views[self._active_view].avoid_rects()
         self.app.menu_battle.set_avoid_rects(rects)
 
@@ -110,7 +111,16 @@ class MenuScreen(Screen):
         self.rail.draw(app.window, now)
         self.views[self._active_view].draw(app.window, self._menu_layout)
         if self._active_view == "play":
+            self._draw_right_rail_panel(app.window)
             self.card_stack.draw(app.window, now)
+
+    def _draw_right_rail_panel(self, window):
+        panel = self._menu_layout.right_rail_full_rect
+        if panel.width <= 0:
+            return
+        pg.draw.rect(window, pg.Color(Colors.surface), panel)
+        pg.draw.line(window, pg.Color(Colors.border), (panel.left, panel.top),
+                     (panel.left, panel.bottom - 1))
 
     def handle_click(self, pos):
         row = self.rail.hit_test(pos)

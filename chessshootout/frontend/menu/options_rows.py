@@ -1,19 +1,25 @@
+import math
+
 import pygame as pg
 
-from chessshootout.frontend.visual.cache import render_text
+from chessshootout.frontend.visual.cache import render_text, new_cache, memoized_surface
 from chessshootout.frontend.visual.colors import Colors
-from chessshootout.frontend.visual.draw import supersample, rounded_rect_surface
-from chessshootout.frontend.visual.fonts import get_font, get_mono_font
+from chessshootout.frontend.visual.draw import (
+    supersample, rounded_rect_surface, cut_rect_surface, infinity_surface)
+from chessshootout.frontend.visual.fonts import get_mono_font
 from chessshootout.frontend.visual.scroll_view import ScrollHost, ScrollView
-from chessshootout.frontend.visual.slider_tick import TickGate
 from chessshootout.frontend.visual.text_input import TextInput
-from chessshootout.frontend.visual.widgets import draw_button, draw_segmented, draw_toggle
+from chessshootout.frontend.visual.widgets import draw_toggle
 
 
-ROW_PAD = 12
-SECTION_GAP = 10
+CARD_CUT = 8
+CARD_PAD_X = 16
+ROW_PAD_Y = 13
+LABEL_DESC_GAP = 3
+CONTROL_GAP = 18
+SECTION_LABEL_GAP = 9
+SECTION_GAP = 18
 SCROLLBAR_RESERVE = 14
-LABEL_GAP = 16
 OPTIONS_WHEEL_STEP = 30
 
 TOGGLE_W = 46
@@ -23,14 +29,34 @@ TOGGLE_HIT_PAD_Y = 14
 TOGGLE_SNAP_EPS = 0.02
 TOGGLE_LERP = 0.3
 
-SLIDER_WIDTH_RATIO = 0.46
-SLIDER_WIDTH_CAP = 200
-SLIDER_TRACK_H = 6
-SLIDER_KNOB_RADIUS = 7
-SLIDER_READOUT_GAP = 44
-SLIDER_LABEL_GAP = 8
-SLIDER_HIT_PAD_X = 20
-SLIDER_HIT_PAD_Y = 22
+NOTCH_COUNT = 10
+NOTCH_CELL_W = 13
+NOTCH_CELL_H = 22
+NOTCH_GAP = 4
+NOTCH_CELL_CUT = 3
+NOTCH_READOUT_GAP = 12
+NOTCH_HIT_PAD_X = 14
+NOTCH_HIT_PAD_Y = 16
+
+SEG_MIN_H = 30
+SEG_PAD_X = 14
+SEG_GAP = 8
+SEG_CUT = 6
+CELL_GAP = 6
+CELL_CUT = 5
+CELL_PAD_X = 10
+
+SWATCH_SIZE = 52
+SWATCH_GAP = 12
+SWATCH_LABEL_GAP = 7
+SWATCH_SEL_RADIUS = 8
+SWATCH_LOCK_ALPHA = 96
+
+FIELD_H = 34
+BTN_PAD_X = 14
+BTN_GAP = 8
+RESET_PAD_X = 10
+FIELD_LEFT_FRAC = 0.40
 
 
 class _Fonts:
@@ -50,16 +76,40 @@ def _blit_clip(window, surf, pos, max_w):
     window.blit(surf, pos)
 
 
-def _swatch_surface(size, top, bottom):
-    def render(surf, k):
-        w, h = surf.get_size()
-        pg.draw.polygon(surf, pg.Color(top), [(0, 0), (w, 0), (0, h)])
-        pg.draw.polygon(surf, pg.Color(bottom), [(w, 0), (w, h), (0, h)])
-        mask = pg.Surface((w, h), pg.SRCALPHA)
-        pg.draw.rect(mask, (255, 255, 255, 255), mask.get_rect(),
-                     border_radius=max(int(8 * k), 1))
-        surf.blit(mask, (0, 0), special_flags=pg.BLEND_RGBA_MULT)
-    return supersample(size, render)
+_CHECKER_CACHE = new_cache()
+
+
+def _checker_surface(size, light, dark):
+    def build():
+        def render(surf, k):
+            w, h = surf.get_size()
+            hw, hh = w // 2, h // 2
+            pg.draw.rect(surf, pg.Color(light), pg.Rect(0, 0, hw, hh))
+            pg.draw.rect(surf, pg.Color(dark), pg.Rect(hw, 0, w - hw, hh))
+            pg.draw.rect(surf, pg.Color(dark), pg.Rect(0, hh, hw, h - hh))
+            pg.draw.rect(surf, pg.Color(light), pg.Rect(hw, hh, w - hw, h - hh))
+            mask = pg.Surface((w, h), pg.SRCALPHA)
+            pg.draw.rect(mask, (255, 255, 255, 255), mask.get_rect(),
+                         border_radius=max(int(8 * k), 1))
+            surf.blit(mask, (0, 0), special_flags=pg.BLEND_RGBA_MULT)
+        return supersample(size, render)
+    return memoized_surface(_CHECKER_CACHE, (tuple(size), str(light), str(dark)), build)
+
+
+def _seg_glyph(font, label, color):
+    if label == "∞":
+        return infinity_surface(int(font.get_height() * 0.82), color)
+    return render_text(font, label, color)
+
+
+def _draw_lock(window, cx, cy, h, color):
+    body_w = max(int(h * 0.72), 4)
+    body_h = max(int(h * 0.5), 3)
+    body = pg.Rect(cx - body_w // 2, cy - body_h // 2 + int(h * 0.14), body_w, body_h)
+    pg.draw.rect(window, color, body, border_radius=max(int(h * 0.12), 1))
+    sr = max(int(body_w * 0.3), 2)
+    pg.draw.arc(window, color, pg.Rect(cx - sr, body.top - sr, 2 * sr, 2 * sr),
+                0.25, math.pi - 0.25, max(int(h * 0.12), 2))
 
 
 class _Row:
@@ -68,24 +118,30 @@ class _Row:
         self.title = title
         self.desc = desc
 
-    def height(self, fonts):
+    def _control_h(self, fonts):
+        return 0
+
+    def _label_h(self, fonts):
         h = fonts.title.get_height()
         if self.desc:
-            h += fonts.desc.get_height() + 2
-        return h + 2 * ROW_PAD
+            h += fonts.desc.get_height() + LABEL_DESC_GAP
+        return h
+
+    def height(self, fonts):
+        return 2 * ROW_PAD_Y + max(self._label_h(fonts), self._control_h(fonts))
 
     def draw(self, window, rect, fonts):
         control_left = self._draw_control(window, rect, fonts)
-        self._draw_label(window, rect, fonts, control_left - LABEL_GAP)
+        self._draw_label(window, rect, fonts, control_left - CONTROL_GAP)
 
     def _draw_label(self, window, rect, fonts, max_right):
         x = rect.x
-        y = rect.y + ROW_PAD
         avail = max(max_right - x, 1)
+        y = rect.centery - self._label_h(fonts) // 2
         _blit_clip(window, render_text(fonts.title, self.title, Colors.text), (x, y), avail)
         if self.desc:
             _blit_clip(window, render_text(fonts.desc, self.desc, Colors.text_muted),
-                       (x, y + fonts.title.get_height() + 2), avail)
+                       (x, y + fonts.title.get_height() + LABEL_DESC_GAP), avail)
 
     def _draw_control(self, window, rect, fonts):
         return rect.right
@@ -109,13 +165,14 @@ class ToggleRow(_Row):
         self._ctl = pg.Rect(0, 0, 0, 0)
         self._pos = None
 
+    def _control_h(self, fonts):
+        return TOGGLE_H
+
     def _draw_control(self, window, rect, fonts):
         self._ctl = pg.Rect(rect.right - TOGGLE_W, rect.centery - TOGGLE_H // 2,
                             TOGGLE_W, TOGGLE_H)
         target = 1.0 if self.getter() else 0.0
-        if self._pos is None:
-            self._pos = target
-        elif abs(self._pos - target) < TOGGLE_SNAP_EPS:
+        if self._pos is None or abs(self._pos - target) < TOGGLE_SNAP_EPS:
             self._pos = target
         else:
             self._pos += (target - self._pos) * TOGGLE_LERP
@@ -132,42 +189,113 @@ class ToggleRow(_Row):
         return self._ctl.inflate(TOGGLE_HIT_PAD_X, TOGGLE_HIT_PAD_Y).collidepoint(pos)
 
 
+class NotchRow(_Row):
+
+    def __init__(self, title, desc, getter, setter, on_tick=None, on_release=None):
+        super().__init__(title, desc)
+        self.getter = getter
+        self.setter = setter
+        self.on_tick = on_tick
+        self.on_release = on_release
+        self._band = pg.Rect(0, 0, 0, 0)
+
+    def _control_h(self, fonts):
+        return max(NOTCH_CELL_H, fonts.value.get_height())
+
+    def _draw_control(self, window, rect, fonts):
+        value = max(0.0, min(1.0, self.getter()))
+        readout = render_text(fonts.value, f"{int(round(value * 100))}%", Colors.text_dim)
+        window.blit(readout, (rect.right - readout.get_width(),
+                              rect.centery - readout.get_height() // 2))
+        total_w = NOTCH_COUNT * NOTCH_CELL_W + (NOTCH_COUNT - 1) * NOTCH_GAP
+        cx = rect.right - readout.get_width() - NOTCH_READOUT_GAP - total_w
+        cy = rect.centery - NOTCH_CELL_H // 2
+        filled = int(round(value * NOTCH_COUNT))
+        for i in range(NOTCH_COUNT):
+            cell = pg.Rect(cx + i * (NOTCH_CELL_W + NOTCH_GAP), cy, NOTCH_CELL_W, NOTCH_CELL_H)
+            if i < filled:
+                window.blit(cut_rect_surface(cell.size, NOTCH_CELL_CUT, Colors.accent,
+                                             corners=("tr",)), cell.topleft)
+            else:
+                window.blit(cut_rect_surface(cell.size, NOTCH_CELL_CUT, Colors.surface_raised,
+                                             border=Colors.border, border_width=1,
+                                             corners=("tr",)), cell.topleft)
+        self._band = pg.Rect(cx, cy, total_w, NOTCH_CELL_H)
+        return cx
+
+    def handle_click(self, pos):
+        if not self.contains_control(pos):
+            return False
+        step = NOTCH_CELL_W + NOTCH_GAP
+        i = max(0, min(NOTCH_COUNT - 1, (pos[0] - self._band.x) // step))
+        self.setter((i + 1) / NOTCH_COUNT)
+        if self.on_tick is not None:
+            self.on_tick()
+        if self.on_release is not None:
+            self.on_release()
+        return True
+
+    def contains_control(self, pos):
+        return self._band.inflate(NOTCH_HIT_PAD_X, NOTCH_HIT_PAD_Y).collidepoint(pos)
+
+
 class SegmentedRow(_Row):
 
-    def __init__(self, title, desc, options, getter, setter, mono=False):
+    def __init__(self, title, desc, options, getter, setter, mono=False, variant="chips"):
         super().__init__(title, desc)
         self.options = options
         self.getter = getter
         self.setter = setter
         self.mono = mono
+        self.variant = variant
         self._rects = {}
         self._mono_font = None
 
     def _seg_h(self, fonts):
-        return max(fonts.button.get_height() + 12, 28)
+        return max(fonts.button.get_height() + 12, SEG_MIN_H)
 
-    def height(self, fonts):
-        base = fonts.title.get_height() + (fonts.desc.get_height() + 2 if self.desc else 0)
-        return ROW_PAD + base + 8 + self._seg_h(fonts) + ROW_PAD
+    def _control_h(self, fonts):
+        return self._seg_h(fonts)
 
-    def draw(self, window, rect, fonts):
-        x = rect.x
-        y = rect.y + ROW_PAD
-        window.blit(render_text(fonts.title, self.title, Colors.text), (x, y))
-        yy = y + fonts.title.get_height() + 2
-        if self.desc:
-            window.blit(render_text(fonts.desc, self.desc, Colors.text_muted), (x, yy))
-            yy += fonts.desc.get_height() + 2
-        yy += 8
-        if self.mono:
-            size = max(int(fonts.button.get_height() * 0.82), 14)
-            if self._mono_font is None or self._mono_font[0] != size:
-                self._mono_font = (size, get_mono_font(size))
-            font = self._mono_font[1]
-        else:
-            font = fonts.button
-        sr = pg.Rect(x, yy, rect.width, self._seg_h(fonts))
-        self._rects = draw_segmented(window, sr, self.options, self.getter(), font)
+    def _font(self, fonts):
+        if not self.mono:
+            return fonts.button
+        size = max(int(fonts.button.get_height() * 0.9), 13)
+        if self._mono_font is None or self._mono_font[0] != size:
+            self._mono_font = (size, get_mono_font(size, bold=True))
+        return self._mono_font[1]
+
+    def _layout(self, font, h):
+        if self.variant == "cells":
+            cell_w = max(h, max(_seg_glyph(font, label, Colors.text_dim).get_width()
+                                for label, _ in self.options) + 2 * CELL_PAD_X)
+            return [cell_w] * len(self.options), CELL_CUT, CELL_GAP
+        widths = [_seg_glyph(font, label, Colors.text_dim).get_width() + 2 * SEG_PAD_X
+                  for label, _ in self.options]
+        return widths, SEG_CUT, SEG_GAP
+
+    def _draw_control(self, window, rect, fonts):
+        font = self._font(fonts)
+        h = self._seg_h(fonts)
+        y = rect.centery - h // 2
+        widths, cut, gap = self._layout(font, h)
+        x = rect.right - (sum(widths) + gap * (len(widths) - 1))
+        left = x
+        self._rects = {}
+        for (label, key), w in zip(self.options, widths):
+            sr = pg.Rect(round(x), y, round(w), h)
+            selected = key == self.getter()
+            fill = Colors.surface_raised if selected else Colors.surface
+            border = Colors.accent if selected else Colors.border
+            color = Colors.text if selected else Colors.text_dim
+            window.blit(cut_rect_surface(sr.size, cut, fill, border=border,
+                                         border_width=1, corners=("tr",)), sr.topleft)
+            glyph = _seg_glyph(font, label, color)
+            window.blit(glyph, (sr.centerx - glyph.get_width() // 2,
+                                sr.centery - glyph.get_height() // 2))
+            self._rects[key] = sr
+            x += w + gap
+        return int(left)
 
     def handle_click(self, pos):
         for key, r in self._rects.items():
@@ -180,66 +308,7 @@ class SegmentedRow(_Row):
         return any(r.collidepoint(pos) for r in self._rects.values())
 
 
-class SliderRow(_Row):
-
-    def __init__(self, title, desc, getter, setter, on_tick=None, on_release=None):
-        super().__init__(title, desc)
-        self.getter = getter
-        self.setter = setter
-        self.on_release = on_release
-        self._track = pg.Rect(0, 0, 0, 0)
-        self._dragging = False
-        self._tick_gate = TickGate(on_tick)
-
-    def _draw_control(self, window, rect, fonts):
-        if self._dragging:
-            if pg.mouse.get_pressed()[0]:
-                self._set_from_x(pg.mouse.get_pos()[0])
-            else:
-                self._dragging = False
-                if self.on_release is not None:
-                    self.on_release()
-        value = max(0.0, min(1.0, self.getter()))
-        readout = fonts.value.render(str(int(round(value * 100))), True, Colors.text_dim)
-        window.blit(readout, (rect.right - readout.get_width(),
-                              rect.centery - readout.get_height() / 2))
-        slider_w = min(int(rect.width * SLIDER_WIDTH_RATIO), SLIDER_WIDTH_CAP)
-        track_h = SLIDER_TRACK_H
-        track_right = rect.right - SLIDER_READOUT_GAP
-        self._track = pg.Rect(track_right - slider_w, rect.centery - track_h // 2,
-                              slider_w, track_h)
-        pg.draw.rect(window, Colors.surface_raised, self._track, border_radius=track_h // 2)
-        fill_w = int(self._track.width * value)
-        if fill_w > 0:
-            pg.draw.rect(window, Colors.accent,
-                         pg.Rect(self._track.x, self._track.y, fill_w, track_h),
-                         border_radius=track_h // 2)
-        pg.draw.circle(window, Colors.text,
-                       (self._track.x + fill_w, self._track.centery), SLIDER_KNOB_RADIUS)
-        return self._track.x - SLIDER_LABEL_GAP
-
-    def _set_from_x(self, x):
-        if self._track.width <= 0:
-            return
-        ratio = max(0.0, min(1.0, (x - self._track.x) / self._track.width))
-        self.setter(ratio)
-        self._tick_gate.feed(ratio, pg.time.get_ticks())
-
-    def handle_click(self, pos):
-        if self.contains_control(pos):
-            self._tick_gate.reset()
-            self._set_from_x(pos[0])
-            self._dragging = True
-            return True
-        return False
-
-    def contains_control(self, pos):
-        return self._track.inflate(SLIDER_HIT_PAD_X, SLIDER_HIT_PAD_Y).collidepoint(pos)
-
-
 class SwatchRow(_Row):
-
-    SWATCH_H = 30
 
     def __init__(self, title, desc, swatches, getter, setter):
         super().__init__(title, desc)
@@ -247,38 +316,45 @@ class SwatchRow(_Row):
         self.getter = getter
         self.setter = setter
         self._rects = {}
-        self.soon_font = get_font(max(int(self.SWATCH_H * 0.38), 9), bold=True)
+        self._label_font = None
 
-    def height(self, fonts):
-        return super().height(fonts) + 38
+    def _lbl_font(self, fonts):
+        size = max(int(fonts.value.get_height() * 0.82), 9)
+        if self._label_font is None or self._label_font[0] != size:
+            self._label_font = (size, get_mono_font(size, bold=True))
+        return self._label_font[1]
 
-    def draw(self, window, rect, fonts):
-        x = rect.x
-        y = rect.y + ROW_PAD
-        window.blit(render_text(fonts.title, self.title, Colors.text), (x, y))
-        yy = y + fonts.title.get_height() + 2
-        if self.desc:
-            window.blit(render_text(fonts.desc, self.desc, Colors.text_muted), (x, yy))
-            yy += fonts.desc.get_height() + 6
+    def _control_h(self, fonts):
+        return SWATCH_SIZE + SWATCH_LABEL_GAP + self._lbl_font(fonts).get_height()
+
+    def _draw_control(self, window, rect, fonts):
+        lf = self._lbl_font(fonts)
+        top = rect.centery - self._control_h(fonts) // 2
+        n = len(self.swatches)
+        x = rect.right - (n * SWATCH_SIZE + (n - 1) * SWATCH_GAP)
+        left = x
         self._rects = {}
-        sw_w, sw_h, gap = 42, self.SWATCH_H, 10
-        sx = x
-        for key, top, bottom, locked in self.swatches:
-            r = pg.Rect(sx, yy, sw_w, sw_h)
-            window.blit(_swatch_surface(r.size, top, bottom), r.topleft)
-            if key == self.getter():
-                window.blit(rounded_rect_surface(r.size, 8, "#00000000",
+        for key, light, dark, locked in self.swatches:
+            r = pg.Rect(x, top, SWATCH_SIZE, SWATCH_SIZE)
+            surf = _checker_surface((SWATCH_SIZE, SWATCH_SIZE), light, dark)
+            if locked:
+                surf = surf.copy()
+                surf.set_alpha(SWATCH_LOCK_ALPHA)
+            window.blit(surf, r.topleft)
+            selected = key == self.getter()
+            if selected:
+                window.blit(rounded_rect_surface(r.size, SWATCH_SEL_RADIUS, "#00000000",
                                                  border=Colors.accent, border_width=2),
                             r.topleft)
             if locked:
-                shadow = render_text(self.soon_font, "SOON", Colors.bg)
-                tag = render_text(self.soon_font, "SOON", Colors.text)
-                tx = r.centerx - tag.get_width() / 2
-                ty = r.centery - tag.get_height() / 2
-                window.blit(shadow, (tx + 1, ty + 1))
-                window.blit(tag, (tx, ty))
+                _draw_lock(window, r.centerx, r.centery, max(int(SWATCH_SIZE * 0.26), 10),
+                           Colors.text)
+            lbl = render_text(lf, key.upper(),
+                              Colors.accent_hi if selected else Colors.text_muted)
+            window.blit(lbl, (r.centerx - lbl.get_width() // 2, r.bottom + SWATCH_LABEL_GAP))
             self._rects[key] = (r, locked)
-            sx += sw_w + gap
+            x += SWATCH_SIZE + SWATCH_GAP
+        return left
 
     def handle_click(self, pos):
         for key, (r, locked) in self._rects.items():
@@ -291,17 +367,7 @@ class SwatchRow(_Row):
         return any(r.collidepoint(pos) for r, _ in self._rects.values())
 
 
-class _FieldRow(_Row):
-
-    def _field_h(self, fonts):
-        return max(fonts.value.get_height() + 18, 34)
-
-    def height(self, fonts):
-        base = fonts.title.get_height() + (fonts.desc.get_height() + 2 if self.desc else 0)
-        return ROW_PAD + base + 10 + self._field_h(fonts) + ROW_PAD
-
-
-class PathRow(_FieldRow):
+class PathRow(_Row):
 
     def __init__(self, label, desc, window, value_getter, on_change, on_reset, suffix=""):
         super().__init__(label, desc)
@@ -310,42 +376,59 @@ class PathRow(_FieldRow):
         self.on_reset = on_reset
         self.suffix = suffix
         self.input = TextInput(window, max_chars=512, placeholder="data folder path",
-                               mono=True, bg=Colors.bg, radius=7, rest_align="end")
-        self.input.padding = 11
+                               mono=True, bg=Colors.bg, radius=6, rest_align="end")
+        self.input.padding = 10
         self.input.text = str(value_getter())
         self._change_rect = pg.Rect(0, 0, 0, 0)
         self._reset_rect = pg.Rect(0, 0, 0, 0)
         self._field_rect = pg.Rect(0, 0, 0, 0)
 
-    def draw(self, window, rect, fonts):
-        x = rect.x
-        y = rect.y + ROW_PAD
-        window.blit(render_text(fonts.title, self.title, Colors.text), (x, y))
-        yy = y + fonts.title.get_height() + 2
-        if self.desc:
-            window.blit(render_text(fonts.desc, self.desc, Colors.text_muted), (x, yy))
-            yy += fonts.desc.get_height() + 2
-        yy += 10
+    def _control_h(self, fonts):
+        return FIELD_H
+
+    def _draw_control(self, window, rect, fonts):
+        y = rect.centery - FIELD_H // 2
         if not self.input.focused and self.input.text != str(self.value_getter()):
             self.input.text = str(self.value_getter())
-        field_h = self._field_h(fonts)
-        btn_w = max(int(rect.width * 0.17), 72)
-        gap = 8
-        self._reset_rect = pg.Rect(rect.right - btn_w, yy, btn_w, field_h)
-        self._change_rect = pg.Rect(self._reset_rect.x - gap - btn_w, yy, btn_w, field_h)
-        suffix_surf = render_text(fonts.value, self.suffix, Colors.text_muted) if self.suffix \
-            else None
-        suffix_w = suffix_surf.get_width() + 6 if suffix_surf else 0
-        field_right = self._change_rect.x - gap - suffix_w
-        self._field_rect = pg.Rect(x, yy, max(field_right - x, 1), field_h)
+        reset_surf = render_text(fonts.button, "Reset", Colors.text_dim)
+        reset_w = reset_surf.get_width() + 2 * RESET_PAD_X
+        self._reset_rect = pg.Rect(rect.right - reset_w, y, reset_w, FIELD_H)
+        change_w = fonts.button.size("Change")[0] + 2 * BTN_PAD_X
+        self._change_rect = pg.Rect(self._reset_rect.x - BTN_GAP - change_w, y,
+                                    change_w, FIELD_H)
+        field_left = rect.x + int(rect.width * FIELD_LEFT_FRAC)
+        self._field_rect = pg.Rect(field_left, y,
+                                   max(self._change_rect.x - BTN_GAP - field_left, 1), FIELD_H)
         self.input.set_rect(self._field_rect)
         self.input.font = fonts.value
-        self.input.draw()
+        if self.input.focused:
+            self.input.draw()
+        else:
+            self._draw_rest_path(window, fonts)
+        window.blit(cut_rect_surface(self._change_rect.size, 6, Colors.surface_raised,
+                                     border=Colors.border, border_width=1, corners=("tr",)),
+                    self._change_rect.topleft)
+        ct = render_text(fonts.button, "Change", Colors.text)
+        window.blit(ct, (self._change_rect.centerx - ct.get_width() // 2,
+                         self._change_rect.centery - ct.get_height() // 2))
+        window.blit(reset_surf, (self._reset_rect.centerx - reset_surf.get_width() // 2,
+                                 self._reset_rect.centery - reset_surf.get_height() // 2))
+        return self._field_rect.x
+
+    def _draw_rest_path(self, window, fonts):
+        path_surf = render_text(fonts.value, self.input.text, Colors.text_muted)
+        suffix_surf = render_text(fonts.value, self.suffix, Colors.text_dim) \
+            if self.suffix else None
+        total = path_surf.get_width() + (suffix_surf.get_width() if suffix_surf else 0)
+        fr = self._field_rect
+        prev = window.get_clip()
+        window.set_clip(fr.clip(prev) if prev is not None else fr)
+        x = fr.right - total
+        window.blit(path_surf, (x, fr.centery - path_surf.get_height() // 2))
         if suffix_surf:
-            window.blit(suffix_surf, (self._field_rect.right + 4,
-                                      self._field_rect.centery - suffix_surf.get_height() // 2))
-        draw_button(window, self._change_rect, "Change", fonts.button)
-        draw_button(window, self._reset_rect, "Reset", fonts.button)
+            window.blit(suffix_surf, (x + path_surf.get_width(),
+                                      fr.centery - suffix_surf.get_height() // 2))
+        window.set_clip(prev)
 
     def current_text(self):
         return self.input.text.strip()
@@ -373,32 +456,30 @@ class PathRow(_FieldRow):
         return self.input.handle_key(event)
 
 
-class TextRow(_FieldRow):
+class TextRow(_Row):
 
     def __init__(self, label, desc, window, value_getter, placeholder=""):
         super().__init__(label, desc)
         self.value_getter = value_getter
         self.input = TextInput(window, max_chars=128, placeholder=placeholder,
-                               mono=True, bg=Colors.bg, radius=7)
+                               mono=True, bg=Colors.bg, radius=6)
         self.input.padding = 11
         self.input.text = str(value_getter())
         self._field_rect = pg.Rect(0, 0, 0, 0)
 
-    def draw(self, window, rect, fonts):
-        x = rect.x
-        y = rect.y + ROW_PAD
-        window.blit(render_text(fonts.title, self.title, Colors.text), (x, y))
-        yy = y + fonts.title.get_height() + 2
-        if self.desc:
-            window.blit(render_text(fonts.desc, self.desc, Colors.text_muted), (x, yy))
-            yy += fonts.desc.get_height() + 2
-        yy += 10
+    def _control_h(self, fonts):
+        return FIELD_H
+
+    def _draw_control(self, window, rect, fonts):
+        y = rect.centery - FIELD_H // 2
         if not self.input.focused and self.input.text != str(self.value_getter()):
             self.input.text = str(self.value_getter())
-        self._field_rect = pg.Rect(x, yy, rect.width, self._field_h(fonts))
+        field_left = rect.x + int(rect.width * FIELD_LEFT_FRAC)
+        self._field_rect = pg.Rect(field_left, y, rect.right - field_left, FIELD_H)
         self.input.set_rect(self._field_rect)
         self.input.font = fonts.value
         self.input.draw()
+        return self._field_rect.x
 
     def current_text(self):
         return self.input.text.strip()
@@ -423,6 +504,7 @@ class OptionsBody(ScrollHost):
         self.sections = []
         self.rect = pg.Rect(0, 0, 0, 0)
         self.fonts = None
+        self._card_rects = []
         self._scroll_px = 0.0
         self._content_h = 0
         self.scroll = ScrollView(
@@ -447,21 +529,35 @@ class OptionsBody(ScrollHost):
         self._scroll_px = max(0.0, min(self._scroll_px, self._max_scroll()))
         prev = window.get_clip()
         window.set_clip(rect)
-        row_w = rect.width - SCROLLBAR_RESERVE
+        card_w = rect.width - SCROLLBAR_RESERVE
         y = rect.y - self._scroll_px
+        self._card_rects = []
         for label, rows in self.sections:
             window.blit(render_text(fonts.section, label.upper(), Colors.text_muted),
-                        (rect.x, y + 6))
-            y += fonts.section.get_height() + 8
-            for row in rows:
-                h = row.height(fonts)
-                row.draw(window, pg.Rect(rect.x, y, row_w, h), fonts)
-                y += h
+                        (rect.x, y))
+            y += fonts.section.get_height() + SECTION_LABEL_GAP
+            y = self._draw_card(window, rect.x, y, card_w, rows, fonts)
             y += SECTION_GAP
-        y += ROW_PAD
-        self._content_h = (y + self._scroll_px) - rect.y
+        self._content_h = (y - SECTION_GAP + self._scroll_px) - rect.y
         window.set_clip(prev)
         self.scroll.draw_thumb(window)
+
+    def _draw_card(self, window, x, y, card_w, rows, fonts):
+        heights = [row.height(fonts) for row in rows]
+        card = pg.Rect(x, round(y), card_w, sum(heights))
+        self._card_rects.append(card)
+        window.blit(cut_rect_surface(card.size, CARD_CUT, Colors.surface, border=Colors.border,
+                                     border_width=1, corners=("tr",)), card.topleft)
+        content_x = card.x + CARD_PAD_X
+        content_w = card.width - 2 * CARD_PAD_X
+        ry = y
+        for i, (row, h) in enumerate(zip(rows, heights)):
+            if i > 0:
+                pg.draw.line(window, pg.Color(Colors.border), (content_x, round(ry)),
+                             (content_x + content_w, round(ry)))
+            row.draw(window, pg.Rect(content_x, round(ry), content_w, h), fonts)
+            ry += h
+        return card.bottom
 
     def _max_scroll(self):
         return max(0, self._content_h - self.rect.height)

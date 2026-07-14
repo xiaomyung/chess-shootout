@@ -21,6 +21,7 @@ class MenuLayout:
     scale: float
     rail_rect: pg.Rect
     right_rail_rect: pg.Rect
+    right_rail_full_rect: pg.Rect
     hero_rect: pg.Rect
     subview_rect: pg.Rect
 
@@ -34,9 +35,12 @@ def compute_menu_layout(window_width, window_height, top, right_rail=False):
     if right_rail:
         right_rail_rect = pg.Rect(window_width - RIGHT_W - MARGIN, top + MARGIN,
                                   RIGHT_W, max(avail_h - 2 * MARGIN, 1))
-        hero_right = right_rail_rect.left - round(HERO_GAP_RIGHT * scale)
+        right_rail_full_rect = pg.Rect(window_width - RIGHT_W - 2 * MARGIN, top,
+                                       RIGHT_W + 2 * MARGIN, avail_h)
+        hero_right = right_rail_full_rect.left - round(HERO_GAP_RIGHT * scale)
     else:
         right_rail_rect = pg.Rect(window_width, top + MARGIN, 0, max(avail_h - 2 * MARGIN, 1))
+        right_rail_full_rect = pg.Rect(window_width, top, 0, avail_h)
         hero_right = window_width - MARGIN
 
     hero_left = RAIL_W + round(HERO_PAD_LEFT * scale)
@@ -55,6 +59,7 @@ def compute_menu_layout(window_width, window_height, top, right_rail=False):
         scale=scale,
         rail_rect=rail_rect,
         right_rail_rect=right_rail_rect,
+        right_rail_full_rect=right_rail_full_rect,
         hero_rect=hero_rect,
         subview_rect=subview_rect,
     )

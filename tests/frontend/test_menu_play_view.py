@@ -274,14 +274,32 @@ def test_time_popover_stays_within_the_hero_column_when_it_fits():
     assert hero._time_popover.right <= hero._hero_rect.right
 
 
-def test_time_popover_falls_back_to_window_relative_clamping_when_it_does_not_fit(app, hero):
-    """At the narrower 1000x800 module window the right rail's cards leave the
-    hero column too narrow for the popover's fixed pixel width -- it must
-    still land fully on screen instead of overflowing or crashing."""
+def test_time_popover_shrinks_to_fit_the_narrow_hero_column(app, hero):
+    """cp2: at the narrower 1000x800 module window the popover's base pixel width
+    exceeds the hero column, so it shrinks its own internal scale to fit inside
+    the column instead of overflowing the rail. Its left edge anchors to the hero
+    column left edge (aligned with the chips row above it)."""
     app.menu.handle_click(hero._time_chip.center)
-    assert hero._time_popover.width > hero._hero_rect.width
-    assert hero._time_popover.left >= 0
-    assert hero._time_popover.right <= app.window_width
+    assert hero._time_popover.width <= hero._hero_rect.width
+    assert hero._time_popover.left == hero._hero_rect.left
+    assert hero._time_popover.right <= hero._hero_rect.right
+
+
+def test_time_popover_stays_left_of_the_left_rail_and_selects_at_reduced_scale():
+    """cp2: in a cramped 1000x700 window the popover must never extend left of the
+    hero column (covering the left rail), must fit inside the column, and the
+    shrunk picker must still be functional -- a chamber click changes the value."""
+    app = make_app(1000, 700)
+    app.draw_frame()
+    hero = app.menu.play_view
+    app.menu.handle_click(hero._time_chip.center)
+    assert hero._time_popover.left >= hero._hero_rect.x
+    assert hero._time_popover.left == hero._hero_rect.left
+    assert hero._time_popover.width <= hero._hero_rect.width
+    assert hero._time_popover.right <= hero._hero_rect.right
+    hero._picker.handle_click(hero._picker.chamber_center(5))
+    hero._picker.update(1000)
+    assert hero._picker.selected_minutes == 30
 
 
 def test_hero_lays_out_open_with_no_card(app, hero):

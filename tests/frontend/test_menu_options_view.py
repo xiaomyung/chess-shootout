@@ -14,7 +14,8 @@ from tests.conftest import pygame_display
 from chessshootout import paths
 from chessshootout.infra import env
 from chessshootout.frontend.menu.options_rows import (
-    OptionsBody, PathRow, TextRow, ToggleRow, SegmentedRow, SliderRow, SwatchRow, _Fonts,
+    OptionsBody, PathRow, TextRow, ToggleRow, SegmentedRow, NotchRow, SwatchRow,
+    NOTCH_COUNT, NOTCH_CELL_W, NOTCH_GAP, _Fonts,
 )
 from chessshootout.frontend.visual.colors import Colors
 from chessshootout.frontend.visual.fonts import get_font, get_mono_font
@@ -99,27 +100,49 @@ def test_segmented_row_selects_option():
     assert chosen["v"] == "c"
 
 
-def test_slider_row_sets_value_from_click():
+def test_notch_row_clicks_a_cell_to_set_that_level():
+    """cp2: the continuous slider became ~10 discrete notch cells. Clicking cell N
+    (1-indexed) sets the value to N / NOTCH_COUNT."""
     val = {"v": 0.0}
-    row = SliderRow("Volume", "", lambda: val["v"], lambda v: val.update(v=v))
+    row = NotchRow("Volume", "", lambda: val["v"], lambda v: val.update(v=v))
     _draw_row(row)
-    row.handle_click((row._track.right, row._track.centery))
-    assert val["v"] > 0.9
+    step = NOTCH_CELL_W + NOTCH_GAP
+
+    def cell_center(i):
+        return (row._band.x + i * step + NOTCH_CELL_W // 2, row._band.centery)
+
+    assert row.handle_click(cell_center(7)) is True
+    assert val["v"] == pytest.approx(0.8)
+    row.handle_click(cell_center(0))
+    assert val["v"] == pytest.approx(0.1)
+    row.handle_click(cell_center(NOTCH_COUNT - 1))
+    assert val["v"] == pytest.approx(1.0)
 
 
-def test_slider_row_fires_on_release_when_drag_ends(monkeypatch):
-    """Volume persists on drag release (not every frame): on_release fires exactly
-    when _dragging goes True -> False."""
-    released = []
-    row = SliderRow("Volume", "", lambda: 0.5, lambda v: None,
-                    on_release=lambda: released.append(1))
+def test_notch_row_click_fires_tick_and_debounced_write():
+    """Clicking a notch cell plays the tick AND schedules the debounced env write
+    (both preserved from the old slider's on_tick / on_release wiring)."""
+    ticks, writes = [], []
+    row = NotchRow("Volume", "", lambda: 0.5, lambda v: None,
+                   on_tick=lambda: ticks.append(1), on_release=lambda: writes.append(1))
     _draw_row(row)
-    row.handle_click((row._track.centerx, row._track.centery))
-    assert row._dragging is True
-    monkeypatch.setattr(pg.mouse, "get_pressed", lambda *a, **k: (False, False, False))
-    _draw_row(row)
-    assert row._dragging is False
-    assert released == [1]
+    assert row.handle_click((row._band.centerx, row._band.centery)) is True
+    assert ticks == [1]
+    assert writes == [1]
+
+
+def test_notch_row_fill_paints_accent_cells_up_to_value():
+    """The filled notch cells wear the accent; empties are sunken border wells."""
+    row = NotchRow("Volume", "", lambda: 0.8, lambda v: None)
+    win = pg.display.get_surface()
+    win.fill((0, 0, 0))
+    row.draw(win, pg.Rect(40, 40, 460, 56), _fonts())
+    step = row._band.width / NOTCH_COUNT
+    filled_x = int(row._band.x + step * 0.5)
+    empty_x = int(row._band.x + step * 9.5)
+    assert_pixel_color(win, filled_x, row._band.centery, Colors.accent, tol=24)
+    empty = win.get_at((empty_x, row._band.centery))[:3]
+    assert empty != tuple(pg.Color(Colors.accent))[:3]
 
 
 def test_swatch_row_selects_unlocked_only():
@@ -207,13 +230,68 @@ def test_enter_builds_six_sections_dropping_profile(app, view):
     assert "Profile" not in labels
 
 
-def test_background_panel_paints_surface_raised(app):
+def test_section_card_paints_surface_fill_and_chamfers_top_right(app):
+    """cp2: each section is its own cut-corner card (Colors.surface fill, 1px border,
+    top-right corner chamfered) rather than one big surface_raised panel."""
     app.menu.goto_view("options")
     view = app.menu.views["options"]
     app.window.fill((0, 0, 0))
     view.draw(app.window, app.menu._menu_layout)
-    assert_pixel_color(app.window, view._body_rect.x + 3, view._body_rect.centery,
-                       Colors.surface_raised, tol=8)
+    card = view.body._card_rects[0]
+    assert_pixel_color(app.window, card.x + 4, card.bottom - 4, Colors.surface, tol=10)
+    assert_pixel_color(app.window, card.x + 3, card.y + 3, Colors.surface, tol=10)
+    corner = app.window.get_at((card.right - 2, card.y + 2))[:3]
+    assert corner != tuple(pg.Color(Colors.surface))[:3], "top-right corner is chamfered away"
+
+
+def test_one_card_per_section(app):
+    app.menu.goto_view("options")
+    view = app.menu.views["options"]
+    app.window.fill((0, 0, 0))
+    view.draw(app.window, app.menu._menu_layout)
+    assert len(view.body._card_rects) == len(view.body.sections) == 6
+
+
+def test_value_cells_hit_test_selects(app):
+    """Default time / increment render as small square cut-corner value cells; each
+    cell is its own hit target keyed to the option value."""
+    chosen = {"v": "10"}
+    row = SegmentedRow("Default time", "", [(v, v) for v in ("1", "3", "5", "10", "∞")],
+                       lambda: chosen["v"], lambda k: chosen.update(v=k),
+                       mono=True, variant="cells")
+    _draw_row(row, pg.Rect(40, 40, 460, 60))
+    assert row.handle_click(row._rects["∞"].center) is True
+    assert chosen["v"] == "∞"
+
+
+def test_focus_chips_hit_test_selects(app):
+    chosen = {"v": "line"}
+    row = SegmentedRow("Show in focus", "", [("Nothing", "nothing"), ("Time Line", "line"),
+                                             ("Full strips", "strips")],
+                       lambda: chosen["v"], lambda k: chosen.update(v=k), variant="chips")
+    _draw_row(row, pg.Rect(40, 40, 460, 60))
+    assert row.handle_click(row._rects["strips"].center) is True
+    assert chosen["v"] == "strips"
+
+
+def test_swatch_labels_render_and_locked_swatch_is_dimmed(app):
+    """Swatches carry a mono label underneath; a locked swatch is dimmed and click
+    on it does nothing (the toast path is left to the app wiring)."""
+    chosen = {"v": "dark"}
+    swatches = [("dark", "#7a818b", "#2f343b", False), ("wood", "#d8b483", "#8a5a3c", True)]
+    row = SwatchRow("Board theme", "soon", swatches, lambda: chosen["v"],
+                    lambda k: chosen.update(v=k))
+    win = pg.display.get_surface()
+    win.fill((0, 0, 0))
+    row.draw(win, pg.Rect(40, 40, 460, 120), _fonts())
+    dark_rect = row._rects["dark"][0]
+    label_band = pg.Rect(dark_rect.x, dark_rect.bottom, dark_rect.width, 20)
+    painted = any(win.get_at((x, y))[:3] != (0, 0, 0)
+                  for x in range(label_band.x, label_band.right)
+                  for y in range(label_band.y, min(label_band.bottom, win.get_height())))
+    assert painted, "the DARK label renders under its swatch"
+    assert row.handle_click(row._rects["wood"][0].center) is False
+    assert chosen["v"] == "dark"
 
 
 def test_sections_paint_nonblank_pixels(app):
