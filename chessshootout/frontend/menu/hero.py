@@ -1,5 +1,3 @@
-import math
-
 import pygame as pg
 
 from chessshootout import paths
@@ -85,8 +83,6 @@ SUMMARY_CHIP_SPACING = 12
 SIDE_ICON_SPREAD = 1.55
 DASH_LEN = 5
 DASH_GAP = 4
-LOCK_H = 12
-LOCK_GAP = 4
 PRESS_OFFSET_PX = 1
 
 
@@ -374,8 +370,6 @@ class PlayView(MenuView):
         cx = x
         for label, key, locked in MODE_CHIPS:
             w = self._chip_font.size(label)[0] + 2 * pad
-            if locked:
-                w += self._s(LOCK_H) + self._s(LOCK_GAP)
             self._mode_rects[key] = pg.Rect(cx, y, w, h)
             cx += w + gap
 
@@ -648,13 +642,8 @@ class PlayView(MenuView):
                     dash=self._s(DASH_LEN), gap=self._s(DASH_GAP), fill=Colors.surface),
                     rect.topleft)
                 text = render_text(self._chip_font, label, Colors.text_muted)
-                lock_h = self._s(LOCK_H)
-                gap = self._s(LOCK_GAP)
-                total = lock_h + gap + text.get_width()
-                lx = rect.centerx - total // 2
-                self._draw_lock(window, lx + lock_h // 2, rect.centery, lock_h,
-                                Colors.text_muted)
-                window.blit(text, (lx + lock_h + gap, rect.centery - text.get_height() // 2))
+                window.blit(text, (rect.centerx - text.get_width() // 2,
+                                   rect.centery - text.get_height() // 2))
                 continue
             selected = key == self.selected_mode
             target = f"mode:{key}"
@@ -671,15 +660,6 @@ class PlayView(MenuView):
             offset = self._s(PRESS_OFFSET_PX) if pressed else 0
             window.blit(text, (rect.centerx - text.get_width() // 2,
                                rect.centery - text.get_height() // 2 + offset))
-
-    def _draw_lock(self, window, cx, cy, h, color):
-        body_w = max(int(h * 0.72), 4)
-        body_h = max(int(h * 0.5), 3)
-        body = pg.Rect(cx - body_w // 2, cy - body_h // 2 + int(h * 0.14), body_w, body_h)
-        pg.draw.rect(window, color, body, border_radius=max(int(h * 0.12), 1))
-        sr = max(int(body_w * 0.3), 2)
-        pg.draw.arc(window, color, pg.Rect(cx - sr, body.top - sr, 2 * sr, 2 * sr),
-                    0.25, math.pi - 0.25, max(int(h * 0.12), 2))
 
     def _draw_time_chip(self, window):
         rect = self._time_chip
