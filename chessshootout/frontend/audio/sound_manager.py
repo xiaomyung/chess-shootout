@@ -210,6 +210,21 @@ class SoundManager:
     def play_give_ratchet(self):
         self._play("give_ratchet")
 
+    def play_drum_tick(self):
+        self._play("drum_tick")
+
+    def play_turret_ratchet(self):
+        self._play("turret_ratchet")
+
+    def play_card_toggle(self):
+        self._play("card_toggle")
+
+    def play_rail_click(self):
+        self._play("rail_click")
+
+    def play_focus_action(self):
+        self._play("focus_action")
+
     def play_skillcheck_appear(self):
         self._play("sc_appear")
 

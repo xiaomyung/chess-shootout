@@ -80,6 +80,13 @@ def test_reclicking_the_open_card_collapses_it(stack, tmp_path, app):
     assert stack._open is None
 
 
+def test_toggle_plays_the_card_toggle_sound_both_ways(app, stack):
+    stack._toggle("recent")
+    app.sound_manager.play_card_toggle.assert_called_once()
+    stack._toggle("recent")
+    assert app.sound_manager.play_card_toggle.call_count == 2
+
+
 def test_profile_card_click_opens_the_profile_view(app, stack):
     assert app.menu._active_view == "play"
 

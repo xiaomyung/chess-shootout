@@ -123,9 +123,10 @@ def _star_points(cx, cy, outer, inner, rotation):
 
 class TimePicker:
 
-    def __init__(self, on_change=None, on_tick=None):
+    def __init__(self, on_change=None, on_tick=None, on_ratchet=None):
         self._on_change = on_change
         self._on_tick = on_tick
+        self._on_ratchet = on_ratchet
         self._min_index = 3
         self._inc_index = 2
         self.rect = pg.Rect(0, 0, 0, 0)
@@ -373,7 +374,7 @@ class TimePicker:
         self._turret_tween = Tween(
             self._turret_angle, TURRET_BASE_DEG + index * TURRET_SPREAD_DEG,
             TURRET_SWING_MS, self._now)
-        self._emit_tick()
+        self._emit_ratchet()
         self._changed()
 
     def _select_increment_clamped(self, index):
@@ -389,6 +390,10 @@ class TimePicker:
     def _emit_tick(self):
         if self._on_tick is not None:
             self._on_tick()
+
+    def _emit_ratchet(self):
+        if self._on_ratchet is not None:
+            self._on_ratchet()
 
     def _feed_spin_tick(self, now):
         idx = round(-self._rotation / CHAMBER_STEP_DEG)

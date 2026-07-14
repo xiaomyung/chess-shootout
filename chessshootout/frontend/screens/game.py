@@ -1302,6 +1302,7 @@ class GameScreen(Screen):
         if on and not self._focus_available():
             return
         log.info("focus mode toggled on=%s", on)
+        self.app.sound_manager.play_focus_action()
         self.board.cancel_drag_physics()
         self.focus_transition = FocusTransition(self)
         if on:

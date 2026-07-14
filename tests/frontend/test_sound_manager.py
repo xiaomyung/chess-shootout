@@ -172,6 +172,11 @@ ONE_SHOT_DISPATCH = [
     ("play_wheel_tick", "wheel_tick"),
     ("play_aim_lock", "aim_lock"),
     ("play_aim_beep", "aim_beep"),
+    ("play_drum_tick", "drum_tick"),
+    ("play_turret_ratchet", "turret_ratchet"),
+    ("play_card_toggle", "card_toggle"),
+    ("play_rail_click", "rail_click"),
+    ("play_focus_action", "focus_action"),
 ]
 
 
@@ -336,6 +341,8 @@ DISABLED_NOOP_METHODS = [
     "play_pickup", "play_drop", "play_swear", "play_ui_click",
     "play_skillcheck_appear", "play_skillcheck_win", "play_skillcheck_miss",
     "play_wheel_tick", "play_aim_lock", "play_aim_beep",
+    "play_drum_tick", "play_turret_ratchet", "play_card_toggle",
+    "play_rail_click", "play_focus_action",
 ]
 
 

@@ -388,4 +388,5 @@ class CardStack(ScrollHost):
 
     def _toggle(self, key):
         self._open = None if self._open == key else key
+        self.app.sound_manager.play_card_toggle()
         self._compute_layout()

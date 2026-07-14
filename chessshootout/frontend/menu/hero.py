@@ -130,7 +130,8 @@ class PlayView(MenuView):
         self.apply_default_time_settings()
 
         self._picker = TimePicker(on_change=self._on_picker_change,
-                                  on_tick=app.sound_manager.play_ui_tick)
+                                  on_tick=app.sound_manager.play_drum_tick,
+                                  on_ratchet=app.sound_manager.play_turret_ratchet)
         self._time_open = False
         self._side_open = False
 

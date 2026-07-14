@@ -227,13 +227,41 @@ def test_turret_wheel_direction_matches_up_next_down_previous():
     assert p.selected_increment == 5, "wheel down steps back to the previous value"
 
 
-def test_turret_wheel_plays_a_tick_through_the_existing_gate():
+def test_turret_wheel_plays_a_ratchet_through_the_dedicated_callback():
     ticks = []
-    p = TimePicker(on_tick=lambda: ticks.append(1))
+    ratchets = []
+    p = TimePicker(on_tick=lambda: ticks.append(1), on_ratchet=lambda: ratchets.append(1))
     p.set_rect(pg.Rect(0, 0, 300, 190))
     p.set_selection(10, 5)
     p.handle_scroll(p._turret_center, 1)
-    assert len(ticks) == 1
+    assert ratchets == [1]
+    assert ticks == [], "the turret ratchet no longer shares the drum's tick callback"
+
+
+def test_turret_click_and_label_jump_also_fire_the_ratchet_not_the_tick():
+    ticks = []
+    ratchets = []
+    p = TimePicker(on_tick=lambda: ticks.append(1), on_ratchet=lambda: ratchets.append(1))
+    p.set_rect(pg.Rect(0, 0, 300, 190))
+    p.set_selection(10, 0)
+    p.handle_click(p._turret_center)
+    target = INCREMENTS.index(15)
+    p.handle_click(p._turret_label_rect(target).center)
+    assert ratchets == [1, 1]
+    assert ticks == []
+
+
+def test_drum_rotation_ticks_do_not_fire_the_ratchet_callback():
+    ticks = []
+    ratchets = []
+    p = TimePicker(on_tick=lambda: ticks.append(1), on_ratchet=lambda: ratchets.append(1))
+    p.set_rect(pg.Rect(0, 0, 300, 190))
+    p.set_selection(10, 5)
+    p.handle_click(p.chamber_center(0))
+    for t in range(0, ROTATION_MS + SETTLE_MS + 20, 8):
+        p.update(t)
+    assert len(ticks) == 3
+    assert ratchets == []
 
 
 def test_turret_wheel_ignored_when_dead():
