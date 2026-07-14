@@ -57,7 +57,7 @@ _INFINITY_CACHE = new_cache()
 def infinity_surface(height, color):
     h = max(int(height), 6)
     w = int(h * 1.7)
-    th = max(h * 0.2, 3.0)
+    th = max(h * 0.14, 2.2)
 
     def build():
         def render(surf, k):
