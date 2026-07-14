@@ -116,7 +116,7 @@ class CountryPicker(BaseModal, ScrollHost):
         btn_y = r.bottom - pad - btn_h
         btn_w = max(int(r.width * 0.34), 96)
         self._cancel_rect = pg.Rect(r.right - pad - btn_w, btn_y, btn_w, btn_h)
-        draw_button(self.window, self._cancel_rect, "Cancel", self.button_font)
+        draw_button(self.window, self._cancel_rect, "Cancel", self.button_font, cut=True)
         list_top = self._search_rect.bottom + int(pad * 0.5)
         list_bottom = btn_y - int(pad * 0.5)
         self._list_rect = pg.Rect(r.x + pad, list_top, r.width - 2 * pad,

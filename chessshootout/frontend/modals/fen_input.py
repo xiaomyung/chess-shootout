@@ -80,7 +80,7 @@ class FenInputModal(BaseModal):
         self.button_rects = draw_button_row(
             self.window, button_row,
             [("Start", "start"), ("Cancel", "cancel")],
-            self.button_font, pad, primary_keys={"start"},
+            self.button_font, pad, primary_keys={"start"}, cut=True,
         )
 
     def handle_click(self, pos):

@@ -131,7 +131,8 @@ class ReconnectingModal(BaseModal):
         row_w = min(int(rect.width * 0.7), 220)
         row = pg.Rect(cx - row_w / 2, y, row_w, btn_h)
         self.button_rects = draw_button_row(
-            self.window, row, [("Abandon game", "abandon")], button_font, self.padding)
+            self.window, row, [("Abandon game", "abandon")], button_font, self.padding,
+            cut=True)
 
     def handle_click(self, pos):
         if not self.visible:

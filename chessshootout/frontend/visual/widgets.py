@@ -18,6 +18,7 @@ SCROLL_THUMB_RIGHT_OFFSET = 4
 SCROLL_THUMB_MIN_HEIGHT = 18
 BUTTON_LABEL_PADDING_PX = 6
 BUTTON_RADIUS = 8
+BUTTON_CUT = 6
 PILL_PAD_Y = 6
 SEGMENT_RADIUS = 8
 SEGMENT_INNER_RADIUS = 6
@@ -175,7 +176,7 @@ def _button_bg(rect, force_pressed=False, disabled=False):
 
 
 def draw_button(window, rect, label, font, force_pressed=False, disabled=False,
-                selected=False, primary=False):
+                selected=False, primary=False, cut=False):
     if primary and not disabled:
         hovered, pressed = _hover_state(rect)
         bg = Colors.accent_press if pressed else (Colors.accent_hi if hovered else Colors.accent)
@@ -184,8 +185,13 @@ def draw_button(window, rect, label, font, force_pressed=False, disabled=False,
     else:
         bg, text_color = _button_bg(rect, force_pressed or selected, disabled)
         border = Colors.accent if (selected and not disabled) else Colors.border
-    window.blit(rounded_rect_surface(rect.size, BUTTON_RADIUS, bg, border=border,
-                                     border_width=1), rect.topleft)
+    if cut:
+        shape = cut_rect_surface(rect.size, BUTTON_CUT, bg, border=border,
+                                 border_width=1, corners=("tr", "bl"))
+    else:
+        shape = rounded_rect_surface(rect.size, BUTTON_RADIUS, bg, border=border,
+                                     border_width=1)
+    window.blit(shape, rect.topleft)
     text = fit_text_to_rect(render_text(font, label, text_color), rect)
     window.blit(
         text,
@@ -240,7 +246,7 @@ def draw_gear(window, rect):
 
 
 def draw_button_row(window, rect, buttons, font, gap, disabled_keys=None,
-                    primary_keys=None):
+                    primary_keys=None, cut=False):
     n = len(buttons)
     if n == 0 or rect.width <= gap * (n - 1):
         return {}
@@ -252,7 +258,7 @@ def draw_button_row(window, rect, buttons, font, gap, disabled_keys=None,
         x = rect.x + i * (btn_w + gap)
         br = pg.Rect(x, rect.y, btn_w, rect.height)
         draw_button(window, br, label, font, disabled=key in disabled_keys,
-                    primary=key in primary_keys)
+                    primary=key in primary_keys, cut=cut)
         button_rects[key] = br
     return button_rects
 

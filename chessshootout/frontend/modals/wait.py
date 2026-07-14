@@ -166,7 +166,7 @@ class WaitModal(BaseModal):
 
         row = pg.Rect(content.x, content.bottom - btn_h, content.width, btn_h)
         self.button_rects = draw_button_row(
-            self.window, row, [("Cancel search", "cancel")], button_font, pad)
+            self.window, row, [("Cancel search", "cancel")], button_font, pad, cut=True)
 
     def handle_click(self, pos):
         if not self.visible:

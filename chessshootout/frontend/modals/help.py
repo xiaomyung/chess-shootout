@@ -103,7 +103,7 @@ class HelpModal(BaseModal, ScrollHost):
 
         self.button_rects = draw_button_row(
             self.window, button_row, [("Close", "close")],
-            self.button_font, pad, primary_keys={"close"},
+            self.button_font, pad, primary_keys={"close"}, cut=True,
         )
 
     def _draw_rows(self, rows_rect):

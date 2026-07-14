@@ -5,7 +5,7 @@ import pygame as pg
 from chessshootout import paths
 from chessshootout.frontend.modals.base import BaseModal, MODAL_RAIL
 from chessshootout.frontend.visual.colors import Colors
-from chessshootout.frontend.visual.draw import rounded_rect_surface
+from chessshootout.frontend.visual.draw import cut_rect_surface
 from chessshootout.frontend.visual.emoji import blit_emoji
 from chessshootout.frontend.visual.fonts import get_display_font, get_font, get_mono_font
 from chessshootout.frontend.visual.icons import draw_eye, draw_file, draw_folder, draw_folder_plus
@@ -18,6 +18,7 @@ ROW_ICON_BOX_W = 24
 ROW_ICON_INSET = 6
 ROW_TEXT_INSET = 8
 ROW_META_INSET = 10
+TOOL_CUT = 4
 
 
 class DirectoryBrowser(BaseModal, ScrollHost):
@@ -202,7 +203,8 @@ class DirectoryBrowser(BaseModal, ScrollHost):
         up_h = self.up_font.get_height() + 12
         bar_y = head_bottom + int(pad * 0.35)
         self._up_rect = pg.Rect(r.x + pad, bar_y, max(int(r.width * 0.16), 64), up_h)
-        draw_button(self.window, self._up_rect, "↑ Up", self.up_font, disabled=self._at_root())
+        draw_button(self.window, self._up_rect, "Up", self.up_font, disabled=self._at_root(),
+                    cut=True)
         crumb_x = self._up_rect.right + 10
         self._blit_breadcrumb(crumb_x, self._up_rect.centery, r.right - pad - crumb_x)
         bar_bottom = bar_y + up_h + int(pad * 0.4)
@@ -213,12 +215,14 @@ class DirectoryBrowser(BaseModal, ScrollHost):
     def _draw_tool(self, rect, icon_fn, on, off=False):
         hovered = rect.collidepoint(pg.mouse.get_pos())
         if on:
-            self.window.blit(rounded_rect_surface(rect.size, 8, Colors.surface_active,
-                                                  border=Colors.accent, border_width=1),
+            self.window.blit(cut_rect_surface(rect.size, TOOL_CUT, Colors.surface_active,
+                                              border=Colors.accent, border_width=1,
+                                              corners=("tr", "bl")),
                              rect.topleft)
             color = Colors.accent
         elif hovered:
-            self.window.blit(rounded_rect_surface(rect.size, 8, Colors.surface_hover),
+            self.window.blit(cut_rect_surface(rect.size, TOOL_CUT, Colors.surface_hover,
+                                              corners=("tr", "bl")),
                              rect.topleft)
             color = Colors.text
         else:
@@ -261,9 +265,9 @@ class DirectoryBrowser(BaseModal, ScrollHost):
         btn_w = max(int(r.width * 0.30), 96)
         self._choose_rect = pg.Rect(r.right - pad - btn_w, btn_y, btn_w, btn_h)
         self._cancel_rect = pg.Rect(self._choose_rect.x - 10 - btn_w, btn_y, btn_w, btn_h)
-        draw_button(self.window, self._cancel_rect, "Cancel", self.button_font)
+        draw_button(self.window, self._cancel_rect, "Cancel", self.button_font, cut=True)
         draw_button(self.window, self._choose_rect, "Choose folder", self.button_font,
-                    primary=True)
+                    primary=True, cut=True)
         dest = os.path.join(self.current, paths.GAMES_SUBDIR)
         val_surf = self.sel_val_font.render(
             self._fit_left(dest, self.sel_val_font, r.width - 2 * pad), True, Colors.text_dim)

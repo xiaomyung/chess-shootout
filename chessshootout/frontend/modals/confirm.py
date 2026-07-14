@@ -2,14 +2,14 @@ import pygame as pg
 
 from chessshootout.frontend.modals.base import BaseModal, MODAL_MAX_WIDTH, MODAL_RAIL
 from chessshootout.frontend.visual.colors import Colors
-from chessshootout.frontend.visual.draw import rounded_rect_surface
+from chessshootout.frontend.visual.draw import cut_rect_surface
 from chessshootout.frontend.visual.emoji import blit_emoji
 from chessshootout.frontend.visual.fonts import fonts_for_width, get_display_font, get_font
 from chessshootout.frontend.visual.widgets import draw_button_row, fit_text_to_rect, wrap_words
 
 
 TITLE_SUB_GAP = 8
-TITLE_TILE_RADIUS = 13
+TITLE_TILE_CUT = 10
 SUB_MAX_LINES = 3
 
 
@@ -101,8 +101,9 @@ class ConfirmModal(BaseModal):
             if self.danger:
                 fill = pg.Color(Colors.loss).lerp(pg.Color(Colors.surface_hover), 0.84)
                 border = pg.Color(Colors.loss).lerp(pg.Color(Colors.surface_raised), 0.6)
-            self.window.blit(rounded_rect_surface(tile.size, TITLE_TILE_RADIUS, fill,
-                                                  border=border, border_width=1), tile.topleft)
+            self.window.blit(cut_rect_surface(tile.size, TITLE_TILE_CUT, fill,
+                                              border=border, border_width=1,
+                                              corners=("tr", "bl")), tile.topleft)
             blit_emoji(self.window, self.emoji, tile.center, int(icon_side * 0.62))
             y += icon_side + gap_icon
         self.window.blit(title_surf, (content.centerx - title_surf.get_width() / 2, y))
@@ -117,7 +118,7 @@ class ConfirmModal(BaseModal):
         if self.on_extra is not None:
             buttons.append((self.extra_label, "extra"))
         self.button_rects = draw_button_row(
-            self.window, row, buttons, button_font, pad, primary_keys={"yes"})
+            self.window, row, buttons, button_font, pad, primary_keys={"yes"}, cut=True)
 
     def handle_click(self, pos):
         if not self.is_visible():

@@ -215,3 +215,24 @@ def test_fit_text_to_rect_never_serves_another_surfaces_fit():
     assert fitted_first is not fitted_second, "distinct sources never share a fit"
     assert widgets.fit_text_to_rect(first, wide, padding=3) is fitted_first, \
         "the first source keeps reusing its own cached fit"
+
+
+def test_cut_button_wears_the_notch_and_the_default_stays_rounded():
+    """Modal buttons opt into the cut-corner language via draw_button(cut=True);
+    the rounded default is load-bearing for the game screen's right menu."""
+    import pygame as pg
+    from chessshootout.frontend.visual.fonts import get_font
+    from chessshootout.frontend.visual.widgets import draw_button
+
+    font = get_font(12, bold=True)
+    rect = pg.Rect(0, 0, 120, 40)
+
+    cut_surf = pg.Surface(rect.size, pg.SRCALPHA)
+    draw_button(cut_surf, rect, "Ok", font, cut=True)
+    assert cut_surf.get_at((rect.width - 2, 1)).a == 0, "tr notch is open"
+    assert cut_surf.get_at((rect.width - 2, rect.height // 2)).a == 255
+
+    round_surf = pg.Surface(rect.size, pg.SRCALPHA)
+    draw_button(round_surf, rect, "Ok", font)
+    assert round_surf.get_at((rect.width - 2, rect.height // 2)).a == 255
+    assert round_surf.get_at((rect.width - 4, 3)).a != 0, "rounded corner stays filled"
