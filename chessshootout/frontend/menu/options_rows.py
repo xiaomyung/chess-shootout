@@ -329,7 +329,7 @@ class PathRow(_Row):
         self.input.set_rect(self._field_rect)
         self.input.font = fonts.value
         if self.input.focused:
-            self.input.draw()
+            self.input.draw(window)
         else:
             self._draw_rest_path(window, fonts)
         window.blit(cut_rect_surface(self._change_rect.size, 6, Colors.surface_raised,
@@ -411,7 +411,7 @@ class TextRow(_Row):
         self._field_rect = pg.Rect(field_left, y, rect.right - field_left, FIELD_H)
         self.input.set_rect(self._field_rect)
         self.input.font = fonts.value
-        self.input.draw()
+        self.input.draw(window)
         return self._field_rect.x
 
     def current_text(self):

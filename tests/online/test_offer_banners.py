@@ -9,8 +9,9 @@ import pygame as pg
 from tests.conftest import pygame_display
 from chessshootout.backend.utils import Square
 from chessshootout.frontend.frontend import Frontend
-from chessshootout.frontend.panels.banners import OfferBanners
+from chessshootout.frontend.panels.banners import PAD_R, OfferBanners, _button_surface
 from chessshootout.frontend.visual.colors import Colors
+from chessshootout.frontend.visual.fonts import get_font
 
 
 _pg = pygame_display(1000, 800)
@@ -94,6 +95,36 @@ def test_icon_chip_is_painted():
         if win.get_at((x, y))[:3] == chip
     )
     assert found > 0
+
+
+def test_button_surface_uses_cut_corner_notch():
+    """The v2.9.0 restyle swapped the offer buttons' rounded_rect_surface for
+    a cut-corner (tr/bl) polygon — the top-right notch must read fully
+    transparent while the untouched top-left stays opaque."""
+    font = get_font(12, bold=True)
+    surf = _button_surface("Accept", font, True)
+    w, _h = surf.get_size()
+    assert surf.get_at((w - 2, 1))[3] == 0
+    assert surf.get_at((2, 1))[3] == 255
+
+
+def test_banner_panel_uses_cut_corner_notch():
+    """The container panel also moved from rounded to cut-corner (tr/bl); the
+    untouched bottom-right corner must stay opaque."""
+    ob = _banners()
+    surf = pg.Surface((1000, 800), pg.SRCALPHA)
+    ob.window = surf
+    _push(ob)
+    _settle(ob)
+    ob.draw(BOARD)
+    name_font, _verb_font, btn_font = ob._fonts()
+    h = ob._banner_height(name_font, btn_font)
+    ok_rect = ob._banners[0]["ok_rect"]
+    right_edge = ok_rect.right + PAD_R
+    top_edge = ok_rect.centery - h / 2
+    bottom_edge = top_edge + h
+    assert surf.get_at((int(right_edge - 2), int(top_edge + 1)))[3] == 0
+    assert surf.get_at((int(right_edge - 2), int(bottom_edge - 1)))[3] == 255
 
 
 def test_accept_button_fill_is_accent():

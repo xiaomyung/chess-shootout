@@ -129,7 +129,7 @@ class ProfileView(MenuView):
                                      corners=("tr", "bl")), self._identity_panel.topleft)
         self._avatar.draw(window, self._avatar_rect, env.get_nickname() or "?",
                           self._avatar_letter_font, avatar_palette())
-        self._nickname_input.draw()
+        self._nickname_input.draw(window)
         self._draw_country_row(window)
 
     def _draw_country_row(self, window):

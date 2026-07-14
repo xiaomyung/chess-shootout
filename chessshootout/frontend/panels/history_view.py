@@ -229,6 +229,14 @@ class HistoryView(ScrollHost):
                 sum(1 for g in groups if g.result == "loss"),
                 sum(1 for g in groups if g.result in _NEUTRAL_BADGES))
 
+    def draw_onto(self, surface):
+        prev = self.window
+        self.window = surface
+        try:
+            self.draw()
+        finally:
+            self.window = prev
+
     def draw(self):
         if not self.visible or self.rect.width <= 0:
             return

@@ -13,10 +13,16 @@ from chessshootout.frontend.modal_registry import ModalSpec
 from chessshootout.frontend.modals.fen_input import FenInputModal
 from chessshootout.frontend.screens.base import Screen
 from chessshootout.frontend.visual.colors import Colors
+from chessshootout.frontend.visual.tween import Tween, out_cubic
 from chessshootout.frontend.window_chrome import WindowChrome
 
 
 log = logging.getLogger("chess.frontend")
+
+MENU_RISE_MS = 260
+MENU_RISE_PX = 20
+VIEW_RISE_MS = 140
+VIEW_RISE_PX = 10
 
 
 class MenuScreen(Screen):
@@ -34,6 +40,10 @@ class MenuScreen(Screen):
         self._active_view = "play"
         self._menu_layout = None
         self._load_pgn_available = False
+        self._transition_kind = "none"
+        self._transition_duration = 0
+        self._transition_tween = None
+        self._scratch = None
 
     @property
     def play_view(self):
@@ -70,6 +80,12 @@ class MenuScreen(Screen):
 
     def enter(self, **payload):
         self._activate(payload.get("view") or self._active_view)
+        self._begin_transition("screen", MENU_RISE_MS)
+
+    def _begin_transition(self, kind, duration_ms):
+        self._transition_kind = kind
+        self._transition_duration = duration_ms
+        self._transition_tween = None
 
     def _activate(self, name):
         self._active_view = name
@@ -81,6 +97,9 @@ class MenuScreen(Screen):
     def exit(self):
         super().exit()
         self.views[self._active_view].exit()
+        self._transition_kind = "none"
+        self._transition_tween = None
+        self._scratch = None
 
     def relayout(self, size):
         right_rail = self._active_view == "play"
@@ -104,13 +123,49 @@ class MenuScreen(Screen):
         self.app.menu_battle.set_avoid_rects(rects)
 
     def draw(self):
-        app = self.app
+        window = self.app.window
         now = pg.time.get_ticks()
-        self.rail.draw(app.window, now)
-        self.views[self._active_view].draw(app.window, self._menu_layout)
+        if self._transition_kind == "none":
+            self._draw_rail(window, now)
+            self._draw_content(window, now)
+            return
+        if self._transition_tween is None:
+            self._transition_tween = Tween(
+                0.0, 1.0, self._transition_duration, now, ease=out_cubic)
+        if self._transition_tween.done(now):
+            self._transition_kind = "none"
+            self._transition_tween = None
+            self._draw_rail(window, now)
+            self._draw_content(window, now)
+            return
+        t = self._transition_tween.value(now)
+        scratch = self._ensure_scratch()
+        scratch.fill((0, 0, 0, 0))
+        if self._transition_kind == "screen":
+            self._draw_rail(scratch, now)
+            self._draw_content(scratch, now)
+            offset = int((1.0 - t) * MENU_RISE_PX)
+        else:
+            self._draw_rail(window, now)
+            self._draw_content(scratch, now)
+            offset = int((1.0 - t) * VIEW_RISE_PX)
+        scratch.set_alpha(int(255 * t))
+        window.blit(scratch, (0, offset))
+
+    def _draw_rail(self, surface, now):
+        self.rail.draw(surface, now)
+
+    def _draw_content(self, surface, now):
+        self.views[self._active_view].draw(surface, self._menu_layout)
         if self._active_view == "play":
-            self._draw_right_rail_panel(app.window)
-            self.card_stack.draw(app.window, now)
+            self._draw_right_rail_panel(surface)
+            self.card_stack.draw(surface, now)
+
+    def _ensure_scratch(self):
+        size = self.app.window.get_size()
+        if self._scratch is None or self._scratch.get_size() != size:
+            self._scratch = pg.Surface(size, pg.SRCALPHA)
+        return self._scratch
 
     def _draw_right_rail_panel(self, window):
         panel = self._menu_layout.right_rail_full_rect
@@ -182,6 +237,7 @@ class MenuScreen(Screen):
         if name == "play":
             self.card_stack.refresh()
         self.app._compute_layout()
+        self._begin_transition("view", VIEW_RISE_MS)
 
     def goto_history(self):
         self.goto_view("history")

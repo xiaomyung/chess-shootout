@@ -259,6 +259,7 @@ class Frontend:
         self.sound_manager.play_game_start()
 
     def run(self):
+        self.menu.enter()
         while self.running:
             frame_start = time.perf_counter()
             if self._last_frame_start is not None:

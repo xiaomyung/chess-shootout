@@ -3,6 +3,7 @@ import math
 import pygame as pg
 
 from chessshootout.frontend.visual.colors import Colors
+from chessshootout.frontend.visual.draw import cut_rect_surface
 from chessshootout.frontend.visual.fonts import get_font
 
 
@@ -105,10 +106,11 @@ class Toast:
         spark_gap = spark_d + SPARK_GAP_PX if hype else 0
         w = text_surf.get_width() + 2 * PADDING_X + spark_gap
         h = text_surf.get_height() + 2 * PADDING_Y
-        radius = h // 2
+        cut = max(int(h * 0.28), 4)
         overlay = pg.Surface((w, h), pg.SRCALPHA)
-        pg.draw.rect(overlay, bg_color, overlay.get_rect(), border_radius=radius)
-        pg.draw.rect(overlay, border_color, overlay.get_rect(), 1, border_radius=radius)
+        shape = cut_rect_surface((w, h), cut, bg_color, border=border_color,
+                                 border_width=1, corners=("tr", "bl"))
+        overlay.blit(shape, (0, 0))
         if hype:
             spark = pg.Color(Colors.on_accent)
             pg.draw.circle(overlay, spark, (PADDING_X + spark_d // 2, h // 2), spark_d // 2)

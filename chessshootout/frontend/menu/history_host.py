@@ -21,7 +21,7 @@ class HistoryMenuView(MenuView):
         self.app.history_view.set_rect(menu_layout.subview_rect)
 
     def draw(self, window, menu_layout):
-        self.app.history_view.draw()
+        self.app.history_view.draw_onto(window)
 
     def handle_click(self, pos):
         return self.app.history_view.handle_click(pos)
