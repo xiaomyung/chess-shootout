@@ -41,12 +41,16 @@ DISC_MARGIN_FRAC = 0.34
 CHAMBER_RING_FRAC = 0.58
 CHAMBER_RADIUS_FRAC = 0.25
 DRUM_GRAB_RADIUS_FRAC = 1.18
-HUB_HIT_RADIUS_FRAC = 0.30
+HUB_HIT_RADIUS_FRAC = 0.32
+HUB_RING_RADIUS_FRAC = 0.085
+HUB_RING_PULSE_MS = 1400
+HUB_RING_ALPHA_LO = 50
+HUB_RING_ALPHA_HI = 160
 SCALLOP_RING_FRAC = 1.05
 SCALLOP_RADIUS_FRAC = 0.23
 STAR_RADIUS_FRAC = 0.15
 STAR_INNER_FRAC = 0.44
-PIN_RADIUS_FRAC = 0.07
+PIN_RADIUS_FRAC = 0.077
 HAMMER_TIP_FRAC = 0.98
 HAMMER_BASE_FRAC = 1.20
 HAMMER_HALF_FRAC = 0.14
@@ -167,6 +171,7 @@ class TimePicker:
         self._turret_sweep_steps = 0
         self._turret_sweep_ticks = 0
         self._now = 0
+        self._hub_ring = None
         self._label_font = get_mono_font(11, bold=True)
         self._value_font = get_display_font(18)
         self._chamber_font = get_mono_font(13, bold=True)
@@ -573,6 +578,7 @@ class TimePicker:
         dial = _bounded_set(_DRUM_CACHE, key, build, DRUM_CACHE_CAP)
         top = (int(self._drum_center[0] - size / 2), int(self._drum_center[1] - size / 2))
         surface.blit(dial, top)
+        self._draw_hub_ring(surface)
         for i in range(CHAMBER_COUNT):
             cx, cy = self.chamber_center(i)
             sel = i == self._min_index
@@ -586,6 +592,24 @@ class TimePicker:
             if self._seat_pop_tween is not None and i == self._seat_pop_index:
                 scale = self._seat_pop_tween.value(self._now)
             self._blit_chamber_glyph(surface, glyph, cx, cy, scale)
+
+    def _draw_hub_ring(self, surface):
+        if self._spinning or self._rot_tween is not None:
+            return
+        ring_r = self._radius * HUB_RING_RADIUS_FRAC
+        d = int(round(ring_r * 2)) + 6
+        if self._hub_ring is None or self._hub_ring.get_width() != d:
+
+            def render(surf, k):
+                c = surf.get_width() / 2.0
+                pg.draw.circle(surf, pg.Color(Colors.accent), (c, c), ring_r * k,
+                               max(int(2 * k), 2))
+            self._hub_ring = supersample((d, d), render)
+        phase = math.sin(self._now * math.tau / HUB_RING_PULSE_MS)
+        span = HUB_RING_ALPHA_HI - HUB_RING_ALPHA_LO
+        self._hub_ring.set_alpha(int(HUB_RING_ALPHA_LO + span * (0.5 + 0.5 * phase)))
+        surface.blit(self._hub_ring, (int(self._drum_center[0] - d / 2),
+                                      int(self._drum_center[1] - d / 2)))
 
     def _blit_chamber_glyph(self, surface, glyph, cx, cy, scale):
         if scale != 1.0:

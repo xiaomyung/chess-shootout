@@ -619,3 +619,38 @@ def test_drum_grab_fringe_drags_and_spins_while_a_click_selects_nothing():
     before = p._min_index
     assert p.handle_click(fringe) is False, "a plain click on the fringe selects nothing"
     assert p._min_index == before
+
+
+def test_idle_hub_wears_a_pulsing_accent_ring():
+    """The roulette hub advertises itself: an accent ring pulses at the drum center
+    while the drum is idle. Sampled at the pulse peak (now = PULSE/4 -> sin = 1 ->
+    alpha HI) on the ring's +x point, well away from the accent hammer at the top."""
+    from chessshootout.frontend.menu.time_picker import (
+        HUB_RING_PULSE_MS, HUB_RING_RADIUS_FRAC)
+    surface = pg.Surface((300, 190))
+    surface.fill(pg.Color(Colors.surface_raised))
+    p = _picker(10, 5)
+    p.draw(surface, HUB_RING_PULSE_MS // 4)
+    cx, cy = p._drum_center
+    probe = (int(cx + p._radius * HUB_RING_RADIUS_FRAC), int(cy))
+    r, g, b = surface.get_at(probe)[:3]
+    assert r > 100 and r > b, f"expected accent-tinted ring pixel, got {(r, g, b)}"
+
+
+def test_spinning_drum_hides_the_hub_ring():
+    from chessshootout.frontend.menu.time_picker import (
+        HUB_RING_PULSE_MS, HUB_RING_RADIUS_FRAC)
+    surface = pg.Surface((300, 190))
+    surface.fill(pg.Color(Colors.surface_raised))
+    p = _picker(10, 5)
+    idle = pg.Surface((300, 190))
+    idle.fill(pg.Color(Colors.surface_raised))
+    p.draw(idle, HUB_RING_PULSE_MS // 4)
+    assert p.handle_scroll(p._drum_center, 2) is True
+    p.draw(surface, HUB_RING_PULSE_MS // 4 + 16)
+    cx, cy = p._drum_center
+    probe = (int(cx + p._radius * HUB_RING_RADIUS_FRAC), int(cy))
+    ri, gi, bi = idle.get_at(probe)[:3]
+    rs, gs, bs = surface.get_at(probe)[:3]
+    assert ri > 100 and ri > bi
+    assert not (rs > 100 and rs > bs), "no invitation ring while the drum is in motion"
