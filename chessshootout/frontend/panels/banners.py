@@ -20,6 +20,7 @@ BTN_CUT = 6
 BTN_PAD_X = 14
 BTN_PAD_Y = 8
 SLIDE_MS = 260
+EXIT_MS = 200
 
 
 def _button_surface(label, font, ok):
@@ -49,7 +50,7 @@ class OfferBanners:
             "key": key, "icon": icon, "name": name, "verb": verb,
             "ok_label": ok_label, "no_label": no_label,
             "on_ok": on_ok, "on_no": on_no,
-            "pushed_at": pg.time.get_ticks(),
+            "pushed_at": pg.time.get_ticks(), "leaving_at": None,
             "ok_rect": pg.Rect(0, 0, 0, 0), "no_rect": pg.Rect(0, 0, 0, 0),
         })
 
@@ -57,13 +58,19 @@ class OfferBanners:
         self._banners = []
 
     def dismiss(self, key):
-        self._banners = [b for b in self._banners if b["key"] != key]
+        now = pg.time.get_ticks()
+        for b in self._banners:
+            if b["key"] == key and b["leaving_at"] is None:
+                b["leaving_at"] = now
 
     def is_empty(self):
-        return not self._banners
+        return self.count() == 0
+
+    def needs_frames(self):
+        return bool(self._banners)
 
     def count(self):
-        return len(self._banners)
+        return sum(1 for b in self._banners if b["leaving_at"] is None)
 
     def _banner_height(self, name_font, btn_font):
         content_h = max(ICON_SIZE, name_font.get_height(),
@@ -83,6 +90,8 @@ class OfferBanners:
         name_font, verb_font, btn_font = self._fonts()
         h = self._banner_height(name_font, btn_font)
         now = pg.time.get_ticks()
+        self._banners = [b for b in self._banners if b["leaving_at"] is None
+                         or now - b["leaving_at"] < EXIT_MS]
         prev_clip = self.window.get_clip()
         self.window.set_clip(board_rect)
         target_y = board_rect.top + TOP_MARGIN
@@ -91,6 +100,10 @@ class OfferBanners:
             eased = 1 - (1 - t) ** 3
             start_y = board_rect.top - h
             y = start_y + (target_y - start_y) * eased
+            if b["leaving_at"] is not None:
+                t2 = min(1.0, (now - b["leaving_at"]) / EXIT_MS)
+                eased2 = 1 - (1 - t2) ** 3
+                y = y + (start_y - y) * eased2
             self._draw_one(b, board_rect, y, h, name_font, verb_font, btn_font)
             target_y += h + STACK_GAP
         self.window.set_clip(prev_clip)
@@ -133,12 +146,14 @@ class OfferBanners:
 
     def handle_click(self, pos):
         for b in list(self._banners):
+            if b["leaving_at"] is not None:
+                continue
             if b["ok_rect"].collidepoint(pos):
-                self._banners.remove(b)
+                b["leaving_at"] = pg.time.get_ticks()
                 b["on_ok"]()
                 return True
             if b["no_rect"].collidepoint(pos):
-                self._banners.remove(b)
+                b["leaving_at"] = pg.time.get_ticks()
                 b["on_no"]()
                 return True
         return False

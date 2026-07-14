@@ -309,7 +309,7 @@ class Frontend:
 
     def _needs_full_redraw(self, had_events):
         return (had_events or self._needs_full_present or self._blocking_modal_visible()
-                or self.toast.is_visible() or not self.coordinator.offer_banners.is_empty()
+                or self.toast.is_visible() or self.coordinator.offer_banners.needs_frames()
                 or self.screen.dirty_rects() is None)
 
     def _present_rects(self, had_events):

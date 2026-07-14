@@ -203,3 +203,56 @@ def test_banner_rect_follows_the_board_only_on_the_game_screen():
 
     app.switch_to("menu")
     assert app._banner_rect() == full
+
+
+def test_dismiss_animates_out_instead_of_vanishing(monkeypatch):
+    """A dismissed offer slides back up over EXIT_MS instead of popping out of
+    existence (user: 'make it disappear with a smooth animation'). While leaving it
+    no longer counts as an active banner, cannot be clicked, but still needs frames
+    presented; the draw pass prunes it once the exit completes."""
+    from chessshootout.frontend.panels.banners import EXIT_MS
+
+    holder = {"ms": 50_000}
+    monkeypatch.setattr(pg.time, "get_ticks", lambda: holder["ms"])
+    fired = []
+    ob = _banners()
+    _push(ob, ok=lambda: fired.append("ok"))
+    _settle(ob)
+    ob.draw(BOARD)
+
+    ob.dismiss("draw_offered")
+    assert ob.count() == 0 and ob.is_empty()
+    assert ob.needs_frames(), "exit animation still needs presented frames"
+    assert len(ob._banners) == 1
+
+    holder["ms"] += EXIT_MS // 2
+    ob.draw(BOARD)
+    assert len(ob._banners) == 1, "mid-exit the banner still draws"
+    assert ob.handle_click(ob._banners[0]["ok_rect"].center) is False
+    assert fired == []
+
+    holder["ms"] += EXIT_MS
+    ob.draw(BOARD)
+    assert ob._banners == [] and not ob.needs_frames()
+
+
+def test_button_click_also_animates_out_and_fires_once(monkeypatch):
+    from chessshootout.frontend.panels.banners import EXIT_MS
+
+    holder = {"ms": 50_000}
+    monkeypatch.setattr(pg.time, "get_ticks", lambda: holder["ms"])
+    fired = []
+    ob = _banners()
+    _push(ob, ok=lambda: fired.append("ok"))
+    _settle(ob)
+    ob.draw(BOARD)
+
+    assert ob.handle_click(ob._banners[0]["ok_rect"].center) is True
+    assert fired == ["ok"]
+    assert ob.is_empty() and ob.needs_frames()
+    assert ob.handle_click(ob._banners[0]["ok_rect"].center) is False
+    assert fired == ["ok"]
+
+    holder["ms"] += EXIT_MS + 1
+    ob.draw(BOARD)
+    assert ob._banners == []
