@@ -18,26 +18,23 @@ import pytest
 from tests.conftest import pygame_display
 from chessshootout.backend.pieces import PieceColor
 from chessshootout.backend.utils import Square
-from tests.helpers import make_app, start_single_screen
+from tests.helpers import (
+    make_app, online_start_payload as _online_start_payload, start_single_screen,
+)
 
 
 _pygame_init = pygame_display(1000, 800)
 
 
-def _online_start_payload(**overrides):
-    payload = {
-        "your_color": "white", "white_name": "alice", "black_name": "bob",
-        "time_minutes": 5, "increment_seconds": 0,
-    }
-    payload.update(overrides)
-    return payload
+def _mock_client(room_id="room-1"):
+    client = MagicMock()
+    client.room_id = room_id
+    return client
 
 
 def _wired_app(**overrides):
     app = make_app(1000, 800)
-    client = MagicMock()
-    client.room_id = "room-1"
-    app.coordinator.client = client
+    app.coordinator.client = _mock_client()
     app.coordinator._start_online_game(_online_start_payload(**overrides))
     return app
 
@@ -46,8 +43,7 @@ def test_game_screen_subscribes_on_online_entry_and_unsubscribes_on_exit():
     app = make_app(1000, 800)
     assert app.coordinator._subscriber is None
 
-    app.coordinator.client = MagicMock()
-    app.coordinator.client.room_id = "room-1"
+    app.coordinator.client = _mock_client()
     app.coordinator._start_online_game(_online_start_payload())
     assert app.coordinator._subscriber is app.game
 
@@ -131,8 +127,7 @@ def test_offer_and_connection_status_never_require_a_subscriber():
 
 def test_match_found_transition_ends_with_a_subscribed_online_game_screen():
     app = make_app(1000, 800)
-    app.coordinator.client = MagicMock()
-    app.coordinator.client.room_id = "room-1"
+    app.coordinator.client = _mock_client()
     payload = _online_start_payload(
         your_color="black", white_name="alice", black_name="bob",
         started_seconds_ago=0.0,

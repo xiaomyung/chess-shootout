@@ -10,22 +10,11 @@ import logging
 import pygame as pg
 
 from tests.conftest import pygame_display
-from chessshootout.backend.backend import Backend
-from chessshootout.domain.pgn.generate import generate_pgn
 from chessshootout.frontend.visual.colors import Colors
-from tests.helpers import make_app
+from tests.helpers import make_app, valid_pgn_text
 
 
 _pygame_init = pygame_display(1000, 800)
-
-
-def _valid_pgn_text():
-    backend = Backend()
-    backend.new_game()
-    for san in ["e4", "e5", "Nf3"]:
-        backend.apply_san(san)
-    return generate_pgn(backend.move_history, "white_wins",
-                        white_name="alice", black_name="Bob")
 
 
 def test_goto_view_switches_and_logs_the_transition(caplog):
@@ -77,7 +66,7 @@ def test_menu_remembers_its_active_view_across_a_screen_roundtrip():
 
 def test_review_from_history_returns_to_the_history_view(tmp_path):
     good = tmp_path / "local-20260101-120000.pgn"
-    good.write_text(_valid_pgn_text(), encoding="utf-8")
+    good.write_text(valid_pgn_text(), encoding="utf-8")
     app = make_app()
     app.menu.goto_history()
     app._open_pgn_review(str(good))

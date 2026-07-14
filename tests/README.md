@@ -184,6 +184,9 @@ Type hints and full docstrings everywhere are a separate later pass — not requ
 - `tests/server/conftest.py` holds the server-only `clock`/`app`/`client` fixture
   trio, `ALICE`/`BOB`, and `auth_msg` — auto-scoped to `tests/server/` so it
   can't shadow a client-side test's own `app`/`client` names.
+- `tests/frontend/conftest.py` holds a shared `app` fixture (a drawn 1200x900
+  `Frontend` with its games folder isolated to a temp dir) for the menu sub-view
+  tests; a file with its own `app` fixture overrides it.
 - Don't duplicate a builder across files — add it to `helpers.py` (or the
   relevant subdir's `conftest.py`) once.
 

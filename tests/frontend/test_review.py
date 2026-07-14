@@ -8,7 +8,7 @@ from chessshootout.backend.backend import Backend
 from chessshootout.backend.pieces import PieceColor, PieceType
 from chessshootout.backend.utils import Square
 from chessshootout.frontend.board import Board
-from tests.helpers import make_app, sq, start_single_screen
+from tests.helpers import fire_animation, make_app, sq, start_single_screen
 
 
 _pygame_init = pygame_display(1500, 800)
@@ -36,12 +36,6 @@ def _play_e4_e5_nf3(app):
         (Square(7, 6), Square(5, 5)),
     ]:
         app.game.match.backend.try_move(from_sq, to_sq)
-
-
-def fire_animation(board):
-    for a in list(board.animations):
-        a.start_ms = pg.time.get_ticks() - 10_000
-    board._draw_animations()
 
 
 def test_position_at_zero_returns_starting_layout():

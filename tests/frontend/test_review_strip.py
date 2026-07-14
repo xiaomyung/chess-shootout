@@ -5,6 +5,7 @@ from tests.conftest import pygame_display
 from chessshootout.backend.pieces import PieceColor
 from chessshootout.frontend.panels.review_strip import ReviewStrip
 from chessshootout.frontend.visual.widgets import avatar_palette
+from tests.helpers import draw_strip as _draw, strip_avatar_pixels as _avatar_pixels
 
 
 _pygame_init = pygame_display(700, 300)
@@ -15,20 +16,6 @@ def strip():
     s = ReviewStrip(pg.display.get_surface())
     s.set_rect(pg.Rect(0, 60, 480, 52))
     return s
-
-
-def _draw(strip):
-    strip.window.fill((0, 0, 0))
-    strip.draw()
-
-
-def _avatar_pixels(strip):
-    pad = max(int(strip.rect.height * 0.16), 4)
-    av = strip.rect.height - 2 * pad
-    cx = strip.rect.x + pad + av // 2
-    top = strip.window.get_at((cx, strip.rect.y + pad + max(3, av // 6)))
-    bottom = strip.window.get_at((cx, strip.rect.y + pad + av - max(3, av // 6)))
-    return top, bottom
 
 
 def test_avatar_fill_matches_the_palette_seeded_by_the_pgn_name(strip):

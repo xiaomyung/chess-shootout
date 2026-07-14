@@ -6,21 +6,10 @@ plays freely behind the opaque history panel (no collider) — only the rail is
 avoided."""
 
 from tests.conftest import pygame_display
-from chessshootout.backend.backend import Backend
-from chessshootout.domain.pgn.generate import generate_pgn
-from tests.helpers import make_app
+from tests.helpers import make_app, valid_pgn_text
 
 
 _pygame_init = pygame_display(1000, 800)
-
-
-def _valid_pgn_text():
-    backend = Backend()
-    backend.new_game()
-    for san in ["e4", "e5", "Nf3"]:
-        backend.apply_san(san)
-    return generate_pgn(backend.move_history, "white_wins",
-                        white_name="alice", black_name="Bob")
 
 
 def test_goto_history_switches_the_menu_to_the_history_view():
@@ -88,7 +77,7 @@ def test_empty_history_view_draws_the_empty_state(tmp_path, monkeypatch):
 
 def test_open_review_from_history_uses_the_menu_return_target(tmp_path):
     good = tmp_path / "local-20260101-120000.pgn"
-    good.write_text(_valid_pgn_text(), encoding="utf-8")
+    good.write_text(valid_pgn_text(), encoding="utf-8")
     app = make_app()
     app.menu.goto_history()
 

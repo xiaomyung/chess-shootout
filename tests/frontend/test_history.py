@@ -12,7 +12,7 @@ from chessshootout.frontend.panels.history_view import (
     CARD_BADGE_CUT, CARD_CACHE_MAX, CARD_GAP, SCROLLBAR_GUTTER, HistoryView,
 )
 from chessshootout.frontend.visual.colors import Colors
-from tests.helpers import fake_uuid4
+from tests.helpers import fake_uuid4, scan_region
 
 
 _pygame_init = pygame_display(1000, 800)
@@ -35,13 +35,7 @@ def _view(directory, nickname="alice", on_open=None):
 
 
 def _region_has_color(surface, rect, hex_color, tol=40):
-    want = pg.Color(hex_color)[:3]
-    for x in range(max(rect.x, 0), min(rect.right, surface.get_width()), 3):
-        for y in range(max(rect.y, 0), min(rect.bottom, surface.get_height()), 3):
-            got = surface.get_at((x, y))[:3]
-            if all(abs(a - b) <= tol for a, b in zip(got, want)):
-                return True
-    return False
+    return scan_region(surface, rect, hex_color, tol=tol, step=3, clamp=True)
 
 
 def _hit_for(view, kind):

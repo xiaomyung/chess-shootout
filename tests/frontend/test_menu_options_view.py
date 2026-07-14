@@ -1,9 +1,10 @@
 """OptionsView + the layout-agnostic settings rows (v2.9.0: Options folded from a
-global modal into a menu sub-view). The row widgets (toggle/segmented/slider/
-swatch/path/text) route clicks to their getter/setter exactly as before; the
-view itself hosts them in an OptionsBody ScrollHost inside the menu's
-subview_rect and replaces the old modal close-gate with an on-exit gate that
-fires on view exit AND app quit, never veto-blocking navigation."""
+global modal into a menu sub-view). The row widgets (toggle/segmented/notch/path/
+text -- the old slider is NotchRow now, SwatchRow retired) route clicks to their
+getter/setter exactly as before; the view itself hosts them in an OptionsBody
+ScrollHost inside the menu's subview_rect and replaces the old modal close-gate
+with an on-exit gate that fires on view exit AND app quit, never veto-blocking
+navigation."""
 
 import os
 
@@ -26,10 +27,10 @@ _pygame_init = pygame_display(1200, 900)
 
 
 @pytest.fixture(autouse=True)
-def _isolate_env(tmp_path_factory, monkeypatch):
-    """Pin persisted env writes to a temp .env (never the real user config)."""
-    envfile = tmp_path_factory.mktemp("envcfg") / ".env"
-    monkeypatch.setattr(env, "_ENV_PATH", envfile)
+def _isolate_env(monkeypatch):
+    """Keep CHESS_DATA_DIR unset for this module's launch-mode / data-folder tests.
+    The root conftest's _isolate_env_file autouse already pins env._ENV_PATH to a
+    temp .env, so no need to re-patch it here."""
     monkeypatch.delenv("CHESS_DATA_DIR", raising=False)
     yield
     os.environ.pop("CHESS_DATA_DIR", None)
@@ -157,7 +158,7 @@ def test_left_elide_prepends_ellipsis_and_preserves_the_exact_tail():
     ellipsis; the visible tail is an exact suffix of the original and the whole
     thing fits the budget. A short path is returned untouched."""
     font = get_mono_font(13)
-    long_path = "/home/xiao_myung/Documents/code/py/chess-shootout"
+    long_path = "/a/very/long/synthetic/path/for/testing/left/elide"
     budget = 150
     out = _elide_left(font, long_path, budget)
     ell = _fitting_ellipsis(font)

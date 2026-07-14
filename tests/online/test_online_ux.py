@@ -6,6 +6,7 @@ seconds before the game starts, the reconnecting on-board overlay surfaces
 only while the client is reconnecting mid-game, and transient errors show a
 toast (not a modal).
 """
+
 import logging
 from types import SimpleNamespace
 from unittest.mock import MagicMock
@@ -14,6 +15,7 @@ import pygame as pg
 import pytest
 
 from tests.conftest import pygame_display
+from tests.helpers import online_start_payload
 from chessshootout.frontend.frontend import Frontend
 from chessshootout.frontend.online_coordinator import RECONNECT_MODAL_DEBOUNCE_MS
 from chessshootout.frontend.screens.game import (
@@ -201,8 +203,7 @@ def test_match_found_reveal_holds_then_starts_game(frontend, monkeypatch):
     frontend.coordinator.wait_modal.show("Rapid", "10 + 5", on_cancel=lambda: None)
     frontend.coordinator._wait_started_at_ms = fake_now[0]
 
-    payload = {"your_color": "white", "white_name": "A", "black_name": "B",
-               "time_minutes": 5, "increment_seconds": 0}
+    payload = online_start_payload(white_name="A", black_name="B")
     frontend.coordinator._begin_match_found_transition(payload)
 
     assert frontend.coordinator.match_found_modal.is_visible()
@@ -226,13 +227,8 @@ def test_match_found_transition_plays_online_game_start_sound(frontend):
     frontend.sound_manager.play_online_game_start = lambda: plays.append(True)
     frontend.coordinator.wait_modal.show("Rapid", "10 + 5", on_cancel=lambda: None)
     frontend.coordinator._wait_started_at_ms = pg.time.get_ticks()
-    frontend.coordinator._begin_match_found_transition({
-        "your_color": "white",
-        "white_name": "A",
-        "black_name": "B",
-        "time_minutes": 5,
-        "increment_seconds": 0,
-    })
+    frontend.coordinator._begin_match_found_transition(
+        online_start_payload(white_name="A", black_name="B"))
     assert plays == [True]
 
 

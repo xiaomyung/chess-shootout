@@ -11,6 +11,7 @@ from chessshootout.frontend.visual.toast import (
 )
 from tests.conftest import pygame_display
 
+
 _pygame_init = pygame_display(800, 600)
 
 

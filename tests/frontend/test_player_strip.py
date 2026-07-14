@@ -9,6 +9,7 @@ from chessshootout.frontend.panels.player_strip import (
     GIVE_TIME_FLOAT_MS, PlayerStrip, give_time_float_alpha,
 )
 from chessshootout.frontend.visual.widgets import avatar_palette
+from tests.helpers import draw_strip as _draw, strip_avatar_pixels as _avatar_pixels
 
 
 _pygame_init = pygame_display(900, 400)
@@ -30,11 +31,6 @@ def strip():
     s.set_rect(pg.Rect(0, 80, 560, 56))
     s.set_piece_icons(_fake_icons())
     return s
-
-
-def _draw(strip):
-    strip.window.fill((0, 0, 0))
-    strip.draw()
 
 
 def _has_color(win, rect, hexcolor, tol=6):
@@ -157,15 +153,6 @@ def test_active_clock_border_stays_neutral(strip):
     """The active cue is the glow, not a hard accent ring on the clock box."""
     strip.set_state("Alice", 200.0, True, clock_initial_seconds=300.0)
     assert strip._clock_border_color() == Colors.border
-
-
-def _avatar_pixels(strip):
-    pad = max(int(strip.rect.height * 0.16), 4)
-    av = strip.rect.height - 2 * pad
-    cx = strip.rect.x + pad + av // 2
-    top = strip.window.get_at((cx, strip.rect.y + pad + max(3, av // 6)))
-    bottom = strip.window.get_at((cx, strip.rect.y + pad + av - max(3, av // 6)))
-    return top, bottom
 
 
 def test_avatar_fill_matches_the_palette_seeded_by_the_displayed_name(strip):

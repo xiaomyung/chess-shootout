@@ -21,7 +21,9 @@ from chessshootout.domain.pgn.generate import generate_pgn
 from chessshootout.frontend.modals.help import HOTKEYS
 from chessshootout.frontend.screens.base import Nav
 from chessshootout.frontend.screens.review import REVIEW_HOTKEY_KEYS, REVIEW_HOTKEYS
-from tests.helpers import make_app as _shared_make_app, sq, start_single_screen
+from tests.helpers import (
+    fire_animation, key_event, make_app as _shared_make_app, sq, start_single_screen,
+)
 
 
 _pygame_init = pygame_display(1000, 800)
@@ -29,16 +31,6 @@ _pygame_init = pygame_display(1000, 800)
 
 def make_app():
     return _shared_make_app(1000, 800, mock_sound=False)
-
-
-def _key(key, unicode=""):
-    return pg.event.Event(pg.KEYDOWN, key=key, mod=0, unicode=unicode)
-
-
-def _fire_animation(board):
-    for a in list(board.animations):
-        a.start_ms = pg.time.get_ticks() - 10_000
-    board._draw_animations()
 
 
 def _write_pgn(tmp_path, name, *, white="alice", black="bob", result="1-0",
@@ -195,24 +187,24 @@ def test_arrow_stepping_mirrors_live_review_semantics(tmp_path):
 
     assert review.board.review_ply == 0
 
-    review.handle_key(_key(pg.K_LEFT))
+    review.handle_key(key_event(pg.K_LEFT))
     assert review.board.review_ply == 0
     assert review.board.animations == []
 
-    review.handle_key(_key(pg.K_RIGHT))
+    review.handle_key(key_event(pg.K_RIGHT))
     assert review.board.review_ply == 0
     assert len(review.board.animations) >= 1
-    _fire_animation(review.board)
+    fire_animation(review.board)
     assert review.board.review_ply == 1
 
-    review.handle_key(_key(pg.K_END))
+    review.handle_key(key_event(pg.K_END))
     assert review.board.review_ply is None
 
-    review.handle_key(_key(pg.K_LEFT))
+    review.handle_key(key_event(pg.K_LEFT))
     assert review.board.review_ply == 3
     assert review.board.animations == []
 
-    review.handle_key(_key(pg.K_HOME))
+    review.handle_key(key_event(pg.K_HOME))
     assert review.board.review_ply == 0
 
 
@@ -221,7 +213,7 @@ def test_flip_key_flips_the_review_board(tmp_path):
     app = make_app()
     _enter_review(app, path)
     before = app.review.board.flipped
-    app.review.handle_key(_key(pg.K_f))
+    app.review.handle_key(key_event(pg.K_f))
     assert app.review.board.flipped != before
 
 
@@ -279,7 +271,7 @@ def test_review_help_shows_navigation_subset(tmp_path):
     path = _write_pgn(tmp_path, "test.pgn")
     app = make_app()
     _enter_review(app, path)
-    app.review.handle_key(_key(pg.K_SLASH, unicode="?"))
+    app.review.handle_key(key_event(pg.K_SLASH, unicode="?"))
     assert app.help_modal.is_visible() is True
     assert app.help_modal.rows == REVIEW_HOTKEYS
     assert len(REVIEW_HOTKEYS) < len(HOTKEYS)
@@ -289,7 +281,7 @@ def test_review_help_shows_navigation_subset(tmp_path):
 
 def test_game_help_shows_the_full_list():
     app = start_single_screen(make_app())
-    app.game.handle_key(_key(pg.K_SLASH, unicode="?"))
+    app.game.handle_key(key_event(pg.K_SLASH, unicode="?"))
     assert app.help_modal.is_visible() is True
     assert app.help_modal.rows == HOTKEYS
 
@@ -382,7 +374,7 @@ def test_review_help_lists_every_key_review_actually_handles(tmp_path):
     screen handles but forgets to list is invisible — including `?`, the key that
     opens the modal you are reading."""
     app = _enter_review(make_app(), _write_pgn(tmp_path, "help.pgn"))
-    app.review.handle_key(_key(pg.K_QUESTION, "?"))
+    app.review.handle_key(key_event(pg.K_QUESTION, "?"))
     listed = {row[0] for row in app.help_modal.rows}
 
     assert "?" in listed

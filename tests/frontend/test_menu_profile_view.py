@@ -13,28 +13,10 @@ from chessshootout.frontend.menu.profile_view import NICKNAME_REJECT_TOAST
 from chessshootout.frontend.screens.menu import VIEW_RISE_MS
 from chessshootout.frontend.visual.widgets import avatar_palette
 from chessshootout.infra import env
-from tests.helpers import make_app
+from tests.helpers import write_pgn_fixture as _write_pgn
 
 
 _pygame_init = pygame_display(1200, 900)
-
-
-def _write_pgn(tmp_path, name, white, black, result, moves):
-    games = tmp_path / "games"
-    games.mkdir(exist_ok=True)
-    path = games / name
-    path.write_text(
-        f'[White "{white}"]\n[Black "{black}"]\n[Result "{result}"]\n\n{moves} {result}\n',
-        encoding="utf-8")
-    return path
-
-
-@pytest.fixture
-def app(tmp_path, monkeypatch):
-    monkeypatch.setenv("CHESS_DATA_DIR", str(tmp_path))
-    application = make_app(1200, 900)
-    application.draw_frame()
-    return application
 
 
 @pytest.fixture

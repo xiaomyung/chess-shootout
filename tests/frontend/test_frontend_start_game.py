@@ -6,7 +6,6 @@ clock or leaves the "menu" mode until the server confirms the game."""
 
 import random
 
-
 import pytest
 
 from tests.conftest import pygame_display
@@ -61,9 +60,10 @@ def test_start_game_single_screen_white_side():
     assert app.game.black_name == "Player 2"
     assert app.game.variant == "local"
     assert app.menu.play_view_visible() is False
-    assert app.game.match.backend.clock is not None
-    assert app.game.match.backend.clock.initial_seconds == 300
-    assert app.game.match.backend.clock.increment_seconds == 2
+    clock = app.game.match.backend.clock
+    assert clock is not None
+    assert clock.initial_seconds == 300
+    assert clock.increment_seconds == 2
 
 
 @pytest.mark.parametrize("nickname", [
@@ -174,15 +174,16 @@ def test_tick_clock_called_only_outside_menu():
     """draw_frame ticks the clock only once a game has started, never in the menu."""
     app = make_app()
     calls = []
-    original_tick = app.game.match.backend.tick_clock
-    app.game.match.backend.tick_clock = lambda: calls.append(1)
+    backend = app.game.match.backend
+    original_tick = backend.tick_clock
+    backend.tick_clock = lambda: calls.append(1)
     app.draw_frame()
     assert calls == []
 
     app._on_start_game(base_config())
     app.draw_frame()
     assert len(calls) >= 1
-    app.game.match.backend.tick_clock = original_tick
+    backend.tick_clock = original_tick
 
 
 def test_tick_clock_no_op_when_game_over():
@@ -200,21 +201,23 @@ def test_new_game_preserves_time_control():
     app._on_start_game(base_config(time_minutes=10, increment_seconds=5))
     app.game.manual_result = "white_wins"
     app._on_new_game()
-    assert app.game.match.backend.clock is not None
-    assert app.game.match.backend.clock.initial_seconds == 600
-    assert app.game.match.backend.clock.increment_seconds == 5
+    clock = app.game.match.backend.clock
+    assert clock is not None
+    assert clock.initial_seconds == 600
+    assert clock.increment_seconds == 5
 
 
 def test_undo_with_clock_restores_remaining():
     """A move debits and increments the clock; undo restores the pre-move remaining."""
     app = make_app()
     app._on_start_game(base_config())
-    pre = app.game.match.backend.clock.white_remaining
+    clock = app.game.match.backend.clock
+    pre = clock.white_remaining
     app.game.board.handle_click(Square(6, 4))
     app.game.board.handle_click(Square(4, 4))
-    assert app.game.match.backend.clock.white_remaining != pre
+    assert clock.white_remaining != pre
     app.game._on_undo()
-    assert app.game.match.backend.clock.white_remaining == pre
+    assert clock.white_remaining == pre
 
 
 @pytest.mark.parametrize("flipped, top_is_white", [

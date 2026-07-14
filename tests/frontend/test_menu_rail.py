@@ -28,6 +28,12 @@ def _rail():
     return rail, opened
 
 
+def _is_warm(rgb):
+    """The accent's warm tint: reddish, clearly warmer than blue, not cooler than green."""
+    r, g, b = rgb
+    return r > 40 and r > b + 15 and r >= g
+
+
 def test_hit_test_returns_every_row_key():
     rail, _ = _rail()
     for key, _, _ in ROWS + (OPTIONS_ROW,):
@@ -63,8 +69,7 @@ def test_active_row_border_is_neutral_not_accent():
     rail.draw(surf, 10_000)
 
     active = rail._row_rects["history"]
-    r, g, b = surf.get_at((active.right - 2, active.centery))[:3]
-    assert not (r > 40 and r > b + 15 and r >= g), \
+    assert not _is_warm(surf.get_at((active.right - 2, active.centery))[:3]), \
         "the active row's own border must not carry the accent's warm tint"
 
 
@@ -189,14 +194,13 @@ def test_footer_font_is_readable_not_tiny():
 
 
 def _has_warm_tint(surf, rect):
-    for x in range(rect.x, rect.right):
-        for y in range(rect.y, rect.bottom, 2):
-            if not surf.get_rect().collidepoint((x, y)):
-                continue
-            r, g, b = surf.get_at((x, y))[:3]
-            if r > 40 and r > b + 15 and r >= g:
-                return True
-    return False
+    clip = surf.get_rect()
+    return any(
+        _is_warm(surf.get_at((x, y))[:3])
+        for x in range(rect.x, rect.right)
+        for y in range(rect.y, rect.bottom, 2)
+        if clip.collidepoint((x, y))
+    )
 
 
 def test_reticle_sits_inside_the_row_near_its_left_edge():
@@ -229,14 +233,13 @@ def test_reticle_is_a_visible_crosshair_not_a_tiny_dot():
     row = rail._row_rects["play"]
     cx = row.x + max(int(RETICLE_INSET * rail.scale), 12)
     band = pg.Rect(cx - 16, row.y, 32, row.height)
-    warm_pixels = 0
-    for x in range(band.x, band.right):
-        for y in range(band.y, band.bottom):
-            if not surf.get_rect().collidepoint((x, y)):
-                continue
-            r, g, b = surf.get_at((x, y))[:3]
-            if r > 40 and r > b + 15 and r >= g:
-                warm_pixels += 1
+    clip = surf.get_rect()
+    warm_pixels = sum(
+        1
+        for x in range(band.x, band.right)
+        for y in range(band.y, band.bottom)
+        if clip.collidepoint((x, y)) and _is_warm(surf.get_at((x, y))[:3])
+    )
     assert warm_pixels > 28, \
         "the reticle must read as a clearly visible crosshair, not a clipped dot"
 

@@ -22,7 +22,7 @@ import pytest
 
 from tests.conftest import pygame_display
 from chessshootout.backend.utils import Square
-from tests.helpers import make_app
+from tests.helpers import key_event, make_app
 
 
 _pygame_init = pygame_display(1000, 800)
@@ -44,10 +44,6 @@ def _entry_payload(name, tmp_path):
     if name == "review":
         return {"pgn_path": str(_write_pgn(tmp_path)), "return_to": "menu"}
     return {}
-
-
-def _key(key, unicode=""):
-    return pg.event.Event(pg.KEYDOWN, key=key, mod=0, unicode=unicode)
 
 
 # --- enter/exit idempotence -------------------------------------------------
@@ -161,7 +157,7 @@ def test_handle_key_and_click_on_an_exited_inactive_screen_is_harmless(name, tmp
     app.switch_to(other)  # runs screen.exit(); screen is now inactive
 
     screen.handle_click((10, 10))
-    screen.handle_key(_key(pg.K_a, "a"))
+    screen.handle_key(key_event(pg.K_a, "a"))
 
     app.draw_frame()  # must not raise, and the real active screen is unaffected
     assert app.screen.name == other
@@ -260,7 +256,7 @@ def test_videoresize_mid_review_animation_does_not_crash(tmp_path):
     app = make_app()
     pgn = _write_pgn(tmp_path)
     app.switch_to("review", pgn_path=str(pgn), return_to="menu")
-    app.review.handle_key(_key(pg.K_RIGHT))
+    app.review.handle_key(key_event(pg.K_RIGHT))
     assert app.review.board.is_animating()
 
     pg.event.clear()

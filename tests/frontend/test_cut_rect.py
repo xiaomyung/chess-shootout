@@ -3,6 +3,7 @@ import pytest
 
 from tests.conftest import pygame_display
 from chessshootout.frontend.visual.draw import cut_rect_surface
+from tests.helpers import rgb, scan_region
 
 
 _pygame_init = pygame_display(80, 80)
@@ -13,22 +14,14 @@ FILL = "#334455"
 BORDER = "#ffcc00"
 
 
-def _rgb(color):
-    return pg.Color(color)[:3]
-
-
 def _has_color_in(surface, color, x0, y0, x1, y1):
-    target = _rgb(color)
-    return any(
-        surface.get_at((x, y))[:3] == target
-        for x in range(x0, x1) for y in range(y0, y1)
-    )
+    return scan_region(surface, pg.Rect(x0, y0, x1 - x0, y1 - y0), color)
 
 
 def test_fill_color_inside_body():
     surf = cut_rect_surface((SIZE, SIZE), CUT, FILL, corners=("tr",))
     px = surf.get_at((SIZE // 2, SIZE // 2))
-    assert px[:3] == _rgb(FILL)
+    assert px[:3] == rgb(FILL)
     assert px[3] == 255
 
 

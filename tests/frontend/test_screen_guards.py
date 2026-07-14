@@ -75,20 +75,19 @@ def _import_targets(tree):
     (level-0 only) statement in tree. For ImportFrom this is node.module
     itself -- exactly the real submodule/package path when the statement
     names a concrete file (`from a.b.c import D`), or the enclosing package
-    when it names a symbol re-exported from an __init__ (`from a.b import D`)."""
+    when it names a symbol re-exported from an __init__ (`from a.b import D`).
+    Relative (`from . import X`) imports are skipped -- no caller needs them."""
     targets = set()
-    had_relative = False
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
             for alias in node.names:
                 targets.add(alias.name)
         elif isinstance(node, ast.ImportFrom):
             if node.level and node.level > 0:
-                had_relative = True
                 continue
             if node.module:
                 targets.add(node.module)
-    return targets, had_relative
+    return targets
 
 
 def test_no_screen_module_imports_a_sibling_screen_module():
@@ -99,7 +98,7 @@ def test_no_screen_module_imports_a_sibling_screen_module():
         stem = os.path.splitext(os.path.basename(path))[0]
         if stem not in CONCRETE_SCREENS:
             continue
-        targets, _ = _import_targets(_parse(path))
+        targets = _import_targets(_parse(path))
         for module in targets:
             if not module.startswith("chessshootout.frontend.screens."):
                 continue
@@ -112,7 +111,7 @@ def test_no_screen_module_imports_a_sibling_screen_module():
 def test_online_coordinator_only_imports_screens_base():
     path = os.path.join(FRONTEND_ROOT, "online_coordinator.py")
     assert os.path.isfile(path), f"expected {path} to exist"
-    targets, _ = _import_targets(_parse(path))
+    targets = _import_targets(_parse(path))
     offenders = [
         m for m in targets
         if m.startswith("chessshootout.frontend.screens")

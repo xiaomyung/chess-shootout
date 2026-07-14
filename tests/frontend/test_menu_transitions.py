@@ -21,16 +21,10 @@ import pygame as pg
 from tests.conftest import pygame_display
 from chessshootout.frontend.screens.menu import MENU_RISE_MS, RAIL_SLIDE_MS, VIEW_RISE_MS
 from chessshootout.frontend.visual.colors import Colors
-from tests.helpers import make_app
+from tests.helpers import freeze_ticks as _freeze, make_app
 
 
 _pygame_init = pygame_display(1000, 800)
-
-
-def _freeze(monkeypatch):
-    holder = {"ms": 100_000}
-    monkeypatch.setattr(pg.time, "get_ticks", lambda: holder["ms"])
-    return holder
 
 
 def _draw_menu(app):

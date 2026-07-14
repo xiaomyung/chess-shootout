@@ -1,7 +1,6 @@
-import pygame as pg
-
 from tests.conftest import pygame_display
 from chessshootout.frontend.visual.draw import chevron_surface, dashed_rounded_rect_surface
+from tests.helpers import rgb
 
 
 _pygame_init = pygame_display(80, 80)
@@ -10,10 +9,6 @@ SIZE = 60
 RADIUS = 10
 BORDER = "#ffcc00"
 FILL = "#223344"
-
-
-def _rgb(color):
-    return pg.Color(color)[:3]
 
 
 def test_top_edge_alternates_dash_and_gap():
@@ -26,7 +21,7 @@ def test_top_edge_alternates_dash_and_gap():
 def test_fill_paints_the_body_when_given():
     surf = dashed_rounded_rect_surface((SIZE, SIZE), RADIUS, BORDER, fill=FILL)
     px = surf.get_at((SIZE // 2, SIZE // 2))
-    assert px[:3] == _rgb(FILL)
+    assert px[:3] == rgb(FILL)
     assert px[3] == 255
 
 

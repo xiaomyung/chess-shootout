@@ -1,6 +1,5 @@
 import os
 
-
 import pytest
 
 from tests.conftest import pygame_display

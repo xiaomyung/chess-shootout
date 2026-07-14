@@ -6,10 +6,10 @@ frames render while the result screen is up) plus two static checks (no log
 call literally sits inside a known per-frame draw/update function, and no log
 call anywhere references a skill-check secret or geometry seed).
 """
+
 import logging
 import os
 import re
-
 
 import pytest
 

@@ -9,7 +9,7 @@ from tests.conftest import pygame_display
 from chessshootout.frontend.modals.match_found import MatchFoundModal
 from chessshootout.frontend.visual.colors import Colors
 from chessshootout.frontend.visual.widgets import avatar_palette, build_flat_avatar
-from tests.helpers import assert_pixel_color
+from tests.helpers import assert_pixel_color, scan_region
 
 
 _pg = pygame_display(800, 600)
@@ -22,13 +22,7 @@ def _modal():
 
 
 def _near_count(win, rect, target, tol=26):
-    t = pg.Color(target)[:3]
-    return sum(
-        1
-        for x in range(rect.x, rect.right, 2)
-        for y in range(rect.y, rect.bottom, 2)
-        if max(abs(win.get_at((x, y))[i] - t[i]) for i in range(3)) <= tol
-    )
+    return scan_region(win, rect, target, tol=tol, step=2, count=True)
 
 
 def test_show_makes_visible_and_hide_clears():

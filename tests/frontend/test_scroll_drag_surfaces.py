@@ -9,14 +9,13 @@ import pytest
 
 from tests.conftest import pygame_display
 from chessshootout.backend.backend import Backend
-from chessshootout.backend.pieces import Piece, PieceType, PieceColor
-from chessshootout.backend.utils import Square, Move, HistoryEntry
 from chessshootout.frontend.modals.country_picker import CountryPicker
 from chessshootout.frontend.modals.directory_browser import DirectoryBrowser
 from chessshootout.frontend.modals.help import HelpModal, HOTKEYS
 from chessshootout.frontend.menu.options_rows import OptionsBody, ToggleRow, Fonts
 from chessshootout.frontend.panels.right import RightMenu
 from chessshootout.frontend.visual.fonts import get_font, get_mono_font
+from tests.helpers import history_entry
 
 
 _pygame_init = pygame_display(1000, 800)
@@ -167,19 +166,13 @@ class _Board:
         self.review_ply = ply
 
 
-def _entry(san):
-    move = Move(Square(6, 0), Square(5, 0), Piece(PieceType.PAWN, PieceColor.WHITE))
-    return HistoryEntry(move=move, prev_castling_rights=(), prev_en_passant_target=None,
-                        prev_halfmove_clock=0, position_key_added=("k",), san=san)
-
-
 def _right():
     backend = Backend()
     backend.new_game()
     board = _Board()
     rm = RightMenu(pg.display.get_surface(), backend, {}, board=board)
     rm.set_rect(pg.Rect(0, 0, 320, 600))
-    backend.move_history = [_entry(f"a{i % 8 + 1}") for i in range(200)]
+    backend.move_history = [history_entry(f"a{i % 8 + 1}") for i in range(200)]
     rm.draw_menu()
     return rm, board
 

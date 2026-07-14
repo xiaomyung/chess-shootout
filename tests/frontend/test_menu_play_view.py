@@ -24,7 +24,7 @@ from chessshootout.frontend.menu.play_view import (
     SUMMARY_CHIP_ICON, PlayView)
 from chessshootout.frontend.visual.colors import Colors
 from chessshootout.infra import env
-from tests.helpers import assert_pixel_color, make_app
+from tests.helpers import assert_pixel_color, freeze_ticks as _freeze, make_app
 
 
 _pygame_init = pygame_display(1000, 800)
@@ -478,12 +478,6 @@ def test_reconnect_banner_shifts_the_title_block_down(app, hero):
 
 def test_clock_icon_is_doubled_in_size():
     assert SUMMARY_CHIP_ICON == 32
-
-
-def _freeze(monkeypatch):
-    holder = {"ms": 100_000}
-    monkeypatch.setattr(pg.time, "get_ticks", lambda: holder["ms"])
-    return holder
 
 
 def _open_and_settle(app, hero, clock, chip):
