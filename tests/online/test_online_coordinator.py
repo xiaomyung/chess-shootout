@@ -347,6 +347,90 @@ def test_send_facades_are_inert_with_no_client():
     assert app.coordinator.ping_ms() is None
 
 
+def test_remote_move_dismisses_the_draw_offer_banner():
+    """The server silently invalidates a pending offer the instant a move lands
+    (handlers.py's _apply_move). The client mirrors that off the move_applied
+    event itself — no decline is ever sent, since the server already cleared it."""
+    app = _wired_app()
+    client = app.coordinator.client
+    app.game.on_remote_move = lambda payload: None
+    app.coordinator._push_offer_banner("draw_offered")
+    assert not app.coordinator.offer_banners.is_empty()
+
+    app.coordinator._handle_remote_move_applied({"from": "e2", "to": "e4", "san": "e4"})
+
+    assert app.coordinator.offer_banners.is_empty()
+    client.send_draw_response.assert_not_called()
+
+
+def test_remote_move_dismisses_the_takeback_offer_banner():
+    app = _wired_app()
+    client = app.coordinator.client
+    app.game.on_remote_move = lambda payload: None
+    app.coordinator._push_offer_banner("takeback_offered")
+    assert not app.coordinator.offer_banners.is_empty()
+
+    app.coordinator._handle_remote_move_applied({"from": "e2", "to": "e4", "san": "e4"})
+
+    assert app.coordinator.offer_banners.is_empty()
+    client.send_takeback_response.assert_not_called()
+
+
+def test_resyncing_remote_move_applied_is_dropped_before_dismissing_offers():
+    """_handle_remote_move_applied bails out on the pre-existing _resyncing guard
+    before it ever reaches the dismiss helper — a stray move_applied mid-resync
+    must not touch banner state at all (in practice _begin_resync already cleared
+    it, and resume carries no offer field to rebuild it from)."""
+    app = _wired_app()
+    app.coordinator._push_offer_banner("draw_offered")
+    app.coordinator._resyncing = True
+
+    app.coordinator._handle_remote_move_applied({"from": "e2", "to": "e4", "san": "e4"})
+
+    assert app.coordinator.offer_banners.count() == 1
+
+
+def test_local_move_send_dismisses_an_incoming_takeback_offer_banner():
+    """The recipient scenario from the bug report: opponent offers a takeback,
+    I ignore it and move instead — that is the implicit decline. send_local_move
+    fires only after the move already landed on my own board (Match._fire_local_move),
+    so dismissing here is never premature."""
+    app = _wired_app()
+    client = app.coordinator.client
+    app.coordinator._push_offer_banner("takeback_offered")
+    assert not app.coordinator.offer_banners.is_empty()
+
+    app.coordinator.send_local_move(Square(6, 4), Square(4, 4), None)
+
+    assert app.coordinator.offer_banners.is_empty()
+    client.send_takeback_response.assert_not_called()
+
+
+def test_local_move_send_dismisses_an_incoming_draw_offer_banner():
+    app = _wired_app()
+    client = app.coordinator.client
+    app.coordinator._push_offer_banner("draw_offered")
+
+    app.coordinator.send_local_move(Square(6, 4), Square(4, 4), None)
+
+    assert app.coordinator.offer_banners.is_empty()
+    client.send_draw_response.assert_not_called()
+
+
+def test_move_landing_never_dismisses_the_rematch_banner():
+    """Rematch offers live post-game, when no move can land — but the dismiss
+    helper must stay scoped to draw/takeback regardless, so a future rematch-window
+    edge case can't silently eat the rematch banner too."""
+    app = _wired_app()
+    app.coordinator._handle_rematch_request()
+    assert app.coordinator.offer_banners.count() == 1
+
+    app.coordinator.send_local_move(Square(6, 4), Square(4, 4), None)
+
+    assert app.coordinator.offer_banners.count() == 1
+    assert app.coordinator._rematch_offered is True
+
+
 def test_unbind_clears_every_field_that_gates_online_behaviour():
     """Four call sites cleared four different subsets of the same nine fields, and they
     had drifted — a teardown left _first_move_deadline_ms and the disconnect stamps set.

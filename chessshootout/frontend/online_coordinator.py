@@ -45,6 +45,8 @@ OFFER_BANNERS = {
                         "send_rematch_response"),
 }
 
+MOVE_INVALIDATED_OFFER_KEYS = ("draw_offered", "takeback_offered")
+
 ONLINE_HARD_FAILURE_LABELS = {
     ClientReason.SERVER_UNREACHABLE: "Server unreachable",
     ClientReason.RECONNECT_FAILED: "Could not reconnect",
@@ -131,6 +133,7 @@ class OnlineCoordinator:
     def send_local_move(self, from_sq, to_sq, promotion):
         if self.client is not None:
             self.client.send_move(coord_from_square(from_sq), coord_from_square(to_sq), promotion)
+            self._dismiss_move_invalidated_offers()
 
     def send_move(self, from_coord, to_coord, promo_letter):
         if self.client is not None:
@@ -404,9 +407,14 @@ class OnlineCoordinator:
             return
         self._forward_board_event("on_spectate", payload)
 
+    def _dismiss_move_invalidated_offers(self):
+        for key in MOVE_INVALIDATED_OFFER_KEYS:
+            self.offer_banners.dismiss(key)
+
     def _handle_remote_move_applied(self, payload):
         if self._resyncing:
             return
+        self._dismiss_move_invalidated_offers()
         self._forward_board_event("on_remote_move", payload)
 
     def _handle_online_result(self, payload):
