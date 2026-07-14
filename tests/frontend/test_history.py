@@ -9,7 +9,7 @@ import pygame as pg
 import chessshootout.frontend.panels.history_view as histmod
 from tests.conftest import pygame_display
 from chessshootout.frontend.panels.history_view import (
-    CARD_CACHE_MAX, CARD_GAP, SCROLLBAR_GUTTER, HistoryView,
+    CARD_BADGE_CUT, CARD_CACHE_MAX, CARD_GAP, SCROLLBAR_GUTTER, HistoryView,
 )
 from chessshootout.frontend.visual.colors import Colors
 from tests.helpers import fake_uuid4
@@ -301,15 +301,23 @@ def test_card_cache_lru_bounded_when_scrolling_many(tmp_path):
     assert len(view._card_cache) <= CARD_CACHE_MAX
 
 
-def _count_rounded_rects(monkeypatch):
+def _count_shape_calls(monkeypatch):
+    """Card bodies/badges/chips build via cut_rect_surface now (v2.9.0 cut-corner
+    restyle); rounded_rect_surface remains only for the ONLINE pill and hover strip.
+    Count both so the warm-frame-cache guarantee still exercises the expensive
+    per-card shape builds, not just the leftover rounded bits."""
     calls = {"n": 0}
-    orig = histmod.rounded_rect_surface
+    orig_rounded = histmod.rounded_rect_surface
+    orig_cut = histmod.cut_rect_surface
 
-    def wrapped(*args, **kwargs):
-        calls["n"] += 1
-        return orig(*args, **kwargs)
+    def wrap(orig):
+        def wrapped(*args, **kwargs):
+            calls["n"] += 1
+            return orig(*args, **kwargs)
+        return wrapped
 
-    monkeypatch.setattr(histmod, "rounded_rect_surface", wrapped)
+    monkeypatch.setattr(histmod, "rounded_rect_surface", wrap(orig_rounded))
+    monkeypatch.setattr(histmod, "cut_rect_surface", wrap(orig_cut))
     return calls
 
 
@@ -317,7 +325,7 @@ def test_visible_cards_not_re_supersampled_each_frame(tmp_path, monkeypatch):
     for i in range(40):
         _write_pgn(tmp_path, f"local-20260101-{100000 + i:06d}.pgn", white=f"p{i}")
     view = _view(tmp_path)
-    calls = _count_rounded_rects(monkeypatch)
+    calls = _count_shape_calls(monkeypatch)
     view.draw()
     cold = calls["n"]
     calls["n"] = 0
@@ -332,7 +340,7 @@ def test_warm_frame_cost_independent_of_game_count(tmp_path_factory, monkeypatch
             _write_pgn(directory, f"local-20260101-{100000 + i:06d}.pgn", white=f"p{i}")
         view = _view(directory)
         view.draw()
-        calls = _count_rounded_rects(monkeypatch)
+        calls = _count_shape_calls(monkeypatch)
         view.draw()
         monkeypatch.undo()
         return calls["n"]
@@ -372,6 +380,30 @@ def test_expand_grows_content_height_on_next_frame(tmp_path):
     view.expanded_match_id = multi.match_id
     view.draw()
     assert view._content_h > base
+
+
+def test_result_badge_uses_cut_corner_notch(tmp_path):
+    """The v2.9.0 restyle swapped the badge's rounded_rect_surface for a
+    cut-corner (tr/bl) polygon — the top-right notch must read fully
+    transparent while the untouched top-left stays opaque."""
+    view = _view(tmp_path)
+    surf = pg.Surface((60, 60), pg.SRCALPHA)
+    view.window = surf
+    rect = pg.Rect(4, 4, 44, 44)
+    view._draw_badge(rect, "win", view._badge_font, CARD_BADGE_CUT)
+    assert surf.get_at((rect.right - 2, rect.y + 1))[3] == 0
+    assert surf.get_at((rect.x + 10, rect.y + 14))[3] != 0
+
+
+def test_filter_chip_uses_cut_corner_notch(tmp_path):
+    """Filter chips also moved from rounded to cut-corner (tr/bl)."""
+    view = _view(tmp_path)
+    surf = pg.Surface((900, 60), pg.SRCALPHA)
+    view.window = surf
+    view._draw_filters(880, 30)
+    rect = view._filter_rects["all"]
+    assert surf.get_at((rect.right - 2, rect.y + 1))[3] == 0
+    assert surf.get_at((rect.x + 2, rect.y + 2))[3] == 255
 
 
 def test_expanded_block_paints_surface_behind_detail_rows(tmp_path):
