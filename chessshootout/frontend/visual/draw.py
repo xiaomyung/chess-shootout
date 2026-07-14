@@ -161,7 +161,7 @@ def cut_rect_surface(size, cut, fill, border=None, border_width=1, corners=("tr"
             bi = max(int(round(border_width * k)), 1)
             pg.draw.polygon(surf, pg.Color(border),
                             _cut_rect_points(0, 0, w, h, outer_cut, corners))
-            inner_cut = max(outer_cut - int(round(bi * (2.0 - 1.41421356))), 0)
+            inner_cut = max(outer_cut - int(round(bi * (2.0 - 1.41421356 * 1.25))), 0)
             pg.draw.polygon(surf, pg.Color(fill),
                             _cut_rect_points(bi, bi, w - bi, h - bi, inner_cut, corners))
         return supersample(size, render)

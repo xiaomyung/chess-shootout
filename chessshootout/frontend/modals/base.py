@@ -85,10 +85,12 @@ class BaseModal:
                 c0, c1 = pg.Color(start), pg.Color(end)
                 for x in range(w):
                     surf.fill(c0.lerp(c1, x / max(w - 1, 1)), pg.Rect(x, 0, 1, h))
+                diag = railk * 1.41421356
                 mask = pg.Surface((w, h), pg.SRCALPHA)
                 pg.draw.polygon(mask, (255, 255, 255, 255),
-                                [(0, 0), (w - cutk, 0), (w, cutk), (w, cutk + railk),
-                                 (w - cutk, railk), (0, railk)])
+                                [(0, 0), (w - cutk, 0), (w, cutk), (w, cutk + diag),
+                                 (w - cutk + railk * (1.0 - 1.41421356), railk),
+                                 (0, railk)])
                 surf.blit(mask, (0, 0), special_flags=pg.BLEND_RGBA_MULT)
-            return supersample((width, MODAL_CUT + MODAL_RAIL), render)
+            return supersample((width, MODAL_CUT + MODAL_RAIL * 2), render)
         return memoized_surface(_RAIL_CACHE, (intent, width, str(start), str(end)), build)
