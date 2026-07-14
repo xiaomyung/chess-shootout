@@ -12,7 +12,7 @@ from chessshootout.frontend.visual.draw import chevron_surface, cut_rect_surface
 from chessshootout.frontend.visual.emoji import emoji_surface
 from chessshootout.frontend.visual.fonts import get_font, get_mono_font
 from chessshootout.frontend.visual.scroll_view import ScrollHost, ScrollView
-from chessshootout.frontend.visual.widgets import draw_avatar, wrap_words
+from chessshootout.frontend.visual.widgets import avatar_palette, draw_avatar, wrap_words
 from chessshootout.online.news import format_news_date
 
 
@@ -202,8 +202,7 @@ class CardStack(ScrollHost):
         pad = self._s(PAD_X, 10)
         av_size = self._s(AVATAR_SIZE, 30)
         av_rect = pg.Rect(rect.x + pad, rect.centery - av_size // 2, av_size, av_size)
-        draw_avatar(window, av_rect, env.get_nickname(), self._avatar_font,
-                    Colors.accent, Colors.on_accent)
+        draw_avatar(window, av_rect, env.get_nickname(), self._avatar_font, *avatar_palette())
         x = av_rect.right + self._s(12, 8)
         nickname = env.get_nickname() or "Set nickname"
         color = Colors.text if env.get_nickname() else Colors.text_muted

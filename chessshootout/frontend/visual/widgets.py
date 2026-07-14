@@ -365,10 +365,8 @@ def draw_scroll_thumb(window, track_rect, total, visible, offset_fraction, last_
                  border_radius=SCROLL_THUMB_WIDTH // 2)
 
 
-def avatar_palette(white):
-    if white:
-        return (pg.Color(Colors.accent), pg.Color(Colors.on_accent))
-    return (pg.Color(Colors.avatar_slate), pg.Color(Colors.avatar_letter_dark))
+def avatar_palette():
+    return (pg.Color(Colors.accent), pg.Color(Colors.on_accent))
 
 
 class AvatarBadge:

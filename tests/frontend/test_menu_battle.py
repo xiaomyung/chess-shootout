@@ -401,6 +401,20 @@ def test_set_rect_shrink_clamps_stale_entities_back_into_the_field():
     assert _in_field(b, b.pawns[0]), "a stranded pawn is clamped into the shrunk field"
 
 
+def test_set_rect_evicts_stale_entities_from_avoid_rects_on_the_same_call():
+    """r4 follow-up: set_rect() must recompute obstacles from the current avoid_rects
+    before it reconciles entities, in the same call -- not wait for the caller's next
+    set_avoid_rects(). Otherwise entities can sit parked inside a rail zone for a frame
+    after a resize."""
+    b = _battle(w=1600, h=1000)
+    card = b.avoid_rects[0]
+    b.queen["x"], b.queen["y"] = card.center
+    b.pawns[0]["x"], b.pawns[0]["y"] = card.center
+    b.set_rect(pg.Rect(0, 0, 700, 500))
+    for ent in (b.queen, b.pawns[0]):
+        assert not b._point_in_any(b.obstacles, ent["x"], ent["y"])
+
+
 def test_set_rect_shrink_culls_out_of_bounds_projectiles_and_drops():
     b = _battle(w=1600, h=1000)
     b.projectiles = [{"x": 1500, "y": 950, "vx": 0.0, "vy": 0.0}]

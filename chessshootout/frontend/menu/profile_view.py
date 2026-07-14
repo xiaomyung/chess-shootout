@@ -80,8 +80,8 @@ class ProfileView(MenuView):
         rect = self._rect
         title_top = rect.y + int(rect.height * TITLE_TOP_FRAC)
         self._title_top = title_top
-        title_font = get_display_font(self._s(28, 20))
-        top = title_top + title_font.get_height() + self._s(20, 12)
+        self._title_font = get_display_font(self._s(28, 20))
+        top = title_top + self._title_font.get_height() + self._s(20, 12)
         panel_h = self._s(ROW_H, 40) * 2
         panel = pg.Rect(rect.x, top, rect.width, panel_h)
         av_size = self._s(AVATAR_SIZE, 44)
@@ -107,12 +107,17 @@ class ProfileView(MenuView):
 
         self._uuid_y = self._stat_rects[0].bottom + self._s(28, 18)
 
+        self._avatar_letter_font = get_font(self._s(22, 16), family=DISPLAY)
+        self._country_font = get_font(self._s(12, 10), bold=True)
+        self._stat_num_font = get_mono_font(self._s(22, 16), bold=True)
+        self._stat_label_font = get_font(self._s(10, 8), bold=True)
+        self._uuid_font = get_mono_font(self._s(11, 9))
+
     def draw(self, window, menu_layout):
         rect = self._rect
         if rect.width <= 0:
             return
-        title_font = get_display_font(self._s(28, 20))
-        title = render_text(title_font, "PROFILE", Colors.text)
+        title = render_text(self._title_font, "PROFILE", Colors.text)
         window.blit(title, (rect.x, self._title_top))
         self._draw_identity_panel(window)
         self._draw_stats(window)
@@ -123,8 +128,7 @@ class ProfileView(MenuView):
                                      Colors.surface, border=Colors.border, border_width=1,
                                      corners=("tr", "bl")), self._identity_panel.topleft)
         self._avatar.draw(window, self._avatar_rect, env.get_nickname() or "?",
-                          get_font(self._s(22, 16), family=DISPLAY),
-                          avatar_palette(True))
+                          self._avatar_letter_font, avatar_palette())
         self._nickname_input.draw()
         self._draw_country_row(window)
 
@@ -142,9 +146,8 @@ class ProfileView(MenuView):
             window.blit(flag, (x, rect.centery - flag.get_height() // 2))
             x += flag.get_width() + self._s(8, 5)
         label = countries.name_for(code) or "Set your country"
-        font = get_font(self._s(12, 10), bold=True)
         color = Colors.text if code else Colors.text_muted
-        label_surf = render_text(font, label, color)
+        label_surf = render_text(self._country_font, label, color)
         window.blit(label_surf, (x, rect.centery - label_surf.get_height() // 2))
 
     def _flag_surface(self, code):
@@ -160,22 +163,19 @@ class ProfileView(MenuView):
     def _draw_stats(self, window):
         cards = ((self._wins, "WINS", Colors.win), (self._losses, "LOSSES", Colors.loss),
                  (self._draws, "DRAWS", Colors.text), (self._kos, "KOS", Colors.amber_hi))
-        num_font = get_mono_font(self._s(22, 16), bold=True)
-        label_font = get_font(self._s(10, 8), bold=True)
         for rect, (value, label, color) in zip(self._stat_rects, cards):
             window.blit(cut_rect_surface(rect.size, self._s(7, 5), Colors.surface,
                                          border=Colors.border, border_width=1,
                                          corners=("tr", "bl")), rect.topleft)
-            num = render_text(num_font, str(value), color)
+            num = render_text(self._stat_num_font, str(value), color)
             window.blit(num, (rect.x + self._s(12, 8), rect.y + self._s(10, 6)))
-            lab = render_text(label_font, label, Colors.text_muted)
+            lab = render_text(self._stat_label_font, label, Colors.text_muted)
             window.blit(lab, (rect.x + self._s(12, 8),
                               rect.y + self._s(10, 6) + num.get_height() + self._s(3, 2)))
 
     def _draw_uuid(self, window):
-        font = get_mono_font(self._s(11, 9))
         text = f"CLIENT ID  {env.get_or_create_client_uuid()}"
-        surf = render_text(font, text, Colors.text_muted)
+        surf = render_text(self._uuid_font, text, Colors.text_muted)
         window.blit(surf, (self._rect.x, self._uuid_y))
 
     def handle_click(self, pos):

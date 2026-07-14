@@ -43,10 +43,12 @@ def test_escape_never_closes_window_in_game():
 
 
 def test_menu_card_escape_opens_quit_prompt():
+    """The menu no longer hides its card behind the confirm modal -- MenuScreen.draw()
+    paints under every blocking modal now, so the card stays visible/live the whole time."""
     app = _app()
     app.input_router._handle_escape()
     assert app.confirm_modal.is_visible() is True
-    assert app.menu.card_visible() is False
+    assert app.menu.card_visible() is True
     assert app.running is True
 
 

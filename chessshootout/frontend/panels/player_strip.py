@@ -175,8 +175,7 @@ class PlayerStrip:
         self._draw_flag_tooltip()
 
     def _draw_avatar(self, rect):
-        self._avatar.draw(self.window, rect, self.name, self.letter_font,
-                          avatar_palette(is_white(self.player_color) and not self.is_bot))
+        self._avatar.draw(self.window, rect, self.name, self.letter_font, avatar_palette())
 
     def _flag_surface(self, height):
         char = flag_emoji(self.country)

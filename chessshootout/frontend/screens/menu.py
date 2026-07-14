@@ -105,8 +105,6 @@ class MenuScreen(Screen):
 
     def draw(self):
         app = self.app
-        if app._blocking_modal_visible():
-            return
         now = pg.time.get_ticks()
         self.rail.draw(app.window, now)
         self.views[self._active_view].draw(app.window, self._menu_layout)
@@ -167,9 +165,8 @@ class MenuScreen(Screen):
         if self._active_view != "play":
             self.goto_view("play")
             return True
-        self.hide_card()
         self.app.confirm_modal.show(
-            "Leaving so soon?", on_yes=self._quit_app, on_no=self._cancel_quit,
+            "Leaving so soon?", on_yes=self._quit_app,
             yes_label="See ya!", no_label="Cancel")
         return True
 
@@ -191,9 +188,6 @@ class MenuScreen(Screen):
 
     def _quit_app(self):
         self.app.running = False
-
-    def _cancel_quit(self):
-        self.show_card()
 
     def modals(self):
         return [ModalSpec(self.fen_input_modal)]

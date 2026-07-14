@@ -175,19 +175,25 @@ def test_white_avatar_is_flat_accent(strip):
     assert top == bottom, "flat avatar has no gradient (top matches bottom)"
 
 
-def test_black_avatar_is_cool_slate(strip):
+def test_black_avatar_matches_white_avatar(strip):
+    strip.set_state("Alice", 60.0, False, player_color=PieceColor.WHITE)
+    _draw(strip)
+    white_top, _ = _avatar_pixels(strip)
     strip.set_state("Bob", 60.0, False, player_color=PieceColor.BLACK)
     _draw(strip)
-    top, bottom = _avatar_pixels(strip)
-    assert top.b >= top.r, "black avatar should be cool slate, not warm"
-    assert top == bottom, "flat avatar has no gradient (top matches bottom)"
+    black_top, black_bottom = _avatar_pixels(strip)
+    assert black_top == white_top, "one shared avatar palette regardless of side"
+    assert black_top == black_bottom, "flat avatar has no gradient (top matches bottom)"
 
 
-def test_bot_avatar_uses_slate_even_when_white(strip):
+def test_bot_avatar_matches_human_avatar(strip):
+    strip.set_state("Alice", 60.0, False, player_color=PieceColor.WHITE)
+    _draw(strip)
+    human_top, _ = _avatar_pixels(strip)
     strip.set_state("Bot", 60.0, False, player_color=PieceColor.WHITE, is_bot=True)
     _draw(strip)
-    top, _ = _avatar_pixels(strip)
-    assert top.b >= top.r, "bot avatar is slate regardless of board color"
+    bot_top, _ = _avatar_pixels(strip)
+    assert bot_top == human_top, "bot avatar uses the same shared palette as a human's"
 
 
 def test_rating_pill_drawn(strip):
@@ -380,18 +386,21 @@ def test_tooltip_resets_alpha_when_country_absent(strip):
 
 
 def test_active_black_strip_shows_accent_inactive_does_not(strip):
-    """A slate (black) strip has no accent at rest, so the accent border is a
-    clean discriminator for the active 'whose turn' cue."""
+    """The avatar fill is one shared warm-accent palette regardless of side, so
+    the discriminator for the active 'whose turn' cue is the border stroke, not
+    the avatar. Sample a band at the bottom edge, clear of the avatar/clock
+    content, to isolate the border stroke color."""
+    border_band = pg.Rect(strip.rect.x, strip.rect.bottom - 3, strip.rect.width, 2)
     strip.set_state("Bob", 60.0, True, player_color=PieceColor.BLACK,
                     clock_initial_seconds=300.0, rating="1500")
     _draw(strip)
-    assert _has_color(strip.window, strip.rect.inflate(20, 20), Colors.accent), \
-        "active strip should show the accent cue"
+    assert _has_color(strip.window, border_band, Colors.accent), \
+        "active strip border should show the accent cue"
     strip.set_state("Bob", 60.0, False, player_color=PieceColor.BLACK,
                     clock_initial_seconds=300.0, rating="1500")
     _draw(strip)
-    assert not _has_color(strip.window, strip.rect.inflate(20, 20), Colors.accent), \
-        "inactive slate strip should have no accent"
+    assert not _has_color(strip.window, border_band, Colors.accent), \
+        "inactive strip border should not show accent"
 
 
 def test_flash_alpha_decays_to_zero(strip):

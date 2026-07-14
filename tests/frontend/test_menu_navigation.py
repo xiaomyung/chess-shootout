@@ -6,9 +6,12 @@ the active view's panels."""
 
 import logging
 
+import pygame as pg
+
 from tests.conftest import pygame_display
 from chessshootout.backend.backend import Backend
 from chessshootout.domain.pgn.generate import generate_pgn
+from chessshootout.frontend.visual.colors import Colors
 from tests.helpers import make_app
 
 
@@ -60,6 +63,7 @@ def test_play_view_escape_opens_the_quit_confirm():
     assert app.menu._active_view == "play"
     assert app.menu.escape() is True
     assert app.confirm_modal.is_visible() is True
+    assert app.menu.card_visible() is True
 
 
 def test_menu_remembers_its_active_view_across_a_screen_roundtrip():
@@ -106,6 +110,25 @@ def test_battle_keeps_running_behind_a_menu_modal(monkeypatch):
     monkeypatch.setattr(app.menu_battle, "update", lambda *a, **k: calls.append("u"))
     app.draw_frame()
     assert "u" in calls
+
+
+def test_menu_paints_the_rail_and_panel_under_the_confirm_modal():
+    app = make_app()
+    app.menu.escape()
+    assert app.confirm_modal.is_visible() is True
+    app.draw_frame()
+    panel = app.menu._menu_layout.right_rail_full_rect
+    point = (panel.right - 4, panel.centery)
+    assert app.window.get_at(point)[:3] == pg.Color(Colors.surface)[:3]
+
+
+def test_avoid_rects_still_cover_the_rails_while_the_confirm_modal_is_up():
+    app = make_app()
+    app.menu.escape()
+    assert app.confirm_modal.is_visible() is True
+    app.draw_frame()
+    assert app.menu._menu_layout.rail_rect in app.menu_battle.avoid_rects
+    assert app.menu._menu_layout.right_rail_full_rect in app.menu_battle.avoid_rects
 
 
 def test_battle_avoids_the_rail_and_the_active_views_panels():

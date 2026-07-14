@@ -3,7 +3,6 @@ import pygame as pg
 from chessshootout.backend.pieces import PieceColor
 from chessshootout.frontend.visual.colors import Colors
 from chessshootout.frontend.visual.fonts import get_font, DISPLAY
-from chessshootout.frontend.panels.player_strip import is_white
 from chessshootout.frontend.visual.widgets import AvatarBadge, avatar_palette
 
 
@@ -60,8 +59,7 @@ class ReviewStrip:
         pg.draw.rect(self.window, Colors.border, self.rect, width=1, border_radius=radius)
 
     def _draw_avatar(self, rect):
-        self._avatar.draw(self.window, rect, self.name, self.letter_font,
-                          avatar_palette(is_white(self.player_color)))
+        self._avatar.draw(self.window, rect, self.name, self.letter_font, avatar_palette())
 
     def _draw_name_and_captures(self, x, ih):
         top_y = self.rect.y + max(int(self.rect.height * 0.18), 4)
