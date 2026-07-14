@@ -14,8 +14,8 @@ from tests.conftest import pygame_display
 from chessshootout import paths
 from chessshootout.infra import env
 from chessshootout.frontend.menu.options_rows import (
-    OptionsBody, PathRow, TextRow, ToggleRow, SegmentedRow, NotchRow, SwatchRow,
-    NOTCH_COUNT, NOTCH_CELL_W, NOTCH_GAP, _Fonts,
+    OptionsBody, PathRow, TextRow, ToggleRow, SegmentedRow, NotchRow,
+    NOTCH_COUNT, NOTCH_CELL_W, NOTCH_GAP, _Fonts, _elide_left, _fitting_ellipsis,
 )
 from chessshootout.frontend.visual.colors import Colors
 from chessshootout.frontend.visual.fonts import get_font, get_mono_font
@@ -145,16 +145,33 @@ def test_notch_row_fill_paints_accent_cells_up_to_value():
     assert empty != tuple(pg.Color(Colors.accent))[:3]
 
 
-def test_swatch_row_selects_unlocked_only():
-    chosen = {"v": "dark"}
-    swatches = [("dark", "#7a818b", "#2f343b", False), ("wood", "#d8b483", "#8a5a3c", True)]
-    row = SwatchRow("Theme", "soon", swatches, lambda: chosen["v"],
-                    lambda k: chosen.update(v=k))
-    _draw_row(row)
-    assert row.handle_click(row._rects["wood"][0].center) is False
-    assert chosen["v"] == "dark"
-    assert row.handle_click(row._rects["dark"][0].center) is True
-    assert chosen["v"] == "dark"
+# SwatchRow (the board-theme picker) was retired in v2.9.0: theme/customization
+# moves to the Armory battle pass, so it left the settings UI entirely (CHESS_THEME
+# env plumbing stays — the engine still reads it). The two swatch draw/click tests
+# were removed with the widget; the Display section's Launch mode row replaces it.
+
+
+def test_left_elide_prepends_ellipsis_and_preserves_the_exact_tail():
+    """A path too wide for its field is truncated from the LEFT with a leading
+    ellipsis; the visible tail is an exact suffix of the original and the whole
+    thing fits the budget. A short path is returned untouched."""
+    font = get_mono_font(13)
+    long_path = "/home/xiao_myung/Documents/code/py/chess-shootout"
+    budget = 150
+    out = _elide_left(font, long_path, budget)
+    ell = _fitting_ellipsis(font)
+    assert out.startswith(ell)
+    assert out != long_path
+    tail = out[len(ell):]
+    assert long_path.endswith(tail) and tail != ""
+    assert font.size(out)[0] <= budget
+    assert _elide_left(font, "/tmp/x", 400) == "/tmp/x"
+
+
+def test_fitting_ellipsis_prefers_the_single_glyph_when_the_font_has_it():
+    """The bundled mono font carries U+2026; the helper uses it. (If a font lacked
+    it — some miss glyphs like the arrow — the helper falls back to three dots.)"""
+    assert _fitting_ellipsis(get_mono_font(13)) == "…"
 
 
 def _path_row(getter=lambda: "/tmp/x", on_change=lambda: None, on_reset=lambda: None):
@@ -226,8 +243,9 @@ def test_body_scroll_clamps():
 def test_enter_builds_six_sections_dropping_profile(app, view):
     app.menu.goto_view("options")
     labels = [label for label, _ in view.body.sections]
-    assert labels == ["Audio", "Appearance", "Focus mode", "Game", "Online", "Performance"]
+    assert labels == ["Audio", "Display", "Focus mode", "Game", "Online", "Performance"]
     assert "Profile" not in labels
+    assert "Appearance" not in labels
 
 
 def test_section_card_paints_surface_fill_and_chamfers_top_right(app):
@@ -274,24 +292,18 @@ def test_focus_chips_hit_test_selects(app):
     assert chosen["v"] == "strips"
 
 
-def test_swatch_labels_render_and_locked_swatch_is_dimmed(app):
-    """Swatches carry a mono label underneath; a locked swatch is dimmed and click
-    on it does nothing (the toast path is left to the app wiring)."""
-    chosen = {"v": "dark"}
-    swatches = [("dark", "#7a818b", "#2f343b", False), ("wood", "#d8b483", "#8a5a3c", True)]
-    row = SwatchRow("Board theme", "soon", swatches, lambda: chosen["v"],
-                    lambda k: chosen.update(v=k))
-    win = pg.display.get_surface()
-    win.fill((0, 0, 0))
-    row.draw(win, pg.Rect(40, 40, 460, 120), _fonts())
-    dark_rect = row._rects["dark"][0]
-    label_band = pg.Rect(dark_rect.x, dark_rect.bottom, dark_rect.width, 20)
-    painted = any(win.get_at((x, y))[:3] != (0, 0, 0)
-                  for x in range(label_band.x, label_band.right)
-                  for y in range(label_band.y, min(label_band.bottom, win.get_height())))
-    assert painted, "the DARK label renders under its swatch"
-    assert row.handle_click(row._rects["wood"][0].center) is False
-    assert chosen["v"] == "dark"
+def test_launch_mode_row_lives_in_display_and_writes_the_env(app, monkeypatch):
+    """The Display section's Launch mode chips write CHESS_LAUNCH_MODE straight
+    through env.set_launch_mode; it applies on next launch, not live."""
+    monkeypatch.delenv("CHESS_LAUNCH_MODE", raising=False)
+    app.menu.goto_view("options")
+    rows = dict(app.menu.views["options"].body.sections)["Display"]
+    launch_row = next(r for r in rows if r.title == "Launch mode")
+    _draw_row(launch_row, pg.Rect(40, 40, 520, 60))
+    assert launch_row.handle_click(launch_row._rects["fullscreen"].center) is True
+    assert env.get_launch_mode() == "fullscreen"
+    assert launch_row.handle_click(launch_row._rects["windowed"].center) is True
+    assert env.get_launch_mode() == "windowed"
 
 
 def test_sections_paint_nonblank_pixels(app):

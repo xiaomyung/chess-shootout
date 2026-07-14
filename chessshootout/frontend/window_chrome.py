@@ -219,6 +219,7 @@ class WindowChrome:
             ctypes.c_void_p, ctypes.c_int, ctypes.c_int
         ]
         self._sdl.SDL_MinimizeWindow.argtypes = [ctypes.c_void_p]
+        self._sdl.SDL_MaximizeWindow.argtypes = [ctypes.c_void_p]
         self._sdl.SDL_RaiseWindow.argtypes = [ctypes.c_void_p]
         self._sdl.SDL_SetWindowFullscreen.argtypes = [ctypes.c_void_p, ctypes.c_uint32]
         self._sdl.SDL_SetWindowFullscreen.restype = ctypes.c_int
@@ -438,6 +439,16 @@ class WindowChrome:
                 self._sdl.SDL_MinimizeWindow(self._win_ptr)
             except Exception:
                 log.warning("minimize failed", exc_info=True)
+
+    def maximize(self):
+        if self._win_ptr is None:
+            return False
+        try:
+            self._sdl.SDL_MaximizeWindow(self._win_ptr)
+        except Exception:
+            log.warning("maximize failed", exc_info=True)
+            return False
+        return True
 
     def apply_fullscreen(self, enable):
         if self._win_ptr is None:

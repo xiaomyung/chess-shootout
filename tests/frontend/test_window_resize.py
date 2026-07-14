@@ -7,6 +7,7 @@ import pygame as pg
 import pytest
 
 from tests.conftest import pygame_display
+from chessshootout.infra import env
 from chessshootout.frontend.frontend import Frontend, MIN_WINDOW_WIDTH, MIN_WINDOW_HEIGHT
 
 
@@ -103,3 +104,48 @@ def test_sync_clamps_reported_size_to_minimum(monkeypatch):
     monkeypatch.setattr(pg.display, "get_window_size", lambda: (200, 150))
     app._sync_window_surface()
     assert app.window.get_size() == (MIN_WINDOW_WIDTH, MIN_WINDOW_HEIGHT)
+
+
+@pytest.mark.parametrize(
+    "mode, expected",
+    [
+        pytest.param("fullscreen", ["fullscreen"], id="fullscreen_reuses_f11_toggle"),
+        pytest.param("maximized", ["maximize"], id="maximized_calls_maximizer"),
+        pytest.param("windowed", [], id="windowed_touches_neither"),
+    ],
+)
+def test_boot_launch_mode_dispatch(monkeypatch, mode, expected):
+    """CHESS_LAUNCH_MODE drives the one-shot boot dispatch: fullscreen goes through
+    the same chrome.toggle_fullscreen path F11 uses (so state stays consistent),
+    maximized asks the maximizer, windowed does nothing."""
+    app = Frontend(1000, 800)
+    calls = []
+    monkeypatch.setattr(app.chrome, "toggle_fullscreen", lambda: calls.append("fullscreen"))
+    monkeypatch.setattr(app, "_maximize_window", lambda: calls.append("maximize"))
+    monkeypatch.setattr(env, "get_launch_mode", lambda: mode)
+    app._apply_launch_mode()
+    assert calls == expected
+
+
+def test_maximize_window_falls_back_to_desktop_size(monkeypatch):
+    """Maximize goes through chrome's ctypes SDL channel (a second
+    Window.from_display_module wrapper corrupted the SDL window and
+    segfaulted on drag-unmaximize). When chrome reports failure, the
+    maximizer falls back to re-set_mode at the largest desktop size."""
+    app = Frontend(1000, 800)
+    monkeypatch.setattr(app.chrome, "maximize", lambda: False)
+    monkeypatch.setattr(pg.display, "get_desktop_sizes", lambda: [(2560, 1440)])
+    app._maximize_window()
+    assert app.window.get_size() == (2560, 1440)
+    assert (app.window_width, app.window_height) == (2560, 1440)
+
+
+def test_maximize_window_uses_chrome_sdl_channel(monkeypatch):
+    """Success path: chrome.maximize() is the ONLY maximize mechanism —
+    no pygame._sdl2 Window wrapper may be created for it."""
+    app = Frontend(1000, 800)
+    calls = []
+    monkeypatch.setattr(app.chrome, "maximize", lambda: calls.append("max") or True)
+    app._maximize_window()
+    assert calls == ["max"]
+    assert app.window.get_size() == (1000, 800)

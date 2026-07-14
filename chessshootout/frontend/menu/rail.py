@@ -33,6 +33,8 @@ ICON_X = 56
 ICON_SIDE = 24
 LABEL_X = 84
 LABEL_FONT_SIZE = 15
+FOOTER_FONT_SIZE = 13
+FOOTER_FONT_FLOOR = 11
 RETICLE_SLIDE_MS = 260
 RETICLE_PULSE_MS = 900
 RETICLE_SIZE = 28
@@ -51,7 +53,7 @@ class MenuRail:
         self._row_rects = {}
         self._reticle_tween = None
         self._label_font = get_font(13, bold=True)
-        self._footer_font = get_mono_font(10)
+        self._footer_font = get_mono_font(FOOTER_FONT_FLOOR)
         self._footer_prefix = ""
         self._footer_prefix_surf = None
         self._footer_prefix_pos = (0, 0)
@@ -64,7 +66,7 @@ class MenuRail:
         self.rect = pg.Rect(rect)
         self.scale = scale
         self._label_font = get_font(max(int(LABEL_FONT_SIZE * scale), 12), bold=True)
-        self._footer_font = get_mono_font(max(int(11 * scale), 9))
+        self._footer_font = get_mono_font(max(int(FOOTER_FONT_SIZE * scale), FOOTER_FONT_FLOOR))
         pad = max(int(ROW_PAD * scale), 9)
         row_h = max(int(46 * scale), 34)
         gap = max(int(ROW_GAP * scale), 6)
@@ -82,23 +84,15 @@ class MenuRail:
         self._remap_reticle(old_rects)
 
     def _remap_reticle(self, old_rects):
-        target = self._row_rects[self.active].centery if self.active in self._row_rects else None
+        if self.active not in self._row_rects:
+            return
+        target = self._row_rects[self.active].centery
         if self._reticle_tween is None:
-            seed = target if target is not None else self._row_rects[ROWS[0][0]].centery
-            self._reticle_tween = Tween(seed, seed, RETICLE_SLIDE_MS, 0)
+            self._reticle_tween = Tween(target, target, RETICLE_SLIDE_MS, 0)
             return
-        if target is None:
+        if old_rects.get(self.active) == self._row_rects[self.active]:
             return
-        first_key, second_key = ROWS[0][0], ROWS[1][0]
-        if not old_rects or first_key not in old_rects:
-            self._reticle_tween.remap(lambda _y: target)
-            return
-        old_top = old_rects[first_key].centery
-        old_pitch = old_rects[second_key].centery - old_top
-        new_top = self._row_rects[first_key].centery
-        new_pitch = self._row_rects[second_key].centery - new_top
-        factor = new_pitch / old_pitch if old_pitch else 1.0
-        self._reticle_tween.remap(lambda y: new_top + (y - old_top) * factor)
+        self._reticle_tween = Tween(target, target, RETICLE_SLIDE_MS, 0)
 
     def _build_footer(self, footer_h):
         version = paths.get_app_version()

@@ -15,7 +15,7 @@ _ISOLATED_VARS = (
     "CHESS_DEFAULT_TC",
     "CHESS_DEFAULT_INCREMENT", "CHESS_THEME", "CHESS_COUNTRY",
     "CHESS_SHOW_FPS", "CHESS_SHOW_PING", "CHESS_FOCUS_SHOW",
-    "CHESS_NEWS_URL", "CHESS_PROFILE_HINT_SHOWN",
+    "CHESS_NEWS_URL", "CHESS_PROFILE_HINT_SHOWN", "CHESS_LAUNCH_MODE",
 )
 
 
@@ -631,6 +631,22 @@ def test_theme_defaults_dark_and_rejects_unknown():
     assert env.get_theme() == "dark"
     env.set_theme("dark")
     assert env.get_theme() == "dark"
+
+
+def test_launch_mode_defaults_windowed_and_validates():
+    """The window opens where the player left it: windowed (default), maximized,
+    or fullscreen. Anything unrecognised falls back to windowed."""
+    assert env.get_launch_mode() == "windowed"
+    for value in ("windowed", "maximized", "fullscreen"):
+        env.set_launch_mode(value)
+        assert env.get_launch_mode() == value
+    env.set_launch_mode("cinema-mode")
+    assert env.get_launch_mode() == "windowed"
+
+
+def test_launch_mode_reads_a_raw_garbage_env_value_as_default(monkeypatch):
+    monkeypatch.setenv("CHESS_LAUNCH_MODE", "borderless-nonsense")
+    assert env.get_launch_mode() == "windowed"
 
 
 def _throw_denied(*_a, **_k):

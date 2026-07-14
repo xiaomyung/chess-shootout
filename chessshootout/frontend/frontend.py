@@ -125,6 +125,7 @@ class Frontend:
         }
         self.screen = self.screens["menu"]
 
+        self._apply_launch_mode()
         self.game.board.load_assets()
         self.review.board.load_assets()
         self._compute_layout()
@@ -287,19 +288,19 @@ class Frontend:
         need_sorted = env.get_show_frame_stats() or env.get_show_1pct_low()
         ordered = sorted(self._frame_times) if need_sorted and self._frame_times else []
         if env.get_show_fps():
-            parts.append(f"FPS {int(self._current_fps())}")
+            parts.append(f"FPS {int(self._current_fps()):>4}")
         if env.get_show_frame_stats() and ordered:
             avg = sum(ordered) / len(ordered)
-            parts.append(f"AVG {1000.0 / avg:.0f}")
-            parts.append(f"MIN {1000.0 / ordered[-1]:.0f}")
+            parts.append(f"AVG {1000.0 / avg:>4.0f}")
+            parts.append(f"MIN {1000.0 / ordered[-1]:>4.0f}")
         if env.get_show_1pct_low() and len(ordered) >= PERF_1PCT_MIN_SAMPLES:
             p99 = ordered[int(len(ordered) * PERF_1PCT_PERCENTILE) - 1]
-            parts.append(f"1%LOW {1000.0 / p99:.0f}")
+            parts.append(f"1%LOW {1000.0 / p99:>4.0f}")
         if env.get_show_frametime():
-            parts.append(f"FRAME {self._last_work_ms:.1f}ms")
+            parts.append(f"FRAME {self._last_work_ms:>5.1f}ms")
         if env.get_show_ping():
             ping = self.coordinator.ping_ms()
-            parts.append(f"PING {ping}ms" if ping is not None else "PING —")
+            parts.append(f"PING {ping:>4}ms" if ping is not None else f"PING {'—':>6}")
         return parts
 
     def _present(self, had_events):
@@ -388,6 +389,23 @@ class Frontend:
             return self.game.board.rect
         return pg.Rect(0, WindowChrome.HEIGHT, self.window_width,
                        self.window_height - WindowChrome.HEIGHT)
+
+    def _apply_launch_mode(self):
+        mode = env.get_launch_mode()
+        if mode == "fullscreen":
+            self.chrome.toggle_fullscreen()
+        elif mode == "maximized":
+            self._maximize_window()
+
+    def _maximize_window(self):
+        if not self.chrome.maximize():
+            sizes = pg.display.get_desktop_sizes()
+            if not sizes:
+                return
+            w = max(sizes[0][0], MIN_WINDOW_WIDTH)
+            h = max(sizes[0][1], MIN_WINDOW_HEIGHT)
+            self._recreate_window_surface(w, h)
+            self.window_width, self.window_height = self.window.get_size()
 
     def _apply_fullscreen(self, enable):
         if enable and not self.chrome.is_fullscreen():

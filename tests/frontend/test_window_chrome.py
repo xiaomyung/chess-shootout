@@ -179,7 +179,8 @@ class _FakeSDL:
     def __init__(self, win_ptr_ret):
         self.SDL_GetWindowFromID = _FakeFn(win_ptr_ret)
         for name in ("SDL_SetWindowHitTest", "SDL_SetWindowMinimumSize",
-                     "SDL_MinimizeWindow", "SDL_RaiseWindow", "SDL_SetWindowFullscreen"):
+                     "SDL_MinimizeWindow", "SDL_MaximizeWindow", "SDL_RaiseWindow",
+                     "SDL_SetWindowFullscreen"):
             setattr(self, name, _FakeFn(0))
 
 

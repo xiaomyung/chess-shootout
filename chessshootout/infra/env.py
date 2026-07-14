@@ -31,6 +31,8 @@ TIME_CONTROL_VALUES = ("1", "3", "5", "10", "15", "30", "∞")
 INCREMENT_VALUES = ("0", "2", "5", "10", "15")
 _FOCUS_SHOW_VALUES = ("nothing", "line", "strips")
 _DEFAULT_FOCUS_SHOW = "line"
+_LAUNCH_MODE_VALUES = ("windowed", "maximized", "fullscreen")
+_DEFAULT_LAUNCH_MODE = "windowed"
 
 _ENV_PATH = paths.get_config_dir() / ".env"
 
@@ -323,6 +325,20 @@ def set_focus_show(value):
         value = _DEFAULT_FOCUS_SHOW
     os.environ["CHESS_FOCUS_SHOW"] = value
     _persist("CHESS_FOCUS_SHOW", value)
+
+
+def get_launch_mode():
+    value = os.environ.get("CHESS_LAUNCH_MODE")
+    if value in _LAUNCH_MODE_VALUES:
+        return value
+    return _DEFAULT_LAUNCH_MODE
+
+
+def set_launch_mode(value):
+    if value not in _LAUNCH_MODE_VALUES:
+        value = _DEFAULT_LAUNCH_MODE
+    os.environ["CHESS_LAUNCH_MODE"] = value
+    _persist("CHESS_LAUNCH_MODE", value)
 
 
 def _persist(key, value):

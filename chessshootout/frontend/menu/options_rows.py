@@ -1,11 +1,8 @@
-import math
-
 import pygame as pg
 
-from chessshootout.frontend.visual.cache import render_text, new_cache, memoized_surface
+from chessshootout.frontend.visual.cache import render_text
 from chessshootout.frontend.visual.colors import Colors
-from chessshootout.frontend.visual.draw import (
-    supersample, rounded_rect_surface, cut_rect_surface, infinity_surface)
+from chessshootout.frontend.visual.draw import cut_rect_surface, infinity_surface
 from chessshootout.frontend.visual.fonts import get_mono_font
 from chessshootout.frontend.visual.scroll_view import ScrollHost, ScrollView
 from chessshootout.frontend.visual.text_input import TextInput
@@ -46,12 +43,6 @@ CELL_GAP = 6
 CELL_CUT = 5
 CELL_PAD_X = 10
 
-SWATCH_SIZE = 52
-SWATCH_GAP = 12
-SWATCH_LABEL_GAP = 7
-SWATCH_SEL_RADIUS = 8
-SWATCH_LOCK_ALPHA = 96
-
 FIELD_H = 34
 BTN_PAD_X = 14
 BTN_GAP = 8
@@ -76,40 +67,27 @@ def _blit_clip(window, surf, pos, max_w):
     window.blit(surf, pos)
 
 
-_CHECKER_CACHE = new_cache()
+def _fitting_ellipsis(font):
+    metrics = font.metrics(chr(0x2026))
+    if not metrics or metrics[0] is None or metrics == font.metrics(chr(0xE000)):
+        return "..."
+    return "…"
 
 
-def _checker_surface(size, light, dark):
-    def build():
-        def render(surf, k):
-            w, h = surf.get_size()
-            hw, hh = w // 2, h // 2
-            pg.draw.rect(surf, pg.Color(light), pg.Rect(0, 0, hw, hh))
-            pg.draw.rect(surf, pg.Color(dark), pg.Rect(hw, 0, w - hw, hh))
-            pg.draw.rect(surf, pg.Color(dark), pg.Rect(0, hh, hw, h - hh))
-            pg.draw.rect(surf, pg.Color(light), pg.Rect(hw, hh, w - hw, h - hh))
-            mask = pg.Surface((w, h), pg.SRCALPHA)
-            pg.draw.rect(mask, (255, 255, 255, 255), mask.get_rect(),
-                         border_radius=max(int(8 * k), 1))
-            surf.blit(mask, (0, 0), special_flags=pg.BLEND_RGBA_MULT)
-        return supersample(size, render)
-    return memoized_surface(_CHECKER_CACHE, (tuple(size), str(light), str(dark)), build)
+def _elide_left(font, text, max_w):
+    if font.size(text)[0] <= max_w:
+        return text
+    ell = _fitting_ellipsis(font)
+    budget = max(max_w - font.size(ell)[0], 0)
+    while text and font.size(text)[0] > budget:
+        text = text[1:]
+    return ell + text
 
 
 def _seg_glyph(font, label, color):
     if label == "∞":
         return infinity_surface(int(font.get_height() * 0.82), color)
     return render_text(font, label, color)
-
-
-def _draw_lock(window, cx, cy, h, color):
-    body_w = max(int(h * 0.72), 4)
-    body_h = max(int(h * 0.5), 3)
-    body = pg.Rect(cx - body_w // 2, cy - body_h // 2 + int(h * 0.14), body_w, body_h)
-    pg.draw.rect(window, color, body, border_radius=max(int(h * 0.12), 1))
-    sr = max(int(body_w * 0.3), 2)
-    pg.draw.arc(window, color, pg.Rect(cx - sr, body.top - sr, 2 * sr, 2 * sr),
-                0.25, math.pi - 0.25, max(int(h * 0.12), 2))
 
 
 class _Row:
@@ -308,65 +286,6 @@ class SegmentedRow(_Row):
         return any(r.collidepoint(pos) for r in self._rects.values())
 
 
-class SwatchRow(_Row):
-
-    def __init__(self, title, desc, swatches, getter, setter):
-        super().__init__(title, desc)
-        self.swatches = swatches
-        self.getter = getter
-        self.setter = setter
-        self._rects = {}
-        self._label_font = None
-
-    def _lbl_font(self, fonts):
-        size = max(int(fonts.value.get_height() * 0.82), 9)
-        if self._label_font is None or self._label_font[0] != size:
-            self._label_font = (size, get_mono_font(size, bold=True))
-        return self._label_font[1]
-
-    def _control_h(self, fonts):
-        return SWATCH_SIZE + SWATCH_LABEL_GAP + self._lbl_font(fonts).get_height()
-
-    def _draw_control(self, window, rect, fonts):
-        lf = self._lbl_font(fonts)
-        top = rect.centery - self._control_h(fonts) // 2
-        n = len(self.swatches)
-        x = rect.right - (n * SWATCH_SIZE + (n - 1) * SWATCH_GAP)
-        left = x
-        self._rects = {}
-        for key, light, dark, locked in self.swatches:
-            r = pg.Rect(x, top, SWATCH_SIZE, SWATCH_SIZE)
-            surf = _checker_surface((SWATCH_SIZE, SWATCH_SIZE), light, dark)
-            if locked:
-                surf = surf.copy()
-                surf.set_alpha(SWATCH_LOCK_ALPHA)
-            window.blit(surf, r.topleft)
-            selected = key == self.getter()
-            if selected:
-                window.blit(rounded_rect_surface(r.size, SWATCH_SEL_RADIUS, "#00000000",
-                                                 border=Colors.accent, border_width=2),
-                            r.topleft)
-            if locked:
-                _draw_lock(window, r.centerx, r.centery, max(int(SWATCH_SIZE * 0.26), 10),
-                           Colors.text)
-            lbl = render_text(lf, key.upper(),
-                              Colors.accent_hi if selected else Colors.text_muted)
-            window.blit(lbl, (r.centerx - lbl.get_width() // 2, r.bottom + SWATCH_LABEL_GAP))
-            self._rects[key] = (r, locked)
-            x += SWATCH_SIZE + SWATCH_GAP
-        return left
-
-    def handle_click(self, pos):
-        for key, (r, locked) in self._rects.items():
-            if r.collidepoint(pos) and not locked:
-                self.setter(key)
-                return True
-        return False
-
-    def contains_control(self, pos):
-        return any(r.collidepoint(pos) for r, _ in self._rects.values())
-
-
 class PathRow(_Row):
 
     def __init__(self, label, desc, window, value_getter, on_change, on_reset, suffix=""):
@@ -416,11 +335,13 @@ class PathRow(_Row):
         return self._field_rect.x
 
     def _draw_rest_path(self, window, fonts):
-        path_surf = render_text(fonts.value, self.input.text, Colors.text_muted)
+        fr = self._field_rect
         suffix_surf = render_text(fonts.value, self.suffix, Colors.text_dim) \
             if self.suffix else None
-        total = path_surf.get_width() + (suffix_surf.get_width() if suffix_surf else 0)
-        fr = self._field_rect
+        suffix_w = suffix_surf.get_width() if suffix_surf else 0
+        path_text = _elide_left(fonts.value, self.input.text, max(fr.width - suffix_w, 1))
+        path_surf = render_text(fonts.value, path_text, Colors.text_muted)
+        total = path_surf.get_width() + suffix_w
         prev = window.get_clip()
         window.set_clip(fr.clip(prev) if prev is not None else fr)
         x = fr.right - total

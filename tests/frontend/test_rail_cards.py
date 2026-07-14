@@ -10,9 +10,12 @@ import pygame as pg
 import pytest
 
 from tests.conftest import pygame_display
-from chessshootout.frontend.menu.rail_cards import BODY_ROW_H, FOOTER_H, HEADER_H
+from chessshootout.frontend.menu.rail_cards import (
+    AVATAR_SIZE, BODY_ROW_H, FOOTER_H, HEADER_H, PAD_X,
+)
+from chessshootout.frontend.visual.colors import Colors
 from chessshootout.infra import env
-from tests.helpers import make_app
+from tests.helpers import assert_pixel_color, make_app
 
 
 _pygame_init = pygame_display(1200, 900)
@@ -203,3 +206,40 @@ def test_cards_only_render_on_the_play_view(app, tmp_path):
 def test_right_rail_absent_off_the_play_view(app):
     app.menu.goto_view("history")
     assert app.menu._menu_layout.right_rail_rect.width == 0
+
+
+def _profile_avatar_rect(stack):
+    block = _block_rect(stack, "profile")
+    pad = stack._s(PAD_X, 10)
+    av = stack._s(AVATAR_SIZE, 30)
+    return pg.Rect(block.x + pad, block.centery - av // 2, av, av)
+
+
+def test_profile_avatar_is_a_flat_accent_tile_not_a_gradient(app, stack):
+    """cp3: the right-rail avatar was a blurry vertical gradient blob, off the
+    flat-fill card language. It is now a crisp flat accent tile with a dark bold
+    letter — a flat fill means top and mid sample the SAME colour (a gradient
+    would not), and that colour is the accent."""
+    env.set_nickname("alice")
+    _refresh(app)
+    app.draw_frame()
+    av = _profile_avatar_rect(stack)
+    win = pg.display.get_surface()
+    top = win.get_at((av.x + 3, av.y + av.height // 4))[:3]
+    mid = win.get_at((av.x + 3, av.centery))[:3]
+    assert top == mid, "flat fill: no vertical gradient across the avatar tile"
+    assert_pixel_color(win, av.x + 3, av.centery, Colors.accent, tol=12)
+
+
+def test_profile_avatar_draws_a_dark_letter_on_the_tile(app, stack):
+    env.set_nickname("alice")
+    _refresh(app)
+    app.draw_frame()
+    av = _profile_avatar_rect(stack)
+    win = pg.display.get_surface()
+    dark = tuple(pg.Color(Colors.on_accent))[:3]
+    found = any(
+        max(abs(a - b) for a, b in zip(win.get_at((x, y))[:3], dark)) <= 36
+        for x in range(av.x + av.width // 4, av.right - av.width // 6)
+        for y in range(av.y + av.height // 4, av.bottom - av.height // 4))
+    assert found, "a dark bold letter renders on the flat accent tile"

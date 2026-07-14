@@ -9,9 +9,11 @@ from tests.conftest import pygame_display
 from chessshootout import paths
 from chessshootout.frontend.menu.layout import compute_menu_layout
 from chessshootout.frontend.menu.rail import (
-    CREDIT_URL, ICON_X, LABEL_X, MenuRail, OPTIONS_ROW, RETICLE_INSET, ROWS,
+    CREDIT_URL, FOOTER_FONT_FLOOR, FOOTER_FONT_SIZE, ICON_X, LABEL_X, MenuRail,
+    OPTIONS_ROW, RETICLE_INSET, ROWS,
 )
 from chessshootout.frontend.visual.colors import Colors
+from chessshootout.frontend.visual.fonts import get_mono_font
 from tests.helpers import assert_pixel_color, make_app
 
 
@@ -135,6 +137,57 @@ def test_double_set_active_same_row_is_a_noop():
     y1 = rail.reticle_y(60)
     rail.set_active("history", 60)
     assert rail.reticle_y(60) == y1, "re-selecting the active row must not perturb the slide"
+
+
+def test_reticle_snaps_to_the_active_row_center_on_an_idle_resize():
+    """cp3: on ANY real geometry change the crosshair is placed instantly at the
+    active row's centre in the NEW geometry — no remap-drift, no animation."""
+    rail, _ = _rail()  # active = play, settled
+    big = compute_menu_layout(1440, 1024, 36)
+    rail.set_rect(big.rail_rect, big.scale)
+    play_cy = rail._row_rects["play"].centery
+    assert abs(rail.reticle_y(0) - play_cy) < 1.0
+    assert abs(rail.reticle_y(9999) - play_cy) < 1.0
+
+
+def test_reticle_lands_on_the_target_row_when_resized_mid_slide():
+    """cp3: a resize that interrupts a slide snaps to the (new-geometry) TARGET row
+    centre — never a dangling mid-slide position."""
+    rail, _ = _rail()
+    rail.set_active("history", 0)
+    midway = rail.reticle_y(130)
+    play_cy = rail._row_rects["play"].centery
+    assert play_cy < midway < rail._row_rects["history"].centery
+    big = compute_menu_layout(1440, 1024, 36)
+    rail.set_rect(big.rail_rect, big.scale)
+    history_cy = rail._row_rects["history"].centery
+    assert abs(rail.reticle_y(130) - history_cy) < 1.0
+    assert abs(rail.reticle_y(9999) - history_cy) < 1.0
+
+
+def test_reticle_stays_on_the_active_row_across_a_fullscreen_sized_relayout():
+    """cp3 core repro: a 900x600 -> 2560x1440 relayout (F11 fullscreen) keeps the
+    crosshair pinned to the active row, not floating mid-rail."""
+    surf = pg.display.get_surface()
+    rail = MenuRail(surf, {"open_url": lambda url: None})
+    small = compute_menu_layout(900, 600, 36)
+    rail.set_rect(small.rail_rect, small.scale)
+    rail.set_active("armory", 0)
+    rail.reticle_y(9999)  # let the slide settle at small size
+    big = compute_menu_layout(2560, 1440, 36)
+    rail.set_rect(big.rail_rect, big.scale)
+    armory_cy = rail._row_rects["armory"].centery
+    assert abs(rail.reticle_y(9999) - armory_cy) < 1.0
+
+
+def test_footer_font_is_readable_not_tiny():
+    """cp3: the footer version/credit line was ~10px and unreadable; it now tracks
+    ~13*scale with an 11px floor (the metric is pinned to the FOOTER_FONT_* knobs)."""
+    rail, _ = _rail()
+    expected = get_mono_font(max(int(FOOTER_FONT_SIZE * rail.scale), FOOTER_FONT_FLOOR))
+    assert rail._footer_font.get_height() == expected.get_height()
+    assert rail._footer_font.get_height() >= get_mono_font(FOOTER_FONT_FLOOR).get_height()
+    assert rail._footer_font.get_height() > get_mono_font(10).get_height()
 
 
 def _has_warm_tint(surf, rect):

@@ -2,7 +2,8 @@ import math
 
 import pygame as pg
 
-from chessshootout.frontend.visual.cache import render_text
+from chessshootout.frontend.visual.cache import (
+    memoized_surface, new_size_cache, render_text)
 from chessshootout.frontend.visual.colors import Colors
 from chessshootout.frontend.visual.draw import infinity_surface, supersample
 from chessshootout.frontend.visual.fonts import get_display_font, get_mono_font
@@ -68,6 +69,32 @@ TURRET_DEAD_ALPHA = 90
 READOUT_LABEL_FONT_FRAC = 0.20
 READOUT_VALUE_FONT_FRAC = 0.30
 READOUT_INSET_FRAC = 0.10
+
+DRUM_ANGLE_QUANT_DEG = 0.5
+DRUM_CACHE_CAP = 32
+NEEDLE_ANGLE_QUANT_DEG = 0.5
+NEEDLE_CACHE_CAP = 16
+
+_DRUM_CACHE = new_size_cache()
+_TURRET_DIAL_CACHE = new_size_cache()
+_TURRET_NEEDLE_CACHE = new_size_cache()
+
+
+def _quantize(value, step):
+    return round(value / step) * step
+
+
+def _bounded_set(cache, key, build, cap):
+    cached = cache.get(key)
+    if cached is not None:
+        del cache[key]
+        cache[key] = cached
+        return cached
+    value = build()
+    cache[key] = value
+    if len(cache) > cap:
+        del cache[next(iter(cache))]
+    return value
 
 
 def _pt(cx, cy, radius, deg):
@@ -419,7 +446,11 @@ class TimePicker:
 
     def _draw_drum(self, surface):
         size = self._footprint(self._radius)
-        rotation = self._rotation
+        rotation = _quantize(self._rotation, DRUM_ANGLE_QUANT_DEG)
+        key = (size, rotation, self._min_index)
+
+        def build():
+            return supersample((size, size), render)
 
         def render(surf, k):
             c = surf.get_width() / 2.0
@@ -450,7 +481,7 @@ class TimePicker:
                             [(c, c - r * HAMMER_TIP_FRAC),
                              (c - base_half, base_y), (c + base_half, base_y)])
 
-        dial = supersample((size, size), render)
+        dial = _bounded_set(_DRUM_CACHE, key, build, DRUM_CACHE_CAP)
         top = (int(self._drum_center[0] - size / 2), int(self._drum_center[1] - size / 2))
         surface.blit(dial, top)
         for i in range(CHAMBER_COUNT):
@@ -477,6 +508,14 @@ class TimePicker:
     def _draw_turret_dial(self, surface):
         tr = self._turret_radius
         size = self._footprint(tr)
+        dead = self._turret_dead()
+        key = (size, dead)
+
+        def build():
+            dial = supersample((size, size), render)
+            if dead:
+                dial.set_alpha(TURRET_DEAD_ALPHA)
+            return dial
 
         def render(surf, k):
             c = surf.get_width() / 2.0
@@ -503,10 +542,7 @@ class TimePicker:
             pg.draw.circle(surf, pg.Color(Colors.surface_raised), (c, c), knob_r)
             pg.draw.circle(surf, pg.Color(Colors.dial_border), (c, c), knob_r, lw)
 
-        dial = supersample((size, size), render)
-        if self._turret_dead():
-            dial = dial.copy()
-            dial.set_alpha(TURRET_DEAD_ALPHA)
+        dial = memoized_surface(_TURRET_DIAL_CACHE, key, build)
         cx, cy = self._turret_center
         surface.blit(dial, (cx - size / 2, cy - size / 2))
 
@@ -515,7 +551,11 @@ class TimePicker:
             return
         tr = self._turret_radius
         size = self._footprint(tr)
-        angle = self._turret_angle
+        angle = _quantize(self._turret_angle, NEEDLE_ANGLE_QUANT_DEG)
+        key = (size, angle)
+
+        def build():
+            return supersample((size, size), render)
 
         def render(surf, k):
             c = surf.get_width() / 2.0
@@ -532,7 +572,7 @@ class TimePicker:
                             [(base_x + perpx * hw, base_y + perpy * hw),
                              (base_x - perpx * hw, base_y - perpy * hw), (tipx, tipy)])
 
-        needle = supersample((size, size), render)
+        needle = _bounded_set(_TURRET_NEEDLE_CACHE, key, build, NEEDLE_CACHE_CAP)
         cx, cy = self._turret_center
         surface.blit(needle, (cx - size / 2, cy - size / 2))
 

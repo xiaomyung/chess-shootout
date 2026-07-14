@@ -12,7 +12,7 @@ from chessshootout.frontend.visual.draw import chevron_surface, cut_rect_surface
 from chessshootout.frontend.visual.emoji import emoji_surface
 from chessshootout.frontend.visual.fonts import get_font, get_mono_font
 from chessshootout.frontend.visual.scroll_view import ScrollHost, ScrollView
-from chessshootout.frontend.visual.widgets import AvatarBadge, avatar_palette, wrap_words
+from chessshootout.frontend.visual.widgets import wrap_words
 from chessshootout.online.news import format_news_date
 
 
@@ -32,6 +32,7 @@ NEWS_TITLE_GAP = 6
 NEWS_LINE_GAP = 4
 HEADLINE_ROW_H = 26
 AVATAR_SIZE = 40
+AVATAR_CUT = 6
 CHEVRON_SIZE = 11
 FLAG_SIZE = 14
 
@@ -75,7 +76,6 @@ class CardStack(ScrollHost):
             lambda: (self._rect, self._content_h),
             wheel_step_px=BODY_ROW_H,
         )
-        self._avatar = AvatarBadge()
         self._flag_cache = {}
         self._fonts_ready = False
 
@@ -112,6 +112,7 @@ class CardStack(ScrollHost):
         self._title_font = get_font(self._s(11, 9), bold=True)
         self._summary_font = get_font(self._s(11, 9))
         self._name_font = get_font(self._s(14, 11), bold=True)
+        self._avatar_font = get_font(self._s(19, 14), bold=True)
         self._meta_font = get_font(self._s(11, 9))
         self._time_font = get_mono_font(self._s(10, 8))
         self._badge_font = get_font(self._s(13, 10), bold=True)
@@ -202,8 +203,7 @@ class CardStack(ScrollHost):
         pad = self._s(PAD_X, 10)
         av_size = self._s(AVATAR_SIZE, 30)
         av_rect = pg.Rect(rect.x + pad, rect.centery - av_size // 2, av_size, av_size)
-        self._avatar.draw(window, av_rect, env.get_nickname(), self._name_font,
-                          avatar_palette(True))
+        self._draw_flat_avatar(window, av_rect, env.get_nickname())
         x = av_rect.right + self._s(12, 8)
         nickname = env.get_nickname() or "Set nickname"
         color = Colors.text if env.get_nickname() else Colors.text_muted
@@ -219,6 +219,14 @@ class CardStack(ScrollHost):
         chevron = self._right_chevron(Colors.text_dim if not hovered else Colors.text)
         window.blit(chevron, (rect.right - pad - chevron.get_width(),
                               rect.centery - chevron.get_height() // 2))
+
+    def _draw_flat_avatar(self, window, rect, name):
+        window.blit(cut_rect_surface(rect.size, self._s(AVATAR_CUT, 3), Colors.accent,
+                                     corners=("tr", "bl")), rect.topleft)
+        glyph = render_text(self._avatar_font, name[:1].upper() if name else "?",
+                            Colors.on_accent)
+        window.blit(glyph, (rect.centerx - glyph.get_width() // 2,
+                            rect.centery - glyph.get_height() // 2))
 
     def _right_chevron(self, color):
         up = chevron_surface(self._s(CHEVRON_SIZE, 9), color, up=True)

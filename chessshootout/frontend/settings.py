@@ -6,7 +6,7 @@ import pygame as pg
 from chessshootout import paths
 from chessshootout.infra import env
 from chessshootout.frontend.menu.options_rows import (
-    PathRow, TextRow, ToggleRow, NotchRow, SegmentedRow, SwatchRow,
+    PathRow, TextRow, ToggleRow, NotchRow, SegmentedRow,
 )
 
 
@@ -80,12 +80,6 @@ class SettingsController:
             window, env.get_server_addr, placeholder="host or host:port")
         time_options = [(label, label) for label in env.TIME_CONTROL_VALUES]
         incr_options = [(label, label) for label in env.INCREMENT_VALUES]
-        themes = [
-            ("dark", "#7a818b", "#2f343b", False),
-            ("wood", "#d8b483", "#8a5a3c", True),
-            ("green", "#b9c4a0", "#516b3e", True),
-            ("ice", "#b4c2d4", "#4a5a72", True),
-        ]
         return [
             ("Audio", [
                 NotchRow("Master volume", "", lambda: sound_manager.master_volume,
@@ -100,9 +94,12 @@ class SettingsController:
                           lambda: not sound_manager.enabled,
                           lambda muted: sound_manager.set_enabled(not muted)),
             ]),
-            ("Appearance", [
-                SwatchRow("Board theme", "More themes coming soon", themes,
-                          env.get_theme, env.set_theme),
+            ("Display", [
+                SegmentedRow("Launch mode",
+                             "How the window opens — applies on next launch",
+                             [("Windowed", "windowed"), ("Maximized", "maximized"),
+                              ("Fullscreen", "fullscreen")],
+                             env.get_launch_mode, env.set_launch_mode),
             ]),
             ("Focus mode", [
                 SegmentedRow("Show in focus",

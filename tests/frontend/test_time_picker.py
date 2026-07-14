@@ -9,6 +9,7 @@ import pygame as pg
 import pytest
 
 from tests.conftest import pygame_display
+import chessshootout.frontend.menu.time_picker as time_picker
 from chessshootout.frontend.menu.time_picker import (
     CHAMBER_RING_FRAC, CHAMBERS, CHAMBER_RADIUS_FRAC, CHAMBER_STEP_DEG,
     DRAG_CLICK_THRESHOLD_DEG, INCREMENTS, ROTATION_MS, SEAT_POP_MS, SETTLE_MS, TimePicker)
@@ -348,3 +349,111 @@ def test_sub_threshold_drag_release_reports_as_a_click():
     p.handle_click(nudged)
     _settle(p)
     assert p.selected_minutes == 30
+
+
+def _spy_on_supersample(monkeypatch):
+    calls = []
+    real = time_picker.supersample
+
+    def spy(*args, **kwargs):
+        calls.append(1)
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(time_picker, "supersample", spy)
+    return calls
+
+
+def test_idle_redraw_never_resupersamples(monkeypatch):
+    p = _picker(10, 5)
+    surface = pg.Surface((300, 190))
+    p.draw(surface, 0)
+    calls = _spy_on_supersample(monkeypatch)
+    p.draw(surface, 16)
+    p.draw(surface, 32)
+    assert calls == [], "an idle picker blits cached drum/turret layers, no re-render"
+
+
+def test_idle_redraw_blits_the_same_cached_surface_object():
+    p = _picker(10, 5)
+    footprint = p._footprint(p._radius)
+    key = (footprint, time_picker._quantize(p._rotation, time_picker.DRUM_ANGLE_QUANT_DEG),
+           p._min_index)
+    surface = pg.Surface((300, 190))
+    p.draw(surface, 0)
+    first = time_picker._DRUM_CACHE[key]
+    p.draw(surface, 16)
+    second = time_picker._DRUM_CACHE[key]
+    assert first is second, "the same rotation/selection key reuses the same surface"
+
+
+def test_rotation_change_rebuilds_the_drum_layer(monkeypatch):
+    p = _picker(10, 5)
+    surface = pg.Surface((300, 190))
+    p.draw(surface, 0)
+    calls = _spy_on_supersample(monkeypatch)
+    p.handle_click(p.chamber_center(0))
+    p.draw(surface, 30)
+    assert calls, "a rotation/selection change must invalidate the drum cache"
+
+
+def test_resize_changes_the_footprint_and_rebuilds(monkeypatch):
+    p = _picker(10, 5)
+    surface = pg.Surface((300, 190))
+    p.draw(surface, 0)
+    calls = _spy_on_supersample(monkeypatch)
+    p.set_rect(pg.Rect(0, 0, 500, 300))
+    surface = pg.Surface((500, 300))
+    p.draw(surface, 0)
+    assert calls, "a radius change must not reuse a stale-size cache entry"
+
+
+def test_spin_keeps_rendering_fresh_geometry_every_frame(monkeypatch):
+    p = TimePicker()
+    p.set_rect(pg.Rect(0, 0, 300, 190))
+    p.set_selection(10, 5)
+    p.handle_scroll(p._drum_center, 4)
+    surface = pg.Surface((300, 190))
+    calls = _spy_on_supersample(monkeypatch)
+    t = 0
+    for _ in range(5):
+        t += 16
+        p.draw(surface, t)
+    assert len(calls) >= 3, "a spinning drum keeps rendering, caching must not freeze it"
+
+
+def test_seat_pop_still_smoothscales_the_cached_glyph(monkeypatch):
+    p = _picker(10, 5)
+    p.handle_click(p.chamber_center(0))
+    _settle(p)
+    assert p._seat_pop_tween is not None
+    calls = []
+    real = pg.transform.smoothscale
+
+    def spy(surf, size):
+        calls.append(size)
+        return real(surf, size)
+
+    monkeypatch.setattr(pg.transform, "smoothscale", spy)
+    surface = pg.Surface((300, 190))
+    p.draw(surface, ROTATION_MS + SETTLE_MS + 15)
+    assert calls, "the seat-pop tween still smoothscales the cached glyph while it runs"
+
+
+def test_drum_cache_stays_bounded_while_spinning():
+    p = _picker(10, 5)
+    surface = pg.Surface((300, 190))
+    time_picker._DRUM_CACHE.clear()
+    for i in range(time_picker.DRUM_CACHE_CAP + 20):
+        p._rotation = i * 1.3
+        p._draw_drum(surface)
+    assert len(time_picker._DRUM_CACHE) <= time_picker.DRUM_CACHE_CAP
+
+
+def test_turret_needle_cache_stays_bounded_during_a_swing():
+    p = _picker(10, 5)
+    surface = pg.Surface((300, 190))
+    time_picker._TURRET_NEEDLE_CACHE.clear()
+    for i in range(time_picker.NEEDLE_CACHE_CAP + 20):
+        p._turret_angle = i * 1.3
+        p._draw_turret_needle(surface)
+    assert len(time_picker._TURRET_NEEDLE_CACHE) <= time_picker.NEEDLE_CACHE_CAP
