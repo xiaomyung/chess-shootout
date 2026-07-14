@@ -64,15 +64,15 @@ def infinity_surface(height, color):
             big_w, big_h = surf.get_size()
             cx, cy = big_w / 2, big_h / 2
             ax, ay = big_w * 0.355, big_h * 0.275
-            lw = max(int(th * k), 2)
-            n = 140
-            pts = []
+            r = max(th * k / 2, 1.5)
+            col = pg.Color(color)
+            n = 480
             for i in range(n):
                 t = 2 * math.pi * i / n
                 d = 1 + math.sin(t) ** 2
-                pts.append((cx + ax * math.cos(t) / d,
-                            cy + ay * math.sin(t) * math.cos(t) / d / 0.3536))
-            pg.draw.lines(surf, pg.Color(color), True, pts, lw)
+                x = cx + ax * math.cos(t) / d
+                y = cy + ay * math.sin(t) * math.cos(t) / d / 0.3536
+                pg.draw.circle(surf, col, (x, y), r)
         return supersample((w, h), render, scale=8)
     return memoized_surface(_INFINITY_CACHE, (h, str(color)), build)
 
