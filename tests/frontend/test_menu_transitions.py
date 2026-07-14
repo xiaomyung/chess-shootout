@@ -19,7 +19,7 @@ appears"). Anchoring on first-draw guarantees the rise is actually seen."""
 import pygame as pg
 
 from tests.conftest import pygame_display
-from chessshootout.frontend.screens.menu import MENU_RISE_MS, VIEW_RISE_MS
+from chessshootout.frontend.screens.menu import MENU_RISE_MS, RAIL_SLIDE_MS, VIEW_RISE_MS
 from chessshootout.frontend.visual.colors import Colors
 from tests.helpers import make_app
 
@@ -140,3 +140,164 @@ def test_resize_mid_transition_does_not_crash():
 
     app.menu.relayout((820, 640))
     app.menu.draw()
+
+
+"""Right-rail slide (design lock #47): the opaque right rail lives only on the play
+view. Leaving play, the rail column (panel + card stack) SNAPSHOTS before the layout
+flips and slides RIGHT out of the window over ~200ms while the new subview rises in
+beneath it -- no more instant vanish. Returning to play, the now-live panel + cards
+slide IN from the right, suppressed in place so they never double-draw. The slide is
+armed by goto_view but only STARTS on the first draw (same first-draw anchor as the
+rise), it is transient (zero cost when idle), and it is cancelled outright by any
+relayout/resize (the snapshot goes stale) and by exit()."""
+
+
+def test_leaving_play_arms_a_rail_slide_out(monkeypatch):
+    _freeze(monkeypatch)
+    app = make_app()
+    _draw_menu(app)
+
+    app.menu.goto_view("history")
+
+    assert app.menu._rail_slide_mode == "out"
+    assert app.menu._rail_slide_snapshot is not None
+    assert app.menu._rail_slide_origin.width > 0
+    assert app.menu._rail_slide_tween is None, \
+        "armed but not started -- the slide anchors on the first draw, not on goto_view()"
+
+
+def test_returning_to_play_arms_a_rail_slide_in(monkeypatch):
+    _freeze(monkeypatch)
+    app = make_app()
+    app.menu.goto_view("history")
+
+    app.menu.goto_view("play")
+
+    assert app.menu._rail_slide_mode == "in"
+    assert app.menu._rail_slide_snapshot is None, "the slide-in renders live, it holds no snapshot"
+    assert app.menu._rail_slide_tween is None
+
+
+def test_non_play_to_non_play_arms_no_rail_slide(monkeypatch):
+    _freeze(monkeypatch)
+    app = make_app()
+    app.menu.goto_view("history")
+
+    app.menu.goto_view("armory")
+
+    assert app.menu._rail_slide_mode == "none", \
+        "neither side of a non-play switch owns the rail -- there is nothing to slide"
+
+
+def test_screen_enter_on_play_arms_no_rail_slide(monkeypatch):
+    _freeze(monkeypatch)
+    app = make_app()
+
+    app.menu.enter()
+    _draw_menu(app)
+
+    assert app.menu._transition_kind == "screen"
+    assert app.menu._rail_slide_mode == "none", \
+        "the screen rise carries the rail up as part of the content -- it never slides"
+
+
+def test_resize_cancels_the_rail_slide(monkeypatch):
+    _freeze(monkeypatch)
+    app = make_app()
+    _draw_menu(app)
+    app.menu.goto_view("history")
+    _draw_menu(app)
+    assert app.menu._rail_slide_mode == "out"
+
+    app.menu.relayout((900, 700))
+
+    assert app.menu._rail_slide_mode == "none", "a relayout makes the snapshot stale -- drop it"
+    assert app.menu._rail_slide_snapshot is None
+
+
+def test_exit_clears_the_rail_slide(monkeypatch):
+    clock = _freeze(monkeypatch)
+    app = make_app()
+    app.menu.goto_view("history")
+    clock["ms"] += RAIL_SLIDE_MS
+    _draw_menu(app)
+    app.menu.goto_view("play")
+    _draw_menu(app)
+    assert app.menu._rail_slide_mode == "in"
+    assert app.menu._rail_scratch is not None
+
+    app.menu.exit()
+
+    assert app.menu._rail_slide_mode == "none"
+    assert app.menu._rail_slide_tween is None
+    assert app.menu._rail_slide_snapshot is None
+    assert app.menu._rail_scratch is None
+
+
+def test_rapid_toggle_replaces_the_slide_without_orphaning(monkeypatch):
+    _freeze(monkeypatch)
+    app = make_app()
+    _draw_menu(app)
+
+    app.menu.goto_view("history")
+    _draw_menu(app)
+    app.menu.goto_view("play")
+
+    assert app.menu._rail_slide_mode == "in"
+    assert app.menu._rail_slide_snapshot is None, "the out-slide snapshot is dropped, no orphan"
+
+    _draw_menu(app)
+    app.menu.goto_view("history")
+
+    assert app.menu._rail_slide_mode == "out"
+    _draw_menu(app)
+
+
+def test_slide_out_paints_the_panel_surface_then_clears(monkeypatch):
+    clock = _freeze(monkeypatch)
+    app = make_app()
+    surface = pg.Color(Colors.surface)[:3]
+    _draw_menu(app)
+
+    app.menu.goto_view("history")
+    origin = app.menu._rail_slide_origin
+    probe = (origin.right - 10, origin.y + 300)
+
+    _draw_menu(app)
+    clock["ms"] += RAIL_SLIDE_MS // 5
+    _draw_menu(app)
+    assert app.window.get_at(probe)[:3] == surface, \
+        "mid-flight the sliding snapshot still paints the panel surface near the right edge"
+
+    clock["ms"] += RAIL_SLIDE_MS
+    _draw_menu(app)
+    assert app.menu._rail_slide_mode == "none"
+    assert app.window.get_at(probe)[:3] != surface, \
+        "once seated the opaque rail is gone -- history's wider layout owns that column"
+
+
+def test_slide_in_seats_the_panel(monkeypatch):
+    clock = _freeze(monkeypatch)
+    app = make_app()
+    surface = pg.Color(Colors.surface)[:3]
+    _draw_menu(app)
+    app.menu.goto_view("history")
+    clock["ms"] += RAIL_SLIDE_MS
+    _draw_menu(app)
+
+    app.menu.goto_view("play")
+    assert app.menu._rail_slide_mode == "in"
+    panel = app.menu._menu_layout.right_rail_full_rect
+    probe = (panel.x + 10, panel.y + 300)
+
+    _draw_menu(app)
+    clock["ms"] += RAIL_SLIDE_MS // 10
+    _draw_menu(app)
+    assert app.window.get_at(probe)[:3] != surface, \
+        "early in-slide the panel enters from the right -- its left seat is still bare"
+
+    clock["ms"] += RAIL_SLIDE_MS
+    _draw_menu(app)
+    assert app.menu._rail_slide_mode == "none"
+    assert app.window.get_at(probe)[:3] == surface, \
+        "the settled panel paints its surface back at the seat"

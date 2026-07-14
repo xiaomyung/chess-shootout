@@ -291,17 +291,3 @@ def test_options_row_switches_to_the_options_view_via_the_menu_screen():
     row_rect = app.menu.rail._row_rects["options"]
     app.menu.handle_click(row_rect.center)
     assert app.menu._active_view == "options"
-
-
-def test_rail_click_plays_on_an_inactive_row_but_not_the_active_one():
-    app = make_app()
-    app.draw_frame()
-    assert app.menu._active_view == "play"
-
-    play_row = app.menu.rail._row_rects["play"]
-    app.menu.handle_click(play_row.center)
-    app.sound_manager.play_rail_click.assert_not_called()
-
-    history_row = app.menu.rail._row_rects["history"]
-    app.menu.handle_click(history_row.center)
-    app.sound_manager.play_rail_click.assert_called_once()

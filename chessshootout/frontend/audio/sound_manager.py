@@ -219,9 +219,6 @@ class SoundManager:
     def play_card_toggle(self):
         self._play("card_toggle")
 
-    def play_rail_click(self):
-        self._play("rail_click")
-
     def play_focus_action(self):
         self._play("focus_action")
 
