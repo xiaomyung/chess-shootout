@@ -13,7 +13,9 @@ from chessshootout.frontend.board import Board
 from chessshootout.frontend.layout import compute_layout
 from chessshootout.frontend.modal_registry import ModalSpec
 from chessshootout.frontend.modals.help import HOTKEYS
-from chessshootout.frontend.panels.player_strip import is_white, top_strip_color
+from chessshootout.frontend.panels.player_strip import (
+    is_white, top_strip_color, refresh_capture_icons,
+)
 from chessshootout.frontend.panels.right import RightMenu, REVIEW_BUTTONS
 from chessshootout.frontend.panels.review_strip import ReviewStrip
 from chessshootout.frontend.pgn_open import open_pgn_or_toast
@@ -24,7 +26,7 @@ from chessshootout.skillcheck.types import SkillCheckOutcome, whiffs_by_ply
 
 log = logging.getLogger("chess.frontend")
 
-REVIEW_HOTKEY_KEYS = ("?", "← →", "Home", "End", "F", "F11", "Esc")
+REVIEW_HOTKEY_KEYS = ("?", "Left / Right", "Home", "End", "F", "F11", "Esc")
 REVIEW_HOTKEYS = [row for row in HOTKEYS if row[0] in REVIEW_HOTKEY_KEYS]
 
 
@@ -40,7 +42,7 @@ class ReviewScreen(Screen):
         self.black_name = "Player 2"
         self._time_control = None
         self._pgn_result_tag = None
-        self._return_to = "history"
+        self._return_to = "menu"
         self._skillcheck_log = []
         self._pgn_path = None
         self.backdrop = ArenaBackdrop()
@@ -62,7 +64,7 @@ class ReviewScreen(Screen):
         return self.app.window
 
     def enter(self, **payload):
-        self._return_to = payload.get("return_to", "history")
+        self._return_to = payload.get("return_to", "menu")
         path = payload["pgn_path"]
         self._pgn_path = path
         text = self._read_pgn(path)
@@ -122,7 +124,8 @@ class ReviewScreen(Screen):
         self.right_menu.set_rect(r.menu_rect)
         self.strip_top.set_rect(r.top_strip_rect)
         self.strip_bottom.set_rect(r.bottom_strip_rect)
-        self._refresh_capture_icons(r.strip_height)
+        refresh_capture_icons(self.board, r.strip_height,
+                              (self.strip_top, self.strip_bottom))
 
     def handle_click(self, pos):
         if self.right_menu.handle_click(pos):
@@ -192,13 +195,6 @@ class ReviewScreen(Screen):
     def _compute_game_info(self):
         tc = format_time_control(self._time_control) or "∞"
         return {"mode": "Review", "time_control": tc, "lines": [self._pgn_result_tag or "*"]}
-
-    def _refresh_capture_icons(self, strip_height):
-        icons = self.board.scaled_capture_icons(strip_height)
-        if icons is None:
-            return
-        self.strip_top.set_piece_icons(icons)
-        self.strip_bottom.set_piece_icons(icons)
 
     def _update_strips(self):
         top_color = top_strip_color(self.board.flipped)

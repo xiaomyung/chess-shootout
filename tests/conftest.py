@@ -86,6 +86,33 @@ def _isolate_games_dir(tmp_path_factory, monkeypatch):
         paths, "get_fallback_data_dir", lambda: tmp_path_factory.mktemp("fallbackdir"))
 
 
+@pytest.fixture(autouse=True)
+def _isolate_news(tmp_path_factory, monkeypatch):
+    """Keep every test off the real news feed and the real config-dir cache file.
+
+    NewsClient fetches once per app run from a background daemon thread at
+    Frontend construction (mirrors the reconnect probe) and reads/writes a
+    cache file in the platform config dir. Point both at inert local spots so
+    the suite never makes a real HTTPS request or touches a stray
+    news_cache.json in the repo root.
+    """
+    from chessshootout.online import news
+    monkeypatch.setenv("CHESS_NEWS_URL", "http://127.0.0.1:1/news.json")
+    monkeypatch.setattr(
+        news, "_cache_path",
+        lambda: tmp_path_factory.mktemp("newscache") / news.CACHE_FILENAME)
+
+
+@pytest.fixture(autouse=True)
+def _isolate_profile_hint(monkeypatch):
+    """Tests build a fresh Frontend from a blank .env every time, which would
+    otherwise trip the once-ever first-run profile hint toast on every single
+    test that constructs an app. Mark it as already shown by default; the
+    tests for the hint itself override this explicitly.
+    """
+    monkeypatch.setenv("CHESS_PROFILE_HINT_SHOWN", "1")
+
+
 @pytest.fixture
 def server(server_with_app):
     """Real uvicorn server, port only.

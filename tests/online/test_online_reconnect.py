@@ -37,7 +37,7 @@ def app():
     pg.display.set_mode((1000, 800))
 
 
-def resume_payload(
+def _resume_payload(
     *,
     your_color="white",
     move_history=(),
@@ -69,7 +69,7 @@ def test_handle_game_resumed_applies_server_clock_snapshot(app):
     app.game.variant = "online"
     app.game._time_control = (300, 2)
     app.game.match.local_color = PieceColor.WHITE
-    payload = resume_payload(
+    payload = _resume_payload(
         move_history=("e4", "e5"),
         white_remaining=240.0, black_remaining=180.0, running_for="white",
     )
@@ -91,7 +91,7 @@ def test_handle_game_resumed_does_not_reset_clock_to_initial(app):
     app.game.variant = "online"
     app.game._time_control = (300, 0)
     app.game.match.local_color = PieceColor.WHITE
-    payload = resume_payload(
+    payload = _resume_payload(
         white_remaining=42.0, black_remaining=17.0, running_for="black",
     )
 
@@ -111,7 +111,7 @@ def test_on_reconnect_active_game_sets_up_online_state_and_clock(app, monkeypatc
         "chessshootout.online.client.OnlineClient.reconnect_to_existing",
         lambda self, *a, **kw: None,
     )
-    fresh = resume_payload(
+    fresh = _resume_payload(
         your_color="black",
         move_history=("d4", "d5", "c4"),
         white_remaining=200.0, black_remaining=210.0, running_for="black",
@@ -123,7 +123,7 @@ def test_on_reconnect_active_game_sets_up_online_state_and_clock(app, monkeypatc
         "addr": "localhost:8000",
         "room_id": "room-x",
         "session_token": "tok",
-        "resume": resume_payload(
+        "resume": _resume_payload(
             white_remaining=999.0, black_remaining=999.0, running_for="white",
         ),
     }
@@ -153,7 +153,7 @@ def test_on_reconnect_active_game_refetches_resume_to_avoid_drift(app, monkeypat
 
     def _fetch(addr, room_id, session_token):
         calls.append((addr, room_id, session_token))
-        return resume_payload(
+        return _resume_payload(
             white_remaining=42.0, black_remaining=42.0, running_for="white",
         )
 
@@ -162,7 +162,7 @@ def test_on_reconnect_active_game_refetches_resume_to_avoid_drift(app, monkeypat
         "addr": "localhost:8000",
         "room_id": "room-y",
         "session_token": "tok",
-        "resume": resume_payload(),
+        "resume": _resume_payload(),
     }
     app.coordinator._on_reconnect_active_game()
     assert calls == [("localhost:8000", "room-y", "tok")]
@@ -182,13 +182,13 @@ def test_on_reconnect_active_game_failed_refetch_restores_pending(app, monkeypat
         "addr": "localhost:8000",
         "room_id": "room-z",
         "session_token": "tok",
-        "resume": resume_payload(),
+        "resume": _resume_payload(),
     }
     app.coordinator._pending_reconnect = dict(pending)
     app.coordinator._on_reconnect_active_game()
     assert app.screen is app.menu
     assert app.coordinator._pending_reconnect == pending
-    assert app.start_menu.reconnect_available
+    assert app.menu.play_view.reconnect_available
     assert app.confirm_modal.is_visible()
 
 
@@ -218,7 +218,7 @@ def test_async_main_resume_does_not_queue_legacy_events():
 
     client._run_session_with_reconnects = fake_session
 
-    asyncio.run(client._async_main_resume(resume_payload()))
+    asyncio.run(client._async_main_resume(_resume_payload()))
 
     queued_types = []
     while not client._inbound.empty():

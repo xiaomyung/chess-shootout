@@ -38,7 +38,7 @@ FONT_PATH = REPO_ROOT / "packaging" / "emoji" / "NotoColorEmoji.ttf"
 # Every emoji the client passes to emoji_surface/blit_emoji that is NOT a flag.
 # Keep in sync with the call sites (tests/test_emoji.py guards against drift):
 #   match_found ROUND  -> "⚔️"
-#   start menu         -> "\U0001f3b2" "\U0001f551" "\U0001f4cb"
+#   play hero side pick -> "\U0001f3b2"
 #   directory browser  -> "\U0001f4c1" "\U0001f4c4"
 #   confirm modal      -> "\U0001f4c1" "\U0001f3f3️" "\U0001f91d"
 #   resign effect      -> "\U0001f3f3️"
@@ -46,8 +46,6 @@ FONT_PATH = REPO_ROOT / "packaging" / "emoji" / "NotoColorEmoji.ttf"
 UI_EMOJI = (
     "⚔️",   # crossed swords
     "🎲",   # game die
-    "🕑",   # two o'clock
-    "📋",   # clipboard
     "📁",   # folder
     "📄",   # page
     "🏳️",   # white flag

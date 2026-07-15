@@ -6,6 +6,7 @@ seconds before the game starts, the reconnecting on-board overlay surfaces
 only while the client is reconnecting mid-game, and transient errors show a
 toast (not a modal).
 """
+
 import logging
 from types import SimpleNamespace
 from unittest.mock import MagicMock
@@ -14,6 +15,7 @@ import pygame as pg
 import pytest
 
 from tests.conftest import pygame_display
+from tests.helpers import online_start_payload
 from chessshootout.frontend.frontend import Frontend
 from chessshootout.frontend.online_coordinator import RECONNECT_MODAL_DEBOUNCE_MS
 from chessshootout.frontend.screens.game import (
@@ -74,7 +76,7 @@ def test_reconnecting_modal_show_makes_visible_and_caches_callback():
     m = ReconnectingModal(pg.display.get_surface())
     m.set_rect(pg.Rect(0, 0, 400, 400))
     cancelled = []
-    m.show(pg.time.get_ticks(), on_cancel=lambda: cancelled.append(True))
+    m.show(pg.time.get_ticks(), on_abandon=lambda: cancelled.append(True))
     assert m.is_visible()
     m.draw()
     m.handle_click(m.button_rects["abandon"].center)
@@ -88,7 +90,7 @@ def test_reconnecting_overlay_fills_board_rect_with_scrim():
     m = ReconnectingModal(win)
     rect = pg.Rect(0, 0, 420, 360)
     m.set_rect(rect)
-    m.show(pg.time.get_ticks(), on_cancel=lambda: None)
+    m.show(pg.time.get_ticks(), on_abandon=lambda: None)
 
     win.fill((0, 0, 0))
     m.draw()
@@ -201,8 +203,7 @@ def test_match_found_reveal_holds_then_starts_game(frontend, monkeypatch):
     frontend.coordinator.wait_modal.show("Rapid", "10 + 5", on_cancel=lambda: None)
     frontend.coordinator._wait_started_at_ms = fake_now[0]
 
-    payload = {"your_color": "white", "white_name": "A", "black_name": "B",
-               "time_minutes": 5, "increment_seconds": 0}
+    payload = online_start_payload(white_name="A", black_name="B")
     frontend.coordinator._begin_match_found_transition(payload)
 
     assert frontend.coordinator.match_found_modal.is_visible()
@@ -226,13 +227,8 @@ def test_match_found_transition_plays_online_game_start_sound(frontend):
     frontend.sound_manager.play_online_game_start = lambda: plays.append(True)
     frontend.coordinator.wait_modal.show("Rapid", "10 + 5", on_cancel=lambda: None)
     frontend.coordinator._wait_started_at_ms = pg.time.get_ticks()
-    frontend.coordinator._begin_match_found_transition({
-        "your_color": "white",
-        "white_name": "A",
-        "black_name": "B",
-        "time_minutes": 5,
-        "increment_seconds": 0,
-    })
+    frontend.coordinator._begin_match_found_transition(
+        online_start_payload(white_name="A", black_name="B"))
     assert plays == [True]
 
 
@@ -362,14 +358,17 @@ def test_menu_mode_skips_board_draw(frontend, monkeypatch):
     assert drew == [True]
 
 
-def test_start_menu_centered_on_window_not_board(frontend):
-    rect = frontend.start_menu._outer
-    win_w, win_h = frontend.window.get_size()
-    top = frontend.chrome.HEIGHT
-    content_center_y = top + (win_h - top - 22) / 2
-    assert abs(rect.centerx - win_w / 2) <= 1
-    assert abs(rect.centery - content_center_y) <= 1
-    assert rect.bottom < frontend.start_menu._footer_link_rect.top
+def test_play_hero_lays_out_open_in_the_hero_column(frontend):
+    """No card: the hero content lays out open across its column, left-aligned and
+    clearing the left rail, with the CTA spanning the full column width."""
+    frontend.draw_frame()
+    layout = frontend.menu._menu_layout
+    hero = frontend.menu.play_view
+    assert layout.hero_rect.left >= layout.rail_rect.right
+    assert hero._title_pos[0] == layout.hero_rect.x
+    assert hero._cta_rect.x == layout.hero_rect.x
+    assert hero._cta_rect.width == layout.hero_rect.width
+    assert hero._cta_rect.bottom <= layout.hero_rect.bottom
 
 
 def test_menu_mode_centers_flex_modals_on_window(frontend):
@@ -440,7 +439,7 @@ def test_offer_accept_and_decline_pop_and_send(frontend):
     captured = {}
     frontend.coordinator.offer_banners = MagicMock()
     frontend.coordinator.offer_banners.push = (
-        lambda *a, on_ok, on_no, **k: captured.update(ok=on_ok, no=on_no))
+        lambda *a, on_yes, on_no, **k: captured.update(ok=on_yes, no=on_no))
     frontend.coordinator._push_offer_banner("draw_offered")
     frontend.sound_manager.reset_mock()
     captured["ok"]()
@@ -481,7 +480,7 @@ def _arm_post_game(frontend, **client):
     frontend.game.manual_result = "draw_agreement"
     frontend.game._chosen_side = "white"
     frontend.game.white_name, frontend.game.black_name = "Me", "Them"
-    frontend.start_menu.hide()
+    frontend.menu.hide_play_view()
 
 
 def test_decline_rematch_sends_false_and_clears(frontend):
@@ -514,7 +513,7 @@ def test_rematch_update_declined_bubbles_and_returns_to_menu(frontend):
     assert frontend.coordinator.client is None
     assert frontend.screen is frontend.menu
     assert frontend.coordinator._rematch_offered is False
-    assert frontend.start_menu.is_visible()
+    assert frontend.menu.play_view_visible()
 
 
 def test_rematch_update_window_expired_returns_to_menu(frontend):
@@ -522,7 +521,7 @@ def test_rematch_update_window_expired_returns_to_menu(frontend):
     frontend.coordinator._handle_rematch_update({"event": "window_expired"})
     assert frontend.coordinator.client is None
     assert frontend.screen is frontend.menu
-    assert frontend.start_menu.is_visible()
+    assert frontend.menu.play_view_visible()
 
 
 def test_rematch_update_declined_logs_the_teardown_reason(frontend, caplog):

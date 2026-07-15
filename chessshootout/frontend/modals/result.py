@@ -4,7 +4,7 @@ from chessshootout.frontend.modals.base import BaseModal
 from chessshootout.frontend.visual.clock_visual import format_clock
 from chessshootout.frontend.visual.colors import Colors
 from chessshootout.frontend.visual.draw import (
-    rounded_rect_surface, blit_centered, stroked_text, soft_blur)
+    cut_rect_surface, blit_centered, stroked_text, soft_blur)
 from chessshootout.frontend.visual.widgets import (
     draw_button_row, fit_text_to_rect, draw_series_chip)
 from chessshootout.frontend.visual.fonts import get_font, get_display_font
@@ -14,8 +14,8 @@ BUTTONS = [("New Game", "new_game"), ("Open PGN", "open_pgn"), ("Menu", "menu")]
 ONLINE_BUTTONS = [("Rematch", "rematch"), ("Open PGN", "open_pgn"), ("Menu", "menu")]
 
 SCORE_SEP = "–"
-STRIP_RADIUS = 10
-CARD_RADIUS = 9
+STRIP_CUT = 9
+CARD_CUT = 8
 HIGHLIGHT_PAD_RATIO = 0.3
 
 OUTCOME_COLOR = {
@@ -147,8 +147,9 @@ class ResultMenu(BaseModal):
         if not potg:
             return y
         h = max(int(self.rect.height * 0.085), 28)
-        strip = rounded_rect_surface((content.width, h), STRIP_RADIUS, Colors.potg_bg,
-                                     border=Colors.potg_border, border_width=1)
+        strip = cut_rect_surface((content.width, h), STRIP_CUT, Colors.potg_bg,
+                                 border=Colors.potg_border, border_width=1,
+                                 corners=("tr", "bl"))
         self.window.blit(strip, (content.x, y))
         pad = max(int(h * HIGHLIGHT_PAD_RATIO), 8)
         cy = y + h / 2
@@ -190,8 +191,9 @@ class ResultMenu(BaseModal):
             cx = content.x + (i % cols) * (cell_w + gap)
             cy = y + (i // cols) * (cell_h + gap)
             cell = pg.Rect(int(cx), int(cy), int(cell_w), int(cell_h))
-            bg = rounded_rect_surface(cell.size, CARD_RADIUS, Colors.surface,
-                                      border=Colors.border, border_width=1)
+            bg = cut_rect_surface(cell.size, CARD_CUT, Colors.surface,
+                                  border=Colors.border, border_width=1,
+                                  corners=("tr", "bl"))
             self.window.blit(bg, cell.topleft)
             value_surf = self.value_font.render(value, True, Colors.text)
             total_w = value_surf.get_width()
@@ -224,7 +226,7 @@ class ResultMenu(BaseModal):
             buttons = [b for b in ONLINE_BUTTONS if b[1] != "rematch"]
         self.button_rects = draw_button_row(
             self.window, row, buttons, self.button_font, gap,
-            primary_keys={buttons[0][1]},
+            primary_keys={buttons[0][1]}, cut=True,
         )
 
     def handle_click(self, pos):

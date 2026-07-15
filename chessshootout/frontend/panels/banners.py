@@ -1,7 +1,7 @@
 import pygame as pg
 
 from chessshootout.frontend.visual.colors import Colors
-from chessshootout.frontend.visual.draw import rounded_rect_surface
+from chessshootout.frontend.visual.draw import cut_rect_surface
 from chessshootout.frontend.visual.emoji import emoji_surface
 from chessshootout.frontend.visual.fonts import get_font
 
@@ -12,13 +12,15 @@ PAD_V = 13
 GAP = 14
 ACTS_GAP = 8
 ICON_SIZE = 30
+ICON_CUT = 4
 TOP_MARGIN = 14
 STACK_GAP = 9
 BTN_MIN_W = 78
-BTN_RADIUS = 7
+BTN_CUT = 6
 BTN_PAD_X = 14
 BTN_PAD_Y = 8
 SLIDE_MS = 260
+EXIT_MS = 200
 
 
 def _button_surface(label, font, ok):
@@ -26,10 +28,12 @@ def _button_surface(label, font, ok):
     w = max(text.get_width() + 2 * BTN_PAD_X, BTN_MIN_W)
     h = text.get_height() + 2 * BTN_PAD_Y
     if ok:
-        surf = rounded_rect_surface((w, h), BTN_RADIUS, Colors.accent)
+        shape = cut_rect_surface((w, h), BTN_CUT, Colors.accent, corners=("tr", "bl"))
     else:
-        surf = rounded_rect_surface((w, h), BTN_RADIUS, Colors.surface_raised,
-                                    border=Colors.border, border_width=1)
+        shape = cut_rect_surface((w, h), BTN_CUT, Colors.surface_raised,
+                                 border=Colors.border, border_width=1, corners=("tr", "bl"))
+    surf = pg.Surface((w, h), pg.SRCALPHA)
+    surf.blit(shape, (0, 0))
     surf.blit(text, ((w - text.get_width()) / 2, (h - text.get_height()) / 2))
     return surf
 
@@ -40,13 +44,13 @@ class OfferBanners:
         self.window = window
         self._banners = []
 
-    def push(self, key, icon, name, verb, ok_label, no_label, on_ok, on_no):
+    def push(self, key, icon, name, verb, yes_label, no_label, on_yes, on_no):
         self._banners = [b for b in self._banners if b["key"] != key]
         self._banners.append({
             "key": key, "icon": icon, "name": name, "verb": verb,
-            "ok_label": ok_label, "no_label": no_label,
-            "on_ok": on_ok, "on_no": on_no,
-            "pushed_at": pg.time.get_ticks(),
+            "yes_label": yes_label, "no_label": no_label,
+            "on_yes": on_yes, "on_no": on_no,
+            "pushed_at": pg.time.get_ticks(), "leaving_at": None,
             "ok_rect": pg.Rect(0, 0, 0, 0), "no_rect": pg.Rect(0, 0, 0, 0),
         })
 
@@ -54,13 +58,19 @@ class OfferBanners:
         self._banners = []
 
     def dismiss(self, key):
-        self._banners = [b for b in self._banners if b["key"] != key]
+        now = pg.time.get_ticks()
+        for b in self._banners:
+            if b["key"] == key and b["leaving_at"] is None:
+                b["leaving_at"] = now
 
     def is_empty(self):
-        return not self._banners
+        return self.count() == 0
+
+    def needs_frames(self):
+        return bool(self._banners)
 
     def count(self):
-        return len(self._banners)
+        return sum(1 for b in self._banners if b["leaving_at"] is None)
 
     def _banner_height(self, name_font, btn_font):
         content_h = max(ICON_SIZE, name_font.get_height(),
@@ -80,6 +90,8 @@ class OfferBanners:
         name_font, verb_font, btn_font = self._fonts()
         h = self._banner_height(name_font, btn_font)
         now = pg.time.get_ticks()
+        self._banners = [b for b in self._banners if b["leaving_at"] is None
+                         or now - b["leaving_at"] < EXIT_MS]
         prev_clip = self.window.get_clip()
         self.window.set_clip(board_rect)
         target_y = board_rect.top + TOP_MARGIN
@@ -88,6 +100,10 @@ class OfferBanners:
             eased = 1 - (1 - t) ** 3
             start_y = board_rect.top - h
             y = start_y + (target_y - start_y) * eased
+            if b["leaving_at"] is not None:
+                t2 = min(1.0, (now - b["leaving_at"]) / EXIT_MS)
+                eased2 = 1 - (1 - t2) ** 3
+                y = y + (start_y - y) * eased2
             self._draw_one(b, board_rect, y, h, name_font, verb_font, btn_font)
             target_y += h + STACK_GAP
         self.window.set_clip(prev_clip)
@@ -97,16 +113,19 @@ class OfferBanners:
         verb_surf = verb_font.render(f" {b['verb']}", True, Colors.text)
         msg_w = name_surf.get_width() + verb_surf.get_width()
         no_surf = _button_surface(b["no_label"], btn_font, False)
-        ok_surf = _button_surface(b["ok_label"], btn_font, True)
+        ok_surf = _button_surface(b["yes_label"], btn_font, True)
         acts_w = no_surf.get_width() + ACTS_GAP + ok_surf.get_width()
         w = PAD_L + ICON_SIZE + GAP + msg_w + GAP + acts_w + PAD_R
         x = board_rect.centerx - w / 2
-        pill = rounded_rect_surface((int(w), int(h)), h // 2, Colors.surface,
-                                    border=Colors.border_strong, border_width=1)
-        self.window.blit(pill, (x, y))
+        panel_cut = max(int(h * 0.22), 4)
+        panel = cut_rect_surface((int(w), int(h)), panel_cut, Colors.surface,
+                                 border=Colors.border_strong, border_width=1,
+                                 corners=("tr", "bl"))
+        self.window.blit(panel, (x, y))
         cy = y + h / 2
         ix = x + PAD_L
-        chip = rounded_rect_surface((ICON_SIZE, ICON_SIZE), 8, Colors.icon_chip_bg)
+        chip = cut_rect_surface((ICON_SIZE, ICON_SIZE), ICON_CUT, Colors.icon_chip_bg,
+                                corners=("tr", "bl"))
         self.window.blit(chip, (ix, cy - ICON_SIZE / 2))
         glyph = emoji_surface(b["icon"], 17)
         if glyph is not None:
@@ -127,12 +146,14 @@ class OfferBanners:
 
     def handle_click(self, pos):
         for b in list(self._banners):
+            if b["leaving_at"] is not None:
+                continue
             if b["ok_rect"].collidepoint(pos):
-                self._banners.remove(b)
-                b["on_ok"]()
+                b["leaving_at"] = pg.time.get_ticks()
+                b["on_yes"]()
                 return True
             if b["no_rect"].collidepoint(pos):
-                self._banners.remove(b)
+                b["leaving_at"] = pg.time.get_ticks()
                 b["on_no"]()
                 return True
         return False

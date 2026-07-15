@@ -3,8 +3,9 @@ import pygame as pg
 from chessshootout.backend.pieces import PieceColor
 from chessshootout.frontend.visual.colors import Colors
 from chessshootout.frontend.visual.fonts import get_font, DISPLAY
-from chessshootout.frontend.panels.player_strip import is_white
-from chessshootout.frontend.visual.widgets import AvatarBadge, avatar_palette
+from chessshootout.frontend.visual.widgets import (
+    StripAvatar, strip_frame_metrics, draw_captured_row,
+)
 
 
 class ReviewStrip:
@@ -21,7 +22,7 @@ class ReviewStrip:
         self.name_font = get_font(14, bold=True)
         self.advantage_font = get_font(12, bold=True)
         self.letter_font = get_font(18, family=DISPLAY)
-        self._avatar = AvatarBadge()
+        self._avatar = StripAvatar()
 
     def set_rect(self, rect):
         self.rect = pg.Rect(rect)
@@ -46,22 +47,15 @@ class ReviewStrip:
         h = self.rect.height
         if h <= 0 or self.rect.width <= 0:
             return
-        pad = max(int(h * 0.16), 4)
-        radius = max(int(h * 0.17), 5)
+        pad, radius, av_size, gap = strip_frame_metrics(h)
         pg.draw.rect(self.window, Colors.surface, self.rect, border_radius=radius)
 
-        av_size = max(h - 2 * pad, 1)
         avatar_rect = pg.Rect(self.rect.x + pad, self.rect.y + pad, av_size, av_size)
-        self._draw_avatar(avatar_rect)
+        self._avatar.draw(self.window, avatar_rect, self.name, self.letter_font)
 
-        gap = max(int(h * 0.18), 6)
         self._draw_name_and_captures(avatar_rect.right + gap, av_size)
 
         pg.draw.rect(self.window, Colors.border, self.rect, width=1, border_radius=radius)
-
-    def _draw_avatar(self, rect):
-        self._avatar.draw(self.window, rect, self.name, self.letter_font,
-                          avatar_palette(is_white(self.player_color)))
 
     def _draw_name_and_captures(self, x, ih):
         top_y = self.rect.y + max(int(self.rect.height * 0.18), 4)
@@ -74,21 +68,9 @@ class ReviewStrip:
         self._draw_captured(x, bottom_cy, ih)
 
     def _draw_captured(self, x, cy, ih):
-        cursor = x
-        last_right = x
         right_bound = self.rect.right - 8
-        size = max(int(ih * 0.5), 6)
-        for piece_type in self.captured:
-            icon = self.icons.get((piece_type, self.captured_color))
-            if icon is None:
-                continue
-            if icon.get_height() != size:
-                icon = pg.transform.smoothscale(icon, (size, size))
-            if cursor + icon.get_width() > right_bound:
-                break
-            self.window.blit(icon, (cursor, cy - icon.get_height() / 2))
-            last_right = cursor + icon.get_width()
-            cursor += icon.get_width() - icon.get_width() // 3
+        last_right = draw_captured_row(
+            self.window, self.icons, self.captured, self.captured_color, x, cy, right_bound, ih)
         if self.advantage > 0:
             self._draw_advantage_pill(last_right + max(int(ih * 0.18), 5), cy, right_bound)
 

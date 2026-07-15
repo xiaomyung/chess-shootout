@@ -16,7 +16,7 @@ import pytest
 from tests.conftest import pygame_display
 from chessshootout.backend.pieces import Piece, PieceColor, PieceType
 from chessshootout.backend.utils import Square
-from chessshootout.frontend.modals.help import HelpModal, HOTKEYS
+from chessshootout.frontend.modals.help import HOTKEYS
 from tests.helpers import make_app, start_single_screen
 
 
@@ -168,21 +168,9 @@ def test_focus_mode_hotkey_is_documented():
     assert any(key == "H" and "focus" in label.lower() for key, label in HOTKEYS)
 
 
-def test_review_row_uses_real_arrow_glyphs():
-    """Regression: the review-step row shows real left/right arrows.
-
-    The SANS body font lacks U+2190/U+2192 and rendered them as the .notdef
-    box (tofu); the key column uses the mono font, which has the glyphs. Render
-    each arrow and assert it differs from a guaranteed-missing glyph's box.
-    """
-    assert any("←" in key and "→" in key for key, _ in HOTKEYS)
-    modal = HelpModal(pg.display.get_surface())
-    modal.set_rect(pg.Rect(200, 150, 420, 420))
-    modal.show(HOTKEYS)
-    modal.draw()
-    tofu = pg.image.tobytes(
-        modal.key_font.render(chr(0xE000), True, (255, 255, 255)), "RGBA")
-    for arrow in ("←", "→"):
-        glyph = pg.image.tobytes(
-            modal.key_font.render(arrow, True, (255, 255, 255)), "RGBA")
-        assert glyph != tofu
+def test_hotkeys_keys_are_ascii_only():
+    """Regression: a non-ASCII key label (the old left/right arrow glyphs)
+    tofu'd on some bundled-font builds. Every HOTKEYS key label must stay
+    plain ASCII so it never depends on glyph coverage."""
+    for key, _ in HOTKEYS:
+        assert key.isascii(), key

@@ -18,26 +18,23 @@ import pytest
 from tests.conftest import pygame_display
 from chessshootout.backend.pieces import PieceColor
 from chessshootout.backend.utils import Square
-from tests.helpers import make_app, start_single_screen
+from tests.helpers import (
+    make_app, online_start_payload as _online_start_payload, start_single_screen,
+)
 
 
 _pygame_init = pygame_display(1000, 800)
 
 
-def _online_start_payload(**overrides):
-    payload = {
-        "your_color": "white", "white_name": "alice", "black_name": "bob",
-        "time_minutes": 5, "increment_seconds": 0,
-    }
-    payload.update(overrides)
-    return payload
+def _mock_client(room_id="room-1"):
+    client = MagicMock()
+    client.room_id = room_id
+    return client
 
 
 def _wired_app(**overrides):
     app = make_app(1000, 800)
-    client = MagicMock()
-    client.room_id = "room-1"
-    app.coordinator.client = client
+    app.coordinator.client = _mock_client()
     app.coordinator._start_online_game(_online_start_payload(**overrides))
     return app
 
@@ -46,8 +43,7 @@ def test_game_screen_subscribes_on_online_entry_and_unsubscribes_on_exit():
     app = make_app(1000, 800)
     assert app.coordinator._subscriber is None
 
-    app.coordinator.client = MagicMock()
-    app.coordinator.client.room_id = "room-1"
+    app.coordinator.client = _mock_client()
     app.coordinator._start_online_game(_online_start_payload())
     assert app.coordinator._subscriber is app.game
 
@@ -131,8 +127,7 @@ def test_offer_and_connection_status_never_require_a_subscriber():
 
 def test_match_found_transition_ends_with_a_subscribed_online_game_screen():
     app = make_app(1000, 800)
-    app.coordinator.client = MagicMock()
-    app.coordinator.client.room_id = "room-1"
+    app.coordinator.client = _mock_client()
     payload = _online_start_payload(
         your_color="black", white_name="alice", black_name="bob",
         started_seconds_ago=0.0,
@@ -271,7 +266,7 @@ def test_run_teardown_fans_out_on_app_exit_to_every_screen_and_the_coordinator(m
 
     app.run()
 
-    assert set(calls) == {"menu", "game", "history", "review", "coordinator"}
+    assert set(calls) == {"menu", "game", "review", "coordinator"}
 
 
 def test_search_cancel_on_menu_does_not_self_switch(caplog):
@@ -279,12 +274,12 @@ def test_search_cancel_on_menu_does_not_self_switch(caplog):
     it) — _return_to_menu_card must re-show the start card without a pointless
     menu -> menu exit/enter cycle polluting the lifecycle log."""
     app = make_app(1000, 800)
-    app.start_menu.hide()
+    app.menu.hide_play_view()
     menu = app.screen
     with caplog.at_level(logging.INFO, logger="chess.frontend"):
         app.coordinator._return_to_menu_card()
     assert app.screen is menu
-    assert app.start_menu.is_visible() is True
+    assert app.menu.play_view_visible() is True
     assert not any("screen switch" in r.getMessage() for r in caplog.records)
 
 
@@ -292,7 +287,7 @@ def test_return_to_menu_from_game_still_switches():
     app = start_single_screen(make_app(1000, 800))
     app.coordinator._return_to_menu_card()
     assert app.screen is app.menu
-    assert app.start_menu.is_visible() is True
+    assert app.menu.play_view_visible() is True
 
 
 def test_every_send_goes_through_the_coordinator_not_around_it():
@@ -345,6 +340,90 @@ def test_send_facades_are_inert_with_no_client():
     assert app.coordinator.is_connected() is False
     assert app.coordinator.opponent_state() is None
     assert app.coordinator.ping_ms() is None
+
+
+def test_remote_move_dismisses_the_draw_offer_banner():
+    """The server silently invalidates a pending offer the instant a move lands
+    (handlers.py's _apply_move). The client mirrors that off the move_applied
+    event itself — no decline is ever sent, since the server already cleared it."""
+    app = _wired_app()
+    client = app.coordinator.client
+    app.game.on_remote_move = lambda payload: None
+    app.coordinator._push_offer_banner("draw_offered")
+    assert not app.coordinator.offer_banners.is_empty()
+
+    app.coordinator._handle_remote_move_applied({"from": "e2", "to": "e4", "san": "e4"})
+
+    assert app.coordinator.offer_banners.is_empty()
+    client.send_draw_response.assert_not_called()
+
+
+def test_remote_move_dismisses_the_takeback_offer_banner():
+    app = _wired_app()
+    client = app.coordinator.client
+    app.game.on_remote_move = lambda payload: None
+    app.coordinator._push_offer_banner("takeback_offered")
+    assert not app.coordinator.offer_banners.is_empty()
+
+    app.coordinator._handle_remote_move_applied({"from": "e2", "to": "e4", "san": "e4"})
+
+    assert app.coordinator.offer_banners.is_empty()
+    client.send_takeback_response.assert_not_called()
+
+
+def test_resyncing_remote_move_applied_is_dropped_before_dismissing_offers():
+    """_handle_remote_move_applied bails out on the pre-existing _resyncing guard
+    before it ever reaches the dismiss helper — a stray move_applied mid-resync
+    must not touch banner state at all (in practice _begin_resync already cleared
+    it, and resume carries no offer field to rebuild it from)."""
+    app = _wired_app()
+    app.coordinator._push_offer_banner("draw_offered")
+    app.coordinator._resyncing = True
+
+    app.coordinator._handle_remote_move_applied({"from": "e2", "to": "e4", "san": "e4"})
+
+    assert app.coordinator.offer_banners.count() == 1
+
+
+def test_local_move_send_dismisses_an_incoming_takeback_offer_banner():
+    """The recipient scenario from the bug report: opponent offers a takeback,
+    I ignore it and move instead — that is the implicit decline. send_local_move
+    fires only after the move already landed on my own board (Match._fire_local_move),
+    so dismissing here is never premature."""
+    app = _wired_app()
+    client = app.coordinator.client
+    app.coordinator._push_offer_banner("takeback_offered")
+    assert not app.coordinator.offer_banners.is_empty()
+
+    app.coordinator.send_local_move(Square(6, 4), Square(4, 4), None)
+
+    assert app.coordinator.offer_banners.is_empty()
+    client.send_takeback_response.assert_not_called()
+
+
+def test_local_move_send_dismisses_an_incoming_draw_offer_banner():
+    app = _wired_app()
+    client = app.coordinator.client
+    app.coordinator._push_offer_banner("draw_offered")
+
+    app.coordinator.send_local_move(Square(6, 4), Square(4, 4), None)
+
+    assert app.coordinator.offer_banners.is_empty()
+    client.send_draw_response.assert_not_called()
+
+
+def test_move_landing_never_dismisses_the_rematch_banner():
+    """Rematch offers live post-game, when no move can land — but the dismiss
+    helper must stay scoped to draw/takeback regardless, so a future rematch-window
+    edge case can't silently eat the rematch banner too."""
+    app = _wired_app()
+    app.coordinator._handle_rematch_request()
+    assert app.coordinator.offer_banners.count() == 1
+
+    app.coordinator.send_local_move(Square(6, 4), Square(4, 4), None)
+
+    assert app.coordinator.offer_banners.count() == 1
+    assert app.coordinator._rematch_offered is True
 
 
 def test_unbind_clears_every_field_that_gates_online_behaviour():

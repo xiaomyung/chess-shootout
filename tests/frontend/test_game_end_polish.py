@@ -87,7 +87,7 @@ def test_modal_hidden_immediately_after_result():
     app = _make_app()
     app.game.manual_result = "white_wins"
     app.game.result_flow.update_result_pending()
-    assert app.game._result_modal_should_show() is False
+    assert app.game._result_menu_should_show() is False
 
 
 def test_modal_shows_after_delay_elapses():
@@ -95,12 +95,12 @@ def test_modal_shows_after_delay_elapses():
     app.game.manual_result = "white_wins_on_time"
     app.game.result_flow.update_result_pending()
     app.game._result_first_seen_at_ms = pg.time.get_ticks() - RESULT_MODAL_DELAY_MS - 1
-    assert app.game._result_modal_should_show() is True
+    assert app.game._result_menu_should_show() is True
 
 
 def test_modal_not_shown_when_no_result():
     app = _make_app()
-    assert app.game._result_modal_should_show() is False
+    assert app.game._result_menu_should_show() is False
 
 
 def test_fade_alpha_starts_low_and_grows_to_max(monkeypatch):
@@ -146,9 +146,9 @@ def test_click_during_fade_window_skips_to_modal():
     app = _make_app()
     app.game.manual_result = "white_wins"
     app.game.result_flow.update_result_pending()
-    assert app.game._result_modal_should_show() is False
+    assert app.game._result_menu_should_show() is False
     app.input_router.mouse_left_clicked((100, 100))
-    assert app.game._result_modal_should_show() is True
+    assert app.game._result_menu_should_show() is True
 
 
 def test_click_outside_fade_window_does_not_alter_state():
@@ -175,7 +175,7 @@ def _show_result_with_menu_center(app, result="white_wins"):
     app.game.result_flow.update_result_pending()
     app.game.board.effects.clear_takeover()
     app.game._result_first_seen_at_ms = pg.time.get_ticks() - RESULT_MODAL_DELAY_MS - 1
-    assert app.game._result_modal_should_show() is True
+    assert app.game._result_menu_should_show() is True
     app._compute_layout()
     app.game.result_flow.feed_result_menu()
     app.game.result_menu.draw()

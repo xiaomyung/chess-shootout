@@ -59,19 +59,19 @@ class ReconnectingModal(BaseModal):
 
     def __init__(self, window):
         super().__init__(window)
-        self.on_cancel = None
+        self.on_abandon = None
         self._disconnected_at_ms = None
         self.button_rects = {}
         self._font_cache = {}
 
-    def show(self, disconnected_at_ms, on_cancel):
+    def show(self, disconnected_at_ms, on_abandon):
         super().show()
         self._disconnected_at_ms = disconnected_at_ms
-        self.on_cancel = on_cancel
+        self.on_abandon = on_abandon
 
     def hide(self):
         super().hide()
-        self.on_cancel = None
+        self.on_abandon = None
         self._disconnected_at_ms = None
         self.button_rects = {}
 
@@ -131,14 +131,15 @@ class ReconnectingModal(BaseModal):
         row_w = min(int(rect.width * 0.7), 220)
         row = pg.Rect(cx - row_w / 2, y, row_w, btn_h)
         self.button_rects = draw_button_row(
-            self.window, row, [("Abandon game", "abandon")], button_font, self.padding)
+            self.window, row, [("Abandon game", "abandon")], button_font, self.padding,
+            cut=True)
 
     def handle_click(self, pos):
         if not self.visible:
             return False
         for key, br in self.button_rects.items():
             if br.collidepoint(pos):
-                if self.on_cancel is not None:
-                    self.on_cancel()
+                if self.on_abandon is not None:
+                    self.on_abandon()
                 return True
         return False

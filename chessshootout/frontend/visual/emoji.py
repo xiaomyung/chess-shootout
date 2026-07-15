@@ -1,5 +1,6 @@
 import pygame as pg
 
+from chessshootout.infra.countries import flag_emoji
 from chessshootout.paths import resource_path
 from chessshootout.frontend.visual.cache import new_cache, memoized_surface
 
@@ -56,3 +57,10 @@ def blit_emoji(window, char, center, size):
         return False
     window.blit(surf, (center[0] - surf.get_width() // 2, center[1] - surf.get_height() // 2))
     return True
+
+
+def flag_surface(code, size):
+    char = flag_emoji(code)
+    if not char:
+        return None
+    return emoji_surface(char, size)

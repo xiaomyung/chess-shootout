@@ -159,7 +159,7 @@ ONE_SHOT_DISPATCH = [
     ("play_you_lose", "you_lose"),
     ("play_flag_fall", "you_lose"),
     ("play_draw", "draw"),
-    ("play_surrender", "resign"),
+    ("play_resign", "resign"),
     ("play_toast", "toast"),
     ("play_flip", "board_flip"),
     ("play_pickup", "pickup"),
@@ -172,6 +172,11 @@ ONE_SHOT_DISPATCH = [
     ("play_wheel_tick", "wheel_tick"),
     ("play_aim_lock", "aim_lock"),
     ("play_aim_beep", "aim_beep"),
+    ("play_drum_tick", "drum_tick"),
+    ("play_turret_ratchet", "turret_ratchet"),
+    ("play_card_toggle", "card_toggle"),
+    ("play_rail_click", "rail_click"),
+    ("play_focus_action", "focus_action"),
 ]
 
 
@@ -331,11 +336,13 @@ def test_play_random_helper_guards_both_branches(enabled, sounds_nonempty, shoul
 DISABLED_NOOP_METHODS = [
     "play_check", "play_checkmate", "play_castle", "play_undo",
     "play_game_start", "play_flag_fall", "play_online_game_start",
-    "play_give_time", "play_surrender", "play_hit",
+    "play_give_time", "play_resign", "play_hit",
     "play_you_win", "play_you_lose", "play_draw", "play_toast", "play_flip",
     "play_pickup", "play_drop", "play_swear", "play_ui_click",
     "play_skillcheck_appear", "play_skillcheck_win", "play_skillcheck_miss",
     "play_wheel_tick", "play_aim_lock", "play_aim_beep",
+    "play_drum_tick", "play_turret_ratchet", "play_card_toggle",
+    "play_rail_click", "play_focus_action",
 ]
 
 

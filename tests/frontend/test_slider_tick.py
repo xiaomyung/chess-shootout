@@ -1,8 +1,10 @@
 """Slider drag ticks (v2.4.3): TickGate gates a UI tick on each 1% change,
-coalescing rapid crossings, and both slider widgets fire play_ui_tick on drag.
+coalescing rapid crossings. The audio panel slider drags through TickGate; the
+options volume became discrete notch cells (cp2) that fire play_ui_tick straight
+on each cell click.
 
 TickGate is pure (takes now_ms) so its cadence logic is tested without pygame;
-the two integration tests prove the wiring reaches sound_manager.play_ui_tick.
+the integration tests prove the wiring reaches sound_manager.play_ui_tick.
 """
 
 from unittest.mock import MagicMock
@@ -77,27 +79,25 @@ def test_tickgate_clamps_out_of_range_ratio():
     assert len(calls) == 1
 
 
-def test_slider_row_drag_emits_ui_tick():
-    from chessshootout.frontend.modals.options import SliderRow
+def test_notch_row_click_emits_ui_tick():
+    from chessshootout.frontend.menu.options_rows import NotchRow
     sm = MagicMock()
     store = [0.0]
-    row = SliderRow("Vol", "", lambda: store[0], lambda v: store.__setitem__(0, v),
-                    on_tick=sm.play_ui_tick)
-    row._track = pg.Rect(0, 0, 100, 10)
-    row.handle_click((10, 5))
-    row._tick_gate._last_ms = -10_000
-    row._set_from_x(90)
-    assert store[0] == pytest.approx(0.9)
-    assert sm.play_ui_tick.call_count >= 2
+    row = NotchRow("Vol", "", lambda: store[0], lambda v: store.__setitem__(0, v),
+                   on_tick=sm.play_ui_tick)
+    row._band = pg.Rect(0, 0, 170, 22)
+    assert row.handle_click((row._band.right - 4, row._band.centery)) is True
+    assert store[0] == pytest.approx(1.0)
+    sm.play_ui_tick.assert_called()
 
 
-def test_slider_row_without_on_tick_is_silent_and_constructs_positionally():
-    from chessshootout.frontend.modals.options import SliderRow
+def test_notch_row_without_on_tick_is_silent_and_constructs_positionally():
+    from chessshootout.frontend.menu.options_rows import NotchRow
     store = [0.0]
-    row = SliderRow("Vol", "", lambda: store[0], lambda v: store.__setitem__(0, v))
-    row._track = pg.Rect(0, 0, 100, 10)
-    row._set_from_x(50)
-    assert store[0] == pytest.approx(0.5)
+    row = NotchRow("Vol", "", lambda: store[0], lambda v: store.__setitem__(0, v))
+    row._band = pg.Rect(0, 0, 170, 22)
+    assert row.handle_click((row._band.centerx, row._band.centery)) is True
+    assert 0.0 < store[0] <= 1.0
 
 
 def test_audio_panel_drag_emits_ui_tick():

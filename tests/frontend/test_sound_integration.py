@@ -491,7 +491,7 @@ def test_resign_win_plays_you_win_not_surrender():
     app.game.current_result = lambda: "white_wins_by_resignation"
     app.game._trigger_result_effects()
     app.sound_manager.play_you_win.assert_called_once()
-    app.sound_manager.play_surrender.assert_not_called()
+    app.sound_manager.play_resign.assert_not_called()
 
 
 def test_flag_result_plays_no_result_voice():
@@ -504,7 +504,7 @@ def test_flag_result_plays_no_result_voice():
     app.game.current_result = lambda: "black_wins_on_time"
     app.game._trigger_result_effects()
     app.sound_manager.play_you_win.assert_not_called()
-    app.sound_manager.play_surrender.assert_not_called()
+    app.sound_manager.play_resign.assert_not_called()
 
 
 def test_kill_announcer_suppressed_once_game_over():
@@ -545,7 +545,7 @@ def test_online_resigner_hears_surrender_not_you_win():
     app.sound_manager.reset_mock()
     app.game.current_result = lambda: "white_wins_by_resignation"
     app.game._trigger_result_effects()
-    app.sound_manager.play_surrender.assert_called_once()
+    app.sound_manager.play_resign.assert_called_once()
     app.sound_manager.play_you_win.assert_not_called()
 
 
@@ -577,7 +577,7 @@ def test_online_mate_loser_plays_you_lose_not_you_win():
     app.game._trigger_result_effects()
     app.sound_manager.play_you_win.assert_not_called()
     app.sound_manager.play_you_lose.assert_called_once()
-    app.sound_manager.play_surrender.assert_not_called()
+    app.sound_manager.play_resign.assert_not_called()
 
 
 def test_online_flag_loser_hears_you_lose():

@@ -1152,9 +1152,9 @@ def test_result_modal_waits_longer_while_a_takeover_plays(monkeypatch):
     app.game.result_flow.update_result_pending()
     assert app.game.board.effects.has_takeover()
     app.game._result_first_seen_at_ms = pg.time.get_ticks() - 600
-    assert app.game._result_modal_should_show() is False
+    assert app.game._result_menu_should_show() is False
     app.game._result_first_seen_at_ms = pg.time.get_ticks() - (TAKEOVER_TOTAL_MS + 50)
-    assert app.game._result_modal_should_show() is True
+    assert app.game._result_menu_should_show() is True
 
 
 def test_takeover_rebuild_keys_on_width_change_not_just_height():

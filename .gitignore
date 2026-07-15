@@ -11,6 +11,7 @@ coverage.json
 CLAUDE.md
 games/
 crashlogs/
+news_cache.json
 .env
 .env.*
 !.env.example

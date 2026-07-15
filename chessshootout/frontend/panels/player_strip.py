@@ -10,7 +10,7 @@ from chessshootout.frontend.visual.draw import rounded_rect_surface, blit_center
 from chessshootout.frontend.visual.emoji import emoji_surface
 from chessshootout.frontend.visual.fonts import get_font, DISPLAY
 from chessshootout.frontend.visual.widgets import (
-    AvatarBadge, avatar_palette, build_ko_badge, KO_WINK_MS,
+    StripAvatar, build_ko_badge, KO_WINK_MS, strip_frame_metrics, draw_captured_row,
 )
 
 
@@ -26,7 +26,7 @@ GIVE_TIME_FADE_IN_FRACTION = 0.3
 GIVE_TIME_FADE_OUT_FRACTION = 1 - GIVE_TIME_FADE_IN_FRACTION
 GIVE_TIME_FLOAT_RISE_PX = 6
 GIVE_TIME_FLOAT_TRAVEL_PX = 28
-NO_PILL_HEIGHT_CAP = 10 ** 6
+PILL_HEIGHT_UNCAPPED = 10 ** 6
 TOOLTIP_PAD_X = 9
 TOOLTIP_PAD_Y = 5
 TOOLTIP_RADIUS = 6
@@ -50,6 +50,14 @@ def give_time_float_alpha(progress):
             if progress < GIVE_TIME_FADE_IN_FRACTION
             else (1 - progress) / GIVE_TIME_FADE_OUT_FRACTION)
     return max(0, min(255, int(255 * ramp)))
+
+
+def refresh_capture_icons(board, strip_height, strips):
+    icons = board.scaled_capture_icons(strip_height)
+    if icons is None:
+        return
+    for strip in strips:
+        strip.set_piece_icons(icons)
 
 
 class PlayerStrip:
@@ -85,7 +93,7 @@ class PlayerStrip:
         self.auto_end_font = get_font(11, bold=True)
         self._give_time_float_font = get_font(11, bold=True, mono=True)
         self.icons = {}
-        self._avatar = AvatarBadge()
+        self._avatar = StripAvatar()
         self._flag_cache = None
         self._flag_rect = pg.Rect(0, 0, 0, 0)
         self._tooltip_alpha = 0.0
@@ -147,18 +155,14 @@ class PlayerStrip:
         if h <= 0 or self.rect.width <= 0:
             return
         self._flag_rect = pg.Rect(0, 0, 0, 0)
-        pad = max(int(h * 0.16), 4)
-        radius = max(int(h * 0.17), 5)
+        pad, radius, av_size, gap = strip_frame_metrics(h)
         pg.draw.rect(self.window, Colors.surface, self.rect, border_radius=radius)
-
-        av_size = max(h - 2 * pad, 1)
-        gap = max(int(h * 0.18), 6)
 
         clock_rect = self._draw_clock(pad, av_size)
         ko_left = self._draw_ko(clock_rect.x - gap, av_size)
 
         avatar_rect = pg.Rect(self.rect.x + pad, self.rect.y + pad, av_size, av_size)
-        self._draw_avatar(avatar_rect)
+        self._avatar.draw(self.window, avatar_rect, self.name, self.letter_font)
 
         who_x = avatar_rect.right + gap
         who_right = (ko_left if ko_left is not None else clock_rect.x) - gap
@@ -173,10 +177,6 @@ class PlayerStrip:
 
         self._draw_give_time_float(clock_rect)
         self._draw_flag_tooltip()
-
-    def _draw_avatar(self, rect):
-        self._avatar.draw(self.window, rect, self.name, self.letter_font,
-                          avatar_palette(is_white(self.player_color) and not self.is_bot))
 
     def _flag_surface(self, height):
         char = flag_emoji(self.country)
@@ -281,7 +281,7 @@ class PlayerStrip:
         blit_centered(self.window, text, (x + w / 2, cy))
         return x + w
 
-    def _draw_rating_pill(self, x, cy, right, max_h=NO_PILL_HEIGHT_CAP):
+    def _draw_rating_pill(self, x, cy, right, max_h=PILL_HEIGHT_UNCAPPED):
         text = self.rating_font.render(str(self.rating), True, Colors.text_dim)
         end = self._draw_text_pill(x, cy, right, text, Colors.surface_hover,
                                    pad_ratio=0.45, pad_min=3, radius_div=3, radius_min=3,
@@ -290,25 +290,13 @@ class PlayerStrip:
             return x
         return end + max(int(self.rect.height * 0.06), 4)
 
-    def _draw_captured(self, x, cy, right, ih, max_h=NO_PILL_HEIGHT_CAP):
-        cursor = x
-        last_right = x
-        size = max(int(ih * 0.5), 6)
-        for piece_type in self.captured:
-            icon = self.icons.get((piece_type, self.captured_color))
-            if icon is None:
-                continue
-            if icon.get_height() != size:
-                icon = pg.transform.smoothscale(icon, (size, size))
-            if cursor + icon.get_width() > right:
-                break
-            self.window.blit(icon, (cursor, cy - icon.get_height() / 2))
-            last_right = cursor + icon.get_width()
-            cursor += icon.get_width() - icon.get_width() // 3
+    def _draw_captured(self, x, cy, right, ih, max_h=PILL_HEIGHT_UNCAPPED):
+        last_right = draw_captured_row(
+            self.window, self.icons, self.captured, self.captured_color, x, cy, right, ih)
         if self.advantage > 0:
             self._draw_advantage_pill(last_right + max(int(ih * 0.18), 5), cy, right, max_h)
 
-    def _draw_advantage_pill(self, x, cy, right, max_h=NO_PILL_HEIGHT_CAP):
+    def _draw_advantage_pill(self, x, cy, right, max_h=PILL_HEIGHT_UNCAPPED):
         text = self.advantage_font.render(f"+{self.advantage}", True, Colors.on_accent)
         self._draw_text_pill(x, cy, right, text, Colors.amber,
                              pad_ratio=0.55, pad_min=4, radius_div=2, radius_min=0, max_h=max_h)

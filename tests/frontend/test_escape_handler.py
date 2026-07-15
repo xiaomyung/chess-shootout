@@ -1,9 +1,9 @@
 """Escape is now a context-aware Back/Cancel that NEVER closes the window
 immediately. Priority: an active skill-check swallows it; any open modal closes
-(the quit/resign confirm, help, fen, country, directory, options, offer banners,
+(the quit/resign confirm, help, fen, country, directory, offer banners,
 search); on the main-menu card it raises a 'Quit the game?' prompt; a menu
-sub-page or a finished game returns to the main menu; a live game
-opens the resign prompt.
+sub-page (including Options, now a view rather than a modal) or a finished
+game returns to the main menu; a live game opens the resign prompt.
 """
 
 import pygame as pg
@@ -43,10 +43,12 @@ def test_escape_never_closes_window_in_game():
 
 
 def test_menu_card_escape_opens_quit_prompt():
+    """The menu no longer hides its card behind the confirm modal -- MenuScreen.draw()
+    paints under every blocking modal now, so the card stays visible/live the whole time."""
     app = _app()
     app.input_router._handle_escape()
     assert app.confirm_modal.is_visible() is True
-    assert app.start_menu.visible is False
+    assert app.menu.play_view_visible() is True
     assert app.running is True
 
 
@@ -62,18 +64,16 @@ def test_second_escape_dismisses_quit_prompt_and_restores_menu():
     app.input_router._handle_escape()
     app.input_router._handle_escape()
     assert app.confirm_modal.is_visible() is False
-    assert app.start_menu.visible is True
+    assert app.menu.play_view_visible() is True
     assert app.running is True
 
 
-def test_menu_history_escape_returns_to_card():
+def test_menu_history_view_escape_returns_to_play_view():
     app = _app()
-    app.switch_to("history")
+    app.menu.goto_history()
     app.input_router._handle_escape()
-    assert app._pending_nav is not None
-    assert app._pending_nav.name == "menu"
-    app._execute_pending_nav()
     assert app.screen.name == "menu"
+    assert app.menu._active_view == "play"
 
 
 def test_game_escape_opens_resign_prompt():
@@ -103,39 +103,6 @@ def test_help_modal_escape_closes_modal_not_resign():
     app.input_router._handle_escape()
     assert app.help_modal.is_visible() is False
     assert app.confirm_modal.is_visible() is False
-
-
-def test_file_browser_over_options_closes_before_options(tmp_path):
-    from chessshootout.infra import env
-    env._ENV_PATH = tmp_path / ".env"
-    app = _app()
-    app.settings._on_open_options()
-    assert app.options_modal.is_visible() is True
-    app.directory_browser.show(str(tmp_path), lambda p: None)
-    assert app.directory_browser.is_visible() is True
-    app.input_router._handle_escape()
-    assert app.directory_browser.is_visible() is False
-    assert app.options_modal.is_visible() is True
-    app.input_router._handle_escape()
-    assert app.options_modal.is_visible() is False
-
-
-def test_country_picker_dismisses_before_the_options_modal_underneath(tmp_path):
-    """The country picker opens from inside the options modal and draws above it,
-    so it is a GLOBAL modal registered ahead of options — Esc must peel the
-    picker first and leave options visible underneath, exactly like the
-    directory browser that shares the same nesting."""
-    from chessshootout.infra import env
-    env._ENV_PATH = tmp_path / ".env"
-    app = _app()
-    app.settings._on_open_options()
-    app.country_picker.show("US", lambda c: None)
-    assert app.country_picker.is_visible() is True
-    app.input_router._handle_escape()
-    assert app.country_picker.is_visible() is False
-    assert app.options_modal.is_visible() is True
-    app.input_router._handle_escape()
-    assert app.options_modal.is_visible() is False
 
 
 def test_active_skillcheck_swallows_escape():
@@ -169,15 +136,15 @@ def test_esc_matrix_per_screen_escape_return_values():
     assert finished_app.game.escape() is True
     assert finished_app.screen is finished_app.menu
 
-    history_app = _app()
-    history_app.switch_to("history")
-    result = history_app.history.escape()
-    assert result == Nav("menu")
+    menu_history_app = _app()
+    menu_history_app.menu.goto_history()
+    assert menu_history_app.menu.escape() is True
+    assert menu_history_app.menu._active_view == "play"
 
     review_app = _app()
-    review_app.review._return_to = "history"
+    review_app.review._return_to = "menu"
     result = review_app.review.escape()
-    assert result == Nav("history")
+    assert result == Nav("menu")
 
 
 def test_skillcheck_swallow_beats_the_global_modal_and_banner_pass():

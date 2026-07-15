@@ -5,8 +5,8 @@ import pygame as pg
 
 from chessshootout import paths
 from chessshootout.infra import env
-from chessshootout.frontend.modals.options import (
-    CountryRow, PathRow, TextRow, ToggleRow, SliderRow, SegmentedRow, SwatchRow,
+from chessshootout.frontend.menu.options_rows import (
+    PathRow, TextRow, ToggleRow, NotchRow, SegmentedRow,
 )
 
 
@@ -21,36 +21,26 @@ class SettingsController:
         self._data_folder_row = None
         self._server_addr_row = None
 
-    def _on_open_options(self):
-        self.frontend.options_modal.show(self._build_settings_sections(),
-                                         on_close=self._on_close_settings)
-
-    def _dismiss_options(self):
-        if self._on_close_settings() is not False:
-            self.frontend.options_modal.hide()
-
-    def _on_close_settings(self):
-        if not self._validate_data_folder_on_close():
-            return False
+    def commit_options_exit(self):
+        self._validate_data_folder_on_exit()
         if self._server_addr_row is not None:
             env.set_server_addr(self._server_addr_row.current_text())
-        self.frontend.start_menu.apply_default_time_settings()
-        return True
+        self.frontend.menu.apply_default_time_settings()
+        self._flush_deferred_env_writes(force=True)
 
-    def _validate_data_folder_on_close(self):
+    def _validate_data_folder_on_exit(self):
         if self._data_folder_row is None:
-            return True
+            return
         typed = self._data_folder_row.current_text()
         if not typed:
-            return True
+            return
         typed = os.path.abspath(os.path.expanduser(typed))
         if os.path.normpath(typed) == os.path.normpath(str(paths.get_data_dir())):
-            return True
+            return
         if not paths.is_writable_dir(typed):
             self.frontend.toast.show("That folder isn't writable")
-            return False
+            return
         self._apply_data_folder_change(typed)
-        return True
 
     def _set_master_volume(self, value):
         self.frontend.sound_manager.set_master_volume(value)
@@ -77,7 +67,7 @@ class SettingsController:
                 del self._deferred_env_writes[key]
                 commit()
 
-    def _build_settings_sections(self):
+    def build_settings_sections(self):
         window = self.frontend.window
         sound_manager = self.frontend.sound_manager
         self._data_folder_row = PathRow(
@@ -90,33 +80,26 @@ class SettingsController:
             window, env.get_server_addr, placeholder="host or host:port")
         time_options = [(label, label) for label in env.TIME_CONTROL_VALUES]
         incr_options = [(label, label) for label in env.INCREMENT_VALUES]
-        themes = [
-            ("dark", "#7a818b", "#2f343b", False),
-            ("wood", "#d8b483", "#8a5a3c", True),
-            ("green", "#b9c4a0", "#516b3e", True),
-            ("ice", "#b4c2d4", "#4a5a72", True),
-        ]
         return [
-            ("Profile", [
-                CountryRow("Country", "Shows your flag on the player strip",
-                           env.get_country, self._on_pick_country),
-            ]),
             ("Audio", [
-                SliderRow("Master volume", "", lambda: sound_manager.master_volume,
-                          self._set_master_volume, on_tick=sound_manager.play_ui_tick,
-                          on_release=lambda: self._defer_env_write(
-                              "master_volume", self._commit_master_volume)),
-                SliderRow("Menu volume", "", lambda: sound_manager.menu_volume,
-                          self._set_menu_volume, on_tick=sound_manager.play_ui_tick,
-                          on_release=lambda: self._defer_env_write(
-                              "menu_volume", self._commit_menu_volume)),
+                NotchRow("Master volume", "", lambda: sound_manager.master_volume,
+                         self._set_master_volume, on_tick=sound_manager.play_ui_tick,
+                         on_release=lambda: self._defer_env_write(
+                             "master_volume", self._commit_master_volume)),
+                NotchRow("Menu volume", "", lambda: sound_manager.menu_volume,
+                         self._set_menu_volume, on_tick=sound_manager.play_ui_tick,
+                         on_release=lambda: self._defer_env_write(
+                             "menu_volume", self._commit_menu_volume)),
                 ToggleRow("Mute all sound", "Silence every shot and callout",
                           lambda: not sound_manager.enabled,
                           lambda muted: sound_manager.set_enabled(not muted)),
             ]),
-            ("Appearance", [
-                SwatchRow("Board theme", "More themes coming soon", themes,
-                          env.get_theme, env.set_theme),
+            ("Display", [
+                SegmentedRow("Launch mode",
+                             "How the window opens — applies on next launch",
+                             [("Windowed", "windowed"), ("Maximized", "maximized"),
+                              ("Fullscreen", "fullscreen")],
+                             env.get_launch_mode, env.set_launch_mode),
             ]),
             ("Focus mode", [
                 SegmentedRow("Show in focus",
@@ -128,10 +111,10 @@ class SettingsController:
             ("Game", [
                 SegmentedRow("Default time", "Minutes on the clock, or untimed",
                              time_options, env.get_default_time_control,
-                             env.set_default_time_control, mono=True),
+                             env.set_default_time_control, mono=True, variant="cells"),
                 SegmentedRow("Default increment", "Seconds added each move",
                              incr_options, env.get_default_increment,
-                             env.set_default_increment, mono=True),
+                             env.set_default_increment, mono=True, variant="cells"),
                 self._data_folder_row,
             ]),
             ("Online", [
@@ -150,12 +133,6 @@ class SettingsController:
                           env.get_show_ping, env.set_show_ping),
             ]),
         ]
-
-    def _on_pick_country(self):
-        self.frontend.country_picker.show(env.get_country(), self._apply_country_choice)
-
-    def _apply_country_choice(self, code):
-        env.set_country(code)
 
     def _on_change_data_folder(self):
         self.frontend.directory_browser.show(
@@ -195,11 +172,7 @@ class SettingsController:
         new_games = os.path.join(new_dir, paths.GAMES_SUBDIR)
         if move_from is not None and not self._move_pgns(move_from, new_games):
             return
-        if to_default:
-            env.set_data_dir(None)
-        else:
-            env.set_data_dir(new_dir)
-        self.frontend._refresh_load_pgn_availability()
+        env.set_data_dir(None if to_default else new_dir)
         self.frontend.toast.show("Data folder updated")
 
     def _move_pgns(self, src, dst):

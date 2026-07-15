@@ -32,11 +32,11 @@ class InputRouter:
         frontend = self.frontend
         frontend.confirm_modal.hide()
         if frontend.screen is frontend.menu:
-            frontend.start_menu.show()
+            frontend.menu.show_play_view()
 
     def _top_visible_modal(self):
         for spec in self.frontend._active_modal_specs():
-            if spec.obj.is_visible():
+            if spec.modal.is_visible():
                 return spec
         return None
 
@@ -44,10 +44,11 @@ class InputRouter:
         frontend = self.frontend
         if dismiss_topmost(frontend._active_modal_specs()):
             return True
-        if not frontend.coordinator.offer_banners.is_empty():
+        offer_banners = frontend.coordinator.offer_banners
+        if not offer_banners.is_empty():
             if frontend.coordinator._rematch_offered:
                 frontend.coordinator._decline_rematch()
-            frontend.coordinator.offer_banners.clear()
+            offer_banners.clear()
             return True
         return False
 
@@ -55,7 +56,7 @@ class InputRouter:
         frontend = self.frontend
         top = self._top_visible_modal()
         if top is not None:
-            return top.obj if top.scrollable else None
+            return top.modal if top.scrollable else None
         return frontend.screen.active_scrollable()
 
     def _cancel_all_scroll(self):
@@ -63,13 +64,13 @@ class InputRouter:
         self._scroll_pressed = None
         for spec in frontend._modal_registry:
             if spec.scrollable:
-                spec.obj.scroll.cancel()
+                spec.modal.scroll.cancel()
         for screen in frontend.screens.values():
             for scrollable in screen.scrollables():
                 scrollable.scroll.cancel()
             for spec in screen.modals():
                 if spec.scrollable:
-                    spec.obj.scroll.cancel()
+                    spec.modal.scroll.cancel()
 
     def _handle_left_drag_motion(self, pos):
         frontend = self.frontend
@@ -88,13 +89,16 @@ class InputRouter:
         if ui_click and not self._click_sound_played:
             frontend.sound_manager.play_ui_click()
 
+    def suppress_click_sound(self):
+        self._click_sound_played = True
+
     def _dispatch_left_click(self, pos):
         frontend = self.frontend
         if frontend.chrome.handle_click(pos):
             return
         top = self._top_visible_modal()
         if top is not None:
-            top.obj.handle_click(pos)
+            top.modal.handle_click(pos)
             return
         if frontend.coordinator.offer_banners.handle_click(pos):
             return
@@ -152,7 +156,7 @@ class InputRouter:
                 top = self._top_visible_modal()
                 if top is not None:
                     if top.handles_keys:
-                        top.obj.handle_key(event)
+                        top.modal.handle_key(event)
                     continue
                 result = frontend.screen.handle_key(event)
                 if isinstance(result, Nav):
@@ -184,6 +188,9 @@ class InputRouter:
                 if event.buttons[0]:
                     frontend.chrome.handle_title_motion(event.pos)
                     self._handle_left_drag_motion(event.pos)
+                elif (event.pos[1] >= frontend.chrome.HEIGHT
+                        and not frontend._blocking_modal_visible()):
+                    frontend.screen.handle_motion(event.pos)
 
             elif event.type == pg.MOUSEWHEEL:
                 scrollable = self._active_scrollable()

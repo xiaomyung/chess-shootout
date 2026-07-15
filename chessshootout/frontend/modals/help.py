@@ -18,7 +18,7 @@ HOTKEYS = [
     ("Hold Give 15s", "Ramp the opponent's clock up to the starting time"),
     ("Q  R  B  N", "Promotion picker (when shown)"),
     ("Space / Click", "Fire the skill-check wheel (Shootout)"),
-    ("← →", "Step through moves (also during live games)"),
+    ("Left / Right", "Step through moves (also during live games)"),
     ("Home", "Jump to first move (also during live games)"),
     ("End", "Return to live play"),
     ("Esc", "Back · close modal · resign · quit"),
@@ -103,7 +103,7 @@ class HelpModal(BaseModal, ScrollHost):
 
         self.button_rects = draw_button_row(
             self.window, button_row, [("Close", "close")],
-            self.button_font, pad, primary_keys={"close"},
+            self.button_font, pad, primary_keys={"close"}, cut=True,
         )
 
     def _draw_rows(self, rows_rect):

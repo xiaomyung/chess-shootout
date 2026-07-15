@@ -9,6 +9,7 @@ from chessshootout.frontend.visual.colors import Colors
 SCALE_MIN = 0.85
 SCALE_MAX = 1.5
 SCALE_REF_HEIGHT = 760.0
+DITHER_SEED = 0x5EED
 
 _DITHER_TILES = {}
 
@@ -17,7 +18,7 @@ def _dither_tiles(t):
     cached = _DITHER_TILES.get(t)
     if cached is not None:
         return cached
-    rng = random.Random(0x5EED)
+    rng = random.Random(DITHER_SEED)
     add = bytearray(t * t * 3)
     sub = bytearray(t * t * 3)
     for i in range(t * t):
@@ -62,12 +63,12 @@ def grid_step(h):
     return max(int(64 * scale), 32)
 
 
-def arena_background(size, center=(0.5, 0.18)):
+def arena_background(size, center=(0.5, 0.18), grid=None):
     w, h = size
     grad = radial_gradient(128, center[0], center[1], 1.2, 0.8,
                            Colors.battle_bg_hi, Colors.battle_bg, Colors.battle_bg_edge)
     surf = pg.transform.smoothscale(grad, size)
-    step = grid_step(h)
+    step = grid if grid is not None else grid_step(h)
     grid = pg.Surface(size, pg.SRCALPHA)
     line = (*pg.Color(Colors.battle_grid)[:3], 6)
     for gx in range(0, w, step):

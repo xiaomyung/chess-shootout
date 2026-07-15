@@ -1,3 +1,4 @@
+import hashlib
 import math
 from weakref import WeakKeyDictionary
 
@@ -8,7 +9,7 @@ from chessshootout.frontend.visual.cache import (
     render_text, new_cache, memoized_surface,
 )
 from chessshootout.frontend.visual.draw import (
-    supersample, rounded_rect_surface, infinity_surface, blit_centered,
+    supersample, rounded_rect_surface, infinity_surface, blit_centered, cut_rect_surface,
 )
 
 
@@ -18,11 +19,13 @@ SCROLL_THUMB_RIGHT_OFFSET = 4
 SCROLL_THUMB_MIN_HEIGHT = 18
 BUTTON_LABEL_PADDING_PX = 6
 BUTTON_RADIUS = 8
+BUTTON_CUT = 6
 PILL_PAD_Y = 6
 SEGMENT_RADIUS = 8
 SEGMENT_INNER_RADIUS = 6
 CHIP_RADIUS = 7
 KO_WINK_MS = 520
+AVATAR_CUT_FRAC = 0.16
 
 
 def build_shell(w, h, winking=False):
@@ -64,24 +67,17 @@ def build_ko_badge(count, font, height, winking=False):
     return memoized_surface(_KO_BADGE_CACHE, (count, height, winking), build)
 
 
-def build_avatar(size, top, bottom):
+def build_flat_avatar(size, fill):
     size = max(int(size), 1)
-    radius = max(int(size * 0.22), 2)
-    top = pg.Color(top)
-    bottom = pg.Color(bottom)
+    cut = max(int(size * AVATAR_CUT_FRAC), 2)
+    return cut_rect_surface((size, size), cut, fill, corners=("tr", "bl"))
 
-    def render(surf, k):
-        w = surf.get_width()
-        for y in range(w):
-            t = y / max(w - 1, 1)
-            surf.fill(top.lerp(bottom, t), pg.Rect(0, y, w, 1))
-        mask = pg.Surface((w, w), pg.SRCALPHA)
-        pg.draw.rect(mask, (255, 255, 255, 255), mask.get_rect(),
-                     border_radius=int(radius * k))
-        surf.blit(mask, (0, 0), special_flags=pg.BLEND_RGBA_MULT)
-        pg.draw.rect(surf, (0, 0, 0, 80), surf.get_rect(),
-                     width=max(int(k), 1), border_radius=int(radius * k))
-    return supersample(size, render)
+
+def draw_avatar(window, rect, name, font, fill, letter_color):
+    window.blit(build_flat_avatar(rect.width, fill), rect.topleft)
+    glyph = font.render(name[:1].upper() if name else "?", True, letter_color)
+    window.blit(glyph, (rect.centerx - glyph.get_width() / 2,
+                        rect.centery - glyph.get_height() / 2))
 
 
 def draw_pill(window, text, x, cy, font, text_color=Colors.amber_hi,
@@ -181,7 +177,7 @@ def _button_bg(rect, force_pressed=False, disabled=False):
 
 
 def draw_button(window, rect, label, font, force_pressed=False, disabled=False,
-                selected=False, primary=False):
+                selected=False, primary=False, cut=False):
     if primary and not disabled:
         hovered, pressed = _hover_state(rect)
         bg = Colors.accent_press if pressed else (Colors.accent_hi if hovered else Colors.accent)
@@ -190,8 +186,13 @@ def draw_button(window, rect, label, font, force_pressed=False, disabled=False,
     else:
         bg, text_color = _button_bg(rect, force_pressed or selected, disabled)
         border = Colors.accent if (selected and not disabled) else Colors.border
-    window.blit(rounded_rect_surface(rect.size, BUTTON_RADIUS, bg, border=border,
-                                     border_width=1), rect.topleft)
+    if cut:
+        shape = cut_rect_surface(rect.size, BUTTON_CUT, bg, border=border,
+                                 border_width=1, corners=("tr", "bl"))
+    else:
+        shape = rounded_rect_surface(rect.size, BUTTON_RADIUS, bg, border=border,
+                                     border_width=1)
+    window.blit(shape, rect.topleft)
     text = fit_text_to_rect(render_text(font, label, text_color), rect)
     window.blit(
         text,
@@ -246,7 +247,7 @@ def draw_gear(window, rect):
 
 
 def draw_button_row(window, rect, buttons, font, gap, disabled_keys=None,
-                    primary_keys=None):
+                    primary_keys=None, cut=False):
     n = len(buttons)
     if n == 0 or rect.width <= gap * (n - 1):
         return {}
@@ -258,7 +259,7 @@ def draw_button_row(window, rect, buttons, font, gap, disabled_keys=None,
         x = rect.x + i * (btn_w + gap)
         br = pg.Rect(x, rect.y, btn_w, rect.height)
         draw_button(window, br, label, font, disabled=key in disabled_keys,
-                    primary=key in primary_keys)
+                    primary=key in primary_keys, cut=cut)
         button_rects[key] = br
     return button_rects
 
@@ -371,12 +372,19 @@ def draw_scroll_thumb(window, track_rect, total, visible, offset_fraction, last_
                  border_radius=SCROLL_THUMB_WIDTH // 2)
 
 
-def avatar_palette(white):
-    if white:
-        return (pg.Color(Colors.amber), pg.Color(Colors.accent),
-                pg.Color(Colors.on_accent))
-    return (pg.Color(Colors.avatar_slate_top), pg.Color(Colors.avatar_slate_bottom),
-            pg.Color(Colors.avatar_letter_dark))
+AVATAR_COLOR_POOL = (
+    Colors.avatar_orange, Colors.avatar_amber, Colors.avatar_teal, Colors.avatar_green,
+    Colors.avatar_blue, Colors.avatar_violet, Colors.avatar_rose, Colors.avatar_cyan,
+)
+
+
+def avatar_palette(seed):
+    if not seed:
+        fill = AVATAR_COLOR_POOL[0]
+    else:
+        digest = hashlib.sha1(seed.encode("utf-8")).hexdigest()
+        fill = AVATAR_COLOR_POOL[int(digest, 16) % len(AVATAR_COLOR_POOL)]
+    return (pg.Color(fill), pg.Color(Colors.on_accent))
 
 
 class AvatarBadge:
@@ -388,11 +396,54 @@ class AvatarBadge:
         self._cache = None
 
     def draw(self, window, rect, name, font, palette):
-        top, bottom, letter_color = palette
-        key = (rect.width, top.r, top.g, top.b, bottom.r, bottom.g, bottom.b)
+        fill, letter_color = palette
+        key = (rect.width, str(fill))
         if self._cache is None or self._cache[0] != key:
-            self._cache = (key, build_avatar(rect.width, top, bottom))
+            self._cache = (key, build_flat_avatar(rect.width, fill))
         window.blit(self._cache[1], rect.topleft)
         glyph = font.render(name[:1].upper() if name else "?", True, letter_color)
         window.blit(glyph, (rect.centerx - glyph.get_width() / 2,
                             rect.centery - glyph.get_height() / 2))
+
+
+class StripAvatar:
+
+    def __init__(self):
+        self._badge = AvatarBadge()
+        self._palette = None
+        self._seed = None
+
+    def reset(self):
+        self._badge.reset()
+
+    def draw(self, window, rect, name, font):
+        if self._palette is None or self._seed != name:
+            self._seed = name
+            self._palette = avatar_palette(name)
+        self._badge.draw(window, rect, name, font, self._palette)
+
+
+def strip_frame_metrics(h):
+    pad = max(int(h * 0.16), 4)
+    radius = max(int(h * 0.17), 5)
+    av_size = max(h - 2 * pad, 1)
+    gap = max(int(h * 0.18), 6)
+    return pad, radius, av_size, gap
+
+
+def draw_captured_row(window, icons, captured, captured_color, x, cy, right, ih):
+    cursor = x
+    last_right = x
+    size = max(int(ih * 0.5), 6)
+    for piece_type in captured:
+        icon = icons.get((piece_type, captured_color))
+        if icon is None:
+            continue
+        if icon.get_height() != size:
+            icon = pg.transform.smoothscale(icon, (size, size))
+        if cursor + icon.get_width() > right:
+            break
+        window.blit(icon, (cursor, cy - icon.get_height() / 2))
+        last_right = cursor + icon.get_width()
+        cursor += icon.get_width() - icon.get_width() // 3
+    return last_right

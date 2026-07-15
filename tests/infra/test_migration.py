@@ -1,6 +1,5 @@
 import os
 
-
 import pytest
 
 from tests.conftest import pygame_display
@@ -156,37 +155,15 @@ def test_reset_clears_override(tmp_path, monkeypatch):
     assert os.environ.get("CHESS_DATA_DIR") is None
 
 
-def test_menu_hidden_while_overlay_modal_open():
-    """An open overlay modal hides the menu; closing it brings the menu back."""
-    app = _app()
-    assert app._blocking_modal_visible() is False
-    app.settings._on_open_options()
-    assert app._blocking_modal_visible() is True
-    app.options_modal.hide()
-    assert app._blocking_modal_visible() is False
-
-
 def test_options_close_applies_default_time_to_menu(monkeypatch):
-    """Closing Settings re-applies the persisted default time/increment to the
-    start-menu selection, overriding whatever was picked there before."""
+    """Leaving the Options view re-applies the persisted default time/increment
+    to the play view's selection, overriding whatever was picked there before."""
     app = _app()
-    app.start_menu.selected_time_minutes = 5
-    app.start_menu.selected_increment_seconds = 2
+    app.menu.play_view.selected_time_minutes = 5
+    app.menu.play_view.selected_increment_seconds = 2
     monkeypatch.setenv("CHESS_DEFAULT_TC", "15")
     monkeypatch.setenv("CHESS_DEFAULT_INCREMENT", "10")
-    assert app.settings._on_close_settings() is True
-    assert app.start_menu.selected_time_minutes == 15
-    assert app.start_menu.selected_increment_seconds == 10
-
-
-def test_menu_click_routes_to_options_not_start_menu(monkeypatch):
-    """With the options modal open, clicks route to it and never reach start_menu."""
-    app = _app()
-    assert app.screen is app.menu
-    app.settings._on_open_options()
-    app.draw_frame()
-    received = []
-    monkeypatch.setattr(app.start_menu, "handle_click", lambda pos: received.append(pos))
-    app.input_router.mouse_left_clicked((10, 10))
-    assert received == []
-    assert app.options_modal.is_visible() is True
+    app.menu.goto_view("options")
+    app.menu.goto_view("play")
+    assert app.menu.play_view.selected_time_minutes == 15
+    assert app.menu.play_view.selected_increment_seconds == 10

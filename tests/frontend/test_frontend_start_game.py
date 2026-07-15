@@ -6,13 +6,13 @@ clock or leaves the "menu" mode until the server confirms the game."""
 
 import random
 
-
 import pytest
 
 from tests.conftest import pygame_display
 from chessshootout.backend.utils import Square
 from chessshootout.backend.pieces import PieceColor
 from chessshootout.infra import countries, env
+from chessshootout.frontend.frontend import Frontend
 from chessshootout.frontend.screens.game import OPPONENT_NAME_FOR_MODE
 from chessshootout.online.client import OnlineClient
 from chessshootout.domain.pgn.load import extract_csmatchid, parse_pgn_headers
@@ -59,10 +59,11 @@ def test_start_game_single_screen_white_side():
     assert app.game.white_name == "alice"
     assert app.game.black_name == "Player 2"
     assert app.game.variant == "local"
-    assert app.start_menu.is_visible() is False
-    assert app.game.match.backend.clock is not None
-    assert app.game.match.backend.clock.initial_seconds == 300
-    assert app.game.match.backend.clock.increment_seconds == 2
+    assert app.menu.play_view_visible() is False
+    clock = app.game.match.backend.clock
+    assert clock is not None
+    assert clock.initial_seconds == 300
+    assert clock.increment_seconds == 2
 
 
 @pytest.mark.parametrize("nickname", [
@@ -138,7 +139,7 @@ def test_start_game_bot_mode_returns_early_without_starting():
     app._on_start_game(base_config(mode="bot"))
     assert app.screen is app.menu
     assert app.game.match.backend.clock is None
-    assert app.start_menu.is_visible() is True
+    assert app.menu.play_view_visible() is True
     assert app.coordinator.client is None
 
 
@@ -153,7 +154,7 @@ def test_start_game_online_mode_starts_matchmaking_without_starting_game(monkeyp
     app._on_start_game(base_config(mode="online"))
     assert app.screen is app.menu
     assert app.game.match.backend.clock is None
-    assert app.start_menu.is_visible() is False
+    assert app.menu.play_view_visible() is False
     assert app.coordinator.client is not None
     assert app.coordinator.wait_modal.is_visible() is True
     assert connected and connected[0][0] == env.get_server_addr()
@@ -173,15 +174,16 @@ def test_tick_clock_called_only_outside_menu():
     """draw_frame ticks the clock only once a game has started, never in the menu."""
     app = make_app()
     calls = []
-    original_tick = app.game.match.backend.tick_clock
-    app.game.match.backend.tick_clock = lambda: calls.append(1)
+    backend = app.game.match.backend
+    original_tick = backend.tick_clock
+    backend.tick_clock = lambda: calls.append(1)
     app.draw_frame()
     assert calls == []
 
     app._on_start_game(base_config())
     app.draw_frame()
     assert len(calls) >= 1
-    app.game.match.backend.tick_clock = original_tick
+    backend.tick_clock = original_tick
 
 
 def test_tick_clock_no_op_when_game_over():
@@ -199,21 +201,23 @@ def test_new_game_preserves_time_control():
     app._on_start_game(base_config(time_minutes=10, increment_seconds=5))
     app.game.manual_result = "white_wins"
     app._on_new_game()
-    assert app.game.match.backend.clock is not None
-    assert app.game.match.backend.clock.initial_seconds == 600
-    assert app.game.match.backend.clock.increment_seconds == 5
+    clock = app.game.match.backend.clock
+    assert clock is not None
+    assert clock.initial_seconds == 600
+    assert clock.increment_seconds == 5
 
 
 def test_undo_with_clock_restores_remaining():
     """A move debits and increments the clock; undo restores the pre-move remaining."""
     app = make_app()
     app._on_start_game(base_config())
-    pre = app.game.match.backend.clock.white_remaining
+    clock = app.game.match.backend.clock
+    pre = clock.white_remaining
     app.game.board.handle_click(Square(6, 4))
     app.game.board.handle_click(Square(4, 4))
-    assert app.game.match.backend.clock.white_remaining != pre
+    assert clock.white_remaining != pre
     app.game._on_undo()
-    assert app.game.match.backend.clock.white_remaining == pre
+    assert clock.white_remaining == pre
 
 
 @pytest.mark.parametrize("flipped, top_is_white", [
@@ -466,12 +470,36 @@ def test_start_game_persists_nickname(monkeypatch, mode_value):
 
 
 def test_settings_close_persists_server_address(monkeypatch):
-    """Editing the Settings server field and closing persists it via env, so the
-    next matchmake + reconnect probe target the last-used server."""
+    """Editing the Options server field and leaving the view persists it via
+    env, so the next matchmake + reconnect probe target the last-used server."""
     app = make_app()
     saved = []
     monkeypatch.setattr(env, "set_server_addr", lambda v: saved.append(v))
-    app.settings._on_open_options()
+    app.menu.goto_view("options")
     app.settings._server_addr_row.input.text = "chess.example.com:9000"
-    assert app.settings._on_close_settings() is True
+    app.menu.goto_view("play")
     assert saved == ["chess.example.com:9000"]
+
+
+def test_first_run_profile_hint_toasts_once_when_the_flag_is_unset(monkeypatch):
+    """v2.9.0: a brand-new install (flag never set) sees a one-time hype toast
+    pointing at Profile, and the flag is persisted immediately so it never
+    fires again."""
+    monkeypatch.delenv("CHESS_PROFILE_HINT_SHOWN", raising=False)
+    assert env.get_profile_hint_shown() is False
+
+    app = Frontend(1000, 800)
+
+    messages = [b["message"] for b in app.toast._bubbles]
+    assert "Set your name in Profile >" in messages
+    assert env.get_profile_hint_shown() is True
+
+
+def test_first_run_profile_hint_does_not_repeat_once_the_flag_is_persisted(monkeypatch):
+    monkeypatch.delenv("CHESS_PROFILE_HINT_SHOWN", raising=False)
+    env.set_profile_hint_shown()
+
+    app = Frontend(1000, 800)
+
+    messages = [b["message"] for b in app.toast._bubbles]
+    assert "Set your name in Profile >" not in messages

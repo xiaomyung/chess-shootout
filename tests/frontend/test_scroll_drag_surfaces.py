@@ -9,13 +9,13 @@ import pytest
 
 from tests.conftest import pygame_display
 from chessshootout.backend.backend import Backend
-from chessshootout.backend.pieces import Piece, PieceType, PieceColor
-from chessshootout.backend.utils import Square, Move, HistoryEntry
 from chessshootout.frontend.modals.country_picker import CountryPicker
 from chessshootout.frontend.modals.directory_browser import DirectoryBrowser
 from chessshootout.frontend.modals.help import HelpModal, HOTKEYS
-from chessshootout.frontend.modals.options import OptionsModal, ToggleRow
+from chessshootout.frontend.menu.options_rows import OptionsBody, ToggleRow, Fonts
 from chessshootout.frontend.panels.right import RightMenu
+from chessshootout.frontend.visual.fonts import get_font, get_mono_font
+from tests.helpers import history_entry
 
 
 _pygame_init = pygame_display(1000, 800)
@@ -118,38 +118,40 @@ def test_help_draws_a_thumb_when_overflowing():
     assert hm.scroll.thumb_rect() is not None
 
 
+def _options_fonts():
+    return Fonts(get_font(14, bold=True), get_font(11), get_font(10, bold=True),
+                 get_mono_font(12), get_font(13, bold=True))
+
+
 def _options():
     state = {f"k{i}": False for i in range(30)}
     rows = [ToggleRow(f"Option {i}", "desc",
                       (lambda i=i: state[f"k{i}"]),
                       (lambda v, i=i: state.__setitem__(f"k{i}", v)))
             for i in range(30)]
-    modal = OptionsModal(pg.display.get_surface())
-    modal.set_rect(pg.Rect(100, 60, 460, 560))
-    modal.show([("Section", rows)])
-    modal.draw()
-    return modal, rows
+    body = OptionsBody()
+    body.set_sections([("Section", rows)])
+    body.draw(pg.display.get_surface(), pg.Rect(100, 60, 460, 560), _options_fonts())
+    return body, rows
 
 
 def test_options_empty_space_arms_scroll():
-    modal, _ = _options()
-    body = modal.body
+    body, _ = _options()
     assert body.scroll.scrollable() is True
-    assert modal.handle_press((body.rect.x + 4, body.rect.y + 20)) is True
+    assert body.handle_press((body.rect.x + 4, body.rect.y + 20)) is True
 
 
 def test_options_control_press_does_not_arm_scroll():
-    modal, rows = _options()
+    body, rows = _options()
     ctl = rows[0]._ctl
     assert ctl.width > 0
-    assert modal.handle_press(ctl.center) is False
+    assert body.handle_press(ctl.center) is False
 
 
 def test_options_drag_scrolls_body():
-    modal, _ = _options()
-    body = modal.body
+    body, _ = _options()
     x = body.rect.x + 4
-    armed, dragged = _drag(modal, x, body.rect.y + 30, body.rect.y + 0)
+    armed, dragged = _drag(body, x, body.rect.y + 30, body.rect.y + 0)
     assert armed is True and dragged is True
     assert body._scroll_px == pytest.approx(30.0)
 
@@ -164,19 +166,13 @@ class _Board:
         self.review_ply = ply
 
 
-def _entry(san):
-    move = Move(Square(6, 0), Square(5, 0), Piece(PieceType.PAWN, PieceColor.WHITE))
-    return HistoryEntry(move=move, prev_castling_rights=(), prev_en_passant_target=None,
-                        prev_halfmove_clock=0, position_key_added=("k",), san=san)
-
-
 def _right():
     backend = Backend()
     backend.new_game()
     board = _Board()
     rm = RightMenu(pg.display.get_surface(), backend, {}, board=board)
     rm.set_rect(pg.Rect(0, 0, 320, 600))
-    backend.move_history = [_entry(f"a{i % 8 + 1}") for i in range(200)]
+    backend.move_history = [history_entry(f"a{i % 8 + 1}") for i in range(200)]
     rm.draw_menu()
     return rm, board
 

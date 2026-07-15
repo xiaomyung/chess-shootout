@@ -11,6 +11,7 @@ from chessshootout.frontend.visual.toast import (
 )
 from tests.conftest import pygame_display
 
+
 _pygame_init = pygame_display(800, 600)
 
 
@@ -164,6 +165,18 @@ def test_draw_paints_only_when_visible(toast, show_first, expect_painted):
     else:
         toast.draw()
     assert _top_centre_painted(window) is expect_painted
+
+
+def test_bubble_overlay_uses_cut_corner_notch(toast, monkeypatch):
+    """The v2.9.0 restyle swapped the bubble's rounded pill for a cut-corner
+    (tr/bl) polygon — the top-right notch must read fully transparent while
+    the untouched top-left stays opaque."""
+    monkeypatch.setattr(pg.time, "get_ticks", lambda: 1000)
+    toast.show("hi")
+    overlay = toast._build_bubble_overlay(toast._bubbles[0])
+    w, _h = overlay.get_size()
+    assert overlay.get_at((w - 2, 1))[3] == 0
+    assert overlay.get_at((1, 1))[3] == 255
 
 
 def test_keyed_update_refreshes_cached_text(toast):

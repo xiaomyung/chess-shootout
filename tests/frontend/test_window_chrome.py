@@ -179,7 +179,8 @@ class _FakeSDL:
     def __init__(self, win_ptr_ret):
         self.SDL_GetWindowFromID = _FakeFn(win_ptr_ret)
         for name in ("SDL_SetWindowHitTest", "SDL_SetWindowMinimumSize",
-                     "SDL_MinimizeWindow", "SDL_RaiseWindow", "SDL_SetWindowFullscreen"):
+                     "SDL_MinimizeWindow", "SDL_MaximizeWindow", "SDL_RaiseWindow",
+                     "SDL_SetWindowFullscreen"):
             setattr(self, name, _FakeFn(0))
 
 
@@ -358,3 +359,37 @@ def test_layout_reserves_titlebar_and_keeps_board_playable_at_min_size():
     app = Frontend(900, 500)
     assert app.game.board.board_offset_y >= app.chrome.HEIGHT - 1
     assert app.game.board.cell_size > 40
+
+
+def _stats_app(monkeypatch, times):
+    from chessshootout.infra import env
+    from chessshootout.frontend.frontend import Frontend
+    env.init_paths()
+    for name in ("get_show_fps", "get_show_frame_stats", "get_show_1pct_low",
+                 "get_show_frametime", "get_show_ping"):
+        monkeypatch.setattr(env, name, lambda: True)
+    app = Frontend(1000, 700)
+    app._frame_times.clear()
+    app._frame_times.extend(times)
+    app._last_work_ms = 10.4
+    app.coordinator.ping_ms = lambda: 32
+    return app
+
+
+def test_chrome_stats_keep_label_and_value_adjacent(monkeypatch):
+    """The value sits one space after its label — never orphaned by right-pad."""
+    parts = _stats_app(monkeypatch, [16.6] * 120)._chrome_stats()
+    assert parts
+    for part in parts:
+        assert "  " not in part.rstrip(), \
+            f"more than one space between a label and its value: {part!r}"
+
+
+def test_chrome_stats_slots_are_length_invariant(monkeypatch):
+    """Fixed-width slots (trailing spaces absorb digit growth) so nothing shifts
+    when the numbers change width."""
+    slow = _stats_app(monkeypatch, [16.6] * 120)._chrome_stats()
+    fast = _stats_app(monkeypatch, [4.0] * 120)._chrome_stats()
+    assert len(slow) == len(fast) and slow
+    assert [len(p) for p in slow] == [len(p) for p in fast], \
+        "each stat slot keeps a constant width regardless of digit count"

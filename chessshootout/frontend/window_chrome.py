@@ -49,7 +49,7 @@ class _SDLPoint(ctypes.Structure):
     _fields_ = [("x", ctypes.c_int), ("y", ctypes.c_int)]
 
 
-FS_DRAG_EXIT_PX = 8
+_FS_DRAG_EXIT_PX = 8
 _SDL_WINDOW_FULLSCREEN_DESKTOP = 0x00001001
 
 
@@ -101,6 +101,7 @@ class WindowChrome:
     STATS_FONT_PX = 11
     STATS_GAP = 14
     STATS_PAD = 16
+    STATS_SEP_HEIGHT_FRAC = 0.6
     DOT_HOVER_LIGHTEN = 0.22
     DOT_GLYPH_DARKEN = 0.74
     DOT_GLYPH_INSET = 0.55
@@ -219,6 +220,7 @@ class WindowChrome:
             ctypes.c_void_p, ctypes.c_int, ctypes.c_int
         ]
         self._sdl.SDL_MinimizeWindow.argtypes = [ctypes.c_void_p]
+        self._sdl.SDL_MaximizeWindow.argtypes = [ctypes.c_void_p]
         self._sdl.SDL_RaiseWindow.argtypes = [ctypes.c_void_p]
         self._sdl.SDL_SetWindowFullscreen.argtypes = [ctypes.c_void_p, ctypes.c_uint32]
         self._sdl.SDL_SetWindowFullscreen.restype = ctypes.c_int
@@ -325,10 +327,18 @@ class WindowChrome:
         if left < self._wordmark_right_edge() + self.STATS_PAD:
             return
         cy = self.HEIGHT // 2
+        sep_half = int(self.HEIGHT * self.STATS_SEP_HEIGHT_FRAC) // 2
+        sep_color = pg.Color(Colors.border)
         x = left
-        for s in surfs:
+        for i, (part, s) in enumerate(zip(parts, surfs)):
             self.window.blit(s, (x, cy - s.get_height() // 2))
-            x += s.get_width() + self.STATS_GAP
+            visible_right = x + self._stats_font.size(part.rstrip())[0]
+            next_x = x + s.get_width() + self.STATS_GAP
+            if i < len(surfs) - 1:
+                sep_x = (visible_right + next_x) // 2
+                pg.draw.line(self.window, sep_color, (sep_x, cy - sep_half),
+                             (sep_x, cy + sep_half))
+            x = next_x
 
     def _load_logo(self):
         try:
@@ -417,7 +427,7 @@ class WindowChrome:
             return
         dx = pos[0] - self._fs_press_pos[0]
         dy = pos[1] - self._fs_press_pos[1]
-        if dx * dx + dy * dy >= FS_DRAG_EXIT_PX * FS_DRAG_EXIT_PX:
+        if dx * dx + dy * dy >= _FS_DRAG_EXIT_PX * _FS_DRAG_EXIT_PX:
             self._fs_press_pos = None
             self.toggle_fullscreen()
 
@@ -438,6 +448,16 @@ class WindowChrome:
                 self._sdl.SDL_MinimizeWindow(self._win_ptr)
             except Exception:
                 log.warning("minimize failed", exc_info=True)
+
+    def maximize(self):
+        if self._win_ptr is None:
+            return False
+        try:
+            self._sdl.SDL_MaximizeWindow(self._win_ptr)
+        except Exception:
+            log.warning("maximize failed", exc_info=True)
+            return False
+        return True
 
     def apply_fullscreen(self, enable):
         if self._win_ptr is None:

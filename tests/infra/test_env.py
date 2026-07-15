@@ -13,8 +13,9 @@ _ISOLATED_VARS = (
     "CHESS_SERVER_ADDR", "CHESS_NICKNAME", "CHESS_CLIENT_UUID",
     "CHESS_LAST_MODE", "CHESS_MASTER_VOLUME", "CHESS_MENU_VOLUME", "CHESS_DATA_DIR",
     "CHESS_DEFAULT_TC",
-    "CHESS_DEFAULT_INCREMENT", "CHESS_THEME", "CHESS_COUNTRY",
+    "CHESS_DEFAULT_INCREMENT", "CHESS_COUNTRY",
     "CHESS_SHOW_FPS", "CHESS_SHOW_PING", "CHESS_FOCUS_SHOW",
+    "CHESS_NEWS_URL", "CHESS_PROFILE_HINT_SHOWN", "CHESS_LAUNCH_MODE",
 )
 
 
@@ -382,6 +383,26 @@ def test_set_nickname_replaces_existing_value_in_place():
     assert "First" not in contents
 
 
+def test_news_url_defaults_to_the_shipped_constant():
+    assert env.get_news_url() == env._DEFAULT_NEWS_URL
+    assert env.get_news_url().startswith("https://")
+
+
+def test_news_url_reads_env_override(monkeypatch):
+    monkeypatch.setenv("CHESS_NEWS_URL", "https://example.com/news.json")
+    assert env.get_news_url() == "https://example.com/news.json"
+
+
+def test_profile_hint_shown_defaults_false():
+    assert env.get_profile_hint_shown() is False
+
+
+def test_profile_hint_shown_persists_round_trip():
+    env.set_profile_hint_shown()
+    assert env.get_profile_hint_shown() is True
+    assert "CHESS_PROFILE_HINT_SHOWN=1" in env._ENV_PATH.read_text(encoding="utf-8")
+
+
 def test_country_defaults_empty():
     assert env.get_country() == ""
 
@@ -594,22 +615,30 @@ def test_default_increment_rejects_unknown_value():
 
 def test_default_time_minutes_parses_value_and_infinity():
     env.set_default_time_control("15")
-    assert env.default_time_minutes() == 15
+    assert env.get_default_time_minutes() == 15
     env.set_default_time_control("∞")
-    assert env.default_time_minutes() is None
+    assert env.get_default_time_minutes() is None
 
 
 def test_default_increment_seconds_parses_value():
     env.set_default_increment("10")
-    assert env.default_increment_seconds() == 10
+    assert env.get_default_increment_seconds() == 10
 
 
-def test_theme_defaults_dark_and_rejects_unknown():
-    assert env.get_theme() == "dark"
-    env.set_theme("wood")
-    assert env.get_theme() == "dark"
-    env.set_theme("dark")
-    assert env.get_theme() == "dark"
+def test_launch_mode_defaults_windowed_and_validates():
+    """The window opens where the player left it: windowed (default), maximized,
+    or fullscreen. Anything unrecognised falls back to windowed."""
+    assert env.get_launch_mode() == "windowed"
+    for value in ("windowed", "maximized", "fullscreen"):
+        env.set_launch_mode(value)
+        assert env.get_launch_mode() == value
+    env.set_launch_mode("cinema-mode")
+    assert env.get_launch_mode() == "windowed"
+
+
+def test_launch_mode_reads_a_raw_garbage_env_value_as_default(monkeypatch):
+    monkeypatch.setenv("CHESS_LAUNCH_MODE", "borderless-nonsense")
+    assert env.get_launch_mode() == "windowed"
 
 
 def _throw_denied(*_a, **_k):
@@ -672,13 +701,6 @@ def test_get_or_create_client_uuid_logs_only_the_key_never_the_value(caplog):
     lines = [r.getMessage() for r in caplog.records if "setting persisted" in r.getMessage()]
     assert lines == ["setting persisted key=CHESS_CLIENT_UUID"]
     assert fresh not in " ".join(lines)
-
-
-def test_set_theme_logs_the_key_for_a_non_sensitive_setting(caplog):
-    with caplog.at_level(logging.INFO, logger="chess.env"):
-        env.set_theme("dark")
-    lines = [r.getMessage() for r in caplog.records if "setting persisted" in r.getMessage()]
-    assert lines == ["setting persisted key=CHESS_THEME"]
 
 
 def test_set_country_empty_logs_the_deleted_key(caplog):

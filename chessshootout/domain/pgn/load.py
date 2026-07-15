@@ -1,4 +1,3 @@
-import glob
 import os
 import re
 from dataclasses import dataclass, field
@@ -66,10 +65,7 @@ WEEK = 604800
 
 
 def parse_pgn_headers(text):
-    headers = {}
-    for m in _TAG_RE.finditer(text):
-        headers[m.group(1)] = m.group(2)
-    return headers
+    return {m.group(1): m.group(2) for m in _TAG_RE.finditer(text)}
 
 
 def extract_csmatchid(headers):
@@ -240,13 +236,6 @@ def _format_time_from_filename(filename, mtime):
         except ValueError:
             pass
     return datetime.fromtimestamp(mtime).strftime("%Y.%m.%d %H:%M:%S"), mtime
-
-
-def latest_pgn_in_dir(directory):
-    files = glob.glob(os.path.join(directory, "*.pgn"))
-    if not files:
-        return None
-    return max(files, key=os.path.getmtime)
 
 
 def parse_time_control(value):

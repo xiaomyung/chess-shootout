@@ -27,7 +27,7 @@ from chessshootout.frontend.panels.right import (
     UNTIMED_BUTTONS as RIGHT_MENU_UNTIMED_BUTTONS,
 )
 from chessshootout.frontend.panels.player_strip import (
-    PlayerStrip, is_white, top_strip_color,
+    PlayerStrip, is_white, top_strip_color, refresh_capture_icons,
 )
 from chessshootout.frontend.modals.result import ResultMenu
 from chessshootout.frontend.focus.arrow import (
@@ -40,7 +40,7 @@ from chessshootout.frontend.visual import cache
 from chessshootout.frontend.visual.backdrop import ArenaBackdrop
 from chessshootout.frontend.visual.effects import TAKEOVER_TOTAL_MS
 from chessshootout.frontend.game.result_flow import ResultFlow, score_str
-from chessshootout.frontend.game.skillcheck_session import SkillcheckSession
+from chessshootout.frontend.game.skillcheck_session import SkillCheckSession
 from chessshootout.frontend.game.give_time import GiveTimeHold
 from chessshootout.frontend.game.variant import MATCH_MODE_BY_VARIANT, Variant
 from chessshootout.server.protocol import FIRST_MOVE_ABORT_SECONDS, GRACE_SECONDS, Reason
@@ -157,7 +157,7 @@ class GameScreen(Screen):
                            announce_callback=self._on_kill_announced)
         self.skillcheck = SkillCheckCoordinator()
         self.skillcheck_overlay = SkillCheckOverlay()
-        self.skillcheck_session = SkillcheckSession(self)
+        self.skillcheck_session = SkillCheckSession(self)
         self.board.skillcheck_gate = self.skillcheck_session.skillcheck_gate
         self.board.skillcheck_armed = lambda: self.skillcheck.enabled
         self.board.locked_targets = self.skillcheck.is_locked
@@ -251,7 +251,7 @@ class GameScreen(Screen):
         )
         self.skillcheck.reset(
             enabled=True,
-            seed="local-{}-{}".format(pg.time.get_ticks(), random.randint(0, 1 << 30)))
+            seed=f"local-{pg.time.get_ticks()}-{random.randint(0, 1 << 30)}")
 
     def _apply_online_start_config(self, payload):
         self._chosen_side = payload["your_color"]
@@ -299,9 +299,9 @@ class GameScreen(Screen):
         granted_by = payload.get("granted_by")
         recipient_color = "black" if granted_by == "white" else "white"
         if granted_by == self._chosen_side:
-            self.give_time.give_time_toast_for_giver(recipient_color, added)
+            self.give_time.toast_for_giver(recipient_color, added)
         else:
-            self.give_time.give_time_toast_for_receiver(granted_by, added)
+            self.give_time.toast_for_receiver(granted_by, added)
 
     def on_resume(self, payload):
         self.match.new_game()
@@ -342,12 +342,8 @@ class GameScreen(Screen):
         clock_snap = payload.get("clock") or {}
         if self.match.clock is None:
             return
-        if default_to_existing:
-            white_default = self.match.clock.white_remaining
-            black_default = self.match.clock.black_remaining
-        else:
-            white_default = 0.0
-            black_default = 0.0
+        white_default = self.match.clock.white_remaining if default_to_existing else 0.0
+        black_default = self.match.clock.black_remaining if default_to_existing else 0.0
         self.match.clock.restore_from_server(
             clock_snap.get("white_remaining", white_default),
             clock_snap.get("black_remaining", black_default),
@@ -413,11 +409,15 @@ class GameScreen(Screen):
             elapsed_ms=float(payload.get("elapsed_ms", 0.0)),
             miss_count=int(payload.get("miss_count", 0)))
 
-    def _resolve_my_skillcheck_failure(self, payload):
+    def _prepare_online_fail(self, payload):
         from_sq, to_sq = self._decode_squares(payload)
         pending = self.skillcheck_session.online_skillcheck
         self.skillcheck_session.record_online_fail(pending, from_sq, to_sq)
         aim_victim = self.board.aim_suppressed_square
+        return from_sq, to_sq, aim_victim
+
+    def _resolve_my_skillcheck_failure(self, payload):
+        from_sq, to_sq, aim_victim = self._prepare_online_fail(payload)
         self.board.selected_square = None
         self._begin_online_verdict(
             False, lambda: self._apply_online_fail(from_sq, to_sq, aim_victim))
@@ -435,10 +435,7 @@ class GameScreen(Screen):
         self.app.toast.show("Opponent is lining up a shot…")
 
     def _resolve_spectated_skillcheck_failure(self, payload):
-        from_sq, to_sq = self._decode_squares(payload)
-        pending = self.skillcheck_session.online_skillcheck
-        self.skillcheck_session.record_online_fail(pending, from_sq, to_sq)
-        aim_victim = self.board.aim_suppressed_square
+        from_sq, to_sq, aim_victim = self._prepare_online_fail(payload)
         self.app.toast.show("Opponent missed!")
         self._begin_online_verdict(
             False, lambda: self._apply_spectate_fail(from_sq, to_sq, aim_victim))
@@ -506,10 +503,11 @@ class GameScreen(Screen):
         reason = payload.get("reason", "")
         if not self._apply_online_result(reason, payload.get("winner_color")):
             return
+        coordinator = self.app.coordinator
         self._first_move_deadline_ms = None
         self._opp_disconnected_at_ms = None
         self._local_disconnected_at_ms = None
-        self.app.coordinator.offer_banners.clear()
+        coordinator.offer_banners.clear()
         self.skillcheck_session.pending_online_move = None
         pending_action = self.skillcheck_session.online_verdict_action
         self.skillcheck_session.online_verdict_action = None
@@ -519,7 +517,7 @@ class GameScreen(Screen):
             self.skillcheck_session.teardown_skillcheck_overlay()
         except Exception:
             log.exception("online result verdict/teardown failed")
-            self.app.coordinator._begin_resync()
+            coordinator._begin_resync()
         if reason == "timeout" and not self._flag_fall_played:
             self._flag_fall_played = True
             self.app.sound_manager.play_flag_fall()
@@ -647,14 +645,8 @@ class GameScreen(Screen):
         if self.skillcheck_overlay.is_active() and skillcheck_target is not None:
             self.skillcheck_overlay.relayout(self.board.cell_rect(skillcheck_target))
             self.skillcheck_overlay.set_board_rect(self.board.rect)
-        self._refresh_capture_icons(r.strip_height)
-
-    def _refresh_capture_icons(self, strip_height):
-        icons = self.board.scaled_capture_icons(strip_height)
-        if icons is None:
-            return
-        self.player_strip_top.set_piece_icons(icons)
-        self.player_strip_bottom.set_piece_icons(icons)
+        refresh_capture_icons(self.board, r.strip_height,
+                              (self.player_strip_top, self.player_strip_bottom))
 
     def draw(self):
         app = self.app
@@ -689,7 +681,7 @@ class GameScreen(Screen):
             self.board.draw_drag_overlay()
             self.result_flow.update_result_pending()
             if not app.coordinator.match_found_modal.is_visible():
-                show_modal = self._result_modal_should_show()
+                show_modal = self._result_menu_should_show()
                 if not show_modal and self.board.effects.has_takeover():
                     self.board.effects.draw_takeover(self.window, now)
                 else:
@@ -736,15 +728,18 @@ class GameScreen(Screen):
             "match_session_id": self._match_session_id,
         }
 
-    def dirty_rects(self):
-        if (self.focus_transition is not None
+    def _forces_full_redraw(self):
+        return (self.focus_transition is not None
                 or self.skillcheck_overlay.is_active()
                 or self.current_result() is not None
-                or self.give_time.give_time_holding
+                or self.give_time.holding
                 or self.board.is_dragging()
                 or self.board.effects.is_active()
                 or self.board.is_restoring()
-                or self.board.pending_promotion_square is not None):
+                or self.board.pending_promotion_square is not None)
+
+    def dirty_rects(self):
+        if self._forces_full_redraw():
             return None
         rects = [
             self.player_strip_top.rect,
@@ -775,7 +770,7 @@ class GameScreen(Screen):
         return True
 
     def active_scrollable(self):
-        if self._result_modal_should_show():
+        if self._result_menu_should_show():
             return None
         if self.focus_mode or self.focus_transition is not None:
             return None
@@ -831,14 +826,14 @@ class GameScreen(Screen):
             return False
         if (self.current_result() is not None
                 and self._result_first_seen_at_ms is not None
-                and not self._result_modal_should_show()):
+                and not self._result_menu_should_show()):
             self._skip_result_fade()
             return False
         if (self.focus_arrow.is_visible() and self._focus_arrow_allowed()
                 and self.focus_arrow.handle_click(pos)):
             self._toggle_focus(not self.focus_mode)
             self._focus_click_consumed = True
-            self.app.input_router._click_sound_played = True
+            self.app.input_router.suppress_click_sound()
             return True
         if not self.focus_mode and self.result_menu.handle_click(pos):
             return True
@@ -848,18 +843,19 @@ class GameScreen(Screen):
             return False
         if self.board.pending_promotion_square is not None:
             self.board.pick_promotion_at(pos)
-            self.app.input_router._click_sound_played = True
+            self.app.input_router.suppress_click_sound()
             return True
         square = self.board.cell_at(pos)
-        if square is not None:
-            if self.board.review_ply is None and not self.board.is_square_annotated(square):
-                self.board.clear_annotations()
-            signal = self.board.handle_click(square)
-            if signal:
-                self.app.input_router._click_sound_played = True
-                if signal == "select":
-                    self.app.sound_manager.play_pickup()
-                return True
+        if square is None:
+            return False
+        if self.board.review_ply is None and not self.board.is_square_annotated(square):
+            self.board.clear_annotations()
+        signal = self.board.handle_click(square)
+        if signal:
+            self.app.input_router.suppress_click_sound()
+            if signal == "select":
+                self.app.sound_manager.play_pickup()
+            return True
         return False
 
     def handle_press(self, pos):
@@ -955,7 +951,7 @@ class GameScreen(Screen):
             return None
         return pg.time.get_ticks() - self._result_first_seen_at_ms
 
-    def _result_modal_should_show(self):
+    def _result_menu_should_show(self):
         elapsed = self._result_elapsed_ms()
         if elapsed is None:
             return False
@@ -1010,7 +1006,7 @@ class GameScreen(Screen):
             if self._local_won(winner):
                 self.app.sound_manager.play_you_win()
             elif is_resign:
-                self.app.sound_manager.play_surrender()
+                self.app.sound_manager.play_resign()
             elif is_mate:
                 self.app.sound_manager.play_you_lose()
 
@@ -1238,7 +1234,7 @@ class GameScreen(Screen):
         clock = self.match.clock
         if clock is None or clock.flagged is not None:
             disabled.add("give_time")
-        if self.give_time.give_time_on_cooldown():
+        if self.give_time.on_cooldown():
             disabled.add("give_time")
         return disabled
 
@@ -1248,9 +1244,10 @@ class GameScreen(Screen):
 
     def _reset_to_new_game(self):
         app = self.app
+        coordinator = app.coordinator
         self._force_focus_off_instant()
-        app.coordinator.offer_banners.clear()
-        app.coordinator._rematch_offered = False
+        coordinator.offer_banners.clear()
+        coordinator._rematch_offered = False
         self.result_menu.reset()
         app.sound_manager.stop_all()
         self.give_time.cancel_give_time_hold()
@@ -1302,6 +1299,7 @@ class GameScreen(Screen):
         if on and not self._focus_available():
             return
         log.info("focus mode toggled on=%s", on)
+        self.app.sound_manager.play_focus_action()
         self.board.cancel_drag_physics()
         self.focus_transition = FocusTransition(self)
         if on:

@@ -214,11 +214,13 @@ def test_draw_frame_smoke_on_game_screen():
     app.draw_frame()
 
 
-def test_caption_falls_back_to_window_title_on_menu_and_history():
+def test_caption_falls_back_to_window_title_on_menu_and_history_view():
     from chessshootout.frontend.window_chrome import WINDOW_TITLE
     app = make_app()
     assert pg.display.get_caption()[0] == WINDOW_TITLE
-    app.switch_to("history")
+    app.menu.goto_history()
+    assert app.screen.name == "menu"
+    assert app.menu._active_view == "history"
     assert pg.display.get_caption()[0] == WINDOW_TITLE
 
 
@@ -251,12 +253,12 @@ def test_dirty_rects_game_returns_a_list_on_a_settled_frame():
 def test_dirty_rects_menu_history_review_return_none(tmp_path):
     app = make_app()
     assert app.menu.dirty_rects() is None
-    app.switch_to("history")
-    assert app.history.dirty_rects() is None
+    app.menu.goto_history()
+    assert app.menu.dirty_rects() is None
     pgn = tmp_path / "d.pgn"
     pgn.write_text('[White "a"]\n[Black "b"]\n[Result "1-0"]\n\n1. e4 e5 1-0\n',
                    encoding="utf-8")
-    app.switch_to("review", pgn_path=str(pgn), return_to="history")
+    app.switch_to("review", pgn_path=str(pgn), return_to="menu")
     assert app.review.dirty_rects() is None
 
 

@@ -1,47 +1,95 @@
-"""Frontend menu navigation: the History button swaps the active screen to HistoryScreen
-(the battle keeps running behind it and its avoid-rect follows the active screen), Back
-returns to the menu card, review opened from History returns to History, and an unloadable
-PGN restores the History screen instead of stranding a blank board."""
+"""Menu shell navigation: the rail swaps sub-views (logged "menu view a -> b"),
+Esc walks non-Play -> Play -> quit confirm, the menu remembers its active view
+across a screen round-trip, review opened from history returns to the history
+view, and the battle keeps running behind menu modals while avoiding the rail
++ the history view's panel -- the play view's chips and popovers contribute no
+avoid rects at all, so battle entities fight freely behind them."""
 
+import logging
+
+import pygame as pg
 
 from tests.conftest import pygame_display
-from chessshootout.domain.pgn.generate import generate_pgn
-from chessshootout.backend.backend import Backend
-from tests.helpers import make_app as _shared_make_app
+from chessshootout.frontend.visual.colors import Colors
+from tests.helpers import make_app, valid_pgn_text
 
 
 _pygame_init = pygame_display(1000, 800)
 
 
-def make_app():
-    return _shared_make_app(1000, 800, mock_sound=False)
-
-
-def _valid_pgn_text():
-    backend = Backend()
-    backend.new_game()
-    for san in ["e4", "e5", "Nf3"]:
-        backend.apply_san(san)
-    return generate_pgn(backend.move_history, "white_wins",
-                        white_name="alice", black_name="Bob")
-
-
-def test_load_pgn_opens_history_page():
+def test_goto_view_switches_and_logs_the_transition(caplog):
     app = make_app()
-    app._on_open_history()
-    app._execute_pending_nav()
-    assert app.screen.name == "history"
-    assert app.history_view.is_visible() is True
+    with caplog.at_level(logging.INFO, logger="chess.frontend"):
+        app.menu.goto_view("history")
+    assert app.menu._active_view == "history"
+    assert any(r.getMessage() == "menu view play -> history" for r in caplog.records)
 
 
-def test_back_returns_to_card():
+def test_goto_view_to_the_same_view_is_a_noop(caplog):
     app = make_app()
-    app._on_open_history()
+    with caplog.at_level(logging.INFO, logger="chess.frontend"):
+        app.menu.goto_view("play")
+    assert not any("menu view" in r.getMessage() for r in caplog.records)
+
+
+def test_rail_hit_test_routes_each_nav_row():
+    app = make_app()
+    app.draw_frame()
+    for row in ("battlepass", "armory", "social", "history", "options", "play"):
+        rect = app.menu.rail._row_rects[row]
+        app.menu.handle_click(rect.center)
+        assert app.menu._active_view == row
+
+
+def test_stub_view_escape_returns_to_play():
+    app = make_app()
+    app.menu.goto_view("battlepass")
+    assert app.menu.escape() is True
+    assert app.menu._active_view == "play"
+
+
+def test_play_view_escape_opens_the_quit_confirm():
+    app = make_app()
+    assert app.menu._active_view == "play"
+    assert app.menu.escape() is True
+    assert app.confirm_modal.is_visible() is True
+    assert app.menu.play_view_visible() is True
+
+
+def test_menu_remembers_its_active_view_across_a_screen_roundtrip():
+    app = make_app()
+    app.menu.goto_history()
+    app.switch_to("game")
+    app.switch_to("menu")
+    assert app.menu._active_view == "history"
+
+
+def test_review_from_history_returns_to_the_history_view(tmp_path):
+    good = tmp_path / "local-20260101-120000.pgn"
+    good.write_text(valid_pgn_text(), encoding="utf-8")
+    app = make_app()
+    app.menu.goto_history()
+    app._open_pgn_review(str(good))
     app._execute_pending_nav()
-    app._on_menu_back()
+    assert app.screen.name == "review"
+
+    app.review._on_menu()
     app._execute_pending_nav()
     assert app.screen.name == "menu"
-    assert app.history_view.is_visible() is False
+    assert app.menu._active_view == "history"
+
+
+def test_unloadable_pgn_returns_to_the_history_view(tmp_path):
+    bad = tmp_path / "broken.pgn"
+    bad.write_text('[White "x"]\n\n1. e4 zz9 *', encoding="utf-8")
+    app = make_app()
+    app.menu.goto_history()
+    app._open_pgn_review(str(bad))
+    app._execute_pending_nav()
+    app._execute_pending_nav()
+    assert app.screen.name == "menu"
+    assert app.menu._active_view == "history"
+    assert app.toast.message == "Could not load PGN"
 
 
 def test_battle_keeps_running_behind_a_menu_modal(monkeypatch):
@@ -54,66 +102,59 @@ def test_battle_keeps_running_behind_a_menu_modal(monkeypatch):
     assert "u" in calls
 
 
-def test_battle_avoid_rect_follows_active_page():
+def test_menu_paints_the_rail_and_panel_under_the_confirm_modal():
+    app = make_app()
+    app.menu.escape()
+    assert app.confirm_modal.is_visible() is True
+    app.draw_frame()
+    panel = app.menu._menu_layout.right_rail_full_rect
+    point = (panel.right - 4, panel.centery)
+    assert app.window.get_at(point)[:3] == pg.Color(Colors.surface)[:3]
+
+
+def test_avoid_rects_still_cover_the_rails_while_the_confirm_modal_is_up():
+    app = make_app()
+    app.menu.escape()
+    assert app.confirm_modal.is_visible() is True
+    app.draw_frame()
+    assert app.menu._menu_layout.rail_rect in app.menu_battle.avoid_rects
+    assert app.menu._menu_layout.right_rail_full_rect in app.menu_battle.avoid_rects
+
+
+def test_battle_avoids_the_rail_and_the_active_views_panels():
     app = make_app()
     app.draw_frame()
-    assert app.menu_battle.avoid_rect == app.start_menu._outer
-    app._on_open_history()
-    app._execute_pending_nav()
+    battle = app.menu_battle
+    hero = app.menu.play_view
+    assert app.menu._menu_layout.rail_rect in battle.avoid_rects
+    # cp2: the play view contributes no colliders at all -- chips, title, CTA and
+    # FEN link all draw over the battle, so entities fight freely behind them
+    assert hero.avoid_rects() == []
+    assert hero._title_block not in battle.avoid_rects
+    assert not any(r.contains(hero._cta_rect) for r in battle.avoid_rects)
+    # cp2: the full right rail column (opaque panel, edge-to-edge, chrome-to-bottom)
+    # is the collider now -- like the left rail -- so entities/KO/bubbles never enter it
+    assert app.menu._menu_layout.right_rail_full_rect in battle.avoid_rects
+    assert app.menu._menu_layout.right_rail_rect not in battle.avoid_rects
+
+    app.menu.goto_history()
     app.draw_frame()
-    assert app.menu_battle.avoid_rect == app.history_view.rect
+    assert app.history_view.rect not in app.menu_battle.avoid_rects
 
 
-def test_intro_overlay_draws_behind_menu_modals(monkeypatch):
-    """The battle fly-in queen must paint before the modals, so she never covers an open modal."""
+def test_play_view_avoid_rects_stay_empty_with_a_popover_open():
+    """The scope grew past just the chip row: an OPEN time/side popover used to
+    add its own collider too. Neither does anymore -- the battle roams and fires
+    straight through an open popover panel exactly as it does through the chips."""
     app = make_app()
-    order = []
-    monkeypatch.setattr(app.menu_battle, "draw_intro_overlay",
-                        lambda *a, **k: order.append("intro"))
-    monkeypatch.setattr(app.options_modal, "draw", lambda *a, **k: order.append("options"))
-    monkeypatch.setattr(app.confirm_modal, "draw", lambda *a, **k: order.append("confirm"))
+    hero = app.menu.play_view
     app.draw_frame()
-    assert {"intro", "options", "confirm"} <= set(order)
-    assert order.index("intro") < order.index("options"), \
-        "the fly-in queen must draw before (behind) the options modal"
-    assert order.index("intro") < order.index("confirm"), \
-        "and behind every other menu modal"
 
+    app.menu.handle_click(hero._time_chip.center)
+    assert hero._time_open is True
+    assert hero.avoid_rects() == []
 
-def test_unloadable_pgn_restores_history(tmp_path):
-    bad = tmp_path / "broken.pgn"
-    bad.write_text('[White "x"]\n\n1. e4 zz9 *', encoding="utf-8")
-    app = make_app()
-    app._open_pgn_review(str(bad))
-    app._execute_pending_nav()
-    app._execute_pending_nav()
-    assert app.screen.name == "history"
-    assert app.toast.message == "Could not load PGN"
-
-
-def test_review_from_history_returns_to_history(tmp_path):
-    good = tmp_path / "local-20260101-120000.pgn"
-    good.write_text(_valid_pgn_text(), encoding="utf-8")
-    app = make_app()
-    app._open_pgn_review(str(good))
-    app._execute_pending_nav()
-    assert app.screen.name == "review"
-    app.review._on_menu()
-    app._execute_pending_nav()
-    assert app.screen.name == "history"
-
-
-def test_fresh_game_after_review_returns_to_card(tmp_path):
-    good = tmp_path / "local-20260101-120000.pgn"
-    good.write_text(_valid_pgn_text(), encoding="utf-8")
-    app = make_app()
-    app._open_pgn_review(str(good))
-    app._execute_pending_nav()
-    assert app.screen.name == "review"
-    app._on_start_game({
-        "mode": "single_screen", "nickname": "alice",
-        "time_minutes": 5, "increment_seconds": 0, "side": "white",
-    })
-    assert app.screen.name == "game"
-    app._on_back_to_menu()
-    assert app.screen.name == "menu"
+    app.menu.handle_click(hero._title_pos)
+    app.menu.handle_click(hero._side_chip.center)
+    assert hero._side_open is True
+    assert hero.avoid_rects() == []

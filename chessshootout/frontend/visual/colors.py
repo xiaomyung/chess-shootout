@@ -44,6 +44,15 @@ class Colors:
     check = "#ff3b3b"
     check_fill = check + "6b"
 
+    avatar_orange = accent
+    avatar_amber = amber
+    avatar_teal = "#23b8a6"
+    avatar_green = "#3ecb7e"
+    avatar_blue = "#4a90e2"
+    avatar_violet = "#8f6fe8"
+    avatar_rose = "#e85a86"
+    avatar_cyan = "#29c2d9"
+
     white_tile = "#828b99"
     black_tile = "#2e333b"
     board_frame = "#0a0c0f"
@@ -56,9 +65,6 @@ class Colors:
     premove = "#e0556e8c"
     premove_chain_tip = "#ff6b8ad9"
 
-    modal_rail_win_end = "#8fe6b4"
-    modal_rail_loss_end = "#ff9a6b"
-    modal_rail_draw_end = "#c2cad6"
     outcome_stroke = "#120804"
     tag_stroke = "#1a1206"
     icon_chip_bg = "#3e3c34"
@@ -68,10 +74,6 @@ class Colors:
     dot_reconnecting = "#ff4d4d"
     dot_unknown = "#8c8c8c"
 
-    avatar_slate_top = "#5a6473"
-    avatar_slate_bottom = "#2c323d"
-    avatar_letter_dark = "#e7ebf1"
-
     battle_bg = "#0d0f14"
     battle_bg_hi = "#1a1f27"
     battle_bg_edge = "#090a0e"
@@ -80,6 +82,9 @@ class Colors:
     battle_shadow = "#000000"
     bubble_pawn_bg = "#20242c"
     bubble_pawn_text = "#cfd6e0"
+
+    dial_border = "#39424f"
+    dial_star = "#2a313d"
 
     shell_red = "#c0392b"
     shell_red_hi = "#e0573f"

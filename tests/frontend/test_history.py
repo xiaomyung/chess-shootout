@@ -1,17 +1,18 @@
 """The History page: it scans saved PGNs, groups them into matches by CSMatchId (rematches
 stack, idless games stay solo), renders the match summary (W/L/D counted per match), match
 cards with filters + a perspective-aware KO score, expands multi-game matches into per-game
-rows, opens a game into review on click, and returns to the card via its Menu button."""
+rows, and opens a game into review on click. Navigation back to Play lives on the rail, not
+on this view."""
 
 import pygame as pg
 
 import chessshootout.frontend.panels.history_view as histmod
 from tests.conftest import pygame_display
 from chessshootout.frontend.panels.history_view import (
-    CARD_CACHE_MAX, CARD_GAP, SCROLLBAR_GUTTER, HistoryView,
+    CARD_BADGE_CUT, CARD_CACHE_MAX, CARD_GAP, SCROLLBAR_GUTTER, HistoryView,
 )
 from chessshootout.frontend.visual.colors import Colors
-from tests.helpers import fake_uuid4
+from tests.helpers import fake_uuid4, scan_region
 
 
 _pygame_init = pygame_display(1000, 800)
@@ -26,22 +27,15 @@ def _write_pgn(directory, name, *, white="alice", black="Bob", result="1-0",
     (directory / name).write_text("\n".join(headers) + "\n\n" + body + "\n", encoding="utf-8")
 
 
-def _view(directory, nickname="alice", on_open=None, on_back=None):
-    view = HistoryView(pg.display.get_surface(), on_open or (lambda p: None),
-                       on_back or (lambda: None))
+def _view(directory, nickname="alice", on_open=None):
+    view = HistoryView(pg.display.get_surface(), on_open or (lambda p: None))
     view.set_rect(pg.Rect(40, 60, 840, 700))
     view.show(str(directory), "*.pgn", nickname=nickname)
     return view
 
 
 def _region_has_color(surface, rect, hex_color, tol=40):
-    want = pg.Color(hex_color)[:3]
-    for x in range(max(rect.x, 0), min(rect.right, surface.get_width()), 3):
-        for y in range(max(rect.y, 0), min(rect.bottom, surface.get_height()), 3):
-            got = surface.get_at((x, y))[:3]
-            if all(abs(a - b) <= tol for a, b in zip(got, want)):
-                return True
-    return False
+    return scan_region(surface, rect, hex_color, tol=tol, step=3, clamp=True)
 
 
 def _hit_for(view, kind):
@@ -49,11 +43,20 @@ def _hit_for(view, kind):
 
 
 def test_hidden_before_show():
-    assert HistoryView(pg.display.get_surface(), lambda p: None, lambda: None).is_visible() is False
+    assert HistoryView(pg.display.get_surface(), lambda p: None).is_visible() is False
 
 
 def test_show_makes_visible(tmp_path):
     assert _view(tmp_path).is_visible() is True
+
+
+def test_no_back_button_on_the_rail_hosted_view(tmp_path):
+    """Rail navigation replaced the in-card back button (v2.9.0) — the view
+    must carry neither the hitbox nor the callback it used to fire."""
+    view = _view(tmp_path)
+    view.draw()
+    assert not hasattr(view, "_menu_rect")
+    assert not hasattr(view, "on_back")
 
 
 def test_rematch_games_group_into_one_card(tmp_path):
@@ -91,14 +94,6 @@ def test_multi_game_card_expands_then_opens_a_game(tmp_path):
     game_rect, path = _hit_for(view, "open")[0]
     view.handle_click(game_rect.center)
     assert opened == [path]
-
-
-def test_menu_button_invokes_on_back(tmp_path):
-    fired = []
-    view = _view(tmp_path, on_back=lambda: fired.append(1))
-    view.draw()
-    assert view.handle_click(view._menu_rect.center) is True
-    assert fired == [1]
 
 
 def test_filter_chip_restricts_groups(tmp_path):
@@ -237,7 +232,7 @@ def test_scroll_outside_list_returns_false(tmp_path):
 
 
 def test_history_does_not_handle_keys():
-    view = HistoryView(pg.display.get_surface(), lambda p: None, lambda: None)
+    view = HistoryView(pg.display.get_surface(), lambda p: None)
     assert not hasattr(view, "handle_key")
 
 
@@ -300,15 +295,23 @@ def test_card_cache_lru_bounded_when_scrolling_many(tmp_path):
     assert len(view._card_cache) <= CARD_CACHE_MAX
 
 
-def _count_rounded_rects(monkeypatch):
+def _count_shape_calls(monkeypatch):
+    """Card bodies/badges/chips build via cut_rect_surface now (v2.9.0 cut-corner
+    restyle); rounded_rect_surface remains only for the ONLINE pill and hover strip.
+    Count both so the warm-frame-cache guarantee still exercises the expensive
+    per-card shape builds, not just the leftover rounded bits."""
     calls = {"n": 0}
-    orig = histmod.rounded_rect_surface
+    orig_rounded = histmod.rounded_rect_surface
+    orig_cut = histmod.cut_rect_surface
 
-    def wrapped(*args, **kwargs):
-        calls["n"] += 1
-        return orig(*args, **kwargs)
+    def wrap(orig):
+        def wrapped(*args, **kwargs):
+            calls["n"] += 1
+            return orig(*args, **kwargs)
+        return wrapped
 
-    monkeypatch.setattr(histmod, "rounded_rect_surface", wrapped)
+    monkeypatch.setattr(histmod, "rounded_rect_surface", wrap(orig_rounded))
+    monkeypatch.setattr(histmod, "cut_rect_surface", wrap(orig_cut))
     return calls
 
 
@@ -316,7 +319,7 @@ def test_visible_cards_not_re_supersampled_each_frame(tmp_path, monkeypatch):
     for i in range(40):
         _write_pgn(tmp_path, f"local-20260101-{100000 + i:06d}.pgn", white=f"p{i}")
     view = _view(tmp_path)
-    calls = _count_rounded_rects(monkeypatch)
+    calls = _count_shape_calls(monkeypatch)
     view.draw()
     cold = calls["n"]
     calls["n"] = 0
@@ -331,7 +334,7 @@ def test_warm_frame_cost_independent_of_game_count(tmp_path_factory, monkeypatch
             _write_pgn(directory, f"local-20260101-{100000 + i:06d}.pgn", white=f"p{i}")
         view = _view(directory)
         view.draw()
-        calls = _count_rounded_rects(monkeypatch)
+        calls = _count_shape_calls(monkeypatch)
         view.draw()
         monkeypatch.undo()
         return calls["n"]
@@ -371,6 +374,30 @@ def test_expand_grows_content_height_on_next_frame(tmp_path):
     view.expanded_match_id = multi.match_id
     view.draw()
     assert view._content_h > base
+
+
+def test_result_badge_uses_cut_corner_notch(tmp_path):
+    """The v2.9.0 restyle swapped the badge's rounded_rect_surface for a
+    cut-corner (tr/bl) polygon — the top-right notch must read fully
+    transparent while the untouched top-left stays opaque."""
+    view = _view(tmp_path)
+    surf = pg.Surface((60, 60), pg.SRCALPHA)
+    view.window = surf
+    rect = pg.Rect(4, 4, 44, 44)
+    view._draw_badge(rect, "win", view._badge_font, CARD_BADGE_CUT)
+    assert surf.get_at((rect.right - 2, rect.y + 1))[3] == 0
+    assert surf.get_at((rect.x + 10, rect.y + 14))[3] != 0
+
+
+def test_filter_chip_uses_cut_corner_notch(tmp_path):
+    """Filter chips also moved from rounded to cut-corner (tr/bl)."""
+    view = _view(tmp_path)
+    surf = pg.Surface((900, 60), pg.SRCALPHA)
+    view.window = surf
+    view._draw_filters(880, 30)
+    rect = view._filter_rects["all"]
+    assert surf.get_at((rect.right - 2, rect.y + 1))[3] == 0
+    assert surf.get_at((rect.x + 2, rect.y + 2))[3] == 255
 
 
 def test_expanded_block_paints_surface_behind_detail_rows(tmp_path):

@@ -22,7 +22,7 @@ import pytest
 
 from tests.conftest import pygame_display
 from chessshootout.backend.utils import Square
-from tests.helpers import make_app
+from tests.helpers import key_event, make_app
 
 
 _pygame_init = pygame_display(1000, 800)
@@ -46,13 +46,9 @@ def _entry_payload(name, tmp_path):
     return {}
 
 
-def _key(key, unicode=""):
-    return pg.event.Event(pg.KEYDOWN, key=key, mod=0, unicode=unicode)
-
-
 # --- enter/exit idempotence -------------------------------------------------
 
-@pytest.mark.parametrize("name", ["menu", "game", "history", "review"])
+@pytest.mark.parametrize("name", ["menu", "game", "review"])
 def test_enter_exit_double_exit_reenter_leaves_the_screen_functional(name, tmp_path):
     app = make_app()
     payload = _entry_payload(name, tmp_path)
@@ -79,15 +75,15 @@ def _menu_game_menu(app, tmp_path, monkeypatch):
     return "menu"
 
 
-def _menu_history_review_history_menu(app, tmp_path, monkeypatch):
-    app.switch_to("history")
-    assert app.screen.name == "history"
+def _menu_history_review_menu(app, tmp_path, monkeypatch):
+    app.menu.goto_history()
+    assert app.menu._active_view == "history"
     pgn = _write_pgn(tmp_path)
-    app.switch_to("review", pgn_path=str(pgn), return_to="history")
+    app.switch_to("review", pgn_path=str(pgn), return_to="menu")
     assert app.screen.name == "review"
-    app.switch_to("history")
-    assert app.screen.name == "history"
     app.switch_to("menu")
+    assert app.screen.name == "menu"
+    assert app.menu._active_view == "history"
     return "menu"
 
 
@@ -133,7 +129,7 @@ def _menu_online_match_found(app, tmp_path, monkeypatch):
 
 NAV_MATRIX = [
     pytest.param(_menu_game_menu, id="menu_game_menu"),
-    pytest.param(_menu_history_review_history_menu, id="menu_history_review_history_menu"),
+    pytest.param(_menu_history_review_menu, id="menu_history_review_menu"),
     pytest.param(_menu_game_fen_menu, id="menu_game_fen_menu"),
     pytest.param(_game_game_self_switch_rematch, id="game_game_self_switch_rematch"),
     pytest.param(_menu_online_match_found, id="menu_online_match_found"),
@@ -150,18 +146,18 @@ def test_nav_matrix(scenario, tmp_path, monkeypatch):
 
 # --- post-exit event safety ---------------------------------------------------
 
-@pytest.mark.parametrize("name", ["menu", "game", "history", "review"])
+@pytest.mark.parametrize("name", ["menu", "game", "review"])
 def test_handle_key_and_click_on_an_exited_inactive_screen_is_harmless(name, tmp_path):
     app = make_app()
     payload = _entry_payload(name, tmp_path)
     app.switch_to(name, **payload)
     screen = app.screens[name]
 
-    other = "history" if name != "history" else "menu"
+    other = "game" if name != "game" else "menu"
     app.switch_to(other)  # runs screen.exit(); screen is now inactive
 
     screen.handle_click((10, 10))
-    screen.handle_key(_key(pg.K_a, "a"))
+    screen.handle_key(key_event(pg.K_a, "a"))
 
     app.draw_frame()  # must not raise, and the real active screen is unaffected
     assert app.screen.name == other
@@ -183,17 +179,17 @@ def test_help_modal_shown_on_game_is_not_drawn_after_switch_to_menu():
 
     assert drawn == []
     assert app.help_modal.is_visible() is False, "exit() hides the screen's own modals"
-    assert app.help_modal not in [spec.obj for spec in app._active_modal_specs()]
+    assert app.help_modal not in [spec.modal for spec in app._active_modal_specs()]
 
 
 def test_help_modal_shown_on_review_is_not_drawn_after_switch_to_history(tmp_path):
     app = make_app()
     pgn = _write_pgn(tmp_path)
-    app.switch_to("review", pgn_path=str(pgn), return_to="history")
+    app.switch_to("review", pgn_path=str(pgn), return_to="menu")
     app.help_modal.show([("Esc", "Back")])
     assert app.help_modal.is_visible() is True
 
-    app.switch_to("history")
+    app.switch_to("menu")
     drawn = []
     app.help_modal.draw = lambda: drawn.append(1)
     app.draw_frame()
@@ -204,7 +200,7 @@ def test_help_modal_shown_on_review_is_not_drawn_after_switch_to_history(tmp_pat
 
 # --- resize mid-anything ------------------------------------------------------
 
-@pytest.mark.parametrize("name", ["menu", "game", "history", "review"])
+@pytest.mark.parametrize("name", ["menu", "game", "review"])
 def test_videoresize_while_screen_active_recomputes_layout_without_crash(name, tmp_path):
     app = make_app()
     payload = _entry_payload(name, tmp_path)
@@ -259,8 +255,8 @@ def test_videoresize_mid_board_drag_does_not_crash():
 def test_videoresize_mid_review_animation_does_not_crash(tmp_path):
     app = make_app()
     pgn = _write_pgn(tmp_path)
-    app.switch_to("review", pgn_path=str(pgn), return_to="history")
-    app.review.handle_key(_key(pg.K_RIGHT))
+    app.switch_to("review", pgn_path=str(pgn), return_to="menu")
+    app.review.handle_key(key_event(pg.K_RIGHT))
     assert app.review.board.is_animating()
 
     pg.event.clear()
@@ -292,11 +288,11 @@ def test_help_left_open_on_the_game_screen_does_not_re_arm_on_the_next_game():
 def test_help_left_open_on_review_does_not_re_arm_on_the_next_review(tmp_path):
     app = make_app()
     pgn = _write_pgn(tmp_path)
-    app.switch_to("review", pgn_path=str(pgn), return_to="history")
+    app.switch_to("review", pgn_path=str(pgn), return_to="menu")
     app.help_modal.show([("Esc", "Back")])
 
-    app.switch_to("history")
-    app.switch_to("review", pgn_path=str(pgn), return_to="history")
+    app.switch_to("menu")
+    app.switch_to("review", pgn_path=str(pgn), return_to="menu")
 
     assert app.help_modal.is_visible() is False
     assert app._blocking_modal_visible() is False
@@ -313,7 +309,7 @@ def test_fen_input_left_open_on_the_menu_does_not_re_arm_on_the_next_menu():
     assert app._blocking_modal_visible() is False
 
 
-@pytest.mark.parametrize("name", ["menu", "game", "history", "review"])
+@pytest.mark.parametrize("name", ["menu", "game", "review"])
 def test_exit_hides_every_modal_the_screen_owns(name, tmp_path):
     """Whatever a screen returns from modals(), exit() hides it. Lives in the base
     Screen, so a fifth screen gets the guarantee without opting in."""
@@ -322,8 +318,69 @@ def test_exit_hides_every_modal_the_screen_owns(name, tmp_path):
     screen = app.screens[name]
     hidden = []
     for spec in screen.modals():
-        spec.obj.hide = lambda obj=spec.obj: hidden.append(obj)
+        spec.modal.hide = lambda obj=spec.modal: hidden.append(obj)
 
     screen.exit()
 
-    assert hidden == [spec.obj for spec in screen.modals()]
+    assert hidden == [spec.modal for spec in screen.modals()]
+
+
+# --- menu sub-view lifecycle (menu is now a shell hosting swappable views) ----
+
+MENU_VIEWS = ["play", "battlepass", "armory", "social", "history", "profile", "options"]
+
+
+@pytest.mark.parametrize("view", MENU_VIEWS)
+def test_menu_subview_enter_exit_reenter_is_idempotent(view):
+    app = make_app()
+    app.menu.goto_view(view)
+    assert app.menu._active_view == view
+
+    app.menu.views[view].exit()
+    app.menu.views[view].exit()  # double-exit must not raise
+
+    app.menu.views[view].enter()
+    app.draw_frame()  # still functional
+
+
+def test_menu_subview_switching_matrix_draws_cleanly():
+    app = make_app()
+    for name in ("play", "history", "battlepass", "armory", "social", "profile",
+                 "options", "history", "play"):
+        app.menu.goto_view(name)
+        assert app.menu._active_view == name
+        app.draw_frame()
+
+
+def test_menu_exit_hides_the_active_history_view():
+    app = make_app()
+    app.menu.goto_history()
+    assert app.history_view.is_visible() is True
+
+    app.switch_to("game")  # runs menu.exit()
+
+    assert app.history_view.is_visible() is False
+
+
+def test_menu_remembers_its_active_view_across_exit_and_reenter():
+    app = make_app()
+    app.menu.goto_history()
+
+    app.switch_to("game")
+    app.switch_to("menu")
+
+    assert app.menu._active_view == "history"
+
+
+@pytest.mark.parametrize("view", MENU_VIEWS)
+def test_videoresize_while_a_menu_subview_is_active_recomputes_without_crash(view):
+    app = make_app()
+    app.menu.goto_view(view)
+    w, h = app.window_width, app.window_height
+
+    pg.event.clear()
+    pg.event.post(pg.event.Event(pg.VIDEORESIZE, {"w": w + 80, "h": h + 40}))
+    app.input_router.check_events()
+
+    assert (app.window_width, app.window_height) == (w + 80, h + 40)
+    app.draw_frame()

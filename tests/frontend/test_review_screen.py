@@ -21,7 +21,9 @@ from chessshootout.domain.pgn.generate import generate_pgn
 from chessshootout.frontend.modals.help import HOTKEYS
 from chessshootout.frontend.screens.base import Nav
 from chessshootout.frontend.screens.review import REVIEW_HOTKEY_KEYS, REVIEW_HOTKEYS
-from tests.helpers import make_app as _shared_make_app, sq, start_single_screen
+from tests.helpers import (
+    fire_animation, key_event, make_app as _shared_make_app, sq, start_single_screen,
+)
 
 
 _pygame_init = pygame_display(1000, 800)
@@ -29,16 +31,6 @@ _pygame_init = pygame_display(1000, 800)
 
 def make_app():
     return _shared_make_app(1000, 800, mock_sound=False)
-
-
-def _key(key, unicode=""):
-    return pg.event.Event(pg.KEYDOWN, key=key, mod=0, unicode=unicode)
-
-
-def _fire_animation(board):
-    for a in list(board.animations):
-        a.start_ms = pg.time.get_ticks() - 10_000
-    board._draw_animations()
 
 
 def _write_pgn(tmp_path, name, *, white="alice", black="bob", result="1-0",
@@ -65,7 +57,7 @@ def _captures_pgn(tmp_path, name="captures.pgn"):
     return path
 
 
-def _enter_review(app, path, return_to="history"):
+def _enter_review(app, path, return_to="menu"):
     app.request_nav(Nav("review", {"pgn_path": str(path), "return_to": return_to}))
     app._execute_pending_nav()
     app._execute_pending_nav()
@@ -75,9 +67,9 @@ def _enter_review(app, path, return_to="history"):
 def test_open_review_from_history_via_real_open_call(tmp_path):
     path = _write_pgn(tmp_path, "local-20260101-120000.pgn")
     app = make_app()
-    app._on_open_history()
-    app._execute_pending_nav()
-    assert app.screen.name == "history"
+    app.menu.goto_history()
+    assert app.screen.name == "menu"
+    assert app.menu._active_view == "history"
 
     app._open_pgn_review(str(path))
     app._execute_pending_nav()
@@ -101,12 +93,11 @@ def test_review_never_writes_a_pgn(tmp_path):
     assert glob.glob(os.path.join(str(paths.get_games_dir()), "*.pgn")) == []
 
 
-def test_esc_on_review_returns_to_history_end_to_end(tmp_path):
+def test_esc_on_review_returns_to_the_remembered_history_view_end_to_end(tmp_path):
     path = _write_pgn(tmp_path, "test.pgn")
     app = make_app()
-    app._on_open_history()
-    app._execute_pending_nav()
-    _enter_review(app, path, return_to="history")
+    app.menu.goto_history()
+    _enter_review(app, path, return_to="menu")
     assert app.screen.name == "review"
 
     pg.event.clear()
@@ -114,17 +105,20 @@ def test_esc_on_review_returns_to_history_end_to_end(tmp_path):
     app.input_router.check_events()
     app._execute_pending_nav()
 
-    assert app.screen.name == "history"
+    assert app.screen.name == "menu"
+    assert app.menu._active_view == "history"
 
 
-def test_menu_button_returns_to_history(tmp_path):
+def test_menu_button_returns_to_the_remembered_history_view(tmp_path):
     path = _write_pgn(tmp_path, "test.pgn")
     app = make_app()
-    _enter_review(app, path, return_to="history")
+    app.menu.goto_history()
+    _enter_review(app, path, return_to="menu")
     assert app.screen.name == "review"
     app.review._on_menu()
     app._execute_pending_nav()
-    assert app.screen.name == "history"
+    assert app.screen.name == "menu"
+    assert app.menu._active_view == "history"
 
 
 def test_return_to_menu_variant(tmp_path):
@@ -139,12 +133,12 @@ def test_return_to_menu_variant(tmp_path):
     assert app.screen.name == "menu"
 
 
-def test_load_failure_toasts_and_returns_to_history(tmp_path):
+def test_load_failure_toasts_and_returns_to_menu(tmp_path):
     bad = tmp_path / "broken.pgn"
     bad.write_text('[White "x"]\n\n1. e4 zz9 *', encoding="utf-8")
     app = make_app()
-    _enter_review(app, bad, return_to="history")
-    assert app.screen.name == "history"
+    _enter_review(app, bad, return_to="menu")
+    assert app.screen.name == "menu"
     assert app.toast.message == "Could not load PGN"
 
 
@@ -193,24 +187,24 @@ def test_arrow_stepping_mirrors_live_review_semantics(tmp_path):
 
     assert review.board.review_ply == 0
 
-    review.handle_key(_key(pg.K_LEFT))
+    review.handle_key(key_event(pg.K_LEFT))
     assert review.board.review_ply == 0
     assert review.board.animations == []
 
-    review.handle_key(_key(pg.K_RIGHT))
+    review.handle_key(key_event(pg.K_RIGHT))
     assert review.board.review_ply == 0
     assert len(review.board.animations) >= 1
-    _fire_animation(review.board)
+    fire_animation(review.board)
     assert review.board.review_ply == 1
 
-    review.handle_key(_key(pg.K_END))
+    review.handle_key(key_event(pg.K_END))
     assert review.board.review_ply is None
 
-    review.handle_key(_key(pg.K_LEFT))
+    review.handle_key(key_event(pg.K_LEFT))
     assert review.board.review_ply == 3
     assert review.board.animations == []
 
-    review.handle_key(_key(pg.K_HOME))
+    review.handle_key(key_event(pg.K_HOME))
     assert review.board.review_ply == 0
 
 
@@ -219,7 +213,7 @@ def test_flip_key_flips_the_review_board(tmp_path):
     app = make_app()
     _enter_review(app, path)
     before = app.review.board.flipped
-    app.review.handle_key(_key(pg.K_f))
+    app.review.handle_key(key_event(pg.K_f))
     assert app.review.board.flipped != before
 
 
@@ -277,7 +271,7 @@ def test_review_help_shows_navigation_subset(tmp_path):
     path = _write_pgn(tmp_path, "test.pgn")
     app = make_app()
     _enter_review(app, path)
-    app.review.handle_key(_key(pg.K_SLASH, unicode="?"))
+    app.review.handle_key(key_event(pg.K_SLASH, unicode="?"))
     assert app.help_modal.is_visible() is True
     assert app.help_modal.rows == REVIEW_HOTKEYS
     assert len(REVIEW_HOTKEYS) < len(HOTKEYS)
@@ -287,7 +281,7 @@ def test_review_help_shows_navigation_subset(tmp_path):
 
 def test_game_help_shows_the_full_list():
     app = start_single_screen(make_app())
-    app.game.handle_key(_key(pg.K_SLASH, unicode="?"))
+    app.game.handle_key(key_event(pg.K_SLASH, unicode="?"))
     assert app.help_modal.is_visible() is True
     assert app.help_modal.rows == HOTKEYS
 
@@ -341,7 +335,7 @@ def test_review_annotations_do_not_survive_exit(tmp_path):
     app.review.handle_right_release(center)
     assert board.highlighted_squares
 
-    app.switch_to("history")
+    app.switch_to("menu")
 
     assert board.highlighted_squares == set()
     assert board.arrows == []
@@ -380,12 +374,12 @@ def test_review_help_lists_every_key_review_actually_handles(tmp_path):
     screen handles but forgets to list is invisible — including `?`, the key that
     opens the modal you are reading."""
     app = _enter_review(make_app(), _write_pgn(tmp_path, "help.pgn"))
-    app.review.handle_key(_key(pg.K_QUESTION, "?"))
+    app.review.handle_key(key_event(pg.K_QUESTION, "?"))
     listed = {row[0] for row in app.help_modal.rows}
 
     assert "?" in listed
     assert "F11" in listed
-    assert {"← →", "Home", "End", "F", "Esc"} <= listed
+    assert {"Left / Right", "Home", "End", "F", "Esc"} <= listed
 
 
 def test_review_open_pgn_toasts_when_the_file_is_gone(tmp_path, monkeypatch):

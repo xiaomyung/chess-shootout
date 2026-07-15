@@ -10,7 +10,6 @@ from chessshootout.frontend.visual import backdrop
 from chessshootout.frontend.visual.gunfx import DT_MAX, GUN_DRAW_SPINS_LAND, RAGDOLL_MS
 from chessshootout.frontend.visual.cache import render_text, new_cache, memoized_surface
 from chessshootout.frontend.visual.colors import Colors
-from chessshootout.frontend.visual.draw import smoothstep
 from chessshootout.frontend.visual.fonts import get_font
 from chessshootout.frontend.visual.widgets import build_ko_badge, wrap_words, KO_WINK_MS
 
@@ -44,12 +43,6 @@ PAWN_LINES = (
     "tactical retreat!!", "mom said im next", "pawnocalypse now", "EN PASSANT??",
 )
 DEATH_LINES = ("ough", "noooo", "tell my wife...", "gg")
-INTRO_LINES = ("Let's rock!", "One by one now, kids", "Here we go again",
-               "back to work", "miss me?")
-INTRO_MS = 1300
-INTRO_GRACE_MS = 500
-INTRO_ARC = 90
-INTRO_DIM = 0.45
 GUN_DRAW_SEC = 0.7
 GUN_DRAW_SPINS_SWAP = 3
 KILL_SPIN_CHANCE = 0.20
@@ -66,6 +59,8 @@ BUBBLE_FADE_OUT_MS = 240
 SCRIM_N = 64
 SCRIM_INNER_ALPHA = 74
 SCRIM_OUTER_ALPHA = 180
+GRID_STEP = 44
+GRID_STEP_MIN = 28
 
 _HITMARK_CACHE = new_cache()
 _MENU_SPARK_CACHE = new_cache()
@@ -96,21 +91,15 @@ def _menu_spark_sprite(size, color):
 
 
 class MenuBattle:
-    def __init__(self, window, rng=None, sound_manager=None):
-        self.window = window
+    def __init__(self, rng=None, sound_manager=None):
         self.rng = rng or random.Random()
         self.sound_manager = sound_manager
         self.rect = pg.Rect(0, 0, 0, 0)
-        self.avoid_rect = pg.Rect(0, 0, 0, 0)
-        self.obstacle = None
+        self.avoid_rects = []
+        self.obstacles = []
         self.top_inset = 0
         self.debug = os.environ.get("CHESS_BATTLE_DEBUG") == "1"
         self.scale = 1.0
-        self._logo_rect = pg.Rect(0, 0, 0, 0)
-        self._intro_active = False
-        self._intro_start_ms = None
-        self._intro_t = 0.0
-        self._intro_land = None
         self.pawns = []
         self.queen = None
         self.particles = []
@@ -152,7 +141,7 @@ class MenuBattle:
         self._build_art()
         self._build_shadows()
         self._build_weapons()
-        self._compute_obstacle()
+        self._compute_obstacles()
         self._bg_cache = None
         self._scrim_cache = None
         if not self._initialized and rect.width > 0 and rect.height > 0:
@@ -162,18 +151,25 @@ class MenuBattle:
             self._size_entity(self.queen)
             for p in self.pawns:
                 self._size_entity(p)
-            self._clamp_queen_to_window()
+            self._reconcile_entities()
+            self._cull_out_of_bounds()
             self.queen["wp"] = self._rand_waypoint()
 
-    def set_avoid_rect(self, rect):
-        self.avoid_rect = pg.Rect(rect)
-        self._compute_obstacle()
+    def set_avoid_rects(self, rects):
+        coerced = [pg.Rect(r) for r in rects]
+        self.avoid_rects = [r for r in coerced if r.width > 0 and r.height > 0]
+        self._compute_obstacles()
         if self.queen is not None:
             for ent in (self.queen, *self.pawns):
-                ent["x"], ent["y"] = self._push_out(self._entity_obstacle(ent),
-                                                    ent["x"], ent["y"],
-                                                    exclude_top=ent["kind"] == "queen")
+                if ent.get("emerging"):
+                    continue
+                ent["x"], ent["y"] = self._push_out_all(
+                    self._entity_obstacles(ent), ent["x"], ent["y"],
+                    exclude_top=ent["kind"] == "queen")
             self._clamp_queen_to_window()
+
+    def set_avoid_rect(self, rect):
+        self.set_avoid_rects([rect])
 
     def _size_entity(self, ent):
         kind = ent["kind"]
@@ -228,26 +224,27 @@ class MenuBattle:
     def _entity_art(self, kind):
         return self._art.get(kind)
 
-    def _compute_obstacle(self):
-        a = self.avoid_rect
-        if a.width <= 0 or a.height <= 0:
-            self.obstacle = None
-            return
-        lx = a.x - self.rect.x
-        ly = a.y - self.rect.y
-        self.obstacle = (lx, ly, lx + a.width, ly + a.height)
+    def _compute_obstacles(self):
+        self.obstacles = []
+        for a in self.avoid_rects:
+            if a.width <= 0 or a.height <= 0:
+                continue
+            lx = a.x - self.rect.x
+            ly = a.y - self.rect.y
+            self.obstacles.append((lx, ly, lx + a.width, ly + a.height))
 
-    def _entity_obstacle(self, ent):
-        o = self.obstacle
-        if o is None:
-            return None
+    def _entity_obstacles(self, ent):
         art = self._entity_art(ent["kind"])
         base = QUEEN_BASE_H if ent["kind"] == "queen" else PAWN_BASE_H
         hw = (art["w"] if art else base * self.scale) / 2
-        return (o[0] - hw, o[1], o[2] + hw, o[3] + ent["sprite_h"])
+        return [(o[0] - hw, o[1], o[2] + hw, o[3] + ent["sprite_h"])
+                for o in self.obstacles]
 
     def _point_in(self, o, x, y):
         return o is not None and o[0] < x < o[2] and o[1] < y < o[3]
+
+    def _point_in_any(self, obstacles, x, y):
+        return any(self._point_in(o, x, y) for o in obstacles)
 
     def _push_out(self, o, x, y, exclude_top=False):
         if not self._point_in(o, x, y):
@@ -263,6 +260,17 @@ class MenuBattle:
             return x, o[1]
         return x, o[3]
 
+    def _push_out_all(self, obstacles, x, y, exclude_top=False):
+        for _ in range(4):
+            moved = False
+            for o in obstacles:
+                nx, ny = self._push_out(o, x, y, exclude_top)
+                if (nx, ny) != (x, y):
+                    x, y, moved = nx, ny, True
+            if not moved:
+                break
+        return x, y
+
     def _seg_hits(self, o, ax, ay, bx, by):
         if o is None:
             return False
@@ -274,9 +282,13 @@ class MenuBattle:
                 return True
         return False
 
-    def _route(self, o, px, py, tx, ty):
-        if o is None or not self._seg_hits(o, px, py, tx, ty):
+    def _seg_hits_any(self, obstacles, ax, ay, bx, by):
+        return any(self._seg_hits(o, ax, ay, bx, by) for o in obstacles)
+
+    def _route(self, obstacles, px, py, tx, ty):
+        if not self._seg_hits_any(obstacles, px, py, tx, ty):
             return tx, ty
+        o = next(o for o in obstacles if self._seg_hits(o, px, py, tx, ty))
         m = ROUTE_MARGIN
         corners = ((o[0] - m, o[1] - m), (o[2] + m, o[1] - m),
                    (o[2] + m, o[3] + m), (o[0] - m, o[3] + m))
@@ -287,32 +299,21 @@ class MenuBattle:
                 best_cost, best = cost, (cx, cy)
         return best
 
-    def _rand_waypoint(self, o=None):
+    def _rand_waypoint(self, obstacles=None):
         w, h = self.rect.width, self.rect.height
-        if o is None:
-            o = self.obstacle
+        if obstacles is None:
+            obstacles = self.obstacles
+        art = self._entity_art("queen")
+        hw = (art["w"] if art else QUEEN_BASE_H * self.scale) / 2
         qh = self.queen["sprite_h"] if self.queen else 0.0
+        xmin, xmax = hw, max(hw, w - hw)
         ymin, ymax = self.top_inset + qh, float(h)
-        if o is None:
-            return [w * self._rnd(0.15, 0.85), self._rnd(ymin, ymax)]
-        left = (12, o[0] - 12, ymin, ymax) if o[0] > 90 else None
-        right = (o[2] + 12, w - 12, ymin, ymax) if w - o[2] > 90 else None
-        extra = []
-        if o[1] - ymin > 60:
-            extra.append((30, w - 30, ymin, o[1] - 12))
-        if ymax - o[3] > 60:
-            extra.append((30, w - 30, o[3] + 12, ymax))
-        bands = [b for b in (left, right) if b] + extra
-        if not bands:
-            return [16, (ymin + ymax) / 2]
-        if left and right and not extra and self.queen is not None:
-            card_cx = (o[0] + o[2]) / 2
-            near = left if self.queen["x"] < card_cx else right
-            far = right if near is left else left
-            b = near if self.rng.random() < 0.78 else far
-        else:
-            b = bands[int(self.rng.random() * len(bands))]
-        return [self._rnd(b[0], b[1]), self._rnd(b[2], b[3])]
+        candidate = [(xmin + xmax) / 2, (ymin + ymax) / 2]
+        for _ in range(30):
+            candidate = [self._rnd(xmin, xmax), self._rnd(ymin, ymax)]
+            if not self._point_in_any(obstacles, candidate[0], candidate[1]):
+                return candidate
+        return [max(xmin, min(xmax, candidate[0])), max(ymin, min(ymax, candidate[1]))]
 
     def _make_queen(self):
         w, h = self.rect.width, self.rect.height
@@ -329,32 +330,6 @@ class MenuBattle:
     def _spawn_initial(self):
         self.queen = self._make_queen()
         self.queen["wp"] = self._rand_waypoint()
-        self.begin_intro()
-
-    def set_logo_rect(self, rect):
-        self._logo_rect = pg.Rect(rect)
-
-    def begin_intro(self):
-        self._intro_active = True
-        self._intro_start_ms = None
-        self._intro_t = 0.0
-        self._intro_land = None
-        self.pawns = []
-        self.projectiles = []
-        self.particles = []
-        self.drops = []
-        self.acc = {"qfire": 0.0, "talk": 1.5, "spawn": 0.0}
-        if self.queen is not None:
-            self.queen["bubble"] = None
-            self.queen["flinch"] = 0.0
-            self.queen["kills"] = 0
-            self.queen["ko_wink_until"] = 0
-
-    def _logo_center(self):
-        if self._logo_rect.width > 0:
-            return (self._logo_rect.centerx - self.rect.x,
-                    self._logo_rect.centery - self.rect.y)
-        return self.rect.width * 0.5, self.rect.height * 0.22
 
     def _spawn_pawn(self, initial):
         if len(self.pawns) >= MAX_PAWNS:
@@ -379,7 +354,8 @@ class MenuBattle:
         }
         self._size_entity(p)
         if initial:
-            p["x"], p["y"] = self._push_out(self._entity_obstacle(p), p["x"], p["y"])
+            p["x"], p["y"] = self._push_out_all(self._entity_obstacles(p), p["x"], p["y"])
+        p["emerging"] = not initial
         self.pawns.append(p)
 
     def _body_point(self, ent):
@@ -428,45 +404,11 @@ class MenuBattle:
         self._last_ms = now_ms
         if self.queen is None:
             return
-        if self._intro_active:
-            self._update_intro(dt, now_ms)
-            self._prune(now_ms)
-            return
-        self._compute_obstacle()
+        self._compute_obstacles()
         self._step(dt, now_ms)
         self._update_projectiles(dt, now_ms)
         self._update_drops(dt)
         self._prune(now_ms)
-
-    def _update_intro(self, dt, now_ms):
-        if self._intro_start_ms is None:
-            self._intro_start_ms = now_ms
-            self._intro_land = self._pick_landing()
-        t = (now_ms - self._intro_start_ms - INTRO_GRACE_MS) / INTRO_MS
-        if t >= 1.0:
-            self._finish_intro(now_ms)
-        else:
-            self._intro_t = max(0.0, t)
-
-    def _pick_landing(self):
-        self._compute_obstacle()
-        qo = self._entity_obstacle(self.queen)
-        land = self._rand_waypoint(qo)
-        x, y = self._window_clamped(land[0], land[1])
-        return list(self._push_out(qo, x, y, exclude_top=True))
-
-    def _finish_intro(self, now_ms):
-        self._intro_active = False
-        self._intro_t = 1.0
-        if self._intro_land is None:
-            self._intro_land = self._pick_landing()
-        self.queen["x"], self.queen["y"] = self._intro_land
-        self._clamp_queen_to_window()
-        self.queen["wp"] = None
-        self.queen["anchor_ms"] = None
-        self._start_gun_flourish(self.queen, GUN_DRAW_SEC, GUN_DRAW_SPINS_LAND, True)
-        self.acc["spawn"] = 0.6
-        self._say(self.queen, self._pick(INTRO_LINES), "queen", now_ms)
 
     @staticmethod
     def _start_gun_flourish(ent, seconds, spins, grow):
@@ -501,15 +443,22 @@ class MenuBattle:
                 d["spin"] = 0.0
 
     def _step(self, dt, now_ms):
+        alive = [p for p in self.pawns if p["alive"]]
+        self._step_queen(dt, now_ms, alive)
+        self._step_pawns(dt, now_ms, alive)
+        self._step_spawns(dt)
+        self._step_dialogue(dt, now_ms, alive)
+
+    def _step_queen(self, dt, now_ms, alive):
         q = self.queen
-        qo = self._entity_obstacle(q)
-        if (q["wp"] is None or self._point_in(qo, q["wp"][0], q["wp"][1])
+        qo = self._entity_obstacles(q)
+        if (q["wp"] is None or self._point_in_any(qo, q["wp"][0], q["wp"][1])
                 or math.hypot(q["wp"][0] - q["x"], q["wp"][1] - q["y"]) < 26):
             q["wp"] = self._rand_waypoint(qo)
         qt = self._route(qo, q["x"], q["y"], q["wp"][0], q["wp"][1])
         q["x"] += (qt[0] - q["x"]) * min(1.0, dt * 1.6)
         q["y"] += (qt[1] - q["y"]) * min(1.0, dt * 1.6)
-        q["x"], q["y"] = self._push_out(qo, q["x"], q["y"], exclude_top=True)
+        q["x"], q["y"] = self._push_out_all(qo, q["x"], q["y"], exclude_top=True)
         self._clamp_queen_to_window()
         q["flinch"] = max(0.0, q["flinch"] - dt * 4)
         q["recoil"] -= q["recoil"] * min(1.0, dt * RECOIL_RECOVER)
@@ -526,8 +475,7 @@ class MenuBattle:
                     self._start_gun_flourish(q, GUN_DRAW_SEC, GUN_DRAW_SPINS_SWAP, True)
             q["weapon_switch"] = self._rnd(WEAPON_SWITCH_MIN, WEAPON_SWITCH_MAX)
 
-        alive = [p for p in self.pawns if p["alive"]]
-        targets = [p for p in alive if self._fully_in_window(p)]
+        targets = [p for p in alive if self._visible(p)]
         nearest, nd = None, 1e9
         for p in targets:
             d = math.hypot(p["x"] - q["x"], p["y"] - q["y"])
@@ -542,9 +490,14 @@ class MenuBattle:
             self.acc["qfire"] = self._rnd(0.23, 0.53)
             self._fire(q, nearest, True, now_ms)
 
+    def _step_pawns(self, dt, now_ms, alive):
+        q = self.queen
         for p in alive:
-            po = self._entity_obstacle(p)
-            rx, ry = self._route(po, p["x"], p["y"], q["x"], q["y"])
+            po = self._entity_obstacles(p)
+            if p.get("emerging") and self._visible_with(p, po):
+                p["emerging"] = False
+            emerging = p.get("emerging", False)
+            rx, ry = self._route(() if emerging else po, p["x"], p["y"], q["x"], q["y"])
             dx, dy = rx - p["x"], ry - p["y"]
             rd = math.hypot(dx, dy) or 1.0
             qx, qy = q["x"] - p["x"], q["y"] - p["y"]
@@ -555,41 +508,59 @@ class MenuBattle:
                 p["y"] += (dy / rd) * p["speed"] * dt
             else:
                 p["x"] -= (qx / qd) * p["speed"] * 0.3 * dt
-            p["x"], p["y"] = self._push_out(po, p["x"], p["y"])
+            if not emerging:
+                p["x"], p["y"] = self._push_out_all(po, p["x"], p["y"])
             p["recoil"] -= p["recoil"] * min(1.0, dt * RECOIL_RECOVER)
             self._aim_gun(p, q, dt)
-            if self._fully_in_window(p):
+            if self._visible_with(p, po):
                 p["fire"] -= dt
                 if p["fire"] <= 0 and self._aligned(p, q):
                     p["fire"] = self._rnd(2.2, 4.6)
                     self._fire(p, q, False, now_ms)
         self._separate_pawns()
 
+    def _step_spawns(self, dt):
         self.acc["spawn"] -= dt
         while self.acc["spawn"] <= 0 and len(self.pawns) < MAX_PAWNS:
             self.acc["spawn"] += self._rnd(0.18, 0.42)
             self._spawn_pawn(False)
 
+    def _step_dialogue(self, dt, now_ms, alive):
         self.acc["talk"] -= dt
         if self.acc["talk"] <= 0:
             self.acc["talk"] = self._rnd(2.4, 4.6)
             if self.rng.random() < 0.5 or not alive:
-                self._say(q, self._pick(QUEEN_LINES), "queen", now_ms)
+                self._say(self.queen, self._pick(QUEEN_LINES), "queen", now_ms)
             else:
                 self._say(self._pick(alive), self._pick(PAWN_LINES), "pawn", now_ms)
 
-    def _window_clamped(self, x, y):
-        art = self._entity_art("queen")
-        hw = (art["w"] if art else QUEEN_BASE_H * self.scale) / 2
-        h = self.queen["sprite_h"]
-        return (max(hw, min(self.rect.width - hw, x)),
-                max(self.top_inset + h, min(float(self.rect.height), y)))
+    def _clamp_entity_to_field(self, ent):
+        art = self._entity_art(ent["kind"])
+        base = QUEEN_BASE_H if ent["kind"] == "queen" else PAWN_BASE_H
+        hw = (art["w"] if art else base * self.scale) / 2
+        h = ent["sprite_h"]
+        ent["x"] = max(hw, min(self.rect.width - hw, ent["x"]))
+        ent["y"] = max(self.top_inset + h, min(float(self.rect.height), ent["y"]))
 
     def _clamp_queen_to_window(self):
-        q = self.queen
-        if q is None:
-            return
-        q["x"], q["y"] = self._window_clamped(q["x"], q["y"])
+        if self.queen is not None:
+            self._clamp_entity_to_field(self.queen)
+
+    def _reconcile_entities(self):
+        for ent in (self.queen, *self.pawns):
+            if ent is None or ent.get("emerging"):
+                continue
+            ent["x"], ent["y"] = self._push_out_all(
+                self._entity_obstacles(ent), ent["x"], ent["y"],
+                exclude_top=ent["kind"] == "queen")
+            self._clamp_entity_to_field(ent)
+
+    def _cull_out_of_bounds(self):
+        self.projectiles = [pr for pr in self.projectiles
+                            if not self._off_screen(pr["x"], pr["y"])]
+        self.particles = [p for p in self.particles
+                          if not self._off_screen(p["x"], p["y"])]
+        self.drops = [d for d in self.drops if not self._off_screen(d["x"], d["y"])]
 
     def _fully_in_window(self, ent):
         art = self._entity_art(ent["kind"])
@@ -598,6 +569,13 @@ class MenuBattle:
         return (ent["x"] - hw >= 0 and ent["x"] + hw <= self.rect.width
                 and ent["y"] - ent["sprite_h"] >= self.top_inset
                 and ent["y"] <= self.rect.height)
+
+    def _visible_with(self, ent, obstacles):
+        return (self._fully_in_window(ent)
+                and not self._point_in_any(obstacles, ent["x"], ent["y"]))
+
+    def _visible(self, ent):
+        return self._visible_with(ent, self._entity_obstacles(ent))
 
     def _separate_pawns(self):
         art = self._entity_art("pawn")
@@ -622,7 +600,9 @@ class MenuBattle:
                     a["y"] -= s * shift
                     b["y"] += s * shift
         for p in movers:
-            p["x"], p["y"] = self._push_out(self._entity_obstacle(p), p["x"], p["y"])
+            if p.get("emerging"):
+                continue
+            p["x"], p["y"] = self._push_out_all(self._entity_obstacles(p), p["x"], p["y"])
 
     def _unstick_queen(self, now_ms, qo):
         q = self.queen
@@ -708,7 +688,7 @@ class MenuBattle:
     def _projectile_hit(self, pr):
         if pr["is_queen"]:
             for p in self.pawns:
-                if p["alive"] and self._hits_hitbox(pr, p):
+                if p["alive"] and self._visible(p) and self._hits_hitbox(pr, p):
                     return p
             return None
         return self.queen if self._hits_hitbox(pr, self.queen) else None
@@ -760,8 +740,7 @@ class MenuBattle:
             self._draw_drop(window, d, now)
         for p in self.pawns:
             self._draw_entity(window, p, now)
-        if not self._intro_active:
-            self._draw_entity(window, self.queen, now)
+        self._draw_entity(window, self.queen, now)
         for p in self.particles:
             self._draw_particle(window, p, now)
         for pr in self.projectiles:
@@ -769,8 +748,7 @@ class MenuBattle:
         self._draw_ko_counter(window)
         for p in self.pawns:
             self._draw_bubble(window, p, now)
-        if not self._intro_active:
-            self._draw_bubble(window, self.queen, now)
+        self._draw_bubble(window, self.queen, now)
 
     def _scaled_bold_font(self, size, attr):
         cached = getattr(self, attr, None)
@@ -781,7 +759,7 @@ class MenuBattle:
 
     def _draw_ko_counter(self, window):
         q = self.queen
-        if q is None or self._intro_active:
+        if q is None:
             return
         now = self._last_ms or 0
         scale = self.scale
@@ -822,40 +800,12 @@ class MenuBattle:
         if self.debug:
             self._draw_debug(window)
 
-    def draw_intro_overlay(self, window):
-        if not self._intro_active or self.queen is None:
-            return
-        art = self._entity_art("queen")
-        if art is None:
-            return
-        t = self._intro_t
-        ox, oy = self.rect.topleft
-        lx, ly = self._logo_center()
-        land = self._intro_land or (self.rect.width * 0.5, self.rect.height * 0.6)
-        h = art["h"]
-        logo_fit = (self._logo_rect.height * 0.92 / h) if self._logo_rect.height > 0 else 0.5
-        fly = smoothstep((t - 0.1) / 0.9)
-        end_cx, end_cy = land[0], land[1] - h / 2
-        cx = lx + (end_cx - lx) * fly
-        cy = ly + (end_cy - ly) * fly - math.sin(fly * math.pi) * INTRO_ARC * self.scale
-        grow = smoothstep(t / 0.35)
-        s = logo_fit + (1.0 - logo_fit) * grow
-        sprite = pg.transform.smoothscale(
-            art["normal"], (max(int(art["w"] * s), 1), max(int(h * s), 1))).copy()
-        g = int(255 * (1.0 - INTRO_DIM * smoothstep(t)))
-        sprite.fill((g, g, g, 255), special_flags=pg.BLEND_RGBA_MULT)
-        flip = max(0.0, min(1.0, (t - 0.35) / 0.65))
-        if flip:
-            sprite = pg.transform.rotozoom(sprite, 360.0 * flip, 1.0)
-        window.blit(sprite, sprite.get_rect(center=(ox + cx, oy + cy)))
-
     def _draw_debug(self, window):
         ox, oy = self.rect.topleft
         playable = pg.Rect(ox, oy + self.top_inset,
                            self.rect.width, self.rect.height - self.top_inset)
         pg.draw.rect(window, pg.Color("magenta"), playable, 2)
-        if self.obstacle is not None:
-            o = self.obstacle
+        for o in self.obstacles:
             pg.draw.rect(window, pg.Color("cyan"),
                          pg.Rect(ox + o[0], oy + o[1], o[2] - o[0], o[3] - o[1]), 2)
         for ent in (*self.pawns, self.queen):
@@ -865,7 +815,12 @@ class MenuBattle:
             base = QUEEN_BASE_H if ent["kind"] == "queen" else PAWN_BASE_H
             w = art["w"] if art else int(base * self.scale)
             h = ent["sprite_h"]
-            color = pg.Color("lime") if ent["kind"] == "queen" else pg.Color("yellow")
+            if ent["kind"] == "queen":
+                color = pg.Color("lime")
+            elif ent.get("emerging"):
+                color = pg.Color("orange")
+            else:
+                color = pg.Color("yellow")
             pg.draw.rect(window, color,
                          pg.Rect(ox + ent["x"] - w / 2, oy + ent["y"] - h, w, h), 2)
 
@@ -995,14 +950,15 @@ class MenuBattle:
     def _fits_above(self, rect):
         if rect.top < self.rect.y + self.top_inset + 4:
             return False
-        card = self.avoid_rect
-        return not (card.width > 0 and rect.colliderect(card))
+        return not any(card.width > 0 and rect.colliderect(card)
+                       for card in self.avoid_rects)
 
     def _prefer_right(self, cx, body_y):
         lw, rw = self.rect.x + 4, self.rect.right - 4
         leftroom, rightroom = cx - lw, rw - cx
-        card = self.avoid_rect
-        if card.width > 0 and card.top - 12 <= body_y <= card.bottom + 12:
+        for card in self.avoid_rects:
+            if card.width <= 0 or not card.top - 12 <= body_y <= card.bottom + 12:
+                continue
             if cx <= card.centerx:
                 rightroom = min(rightroom, card.left - 6 - cx)
             else:
@@ -1041,7 +997,6 @@ class MenuBattle:
         art = self._entity_art(ent["kind"])
         half_w = art["normal"].get_width() / 2 if art else sprite_h * 0.32
         lw, rw = self.rect.x + 4, self.rect.right - 4
-        card = self.avoid_rect
 
         def measure(max_text_w):
             mw = max(int(max_text_w), 1)
@@ -1056,7 +1011,9 @@ class MenuBattle:
             return cache[ckey]
 
         above_lw, above_rw = lw, rw
-        if card.width > 0:
+        for card in self.avoid_rects:
+            if card.width <= 0:
+                continue
             if cx <= card.centerx:
                 above_rw = min(above_rw, card.left - 6)
             else:
@@ -1118,7 +1075,8 @@ class MenuBattle:
     def _background(self, size):
         if self._bg_cache is not None and self._bg_cache[0] == size:
             return self._bg_cache[1]
-        surf = backdrop.arena_background(size, (0.5, 0.18)).convert()
+        step = max(int(GRID_STEP * self.scale), GRID_STEP_MIN)
+        surf = backdrop.arena_background(size, (0.5, 0.18), grid=step).convert()
         self._bg_cache = (size, surf)
         return surf
 

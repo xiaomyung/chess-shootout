@@ -6,10 +6,10 @@ frames render while the result screen is up) plus two static checks (no log
 call literally sits inside a known per-frame draw/update function, and no log
 call anywhere references a skill-check secret or geometry seed).
 """
+
 import logging
 import os
 import re
-
 
 import pytest
 
@@ -113,14 +113,19 @@ def _write_review_pgn(tmp_path):
 
 
 def _enter_history(app):
-    app._on_open_history()
-    app._execute_pending_nav()
+    app.menu.goto_history()
+    app.draw_frame()
+    return app
+
+
+def _enter_options(app):
+    app.menu.goto_view("options")
     app.draw_frame()
     return app
 
 
 def _enter_review(app, path):
-    app.request_nav(Nav("review", {"pgn_path": str(path), "return_to": "history"}))
+    app.request_nav(Nav("review", {"pgn_path": str(path), "return_to": "menu"}))
     app._execute_pending_nav()
     app.draw_frame()
     return app
@@ -138,6 +143,7 @@ def _online_ish(app):
 
 
 def _idle_frame_offenders(app, clock, capture, n=100, step=16):
+    app.coordinator._last_reconnect_probe_ms = clock()
     capture.records.clear()
     for _ in range(n):
         clock.advance(step)
@@ -159,6 +165,7 @@ def test_idle_draw_frame_emits_no_log_records_on_every_screen(
         ("game", start_game(make_app())),
         ("online-ish game", _online_ish(start_game(make_app()))),
         ("history", _enter_history(make_app())),
+        ("options", _enter_options(make_app())),
         ("review", _enter_review(make_app(), _write_review_pgn(tmp_path))),
     ]
 
@@ -174,6 +181,7 @@ INFO_ALLOWLIST_PREFIXES = (
     "frontend ready",
     "setting persisted",
     "screen switch",
+    "menu view",
     "game start",
     "game enter",
     "game end",
@@ -223,7 +231,8 @@ stray internal leaking at INFO."""
 
 def _run_scripted_local_session(tmp_path):
     """menu -> start local game -> play a move each side -> resign -> back to
-    menu -> history -> open review -> back -> quit flush, entirely offline."""
+    menu -> history -> open review -> back -> options -> back to play -> quit
+    flush, entirely offline."""
     app = make_app()
     app._on_start_game({
         "mode": "single_screen", "nickname": "alice", "side": "white",
@@ -238,12 +247,15 @@ def _run_scripted_local_session(tmp_path):
     assert saved_path is not None
 
     app._on_back_to_menu()
-    app._on_open_history()
+    app.menu.goto_history()
     app._execute_pending_nav()
     app._open_pgn_review(saved_path)
     app._execute_pending_nav()
     app.review._on_menu()
     app._execute_pending_nav()
+
+    app.menu.goto_view("options")
+    app.menu.goto_view("play")
 
     for screen in app.screens.values():
         screen.on_app_exit()
@@ -271,9 +283,10 @@ def test_scripted_local_session_info_lines_match_the_allowlist(
     for expected_prefix in (
         "screen switch menu -> game", "game start mode=single_screen",
         "game enter variant=local", "game end result=",
-        "screen switch game -> menu", "screen switch menu -> history",
-        "screen switch history -> review", "review enter path=",
-        "screen switch review -> history",
+        "screen switch game -> menu", "menu view play -> history",
+        "screen switch menu -> review", "review enter path=",
+        "screen switch review -> menu", "menu view history -> options",
+        "menu view options -> play",
     ):
         assert any(m.startswith(expected_prefix) for m in messages), (
             f"expected story beat missing: {expected_prefix!r} not in {messages}")

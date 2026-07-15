@@ -7,10 +7,9 @@ cancels an in-flight gesture."""
 import pygame as pg
 
 from tests.conftest import pygame_display
-from chessshootout.backend.pieces import Piece, PieceType, PieceColor
-from chessshootout.backend.utils import Square, Move, HistoryEntry
 from chessshootout.frontend.frontend import Frontend
 from chessshootout.frontend.modals.help import HOTKEYS
+from tests.helpers import history_entry
 
 
 _pygame_init = pygame_display(1000, 800)
@@ -21,16 +20,10 @@ def _config():
             "time_minutes": 5, "increment_seconds": 2, "side": "white"}
 
 
-def _entry(san):
-    move = Move(Square(6, 0), Square(5, 0), Piece(PieceType.PAWN, PieceColor.WHITE))
-    return HistoryEntry(move=move, prev_castling_rights=(), prev_en_passant_target=None,
-                        prev_halfmove_clock=0, position_key_added=("k",), san=san)
-
-
 def _game_app(n_moves=200):
     app = Frontend(1000, 800)
     app._on_start_game(_config())
-    app.game.match.backend.move_history = [_entry(f"a{i % 8 + 1}") for i in range(n_moves)]
+    app.game.match.backend.move_history = [history_entry(f"a{i % 8 + 1}") for i in range(n_moves)]
     app.draw_frame()
     return app
 
@@ -38,7 +31,7 @@ def _game_app(n_moves=200):
 def test_active_scrollable_menu_then_game():
     app = Frontend(1000, 800)
     assert app.input_router._active_scrollable() is None
-    app.switch_to("history")
+    app.menu.goto_history()
     assert app.input_router._active_scrollable() is app.history_view
     app._on_start_game(_config())
     assert app.input_router._active_scrollable() is app.game.right_menu

@@ -18,36 +18,40 @@ from chessshootout.frontend.modal_registry import ModalSpec
 from chessshootout.frontend.modals.confirm import ConfirmModal
 from chessshootout.frontend.modals.country_picker import CountryPicker
 from chessshootout.frontend.modals.directory_browser import DirectoryBrowser
-from chessshootout.frontend.modals.options import OptionsModal
 from chessshootout.frontend.settings import SettingsController
 from chessshootout.frontend.modals.help import HelpModal, HOTKEYS
 from chessshootout.frontend.visual.toast import Toast
 from chessshootout.frontend.visual import cache
+from chessshootout.frontend.frame_pacer import FramePacer
 from chessshootout.frontend.input_router import InputRouter
 from chessshootout.frontend.layout import compute_layout
 from chessshootout.frontend.screens.base import Nav, assert_plain_payload
 from chessshootout.frontend.screens.menu import MenuScreen
 from chessshootout.frontend.screens.game import GameScreen
-from chessshootout.frontend.screens.history import HistoryScreen
 from chessshootout.frontend.screens.review import ReviewScreen
 from chessshootout.frontend.window_chrome import (
     WindowChrome, WINDOW_FLAGS, WINDOW_TITLE, MIN_WINDOW_WIDTH, MIN_WINDOW_HEIGHT,
 )
-from chessshootout.infra.open_external import open_with_default_app
 from chessshootout.frontend.game.variant import Variant
 from chessshootout.frontend.online_coordinator import OnlineCoordinator
 from chessshootout.frontend.audio.sound_manager import SoundManager
-from chessshootout.frontend.menu.start import StartMenu
-from chessshootout.domain.pgn.load import latest_pgn_in_dir
+from chessshootout.online.news import NewsClient
 
 
 PERF_SAMPLE_COUNT = 240
 PERF_1PCT_PERCENTILE = 0.99
 PERF_1PCT_MIN_SAMPLES = 100
+STAT_SLOT_FPS = 7
+STAT_SLOT_1PCT = 9
+STAT_SLOT_FRAME = 13
+STAT_SLOT_PING = 10
+
+KEY_REPEAT_DELAY_MS = 400
+KEY_REPEAT_INTERVAL_MS = 35
 
 
-def _games_dir():
-    return str(paths.get_games_dir())
+def _stat_slot(label, value, width):
+    return f"{label} {value}".ljust(width)
 
 
 log = logging.getLogger("chess.frontend")
@@ -74,46 +78,37 @@ class Frontend:
         self.window_height = max(window_height, MIN_WINDOW_HEIGHT)
         self.window = pg.display.set_mode(
             (self.window_width, self.window_height), WINDOW_FLAGS)
-        pg.key.set_repeat(400, 35)
+        pg.key.set_repeat(KEY_REPEAT_DELAY_MS, KEY_REPEAT_INTERVAL_MS)
         icon = _load_window_icon()
         if icon is not None:
             pg.display.set_icon(icon)
         self._pre_fullscreen_size = None
         self.settings = SettingsController(self)
         self.chrome = WindowChrome(self.window, on_fullscreen=self._apply_fullscreen)
-        self.clock = pg.time.Clock()
+        self.pacer = FramePacer(self.target_fps)
 
         self._needs_full_present = True
         self._frame_times = deque(maxlen=PERF_SAMPLE_COUNT)
         self._last_work_ms = 0.0
         self._last_frame_start = None
-        self._prev_screen_used_backdrop = False
 
         self.sound_manager = SoundManager(paths.SOUNDS_DIR, enabled=pg.mixer.get_init() is not None)
         self.coordinator = OnlineCoordinator(self)
-        self.start_menu = StartMenu(self.window, {
-            "start_game": self._on_start_game,
-            "load_pgn": self._on_open_history,
-            "fen": self._on_open_fen_modal,
-            "reconnect": self.coordinator.reconnect,
-            "options": self.settings._on_open_options,
-            "open_url": open_with_default_app,
-            "toast": lambda msg: self.toast.show(msg),
-        })
         self.audio_panel = AudioPanel(self.window, self.sound_manager)
         self.confirm_modal = ConfirmModal(self.window)
-        self.history_view = HistoryView(self.window, on_open=self._open_pgn_review,
-                                        on_back=self._on_menu_back)
+        self.history_view = HistoryView(self.window, on_open=self._open_pgn_review)
         self.help_modal = HelpModal(self.window)
-        self.options_modal = OptionsModal(self.window)
         self.country_picker = CountryPicker(self.window)
         self.directory_browser = DirectoryBrowser(self.window)
         self.toast = Toast(self.window)
         self.toast.top_inset = self.chrome.HEIGHT
         self.toast.on_new = lambda: self.sound_manager.play_toast()
         if env.normalize_stored_nickname():
-            self.start_menu.text_input.text = env.get_nickname()
             self.toast.show("Your nickname contained non ASCII symbols, I cleaned them :3")
+        if not env.get_profile_hint_shown():
+            env.set_profile_hint_shown()
+            self.toast.show("Set your name in Profile >", kind="hype")
+        self.news_client = NewsClient()
         self.input_router = InputRouter(self)
         self._modal_registry = [
             ModalSpec(self.confirm_modal, on_dismiss=self.input_router._dismiss_confirm),
@@ -122,29 +117,27 @@ class Frontend:
             ModalSpec(self.coordinator.reconnecting_modal, esc_dismiss=False),
             ModalSpec(self.country_picker),
             ModalSpec(self.directory_browser),
-            ModalSpec(self.options_modal, on_dismiss=self.settings._dismiss_options),
         ]
-        self.menu_battle = MenuBattle(self.window, sound_manager=self.sound_manager)
+        self.menu_battle = MenuBattle(sound_manager=self.sound_manager)
         self._pending_nav = None
 
         self.menu = MenuScreen(self)
         self.game = GameScreen(self)
-        self.history = HistoryScreen(self)
         self.review = ReviewScreen(self)
         self.screens = {
             "menu": self.menu,
             "game": self.game,
-            "history": self.history,
             "review": self.review,
         }
         self.screen = self.screens["menu"]
 
+        self._apply_launch_mode()
         self.game.board.load_assets()
         self.review.board.load_assets()
         self._compute_layout()
-        self._refresh_load_pgn_availability()
         self._settle_window()
         self.coordinator._spawn_reconnect_probe()
+        self.news_client.fetch_once()
 
         pg.display.set_caption(WINDOW_TITLE)
 
@@ -191,7 +184,6 @@ class Frontend:
         self.coordinator.retain_for_rematch(keep_online)
         self.coordinator.unbind_game_from_online()
         self.game._reset_to_new_game()
-        self._refresh_load_pgn_availability()
         if keep_online and had_rematch_offer:
             self.coordinator._reshow_rematch_banner()
 
@@ -209,18 +201,6 @@ class Frontend:
     def _on_help(self):
         self.help_modal.show(HOTKEYS)
 
-    def _refresh_load_pgn_availability(self):
-        self.start_menu.load_pgn_available = self._latest_pgn_path() is not None
-
-    def _latest_pgn_path(self):
-        return latest_pgn_in_dir(_games_dir())
-
-    def _on_open_history(self):
-        self.request_nav(Nav("history"))
-
-    def _on_menu_back(self):
-        self.request_nav(Nav("menu"))
-
     def _on_open_fen_modal(self):
         self.menu.fen_input_modal.show(on_submit=self._start_game_from_fen)
 
@@ -234,11 +214,11 @@ class Frontend:
         self.request_nav(Nav("game", {"fen": fen}))
         self._execute_pending_nav()
         self.menu.fen_input_modal.hide()
-        self.start_menu.hide()
+        self.menu.hide_play_view()
         return True
 
     def _open_pgn_review(self, path):
-        self.request_nav(Nav("review", {"pgn_path": str(path), "return_to": "history"}))
+        self.request_nav(Nav("review", {"pgn_path": str(path), "return_to": "menu"}))
 
     def _on_start_game(self, config):
         env.set_last_mode(config["mode"])
@@ -265,10 +245,11 @@ class Frontend:
             "increment_seconds": config["increment_seconds"],
         }))
         self._execute_pending_nav()
-        self.start_menu.hide()
+        self.menu.hide_play_view()
         self.sound_manager.play_game_start()
 
     def run(self):
+        self.menu.enter()
         while self.running:
             frame_start = time.perf_counter()
             if self._last_frame_start is not None:
@@ -280,7 +261,7 @@ class Frontend:
             self._execute_pending_nav()
             self.chrome.draw(self._chrome_stats())
             work_before_present = time.perf_counter() - frame_start
-            self.clock.tick(self.target_fps)
+            self.pacer.wait()
             present_start = time.perf_counter()
             self._present(had_events)
             self._last_work_ms = (
@@ -294,24 +275,32 @@ class Frontend:
         cache.clear_all()
         pg.quit()
 
+    def _current_fps(self):
+        recent = list(self._frame_times)[-10:]
+        if len(recent) < 2:
+            return 0.0
+        avg = sum(recent) / len(recent)
+        return 1000.0 / avg
+
     def _chrome_stats(self):
         parts = []
         need_sorted = env.get_show_frame_stats() or env.get_show_1pct_low()
         ordered = sorted(self._frame_times) if need_sorted and self._frame_times else []
         if env.get_show_fps():
-            parts.append(f"FPS {int(self.clock.get_fps())}")
+            parts.append(_stat_slot("FPS", int(self._current_fps()), STAT_SLOT_FPS))
         if env.get_show_frame_stats() and ordered:
             avg = sum(ordered) / len(ordered)
-            parts.append(f"AVG {1000.0 / avg:.0f}")
-            parts.append(f"MIN {1000.0 / ordered[-1]:.0f}")
+            parts.append(_stat_slot("AVG", f"{1000.0 / avg:.0f}", STAT_SLOT_FPS))
+            parts.append(_stat_slot("MIN", f"{1000.0 / ordered[-1]:.0f}", STAT_SLOT_FPS))
         if env.get_show_1pct_low() and len(ordered) >= PERF_1PCT_MIN_SAMPLES:
             p99 = ordered[int(len(ordered) * PERF_1PCT_PERCENTILE) - 1]
-            parts.append(f"1%LOW {1000.0 / p99:.0f}")
+            parts.append(_stat_slot("1%LOW", f"{1000.0 / p99:.0f}", STAT_SLOT_1PCT))
         if env.get_show_frametime():
-            parts.append(f"FRAME {self._last_work_ms:.1f}ms")
+            parts.append(_stat_slot("FRAME", f"{self._last_work_ms:.1f}ms", STAT_SLOT_FRAME))
         if env.get_show_ping():
             ping = self.coordinator.ping_ms()
-            parts.append(f"PING {ping}ms" if ping is not None else "PING —")
+            value = f"{ping}ms" if ping is not None else "—"
+            parts.append(_stat_slot("PING", value, STAT_SLOT_PING))
         return parts
 
     def _present(self, had_events):
@@ -323,7 +312,7 @@ class Frontend:
 
     def _needs_full_redraw(self, had_events):
         return (had_events or self._needs_full_present or self._blocking_modal_visible()
-                or self.toast.is_visible() or not self.coordinator.offer_banners.is_empty()
+                or self.toast.is_visible() or self.coordinator.offer_banners.needs_frames()
                 or self.screen.dirty_rects() is None)
 
     def _present_rects(self, had_events):
@@ -336,12 +325,18 @@ class Frontend:
         return list(self._modal_registry) + self.screen.modals()
 
     def _blocking_modal_visible(self):
-        return any(spec.obj.is_visible() for spec in self._active_modal_specs())
+        return any(spec.modal.is_visible() for spec in self._active_modal_specs())
 
     def _recreate_window_surface(self, w, h):
         self.window = pg.display.set_mode((w, h), WINDOW_FLAGS)
         self.chrome.window = self.window
         self.chrome.reinit_sdl()
+
+    def _finish_resize(self, w, h):
+        self.window_width = w
+        self.window_height = h
+        self.input_router._cancel_all_scroll()
+        self._compute_layout()
 
     def _settle_window(self):
         if os.name != "nt" or self.chrome.client_size() is None:
@@ -360,11 +355,8 @@ class Frontend:
                           self.chrome.client_size(), pg.display.get_window_size(),
                           self.window.get_size(), win_w, win_h)
             self._recreate_window_surface(win_w, win_h)
-            self.window_width = win_w
-            self.window_height = win_h
-            self.input_router._cancel_all_scroll()
             self.screen.on_resize()
-            self._compute_layout()
+            self._finish_resize(win_w, win_h)
 
     def draw_frame(self):
         if os.name == "nt" and not self.chrome.is_fullscreen():
@@ -381,21 +373,15 @@ class Frontend:
             self.request_nav(nav)
 
         if self.screen.uses_battle_backdrop:
-            if self.screen.name == "menu" and not self._prev_screen_used_backdrop:
-                self.menu_battle.begin_intro()
             self.menu_battle.update(now)
             self.menu_battle.draw(self.window)
             self.menu_battle.draw_scrim(self.window)
-        self._prev_screen_used_backdrop = self.screen.uses_battle_backdrop
 
         self.screen.draw()
 
-        if self.screen.uses_battle_backdrop:
-            self.menu_battle.draw_intro_overlay(self.window)
-
         self.coordinator.offer_banners.draw(self._banner_rect())
         for spec in reversed(self._active_modal_specs()):
-            spec.obj.draw()
+            spec.modal.draw()
         self.toast.draw(
             center_x=self.game.board.rect.centerx if self.screen is self.game else None)
         self.game.skillcheck_overlay.update(now)
@@ -406,6 +392,34 @@ class Frontend:
             return self.game.board.rect
         return pg.Rect(0, WindowChrome.HEIGHT, self.window_width,
                        self.window_height - WindowChrome.HEIGHT)
+
+    def _apply_launch_mode(self):
+        mode = env.get_launch_mode()
+        if mode == "fullscreen":
+            self.chrome.toggle_fullscreen()
+        elif mode == "maximized":
+            self._maximize_window()
+
+    def _maximize_window(self):
+        if self.chrome.maximize():
+            self._settle_maximized()
+            return
+        sizes = pg.display.get_desktop_sizes()
+        if not sizes:
+            return
+        w = max(sizes[0][0], MIN_WINDOW_WIDTH)
+        h = max(sizes[0][1], MIN_WINDOW_HEIGHT)
+        self._recreate_window_surface(w, h)
+        self.window_width, self.window_height = self.window.get_size()
+
+    def _settle_maximized(self):
+        size = self.chrome.client_size()
+        if size is None:
+            return
+        w = max(size[0], MIN_WINDOW_WIDTH)
+        h = max(size[1], MIN_WINDOW_HEIGHT)
+        self._recreate_window_surface(w, h)
+        self._finish_resize(*self.window.get_size())
 
     def _apply_fullscreen(self, enable):
         if enable and not self.chrome.is_fullscreen():
@@ -419,9 +433,7 @@ class Frontend:
             self.chrome.reinit_sdl()
             self._pre_fullscreen_size = None
         self.chrome.window = self.window
-        self.window_width, self.window_height = self.window.get_size()
-        self.input_router._cancel_all_scroll()
-        self._compute_layout()
+        self._finish_resize(*self.window.get_size())
         return True
 
     def _compute_layout(self):
@@ -440,13 +452,11 @@ class Frontend:
         self.coordinator.wait_modal.set_rect(r.flex_rect)
         self.coordinator.match_found_modal.set_rect(r.flex_rect)
         self.coordinator.reconnecting_modal.set_rect(r.board_rect)
-        self.start_menu.set_rect(r.start_rect)
         self.help_modal.set_rect(r.result_rect)
         for screen in self.screens.values():
             screen.relayout(size)
         self.menu_battle.top_inset = r.top
         self.menu_battle.set_rect(r.window_rect)
-        self.options_modal.set_rect(r.options_rect)
         self.country_picker.set_rect(r.wide_overlay_rect)
         self.directory_browser.set_rect(r.wide_overlay_rect)
         self._needs_full_present = True

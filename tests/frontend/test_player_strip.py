@@ -8,6 +8,8 @@ from chessshootout.frontend.visual.colors import Colors
 from chessshootout.frontend.panels.player_strip import (
     GIVE_TIME_FLOAT_MS, PlayerStrip, give_time_float_alpha,
 )
+from chessshootout.frontend.visual.widgets import avatar_palette
+from tests.helpers import draw_strip as _draw, strip_avatar_pixels as _avatar_pixels
 
 
 _pygame_init = pygame_display(900, 400)
@@ -29,11 +31,6 @@ def strip():
     s.set_rect(pg.Rect(0, 80, 560, 56))
     s.set_piece_icons(_fake_icons())
     return s
-
-
-def _draw(strip):
-    strip.window.fill((0, 0, 0))
-    strip.draw()
 
 
 def _has_color(win, rect, hexcolor, tol=6):
@@ -158,32 +155,42 @@ def test_active_clock_border_stays_neutral(strip):
     assert strip._clock_border_color() == Colors.border
 
 
-def _avatar_top_pixel(strip):
-    pad = max(int(strip.rect.height * 0.16), 4)
-    av = strip.rect.height - 2 * pad
-    return strip.window.get_at(
-        (strip.rect.x + pad + av // 2, strip.rect.y + pad + max(3, av // 6)))
-
-
-def test_white_avatar_is_warm_amber(strip):
+def test_avatar_fill_matches_the_palette_seeded_by_the_displayed_name(strip):
     strip.set_state("Alice", 60.0, False, player_color=PieceColor.WHITE)
     _draw(strip)
-    px = _avatar_top_pixel(strip)
-    assert px.r > 180 and px.r > px.b, "white avatar top should be warm amber→accent"
+    top, bottom = _avatar_pixels(strip)
+    expected_fill, _ = avatar_palette("Alice")
+    assert (top.r, top.g, top.b) == (expected_fill.r, expected_fill.g, expected_fill.b)
+    assert top == bottom, "flat avatar has no gradient (top matches bottom)"
 
 
-def test_black_avatar_is_cool_slate(strip):
+def test_avatar_color_differs_for_a_different_name_regardless_of_side(strip):
+    strip.set_state("Alice", 60.0, False, player_color=PieceColor.WHITE)
+    _draw(strip)
+    white_top, _ = _avatar_pixels(strip)
     strip.set_state("Bob", 60.0, False, player_color=PieceColor.BLACK)
     _draw(strip)
-    px = _avatar_top_pixel(strip)
-    assert px.b >= px.r, "black avatar should be cool slate, not warm"
+    black_top, black_bottom = _avatar_pixels(strip)
+    assert black_top != white_top, "different display names seed different avatar colors"
+    assert black_top == black_bottom, "flat avatar has no gradient (top matches bottom)"
 
 
-def test_bot_avatar_uses_slate_even_when_white(strip):
+def test_avatar_color_is_stable_across_redraws_for_the_same_name(strip):
+    strip.set_state("Alice", 60.0, False, player_color=PieceColor.WHITE)
+    _draw(strip)
+    first_top, _ = _avatar_pixels(strip)
+    strip.set_state("Alice", 61.0, True, player_color=PieceColor.WHITE)
+    _draw(strip)
+    second_top, _ = _avatar_pixels(strip)
+    assert first_top == second_top, "same name keeps the same avatar color across redraws"
+
+
+def test_bot_avatar_seeds_from_its_own_display_name(strip):
     strip.set_state("Bot", 60.0, False, player_color=PieceColor.WHITE, is_bot=True)
     _draw(strip)
-    px = _avatar_top_pixel(strip)
-    assert px.b >= px.r, "bot avatar is slate regardless of board color"
+    bot_top, _ = _avatar_pixels(strip)
+    expected_fill, _ = avatar_palette("Bot")
+    assert (bot_top.r, bot_top.g, bot_top.b) == (expected_fill.r, expected_fill.g, expected_fill.b)
 
 
 def test_rating_pill_drawn(strip):
@@ -376,18 +383,21 @@ def test_tooltip_resets_alpha_when_country_absent(strip):
 
 
 def test_active_black_strip_shows_accent_inactive_does_not(strip):
-    """A slate (black) strip has no accent at rest, so the accent border is a
-    clean discriminator for the active 'whose turn' cue."""
+    """The avatar fill is seeded from the display name, not turn state, so
+    the discriminator for the active 'whose turn' cue is the border stroke, not
+    the avatar. Sample a band at the bottom edge, clear of the avatar/clock
+    content, to isolate the border stroke color."""
+    border_band = pg.Rect(strip.rect.x, strip.rect.bottom - 3, strip.rect.width, 2)
     strip.set_state("Bob", 60.0, True, player_color=PieceColor.BLACK,
                     clock_initial_seconds=300.0, rating="1500")
     _draw(strip)
-    assert _has_color(strip.window, strip.rect.inflate(20, 20), Colors.accent), \
-        "active strip should show the accent cue"
+    assert _has_color(strip.window, border_band, Colors.accent), \
+        "active strip border should show the accent cue"
     strip.set_state("Bob", 60.0, False, player_color=PieceColor.BLACK,
                     clock_initial_seconds=300.0, rating="1500")
     _draw(strip)
-    assert not _has_color(strip.window, strip.rect.inflate(20, 20), Colors.accent), \
-        "inactive slate strip should have no accent"
+    assert not _has_color(strip.window, border_band, Colors.accent), \
+        "inactive strip border should not show accent"
 
 
 def test_flash_alpha_decays_to_zero(strip):

@@ -1,7 +1,7 @@
 """The modal system is now two-tier: Frontend._modal_registry holds the GLOBAL
-modals (confirm, wait/match_found/reconnecting, directory_browser, options);
-each screen additionally owns its own modals() (menu: fen_input + country
-picker, game/review: help). Frontend._active_modal_specs() merges global ∪ the
+modals (confirm, wait/match_found/reconnecting, country_picker, directory_browser);
+each screen additionally owns its own modals() (menu: fen_input, game/review:
+help). Frontend._active_modal_specs() merges global ∪ the
 active screen's modals(), global first, and that merged, ordered list drives
 the click cascade, KEYDOWN forwarding, Esc-dismiss, _blocking_modal_visible,
 _active_scrollable, and the reversed draw order. This file pins two drift bugs
@@ -54,18 +54,17 @@ OPENERS = {
     "match_found_modal": lambda app: app.coordinator.match_found_modal.show(
         "White", "Black", "white", on_done=lambda: None),
     "reconnecting_modal": lambda app: app.coordinator.reconnecting_modal.show(
-        0, on_cancel=lambda: None),
+        0, on_abandon=lambda: None),
     "country_picker": lambda app: app.country_picker.show("US", lambda c: None),
     "directory_browser": lambda app: app.directory_browser.show(
         os.path.expanduser("~"), on_select=lambda p: None),
-    "options_modal": lambda app: app.options_modal.show([], on_close=lambda: True),
 }
 
 MODAL_NAMES = list(OPENERS)
 
 GLOBAL_PRIORITY_ORDER = [
     "confirm_modal", "wait_modal", "match_found_modal", "reconnecting_modal",
-    "country_picker", "directory_browser", "options_modal",
+    "country_picker", "directory_browser",
 ]
 
 NON_DISMISSABLE = {"match_found_modal", "reconnecting_modal"}
@@ -92,7 +91,7 @@ ADJACENT_GLOBAL_PAIRS = [
 def test_registry_priority_order():
     app = _app()
     names = [
-        next(n for n in GLOBAL_PRIORITY_ORDER if _modal(app, n) is spec.obj)
+        next(n for n in GLOBAL_PRIORITY_ORDER if _modal(app, n) is spec.modal)
         for spec in app._modal_registry
     ]
     assert names == GLOBAL_PRIORITY_ORDER
@@ -102,14 +101,14 @@ def test_menu_screen_modals_follow_global_in_active_specs():
     app = _app()
     assert app.screen is app.menu
     specs = app._active_modal_specs()
-    tail = [spec.obj for spec in specs[len(GLOBAL_PRIORITY_ORDER):]]
+    tail = [spec.modal for spec in specs[len(GLOBAL_PRIORITY_ORDER):]]
     assert tail == [app.menu.fen_input_modal]
 
 
 def test_game_screen_modals_follow_global_in_active_specs():
     app = _start_game(_app())
     specs = app._active_modal_specs()
-    tail = [spec.obj for spec in specs[len(GLOBAL_PRIORITY_ORDER):]]
+    tail = [spec.modal for spec in specs[len(GLOBAL_PRIORITY_ORDER):]]
     assert tail == [app.help_modal]
 
 
@@ -117,9 +116,9 @@ def test_draw_order_is_the_exact_reverse_of_priority():
     app = _app()
     seen = []
     for spec in app._active_modal_specs():
-        spec.obj.draw = lambda seen=seen, obj=spec.obj: seen.append(obj)
+        spec.modal.draw = lambda seen=seen, obj=spec.modal: seen.append(obj)
     app.draw_frame()
-    assert seen == [spec.obj for spec in reversed(app._active_modal_specs())]
+    assert seen == [spec.modal for spec in reversed(app._active_modal_specs())]
 
 
 def test_confirm_blocks_promotion_key_end_to_end():
@@ -205,8 +204,8 @@ def test_click_inside_is_consumed_never_reaches_the_board(name):
     app = _app()
     OPENERS[name](app)
     app.game.board.handle_click = MagicMock()
-    spec = next(s for s in app._active_modal_specs() if s.obj is _modal(app, name))
-    app.input_router._dispatch_left_click(spec.obj.rect.center)
+    spec = next(s for s in app._active_modal_specs() if s.modal is _modal(app, name))
+    app.input_router._dispatch_left_click(spec.modal.rect.center)
     app.game.board.handle_click.assert_not_called()
 
 
@@ -214,9 +213,9 @@ def test_click_inside_is_consumed_never_reaches_the_board(name):
 def test_active_scrollable_matches_the_spec_flag(name):
     app = _app()
     OPENERS[name](app)
-    spec = next(s for s in app._active_modal_specs() if s.obj is _modal(app, name))
+    spec = next(s for s in app._active_modal_specs() if s.modal is _modal(app, name))
     if spec.scrollable:
-        assert app.input_router._active_scrollable() is spec.obj
+        assert app.input_router._active_scrollable() is spec.modal
     else:
         assert app.input_router._active_scrollable() is None
 
@@ -225,12 +224,12 @@ def test_active_scrollable_matches_the_spec_flag(name):
 def test_cancel_all_scroll_stops_an_in_progress_grab(name):
     app = _app()
     OPENERS[name](app)
-    spec = next(s for s in app._active_modal_specs() if s.obj is _modal(app, name))
+    spec = next(s for s in app._active_modal_specs() if s.modal is _modal(app, name))
     if not spec.scrollable:
         pytest.skip(f"{name} is not a scrollable registry entry")
-    spec.obj.scroll.handle_press(spec.obj.rect.center)
+    spec.modal.scroll.handle_press(spec.modal.rect.center)
     app.input_router._cancel_all_scroll()
-    assert spec.obj.scroll.is_active() is False
+    assert spec.modal.scroll.is_active() is False
 
 
 @pytest.mark.parametrize("name", MODAL_NAMES)
@@ -296,12 +295,12 @@ def test_inactive_screens_modals_are_excluded_from_active_specs():
     the active one."""
     app = _app()
     app.menu.fen_input_modal.show(on_submit=lambda t: True)
-    specs_objs_before = [spec.obj for spec in app._active_modal_specs()]
+    specs_objs_before = [spec.modal for spec in app._active_modal_specs()]
     assert app.menu.fen_input_modal in specs_objs_before
     assert app.help_modal not in specs_objs_before
 
     _start_game(app)
     assert app.menu.fen_input_modal.is_visible() is False
-    specs_objs_after = [spec.obj for spec in app._active_modal_specs()]
+    specs_objs_after = [spec.modal for spec in app._active_modal_specs()]
     assert app.menu.fen_input_modal not in specs_objs_after
     assert app.help_modal in specs_objs_after

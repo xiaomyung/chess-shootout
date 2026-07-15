@@ -1,25 +1,20 @@
 import pygame as pg
 
-from chessshootout.infra.countries import flag_emoji
 from chessshootout.frontend.modals.base import BaseModal, MODAL_MAX_WIDTH, MODAL_RAIL
 from chessshootout.frontend.visual.colors import Colors
 from chessshootout.frontend.visual.draw import stroked_text
-from chessshootout.frontend.visual.emoji import emoji_surface
+from chessshootout.frontend.visual.emoji import emoji_surface, flag_surface
 from chessshootout.frontend.visual.fonts import (
     fonts_for_width, get_display_font, get_font, get_mono_font,
 )
-from chessshootout.frontend.visual.widgets import build_avatar, fit_text_to_rect
+from chessshootout.frontend.visual.widgets import (
+    avatar_palette, build_flat_avatar, fit_text_to_rect,
+)
 
 
 FLAG_NAME_GAP = 7
 AVATAR_NAME_GAP = 8
 NAME_RATING_GAP = 2
-
-
-def _avatar_colors(side):
-    if side in (Colors.text, "white", "w"):
-        return (Colors.amber, Colors.accent, Colors.on_accent)
-    return (Colors.avatar_slate_top, Colors.avatar_slate_bottom, Colors.avatar_letter_dark)
 
 
 class MatchFoundModal(BaseModal):
@@ -35,12 +30,13 @@ class MatchFoundModal(BaseModal):
         self.rating = "1500"
         self.rematch = False
         self.on_done = None
+        self.me_palette = None
+        self.opp_palette = None
         self._started_at = 0
         self._seconds = 3
-        self._flag_cache = {}
         self._font_cache = {}
 
-    def show(self, white_name, black_name, your_color, on_done, seconds=3, rating="1500",
+    def show(self, white_name, black_name, your_color, on_done, seconds=3,
              white_country="", black_country="", rematch=False):
         self.rematch = rematch
         if your_color == "white":
@@ -49,10 +45,11 @@ class MatchFoundModal(BaseModal):
         else:
             self.me_name, self.me_side, self.me_country = black_name, "black", black_country
             self.opp_name, self.opp_side, self.opp_country = white_name, "white", white_country
-        self.rating = rating
         self.on_done = on_done
         self._seconds = seconds
         self._started_at = pg.time.get_ticks()
+        self.me_palette = avatar_palette(self.me_name)
+        self.opp_palette = avatar_palette(self.opp_name)
         super().show()
 
     def hide(self):
@@ -127,9 +124,9 @@ class MatchFoundModal(BaseModal):
         gap = max(int(panel_w * 0.027), 12)
         side_w = (content.width - vs_surf.get_width() - 2 * gap) / 2
         self._draw_card(content.x + side_w / 2, y, av, side_w, card_h, self.me_name,
-                        self.me_side, self.me_country, name_font, rating_font, letter_font)
+                        self.me_country, name_font, rating_font, letter_font, self.me_palette)
         self._draw_card(content.right - side_w / 2, y, av, side_w, card_h, self.opp_name,
-                        self.opp_side, self.opp_country, name_font, rating_font, letter_font)
+                        self.opp_country, name_font, rating_font, letter_font, self.opp_palette)
         self.window.blit(vs_surf, (content.centerx - vs_surf.get_width() / 2,
                                    y + (card_h - vs_surf.get_height()) / 2))
         y += vs_block_h + g_vs_bottom
@@ -141,24 +138,15 @@ class MatchFoundModal(BaseModal):
         self.window.blit(label, (cx, y))
         self.window.blit(number, (cx + label.get_width(), y))
 
-    def _flag(self, country, size):
-        char = flag_emoji(country)
-        if not char:
-            return None
-        key = (char, size)
-        if key not in self._flag_cache:
-            self._flag_cache[key] = emoji_surface(char, size)
-        return self._flag_cache[key]
-
-    def _draw_card(self, cx, y, av, side_w, card_h, name, side, country, name_font,
-                   rating_font, letter_font):
-        top, bottom, letter_color = _avatar_colors(side)
-        self.window.blit(build_avatar(av, top, bottom), (cx - av / 2, y))
+    def _draw_card(self, cx, y, av, side_w, card_h, name, country, name_font,
+                   rating_font, letter_font, palette):
+        fill, letter_color = palette
+        self.window.blit(build_flat_avatar(av, fill), (cx - av / 2, y))
         letter = (name[:1].upper() if name else "?")
         glyph = letter_font.render(letter, True, letter_color)
         self.window.blit(glyph, (cx - glyph.get_width() / 2,
                                  y + av / 2 - glyph.get_height() / 2))
-        flag = self._flag(country, name_font.get_height())
+        flag = flag_surface(country, name_font.get_height())
         flag_w = (flag.get_width() + FLAG_NAME_GAP) if flag is not None else 0
         name_surf = name_font.render(name, True, Colors.text)
         name_surf = fit_text_to_rect(

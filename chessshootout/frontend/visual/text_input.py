@@ -34,7 +34,7 @@ class TextInput:
         self.rect = pg.Rect(0, 0, 0, 0)
         self.font_factor = 1.6
         self._font_size = 16
-        self.font = self._font(16)
+        self.font = self._font(self._font_size)
         self.padding = 8
         self.scroll = 0
         self._last_action_ms = 0
@@ -277,12 +277,13 @@ class TextInput:
             return True
         return (pg.time.get_ticks() // CURSOR_BLINK_MS) % 2 == 0
 
-    def draw(self):
+    def draw(self, surface=None):
+        window = self.window if surface is None else surface
         bg = self.bg if self.bg is not None else Colors.surface_raised
-        pg.draw.rect(self.window, bg, self.rect, border_radius=self.radius)
+        pg.draw.rect(window, bg, self.rect, border_radius=self.radius)
         border_color = Colors.accent if self._focused else Colors.border
         border_width = 2 if self._focused else 1
-        pg.draw.rect(self.window, border_color, self.rect, border_width,
+        pg.draw.rect(window, border_color, self.rect, border_width,
                      border_radius=self.radius)
 
         if self._dragging:
@@ -314,26 +315,26 @@ class TextInput:
         cy = self.rect.centery
         glyph_h = self.font.get_height()
 
-        prev_clip = self.window.get_clip()
-        self.window.set_clip(self.rect if prev_clip is None else self.rect.clip(prev_clip))
+        prev_clip = window.get_clip()
+        window.set_clip(self.rect if prev_clip is None else self.rect.clip(prev_clip))
         sel = self._sel_range()
         if sel and self._focused:
             sx = base_x + self.font.size(self._text[:sel[0]])[0]
             ex = base_x + self.font.size(self._text[:sel[1]])[0]
             band = pg.Surface((max(int(ex - sx), 1), glyph_h), pg.SRCALPHA)
             band.fill(pg.Color(Colors.text_selection))
-            self.window.blit(band, (sx, cy - glyph_h / 2))
+            window.blit(band, (sx, cy - glyph_h / 2))
         if self._text:
             surf = render_text(self.font, self._text, Colors.text)
-            self.window.blit(surf, (base_x, cy - surf.get_height() / 2))
+            window.blit(surf, (base_x, cy - surf.get_height() / 2))
         elif not self._focused:
             surf = render_text(self.font, self.placeholder, Colors.border)
-            self.window.blit(surf, (self.rect.x + self.padding, cy - surf.get_height() / 2))
+            window.blit(surf, (self.rect.x + self.padding, cy - surf.get_height() / 2))
         if self._cursor_visible():
             cx = base_x + cursor_x
-            pg.draw.line(self.window, Colors.text,
+            pg.draw.line(window, Colors.text,
                          (cx, cy - glyph_h / 2), (cx, cy + glyph_h / 2), 2)
-        self.window.set_clip(prev_clip)
+        window.set_clip(prev_clip)
 
 
 def _copy_to_clipboard(text):

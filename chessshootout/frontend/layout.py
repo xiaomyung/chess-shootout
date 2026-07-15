@@ -26,13 +26,15 @@ class LayoutRects:
     result_rect: pg.Rect
     result_modal_rect: pg.Rect
     flex_rect: pg.Rect
-    start_rect: pg.Rect
     wide_overlay_rect: pg.Rect
-    options_rect: pg.Rect
     menu_rect: pg.Rect
     top_strip_rect: pg.Rect
     bottom_strip_rect: pg.Rect
     window_rect: pg.Rect
+
+
+def centered_rect(cx, cy, w, h):
+    return pg.Rect(cx - w / 2, cy - h / 2, w, h)
 
 
 def compute_layout(window_width, window_height, *, mode, focus_mode, focus_show, board_size):
@@ -63,48 +65,30 @@ def compute_layout(window_width, window_height, *, mode, focus_mode, focus_show,
     result_width = min(440, board_size_px * 0.92)
     result_height = min(int(result_width * RESULT_HEIGHT_RATIO),
                         avail_height - 2 * BOARD_AREA_MARGIN)
-    result_rect = pg.Rect(
-        board_x + board_size_px / 2 - result_width / 2,
-        board_y + board_size_px / 2 - result_height / 2,
-        result_width,
-        result_height
-    )
+    result_rect = centered_rect(
+        board_x + board_size_px / 2, board_y + board_size_px / 2,
+        result_width, result_height)
     wait_width = max(result_width, MIN_MODAL_WIDTH)
     wait_height = max(cell_size * WAIT_HEIGHT_RATIO, 200)
-    wait_rect = pg.Rect(
-        board_x + board_size_px / 2 - wait_width / 2,
-        board_y + board_size_px / 2 - wait_height / 2,
-        wait_width,
-        wait_height,
-    )
+    wait_rect = centered_rect(
+        board_x + board_size_px / 2, board_y + board_size_px / 2,
+        wait_width, wait_height)
 
     usable_menu_h = max(avail_height - MENU_FOOTER_RESERVE, 200)
     start_width = min(440, window_width - 24)
     start_height = min(max(usable_menu_h - 24, 200), 660)
-    start_rect = pg.Rect(
-        window_width / 2 - start_width / 2,
-        top + usable_menu_h / 2 - start_height / 2,
-        start_width,
-        start_height
-    )
 
     wide_overlay_width = min(window_width * 0.9, 1100)
     wide_overlay_height = min(window_height * 0.85, 760)
-    wide_overlay_rect = pg.Rect(
-        window_width / 2 - wide_overlay_width / 2,
-        top + avail_height / 2 - wide_overlay_height / 2,
-        wide_overlay_width,
-        wide_overlay_height,
-    )
+    wide_overlay_rect = centered_rect(
+        window_width / 2, top + avail_height / 2,
+        wide_overlay_width, wide_overlay_height)
 
     menu_modal_width = min(start_width, max(result_width, MIN_MODAL_WIDTH))
     menu_modal_height = min(start_height, max(cell_size * WAIT_HEIGHT_RATIO, 200))
-    menu_modal_rect = pg.Rect(
-        window_width / 2 - menu_modal_width / 2,
-        top + avail_height / 2 - menu_modal_height / 2,
-        menu_modal_width,
-        menu_modal_height,
-    )
+    menu_modal_rect = centered_rect(
+        window_width / 2, top + avail_height / 2,
+        menu_modal_width, menu_modal_height)
 
     board_visible = mode != "menu"
     flex_rect = wait_rect if board_visible else menu_modal_rect
@@ -134,14 +118,6 @@ def compute_layout(window_width, window_height, *, mode, focus_mode, focus_show,
     if focus_strip_override is not None:
         top_strip_rect, bottom_strip_rect = focus_strip_override
 
-    options_width = min(int(window_width * 0.7), 520)
-    options_height = min(int(window_height * 0.82), 620)
-    options_rect = pg.Rect(
-        window_width / 2 - options_width / 2,
-        top + avail_height / 2 - options_height / 2,
-        options_width, options_height,
-    )
-
     return LayoutRects(
         top=top,
         strip_height=strip_height,
@@ -149,9 +125,7 @@ def compute_layout(window_width, window_height, *, mode, focus_mode, focus_show,
         result_rect=result_rect,
         result_modal_rect=result_modal_rect,
         flex_rect=flex_rect,
-        start_rect=start_rect,
         wide_overlay_rect=wide_overlay_rect,
-        options_rect=options_rect,
         menu_rect=menu_rect,
         top_strip_rect=top_strip_rect,
         bottom_strip_rect=bottom_strip_rect,

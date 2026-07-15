@@ -2,6 +2,8 @@
 square and back, exactly one real board.set_rect per direction, no re-toggle
 mid-transition."""
 
+from unittest.mock import MagicMock
+
 import pygame as pg
 
 from tests.conftest import pygame_display
@@ -75,3 +77,29 @@ def test_toggle_ignored_mid_transition(monkeypatch):
     assert app.game.focus_transition is trans
     app.game._toggle_focus(True)
     assert app.game.focus_transition is trans
+
+
+def test_toggle_focus_plays_focus_action_on_both_directions(monkeypatch):
+    app = start_game(make_app())
+    app.sound_manager = MagicMock()
+    clock = FakeTicks()
+    install_clock(monkeypatch, clock)
+
+    app.game._toggle_focus(True)
+    app.sound_manager.play_focus_action.assert_called_once()
+    finish_transition(app, clock)
+
+    app.game._toggle_focus(False)
+    assert app.sound_manager.play_focus_action.call_count == 2
+
+
+def test_toggle_focus_noop_calls_do_not_replay_the_sound(monkeypatch):
+    app = start_game(make_app())
+    app.sound_manager = MagicMock()
+    clock = FakeTicks()
+    install_clock(monkeypatch, clock)
+
+    app.game._toggle_focus(True)
+    app.sound_manager.play_focus_action.reset_mock()
+    app.game._toggle_focus(True)
+    app.sound_manager.play_focus_action.assert_not_called()

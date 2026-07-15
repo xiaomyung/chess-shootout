@@ -57,12 +57,42 @@ def test_chrome_stats_readouts_follow_toggles():
     assert any(p.startswith("AVG ") for p in parts)
     assert any(p.startswith("MIN ") for p in parts)
     assert any(p.startswith("1%LOW ") for p in parts)
-    assert any(p.startswith("FRAME ") and p.endswith("ms") for p in parts)
+    assert any(p.startswith("FRAME ") and p.rstrip().endswith("ms") for p in parts)
 
     env.set_show_frame_stats(False)
     env.set_show_1pct_low(False)
     env.set_show_frametime(False)
-    assert app._chrome_stats() == [f"FPS {int(app.clock.get_fps())}"]
+    recent = list(app._frame_times)[-10:]
+    expected_fps = 1000.0 / (sum(recent) / len(recent))
+    from chessshootout.frontend.frontend import STAT_SLOT_FPS, _stat_slot
+    assert app._chrome_stats() == [_stat_slot("FPS", int(expected_fps), STAT_SLOT_FPS)]
+
+
+def test_chrome_stats_value_fields_are_fixed_width():
+    from chessshootout.infra import env
+    app = _make_app()
+    _start_local(app)
+    env.set_show_fps(True)
+    env.set_show_frame_stats(True)
+    env.set_show_1pct_low(True)
+    env.set_show_frametime(True)
+    env.set_show_ping(True)
+
+    def stats_for(fps_frames, frame_ms, ping):
+        app._frame_times.clear()
+        app._frame_times.extend(fps_frames)
+        app._last_work_ms = frame_ms
+        app.coordinator.ping_ms = lambda: ping
+        return app._chrome_stats()
+
+    narrow = stats_for([1000.0 / 9] * 120, 9.4, None)
+    wide = stats_for([1000.0 / 999] * 120, 10.5, 12)
+    widest = stats_for([1000.0 / 999] * 120, 100.5, 999)
+    by_label = {p.split(" ", 1)[0]: len(p) for p in narrow}
+    for stats in (wide, widest):
+        for p in stats:
+            label = p.split(" ", 1)[0]
+            assert len(p) == by_label[label]
 
 
 def test_current_result_recomputes_when_position_changes_at_same_length(monkeypatch):
@@ -356,7 +386,7 @@ def test_menu_mode_returns_no_info():
 def test_settings_has_performance_section_wired_to_env():
     from chessshootout.infra import env
     app = _make_app()
-    sections = dict(app.settings._build_settings_sections())
+    sections = dict(app.settings.build_settings_sections())
     assert "Performance" in sections
     rows = sections["Performance"]
     assert [r.title for r in rows] == [

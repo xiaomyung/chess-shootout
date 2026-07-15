@@ -5,7 +5,6 @@ import uuid
 import pygame as pg
 
 from chessshootout.backend.utils import coord_from_square, square_from_coord
-from chessshootout.domain.match import ONLINE
 from chessshootout.domain.pgn.load import time_category_for_minutes
 from chessshootout.frontend.modals.match_found import MatchFoundModal
 from chessshootout.frontend.modals.reconnecting import ReconnectingModal
@@ -45,6 +44,8 @@ OFFER_BANNERS = {
     "rematch_request": ("⚔️", "wants a rematch", "Accept", "Deny",
                         "send_rematch_response"),
 }
+
+MOVE_INVALIDATED_OFFER_KEYS = ("draw_offered", "takeback_offered")
 
 ONLINE_HARD_FAILURE_LABELS = {
     ClientReason.SERVER_UNREACHABLE: "Server unreachable",
@@ -132,6 +133,7 @@ class OnlineCoordinator:
     def send_local_move(self, from_sq, to_sq, promotion):
         if self.client is not None:
             self.client.send_move(coord_from_square(from_sq), coord_from_square(to_sq), promotion)
+            self._dismiss_move_invalidated_offers()
 
     def send_move(self, from_coord, to_coord, promo_letter):
         if self.client is not None:
@@ -248,7 +250,8 @@ class OnlineCoordinator:
             self.wait_modal.hide()
             self.match_found_modal.hide()
             self.offer_banners.clear()
-            label = ONLINE_HARD_FAILURE_LABELS.get(reason, "Server unreachable")
+            label = ONLINE_HARD_FAILURE_LABELS.get(
+                reason, ONLINE_HARD_FAILURE_LABELS[ClientReason.SERVER_UNREACHABLE])
             self.app.confirm_modal.show(
                 label,
                 on_yes=self._restart_online_search,
@@ -269,15 +272,16 @@ class OnlineCoordinator:
 
     def _push_rematch_banner(self):
         self._rematch_offered = True
-        icon, verb, ok_label, no_label, _ = OFFER_BANNERS["rematch_request"]
+        icon, verb, yes_label, no_label, _ = OFFER_BANNERS["rematch_request"]
         self.offer_banners.push(
-            "rematch_request", icon, self._opp_name(), verb, ok_label, no_label,
-            on_ok=self._accept_rematch, on_no=self._decline_rematch)
+            "rematch_request", icon, self._opp_name(), verb, yes_label, no_label,
+            on_yes=self._accept_rematch, on_no=self._decline_rematch)
 
     def _clear_rematch_offer(self):
+        game = self.app.game
         self.offer_banners.dismiss("rematch_request")
         self._rematch_offered = False
-        self.app.game.result_menu.set_rematch_offered(False)
+        game.result_menu.set_rematch_offered(False)
 
     def _handle_rematch_request(self):
         if self.client is None:
@@ -333,7 +337,7 @@ class OnlineCoordinator:
     def _push_offer_banner(self, event_type):
         if self.client is None:
             return
-        icon, verb, ok_label, no_label, send_method = OFFER_BANNERS[event_type]
+        icon, verb, yes_label, no_label, send_method = OFFER_BANNERS[event_type]
         opp_name = self._opp_name()
         send_response = getattr(self.client, send_method)
         log.info("offer received type=%s from=%s", event_type, opp_name)
@@ -348,8 +352,8 @@ class OnlineCoordinator:
             return fire
 
         self.offer_banners.push(
-            event_type, icon, opp_name, verb, ok_label, no_label,
-            on_ok=respond(True), on_no=respond(False),
+            event_type, icon, opp_name, verb, yes_label, no_label,
+            on_yes=respond(True), on_no=respond(False),
         )
 
     def _begin_resync(self):
@@ -405,9 +409,14 @@ class OnlineCoordinator:
             return
         self._forward_board_event("on_spectate", payload)
 
+    def _dismiss_move_invalidated_offers(self):
+        for key in MOVE_INVALIDATED_OFFER_KEYS:
+            self.offer_banners.dismiss(key)
+
     def _handle_remote_move_applied(self, payload):
         if self._resyncing:
             return
+        self._dismiss_move_invalidated_offers()
         self._forward_board_event("on_remote_move", payload)
 
     def _handle_online_result(self, payload):
@@ -463,7 +472,7 @@ class OnlineCoordinator:
                  payload.get("time_minutes"), payload.get("increment_seconds"))
         self.wait_modal.hide()
         self.app.confirm_modal.hide()
-        self.app.start_menu.hide()
+        self.app.menu.hide_play_view()
         nav_payload = {
             "your_color": payload["your_color"],
             "white_name": payload["white_name"],
@@ -484,7 +493,7 @@ class OnlineCoordinator:
                  config.get("time_minutes"), config.get("increment_seconds"),
                  config.get("side"))
         self._online_config = config
-        self.app.start_menu.hide()
+        self.app.menu.hide_play_view()
         self._on_server_addr_connect(env.get_server_addr())
 
     def _on_server_addr_connect(self, addr):
@@ -558,9 +567,10 @@ class OnlineCoordinator:
     def _on_rematch(self):
         if self.client is None:
             return
+        game = self.app.game
         if self._rematch_offered:
             self._rematch_offered = False
-            self.app.game.result_menu.set_rematch_offered(False)
+            game.result_menu.set_rematch_offered(False)
             log.info("rematch response sent accepted=True")
             self.client.send_rematch_response(True)
         else:
@@ -586,11 +596,10 @@ class OnlineCoordinator:
         self.unbind_game_from_online()
         self.app.switch_to("menu")
         game._reset_to_new_game()
-        self.app._refresh_load_pgn_availability()
 
     def _return_to_menu_card(self):
         if self.app.screen is self.app.menu:
-            self.app.start_menu.show()
+            self.app.menu.show_play_view()
         else:
             self.app.switch_to("menu")
         self._reconnect_probe_attempts = 0
@@ -694,10 +703,10 @@ class OnlineCoordinator:
             self._begin_resync()
 
     def _update_online_phase(self):
-        if self.wait_modal.is_visible() and self._match_found_at_ms is None:
-            if self._wait_started_at_ms is not None:
-                self.wait_modal.set_elapsed(
-                    (pg.time.get_ticks() - self._wait_started_at_ms) // 1000)
+        if (self.wait_modal.is_visible() and self._match_found_at_ms is None
+                and self._wait_started_at_ms is not None):
+            self.wait_modal.set_elapsed(
+                (pg.time.get_ticks() - self._wait_started_at_ms) // 1000)
         self.match_found_modal.update()
         self._track_local_online_state()
         self._send_heartbeat_if_due()
@@ -711,7 +720,7 @@ class OnlineCoordinator:
             if (not self.reconnecting_modal.is_visible() and since is not None
                     and now - since >= RECONNECT_MODAL_DEBOUNCE_MS):
                 self.reconnecting_modal.show(
-                    since, on_cancel=self._abandon_online_game)
+                    since, on_abandon=self._abandon_online_game)
         elif self.reconnecting_modal.is_visible():
             self.reconnecting_modal.hide()
         if self._resyncing:
@@ -774,7 +783,7 @@ class OnlineCoordinator:
                 and pg.time.get_ticks() - self._last_reconnect_probe_ms
                 >= RECONNECT_PROBE_INTERVAL_MS):
             self._spawn_reconnect_probe()
-        self.app.start_menu.set_reconnect_available(self.reconnect_available())
+        self.app.menu.set_reconnect_available(self.reconnect_available())
 
     def reconnect_available(self):
         with self._pending_reconnect_lock:
@@ -791,7 +800,7 @@ class OnlineCoordinator:
         if pending is None:
             return
         log.info("reconnect: resume begin room=%s", pending["room_id"])
-        self.app.start_menu.set_reconnect_available(False)
+        self.app.menu.set_reconnect_available(False)
         resume = fetch_resume(
             pending["addr"], pending["room_id"], pending["session_token"],
         )
@@ -799,29 +808,23 @@ class OnlineCoordinator:
             log.warning("reconnect: fresh /resume failed; restoring pending entry")
             with self._pending_reconnect_lock:
                 self._pending_reconnect = pending
-            self.app.start_menu.set_reconnect_available(True)
+            self.app.menu.set_reconnect_available(True)
             self.app.confirm_modal.show(
-                ONLINE_HARD_FAILURE_LABELS["reconnect_failed"],
+                ONLINE_HARD_FAILURE_LABELS[ClientReason.RECONNECT_FAILED],
                 on_yes=self._on_reconnect_active_game,
                 on_no=lambda: None,
                 yes_label="Retry", no_label="Cancel",
             )
             return
         log.info("reconnect: resume ok room=%s", pending["room_id"])
-        nickname = (resume["white_name"] if resume["your_color"] == "white"
-                    else resume["black_name"])
-        self.app.start_menu.text_input.text = nickname
-        self.app.start_menu.selected_mode = ONLINE
-        self.app.start_menu.selected_time_minutes = resume["time_minutes"]
-        self.app.start_menu.selected_increment_seconds = resume["increment_seconds"]
-        self.app.start_menu.selected_side = resume["your_color"]
+        self.app.menu.apply_resume_config(resume)
         self.client = OnlineClient()
         self._start_online_game(resume)
         self._handle_game_resumed(resume)
         self.client.reconnect_to_existing(
             pending["addr"], pending["room_id"], pending["session_token"], resume,
         )
-        self.app.start_menu.hide()
+        self.app.menu.hide_play_view()
 
     def update(self, now):
         self._drain_online_inbound()

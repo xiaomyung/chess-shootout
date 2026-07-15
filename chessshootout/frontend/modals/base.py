@@ -2,22 +2,23 @@ import pygame as pg
 
 from chessshootout.frontend.visual.cache import new_cache, memoized_surface
 from chessshootout.frontend.visual.colors import Colors
-from chessshootout.frontend.visual.draw import supersample
+from chessshootout.frontend.visual.draw import SQRT2, cut_rect_surface, supersample
 from chessshootout.frontend.visual.fonts import get_font
+
 
 _RAIL_CACHE = new_cache()
 
 
 DEFAULT_PADDING = 12
-MODAL_RADIUS = 14
+MODAL_CUT = 12
 MODAL_RAIL = 5
 MODAL_MAX_WIDTH = 440
 BUTTON_VPAD = 16
 
 INTENT_RAIL = {
-    "win": (Colors.win, Colors.modal_rail_win_end),
-    "loss": (Colors.loss, Colors.modal_rail_loss_end),
-    "draw": (Colors.text_dim, Colors.modal_rail_draw_end),
+    "win": Colors.win,
+    "loss": Colors.loss,
+    "draw": Colors.text_dim,
 }
 
 
@@ -68,25 +69,24 @@ class BaseModal:
         r = rect if rect is not None else self.rect
         if r.width <= 0 or r.height <= 0:
             return
-        pg.draw.rect(self.window, Colors.surface_raised, r, border_radius=MODAL_RADIUS)
-        pg.draw.rect(self.window, Colors.border_strong, r, width=1,
-                     border_radius=MODAL_RADIUS)
+        panel = cut_rect_surface(r.size, MODAL_CUT, Colors.surface_raised,
+                                 border=Colors.border_strong, border_width=1,
+                                 corners=("tr", "bl"))
+        self.window.blit(panel, r.topleft)
         self.window.blit(self._rail_surface(intent, r.width), r.topleft)
 
     def _rail_surface(self, intent, width):
-        start, end = INTENT_RAIL.get(intent, (Colors.accent, Colors.accent))
+        color = INTENT_RAIL.get(intent, Colors.accent)
 
         def build():
             def render(surf, k):
-                w, _ = surf.get_size()
-                railpx = int(MODAL_RAIL * k)
-                c0, c1 = pg.Color(start), pg.Color(end)
-                for x in range(w):
-                    surf.fill(c0.lerp(c1, x / max(w - 1, 1)), pg.Rect(x, 0, 1, railpx))
-                mask = pg.Surface(surf.get_size(), pg.SRCALPHA)
-                pg.draw.rect(mask, (255, 255, 255, 255), mask.get_rect(),
-                             border_top_left_radius=int(MODAL_RADIUS * k),
-                             border_top_right_radius=int(MODAL_RADIUS * k))
-                surf.blit(mask, (0, 0), special_flags=pg.BLEND_RGBA_MULT)
-            return supersample((width, MODAL_RADIUS), render)
-        return memoized_surface(_RAIL_CACHE, (intent, width, str(start), str(end)), build)
+                w, h = surf.get_size()
+                cutk = MODAL_CUT * k
+                railk = MODAL_RAIL * k
+                diag = railk * SQRT2
+                pg.draw.polygon(surf, pg.Color(color),
+                                [(0, 0), (w - cutk, 0), (w, cutk), (w, cutk + diag),
+                                 (w - cutk + railk * (1.0 - SQRT2), railk),
+                                 (0, railk)])
+            return supersample((width, MODAL_CUT + MODAL_RAIL * 2), render)
+        return memoized_surface(_RAIL_CACHE, (intent, width, str(color)), build)

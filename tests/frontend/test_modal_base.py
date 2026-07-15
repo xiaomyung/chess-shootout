@@ -9,7 +9,7 @@ import pygame as pg
 import pytest
 
 from tests.conftest import pygame_display
-from chessshootout.frontend.modals.base import BaseModal
+from chessshootout.frontend.modals.base import BaseModal, MODAL_CUT
 
 
 _pygame_init = pygame_display(600, 400)
@@ -84,3 +84,22 @@ def test_base_modal_font_respects_min_size(window):
     raw = modal.font(factor=4, min_size=1).get_height()
     assert floored >= 18
     assert floored > raw
+
+
+def test_draw_shell_wears_the_cut_corner_notch():
+    """The panel shell is a notch polygon, not a rounded rect: tr/bl corners are
+
+    transparent past the cut on an owned surface, while the body and the
+    untouched corners stay opaque.
+    """
+    w, h = 200, 120
+    owned = pg.Surface((w, h), pg.SRCALPHA)
+    modal = BaseModal(owned)
+    modal.set_rect(pg.Rect(0, 0, w, h))
+    modal.draw_shell()
+    assert owned.get_at((w - 2, 2))[3] == 0
+    assert owned.get_at((2, h - 2))[3] == 0
+    assert owned.get_at((w // 2, h // 2))[3] == 255
+    assert owned.get_at((2, 2))[3] == 255
+    assert owned.get_at((w - 2, h - 2))[3] == 255
+    assert owned.get_at((w - MODAL_CUT - 4, 2))[3] == 255
