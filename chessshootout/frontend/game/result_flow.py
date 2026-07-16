@@ -118,6 +118,8 @@ class ResultFlow:
     def _outcome_word_intent(self, code, title):
         if code.startswith("draw"):
             return "DRAW", "draw"
+        if not code.startswith(("white_wins", "black_wins")):
+            return title.upper(), "draw"
         winner = PieceColor.WHITE if code.startswith("white_wins") else PieceColor.BLACK
         local = self._perspective_color()
         if local is not None:

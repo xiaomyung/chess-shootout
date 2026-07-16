@@ -363,6 +363,21 @@ def test_partial_star_upgrades_to_decisive_result(tmp_path, monkeypatch):
     assert len(_pgn_files(tmp_path)) == 1
 
 
+def test_aborted_result_shows_neutral_headline_for_both_sides(tmp_path, monkeypatch):
+    """REGRESSION: no-winner codes fell into the winner branch (anything not
+    white_wins* read as a black win), so a zero-move abort showed VICTORY to
+    black and DEFEAT to white. Aborted/cancelled games are nobody's result:
+    both perspectives get the neutral GAME ABORTED headline with draw intent."""
+    for side in ("white", "black"):
+        app = _online_app(tmp_path, monkeypatch, your_color=side)
+        app.coordinator._handle_online_result({"reason": "aborted"})
+        app.draw_frame()
+        word, intent = app.game.result_flow._outcome_word_intent(
+            "aborted", "Game aborted")
+        assert word == "GAME ABORTED"
+        assert intent == "draw"
+
+
 def test_room_lost_midgame_saves_partial(tmp_path, monkeypatch):
     app = _online_app(tmp_path, monkeypatch)
     _one_quiet_move(app)
