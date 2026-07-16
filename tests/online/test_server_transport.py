@@ -434,6 +434,41 @@ async def test_server_websocket_send_methods_emit_typed_payloads():
     assert sent["ply"] == 3
 
 
+@pytest.mark.asyncio
+async def test_share_and_chat_sends_emit_aliased_coord_payloads():
+    """The model _send path serializes by_alias, so arrow/delta coords go on the wire
+    as "from"/"to" (the field names ArrowWire/AnnotationDeltaMessage validate against),
+    never the Python-side from_sq/to_sq. The _send_raw dict path would skip aliasing and
+    the server would reject the payload, so these must stay on _send."""
+    ws = ServerWebSocket(_RecordingWS())
+    inner = ws._ws
+
+    await ws.send_annotations_state(True, ["e4", "d5"], [("e2", "e4"), ("g1", "f3")])
+    state = json.loads(inner.sent[-1])
+    assert state["type"] == "annotations_state"
+    assert state["sharing"] is True
+    assert state["highlights"] == ["e4", "d5"]
+    assert state["arrows"] == [{"from": "e2", "to": "e4"}, {"from": "g1", "to": "f3"}]
+    assert "from_sq" not in state["arrows"][0]
+
+    await ws.send_annotation_delta("add", "arrow", from_sq="e2", to_sq="e4")
+    delta = json.loads(inner.sent[-1])
+    assert delta["type"] == "annotation_delta"
+    assert delta["action"] == "add" and delta["kind"] == "arrow"
+    assert delta["from"] == "e2" and delta["to"] == "e4"
+    assert "from_sq" not in delta
+
+    await ws.send_annotation_delta("remove", "highlight", square="c3")
+    highlight_delta = json.loads(inner.sent[-1])
+    assert highlight_delta["kind"] == "highlight"
+    assert highlight_delta["square"] == "c3"
+    assert highlight_delta["from"] is None and highlight_delta["to"] is None
+
+    await ws.send_quick_chat(2)
+    chat = json.loads(inner.sent[-1])
+    assert chat["type"] == "quick_chat" and chat["preset"] == 2
+
+
 def test_only_transport_module_imports_httpx_or_websockets():
     import os
     import re

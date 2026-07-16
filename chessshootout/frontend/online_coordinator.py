@@ -167,6 +167,18 @@ class OnlineCoordinator:
         if self.client is not None:
             self.client.send_skill_check_shot(client_elapsed_ms)
 
+    def send_annotations_state(self, sharing, highlights, arrows):
+        if self.client is not None:
+            self.client.send_annotations_state(sharing, highlights, arrows)
+
+    def send_annotation_delta(self, action, kind, square=None, from_sq=None, to_sq=None):
+        if self.client is not None:
+            self.client.send_annotation_delta(action, kind, square, from_sq, to_sq)
+
+    def send_quick_chat(self, preset):
+        if self.client is not None:
+            self.client.send_quick_chat(preset)
+
     def _drain_online_inbound(self):
         if self.client is None:
             return
@@ -195,6 +207,12 @@ class OnlineCoordinator:
             self._handle_game_resumed(event.payload)
         elif event.type == "time_granted":
             self._handle_time_granted(event.payload)
+        elif event.type == "annotations_state":
+            self._handle_annotations_state(event.payload)
+        elif event.type == "annotation_delta":
+            self._handle_annotation_delta(event.payload)
+        elif event.type == "quick_chat_received":
+            self._forward_board_event("on_quick_chat", event.payload)
         elif event.type == "connection_status":
             self._handle_connection_status(event.payload)
         elif event.type == "resync_directive":
@@ -382,6 +400,16 @@ class OnlineCoordinator:
         if self._resyncing:
             return
         self._forward_board_event("on_takeback", payload)
+
+    def _handle_annotations_state(self, payload):
+        if self._resyncing:
+            return
+        self._forward_board_event("on_annotations_state", payload)
+
+    def _handle_annotation_delta(self, payload):
+        if self._resyncing:
+            return
+        self._forward_board_event("on_annotation_delta", payload)
 
     def _handle_skill_check_required(self, payload):
         if self._resyncing:

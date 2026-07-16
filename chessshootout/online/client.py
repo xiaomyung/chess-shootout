@@ -199,6 +199,15 @@ class OnlineClient:
     def send_skill_check_shot(self, client_elapsed_ms):
         self._enqueue("send_skill_check_shot", client_elapsed_ms)
 
+    def send_annotations_state(self, sharing, highlights, arrows):
+        self._enqueue("send_annotations_state", sharing, highlights, arrows)
+
+    def send_annotation_delta(self, action, kind, square=None, from_sq=None, to_sq=None):
+        self._enqueue("send_annotation_delta", action, kind, square, from_sq, to_sq)
+
+    def send_quick_chat(self, preset):
+        self._enqueue("send_quick_chat", preset)
+
     def heartbeat_interval(self):
         return self._heartbeat_interval
 

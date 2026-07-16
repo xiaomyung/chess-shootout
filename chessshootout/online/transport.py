@@ -10,9 +10,10 @@ import websockets
 from websockets.exceptions import ConnectionClosed
 
 from chessshootout.server.protocol import (
-    AuthMessage, CancelMatchmakeRequest, DrawResponseMessage, GiveTimeMessage,
-    HealthResponse, MatchmakeRequest, MatchmakeResponse, MoveMessage, PingMessage,
-    PROTOCOL_VERSION, Reason, ReclaimRequest, ReclaimResponse, RematchRequestMessage,
+    AnnotationDeltaMessage, AnnotationsStateMessage, ArrowWire, AuthMessage,
+    CancelMatchmakeRequest, DrawResponseMessage, GiveTimeMessage, HealthResponse,
+    MatchmakeRequest, MatchmakeResponse, MoveMessage, PingMessage, PROTOCOL_VERSION,
+    QuickChatMessage, Reason, ReclaimRequest, ReclaimResponse, RematchRequestMessage,
     RematchResponseMessage, ResumeRequest, ResumeResponse, SkillCheckShotMessage,
     TakebackResponseMessage,
 )
@@ -284,6 +285,23 @@ class ServerWebSocket:
 
     async def send_skill_check_shot(self, client_elapsed_ms):
         await self._send(SkillCheckShotMessage(client_elapsed_ms=client_elapsed_ms))
+
+    async def send_annotations_state(self, sharing, highlights, arrows):
+        msg = AnnotationsStateMessage(
+            sharing=sharing,
+            highlights=list(highlights),
+            arrows=[ArrowWire(from_sq=from_sq, to_sq=to_sq) for from_sq, to_sq in arrows],
+        )
+        await self._send(msg)
+
+    async def send_annotation_delta(self, action, kind, square=None, from_sq=None, to_sq=None):
+        msg = AnnotationDeltaMessage(
+            action=action, kind=kind, square=square, from_sq=from_sq, to_sq=to_sq,
+        )
+        await self._send(msg)
+
+    async def send_quick_chat(self, preset):
+        await self._send(QuickChatMessage(preset=preset))
 
     async def _send(self, message):
         await self._ws.send(message.model_dump_json(by_alias=True))
