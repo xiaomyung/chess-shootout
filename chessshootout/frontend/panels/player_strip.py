@@ -99,7 +99,8 @@ class PlayerStrip:
         self._tooltip_alpha = 0.0
         self.tooltip_font = get_font(12, bold=True)
 
-    def set_rect(self, rect):
+    def set_rect(self, rect, scale=1.0):
+        self.scale = scale
         self.rect = pg.Rect(rect)
         h = rect.height
         ih = max(int(h * 0.68), 1)

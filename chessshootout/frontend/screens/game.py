@@ -636,10 +636,10 @@ class GameScreen(Screen):
         r = compute_layout(
             window_width, window_height, mode=self.name, focus_mode=self.focus_mode,
             focus_show=self._focus_show(), board_size=self.board.SIZE)
-        self.board.set_rect(r.board_rect)
-        self.right_menu.set_rect(r.menu_rect)
-        self.player_strip_top.set_rect(r.top_strip_rect)
-        self.player_strip_bottom.set_rect(r.bottom_strip_rect)
+        self.board.set_rect(r.board_rect, scale=r.scale)
+        self.right_menu.set_rect(r.menu_rect, scale=r.scale)
+        self.player_strip_top.set_rect(r.top_strip_rect, scale=r.scale)
+        self.player_strip_bottom.set_rect(r.bottom_strip_rect, scale=r.scale)
         self.result_menu.set_rect(r.result_rect)
         skillcheck_target = self.skillcheck_session.skillcheck_target
         if self.skillcheck_overlay.is_active() and skillcheck_target is not None:

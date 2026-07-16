@@ -759,7 +759,8 @@ class Board:
                 self.HITMARKER_SIZE_MIN),
             Colors.accent, self.CAPTURE_HITMARKER_THICKNESS)
 
-    def set_rect(self, rect):
+    def set_rect(self, rect, scale=1.0):
+        self.scale = scale
         self.cancel_drag_physics()
         self.rect = pg.Rect(rect)
         self.effects.board_rect = pg.Rect(rect)

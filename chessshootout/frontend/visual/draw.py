@@ -12,6 +12,10 @@ _HALF_RGBA_MULT = (128, 128, 128, 128)
 _CUT_BORDER_SCALE = 1.25
 
 
+def scale_floor(value, scale, floor=1):
+    return max(int(value * scale), floor)
+
+
 def supersample(size, render, scale=SUPERSAMPLE):
     if isinstance(size, int):
         size = (size, size)

@@ -17,6 +17,11 @@ WAIT_HEIGHT_RATIO = 1.6
 MENU_FOOTER_RESERVE = 22
 MIN_MODAL_WIDTH = 360
 
+UI_SCALE_MIN = 0.72
+UI_SCALE_MAX = 1.15
+UI_SCALE_REF_W = 1280
+UI_SCALE_REF_H = 764
+
 
 @dataclass
 class LayoutRects:
@@ -31,6 +36,12 @@ class LayoutRects:
     top_strip_rect: pg.Rect
     bottom_strip_rect: pg.Rect
     window_rect: pg.Rect
+    scale: float = 1.0
+
+
+def compute_ui_scale(width, height):
+    scale = min(width / UI_SCALE_REF_W, height / UI_SCALE_REF_H)
+    return max(UI_SCALE_MIN, min(UI_SCALE_MAX, scale))
 
 
 def centered_rect(cx, cy, w, h):
@@ -41,6 +52,7 @@ def compute_layout(window_width, window_height, *, mode, focus_mode, focus_show,
     window_rect = pg.Rect(0, 0, window_width, window_height)
     top = WindowChrome.HEIGHT
     avail_height = window_height - top
+    scale = compute_ui_scale(window_width, avail_height)
     panel_w = min(RIGHT_PANEL_WIDTH, int(window_width * PANEL_WIDTH_RATIO))
     board_area_w = max(window_width - panel_w, 200)
 
@@ -130,4 +142,5 @@ def compute_layout(window_width, window_height, *, mode, focus_mode, focus_show,
         top_strip_rect=top_strip_rect,
         bottom_strip_rect=bottom_strip_rect,
         window_rect=window_rect,
+        scale=scale,
     )

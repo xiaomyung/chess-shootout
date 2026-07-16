@@ -1,13 +1,13 @@
 from chessshootout.frontend.visual.cache import render_text
 from chessshootout.frontend.visual.colors import Colors
+from chessshootout.frontend.visual.draw import scale_floor
 from chessshootout.frontend.visual.widgets import avatar_palette
 
 
+__all__ = ["MenuView", "scale_floor", "subview_title_top", "draw_subview_title",
+           "seeded_avatar_palette"]
+
 TITLE_TOP_FRAC = 0.05
-
-
-def scale_floor(value, scale, floor=1):
-    return max(int(value * scale), floor)
 
 
 def subview_title_top(rect):

@@ -120,10 +120,10 @@ class ReviewScreen(Screen):
         r = compute_layout(
             window_width, window_height, mode=self.name, focus_mode=False,
             focus_show=env.get_focus_show(), board_size=self.board.SIZE)
-        self.board.set_rect(r.board_rect)
-        self.right_menu.set_rect(r.menu_rect)
-        self.strip_top.set_rect(r.top_strip_rect)
-        self.strip_bottom.set_rect(r.bottom_strip_rect)
+        self.board.set_rect(r.board_rect, scale=r.scale)
+        self.right_menu.set_rect(r.menu_rect, scale=r.scale)
+        self.strip_top.set_rect(r.top_strip_rect, scale=r.scale)
+        self.strip_bottom.set_rect(r.bottom_strip_rect, scale=r.scale)
         refresh_capture_icons(self.board, r.strip_height,
                               (self.strip_top, self.strip_bottom))
 

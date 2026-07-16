@@ -57,7 +57,8 @@ def test_one_set_rect_per_direction(monkeypatch):
     calls = []
     orig = app.game.board.set_rect
     monkeypatch.setattr(
-        app.game.board, "set_rect", lambda r: (calls.append(pg.Rect(r)), orig(r))[1])
+        app.game.board, "set_rect",
+        lambda r, **kw: (calls.append(pg.Rect(r)), orig(r, **kw))[1])
     app.game._toggle_focus(True)
     finish_transition(app, clock)
     assert len(calls) == 1

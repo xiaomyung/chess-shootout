@@ -101,7 +101,8 @@ class RightMenu:
     def is_visible(self):
         return True
 
-    def set_rect(self, rect):
+    def set_rect(self, rect, scale=1.0):
+        self.scale = scale
         self.font = get_font(max(int(rect.width / self.moves_font_factor), 10), mono=True)
         self.moves_font = get_font(
             max(int(rect.width / self.moves_font_factor), 10), bold=True)
