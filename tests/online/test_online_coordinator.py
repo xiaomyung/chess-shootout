@@ -512,3 +512,22 @@ def test_teardown_from_game_screen_still_returns_to_menu():
     assert app.screen is app.game
     app.coordinator._tear_down_online_session("test")
     assert app.screen is app.menu
+
+
+def test_opponent_left_while_viewing_the_result_does_not_yank_to_menu():
+    """REGRESSION (v2.10.0 live smoke): the leaver's grace had already elapsed
+    pre-result, so result and rematch_update(opponent_left) arrived in the same
+    drain and the teardown navigation stole the screen 2ms after the VICTORY
+    modal appeared. When the game screen is showing a final result, ending the
+    rematch window drops the session but stays put -- the player leaves via the
+    result modal's own buttons."""
+    app = _wired_app()
+    assert app.screen is app.game
+    app.coordinator._handle_online_result(
+        {"reason": "abandonment", "winner_color": "black"})
+    assert app.game.current_result() is not None
+    app.coordinator._handle_rematch_update({"event": "opponent_left"})
+    assert app.screen is app.game, "stay on the result screen"
+    assert app.coordinator.client is None, "session is still torn down"
+    assert app.game.current_result() is not None, "result stays adopted"
+    assert app.toast.is_visible()

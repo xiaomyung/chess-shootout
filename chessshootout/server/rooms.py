@@ -349,6 +349,9 @@ class RoomManager:
             reason, winner_color = "aborted", None
         room.result = (reason, winner_color)
         room.ended_at = self._now()
+        for slot in (room.white, room.black):
+            if slot is not None and slot.disconnected_at is not None:
+                slot.disconnected_at = room.ended_at
         room.last_rematch_activity_at = room.ended_at
         room.pending_skillcheck = None
         room.annotations_white.reset()

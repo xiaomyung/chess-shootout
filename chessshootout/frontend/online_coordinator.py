@@ -327,8 +327,13 @@ class OnlineCoordinator:
 
     def _end_rematch_window(self):
         self._clear_rematch_offer()
-        self._tear_down_online_session("rematch_window_closed")
-        self._return_to_menu_card()
+        game = self.app.game
+        stay_on_result = (self.app.screen is game
+                          and game.current_result() is not None)
+        self._tear_down_online_session("rematch_window_closed",
+                                       navigate=not stay_on_result)
+        if not stay_on_result:
+            self._return_to_menu_card()
 
     def _handle_rematch_update(self, payload):
         event = payload.get("event", "")
@@ -613,7 +618,7 @@ class OnlineCoordinator:
         self._drop_client()
         self.unbind_game_from_online()
 
-    def _tear_down_online_session(self, reason="unspecified"):
+    def _tear_down_online_session(self, reason="unspecified", navigate=True):
         log.info("online session teardown reason=%s", reason)
         game = self.app.game
         game.result_flow.auto_save_pgn()
@@ -622,6 +627,8 @@ class OnlineCoordinator:
         self._clear_search_state()
         self.offer_banners.clear()
         self.unbind_game_from_online()
+        if not navigate:
+            return
         if self.app.screen is self.app.menu:
             self.app.menu.show_play_view()
         else:

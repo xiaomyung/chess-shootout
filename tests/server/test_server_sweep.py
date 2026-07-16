@@ -7,7 +7,9 @@ GC) so we drive each independently without the full asyncio loop.
 import pytest
 
 from chessshootout.server.protocol import GRACE_SECONDS, HEARTBEAT_TIMEOUT_SECONDS, Reason
+from chessshootout.server.rooms import POST_GAME_DISCONNECT_GRACE
 from chessshootout.server.sweep import PREGAME_CONNECT_GRACE_SECONDS
+from tests.server.test_server_broadcasts import RecordingWS
 from tests.helpers import fake_uuid4
 from tests.server.conftest import ALICE, BOB
 
@@ -74,16 +76,48 @@ async def test_sweep_step_grace_expired_without_desync_awards_opponent(sweep, ap
 
 
 @pytest.mark.asyncio
-async def test_sweep_step_grace_expired_after_desync_aborts(sweep, app, clock):
+async def test_sweep_step_grace_expired_with_desync_awards_opponent(sweep, app, clock):
+    """See test_server_app: the desync flag never downgrades an abandonment win
+    once moves were played; zero-ply games abort via finalize_result instead."""
     room = await _pair(app.state.rooms)
     room.started_at = clock()
     room.first_move_at = clock()
+    room.plies_ever = 1
     room.white.connected = True
     room.white.desync_active = True
     app.state.rooms.mark_disconnected(room.room_id, "white")
     clock.advance(61)
     await sweep.step_grace_expired()
-    assert room.result == (Reason.ABORTED_DISCONNECT, None)
+    assert room.result == (Reason.ABANDONMENT, "black")
+
+
+async def test_post_game_leaver_grace_restarts_at_the_result(sweep, app, clock):
+    """REGRESSION (v2.10.0 live smoke): the winner never saw the VICTORY screen.
+    The leaver's pre-result disconnected_at also satisfied the post-game rematch
+    grace, so opponent_left fired in the same sweep pass as the result and the
+    client tore the session down instantly. finalize_result now restamps a
+    disconnected slot's clock to ended_at: the post-game window gets its full
+    grace measured from the result, not from the original disconnect."""
+    room = await _pair(app.state.rooms)
+    room.started_at = clock()
+    room.first_move_at = clock()
+    room.plies_ever = 1
+    room.white.connected = True
+    app.state.rooms.mark_disconnected(room.room_id, "white")
+    clock.advance(61)
+    await sweep.step_grace_expired()
+    assert room.result == (Reason.ABANDONMENT, "black")
+    assert room.white.disconnected_at == room.ended_at
+    ws_black = RecordingWS()
+    app.state.connections.add(room.room_id, room.black.client_uuid, ws_black)
+    clock.advance(POST_GAME_DISCONNECT_GRACE - 1)
+    await sweep.step_post_game()
+    assert app.state.rooms.get(room.room_id) is room, "room survives inside the fresh grace"
+    assert not ws_black.of_type("rematch_update")
+    clock.advance(2)
+    await sweep.step_post_game()
+    updates = ws_black.of_type("rematch_update")
+    assert updates and updates[-1]["event"] == "opponent_left"
 
 
 CARL = fake_uuid4(3)

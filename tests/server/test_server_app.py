@@ -449,15 +449,31 @@ async def test_grace_expiry_without_desync_awards_opponent(app, clock):
     assert room.result == (Reason.ABANDONMENT, "black")
 
 
-async def test_grace_expiry_after_desync_aborts(app, clock):
-    """A disconnect while a desync was active aborts the game with no winner."""
+async def test_grace_expiry_with_desync_still_awards_opponent(app, clock):
+    """REGRESSION (v2.10.0 live smoke): desync_active is a sticky flag -- any
+    /resume sets it and only the player's NEXT applied move clears it. The old
+    desync branch aborted the game with no winner, so a deliberate leave right
+    after a resync robbed the stayer of the abandonment win. Rule: with moves
+    played, a grace expiry ALWAYS awards the opponent; only zero-ply games
+    convert to aborted (finalize_result's central guard)."""
+    rooms = app.state.rooms
+    room = await _paired_in_progress_room(rooms, clock)
+    room.plies_ever = 1
+    room.white.desync_active = True
+    rooms.mark_disconnected(room.room_id, "white")
+    clock.advance(GRACE_SECONDS + 1)
+    await _sweep(app)
+    assert room.result == (Reason.ABANDONMENT, "black")
+
+
+async def test_grace_expiry_with_desync_at_zero_plies_aborts(app, clock):
     rooms = app.state.rooms
     room = await _paired_in_progress_room(rooms, clock)
     room.white.desync_active = True
     rooms.mark_disconnected(room.room_id, "white")
     clock.advance(GRACE_SECONDS + 1)
     await _sweep(app)
-    assert room.result == (Reason.ABORTED_DISCONNECT, None)
+    assert room.result == (Reason.ABORTED, None)
 
 
 @pytest.mark.asyncio
