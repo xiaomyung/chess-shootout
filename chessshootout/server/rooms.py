@@ -339,7 +339,7 @@ class RoomManager:
                         and now - slot.disconnected_at >= GRACE_SECONDS):
                     yield room, color
 
-    ZERO_PLY_ABORT_REASONS = ("timeout",)
+    ZERO_PLY_ABORT_REASONS = ("timeout", "abandonment")
 
     def finalize_result(self, room_id, reason, winner_color=None):
         room = self._active.get(room_id)

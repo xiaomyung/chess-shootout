@@ -483,3 +483,13 @@ async def test_zero_ply_resignation_keeps_its_winner(manager):
     room = await manager.enqueue(**_enqueue_kwargs("bob"))
     manager.finalize_result(room.room_id, "resignation", "black")
     assert room.result == ("resignation", "black")
+
+
+async def test_zero_ply_abandonment_finalizes_as_aborted_draw(manager):
+    """Leaving before any move landed cancels the game instead of awarding a win:
+    nobody played, nobody scores (same rule as a zero-ply flag fall)."""
+    await manager.enqueue(**_enqueue_kwargs("alice"))
+    room = await manager.enqueue(**_enqueue_kwargs("bob"))
+    manager.finalize_result(room.room_id, "abandonment", "black")
+    assert room.result == ("aborted", None)
+    assert room.series_scores == {}

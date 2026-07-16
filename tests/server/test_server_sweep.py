@@ -65,6 +65,7 @@ async def test_sweep_step_grace_expired_without_desync_awards_opponent(sweep, ap
     room = await _pair(app.state.rooms)
     room.started_at = clock()
     room.first_move_at = clock()
+    room.plies_ever = 1
     room.white.connected = True
     app.state.rooms.mark_disconnected(room.room_id, "white")
     clock.advance(61)
@@ -106,6 +107,7 @@ async def test_sweep_step_grace_expired_revalidates_a_reconnect_that_lands_mid_p
     room_a = await _pair(rooms)
     room_a.started_at = clock()
     room_a.first_move_at = clock()
+    room_a.plies_ever = 1
     room_a.white.connected = True
     room_a.black.connected = True
 
@@ -115,6 +117,7 @@ async def test_sweep_step_grace_expired_revalidates_a_reconnect_that_lands_mid_p
                                  time_minutes=5, increment_seconds=0, side_preference="black")
     room_b.started_at = clock()
     room_b.first_move_at = clock()
+    room_b.plies_ever = 1
     room_b.white.connected = True
     room_b.black.connected = True
 

@@ -442,6 +442,7 @@ async def test_grace_expiry_without_desync_awards_opponent(app, clock):
     leave: the waiting player wins by abandonment."""
     rooms = app.state.rooms
     room = await _paired_in_progress_room(rooms, clock)
+    room.plies_ever = 1
     rooms.mark_disconnected(room.room_id, "white")
     clock.advance(GRACE_SECONDS + 1)
     await _sweep(app)
