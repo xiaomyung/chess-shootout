@@ -273,6 +273,38 @@ def test_section_header_click_toggles_the_section():
     assert SECTION_OPEN["signals"] is False
 
 
+def test_sections_default_closed_without_persisted_state():
+    """Fresh install: no CHESS_RAIL_*_OPEN env keys and an empty cache means every
+    section starts collapsed."""
+    from chessshootout.frontend.panels.right import section_open
+    import os
+    from chessshootout.infra.env import _RAIL_SECTION_KEYS
+    for key in _RAIL_SECTION_KEYS.values():
+        os.environ.pop(key, None)
+    SECTION_OPEN.clear()
+    assert section_open("actions") is False
+    assert section_open("signals") is False
+    assert section_open("chat") is False
+
+
+def test_toggle_section_persists_to_env_and_survives_cache_reset():
+    """Toggling a section writes CHESS_RAIL_*_OPEN, so a fresh SECTION_OPEN cache
+    (a new app run) re-reads the same state."""
+    from chessshootout.frontend.panels.right import section_open
+    from chessshootout.infra import env
+    rm, _ = _menu()
+    rm.window.fill((0, 0, 0))
+    rm.draw_menu()
+    rm.toggle_section("actions")
+    assert env.get_rail_section_open("actions") is False
+    SECTION_OPEN.clear()
+    assert section_open("actions") is False
+    rm.toggle_section("actions")
+    assert env.get_rail_section_open("actions") is True
+    SECTION_OPEN.clear()
+    assert section_open("actions") is True
+
+
 def test_section_open_state_is_shared_across_instances():
     rm1, _ = _menu()
     rm2, _ = _menu()

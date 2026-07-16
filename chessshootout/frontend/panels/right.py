@@ -3,6 +3,7 @@ from typing import NamedTuple
 import pygame as pg
 
 from chessshootout.frontend.visual.colors import Colors
+from chessshootout.infra import env
 from chessshootout.domain.pgn.generate import iter_move_pairs
 from chessshootout.frontend.visual.scroll_view import ScrollView
 from chessshootout.frontend.visual.widgets import draw_pill
@@ -57,7 +58,14 @@ _GLYPH_SPECS = {
     for table in (CAPS, UNTIMED_CAPS, REVIEW_CAPS) for cap in table if cap.glyph
 }
 
-SECTION_OPEN = {"actions": True, "signals": True, "chat": True}
+SECTION_OPEN = {}
+
+
+def section_open(key):
+    if key not in SECTION_OPEN:
+        SECTION_OPEN[key] = env.get_rail_section_open(key)
+    return SECTION_OPEN[key]
+
 
 SECTION_ORDER = ("actions", "signals", "chat")
 SECTION_LABELS = {"actions": "ACTIONS", "signals": "SIGNALS", "chat": "QUICK CHAT"}
@@ -395,7 +403,7 @@ class RightMenu:
             divider_y = y + div_top
             header = pg.Rect(x, divider_y + div_bottom, inner_w, header_h)
             body = pg.Rect(x, header.bottom, inner_w, body_h)
-            show_body = body_h > 0 and SECTION_OPEN.get(key, True)
+            show_body = body_h > 0 and section_open(key)
             self._section_blocks.append(
                 SectionBlock(key, divider_y, header, body, show_body))
             if key == "actions" and show_body:
@@ -413,7 +421,7 @@ class RightMenu:
         return [key for key in SECTION_ORDER if key != "chat"]
 
     def _section_body_height(self, key):
-        if not SECTION_OPEN.get(key, True):
+        if not section_open(key):
             return 0
         if key == "actions":
             return self._actions_body_height()
@@ -797,7 +805,8 @@ class RightMenu:
     def toggle_section(self, key):
         now = pg.time.get_ticks()
         cur = self._chevron_frac(key, now)
-        SECTION_OPEN[key] = not SECTION_OPEN.get(key, True)
+        SECTION_OPEN[key] = not section_open(key)
+        env.set_rail_section_open(key, SECTION_OPEN[key])
         target = 1.0 if SECTION_OPEN[key] else 0.0
         self._chevron_anim[key] = (now, cur, target)
         if self._last_outer_rect is not None:
@@ -833,7 +842,7 @@ class RightMenu:
                                 header.centery - chev.get_height() // 2))
 
     def _chevron_frac(self, key, now):
-        target = 1.0 if SECTION_OPEN.get(key, True) else 0.0
+        target = 1.0 if section_open(key) else 0.0
         anim = self._chevron_anim.get(key)
         if anim is None:
             return target
