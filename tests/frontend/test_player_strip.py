@@ -476,20 +476,20 @@ def test_draw_untimed_shows_infinity(strip):
     assert format_clock(strip.clock_seconds) == "∞"
 
 
-def test_untimed_clock_area_paints_via_fallback_font(strip):
-    """Anton (the display clock font) lacks ∞, so the untimed clock falls back to
-    the mono font and the glyph still paints inside the well."""
+def test_untimed_clock_area_paints_infinity(strip):
+    """The mono clock font carries ∞, so the untimed clock glyph paints inside
+    the well with no special-casing."""
     strip.set_state("Carol", None, False, player_color=PieceColor.WHITE)
     _draw(strip)
     right_half = pg.Rect(strip.rect.centerx, strip.rect.y,
                          strip.rect.width // 2, strip.rect.height)
     assert _has_color(strip.window, right_half, Colors.text, tol=30), \
-        "the ∞ glyph renders in the clock well through the mono fallback"
+        "the ∞ glyph renders in the clock well"
 
 
 def test_clock_digits_have_fixed_advance(strip):
-    """Per-digit fixed advance keeps equal-length clock strings the same pixel width,
-    so the display-font digits never jitter as the clock ticks."""
+    """Space Mono is tabular: equal-length clock strings render the same pixel
+    width, so the digits never jitter as the clock ticks."""
     a = strip._compose_clock("1:11", Colors.text)
     b = strip._compose_clock("0:00", Colors.text)
     assert a.get_width() == b.get_width()

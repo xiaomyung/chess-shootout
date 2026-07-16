@@ -43,6 +43,7 @@ PULSE_QUANT_STEPS = 16
 CLOCK_WELL_RADIUS = 7
 CLOCK_WELL_PAD_X = 13
 CLOCK_WELL_PAD_Y = 5
+CLOCK_RIGHT_MARGIN = 8
 SHARING_PILL_TEXT = "SHARING MARKS"
 SHARING_DOT_PULSE_MS = 1600
 SHARING_DOT_MIN_ALPHA = 90
@@ -103,8 +104,7 @@ class PlayerStrip:
         self.name_font = get_font(14, bold=True)
         self.rating_font = get_font(11, bold=True, mono=True)
         self._clock_px = 16
-        self.clock_font = get_font(16, family=DISPLAY)
-        self.clock_fallback_font = get_font(16, bold=True, mono=True)
+        self.clock_font = get_font(16, bold=True, mono=True)
         self.sharing_font = get_font(9, bold=True, mono=True)
         self.advantage_font = get_font(12, bold=True)
         self.ko_font = get_font(10, bold=True)
@@ -128,8 +128,7 @@ class PlayerStrip:
         self._clock_px = max(int(h * 0.5), 14)
         self.name_font = get_font(max(int(ih * 0.42), 11), bold=True)
         self.rating_font = get_font(max(int(ih * 0.26), 8), bold=True, mono=True)
-        self.clock_font = get_font(self._clock_px, family=DISPLAY)
-        self.clock_fallback_font = get_font(self._clock_px, bold=True, mono=True)
+        self.clock_font = get_font(self._clock_px, bold=True, mono=True)
         self.sharing_font = get_font(max(int(ih * 0.22), 8), bold=True, mono=True)
         self.advantage_font = get_font(max(int(ih * 0.26), 8), bold=True)
         self.ko_font = get_font(max(int(ih * 0.3), 8), bold=True)
@@ -402,9 +401,10 @@ class PlayerStrip:
         surf = self._clock_cache[1]
         hpad = scale_floor(CLOCK_WELL_PAD_X, self.scale, 9)
         vpad = scale_floor(CLOCK_WELL_PAD_Y, self.scale, 3)
+        margin = scale_floor(CLOCK_RIGHT_MARGIN, self.scale, 6)
         box_w = surf.get_width() + 2 * hpad
         box_h = min(av_size, surf.get_height() + 2 * vpad)
-        box = pg.Rect(self.rect.right - pad - box_w,
+        box = pg.Rect(self.rect.right - pad - margin - box_w,
                       round(self.rect.centery - box_h / 2), box_w, box_h)
         radius = scale_floor(CLOCK_WELL_RADIUS, self.scale, 5)
         self.window.blit(rounded_rect_surface(box.size, radius, Colors.bg,
@@ -422,26 +422,7 @@ class PlayerStrip:
         return box
 
     def _compose_clock(self, text, color):
-        if not text.isascii():
-            return self.clock_fallback_font.render(text, True, color)
-        font = self.clock_font
-        advance = max(font.size(d)[0] for d in "0123456789") + int(self._clock_px * 0.05)
-        glyphs = []
-        total_w = 0
-        max_h = 1
-        for ch in text:
-            glyph = font.render(ch, True, color)
-            width = advance if ch.isdigit() else glyph.get_width()
-            glyphs.append((glyph, ch.isdigit(), width))
-            total_w += width
-            max_h = max(max_h, glyph.get_height())
-        surf = pg.Surface((max(total_w, 1), max_h), pg.SRCALPHA)
-        cursor = 0
-        for glyph, is_digit, width in glyphs:
-            gx = cursor + (width - glyph.get_width()) // 2 if is_digit else cursor
-            surf.blit(glyph, (gx, (max_h - glyph.get_height()) // 2))
-            cursor += width
-        return surf
+        return self.clock_font.render(text, True, color)
 
     def _is_low_time(self):
         frac = self._clock_fraction()
