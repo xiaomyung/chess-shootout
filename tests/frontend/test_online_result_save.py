@@ -371,7 +371,6 @@ def test_aborted_result_shows_neutral_headline_for_both_sides(tmp_path, monkeypa
     for side in ("white", "black"):
         app = _online_app(tmp_path, monkeypatch, your_color=side)
         app.coordinator._handle_online_result({"reason": "aborted"})
-        app.draw_frame()
         word, intent = app.game.result_flow._outcome_word_intent(
             "aborted", "Game aborted")
         assert word == "GAME ABORTED"
