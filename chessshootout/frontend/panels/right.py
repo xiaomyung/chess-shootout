@@ -30,7 +30,7 @@ class Cap(NamedTuple):
 
 CAPS = [
     Cap("undo",      "undo",   "",    0,  False, "Undo",     "UNDO — KEY Z"),
-    Cap("draw",      "",       "½",   20, False, "Draw",     "OFFER DRAW — KEY D"),
+    Cap("draw",      "",       "½",   26, False, "Draw",     "OFFER DRAW — KEY D"),
     Cap("resign",    "resign", "",    0,  False, "Resign",   "RESIGN — KEY R"),
     Cap("give_time", "",       "+15", 14, True,  "Give +15", "GIVE +15 — KEY G · HOLD TO RAMP"),
     Cap("flip",      "flip",   "",    0,  False, "Flip",     "FLIP — KEY F"),
@@ -903,9 +903,13 @@ class RightMenu:
             else:
                 surf = pg.Surface((box, box), pg.SRCALPHA)
                 CAP_ICON_FUNCS[cap.icon](surf, surf.get_rect(), Colors.rail_icon)
+            ink = surf.get_bounding_rect()
+            canvas = pg.Surface(surf.get_size(), pg.SRCALPHA)
+            canvas.blit(surf, (surf.get_width() // 2 - ink.centerx,
+                               surf.get_height() // 2 - ink.centery))
             if faded:
-                surf.set_alpha(FADED_ICON_ALPHA)
-            return surf
+                canvas.set_alpha(FADED_ICON_ALPHA)
+            return canvas
         return memoized_surface(_CAP_FG_CACHE, key, build)
 
     def _draw_signals(self):
