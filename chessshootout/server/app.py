@@ -291,6 +291,8 @@ def create_app(*, now_provider=time.monotonic, max_rooms=DEFAULT_MAX_ROOMS):
         if slot is None:
             log.info("resume rejected room=%s reason=session_expired", body.room_id)
             raise HTTPException(status_code=401, detail={"reason": Reason.SESSION_EXPIRED})
+        if room.backend is not None:
+            room.backend.tick_clock()
         history = [
             HistoryEntryWire(
                 from_sq=coord_from_square(entry.move.from_sq),
@@ -300,22 +302,13 @@ def create_app(*, now_provider=time.monotonic, max_rooms=DEFAULT_MAX_ROOMS):
             )
             for entry in (room.backend.move_history if room.backend else [])
         ]
-        if room.backend is not None:
-            room.backend.tick_clock()
-        if (connections.get_for_color(room, color) is not None
-                and slot is not None and not slot.desync_active):
-            slot.desync_active = True
-            opp_ws = connections.get_for_color(room, room.opp_color(color))
-            if opp_ws is not None:
-                await send(opp_ws, ConnectionStatusMessage(opp_state="resyncing"))
         pending = _pending_skillcheck_wire(room, app.state.now_ms)
         locks = [LockWire(from_sq=coord_from_square(frm), to_sq=coord_from_square(to))
                  for frm, to in room.skillcheck_locks]
         skillcheck_log = [
             SkillCheckOutcomeWire(ply=e.ply, kind=e.kind, won=e.won, san=e.san)
             for e in room.skillcheck_log]
-        log.info("resume served room=%s color=%s ply=%d", body.room_id, color, len(history))
-        return ResumeResponse(
+        response = ResumeResponse(
             fen=export_fen(room.backend),
             move_history=history,
             clock=_clock_snapshot(room.backend.clock),
@@ -336,6 +329,14 @@ def create_app(*, now_provider=time.monotonic, max_rooms=DEFAULT_MAX_ROOMS):
             result_reason=room.result[0] if room.result else None,
             result_winner=room.result[1] if room.result else None,
         )
+        log.info("resume served room=%s color=%s ply=%d", body.room_id, color, len(history))
+        if (connections.get_for_color(room, color) is not None
+                and slot is not None and not slot.desync_active):
+            slot.desync_active = True
+            opp_ws = connections.get_for_color(room, room.opp_color(color))
+            if opp_ws is not None:
+                await send(opp_ws, ConnectionStatusMessage(opp_state="resyncing"))
+        return response
 
     @app.post("/reclaim", response_model=ReclaimResponse)
     @limiter.limit(RECLAIM_PER_IP_LIMIT)

@@ -402,6 +402,8 @@ async def handle_takeback_response(app, websocket, room, color, raw):
         room.backend.undo()
         room.skillcheck_log = [e for e in room.skillcheck_log if e.ply < popped_ply]
         room.takeback_offered_by = None
+        room.annotations_white.clear_marks()
+        room.annotations_black.clear_marks()
         await broadcast(rooms, connections, room, TakebackAppliedMessage(
             fen=export_fen(room.backend),
             clock=_clock_snapshot(room.backend.clock),
@@ -476,30 +478,36 @@ async def handle_ping(app, websocket, room, color, raw):
     return "ping"
 
 
-async def handle_annotations_state(app, websocket, room, color, raw):
-    connections = app.state.connections
+async def _relay_guard(websocket, room, color, limiter, msg_type):
     if room.backend is None or room.result is not None:
         return "noop"
-    if not app.state.annotation_limiter.hit(room.slot(color).client_uuid):
-        await send(websocket, ErrorMessage(reason=Reason.RATE_LIMITED,
-                                           msg_type="annotations_state"))
+    if not limiter.hit(room.slot(color).client_uuid):
+        await send(websocket, ErrorMessage(reason=Reason.RATE_LIMITED, msg_type=msg_type))
         return "rate_limited"
+    return None
+
+
+async def handle_annotations_state(app, websocket, room, color, raw):
+    connections = app.state.connections
+    verdict = await _relay_guard(websocket, room, color,
+                                 app.state.annotation_limiter, "annotations_state")
+    if verdict is not None:
+        return verdict
     try:
         msg = AnnotationsStateMessage.model_validate_json(raw)
-        for coord in msg.highlights:
-            square_from_coord(coord)
-        for arrow in msg.arrows:
-            square_from_coord(arrow.from_sq)
-            square_from_coord(arrow.to_sq)
-    except (ValidationError, ValueError):
+    except ValidationError:
         return "invalid"
     store = room.annotations_for(color)
     if msg.sharing != store.sharing:
         log.info("annotations sharing room=%s by=%s on=%s",
                  room.room_id, color, msg.sharing)
     store.sharing = msg.sharing
-    store.highlights = set(msg.highlights)
-    store.arrows = [(a.from_sq, a.to_sq) for a in msg.arrows]
+    if msg.sharing:
+        store.highlights = set(msg.highlights)
+        store.arrows = [(a.from_sq, a.to_sq) for a in msg.arrows]
+    else:
+        store.clear_marks()
+        msg = AnnotationsStateMessage(sharing=False, highlights=[], arrows=[])
     opp_ws = connections.get_for_color(room, room.opp_color(color))
     if opp_ws is not None:
         await send(opp_ws, msg)
@@ -508,12 +516,10 @@ async def handle_annotations_state(app, websocket, room, color, raw):
 
 async def handle_annotation_delta(app, websocket, room, color, raw):
     connections = app.state.connections
-    if room.backend is None or room.result is not None:
-        return "noop"
-    if not app.state.annotation_limiter.hit(room.slot(color).client_uuid):
-        await send(websocket, ErrorMessage(reason=Reason.RATE_LIMITED,
-                                           msg_type="annotation_delta"))
-        return "rate_limited"
+    verdict = await _relay_guard(websocket, room, color,
+                                 app.state.annotation_limiter, "annotation_delta")
+    if verdict is not None:
+        return verdict
     try:
         msg = AnnotationDeltaMessage.model_validate_json(raw)
     except ValidationError:
@@ -521,16 +527,9 @@ async def handle_annotation_delta(app, websocket, room, color, raw):
     if msg.kind == "highlight":
         if msg.square is None:
             return "invalid"
-        present_coords = (msg.square,)
     else:
         if msg.from_sq is None or msg.to_sq is None or msg.from_sq == msg.to_sq:
             return "invalid"
-        present_coords = (msg.from_sq, msg.to_sq)
-    try:
-        for coord in present_coords:
-            square_from_coord(coord)
-    except (ValidationError, ValueError):
-        return "invalid"
     store = room.annotations_for(color)
     if msg.kind == "highlight":
         if msg.action == "add":
@@ -557,12 +556,10 @@ async def handle_annotation_delta(app, websocket, room, color, raw):
 
 async def handle_quick_chat(app, websocket, room, color, raw):
     connections = app.state.connections
-    if room.backend is None or room.result is not None:
-        return "noop"
-    if not app.state.chat_limiter.hit(room.slot(color).client_uuid):
-        await send(websocket, ErrorMessage(reason=Reason.RATE_LIMITED,
-                                           msg_type="quick_chat"))
-        return "rate_limited"
+    verdict = await _relay_guard(websocket, room, color,
+                                 app.state.chat_limiter, "quick_chat")
+    if verdict is not None:
+        return verdict
     try:
         msg = QuickChatMessage.model_validate_json(raw)
     except ValidationError:

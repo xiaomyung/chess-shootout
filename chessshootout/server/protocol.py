@@ -52,7 +52,7 @@ def _validate_uuid4(value, name):
 
 
 def _validate_coord(value, name):
-    if not (isinstance(value, str) and bool(COORD_RE.match(value))):
+    if not (isinstance(value, str) and COORD_RE.match(value)):
         raise ValueError(f"invalid_{name}")
     return value
 
@@ -84,7 +84,6 @@ class Reason:
     DRAW_INSUFFICIENT_MATERIAL = "draw_insufficient_material"
     TIMEOUT = "timeout"
     ABORTED = "aborted"
-    ABORTED_DISCONNECT = "aborted_disconnect"
     ABANDONMENT = "abandonment"
     SERVER_SHUTDOWN = "server_shutdown"
 

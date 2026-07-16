@@ -17,7 +17,8 @@ import json
 import random
 
 from chessshootout.server.app import PROTOCOL_VERSION
-from chessshootout.server.protocol import CHAT_PRESET_COUNT, MAX_SHARED_ARROWS, Reason
+from chessshootout.server.protocol import (
+    CHAT_PRESET_COUNT, MAX_SHARED_ARROWS, MAX_SHARED_HIGHLIGHTS, Reason)
 from tests.server.conftest import ALICE, BOB, auth_msg
 
 
@@ -57,6 +58,10 @@ def _pong(ws, ply=0):
 
 def _room(client, a):
     return client.app.state.rooms.get(a["room_id"])
+
+
+def _all_squares():
+    return {file + rank for file in "abcdefgh" for rank in "12345678"}
 
 
 def test_annotations_state_relays_to_opponent_only_and_stores(client):
@@ -101,6 +106,30 @@ def test_annotations_state_toggle_off_overwrites_store_and_relays(client):
 
         _send(ws_w, type="annotations_state", sharing=False, highlights=[], arrows=[])
         relayed = _recv(ws_b)
+        assert relayed["sharing"] is False
+        assert relayed["highlights"] == []
+        assert relayed["arrows"] == []
+
+        assert room.annotations_white.sharing is False
+        assert room.annotations_white.highlights == set()
+        assert room.annotations_white.arrows == []
+
+
+def test_annotations_state_sharing_off_with_marks_is_sanitized(client):
+    """A sharing=False frame that still smuggles highlights/arrows (a stale or
+    malformed client) must be sanitized: the server clears its store and relays
+    sharing=False with EMPTY sets, never the marks the client tried to sneak in
+    while claiming to be sharing nothing."""
+    with _paired_sockets(client) as (ws_w, ws_b, a):
+        room = _room(client, a)
+        room.annotations_white.sharing = True
+        room.annotations_white.highlights = {"a1"}
+        room.annotations_white.arrows = [("b1", "c3")]
+
+        _send(ws_w, type="annotations_state", sharing=False,
+              highlights=["e4", "d5"], arrows=[{"from": "e2", "to": "e4"}])
+        relayed = _recv(ws_b)
+        assert relayed["type"] == "annotations_state"
         assert relayed["sharing"] is False
         assert relayed["highlights"] == []
         assert relayed["arrows"] == []
@@ -168,6 +197,102 @@ def test_annotation_delta_arrow_cap_refuses_add_without_relay(client):
         assert ("e2", "e4") not in room.annotations_white.arrows
 
 
+def test_annotation_delta_highlight_dup_add_at_cap_is_idempotent_not_capped(client):
+    """The highlight cap guard is `square not in store.highlights AND at cap`, with
+    the membership test FIRST, so a duplicate add of an already-present square
+    short-circuits past the cap and takes the idempotent path (set.add is a no-op),
+    relaying normally instead of returning "capped".
+
+    Pigeonhole: only 64 valid squares exist (COORD_RE = ^[a-h][1-8]$) and
+    MAX_SHARED_HIGHLIGHTS is 64, so the store can hold every legal square at once. A
+    65th DISTINCT highlight is therefore impossible over the wire, which makes the
+    "capped" return unreachable for highlights -- the only add that can occur while
+    64 are stored is a duplicate, and that stays a harmless relayed no-op so the
+    opponent's shared board never silently drops a frame."""
+    with _paired_sockets(client) as (ws_w, ws_b, a):
+        room = _room(client, a)
+        room.annotations_white.highlights = _all_squares()
+        assert len(room.annotations_white.highlights) == MAX_SHARED_HIGHLIGHTS
+
+        _send(ws_w, type="annotation_delta", action="add", kind="highlight", square="e4")
+        d = _recv(ws_b)
+        assert (d["type"], d["action"], d["kind"], d["square"]) == (
+            "annotation_delta", "add", "highlight", "e4")
+        assert room.annotations_white.highlights == _all_squares()
+
+
+def test_annotation_delta_duplicate_add_is_idempotent_and_still_relays(client):
+    """A repeated add of the same mark leaves exactly one copy in the store -- set
+    semantics for highlights, the `pair not in store.arrows` guard for arrows -- yet
+    BOTH frames relay to the opponent, since neither dedup path returns early. The
+    relay is what keeps an opponent that is repainting from a fresh redraw coherent."""
+    with _paired_sockets(client) as (ws_w, ws_b, a):
+        room = _room(client, a)
+
+        for _ in range(2):
+            _send(ws_w, type="annotation_delta", action="add", kind="highlight",
+                  square="e4")
+            assert _recv(ws_b)["square"] == "e4"
+        assert room.annotations_white.highlights == {"e4"}
+
+        for _ in range(2):
+            _send(ws_w, type="annotation_delta", action="add", kind="arrow",
+                  **{"from": "e2", "to": "e4"})
+            got = _recv(ws_b)
+            assert (got["from"], got["to"]) == ("e2", "e4")
+        assert room.annotations_white.arrows == [("e2", "e4")]
+
+
+def test_annotation_delta_remove_absent_mark_is_harmless_noop_and_relays(client):
+    """Removing a mark that was never stored is a no-op on the store (set.discard for
+    highlights, the `pair in store.arrows` guard for arrows) but still relays -- the
+    handler never short-circuits a remove, so the opponent always hears the intent
+    even when the local store had nothing to drop."""
+    with _paired_sockets(client) as (ws_w, ws_b, a):
+        room = _room(client, a)
+
+        _send(ws_w, type="annotation_delta", action="remove", kind="highlight",
+              square="h8")
+        assert _recv(ws_b)["action"] == "remove"
+        assert room.annotations_white.highlights == set()
+
+        _send(ws_w, type="annotation_delta", action="remove", kind="arrow",
+              **{"from": "a1", "to": "h8"})
+        assert _recv(ws_b)["action"] == "remove"
+        assert room.annotations_white.arrows == []
+
+
+def test_off_turn_side_relays_share_and_chat_normally(client):
+    """The share/chat handlers are deliberately turn-agnostic: annotating and
+    chatting are legal whoever is on move. At ply 0 white is to move, so black is the
+    OFF-turn side; each of its annotations_state / annotation_delta / quick_chat
+    frames still relays to white and mutates the black store, and nothing echoes back
+    to black (proved by the trailing ping sentinel)."""
+    with _paired_sockets(client) as (ws_w, ws_b, a):
+        room = _room(client, a)
+
+        _send(ws_b, type="annotations_state", sharing=True,
+              highlights=["e5"], arrows=[{"from": "e7", "to": "e5"}])
+        state = _recv(ws_w)
+        assert state["type"] == "annotations_state"
+        assert state["sharing"] is True
+        assert set(state["highlights"]) == {"e5"}
+        assert room.annotations_black.sharing is True
+        assert room.annotations_black.arrows == [("e7", "e5")]
+
+        _send(ws_b, type="annotation_delta", action="add", kind="highlight", square="d4")
+        delta = _recv(ws_w)
+        assert (delta["action"], delta["square"]) == ("add", "d4")
+        assert room.annotations_black.highlights == {"e5", "d4"}
+
+        _send(ws_b, type="quick_chat", preset=4)
+        chat = _recv(ws_w)
+        assert (chat["type"], chat["preset"], chat["sender"]) == (
+            "quick_chat_received", 4, "black")
+
+        assert _pong(ws_b)["type"] == "pong"
+
+
 def test_annotation_rate_limit_trips_on_eleventh_frame_in_a_frozen_second(client, clock):
     """The eleventh annotations_state frame inside one frozen second is refused by
     the 10/s annotation limiter (not the 30/s WS limiter, since 11 < 30): the
@@ -210,16 +335,21 @@ def test_move_wipes_marks_keeps_sharing_and_emits_no_annotation_frame(client):
         assert _pong(ws_b, ply=1)["type"] == "pong"
 
 
-def test_takeback_does_not_wipe_shared_marks(client):
+def test_takeback_wipes_shared_marks(client):
+    """An accepted takeback rewinds the position, so shared marks -- drawn against
+    the now-undone board -- must be cleared server-side on BOTH stores, exactly the
+    same clear a normal move performs. Sharing flags survive; only the marks drop,
+    so the players keep sharing turned on for the rewound board."""
     with _paired_sockets(client) as (ws_w, ws_b, a):
         _send(ws_w, type="move", **{"from": "e2", "to": "e4"})
         assert _recv(ws_w)["type"] == "move_applied"
         assert _recv(ws_b)["type"] == "move_applied"
 
         room = _room(client, a)
-        room.annotations_white.sharing = True
-        room.annotations_white.highlights = {"c4"}
-        room.annotations_white.arrows = [("b1", "c3")]
+        for store in (room.annotations_white, room.annotations_black):
+            store.sharing = True
+            store.highlights = {"c4"}
+            store.arrows = [("b1", "c3")]
 
         _send(ws_w, type="takeback_request")
         assert _recv(ws_b)["type"] == "takeback_offered"
@@ -227,9 +357,10 @@ def test_takeback_does_not_wipe_shared_marks(client):
         assert _recv(ws_w)["type"] == "takeback_applied"
         assert _recv(ws_b)["type"] == "takeback_applied"
 
-        assert room.annotations_white.sharing is True
-        assert room.annotations_white.highlights == {"c4"}
-        assert room.annotations_white.arrows == [("b1", "c3")]
+        for store in (room.annotations_white, room.annotations_black):
+            assert store.sharing is True
+            assert store.highlights == set()
+            assert store.arrows == []
 
 
 def test_after_result_share_and_chat_are_silent_noops(client):
@@ -274,6 +405,74 @@ def test_resume_carries_both_annotation_sets(client):
     assert ba["sharing"] is False
     assert ba["highlights"] == ["h7"]
     assert ba["arrows"] == [{"from": "b8", "to": "c6"}]
+
+
+def test_resume_snapshot_is_taken_before_opponent_notify(client, monkeypatch):
+    """post_resume must read ALL room state and build the ResumeResponse in one
+    synchronous, await-free block, and only THEN fire the opponent 'resyncing'
+    notify. If a move lands during that notify's await, the returned payload must
+    still be the pre-notify snapshot -- fen, move_history length, result, and
+    annotations captured at the same instant. Here the monkeypatched notify send
+    mutates the room mid-await (applies a move, sets a result, clears marks); a
+    read placed after the await would leak that newer state and tear fen away from
+    the history it was captured with. Pins the torn-snapshot fix."""
+    import chessshootout.server.app as app_mod
+    from chessshootout.backend.fen import export_fen
+    from chessshootout.backend.utils import square_from_coord
+
+    random.seed(0)
+    a = _matchmake(client, uuid=ALICE, nickname="Alice", side="white")
+    _matchmake(client, uuid=BOB, nickname="Bob", side="black")
+    room = _room(client, a)
+    assert room.slot("white").client_uuid == ALICE
+
+    room.backend.try_move(square_from_coord("e2"), square_from_coord("e4"))
+    room.backend.try_move(square_from_coord("e7"), square_from_coord("e5"))
+    room.annotations_white.sharing = True
+    room.annotations_white.highlights = {"e4"}
+    room.annotations_white.arrows = [("g1", "f3")]
+    room.slot("white").desync_active = False
+
+    class _FakeWS:
+        async def send_json(self, payload):
+            return None
+
+    client.app.state.connections.add(room.room_id, ALICE, _FakeWS())
+    client.app.state.connections.add(room.room_id, BOB, _FakeWS())
+
+    pre_fen = export_fen(room.backend)
+    pre_ply = len(room.backend.move_history)
+
+    state = {"fired": False}
+    real_send = app_mod.send
+
+    async def mutating_send(ws, message):
+        if not state["fired"]:
+            state["fired"] = True
+            room.backend.try_move(square_from_coord("g1"), square_from_coord("f3"))
+            room.result = (Reason.RESIGNATION, "white")
+            room.annotations_white.clear_marks()
+        return await real_send(ws, message)
+
+    monkeypatch.setattr(app_mod, "send", mutating_send)
+
+    r = client.post("/resume", json={
+        "version": PROTOCOL_VERSION, "room_id": a["room_id"],
+        "session_token": a["session_token"],
+    })
+
+    assert state["fired"] is True
+    assert r.status_code == 200
+    body = r.json()
+    assert body["your_color"] == "white"
+    assert len(body["move_history"]) == pre_ply
+    assert body["fen"] == pre_fen
+    assert body["result_reason"] is None
+    assert body["result_winner"] is None
+    wa = body["white_annotations"]
+    assert wa["sharing"] is True
+    assert wa["highlights"] == ["e4"]
+    assert wa["arrows"] == [{"from": "g1", "to": "f3"}]
 
 
 def test_quick_chat_relays_to_opponent_only(client):

@@ -364,7 +364,7 @@ class RoomManager:
 
     @staticmethod
     def _award_series(room, reason, winner_color):
-        if reason in ("aborted", "aborted_disconnect", "server_shutdown"):
+        if reason in ("aborted", "server_shutdown"):
             return
         scores = room.series_scores
         if winner_color in ("white", "black"):
