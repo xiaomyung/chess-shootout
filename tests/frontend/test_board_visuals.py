@@ -246,32 +246,38 @@ def test_promotion_picker_cells_are_raised_shells_with_hover_accent(monkeypatch)
 
 
 def test_promotion_picker_draws_key_hint_micro_labels():
+    """Key hints sit on a dark scrim nameplate so they stay readable over white
+    piece art: text_dim ink plus near-bg scrim pixels in the corner region."""
     board, win = _board()
     board.pending_promotion_square = Square(1, 4)
     board.draw_board()
-    muted = pg.Color(Colors.text_muted)[:3]
+    dim = pg.Color(Colors.text_dim)[:3]
+    bg = pg.Color(Colors.bg)[:3]
     for ptype in (PieceType.QUEEN, PieceType.ROOK, PieceType.BISHOP, PieceType.KNIGHT):
         cell = board._promotion_rects[ptype]
-        corner = pg.Rect(cell.right - 18, cell.bottom - 16, 18, 16)
-        assert _cell_has(win, corner, lambda c: tuple(c[:3]) == muted), \
-            "each cell shows a text_muted key hint in its bottom-right corner"
+        corner = pg.Rect(cell.right - 20, cell.bottom - 18, 20, 18)
+        assert _cell_has(win, corner, lambda c: tuple(c[:3]) == dim), \
+            "each cell shows a text_dim key hint in its bottom-right corner"
+        assert _cell_has(win, corner,
+                         lambda c: all(abs(c[i] - bg[i]) <= 24 for i in range(3))), \
+            "the key hint rides a dark scrim plate for contrast"
 
 
 def test_promotion_picker_shows_role_tags_that_brighten_on_hover(monkeypatch):
     board, win = _board()
     board.pending_promotion_square = Square(1, 4)
     board.draw_board()
-    muted = pg.Color(Colors.text_muted)[:3]
+    dim = pg.Color(Colors.text_dim)[:3]
     amber = pg.Color(Colors.amber)[:3]
     for ptype in (PieceType.QUEEN, PieceType.ROOK, PieceType.BISHOP, PieceType.KNIGHT):
         cell = board._promotion_rects[ptype]
-        corner = pg.Rect(cell.left + 2, cell.top + 2, cell.width - 8, 16)
-        assert _cell_has(win, corner, lambda c: tuple(c[:3]) == muted), \
-            "each cell wears its role tag (BOSS/TANK/SNIPER/WILDCARD) in muted ink"
+        corner = pg.Rect(cell.left + 2, cell.top + 2, cell.width - 8, 18)
+        assert _cell_has(win, corner, lambda c: tuple(c[:3]) == dim), \
+            "each cell wears its role tag (BOSS/TANK/SNIPER/WILDCARD) in dim ink"
     knight = board._promotion_rects[PieceType.KNIGHT]
     monkeypatch.setattr(pg.mouse, "get_pos", lambda: knight.center)
     board.draw_board()
-    corner = pg.Rect(knight.left + 2, knight.top + 2, knight.width - 8, 16)
+    corner = pg.Rect(knight.left + 2, knight.top + 2, knight.width - 8, 18)
     assert _cell_has(win, corner, lambda c: tuple(c[:3]) == amber), \
         "the hovered cell's role tag brightens to amber"
 
@@ -287,8 +293,9 @@ def test_promotion_picker_role_tags_fit_at_the_minimum_option_size():
     opt = max(board.PROMOTION_OPTION_SIZE_MIN,
               min(int(board.cell_size), board.PROMOTION_OPTION_SIZE_MAX))
     assert opt == board.PROMOTION_OPTION_SIZE_MIN, "sanity: the small board hits the floor"
-    assert 4 + board._promo_tag_font.size("WILDCARD")[0] <= opt - 4, \
-        "the longest tag stays inside the cell at the smallest option size"
+    plate_pad = 2 * board.PROMO_PLATE_TEXT_PAD[0]
+    assert 1 + plate_pad + board._promo_tag_font.size("WILDCARD")[0] <= opt - 1, \
+        "the longest tag nameplate stays inside the cell at the smallest option size"
 
 
 def test_flipped_cell_rect_mirrors():

@@ -9,7 +9,7 @@ from chessshootout.frontend.board.annotations import Annotations
 from chessshootout.frontend.board.drag import DragPhysics
 from chessshootout.frontend.visual.animation import PieceAnimation
 from chessshootout.frontend.visual.cache import (
-    new_cache, new_size_cache, memoized_surface, render_text,
+    new_cache, new_size_cache, memoized_surface,
 )
 from chessshootout.frontend.visual.colors import Colors
 from chessshootout.frontend.visual.draw import (
@@ -24,6 +24,7 @@ from chessshootout.frontend.visual.fonts import get_font
 
 _OVERLAY_CACHE = new_cache()
 _PROMO_OPTION_CACHE = new_size_cache()
+_PROMO_PLATE_CACHE = new_cache()
 _MARKER_CACHE = new_cache()
 _PIECE_IMAGE_CACHE = new_cache()
 _SCALED_PIECE_CACHE = new_size_cache()
@@ -99,6 +100,8 @@ class Board:
     PROMOTION_PLATE_CUT = 10
     PROMOTION_CELL_CUT = 6
     PROMOTION_SQUARE_GAP = 6
+    PROMO_PLATE_TEXT_PAD = (3, 2)
+    PROMO_PLATE_SCRIM_ALPHA = 200
     PROMOTION_SCREEN_MARGIN = 8
 
     HITMARKER_SIZE_MIN = 8
@@ -290,13 +293,28 @@ class Board:
             self.window.blit(shell, cell.topleft)
             img = self._promo_option_sprite(ptype, color, opt)
             self.window.blit(img, cell.topleft)
-            hk = render_text(self._promo_hotkey_font, hotkey, Colors.text_muted)
-            self.window.blit(hk, (cell.right - hk.get_width() - 4,
+            hk = self._promo_nameplate(hotkey, self._promo_hotkey_font, Colors.text_dim)
+            self.window.blit(hk, (cell.right - hk.get_width() - 3,
                                   cell.bottom - hk.get_height() - 3))
-            tag_surf = render_text(self._promo_tag_font, tag,
-                                   Colors.amber if hovered else Colors.text_muted)
-            self.window.blit(tag_surf, (cell.left + 4, cell.top + 3))
+            tag_surf = self._promo_nameplate(
+                tag, self._promo_tag_font,
+                Colors.amber if hovered else Colors.text_dim)
+            tag_inset = max(1, min(3, cell.width - tag_surf.get_width() - 1))
+            self.window.blit(tag_surf, (cell.left + tag_inset, cell.top + 3))
             self._promotion_rects[ptype] = cell
+
+    def _promo_nameplate(self, text, font, color):
+        def build():
+            label = font.render(text, True, pg.Color(color))
+            pad_x, pad_y = self.PROMO_PLATE_TEXT_PAD
+            surf = pg.Surface((label.get_width() + 2 * pad_x,
+                               label.get_height() + 2 * pad_y), pg.SRCALPHA)
+            scrim = pg.Color(Colors.bg)
+            scrim.a = self.PROMO_PLATE_SCRIM_ALPHA
+            pg.draw.rect(surf, scrim, surf.get_rect(), border_radius=3)
+            surf.blit(label, (pad_x, pad_y))
+            return surf
+        return memoized_surface(_PROMO_PLATE_CACHE, (text, font, color), build)
 
     def pick_promotion(self, ptype):
         if self.pending_promotion_square is None:
