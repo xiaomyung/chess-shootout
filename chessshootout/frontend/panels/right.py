@@ -10,6 +10,7 @@ from chessshootout.frontend.visual.widgets import draw_pill
 from chessshootout.frontend.visual.draw import (
     cut_rect_surface, rounded_rect_surface, dashed_hline, scale_floor,
     smoothstep, rotated_chevron_surface, dashed_rounded_rect_surface, circle_surface,
+    build_tooltip_bubble, notch_geometry, notch_value_from_click, notch_readout_slot_w,
 )
 from chessshootout.frontend.visual.icons import (
     draw_undo_arrow, draw_resign_flag, draw_flip_arrows, draw_left_arrow, draw_file,
@@ -90,6 +91,7 @@ LOG_SEP_GAP = 8
 LOG_ROWS_GAP = 9
 MOVE_CELL_CUT = 8
 MICRO_FONT_PT = 10
+WHIFF_ALPHA = 190
 
 DEBUT_NAME_PT = 12
 DEBUT_NAME_FLOOR = 10
@@ -116,8 +118,6 @@ FADED_ICON_ALPHA = 102
 TOOLTIP_DELAY_MS = 250
 TOOLTIP_FADE_MS = 120
 TOOLTIP_PT = 10
-TOOLTIP_PAD_X = 10
-TOOLTIP_PAD_Y = 5
 TOOLTIP_GAP = 6
 
 SIGNAL_CHIP_H = 31
@@ -134,7 +134,6 @@ SIGNAL_NOTCH_GAP = 4
 SIGNAL_NOTCH_CUT = 4
 SIGNAL_VOL_READOUT_PT = 10
 SIGNAL_VOL_GAP = 8
-SIGNAL_ZERO_EPSILON = 0.005
 SIGNAL_DIM_ALPHA = 89
 SIGNAL_SHARE_DISABLED_ALPHA = 102
 SIGNAL_ON_BORDER_ALPHA = "8c"
@@ -151,6 +150,7 @@ CHAT_DIM_ALPHA = 102
 _CAP_FG_CACHE = new_cache()
 _SIGNAL_CACHE = new_cache()
 _CHAT_CACHE = new_cache()
+_WHIFF_CACHE = new_cache()
 
 
 class SignalChip(NamedTuple):
@@ -222,19 +222,8 @@ class RailTooltip:
 
     def _bubble(self, label, scale, font):
         key = (label, font.get_height())
-
-        def build():
-            text = font.render(label, True, pg.Color(Colors.text))
-            pad_x = scale_floor(TOOLTIP_PAD_X, scale, 6)
-            pad_y = scale_floor(TOOLTIP_PAD_Y, scale, 3)
-            w = text.get_width() + 2 * pad_x
-            h = text.get_height() + 2 * pad_y
-            surf = cut_rect_surface((w, h), scale_floor(6, scale, 4), Colors.bg,
-                                    border=Colors.border_strong, border_width=1,
-                                    corners=("tr",)).copy()
-            surf.blit(text, (pad_x, pad_y))
-            return surf
-        return memoized_surface(self._cache, key, build)
+        return memoized_surface(
+            self._cache, key, lambda: build_tooltip_bubble(font, label, scale))
 
     def _position(self, bubble, rect, clip_rect):
         w, h = bubble.get_size()
@@ -277,7 +266,6 @@ class RightMenu:
         self.pill_font_factor = 30
 
         self.scale = 1.0
-        self._last_scale = 1.0
         self.font = get_font(13, mono=True)
         self.moves_font = get_font(14, bold=True)
         self.pill_font = get_font(11, bold=True)
@@ -326,6 +314,7 @@ class RightMenu:
         self._move_cell_hits = []
         self._last_seen_total_rows = 0
         self._last_review_ply = None
+        self._move_rows_cache = None
 
     @property
     def backend(self):
@@ -347,7 +336,6 @@ class RightMenu:
 
     def set_rect(self, rect, scale=1.0):
         self.scale = scale
-        self._last_scale = scale
         self.font = get_font(max(int(rect.width / self.moves_font_factor), 10), mono=True)
         self.moves_font = get_font(
             max(int(rect.width / self.moves_font_factor), 10), bold=True)
@@ -542,10 +530,9 @@ class RightMenu:
     def _vol_geometry(self, width):
         cell_w = scale_floor(SIGNAL_NOTCH_CELL_W, self.scale, 8)
         gap = scale_floor(SIGNAL_NOTCH_GAP, self.scale, 2)
-        total = SIGNAL_NOTCH_COUNT * cell_w + (SIGNAL_NOTCH_COUNT - 1) * gap
-        slot_w = self.signal_num_font.size("100%")[0]
+        slot_w = notch_readout_slot_w(self.signal_num_font)
         readout_gap = scale_floor(SIGNAL_VOL_GAP, self.scale, 5)
-        x0 = width - slot_w - readout_gap - total
+        x0, total = notch_geometry(width, SIGNAL_NOTCH_COUNT, cell_w, gap, slot_w, readout_gap)
         return x0, cell_w, gap, total
 
     def _info_section_height(self):
@@ -561,7 +548,7 @@ class RightMenu:
     def set_game_info(self, info):
         self.game_info = info
         if self._last_outer_rect is not None:
-            self.set_rect(self._last_outer_rect, self._last_scale)
+            self.set_rect(self._last_outer_rect, self.scale)
 
     def reset_for_new_game(self):
         self.scroll_offset = 0
@@ -571,6 +558,7 @@ class RightMenu:
         self.scroll.last_activity_ms = 0
         self._last_review_ply = None
         self._marquee_off = 0.0
+        self._move_rows_cache = None
 
     def draw_menu(self):
         self.scroll.tick()
@@ -671,11 +659,18 @@ class RightMenu:
     def handle_release(self, pos):
         return self.scroll.handle_release()
 
+    def _move_rows(self, history, whiffs):
+        key = (len(history), tuple(sorted((ply, len(v)) for ply, v in whiffs.items())))
+        if self._move_rows_cache is None or self._move_rows_cache[0] != key:
+            self._move_rows_cache = (key, *self._build_move_rows(history, whiffs))
+        self._pair_to_row = self._move_rows_cache[2]
+        return self._move_rows_cache[1]
+
     def _build_move_rows(self, history, whiffs):
         rows = []
-        self._pair_to_row = {}
+        pair_to_row = {}
         for pair_idx, (number, white_entry, black_entry) in enumerate(iter_move_pairs(history)):
-            self._pair_to_row[pair_idx] = len(rows)
+            pair_to_row[pair_idx] = len(rows)
             rows.append(("pair", pair_idx, number, white_entry, black_entry))
             white_ply = pair_idx * 2 + 1
             black_ply = pair_idx * 2 + 2 if black_entry is not None else None
@@ -686,7 +681,7 @@ class RightMenu:
                     "whiff",
                     white_whiffs[k] if k < len(white_whiffs) else None,
                     black_whiffs[k] if k < len(black_whiffs) else None))
-        return rows
+        return rows, pair_to_row
 
     def _draw_log_header(self, rect):
         pad = self.padding
@@ -742,7 +737,7 @@ class RightMenu:
         rows_top = rect.y + header_h
         self._max_lines = max(int((rect.bottom - self.padding - rows_top) // line_h), 0)
 
-        rows = self._build_move_rows(history, self.whiffs_provider())
+        rows = self._move_rows(history, self.whiffs_provider())
         self._total_rows = len(rows)
         self._content_px = self._total_rows * line_h
         self._moves_viewport = pg.Rect(rect.x, rows_top, rect.width,
@@ -799,11 +794,19 @@ class RightMenu:
                 self._draw_move_cell(black_cell, black_entry, active_ply == black_ply)
                 self._move_cell_hits.append((black_cell, black_ply))
 
+    def _whiff_surface(self, san):
+        key = (san, self.moves_font.get_height())
+
+        def build():
+            surf = self.moves_font.render(san, True, pg.Color(Colors.loss))
+            surf.set_alpha(WHIFF_ALPHA)
+            return surf
+        return memoized_surface(_WHIFF_CACHE, key, build)
+
     def _draw_whiff(self, x, y, w, line_h, whiff):
         if whiff is None:
             return
-        surf = self.moves_font.render(whiff[1], True, pg.Color(Colors.loss))
-        surf.set_alpha(190)
+        surf = self._whiff_surface(whiff[1])
         max_w = w - 8
         draw_w = surf.get_width()
         area = None
@@ -865,7 +868,7 @@ class RightMenu:
         target = 1.0 if SECTION_OPEN[key] else 0.0
         self._chevron_anim[key] = (now, cur, target)
         if self._last_outer_rect is not None:
-            self.set_rect(self._last_outer_rect, self._last_scale)
+            self.set_rect(self._last_outer_rect, self.scale)
         if self.sounds is not None:
             self.sounds.play_section_toggle()
 
@@ -1125,12 +1128,9 @@ class RightMenu:
         return None
 
     def _handle_vol_click(self, pos, state):
-        band = self._signal_notch_band
-        i = max(0, min(SIGNAL_NOTCH_COUNT - 1,
-                       (pos[0] - band.x) // self._signal_notch_step))
-        target = (i + 1) / SIGNAL_NOTCH_COUNT
-        if i == 0 and abs(state.get("volume", 0.0) - target) < SIGNAL_ZERO_EPSILON:
-            target = 0.0
+        target = notch_value_from_click(
+            pos[0], self._signal_notch_band.x, self._signal_notch_step,
+            SIGNAL_NOTCH_COUNT, state.get("volume", 0.0))
         callback = self.callbacks.get("set_volume")
         if callback is not None:
             callback(target)

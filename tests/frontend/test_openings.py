@@ -42,6 +42,31 @@ def test_preload_idempotent_does_not_reparse(monkeypatch):
     assert len(openings._TABLE) >= 3000
 
 
+def test_preload_tolerates_malformed_rows(tmp_path, monkeypatch):
+    """preload skips rows with the wrong column count and rows whose PGN body
+    yields no SANs, without aborting the parse -- one bad line can't nuke the book.
+    The good row still resolves; the two bad rows leave no trace in the table."""
+    tsv = tmp_path / "openings.tsv"
+    tsv.write_text(
+        "eco\tname\tpgn\n"                    # header line, skipped by preload
+        "C99\tGood Line\t1. e4 e5\n"          # valid three-column row
+        "BAD\tTwo Columns Only\n"             # wrong column count -> dropped
+        "D00\tEmpty Body\t\n",                # empty PGN -> no SANs -> dropped
+        encoding="utf-8",
+    )
+    openings._TABLE = None
+    openings._MAX_PLIES = 0
+    monkeypatch.setattr(openings, "resource_path", lambda *parts: tsv)
+    try:
+        openings.preload()
+        assert openings.lookup(["e4", "e5"]) == ("C99", "Good Line")
+        assert len(openings._TABLE) == 1
+        assert openings.lookup(["d4"]) is None
+    finally:
+        openings._TABLE = None
+        openings._MAX_PLIES = 0
+
+
 def test_lookup_empty_returns_none():
     openings.preload()
     assert openings.lookup([]) is None

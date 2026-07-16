@@ -61,7 +61,9 @@ def test_shared_annotations_relay_state_sync_and_move_wipe(server):
     """White shares an annotation set + a delta (opponent-only relay, arrows keyed
     by their aliases); a move silently wipes the marks server-side with no frame
     relayed; /resume then carries white's current (empty-marks, still-sharing)
-    store; and turning sharing off relays as an empty state."""
+    store; turning sharing off relays as an empty state; and a fresh share after
+    that comes back through /resume with the live arrows still alias-keyed —
+    the exact dict shape GameScreen's decoder reads on restore."""
     addr, a, b = _pair(server, ANNO_WHITE, ANNO_BLACK)
 
     a.send_annotations_state(True, ["e4"], [("g1", "f3")])
@@ -99,6 +101,16 @@ def test_shared_annotations_relay_state_sync_and_move_wipe(server):
     assert stop_ev.payload["sharing"] is False
     assert stop_ev.payload["highlights"] == []
     assert stop_ev.payload["arrows"] == []
+
+    a.send_annotations_state(True, ["d4"], [("b1", "c3")])
+    reshared = _wait_for(b, "annotations_state")
+    assert reshared is not None
+    assert reshared.payload["arrows"] == [{"from": "b1", "to": "c3"}]
+    resumed_full = fetch_resume(addr, b.room_id, b._session_token)
+    assert resumed_full is not None
+    assert resumed_full["white_annotations"]["sharing"] is True
+    assert resumed_full["white_annotations"]["highlights"] == ["d4"]
+    assert resumed_full["white_annotations"]["arrows"] == [{"from": "b1", "to": "c3"}]
 
     a.disconnect()
     b.disconnect()

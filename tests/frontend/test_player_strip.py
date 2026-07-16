@@ -492,8 +492,8 @@ def test_untimed_clock_area_paints_infinity(strip):
 def test_clock_digits_have_fixed_advance(strip):
     """Space Mono is tabular: equal-length clock strings render the same pixel
     width, so the digits never jitter as the clock ticks."""
-    a = strip._compose_clock("1:11", Colors.text)
-    b = strip._compose_clock("0:00", Colors.text)
+    a = strip.clock_font.render("1:11", True, Colors.text)
+    b = strip.clock_font.render("0:00", True, Colors.text)
     assert a.get_width() == b.get_width()
 
 

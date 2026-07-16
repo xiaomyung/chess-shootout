@@ -422,7 +422,8 @@ def test_opponent_win_move_applied_holds_green_then_applies():
 
 
 def _resumed(pending=None, locks=None, skillcheck_log=None):
-    """Mirror the real /resume payload: model_dump() (field-name keys), like the client sees."""
+    """Mirror the real /resume payload: model_dump(by_alias=True) (wire-alias keys,
+    "from"/"to"), exactly like the client hands the frontend."""
     payload = {
         "move_history": [], "fen": "8/8/8/8/8/8/8/8 w - - 0 1",
         "clock": {"white_remaining": 300.0, "black_remaining": 300.0, "running_for": "white"},
@@ -437,11 +438,11 @@ def _pending_wire(kind, frm, to, color, *, elapsed_ms=0.0, miss_count=0, promo=N
     return PendingSkillCheckWire(
         kind=kind, seed="s", value_diff=3, deadline_ms=5000.0, elapsed_ms=elapsed_ms,
         miss_count=miss_count, color=color, from_sq=frm, to_sq=to,
-        promotion=promo).model_dump()
+        promotion=promo).model_dump(by_alias=True)
 
 
 def _lock_wire(frm, to):
-    return LockWire(from_sq=frm, to_sq=to).model_dump()
+    return LockWire(from_sq=frm, to_sq=to).model_dump(by_alias=True)
 
 
 def test_resume_reopens_my_pending_check_at_the_right_elapsed():

@@ -10,6 +10,7 @@ from chessshootout.domain.pgn.load import (
     format_time_control, load_pgn_into_backend, parse_comment, parse_time_control,
 )
 from chessshootout.infra import env
+from chessshootout.frontend import signal_controls
 from chessshootout.frontend.board import Board
 from chessshootout.frontend.layout import compute_layout
 from chessshootout.frontend.modal_registry import ModalSpec
@@ -47,7 +48,7 @@ class ReviewScreen(Screen):
         self._skillcheck_log = []
         self._pgn_path = None
         self._custom_start = False
-        self._debut_memo = None
+        self._debut = openings.DebutTracker(self._reviewed_sans)
         self.backdrop = ArenaBackdrop()
 
         self.match = Match()
@@ -57,8 +58,8 @@ class ReviewScreen(Screen):
             "menu": self._on_menu,
             "flip": self._on_flip,
             "open_pgn": self._on_open_pgn,
-            "sound_toggle": self._toggle_sound,
-            "set_volume": self._set_signal_volume,
+            "sound_toggle": lambda: signal_controls.toggle_sound(app),
+            "set_volume": lambda value: signal_controls.set_signal_volume(app, value),
         }, board=self.board, buttons_provider=lambda: REVIEW_CAPS,
             whiffs_provider=self._skillcheck_whiffs,
             debut_provider=self._debut_line,
@@ -77,7 +78,7 @@ class ReviewScreen(Screen):
         self._return_to = payload.get("return_to", "menu")
         path = payload["pgn_path"]
         self._pgn_path = path
-        self._debut_memo = None
+        self._debut.reset()
         text = self._read_pgn(path)
         if text is None:
             self._fail(path, "could not read file")
@@ -222,14 +223,6 @@ class ReviewScreen(Screen):
             "review": True,
         }
 
-    def _toggle_sound(self):
-        sm = self.app.sound_manager
-        sm.set_enabled(not sm.enabled)
-
-    def _set_signal_volume(self, value):
-        self.app.sound_manager.set_master_volume(value)
-        self.app.settings.defer_master_volume_write()
-
     def _compute_game_info(self):
         tc = format_time_control(self._time_control) or "∞"
         return {"mode": "Review", "time_control": tc, "lines": [self._pgn_result_tag or "*"]}
@@ -253,16 +246,13 @@ class ReviewScreen(Screen):
             "captured_color": opponent_of(color),
         }
 
+    def _reviewed_sans(self):
+        return [entry.san for entry in self.board.reviewed_history()]
+
     def _debut_line(self):
         if self._custom_start:
             return None
-        key = (len(self.match.move_history), self.board.review_ply)
-        if self._debut_memo is not None and self._debut_memo[0] == key:
-            return self._debut_memo[1]
-        sans = [entry.san for entry in self.board.reviewed_history()]
-        result = openings.lookup(sans)
-        self._debut_memo = (key, result)
-        return result
+        return self._debut.line((len(self.match.move_history), self.board.review_ply))
 
     def _rebuild_skillcheck_log(self, move_comments):
         self._skillcheck_log = []

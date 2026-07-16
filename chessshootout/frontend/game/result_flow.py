@@ -32,7 +32,6 @@ RESULT_TEXT = {
     "draw_insufficient_material": ("Draw", "by insufficient material"),
     "draw_agreement": ("Draw", "by agreement"),
     "aborted": ("Game aborted", "no moves played"),
-    "aborted_disconnect": ("Game aborted", "opponent disconnected"),
     "server_shutdown": ("Game cancelled", "server shutting down"),
 }
 

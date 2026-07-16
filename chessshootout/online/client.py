@@ -51,7 +51,7 @@ def probe_active_game(addr, client_uuid, timeout=2.0):
     response = transport.reclaim_blocking(client_uuid, timeout=timeout)
     if response is None:
         return None
-    return response.model_dump()
+    return response.model_dump(by_alias=True)
 
 
 def fetch_resume(addr, room_id, session_token):
@@ -59,7 +59,7 @@ def fetch_resume(addr, room_id, session_token):
     response = transport.resume_blocking(room_id, session_token)
     if response is None:
         return None
-    return response.model_dump()
+    return response.model_dump(by_alias=True)
 
 
 class OnlineClient:
@@ -260,7 +260,7 @@ class OnlineClient:
             return
         log.info("state-sync ok room=%s ply=%d",
                  self._room_id, len(response.move_history))
-        resumed = response.model_dump()
+        resumed = response.model_dump(by_alias=True)
         self._adopt_timing(resumed)
         self._inbound.put(Event("game_resumed", resumed))
 
@@ -389,7 +389,7 @@ class OnlineClient:
                         return self.ROOM_LOST
                     return None
                 if response is not None:
-                    return response.model_dump()
+                    return response.model_dump(by_alias=True)
                 remaining = deadline - loop.time()
                 if remaining <= 0:
                     break
@@ -403,7 +403,8 @@ class OnlineClient:
         async with self._transport.make_async_http() as http:
             for attempt in range(SERVER_FULL_RETRIES + 1):
                 try:
-                    return (await self._transport.matchmake_async(req, http)).model_dump()
+                    return (await self._transport.matchmake_async(req, http)
+                            ).model_dump(by_alias=True)
                 except TransportHTTPError as exc:
                     if exc.status_code == 503:
                         last_exc = RuntimeError("room_full")

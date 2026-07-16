@@ -25,7 +25,6 @@ class ReviewStrip:
         self._avatar = StripAvatar()
 
     def set_rect(self, rect, scale=1.0):
-        self.scale = scale
         self.rect = pg.Rect(rect)
         h = rect.height
         ih = max(int(h * 0.68), 1)

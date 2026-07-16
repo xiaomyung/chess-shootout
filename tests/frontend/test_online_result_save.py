@@ -258,15 +258,15 @@ def test_finished_game_resume_does_not_replay_result_effects(tmp_path, monkeypat
 
 
 def test_resumed_static_result_saves_partial(tmp_path, monkeypatch):
-    """A player who reconnects into an aborted_disconnect/server_shutdown keeps the
+    """A player who reconnects into an aborted/server_shutdown keeps the
     partial archive too — symmetric with the still-connected opponent."""
     app = _online_app(tmp_path, monkeypatch)
     app.coordinator._handle_game_resumed({
         "move_history": [{"san": s} for s in ["e4", "e5"]],
-        "fen": "", "result_reason": "aborted_disconnect", "result_winner": None,
+        "fen": "", "result_reason": "server_shutdown", "result_winner": None,
         "skillcheck_log": [], "skillcheck_locks": [], "pending_skillcheck": None,
     })
-    assert app.game.manual_result == "aborted_disconnect"
+    assert app.game.manual_result == "server_shutdown"
     assert '[Result "*"]' in _saved_text(app)
 
 

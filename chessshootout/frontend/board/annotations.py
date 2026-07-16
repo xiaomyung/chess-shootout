@@ -28,7 +28,7 @@ class Annotations:
             self.arrows.remove(arrow)
             return False
         if len(self.arrows) >= MAX_SHARED_ARROWS:
-            return False
+            return None
         self.arrows.append(arrow)
         return True
 

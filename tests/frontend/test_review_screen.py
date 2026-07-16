@@ -19,6 +19,7 @@ from chessshootout.backend.backend import Backend
 from chessshootout.backend.pieces import PieceType
 from chessshootout.domain.pgn.generate import generate_pgn
 from chessshootout.frontend.modals.help import HOTKEYS
+from chessshootout.frontend.panels.right import SECTION_OPEN
 from chessshootout.frontend.screens.base import Nav
 from chessshootout.frontend.screens.review import REVIEW_HOTKEY_KEYS, REVIEW_HOTKEYS
 from tests.helpers import (
@@ -215,6 +216,27 @@ def test_flip_key_flips_the_review_board(tmp_path):
     before = app.review.board.flipped
     app.review.handle_key(key_event(pg.K_f))
     assert app.review.board.flipped != before
+
+
+def test_a_and_s_keys_toggle_the_review_rail_sections(tmp_path):
+    """ReviewScreen shares the A/S rail-section hotkeys with GameScreen; both toggle
+    the process-global SECTION_OPEN and the key is consumed."""
+    app = _enter_review(make_app(), _write_pgn(tmp_path, "sections.pgn"))
+    assert SECTION_OPEN["actions"] is True
+    assert app.review.handle_key(key_event(pg.K_a)) is True
+    assert SECTION_OPEN["actions"] is False
+
+    assert SECTION_OPEN["signals"] is True
+    assert app.review.handle_key(key_event(pg.K_s)) is True
+    assert SECTION_OPEN["signals"] is False
+
+
+def test_c_key_is_inert_on_the_review_screen(tmp_path):
+    """Review has no chat rail (unlike an online game), so K_c is not one of the
+    keys it handles -- it returns False and leaves the chat section untouched."""
+    app = _enter_review(make_app(), _write_pgn(tmp_path, "noc.pgn"))
+    assert app.review.handle_key(key_event(pg.K_c)) is False
+    assert SECTION_OPEN["chat"] is True
 
 
 def test_slim_strip_captures_update_when_stepping(tmp_path):

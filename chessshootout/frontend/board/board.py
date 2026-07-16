@@ -1390,7 +1390,5 @@ class Board:
             return
 
         rect = self._cell_rect(self.selected_square.row, self.selected_square.col)
-        wash = pg.Surface((rect.width, rect.height), pg.SRCALPHA)
-        wash.fill(Colors.selection_fill)
-        self.window.blit(wash, rect.topleft)
+        self.window.blit(self._cell_overlay(Colors.selection_fill), rect.topleft)
         pg.draw.rect(self.window, Colors.accent, rect, 4)

@@ -189,10 +189,11 @@ def test_resume_after_a_won_check_carries_the_skillcheck_log(server_with_app):
     b.disconnect()
 
 
-def test_resume_pending_uses_field_name_keys(server_with_app):
-    # the /resume HTTP channel serializes the pending check with PLAIN field names
-    # (from_sq/to_sq), NOT the WS `from`/`to` aliases. An alias leak here would feed
-    # the client a key it never reads on resume, silently breaking pending recovery.
+def test_resume_pending_uses_wire_alias_keys(server_with_app):
+    # the /resume dump the client hands the frontend uses the SAME `from`/`to`
+    # alias keys as every WS frame (model_dump(by_alias=True)). A field-name dump
+    # here fed GameScreen keys it never reads and silently broke pending recovery
+    # and shared-arrow restore.
     port, app = server_with_app
     addr = "localhost:{}".format(port)
     a, b = _pair(addr, fake_uuid4(29), fake_uuid4(30))
@@ -201,8 +202,9 @@ def test_resume_pending_uses_field_name_keys(server_with_app):
     payload = fetch_resume(addr, a._room_id, a._session_token)
     pending = payload["pending_skillcheck"]
     assert pending is not None, "the live pending check rides the resume payload"
-    assert pending["from_sq"] == "e4", "field-name key carries the capture-from square"
-    assert pending["to_sq"] == "d5"
-    assert "from" not in pending and "to" not in pending, "no WS alias leaks into /resume"
+    assert pending["from"] == "e4", "alias key carries the capture-from square"
+    assert pending["to"] == "d5"
+    assert "from_sq" not in pending and "to_sq" not in pending, \
+        "no field-name key leaks into the resume dump"
     a.disconnect()
     b.disconnect()

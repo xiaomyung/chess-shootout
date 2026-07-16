@@ -738,13 +738,15 @@ def test_end_right_press_off_board_returns_none(board):
 
 
 def test_own_arrow_cap_blocks_add_beyond_max(board):
+    """A cap-rejected add returns None (distinct from a remove's False) so the
+    share path can tell 'nothing happened' apart from 'arrow removed'."""
     squares = [Square(r, c) for r in range(8) for c in range(8)]
     pairs = [(a, b) for a in squares for b in squares if a != b]
     for a, b in pairs[:MAX_SHARED_ARROWS]:
         assert board.toggle_arrow(a, b) is True
     assert len(board.arrows) == MAX_SHARED_ARROWS
     extra_a, extra_b = pairs[MAX_SHARED_ARROWS]
-    assert board.toggle_arrow(extra_a, extra_b) is False
+    assert board.toggle_arrow(extra_a, extra_b) is None
     assert len(board.arrows) == MAX_SHARED_ARROWS
     assert (extra_a, extra_b) not in board.arrows
 

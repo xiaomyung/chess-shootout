@@ -133,6 +133,9 @@ def test_enter_logs_variant(caplog):
 
 @pytest.mark.parametrize("mod", [0, pg.KMOD_CTRL], ids=["plain_z", "ctrl_z"])
 def test_z_undoes_a_ply(mod):
+    """v2.10.0 deliberately flipped bare Z into an undo shortcut alongside Ctrl+Z
+    (mirroring the rail's UNDO cap); the old test_z_without_ctrl_does_not_undo that
+    pinned the opposite is gone. Both modifiers must land the same single undo."""
     app = _make_app()
     start_single_screen(app, time_minutes=None)
     app.game.match.try_move(Square(6, 4), Square(4, 4))
@@ -167,6 +170,26 @@ def test_s_key_toggles_signals_section():
     assert SECTION_OPEN["signals"] is False
 
 
+def test_c_key_toggles_chat_section_in_an_online_game():
+    """K_c toggles the QUICK CHAT rail, but only when it exists -- online games
+    show it, so chat_visible_provider() is True and the key is consumed."""
+    app = _make_app()
+    app.switch_to("game", variant=ONLINE)
+    assert SECTION_OPEN["chat"] is True
+    assert app.game.handle_key(_key(pg.K_c)) is True
+    assert SECTION_OPEN["chat"] is False
+
+
+def test_c_key_is_inert_in_a_local_game():
+    """A local game has no chat rail (chat_visible_provider() is False), so K_c is
+    a no-op the screen does not consume and the chat section state is untouched."""
+    app = _make_app()
+    start_single_screen(app)
+    assert SECTION_OPEN["chat"] is True
+    assert app.game.handle_key(_key(pg.K_c)) is False
+    assert SECTION_OPEN["chat"] is True
+
+
 def _play_giuoco(game):
     for san in ["e4", "e5", "Nf3", "Nc6", "Bc4", "Bc5"]:
         assert game.match.apply_san(san).legal
@@ -187,7 +210,7 @@ def test_debut_provider_truncates_sans_when_browsing_back(monkeypatch):
     captured = []
     monkeypatch.setattr(openings, "lookup",
                         lambda sans: captured.append(list(sans)))
-    game._debut_memo = None
+    game._debut.reset()
     game.board.jump_to_review_ply(4)
     game._debut_line()
     assert captured == [["e4", "e5", "Nf3", "Nc6"]], \
@@ -229,7 +252,7 @@ def test_rail_controls_with_owned_sounds_suppress_the_generic_click():
     right_mod.SECTION_OPEN.update({"actions": True, "signals": True, "chat": True})
     rm = app.game.right_menu
     rm.sounds = app.sound_manager
-    rm.set_rect(rm._last_outer_rect, rm._last_scale)
+    rm.set_rect(rm._last_outer_rect, rm.scale)
     app.draw_frame()
 
     app.sound_manager.reset_mock()
@@ -249,6 +272,11 @@ def test_rail_controls_with_owned_sounds_suppress_the_generic_click():
     app.sound_manager.reset_mock()
     app.input_router.mouse_left_clicked(chip_rect.center)
     app.sound_manager.play_chip_toggle.assert_called_once()
+    app.sound_manager.play_ui_click.assert_not_called()
+
+    app.sound_manager.reset_mock()
+    app.input_router.mouse_left_clicked(rm._signal_notch_band.center)
+    app.sound_manager.play_vol_notch.assert_called_once()
     app.sound_manager.play_ui_click.assert_not_called()
 
     app.sound_manager.reset_mock()

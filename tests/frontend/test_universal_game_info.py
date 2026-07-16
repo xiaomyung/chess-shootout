@@ -253,18 +253,38 @@ def test_aborted_does_not_change_series():
     assert app.game.result_flow.series_scores == {"Alice": 1, "Bob": 0}
 
 
-def test_disconnect_abort_is_neutral_result_with_its_own_text():
-    """A disconnect abort is a no-winner static result with a distinct modal subtitle and
-    leaves the series score untouched."""
+def test_server_shutdown_is_neutral_result_with_its_own_text():
+    """A server shutdown is a no-winner static result with a distinct modal subtitle
+    and leaves the series score untouched."""
     app = _make_app()
     app.switch_to("game", variant=ONLINE)
     app.game.white_name = "Alice"
     app.game.black_name = "Bob"
     app.game.result_flow.series_scores = {"Alice": 1, "Bob": 0}
-    app.coordinator._handle_online_result({"reason": "aborted_disconnect"})
-    assert app.game.manual_result == "aborted_disconnect"
-    assert app.game.result_flow.result_text() == ("Game aborted", "opponent disconnected")
+    app.coordinator._handle_online_result({"reason": "server_shutdown"})
+    assert app.game.manual_result == "server_shutdown"
+    assert app.game.result_flow.result_text() == ("Game cancelled", "server shutting down")
     assert app.game.result_flow.series_scores == {"Alice": 1, "Bob": 0}
+
+
+def test_refresh_game_info_rebuilds_only_when_its_inputs_change(monkeypatch):
+    """The info dict + f-strings sit in the draw path; the memo rebuilds them
+    only when an actual input (here: series scores) changes, not per frame."""
+    app = _make_app()
+    _start_local(app)
+    game = app.game
+    calls = []
+    orig = game._compute_game_info
+    monkeypatch.setattr(game, "_compute_game_info",
+                        lambda: calls.append(1) or orig())
+    game._refresh_game_info()
+    game._refresh_game_info()
+    assert len(calls) == 1, "an unchanged key never recomputes"
+    game.result_flow.series_scores = {game.white_name: 1.0}
+    game._refresh_game_info()
+    assert len(calls) == 2, "a score change rebuilds exactly once"
+    game._refresh_game_info()
+    assert len(calls) == 2
 
 
 def test_score_follows_player_through_color_swap_end_to_end():

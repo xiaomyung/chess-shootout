@@ -44,3 +44,17 @@ def lookup(sans):
         if hit is not None:
             return hit
     return None
+
+
+class DebutTracker:
+    def __init__(self, sans_provider):
+        self._sans_provider = sans_provider
+        self._memo = None
+
+    def reset(self):
+        self._memo = None
+
+    def line(self, key):
+        if self._memo is None or self._memo[0] != key:
+            self._memo = (key, lookup(self._sans_provider()))
+        return self._memo[1]

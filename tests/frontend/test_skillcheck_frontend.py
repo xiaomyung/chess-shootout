@@ -1608,7 +1608,7 @@ def test_move_rows_insert_a_whiff_row_after_the_pair_that_whiffed():
     app.game.skillcheck.reset(enabled=False)
     for san in ["e4", "e5", "Nf3", "Nc6"]:
         app.game.match.backend.apply_san(san)
-    rows = app.game.right_menu._build_move_rows(
+    rows = app.game.right_menu._move_rows(
         app.game.match.move_history, {3: [("Wheel", "Qxd6")]})
     assert [r[0] for r in rows] == ["pair", "pair", "whiff"]
     assert rows[2] == ("whiff", ("Wheel", "Qxd6"), None), "ply 3 is white of the 2nd pair"
@@ -1620,7 +1620,7 @@ def test_multiple_whiffs_one_ply_stack_one_per_row():
     app.game.skillcheck.reset(enabled=False)
     for san in ["e4", "e5", "Nf3", "Nc6"]:
         app.game.match.backend.apply_san(san)
-    rows = app.game.right_menu._build_move_rows(
+    rows = app.game.right_menu._move_rows(
         app.game.match.move_history, {3: [("Wheel", "Qxa2"), ("Steady-Aim", "Qxd4")]})
     assert [r[0] for r in rows] == ["pair", "pair", "whiff", "whiff"]
     assert rows[2] == ("whiff", ("Wheel", "Qxa2"), None)
@@ -1633,7 +1633,7 @@ def test_no_whiffs_means_no_extra_rows():
     app.game.skillcheck.reset(enabled=False)
     for san in ["e4", "e5"]:
         app.game.match.backend.apply_san(san)
-    rows = app.game.right_menu._build_move_rows(app.game.match.move_history, {})
+    rows = app.game.right_menu._move_rows(app.game.match.move_history, {})
     assert [r[0] for r in rows] == ["pair"]
 
 
@@ -1645,7 +1645,7 @@ def test_black_only_whiff_row_has_an_empty_white_slot():
     app.game.skillcheck.reset(enabled=False)
     for san in ["e4", "e5", "Nf3", "Nc6"]:
         app.game.match.backend.apply_san(san)
-    rows = app.game.right_menu._build_move_rows(
+    rows = app.game.right_menu._move_rows(
         app.game.match.move_history, {4: [("Steady-Aim", "Rxe5")]})
     assert [r[0] for r in rows] == ["pair", "pair", "whiff"]
     assert rows[2] == ("whiff", None, ("Steady-Aim", "Rxe5"))
@@ -1659,7 +1659,7 @@ def test_both_sides_whiff_same_pair_share_one_row():
     app.game.skillcheck.reset(enabled=False)
     for san in ["e4", "e5", "Nf3", "Nc6"]:
         app.game.match.backend.apply_san(san)
-    rows = app.game.right_menu._build_move_rows(
+    rows = app.game.right_menu._move_rows(
         app.game.match.move_history, {3: [("Wheel", "Qxd5")], 4: [("Steady-Aim", "Rxe5")]})
     assert [r[0] for r in rows] == ["pair", "pair", "whiff"]
     assert rows[2] == ("whiff", ("Wheel", "Qxd5"), ("Steady-Aim", "Rxe5"))
@@ -1673,7 +1673,7 @@ def test_whiff_on_a_non_final_pair_offsets_the_following_pairs_row_index():
     app.game.skillcheck.reset(enabled=False)
     for san in ["e4", "e5", "Nf3", "Nc6"]:
         app.game.match.backend.apply_san(san)
-    rows = app.game.right_menu._build_move_rows(
+    rows = app.game.right_menu._move_rows(
         app.game.match.move_history, {1: [("Wheel", "Qxd5")]})
     assert [r[0] for r in rows] == ["pair", "whiff", "pair"]
     assert rows[1] == ("whiff", ("Wheel", "Qxd5"), None), "ply 1 is white of the 1st pair"

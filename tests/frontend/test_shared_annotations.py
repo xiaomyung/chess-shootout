@@ -18,9 +18,11 @@ import pytest
 from tests.conftest import pygame_display
 from chessshootout.backend.pieces import PieceColor
 from chessshootout.backend.utils import Square
-from chessshootout.frontend.screens.game import CHAT_PRESETS
+from chessshootout.frontend.screens.game import CHAT_COOLDOWN_MARGIN_MS, CHAT_PRESETS
 from chessshootout.frontend.visual.colors import Colors
-from chessshootout.server.protocol import CHAT_PRESET_COUNT
+from chessshootout.server.protocol import (
+    CHAT_COOLDOWN_SECONDS, CHAT_PRESET_COUNT, MAX_SHARED_ARROWS,
+)
 from tests.helpers import make_app as _shared_make_app, start_single_screen
 
 
@@ -147,6 +149,20 @@ def test_no_delta_sent_for_a_local_game():
     app.coordinator.send_annotation_delta.assert_not_called()
 
 
+def test_cap_rejected_arrow_sends_no_delta():
+    """toggle_arrow returns None at the MAX_SHARED_ARROWS cap; the send path must
+    not map that falsy verdict onto a bogus remove frame (nothing changed locally)."""
+    game = _online_game()
+    game._share_marks = True
+    squares = [Square(r, c) for r in range(8) for c in range(8)]
+    pairs = [(a, b) for a in squares for b in squares if a != b]
+    game.board.arrows = list(pairs[:MAX_SHARED_ARROWS])
+    _right_gesture(game, ARROW_FROM, ARROW_TO)
+    game.app.coordinator.send_annotation_delta.assert_not_called()
+    assert (ARROW_FROM, ARROW_TO) not in game.board.arrows
+    assert len(game.board.arrows) == MAX_SHARED_ARROWS
+
+
 # ---- bulk-clear on a left-click -------------------------------------------
 
 
@@ -255,6 +271,25 @@ def test_on_resume_maps_mine_and_opp_by_chosen_side():
     assert game.board.annotations.opp_highlighted_squares == {Square(7, 0)}  # a1
 
 
+# ---- takeback wipes both sides ----------------------------------------------
+
+
+def test_takeback_clears_both_sides_annotations():
+    """The server wipes both annotation stores on an accepted takeback; the client
+    mirrors that locally so neither side keeps marks aimed at a retracted position."""
+    game = _online_game()
+    assert game.match.apply_san("e4").legal
+    game.board.highlighted_squares = {HL}
+    game.board.arrows = [(ARROW_FROM, ARROW_TO)]
+    game.board.annotations.set_opp({HL2}, [(ARROW_FROM, ARROW_TO)])
+    game.on_takeback({"ply": 0, "clock": {}})
+    assert game.board.highlighted_squares == set()
+    assert game.board.arrows == []
+    assert game.board.annotations.opp_highlighted_squares == set()
+    assert game.board.annotations.opp_arrows == []
+    assert game.match.move_history == []
+
+
 # ---- reset + strips + chat -------------------------------------------------
 
 
@@ -294,7 +329,7 @@ def test_on_quick_chat_pops_bubble_and_plays_sound():
     game = _online_game(your_color="white")
     game.show_speech_bubble = MagicMock()
     game.app.sound_manager.play_chat_receive.reset_mock()
-    game.on_quick_chat({"preset": 1})
+    game.on_quick_chat({"preset": 1, "sender": "black"})
     game.show_speech_bubble.assert_called_once_with("black", CHAT_PRESETS[1])
     game.app.sound_manager.play_chat_receive.assert_called_once()
 
@@ -311,7 +346,7 @@ def test_on_quick_chat_ignores_out_of_range_presets(preset):
     game = _online_game()
     game.show_speech_bubble = MagicMock()
     game.app.sound_manager.play_chat_receive.reset_mock()
-    game.on_quick_chat({"preset": preset})
+    game.on_quick_chat({"preset": preset, "sender": "black"})
     game.show_speech_bubble.assert_not_called()
     game.app.sound_manager.play_chat_receive.assert_not_called()
 
@@ -324,6 +359,8 @@ def test_chat_presets_match_the_server_preset_count():
 
 
 def test_quick_chat_send_relays_echoes_own_bubble_and_arms_cooldown(monkeypatch):
+    """The cooldown re-arms past the server's strict window by the safety margin,
+    so the earliest client resend can never race the server clock and get dropped."""
     game = _online_game(your_color="white")
     game.show_speech_bubble = MagicMock()
     ticks = {"t": 5_000}
@@ -333,6 +370,8 @@ def test_quick_chat_send_relays_echoes_own_bubble_and_arms_cooldown(monkeypatch)
     game.app.coordinator.send_quick_chat.assert_called_once_with(2)
     game.show_speech_bubble.assert_called_once_with("white", CHAT_PRESETS[2])
     assert game._chat_buttons_inert() is True
+    assert game._chat_cooldown_until_ms == (
+        5_000 + int(CHAT_COOLDOWN_SECONDS * 1000) + CHAT_COOLDOWN_MARGIN_MS)
 
 
 def test_quick_chat_send_echo_is_silent():
@@ -354,6 +393,9 @@ def test_quick_chat_second_send_within_cooldown_no_ops(monkeypatch):
     game._on_quick_chat_send(1)
     game.app.coordinator.send_quick_chat.assert_not_called()
     ticks["t"] = 8_100
+    game._on_quick_chat_send(1)
+    game.app.coordinator.send_quick_chat.assert_not_called()
+    ticks["t"] = 8_000 + CHAT_COOLDOWN_MARGIN_MS
     game._on_quick_chat_send(1)
     game.app.coordinator.send_quick_chat.assert_called_once_with(1)
 

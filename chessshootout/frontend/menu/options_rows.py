@@ -2,7 +2,10 @@ import pygame as pg
 
 from chessshootout.frontend.visual.cache import render_text
 from chessshootout.frontend.visual.colors import Colors
-from chessshootout.frontend.visual.draw import cut_rect_surface, infinity_surface
+from chessshootout.frontend.visual.draw import (
+    cut_rect_surface, infinity_surface, notch_geometry, notch_value_from_click,
+    notch_readout_slot_w,
+)
 from chessshootout.frontend.visual.fonts import get_mono_font
 from chessshootout.frontend.visual.scroll_view import ScrollHost, ScrollView
 from chessshootout.frontend.visual.text_input import TextInput
@@ -27,7 +30,6 @@ TOGGLE_SNAP_EPS = 0.02
 TOGGLE_LERP = 0.3
 
 NOTCH_COUNT = 10
-NOTCH_ZERO_EPSILON = 0.005
 NOTCH_CELL_W = 13
 NOTCH_CELL_H = 22
 NOTCH_GAP = 4
@@ -184,11 +186,12 @@ class NotchRow(_Row):
     def _draw_control(self, window, rect, fonts):
         value = max(0.0, min(1.0, self.getter()))
         readout = render_text(fonts.value, f"{int(round(value * 100))}%", Colors.text_dim)
-        slot_w = fonts.value.size("100%")[0]
+        slot_w = notch_readout_slot_w(fonts.value)
         window.blit(readout, (rect.right - readout.get_width(),
                               rect.centery - readout.get_height() // 2))
-        total_w = NOTCH_COUNT * NOTCH_CELL_W + (NOTCH_COUNT - 1) * NOTCH_GAP
-        cx = rect.right - slot_w - NOTCH_READOUT_GAP - total_w
+        x0, total_w = notch_geometry(rect.width, NOTCH_COUNT, NOTCH_CELL_W, NOTCH_GAP,
+                                     slot_w, NOTCH_READOUT_GAP)
+        cx = rect.x + x0
         cy = rect.centery - NOTCH_CELL_H // 2
         filled = int(round(value * NOTCH_COUNT))
         for i in range(NOTCH_COUNT):
@@ -207,10 +210,8 @@ class NotchRow(_Row):
         if not self.contains_control(pos):
             return False
         step = NOTCH_CELL_W + NOTCH_GAP
-        i = max(0, min(NOTCH_COUNT - 1, (pos[0] - self._band.x) // step))
-        target = (i + 1) / NOTCH_COUNT
-        if i == 0 and abs(self.getter() - target) < NOTCH_ZERO_EPSILON:
-            target = 0.0
+        target = notch_value_from_click(pos[0], self._band.x, step, NOTCH_COUNT,
+                                        self.getter())
         self.setter(target)
         if self.on_tick is not None:
             self.on_tick()

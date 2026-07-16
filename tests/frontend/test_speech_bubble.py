@@ -137,6 +137,41 @@ def test_anchor_falls_back_to_king_without_a_queen(monkeypatch):
     assert anchor.center == king.center
 
 
+def test_anchor_prefers_first_row_major_queen_with_two_on_board(monkeypatch):
+    """Promotion can put two queens on the board; the anchor deterministically
+    picks the first in row-major scan order (piece_square's contract)."""
+    game = _game(monkeypatch, FakeTicks())
+    _clear_board(game)
+    game.match.state[7][7] = Piece(PieceType.QUEEN, PieceColor.WHITE)
+    game.match.state[2][1] = Piece(PieceType.QUEEN, PieceColor.WHITE)
+    anchor = game._speech_anchor("white")
+    assert anchor.center == game.board.cell_rect(Square(2, 1)).center
+
+
+def test_anchor_memo_never_recomputes_on_an_unchanged_key(monkeypatch):
+    """While browsing, the anchor grid comes from match.position_at — a full
+    engine deepcopy. The memo keys on (color, review_ply, len(history)) so a
+    second frame with the same key never touches position_at; changing the key
+    naturally recomputes."""
+    game = _game(monkeypatch, FakeTicks())
+    game.match.apply_san("e4")
+    game.board.review_ply = 0
+    calls = []
+    orig = game.match.position_at
+    monkeypatch.setattr(game.match, "position_at",
+                        lambda ply: calls.append(ply) or orig(ply))
+    first = game._speech_anchor("white")
+    second = game._speech_anchor("white")
+    assert first == second
+    assert len(calls) == 1
+    game.board.review_ply = None
+    game._speech_anchor("white")
+    assert len(calls) == 1, "the live grid path reads match.state, not position_at"
+    game.board.review_ply = 0
+    game._speech_anchor("white")
+    assert len(calls) == 2, "a key change recomputes exactly once"
+
+
 def test_clamp_keeps_corner_bubble_in_board_and_flips_below(monkeypatch):
     game = _game(monkeypatch, FakeTicks())
     game.board.flipped = False

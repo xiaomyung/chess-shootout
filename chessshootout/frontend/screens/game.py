@@ -11,11 +11,12 @@ from chessshootout.domain.match import Match, SINGLE_SCREEN, BOT, ONLINE
 from chessshootout.domain.capture_summary import captured_by, material_advantage
 from chessshootout.domain.pgn.load import format_time_control
 from chessshootout.backend.pieces import PieceColor, PieceType, opponent_of
-from chessshootout.backend.pseudo_legal import king_square
+from chessshootout.backend.pseudo_legal import king_square, piece_square
 from chessshootout.backend.utils import (
     PROMO_TYPE_BY_LETTER, Square, coord_from_square, square_from_coord,
 )
 from chessshootout.infra import countries, env
+from chessshootout.frontend import signal_controls
 from chessshootout.frontend.board import Board
 from chessshootout.frontend.board.speech_bubble import SpeechBubble
 from chessshootout.frontend.modal_registry import ModalSpec
@@ -94,6 +95,8 @@ RESULT_FADE_MAX_ALPHA = 140
 
 AUTO_END_GATE_FRACTION = 0.1
 
+CHAT_COOLDOWN_MARGIN_MS = 150
+
 ONLINE_WIN_RESULT_BY_REASON = {
     Reason.CHECKMATE:   ("white_wins",                "black_wins"),
     Reason.TIMEOUT:     ("white_wins_on_time",        "black_wins_on_time"),
@@ -106,7 +109,7 @@ ONLINE_DRAW_REASONS = {
     Reason.DRAW_FIFTY_MOVE, Reason.DRAW_INSUFFICIENT_MATERIAL,
 }
 ONLINE_STATIC_RESULTS = {
-    Reason.ABORTED, Reason.ABORTED_DISCONNECT, Reason.SERVER_SHUTDOWN,
+    Reason.ABORTED, Reason.SERVER_SHUTDOWN,
 }
 
 ANIM_MS_DEFAULT = 180
@@ -160,10 +163,12 @@ class GameScreen(Screen):
         self._local_disconnected_at_ms = None
         self._focus_click_consumed = False
         self._custom_start = False
-        self._debut_memo = None
+        self._debut = openings.DebutTracker(self._reviewed_sans)
         self._share_marks = False
         self._opp_sharing = False
         self._chat_cooldown_until_ms = 0
+        self._speech_anchor_memo = {}
+        self._game_info_memo = None
 
         self.match = Match()
         self.board = Board(window, self.match,
@@ -198,8 +203,8 @@ class GameScreen(Screen):
             "give_time": self.give_time.on_give_time,
             "share_toggle": self._on_share_toggle,
             "auto_q_toggle": self._toggle_auto_queen,
-            "sound_toggle": self._toggle_sound,
-            "set_volume": self._set_signal_volume,
+            "sound_toggle": lambda: signal_controls.toggle_sound(app),
+            "set_volume": lambda value: signal_controls.set_signal_volume(app, value),
             "quick_chat": self._on_quick_chat_send,
         }, board=self.board, buttons_provider=self._right_menu_buttons,
             disabled_keys_provider=self._right_menu_disabled_keys,
@@ -354,9 +359,7 @@ class GameScreen(Screen):
         preset = int(payload.get("preset", -1))
         if not 0 <= preset < len(CHAT_PRESETS):
             return
-        sender = payload.get("sender") or (
-            "black" if self._chosen_side == "white" else "white")
-        self.show_speech_bubble(sender, CHAT_PRESETS[preset])
+        self.show_speech_bubble(payload["sender"], CHAT_PRESETS[preset])
         self.app.sound_manager.play_chat_receive()
 
     def _chat_buttons_inert(self):
@@ -370,7 +373,8 @@ class GameScreen(Screen):
             return
         if self._chat_buttons_inert():
             return
-        self._chat_cooldown_until_ms = pg.time.get_ticks() + int(CHAT_COOLDOWN_SECONDS * 1000)
+        self._chat_cooldown_until_ms = (
+            pg.time.get_ticks() + int(CHAT_COOLDOWN_SECONDS * 1000) + CHAT_COOLDOWN_MARGIN_MS)
         self.app.coordinator.send_quick_chat(index)
         self.show_speech_bubble(self._chosen_side, CHAT_PRESETS[index])
         log.info("quick chat sent preset=%d", index)
@@ -450,6 +454,7 @@ class GameScreen(Screen):
         if server_ply is not None and server_ply != expected:
             self.app.coordinator._begin_resync()
             return
+        self.board.clear_all_annotations()
         if self.match.move_history:
             self.skillcheck_session.drop_skillcheck_log_from(len(self.match.move_history))
             last = self.match.move_history[-1].move
@@ -665,16 +670,16 @@ class GameScreen(Screen):
         self.skillcheck_session.pending_online_move = None
         self.skillcheck.clear_locks()
         for lock in payload.get("skillcheck_locks", []):
-            self.skillcheck.lock(square_from_coord(lock["from_sq"]),
-                                 square_from_coord(lock["to_sq"]))
+            self.skillcheck.lock(square_from_coord(lock["from"]),
+                                 square_from_coord(lock["to"]))
         pending = payload.get("pending_skillcheck")
         if pending is not None:
             self._restore_pending_skillcheck(pending)
 
     def _restore_pending_skillcheck(self, pending):
         kind = SkillCheckKind(pending["kind"])
-        from_sq = square_from_coord(pending["from_sq"])
-        to_sq = square_from_coord(pending["to_sq"])
+        from_sq = square_from_coord(pending["from"])
+        to_sq = square_from_coord(pending["to"])
         promo = pending.get("promotion")
         promo_type = PROMO_TYPE_BY_LETTER.get(promo) if promo else None
         elapsed_ms = float(pending.get("elapsed_ms", 0.0))
@@ -1036,7 +1041,8 @@ class GameScreen(Screen):
 
     def handle_right_release(self, pos):
         delta = self.board.end_right_press(pos)
-        if delta is not None and self._share_marks and self._share_active():
+        if (delta is not None and delta[-1] is not None
+                and self._share_marks and self._share_active()):
             self._send_annotation_delta(delta)
         return True
 
@@ -1113,32 +1119,39 @@ class GameScreen(Screen):
             bubble.draw(self.window, anchor, self.board.rect, now, scale=scale)
 
     def _speech_anchor(self, color):
+        key = (color, self.board.review_ply, len(self.match.move_history))
+        cached = self._speech_anchor_memo.get(color)
+        if cached is None or cached[0] != key:
+            cached = (key, self._speech_anchor_square(color))
+            self._speech_anchor_memo[color] = cached
+        target = cached[1]
+        if target is None:
+            return None
+        return self.board.cell_rect(target)
+
+    def _speech_anchor_square(self, color):
         pcolor = PieceColor.WHITE if color == "white" else PieceColor.BLACK
         if self.board.review_ply is not None:
             grid = self.match.position_at(self.board.review_ply)
         else:
             grid = self.match.state
-        target = None
-        for row in range(self.board.SIZE):
-            for col in range(self.board.SIZE):
-                piece = grid[row][col]
-                if (piece is not None and piece.type == PieceType.QUEEN
-                        and piece.color == pcolor):
-                    target = Square(row, col)
-                    break
-            if target is not None:
-                break
+        target = piece_square(grid, PieceType.QUEEN, pcolor)
         if target is None:
             target = king_square(grid, pcolor)
-        if target is None:
-            return None
-        return self.board.cell_rect(target)
+        return target
 
     def _draw_game_background(self):
         self.backdrop.draw(self.window, self.board.rect)
 
     def _refresh_game_info(self):
+        key = (self.app.screen is self, self.variant, self._time_control,
+               self.white_name, self.black_name,
+               self.result_flow.series_scores.get(self.white_name, 0.0),
+               self.result_flow.series_scores.get(self.black_name, 0.0))
+        if self._game_info_memo is not None and self._game_info_memo[0] == key:
+            return
         info = self._compute_game_info()
+        self._game_info_memo = (key, info)
         if info != self.right_menu.game_info:
             self.right_menu.set_game_info(info)
 
@@ -1357,16 +1370,13 @@ class GameScreen(Screen):
         self.player_strip_top.set_state(**self._strip_state(top_color, turn, over))
         self.player_strip_bottom.set_state(**self._strip_state(bottom_color, turn, over))
 
+    def _reviewed_sans(self):
+        return [entry.san for entry in self.board.reviewed_history()]
+
     def _debut_line(self):
         if self._custom_start:
             return None
-        key = (len(self.match.move_history), self.board.review_ply)
-        if self._debut_memo is not None and self._debut_memo[0] == key:
-            return self._debut_memo[1]
-        sans = [entry.san for entry in self.board.reviewed_history()]
-        result = openings.lookup(sans)
-        self._debut_memo = (key, result)
-        return result
+        return self._debut.line((len(self.match.move_history), self.board.review_ply))
 
     def _strip_capture_summary(self, color):
         key = (len(self.match.move_history), self.board.review_ply, color)
@@ -1474,14 +1484,6 @@ class GameScreen(Screen):
     def _toggle_auto_queen(self):
         env.set_auto_queen(not env.get_auto_queen())
 
-    def _toggle_sound(self):
-        sm = self.app.sound_manager
-        sm.set_enabled(not sm.enabled)
-
-    def _set_signal_volume(self, value):
-        self.app.sound_manager.set_master_volume(value)
-        self.app.settings.defer_master_volume_write()
-
     def _right_menu_buttons(self):
         if self.match.clock is None:
             return RIGHT_MENU_UNTIMED_CAPS
@@ -1515,10 +1517,12 @@ class GameScreen(Screen):
         self._flag_fall_played = False
         self._strip_memo = {}
         self._custom_start = False
-        self._debut_memo = None
+        self._debut.reset()
         self._share_marks = False
         self._opp_sharing = False
         self._chat_cooldown_until_ms = 0
+        self._speech_anchor_memo = {}
+        self._game_info_memo = None
         self._result_first_seen_at_ms = None
         self.result_flow.reset_for_new_game()
         self.right_menu.reset_for_new_game()

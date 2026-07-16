@@ -80,6 +80,14 @@ def king_square(state, color):
     return None
 
 
+def piece_square(state, ptype, color):
+    for row, col in product(range(BOARD_SIZE), repeat=2):
+        piece = state[row][col]
+        if piece is not None and piece.type == ptype and piece.color == color:
+            return Square(row, col)
+    return None
+
+
 def checking_square(state, king_sq, by_color):
     for row, col in product(range(BOARD_SIZE), repeat=2):
         piece = state[row][col]
