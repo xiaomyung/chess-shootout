@@ -622,7 +622,10 @@ class OnlineCoordinator:
         self._clear_search_state()
         self.offer_banners.clear()
         self.unbind_game_from_online()
-        self.app.switch_to("menu")
+        if self.app.screen is self.app.menu:
+            self.app.menu.show_play_view()
+        else:
+            self.app.switch_to("menu")
         game._reset_to_new_game()
 
     def _return_to_menu_card(self):

@@ -488,3 +488,27 @@ def test_resume_with_an_inactive_game_screen_still_reaches_the_game():
 
     assert [e.san for e in app.game.match.move_history] == ["e4", "e5"]
     assert app.game.match.clock.white_remaining == 111.0
+
+
+def test_teardown_on_menu_does_not_reenter_the_menu():
+    """REGRESSION: the rematch window dying (opponent left, room expired) while the
+    player already sits on the menu used to switch_to("menu") unconditionally — a
+    self-switch runs the full exit->enter cycle, replaying the menu entry
+    transitions as a visible interface reload. On the menu, teardown now only
+    surfaces the Play view; the full switch is reserved for arriving from the
+    game screen."""
+    app = _wired_app()
+    app.switch_to("menu")
+    enter_spy = MagicMock(wraps=app.menu.enter)
+    app.menu.enter = enter_spy
+    app.coordinator._tear_down_online_session("test")
+    assert app.screen is app.menu
+    enter_spy.assert_not_called()
+    assert app.menu.play_view_visible()
+
+
+def test_teardown_from_game_screen_still_returns_to_menu():
+    app = _wired_app()
+    assert app.screen is app.game
+    app.coordinator._tear_down_online_session("test")
+    assert app.screen is app.menu
