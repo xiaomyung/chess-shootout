@@ -201,23 +201,6 @@ def draw_button(window, rect, label, font, force_pressed=False, disabled=False,
     )
 
 
-def draw_icon_button(window, rect, icon_fn, force_pressed=False, disabled=False, muted=False):
-    if muted and not disabled:
-        pg.draw.rect(window, Colors.surface_active, rect, border_radius=BUTTON_RADIUS)
-        pg.draw.rect(window, Colors.accent, rect, 1, border_radius=BUTTON_RADIUS)
-    elif not disabled:
-        hovered, pressed = _hover_state(rect)
-        if force_pressed or pressed:
-            bg = Colors.surface_active
-        elif hovered:
-            bg = Colors.surface_hover
-        else:
-            bg = Colors.surface_raised
-        pg.draw.rect(window, bg, rect, border_radius=BUTTON_RADIUS)
-        pg.draw.rect(window, Colors.border, rect, 1, border_radius=BUTTON_RADIUS)
-    icon_fn(window, rect)
-
-
 _GEAR_CACHE = new_cache()
 
 

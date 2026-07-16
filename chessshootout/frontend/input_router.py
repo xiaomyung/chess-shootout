@@ -79,8 +79,7 @@ class InputRouter:
                 self._scroll_pressed = None
             elif self._scroll_pressed.handle_motion(pos):
                 return
-        if not frontend.audio_panel.handle_drag(pos, True):
-            frontend.screen.handle_motion(pos)
+        frontend.screen.handle_motion(pos)
 
     def mouse_left_clicked(self, pos, *, ui_click=True):
         frontend = self.frontend
@@ -118,7 +117,6 @@ class InputRouter:
 
     def _mouse_left_released(self, pos):
         frontend = self.frontend
-        frontend.audio_panel.end_drag()
         if self._scroll_pressed is not None:
             scrollable = self._scroll_pressed
             self._scroll_pressed = None

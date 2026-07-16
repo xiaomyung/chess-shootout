@@ -11,7 +11,6 @@ from chessshootout.domain.match import SINGLE_SCREEN, ONLINE
 from chessshootout.backend.backend import Backend
 from chessshootout.backend.fen import apply_fen
 from chessshootout.infra import env
-from chessshootout.frontend.panels.audio import AudioPanel
 from chessshootout.frontend.menu.menu_battle import MenuBattle
 from chessshootout.frontend.panels.history_view import HistoryView
 from chessshootout.frontend.modal_registry import ModalSpec
@@ -94,7 +93,6 @@ class Frontend:
 
         self.sound_manager = SoundManager(paths.SOUNDS_DIR, enabled=pg.mixer.get_init() is not None)
         self.coordinator = OnlineCoordinator(self)
-        self.audio_panel = AudioPanel(self.window, self.sound_manager)
         self.confirm_modal = ConfirmModal(self.window)
         self.history_view = HistoryView(self.window, on_open=self._open_pgn_review)
         self.help_modal = HelpModal(self.window)

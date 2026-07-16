@@ -131,7 +131,7 @@ def test_no_resnap_when_review_ply_unchanged():
 def test_live_play_does_not_snap_offset():
     board = _Board()
     rm, backend = _menu(board)
-    _pawn_rows(backend, 60)
+    _pawn_rows(backend, 120)
     board.review_ply = None
     rm.scroll_offset = 5
     rm.window.fill((0, 0, 0))

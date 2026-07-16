@@ -1,7 +1,6 @@
 """Slider drag ticks (v2.4.3): TickGate gates a UI tick on each 1% change,
-coalescing rapid crossings. The audio panel slider drags through TickGate; the
-options volume became discrete notch cells (cp2) that fire play_ui_tick straight
-on each cell click.
+coalescing rapid crossings. The options volume is discrete notch cells (cp2)
+that fire play_ui_tick straight on each cell click.
 
 TickGate is pure (takes now_ms) so its cadence logic is tested without pygame;
 the integration tests prove the wiring reaches sound_manager.play_ui_tick.
@@ -98,15 +97,3 @@ def test_notch_row_without_on_tick_is_silent_and_constructs_positionally():
     row._band = pg.Rect(0, 0, 170, 22)
     assert row.handle_click((row._band.centerx, row._band.centery)) is True
     assert 0.0 < store[0] <= 1.0
-
-
-def test_audio_panel_drag_emits_ui_tick():
-    from chessshootout.frontend.panels.audio import AudioPanel
-    sm = MagicMock()
-    sm.master_volume = 0.0
-    sm.enabled = True
-    panel = AudioPanel(pg.Surface((10, 10)), sm)
-    panel.slider_rect = pg.Rect(0, 0, 200, 20)
-    panel.mute_rect = pg.Rect(500, 0, 10, 10)
-    panel.handle_click((100, 10))
-    sm.play_ui_tick.assert_called()

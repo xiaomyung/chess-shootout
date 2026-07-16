@@ -1,7 +1,6 @@
 import pygame as pg
 
 from chessshootout.frontend.visual.colors import Colors
-from chessshootout.frontend.panels.audio import DEFAULT_BUTTON_COLUMNS
 from chessshootout.domain.pgn.generate import iter_move_pairs
 from chessshootout.frontend.visual.scroll_view import ScrollView
 from chessshootout.frontend.visual.widgets import draw_button_row, draw_pill
@@ -33,14 +32,13 @@ MOVE_MIN_CELL_CHARS = 4
 class RightMenu:
 
     def __init__(self, window, match, callbacks, board=None,
-                 buttons_provider=None, audio_panel=None,
+                 buttons_provider=None,
                  disabled_keys_provider=None, whiffs_provider=None):
         self.window = window
         self.match = match
         self.callbacks = callbacks
         self.board = board
         self.buttons_provider = buttons_provider or (lambda: BUTTONS)
-        self.audio_panel = audio_panel
         self.disabled_keys_provider = disabled_keys_provider or (lambda: set())
         self.whiffs_provider = whiffs_provider or (lambda: {})
         self._pair_to_row = {}
@@ -62,7 +60,6 @@ class RightMenu:
         self.moves_rect = pg.Rect(0, 0, 0, 0)
         self.info_rect = pg.Rect(0, 0, 0, 0)
         self.buttons_rect = pg.Rect(0, 0, 0, 0)
-        self.audio_rect = pg.Rect(0, 0, 0, 0)
         self.button_rects = {}
         self.game_info = None
         self._last_outer_rect = None
@@ -121,18 +118,11 @@ class RightMenu:
         inner_w = self.outer_rect.width - 2 * p
         small_gap = max(int(self.outer_rect.height * 0.01), 4)
 
-        self.audio_rect = pg.Rect(
-            self.outer_rect.x + p,
-            self.outer_rect.bottom - p - button_row_h,
-            inner_w,
-            button_row_h,
-        )
-
         n_rows = max(len(self.buttons_provider()), 1)
         buttons_block_h = n_rows * button_row_h + (n_rows - 1) * small_gap
         self.buttons_rect = pg.Rect(
             self.outer_rect.x + p,
-            self.audio_rect.y - small_gap - buttons_block_h,
+            self.outer_rect.bottom - p - buttons_block_h,
             inner_w,
             buttons_block_h,
         )
@@ -182,14 +172,6 @@ class RightMenu:
         self._draw_moves(self.moves_rect)
         self.scroll.draw_thumb(self.window)
         self._draw_buttons(self.buttons_rect)
-        if self.audio_panel is not None:
-            rows = self.buttons_provider()
-            n_cols = len(rows[0]) if rows else DEFAULT_BUTTON_COLUMNS
-            self.audio_panel.set_rect(
-                self.audio_rect, button_font=self.button_font,
-                n_columns=n_cols, gap=self.button_gap,
-            )
-            self.audio_panel.draw()
 
     def _draw_game_info(self, rect):
         info = self.game_info
@@ -234,8 +216,6 @@ class RightMenu:
                 if callback is not None:
                     callback()
                 return True
-        if self.audio_panel is not None and self.audio_panel.handle_click(pos):
-            return True
         if self.board is None or not self.moves_rect.collidepoint(pos):
             return False
         for cell_rect, ply in self._move_cell_hits:

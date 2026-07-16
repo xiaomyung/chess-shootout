@@ -180,7 +180,6 @@ class GameScreen(Screen):
             "help": app._on_help,
             "give_time": self.give_time.on_give_time,
         }, board=self.board, buttons_provider=self._right_menu_buttons,
-            audio_panel=app.audio_panel,
             disabled_keys_provider=self._right_menu_disabled_keys,
             whiffs_provider=self.skillcheck_session.skillcheck_whiffs)
         self.player_strip_top = PlayerStrip(window)

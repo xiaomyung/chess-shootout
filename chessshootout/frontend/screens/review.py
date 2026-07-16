@@ -55,7 +55,7 @@ class ReviewScreen(Screen):
             "flip": self._on_flip,
             "open_pgn": self._on_open_pgn,
         }, board=self.board, buttons_provider=lambda: REVIEW_BUTTONS,
-            audio_panel=app.audio_panel, whiffs_provider=self._skillcheck_whiffs)
+            whiffs_provider=self._skillcheck_whiffs)
         self.strip_top = ReviewStrip(window)
         self.strip_bottom = ReviewStrip(window)
 

@@ -49,10 +49,78 @@ def manager(fake_channel):
     return sm
 
 
+@pytest.fixture
+def sm():
+    return SoundManager(SOUNDS_DIR, enabled=True, master_volume=1.0)
+
+
 def _inject(manager, slot):
     target = MagicMock(name=slot)
     manager._slots[slot] = [target]
     return target
+
+
+def test_master_volume_explicit_override(sm):
+    assert sm.master_volume == 1.0
+
+
+def test_master_volume_falls_back_to_env_default(monkeypatch, tmp_path):
+    from chessshootout.infra import env as env_mod
+    monkeypatch.setattr(env_mod, "_ENV_PATH", tmp_path / ".env")
+    monkeypatch.delenv("CHESS_MASTER_VOLUME", raising=False)
+    s = SoundManager(SOUNDS_DIR, enabled=True)
+    assert s.master_volume == env_mod._DEFAULT_MASTER_VOLUME
+
+
+def test_master_volume_reads_env_when_set(monkeypatch, tmp_path):
+    from chessshootout.infra import env as env_mod
+    monkeypatch.setattr(env_mod, "_ENV_PATH", tmp_path / ".env")
+    monkeypatch.setenv("CHESS_MASTER_VOLUME", "0.42")
+    s = SoundManager(SOUNDS_DIR, enabled=True)
+    assert s.master_volume == pytest.approx(0.42, abs=1e-3)
+
+
+@pytest.mark.parametrize(
+    "value, expected",
+    [
+        pytest.param(-0.5, 0.0, id="clamps_below_zero"),
+        pytest.param(2.0, 1.0, id="clamps_above_one"),
+        pytest.param(0.42, 0.42, id="accepts_mid_range"),
+    ],
+)
+def test_set_master_volume_clamps(sm, value, expected):
+    sm.set_master_volume(value)
+    assert sm.master_volume == pytest.approx(expected)
+
+
+def test_play_with_master_scales_volume_before_playing():
+    s = SoundManager(SOUNDS_DIR, enabled=True)
+    s.master_volume = 0.3
+    fake_sound = MagicMock()
+    s._play_with_master(fake_sound)
+    fake_sound.set_volume.assert_called_once_with(0.3)
+    fake_sound.play.assert_called_once()
+
+
+def test_heartbeat_volume_scales_by_master():
+    s = SoundManager(SOUNDS_DIR, enabled=True, master_volume=1.0)
+    base = s._heartbeat_volume(0.0)
+    s.master_volume = 0.5
+    half = s._heartbeat_volume(0.0)
+    assert half == pytest.approx(base * 0.5)
+
+
+def test_play_disabled_does_nothing(sm):
+    """Disabled is a true no-op; enabling re-arms the real play path."""
+    calls = []
+    sm._play_with_master = lambda sound: calls.append(sound)
+    sm._slots["castle"] = [MagicMock()]
+    sm.enabled = False
+    sm.play_castle()
+    assert calls == []
+    sm.enabled = True
+    sm.play_castle()
+    assert len(calls) == 1
 
 
 def test_slots_piece_gun_matches_gunfx():
