@@ -13,7 +13,7 @@ from chessshootout.frontend.visual.cache import (
 )
 from chessshootout.frontend.visual.colors import Colors
 from chessshootout.frontend.visual.draw import (
-    supersample, smoothstep, scale_floor, cut_rect_surface,
+    supersample, smoothstep, scale_floor, cut_rect_surface, soft_blur,
 )
 from chessshootout.frontend.visual.effects import EffectManager
 from chessshootout.frontend.visual.icons import piece_png_path
@@ -26,8 +26,44 @@ _OVERLAY_CACHE = new_cache()
 _PROMO_OPTION_CACHE = new_size_cache()
 _MARKER_CACHE = new_cache()
 _PIECE_IMAGE_CACHE = new_cache()
+_SCALED_PIECE_CACHE = new_size_cache()
 
 CAPTURE_ICON_FRACTION = 0.42
+
+PIECE_SCALE = 0.9
+RIM_ALPHA = 54
+RIM_BLUR_PASSES = 2
+
+
+def _rim_glow(canvas):
+    rim_rgb = pg.Color(Colors.rim_light)[:3]
+    sil = canvas.copy()
+    sil.fill((0, 0, 0, 255), special_flags=pg.BLEND_RGBA_MULT)
+    sil.fill((*rim_rgb, 0), special_flags=pg.BLEND_RGBA_ADD)
+    sil = soft_blur(sil, RIM_BLUR_PASSES)
+    sil.fill((255, 255, 255, RIM_ALPHA), special_flags=pg.BLEND_RGBA_MULT)
+    return sil
+
+
+def _build_scaled_sprite(original, cell, color):
+    art_size = max(int(cell * PIECE_SCALE), 1)
+    art = pg.transform.smoothscale(original, (art_size, art_size))
+    off = ((cell - art_size) // 2, (cell - art_size) // 2)
+    canvas = pg.Surface((cell, cell), pg.SRCALPHA)
+    canvas.blit(art, off)
+    art_bbox = art.get_bounding_rect().move(off)
+    geom = {
+        "bbox": art_bbox,
+        "center": art_bbox.center,
+        "top_center": (art_bbox.centerx, art_bbox.top),
+    }
+    if color == PieceColor.WHITE:
+        return canvas, geom
+    sprite = pg.Surface((cell, cell), pg.SRCALPHA)
+    sprite.blit(_rim_glow(canvas), (0, 0))
+    sprite.blit(canvas, (0, 0))
+    return sprite, geom
+
 
 RESTORE_MS = 480
 RESTORE_DROP_FRAC = 0.8
@@ -309,19 +345,16 @@ class Board:
         if self.cell_size <= 0:
             return
 
-        size = int(self.cell_size)
-        self.piece_images_scaled = {
-            k: pg.transform.smoothscale(surface, (size, size))
-            for k, surface in self.piece_images_original.items()
-        }
+        cell = int(self.cell_size)
+        self.piece_images_scaled = {}
         self._sprite_geom = {}
-        for k, surface in self.piece_images_scaled.items():
-            bbox = surface.get_bounding_rect()
-            self._sprite_geom[k] = {
-                "bbox": bbox,
-                "center": bbox.center,
-                "top_center": (bbox.centerx, bbox.top),
-            }
+        for k, original in self.piece_images_original.items():
+            ptype, color = k
+            sprite, geom = memoized_surface(
+                _SCALED_PIECE_CACHE, (ptype, color, cell),
+                lambda o=original, c=color: _build_scaled_sprite(o, cell, c))
+            self.piece_images_scaled[k] = sprite
+            self._sprite_geom[k] = geom
 
     def _draw_vertical_guides(self):
         gutter_cx = (self.rect.x + self.board_offset_x) // 2

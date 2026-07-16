@@ -2,10 +2,11 @@ import pygame as pg
 
 from tests.conftest import pygame_display
 from chessshootout.domain.match import Match
-from chessshootout.backend.pieces import PieceType, PieceColor
+from chessshootout.backend.pieces import PieceType, PieceColor, Piece
 from chessshootout.backend.utils import Square
 from chessshootout.frontend.board import Board
 from chessshootout.frontend.board import board as board_module
+from chessshootout.frontend.board.board import PIECE_SCALE
 from chessshootout.frontend.visual.colors import Colors
 from chessshootout.frontend.visual.draw import scale_floor
 
@@ -248,3 +249,103 @@ def test_piece_image_cache_survives_a_pygame_reinit_cycle():
     after = [cached.get_at((x, x)) for x in range(0, cached.get_width(), 64)]
     assert after == before
     assert sum(sum(px) for px in after) > 0, "pixel data must not have gone blank/garbage"
+
+
+def _lone_piece_board(ptype, color, at):
+    win = pg.display.get_surface()
+    win.fill((0, 0, 0))
+    match = Match()
+    match.new_game()
+    match.backend.state = [[None] * 8 for _ in range(8)]
+    match.backend.state[at.row][at.col] = Piece(ptype, color)
+    board = Board(win, match)
+    board.load_assets()
+    board.set_rect(pg.Rect(40, 40, 680, 680))
+    return board, win
+
+
+def _sq_dist(a, b):
+    return sum((a[i] - b[i]) ** 2 for i in range(3))
+
+
+def test_piece_scale_is_ninety_percent():
+    assert PIECE_SCALE == 0.9
+
+
+def test_white_sprite_fills_cell_with_scaled_centered_art():
+    """The sprite surface is the full cell, but the visible art is scaled to
+    PIECE_SCALE and centered -- verified on a white piece so no rim glow inflates
+    the measured bounding box."""
+    board, _ = _board()
+    cell = board.cell_size
+    key = (PieceType.QUEEN, PieceColor.WHITE)
+    sprite = board.piece_images_scaled[key]
+    assert sprite.get_size() == (cell, cell)
+    bbox = board._sprite_geom[key]["bbox"]
+    assert bbox.width <= cell * PIECE_SCALE + 2
+    assert bbox.height <= cell * PIECE_SCALE + 2
+    assert abs(bbox.centerx - cell / 2) <= 1.5
+    assert abs(bbox.centery - cell / 2) <= 1.5
+
+
+def test_white_piece_casts_no_resting_shadow():
+    """Every pixel of a white piece's cell that lies outside its art bounding box
+    is exactly the underlying tile colour -- no shadow, tint, or glow bleeds out."""
+    at = Square(4, 4)
+    board, win = _lone_piece_board(PieceType.PAWN, PieceColor.WHITE, at)
+    board.draw_board()
+    tile = tuple(pg.Color(Colors.white_tile)[:3])
+    rect = board._cell_rect(at.row, at.col)
+    art = board._sprite_geom[(PieceType.PAWN, PieceColor.WHITE)]["bbox"].move(rect.x, rect.y)
+    offenders = [
+        (x, y) for x in range(rect.x, rect.right) for y in range(rect.y, rect.bottom)
+        if not art.collidepoint(x, y) and tuple(win.get_at((x, y))[:3]) != tile
+    ]
+    assert offenders == [], "no pixel outside the art may differ from the tile colour"
+
+
+def test_black_piece_has_warm_rim_and_white_piece_has_none():
+    board, _ = _board()
+    rim = tuple(pg.Color(Colors.rim_light)[:3])
+    white_tile = tuple(pg.Color(Colors.white_tile)[:3])
+    black_tile = tuple(pg.Color(Colors.black_tile)[:3])
+
+    def is_rim(px):
+        if not 0 < px.a < 255:
+            return False
+        c = (px.r, px.g, px.b)
+        return _sq_dist(c, rim) < _sq_dist(c, white_tile) and \
+            _sq_dist(c, rim) < _sq_dist(c, black_tile)
+
+    key_b = (PieceType.PAWN, PieceColor.BLACK)
+    black = board.piece_images_scaled[key_b]
+    bbox_b = board._sprite_geom[key_b]["bbox"]
+    rim_hits = [
+        (x, y) for x in range(black.get_width()) for y in range(black.get_height())
+        if not bbox_b.collidepoint(x, y) and is_rim(black.get_at((x, y)))
+    ]
+    assert rim_hits, "a black piece must carry a warm rim glow just outside its art"
+
+    key_w = (PieceType.PAWN, PieceColor.WHITE)
+    white = board.piece_images_scaled[key_w]
+    bbox_w = board._sprite_geom[key_w]["bbox"]
+    lit = [
+        (x, y) for x in range(white.get_width()) for y in range(white.get_height())
+        if not bbox_w.collidepoint(x, y) and white.get_at((x, y)).a > 0
+    ]
+    assert lit == [], "a white piece must be fully transparent outside its art -- no glow"
+
+
+def test_scaled_sprites_are_shared_across_boards_at_the_same_cell():
+    board_module._SCALED_PIECE_CACHE.clear()
+    win = pg.display.get_surface()
+    match = Match()
+    match.new_game()
+    first = Board(win, match)
+    first.load_assets()
+    first.set_rect(pg.Rect(40, 40, 680, 680))
+    second = Board(win, match)
+    second.load_assets()
+    second.set_rect(pg.Rect(40, 40, 680, 680))
+    for key in ((PieceType.QUEEN, PieceColor.WHITE), (PieceType.KNIGHT, PieceColor.BLACK)):
+        assert first.piece_images_scaled[key] is second.piece_images_scaled[key]
