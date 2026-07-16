@@ -7,6 +7,7 @@ from chessshootout.backend.utils import Square
 from chessshootout.frontend.board import Board
 from chessshootout.frontend.board import board as board_module
 from chessshootout.frontend.visual.colors import Colors
+from chessshootout.frontend.visual.draw import scale_floor
 
 
 _pygame_init = pygame_display(780, 780)
@@ -34,13 +35,45 @@ def _cell_has(win, rect, predicate):
 
 def test_arena_frame_insets_grid_and_caches_surface():
     board, _ = _board()
+    assert board.frame_pad == scale_floor(26, board.scale, 18)
     assert board.board_offset_x >= board.rect.x + board.frame_pad - 2
     assert board.board_offset_y >= board.rect.y + board.frame_pad - 2
     assert board.cell_size > 0
     assert board._frame_surf is not None
+    built = board._frame_surf
+    board.draw_board()
+    board.draw_board()
+    assert board._frame_surf is built, "the plate surface is baked once, not per frame"
     grid_px = board.cell_size * board.SIZE
     assert board.board_offset_x + grid_px <= board.rect.right
     assert board.board_offset_y + grid_px <= board.rect.bottom
+
+
+def test_plate_exposes_backdrop_through_cut_corner_and_borders_top_edge():
+    board, win = _board()
+    backdrop = (10, 20, 30)
+    win.fill(backdrop)
+    board.draw_board()
+    top = board.rect.top
+    cut_px = win.get_at((board.rect.right - 4, top + 2))[:3]
+    assert tuple(cut_px) == backdrop, "the top-right cut must expose the window backdrop"
+    edge_px = win.get_at((board.rect.centerx, top))[:3]
+    assert tuple(edge_px) in (
+        tuple(pg.Color(Colors.border)[:3]), tuple(pg.Color(Colors.surface)[:3])), \
+        "the plate top edge (away from the cut) is opaque border/surface, not backdrop"
+
+
+def test_coord_labels_fit_within_the_plate_margin_on_a_huge_board():
+    win = pg.display.get_surface()
+    win.fill((0, 0, 0))
+    match = Match()
+    match.new_game()
+    board = Board(win, match)
+    board.load_assets()
+    board.set_rect(pg.Rect(0, 0, 1400, 1400))
+    assert board.cell_size > 90, "sanity: cells are huge, so the raw coord font would overflow"
+    assert board.file_labels_rendered[0].get_height() <= board.frame_pad
+    assert board.rank_labels_rendered[0].get_height() <= board.frame_pad
 
 
 def test_gutter_coords_rendered():

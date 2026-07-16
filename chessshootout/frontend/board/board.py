@@ -12,7 +12,9 @@ from chessshootout.frontend.visual.cache import (
     new_cache, new_size_cache, memoized_surface, render_text,
 )
 from chessshootout.frontend.visual.colors import Colors
-from chessshootout.frontend.visual.draw import supersample, smoothstep
+from chessshootout.frontend.visual.draw import (
+    supersample, smoothstep, scale_floor, cut_rect_surface,
+)
 from chessshootout.frontend.visual.effects import EffectManager
 from chessshootout.frontend.visual.icons import piece_png_path
 from chessshootout.domain.premoves import Premove, speculative_board
@@ -49,10 +51,10 @@ def _draw_capsule(surf, p1, p2, width, color):
 
 class Board:
     SIZE = 8
-    FRAME_PAD_FRACTION = 0.055
-    FRAME_PAD_MIN = 16
-    FRAME_RADIUS = 14
-    GRID_RADIUS = 4
+    PLATE_MARGIN = 26
+    PLATE_MARGIN_FLOOR = 18
+    PLATE_CUT = 18
+    COORD_PAD_FRACTION = 0.6
 
     PROMOTION_OPTION_SIZE_MIN = 48
     PROMOTION_OPTION_SIZE_MAX = 72
@@ -160,6 +162,8 @@ class Board:
 
     def _render_text(self):
         size = max(int(self.cell_size * 0.30), 11) if self.cell_size else 13
+        if self.frame_pad:
+            size = min(size, max(int(self.frame_pad * self.COORD_PAD_FRACTION), 8))
         coord_font = get_font(size, bold=True, mono=True)
         self.file_labels_rendered = [
             coord_font.render(self.file_labels[i], True, Colors.text_muted)
@@ -473,8 +477,10 @@ class Board:
     def _draw_review_cue(self):
         if self.read_only or self._frame_surf is None:
             return
-        pg.draw.rect(self.window, pg.Color(Colors.accent), self.rect, 2,
-                     border_radius=self.FRAME_RADIUS)
+        cue = cut_rect_surface(
+            self.rect.size, scale_floor(self.PLATE_CUT, self.scale, 12),
+            "#00000000", border=Colors.accent, border_width=2, corners=("tr",))
+        self.window.blit(cue, self.rect.topleft)
 
     def _draw_arrows(self):
         self.annotations._draw_arrows()
@@ -764,7 +770,7 @@ class Board:
         self.cancel_drag_physics()
         self.rect = pg.Rect(rect)
         self.effects.board_rect = pg.Rect(rect)
-        self.frame_pad = max(int(rect.width * self.FRAME_PAD_FRACTION), self.FRAME_PAD_MIN)
+        self.frame_pad = scale_floor(self.PLATE_MARGIN, self.scale, self.PLATE_MARGIN_FLOOR)
         inner = rect.width - 2 * self.frame_pad
         cell_size = max(inner // self.SIZE, 1)
         if cell_size != self.cell_size:
@@ -801,42 +807,15 @@ class Board:
         if self.rect.width <= 0 or self.rect.height <= 0:
             self._frame_surf = None
             return
-        w, h = self.rect.width, self.rect.height
-        top, bot = pg.Color(Colors.board_frame_inner), pg.Color(Colors.board_frame)
-        column = pg.Surface((1, h))
-        for y in range(h):
-            t = y / max(h - 1, 1)
-            column.set_at((0, y), (round(top.r + (bot.r - top.r) * t),
-                                   round(top.g + (bot.g - top.g) * t),
-                                   round(top.b + (bot.b - top.b) * t)))
-        bezel = pg.transform.scale(column, (w, h)).convert_alpha()
-        mask = pg.Surface((w, h), pg.SRCALPHA)
-        pg.draw.rect(mask, (255, 255, 255, 255), mask.get_rect(), border_radius=self.FRAME_RADIUS)
-        bezel.blit(mask, (0, 0), special_flags=pg.BLEND_RGBA_MULT)
-        surf = pg.Surface((w, h), pg.SRCALPHA)
-        surf.blit(bezel, (0, 0))
-        pg.draw.rect(surf, Colors.border_strong, surf.get_rect(), 2,
-                     border_radius=self.FRAME_RADIUS)
-        self._draw_corner_ticks(surf)
+        plate = cut_rect_surface(
+            self.rect.size, scale_floor(self.PLATE_CUT, self.scale, 12),
+            Colors.surface, border=Colors.border, border_width=1, corners=("tr",))
+        surf = plate.copy()
         gx = self.board_offset_x - self.rect.x
         gy = self.board_offset_y - self.rect.y
         gs = self.cell_size * self.SIZE
-        pg.draw.rect(surf, "#000000", pg.Rect(gx - 1, gy - 1, gs + 2, gs + 2),
-                     border_radius=self.GRID_RADIUS)
+        pg.draw.rect(surf, Colors.border, pg.Rect(gx - 1, gy - 1, gs + 2, gs + 2), 1)
         self._frame_surf = surf
-
-    def _draw_corner_ticks(self, surf):
-        w, h = surf.get_size()
-        inset, length, thick = 8, 18, 2
-        color = pg.Color(Colors.accent)
-        color.a = 107
-        ticks = pg.Surface((w, h), pg.SRCALPHA)
-        corners = (((inset, inset), (1, 1)), ((w - inset, inset), (-1, 1)),
-                   ((inset, h - inset), (1, -1)), ((w - inset, h - inset), (-1, -1)))
-        for (cx, cy), (sx, sy) in corners:
-            pg.draw.line(ticks, color, (cx, cy), (cx + sx * length, cy), thick)
-            pg.draw.line(ticks, color, (cx, cy), (cx, cy + sy * length), thick)
-        surf.blit(ticks, (0, 0))
 
     def begin_press(self, pos):
         self.drag.begin_press(pos)

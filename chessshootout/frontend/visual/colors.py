@@ -56,8 +56,6 @@ class Colors:
 
     white_tile = "#828b99"
     black_tile = "#2e333b"
-    board_frame = "#0a0c0f"
-    board_frame_inner = "#20242c"
     rim_light = "#e9e2d4"
 
     clock_low_time = "#7a1f1f"

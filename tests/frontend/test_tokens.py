@@ -30,8 +30,7 @@ def test_base_palette_hex_values():
         "accent": "#ff5a36", "accent_hi": "#ff7a5c", "accent_press": "#e6431f",
         "amber": "#ffb020", "amber_hi": "#ffc34d",
         "win": "#46d17f", "loss": "#ff5a4f", "check": "#ff3b3b",
-        "white_tile": "#828b99", "black_tile": "#2e333b",
-        "board_frame": "#0a0c0f", "board_frame_inner": "#20242c", "rim_light": "#e9e2d4",
+        "white_tile": "#828b99", "black_tile": "#2e333b", "rim_light": "#e9e2d4",
     }
     for attr, hexval in expected.items():
         assert pg.Color(getattr(Colors, attr))[:3] == pg.Color(hexval)[:3], attr
