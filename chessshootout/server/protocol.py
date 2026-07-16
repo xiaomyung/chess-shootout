@@ -19,7 +19,7 @@ def _env_int(name, default):
         return default
 
 
-PROTOCOL_VERSION = 2
+PROTOCOL_VERSION = 3
 MAX_NICKNAME_LEN = 20
 GIVE_TIME_SECONDS = 15
 GIVE_TIME_TICK_MS = 100
@@ -29,10 +29,16 @@ GRACE_SECONDS = _env_float("GRACE_SECONDS", 60.0)
 HEARTBEAT_INTERVAL_SECONDS = _env_float("HEARTBEAT_INTERVAL_SECONDS", 2.0)
 HEARTBEAT_MISS_LIMIT = _env_int("HEARTBEAT_MISS_LIMIT", 3)
 HEARTBEAT_TIMEOUT_SECONDS = HEARTBEAT_INTERVAL_SECONDS * HEARTBEAT_MISS_LIMIT
+MAX_SHARED_HIGHLIGHTS = 64
+MAX_SHARED_ARROWS = 128
+CHAT_COOLDOWN_SECONDS = 3.0
+CHAT_PRESET_COUNT = 4
+ANNOTATIONS_PER_SECOND = 10
 
 UUID4_RE = re.compile(
     r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$",
 )
+COORD_RE = re.compile(r"^[a-h][1-8]$")
 
 
 def is_uuid4(value):
@@ -41,6 +47,12 @@ def is_uuid4(value):
 
 def _validate_uuid4(value, name):
     if not is_uuid4(value):
+        raise ValueError(f"invalid_{name}")
+    return value
+
+
+def _validate_coord(value, name):
+    if not (isinstance(value, str) and bool(COORD_RE.match(value))):
         raise ValueError(f"invalid_{name}")
     return value
 
@@ -121,6 +133,31 @@ class LockWire(BaseModel):
     to_sq: str = Field(alias="to")
 
     model_config = {"populate_by_name": True}
+
+
+class ArrowWire(BaseModel):
+    from_sq: str = Field(alias="from")
+    to_sq: str = Field(alias="to")
+
+    model_config = {"populate_by_name": True}
+
+    @field_validator("from_sq", "to_sq")
+    @classmethod
+    def _coord(cls, v):
+        return _validate_coord(v, "coord")
+
+
+class AnnotationSetWire(BaseModel):
+    sharing: bool = False
+    highlights: list[str] = Field(default_factory=list, max_length=MAX_SHARED_HIGHLIGHTS)
+    arrows: list[ArrowWire] = Field(default_factory=list, max_length=MAX_SHARED_ARROWS)
+
+    @field_validator("highlights")
+    @classmethod
+    def _coords(cls, v):
+        for sq in v:
+            _validate_coord(sq, "coord")
+        return v
 
 
 class _SkillCheckGeometryBase(BaseModel):
@@ -222,6 +259,8 @@ class ResumeResponse(_Base):
     pending_skillcheck: Optional[PendingSkillCheckWire] = None
     skillcheck_locks: list[LockWire] = Field(default_factory=list)
     skillcheck_log: list[SkillCheckOutcomeWire] = Field(default_factory=list)
+    white_annotations: AnnotationSetWire = Field(default_factory=AnnotationSetWire)
+    black_annotations: AnnotationSetWire = Field(default_factory=AnnotationSetWire)
     result_reason: Optional[str] = None
     result_winner: Optional[Literal["white", "black"]] = None
 
@@ -356,6 +395,49 @@ class TimeGrantedMessage(_Base):
     granted_by: Literal["white", "black"]
     seconds_added: float
     clock: ClockSnapshot
+
+
+class AnnotationsStateMessage(_Base):
+    type: Literal["annotations_state"] = "annotations_state"
+    sharing: bool
+    highlights: list[str] = Field(default_factory=list, max_length=MAX_SHARED_HIGHLIGHTS)
+    arrows: list[ArrowWire] = Field(default_factory=list, max_length=MAX_SHARED_ARROWS)
+
+    @field_validator("highlights")
+    @classmethod
+    def _coords(cls, v):
+        for sq in v:
+            _validate_coord(sq, "coord")
+        return v
+
+
+class AnnotationDeltaMessage(_Base):
+    type: Literal["annotation_delta"] = "annotation_delta"
+    action: Literal["add", "remove"]
+    kind: Literal["highlight", "arrow"]
+    square: Optional[str] = None
+    from_sq: Optional[str] = Field(default=None, alias="from")
+    to_sq: Optional[str] = Field(default=None, alias="to")
+
+    model_config = {"populate_by_name": True}
+
+    @field_validator("square", "from_sq", "to_sq")
+    @classmethod
+    def _coord(cls, v):
+        if v is None:
+            return v
+        return _validate_coord(v, "coord")
+
+
+class QuickChatMessage(_Base):
+    type: Literal["quick_chat"] = "quick_chat"
+    preset: int = Field(ge=0, le=CHAT_PRESET_COUNT - 1)
+
+
+class QuickChatReceivedMessage(_Base):
+    type: Literal["quick_chat_received"] = "quick_chat_received"
+    preset: int = Field(ge=0, le=CHAT_PRESET_COUNT - 1)
+    sender: Literal["white", "black"]
 
 
 class ConnectionStatusMessage(_Base):

@@ -1,13 +1,17 @@
 import pytest
 from pydantic import ValidationError
 
+from chessshootout.server.app import MAX_INBOUND_MESSAGE_BYTES
 from chessshootout.server.protocol import (
-    AuthMessage, ClockSnapshot, ErrorMessage, GameStartMessage, LockWire,
-    MatchmakeRequest, MoveAppliedMessage, MoveMessage, PROTOCOL_VERSION,
-    PendingSkillCheckWire, PingMessage, PongMessage, ResumeResponse,
-    ResyncDirectiveMessage, SkillCheckRequiredMessage, SkillCheckResultMessage,
-    SkillCheckOutcomeWire, SkillCheckShotMessage, SkillCheckSpectateMessage,
-    SkillCheckSpectateShotMessage, normalize_country, normalize_nickname,
+    AnnotationDeltaMessage, AnnotationSetWire, AnnotationsStateMessage, ArrowWire,
+    AuthMessage, CHAT_PRESET_COUNT, ClockSnapshot, ErrorMessage, GameStartMessage,
+    LockWire, MAX_SHARED_ARROWS, MAX_SHARED_HIGHLIGHTS, MatchmakeRequest,
+    MoveAppliedMessage, MoveMessage, PROTOCOL_VERSION, PendingSkillCheckWire,
+    PingMessage, PongMessage, QuickChatMessage, QuickChatReceivedMessage,
+    ResumeResponse, ResyncDirectiveMessage, SkillCheckRequiredMessage,
+    SkillCheckResultMessage, SkillCheckOutcomeWire, SkillCheckShotMessage,
+    SkillCheckSpectateMessage, SkillCheckSpectateShotMessage, normalize_country,
+    normalize_nickname,
 )
 from tests.helpers import fake_uuid4
 
@@ -228,8 +232,8 @@ def test_move_message_promotion_validated():
                                     "from": "e7", "to": "e8", "promotion": "x"})
 
 
-def test_protocol_version_bumped_for_skillchecks():
-    assert PROTOCOL_VERSION == 2
+def test_protocol_version_pinned_for_annotations_and_chat():
+    assert PROTOCOL_VERSION == 3
 
 
 def test_skill_check_required_round_trips():
@@ -399,3 +403,124 @@ def test_resume_response_carries_pending_and_locks_when_set():
     assert dumped["pending_skillcheck"]["from_sq"] == "e4"
     assert dumped["pending_skillcheck"]["to_sq"] == "d5"
     assert dumped["pending_skillcheck"]["color"] == "white"
+
+
+ALL_SQUARES = [f"{file}{rank}" for file in "abcdefgh" for rank in "12345678"]
+
+
+def test_annotations_state_accepts_full_valid_payload_with_from_to_aliases():
+    raw = {
+        "version": PROTOCOL_VERSION, "type": "annotations_state", "sharing": True,
+        "highlights": ["e4", "d5"],
+        "arrows": [{"from": "e2", "to": "e4"}, {"from": "g1", "to": "f3"}],
+    }
+    msg = AnnotationsStateMessage.model_validate(raw)
+    assert msg.sharing is True
+    assert msg.highlights == ["e4", "d5"]
+    assert (msg.arrows[0].from_sq, msg.arrows[0].to_sq) == ("e2", "e4")
+    assert msg.model_dump(by_alias=True)["arrows"][1] == {"from": "g1", "to": "f3"}
+
+
+def test_annotations_state_rejects_too_many_highlights():
+    with pytest.raises(ValidationError):
+        AnnotationsStateMessage(sharing=True, highlights=["a1"] * (MAX_SHARED_HIGHLIGHTS + 1))
+
+
+def test_annotations_state_rejects_too_many_arrows():
+    arrow = {"from": "e2", "to": "e4"}
+    with pytest.raises(ValidationError):
+        AnnotationsStateMessage(sharing=True, arrows=[arrow] * (MAX_SHARED_ARROWS + 1))
+
+
+@pytest.mark.parametrize("bad", ["z9", "a0", "aa", "e9", "i1", ""])
+def test_annotations_state_rejects_off_board_highlight(bad):
+    with pytest.raises(ValidationError):
+        AnnotationsStateMessage(sharing=True, highlights=[bad])
+
+
+@pytest.mark.parametrize("bad", ["z9", "a0", "aa"])
+def test_arrow_wire_rejects_off_board_coord(bad):
+    with pytest.raises(ValidationError):
+        ArrowWire(from_sq=bad, to_sq="e4")
+    with pytest.raises(ValidationError):
+        ArrowWire(from_sq="e4", to_sq=bad)
+
+
+def test_annotation_delta_add_highlight_round_trips():
+    msg = AnnotationDeltaMessage(action="add", kind="highlight", square="e4")
+    assert (msg.action, msg.kind, msg.square) == ("add", "highlight", "e4")
+    dumped = msg.model_dump(by_alias=True)
+    assert dumped["type"] == "annotation_delta"
+    assert dumped["square"] == "e4" and dumped["from"] is None
+
+
+def test_annotation_delta_arrow_uses_from_to_aliases():
+    raw = {"type": "annotation_delta", "action": "remove", "kind": "arrow",
+           "from": "e2", "to": "e4"}
+    msg = AnnotationDeltaMessage.model_validate(raw)
+    assert (msg.from_sq, msg.to_sq) == ("e2", "e4")
+    assert msg.model_dump(by_alias=True)["from"] == "e2"
+
+
+@pytest.mark.parametrize(
+    "field, value",
+    [
+        pytest.param("action", "toggle", id="bad_action"),
+        pytest.param("kind", "circle", id="bad_kind"),
+    ],
+)
+def test_annotation_delta_enforces_literals(field, value):
+    base = {"action": "add", "kind": "highlight", "square": "e4"}
+    base[field] = value
+    with pytest.raises(ValidationError):
+        AnnotationDeltaMessage(**base)
+
+
+def test_annotation_delta_rejects_off_board_square():
+    with pytest.raises(ValidationError):
+        AnnotationDeltaMessage(action="add", kind="highlight", square="z9")
+
+
+@pytest.mark.parametrize("preset", list(range(CHAT_PRESET_COUNT)))
+def test_quick_chat_accepts_valid_presets(preset):
+    msg = QuickChatMessage(preset=preset)
+    assert msg.preset == preset
+    assert msg.type == "quick_chat"
+
+
+@pytest.mark.parametrize("preset", [-1, CHAT_PRESET_COUNT])
+def test_quick_chat_rejects_out_of_range_preset(preset):
+    with pytest.raises(ValidationError):
+        QuickChatMessage(preset=preset)
+
+
+def test_quick_chat_received_carries_sender_and_preset():
+    msg = QuickChatReceivedMessage(preset=2, sender="black")
+    assert (msg.preset, msg.sender) == (2, "black")
+    assert msg.model_dump()["type"] == "quick_chat_received"
+
+
+def test_quick_chat_received_enforces_sender_literal():
+    with pytest.raises(ValidationError):
+        QuickChatReceivedMessage(preset=0, sender="green")
+
+
+def test_resume_response_annotations_default_empty_both_colors():
+    resp = ResumeResponse(
+        fen="x", move_history=[],
+        clock=ClockSnapshot(white_remaining=1.0, black_remaining=1.0, running_for="white"),
+        your_color="white", white_name="A", black_name="B",
+        time_minutes=5, increment_seconds=0)
+    for side in ("white_annotations", "black_annotations"):
+        ann = getattr(resp, side)
+        assert isinstance(ann, AnnotationSetWire)
+        assert ann.sharing is False and ann.highlights == [] and ann.arrows == []
+
+
+def test_full_annotations_state_serializes_under_inbound_cap():
+    highlights = ALL_SQUARES[:MAX_SHARED_HIGHLIGHTS]
+    arrows = [ArrowWire(from_sq=ALL_SQUARES[i % 64], to_sq=ALL_SQUARES[(i + 1) % 64])
+              for i in range(MAX_SHARED_ARROWS)]
+    msg = AnnotationsStateMessage(sharing=True, highlights=highlights, arrows=arrows)
+    payload = msg.model_dump_json(by_alias=True)
+    assert len(payload.encode()) < MAX_INBOUND_MESSAGE_BYTES

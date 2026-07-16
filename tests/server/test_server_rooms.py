@@ -5,7 +5,8 @@ import pytest
 from chessshootout.server.protocol import GRACE_SECONDS
 from chessshootout.server.rooms import (
     AlreadyInGameError, InvalidTokenError, NotInRoomError,
-    REMATCH_ABSOLUTE_CAP_SECONDS, REMATCH_IDLE_SECONDS, RoomManager,
+    REMATCH_ABSOLUTE_CAP_SECONDS, REMATCH_IDLE_SECONDS, Room, RoomManager,
+    SharedAnnotations,
 )
 from tests.helpers import FakeClock
 
@@ -393,3 +394,65 @@ async def test_series_scores_not_awarded_on_abort(manager):
     room = await manager.enqueue(**_enqueue_kwargs("bob"))
     manager.finalize_result(room.room_id, "aborted", None)
     assert room.series_scores == {}
+
+
+def test_annotations_for_returns_the_matching_color_store():
+    room = Room(room_id="r", time_minutes=5, increment_seconds=0, created_at=0.0)
+    assert room.annotations_for("white") is room.annotations_white
+    assert room.annotations_for("black") is room.annotations_black
+    assert isinstance(room.annotations_for("white"), SharedAnnotations)
+    assert room.annotations_white is not room.annotations_black
+
+
+def test_shared_annotations_clear_marks_preserves_sharing():
+    ann = SharedAnnotations(sharing=True)
+    ann.highlights.add("e4")
+    ann.arrows.append(("e2", "e4"))
+    ann.clear_marks()
+    assert ann.highlights == set()
+    assert ann.arrows == []
+    assert ann.sharing is True
+
+
+def test_shared_annotations_reset_clears_marks_and_sharing():
+    ann = SharedAnnotations(sharing=True)
+    ann.highlights.add("e4")
+    ann.arrows.append(("e2", "e4"))
+    ann.reset()
+    assert ann.highlights == set() and ann.arrows == []
+    assert ann.sharing is False
+
+
+@pytest.mark.asyncio
+async def test_finalize_result_resets_both_shared_annotation_stores(manager):
+    await manager.enqueue(**_enqueue_kwargs("alice"))
+    room = await manager.enqueue(**_enqueue_kwargs("bob"))
+    for color in ("white", "black"):
+        ann = room.annotations_for(color)
+        ann.sharing = True
+        ann.highlights.add("e4")
+        ann.arrows.append(("e2", "e4"))
+    manager.finalize_result(room.room_id, "checkmate", winner_color="white")
+    for color in ("white", "black"):
+        ann = room.annotations_for(color)
+        assert ann.sharing is False
+        assert ann.highlights == set()
+        assert ann.arrows == []
+
+
+@pytest.mark.asyncio
+async def test_reset_for_rematch_installs_fresh_annotation_stores(manager):
+    await manager.enqueue(**_enqueue_kwargs("alice"))
+    room = await manager.enqueue(**_enqueue_kwargs("bob"))
+    white_before = room.annotations_white
+    black_before = room.annotations_black
+    room.annotations_white.sharing = True
+    room.annotations_white.highlights.add("d4")
+    room.annotations_black.arrows.append(("g1", "f3"))
+    manager.finalize_result(room.room_id, "checkmate", winner_color="white")
+    assert manager.reset_for_rematch(room.room_id) is True
+    assert room.annotations_white is not white_before
+    assert room.annotations_black is not black_before
+    assert room.annotations_white.sharing is False
+    assert room.annotations_white.highlights == set()
+    assert room.annotations_black.arrows == []

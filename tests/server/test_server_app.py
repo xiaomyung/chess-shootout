@@ -171,6 +171,22 @@ def test_ws_rejects_non_auth_first_message(client):
             ws.receive_text()
 
 
+def test_ws_rejects_version_mismatch_auth(client):
+    """An old client (one protocol version behind) is refused with a
+    version_mismatch error before the socket closes."""
+    _matchmake(client, uuid=ALICE)
+    r2 = _matchmake(client, uuid=BOB)
+    body = r2.json()
+    with client.websocket_connect(f"/ws/{body['room_id']}") as ws:
+        ws.send_text(json.dumps({"version": PROTOCOL_VERSION - 1, "type": "auth",
+                                  "session_token": body["session_token"]}))
+        err = json.loads(ws.receive_text())
+        assert err["type"] == "error"
+        assert err["reason"] == Reason.VERSION_MISMATCH
+        with pytest.raises(Exception):
+            ws.receive_text()
+
+
 def test_two_clients_pair_and_get_game_start(client):
     random.seed(0)
     r1 = _matchmake(client, uuid=ALICE, side="white")
