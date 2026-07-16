@@ -14,9 +14,10 @@ from chessshootout.backend.pieces import Piece, PieceType, PieceColor
 from chessshootout.backend.utils import Square, Move, HistoryEntry
 from chessshootout.frontend.panels.right import (
     RightMenu, CARD_INSET, CAPS, REVIEW_CAPS, SECTION_OPEN,
+    LOG_HEADER_TOP, DEBUT_ROW_GAP,
 )
 from chessshootout.frontend.visual.colors import Colors
-from chessshootout.frontend.visual.draw import dashed_hline
+from chessshootout.frontend.visual.draw import dashed_hline, scale_floor
 
 
 _pygame_init = pygame_display(1000, 800)
@@ -325,6 +326,64 @@ def test_section_toggle_plays_section_toggle_sound():
     rm.set_rect(pg.Rect(0, 0, 320, 640))
     rm.toggle_section("actions")
     sounds.play_section_toggle.assert_called_once()
+
+
+def _debut_row_center(rm):
+    ly = rm.moves_rect.y + scale_floor(LOG_HEADER_TOP, rm.scale, 6)
+    row_y = ly + rm.micro_font.get_height() + scale_floor(DEBUT_ROW_GAP, rm.scale, 3)
+    return (rm.moves_rect.centerx, row_y + rm.micro_font.get_height() // 2)
+
+
+def test_debut_row_paints_only_when_provider_hits():
+    rm, backend = _menu()
+    backend.move_history = [_entry(PieceType.PAWN, PieceColor.WHITE, "e4")]
+    rm.debut_provider = lambda: None
+    rm.window.fill((0, 0, 0))
+    rm.draw_menu()
+    absent = pg.image.tobytes(rm.window.subsurface(rm.moves_rect), "RGB")
+    rm.debut_provider = lambda: ("C50", "Italian Game: Giuoco Piano")
+    rm.window.fill((0, 0, 0))
+    rm.draw_menu()
+    present = pg.image.tobytes(rm.window.subsurface(rm.moves_rect), "RGB")
+    assert present != absent, "a debut hit adds a row under the micro-header"
+    band = pg.Rect(rm.moves_rect.x, rm.moves_rect.y, rm.moves_rect.width, 44)
+    assert _has_color(rm.window, band, pg.Color(Colors.text_dim)[:3], tol=45), \
+        "the opening NAME paints in text_dim"
+
+
+def test_debut_row_shrinks_move_viewport():
+    rm, backend = _menu()
+    _pawn_rows(backend, 60)
+    rm.debut_provider = lambda: None
+    rm.window.fill((0, 0, 0))
+    rm.draw_menu()
+    without = rm._max_lines
+    rm.debut_provider = lambda: ("C50", "Italian Game: Giuoco Piano")
+    rm.window.fill((0, 0, 0))
+    rm.draw_menu()
+    assert rm._max_lines < without, "the debut row steals a line from the move viewport"
+
+
+def test_debut_marquee_slides_on_hover_and_eases_back(monkeypatch):
+    rm, backend = _menu()
+    long_name = ("Ruy Lopez Morphy Defense Chigorin Panov System Deferred "
+                 "Extended Long Marquee Variation")
+    rm.debut_provider = lambda: ("C99", long_name)
+    rm.set_rect(pg.Rect(0, 0, 240, 640), scale=1.0)
+    rm._marquee_off = 0.0
+    monkeypatch.setattr(pg.mouse, "get_pos", lambda: _debut_row_center(rm))
+    offsets = []
+    for _ in range(8):
+        rm.window.fill((0, 0, 0))
+        rm.draw_menu()
+        offsets.append(rm._marquee_off)
+    assert offsets[-1] > offsets[0] > 0, "the name slides left while the row is hovered"
+    peak = rm._marquee_off
+    monkeypatch.setattr(pg.mouse, "get_pos", lambda: (0, 0))
+    for _ in range(20):
+        rm.window.fill((0, 0, 0))
+        rm.draw_menu()
+    assert rm._marquee_off < peak, "the offset eases back toward 0 once the mouse leaves"
 
 
 def test_rail_tooltip_appears_over_hovered_cap(monkeypatch):

@@ -6,6 +6,7 @@ from typing import NamedTuple
 import pygame as pg
 
 from chessshootout.backend.fen import apply_fen
+from chessshootout.domain import openings
 from chessshootout.domain.match import Match, SINGLE_SCREEN, BOT, ONLINE
 from chessshootout.domain.capture_summary import captured_by, material_advantage
 from chessshootout.domain.pgn.load import format_time_control
@@ -148,6 +149,8 @@ class GameScreen(Screen):
         self._opp_disconnected_at_ms = None
         self._local_disconnected_at_ms = None
         self._focus_click_consumed = False
+        self._custom_start = False
+        self._debut_memo = None
 
         self.match = Match()
         self.board = Board(window, self.match,
@@ -182,6 +185,7 @@ class GameScreen(Screen):
         }, board=self.board, buttons_provider=self._right_menu_buttons,
             disabled_keys_provider=self._right_menu_disabled_keys,
             whiffs_provider=self.skillcheck_session.skillcheck_whiffs,
+            debut_provider=self._debut_line,
             sounds=app.sound_manager)
         self.player_strip_top = PlayerStrip(window)
         self.player_strip_bottom = PlayerStrip(window)
@@ -203,6 +207,7 @@ class GameScreen(Screen):
         self.app._compute_layout()
 
     def enter(self, **payload):
+        openings.preload()
         fen = payload.get("fen")
         side = payload.get("side")
         your_color = payload.get("your_color")
@@ -223,6 +228,7 @@ class GameScreen(Screen):
         self._reset_to_new_game()
         if fen is not None:
             apply_fen(self.match.backend, fen)
+            self._custom_start = True
         if your_color is not None:
             self.board.flipped = (your_color == "black")
             self.app.coordinator.subscribe(self)
@@ -310,6 +316,7 @@ class GameScreen(Screen):
             if not result.legal:
                 log.warning("resume: SAN replay failed at %r", entry.get("san"))
                 apply_fen(self.match.backend, payload["fen"])
+                self._custom_start = True
                 break
         if self._time_control is not None:
             initial, incr = self._time_control
@@ -1152,6 +1159,17 @@ class GameScreen(Screen):
         self.player_strip_top.set_state(**self._strip_state(top_color, turn, over))
         self.player_strip_bottom.set_state(**self._strip_state(bottom_color, turn, over))
 
+    def _debut_line(self):
+        if self._custom_start:
+            return None
+        key = (len(self.match.move_history), self.board.review_ply)
+        if self._debut_memo is not None and self._debut_memo[0] == key:
+            return self._debut_memo[1]
+        sans = [entry.san for entry in self.board.reviewed_history()]
+        result = openings.lookup(sans)
+        self._debut_memo = (key, result)
+        return result
+
     def _strip_capture_summary(self, color):
         key = (len(self.match.move_history), self.board.review_ply, color)
         cached = self._strip_memo.get(color)
@@ -1266,6 +1284,8 @@ class GameScreen(Screen):
         self.manual_result = None
         self._flag_fall_played = False
         self._strip_memo = {}
+        self._custom_start = False
+        self._debut_memo = None
         self._result_first_seen_at_ms = None
         self.result_flow.reset_for_new_game()
         self.right_menu.reset_for_new_game()

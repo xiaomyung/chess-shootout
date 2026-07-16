@@ -396,3 +396,28 @@ def test_review_open_pgn_toasts_when_the_file_is_gone(tmp_path, monkeypatch):
 
     assert opened == []
     assert app.toast.message == "No saved PGN"
+
+
+def test_review_debut_tracks_review_ply(tmp_path):
+    path = _write_pgn(tmp_path, "local-20260101-120000.pgn",
+                      moves="1. e4 e5 2. Nf3 Nc6 3. Bc4 Bc5")
+    review = _enter_review(make_app(), path).review
+    assert review._custom_start is False
+    assert review.board.review_ply == 0
+    assert review._debut_line() is None
+    review.board.jump_to_review_ply(None)
+    assert review._debut_line() == ("C50", "Italian Game: Giuoco Piano")
+
+
+def test_review_hides_debut_for_setup_fen_pgn(tmp_path):
+    start_fen = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
+    path = tmp_path / "custom.pgn"
+    path.write_text(
+        '[White "a"]\n[Black "b"]\n[Result "*"]\n[TimeControl "-"]\n'
+        f'[SetUp "1"]\n[FEN "{start_fen}"]\n\n1. e4 e5 2. Nf3 Nc6 3. Bc4 Bc5 *\n',
+        encoding="utf-8",
+    )
+    review = _enter_review(make_app(), path).review
+    assert review._custom_start is True
+    review.board.jump_to_review_ply(None)
+    assert review._debut_line() is None

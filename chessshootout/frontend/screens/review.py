@@ -3,6 +3,7 @@ import logging
 import pygame as pg
 
 from chessshootout.backend.pieces import opponent_of
+from chessshootout.domain import openings
 from chessshootout.domain.capture_summary import captured_by, material_advantage
 from chessshootout.domain.match import Match
 from chessshootout.domain.pgn.load import (
@@ -45,6 +46,8 @@ class ReviewScreen(Screen):
         self._return_to = "menu"
         self._skillcheck_log = []
         self._pgn_path = None
+        self._custom_start = False
+        self._debut_memo = None
         self.backdrop = ArenaBackdrop()
 
         self.match = Match()
@@ -56,6 +59,7 @@ class ReviewScreen(Screen):
             "open_pgn": self._on_open_pgn,
         }, board=self.board, buttons_provider=lambda: REVIEW_CAPS,
             whiffs_provider=self._skillcheck_whiffs,
+            debut_provider=self._debut_line,
             sounds=app.sound_manager, caps_stacked=True)
         self.strip_top = ReviewStrip(window)
         self.strip_bottom = ReviewStrip(window)
@@ -65,9 +69,11 @@ class ReviewScreen(Screen):
         return self.app.window
 
     def enter(self, **payload):
+        openings.preload()
         self._return_to = payload.get("return_to", "menu")
         path = payload["pgn_path"]
         self._pgn_path = path
+        self._debut_memo = None
         text = self._read_pgn(path)
         if text is None:
             self._fail(path, "could not read file")
@@ -80,6 +86,8 @@ class ReviewScreen(Screen):
         self.black_name = parsed.headers.get("Black", "Player 2")
         self._time_control = parse_time_control(parsed.headers.get("TimeControl", "-"))
         self._pgn_result_tag = parsed.result
+        self._custom_start = (parsed.headers.get("SetUp") == "1"
+                              or "FEN" in parsed.headers)
         self._rebuild_skillcheck_log(parsed.move_comments)
         self.board.reset_for_new_game()
         self.right_menu.reset_for_new_game()
@@ -221,6 +229,17 @@ class ReviewScreen(Screen):
             "advantage": material_advantage(history, color),
             "captured_color": opponent_of(color),
         }
+
+    def _debut_line(self):
+        if self._custom_start:
+            return None
+        key = (len(self.match.move_history), self.board.review_ply)
+        if self._debut_memo is not None and self._debut_memo[0] == key:
+            return self._debut_memo[1]
+        sans = [entry.san for entry in self.board.reviewed_history()]
+        result = openings.lookup(sans)
+        self._debut_memo = (key, result)
+        return result
 
     def _rebuild_skillcheck_log(self, move_comments):
         self._skillcheck_log = []

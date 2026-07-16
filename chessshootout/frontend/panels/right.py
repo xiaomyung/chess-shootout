@@ -82,6 +82,12 @@ LOG_ROWS_GAP = 6
 MOVE_CELL_CUT = 8
 MICRO_FONT_PT = 9
 
+DEBUT_NAME_PT = 10
+DEBUT_NAME_FLOOR = 9
+DEBUT_ROW_GAP = 4
+DEBUT_ECO_GAP = 6
+MARQUEE_EASE = 0.12
+
 SECTION_HEADER_PT = 9
 SECTION_HEADER_VPAD = 6
 SECTION_DIVIDER_TOP = 8
@@ -185,6 +191,7 @@ class RightMenu:
     def __init__(self, window, match, callbacks, board=None,
                  buttons_provider=None,
                  disabled_keys_provider=None, whiffs_provider=None,
+                 debut_provider=None,
                  sounds=None, chat_visible_provider=None, caps_stacked=False):
         self.window = window
         self.match = match
@@ -193,10 +200,12 @@ class RightMenu:
         self.buttons_provider = buttons_provider or (lambda: CAPS)
         self.disabled_keys_provider = disabled_keys_provider or (lambda: set())
         self.whiffs_provider = whiffs_provider or (lambda: {})
+        self.debut_provider = debut_provider or (lambda: None)
         self.sounds = sounds
         self.chat_visible_provider = chat_visible_provider or (lambda: False)
         self.caps_stacked = caps_stacked
         self._pair_to_row = {}
+        self._marquee_off = 0.0
 
         self.padding = 10
         self.moves_font_factor = 24
@@ -209,6 +218,7 @@ class RightMenu:
         self.pill_font = get_font(11, bold=True)
         self.round_font = get_font(11, bold=True)
         self.micro_font = get_font(MICRO_FONT_PT, bold=True, mono=True)
+        self.debut_name_font = get_font(DEBUT_NAME_PT, bold=True, mono=True)
         self.section_font = get_font(SECTION_HEADER_PT, mono=True, bold=True)
         self.cap_label_font = get_font(CAP_LABEL_PT, bold=True)
         self.tooltip_font = get_font(TOOLTIP_PT, mono=True)
@@ -271,6 +281,8 @@ class RightMenu:
         self.pill_font = get_font(max(int(rect.width / self.pill_font_factor), 9), bold=True)
         self.round_font = get_font(max(int(rect.width / self.pill_font_factor), 9), bold=True)
         self.micro_font = get_font(scale_floor(MICRO_FONT_PT, scale, 8), bold=True, mono=True)
+        self.debut_name_font = get_font(
+            scale_floor(DEBUT_NAME_PT, scale, DEBUT_NAME_FLOOR), bold=True, mono=True)
         self.section_font = get_font(
             scale_floor(SECTION_HEADER_PT, scale, 7), mono=True, bold=True)
         self.cap_label_font = get_font(scale_floor(CAP_LABEL_PT, scale, 10), bold=True)
@@ -401,6 +413,7 @@ class RightMenu:
         self.scroll.cancel()
         self.scroll.last_activity_ms = 0
         self._last_review_ply = None
+        self._marquee_off = 0.0
 
     def draw_menu(self):
         self.scroll.tick()
@@ -517,10 +530,46 @@ class RightMenu:
         ly = rect.y + scale_floor(LOG_HEADER_TOP, self.scale, 6)
         self.window.blit(label, (rect.x + pad, ly))
         self.window.blit(count, (rect.right - pad - count.get_width(), ly))
-        sep_y = ly + label.get_height() + scale_floor(LOG_SEP_GAP, self.scale, 4)
+        cursor = ly + label.get_height()
+        debut = self.debut_provider()
+        if debut is not None:
+            cursor = self._draw_debut_row(
+                rect, debut, cursor + scale_floor(DEBUT_ROW_GAP, self.scale, 3))
+        else:
+            self._marquee_off = 0.0
+        sep_y = cursor + scale_floor(LOG_SEP_GAP, self.scale, 4)
         self.window.blit(dashed_hline(rect.width - 2 * pad, Colors.border),
                          (rect.x + pad, sep_y))
         return sep_y + scale_floor(LOG_ROWS_GAP, self.scale, 4) - rect.y
+
+    def _draw_debut_row(self, rect, debut, y):
+        pad = self.padding
+        eco, name = debut
+        eco_surf = render_text(self.micro_font, eco, Colors.text_muted)
+        name_surf = render_text(self.debut_name_font, name.upper(), Colors.text_dim)
+        row_h = max(eco_surf.get_height(), name_surf.get_height())
+        eco_x = rect.x + pad
+        name_x = eco_x + eco_surf.get_width() + scale_floor(DEBUT_ECO_GAP, self.scale, 4)
+        avail = rect.right - pad - name_x
+        self.window.blit(eco_surf, (eco_x, y + (row_h - eco_surf.get_height()) // 2))
+        name_y = y + (row_h - name_surf.get_height()) // 2
+        text_w = name_surf.get_width()
+        if text_w <= avail or avail <= 0:
+            self._marquee_off = 0.0
+            self.window.blit(name_surf, (name_x, name_y))
+            return y + row_h
+        row_rect = pg.Rect(eco_x, y, rect.width - 2 * pad, row_h)
+        hovered = row_rect.collidepoint(pg.mouse.get_pos())
+        target = float(text_w - avail) if hovered else 0.0
+        self._marquee_off += (target - self._marquee_off) * MARQUEE_EASE
+        prev_clip = self.window.get_clip()
+        clip = pg.Rect(name_x, y, avail, row_h)
+        if prev_clip is not None:
+            clip = clip.clip(prev_clip)
+        self.window.set_clip(clip)
+        self.window.blit(name_surf, (name_x - int(self._marquee_off), name_y))
+        self.window.set_clip(prev_clip)
+        return y + row_h
 
     def _draw_moves(self, rect):
         header_h = self._draw_log_header(rect)

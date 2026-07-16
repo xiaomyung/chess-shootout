@@ -11,6 +11,7 @@ import pytest
 from tests.conftest import pygame_display
 from chessshootout.backend.pieces import PieceType
 from chessshootout.backend.utils import Square
+from chessshootout.domain import openings
 from chessshootout.domain.match import ONLINE, SINGLE_SCREEN
 from chessshootout.domain.premoves import Premove
 from chessshootout.frontend.frontend import Frontend
@@ -164,3 +165,54 @@ def test_s_key_toggles_signals_section():
     assert SECTION_OPEN["signals"] is True
     assert app.game.handle_key(_key(pg.K_s)) is True
     assert SECTION_OPEN["signals"] is False
+
+
+def _play_giuoco(game):
+    for san in ["e4", "e5", "Nf3", "Nc6", "Bc4", "Bc5"]:
+        assert game.match.apply_san(san).legal
+
+
+def test_live_game_reports_opening_name():
+    app = _make_app()
+    start_single_screen(app, time_minutes=None)
+    _play_giuoco(app.game)
+    assert app.game._debut_line() == ("C50", "Italian Game: Giuoco Piano")
+
+
+def test_debut_provider_truncates_sans_when_browsing_back(monkeypatch):
+    app = _make_app()
+    start_single_screen(app, time_minutes=None)
+    game = app.game
+    _play_giuoco(game)
+    captured = []
+    monkeypatch.setattr(openings, "lookup",
+                        lambda sans: captured.append(list(sans)))
+    game._debut_memo = None
+    game.board.jump_to_review_ply(4)
+    game._debut_line()
+    assert captured == [["e4", "e5", "Nf3", "Nc6"]], \
+        "browsing back feeds the truncated line to the opening lookup"
+
+
+def test_custom_fen_game_skips_opening_lookup(monkeypatch):
+    app = _make_app()
+    app.request_nav(Nav("game", {"fen": SPARSE_FEN}))
+    app._execute_pending_nav()
+    game = app.game
+    called = []
+    monkeypatch.setattr(openings, "lookup", lambda sans: called.append(sans))
+    assert game._custom_start is True
+    assert game._debut_line() is None
+    assert called == [], "a custom-FEN start never consults the opening book"
+
+
+def test_new_game_after_fen_restores_opening_detection():
+    app = _make_app()
+    app.request_nav(Nav("game", {"fen": SPARSE_FEN}))
+    app._execute_pending_nav()
+    game = app.game
+    assert game._custom_start is True
+    app._on_new_game()
+    assert game._custom_start is False
+    assert game.match.apply_san("e4").legal
+    assert game._debut_line() is not None
