@@ -302,7 +302,9 @@ def draw_undo_arrow(window, rect, color):
                lambda: supersample(side, render, scale=ICON_SUPERSAMPLE))
 
 
-_RESIGN_FLAG = [(7, 4.8), (19.6, 8.8), (7, 11.4)]
+_RESIGN_FLAG = [(8.2, 4.2), (18.8, 5.2), (16.2, 8.0), (18.8, 10.8), (8.2, 11.8)]
+_RESIGN_POLE_X = 7.2
+_RESIGN_BASE = ((4.6, 20.6), (9.8, 20.6))
 
 
 def draw_resign_flag(window, rect, color):
@@ -314,7 +316,10 @@ def draw_resign_flag(window, rect, color):
     def render(surf, k):
         u = side * k / ICON_GRID
         pole = max(int(2.0 * u), 2)
-        pg.draw.line(surf, col, (7 * u, 3.4 * u), (7 * u, 20.6 * u), pole)
+        px = _RESIGN_POLE_X
+        pg.draw.line(surf, col, (px * u, 3.2 * u), (px * u, 20.6 * u), pole)
+        (bx1, by), (bx2, _) = _RESIGN_BASE
+        pg.draw.line(surf, col, (bx1 * u, by * u), (bx2 * u, by * u), pole)
         pg.draw.polygon(surf, col, [(x * u, y * u) for x, y in _RESIGN_FLAG])
 
     _blit_icon(window, rect, side, ("resign_flag", side, str(color)),
