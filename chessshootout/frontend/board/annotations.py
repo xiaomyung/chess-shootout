@@ -5,6 +5,7 @@ import pygame as pg
 from chessshootout.backend.utils import Square
 from chessshootout.frontend.visual.colors import Colors
 from chessshootout.frontend.visual.draw import supersample
+from chessshootout.server.protocol import MAX_SHARED_ARROWS
 
 
 class Annotations:
@@ -12,18 +13,24 @@ class Annotations:
         self.board = board
         self.highlighted_squares = set()
         self.arrows = []
+        self.opp_highlighted_squares = set()
+        self.opp_arrows = []
         self._arrow_cache = None
         self._right_drag_start_square = None
 
     def toggle_highlight(self, sq):
         self.highlighted_squares ^= {sq}
+        return sq in self.highlighted_squares
 
     def toggle_arrow(self, from_sq, to_sq):
         arrow = (from_sq, to_sq)
         if arrow in self.arrows:
             self.arrows.remove(arrow)
-        else:
-            self.arrows.append(arrow)
+            return False
+        if len(self.arrows) >= MAX_SHARED_ARROWS:
+            return False
+        self.arrows.append(arrow)
+        return True
 
     def is_square_annotated(self, sq):
         return sq in self.highlighted_squares or any(
@@ -34,6 +41,14 @@ class Annotations:
         self.highlighted_squares = set()
         self.arrows = []
         self._right_drag_start_square = None
+
+    def clear_opp(self):
+        self.opp_highlighted_squares = set()
+        self.opp_arrows = []
+
+    def clear_all(self):
+        self.clear()
+        self.clear_opp()
 
     def begin_right_press(self, pos):
         sq = self.board.cell_at(pos)
@@ -46,20 +61,22 @@ class Annotations:
         start = self._right_drag_start_square
         self._right_drag_start_square = None
         if start is None:
-            return
+            return None
         end = self.board.cell_at(pos)
         if end is None:
-            return
+            return None
         if end == start:
-            self.toggle_highlight(start)
-        else:
-            self.toggle_arrow(start, end)
+            return ("highlight", start, self.toggle_highlight(start))
+        return ("arrow", start, end, self.toggle_arrow(start, end))
 
     def _draw_annotation_highlights(self):
         board = self.board
         for sq in self.highlighted_squares:
             rect = board._cell_rect(sq.row, sq.col)
             board.window.blit(board._cell_overlay(Colors.annotation_highlight), rect.topleft)
+        for sq in self.opp_highlighted_squares:
+            rect = board._cell_rect(sq.row, sq.col)
+            board.window.blit(board._cell_overlay(Colors.annotation_highlight_opp), rect.topleft)
 
     def _draw_arrows(self):
         board = self.board
@@ -67,6 +84,7 @@ class Annotations:
             self._arrow_cache = None
             return
         items = [(fr, to, Colors.annotation_arrow) for fr, to in self.arrows]
+        items += [(fr, to, Colors.annotation_arrow_opp) for fr, to in self.opp_arrows]
         if self._right_drag_start_square is not None:
             end_sq = board.cell_at(pg.mouse.get_pos())
             if end_sq is not None and end_sq != self._right_drag_start_square:

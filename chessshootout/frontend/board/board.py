@@ -195,7 +195,7 @@ class Board:
         self.effects.clear()
         self.clear_premoves()
         self.aim_suppressed_square = None
-        self.clear_annotations()
+        self.clear_all_annotations()
         self.end_press()
         self.review_ply = None
 
@@ -506,10 +506,10 @@ class Board:
         return None
 
     def toggle_highlight(self, sq):
-        self.annotations.toggle_highlight(sq)
+        return self.annotations.toggle_highlight(sq)
 
     def toggle_arrow(self, from_sq, to_sq):
-        self.annotations.toggle_arrow(from_sq, to_sq)
+        return self.annotations.toggle_arrow(from_sq, to_sq)
 
     def is_square_annotated(self, sq):
         return self.annotations.is_square_annotated(sq)
@@ -517,11 +517,14 @@ class Board:
     def clear_annotations(self):
         self.annotations.clear()
 
+    def clear_all_annotations(self):
+        self.annotations.clear_all()
+
     def begin_right_press(self, pos):
         return self.annotations.begin_right_press(pos)
 
     def end_right_press(self, pos):
-        self.annotations.end_right_press(pos)
+        return self.annotations.end_right_press(pos)
 
     def _draw_annotation_highlights(self):
         self.annotations._draw_annotation_highlights()
@@ -1140,7 +1143,7 @@ class Board:
         self._target_ply = None
         self.cancel_animations()
         self.effects.cut(pg.time.get_ticks())
-        self.clear_annotations()
+        self.clear_all_annotations()
         entry = self.match.move_history[-1]
         moving_piece = entry.move.piece
 

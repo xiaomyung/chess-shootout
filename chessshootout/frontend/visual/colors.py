@@ -54,6 +54,9 @@ class Colors:
     avatar_rose = "#e85a86"
     avatar_cyan = "#29c2d9"
 
+    annotation_highlight_opp = avatar_blue + "57"
+    annotation_arrow_opp = avatar_blue + "c7"
+
     white_tile = "#828b99"
     black_tile = "#2e333b"
     rim_light = "#e9e2d4"

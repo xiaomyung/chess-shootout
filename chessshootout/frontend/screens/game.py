@@ -601,7 +601,7 @@ class GameScreen(Screen):
         had_premoves = bool(self.board.premoves)
         self.board.clear_premoves()
         had_annotations = bool(self.board.highlighted_squares or self.board.arrows)
-        self.board.clear_annotations()
+        self.board.clear_all_annotations()
         overlay_active = self.skillcheck_overlay.is_active()
         if overlay_active:
             self.skillcheck_session.teardown_skillcheck_overlay()
