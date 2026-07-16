@@ -117,6 +117,7 @@ class Board:
         self.skillcheck_gate = None
         self.skillcheck_armed = None
         self.locked_targets = None
+        self.auto_queen_provider = lambda: False
 
         self.rect = pg.Rect(0, 0, 0, 0)
         self.frame_pad = 0
@@ -311,6 +312,9 @@ class Board:
             self._promotion_from = None
             self._resolve_promotion_pick(from_sq, sq, ptype)
             return
+        self._promote_landed(sq, ptype)
+
+    def _promote_landed(self, sq, ptype):
         self.match.promote(sq, ptype)
         self.pending_promotion_square = None
         self._promotion_rects = {}
@@ -963,7 +967,10 @@ class Board:
             if self._skillcheck_armed() and self._is_promotion_move(from_sq, square):
                 if self.locked_targets is not None and self.locked_targets(from_sq, square):
                     return None
-                self._begin_promotion_pick(from_sq, square)
+                if self.auto_queen_provider():
+                    self._resolve_promotion_pick(from_sq, square, PieceType.QUEEN)
+                else:
+                    self._begin_promotion_pick(from_sq, square)
                 return "promotion"
             if self.skillcheck_gate is not None and self.skillcheck_gate(from_sq, square):
                 return "skillcheck"
@@ -1177,6 +1184,9 @@ class Board:
             self.start_animation(rook_post, rook_home, rook_piece)
 
     def _set_pending_promotion(self, sq):
+        if self.auto_queen_provider():
+            self._promote_landed(sq, PieceType.QUEEN)
+            return
         self.pending_promotion_square = sq
 
     def _fire_move_landed(self):

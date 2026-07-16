@@ -51,6 +51,9 @@ class SettingsController:
     def _commit_master_volume(self):
         env.set_master_volume(self.frontend.sound_manager.master_volume)
 
+    def defer_master_volume_write(self):
+        self._defer_env_write("master_volume", self._commit_master_volume)
+
     def _commit_menu_volume(self):
         env.set_menu_volume(self.frontend.sound_manager.menu_volume)
 
@@ -115,6 +118,9 @@ class SettingsController:
                 SegmentedRow("Default increment", "Seconds added each move",
                              incr_options, env.get_default_increment,
                              env.set_default_increment, mono=True, variant="cells"),
+                ToggleRow("Auto-queen",
+                          "Promotions auto-pick the queen — the skill check still fires",
+                          env.get_auto_queen, env.set_auto_queen),
                 self._data_folder_row,
             ]),
             ("Online", [

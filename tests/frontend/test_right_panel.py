@@ -6,6 +6,7 @@ per-frame re-snap that would fight manual scrollback."""
 from unittest.mock import MagicMock
 
 import pygame as pg
+import pytest
 
 from tests.conftest import pygame_display
 from tests.helpers import scan_region
@@ -14,7 +15,7 @@ from chessshootout.backend.pieces import Piece, PieceType, PieceColor
 from chessshootout.backend.utils import Square, Move, HistoryEntry
 from chessshootout.frontend.panels.right import (
     RightMenu, CARD_INSET, CAPS, REVIEW_CAPS, SECTION_OPEN,
-    LOG_HEADER_TOP, DEBUT_ROW_GAP,
+    LOG_HEADER_TOP, DEBUT_ROW_GAP, SIGNAL_NOTCH_COUNT,
 )
 from chessshootout.frontend.visual.colors import Colors
 from chessshootout.frontend.visual.draw import dashed_hline, scale_floor
@@ -384,6 +385,152 @@ def test_debut_marquee_slides_on_hover_and_eases_back(monkeypatch):
         rm.window.fill((0, 0, 0))
         rm.draw_menu()
     assert rm._marquee_off < peak, "the offset eases back toward 0 once the mouse leaves"
+
+
+# --- SIGNALS section: SHARE / AUTO-Q / SOUND chips + VOL notch row -----------
+
+_SIGNAL_STATE = {
+    "share_on": False, "share_enabled": True, "auto_q": False,
+    "sound_on": True, "volume": 0.5, "review": False,
+}
+
+
+def _signals_menu(state, **callbacks):
+    backend = Backend()
+    backend.new_game()
+    cb = {"share_toggle": lambda: None, "auto_q_toggle": lambda: None,
+          "sound_toggle": lambda: None, "set_volume": lambda v: None}
+    cb.update(callbacks)
+    rm = RightMenu(pg.display.get_surface(), backend, cb,
+                   signals_provider=lambda: dict(state))
+    rm.set_rect(pg.Rect(0, 0, 320, 640))
+    return rm
+
+
+def _signal_chip(rm, key):
+    return next(rect for chip, rect in rm._signal_chips if chip.key == key)
+
+
+def _draw(rm):
+    rm.window.fill((0, 0, 0))
+    rm.draw_menu()
+
+
+def test_signals_chips_render_all_three_live():
+    state = dict(_SIGNAL_STATE)
+    rm = _signals_menu(state)
+    _draw(rm)
+    assert [chip.key for chip, _ in rm._signal_chips] == ["share", "auto_q", "sound"]
+
+
+def test_review_signals_show_only_the_sound_chip():
+    state = dict(_SIGNAL_STATE, review=True)
+    rm = _signals_menu(state)
+    _draw(rm)
+    assert [chip.key for chip, _ in rm._signal_chips] == ["sound"]
+
+
+def test_signal_chip_on_paints_its_on_color_dot():
+    """An ON chip wears a solid on-color status dot; OFF it is a muted border dot,
+    so the on-colour never appears inside an OFF chip."""
+    state = dict(_SIGNAL_STATE, auto_q=True)
+    rm = _signals_menu(state)
+    _draw(rm)
+    rect = _signal_chip(rm, "auto_q")
+    assert _has_color(rm.window, rect, pg.Color(Colors.accent)[:3], tol=12), \
+        "the ON AUTO-Q chip shows an accent dot"
+    state["auto_q"] = False
+    _draw(rm)
+    assert not _has_color(rm.window, rect, pg.Color(Colors.accent)[:3], tol=12), \
+        "the OFF chip carries no accent"
+
+
+def test_disabled_share_chip_is_inert_on_click():
+    """SHARE is disabled off the board (local/bot): a click swallows but never
+    fires the callback."""
+    fired = []
+    state = dict(_SIGNAL_STATE, share_enabled=False)
+    rm = _signals_menu(state, share_toggle=lambda: fired.append("share"))
+    _draw(rm)
+    rect = _signal_chip(rm, "share")
+    assert rm.handle_click(rect.center) is True
+    assert fired == [], "the disabled SHARE chip swallows the click but never fires"
+
+
+def test_live_chip_click_fires_callback_and_chip_toggle_sound():
+    fired = []
+    sounds = MagicMock()
+    state = dict(_SIGNAL_STATE)
+    backend = Backend()
+    backend.new_game()
+    rm = RightMenu(pg.display.get_surface(), backend,
+                   {"auto_q_toggle": lambda: fired.append("auto_q"),
+                    "share_toggle": lambda: None, "sound_toggle": lambda: None,
+                    "set_volume": lambda v: None},
+                   signals_provider=lambda: dict(state), sounds=sounds)
+    rm.set_rect(pg.Rect(0, 0, 320, 640))
+    _draw(rm)
+    assert rm.handle_click(_signal_chip(rm, "auto_q").center) is True
+    assert fired == ["auto_q"]
+    sounds.play_chip_toggle.assert_called_once()
+
+
+def _notch_center(rm, i):
+    band = rm._signal_notch_band
+    return (band.x + i * rm._signal_notch_step + rm._signal_notch_step // 2, band.centery)
+
+
+def test_vol_notch_click_sets_that_level():
+    vols = []
+    state = dict(_SIGNAL_STATE, volume=0.0)
+    rm = _signals_menu(state, set_volume=vols.append)
+    _draw(rm)
+    assert rm.handle_click(_notch_center(rm, 6)) is True
+    assert vols == [pytest.approx(0.7)]
+    rm.handle_click(_notch_center(rm, SIGNAL_NOTCH_COUNT - 1))
+    assert vols[-1] == pytest.approx(1.0)
+
+
+def test_vol_first_notch_zero_toggles_only_from_ten_percent():
+    vols = []
+    state = dict(_SIGNAL_STATE, volume=0.1)
+    rm = _signals_menu(state, set_volume=vols.append)
+    _draw(rm)
+    rm.handle_click(_notch_center(rm, 0))
+    assert vols[-1] == pytest.approx(0.0), "re-clicking notch 0 at 10% drops to 0%"
+    state["volume"] = 0.5
+    rm.handle_click(_notch_center(rm, 0))
+    assert vols[-1] == pytest.approx(0.1), "notch 0 from any other level lands 10%, not 0%"
+
+
+def test_sound_off_dims_vol_row_and_makes_notches_inert():
+    vols = []
+    state = dict(_SIGNAL_STATE, sound_on=True, volume=0.8)
+    rm = _signals_menu(state, set_volume=vols.append)
+    _draw(rm)
+    band = rm._signal_notch_band
+    assert _has_color(rm.window, band, pg.Color(Colors.accent)[:3], tol=12), \
+        "a live VOL row paints full-accent filled notches"
+    state["sound_on"] = False
+    _draw(rm)
+    assert not _has_color(rm.window, band, pg.Color(Colors.accent)[:3], tol=12), \
+        "muted, the whole VOL row is dimmed below full accent"
+    assert rm.handle_click(_notch_center(rm, 3)) is True
+    assert vols == [], "a notch click is inert while sound is muted"
+
+
+def test_vol_band_x_is_stable_across_readout_widths():
+    """The N% readout sits in a fixed-width '100%' slot, so the notch band never
+    shifts as the value moves between 0%, 50% and 100%."""
+    state = dict(_SIGNAL_STATE)
+    rm = _signals_menu(state)
+    positions = []
+    for v in (0.0, 0.5, 1.0):
+        state["volume"] = v
+        rm.set_rect(pg.Rect(0, 0, 320, 640))
+        _draw(rm)
+        positions.append(rm._signal_notch_band.x)
+    assert positions[0] == positions[1] == positions[2]
 
 
 def test_rail_tooltip_appears_over_hovered_cap(monkeypatch):

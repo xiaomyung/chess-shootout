@@ -158,6 +158,7 @@ class GameScreen(Screen):
                            on_premove_queued=app.sound_manager.play_premove_queued,
                            shot_callback=self._on_shot_fired,
                            announce_callback=self._on_kill_announced)
+        self.board.auto_queen_provider = env.get_auto_queen
         self.skillcheck = SkillCheckCoordinator()
         self.skillcheck_overlay = SkillCheckOverlay()
         self.skillcheck_session = SkillCheckSession(self)
@@ -182,10 +183,15 @@ class GameScreen(Screen):
             "menu": app._on_back_to_menu,
             "help": app._on_help,
             "give_time": self.give_time.on_give_time,
+            "share_toggle": lambda: None,
+            "auto_q_toggle": self._toggle_auto_queen,
+            "sound_toggle": self._toggle_sound,
+            "set_volume": self._set_signal_volume,
         }, board=self.board, buttons_provider=self._right_menu_buttons,
             disabled_keys_provider=self._right_menu_disabled_keys,
             whiffs_provider=self.skillcheck_session.skillcheck_whiffs,
             debut_provider=self._debut_line,
+            signals_provider=self._signals_provider,
             sounds=app.sound_manager)
         self.player_strip_top = PlayerStrip(window)
         self.player_strip_bottom = PlayerStrip(window)
@@ -1251,6 +1257,28 @@ class GameScreen(Screen):
         if remaining <= 0:
             return None, None
         return label, remaining
+
+    def _signals_provider(self):
+        sm = self.app.sound_manager
+        return {
+            "share_on": False,
+            "share_enabled": self.variant == Variant.ONLINE and self.game_live(),
+            "auto_q": env.get_auto_queen(),
+            "sound_on": sm.enabled,
+            "volume": sm.master_volume,
+            "review": False,
+        }
+
+    def _toggle_auto_queen(self):
+        env.set_auto_queen(not env.get_auto_queen())
+
+    def _toggle_sound(self):
+        sm = self.app.sound_manager
+        sm.set_enabled(not sm.enabled)
+
+    def _set_signal_volume(self, value):
+        self.app.sound_manager.set_master_volume(value)
+        self.app.settings.defer_master_volume_write()
 
     def _right_menu_buttons(self):
         if self.match.clock is None:

@@ -372,6 +372,22 @@ def test_click_routes_to_options_body_not_play_view(app, monkeypatch):
     assert app.menu._active_view == "options"
 
 
+def test_auto_queen_row_lives_in_game_and_writes_env(app, monkeypatch):
+    """The Game section's Auto-queen toggle writes CHESS_AUTO_QUEEN straight through
+    env.get/set_auto_queen; the promotion picker is bypassed but the skill check
+    still fires (enforced in the board tests)."""
+    monkeypatch.delenv("CHESS_AUTO_QUEEN", raising=False)
+    app.menu.goto_view("options")
+    rows = dict(app.menu.views["options"].body.sections)["Game"]
+    auto_row = next(r for r in rows if r.title == "Auto-queen")
+    assert auto_row.getter() is False
+    _draw_row(auto_row, pg.Rect(40, 40, 520, 60))
+    assert auto_row.handle_click(auto_row._ctl.center) is True
+    assert env.get_auto_queen() is True
+    assert auto_row.handle_click(auto_row._ctl.center) is True
+    assert env.get_auto_queen() is False
+
+
 def test_mute_toggle_row_wired_to_sound_manager(app):
     from unittest.mock import MagicMock
     app.sound_manager = MagicMock(enabled=True)

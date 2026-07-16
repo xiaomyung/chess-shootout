@@ -57,9 +57,12 @@ class ReviewScreen(Screen):
             "menu": self._on_menu,
             "flip": self._on_flip,
             "open_pgn": self._on_open_pgn,
+            "sound_toggle": self._toggle_sound,
+            "set_volume": self._set_signal_volume,
         }, board=self.board, buttons_provider=lambda: REVIEW_CAPS,
             whiffs_provider=self._skillcheck_whiffs,
             debut_provider=self._debut_line,
+            signals_provider=self._signals_provider,
             sounds=app.sound_manager, caps_stacked=True)
         self.strip_top = ReviewStrip(window)
         self.strip_bottom = ReviewStrip(window)
@@ -206,6 +209,25 @@ class ReviewScreen(Screen):
 
     def _on_open_pgn(self):
         open_pgn_or_toast(self.app.toast, self._pgn_path)
+
+    def _signals_provider(self):
+        sm = self.app.sound_manager
+        return {
+            "share_on": False,
+            "share_enabled": False,
+            "auto_q": False,
+            "sound_on": sm.enabled,
+            "volume": sm.master_volume,
+            "review": True,
+        }
+
+    def _toggle_sound(self):
+        sm = self.app.sound_manager
+        sm.set_enabled(not sm.enabled)
+
+    def _set_signal_volume(self, value):
+        self.app.sound_manager.set_master_volume(value)
+        self.app.settings.defer_master_volume_write()
 
     def _compute_game_info(self):
         tc = format_time_control(self._time_control) or "∞"

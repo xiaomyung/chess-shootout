@@ -268,6 +268,14 @@ def set_show_frametime(value):
     _set_bool("CHESS_SHOW_FRAMETIME", value)
 
 
+def get_auto_queen():
+    return _get_bool("CHESS_AUTO_QUEEN", False)
+
+
+def set_auto_queen(value):
+    _set_bool("CHESS_AUTO_QUEEN", value)
+
+
 def get_profile_hint_shown():
     return _get_bool("CHESS_PROFILE_HINT_SHOWN", False)
 

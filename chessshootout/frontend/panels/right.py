@@ -8,7 +8,7 @@ from chessshootout.frontend.visual.scroll_view import ScrollView
 from chessshootout.frontend.visual.widgets import draw_pill
 from chessshootout.frontend.visual.draw import (
     cut_rect_surface, rounded_rect_surface, dashed_hline, scale_floor,
-    smoothstep, rotated_chevron_surface,
+    smoothstep, rotated_chevron_surface, dashed_rounded_rect_surface, circle_surface,
 )
 from chessshootout.frontend.visual.icons import (
     draw_undo_arrow, draw_resign_flag, draw_flip_arrows, draw_left_arrow, draw_file,
@@ -112,7 +112,48 @@ TOOLTIP_PAD_X = 8
 TOOLTIP_PAD_Y = 4
 TOOLTIP_GAP = 6
 
+SIGNAL_CHIP_H = 26
+SIGNAL_CHIP_GAP = 7
+SIGNAL_CHIP_DOT = 6
+SIGNAL_CHIP_DOT_GAP = 5
+SIGNAL_CHIP_LABEL_PT = 10
+SIGNAL_CHIP_LABEL_FLOOR = 9
+SIGNAL_ROW_GAP = 8
+SIGNAL_NOTCH_COUNT = 10
+SIGNAL_NOTCH_CELL_W = 13
+SIGNAL_NOTCH_CELL_H = 20
+SIGNAL_NOTCH_GAP = 4
+SIGNAL_NOTCH_CUT = 4
+SIGNAL_VOL_READOUT_PT = 9
+SIGNAL_VOL_GAP = 8
+SIGNAL_ZERO_EPSILON = 0.005
+SIGNAL_DIM_ALPHA = 89
+SIGNAL_SHARE_DISABLED_ALPHA = 102
+SIGNAL_ON_BORDER_ALPHA = "8c"
+
 _CAP_FG_CACHE = new_cache()
+_SIGNAL_CACHE = new_cache()
+
+
+class SignalChip(NamedTuple):
+    key: str
+    label: str
+    on_color: str
+    state_key: str
+    callback: str
+    tooltip: str
+
+
+SIGNAL_CHIPS = [
+    SignalChip("share", "SHARE", Colors.amber, "share_on", "share_toggle",
+               "SHARE MARKS — BROADCAST YOUR DRAWINGS"),
+    SignalChip("auto_q", "AUTO-Q", Colors.accent, "auto_q", "auto_q_toggle",
+               "AUTO-QUEEN — PROMOTIONS PICK QUEEN"),
+    SignalChip("sound", "SOUND", Colors.accent, "sound_on", "sound_toggle",
+               "SOUND — MUTE ALL"),
+]
+REVIEW_SIGNAL_CHIPS = [chip for chip in SIGNAL_CHIPS if chip.key == "sound"]
+SIGNAL_VOL_TOOLTIP = "VOLUME — CLICK A NOTCH; FIRST NOTCH TOGGLES 0%"
 
 
 class SectionBlock(NamedTuple):
@@ -191,7 +232,7 @@ class RightMenu:
     def __init__(self, window, match, callbacks, board=None,
                  buttons_provider=None,
                  disabled_keys_provider=None, whiffs_provider=None,
-                 debut_provider=None,
+                 debut_provider=None, signals_provider=None,
                  sounds=None, chat_visible_provider=None, caps_stacked=False):
         self.window = window
         self.match = match
@@ -201,6 +242,7 @@ class RightMenu:
         self.disabled_keys_provider = disabled_keys_provider or (lambda: set())
         self.whiffs_provider = whiffs_provider or (lambda: {})
         self.debut_provider = debut_provider or (lambda: None)
+        self.signals_provider = signals_provider
         self.sounds = sounds
         self.chat_visible_provider = chat_visible_provider or (lambda: False)
         self.caps_stacked = caps_stacked
@@ -221,6 +263,8 @@ class RightMenu:
         self.debut_name_font = get_font(DEBUT_NAME_PT, bold=True, mono=True)
         self.section_font = get_font(SECTION_HEADER_PT, mono=True, bold=True)
         self.cap_label_font = get_font(CAP_LABEL_PT, bold=True)
+        self.chip_font = get_font(SIGNAL_CHIP_LABEL_PT, bold=True, mono=True)
+        self.signal_num_font = get_font(SIGNAL_VOL_READOUT_PT, mono=True)
         self.tooltip_font = get_font(TOOLTIP_PT, mono=True)
         self._glyph_fonts = {
             spec: get_font(spec[0], mono=True, bold=spec[1]) for spec in _GLYPH_SPECS
@@ -233,6 +277,10 @@ class RightMenu:
         self.button_rects = {}
         self._section_blocks = []
         self._cap_draws = []
+        self._signal_chips = []
+        self._signal_vol_rect = pg.Rect(0, 0, 0, 0)
+        self._signal_notch_band = pg.Rect(0, 0, 0, 0)
+        self._signal_notch_step = 1
         self._chevron_anim = {}
         self.rail_tooltip = RailTooltip()
         self.game_info = None
@@ -286,6 +334,10 @@ class RightMenu:
         self.section_font = get_font(
             scale_floor(SECTION_HEADER_PT, scale, 7), mono=True, bold=True)
         self.cap_label_font = get_font(scale_floor(CAP_LABEL_PT, scale, 10), bold=True)
+        self.chip_font = get_font(
+            scale_floor(SIGNAL_CHIP_LABEL_PT, scale, SIGNAL_CHIP_LABEL_FLOOR),
+            bold=True, mono=True)
+        self.signal_num_font = get_font(scale_floor(SIGNAL_VOL_READOUT_PT, scale, 8), mono=True)
         self.tooltip_font = get_font(scale_floor(TOOLTIP_PT, scale, 8), mono=True)
         self._glyph_fonts = {
             spec: get_font(scale_floor(spec[0], scale, max(spec[0] - 4, 8)),
@@ -337,6 +389,7 @@ class RightMenu:
         y = stack_top
         self._section_blocks = []
         self._cap_draws = []
+        self._signal_chips = []
         self.button_rects = {}
         for key, body_h, block_h in metas:
             divider_y = y + div_top
@@ -349,6 +402,8 @@ class RightMenu:
                 self._cap_draws = self._layout_caps(self.buttons_provider(), body)
                 for cap, cap_rect in self._cap_draws:
                     self.button_rects[cap.key] = cap_rect
+            elif key == "signals" and show_body:
+                self._layout_signals(body)
             y += block_h
         return stack_top
 
@@ -358,8 +413,15 @@ class RightMenu:
         return [key for key in SECTION_ORDER if key != "chat"]
 
     def _section_body_height(self, key):
-        if key != "actions" or not SECTION_OPEN.get(key, True):
+        if not SECTION_OPEN.get(key, True):
             return 0
+        if key == "actions":
+            return self._actions_body_height()
+        if key == "signals":
+            return self._signals_body_height()
+        return 0
+
+    def _actions_body_height(self):
         caps = self.buttons_provider()
         if not caps:
             return 0
@@ -369,6 +431,15 @@ class RightMenu:
             gap = scale_floor(CAP_GAP, self.scale, 5)
             return body_top + len(caps) * cap_h + (len(caps) - 1) * gap
         return body_top + scale_floor(CAP_H_GAME, self.scale, 30)
+
+    def _signals_body_height(self):
+        if self.signals_provider is None:
+            return 0
+        body_top = scale_floor(SECTION_BODY_TOP, self.scale, 4)
+        chip_h = scale_floor(SIGNAL_CHIP_H, self.scale, 20)
+        gap = scale_floor(SIGNAL_ROW_GAP, self.scale, 5)
+        vol_h = scale_floor(SIGNAL_NOTCH_CELL_H, self.scale, 14)
+        return body_top + chip_h + gap + vol_h
 
     def _layout_caps(self, caps, body):
         result = []
@@ -390,6 +461,34 @@ class RightMenu:
             result.append((cap, pg.Rect(round(x), top, round(cap_w), cap_h)))
             x += cap_w + gap
         return result
+
+    def _layout_signals(self, body):
+        chips = REVIEW_SIGNAL_CHIPS if self.signals_provider()["review"] else SIGNAL_CHIPS
+        body_top = scale_floor(SECTION_BODY_TOP, self.scale, 4)
+        chip_h = scale_floor(SIGNAL_CHIP_H, self.scale, 20)
+        gap = scale_floor(SIGNAL_CHIP_GAP, self.scale, 4)
+        chip_w = (body.width - gap * (len(chips) - 1)) / len(chips)
+        top = body.y + body_top
+        x = float(body.x)
+        self._signal_chips = []
+        for chip in chips:
+            self._signal_chips.append((chip, pg.Rect(round(x), top, round(chip_w), chip_h)))
+            x += chip_w + gap
+        vol_top = top + chip_h + scale_floor(SIGNAL_ROW_GAP, self.scale, 5)
+        vol_h = scale_floor(SIGNAL_NOTCH_CELL_H, self.scale, 14)
+        self._signal_vol_rect = pg.Rect(body.x, vol_top, body.width, vol_h)
+        x0, cell_w, notch_gap, total = self._vol_geometry(body.width)
+        self._signal_notch_step = cell_w + notch_gap
+        self._signal_notch_band = pg.Rect(body.x + x0, vol_top, total, vol_h)
+
+    def _vol_geometry(self, width):
+        cell_w = scale_floor(SIGNAL_NOTCH_CELL_W, self.scale, 8)
+        gap = scale_floor(SIGNAL_NOTCH_GAP, self.scale, 2)
+        total = SIGNAL_NOTCH_COUNT * cell_w + (SIGNAL_NOTCH_COUNT - 1) * gap
+        slot_w = self.signal_num_font.size("100%")[0]
+        readout_gap = scale_floor(SIGNAL_VOL_GAP, self.scale, 5)
+        x0 = width - slot_w - readout_gap - total
+        return x0, cell_w, gap, total
 
     def _info_section_height(self):
         if self.game_info is None:
@@ -480,6 +579,9 @@ class RightMenu:
                         self.sounds.play_cap_press()
                     callback()
                 return True
+        signal = self._handle_signal_click(pos)
+        if signal is not None:
+            return signal
         for block in self._section_blocks:
             if block.header.collidepoint(pos):
                 self.toggle_section(block.key)
@@ -714,6 +816,7 @@ class RightMenu:
             self.rail_tooltip.register(
                 ("section", block.key), block.header, SECTION_TOOLTIPS[block.key])
         self._draw_caps()
+        self._draw_signals()
         self.rail_tooltip.draw(
             self.window, self.outer_rect, self.scale, now, self.tooltip_font)
 
@@ -797,3 +900,113 @@ class RightMenu:
                 surf.set_alpha(FADED_ICON_ALPHA)
             return surf
         return memoized_surface(_CAP_FG_CACHE, key, build)
+
+    def _draw_signals(self):
+        if not self._signal_chips:
+            return
+        state = self.signals_provider()
+        for chip, rect in self._signal_chips:
+            on = bool(state.get(chip.state_key))
+            disabled = chip.key == "share" and not state.get("share_enabled")
+            self.window.blit(
+                self._chip_surface(chip, rect.width, rect.height, on, disabled),
+                rect.topleft)
+            self.rail_tooltip.register(("signal", chip.key), rect, chip.tooltip)
+        self._draw_vol_row(state)
+
+    def _chip_surface(self, chip, w, h, on, disabled):
+        key = ("chip", chip.key, w, h, on, disabled, self.chip_font.get_height())
+
+        def build():
+            if disabled:
+                surf = rounded_rect_surface((w, h), h, Colors.surface_raised).copy()
+                surf.blit(dashed_rounded_rect_surface((w, h), h, Colors.border), (0, 0))
+                dot_color, label_color = Colors.border_strong, Colors.text_muted
+            else:
+                border = (chip.on_color + SIGNAL_ON_BORDER_ALPHA) if on else Colors.border
+                surf = rounded_rect_surface(
+                    (w, h), h, Colors.surface_raised, border=border, border_width=1).copy()
+                dot_color = chip.on_color if on else Colors.border_strong
+                label_color = Colors.text if on else Colors.text_muted
+            dot = circle_surface(scale_floor(SIGNAL_CHIP_DOT, self.scale, 5), dot_color)
+            label = render_text(self.chip_font, chip.label, label_color)
+            inner = scale_floor(SIGNAL_CHIP_DOT_GAP, self.scale, 3)
+            gx = (w - (dot.get_width() + inner + label.get_width())) // 2
+            surf.blit(dot, (gx, (h - dot.get_height()) // 2))
+            surf.blit(label, (gx + dot.get_width() + inner, (h - label.get_height()) // 2))
+            if disabled:
+                surf.set_alpha(SIGNAL_SHARE_DISABLED_ALPHA)
+            return surf
+        return memoized_surface(_SIGNAL_CACHE, key, build)
+
+    def _draw_vol_row(self, state):
+        rect = self._signal_vol_rect
+        if rect.width <= 0:
+            return
+        vol = max(0.0, min(1.0, float(state.get("volume", 0.0))))
+        self.window.blit(
+            self._vol_surface(rect.width, rect.height, vol, not state.get("sound_on")),
+            rect.topleft)
+        self.rail_tooltip.register(("signal", "vol"), rect, SIGNAL_VOL_TOOLTIP)
+
+    def _vol_surface(self, w, h, vol, dimmed):
+        filled = int(round(vol * SIGNAL_NOTCH_COUNT))
+        pct = int(round(vol * 100))
+        key = ("vol", w, h, filled, pct, dimmed,
+               self.micro_font.get_height(), self.signal_num_font.get_height())
+
+        def build():
+            surf = pg.Surface((w, h), pg.SRCALPHA)
+            label = render_text(self.micro_font, "VOL", Colors.text_muted)
+            surf.blit(label, (0, (h - label.get_height()) // 2))
+            x0, cell_w, gap, _ = self._vol_geometry(w)
+            cut = scale_floor(SIGNAL_NOTCH_CUT, self.scale, 3)
+            for i in range(SIGNAL_NOTCH_COUNT):
+                cx = x0 + i * (cell_w + gap)
+                if i < filled:
+                    cell = cut_rect_surface((cell_w, h), cut, Colors.accent, corners=("tr",))
+                else:
+                    cell = cut_rect_surface((cell_w, h), cut, Colors.surface_raised,
+                                            border=Colors.border, border_width=1,
+                                            corners=("tr",))
+                surf.blit(cell, (cx, 0))
+            readout = render_text(self.signal_num_font, f"{pct}%", Colors.text_dim)
+            surf.blit(readout, (w - readout.get_width(), (h - readout.get_height()) // 2))
+            if dimmed:
+                surf.set_alpha(SIGNAL_DIM_ALPHA)
+            return surf
+        return memoized_surface(_SIGNAL_CACHE, key, build)
+
+    def _handle_signal_click(self, pos):
+        if not self._signal_chips:
+            return None
+        state = self.signals_provider()
+        for chip, rect in self._signal_chips:
+            if not rect.collidepoint(pos):
+                continue
+            if chip.key == "share" and not state.get("share_enabled"):
+                return True
+            callback = self.callbacks.get(chip.callback)
+            if callback is not None:
+                callback()
+            if self.sounds is not None:
+                self.sounds.play_chip_toggle()
+            return True
+        if self._signal_notch_band.collidepoint(pos):
+            if state.get("sound_on"):
+                self._handle_vol_click(pos, state)
+            return True
+        return None
+
+    def _handle_vol_click(self, pos, state):
+        band = self._signal_notch_band
+        i = max(0, min(SIGNAL_NOTCH_COUNT - 1,
+                       (pos[0] - band.x) // self._signal_notch_step))
+        target = (i + 1) / SIGNAL_NOTCH_COUNT
+        if i == 0 and abs(state.get("volume", 0.0) - target) < SIGNAL_ZERO_EPSILON:
+            target = 0.0
+        callback = self.callbacks.get("set_volume")
+        if callback is not None:
+            callback(target)
+        if self.sounds is not None:
+            self.sounds.play_vol_notch()
