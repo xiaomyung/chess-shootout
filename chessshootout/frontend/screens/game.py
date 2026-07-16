@@ -209,7 +209,8 @@ class GameScreen(Screen):
             chat_visible_provider=lambda: self.variant == Variant.ONLINE,
             chat_presets_provider=lambda: CHAT_PRESETS,
             chat_cooldown_provider=self._chat_buttons_inert,
-            sounds=app.sound_manager)
+            sounds=app.sound_manager,
+            suppress_click=app.input_router.suppress_click_sound)
         self.player_strip_top = PlayerStrip(window)
         self.player_strip_bottom = PlayerStrip(window)
 

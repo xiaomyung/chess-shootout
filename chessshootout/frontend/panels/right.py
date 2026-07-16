@@ -253,7 +253,7 @@ class RightMenu:
                  debut_provider=None, signals_provider=None,
                  sounds=None, chat_visible_provider=None,
                  chat_presets_provider=None, chat_cooldown_provider=None,
-                 caps_stacked=False):
+                 caps_stacked=False, suppress_click=None):
         self.window = window
         self.match = match
         self.callbacks = callbacks
@@ -261,6 +261,7 @@ class RightMenu:
         self.buttons_provider = buttons_provider or (lambda: CAPS)
         self.disabled_keys_provider = disabled_keys_provider or (lambda: set())
         self.whiffs_provider = whiffs_provider or (lambda: {})
+        self.suppress_click = suppress_click or (lambda: None)
         self.debut_provider = debut_provider or (lambda: None)
         self.signals_provider = signals_provider
         self.sounds = sounds
@@ -635,6 +636,7 @@ class RightMenu:
                 if callback is not None:
                     if self.sounds is not None:
                         self.sounds.play_cap_press()
+                    self.suppress_click()
                     callback()
                 return True
         signal = self._handle_signal_click(pos)
@@ -645,6 +647,7 @@ class RightMenu:
             return chat
         for block in self._section_blocks:
             if block.header.collidepoint(pos):
+                self.suppress_click()
                 self.toggle_section(block.key)
                 return True
         if self.board is None or not self.moves_rect.collidepoint(pos):
@@ -1028,6 +1031,7 @@ class RightMenu:
             if callback is not None:
                 if self.sounds is not None:
                     self.sounds.play_cap_press()
+                self.suppress_click()
                 callback(index)
             return True
         return None
@@ -1112,6 +1116,7 @@ class RightMenu:
                 callback()
             if self.sounds is not None:
                 self.sounds.play_chip_toggle()
+            self.suppress_click()
             return True
         if self._signal_notch_band.collidepoint(pos):
             if state.get("sound_on"):
@@ -1131,3 +1136,4 @@ class RightMenu:
             callback(target)
         if self.sounds is not None:
             self.sounds.play_vol_notch()
+        self.suppress_click()

@@ -63,7 +63,8 @@ class ReviewScreen(Screen):
             whiffs_provider=self._skillcheck_whiffs,
             debut_provider=self._debut_line,
             signals_provider=self._signals_provider,
-            sounds=app.sound_manager, caps_stacked=True)
+            sounds=app.sound_manager, caps_stacked=True,
+            suppress_click=app.input_router.suppress_click_sound)
         self.strip_top = ReviewStrip(window)
         self.strip_bottom = ReviewStrip(window)
 

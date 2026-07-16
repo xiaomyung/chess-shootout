@@ -216,3 +216,41 @@ def test_new_game_after_fen_restores_opening_detection():
     assert game._custom_start is False
     assert game.match.apply_san("e4").legal
     assert game._debut_line() is not None
+
+
+def test_rail_controls_with_owned_sounds_suppress_the_generic_click():
+    """Caps, section headers, chips, and vol notches each play their own sound;
+    the router's fallback ui_click must stay silent for them (no doubled click),
+    while a plain board/move-list click still gets the generic click."""
+    app = _make_app_at(1200, 900)
+    start_single_screen(app, nickname="a", side="white",
+                        time_minutes=5, increment_seconds=0)
+    from chessshootout.frontend.panels import right as right_mod
+    right_mod.SECTION_OPEN.update({"actions": True, "signals": True, "chat": True})
+    rm = app.game.right_menu
+    rm.sounds = app.sound_manager
+    rm.set_rect(rm._last_outer_rect, rm._last_scale)
+    app.draw_frame()
+
+    app.sound_manager.reset_mock()
+    app.input_router.mouse_left_clicked(rm.button_rects["flip"].center)
+    app.sound_manager.play_cap_press.assert_called_once()
+    app.sound_manager.play_ui_click.assert_not_called()
+
+    header = next(b.header for b in rm._section_blocks if b.key == "signals")
+    app.sound_manager.reset_mock()
+    app.input_router.mouse_left_clicked(header.center)
+    app.sound_manager.play_section_toggle.assert_called_once()
+    app.sound_manager.play_ui_click.assert_not_called()
+    rm.toggle_section("signals")
+    app.draw_frame()
+
+    chip_rect = next(rect for chip, rect in rm._signal_chips if chip.key == "sound")
+    app.sound_manager.reset_mock()
+    app.input_router.mouse_left_clicked(chip_rect.center)
+    app.sound_manager.play_chip_toggle.assert_called_once()
+    app.sound_manager.play_ui_click.assert_not_called()
+
+    app.sound_manager.reset_mock()
+    app.input_router.mouse_left_clicked(app.game.board.rect.center)
+    app.sound_manager.play_ui_click.assert_called_once()
