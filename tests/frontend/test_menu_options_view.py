@@ -143,6 +143,19 @@ def test_notch_row_first_cell_reclick_toggles_to_zero():
     assert val["v"] == pytest.approx(0.5)
 
 
+def test_notch_band_position_is_stable_across_readout_widths():
+    """The notch band anchors to a fixed-width readout slot sized for '100%', so
+    switching between 0%, 50%, and 100% never shifts the cells horizontally."""
+    val = {"v": 0.0}
+    row = NotchRow("Volume", "", lambda: val["v"], lambda v: val.update(v=v))
+    positions = []
+    for v in (0.0, 0.5, 1.0):
+        val["v"] = v
+        _draw_row(row)
+        positions.append(row._band.x)
+    assert positions[0] == positions[1] == positions[2]
+
+
 def test_notch_row_click_fires_tick_and_debounced_write():
     """Clicking a notch cell plays the tick AND schedules the debounced env write
     (both preserved from the old slider's on_tick / on_release wiring)."""

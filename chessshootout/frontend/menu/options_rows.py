@@ -184,10 +184,11 @@ class NotchRow(_Row):
     def _draw_control(self, window, rect, fonts):
         value = max(0.0, min(1.0, self.getter()))
         readout = render_text(fonts.value, f"{int(round(value * 100))}%", Colors.text_dim)
+        slot_w = fonts.value.size("100%")[0]
         window.blit(readout, (rect.right - readout.get_width(),
                               rect.centery - readout.get_height() // 2))
         total_w = NOTCH_COUNT * NOTCH_CELL_W + (NOTCH_COUNT - 1) * NOTCH_GAP
-        cx = rect.right - readout.get_width() - NOTCH_READOUT_GAP - total_w
+        cx = rect.right - slot_w - NOTCH_READOUT_GAP - total_w
         cy = rect.centery - NOTCH_CELL_H // 2
         filled = int(round(value * NOTCH_COUNT))
         for i in range(NOTCH_COUNT):
