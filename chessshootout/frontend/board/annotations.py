@@ -46,6 +46,23 @@ class Annotations:
         self.opp_highlighted_squares = set()
         self.opp_arrows = []
 
+    def set_opp(self, highlights, arrows):
+        self.opp_highlighted_squares = set(highlights)
+        self.opp_arrows = list(arrows)
+
+    def apply_opp_delta(self, action, kind, square=None, arrow=None):
+        if kind == "highlight":
+            if action == "add":
+                self.opp_highlighted_squares.add(square)
+            else:
+                self.opp_highlighted_squares.discard(square)
+            return
+        if action == "add":
+            if arrow not in self.opp_arrows:
+                self.opp_arrows.append(arrow)
+        elif arrow in self.opp_arrows:
+            self.opp_arrows.remove(arrow)
+
     def clear_all(self):
         self.clear()
         self.clear_opp()
