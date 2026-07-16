@@ -121,8 +121,8 @@ class CardStack(ScrollHost):
         self._badge_font = get_font(self._s(13, 10), bold=True)
         self._link_font = get_font(self._s(11, 9), bold=True)
         self._date_font = get_mono_font(self._s(10, 8), bold=True)
-        self._news_title_font = get_font(self._s(13, 11), bold=True)
-        self._news_body_font = get_font(self._s(11, 9))
+        self._news_title_font = get_font(self._s(15, 12), bold=True)
+        self._news_body_font = get_font(self._s(13, 10))
         self._headline_font = get_font(self._s(11, 9))
         self._fonts_ready = True
         self._compute_layout()
