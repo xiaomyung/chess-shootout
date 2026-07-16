@@ -17,7 +17,7 @@ import json
 import random
 
 from chessshootout.server.app import PROTOCOL_VERSION
-from chessshootout.server.protocol import MAX_SHARED_ARROWS, Reason
+from chessshootout.server.protocol import CHAT_PRESET_COUNT, MAX_SHARED_ARROWS, Reason
 from tests.server.conftest import ALICE, BOB, auth_msg
 
 
@@ -306,6 +306,6 @@ def test_quick_chat_cooldown_then_recovers(client, clock):
 
 def test_quick_chat_out_of_range_preset_is_silently_invalid(client, clock):
     with _paired_sockets(client) as (ws_w, ws_b, _a):
-        _send(ws_w, type="quick_chat", preset=7)
+        _send(ws_w, type="quick_chat", preset=CHAT_PRESET_COUNT)
         assert _pong(ws_w)["type"] == "pong"
         assert _pong(ws_b)["type"] == "pong"
