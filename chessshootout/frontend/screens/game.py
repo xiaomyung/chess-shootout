@@ -11,11 +11,13 @@ from chessshootout.domain.match import Match, SINGLE_SCREEN, BOT, ONLINE
 from chessshootout.domain.capture_summary import captured_by, material_advantage
 from chessshootout.domain.pgn.load import format_time_control
 from chessshootout.backend.pieces import PieceColor, PieceType, opponent_of
+from chessshootout.backend.pseudo_legal import king_square
 from chessshootout.backend.utils import (
     PROMO_TYPE_BY_LETTER, Square, coord_from_square, square_from_coord,
 )
 from chessshootout.infra import countries, env
 from chessshootout.frontend.board import Board
+from chessshootout.frontend.board.speech_bubble import SpeechBubble
 from chessshootout.frontend.modal_registry import ModalSpec
 from chessshootout.frontend.modals.help import HOTKEYS
 from chessshootout.frontend.screens.base import Screen
@@ -195,6 +197,8 @@ class GameScreen(Screen):
             sounds=app.sound_manager)
         self.player_strip_top = PlayerStrip(window)
         self.player_strip_bottom = PlayerStrip(window)
+
+        self.speech_bubbles = {"white": SpeechBubble(), "black": SpeechBubble()}
 
         self.focus_mode = False
         self.focus_transition = None
@@ -765,6 +769,9 @@ class GameScreen(Screen):
             rects.append(self.board.animation_dirty_rect())
         if self.focus_arrow.is_visible():
             rects.append(self.focus_arrow.dirty_rect())
+        for bubble in self.speech_bubbles.values():
+            if bubble.last_rect is not None:
+                rects.append(bubble.last_rect)
         if self.focus_mode and self._focus_show() == "line":
             top_line, bottom_line = self.time_line.rects_for(self.board, self.board.rect)
             rects.extend([top_line, bottom_line])
@@ -929,6 +936,7 @@ class GameScreen(Screen):
         self.skillcheck_session.sync_aim_check_gun()
         self._draw_game_background()
         self.board.draw_board()
+        self._draw_speech_bubbles()
         if after_board is not None:
             after_board()
         if show_strips:
@@ -941,6 +949,48 @@ class GameScreen(Screen):
             arrow_hook()
         if show_panel:
             self.right_menu.draw_menu()
+
+    def show_speech_bubble(self, color, text):
+        self.speech_bubbles[color].show(text, pg.time.get_ticks())
+
+    def _draw_speech_bubbles(self):
+        now = pg.time.get_ticks()
+        if self.app._blocking_modal_visible() or self._result_menu_should_show():
+            for bubble in self.speech_bubbles.values():
+                bubble.last_rect = None
+            return
+        scale = getattr(self.board, "scale", 1.0)
+        for color, bubble in self.speech_bubbles.items():
+            if not bubble.active(now):
+                bubble.last_rect = None
+                continue
+            anchor = self._speech_anchor(color)
+            if anchor is None:
+                bubble.last_rect = None
+                continue
+            bubble.draw(self.window, anchor, self.board.rect, now, scale=scale)
+
+    def _speech_anchor(self, color):
+        pcolor = PieceColor.WHITE if color == "white" else PieceColor.BLACK
+        if self.board.review_ply is not None:
+            grid = self.match.position_at(self.board.review_ply)
+        else:
+            grid = self.match.state
+        target = None
+        for row in range(self.board.SIZE):
+            for col in range(self.board.SIZE):
+                piece = grid[row][col]
+                if (piece is not None and piece.type == PieceType.QUEEN
+                        and piece.color == pcolor):
+                    target = Square(row, col)
+                    break
+            if target is not None:
+                break
+        if target is None:
+            target = king_square(grid, pcolor)
+        if target is None:
+            return None
+        return self.board.cell_rect(target)
 
     def _draw_game_background(self):
         self.backdrop.draw(self.window, self.board.rect)
@@ -1332,6 +1382,8 @@ class GameScreen(Screen):
         self.skillcheck_session.skillcheck_log = []
         app.confirm_modal.hide()
         self._last_turn_for_flip = None
+        for bubble in self.speech_bubbles.values():
+            bubble.clear()
 
     def _focus_show(self):
         return env.get_focus_show()
