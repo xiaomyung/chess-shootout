@@ -160,6 +160,7 @@ class Board:
         self._target_ply = None
         self.read_only = False
         self._promo_hotkey_font = get_font(9, bold=True, mono=True)
+        self._promo_tag_font = get_font(8, bold=True, mono=True)
 
     @property
     def backend(self):
@@ -233,8 +234,8 @@ class Board:
         return self._cell_rect_base(row, col).move(self._shake_dx, self._shake_dy)
 
     PROMOTION_OPTIONS = [
-        (PieceType.QUEEN, "Q"), (PieceType.ROOK, "R"),
-        (PieceType.BISHOP, "B"), (PieceType.KNIGHT, "N"),
+        (PieceType.QUEEN, "Q", "BOSS"), (PieceType.ROOK, "R", "TANK"),
+        (PieceType.BISHOP, "B", "SNIPER"), (PieceType.KNIGHT, "N", "WILDCARD"),
     ]
 
     def _promo_option_sprite(self, ptype, color, opt):
@@ -278,7 +279,7 @@ class Board:
         self.window.blit(plate, panel.topleft)
         mouse = pg.mouse.get_pos()
         cell_cut = scale_floor(self.PROMOTION_CELL_CUT, self.scale, 4)
-        for i, (ptype, hotkey) in enumerate(self.PROMOTION_OPTIONS):
+        for i, (ptype, hotkey, tag) in enumerate(self.PROMOTION_OPTIONS):
             cell = pg.Rect(panel.x + pad + i * (opt + gap), panel.y + pad, opt, opt)
             hovered = cell.collidepoint(mouse)
             shell = cut_rect_surface(
@@ -292,6 +293,9 @@ class Board:
             hk = render_text(self._promo_hotkey_font, hotkey, Colors.text_muted)
             self.window.blit(hk, (cell.right - hk.get_width() - 4,
                                   cell.bottom - hk.get_height() - 3))
+            tag_surf = render_text(self._promo_tag_font, tag,
+                                   Colors.amber if hovered else Colors.text_muted)
+            self.window.blit(tag_surf, (cell.left + 4, cell.top + 3))
             self._promotion_rects[ptype] = cell
 
     def pick_promotion(self, ptype):
@@ -808,6 +812,7 @@ class Board:
             opt = max(self.PROMOTION_OPTION_SIZE_MIN,
                       min(int(cell_size), self.PROMOTION_OPTION_SIZE_MAX))
             self._promo_hotkey_font = get_font(max(int(opt * 0.18), 9), bold=True, mono=True)
+            self._promo_tag_font = get_font(max(int(opt * 0.13), 8), bold=True, mono=True)
         self.cell_size = cell_size
         used = self.cell_size * self.SIZE
         free_w = rect.width - 2 * self.frame_pad - used

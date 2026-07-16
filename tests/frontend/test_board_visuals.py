@@ -257,6 +257,40 @@ def test_promotion_picker_draws_key_hint_micro_labels():
             "each cell shows a text_muted key hint in its bottom-right corner"
 
 
+def test_promotion_picker_shows_role_tags_that_brighten_on_hover(monkeypatch):
+    board, win = _board()
+    board.pending_promotion_square = Square(1, 4)
+    board.draw_board()
+    muted = pg.Color(Colors.text_muted)[:3]
+    amber = pg.Color(Colors.amber)[:3]
+    for ptype in (PieceType.QUEEN, PieceType.ROOK, PieceType.BISHOP, PieceType.KNIGHT):
+        cell = board._promotion_rects[ptype]
+        corner = pg.Rect(cell.left + 2, cell.top + 2, cell.width - 8, 16)
+        assert _cell_has(win, corner, lambda c: tuple(c[:3]) == muted), \
+            "each cell wears its role tag (BOSS/TANK/SNIPER/WILDCARD) in muted ink"
+    knight = board._promotion_rects[PieceType.KNIGHT]
+    monkeypatch.setattr(pg.mouse, "get_pos", lambda: knight.center)
+    board.draw_board()
+    corner = pg.Rect(knight.left + 2, knight.top + 2, knight.width - 8, 16)
+    assert _cell_has(win, corner, lambda c: tuple(c[:3]) == amber), \
+        "the hovered cell's role tag brightens to amber"
+
+
+def test_promotion_picker_role_tags_fit_at_the_minimum_option_size():
+    win = pg.display.get_surface()
+    win.fill((0, 0, 0))
+    match = Match()
+    match.new_game()
+    board = Board(win, match)
+    board.load_assets()
+    board.set_rect(pg.Rect(40, 40, 360, 360))
+    opt = max(board.PROMOTION_OPTION_SIZE_MIN,
+              min(int(board.cell_size), board.PROMOTION_OPTION_SIZE_MAX))
+    assert opt == board.PROMOTION_OPTION_SIZE_MIN, "sanity: the small board hits the floor"
+    assert 4 + board._promo_tag_font.size("WILDCARD")[0] <= opt - 4, \
+        "the longest tag stays inside the cell at the smallest option size"
+
+
 def test_flipped_cell_rect_mirrors():
     board, _ = _board()
     normal = board._cell_rect(0, 0)
