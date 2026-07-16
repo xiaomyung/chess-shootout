@@ -4,6 +4,9 @@ from chessshootout.frontend.visual.colors import Colors
 from chessshootout.domain.pgn.generate import iter_move_pairs
 from chessshootout.frontend.visual.scroll_view import ScrollView
 from chessshootout.frontend.visual.widgets import draw_button_row, draw_pill
+from chessshootout.frontend.visual.draw import (
+    cut_rect_surface, rounded_rect_surface, dashed_hline, scale_floor,
+)
 from chessshootout.server.protocol import GIVE_TIME_SECONDS
 from chessshootout.frontend.visual.fonts import get_font
 from chessshootout.frontend.visual.cache import render_text
@@ -28,6 +31,16 @@ MOVE_PREFIX_CHARS = 5
 MOVE_CELL_PAD = 4
 MOVE_MIN_CELL_CHARS = 4
 
+CARD_INSET = 12
+CARD_CUT = 16
+LOG_RADIUS = 9
+LOG_MIN_H = 90
+LOG_HEADER_TOP = 8
+LOG_SEP_GAP = 6
+LOG_ROWS_GAP = 6
+MOVE_CELL_CUT = 8
+MICRO_FONT_PT = 9
+
 
 class RightMenu:
 
@@ -50,11 +63,14 @@ class RightMenu:
         self.button_font_factor = 28
         self.pill_font_factor = 34
 
+        self.scale = 1.0
+        self._last_scale = 1.0
         self.font = get_font(13, mono=True)
         self.moves_font = get_font(14, bold=True)
         self.button_font = get_font(14, bold=True)
         self.pill_font = get_font(11, bold=True)
         self.round_font = get_font(11, bold=True)
+        self.micro_font = get_font(MICRO_FONT_PT, bold=True, mono=True)
 
         self.outer_rect = pg.Rect(0, 0, 0, 0)
         self.moves_rect = pg.Rect(0, 0, 0, 0)
@@ -100,17 +116,20 @@ class RightMenu:
 
     def set_rect(self, rect, scale=1.0):
         self.scale = scale
+        self._last_scale = scale
         self.font = get_font(max(int(rect.width / self.moves_font_factor), 10), mono=True)
         self.moves_font = get_font(
             max(int(rect.width / self.moves_font_factor), 10), bold=True)
         self.button_font = get_font(max(int(rect.width / self.button_font_factor), 10), bold=True)
         self.pill_font = get_font(max(int(rect.width / self.pill_font_factor), 9), bold=True)
         self.round_font = get_font(max(int(rect.width / self.pill_font_factor), 9), bold=True)
+        self.micro_font = get_font(scale_floor(MICRO_FONT_PT, scale, 8), bold=True, mono=True)
 
         p = self.padding
+        inset = scale_floor(CARD_INSET, scale, 8)
         self.outer_rect = pg.Rect(
-            rect.x + p, rect.y + p,
-            rect.width - 2 * p, rect.height - 2 * p,
+            rect.x + p, rect.y + inset,
+            rect.width - inset - p, rect.height - 2 * inset,
         )
         self._last_outer_rect = pg.Rect(rect)
 
@@ -132,7 +151,8 @@ class RightMenu:
         self.info_rect = pg.Rect(self.outer_rect.x + p, info_y, inner_w, info_h)
 
         moves_top = info_y + info_h + (small_gap if info_h > 0 else 0)
-        moves_h = max(self.buttons_rect.y - moves_top - p, 0)
+        moves_h = max(self.buttons_rect.y - moves_top - p,
+                      scale_floor(LOG_MIN_H, scale, 70))
         self.moves_rect = pg.Rect(self.outer_rect.x + p, moves_top, inner_w, moves_h)
 
     def _info_section_height(self):
@@ -148,7 +168,7 @@ class RightMenu:
     def set_game_info(self, info):
         self.game_info = info
         if self._last_outer_rect is not None:
-            self.set_rect(self._last_outer_rect)
+            self.set_rect(self._last_outer_rect, self._last_scale)
 
     def reset_for_new_game(self):
         self.scroll_offset = 0
@@ -158,20 +178,25 @@ class RightMenu:
         self.scroll.last_activity_ms = 0
         self._last_review_ply = None
 
-    OUTER_RADIUS = 10
-    INNER_RADIUS = 8
-
     def draw_menu(self):
         self.scroll.tick()
-        pg.draw.rect(self.window, Colors.surface, self.outer_rect,
-                     border_radius=self.OUTER_RADIUS)
+        prev_clip = self.window.get_clip()
+        self.window.set_clip(self.outer_rect)
+        self.window.blit(
+            cut_rect_surface(self.outer_rect.size, scale_floor(CARD_CUT, self.scale, 10),
+                             Colors.surface, border=Colors.border, border_width=1,
+                             corners=("tr",)),
+            self.outer_rect.topleft)
         if self.game_info is not None and self.info_rect.height > 0:
             self._draw_game_info(self.info_rect)
-        pg.draw.rect(self.window, Colors.surface_raised, self.moves_rect,
-                     border_radius=self.INNER_RADIUS)
+        self.window.blit(
+            rounded_rect_surface(self.moves_rect.size,
+                                 scale_floor(LOG_RADIUS, self.scale, 6), Colors.well_deep),
+            self.moves_rect.topleft)
         self._draw_moves(self.moves_rect)
         self.scroll.draw_thumb(self.window)
         self._draw_buttons(self.buttons_rect)
+        self.window.set_clip(prev_clip)
 
     def _draw_game_info(self, rect):
         info = self.game_info
@@ -254,16 +279,31 @@ class RightMenu:
                     black_whiffs[k] if k < len(black_whiffs) else None))
         return rows
 
+    def _draw_log_header(self, rect):
+        pad = self.padding
+        label = render_text(self.micro_font, "SHOT LOG", Colors.text_muted)
+        count = render_text(self.micro_font, f"{len(self.match.move_history)} PLY",
+                            Colors.text_muted)
+        ly = rect.y + scale_floor(LOG_HEADER_TOP, self.scale, 6)
+        self.window.blit(label, (rect.x + pad, ly))
+        self.window.blit(count, (rect.right - pad - count.get_width(), ly))
+        sep_y = ly + label.get_height() + scale_floor(LOG_SEP_GAP, self.scale, 4)
+        self.window.blit(dashed_hline(rect.width - 2 * pad, Colors.border),
+                         (rect.x + pad, sep_y))
+        return sep_y + scale_floor(LOG_ROWS_GAP, self.scale, 4) - rect.y
+
     def _draw_moves(self, rect):
+        header_h = self._draw_log_header(rect)
         history = self.match.move_history
         line_h = self.moves_font.get_linesize() + 2
         self._line_h = line_h
-        self._max_lines = max(int((rect.height - 2 * self.padding) // line_h), 0)
+        rows_top = rect.y + header_h
+        self._max_lines = max(int((rect.bottom - self.padding - rows_top) // line_h), 0)
 
         rows = self._build_move_rows(history, self.whiffs_provider())
         self._total_rows = len(rows)
         self._content_px = self._total_rows * line_h
-        self._moves_viewport = pg.Rect(rect.x, rect.y + self.padding, rect.width,
+        self._moves_viewport = pg.Rect(rect.x, rows_top, rect.width,
                                        self._max_lines * line_h)
 
         if (not self.scroll.is_active()
@@ -293,7 +333,7 @@ class RightMenu:
 
         for i, row_idx in enumerate(range(start, end)):
             row = rows[row_idx]
-            row_y = rect.y + self.padding + i * line_h
+            row_y = rows_top + i * line_h
             row_x = rect.x + self.padding
             white_x = row_x + prefix_w
             black_x = white_x + cell_w + cell_pad
@@ -346,8 +386,11 @@ class RightMenu:
 
     def _draw_move_cell(self, rect, entry, active):
         if active:
-            pg.draw.rect(self.window, Colors.surface_active, rect, border_radius=4)
-            pg.draw.rect(self.window, Colors.accent, rect, width=1, border_radius=4)
+            self.window.blit(
+                cut_rect_surface(rect.size, scale_floor(MOVE_CELL_CUT, self.scale, 5),
+                                 Colors.surface_active, border=Colors.accent,
+                                 border_width=1, corners=("tr",)),
+                rect.topleft)
         color = Colors.text if active else Colors.text_dim
         surf = render_text(self.moves_font, entry.san, color)
         self.window.blit(surf, (rect.x + 4, rect.centery - surf.get_height() / 2))

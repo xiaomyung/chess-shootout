@@ -245,6 +245,27 @@ def dashed_rounded_rect_surface(size, radius, border, border_width=1, dash=6, ga
     return memoized_surface(_DASHED_RECT_CACHE, key, build)
 
 
+_DASHED_HLINE_CACHE = new_cache()
+
+
+def dashed_hline(width, color, dash=6, gap=5):
+    w = max(int(width), 1)
+    key = (w, str(color), dash, gap)
+
+    def build():
+        surf = pg.Surface((w, 1), pg.SRCALPHA)
+        col = pg.Color(color)
+        period = max(dash + gap, 1)
+        x = 0
+        while x < w:
+            seg = min(dash, w - x)
+            if seg > 0:
+                pg.draw.rect(surf, col, pg.Rect(x, 0, seg, 1))
+            x += period
+        return surf
+    return memoized_surface(_DASHED_HLINE_CACHE, key, build)
+
+
 _CHEVRON_CACHE = new_cache()
 
 
