@@ -85,7 +85,6 @@ MICRO_FONT_PT = 9
 DEBUT_NAME_PT = 10
 DEBUT_NAME_FLOOR = 9
 DEBUT_ROW_GAP = 4
-DEBUT_ECO_GAP = 6
 MARQUEE_EASE = 0.12
 
 SECTION_HEADER_PT = 9
@@ -646,21 +645,18 @@ class RightMenu:
 
     def _draw_debut_row(self, rect, debut, y):
         pad = self.padding
-        eco, name = debut
-        eco_surf = render_text(self.micro_font, eco, Colors.text_muted)
+        _, name = debut
         name_surf = render_text(self.debut_name_font, name.upper(), Colors.text_dim)
-        row_h = max(eco_surf.get_height(), name_surf.get_height())
-        eco_x = rect.x + pad
-        name_x = eco_x + eco_surf.get_width() + scale_floor(DEBUT_ECO_GAP, self.scale, 4)
+        row_h = name_surf.get_height()
+        name_x = rect.x + pad
         avail = rect.right - pad - name_x
-        self.window.blit(eco_surf, (eco_x, y + (row_h - eco_surf.get_height()) // 2))
-        name_y = y + (row_h - name_surf.get_height()) // 2
+        name_y = y
         text_w = name_surf.get_width()
         if text_w <= avail or avail <= 0:
             self._marquee_off = 0.0
             self.window.blit(name_surf, (name_x, name_y))
             return y + row_h
-        row_rect = pg.Rect(eco_x, y, rect.width - 2 * pad, row_h)
+        row_rect = pg.Rect(name_x, y, rect.width - 2 * pad, row_h)
         hovered = row_rect.collidepoint(pg.mouse.get_pos())
         target = float(text_w - avail) if hovered else 0.0
         self._marquee_off += (target - self._marquee_off) * MARQUEE_EASE
