@@ -240,6 +240,9 @@ class SoundManager:
     def play_focus_action(self):
         self._play("focus_action")
 
+    def play_focus_action_off(self):
+        self._play("focus_action_off")
+
     def play_skillcheck_appear(self):
         self._play("sc_appear")
 

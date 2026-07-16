@@ -68,6 +68,7 @@ def _build_slots():
     slots["card_toggle"] = Slot("card_toggle", "ui/card_toggle")
     slots["rail_click"] = Slot("rail_click", "ui/rail_click")
     slots["focus_action"] = Slot("focus_action", "ui/focus_action")
+    slots["focus_action_off"] = Slot("focus_action_off", "ui/focus_action_off")
     slots["section_toggle"] = Slot("section_toggle", "ui/section_toggle")
     slots["chip_toggle"] = Slot("chip_toggle", "ui/chip_toggle")
     slots["cap_press"] = Slot("cap_press", "ui/cap_press")
