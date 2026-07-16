@@ -3,13 +3,18 @@ current-move highlight (surface_active fill + inset accent border), click→ply
 routing, and the scroll-reveal that fires only on review navigation — never as a
 per-frame re-snap that would fight manual scrollback."""
 
+from unittest.mock import MagicMock
+
 import pygame as pg
 
 from tests.conftest import pygame_display
+from tests.helpers import scan_region
 from chessshootout.backend.backend import Backend
 from chessshootout.backend.pieces import Piece, PieceType, PieceColor
 from chessshootout.backend.utils import Square, Move, HistoryEntry
-from chessshootout.frontend.panels.right import RightMenu, CARD_INSET
+from chessshootout.frontend.panels.right import (
+    RightMenu, CARD_INSET, CAPS, REVIEW_CAPS, SECTION_OPEN,
+)
 from chessshootout.frontend.visual.colors import Colors
 from chessshootout.frontend.visual.draw import dashed_hline
 
@@ -216,3 +221,128 @@ def test_short_window_clips_body_to_card():
     rm.draw_menu()
     gap = rm.window.get_at((rm.outer_rect.centerx, rm.outer_rect.top - 4))
     assert (gap.r, gap.g, gap.b) == backdrop, "the top inset gap shows only backdrop"
+
+
+def _review_menu():
+    backend = Backend()
+    backend.new_game()
+    rm = RightMenu(pg.display.get_surface(), backend, {},
+                   buttons_provider=lambda: REVIEW_CAPS, caps_stacked=True)
+    rm.set_rect(pg.Rect(0, 0, 320, 640))
+    return rm
+
+
+def test_caps_provider_populates_expected_button_rects():
+    rm, _ = _menu()
+    rm.window.fill((0, 0, 0))
+    rm.draw_menu()
+    assert set(rm.button_rects) == {"undo", "draw", "resign", "give_time", "flip", "help"}
+
+
+def test_review_caps_are_full_width_stacked_rows():
+    rm = _review_menu()
+    rm.window.fill((0, 0, 0))
+    rm.draw_menu()
+    assert set(rm.button_rects) == {"menu", "flip", "open_pgn"}
+    inner = rm.moves_rect.width
+    for rect in rm.button_rects.values():
+        assert rect.width == inner, "review caps span the full inner width"
+
+
+def test_toggle_section_collapses_actions_and_clears_caps():
+    rm, _ = _menu()
+    rm.window.fill((0, 0, 0))
+    rm.draw_menu()
+    assert set(rm.button_rects) == {cap.key for cap in CAPS}
+    rm.toggle_section("actions")
+    assert SECTION_OPEN["actions"] is False
+    assert rm.button_rects == {}, "collapsing actions removes the cap hit rects"
+    block = next(b for b in rm._section_blocks if b.key == "actions")
+    assert block.show_body is False
+
+
+def test_section_header_click_toggles_the_section():
+    rm, _ = _menu()
+    rm.window.fill((0, 0, 0))
+    rm.draw_menu()
+    header = next(b.header for b in rm._section_blocks if b.key == "signals")
+    assert SECTION_OPEN["signals"] is True
+    assert rm.handle_click(header.center) is True
+    assert SECTION_OPEN["signals"] is False
+
+
+def test_section_open_state_is_shared_across_instances():
+    rm1, _ = _menu()
+    rm2, _ = _menu()
+    rm1.window.fill((0, 0, 0))
+    rm1.draw_menu()
+    rm1.toggle_section("actions")
+    rm2.set_rect(pg.Rect(0, 0, 320, 640))
+    assert rm2.button_rects == {}, "the shared collapse hides caps on the second rail too"
+    block = next(b for b in rm2._section_blocks if b.key == "actions")
+    assert block.show_body is False
+
+
+def test_disabled_cap_click_is_swallowed_without_callback():
+    backend = Backend()
+    backend.new_game()
+    fired = []
+    rm = RightMenu(pg.display.get_surface(), backend,
+                   {"give_time": lambda: fired.append("give_time")},
+                   buttons_provider=lambda: CAPS,
+                   disabled_keys_provider=lambda: {"give_time"})
+    rm.set_rect(pg.Rect(0, 0, 320, 640))
+    rm.window.fill((0, 0, 0))
+    rm.draw_menu()
+    give = rm.button_rects["give_time"]
+    assert rm.handle_click(give.center) is True
+    assert fired == [], "a disabled cap swallows the click but never fires"
+
+
+def test_cap_click_fires_callback_and_plays_cap_press():
+    backend = Backend()
+    backend.new_game()
+    fired = []
+    sounds = MagicMock()
+    rm = RightMenu(pg.display.get_surface(), backend,
+                   {"resign": lambda: fired.append("resign")},
+                   buttons_provider=lambda: CAPS, sounds=sounds)
+    rm.set_rect(pg.Rect(0, 0, 320, 640))
+    rm.window.fill((0, 0, 0))
+    rm.draw_menu()
+    resign = rm.button_rects["resign"]
+    assert rm.handle_click(resign.center) is True
+    assert fired == ["resign"]
+    sounds.play_cap_press.assert_called_once()
+
+
+def test_section_toggle_plays_section_toggle_sound():
+    backend = Backend()
+    backend.new_game()
+    sounds = MagicMock()
+    rm = RightMenu(pg.display.get_surface(), backend, {},
+                   buttons_provider=lambda: CAPS, sounds=sounds)
+    rm.set_rect(pg.Rect(0, 0, 320, 640))
+    rm.toggle_section("actions")
+    sounds.play_section_toggle.assert_called_once()
+
+
+def test_rail_tooltip_appears_over_hovered_cap(monkeypatch):
+    rm, _ = _menu()
+    rm.window.fill((0, 0, 0))
+    rm.draw_menu()
+    resign = rm.button_rects["resign"]
+    monkeypatch.setattr(pg.mouse, "get_pos", lambda: resign.center)
+    ticks = {"t": 0}
+    monkeypatch.setattr(pg.time, "get_ticks", lambda: ticks["t"])
+    rm.window.fill((0, 0, 0))
+    rm.draw_menu()
+    labels = [label for _, _, label in rm.rail_tooltip.entries]
+    assert any(label.startswith("RESIGN") for label in labels), \
+        "the resign cap registers its tooltip label for the frame"
+    ticks["t"] = 500
+    rm.window.fill((0, 0, 0))
+    rm.draw_menu()
+    band = pg.Rect(rm.outer_rect.x, resign.top - 44, rm.outer_rect.width, 44)
+    assert scan_region(rm.window, band, Colors.border_strong, tol=12, step=1), \
+        "a border_strong-bordered bubble fades in above the hovered cap"

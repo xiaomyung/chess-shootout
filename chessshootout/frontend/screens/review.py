@@ -16,7 +16,7 @@ from chessshootout.frontend.modals.help import HOTKEYS
 from chessshootout.frontend.panels.player_strip import (
     is_white, top_strip_color, refresh_capture_icons,
 )
-from chessshootout.frontend.panels.right import RightMenu, REVIEW_BUTTONS
+from chessshootout.frontend.panels.right import RightMenu, REVIEW_CAPS
 from chessshootout.frontend.panels.review_strip import ReviewStrip
 from chessshootout.frontend.pgn_open import open_pgn_or_toast
 from chessshootout.frontend.screens.base import Nav, Screen
@@ -54,8 +54,9 @@ class ReviewScreen(Screen):
             "menu": self._on_menu,
             "flip": self._on_flip,
             "open_pgn": self._on_open_pgn,
-        }, board=self.board, buttons_provider=lambda: REVIEW_BUTTONS,
-            whiffs_provider=self._skillcheck_whiffs)
+        }, board=self.board, buttons_provider=lambda: REVIEW_CAPS,
+            whiffs_provider=self._skillcheck_whiffs,
+            sounds=app.sound_manager, caps_stacked=True)
         self.strip_top = ReviewStrip(window)
         self.strip_bottom = ReviewStrip(window)
 
@@ -160,6 +161,12 @@ class ReviewScreen(Screen):
             return True
         if event.key == pg.K_f:
             self._on_flip()
+            return True
+        if event.key == pg.K_a:
+            self.right_menu.toggle_section("actions")
+            return True
+        if event.key == pg.K_s:
+            self.right_menu.toggle_section("signals")
             return True
         if getattr(event, "unicode", "") == "?":
             self.app.help_modal.show(REVIEW_HOTKEYS)

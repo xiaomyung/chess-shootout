@@ -579,8 +579,8 @@ def test_active_row_highlight_follows_review_ply():
     assert app.game.right_menu._active_ply(3) == 1
 
 
-def _flat_button_keys(rows):
-    return {key for row in rows for _, key in row}
+def _flat_button_keys(caps):
+    return {cap.key for cap in caps}
 
 
 def test_timed_mode_shows_full_buttons():
@@ -590,22 +590,19 @@ def test_timed_mode_shows_full_buttons():
     }
 
 
-def test_timed_mode_buttons_are_two_rows_of_three():
-    """Layout pin: two rows of three buttons so the audio slider grid lines up."""
+def test_timed_mode_caps_are_a_single_ordered_row():
+    """Layout pin: the timed action caps are one ordered row of six icon caps."""
     app = _new_timed_app()
-    rows = app.game._right_menu_buttons()
-    assert len(rows) == 2
-    assert [key for _, key in rows[0]] == ["undo", "resign", "draw"]
-    assert [key for _, key in rows[1]] == ["give_time", "flip", "help"]
+    caps = app.game._right_menu_buttons()
+    assert [cap.key for cap in caps] == [
+        "undo", "draw", "resign", "give_time", "flip", "help"]
 
 
 def test_untimed_mode_hides_give_time():
-    """No clock → no give-time button; row two collapses to Flip / Help."""
+    """No clock → no give-time cap; the row drops to five icon caps."""
     app = _new_app()
-    rows = app.game._right_menu_buttons()
-    assert len(rows) == 2
-    assert [key for _, key in rows[0]] == ["undo", "resign", "draw"]
-    assert [key for _, key in rows[1]] == ["flip", "help"]
+    caps = app.game._right_menu_buttons()
+    assert [cap.key for cap in caps] == ["undo", "draw", "resign", "flip", "help"]
 
 
 def _new_timed_app():

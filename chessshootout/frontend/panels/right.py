@@ -1,30 +1,71 @@
+from typing import NamedTuple
+
 import pygame as pg
 
 from chessshootout.frontend.visual.colors import Colors
 from chessshootout.domain.pgn.generate import iter_move_pairs
 from chessshootout.frontend.visual.scroll_view import ScrollView
-from chessshootout.frontend.visual.widgets import draw_button_row, draw_pill
+from chessshootout.frontend.visual.widgets import draw_pill
 from chessshootout.frontend.visual.draw import (
     cut_rect_surface, rounded_rect_surface, dashed_hline, scale_floor,
+    smoothstep, rotated_chevron_surface,
 )
-from chessshootout.server.protocol import GIVE_TIME_SECONDS
+from chessshootout.frontend.visual.icons import (
+    draw_undo_arrow, draw_resign_flag, draw_flip_arrows, draw_left_arrow, draw_file,
+)
 from chessshootout.frontend.visual.fonts import get_font
-from chessshootout.frontend.visual.cache import render_text
+from chessshootout.frontend.visual.cache import render_text, new_cache, memoized_surface
 
 
-BUTTONS = [
-    [("Undo", "undo"), ("Resign", "resign"), ("Draw", "draw")],
-    [(f"Give {GIVE_TIME_SECONDS} sec", "give_time"), ("Flip", "flip"), ("?", "help")],
+class Cap(NamedTuple):
+    key: str
+    icon: str
+    glyph: str
+    glyph_pt: int
+    glyph_bold: bool
+    label: str
+    tooltip: str
+
+
+CAPS = [
+    Cap("undo",      "undo",   "",    0,  False, "Undo",     "UNDO — KEY Z"),
+    Cap("draw",      "",       "½",   14, False, "Draw",     "OFFER DRAW — KEY D"),
+    Cap("resign",    "resign", "",    0,  False, "Resign",   "RESIGN — KEY R"),
+    Cap("give_time", "",       "+15", 10, True,  "Give +15", "GIVE +15 — KEY G · HOLD TO RAMP"),
+    Cap("flip",      "flip",   "",    0,  False, "Flip",     "FLIP — KEY F"),
+    Cap("help",      "",       "?",   13, True,  "Help",     "HELP — KEY ?"),
 ]
 
-UNTIMED_BUTTONS = [
-    [("Undo", "undo"), ("Resign", "resign"), ("Draw", "draw")],
-    [("Flip", "flip"), ("?", "help")],
+UNTIMED_CAPS = [cap for cap in CAPS if cap.key != "give_time"]
+
+REVIEW_CAPS = [
+    Cap("menu",     "menu", "", 0, False, "Menu",     "BACK TO MENU"),
+    Cap("flip",     "flip", "", 0, False, "Flip",     "FLIP — KEY F"),
+    Cap("open_pgn", "file", "", 0, False, "Open PGN", "OPEN PGN FILE"),
 ]
 
-REVIEW_BUTTONS = [
-    [("Menu", "menu"), ("Flip", "flip"), ("Open PGN", "open_pgn")],
-]
+CAP_ICON_FUNCS = {
+    "undo": draw_undo_arrow,
+    "resign": draw_resign_flag,
+    "flip": draw_flip_arrows,
+    "menu": draw_left_arrow,
+    "file": draw_file,
+}
+
+_GLYPH_SPECS = {
+    (cap.glyph_pt, cap.glyph_bold)
+    for table in (CAPS, UNTIMED_CAPS, REVIEW_CAPS) for cap in table if cap.glyph
+}
+
+SECTION_OPEN = {"actions": True, "signals": True, "chat": True}
+
+SECTION_ORDER = ("actions", "signals", "chat")
+SECTION_LABELS = {"actions": "ACTIONS", "signals": "SIGNALS", "chat": "QUICK CHAT"}
+SECTION_TOOLTIPS = {
+    "actions": "ACTIONS — KEY A",
+    "signals": "SIGNALS — KEY S",
+    "chat": "QUICK CHAT — KEY C",
+}
 
 INFO_HEADER_PAD = 12
 MOVE_PREFIX_CHARS = 5
@@ -41,42 +82,149 @@ LOG_ROWS_GAP = 6
 MOVE_CELL_CUT = 8
 MICRO_FONT_PT = 9
 
+SECTION_HEADER_PT = 9
+SECTION_HEADER_VPAD = 6
+SECTION_DIVIDER_TOP = 8
+SECTION_DIVIDER_BOTTOM = 6
+SECTION_BODY_TOP = 8
+SECTION_CHEVRON_MS = 200
+SECTION_CHEVRON_H = 7
+
+CAP_H_GAME = 38
+CAP_H_REVIEW = 34
+CAP_GAP = 7
+CAP_CUT = 7
+CAP_ICON_BOX = 22
+CAP_LABEL_PT = 13
+CAP_LABEL_PAD = 9
+FADED_ICON_ALPHA = 102
+
+TOOLTIP_DELAY_MS = 250
+TOOLTIP_FADE_MS = 120
+TOOLTIP_PT = 9
+TOOLTIP_PAD_X = 8
+TOOLTIP_PAD_Y = 4
+TOOLTIP_GAP = 6
+
+_CAP_FG_CACHE = new_cache()
+
+
+class SectionBlock(NamedTuple):
+    key: str
+    divider_y: int
+    header: pg.Rect
+    body: pg.Rect
+    show_body: bool
+
+
+class RailTooltip:
+
+    def __init__(self):
+        self.entries = []
+        self._hover_key = None
+        self._hover_since = 0
+        self._mouse = (0, 0)
+        self._cache = new_cache()
+
+    def begin_frame(self):
+        self.entries.clear()
+        self._mouse = pg.mouse.get_pos()
+
+    def register(self, key, rect, label):
+        self.entries.append((key, pg.Rect(rect), label))
+
+    def draw(self, window, clip_rect, scale, now, font):
+        hovered = None
+        for key, rect, label in self.entries:
+            if rect.collidepoint(self._mouse):
+                hovered = (key, rect, label)
+                break
+        if hovered is None:
+            self._hover_key = None
+            return
+        key, rect, label = hovered
+        if key != self._hover_key:
+            self._hover_key = key
+            self._hover_since = now
+            return
+        elapsed = now - self._hover_since
+        if elapsed < TOOLTIP_DELAY_MS:
+            return
+        alpha = smoothstep((elapsed - TOOLTIP_DELAY_MS) / TOOLTIP_FADE_MS)
+        bubble = self._bubble(label, scale, font)
+        bubble.set_alpha(int(255 * alpha))
+        window.blit(bubble, self._position(bubble, rect, clip_rect))
+
+    def _bubble(self, label, scale, font):
+        key = (label, font.get_height())
+
+        def build():
+            text = font.render(label, True, pg.Color(Colors.text))
+            pad_x = scale_floor(TOOLTIP_PAD_X, scale, 6)
+            pad_y = scale_floor(TOOLTIP_PAD_Y, scale, 3)
+            w = text.get_width() + 2 * pad_x
+            h = text.get_height() + 2 * pad_y
+            surf = cut_rect_surface((w, h), scale_floor(6, scale, 4), Colors.bg,
+                                    border=Colors.border_strong, border_width=1,
+                                    corners=("tr",)).copy()
+            surf.blit(text, (pad_x, pad_y))
+            return surf
+        return memoized_surface(self._cache, key, build)
+
+    def _position(self, bubble, rect, clip_rect):
+        w, h = bubble.get_size()
+        x = max(clip_rect.left, min(rect.centerx - w // 2, clip_rect.right - w))
+        y = rect.top - h - TOOLTIP_GAP
+        if y < clip_rect.top:
+            y = rect.bottom + TOOLTIP_GAP
+        return (x, y)
+
 
 class RightMenu:
 
     def __init__(self, window, match, callbacks, board=None,
                  buttons_provider=None,
-                 disabled_keys_provider=None, whiffs_provider=None):
+                 disabled_keys_provider=None, whiffs_provider=None,
+                 sounds=None, chat_visible_provider=None, caps_stacked=False):
         self.window = window
         self.match = match
         self.callbacks = callbacks
         self.board = board
-        self.buttons_provider = buttons_provider or (lambda: BUTTONS)
+        self.buttons_provider = buttons_provider or (lambda: CAPS)
         self.disabled_keys_provider = disabled_keys_provider or (lambda: set())
         self.whiffs_provider = whiffs_provider or (lambda: {})
+        self.sounds = sounds
+        self.chat_visible_provider = chat_visible_provider or (lambda: False)
+        self.caps_stacked = caps_stacked
         self._pair_to_row = {}
 
         self.padding = 10
-        self.button_gap = 6
-        self.button_v_pad = 8
         self.moves_font_factor = 24
-        self.button_font_factor = 28
         self.pill_font_factor = 34
 
         self.scale = 1.0
         self._last_scale = 1.0
         self.font = get_font(13, mono=True)
         self.moves_font = get_font(14, bold=True)
-        self.button_font = get_font(14, bold=True)
         self.pill_font = get_font(11, bold=True)
         self.round_font = get_font(11, bold=True)
         self.micro_font = get_font(MICRO_FONT_PT, bold=True, mono=True)
+        self.section_font = get_font(SECTION_HEADER_PT, mono=True, bold=True)
+        self.cap_label_font = get_font(CAP_LABEL_PT, bold=True)
+        self.tooltip_font = get_font(TOOLTIP_PT, mono=True)
+        self._glyph_fonts = {
+            spec: get_font(spec[0], mono=True, bold=spec[1]) for spec in _GLYPH_SPECS
+        }
+        self._cap_fg_box = CAP_ICON_BOX
 
         self.outer_rect = pg.Rect(0, 0, 0, 0)
         self.moves_rect = pg.Rect(0, 0, 0, 0)
         self.info_rect = pg.Rect(0, 0, 0, 0)
-        self.buttons_rect = pg.Rect(0, 0, 0, 0)
         self.button_rects = {}
+        self._section_blocks = []
+        self._cap_draws = []
+        self._chevron_anim = {}
+        self.rail_tooltip = RailTooltip()
         self.game_info = None
         self._last_outer_rect = None
 
@@ -120,10 +268,19 @@ class RightMenu:
         self.font = get_font(max(int(rect.width / self.moves_font_factor), 10), mono=True)
         self.moves_font = get_font(
             max(int(rect.width / self.moves_font_factor), 10), bold=True)
-        self.button_font = get_font(max(int(rect.width / self.button_font_factor), 10), bold=True)
         self.pill_font = get_font(max(int(rect.width / self.pill_font_factor), 9), bold=True)
         self.round_font = get_font(max(int(rect.width / self.pill_font_factor), 9), bold=True)
         self.micro_font = get_font(scale_floor(MICRO_FONT_PT, scale, 8), bold=True, mono=True)
+        self.section_font = get_font(
+            scale_floor(SECTION_HEADER_PT, scale, 7), mono=True, bold=True)
+        self.cap_label_font = get_font(scale_floor(CAP_LABEL_PT, scale, 10), bold=True)
+        self.tooltip_font = get_font(scale_floor(TOOLTIP_PT, scale, 8), mono=True)
+        self._glyph_fonts = {
+            spec: get_font(scale_floor(spec[0], scale, max(spec[0] - 4, 8)),
+                           mono=True, bold=spec[1])
+            for spec in _GLYPH_SPECS
+        }
+        self._cap_fg_box = scale_floor(CAP_ICON_BOX, scale, 16)
 
         p = self.padding
         inset = scale_floor(CARD_INSET, scale, 8)
@@ -133,27 +290,94 @@ class RightMenu:
         )
         self._last_outer_rect = pg.Rect(rect)
 
-        button_row_h = self.button_font.get_height() + 2 * self.button_v_pad
         inner_w = self.outer_rect.width - 2 * p
         small_gap = max(int(self.outer_rect.height * 0.01), 4)
 
-        n_rows = max(len(self.buttons_provider()), 1)
-        buttons_block_h = n_rows * button_row_h + (n_rows - 1) * small_gap
-        self.buttons_rect = pg.Rect(
-            self.outer_rect.x + p,
-            self.outer_rect.bottom - p - buttons_block_h,
-            inner_w,
-            buttons_block_h,
-        )
+        stack_top = self._layout_sections(inner_w)
 
         info_h = self._info_section_height()
         info_y = self.outer_rect.y + p
         self.info_rect = pg.Rect(self.outer_rect.x + p, info_y, inner_w, info_h)
 
         moves_top = info_y + info_h + (small_gap if info_h > 0 else 0)
-        moves_h = max(self.buttons_rect.y - moves_top - p,
+        moves_h = max(stack_top - moves_top - small_gap,
                       scale_floor(LOG_MIN_H, scale, 70))
         self.moves_rect = pg.Rect(self.outer_rect.x + p, moves_top, inner_w, moves_h)
+
+    def _layout_sections(self, inner_w):
+        scale = self.scale
+        p = self.padding
+        div_top = scale_floor(SECTION_DIVIDER_TOP, scale, 4)
+        div_bottom = scale_floor(SECTION_DIVIDER_BOTTOM, scale, 3)
+        header_h = self.section_font.get_height() + 2 * scale_floor(
+            SECTION_HEADER_VPAD, scale, 4)
+
+        metas = []
+        stack_h = 0
+        for key in self._visible_sections():
+            body_h = self._section_body_height(key)
+            block_h = div_top + div_bottom + header_h + body_h
+            metas.append((key, body_h, block_h))
+            stack_h += block_h
+
+        stack_top = self.outer_rect.bottom - p - stack_h
+        x = self.outer_rect.x + p
+        y = stack_top
+        self._section_blocks = []
+        self._cap_draws = []
+        self.button_rects = {}
+        for key, body_h, block_h in metas:
+            divider_y = y + div_top
+            header = pg.Rect(x, divider_y + div_bottom, inner_w, header_h)
+            body = pg.Rect(x, header.bottom, inner_w, body_h)
+            show_body = body_h > 0 and SECTION_OPEN.get(key, True)
+            self._section_blocks.append(
+                SectionBlock(key, divider_y, header, body, show_body))
+            if key == "actions" and show_body:
+                self._cap_draws = self._layout_caps(self.buttons_provider(), body)
+                for cap, cap_rect in self._cap_draws:
+                    self.button_rects[cap.key] = cap_rect
+            y += block_h
+        return stack_top
+
+    def _visible_sections(self):
+        if self.chat_visible_provider():
+            return list(SECTION_ORDER)
+        return [key for key in SECTION_ORDER if key != "chat"]
+
+    def _section_body_height(self, key):
+        if key != "actions" or not SECTION_OPEN.get(key, True):
+            return 0
+        caps = self.buttons_provider()
+        if not caps:
+            return 0
+        body_top = scale_floor(SECTION_BODY_TOP, self.scale, 4)
+        if self.caps_stacked:
+            cap_h = scale_floor(CAP_H_REVIEW, self.scale, 28)
+            gap = scale_floor(CAP_GAP, self.scale, 5)
+            return body_top + len(caps) * cap_h + (len(caps) - 1) * gap
+        return body_top + scale_floor(CAP_H_GAME, self.scale, 30)
+
+    def _layout_caps(self, caps, body):
+        result = []
+        if not caps:
+            return result
+        gap = scale_floor(CAP_GAP, self.scale, 5)
+        top = body.y + scale_floor(SECTION_BODY_TOP, self.scale, 4)
+        if self.caps_stacked:
+            cap_h = scale_floor(CAP_H_REVIEW, self.scale, 28)
+            y = top
+            for cap in caps:
+                result.append((cap, pg.Rect(body.x, y, body.width, cap_h)))
+                y += cap_h + gap
+            return result
+        cap_h = scale_floor(CAP_H_GAME, self.scale, 30)
+        cap_w = (body.width - gap * (len(caps) - 1)) / len(caps)
+        x = float(body.x)
+        for cap in caps:
+            result.append((cap, pg.Rect(round(x), top, round(cap_w), cap_h)))
+            x += cap_w + gap
+        return result
 
     def _info_section_height(self):
         if self.game_info is None:
@@ -195,7 +419,7 @@ class RightMenu:
             self.moves_rect.topleft)
         self._draw_moves(self.moves_rect)
         self.scroll.draw_thumb(self.window)
-        self._draw_buttons(self.buttons_rect)
+        self._draw_sections()
         self.window.set_clip(prev_clip)
 
     def _draw_game_info(self, rect):
@@ -239,7 +463,13 @@ class RightMenu:
                     return True
                 callback = self.callbacks.get(key)
                 if callback is not None:
+                    if self.sounds is not None:
+                        self.sounds.play_cap_press()
                     callback()
+                return True
+        for block in self._section_blocks:
+            if block.header.collidepoint(pos):
+                self.toggle_section(block.key)
                 return True
         if self.board is None or not self.moves_rect.collidepoint(pos):
             return False
@@ -415,21 +645,106 @@ class RightMenu:
         new_offset = self._total_rows - new_end
         return max(0, min(new_offset, max_offset))
 
-    def _draw_buttons(self, rect):
-        rows = self.buttons_provider()
-        self.button_rects = {}
-        if not rows:
+    def toggle_section(self, key):
+        now = pg.time.get_ticks()
+        cur = self._chevron_frac(key, now)
+        SECTION_OPEN[key] = not SECTION_OPEN.get(key, True)
+        target = 1.0 if SECTION_OPEN[key] else 0.0
+        self._chevron_anim[key] = (now, cur, target)
+        if self._last_outer_rect is not None:
+            self.set_rect(self._last_outer_rect, self._last_scale)
+        if self.sounds is not None:
+            self.sounds.play_section_toggle()
+
+    def _draw_sections(self):
+        now = pg.time.get_ticks()
+        self.rail_tooltip.begin_frame()
+        for block in self._section_blocks:
+            self._draw_divider(block)
+            self._draw_section_header(block, now)
+            self.rail_tooltip.register(
+                ("section", block.key), block.header, SECTION_TOOLTIPS[block.key])
+        self._draw_caps()
+        self.rail_tooltip.draw(
+            self.window, self.outer_rect, self.scale, now, self.tooltip_font)
+
+    def _draw_divider(self, block):
+        self.window.blit(dashed_hline(block.header.width, Colors.border),
+                         (block.header.x, block.divider_y))
+
+    def _draw_section_header(self, block, now):
+        header = block.header
+        label = render_text(self.section_font, SECTION_LABELS[block.key], Colors.text_muted)
+        self.window.blit(label, (header.x, header.centery - label.get_height() // 2))
+        frac = self._chevron_frac(block.key, now)
+        chev_h = scale_floor(SECTION_CHEVRON_H, self.scale, 5)
+        chev = rotated_chevron_surface(chev_h, Colors.text_muted, 90.0 * (1.0 - frac))
+        self.window.blit(chev, (header.right - chev.get_width(),
+                                header.centery - chev.get_height() // 2))
+
+    def _chevron_frac(self, key, now):
+        target = 1.0 if SECTION_OPEN.get(key, True) else 0.0
+        anim = self._chevron_anim.get(key)
+        if anim is None:
+            return target
+        start_ms, from_frac, to_frac = anim
+        t = (now - start_ms) / SECTION_CHEVRON_MS
+        if t >= 1.0:
+            return to_frac
+        if t <= 0.0:
+            return from_frac
+        return from_frac + (to_frac - from_frac) * smoothstep(t)
+
+    def _draw_caps(self):
+        if not self._cap_draws:
             return
-        row_h = (rect.height - (len(rows) - 1) * self.button_gap) / len(rows)
         disabled = self.disabled_keys_provider()
-        for i, row in enumerate(rows):
-            row_rect = pg.Rect(
-                rect.x,
-                round(rect.y + i * (row_h + self.button_gap)),
-                rect.width,
-                round(row_h),
-            )
-            self.button_rects.update(draw_button_row(
-                self.window, row_rect, row, self.button_font, self.button_gap,
-                disabled_keys=disabled,
-            ))
+        mouse = pg.mouse.get_pos()
+        mouse_down = pg.mouse.get_pressed()[0]
+        for cap, rect in self._cap_draws:
+            is_disabled = cap.key in disabled
+            hovered = (not is_disabled) and rect.collidepoint(mouse)
+            pressed = hovered and mouse_down
+            fill = (Colors.surface if is_disabled
+                    else Colors.surface_hover if hovered else Colors.surface_raised)
+            self.window.blit(
+                cut_rect_surface(rect.size, scale_floor(CAP_CUT, self.scale, 5), fill,
+                                 border=Colors.border, border_width=1, corners=("tr",)),
+                rect.topleft)
+            off = 1 if pressed else 0
+            if self.caps_stacked:
+                self._draw_cap_stacked(cap, rect, is_disabled, off)
+            else:
+                self._draw_cap_icon(cap, rect, is_disabled, off)
+            self.rail_tooltip.register(("cap", cap.key), rect, cap.tooltip)
+
+    def _draw_cap_icon(self, cap, rect, faded, off):
+        fg = self._cap_foreground(cap, faded)
+        self.window.blit(fg, (rect.centerx - fg.get_width() // 2,
+                              rect.centery - fg.get_height() // 2 + off))
+
+    def _draw_cap_stacked(self, cap, rect, faded, off):
+        fg = self._cap_foreground(cap, faded)
+        pad = scale_floor(CAP_LABEL_PAD, self.scale, 6)
+        icon_x = rect.x + pad
+        self.window.blit(fg, (icon_x, rect.centery - fg.get_height() // 2 + off))
+        color = Colors.text_muted if faded else Colors.rail_icon
+        label = render_text(self.cap_label_font, cap.label, color)
+        self.window.blit(label, (icon_x + fg.get_width() + pad,
+                                 rect.centery - label.get_height() // 2 + off))
+
+    def _cap_foreground(self, cap, faded):
+        box = self._cap_fg_box
+        key = (cap.key, box, faded)
+
+        def build():
+            if cap.glyph:
+                font = self._glyph_fonts[(cap.glyph_pt, cap.glyph_bold)]
+                surf = font.render(cap.glyph, True, pg.Color(Colors.rail_icon))
+            else:
+                surf = pg.Surface((box, box), pg.SRCALPHA)
+                CAP_ICON_FUNCS[cap.icon](surf, surf.get_rect(), Colors.rail_icon)
+            if faded:
+                surf.set_alpha(FADED_ICON_ALPHA)
+            return surf
+        return memoized_surface(_CAP_FG_CACHE, key, build)

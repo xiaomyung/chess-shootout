@@ -270,3 +270,82 @@ def draw_reticle(window, rect, color, alpha=255):
                              lambda: supersample(side, render, scale=ICON_SUPERSAMPLE))
     surf.set_alpha(max(0, min(255, int(alpha))))
     window.blit(surf, (rect.centerx - side // 2, rect.centery - side // 2))
+
+
+def draw_undo_arrow(window, rect, color):
+    side = _icon_side(rect, _ICON_FOOTPRINT_MEDIUM)
+    if side < 6:
+        return
+    col = pg.Color(color)
+
+    def render(surf, k):
+        u = side * k / ICON_GRID
+        lw = max(int(_ICON_STROKE_FACTOR * u), 2)
+        cx, cy, r = 12 * u, 12.4 * u, 6.6 * u
+        a0, a1, n = math.radians(300), math.radians(120), 26
+        pts = [(cx + r * math.cos(a0 + (a1 - a0) * i / n),
+                cy + r * math.sin(a0 + (a1 - a0) * i / n)) for i in range(n + 1)]
+        pg.draw.lines(surf, col, False, pts, lw)
+        hx, hy = pts[0]
+        head = 3.4 * u
+        pg.draw.line(surf, col, (hx, hy), (hx + head, hy - head * 0.35), lw)
+        pg.draw.line(surf, col, (hx, hy), (hx + head * 0.35, hy + head), lw)
+
+    _blit_icon(window, rect, side, ("undo_arrow", side, str(color)),
+               lambda: supersample(side, render, scale=ICON_SUPERSAMPLE))
+
+
+_RESIGN_FLAG = [(7, 5), (18, 8), (7, 12)]
+
+
+def draw_resign_flag(window, rect, color):
+    side = _icon_side(rect, _ICON_FOOTPRINT_MEDIUM)
+    if side < 6:
+        return
+    col = pg.Color(color)
+
+    def render(surf, k):
+        u = side * k / ICON_GRID
+        lw = max(int(_ICON_STROKE_FACTOR * u), 2)
+        pg.draw.line(surf, col, (7 * u, 4 * u), (7 * u, 20.5 * u), lw)
+        pg.draw.polygon(surf, col, [(x * u, y * u) for x, y in _RESIGN_FLAG])
+
+    _blit_icon(window, rect, side, ("resign_flag", side, str(color)),
+               lambda: supersample(side, render, scale=ICON_SUPERSAMPLE))
+
+
+def draw_flip_arrows(window, rect, color):
+    side = _icon_side(rect, _ICON_FOOTPRINT_MEDIUM)
+    if side < 6:
+        return
+    col = pg.Color(color)
+
+    def render(surf, k):
+        u = side * k / ICON_GRID
+        lw = max(int(_ICON_STROKE_FACTOR * u), 2)
+        pg.draw.line(surf, col, (9 * u, 5 * u), (9 * u, 19 * u), lw)
+        pg.draw.lines(surf, col, False,
+                      [(6.5 * u, 8 * u), (9 * u, 5 * u), (11.5 * u, 8 * u)], lw)
+        pg.draw.line(surf, col, (15 * u, 5 * u), (15 * u, 19 * u), lw)
+        pg.draw.lines(surf, col, False,
+                      [(12.5 * u, 16 * u), (15 * u, 19 * u), (17.5 * u, 16 * u)], lw)
+
+    _blit_icon(window, rect, side, ("flip_arrows", side, str(color)),
+               lambda: supersample(side, render, scale=ICON_SUPERSAMPLE))
+
+
+def draw_left_arrow(window, rect, color):
+    side = _icon_side(rect, _ICON_FOOTPRINT_MEDIUM)
+    if side < 6:
+        return
+    col = pg.Color(color)
+
+    def render(surf, k):
+        u = side * k / ICON_GRID
+        lw = max(int(_ICON_STROKE_FACTOR * u), 2)
+        pg.draw.line(surf, col, (5.5 * u, 12 * u), (18.5 * u, 12 * u), lw)
+        pg.draw.lines(surf, col, False,
+                      [(10.5 * u, 7 * u), (5.5 * u, 12 * u), (10.5 * u, 17 * u)], lw)
+
+    _blit_icon(window, rect, side, ("left_arrow", side, str(color)),
+               lambda: supersample(side, render, scale=ICON_SUPERSAMPLE))

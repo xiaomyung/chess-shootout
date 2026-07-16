@@ -23,8 +23,8 @@ from chessshootout.skillcheck.coordinator import SkillCheckCoordinator
 from chessshootout.skillcheck.types import SkillCheckKind
 from chessshootout.frontend.panels.right import (
     RightMenu,
-    BUTTONS as RIGHT_MENU_BUTTONS,
-    UNTIMED_BUTTONS as RIGHT_MENU_UNTIMED_BUTTONS,
+    CAPS as RIGHT_MENU_CAPS,
+    UNTIMED_CAPS as RIGHT_MENU_UNTIMED_CAPS,
 )
 from chessshootout.frontend.panels.player_strip import (
     PlayerStrip, is_white, top_strip_color, refresh_capture_icons,
@@ -181,7 +181,8 @@ class GameScreen(Screen):
             "give_time": self.give_time.on_give_time,
         }, board=self.board, buttons_provider=self._right_menu_buttons,
             disabled_keys_provider=self._right_menu_disabled_keys,
-            whiffs_provider=self.skillcheck_session.skillcheck_whiffs)
+            whiffs_provider=self.skillcheck_session.skillcheck_whiffs,
+            sounds=app.sound_manager)
         self.player_strip_top = PlayerStrip(window)
         self.player_strip_bottom = PlayerStrip(window)
 
@@ -793,8 +794,20 @@ class GameScreen(Screen):
         if event.key == pg.K_d:
             self._on_draw()
             return True
-        if event.key == pg.K_z and (event.mod & pg.KMOD_CTRL):
+        if event.key == pg.K_z:
             self._on_undo()
+            return True
+        if event.key == pg.K_g:
+            self.give_time.tap_give_time()
+            return True
+        if event.key == pg.K_a:
+            self.right_menu.toggle_section("actions")
+            return True
+        if event.key == pg.K_s:
+            self.right_menu.toggle_section("signals")
+            return True
+        if event.key == pg.K_c and self.right_menu.chat_visible_provider():
+            self.right_menu.toggle_section("chat")
             return True
         if event.key == pg.K_LEFT:
             self.board.step_review(-1)
@@ -1223,8 +1236,8 @@ class GameScreen(Screen):
 
     def _right_menu_buttons(self):
         if self.match.clock is None:
-            return RIGHT_MENU_UNTIMED_BUTTONS
-        return RIGHT_MENU_BUTTONS
+            return RIGHT_MENU_UNTIMED_CAPS
+        return RIGHT_MENU_CAPS
 
     def _right_menu_disabled_keys(self):
         if self.current_result() is not None:

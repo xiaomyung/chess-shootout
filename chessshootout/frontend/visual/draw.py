@@ -284,3 +284,19 @@ def chevron_surface(height, color, up=False):
             pg.draw.lines(surf, pg.Color(color), False, pts, lw)
         return supersample((w, h), render)
     return memoized_surface(_CHEVRON_CACHE, (h, up, str(color)), build)
+
+
+_ROTATED_CHEVRON_CACHE = new_cache()
+_CHEVRON_ANGLE_STEP = 6
+
+
+def rotated_chevron_surface(height, color, angle):
+    bucket = int(round(angle / _CHEVRON_ANGLE_STEP)) * _CHEVRON_ANGLE_STEP
+    key = (max(int(height), 4), str(color), bucket)
+
+    def build():
+        base = chevron_surface(height, color)
+        if bucket == 0:
+            return base
+        return pg.transform.rotate(base, bucket)
+    return memoized_surface(_ROTATED_CHEVRON_CACHE, key, build)

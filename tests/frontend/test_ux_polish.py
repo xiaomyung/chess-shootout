@@ -514,15 +514,17 @@ def test_ctrl_z_undoes_last_move():
     assert len(app.game.match.backend.move_history) == 0
 
 
-def test_z_without_ctrl_does_not_undo():
+def test_plain_z_also_undoes_last_move():
+    """Plain Z is now an undo shortcut alongside Ctrl+Z (the rail's UNDO cap)."""
     app = _new_app()
     app.game.board.handle_click(Square(6, 4))
     app.game.board.handle_click(Square(4, 4))
     fire_animation(app.game.board)
+    assert len(app.game.match.backend.move_history) == 1
     event = pg.event.Event(pg.KEYDOWN, key=pg.K_z, mod=0)
     handled = app.game.handle_key(event)
-    assert handled is False
-    assert len(app.game.match.backend.move_history) == 1
+    assert handled is True
+    assert len(app.game.match.backend.move_history) == 0
 
 
 def test_shortcuts_blocked_while_confirm_modal_open():

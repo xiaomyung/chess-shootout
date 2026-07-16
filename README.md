@@ -172,11 +172,12 @@ pyenv shell 3.12                  # `python3.12` now resolves for the venv step 
 | `D` | Offer draw |
 | `Q` / `B` / `N` | Promote (queen / bishop / knight) |
 | `Space` / Click | Fire the active skill-check (Shootout) |
-| `Ctrl+Z` | Undo (online: takeback request) |
+| `Z` | Undo move (`Ctrl+Z` also works; online: takeback request) |
+| `G` | Give 15 seconds (hold the **+15** cap to ramp) |
+| `A` / `S` / `C` | Collapse or expand rail sections |
 | Left / Right | Step through moves (also during live games) |
 | `Home` / `End` | Jump to ply 0 / return to live play |
 | `?` | Open Help modal |
-| Hold **Give 15s** | Ramp the opponent's clock up to the starting time |
 | `Esc` | Context Back/Cancel — closes the top modal, else exits focus mode, else the quit / resign prompt (never the window) |
 
 ## Online play
