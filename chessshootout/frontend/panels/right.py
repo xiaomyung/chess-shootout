@@ -29,11 +29,11 @@ class Cap(NamedTuple):
 
 CAPS = [
     Cap("undo",      "undo",   "",    0,  False, "Undo",     "UNDO — KEY Z"),
-    Cap("draw",      "",       "½",   17, False, "Draw",     "OFFER DRAW — KEY D"),
+    Cap("draw",      "",       "½",   20, False, "Draw",     "OFFER DRAW — KEY D"),
     Cap("resign",    "resign", "",    0,  False, "Resign",   "RESIGN — KEY R"),
-    Cap("give_time", "",       "+15", 12, True,  "Give +15", "GIVE +15 — KEY G · HOLD TO RAMP"),
+    Cap("give_time", "",       "+15", 14, True,  "Give +15", "GIVE +15 — KEY G · HOLD TO RAMP"),
     Cap("flip",      "flip",   "",    0,  False, "Flip",     "FLIP — KEY F"),
-    Cap("help",      "",       "?",   15, True,  "Help",     "HELP — KEY ?"),
+    Cap("help",      "",       "?",   18, True,  "Help",     "HELP — KEY ?"),
 ]
 
 UNTIMED_CAPS = [cap for cap in CAPS if cap.key != "give_time"]
@@ -100,7 +100,7 @@ CAP_H_GAME = 44
 CAP_H_REVIEW = 40
 CAP_GAP = 8
 CAP_CUT = 7
-CAP_ICON_BOX = 27
+CAP_ICON_BOX = 32
 CAP_LABEL_PT = 14
 CAP_LABEL_PAD = 9
 FADED_ICON_ALPHA = 102
@@ -931,8 +931,8 @@ class RightMenu:
             inner = scale_floor(SIGNAL_CHIP_DOT_GAP, self.scale, 3)
             gx = (w - (dot.get_width() + inner + label.get_width())) // 2
             label_y = (h - label.get_height()) // 2
-            ink = label.get_bounding_rect()
-            dot_y = round(label_y + ink.centery - dot.get_height() / 2)
+            cap_ink = self.chip_font.render("X", True, (255, 255, 255)).get_bounding_rect()
+            dot_y = round(label_y + cap_ink.centery - dot.get_height() / 2)
             surf.blit(dot, (gx, dot_y))
             surf.blit(label, (gx + dot.get_width() + inner, label_y))
             if disabled:

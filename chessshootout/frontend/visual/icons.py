@@ -17,6 +17,7 @@ _ICON_FOOTPRINT_MEDIUM = 0.82
 _ICON_FOOTPRINT_LARGE = 0.86
 _ICON_STROKE_FACTOR = 1.7
 _ICON_STROKE_FACTOR_THIN = 1.6
+_ICON_STROKE_FACTOR_BOLD = 2.2
 
 
 def _blit_icon(window, rect, side, key, build):
@@ -280,22 +281,28 @@ def draw_undo_arrow(window, rect, color):
 
     def render(surf, k):
         u = side * k / ICON_GRID
-        lw = max(int(_ICON_STROKE_FACTOR * u), 2)
-        cx, cy, r = 12 * u, 12.4 * u, 6.6 * u
-        a0, a1, n = math.radians(300), math.radians(120), 26
-        pts = [(cx + r * math.cos(a0 + (a1 - a0) * i / n),
-                cy + r * math.sin(a0 + (a1 - a0) * i / n)) for i in range(n + 1)]
+        lw = max(int(_ICON_STROKE_FACTOR_BOLD * u), 2)
+        cx, cy, r = 12 * u, 12 * u, 7.4 * u
+        head, sweep, n = math.radians(96), math.radians(268), 44
+        start = head - sweep
+        pts = [(cx + r * math.cos(start + sweep * i / n),
+                cy - r * math.sin(start + sweep * i / n)) for i in range(n + 1)]
         pg.draw.lines(surf, col, False, pts, lw)
-        hx, hy = pts[0]
-        head = 3.4 * u
-        pg.draw.line(surf, col, (hx, hy), (hx + head, hy - head * 0.35), lw)
-        pg.draw.line(surf, col, (hx, hy), (hx + head * 0.35, hy + head), lw)
+        pg.draw.circle(surf, col, (int(pts[0][0]), int(pts[0][1])), max(lw // 2, 1))
+        hx, hy = pts[-1]
+        fx, fy = -math.sin(head), -math.cos(head)
+        px, py = -fy, fx
+        hl, hw = 4.6 * u, 3.2 * u
+        pg.draw.polygon(surf, col, [
+            (hx + fx * hl, hy + fy * hl),
+            (hx - fx * hl * 0.28 + px * hw, hy - fy * hl * 0.28 + py * hw),
+            (hx - fx * hl * 0.28 - px * hw, hy - fy * hl * 0.28 - py * hw)])
 
     _blit_icon(window, rect, side, ("undo_arrow", side, str(color)),
                lambda: supersample(side, render, scale=ICON_SUPERSAMPLE))
 
 
-_RESIGN_FLAG = [(7, 5), (18, 8), (7, 12)]
+_RESIGN_FLAG = [(7, 4.8), (19.6, 8.8), (7, 11.4)]
 
 
 def draw_resign_flag(window, rect, color):
@@ -306,8 +313,8 @@ def draw_resign_flag(window, rect, color):
 
     def render(surf, k):
         u = side * k / ICON_GRID
-        lw = max(int(_ICON_STROKE_FACTOR * u), 2)
-        pg.draw.line(surf, col, (7 * u, 4 * u), (7 * u, 20.5 * u), lw)
+        pole = max(int(2.0 * u), 2)
+        pg.draw.line(surf, col, (7 * u, 3.4 * u), (7 * u, 20.6 * u), pole)
         pg.draw.polygon(surf, col, [(x * u, y * u) for x, y in _RESIGN_FLAG])
 
     _blit_icon(window, rect, side, ("resign_flag", side, str(color)),
@@ -322,7 +329,7 @@ def draw_flip_arrows(window, rect, color):
 
     def render(surf, k):
         u = side * k / ICON_GRID
-        lw = max(int(_ICON_STROKE_FACTOR * u), 2)
+        lw = max(int(_ICON_STROKE_FACTOR_BOLD * u), 2)
         pg.draw.line(surf, col, (9 * u, 5 * u), (9 * u, 19 * u), lw)
         pg.draw.lines(surf, col, False,
                       [(6.5 * u, 8 * u), (9 * u, 5 * u), (11.5 * u, 8 * u)], lw)
@@ -342,7 +349,7 @@ def draw_left_arrow(window, rect, color):
 
     def render(surf, k):
         u = side * k / ICON_GRID
-        lw = max(int(_ICON_STROKE_FACTOR * u), 2)
+        lw = max(int(_ICON_STROKE_FACTOR_BOLD * u), 2)
         pg.draw.line(surf, col, (5.5 * u, 12 * u), (18.5 * u, 12 * u), lw)
         pg.draw.lines(surf, col, False,
                       [(10.5 * u, 7 * u), (5.5 * u, 12 * u), (10.5 * u, 17 * u)], lw)

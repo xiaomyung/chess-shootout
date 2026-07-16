@@ -376,8 +376,10 @@ def test_tooltip_bubble_renders_country_name(strip):
     strip._tooltip_alpha = 1.0
     strip._blit_tooltip("United States")
     flag = strip._flag_rect
-    region = pg.Rect(max(flag.centerx - 80, 0), flag.bottom + 2, 160, 30)
+    region = pg.Rect(max(flag.centerx - 80, 0), flag.bottom, 200, 40)
     assert _has_color(strip.window, region, Colors.text, tol=20)
+    assert scan_region(strip.window, region, Colors.border_strong, tol=12, clamp=True), \
+        "the flag tooltip wears the command-rail cut-corner border"
 
 
 def test_tooltip_resets_alpha_when_country_absent(strip):

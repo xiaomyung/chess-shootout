@@ -31,7 +31,7 @@ GIVE_TIME_FADE_OUT_FRACTION = 1 - GIVE_TIME_FADE_IN_FRACTION
 GIVE_TIME_FLOAT_RISE_PX = 6
 GIVE_TIME_FLOAT_TRAVEL_PX = 28
 PILL_HEIGHT_UNCAPPED = 10 ** 6
-TOOLTIP_PAD_X = 9
+TOOLTIP_PAD_X = 10
 TOOLTIP_PAD_Y = 5
 TOOLTIP_RADIUS = 6
 TOOLTIP_RISE_PX = 5
@@ -116,7 +116,7 @@ class PlayerStrip:
         self._flag_cache = None
         self._flag_rect = pg.Rect(0, 0, 0, 0)
         self._tooltip_alpha = 0.0
-        self.tooltip_font = get_font(12, bold=True)
+        self.tooltip_font = get_font(10, mono=True)
         self._clock_cache = None
         self._sharing_dot_cache = None
 
@@ -135,7 +135,7 @@ class PlayerStrip:
         self.letter_font = get_font(max(int(ih * 0.5), 11), family=DISPLAY)
         self.auto_end_font = get_font(
             max(int(ih * 0.42 * AUTO_END_BADGE_FONT_SCALE), 9), bold=True)
-        self.tooltip_font = get_font(max(int(ih * 0.34), 11), bold=True)
+        self.tooltip_font = get_font(scale_floor(10, scale, 9), mono=True)
         self._give_time_float_font = get_font(
             max(int(h * 0.24), 11), bold=True, mono=True)
         self._avatar.reset()
@@ -249,13 +249,14 @@ class PlayerStrip:
 
     def _blit_tooltip(self, name):
         alpha = int(max(0.0, min(1.0, self._tooltip_alpha)) * 255)
-        text = self.tooltip_font.render(name, True, Colors.text)
-        pad_x, pad_y = TOOLTIP_PAD_X, TOOLTIP_PAD_Y
+        text = self.tooltip_font.render(name.upper(), True, Colors.text)
+        pad_x = scale_floor(TOOLTIP_PAD_X, self.scale, 6)
+        pad_y = scale_floor(TOOLTIP_PAD_Y, self.scale, 3)
         w = text.get_width() + 2 * pad_x
         h = text.get_height() + 2 * pad_y
-        bubble = pg.Surface((w, h), pg.SRCALPHA)
-        bubble.blit(rounded_rect_surface((w, h), TOOLTIP_RADIUS, Colors.bg,
-                                         border=Colors.border, border_width=1), (0, 0))
+        bubble = cut_rect_surface((w, h), scale_floor(TOOLTIP_RADIUS, self.scale, 4),
+                                  Colors.bg, border=Colors.border_strong,
+                                  border_width=1, corners=("tr",)).copy()
         bubble.blit(text, (pad_x, pad_y))
         bubble.set_alpha(alpha)
         rise = int(TOOLTIP_RISE_PX * (1 - self._tooltip_alpha))
