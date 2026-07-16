@@ -120,6 +120,29 @@ def test_notch_row_clicks_a_cell_to_set_that_level():
     assert val["v"] == pytest.approx(1.0)
 
 
+def test_notch_row_first_cell_reclick_toggles_to_zero():
+    """The first notch doubles as an off switch: clicking it at 10% drops the value
+    to 0%, clicking again restores 10%. Other cells never toggle to zero."""
+    val = {"v": 0.0}
+    row = NotchRow("Volume", "", lambda: val["v"], lambda v: val.update(v=v))
+    _draw_row(row)
+    step = NOTCH_CELL_W + NOTCH_GAP
+
+    def cell_center(i):
+        return (row._band.x + i * step + NOTCH_CELL_W // 2, row._band.centery)
+
+    row.handle_click(cell_center(0))
+    assert val["v"] == pytest.approx(0.1)
+    row.handle_click(cell_center(0))
+    assert val["v"] == pytest.approx(0.0)
+    row.handle_click(cell_center(0))
+    assert val["v"] == pytest.approx(0.1)
+    row.handle_click(cell_center(4))
+    assert val["v"] == pytest.approx(0.5)
+    row.handle_click(cell_center(4))
+    assert val["v"] == pytest.approx(0.5)
+
+
 def test_notch_row_click_fires_tick_and_debounced_write():
     """Clicking a notch cell plays the tick AND schedules the debounced env write
     (both preserved from the old slider's on_tick / on_release wiring)."""

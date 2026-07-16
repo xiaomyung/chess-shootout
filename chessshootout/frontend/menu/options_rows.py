@@ -27,6 +27,7 @@ TOGGLE_SNAP_EPS = 0.02
 TOGGLE_LERP = 0.3
 
 NOTCH_COUNT = 10
+NOTCH_ZERO_EPSILON = 0.005
 NOTCH_CELL_W = 13
 NOTCH_CELL_H = 22
 NOTCH_GAP = 4
@@ -206,7 +207,10 @@ class NotchRow(_Row):
             return False
         step = NOTCH_CELL_W + NOTCH_GAP
         i = max(0, min(NOTCH_COUNT - 1, (pos[0] - self._band.x) // step))
-        self.setter((i + 1) / NOTCH_COUNT)
+        target = (i + 1) / NOTCH_COUNT
+        if i == 0 and abs(self.getter() - target) < NOTCH_ZERO_EPSILON:
+            target = 0.0
+        self.setter(target)
         if self.on_tick is not None:
             self.on_tick()
         if self.on_release is not None:
