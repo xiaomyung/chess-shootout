@@ -567,6 +567,77 @@ def test_vol_band_x_is_stable_across_readout_widths():
     assert positions[0] == positions[1] == positions[2]
 
 
+# --- QUICK CHAT section: 2x2 preset grid + cooldown dim ----------------------
+
+_CHAT_PRESETS = ("GG WELL PLAYED", "NICE SHOT", "THAT STINGS", "REMATCH?")
+
+
+def _chat_menu(cooldown=lambda: False, sounds=None, **callbacks):
+    backend = Backend()
+    backend.new_game()
+    cb = {"quick_chat": lambda i: None}
+    cb.update(callbacks)
+    rm = RightMenu(pg.display.get_surface(), backend, cb,
+                   chat_visible_provider=lambda: True,
+                   chat_presets_provider=lambda: list(_CHAT_PRESETS),
+                   chat_cooldown_provider=cooldown, sounds=sounds)
+    rm.set_rect(pg.Rect(0, 0, 320, 640))
+    return rm
+
+
+def _chat_body_rect(rm):
+    return next(b.body for b in rm._section_blocks if b.key == "chat")
+
+
+def test_chat_section_renders_four_preset_buttons_when_visible():
+    rm = _chat_menu()
+    _draw(rm)
+    assert [index for index, _ in rm._chat_buttons] == [0, 1, 2, 3]
+    labels = [label for _, _, label in rm.rail_tooltip.entries]
+    assert "SEND: THAT STINGS" in labels, "each chat button registers a SEND tooltip"
+
+
+def test_chat_section_absent_when_provider_false():
+    """Off the online rail the QUICK CHAT section never lays out: no block, no
+    button rects, zero body height."""
+    backend = Backend()
+    backend.new_game()
+    rm = RightMenu(pg.display.get_surface(), backend, {"quick_chat": lambda i: None},
+                   chat_presets_provider=lambda: list(_CHAT_PRESETS))
+    rm.set_rect(pg.Rect(0, 0, 320, 640))
+    _draw(rm)
+    assert rm._chat_buttons == []
+    assert all(block.key != "chat" for block in rm._section_blocks)
+
+
+def test_chat_button_click_fires_callback_with_index_and_plays_cap_press():
+    fired = []
+    sounds = MagicMock()
+    rm = _chat_menu(sounds=sounds, quick_chat=fired.append)
+    _draw(rm)
+    _, rect = rm._chat_buttons[2]
+    assert rm.handle_click(rect.center) is True
+    assert fired == [2]
+    sounds.play_cap_press.assert_called_once()
+
+
+def test_chat_cooldown_swallows_click_and_dims_buttons():
+    fired = []
+    rm = _chat_menu(cooldown=lambda: True, quick_chat=fired.append)
+    _draw(rm)
+    cooling_body = pg.image.tobytes(rm.window.subsurface(_chat_body_rect(rm)), "RGB")
+    _, rect = rm._chat_buttons[0]
+    assert rm.handle_click(rect.center) is True
+    assert fired == [], "a cooling chat button swallows the click but never fires"
+    labels = [label for _, _, label in rm.rail_tooltip.entries]
+    assert "CHAT COOLING DOWN" in labels, "cooling swaps the tooltip copy"
+
+    live = _chat_menu(cooldown=lambda: False)
+    _draw(live)
+    live_body = pg.image.tobytes(live.window.subsurface(_chat_body_rect(live)), "RGB")
+    assert cooling_body != live_body, "the cooling buttons paint dimmed, not full strength"
+
+
 def test_rail_tooltip_appears_over_hovered_cap(monkeypatch):
     rm, _ = _menu()
     rm.window.fill((0, 0, 0))

@@ -47,7 +47,9 @@ from chessshootout.frontend.game.result_flow import ResultFlow, score_str
 from chessshootout.frontend.game.skillcheck_session import SkillCheckSession
 from chessshootout.frontend.game.give_time import GiveTimeHold
 from chessshootout.frontend.game.variant import MATCH_MODE_BY_VARIANT, Variant
-from chessshootout.server.protocol import FIRST_MOVE_ABORT_SECONDS, GRACE_SECONDS, Reason
+from chessshootout.server.protocol import (
+    CHAT_COOLDOWN_SECONDS, FIRST_MOVE_ABORT_SECONDS, GRACE_SECONDS, Reason,
+)
 from chessshootout.online.client import RECONNECT_TOTAL_SECONDS
 
 
@@ -160,6 +162,7 @@ class GameScreen(Screen):
         self._debut_memo = None
         self._share_marks = False
         self._opp_sharing = False
+        self._chat_cooldown_until_ms = 0
 
         self.match = Match()
         self.board = Board(window, self.match,
@@ -196,11 +199,15 @@ class GameScreen(Screen):
             "auto_q_toggle": self._toggle_auto_queen,
             "sound_toggle": self._toggle_sound,
             "set_volume": self._set_signal_volume,
+            "quick_chat": self._on_quick_chat_send,
         }, board=self.board, buttons_provider=self._right_menu_buttons,
             disabled_keys_provider=self._right_menu_disabled_keys,
             whiffs_provider=self.skillcheck_session.skillcheck_whiffs,
             debut_provider=self._debut_line,
             signals_provider=self._signals_provider,
+            chat_visible_provider=lambda: self.variant == Variant.ONLINE,
+            chat_presets_provider=lambda: CHAT_PRESETS,
+            chat_cooldown_provider=self._chat_buttons_inert,
             sounds=app.sound_manager)
         self.player_strip_top = PlayerStrip(window)
         self.player_strip_bottom = PlayerStrip(window)
@@ -349,6 +356,22 @@ class GameScreen(Screen):
             "black" if self._chosen_side == "white" else "white")
         self.show_speech_bubble(sender, CHAT_PRESETS[preset])
         self.app.sound_manager.play_chat_receive()
+
+    def _chat_buttons_inert(self):
+        return (self.current_result() is not None
+                or pg.time.get_ticks() < self._chat_cooldown_until_ms)
+
+    def _on_quick_chat_send(self, index):
+        if self.variant != Variant.ONLINE:
+            return
+        if not 0 <= index < len(CHAT_PRESETS):
+            return
+        if self._chat_buttons_inert():
+            return
+        self._chat_cooldown_until_ms = pg.time.get_ticks() + int(CHAT_COOLDOWN_SECONDS * 1000)
+        self.app.coordinator.send_quick_chat(index)
+        self.show_speech_bubble(self._chosen_side, CHAT_PRESETS[index])
+        log.info("quick chat sent preset=%d", index)
 
     @staticmethod
     def _decode_highlight_coords(coords):
@@ -1493,6 +1516,7 @@ class GameScreen(Screen):
         self._debut_memo = None
         self._share_marks = False
         self._opp_sharing = False
+        self._chat_cooldown_until_ms = 0
         self._result_first_seen_at_ms = None
         self.result_flow.reset_for_new_game()
         self.right_menu.reset_for_new_game()

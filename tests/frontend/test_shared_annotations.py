@@ -12,6 +12,7 @@ player strips surface the sharing pill in the owner's colour."""
 
 from unittest.mock import MagicMock
 
+import pygame as pg
 import pytest
 
 from tests.conftest import pygame_display
@@ -317,3 +318,73 @@ def test_on_quick_chat_ignores_out_of_range_presets(preset):
 
 def test_chat_presets_match_the_server_preset_count():
     assert len(CHAT_PRESETS) == CHAT_PRESET_COUNT
+
+
+# ---- quick chat send (own rail buttons) ------------------------------------
+
+
+def test_quick_chat_send_relays_echoes_own_bubble_and_arms_cooldown(monkeypatch):
+    game = _online_game(your_color="white")
+    game.show_speech_bubble = MagicMock()
+    ticks = {"t": 5_000}
+    monkeypatch.setattr(pg.time, "get_ticks", lambda: ticks["t"])
+    assert game._chat_buttons_inert() is False
+    game._on_quick_chat_send(2)
+    game.app.coordinator.send_quick_chat.assert_called_once_with(2)
+    game.show_speech_bubble.assert_called_once_with("white", CHAT_PRESETS[2])
+    assert game._chat_buttons_inert() is True
+
+
+def test_quick_chat_send_echo_is_silent():
+    """The local echo pops a bubble but plays no sound — only the inbound
+    receive path chimes."""
+    game = _online_game(your_color="white")
+    game.app.sound_manager.play_chat_receive = MagicMock()
+    game._on_quick_chat_send(0)
+    game.app.sound_manager.play_chat_receive.assert_not_called()
+
+
+def test_quick_chat_second_send_within_cooldown_no_ops(monkeypatch):
+    game = _online_game(your_color="white")
+    ticks = {"t": 5_000}
+    monkeypatch.setattr(pg.time, "get_ticks", lambda: ticks["t"])
+    game._on_quick_chat_send(0)
+    game.app.coordinator.send_quick_chat.reset_mock()
+    ticks["t"] = 7_000
+    game._on_quick_chat_send(1)
+    game.app.coordinator.send_quick_chat.assert_not_called()
+    ticks["t"] = 8_100
+    game._on_quick_chat_send(1)
+    game.app.coordinator.send_quick_chat.assert_called_once_with(1)
+
+
+def test_quick_chat_inert_and_no_op_once_game_is_over(monkeypatch):
+    game = _online_game(your_color="white")
+    monkeypatch.setattr(game, "current_result", lambda: "draw_agreement")
+    assert game._chat_buttons_inert() is True
+    game._on_quick_chat_send(0)
+    game.app.coordinator.send_quick_chat.assert_not_called()
+
+
+def test_quick_chat_send_is_inert_for_a_local_game():
+    app = start_single_screen(_shared_make_app(1000, 800))
+    app.coordinator.send_quick_chat = MagicMock()
+    app.game._on_quick_chat_send(0)
+    app.coordinator.send_quick_chat.assert_not_called()
+
+
+def test_chat_section_visible_only_online():
+    game = _online_game()
+    assert game.right_menu.chat_visible_provider() is True
+    local = start_single_screen(_shared_make_app(1000, 800)).game
+    assert local.right_menu.chat_visible_provider() is False
+
+
+def test_reset_to_new_game_clears_chat_cooldown(monkeypatch):
+    game = _online_game(your_color="white")
+    monkeypatch.setattr(pg.time, "get_ticks", lambda: 5_000)
+    game._on_quick_chat_send(0)
+    assert game._chat_buttons_inert() is True
+    game._reset_to_new_game()
+    assert game._chat_cooldown_until_ms == 0
+    assert game._chat_buttons_inert() is False

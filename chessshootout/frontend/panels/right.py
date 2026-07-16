@@ -139,8 +139,18 @@ SIGNAL_DIM_ALPHA = 89
 SIGNAL_SHARE_DISABLED_ALPHA = 102
 SIGNAL_ON_BORDER_ALPHA = "8c"
 
+CHAT_BUTTON_H = 30
+CHAT_BUTTON_FLOOR = 26
+CHAT_LABEL_PT = 12
+CHAT_LABEL_FLOOR = 11
+CHAT_GAP = 7
+CHAT_CUT = 7
+CHAT_COLS = 2
+CHAT_DIM_ALPHA = 102
+
 _CAP_FG_CACHE = new_cache()
 _SIGNAL_CACHE = new_cache()
+_CHAT_CACHE = new_cache()
 
 
 class SignalChip(NamedTuple):
@@ -241,7 +251,9 @@ class RightMenu:
                  buttons_provider=None,
                  disabled_keys_provider=None, whiffs_provider=None,
                  debut_provider=None, signals_provider=None,
-                 sounds=None, chat_visible_provider=None, caps_stacked=False):
+                 sounds=None, chat_visible_provider=None,
+                 chat_presets_provider=None, chat_cooldown_provider=None,
+                 caps_stacked=False):
         self.window = window
         self.match = match
         self.callbacks = callbacks
@@ -253,6 +265,8 @@ class RightMenu:
         self.signals_provider = signals_provider
         self.sounds = sounds
         self.chat_visible_provider = chat_visible_provider or (lambda: False)
+        self.chat_presets_provider = chat_presets_provider or (lambda: [])
+        self.chat_cooldown_provider = chat_cooldown_provider or (lambda: False)
         self.caps_stacked = caps_stacked
         self._pair_to_row = {}
         self._marquee_off = 0.0
@@ -272,6 +286,7 @@ class RightMenu:
         self.section_font = get_font(SECTION_HEADER_PT, mono=True, bold=True)
         self.cap_label_font = get_font(CAP_LABEL_PT, bold=True)
         self.chip_font = get_font(SIGNAL_CHIP_LABEL_PT, bold=True, mono=True)
+        self.chat_font = get_font(CHAT_LABEL_PT, bold=True)
         self.signal_num_font = get_font(SIGNAL_VOL_READOUT_PT, mono=True)
         self.tooltip_font = get_font(TOOLTIP_PT, mono=True)
         self._glyph_fonts = {
@@ -286,6 +301,7 @@ class RightMenu:
         self._section_blocks = []
         self._cap_draws = []
         self._signal_chips = []
+        self._chat_buttons = []
         self._signal_vol_rect = pg.Rect(0, 0, 0, 0)
         self._signal_notch_band = pg.Rect(0, 0, 0, 0)
         self._signal_notch_step = 1
@@ -345,6 +361,7 @@ class RightMenu:
         self.chip_font = get_font(
             scale_floor(SIGNAL_CHIP_LABEL_PT, scale, SIGNAL_CHIP_LABEL_FLOOR),
             bold=True, mono=True)
+        self.chat_font = get_font(scale_floor(CHAT_LABEL_PT, scale, CHAT_LABEL_FLOOR), bold=True)
         self.signal_num_font = get_font(scale_floor(SIGNAL_VOL_READOUT_PT, scale, 8), mono=True)
         self.tooltip_font = get_font(scale_floor(TOOLTIP_PT, scale, 8), mono=True)
         self._glyph_fonts = {
@@ -398,6 +415,7 @@ class RightMenu:
         self._section_blocks = []
         self._cap_draws = []
         self._signal_chips = []
+        self._chat_buttons = []
         self.button_rects = {}
         for key, body_h, block_h in metas:
             divider_y = y + div_top
@@ -412,6 +430,8 @@ class RightMenu:
                     self.button_rects[cap.key] = cap_rect
             elif key == "signals" and show_body:
                 self._layout_signals(body)
+            elif key == "chat" and show_body:
+                self._layout_chat(body)
             y += block_h
         return stack_top
 
@@ -427,6 +447,8 @@ class RightMenu:
             return self._actions_body_height()
         if key == "signals":
             return self._signals_body_height()
+        if key == "chat":
+            return self._chat_body_height()
         return 0
 
     def _actions_body_height(self):
@@ -448,6 +470,16 @@ class RightMenu:
         gap = scale_floor(SIGNAL_ROW_GAP, self.scale, 5)
         vol_h = scale_floor(SIGNAL_NOTCH_CELL_H, self.scale, 14)
         return body_top + chip_h + gap + vol_h
+
+    def _chat_body_height(self):
+        presets = self.chat_presets_provider()
+        if not presets:
+            return 0
+        body_top = scale_floor(SECTION_BODY_TOP, self.scale, 4)
+        btn_h = scale_floor(CHAT_BUTTON_H, self.scale, CHAT_BUTTON_FLOOR)
+        gap = scale_floor(CHAT_GAP, self.scale, 4)
+        rows = -(-len(presets) // CHAT_COLS)
+        return body_top + rows * btn_h + (rows - 1) * gap
 
     def _layout_caps(self, caps, body):
         result = []
@@ -488,6 +520,23 @@ class RightMenu:
         x0, cell_w, notch_gap, total = self._vol_geometry(body.width)
         self._signal_notch_step = cell_w + notch_gap
         self._signal_notch_band = pg.Rect(body.x + x0, vol_top, total, vol_h)
+
+    def _layout_chat(self, body):
+        presets = self.chat_presets_provider()
+        self._chat_buttons = []
+        if not presets:
+            return
+        body_top = scale_floor(SECTION_BODY_TOP, self.scale, 4)
+        btn_h = scale_floor(CHAT_BUTTON_H, self.scale, CHAT_BUTTON_FLOOR)
+        gap = scale_floor(CHAT_GAP, self.scale, 4)
+        btn_w = (body.width - gap * (CHAT_COLS - 1)) / CHAT_COLS
+        top = body.y + body_top
+        for index in range(len(presets)):
+            row, col = divmod(index, CHAT_COLS)
+            x = body.x + col * (btn_w + gap)
+            y = top + row * (btn_h + gap)
+            self._chat_buttons.append(
+                (index, pg.Rect(round(x), round(y), round(btn_w), btn_h)))
 
     def _vol_geometry(self, width):
         cell_w = scale_floor(SIGNAL_NOTCH_CELL_W, self.scale, 8)
@@ -591,6 +640,9 @@ class RightMenu:
         signal = self._handle_signal_click(pos)
         if signal is not None:
             return signal
+        chat = self._handle_chat_click(pos)
+        if chat is not None:
+            return chat
         for block in self._section_blocks:
             if block.header.collidepoint(pos):
                 self.toggle_section(block.key)
@@ -824,6 +876,7 @@ class RightMenu:
                 ("section", block.key), block.header, SECTION_TOOLTIPS[block.key])
         self._draw_caps()
         self._draw_signals()
+        self._draw_chat()
         self.rail_tooltip.draw(
             self.window, self.outer_rect, self.scale, now, self.tooltip_font)
 
@@ -924,6 +977,60 @@ class RightMenu:
                 rect.topleft)
             self.rail_tooltip.register(("signal", chip.key), rect, chip.tooltip)
         self._draw_vol_row(state)
+
+    def _draw_chat(self):
+        if not self._chat_buttons:
+            return
+        presets = self.chat_presets_provider()
+        cooling = self.chat_cooldown_provider()
+        mouse = pg.mouse.get_pos()
+        mouse_down = pg.mouse.get_pressed()[0]
+        for index, rect in self._chat_buttons:
+            if index >= len(presets):
+                continue
+            label = presets[index]
+            hovered = (not cooling) and rect.collidepoint(mouse)
+            pressed = hovered and mouse_down
+            self.window.blit(
+                self._chat_button_surface(rect.size, label, hovered, pressed, cooling),
+                rect.topleft)
+            tooltip = "CHAT COOLING DOWN" if cooling else f"SEND: {label}"
+            self.rail_tooltip.register(("chat", index), rect, tooltip)
+
+    def _chat_button_surface(self, size, label, hovered, pressed, cooling):
+        key = (tuple(size), label, hovered, pressed, cooling, self.chat_font.get_height())
+
+        def build():
+            fill = Colors.surface_hover if hovered else Colors.surface_raised
+            surf = cut_rect_surface(size, scale_floor(CHAT_CUT, self.scale, 5), fill,
+                                    border=Colors.border, border_width=1,
+                                    corners=("tr",)).copy()
+            color = Colors.text_muted if cooling else Colors.rail_icon
+            text = render_text(self.chat_font, label, color)
+            off = 1 if pressed else 0
+            surf.blit(text, (size[0] // 2 - text.get_width() // 2,
+                             size[1] // 2 - text.get_height() // 2 + off))
+            if cooling:
+                surf.set_alpha(CHAT_DIM_ALPHA)
+            return surf
+        return memoized_surface(_CHAT_CACHE, key, build)
+
+    def _handle_chat_click(self, pos):
+        if not self._chat_buttons:
+            return None
+        cooling = self.chat_cooldown_provider()
+        for index, rect in self._chat_buttons:
+            if not rect.collidepoint(pos):
+                continue
+            if cooling:
+                return True
+            callback = self.callbacks.get("quick_chat")
+            if callback is not None:
+                if self.sounds is not None:
+                    self.sounds.play_cap_press()
+                callback(index)
+            return True
+        return None
 
     def _chip_surface(self, chip, w, h, on, disabled):
         key = ("chip", chip.key, w, h, on, disabled, self.chip_font.get_height())

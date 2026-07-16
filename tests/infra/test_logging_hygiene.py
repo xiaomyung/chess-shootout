@@ -194,6 +194,7 @@ INFO_ALLOWLIST_PREFIXES = (
     "give time granted",
     "give time received",
     "share marks toggled",
+    "quick chat sent",
     "skillcheck fired",
     "skillcheck resolved",
     "skillcheck move locked",
