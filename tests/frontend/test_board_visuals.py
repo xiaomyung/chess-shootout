@@ -199,6 +199,64 @@ def test_promotion_popover_stays_within_board_left_edge():
         "popover must not spill past the board's left edge"
 
 
+def _promotion_panel_rect(board):
+    cells = list(board._promotion_rects.values())
+    pad = board.PROMOTION_PLATE_PAD
+    left = min(c.left for c in cells) - pad
+    top = min(c.top for c in cells) - pad
+    right = max(c.right for c in cells) + pad
+    bottom = max(c.bottom for c in cells) + pad
+    return pg.Rect(left, top, right - left, bottom - top)
+
+
+def test_promotion_picker_plate_is_cut_corner_command_rail_shell():
+    board, win = _board()
+    win.fill((7, 11, 17))
+    board.pending_promotion_square = Square(1, 4)
+    board.draw_board()
+    panel = _promotion_panel_rect(board)
+    strong = pg.Color(Colors.border_strong)[:3]
+    assert win.get_at((panel.centerx, panel.top + 4))[:3] == pg.Color(Colors.surface)[:3], \
+        "the plate interior is filled with the Command Rail surface color"
+    assert win.get_at((panel.left, panel.centery))[:3] == strong, \
+        "the plate carries a strong 1px border down its straight edges"
+    assert win.get_at((panel.left, panel.top))[:3] == strong, \
+        "the square top-left corner keeps the border"
+    assert win.get_at((panel.right - 1, panel.top))[:3] != strong, \
+        "the top-right corner is cut away, matching the board plate"
+
+
+def test_promotion_picker_cells_are_raised_shells_with_hover_accent(monkeypatch):
+    board, win = _board()
+    board.pending_promotion_square = Square(1, 4)
+    board.draw_board()
+    rook = board._promotion_rects[PieceType.ROOK]
+    border = pg.Color(Colors.border)[:3]
+    accent = pg.Color(Colors.accent)[:3]
+    assert win.get_at((rook.left, rook.centery))[:3] == border, \
+        "a resting cell wears the muted border"
+    monkeypatch.setattr(pg.mouse, "get_pos", lambda: rook.center)
+    board.draw_board()
+    assert win.get_at((rook.left, rook.centery))[:3] == accent, \
+        "the hovered cell swaps its border to accent as a selection affordance"
+    assert win.get_at((rook.centerx, rook.top))[:3] == accent
+    other = board._promotion_rects[PieceType.KNIGHT]
+    assert win.get_at((other.left, other.centery))[:3] == border, \
+        "un-hovered cells keep the muted border"
+
+
+def test_promotion_picker_draws_key_hint_micro_labels():
+    board, win = _board()
+    board.pending_promotion_square = Square(1, 4)
+    board.draw_board()
+    muted = pg.Color(Colors.text_muted)[:3]
+    for ptype in (PieceType.QUEEN, PieceType.ROOK, PieceType.BISHOP, PieceType.KNIGHT):
+        cell = board._promotion_rects[ptype]
+        corner = pg.Rect(cell.right - 18, cell.bottom - 16, 18, 16)
+        assert _cell_has(win, corner, lambda c: tuple(c[:3]) == muted), \
+            "each cell shows a text_muted key hint in its bottom-right corner"
+
+
 def test_flipped_cell_rect_mirrors():
     board, _ = _board()
     normal = board._cell_rect(0, 0)

@@ -19,7 +19,7 @@ from chessshootout.frontend.visual.effects import EffectManager
 from chessshootout.frontend.visual.icons import piece_png_path
 from chessshootout.domain.premoves import Premove, speculative_board
 from chessshootout.backend.pieces import PieceType, PieceColor, Piece, opponent_of
-from chessshootout.frontend.visual.fonts import get_font, DISPLAY
+from chessshootout.frontend.visual.fonts import get_font
 
 
 _OVERLAY_CACHE = new_cache()
@@ -94,10 +94,11 @@ class Board:
 
     PROMOTION_OPTION_SIZE_MIN = 48
     PROMOTION_OPTION_SIZE_MAX = 72
-    PROMOTION_PANEL_PAD = 10
+    PROMOTION_PLATE_PAD = 10
     PROMOTION_OPTION_GAP = 8
-    PROMOTION_LABEL_HEIGHT = 20
-    PROMOTION_LABEL_OPTION_GAP = 6
+    PROMOTION_PLATE_CUT = 10
+    PROMOTION_CELL_CUT = 6
+    PROMOTION_SQUARE_GAP = 6
     PROMOTION_SCREEN_MARGIN = 8
 
     HITMARKER_SIZE_MIN = 8
@@ -158,10 +159,7 @@ class Board:
         self.review_ply = None
         self._target_ply = None
         self.read_only = False
-        self._promo_label_font = get_font(
-            max(int(self.PROMOTION_LABEL_HEIGHT * 0.8), 12), family=DISPLAY)
         self._promo_hotkey_font = get_font(9, bold=True, mono=True)
-        self._promo_tag_font = get_font(8, bold=True)
 
     @property
     def backend(self):
@@ -235,8 +233,8 @@ class Board:
         return self._cell_rect_base(row, col).move(self._shake_dx, self._shake_dy)
 
     PROMOTION_OPTIONS = [
-        (PieceType.QUEEN, "Q", "BOSS"), (PieceType.ROOK, "R", "TANK"),
-        (PieceType.BISHOP, "B", "SNIPER"), (PieceType.KNIGHT, "N", "WILDCARD"),
+        (PieceType.QUEEN, "Q"), (PieceType.ROOK, "R"),
+        (PieceType.BISHOP, "B"), (PieceType.KNIGHT, "N"),
     ]
 
     def _promo_option_sprite(self, ptype, color, opt):
@@ -258,47 +256,42 @@ class Board:
         color = pawn.color
         opt = max(self.PROMOTION_OPTION_SIZE_MIN,
                   min(int(self.cell_size), self.PROMOTION_OPTION_SIZE_MAX))
-        pad, gap, label_h = (self.PROMOTION_PANEL_PAD, self.PROMOTION_OPTION_GAP,
-                             self.PROMOTION_LABEL_HEIGHT)
+        pad, gap = self.PROMOTION_PLATE_PAD, self.PROMOTION_OPTION_GAP
         panel_w = pad * 2 + 4 * opt + 3 * gap
-        panel_h = pad * 2 + label_h + self.PROMOTION_LABEL_OPTION_GAP + opt
+        panel_h = pad * 2 + opt
         sq_rect = self._cell_rect_base(sq.row, sq.col)
         win_w, win_h = self.window.get_size()
+        square_gap = scale_floor(self.PROMOTION_SQUARE_GAP, self.scale, 4)
         left_bound = max(self.rect.x, self.PROMOTION_SCREEN_MARGIN)
         right_bound = min(self.rect.right, win_w - self.PROMOTION_SCREEN_MARGIN)
-        x = sq_rect.right + self.PROMOTION_PANEL_PAD
+        x = sq_rect.right + square_gap
         if x + panel_w > right_bound:
-            x = sq_rect.left - panel_w - self.PROMOTION_PANEL_PAD
+            x = sq_rect.left - panel_w - square_gap
         x = max(left_bound, min(x, right_bound - panel_w))
         y = max(self.rect.y,
                 min(sq_rect.centery - panel_h // 2,
                     win_h - panel_h - self.PROMOTION_SCREEN_MARGIN))
         panel = pg.Rect(x, y, panel_w, panel_h)
-        pg.draw.rect(self.window, Colors.surface_raised, panel, border_radius=12)
-        pg.draw.rect(self.window, Colors.accent, panel, 1, border_radius=12)
-        label = render_text(self._promo_label_font, "UPGRADE", Colors.accent_hi)
-        self.window.blit(label, (panel.centerx - label.get_width() // 2, panel.y + pad - 2))
+        plate = cut_rect_surface(
+            panel.size, scale_floor(self.PROMOTION_PLATE_CUT, self.scale, 7),
+            Colors.surface, border=Colors.border_strong, border_width=1, corners=("tr",))
+        self.window.blit(plate, panel.topleft)
         mouse = pg.mouse.get_pos()
-        cells_y = panel.y + pad + label_h + self.PROMOTION_LABEL_OPTION_GAP
-        for i, (ptype, hotkey, tag) in enumerate(self.PROMOTION_OPTIONS):
-            cell = pg.Rect(panel.x + pad + i * (opt + gap), cells_y, opt, opt)
+        cell_cut = scale_floor(self.PROMOTION_CELL_CUT, self.scale, 4)
+        for i, (ptype, hotkey) in enumerate(self.PROMOTION_OPTIONS):
+            cell = pg.Rect(panel.x + pad + i * (opt + gap), panel.y + pad, opt, opt)
             hovered = cell.collidepoint(mouse)
-            pg.draw.rect(self.window, Colors.surface_hover if hovered else Colors.surface,
-                         cell, border_radius=11)
-            pg.draw.rect(self.window, Colors.accent if hovered else Colors.border,
-                         cell, 1, border_radius=11)
+            shell = cut_rect_surface(
+                cell.size, cell_cut,
+                Colors.surface_hover if hovered else Colors.surface_raised,
+                border=Colors.accent if hovered else Colors.border,
+                border_width=1, corners=("tr",))
+            self.window.blit(shell, cell.topleft)
             img = self._promo_option_sprite(ptype, color, opt)
             self.window.blit(img, cell.topleft)
             hk = render_text(self._promo_hotkey_font, hotkey, Colors.text_muted)
-            self.window.blit(hk, (cell.right - hk.get_width() - 3,
-                                  cell.bottom - hk.get_height() - 2))
-            if hovered:
-                tag_surf = render_text(self._promo_tag_font, tag, Colors.on_accent)
-                tag_rect = pg.Rect(0, 0, tag_surf.get_width() + 8, tag_surf.get_height() + 4)
-                tag_rect.center = (cell.centerx, cell.y - 6)
-                pg.draw.rect(self.window, Colors.amber, tag_rect, border_radius=7)
-                self.window.blit(tag_surf, (tag_rect.centerx - tag_surf.get_width() // 2,
-                                            tag_rect.centery - tag_surf.get_height() // 2))
+            self.window.blit(hk, (cell.right - hk.get_width() - 4,
+                                  cell.bottom - hk.get_height() - 3))
             self._promotion_rects[ptype] = cell
 
     def pick_promotion(self, ptype):
@@ -815,7 +808,6 @@ class Board:
             opt = max(self.PROMOTION_OPTION_SIZE_MIN,
                       min(int(cell_size), self.PROMOTION_OPTION_SIZE_MAX))
             self._promo_hotkey_font = get_font(max(int(opt * 0.18), 9), bold=True, mono=True)
-            self._promo_tag_font = get_font(max(int(opt * 0.14), 8), bold=True)
         self.cell_size = cell_size
         used = self.cell_size * self.SIZE
         free_w = rect.width - 2 * self.frame_pad - used
