@@ -5,7 +5,8 @@ import pytest
 from chessshootout.server.protocol import GRACE_SECONDS
 from chessshootout.server.rooms import (
     AlreadyInGameError, InvalidTokenError, NotInRoomError,
-    REMATCH_ABSOLUTE_CAP_SECONDS, REMATCH_IDLE_SECONDS, RoomManager,
+    REMATCH_ABSOLUTE_CAP_SECONDS, REMATCH_IDLE_SECONDS, Room, RoomManager,
+    SharedAnnotations,
 )
 from tests.helpers import FakeClock
 
@@ -154,11 +155,11 @@ async def test_finalize_result_aborts_with_no_winner(manager, clock):
     clock.advance(12)
     await manager.enqueue(**_enqueue_kwargs("alice"))
     room = await manager.enqueue(**_enqueue_kwargs("bob"))
-    manager.finalize_result(room.room_id, "aborted_disconnect")
-    assert room.result == ("aborted_disconnect", None)
+    manager.finalize_result(room.room_id, "aborted")
+    assert room.result == ("aborted", None)
     assert room.ended_at == 12.0
     manager.finalize_result(room.room_id, "checkmate", winner_color="white")
-    assert room.result == ("aborted_disconnect", None)
+    assert room.result == ("aborted", None)
 
 
 @pytest.mark.asyncio
@@ -378,18 +379,128 @@ async def test_series_scores_award_win_and_persist_across_rematch(manager):
 
 
 @pytest.mark.asyncio
-async def test_series_scores_not_awarded_on_disconnect_abort(manager):
-    """A disconnect abort is neutral: no series point to either player."""
+async def test_series_scores_not_awarded_on_abort(manager):
+    """An abort is neutral: no series point to either player."""
     await manager.enqueue(**_enqueue_kwargs("alice"))
     room = await manager.enqueue(**_enqueue_kwargs("bob"))
-    manager.finalize_result(room.room_id, "aborted_disconnect", None)
+    manager.finalize_result(room.room_id, "aborted", None)
+    assert room.series_scores == {}
     assert room.score_for("white") == 0.0
     assert room.score_for("black") == 0.0
 
 
+def test_annotations_for_returns_the_matching_color_store():
+    room = Room(room_id="r", time_minutes=5, increment_seconds=0, created_at=0.0)
+    assert room.annotations_for("white") is room.annotations_white
+    assert room.annotations_for("black") is room.annotations_black
+    assert isinstance(room.annotations_for("white"), SharedAnnotations)
+    assert room.annotations_white is not room.annotations_black
+
+
+def test_shared_annotations_clear_marks_preserves_sharing():
+    ann = SharedAnnotations(sharing=True)
+    ann.highlights.add("e4")
+    ann.arrows.append(("e2", "e4"))
+    ann.clear_marks()
+    assert ann.highlights == set()
+    assert ann.arrows == []
+    assert ann.sharing is True
+
+
+def test_shared_annotations_reset_clears_marks_and_sharing():
+    ann = SharedAnnotations(sharing=True)
+    ann.highlights.add("e4")
+    ann.arrows.append(("e2", "e4"))
+    ann.reset()
+    assert ann.highlights == set() and ann.arrows == []
+    assert ann.sharing is False
+
+
 @pytest.mark.asyncio
-async def test_series_scores_not_awarded_on_abort(manager):
+async def test_finalize_result_resets_both_shared_annotation_stores(manager):
     await manager.enqueue(**_enqueue_kwargs("alice"))
     room = await manager.enqueue(**_enqueue_kwargs("bob"))
-    manager.finalize_result(room.room_id, "aborted", None)
+    for color in ("white", "black"):
+        ann = room.annotations_for(color)
+        ann.sharing = True
+        ann.highlights.add("e4")
+        ann.arrows.append(("e2", "e4"))
+    manager.finalize_result(room.room_id, "checkmate", winner_color="white")
+    for color in ("white", "black"):
+        ann = room.annotations_for(color)
+        assert ann.sharing is False
+        assert ann.highlights == set()
+        assert ann.arrows == []
+
+
+@pytest.mark.asyncio
+async def test_reset_for_rematch_installs_fresh_annotation_stores(manager):
+    await manager.enqueue(**_enqueue_kwargs("alice"))
+    room = await manager.enqueue(**_enqueue_kwargs("bob"))
+    white_before = room.annotations_white
+    black_before = room.annotations_black
+    room.annotations_white.sharing = True
+    room.annotations_white.highlights.add("d4")
+    room.annotations_black.arrows.append(("g1", "f3"))
+    manager.finalize_result(room.room_id, "checkmate", winner_color="white")
+    assert manager.reset_for_rematch(room.room_id) is True
+    assert room.annotations_white is not white_before
+    assert room.annotations_black is not black_before
+    assert room.annotations_white.sharing is False
+    assert room.annotations_white.highlights == set()
+    assert room.annotations_black.arrows == []
+
+
+async def test_timeout_with_no_plies_finalizes_as_aborted_draw(manager):
+    """User rule: a flag fall before any move landed is nobody's win -- the game
+    aborts with no winner and awards no series points. Resignation at zero plies
+    deliberately KEEPS its winner (an explicit choice, unlike a dead clock)."""
+    await manager.enqueue(**_enqueue_kwargs("alice"))
+    room = await manager.enqueue(**_enqueue_kwargs("bob"))
+    assert room.plies_ever == 0
+    manager.finalize_result(room.room_id, "timeout", "white")
+    assert room.result == ("aborted", None)
+    assert room.series_scores == {}
+
+
+async def test_timeout_after_a_ply_keeps_its_winner(manager):
+    await manager.enqueue(**_enqueue_kwargs("alice"))
+    room = await manager.enqueue(**_enqueue_kwargs("bob"))
+    room.plies_ever = 1
+    manager.finalize_result(room.room_id, "timeout", "white")
+    assert room.result == ("timeout", "white")
+
+
+async def test_zero_ply_resignation_keeps_its_winner(manager):
+    await manager.enqueue(**_enqueue_kwargs("alice"))
+    room = await manager.enqueue(**_enqueue_kwargs("bob"))
+    manager.finalize_result(room.room_id, "resignation", "black")
+    assert room.result == ("resignation", "black")
+
+
+async def test_zero_ply_draw_agreement_stays_a_draw(manager):
+    """ZERO_PLY_ABORT_REASONS only covers dead-clock and walk-away (timeout,
+    abandonment); a mutually agreed draw is a deliberate two-sided choice, so a
+    draw_agreement at zero plies is NOT rewritten to aborted. The result stays
+    draw_agreement and _award_series still splits the point +0.5/+0.5, exactly as
+    it would after a full game -- agreeing to a draw before moving is a real draw,
+    not a cancelled game."""
+    await manager.enqueue(**_enqueue_kwargs("alice"))
+    room = await manager.enqueue(**_enqueue_kwargs("bob"))
+    assert room.plies_ever == 0
+    manager.finalize_result(room.room_id, "draw_agreement", None)
+    assert room.result == ("draw_agreement", None)
+    assert room.series_scores[room.white.nickname] == 0.5
+    assert room.series_scores[room.black.nickname] == 0.5
+    assert room.score_for("white") == 0.5
+    assert room.score_for("black") == 0.5
+
+
+async def test_zero_ply_abandonment_finalizes_as_aborted_draw(manager):
+    """Leaving before any move landed cancels the game instead of awarding a win:
+    nobody played, nobody scores (same rule as a zero-ply flag fall)."""
+    await manager.enqueue(**_enqueue_kwargs("alice"))
+    room = await manager.enqueue(**_enqueue_kwargs("bob"))
+    manager.finalize_result(room.room_id, "abandonment", "black")
+    assert room.result == ("aborted", None)
     assert room.series_scores == {}

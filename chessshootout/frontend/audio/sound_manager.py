@@ -222,8 +222,26 @@ class SoundManager:
     def play_rail_click(self):
         self._play("rail_click")
 
+    def play_section_toggle(self):
+        self._play("section_toggle")
+
+    def play_chip_toggle(self):
+        self._play("chip_toggle")
+
+    def play_cap_press(self):
+        self._play("cap_press")
+
+    def play_vol_notch(self):
+        self._play("vol_notch")
+
+    def play_chat_receive(self):
+        self._play("chat_receive")
+
     def play_focus_action(self):
         self._play("focus_action")
+
+    def play_focus_action_off(self):
+        self._play("focus_action_off")
 
     def play_skillcheck_appear(self):
         self._play("sc_appear")

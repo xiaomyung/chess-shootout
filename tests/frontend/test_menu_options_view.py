@@ -120,6 +120,42 @@ def test_notch_row_clicks_a_cell_to_set_that_level():
     assert val["v"] == pytest.approx(1.0)
 
 
+def test_notch_row_first_cell_reclick_toggles_to_zero():
+    """The first notch doubles as an off switch: clicking it at 10% drops the value
+    to 0%, clicking again restores 10%. Other cells never toggle to zero."""
+    val = {"v": 0.0}
+    row = NotchRow("Volume", "", lambda: val["v"], lambda v: val.update(v=v))
+    _draw_row(row)
+    step = NOTCH_CELL_W + NOTCH_GAP
+
+    def cell_center(i):
+        return (row._band.x + i * step + NOTCH_CELL_W // 2, row._band.centery)
+
+    row.handle_click(cell_center(0))
+    assert val["v"] == pytest.approx(0.1)
+    row.handle_click(cell_center(0))
+    assert val["v"] == pytest.approx(0.0)
+    row.handle_click(cell_center(0))
+    assert val["v"] == pytest.approx(0.1)
+    row.handle_click(cell_center(4))
+    assert val["v"] == pytest.approx(0.5)
+    row.handle_click(cell_center(4))
+    assert val["v"] == pytest.approx(0.5)
+
+
+def test_notch_band_position_is_stable_across_readout_widths():
+    """The notch band anchors to a fixed-width readout slot sized for '100%', so
+    switching between 0%, 50%, and 100% never shifts the cells horizontally."""
+    val = {"v": 0.0}
+    row = NotchRow("Volume", "", lambda: val["v"], lambda v: val.update(v=v))
+    positions = []
+    for v in (0.0, 0.5, 1.0):
+        val["v"] = v
+        _draw_row(row)
+        positions.append(row._band.x)
+    assert positions[0] == positions[1] == positions[2]
+
+
 def test_notch_row_click_fires_tick_and_debounced_write():
     """Clicking a notch cell plays the tick AND schedules the debounced env write
     (both preserved from the old slider's on_tick / on_release wiring)."""
@@ -334,6 +370,22 @@ def test_click_routes_to_options_body_not_play_view(app, monkeypatch):
     app.input_router.mouse_left_clicked((10, 10))
     assert received == []
     assert app.menu._active_view == "options"
+
+
+def test_auto_queen_row_lives_in_game_and_writes_env(app, monkeypatch):
+    """The Game section's Auto-queen toggle writes CHESS_AUTO_QUEEN straight through
+    env.get/set_auto_queen; the promotion picker is bypassed but the skill check
+    still fires (enforced in the board tests)."""
+    monkeypatch.delenv("CHESS_AUTO_QUEEN", raising=False)
+    app.menu.goto_view("options")
+    rows = dict(app.menu.views["options"].body.sections)["Game"]
+    auto_row = next(r for r in rows if r.title == "Auto-queen")
+    assert auto_row.getter() is False
+    _draw_row(auto_row, pg.Rect(40, 40, 520, 60))
+    assert auto_row.handle_click(auto_row._ctl.center) is True
+    assert env.get_auto_queen() is True
+    assert auto_row.handle_click(auto_row._ctl.center) is True
+    assert env.get_auto_queen() is False
 
 
 def test_mute_toggle_row_wired_to_sound_manager(app):

@@ -16,6 +16,7 @@ _ISOLATED_VARS = (
     "CHESS_DEFAULT_INCREMENT", "CHESS_COUNTRY",
     "CHESS_SHOW_FPS", "CHESS_SHOW_PING", "CHESS_FOCUS_SHOW",
     "CHESS_NEWS_URL", "CHESS_PROFILE_HINT_SHOWN", "CHESS_LAUNCH_MODE",
+    "CHESS_AUTO_QUEEN",
 )
 
 
@@ -391,6 +392,19 @@ def test_news_url_defaults_to_the_shipped_constant():
 def test_news_url_reads_env_override(monkeypatch):
     monkeypatch.setenv("CHESS_NEWS_URL", "https://example.com/news.json")
     assert env.get_news_url() == "https://example.com/news.json"
+
+
+def test_auto_queen_defaults_false():
+    assert env.get_auto_queen() is False
+
+
+def test_auto_queen_round_trips():
+    env.set_auto_queen(True)
+    assert env.get_auto_queen() is True
+    assert "CHESS_AUTO_QUEEN=1" in env._ENV_PATH.read_text(encoding="utf-8")
+    env.set_auto_queen(False)
+    assert env.get_auto_queen() is False
+    assert "CHESS_AUTO_QUEEN=0" in env._ENV_PATH.read_text(encoding="utf-8")
 
 
 def test_profile_hint_shown_defaults_false():

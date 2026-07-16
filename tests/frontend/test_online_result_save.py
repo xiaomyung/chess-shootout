@@ -258,15 +258,15 @@ def test_finished_game_resume_does_not_replay_result_effects(tmp_path, monkeypat
 
 
 def test_resumed_static_result_saves_partial(tmp_path, monkeypatch):
-    """A player who reconnects into an aborted_disconnect/server_shutdown keeps the
+    """A player who reconnects into an aborted/server_shutdown keeps the
     partial archive too — symmetric with the still-connected opponent."""
     app = _online_app(tmp_path, monkeypatch)
     app.coordinator._handle_game_resumed({
         "move_history": [{"san": s} for s in ["e4", "e5"]],
-        "fen": "", "result_reason": "aborted_disconnect", "result_winner": None,
+        "fen": "", "result_reason": "server_shutdown", "result_winner": None,
         "skillcheck_log": [], "skillcheck_locks": [], "pending_skillcheck": None,
     })
-    assert app.game.manual_result == "aborted_disconnect"
+    assert app.game.manual_result == "server_shutdown"
     assert '[Result "*"]' in _saved_text(app)
 
 
@@ -361,6 +361,20 @@ def test_partial_star_upgrades_to_decisive_result(tmp_path, monkeypatch):
         "overwrites the same file, no duplicate"
     assert '[Result "1-0"]' in _saved_text(app)
     assert len(_pgn_files(tmp_path)) == 1
+
+
+def test_aborted_result_shows_neutral_headline_for_both_sides(tmp_path, monkeypatch):
+    """REGRESSION: no-winner codes fell into the winner branch (anything not
+    white_wins* read as a black win), so a zero-move abort showed VICTORY to
+    black and DEFEAT to white. Aborted/cancelled games are nobody's result:
+    both perspectives get the neutral GAME ABORTED headline with draw intent."""
+    for side in ("white", "black"):
+        app = _online_app(tmp_path, monkeypatch, your_color=side)
+        app.coordinator._handle_online_result({"reason": "aborted"})
+        word, intent = app.game.result_flow._outcome_word_intent(
+            "aborted", "Game aborted")
+        assert word == "GAME ABORTED"
+        assert intent == "draw"
 
 
 def test_room_lost_midgame_saves_partial(tmp_path, monkeypatch):

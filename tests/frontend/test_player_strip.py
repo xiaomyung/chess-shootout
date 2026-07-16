@@ -6,10 +6,14 @@ from chessshootout.backend.pieces import PieceType, PieceColor
 from chessshootout.frontend.visual.clock_visual import format_clock, format_countdown
 from chessshootout.frontend.visual.colors import Colors
 from chessshootout.frontend.panels.player_strip import (
-    GIVE_TIME_FLOAT_MS, PlayerStrip, give_time_float_alpha,
+    GIVE_TIME_FLOAT_MS, SHARING_DOT_PULSE_MS, STRIP_PULSE_MS, PlayerStrip,
+    give_time_float_alpha,
 )
 from chessshootout.frontend.visual.widgets import avatar_palette
-from tests.helpers import draw_strip as _draw, strip_avatar_pixels as _avatar_pixels
+from tests.helpers import (
+    draw_strip as _draw, scan_region, strip_avatar_pixels as _avatar_pixels,
+)
+from tests.frontend.focus_helpers import FakeTicks, install_clock
 
 
 _pygame_init = pygame_display(900, 400)
@@ -150,9 +154,10 @@ def test_untimed_clock_is_never_low(strip):
 
 
 def test_active_clock_border_stays_neutral(strip):
-    """The active cue is the glow, not a hard accent ring on the clock box."""
+    """The active cue is the frame pulse/accent, not a hard accent ring on the clock
+    box: the well keeps its neutral dial border at normal time regardless of turn."""
     strip.set_state("Alice", 200.0, True, clock_initial_seconds=300.0)
-    assert strip._clock_border_color() == Colors.border
+    assert strip._clock_border_color() == Colors.dial_border
 
 
 def test_avatar_fill_matches_the_palette_seeded_by_the_displayed_name(strip):
@@ -371,8 +376,10 @@ def test_tooltip_bubble_renders_country_name(strip):
     strip._tooltip_alpha = 1.0
     strip._blit_tooltip("United States")
     flag = strip._flag_rect
-    region = pg.Rect(max(flag.centerx - 80, 0), flag.bottom + 2, 160, 30)
+    region = pg.Rect(max(flag.centerx - 80, 0), flag.bottom, 200, 40)
     assert _has_color(strip.window, region, Colors.text, tol=20)
+    assert scan_region(strip.window, region, Colors.border_strong, tol=12, clamp=True), \
+        "the flag tooltip wears the command-rail cut-corner border"
 
 
 def test_tooltip_resets_alpha_when_country_absent(strip):
@@ -469,3 +476,94 @@ def test_draw_untimed_shows_infinity(strip):
     strip.set_state("Carol", None, False, player_color=PieceColor.WHITE, rating="1500")
     _draw(strip)
     assert format_clock(strip.clock_seconds) == "∞"
+
+
+def test_untimed_clock_area_paints_infinity(strip):
+    """The mono clock font carries ∞, so the untimed clock glyph paints inside
+    the well with no special-casing."""
+    strip.set_state("Carol", None, False, player_color=PieceColor.WHITE)
+    _draw(strip)
+    right_half = pg.Rect(strip.rect.centerx, strip.rect.y,
+                         strip.rect.width // 2, strip.rect.height)
+    assert _has_color(strip.window, right_half, Colors.text, tol=30), \
+        "the ∞ glyph renders in the clock well"
+
+
+def test_clock_digits_have_fixed_advance(strip):
+    """Space Mono is tabular: equal-length clock strings render the same pixel
+    width, so the digits never jitter as the clock ticks."""
+    a = strip.clock_font.render("1:11", True, Colors.text)
+    b = strip.clock_font.render("0:00", True, Colors.text)
+    assert a.get_width() == b.get_width()
+
+
+def test_top_right_corner_is_cut(strip):
+    """The frame is a cut-corner (TR) rect: the top-right corner is carved away and
+    shows the window backdrop, while the top edge elsewhere is covered by the frame."""
+    strip.set_state("Alice", 300.0, False, player_color=PieceColor.WHITE)
+    backdrop = (48, 96, 160)
+    strip.window.fill(backdrop)
+    strip.draw()
+    corner = strip.window.get_at((strip.rect.right - 2, strip.rect.y + 1))
+    assert (corner.r, corner.g, corner.b) == backdrop, \
+        "the top-right corner is cut, revealing the backdrop"
+    edge = strip.window.get_at((strip.rect.centerx, strip.rect.y + 1))
+    assert (edge.r, edge.g, edge.b) != backdrop, \
+        "the top edge away from the cut is covered by the frame"
+
+
+def test_low_time_active_frame_pulses_reddish(strip, monkeypatch):
+    """An active strip in low time pulses its border between clock_low_time and loss;
+    sampled half a period apart the two frame colors differ and both read reddish."""
+    clock = FakeTicks(0)
+    install_clock(monkeypatch, clock)
+    strip.set_state("Al", 5.0, True, clock_initial_seconds=300.0,
+                    player_color=PieceColor.WHITE)
+    _draw(strip)
+    c0 = strip.window.get_at((strip.rect.x + 1, strip.rect.centery))
+    clock.t = STRIP_PULSE_MS // 2
+    _draw(strip)
+    c1 = strip.window.get_at((strip.rect.x + 1, strip.rect.centery))
+    assert (c0.r, c0.g, c0.b) != (c1.r, c1.g, c1.b), \
+        "the low-time active frame pulses between two border colors"
+    for c in (c0, c1):
+        assert c.r > c.g and c.r > c.b, "the pulsing frame stays reddish"
+
+
+def test_ko_badge_paints_amber(strip):
+    strip.set_state("Alice", 60.0, False, player_color=PieceColor.WHITE,
+                    rating="1500", ko_count=3)
+    strip._ko_wink_until_ms = 0
+    _draw(strip)
+    assert _has_color(strip.window, strip.rect, Colors.amber, tol=30), \
+        "the KO pill paints its amber text"
+
+
+def test_sharing_pill_full_renders_text(strip, monkeypatch):
+    install_clock(monkeypatch, FakeTicks(SHARING_DOT_PULSE_MS // 2))
+    strip.set_state("A", 300.0, False, player_color=PieceColor.WHITE)
+    _draw(strip)
+    off = _snapshot(strip)
+    strip.set_state("A", 300.0, False, player_color=PieceColor.WHITE,
+                    sharing=True, sharing_color=Colors.amber)
+    _draw(strip)
+    assert _snapshot(strip) != off, "the sharing pill changes the strip render"
+    assert _has_color(strip.window, strip.rect, Colors.amber, tol=30), \
+        "SHARING MARKS text paints in the sharing color"
+
+
+def test_sharing_pill_overflow_shows_dot_only(strip, monkeypatch):
+    install_clock(monkeypatch, FakeTicks(SHARING_DOT_PULSE_MS // 2))
+    strip.set_rect(pg.Rect(0, 80, 560, 56))
+    strip.set_state("A", 300.0, False, player_color=PieceColor.WHITE,
+                    sharing=True, sharing_color=Colors.amber)
+    _draw(strip)
+    wide_amber = scan_region(strip.window, strip.rect, Colors.amber, tol=40, count=True)
+    strip.set_rect(pg.Rect(0, 80, 220, 56))
+    strip.set_state("A", 300.0, False, player_color=PieceColor.WHITE,
+                    sharing=True, sharing_color=Colors.amber)
+    _draw(strip)
+    narrow_amber = scan_region(strip.window, strip.rect, Colors.amber, tol=40, count=True)
+    assert narrow_amber > 0, "the pulsing dot still paints when the full pill can't fit"
+    assert wide_amber > narrow_amber, \
+        "the overflow layout drops the SHARING MARKS text, keeping only the dot"

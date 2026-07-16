@@ -193,6 +193,8 @@ INFO_ALLOWLIST_PREFIXES = (
     "focus mode toggled",
     "give time granted",
     "give time received",
+    "share marks toggled",
+    "quick chat sent",
     "skillcheck fired",
     "skillcheck resolved",
     "skillcheck move locked",

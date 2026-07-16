@@ -19,6 +19,7 @@ from chessshootout.backend.backend import Backend
 from chessshootout.backend.pieces import PieceType
 from chessshootout.domain.pgn.generate import generate_pgn
 from chessshootout.frontend.modals.help import HOTKEYS
+from chessshootout.frontend.panels.right import SECTION_OPEN
 from chessshootout.frontend.screens.base import Nav
 from chessshootout.frontend.screens.review import REVIEW_HOTKEY_KEYS, REVIEW_HOTKEYS
 from tests.helpers import (
@@ -217,6 +218,27 @@ def test_flip_key_flips_the_review_board(tmp_path):
     assert app.review.board.flipped != before
 
 
+def test_a_and_s_keys_toggle_the_review_rail_sections(tmp_path):
+    """ReviewScreen shares the A/S rail-section hotkeys with GameScreen; both toggle
+    the process-global SECTION_OPEN and the key is consumed."""
+    app = _enter_review(make_app(), _write_pgn(tmp_path, "sections.pgn"))
+    assert SECTION_OPEN["actions"] is True
+    assert app.review.handle_key(key_event(pg.K_a)) is True
+    assert SECTION_OPEN["actions"] is False
+
+    assert SECTION_OPEN["signals"] is True
+    assert app.review.handle_key(key_event(pg.K_s)) is True
+    assert SECTION_OPEN["signals"] is False
+
+
+def test_c_key_is_inert_on_the_review_screen(tmp_path):
+    """Review has no chat rail (unlike an online game), so K_c is not one of the
+    keys it handles -- it returns False and leaves the chat section untouched."""
+    app = _enter_review(make_app(), _write_pgn(tmp_path, "noc.pgn"))
+    assert app.review.handle_key(key_event(pg.K_c)) is False
+    assert SECTION_OPEN["chat"] is True
+
+
 def test_slim_strip_captures_update_when_stepping(tmp_path):
     path = _captures_pgn(tmp_path)
     app = make_app()
@@ -396,3 +418,28 @@ def test_review_open_pgn_toasts_when_the_file_is_gone(tmp_path, monkeypatch):
 
     assert opened == []
     assert app.toast.message == "No saved PGN"
+
+
+def test_review_debut_tracks_review_ply(tmp_path):
+    path = _write_pgn(tmp_path, "local-20260101-120000.pgn",
+                      moves="1. e4 e5 2. Nf3 Nc6 3. Bc4 Bc5")
+    review = _enter_review(make_app(), path).review
+    assert review._custom_start is False
+    assert review.board.review_ply == 0
+    assert review._debut_line() is None
+    review.board.jump_to_review_ply(None)
+    assert review._debut_line() == ("C50", "Italian Game: Giuoco Piano")
+
+
+def test_review_hides_debut_for_setup_fen_pgn(tmp_path):
+    start_fen = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
+    path = tmp_path / "custom.pgn"
+    path.write_text(
+        '[White "a"]\n[Black "b"]\n[Result "*"]\n[TimeControl "-"]\n'
+        f'[SetUp "1"]\n[FEN "{start_fen}"]\n\n1. e4 e5 2. Nf3 Nc6 3. Bc4 Bc5 *\n',
+        encoding="utf-8",
+    )
+    review = _enter_review(make_app(), path).review
+    assert review._custom_start is True
+    review.board.jump_to_review_ply(None)
+    assert review._debut_line() is None

@@ -56,6 +56,11 @@ class GiveTimeHold:
         self._give_time_hold_added = 0.0
         self._give_time_hold_recipient = recipient
 
+    def tap_give_time(self):
+        self.on_give_time()
+        if self.holding:
+            self._end_give_time_hold()
+
     def update_give_time_hold(self):
         screen = self.screen
         if not self.holding:

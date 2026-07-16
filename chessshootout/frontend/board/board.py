@@ -9,23 +9,62 @@ from chessshootout.frontend.board.annotations import Annotations
 from chessshootout.frontend.board.drag import DragPhysics
 from chessshootout.frontend.visual.animation import PieceAnimation
 from chessshootout.frontend.visual.cache import (
-    new_cache, new_size_cache, memoized_surface, render_text,
+    new_cache, new_size_cache, memoized_surface,
 )
 from chessshootout.frontend.visual.colors import Colors
-from chessshootout.frontend.visual.draw import supersample, smoothstep
+from chessshootout.frontend.visual.draw import (
+    supersample, smoothstep, scale_floor, cut_rect_surface, soft_blur,
+)
 from chessshootout.frontend.visual.effects import EffectManager
 from chessshootout.frontend.visual.icons import piece_png_path
 from chessshootout.domain.premoves import Premove, speculative_board
 from chessshootout.backend.pieces import PieceType, PieceColor, Piece, opponent_of
-from chessshootout.frontend.visual.fonts import get_font, DISPLAY
+from chessshootout.frontend.visual.fonts import get_font
 
 
 _OVERLAY_CACHE = new_cache()
 _PROMO_OPTION_CACHE = new_size_cache()
+_PROMO_PLATE_CACHE = new_cache()
 _MARKER_CACHE = new_cache()
 _PIECE_IMAGE_CACHE = new_cache()
+_SCALED_PIECE_CACHE = new_size_cache()
 
 CAPTURE_ICON_FRACTION = 0.42
+
+PIECE_SCALE = 0.9
+RIM_ALPHA = 54
+RIM_BLUR_PASSES = 2
+
+
+def _rim_glow(canvas):
+    rim_rgb = pg.Color(Colors.rim_light)[:3]
+    sil = canvas.copy()
+    sil.fill((0, 0, 0, 255), special_flags=pg.BLEND_RGBA_MULT)
+    sil.fill((*rim_rgb, 0), special_flags=pg.BLEND_RGBA_ADD)
+    sil = soft_blur(sil, RIM_BLUR_PASSES)
+    sil.fill((255, 255, 255, RIM_ALPHA), special_flags=pg.BLEND_RGBA_MULT)
+    return sil
+
+
+def _build_scaled_sprite(original, cell, color):
+    art_size = max(int(cell * PIECE_SCALE), 1)
+    art = pg.transform.smoothscale(original, (art_size, art_size))
+    off = ((cell - art_size) // 2, (cell - art_size) // 2)
+    canvas = pg.Surface((cell, cell), pg.SRCALPHA)
+    canvas.blit(art, off)
+    art_bbox = art.get_bounding_rect().move(off)
+    geom = {
+        "bbox": art_bbox,
+        "center": art_bbox.center,
+        "top_center": (art_bbox.centerx, art_bbox.top),
+    }
+    if color == PieceColor.WHITE:
+        return canvas, geom
+    sprite = pg.Surface((cell, cell), pg.SRCALPHA)
+    sprite.blit(_rim_glow(canvas), (0, 0))
+    sprite.blit(canvas, (0, 0))
+    return sprite, geom
+
 
 RESTORE_MS = 480
 RESTORE_DROP_FRAC = 0.8
@@ -49,17 +88,20 @@ def _draw_capsule(surf, p1, p2, width, color):
 
 class Board:
     SIZE = 8
-    FRAME_PAD_FRACTION = 0.055
-    FRAME_PAD_MIN = 16
-    FRAME_RADIUS = 14
-    GRID_RADIUS = 4
+    PLATE_MARGIN = 26
+    PLATE_MARGIN_FLOOR = 18
+    PLATE_CUT = 18
+    COORD_PAD_FRACTION = 0.6
 
     PROMOTION_OPTION_SIZE_MIN = 48
     PROMOTION_OPTION_SIZE_MAX = 72
-    PROMOTION_PANEL_PAD = 10
+    PROMOTION_PLATE_PAD = 10
     PROMOTION_OPTION_GAP = 8
-    PROMOTION_LABEL_HEIGHT = 20
-    PROMOTION_LABEL_OPTION_GAP = 6
+    PROMOTION_PLATE_CUT = 10
+    PROMOTION_CELL_CUT = 6
+    PROMOTION_SQUARE_GAP = 6
+    PROMO_PLATE_TEXT_PAD = (3, 2)
+    PROMO_PLATE_SCRIM_ALPHA = 200
     PROMOTION_SCREEN_MARGIN = 8
 
     HITMARKER_SIZE_MIN = 8
@@ -79,6 +121,7 @@ class Board:
         self.skillcheck_gate = None
         self.skillcheck_armed = None
         self.locked_targets = None
+        self.auto_queen_provider = lambda: False
 
         self.rect = pg.Rect(0, 0, 0, 0)
         self.frame_pad = 0
@@ -119,10 +162,8 @@ class Board:
         self.review_ply = None
         self._target_ply = None
         self.read_only = False
-        self._promo_label_font = get_font(
-            max(int(self.PROMOTION_LABEL_HEIGHT * 0.8), 12), family=DISPLAY)
         self._promo_hotkey_font = get_font(9, bold=True, mono=True)
-        self._promo_tag_font = get_font(8, bold=True)
+        self._promo_tag_font = get_font(8, bold=True, mono=True)
 
     @property
     def backend(self):
@@ -154,19 +195,21 @@ class Board:
         self.effects.clear()
         self.clear_premoves()
         self.aim_suppressed_square = None
-        self.clear_annotations()
+        self.clear_all_annotations()
         self.end_press()
         self.review_ply = None
 
     def _render_text(self):
         size = max(int(self.cell_size * 0.30), 11) if self.cell_size else 13
+        if self.frame_pad:
+            size = min(size, max(int(self.frame_pad * self.COORD_PAD_FRACTION), 8))
         coord_font = get_font(size, bold=True, mono=True)
         self.file_labels_rendered = [
-            coord_font.render(self.file_labels[i], True, Colors.coord)
+            coord_font.render(self.file_labels[i], True, Colors.text_muted)
             for i in range(self.SIZE)
         ]
         self.rank_labels_rendered = [
-            coord_font.render(str(self.SIZE - r), True, Colors.coord)
+            coord_font.render(str(self.SIZE - r), True, Colors.text_muted)
             for r in range(self.SIZE)
         ]
 
@@ -217,48 +260,61 @@ class Board:
         color = pawn.color
         opt = max(self.PROMOTION_OPTION_SIZE_MIN,
                   min(int(self.cell_size), self.PROMOTION_OPTION_SIZE_MAX))
-        pad, gap, label_h = (self.PROMOTION_PANEL_PAD, self.PROMOTION_OPTION_GAP,
-                             self.PROMOTION_LABEL_HEIGHT)
+        pad, gap = self.PROMOTION_PLATE_PAD, self.PROMOTION_OPTION_GAP
         panel_w = pad * 2 + 4 * opt + 3 * gap
-        panel_h = pad * 2 + label_h + self.PROMOTION_LABEL_OPTION_GAP + opt
+        panel_h = pad * 2 + opt
         sq_rect = self._cell_rect_base(sq.row, sq.col)
         win_w, win_h = self.window.get_size()
+        square_gap = scale_floor(self.PROMOTION_SQUARE_GAP, self.scale, 4)
         left_bound = max(self.rect.x, self.PROMOTION_SCREEN_MARGIN)
         right_bound = min(self.rect.right, win_w - self.PROMOTION_SCREEN_MARGIN)
-        x = sq_rect.right + self.PROMOTION_PANEL_PAD
+        x = sq_rect.right + square_gap
         if x + panel_w > right_bound:
-            x = sq_rect.left - panel_w - self.PROMOTION_PANEL_PAD
+            x = sq_rect.left - panel_w - square_gap
         x = max(left_bound, min(x, right_bound - panel_w))
         y = max(self.rect.y,
                 min(sq_rect.centery - panel_h // 2,
                     win_h - panel_h - self.PROMOTION_SCREEN_MARGIN))
         panel = pg.Rect(x, y, panel_w, panel_h)
-        pg.draw.rect(self.window, Colors.surface_raised, panel, border_radius=12)
-        pg.draw.rect(self.window, Colors.accent, panel, 1, border_radius=12)
-        label = render_text(self._promo_label_font, "UPGRADE", Colors.accent_hi)
-        self.window.blit(label, (panel.centerx - label.get_width() // 2, panel.y + pad - 2))
+        plate = cut_rect_surface(
+            panel.size, scale_floor(self.PROMOTION_PLATE_CUT, self.scale, 7),
+            Colors.surface, border=Colors.border_strong, border_width=1, corners=("tr",))
+        self.window.blit(plate, panel.topleft)
         mouse = pg.mouse.get_pos()
-        cells_y = panel.y + pad + label_h + self.PROMOTION_LABEL_OPTION_GAP
+        cell_cut = scale_floor(self.PROMOTION_CELL_CUT, self.scale, 4)
         for i, (ptype, hotkey, tag) in enumerate(self.PROMOTION_OPTIONS):
-            cell = pg.Rect(panel.x + pad + i * (opt + gap), cells_y, opt, opt)
+            cell = pg.Rect(panel.x + pad + i * (opt + gap), panel.y + pad, opt, opt)
             hovered = cell.collidepoint(mouse)
-            pg.draw.rect(self.window, Colors.surface_hover if hovered else Colors.surface,
-                         cell, border_radius=11)
-            pg.draw.rect(self.window, Colors.accent if hovered else Colors.border,
-                         cell, 1, border_radius=11)
+            shell = cut_rect_surface(
+                cell.size, cell_cut,
+                Colors.surface_hover if hovered else Colors.surface_raised,
+                border=Colors.accent if hovered else Colors.border,
+                border_width=1, corners=("tr",))
+            self.window.blit(shell, cell.topleft)
             img = self._promo_option_sprite(ptype, color, opt)
             self.window.blit(img, cell.topleft)
-            hk = render_text(self._promo_hotkey_font, hotkey, Colors.text_muted)
+            hk = self._promo_nameplate(hotkey, self._promo_hotkey_font, Colors.text_dim)
             self.window.blit(hk, (cell.right - hk.get_width() - 3,
-                                  cell.bottom - hk.get_height() - 2))
-            if hovered:
-                tag_surf = render_text(self._promo_tag_font, tag, Colors.on_accent)
-                tag_rect = pg.Rect(0, 0, tag_surf.get_width() + 8, tag_surf.get_height() + 4)
-                tag_rect.center = (cell.centerx, cell.y - 6)
-                pg.draw.rect(self.window, Colors.amber, tag_rect, border_radius=7)
-                self.window.blit(tag_surf, (tag_rect.centerx - tag_surf.get_width() // 2,
-                                            tag_rect.centery - tag_surf.get_height() // 2))
+                                  cell.bottom - hk.get_height() - 3))
+            tag_surf = self._promo_nameplate(
+                tag, self._promo_tag_font,
+                Colors.amber if hovered else Colors.text_dim)
+            tag_inset = max(1, min(3, cell.width - tag_surf.get_width() - 1))
+            self.window.blit(tag_surf, (cell.left + tag_inset, cell.top + 3))
             self._promotion_rects[ptype] = cell
+
+    def _promo_nameplate(self, text, font, color):
+        def build():
+            label = font.render(text, True, pg.Color(color))
+            pad_x, pad_y = self.PROMO_PLATE_TEXT_PAD
+            surf = pg.Surface((label.get_width() + 2 * pad_x,
+                               label.get_height() + 2 * pad_y), pg.SRCALPHA)
+            scrim = pg.Color(Colors.bg)
+            scrim.a = self.PROMO_PLATE_SCRIM_ALPHA
+            pg.draw.rect(surf, scrim, surf.get_rect(), border_radius=3)
+            surf.blit(label, (pad_x, pad_y))
+            return surf
+        return memoized_surface(_PROMO_PLATE_CACHE, (text, font, color), build)
 
     def pick_promotion(self, ptype):
         if self.pending_promotion_square is None:
@@ -271,6 +327,9 @@ class Board:
             self._promotion_from = None
             self._resolve_promotion_pick(from_sq, sq, ptype)
             return
+        self._promote_landed(sq, ptype)
+
+    def _promote_landed(self, sq, ptype):
         self.match.promote(sq, ptype)
         self.pending_promotion_square = None
         self._promotion_rects = {}
@@ -305,19 +364,16 @@ class Board:
         if self.cell_size <= 0:
             return
 
-        size = int(self.cell_size)
-        self.piece_images_scaled = {
-            k: pg.transform.smoothscale(surface, (size, size))
-            for k, surface in self.piece_images_original.items()
-        }
+        cell = int(self.cell_size)
+        self.piece_images_scaled = {}
         self._sprite_geom = {}
-        for k, surface in self.piece_images_scaled.items():
-            bbox = surface.get_bounding_rect()
-            self._sprite_geom[k] = {
-                "bbox": bbox,
-                "center": bbox.center,
-                "top_center": (bbox.centerx, bbox.top),
-            }
+        for k, original in self.piece_images_original.items():
+            ptype, color = k
+            sprite, geom = memoized_surface(
+                _SCALED_PIECE_CACHE, (ptype, color, cell),
+                lambda o=original, c=color: _build_scaled_sprite(o, cell, c))
+            self.piece_images_scaled[k] = sprite
+            self._sprite_geom[k] = geom
 
     def _draw_vertical_guides(self):
         gutter_cx = (self.rect.x + self.board_offset_x) // 2
@@ -450,10 +506,10 @@ class Board:
         return None
 
     def toggle_highlight(self, sq):
-        self.annotations.toggle_highlight(sq)
+        return self.annotations.toggle_highlight(sq)
 
     def toggle_arrow(self, from_sq, to_sq):
-        self.annotations.toggle_arrow(from_sq, to_sq)
+        return self.annotations.toggle_arrow(from_sq, to_sq)
 
     def is_square_annotated(self, sq):
         return self.annotations.is_square_annotated(sq)
@@ -461,11 +517,14 @@ class Board:
     def clear_annotations(self):
         self.annotations.clear()
 
+    def clear_all_annotations(self):
+        self.annotations.clear_all()
+
     def begin_right_press(self, pos):
         return self.annotations.begin_right_press(pos)
 
     def end_right_press(self, pos):
-        self.annotations.end_right_press(pos)
+        return self.annotations.end_right_press(pos)
 
     def _draw_annotation_highlights(self):
         self.annotations._draw_annotation_highlights()
@@ -473,8 +532,10 @@ class Board:
     def _draw_review_cue(self):
         if self.read_only or self._frame_surf is None:
             return
-        pg.draw.rect(self.window, pg.Color(Colors.accent), self.rect, 2,
-                     border_radius=self.FRAME_RADIUS)
+        cue = cut_rect_surface(
+            self.rect.size, scale_floor(self.PLATE_CUT, self.scale, 12),
+            "#00000000", border=Colors.accent, border_width=2, corners=("tr",))
+        self.window.blit(cue, self.rect.topleft)
 
     def _draw_arrows(self):
         self.annotations._draw_arrows()
@@ -759,11 +820,12 @@ class Board:
                 self.HITMARKER_SIZE_MIN),
             Colors.accent, self.CAPTURE_HITMARKER_THICKNESS)
 
-    def set_rect(self, rect):
+    def set_rect(self, rect, scale=1.0):
+        self.scale = scale
         self.cancel_drag_physics()
         self.rect = pg.Rect(rect)
         self.effects.board_rect = pg.Rect(rect)
-        self.frame_pad = max(int(rect.width * self.FRAME_PAD_FRACTION), self.FRAME_PAD_MIN)
+        self.frame_pad = scale_floor(self.PLATE_MARGIN, self.scale, self.PLATE_MARGIN_FLOOR)
         inner = rect.width - 2 * self.frame_pad
         cell_size = max(inner // self.SIZE, 1)
         if cell_size != self.cell_size:
@@ -771,7 +833,7 @@ class Board:
             opt = max(self.PROMOTION_OPTION_SIZE_MIN,
                       min(int(cell_size), self.PROMOTION_OPTION_SIZE_MAX))
             self._promo_hotkey_font = get_font(max(int(opt * 0.18), 9), bold=True, mono=True)
-            self._promo_tag_font = get_font(max(int(opt * 0.14), 8), bold=True)
+            self._promo_tag_font = get_font(max(int(opt * 0.13), 8), bold=True, mono=True)
         self.cell_size = cell_size
         used = self.cell_size * self.SIZE
         free_w = rect.width - 2 * self.frame_pad - used
@@ -800,42 +862,15 @@ class Board:
         if self.rect.width <= 0 or self.rect.height <= 0:
             self._frame_surf = None
             return
-        w, h = self.rect.width, self.rect.height
-        top, bot = pg.Color(Colors.board_frame_inner), pg.Color(Colors.board_frame)
-        column = pg.Surface((1, h))
-        for y in range(h):
-            t = y / max(h - 1, 1)
-            column.set_at((0, y), (round(top.r + (bot.r - top.r) * t),
-                                   round(top.g + (bot.g - top.g) * t),
-                                   round(top.b + (bot.b - top.b) * t)))
-        bezel = pg.transform.scale(column, (w, h)).convert_alpha()
-        mask = pg.Surface((w, h), pg.SRCALPHA)
-        pg.draw.rect(mask, (255, 255, 255, 255), mask.get_rect(), border_radius=self.FRAME_RADIUS)
-        bezel.blit(mask, (0, 0), special_flags=pg.BLEND_RGBA_MULT)
-        surf = pg.Surface((w, h), pg.SRCALPHA)
-        surf.blit(bezel, (0, 0))
-        pg.draw.rect(surf, Colors.border_strong, surf.get_rect(), 2,
-                     border_radius=self.FRAME_RADIUS)
-        self._draw_corner_ticks(surf)
+        plate = cut_rect_surface(
+            self.rect.size, scale_floor(self.PLATE_CUT, self.scale, 12),
+            Colors.surface, border=Colors.border, border_width=1, corners=("tr",))
+        surf = plate.copy()
         gx = self.board_offset_x - self.rect.x
         gy = self.board_offset_y - self.rect.y
         gs = self.cell_size * self.SIZE
-        pg.draw.rect(surf, "#000000", pg.Rect(gx - 1, gy - 1, gs + 2, gs + 2),
-                     border_radius=self.GRID_RADIUS)
+        pg.draw.rect(surf, Colors.border, pg.Rect(gx - 1, gy - 1, gs + 2, gs + 2), 1)
         self._frame_surf = surf
-
-    def _draw_corner_ticks(self, surf):
-        w, h = surf.get_size()
-        inset, length, thick = 8, 18, 2
-        color = pg.Color(Colors.accent)
-        color.a = 107
-        ticks = pg.Surface((w, h), pg.SRCALPHA)
-        corners = (((inset, inset), (1, 1)), ((w - inset, inset), (-1, 1)),
-                   ((inset, h - inset), (1, -1)), ((w - inset, h - inset), (-1, -1)))
-        for (cx, cy), (sx, sy) in corners:
-            pg.draw.line(ticks, color, (cx, cy), (cx + sx * length, cy), thick)
-            pg.draw.line(ticks, color, (cx, cy), (cx, cy + sy * length), thick)
-        surf.blit(ticks, (0, 0))
 
     def begin_press(self, pos):
         self.drag.begin_press(pos)
@@ -950,7 +985,10 @@ class Board:
             if self._skillcheck_armed() and self._is_promotion_move(from_sq, square):
                 if self.locked_targets is not None and self.locked_targets(from_sq, square):
                     return None
-                self._begin_promotion_pick(from_sq, square)
+                if self.auto_queen_provider():
+                    self._resolve_promotion_pick(from_sq, square, PieceType.QUEEN)
+                else:
+                    self._begin_promotion_pick(from_sq, square)
                 return "promotion"
             if self.skillcheck_gate is not None and self.skillcheck_gate(from_sq, square):
                 return "skillcheck"
@@ -1105,7 +1143,7 @@ class Board:
         self._target_ply = None
         self.cancel_animations()
         self.effects.cut(pg.time.get_ticks())
-        self.clear_annotations()
+        self.clear_all_annotations()
         entry = self.match.move_history[-1]
         moving_piece = entry.move.piece
 
@@ -1164,6 +1202,9 @@ class Board:
             self.start_animation(rook_post, rook_home, rook_piece)
 
     def _set_pending_promotion(self, sq):
+        if self.auto_queen_provider():
+            self._promote_landed(sq, PieceType.QUEEN)
+            return
         self.pending_promotion_square = sq
 
     def _fire_move_landed(self):
@@ -1349,7 +1390,5 @@ class Board:
             return
 
         rect = self._cell_rect(self.selected_square.row, self.selected_square.col)
-        wash = pg.Surface((rect.width, rect.height), pg.SRCALPHA)
-        wash.fill(Colors.selection_fill)
-        self.window.blit(wash, rect.topleft)
+        self.window.blit(self._cell_overlay(Colors.selection_fill), rect.topleft)
         pg.draw.rect(self.window, Colors.accent, rect, 4)

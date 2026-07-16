@@ -4,10 +4,7 @@ import pytest
 from tests.conftest import pygame_display
 from chessshootout.frontend.visual.colors import Colors
 from chessshootout.frontend.visual.fonts import get_font
-from chessshootout.frontend.visual.widgets import (
-    draw_button, draw_button_row, draw_icon_button,
-)
-from chessshootout.frontend.visual.icons import draw_speaker
+from chessshootout.frontend.visual.widgets import draw_button, draw_button_row
 from chessshootout.frontend.visual.toast import ENTER_MS as TOAST_ENTER_MS, Toast
 
 
@@ -17,10 +14,6 @@ _pygame_init = pygame_display(900, 400)
 @pytest.fixture
 def font():
     return get_font(16, bold=True)
-
-
-def _top_border_rgb(surface, rect):
-    return surface.get_at((rect.centerx, rect.top))[:3]
 
 
 def test_selected_button_fills_pressed_color(font):
@@ -45,27 +38,6 @@ def test_button_row_guards_empty_and_narrow(font):
     narrow = pg.Rect(0, 0, 4, 30)
     assert draw_button_row(surface, narrow, [("a", "a"), ("b", "b"), ("c", "c")],
                            font, 6) == {}
-
-
-def test_icon_button_muted_draws_accent_border(font):
-    surface = pg.display.get_surface()
-    surface.fill((0, 0, 0))
-    rect = pg.Rect(20, 20, 46, 40)
-    draw_icon_button(surface, rect, lambda w, r: None, muted=True)
-    assert _top_border_rgb(surface, rect) == pg.Color(Colors.accent)[:3]
-
-
-def test_speaker_icon_renders_ink():
-    surface = pg.display.get_surface()
-    surface.fill((0, 0, 0))
-    rect = pg.Rect(20, 20, 46, 40)
-    draw_speaker(surface, rect, Colors.accent, muted=False)
-    accent = pg.Color(Colors.accent)[:3]
-    ink = sum(
-        1 for x in range(rect.x, rect.right) for y in range(rect.y, rect.bottom)
-        if surface.get_at((x, y))[:3] == accent
-    )
-    assert ink > 0
 
 
 def _band_has_color(surface, rgb):

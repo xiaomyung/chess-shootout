@@ -104,16 +104,11 @@ class Sweep:
                 continue
             if self._now() - slot.disconnected_at < GRACE_SECONDS:
                 continue
-            if slot.desync_active:
-                log.info("aborted room=%s reason=desync gone=%s", room.room_id, gone_color)
-                await finalize_and_broadcast(self.rooms, self.connections, room,
-                                             Reason.ABORTED_DISCONNECT)
-            else:
-                winner = room.opp_color(gone_color)
-                log.info("abandonment room=%s loser=%s winner=%s",
-                         room.room_id, gone_color, winner)
-                await finalize_and_broadcast(self.rooms, self.connections, room,
-                                             Reason.ABANDONMENT, winner_color=winner)
+            winner = room.opp_color(gone_color)
+            log.info("abandonment room=%s loser=%s winner=%s desync=%s",
+                     room.room_id, gone_color, winner, slot.desync_active)
+            await finalize_and_broadcast(self.rooms, self.connections, room,
+                                         Reason.ABANDONMENT, winner_color=winner)
 
     def step_drop_orphans_pre_game(self):
         now = self._now()

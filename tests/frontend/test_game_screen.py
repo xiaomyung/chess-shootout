@@ -6,16 +6,20 @@ import logging
 from unittest.mock import MagicMock
 
 import pygame as pg
+import pytest
 
 from tests.conftest import pygame_display
 from chessshootout.backend.pieces import PieceType
 from chessshootout.backend.utils import Square
+from chessshootout.domain import openings
 from chessshootout.domain.match import ONLINE, SINGLE_SCREEN
 from chessshootout.domain.premoves import Premove
 from chessshootout.frontend.frontend import Frontend
+from chessshootout.frontend.panels.right import SECTION_OPEN
 from chessshootout.frontend.screens.base import Nav
 from chessshootout.frontend.skillcheck.wheel_view import WheelController
 from chessshootout.skillcheck.wheel import WheelChallenge
+from chessshootout.server.protocol import GIVE_TIME_SECONDS
 from tests.helpers import make_app as _make_app_at, start_single_screen
 
 
@@ -26,6 +30,10 @@ SPARSE_FEN = "8/8/8/4k3/8/4K3/8/8 w - - 0 1"
 
 def _make_app():
     return _make_app_at(1000, 800)
+
+
+def _key(key, mod=0):
+    return pg.event.Event(pg.KEYDOWN, {"key": key, "unicode": "", "mod": mod})
 
 
 def test_enter_applies_start_config_and_resets_match():
@@ -121,3 +129,156 @@ def test_enter_logs_variant(caplog):
     with caplog.at_level(logging.INFO, logger="chess.frontend"):
         start_single_screen(app)
     assert "variant=" in caplog.text
+
+
+@pytest.mark.parametrize("mod", [0, pg.KMOD_CTRL], ids=["plain_z", "ctrl_z"])
+def test_z_undoes_a_ply(mod):
+    """v2.10.0 deliberately flipped bare Z into an undo shortcut alongside Ctrl+Z
+    (mirroring the rail's UNDO cap); the old test_z_without_ctrl_does_not_undo that
+    pinned the opposite is gone. Both modifiers must land the same single undo."""
+    app = _make_app()
+    start_single_screen(app, time_minutes=None)
+    app.game.match.try_move(Square(6, 4), Square(4, 4))
+    assert len(app.game.match.move_history) == 1
+    assert app.game.handle_key(_key(pg.K_z, mod=mod)) is True
+    assert app.game.match.move_history == []
+
+
+def test_g_grants_give_time_once_to_recipient_clock():
+    app = _make_app()
+    start_single_screen(app, side="white", time_minutes=5, increment_seconds=0)
+    clock = app.game.match.clock
+    clock.white_remaining -= 40
+    before = clock.white_remaining
+    assert app.game.handle_key(_key(pg.K_g)) is True
+    assert clock.white_remaining == pytest.approx(before + GIVE_TIME_SECONDS)
+
+
+def test_a_key_toggles_actions_section():
+    app = _make_app()
+    start_single_screen(app)
+    assert SECTION_OPEN["actions"] is True
+    assert app.game.handle_key(_key(pg.K_a)) is True
+    assert SECTION_OPEN["actions"] is False
+
+
+def test_s_key_toggles_signals_section():
+    app = _make_app()
+    start_single_screen(app)
+    assert SECTION_OPEN["signals"] is True
+    assert app.game.handle_key(_key(pg.K_s)) is True
+    assert SECTION_OPEN["signals"] is False
+
+
+def test_c_key_toggles_chat_section_in_an_online_game():
+    """K_c toggles the QUICK CHAT rail, but only when it exists -- online games
+    show it, so chat_visible_provider() is True and the key is consumed."""
+    app = _make_app()
+    app.switch_to("game", variant=ONLINE)
+    assert SECTION_OPEN["chat"] is True
+    assert app.game.handle_key(_key(pg.K_c)) is True
+    assert SECTION_OPEN["chat"] is False
+
+
+def test_c_key_is_inert_in_a_local_game():
+    """A local game has no chat rail (chat_visible_provider() is False), so K_c is
+    a no-op the screen does not consume and the chat section state is untouched."""
+    app = _make_app()
+    start_single_screen(app)
+    assert SECTION_OPEN["chat"] is True
+    assert app.game.handle_key(_key(pg.K_c)) is False
+    assert SECTION_OPEN["chat"] is True
+
+
+def _play_giuoco(game):
+    for san in ["e4", "e5", "Nf3", "Nc6", "Bc4", "Bc5"]:
+        assert game.match.apply_san(san).legal
+
+
+def test_live_game_reports_opening_name():
+    app = _make_app()
+    start_single_screen(app, time_minutes=None)
+    _play_giuoco(app.game)
+    assert app.game._debut_line() == ("C50", "Italian Game: Giuoco Piano")
+
+
+def test_debut_provider_truncates_sans_when_browsing_back(monkeypatch):
+    app = _make_app()
+    start_single_screen(app, time_minutes=None)
+    game = app.game
+    _play_giuoco(game)
+    captured = []
+    monkeypatch.setattr(openings, "lookup",
+                        lambda sans: captured.append(list(sans)))
+    game._debut.reset()
+    game.board.jump_to_review_ply(4)
+    game._debut_line()
+    assert captured == [["e4", "e5", "Nf3", "Nc6"]], \
+        "browsing back feeds the truncated line to the opening lookup"
+
+
+def test_custom_fen_game_skips_opening_lookup(monkeypatch):
+    app = _make_app()
+    app.request_nav(Nav("game", {"fen": SPARSE_FEN}))
+    app._execute_pending_nav()
+    game = app.game
+    called = []
+    monkeypatch.setattr(openings, "lookup", lambda sans: called.append(sans))
+    assert game._custom_start is True
+    assert game._debut_line() is None
+    assert called == [], "a custom-FEN start never consults the opening book"
+
+
+def test_new_game_after_fen_restores_opening_detection():
+    app = _make_app()
+    app.request_nav(Nav("game", {"fen": SPARSE_FEN}))
+    app._execute_pending_nav()
+    game = app.game
+    assert game._custom_start is True
+    app._on_new_game()
+    assert game._custom_start is False
+    assert game.match.apply_san("e4").legal
+    assert game._debut_line() is not None
+
+
+def test_rail_controls_with_owned_sounds_suppress_the_generic_click():
+    """Caps, section headers, chips, and vol notches each play their own sound;
+    the router's fallback ui_click must stay silent for them (no doubled click),
+    while a plain board/move-list click still gets the generic click."""
+    app = _make_app_at(1200, 900)
+    start_single_screen(app, nickname="a", side="white",
+                        time_minutes=5, increment_seconds=0)
+    from chessshootout.frontend.panels import right as right_mod
+    right_mod.SECTION_OPEN.update({"actions": True, "signals": True, "chat": True})
+    rm = app.game.right_menu
+    rm.sounds = app.sound_manager
+    rm.set_rect(rm._last_outer_rect, rm.scale)
+    app.draw_frame()
+
+    app.sound_manager.reset_mock()
+    app.input_router.mouse_left_clicked(rm.button_rects["flip"].center)
+    app.sound_manager.play_cap_press.assert_called_once()
+    app.sound_manager.play_ui_click.assert_not_called()
+
+    header = next(b.header for b in rm._section_blocks if b.key == "signals")
+    app.sound_manager.reset_mock()
+    app.input_router.mouse_left_clicked(header.center)
+    app.sound_manager.play_section_toggle.assert_called_once()
+    app.sound_manager.play_ui_click.assert_not_called()
+    rm.toggle_section("signals")
+    app.draw_frame()
+
+    chip_rect = next(rect for chip, rect in rm._signal_chips if chip.key == "sound")
+    app.sound_manager.reset_mock()
+    app.input_router.mouse_left_clicked(chip_rect.center)
+    app.sound_manager.play_chip_toggle.assert_called_once()
+    app.sound_manager.play_ui_click.assert_not_called()
+
+    app.sound_manager.reset_mock()
+    app.input_router.mouse_left_clicked(rm._signal_notch_band.center)
+    app.sound_manager.play_vol_notch.assert_called_once()
+    app.sound_manager.play_ui_click.assert_not_called()
+
+    app.sound_manager.reset_mock()
+    app.input_router.mouse_left_clicked(app.game.board.rect.center)
+    app.sound_manager.play_ui_click.assert_called_once()

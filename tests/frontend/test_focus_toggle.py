@@ -57,7 +57,8 @@ def test_one_set_rect_per_direction(monkeypatch):
     calls = []
     orig = app.game.board.set_rect
     monkeypatch.setattr(
-        app.game.board, "set_rect", lambda r: (calls.append(pg.Rect(r)), orig(r))[1])
+        app.game.board, "set_rect",
+        lambda r, **kw: (calls.append(pg.Rect(r)), orig(r, **kw))[1])
     app.game._toggle_focus(True)
     finish_transition(app, clock)
     assert len(calls) == 1
@@ -79,7 +80,9 @@ def test_toggle_ignored_mid_transition(monkeypatch):
     assert app.game.focus_transition is trans
 
 
-def test_toggle_focus_plays_focus_action_on_both_directions(monkeypatch):
+def test_toggle_focus_plays_directional_focus_sounds(monkeypatch):
+    """Entering focus plays the zoom-in whoosh; leaving plays its reversed
+    counterpart (focus_action_off), never the enter sound twice."""
     app = start_game(make_app())
     app.sound_manager = MagicMock()
     clock = FakeTicks()
@@ -87,10 +90,12 @@ def test_toggle_focus_plays_focus_action_on_both_directions(monkeypatch):
 
     app.game._toggle_focus(True)
     app.sound_manager.play_focus_action.assert_called_once()
+    app.sound_manager.play_focus_action_off.assert_not_called()
     finish_transition(app, clock)
 
     app.game._toggle_focus(False)
-    assert app.sound_manager.play_focus_action.call_count == 2
+    app.sound_manager.play_focus_action.assert_called_once()
+    app.sound_manager.play_focus_action_off.assert_called_once()
 
 
 def test_toggle_focus_noop_calls_do_not_replay_the_sound(monkeypatch):

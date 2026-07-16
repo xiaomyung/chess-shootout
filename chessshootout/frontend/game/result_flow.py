@@ -32,7 +32,6 @@ RESULT_TEXT = {
     "draw_insufficient_material": ("Draw", "by insufficient material"),
     "draw_agreement": ("Draw", "by agreement"),
     "aborted": ("Game aborted", "no moves played"),
-    "aborted_disconnect": ("Game aborted", "opponent disconnected"),
     "server_shutdown": ("Game cancelled", "server shutting down"),
 }
 
@@ -118,6 +117,8 @@ class ResultFlow:
     def _outcome_word_intent(self, code, title):
         if code.startswith("draw"):
             return "DRAW", "draw"
+        if not code.startswith(("white_wins", "black_wins")):
+            return title.upper(), "draw"
         winner = PieceColor.WHITE if code.startswith("white_wins") else PieceColor.BLACK
         local = self._perspective_color()
         if local is not None:

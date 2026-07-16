@@ -82,10 +82,12 @@ ATTRIBUTION_CC_BY = [
 ]
 
 ATTRIBUTION_CC0 = [
-    dict(who="Kenney", title="Audio packs (Interface / UI / Impact / Digital / Sci-Fi / Voiceover)",
+    dict(who="Kenney", title="Audio packs (Interface / UI / Impact / Digital / Sci-Fi / "
+               "Casino / Voiceover)",
          url="https://kenney.nl/assets/category:Audio",
          used="piece moves, skill-check cues, UI clicks, slider ticks, ray-gun lasers, "
-              "you-win callouts"),
+              "you-win callouts, rail caps/sections/volume, signal chips, quick-chat "
+              "receipt, focus toggle"),
     dict(who="Dustyroom", title="Casual Game Sounds",
          url="https://dustyroom.com/free-casual-game-sounds/", used="UI / feedback one-shots"),
     dict(who="Ben Jaszczak, Brian Nelson, Kevin Heras, Matthew Nanney (submitted by bart)",

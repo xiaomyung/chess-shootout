@@ -25,7 +25,8 @@ SEGMENT_RADIUS = 8
 SEGMENT_INNER_RADIUS = 6
 CHIP_RADIUS = 7
 KO_WINK_MS = 520
-AVATAR_CUT_FRAC = 0.16
+
+AVATAR_CUT_FRAC = 0.22
 
 
 def build_shell(w, h, winking=False):
@@ -57,7 +58,7 @@ def build_ko_badge(count, font, height, winking=False):
         shell_h = max(int(height * 0.42), 7)
         gap = max(int(height * 0.12), 3)
         text = font.render(f"{count} KO", True,
-                           pg.Color(Colors.amber if winking else Colors.text_muted))
+                           pg.Color(Colors.amber_hi if winking else Colors.amber))
         th = text.get_height()
         h = max(shell_h, th)
         surf = pg.Surface((shell_w + gap + text.get_width(), h), pg.SRCALPHA)
@@ -198,23 +199,6 @@ def draw_button(window, rect, label, font, force_pressed=False, disabled=False,
         text,
         (rect.centerx - text.get_width() / 2, rect.centery - text.get_height() / 2),
     )
-
-
-def draw_icon_button(window, rect, icon_fn, force_pressed=False, disabled=False, muted=False):
-    if muted and not disabled:
-        pg.draw.rect(window, Colors.surface_active, rect, border_radius=BUTTON_RADIUS)
-        pg.draw.rect(window, Colors.accent, rect, 1, border_radius=BUTTON_RADIUS)
-    elif not disabled:
-        hovered, pressed = _hover_state(rect)
-        if force_pressed or pressed:
-            bg = Colors.surface_active
-        elif hovered:
-            bg = Colors.surface_hover
-        else:
-            bg = Colors.surface_raised
-        pg.draw.rect(window, bg, rect, border_radius=BUTTON_RADIUS)
-        pg.draw.rect(window, Colors.border, rect, 1, border_radius=BUTTON_RADIUS)
-    icon_fn(window, rect)
 
 
 _GEAR_CACHE = new_cache()

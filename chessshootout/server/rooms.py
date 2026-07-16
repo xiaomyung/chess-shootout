@@ -65,6 +65,21 @@ class PendingSkillCheck:
 
 
 @dataclass
+class SharedAnnotations:
+    sharing: bool = False
+    highlights: set = field(default_factory=set)
+    arrows: list = field(default_factory=list)
+
+    def clear_marks(self):
+        self.highlights.clear()
+        self.arrows.clear()
+
+    def reset(self):
+        self.clear_marks()
+        self.sharing = False
+
+
+@dataclass
 class Room:
     room_id: str
     time_minutes: int
@@ -88,6 +103,8 @@ class Room:
     skillcheck_log: list = field(default_factory=list)
     pending_skillcheck: Optional[PendingSkillCheck] = None
     plies_ever: int = 0
+    annotations_white: SharedAnnotations = field(default_factory=SharedAnnotations)
+    annotations_black: SharedAnnotations = field(default_factory=SharedAnnotations)
 
     def score_for(self, color):
         slot = self.slot(color)
@@ -98,6 +115,9 @@ class Room:
 
     def slot(self, color):
         return self.white if color == "white" else self.black
+
+    def annotations_for(self, color):
+        return self.annotations_white if color == "white" else self.annotations_black
 
     def opp_color(self, color):
         return "black" if color == "white" else "white"
@@ -319,14 +339,23 @@ class RoomManager:
                         and now - slot.disconnected_at >= GRACE_SECONDS):
                     yield room, color
 
+    ZERO_PLY_ABORT_REASONS = ("timeout", "abandonment")
+
     def finalize_result(self, room_id, reason, winner_color=None):
         room = self._active.get(room_id)
         if room is None or room.result is not None:
             return False
+        if room.plies_ever == 0 and reason in self.ZERO_PLY_ABORT_REASONS:
+            reason, winner_color = "aborted", None
         room.result = (reason, winner_color)
         room.ended_at = self._now()
+        for slot in (room.white, room.black):
+            if slot is not None and slot.disconnected_at is not None:
+                slot.disconnected_at = room.ended_at
         room.last_rematch_activity_at = room.ended_at
         room.pending_skillcheck = None
+        room.annotations_white.reset()
+        room.annotations_black.reset()
         for slot in (room.white, room.black):
             if slot is not None:
                 slot.at_result = True
@@ -335,7 +364,7 @@ class RoomManager:
 
     @staticmethod
     def _award_series(room, reason, winner_color):
-        if reason in ("aborted", "aborted_disconnect", "server_shutdown"):
+        if reason in ("aborted", "server_shutdown"):
             return
         scores = room.series_scores
         if winner_color in ("white", "black"):
@@ -403,6 +432,8 @@ class RoomManager:
         room.skillcheck_log = []
         room.pending_skillcheck = None
         room.plies_ever = 0
+        room.annotations_white = SharedAnnotations()
+        room.annotations_black = SharedAnnotations()
         room.started_at = self._now()
         room.first_move_at = None
         room.ended_at = None

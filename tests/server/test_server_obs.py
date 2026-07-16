@@ -42,6 +42,7 @@ def test_handlers_dispatch_table_covers_all_known_message_types():
         "rematch_request", "rematch_response", "left_result",
         "takeback_request", "takeback_response",
         "give_time", "ping", "skill_check_shot",
+        "annotations_state", "annotation_delta", "quick_chat",
     }
     assert set(HANDLERS.keys()) == expected
 

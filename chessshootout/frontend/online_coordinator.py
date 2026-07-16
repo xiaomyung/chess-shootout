@@ -91,6 +91,7 @@ class OnlineCoordinator:
 
         self._online_config = None
         self._resyncing = False
+        self._resync_buffer = []
         self._resync_started_at_ms = 0
         self._last_heartbeat_sent_ms = 0
         self._wait_started_at_ms = None
@@ -167,6 +168,18 @@ class OnlineCoordinator:
         if self.client is not None:
             self.client.send_skill_check_shot(client_elapsed_ms)
 
+    def send_annotations_state(self, sharing, highlights, arrows):
+        if self.client is not None:
+            self.client.send_annotations_state(sharing, highlights, arrows)
+
+    def send_annotation_delta(self, action, kind, square=None, from_sq=None, to_sq=None):
+        if self.client is not None:
+            self.client.send_annotation_delta(action, kind, square, from_sq, to_sq)
+
+    def send_quick_chat(self, preset):
+        if self.client is not None:
+            self.client.send_quick_chat(preset)
+
     def _drain_online_inbound(self):
         if self.client is None:
             return
@@ -195,6 +208,12 @@ class OnlineCoordinator:
             self._handle_game_resumed(event.payload)
         elif event.type == "time_granted":
             self._handle_time_granted(event.payload)
+        elif event.type == "annotations_state":
+            self._handle_annotations_state(event.payload)
+        elif event.type == "annotation_delta":
+            self._handle_annotation_delta(event.payload)
+        elif event.type == "quick_chat_received":
+            self._forward_board_event("on_quick_chat", event.payload)
         elif event.type == "connection_status":
             self._handle_connection_status(event.payload)
         elif event.type == "resync_directive":
@@ -233,7 +252,7 @@ class OnlineCoordinator:
             return
         if reason == ClientReason.ROOM_LOST:
             log.warning("online room lost — server restarted mid-game")
-            self._resyncing = False
+            self._cancel_resync()
             game.result_flow.auto_save_pgn()
             self.reconnecting_modal.hide()
             self.offer_banners.clear()
@@ -246,7 +265,7 @@ class OnlineCoordinator:
             return
         if reason in ONLINE_HARD_FAILURE_REASONS or reason.startswith("http_"):
             log.warning("online hard failure reason=%s", reason)
-            self._resyncing = False
+            self._cancel_resync()
             self.wait_modal.hide()
             self.match_found_modal.hide()
             self.offer_banners.clear()
@@ -309,8 +328,13 @@ class OnlineCoordinator:
 
     def _end_rematch_window(self):
         self._clear_rematch_offer()
-        self._tear_down_online_session("rematch_window_closed")
-        self._return_to_menu_card()
+        game = self.app.game
+        stay_on_result = (self.app.screen is game
+                          and game.current_result() is not None)
+        self._tear_down_online_session("rematch_window_closed",
+                                       navigate=not stay_on_result)
+        if not stay_on_result:
+            self._return_to_menu_card()
 
     def _handle_rematch_update(self, payload):
         event = payload.get("event", "")
@@ -365,15 +389,26 @@ class OnlineCoordinator:
         if self.client is not None:
             self.client.request_state_sync()
 
+    def _cancel_resync(self):
+        self._resyncing = False
+        self._resync_buffer = []
+
+    def _replay_resync_buffer(self):
+        buffered = self._resync_buffer
+        self._resync_buffer = []
+        for method_name, payload in buffered:
+            self._forward_board_event(method_name, payload)
+
     def _handle_game_resumed(self, payload):
         game = self.app.game
         if game.variant != Variant.ONLINE:
             log.info("resume ignored — no active online game")
-            self._resyncing = False
+            self._cancel_resync()
             return
         target = self._subscriber if self._subscriber is not None else game
         target.on_resume(payload)
         self._resyncing = False
+        self._replay_resync_buffer()
 
     def _handle_time_granted(self, payload):
         self._forward_board_event("on_give_time", payload)
@@ -382,6 +417,18 @@ class OnlineCoordinator:
         if self._resyncing:
             return
         self._forward_board_event("on_takeback", payload)
+
+    def _handle_annotations_state(self, payload):
+        if self._resyncing:
+            self._resync_buffer.append(("on_annotations_state", payload))
+            return
+        self._forward_board_event("on_annotations_state", payload)
+
+    def _handle_annotation_delta(self, payload):
+        if self._resyncing:
+            self._resync_buffer.append(("on_annotation_delta", payload))
+            return
+        self._forward_board_event("on_annotation_delta", payload)
 
     def _handle_skill_check_required(self, payload):
         if self._resyncing:
@@ -504,6 +551,7 @@ class OnlineCoordinator:
         if self.client is not None:
             self.client.disconnect()
             self.client = None
+        self._cancel_resync()
         self.offer_banners.dismiss("rematch_request")
         self._rematch_offered = False
         self.client = OnlineClient()
@@ -528,7 +576,7 @@ class OnlineCoordinator:
         return time_category_for_minutes(minutes), f"{minutes} + {incr}"
 
     def _drop_client(self, *, cancel_queue=False):
-        self._resyncing = False
+        self._cancel_resync()
         if self.client is None:
             return
         if cancel_queue:
@@ -585,7 +633,7 @@ class OnlineCoordinator:
         self._drop_client()
         self.unbind_game_from_online()
 
-    def _tear_down_online_session(self, reason="unspecified"):
+    def _tear_down_online_session(self, reason="unspecified", navigate=True):
         log.info("online session teardown reason=%s", reason)
         game = self.app.game
         game.result_flow.auto_save_pgn()
@@ -594,7 +642,12 @@ class OnlineCoordinator:
         self._clear_search_state()
         self.offer_banners.clear()
         self.unbind_game_from_online()
-        self.app.switch_to("menu")
+        if not navigate:
+            return
+        if self.app.screen is self.app.menu:
+            self.app.menu.show_play_view()
+        else:
+            self.app.switch_to("menu")
         game._reset_to_new_game()
 
     def _return_to_menu_card(self):
@@ -616,7 +669,7 @@ class OnlineCoordinator:
             self._return_to_menu_card()
 
     def retain_for_rematch(self, keep_online):
-        self._resyncing = False
+        self._cancel_resync()
         if keep_online:
             self.client.send_left_result()
         elif self.client is not None:
@@ -725,7 +778,7 @@ class OnlineCoordinator:
             self.reconnecting_modal.hide()
         if self._resyncing:
             if pg.time.get_ticks() - self._resync_started_at_ms > RESYNC_TIMEOUT_MS:
-                self._resyncing = False
+                self._cancel_resync()
                 if self.client is not None and self.client.state == "connected":
                     log.warning("resync timed out; escalating to reconnect")
                     self.client.force_reconnect()

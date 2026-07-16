@@ -24,6 +24,14 @@ MENU_REDESIGN_SLOTS = {
     "focus_action": "ui/focus_action",
 }
 
+RAIL_SECTIONS_SLOTS = {
+    "section_toggle": "ui/section_toggle",
+    "chip_toggle": "ui/chip_toggle",
+    "cap_press": "ui/cap_press",
+    "vol_notch": "ui/vol_notch",
+    "chat_receive": "ui/chat_receive",
+}
+
 
 @pytest.mark.parametrize("slot_id, dst", sorted(NEW_SLOTS.items()))
 def test_new_slot_registered_with_expected_dst(slot_id, dst):
@@ -64,3 +72,10 @@ def test_menu_redesign_slot_pool_ships_oggs(dst):
         f"{dst} pool is empty — process the audition picks "
         f"(packaging/process_sounds.py) before shipping"
     )
+
+
+@pytest.mark.parametrize("slot_id, dst", sorted(RAIL_SECTIONS_SLOTS.items()))
+def test_rail_sections_slot_registered_with_expected_dst(slot_id, dst):
+    assert slot_id in SLOTS
+    assert SLOTS[slot_id].dst == dst
+    assert SLOTS[slot_id].src == slot_id

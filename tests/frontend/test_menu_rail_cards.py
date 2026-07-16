@@ -172,6 +172,37 @@ def test_news_card_expanded_shows_newest_plus_headlines(app, stack):
     app.draw_frame()  # renders without crashing: newest expanded + 2 headline rows
 
 
+def test_news_body_bullet_lines_get_bullets_and_hanging_indent(app, stack):
+    """News bodies are authored as '- item' lists: each list line renders with a
+    bullet glyph, wrapped continuations hang-indent under the text (not the
+    bullet), and plain intro lines render unindented."""
+    long_item = "- " + "really " * 30 + "long entry"
+    app.news_client._items = [
+        {"title": "T", "body": f"Intro line\n- First change\n{long_item}",
+         "date": "2026-07-14"},
+    ]
+    _refresh(app)
+    app.draw_frame()
+    lines = stack._news_body_lines(stack._news_items[0], 200)
+    assert lines[0] == (0, "Intro line")
+    assert lines[1][0] == 0 and lines[1][1].startswith("• First change")
+    bullet_starts = [line for indent, line in lines if line.startswith("•")]
+    assert len(bullet_starts) == 2
+    continuations = [indent for indent, line in lines[2:] if not line.startswith("•")]
+    assert continuations and all(indent > 0 for indent in continuations)
+
+
+def test_news_body_line_count_capped(app, stack):
+    app.news_client._items = [
+        {"title": "T", "body": "\n".join(f"- item {i}" for i in range(20)),
+         "date": "2026-07-14"},
+    ]
+    _refresh(app)
+    app.draw_frame()
+    lines = stack._news_body_lines(stack._news_items[0], 400)
+    assert len(lines) == 8
+
+
 def test_news_arriving_after_construction_surfaces_via_update(app, tmp_path, stack):
     """Cold-cache landing: the async fetch replaces NewsClient's items and bumps
     its generation counter after the menu is already built. MenuScreen.update()

@@ -171,6 +171,22 @@ def test_ws_rejects_non_auth_first_message(client):
             ws.receive_text()
 
 
+def test_ws_rejects_version_mismatch_auth(client):
+    """An old client (one protocol version behind) is refused with a
+    version_mismatch error before the socket closes."""
+    _matchmake(client, uuid=ALICE)
+    r2 = _matchmake(client, uuid=BOB)
+    body = r2.json()
+    with client.websocket_connect(f"/ws/{body['room_id']}") as ws:
+        ws.send_text(json.dumps({"version": PROTOCOL_VERSION - 1, "type": "auth",
+                                  "session_token": body["session_token"]}))
+        err = json.loads(ws.receive_text())
+        assert err["type"] == "error"
+        assert err["reason"] == Reason.VERSION_MISMATCH
+        with pytest.raises(Exception):
+            ws.receive_text()
+
+
 def test_two_clients_pair_and_get_game_start(client):
     random.seed(0)
     r1 = _matchmake(client, uuid=ALICE, side="white")
@@ -400,6 +416,7 @@ async def test_clock_flag_during_play_broadcasts_timeout(app, clock):
     room = list(rooms._active.values())[0]
     room.started_at = clock()
     room.first_move_at = clock()
+    room.plies_ever = 1
     clock.advance(70)
     await _sweep(app)
     assert room.result is not None
@@ -425,21 +442,38 @@ async def test_grace_expiry_without_desync_awards_opponent(app, clock):
     leave: the waiting player wins by abandonment."""
     rooms = app.state.rooms
     room = await _paired_in_progress_room(rooms, clock)
+    room.plies_ever = 1
     rooms.mark_disconnected(room.room_id, "white")
     clock.advance(GRACE_SECONDS + 1)
     await _sweep(app)
     assert room.result == (Reason.ABANDONMENT, "black")
 
 
-async def test_grace_expiry_after_desync_aborts(app, clock):
-    """A disconnect while a desync was active aborts the game with no winner."""
+async def test_grace_expiry_with_desync_still_awards_opponent(app, clock):
+    """REGRESSION (v2.10.0 live smoke): desync_active is a sticky flag -- any
+    /resume sets it and only the player's NEXT applied move clears it. The old
+    desync branch aborted the game with no winner, so a deliberate leave right
+    after a resync robbed the stayer of the abandonment win. Rule: with moves
+    played, a grace expiry ALWAYS awards the opponent; only zero-ply games
+    convert to aborted (finalize_result's central guard)."""
+    rooms = app.state.rooms
+    room = await _paired_in_progress_room(rooms, clock)
+    room.plies_ever = 1
+    room.white.desync_active = True
+    rooms.mark_disconnected(room.room_id, "white")
+    clock.advance(GRACE_SECONDS + 1)
+    await _sweep(app)
+    assert room.result == (Reason.ABANDONMENT, "black")
+
+
+async def test_grace_expiry_with_desync_at_zero_plies_aborts(app, clock):
     rooms = app.state.rooms
     room = await _paired_in_progress_room(rooms, clock)
     room.white.desync_active = True
     rooms.mark_disconnected(room.room_id, "white")
     clock.advance(GRACE_SECONDS + 1)
     await _sweep(app)
-    assert room.result == (Reason.ABORTED_DISCONNECT, None)
+    assert room.result == (Reason.ABORTED, None)
 
 
 @pytest.mark.asyncio

@@ -238,7 +238,8 @@ def test_resume_backoff_grows_and_is_bounded(monkeypatch):
 
     async def resume_async(body, http):
         calls["n"] += 1
-        return None if calls["n"] <= 4 else SimpleNamespace(model_dump=lambda: {"ok": True})
+        return (None if calls["n"] <= 4
+                else SimpleNamespace(model_dump=lambda by_alias=False: {"ok": True}))
 
     client._transport = SimpleNamespace(
         make_async_http=lambda: _Http(), resume_async=resume_async)

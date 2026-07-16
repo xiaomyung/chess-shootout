@@ -11,6 +11,7 @@ from chessshootout.backend.utils import Square
 from chessshootout.frontend.board import Board
 from chessshootout.frontend.board.annotations import Annotations
 from chessshootout.frontend.visual.colors import Colors
+from chessshootout.server.protocol import MAX_SHARED_ARROWS
 from tests.helpers import make_app as _shared_make_app
 from tests.helpers import start_single_screen
 
@@ -645,3 +646,202 @@ def test_premove_queueing_does_not_clear_annotations(board):
     board.handle_click(Square(4, 4))
     assert len(board.premoves) == 1
     assert Square(4, 4) in board.highlighted_squares
+
+
+def _seed_opp_annotations(board, hi=Square(2, 2), arrow=(Square(6, 6), Square(5, 5))):
+    board.annotations.opp_highlighted_squares.add(hi)
+    board.annotations.opp_arrows.append(arrow)
+    return hi, arrow
+
+
+def test_local_move_clears_own_and_opp_annotations(board):
+    board.toggle_highlight(Square(0, 0))
+    board.toggle_arrow(Square(6, 0), Square(4, 0))
+    _seed_opp_annotations(board)
+    board.handle_click(Square(6, 4))
+    board.handle_click(Square(4, 4))
+    assert board.highlighted_squares == set()
+    assert board.arrows == []
+    assert board.annotations.opp_highlighted_squares == set()
+    assert board.annotations.opp_arrows == []
+
+
+def test_remote_move_clears_own_and_opp_annotations(board):
+    board.match.try_move(Square(6, 4), Square(4, 4))
+    board.toggle_highlight(Square(0, 0))
+    board.toggle_arrow(Square(6, 0), Square(4, 0))
+    _seed_opp_annotations(board)
+    board.animate_remote_move(Square(6, 4), Square(4, 4))
+    assert board.highlighted_squares == set()
+    assert board.arrows == []
+    assert board.annotations.opp_highlighted_squares == set()
+    assert board.annotations.opp_arrows == []
+
+
+def test_review_browse_click_clears_own_keeps_opp(board):
+    board.toggle_highlight(Square(4, 4))
+    board.toggle_arrow(Square(6, 0), Square(4, 0))
+    opp_hi, opp_arrow = _seed_opp_annotations(board)
+    board.review_ply = 0
+    board.handle_click(Square(3, 3))
+    assert board.highlighted_squares == set()
+    assert board.arrows == []
+    assert board.annotations.opp_highlighted_squares == {opp_hi}
+    assert board.annotations.opp_arrows == [opp_arrow]
+
+
+def test_right_drag_highlight_does_not_touch_opp(board):
+    opp_hi, opp_arrow = _seed_opp_annotations(board)
+    sq = Square(6, 4)
+    board.begin_right_press(_cell_center(board, sq))
+    board.end_right_press(_cell_center(board, sq))
+    assert sq in board.highlighted_squares
+    assert board.annotations.opp_highlighted_squares == {opp_hi}
+    assert board.annotations.opp_arrows == [opp_arrow]
+
+
+def test_right_drag_arrow_does_not_touch_opp(board):
+    opp_hi, opp_arrow = _seed_opp_annotations(board)
+    a, b = Square(6, 4), Square(4, 4)
+    board.begin_right_press(_cell_center(board, a))
+    board.end_right_press(_cell_center(board, b))
+    assert (a, b) in board.arrows
+    assert board.annotations.opp_highlighted_squares == {opp_hi}
+    assert board.annotations.opp_arrows == [opp_arrow]
+
+
+def test_end_right_press_highlight_descriptor(board):
+    sq = Square(6, 4)
+    center = _cell_center(board, sq)
+    board.begin_right_press(center)
+    assert board.end_right_press(center) == ("highlight", sq, True)
+    board.begin_right_press(center)
+    assert board.end_right_press(center) == ("highlight", sq, False)
+
+
+def test_end_right_press_arrow_descriptor(board):
+    a, b = Square(6, 4), Square(4, 4)
+    board.begin_right_press(_cell_center(board, a))
+    assert board.end_right_press(_cell_center(board, b)) == ("arrow", a, b, True)
+    board.begin_right_press(_cell_center(board, a))
+    assert board.end_right_press(_cell_center(board, b)) == ("arrow", a, b, False)
+
+
+def test_end_right_press_without_drag_returns_none(board):
+    board.annotations._right_drag_start_square = None
+    assert board.end_right_press(_cell_center(board, Square(4, 4))) is None
+
+
+def test_end_right_press_off_board_returns_none(board):
+    board.begin_right_press(_cell_center(board, Square(6, 4)))
+    assert board.end_right_press((5000, 5000)) is None
+
+
+def test_own_arrow_cap_blocks_add_beyond_max(board):
+    """A cap-rejected add returns None (distinct from a remove's False) so the
+    share path can tell 'nothing happened' apart from 'arrow removed'."""
+    squares = [Square(r, c) for r in range(8) for c in range(8)]
+    pairs = [(a, b) for a in squares for b in squares if a != b]
+    for a, b in pairs[:MAX_SHARED_ARROWS]:
+        assert board.toggle_arrow(a, b) is True
+    assert len(board.arrows) == MAX_SHARED_ARROWS
+    extra_a, extra_b = pairs[MAX_SHARED_ARROWS]
+    assert board.toggle_arrow(extra_a, extra_b) is None
+    assert len(board.arrows) == MAX_SHARED_ARROWS
+    assert (extra_a, extra_b) not in board.arrows
+
+
+def test_own_arrow_toggle_off_still_works_at_cap(board):
+    squares = [Square(r, c) for r in range(8) for c in range(8)]
+    pairs = [(a, b) for a in squares for b in squares if a != b]
+    for a, b in pairs[:MAX_SHARED_ARROWS]:
+        board.toggle_arrow(a, b)
+    first_a, first_b = pairs[0]
+    assert board.toggle_arrow(first_a, first_b) is False
+    assert (first_a, first_b) not in board.arrows
+    assert len(board.arrows) == MAX_SHARED_ARROWS - 1
+
+
+def test_clear_annotations_keeps_opp(board):
+    """Own-only clear() leaves the opponent's shared annotations intact."""
+    board.toggle_highlight(Square(4, 4))
+    opp_hi, opp_arrow = _seed_opp_annotations(board)
+    board.clear_annotations()
+    assert board.highlighted_squares == set()
+    assert board.annotations.opp_highlighted_squares == {opp_hi}
+    assert board.annotations.opp_arrows == [opp_arrow]
+
+
+def test_clear_opp_only_clears_opp(board):
+    board.toggle_highlight(Square(4, 4))
+    board.toggle_arrow(Square(6, 0), Square(4, 0))
+    _seed_opp_annotations(board)
+    board.annotations.clear_opp()
+    assert board.highlighted_squares == {Square(4, 4)}
+    assert board.arrows == [(Square(6, 0), Square(4, 0))]
+    assert board.annotations.opp_highlighted_squares == set()
+    assert board.annotations.opp_arrows == []
+
+
+def test_clear_all_clears_own_and_opp(board):
+    board.toggle_highlight(Square(4, 4))
+    board.toggle_arrow(Square(6, 0), Square(4, 0))
+    _seed_opp_annotations(board)
+    board.annotations._right_drag_start_square = Square(1, 1)
+    board.clear_all_annotations()
+    assert board.highlighted_squares == set()
+    assert board.arrows == []
+    assert board.annotations.opp_highlighted_squares == set()
+    assert board.annotations.opp_arrows == []
+    assert board.annotations._right_drag_start_square is None
+
+
+def test_own_and_opp_highlights_use_distinct_hues(board):
+    """Own highlights read warm (amber), opponent highlights read cool (blue)."""
+    own_sq, opp_sq = Square(4, 4), Square(3, 3)
+    board.toggle_highlight(own_sq)
+    board.annotations.opp_highlighted_squares.add(opp_sq)
+    board.window.fill((0, 0, 0))
+    board._draw_annotation_highlights()
+    own = board.window.get_at(_cell_center(board, own_sq))
+    opp = board.window.get_at(_cell_center(board, opp_sq))
+    assert own.r > own.b, "own highlight reads warm"
+    assert opp.b > opp.r and opp.b > opp.g, "opp highlight reads blue"
+
+
+def _opp_arrow_changed_pixels(board, sq):
+    """Pixels in a cell region that the opp arrow introduces (with vs without)."""
+    win = board.window
+    region = _arrow_region(board, sq)
+
+    def frame():
+        board.annotations._arrow_cache = None
+        win.fill((0, 0, 0))
+        board.draw_board()
+        return [win.get_at((region.x + x, region.y + y))
+                for x in range(region.width) for y in range(region.height)]
+
+    with_arrow = frame()
+    saved = board.annotations.opp_arrows
+    board.annotations.opp_arrows = []
+    without = frame()
+    board.annotations.opp_arrows = saved
+    board.annotations._arrow_cache = None
+    return [wp for wp, bp in zip(with_arrow, without) if wp != bp]
+
+
+def test_opp_arrow_adds_blueish_pixels(board):
+    from_sq, to_sq = Square(6, 0), Square(4, 0)
+    board.annotations.opp_arrows.append((from_sq, to_sq))
+    changed = _opp_arrow_changed_pixels(board, to_sq)
+    assert changed, "opp arrow should mark its to-square"
+    assert any(c.b > c.r and c.b > c.g for c in changed), "opp arrow pixels read blue"
+
+
+def test_opp_arrow_renders_alongside_own_arrow(board):
+    board.toggle_arrow(Square(6, 7), Square(4, 7))
+    board.annotations.opp_arrows.append((Square(6, 0), Square(4, 0)))
+    own_changed = _arrow_marks_cells(board, [Square(6, 7), Square(4, 7)])
+    assert all(own_changed.values()), "own arrow still rendered when opp arrows exist"
+    opp_changed = _opp_arrow_changed_pixels(board, Square(4, 0))
+    assert any(c.b > c.r and c.b > c.g for c in opp_changed)

@@ -2,7 +2,10 @@ import math
 
 import pygame as pg
 
-from chessshootout.frontend.visual.cache import new_cache, memoized_surface
+from chessshootout.frontend.visual.cache import (
+    new_size_cache, memoized_surface, render_text,
+)
+from chessshootout.frontend.visual.colors import Colors
 
 SUPERSAMPLE = 4
 GLOW_BLUR_PASSES = 3
@@ -10,6 +13,38 @@ SQRT2 = 1.41421356
 
 _HALF_RGBA_MULT = (128, 128, 128, 128)
 _CUT_BORDER_SCALE = 1.25
+
+NOTCH_ZERO_EPSILON = 0.005
+
+TOOLTIP_PAD_X = 10
+TOOLTIP_PAD_Y = 5
+TOOLTIP_RADIUS = 6
+
+
+def scale_floor(value, scale, floor=1):
+    return max(int(value * scale), floor)
+
+
+def cosine_pulse(now_ms, period_ms):
+    phase = (now_ms % period_ms) / period_ms
+    return (1 - math.cos(2 * math.pi * phase)) / 2
+
+
+def notch_readout_slot_w(font):
+    return font.size("100%")[0]
+
+
+def notch_geometry(width, count, cell_w, gap, slot_w, readout_gap):
+    total = count * cell_w + (count - 1) * gap
+    return width - slot_w - readout_gap - total, total
+
+
+def notch_value_from_click(pos_x, band_x, step, count, current):
+    i = max(0, min(count - 1, (pos_x - band_x) // step))
+    target = (i + 1) / count
+    if i == 0 and abs(current - target) < NOTCH_ZERO_EPSILON:
+        return 0.0
+    return target
 
 
 def supersample(size, render, scale=SUPERSAMPLE):
@@ -55,7 +90,7 @@ def soft_blur(surface, passes=GLOW_BLUR_PASSES):
     return forward
 
 
-_INFINITY_CACHE = new_cache()
+_INFINITY_CACHE = new_size_cache()
 
 
 def infinity_surface(height, color):
@@ -81,7 +116,7 @@ def infinity_surface(height, color):
     return memoized_surface(_INFINITY_CACHE, (h, str(color)), build)
 
 
-_CIRCLE_CACHE = new_cache()
+_CIRCLE_CACHE = new_size_cache()
 
 
 def circle_surface(diameter, color):
@@ -113,7 +148,7 @@ def blit_centered(surface, text, center):
     surface.blit(text, (round(center[0] - ink.centerx), round(center[1] - ink.centery)))
 
 
-_ROUNDED_RECT_CACHE = new_cache()
+_ROUNDED_RECT_CACHE = new_size_cache()
 
 
 def rounded_rect_surface(size, radius, fill, border=None, border_width=1):
@@ -132,7 +167,7 @@ def rounded_rect_surface(size, radius, fill, border=None, border_width=1):
     return memoized_surface(_ROUNDED_RECT_CACHE, key, build)
 
 
-_CUT_RECT_CACHE = new_cache()
+_CUT_RECT_CACHE = new_size_cache()
 _CUT_CORNERS = ("tl", "tr", "br", "bl")
 
 
@@ -172,6 +207,19 @@ def cut_rect_surface(size, cut, fill, border=None, border_width=1, corners=("tr"
     return memoized_surface(_CUT_RECT_CACHE, key, build)
 
 
+def build_tooltip_bubble(font, label, scale):
+    text = render_text(font, label, Colors.text)
+    pad_x = scale_floor(TOOLTIP_PAD_X, scale, 6)
+    pad_y = scale_floor(TOOLTIP_PAD_Y, scale, 3)
+    w = text.get_width() + 2 * pad_x
+    h = text.get_height() + 2 * pad_y
+    bubble = cut_rect_surface((w, h), scale_floor(TOOLTIP_RADIUS, scale, 4), Colors.bg,
+                              border=Colors.border_strong, border_width=1,
+                              corners=("tr",)).copy()
+    bubble.blit(text, (pad_x, pad_y))
+    return bubble
+
+
 def _rounded_rect_perimeter(w, h, r, arc_segs=8):
     r = max(0.0, min(r, w / 2, h / 2))
     pts = [(r, 0.0)]
@@ -209,7 +257,7 @@ def _densify(pts, step):
     return dense
 
 
-_DASHED_RECT_CACHE = new_cache()
+_DASHED_RECT_CACHE = new_size_cache()
 
 
 def dashed_rounded_rect_surface(size, radius, border, border_width=1, dash=6, gap=5, fill=None):
@@ -241,7 +289,28 @@ def dashed_rounded_rect_surface(size, radius, border, border_width=1, dash=6, ga
     return memoized_surface(_DASHED_RECT_CACHE, key, build)
 
 
-_CHEVRON_CACHE = new_cache()
+_DASHED_HLINE_CACHE = new_size_cache()
+
+
+def dashed_hline(width, color, dash=6, gap=5):
+    w = max(int(width), 1)
+    key = (w, str(color), dash, gap)
+
+    def build():
+        surf = pg.Surface((w, 1), pg.SRCALPHA)
+        col = pg.Color(color)
+        period = max(dash + gap, 1)
+        x = 0
+        while x < w:
+            seg = min(dash, w - x)
+            if seg > 0:
+                pg.draw.rect(surf, col, pg.Rect(x, 0, seg, 1))
+            x += period
+        return surf
+    return memoized_surface(_DASHED_HLINE_CACHE, key, build)
+
+
+_CHEVRON_CACHE = new_size_cache()
 
 
 def chevron_surface(height, color, up=False):
@@ -259,3 +328,19 @@ def chevron_surface(height, color, up=False):
             pg.draw.lines(surf, pg.Color(color), False, pts, lw)
         return supersample((w, h), render)
     return memoized_surface(_CHEVRON_CACHE, (h, up, str(color)), build)
+
+
+_ROTATED_CHEVRON_CACHE = new_size_cache()
+_CHEVRON_ANGLE_STEP = 6
+
+
+def rotated_chevron_surface(height, color, angle):
+    bucket = int(round(angle / _CHEVRON_ANGLE_STEP)) * _CHEVRON_ANGLE_STEP
+    key = (max(int(height), 4), str(color), bucket)
+
+    def build():
+        base = chevron_surface(height, color)
+        if bucket == 0:
+            return base
+        return pg.transform.rotate(base, bucket)
+    return memoized_surface(_ROTATED_CHEVRON_CACHE, key, build)

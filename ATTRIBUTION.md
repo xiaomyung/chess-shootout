@@ -28,6 +28,12 @@ assets/fonts/OFL.txt (https://openfontlicense.org/).
   Noto Color Emoji, by Google (SIL OFL 1.1; see assets/fonts/OFL.txt).
   https://fonts.google.com/noto/specimen/Noto+Color+Emoji
 
+## Data
+
+- **assets/openings.tsv** — opening names dataset (ECO code + name + PGN line),
+  from chess-openings by lichess-org, CC0 (public domain).
+  https://github.com/lichess-org/chess-openings
+
 ## Sounds
 
 Sound effects are CC0 unless listed under **Attribution required** below.
@@ -41,7 +47,7 @@ Sound effects are CC0 unless listed under **Attribution required** below.
 
 ### Public domain (CC0 -- credited as a courtesy, not required)
 
-- **Audio packs (Interface / UI / Impact / Digital / Sci-Fi / Voiceover)** by Kenney -- https://kenney.nl/assets/category:Audio (piece moves, skill-check cues, UI clicks, slider ticks, ray-gun lasers, you-win callouts)
+- **Audio packs (Interface / UI / Impact / Digital / Sci-Fi / Casino / Voiceover)** by Kenney -- https://kenney.nl/assets/category:Audio (piece moves, skill-check cues, UI clicks, slider ticks, ray-gun lasers, you-win callouts, rail caps/sections/volume, signal chips, quick-chat receipt, focus toggle)
 - **Casual Game Sounds** by Dustyroom -- https://dustyroom.com/free-casual-game-sounds/ (UI / feedback one-shots)
 - **The Free Firearm Sound Library** by Ben Jaszczak, Brian Nelson, Kevin Heras, Matthew Nanney (submitted by bart) -- https://opengameart.org/content/the-free-firearm-sound-library (pistol / cannon / rifle capture shots)
 - **Bullet / Gun SFX (CC0)** by Signature Sounds -- https://signaturesounds.org/store/p/bulletgun-sfx-cc0 (foley / reload layers / give-time ratchet)

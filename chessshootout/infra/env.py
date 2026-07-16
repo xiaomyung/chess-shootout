@@ -268,6 +268,29 @@ def set_show_frametime(value):
     _set_bool("CHESS_SHOW_FRAMETIME", value)
 
 
+def get_auto_queen():
+    return _get_bool("CHESS_AUTO_QUEEN", False)
+
+
+def set_auto_queen(value):
+    _set_bool("CHESS_AUTO_QUEEN", value)
+
+
+_RAIL_SECTION_KEYS = {
+    "actions": "CHESS_RAIL_ACTIONS_OPEN",
+    "signals": "CHESS_RAIL_SIGNALS_OPEN",
+    "chat": "CHESS_RAIL_CHAT_OPEN",
+}
+
+
+def get_rail_section_open(section):
+    return _get_bool(_RAIL_SECTION_KEYS[section], False)
+
+
+def set_rail_section_open(section, value):
+    _set_bool(_RAIL_SECTION_KEYS[section], value)
+
+
 def get_profile_hint_shown():
     return _get_bool("CHESS_PROFILE_HINT_SHOWN", False)
 

@@ -3,12 +3,14 @@ import logging
 import pygame as pg
 
 from chessshootout.backend.pieces import opponent_of
+from chessshootout.domain import openings
 from chessshootout.domain.capture_summary import captured_by, material_advantage
 from chessshootout.domain.match import Match
 from chessshootout.domain.pgn.load import (
     format_time_control, load_pgn_into_backend, parse_comment, parse_time_control,
 )
 from chessshootout.infra import env
+from chessshootout.frontend import signal_controls
 from chessshootout.frontend.board import Board
 from chessshootout.frontend.layout import compute_layout
 from chessshootout.frontend.modal_registry import ModalSpec
@@ -16,7 +18,7 @@ from chessshootout.frontend.modals.help import HOTKEYS
 from chessshootout.frontend.panels.player_strip import (
     is_white, top_strip_color, refresh_capture_icons,
 )
-from chessshootout.frontend.panels.right import RightMenu, REVIEW_BUTTONS
+from chessshootout.frontend.panels.right import RightMenu, REVIEW_CAPS
 from chessshootout.frontend.panels.review_strip import ReviewStrip
 from chessshootout.frontend.pgn_open import open_pgn_or_toast
 from chessshootout.frontend.screens.base import Nav, Screen
@@ -45,6 +47,8 @@ class ReviewScreen(Screen):
         self._return_to = "menu"
         self._skillcheck_log = []
         self._pgn_path = None
+        self._custom_start = False
+        self._debut = openings.DebutTracker(self._reviewed_sans)
         self.backdrop = ArenaBackdrop()
 
         self.match = Match()
@@ -54,8 +58,14 @@ class ReviewScreen(Screen):
             "menu": self._on_menu,
             "flip": self._on_flip,
             "open_pgn": self._on_open_pgn,
-        }, board=self.board, buttons_provider=lambda: REVIEW_BUTTONS,
-            audio_panel=app.audio_panel, whiffs_provider=self._skillcheck_whiffs)
+            "sound_toggle": lambda: signal_controls.toggle_sound(app),
+            "set_volume": lambda value: signal_controls.set_signal_volume(app, value),
+        }, board=self.board, buttons_provider=lambda: REVIEW_CAPS,
+            whiffs_provider=self._skillcheck_whiffs,
+            debut_provider=self._debut_line,
+            signals_provider=self._signals_provider,
+            sounds=app.sound_manager, caps_stacked=True,
+            suppress_click=app.input_router.suppress_click_sound)
         self.strip_top = ReviewStrip(window)
         self.strip_bottom = ReviewStrip(window)
 
@@ -64,9 +74,11 @@ class ReviewScreen(Screen):
         return self.app.window
 
     def enter(self, **payload):
+        openings.preload()
         self._return_to = payload.get("return_to", "menu")
         path = payload["pgn_path"]
         self._pgn_path = path
+        self._debut.reset()
         text = self._read_pgn(path)
         if text is None:
             self._fail(path, "could not read file")
@@ -79,6 +91,8 @@ class ReviewScreen(Screen):
         self.black_name = parsed.headers.get("Black", "Player 2")
         self._time_control = parse_time_control(parsed.headers.get("TimeControl", "-"))
         self._pgn_result_tag = parsed.result
+        self._custom_start = (parsed.headers.get("SetUp") == "1"
+                              or "FEN" in parsed.headers)
         self._rebuild_skillcheck_log(parsed.move_comments)
         self.board.reset_for_new_game()
         self.right_menu.reset_for_new_game()
@@ -120,10 +134,10 @@ class ReviewScreen(Screen):
         r = compute_layout(
             window_width, window_height, mode=self.name, focus_mode=False,
             focus_show=env.get_focus_show(), board_size=self.board.SIZE)
-        self.board.set_rect(r.board_rect)
-        self.right_menu.set_rect(r.menu_rect)
-        self.strip_top.set_rect(r.top_strip_rect)
-        self.strip_bottom.set_rect(r.bottom_strip_rect)
+        self.board.set_rect(r.board_rect, scale=r.scale)
+        self.right_menu.set_rect(r.menu_rect, scale=r.scale)
+        self.strip_top.set_rect(r.top_strip_rect, scale=r.scale)
+        self.strip_bottom.set_rect(r.bottom_strip_rect, scale=r.scale)
         refresh_capture_icons(self.board, r.strip_height,
                               (self.strip_top, self.strip_bottom))
 
@@ -161,6 +175,12 @@ class ReviewScreen(Screen):
         if event.key == pg.K_f:
             self._on_flip()
             return True
+        if event.key == pg.K_a:
+            self.right_menu.toggle_section("actions")
+            return True
+        if event.key == pg.K_s:
+            self.right_menu.toggle_section("signals")
+            return True
         if getattr(event, "unicode", "") == "?":
             self.app.help_modal.show(REVIEW_HOTKEYS)
             return True
@@ -192,6 +212,17 @@ class ReviewScreen(Screen):
     def _on_open_pgn(self):
         open_pgn_or_toast(self.app.toast, self._pgn_path)
 
+    def _signals_provider(self):
+        sm = self.app.sound_manager
+        return {
+            "share_on": False,
+            "share_enabled": False,
+            "auto_q": False,
+            "sound_on": sm.enabled,
+            "volume": sm.master_volume,
+            "review": True,
+        }
+
     def _compute_game_info(self):
         tc = format_time_control(self._time_control) or "∞"
         return {"mode": "Review", "time_control": tc, "lines": [self._pgn_result_tag or "*"]}
@@ -214,6 +245,14 @@ class ReviewScreen(Screen):
             "advantage": material_advantage(history, color),
             "captured_color": opponent_of(color),
         }
+
+    def _reviewed_sans(self):
+        return [entry.san for entry in self.board.reviewed_history()]
+
+    def _debut_line(self):
+        if self._custom_start:
+            return None
+        return self._debut.line((len(self.match.move_history), self.board.review_ply))
 
     def _rebuild_skillcheck_log(self, move_comments):
         self._skillcheck_log = []

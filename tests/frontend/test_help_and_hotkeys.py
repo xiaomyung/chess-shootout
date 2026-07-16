@@ -174,3 +174,14 @@ def test_hotkeys_keys_are_ascii_only():
     plain ASCII so it never depends on glyph coverage."""
     for key, _ in HOTKEYS:
         assert key.isascii(), key
+
+
+def test_help_documents_new_rail_hotkeys():
+    """Z (with Ctrl+Z noted), G, and the A/S/C section toggles are documented,
+    and the old bare Ctrl+Z / Hold-Give-15s rows are gone."""
+    rows = dict(HOTKEYS)
+    assert "Ctrl+Z" not in rows
+    assert "Hold Give 15s" not in rows
+    assert "Ctrl+Z" in rows["Z"] and "undo" in rows["Z"].lower()
+    assert rows["G"].lower().startswith("give 15")
+    assert rows["A / S / C"] == "Collapse or expand rail sections"

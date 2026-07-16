@@ -488,3 +488,46 @@ def test_resume_with_an_inactive_game_screen_still_reaches_the_game():
 
     assert [e.san for e in app.game.match.move_history] == ["e4", "e5"]
     assert app.game.match.clock.white_remaining == 111.0
+
+
+def test_teardown_on_menu_does_not_reenter_the_menu():
+    """REGRESSION: the rematch window dying (opponent left, room expired) while the
+    player already sits on the menu used to switch_to("menu") unconditionally — a
+    self-switch runs the full exit->enter cycle, replaying the menu entry
+    transitions as a visible interface reload. On the menu, teardown now only
+    surfaces the Play view; the full switch is reserved for arriving from the
+    game screen."""
+    app = _wired_app()
+    app.switch_to("menu")
+    enter_spy = MagicMock(wraps=app.menu.enter)
+    app.menu.enter = enter_spy
+    app.coordinator._tear_down_online_session("test")
+    assert app.screen is app.menu
+    enter_spy.assert_not_called()
+    assert app.menu.play_view_visible()
+
+
+def test_teardown_from_game_screen_still_returns_to_menu():
+    app = _wired_app()
+    assert app.screen is app.game
+    app.coordinator._tear_down_online_session("test")
+    assert app.screen is app.menu
+
+
+def test_opponent_left_while_viewing_the_result_does_not_yank_to_menu():
+    """REGRESSION (v2.10.0 live smoke): the leaver's grace had already elapsed
+    pre-result, so result and rematch_update(opponent_left) arrived in the same
+    drain and the teardown navigation stole the screen 2ms after the VICTORY
+    modal appeared. When the game screen is showing a final result, ending the
+    rematch window drops the session but stays put -- the player leaves via the
+    result modal's own buttons."""
+    app = _wired_app()
+    assert app.screen is app.game
+    app.coordinator._handle_online_result(
+        {"reason": "abandonment", "winner_color": "black"})
+    assert app.game.current_result() is not None
+    app.coordinator._handle_rematch_update({"event": "opponent_left"})
+    assert app.screen is app.game, "stay on the result screen"
+    assert app.coordinator.client is None, "session is still torn down"
+    assert app.game.current_result() is not None, "result stays adopted"
+    assert app.toast.is_visible()

@@ -2,6 +2,8 @@ from dataclasses import dataclass
 
 import pygame as pg
 
+from chessshootout.frontend.layout import compute_ui_scale
+
 
 RAIL_W = 216
 RIGHT_W = 312
@@ -9,10 +11,6 @@ MARGIN = 24
 HERO_PAD_LEFT = 48
 HERO_GAP_RIGHT = 24
 SUBVIEW_MAX_W = 860
-SCALE_MIN = 0.72
-SCALE_MAX = 1.15
-SCALE_REF_W = 1280
-SCALE_REF_H = 764
 
 
 @dataclass
@@ -28,8 +26,7 @@ class MenuLayout:
 
 def compute_menu_layout(window_width, window_height, top, right_rail=False):
     avail_h = max(window_height - top, 1)
-    scale = min(window_width / SCALE_REF_W, avail_h / SCALE_REF_H)
-    scale = max(SCALE_MIN, min(SCALE_MAX, scale))
+    scale = compute_ui_scale(window_width, avail_h)
 
     rail_rect = pg.Rect(0, top, RAIL_W, avail_h)
     if right_rail:

@@ -22,7 +22,9 @@ from chessshootout.server.broadcasts import broadcast_game_start, finalize_and_b
 from chessshootout.server.connections import ConnectionRegistry, send
 from chessshootout.server.handlers import _clock_snapshot, dispatch
 from chessshootout.server.protocol import (
-    AuthMessage, CancelMatchmakeRequest, ConnectionStatusMessage, ErrorMessage,
+    ANNOTATIONS_PER_SECOND, AnnotationSetWire, ArrowWire,
+    AuthMessage, CHAT_COOLDOWN_SECONDS, CancelMatchmakeRequest,
+    ConnectionStatusMessage, ErrorMessage,
     HealthResponse, HistoryEntryWire, LockWire, MatchmakeRequest, MatchmakeResponse,
     PROTOCOL_VERSION, PendingSkillCheckWire, Reason, ReclaimRequest, ReclaimResponse,
     RematchRequestMessage, RematchUpdateMessage,
@@ -143,6 +145,12 @@ def create_app(*, now_provider=time.monotonic, max_rooms=DEFAULT_MAX_ROOMS):
         RECLAIM_PER_UUID_LIMIT_PER_MINUTE, RECLAIM_WINDOW_SECONDS,
         now_provider=now_provider,
     )
+    annotation_limiter = UuidRateLimiter(
+        ANNOTATIONS_PER_SECOND, 1.0, now_provider=now_provider,
+    )
+    chat_limiter = UuidRateLimiter(
+        1, CHAT_COOLDOWN_SECONDS, now_provider=now_provider,
+    )
     started_at = now_provider()
 
     @asynccontextmanager
@@ -170,6 +178,8 @@ def create_app(*, now_provider=time.monotonic, max_rooms=DEFAULT_MAX_ROOMS):
     app.state.now_ms = now_ms
     app.state.started_at = started_at
     app.state.reclaim_limiter = reclaim_limiter
+    app.state.annotation_limiter = annotation_limiter
+    app.state.chat_limiter = chat_limiter
     app.state.sweep = Sweep(rooms, connections, now_provider, now_ms)
 
     @app.exception_handler(RateLimitExceeded)
@@ -281,6 +291,8 @@ def create_app(*, now_provider=time.monotonic, max_rooms=DEFAULT_MAX_ROOMS):
         if slot is None:
             log.info("resume rejected room=%s reason=session_expired", body.room_id)
             raise HTTPException(status_code=401, detail={"reason": Reason.SESSION_EXPIRED})
+        if room.backend is not None:
+            room.backend.tick_clock()
         history = [
             HistoryEntryWire(
                 from_sq=coord_from_square(entry.move.from_sq),
@@ -290,22 +302,13 @@ def create_app(*, now_provider=time.monotonic, max_rooms=DEFAULT_MAX_ROOMS):
             )
             for entry in (room.backend.move_history if room.backend else [])
         ]
-        if room.backend is not None:
-            room.backend.tick_clock()
-        if (connections.get_for_color(room, color) is not None
-                and slot is not None and not slot.desync_active):
-            slot.desync_active = True
-            opp_ws = connections.get_for_color(room, room.opp_color(color))
-            if opp_ws is not None:
-                await send(opp_ws, ConnectionStatusMessage(opp_state="resyncing"))
         pending = _pending_skillcheck_wire(room, app.state.now_ms)
         locks = [LockWire(from_sq=coord_from_square(frm), to_sq=coord_from_square(to))
                  for frm, to in room.skillcheck_locks]
         skillcheck_log = [
             SkillCheckOutcomeWire(ply=e.ply, kind=e.kind, won=e.won, san=e.san)
             for e in room.skillcheck_log]
-        log.info("resume served room=%s color=%s ply=%d", body.room_id, color, len(history))
-        return ResumeResponse(
+        response = ResumeResponse(
             fen=export_fen(room.backend),
             move_history=history,
             clock=_clock_snapshot(room.backend.clock),
@@ -321,9 +324,19 @@ def create_app(*, now_provider=time.monotonic, max_rooms=DEFAULT_MAX_ROOMS):
             pending_skillcheck=pending,
             skillcheck_locks=locks,
             skillcheck_log=skillcheck_log,
+            white_annotations=_annotation_set_wire(room.annotations_white),
+            black_annotations=_annotation_set_wire(room.annotations_black),
             result_reason=room.result[0] if room.result else None,
             result_winner=room.result[1] if room.result else None,
         )
+        log.info("resume served room=%s color=%s ply=%d", body.room_id, color, len(history))
+        if (connections.get_for_color(room, color) is not None
+                and slot is not None and not slot.desync_active):
+            slot.desync_active = True
+            opp_ws = connections.get_for_color(room, room.opp_color(color))
+            if opp_ws is not None:
+                await send(opp_ws, ConnectionStatusMessage(opp_state="resyncing"))
+        return response
 
     @app.post("/reclaim", response_model=ReclaimResponse)
     @limiter.limit(RECLAIM_PER_IP_LIMIT)
@@ -377,6 +390,14 @@ def _promotion_letter(move):
     if move.promoted_to is None:
         return None
     return PROMO_LETTER_BY_TYPE.get(move.promoted_to)
+
+
+def _annotation_set_wire(store):
+    return AnnotationSetWire(
+        sharing=store.sharing,
+        highlights=sorted(store.highlights),
+        arrows=[ArrowWire(from_sq=frm, to_sq=to) for frm, to in store.arrows],
+    )
 
 
 def _pending_skillcheck_wire(room, now_ms):
