@@ -41,6 +41,8 @@ STRIP_FRAME_CUT = 12
 STRIP_PULSE_MS = 1000
 PULSE_QUANT_STEPS = 16
 CLOCK_WELL_RADIUS = 7
+CLOCK_WELL_PAD_X = 13
+CLOCK_WELL_PAD_Y = 5
 SHARING_PILL_TEXT = "SHARING MARKS"
 SHARING_DOT_PULSE_MS = 1600
 SHARING_DOT_MIN_ALPHA = 90
@@ -398,10 +400,12 @@ class PlayerStrip:
         if self._clock_cache is None or self._clock_cache[0] != key:
             self._clock_cache = (key, self._compose_clock(text, color))
         surf = self._clock_cache[1]
-        hpad = max(int(self.rect.height * 0.22), 8)
-        min_w = max(int(self.rect.height * 2.0), 70)
-        box_w = max(surf.get_width() + 2 * hpad, min_w)
-        box = pg.Rect(self.rect.right - pad - box_w, self.rect.y + pad, box_w, av_size)
+        hpad = scale_floor(CLOCK_WELL_PAD_X, self.scale, 9)
+        vpad = scale_floor(CLOCK_WELL_PAD_Y, self.scale, 3)
+        box_w = surf.get_width() + 2 * hpad
+        box_h = min(av_size, surf.get_height() + 2 * vpad)
+        box = pg.Rect(self.rect.right - pad - box_w,
+                      round(self.rect.centery - box_h / 2), box_w, box_h)
         radius = scale_floor(CLOCK_WELL_RADIUS, self.scale, 5)
         self.window.blit(rounded_rect_surface(box.size, radius, Colors.bg,
                                               border=self._clock_border_color(),
