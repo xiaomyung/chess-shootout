@@ -50,6 +50,7 @@ async def test_sweep_step_clock_and_first_move(sweep, app, clock, time_minutes,
     room.started_at = clock()
     if set_first_move:
         room.first_move_at = clock()
+        room.plies_ever = 1
     clock.advance(advance)
     await sweep.step_clock_and_first_move_abort()
     if expected_result is not None:

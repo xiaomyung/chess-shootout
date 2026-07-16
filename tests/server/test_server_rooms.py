@@ -456,3 +456,30 @@ async def test_reset_for_rematch_installs_fresh_annotation_stores(manager):
     assert room.annotations_white.sharing is False
     assert room.annotations_white.highlights == set()
     assert room.annotations_black.arrows == []
+
+
+async def test_timeout_with_no_plies_finalizes_as_aborted_draw(manager):
+    """User rule: a flag fall before any move landed is nobody's win -- the game
+    aborts with no winner and awards no series points. Resignation at zero plies
+    deliberately KEEPS its winner (an explicit choice, unlike a dead clock)."""
+    await manager.enqueue(**_enqueue_kwargs("alice"))
+    room = await manager.enqueue(**_enqueue_kwargs("bob"))
+    assert room.plies_ever == 0
+    manager.finalize_result(room.room_id, "timeout", "white")
+    assert room.result == ("aborted", None)
+    assert room.series_scores == {}
+
+
+async def test_timeout_after_a_ply_keeps_its_winner(manager):
+    await manager.enqueue(**_enqueue_kwargs("alice"))
+    room = await manager.enqueue(**_enqueue_kwargs("bob"))
+    room.plies_ever = 1
+    manager.finalize_result(room.room_id, "timeout", "white")
+    assert room.result == ("timeout", "white")
+
+
+async def test_zero_ply_resignation_keeps_its_winner(manager):
+    await manager.enqueue(**_enqueue_kwargs("alice"))
+    room = await manager.enqueue(**_enqueue_kwargs("bob"))
+    manager.finalize_result(room.room_id, "resignation", "black")
+    assert room.result == ("resignation", "black")

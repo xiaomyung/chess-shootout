@@ -339,10 +339,14 @@ class RoomManager:
                         and now - slot.disconnected_at >= GRACE_SECONDS):
                     yield room, color
 
+    ZERO_PLY_ABORT_REASONS = ("timeout",)
+
     def finalize_result(self, room_id, reason, winner_color=None):
         room = self._active.get(room_id)
         if room is None or room.result is not None:
             return False
+        if room.plies_ever == 0 and reason in self.ZERO_PLY_ABORT_REASONS:
+            reason, winner_color = "aborted", None
         room.result = (reason, winner_color)
         room.ended_at = self._now()
         room.last_rematch_activity_at = room.ended_at

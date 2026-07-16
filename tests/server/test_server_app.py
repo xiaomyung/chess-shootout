@@ -416,6 +416,7 @@ async def test_clock_flag_during_play_broadcasts_timeout(app, clock):
     room = list(rooms._active.values())[0]
     room.started_at = clock()
     room.first_move_at = clock()
+    room.plies_ever = 1
     clock.advance(70)
     await _sweep(app)
     assert room.result is not None
