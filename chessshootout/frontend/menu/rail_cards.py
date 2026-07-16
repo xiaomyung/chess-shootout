@@ -18,7 +18,8 @@ from chessshootout.online.news import format_news_date
 
 
 RECENT_MATCHES_LIMIT = 3
-NEWS_BODY_MAX_LINES = 4
+NEWS_BODY_MAX_LINES = 8
+NEWS_BULLET = "• "
 
 CARD_GAP = 12
 CARD_CUT = 8
@@ -128,7 +129,23 @@ class CardStack(ScrollHost):
         self._compute_layout()
 
     def _news_body_lines(self, item, max_w):
-        return wrap_words(item["body"], self._news_body_font, max_w, NEWS_BODY_MAX_LINES)
+        lines = []
+        for raw in item["body"].split("\n"):
+            raw = raw.strip()
+            if not raw:
+                continue
+            if raw.startswith("- "):
+                indent = self._news_body_font.size(NEWS_BULLET)[0]
+                wrapped = wrap_words(raw[2:], self._news_body_font, max_w - indent)
+                if wrapped:
+                    lines.append((0, NEWS_BULLET + wrapped[0]))
+                    lines.extend((indent, cont) for cont in wrapped[1:])
+            else:
+                lines.extend((0, line)
+                             for line in wrap_words(raw, self._news_body_font, max_w))
+            if len(lines) >= NEWS_BODY_MAX_LINES:
+                return lines[:NEWS_BODY_MAX_LINES]
+        return lines
 
     def _card_height(self, key):
         if key == "profile":
@@ -332,9 +349,9 @@ class CardStack(ScrollHost):
         window.blit(date_surf, (rect.right - pad - date_surf.get_width(), y))
         y += title_surf.get_height() + self._s(NEWS_TITLE_GAP, 4)
         max_w = rect.width - 2 * pad
-        for line in self._news_body_lines(newest, max_w):
+        for indent, line in self._news_body_lines(newest, max_w):
             line_surf = render_text(self._news_body_font, line, Colors.text_muted)
-            window.blit(line_surf, (rect.x + pad, y))
+            window.blit(line_surf, (rect.x + pad + indent, y))
             y += line_surf.get_height() + self._s(NEWS_LINE_GAP, 2)
         y += gap
         row_h = self._s(HEADLINE_ROW_H, 20)
