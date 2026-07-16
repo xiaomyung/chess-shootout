@@ -27,6 +27,8 @@ server for online two-player matches.
 - Drag-and-drop or click-to-move; right-click highlights and arrows.
 - chess.com-style premove queueing (pseudo-legal validation, bouncing chains).
 - Time controls with increment, board flip, undo, resign, draw agreement.
+- Opening names live in the shot log (full ECO book), and an **Auto-queen**
+  option that skips the promotion picker — the skill check still fires.
 - Start from any FEN, or play two-up on a single screen.
 - Captured-piece graveyard with running material balance; master-volume
   slider persisted to `.env`.
@@ -83,7 +85,12 @@ server for online two-player matches.
 - Rematch (colors swap; the series score follows the player, not the color),
   takeback, draw offers, and **Give 15 sec** (tops up the opponent's clock,
   capped at the starting time).
-- Live abort / abandon / reconnect countdowns in the player strips.
+- **Shared marks** — flip SHARE in the rail's SIGNALS section to broadcast your
+  highlights and arrows live; your opponent's marks arrive in blue.
+- **Quick chat** — preset lines only; your queen speaks them in a bubble on the
+  opponent's board.
+- Live abort / abandon / reconnect countdowns in the player strips; games with
+  no moves played end as **aborted** (nobody wins).
 - Layered reconnection for WiFi blips, app restarts, and server restarts
   (see [Reconnection](#reconnection)).
 - Crash-log capture for easy bug reports.

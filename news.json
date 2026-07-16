@@ -1,5 +1,10 @@
 [
   {
+    "title": "v2.10.0 — Battle Station",
+    "body": "The in-game screen joins the Command Rail:\n- Board plate, player strips, and right rail fully redesigned\n- Share your board drawings with your opponent — flip SHARE in SIGNALS\n- Quick chat: pick a line and your queen says it on their board\n- Opening names show live in the shot log\n- Auto-queen toggle for instant promotions (the skill check still fires)\n- Black pieces wear a rim light — readable on every square\n- Games with no moves played now abort: no winners, no losers",
+    "date": "2026-07-16"
+  },
+  {
     "title": "v2.9.0 — Command Rail",
     "body": "The main menu got rebuilt end to end:\n- New left nav rail with a sliding crosshair\n- Revolver-cylinder time picker — click the center pin for a random time control\n- Right rail with your profile, recent matches, and this news feed\n- Fresh gunmetal sounds throughout\n- The menu shootout now spills out from under the rails",
     "date": "2026-07-15"
