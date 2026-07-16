@@ -1,3 +1,5 @@
+import math
+
 import pygame as pg
 
 from chessshootout.backend.pieces import PieceColor
@@ -6,7 +8,9 @@ from chessshootout.frontend.visual.clock_visual import (
     LOW_TIME_FRACTION, format_clock, format_countdown,
 )
 from chessshootout.frontend.visual.colors import Colors
-from chessshootout.frontend.visual.draw import rounded_rect_surface, blit_centered, circle_surface
+from chessshootout.frontend.visual.draw import (
+    rounded_rect_surface, blit_centered, circle_surface, cut_rect_surface, scale_floor,
+)
 from chessshootout.frontend.visual.emoji import emoji_surface
 from chessshootout.frontend.visual.fonts import get_font, DISPLAY
 from chessshootout.frontend.visual.widgets import (
@@ -33,6 +37,13 @@ TOOLTIP_RADIUS = 6
 TOOLTIP_RISE_PX = 5
 TOOLTIP_GAP_PX = 5
 TOOLTIP_EDGE_MARGIN_PX = 2
+STRIP_FRAME_CUT = 12
+STRIP_PULSE_MS = 1000
+PULSE_QUANT_STEPS = 16
+CLOCK_WELL_RADIUS = 7
+SHARING_PILL_TEXT = "SHARING MARKS"
+SHARING_DOT_PULSE_MS = 1600
+SHARING_DOT_MIN_ALPHA = 90
 
 
 def is_white(color):
@@ -84,9 +95,15 @@ class PlayerStrip:
         self._give_time_start_ms = 0
         self._give_time_amount = 0
         self._ko_wink_until_ms = 0
+        self.scale = 1.0
+        self.sharing = False
+        self.sharing_color = None
         self.name_font = get_font(14, bold=True)
         self.rating_font = get_font(11, bold=True, mono=True)
-        self.clock_font = get_font(16, bold=True, mono=True)
+        self._clock_px = 16
+        self.clock_font = get_font(16, family=DISPLAY)
+        self.clock_fallback_font = get_font(16, bold=True, mono=True)
+        self.sharing_font = get_font(9, bold=True, mono=True)
         self.advantage_font = get_font(12, bold=True)
         self.ko_font = get_font(10, bold=True)
         self.letter_font = get_font(18, family=DISPLAY)
@@ -98,15 +115,20 @@ class PlayerStrip:
         self._flag_rect = pg.Rect(0, 0, 0, 0)
         self._tooltip_alpha = 0.0
         self.tooltip_font = get_font(12, bold=True)
+        self._clock_cache = None
+        self._sharing_dot_cache = None
 
     def set_rect(self, rect, scale=1.0):
         self.scale = scale
         self.rect = pg.Rect(rect)
         h = rect.height
         ih = max(int(h * 0.68), 1)
+        self._clock_px = max(int(h * 0.5), 14)
         self.name_font = get_font(max(int(ih * 0.42), 11), bold=True)
         self.rating_font = get_font(max(int(ih * 0.26), 8), bold=True, mono=True)
-        self.clock_font = get_font(max(int(h * 0.5), 14), bold=True, mono=True)
+        self.clock_font = get_font(self._clock_px, family=DISPLAY)
+        self.clock_fallback_font = get_font(self._clock_px, bold=True, mono=True)
+        self.sharing_font = get_font(max(int(ih * 0.22), 8), bold=True, mono=True)
         self.advantage_font = get_font(max(int(ih * 0.26), 8), bold=True)
         self.ko_font = get_font(max(int(ih * 0.3), 8), bold=True)
         self.letter_font = get_font(max(int(ih * 0.5), 11), family=DISPLAY)
@@ -116,6 +138,7 @@ class PlayerStrip:
         self._give_time_float_font = get_font(
             max(int(h * 0.24), 11), bold=True, mono=True)
         self._avatar.reset()
+        self._clock_cache = None
 
     def set_piece_icons(self, icons):
         self.icons = icons
@@ -124,12 +147,15 @@ class PlayerStrip:
                   captured_color=None, connection_state=None,
                   clock_initial_seconds=None, auto_end_label=None,
                   auto_end_seconds=None, player_color=PieceColor.WHITE,
-                  is_bot=False, rating=None, ko_count=0, country=None):
+                  is_bot=False, rating=None, ko_count=0, country=None,
+                  sharing=False, sharing_color=None):
         self.name = name
         self.player_color = player_color
         self.is_bot = is_bot
         self.rating = rating
         self.country = country
+        self.sharing = sharing
+        self.sharing_color = sharing_color
         self.clock_seconds = clock_seconds
         self.clock_initial_seconds = clock_initial_seconds
         self.active = active
@@ -156,8 +182,13 @@ class PlayerStrip:
         if h <= 0 or self.rect.width <= 0:
             return
         self._flag_rect = pg.Rect(0, 0, 0, 0)
-        pad, radius, av_size, gap = strip_frame_metrics(h)
-        pg.draw.rect(self.window, Colors.surface, self.rect, border_radius=radius)
+        now_ms = pg.time.get_ticks()
+        pad, _radius, av_size, gap = strip_frame_metrics(h)
+        border_color, border_width = self._frame_border(now_ms)
+        frame = cut_rect_surface(self.rect.size, scale_floor(STRIP_FRAME_CUT, self.scale, 8),
+                                 Colors.surface, border=border_color,
+                                 border_width=border_width, corners=("tr",))
+        self.window.blit(frame, self.rect.topleft)
 
         clock_rect = self._draw_clock(pad, av_size)
         ko_left = self._draw_ko(clock_rect.x - gap, av_size)
@@ -169,15 +200,24 @@ class PlayerStrip:
         who_right = (ko_left if ko_left is not None else clock_rect.x) - gap
         self._draw_who(who_x, who_right, av_size)
 
-        if self.active:
-            pg.draw.rect(self.window, Colors.accent, self.rect, width=2,
-                         border_radius=radius)
-        else:
-            pg.draw.rect(self.window, Colors.border, self.rect, width=1,
-                         border_radius=radius)
-
         self._draw_give_time_float(clock_rect)
         self._draw_flag_tooltip()
+
+    def _frame_border(self, now_ms):
+        low = self._is_low_time()
+        if self.active:
+            if low:
+                return self._pulse_border(now_ms), 2
+            return Colors.accent, 2
+        if low:
+            return Colors.loss, 1
+        return Colors.border, 1
+
+    def _pulse_border(self, now_ms):
+        phase = (now_ms % STRIP_PULSE_MS) / STRIP_PULSE_MS
+        frac = (1 - math.cos(2 * math.pi * phase)) / 2
+        step = round(frac * (PULSE_QUANT_STEPS - 1)) / (PULSE_QUANT_STEPS - 1)
+        return pg.Color(Colors.clock_low_time).lerp(pg.Color(Colors.loss), step)
 
     def _flag_surface(self, height):
         char = flag_emoji(self.country)
@@ -262,12 +302,15 @@ class PlayerStrip:
         self.window.blit(name_surf, (cursor, top_cy - name_surf.get_height() / 2))
         cursor += name_surf.get_width() + max(int(ih * 0.14), 5)
         if two_row:
+            row1 = cursor
             if self.rating is not None:
-                self._draw_rating_pill(cursor, top_cy, name_right, pill_max)
+                row1 = self._draw_rating_pill(cursor, top_cy, name_right, pill_max)
+            self._draw_sharing_pill(row1, top_cy, name_right, pill_max)
             self._draw_captured(x, bottom_cy, right, ih, pill_max)
         else:
             if self.rating is not None:
                 cursor = self._draw_rating_pill(cursor, bottom_cy, right, pill_max)
+            cursor = self._draw_sharing_pill(cursor, bottom_cy, right, pill_max)
             self._draw_captured(cursor, bottom_cy, right, ih, pill_max)
 
     def _draw_text_pill(self, x, cy, right, text, bg, *,
@@ -285,11 +328,47 @@ class PlayerStrip:
     def _draw_rating_pill(self, x, cy, right, max_h=PILL_HEIGHT_UNCAPPED):
         text = self.rating_font.render(str(self.rating), True, Colors.text_dim)
         end = self._draw_text_pill(x, cy, right, text, Colors.surface_hover,
-                                   pad_ratio=0.45, pad_min=3, radius_div=3, radius_min=3,
+                                   pad_ratio=0.45, pad_min=3, radius_div=3, radius_min=4,
                                    max_h=max_h)
         if end is None:
             return x
         return end + max(int(self.rect.height * 0.06), 4)
+
+    def _draw_sharing_pill(self, x, cy, right, max_h=PILL_HEIGHT_UNCAPPED):
+        if not self.sharing:
+            return x
+        color = self.sharing_color or Colors.accent
+        dot_d = max(int(self.rect.height * 0.07), 4)
+        dot = self._sharing_dot(color, dot_d)
+        dot.set_alpha(self._sharing_dot_alpha(pg.time.get_ticks()))
+        text = self.sharing_font.render(SHARING_PILL_TEXT, True, pg.Color(color))
+        pad_x = max(int(text.get_height() * 0.5), 4)
+        gap = max(int(dot_d * 0.7), 3)
+        h = min(text.get_height() + 4, max_h)
+        w = 2 * pad_x + dot_d + gap + text.get_width()
+        if x + w <= right:
+            pill = rounded_rect_surface((w, h), h, Colors.surface,
+                                        border=color + "80", border_width=1)
+            self.window.blit(pill, (x, round(cy - h / 2)))
+            self.window.blit(dot, (x + pad_x, round(cy - dot_d / 2)))
+            self.window.blit(text, (x + pad_x + dot_d + gap,
+                                    round(cy - text.get_height() / 2)))
+            return x + w + max(int(self.rect.height * 0.06), 4)
+        if x + dot_d <= right:
+            self.window.blit(dot, (x, round(cy - dot_d / 2)))
+            return x + dot_d
+        return x
+
+    def _sharing_dot(self, color, diameter):
+        key = (color, diameter)
+        if self._sharing_dot_cache is None or self._sharing_dot_cache[0] != key:
+            self._sharing_dot_cache = (key, circle_surface(diameter, color).copy())
+        return self._sharing_dot_cache[1]
+
+    def _sharing_dot_alpha(self, now_ms):
+        phase = (now_ms % SHARING_DOT_PULSE_MS) / SHARING_DOT_PULSE_MS
+        frac = (1 - math.cos(2 * math.pi * phase)) / 2
+        return int(SHARING_DOT_MIN_ALPHA + (255 - SHARING_DOT_MIN_ALPHA) * frac)
 
     def _draw_captured(self, x, cy, right, ih, max_h=PILL_HEIGHT_UNCAPPED):
         last_right = draw_captured_row(
@@ -316,15 +395,17 @@ class PlayerStrip:
         text = format_clock(self.clock_seconds)
         color = self._clock_text_color()
         key = (text, color, self.clock_font)
-        if getattr(self, "_clock_cache", None) is None or self._clock_cache[0] != key:
-            self._clock_cache = (key, self.clock_font.render(text, True, color))
+        if self._clock_cache is None or self._clock_cache[0] != key:
+            self._clock_cache = (key, self._compose_clock(text, color))
         surf = self._clock_cache[1]
         hpad = max(int(self.rect.height * 0.22), 8)
         min_w = max(int(self.rect.height * 2.0), 70)
         box_w = max(surf.get_width() + 2 * hpad, min_w)
         box = pg.Rect(self.rect.right - pad - box_w, self.rect.y + pad, box_w, av_size)
-        radius = max(int(self.rect.height * 0.14), 5)
-        pg.draw.rect(self.window, Colors.bg, box, border_radius=radius)
+        radius = scale_floor(CLOCK_WELL_RADIUS, self.scale, 5)
+        self.window.blit(rounded_rect_surface(box.size, radius, Colors.bg,
+                                              border=self._clock_border_color(),
+                                              border_width=1), box.topleft)
         flash = self._flash_alpha()
         if flash > 0:
             tint = pg.Surface(box.size, pg.SRCALPHA)
@@ -332,11 +413,31 @@ class PlayerStrip:
             col.a = flash
             pg.draw.rect(tint, col, tint.get_rect(), border_radius=radius)
             self.window.blit(tint, box.topleft)
-        pg.draw.rect(self.window, self._clock_border_color(), box, width=1,
-                     border_radius=radius)
         self.window.blit(surf, (box.centerx - surf.get_width() / 2,
                                 box.centery - surf.get_height() / 2))
         return box
+
+    def _compose_clock(self, text, color):
+        if not text.isascii():
+            return self.clock_fallback_font.render(text, True, color)
+        font = self.clock_font
+        advance = max(font.size(d)[0] for d in "0123456789") + int(self._clock_px * 0.05)
+        glyphs = []
+        total_w = 0
+        max_h = 1
+        for ch in text:
+            glyph = font.render(ch, True, color)
+            width = advance if ch.isdigit() else glyph.get_width()
+            glyphs.append((glyph, ch.isdigit(), width))
+            total_w += width
+            max_h = max(max_h, glyph.get_height())
+        surf = pg.Surface((max(total_w, 1), max_h), pg.SRCALPHA)
+        cursor = 0
+        for glyph, is_digit, width in glyphs:
+            gx = cursor + (width - glyph.get_width()) // 2 if is_digit else cursor
+            surf.blit(glyph, (gx, (max_h - glyph.get_height()) // 2))
+            cursor += width
+        return surf
 
     def _is_low_time(self):
         frac = self._clock_fraction()
@@ -350,7 +451,7 @@ class PlayerStrip:
     def _clock_border_color(self):
         if self._is_low_time():
             return Colors.clock_low_time
-        return Colors.border
+        return Colors.dial_border
 
     def _draw_give_time_float(self, clock_rect):
         if self._give_time_start_ms <= 0:

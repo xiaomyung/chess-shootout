@@ -25,7 +25,8 @@ SEGMENT_RADIUS = 8
 SEGMENT_INNER_RADIUS = 6
 CHIP_RADIUS = 7
 KO_WINK_MS = 520
-AVATAR_CUT_FRAC = 0.16
+KO_BADGE_RADIUS = 5
+AVATAR_CUT_FRAC = 0.22
 
 
 def build_shell(w, h, winking=False):
@@ -56,13 +57,18 @@ def build_ko_badge(count, font, height, winking=False):
         shell_w = max(int(height * 0.16), 4)
         shell_h = max(int(height * 0.42), 7)
         gap = max(int(height * 0.12), 3)
+        pad_x = max(int(height * 0.13), 4)
+        pad_y = max(int(height * 0.06), 2)
         text = font.render(f"{count} KO", True,
-                           pg.Color(Colors.amber if winking else Colors.text_muted))
+                           pg.Color(Colors.amber_hi if winking else Colors.amber))
         th = text.get_height()
-        h = max(shell_h, th)
-        surf = pg.Surface((shell_w + gap + text.get_width(), h), pg.SRCALPHA)
-        surf.blit(build_shell(shell_w, shell_h, winking), (0, (h - shell_h) // 2))
-        surf.blit(text, (shell_w + gap, (h - th) // 2))
+        content_h = max(shell_h, th)
+        w = 2 * pad_x + shell_w + gap + text.get_width()
+        h = content_h + 2 * pad_y
+        surf = rounded_rect_surface((w, h), KO_BADGE_RADIUS, Colors.surface,
+                                    border=Colors.amber_glow, border_width=1).copy()
+        surf.blit(build_shell(shell_w, shell_h, winking), (pad_x, (h - shell_h) // 2))
+        surf.blit(text, (pad_x + shell_w + gap, (h - th) // 2))
         return surf
     return memoized_surface(_KO_BADGE_CACHE, (count, height, winking), build)
 
