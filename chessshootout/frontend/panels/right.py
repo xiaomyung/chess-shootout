@@ -29,11 +29,11 @@ class Cap(NamedTuple):
 
 CAPS = [
     Cap("undo",      "undo",   "",    0,  False, "Undo",     "UNDO — KEY Z"),
-    Cap("draw",      "",       "½",   14, False, "Draw",     "OFFER DRAW — KEY D"),
+    Cap("draw",      "",       "½",   17, False, "Draw",     "OFFER DRAW — KEY D"),
     Cap("resign",    "resign", "",    0,  False, "Resign",   "RESIGN — KEY R"),
-    Cap("give_time", "",       "+15", 10, True,  "Give +15", "GIVE +15 — KEY G · HOLD TO RAMP"),
+    Cap("give_time", "",       "+15", 12, True,  "Give +15", "GIVE +15 — KEY G · HOLD TO RAMP"),
     Cap("flip",      "flip",   "",    0,  False, "Flip",     "FLIP — KEY F"),
-    Cap("help",      "",       "?",   13, True,  "Help",     "HELP — KEY ?"),
+    Cap("help",      "",       "?",   15, True,  "Help",     "HELP — KEY ?"),
 ]
 
 UNTIMED_CAPS = [cap for cap in CAPS if cap.key != "give_time"]
@@ -75,55 +75,55 @@ MOVE_MIN_CELL_CHARS = 4
 CARD_INSET = 12
 CARD_CUT = 16
 LOG_RADIUS = 9
-LOG_MIN_H = 90
-LOG_HEADER_TOP = 8
-LOG_SEP_GAP = 6
-LOG_ROWS_GAP = 6
+LOG_MIN_H = 110
+LOG_HEADER_TOP = 10
+LOG_SEP_GAP = 8
+LOG_ROWS_GAP = 9
 MOVE_CELL_CUT = 8
-MICRO_FONT_PT = 9
+MICRO_FONT_PT = 10
 
-DEBUT_NAME_PT = 10
-DEBUT_NAME_FLOOR = 9
+DEBUT_NAME_PT = 12
+DEBUT_NAME_FLOOR = 10
 DEBUT_ROW_GAP = 4
 MARQUEE_EASE = 0.12
 
-SECTION_HEADER_PT = 9
-SECTION_HEADER_VPAD = 6
-SECTION_DIVIDER_TOP = 8
+SECTION_HEADER_PT = 10
+SECTION_HEADER_VPAD = 9
+SECTION_DIVIDER_TOP = 10
 SECTION_DIVIDER_BOTTOM = 6
-SECTION_BODY_TOP = 8
+SECTION_BODY_TOP = 10
 SECTION_CHEVRON_MS = 200
 SECTION_CHEVRON_H = 7
 
-CAP_H_GAME = 38
-CAP_H_REVIEW = 34
-CAP_GAP = 7
+CAP_H_GAME = 44
+CAP_H_REVIEW = 40
+CAP_GAP = 8
 CAP_CUT = 7
-CAP_ICON_BOX = 22
-CAP_LABEL_PT = 13
+CAP_ICON_BOX = 27
+CAP_LABEL_PT = 14
 CAP_LABEL_PAD = 9
 FADED_ICON_ALPHA = 102
 
 TOOLTIP_DELAY_MS = 250
 TOOLTIP_FADE_MS = 120
-TOOLTIP_PT = 9
-TOOLTIP_PAD_X = 8
-TOOLTIP_PAD_Y = 4
+TOOLTIP_PT = 10
+TOOLTIP_PAD_X = 10
+TOOLTIP_PAD_Y = 5
 TOOLTIP_GAP = 6
 
-SIGNAL_CHIP_H = 26
+SIGNAL_CHIP_H = 31
 SIGNAL_CHIP_GAP = 7
-SIGNAL_CHIP_DOT = 6
+SIGNAL_CHIP_DOT = 7
 SIGNAL_CHIP_DOT_GAP = 5
-SIGNAL_CHIP_LABEL_PT = 10
-SIGNAL_CHIP_LABEL_FLOOR = 9
-SIGNAL_ROW_GAP = 8
+SIGNAL_CHIP_LABEL_PT = 11
+SIGNAL_CHIP_LABEL_FLOOR = 10
+SIGNAL_ROW_GAP = 10
 SIGNAL_NOTCH_COUNT = 10
-SIGNAL_NOTCH_CELL_W = 13
-SIGNAL_NOTCH_CELL_H = 20
+SIGNAL_NOTCH_CELL_W = 15
+SIGNAL_NOTCH_CELL_H = 24
 SIGNAL_NOTCH_GAP = 4
 SIGNAL_NOTCH_CUT = 4
-SIGNAL_VOL_READOUT_PT = 9
+SIGNAL_VOL_READOUT_PT = 10
 SIGNAL_VOL_GAP = 8
 SIGNAL_ZERO_EPSILON = 0.005
 SIGNAL_DIM_ALPHA = 89
@@ -249,8 +249,8 @@ class RightMenu:
         self._marquee_off = 0.0
 
         self.padding = 10
-        self.moves_font_factor = 24
-        self.pill_font_factor = 34
+        self.moves_font_factor = 21
+        self.pill_font_factor = 30
 
         self.scale = 1.0
         self._last_scale = 1.0
@@ -672,7 +672,7 @@ class RightMenu:
     def _draw_moves(self, rect):
         header_h = self._draw_log_header(rect)
         history = self.match.move_history
-        line_h = self.moves_font.get_linesize() + 2
+        line_h = self.moves_font.get_linesize() + 6
         self._line_h = line_h
         rows_top = rect.y + header_h
         self._max_lines = max(int((rect.bottom - self.padding - rows_top) // line_h), 0)

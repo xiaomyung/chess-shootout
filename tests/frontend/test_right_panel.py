@@ -359,10 +359,12 @@ def test_debut_row_shrinks_move_viewport():
     rm.window.fill((0, 0, 0))
     rm.draw_menu()
     without = rm._max_lines
+    without_top = rm._moves_viewport.y
     rm.debut_provider = lambda: ("C50", "Italian Game: Giuoco Piano")
     rm.window.fill((0, 0, 0))
     rm.draw_menu()
-    assert rm._max_lines < without, "the debut row steals a line from the move viewport"
+    assert rm._moves_viewport.y > without_top, "the debut row pushes the move rows down"
+    assert rm._max_lines <= without, "the debut row never grows the move viewport"
 
 
 def test_debut_marquee_slides_on_hover_and_eases_back(monkeypatch):
