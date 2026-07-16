@@ -68,6 +68,7 @@ SECTION_TOOLTIPS = {
 }
 
 INFO_HEADER_PAD = 12
+ROUND_RIGHT_PAD = 10
 MOVE_PREFIX_CHARS = 5
 MOVE_CELL_PAD = 4
 MOVE_MIN_CELL_CHARS = 4
@@ -117,7 +118,7 @@ SIGNAL_CHIP_DOT = 7
 SIGNAL_CHIP_DOT_GAP = 5
 SIGNAL_CHIP_LABEL_PT = 11
 SIGNAL_CHIP_LABEL_FLOOR = 10
-SIGNAL_ROW_GAP = 10
+SIGNAL_ROW_GAP = 16
 SIGNAL_NOTCH_COUNT = 10
 SIGNAL_NOTCH_CELL_W = 15
 SIGNAL_NOTCH_CELL_H = 24
@@ -549,11 +550,12 @@ class RightMenu:
         rnd = info.get("round")
         if rnd:
             rnd_surf = render_text(self.round_font, f"ROUND {rnd}", Colors.text_muted)
-            sep_x = rect.right - rnd_surf.get_width() - 12
+            rnd_right = rect.right - scale_floor(ROUND_RIGHT_PAD, self.scale, 6)
+            sep_x = rnd_right - rnd_surf.get_width() - 12
             pg.draw.line(self.window, Colors.border,
                          (sep_x, cy - rnd_surf.get_height() // 2),
                          (sep_x, cy + rnd_surf.get_height() // 2))
-            self.window.blit(rnd_surf, (rect.right - rnd_surf.get_width(),
+            self.window.blit(rnd_surf, (rnd_right - rnd_surf.get_width(),
                                         cy - rnd_surf.get_height() / 2))
         line_h = self._info_line_height()
         for i, line in enumerate(info.get("lines", [])):
@@ -928,8 +930,11 @@ class RightMenu:
             label = render_text(self.chip_font, chip.label, label_color)
             inner = scale_floor(SIGNAL_CHIP_DOT_GAP, self.scale, 3)
             gx = (w - (dot.get_width() + inner + label.get_width())) // 2
-            surf.blit(dot, (gx, (h - dot.get_height()) // 2))
-            surf.blit(label, (gx + dot.get_width() + inner, (h - label.get_height()) // 2))
+            label_y = (h - label.get_height()) // 2
+            ink = label.get_bounding_rect()
+            dot_y = round(label_y + ink.centery - dot.get_height() / 2)
+            surf.blit(dot, (gx, dot_y))
+            surf.blit(label, (gx + dot.get_width() + inner, label_y))
             if disabled:
                 surf.set_alpha(SIGNAL_SHARE_DISABLED_ALPHA)
             return surf
