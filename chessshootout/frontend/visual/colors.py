@@ -6,12 +6,13 @@ class Colors:
     surface_active = "#333a47"
     titlebar_bg = "#14161b"
     overlay_scrim = bg + "d9"
+    well_deep = "#0f1218"
 
     text = "#f3f5f8"
     text_dim = "#9aa4b2"
     text_muted = "#5c6573"
     on_accent = "#1a0b06"
-    coord = "#aeb6c2"
+    rail_icon = "#cfd6e0"
 
     border = "#313947"
     border_strong = "#475064"
@@ -57,6 +58,7 @@ class Colors:
     black_tile = "#2e333b"
     board_frame = "#0a0c0f"
     board_frame_inner = "#20242c"
+    rim_light = "#e9e2d4"
 
     clock_low_time = "#7a1f1f"
     clock_low_text = "#ff6a64"

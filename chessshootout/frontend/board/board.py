@@ -162,11 +162,11 @@ class Board:
         size = max(int(self.cell_size * 0.30), 11) if self.cell_size else 13
         coord_font = get_font(size, bold=True, mono=True)
         self.file_labels_rendered = [
-            coord_font.render(self.file_labels[i], True, Colors.coord)
+            coord_font.render(self.file_labels[i], True, Colors.text_muted)
             for i in range(self.SIZE)
         ]
         self.rank_labels_rendered = [
-            coord_font.render(str(self.SIZE - r), True, Colors.coord)
+            coord_font.render(str(self.SIZE - r), True, Colors.text_muted)
             for r in range(self.SIZE)
         ]
 

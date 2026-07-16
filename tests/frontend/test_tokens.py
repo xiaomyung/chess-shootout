@@ -23,17 +23,23 @@ def test_base_palette_hex_values():
     expected = {
         "bg": "#0c0e12", "surface": "#16191f", "surface_raised": "#1d212a",
         "surface_hover": "#272d38", "surface_active": "#333a47", "titlebar_bg": "#14161b",
+        "well_deep": "#0f1218",
         "text": "#f3f5f8", "text_dim": "#9aa4b2", "text_muted": "#5c6573",
-        "on_accent": "#1a0b06", "coord": "#aeb6c2",
+        "on_accent": "#1a0b06", "rail_icon": "#cfd6e0",
         "border": "#313947", "border_strong": "#475064",
         "accent": "#ff5a36", "accent_hi": "#ff7a5c", "accent_press": "#e6431f",
         "amber": "#ffb020", "amber_hi": "#ffc34d",
         "win": "#46d17f", "loss": "#ff5a4f", "check": "#ff3b3b",
         "white_tile": "#828b99", "black_tile": "#2e333b",
-        "board_frame": "#0a0c0f", "board_frame_inner": "#20242c",
+        "board_frame": "#0a0c0f", "board_frame_inner": "#20242c", "rim_light": "#e9e2d4",
     }
     for attr, hexval in expected.items():
         assert pg.Color(getattr(Colors, attr))[:3] == pg.Color(hexval)[:3], attr
+
+
+def test_rail_icon_matches_bubble_pawn_text():
+    """rail_icon deliberately shares its hex with bubble_pawn_text."""
+    assert Colors.rail_icon == Colors.bubble_pawn_text
 
 
 @pytest.mark.parametrize("state", ["connected", "reconnecting", "resyncing", "unknown"])
