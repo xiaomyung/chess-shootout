@@ -13,10 +13,12 @@ from chessshootout.server.connections import broadcast, send
 from chessshootout.server.broadcasts import (
     broadcast_game_start, finalize_and_broadcast, resolve_skillcheck_fail)
 from chessshootout.server.protocol import (
+    AnnotationDeltaMessage, AnnotationsStateMessage,
     ClockSnapshot, ConnectionStatusMessage, DrawOfferedMessage, DrawResponseMessage,
     ErrorMessage, GIVE_TIME_SECONDS, GIVE_TIME_TICK_MS, GiveTimeMessage,
+    MAX_SHARED_ARROWS, MAX_SHARED_HIGHLIGHTS,
     MoveAppliedMessage, MoveMessage,
-    PingMessage, PongMessage, Reason,
+    PingMessage, PongMessage, QuickChatMessage, QuickChatReceivedMessage, Reason,
     RematchRequestMessage, RematchResponseMessage, RematchUpdateMessage,
     ResyncDirectiveMessage,
     SkillCheckRequiredMessage, SkillCheckShotMessage, SkillCheckSpectateMessage,
@@ -151,6 +153,8 @@ async def _apply_move(app, room, color, from_sq, to_sq, promotion,
         room.backend.promote(to_sq, PROMO_TYPE_BY_LETTER[promotion or "q"])
     room.plies_ever += 1
     room.skillcheck_locks.clear()
+    room.annotations_white.clear_marks()
+    room.annotations_black.clear_marks()
     if room.first_move_at is None:
         room.first_move_at = app.state.now()
     await clear_resyncing(connections, room, color)
@@ -472,6 +476,104 @@ async def handle_ping(app, websocket, room, color, raw):
     return "ping"
 
 
+async def handle_annotations_state(app, websocket, room, color, raw):
+    connections = app.state.connections
+    if room.backend is None or room.result is not None:
+        return "noop"
+    if not app.state.annotation_limiter.hit(room.slot(color).client_uuid):
+        await send(websocket, ErrorMessage(reason=Reason.RATE_LIMITED,
+                                           msg_type="annotations_state"))
+        return "rate_limited"
+    try:
+        msg = AnnotationsStateMessage.model_validate_json(raw)
+        for coord in msg.highlights:
+            square_from_coord(coord)
+        for arrow in msg.arrows:
+            square_from_coord(arrow.from_sq)
+            square_from_coord(arrow.to_sq)
+    except (ValidationError, ValueError):
+        return "invalid"
+    store = room.annotations_for(color)
+    if msg.sharing != store.sharing:
+        log.info("annotations sharing room=%s by=%s on=%s",
+                 room.room_id, color, msg.sharing)
+    store.sharing = msg.sharing
+    store.highlights = set(msg.highlights)
+    store.arrows = [(a.from_sq, a.to_sq) for a in msg.arrows]
+    opp_ws = connections.get_for_color(room, room.opp_color(color))
+    if opp_ws is not None:
+        await send(opp_ws, msg)
+    return "relayed"
+
+
+async def handle_annotation_delta(app, websocket, room, color, raw):
+    connections = app.state.connections
+    if room.backend is None or room.result is not None:
+        return "noop"
+    if not app.state.annotation_limiter.hit(room.slot(color).client_uuid):
+        await send(websocket, ErrorMessage(reason=Reason.RATE_LIMITED,
+                                           msg_type="annotation_delta"))
+        return "rate_limited"
+    try:
+        msg = AnnotationDeltaMessage.model_validate_json(raw)
+    except ValidationError:
+        return "invalid"
+    if msg.kind == "highlight":
+        if msg.square is None:
+            return "invalid"
+        present_coords = (msg.square,)
+    else:
+        if msg.from_sq is None or msg.to_sq is None or msg.from_sq == msg.to_sq:
+            return "invalid"
+        present_coords = (msg.from_sq, msg.to_sq)
+    try:
+        for coord in present_coords:
+            square_from_coord(coord)
+    except (ValidationError, ValueError):
+        return "invalid"
+    store = room.annotations_for(color)
+    if msg.kind == "highlight":
+        if msg.action == "add":
+            if (msg.square not in store.highlights
+                    and len(store.highlights) >= MAX_SHARED_HIGHLIGHTS):
+                return "capped"
+            store.highlights.add(msg.square)
+        else:
+            store.highlights.discard(msg.square)
+    else:
+        pair = (msg.from_sq, msg.to_sq)
+        if msg.action == "add":
+            if pair not in store.arrows:
+                if len(store.arrows) >= MAX_SHARED_ARROWS:
+                    return "capped"
+                store.arrows.append(pair)
+        elif pair in store.arrows:
+            store.arrows.remove(pair)
+    opp_ws = connections.get_for_color(room, room.opp_color(color))
+    if opp_ws is not None:
+        await send(opp_ws, msg)
+    return "relayed"
+
+
+async def handle_quick_chat(app, websocket, room, color, raw):
+    connections = app.state.connections
+    if room.backend is None or room.result is not None:
+        return "noop"
+    if not app.state.chat_limiter.hit(room.slot(color).client_uuid):
+        await send(websocket, ErrorMessage(reason=Reason.RATE_LIMITED,
+                                           msg_type="quick_chat"))
+        return "rate_limited"
+    try:
+        msg = QuickChatMessage.model_validate_json(raw)
+    except ValidationError:
+        return "invalid"
+    log.info("quick chat room=%s by=%s preset=%d", room.room_id, color, msg.preset)
+    opp_ws = connections.get_for_color(room, room.opp_color(color))
+    if opp_ws is not None:
+        await send(opp_ws, QuickChatReceivedMessage(preset=msg.preset, sender=color))
+    return "relayed"
+
+
 HANDLERS = {
     "move": handle_move,
     "resign": handle_resign,
@@ -485,4 +587,7 @@ HANDLERS = {
     "give_time": handle_give_time,
     "ping": handle_ping,
     "skill_check_shot": handle_skill_check_shot,
+    "annotations_state": handle_annotations_state,
+    "annotation_delta": handle_annotation_delta,
+    "quick_chat": handle_quick_chat,
 }

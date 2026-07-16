@@ -22,7 +22,9 @@ from chessshootout.server.broadcasts import broadcast_game_start, finalize_and_b
 from chessshootout.server.connections import ConnectionRegistry, send
 from chessshootout.server.handlers import _clock_snapshot, dispatch
 from chessshootout.server.protocol import (
-    AuthMessage, CancelMatchmakeRequest, ConnectionStatusMessage, ErrorMessage,
+    ANNOTATIONS_PER_SECOND, AnnotationSetWire, ArrowWire,
+    AuthMessage, CHAT_COOLDOWN_SECONDS, CancelMatchmakeRequest,
+    ConnectionStatusMessage, ErrorMessage,
     HealthResponse, HistoryEntryWire, LockWire, MatchmakeRequest, MatchmakeResponse,
     PROTOCOL_VERSION, PendingSkillCheckWire, Reason, ReclaimRequest, ReclaimResponse,
     RematchRequestMessage, RematchUpdateMessage,
@@ -143,6 +145,12 @@ def create_app(*, now_provider=time.monotonic, max_rooms=DEFAULT_MAX_ROOMS):
         RECLAIM_PER_UUID_LIMIT_PER_MINUTE, RECLAIM_WINDOW_SECONDS,
         now_provider=now_provider,
     )
+    annotation_limiter = UuidRateLimiter(
+        ANNOTATIONS_PER_SECOND, 1.0, now_provider=now_provider,
+    )
+    chat_limiter = UuidRateLimiter(
+        1, CHAT_COOLDOWN_SECONDS, now_provider=now_provider,
+    )
     started_at = now_provider()
 
     @asynccontextmanager
@@ -170,6 +178,8 @@ def create_app(*, now_provider=time.monotonic, max_rooms=DEFAULT_MAX_ROOMS):
     app.state.now_ms = now_ms
     app.state.started_at = started_at
     app.state.reclaim_limiter = reclaim_limiter
+    app.state.annotation_limiter = annotation_limiter
+    app.state.chat_limiter = chat_limiter
     app.state.sweep = Sweep(rooms, connections, now_provider, now_ms)
 
     @app.exception_handler(RateLimitExceeded)
@@ -321,6 +331,8 @@ def create_app(*, now_provider=time.monotonic, max_rooms=DEFAULT_MAX_ROOMS):
             pending_skillcheck=pending,
             skillcheck_locks=locks,
             skillcheck_log=skillcheck_log,
+            white_annotations=_annotation_set_wire(room.annotations_white),
+            black_annotations=_annotation_set_wire(room.annotations_black),
             result_reason=room.result[0] if room.result else None,
             result_winner=room.result[1] if room.result else None,
         )
@@ -377,6 +389,14 @@ def _promotion_letter(move):
     if move.promoted_to is None:
         return None
     return PROMO_LETTER_BY_TYPE.get(move.promoted_to)
+
+
+def _annotation_set_wire(store):
+    return AnnotationSetWire(
+        sharing=store.sharing,
+        highlights=sorted(store.highlights),
+        arrows=[ArrowWire(from_sq=frm, to_sq=to) for frm, to in store.arrows],
+    )
 
 
 def _pending_skillcheck_wire(room, now_ms):
