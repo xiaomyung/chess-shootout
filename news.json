@@ -1,5 +1,10 @@
 [
   {
+    "title": "v2.11.0 — Rules of Engagement",
+    "body": "Cleaner shared play and a readable news feed:\n- Shared board drawings are now moderated — prohibited symbols and slurs are blocked before your opponent sees them\n- A blocked mark turns red for you with a quick heads-up\n- New option to hide your opponent's shared marks entirely — Options → Online\n- The News card now lists every update: expandable, scrollable, with an unread badge",
+    "date": "2026-07-17"
+  },
+  {
     "title": "v2.10.0 — Battle Station",
     "body": "The in-game screen joins the Command Rail:\n- Board plate, player strips, and right rail fully redesigned\n- Share your board drawings with your opponent — flip SHARE in SIGNALS\n- Quick chat: pick a line and your queen says it on their board\n- Opening names show live in the shot log\n- Auto-queen toggle for instant promotions (the skill check still fires)\n- Black pieces wear a rim light — readable on every square\n- Games with no moves played now abort: no winners, no losers",
     "date": "2026-07-16"

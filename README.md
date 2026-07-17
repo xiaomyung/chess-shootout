@@ -44,6 +44,8 @@ server for online two-player matches.
   manager on Linux), fullscreen (`F11` or the green title-bar button), minimize,
   and a themed title bar on every screen.
 - Animated menu "battle" backdrop and themed result / online screens.
+- The menu's **News** card lists every update as an expandable, scrollable feed
+  with an unread badge for what you haven't read yet.
 - Focus mode (`H`, the board-seam arrow, or `Esc` to exit) collapses the in-game
   UI to just the board, which grows to a centered square. **Options → Focus mode
   → "Show in focus"** picks what stays on the board: a slim per-player **Time
@@ -87,6 +89,9 @@ server for online two-player matches.
   capped at the starting time).
 - **Shared marks** — flip SHARE in the rail's SIGNALS section to broadcast your
   highlights and arrows live; your opponent's marks arrive in blue.
+- Shared drawings are screened for prohibited symbols and slurs before they
+  reach your opponent; a blocked mark turns red for you with a heads-up toast.
+  **Options → Online → Hide opponent's marks** hides their shared marks entirely.
 - **Quick chat** — preset lines only; your queen speaks them in a bubble on the
   opponent's board.
 - Live abort / abandon / reconnect countdowns in the player strips; games with
