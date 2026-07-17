@@ -156,17 +156,20 @@ def test_worst_case_timing_under_budget():
     # one-time build.
     detector.detect(list(arrows), highlights)
 
-    # process_time (compute), not wall clock: the budget bounds work done per
-    # update, and a wall-clock micro-benchmark deschedules under xdist CPU
-    # contention on small CI runners, timing the scheduler rather than detect().
+    # thread_time (this thread's CPU), not wall clock or process_time: detect()
+    # is single-threaded and synchronous, so this budget bounds the CPU it burns
+    # on one thread. Wall clock deschedules under xdist CPU contention (timing
+    # the scheduler); process_time sums every thread in the process, so a
+    # lingering server-fixture thread in the same xdist worker inflates it.
+    # thread_time counts only the calling thread and is immune to both.
     worst_ms = 0.0
     for i in range(30):
         churned = list(arrows)
         churned[i % 120] = (M.coord(rng.randrange(8), rng.randrange(8)),
                             M.coord(rng.randrange(8), rng.randrange(8)))
-        start = time.process_time()
+        start = time.thread_time()
         detector.detect(churned, highlights)
-        worst_ms = max(worst_ms, (time.process_time() - start) * 1000)
+        worst_ms = max(worst_ms, (time.thread_time() - start) * 1000)
 
     assert worst_ms < TIMING_BUDGET_MS, (
         f"worst-case detect() {worst_ms:.2f} ms exceeded budget "
