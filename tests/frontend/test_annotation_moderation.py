@@ -118,10 +118,15 @@ def test_flagged_discarded_when_mark_deleted(board):
 def test_flag_own_tolerates_absent_marks(board):
     # A resync-buffered blocked message can replay after resume already stripped
     # the referenced marks -- flag_own must not raise and rendering must be safe.
+    assert board.arrows == []
+    assert board.highlighted_squares == set()
     board.annotations.flag_own([(ARROW_FROM, ARROW_TO)], [HL])
+    assert (ARROW_FROM, ARROW_TO) in board.annotations.flagged
+    assert HL in board.annotations.flagged
     board.annotations._arrow_cache = None
-    board.annotations._draw_arrows()  # no arrows present -> no crash
+    board.annotations._draw_arrows()
     board.annotations._draw_annotation_highlights()
+    assert board.annotations.flagged == {(ARROW_FROM, ARROW_TO), HL}
 
 
 # ---- on_annotations_blocked (blocked / suspect / muted) -------------------
