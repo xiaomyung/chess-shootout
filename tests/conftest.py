@@ -114,6 +114,17 @@ def _isolate_hide_opp_marks():
 
 
 @pytest.fixture(autouse=True)
+def _isolate_news_last_seen():
+    """env.set_news_last_seen writes os.environ directly (not via monkeypatch),
+    so a test that persists a last-seen date would leak it into later tests in
+    the same worker and skew their unread-badge counts. Pop it before and after
+    every test to keep the default (unset)."""
+    os.environ.pop("CHESS_NEWS_LAST_SEEN", None)
+    yield
+    os.environ.pop("CHESS_NEWS_LAST_SEEN", None)
+
+
+@pytest.fixture(autouse=True)
 def _isolate_profile_hint(monkeypatch):
     """Tests build a fresh Frontend from a blank .env every time, which would
     otherwise trip the once-ever first-run profile hint toast on every single

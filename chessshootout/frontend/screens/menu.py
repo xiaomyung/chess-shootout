@@ -266,12 +266,15 @@ class MenuScreen(Screen):
         picker = self.views["play"].active_scrollable()
         if picker is not None:
             return picker
+        news_box = self.card_stack.news_box
+        if news_box.is_visible() and news_box.scroll.scrollable():
+            return news_box
         if self.card_stack.scroll.scrollable():
             return self.card_stack
         return None
 
     def scrollables(self):
-        result = [self.card_stack]
+        result = [self.card_stack, self.card_stack.news_box]
         for view in self.views.values():
             result.extend(view.scrollables())
         return result

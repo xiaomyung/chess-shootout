@@ -1,4 +1,5 @@
 import time
+from datetime import datetime
 
 import pygame as pg
 
@@ -14,12 +15,12 @@ from chessshootout.frontend.visual.emoji import flag_surface
 from chessshootout.frontend.visual.fonts import get_font, get_mono_font
 from chessshootout.frontend.visual.scroll_view import ScrollHost, ScrollView
 from chessshootout.frontend.visual.widgets import draw_avatar, wrap_words
-from chessshootout.online.news import format_news_date
+from chessshootout.online.news import NEWS_DATE_FORMAT, format_news_date
 
 
 RECENT_MATCHES_LIMIT = 3
-NEWS_BODY_MAX_LINES = 8
 NEWS_BULLET = "• "
+NEWS_GUTTER = 14
 
 CARD_GAP = 12
 CARD_CUT = 8
@@ -57,6 +58,47 @@ def _opponent(group, nickname):
     return group.black
 
 
+def _valid_news_date(value):
+    try:
+        datetime.strptime(value, NEWS_DATE_FORMAT)
+        return True
+    except (ValueError, TypeError):
+        return False
+
+
+def _item_key(item):
+    return (item.get("date", ""), item.get("title", ""))
+
+
+class NewsBox(ScrollHost):
+
+    def __init__(self, stack):
+        self._stack = stack
+        self._rect = pg.Rect(0, 0, 0, 0)
+        self._content_h = 0
+        self._scroll_px = 0.0
+        self.scroll = ScrollView(
+            lambda: self._scroll_px,
+            self._store_scroll,
+            lambda: (self._rect, self._content_h),
+            wheel_step_px=lambda: self._stack._s(BODY_ROW_H, 32),
+        )
+
+    def is_visible(self):
+        return (self._stack.news_expanded() and self._stack._rect.width > 0
+                and self._rect.height > 0)
+
+    def tick(self):
+        self.scroll.tick()
+
+    def reset(self):
+        self._scroll_px = 0.0
+        self.scroll.cancel()
+
+    def handle_click(self, pos):
+        return self._stack._handle_news_item_click(pos)
+
+
 class CardStack(ScrollHost):
 
     def __init__(self, app):
@@ -67,6 +109,11 @@ class CardStack(ScrollHost):
         self._news_items = []
         self._news_generation = -1
         self._open = None
+        self._open_news_item = None
+        self._news_item_hits = []
+        self._valid_news_dates = []
+        self._body_lines_cache = {}
+        self.news_box = NewsBox(self)
         self._cards = []
         self._content_h = 0
         self._scroll_px = 0.0
@@ -95,9 +142,20 @@ class CardStack(ScrollHost):
         self._recent_groups = groups[:RECENT_MATCHES_LIMIT]
         self._news_items = self.app.news_client.items()
         self._news_generation = self.app.news_client.generation()
+        self._valid_news_dates = [item["date"] for item in self._news_items
+                                  if _valid_news_date(item.get("date", ""))]
+        self._body_lines_cache = {}
         if self._open not in self._visible_card_keys():
             self._open = None
+        if self._open_news_item not in self._news_item_keys():
+            self._open_news_item = None
         self._compute_layout()
+
+    def _news_item_keys(self):
+        return {_item_key(item) for item in self._news_items}
+
+    def news_expanded(self):
+        return self._open == "news"
 
     def _visible_card_keys(self):
         keys = ["profile"]
@@ -126,9 +184,18 @@ class CardStack(ScrollHost):
         self._news_body_font = get_font(self._s(13, 10))
         self._headline_font = get_font(self._s(11, 9))
         self._fonts_ready = True
+        self._body_lines_cache = {}
         self._compute_layout()
 
     def _news_body_lines(self, item, max_w):
+        key = (item.get("date", ""), item.get("title", ""), item["body"], max_w)
+        cached = self._body_lines_cache.get(key)
+        if cached is None:
+            cached = self._build_news_body_lines(item, max_w)
+            self._body_lines_cache[key] = cached
+        return cached
+
+    def _build_news_body_lines(self, item, max_w):
         lines = []
         for raw in item["body"].split("\n"):
             raw = raw.strip()
@@ -143,9 +210,28 @@ class CardStack(ScrollHost):
             else:
                 lines.extend((0, line)
                              for line in wrap_words(raw, self._news_body_font, max_w))
-            if len(lines) >= NEWS_BODY_MAX_LINES:
-                return lines[:NEWS_BODY_MAX_LINES]
         return lines
+
+    def _news_content_w(self):
+        return self._rect.width - 2 * self._s(PAD_X, 10) - self._s(NEWS_GUTTER, 10)
+
+    def _news_body_block_h(self, item):
+        lines = self._news_body_lines(item, self._news_content_w())
+        line_h = self._news_body_font.get_height() + self._s(NEWS_LINE_GAP, 2)
+        return self._s(NEWS_TITLE_GAP, 4) + len(lines) * line_h + self._s(NEWS_PAD_Y, 8)
+
+    def _news_layout_rows(self):
+        rows = []
+        y = self._s(NEWS_PAD_Y, 8)
+        row_h = self._s(HEADLINE_ROW_H, 20)
+        for item in self._news_items:
+            rows.append(("header", item, y, row_h))
+            y += row_h
+            if _item_key(item) == self._open_news_item:
+                block_h = self._news_body_block_h(item)
+                rows.append(("body", item, y, block_h))
+                y += block_h
+        return rows, y
 
     def _card_height(self, key):
         if key == "profile":
@@ -156,37 +242,36 @@ class CardStack(ScrollHost):
         if key == "recent":
             rows = len(self._recent_groups)
             return header_h + rows * self._s(BODY_ROW_H, 32) + self._s(FOOTER_H, 24)
-        newest, *older = self._news_items
-        return header_h + self._news_expanded_extra_height(newest, older)
-
-    def _news_expanded_extra_height(self, newest, older):
-        gap = self._s(NEWS_PAD_Y, 8)
-        title_gap = self._s(NEWS_TITLE_GAP, 4)
-        line_gap = self._s(NEWS_LINE_GAP, 2)
-        max_w = self._rect.width - 2 * self._s(PAD_X, 10)
-        lines = self._news_body_lines(newest, max_w)
-        body_h = len(lines) * (self._news_body_font.get_height() + line_gap)
-        return (gap + self._news_title_font.get_height() + title_gap + body_h
-                + gap + len(older) * self._s(HEADLINE_ROW_H, 20))
+        _, content_h = self._news_layout_rows()
+        return header_h + content_h
 
     def _compute_layout(self):
         if not self._fonts_ready or self._rect.width <= 0:
             self._cards = []
             self._content_h = 0
             return
+        gap = self._s(CARD_GAP, 8)
+        keys = self._visible_card_keys()
+        heights = {key: self._card_height(key) for key in keys}
+        if self._open == "news" and "news" in heights:
+            others = sum(h for k, h in heights.items() if k != "news")
+            available = self._rect.height - others - gap * max(len(keys) - 1, 0)
+            header_h = self._s(HEADER_H, 34)
+            heights["news"] = max(header_h, min(heights["news"], available))
         cards = []
         y = 0
-        for key in self._visible_card_keys():
-            h = self._card_height(key)
+        for key in keys:
+            h = heights[key]
             cards.append((key, y, h))
-            y += h + self._s(CARD_GAP, 8)
+            y += h + gap
         self._cards = cards
-        self._content_h = max(y - self._s(CARD_GAP, 8), 0)
+        self._content_h = max(y - gap, 0)
 
     def draw(self, window, now_ms):
         if self._rect.width <= 0:
             return
         self.scroll.tick()
+        self.news_box.tick()
         max_offset = max(0, self._content_h - self._rect.height)
         self._scroll_px = max(0.0, min(self._scroll_px, max_offset))
         prev_clip = window.get_clip()
@@ -332,41 +417,92 @@ class CardStack(ScrollHost):
     def _draw_news_card(self, window, rect, mouse):
         header = pg.Rect(rect.x, rect.y, rect.width, self._s(HEADER_H, 34))
         expanded = self._open == "news"
-        self._draw_header(window, header, "News", self._news_summary(),
-                          expanded, header.collidepoint(mouse))
+        unread = 0 if expanded else self._unread_count()
+        summary = "" if unread else self._news_summary()
+        self._draw_header(window, header, "News", summary, expanded, header.collidepoint(mouse))
+        if unread:
+            self._draw_news_badge(window, header, unread)
         if not expanded:
+            self._news_item_hits = []
             return
+        inner = pg.Rect(rect.x, header.bottom, rect.width, max(rect.bottom - header.bottom, 0))
+        self._draw_news_items(window, inner, mouse)
+
+    def _draw_news_badge(self, window, header, count):
         pad = self._s(PAD_X, 10)
-        gap = self._s(NEWS_PAD_Y, 8)
-        newest, *older = self._news_items
-        y = header.bottom + gap
-        date_surf = render_text(self._date_font, format_news_date(newest["date"]),
-                                Colors.amber_hi)
-        title_w = rect.width - 2 * pad - date_surf.get_width() - self._s(8, 6)
-        title_text = _elide(self._news_title_font, newest["title"], title_w)
-        title_surf = render_text(self._news_title_font, title_text, Colors.text)
-        window.blit(title_surf, (rect.x + pad, y))
-        window.blit(date_surf, (rect.right - pad - date_surf.get_width(), y))
-        y += title_surf.get_height() + self._s(NEWS_TITLE_GAP, 4)
-        max_w = rect.width - 2 * pad
-        for indent, line in self._news_body_lines(newest, max_w):
+        chevron_w = chevron_surface(self._s(CHEVRON_SIZE, 9), Colors.text_dim, up=False).get_width()
+        label = render_text(self._badge_font, str(count), Colors.amber_hi)
+        bw = label.get_width() + self._s(12, 8)
+        bh = label.get_height() + self._s(4, 3)
+        right = header.right - pad - chevron_w - self._s(8, 6)
+        badge = pg.Rect(right - bw, header.centery - bh // 2, bw, bh)
+        window.blit(cut_rect_surface(badge.size, self._s(4, 3), Colors.amber + "26",
+                                     border=Colors.amber + "5c", border_width=1,
+                                     corners=("tr", "bl")), badge.topleft)
+        window.blit(label, (badge.centerx - label.get_width() // 2,
+                            badge.centery - label.get_height() // 2))
+
+    def _draw_news_items(self, window, inner, mouse):
+        self.news_box._rect = pg.Rect(inner)
+        rows, content_h = self._news_layout_rows()
+        self.news_box._content_h = content_h
+        offset = max(0.0, min(self.news_box.scroll_offset, max(0, content_h - inner.height)))
+        self.news_box._scroll_px = offset
+        self._news_item_hits = []
+        outer_clip = window.get_clip()
+        window.set_clip(inner.clip(pg.Rect(outer_clip)) if outer_clip else inner)
+        try:
+            for kind, item, y_rel, h in rows:
+                rect = pg.Rect(inner.x, round(inner.y + y_rel - offset), inner.width, h)
+                on_screen = rect.bottom >= inner.y and rect.top <= inner.bottom
+                if kind == "header":
+                    if on_screen:
+                        self._draw_news_item_header(window, rect, item, mouse)
+                    self._news_item_hits.append((pg.Rect(rect), _item_key(item)))
+                elif on_screen:
+                    self._draw_news_item_body(window, rect, item)
+        finally:
+            window.set_clip(outer_clip)
+        self.news_box.scroll.draw_thumb(window)
+
+    def _draw_news_item_header(self, window, row, item, mouse):
+        opened = _item_key(item) == self._open_news_item
+        if row.collidepoint(mouse):
+            window.blit(cut_rect_surface(row.size, self._s(6, 4), Colors.surface_hover,
+                                         corners=("tr", "bl")), row.topleft)
+        date_color = Colors.amber_hi if opened else Colors.text_dim
+        date_surf = render_text(self._date_font, format_news_date(item["date"]), date_color)
+        window.blit(date_surf, (row.x + self._s(PAD_X, 10),
+                                row.centery - date_surf.get_height() // 2))
+        chevron = chevron_surface(self._s(CHEVRON_SIZE, 9), Colors.text_dim, up=opened)
+        cx = row.right - self._s(PAD_X, 10) - self._s(NEWS_GUTTER, 10) - chevron.get_width()
+        window.blit(chevron, (cx, row.centery - chevron.get_height() // 2))
+        title_x = row.x + self._s(PAD_X, 10) + date_surf.get_width() + self._s(10, 6)
+        title_w = cx - self._s(6, 4) - title_x
+        if title_w > 10:
+            title_text = _elide(self._headline_font, item["title"], title_w)
+            color = Colors.text if opened else Colors.text_dim
+            title_surf = render_text(self._headline_font, title_text, color)
+            window.blit(title_surf, (title_x, row.centery - title_surf.get_height() // 2))
+
+    def _draw_news_item_body(self, window, rect, item):
+        pad = self._s(PAD_X, 10)
+        y = rect.y + self._s(NEWS_TITLE_GAP, 4)
+        for indent, line in self._news_body_lines(item, self._news_content_w()):
             line_surf = render_text(self._news_body_font, line, Colors.text_muted)
             window.blit(line_surf, (rect.x + pad + indent, y))
             y += line_surf.get_height() + self._s(NEWS_LINE_GAP, 2)
-        y += gap
-        row_h = self._s(HEADLINE_ROW_H, 20)
-        for item in older:
-            self._draw_headline_row(window, pg.Rect(rect.x, y, rect.width, row_h), item, pad)
-            y += row_h
 
-    def _draw_headline_row(self, window, row, item, pad):
-        date_surf = render_text(self._date_font, format_news_date(item["date"]), Colors.text_dim)
-        window.blit(date_surf, (row.x + pad, row.centery - date_surf.get_height() // 2))
-        title_x = row.x + pad + date_surf.get_width() + self._s(10, 6)
-        title_w = row.right - pad - title_x
-        title_text = _elide(self._headline_font, item["title"], title_w)
-        title_surf = render_text(self._headline_font, title_text, Colors.text_dim)
-        window.blit(title_surf, (title_x, row.centery - title_surf.get_height() // 2))
+    def _last_seen(self):
+        value = env.get_news_last_seen()
+        return value if _valid_news_date(value) else ""
+
+    def _unread_count(self):
+        last_seen = self._last_seen()
+        return sum(1 for date in self._valid_news_dates if date > last_seen)
+
+    def _newest_news_date(self):
+        return max(self._valid_news_dates, default="")
 
     def handle_click(self, pos):
         if not self._rect.collidepoint(pos):
@@ -389,7 +525,22 @@ class CardStack(ScrollHost):
             return True
         if key == "recent" and self._open == "recent":
             self._handle_recent_body_click(card_rect, header, pos)
+        elif key == "news" and self._open == "news":
+            self._handle_news_item_click(pos)
         return True
+
+    def _handle_news_item_click(self, pos):
+        for rect, item_key in self._news_item_hits:
+            if rect.collidepoint(pos):
+                self._toggle_news_item(item_key)
+                return True
+        return False
+
+    def _toggle_news_item(self, item_key):
+        self._open_news_item = None if self._open_news_item == item_key else item_key
+        self.app.input_router.suppress_click_sound()
+        self.app.sound_manager.play_section_toggle()
+        self._compute_layout()
 
     def _handle_recent_body_click(self, card_rect, header, pos):
         row_h = self._s(BODY_ROW_H, 32)
@@ -408,4 +559,13 @@ class CardStack(ScrollHost):
         self._open = None if self._open == key else key
         self.app.input_router.suppress_click_sound()
         self.app.sound_manager.play_card_toggle()
+        if self._open == "news":
+            self._on_news_expanded()
         self._compute_layout()
+
+    def _on_news_expanded(self):
+        newest = self._newest_news_date()
+        if newest > self._last_seen():
+            env.set_news_last_seen(newest)
+        self._open_news_item = _item_key(self._news_items[0]) if self._news_items else None
+        self.news_box.reset()
