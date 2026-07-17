@@ -13,19 +13,21 @@ from chessshootout.server.connections import broadcast, send
 from chessshootout.server.broadcasts import (
     broadcast_game_start, finalize_and_broadcast, resolve_skillcheck_fail)
 from chessshootout.server.protocol import (
-    AnnotationDeltaMessage, AnnotationsStateMessage,
-    ClockSnapshot, ConnectionStatusMessage, DrawOfferedMessage, DrawResponseMessage,
+    AnnotationDeltaMessage, AnnotationsBlockedMessage, AnnotationsStateMessage,
+    ArrowWire, ClockSnapshot, ConnectionStatusMessage,
+    DrawOfferedMessage, DrawResponseMessage,
     ErrorMessage, GIVE_TIME_SECONDS, GIVE_TIME_TICK_MS, GiveTimeMessage,
-    MAX_SHARED_ARROWS, MAX_SHARED_HIGHLIGHTS,
+    MAX_SHARED_ARROWS, MAX_SHARED_HIGHLIGHTS, MODERATION_TRIP_LIMIT,
     MoveAppliedMessage, MoveMessage,
     PingMessage, PongMessage, QuickChatMessage, QuickChatReceivedMessage, Reason,
     RematchRequestMessage, RematchResponseMessage, RematchUpdateMessage,
-    ResyncDirectiveMessage,
+    ResyncDirectiveMessage, SetMarksVisibilityMessage,
     SkillCheckRequiredMessage, SkillCheckShotMessage, SkillCheckSpectateMessage,
     SkillCheckSpectateShotMessage,
     TakebackAppliedMessage, TakebackOfferedMessage,
     TakebackResponseMessage, TimeGrantedMessage,
 )
+from chessshootout.server.moderation import detector
 from chessshootout.server.rooms import PendingSkillCheck
 from chessshootout.server.sweep import RESULT_REASON_BY_GAME_RESULT
 from chessshootout.skillcheck import online
@@ -498,20 +500,28 @@ async def handle_annotations_state(app, websocket, room, color, raw):
     except ValidationError:
         return "invalid"
     store = room.annotations_for(color)
+    if msg.sharing and store.share_muted and app.state.moderation_enabled:
+        await send(connections.get_for_color(room, color),
+                     ErrorMessage(reason=Reason.SHARE_MUTED, msg_type="annotations_state"))
+        return "muted"
+    was_sharing = store.sharing
     if msg.sharing != store.sharing:
         log.info("annotations sharing room=%s by=%s on=%s",
                  room.room_id, color, msg.sharing)
     store.sharing = msg.sharing
-    if msg.sharing:
-        store.highlights = set(msg.highlights)
-        store.arrows = [(a.from_sq, a.to_sq) for a in msg.arrows]
-    else:
+    if not msg.sharing:
         store.clear_marks()
-        msg = AnnotationsStateMessage(sharing=False, highlights=[], arrows=[])
-    opp_ws = connections.get_for_color(room, room.opp_color(color))
-    if opp_ws is not None:
-        await send(opp_ws, msg)
-    return "relayed"
+        await _relay_plain(connections, room, color,
+                           AnnotationsStateMessage(sharing=False, highlights=[], arrows=[]))
+        return "relayed"
+    if not was_sharing:
+        store.opp_hidden_notice_sent = False
+    store.highlights = set(msg.highlights)
+    store.arrows = [(a.from_sq, a.to_sq) for a in msg.arrows]
+    if not app.state.moderation_enabled:
+        await _relay_to_opp(app, room, color, msg, "annotations_state")
+        return "relayed"
+    return await _moderate_relay(app, room, color, msg, None, "annotations_state")
 
 
 async def handle_annotation_delta(app, websocket, room, color, raw):
@@ -531,6 +541,10 @@ async def handle_annotation_delta(app, websocket, room, color, raw):
         if msg.from_sq is None or msg.to_sq is None or msg.from_sq == msg.to_sq:
             return "invalid"
     store = room.annotations_for(color)
+    if store.share_muted and app.state.moderation_enabled:
+        await send(connections.get_for_color(room, color),
+                     ErrorMessage(reason=Reason.SHARE_MUTED, msg_type="annotation_delta"))
+        return "muted"
     if msg.kind == "highlight":
         if msg.action == "add":
             if (msg.square not in store.highlights
@@ -539,6 +553,7 @@ async def handle_annotation_delta(app, websocket, room, color, raw):
             store.highlights.add(msg.square)
         else:
             store.highlights.discard(msg.square)
+        changed = msg.square if msg.action == "add" else None
     else:
         pair = (msg.from_sq, msg.to_sq)
         if msg.action == "add":
@@ -548,10 +563,154 @@ async def handle_annotation_delta(app, websocket, room, color, raw):
                 store.arrows.append(pair)
         elif pair in store.arrows:
             store.arrows.remove(pair)
+        changed = pair if msg.action == "add" else None
+    if not app.state.moderation_enabled:
+        await _relay_to_opp(app, room, color, msg, "annotation_delta")
+        return "relayed"
+    return await _moderate_relay(app, room, color, msg, changed, "annotation_delta")
+
+
+def _moderate(room, color, changed):
+    store = room.annotations_for(color)
+    own = detector.detect(store.arrows, store.highlights,
+                          codes_seen=store.codes_seen, changed=changed)
+    store.codes_seen = own.codes_seen_out
+    if own.kind == detector.BLOCKED:
+        return own, False
+    opp_store = room.annotations_for(room.opp_color(color))
+    union_arrows, union_highlights = detector.union_sides(
+        store.arrows, store.highlights, opp_store.arrows, opp_store.highlights)
+    union = detector.detect(union_arrows, union_highlights,
+                            codes_seen=store.codes_seen | opp_store.codes_seen,
+                            changed=changed)
+    if union.kind == detector.BLOCKED:
+        return union, True
+    if own.kind == detector.SUSPECT:
+        return own, False
+    return None, False
+
+
+async def _moderate_relay(app, room, color, relay_msg, changed, msg_type):
+    verdict, is_union = _moderate(room, color, changed)
+    if verdict is None:
+        await _relay_to_opp(app, room, color, relay_msg, msg_type)
+        return "relayed"
+    if verdict.kind == detector.BLOCKED:
+        await _handle_block(app, room, color, verdict, is_union)
+        return "blocked"
+    await _relay_to_opp(app, room, color, relay_msg, msg_type)
+    log.warning("marks suspect room=%s color=%s pattern=%s",
+                room.room_id, color, _pattern_label(verdict.pattern_id))
+    await send(app.state.connections.get_for_color(room, color),
+                 AnnotationsBlockedMessage(
+                     action="suspect",
+                     highlights=list(verdict.matched_highlights),
+                     arrows=[ArrowWire(from_sq=a[0], to_sq=a[1])
+                             for a in verdict.matched_arrows],
+                     share_muted=room.annotations_for(color).share_muted))
+    return "suspect"
+
+
+async def _handle_block(app, room, color, verdict, is_union):
+    connections = app.state.connections
+    store = room.annotations_for(color)
+    opp_color = room.opp_color(color)
+    _strip_store(store, verdict.matched_arrows, verdict.matched_highlights)
+    if is_union:
+        _strip_store(room.annotations_for(opp_color),
+                     verdict.matched_arrows, verdict.matched_highlights)
+    store.trip_count += 1
+    muted = store.trip_count >= MODERATION_TRIP_LIMIT
+    if muted:
+        store.share_muted = True
+        store.clear_marks()
+    log.warning("marks blocked room=%s color=%s pattern=%s trip=%d muted=%s",
+                room.room_id, color, _pattern_label(verdict.pattern_id),
+                store.trip_count, muted)
+    await _corrective_snapshot(app, room, color)
+    if is_union:
+        await _corrective_snapshot(app, room, opp_color)
+    await send(connections.get_for_color(room, color),
+                 AnnotationsBlockedMessage(
+                     action="blocked",
+                     highlights=list(verdict.matched_highlights),
+                     arrows=[ArrowWire(from_sq=a[0], to_sq=a[1])
+                             for a in verdict.matched_arrows],
+                     share_muted=muted))
+
+
+def _strip_store(store, arrows, highlights):
+    for arrow in arrows:
+        pair = (arrow[0], arrow[1])
+        while pair in store.arrows:
+            store.arrows.remove(pair)
+    for highlight in highlights:
+        store.highlights.discard(highlight)
+
+
+async def _corrective_snapshot(app, room, source_color):
+    connections = app.state.connections
+    target_color = room.opp_color(source_color)
+    target_slot = room.slot(target_color)
+    if target_slot is not None and target_slot.hide_opp_marks:
+        return
+    target_ws = connections.get_for_color(room, target_color)
+    if target_ws is None:
+        return
+    store = room.annotations_for(source_color)
+    await send(target_ws, AnnotationsStateMessage(
+        sharing=True, highlights=sorted(store.highlights),
+        arrows=[ArrowWire(from_sq=a[0], to_sq=a[1]) for a in store.arrows]))
+
+
+async def _relay_plain(connections, room, color, msg):
     opp_ws = connections.get_for_color(room, room.opp_color(color))
     if opp_ws is not None:
         await send(opp_ws, msg)
-    return "relayed"
+
+
+async def _relay_to_opp(app, room, color, msg, msg_type):
+    connections = app.state.connections
+    opp_color = room.opp_color(color)
+    opp_slot = room.slot(opp_color)
+    if opp_slot is not None and opp_slot.hide_opp_marks:
+        store = room.annotations_for(color)
+        if not store.opp_hidden_notice_sent:
+            store.opp_hidden_notice_sent = True
+            await send(connections.get_for_color(room, color),
+                         ErrorMessage(reason=Reason.OPP_HIDES_MARKS, msg_type=msg_type))
+        return
+    opp_ws = connections.get_for_color(room, opp_color)
+    if opp_ws is not None:
+        await send(opp_ws, msg)
+
+
+def _pattern_label(pattern_id):
+    text = str(pattern_id)
+    if text.startswith("word:"):
+        return "word"
+    return text
+
+
+async def handle_set_marks_visibility(app, websocket, room, color, raw):
+    connections = app.state.connections
+    try:
+        msg = SetMarksVisibilityMessage.model_validate_json(raw)
+    except ValidationError:
+        return "invalid"
+    slot = room.slot(color)
+    if slot is None or slot.hide_opp_marks == msg.hide_opp:
+        return "noop"
+    slot.hide_opp_marks = msg.hide_opp
+    log.info("marks visibility room=%s color=%s hide_opp=%s",
+             room.room_id, color, msg.hide_opp)
+    if msg.hide_opp:
+        return "hidden"
+    opp_store = room.annotations_for(room.opp_color(color))
+    await send(connections.get_for_color(room, color), AnnotationsStateMessage(
+        sharing=opp_store.sharing, highlights=sorted(opp_store.highlights),
+        arrows=[ArrowWire(from_sq=a[0], to_sq=a[1]) for a in opp_store.arrows]))
+    return "shown"
 
 
 async def handle_quick_chat(app, websocket, room, color, raw):
@@ -586,5 +745,6 @@ HANDLERS = {
     "skill_check_shot": handle_skill_check_shot,
     "annotations_state": handle_annotations_state,
     "annotation_delta": handle_annotation_delta,
+    "set_marks_visibility": handle_set_marks_visibility,
     "quick_chat": handle_quick_chat,
 }

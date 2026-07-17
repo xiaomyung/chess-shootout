@@ -39,6 +39,7 @@ class PlayerSlot:
     session_token: str
     side_preference: str = "random"
     country: Optional[str] = None
+    hide_opp_marks: bool = False
     connected: bool = False
     disconnected_at: Optional[float] = None
     desync_active: bool = False
@@ -69,6 +70,10 @@ class SharedAnnotations:
     sharing: bool = False
     highlights: set = field(default_factory=set)
     arrows: list = field(default_factory=list)
+    trip_count: int = 0
+    share_muted: bool = False
+    codes_seen: frozenset = frozenset()
+    opp_hidden_notice_sent: bool = False
 
     def clear_marks(self):
         self.highlights.clear()
@@ -77,6 +82,10 @@ class SharedAnnotations:
     def reset(self):
         self.clear_marks()
         self.sharing = False
+        self.trip_count = 0
+        self.share_muted = False
+        self.codes_seen = frozenset()
+        self.opp_hidden_notice_sent = False
 
 
 @dataclass
@@ -165,7 +174,7 @@ class RoomManager:
 
     async def enqueue(self, *, client_uuid, nickname, session_token,
                       time_minutes, increment_seconds, side_preference,
-                      country=None):
+                      country=None, hide_opp_marks=False):
         async with self._lock:
             if client_uuid in self._uuid_to_room:
                 raise AlreadyInGameError()
@@ -186,7 +195,7 @@ class RoomManager:
                 new_slot = PlayerSlot(
                     client_uuid=client_uuid, nickname=nickname,
                     session_token=session_token, side_preference=side_preference,
-                    country=country,
+                    country=country, hide_opp_marks=hide_opp_marks,
                 )
                 setattr(room, second_color, new_slot)
                 room.backend = Backend()
@@ -205,7 +214,7 @@ class RoomManager:
             slot = PlayerSlot(
                 client_uuid=client_uuid, nickname=nickname,
                 session_token=session_token, side_preference=side_preference,
-                country=country,
+                country=country, hide_opp_marks=hide_opp_marks,
             )
             room = Room(
                 room_id=room_id, time_minutes=time_minutes,

@@ -34,6 +34,7 @@ MAX_SHARED_ARROWS = 128
 CHAT_COOLDOWN_SECONDS = 3.0
 CHAT_PRESET_COUNT = 8
 ANNOTATIONS_PER_SECOND = 10
+MODERATION_TRIP_LIMIT = 3
 
 UUID4_RE = re.compile(
     r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$",
@@ -74,6 +75,10 @@ class Reason:
     REMATCH_UNAVAILABLE = "rematch_unavailable"
     REMATCH_ALREADY_PENDING = "rematch_already_pending"
     NO_TAKEBACK_AVAILABLE = "no_takeback_available"
+    MARKS_BLOCKED = "marks_blocked"
+    MARKS_SUSPECT = "marks_suspect"
+    SHARE_MUTED = "share_muted"
+    OPP_HIDES_MARKS = "opp_hides_marks"
 
     CHECKMATE = "checkmate"
     RESIGNATION = "resignation"
@@ -191,6 +196,7 @@ class MatchmakeRequest(_Base):
     increment_seconds: int
     side_preference: Literal["white", "black", "random"] = "random"
     country: Optional[str] = None
+    hide_opp_marks: bool = False
 
     @field_validator("nickname")
     @classmethod
@@ -260,6 +266,8 @@ class ResumeResponse(_Base):
     skillcheck_log: list[SkillCheckOutcomeWire] = Field(default_factory=list)
     white_annotations: AnnotationSetWire = Field(default_factory=AnnotationSetWire)
     black_annotations: AnnotationSetWire = Field(default_factory=AnnotationSetWire)
+    share_muted: bool = False
+    hide_opp_marks: bool = False
     result_reason: Optional[str] = None
     result_winner: Optional[Literal["white", "black"]] = None
 
@@ -426,6 +434,19 @@ class AnnotationDeltaMessage(_Base):
         if v is None:
             return v
         return _validate_coord(v, "coord")
+
+
+class AnnotationsBlockedMessage(_Base):
+    type: Literal["annotations_blocked"] = "annotations_blocked"
+    action: Literal["blocked", "suspect"]
+    highlights: list[str] = Field(default_factory=list, max_length=MAX_SHARED_HIGHLIGHTS)
+    arrows: list[ArrowWire] = Field(default_factory=list, max_length=MAX_SHARED_ARROWS)
+    share_muted: bool = False
+
+
+class SetMarksVisibilityMessage(_Base):
+    type: Literal["set_marks_visibility"] = "set_marks_visibility"
+    hide_opp: bool
 
 
 class QuickChatMessage(_Base):
