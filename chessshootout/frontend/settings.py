@@ -5,6 +5,7 @@ import pygame as pg
 
 from chessshootout import paths
 from chessshootout.infra import env
+from chessshootout.frontend.game.variant import Variant
 from chessshootout.frontend.menu.options_rows import (
     PathRow, TextRow, ToggleRow, NotchRow, SegmentedRow,
 )
@@ -41,6 +42,15 @@ class SettingsController:
             self.frontend.toast.show("That folder isn't writable")
             return
         self._apply_data_folder_change(typed)
+
+    def _set_hide_opp_marks(self, value):
+        env.set_hide_opp_marks(value)
+        game = self.frontend.game
+        coordinator = self.frontend.coordinator
+        if coordinator.is_connected() and game.variant == Variant.ONLINE:
+            coordinator.set_marks_visibility(value)
+        if value:
+            game.apply_opp_marks_shield()
 
     def _set_master_volume(self, value):
         self.frontend.sound_manager.set_master_volume(value)
@@ -125,6 +135,9 @@ class SettingsController:
             ]),
             ("Online", [
                 self._server_addr_row,
+                ToggleRow("Hide opponent's marks",
+                          "Never show the arrows and highlights they share",
+                          env.get_hide_opp_marks, self._set_hide_opp_marks),
             ]),
             ("Performance", [
                 ToggleRow("Show FPS", "Frame rate in the title bar",

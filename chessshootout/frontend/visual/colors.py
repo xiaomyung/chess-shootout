@@ -57,6 +57,10 @@ class Colors:
     annotation_highlight_opp = avatar_blue + "57"
     annotation_arrow_opp = avatar_blue + "c7"
 
+    annotation_flagged = "#ff2d4a"
+    annotation_highlight_flagged = annotation_flagged + "57"
+    annotation_arrow_flagged = annotation_flagged + "c7"
+
     white_tile = "#828b99"
     black_tile = "#2e333b"
     rim_light = "#e9e2d4"

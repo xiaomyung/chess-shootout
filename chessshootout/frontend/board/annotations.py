@@ -15,22 +15,31 @@ class Annotations:
         self.arrows = []
         self.opp_highlighted_squares = set()
         self.opp_arrows = []
+        self.flagged = set()
         self._arrow_cache = None
         self._right_drag_start_square = None
 
     def toggle_highlight(self, sq):
         self.highlighted_squares ^= {sq}
-        return sq in self.highlighted_squares
+        present = sq in self.highlighted_squares
+        if not present:
+            self.flagged.discard(sq)
+        return present
 
     def toggle_arrow(self, from_sq, to_sq):
         arrow = (from_sq, to_sq)
         if arrow in self.arrows:
             self.arrows.remove(arrow)
+            self.flagged.discard(arrow)
             return False
         if len(self.arrows) >= MAX_SHARED_ARROWS:
             return None
         self.arrows.append(arrow)
         return True
+
+    def flag_own(self, arrows, highlights):
+        self.flagged.update(arrows)
+        self.flagged.update(highlights)
 
     def is_square_annotated(self, sq):
         return sq in self.highlighted_squares or any(
@@ -40,6 +49,7 @@ class Annotations:
     def clear(self):
         self.highlighted_squares = set()
         self.arrows = []
+        self.flagged = set()
         self._right_drag_start_square = None
 
     def clear_opp(self):
@@ -90,7 +100,9 @@ class Annotations:
         board = self.board
         for sq in self.highlighted_squares:
             rect = board._cell_rect(sq.row, sq.col)
-            board.window.blit(board._cell_overlay(Colors.annotation_highlight), rect.topleft)
+            color = (Colors.annotation_highlight_flagged if sq in self.flagged
+                     else Colors.annotation_highlight)
+            board.window.blit(board._cell_overlay(color), rect.topleft)
         for sq in self.opp_highlighted_squares:
             rect = board._cell_rect(sq.row, sq.col)
             board.window.blit(board._cell_overlay(Colors.annotation_highlight_opp), rect.topleft)
@@ -100,7 +112,8 @@ class Annotations:
         if board.cell_size <= 0:
             self._arrow_cache = None
             return
-        items = [(fr, to, Colors.annotation_arrow) for fr, to in self.arrows]
+        items = [(fr, to, Colors.annotation_arrow_flagged if (fr, to) in self.flagged
+                  else Colors.annotation_arrow) for fr, to in self.arrows]
         items += [(fr, to, Colors.annotation_arrow_opp) for fr, to in self.opp_arrows]
         if self._right_drag_start_square is not None:
             end_sq = board.cell_at(pg.mouse.get_pos())

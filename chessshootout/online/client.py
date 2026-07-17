@@ -208,6 +208,9 @@ class OnlineClient:
     def send_quick_chat(self, preset):
         self._enqueue("send_quick_chat", preset)
 
+    def send_set_marks_visibility(self, hide_opp):
+        self._enqueue("send_set_marks_visibility", hide_opp)
+
     def heartbeat_interval(self):
         return self._heartbeat_interval
 

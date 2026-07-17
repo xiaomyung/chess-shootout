@@ -104,6 +104,16 @@ def _isolate_news(tmp_path_factory, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _isolate_hide_opp_marks():
+    """env.set_hide_opp_marks writes os.environ directly (not via monkeypatch),
+    so a test that flips it would leak the flag into later tests in the same
+    worker. Pop it before and after every test to keep the default (unset)."""
+    os.environ.pop("CHESS_HIDE_OPP_MARKS", None)
+    yield
+    os.environ.pop("CHESS_HIDE_OPP_MARKS", None)
+
+
+@pytest.fixture(autouse=True)
 def _isolate_profile_hint(monkeypatch):
     """Tests build a fresh Frontend from a blank .env every time, which would
     otherwise trip the once-ever first-run profile hint toast on every single

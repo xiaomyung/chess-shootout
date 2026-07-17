@@ -276,6 +276,14 @@ def set_auto_queen(value):
     _set_bool("CHESS_AUTO_QUEEN", value)
 
 
+def get_hide_opp_marks():
+    return _get_bool("CHESS_HIDE_OPP_MARKS", False)
+
+
+def set_hide_opp_marks(value):
+    _set_bool("CHESS_HIDE_OPP_MARKS", value)
+
+
 _RAIL_SECTION_KEYS = {
     "actions": "CHESS_RAIL_ACTIONS_OPEN",
     "signals": "CHESS_RAIL_SIGNALS_OPEN",
