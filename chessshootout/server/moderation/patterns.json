@@ -1,0 +1,2792 @@
+{
+  "patterns": [
+    {
+      "id": "swastika_axis",
+      "tier": 1,
+      "action": "HARD_BLOCK",
+      "channel": "vector",
+      "transform_group": "d4",
+      "scale_min": 1,
+      "scale_max": 1,
+      "coverage_threshold": 0.85,
+      "iou_threshold": null,
+      "segments": [
+        [
+          [
+            3,
+            1
+          ],
+          [
+            3,
+            5
+          ]
+        ],
+        [
+          [
+            1,
+            3
+          ],
+          [
+            5,
+            3
+          ]
+        ],
+        [
+          [
+            3,
+            1
+          ],
+          [
+            5,
+            1
+          ]
+        ],
+        [
+          [
+            5,
+            3
+          ],
+          [
+            5,
+            5
+          ]
+        ],
+        [
+          [
+            3,
+            5
+          ],
+          [
+            1,
+            5
+          ]
+        ],
+        [
+          [
+            1,
+            3
+          ],
+          [
+            1,
+            1
+          ]
+        ]
+      ],
+      "provenance": {
+        "source": "hand",
+        "ref": "https://www.adl.org/resources/hate-symbols/search (Swastika); axis-aligned arm2/hook2",
+        "unicode": "U+5350"
+      }
+    },
+    {
+      "id": "swastika_axis_min",
+      "tier": 1,
+      "action": "HARD_BLOCK",
+      "channel": "vector",
+      "transform_group": "d4",
+      "scale_min": 1,
+      "scale_max": 3,
+      "coverage_threshold": 0.85,
+      "iou_threshold": null,
+      "segments": [
+        [
+          [
+            3,
+            2
+          ],
+          [
+            3,
+            4
+          ]
+        ],
+        [
+          [
+            2,
+            3
+          ],
+          [
+            4,
+            3
+          ]
+        ],
+        [
+          [
+            3,
+            2
+          ],
+          [
+            4,
+            2
+          ]
+        ],
+        [
+          [
+            4,
+            3
+          ],
+          [
+            4,
+            4
+          ]
+        ],
+        [
+          [
+            3,
+            4
+          ],
+          [
+            2,
+            4
+          ]
+        ],
+        [
+          [
+            2,
+            3
+          ],
+          [
+            2,
+            2
+          ]
+        ]
+      ],
+      "provenance": {
+        "source": "hand",
+        "ref": "minimal 3x3 swastika arm1/hook1; scales cover arm1-2",
+        "unicode": "U+5350"
+      }
+    },
+    {
+      "id": "swastika_tilt45",
+      "tier": 1,
+      "action": "HARD_BLOCK",
+      "channel": "vector",
+      "transform_group": "d4",
+      "scale_min": 1,
+      "scale_max": 1,
+      "coverage_threshold": 0.85,
+      "iou_threshold": null,
+      "segments": [
+        [
+          [
+            1,
+            1
+          ],
+          [
+            5,
+            5
+          ]
+        ],
+        [
+          [
+            5,
+            1
+          ],
+          [
+            1,
+            5
+          ]
+        ],
+        [
+          [
+            1,
+            1
+          ],
+          [
+            2,
+            0
+          ]
+        ],
+        [
+          [
+            5,
+            1
+          ],
+          [
+            6,
+            2
+          ]
+        ],
+        [
+          [
+            5,
+            5
+          ],
+          [
+            4,
+            6
+          ]
+        ],
+        [
+          [
+            1,
+            5
+          ],
+          [
+            0,
+            4
+          ]
+        ]
+      ],
+      "provenance": {
+        "source": "hand",
+        "ref": "45-degree Nazi-flag diamond swastika",
+        "unicode": "U+5350"
+      }
+    },
+    {
+      "id": "swastika_knight4",
+      "tier": 1,
+      "action": "HARD_BLOCK",
+      "channel": "vector",
+      "transform_group": "d4",
+      "scale_min": 1,
+      "scale_max": 1,
+      "coverage_threshold": 0.85,
+      "iou_threshold": null,
+      "segments": [
+        [
+          [
+            3,
+            3
+          ],
+          [
+            3,
+            1
+          ]
+        ],
+        [
+          [
+            3,
+            1
+          ],
+          [
+            4,
+            1
+          ]
+        ],
+        [
+          [
+            3,
+            3
+          ],
+          [
+            5,
+            3
+          ]
+        ],
+        [
+          [
+            5,
+            3
+          ],
+          [
+            5,
+            4
+          ]
+        ],
+        [
+          [
+            3,
+            3
+          ],
+          [
+            3,
+            5
+          ]
+        ],
+        [
+          [
+            3,
+            5
+          ],
+          [
+            2,
+            5
+          ]
+        ],
+        [
+          [
+            3,
+            3
+          ],
+          [
+            1,
+            3
+          ]
+        ],
+        [
+          [
+            1,
+            3
+          ],
+          [
+            1,
+            2
+          ]
+        ]
+      ],
+      "provenance": {
+        "source": "hand",
+        "ref": "L-leg decomposition of 4 same-chirality knight arrows from one square (annotations.py elbow rule); arm2/hook1",
+        "unicode": "U+5350"
+      }
+    },
+    {
+      "id": "swastika_raster7",
+      "tier": 1,
+      "action": "HARD_BLOCK",
+      "channel": "raster",
+      "transform_group": "d4",
+      "scale_min": 1,
+      "scale_max": 1,
+      "coverage_threshold": 0.85,
+      "iou_threshold": 0.5,
+      "grid": [
+        "#..####",
+        "#..#...",
+        "#..#...",
+        "#######",
+        "...#..#",
+        "...#..#",
+        "####..#"
+      ],
+      "provenance": {
+        "source": "hand",
+        "ref": "7x7 highlight swastika",
+        "unicode": "U+5350"
+      }
+    },
+    {
+      "id": "swastika_raster5",
+      "tier": 1,
+      "action": "HARD_BLOCK",
+      "channel": "raster",
+      "transform_group": "d4",
+      "scale_min": 1,
+      "scale_max": 1,
+      "coverage_threshold": 0.85,
+      "iou_threshold": 0.5,
+      "grid": [
+        "#.###",
+        "#.#..",
+        "#####",
+        "..#.#",
+        "###.#"
+      ],
+      "provenance": {
+        "source": "hand",
+        "ref": "5x5 minimal highlight swastika",
+        "unicode": "U+5350"
+      }
+    },
+    {
+      "id": "ss_bolts_vector",
+      "tier": 1,
+      "action": "HARD_BLOCK",
+      "channel": "vector",
+      "transform_group": "d4",
+      "scale_min": 1,
+      "scale_max": 1,
+      "coverage_threshold": 0.85,
+      "iou_threshold": null,
+      "segments": [
+        [
+          [
+            1,
+            0
+          ],
+          [
+            3,
+            2
+          ]
+        ],
+        [
+          [
+            3,
+            2
+          ],
+          [
+            1,
+            4
+          ]
+        ],
+        [
+          [
+            1,
+            4
+          ],
+          [
+            3,
+            6
+          ]
+        ],
+        [
+          [
+            4,
+            0
+          ],
+          [
+            6,
+            2
+          ]
+        ],
+        [
+          [
+            6,
+            2
+          ],
+          [
+            4,
+            4
+          ]
+        ],
+        [
+          [
+            4,
+            4
+          ],
+          [
+            6,
+            6
+          ]
+        ]
+      ],
+      "provenance": {
+        "source": "hand",
+        "ref": "https://www.adl.org/resources/hate-symbols/search (SS Bolts); two congruent 3-stroke sig zigzags, +3 col offset",
+        "unicode": "U+16CB"
+      }
+    },
+    {
+      "id": "ss_bolts_raster",
+      "tier": 1,
+      "action": "HARD_BLOCK",
+      "channel": "raster",
+      "transform_group": "d4",
+      "scale_min": 1,
+      "scale_max": 1,
+      "coverage_threshold": 0.9,
+      "iou_threshold": 0.5,
+      "grid": [
+        "#...#..",
+        ".#...#.",
+        "..#...#",
+        ".#...#.",
+        "#...#..",
+        ".#...#.",
+        "..#...#"
+      ],
+      "provenance": {
+        "source": "hand",
+        "ref": "paired sig-rune zigzag highlight raster",
+        "unicode": "U+16CB"
+      }
+    },
+    {
+      "id": "kolovrat_vector",
+      "tier": 1,
+      "action": "HARD_BLOCK",
+      "channel": "vector",
+      "transform_group": "d4",
+      "scale_min": 1,
+      "scale_max": 1,
+      "coverage_threshold": 0.85,
+      "iou_threshold": null,
+      "segments": [
+        [
+          [
+            3,
+            1
+          ],
+          [
+            3,
+            5
+          ]
+        ],
+        [
+          [
+            1,
+            3
+          ],
+          [
+            5,
+            3
+          ]
+        ],
+        [
+          [
+            1,
+            1
+          ],
+          [
+            5,
+            5
+          ]
+        ],
+        [
+          [
+            5,
+            1
+          ],
+          [
+            1,
+            5
+          ]
+        ],
+        [
+          [
+            3,
+            1
+          ],
+          [
+            4,
+            1
+          ]
+        ],
+        [
+          [
+            5,
+            1
+          ],
+          [
+            6,
+            2
+          ]
+        ],
+        [
+          [
+            5,
+            3
+          ],
+          [
+            5,
+            4
+          ]
+        ],
+        [
+          [
+            5,
+            5
+          ],
+          [
+            4,
+            6
+          ]
+        ],
+        [
+          [
+            3,
+            5
+          ],
+          [
+            2,
+            5
+          ]
+        ],
+        [
+          [
+            1,
+            5
+          ],
+          [
+            0,
+            4
+          ]
+        ],
+        [
+          [
+            1,
+            3
+          ],
+          [
+            1,
+            2
+          ]
+        ],
+        [
+          [
+            1,
+            1
+          ],
+          [
+            2,
+            0
+          ]
+        ]
+      ],
+      "provenance": {
+        "source": "hand",
+        "ref": "https://www.adl.org/resources/hate-symbols/search (Sonnenrad/Kolovrat); 8-arm same-chirality hooked wheel, contains two 45deg-offset swastikas",
+        "unicode": null
+      }
+    },
+    {
+      "id": "othala_vector",
+      "tier": 2,
+      "action": "HARD_BLOCK",
+      "channel": "vector",
+      "transform_group": "d4",
+      "scale_min": 1,
+      "scale_max": 1,
+      "coverage_threshold": 0.95,
+      "iou_threshold": null,
+      "segments": [
+        [
+          [
+            3,
+            0
+          ],
+          [
+            5,
+            2
+          ]
+        ],
+        [
+          [
+            5,
+            2
+          ],
+          [
+            1,
+            6
+          ]
+        ],
+        [
+          [
+            1,
+            2
+          ],
+          [
+            5,
+            6
+          ]
+        ],
+        [
+          [
+            3,
+            0
+          ],
+          [
+            1,
+            2
+          ]
+        ]
+      ],
+      "provenance": {
+        "source": "hand",
+        "ref": "https://www.adl.org/resources/hate-symbols/search (Othala Rune); diamond over crossed extended legs",
+        "unicode": "U+16DF"
+      }
+    },
+    {
+      "id": "wolfsangel_vector",
+      "tier": 2,
+      "action": "HARD_BLOCK",
+      "channel": "vector",
+      "transform_group": "d4",
+      "scale_min": 1,
+      "scale_max": 1,
+      "coverage_threshold": 0.95,
+      "iou_threshold": null,
+      "segments": [
+        [
+          [
+            1,
+            1
+          ],
+          [
+            5,
+            1
+          ]
+        ],
+        [
+          [
+            5,
+            1
+          ],
+          [
+            1,
+            5
+          ]
+        ],
+        [
+          [
+            1,
+            5
+          ],
+          [
+            5,
+            5
+          ]
+        ],
+        [
+          [
+            2,
+            3
+          ],
+          [
+            4,
+            3
+          ]
+        ]
+      ],
+      "provenance": {
+        "source": "hand",
+        "ref": "https://www.adl.org/resources/hate-symbols/search (Wolfsangel); barred-Z, crossbar is the discriminator",
+        "unicode": null
+      }
+    },
+    {
+      "id": "hexagram_vector",
+      "tier": 2,
+      "action": "HARD_BLOCK",
+      "channel": "vector",
+      "transform_group": "d4",
+      "scale_min": 1,
+      "scale_max": 1,
+      "coverage_threshold": 0.95,
+      "iou_threshold": null,
+      "segments": [
+        [
+          [
+            0,
+            4
+          ],
+          [
+            6,
+            4
+          ]
+        ],
+        [
+          [
+            0,
+            4
+          ],
+          [
+            3,
+            1
+          ]
+        ],
+        [
+          [
+            6,
+            4
+          ],
+          [
+            3,
+            1
+          ]
+        ],
+        [
+          [
+            0,
+            2
+          ],
+          [
+            6,
+            2
+          ]
+        ],
+        [
+          [
+            0,
+            2
+          ],
+          [
+            3,
+            5
+          ]
+        ],
+        [
+          [
+            6,
+            2
+          ],
+          [
+            3,
+            5
+          ]
+        ]
+      ],
+      "provenance": {
+        "source": "hand",
+        "ref": "https://www.adl.org/resources/hate-symbols/search (hexagram tagging misuse); two overlapped 45-degree triangles",
+        "unicode": "U+2721"
+      }
+    },
+    {
+      "id": "code_1488_vector",
+      "digits": "1488",
+      "tier": 1,
+      "action": "HARD_BLOCK",
+      "channel": "vector",
+      "transform_group": "digit",
+      "scale_min": 1,
+      "scale_max": 1,
+      "coverage_threshold": 0.9,
+      "iou_threshold": null,
+      "segments": [
+        [
+          [
+            1,
+            0
+          ],
+          [
+            1,
+            2
+          ]
+        ],
+        [
+          [
+            3,
+            0
+          ],
+          [
+            3,
+            1
+          ]
+        ],
+        [
+          [
+            3,
+            1
+          ],
+          [
+            4,
+            1
+          ]
+        ],
+        [
+          [
+            4,
+            0
+          ],
+          [
+            4,
+            2
+          ]
+        ],
+        [
+          [
+            1,
+            4
+          ],
+          [
+            1,
+            6
+          ]
+        ],
+        [
+          [
+            2,
+            4
+          ],
+          [
+            2,
+            6
+          ]
+        ],
+        [
+          [
+            1,
+            4
+          ],
+          [
+            2,
+            4
+          ]
+        ],
+        [
+          [
+            1,
+            5
+          ],
+          [
+            2,
+            5
+          ]
+        ],
+        [
+          [
+            1,
+            6
+          ],
+          [
+            2,
+            6
+          ]
+        ],
+        [
+          [
+            4,
+            4
+          ],
+          [
+            4,
+            6
+          ]
+        ],
+        [
+          [
+            5,
+            4
+          ],
+          [
+            5,
+            6
+          ]
+        ],
+        [
+          [
+            4,
+            4
+          ],
+          [
+            5,
+            4
+          ]
+        ],
+        [
+          [
+            4,
+            5
+          ],
+          [
+            5,
+            5
+          ]
+        ],
+        [
+          [
+            4,
+            6
+          ],
+          [
+            5,
+            6
+          ]
+        ]
+      ],
+      "provenance": {
+        "source": "hand",
+        "ref": "https://www.adl.org/resources/hate-symbols/search (1488); two-line 7-segment arrow construction 14 over 88",
+        "unicode": null
+      }
+    },
+    {
+      "id": "code_1488_raster",
+      "digits": "1488",
+      "tier": 1,
+      "action": "HARD_BLOCK",
+      "channel": "raster",
+      "transform_group": "digit",
+      "scale_min": 1,
+      "scale_max": 1,
+      "coverage_threshold": 0.9,
+      "iou_threshold": 0.5,
+      "grid": [
+        ".#..#.#",
+        ".#..#.#",
+        ".#..###",
+        ".#....#",
+        "###.###",
+        "#.#.#.#",
+        "###.###",
+        "###.###"
+      ],
+      "provenance": {
+        "source": "hand",
+        "ref": "stacked highlight 14 (rows0-3) over 88 (rows4-7)",
+        "unicode": null
+      }
+    },
+    {
+      "id": "code_kkk_vector",
+      "tier": 2,
+      "action": "HARD_BLOCK",
+      "channel": "vector",
+      "transform_group": "digit",
+      "scale_min": 1,
+      "scale_max": 1,
+      "coverage_threshold": 0.95,
+      "iou_threshold": null,
+      "segments": [
+        [
+          [
+            0,
+            1
+          ],
+          [
+            0,
+            5
+          ]
+        ],
+        [
+          [
+            0,
+            3
+          ],
+          [
+            1,
+            1
+          ]
+        ],
+        [
+          [
+            0,
+            3
+          ],
+          [
+            1,
+            5
+          ]
+        ],
+        [
+          [
+            3,
+            1
+          ],
+          [
+            3,
+            5
+          ]
+        ],
+        [
+          [
+            3,
+            3
+          ],
+          [
+            4,
+            1
+          ]
+        ],
+        [
+          [
+            3,
+            3
+          ],
+          [
+            4,
+            5
+          ]
+        ],
+        [
+          [
+            6,
+            1
+          ],
+          [
+            6,
+            5
+          ]
+        ],
+        [
+          [
+            6,
+            3
+          ],
+          [
+            7,
+            1
+          ]
+        ],
+        [
+          [
+            6,
+            3
+          ],
+          [
+            7,
+            5
+          ]
+        ]
+      ],
+      "provenance": {
+        "source": "hand",
+        "ref": "https://www.adl.org/resources/hate-symbols/search (Klan); three K letter glyphs",
+        "unicode": null
+      }
+    },
+    {
+      "id": "code_kys_vector",
+      "tier": 2,
+      "action": "HARD_BLOCK",
+      "channel": "vector",
+      "transform_group": "digit",
+      "scale_min": 1,
+      "scale_max": 1,
+      "coverage_threshold": 0.95,
+      "iou_threshold": null,
+      "segments": [
+        [
+          [
+            0,
+            1
+          ],
+          [
+            0,
+            5
+          ]
+        ],
+        [
+          [
+            0,
+            3
+          ],
+          [
+            1,
+            1
+          ]
+        ],
+        [
+          [
+            0,
+            3
+          ],
+          [
+            1,
+            5
+          ]
+        ],
+        [
+          [
+            2,
+            1
+          ],
+          [
+            3,
+            3
+          ]
+        ],
+        [
+          [
+            4,
+            1
+          ],
+          [
+            3,
+            3
+          ]
+        ],
+        [
+          [
+            3,
+            3
+          ],
+          [
+            3,
+            5
+          ]
+        ],
+        [
+          [
+            7,
+            1
+          ],
+          [
+            5,
+            1
+          ]
+        ],
+        [
+          [
+            5,
+            1
+          ],
+          [
+            5,
+            3
+          ]
+        ],
+        [
+          [
+            5,
+            3
+          ],
+          [
+            7,
+            3
+          ]
+        ],
+        [
+          [
+            7,
+            3
+          ],
+          [
+            7,
+            5
+          ]
+        ],
+        [
+          [
+            7,
+            5
+          ],
+          [
+            5,
+            5
+          ]
+        ]
+      ],
+      "provenance": {
+        "source": "hand",
+        "ref": "harassment 'KYS'; K/Y/S letter glyphs",
+        "unicode": null
+      }
+    },
+    {
+      "id": "code_88",
+      "digits": "88",
+      "tier": 2,
+      "action": "SOFT_FLAG",
+      "channel": "raster",
+      "transform_group": "digit",
+      "scale_min": 1,
+      "scale_max": 1,
+      "coverage_threshold": 0.95,
+      "iou_threshold": 0.6,
+      "grid": [
+        "###.###",
+        "#.#.#.#",
+        "###.###",
+        "#.#.#.#",
+        "###.###"
+      ],
+      "provenance": {
+        "source": "hand",
+        "ref": "https://www.adl.org/resources/hate-symbols/search (88 = HH); two 3x5 eight glyphs",
+        "unicode": null
+      }
+    },
+    {
+      "id": "code_14",
+      "digits": "14",
+      "tier": 2,
+      "action": "SOFT_FLAG",
+      "channel": "raster",
+      "transform_group": "digit",
+      "scale_min": 1,
+      "scale_max": 1,
+      "coverage_threshold": 0.95,
+      "iou_threshold": 0.6,
+      "grid": [
+        ".#..#.#",
+        ".#..#.#",
+        ".#..###",
+        ".#....#",
+        ".#....#"
+      ],
+      "provenance": {
+        "source": "hand",
+        "ref": "https://www.adl.org/resources/hate-symbols/search (14 words)",
+        "unicode": null
+      }
+    },
+    {
+      "id": "code_18",
+      "digits": "18",
+      "tier": 2,
+      "action": "SOFT_FLAG",
+      "channel": "raster",
+      "transform_group": "digit",
+      "scale_min": 1,
+      "scale_max": 1,
+      "coverage_threshold": 0.95,
+      "iou_threshold": 0.6,
+      "grid": [
+        ".#..###",
+        ".#..#.#",
+        ".#..###",
+        ".#..#.#",
+        ".#..###"
+      ],
+      "provenance": {
+        "source": "hand",
+        "ref": "https://www.adl.org/resources/hate-symbols/search (18 = AH)",
+        "unicode": null
+      }
+    },
+    {
+      "id": "code_311",
+      "digits": "311",
+      "tier": 2,
+      "action": "SOFT_FLAG",
+      "channel": "raster",
+      "transform_group": "digit",
+      "scale_min": 1,
+      "scale_max": 1,
+      "coverage_threshold": 0.95,
+      "iou_threshold": 0.6,
+      "grid": [
+        "###.#.#",
+        "..#.#.#",
+        "###.#.#",
+        "..#.#.#",
+        "###.#.#"
+      ],
+      "provenance": {
+        "source": "hand",
+        "ref": "https://www.adl.org/resources/hate-symbols/search (311 = KKK)",
+        "unicode": null
+      }
+    },
+    {
+      "id": "penis_mixed",
+      "tier": 1,
+      "action": "HARD_BLOCK",
+      "channel": "raster",
+      "transform_group": "d4",
+      "scale_min": 1,
+      "scale_max": 1,
+      "coverage_threshold": 0.85,
+      "iou_threshold": 0.5,
+      "grid": [
+        "...#....",
+        "..###...",
+        "...#....",
+        "...#....",
+        "...#....",
+        "...#....",
+        "...#....",
+        "..#.#..."
+      ],
+      "provenance": {
+        "source": "hand",
+        "ref": "minimal mixed shaft-arrow + two testicle blobs",
+        "unicode": null
+      }
+    },
+    {
+      "id": "penis_vector",
+      "tier": 1,
+      "action": "HARD_BLOCK",
+      "channel": "vector",
+      "transform_group": "d4",
+      "scale_min": 1,
+      "scale_max": 1,
+      "coverage_threshold": 0.85,
+      "iou_threshold": null,
+      "segments": [
+        [
+          [
+            2,
+            5
+          ],
+          [
+            2,
+            1
+          ]
+        ],
+        [
+          [
+            4,
+            5
+          ],
+          [
+            4,
+            1
+          ]
+        ],
+        [
+          [
+            2,
+            1
+          ],
+          [
+            3,
+            0
+          ]
+        ],
+        [
+          [
+            3,
+            0
+          ],
+          [
+            4,
+            1
+          ]
+        ],
+        [
+          [
+            2,
+            5
+          ],
+          [
+            1,
+            6
+          ]
+        ],
+        [
+          [
+            1,
+            6
+          ],
+          [
+            2,
+            7
+          ]
+        ],
+        [
+          [
+            2,
+            7
+          ],
+          [
+            3,
+            6
+          ]
+        ],
+        [
+          [
+            4,
+            5
+          ],
+          [
+            5,
+            6
+          ]
+        ],
+        [
+          [
+            5,
+            6
+          ],
+          [
+            4,
+            7
+          ]
+        ],
+        [
+          [
+            4,
+            7
+          ],
+          [
+            3,
+            6
+          ]
+        ]
+      ],
+      "provenance": {
+        "source": "hand",
+        "ref": "10-segment penis outline",
+        "unicode": null
+      }
+    },
+    {
+      "id": "penis_raster",
+      "tier": 1,
+      "action": "HARD_BLOCK",
+      "channel": "raster",
+      "transform_group": "d4",
+      "scale_min": 1,
+      "scale_max": 1,
+      "coverage_threshold": 0.85,
+      "iou_threshold": 0.5,
+      "grid": [
+        "..####..",
+        "..####..",
+        "...##...",
+        "...##...",
+        "...##...",
+        "...##...",
+        ".######.",
+        ".##..##."
+      ],
+      "provenance": {
+        "source": "hand",
+        "ref": "8x8 highlight penis",
+        "unicode": null
+      }
+    },
+    {
+      "id": "middlefinger_raster",
+      "tier": 2,
+      "action": "HARD_BLOCK",
+      "channel": "raster",
+      "transform_group": "d4",
+      "scale_min": 1,
+      "scale_max": 1,
+      "coverage_threshold": 0.9,
+      "iou_threshold": 0.6,
+      "grid": [
+        "...##...",
+        "...##...",
+        "...##...",
+        "##.##.##",
+        "########",
+        "########",
+        ".######.",
+        "..####.."
+      ],
+      "provenance": {
+        "source": "hand",
+        "ref": "raised middle finger with knuckle gaps",
+        "unicode": null
+      }
+    },
+    {
+      "id": "code_12",
+      "digits": "12",
+      "tier": 3,
+      "action": "DISABLED",
+      "channel": "raster",
+      "transform_group": "digit",
+      "scale_min": 1,
+      "scale_max": 1,
+      "coverage_threshold": 0.95,
+      "iou_threshold": 0.6,
+      "grid": [
+        "#.###",
+        "#...#",
+        "#.###",
+        "#.#..",
+        "#.###"
+      ],
+      "provenance": {
+        "source": "hand",
+        "ref": "long-tail co-occurrence booster",
+        "unicode": null
+      }
+    },
+    {
+      "id": "code_23",
+      "digits": "23",
+      "tier": 3,
+      "action": "DISABLED",
+      "channel": "raster",
+      "transform_group": "digit",
+      "scale_min": 1,
+      "scale_max": 1,
+      "coverage_threshold": 0.95,
+      "iou_threshold": 0.6,
+      "grid": [
+        "###.###",
+        "..#...#",
+        "###.###",
+        "#.....#",
+        "###.###"
+      ],
+      "provenance": {
+        "source": "hand",
+        "ref": "long-tail co-occurrence booster",
+        "unicode": null
+      }
+    },
+    {
+      "id": "code_28",
+      "digits": "28",
+      "tier": 3,
+      "action": "DISABLED",
+      "channel": "raster",
+      "transform_group": "digit",
+      "scale_min": 1,
+      "scale_max": 1,
+      "coverage_threshold": 0.95,
+      "iou_threshold": 0.6,
+      "grid": [
+        "###.###",
+        "..#.#.#",
+        "###.###",
+        "#...#.#",
+        "###.###"
+      ],
+      "provenance": {
+        "source": "hand",
+        "ref": "long-tail co-occurrence booster",
+        "unicode": null
+      }
+    },
+    {
+      "id": "code_38",
+      "digits": "38",
+      "tier": 3,
+      "action": "DISABLED",
+      "channel": "raster",
+      "transform_group": "digit",
+      "scale_min": 1,
+      "scale_max": 1,
+      "coverage_threshold": 0.95,
+      "iou_threshold": 0.6,
+      "grid": [
+        "###.###",
+        "..#.#.#",
+        "###.###",
+        "..#.#.#",
+        "###.###"
+      ],
+      "provenance": {
+        "source": "hand",
+        "ref": "long-tail co-occurrence booster",
+        "unicode": null
+      }
+    },
+    {
+      "id": "code_43",
+      "digits": "43",
+      "tier": 3,
+      "action": "DISABLED",
+      "channel": "raster",
+      "transform_group": "digit",
+      "scale_min": 1,
+      "scale_max": 1,
+      "coverage_threshold": 0.95,
+      "iou_threshold": 0.6,
+      "grid": [
+        "#.#.###",
+        "#.#...#",
+        "###.###",
+        "..#...#",
+        "..#.###"
+      ],
+      "provenance": {
+        "source": "hand",
+        "ref": "long-tail co-occurrence booster",
+        "unicode": null
+      }
+    },
+    {
+      "id": "code_83",
+      "digits": "83",
+      "tier": 3,
+      "action": "DISABLED",
+      "channel": "raster",
+      "transform_group": "digit",
+      "scale_min": 1,
+      "scale_max": 1,
+      "coverage_threshold": 0.95,
+      "iou_threshold": 0.6,
+      "grid": [
+        "###.###",
+        "#.#...#",
+        "###.###",
+        "#.#...#",
+        "###.###"
+      ],
+      "provenance": {
+        "source": "hand",
+        "ref": "long-tail co-occurrence booster",
+        "unicode": null
+      }
+    },
+    {
+      "id": "code_511",
+      "digits": "511",
+      "tier": 3,
+      "action": "DISABLED",
+      "channel": "raster",
+      "transform_group": "digit",
+      "scale_min": 1,
+      "scale_max": 1,
+      "coverage_threshold": 0.95,
+      "iou_threshold": 0.6,
+      "grid": [
+        "###.#.#",
+        "#...#.#",
+        "###.#.#",
+        "..#.#.#",
+        "###.#.#"
+      ],
+      "provenance": {
+        "source": "hand",
+        "ref": "long-tail co-occurrence booster",
+        "unicode": null
+      }
+    },
+    {
+      "id": "code_318",
+      "digits": "318",
+      "tier": 3,
+      "action": "DISABLED",
+      "channel": "vector",
+      "transform_group": "digit",
+      "scale_min": 1,
+      "scale_max": 1,
+      "coverage_threshold": 0.95,
+      "iou_threshold": null,
+      "segments": [
+        [
+          [
+            0,
+            0
+          ],
+          [
+            1,
+            0
+          ]
+        ],
+        [
+          [
+            0,
+            1
+          ],
+          [
+            1,
+            1
+          ]
+        ],
+        [
+          [
+            0,
+            2
+          ],
+          [
+            1,
+            2
+          ]
+        ],
+        [
+          [
+            1,
+            0
+          ],
+          [
+            1,
+            2
+          ]
+        ],
+        [
+          [
+            3,
+            0
+          ],
+          [
+            3,
+            2
+          ]
+        ],
+        [
+          [
+            6,
+            0
+          ],
+          [
+            6,
+            2
+          ]
+        ],
+        [
+          [
+            7,
+            0
+          ],
+          [
+            7,
+            2
+          ]
+        ],
+        [
+          [
+            6,
+            0
+          ],
+          [
+            7,
+            0
+          ]
+        ],
+        [
+          [
+            6,
+            1
+          ],
+          [
+            7,
+            1
+          ]
+        ],
+        [
+          [
+            6,
+            2
+          ],
+          [
+            7,
+            2
+          ]
+        ]
+      ],
+      "provenance": {
+        "source": "hand",
+        "ref": "long-tail co-occurrence booster (7-seg arrows)",
+        "unicode": null
+      }
+    },
+    {
+      "id": "code_737",
+      "digits": "737",
+      "tier": 3,
+      "action": "DISABLED",
+      "channel": "vector",
+      "transform_group": "digit",
+      "scale_min": 1,
+      "scale_max": 1,
+      "coverage_threshold": 0.95,
+      "iou_threshold": null,
+      "segments": [
+        [
+          [
+            0,
+            0
+          ],
+          [
+            1,
+            0
+          ]
+        ],
+        [
+          [
+            1,
+            0
+          ],
+          [
+            1,
+            2
+          ]
+        ],
+        [
+          [
+            3,
+            0
+          ],
+          [
+            4,
+            0
+          ]
+        ],
+        [
+          [
+            3,
+            1
+          ],
+          [
+            4,
+            1
+          ]
+        ],
+        [
+          [
+            3,
+            2
+          ],
+          [
+            4,
+            2
+          ]
+        ],
+        [
+          [
+            4,
+            0
+          ],
+          [
+            4,
+            2
+          ]
+        ],
+        [
+          [
+            6,
+            0
+          ],
+          [
+            7,
+            0
+          ]
+        ],
+        [
+          [
+            7,
+            0
+          ],
+          [
+            7,
+            2
+          ]
+        ]
+      ],
+      "provenance": {
+        "source": "hand",
+        "ref": "long-tail co-occurrence booster (7-seg arrows)",
+        "unicode": null
+      }
+    },
+    {
+      "id": "ss_bolt_single",
+      "tier": 1,
+      "action": "DISABLED",
+      "channel": "vector",
+      "transform_group": "d4",
+      "scale_min": 1,
+      "scale_max": 1,
+      "coverage_threshold": 0.95,
+      "iou_threshold": null,
+      "segments": [
+        [
+          [
+            2,
+            0
+          ],
+          [
+            4,
+            2
+          ]
+        ],
+        [
+          [
+            4,
+            2
+          ],
+          [
+            2,
+            4
+          ]
+        ],
+        [
+          [
+            2,
+            4
+          ],
+          [
+            4,
+            6
+          ]
+        ]
+      ],
+      "provenance": {
+        "source": "hand",
+        "ref": "single sig rune; component of ss_bolts, never fire alone",
+        "unicode": "U+16CB"
+      }
+    },
+    {
+      "id": "sonnenrad_ring",
+      "tier": 2,
+      "action": "DISABLED",
+      "channel": "vector",
+      "transform_group": "d4",
+      "scale_min": 1,
+      "scale_max": 1,
+      "coverage_threshold": 0.9,
+      "iou_threshold": null,
+      "segments": [
+        [
+          [
+            2,
+            0
+          ],
+          [
+            5,
+            0
+          ]
+        ],
+        [
+          [
+            5,
+            0
+          ],
+          [
+            7,
+            2
+          ]
+        ],
+        [
+          [
+            7,
+            2
+          ],
+          [
+            7,
+            5
+          ]
+        ],
+        [
+          [
+            7,
+            5
+          ],
+          [
+            5,
+            7
+          ]
+        ],
+        [
+          [
+            5,
+            7
+          ],
+          [
+            2,
+            7
+          ]
+        ],
+        [
+          [
+            2,
+            7
+          ],
+          [
+            0,
+            5
+          ]
+        ],
+        [
+          [
+            0,
+            5
+          ],
+          [
+            0,
+            2
+          ]
+        ],
+        [
+          [
+            0,
+            2
+          ],
+          [
+            2,
+            0
+          ]
+        ]
+      ],
+      "provenance": {
+        "source": "hand",
+        "ref": "octagon ring; escalation booster around kolovrat",
+        "unicode": null
+      }
+    },
+    {
+      "id": "life_rune",
+      "tier": 3,
+      "action": "DISABLED",
+      "channel": "vector",
+      "transform_group": "d4",
+      "scale_min": 1,
+      "scale_max": 1,
+      "coverage_threshold": 0.9,
+      "iou_threshold": null,
+      "segments": [
+        [
+          [
+            3,
+            0
+          ],
+          [
+            3,
+            6
+          ]
+        ],
+        [
+          [
+            3,
+            2
+          ],
+          [
+            1,
+            0
+          ]
+        ],
+        [
+          [
+            3,
+            2
+          ],
+          [
+            5,
+            0
+          ]
+        ]
+      ],
+      "provenance": {
+        "source": "hand",
+        "ref": "Lebensrune; component, pair with death_rune to escalate",
+        "unicode": "U+16C1"
+      }
+    },
+    {
+      "id": "death_rune",
+      "tier": 3,
+      "action": "DISABLED",
+      "channel": "vector",
+      "transform_group": "d4",
+      "scale_min": 1,
+      "scale_max": 1,
+      "coverage_threshold": 0.9,
+      "iou_threshold": null,
+      "segments": [
+        [
+          [
+            3,
+            0
+          ],
+          [
+            3,
+            6
+          ]
+        ],
+        [
+          [
+            3,
+            4
+          ],
+          [
+            1,
+            6
+          ]
+        ],
+        [
+          [
+            3,
+            4
+          ],
+          [
+            5,
+            6
+          ]
+        ]
+      ],
+      "provenance": {
+        "source": "hand",
+        "ref": "Todesrune; component, pair with life_rune to escalate",
+        "unicode": "U+16C2"
+      }
+    },
+    {
+      "id": "iron_cross",
+      "tier": 3,
+      "action": "DISABLED",
+      "channel": "raster",
+      "transform_group": "d4",
+      "scale_min": 1,
+      "scale_max": 1,
+      "coverage_threshold": 0.95,
+      "iou_threshold": 0.6,
+      "grid": [
+        "##...##",
+        "###.###",
+        ".#####.",
+        "..###..",
+        ".#####.",
+        "###.###",
+        "##...##"
+      ],
+      "provenance": {
+        "source": "hand",
+        "ref": "collapses to fat plus at 8x8; FP-fatal, never enable",
+        "unicode": null
+      }
+    },
+    {
+      "id": "totenkopf",
+      "tier": 3,
+      "action": "DISABLED",
+      "channel": "raster",
+      "transform_group": "d4",
+      "scale_min": 1,
+      "scale_max": 1,
+      "coverage_threshold": 0.9,
+      "iou_threshold": 0.6,
+      "grid": [
+        "..####..",
+        ".######.",
+        ".#.##.#.",
+        ".######.",
+        "..####..",
+        "..#..#.."
+      ],
+      "provenance": {
+        "source": "hand",
+        "ref": "reads as generic skull; co-occurrence booster only",
+        "unicode": null
+      }
+    },
+    {
+      "id": "triskele",
+      "tier": 3,
+      "action": "DISABLED",
+      "channel": "vector",
+      "transform_group": "d4_no_reflect",
+      "scale_min": 1,
+      "scale_max": 1,
+      "coverage_threshold": 0.9,
+      "iou_threshold": null,
+      "segments": [
+        [
+          [
+            3,
+            3
+          ],
+          [
+            3,
+            1
+          ]
+        ],
+        [
+          [
+            3,
+            1
+          ],
+          [
+            4,
+            1
+          ]
+        ],
+        [
+          [
+            3,
+            3
+          ],
+          [
+            5,
+            4
+          ]
+        ],
+        [
+          [
+            5,
+            4
+          ],
+          [
+            5,
+            5
+          ]
+        ],
+        [
+          [
+            3,
+            3
+          ],
+          [
+            1,
+            4
+          ]
+        ],
+        [
+          [
+            1,
+            4
+          ],
+          [
+            1,
+            5
+          ]
+        ]
+      ],
+      "provenance": {
+        "source": "hand",
+        "ref": "3-arm hooked pinwheel; caught weakly by pinwheel net, booster only",
+        "unicode": null
+      }
+    },
+    {
+      "id": "valknut",
+      "tier": 3,
+      "action": "DISABLED",
+      "channel": "vector",
+      "transform_group": "d4",
+      "scale_min": 1,
+      "scale_max": 1,
+      "coverage_threshold": 0.9,
+      "iou_threshold": null,
+      "segments": [
+        [
+          [
+            2,
+            0
+          ],
+          [
+            6,
+            0
+          ]
+        ],
+        [
+          [
+            6,
+            0
+          ],
+          [
+            4,
+            3
+          ]
+        ],
+        [
+          [
+            4,
+            3
+          ],
+          [
+            2,
+            0
+          ]
+        ],
+        [
+          [
+            0,
+            4
+          ],
+          [
+            4,
+            4
+          ]
+        ],
+        [
+          [
+            4,
+            4
+          ],
+          [
+            2,
+            7
+          ]
+        ],
+        [
+          [
+            2,
+            7
+          ],
+          [
+            0,
+            4
+          ]
+        ],
+        [
+          [
+            3,
+            4
+          ],
+          [
+            7,
+            4
+          ]
+        ],
+        [
+          [
+            7,
+            4
+          ],
+          [
+            5,
+            7
+          ]
+        ],
+        [
+          [
+            5,
+            7
+          ],
+          [
+            3,
+            4
+          ]
+        ]
+      ],
+      "provenance": {
+        "source": "hand",
+        "ref": "three interlocking triangles; heavy benign Heathen use, booster only",
+        "unicode": "U+16E5"
+      }
+    },
+    {
+      "id": "tyr_rune",
+      "tier": 3,
+      "action": "DISABLED",
+      "channel": "vector",
+      "transform_group": "d4",
+      "scale_min": 1,
+      "scale_max": 1,
+      "coverage_threshold": 0.99,
+      "iou_threshold": null,
+      "segments": [
+        [
+          [
+            3,
+            6
+          ],
+          [
+            3,
+            1
+          ]
+        ],
+        [
+          [
+            3,
+            1
+          ],
+          [
+            2,
+            2
+          ]
+        ],
+        [
+          [
+            3,
+            1
+          ],
+          [
+            4,
+            2
+          ]
+        ]
+      ],
+      "provenance": {
+        "source": "hand",
+        "ref": "identical to native arrow rendering; FP-fatal, never enable",
+        "unicode": "U+16CF"
+      }
+    },
+    {
+      "id": "arrow_cross",
+      "tier": 3,
+      "action": "DISABLED",
+      "channel": "vector",
+      "transform_group": "d4",
+      "scale_min": 1,
+      "scale_max": 1,
+      "coverage_threshold": 0.99,
+      "iou_threshold": null,
+      "segments": [
+        [
+          [
+            3,
+            3
+          ],
+          [
+            3,
+            0
+          ]
+        ],
+        [
+          [
+            3,
+            3
+          ],
+          [
+            6,
+            3
+          ]
+        ],
+        [
+          [
+            3,
+            3
+          ],
+          [
+            3,
+            6
+          ]
+        ],
+        [
+          [
+            3,
+            3
+          ],
+          [
+            0,
+            3
+          ]
+        ]
+      ],
+      "provenance": {
+        "source": "hand",
+        "ref": "= rook/queen orthogonal move fan; FP-fatal, never enable",
+        "unicode": null
+      }
+    },
+    {
+      "id": "celtic_cross",
+      "tier": 3,
+      "action": "DISABLED",
+      "channel": "vector",
+      "transform_group": "d4",
+      "scale_min": 1,
+      "scale_max": 1,
+      "coverage_threshold": 0.99,
+      "iou_threshold": null,
+      "segments": [
+        [
+          [
+            3,
+            1
+          ],
+          [
+            3,
+            5
+          ]
+        ],
+        [
+          [
+            1,
+            3
+          ],
+          [
+            5,
+            3
+          ]
+        ],
+        [
+          [
+            3,
+            2
+          ],
+          [
+            4,
+            3
+          ]
+        ],
+        [
+          [
+            4,
+            3
+          ],
+          [
+            3,
+            4
+          ]
+        ],
+        [
+          [
+            3,
+            4
+          ],
+          [
+            2,
+            3
+          ]
+        ],
+        [
+          [
+            2,
+            3
+          ],
+          [
+            3,
+            2
+          ]
+        ]
+      ],
+      "provenance": {
+        "source": "hand",
+        "ref": "crosshair = king-safety analysis; FP-fatal, never enable",
+        "unicode": null
+      }
+    },
+    {
+      "id": "sun_cross",
+      "tier": 3,
+      "action": "DISABLED",
+      "channel": "vector",
+      "transform_group": "d4",
+      "scale_min": 1,
+      "scale_max": 1,
+      "coverage_threshold": 0.99,
+      "iou_threshold": null,
+      "segments": [
+        [
+          [
+            3,
+            0
+          ],
+          [
+            3,
+            6
+          ]
+        ],
+        [
+          [
+            0,
+            3
+          ],
+          [
+            6,
+            3
+          ]
+        ],
+        [
+          [
+            3,
+            1
+          ],
+          [
+            4,
+            2
+          ]
+        ],
+        [
+          [
+            4,
+            2
+          ],
+          [
+            3,
+            3
+          ]
+        ],
+        [
+          [
+            3,
+            3
+          ],
+          [
+            2,
+            2
+          ]
+        ],
+        [
+          [
+            2,
+            2
+          ],
+          [
+            3,
+            1
+          ]
+        ]
+      ],
+      "provenance": {
+        "source": "hand",
+        "ref": "circled cross reticle; FP-fatal, never enable",
+        "unicode": null
+      }
+    },
+    {
+      "id": "hash_grid",
+      "tier": 3,
+      "action": "DISABLED",
+      "channel": "vector",
+      "transform_group": "d4",
+      "scale_min": 1,
+      "scale_max": 1,
+      "coverage_threshold": 0.99,
+      "iou_threshold": null,
+      "segments": [
+        [
+          [
+            2,
+            0
+          ],
+          [
+            2,
+            6
+          ]
+        ],
+        [
+          [
+            4,
+            0
+          ],
+          [
+            4,
+            6
+          ]
+        ],
+        [
+          [
+            0,
+            2
+          ],
+          [
+            6,
+            2
+          ]
+        ],
+        [
+          [
+            0,
+            4
+          ],
+          [
+            6,
+            4
+          ]
+        ]
+      ],
+      "provenance": {
+        "source": "hand",
+        "ref": "tic-tac-toe / zone marking; FP-fatal, never enable",
+        "unicode": null
+      }
+    },
+    {
+      "id": "plain_plus",
+      "tier": 3,
+      "action": "DISABLED",
+      "channel": "vector",
+      "transform_group": "d4",
+      "scale_min": 1,
+      "scale_max": 1,
+      "coverage_threshold": 0.99,
+      "iou_threshold": null,
+      "segments": [
+        [
+          [
+            3,
+            0
+          ],
+          [
+            3,
+            6
+          ]
+        ],
+        [
+          [
+            0,
+            3
+          ],
+          [
+            6,
+            3
+          ]
+        ]
+      ],
+      "provenance": {
+        "source": "hand",
+        "ref": "achiral plus; FP-fatal, never enable",
+        "unicode": null
+      }
+    },
+    {
+      "id": "plain_x",
+      "tier": 3,
+      "action": "DISABLED",
+      "channel": "vector",
+      "transform_group": "d4",
+      "scale_min": 1,
+      "scale_max": 1,
+      "coverage_threshold": 0.99,
+      "iou_threshold": null,
+      "segments": [
+        [
+          [
+            0,
+            0
+          ],
+          [
+            6,
+            6
+          ]
+        ],
+        [
+          [
+            6,
+            0
+          ],
+          [
+            0,
+            6
+          ]
+        ]
+      ],
+      "provenance": {
+        "source": "hand",
+        "ref": "diagonal analysis cross; FP-fatal, never enable",
+        "unicode": null
+      }
+    }
+  ]
+}
