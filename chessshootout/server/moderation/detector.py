@@ -236,10 +236,7 @@ def _folded_words():
 
 
 def _fold(text):
-    out = []
-    for ch in text.upper():
-        out.append(HOMOGLYPHS.get(ch, ch))
-    return "".join(out)
+    return "".join(HOMOGLYPHS.get(ch, ch) for ch in text.upper())
 
 
 def _normalize_inputs(arrows, highlights):
@@ -464,7 +461,7 @@ def _fan_suppressed(matched, placed, drawn_edges):
 def _mirror_present(placed_edges, drawn_edges):
     placed_doubled = {_double_edge(edge) for edge in placed_edges}
     drawn_doubled = {_double_edge(edge) for edge in drawn_edges}
-    box = _doubled_bbox(placed_doubled)
+    box = geometry.edges_bbox(placed_doubled)
     if box is None:
         return False
     cx = (box[0] + box[2]) // 2
@@ -511,7 +508,7 @@ def _match_raster(pattern, board, highlight_board, side, drawn_bbox, window):
         margin = pattern.supersample
         for offy in range(y0, y1 + 1):
             for offx in range(x0, x1 + 1):
-                placed = geometry.embed(rows, width, offx, offy, side, side)
+                placed = geometry.embed(rows, offx, offy, side, side)
                 inter = geometry.popcount(geometry.bitmap_and(placed, board))
                 if inter < _needed(variant.ink, pattern.coverage_threshold):
                     continue
@@ -631,7 +628,7 @@ def _best_glyph(rows, x0, x1, index, coverage):
     rw = x1 - x0 + 1
     mask = (1 << rw) - 1
     subcols = [(row >> x0) & mask for row in rows]
-    sub = geometry.normalized_bitmap_from_pixels(_bitmap_pixels(subcols, rw))
+    sub = geometry.normalized_bitmap_from_pixels(_bitmap_pixels(subcols))
     srows, sw, sh = sub
     if not srows:
         return None
@@ -652,7 +649,7 @@ def _best_glyph(rows, x0, x1, index, coverage):
     return best
 
 
-def _bitmap_pixels(rows, width):
+def _bitmap_pixels(rows):
     pixels = set()
     for y, row in enumerate(rows):
         bit = row
@@ -667,7 +664,7 @@ def _best_overlap(grows, gw, gh, srows, sw, sh):
     best = 0
     for dy in (-1, 0, 1):
         for dx in (-1, 0, 1):
-            placed = geometry.embed(grows, gw, dx, dy, sw, sh)
+            placed = geometry.embed(grows, dx, dy, sw, sh)
             inter = geometry.popcount(geometry.bitmap_and(placed, srows))
             if inter > best:
                 best = inter
@@ -808,7 +805,7 @@ def _heuristic_center(drawn_edges):
     if len(drawn_edges) < HEURISTIC_MIN_EDGES:
         return None
     doubled = frozenset(_double_edge(edge) for edge in drawn_edges)
-    box = _doubled_bbox(doubled)
+    box = geometry.edges_bbox(doubled)
     if box is None:
         return None
     if len(doubled) > HEURISTIC_SUBSET_MAX_EDGES:
@@ -842,7 +839,7 @@ def _c4_chiral_core(doubled, cx, cy):
                      and _transform_edge(edge, cx, cy, _rotate270) in doubled)
     if len(core) < HEURISTIC_MIN_EDGES:
         return False
-    cminx, cminy, cmaxx, cmaxy = _doubled_bbox(core)
+    cminx, cminy, cmaxx, cmaxy = geometry.edges_bbox(core)
     if (cmaxx - cminx) // 2 > HEURISTIC_MAX_SPAN or (cmaxy - cminy) // 2 > HEURISTIC_MAX_SPAN:
         return False
     for axis in ("x", "y", "d", "a"):
@@ -863,17 +860,6 @@ def _transform_edge(edge, cx, cy, fn):
 def _double_edge(edge):
     a, b = edge
     return geometry.canonical_edge((a[0] * 2, a[1] * 2), (b[0] * 2, b[1] * 2))
-
-
-def _doubled_bbox(edges):
-    xs = []
-    ys = []
-    for a, b in edges:
-        xs.extend((a[0], b[0]))
-        ys.extend((a[1], b[1]))
-    if not xs:
-        return None
-    return (min(xs), min(ys), max(xs), max(ys))
 
 
 def _rotate90(point, cx, cy):

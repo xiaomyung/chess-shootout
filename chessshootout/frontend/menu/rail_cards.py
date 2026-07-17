@@ -432,10 +432,10 @@ class CardStack(ScrollHost):
         pad = self._s(PAD_X, 10)
         chevron_w = chevron_surface(self._s(CHEVRON_SIZE, 9), Colors.text_dim, up=False).get_width()
         label = render_text(self._badge_font, str(count), Colors.amber_hi)
-        bw = label.get_width() + self._s(12, 8)
-        bh = label.get_height() + self._s(4, 3)
+        badge_w = label.get_width() + self._s(12, 8)
+        badge_h = label.get_height() + self._s(4, 3)
         right = header.right - pad - chevron_w - self._s(8, 6)
-        badge = pg.Rect(right - bw, header.centery - bh // 2, bw, bh)
+        badge = pg.Rect(right - badge_w, header.centery - badge_h // 2, badge_w, badge_h)
         window.blit(cut_rect_surface(badge.size, self._s(4, 3), Colors.amber + "26",
                                      border=Colors.amber + "5c", border_width=1,
                                      corners=("tr", "bl")), badge.topleft)

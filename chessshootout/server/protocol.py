@@ -75,8 +75,6 @@ class Reason:
     REMATCH_UNAVAILABLE = "rematch_unavailable"
     REMATCH_ALREADY_PENDING = "rematch_already_pending"
     NO_TAKEBACK_AVAILABLE = "no_takeback_available"
-    MARKS_BLOCKED = "marks_blocked"
-    MARKS_SUSPECT = "marks_suspect"
     SHARE_MUTED = "share_muted"
     OPP_HIDES_MARKS = "opp_hides_marks"
 

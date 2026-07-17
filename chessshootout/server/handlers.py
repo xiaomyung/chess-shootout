@@ -55,6 +55,10 @@ def _clock_snapshot(clock):
     )
 
 
+def _arrow_wires(pairs):
+    return [ArrowWire(from_sq=a[0], to_sq=a[1]) for a in pairs]
+
+
 def peek_type(raw):
     try:
         return json.loads(raw).get("type")
@@ -605,8 +609,7 @@ async def _moderate_relay(app, room, color, relay_msg, changed, msg_type):
                  AnnotationsBlockedMessage(
                      action="suspect",
                      highlights=list(verdict.matched_highlights),
-                     arrows=[ArrowWire(from_sq=a[0], to_sq=a[1])
-                             for a in verdict.matched_arrows],
+                     arrows=_arrow_wires(verdict.matched_arrows),
                      share_muted=room.annotations_for(color).share_muted))
     return "suspect"
 
@@ -634,8 +637,7 @@ async def _handle_block(app, room, color, verdict, is_union):
                  AnnotationsBlockedMessage(
                      action="blocked",
                      highlights=list(verdict.matched_highlights),
-                     arrows=[ArrowWire(from_sq=a[0], to_sq=a[1])
-                             for a in verdict.matched_arrows],
+                     arrows=_arrow_wires(verdict.matched_arrows),
                      share_muted=muted))
 
 
@@ -660,7 +662,7 @@ async def _corrective_snapshot(app, room, source_color):
     store = room.annotations_for(source_color)
     await send(target_ws, AnnotationsStateMessage(
         sharing=True, highlights=sorted(store.highlights),
-        arrows=[ArrowWire(from_sq=a[0], to_sq=a[1]) for a in store.arrows]))
+        arrows=_arrow_wires(store.arrows)))
 
 
 async def _relay_plain(connections, room, color, msg):
@@ -709,7 +711,7 @@ async def handle_set_marks_visibility(app, websocket, room, color, raw):
     opp_store = room.annotations_for(room.opp_color(color))
     await send(connections.get_for_color(room, color), AnnotationsStateMessage(
         sharing=opp_store.sharing, highlights=sorted(opp_store.highlights),
-        arrows=[ArrowWire(from_sq=a[0], to_sq=a[1]) for a in opp_store.arrows]))
+        arrows=_arrow_wires(opp_store.arrows)))
     return "shown"
 
 

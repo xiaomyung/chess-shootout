@@ -252,7 +252,7 @@ def bitmap_and(a, b):
     return [x & y for x, y in zip(a, b)]
 
 
-def embed(rows, width, offset_x, offset_y, board_width_px, board_height_px):
+def embed(rows, offset_x, offset_y, board_width_px, board_height_px):
     placed = [0] * board_height_px
     board_mask = (1 << board_width_px) - 1
     for y, row in enumerate(rows):
