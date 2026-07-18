@@ -1113,6 +1113,9 @@ class RightMenu:
             if not rect.collidepoint(pos):
                 continue
             if chip.key == "share" and not state.get("share_enabled"):
+                blocked = self.callbacks.get("share_blocked")
+                if blocked is not None:
+                    blocked()
                 return True
             callback = self.callbacks.get(chip.callback)
             if callback is not None:

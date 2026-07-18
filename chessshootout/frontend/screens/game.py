@@ -203,6 +203,7 @@ class GameScreen(Screen):
             "help": app._on_help,
             "give_time": self.give_time.on_give_time,
             "share_toggle": self._on_share_toggle,
+            "share_blocked": self._on_share_blocked,
             "auto_q_toggle": self._toggle_auto_queen,
             "sound_toggle": lambda: signal_controls.toggle_sound(app),
             "set_volume": lambda value: signal_controls.set_signal_volume(app, value),
@@ -1080,6 +1081,10 @@ class GameScreen(Screen):
     def _share_active(self):
         return (self.variant == Variant.ONLINE and self.current_result() is None
                 and not self._share_muted)
+
+    def _on_share_blocked(self):
+        if self._share_muted:
+            self.app.toast.show("Mark sharing is muted for this game", key="marks_muted")
 
     def _on_share_toggle(self):
         if not self._share_active():

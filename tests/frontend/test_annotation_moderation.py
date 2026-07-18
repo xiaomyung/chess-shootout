@@ -181,6 +181,23 @@ def test_reset_to_new_game_clears_mute():
     assert game._share_muted is False
 
 
+def test_clicking_muted_share_reshows_the_muted_toast():
+    game = _online_game()
+    game._share_muted = True
+    game.app.toast.show = MagicMock()
+    game._on_share_blocked()
+    game.app.toast.show.assert_called_once_with(
+        "Mark sharing is muted for this game", key="marks_muted")
+
+
+def test_share_blocked_is_silent_when_not_muted():
+    game = _online_game()
+    game._share_muted = False
+    game.app.toast.show = MagicMock()
+    game._on_share_blocked()
+    game.app.toast.show.assert_not_called()
+
+
 def test_muted_share_stops_client_sends():
     game = _online_game()
     game._share_marks = True
