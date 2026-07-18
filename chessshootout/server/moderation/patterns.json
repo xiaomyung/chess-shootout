@@ -11,66 +11,12 @@
       "coverage_threshold": 0.85,
       "iou_threshold": null,
       "segments": [
-        [
-          [
-            3,
-            1
-          ],
-          [
-            3,
-            5
-          ]
-        ],
-        [
-          [
-            1,
-            3
-          ],
-          [
-            5,
-            3
-          ]
-        ],
-        [
-          [
-            3,
-            1
-          ],
-          [
-            5,
-            1
-          ]
-        ],
-        [
-          [
-            5,
-            3
-          ],
-          [
-            5,
-            5
-          ]
-        ],
-        [
-          [
-            3,
-            5
-          ],
-          [
-            1,
-            5
-          ]
-        ],
-        [
-          [
-            1,
-            3
-          ],
-          [
-            1,
-            1
-          ]
-        ]
+        [[3, 1], [3, 5]],
+        [[1, 3], [5, 3]],
+        [[3, 1], [5, 1]],
+        [[5, 3], [5, 5]],
+        [[3, 5], [1, 5]],
+        [[1, 3], [1, 1]]
       ],
       "provenance": {
         "source": "hand",
@@ -89,66 +35,12 @@
       "coverage_threshold": 0.85,
       "iou_threshold": null,
       "segments": [
-        [
-          [
-            3,
-            2
-          ],
-          [
-            3,
-            4
-          ]
-        ],
-        [
-          [
-            2,
-            3
-          ],
-          [
-            4,
-            3
-          ]
-        ],
-        [
-          [
-            3,
-            2
-          ],
-          [
-            4,
-            2
-          ]
-        ],
-        [
-          [
-            4,
-            3
-          ],
-          [
-            4,
-            4
-          ]
-        ],
-        [
-          [
-            3,
-            4
-          ],
-          [
-            2,
-            4
-          ]
-        ],
-        [
-          [
-            2,
-            3
-          ],
-          [
-            2,
-            2
-          ]
-        ]
+        [[3, 2], [3, 4]],
+        [[2, 3], [4, 3]],
+        [[3, 2], [4, 2]],
+        [[4, 3], [4, 4]],
+        [[3, 4], [2, 4]],
+        [[2, 3], [2, 2]]
       ],
       "provenance": {
         "source": "hand",
@@ -167,72 +59,14 @@
       "coverage_threshold": 0.85,
       "iou_threshold": null,
       "segments": [
-        [
-          [
-            1,
-            1
-          ],
-          [
-            5,
-            5
-          ]
-        ],
-        [
-          [
-            5,
-            1
-          ],
-          [
-            1,
-            5
-          ]
-        ],
-        [
-          [
-            1,
-            1
-          ],
-          [
-            2,
-            0
-          ]
-        ],
-        [
-          [
-            5,
-            1
-          ],
-          [
-            6,
-            2
-          ]
-        ],
-        [
-          [
-            5,
-            5
-          ],
-          [
-            4,
-            6
-          ]
-        ],
-        [
-          [
-            1,
-            5
-          ],
-          [
-            0,
-            4
-          ]
-        ]
+        [[1, 1], [5, 5]],
+        [[5, 1], [1, 5]],
+        [[1, 1], [2, 0]],
+        [[5, 1], [6, 2]],
+        [[5, 5], [4, 6]],
+        [[1, 5], [0, 4]]
       ],
-      "provenance": {
-        "source": "hand",
-        "ref": "45-degree Nazi-flag diamond swastika",
-        "unicode": "U+5350"
-      }
+      "provenance": {"source": "hand", "ref": "45-degree Nazi-flag diamond swastika", "unicode": "U+5350"}
     },
     {
       "id": "swastika_knight4",
@@ -245,86 +79,14 @@
       "coverage_threshold": 0.85,
       "iou_threshold": null,
       "segments": [
-        [
-          [
-            3,
-            3
-          ],
-          [
-            3,
-            1
-          ]
-        ],
-        [
-          [
-            3,
-            1
-          ],
-          [
-            4,
-            1
-          ]
-        ],
-        [
-          [
-            3,
-            3
-          ],
-          [
-            5,
-            3
-          ]
-        ],
-        [
-          [
-            5,
-            3
-          ],
-          [
-            5,
-            4
-          ]
-        ],
-        [
-          [
-            3,
-            3
-          ],
-          [
-            3,
-            5
-          ]
-        ],
-        [
-          [
-            3,
-            5
-          ],
-          [
-            2,
-            5
-          ]
-        ],
-        [
-          [
-            3,
-            3
-          ],
-          [
-            1,
-            3
-          ]
-        ],
-        [
-          [
-            1,
-            3
-          ],
-          [
-            1,
-            2
-          ]
-        ]
+        [[3, 3], [3, 1]],
+        [[3, 1], [4, 1]],
+        [[3, 3], [5, 3]],
+        [[5, 3], [5, 4]],
+        [[3, 3], [3, 5]],
+        [[3, 5], [2, 5]],
+        [[3, 3], [1, 3]],
+        [[1, 3], [1, 2]]
       ],
       "provenance": {
         "source": "hand",
@@ -351,11 +113,7 @@
         "...#..#",
         "####..#"
       ],
-      "provenance": {
-        "source": "hand",
-        "ref": "7x7 highlight swastika",
-        "unicode": "U+5350"
-      }
+      "provenance": {"source": "hand", "ref": "7x7 highlight swastika", "unicode": "U+5350"}
     },
     {
       "id": "swastika_raster5",
@@ -374,11 +132,7 @@
         "..#.#",
         "###.#"
       ],
-      "provenance": {
-        "source": "hand",
-        "ref": "5x5 minimal highlight swastika",
-        "unicode": "U+5350"
-      }
+      "provenance": {"source": "hand", "ref": "5x5 minimal highlight swastika", "unicode": "U+5350"}
     },
     {
       "id": "ss_bolts_vector",
@@ -391,66 +145,12 @@
       "coverage_threshold": 0.85,
       "iou_threshold": null,
       "segments": [
-        [
-          [
-            1,
-            0
-          ],
-          [
-            3,
-            2
-          ]
-        ],
-        [
-          [
-            3,
-            2
-          ],
-          [
-            1,
-            4
-          ]
-        ],
-        [
-          [
-            1,
-            4
-          ],
-          [
-            3,
-            6
-          ]
-        ],
-        [
-          [
-            4,
-            0
-          ],
-          [
-            6,
-            2
-          ]
-        ],
-        [
-          [
-            6,
-            2
-          ],
-          [
-            4,
-            4
-          ]
-        ],
-        [
-          [
-            4,
-            4
-          ],
-          [
-            6,
-            6
-          ]
-        ]
+        [[1, 0], [3, 2]],
+        [[3, 2], [1, 4]],
+        [[1, 4], [3, 6]],
+        [[4, 0], [6, 2]],
+        [[6, 2], [4, 4]],
+        [[4, 4], [6, 6]]
       ],
       "provenance": {
         "source": "hand",
@@ -477,11 +177,7 @@
         ".#...#.",
         "..#...#"
       ],
-      "provenance": {
-        "source": "hand",
-        "ref": "paired sig-rune zigzag highlight raster",
-        "unicode": "U+16CB"
-      }
+      "provenance": {"source": "hand", "ref": "paired sig-rune zigzag highlight raster", "unicode": "U+16CB"}
     },
     {
       "id": "kolovrat_vector",
@@ -494,126 +190,18 @@
       "coverage_threshold": 0.85,
       "iou_threshold": null,
       "segments": [
-        [
-          [
-            3,
-            1
-          ],
-          [
-            3,
-            5
-          ]
-        ],
-        [
-          [
-            1,
-            3
-          ],
-          [
-            5,
-            3
-          ]
-        ],
-        [
-          [
-            1,
-            1
-          ],
-          [
-            5,
-            5
-          ]
-        ],
-        [
-          [
-            5,
-            1
-          ],
-          [
-            1,
-            5
-          ]
-        ],
-        [
-          [
-            3,
-            1
-          ],
-          [
-            4,
-            1
-          ]
-        ],
-        [
-          [
-            5,
-            1
-          ],
-          [
-            6,
-            2
-          ]
-        ],
-        [
-          [
-            5,
-            3
-          ],
-          [
-            5,
-            4
-          ]
-        ],
-        [
-          [
-            5,
-            5
-          ],
-          [
-            4,
-            6
-          ]
-        ],
-        [
-          [
-            3,
-            5
-          ],
-          [
-            2,
-            5
-          ]
-        ],
-        [
-          [
-            1,
-            5
-          ],
-          [
-            0,
-            4
-          ]
-        ],
-        [
-          [
-            1,
-            3
-          ],
-          [
-            1,
-            2
-          ]
-        ],
-        [
-          [
-            1,
-            1
-          ],
-          [
-            2,
-            0
-          ]
-        ]
+        [[3, 1], [3, 5]],
+        [[1, 3], [5, 3]],
+        [[1, 1], [5, 5]],
+        [[5, 1], [1, 5]],
+        [[3, 1], [4, 1]],
+        [[5, 1], [6, 2]],
+        [[5, 3], [5, 4]],
+        [[5, 5], [4, 6]],
+        [[3, 5], [2, 5]],
+        [[1, 5], [0, 4]],
+        [[1, 3], [1, 2]],
+        [[1, 1], [2, 0]]
       ],
       "provenance": {
         "source": "hand",
@@ -631,48 +219,7 @@
       "scale_max": 1,
       "coverage_threshold": 0.95,
       "iou_threshold": null,
-      "segments": [
-        [
-          [
-            3,
-            0
-          ],
-          [
-            5,
-            2
-          ]
-        ],
-        [
-          [
-            5,
-            2
-          ],
-          [
-            1,
-            6
-          ]
-        ],
-        [
-          [
-            1,
-            2
-          ],
-          [
-            5,
-            6
-          ]
-        ],
-        [
-          [
-            3,
-            0
-          ],
-          [
-            1,
-            2
-          ]
-        ]
-      ],
+      "segments": [[[3, 0], [5, 2]], [[5, 2], [1, 6]], [[1, 2], [5, 6]], [[3, 0], [1, 2]]],
       "provenance": {
         "source": "hand",
         "ref": "https://www.adl.org/resources/hate-symbols/search (Othala Rune); diamond over crossed extended legs",
@@ -689,48 +236,7 @@
       "scale_max": 1,
       "coverage_threshold": 0.95,
       "iou_threshold": null,
-      "segments": [
-        [
-          [
-            1,
-            1
-          ],
-          [
-            5,
-            1
-          ]
-        ],
-        [
-          [
-            5,
-            1
-          ],
-          [
-            1,
-            5
-          ]
-        ],
-        [
-          [
-            1,
-            5
-          ],
-          [
-            5,
-            5
-          ]
-        ],
-        [
-          [
-            2,
-            3
-          ],
-          [
-            4,
-            3
-          ]
-        ]
-      ],
+      "segments": [[[1, 1], [5, 1]], [[5, 1], [1, 5]], [[1, 5], [5, 5]], [[2, 3], [4, 3]]],
       "provenance": {
         "source": "hand",
         "ref": "https://www.adl.org/resources/hate-symbols/search (Wolfsangel); barred-Z, crossbar is the discriminator",
@@ -748,66 +254,12 @@
       "coverage_threshold": 0.95,
       "iou_threshold": null,
       "segments": [
-        [
-          [
-            0,
-            4
-          ],
-          [
-            6,
-            4
-          ]
-        ],
-        [
-          [
-            0,
-            4
-          ],
-          [
-            3,
-            1
-          ]
-        ],
-        [
-          [
-            6,
-            4
-          ],
-          [
-            3,
-            1
-          ]
-        ],
-        [
-          [
-            0,
-            2
-          ],
-          [
-            6,
-            2
-          ]
-        ],
-        [
-          [
-            0,
-            2
-          ],
-          [
-            3,
-            5
-          ]
-        ],
-        [
-          [
-            6,
-            2
-          ],
-          [
-            3,
-            5
-          ]
-        ]
+        [[0, 4], [6, 4]],
+        [[0, 4], [3, 1]],
+        [[6, 4], [3, 1]],
+        [[0, 2], [6, 2]],
+        [[0, 2], [3, 5]],
+        [[6, 2], [3, 5]]
       ],
       "provenance": {
         "source": "hand",
@@ -827,146 +279,20 @@
       "coverage_threshold": 0.9,
       "iou_threshold": null,
       "segments": [
-        [
-          [
-            1,
-            0
-          ],
-          [
-            1,
-            2
-          ]
-        ],
-        [
-          [
-            3,
-            0
-          ],
-          [
-            3,
-            1
-          ]
-        ],
-        [
-          [
-            3,
-            1
-          ],
-          [
-            4,
-            1
-          ]
-        ],
-        [
-          [
-            4,
-            0
-          ],
-          [
-            4,
-            2
-          ]
-        ],
-        [
-          [
-            1,
-            4
-          ],
-          [
-            1,
-            6
-          ]
-        ],
-        [
-          [
-            2,
-            4
-          ],
-          [
-            2,
-            6
-          ]
-        ],
-        [
-          [
-            1,
-            4
-          ],
-          [
-            2,
-            4
-          ]
-        ],
-        [
-          [
-            1,
-            5
-          ],
-          [
-            2,
-            5
-          ]
-        ],
-        [
-          [
-            1,
-            6
-          ],
-          [
-            2,
-            6
-          ]
-        ],
-        [
-          [
-            4,
-            4
-          ],
-          [
-            4,
-            6
-          ]
-        ],
-        [
-          [
-            5,
-            4
-          ],
-          [
-            5,
-            6
-          ]
-        ],
-        [
-          [
-            4,
-            4
-          ],
-          [
-            5,
-            4
-          ]
-        ],
-        [
-          [
-            4,
-            5
-          ],
-          [
-            5,
-            5
-          ]
-        ],
-        [
-          [
-            4,
-            6
-          ],
-          [
-            5,
-            6
-          ]
-        ]
+        [[1, 0], [1, 2]],
+        [[3, 0], [3, 1]],
+        [[3, 1], [4, 1]],
+        [[4, 0], [4, 2]],
+        [[1, 4], [1, 6]],
+        [[2, 4], [2, 6]],
+        [[1, 4], [2, 4]],
+        [[1, 5], [2, 5]],
+        [[1, 6], [2, 6]],
+        [[4, 4], [4, 6]],
+        [[5, 4], [5, 6]],
+        [[4, 4], [5, 4]],
+        [[4, 5], [5, 5]],
+        [[4, 6], [5, 6]]
       ],
       "provenance": {
         "source": "hand",
@@ -995,11 +321,7 @@
         "###.###",
         "###.###"
       ],
-      "provenance": {
-        "source": "hand",
-        "ref": "stacked highlight 14 (rows0-3) over 88 (rows4-7)",
-        "unicode": null
-      }
+      "provenance": {"source": "hand", "ref": "stacked highlight 14 (rows0-3) over 88 (rows4-7)", "unicode": null}
     },
     {
       "id": "code_kkk_vector",
@@ -1012,96 +334,15 @@
       "coverage_threshold": 0.95,
       "iou_threshold": null,
       "segments": [
-        [
-          [
-            0,
-            1
-          ],
-          [
-            0,
-            5
-          ]
-        ],
-        [
-          [
-            0,
-            3
-          ],
-          [
-            1,
-            1
-          ]
-        ],
-        [
-          [
-            0,
-            3
-          ],
-          [
-            1,
-            5
-          ]
-        ],
-        [
-          [
-            3,
-            1
-          ],
-          [
-            3,
-            5
-          ]
-        ],
-        [
-          [
-            3,
-            3
-          ],
-          [
-            4,
-            1
-          ]
-        ],
-        [
-          [
-            3,
-            3
-          ],
-          [
-            4,
-            5
-          ]
-        ],
-        [
-          [
-            6,
-            1
-          ],
-          [
-            6,
-            5
-          ]
-        ],
-        [
-          [
-            6,
-            3
-          ],
-          [
-            7,
-            1
-          ]
-        ],
-        [
-          [
-            6,
-            3
-          ],
-          [
-            7,
-            5
-          ]
-        ]
+        [[0, 1], [0, 5]],
+        [[0, 3], [1, 1]],
+        [[0, 3], [1, 5]],
+        [[3, 1], [3, 5]],
+        [[3, 3], [4, 1]],
+        [[3, 3], [4, 5]],
+        [[6, 1], [6, 5]],
+        [[6, 3], [7, 1]],
+        [[6, 3], [7, 5]]
       ],
       "provenance": {
         "source": "hand",
@@ -1120,122 +361,19 @@
       "coverage_threshold": 0.95,
       "iou_threshold": null,
       "segments": [
-        [
-          [
-            0,
-            1
-          ],
-          [
-            0,
-            5
-          ]
-        ],
-        [
-          [
-            0,
-            3
-          ],
-          [
-            1,
-            1
-          ]
-        ],
-        [
-          [
-            0,
-            3
-          ],
-          [
-            1,
-            5
-          ]
-        ],
-        [
-          [
-            2,
-            1
-          ],
-          [
-            3,
-            3
-          ]
-        ],
-        [
-          [
-            4,
-            1
-          ],
-          [
-            3,
-            3
-          ]
-        ],
-        [
-          [
-            3,
-            3
-          ],
-          [
-            3,
-            5
-          ]
-        ],
-        [
-          [
-            7,
-            1
-          ],
-          [
-            5,
-            1
-          ]
-        ],
-        [
-          [
-            5,
-            1
-          ],
-          [
-            5,
-            3
-          ]
-        ],
-        [
-          [
-            5,
-            3
-          ],
-          [
-            7,
-            3
-          ]
-        ],
-        [
-          [
-            7,
-            3
-          ],
-          [
-            7,
-            5
-          ]
-        ],
-        [
-          [
-            7,
-            5
-          ],
-          [
-            5,
-            5
-          ]
-        ]
+        [[0, 1], [0, 5]],
+        [[0, 3], [1, 1]],
+        [[0, 3], [1, 5]],
+        [[2, 1], [3, 3]],
+        [[4, 1], [3, 3]],
+        [[3, 3], [3, 5]],
+        [[7, 1], [5, 1]],
+        [[5, 1], [5, 3]],
+        [[5, 3], [7, 3]],
+        [[7, 3], [7, 5]],
+        [[7, 5], [5, 5]]
       ],
-      "provenance": {
-        "source": "hand",
-        "ref": "harassment 'KYS'; K/Y/S letter glyphs",
-        "unicode": null
-      }
+      "provenance": {"source": "hand", "ref": "harassment 'KYS'; K/Y/S letter glyphs", "unicode": null}
     },
     {
       "id": "code_88",
@@ -1353,11 +491,7 @@
         "...#....",
         "..#.#..."
       ],
-      "provenance": {
-        "source": "hand",
-        "ref": "minimal mixed shaft-arrow + two testicle blobs",
-        "unicode": null
-      }
+      "provenance": {"source": "hand", "ref": "minimal mixed shaft-arrow + two testicle blobs", "unicode": null}
     },
     {
       "id": "penis_vector",
@@ -1370,112 +504,18 @@
       "coverage_threshold": 0.85,
       "iou_threshold": null,
       "segments": [
-        [
-          [
-            2,
-            5
-          ],
-          [
-            2,
-            1
-          ]
-        ],
-        [
-          [
-            4,
-            5
-          ],
-          [
-            4,
-            1
-          ]
-        ],
-        [
-          [
-            2,
-            1
-          ],
-          [
-            3,
-            0
-          ]
-        ],
-        [
-          [
-            3,
-            0
-          ],
-          [
-            4,
-            1
-          ]
-        ],
-        [
-          [
-            2,
-            5
-          ],
-          [
-            1,
-            6
-          ]
-        ],
-        [
-          [
-            1,
-            6
-          ],
-          [
-            2,
-            7
-          ]
-        ],
-        [
-          [
-            2,
-            7
-          ],
-          [
-            3,
-            6
-          ]
-        ],
-        [
-          [
-            4,
-            5
-          ],
-          [
-            5,
-            6
-          ]
-        ],
-        [
-          [
-            5,
-            6
-          ],
-          [
-            4,
-            7
-          ]
-        ],
-        [
-          [
-            4,
-            7
-          ],
-          [
-            3,
-            6
-          ]
-        ]
+        [[2, 5], [2, 1]],
+        [[4, 5], [4, 1]],
+        [[2, 1], [3, 0]],
+        [[3, 0], [4, 1]],
+        [[2, 5], [1, 6]],
+        [[1, 6], [2, 7]],
+        [[2, 7], [3, 6]],
+        [[4, 5], [5, 6]],
+        [[5, 6], [4, 7]],
+        [[4, 7], [3, 6]]
       ],
-      "provenance": {
-        "source": "hand",
-        "ref": "10-segment penis outline",
-        "unicode": null
-      }
+      "provenance": {"source": "hand", "ref": "10-segment penis outline", "unicode": null}
     },
     {
       "id": "penis_raster",
@@ -1497,11 +537,7 @@
         ".######.",
         ".##..##."
       ],
-      "provenance": {
-        "source": "hand",
-        "ref": "8x8 highlight penis",
-        "unicode": null
-      }
+      "provenance": {"source": "hand", "ref": "8x8 highlight penis", "unicode": null}
     },
     {
       "id": "middlefinger_raster",
@@ -1523,11 +559,7 @@
         ".######.",
         "..####.."
       ],
-      "provenance": {
-        "source": "hand",
-        "ref": "raised middle finger with knuckle gaps",
-        "unicode": null
-      }
+      "provenance": {"source": "hand", "ref": "raised middle finger with knuckle gaps", "unicode": null}
     },
     {
       "id": "code_12",
@@ -1547,11 +579,7 @@
         "#.#..",
         "#.###"
       ],
-      "provenance": {
-        "source": "hand",
-        "ref": "long-tail co-occurrence booster",
-        "unicode": null
-      }
+      "provenance": {"source": "hand", "ref": "long-tail co-occurrence booster", "unicode": null}
     },
     {
       "id": "code_23",
@@ -1571,11 +599,7 @@
         "#.....#",
         "###.###"
       ],
-      "provenance": {
-        "source": "hand",
-        "ref": "long-tail co-occurrence booster",
-        "unicode": null
-      }
+      "provenance": {"source": "hand", "ref": "long-tail co-occurrence booster", "unicode": null}
     },
     {
       "id": "code_28",
@@ -1595,11 +619,7 @@
         "#...#.#",
         "###.###"
       ],
-      "provenance": {
-        "source": "hand",
-        "ref": "long-tail co-occurrence booster",
-        "unicode": null
-      }
+      "provenance": {"source": "hand", "ref": "long-tail co-occurrence booster", "unicode": null}
     },
     {
       "id": "code_38",
@@ -1619,11 +639,7 @@
         "..#.#.#",
         "###.###"
       ],
-      "provenance": {
-        "source": "hand",
-        "ref": "long-tail co-occurrence booster",
-        "unicode": null
-      }
+      "provenance": {"source": "hand", "ref": "long-tail co-occurrence booster", "unicode": null}
     },
     {
       "id": "code_43",
@@ -1643,11 +659,7 @@
         "..#...#",
         "..#.###"
       ],
-      "provenance": {
-        "source": "hand",
-        "ref": "long-tail co-occurrence booster",
-        "unicode": null
-      }
+      "provenance": {"source": "hand", "ref": "long-tail co-occurrence booster", "unicode": null}
     },
     {
       "id": "code_83",
@@ -1667,11 +679,7 @@
         "#.#...#",
         "###.###"
       ],
-      "provenance": {
-        "source": "hand",
-        "ref": "long-tail co-occurrence booster",
-        "unicode": null
-      }
+      "provenance": {"source": "hand", "ref": "long-tail co-occurrence booster", "unicode": null}
     },
     {
       "id": "code_511",
@@ -1691,11 +699,7 @@
         "..#.#.#",
         "###.#.#"
       ],
-      "provenance": {
-        "source": "hand",
-        "ref": "long-tail co-occurrence booster",
-        "unicode": null
-      }
+      "provenance": {"source": "hand", "ref": "long-tail co-occurrence booster", "unicode": null}
     },
     {
       "id": "code_318",
@@ -1709,112 +713,18 @@
       "coverage_threshold": 0.95,
       "iou_threshold": null,
       "segments": [
-        [
-          [
-            0,
-            0
-          ],
-          [
-            1,
-            0
-          ]
-        ],
-        [
-          [
-            0,
-            1
-          ],
-          [
-            1,
-            1
-          ]
-        ],
-        [
-          [
-            0,
-            2
-          ],
-          [
-            1,
-            2
-          ]
-        ],
-        [
-          [
-            1,
-            0
-          ],
-          [
-            1,
-            2
-          ]
-        ],
-        [
-          [
-            3,
-            0
-          ],
-          [
-            3,
-            2
-          ]
-        ],
-        [
-          [
-            6,
-            0
-          ],
-          [
-            6,
-            2
-          ]
-        ],
-        [
-          [
-            7,
-            0
-          ],
-          [
-            7,
-            2
-          ]
-        ],
-        [
-          [
-            6,
-            0
-          ],
-          [
-            7,
-            0
-          ]
-        ],
-        [
-          [
-            6,
-            1
-          ],
-          [
-            7,
-            1
-          ]
-        ],
-        [
-          [
-            6,
-            2
-          ],
-          [
-            7,
-            2
-          ]
-        ]
+        [[0, 0], [1, 0]],
+        [[0, 1], [1, 1]],
+        [[0, 2], [1, 2]],
+        [[1, 0], [1, 2]],
+        [[3, 0], [3, 2]],
+        [[6, 0], [6, 2]],
+        [[7, 0], [7, 2]],
+        [[6, 0], [7, 0]],
+        [[6, 1], [7, 1]],
+        [[6, 2], [7, 2]]
       ],
-      "provenance": {
-        "source": "hand",
-        "ref": "long-tail co-occurrence booster (7-seg arrows)",
-        "unicode": null
-      }
+      "provenance": {"source": "hand", "ref": "long-tail co-occurrence booster (7-seg arrows)", "unicode": null}
     },
     {
       "id": "code_737",
@@ -1828,92 +738,16 @@
       "coverage_threshold": 0.95,
       "iou_threshold": null,
       "segments": [
-        [
-          [
-            0,
-            0
-          ],
-          [
-            1,
-            0
-          ]
-        ],
-        [
-          [
-            1,
-            0
-          ],
-          [
-            1,
-            2
-          ]
-        ],
-        [
-          [
-            3,
-            0
-          ],
-          [
-            4,
-            0
-          ]
-        ],
-        [
-          [
-            3,
-            1
-          ],
-          [
-            4,
-            1
-          ]
-        ],
-        [
-          [
-            3,
-            2
-          ],
-          [
-            4,
-            2
-          ]
-        ],
-        [
-          [
-            4,
-            0
-          ],
-          [
-            4,
-            2
-          ]
-        ],
-        [
-          [
-            6,
-            0
-          ],
-          [
-            7,
-            0
-          ]
-        ],
-        [
-          [
-            7,
-            0
-          ],
-          [
-            7,
-            2
-          ]
-        ]
+        [[0, 0], [1, 0]],
+        [[1, 0], [1, 2]],
+        [[3, 0], [4, 0]],
+        [[3, 1], [4, 1]],
+        [[3, 2], [4, 2]],
+        [[4, 0], [4, 2]],
+        [[6, 0], [7, 0]],
+        [[7, 0], [7, 2]]
       ],
-      "provenance": {
-        "source": "hand",
-        "ref": "long-tail co-occurrence booster (7-seg arrows)",
-        "unicode": null
-      }
+      "provenance": {"source": "hand", "ref": "long-tail co-occurrence booster (7-seg arrows)", "unicode": null}
     },
     {
       "id": "ss_bolt_single",
@@ -1925,38 +759,7 @@
       "scale_max": 1,
       "coverage_threshold": 0.95,
       "iou_threshold": null,
-      "segments": [
-        [
-          [
-            2,
-            0
-          ],
-          [
-            4,
-            2
-          ]
-        ],
-        [
-          [
-            4,
-            2
-          ],
-          [
-            2,
-            4
-          ]
-        ],
-        [
-          [
-            2,
-            4
-          ],
-          [
-            4,
-            6
-          ]
-        ]
-      ],
+      "segments": [[[2, 0], [4, 2]], [[4, 2], [2, 4]], [[2, 4], [4, 6]]],
       "provenance": {
         "source": "hand",
         "ref": "single sig rune; component of ss_bolts, never fire alone",
@@ -1974,92 +777,16 @@
       "coverage_threshold": 0.9,
       "iou_threshold": null,
       "segments": [
-        [
-          [
-            2,
-            0
-          ],
-          [
-            5,
-            0
-          ]
-        ],
-        [
-          [
-            5,
-            0
-          ],
-          [
-            7,
-            2
-          ]
-        ],
-        [
-          [
-            7,
-            2
-          ],
-          [
-            7,
-            5
-          ]
-        ],
-        [
-          [
-            7,
-            5
-          ],
-          [
-            5,
-            7
-          ]
-        ],
-        [
-          [
-            5,
-            7
-          ],
-          [
-            2,
-            7
-          ]
-        ],
-        [
-          [
-            2,
-            7
-          ],
-          [
-            0,
-            5
-          ]
-        ],
-        [
-          [
-            0,
-            5
-          ],
-          [
-            0,
-            2
-          ]
-        ],
-        [
-          [
-            0,
-            2
-          ],
-          [
-            2,
-            0
-          ]
-        ]
+        [[2, 0], [5, 0]],
+        [[5, 0], [7, 2]],
+        [[7, 2], [7, 5]],
+        [[7, 5], [5, 7]],
+        [[5, 7], [2, 7]],
+        [[2, 7], [0, 5]],
+        [[0, 5], [0, 2]],
+        [[0, 2], [2, 0]]
       ],
-      "provenance": {
-        "source": "hand",
-        "ref": "octagon ring; escalation booster around kolovrat",
-        "unicode": null
-      }
+      "provenance": {"source": "hand", "ref": "octagon ring; escalation booster around kolovrat", "unicode": null}
     },
     {
       "id": "life_rune",
@@ -2071,38 +798,7 @@
       "scale_max": 1,
       "coverage_threshold": 0.9,
       "iou_threshold": null,
-      "segments": [
-        [
-          [
-            3,
-            0
-          ],
-          [
-            3,
-            6
-          ]
-        ],
-        [
-          [
-            3,
-            2
-          ],
-          [
-            1,
-            0
-          ]
-        ],
-        [
-          [
-            3,
-            2
-          ],
-          [
-            5,
-            0
-          ]
-        ]
-      ],
+      "segments": [[[3, 0], [3, 6]], [[3, 2], [1, 0]], [[3, 2], [5, 0]]],
       "provenance": {
         "source": "hand",
         "ref": "Lebensrune; component, pair with death_rune to escalate",
@@ -2119,38 +815,7 @@
       "scale_max": 1,
       "coverage_threshold": 0.9,
       "iou_threshold": null,
-      "segments": [
-        [
-          [
-            3,
-            0
-          ],
-          [
-            3,
-            6
-          ]
-        ],
-        [
-          [
-            3,
-            4
-          ],
-          [
-            1,
-            6
-          ]
-        ],
-        [
-          [
-            3,
-            4
-          ],
-          [
-            5,
-            6
-          ]
-        ]
-      ],
+      "segments": [[[3, 0], [3, 6]], [[3, 4], [1, 6]], [[3, 4], [5, 6]]],
       "provenance": {
         "source": "hand",
         "ref": "Todesrune; component, pair with life_rune to escalate",
@@ -2176,11 +841,7 @@
         "###.###",
         "##...##"
       ],
-      "provenance": {
-        "source": "hand",
-        "ref": "collapses to fat plus at 8x8; FP-fatal, never enable",
-        "unicode": null
-      }
+      "provenance": {"source": "hand", "ref": "collapses to fat plus at 8x8; FP-fatal, never enable", "unicode": null}
     },
     {
       "id": "totenkopf",
@@ -2200,11 +861,7 @@
         "..####..",
         "..#..#.."
       ],
-      "provenance": {
-        "source": "hand",
-        "ref": "reads as generic skull; co-occurrence booster only",
-        "unicode": null
-      }
+      "provenance": {"source": "hand", "ref": "reads as generic skull; co-occurrence booster only", "unicode": null}
     },
     {
       "id": "triskele",
@@ -2217,66 +874,12 @@
       "coverage_threshold": 0.9,
       "iou_threshold": null,
       "segments": [
-        [
-          [
-            3,
-            3
-          ],
-          [
-            3,
-            1
-          ]
-        ],
-        [
-          [
-            3,
-            1
-          ],
-          [
-            4,
-            1
-          ]
-        ],
-        [
-          [
-            3,
-            3
-          ],
-          [
-            5,
-            4
-          ]
-        ],
-        [
-          [
-            5,
-            4
-          ],
-          [
-            5,
-            5
-          ]
-        ],
-        [
-          [
-            3,
-            3
-          ],
-          [
-            1,
-            4
-          ]
-        ],
-        [
-          [
-            1,
-            4
-          ],
-          [
-            1,
-            5
-          ]
-        ]
+        [[3, 3], [3, 1]],
+        [[3, 1], [4, 1]],
+        [[3, 3], [5, 4]],
+        [[5, 4], [5, 5]],
+        [[3, 3], [1, 4]],
+        [[1, 4], [1, 5]]
       ],
       "provenance": {
         "source": "hand",
@@ -2295,96 +898,15 @@
       "coverage_threshold": 0.9,
       "iou_threshold": null,
       "segments": [
-        [
-          [
-            2,
-            0
-          ],
-          [
-            6,
-            0
-          ]
-        ],
-        [
-          [
-            6,
-            0
-          ],
-          [
-            4,
-            3
-          ]
-        ],
-        [
-          [
-            4,
-            3
-          ],
-          [
-            2,
-            0
-          ]
-        ],
-        [
-          [
-            0,
-            4
-          ],
-          [
-            4,
-            4
-          ]
-        ],
-        [
-          [
-            4,
-            4
-          ],
-          [
-            2,
-            7
-          ]
-        ],
-        [
-          [
-            2,
-            7
-          ],
-          [
-            0,
-            4
-          ]
-        ],
-        [
-          [
-            3,
-            4
-          ],
-          [
-            7,
-            4
-          ]
-        ],
-        [
-          [
-            7,
-            4
-          ],
-          [
-            5,
-            7
-          ]
-        ],
-        [
-          [
-            5,
-            7
-          ],
-          [
-            3,
-            4
-          ]
-        ]
+        [[2, 0], [6, 0]],
+        [[6, 0], [4, 3]],
+        [[4, 3], [2, 0]],
+        [[0, 4], [4, 4]],
+        [[4, 4], [2, 7]],
+        [[2, 7], [0, 4]],
+        [[3, 4], [7, 4]],
+        [[7, 4], [5, 7]],
+        [[5, 7], [3, 4]]
       ],
       "provenance": {
         "source": "hand",
@@ -2402,38 +924,7 @@
       "scale_max": 1,
       "coverage_threshold": 0.99,
       "iou_threshold": null,
-      "segments": [
-        [
-          [
-            3,
-            6
-          ],
-          [
-            3,
-            1
-          ]
-        ],
-        [
-          [
-            3,
-            1
-          ],
-          [
-            2,
-            2
-          ]
-        ],
-        [
-          [
-            3,
-            1
-          ],
-          [
-            4,
-            2
-          ]
-        ]
-      ],
+      "segments": [[[3, 6], [3, 1]], [[3, 1], [2, 2]], [[3, 1], [4, 2]]],
       "provenance": {
         "source": "hand",
         "ref": "identical to native arrow rendering; FP-fatal, never enable",
@@ -2450,48 +941,7 @@
       "scale_max": 1,
       "coverage_threshold": 0.99,
       "iou_threshold": null,
-      "segments": [
-        [
-          [
-            3,
-            3
-          ],
-          [
-            3,
-            0
-          ]
-        ],
-        [
-          [
-            3,
-            3
-          ],
-          [
-            6,
-            3
-          ]
-        ],
-        [
-          [
-            3,
-            3
-          ],
-          [
-            3,
-            6
-          ]
-        ],
-        [
-          [
-            3,
-            3
-          ],
-          [
-            0,
-            3
-          ]
-        ]
-      ],
+      "segments": [[[3, 3], [3, 0]], [[3, 3], [6, 3]], [[3, 3], [3, 6]], [[3, 3], [0, 3]]],
       "provenance": {
         "source": "hand",
         "ref": "= rook/queen orthogonal move fan; FP-fatal, never enable",
@@ -2509,66 +959,12 @@
       "coverage_threshold": 0.99,
       "iou_threshold": null,
       "segments": [
-        [
-          [
-            3,
-            1
-          ],
-          [
-            3,
-            5
-          ]
-        ],
-        [
-          [
-            1,
-            3
-          ],
-          [
-            5,
-            3
-          ]
-        ],
-        [
-          [
-            3,
-            2
-          ],
-          [
-            4,
-            3
-          ]
-        ],
-        [
-          [
-            4,
-            3
-          ],
-          [
-            3,
-            4
-          ]
-        ],
-        [
-          [
-            3,
-            4
-          ],
-          [
-            2,
-            3
-          ]
-        ],
-        [
-          [
-            2,
-            3
-          ],
-          [
-            3,
-            2
-          ]
-        ]
+        [[3, 1], [3, 5]],
+        [[1, 3], [5, 3]],
+        [[3, 2], [4, 3]],
+        [[4, 3], [3, 4]],
+        [[3, 4], [2, 3]],
+        [[2, 3], [3, 2]]
       ],
       "provenance": {
         "source": "hand",
@@ -2587,72 +983,14 @@
       "coverage_threshold": 0.99,
       "iou_threshold": null,
       "segments": [
-        [
-          [
-            3,
-            0
-          ],
-          [
-            3,
-            6
-          ]
-        ],
-        [
-          [
-            0,
-            3
-          ],
-          [
-            6,
-            3
-          ]
-        ],
-        [
-          [
-            3,
-            1
-          ],
-          [
-            4,
-            2
-          ]
-        ],
-        [
-          [
-            4,
-            2
-          ],
-          [
-            3,
-            3
-          ]
-        ],
-        [
-          [
-            3,
-            3
-          ],
-          [
-            2,
-            2
-          ]
-        ],
-        [
-          [
-            2,
-            2
-          ],
-          [
-            3,
-            1
-          ]
-        ]
+        [[3, 0], [3, 6]],
+        [[0, 3], [6, 3]],
+        [[3, 1], [4, 2]],
+        [[4, 2], [3, 3]],
+        [[3, 3], [2, 2]],
+        [[2, 2], [3, 1]]
       ],
-      "provenance": {
-        "source": "hand",
-        "ref": "circled cross reticle; FP-fatal, never enable",
-        "unicode": null
-      }
+      "provenance": {"source": "hand", "ref": "circled cross reticle; FP-fatal, never enable", "unicode": null}
     },
     {
       "id": "hash_grid",
@@ -2664,53 +1002,8 @@
       "scale_max": 1,
       "coverage_threshold": 0.99,
       "iou_threshold": null,
-      "segments": [
-        [
-          [
-            2,
-            0
-          ],
-          [
-            2,
-            6
-          ]
-        ],
-        [
-          [
-            4,
-            0
-          ],
-          [
-            4,
-            6
-          ]
-        ],
-        [
-          [
-            0,
-            2
-          ],
-          [
-            6,
-            2
-          ]
-        ],
-        [
-          [
-            0,
-            4
-          ],
-          [
-            6,
-            4
-          ]
-        ]
-      ],
-      "provenance": {
-        "source": "hand",
-        "ref": "tic-tac-toe / zone marking; FP-fatal, never enable",
-        "unicode": null
-      }
+      "segments": [[[2, 0], [2, 6]], [[4, 0], [4, 6]], [[0, 2], [6, 2]], [[0, 4], [6, 4]]],
+      "provenance": {"source": "hand", "ref": "tic-tac-toe / zone marking; FP-fatal, never enable", "unicode": null}
     },
     {
       "id": "plain_plus",
@@ -2722,33 +1015,8 @@
       "scale_max": 1,
       "coverage_threshold": 0.99,
       "iou_threshold": null,
-      "segments": [
-        [
-          [
-            3,
-            0
-          ],
-          [
-            3,
-            6
-          ]
-        ],
-        [
-          [
-            0,
-            3
-          ],
-          [
-            6,
-            3
-          ]
-        ]
-      ],
-      "provenance": {
-        "source": "hand",
-        "ref": "achiral plus; FP-fatal, never enable",
-        "unicode": null
-      }
+      "segments": [[[3, 0], [3, 6]], [[0, 3], [6, 3]]],
+      "provenance": {"source": "hand", "ref": "achiral plus; FP-fatal, never enable", "unicode": null}
     },
     {
       "id": "plain_x",
@@ -2760,33 +1028,8 @@
       "scale_max": 1,
       "coverage_threshold": 0.99,
       "iou_threshold": null,
-      "segments": [
-        [
-          [
-            0,
-            0
-          ],
-          [
-            6,
-            6
-          ]
-        ],
-        [
-          [
-            6,
-            0
-          ],
-          [
-            0,
-            6
-          ]
-        ]
-      ],
-      "provenance": {
-        "source": "hand",
-        "ref": "diagonal analysis cross; FP-fatal, never enable",
-        "unicode": null
-      }
+      "segments": [[[0, 0], [6, 6]], [[6, 0], [0, 6]]],
+      "provenance": {"source": "hand", "ref": "diagonal analysis cross; FP-fatal, never enable", "unicode": null}
     }
   ]
 }
