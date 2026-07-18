@@ -478,10 +478,10 @@ def test_add_delta_anchors_search_and_remove_delta_full_scans(client, monkeypatc
     calls = []
     real_detect = detector.detect
 
-    def spy(arrows, highlights, codes_seen=None, changed=None):
+    def spy(arrows, highlights, codes_seen=None, changed=None, context=()):
         calls.append(changed)
         return real_detect(arrows, highlights, codes_seen=codes_seen,
-                           changed=changed)
+                           changed=changed, context=context)
 
     monkeypatch.setattr(detector, "detect", spy)
 

@@ -11,11 +11,17 @@ from chessshootout.server.moderation import geometry, library
 HEURISTIC_MIN_EDGES = 8
 HEURISTIC_MAX_SPAN = 6
 HEURISTIC_SUBSET_MAX_EDGES = 80
+HEURISTIC_TIGHT_MIN_EDGES = 12
+HEURISTIC_TIGHT_MAX_SPAN = 4
+HEURISTIC_TIGHT_MIN_TIPS = 4
 RASTER_HIGHLIGHT_SHARE = 0.3
 GLYPH_SCALES = (1, 2)
 GLYPH_COVERAGE = 0.72
 GLYPH_IOU = 0.6
 MIN_WORD_GLYPHS = 3
+MIN_GENERIC_LETTERS = 2
+GENERIC_LETTER_COVERAGE = 0.72
+LINE_LETTERS = frozenset({"I", "L", "J"})
 DIGIT_COVERAGE = 0.85
 MIN_CODE_DIGITS = 2
 DIGIT_GAP_FACTOR = 1.6
@@ -36,12 +42,14 @@ BLOCKED = "blocked"
 
 CODE_COOCCURRENCE_ID = "code_cooccurrence"
 HEURISTIC_ID = "heuristic_c4"
+GENERIC_LETTER_ID = "letters"
 
 _FLOORS = None
 _GLYPHS = None
 _WORD_FOLDED = None
 _GLYPH_WIDTH_INDEX = None
 _DIGIT_WIDTH_INDEX = None
+_LETTER_WIDTH_INDEX = None
 _CODE_TABLE = None
 _CACHE = {}
 _CACHE_ORDER = []
@@ -108,11 +116,13 @@ def _ensure_floors():
                 dneed = _needed(variant[3], DIGIT_COVERAGE)
                 if digit_floor is None or dneed < digit_floor:
                     digit_floor = dneed
+    unit_glyph = glyph_floor if glyph_floor is not None else 1
     _FLOORS = (
         vector_floor if vector_floor is not None else 1,
         raster_floor if raster_floor is not None else 1,
-        (glyph_floor if glyph_floor is not None else 1) * MIN_WORD_GLYPHS,
+        unit_glyph * MIN_WORD_GLYPHS,
         (digit_floor if digit_floor is not None else 1) * MIN_CODE_DIGITS,
+        unit_glyph * MIN_GENERIC_LETTERS,
     )
     return _FLOORS
 
@@ -148,7 +158,7 @@ def _glyph_atlas():
                         scaled.add((cx * factor + i, cy * factor + j))
             _add_glyph_variant(variants, seen, scaled)
         atlas[char] = variants
-    _add_segment_glyphs(atlas, data["letter_segments"], (1,))
+    _add_segment_glyphs(atlas, data["letter_segments"], GLYPH_SCALES)
     _add_segment_glyphs(atlas, data["digit_segments"], GLYPH_SCALES)
     _GLYPHS = {char: tuple(variants) for char, variants in atlas.items()}
     return _GLYPHS
@@ -203,6 +213,20 @@ def _digit_glyphs_by_width():
             index[gw].append((char, grows, gw, gh, gink))
     _DIGIT_WIDTH_INDEX = index
     return _DIGIT_WIDTH_INDEX
+
+
+def _letter_glyphs_by_width():
+    global _LETTER_WIDTH_INDEX
+    if _LETTER_WIDTH_INDEX is not None:
+        return _LETTER_WIDTH_INDEX
+    index = defaultdict(list)
+    for char, variants in _glyph_atlas().items():
+        if char in DIGIT_ALPHABET or char in LINE_LETTERS:
+            continue
+        for grows, gw, gh, gink in variants:
+            index[gw].append((char, grows, gw, gh, gink))
+    _LETTER_WIDTH_INDEX = index
+    return _LETTER_WIDTH_INDEX
 
 
 def _code_table():
@@ -264,17 +288,18 @@ def _changed_edges_cells(changed):
     return edges, cells
 
 
-def detect(arrows, highlights, codes_seen=None, changed=None):
+def detect(arrows, highlights, codes_seen=None, changed=None, context=()):
     library.preload()
     codes_in = frozenset(codes_seen) if codes_seen else frozenset()
     arrows, highlights, arrow_edges, drawn_edges, cells = _normalize_inputs(arrows, highlights)
+    context_cells = [_cell(coord) for coord in context]
     changed_edges, changed_cells = _changed_edges_cells(changed)
-    key = (frozenset(drawn_edges), frozenset(cells), codes_in,
+    key = (tuple(arrows), tuple(highlights), frozenset(context_cells), codes_in,
            _changed_key(changed_edges, changed_cells))
     cached = _CACHE.get(key)
     if cached is not None:
         return cached
-    verdict = _run(arrows, highlights, arrow_edges, drawn_edges, cells,
+    verdict = _run(arrows, highlights, arrow_edges, drawn_edges, cells, context_cells,
                    codes_in, changed_edges, changed_cells)
     _cache_put(key, verdict)
     return verdict
@@ -296,7 +321,7 @@ def _cache_put(key, verdict):
         _CACHE.pop(old, None)
 
 
-def _run(arrows, highlights, arrow_edges, drawn_edges, cells,
+def _run(arrows, highlights, arrow_edges, drawn_edges, cells, context_cells,
          codes_in, changed_edges, changed_cells):
     if not arrows and not cells:
         return Verdict(CLEAN, codes_seen_out=codes_in)
@@ -307,18 +332,20 @@ def _run(arrows, highlights, arrow_edges, drawn_edges, cells,
     for arrow in arrows:
         segments.extend(geometry.arrow_segments(_square(arrow[0]), _square(arrow[1])))
     board_thin = geometry.rasterize_board(segments, cells, supersample)
-    shape_cells = set(cells) | geometry.traversed_cells(segments)
+    context = set(context_cells)
+    shape_cells = set(cells) | context | geometry.traversed_cells(segments)
     board = geometry.rasterize_board([], shape_cells, supersample)
-    highlight_board = geometry.rasterize_board([], cells, supersample)
+    highlight_board = geometry.rasterize_board([], set(cells) | context, supersample)
     drawn_bbox = geometry.bitmap_bbox(board, side)
     board_ink = geometry.popcount(board)
     thin_ink = geometry.popcount(board_thin)
 
-    vector_floor, raster_floor, word_floor, code_floor = _ensure_floors()
+    vector_floor, raster_floor, word_floor, code_floor, letter_floor = _ensure_floors()
     heuristic = _heuristic_center(drawn_edges)
     if (changed_edges is None and len(drawn_edges) < vector_floor
             and board_ink < raster_floor and thin_ink < word_floor
-            and thin_ink < code_floor and heuristic is None):
+            and thin_ink < code_floor and thin_ink < letter_floor
+            and heuristic is None):
         return Verdict(CLEAN, codes_seen_out=codes_in)
 
     anchor_edges = drawn_edges if changed_edges is None else changed_edges
@@ -353,6 +380,11 @@ def _run(arrows, highlights, arrow_edges, drawn_edges, cells,
                        matched_arrows=list(arrows), matched_highlights=list(highlights),
                        codes_seen_out=codes_in)
 
+    if _stage_generic_letters(board_thin, letter_floor):
+        return Verdict(BLOCKED, pattern_id=GENERIC_LETTER_ID,
+                       matched_arrows=list(arrows), matched_highlights=list(highlights),
+                       codes_seen_out=codes_in)
+
     code = _stage_codes(board_thin)
     if code is not None and code[0] == "hard":
         return Verdict(BLOCKED, pattern_id=code[1],
@@ -383,6 +415,12 @@ def _run(arrows, highlights, arrow_edges, drawn_edges, cells,
         return Verdict(BLOCKED, pattern_id=CODE_COOCCURRENCE_ID,
                        matched_arrows=marks[0], matched_highlights=marks[1],
                        codes_seen_out=codes_out, suspect_ids=tuple(sorted(boosters)))
+
+    if heuristic is not None and heuristic[2]:
+        matched = [arrow for arrow, edges in arrow_edges
+                   if {_double_edge(edge) for edge in edges} & heuristic[3]]
+        return Verdict(BLOCKED, pattern_id=HEURISTIC_ID, matched_arrows=matched,
+                       matched_highlights=[], codes_seen_out=codes_out)
 
     if soft_ids or heuristic is not None:
         ids = tuple(sorted(soft_ids)) + ((HEURISTIC_ID,) if heuristic is not None else ())
@@ -562,7 +600,7 @@ def _changed_pixels(changed_edges, changed_cells, supersample):
 
 
 def _stage_words(board):
-    _, _, word_floor, _ = _ensure_floors()
+    _, _, word_floor, _, _ = _ensure_floors()
     if geometry.popcount(board) < word_floor:
         return None
     lit = set()
@@ -628,10 +666,13 @@ def _best_glyph(rows, x0, x1, index, coverage):
     rw = x1 - x0 + 1
     mask = (1 << rw) - 1
     subcols = [(row >> x0) & mask for row in rows]
-    sub = geometry.normalized_bitmap_from_pixels(_bitmap_pixels(subcols))
-    srows, sw, sh = sub
+    srows, sw, sh = geometry.normalized_bitmap_from_pixels(_bitmap_pixels(subcols))
     if not srows:
         return None
+    return _match_normalized(srows, sw, sh, index, coverage)
+
+
+def _match_normalized(srows, sw, sh, index, coverage):
     sink = geometry.popcount(srows)
     best = None
     best_score = GLYPH_IOU
@@ -647,6 +688,49 @@ def _best_glyph(rows, x0, x1, index, coverage):
                 best_score = score
                 best = char
     return best
+
+
+def _stage_generic_letters(board, letter_floor):
+    if geometry.popcount(board) < letter_floor:
+        return False
+    lit = _bitmap_pixels(board)
+    index = _letter_glyphs_by_width()
+    for op_key in OCR_READING_OPS:
+        transformed = {geometry.apply_op(pixel, op_key) for pixel in lit}
+        if _count_structured_letters(transformed, index) >= MIN_GENERIC_LETTERS:
+            return True
+    return False
+
+
+def _count_structured_letters(pixels, index):
+    count = 0
+    for component in _connected_components(pixels):
+        srows, sw, sh = geometry.normalized_bitmap_from_pixels(component)
+        if not srows:
+            continue
+        if _match_normalized(srows, sw, sh, index, GENERIC_LETTER_COVERAGE) is not None:
+            count += 1
+    return count
+
+
+def _connected_components(pixels):
+    remaining = set(pixels)
+    components = []
+    while remaining:
+        start = remaining.pop()
+        stack = [start]
+        component = {start}
+        while stack:
+            px, py = stack.pop()
+            for dx in (-1, 0, 1):
+                for dy in (-1, 0, 1):
+                    neighbor = (px + dx, py + dy)
+                    if neighbor in remaining:
+                        remaining.discard(neighbor)
+                        component.add(neighbor)
+                        stack.append(neighbor)
+        components.append(component)
+    return components
 
 
 def _bitmap_pixels(rows):
@@ -697,7 +781,7 @@ def _matches_word(text):
 
 
 def _stage_codes(board):
-    _, _, _, code_floor = _ensure_floors()
+    _, _, _, code_floor, _ = _ensure_floors()
     if geometry.popcount(board) < code_floor:
         return None
     hard_codes, soft_codes = _code_table()
@@ -813,8 +897,9 @@ def _heuristic_center(drawn_edges):
     minx, miny, maxx, maxy = box
     for cx in range(minx, maxx + 1):
         for cy in range(miny, maxy + 1):
-            if _c4_chiral_core(doubled, cx, cy):
-                return (cx, cy)
+            core = _c4_chiral_core(doubled, cx, cy)
+            if core is not None:
+                return (cx, cy, _core_tight(core), core)
     return None
 
 
@@ -825,7 +910,7 @@ def _heuristic_whole_set(doubled, box):
     for cx in range(minx, maxx + 1):
         for cy in range(miny, maxy + 1):
             if _is_c4_chiral(doubled, cx, cy):
-                return (cx, cy)
+                return (cx, cy, False, doubled)
     return None
 
 
@@ -833,23 +918,57 @@ def _c4_chiral_core(doubled, cx, cy):
     half = {edge for edge in doubled
             if _transform_edge(edge, cx, cy, _rotate180) in doubled}
     if len(half) < HEURISTIC_MIN_EDGES:
-        return False
+        return None
     core = frozenset(edge for edge in half
                      if _transform_edge(edge, cx, cy, _rotate90) in doubled
                      and _transform_edge(edge, cx, cy, _rotate270) in doubled)
     if len(core) < HEURISTIC_MIN_EDGES:
-        return False
+        return None
     cminx, cminy, cmaxx, cmaxy = geometry.edges_bbox(core)
     if (cmaxx - cminx) // 2 > HEURISTIC_MAX_SPAN or (cmaxy - cminy) // 2 > HEURISTIC_MAX_SPAN:
-        return False
+        return None
     for axis in ("x", "y", "d", "a"):
         reflected = _transform_edges_about(
             core, cx, cy, lambda p, gx, gy, ax=axis: _reflect(p, gx, gy, ax))
         if reflected == core:
-            return False
+            return None
         if reflected <= doubled:
-            return False
-    return True
+            return None
+    return core
+
+
+def _core_tight(core):
+    if len(core) < HEURISTIC_TIGHT_MIN_EDGES:
+        return False
+    minx, miny, maxx, maxy = geometry.edges_bbox(core)
+    if (maxx - minx) // 2 > HEURISTIC_TIGHT_MAX_SPAN:
+        return False
+    if (maxy - miny) // 2 > HEURISTIC_TIGHT_MAX_SPAN:
+        return False
+    return _bent_tip_count(core) >= HEURISTIC_TIGHT_MIN_TIPS
+
+
+def _bent_tip_count(core):
+    adjacency = defaultdict(list)
+    for a, b in core:
+        adjacency[a].append(b)
+        adjacency[b].append(a)
+    bent = 0
+    for vertex, neighbors in adjacency.items():
+        if len(neighbors) != 1:
+            continue
+        corner = neighbors[0]
+        tip_dir = (geometry._sign(corner[0] - vertex[0]),
+                   geometry._sign(corner[1] - vertex[1]))
+        for onward in adjacency[corner]:
+            if onward == vertex:
+                continue
+            arm_dir = (geometry._sign(onward[0] - corner[0]),
+                       geometry._sign(onward[1] - corner[1]))
+            if arm_dir != (0, 0) and arm_dir != tip_dir:
+                bent += 1
+                break
+    return bent
 
 
 def _transform_edge(edge, cx, cy, fn):

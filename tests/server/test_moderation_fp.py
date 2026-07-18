@@ -99,13 +99,15 @@ def test_three_parallel_file_arrows_stay_clean():
                   "three parallel file arrows")
 
 
-def test_dense_arrow_cluster_does_not_match_symbol_rasters():
-    # Regression pin for the arrow-dilated raster board: a dense pure-arrow
-    # cluster (an unlisted word) must not reach any cell template -- the
-    # highlight-share floor keeps the raster channel highlight-anchored.
+def test_dense_arrow_letter_cluster_now_blocks():
+    # v2 aggressive reversal: a dense arrow cluster that reads as >=2 non-line
+    # letters now hard-blocks via the generic-letter stage (the raster symbol
+    # channel still stays highlight-anchored; this is the letter classifier).
     arrows = M.spell_arrows("cat")
     assert arrows is not None
-    _assert_clean(arrows, [], "dense arrow letter cluster")
+    verdict = detector.detect(arrows, [])
+    assert verdict.kind == detector.BLOCKED
+    assert verdict.pattern_id == detector.GENERIC_LETTER_ID
 
 
 def test_single_sig_bolt_stays_clean():

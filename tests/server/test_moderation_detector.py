@@ -211,9 +211,12 @@ def test_evasion_scaled_minimal_swastika_x3_trips():
     assert verdict.pattern_id == "swastika_axis_min"
 
 
+# Long axis arms with rotationally-consistent DIAGONAL hooks: C4-chiral but
+# matching no library template (the axis-hook long-arm form is now the
+# swastika_axis7 template and hard-blocks; this stays the heuristic's case).
 NOVEL_PINWHEEL = [
-    [[3, 3], [3, 0]], [[3, 0], [5, 0]], [[3, 3], [6, 3]], [[6, 3], [6, 5]],
-    [[3, 3], [3, 6]], [[3, 6], [1, 6]], [[3, 3], [0, 3]], [[0, 3], [0, 1]],
+    [[3, 3], [3, 0]], [[3, 0], [5, 2]], [[3, 3], [6, 3]], [[6, 3], [4, 5]],
+    [[3, 3], [3, 6]], [[3, 6], [1, 4]], [[3, 3], [0, 3]], [[0, 3], [2, 1]],
 ]
 
 
@@ -239,14 +242,17 @@ def test_evasion_slow_draw_trips_at_completing_mark():
         if verdict.kind == detector.BLOCKED:
             trip_index = index
             break
-    assert trip_index == 14, f"slow-draw tripped at {trip_index}, expected 14 (>=85%)"
+    # v2 coverage floor is 0.78: the 12th axis edge completes >=78% of the
+    # overlapping 12-edge swastika_knight4 template (10/12), so the symbol trips
+    # one edge earlier than the 13/16 axis-proper boundary.
+    assert trip_index == 12, f"slow-draw tripped at {trip_index}, expected 12 (>=78%)"
 
 
 def test_evasion_slow_draw_below_threshold_stays_clean():
     unit_arrows = _swastika_axis_unit_arrows()
-    thirteen = unit_arrows[:13]
-    verdict = detector.detect(thirteen, [], changed=thirteen[-1])
-    _assert_clean(verdict, "slow-draw 13/16")
+    eleven = unit_arrows[:11]
+    verdict = detector.detect(eleven, [], changed=eleven[-1])
+    _assert_clean(verdict, "slow-draw 11/16")
 
 
 def test_evasion_mixed_media_arrow_stroke_plus_highlights_trips():
@@ -341,16 +347,17 @@ def test_chirality_mixed_knight_fan_stays_clean():
 
 # --- threshold edges ----------------------------------------------------------
 
-def test_threshold_below_85_percent_does_not_trip():
+def test_threshold_below_78_percent_does_not_trip():
     unit_arrows = _swastika_axis_unit_arrows()
-    # 13 of 16 template edges == 81.25% < 0.85 needed.
-    _assert_clean(detector.detect(unit_arrows[:13], []), "13/16 coverage")
+    # 11 axis edges cover < 78% of every swastika template (incl. the 12-edge
+    # knight4 the axis stroke set overlaps) -- below the v2 0.78 floor.
+    _assert_clean(detector.detect(unit_arrows[:11], []), "11/16 coverage")
 
 
-def test_threshold_at_least_85_percent_trips():
+def test_threshold_at_least_78_percent_trips():
     unit_arrows = _swastika_axis_unit_arrows()
-    # 14 of 16 template edges == 87.5% >= 0.85 needed.
-    _assert_trips(detector.detect(unit_arrows[:14], []), label="14/16 coverage")
+    # 12 axis edges complete >=78% of the overlapping 12-edge knight4 template.
+    _assert_trips(detector.detect(unit_arrows[:12], []), label="12/16 coverage")
 
 
 # --- user swastika screenshot fixtures ----------------------------------------
@@ -420,11 +427,17 @@ def test_huy_fixture_cell_resolution_recognized():
     assert _cell_res_recognizes("хуй", atlas) == "хуй"
 
 
-def test_unlisted_word_stays_clean():
+def test_unlisted_word_no_longer_stays_clean():
+    # v2 aggressive rule: >=2 recognized non-line letters block regardless of
+    # dictionary membership. The DICTIONARY layer (_scan_line/ocr_scan) still
+    # returns None for an unlisted string -- the generic-letter stage is what
+    # now blocks it end-to-end.
     atlas = M.letter_atlas()
-    # A benign 3+ letter string that is not on the word list must not match.
     cells = M.spell_cells("cat", atlas)
     assert M.ocr_scan(cells) is None
+    arrows = M.spell_arrows("cat")
+    assert arrows is not None
+    assert detector.detect(arrows, []).kind == detector.BLOCKED
 
 
 # --- word OCR end-to-end via detect() -----------------------------------------
@@ -456,12 +469,14 @@ def test_word_end_to_end_every_board_fitting_word_blocks():
     assert not missed, f"board-fitting words that did not block: {missed}"
 
 
-def test_word_end_to_end_unlisted_word_stays_clean():
+def test_word_end_to_end_generic_two_letters_block():
+    # v2 aggressive rule reversal: >=2 recognized non-line letters hard-block
+    # even when the string is not a dictionary word.
     arrows = M.spell_arrows("cat")
     assert arrows is not None
     verdict = detector.detect(arrows, [])
-    assert verdict.kind == detector.CLEAN, (
-        f"unlisted arrow-written word tripped: {verdict.pattern_id}")
+    assert verdict.kind == detector.BLOCKED
+    assert verdict.pattern_id == detector.GENERIC_LETTER_ID
 
 
 def test_block_atlas_glyphs_cannot_fit_the_board():
@@ -475,3 +490,141 @@ def test_block_atlas_glyphs_cannot_fit_the_board():
     total = sum(widths[ch.upper()] for ch in three_letter) + 2 * (len(three_letter) - 1)
     assert total > 8, f"expected a 3-glyph word to overrun the board, got {total}"
     assert min(widths.values()) >= 4
+
+
+# --- v2 hardening: free-square context ----------------------------------------
+
+def test_free_square_context_completes_symbol_and_is_excluded_from_marks():
+    # A swastika finished by the board's free last-move highlight: 14 user cells
+    # sit below the raster5 coverage floor, the 3 context squares complete it,
+    # and the context cells never surface in matched_highlights (not user marks).
+    cells = M.grid_cells(M.entry_by_id("swastika_raster5")["grid"])
+    context = M.highlights_from_cells(cells[:3])
+    user = M.highlights_from_cells(cells[3:])
+    assert detector.detect([], user).kind == detector.CLEAN
+    verdict = detector.detect([], user, context=context)
+    assert verdict.kind == detector.BLOCKED
+    assert verdict.pattern_id == "swastika_raster5"
+    assert len(verdict.matched_highlights) == 14
+    assert not any(c in verdict.matched_highlights for c in context)
+
+
+def test_context_default_empty_is_backward_compatible():
+    cells = M.grid_cells(M.entry_by_id("swastika_raster5")["grid"])
+    user = M.highlights_from_cells(cells[3:])
+    assert detector.detect([], user).kind == detector.CLEAN
+    assert detector.detect([], user, context=()).kind == detector.CLEAN
+
+
+# --- v2 hardening: authored hand-proportion swastika templates ----------------
+
+def test_thin_stroke_hand_swastika_blocks():
+    thin7 = ["..#.###", "..#...#", "..#...#", "#######",
+             "#...#..", "#...#..", "###.#.."]
+    verdict = detector.detect([], M.highlights_from_cells(M.grid_cells(thin7)))
+    assert verdict.kind == detector.BLOCKED
+    assert verdict.pattern_id.startswith("swastika_raster7_thin")
+
+
+def test_bold_stroke_hand_swastika_blocks():
+    bold8 = ["..######", "..######", "..##..##", "########",
+             "########", "##..##..", "######..", "######.."]
+    verdict = detector.detect([], M.highlights_from_cells(M.grid_cells(bold8)))
+    assert verdict.kind == detector.BLOCKED
+    assert verdict.pattern_id.startswith("swastika_raster8_bold")
+
+
+def test_short_hook_cross_swastikas_block():
+    # Proportion sweep found cross swastikas with 1-cell hooks fully CLEAN
+    # (no arrows, so the C4 heuristic never sees them): arm2/hook1 and
+    # arm3/hook1 highlight forms, plus the arm3 arrow forms that only reached
+    # SUSPECT. Templates swastika_raster5_hook1/raster7_hook1/axis7 close them.
+    hook5 = [".##..", "..#.#", "#####", "#.#..", "..##."]
+    verdict = detector.detect([], M.highlights_from_cells(M.grid_cells(hook5)))
+    assert verdict.kind == detector.BLOCKED
+    assert verdict.pattern_id == "swastika_raster5_hook1"
+    hook7 = ["..##...", "...#...", "...#..#", "#######",
+             "#..#...", "...#...", "...##.."]
+    verdict = detector.detect([], M.highlights_from_cells(M.grid_cells(hook7)))
+    assert verdict.kind == detector.BLOCKED
+    assert verdict.pattern_id == "swastika_raster7_hook1"
+    arm3_hook2 = M.arrows_from_segments(M.entry_by_id("swastika_axis7")["segments"])
+    verdict = detector.detect(arm3_hook2, [])
+    assert verdict.kind == detector.BLOCKED
+    assert verdict.pattern_id == "swastika_axis7"
+
+
+def test_short_hook_templates_leave_plain_crosses_clean():
+    # The hook1 templates are cross-dominated; a plain highlighted plus, X, or
+    # full file+rank cross must stay clean (0.85 floor requires the hooks).
+    plus7 = [(x, 3) for x in range(7)] + [(3, y) for y in range(7) if y != 3]
+    assert detector.detect([], M.highlights_from_cells(plus7)).kind == detector.CLEAN
+    file_rank = [(4, y) for y in range(8)] + [(x, 3) for x in range(8) if x != 4]
+    assert detector.detect([], M.highlights_from_cells(file_rank)).kind == detector.CLEAN
+    cross_arrows = [("d1", "d8"), ("a4", "h4")]
+    assert detector.detect(cross_arrows, []).kind == detector.CLEAN
+
+
+# --- v2 hardening: C4-symmetry hard block for tight arrow swastikas ------------
+
+TIGHT_ARROW_SWASTIKA = [
+    ("b3", "c4"), ("d1", "c2"), ("d3", "b3"), ("d3", "d1"),
+    ("d3", "d5"), ("d3", "f3"), ("d5", "e4"), ("f3", "e2"),
+]
+
+
+def test_c4_tight_arrow_swastika_hard_blocks():
+    # A compact chiral pinwheel with diagonal hooks that matches NO template:
+    # v1 relayed it as SUSPECT, v2 promotes a tight C4 core (>=12 doubled edges,
+    # span<=4, bent tips, strict chirality) to a hard block.
+    verdict = detector.detect(TIGHT_ARROW_SWASTIKA, [])
+    assert verdict.kind == detector.BLOCKED
+    assert verdict.pattern_id == detector.HEURISTIC_ID
+    assert verdict.matched_arrows
+
+
+def test_c4_long_armed_pinwheel_stays_suspect():
+    # The long-armed novel pinwheel (core span 6) is NOT tight: it must remain a
+    # relayed SUSPECT, not a hard block.
+    verdict = detector.detect(M.arrows_from_segments(NOVEL_PINWHEEL), [])
+    assert verdict.kind == detector.SUSPECT
+    assert detector.HEURISTIC_ID in verdict.suspect_ids
+
+
+# --- v2 hardening: generic >=2-letter blocking --------------------------------
+
+@pytest.mark.parametrize("text", ["cat", "nig", "fuc", "fuk", "fck", "nog"])
+def test_generic_two_letter_string_blocks(text):
+    # >=2 recognized non-line letters block regardless of dictionary membership
+    # or spelling -- misspellings and non-words included.
+    arrows = M.spell_arrows(text)
+    assert arrows is not None
+    verdict = detector.detect(arrows, [])
+    assert verdict.kind == detector.BLOCKED, f"{text}: {verdict.kind}"
+    assert verdict.pattern_id == detector.GENERIC_LETTER_ID
+
+
+def test_generic_single_letter_stays_clean():
+    for ch in ("a", "t", "o", "c"):
+        arrows = M.spell_arrows(ch)
+        assert arrows is not None
+        assert detector.detect(arrows, []).kind == detector.CLEAN, ch
+
+
+def test_generic_line_glyph_guard_keeps_parallel_arrows_clean():
+    # I/1/7/L/J alias to parallel file/rank arrows; the line-glyph guard excludes
+    # them so ordinary chess analysis never trips the >=2-letter rule.
+    for arrows in (
+        [("a2", "a6"), ("d2", "d6"), ("g2", "g6")],
+        [("e2", "e4"), ("d2", "d4"), ("b1", "c3")],
+        [("a2", "a7"), ("h2", "h7")],
+    ):
+        assert detector.detect(arrows, []).kind == detector.CLEAN, arrows
+
+
+def test_generic_letters_coverage_078_edge_symbol_still_needs_threshold():
+    # The 0.78 symbol floor: 11 of the 16 axis-swastika edges cover < 78% of
+    # every template and stay clean; the 12th tips it over.
+    unit_arrows = _swastika_axis_unit_arrows()
+    assert detector.detect(unit_arrows[:11], []).kind == detector.CLEAN
+    assert detector.detect(unit_arrows[:12], []).kind == detector.BLOCKED

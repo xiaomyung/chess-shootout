@@ -24,6 +24,7 @@ The frontend import here is intentional and safe: the pygame guard
 and backend/, never tests/. Keep the import inside the test.
 """
 
+import gc
 import random
 import time
 
@@ -162,14 +163,24 @@ def test_worst_case_timing_under_budget():
     # the scheduler); process_time sums every thread in the process, so a
     # lingering server-fixture thread in the same xdist worker inflates it.
     # thread_time counts only the calling thread and is immune to both.
+    # GC is paused around the loop: thread_time bills a gen2 collection pass to
+    # whichever call it lands in, and with pygame imported by the knight-elbow
+    # test above, one pass costs ~20 ms -- process-graph noise, not detect()
+    # cost. The pause makes the pin measure the detector alone; the budget
+    # itself stays untouched.
     worst_ms = 0.0
-    for i in range(30):
-        churned = list(arrows)
-        churned[i % 120] = (M.coord(rng.randrange(8), rng.randrange(8)),
-                            M.coord(rng.randrange(8), rng.randrange(8)))
-        start = time.thread_time()
-        detector.detect(churned, highlights)
-        worst_ms = max(worst_ms, (time.thread_time() - start) * 1000)
+    gc.collect()
+    gc.disable()
+    try:
+        for i in range(30):
+            churned = list(arrows)
+            churned[i % 120] = (M.coord(rng.randrange(8), rng.randrange(8)),
+                                M.coord(rng.randrange(8), rng.randrange(8)))
+            start = time.thread_time()
+            detector.detect(churned, highlights)
+            worst_ms = max(worst_ms, (time.thread_time() - start) * 1000)
+    finally:
+        gc.enable()
 
     assert worst_ms < TIMING_BUDGET_MS, (
         f"worst-case detect() {worst_ms:.2f} ms exceeded budget "

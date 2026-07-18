@@ -574,10 +574,18 @@ async def handle_annotation_delta(app, websocket, room, color, raw):
     return await _moderate_relay(app, room, color, msg, changed, "annotation_delta")
 
 
+def _last_move_context(room):
+    if not room.backend.move_history:
+        return ()
+    move = room.backend.move_history[-1].move
+    return (coord_from_square(move.from_sq), coord_from_square(move.to_sq))
+
+
 def _moderate(room, color, changed):
     store = room.annotations_for(color)
+    context = _last_move_context(room)
     own = detector.detect(store.arrows, store.highlights,
-                          codes_seen=store.codes_seen, changed=changed)
+                          codes_seen=store.codes_seen, changed=changed, context=context)
     store.codes_seen = own.codes_seen_out
     if own.kind == detector.BLOCKED:
         return own, False
@@ -586,7 +594,7 @@ def _moderate(room, color, changed):
         store.arrows, store.highlights, opp_store.arrows, opp_store.highlights)
     union = detector.detect(union_arrows, union_highlights,
                             codes_seen=store.codes_seen | opp_store.codes_seen,
-                            changed=changed)
+                            changed=changed, context=context)
     if union.kind == detector.BLOCKED:
         return union, True
     if own.kind == detector.SUSPECT:
