@@ -13,5 +13,125 @@
     "title": "v2.9.0 — Command Rail",
     "body": "The main menu got rebuilt end to end:\n- New left nav rail with a sliding crosshair\n- Revolver-cylinder time picker — click the center pin for a random time control\n- Right rail with your profile, recent matches, and this news feed\n- Fresh gunmetal sounds throughout\n- The menu shootout now spills out from under the rails",
     "date": "2026-07-15"
+  },
+  {
+    "title": "v2.8.0 — Substation",
+    "body": "Groundwork for what's coming, plus one handy tweak:\n- Open PGN now opens the game in your system's default app\n- Rebuilt the app's screen plumbing so new screens (profile, friends, and more) can arrive faster",
+    "date": "2026-07-11"
+  },
+  {
+    "title": "v2.7.0 — Field Repairs",
+    "body": "A repair-and-polish sweep:\n- Live games now save reliably even if you close or leave mid-move\n- Browse your move history during a live game with the arrow keys; Home/End jump to the ends\n- Skill-check dials and crosshairs scale cleanly at every window size\n- Draw results show the real reason — stalemate, repetition, fifty-move, insufficient material — instead of \"by agreement\"\n- The Windows portable build ships its license and attribution files; macOS builds no longer hide your games inside the app bundle",
+    "date": "2026-07-10"
+  },
+  {
+    "title": "v2.6.0 — Tunnel Vision",
+    "body": "Distraction-free play:\n- New Focus mode collapses the in-game UI down to just the board — press H or click the arrow in the board seam\n- Choose what stays on screen: a thin time line on the board edges, the full player strips, or nothing at all — Options → Focus mode\n- A game result auto-expands the UI; Esc steps back out before it offers to resign",
+    "date": "2026-07-08"
+  },
+  {
+    "title": "v2.5.0 — Full Auto",
+    "body": "A big frame-rate boost:\n- The board only repaints what actually changes, so idle and menu frame rates climb sharply\n- New Performance readouts — FPS, 1% lows, and render time — in Options → Performance\n- Fixed a bug where a game could run past 0:00; a flagged clock now ends the game",
+    "date": "2026-07-03"
+  },
+  {
+    "title": "v2.4.3 — Reinforcements",
+    "body": "More control at the board:\n- Press and hold \"Give 15 sec\" to pour extra time onto your opponent's clock, up to the starting time (a tap still gives a single 15s)\n- Volume sliders now tick as you drag them, with a gun-cock ratchet while you hold to give time\n- Windows: edge-resize, drag-to-snap, and taskbar-aware maximize now work on the window",
+    "date": "2026-07-03"
+  },
+  {
+    "title": "v2.4.2 — Failsafe",
+    "body": "Stability fix:\n- Fixed a crash on Windows when a game ended, caused by non-ASCII text in saved games or nicknames\n- Nicknames are now limited to standard ASCII so they always render correctly",
+    "date": "2026-07-03"
+  },
+  {
+    "title": "v2.4.1 — Hold the Line",
+    "body": "Online reliability fixes:\n- Online games now reliably save to PGN, including on checkmate and if you close mid-move\n- Steadier reconnection — a game interrupted by a dropped connection is recovered from the server",
+    "date": "2026-07-03"
+  },
+  {
+    "title": "v2.4.0 — Live Rounds",
+    "body": "A full sound overhaul:\n- Every piece has its own move sound, and a distinct gun on a won capture check — pawn revolver, knight hand-cannon, bishop lever-action, rook shotgun, queen blunderbuss, king ray-gun\n- Skill-check cues: a ding as the dial opens, a tick in the sweet spot, and a win/miss sting\n- A two-stage low-time heartbeat that speeds up as your clock runs down\n- Announcer killstreaks and result voices, plus castle doors, undo rewind, and board-flip whoosh\n- All audio is now cleanly licensed with full attribution",
+    "date": "2026-07-01"
+  },
+  {
+    "title": "v2.3.6 — Sound Check",
+    "body": "An early taste of the sound overhaul:\n- First pass at per-piece move sounds, expanded in full in v2.4.0",
+    "date": "2026-06-29"
+  },
+  {
+    "title": "v2.3.5 — Briefing",
+    "body": "Docs:\n- Documented the F11 fullscreen shortcut in Help and the README",
+    "date": "2026-06-29"
+  },
+  {
+    "title": "v2.3.4 — Second Wind",
+    "body": "Online play polish:\n- Rematch now works and swaps sides correctly — rooms stay alive while you're on the result screen\n- Windows window controls: work-area maximize, F11 fullscreen, minimize, and double-click the title bar\n- A piece you're dragging is no longer hijacked when your opponent's move lands\n- The material bar now counts promotions\n- Rematch offers reach you on the menu, and even after a quick restart, via a drop-in banner\n- Notifications are now a tidy stacked queue",
+    "date": "2026-06-28"
+  },
+  {
+    "title": "v2.3.3 — Safety Catch",
+    "body": "Bug fix:\n- Fixed a bug that could quit you to the main menu mid-game when clicking to select a piece",
+    "date": "2026-06-26"
+  },
+  {
+    "title": "v2.3.2 — Open Line",
+    "body": "Online, out of the box:\n- Downloaded desktop builds now connect to the public Chess Shootout server automatically — no server address to type in (you can still override it in Options → Server)",
+    "date": "2026-06-26"
+  },
+  {
+    "title": "v2.3.1 — Steady Hands",
+    "body": "Smoother browsing:\n- The games list stays smooth with hundreds of saved games\n- New performance readout in the window bar: FPS and live ping — toggle in Options → Performance\n- A friendly \"Already in a game\" message replaces the old raw code",
+    "date": "2026-06-26"
+  },
+  {
+    "title": "v2.3.0 — Quick Draw",
+    "body": "The Shootout mechanic arrives:\n- Every capture and promotion now fires a fast, skill-based minigame — win it and the move lands; miss and that move is locked for the turn, with no turn lost\n- Two checks: the Wheel, a timing dial, and Steady-Aim, a crosshair tracing a shrinking target; the more material at stake, the tougher the check\n- Fully server-adjudicated online and takeback-proof, and your opponent watches your attempt live\n- Every hit and miss is saved into the game's PGN and shown in review — and still imports cleanly on chess.com and Lichess",
+    "date": "2026-06-25"
+  },
+  {
+    "title": "v2.2.1 — Momentum",
+    "body": "Scrolling that feels right:\n- Click-drag to scroll any list — the move log, history, options, pickers, and Help\n- Flick to fling with kinetic momentum, or grab the scrollbar thumb directly",
+    "date": "2026-06-06"
+  },
+  {
+    "title": "v2.2.0 — Heft",
+    "body": "Pieces you can feel:\n- Grabbed pieces now tilt and swing with real inertia while you drag, then rotate upright and glide onto their square on release\n- A hard flick can spin a piece a full turn; it respects your reduce-motion and effect-intensity settings",
+    "date": "2026-06-06"
+  },
+  {
+    "title": "v2.1.2 — Quartermaster",
+    "body": "Behind the scenes:\n- A one-command update path for the online server, so fixes reach you sooner",
+    "date": "2026-06-06"
+  },
+  {
+    "title": "v2.1.1 — Supply Line",
+    "body": "Behind the scenes:\n- Build-pipeline fix so server updates ship cleanly",
+    "date": "2026-06-05"
+  },
+  {
+    "title": "v2.1.0 — Garrison",
+    "body": "Behind the scenes:\n- The online server moved to a hardened, containerized setup for steadier matches and quicker updates",
+    "date": "2026-06-05"
+  },
+  {
+    "title": "v2.0.2 — Fair Fight",
+    "body": "A fairer online game:\n- Disconnects are handled fairly — a game that never recovers aborts with no winner if it had desynced, otherwise the waiting player wins\n- A new amber \"resyncing\" connection state keeps both players in sync\n- Fixed recapture premoves, a replaying \"FIRST BLOOD\" callout, rematch side-flip, and nickname saving\n- On packaged builds, window resize and the minimize/maximize buttons work again",
+    "date": "2026-06-04"
+  },
+  {
+    "title": "v2.0.1 — Warpaint",
+    "body": "Windows fix:\n- Country flags and emoji now render correctly on Windows instead of showing as blank squares — shipped as pre-rendered art, which also shrinks the download",
+    "date": "2026-06-04"
+  },
+  {
+    "title": "v2.0.0 — Muzzle Flash",
+    "body": "A full visual overhaul:\n- A brand-new Chess Shootout look — clean at rest, chaos in the moments: gun-toting pieces, announcer callouts, screen-shake, and killstreaks\n- Redesigned board, pieces, player strips, modals, and menus with new fonts and art\n- A capture arsenal: muzzle flash, tracer, impact, bullet hole, sparks, board-shake, and ragdoll\n- Match-found VS reveal, searching radar, on-board reconnect overlay, and draw/takeback banners\n- A match-grouped games browser replaces the old file picker",
+    "date": "2026-06-03"
+  },
+  {
+    "title": "v1.0.0 — First Blood",
+    "body": "Chess Shootout launches:\n- Play chess locally or online with live matchmaking, reconnect, resign, draw offers, takebacks, and rematches\n- Standalone desktop downloads for Windows, macOS, and Linux\n- An Options menu with a configurable games folder; games auto-save to PGN\n- The gun-fight theme: pieces that shoot, killstreak callouts, and a menu shootout backdrop",
+    "date": "2026-05-29"
   }
 ]

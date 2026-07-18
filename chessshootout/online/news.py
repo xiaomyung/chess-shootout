@@ -12,7 +12,7 @@ log = logging.getLogger("chess.client.news")
 
 CACHE_FILENAME = "news_cache.json"
 
-NEWS_MAX_ITEMS = 20
+NEWS_MAX_ITEMS = 30
 
 NEWS_DATE_FORMAT = "%Y-%m-%d"
 
