@@ -180,9 +180,9 @@ class CardStack(ScrollHost):
         self._badge_font = get_font(self._s(13, 10), bold=True)
         self._link_font = get_font(self._s(11, 9), bold=True)
         self._date_font = get_mono_font(self._s(10, 8), bold=True)
-        self._news_title_font = get_font(self._s(15, 12), bold=True)
-        self._news_body_font = get_font(self._s(13, 10))
-        self._headline_font = get_font(self._s(11, 9))
+        self._news_title_font = get_font(self._s(17, 15), bold=True)
+        self._news_body_font = get_font(self._s(15, 13))
+        self._headline_font = get_font(self._s(13, 12))
         self._fonts_ready = True
         self._body_lines_cache = {}
         self._compute_layout()
@@ -539,7 +539,7 @@ class CardStack(ScrollHost):
     def _toggle_news_item(self, item_key):
         self._open_news_item = None if self._open_news_item == item_key else item_key
         self.app.input_router.suppress_click_sound()
-        self.app.sound_manager.play_section_toggle()
+        self.app.sound_manager.play_card_toggle()
         self._compute_layout()
 
     def _handle_recent_body_click(self, card_rect, header, pos):

@@ -378,16 +378,14 @@ def test_news_item_accordion_is_single_open(app, stack):
     assert stack._open_news_item is None, "re-clicking the open item closes it"
 
 
-def test_news_item_toggle_plays_section_toggle_not_card_toggle(app, stack):
+def test_news_item_toggle_plays_the_card_toggle_sound(app, stack):
     items = _feed([("A", "a", "2026-07-14"), ("B", "b", "2026-06-01")])
     _expand_news(app, stack, items)
-    app.sound_manager.play_section_toggle.reset_mock()
     app.sound_manager.play_card_toggle.reset_mock()
 
     stack._toggle_news_item(_item_key(items[1]))
 
-    app.sound_manager.play_section_toggle.assert_called_once()
-    app.sound_manager.play_card_toggle.assert_not_called()
+    app.sound_manager.play_card_toggle.assert_called_once()
 
 
 def test_news_body_click_toggles_the_item_accordion(app, stack):
@@ -549,17 +547,17 @@ def test_expanding_never_regresses_the_persisted_last_seen(app, stack):
 def test_tap_on_the_scrollable_news_box_toggles_via_the_release_path(app, stack):
     """When the inner box is scrollable, a press inside it is grabbed by the
     scroll host and never reaches mouse_left_clicked — the item toggle (and its
-    section-toggle sound) must also fire on the router's tap-on-release path."""
+    card-toggle sound) must also fire on the router's tap-on-release path."""
     _expand_news(app, stack, _big_feed())
     assert app.menu.active_scrollable() is stack.news_box
-    app.sound_manager.play_section_toggle.reset_mock()
+    app.sound_manager.play_card_toggle.reset_mock()
     pos = stack._news_item_hits[0][0].center
     router = app.input_router
     router._mouse_left_pressed(pos)
     assert router._scroll_pressed is stack.news_box, "press grabs the inner box, not a click"
     router._mouse_left_released(pos)
     assert stack._open_news_item is None, "tap release toggles the open item closed"
-    app.sound_manager.play_section_toggle.assert_called_once()
+    app.sound_manager.play_card_toggle.assert_called_once()
 
 
 def test_zero_height_inner_viewport_never_captures_the_wheel(app, stack):
