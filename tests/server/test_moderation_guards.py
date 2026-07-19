@@ -5,19 +5,14 @@
   knight vector, or arrow decomposition diverges from what the opponent drew.
 - Library meta-test: every patterns.json entry compiles, and every ENABLED entry
   trips its own canonical construction (doubles as full enabled-pattern coverage).
-- Words meta-test: every words.json entry is renderable and recognized by the OCR
-  classifier at cell resolution.
 - Timing pin: a near-cap store churned through detect() stays under budget. The
   arrows are lattice-aligned on purpose: random squares mostly produce arrows
   with no unit-edge decomposition, which understates the vector stage's real
   worst case. Budget matches the plan's event-loop bound (<10 ms/update).
 - Enabled vector patterns must decompose their authored segments COMPLETELY
   through segment_legs: a knight-vector or off-lattice segment that silently
-  drops edges degenerates the template (the code_kkk_vector three-bare-lines
-  false positive). DISABLED entries may carry undrawable drafts.
-- Every letter of every listed word has a block glyph AND, when the word can fit
-  the board at skeleton width, the letters need segment-skeleton constructions
-  so the word is reachable end-to-end.
+  drops edges degenerates the template (a three-bare-lines false positive).
+  DISABLED entries may carry undrawable drafts.
 
 The frontend import here is intentional and safe: the pygame guard
 (tests/infra/test_server_no_pygame.py) scans only package SOURCE under server/
@@ -67,7 +62,7 @@ def test_every_pattern_entry_compiles():
     compiled_ids = {pattern.id for pattern in compiled}
     assert compiled_ids == entry_ids
     for pattern in compiled:
-        assert pattern.action in (library.HARD_BLOCK, library.SOFT_FLAG, library.DISABLED)
+        assert pattern.action in (library.HARD_BLOCK, library.DISABLED)
         if pattern.action == library.DISABLED:
             continue
         has_vector = bool(pattern.vector_variants)
@@ -83,9 +78,7 @@ def test_every_enabled_entry_trips_its_canonical_construction():
             verdict = detector.detect(M.canonical_arrows(entry), [])
         else:
             verdict = detector.detect([], M.canonical_highlights(entry))
-        soft = entry["action"] == "SOFT_FLAG"
-        allowed = {detector.BLOCKED} | ({detector.SUSPECT} if soft else set())
-        if verdict.kind not in allowed:
+        if verdict.kind != detector.BLOCKED:
             missed.append((entry["id"], verdict.kind))
     assert not missed, f"enabled entries that did not trip their canonical form: {missed}"
 
@@ -102,31 +95,6 @@ def test_enabled_vector_segments_decompose_completely():
                 undecomposed.append((entry["id"], a, b))
     assert not undecomposed, (
         f"enabled vector segments that drop edges silently: {undecomposed}")
-
-
-def test_every_word_letter_has_skeleton_construction():
-    skeletons = M.letter_segment_atlas()
-    missing = set()
-    for entry in M.word_entries():
-        for ch in entry["text"].upper():
-            if ch not in skeletons or not skeletons[ch]:
-                missing.add(ch)
-    assert not missing, f"word letters without skeleton constructions: {missing}"
-
-
-def test_every_word_entry_renderable_and_recognized():
-    atlas = M.letter_atlas()
-    missed = []
-    for entry in M.word_entries():
-        text = entry["text"]
-        renderable = all(ch.upper() in atlas for ch in text)
-        if not renderable:
-            missed.append((text, "unrenderable"))
-            continue
-        cells = M.spell_cells(text, atlas)
-        if M.ocr_scan(cells) is None:
-            missed.append((text, "unrecognized"))
-    assert not missed, f"word entries not renderable/recognized by the OCR: {missed}"
 
 
 def test_worst_case_timing_under_budget():
@@ -150,9 +118,9 @@ def test_worst_case_timing_under_budget():
         highlight_cells.add((rng.randrange(8), rng.randrange(8)))
     highlights = [M.coord(*cell) for cell in highlight_cells]
 
-    # Pattern compilation, the glyph atlas, and the OCR width indices are built
-    # lazily on the first detect() and amortized once per process -- that is
-    # init cost, not the per-update cost this budget bounds. Warm it so a cold
+    # Pattern compilation is built lazily on the first detect() and amortized
+    # once per process -- that is init cost, not the per-update cost this budget
+    # bounds. Warm it so a cold
     # worker (xdist splits files across processes) times steady state, not the
     # one-time build.
     detector.detect(list(arrows), highlights)

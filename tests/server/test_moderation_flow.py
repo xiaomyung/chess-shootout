@@ -19,9 +19,9 @@ the decoy and the now-clean pattern lies outside the removed mark's search
 window, so an anchored rescan would miss it for the rest of the game.
 
 The concrete trip inputs (4-arrow knight-pinwheel swastika, the 8-arrow novel
-pinwheel that only the stage-4 net flags, the split-across-colors collusion
-swastika, and the 14->18 temporal code pair) are the detector's own fixtures --
-this file asserts the RELAY consequences, not the geometry.
+pinwheel that only the stage-4 net flags, and the split-across-colors collusion
+swastika) are the detector's own fixtures -- this file asserts the RELAY
+consequences, not the geometry.
 """
 import json
 import random
@@ -45,11 +45,6 @@ NOVEL = M.arrows_from_segments([(tuple(a), tuple(b)) for a, b in NOVEL_PINWHEEL]
 
 def _wire_arrows(arrows):
     return [{"from": f, "to": t} for f, t in arrows]
-
-
-def _spell(text):
-    step = 2 if len(text) >= 4 else 3
-    return M.arrows_from_segments(M.digit_code_segments(text, step))
 
 
 def _matchmake(client, *, uuid, nickname, side, hide=False, time=5, inc=0):
@@ -350,35 +345,6 @@ def test_cross_color_collusion_strips_both_and_trips_completing_mover(client):
     assert room.annotations_white.trip_count == 0
 
 
-# --- temporal code memory threaded through the store --------------------------
-
-def test_temporal_14_then_18_across_move_wipe_blocks(client):
-    p = _pair(client)
-
-    _send(p.ws_w, type="annotations_state", sharing=True, highlights=[],
-          arrows=_wire_arrows(_spell("14")))
-    assert _recv(p.ws_b)["type"] == "annotations_state"
-    suspect = _recv(p.ws_w)
-    assert suspect["type"] == "annotations_blocked"
-    assert suspect["action"] == "suspect"
-    assert p.room().annotations_white.codes_seen == frozenset({"code_14"})
-
-    _send(p.ws_w, type="move", **{"from": "e2", "to": "e4"})
-    assert _recv(p.ws_w)["type"] == "move_applied"
-    assert _recv(p.ws_b)["type"] == "move_applied"
-    assert p.room().annotations_white.arrows == []
-    assert p.room().annotations_white.codes_seen == frozenset({"code_14"})
-
-    _send(p.ws_w, type="annotations_state", sharing=True, highlights=[],
-          arrows=_wire_arrows(_spell("18")))
-    corrective = _recv(p.ws_b)
-    assert corrective["type"] == "annotations_state"
-    blocked = _recv(p.ws_w)
-    assert blocked["type"] == "annotations_blocked"
-    assert blocked["action"] == "blocked"
-    assert p.room().annotations_white.trip_count == 1
-
-
 # --- kill switch --------------------------------------------------------------
 
 def test_moderation_off_relays_the_swastika_untouched(monkeypatch):
@@ -407,14 +373,12 @@ def test_result_resets_mod_state_and_rematch_swap_keeps_hide_preference(client):
 
     room.annotations_white.trip_count = 2
     room.annotations_white.share_muted = True
-    room.annotations_white.codes_seen = frozenset({"code_14"})
     room.annotations_white.opp_hidden_notice_sent = True
     assert room.slot("white").hide_opp_marks is True
 
     assert rooms.finalize_result(room.room_id, Reason.RESIGNATION, winner_color="black")
     assert room.annotations_white.trip_count == 0
     assert room.annotations_white.share_muted is False
-    assert room.annotations_white.codes_seen == frozenset()
     assert room.annotations_white.opp_hidden_notice_sent is False
     assert room.slot("white").hide_opp_marks is True
 
@@ -423,7 +387,6 @@ def test_result_resets_mod_state_and_rematch_swap_keeps_hide_preference(client):
     assert room.slot("white").hide_opp_marks is False
     assert room.annotations_white.trip_count == 0
     assert room.annotations_white.share_muted is False
-    assert room.annotations_white.codes_seen == frozenset()
 
 
 # --- race discipline + delta search-window pins -------------------------------
@@ -478,10 +441,9 @@ def test_add_delta_anchors_search_and_remove_delta_full_scans(client, monkeypatc
     calls = []
     real_detect = detector.detect
 
-    def spy(arrows, highlights, codes_seen=None, changed=None, context=()):
+    def spy(arrows, highlights, changed=None, context=()):
         calls.append(changed)
-        return real_detect(arrows, highlights, codes_seen=codes_seen,
-                           changed=changed, context=context)
+        return real_detect(arrows, highlights, changed=changed, context=context)
 
     monkeypatch.setattr(detector, "detect", spy)
 
@@ -514,16 +476,14 @@ def test_add_delta_anchors_search_and_remove_delta_full_scans(client, monkeypatc
 def test_worst_case_delta_moderation_stays_within_budget():
     """Event-loop budget pin: a near-cap store (127 arrows + 63 highlights)
     with an anchored add-update per iteration, plus a full rescan (the remove
-    path). The plan's aspirational budget was 10 ms/update; the word and code
-    OCR stages run unwindowed once the board's ink passes their floors, which
-    puts the measured worst case near 20 ms on the dev box. Wall-clock time
-    per iteration is not deterministic under xdist -- a loaded worker can lose
-    100 ms+ to scheduler contention with nothing wrong -- so the pin asserts
-    the BEST of the samples: the fastest of ten anchored updates (and three
-    full rescans) must clear 100 ms. Contention inflates individual samples
-    but at least one runs uncontended; an order-of-magnitude regression in the
-    real per-message cost pushes every sample over the line. Each verdict is
-    also asserted well-formed so the loop can't pass by silently erroring."""
+    path). Wall-clock time per iteration is not deterministic under xdist -- a
+    loaded worker can lose 100 ms+ to scheduler contention with nothing wrong --
+    so the pin asserts the BEST of the samples: the fastest of ten anchored
+    updates (and three full rescans) must clear 100 ms. Contention inflates
+    individual samples but at least one runs uncontended; an order-of-magnitude
+    regression in the real per-message cost pushes every sample over the line.
+    Each verdict is also asserted well-formed so the loop can't pass by silently
+    erroring."""
     from chessshootout.backend.utils import Square, coord_from_square
 
     def coord(x, y):
@@ -547,23 +507,20 @@ def test_worst_case_delta_moderation_stays_within_budget():
     detector.detect(arrows[:5], highlights[:5])
 
     budget = 0.1
-    codes = frozenset()
     delta_times = []
     for i in range(10):
         new = (coord(i % 8, (i * 3) % 8), coord((i + 2) % 8, (i * 5 + 1) % 8))
         if new[0] == new[1]:
             new = (new[0], coord((i + 3) % 8, i % 8))
         t0 = time.perf_counter()
-        verdict = detector.detect(arrows + [new], highlights,
-                                  codes_seen=codes, changed=new)
+        verdict = detector.detect(arrows + [new], highlights, changed=new)
         delta_times.append(time.perf_counter() - t0)
         assert verdict.kind in (detector.CLEAN, detector.SUSPECT, detector.BLOCKED)
-        codes = verdict.codes_seen_out
 
     full_times = []
     for _ in range(3):
         t0 = time.perf_counter()
-        detector.detect(arrows, highlights, codes_seen=codes)
+        detector.detect(arrows, highlights)
         full_times.append(time.perf_counter() - t0)
 
     assert min(delta_times) < budget

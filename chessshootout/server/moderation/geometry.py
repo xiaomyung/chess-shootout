@@ -16,12 +16,10 @@ DIHEDRAL = {
 
 D4_ALL = ("r0", "r90", "r180", "r270", "fx", "fy", "fd", "fa")
 D4_ROTATIONS = ("r0", "r90", "r180", "r270")
-DIGIT_OPS = ("r0", "r180", "fx")
 
 TRANSFORM_GROUPS = {
     "d4": D4_ALL,
     "d4_no_reflect": D4_ROTATIONS,
-    "digit": DIGIT_OPS,
 }
 
 

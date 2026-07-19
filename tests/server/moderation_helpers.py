@@ -2,7 +2,7 @@ import json
 from importlib import resources
 
 from chessshootout.backend.utils import Square, coord_from_square
-from chessshootout.server.moderation import detector, geometry
+from chessshootout.server.moderation import geometry
 
 
 def coord(x, y):
@@ -41,51 +41,6 @@ def entry_by_id(pattern_id):
         if entry["id"] == pattern_id:
             return entry
     raise KeyError(pattern_id)
-
-
-def word_entries():
-    return _load("words.json")["words"]
-
-
-def letter_atlas():
-    return _load("words.json")["letters"]
-
-
-def letter_segment_atlas():
-    return _load("words.json")["letter_segments"]
-
-
-def digit_segment_atlas():
-    return _load("words.json")["digit_segments"]
-
-
-def digit_code_segments(text, step=None):
-    atlas = digit_segment_atlas()
-    if step is None:
-        step = 2 if len(text) >= 4 else 3
-    segments = []
-    x = 0
-    for ch in text:
-        for a, b in atlas[ch][0]:
-            segments.append([[a[0] + x, a[1]], [b[0] + x, b[1]]])
-        x += step
-    return segments
-
-
-def spell_arrows(text, x0=0, y0=0):
-    atlas = letter_segment_atlas()
-    arrows = []
-    x = x0
-    for ch in text.upper():
-        construction = atlas[ch][0]
-        width = max(max(a[0], b[0]) for a, b in construction)
-        depth = max(max(a[1], b[1]) for a, b in construction)
-        if x + width > 7 or y0 + depth > 7:
-            return None
-        for a, b in construction:
-            arrows.append((coord(a[0] + x, a[1] + y0), coord(b[0] + x, b[1] + y0)))
-        x += width + 1
-    return arrows
 
 
 def canonical_arrows(entry):
@@ -149,26 +104,3 @@ def transformed_raster_highlights(cells, op_key, factor, dx=0, dy=0):
     if not _fits(shifted):
         return None
     return [coord(x, y) for x, y in shifted]
-
-
-def spell_cells(text, atlas, gap=2, x0=0, y0=0):
-    cells = set()
-    x = x0
-    for ch in text:
-        rows = atlas[ch.upper()]
-        width = max(len(row) for row in rows)
-        for cy, row in enumerate(rows):
-            for cx, glyph_ch in enumerate(row):
-                if glyph_ch == "#":
-                    cells.add((x + cx, y0 + cy))
-        x += width + gap
-    return cells
-
-
-def ocr_scan(cells):
-    for op_key in geometry.D4_ALL:
-        transformed = [geometry.apply_op(point, op_key) for point in cells]
-        found = detector._scan_line(transformed)
-        if found is not None:
-            return found
-    return None

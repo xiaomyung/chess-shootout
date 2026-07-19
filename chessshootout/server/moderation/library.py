@@ -6,7 +6,6 @@ from chessshootout.server.moderation import geometry
 
 
 HARD_BLOCK = "HARD_BLOCK"
-SOFT_FLAG = "SOFT_FLAG"
 DISABLED = "DISABLED"
 
 VECTOR = "vector"
@@ -14,7 +13,6 @@ RASTER = "raster"
 BOTH = "both"
 
 _PATTERNS = None
-_WORDS = None
 
 
 @dataclass(frozen=True)
@@ -46,15 +44,6 @@ class CompiledPattern:
     supersample: int
     vector_variants: tuple
     raster_variants: tuple
-    digits: str = ""
-    provenance: dict = field(default_factory=dict)
-
-
-@dataclass
-class WordEntry:
-    text: str
-    lang: str
-    action: str
     provenance: dict = field(default_factory=dict)
 
 
@@ -166,27 +155,17 @@ def _compile_pattern(entry, supersample):
         supersample=supersample,
         vector_variants=vector_variants,
         raster_variants=raster_variants,
-        digits=entry.get("digits", ""),
         provenance=entry.get("provenance", {}),
     )
 
 
 def preload(supersample=geometry.DEFAULT_SUPERSAMPLE):
-    global _PATTERNS, _WORDS
+    global _PATTERNS
     if _PATTERNS is not None:
         return
     pattern_data = _load_json("patterns.json")
-    compiled = tuple(_compile_pattern(entry, supersample)
-                     for entry in pattern_data["patterns"])
-    word_data = _load_json("words.json")
-    words = tuple(WordEntry(
-        text=entry["text"],
-        lang=entry["lang"],
-        action=entry["action"],
-        provenance=entry.get("provenance", {}),
-    ) for entry in word_data["words"])
-    _PATTERNS = compiled
-    _WORDS = words
+    _PATTERNS = tuple(_compile_pattern(entry, supersample)
+                      for entry in pattern_data["patterns"])
 
 
 def compiled_patterns():
@@ -197,8 +176,3 @@ def compiled_patterns():
 def enabled_patterns():
     preload()
     return tuple(pattern for pattern in _PATTERNS if pattern.action != DISABLED)
-
-
-def word_list():
-    preload()
-    return _WORDS

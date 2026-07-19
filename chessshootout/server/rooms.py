@@ -72,7 +72,6 @@ class SharedAnnotations:
     arrows: list = field(default_factory=list)
     trip_count: int = 0
     share_muted: bool = False
-    codes_seen: frozenset = frozenset()
     opp_hidden_notice_sent: bool = False
 
     def clear_marks(self):
@@ -84,7 +83,6 @@ class SharedAnnotations:
         self.sharing = False
         self.trip_count = 0
         self.share_muted = False
-        self.codes_seen = frozenset()
         self.opp_hidden_notice_sent = False
 
 

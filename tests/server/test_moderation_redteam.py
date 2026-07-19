@@ -7,8 +7,8 @@ matching context cell, arrow<->highlight media swaps, decoy-padded forms, and
 thickness tweaks -- runs detect() on each, and computes the ESCAPE RATE: the
 fraction of constructions that returned CLEAN when they should have blocked.
 
-Symbols with strong invariants (swastika, SS, and drawn letters) are held to a
-low escape bound. Every construction that DOES escape today is frozen into
+Symbols with strong invariants (swastika, SS) are held to a low escape bound.
+Every construction that DOES escape today is frozen into
 KNOWN_ESCAPES so a regression that lets a currently-blocked form slip through is
 caught immediately. The generator is seeded (random.Random) and touches no wall
 clock, so the escape set is stable across runs and machines.
@@ -113,29 +113,6 @@ def _raster_constructions(entry, rng):
         yield ("thicken", [], M.highlights_from_cells(thick), ())
 
 
-def _letter_constructions(rng):
-    words = ["cat", "nig", "fuc", "fuk", "fck", "nog", "fag", "gas", "cop",
-             "sac", "tng", "urn"]
-    decoys = [("a1", "a4"), ("h8", "h5")]
-    for text in words:
-        arrows = M.spell_arrows(text)
-        if arrows is None:
-            continue
-        yield ("word:%s" % text, arrows, [], ())
-        yield ("word_decoy:%s" % text, arrows + decoys, [], ())
-        flipped = [(b, a) for a, b in arrows]
-        yield ("word_flip:%s" % text, flipped, [], ())
-    # media swap: strings drawn as D4-rotated highlight cells
-    for text in words:
-        cells = M.spell_cells(text, M.letter_atlas())
-        for op_key in geometry.D4_ALL:
-            transformed = [geometry.apply_op(point, op_key) for point in cells]
-            pts = _shift(transformed)
-            if _fits(pts):
-                yield ("word_cells:%s:%s" % (text, op_key), [],
-                       M.highlights_from_cells(pts), ())
-
-
 def _run_symbol(base_ids, extra_gen=None):
     rng = random.Random(0xC0FFEE)
     total = 0
@@ -167,16 +144,11 @@ KNOWN_ESCAPES = {
     # covers the legible thick-stroke case, so this marginal form is left open.
     "swastika": {"swastika_raster5:thicken"},
     "ss": set(),
-    # A decoy arrow drawn to touch the single non-line letter of a 2-effective
-    # word ("nig": I is a line glyph, leaving only N+G) can fragment one glyph
-    # below recognition. Words with >=3 non-line letters survive the same decoy.
-    "letters": {"word_decoy:nig:escape"},
 }
 
 ESCAPE_BOUNDS = {
     "swastika": 0.05,
     "ss": 0.05,
-    "letters": 0.05,
 }
 
 
@@ -204,8 +176,3 @@ def test_redteam_swastika_escape_rate_bounded():
 def test_redteam_ss_escape_rate_bounded():
     total, escaped = _run_symbol(SS_BASE_IDS)
     _check("ss", total, escaped)
-
-
-def test_redteam_letters_escape_rate_bounded():
-    total, escaped = _run_symbol([], extra_gen=_letter_constructions)
-    _check("letters", total, escaped)

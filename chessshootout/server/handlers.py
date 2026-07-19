@@ -585,15 +585,13 @@ def _moderate(room, color, changed):
     store = room.annotations_for(color)
     context = _last_move_context(room)
     own = detector.detect(store.arrows, store.highlights,
-                          codes_seen=store.codes_seen, changed=changed, context=context)
-    store.codes_seen = own.codes_seen_out
+                          changed=changed, context=context)
     if own.kind == detector.BLOCKED:
         return own, False
     opp_store = room.annotations_for(room.opp_color(color))
     union_arrows, union_highlights = detector.union_sides(
         store.arrows, store.highlights, opp_store.arrows, opp_store.highlights)
     union = detector.detect(union_arrows, union_highlights,
-                            codes_seen=store.codes_seen | opp_store.codes_seen,
                             changed=changed, context=context)
     if union.kind == detector.BLOCKED:
         return union, True

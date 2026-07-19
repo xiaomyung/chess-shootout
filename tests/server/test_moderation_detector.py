@@ -3,9 +3,8 @@
 Every ENABLED pattern must trip across a sample of its D4 orbit x scale range x
 translations, and the full evasion matrix (stroke split/merge, direction flip,
 decoys against BOTH channels, slow-draw, mixed media, multi/cross-color union,
-negative space, temporal code memory, chirality, integer scaling) must survive
-as individually-named cases. Threshold edges bracket the 85% vector-coverage
-boundary.
+negative space, chirality, integer scaling) must survive as individually-named
+cases. Threshold edges bracket the 85% vector-coverage boundary.
 
 Review-hardening rationale (post-review fixes pinned here, not in production):
 - Raster IoU is LOCAL (placement bbox + one-cell margin ring): a global IoU let
@@ -16,22 +15,14 @@ Review-hardening rationale (post-review fixes pinned here, not in production):
   coverage -- but a pure-arrow cluster can never raster-match a cell template
   because a highlight-share floor (RASTER_HIGHLIGHT_SHARE of pattern ink must
   come from real highlight cells) guards the channel; pure-arrow symbols belong
-  to the vector channel and word OCR.
+  to the vector channel.
 - Pattern segments compile through the same knight-L polyline decomposition the
-  client renders (geometry.segment_legs). Before that fix, knight-vector arms in
-  code_kkk_vector were silently dropped, degenerating the template to three bare
-  vertical lines that hard-blocked any three aligned file arrows. The elbow rule
-  is "long leg first", which is D4-equivariant, so decompose-then-transform
-  equals transform-then-decompose.
+  client renders (geometry.segment_legs). The elbow rule is "long leg first",
+  which is D4-equivariant, so decompose-then-transform equals
+  transform-then-decompose.
 - Stage-4 runs on the maximal C4-invariant SUBSET about each candidate center
   (decoy edges die in the rotation intersection), so one throwaway arrow cannot
   switch the novel-variant net off.
-
-Word OCR end-to-end: glyph templates carry segment-skeleton constructions
-(words.json letter_segments) rendered through the SAME arrow rasterization path
-as drawn arrows (including knight-L decomposition), so arrow-written words are
-matched at the supersampled resolution. The block-cell atlas remains for the
-cell-resolution classifier layer.
 
 Coordinate convention (col,row)=(x,y), origin top-left; a lattice point (col,row)
 is a square center. Constructions come from each pattern's OWN segments/grid.
@@ -42,12 +33,6 @@ import pytest
 from chessshootout.server.moderation import detector, geometry
 from tests.server import moderation_helpers as M
 
-
-HUY_ARROW_FIXTURE = [
-    [[0, 1], [2, 5]], [[2, 1], [0, 5]],
-    [[3, 1], [4, 3]], [[5, 1], [4, 3]], [[4, 3], [4, 5]],
-    [[6, 1], [6, 5]], [[7, 1], [7, 5]], [[6, 5], [7, 1]], [[6, 0], [7, 0]],
-]
 
 SWASTIKA_SCREENSHOTS = {
     "v1_hooks_only_pinwheel": [
@@ -68,13 +53,10 @@ SWASTIKA_SCREENSHOTS = {
 }
 
 
-def _assert_trips(verdict, *, soft_ok=False, label=""):
-    allowed = {detector.BLOCKED}
-    if soft_ok:
-        allowed.add(detector.SUSPECT)
-    assert verdict.kind in allowed, (
-        f"{label}: expected trip ({allowed}), got {verdict.kind} "
-        f"id={verdict.pattern_id} suspect={verdict.suspect_ids}"
+def _assert_trips(verdict, *, label=""):
+    assert verdict.kind == detector.BLOCKED, (
+        f"{label}: expected {detector.BLOCKED}, got {verdict.kind} "
+        f"id={verdict.pattern_id}"
     )
 
 
@@ -103,7 +85,6 @@ def test_enabled_pattern_trips_across_orbit(pattern_id):
     entry = M.entry_by_id(pattern_id)
     group = geometry.TRANSFORM_GROUPS[entry["transform_group"]]
     is_vector = "segments" in entry and entry["channel"] in ("vector", "both")
-    soft = entry["action"] == "SOFT_FLAG"
     samples = 0
     for op_key in group:
         for factor in range(entry["scale_min"], entry["scale_max"] + 1):
@@ -122,7 +103,7 @@ def test_enabled_pattern_trips_across_orbit(pattern_id):
                         continue
                     verdict = detector.detect([], highlights)
                 samples += 1
-                _assert_trips(verdict, soft_ok=soft,
+                _assert_trips(verdict,
                               label=f"{pattern_id} {op_key} x{factor} +{dx},{dy}")
     assert samples > 0, f"{pattern_id}: no on-board orbit sample fit the board"
 
@@ -226,10 +207,10 @@ def test_evasion_novel_pinwheel_with_decoy_stays_suspect():
     base = M.arrows_from_segments(NOVEL_PINWHEEL)
     alone = detector.detect(base, [])
     assert alone.kind == detector.SUSPECT
-    assert detector.HEURISTIC_ID in alone.suspect_ids
+    assert alone.pattern_id == detector.HEURISTIC_ID
     decoyed = detector.detect(base + [("a1", "b1")], [])
     assert decoyed.kind == detector.SUSPECT
-    assert detector.HEURISTIC_ID in decoyed.suspect_ids
+    assert decoyed.pattern_id == detector.HEURISTIC_ID
 
 
 def test_evasion_slow_draw_trips_at_completing_mark():
@@ -298,33 +279,6 @@ def test_evasion_negative_space_fill_complement_trips():
     assert verdict.pattern_id == "swastika_raster5"
 
 
-def test_evasion_temporal_14_then_88_wipe_blocks():
-    fourteen = M.highlights_from_cells(M.grid_cells(M.entry_by_id("code_14")["grid"]))
-    eighty_eight = M.highlights_from_cells(
-        M.grid_cells(M.entry_by_id("code_88")["grid"]))
-    first = detector.detect([], fourteen)
-    _assert_trips(first, soft_ok=True, label="temporal frame 1 (14)")
-    assert "code_14" in first.codes_seen_out
-    second = detector.detect([], eighty_eight, codes_seen=first.codes_seen_out)
-    _assert_trips(second, label="temporal frame 2 (88 across wipe)")
-
-
-def test_evasion_temporal_memory_threads_codes_seen():
-    fourteen = M.highlights_from_cells(M.grid_cells(M.entry_by_id("code_14")["grid"]))
-    three_eleven = M.highlights_from_cells(
-        M.grid_cells(M.entry_by_id("code_311")["grid"]))
-    first = detector.detect([], fourteen)
-    assert first.codes_seen_out == frozenset({"code_14"})
-    # Without memory the second code only flags; with memory it co-occurrence-blocks.
-    without = detector.detect([], three_eleven)
-    assert without.kind == detector.SUSPECT
-    assert without.suspect_ids == ("code_311",)
-    with_memory = detector.detect([], three_eleven, codes_seen=first.codes_seen_out)
-    assert with_memory.kind == detector.BLOCKED
-    assert with_memory.pattern_id == detector.CODE_COOCCURRENCE_ID
-    assert set(with_memory.suspect_ids) == {"code_14", "code_311"}
-
-
 def test_chirality_same_chirality_pinwheel_trips():
     verdict = detector.detect(M.arrows_from_segments(
         SWASTIKA_SCREENSHOTS["v1_hooks_only_pinwheel"]), [])
@@ -373,123 +327,6 @@ def test_swastika_screenshot_receiver_mirrored_blocks():
         mirrored = [[[7 - a[0], 7 - a[1]], [7 - b[0], 7 - b[1]]] for a, b in arrows]
         verdict = detector.detect(M.arrows_from_segments(mirrored), [])
         assert verdict.kind == detector.BLOCKED, f"{name} mirrored: {verdict.kind}"
-
-
-# --- word OCR classifier (reachable, cell-resolution) -------------------------
-
-def _cell_res_recognizes(text, atlas):
-    cells = M.spell_cells(text, atlas)
-    return M.ocr_scan(cells)
-
-
-def test_word_ocr_every_word_recognized_in_raster_letters():
-    atlas = M.letter_atlas()
-    missed = []
-    for entry in M.word_entries():
-        text = entry["text"]
-        if _cell_res_recognizes(text, atlas) is None:
-            missed.append(text)
-    assert not missed, f"OCR classifier missed raster-letter words: {missed}"
-
-
-def test_word_ocr_all_reading_orientations_recognized():
-    # A word drawn in ANY D4 orientation is caught, because the OCR replays every
-    # reading direction (ocr_scan) before giving up.
-    atlas = M.letter_atlas()
-    cells = M.spell_cells("fuck", atlas)
-    missed = []
-    for op_key in geometry.D4_ALL:
-        drawn = [geometry.apply_op(point, op_key) for point in cells]
-        if M.ocr_scan(drawn) != "fuck":
-            missed.append(op_key)
-    assert not missed, f"drawn orientations the OCR failed to read: {missed}"
-
-
-def test_word_ocr_homoglyph_fold_cyrillic_and_leet():
-    atlas = M.letter_atlas()
-    # Cyrillic ХУЙ folds (X/Y/N) to the Russian slur entry.
-    assert _cell_res_recognizes("ХУЙ", atlas) == "хуй"
-    # Leet folds: 5->S 1->I 7->T etc. spelling an English slur.
-    assert detector._fold("5P1C") == "SPIC"
-
-
-def test_word_ocr_receiver_mirrored_word_recognized():
-    atlas = M.letter_atlas()
-    cells = M.spell_cells("fuck", atlas)
-    mirrored = [geometry.apply_op(point, "r180") for point in cells]
-    assert M.ocr_scan(mirrored) is not None
-
-
-def test_huy_fixture_cell_resolution_recognized():
-    # The user's ХУЙ screenshot, recognized by the OCR classifier at native
-    # (cell) resolution -- the layer that actually works.
-    atlas = M.letter_atlas()
-    assert _cell_res_recognizes("хуй", atlas) == "хуй"
-
-
-def test_unlisted_word_no_longer_stays_clean():
-    # v2 aggressive rule: >=2 recognized non-line letters block regardless of
-    # dictionary membership. The DICTIONARY layer (_scan_line/ocr_scan) still
-    # returns None for an unlisted string -- the generic-letter stage is what
-    # now blocks it end-to-end.
-    atlas = M.letter_atlas()
-    cells = M.spell_cells("cat", atlas)
-    assert M.ocr_scan(cells) is None
-    arrows = M.spell_arrows("cat")
-    assert arrows is not None
-    assert detector.detect(arrows, []).kind == detector.BLOCKED
-
-
-# --- word OCR end-to-end via detect() -----------------------------------------
-
-def test_huy_arrow_fixture_blocks_end_to_end():
-    # The user's ХУЙ screenshot, arrows only (two of the У strokes are
-    # knight-vector arrows and render as Ls -- the glyph templates reproduce
-    # that through the same decomposition).
-    verdict = detector.detect(M.arrows_from_segments(HUY_ARROW_FIXTURE), [])
-    assert verdict.kind == detector.BLOCKED
-    assert verdict.pattern_id == "word:хуй"
-
-
-def test_word_end_to_end_every_board_fitting_word_blocks():
-    # Every listed word short enough to draw with skeleton letters on an 8-wide
-    # board must hard-block through detect(); longer words are geometrically
-    # unwritable at this resolution and stay classifier-only coverage.
-    missed = []
-    fitted = 0
-    for entry in M.word_entries():
-        arrows = M.spell_arrows(entry["text"])
-        if arrows is None:
-            continue
-        fitted += 1
-        verdict = detector.detect(arrows, [])
-        if verdict.kind != detector.BLOCKED:
-            missed.append((entry["text"], verdict.kind))
-    assert fitted >= 10, f"expected most short words to fit the board, got {fitted}"
-    assert not missed, f"board-fitting words that did not block: {missed}"
-
-
-def test_word_end_to_end_generic_two_letters_block():
-    # v2 aggressive rule reversal: >=2 recognized non-line letters hard-block
-    # even when the string is not a dictionary word.
-    arrows = M.spell_arrows("cat")
-    assert arrows is not None
-    verdict = detector.detect(arrows, [])
-    assert verdict.kind == detector.BLOCKED
-    assert verdict.pattern_id == detector.GENERIC_LETTER_ID
-
-
-def test_block_atlas_glyphs_cannot_fit_the_board():
-    # Rationale for the skeleton atlas: block-filled glyphs are 6-7 cells wide,
-    # so three of them plus gutters overrun an 8-wide board -- highlight-drawn
-    # words are geometrically impossible and arrow skeletons are the only
-    # board-drawable letters.
-    atlas = M.letter_atlas()
-    widths = {ch: max(len(row) for row in rows) for ch, rows in atlas.items()}
-    three_letter = "fag"
-    total = sum(widths[ch.upper()] for ch in three_letter) + 2 * (len(three_letter) - 1)
-    assert total > 8, f"expected a 3-glyph word to overrun the board, got {total}"
-    assert min(widths.values()) >= 4
 
 
 # --- v2 hardening: free-square context ----------------------------------------
@@ -588,109 +425,4 @@ def test_c4_long_armed_pinwheel_stays_suspect():
     # relayed SUSPECT, not a hard block.
     verdict = detector.detect(M.arrows_from_segments(NOVEL_PINWHEEL), [])
     assert verdict.kind == detector.SUSPECT
-    assert detector.HEURISTIC_ID in verdict.suspect_ids
-
-
-# --- v2 hardening: generic >=2-letter blocking --------------------------------
-
-@pytest.mark.parametrize("text", ["cat", "nig", "fuc", "fuk", "fck", "nog"])
-def test_generic_two_letter_string_blocks(text):
-    # >=2 recognized non-line letters block regardless of dictionary membership
-    # or spelling -- misspellings and non-words included.
-    arrows = M.spell_arrows(text)
-    assert arrows is not None
-    verdict = detector.detect(arrows, [])
-    assert verdict.kind == detector.BLOCKED, f"{text}: {verdict.kind}"
-    assert verdict.pattern_id == detector.GENERIC_LETTER_ID
-
-
-def test_generic_single_letter_stays_clean():
-    for ch in ("a", "t", "o", "c"):
-        arrows = M.spell_arrows(ch)
-        assert arrows is not None
-        assert detector.detect(arrows, []).kind == detector.CLEAN, ch
-
-
-def test_generic_line_glyph_guard_keeps_parallel_arrows_clean():
-    # I/1/7/L/J alias to parallel file/rank arrows; the line-glyph guard excludes
-    # them so ordinary chess analysis never trips the >=2-letter rule.
-    for arrows in (
-        [("a2", "a6"), ("d2", "d6"), ("g2", "g6")],
-        [("e2", "e4"), ("d2", "d4"), ("b1", "c3")],
-        [("a2", "a7"), ("h2", "h7")],
-    ):
-        assert detector.detect(arrows, []).kind == detector.CLEAN, arrows
-
-
-def test_generic_letters_coverage_078_edge_symbol_still_needs_threshold():
-    # The 0.78 symbol floor: 11 of the 16 axis-swastika edges cover < 78% of
-    # every template and stay clean; the 12th tips it over.
-    unit_arrows = _swastika_axis_unit_arrows()
-    assert detector.detect(unit_arrows[:11], []).kind == detector.CLEAN
-    assert detector.detect(unit_arrows[:12], []).kind == detector.BLOCKED
-
-
-# --- v3 hardening: single board-spanning arrow-letter (lone-letter) block -----
-
-def _big_letter(char, xf=3, yf=1):
-    # A faithful board-spanning single glyph from the skeleton atlas: the exact
-    # construction the client renders, scaled wide enough to clear LONE_MIN_SPAN.
-    construction = M.letter_segment_atlas()[char][0]
-    return [(M.coord(a[0] * xf, a[1] * yf), M.coord(b[0] * xf, b[1] * yf))
-            for a, b in construction]
-
-
-def test_single_big_latin_letter_blocks():
-    # The live failure: one board-spanning arrow-letter (Latin N) drawn as a few
-    # big arrows now hard-blocks -- v2 required >=2 letters and never tried the
-    # whole drawing as one large glyph.
-    verdict = detector.detect(_big_letter("N"), [])
-    assert verdict.kind == detector.BLOCKED
-    assert verdict.pattern_id == detector.GENERIC_LETTER_ID
-
-
-def test_single_big_cyrillic_letter_blocks():
-    # Cyrillic И (mirror-N, its own atlas glyph) and Cyrillic Н (== Latin H,
-    # caught through the H glyph) each block as a single board letter.
-    for char in ("И", "H"):
-        verdict = detector.detect(_big_letter(char), [])
-        assert verdict.kind == detector.BLOCKED, char
-        assert verdict.pattern_id == detector.GENERIC_LETTER_ID
-
-
-@pytest.mark.parametrize("char", sorted(detector.LONE_LETTERS - {"M"}))
-def test_lone_block_letter_set_each_blocks(char):
-    # Every letter in the lone-block set (minus M, which has no arrow skeleton),
-    # drawn alone board-spanning, hard-blocks as a generic letter.
-    verdict = detector.detect(_big_letter(char), [])
-    assert verdict.kind == detector.BLOCKED, char
-    assert verdict.pattern_id == detector.GENERIC_LETTER_ID
-
-
-def test_lone_excluded_shapes_stay_clean():
-    # Shapes a single or dual chess arrow naturally makes -- a lone T, a lone X,
-    # a lone file line (I) -- are NOT in the lone-block set and stay clean.
-    lone_t = [("b2", "g2"), ("d2", "d7")]
-    lone_x = [("b2", "g7"), ("b7", "g2")]
-    lone_i = [("d2", "d7")]
-    for arrows, label in ((lone_t, "T"), (lone_x, "X"), (lone_i, "I")):
-        assert detector.detect(arrows, []).kind == detector.CLEAN, label
-
-
-def test_lone_letter_below_min_span_stays_clean():
-    # A recognizable but small single letter (below LONE_MIN_SPAN) does not
-    # lone-block; only a deliberately large single glyph does.
-    assert detector.detect(_big_letter("N", 1, 1), []).kind == detector.CLEAN
-    assert detector.detect(_big_letter("N", 3, 1), []).kind == detector.BLOCKED
-
-
-def test_lone_innocent_arrow_sets_stay_clean():
-    for arrows in ([("e2", "e7")], [("g1", "f3"), ("b1", "c3")],
-                   [("c1", "h6"), ("g1", "f3")]):
-        assert detector.detect(arrows, []).kind == detector.CLEAN, arrows
-
-
-def test_multi_letter_run_still_blocks():
-    verdict = detector.detect(M.spell_arrows("gas"), [])
-    assert verdict.kind == detector.BLOCKED
-    assert verdict.pattern_id == detector.GENERIC_LETTER_ID
+    assert verdict.pattern_id == detector.HEURISTIC_ID

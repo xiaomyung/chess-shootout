@@ -27,7 +27,7 @@ def _assert_clean(arrows, highlights, label):
     verdict = detector.detect(arrows, highlights)
     assert verdict.kind == detector.CLEAN, (
         f"{label}: innocent input tripped -> {verdict.kind} "
-        f"id={verdict.pattern_id} suspect={verdict.suspect_ids}"
+        f"id={verdict.pattern_id}"
     )
 
 
@@ -97,17 +97,6 @@ def test_three_parallel_file_arrows_stay_clean():
     # aligned file arrows at the right spacing hard-blocked as KKK.
     _assert_clean([("a2", "a6"), ("d2", "d6"), ("g2", "g6")], [],
                   "three parallel file arrows")
-
-
-def test_dense_arrow_letter_cluster_now_blocks():
-    # v2 aggressive reversal: a dense arrow cluster that reads as >=2 non-line
-    # letters now hard-blocks via the generic-letter stage (the raster symbol
-    # channel still stays highlight-anchored; this is the letter classifier).
-    arrows = M.spell_arrows("cat")
-    assert arrows is not None
-    verdict = detector.detect(arrows, [])
-    assert verdict.kind == detector.BLOCKED
-    assert verdict.pattern_id == detector.GENERIC_LETTER_ID
 
 
 def test_single_sig_bolt_stays_clean():
