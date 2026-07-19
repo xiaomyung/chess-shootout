@@ -251,3 +251,31 @@ def test_fetch_once_spawns_a_daemon_thread(monkeypatch, tmp_path):
 class _FakeThread:
     def start(self):
         pass
+
+
+def test_read_news_file_parses_local_source(tmp_path):
+    path = tmp_path / "news.json"
+    path.write_text(json.dumps([
+        {"title": "Local", "body": "unpushed edit", "date": "2026-07-19"},
+    ]), encoding="utf-8")
+    items = news._read_news_file(path)
+    assert [item["title"] for item in items] == ["Local"]
+
+
+def test_read_news_file_missing_or_invalid_returns_none(tmp_path):
+    assert news._read_news_file(tmp_path / "absent.json") is None
+    bad = tmp_path / "bad.json"
+    bad.write_text("{not json", encoding="utf-8")
+    assert news._read_news_file(bad) is None
+
+
+def test_dev_news_disabled_under_pytest():
+    assert news._dev_news_items() is None
+
+
+def test_explicit_construction_never_uses_dev(monkeypatch, tmp_path):
+    monkeypatch.setattr(news, "_dev_news_items",
+                        lambda: [{"title": "X", "body": "y", "date": "2026-07-19"}])
+    client = NewsClient(url="fake://x", cache_path=tmp_path / "cache.json")
+    assert client._dev is False
+    assert client.items() == []
