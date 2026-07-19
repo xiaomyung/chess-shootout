@@ -25,6 +25,19 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Stamp the release date on the newest item
+        run: |
+          python - <<'PY'
+          import datetime
+          import json
+          items = json.load(open("news.json", encoding="utf-8"))
+          if items:
+              items[0]["date"] = datetime.date.today().isoformat()
+              with open("news.json", "w", encoding="utf-8") as handle:
+                  json.dump(items, handle, indent=2, ensure_ascii=False)
+                  handle.write("\n")
+          PY
+
       - name: Stage site
         run: |
           mkdir -p site
