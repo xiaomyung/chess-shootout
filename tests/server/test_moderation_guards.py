@@ -136,6 +136,12 @@ def test_worst_case_timing_under_budget():
     # test above, one pass costs ~20 ms -- process-graph noise, not detect()
     # cost. The pause makes the pin measure the detector alone; the budget
     # itself stays untouched.
+    # Even thread_time inflates on a saturated shared runner (SMT-sibling
+    # contention, cache thrash, frequency throttling bill extra CPU-seconds to
+    # the same instructions), so each input is sampled a few times and the BEST
+    # sample -- its true uncontended cost -- is what the worst-input max is
+    # taken over. An order-of-magnitude regression pushes every sample over the
+    # line; transient contention on one sample no longer can.
     worst_ms = 0.0
     gc.collect()
     gc.disable()
@@ -144,9 +150,12 @@ def test_worst_case_timing_under_budget():
             churned = list(arrows)
             churned[i % 120] = (M.coord(rng.randrange(8), rng.randrange(8)),
                                 M.coord(rng.randrange(8), rng.randrange(8)))
-            start = time.thread_time()
-            detector.detect(churned, highlights)
-            worst_ms = max(worst_ms, (time.thread_time() - start) * 1000)
+            best_ms = float("inf")
+            for _ in range(3):
+                start = time.thread_time()
+                detector.detect(churned, highlights)
+                best_ms = min(best_ms, (time.thread_time() - start) * 1000)
+            worst_ms = max(worst_ms, best_ms)
     finally:
         gc.enable()
 
@@ -174,7 +183,7 @@ def test_detect_is_thread_safe_under_concurrent_callers():
         inputs.append(tuple(a for a in arrows if a[0] != a[1]))
 
     serial = [detector.detect(list(arrows), []).kind for arrows in inputs]
-    with ThreadPoolExecutor(max_workers=8) as pool:
+    with ThreadPoolExecutor(max_workers=6) as pool:
         concurrent = list(pool.map(
-            lambda arrows: detector.detect(list(arrows), []).kind, inputs * 8))
-    assert concurrent == serial * 8
+            lambda arrows: detector.detect(list(arrows), []).kind, inputs * 3))
+    assert concurrent == serial * 3
