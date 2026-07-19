@@ -43,7 +43,7 @@ class SettingsController:
             return
         self._apply_data_folder_change(typed)
 
-    def _set_hide_opp_marks(self, value):
+    def apply_hide_opp_marks(self, value):
         env.set_hide_opp_marks(value)
         game = self.frontend.game
         coordinator = self.frontend.coordinator
@@ -137,7 +137,7 @@ class SettingsController:
                 self._server_addr_row,
                 ToggleRow("Hide opponent's marks",
                           "Never show the arrows and highlights they share",
-                          env.get_hide_opp_marks, self._set_hide_opp_marks),
+                          env.get_hide_opp_marks, self.apply_hide_opp_marks),
             ]),
             ("Performance", [
                 ToggleRow("Show FPS", "Frame rate in the title bar",

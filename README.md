@@ -91,7 +91,8 @@ server for online two-player matches.
   highlights and arrows live; your opponent's marks arrive in blue.
 - Shared drawings are screened for prohibited symbols and slurs before they
   reach your opponent; a blocked mark turns red for you with a heads-up toast.
-  **Options → Online → Hide opponent's marks** hides their shared marks entirely.
+  Flip HIDE in the SIGNALS section (or **Options → Online → Hide opponent's
+  marks**) to hide their shared marks entirely — both toggle the same setting.
 - **Quick chat** — preset lines only; your queen speaks them in a bubble on the
   opponent's board.
 - Live abort / abandon / reconnect countdowns in the player strips; games with

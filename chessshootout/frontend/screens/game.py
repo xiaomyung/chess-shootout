@@ -204,6 +204,7 @@ class GameScreen(Screen):
             "give_time": self.give_time.on_give_time,
             "share_toggle": self._on_share_toggle,
             "share_blocked": self._on_share_blocked,
+            "hide_marks_toggle": self._on_hide_marks_toggle,
             "auto_q_toggle": self._toggle_auto_queen,
             "sound_toggle": lambda: signal_controls.toggle_sound(app),
             "set_volume": lambda value: signal_controls.set_signal_volume(app, value),
@@ -1513,6 +1514,8 @@ class GameScreen(Screen):
             "share_on": self._share_marks,
             "share_enabled": (self.variant == Variant.ONLINE and self.game_live()
                               and not self._share_muted),
+            "hide_on": env.get_hide_opp_marks(),
+            "hide_enabled": self.variant == Variant.ONLINE and self.game_live(),
             "auto_q": env.get_auto_queen(),
             "sound_on": sm.enabled,
             "volume": sm.master_volume,
@@ -1521,6 +1524,9 @@ class GameScreen(Screen):
 
     def _toggle_auto_queen(self):
         env.set_auto_queen(not env.get_auto_queen())
+
+    def _on_hide_marks_toggle(self):
+        self.app.settings.apply_hide_opp_marks(not env.get_hide_opp_marks())
 
     def _right_menu_buttons(self):
         if self.match.clock is None:

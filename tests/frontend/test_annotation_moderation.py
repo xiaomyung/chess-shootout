@@ -38,7 +38,7 @@ from chessshootout.frontend.board import Board
 from chessshootout.frontend.visual.colors import Colors
 from chessshootout.infra import env
 from chessshootout.server.protocol import Reason
-from tests.helpers import make_app as _shared_make_app
+from tests.helpers import make_app as _shared_make_app, start_single_screen
 
 
 _pygame_init = pygame_display(1000, 800)
@@ -288,7 +288,7 @@ def test_annotations_blocked_buffered_during_resync_then_replayed():
 def test_hide_opp_marks_option_persists_offline_without_send():
     app = _shared_make_app(1000, 800)
     app.coordinator.set_marks_visibility = MagicMock()
-    app.settings._set_hide_opp_marks(True)
+    app.settings.apply_hide_opp_marks(True)
     assert env.get_hide_opp_marks() is True
     app.coordinator.set_marks_visibility.assert_not_called()
 
@@ -300,7 +300,7 @@ def test_hide_opp_marks_toggle_on_sends_and_clears_opp_mid_game():
     app.coordinator.is_connected = lambda: True
     game.board.annotations.set_opp({HL}, [(ARROW_FROM, ARROW_TO)])
     game._opp_sharing = True
-    app.settings._set_hide_opp_marks(True)
+    app.settings.apply_hide_opp_marks(True)
     assert env.get_hide_opp_marks() is True
     app.coordinator.set_marks_visibility.assert_called_once_with(True)
     assert game.board.annotations.opp_highlighted_squares == set()
@@ -331,7 +331,7 @@ def test_hide_opp_marks_toggle_off_sends_without_clearing_opp():
     app.coordinator.set_marks_visibility = MagicMock()
     app.coordinator.is_connected = lambda: True
     game.board.annotations.set_opp({HL}, [])
-    app.settings._set_hide_opp_marks(False)
+    app.settings.apply_hide_opp_marks(False)
     app.coordinator.set_marks_visibility.assert_called_once_with(False)
     assert game.board.annotations.opp_highlighted_squares == {HL}
 
@@ -363,3 +363,64 @@ def test_matchmake_request_carries_hide_preference():
     finally:
         oc.OnlineClient = original
     assert captured["hide_opp_marks"] is True
+
+
+# ---- in-game HIDE signal chip (mirrors the Options toggle) -----------------
+
+
+def test_hide_chip_state_reflects_env():
+    game = _online_game()
+    assert game._signals_provider()["hide_on"] is False
+    env.set_hide_opp_marks(True)
+    assert game._signals_provider()["hide_on"] is True
+
+
+def test_hide_chip_enabled_online_disabled_offline():
+    game = _online_game()
+    assert game._signals_provider()["hide_enabled"] is True
+    local = _shared_make_app(1000, 800)
+    start_single_screen(local)
+    assert local.game._signals_provider()["hide_enabled"] is False
+
+
+def test_hide_chip_toggle_on_sends_and_shields_mid_game():
+    game = _online_game()
+    app = game.app
+    app.coordinator.set_marks_visibility = MagicMock()
+    app.coordinator.is_connected = lambda: True
+    game.board.annotations.set_opp({HL}, [(ARROW_FROM, ARROW_TO)])
+    game._opp_sharing = True
+    game._on_hide_marks_toggle()
+    assert env.get_hide_opp_marks() is True
+    app.coordinator.set_marks_visibility.assert_called_once_with(True)
+    assert game.board.annotations.opp_highlighted_squares == set()
+    assert game.board.annotations.opp_arrows == []
+    assert game._opp_sharing is False
+
+
+def test_hide_chip_toggle_off_sends_without_shielding():
+    game = _online_game()
+    app = game.app
+    env.set_hide_opp_marks(True)
+    app.coordinator.set_marks_visibility = MagicMock()
+    app.coordinator.is_connected = lambda: True
+    game.board.annotations.set_opp({HL}, [])
+    game._on_hide_marks_toggle()
+    assert env.get_hide_opp_marks() is False
+    app.coordinator.set_marks_visibility.assert_called_once_with(False)
+    assert game.board.annotations.opp_highlighted_squares == {HL}
+
+
+def test_hide_chip_and_options_toggle_stay_in_sync():
+    """The chip and the Options row both read and write the same env key, so a
+    flip from either surface is immediately visible through the other."""
+    game = _online_game()
+    app = game.app
+    app.coordinator.set_marks_visibility = MagicMock()
+    app.coordinator.is_connected = lambda: True
+    game._on_hide_marks_toggle()
+    assert env.get_hide_opp_marks() is True
+    assert game._signals_provider()["hide_on"] is True
+    app.settings.apply_hide_opp_marks(False)
+    assert env.get_hide_opp_marks() is False
+    assert game._signals_provider()["hide_on"] is False
