@@ -1,3 +1,4 @@
+import asyncio
 import json
 import secrets
 
@@ -575,16 +576,20 @@ def _last_move_context(room):
     return (coord_from_square(move.from_sq), coord_from_square(move.to_sq))
 
 
-def _moderate(room, color, changed):
+def _moderation_inputs(room, color):
     store = room.annotations_for(color)
-    context = _last_move_context(room)
-    own = detector.detect(store.arrows, store.highlights,
-                          changed=changed, context=context)
+    opp_store = room.annotations_for(room.opp_color(color))
+    return (list(store.arrows), set(store.highlights),
+            list(opp_store.arrows), set(opp_store.highlights),
+            _last_move_context(room))
+
+
+def _moderate(own_arrows, own_highlights, opp_arrows, opp_highlights, context, changed):
+    own = detector.detect(own_arrows, own_highlights, changed=changed, context=context)
     if own.kind == detector.BLOCKED:
         return own, False
-    opp_store = room.annotations_for(room.opp_color(color))
     union_arrows, union_highlights = detector.union_sides(
-        store.arrows, store.highlights, opp_store.arrows, opp_store.highlights)
+        own_arrows, own_highlights, opp_arrows, opp_highlights)
     union = detector.detect(union_arrows, union_highlights,
                             changed=changed, context=context)
     if union.kind == detector.BLOCKED:
@@ -592,6 +597,12 @@ def _moderate(room, color, changed):
     if own.kind == detector.SUSPECT:
         return own, False
     return None, False
+
+
+def _own_matched(store, verdict):
+    arrows = [a for a in verdict.matched_arrows if (a[0], a[1]) in store.arrows]
+    highlights = [h for h in verdict.matched_highlights if h in store.highlights]
+    return arrows, highlights
 
 
 async def _relay_or_moderate(app, room, color, msg, changed, msg_type):
@@ -602,7 +613,10 @@ async def _relay_or_moderate(app, room, color, msg, changed, msg_type):
 
 
 async def _moderate_relay(app, room, color, relay_msg, changed, msg_type):
-    verdict, is_union = _moderate(room, color, changed)
+    inputs = _moderation_inputs(room, color)
+    verdict, is_union = await asyncio.to_thread(_moderate, *inputs, changed)
+    if room.backend is None or room.result is not None:
+        return "noop"
     if verdict is None:
         await _relay_to_opp(app, room, color, relay_msg, msg_type)
         return "relayed"
@@ -612,12 +626,14 @@ async def _moderate_relay(app, room, color, relay_msg, changed, msg_type):
     await _relay_to_opp(app, room, color, relay_msg, msg_type)
     log.warning("marks suspect room=%s color=%s pattern=%s",
                 room.room_id, color, str(verdict.pattern_id))
+    store = room.annotations_for(color)
+    sus_arrows, sus_highlights = _own_matched(store, verdict)
     await send(app.state.connections.get_for_color(room, color),
                  AnnotationsBlockedMessage(
                      action="suspect",
-                     highlights=list(verdict.matched_highlights),
-                     arrows=_arrow_wires(verdict.matched_arrows),
-                     share_muted=room.annotations_for(color).share_muted))
+                     highlights=sus_highlights,
+                     arrows=_arrow_wires(sus_arrows),
+                     share_muted=store.share_muted))
     return "suspect"
 
 
@@ -625,6 +641,7 @@ async def _handle_block(app, room, color, verdict, is_union):
     connections = app.state.connections
     store = room.annotations_for(color)
     opp_color = room.opp_color(color)
+    own_arrows, own_highlights = _own_matched(store, verdict)
     store.strip(verdict.matched_arrows, verdict.matched_highlights)
     if is_union:
         room.annotations_for(opp_color).strip(
@@ -639,8 +656,8 @@ async def _handle_block(app, room, color, verdict, is_union):
     await send(connections.get_for_color(room, color),
                  AnnotationsBlockedMessage(
                      action="blocked",
-                     highlights=list(verdict.matched_highlights),
-                     arrows=_arrow_wires(verdict.matched_arrows),
+                     highlights=own_highlights,
+                     arrows=_arrow_wires(own_arrows),
                      share_muted=muted))
 
 

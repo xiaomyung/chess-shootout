@@ -21,6 +21,7 @@ from chessshootout.server import logging_setup
 from chessshootout.server.broadcasts import broadcast_game_start, finalize_and_broadcast
 from chessshootout.server.connections import ConnectionRegistry, send
 from chessshootout.server.handlers import _clock_snapshot, dispatch
+from chessshootout.server.moderation import library
 from chessshootout.server.protocol import (
     ANNOTATIONS_PER_SECOND, AnnotationSetWire, ArrowWire,
     AuthMessage, CHAT_COOLDOWN_SECONDS, CancelMatchmakeRequest,
@@ -186,6 +187,8 @@ def create_app(*, now_provider=time.monotonic, max_rooms=DEFAULT_MAX_ROOMS):
     app.state.annotation_limiter = annotation_limiter
     app.state.chat_limiter = chat_limiter
     app.state.moderation_enabled = _moderation_enabled()
+    if app.state.moderation_enabled:
+        library.preload()
     app.state.sweep = Sweep(rooms, connections, now_provider, now_ms)
 
     @app.exception_handler(RateLimitExceeded)

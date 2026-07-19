@@ -1,16 +1,22 @@
 """Server-side annotation moderation wired into the live relay, driven end-to-end
 through real websockets with a fake clock.
 
-Detection runs synchronously between the store mutation and the relay await, so
-the store is coherent the instant a corrective/blocked send fires; ALL block
-state writes (strip, trip_count, share_muted, mute-clear) commit before the
-first await, so a finalize racing into one of the block path's sends never
-lands writes on a freshly reset store. At the mute trip the corrective
-snapshot therefore already carries the emptied store and doubles as the
-clearing snapshot -- one wire event, routed through the hide-aware corrective
-path. Every "opponent received nothing" claim is proved with a ping sentinel:
-the very next frame the peer reads back must be its pong, so a stray relay
-would surface ahead of it.
+Detection runs off the event loop (asyncio.to_thread) on a snapshot of both
+stores taken before the await, so an adversarial worst-case detect cannot
+stall clocks/pings for other rooms; the room's liveness is re-validated after
+the await (race discipline), so a finalize landing mid-detection drops the
+whole outcome instead of writing to a freshly reset store. Past that gate,
+ALL block state writes (strip, trip_count, share_muted, mute-clear) commit
+before the first send await. At the mute trip the corrective snapshot
+therefore already carries the emptied store and doubles as the clearing
+snapshot -- one wire event, routed through the hide-aware corrective path.
+The blocked/suspect message to the drawer carries only the MOVER'S OWN subset
+of the matched marks: a cross-color union can match up to two full stores
+(~256 arrows), which would burst the wire model's MAX_SHARED_ARROWS cap and
+tear down the session mid-block, and the client can only red-flag its own
+marks anyway. Every "opponent received nothing" claim is proved with a ping
+sentinel: the very next frame the peer reads back must be its pong, so a
+stray relay would surface ahead of it.
 
 Deltas moderate anchored at the changed mark only on ADD; a remove runs the
 full-scan path (changed=None) because the raster stage's local excess-ink
@@ -335,13 +341,45 @@ def test_cross_color_collusion_strips_both_and_trips_completing_mover(client):
     blocked = _recv(p.ws_b)
     assert blocked["type"] == "annotations_blocked"
     assert blocked["action"] == "blocked"
-    assert len(blocked["arrows"]) == len(SWASTIKA)
+    # only the completing mover's own contribution comes back on the wire --
+    # the full union can exceed MAX_SHARED_ARROWS and the client can only
+    # red-flag its own marks
+    got = {(arrow["from"], arrow["to"]) for arrow in blocked["arrows"]}
+    assert got == set(SWASTIKA[2:])
 
     room = p.room()
     assert room.annotations_white.arrows == []
     assert room.annotations_black.arrows == []
     assert room.annotations_black.trip_count == 1
     assert room.annotations_white.trip_count == 0
+
+
+def test_blocked_wire_marks_stay_within_the_arrow_cap(client):
+    """A union verdict can match both stores at once (up to ~2x
+    MAX_SHARED_ARROWS distinct arrows); building AnnotationsBlockedMessage
+    from the raw union raises pydantic ValidationError mid-block and tears
+    down the mover's socket with half-applied trip state. The own-store
+    filter keeps the wire list at or below the store cap by construction."""
+    from chessshootout.server.protocol import AnnotationsBlockedMessage, MAX_SHARED_ARROWS
+    from chessshootout.server.rooms import SharedAnnotations
+
+    def coord(i):
+        return f"{chr(ord('a') + i % 8)}{i // 8 + 1}"
+
+    union_arrows = [(coord(i), coord(i + off))
+                    for off in (1, 2, 7, 8, 9) for i in range(64 - off)]
+    union_arrows = union_arrows[:2 * MAX_SHARED_ARROWS]
+    store = SharedAnnotations()
+    store.arrows = list(union_arrows[:MAX_SHARED_ARROWS])
+    verdict = detector.Verdict(detector.BLOCKED, pattern_id="x",
+                               matched_arrows=list(union_arrows),
+                               matched_highlights=[])
+    own_arrows, own_highlights = handlers._own_matched(store, verdict)
+    msg = AnnotationsBlockedMessage(
+        action="blocked", highlights=own_highlights,
+        arrows=[{"from": f, "to": t} for f, t in own_arrows], share_muted=False)
+    assert len(msg.arrows) == MAX_SHARED_ARROWS
+    assert {(a.from_sq, a.to_sq) for a in msg.arrows} == set(store.arrows)
 
 
 # --- kill switch --------------------------------------------------------------
@@ -393,9 +431,11 @@ def test_result_resets_mod_state_and_rematch_swap_keeps_hide_preference(client):
 def test_mute_state_commits_before_the_first_block_await(client, monkeypatch):
     """The block path awaits several sends; a finalize can interleave at any of
     them and reset() the annotation stores. Every state write (strip, trip
-    count, share_muted, mute-clear) must therefore land BEFORE the first await
-    -- a post-await `share_muted = True` would re-mute a freshly reset store.
-    Pinned by observing the store at the moment each send coroutine fires."""
+    count, share_muted, mute-clear) must therefore land BEFORE the first SEND
+    await -- a post-send `share_muted = True` would re-mute a freshly reset
+    store. (Detection itself awaits to_thread earlier; that window is covered
+    by the liveness re-validation pinned below.) Pinned by observing the store
+    at the moment each send coroutine fires."""
     p = _pair(client)
     swastika = _wire_arrows(SWASTIKA)
     for _ in (1, 2):
@@ -425,6 +465,30 @@ def test_mute_state_commits_before_the_first_block_await(client, monkeypatch):
         "AnnotationsStateMessage", "AnnotationsBlockedMessage"]
     assert all(muted for _, muted, _, _ in observed)
     assert all(h == [] and a == [] for _, _, h, a in observed)
+
+
+def test_finalize_during_detection_drops_the_relay(client, monkeypatch):
+    """Detection now happens inside asyncio.to_thread, so a finalize can land
+    while the verdict is being computed. Race discipline: the room's liveness
+    is re-validated after the await -- without it, a clean verdict computed on
+    a live game relays annotations into a finished one (and a blocked verdict
+    would strip/trip a freshly reset store). Simulated by finalizing from
+    inside the detection callable itself."""
+    p = _pair(client)
+    room = p.room()
+    rooms = client.app.state.rooms
+    real = handlers._moderate
+
+    def finalize_then_detect(*args):
+        rooms.finalize_result(room.room_id, Reason.RESIGNATION, winner_color="black")
+        return real(*args)
+
+    monkeypatch.setattr(handlers, "_moderate", finalize_then_detect)
+    _send(p.ws_w, type="annotation_delta", action="add", kind="highlight",
+          square="e4")
+    assert _pong(p.ws_w)["type"] == "pong"
+    assert room.result is not None
+    assert _pong(p.ws_b)["type"] == "pong"
 
 
 def test_add_delta_anchors_search_and_remove_delta_full_scans(client, monkeypatch):

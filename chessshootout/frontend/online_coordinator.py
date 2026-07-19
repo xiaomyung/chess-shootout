@@ -413,6 +413,9 @@ class OnlineCoordinator:
             log.info("resume ignored — no active online game")
             self._cancel_resync()
             return
+        desired = env.get_hide_opp_marks()
+        if bool(payload.get("hide_opp_marks")) != desired:
+            self.set_marks_visibility(desired)
         target = self._subscriber if self._subscriber is not None else game
         target.on_resume(payload)
         self._resyncing = False

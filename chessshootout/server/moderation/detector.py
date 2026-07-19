@@ -1,4 +1,5 @@
 import math
+import threading
 from collections import defaultdict
 from dataclasses import dataclass, field
 
@@ -26,6 +27,7 @@ HEURISTIC_ID = "heuristic_c4"
 _FLOORS = None
 _CACHE = {}
 _CACHE_ORDER = []
+_LOCK = threading.Lock()
 
 
 @dataclass
@@ -98,18 +100,22 @@ def _changed_edges_cells(changed):
 
 
 def detect(arrows, highlights, changed=None, context=()):
-    library.preload()
+    with _LOCK:
+        library.preload()
+        _ensure_floors()
     arrows, highlights, arrow_edges, drawn_edges, cells = _normalize_inputs(arrows, highlights)
     context_cells = [_cell(coord) for coord in context]
     changed_edges, changed_cells = _changed_edges_cells(changed)
     key = (tuple(arrows), tuple(highlights), frozenset(context_cells),
            _changed_key(changed_edges, changed_cells))
-    cached = _CACHE.get(key)
+    with _LOCK:
+        cached = _CACHE.get(key)
     if cached is not None:
         return cached
     verdict = _run(arrows, highlights, arrow_edges, drawn_edges, cells, context_cells,
                    changed_edges, changed_cells)
-    _cache_put(key, verdict)
+    with _LOCK:
+        _cache_put(key, verdict)
     return verdict
 
 

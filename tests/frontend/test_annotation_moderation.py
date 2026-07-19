@@ -424,3 +424,32 @@ def test_hide_chip_and_options_toggle_stay_in_sync():
     app.settings.apply_hide_opp_marks(False)
     assert env.get_hide_opp_marks() is False
     assert game._signals_provider()["hide_on"] is False
+
+
+# ---- resume re-syncs a stale hide preference -------------------------------
+
+
+def test_resume_pushes_hide_preference_when_server_slot_is_stale():
+    """Toggling the option while disconnected never reaches the server (the
+    send is gated on is_connected), so the server slot can drift; /resume
+    echoes the slot's view, and a mismatch must re-push the client's desired
+    value or the stale slot keeps suppressing (or leaking) opponent marks for
+    the rest of the game."""
+    game = _online_game()
+    coord = game.app.coordinator
+    coord.set_marks_visibility = MagicMock()
+    coord._subscriber = MagicMock()
+    env.set_hide_opp_marks(True)
+    coord._handle_game_resumed({"hide_opp_marks": False})
+    coord.set_marks_visibility.assert_called_once_with(True)
+    coord._subscriber.on_resume.assert_called_once()
+
+
+def test_resume_matching_hide_preference_sends_nothing():
+    game = _online_game()
+    coord = game.app.coordinator
+    coord.set_marks_visibility = MagicMock()
+    coord._subscriber = MagicMock()
+    env.set_hide_opp_marks(False)
+    coord._handle_game_resumed({"hide_opp_marks": False})
+    coord.set_marks_visibility.assert_not_called()

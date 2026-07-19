@@ -153,3 +153,28 @@ def test_worst_case_timing_under_budget():
     assert worst_ms < TIMING_BUDGET_MS, (
         f"worst-case detect() {worst_ms:.2f} ms exceeded budget "
         f"{TIMING_BUDGET_MS} ms -- fix perf, do not loosen silently")
+
+
+def test_detect_is_thread_safe_under_concurrent_callers():
+    """Handlers run detect() inside asyncio.to_thread, so the module-level
+    LRU memo (dict + order list) is shared across worker threads; unlocked
+    pop(0)/append pairs corrupt it under contention. Hammer distinct and
+    repeated inputs from a pool and pin that every concurrent verdict matches
+    its serial twin."""
+    from concurrent.futures import ThreadPoolExecutor
+
+    swastika = [(tuple(a), tuple(b))
+                for a, b in M.SWASTIKA_SCREENSHOTS["v1_hooks_only_pinwheel"]]
+    inputs = [tuple(M.arrows_from_segments(swastika))]
+    rng = random.Random(11)
+    for _ in range(31):
+        arrows = tuple((M.coord(rng.randrange(8), rng.randrange(8)),
+                        M.coord(rng.randrange(8), rng.randrange(8)))
+                       for _ in range(rng.randrange(1, 12)))
+        inputs.append(tuple(a for a in arrows if a[0] != a[1]))
+
+    serial = [detector.detect(list(arrows), []).kind for arrows in inputs]
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        concurrent = list(pool.map(
+            lambda arrows: detector.detect(list(arrows), []).kind, inputs * 8))
+    assert concurrent == serial * 8
