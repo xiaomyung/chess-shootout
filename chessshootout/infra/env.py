@@ -161,6 +161,15 @@ def set_last_mode(mode):
     _persist("CHESS_LAST_MODE", mode)
 
 
+def get_news_last_seen():
+    return os.environ.get("CHESS_NEWS_LAST_SEEN") or ""
+
+
+def set_news_last_seen(value):
+    os.environ["CHESS_NEWS_LAST_SEEN"] = value
+    _persist("CHESS_NEWS_LAST_SEEN", value)
+
+
 def set_data_dir(path):
     if path:
         os.environ["CHESS_DATA_DIR"] = path
@@ -274,6 +283,14 @@ def get_auto_queen():
 
 def set_auto_queen(value):
     _set_bool("CHESS_AUTO_QUEEN", value)
+
+
+def get_hide_opp_marks():
+    return _get_bool("CHESS_HIDE_OPP_MARKS", False)
+
+
+def set_hide_opp_marks(value):
+    _set_bool("CHESS_HIDE_OPP_MARKS", value)
 
 
 _RAIL_SECTION_KEYS = {

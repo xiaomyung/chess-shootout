@@ -424,16 +424,17 @@ def test_debut_marquee_slides_on_hover_and_eases_back(monkeypatch):
 # --- SIGNALS section: SHARE / AUTO-Q / SOUND chips + VOL notch row -----------
 
 _SIGNAL_STATE = {
-    "share_on": False, "share_enabled": True, "auto_q": False,
-    "sound_on": True, "volume": 0.5, "review": False,
+    "share_on": False, "share_enabled": True, "hide_on": False, "hide_enabled": True,
+    "auto_q": False, "sound_on": True, "volume": 0.5, "review": False,
 }
 
 
 def _signals_menu(state, **callbacks):
     backend = Backend()
     backend.new_game()
-    cb = {"share_toggle": lambda: None, "auto_q_toggle": lambda: None,
-          "sound_toggle": lambda: None, "set_volume": lambda v: None}
+    cb = {"share_toggle": lambda: None, "hide_marks_toggle": lambda: None,
+          "auto_q_toggle": lambda: None, "sound_toggle": lambda: None,
+          "set_volume": lambda v: None}
     cb.update(callbacks)
     rm = RightMenu(pg.display.get_surface(), backend, cb,
                    signals_provider=lambda: dict(state))
@@ -450,11 +451,12 @@ def _draw(rm):
     rm.draw_menu()
 
 
-def test_signals_chips_render_all_three_live():
+def test_signals_chips_render_all_four_live():
     state = dict(_SIGNAL_STATE)
     rm = _signals_menu(state)
     _draw(rm)
-    assert [chip.key for chip, _ in rm._signal_chips] == ["share", "auto_q", "sound"]
+    assert [chip.key for chip, _ in rm._signal_chips] == [
+        "share", "hide_marks", "auto_q", "sound"]
 
 
 def test_review_signals_show_only_the_sound_chip():
@@ -489,6 +491,42 @@ def test_disabled_share_chip_is_inert_on_click():
     rect = _signal_chip(rm, "share")
     assert rm.handle_click(rect.center) is True
     assert fired == [], "the disabled SHARE chip swallows the click but never fires"
+
+
+def test_hide_chip_on_paints_avatar_blue_dot():
+    """The HIDE chip wears its avatar_blue status dot when hiding is on, and drops
+    it when off -- the same on/off contract as the other signal chips."""
+    state = dict(_SIGNAL_STATE, hide_on=True)
+    rm = _signals_menu(state)
+    _draw(rm)
+    rect = _signal_chip(rm, "hide_marks")
+    assert _has_color(rm.window, rect, pg.Color(Colors.avatar_blue)[:3], tol=12), \
+        "the ON HIDE chip shows an avatar_blue dot"
+    state["hide_on"] = False
+    _draw(rm)
+    assert not _has_color(rm.window, rect, pg.Color(Colors.avatar_blue)[:3], tol=12), \
+        "the OFF HIDE chip carries no avatar_blue"
+
+
+def test_disabled_hide_chip_is_inert_on_click():
+    """Off the online board HIDE is gated exactly like SHARE: the click is
+    swallowed but never fires the toggle."""
+    fired = []
+    state = dict(_SIGNAL_STATE, hide_enabled=False)
+    rm = _signals_menu(state, hide_marks_toggle=lambda: fired.append("hide"))
+    _draw(rm)
+    rect = _signal_chip(rm, "hide_marks")
+    assert rm.handle_click(rect.center) is True
+    assert fired == [], "the disabled HIDE chip swallows the click but never fires"
+
+
+def test_hide_chip_click_fires_hide_marks_toggle():
+    fired = []
+    state = dict(_SIGNAL_STATE)
+    rm = _signals_menu(state, hide_marks_toggle=lambda: fired.append("hide"))
+    _draw(rm)
+    assert rm.handle_click(_signal_chip(rm, "hide_marks").center) is True
+    assert fired == ["hide"]
 
 
 def test_live_chip_click_fires_callback_and_chip_toggle_sound():

@@ -1,4 +1,4 @@
-from typing import NamedTuple
+from typing import NamedTuple, Optional
 
 import pygame as pg
 
@@ -160,11 +160,14 @@ class SignalChip(NamedTuple):
     state_key: str
     callback: str
     tooltip: str
+    enabled_key: Optional[str] = None
 
 
 SIGNAL_CHIPS = [
     SignalChip("share", "SHARE", Colors.amber, "share_on", "share_toggle",
-               "SHARE MARKS — BROADCAST YOUR DRAWINGS"),
+               "SHARE MARKS — BROADCAST YOUR DRAWINGS", "share_enabled"),
+    SignalChip("hide_marks", "HIDE", Colors.avatar_blue, "hide_on", "hide_marks_toggle",
+               "HIDE OPPONENT MARKS — NEVER SHOW THEIR DRAWINGS", "hide_enabled"),
     SignalChip("auto_q", "AUTO-Q", Colors.accent, "auto_q", "auto_q_toggle",
                "AUTO-QUEEN — PROMOTIONS PICK QUEEN"),
     SignalChip("sound", "SOUND", Colors.accent, "sound_on", "sound_toggle",
@@ -977,7 +980,7 @@ class RightMenu:
         state = self.signals_provider()
         for chip, rect in self._signal_chips:
             on = bool(state.get(chip.state_key))
-            disabled = chip.key == "share" and not state.get("share_enabled")
+            disabled = chip.enabled_key is not None and not state.get(chip.enabled_key)
             self.window.blit(
                 self._chip_surface(chip, rect.width, rect.height, on, disabled),
                 rect.topleft)
@@ -1112,7 +1115,11 @@ class RightMenu:
         for chip, rect in self._signal_chips:
             if not rect.collidepoint(pos):
                 continue
-            if chip.key == "share" and not state.get("share_enabled"):
+            if chip.enabled_key is not None and not state.get(chip.enabled_key):
+                if chip.key == "share":
+                    blocked = self.callbacks.get("share_blocked")
+                    if blocked is not None:
+                        blocked()
                 return True
             callback = self.callbacks.get(chip.callback)
             if callback is not None:

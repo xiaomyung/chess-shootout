@@ -21,6 +21,7 @@ from chessshootout.server import logging_setup
 from chessshootout.server.broadcasts import broadcast_game_start, finalize_and_broadcast
 from chessshootout.server.connections import ConnectionRegistry, send
 from chessshootout.server.handlers import _clock_snapshot, dispatch
+from chessshootout.server.moderation import library
 from chessshootout.server.protocol import (
     ANNOTATIONS_PER_SECOND, AnnotationSetWire, ArrowWire,
     AuthMessage, CHAT_COOLDOWN_SECONDS, CancelMatchmakeRequest,
@@ -40,6 +41,11 @@ from chessshootout.server.sweep import Sweep
 CLOCK_TICK_INTERVAL_SECONDS = 0.1
 MAX_INBOUND_MESSAGE_BYTES = 4096
 DEFAULT_MAX_ROOMS = 100
+
+
+def _moderation_enabled():
+    return os.environ.get("MODERATION_OFF", "").strip().lower() not in (
+        "1", "true", "yes", "on")
 
 
 def app_version():
@@ -180,6 +186,9 @@ def create_app(*, now_provider=time.monotonic, max_rooms=DEFAULT_MAX_ROOMS):
     app.state.reclaim_limiter = reclaim_limiter
     app.state.annotation_limiter = annotation_limiter
     app.state.chat_limiter = chat_limiter
+    app.state.moderation_enabled = _moderation_enabled()
+    if app.state.moderation_enabled:
+        library.preload()
     app.state.sweep = Sweep(rooms, connections, now_provider, now_ms)
 
     @app.exception_handler(RateLimitExceeded)
@@ -247,6 +256,7 @@ def create_app(*, now_provider=time.monotonic, max_rooms=DEFAULT_MAX_ROOMS):
                 increment_seconds=body.increment_seconds,
                 side_preference=body.side_preference,
                 country=body.country,
+                hide_opp_marks=body.hide_opp_marks,
             )
         except AlreadyInGameError:
             log.info("matchmake rejected uuid=%s reason=already_in_game", body.client_uuid[:8])
@@ -308,6 +318,13 @@ def create_app(*, now_provider=time.monotonic, max_rooms=DEFAULT_MAX_ROOMS):
         skillcheck_log = [
             SkillCheckOutcomeWire(ply=e.ply, kind=e.kind, won=e.won, san=e.san)
             for e in room.skillcheck_log]
+        white_annotations = _annotation_set_wire(room.annotations_white)
+        black_annotations = _annotation_set_wire(room.annotations_black)
+        if room.hides_opponent_marks(color):
+            if color == "white":
+                black_annotations = AnnotationSetWire()
+            else:
+                white_annotations = AnnotationSetWire()
         response = ResumeResponse(
             fen=export_fen(room.backend),
             move_history=history,
@@ -324,8 +341,10 @@ def create_app(*, now_provider=time.monotonic, max_rooms=DEFAULT_MAX_ROOMS):
             pending_skillcheck=pending,
             skillcheck_locks=locks,
             skillcheck_log=skillcheck_log,
-            white_annotations=_annotation_set_wire(room.annotations_white),
-            black_annotations=_annotation_set_wire(room.annotations_black),
+            white_annotations=white_annotations,
+            black_annotations=black_annotations,
+            share_muted=room.annotations_for(color).share_muted,
+            hide_opp_marks=slot.hide_opp_marks,
             result_reason=room.result[0] if room.result else None,
             result_winner=room.result[1] if room.result else None,
         )

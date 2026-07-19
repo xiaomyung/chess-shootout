@@ -1,5 +1,6 @@
 import json
 import logging
+import sys
 import threading
 from datetime import datetime
 
@@ -12,7 +13,7 @@ log = logging.getLogger("chess.client.news")
 
 CACHE_FILENAME = "news_cache.json"
 
-NEWS_MAX_ITEMS = 20
+NEWS_MAX_ITEMS = 30
 
 NEWS_DATE_FORMAT = "%Y-%m-%d"
 
@@ -64,22 +65,34 @@ def _atomic_write_json(path, data):
 
 
 def _load_cache(path):
+    return _read_news_file(path) or []
+
+
+def _read_news_file(path):
     if not path.exists():
-        return []
+        return None
     try:
         raw = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError):
-        return []
+        return None
     return parse_news_items(raw)
+
+
+def _dev_news_items():
+    if paths.is_frozen() or "pytest" in sys.modules:
+        return None
+    return _read_news_file(paths.resource_path("news.json"))
 
 
 class NewsClient:
 
     def __init__(self, url=None, cache_path=None):
+        dev = _dev_news_items() if url is None and cache_path is None else None
         self.url = url or env.get_news_url()
         self._cache_path = cache_path or _cache_path()
         self._lock = threading.Lock()
-        self._items = _load_cache(self._cache_path)
+        self._items = dev if dev is not None else _load_cache(self._cache_path)
+        self._dev = dev is not None
         self._generation = 0
         self._fetched = False
 
@@ -93,7 +106,7 @@ class NewsClient:
 
     def fetch_once(self):
         with self._lock:
-            if self._fetched:
+            if self._fetched or self._dev:
                 return
             self._fetched = True
         thread = threading.Thread(target=self._fetch_worker, daemon=True)

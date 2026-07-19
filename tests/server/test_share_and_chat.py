@@ -197,7 +197,8 @@ def test_annotation_delta_arrow_cap_refuses_add_without_relay(client):
         assert ("e2", "e4") not in room.annotations_white.arrows
 
 
-def test_annotation_delta_highlight_dup_add_at_cap_is_idempotent_not_capped(client):
+def test_annotation_delta_highlight_dup_add_at_cap_is_idempotent_not_capped(
+        monkeypatch):
     """The highlight cap guard is `square not in store.highlights AND at cap`, with
     the membership test FIRST, so a duplicate add of an already-present square
     short-circuits past the cap and takes the idempotent path (set.add is a no-op),
@@ -208,7 +209,17 @@ def test_annotation_delta_highlight_dup_add_at_cap_is_idempotent_not_capped(clie
     65th DISTINCT highlight is therefore impossible over the wire, which makes the
     "capped" return unreachable for highlights -- the only add that can occur while
     64 are stored is a duplicate, and that stays a harmless relayed no-op so the
-    opponent's shared board never silently drops a frame."""
+    opponent's shared board never silently drops a frame.
+
+    Runs on a MODERATION_OFF app on purpose: the cap can only be reached with the
+    whole board highlighted, and that fully-inked degenerate state is exactly what
+    the annotation moderator flags/strips -- an orthogonal concern to the store
+    cap guard this test isolates."""
+    from fastapi.testclient import TestClient
+    from chessshootout.server.app import create_app
+    from tests.helpers import FakeClock
+    monkeypatch.setenv("MODERATION_OFF", "1")
+    client = TestClient(create_app(now_provider=FakeClock(), max_rooms=8))
     with _paired_sockets(client) as (ws_w, ws_b, a):
         room = _room(client, a)
         room.annotations_white.highlights = _all_squares()

@@ -165,6 +165,7 @@ class GameScreen(Screen):
         self._custom_start = False
         self._debut = openings.DebutTracker(self._reviewed_sans)
         self._share_marks = False
+        self._share_muted = False
         self._opp_sharing = False
         self._chat_cooldown_until_ms = 0
         self._speech_anchor_memo = {}
@@ -202,6 +203,8 @@ class GameScreen(Screen):
             "help": app._on_help,
             "give_time": self.give_time.on_give_time,
             "share_toggle": self._on_share_toggle,
+            "share_blocked": self._on_share_blocked,
+            "hide_marks_toggle": self._on_hide_marks_toggle,
             "auto_q_toggle": self._toggle_auto_queen,
             "sound_toggle": lambda: signal_controls.toggle_sound(app),
             "set_volume": lambda value: signal_controls.set_signal_volume(app, value),
@@ -331,12 +334,16 @@ class GameScreen(Screen):
             self._opp_disconnected_at_ms = None
 
     def on_annotations_state(self, payload):
+        if env.get_hide_opp_marks():
+            return
         self._opp_sharing = bool(payload.get("sharing"))
         self.board.annotations.set_opp(
             self._decode_highlight_coords(payload.get("highlights", [])),
             self._decode_arrow_wires(payload.get("arrows", [])))
 
     def on_annotation_delta(self, payload):
+        if env.get_hide_opp_marks():
+            return
         action = payload.get("action")
         kind = payload.get("kind")
         if action not in ("add", "remove") or kind not in ("highlight", "arrow"):
@@ -354,6 +361,25 @@ class GameScreen(Screen):
             except (ValueError, KeyError, TypeError):
                 return
             self.board.annotations.apply_opp_delta(action, kind, arrow=arrow)
+
+    def on_annotations_blocked(self, payload):
+        action = payload.get("action")
+        arrows = self._decode_arrow_wires(payload.get("arrows", []))
+        highlights = self._decode_highlight_coords(payload.get("highlights", []))
+        if action == "blocked":
+            self.board.annotations.flag_own(arrows, highlights)
+            log.info("marks blocked arrows=%d highlights=%d muted=%s",
+                     len(arrows), len(highlights), bool(payload.get("share_muted")))
+            self.app.toast.show("Some marks can't be shared", key="marks_blocked")
+            if payload.get("share_muted"):
+                self._share_muted = True
+                self._toast_share_muted()
+        elif action == "suspect":
+            self.app.toast.show("Those marks look suspicious", key="marks_suspect")
+
+    def apply_opp_marks_shield(self):
+        self.board.annotations.clear_opp()
+        self._opp_sharing = False
 
     def on_quick_chat(self, payload):
         preset = int(payload.get("preset", -1))
@@ -439,14 +465,19 @@ class GameScreen(Screen):
             mine_key, opp_key = "black_annotations", "white_annotations"
         mine = payload.get(mine_key) or {}
         opp = payload.get(opp_key) or {}
+        self.board.annotations.flagged = set()
         self.board.highlighted_squares = self._decode_highlight_coords(
             mine.get("highlights", []))
         self.board.arrows = self._decode_arrow_wires(mine.get("arrows", []))
         self._share_marks = bool(mine.get("sharing"))
-        self.board.annotations.set_opp(
-            self._decode_highlight_coords(opp.get("highlights", [])),
-            self._decode_arrow_wires(opp.get("arrows", [])))
-        self._opp_sharing = bool(opp.get("sharing"))
+        if env.get_hide_opp_marks():
+            self.apply_opp_marks_shield()
+        else:
+            self.board.annotations.set_opp(
+                self._decode_highlight_coords(opp.get("highlights", [])),
+                self._decode_arrow_wires(opp.get("arrows", [])))
+            self._opp_sharing = bool(opp.get("sharing"))
+        self._share_muted = bool(payload.get("share_muted"))
 
     def on_takeback(self, payload):
         server_ply = payload.get("ply")
@@ -1047,7 +1078,15 @@ class GameScreen(Screen):
         return True
 
     def _share_active(self):
-        return self.variant == Variant.ONLINE and self.current_result() is None
+        return (self.variant == Variant.ONLINE and self.current_result() is None
+                and not self._share_muted)
+
+    def _toast_share_muted(self):
+        self.app.toast.show("Mark sharing is muted for this game", key="marks_muted")
+
+    def _on_share_blocked(self):
+        if self._share_muted:
+            self._toast_share_muted()
 
     def _on_share_toggle(self):
         if not self._share_active():
@@ -1474,7 +1513,10 @@ class GameScreen(Screen):
         sm = self.app.sound_manager
         return {
             "share_on": self._share_marks,
-            "share_enabled": self.variant == Variant.ONLINE and self.game_live(),
+            "share_enabled": (self.variant == Variant.ONLINE and self.game_live()
+                              and not self._share_muted),
+            "hide_on": env.get_hide_opp_marks(),
+            "hide_enabled": self.variant == Variant.ONLINE and self.game_live(),
             "auto_q": env.get_auto_queen(),
             "sound_on": sm.enabled,
             "volume": sm.master_volume,
@@ -1483,6 +1525,9 @@ class GameScreen(Screen):
 
     def _toggle_auto_queen(self):
         env.set_auto_queen(not env.get_auto_queen())
+
+    def _on_hide_marks_toggle(self):
+        self.app.settings.apply_hide_opp_marks(not env.get_hide_opp_marks())
 
     def _right_menu_buttons(self):
         if self.match.clock is None:
@@ -1519,6 +1564,7 @@ class GameScreen(Screen):
         self._custom_start = False
         self._debut.reset()
         self._share_marks = False
+        self._share_muted = False
         self._opp_sharing = False
         self._chat_cooldown_until_ms = 0
         self._speech_anchor_memo = {}

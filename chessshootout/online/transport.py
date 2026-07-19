@@ -14,8 +14,8 @@ from chessshootout.server.protocol import (
     CancelMatchmakeRequest, DrawResponseMessage, GiveTimeMessage, HealthResponse,
     MatchmakeRequest, MatchmakeResponse, MoveMessage, PingMessage, PROTOCOL_VERSION,
     QuickChatMessage, Reason, ReclaimRequest, ReclaimResponse, RematchRequestMessage,
-    RematchResponseMessage, ResumeRequest, ResumeResponse, SkillCheckShotMessage,
-    TakebackResponseMessage,
+    RematchResponseMessage, ResumeRequest, ResumeResponse, SetMarksVisibilityMessage,
+    SkillCheckShotMessage, TakebackResponseMessage,
 )
 
 WsConnectionClosed = ConnectionClosed
@@ -302,6 +302,9 @@ class ServerWebSocket:
 
     async def send_quick_chat(self, preset):
         await self._send(QuickChatMessage(preset=preset))
+
+    async def send_set_marks_visibility(self, hide_opp):
+        await self._send(SetMarksVisibilityMessage(hide_opp=hide_opp))
 
     async def _send(self, message):
         await self._ws.send(message.model_dump_json(by_alias=True))

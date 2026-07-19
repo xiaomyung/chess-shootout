@@ -61,6 +61,8 @@ ONLINE_TRANSIENT_REASON_LABELS = {
     Reason.REMATCH_ALREADY_PENDING: "Rematch already requested",
     Reason.ALREADY_IN_GAME: "Already in a game",
     Reason.GAME_ALREADY_OVER: "This game has ended",
+    Reason.SHARE_MUTED: "Mark sharing is muted for this game",
+    Reason.OPP_HIDES_MARKS: "Opponent hides shared marks",
 }
 
 ONLINE_GAME_STATE_REASONS = {
@@ -180,6 +182,10 @@ class OnlineCoordinator:
         if self.client is not None:
             self.client.send_quick_chat(preset)
 
+    def set_marks_visibility(self, hide_opp):
+        if self.client is not None:
+            self.client.send_set_marks_visibility(hide_opp)
+
     def _drain_online_inbound(self):
         if self.client is None:
             return
@@ -212,6 +218,8 @@ class OnlineCoordinator:
             self._handle_annotations_state(event.payload)
         elif event.type == "annotation_delta":
             self._handle_annotation_delta(event.payload)
+        elif event.type == "annotations_blocked":
+            self._handle_annotations_blocked(event.payload)
         elif event.type == "quick_chat_received":
             self._forward_board_event("on_quick_chat", event.payload)
         elif event.type == "connection_status":
@@ -405,6 +413,9 @@ class OnlineCoordinator:
             log.info("resume ignored — no active online game")
             self._cancel_resync()
             return
+        desired = env.get_hide_opp_marks()
+        if bool(payload.get("hide_opp_marks")) != desired:
+            self.set_marks_visibility(desired)
         target = self._subscriber if self._subscriber is not None else game
         target.on_resume(payload)
         self._resyncing = False
@@ -429,6 +440,12 @@ class OnlineCoordinator:
             self._resync_buffer.append(("on_annotation_delta", payload))
             return
         self._forward_board_event("on_annotation_delta", payload)
+
+    def _handle_annotations_blocked(self, payload):
+        if self._resyncing:
+            self._resync_buffer.append(("on_annotations_blocked", payload))
+            return
+        self._forward_board_event("on_annotations_blocked", payload)
 
     def _handle_skill_check_required(self, payload):
         if self._resyncing:
@@ -562,6 +579,7 @@ class OnlineCoordinator:
             "increment_seconds": self._online_config["increment_seconds"],
             "side_preference": self._online_config["side"],
             "country": env.get_country() or None,
+            "hide_opp_marks": env.get_hide_opp_marks(),
         }
         self.client.connect(addr, request)
         mode_label, tc_text = self._search_labels()

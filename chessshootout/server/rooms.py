@@ -39,6 +39,7 @@ class PlayerSlot:
     session_token: str
     side_preference: str = "random"
     country: Optional[str] = None
+    hide_opp_marks: bool = False
     connected: bool = False
     disconnected_at: Optional[float] = None
     desync_active: bool = False
@@ -69,6 +70,9 @@ class SharedAnnotations:
     sharing: bool = False
     highlights: set = field(default_factory=set)
     arrows: list = field(default_factory=list)
+    trip_count: int = 0
+    share_muted: bool = False
+    opp_hidden_notice_sent: bool = False
 
     def clear_marks(self):
         self.highlights.clear()
@@ -77,6 +81,25 @@ class SharedAnnotations:
     def reset(self):
         self.clear_marks()
         self.sharing = False
+        self.trip_count = 0
+        self.share_muted = False
+        self.opp_hidden_notice_sent = False
+
+    def register_trip(self, limit):
+        self.trip_count += 1
+        muted = self.trip_count >= limit
+        if muted:
+            self.share_muted = True
+            self.clear_marks()
+        return muted
+
+    def strip(self, arrows, highlights):
+        for arrow in arrows:
+            pair = (arrow[0], arrow[1])
+            while pair in self.arrows:
+                self.arrows.remove(pair)
+        for highlight in highlights:
+            self.highlights.discard(highlight)
 
 
 @dataclass
@@ -122,6 +145,10 @@ class Room:
     def opp_color(self, color):
         return "black" if color == "white" else "white"
 
+    def hides_opponent_marks(self, color):
+        slot = self.slot(color)
+        return slot is not None and slot.hide_opp_marks
+
     def color_of(self, client_uuid):
         if self.white and self.white.client_uuid == client_uuid:
             return "white"
@@ -165,7 +192,7 @@ class RoomManager:
 
     async def enqueue(self, *, client_uuid, nickname, session_token,
                       time_minutes, increment_seconds, side_preference,
-                      country=None):
+                      country=None, hide_opp_marks=False):
         async with self._lock:
             if client_uuid in self._uuid_to_room:
                 raise AlreadyInGameError()
@@ -186,7 +213,7 @@ class RoomManager:
                 new_slot = PlayerSlot(
                     client_uuid=client_uuid, nickname=nickname,
                     session_token=session_token, side_preference=side_preference,
-                    country=country,
+                    country=country, hide_opp_marks=hide_opp_marks,
                 )
                 setattr(room, second_color, new_slot)
                 room.backend = Backend()
@@ -205,7 +232,7 @@ class RoomManager:
             slot = PlayerSlot(
                 client_uuid=client_uuid, nickname=nickname,
                 session_token=session_token, side_preference=side_preference,
-                country=country,
+                country=country, hide_opp_marks=hide_opp_marks,
             )
             room = Room(
                 room_id=room_id, time_minutes=time_minutes,
