@@ -33,15 +33,6 @@ assets/fonts/OFL.txt (https://openfontlicense.org/).
 - **assets/openings.tsv** — opening names dataset (ECO code + name + PGN line),
   from chess-openings by lichess-org, CC0 (public domain).
   https://github.com/lichess-org/chess-openings
-- **chessshootout/server/moderation/words.json** (glyph bitmaps) — the block-letter
-  and digit shapes used to read text drawn on the board come from font8x8 by
-  Daniel Hepper, public domain (derived from Marcel Sondaar's IBM VGA bitmap fonts).
-  https://github.com/dhepper/font8x8
-- **chessshootout/server/moderation/words.json** (word list) — a subset of the
-  blocked terms is drawn from the List of Dirty, Naughty, Obscene, and Otherwise
-  Bad Words by LDNOOBW (Shutterstock), CC BY 4.0
-  (https://creativecommons.org/licenses/by/4.0/).
-  https://github.com/LDNOOBW/List-of-Dirty-Naughty-Obscene-and-Otherwise-Bad-Words
 
 ## Sounds
 

@@ -34,25 +34,6 @@ from chessshootout.server.moderation import detector, geometry
 from tests.server import moderation_helpers as M
 
 
-SWASTIKA_SCREENSHOTS = {
-    "v1_hooks_only_pinwheel": [
-        [[3, 3], [4, 1]], [[3, 3], [5, 4]], [[3, 3], [2, 5]], [[3, 3], [1, 2]],
-    ],
-    "v2_cross_plus_tip_hooks": [
-        [[3, 3], [3, 1]], [[3, 3], [5, 3]], [[3, 3], [3, 5]], [[3, 3], [1, 3]],
-        [[3, 1], [5, 1]], [[5, 3], [5, 5]], [[3, 5], [1, 5]], [[1, 3], [1, 1]],
-    ],
-    "v3_overlapping_straight_arrow_pinwheel": [
-        [[3, 1], [3, 3]], [[3, 3], [3, 5]], [[1, 3], [3, 3]], [[3, 3], [5, 3]],
-        [[3, 1], [4, 1]], [[5, 3], [5, 4]], [[3, 5], [2, 5]], [[1, 3], [1, 2]],
-    ],
-    "v4_cross_plus_partial_hooks": [
-        [[3, 1], [3, 5]], [[1, 3], [5, 3]],
-        [[3, 1], [5, 1]], [[5, 3], [5, 5]], [[3, 5], [1, 5]],
-    ],
-}
-
-
 def _assert_trips(verdict, *, label=""):
     assert verdict.kind == detector.BLOCKED, (
         f"{label}: expected {detector.BLOCKED}, got {verdict.kind} "
@@ -192,19 +173,10 @@ def test_evasion_scaled_minimal_swastika_x3_trips():
     assert verdict.pattern_id == "swastika_axis_min"
 
 
-# Long axis arms with rotationally-consistent DIAGONAL hooks: C4-chiral but
-# matching no library template (the axis-hook long-arm form is now the
-# swastika_axis7 template and hard-blocks; this stays the heuristic's case).
-NOVEL_PINWHEEL = [
-    [[3, 3], [3, 0]], [[3, 0], [5, 2]], [[3, 3], [6, 3]], [[6, 3], [4, 5]],
-    [[3, 3], [3, 6]], [[3, 6], [1, 4]], [[3, 3], [0, 3]], [[0, 3], [2, 1]],
-]
-
-
 def test_evasion_novel_pinwheel_with_decoy_stays_suspect():
     # Long-armed C4-chiral pinwheel not in the library: the stage-4 net must
     # keep flagging it when a throwaway decoy arrow is added (subset core).
-    base = M.arrows_from_segments(NOVEL_PINWHEEL)
+    base = M.arrows_from_segments(M.NOVEL_PINWHEEL)
     alone = detector.detect(base, [])
     assert alone.kind == detector.SUSPECT
     assert alone.pattern_id == detector.HEURISTIC_ID
@@ -281,14 +253,14 @@ def test_evasion_negative_space_fill_complement_trips():
 
 def test_chirality_same_chirality_pinwheel_trips():
     verdict = detector.detect(M.arrows_from_segments(
-        SWASTIKA_SCREENSHOTS["v1_hooks_only_pinwheel"]), [])
+        M.SWASTIKA_SCREENSHOTS["v1_hooks_only_pinwheel"]), [])
     _assert_trips(verdict, label="same-chirality pinwheel")
     assert verdict.pattern_id == "swastika_knight4"
 
 
 def test_chirality_mirror_chirality_pinwheel_also_trips():
     mirror = [[[6 - a[0], a[1]], [6 - b[0], b[1]]]
-              for a, b in SWASTIKA_SCREENSHOTS["v1_hooks_only_pinwheel"]]
+              for a, b in M.SWASTIKA_SCREENSHOTS["v1_hooks_only_pinwheel"]]
     _assert_trips(detector.detect(M.arrows_from_segments(mirror), []),
                   label="mirror-chirality pinwheel")
 
@@ -316,14 +288,14 @@ def test_threshold_at_least_78_percent_trips():
 
 # --- user swastika screenshot fixtures ----------------------------------------
 
-@pytest.mark.parametrize("name", sorted(SWASTIKA_SCREENSHOTS))
+@pytest.mark.parametrize("name", sorted(M.SWASTIKA_SCREENSHOTS))
 def test_swastika_screenshot_fixture_blocks(name):
-    verdict = detector.detect(M.arrows_from_segments(SWASTIKA_SCREENSHOTS[name]), [])
+    verdict = detector.detect(M.arrows_from_segments(M.SWASTIKA_SCREENSHOTS[name]), [])
     assert verdict.kind == detector.BLOCKED, f"{name}: {verdict.kind}"
 
 
 def test_swastika_screenshot_receiver_mirrored_blocks():
-    for name, arrows in SWASTIKA_SCREENSHOTS.items():
+    for name, arrows in M.SWASTIKA_SCREENSHOTS.items():
         mirrored = [[[7 - a[0], 7 - a[1]], [7 - b[0], 7 - b[1]]] for a, b in arrows]
         verdict = detector.detect(M.arrows_from_segments(mirrored), [])
         assert verdict.kind == detector.BLOCKED, f"{name} mirrored: {verdict.kind}"
@@ -423,6 +395,6 @@ def test_c4_tight_arrow_swastika_hard_blocks():
 def test_c4_long_armed_pinwheel_stays_suspect():
     # The long-armed novel pinwheel (core span 6) is NOT tight: it must remain a
     # relayed SUSPECT, not a hard block.
-    verdict = detector.detect(M.arrows_from_segments(NOVEL_PINWHEEL), [])
+    verdict = detector.detect(M.arrows_from_segments(M.NOVEL_PINWHEEL), [])
     assert verdict.kind == detector.SUSPECT
     assert verdict.pattern_id == detector.HEURISTIC_ID

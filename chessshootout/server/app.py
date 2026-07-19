@@ -317,7 +317,7 @@ def create_app(*, now_provider=time.monotonic, max_rooms=DEFAULT_MAX_ROOMS):
             for e in room.skillcheck_log]
         white_annotations = _annotation_set_wire(room.annotations_white)
         black_annotations = _annotation_set_wire(room.annotations_black)
-        if slot.hide_opp_marks:
+        if room.hides_opponent_marks(color):
             if color == "white":
                 black_annotations = AnnotationSetWire()
             else:

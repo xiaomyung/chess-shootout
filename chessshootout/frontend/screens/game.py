@@ -373,8 +373,7 @@ class GameScreen(Screen):
             self.app.toast.show("Some marks can't be shared", key="marks_blocked")
             if payload.get("share_muted"):
                 self._share_muted = True
-                self.app.toast.show("Mark sharing is muted for this game",
-                                    key="marks_muted")
+                self._toast_share_muted()
         elif action == "suspect":
             self.app.toast.show("Those marks look suspicious", key="marks_suspect")
 
@@ -472,8 +471,7 @@ class GameScreen(Screen):
         self.board.arrows = self._decode_arrow_wires(mine.get("arrows", []))
         self._share_marks = bool(mine.get("sharing"))
         if env.get_hide_opp_marks():
-            self.board.annotations.clear_opp()
-            self._opp_sharing = False
+            self.apply_opp_marks_shield()
         else:
             self.board.annotations.set_opp(
                 self._decode_highlight_coords(opp.get("highlights", [])),
@@ -1083,9 +1081,12 @@ class GameScreen(Screen):
         return (self.variant == Variant.ONLINE and self.current_result() is None
                 and not self._share_muted)
 
+    def _toast_share_muted(self):
+        self.app.toast.show("Mark sharing is muted for this game", key="marks_muted")
+
     def _on_share_blocked(self):
         if self._share_muted:
-            self.app.toast.show("Mark sharing is muted for this game", key="marks_muted")
+            self._toast_share_muted()
 
     def _on_share_toggle(self):
         if not self._share_active():

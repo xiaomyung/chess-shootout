@@ -1,5 +1,5 @@
 import json
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from importlib import resources
 
 from chessshootout.server.moderation import geometry
@@ -18,8 +18,6 @@ _PATTERNS = None
 @dataclass(frozen=True)
 class VectorVariant:
     edges: frozenset
-    width: int
-    height: int
 
 
 @dataclass(frozen=True)
@@ -33,18 +31,13 @@ class RasterVariant:
 @dataclass
 class CompiledPattern:
     id: str
-    tier: int
     action: str
     channel: str
-    transform_group: str
-    scale_min: int
-    scale_max: int
     coverage_threshold: float
     iou_threshold: float
     supersample: int
     vector_variants: tuple
     raster_variants: tuple
-    provenance: dict = field(default_factory=dict)
 
 
 def _load_json(name):
@@ -58,21 +51,13 @@ def _parse_segments(raw):
 
 
 def _parse_grid(rows):
-    cells = set()
-    for cy, row in enumerate(rows):
-        for cx, ch in enumerate(row):
-            if ch == "#":
-                cells.add((cx, cy))
-    return cells
+    return {(cx, cy) for cy, row in enumerate(rows)
+            for cx, ch in enumerate(row) if ch == "#"}
 
 
 def _scale_cells(cells, factor):
-    expanded = set()
-    for cx, cy in cells:
-        for i in range(factor):
-            for j in range(factor):
-                expanded.add((cx * factor + i, cy * factor + j))
-    return expanded
+    return {(cx * factor + i, cy * factor + j)
+            for cx, cy in cells for i in range(factor) for j in range(factor)}
 
 
 def _vector_variants(segments, ops, scale_min, scale_max):
@@ -88,11 +73,11 @@ def _vector_variants(segments, ops, scale_min, scale_max):
                 unit = geometry.segment_unit_edges(a, b)
                 if unit:
                     edges |= unit
-            normalized, width, height = geometry.normalize_edges(edges)
+            normalized = geometry.normalize_edges(edges)[0]
             if not normalized or normalized in seen:
                 continue
             seen.add(normalized)
-            variants.append(VectorVariant(normalized, width, height))
+            variants.append(VectorVariant(normalized))
     return tuple(variants)
 
 
@@ -144,18 +129,13 @@ def _compile_pattern(entry, supersample):
             cells, segments, ops, scale_min, scale_max, supersample)
     return CompiledPattern(
         id=entry["id"],
-        tier=entry["tier"],
         action=entry["action"],
         channel=channel,
-        transform_group=entry["transform_group"],
-        scale_min=scale_min,
-        scale_max=scale_max,
         coverage_threshold=entry["coverage_threshold"],
         iou_threshold=entry["iou_threshold"],
         supersample=supersample,
         vector_variants=vector_variants,
         raster_variants=raster_variants,
-        provenance=entry.get("provenance", {}),
     )
 
 

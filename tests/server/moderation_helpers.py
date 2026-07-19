@@ -104,3 +104,31 @@ def transformed_raster_highlights(cells, op_key, factor, dx=0, dy=0):
     if not _fits(shifted):
         return None
     return [coord(x, y) for x, y in shifted]
+
+
+SWASTIKA_SCREENSHOTS = {
+    "v1_hooks_only_pinwheel": [
+        [[3, 3], [4, 1]], [[3, 3], [5, 4]], [[3, 3], [2, 5]], [[3, 3], [1, 2]],
+    ],
+    "v2_cross_plus_tip_hooks": [
+        [[3, 3], [3, 1]], [[3, 3], [5, 3]], [[3, 3], [3, 5]], [[3, 3], [1, 3]],
+        [[3, 1], [5, 1]], [[5, 3], [5, 5]], [[3, 5], [1, 5]], [[1, 3], [1, 1]],
+    ],
+    "v3_overlapping_straight_arrow_pinwheel": [
+        [[3, 1], [3, 3]], [[3, 3], [3, 5]], [[1, 3], [3, 3]], [[3, 3], [5, 3]],
+        [[3, 1], [4, 1]], [[5, 3], [5, 4]], [[3, 5], [2, 5]], [[1, 3], [1, 2]],
+    ],
+    "v4_cross_plus_partial_hooks": [
+        [[3, 1], [3, 5]], [[1, 3], [5, 3]],
+        [[3, 1], [5, 1]], [[5, 3], [5, 5]], [[3, 5], [1, 5]],
+    ],
+}
+
+
+# Long axis arms with rotationally-consistent DIAGONAL hooks: C4-chiral but
+# matching no library template (the axis-hook long-arm form is now the
+# swastika_axis7 template and hard-blocks; this stays the heuristic's case).
+NOVEL_PINWHEEL = [
+    [[3, 3], [3, 0]], [[3, 0], [5, 2]], [[3, 3], [6, 3]], [[6, 3], [4, 5]],
+    [[3, 3], [3, 6]], [[3, 6], [1, 4]], [[3, 3], [0, 3]], [[0, 3], [2, 1]],
+]

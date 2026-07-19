@@ -23,7 +23,6 @@ from tests.helpers import fake_uuid4
 from tests.online.test_online_flow import _wait_for
 from tests.online.test_online_share_chat_e2e import _collect_for
 from tests.server import moderation_helpers as M
-from tests.server.test_moderation_detector import SWASTIKA_SCREENSHOTS
 
 
 MOD_WHITE = fake_uuid4(41)
@@ -37,7 +36,7 @@ DELTA_PACING_S = 0.12
 
 
 SWASTIKA = M.arrows_from_segments(
-    [(tuple(a), tuple(b)) for a, b in SWASTIKA_SCREENSHOTS["v1_hooks_only_pinwheel"]])
+    [(tuple(a), tuple(b)) for a, b in M.SWASTIKA_SCREENSHOTS["v1_hooks_only_pinwheel"]])
 
 
 def _connect(addr, uuid, nickname, side, hide=False):

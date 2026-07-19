@@ -27,7 +27,7 @@ def square_point(sq):
     return (sq.col, sq.row)
 
 
-def _sign(value):
+def sign(value):
     return (value > 0) - (value < 0)
 
 
@@ -106,8 +106,8 @@ def segment_unit_edges(a, b):
     if not (axis or diagonal):
         return None
     steps = max(abs(dx), abs(dy))
-    sx = _sign(dx)
-    sy = _sign(dy)
+    sx = sign(dx)
+    sy = sign(dy)
     edges = set()
     cx, cy = a
     for _ in range(steps):
@@ -138,13 +138,8 @@ def arrow_segments(from_sq, to_sq):
 def edges_bbox(edges):
     if not edges:
         return None
-    xs = []
-    ys = []
-    for a, b in edges:
-        xs.append(a[0])
-        xs.append(b[0])
-        ys.append(a[1])
-        ys.append(b[1])
+    xs = [c for a, b in edges for c in (a[0], b[0])]
+    ys = [c for a, b in edges for c in (a[1], b[1])]
     return (min(xs), min(ys), max(xs), max(ys))
 
 
@@ -244,10 +239,6 @@ def board_width(supersample=DEFAULT_SUPERSAMPLE, board_cells=BOARD_SIZE):
 
 def popcount(rows):
     return sum(row.bit_count() for row in rows)
-
-
-def bitmap_and(a, b):
-    return [x & y for x, y in zip(a, b)]
 
 
 def embed(rows, offset_x, offset_y, board_width_px, board_height_px):

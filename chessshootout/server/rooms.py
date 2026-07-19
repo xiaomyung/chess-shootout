@@ -85,6 +85,22 @@ class SharedAnnotations:
         self.share_muted = False
         self.opp_hidden_notice_sent = False
 
+    def register_trip(self, limit):
+        self.trip_count += 1
+        muted = self.trip_count >= limit
+        if muted:
+            self.share_muted = True
+            self.clear_marks()
+        return muted
+
+    def strip(self, arrows, highlights):
+        for arrow in arrows:
+            pair = (arrow[0], arrow[1])
+            while pair in self.arrows:
+                self.arrows.remove(pair)
+        for highlight in highlights:
+            self.highlights.discard(highlight)
+
 
 @dataclass
 class Room:
@@ -128,6 +144,10 @@ class Room:
 
     def opp_color(self, color):
         return "black" if color == "white" else "white"
+
+    def hides_opponent_marks(self, color):
+        slot = self.slot(color)
+        return slot is not None and slot.hide_opp_marks
 
     def color_of(self, client_uuid):
         if self.white and self.white.client_uuid == client_uuid:

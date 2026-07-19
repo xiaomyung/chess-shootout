@@ -1,3 +1,4 @@
+import math
 from collections import defaultdict
 from dataclasses import dataclass, field
 
@@ -13,6 +14,7 @@ HEURISTIC_TIGHT_MIN_EDGES = 12
 HEURISTIC_TIGHT_MAX_SPAN = 4
 HEURISTIC_TIGHT_MIN_TIPS = 4
 RASTER_HIGHLIGHT_SHARE = 0.3
+COMPLEMENT_SCAN_MIN_CELLS = (BOARD_SIZE * BOARD_SIZE) // 2
 CACHE_LIMIT = 512
 
 CLEAN = "clean"
@@ -35,19 +37,9 @@ class Verdict:
 
 
 def union_sides(arrows_a, highlights_a, arrows_b, highlights_b):
-    arrows = list(arrows_a)
-    seen = {_arrow_key(a) for a in arrows}
-    for arrow in arrows_b:
-        key = _arrow_key(arrow)
-        if key not in seen:
-            seen.add(key)
-            arrows.append(arrow)
+    arrows = list(dict.fromkeys(list(arrows_a) + list(arrows_b)))
     highlights = list(dict.fromkeys(list(highlights_a) + list(highlights_b)))
     return arrows, highlights
-
-
-def _arrow_key(arrow):
-    return (arrow[0], arrow[1])
 
 
 def _square(coord):
@@ -63,27 +55,21 @@ def _ensure_floors():
     global _FLOORS
     if _FLOORS is not None:
         return _FLOORS
-    vector_floor = None
-    raster_floor = None
-    for pattern in library.enabled_patterns():
-        for variant in pattern.vector_variants:
-            need = _needed(len(variant.edges), pattern.coverage_threshold)
-            if vector_floor is None or need < vector_floor:
-                vector_floor = need
-        for variant in pattern.raster_variants:
-            need = _needed(variant.ink, pattern.coverage_threshold)
-            if raster_floor is None or need < raster_floor:
-                raster_floor = need
-    _FLOORS = (vector_floor if vector_floor is not None else 1,
-               raster_floor if raster_floor is not None else 1)
+    patterns = library.enabled_patterns()
+    vector_floor = min(
+        (_needed(len(variant.edges), pattern.coverage_threshold)
+         for pattern in patterns for variant in pattern.vector_variants),
+        default=1)
+    raster_floor = min(
+        (_needed(variant.ink, pattern.coverage_threshold)
+         for pattern in patterns for variant in pattern.raster_variants),
+        default=1)
+    _FLOORS = (vector_floor, raster_floor)
     return _FLOORS
 
 
 def _needed(size, threshold):
-    need = int(size * threshold)
-    if need < size * threshold:
-        need += 1
-    return max(need, 1)
+    return max(math.ceil(size * threshold), 1)
 
 
 def _normalize_inputs(arrows, highlights):
@@ -154,9 +140,11 @@ def _run(arrows, highlights, arrow_edges, drawn_edges, cells, context_cells,
     for arrow in arrows:
         segments.extend(geometry.arrow_segments(_square(arrow[0]), _square(arrow[1])))
     context = set(context_cells)
-    shape_cells = set(cells) | context | geometry.traversed_cells(segments)
+    cells_set = set(cells)
+    base_cells = cells_set | context
+    shape_cells = base_cells | geometry.traversed_cells(segments)
     board = geometry.rasterize_board([], shape_cells, supersample)
-    highlight_board = geometry.rasterize_board([], set(cells) | context, supersample)
+    highlight_board = geometry.rasterize_board([], base_cells, supersample)
     drawn_bbox = geometry.bitmap_bbox(board, side)
     board_ink = geometry.popcount(board)
 
@@ -181,7 +169,7 @@ def _run(arrows, highlights, arrow_edges, drawn_edges, cells, context_cells,
         return Verdict(BLOCKED, pattern_id=pattern.id, matched_arrows=matched_a,
                        matched_highlights=matched_h)
 
-    if len(set(cells)) > (BOARD_SIZE * BOARD_SIZE) // 2:
+    if len(cells_set) > COMPLEMENT_SCAN_MIN_CELLS:
         complement = _complement_board(cells, supersample)
         comp_bbox = geometry.bitmap_bbox(complement, side)
         comp = _stage_raster(complement, complement, side, comp_bbox, None)
@@ -435,13 +423,13 @@ def _bent_tip_count(core):
         if len(neighbors) != 1:
             continue
         corner = neighbors[0]
-        tip_dir = (geometry._sign(corner[0] - vertex[0]),
-                   geometry._sign(corner[1] - vertex[1]))
+        tip_dir = (geometry.sign(corner[0] - vertex[0]),
+                   geometry.sign(corner[1] - vertex[1]))
         for onward in adjacency[corner]:
             if onward == vertex:
                 continue
-            arm_dir = (geometry._sign(onward[0] - corner[0]),
-                       geometry._sign(onward[1] - corner[1]))
+            arm_dir = (geometry.sign(onward[0] - corner[0]),
+                       geometry.sign(onward[1] - corner[1]))
             if arm_dir != (0, 0) and arm_dir != tip_dir:
                 bent += 1
                 break

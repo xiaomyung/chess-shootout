@@ -89,8 +89,8 @@ server for online two-player matches.
   capped at the starting time).
 - **Shared marks** — flip SHARE in the rail's SIGNALS section to broadcast your
   highlights and arrows live; your opponent's marks arrive in blue.
-- Shared drawings are screened for prohibited symbols and slurs before they
-  reach your opponent; a blocked mark turns red for you with a heads-up toast.
+- Shared drawings are screened for prohibited symbols before they reach your
+  opponent; a blocked mark turns red for you with a heads-up toast.
   Flip HIDE in the SIGNALS section (or **Options → Online → Hide opponent's
   marks**) to hide their shared marks entirely — both toggle the same setting.
 - **Quick chat** — preset lines only; your queen speaks them in a bubble on the

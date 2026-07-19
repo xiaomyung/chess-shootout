@@ -522,10 +522,7 @@ async def handle_annotations_state(app, websocket, room, color, raw):
         store.opp_hidden_notice_sent = False
     store.highlights = set(msg.highlights)
     store.arrows = [(a.from_sq, a.to_sq) for a in msg.arrows]
-    if not app.state.moderation_enabled:
-        await _relay_to_opp(app, room, color, msg, "annotations_state")
-        return "relayed"
-    return await _moderate_relay(app, room, color, msg, None, "annotations_state")
+    return await _relay_or_moderate(app, room, color, msg, None, "annotations_state")
 
 
 async def handle_annotation_delta(app, websocket, room, color, raw):
@@ -568,10 +565,7 @@ async def handle_annotation_delta(app, websocket, room, color, raw):
         elif pair in store.arrows:
             store.arrows.remove(pair)
         changed = pair if msg.action == "add" else None
-    if not app.state.moderation_enabled:
-        await _relay_to_opp(app, room, color, msg, "annotation_delta")
-        return "relayed"
-    return await _moderate_relay(app, room, color, msg, changed, "annotation_delta")
+    return await _relay_or_moderate(app, room, color, msg, changed, "annotation_delta")
 
 
 def _last_move_context(room):
@@ -600,6 +594,13 @@ def _moderate(room, color, changed):
     return None, False
 
 
+async def _relay_or_moderate(app, room, color, msg, changed, msg_type):
+    if not app.state.moderation_enabled:
+        await _relay_to_opp(app, room, color, msg, msg_type)
+        return "relayed"
+    return await _moderate_relay(app, room, color, msg, changed, msg_type)
+
+
 async def _moderate_relay(app, room, color, relay_msg, changed, msg_type):
     verdict, is_union = _moderate(room, color, changed)
     if verdict is None:
@@ -610,7 +611,7 @@ async def _moderate_relay(app, room, color, relay_msg, changed, msg_type):
         return "blocked"
     await _relay_to_opp(app, room, color, relay_msg, msg_type)
     log.warning("marks suspect room=%s color=%s pattern=%s",
-                room.room_id, color, _pattern_label(verdict.pattern_id))
+                room.room_id, color, str(verdict.pattern_id))
     await send(app.state.connections.get_for_color(room, color),
                  AnnotationsBlockedMessage(
                      action="suspect",
@@ -624,17 +625,13 @@ async def _handle_block(app, room, color, verdict, is_union):
     connections = app.state.connections
     store = room.annotations_for(color)
     opp_color = room.opp_color(color)
-    _strip_store(store, verdict.matched_arrows, verdict.matched_highlights)
+    store.strip(verdict.matched_arrows, verdict.matched_highlights)
     if is_union:
-        _strip_store(room.annotations_for(opp_color),
-                     verdict.matched_arrows, verdict.matched_highlights)
-    store.trip_count += 1
-    muted = store.trip_count >= MODERATION_TRIP_LIMIT
-    if muted:
-        store.share_muted = True
-        store.clear_marks()
+        room.annotations_for(opp_color).strip(
+            verdict.matched_arrows, verdict.matched_highlights)
+    muted = store.register_trip(MODERATION_TRIP_LIMIT)
     log.warning("marks blocked room=%s color=%s pattern=%s trip=%d muted=%s",
-                room.room_id, color, _pattern_label(verdict.pattern_id),
+                room.room_id, color, str(verdict.pattern_id),
                 store.trip_count, muted)
     await _corrective_snapshot(app, room, color)
     if is_union:
@@ -647,20 +644,10 @@ async def _handle_block(app, room, color, verdict, is_union):
                      share_muted=muted))
 
 
-def _strip_store(store, arrows, highlights):
-    for arrow in arrows:
-        pair = (arrow[0], arrow[1])
-        while pair in store.arrows:
-            store.arrows.remove(pair)
-    for highlight in highlights:
-        store.highlights.discard(highlight)
-
-
 async def _corrective_snapshot(app, room, source_color):
     connections = app.state.connections
     target_color = room.opp_color(source_color)
-    target_slot = room.slot(target_color)
-    if target_slot is not None and target_slot.hide_opp_marks:
+    if room.hides_opponent_marks(target_color):
         return
     target_ws = connections.get_for_color(room, target_color)
     if target_ws is None:
@@ -680,8 +667,7 @@ async def _relay_plain(connections, room, color, msg):
 async def _relay_to_opp(app, room, color, msg, msg_type):
     connections = app.state.connections
     opp_color = room.opp_color(color)
-    opp_slot = room.slot(opp_color)
-    if opp_slot is not None and opp_slot.hide_opp_marks:
+    if room.hides_opponent_marks(opp_color):
         store = room.annotations_for(color)
         if not store.opp_hidden_notice_sent:
             store.opp_hidden_notice_sent = True
@@ -691,13 +677,6 @@ async def _relay_to_opp(app, room, color, msg, msg_type):
     opp_ws = connections.get_for_color(room, opp_color)
     if opp_ws is not None:
         await send(opp_ws, msg)
-
-
-def _pattern_label(pattern_id):
-    text = str(pattern_id)
-    if text.startswith("word:"):
-        return "word"
-    return text
 
 
 async def handle_set_marks_visibility(app, websocket, room, color, raw):

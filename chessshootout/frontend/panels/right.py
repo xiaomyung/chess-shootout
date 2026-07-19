@@ -1,4 +1,4 @@
-from typing import NamedTuple
+from typing import NamedTuple, Optional
 
 import pygame as pg
 
@@ -160,7 +160,7 @@ class SignalChip(NamedTuple):
     state_key: str
     callback: str
     tooltip: str
-    enabled_key: str = None
+    enabled_key: Optional[str] = None
 
 
 SIGNAL_CHIPS = [

@@ -65,13 +65,7 @@ def _atomic_write_json(path, data):
 
 
 def _load_cache(path):
-    if not path.exists():
-        return []
-    try:
-        raw = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return []
-    return parse_news_items(raw)
+    return _read_news_file(path) or []
 
 
 def _read_news_file(path):

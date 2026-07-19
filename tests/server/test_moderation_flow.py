@@ -34,13 +34,12 @@ from chessshootout.server.protocol import Reason
 from tests.helpers import FakeClock
 from tests.server import moderation_helpers as M
 from tests.server.conftest import ALICE, BOB, auth_msg
-from tests.server.test_moderation_detector import NOVEL_PINWHEEL, SWASTIKA_SCREENSHOTS
 from fastapi.testclient import TestClient
 
 
 SWASTIKA = M.arrows_from_segments(
-    [(tuple(a), tuple(b)) for a, b in SWASTIKA_SCREENSHOTS["v1_hooks_only_pinwheel"]])
-NOVEL = M.arrows_from_segments([(tuple(a), tuple(b)) for a, b in NOVEL_PINWHEEL])
+    [(tuple(a), tuple(b)) for a, b in M.SWASTIKA_SCREENSHOTS["v1_hooks_only_pinwheel"]])
+NOVEL = M.arrows_from_segments([(tuple(a), tuple(b)) for a, b in M.NOVEL_PINWHEEL])
 
 
 def _wire_arrows(arrows):
