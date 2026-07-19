@@ -1,7 +1,7 @@
 [
   {
     "title": "v2.11.0 — Rules of Engagement",
-    "body": "Cleaner shared play and a readable news feed:\n- Shared board drawings are now moderated — prohibited hate symbols are blocked before your opponent sees them\n- A blocked mark turns red for you with a quick heads-up\n- New option to hide your opponent's shared marks entirely — Options › Online\n- The News card now lists every update: expandable, scrollable, with an unread badge",
+    "body": "Cleaner shared play and a readable news feed:\n- Shared board drawings are now moderated — prohibited hate symbols are blocked before they reach your opponent, and a blocked mark turns red for you with a heads-up\n- Hide your opponent's shared marks entirely with the new HIDE toggle — flip it in the in-game SIGNALS row or under Options › Online\n- The News card now carries the full history — every past update, expandable and scrollable, with an unread badge for what you haven't read",
     "date": "2026-07-17"
   },
   {
