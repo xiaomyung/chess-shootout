@@ -165,10 +165,14 @@ def _knight_targets(col, row):
     return out
 
 
-def test_seeded_piece_geometry_fuzz_stays_clean():
+def _piece_fuzz_corpus():
+    # The full 500-board pinned corpus (seed unchanged since the feature
+    # landed). Generation is pure RNG and costs microseconds; the expensive
+    # detect() calls are sliced across parametrized chunks below so no single
+    # test is a multi-second CI outlier while total coverage stays at 500.
     rng = random.Random(20260717)
     generators = (_rook_targets, _bishop_targets, _knight_targets)
-    trips = []
+    boards = []
     for _ in range(500):
         arrows = []
         for _ in range(rng.randint(1, 6)):
@@ -180,6 +184,14 @@ def test_seeded_piece_geometry_fuzz_stays_clean():
             arrows.append((_c(col, row), _c(tcol, trow)))
         highlights = [_c(rng.randrange(8), rng.randrange(8))
                       for _ in range(rng.randint(0, 4))]
+        boards.append((arrows, highlights))
+    return boards
+
+
+@pytest.mark.parametrize("chunk", range(10))
+def test_seeded_piece_geometry_fuzz_stays_clean(chunk):
+    trips = []
+    for arrows, highlights in _piece_fuzz_corpus()[chunk::10]:
         verdict = detector.detect(arrows, highlights)
         if verdict.kind != detector.CLEAN:
             trips.append((verdict.pattern_id, arrows, highlights))

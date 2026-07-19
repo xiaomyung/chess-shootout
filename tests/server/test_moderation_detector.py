@@ -628,3 +628,69 @@ def test_generic_letters_coverage_078_edge_symbol_still_needs_threshold():
     unit_arrows = _swastika_axis_unit_arrows()
     assert detector.detect(unit_arrows[:11], []).kind == detector.CLEAN
     assert detector.detect(unit_arrows[:12], []).kind == detector.BLOCKED
+
+
+# --- v3 hardening: single board-spanning arrow-letter (lone-letter) block -----
+
+def _big_letter(char, xf=3, yf=1):
+    # A faithful board-spanning single glyph from the skeleton atlas: the exact
+    # construction the client renders, scaled wide enough to clear LONE_MIN_SPAN.
+    construction = M.letter_segment_atlas()[char][0]
+    return [(M.coord(a[0] * xf, a[1] * yf), M.coord(b[0] * xf, b[1] * yf))
+            for a, b in construction]
+
+
+def test_single_big_latin_letter_blocks():
+    # The live failure: one board-spanning arrow-letter (Latin N) drawn as a few
+    # big arrows now hard-blocks -- v2 required >=2 letters and never tried the
+    # whole drawing as one large glyph.
+    verdict = detector.detect(_big_letter("N"), [])
+    assert verdict.kind == detector.BLOCKED
+    assert verdict.pattern_id == detector.GENERIC_LETTER_ID
+
+
+def test_single_big_cyrillic_letter_blocks():
+    # Cyrillic И (mirror-N, its own atlas glyph) and Cyrillic Н (== Latin H,
+    # caught through the H glyph) each block as a single board letter.
+    for char in ("И", "H"):
+        verdict = detector.detect(_big_letter(char), [])
+        assert verdict.kind == detector.BLOCKED, char
+        assert verdict.pattern_id == detector.GENERIC_LETTER_ID
+
+
+@pytest.mark.parametrize("char", sorted(detector.LONE_LETTERS - {"M"}))
+def test_lone_block_letter_set_each_blocks(char):
+    # Every letter in the lone-block set (minus M, which has no arrow skeleton),
+    # drawn alone board-spanning, hard-blocks as a generic letter.
+    verdict = detector.detect(_big_letter(char), [])
+    assert verdict.kind == detector.BLOCKED, char
+    assert verdict.pattern_id == detector.GENERIC_LETTER_ID
+
+
+def test_lone_excluded_shapes_stay_clean():
+    # Shapes a single or dual chess arrow naturally makes -- a lone T, a lone X,
+    # a lone file line (I) -- are NOT in the lone-block set and stay clean.
+    lone_t = [("b2", "g2"), ("d2", "d7")]
+    lone_x = [("b2", "g7"), ("b7", "g2")]
+    lone_i = [("d2", "d7")]
+    for arrows, label in ((lone_t, "T"), (lone_x, "X"), (lone_i, "I")):
+        assert detector.detect(arrows, []).kind == detector.CLEAN, label
+
+
+def test_lone_letter_below_min_span_stays_clean():
+    # A recognizable but small single letter (below LONE_MIN_SPAN) does not
+    # lone-block; only a deliberately large single glyph does.
+    assert detector.detect(_big_letter("N", 1, 1), []).kind == detector.CLEAN
+    assert detector.detect(_big_letter("N", 3, 1), []).kind == detector.BLOCKED
+
+
+def test_lone_innocent_arrow_sets_stay_clean():
+    for arrows in ([("e2", "e7")], [("g1", "f3"), ("b1", "c3")],
+                   [("c1", "h6"), ("g1", "f3")]):
+        assert detector.detect(arrows, []).kind == detector.CLEAN, arrows
+
+
+def test_multi_letter_run_still_blocks():
+    verdict = detector.detect(M.spell_arrows("gas"), [])
+    assert verdict.kind == detector.BLOCKED
+    assert verdict.pattern_id == detector.GENERIC_LETTER_ID

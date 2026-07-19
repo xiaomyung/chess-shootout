@@ -266,14 +266,12 @@ def _is_code_verdict(verdict):
     return any(isinstance(s, str) and s.startswith("code_") for s in verdict.suspect_ids)
 
 
-def test_seeded_piece_geometry_fuzz_no_code_false_positives():
-    # The digit channel must never trip on piece-geometry arrows. Scope is the
-    # code channel specifically: a coincidental swastika/heuristic hit belongs
-    # to the shape channel's own FP corpus, not this feature.
+def _code_fuzz_corpus():
+    # Full 500-board pinned corpus (seed unchanged); RNG generation is cheap,
+    # detect() is sliced across chunks so no single test dominates CI time.
     rng = random.Random(88148814)
     generators = (_rook_targets, _bishop_targets, _knight_targets)
-    code_trips = []
-    code_hard = []
+    boards = []
     for _ in range(500):
         arrows = []
         for _ in range(rng.randint(1, 7)):
@@ -285,6 +283,18 @@ def test_seeded_piece_geometry_fuzz_no_code_false_positives():
             arrows.append((_c(col, row), _c(tcol, trow)))
         highlights = [_c(rng.randrange(8), rng.randrange(8))
                       for _ in range(rng.randint(0, 4))]
+        boards.append((arrows, highlights))
+    return boards
+
+
+@pytest.mark.parametrize("chunk", range(10))
+def test_seeded_piece_geometry_fuzz_no_code_false_positives(chunk):
+    # The digit channel must never trip on piece-geometry arrows. Scope is the
+    # code channel specifically: a coincidental swastika/heuristic hit belongs
+    # to the shape channel's own FP corpus, not this feature.
+    code_trips = []
+    code_hard = []
+    for arrows, highlights in _code_fuzz_corpus()[chunk::10]:
         verdict = detector.detect(arrows, highlights)
         if not _is_code_verdict(verdict):
             continue

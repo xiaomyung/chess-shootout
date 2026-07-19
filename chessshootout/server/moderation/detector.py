@@ -15,14 +15,19 @@ HEURISTIC_TIGHT_MIN_EDGES = 12
 HEURISTIC_TIGHT_MAX_SPAN = 4
 HEURISTIC_TIGHT_MIN_TIPS = 4
 RASTER_HIGHLIGHT_SHARE = 0.3
-GLYPH_SCALES = (1, 2)
-GLYPH_COVERAGE = 0.72
-GLYPH_IOU = 0.6
+GLYPH_NORM_HEIGHT = 14
+GLYPH_STRETCH = ((1, 1), (2, 1), (3, 1), (4, 1), (2, 2), (4, 4), (6, 6))
+LETTER_IOU = 0.7
+LONE_COVERAGE = 0.94
+DIGIT_IOU = 0.75
 MIN_WORD_GLYPHS = 3
 MIN_GENERIC_LETTERS = 2
-GENERIC_LETTER_COVERAGE = 0.72
 LINE_LETTERS = frozenset({"I", "L", "J"})
-DIGIT_COVERAGE = 0.85
+LONE_LETTERS = frozenset("ABEFGHKMNPRSWZ") | {"И", "Й", "Ж"}
+LONE_MIN_SPAN = 10
+LONE_INK_RATIO = 1.6
+LETTER_INK_FLOOR = 24
+CODE_INK_FLOOR = 16
 MIN_CODE_DIGITS = 2
 DIGIT_GAP_FACTOR = 1.6
 DIGIT_VOVERLAP = 0.6
@@ -45,11 +50,9 @@ HEURISTIC_ID = "heuristic_c4"
 GENERIC_LETTER_ID = "letters"
 
 _FLOORS = None
-_GLYPHS = None
 _WORD_FOLDED = None
-_GLYPH_WIDTH_INDEX = None
-_DIGIT_WIDTH_INDEX = None
-_LETTER_WIDTH_INDEX = None
+_LETTER_TEMPLATES = None
+_DIGIT_TEMPLATES = None
 _CODE_TABLE = None
 _CACHE = {}
 _CACHE_ORDER = []
@@ -105,24 +108,12 @@ def _ensure_floors():
             need = _needed(variant.ink, pattern.coverage_threshold)
             if raster_floor is None or need < raster_floor:
                 raster_floor = need
-    glyph_floor = None
-    digit_floor = None
-    for char, variants in _glyph_atlas().items():
-        for variant in variants:
-            need = _needed(variant[3], GLYPH_COVERAGE)
-            if glyph_floor is None or need < glyph_floor:
-                glyph_floor = need
-            if char in DIGIT_ALPHABET:
-                dneed = _needed(variant[3], DIGIT_COVERAGE)
-                if digit_floor is None or dneed < digit_floor:
-                    digit_floor = dneed
-    unit_glyph = glyph_floor if glyph_floor is not None else 1
     _FLOORS = (
         vector_floor if vector_floor is not None else 1,
         raster_floor if raster_floor is not None else 1,
-        unit_glyph * MIN_WORD_GLYPHS,
-        (digit_floor if digit_floor is not None else 1) * MIN_CODE_DIGITS,
-        unit_glyph * MIN_GENERIC_LETTERS,
+        LETTER_INK_FLOOR,
+        CODE_INK_FLOOR,
+        LETTER_INK_FLOOR,
     )
     return _FLOORS
 
@@ -134,99 +125,131 @@ def _needed(size, threshold):
     return max(need, 1)
 
 
-def _glyph_atlas():
-    global _GLYPHS
-    if _GLYPHS is not None:
-        return _GLYPHS
+def _build_templates():
+    global _LETTER_TEMPLATES, _DIGIT_TEMPLATES
+    if _LETTER_TEMPLATES is not None:
+        return
     resource = resources.files("chessshootout.server.moderation").joinpath("words.json")
     with resource.open(encoding="utf-8") as source:
         data = json.load(source)
-    atlas = {}
-    for char, rows in data["letters"].items():
-        cells = set()
-        for cy, row in enumerate(rows):
-            for cx, ch in enumerate(row):
-                if ch == "#":
-                    cells.add((cx, cy))
-        variants = []
+    letters = []
+    digits = []
+    chars = set(data["letters"]) | set(data["letter_segments"]) | set(data["digit_segments"])
+    for char in sorted(chars):
+        index = digits if char in DIGIT_ALPHABET else letters
         seen = set()
-        for factor in GLYPH_SCALES:
-            scaled = set()
-            for cx, cy in cells:
-                for i in range(factor):
-                    for j in range(factor):
-                        scaled.add((cx * factor + i, cy * factor + j))
-            _add_glyph_variant(variants, seen, scaled)
-        atlas[char] = variants
-    _add_segment_glyphs(atlas, data["letter_segments"], GLYPH_SCALES)
-    _add_segment_glyphs(atlas, data["digit_segments"], GLYPH_SCALES)
-    _GLYPHS = {char: tuple(variants) for char, variants in atlas.items()}
-    return _GLYPHS
+        for pixels in _glyph_pixel_sets(data, char):
+            box = geometry.pixels_bbox(pixels)
+            if box is None:
+                continue
+            minx, miny, maxx, maxy = box
+            width = maxx - minx + 1
+            height = maxy - miny + 1
+            relpix = frozenset((px - minx, py - miny) for px, py in pixels)
+            key = _norm_grid(relpix, width, height, _norm_width(width, height))
+            if key in seen:
+                continue
+            seen.add(key)
+            index.append((char, _norm_width(width, height), relpix, width, height, {}))
+    _LETTER_TEMPLATES = tuple(letters)
+    _DIGIT_TEMPLATES = tuple(digits)
 
 
-def _add_segment_glyphs(atlas, table, scales):
-    for char, constructions in table.items():
-        variants = atlas.setdefault(char, [])
-        seen = {variant[0] for variant in variants}
-        for segments in constructions:
-            for factor in scales:
+def _glyph_pixel_sets(data, char):
+    sets = []
+    rows = data["letters"].get(char)
+    if rows:
+        cells = {(cx, cy) for cy, row in enumerate(rows)
+                 for cx, ch in enumerate(row) if ch == "#"}
+        if cells:
+            sets.append(cells)
+    for table in ("letter_segments", "digit_segments"):
+        for construction in data[table].get(char, ()):
+            for xf, yf in GLYPH_STRETCH:
                 strokes = []
-                for a, b in segments:
+                for a, b in construction:
                     strokes.extend(geometry.arrow_segments(
-                        Square(row=a[1] * factor, col=a[0] * factor),
-                        Square(row=b[1] * factor, col=b[0] * factor)))
+                        Square(row=a[1] * yf, col=a[0] * xf),
+                        Square(row=b[1] * yf, col=b[0] * xf)))
                 pixels = geometry.lit_pixels_from_segments(
                     strokes, geometry.DEFAULT_SUPERSAMPLE)
-                _add_glyph_variant(variants, seen, pixels)
+                if pixels:
+                    sets.append(pixels)
+    return sets
 
 
-def _add_glyph_variant(variants, seen, pixels):
-    grid_rows, width, height = geometry.normalized_bitmap_from_pixels(pixels)
-    key = tuple(grid_rows)
-    if not grid_rows or key in seen:
-        return
-    seen.add(key)
-    variants.append((key, width, height, geometry.popcount(grid_rows)))
+def _letter_templates():
+    _build_templates()
+    return _LETTER_TEMPLATES
 
 
-def _glyphs_by_width():
-    global _GLYPH_WIDTH_INDEX
-    if _GLYPH_WIDTH_INDEX is not None:
-        return _GLYPH_WIDTH_INDEX
-    index = defaultdict(list)
-    for char, variants in _glyph_atlas().items():
-        for grows, gw, gh, gink in variants:
-            index[gw].append((char, grows, gw, gh, gink))
-    _GLYPH_WIDTH_INDEX = index
-    return _GLYPH_WIDTH_INDEX
+def _digit_templates():
+    _build_templates()
+    return _DIGIT_TEMPLATES
 
 
-def _digit_glyphs_by_width():
-    global _DIGIT_WIDTH_INDEX
-    if _DIGIT_WIDTH_INDEX is not None:
-        return _DIGIT_WIDTH_INDEX
-    index = defaultdict(list)
-    for char, variants in _glyph_atlas().items():
-        if char not in DIGIT_ALPHABET:
+def _norm_width(width, height):
+    return max(1, min(2 * GLYPH_NORM_HEIGHT, round(GLYPH_NORM_HEIGHT * width / height)))
+
+
+def _norm_grid(relpix, width, height, nw):
+    return frozenset(
+        (min(nw - 1, px * nw // width),
+         min(GLYPH_NORM_HEIGHT - 1, py * GLYPH_NORM_HEIGHT // height))
+        for px, py in relpix)
+
+
+def _glyph_descriptor(pixels):
+    box = geometry.pixels_bbox(pixels)
+    if box is None:
+        return None
+    minx, miny, maxx, maxy = box
+    width = maxx - minx + 1
+    height = maxy - miny + 1
+    relpix = frozenset((px - minx, py - miny) for px, py in pixels)
+    nw = _norm_width(width, height)
+    return (nw, _norm_grid(relpix, width, height, nw))
+
+
+def _jitter_grids(grid):
+    return [frozenset((x + dx, y + dy) for x, y in grid)
+            for dx in (-1, 0, 1) for dy in (-1, 0, 1)]
+
+
+def _jitter_iou(shifted, glen, template):
+    best = 0.0
+    tlen = len(template)
+    for grid in shifted:
+        inter = len(grid & template)
+        if not inter:
             continue
-        for grows, gw, gh, gink in variants:
-            index[gw].append((char, grows, gw, gh, gink))
-    _DIGIT_WIDTH_INDEX = index
-    return _DIGIT_WIDTH_INDEX
+        score = inter / (glen + tlen - inter)
+        if score > best:
+            best = score
+    return best
 
 
-def _letter_glyphs_by_width():
-    global _LETTER_WIDTH_INDEX
-    if _LETTER_WIDTH_INDEX is not None:
-        return _LETTER_WIDTH_INDEX
-    index = defaultdict(list)
-    for char, variants in _glyph_atlas().items():
-        if char in DIGIT_ALPHABET or char in LINE_LETTERS:
+def _match_descriptor(desc, templates, threshold):
+    nw, grid = desc
+    glen = len(grid)
+    shifted = _jitter_grids(grid)
+    best_char = None
+    best_score = threshold
+    for char, t_nw, relpix, width, height, cache in templates:
+        if abs(t_nw - nw) > 1 + nw // 5:
             continue
-        for grows, gw, gh, gink in variants:
-            index[gw].append((char, grows, gw, gh, gink))
-    _LETTER_WIDTH_INDEX = index
-    return _LETTER_WIDTH_INDEX
+        template = cache.get(nw)
+        if template is None:
+            template = _norm_grid(relpix, width, height, nw)
+            cache[nw] = template
+        tlen = len(template)
+        if min(glen, tlen) <= best_score * max(glen, tlen):
+            continue
+        score = _jitter_iou(shifted, glen, template)
+        if score > best_score:
+            best_score = score
+            best_char = char
+    return best_char
 
 
 def _code_table():
@@ -374,14 +397,9 @@ def _run(arrows, highlights, arrow_edges, drawn_edges, cells, context_cells,
                            matched_arrows=[], matched_highlights=list(highlights),
                            codes_seen_out=codes_in)
 
-    word = _stage_words(board_thin)
-    if word is not None:
-        return Verdict(BLOCKED, pattern_id="word:" + word,
-                       matched_arrows=list(arrows), matched_highlights=list(highlights),
-                       codes_seen_out=codes_in)
-
-    if _stage_generic_letters(board_thin, letter_floor):
-        return Verdict(BLOCKED, pattern_id=GENERIC_LETTER_ID,
+    letters = _stage_letters(board_thin)
+    if letters is not None and letters[0] == "word":
+        return Verdict(BLOCKED, pattern_id="word:" + letters[1],
                        matched_arrows=list(arrows), matched_highlights=list(highlights),
                        codes_seen_out=codes_in)
 
@@ -407,6 +425,11 @@ def _run(arrows, highlights, arrow_edges, drawn_edges, cells, context_cells,
         soft_ids |= set(code[1])
         if soft_marks is None:
             soft_marks = (list(arrows), list(highlights))
+
+    if letters is not None and not soft_ids:
+        return Verdict(BLOCKED, pattern_id=GENERIC_LETTER_ID,
+                       matched_arrows=list(arrows), matched_highlights=list(highlights),
+                       codes_seen_out=codes_in)
 
     codes_out = codes_in | frozenset(pid for pid in soft_ids if pid in _code_ids())
     boosters = codes_out & _code_ids()
@@ -544,15 +567,21 @@ def _match_raster(pattern, board, highlight_board, side, drawn_bbox, window):
         y1 = min(side - height, rmaxy)
         rows = list(variant.rows)
         margin = pattern.supersample
+        need_inter = _needed(variant.ink, pattern.coverage_threshold)
+        need_lit = _needed(variant.ink, RASTER_HIGHLIGHT_SHARE)
         for offy in range(y0, y1 + 1):
             for offx in range(x0, x1 + 1):
+                inter = 0
+                for y, row in enumerate(rows):
+                    inter += ((board[y + offy] >> offx) & row).bit_count()
+                if inter < need_inter:
+                    continue
+                lit_h = 0
+                for y, row in enumerate(rows):
+                    lit_h += ((highlight_board[y + offy] >> offx) & row).bit_count()
+                if lit_h < need_lit:
+                    continue
                 placed = geometry.embed(rows, offx, offy, side, side)
-                inter = geometry.popcount(geometry.bitmap_and(placed, board))
-                if inter < _needed(variant.ink, pattern.coverage_threshold):
-                    continue
-                lit_h = geometry.popcount(geometry.bitmap_and(placed, highlight_board))
-                if lit_h < _needed(variant.ink, RASTER_HIGHLIGHT_SHARE):
-                    continue
                 lx0 = max(0, offx - margin)
                 ly0 = max(0, offy - margin)
                 lx1 = min(side, offx + width + margin)
@@ -599,27 +628,7 @@ def _changed_pixels(changed_edges, changed_cells, supersample):
     return geometry.pixels_bbox(geometry.lit_pixels_from_cells(cells, supersample))
 
 
-def _stage_words(board):
-    _, _, word_floor, _, _ = _ensure_floors()
-    if geometry.popcount(board) < word_floor:
-        return None
-    lit = set()
-    for y, row in enumerate(board):
-        bit = row
-        while bit:
-            low = bit & -bit
-            x = low.bit_length() - 1
-            lit.add((x, y))
-            bit ^= low
-    for op_key in OCR_READING_OPS:
-        transformed = [geometry.apply_op((x, y), op_key) for x, y in lit]
-        found = _scan_line(transformed)
-        if found is not None:
-            return found
-    return None
-
-
-def _scan_line(pixels):
+def _row_slots(pixels):
     box = geometry.pixels_bbox(pixels)
     if box is None:
         return None
@@ -630,14 +639,7 @@ def _scan_line(pixels):
     colmask = 0
     for row in rows:
         colmask |= row
-    slots = _column_runs(colmask, width)
-    if len(slots) < MIN_WORD_GLYPHS:
-        return None
-    letters = []
-    for x0, x1 in slots:
-        char = _best_letter(rows, x0, x1)
-        letters.append(char)
-    return _assemble(letters)
+    return rows, width, _column_runs(colmask, width)
 
 
 def _column_runs(colmask, width):
@@ -654,68 +656,76 @@ def _column_runs(colmask, width):
     return runs
 
 
-def _best_letter(rows, x0, x1):
-    return _best_glyph(rows, x0, x1, _glyphs_by_width(), GLYPH_COVERAGE)
+def _slot_descriptor(rows, x0, x1):
+    pixels = {(x, y) for y, row in enumerate(rows)
+              for x in range(x0, x1 + 1) if (row >> x) & 1}
+    return _glyph_descriptor(pixels)
 
 
-def _best_digit(rows, x0, x1):
-    return _best_glyph(rows, x0, x1, _digit_glyphs_by_width(), DIGIT_COVERAGE)
-
-
-def _best_glyph(rows, x0, x1, index, coverage):
-    rw = x1 - x0 + 1
-    mask = (1 << rw) - 1
-    subcols = [(row >> x0) & mask for row in rows]
-    srows, sw, sh = geometry.normalized_bitmap_from_pixels(_bitmap_pixels(subcols))
-    if not srows:
+def _recognize_slot(rows, x0, x1, templates, threshold):
+    desc = _slot_descriptor(rows, x0, x1)
+    if desc is None:
         return None
-    return _match_normalized(srows, sw, sh, index, coverage)
+    return _match_descriptor(desc, templates, threshold)
 
 
-def _match_normalized(srows, sw, sh, index, coverage):
-    sink = geometry.popcount(srows)
-    best = None
-    best_score = GLYPH_IOU
-    for gwidth in range(sw - 2, sw + 3):
-        for char, grows, gw, gh, gink in index.get(gwidth, ()):
-            if abs(gh - sh) > 2:
-                continue
-            inter = _best_overlap(list(grows), gw, gh, srows, sw, sh)
-            cov = inter / gink
-            rev = inter / sink
-            score = inter / (gink + sink - inter) if (gink + sink - inter) else 0.0
-            if cov >= coverage and rev >= coverage and score > best_score:
-                best_score = score
-                best = char
-    return best
+def _scan_line(pixels):
+    seg = _row_slots(pixels)
+    if seg is None:
+        return None
+    rows, _, slots = seg
+    if len(slots) < MIN_WORD_GLYPHS:
+        return None
+    letters = [_recognize_slot(rows, x0, x1, _letter_templates(), LETTER_IOU)
+               for x0, x1 in slots]
+    return _assemble(letters)
 
 
-def _stage_generic_letters(board, letter_floor):
+def _stage_letters(board):
+    _, _, _, _, letter_floor = _ensure_floors()
     if geometry.popcount(board) < letter_floor:
-        return False
+        return None
     lit = _bitmap_pixels(board)
-    index = _letter_glyphs_by_width()
+    templates = _letter_templates()
+    generic = False
     for op_key in OCR_READING_OPS:
-        transformed = {geometry.apply_op(pixel, op_key) for pixel in lit}
-        if _count_structured_letters(transformed, index) >= MIN_GENERIC_LETTERS:
-            return True
-    return False
-
-
-def _count_structured_letters(pixels, index):
-    count = 0
-    for component in _connected_components(pixels):
-        srows, sw, sh = geometry.normalized_bitmap_from_pixels(component)
-        if not srows:
+        seg = _row_slots({geometry.apply_op(pixel, op_key) for pixel in lit})
+        if seg is None:
             continue
-        if _match_normalized(srows, sw, sh, index, GENERIC_LETTER_COVERAGE) is not None:
-            count += 1
-    return count
+        rows, _, slots = seg
+        recognized = [(_recognize_slot(rows, x0, x1, templates, LETTER_IOU),
+                       x0, x1, _run_vextent(rows, x0, x1)) for x0, x1 in slots]
+        word = _assemble([glyph[0] for glyph in recognized])
+        if word is not None:
+            return ("word", word)
+        if not generic and _generic_hit(recognized, rows, templates):
+            generic = True
+    return ("generic", None) if generic else None
 
 
-def _connected_components(pixels):
+def _generic_hit(recognized, rows, templates):
+    for group in _aligned_groups(recognized, MIN_GENERIC_LETTERS):
+        effective = [glyph for glyph in group if glyph[0] not in LINE_LETTERS]
+        if len(effective) >= MIN_GENERIC_LETTERS:
+            return True
+    if len(recognized) != 1:
+        return False
+    _, x0, x1, _ = recognized[0]
+    pixels = {(x, y) for y, row in enumerate(rows)
+              for x in range(x0, x1 + 1) if (row >> x) & 1}
+    glyph = _largest_component(pixels)
+    minx, miny, maxx, maxy = geometry.pixels_bbox(glyph)
+    if min(maxx - minx + 1, maxy - miny + 1) < LONE_MIN_SPAN:
+        return False
+    desc = _glyph_descriptor(glyph)
+    if desc is None:
+        return False
+    return _lone_match(desc, templates) in LONE_LETTERS
+
+
+def _largest_component(pixels):
     remaining = set(pixels)
-    components = []
+    best = set()
     while remaining:
         start = remaining.pop()
         stack = [start]
@@ -729,8 +739,38 @@ def _connected_components(pixels):
                         remaining.discard(neighbor)
                         component.add(neighbor)
                         stack.append(neighbor)
-        components.append(component)
-    return components
+        if len(component) > len(best):
+            best = component
+    return best
+
+
+def _dilate(pixels):
+    return {(x + dx, y + dy) for x, y in pixels
+            for dx in (-1, 0, 1) for dy in (-1, 0, 1)}
+
+
+def _lone_match(desc, templates):
+    nw, grid = desc
+    dgrid = _dilate(grid)
+    best_char = None
+    best_score = LONE_COVERAGE
+    for char, t_nw, relpix, width, height, cache in templates:
+        if abs(t_nw - nw) > 1 + nw // 5:
+            continue
+        template = cache.get(nw)
+        if template is None:
+            template = _norm_grid(relpix, width, height, nw)
+            cache[nw] = template
+        if max(len(grid), len(template)) > LONE_INK_RATIO * min(len(grid), len(template)):
+            continue
+        dtemplate = _dilate(template)
+        drawn_cover = sum(1 for p in grid if p in dtemplate) / len(grid)
+        template_cover = sum(1 for p in template if p in dgrid) / len(template)
+        score = min(drawn_cover, template_cover)
+        if score > best_score:
+            best_score = score
+            best_char = char
+    return best_char
 
 
 def _bitmap_pixels(rows):
@@ -742,17 +782,6 @@ def _bitmap_pixels(rows):
             pixels.add((low.bit_length() - 1, y))
             bit ^= low
     return pixels
-
-
-def _best_overlap(grows, gw, gh, srows, sw, sh):
-    best = 0
-    for dy in (-1, 0, 1):
-        for dx in (-1, 0, 1):
-            placed = geometry.embed(grows, dx, dy, sw, sh)
-            inter = geometry.popcount(geometry.bitmap_and(placed, srows))
-            if inter > best:
-                best = inter
-    return best
 
 
 def _assemble(letters):
@@ -809,25 +838,20 @@ def _stage_codes(board):
 
 
 def _scan_code_line(pixels, hard_codes, soft_codes):
-    box = geometry.pixels_bbox(pixels)
-    if box is None:
+    seg = _row_slots(pixels)
+    if seg is None:
         return None
-    minx, miny, maxx, maxy = box
-    width = maxx - minx + 1
-    height = maxy - miny + 1
-    rows = geometry.bitmap_from_pixels(pixels, width, height, minx, miny)
-    colmask = 0
-    for row in rows:
-        colmask |= row
-    slots = _column_runs(colmask, width)
+    rows, _, slots = seg
     if len(slots) < MIN_CODE_DIGITS:
         return None
+    templates = _digit_templates()
     glyphs = []
     for x0, x1 in slots:
-        glyphs.append((_best_digit(rows, x0, x1), x0, x1, _run_vextent(rows, x0, x1)))
+        digit = _recognize_slot(rows, x0, x1, templates, DIGIT_IOU)
+        glyphs.append((digit, x0, x1, _run_vextent(rows, x0, x1)))
     hard = None
     soft = set()
-    for group in _aligned_digit_groups(glyphs):
+    for group in _aligned_groups(glyphs, MIN_CODE_DIGITS):
         text = "".join(glyph[0] for glyph in group)
         for start in range(len(text)):
             for end in range(start + MIN_CODE_DIGITS, len(text) + 1):
@@ -851,27 +875,27 @@ def _run_vextent(rows, x0, x1):
     return (min(ys), max(ys))
 
 
-def _aligned_digit_groups(glyphs):
+def _aligned_groups(glyphs, min_size):
     groups = []
     current = []
     for glyph in glyphs:
         char, _, _, extent = glyph
         if char is None or extent is None:
-            if len(current) >= MIN_CODE_DIGITS:
+            if len(current) >= min_size:
                 groups.append(current)
             current = []
             continue
-        if current and not _digits_aligned(current[-1], glyph):
-            if len(current) >= MIN_CODE_DIGITS:
+        if current and not _glyphs_aligned(current[-1], glyph):
+            if len(current) >= min_size:
                 groups.append(current)
             current = []
         current.append(glyph)
-    if len(current) >= MIN_CODE_DIGITS:
+    if len(current) >= min_size:
         groups.append(current)
     return groups
 
 
-def _digits_aligned(prev, cur):
+def _glyphs_aligned(prev, cur):
     _, _, prev_x1, prev_extent = prev
     _, cur_x0, _, cur_extent = cur
     prev_h = prev_extent[1] - prev_extent[0] + 1
