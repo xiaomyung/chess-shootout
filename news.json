@@ -1,7 +1,7 @@
 [
   {
     "title": "v2.11.0 — Rules of Engagement",
-    "body": "Cleaner shared play and a readable news feed:\n- Shared board drawings are now moderated — prohibited symbols and slurs are blocked before your opponent sees them\n- A blocked mark turns red for you with a quick heads-up\n- New option to hide your opponent's shared marks entirely — Options → Online\n- The News card now lists every update: expandable, scrollable, with an unread badge",
+    "body": "Cleaner shared play and a readable news feed:\n- Shared board drawings are now moderated — prohibited symbols and slurs are blocked before your opponent sees them\n- A blocked mark turns red for you with a quick heads-up\n- New option to hide your opponent's shared marks entirely — Options › Online\n- The News card now lists every update: expandable, scrollable, with an unread badge",
     "date": "2026-07-17"
   },
   {
@@ -26,12 +26,12 @@
   },
   {
     "title": "v2.6.0 — Tunnel Vision",
-    "body": "Distraction-free play:\n- New Focus mode collapses the in-game UI down to just the board — press H or click the arrow in the board seam\n- Choose what stays on screen: a thin time line on the board edges, the full player strips, or nothing at all — Options → Focus mode\n- A game result auto-expands the UI; Esc steps back out before it offers to resign",
+    "body": "Distraction-free play:\n- New Focus mode collapses the in-game UI down to just the board — press H or click the arrow in the board seam\n- Choose what stays on screen: a thin time line on the board edges, the full player strips, or nothing at all — Options › Focus mode\n- A game result auto-expands the UI; Esc steps back out before it offers to resign",
     "date": "2026-07-08"
   },
   {
     "title": "v2.5.0 — Full Auto",
-    "body": "A big frame-rate boost:\n- The board only repaints what actually changes, so idle and menu frame rates climb sharply\n- New Performance readouts — FPS, 1% lows, and render time — in Options → Performance\n- Fixed a bug where a game could run past 0:00; a flagged clock now ends the game",
+    "body": "A big frame-rate boost:\n- The board only repaints what actually changes, so idle and menu frame rates climb sharply\n- New Performance readouts — FPS, 1% lows, and render time — in Options › Performance\n- Fixed a bug where a game could run past 0:00; a flagged clock now ends the game",
     "date": "2026-07-03"
   },
   {
@@ -76,12 +76,12 @@
   },
   {
     "title": "v2.3.2 — Open Line",
-    "body": "Online, out of the box:\n- Downloaded desktop builds now connect to the public Chess Shootout server automatically — no server address to type in (you can still override it in Options → Server)",
+    "body": "Online, out of the box:\n- Downloaded desktop builds now connect to the public Chess Shootout server automatically — no server address to type in (you can still override it in Options › Server)",
     "date": "2026-06-26"
   },
   {
     "title": "v2.3.1 — Steady Hands",
-    "body": "Smoother browsing:\n- The games list stays smooth with hundreds of saved games\n- New performance readout in the window bar: FPS and live ping — toggle in Options → Performance\n- A friendly \"Already in a game\" message replaces the old raw code",
+    "body": "Smoother browsing:\n- The games list stays smooth with hundreds of saved games\n- New performance readout in the window bar: FPS and live ping — toggle in Options › Performance\n- A friendly \"Already in a game\" message replaces the old raw code",
     "date": "2026-06-26"
   },
   {
