@@ -6,9 +6,16 @@ class SkillCheckKind(Enum):
     NONE = "none"
     WHEEL = "wheel"
     AIM = "aim"
+    WHACK = "whack"
+    COMBO = "combo"
 
 
-KIND_LABEL = {"wheel": "Wheel", "aim": "Steady-Aim"}
+KIND_LABEL = {
+    "wheel": "Wheel",
+    "aim": "Steady-Aim",
+    "whack": "Whack-a-Mole",
+    "combo": "Combo",
+}
 
 
 @dataclass(frozen=True)

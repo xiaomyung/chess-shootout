@@ -3,6 +3,8 @@ from chessshootout.skillcheck.types import SkillCheckKind
 NONE = SkillCheckKind.NONE
 WHEEL = SkillCheckKind.WHEEL
 AIM = SkillCheckKind.AIM
+WHACK = SkillCheckKind.WHACK
+COMBO = SkillCheckKind.COMBO
 
 CAPTURE_WHEEL_SHARE = 0.5
 CAPTURE_AIM_SHARE = 0.5
@@ -10,8 +12,8 @@ CAPTURE_AIM_SHARE = 0.5
 CAPTURE_FIRE = {NONE: 0.0, WHEEL: CAPTURE_WHEEL_SHARE, AIM: CAPTURE_AIM_SHARE}
 PROMOTION_FIRE = {NONE: 0.0, WHEEL: 1.0}
 
-_NEVER = {NONE: 1.0, WHEEL: 0.0, AIM: 0.0}
-_ORDER = (NONE, WHEEL, AIM)
+_NEVER = {NONE: 1.0, WHEEL: 0.0, AIM: 0.0, WHACK: 0.0, COMBO: 0.0}
+_ORDER = (NONE, WHEEL, AIM, WHACK, COMBO)
 
 
 def distribution_for(facts):
