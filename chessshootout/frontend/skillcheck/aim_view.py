@@ -160,7 +160,7 @@ class AimController(SkillCheckController):
         self._resolved_at = self._now
         self._emit_verdict()
 
-    def spectate_shot(self, elapsed, miss_count, won):
+    def spectate_shot(self, elapsed, miss_count, won, progress=0, direction=None, target=None):
         if won:
             self._shot_render = (elapsed, miss_count)
             self._shot_offset = self.challenge.reticle_offset(elapsed, miss_count)

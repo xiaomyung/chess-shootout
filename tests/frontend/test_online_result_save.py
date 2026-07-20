@@ -52,7 +52,8 @@ class FakeOnlineClient:
     def send_move(self, from_sq, to_sq, promotion=None):
         self.sent_moves.append((from_sq, to_sq, promotion))
 
-    def send_skill_check_shot(self, client_elapsed_ms=0.0):
+    def send_skill_check_shot(self, client_elapsed_ms=0.0, direction=None,
+                              target_row=None, target_col=None):
         self.shots += 1
 
     def request_state_sync(self):

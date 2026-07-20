@@ -1,3 +1,9 @@
+def _close_controller(controller):
+    close = getattr(controller, "close", None)
+    if close is not None:
+        close()
+
+
 class SkillCheckOverlay:
 
     def __init__(self):
@@ -6,6 +12,8 @@ class SkillCheckOverlay:
         self._on_done = None
 
     def start(self, controller, context, on_done):
+        if self._controller is not None and self._controller is not controller:
+            _close_controller(self._controller)
         self._controller = controller
         self._context = context
         self._on_done = on_done
@@ -20,9 +28,10 @@ class SkillCheckOverlay:
         fn = getattr(self._controller, "victim_scale", None)
         return fn() if fn is not None else 1.0
 
-    def spectate_shot(self, elapsed, miss_count, won):
+    def spectate_shot(self, elapsed, miss_count, won, progress=0, direction=None, target=None):
         if self._controller is not None:
-            self._controller.spectate_shot(elapsed, miss_count, won)
+            self._controller.spectate_shot(elapsed, miss_count, won, progress=progress,
+                                           direction=direction, target=target)
 
     def handle_event(self, event):
         if self._controller is None:
@@ -54,9 +63,12 @@ class SkillCheckOverlay:
             self._controller.resolve(won)
 
     def cancel(self):
+        controller = self._controller
         self._controller = None
         self._context = None
         self._on_done = None
+        if controller is not None:
+            _close_controller(controller)
 
     def _finish(self):
         context = self._context

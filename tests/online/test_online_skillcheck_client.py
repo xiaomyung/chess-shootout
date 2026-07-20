@@ -14,11 +14,16 @@ import pygame as pg
 import pytest
 
 from tests.conftest import pygame_display
-from chessshootout.backend.utils import coord_from_square
+from chessshootout.backend.utils import Square, coord_from_square
 from chessshootout.frontend.frontend import Frontend
+from chessshootout.frontend.skillcheck.combo_view import ComboController
+from chessshootout.frontend.skillcheck.mole_view import MoleController
 from chessshootout.online.client import Event
 from chessshootout.server.protocol import (
     LockWire, PendingSkillCheckWire, SkillCheckSpectateMessage)
+from chessshootout.skillcheck import mole, online
+from chessshootout.skillcheck.combo import ComboChallenge
+from chessshootout.skillcheck.mole import MoleChallenge
 from chessshootout.skillcheck.types import SkillCheckKind, SkillCheckOutcome
 from chessshootout.skillcheck.wheel import placement_square
 from tests.helpers import BLACK, K, P, Q, R, WHITE, make_backend, piece, sq
@@ -34,6 +39,7 @@ class FakeOnlineClient:
         self.opp_state = "connected"
         self.sent_moves = []
         self.shots = 0
+        self.shot_calls = []
         self.state_syncs = 0
         self.pings = 0
 
@@ -55,9 +61,13 @@ class FakeOnlineClient:
     def send_move(self, from_sq, to_sq, promotion=None):
         self.sent_moves.append((from_sq, to_sq, promotion))
 
-    def send_skill_check_shot(self, client_elapsed_ms=0.0):
+    def send_skill_check_shot(self, client_elapsed_ms=0.0, direction=None,
+                              target_row=None, target_col=None):
         self.shots += 1
         self.last_shot_elapsed = client_elapsed_ms
+        self.last_shot_direction = direction
+        self.last_shot_target = (target_row, target_col)
+        self.shot_calls.append((client_elapsed_ms, direction, target_row, target_col))
 
     def request_state_sync(self):
         self.state_syncs += 1
@@ -120,20 +130,20 @@ def _drive_verdict_hold(app):
 
 
 def _required_payload(frm, to, kind="wheel", promotion=None, value_diff=3,
-                      elapsed_ms=0.0, miss_count=0):
+                      elapsed_ms=0.0, miss_count=0, captured_value=0):
     return {
         "kind": kind, "seed": "seed-1", "value_diff": value_diff,
         "deadline_ms": 5000.0, "elapsed_ms": elapsed_ms, "miss_count": miss_count,
         "from": coord_from_square(frm), "to": coord_from_square(to),
-        "promotion": promotion,
+        "promotion": promotion, "captured_value": captured_value,
     }
 
 
-def _spectate_payload(frm, to, kind="wheel", value_diff=3, promotion=None):
+def _spectate_payload(frm, to, kind="wheel", value_diff=3, promotion=None, captured_value=0):
     return SkillCheckSpectateMessage(
         kind=kind, seed="seed-1", value_diff=value_diff, deadline_ms=5000.0,
         from_sq=coord_from_square(frm), to_sq=coord_from_square(to),
-        promotion=promotion).model_dump(by_alias=True)
+        promotion=promotion, captured_value=captured_value).model_dump(by_alias=True)
 
 
 def test_online_gate_holds_a_capture_without_applying_locally():
@@ -434,11 +444,13 @@ def _resumed(pending=None, locks=None, skillcheck_log=None):
     return payload
 
 
-def _pending_wire(kind, frm, to, color, *, elapsed_ms=0.0, miss_count=0, promo=None):
+def _pending_wire(kind, frm, to, color, *, elapsed_ms=0.0, miss_count=0, promo=None,
+                  progress=0, captured_value=0):
     return PendingSkillCheckWire(
         kind=kind, seed="s", value_diff=3, deadline_ms=5000.0, elapsed_ms=elapsed_ms,
         miss_count=miss_count, color=color, from_sq=frm, to_sq=to,
-        promotion=promo).model_dump(by_alias=True)
+        promotion=promo, progress=progress,
+        captured_value=captured_value).model_dump(by_alias=True)
 
 
 def _lock_wire(frm, to):
@@ -864,3 +876,187 @@ def test_a_live_log_round_trips_through_the_resume_wire_unchanged():
     wire = [{"ply": e.ply, "kind": e.kind, "won": e.won, "san": e.san} for e in live]
     other.coordinator._handle_game_resumed(_resumed(skillcheck_log=wire))
     assert other.game.skillcheck_session.skillcheck_log == live
+
+
+def _server_whack(app, to, captured_value, value_diff=3):
+    """Rebuild EXACTLY what the server adjudicates against: the challenge from the wire
+    seed and the holes from (seed, captured_value, capture square, frozen occupied set)."""
+    challenge = MoleChallenge.from_seed("seed-1", value_diff, 5000.0, captured_value)
+    state = app.game.match.state
+    occupied = [(row, col) for row in range(8) for col in range(8)
+                if state[row][col] is not None]
+    holes = mole.hole_squares("seed-1", captured_value, (to.row, to.col), occupied, 8)
+    return challenge, holes
+
+
+def test_required_whack_builds_the_engine_holes_and_captured_value():
+    app = _online_app()
+    frm, to = _capture_board(app)
+    app.game.skillcheck_session.skillcheck_gate(frm, to)
+    app.coordinator._handle_skill_check_required(
+        _required_payload(frm, to, kind="whack", captured_value=5))
+    ctrl = app.game.skillcheck_overlay._controller
+    assert isinstance(ctrl, MoleController)
+    challenge, holes = _server_whack(app, to, captured_value=5)
+    assert ctrl.challenge == challenge, "the wire captured_value reaches the challenge"
+    assert ctrl._hole_squares == holes, "the client digs the server's exact pits"
+    assert len(holes) == 5
+    assert app.game.board.aim_suppressed_square == to, "the whack victim square is suppressed"
+
+
+def test_whack_shots_relay_board_targets_that_solve_the_server_challenge():
+    app = _online_app()
+    frm, to = _capture_board(app)
+    app.game.skillcheck_session.skillcheck_gate(frm, to)
+    app.coordinator._handle_skill_check_required(
+        _required_payload(frm, to, kind="whack", captured_value=3))
+    ctrl = app.game.skillcheck_overlay._controller
+    challenge, holes = _server_whack(app, to, captured_value=3)
+    client = app.coordinator.client
+    pops = challenge.pops[:challenge.hits_required]
+    for pop in pops:
+        elapsed = int((pop.t_up_ms + pop.t_down_ms) / 2.0)
+        app.game.skillcheck_overlay.update(ctrl.start_ms + elapsed)
+        pos = app.game.board.cell_rect(Square(*holes[pop.hole])).center
+        app.game.skillcheck_overlay.handle_event(
+            pg.event.Event(pg.MOUSEBUTTONDOWN, {"button": 1, "pos": pos}))
+    assert len(client.shot_calls) == challenge.hits_required, "every shot relays exactly once"
+    last_hit = -1
+    for pop, (sent_elapsed, direction, row_f, col_f) in zip(pops, client.shot_calls):
+        assert direction is None, "a whack shot carries a target, never a direction"
+        hole_row, hole_col = holes[pop.hole]
+        assert (row_f, col_f) == (hole_row + 0.5, hole_col + 0.5), \
+            "the board-px click inverts to the exact hole center in board coords"
+        assert online.shot_wins(
+            SkillCheckKind.WHACK, challenge, sent_elapsed, 0, 5000.0,
+            target=(row_f, col_f), hole_squares=holes, last_hit_pop=last_hit) is True, \
+            "the relayed shot wins under the server's own adjudication"
+        last_hit = challenge.pop_up_at(sent_elapsed)
+    assert ctrl._progress == challenge.hits_required, "the optimistic pips fill locally"
+    assert ctrl.landed is None, "the client never paints its own verdict online"
+    assert app.game.skillcheck_overlay.is_active(), "the overlay awaits the server"
+
+
+def test_whack_targets_stay_server_exact_on_a_flipped_board():
+    app = _online_app("black")
+    frm, to = _capture_board(app)
+    assert app.game.board.flipped is True, "the black player views the board flipped"
+    app.game.skillcheck_session.pending_online_move = (frm, to, None)
+    app.coordinator._handle_skill_check_required(
+        _required_payload(frm, to, kind="whack", captured_value=3))
+    ctrl = app.game.skillcheck_overlay._controller
+    challenge, holes = _server_whack(app, to, captured_value=3)
+    pop = challenge.pops[0]
+    app.game.skillcheck_overlay.update(ctrl.start_ms + int((pop.t_up_ms + pop.t_down_ms) / 2))
+    pos = app.game.board.cell_rect(Square(*holes[pop.hole])).center
+    app.game.skillcheck_overlay.handle_event(
+        pg.event.Event(pg.MOUSEBUTTONDOWN, {"button": 1, "pos": pos}))
+    _, _, row_f, col_f = app.coordinator.client.shot_calls[0]
+    hole_row, hole_col = holes[pop.hole]
+    assert (row_f, col_f) == (hole_row + 0.5, hole_col + 0.5), \
+        "the inverse mapping honors the flipped orientation"
+
+
+def test_combo_presses_relay_directions_in_prompt_order():
+    app = _online_app()
+    frm, to = _capture_board(app)
+    app.game.skillcheck_session.skillcheck_gate(frm, to)
+    app.coordinator._handle_skill_check_required(
+        _required_payload(frm, to, kind="combo", captured_value=1))
+    ctrl = app.game.skillcheck_overlay._controller
+    assert isinstance(ctrl, ComboController)
+    challenge = ComboChallenge.from_seed("seed-1", 3, 5000.0, 1)
+    assert ctrl.challenge == challenge, "the wire captured_value reaches the combo challenge"
+    keys = {"up": pg.K_UP, "down": pg.K_DOWN, "left": pg.K_LEFT, "right": pg.K_RIGHT}
+    client = app.coordinator.client
+    for i, direction in enumerate(challenge.prompts):
+        app.game.skillcheck_overlay.update(ctrl.start_ms + 300 * (i + 1))
+        app.game.skillcheck_overlay.handle_event(
+            pg.event.Event(pg.KEYDOWN, {"key": keys[direction], "mod": 0}))
+    assert [c[1] for c in client.shot_calls] == list(challenge.prompts), \
+        "each press relays its direction; solving the seed sends the full prompt string"
+    assert all(c[2] is None and c[3] is None for c in client.shot_calls), \
+        "a combo press carries a direction, never a target"
+    for progress, (sent_elapsed, direction, _, _) in enumerate(client.shot_calls):
+        assert online.shot_wins(SkillCheckKind.COMBO, challenge, sent_elapsed, 0, 5000.0,
+                                progress=progress, direction=direction) is True
+    assert ctrl.progress == challenge.prompt_count
+    assert ctrl.landed is None, "the client never paints its own verdict online"
+    assert app.game.skillcheck_overlay.is_active()
+
+
+def test_whack_spectate_mirror_adopts_the_relayed_progress():
+    app = _online_app("black")
+    frm, to = _capture_board(app)
+    app.coordinator._handle_skill_check_spectate(
+        _spectate_payload(frm, to, kind="whack", captured_value=3))
+    ctrl = app.game.skillcheck_overlay._controller
+    assert isinstance(ctrl, MoleController)
+    assert app.game.skillcheck_overlay.is_passive() and ctrl._progress == 0
+    challenge, holes = _server_whack(app, to, captured_value=3)
+    row, col = holes[challenge.pops[0].hole]
+    app.coordinator._handle_skill_check_spectate_shot(
+        {"elapsed_ms": 900.0, "miss_count": 0, "won": False, "progress": 1,
+         "direction": None, "target_row": row + 0.5, "target_col": col + 0.5})
+    assert ctrl._progress == 1, "the mirror adopts the server's progress, not its own count"
+    assert ctrl._impacts, "the relayed board target paints an impact marker"
+    app.coordinator._handle_skill_check_spectate_shot(
+        {"elapsed_ms": 1800.0, "miss_count": 1, "won": False, "progress": 1,
+         "direction": None, "target_row": 0.5, "target_col": 0.5})
+    assert ctrl._progress == 1, "a relayed whiff never advances the pips"
+
+
+def test_combo_spectate_mirror_steps_the_strip_with_progress():
+    app = _online_app("black")
+    frm, to = _capture_board(app)
+    app.coordinator._handle_skill_check_spectate(
+        _spectate_payload(frm, to, kind="combo", captured_value=1))
+    ctrl = app.game.skillcheck_overlay._controller
+    assert isinstance(ctrl, ComboController)
+    challenge = ComboChallenge.from_seed("seed-1", 3, 5000.0, 1)
+    app.coordinator._handle_skill_check_spectate_shot(
+        {"elapsed_ms": 700.0, "miss_count": 0, "won": False, "progress": 1,
+         "direction": challenge.prompts[0], "target_row": None, "target_col": None})
+    assert ctrl.progress == 1, "the spectated strip advances with the relayed progress"
+    app.coordinator._handle_skill_check_spectate_shot(
+        {"elapsed_ms": 1200.0, "miss_count": 1, "won": False, "progress": 1,
+         "direction": "up", "target_row": None, "target_col": None})
+    assert ctrl.progress == 1
+    assert ctrl.wrong_count == 1, "a relayed wrong press strikes a pip instead"
+
+
+def test_resume_reopens_a_whack_check_with_progress_and_captured_value():
+    app = _online_app("white")
+    pending = _pending_wire("whack", "d4", "d5", "white", elapsed_ms=1200.0,
+                            progress=2, captured_value=5)
+    app.coordinator._handle_game_resumed(_resumed(pending=pending))
+    ctrl = app.game.skillcheck_overlay._controller
+    assert isinstance(ctrl, MoleController)
+    assert ctrl._online is True and ctrl._passive is False
+    assert ctrl._progress == 2, "the server's mid-check progress rides the resume wire"
+    assert ctrl.challenge.hole_count == 5, "captured_value survives the resume round-trip"
+    assert pg.time.get_ticks() - ctrl.start_ms == pytest.approx(1200, abs=80), "back-dated start"
+
+
+def test_resume_of_an_opponent_whack_pending_spectates_with_progress():
+    app = _online_app("white")
+    pending = _pending_wire("whack", "d5", "d4", "black", elapsed_ms=500.0,
+                            progress=1, captured_value=4)
+    app.coordinator._handle_game_resumed(_resumed(pending=pending))
+    ctrl = app.game.skillcheck_overlay._controller
+    assert app.game.skillcheck_overlay.is_passive()
+    assert app.game.skillcheck_session.online_spectate_kind == SkillCheckKind.WHACK
+    assert ctrl._progress == 1, "the spectated mirror resumes at the server's progress"
+    assert ctrl.challenge.hole_count == 4
+
+
+def test_resume_reopens_a_combo_check_with_progress():
+    app = _online_app("white")
+    pending = _pending_wire("combo", "d4", "d5", "white", elapsed_ms=800.0,
+                            progress=2, captured_value=1)
+    app.coordinator._handle_game_resumed(_resumed(pending=pending))
+    ctrl = app.game.skillcheck_overlay._controller
+    assert isinstance(ctrl, ComboController)
+    assert ctrl._online is True and ctrl._passive is False
+    assert ctrl.progress == 2, "the strip reopens two chevrons in"
+    assert pg.time.get_ticks() - ctrl.start_ms == pytest.approx(800, abs=80), "back-dated start"

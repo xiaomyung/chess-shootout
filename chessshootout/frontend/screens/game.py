@@ -128,6 +128,7 @@ class OnlineCheck(NamedTuple):
     from_sq: Square
     to_sq: Square
     promo_type: PieceType | None
+    captured_value: int
 
 
 def compute_animation_ms(initial_seconds):
@@ -552,6 +553,7 @@ class GameScreen(Screen):
             from_sq=from_sq,
             to_sq=to_sq,
             promo_type=PROMO_TYPE_BY_LETTER.get(promo) if promo else None,
+            captured_value=int(payload.get("captured_value", 0)),
         )
 
     def _open_my_skillcheck(self, payload):
@@ -598,8 +600,14 @@ class GameScreen(Screen):
             False, lambda: self._apply_spectate_fail(from_sq, to_sq, aim_victim))
 
     def _spectate_shot(self, payload):
+        target_row = payload.get("target_row")
+        target_col = payload.get("target_col")
+        target = ((float(target_row), float(target_col))
+                  if target_row is not None and target_col is not None else None)
         self.skillcheck_overlay.spectate_shot(
-            float(payload["elapsed_ms"]), int(payload["miss_count"]), bool(payload["won"]))
+            float(payload["elapsed_ms"]), int(payload["miss_count"]), bool(payload["won"]),
+            progress=int(payload.get("progress", 0)),
+            direction=payload.get("direction"), target=target)
 
     def _clear_online_move_locks(self, from_sq, to_sq):
         if self.variant != Variant.ONLINE:
@@ -715,19 +723,21 @@ class GameScreen(Screen):
         promo_type = PROMO_TYPE_BY_LETTER.get(promo) if promo else None
         elapsed_ms = float(pending.get("elapsed_ms", 0.0))
         miss_count = int(pending.get("miss_count", 0))
+        captured_value = int(pending.get("captured_value", 0))
+        progress = int(pending.get("progress", 0))
         if pending["color"] != self._chosen_side:
             self.skillcheck_session.open_spectate_overlay(
                 kind, pending["seed"], int(pending["value_diff"]),
-                float(pending["deadline_ms"]), from_sq, to_sq, promo_type,
-                elapsed_ms=elapsed_ms, miss_count=miss_count)
+                float(pending["deadline_ms"]), from_sq, to_sq, promo_type, captured_value,
+                elapsed_ms=elapsed_ms, miss_count=miss_count, progress=progress)
             self.app.toast.show("Opponent is lining up a shot…")
             return
         self.skillcheck_session.online_skillcheck = (from_sq, to_sq, promo_type, kind)
         self.skillcheck_session.online_skillcheck_opened_ms = pg.time.get_ticks() - int(elapsed_ms)
         self.skillcheck_session.open_skillcheck_overlay(
             kind, pending["seed"], int(pending["value_diff"]),
-            float(pending["deadline_ms"]), from_sq, to_sq, promo_type, online=True,
-            elapsed_ms=elapsed_ms, miss_count=miss_count)
+            float(pending["deadline_ms"]), from_sq, to_sq, promo_type, captured_value,
+            online=True, elapsed_ms=elapsed_ms, miss_count=miss_count, progress=progress)
 
     def exit(self):
         super().exit()

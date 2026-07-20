@@ -166,9 +166,11 @@ class OnlineCoordinator:
         if self.client is not None:
             self.client.send_give_time(hold_ms)
 
-    def send_skill_check_shot(self, client_elapsed_ms):
+    def send_skill_check_shot(self, client_elapsed_ms, direction=None,
+                              target_row=None, target_col=None):
         if self.client is not None:
-            self.client.send_skill_check_shot(client_elapsed_ms)
+            self.client.send_skill_check_shot(client_elapsed_ms, direction=direction,
+                                              target_row=target_row, target_col=target_col)
 
     def send_annotations_state(self, sharing, highlights, arrows):
         if self.client is not None:
