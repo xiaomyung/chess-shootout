@@ -7,10 +7,11 @@ from chessshootout.backend.pieces import Piece, PieceColor, PieceType
 from chessshootout.backend.utils import Square
 from chessshootout.domain.pgn.generate import generate_pgn
 from chessshootout.domain.pgn.load import (
-    PgnSummary, extract_csmatchid, format_relative_time, group_by_csmatchid,
-    load_pgn_into_backend, parse_comment, parse_pgn, scan_pgn_summaries,
-    summarize_pgn_file, termination_reason, time_category,
+    PgnSummary, _NOTE_TOKEN_RE, extract_csmatchid, format_relative_time,
+    group_by_csmatchid, load_pgn_into_backend, parse_comment, parse_pgn,
+    scan_pgn_summaries, summarize_pgn_file, termination_reason, time_category,
 )
+from chessshootout.skillcheck.types import KIND_LABEL
 from tests.helpers import fake_uuid4
 
 
@@ -420,8 +421,24 @@ def test_parse_pgn_strips_variations_but_keeps_real_comments():
 def test_parse_comment_round_trips_format_annotations():
     assert parse_comment("Wheel ✓") == [("wheel", True, "")]
     assert parse_comment("Steady-Aim ✗ Nxe5") == [("aim", False, "Nxe5")]
+    assert parse_comment("Whack-a-Mole ✓") == [("whack", True, "")]
+    assert parse_comment("Combo ✗ Qxd5") == [("combo", False, "Qxd5")]
     assert parse_comment("Wheel ✗ Rxe5 · Steady-Aim ✓") == [
         ("wheel", False, "Rxe5"), ("aim", True, "")]
+    assert parse_comment("Whack-a-Mole ✓ · Combo ✗ Qxd5") == [
+        ("whack", True, ""), ("combo", False, "Qxd5")]
+
+
+def test_every_skillcheck_label_round_trips_and_matches_note_regex():
+    """Drift guard: KIND_LABEL is the single source of truth for the {comment}
+    tokens. Every label must both satisfy _NOTE_TOKEN_RE and decode back through the
+    public parse_comment path into its own kind + the right won flag — so a new kind
+    can never be silently dropped on load the way whack/combo were before v2.12.0."""
+    for kind, label in KIND_LABEL.items():
+        assert _NOTE_TOKEN_RE.fullmatch(f"{label} ✓") is not None
+        assert _NOTE_TOKEN_RE.fullmatch(f"{label} ✗") is not None
+        assert parse_comment(f"{label} ✓") == [(kind, True, "")]
+        assert parse_comment(f"{label} ✗") == [(kind, False, "")]
 
 
 def test_parse_comment_ignores_free_text():

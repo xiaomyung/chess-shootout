@@ -6,7 +6,8 @@ breaks movetext replay."""
 from chessshootout.backend.backend import Backend
 from chessshootout.domain.pgn.generate import format_annotations, generate_pgn
 from chessshootout.domain.pgn.load import (
-    extract_csmatchid, load_pgn_into_backend, parse_pgn, parse_pgn_headers,
+    extract_csmatchid, load_pgn_into_backend, parse_comment, parse_pgn,
+    parse_pgn_headers,
 )
 from chessshootout.skillcheck.types import SkillCheckOutcome
 from tests.helpers import fake_uuid4
@@ -75,6 +76,19 @@ def test_format_annotations_groups_and_orders_per_ply():
     }
 
 
+def test_format_annotations_labels_whack_and_combo_kinds():
+    log = [
+        SkillCheckOutcome(13, "whack", True),
+        SkillCheckOutcome(14, "combo", False, "Qxd5"),
+        SkillCheckOutcome(14, "whack", True),
+    ]
+    ann = format_annotations(log)
+    assert ann == {
+        13: "Whack-a-Mole ✓",
+        14: "Combo ✗ Qxd5 · Whack-a-Mole ✓",
+    }
+
+
 def test_format_annotations_empty_log_is_empty_dict():
     assert format_annotations([]) == {}
 
@@ -108,3 +122,26 @@ def test_generate_pgn_annotations_survive_a_full_round_trip():
     parsed = parse_pgn(text)
     assert parsed.moves == ["e4", "e5", "Nf3", "Nc6"]
     assert parsed.move_comments == ["Wheel ✓", "", "", "Steady-Aim ✗ Nxe5"]
+
+
+def test_generate_pgn_injects_whack_and_combo_annotations_after_the_right_san():
+    backend = _played("e4", "d5", "exd5", "Qxd5")
+    text = generate_pgn(backend.move_history, "white_wins",
+                        annotations={3: "Whack-a-Mole ✓", 4: "Combo ✗ Qxd5"})
+    assert "2. exd5 {Whack-a-Mole ✓} Qxd5 {Combo ✗ Qxd5}" in text
+
+
+def test_generate_load_round_trip_with_whack_and_combo_outcomes():
+    backend = _played("e4", "d5", "exd5", "Qxd5")
+    log = [
+        SkillCheckOutcome(3, "whack", True),
+        SkillCheckOutcome(4, "combo", False, "Qxd5"),
+    ]
+    text = generate_pgn(backend.move_history, "white_wins",
+                        annotations=format_annotations(log))
+    fresh = Backend()
+    parsed, ok = load_pgn_into_backend(fresh, text)
+    assert ok is True
+    assert [e.san for e in fresh.move_history] == ["e4", "d5", "exd5", "Qxd5"]
+    events = [parse_comment(comment) for comment in parsed.move_comments]
+    assert events == [[], [], [("whack", True, "")], [("combo", False, "Qxd5")]]
