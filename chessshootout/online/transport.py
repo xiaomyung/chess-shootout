@@ -283,8 +283,11 @@ class ServerWebSocket:
     async def send_ping(self, ply):
         await self._send(PingMessage(ply=ply))
 
-    async def send_skill_check_shot(self, client_elapsed_ms):
-        await self._send(SkillCheckShotMessage(client_elapsed_ms=client_elapsed_ms))
+    async def send_skill_check_shot(self, client_elapsed_ms, direction=None,
+                                    target_row=None, target_col=None):
+        await self._send(SkillCheckShotMessage(
+            client_elapsed_ms=client_elapsed_ms, direction=direction,
+            target_row=target_row, target_col=target_col))
 
     async def send_annotations_state(self, sharing, highlights, arrows):
         msg = AnnotationsStateMessage(

@@ -232,8 +232,8 @@ def test_move_message_promotion_validated():
                                     "from": "e7", "to": "e8", "promotion": "x"})
 
 
-def test_protocol_version_pinned_for_annotations_and_chat():
-    assert PROTOCOL_VERSION == 3
+def test_protocol_version_pinned_for_four_kind_skillchecks():
+    assert PROTOCOL_VERSION == 4
 
 
 def test_skill_check_required_round_trips():
@@ -371,18 +371,18 @@ def test_skillcheck_wire_messages_are_byte_identical_after_the_shared_base_refac
 
     assert pending.model_dump(by_alias=True) == {
         "kind": "aim", "seed": "seed123", "value_diff": 5, "deadline_ms": 5000.0,
-        "elapsed_ms": 1200.0, "miss_count": 2, "from": "e4", "to": "d5",
-        "promotion": "q", "color": "white",
+        "captured_value": 0, "elapsed_ms": 1200.0, "miss_count": 2, "progress": 0,
+        "from": "e4", "to": "d5", "promotion": "q", "color": "white",
     }
     assert required.model_dump(by_alias=True) == {
         "version": PROTOCOL_VERSION, "type": "skill_check_required",
         "kind": "wheel", "seed": "seedreq", "value_diff": -3, "deadline_ms": 4000.0,
-        "miss_count": 1, "from": "a7", "to": "b8", "promotion": "n",
+        "captured_value": 0, "miss_count": 1, "from": "a7", "to": "b8", "promotion": "n",
     }
     assert spectate.model_dump(by_alias=True) == {
         "version": PROTOCOL_VERSION, "type": "skill_check_spectate",
         "kind": "aim", "seed": "seedspec", "value_diff": 0, "deadline_ms": 3000.0,
-        "from": "c2", "to": "c3", "promotion": None,
+        "captured_value": 0, "from": "c2", "to": "c3", "promotion": None,
     }
 
 
@@ -403,6 +403,141 @@ def test_resume_response_carries_pending_and_locks_when_set():
     assert dumped["pending_skillcheck"]["from_sq"] == "e4"
     assert dumped["pending_skillcheck"]["to_sq"] == "d5"
     assert dumped["pending_skillcheck"]["color"] == "white"
+
+
+@pytest.mark.parametrize("kind", ["wheel", "aim", "whack", "combo"])
+def test_skill_check_kind_literal_accepts_all_four_kinds(kind):
+    msg = SkillCheckRequiredMessage(
+        kind=kind, seed="s", value_diff=0, deadline_ms=5000.0,
+        from_sq="e4", to_sq="d5")
+    assert msg.kind == kind
+    assert SkillCheckRequiredMessage.model_validate(msg.model_dump(by_alias=True)) == msg
+
+
+def test_geometry_base_bounds_captured_value():
+    """captured_value rides the shared geometry base: defaults 0, capped at the
+    queen's value 9, and never negative — the whack/combo scaling input can't be
+    forged outside real piece values."""
+    base = dict(kind="whack", seed="s", value_diff=0, deadline_ms=5000.0,
+                from_sq="e4", to_sq="d5")
+    assert SkillCheckRequiredMessage(**base).captured_value == 0
+    assert SkillCheckRequiredMessage(**base, captured_value=9).captured_value == 9
+    for bad in (-1, 10):
+        with pytest.raises(ValidationError):
+            SkillCheckRequiredMessage(**base, captured_value=bad)
+
+
+def test_skill_check_shot_old_client_shape_still_parses():
+    """A protocol-v3-era shot without the whack/combo fields must parse — the new
+    fields are optional so the wheel/aim payload shape is unchanged."""
+    msg = SkillCheckShotMessage.model_validate(
+        {"type": "skill_check_shot", "version": PROTOCOL_VERSION, "client_elapsed_ms": 412.0})
+    assert msg.client_elapsed_ms == 412.0
+    assert msg.direction is None
+    assert msg.target_row is None and msg.target_col is None
+
+
+def test_skill_check_shot_carries_combo_direction_and_whack_target():
+    combo = SkillCheckShotMessage(client_elapsed_ms=500.0, direction="left")
+    assert combo.direction == "left"
+    whack = SkillCheckShotMessage(client_elapsed_ms=900.0, target_row=3.5, target_col=0.0)
+    assert (whack.target_row, whack.target_col) == (3.5, 0.0)
+
+
+def test_skill_check_shot_rejects_unknown_direction():
+    with pytest.raises(ValidationError):
+        SkillCheckShotMessage(client_elapsed_ms=500.0, direction="diagonal")
+
+
+@pytest.mark.parametrize("field", ["target_row", "target_col"])
+@pytest.mark.parametrize(
+    "bad",
+    [
+        pytest.param(8.0, id="at_upper_bound_exclusive"),
+        pytest.param(8.5, id="past_upper_bound"),
+        pytest.param(-0.1, id="negative"),
+        pytest.param(float("nan"), id="nan"),
+        pytest.param(float("inf"), id="inf"),
+        pytest.param(float("-inf"), id="neg_inf"),
+    ],
+)
+def test_skill_check_shot_rejects_out_of_board_target(field, bad):
+    with pytest.raises(ValidationError):
+        SkillCheckShotMessage(client_elapsed_ms=500.0, **{field: bad})
+
+
+@pytest.mark.parametrize(
+    "token",
+    [pytest.param("NaN", id="nan"), pytest.param("Infinity", id="inf"),
+     pytest.param("-Infinity", id="neg_inf")],
+)
+def test_skill_check_shot_rejects_non_finite_json_target(token):
+    """pydantic-core parses bare NaN/Infinity JSON tokens, so the ge/lt bounds must
+    reject them at the wire — a non-finite target can never reach adjudication."""
+    raw = ('{"type": "skill_check_shot", "client_elapsed_ms": 500.0, '
+           '"target_row": ' + token + ', "target_col": 1.0}')
+    with pytest.raises(ValidationError):
+        SkillCheckShotMessage.model_validate_json(raw)
+
+
+def test_skill_check_spectate_shot_defaults_keep_the_v3_shape_parsing():
+    msg = SkillCheckSpectateShotMessage.model_validate(
+        {"type": "skill_check_spectate_shot", "elapsed_ms": 742.0,
+         "miss_count": 2, "won": False})
+    assert msg.progress == 0
+    assert msg.direction is None
+    assert msg.target_row is None and msg.target_col is None
+
+
+def test_skill_check_spectate_shot_carries_progress_direction_and_target():
+    msg = SkillCheckSpectateShotMessage(
+        elapsed_ms=900.0, miss_count=1, won=False, progress=2,
+        direction="up", target_row=2.5, target_col=4.5)
+    dumped = msg.model_dump()
+    assert dumped["progress"] == 2
+    assert dumped["direction"] == "up"
+    assert (dumped["target_row"], dumped["target_col"]) == (2.5, 4.5)
+
+
+def test_pending_skillcheck_wire_carries_progress_and_captured_value():
+    wire = PendingSkillCheckWire(
+        kind="whack", seed="s", value_diff=8, deadline_ms=5000.0, captured_value=1,
+        elapsed_ms=1800.0, miss_count=1, progress=2, from_sq="e4", to_sq="d5",
+        color="white")
+    dumped = wire.model_dump()
+    assert (dumped["progress"], dumped["captured_value"]) == (2, 1)
+    assert PendingSkillCheckWire(
+        kind="whack", seed="s", value_diff=8, deadline_ms=5000.0,
+        elapsed_ms=0.0, from_sq="e4", to_sq="d5", color="white").progress == 0
+
+
+@pytest.mark.parametrize(
+    "model",
+    [
+        pytest.param(PendingSkillCheckWire(
+            kind="whack", seed="s", value_diff=8, deadline_ms=5000.0, captured_value=1,
+            elapsed_ms=100.0, progress=1, from_sq="e4", to_sq="d5", color="white"),
+            id="pending_wire"),
+        pytest.param(SkillCheckRequiredMessage(
+            kind="whack", seed="s", value_diff=8, deadline_ms=5000.0, captured_value=1,
+            from_sq="e4", to_sq="d5"), id="required"),
+        pytest.param(SkillCheckSpectateMessage(
+            kind="whack", seed="s", value_diff=8, deadline_ms=5000.0, captured_value=1,
+            from_sq="e4", to_sq="d5"), id="spectate"),
+        pytest.param(SkillCheckSpectateShotMessage(
+            elapsed_ms=900.0, miss_count=1, won=False, progress=1,
+            target_row=2.5, target_col=4.5), id="spectate_shot"),
+        pytest.param(SkillCheckShotMessage(client_elapsed_ms=100.0), id="shot"),
+        pytest.param(SkillCheckResultMessage(won=False, from_sq="e4", to_sq="d5"),
+                     id="result"),
+    ],
+)
+def test_server_only_pending_fields_never_appear_on_any_skillcheck_wire_model(model):
+    """last_hit_pop and last_input_ms are server-side adjudication state on
+    PendingSkillCheck — no wire model may ever dump them."""
+    for dumped in (model.model_dump(), model.model_dump(by_alias=True)):
+        assert "last_hit_pop" not in dumped
+        assert "last_input_ms" not in dumped
 
 
 ALL_SQUARES = [f"{file}{rank}" for file in "abcdefgh" for rank in "12345678"]

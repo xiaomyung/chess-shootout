@@ -24,7 +24,8 @@ from chessshootout.server.handlers import (
     handle_takeback_response,
 )
 from chessshootout.server.protocol import PROTOCOL_VERSION, Reason
-from chessshootout.skillcheck import online
+from chessshootout.skillcheck import mole, online
+from chessshootout.skillcheck.combo import COMBO_DIRECTIONS, COMBO_MAX_WRONGS
 from chessshootout.skillcheck.triggers import compute_facts
 from chessshootout.skillcheck.types import SkillCheckKind, SkillCheckOutcome
 from tests.helpers import fake_uuid4, make_backend, piece, sq
@@ -32,6 +33,9 @@ from tests.server.conftest import ALICE, BOB
 
 WHEEL = SkillCheckKind.WHEEL
 AIM = SkillCheckKind.AIM
+WHACK = SkillCheckKind.WHACK
+COMBO = SkillCheckKind.COMBO
+ALL_KINDS = (WHEEL, AIM, WHACK, COMBO)
 
 
 class RecordingWS:
@@ -190,17 +194,23 @@ async def test_capturing_underpromotion_values_the_promoted_piece(app, clock):
 
 
 @pytest.mark.asyncio
-async def test_placement_and_square_keys_never_leak_into_skillcheck_payloads(app, clock):
+@pytest.mark.parametrize("kind", [WHEEL, WHACK])
+async def test_placement_and_square_keys_never_leak_into_skillcheck_payloads(app, clock, kind):
     # board placement is render-only and server-authoritative geometry; no
-    # 'placement'/'square' key may appear in the required or spectate payloads,
-    # so it can never feed adjudication or leak the relocated dial position.
-    room, ws_w, ws_b, frm, to = await _capture_room(app, clock, WHEEL)
+    # 'placement'/'square' key may appear in the required, spectate, or resume
+    # payloads, so it can never feed adjudication or leak the relocated dial
+    # position. For whack the hole layout is derived server-side per shot and
+    # must never ride any wire either, nor may the server-only adjudication
+    # fields (last_hit_pop/last_input_ms) on the stored pending.
+    room, ws_w, ws_b, frm, to = await _capture_room(app, clock, kind)
     await handle_move(app, ws_w, room, "white", _move_raw(frm, to))
     payloads = ws_w.of_type("skill_check_required") + ws_b.of_type("skill_check_spectate")
     assert payloads, "the check fired and emitted payloads"
+    payloads = payloads + [_resume_payload(app, room, "white").model_dump(by_alias=True)]
     for p in payloads:
-        assert "placement" not in p, "no render-placement leaks into the wire"
-        assert "square" not in p, "geometry is keyed by from/to only, never a placement square"
+        for key in ("placement", "square", "hole", "holes", "hole_squares",
+                    "last_hit_pop", "last_input_ms"):
+            assert key not in p, f"'{key}' must never appear on a skillcheck wire payload"
 
 
 @pytest.mark.asyncio
@@ -922,3 +932,415 @@ async def test_a_shot_past_the_capped_deadline_fails_even_under_the_base(app, cl
     assert room.pending_skillcheck is None
     assert len(room.backend.move_history) == 0, "the move never lands past the capped deadline"
     assert room.skillcheck_log == [SkillCheckOutcome(1, "wheel", False, "Qxd5")]
+
+
+def _full_challenge(pending):
+    """The exact challenge the server adjudicates against: full params, incl. the
+    deadline and captured_value the two new kinds scale by."""
+    return online.challenge_from(pending.kind, pending.seed, pending.value_diff,
+                                 pending.deadline_ms, pending.captured_value)
+
+
+def _holes_for(room):
+    """Rebuild the whack hole layout exactly as the server derives it per shot:
+    seeded off the stored pending, anchored at the capture square, avoiding every
+    occupied square of the room's authoritative backend."""
+    pending = room.pending_skillcheck
+    backend = room.backend
+    occupied = [(row, col)
+                for row in range(backend.SIZE) for col in range(backend.SIZE)
+                if backend.state[row][col] is not None]
+    return mole.hole_squares(pending.seed, pending.captured_value,
+                             (pending.to_sq.row, pending.to_sq.col),
+                             occupied, backend.SIZE)
+
+
+def _pop_mid(ch, index):
+    pop = ch.pops[index]
+    return int((pop.t_up_ms + pop.t_down_ms) / 2)
+
+
+def _hole_center(holes, hole):
+    row, col = holes[hole]
+    return (row + 0.5, col + 0.5)
+
+
+def _shot_raw(elapsed, direction=None, target=None):
+    payload = {"type": "skill_check_shot", "client_elapsed_ms": elapsed}
+    if direction is not None:
+        payload["direction"] = direction
+    if target is not None:
+        payload["target_row"], payload["target_col"] = target
+    return json.dumps(payload)
+
+
+async def _fire(app, clock, room, color, elapsed, direction=None, target=None):
+    clock.set((room.pending_skillcheck.start_ms + elapsed) / 1000.0)
+    ws = app.state.connections.get_for_color(room, color)
+    return await handle_skill_check_shot(app, ws, room, color,
+                                         _shot_raw(elapsed, direction, target))
+
+
+async def _whack_room(app, clock):
+    room, ws_w, ws_b, frm, to = await _capture_room(app, clock, WHACK)
+    await handle_move(app, ws_w, room, "white", _move_raw(frm, to))
+    pending = room.pending_skillcheck
+    return room, ws_w, ws_b, frm, to, pending, _full_challenge(pending), _holes_for(room)
+
+
+async def _combo_room(app, clock):
+    room, ws_w, ws_b, frm, to = await _capture_room(app, clock, COMBO)
+    await handle_move(app, ws_w, room, "white", _move_raw(frm, to))
+    pending = room.pending_skillcheck
+    return room, ws_w, ws_b, frm, to, pending, _full_challenge(pending)
+
+
+@pytest.mark.asyncio
+async def test_gated_capture_mints_the_captured_value_into_pending_and_both_wires(app, clock):
+    room, ws_w, ws_b, frm, to, pending, ch, holes = await _whack_room(app, clock)
+    assert pending.captured_value == 1, "queen takes pawn: the captured piece's value"
+    req = ws_w.of_type("skill_check_required")[-1]
+    spec = ws_b.of_type("skill_check_spectate")[-1]
+    assert req["captured_value"] == 1 == spec["captured_value"]
+    assert req["kind"] == "whack" == spec["kind"]
+
+
+@pytest.mark.asyncio
+async def test_whack_true_position_hits_up_to_quota_apply_the_move(app, clock):
+    room, ws_w, ws_b, frm, to, pending, ch, holes = await _whack_room(app, clock)
+    required = ch.hits_required
+    assert required >= 2, "a 5+0 whack demands multiple hits"
+    outs = []
+    for i in range(required):
+        outs.append(await _fire(app, clock, room, "white", _pop_mid(ch, i),
+                                target=_hole_center(holes, ch.pops[i].hole)))
+    assert outs[:-1] == ["skillcheck_hit"] * (required - 1), \
+        "pre-quota hits keep the check pending without a resolution"
+    assert outs[-1] == "applied"
+    assert room.pending_skillcheck is None
+    assert len(room.backend.move_history) == 1
+    applied = ws_b.of_type("move_applied")[-1]
+    assert applied["skill_check_kind"] == "whack" and applied["skill_check_won"] is True
+    assert room.skillcheck_log == [SkillCheckOutcome(1, "whack", True, "Qxd5")]
+
+
+@pytest.mark.asyncio
+async def test_whack_hit_at_a_wrong_hole_increments_miss_only(app, clock):
+    room, ws_w, ws_b, frm, to, pending, ch, holes = await _whack_room(app, clock)
+    wrong_hole = next(h for h in range(ch.hole_count) if h != ch.pops[0].hole)
+    out = await _fire(app, clock, room, "white", _pop_mid(ch, 0),
+                      target=_hole_center(holes, wrong_hole))
+    assert out == "skillcheck_miss", "an empty hole while another pop is up is a plain miss"
+    assert pending.miss_count == 1 and pending.progress == 0
+    assert room.pending_skillcheck is pending
+    assert not ws_b.of_type("skill_check_result")
+
+
+@pytest.mark.asyncio
+async def test_whack_second_shot_in_the_same_up_window_credits_once(app, clock):
+    room, ws_w, ws_b, frm, to, pending, ch, holes = await _whack_room(app, clock)
+    center = _hole_center(holes, ch.pops[0].hole)
+    first = await _fire(app, clock, room, "white", _pop_mid(ch, 0), target=center)
+    second = await _fire(app, clock, room, "white", _pop_mid(ch, 0) + 200, target=center)
+    assert first == "skillcheck_hit" and pending.progress == 1
+    assert second == "skillcheck_miss", "the same pop can never be credited twice"
+    assert pending.progress == 1 and pending.miss_count == 1
+
+
+@pytest.mark.asyncio
+async def test_whack_shots_inside_the_min_input_gap_are_silent_noops(app, clock):
+    room, ws_w, ws_b, frm, to, pending, ch, holes = await _whack_room(app, clock)
+    ws_b.sent.clear()
+    wrong_hole = next(h for h in range(ch.hole_count) if h != ch.pops[0].hole)
+    mid = _pop_mid(ch, 0)
+    center = _hole_center(holes, ch.pops[0].hole)
+    first = await _fire(app, clock, room, "white", mid,
+                        target=_hole_center(holes, wrong_hole))
+    assert first == "skillcheck_miss" and pending.miss_count == 1
+    throttled = await _fire(app, clock, room, "white", mid + 40, target=center)
+    assert throttled == "noop", "a shot 40ms after the last input is autofire, dropped whole"
+    assert pending.miss_count == 1 and pending.progress == 0, "no state change at all"
+    assert len(ws_b.of_type("skill_check_spectate_shot")) == 1, "no relay for the dropped shot"
+    third = await _fire(app, clock, room, "white", mid + 200, target=center)
+    assert third == "skillcheck_hit", "a legitimately spaced follow-up still lands"
+    assert pending.progress == 1
+
+
+@pytest.mark.asyncio
+async def test_whack_shot_without_target_fields_is_a_noop(app, clock):
+    room, ws_w, ws_b, frm, to, pending, ch, holes = await _whack_room(app, clock)
+    ws_b.sent.clear()
+    out = await _fire(app, clock, room, "white", _pop_mid(ch, 0))
+    assert out == "noop"
+    assert pending.miss_count == 0 and pending.progress == 0
+    assert not ws_b.of_type("skill_check_spectate_shot")
+
+
+@pytest.mark.asyncio
+async def test_whack_out_of_range_target_is_rejected_at_validation(app, clock):
+    room, ws_w, ws_b, frm, to, pending, ch, holes = await _whack_room(app, clock)
+    ws_b.sent.clear()
+    out = await _fire(app, clock, room, "white", _pop_mid(ch, 0), target=(8.5, 0.5))
+    assert out == "noop", "an off-board target fails Pydantic validation before any logic"
+    assert pending.miss_count == 0 and pending.progress == 0
+    assert not ws_b.of_type("skill_check_spectate_shot")
+
+
+def _whack_quota_dead_elapsed(pending, ch):
+    dead_at = next(e for e in range(0, int(pending.deadline_ms))
+                   if ch.quota_unreachable(e, 0, -1))
+    assert dead_at < pending.deadline_ms, "quota death precedes the absolute deadline"
+    return dead_at
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("surface", ["move_gate", "resume", "sweep"])
+async def test_whack_quota_dead_pending_is_dead_at_every_surface(app, clock, surface):
+    """Once too few pops remain for the quota, the pending is dead everywhere at
+    the same instant — the move gate resolves it inline, /resume omits it, and
+    the sweep fails it — all through the one is_dead predicate."""
+    room, ws_w, ws_b, frm, to, pending, ch, holes = await _whack_room(app, clock)
+    dead_at = _whack_quota_dead_elapsed(pending, ch)
+    clock.set((pending.start_ms + dead_at + 1) / 1000.0)
+    if surface == "resume":
+        assert room.pending_skillcheck is pending, "nothing swept it yet"
+        assert _resume_payload(app, room, "white") is None, \
+            "a reconnect must not re-hand a quota-dead check"
+        return
+    if surface == "move_gate":
+        out = await handle_move(app, ws_w, room, "white", _move_raw(frm, to))
+        assert out == "locked", "the dead check resolves inline; the retry hits the fresh lock"
+    else:
+        await app.state.sweep.step_skillcheck_deadline()
+    assert room.pending_skillcheck is None
+    assert (frm, to) in room.skillcheck_locks
+    assert len(room.backend.move_history) == 0
+    assert room.skillcheck_log == [SkillCheckOutcome(1, "whack", False, "Qxd5")]
+    assert ws_b.of_type("skill_check_result"), "the opponent hears the fail"
+
+
+@pytest.mark.asyncio
+async def test_sweep_leaves_a_quota_reachable_whack_pending_alone(app, clock):
+    room, ws_w, ws_b, frm, to, pending, ch, holes = await _whack_room(app, clock)
+    clock.set((pending.start_ms + _pop_mid(ch, 0)) / 1000.0)
+    await app.state.sweep.step_skillcheck_deadline()
+    assert room.pending_skillcheck is pending, "quota still reachable mid-schedule"
+
+
+@pytest.mark.asyncio
+async def test_resume_wire_echoes_progress_and_captured_value_mid_whack(app, clock):
+    room, ws_w, ws_b, frm, to, pending, ch, holes = await _whack_room(app, clock)
+    await _fire(app, clock, room, "white", _pop_mid(ch, 0),
+                target=_hole_center(holes, ch.pops[0].hole))
+    wire = _resume_payload(app, room, "white")
+    assert wire.kind == "whack"
+    assert wire.progress == 1, "the earned hit survives a reconnect"
+    assert wire.captured_value == 1, "the client rebuilds the identical hole layout"
+    resp = TestClient(app).post("/resume", json={
+        "version": PROTOCOL_VERSION, "room_id": room.room_id, "session_token": "ta"})
+    assert resp.status_code == 200
+    served = resp.json()["pending_skillcheck"]
+    assert (served["progress"], served["captured_value"]) == (1, 1)
+
+
+@pytest.mark.asyncio
+async def test_whack_spectate_shots_carry_progress_coords_and_won(app, clock):
+    room, ws_w, ws_b, frm, to, pending, ch, holes = await _whack_room(app, clock)
+    required = ch.hits_required
+    for i in range(required):
+        await _fire(app, clock, room, "white", _pop_mid(ch, i),
+                    target=_hole_center(holes, ch.pops[i].hole))
+    relays = ws_b.of_type("skill_check_spectate_shot")
+    assert len(relays) == required
+    assert [r["progress"] for r in relays] == list(range(1, required + 1))
+    assert [r["won"] for r in relays] == [False] * (required - 1) + [True]
+    row, col = _hole_center(holes, ch.pops[0].hole)
+    assert (relays[0]["target_row"], relays[0]["target_col"]) == (row, col), \
+        "the opponent mirrors the mover's actual shot position"
+    assert relays[0]["direction"] is None
+
+
+@pytest.mark.asyncio
+async def test_combo_full_correct_run_applies_the_move(app, clock):
+    room, ws_w, ws_b, frm, to, pending, ch = await _combo_room(app, clock)
+    assert pending.captured_value == 1
+    outs = []
+    for i, direction in enumerate(ch.prompts):
+        outs.append(await _fire(app, clock, room, "white", 320 + 200 * i,
+                                direction=direction))
+    assert outs[:-1] == ["skillcheck_hit"] * (ch.prompt_count - 1)
+    assert outs[-1] == "applied"
+    assert room.pending_skillcheck is None
+    assert len(room.backend.move_history) == 1
+    applied = ws_b.of_type("move_applied")[-1]
+    assert applied["skill_check_kind"] == "combo" and applied["skill_check_won"] is True
+    assert room.skillcheck_log == [SkillCheckOutcome(1, "combo", True, "Qxd5")]
+
+
+@pytest.mark.asyncio
+async def test_combo_wrong_press_increments_miss_and_keeps_pending(app, clock):
+    room, ws_w, ws_b, frm, to, pending, ch = await _combo_room(app, clock)
+    wrong = next(d for d in COMBO_DIRECTIONS if d != ch.prompts[0])
+    out = await _fire(app, clock, room, "white", 320, direction=wrong)
+    assert out == "skillcheck_miss"
+    assert pending.miss_count == 1 and pending.progress == 0
+    assert room.pending_skillcheck is pending
+    assert not ws_b.of_type("skill_check_result")
+
+
+@pytest.mark.asyncio
+async def test_combo_third_wrong_terminates_immediately(app, clock):
+    room, ws_w, ws_b, frm, to, pending, ch = await _combo_room(app, clock)
+    wrong = next(d for d in COMBO_DIRECTIONS if d != ch.prompts[0])
+    outs = [await _fire(app, clock, room, "white", 320 + 200 * i, direction=wrong)
+            for i in range(COMBO_MAX_WRONGS)]
+    assert outs == ["skillcheck_miss"] * (COMBO_MAX_WRONGS - 1) + ["skillcheck_fail"], \
+        "the wrong being processed counts: the 3rd terminates NOW, not on a later probe"
+    assert room.pending_skillcheck is None
+    assert (frm, to) in room.skillcheck_locks
+    assert len(room.backend.move_history) == 0
+    assert room.skillcheck_log == [SkillCheckOutcome(1, "combo", False, "Qxd5")]
+
+
+@pytest.mark.asyncio
+async def test_combo_two_wrongs_then_a_correct_run_still_wins(app, clock):
+    room, ws_w, ws_b, frm, to, pending, ch = await _combo_room(app, clock)
+    wrong = next(d for d in COMBO_DIRECTIONS if d != ch.prompts[0])
+    for i in range(COMBO_MAX_WRONGS - 1):
+        assert await _fire(app, clock, room, "white", 320 + 200 * i,
+                           direction=wrong) == "skillcheck_miss"
+    assert pending.miss_count == COMBO_MAX_WRONGS - 1, "one wrong short of the cap"
+    out = None
+    for i, direction in enumerate(ch.prompts):
+        out = await _fire(app, clock, room, "white", 800 + 200 * i, direction=direction)
+    assert out == "applied", "two wrongs leave the run fully winnable"
+    assert len(room.backend.move_history) == 1
+
+
+@pytest.mark.asyncio
+async def test_combo_press_without_direction_is_a_noop(app, clock):
+    room, ws_w, ws_b, frm, to, pending, ch = await _combo_room(app, clock)
+    ws_b.sent.clear()
+    out = await _fire(app, clock, room, "white", 320)
+    assert out == "noop"
+    assert pending.miss_count == 0 and pending.progress == 0
+    assert not ws_b.of_type("skill_check_spectate_shot")
+
+
+@pytest.mark.asyncio
+async def test_combo_mash_burst_cannot_clear_the_run(app, clock):
+    """A scripted 10ms mash cycling all four directions: the 80ms input gate drops
+    seven of every eight presses and the wrongs cap kills the run long before the
+    deadline — mashing can never brute-force the prompt sequence."""
+    room, ws_w, ws_b, frm, to, pending, ch = await _combo_room(app, clock)
+    elapsed, out = 120, None
+    while room.pending_skillcheck is not None and elapsed < int(pending.deadline_ms):
+        out = await _fire(app, clock, room, "white", elapsed,
+                          direction=COMBO_DIRECTIONS[(elapsed // 10) % 4])
+        elapsed += 10
+    assert len(room.backend.move_history) == 0, "the mash never lands the capture"
+    assert room.pending_skillcheck is None and out == "skillcheck_fail"
+    assert (frm, to) in room.skillcheck_locks
+    assert room.skillcheck_log == [SkillCheckOutcome(1, "combo", False, "Qxd5")]
+
+
+@pytest.mark.asyncio
+async def test_combo_resume_mid_run_restores_progress(app, clock):
+    room, ws_w, ws_b, frm, to, pending, ch = await _combo_room(app, clock)
+    for i in range(2):
+        await _fire(app, clock, room, "white", 320 + 200 * i, direction=ch.prompts[i])
+    wire = _resume_payload(app, room, "white")
+    assert wire.kind == "combo" and wire.progress == 2
+    assert wire.miss_count == 0 and wire.captured_value == 1
+
+
+async def _terminal_win(app, clock, room):
+    """A guaranteed-winning input for the stored pending of ANY kind, derived
+    from the stored challenge; whack/combo are fast-forwarded to quota-1 first."""
+    pending = room.pending_skillcheck
+    ch = _full_challenge(pending)
+    if pending.kind in (WHEEL, AIM):
+        return await _shoot_at(app, clock, room, pending.color, _win_elapsed(pending))
+    if pending.kind == WHACK:
+        pending.progress = ch.hits_required - 1
+        return await _fire(app, clock, room, pending.color, _pop_mid(ch, 0),
+                           target=_hole_center(_holes_for(room), ch.pops[0].hole))
+    pending.progress = ch.prompt_count - 1
+    return await _fire(app, clock, room, pending.color, 400,
+                       direction=ch.prompts[ch.prompt_count - 1])
+
+
+def _deadline_shot_kwargs(kind):
+    if kind == WHACK:
+        return {"target": (0.5, 0.5)}
+    if kind == COMBO:
+        return {"direction": "up"}
+    return {}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ALL_KINDS)
+async def test_terminal_win_applies_and_latches_for_every_kind(app, clock, kind):
+    room, ws_w, ws_b, frm, to = await _capture_room(app, clock, kind)
+    await handle_move(app, ws_w, room, "white", _move_raw(frm, to))
+    out = await _terminal_win(app, clock, room)
+    assert out == "applied"
+    assert room.pending_skillcheck is None
+    assert len(room.backend.move_history) == 1
+    again = await handle_skill_check_shot(app, ws_w, room, "white",
+                                          '{"type":"skill_check_shot"}')
+    assert again == "noop", "the one-shot latch holds across all four kinds"
+    assert len(room.backend.move_history) == 1, "the move applied exactly once"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ALL_KINDS)
+async def test_sweep_auto_fails_past_the_absolute_deadline_for_every_kind(app, clock, kind):
+    room, ws_w, ws_b, frm, to = await _capture_room(app, clock, kind)
+    await handle_move(app, ws_w, room, "white", _move_raw(frm, to))
+    clock.advance((online.SKILLCHECK_DEADLINE_MS + 100) / 1000.0)
+    await app.state.sweep.step_skillcheck_deadline()
+    assert room.pending_skillcheck is None
+    assert (frm, to) in room.skillcheck_locks
+    assert room.result is None, "auto-fail locks the move; it does not end the game"
+    assert ws_b.of_type("skill_check_result")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ALL_KINDS)
+async def test_sweep_auto_fails_while_the_mover_is_disconnected_for_every_kind(app, clock, kind):
+    room, ws_w, ws_b, frm, to = await _capture_room(app, clock, kind)
+    await handle_move(app, ws_w, room, "white", _move_raw(frm, to))
+    app.state.rooms.mark_disconnected(room.room_id, "white")
+    clock.advance((online.SKILLCHECK_DEADLINE_MS + 100) / 1000.0)
+    await app.state.sweep.step_skillcheck_deadline()
+    assert room.pending_skillcheck is None, "a disconnect can never dodge a pending check"
+    assert (frm, to) in room.skillcheck_locks
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ALL_KINDS)
+async def test_shot_and_sweep_same_tick_resolve_once_for_every_kind(app, clock, kind):
+    room, ws_w, ws_b, frm, to = await _capture_room(app, clock, kind)
+    await handle_move(app, ws_w, room, "white", _move_raw(frm, to))
+    ws_b.sent.clear()
+    out = await _fire(app, clock, room, "white", int(online.SKILLCHECK_DEADLINE_MS) + 10,
+                      **_deadline_shot_kwargs(kind))
+    await app.state.sweep.step_skillcheck_deadline()
+    assert out == "skillcheck_fail"
+    assert len(ws_b.of_type("skill_check_result")) == 1, "exactly one fail broadcast"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ALL_KINDS)
+async def test_winning_shot_nulled_during_the_spectate_await_is_a_noop_for_every_kind(
+        app, clock, kind):
+    room, ws_w, ws_b, frm, to = await _capture_room(app, clock, kind)
+    nulling = _NullingPendingWS(room)
+    app.state.connections.add(room.room_id, room.black.client_uuid, nulling)
+    await handle_move(app, ws_w, room, "white", _move_raw(frm, to))
+    out = await _terminal_win(app, clock, room)
+    assert nulling.of_type("skill_check_spectate_shot"), "the spectate-shot was relayed first"
+    assert out == "noop", "the post-await guard bails for every kind"
+    assert len(room.backend.move_history) == 0
+    assert room.skillcheck_log == []

@@ -196,8 +196,10 @@ class OnlineClient:
         self._last_ping_sent_at = time.monotonic()
         self._enqueue("send_ping", ply)
 
-    def send_skill_check_shot(self, client_elapsed_ms):
-        self._enqueue("send_skill_check_shot", client_elapsed_ms)
+    def send_skill_check_shot(self, client_elapsed_ms, direction=None,
+                              target_row=None, target_col=None):
+        self._enqueue("send_skill_check_shot", client_elapsed_ms, direction,
+                      target_row, target_col)
 
     def send_annotations_state(self, sharing, highlights, arrows):
         self._enqueue("send_annotations_state", sharing, highlights, arrows)

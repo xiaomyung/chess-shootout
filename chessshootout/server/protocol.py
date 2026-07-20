@@ -19,7 +19,7 @@ def _env_int(name, default):
         return default
 
 
-PROTOCOL_VERSION = 3
+PROTOCOL_VERSION = 4
 MAX_NICKNAME_LEN = 20
 GIVE_TIME_SECONDS = 15
 GIVE_TIME_TICK_MS = 100
@@ -162,11 +162,16 @@ class AnnotationSetWire(BaseModel):
         return v
 
 
+SkillCheckKindLiteral = Literal["wheel", "aim", "whack", "combo"]
+SkillCheckDirectionLiteral = Literal["up", "down", "left", "right"]
+
+
 class _SkillCheckGeometryBase(BaseModel):
-    kind: Literal["wheel", "aim"]
+    kind: SkillCheckKindLiteral
     seed: str
     value_diff: int
     deadline_ms: float
+    captured_value: int = Field(default=0, ge=0, le=9)
     from_sq: str = Field(alias="from")
     to_sq: str = Field(alias="to")
     promotion: Optional[Literal["q", "r", "b", "n"]] = None
@@ -177,12 +182,13 @@ class _SkillCheckGeometryBase(BaseModel):
 class PendingSkillCheckWire(_SkillCheckGeometryBase):
     elapsed_ms: float
     miss_count: int = 0
+    progress: int = 0
     color: Literal["white", "black"]
 
 
 class SkillCheckOutcomeWire(BaseModel):
     ply: int
-    kind: Literal["wheel", "aim"]
+    kind: SkillCheckKindLiteral
     won: bool
     san: str = ""
 
@@ -363,7 +369,7 @@ class MoveAppliedMessage(_Base):
     san: str
     clock: ClockSnapshot
     ply: int
-    skill_check_kind: Optional[Literal["wheel", "aim"]] = None
+    skill_check_kind: Optional[SkillCheckKindLiteral] = None
     skill_check_won: Optional[bool] = None
 
     model_config = {"populate_by_name": True}
@@ -484,6 +490,9 @@ class SkillCheckRequiredMessage(_SkillCheckGeometryBase, _Base):
 class SkillCheckShotMessage(_Base):
     type: Literal["skill_check_shot"] = "skill_check_shot"
     client_elapsed_ms: float = 0.0
+    direction: Optional[SkillCheckDirectionLiteral] = None
+    target_row: Optional[float] = Field(default=None, ge=0.0, lt=8.0)
+    target_col: Optional[float] = Field(default=None, ge=0.0, lt=8.0)
 
     model_config = {"extra": "ignore"}
 
@@ -506,6 +515,10 @@ class SkillCheckSpectateShotMessage(_Base):
     elapsed_ms: float
     miss_count: int
     won: bool
+    progress: int = 0
+    direction: Optional[SkillCheckDirectionLiteral] = None
+    target_row: Optional[float] = None
+    target_col: Optional[float] = None
 
 
 class ErrorMessage(_Base):
