@@ -43,22 +43,24 @@ def test_local_roll_agrees_with_the_servers_select_kind():
     local = coord.select(backend, frm, to)
     server = online.select_kind(secret, len(backend.move_history), backend, frm, to, set())
     assert local == server
-    assert local in (SkillCheckKind.WHEEL, SkillCheckKind.AIM), "a capture always rolls a kind"
+    assert local in (SkillCheckKind.WHEEL, SkillCheckKind.AIM, SkillCheckKind.WHACK,
+                     SkillCheckKind.COMBO), "a capture always rolls a kind"
 
 
 def test_local_roll_tracks_the_server_across_many_secrets():
     # not a single happy-path coincidence: they agree for every secret, including
-    # the secrets that flip the kind from wheel to aim.
+    # the secrets that flip the kind across all four capture outcomes.
     backend = _queen_takes_pawn()
     frm, to = sq(4, 3), sq(3, 3)
     seen = set()
-    for i in range(60):
+    for i in range(120):
         secret = "s-{}".format(i)
         local = SkillCheckCoordinator(enabled=True, seed=secret).select(backend, frm, to)
         server = online.select_kind(secret, len(backend.move_history), backend, frm, to, set())
         assert local == server, "client and server must roll the same kind for secret {}".format(i)
         seen.add(local)
-    assert seen == {SkillCheckKind.WHEEL, SkillCheckKind.AIM}, "both kinds were exercised"
+    assert seen == {SkillCheckKind.WHEEL, SkillCheckKind.AIM, SkillCheckKind.WHACK,
+                    SkillCheckKind.COMBO}, "all four kinds were exercised"
 
 
 def test_locked_move_does_not_fire():

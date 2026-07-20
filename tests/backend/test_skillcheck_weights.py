@@ -1,8 +1,9 @@
-"""Weighted skill-check selection. A capture rolls a seeded 50/50 wheel vs
-steady-aim; a non-capturing promotion is wheel-only. Checks/checkmates never
-fire. A forced move never fires, capture takes precedence over promotion, and
-the per-ply RNG is deterministic + uniform. Check DIFFICULTY (needle/sway speed)
-scales with capturer-vs-victim material in the engine, NOT the selection odds.
+"""Weighted skill-check selection. A capture rolls a seeded even 4-way split
+across wheel / steady-aim / whack-a-mole / combo; a non-capturing promotion is
+wheel-only. Checks/checkmates never fire. A forced move never fires, capture
+takes precedence over promotion, and the per-ply RNG is deterministic + uniform.
+Check DIFFICULTY (needle/sway speed) scales with capturer-vs-victim material in
+the engine, NOT the selection odds.
 
 Distribution tests sweep evenly-spaced rolls (i+0.5)/n through the deterministic
 selector, so observed proportions equal the cumulative distribution exactly to
@@ -21,6 +22,10 @@ from chessshootout.skillcheck.types import SkillCheckKind, TriggerFacts
 NONE = SkillCheckKind.NONE
 WHEEL = SkillCheckKind.WHEEL
 AIM = SkillCheckKind.AIM
+WHACK = SkillCheckKind.WHACK
+COMBO = SkillCheckKind.COMBO
+
+KINDS = (NONE, WHEEL, AIM, WHACK, COMBO)
 
 N = 20000
 
@@ -29,11 +34,11 @@ def sweep(facts):
     counts = Counter()
     for i in range(N):
         counts[weights.roll_skillcheck(facts, (i + 0.5) / N)] += 1
-    return {k: counts[k] / N for k in (NONE, WHEEL, AIM)}
+    return {k: counts[k] / N for k in KINDS}
 
 
 def assert_dist(observed, expected, tol=0.001):
-    for k in (NONE, WHEEL, AIM):
+    for k in KINDS:
         assert observed[k] == pytest.approx(expected.get(k, 0.0), abs=tol)
 
 
@@ -50,15 +55,18 @@ def test_capture_summary_reexports_shared_values():
     assert reexport is PIECE_VALUES
 
 
-def test_capture_shares_are_fifty_fifty():
-    assert weights.CAPTURE_WHEEL_SHARE == 0.5
-    assert weights.CAPTURE_AIM_SHARE == 0.5
+def test_capture_shares_are_an_even_four_way_split():
+    assert weights.CAPTURE_WHEEL_SHARE == 0.25
+    assert weights.CAPTURE_AIM_SHARE == 0.25
+    assert weights.CAPTURE_WHACK_SHARE == 0.25
+    assert weights.CAPTURE_COMBO_SHARE == 0.25
 
 
 @pytest.mark.parametrize("cap, vic", [(9, 1), (3, 3), (1, 9)])
-def test_capture_splits_fifty_fifty_wheel_and_aim(cap, vic):
+def test_capture_splits_evenly_across_the_four_kinds(cap, vic):
     facts = TriggerFacts(is_capture=True, capturer_value=cap, captured_value=vic)
-    assert_dist(sweep(facts), {NONE: 0.0, WHEEL: 0.5, AIM: 0.5})
+    assert_dist(sweep(facts),
+                {NONE: 0.0, WHEEL: 0.25, AIM: 0.25, WHACK: 0.25, COMBO: 0.25})
 
 
 def test_material_does_not_change_the_selection_odds():
@@ -70,7 +78,8 @@ def test_material_does_not_change_the_selection_odds():
 def test_capture_takes_precedence_over_promotion():
     facts = TriggerFacts(
         is_capture=True, capturer_value=1, captured_value=5, is_promotion=True)
-    assert_dist(sweep(facts), {NONE: 0.0, WHEEL: 0.5, AIM: 0.5})
+    assert_dist(sweep(facts),
+                {NONE: 0.0, WHEEL: 0.25, AIM: 0.25, WHACK: 0.25, COMBO: 0.25})
 
 
 @pytest.mark.parametrize(
@@ -103,11 +112,12 @@ def test_roll_zero_picks_the_wheel_for_a_capture():
     assert weights.roll_skillcheck(facts, 0.0) == WHEEL
 
 
-def test_roll_near_one_picks_aim_for_a_capture():
+def test_roll_sweeps_the_four_capture_kinds_in_cumulative_order():
     facts = TriggerFacts(is_capture=True, capturer_value=9, captured_value=1)
-    assert weights.roll_skillcheck(facts, 0.999999) == AIM
-    assert weights.roll_skillcheck(facts, 0.25) == WHEEL
-    assert weights.roll_skillcheck(facts, 0.75) == AIM
+    assert weights.roll_skillcheck(facts, 0.1) == WHEEL
+    assert weights.roll_skillcheck(facts, 0.3) == AIM
+    assert weights.roll_skillcheck(facts, 0.6) == WHACK
+    assert weights.roll_skillcheck(facts, 0.999999) == COMBO
 
 
 def test_ply_roll_is_deterministic():

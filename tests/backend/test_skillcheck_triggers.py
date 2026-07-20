@@ -17,6 +17,8 @@ from tests.helpers import BLACK, K, P, Q, R, WHITE, make_backend, piece, sq
 
 WHEEL = SkillCheckKind.WHEEL
 AIM = SkillCheckKind.AIM
+WHACK = SkillCheckKind.WHACK
+COMBO = SkillCheckKind.COMBO
 NONE = SkillCheckKind.NONE
 
 
@@ -139,8 +141,10 @@ def test_select_uses_capture_bracket():
         sq(4, 3): piece(Q, WHITE), sq(3, 3): piece(P, BLACK),
     })
     assert triggers.select_skillcheck(backend, sq(4, 3), sq(3, 3), 0.0) == WHEEL
-    assert triggers.select_skillcheck(backend, sq(4, 3), sq(3, 3), 0.99) == AIM
-    assert CAPTURE_WHEEL_SHARE == 0.5
+    assert triggers.select_skillcheck(backend, sq(4, 3), sq(3, 3), 0.3) == AIM
+    assert triggers.select_skillcheck(backend, sq(4, 3), sq(3, 3), 0.6) == WHACK
+    assert triggers.select_skillcheck(backend, sq(4, 3), sq(3, 3), 0.99) == COMBO
+    assert CAPTURE_WHEEL_SHARE == 0.25
 
 
 def test_select_illegal_move_is_none():

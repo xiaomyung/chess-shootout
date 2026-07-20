@@ -127,7 +127,7 @@ def test_wrongs_exhausted_boundaries():
 
 def test_deadline_ms_is_single_sourced_from_wheel():
     # No 5000 literal may live in combo.py; the deadline is imported, not restated.
-    assert "5000" not in Path(combo.__file__).read_text()
+    assert "5000" not in Path(combo.__file__).read_text(encoding="utf-8")
     assert combo.SKILLCHECK_DEADLINE_MS is wheel.SKILLCHECK_DEADLINE_MS
 
 
