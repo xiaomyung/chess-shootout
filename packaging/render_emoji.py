@@ -51,6 +51,9 @@ UI_EMOJI = (
     "🏳️",   # white flag
     "🤝",   # handshake
     "↩️",   # left-hook arrow
+    "🎉",   # party popper (combo confetti)
+    "✨",   # sparkles (combo confetti)
+    "🔥",   # fire (combo confetti)
 )
 
 

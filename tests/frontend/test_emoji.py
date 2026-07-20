@@ -16,7 +16,7 @@ from tests.conftest import pygame_display
 from chessshootout.frontend.visual.emoji import blit_emoji, emoji_png_path, emoji_surface
 from chessshootout.infra.countries import CODES, flag_emoji
 
-UI_EMOJI = ["⚔️", "🎲", "📁", "📄", "🏳️", "🤝", "↩️"]
+UI_EMOJI = ["⚔️", "🎲", "📁", "📄", "🏳️", "🤝", "↩️", "🎉", "✨", "🔥"]
 
 # Arrows rendered as plain text via get_font, never through the emoji helper -- they
 # are not color emoji and intentionally have no sprite. The check/cross marks are
