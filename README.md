@@ -12,12 +12,16 @@ server for online two-player matches.
 **Skill-checks — the *Shootout***
 - Every capture and promotion triggers a fast skill-check: win it and the move
   lands; miss it and that move is locked for the turn, so you play something
-  else — no turn is forfeited. Two checks roll 50/50 per capture; promotions are
-  wheel-only.
+  else — no turn is forfeited. Four checks roll an even split per capture;
+  promotions are wheel-only.
 - **Timing wheel** — tap when the needle is inside the shrinking sweet-spot; it
   spins faster the more material is at stake.
 - **Steady-Aim** — a crosshair auto-traces a figure-8 over the shrinking victim;
   it is multi-shot, and every miss escalates the sway and shrink.
+- **Whack-a-Mole** — the captured piece dives into a pit and pops back from a
+  ring of glowing holes; land three shots on it before it ducks away for good.
+- **Combo** — a strip of arrow prompts scrolls in; punch each direction in order
+  with the Arrows/WASD keys or the on-screen pad, and three wrong inputs miss it.
 - Online, the server adjudicates every shot and your opponent watches a live,
   read-only mirror of the same minigame while their own board stays interactive.
 
@@ -56,10 +60,10 @@ server for online two-player matches.
 - A distinct move sound per piece, and a distinct gun on a won capture check —
   pawn revolver, knight hand-cannon, bishop lever-action, rook shotgun, queen
   blunderbuss, king ray-gun — over a victim "oof" (the queen has her own).
-- Skill-check cues: a ding as the wheel or aim opens, a tick each time the
-  needle enters the sweet-spot or the crosshair crosses the target, and a
-  win/miss sting on resolve. Online, only your own check is audible — a
-  spectated opponent's is silent.
+- Skill-check cues: a ding as a check opens, a tick on every good beat — the
+  needle in the sweet-spot, the crosshair on target, a mole tagged, a combo
+  arrow nailed — and a win/miss sting on resolve. Online, only your own check is
+  audible — a spectated opponent's is silent.
 - A universal typewriter click on every button, key, and empty-square press;
   moves, pickups, and drops have their own sounds instead.
 - A two-stage low-time heartbeat that starts slow near 10% on the clock and
@@ -184,7 +188,8 @@ pyenv shell 3.12                  # `python3.12` now resolves for the venv step 
 | `R` | Resign / promote to rook (when a promotion is pending) |
 | `D` | Offer draw |
 | `Q` / `B` / `N` | Promote (queen / bishop / knight) |
-| `Space` / Click | Fire the active skill-check (Shootout) |
+| `Space` / Click | Fire the active skill-check (wheel / aim / whack) |
+| Arrows / WASD | Combo check input (while a check is active) |
 | `Z` | Undo move (`Ctrl+Z` also works; online: takeback request) |
 | `G` | Give 15 seconds (hold the **+15** cap to ramp) |
 | `A` / `S` / `C` | Collapse or expand rail sections |

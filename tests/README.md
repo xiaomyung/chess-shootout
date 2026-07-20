@@ -24,14 +24,20 @@ strongest single regression for the move engine.
 Tests mirror the source layout, five dirs under `tests/`:
 
 - `tests/backend/` — the pure chess engine (`chessshootout/backend/`) and the
-  pygame-free `chessshootout/skillcheck/` package (wheel/aim geometry,
-  triggers, weights, coordinator, the cross-side `online` adjudication
-  surface — a peer of `backend/`, imported by both server and frontend, not
-  to be confused with the client-side `chessshootout/online` package below).
+  pygame-free `chessshootout/skillcheck/` package (the four capture-check
+  engines — wheel/aim geometry plus whack (`test_skillcheck_mole.py`) and combo
+  (`test_skillcheck_combo.py`) — triggers, weights, coordinator, the cross-side
+  `online` adjudication surface — a peer of `backend/`, imported by both server
+  and frontend, not to be confused with the client-side `chessshootout/online`
+  package below).
 - `tests/frontend/` — pygame UI: the `Frontend` shell and its four screens
   (`menu`/`game`/`history`/`review`, see "Screens" below), board, panels,
-  modals, visual/, the `frontend/skillcheck/` view layer, focus mode, audio
-  dispatch. Flat — no `tests/frontend/board/` subdirs.
+  modals, visual/, the `frontend/skillcheck/` view layer (wheel/aim plus the
+  whack (`test_skillcheck_mole_view.py`) and combo
+  (`test_skillcheck_combo_view.py`) views and shared juice
+  (`test_skillcheck_juice.py`), with `test_skillcheck_session_kinds.py` driving
+  all four kinds through a session), focus mode, audio dispatch. Flat — no
+  `tests/frontend/board/` subdirs.
 - `tests/server/` — the `chessshootout/server/` package (FastAPI app,
   handlers, rooms, sweep, protocol).
 - `tests/online/` — client-side online multiplayer: the top-level
