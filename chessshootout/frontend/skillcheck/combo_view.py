@@ -14,7 +14,9 @@ from chessshootout.frontend.visual.draw import (
     chevron_surface, cosine_pulse, cut_rect_surface, supersample)
 from chessshootout.frontend.visual.emoji import emoji_surface
 from chessshootout.frontend.visual.fonts import get_display_font
-from chessshootout.skillcheck.combo import COMBO_WRONG_LOCKOUT_MS, COMBO_MAX_WRONGS
+from chessshootout.skillcheck.combo import (
+    COMBO_WRONG_LOCKOUT_MS, COMBO_MAX_WRONGS, COMBO_MIN_INTER_PRESS_MS)
+from chessshootout.skillcheck.online import SKILLCHECK_HUMAN_FLOOR_MS
 from chessshootout.skillcheck.rng import seeded_floats
 from chessshootout.skillcheck.wheel import SKILLCHECK_DEADLINE_MS
 
@@ -237,6 +239,8 @@ class ComboController(SkillCheckController):
         self._resolved_at = None
         self._closed = False
         self._lockout_until = now_ms
+        self._last_accept_ms = None
+        self._torn_key = hash(challenge.prompts)
         self._prompt_started_ms = now_ms
         self._judgement = None
         self._judgement_at = now_ms
@@ -324,6 +328,12 @@ class ComboController(SkillCheckController):
 
     def _press(self, direction):
         elapsed = self._now - self.start_ms
+        if elapsed < SKILLCHECK_HUMAN_FLOOR_MS:
+            return
+        if (self._last_accept_ms is not None
+                and self._now - self._last_accept_ms < COMBO_MIN_INTER_PRESS_MS):
+            return
+        self._last_accept_ms = self._now
         if self.challenge.press_correct(self.progress, direction):
             self._register_correct(direction)
         else:
@@ -341,7 +351,8 @@ class ComboController(SkillCheckController):
         self._trauma.add(COMBO_TRAUMA_CORRECT)
         self.progress += 1
         self._prompt_started_ms = self._now
-        self._cue("play_combo_hit")
+        if self._audio is not None and not self._passive:
+            self._audio.play_combo_hit(self.progress - 1)
         if self.challenge.is_complete(self.progress):
             self._win()
 
@@ -404,7 +415,7 @@ class ComboController(SkillCheckController):
                     self.progress)
                 self._register_correct(step if step is not None else "up")
         else:
-            self.wrong_count = max(self.wrong_count, miss_count)
+            self.wrong_count = miss_count + 1
             step = direction if direction is not None else self.challenge.expected(self.progress)
             self._register_spectate_wrong(step if step is not None else "up")
 
@@ -680,13 +691,18 @@ class ComboController(SkillCheckController):
             surf.set_alpha(alpha)
             window.blit(surf, (x - surf.get_width() / 2.0, y - surf.get_height() / 2.0))
 
+    def _torn_victim(self):
+        victim = self._scaled_sprite(self._victim_src)
+        if victim is None:
+            return None
+        return torn_sprite(victim, (self._torn_key, self._cell), 3)
+
     def _draw_torn_victim(self, window):
         if self._torn_until is None or self._now >= self._torn_until:
             return
-        victim = self._scaled_sprite(self._victim_src)
-        if victim is None:
+        torn = self._torn_victim()
+        if torn is None:
             return
-        torn = torn_sprite(victim, ("combo-torn", self._cell), 3)
         window.blit(torn, torn.get_rect(center=self._actor_center(self._victim_sq)))
 
     def _draw_judgement(self, window):

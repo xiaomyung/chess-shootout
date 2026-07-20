@@ -75,6 +75,7 @@ MOLE_VIEW_IMPACT_MS = 260.0
 MOLE_VIEW_IMPACT_R_FRAC = 0.12
 MOLE_VIEW_TAUNT_ANCHOR_CELL = 99.0
 MOLE_VIEW_TAUNTS = ("missed me", "lol", "nice aim", "rip", "too slow")
+MOLE_VIEW_TARGET_MAX = 7.999
 
 _PIT_DARK = pg.Color(Colors.well_deep)
 _CROSS_COLOR = pg.Color(Colors.text)
@@ -187,7 +188,11 @@ class MoleController(SkillCheckController):
         self._owned = {}
         self._board_rect = None if board_rect is None else pg.Rect(board_rect)
         self._progress = progress
+        self._torn_key = hash(challenge.pops)
         self._last_hit_pop = -1
+        if progress > 0:
+            resumed = challenge.pop_up_at(pg.time.get_ticks() - now_ms)
+            self._last_hit_pop = resumed if resumed is not None else -1
         self._last_hit_anim_ms = None
         self._last_hit_px = None
         self._hit_flash_ms = None
@@ -297,6 +302,10 @@ class MoleController(SkillCheckController):
             return ((pos[1] - y0) / dy + 0.5, (pos[0] - x0) / dx + 0.5)
         return (-1.0, -1.0)
 
+    def _clamp_target(self, target):
+        return (min(max(target[0], 0.0), MOLE_VIEW_TARGET_MAX),
+                min(max(target[1], 0.0), MOLE_VIEW_TARGET_MAX))
+
     def set_board_rect(self, board_rect):
         self._board_rect = None if board_rect is None else pg.Rect(board_rect)
 
@@ -326,7 +335,7 @@ class MoleController(SkillCheckController):
         if self._shot_sound is not None:
             self._shot_sound()
         elapsed = self._now - self.start_ms
-        target = self._shot_target(pos)
+        target = self._clamp_target(self._shot_target(pos))
         if self._online:
             self._on_shot(elapsed, target=target)
         if self.challenge.hit_at(elapsed, target[0], target[1], self._hole_squares,
@@ -347,7 +356,8 @@ class MoleController(SkillCheckController):
         self._progress += 1
         kill = self._progress >= self.challenge.hits_required
         self._hit_juice(kill)
-        self._cue("play_whack_hit")
+        if self._audio is not None and not self._passive:
+            self._audio.play_whack_hit(self._progress - 1)
         if kill:
             self._cue("play_whack_kill")
             if not self._online:
@@ -544,10 +554,10 @@ class MoleController(SkillCheckController):
 
     def _victim_sprite(self):
         tier = min(self._progress, 3)
-        sprite = torn_sprite(self._victim, (id(self), self.cell_size), tier)
+        sprite = torn_sprite(self._victim, (self._torn_key, self.cell_size), tier)
         if (self._hit_flash_ms is not None
                 and self._now - self._hit_flash_ms < MOLE_VIEW_HIT_FLASH_MS):
-            sprite = flash_sprite(sprite, (id(self), self.cell_size, tier))
+            sprite = flash_sprite(sprite, (self._torn_key, self.cell_size, tier))
         return sprite
 
     def _squash_variant(self, sprite, bucket):

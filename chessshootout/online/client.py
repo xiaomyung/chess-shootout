@@ -491,6 +491,11 @@ class OnlineClient:
                 if send is None:
                     log.warning("unknown ws send method=%s", method)
                     continue
-                await send(*args)
+                try:
+                    await send(*args)
+                except (WsConnectionClosed, asyncio.CancelledError):
+                    raise
+                except Exception as exc:
+                    log.warning("ws send failed method=%s: %s", method, exc)
         except (WsConnectionClosed, asyncio.CancelledError):
             pass

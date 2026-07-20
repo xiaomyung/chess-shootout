@@ -233,6 +233,7 @@ def test_arrow_keys_reach_the_combo_pad_not_move_stepping():
     app = _local_app()
     _gate(app, SkillCheckKind.COMBO)
     ctrl = app.game.skillcheck_overlay._controller
+    ctrl.update(ctrl.start_ms + 200)
     assert app.game.swallows_input() is True
     app.game.board.step_review = MagicMock()
     pg.event.clear()

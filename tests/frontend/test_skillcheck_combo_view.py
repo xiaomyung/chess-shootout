@@ -1,6 +1,6 @@
 import importlib.util
 import logging
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, call
 
 import pygame as pg
 import pytest
@@ -55,7 +55,7 @@ def _combo_scene(prompts, cell):
         from_sq=Square(4, 4), victim_sq=Square(3, 3), audio=MagicMock())
 
 
-def _run_correct(ctrl, prompts=_PROMPTS, key=_key, step=100):
+def _run_correct(ctrl, prompts=_PROMPTS, key=_key, step=150):
     for i, direction in enumerate(prompts):
         ctrl.update(step * (i + 1))
         ctrl.handle_event(key(direction))
@@ -79,7 +79,7 @@ def test_local_correct_run_commits_win():
     assert ctrl.progress == 5
     assert ctrl.landed is True
     assert ctrl.done is False
-    ctrl.update(500 + COMBO_RESULT_HOLD_MS)
+    ctrl.update(750 + COMBO_RESULT_HOLD_MS)
     assert ctrl.done is True
     audio.play_combo_complete.assert_called_once()
     assert audio.play_combo_hit.call_count == 5
@@ -87,16 +87,16 @@ def test_local_correct_run_commits_win():
 
 def test_wrong_press_locks_and_lockout_press_is_ignored():
     ctrl = _combo()
-    ctrl.update(100)
+    ctrl.update(150)
     ctrl.handle_event(_key("down"))
     assert ctrl.progress == 0
     assert ctrl.wrong_count == 1
     assert ctrl._lockout_until > ctrl._now
-    ctrl.update(150)
+    ctrl.update(200)
     ctrl.handle_event(_key("up"))
     assert ctrl.progress == 0, "a press inside the lockout does not advance"
     assert ctrl.wrong_count == 1, "a lockout-swallowed press is not counted as a wrong"
-    ctrl.update(320)
+    ctrl.update(400)
     ctrl.handle_event(_key("up"))
     assert ctrl.progress == 1, "after the lockout the correct press lands"
 
@@ -133,7 +133,7 @@ def test_wasd_matches_arrows():
 
 def test_mouse_click_on_receptor_advances():
     ctrl = _combo(board_rect=pg.Rect(0, 0, 700, 700))
-    ctrl.update(100)
+    ctrl.update(150)
     ctrl.handle_event(_click(ctrl._receptors["up"].center))
     assert ctrl.progress == 1
     ctrl.handle_event(_click((5, 5)))
@@ -168,8 +168,8 @@ def test_online_relays_each_accepted_press_with_direction_keyword():
     ctrl = _combo(on_shot=on_shot)
     _run_correct(ctrl)
     assert on_shot.call_count == 5
-    for call, direction in zip(on_shot.call_args_list, _PROMPTS):
-        assert call.kwargs["direction"] == direction
+    for relayed, direction in zip(on_shot.call_args_list, _PROMPTS):
+        assert relayed.kwargs["direction"] == direction
     assert ctrl.landed is None, "the client never self-commits a terminal online"
     assert ctrl.progress == 5, "the displayed strip still advances optimistically"
 
@@ -177,10 +177,10 @@ def test_online_relays_each_accepted_press_with_direction_keyword():
 def test_online_does_not_relay_a_lockout_swallowed_press():
     on_shot = MagicMock()
     ctrl = _combo(on_shot=on_shot)
-    ctrl.update(100)
+    ctrl.update(150)
     ctrl.handle_event(_key("down"))
     assert on_shot.call_count == 1, "an accepted wrong press relays (server counts wrongs)"
-    ctrl.update(150)
+    ctrl.update(200)
     ctrl.handle_event(_key("up"))
     assert on_shot.call_count == 1, "a lockout-swallowed press is never relayed"
 
@@ -204,7 +204,7 @@ def test_passive_ignores_input_and_mirrors_progress():
     ctrl.update(100)
     ctrl.spectate_shot(90, 0, False, progress=1)
     assert ctrl.progress == 1, "progress adoption advances the mirrored strip"
-    ctrl.spectate_shot(150, 1, False, progress=1)
+    ctrl.spectate_shot(150, 0, False, progress=1)
     assert ctrl.wrong_count == 1, "a non-advancing spectate shot registers a wrong pip"
     audio.play_combo_hit.assert_not_called()
     audio.play_combo_wrong.assert_not_called()
@@ -244,7 +244,7 @@ def test_registry_builds_mole_when_mole_view_exists():
 
 
 def test_determinism_same_script_same_strip_and_pips():
-    script = [("up", 100), ("left", 400), ("down", 700)]
+    script = [("up", 150), ("left", 450), ("down", 750)]
 
     def run():
         ctrl = _combo()
@@ -266,12 +266,12 @@ def test_draw_smoke_across_states_and_sizes(cell):
     mount.draw(surf)
 
     correct = _combo_scene(_PROMPTS, cell)
-    correct.update(100)
+    correct.update(150)
     correct.handle_event(_key("up"))
     correct.draw(surf)
 
     wrong = _combo_scene(_PROMPTS, cell)
-    wrong.update(100)
+    wrong.update(150)
     wrong.handle_event(_key("down"))
     wrong.draw(surf)
 
@@ -300,12 +300,88 @@ def test_receptor_flash_brightens_the_receptor_region():
     flashed = _combo(board_rect=pg.Rect(0, 0, 700, 700))
     flashed_surf = pg.Surface((700, 700))
     flashed_surf.fill((0, 0, 0))
-    flashed.update(100)
+    flashed.update(150)
     flashed.handle_event(_key("up"))
     flashed.draw(flashed_surf)
     flash_bright = _region_brightness(flashed_surf, flashed._receptors["up"])
 
     assert flash_bright > base_bright, "a correct press flash-fills its receptor brighter"
+
+
+def test_two_same_frame_presses_advance_and_relay_once():
+    on_shot = MagicMock()
+    ctrl = _combo(on_shot=on_shot)
+    ctrl.update(150)
+    ctrl.handle_event(_key("up"))
+    ctrl.handle_event(_key("up"))
+    assert ctrl.progress == 1, "two KEYDOWNs in one frame advance the strip only once"
+    assert on_shot.call_count == 1, "the paced-out second press never reaches the wire"
+
+
+def test_press_below_human_floor_is_ignored_entirely():
+    on_shot = MagicMock()
+    ctrl = _combo(on_shot=on_shot)
+    ctrl.update(100)
+    ctrl.handle_event(_key("up"))
+    assert ctrl.progress == 0, "an elapsed below the human floor never advances"
+    assert ctrl.wrong_count == 0, "and never counts as a wrong"
+    assert on_shot.call_count == 0, "and never relays"
+    ctrl.update(130)
+    ctrl.handle_event(_key("up"))
+    assert ctrl.progress == 1, "a press at elapsed 130 is accepted"
+
+
+def test_inter_press_gate_paces_accepted_presses():
+    ctrl = _combo(("up", "down", "left", "right", "up"))
+    ctrl.update(150)
+    ctrl.handle_event(_key("up"))
+    assert ctrl.progress == 1
+    ctrl.update(150 + 79)
+    ctrl.handle_event(_key("down"))
+    assert ctrl.progress == 1, "a press 79 ms after an accepted press is paced out"
+    ctrl.update(150 + 81)
+    ctrl.handle_event(_key("down"))
+    assert ctrl.progress == 2, "a press 81 ms after an accepted press lands"
+
+
+def test_torn_victim_key_is_per_challenge():
+    v = pg.Surface((80, 80), pg.SRCALPHA)
+    pg.draw.circle(v, (210, 140, 60, 255), (40, 40), 26)
+    a = ComboController(ComboChallenge(("up", "down", "left", "right", "up"), 5000.0),
+                        pg.Rect(0, 0, 80, 80), now_ms=0, deadline_ms=5000, victim_surface=v)
+    b = ComboController(ComboChallenge(("down", "up", "right", "left", "down"), 5000.0),
+                        pg.Rect(0, 0, 80, 80), now_ms=0, deadline_ms=5000, victim_surface=v)
+    ta, tb = a._torn_victim(), b._torn_victim()
+    assert ta is not tb, "distinct challenges never share a cached torn victim"
+    assert pg.image.tostring(ta, "RGBA") != pg.image.tostring(tb, "RGBA"), \
+        "different seeds tear the victim in different places"
+    assert a._torn_victim() is ta, "the same check re-uses its cached torn victim"
+
+
+def test_spectate_wrong_shows_the_struck_pip_immediately():
+    ctrl = _combo(passive=True, audio=MagicMock())
+    ctrl.update(200)
+    ctrl.spectate_shot(150, 0, False, progress=0)
+    assert ctrl.wrong_count == 1, \
+        "the server relays the pre-increment miss_count; the mirror shows one struck pip"
+
+
+def test_combo_hit_plays_the_pitch_ladder_index():
+    audio = MagicMock()
+    ctrl = _combo(audio=audio)
+    ctrl.update(150)
+    ctrl.handle_event(_key("up"))
+    ctrl.update(350)
+    ctrl.handle_event(_key("down"))
+    assert audio.play_combo_hit.call_args_list == [call(0), call(1)]
+
+
+def test_combo_hit_pitch_ladder_muted_when_passive():
+    audio = MagicMock()
+    ctrl = _combo(passive=True, audio=audio)
+    ctrl.update(150)
+    ctrl.spectate_shot(140, 0, True, progress=1)
+    audio.play_combo_hit.assert_not_called()
 
 
 def test_no_logging_across_update_and_draw_frames(caplog):

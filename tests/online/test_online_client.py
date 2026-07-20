@@ -248,3 +248,27 @@ def test_resume_backoff_grows_and_is_bounded(monkeypatch):
     assert result == {"ok": True}
     assert sleeps == [2, 4, 8, 8], "exponential backoff, capped at the max"
     assert max(sleeps) <= RECONNECT_BACKOFF_MAX_SECONDS
+
+
+def test_send_loop_survives_a_send_error_and_keeps_going():
+    """A per-op send that raises (e.g. a wire ValidationError) is logged and skipped;
+    the send task must not die, so the following op still reaches the socket."""
+    client = OnlineClient()
+    calls = []
+
+    class _Ws:
+        async def raise_op(self, *args):
+            raise ValueError("bad payload")
+
+        async def good_op(self, *args):
+            calls.append(args)
+            client._stop.set()
+
+    async def drive():
+        client._outbound = asyncio.Queue()
+        client._outbound.put_nowait(("raise_op", ()))
+        client._outbound.put_nowait(("good_op", (1, 2)))
+        await client._send_loop(_Ws())
+
+    asyncio.run(drive())
+    assert calls == [(1, 2)], "the raising op is skipped and the next op still sends"

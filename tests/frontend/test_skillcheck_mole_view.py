@@ -376,6 +376,93 @@ def test_relayout_reanchors_geometry():
     assert ctrl._pit_rx > old_rx, "pit geometry rescales off the new cell"
 
 
+def test_out_of_board_shot_clamps_target_within_wire_bounds():
+    on_shot = MagicMock()
+    ctrl = _mole(on_shot=on_shot)
+    ctrl.update(800)
+    ctrl.handle_event(_click((752, 200)))
+    _, kwargs = on_shot.call_args
+    r, c = kwargs["target"]
+    assert 0.0 <= r < 8.0 and 0.0 <= c < 8.0, "an off-board shot never exceeds the wire bound"
+
+
+def test_sentinel_target_clamps_into_wire_bounds():
+    on_shot = MagicMock()
+    ch = _challenge()
+    ctrl = MoleController(ch, pg.Rect(3 * _CELL, 4 * _CELL, _CELL, _CELL), 0,
+                          ch.deadline_ms, hole_squares=_HOLES, audio=MagicMock(),
+                          victim_surface=_victim(_CELL), on_shot=on_shot)
+    ctrl.update(800)
+    ctrl.handle_event(_click((200, 200)))
+    _, kwargs = on_shot.call_args
+    assert kwargs["target"] == (0.0, 0.0), \
+        "the no-mapper sentinel clamps to an in-range guaranteed miss"
+    assert ctrl._progress == 0, "the clamped sentinel never registers a hit"
+
+
+def test_local_edge_shot_adjudicates_on_the_clamped_value(monkeypatch):
+    seen = []
+    original = MoleChallenge.hit_at
+
+    def spy(self, elapsed_ms, row_f, col_f, holes, last_hit_pop=-1):
+        seen.append((row_f, col_f))
+        return original(self, elapsed_ms, row_f, col_f, holes, last_hit_pop)
+
+    monkeypatch.setattr(MoleChallenge, "hit_at", spy)
+    ctrl = _mole()
+    ctrl.update(800)
+    ctrl.handle_event(_click((752, 752)))
+    assert seen, "the local path adjudicates through the engine"
+    for r, c in seen:
+        assert r < 8.0 and c < 8.0, "no out-of-range coordinate reaches adjudication"
+
+
+def test_torn_victim_key_is_per_challenge():
+    v = _victim(_CELL)
+    other_pops = (MolePop(2, 400.0, 600.0, 1400.0),
+                  MolePop(0, 1500.0, 1700.0, 2500.0),
+                  MolePop(1, 2600.0, 2800.0, 3600.0))
+    a = _mole(victim_surface=v, progress=1)
+    b = _mole(challenge=_challenge(pops=other_pops), victim_surface=v, progress=1)
+    sa, sb = a._victim_sprite(), b._victim_sprite()
+    assert sa is not sb, "distinct challenges never share a cached torn victim"
+    assert pg.image.tostring(sa, "RGBA") != pg.image.tostring(sb, "RGBA"), \
+        "different pop scripts tear the victim differently"
+    assert a._victim_sprite() is sa, "the same check re-uses its cached torn victim"
+
+
+def test_resume_with_progress_seeds_the_already_hit_pop():
+    now = pg.time.get_ticks()
+    ch = _challenge()
+    ctrl = MoleController(ch, pg.Rect(3 * _CELL, 4 * _CELL, _CELL, _CELL), now - 1000,
+                          ch.deadline_ms, hole_squares=_HOLES, geom=_geom_for(_CELL),
+                          audio=MagicMock(), victim_surface=_victim(_CELL), progress=1)
+    assert ctrl._last_hit_pop == 0, \
+        "resuming mid-pop seeds the hit index so the pop can't be locally re-hit"
+    ctrl.update(now)
+    ctrl.handle_event(_click(_hole_px(0)))
+    assert ctrl._progress == 1, "the already-hit pop is deduped on the resumed client"
+    ctrl.update(now + 900)
+    ctrl.handle_event(_click(_hole_px(1)))
+    assert ctrl._progress == 2, "a later pop still registers normally"
+
+
+def test_whack_hit_plays_the_pitch_ladder_index():
+    ctrl = _mole()
+    ctrl.update(800)
+    ctrl.handle_event(_click(_hole_px(0)))
+    ctrl.update(2000)
+    ctrl.handle_event(_click(_hole_px(1)))
+    assert ctrl._audio.play_whack_hit.call_args_list == [call(0), call(1)]
+
+
+def test_whack_hit_pitch_ladder_muted_when_passive():
+    ctrl = _mole(passive=True)
+    ctrl.update(900)
+    ctrl.spectate_shot(800.0, 0, True, progress=1, target=(2.5, 2.5))
+    ctrl._audio.play_whack_hit.assert_not_called()
+
+
 def test_no_per_frame_logging(caplog):
     surf = pg.Surface((640, 640))
     ctrl = _mole()

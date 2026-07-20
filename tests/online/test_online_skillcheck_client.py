@@ -1019,7 +1019,7 @@ def test_combo_spectate_mirror_steps_the_strip_with_progress():
          "direction": challenge.prompts[0], "target_row": None, "target_col": None})
     assert ctrl.progress == 1, "the spectated strip advances with the relayed progress"
     app.coordinator._handle_skill_check_spectate_shot(
-        {"elapsed_ms": 1200.0, "miss_count": 1, "won": False, "progress": 1,
+        {"elapsed_ms": 1200.0, "miss_count": 0, "won": False, "progress": 1,
          "direction": "up", "target_row": None, "target_col": None})
     assert ctrl.progress == 1
     assert ctrl.wrong_count == 1, "a relayed wrong press strikes a pip instead"
