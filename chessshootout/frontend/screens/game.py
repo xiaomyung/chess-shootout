@@ -256,6 +256,9 @@ class GameScreen(Screen):
             self.black_country = countries.random_code()
             self._time_control = None
             self._ensure_local_session()
+            self.skillcheck.reset(
+                enabled=True,
+                seed=f"local-{pg.time.get_ticks()}-{random.randint(0, 1 << 30)}")
         if side is not None:
             self._apply_start_config(payload)
         if your_color is not None:
@@ -290,9 +293,6 @@ class GameScreen(Screen):
         self._time_control = (
             (time_minutes * 60, increment_seconds) if time_minutes is not None else None
         )
-        self.skillcheck.reset(
-            enabled=True,
-            seed=f"local-{pg.time.get_ticks()}-{random.randint(0, 1 << 30)}")
 
     def _apply_online_start_config(self, payload):
         self._chosen_side = payload["your_color"]
