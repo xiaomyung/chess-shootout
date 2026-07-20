@@ -240,6 +240,17 @@ ONE_SHOT_DISPATCH = [
     ("play_wheel_tick", "wheel_tick"),
     ("play_aim_lock", "aim_lock"),
     ("play_aim_beep", "aim_beep"),
+    ("play_mole_fall", "mole_fall"),
+    ("play_mole_telegraph", "mole_telegraph"),
+    ("play_mole_pop", "mole_pop"),
+    ("play_whack_hit", "whack_hit"),
+    ("play_whack_kill", "whack_kill"),
+    ("play_mole_taunt", "mole_taunt"),
+    ("play_whiff_ricochet", "whiff_ricochet"),
+    ("play_combo_hit", "combo_hit"),
+    ("play_combo_wrong", "combo_wrong"),
+    ("play_combo_complete", "combo_complete"),
+    ("play_combo_fail", "combo_fail"),
     ("play_drum_tick", "drum_tick"),
     ("play_turret_ratchet", "turret_ratchet"),
     ("play_card_toggle", "card_toggle"),
@@ -283,6 +294,75 @@ def test_play_picks_a_random_variant(manager):
         manager.play_checkmate()
     b.play.assert_called_once_with(fade_ms=ONESHOT_FADE_MS)
     a.play.assert_not_called()
+
+
+def test_play_indexed_empty_pool_is_noop(manager):
+    manager._slots["whack_hit"] = []
+    with patch.object(manager, "_play_with_master") as play:
+        manager._play_indexed("whack_hit", 3)
+    play.assert_not_called()
+
+
+def test_play_indexed_single_file_degrades_to_it(manager):
+    only = MagicMock()
+    manager._slots["whack_hit"] = [only]
+    manager._play_indexed("whack_hit", 5)
+    only.play.assert_called_once_with(fade_ms=ONESHOT_FADE_MS)
+
+
+def test_play_indexed_selects_by_index(manager):
+    pool = [MagicMock(), MagicMock(), MagicMock()]
+    manager._slots["whack_hit"] = pool
+    manager._play_indexed("whack_hit", 1)
+    pool[1].play.assert_called_once_with(fade_ms=ONESHOT_FADE_MS)
+    pool[0].play.assert_not_called()
+    pool[2].play.assert_not_called()
+
+
+def test_play_indexed_clamps_past_pool_end(manager):
+    pool = [MagicMock(), MagicMock(), MagicMock()]
+    manager._slots["whack_hit"] = pool
+    manager._play_indexed("whack_hit", 9)
+    pool[-1].play.assert_called_once_with(fade_ms=ONESHOT_FADE_MS)
+    pool[0].play.assert_not_called()
+    pool[1].play.assert_not_called()
+
+
+def test_play_indexed_disabled_is_noop():
+    sm = SoundManager(SOUNDS_DIR, enabled=False)
+    with patch.object(sm, "_play_with_master") as play:
+        sm._play_indexed("whack_hit", 0)
+    play.assert_not_called()
+
+
+def test_play_whack_hit_no_args_uses_index_zero(manager):
+    pool = [MagicMock(), MagicMock()]
+    manager._slots["whack_hit"] = pool
+    manager.play_whack_hit()
+    pool[0].play.assert_called_once_with(fade_ms=ONESHOT_FADE_MS)
+    pool[1].play.assert_not_called()
+
+
+def test_play_whack_hit_combo_climbs_pitch_ladder(manager):
+    pool = [MagicMock() for _ in range(4)]
+    manager._slots["whack_hit"] = pool
+    manager.play_whack_hit(combo=2)
+    pool[2].play.assert_called_once_with(fade_ms=ONESHOT_FADE_MS)
+
+
+def test_play_combo_hit_no_args_uses_index_zero(manager):
+    pool = [MagicMock(), MagicMock()]
+    manager._slots["combo_hit"] = pool
+    manager.play_combo_hit()
+    pool[0].play.assert_called_once_with(fade_ms=ONESHOT_FADE_MS)
+    pool[1].play.assert_not_called()
+
+
+def test_play_combo_hit_combo_climbs_pitch_ladder(manager):
+    pool = [MagicMock() for _ in range(4)]
+    manager._slots["combo_hit"] = pool
+    manager.play_combo_hit(combo=3)
+    pool[3].play.assert_called_once_with(fade_ms=ONESHOT_FADE_MS)
 
 
 def test_play_move_each_piece_picks_its_slot(manager):
@@ -414,6 +494,10 @@ DISABLED_NOOP_METHODS = [
     "play_pickup", "play_drop", "play_swear", "play_ui_click",
     "play_skillcheck_appear", "play_skillcheck_win", "play_skillcheck_miss",
     "play_wheel_tick", "play_aim_lock", "play_aim_beep",
+    "play_mole_fall", "play_mole_telegraph", "play_mole_pop",
+    "play_whack_hit", "play_whack_kill", "play_mole_taunt",
+    "play_whiff_ricochet", "play_combo_hit", "play_combo_wrong",
+    "play_combo_complete", "play_combo_fail",
     "play_drum_tick", "play_turret_ratchet", "play_card_toggle",
     "play_rail_click", "play_focus_action",
     "play_section_toggle", "play_chip_toggle", "play_cap_press",

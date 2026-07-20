@@ -32,6 +32,20 @@ RAIL_SECTIONS_SLOTS = {
     "chat_receive": "ui/chat_receive",
 }
 
+WHACK_COMBO_SLOTS = {
+    "mole_fall": "skillcheck/mole_fall",
+    "mole_telegraph": "skillcheck/mole_telegraph",
+    "mole_pop": "skillcheck/mole_pop",
+    "whack_hit": "skillcheck/whack_hit",
+    "whack_kill": "skillcheck/whack_kill",
+    "mole_taunt": "skillcheck/mole_taunt",
+    "whiff_ricochet": "skillcheck/whiff_ricochet",
+    "combo_hit": "skillcheck/combo_hit",
+    "combo_wrong": "skillcheck/combo_wrong",
+    "combo_complete": "skillcheck/combo_complete",
+    "combo_fail": "skillcheck/combo_fail",
+}
+
 
 @pytest.mark.parametrize("slot_id, dst", sorted(NEW_SLOTS.items()))
 def test_new_slot_registered_with_expected_dst(slot_id, dst):
@@ -79,3 +93,11 @@ def test_rail_sections_slot_registered_with_expected_dst(slot_id, dst):
     assert slot_id in SLOTS
     assert SLOTS[slot_id].dst == dst
     assert SLOTS[slot_id].src == slot_id
+
+
+@pytest.mark.parametrize("slot_id, dst", sorted(WHACK_COMBO_SLOTS.items()))
+def test_whack_combo_slot_registered_with_expected_dst(slot_id, dst):
+    assert slot_id in SLOTS
+    assert SLOTS[slot_id].dst == dst
+    assert SLOTS[slot_id].src == slot_id
+    assert dst.startswith("skillcheck/")
