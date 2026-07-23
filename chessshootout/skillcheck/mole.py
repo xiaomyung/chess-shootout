@@ -22,6 +22,7 @@ MOLE_UP_RAMP_MS = (850.0, 850.0, 780.0, 700.0, 750.0)
 MOLE_POP_UP_FLOOR_MS = 600.0
 MOLE_UP_PER_DIFF_MS = 9.0
 MOLE_GRACE_MS = 120.0
+MOLE_FIT_EPSILON_MS = 0.001
 MOLE_HOLE_MIN = 3
 MOLE_HOLE_CAP = 5
 MOLE_HOLE_RADIUS_CELLS = 3
@@ -32,6 +33,15 @@ MOLE_MIN_INTER_SHOT_MS = 80.0
 
 def _clamped_hole_count(captured_value):
     return min(MOLE_HOLE_CAP, max(MOLE_HOLE_MIN, captured_value))
+
+
+def _required_hits(captured_value):
+    return MOLE_HITS_REQUIRED + (captured_value >= 3) + (captured_value >= 9)
+
+
+def _compressed_hits(required):
+    return max(MOLE_HITS_COMPRESSED,
+               round(required * MOLE_POPS_COMPRESSED / MOLE_POPS_TOTAL))
 
 
 def _hole_sequence(seed, count, hole_count):
@@ -110,7 +120,9 @@ class MoleChallenge:
                   captured_value=0):
         compressed = deadline_ms < MOLE_COMPRESS_DEADLINE_MS
         count = MOLE_POPS_COMPRESSED if compressed else MOLE_POPS_TOTAL
-        required = MOLE_HITS_COMPRESSED if compressed else MOLE_HITS_REQUIRED
+        required = _required_hits(captured_value)
+        if compressed:
+            required = _compressed_hits(required)
         hole_count = _clamped_hole_count(captured_value)
         holes = _hole_sequence(seed, count, hole_count)
         gaps = _gap_sequence(seed)[:count]
@@ -123,7 +135,8 @@ class MoleChallenge:
                           + [(gap, MOLE_GAP_FLOOR_MS) for gap in gaps[:count - 1]])
             scale = _fit_scale(deadline_ms - MOLE_GRACE_MS, components)
             times = _scaled_times(scale, gaps, ups)
-            inside = sum(1 for _, _, down in times if down + MOLE_GRACE_MS < deadline_ms)
+            inside = sum(1 for _, _, down in times
+                         if down + MOLE_GRACE_MS <= deadline_ms + MOLE_FIT_EPSILON_MS)
             if inside < required:
                 required = max(1, inside)
         pops = tuple(MolePop(hole, telegraph, up, down)
@@ -159,6 +172,9 @@ class MoleChallenge:
 
     def quota_unreachable(self, elapsed_ms, hits, last_hit_pop=-1):
         return hits + self.remaining_hittable(elapsed_ms, last_hit_pop) < self.hits_required
+
+    def pop_mandatory(self, index, hits):
+        return hits + (len(self.pops) - index) == self.hits_required
 
 
 def _free_squares(capture_sq, blocked, radius, board_size):

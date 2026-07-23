@@ -94,6 +94,7 @@ class SkillCheckSession:
                  kind.value, ply, online, passive)
         self.skillcheck_target = target
         self.active_kind = kind
+        self.active_seed = seed
         screen.board.aim_suppressed_square = target if kind in SUPPRESSING_KINDS else None
         on_done = self._on_online_skillcheck_done if online else self._on_skillcheck_done
         screen.skillcheck_overlay.start(
@@ -108,6 +109,7 @@ class SkillCheckSession:
         self.pending_online_move = None
         self.online_skillcheck = (from_sq, to_sq, promo_type, kind)
         self.online_spectate_kind = kind
+        self.online_was_spectator = True
         self.online_skillcheck_opened_ms = pg.time.get_ticks() - int(elapsed_ms)
         self.open_skillcheck_overlay(
             kind, seed, value_diff, deadline_ms, from_sq, to_sq, promo_type, captured_value,
@@ -139,9 +141,11 @@ class SkillCheckSession:
     def clear_online_skillcheck_state(self):
         self.skillcheck_target = None
         self.active_kind = None
+        self.active_seed = None
         self.pending_online_move = None
         self.online_skillcheck = None
         self.online_spectate_kind = None
+        self.online_was_spectator = False
         self.online_skillcheck_opened_ms = None
         self.online_verdict_action = None
 
@@ -151,19 +155,32 @@ class SkillCheckSession:
         screen.board.aim_suppressed_square = None
         self.skillcheck_target = None
         self.active_kind = None
+        self.active_seed = None
         self.online_skillcheck = None
         self.online_spectate_kind = None
+        self.online_was_spectator = False
         self.online_skillcheck_opened_ms = None
         self.online_verdict_action = None
 
     def _on_online_skillcheck_done(self, context, landed):
+        kind = context[3] if context and len(context) > 3 else None
+        target = self.skillcheck_target
+        seed = self.active_seed
+        was_spectator = self.online_was_spectator
+        self.online_was_spectator = False
         action = self.online_verdict_action
         self.online_verdict_action = None
         self.screen.board.aim_suppressed_square = None
         self.skillcheck_target = None
         self.active_kind = None
+        self.active_seed = None
         if action is not None:
             action()
+        if kind == SkillCheckKind.WHACK and landed is False and target is not None:
+            from chessshootout.frontend.skillcheck.mole_view import pick_taunt
+            self.screen.show_taunt(target, pick_taunt(seed))
+            if not was_spectator:
+                self.app.sound_manager.play_mole_taunt()
 
     def _skillcheck_render_square(self, kind, seed, value_diff, from_sq, to_sq):
         screen = self.screen
@@ -241,9 +258,11 @@ class SkillCheckSession:
         from_sq, to_sq = context[0], context[1]
         promo_type = context[2] if len(context) > 2 else None
         kind = context[3] if len(context) > 3 else None
+        seed = self.active_seed
         aim_victim = screen.board.aim_suppressed_square
         screen.board.aim_suppressed_square = None
         self.active_kind = None
+        self.active_seed = None
         if landed:
             screen.board.apply_gated_move(from_sq, to_sq, promo_type)
             self.record_skillcheck(kind, True, len(screen.match.move_history))
@@ -262,6 +281,10 @@ class SkillCheckSession:
                 from_sq, to_sq, on_fire=self.on_skillcheck_miss_fire)
             if aim_victim is not None:
                 screen.board.restore_piece(aim_victim)
+            if kind == SkillCheckKind.WHACK:
+                from chessshootout.frontend.skillcheck.mole_view import pick_taunt
+                screen.show_taunt(aim_victim, pick_taunt(seed))
+                self.app.sound_manager.play_mole_taunt()
 
     def on_skillcheck_miss_fire(self, piece_type):
         self.app.sound_manager.play_capture(piece_type)

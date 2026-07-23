@@ -62,6 +62,7 @@ def _build_slots():
     slots["mole_pop"] = Slot("mole_pop", "skillcheck/mole_pop")
     slots["whack_hit"] = Slot("whack_hit", "skillcheck/whack_hit")
     slots["whack_kill"] = Slot("whack_kill", "skillcheck/whack_kill")
+    slots["whack_dry"] = Slot("whack_dry", "skillcheck/whack_dry")
     slots["mole_taunt"] = Slot("mole_taunt", "skillcheck/mole_taunt")
     slots["whiff_ricochet"] = Slot("whiff_ricochet", "skillcheck/whiff_ricochet")
     slots["combo_hit"] = Slot("combo_hit", "skillcheck/combo_hit")

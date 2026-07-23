@@ -11,7 +11,7 @@ from chessshootout.frontend.skillcheck.aim_view import AimController
 from chessshootout.frontend.skillcheck.controller import SKILLCHECK_RESULT_HOLD_MS
 from chessshootout.frontend.skillcheck.combo_view import (
     ComboController, COMBO_RESULT_HOLD_MS, COMBO_BRILLIANT_TEXT, COMBO_CLEAN_TEXT,
-    COMBO_FAIL_TEXT)
+    COMBO_FAIL_TEXT, COMBO_STREAK_FIRE)
 from chessshootout.frontend.skillcheck.registry import build_controller
 from chessshootout.frontend.skillcheck.wheel_view import WheelController
 from chessshootout.skillcheck.combo import ComboChallenge, COMBO_MAX_WRONGS
@@ -59,6 +59,20 @@ def _run_correct(ctrl, prompts=_PROMPTS, key=_key, step=150):
     for i, direction in enumerate(prompts):
         ctrl.update(step * (i + 1))
         ctrl.handle_event(key(direction))
+
+
+def _wedge_center(ctrl, direction):
+    dx, dy = {"up": (0, -1), "down": (0, 1), "left": (-1, 0), "right": (1, 0)}[direction]
+    cx, cy = ctrl._pad_center
+    d = ctrl._pad_r * 0.6
+    return (int(cx + dx * d), int(cy + dy * d))
+
+
+def _wedge_probe_rect(ctrl, direction):
+    side = max(int(ctrl._pad_r * 0.35), 8)
+    rect = pg.Rect(0, 0, side, side)
+    rect.center = _wedge_center(ctrl, direction)
+    return rect
 
 
 def _region_brightness(surf, rect):
@@ -131,13 +145,39 @@ def test_wasd_matches_arrows():
     assert ctrl.landed is True
 
 
-def test_mouse_click_on_receptor_advances():
+def test_mouse_click_on_wedge_advances():
     ctrl = _combo(board_rect=pg.Rect(0, 0, 700, 700))
     ctrl.update(150)
-    ctrl.handle_event(_click(ctrl._receptors["up"].center))
+    ctrl.handle_event(_click(_wedge_center(ctrl, "up")))
     assert ctrl.progress == 1
     ctrl.handle_event(_click((5, 5)))
-    assert ctrl.progress == 1, "a click off every receptor is ignored"
+    assert ctrl.progress == 1, "a click outside the pad circle is ignored"
+
+
+def test_wedge_hit_test_resolves_all_four_directions():
+    ctrl = _combo(board_rect=pg.Rect(0, 0, 700, 700))
+    for direction in ("up", "down", "left", "right"):
+        assert ctrl._receptor_hit(_wedge_center(ctrl, direction)) == direction
+
+
+def test_wedge_hit_test_hub_and_outside_are_dead_zones():
+    ctrl = _combo(board_rect=pg.Rect(0, 0, 700, 700))
+    cx, cy = ctrl._pad_center
+    assert ctrl._receptor_hit((cx, cy)) is None, "the hub centre is a dead zone"
+    hub_pt = (cx + ctrl._hub_r // 2, cy)
+    assert ctrl._receptor_hit(hub_pt) is None, "inside the hub radius never registers"
+    assert ctrl._receptor_hit((cx + ctrl._pad_r + 10, cy)) is None, \
+        "outside the pad circle never registers"
+
+
+def test_wedge_hit_test_diagonal_adjacent_resolves_by_dominant_axis():
+    ctrl = _combo(board_rect=pg.Rect(0, 0, 700, 700))
+    cx, cy = ctrl._pad_center
+    r = ctrl._pad_r
+    assert ctrl._receptor_hit((cx + int(r * 0.5), cy + int(r * 0.2))) == "right"
+    assert ctrl._receptor_hit((cx + int(r * 0.2), cy + int(r * 0.5))) == "down"
+    assert ctrl._receptor_hit((cx - int(r * 0.5), cy - int(r * 0.2))) == "left"
+    assert ctrl._receptor_hit((cx - int(r * 0.2), cy - int(r * 0.5))) == "up"
 
 
 def test_judgement_tiers_track_driven_latency():
@@ -289,13 +329,13 @@ def test_draw_smoke_across_states_and_sizes(cell):
     assert surf.get_size() == (700, 700)
 
 
-def test_receptor_flash_brightens_the_receptor_region():
+def test_receptor_flash_brightens_the_wedge_region():
     base = _combo(board_rect=pg.Rect(0, 0, 700, 700))
     base_surf = pg.Surface((700, 700))
     base_surf.fill((0, 0, 0))
     base.update(100)
     base.draw(base_surf)
-    base_bright = _region_brightness(base_surf, base._receptors["up"])
+    base_bright = _region_brightness(base_surf, _wedge_probe_rect(base, "up"))
 
     flashed = _combo(board_rect=pg.Rect(0, 0, 700, 700))
     flashed_surf = pg.Surface((700, 700))
@@ -303,9 +343,103 @@ def test_receptor_flash_brightens_the_receptor_region():
     flashed.update(150)
     flashed.handle_event(_key("up"))
     flashed.draw(flashed_surf)
-    flash_bright = _region_brightness(flashed_surf, flashed._receptors["up"])
+    flash_bright = _region_brightness(flashed_surf, _wedge_probe_rect(flashed, "up"))
 
-    assert flash_bright > base_bright, "a correct press flash-fills its receptor brighter"
+    assert flash_bright > base_bright, "a correct press flash-fills its wedge brighter"
+
+
+def test_spotlight_radius_shrinks_with_the_deadline():
+    ctrl = _combo(board_rect=pg.Rect(0, 0, 700, 700))
+    ctrl.update(500)
+    r1 = ctrl._spot_radius()
+    ctrl.update(2000)
+    r2 = ctrl._spot_radius()
+    ctrl.update(4000)
+    r3 = ctrl._spot_radius()
+    assert r1 > r2 > r3, "the closing light IS the countdown: strictly shrinking"
+
+
+def test_spotlight_radius_freezes_once_the_check_commits():
+    ctrl = _combo(board_rect=pg.Rect(0, 0, 700, 700))
+    t = 0
+    for _ in range(COMBO_MAX_WRONGS):
+        t += 300
+        ctrl.update(t)
+        ctrl.handle_event(_key("down"))
+    assert ctrl.landed is False
+    frozen = ctrl._spot_radius()
+    ctrl.update(3000)
+    assert ctrl._spot_radius() == frozen, "a committed fail stops the countdown light"
+
+
+def test_passive_never_allocates_or_draws_the_spotlight_layer():
+    ctrl = _combo(passive=True, audio=MagicMock(), board_rect=pg.Rect(0, 0, 700, 700))
+    assert ctrl._spot_layer is None, "the spectator mirror keeps the live board readable"
+    ctrl.set_board_rect(pg.Rect(0, 0, 640, 640))
+    assert ctrl._spot_layer is None, "set_board_rect never allocates for a passive mirror"
+    surf = pg.Surface((700, 700), pg.SRCALPHA)
+    ctrl.update(2000)
+    ctrl.draw(surf)
+
+
+def test_spotlight_scrims_the_corner_but_not_the_hole():
+    ctrl = _combo(board_rect=pg.Rect(0, 0, 700, 700))
+    surf = pg.Surface((700, 700))
+    surf.fill((255, 255, 255))
+    ctrl.update(4000)
+    ctrl.draw(surf)
+    corner = surf.get_at((5, 5))
+    hole_pt = (ctrl._pad_center[0] + ctrl._pad_r + 20, ctrl._pad_center[1])
+    hole = surf.get_at(hole_pt)
+    assert sum(corner[:3]) < sum(hole[:3]), \
+        "outside the shrunken light the board is dark; under the hole it stays lit"
+
+
+def test_brilliant_streak_ignites_fire_and_a_wrong_resets_it():
+    ctrl = _combo()
+    for i, direction in enumerate(_PROMPTS[:3]):
+        ctrl.update(150 * (i + 1))
+        ctrl.handle_event(_key(direction))
+    assert ctrl._brilliant_streak == COMBO_STREAK_FIRE, \
+        "three sub-350ms presses each judge BRILLIANT and chain the streak"
+    assert ctrl._fire_active() is True
+    ctrl.update(700)
+    ctrl.handle_event(_key("up"))
+    assert ctrl._brilliant_streak == 0, "a wrong press douses the streak"
+    assert ctrl._fire_active() is False
+
+
+def test_slow_correct_press_also_resets_the_streak():
+    ctrl = _combo()
+    for i, direction in enumerate(_PROMPTS[:3]):
+        ctrl.update(150 * (i + 1))
+        ctrl.handle_event(_key(direction))
+    assert ctrl._fire_active() is True
+    ctrl.update(1000)
+    ctrl.handle_event(_key("right"))
+    assert ctrl.progress == 4, "the slow press still lands"
+    assert ctrl._brilliant_streak == 0, "only BRILLIANT judgements keep the fire burning"
+
+
+def test_fire_streak_draw_smoke():
+    ctrl = _combo_scene(_PROMPTS, 99)
+    for i, direction in enumerate(_PROMPTS[:3]):
+        ctrl.update(150 * (i + 1))
+        ctrl.handle_event(_key(direction))
+    assert ctrl._fire_active() is True
+    surf = pg.Surface((700, 700), pg.SRCALPHA)
+    ctrl.draw(surf)
+    assert surf.get_size() == (700, 700)
+
+
+def test_passive_never_tracks_a_fire_streak():
+    ctrl = _combo(passive=True, audio=MagicMock())
+    for p in (1, 2, 3):
+        ctrl.update(150 * p)
+        ctrl.spectate_shot(150 * p, 0, True, progress=p)
+    assert ctrl.progress == 3
+    assert ctrl._brilliant_streak == 0, "the mirror never claims the mover's streak"
+    assert ctrl._fire_active() is False
 
 
 def test_two_same_frame_presses_advance_and_relay_once():

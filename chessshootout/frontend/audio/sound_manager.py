@@ -282,6 +282,9 @@ class SoundManager:
     def play_whack_kill(self):
         self._play("whack_kill")
 
+    def play_whack_dry(self):
+        self._play("whack_dry")
+
     def play_mole_taunt(self):
         self._play("mole_taunt")
 

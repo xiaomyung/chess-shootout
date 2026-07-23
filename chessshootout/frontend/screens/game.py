@@ -224,6 +224,8 @@ class GameScreen(Screen):
         self.player_strip_bottom = PlayerStrip(window)
 
         self.speech_bubbles = {"white": SpeechBubble(), "black": SpeechBubble()}
+        self.taunt_bubble = SpeechBubble()
+        self._taunt_square = None
 
         self.focus_mode = False
         self.focus_transition = None
@@ -922,6 +924,8 @@ class GameScreen(Screen):
         for bubble in self.speech_bubbles.values():
             if bubble.last_rect is not None:
                 rects.append(bubble.last_rect)
+        if self.taunt_bubble.last_rect is not None:
+            rects.append(self.taunt_bubble.last_rect)
         if self.focus_mode and self._focus_show() == "line":
             top_line, bottom_line = self.time_line.rects_for(self.board, self.board.rect)
             rects.extend([top_line, bottom_line])
@@ -1150,11 +1154,18 @@ class GameScreen(Screen):
     def show_speech_bubble(self, color, text):
         self.speech_bubbles[color].show(text, pg.time.get_ticks())
 
+    def show_taunt(self, square, text):
+        if square is None:
+            return
+        self._taunt_square = square
+        self.taunt_bubble.show(text, pg.time.get_ticks())
+
     def _draw_speech_bubbles(self):
         now = pg.time.get_ticks()
         if self.app._blocking_modal_visible() or self._result_menu_should_show():
             for bubble in self.speech_bubbles.values():
                 bubble.last_rect = None
+            self.taunt_bubble.last_rect = None
             return
         scale = getattr(self.board, "scale", 1.0)
         for color, bubble in self.speech_bubbles.items():
@@ -1166,6 +1177,15 @@ class GameScreen(Screen):
                 bubble.last_rect = None
                 continue
             bubble.draw(self.window, anchor, self.board.rect, now, scale=scale)
+        self._draw_taunt_bubble(now, scale)
+
+    def _draw_taunt_bubble(self, now, scale):
+        bubble = self.taunt_bubble
+        if not bubble.active(now) or self._taunt_square is None:
+            bubble.last_rect = None
+            return
+        anchor = self.board.cell_rect(self._taunt_square)
+        bubble.draw(self.window, anchor, self.board.rect, now, scale=scale)
 
     def _speech_anchor(self, color):
         key = (color, self.board.review_ply, len(self.match.move_history))
@@ -1599,6 +1619,8 @@ class GameScreen(Screen):
         self._last_turn_for_flip = None
         for bubble in self.speech_bubbles.values():
             bubble.clear()
+        self.taunt_bubble.clear()
+        self._taunt_square = None
 
     def _focus_show(self):
         return env.get_focus_show()

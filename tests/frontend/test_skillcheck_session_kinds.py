@@ -8,6 +8,13 @@ while sync_aim_check_gun stays an AIM-only coupling, and every path that discard
 live controller (teardown, screen exit, new-game reset, overlay replacement) calls
 close() so the whack check's hidden OS cursor can never leak. The input swallow
 path is pinned: arrows reach the combo pad, never move-stepping.
+
+A failed WHACK hands the taunt to the BOARD layer: the session stores the check
+seed at overlay-open, and on a fail calls screen.show_taunt(victim_sq,
+pick_taunt(seed)) — deterministic per seed, so mover and spectator show the same
+line — plus the taunt sound for the mover only (the spectate mirror stays muted).
+The seed clears on every terminal path so a stale seed can never leak into the
+next check's taunt.
 """
 
 from unittest.mock import MagicMock
@@ -18,7 +25,7 @@ from tests.conftest import pygame_display
 from chessshootout.backend.pieces import PieceColor, PieceType
 from chessshootout.backend.utils import Square
 from chessshootout.frontend.skillcheck.combo_view import ComboController, COMBO_TIME_LIMIT_MS
-from chessshootout.frontend.skillcheck.mole_view import MoleController
+from chessshootout.frontend.skillcheck.mole_view import MoleController, pick_taunt
 from chessshootout.skillcheck import mole
 from chessshootout.skillcheck.combo import ComboChallenge
 from chessshootout.skillcheck.coordinator import move_roll_key
@@ -173,6 +180,73 @@ def test_failed_whack_restores_the_suppressed_victim_and_clears_state():
     assert any(a["sq"] == to for a in app.game.board._restore_anims), \
         "the surviving victim drops back onto its square, same as a failed aim"
     assert app.game.skillcheck.is_locked(frm, to) is True
+
+
+def test_failed_whack_taunts_from_the_victim_square_on_the_board_layer():
+    app = _local_app()
+    frm, to, _ = _gate(app, SkillCheckKind.WHACK)
+    seed = app.game.skillcheck_session.active_seed
+    assert seed is not None, "the session stores the check seed at overlay-open"
+    context = app.game.skillcheck_overlay._context
+    app.game.skillcheck_overlay.cancel()
+    app.game.skillcheck_session._on_skillcheck_done(context, False)
+    assert app.game._taunt_square == to, "the taunt bubble anchors to the surviving victim"
+    assert app.game.taunt_bubble.shown_at is not None
+    assert app.game.taunt_bubble.text == pick_taunt(seed).upper(), \
+        "the line comes from the per-check seed, not the controller"
+    app.sound_manager.play_mole_taunt.assert_called_once()
+    assert app.game.skillcheck_session.active_seed is None, "the seed clears at resolution"
+
+
+def test_won_whack_never_taunts():
+    app = _local_app()
+    frm, to, _ = _gate(app, SkillCheckKind.WHACK)
+    context = app.game.skillcheck_overlay._context
+    app.game.skillcheck_overlay.cancel()
+    app.game.skillcheck_session._on_skillcheck_done(context, True)
+    assert app.game.taunt_bubble.shown_at is None
+    app.sound_manager.play_mole_taunt.assert_not_called()
+    assert app.game.skillcheck_session.active_seed is None
+
+
+def test_online_whack_fail_shows_the_board_taunt_with_sound():
+    app = _local_app()
+    session = app.game.skillcheck_session
+    session.skillcheck_target = sq(3, 3)
+    session.active_seed = "wire-seed"
+    session._on_online_skillcheck_done(
+        (sq(4, 3), sq(3, 3), None, SkillCheckKind.WHACK), False)
+    assert app.game._taunt_square == sq(3, 3)
+    assert app.game.taunt_bubble.text == pick_taunt("wire-seed").upper(), \
+        "both clients derive the same line from the same wire seed"
+    app.sound_manager.play_mole_taunt.assert_called_once()
+    assert session.active_seed is None
+
+
+def test_spectated_online_whack_fail_taunts_silently():
+    # _begin_online_verdict nulls online_spectate_kind BEFORE the done handler runs,
+    # so spectator-ness must survive on the online_was_spectator latch instead.
+    app = _local_app()
+    session = app.game.skillcheck_session
+    session.skillcheck_target = sq(3, 3)
+    session.active_seed = "wire-seed"
+    session.online_was_spectator = True
+    session.online_spectate_kind = None
+    session._on_online_skillcheck_done(
+        (sq(4, 3), sq(3, 3), None, SkillCheckKind.WHACK), False)
+    assert app.game.taunt_bubble.shown_at is not None, \
+        "the mirror still shows the victim's line"
+    app.sound_manager.play_mole_taunt.assert_not_called()
+    assert session.online_was_spectator is False
+
+
+def test_spectate_open_arms_the_spectator_latch():
+    app = _local_app()
+    session = app.game.skillcheck_session
+    session.open_spectate_overlay(
+        SkillCheckKind.WHACK, "spec-seed", 0, 5000, sq(4, 3), sq(3, 3), None, 1)
+    assert session.online_was_spectator is True
+    session.teardown_skillcheck_overlay()
 
 
 def _mock_controller():

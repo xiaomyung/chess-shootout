@@ -237,6 +237,66 @@ def test_quota_unreachable_discounts_the_still_up_credited_pop():
         "but not when that final window already produced the credited hit"
 
 
+@pytest.mark.parametrize("captured_value, expected", [(0, 3), (1, 3), (3, 4), (5, 4), (9, 5)])
+def test_required_hits_scales_with_the_captured_piece_value(captured_value, expected):
+    # pawn(1) 3-of-5, knight/bishop(3) and rook(5) 4-of-5, queen(9) 5-of-5; a
+    # value of 0 (promotions / edge cases) stays at the base 3.
+    assert mole._required_hits(captured_value) == expected
+
+
+@pytest.mark.parametrize("captured_value, expected", [(0, 3), (1, 3), (3, 4), (5, 4)])
+def test_from_seed_quota_follows_the_value_map_at_the_default_deadline(captured_value, expected):
+    for i in range(40):
+        assert MoleChallenge.from_seed(f"map:{i}", captured_value=captured_value).hits_required \
+            == expected
+
+
+def test_a_queen_capture_demands_all_five_pops():
+    # the full 5-of-5 only survives when the seeded schedule fits the 5s budget
+    # without scaling; "queen" is such a seed. Nominal-overflow seeds get scaled
+    # and the untouched budget-solve fallback trims the unreachable fifth hit to 4.
+    ch = MoleChallenge.from_seed("queen", captured_value=9)
+    assert ch.hits_required == 5 and len(ch.pops) == 5
+
+
+@pytest.mark.parametrize("required, expected", [(3, 2), (4, 2), (5, 3)])
+def test_compressed_hits_scales_the_quota_by_the_pop_ratio(required, expected):
+    assert mole._compressed_hits(required) == expected
+
+
+@pytest.mark.parametrize("captured_value, expected", [(1, 2), (5, 2), (9, 3)])
+def test_compressed_deadline_scales_the_value_map(captured_value, expected):
+    # deadline 3000 -> the 3-pop tier; "t:9" fits all three windows so the
+    # compressed map shows through without the budget-solve fallback trimming it.
+    ch = MoleChallenge.from_seed("t:9", deadline_ms=3000.0, captured_value=captured_value)
+    assert ch.hits_required == expected
+
+
+def test_pop_mandatory_flags_a_pop_whose_miss_dooms_the_quota():
+    queen = MoleChallenge.from_seed("queen", captured_value=9)
+    assert queen.hits_required == 5 and len(queen.pops) == 5
+    assert queen.pop_mandatory(0, 0) is True, "a 5-of-5 has zero slack from the opening pop"
+    assert all(queen.pop_mandatory(i, i) for i in range(5)), \
+        "along the perfect run every queen pop is mandatory"
+    assert [queen.pop_mandatory(i, 0) for i in range(5)] == [True, False, False, False, False], \
+        "at zero hits only the opening pop still sits on the exact-quota line"
+    pawn = MoleChallenge.from_seed("pawn", captured_value=1)
+    assert pawn.hits_required == 3 and len(pawn.pops) == 5
+    assert pawn.pop_mandatory(0, 0) is False, "a 3-of-5 carries two pops of slack at the start"
+    assert pawn.pop_mandatory(2, 0) is True, "with two pops already gone the third is forced"
+
+
+def test_a_five_of_five_dies_the_instant_one_pop_expires_unhit():
+    ch = MoleChallenge.from_seed("queen", captured_value=9)
+    ends = _window_ends(ch)
+    assert ch.quota_unreachable(0.0, 0) is False, "reachable while every pop is still ahead"
+    assert ch.quota_unreachable(ends[0] - 0.001, 0) is False, "the opening pop is still live"
+    assert ch.quota_unreachable(ends[0], 0) is True, \
+        "the first unhit expiry already makes 5-of-5 impossible"
+    assert ch.pop_mandatory(0, 0) is True, \
+        "pop_mandatory foretells exactly the pop whose miss triggers that death"
+
+
 def test_hole_squares_is_deterministic_and_iteration_order_independent():
     occupied = [(3, 3), (4, 4), (2, 2), (5, 1)]
     first = mole.hole_squares("stable", 5, CAPTURE_SQ, occupied)
