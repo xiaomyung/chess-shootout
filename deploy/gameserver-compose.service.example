@@ -1,7 +1,8 @@
-# systemd unit for the containerized chess server (docker compose, edge profile).
+# systemd unit for the containerized chess gameserver (docker compose).
 #
-# 1. Put the compose project at /srv/chess-shootout:
-#    docker-compose.yml, deploy/Caddyfile, gameserver.env, secrets/*.pem
+# 1. Put the compose project at /srv/chess-shootout: docker-compose.yml, gameserver.env
+#    The external `edge` docker network must already exist (created by the standalone
+#    edge proxy stack, which terminates TLS and reverse-proxies to this container).
 # 2. Copy this file to /etc/systemd/system/gameserver-compose.service
 # 3. systemctl daemon-reload && systemctl enable --now gameserver-compose
 #
@@ -10,7 +11,7 @@
 # stop_grace_period (10s) so the graceful server_shutdown broadcast completes.
 
 [Unit]
-Description=Chess Shootout server (docker compose, edge profile)
+Description=Chess Shootout gameserver (docker compose)
 Requires=docker.service
 After=docker.service network-online.target
 Wants=network-online.target
@@ -18,8 +19,8 @@ Wants=network-online.target
 [Service]
 Type=simple
 WorkingDirectory=/srv/chess-shootout
-ExecStart=/usr/bin/docker compose --profile edge up
-ExecStop=/usr/bin/docker compose --profile edge down
+ExecStart=/usr/bin/docker compose up
+ExecStop=/usr/bin/docker compose down
 Restart=on-failure
 RestartSec=5
 TimeoutStopSec=30

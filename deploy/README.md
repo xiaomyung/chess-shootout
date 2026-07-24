@@ -1,30 +1,32 @@
 # Deploying the server (containerized)
 
-The server runs as a `docker compose` **edge stack**: a hardened `gameserver`
-container (uvicorn) plus a `caddy` container that terminates TLS and reverse-proxies
-to it, all behind Cloudflare.
+The server runs as a single hardened `gameserver` container (uvicorn) managed by
+`docker compose`. TLS termination and the public `:80/:443` surface live in a
+**standalone edge proxy stack** (Caddy) that ships from its own private repo and runs
+separately on the VPS. This repo's compose file joins that stack's external `edge`
+docker network under the alias `chess-gameserver`, and the edge proxy reverse-proxies
+to it.
 
 ```
 Player ──wss:443──▶ Cloudflare (orange cloud, Full strict)
-                         │  adds CF-Connecting-IP
                          ▼
-        DOCKER-USER firewall: only Cloudflare ranges reach :80/:443
+        edge proxy stack (Caddy, separate repo)  :80/:443, terminates TLS
+                         │  reverse_proxy chess-gameserver:8000  (external `edge` network)
                          ▼
-        caddy container :80/:443  ── Origin Cert (Authenticated Origin Pulls optional)
-                         │  reverse_proxy gameserver:8000  (compose network)
-                         ▼
-        gameserver container  (uvicorn; 127.0.0.1:8000 published for debug only)
+        gameserver container  (uvicorn; 127.0.0.1:8000 published for the healthcheck)
 ```
 
 The server is **stateless** (in-memory rooms, no DB) — a restart loses in-flight
-games. The public surface is Caddy on `:80/:443`; the `127.0.0.1:8000` publish is for
-the local healthcheck only.
+games. TLS, the Cloudflare origin certificate, and the "only Cloudflare reaches the
+origin" firewall are all owned by the edge stack and documented in its own repo — none
+of that lives here anymore. This repo ships only the gameserver; the `127.0.0.1:8000`
+publish is for the local healthcheck only.
 
 ## Prerequisites
 
-- A Debian VPS and a domain proxied through Cloudflare (orange cloud).
-- Cloudflare **SSL/TLS mode = Full (strict)** with a **Cloudflare Origin Certificate**
-  for the host (Dashboard → SSL/TLS → Origin Server → Create Certificate).
+- A Debian VPS with Docker installed, running the standalone **edge proxy stack**. That
+  stack creates and owns the external `edge` docker network (bridge) and terminates TLS
+  in front of this container; deploy it first.
 - Read access to the image at `ghcr.io/xiaomyung/chess-shootout-gameserver`: make the GHCR
   package **Public** (repo → Packages → Package settings), or `docker login ghcr.io`
   once on the box.
@@ -59,21 +61,7 @@ git clone https://github.com/xiaomyung/chess-shootout.git /srv/chess-shootout
 cd /srv/chess-shootout
 ```
 
-### 3. Secrets
-
-The Caddy container reads three PEM files from `./secrets/` (mounted as compose
-secrets). Replace the two `origin` paths with your Cloudflare Origin Certificate and
-key.
-
-```bash
-mkdir -p secrets
-install -m 600 /path/to/origin.crt secrets/cf_origin_cert.pem
-install -m 600 /path/to/origin.key secrets/cf_origin_key.pem
-curl -fsSL https://developers.cloudflare.com/ssl/static/authenticated_origin_pull_ca.pem -o secrets/cf_aop_ca.pem
-chmod 600 secrets/cf_aop_ca.pem
-```
-
-### 4. Config files
+### 3. Config files
 
 Create `.env` in the project dir — it selects which image runs:
 
@@ -92,98 +80,33 @@ MAX_ROOMS=100
 EOF
 ```
 
-`HOST=0.0.0.0` lets Caddy reach the app over the compose network. Do not set
-`LOG_FILE` (logs go to stdout). `TRUSTED_PROXIES` is set in `docker-compose.yml`, not
-here. Optional tunables you can add to `gameserver.env`: `GRACE_SECONDS=60`,
-`HEARTBEAT_INTERVAL_SECONDS=2`, `HEARTBEAT_MISS_LIMIT=3`.
+`HOST=0.0.0.0` lets the edge proxy reach the app over the shared `edge` network. Do not
+set `LOG_FILE` (logs go to stdout). `TRUSTED_PROXIES` is set in `docker-compose.yml`
+(the edge proxy's IP on the `edge` network), not here. Optional tunables you can add to
+`gameserver.env`: `GRACE_SECONDS=60`, `HEARTBEAT_INTERVAL_SECONDS=2`,
+`HEARTBEAT_MISS_LIMIT=3`.
 
-### 5. Firewall: only Cloudflare may reach the origin
+### 4. Start
 
-Docker's published ports **bypass UFW**, and Docker **recreates the `DOCKER-USER`
-chain on every boot and daemon restart** — so the Cloudflare-only rules can't live in
-`ufw` or `netfilter-persistent` (Docker would wipe them). A small systemd unit
-re-applies them after Docker.
+The external `edge` network must already exist (created by the edge proxy stack). Then:
 
 ```bash
-sudo ufw allow ssh && sudo ufw default deny incoming && sudo ufw enable
-
-sudo tee /usr/local/sbin/cf-docker-firewall.sh >/dev/null <<'EOF'
-#!/usr/bin/env bash
-iptables -F DOCKER-USER
-for ip in $(curl -fsS --retry 3 https://www.cloudflare.com/ips-v4 || true); do
-  iptables -A DOCKER-USER -p tcp -m multiport --dports 80,443 -s "$ip" -j ACCEPT
-done
-iptables -A DOCKER-USER -p tcp -m multiport --dports 80,443 -j DROP
-iptables -A DOCKER-USER -j RETURN
-EOF
-sudo chmod 755 /usr/local/sbin/cf-docker-firewall.sh
-
-sudo tee /etc/systemd/system/cf-docker-firewall.service >/dev/null <<'EOF'
-[Unit]
-Description=Restrict published 80/443 to Cloudflare ranges
-After=docker.service network-online.target
-Wants=network-online.target
-Requires=docker.service
-PartOf=docker.service
-
-[Service]
-Type=oneshot
-ExecStart=/usr/local/sbin/cf-docker-firewall.sh
-RemainAfterExit=yes
-
-[Install]
-WantedBy=multi-user.target
-EOF
-sudo systemctl daemon-reload && sudo systemctl enable --now cf-docker-firewall.service
-```
-
-This is the primary "only Cloudflare reaches the origin" control, and it survives
-reboots and Docker restarts. The container publishes IPv4; if you enable Docker IPv6
-publishing, add matching `ip6tables` rules with Cloudflare's IPv6 ranges.
-
-### 6. Start
-
-```bash
-docker compose --profile edge up -d
-docker compose --profile edge ps
+docker compose up -d
+docker compose ps
 curl -s http://127.0.0.1:8000/healthz
 ```
 
-`restart: unless-stopped` brings the stack back automatically after a reboot. For
-systemd integration (so `systemctl stop` triggers the graceful client drain), you can
-optionally install the bundled unit:
+The compose file attaches the container to the external `edge` network with the alias
+`chess-gameserver`, which is how the proxy reaches it. `restart: unless-stopped` brings
+the container back automatically after a reboot. For systemd integration (so
+`systemctl stop` triggers the graceful client drain), you can optionally install the
+bundled unit:
 
 ```bash
 sudo cp deploy/gameserver-compose.service.example /etc/systemd/system/gameserver-compose.service
 sudo systemctl daemon-reload
 sudo systemctl enable --now gameserver-compose
 ```
-
-### 7. (Optional) Authenticated Origin Pulls
-
-The shipped Caddyfile uses the Origin Certificate only — a standard Full-strict setup.
-The `DOCKER-USER` firewall already limits the origin to Cloudflare ranges. To add mTLS
-on top (so the origin also *verifies* the client is Cloudflare), enable **SSL/TLS →
-Origin Server → Authenticated Origin Pulls** (zone-level) in Cloudflare, then wrap the
-Caddyfile's `tls` directive with a `client_auth` block:
-
-```
-tls /run/secrets/cf_origin_cert /run/secrets/cf_origin_key {
-    client_auth {
-        mode require_and_verify
-        trust_pool file /run/secrets/cf_aop_ca
-    }
-}
-```
-
-Apply it with:
-
-```bash
-docker compose --profile edge restart caddy
-```
-
-Cloudflare's AOP CA has rotated before; if origin pulls fail zone-wide after enabling,
-refresh `secrets/cf_aop_ca.pem` from Cloudflare and restart caddy.
 
 ## Updating
 
@@ -203,11 +126,11 @@ cd /srv/chess-shootout
 ```
 
 The script pulls the matching CI-built (and trivy-scanned) image from GHCR, refreshes
-the compose file / Caddyfile from git, recreates only `gameserver` (Caddy untouched)
-with the graceful `server_shutdown` drain, and reports the installed version before and
-after (`was <ver>@<digest> -> now <ver>@<digest>`, read from `/healthz`). Each run is
-appended to `deploy/update.log` (UTC, gitignored). It falls back to `sudo` automatically
-when your shell isn't in the `docker` group.
+the compose file from git, recreates the `gameserver` container with the graceful
+`server_shutdown` drain, and reports the installed version before and after
+(`was <ver>@<digest> -> now <ver>@<digest>`, read from `/healthz`). Each run is appended
+to `deploy/update.log` (UTC, gitignored). It falls back to `sudo` automatically when
+your shell isn't in the `docker` group.
 
 ## Operations
 
@@ -216,25 +139,25 @@ Run these from `/srv/chess-shootout`.
 Status:
 
 ```bash
-docker compose --profile edge ps
+docker compose ps
 ```
 
 Live logs:
 
 ```bash
-docker compose --profile edge logs -f
+docker compose logs -f
 ```
 
 Restart:
 
 ```bash
-docker compose --profile edge restart
+docker compose restart
 ```
 
 Stop:
 
 ```bash
-docker compose --profile edge down
+docker compose down
 ```
 
 A clean stop, restart, or update lets the server broadcast `server_shutdown` to

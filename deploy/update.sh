@@ -4,7 +4,7 @@
 #   ./deploy/update.sh v2.1.5     # or roll to a specific release tag
 #
 # Pulls the CI-built, scanned image from GHCR and recreates the gameserver
-# container; refreshes the compose file / Caddyfile from git. Falls back to sudo
+# container; refreshes the compose file from git. Falls back to sudo
 # automatically when the shell is not in the docker group. Reports the installed
 # version before and after, and appends a UTC-timestamped record to
 # deploy/update.log.
@@ -58,7 +58,7 @@ main() {
 
   local pull_status="ok"
   $dc compose pull gameserver || pull_status="failed"
-  $dc compose --profile edge up -d
+  $dc compose up -d
 
   sleep 3
   local health new_ver new_digest
