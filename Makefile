@@ -14,14 +14,14 @@ up:
 
 # Full edge stack (needs ./secrets/*.pem + ./gameserver.env).
 up-edge:
-	docker compose --profile edge up -d
+	docker compose up -d
 
 # Tear down the whole stack (keeps named volumes).
 down:
-	docker compose --profile edge down
+	docker compose down
 
 logs:
-	docker compose --profile edge logs -f
+	docker compose logs -f
 
 # Drive synthetic games at a local/throwaway server. Pass args via ARGS, e.g.
 #   make loadtest ARGS="--addr localhost:8000 --rooms 200 --hold 60"
