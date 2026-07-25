@@ -6,6 +6,8 @@ import pytest
 from tests.conftest import pygame_display
 from chessshootout.frontend.skillcheck.juice import (
     Trauma, Hitstop, sakurai_vibrate, ease_out_back, torn_sprite, flash_sprite,
+    TRAUMA_DECAY_PER_S, HITSTOP_CAP_MS, TORN_MAX_TIER,
+    _TORN_NOTCHES, _TORN_NOTCH_FRAC, _TORN_CRACKS,
 )
 
 
@@ -48,6 +50,25 @@ def _mean_rgb_of_opaque(surf):
                 total[2] += px[2]
                 n += 1
     return sum(total) / (3 * n)
+
+
+# --- module constants -------------------------------------------------------
+
+def test_named_defaults_are_the_live_tuned_values():
+    """The tuned defaults are named constants so other modules can reference
+    them; the constructors must keep defaulting to those exact values."""
+    assert Trauma()._decay_per_s == TRAUMA_DECAY_PER_S
+    assert Hitstop()._cap_ms == HITSTOP_CAP_MS
+
+
+def test_torn_max_tier_covers_exactly_the_tier_tables():
+    """TORN_MAX_TIER is public (the check views clamp damage tiers against it),
+    so the per-tier tables must cover exactly tiers 1..TORN_MAX_TIER — a table
+    edit that drifts from the constant is a silent KeyError at draw time."""
+    expected = set(range(1, TORN_MAX_TIER + 1))
+    assert set(_TORN_NOTCHES) == expected
+    assert set(_TORN_NOTCH_FRAC) == expected
+    assert set(_TORN_CRACKS) == expected
 
 
 # --- Trauma -----------------------------------------------------------------

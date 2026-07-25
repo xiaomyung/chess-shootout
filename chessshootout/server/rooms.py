@@ -11,7 +11,6 @@ from chessshootout.backend.backend import Backend
 from chessshootout.backend.utils import Square
 from chessshootout.server.protocol import GRACE_SECONDS, HEARTBEAT_TIMEOUT_SECONDS
 from chessshootout.skillcheck import online
-from chessshootout.skillcheck.online import SKILLCHECK_DEADLINE_MS
 from chessshootout.skillcheck.types import SkillCheckKind
 
 
@@ -59,12 +58,21 @@ class PendingSkillCheck:
     value_diff: int
     start_ms: float
     expires_at_ms: float
-    deadline_ms: float = SKILLCHECK_DEADLINE_MS
+    deadline_ms: float = online.SKILLCHECK_DEADLINE_MS
     miss_count: int = 0
     captured_value: int = 0
     progress: int = 0
     last_hit_pop: int = -1
     last_input_ms: float = -1.0
+    _challenge: object = field(default=None, repr=False)
+
+    @property
+    def challenge(self):
+        if self._challenge is None:
+            self._challenge = online.challenge_from(
+                self.kind, self.seed, self.value_diff, self.deadline_ms,
+                self.captured_value)
+        return self._challenge
 
     def is_expired(self, now_ms):
         return now_ms > self.expires_at_ms
@@ -72,9 +80,7 @@ class PendingSkillCheck:
     def is_dead(self, now_ms):
         if self.is_expired(now_ms):
             return True
-        challenge = online.challenge_from(
-            self.kind, self.seed, self.value_diff, self.deadline_ms, self.captured_value)
-        return online.check_expired(self.kind, challenge, now_ms - self.start_ms,
+        return online.check_expired(self.kind, self.challenge, now_ms - self.start_ms,
                                     self.miss_count, self.progress, self.last_hit_pop)
 
 

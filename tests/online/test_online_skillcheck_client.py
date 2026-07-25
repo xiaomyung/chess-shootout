@@ -980,7 +980,7 @@ def test_combo_presses_relay_directions_in_prompt_order():
     for progress, (sent_elapsed, direction, _, _) in enumerate(client.shot_calls):
         assert online.shot_wins(SkillCheckKind.COMBO, challenge, sent_elapsed, 0, 5000.0,
                                 progress=progress, direction=direction) is True
-    assert ctrl.progress == challenge.prompt_count
+    assert ctrl._progress == challenge.prompt_count
     assert ctrl.landed is None, "the client never paints its own verdict online"
     assert app.game.skillcheck_overlay.is_active()
 
@@ -1017,12 +1017,12 @@ def test_combo_spectate_mirror_steps_the_strip_with_progress():
     app.coordinator._handle_skill_check_spectate_shot(
         {"elapsed_ms": 700.0, "miss_count": 0, "won": False, "progress": 1,
          "direction": challenge.prompts[0], "target_row": None, "target_col": None})
-    assert ctrl.progress == 1, "the spectated strip advances with the relayed progress"
+    assert ctrl._progress == 1, "the spectated strip advances with the relayed progress"
     app.coordinator._handle_skill_check_spectate_shot(
         {"elapsed_ms": 1200.0, "miss_count": 0, "won": False, "progress": 1,
          "direction": "up", "target_row": None, "target_col": None})
-    assert ctrl.progress == 1
-    assert ctrl.wrong_count == 1, "a relayed wrong press strikes a pip instead"
+    assert ctrl._progress == 1
+    assert ctrl._wrong_count == 1, "a relayed wrong press strikes a pip instead"
 
 
 def test_resume_reopens_a_whack_check_with_progress_and_captured_value():
@@ -1058,5 +1058,5 @@ def test_resume_reopens_a_combo_check_with_progress():
     ctrl = app.game.skillcheck_overlay._controller
     assert isinstance(ctrl, ComboController)
     assert ctrl._online is True and ctrl._passive is False
-    assert ctrl.progress == 2, "the strip reopens two chevrons in"
+    assert ctrl._progress == 2, "the strip reopens two chevrons in"
     assert pg.time.get_ticks() - ctrl.start_ms == pytest.approx(800, abs=80), "back-dated start"

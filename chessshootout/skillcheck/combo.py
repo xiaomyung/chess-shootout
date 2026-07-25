@@ -31,7 +31,8 @@ class ComboChallenge:
         n_deadline = int((deadline_ms - COMBO_INTRO_MS) / COMBO_MS_PER_PROMPT)
         n = max(COMBO_MIN_PROMPTS, min(n_value, n_deadline))
         floats = seeded_floats(f"combo:{seed}", COMBO_PROMPT_COUNT_MAX)[:n]
-        prompts = tuple(COMBO_DIRECTIONS[int(f * 4) % 4] for f in floats)
+        span = len(COMBO_DIRECTIONS)
+        prompts = tuple(COMBO_DIRECTIONS[int(f * span) % span] for f in floats)
         return cls(prompts=prompts, deadline_ms=deadline_ms)
 
     def expected(self, index):

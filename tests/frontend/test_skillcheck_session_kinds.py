@@ -2,8 +2,9 @@
 the controller the SAME hole squares the pure engine derives from the frozen board
 (seed + captured value + capture square + occupied set), a COMBO gate threads the
 capturer's cell-scaled sprite and the captured value into the challenge, and the
-px->board inverse the session builds off Board.cell_rect round-trips square centers
-on both orientations. Victim-square suppression now covers {AIM, WHACK, COMBO}
+controller's own geom-derived affine — the single owner of the px->board inverse —
+round-trips square centers on both orientations. Victim-square suppression now covers
+{AIM, WHACK, COMBO}
 while sync_aim_check_gun stays an AIM-only coupling, and every path that discards a
 live controller (teardown, screen exit, new-game reset, overlay replacement) calls
 close() so the whack check's hidden OS cursor can never leak. The input swallow
@@ -11,8 +12,8 @@ path is pinned: arrows reach the combo pad, never move-stepping.
 
 A failed WHACK hands the taunt to the BOARD layer: the session stores the check
 seed at overlay-open, and on a fail calls screen.show_taunt(victim_sq,
-pick_taunt(seed)) — deterministic per seed, so mover and spectator show the same
-line — plus the taunt sound for the mover only (the spectate mirror stays muted).
+mole.pick_taunt(seed)) — deterministic per seed, so mover and spectator show the
+same line — plus the taunt sound for the mover only (the spectate mirror stays muted).
 The seed clears on every terminal path so a stale seed can never leak into the
 next check's taunt.
 """
@@ -25,7 +26,8 @@ from tests.conftest import pygame_display
 from chessshootout.backend.pieces import PieceColor, PieceType
 from chessshootout.backend.utils import Square
 from chessshootout.frontend.skillcheck.combo_view import ComboController, COMBO_TIME_LIMIT_MS
-from chessshootout.frontend.skillcheck.mole_view import MoleController, pick_taunt
+from chessshootout.frontend.skillcheck.mole_view import MoleController
+from chessshootout.frontend.skillcheck.registry import build_controller
 from chessshootout.skillcheck import mole
 from chessshootout.skillcheck.combo import ComboChallenge
 from chessshootout.skillcheck.coordinator import move_roll_key
@@ -101,16 +103,23 @@ def test_local_whack_gate_threads_the_captured_value_into_the_challenge():
     assert len(ctrl._hole_squares) == 5
 
 
-def test_px_to_board_round_trips_square_centers_on_both_orientations():
+def test_shot_inverse_round_trips_square_centers_on_both_orientations():
+    # The controller's affine (derived from the geom the session hands it) is the
+    # only px->board inverse left — it must agree with Board.cell_rect either way up.
     app = _local_app()
-    session = app.game.skillcheck_session
+    board = app.game.board
     for flipped in (False, True):
-        app.game.board.flipped = flipped
+        board.flipped = flipped
+        ctrl = build_controller(
+            SkillCheckKind.WHACK, seed="inv-seed", cell_rect=board.cell_rect(Square(3, 3)),
+            now_ms=0, deadline_ms=5000, captured_value=1, hole_squares=((2, 2),),
+            geom=lambda sq: board.cell_rect(sq).center)
         for row, col in ((0, 0), (3, 3), (7, 7), (2, 5)):
-            center = app.game.board.cell_rect(Square(row, col)).center
-            assert session._px_to_board(center) == (row + 0.5, col + 0.5), \
+            center = board.cell_rect(Square(row, col)).center
+            assert ctrl._shot_target(center) == (row + 0.5, col + 0.5), \
                 "flipped={} square ({},{})".format(flipped, row, col)
-    app.game.board.flipped = False
+        ctrl.close()
+    board.flipped = False
 
 
 def test_local_combo_gate_passes_attacker_surface_and_captured_value():
@@ -192,7 +201,7 @@ def test_failed_whack_taunts_from_the_victim_square_on_the_board_layer():
     app.game.skillcheck_session._on_skillcheck_done(context, False)
     assert app.game._taunt_square == to, "the taunt bubble anchors to the surviving victim"
     assert app.game.taunt_bubble.shown_at is not None
-    assert app.game.taunt_bubble.text == pick_taunt(seed).upper(), \
+    assert app.game.taunt_bubble.text == mole.pick_taunt(seed).upper(), \
         "the line comes from the per-check seed, not the controller"
     app.sound_manager.play_mole_taunt.assert_called_once()
     assert app.game.skillcheck_session.active_seed is None, "the seed clears at resolution"
@@ -217,7 +226,7 @@ def test_online_whack_fail_shows_the_board_taunt_with_sound():
     session._on_online_skillcheck_done(
         (sq(4, 3), sq(3, 3), None, SkillCheckKind.WHACK), False)
     assert app.game._taunt_square == sq(3, 3)
-    assert app.game.taunt_bubble.text == pick_taunt("wire-seed").upper(), \
+    assert app.game.taunt_bubble.text == mole.pick_taunt("wire-seed").upper(), \
         "both clients derive the same line from the same wire seed"
     app.sound_manager.play_mole_taunt.assert_called_once()
     assert session.active_seed is None
@@ -314,6 +323,6 @@ def test_arrow_keys_reach_the_combo_pad_not_move_stepping():
     pg.event.post(pg.event.Event(pg.KEYDOWN, {"key": pg.K_LEFT, "unicode": "", "mod": 0}))
     app.input_router.check_events()
     app.game.board.step_review.assert_not_called()
-    assert ctrl.progress + ctrl.wrong_count == 1, "the press registered on the combo pad"
+    assert ctrl._progress + ctrl._wrong_count == 1, "the press registered on the combo pad"
     pg.event.clear()
     app.game.skillcheck_session.teardown_skillcheck_overlay()

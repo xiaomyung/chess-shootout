@@ -38,6 +38,7 @@ WHACK_COMBO_SLOTS = {
     "mole_pop": "skillcheck/mole_pop",
     "whack_hit": "skillcheck/whack_hit",
     "whack_kill": "skillcheck/whack_kill",
+    "whack_dry": "skillcheck/whack_dry",
     "mole_taunt": "skillcheck/mole_taunt",
     "whiff_ricochet": "skillcheck/whiff_ricochet",
     "combo_hit": "skillcheck/combo_hit",

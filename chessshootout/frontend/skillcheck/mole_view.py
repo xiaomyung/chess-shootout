@@ -1,12 +1,13 @@
 import math
+import typing
 
 import pygame as pg
 
-from chessshootout.backend.utils import Square
+from chessshootout.backend.utils import BOARD_SIZE, Square
 from chessshootout.frontend.skillcheck.controller import (
     SkillCheckController, SKILLCHECK_RESULT_HOLD_MS)
 from chessshootout.frontend.skillcheck.juice import (
-    Trauma, Hitstop, sakurai_vibrate, ease_out_back, torn_sprite, flash_sprite)
+    Trauma, Hitstop, sakurai_vibrate, ease_out_back, torn_sprite, flash_sprite, TORN_MAX_TIER)
 from chessshootout.frontend.visual.cache import new_size_cache, memoized_surface
 from chessshootout.frontend.visual.colors import Colors
 from chessshootout.frontend.visual.draw import cosine_pulse, rounded_rect_surface, supersample
@@ -64,24 +65,33 @@ MOLE_VIEW_CASING_GRAVITY_FRAC = 7.0
 MOLE_VIEW_CASING_FALL_FRAC = 0.7
 MOLE_VIEW_CASING_SPIN_DPS = 520.0
 MOLE_VIEW_CASING_SPIN_BUCKET_DEG = 20
+MOLE_VIEW_CASING_UP_JITTER = (0.7, 0.6)
 MOLE_VIEW_PUFF_MS = 320.0
 MOLE_VIEW_PUFF_COUNT = 5
 MOLE_VIEW_PUFF_R_FRAC = 0.09
 MOLE_VIEW_PUFF_SPEED_FRAC = 0.9
+MOLE_VIEW_PUFF_SPEED_JITTER = (0.5, 0.5)
 MOLE_VIEW_DEBRIS_MS = 420.0
 MOLE_VIEW_DEBRIS_COUNT = 7
 MOLE_VIEW_DEBRIS_R_FRAC = 0.05
 MOLE_VIEW_DEBRIS_SPEED_FRAC = 1.6
+MOLE_VIEW_DEBRIS_SPEED_JITTER = (0.4, 0.6)
 MOLE_VIEW_DEBRIS_GRAVITY_FRAC = 4.0
 MOLE_VIEW_IMPACT_MS = 260.0
 MOLE_VIEW_IMPACT_R_FRAC = 0.12
-MOLE_VIEW_TAUNTS = ("missed me", "lol", "nice aim", "rip", "too slow")
-MOLE_VIEW_TARGET_MAX = 7.999
+MOLE_VIEW_FALLBACK_SPREAD_FRAC = 1.2
+MOLE_VIEW_TARGET_MAX = BOARD_SIZE - 0.001
 
 
-def pick_taunt(seed):
-    roll = seeded_floats("moletaunt:{}".format(seed), 1)[0]
-    return MOLE_VIEW_TAUNTS[int(roll * len(MOLE_VIEW_TAUNTS)) % len(MOLE_VIEW_TAUNTS)]
+class MoleCasing(typing.NamedTuple):
+    spawn_ms: float
+    x0: float
+    y0: float
+    vx: float
+    vy: float
+    gravity: float
+    t_land: float
+    spin: float
 
 
 _PIT_DARK = pg.Color(Colors.well_deep)
@@ -170,18 +180,21 @@ def _casing_rotated(w, h, bucket):
     return memoized_surface(_MOLE_STATIC_CACHE, ("casing_rot", w, h, bucket), build)
 
 
+def _expire(items, now_ms, ttl_ms):
+    while items and now_ms - items[0][0] >= ttl_ms:
+        items.pop(0)
+
+
 class MoleController(SkillCheckController):
 
     def __init__(self, challenge, cell_rect, now_ms, deadline_ms, *, hole_squares=None,
-                 px_to_board=None, victim_surface=None, board_rect=None, geom=None,
-                 from_sq=None, victim_sq=None, attacker_type=None, shot_sound=None,
-                 on_shot=None, miss_count=0, progress=0, passive=False, audio=None):
+                 victim_surface=None, geom=None, shot_sound=None, on_shot=None,
+                 progress=0, passive=False, audio=None):
         self.challenge = challenge
         self.start_ms = now_ms
         self._now = now_ms
         self.deadline_ms = deadline_ms
         self._hole_squares = tuple(hole_squares) if hole_squares is not None else ()
-        self._px_to_board = px_to_board
         self._geom = geom
         self._shot_sound = shot_sound
         self._on_shot = on_shot
@@ -193,7 +206,7 @@ class MoleController(SkillCheckController):
         self._victim = victim_surface
         self._victim_cache = {}
         self._squash_cache = {}
-        self._owned = {}
+        self._owned_pit = None
         self._progress = progress
         self._torn_key = hash(challenge.pops)
         self._last_hit_pop = -1
@@ -202,26 +215,16 @@ class MoleController(SkillCheckController):
             self._last_hit_pop = resumed if resumed is not None else -1
         self._last_hit_anim_ms = None
         self._last_hit_px = None
-        self._hit_flash_ms = None
-        self._vibrate_ms = None
-        self._vibrate_dur_ms = 0.0
+        self._reset_effects(cell_rect.center)
         self._committed_at = None
         self._resolved_at = None
         self._landed = None
         self._win_ms = None
         self._last_shot_ms = None
         self._shot_count = 0
-        self._flash_ms = None
-        self._flash_px = cell_rect.center
         self._next_telegraph = 0
         self._next_pop = 0
-        self._trauma = Trauma()
-        self._hitstop = Hitstop()
         self._anim_ms = float(now_ms)
-        self._casings = []
-        self._puffs = []
-        self._debris = []
-        self._impacts = []
         first = challenge.pops[0]
         self._intro_ms = max(min(MOLE_INTRO_MS, first.t_telegraph_ms), 1.0)
         self._cursor_hidden = False
@@ -230,6 +233,19 @@ class MoleController(SkillCheckController):
             self._cursor_hidden = True
         self._apply_geometry(cell_rect)
         self._cue("play_mole_fall")
+
+    def _reset_effects(self, flash_px):
+        self._hit_flash_ms = None
+        self._vibrate_ms = None
+        self._vibrate_dur_ms = 0.0
+        self._flash_ms = None
+        self._flash_px = flash_px
+        self._trauma = Trauma()
+        self._hitstop = Hitstop()
+        self._casings = []
+        self._puffs = []
+        self._debris = []
+        self._impacts = []
 
     def _apply_geometry(self, cell_rect):
         cell = max(int(cell_rect.width), 1)
@@ -250,7 +266,7 @@ class MoleController(SkillCheckController):
         self._pip_h = max(int(cell * MOLE_VIEW_PIP_H_FRAC), 6)
         self._pip_gap = max(int(cell * MOLE_VIEW_PIP_GAP_FRAC), 2)
         self._squash_cache.clear()
-        self._owned.clear()
+        self._owned_pit = None
 
     def _scaled_victim(self, new_cell):
         if new_cell == self._victim_orig_cell:
@@ -279,7 +295,7 @@ class MoleController(SkillCheckController):
         if self._geom is not None:
             return tuple(self._geom(Square(row, col)) for row, col in self._hole_squares)
         n = len(self._hole_squares)
-        spread = self.cell_size * 1.2
+        spread = self.cell_size * MOLE_VIEW_FALLBACK_SPREAD_FRAC
         return tuple((int(self.center[0] + (i - (n - 1) / 2.0) * spread), self.center[1])
                      for i in range(n))
 
@@ -290,9 +306,6 @@ class MoleController(SkillCheckController):
         return (x0 + (col_f - 0.5) * dx, y0 + (row_f - 0.5) * dy)
 
     def _shot_target(self, pos):
-        if self._px_to_board is not None:
-            row_f, col_f = self._px_to_board(pos)
-            return (float(row_f), float(col_f))
         if self._affine is not None:
             x0, y0, dx, dy = self._affine
             return ((pos[1] - y0) / dy + 0.5, (pos[0] - x0) / dx + 0.5)
@@ -370,13 +383,15 @@ class MoleController(SkillCheckController):
         self._shot_count += 1
         cell = self.cell_size
         f = seeded_floats("molecasing:{}".format(self._shot_count), 3)
+        up_base, up_span = MOLE_VIEW_CASING_UP_JITTER
         vx = (f[0] * 2.0 - 1.0) * cell * MOLE_VIEW_CASING_VX_FRAC
-        vy = -cell * MOLE_VIEW_CASING_UP_FRAC * (0.7 + 0.6 * f[1])
+        vy = -cell * MOLE_VIEW_CASING_UP_FRAC * (up_base + up_span * f[1])
         g = cell * MOLE_VIEW_CASING_GRAVITY_FRAC
         fall = cell * MOLE_VIEW_CASING_FALL_FRAC
         t_land = (-vy + math.sqrt(vy * vy + 2.0 * g * fall)) / g
         spin = 1.0 if f[2] < 0.5 else -1.0
-        self._casings.append((self._now, float(pos[0]), float(pos[1]), vx, vy, g, t_land, spin))
+        self._casings.append(
+            MoleCasing(self._now, float(pos[0]), float(pos[1]), vx, vy, g, t_land, spin))
 
     def _spawn_puffs(self, pos):
         f = seeded_floats("molepuff:{}".format(self._shot_count + 1),
@@ -388,7 +403,7 @@ class MoleController(SkillCheckController):
                           MOLE_VIEW_DEBRIS_COUNT * 2)
         self._debris.append((self._now, float(pos[0]), float(pos[1]), f))
 
-    def spectate_shot(self, elapsed_ms, miss_count, won, progress=0, direction=None,
+    def spectate_shot(self, elapsed, miss_count, won, progress=0, direction=None,
                       target=None):
         px = None
         if target is not None:
@@ -400,6 +415,10 @@ class MoleController(SkillCheckController):
             self._progress = progress
             if px is not None:
                 self._last_hit_px = px
+            idx = self.challenge.pop_up_at(elapsed)
+            if idx is not None:
+                self._last_hit_pop = idx
+                self._last_hit_anim_ms = self._anim_ms
             self._hit_juice(progress >= self.challenge.hits_required)
         elif px is not None and not won:
             self._spawn_puffs(px)
@@ -436,12 +455,9 @@ class MoleController(SkillCheckController):
         self._trauma.update(now_ms)
         if dt > 0 and not self._hitstop.frozen(now_ms):
             self._anim_ms += dt
-        while self._puffs and now_ms - self._puffs[0][0] >= MOLE_VIEW_PUFF_MS:
-            self._puffs.pop(0)
-        while self._debris and now_ms - self._debris[0][0] >= MOLE_VIEW_DEBRIS_MS:
-            self._debris.pop(0)
-        while self._impacts and now_ms - self._impacts[0][0] >= MOLE_VIEW_IMPACT_MS:
-            self._impacts.pop(0)
+        _expire(self._puffs, now_ms, MOLE_VIEW_PUFF_MS)
+        _expire(self._debris, now_ms, MOLE_VIEW_DEBRIS_MS)
+        _expire(self._impacts, now_ms, MOLE_VIEW_IMPACT_MS)
         if self._committed_at is None:
             elapsed = now_ms - self.start_ms
             self._cue_schedule(elapsed)
@@ -506,12 +522,10 @@ class MoleController(SkillCheckController):
         return None
 
     def _owned_faded(self, base, fade):
-        owned = self._owned.get("pit")
-        if owned is None:
-            owned = base.copy()
-            self._owned["pit"] = owned
-        owned.set_alpha(max(int(fade * 255), 0))
-        return owned
+        if self._owned_pit is None:
+            self._owned_pit = base.copy()
+        self._owned_pit.set_alpha(max(int(fade * 255), 0))
+        return self._owned_pit
 
     def _draw_pits(self, window, elapsed, group):
         fade = 1.0
@@ -545,7 +559,7 @@ class MoleController(SkillCheckController):
         return _pit_telegraph_surface(self._pit_rx, self._pit_ry, bucket, danger)
 
     def _victim_sprite(self):
-        tier = min(self._progress, 3)
+        tier = min(self._progress, TORN_MAX_TIER)
         sprite = torn_sprite(self._victim, (self._torn_key, self.cell_size), tier)
         if self._flash_active():
             sprite = flash_sprite(sprite, (self._torn_key, self.cell_size, tier))
@@ -593,6 +607,12 @@ class MoleController(SkillCheckController):
         clip_h = max(int(h * height_frac), 1)
         window.blit(sprite, (cx - w // 2, base_y - clip_h), area=pg.Rect(0, 0, w, clip_h))
 
+    def _retreat_frame(self, idx, rt):
+        if rt >= 1.0:
+            return None
+        bucket = min(int(rt * MOLE_VIEW_SQUASH_BUCKETS), MOLE_VIEW_SQUASH_BUCKETS - 1)
+        return idx, MOLE_VIEW_POP_HEIGHT_FRAC * (1.0 - rt), bucket
+
     def _render_pop(self, elapsed):
         idx = None
         for i, pop in enumerate(self.challenge.pops):
@@ -602,19 +622,12 @@ class MoleController(SkillCheckController):
             return None
         pop = self.challenge.pops[idx]
         if idx == self._last_hit_pop and self._last_hit_anim_ms is not None:
-            rt = (self._anim_ms - self._last_hit_anim_ms) / MOLE_VIEW_RETREAT_MS
-            if rt >= 1.0:
-                return None
-            bucket = min(int(rt * MOLE_VIEW_SQUASH_BUCKETS), MOLE_VIEW_SQUASH_BUCKETS - 1)
-            return idx, MOLE_VIEW_POP_HEIGHT_FRAC * (1.0 - rt), bucket
+            return self._retreat_frame(
+                idx, (self._anim_ms - self._last_hit_anim_ms) / MOLE_VIEW_RETREAT_MS)
         if elapsed < pop.t_down_ms:
             rise = min((elapsed - pop.t_up_ms) / MOLE_VIEW_RISE_MS, 1.0)
             return idx, MOLE_VIEW_POP_HEIGHT_FRAC * ease_out_back(rise), 0
-        rt = (elapsed - pop.t_down_ms) / MOLE_VIEW_RETREAT_MS
-        if rt >= 1.0:
-            return None
-        bucket = min(int(rt * MOLE_VIEW_SQUASH_BUCKETS), MOLE_VIEW_SQUASH_BUCKETS - 1)
-        return idx, MOLE_VIEW_POP_HEIGHT_FRAC * (1.0 - rt), bucket
+        return self._retreat_frame(idx, (elapsed - pop.t_down_ms) / MOLE_VIEW_RETREAT_MS)
 
     def _draw_victim(self, window, elapsed, group):
         if self._victim is None:
@@ -642,6 +655,7 @@ class MoleController(SkillCheckController):
 
     def _draw_puffs(self, window):
         cell = self.cell_size
+        speed_base, speed_span = MOLE_VIEW_PUFF_SPEED_JITTER
         for spawn_ms, x, y, floats in self._puffs:
             tt = (self._now - spawn_ms) / MOLE_VIEW_PUFF_MS
             if not 0.0 <= tt < 1.0:
@@ -651,7 +665,8 @@ class MoleController(SkillCheckController):
             r = max(int(cell * MOLE_VIEW_PUFF_R_FRAC * (1.0 - tt)), 1)
             for j in range(MOLE_VIEW_PUFF_COUNT):
                 ang = floats[j * 2] * 2.0 * math.pi
-                speed = cell * MOLE_VIEW_PUFF_SPEED_FRAC * (0.5 + 0.5 * floats[j * 2 + 1])
+                speed = (cell * MOLE_VIEW_PUFF_SPEED_FRAC
+                         * (speed_base + speed_span * floats[j * 2 + 1]))
                 pg.draw.circle(window, color,
                                (int(x + math.cos(ang) * speed * t),
                                 int(y + math.sin(ang) * speed * t)), r)
@@ -659,6 +674,7 @@ class MoleController(SkillCheckController):
     def _draw_debris(self, window):
         cell = self.cell_size
         g = cell * MOLE_VIEW_DEBRIS_GRAVITY_FRAC
+        speed_base, speed_span = MOLE_VIEW_DEBRIS_SPEED_JITTER
         for spawn_ms, x, y, floats in self._debris:
             tt = (self._now - spawn_ms) / MOLE_VIEW_DEBRIS_MS
             if not 0.0 <= tt < 1.0:
@@ -667,7 +683,8 @@ class MoleController(SkillCheckController):
             r = max(int(cell * MOLE_VIEW_DEBRIS_R_FRAC * (1.0 - tt)), 1)
             for j in range(MOLE_VIEW_DEBRIS_COUNT):
                 ang = floats[j * 2] * 2.0 * math.pi
-                speed = cell * MOLE_VIEW_DEBRIS_SPEED_FRAC * (0.4 + 0.6 * floats[j * 2 + 1])
+                speed = (cell * MOLE_VIEW_DEBRIS_SPEED_FRAC
+                         * (speed_base + speed_span * floats[j * 2 + 1]))
                 px = x + math.cos(ang) * speed * t
                 py = y + math.sin(ang) * speed * t + 0.5 * g * t * t
                 pg.draw.circle(window, _DEBRIS_COLORS[j % len(_DEBRIS_COLORS)],

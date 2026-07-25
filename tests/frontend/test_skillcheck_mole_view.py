@@ -6,16 +6,17 @@ pit (hitstop freeze -> ease_out_back rise -> deadpan -> fry flash) through
 MOLE_VIEW_WIN_HOLD_MS, while deadline/quota exhaustion commits a fast fail: the
 pits fade, the victim draws nothing (the board-level restore drop takes over),
 and the overlay ends after MOLE_VIEW_FAIL_HOLD_MS. The taunt moved out of the
-controller entirely — module-level pick_taunt(seed) is deterministic per check
-seed so mover and spectator show the same line on the board layer. A telegraphing
+controller entirely — the pure engine's mole.pick_taunt(seed) is deterministic per
+check seed so mover and spectator show the same line on the board layer. A telegraphing
 pop that pop_mandatory marks as must-hit pulses a danger rim (Colors.loss lerp)
 instead of the plain white one. Online every registered shot relays exactly once
 with a keyword (row_f, col_f) target and the client never self-commits —
 resolve() carries the server verdict; a win holds the climb (WIN_HOLD) online and
 on the passive mirror, a fail holds the shared RESULT_HOLD. Passive mirrors
 swallow no input, never touch the OS cursor, stay muted, and replay the mover's
-shots via spectate_shot. The OS cursor hides on active construction and is
-restored on every terminal path.
+shots via spectate_shot — which mirrors the mover's pop bookkeeping so a relayed
+hit ducks the mole on the mirror too. The OS cursor hides on active construction
+and is restored on every terminal path.
 """
 
 import gc
@@ -28,11 +29,12 @@ import pytest
 from tests.conftest import pygame_display
 from chessshootout.frontend.skillcheck.controller import SKILLCHECK_RESULT_HOLD_MS
 from chessshootout.frontend.skillcheck.mole_view import (
-    MoleController, pick_taunt, MOLE_VIEW_FAIL_FADE_MS, MOLE_VIEW_FAIL_HOLD_MS,
+    MoleController, MOLE_VIEW_FAIL_FADE_MS, MOLE_VIEW_FAIL_HOLD_MS,
     MOLE_VIEW_WIN_HOLD_MS, MOLE_VIEW_HITSTOP_KILL_MS, MOLE_VIEW_WIN_CLIMB_MS,
-    MOLE_VIEW_WIN_DEADPAN_MS, MOLE_VIEW_TAUNTS, MOLE_VIEW_PIP_OFFSET_FRAC)
+    MOLE_VIEW_WIN_DEADPAN_MS, MOLE_VIEW_RETREAT_MS, MOLE_VIEW_PIP_OFFSET_FRAC)
 from chessshootout.frontend.visual.colors import Colors
-from chessshootout.skillcheck.mole import MoleChallenge, MolePop
+from chessshootout.skillcheck.mole import (
+    MoleChallenge, MolePop, MOLE_TAUNTS, pick_taunt)
 
 _pygame_init = pygame_display(640, 640)
 
@@ -287,6 +289,20 @@ def test_spectate_shot_adopts_progress_and_fires_the_hit_juice():
     assert ctrl._progress == 1, "a replay without a progress increase adopts nothing"
 
 
+def test_spectate_hit_ducks_the_mole_like_the_mover_sees():
+    # Without the pop bookkeeping the mirror would keep the mole standing until
+    # t_down (1500ms) while the mover already saw it duck on the hit.
+    ctrl = _mole(passive=True)
+    ctrl.update(800)
+    ctrl.spectate_shot(800.0, 0, True, progress=1, target=(2.5, 2.5))
+    assert ctrl._last_hit_pop == 0, "the mirror adopts the pop the mover just hit"
+    frame = ctrl._render_pop(800.0)
+    assert frame is not None and frame[0] == 0, "the hit pop is the one being drawn"
+    ctrl.update(800 + int(MOLE_VIEW_RETREAT_MS) + 40)
+    assert ctrl._render_pop(800.0 + MOLE_VIEW_RETREAT_MS + 40) is None, \
+        "the hit pop finishes its retreat instead of standing to t_down"
+
+
 def test_spectate_miss_spawns_dust_without_progress():
     ctrl = _mole(passive=True)
     ctrl.update(700)
@@ -412,7 +428,7 @@ def test_pick_taunt_is_deterministic_per_seed_and_varied_across_seeds():
     assert pick_taunt("seed-x") == pick_taunt("seed-x"), \
         "mover and spectator derive the same line from the same check seed"
     texts = {pick_taunt("seed-{}".format(i)) for i in range(30)}
-    assert texts <= set(MOLE_VIEW_TAUNTS)
+    assert texts <= set(MOLE_TAUNTS)
     assert len(texts) >= 3, "fresh per-check seeds actually rotate the taunt pool"
 
 

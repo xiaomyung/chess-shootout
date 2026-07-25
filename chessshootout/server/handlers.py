@@ -190,10 +190,31 @@ async def _apply_move(app, room, color, from_sq, to_sq, promotion,
     return "applied"
 
 
-def _occupied_squares(backend):
-    return [(row, col)
-            for row in range(backend.SIZE) for col in range(backend.SIZE)
-            if backend.state[row][col] is not None]
+def _shot_payload_ok(pending, msg):
+    if pending.kind == SkillCheckKind.COMBO and msg.direction is None:
+        return False
+    if pending.kind == SkillCheckKind.WHACK and (msg.target_row is None
+                                                 or msg.target_col is None):
+        return False
+    return True
+
+
+def _adjudicate_shot(pending, msg, elapsed, backend):
+    is_whack = pending.kind == SkillCheckKind.WHACK
+    challenge = pending.challenge
+    holes = None
+    if is_whack:
+        holes = mole.hole_squares(
+            pending.seed, pending.captured_value,
+            (pending.to_sq.row, pending.to_sq.col),
+            mole.occupied_squares(backend.state, backend.SIZE), backend.SIZE)
+    hit = online.shot_wins(pending.kind, challenge, elapsed, pending.miss_count,
+                           pending.deadline_ms, progress=pending.progress,
+                           direction=msg.direction,
+                           target=(msg.target_row, msg.target_col) if is_whack else None,
+                           hole_squares=holes, last_hit_pop=pending.last_hit_pop)
+    won = hit and pending.progress + 1 >= online.hits_required(pending.kind, challenge)
+    return challenge, hit, won
 
 
 async def handle_skill_check_shot(app, websocket, room, color, raw):
@@ -206,42 +227,27 @@ async def handle_skill_check_shot(app, websocket, room, color, raw):
         msg = SkillCheckShotMessage.model_validate_json(raw)
     except ValidationError:
         return "noop"
+    if not _shot_payload_ok(pending, msg):
+        return "noop"
     is_whack = pending.kind == SkillCheckKind.WHACK
-    if pending.kind == SkillCheckKind.COMBO and msg.direction is None:
-        return "noop"
-    if is_whack and (msg.target_row is None or msg.target_col is None):
-        return "noop"
     recv_ms = app.state.now_ms()
+    raw_elapsed = recv_ms - pending.start_ms
     elapsed = online.adjudicated_elapsed_ms(msg.client_elapsed_ms, recv_ms, pending.start_ms)
     gap = online.min_inter_input_ms(pending.kind)
-    if gap > 0 and pending.last_input_ms >= 0 and elapsed - pending.last_input_ms < gap:
+    if gap > 0 and pending.last_input_ms >= 0 and raw_elapsed - pending.last_input_ms < gap:
         return "noop"
-    challenge = online.challenge_from(pending.kind, pending.seed, pending.value_diff,
-                                      pending.deadline_ms, pending.captured_value)
-    holes = None
-    if is_whack:
-        holes = mole.hole_squares(
-            pending.seed, pending.captured_value,
-            (pending.to_sq.row, pending.to_sq.col),
-            _occupied_squares(room.backend), room.backend.SIZE)
-    hit = online.shot_wins(pending.kind, challenge, elapsed, pending.miss_count,
-                           pending.deadline_ms, progress=pending.progress,
-                           direction=msg.direction,
-                           target=(msg.target_row, msg.target_col) if is_whack else None,
-                           hole_squares=holes, last_hit_pop=pending.last_hit_pop)
+    challenge, hit, won = _adjudicate_shot(pending, msg, elapsed, room.backend)
     progress_after = pending.progress + (1 if hit else 0)
-    won = hit and progress_after >= online.hits_required(pending.kind, challenge)
     log.debug("skillcheck shot room=%s kind=%s raw_ms=%.1f client=%.1f effective=%d "
               "miss=%d subfloor=%s", room.room_id, pending.kind.value,
-              recv_ms - pending.start_ms, msg.client_elapsed_ms, elapsed,
+              raw_elapsed, msg.client_elapsed_ms, elapsed,
               pending.miss_count, elapsed < online.SKILLCHECK_HUMAN_FLOOR_MS)
-    relay = SkillCheckSpectateShotMessage(
-        elapsed_ms=elapsed, miss_count=pending.miss_count, won=won,
-        progress=progress_after, direction=msg.direction,
-        target_row=msg.target_row, target_col=msg.target_col)
     opp_ws = connections.get_for_color(room, room.opp_color(color))
     if opp_ws is not None:
-        await send(opp_ws, relay)
+        await send(opp_ws, SkillCheckSpectateShotMessage(
+            elapsed_ms=elapsed, miss_count=pending.miss_count, won=won,
+            progress=progress_after, direction=msg.direction,
+            target_row=msg.target_row, target_col=msg.target_col))
     if room.pending_skillcheck is not pending:
         return "noop"
     if won:
@@ -255,7 +261,7 @@ async def handle_skill_check_shot(app, websocket, room, color, raw):
         pending.progress = progress_after
         if is_whack:
             pending.last_hit_pop = challenge.pop_up_at(elapsed)
-        pending.last_input_ms = elapsed
+        pending.last_input_ms = raw_elapsed
         return "skillcheck_hit"
     if pending.kind == SkillCheckKind.WHEEL \
             or online.is_past_deadline(elapsed, pending.deadline_ms) \
@@ -267,7 +273,7 @@ async def handle_skill_check_shot(app, websocket, room, color, raw):
         await resolve_skillcheck_fail(rooms, connections, room)
         return "skillcheck_fail"
     pending.miss_count += 1
-    pending.last_input_ms = elapsed
+    pending.last_input_ms = raw_elapsed
     return "skillcheck_miss"
 
 

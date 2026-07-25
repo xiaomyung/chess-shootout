@@ -1,4 +1,3 @@
-import importlib.util
 import logging
 from unittest.mock import MagicMock, call
 
@@ -8,10 +7,12 @@ import pytest
 from tests.conftest import pygame_display
 from chessshootout.backend.utils import Square
 from chessshootout.frontend.skillcheck.aim_view import AimController
-from chessshootout.frontend.skillcheck.controller import SKILLCHECK_RESULT_HOLD_MS
 from chessshootout.frontend.skillcheck.combo_view import (
-    ComboController, COMBO_RESULT_HOLD_MS, COMBO_BRILLIANT_TEXT, COMBO_CLEAN_TEXT,
-    COMBO_FAIL_TEXT, COMBO_STREAK_FIRE)
+    ComboController, COMBO_VIEW_RESULT_HOLD_MS, COMBO_VIEW_BRILLIANT_TEXT, COMBO_VIEW_CLEAN_TEXT,
+    COMBO_VIEW_FAIL_TEXT, COMBO_VIEW_STREAK_FIRE,
+    _JUDGE_BRILLIANT, _JUDGE_CLEAN, _JUDGE_FAIL, _JUDGE_TEXT)
+from chessshootout.frontend.skillcheck.controller import SKILLCHECK_RESULT_HOLD_MS
+from chessshootout.frontend.skillcheck.mole_view import MoleController
 from chessshootout.frontend.skillcheck.registry import build_controller
 from chessshootout.frontend.skillcheck.wheel_view import WheelController
 from chessshootout.skillcheck.combo import ComboChallenge, COMBO_MAX_WRONGS
@@ -90,10 +91,10 @@ def test_local_correct_run_commits_win():
     audio = MagicMock()
     ctrl = _combo(audio=audio)
     _run_correct(ctrl)
-    assert ctrl.progress == 5
+    assert ctrl._progress == 5
     assert ctrl.landed is True
     assert ctrl.done is False
-    ctrl.update(750 + COMBO_RESULT_HOLD_MS)
+    ctrl.update(750 + COMBO_VIEW_RESULT_HOLD_MS)
     assert ctrl.done is True
     audio.play_combo_complete.assert_called_once()
     assert audio.play_combo_hit.call_count == 5
@@ -103,16 +104,16 @@ def test_wrong_press_locks_and_lockout_press_is_ignored():
     ctrl = _combo()
     ctrl.update(150)
     ctrl.handle_event(_key("down"))
-    assert ctrl.progress == 0
-    assert ctrl.wrong_count == 1
+    assert ctrl._progress == 0
+    assert ctrl._wrong_count == 1
     assert ctrl._lockout_until > ctrl._now
     ctrl.update(200)
     ctrl.handle_event(_key("up"))
-    assert ctrl.progress == 0, "a press inside the lockout does not advance"
-    assert ctrl.wrong_count == 1, "a lockout-swallowed press is not counted as a wrong"
+    assert ctrl._progress == 0, "a press inside the lockout does not advance"
+    assert ctrl._wrong_count == 1, "a lockout-swallowed press is not counted as a wrong"
     ctrl.update(400)
     ctrl.handle_event(_key("up"))
-    assert ctrl.progress == 1, "after the lockout the correct press lands"
+    assert ctrl._progress == 1, "after the lockout the correct press lands"
 
 
 def test_third_wrong_commits_fail():
@@ -122,10 +123,10 @@ def test_third_wrong_commits_fail():
         t += 300
         ctrl.update(t)
         ctrl.handle_event(_key("down"))
-    assert ctrl.wrong_count == COMBO_MAX_WRONGS
+    assert ctrl._wrong_count == COMBO_MAX_WRONGS
     assert ctrl.landed is False
-    assert ctrl._judgement == COMBO_FAIL_TEXT
-    ctrl.update(t + COMBO_RESULT_HOLD_MS)
+    assert ctrl._judgement == _JUDGE_FAIL
+    ctrl.update(t + COMBO_VIEW_RESULT_HOLD_MS)
     assert ctrl.done is True
 
 
@@ -135,7 +136,7 @@ def test_deadline_commits_fail():
     assert ctrl.landed is None
     ctrl.update(5000)
     assert ctrl.landed is False
-    ctrl.update(5000 + COMBO_RESULT_HOLD_MS)
+    ctrl.update(5000 + COMBO_VIEW_RESULT_HOLD_MS)
     assert ctrl.done is True
 
 
@@ -149,9 +150,9 @@ def test_mouse_click_on_wedge_advances():
     ctrl = _combo(board_rect=pg.Rect(0, 0, 700, 700))
     ctrl.update(150)
     ctrl.handle_event(_click(_wedge_center(ctrl, "up")))
-    assert ctrl.progress == 1
+    assert ctrl._progress == 1
     ctrl.handle_event(_click((5, 5)))
-    assert ctrl.progress == 1, "a click outside the pad circle is ignored"
+    assert ctrl._progress == 1, "a click outside the pad circle is ignored"
 
 
 def test_wedge_hit_test_resolves_all_four_directions():
@@ -184,22 +185,34 @@ def test_judgement_tiers_track_driven_latency():
     brilliant = _combo()
     brilliant.update(300)
     brilliant.handle_event(_key("up"))
-    assert brilliant._judgement == COMBO_BRILLIANT_TEXT
+    assert brilliant._judgement == _JUDGE_BRILLIANT
     clean = _combo()
     clean.update(500)
     clean.handle_event(_key("up"))
-    assert clean._judgement == COMBO_CLEAN_TEXT
+    assert clean._judgement == _JUDGE_CLEAN
     plain = _combo()
     plain.update(800)
     plain.handle_event(_key("up"))
     assert plain._judgement is None
 
 
+def test_judgement_tokens_map_to_the_shipped_copy():
+    # the state token is decoupled from the display string; the rendered copy is pinned
+    # here so a token rename can never silently change what the player reads.
+    assert _JUDGE_TEXT == {
+        _JUDGE_BRILLIANT: COMBO_VIEW_BRILLIANT_TEXT,
+        _JUDGE_CLEAN: COMBO_VIEW_CLEAN_TEXT,
+        _JUDGE_FAIL: COMBO_VIEW_FAIL_TEXT,
+    }
+    assert (COMBO_VIEW_BRILLIANT_TEXT, COMBO_VIEW_CLEAN_TEXT, COMBO_VIEW_FAIL_TEXT) == (
+        "BRILLIANT!", "CLEAN!", "BLUNDER??")
+
+
 def test_repeated_prompts_resolve():
     prompts = ("up", "up", "down", "down", "left")
     ctrl = _combo(prompts)
     _run_correct(ctrl, prompts)
-    assert ctrl.progress == 5
+    assert ctrl._progress == 5
     assert ctrl.landed is True
 
 
@@ -211,7 +224,7 @@ def test_online_relays_each_accepted_press_with_direction_keyword():
     for relayed, direction in zip(on_shot.call_args_list, _PROMPTS):
         assert relayed.kwargs["direction"] == direction
     assert ctrl.landed is None, "the client never self-commits a terminal online"
-    assert ctrl.progress == 5, "the displayed strip still advances optimistically"
+    assert ctrl._progress == 5, "the displayed strip still advances optimistically"
 
 
 def test_online_does_not_relay_a_lockout_swallowed_press():
@@ -243,9 +256,9 @@ def test_passive_ignores_input_and_mirrors_progress():
     assert ctrl.handle_event(_key("up")) is False
     ctrl.update(100)
     ctrl.spectate_shot(90, 0, False, progress=1)
-    assert ctrl.progress == 1, "progress adoption advances the mirrored strip"
+    assert ctrl._progress == 1, "progress adoption advances the mirrored strip"
     ctrl.spectate_shot(150, 0, False, progress=1)
-    assert ctrl.wrong_count == 1, "a non-advancing spectate shot registers a wrong pip"
+    assert ctrl._wrong_count == 1, "a non-advancing spectate shot registers a wrong pip"
     audio.play_combo_hit.assert_not_called()
     audio.play_combo_wrong.assert_not_called()
 
@@ -270,14 +283,11 @@ def test_registry_builds_combo_from_seed_deterministically():
     assert one.challenge.prompts == two.challenge.prompts, "same seed -> same prompts"
 
 
-def test_registry_builds_mole_when_mole_view_exists():
-    if importlib.util.find_spec("chessshootout.frontend.skillcheck.mole_view") is None:
-        pytest.skip("mole_view sibling not landed yet")
-    from chessshootout.frontend.skillcheck.mole_view import MoleController
+def test_registry_builds_mole_for_the_whack_kind():
     ctrl = build_controller(
         SkillCheckKind.WHACK, seed="s", cell_rect=pg.Rect(0, 0, 80, 80), now_ms=0,
         deadline_ms=5000, value_diff=2, captured_value=4,
-        hole_squares=((3, 3), (3, 4), (4, 3), (4, 4)), px_to_board=lambda pos: (0.0, 0.0),
+        hole_squares=((3, 3), (3, 4), (4, 3), (4, 4)),
         board_rect=pg.Rect(0, 0, 640, 640), geom=lambda sq: (0, 0),
         victim_surface=pg.Surface((80, 80), pg.SRCALPHA))
     assert isinstance(ctrl, MoleController)
@@ -291,7 +301,7 @@ def test_determinism_same_script_same_strip_and_pips():
         for direction, t in script:
             ctrl.update(t)
             ctrl.handle_event(_key(direction))
-        return ctrl.progress, ctrl.wrong_count
+        return ctrl._progress, ctrl._wrong_count
 
     assert run() == (2, 1)
     assert run() == run()
@@ -400,7 +410,7 @@ def test_brilliant_streak_ignites_fire_and_a_wrong_resets_it():
     for i, direction in enumerate(_PROMPTS[:3]):
         ctrl.update(150 * (i + 1))
         ctrl.handle_event(_key(direction))
-    assert ctrl._brilliant_streak == COMBO_STREAK_FIRE, \
+    assert ctrl._brilliant_streak == COMBO_VIEW_STREAK_FIRE, \
         "three sub-350ms presses each judge BRILLIANT and chain the streak"
     assert ctrl._fire_active() is True
     ctrl.update(700)
@@ -417,7 +427,7 @@ def test_slow_correct_press_also_resets_the_streak():
     assert ctrl._fire_active() is True
     ctrl.update(1000)
     ctrl.handle_event(_key("right"))
-    assert ctrl.progress == 4, "the slow press still lands"
+    assert ctrl._progress == 4, "the slow press still lands"
     assert ctrl._brilliant_streak == 0, "only BRILLIANT judgements keep the fire burning"
 
 
@@ -437,7 +447,7 @@ def test_passive_never_tracks_a_fire_streak():
     for p in (1, 2, 3):
         ctrl.update(150 * p)
         ctrl.spectate_shot(150 * p, 0, True, progress=p)
-    assert ctrl.progress == 3
+    assert ctrl._progress == 3
     assert ctrl._brilliant_streak == 0, "the mirror never claims the mover's streak"
     assert ctrl._fire_active() is False
 
@@ -448,7 +458,7 @@ def test_two_same_frame_presses_advance_and_relay_once():
     ctrl.update(150)
     ctrl.handle_event(_key("up"))
     ctrl.handle_event(_key("up"))
-    assert ctrl.progress == 1, "two KEYDOWNs in one frame advance the strip only once"
+    assert ctrl._progress == 1, "two KEYDOWNs in one frame advance the strip only once"
     assert on_shot.call_count == 1, "the paced-out second press never reaches the wire"
 
 
@@ -457,25 +467,25 @@ def test_press_below_human_floor_is_ignored_entirely():
     ctrl = _combo(on_shot=on_shot)
     ctrl.update(100)
     ctrl.handle_event(_key("up"))
-    assert ctrl.progress == 0, "an elapsed below the human floor never advances"
-    assert ctrl.wrong_count == 0, "and never counts as a wrong"
+    assert ctrl._progress == 0, "an elapsed below the human floor never advances"
+    assert ctrl._wrong_count == 0, "and never counts as a wrong"
     assert on_shot.call_count == 0, "and never relays"
     ctrl.update(130)
     ctrl.handle_event(_key("up"))
-    assert ctrl.progress == 1, "a press at elapsed 130 is accepted"
+    assert ctrl._progress == 1, "a press at elapsed 130 is accepted"
 
 
 def test_inter_press_gate_paces_accepted_presses():
     ctrl = _combo(("up", "down", "left", "right", "up"))
     ctrl.update(150)
     ctrl.handle_event(_key("up"))
-    assert ctrl.progress == 1
+    assert ctrl._progress == 1
     ctrl.update(150 + 79)
     ctrl.handle_event(_key("down"))
-    assert ctrl.progress == 1, "a press 79 ms after an accepted press is paced out"
+    assert ctrl._progress == 1, "a press 79 ms after an accepted press is paced out"
     ctrl.update(150 + 81)
     ctrl.handle_event(_key("down"))
-    assert ctrl.progress == 2, "a press 81 ms after an accepted press lands"
+    assert ctrl._progress == 2, "a press 81 ms after an accepted press lands"
 
 
 def test_torn_victim_key_is_per_challenge():
@@ -496,7 +506,7 @@ def test_spectate_wrong_shows_the_struck_pip_immediately():
     ctrl = _combo(passive=True, audio=MagicMock())
     ctrl.update(200)
     ctrl.spectate_shot(150, 0, False, progress=0)
-    assert ctrl.wrong_count == 1, \
+    assert ctrl._wrong_count == 1, \
         "the server relays the pre-increment miss_count; the mirror shows one struck pip"
 
 

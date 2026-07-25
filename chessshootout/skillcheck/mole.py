@@ -1,11 +1,14 @@
 import math
 from dataclasses import dataclass
 
+from chessshootout.backend.utils import BOARD_SIZE
 from chessshootout.skillcheck.rng import seeded_floats
 from chessshootout.skillcheck.wheel import SKILLCHECK_DEADLINE_MS
 
 MOLE_POPS_TOTAL = 5
 MOLE_HITS_REQUIRED = 3
+MOLE_HITS_MINOR_VALUE = 3
+MOLE_HITS_QUEEN_VALUE = 9
 MOLE_POPS_COMPRESSED = 3
 MOLE_HITS_COMPRESSED = 2
 MOLE_COMPRESS_DEADLINE_MS = 3500.0
@@ -29,6 +32,18 @@ MOLE_HOLE_RADIUS_CELLS = 3
 MOLE_HITBOX_FRAC = 0.55
 MOLE_RECOIL_LOCKOUT_MS = 180.0
 MOLE_MIN_INTER_SHOT_MS = 80.0
+MOLE_TAUNTS = ("missed me", "lol", "nice aim", "rip", "too slow")
+
+
+def pick_taunt(seed):
+    roll = seeded_floats("moletaunt:{}".format(seed), 1)[0]
+    return MOLE_TAUNTS[int(roll * len(MOLE_TAUNTS)) % len(MOLE_TAUNTS)]
+
+
+def occupied_squares(state, board_size):
+    return [(row, col)
+            for row in range(board_size) for col in range(board_size)
+            if state[row][col] is not None]
 
 
 def _clamped_hole_count(captured_value):
@@ -36,7 +51,8 @@ def _clamped_hole_count(captured_value):
 
 
 def _required_hits(captured_value):
-    return MOLE_HITS_REQUIRED + (captured_value >= 3) + (captured_value >= 9)
+    return (MOLE_HITS_REQUIRED + (captured_value >= MOLE_HITS_MINOR_VALUE)
+            + (captured_value >= MOLE_HITS_QUEEN_VALUE))
 
 
 def _compressed_hits(required):
@@ -76,7 +92,7 @@ def _build(intro_ms, precue_ms, gaps, ups, first_up_min_ms):
 
 def _fit_scale(target, components):
     scale = target / sum(nominal for nominal, _ in components)
-    for _ in components:
+    for _ in range(len(components)):
         floored = sum(floor for nominal, floor in components if nominal * scale < floor)
         free = sum(nominal for nominal, floor in components if nominal * scale >= floor)
         if free <= 0.0:
@@ -185,7 +201,7 @@ def _free_squares(capture_sq, blocked, radius, board_size):
             if (row, col) not in blocked]
 
 
-def hole_squares(seed, captured_value, capture_sq, occupied, board_size=8):
+def hole_squares(seed, captured_value, capture_sq, occupied, board_size=BOARD_SIZE):
     blocked = set(occupied)
     hole_count = _clamped_hole_count(captured_value)
     radius = MOLE_HOLE_RADIUS_CELLS

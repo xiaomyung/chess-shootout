@@ -427,14 +427,33 @@ def test_geometry_base_bounds_captured_value():
             SkillCheckRequiredMessage(**base, captured_value=bad)
 
 
-def test_skill_check_shot_old_client_shape_still_parses():
-    """A protocol-v3-era shot without the whack/combo fields must parse — the new
-    fields are optional so the wheel/aim payload shape is unchanged."""
+def test_skill_check_shot_wheel_shape_omits_the_whack_and_combo_fields():
+    """A wheel/aim shot carries only client_elapsed_ms: direction and target_row/col
+    are optional and default to None. This is NOT a v3 compatibility claim — v4 is a
+    hard gate (the version field is checked at the handshake, no v3 client can
+    connect) — it pins that the two positional kinds' fields stay opt-in so the
+    wheel/aim payload never has to send them."""
     msg = SkillCheckShotMessage.model_validate(
         {"type": "skill_check_shot", "version": PROTOCOL_VERSION, "client_elapsed_ms": 412.0})
     assert msg.client_elapsed_ms == 412.0
     assert msg.direction is None
     assert msg.target_row is None and msg.target_col is None
+
+
+@pytest.mark.parametrize(
+    "token",
+    [pytest.param("NaN", id="nan"), pytest.param("Infinity", id="inf"),
+     pytest.param("-Infinity", id="neg_inf")],
+)
+def test_skill_check_shot_rejects_non_finite_client_elapsed(token):
+    """pydantic-core parses bare NaN/Infinity JSON tokens into floats. A non-finite
+    client_elapsed_ms would poison every comparison downstream (NaN loses the
+    lag-comp clamp's min/max, the human floor, and the deadline test all at once),
+    so allow_inf_nan=False must reject it at the wire; the handler's
+    `except ValidationError -> noop` then drops the frame with no state change."""
+    raw = ('{"type": "skill_check_shot", "client_elapsed_ms": ' + token + '}')
+    with pytest.raises(ValidationError):
+        SkillCheckShotMessage.model_validate_json(raw)
 
 
 def test_skill_check_shot_carries_combo_direction_and_whack_target():

@@ -19,7 +19,7 @@ HOTKEYS = [
     ("D", "Offer draw"),
     ("Q  R  B  N", "Promotion picker (when shown)"),
     ("Space / Click", "Fire the active skill-check (wheel / aim / whack)"),
-    ("Arrows / WASD", "Combo check input (while a check is active)"),
+    ("Arrows / WASD", "Combo check input, or click the on-screen pad"),
     ("Left / Right", "Step through moves (also during live games)"),
     ("Home", "Jump to first move (also during live games)"),
     ("End", "Return to live play"),

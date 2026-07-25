@@ -35,6 +35,8 @@ CHAT_COOLDOWN_SECONDS = 3.0
 CHAT_PRESET_COUNT = 8
 ANNOTATIONS_PER_SECOND = 10
 MODERATION_TRIP_LIMIT = 3
+SKILLCHECK_TARGET_MAX = 8.0
+SKILLCHECK_MAX_CAPTURED_VALUE = 9
 
 UUID4_RE = re.compile(
     r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$",
@@ -171,7 +173,7 @@ class _SkillCheckGeometryBase(BaseModel):
     seed: str
     value_diff: int
     deadline_ms: float
-    captured_value: int = Field(default=0, ge=0, le=9)
+    captured_value: int = Field(default=0, ge=0, le=SKILLCHECK_MAX_CAPTURED_VALUE)
     from_sq: str = Field(alias="from")
     to_sq: str = Field(alias="to")
     promotion: Optional[Literal["q", "r", "b", "n"]] = None
@@ -489,10 +491,10 @@ class SkillCheckRequiredMessage(_SkillCheckGeometryBase, _Base):
 
 class SkillCheckShotMessage(_Base):
     type: Literal["skill_check_shot"] = "skill_check_shot"
-    client_elapsed_ms: float = 0.0
+    client_elapsed_ms: float = Field(default=0.0, allow_inf_nan=False)
     direction: Optional[SkillCheckDirectionLiteral] = None
-    target_row: Optional[float] = Field(default=None, ge=0.0, lt=8.0)
-    target_col: Optional[float] = Field(default=None, ge=0.0, lt=8.0)
+    target_row: Optional[float] = Field(default=None, ge=0.0, lt=SKILLCHECK_TARGET_MAX)
+    target_col: Optional[float] = Field(default=None, ge=0.0, lt=SKILLCHECK_TARGET_MAX)
 
     model_config = {"extra": "ignore"}
 

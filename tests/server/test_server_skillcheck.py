@@ -1067,6 +1067,33 @@ async def test_whack_shots_inside_the_min_input_gap_are_silent_noops(app, clock)
 
 
 @pytest.mark.asyncio
+async def test_forged_client_elapsed_buys_no_spacing_past_the_anti_mash_gate(app, clock):
+    """The anti-mash gate is paced on the SERVER wall clock, never on the
+    client-reported elapsed. The lag-comp clamp window (200ms) is WIDER than the
+    80ms gate, so adjudicating the gate on the clamped value let a crafted client
+    send two shots in the same instant while claiming 200ms of separation — buying
+    a free extra input per burst. Same-instant sends must always throttle: the
+    second shot is dropped whole, with no relay, no miss, and no gate movement."""
+    room, ws_w, ws_b, frm, to, pending, ch, holes = await _whack_room(app, clock)
+    wrong_hole = next(h for h in range(ch.hole_count) if h != ch.pops[0].hole)
+    mid = _pop_mid(ch, 0)
+    first = await _fire(app, clock, room, "white", mid,
+                        target=_hole_center(holes, wrong_hole))
+    assert first == "skillcheck_miss" and pending.miss_count == 1
+    ws_b.sent.clear()
+    gate_before = pending.last_input_ms
+
+    ws = app.state.connections.get_for_color(room, "white")
+    forged = _shot_raw(mid + 200, target=_hole_center(holes, ch.pops[0].hole))
+    second = await handle_skill_check_shot(app, ws, room, "white", forged)
+
+    assert second == "noop", "zero wall-clock spacing throttles however the client claims"
+    assert pending.miss_count == 1 and pending.progress == 0, "no state change at all"
+    assert pending.last_input_ms == gate_before, "a dropped shot never moves the gate"
+    assert not ws_b.of_type("skill_check_spectate_shot"), "no relay for the dropped shot"
+
+
+@pytest.mark.asyncio
 async def test_whack_shot_without_target_fields_is_a_noop(app, clock):
     room, ws_w, ws_b, frm, to, pending, ch, holes = await _whack_room(app, clock)
     ws_b.sent.clear()

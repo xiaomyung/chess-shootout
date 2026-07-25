@@ -14,7 +14,7 @@ def test_server_and_backend_never_import_pygame_or_frontend():
     package_root = os.path.dirname(os.path.abspath(chessshootout.__file__))
     offenders = []
     scanned = 0
-    for pkg in ("server", "backend"):
+    for pkg in ("server", "backend", "skillcheck"):
         pkg_dir = os.path.join(package_root, pkg)
         assert os.path.isdir(pkg_dir), f"expected a walkable package dir at {pkg_dir}"
         for root, _, files in os.walk(pkg_dir):
@@ -26,7 +26,7 @@ def test_server_and_backend_never_import_pygame_or_frontend():
                 with open(path, encoding="utf-8") as f:
                     if IMPORT_PATTERN.search(f.read()):
                         offenders.append(path)
-    assert scanned > 10, f"only scanned {scanned} files, guard root is likely wrong"
+    assert scanned > 25, f"only scanned {scanned} files, guard root is likely wrong"
     assert offenders == [], (
         f"server image must stay pygame-free (no pygame/frontend imports): {offenders}"
     )

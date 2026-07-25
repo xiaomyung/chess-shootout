@@ -61,8 +61,8 @@ class SkillCheckSession:
         return True
 
     def open_skillcheck_overlay(self, kind, seed, value_diff, deadline_ms,
-                                 from_sq, to_sq, promo_type, captured_value=0, *, online,
-                                 elapsed_ms=0, miss_count=0, progress=0, passive=False):
+                                from_sq, to_sq, promo_type, captured_value=0, *, online,
+                                elapsed_ms=0, miss_count=0, progress=0, passive=False):
         screen = self.screen
         target = self._skillcheck_render_square(kind, seed, value_diff, from_sq, to_sq)
         capturer = screen.match.piece_at(from_sq)
@@ -83,8 +83,7 @@ class SkillCheckSession:
             shot_sound=self._shot_sound_for(capturer),
             on_shot=None if passive else (self._send_skillcheck_shot if online else None),
             miss_count=miss_count, passive=passive, audio=self.app.sound_manager,
-            hole_squares=hole_squares, px_to_board=self._px_to_board,
-            captured_value=captured_value, progress=progress,
+            hole_squares=hole_squares, captured_value=captured_value, progress=progress,
             attacker_surface=attacker_surface)
         if controller is None:
             return False
@@ -102,8 +101,8 @@ class SkillCheckSession:
         return True
 
     def open_spectate_overlay(self, kind, seed, value_diff, deadline_ms,
-                               from_sq, to_sq, promo_type, captured_value=0, *,
-                               elapsed_ms=0, miss_count=0, progress=0):
+                              from_sq, to_sq, promo_type, captured_value=0, *,
+                              elapsed_ms=0, miss_count=0, progress=0):
         screen = self.screen
         screen.board.jump_to_review_ply(None)
         self.pending_online_move = None
@@ -163,7 +162,7 @@ class SkillCheckSession:
         self.online_verdict_action = None
 
     def _on_online_skillcheck_done(self, context, landed):
-        kind = context[3] if context and len(context) > 3 else None
+        kind = context[3] if len(context) > 3 else None
         target = self.skillcheck_target
         seed = self.active_seed
         was_spectator = self.online_was_spectator
@@ -177,10 +176,12 @@ class SkillCheckSession:
         if action is not None:
             action()
         if kind == SkillCheckKind.WHACK and landed is False and target is not None:
-            from chessshootout.frontend.skillcheck.mole_view import pick_taunt
-            self.screen.show_taunt(target, pick_taunt(seed))
-            if not was_spectator:
-                self.app.sound_manager.play_mole_taunt()
+            self._show_whack_taunt(target, seed, not was_spectator)
+
+    def _show_whack_taunt(self, square, seed, play_sound):
+        self.screen.show_taunt(square, mole.pick_taunt(seed))
+        if play_sound:
+            self.app.sound_manager.play_mole_taunt()
 
     def _skillcheck_render_square(self, kind, seed, value_diff, from_sq, to_sq):
         screen = self.screen
@@ -207,20 +208,7 @@ class SkillCheckSession:
         return self.screen.board.piece_images_scaled.get((piece.type, piece.color))
 
     def _occupied_squares(self):
-        state = self.screen.match.state
-        size = self.screen.board.SIZE
-        return [(row, col) for row in range(size) for col in range(size)
-                if state[row][col] is not None]
-
-    def _px_to_board(self, pos):
-        board = self.screen.board
-        origin = board.cell_rect(Square(0, 0)).center
-        step = board.cell_rect(Square(1, 1)).center
-        dx = step[0] - origin[0]
-        dy = step[1] - origin[1]
-        if dx == 0 or dy == 0:
-            return (-1.0, -1.0)
-        return ((pos[1] - origin[1]) / dy + 0.5, (pos[0] - origin[0]) / dx + 0.5)
+        return mole.occupied_squares(self.screen.match.state, self.screen.board.SIZE)
 
     def _shot_sound_for(self, capturer):
         if capturer is None:
@@ -228,29 +216,25 @@ class SkillCheckSession:
         piece_type = capturer.type
         return lambda: self.app.sound_manager.play_capture(piece_type)
 
-    def _capture_value_diff(self, from_sq, to_sq, promo_type):
+    def _victim_piece(self, from_sq, to_sq):
         screen = self.screen
+        capturer = screen.match.piece_at(from_sq)
+        if capturer is None:
+            return None
+        victim_sq = screen.board.capture_victim_square(capturer, from_sq, to_sq)
+        return screen.match.piece_at(victim_sq) if victim_sq is not None else None
+
+    def _capture_value_diff(self, from_sq, to_sq, promo_type):
         if promo_type is not None:
             return PIECE_VALUES[PieceType.PAWN] - PIECE_VALUES.get(promo_type, 0)
-        capturer = screen.match.piece_at(from_sq)
-        if capturer is None:
+        victim = self._victim_piece(from_sq, to_sq)
+        if victim is None:
             return 0
-        victim_sq = screen.board.capture_victim_square(capturer, from_sq, to_sq)
-        if victim_sq is not None:
-            victim = screen.match.piece_at(victim_sq)
-            return PIECE_VALUES.get(capturer.type, 0) - (
-                PIECE_VALUES.get(victim.type, 0) if victim is not None else 0)
-        return 0
+        capturer = self.screen.match.piece_at(from_sq)
+        return PIECE_VALUES.get(capturer.type, 0) - PIECE_VALUES.get(victim.type, 0)
 
     def _captured_value(self, from_sq, to_sq):
-        screen = self.screen
-        capturer = screen.match.piece_at(from_sq)
-        if capturer is None:
-            return 0
-        victim_sq = screen.board.capture_victim_square(capturer, from_sq, to_sq)
-        if victim_sq is None:
-            return 0
-        victim = screen.match.piece_at(victim_sq)
+        victim = self._victim_piece(from_sq, to_sq)
         return PIECE_VALUES.get(victim.type, 0) if victim is not None else 0
 
     def _on_skillcheck_done(self, context, landed):
@@ -282,9 +266,7 @@ class SkillCheckSession:
             if aim_victim is not None:
                 screen.board.restore_piece(aim_victim)
             if kind == SkillCheckKind.WHACK:
-                from chessshootout.frontend.skillcheck.mole_view import pick_taunt
-                screen.show_taunt(aim_victim, pick_taunt(seed))
-                self.app.sound_manager.play_mole_taunt()
+                self._show_whack_taunt(aim_victim, seed, True)
 
     def on_skillcheck_miss_fire(self, piece_type):
         self.app.sound_manager.play_capture(piece_type)

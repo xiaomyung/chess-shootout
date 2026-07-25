@@ -399,6 +399,26 @@ def test_motor_model_sweep_is_deterministic_and_bounded():
     assert 0.0 <= first <= 1.0
 
 
+def test_pick_taunt_is_deterministic_per_seed_and_drawn_from_the_table():
+    # the taunt lives in the pure engine so the pygame-free server side and the
+    # view render the SAME string for one check without duplicating the table.
+    assert mole.pick_taunt("seed-x") == mole.pick_taunt("seed-x")
+    texts = {mole.pick_taunt(f"seed-{i}") for i in range(30)}
+    assert texts <= set(mole.MOLE_TAUNTS)
+    assert len(texts) >= 2, "the table is genuinely sampled, not pinned to one entry"
+
+
+def test_occupied_squares_is_row_major_and_skips_empty_cells():
+    # the hole-layout derivation is seeded off this list, so its ORDER is
+    # load-bearing: server and client must walk the grid identically.
+    state = [[None] * 3 for _ in range(3)]
+    state[0][2] = "wK"
+    state[2][0] = "bq"
+    state[2][1] = "bp"
+    assert mole.occupied_squares(state, 3) == [(0, 2), (2, 0), (2, 1)]
+    assert mole.occupied_squares([[None] * 3 for _ in range(3)], 3) == []
+
+
 def test_deadline_is_single_sourced_from_wheel():
     assert mole.SKILLCHECK_DEADLINE_MS is wheel.SKILLCHECK_DEADLINE_MS
     assert "5000" not in Path(mole.__file__).read_text(encoding="utf-8"), \

@@ -19,7 +19,8 @@ server for online two-player matches.
 - **Steady-Aim** — a crosshair auto-traces a figure-8 over the shrinking victim;
   it is multi-shot, and every miss escalates the sway and shrink.
 - **Whack-a-Mole** — the captured piece dives into a pit and pops back from a
-  ring of glowing holes; land three shots on it before it ducks away for good.
+  ring of glowing holes; land its quota of shots before it ducks away for good —
+  three on a pawn, four on a knight, bishop or rook, all five on a queen.
 - **Combo** — a strip of arrow prompts scrolls in; punch each direction in order
   with the Arrows/WASD keys or the on-screen pad, and three wrong inputs miss it.
 - Online, the server adjudicates every shot and your opponent watches a live,
@@ -189,7 +190,7 @@ pyenv shell 3.12                  # `python3.12` now resolves for the venv step 
 | `D` | Offer draw |
 | `Q` / `B` / `N` | Promote (queen / bishop / knight) |
 | `Space` / Click | Fire the active skill-check (wheel / aim / whack) |
-| Arrows / WASD | Combo check input (while a check is active) |
+| Arrows / WASD | Combo check input, or click the on-screen pad |
 | `Z` | Undo move (`Ctrl+Z` also works; online: takeback request) |
 | `G` | Give 15 seconds (hold the **+15** cap to ramp) |
 | `A` / `S` / `C` | Collapse or expand rail sections |
