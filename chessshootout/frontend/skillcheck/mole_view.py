@@ -18,7 +18,7 @@ from chessshootout.skillcheck.mole import (
 from chessshootout.skillcheck.rng import seeded_floats
 
 MOLE_VIEW_FAIL_FADE_MS = 300
-MOLE_VIEW_FAIL_HOLD_MS = 750
+MOLE_VIEW_FAIL_HOLD_MS = 1250
 MOLE_VIEW_HOLE_STAGGER_MS = 40.0
 MOLE_VIEW_HOLE_OPEN_MS = 160.0
 MOLE_VIEW_RISE_MS = 140.0
@@ -63,6 +63,10 @@ MOLE_VIEW_JUMP_RISE_MS = 180.0
 MOLE_VIEW_JUMP_HOP_MS = 320.0
 MOLE_VIEW_JUMP_HEIGHT_FRAC = 0.5
 MOLE_VIEW_LAND_SQUASH_MS = 90.0
+MOLE_VIEW_REGROW_MS = 550.0
+MOLE_VIEW_MOTE_COUNT = 9
+MOLE_VIEW_MOTE_R_FRAC = 0.045
+MOLE_VIEW_MOTE_RING_FRAC = 0.95
 MOLE_VIEW_PIP_W_FRAC = 0.11
 MOLE_VIEW_PIP_H_FRAC = 0.20
 MOLE_VIEW_PIP_GAP_FRAC = 0.07
@@ -236,6 +240,10 @@ class MoleController(SkillCheckController):
         self._owned_pit = None
         self._progress = progress
         self._torn_key = hash(challenge.pops)
+        self._mote_floats = seeded_floats(
+            "moleregrow:{}:{}".format(challenge.pops[0].t_telegraph_ms,
+                                      challenge.deadline_ms),
+            MOLE_VIEW_MOTE_COUNT * 2)
         self._last_hit_pop = -1
         if progress > 0:
             resumed = challenge.pop_up_at(pg.time.get_ticks() - now_ms)
@@ -633,8 +641,8 @@ class MoleController(SkillCheckController):
         jump_t = self._jump_elapsed()
         if jump_t is None:
             return 0.0
-        total = MOLE_VIEW_JUMP_RISE_MS + MOLE_VIEW_JUMP_HOP_MS
-        return min(max(jump_t / total, 0.0), 1.0)
+        heal_t = jump_t - MOLE_VIEW_JUMP_RISE_MS - MOLE_VIEW_JUMP_HOP_MS
+        return min(max(heal_t / MOLE_VIEW_REGROW_MS, 0.0), 1.0)
 
     def _regrow_bucket(self):
         if self._landed is not False or self._committed_at is None:
@@ -727,6 +735,28 @@ class MoleController(SkillCheckController):
             p = 1.0 - land_t / MOLE_VIEW_LAND_SQUASH_MS
             squash = min(int(p * MOLE_VIEW_SQUASH_BUCKETS), MOLE_VIEW_SQUASH_BUCKETS - 1)
         self._blit_victim(window, self.center, 1.0, group, squash=squash, ground_dy=rest_dy)
+        if self._landed is False:
+            self._draw_regrow_motes(window, group)
+
+    def _draw_regrow_motes(self, window, group):
+        progress = self._heal_progress()
+        if progress <= 0.0 or progress >= 1.0:
+            return
+        cell = self.cell_size
+        r = max(int(cell * MOLE_VIEW_MOTE_R_FRAC), 2)
+        cx = self.center[0] + group[0]
+        cy = self.center[1] + group[1]
+        f = self._mote_floats
+        for j in range(MOLE_VIEW_MOTE_COUNT):
+            stagger = f[j * 2 + 1] * 0.35
+            p = (progress - stagger) / max(1.0 - stagger, 0.001)
+            if not 0.0 <= p < 1.0:
+                continue
+            ang = f[j * 2] * 2.0 * math.pi + p * 0.8
+            dist = cell * MOLE_VIEW_MOTE_RING_FRAC * (1.0 - p)
+            pg.draw.circle(window, _DEBRIS_COLORS[j % len(_DEBRIS_COLORS)],
+                           (int(cx + math.cos(ang) * dist),
+                            int(cy + math.sin(ang) * dist)), r)
 
     def _retreat_frame(self, idx, rt):
         if rt >= 1.0:

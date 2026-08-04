@@ -42,6 +42,7 @@ from chessshootout.frontend.skillcheck.mole_view import (
     MOLE_VIEW_WIN_HOLD_MS, MOLE_VIEW_HITSTOP_KILL_MS, MOLE_VIEW_WIN_FRY_MS,
     MOLE_VIEW_WIN_DEADPAN_MS, MOLE_VIEW_RETREAT_MS, MOLE_VIEW_PIP_OFFSET_FRAC,
     MOLE_VIEW_JUMP_RISE_MS, MOLE_VIEW_JUMP_HOP_MS, MOLE_VIEW_LAND_SQUASH_MS,
+    MOLE_VIEW_REGROW_MS,
     MOLE_VIEW_PIT_CLOSE_MS, MOLE_VIEW_DANGER_PULSE_MS, MOLE_VIEW_PULSE_MS,
     _pit_telegraph_surface, _MOLE_STATIC_CACHE)
 from chessshootout.frontend.skillcheck.juice import TORN_REGROW_STEPS
@@ -689,26 +690,54 @@ def _fail_at_two_hits():
     return ctrl
 
 
-def test_fail_jump_regrows_the_victim_continuously_and_lands_it_intact():
-    # The heal is a bucketed continuous regrowth (juice.TORN_REGROW_STEPS), not
-    # tier swaps: the sprite must pass through MANY distinct frames on its way
-    # to clean, never jumping straight from damaged to whole.
+def test_fail_regrow_happens_standing_on_the_square_after_the_jump():
+    # The regrow got its own readable beat: the victim stays FULLY damaged
+    # through the whole hop (motion would mask the heal), lands, and only then
+    # knits itself back over MOLE_VIEW_REGROW_MS while standing still — a
+    # bucketed continuous regrowth (juice.TORN_REGROW_STEPS), never one snap.
     ctrl = _fail_at_two_hits()
-    assert ctrl._regrow_bucket() == 0, "the victim leaves the pit fully damaged"
+    jump_ms = MOLE_VIEW_JUMP_RISE_MS + MOLE_VIEW_JUMP_HOP_MS
+    for frac in (0.0, 0.4, 0.8, 0.99):
+        ctrl.update(int(_FAIL_AT_MS + jump_ms * frac))
+        assert ctrl._regrow_bucket() == 0, \
+            "damage is held through the whole arc so the heal is visible at rest"
     sprites = []
     buckets = []
     steps = 10
     for i in range(steps + 1):
-        frac = i / steps
-        ctrl.update(int(_FAIL_AT_MS + (MOLE_VIEW_JUMP_RISE_MS
-                                       + MOLE_VIEW_JUMP_HOP_MS) * frac))
+        ctrl.update(int(_FAIL_AT_MS + jump_ms + MOLE_VIEW_REGROW_MS * i / steps))
         buckets.append(ctrl._regrow_bucket())
         sprites.append(ctrl._victim_sprite())
     assert buckets == sorted(buckets), "regrowth only ever moves toward clean"
     assert buckets[0] == 0 and buckets[-1] == TORN_REGROW_STEPS
     assert len(set(id(s) for s in sprites)) >= 6, \
         "the repair passes through many distinct frames, not one snap"
-    assert sprites[-1] is ctrl._victim, "touchdown is the untouched source sprite"
+    assert sprites[-1] is ctrl._victim, "the heal ends on the untouched source sprite"
+
+
+def test_fail_hold_covers_the_jump_plus_the_standing_regrow():
+    assert MOLE_VIEW_FAIL_HOLD_MS >= (MOLE_VIEW_JUMP_RISE_MS + MOLE_VIEW_JUMP_HOP_MS
+                                      + MOLE_VIEW_REGROW_MS), \
+        "the overlay must stay alive until the piece finishes growing back"
+
+
+def test_regrow_motes_converge_only_during_the_standing_heal():
+    ctrl = _fail_at_two_hits()
+    jump_ms = MOLE_VIEW_JUMP_RISE_MS + MOLE_VIEW_JUMP_HOP_MS
+    surf = pg.Surface((640, 640))
+
+    def mote_pixels(t):
+        ctrl.update(int(t))
+        surf.fill((0, 0, 0))
+        ctrl._draw_regrow_motes(surf, (0, 0))
+        return sum(1 for x in range(0, 640, 3) for y in range(0, 640, 3)
+                   if surf.get_at((x, y))[:3] != (0, 0, 0))
+
+    assert mote_pixels(_FAIL_AT_MS + jump_ms * 0.5) == 0, "no motes mid-hop"
+    assert mote_pixels(_FAIL_AT_MS + jump_ms + MOLE_VIEW_REGROW_MS * 0.5) > 0, \
+        "parts visibly fly back into the piece while it heals"
+    assert mote_pixels(_FAIL_AT_MS + jump_ms + MOLE_VIEW_REGROW_MS + 50) == 0, \
+        "motes end with the heal"
 
 
 def test_win_jump_keeps_the_shredded_victim_all_the_way_down():
