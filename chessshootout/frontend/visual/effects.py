@@ -147,6 +147,7 @@ class EffectManager:
         self.rng = rng if rng is not None else random.Random()
         self.geom = None
         self._art = None
+        self.firing_advance_only = False
         self._weapon_cache = {}
         self.particles = []
         self.holes = []
@@ -265,18 +266,20 @@ class EffectManager:
     def capture(self, *, now_ms, attacker_type, attacker_surface, victim_surface,
                 from_sq, victim_sq, to_sq, cell_size, power="med",
                 on_fire=None, on_slide=None, occupied=None, predrawn=False):
-        predrawn = predrawn or self._take_gun_handoff(from_sq)
+        handed = self._take_gun_handoff(from_sq)
+        predrawn = predrawn or handed
         gun = gunfx.PIECE_GUN.get(attacker_type, "revolver")
         weapon = self._weapon(gun, cell_size)
         if weapon is None:
-            self._impact(now_ms, from_sq, victim_sq, victim_surface, cell_size)
+            if not handed:
+                self._impact(now_ms, from_sq, victim_sq, victim_surface, cell_size)
             if on_fire is not None:
                 on_fire()
             if on_slide is not None:
                 on_slide()
             return
         self.captures.append({
-            "start": now_ms, "predrawn": predrawn,
+            "start": now_ms, "predrawn": predrawn, "advance_only": handed,
             "fire_at": now_ms + (0 if predrawn else DRAW_MS) + AIM_MS,
             "fired": False, "gun": gun, "weapon": weapon,
             "from_sq": from_sq, "victim_sq": victim_sq, "to_sq": to_sq,
@@ -575,10 +578,16 @@ class EffectManager:
         self._last_now = now
         for c in list(self.captures):
             if not c["fired"] and now >= c["fire_at"]:
-                self._shoot(now, c)
+                if not c.get("advance_only"):
+                    self._shoot(now, c)
                 c["fired"] = True
                 if c["on_fire"] is not None:
+                    self.firing_advance_only = bool(c.get("advance_only"))
                     c["on_fire"]()
+                    self.firing_advance_only = False
+            if (c.get("advance_only") and c["fired"]
+                    and now >= c["fire_at"] + PROJECTILE_TRAVEL_MS):
+                self._resolve_capture(now, c)
         self.captures = [c for c in self.captures
                          if not (c.get("miss") and c["fired"]
                                  and now >= c["fire_at"] + MISS_HOLD_MS)]
@@ -636,7 +645,8 @@ class EffectManager:
                 or pr["y"] < r.y - m or pr["y"] > r.bottom + m)
 
     def _resolve_capture(self, now, c):
-        self._impact(now, c["from_sq"], c["victim_sq"], c["victim"], c["cell"])
+        if not c.get("advance_only"):
+            self._impact(now, c["from_sq"], c["victim_sq"], c["victim"], c["cell"])
         if c["on_slide"] is not None:
             c["on_slide"]()
         if c in self.captures:
@@ -684,7 +694,8 @@ class EffectManager:
     def _draw_capture(self, window, c, now):
         fx, fy = self._center(c["from_sq"])
         tx, ty = self._center(c["victim_sq"])
-        if c["victim"] is not None:
+        advance_only = c.get("advance_only")
+        if c["victim"] is not None and not advance_only:
             window.blit(c["victim"], c["victim"].get_rect(center=(tx, ty)))
         if c["attacker"] is not None:
             window.blit(c["attacker"], c["attacker"].get_rect(center=(fx, fy)))
@@ -696,7 +707,7 @@ class EffectManager:
             gunfx.draw_flourish(window, weapon["gun"], weapon["grip"], pivot, aim,
                                 t / DRAW_MS, gunfx.GUN_DRAW_SPINS_LAND)
         else:
-            if c["fired"]:
+            if c["fired"] and not advance_only:
                 rx, ry = self._recoil(c["gun"], weapon, aim, now - c["fire_at"])
                 pivot = (pivot[0] + rx, pivot[1] + ry)
             gunfx.blit_aimed(window, weapon["gun"], weapon["grip"], pivot, aim)

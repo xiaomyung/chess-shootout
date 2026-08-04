@@ -31,9 +31,12 @@ must never survive into the next game.
 
 A WON whack is the one ending that does NOT tumble: the piece hands the same gun to
 the capture choreography (hand_off_gun_px -> predrawn capture, AIM_MS only), so the
-killing shot flows straight into the capture volley with no drop and no second
-draw-flourish. Every other ending — fail, teardown, Esc, resign, new game — keeps the
-approved tumble, and a capture with no check behind it is untouched.
+killing shot flows straight into the capture with no drop and no second
+draw-flourish. That handoff also arms the capture ADVANCE-ONLY — the whack already
+blasted the victim off the pit, so the capture keeps the aimed gun and the slide but
+fires nothing at the empty square. Every other ending — fail, teardown, Esc, resign,
+new game — keeps the approved tumble and its own drawn-and-fired shot, and a capture
+with no check behind it is untouched.
 """
 
 import math
@@ -49,7 +52,7 @@ from chessshootout.backend.utils import Square
 from chessshootout.frontend.skillcheck.combo_view import ComboController, COMBO_TIME_LIMIT_MS
 from chessshootout.frontend.skillcheck.mole_view import MoleController
 from chessshootout.frontend.skillcheck.registry import build_controller
-from chessshootout.frontend.visual.effects import AIM_MS, DRAW_MS
+from chessshootout.frontend.visual.effects import AIM_MS, DRAW_MS, PROJECTILE_TRAVEL_MS
 from chessshootout.frontend.visual.gunfx import GUNS, PIECE_GUN
 from chessshootout.skillcheck import mole
 from chessshootout.skillcheck.combo import ComboChallenge
@@ -547,7 +550,7 @@ def _finish_check(app, landed):
 
 def test_a_won_whack_hands_the_same_gun_to_the_capture(monkeypatch):
     # The check gun and the capture gun are the same weapon in the same hand: no
-    # tumble-drop, no second draw-flourish, only the aim beat before it fires.
+    # tumble-drop, no second draw-flourish, only the aim beat before it advances.
     app, clock, frm, to = _whack_app(monkeypatch)
     session, fx = app.game.skillcheck_session, app.game.board.effects
     session.sync_whack_gun()
@@ -557,8 +560,29 @@ def test_a_won_whack_hands_the_same_gun_to_the_capture(monkeypatch):
     entry = fx.captures[0]
     assert entry["predrawn"] is True
     assert entry["fire_at"] == entry["start"] + AIM_MS, "no DRAW_MS — it is already drawn"
+    assert entry["advance_only"] is True, \
+        "the whack already killed the victim — the capture must not shoot the empty square"
     session.sync_whack_gun()
     assert fx.has_gun_px() is False, "and the whack state stays gone afterwards"
+
+
+def test_a_won_whacks_capture_advances_without_firing_a_shot(monkeypatch):
+    app, clock, frm, to = _whack_app(monkeypatch)
+    session, fx, board = app.game.skillcheck_session, app.game.board.effects, app.game.board
+    session.sync_whack_gun()
+    _finish_check(app, True)
+    entry = fx.captures[0]
+    clock.advance(AIM_MS)
+    fx.update(entry["fire_at"])
+    assert fx.projectiles == [], "no volley leaves the barrel"
+    assert [p["kind"] for p in fx.particles if p["kind"] in ("flash", "impact", "blood",
+                                                             "ragdoll")] == [], \
+        "and nothing is shot, wounded or thrown around"
+    assert fx.holes == []
+    clock.advance(PROJECTILE_TRAVEL_MS)
+    fx.update(entry["fire_at"] + PROJECTILE_TRAVEL_MS)
+    assert fx.captures == [], "the capture retires on its slide"
+    assert board.is_animating() is True, "the attacker still slides onto the square"
 
 
 def test_a_failed_whack_still_tumbles_and_the_miss_gun_still_flourishes(monkeypatch):
@@ -570,6 +594,7 @@ def test_a_failed_whack_still_tumbles_and_the_miss_gun_still_flourishes(monkeypa
     assert len(fx.drops) == 1, "the fail keeps the approved tumble"
     entry = fx.captures[0]
     assert not entry.get("predrawn"), "the SKILL ISSUE shot draws its own gun"
+    assert not entry.get("advance_only"), "and it really does fire at the survivor"
     assert entry["fire_at"] == entry["start"] + DRAW_MS + AIM_MS
 
 
@@ -580,5 +605,6 @@ def test_a_plain_capture_is_untouched_by_the_handoff(monkeypatch):
     app.game.board.apply_gated_move(frm, to)
     entry = app.game.board.effects.captures[0]
     assert entry["predrawn"] is False
+    assert entry["advance_only"] is False, "it has a victim to shoot and it shoots it"
     assert entry["fire_at"] == entry["start"] + DRAW_MS + AIM_MS, \
         "a capture with no check behind it still draws, aims, then fires"

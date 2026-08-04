@@ -56,9 +56,15 @@ MOLE_VIEW_HITSTOP_KILL_MS = 200.0
 MOLE_VIEW_VIBRATE_AMP_FRAC = 0.05
 MOLE_VIEW_WIN_POP_MS = 350.0
 MOLE_VIEW_WIN_POP_R_FRAC = 1.1
-MOLE_VIEW_WIN_DEADPAN_MS = 80.0
-MOLE_VIEW_WIN_FRY_MS = 120.0
-MOLE_VIEW_WIN_HOLD_MS = 1000
+MOLE_VIEW_WIN_HOLD_MS = 900
+MOLE_VIEW_TOSS_MS = 650.0
+MOLE_VIEW_TOSS_SPEED_FRAC = 2.2
+MOLE_VIEW_TOSS_UP_FRAC = 1.4
+MOLE_VIEW_TOSS_GRAVITY_FRAC = 5.0
+MOLE_VIEW_TOSS_SPIN_DPS = 420.0
+MOLE_VIEW_TOSS_SPIN_BUCKET_DEG = 20
+MOLE_VIEW_TOSS_FADE_START = 0.45
+MOLE_VIEW_TOSS_FALLBACK_ARC = (0.2, 0.8)
 MOLE_VIEW_JUMP_RISE_MS = 180.0
 MOLE_VIEW_JUMP_HOP_MS = 320.0
 MOLE_VIEW_JUMP_HEIGHT_FRAC = 0.5
@@ -107,6 +113,14 @@ class MoleCasing(typing.NamedTuple):
     vy: float
     gravity: float
     t_land: float
+    spin: float
+
+
+class MoleToss(typing.NamedTuple):
+    x0: float
+    y0: float
+    vx: float
+    vy: float
     spin: float
 
 
@@ -218,7 +232,7 @@ def _expire(items, now_ms, ttl_ms):
 class MoleController(SkillCheckController):
 
     def __init__(self, challenge, cell_rect, now_ms, deadline_ms, *, hole_squares=None,
-                 victim_surface=None, geom=None, shot_sound=None, on_shot=None,
+                 victim_surface=None, geom=None, from_sq=None, shot_sound=None, on_shot=None,
                  progress=0, passive=False, audio=None, on_hit_px=None):
         self.challenge = challenge
         self.start_ms = now_ms
@@ -226,6 +240,7 @@ class MoleController(SkillCheckController):
         self.deadline_ms = deadline_ms
         self._hole_squares = tuple(hole_squares) if hole_squares is not None else ()
         self._geom = geom
+        self._from_sq = from_sq
         self._shot_sound = shot_sound
         self._on_shot = on_shot
         self._on_hit_px = on_hit_px
@@ -237,6 +252,7 @@ class MoleController(SkillCheckController):
         self._victim = victim_surface
         self._victim_cache = {}
         self._squash_cache = {}
+        self._toss_cache = {}
         self._owned_pit = None
         self._progress = progress
         self._torn_key = hash(challenge.pops)
@@ -278,6 +294,7 @@ class MoleController(SkillCheckController):
         self._flash_px = flash_px
         self._trauma = Trauma()
         self._hitstop = Hitstop()
+        self._toss = None
         self._casings = []
         self._puffs = []
         self._debris = []
@@ -302,6 +319,7 @@ class MoleController(SkillCheckController):
         self._pip_h = max(int(cell * MOLE_VIEW_PIP_H_FRAC), 6)
         self._pip_gap = max(int(cell * MOLE_VIEW_PIP_GAP_FRAC), 2)
         self._squash_cache.clear()
+        self._toss_cache.clear()
         self._owned_pit = None
 
     def _scaled_victim(self, new_cell):
@@ -442,8 +460,8 @@ class MoleController(SkillCheckController):
                           MOLE_VIEW_PUFF_COUNT * 2)
         self._puffs.append((self._now, float(pos[0]), float(pos[1]), f))
 
-    def _spawn_debris(self, pos):
-        f = seeded_floats("moledebris:{}".format(self._shot_count + 1),
+    def _spawn_debris(self, pos, tag=""):
+        f = seeded_floats("moledebris:{}{}".format(tag, self._shot_count + 1),
                           MOLE_VIEW_DEBRIS_COUNT * 2)
         self._debris.append((self._now, float(pos[0]), float(pos[1]), f))
 
@@ -503,6 +521,8 @@ class MoleController(SkillCheckController):
         _expire(self._puffs, now_ms, MOLE_VIEW_PUFF_MS)
         _expire(self._debris, now_ms, MOLE_VIEW_DEBRIS_MS)
         _expire(self._impacts, now_ms, MOLE_VIEW_IMPACT_MS)
+        if self._toss is None and self._toss_elapsed() is not None:
+            self._start_toss()
         if self._committed_at is None:
             elapsed = now_ms - self.start_ms
             self._cue_schedule(elapsed)
@@ -615,7 +635,7 @@ class MoleController(SkillCheckController):
 
     def _home_pit_close_scale(self):
         jump_t = self._jump_elapsed()
-        if self._landed is not False or jump_t is None:
+        if jump_t is None:
             return 1.0
         closing = jump_t - MOLE_VIEW_JUMP_RISE_MS - MOLE_VIEW_JUMP_HOP_MS
         if closing <= 0.0:
@@ -645,8 +665,6 @@ class MoleController(SkillCheckController):
         return min(max(jump_t / total, 0.0), 1.0)
 
     def _regrow_bucket(self):
-        if self._landed is not False or self._committed_at is None:
-            return 0
         return min(int(self._heal_progress() * TORN_REGROW_STEPS), TORN_REGROW_STEPS)
 
     def _victim_sprite(self):
@@ -658,16 +676,8 @@ class MoleController(SkillCheckController):
         return sprite
 
     def _flash_active(self):
-        if (self._hit_flash_ms is not None
-                and self._now - self._hit_flash_ms < MOLE_VIEW_HIT_FLASH_MS):
-            return True
-        if self._landed and self._committed_at is not None:
-            fry_start = (MOLE_VIEW_HITSTOP_KILL_MS + MOLE_VIEW_JUMP_RISE_MS
-                         + MOLE_VIEW_JUMP_HOP_MS + MOLE_VIEW_LAND_SQUASH_MS
-                         + MOLE_VIEW_WIN_DEADPAN_MS)
-            t = self._now - self._committed_at
-            return fry_start <= t < fry_start + MOLE_VIEW_WIN_FRY_MS
-        return False
+        return (self._hit_flash_ms is not None
+                and self._now - self._hit_flash_ms < MOLE_VIEW_HIT_FLASH_MS)
 
     def _squash_variant(self, sprite, bucket):
         if bucket <= 0:
@@ -706,18 +716,74 @@ class MoleController(SkillCheckController):
         h = self._victim.get_height()
         return h - h // 2
 
-    def _jump_start_ms(self):
-        return MOLE_VIEW_HITSTOP_KILL_MS if self._landed else 0.0
-
     def _jump_elapsed(self):
-        if self._committed_at is None:
+        if self._landed is not False or self._committed_at is None:
             return None
-        jump_t = self._now - self._committed_at - self._jump_start_ms()
-        return jump_t if jump_t >= 0.0 else None
+        return self._now - self._committed_at
+
+    def _toss_elapsed(self):
+        if not self._landed or self._committed_at is None:
+            return None
+        toss_t = self._now - self._committed_at - MOLE_VIEW_HITSTOP_KILL_MS
+        return toss_t if toss_t >= 0.0 else None
+
+    def _start_toss(self):
+        origin = self._last_hit_px if self._last_hit_px is not None else self.center
+        cell = self.cell_size
+        dx, dy = self._toss_direction(origin)
+        speed = cell * MOLE_VIEW_TOSS_SPEED_FRAC
+        spin = seeded_floats("moletossspin:{}".format(self._torn_key), 1)[0]
+        self._toss = MoleToss(float(origin[0]), float(origin[1]), dx * speed,
+                              dy * speed - cell * MOLE_VIEW_TOSS_UP_FRAC,
+                              1.0 if spin < 0.5 else -1.0)
+        self._spawn_debris(origin, "toss")
+
+    def _toss_direction(self, origin):
+        if self._from_sq is not None and self._geom is not None:
+            ax, ay = self._geom(self._from_sq)
+            dx, dy = origin[0] - ax, origin[1] - ay
+            dist = math.hypot(dx, dy)
+            if dist > 0.0:
+                return (dx / dist, dy / dist)
+        low, high = MOLE_VIEW_TOSS_FALLBACK_ARC
+        f = seeded_floats("moletossdir:{}".format(self._torn_key), 1)
+        ang = -math.pi * (low + (high - low) * f[0])
+        return (math.cos(ang), math.sin(ang))
+
+    def _toss_point(self, toss_t):
+        t = toss_t / 1000.0
+        g = self.cell_size * MOLE_VIEW_TOSS_GRAVITY_FRAC
+        return (self._toss.x0 + self._toss.vx * t,
+                self._toss.y0 + self._toss.vy * t + 0.5 * g * t * t)
+
+    @staticmethod
+    def _toss_alpha(progress):
+        fade = ((progress - MOLE_VIEW_TOSS_FADE_START)
+                / max(1.0 - MOLE_VIEW_TOSS_FADE_START, 0.001))
+        return max(int(255 * (1.0 - max(fade, 0.0))), 0)
+
+    def _toss_sprite(self, bucket):
+        tier = self._damage_tier()
+        cached = self._toss_cache.get((tier, bucket))
+        if cached is None:
+            base = torn_sprite(self._victim, (self._torn_key, self.cell_size), tier)
+            cached = pg.transform.rotate(base, bucket * MOLE_VIEW_TOSS_SPIN_BUCKET_DEG)
+            self._toss_cache[(tier, bucket)] = cached
+        return cached
+
+    def _draw_toss(self, window, toss_t, group):
+        if self._toss is None or toss_t >= MOLE_VIEW_TOSS_MS:
+            return
+        x, y = self._toss_point(toss_t)
+        deg = self._toss.spin * toss_t / 1000.0 * MOLE_VIEW_TOSS_SPIN_DPS
+        buckets = 360 // MOLE_VIEW_TOSS_SPIN_BUCKET_DEG
+        sprite = self._toss_sprite(int(deg / MOLE_VIEW_TOSS_SPIN_BUCKET_DEG) % buckets)
+        sprite.set_alpha(self._toss_alpha(toss_t / MOLE_VIEW_TOSS_MS))
+        window.blit(sprite, (int(x) + group[0] - sprite.get_width() // 2,
+                             int(y) + group[1] - sprite.get_height() // 2))
 
     def _draw_jump(self, window, jump_t, group):
-        if self._landed is False:
-            self._draw_regrow_motes(window, group)
+        self._draw_regrow_motes(window, group)
         pit_dy = self._pit_ry // 2
         rest_dy = self._rest_ground_dy()
         if jump_t < MOLE_VIEW_JUMP_RISE_MS:
@@ -782,6 +848,10 @@ class MoleController(SkillCheckController):
 
     def _draw_victim(self, window, elapsed, group):
         if self._victim is None:
+            return
+        toss_t = self._toss_elapsed()
+        if toss_t is not None:
+            self._draw_toss(window, toss_t, group)
             return
         jump_t = self._jump_elapsed()
         if jump_t is not None:

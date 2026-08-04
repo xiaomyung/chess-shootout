@@ -26,23 +26,35 @@ hit ducks the mole on the mirror too. The OS cursor hides on active construction
 and is restored on every terminal path. CHESS_DEBUG_HITBOX draws the engine's true
 hit region (MOLE_HITBOX_FRAC circle on each hole SQUARE center, mapped through the
 controller's affine) and costs nothing when unset.
+
+A WON check no longer walks the victim home to be shot a second time by the capture
+choreography: on the killing hit the shredded tier-3 sprite freezes for the kill
+hitstop and is then BLASTED off the pit it was shot at, continuing the shot line
+(attacker square center -> hit pit) with an upward kick, a gravity arc, bucketed
+spin frames and an alpha fade, plus a debris burst at the launch. Nothing is ever
+drawn on the home square again and the pit it left stays open — the fail path owns
+the jump-out/regrow/pit-close, the win path owns the toss.
 """
 
 import gc
 import logging
+import math
 from unittest.mock import MagicMock, call
 
 import pygame as pg
 import pytest
 
 from tests.conftest import pygame_display
+from chessshootout.backend.utils import Square
 from chessshootout.frontend.skillcheck.controller import SKILLCHECK_RESULT_HOLD_MS
 from chessshootout.frontend.skillcheck.mole_view import (
     MoleController, MOLE_VIEW_FAIL_FADE_MS, MOLE_VIEW_FAIL_HOLD_MS,
-    MOLE_VIEW_WIN_HOLD_MS, MOLE_VIEW_HITSTOP_KILL_MS, MOLE_VIEW_WIN_FRY_MS,
-    MOLE_VIEW_WIN_DEADPAN_MS, MOLE_VIEW_RETREAT_MS, MOLE_VIEW_PIP_OFFSET_FRAC,
+    MOLE_VIEW_WIN_HOLD_MS, MOLE_VIEW_HITSTOP_KILL_MS,
+    MOLE_VIEW_RETREAT_MS, MOLE_VIEW_PIP_OFFSET_FRAC,
     MOLE_VIEW_JUMP_RISE_MS, MOLE_VIEW_JUMP_HOP_MS, MOLE_VIEW_LAND_SQUASH_MS,
-    MOLE_VIEW_REGROW_MS,
+    MOLE_VIEW_REGROW_MS, MOLE_VIEW_TOSS_MS, MOLE_VIEW_TOSS_SPEED_FRAC,
+    MOLE_VIEW_TOSS_UP_FRAC, MOLE_VIEW_TOSS_GRAVITY_FRAC,
+    MOLE_VIEW_TOSS_SPIN_BUCKET_DEG, MOLE_VIEW_TOSS_FADE_START,
     MOLE_VIEW_PIT_CLOSE_MS, MOLE_VIEW_DANGER_PULSE_MS, MOLE_VIEW_PULSE_MS,
     _pit_telegraph_surface, _MOLE_STATIC_CACHE)
 from chessshootout.frontend.skillcheck.juice import TORN_REGROW_STEPS
@@ -161,7 +173,7 @@ def test_space_fires_at_the_mouse_and_shares_the_click_lockout(monkeypatch):
     assert ctrl._progress == 1, "Space after the lockout fires at the mouse position"
 
 
-def test_third_hit_commits_the_win_after_the_jump_hold():
+def test_third_hit_commits_the_win_after_the_toss_hold():
     ctrl = _mole()
     ctrl.update(800)
     ctrl.handle_event(_click(_hole_px(0)))
@@ -173,29 +185,33 @@ def test_third_hit_commits_the_win_after_the_jump_hold():
     ctrl._audio.play_whack_kill.assert_called_once()
     assert ctrl.done is False
     ctrl.update(3200 + MOLE_VIEW_WIN_HOLD_MS - 50)
-    assert ctrl.done is False, "the jump-out choreography still owns the overlay"
+    assert ctrl.done is False, "the toss still owns the overlay"
     ctrl.update(3200 + MOLE_VIEW_WIN_HOLD_MS)
     assert ctrl.done is True
 
 
-def test_win_hold_covers_the_hitstop_the_jump_and_the_whole_fry_flash():
-    # The gun capture may only fire once the fry window has fully played; a hold
-    # shorter than the sum would cut the flash mid-frame.
-    total = (MOLE_VIEW_HITSTOP_KILL_MS + _JUMP_TOTAL_MS
-             + MOLE_VIEW_WIN_DEADPAN_MS + MOLE_VIEW_WIN_FRY_MS)
-    assert total <= MOLE_VIEW_WIN_HOLD_MS
+def test_win_hold_covers_the_kill_hitstop_and_the_whole_toss():
+    # The capture choreography may only take over once the body has finished
+    # flying; a hold shorter than the sum would cut the arc mid-air.
+    assert MOLE_VIEW_HITSTOP_KILL_MS + MOLE_VIEW_TOSS_MS <= MOLE_VIEW_WIN_HOLD_MS
     ctrl = _mole()
     for now, hole in ((800, 0), (2000, 1), (3200, 2)):
         ctrl.update(now)
         ctrl.handle_event(_click(_hole_px(hole)))
-    fry_start = 3200 + MOLE_VIEW_HITSTOP_KILL_MS + _JUMP_TOTAL_MS + MOLE_VIEW_WIN_DEADPAN_MS
-    ctrl.update(int(fry_start) - 20)
-    assert ctrl._flash_active() is False, "the fry waits for the landing plus the deadpan beat"
-    ctrl.update(int(fry_start) + 10)
-    assert ctrl._flash_active() is True
-    ctrl.update(int(fry_start + MOLE_VIEW_WIN_FRY_MS) + 1)
-    assert ctrl._flash_active() is False
-    assert ctrl.done is False, "the fry finishes inside the hold, not after it"
+    ctrl.update(int(3200 + MOLE_VIEW_HITSTOP_KILL_MS + MOLE_VIEW_TOSS_MS))
+    assert ctrl.done is False, "the flight lands inside the hold, not after it"
+
+
+def test_the_kill_flash_is_the_hit_flash_and_nothing_reignites_it():
+    ctrl = _mole()
+    for now, hole in ((800, 0), (2000, 1), (3200, 2)):
+        ctrl.update(now)
+        ctrl.handle_event(_click(_hole_px(hole)))
+    assert ctrl._flash_active() is True, "the killing hit flashes like any other hit"
+    for dt in (200, 400, 600, 800, MOLE_VIEW_WIN_HOLD_MS - 1):
+        ctrl.update(3200 + int(dt))
+        assert ctrl._flash_active() is False, \
+            "the deep-fry beat is gone — the victim is blasted away, not cooked"
 
 
 def test_fail_hold_covers_the_jump_and_the_home_pit_closing():
@@ -281,13 +297,14 @@ def test_online_resolve_fail_holds_the_whole_jump_not_the_shared_result_hold():
     assert ctrl.done is True
 
 
-def test_online_resolve_win_holds_through_the_jump():
+def test_online_resolve_win_holds_through_the_toss():
     ctrl = _mole(on_shot=MagicMock())
     ctrl.update(900)
     ctrl.resolve(True)
     assert ctrl.landed is True
     ctrl.update(900 + SKILLCHECK_RESULT_HOLD_MS)
-    assert ctrl.done is False, "the shredded jump-out plays online too"
+    assert ctrl.done is False, "the shredded body still has to fly online too"
+    assert ctrl._toss is not None, "the server verdict launches the same toss"
     ctrl.update(900 + MOLE_VIEW_WIN_HOLD_MS)
     assert ctrl.done is True
 
@@ -297,7 +314,8 @@ def test_spectator_resolve_holds_the_same_totals_as_the_mover():
     ctrl.update(900)
     ctrl.resolve(True)
     ctrl.update(900 + SKILLCHECK_RESULT_HOLD_MS)
-    assert ctrl.done is False, "the mirror shows the same jump-out as the mover"
+    assert ctrl.done is False, "the mirror shows the same toss as the mover"
+    assert ctrl._toss is not None, "the passive mirror blasts the body off too"
     ctrl.update(900 + MOLE_VIEW_WIN_HOLD_MS)
     assert ctrl.done is True
 
@@ -424,9 +442,10 @@ def test_draw_smoke_across_states_and_sizes(cell):
         ctrl.handle_event(_click(_hole_px(hole, cell)))
         ctrl.draw(surf)
     assert ctrl.landed is True
-    for dt in (100, MOLE_VIEW_HITSTOP_KILL_MS + 120,
-               MOLE_VIEW_HITSTOP_KILL_MS + _JUMP_MS + 10,
-               MOLE_VIEW_HITSTOP_KILL_MS + _JUMP_TOTAL_MS + MOLE_VIEW_WIN_DEADPAN_MS + 10):
+    for dt in (100, MOLE_VIEW_HITSTOP_KILL_MS + 1,
+               MOLE_VIEW_HITSTOP_KILL_MS + MOLE_VIEW_TOSS_MS / 2,
+               MOLE_VIEW_HITSTOP_KILL_MS + MOLE_VIEW_TOSS_MS + 10,
+               MOLE_VIEW_WIN_HOLD_MS - 1):
         ctrl.update(3200 + int(dt))
         ctrl.draw(surf)
     failed = _mole(cell=cell, challenge=_one_pop_challenge())
@@ -740,13 +759,13 @@ def test_regrow_motes_converge_through_the_whole_heal_window():
     assert mote_pixels(_FAIL_AT_MS + total + 50) == 0, "motes end with the heal"
 
 
-def test_win_jump_keeps_the_shredded_victim_all_the_way_down():
+def test_win_toss_keeps_the_shredded_victim_all_the_way_out():
     ctrl = _mole()
     for now, hole in ((800, 0), (2000, 1), (3200, 2)):
         ctrl.update(now)
         ctrl.handle_event(_click(_hole_px(hole)))
-    for dt in (MOLE_VIEW_HITSTOP_KILL_MS, MOLE_VIEW_HITSTOP_KILL_MS + _JUMP_MS / 2,
-               MOLE_VIEW_HITSTOP_KILL_MS + _JUMP_TOTAL_MS, MOLE_VIEW_WIN_HOLD_MS - 1):
+    for dt in (MOLE_VIEW_HITSTOP_KILL_MS, MOLE_VIEW_HITSTOP_KILL_MS + MOLE_VIEW_TOSS_MS / 2,
+               MOLE_VIEW_HITSTOP_KILL_MS + MOLE_VIEW_TOSS_MS, MOLE_VIEW_WIN_HOLD_MS - 1):
         ctrl.update(3200 + int(dt))
         assert ctrl._regrow_bucket() == 0, "only the fail repairs the victim"
         assert ctrl._damage_tier() == 3
@@ -769,6 +788,161 @@ def _draw_at(ctrl, now_ms):
     ctrl.update(int(now_ms))
     ctrl.draw(surf)
     return surf
+
+
+_TOSS_COLOR = (10, 200, 40)
+_BODY_MARGIN = 40
+_ATTACKER_SQ = Square(7, 0)
+_WIN_AT_MS = 3200
+
+
+def _solid_victim(cell=_CELL):
+    surf = pg.Surface((cell, cell), pg.SRCALPHA)
+    surf.fill((*_TOSS_COLOR, 255))
+    return surf
+
+
+def _body_pixels(surf, rect):
+    # Green-dominance, not an exact match: the win-pop flash blends additively over
+    # the body and the flight fades it out, but no other element on the mole layer
+    # is green (Colors.win only ever paints under CHESS_DEBUG_HITBOX).
+    return sum(1 for x in range(rect.x, rect.right) for y in range(rect.y, rect.bottom)
+               if surf.get_at((x, y)).g - surf.get_at((x, y)).r > _BODY_MARGIN
+               and surf.get_at((x, y)).g - surf.get_at((x, y)).b > _BODY_MARGIN)
+
+
+def _won_at_the_far_pit():
+    # The attacker sits down-left of the last pit, so the shot line points up and to
+    # the right and the flight can never wander over the home square by accident.
+    ctrl = _mole(victim_surface=_solid_victim(), from_sq=_ATTACKER_SQ)
+    for now, hole in ((800, 0), (2000, 1), (_WIN_AT_MS, 2)):
+        ctrl.update(now)
+        ctrl.handle_event(_click(_hole_px(hole)))
+    assert ctrl.landed is True
+    return ctrl
+
+
+def test_a_won_check_never_walks_the_victim_home():
+    # The old win jumped the shredded body back onto its own square, where the
+    # capture choreography then shot it a second time. Nothing may land there.
+    ctrl = _won_at_the_far_pit()
+    home = pg.Rect(ctrl.center[0] - _CELL, ctrl.center[1] - 2 * _CELL, 2 * _CELL, 3 * _CELL)
+    for dt in range(0, MOLE_VIEW_WIN_HOLD_MS, 25):
+        surf = _draw_at(ctrl, _WIN_AT_MS + dt)
+        assert _body_pixels(surf, home) == 0, \
+            "the victim is drawn on its home square at +{}ms".format(dt)
+
+
+def test_the_kill_blasts_the_victim_off_the_pit_along_the_shot_line():
+    ctrl = _won_at_the_far_pit()
+    assert ctrl._toss is None, "nothing launches while the kill hitstop still holds"
+    ctrl.update(int(_WIN_AT_MS + MOLE_VIEW_HITSTOP_KILL_MS))
+    toss = ctrl._toss
+    assert toss is not None, "the launch happens the frame the freeze ends"
+    origin = _hole_px(2)
+    assert (toss.x0, toss.y0) == (float(origin[0]), float(origin[1])), \
+        "it leaves from the pit it was shot at, not from its home square"
+    ax, ay = _geom_for(_CELL)(_ATTACKER_SQ)
+    dist = math.hypot(origin[0] - ax, origin[1] - ay)
+    speed = _CELL * MOLE_VIEW_TOSS_SPEED_FRAC
+    assert toss.vx == pytest.approx((origin[0] - ax) / dist * speed)
+    assert toss.vy == pytest.approx((origin[1] - ay) / dist * speed
+                                    - _CELL * MOLE_VIEW_TOSS_UP_FRAC), \
+        "the shot direction carries straight through, with the upward kick on top"
+
+
+def test_the_tossed_body_arcs_away_from_the_pit_and_falls():
+    ctrl = _won_at_the_far_pit()
+    ctrl.update(int(_WIN_AT_MS + MOLE_VIEW_HITSTOP_KILL_MS))
+    start = ctrl._toss_point(0.0)
+    mid = ctrl._toss_point(MOLE_VIEW_TOSS_MS / 2)
+    end = ctrl._toss_point(MOLE_VIEW_TOSS_MS)
+    assert start == (ctrl._toss.x0, ctrl._toss.y0)
+    assert mid[0] > start[0] and mid[1] < start[1], "up and away along the shot line"
+    assert end[0] > mid[0], "it never stops travelling"
+    assert end[1] > mid[1], "and gravity has already bent the arc back down"
+    flight = MOLE_VIEW_TOSS_MS / 1000.0
+    assert end[1] == pytest.approx(
+        ctrl._toss.y0 + ctrl._toss.vy * flight
+        + 0.5 * _CELL * MOLE_VIEW_TOSS_GRAVITY_FRAC * flight * flight), \
+        "the fall is the plain cells-per-second-squared pull, nothing hand-tweaked"
+    assert math.hypot(end[0] - start[0], end[1] - start[1]) > _CELL, \
+        "the body clears the pit by more than a whole cell"
+
+
+def test_the_launch_bursts_its_own_debris():
+    ctrl = _won_at_the_far_pit()
+    ctrl.update(int(_WIN_AT_MS + MOLE_VIEW_HITSTOP_KILL_MS) - 1)
+    before = len(ctrl._debris)
+    ctrl.update(int(_WIN_AT_MS + MOLE_VIEW_HITSTOP_KILL_MS))
+    assert len(ctrl._debris) == before + 1, "the blast throws chunks as the body leaves"
+
+
+def test_the_tossed_body_is_in_the_air_mid_flight_and_gone_by_the_hold():
+    ctrl = _won_at_the_far_pit()
+    whole = pg.Rect(0, 0, 640, 640)
+    flying = _draw_at(ctrl, _WIN_AT_MS + MOLE_VIEW_HITSTOP_KILL_MS + 40)
+    assert _body_pixels(flying, whole) > 0, "the body is mid-air"
+    gone = _draw_at(ctrl, _WIN_AT_MS + MOLE_VIEW_WIN_HOLD_MS - 1)
+    assert _body_pixels(gone, whole) == 0, \
+        "the flight is over and nothing is left for the capture to shoot at"
+
+
+def test_the_spin_comes_from_a_bucketed_cache_not_a_per_frame_rotation():
+    ctrl = _won_at_the_far_pit()
+    surf = pg.Surface((640, 640))
+    launch = int(_WIN_AT_MS + MOLE_VIEW_HITSTOP_KILL_MS)
+    for now in range(launch, int(launch + MOLE_VIEW_TOSS_MS), 4):
+        ctrl.update(now)
+        ctrl.draw(surf)
+    assert 1 < len(ctrl._toss_cache) <= 360 // MOLE_VIEW_TOSS_SPIN_BUCKET_DEG, \
+        "the body really turns, and every frame reuses one of the spin buckets"
+
+
+def test_the_fade_never_tints_the_sprite_the_board_shares():
+    # The flight sets a blanket alpha every frame; every spin frame it can touch
+    # must therefore be a surface the controller owns, never the board's piece
+    # image or juice's shared torn cache entry.
+    ctrl = _won_at_the_far_pit()
+    surf = pg.Surface((640, 640))
+    launch = int(_WIN_AT_MS + MOLE_VIEW_HITSTOP_KILL_MS)
+    for now in range(launch, int(launch + MOLE_VIEW_TOSS_MS), 20):
+        ctrl.update(now)
+        ctrl.draw(surf)
+    assert ctrl._victim.get_alpha() == 255, "the source sprite is never faded"
+    assert all(s is not ctrl._victim for s in ctrl._toss_cache.values())
+
+
+def test_the_body_fades_out_over_the_tail_of_the_flight():
+    assert MoleController._toss_alpha(0.0) == 255
+    assert MoleController._toss_alpha(MOLE_VIEW_TOSS_FADE_START) == 255, \
+        "it stays solid while it is still readable as the piece"
+    half = MoleController._toss_alpha((MOLE_VIEW_TOSS_FADE_START + 1.0) / 2.0)
+    assert 0 < half < 255
+    assert MoleController._toss_alpha(1.0) == 0, "and it is fully gone at touchdown"
+
+
+def test_no_pit_closes_on_a_win():
+    ctrl = _won_at_the_far_pit()
+    for dt in (MOLE_VIEW_HITSTOP_KILL_MS, MOLE_VIEW_WIN_HOLD_MS - 1):
+        surf = _draw_at(ctrl, _WIN_AT_MS + int(dt))
+        assert ctrl._home_pit_close_scale() == 1.0, "the close animation is fail-only"
+        assert _pit_dark_pixels(surf, ctrl) > 0, "the ground stays torn open"
+
+
+def test_a_toss_with_no_shot_line_still_leaves_upward():
+    ch = _challenge()
+    ctrl = MoleController(ch, pg.Rect(3 * _CELL, 4 * _CELL, _CELL, _CELL), 0,
+                          ch.deadline_ms, hole_squares=_HOLES, audio=MagicMock(),
+                          victim_surface=_victim(_CELL), on_shot=MagicMock())
+    ctrl.update(900)
+    ctrl.resolve(True)
+    ctrl.update(int(900 + MOLE_VIEW_HITSTOP_KILL_MS))
+    toss = ctrl._toss
+    assert toss is not None
+    assert (toss.x0, toss.y0) == (float(ctrl.center[0]), float(ctrl.center[1])), \
+        "with no hit pit on record the body leaves from the check's own square"
+    assert toss.vy < 0.0, "the seeded fallback still throws it up, never into the floor"
 
 
 def test_home_pit_holds_open_under_the_fail_jump_then_shrinks_shut():

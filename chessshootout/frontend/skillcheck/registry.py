@@ -32,8 +32,8 @@ def build_controller(kind, *, seed, cell_rect, now_ms, deadline_ms, period_ms=WH
             MoleChallenge.from_seed(seed, value_diff, deadline_ms, captured_value),
             cell_rect, now_ms, deadline_ms,
             hole_squares=hole_squares, victim_surface=victim_surface, geom=geom,
-            shot_sound=shot_sound, on_shot=on_shot, progress=progress, passive=passive,
-            audio=audio, on_hit_px=on_hit_px)
+            from_sq=from_sq, shot_sound=shot_sound, on_shot=on_shot, progress=progress,
+            passive=passive, audio=audio, on_hit_px=on_hit_px)
     if kind == SkillCheckKind.COMBO:
         return ComboController(
             ComboChallenge.from_seed(seed, value_diff, deadline_ms, captured_value),

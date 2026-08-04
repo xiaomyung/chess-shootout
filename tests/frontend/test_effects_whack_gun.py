@@ -26,6 +26,15 @@ board._start_move_animation fires between the handoff and the capture; only a re
 reset (clear_transients) drops it. capture(predrawn=True) is the same switch for
 callers that can pass it directly — the session cannot, because its capture is three
 frames deep behind board.apply_gated_move.
+
+A consumed handoff means MORE than a predrawn gun: the whack already killed the
+victim (its body is blasted off the pit by the check's own choreography), so the
+capture behind it is ADVANCE-ONLY — the fire phase is skipped whole. No pellet, no
+muzzle flash, no impact/blood/hole/ragdoll, no victim sprite to draw, no recoil.
+Only the two timing hooks survive, in the same order and at the same offsets a real
+volley would have fired them at (on_fire at fire_at, on_slide one pellet flight
+later), because the board hangs its kill bookkeeping and its slide animation off
+them. Captures with no check behind them still shoot everything.
 """
 
 import math
@@ -38,7 +47,7 @@ from tests.conftest import pygame_display
 from chessshootout.backend.utils import Square
 from chessshootout.frontend.visual.effects import (
     AIM_MS, CHECK_DROP_MS, DRAW_MS, GUN_PX_AIM_RATE, MUZZLE_MS, PROJECTILE_MAX_MS,
-    WHACK_SHOT_LIFE_EPS_MS, WHACK_SHOT_TRAVEL_MS, EffectManager)
+    PROJECTILE_TRAVEL_MS, WHACK_SHOT_LIFE_EPS_MS, WHACK_SHOT_TRAVEL_MS, EffectManager)
 from chessshootout.frontend.visual.gunfx import GUNS, PIECE_GUN
 
 _pygame_init = pygame_display(800, 800)
@@ -299,7 +308,9 @@ def test_the_win_handoff_drops_nothing_and_predraws_the_capture():
     em.hand_off_gun_px()
     assert em.has_gun_px() is False, "the held gun leaves the whack state"
     assert em.drops == [], "a WON check never tumbles the gun — the capture keeps shooting it"
-    assert _capture(em)["predrawn"] is True, "the capture picks it straight back up"
+    entry = _capture(em)
+    assert entry["predrawn"] is True, "the capture picks it straight back up"
+    assert entry["advance_only"] is True, "and it advances instead of firing again"
 
 
 def test_the_handoff_belongs_to_the_shooter_and_is_consumed_once():
@@ -308,8 +319,11 @@ def test_the_handoff_belongs_to_the_shooter_and_is_consumed_once():
     em.hand_off_gun_px()
     other = _capture(em, from_sq=Square(1, 1))
     assert other["predrawn"] is False, "another piece's capture cannot inherit the handoff"
+    assert other["advance_only"] is False, "and it shoots for itself"
     em.captures = []
-    assert _capture(em)["predrawn"] is False, "and a stale latch never survives one capture"
+    stale = _capture(em)
+    assert stale["predrawn"] is False, "and a stale latch never survives one capture"
+    assert stale["advance_only"] is False
 
 
 def test_the_handoff_survives_the_boards_cut_but_not_a_reset():
@@ -323,7 +337,9 @@ def test_the_handoff_survives_the_boards_cut_but_not_a_reset():
     em.hand_off_gun_px()
     em.clear_transients()
     em.captures = []
-    assert _capture(em)["predrawn"] is False, "a real reset drops the latch"
+    entry = _capture(em)
+    assert entry["predrawn"] is False, "a real reset drops the latch"
+    assert entry["advance_only"] is False, "and the capture behind it shoots normally"
 
 
 def test_arming_a_fresh_check_clears_a_stale_handoff():
@@ -332,8 +348,77 @@ def test_arming_a_fresh_check_clears_a_stale_handoff():
     em.hand_off_gun_px()
     _held(em)
     em.release_gun_px(500)
-    assert _capture(em)["predrawn"] is False, \
+    entry = _capture(em)
+    assert entry["predrawn"] is False, \
         "a check that ended in a tumble cannot leave a predrawn capture behind it"
+    assert entry["advance_only"] is False
+
+
+def _armed_advance(em, **kw):
+    _held(em, attacker_type="queen")
+    em.hand_off_gun_px()
+    return _capture(em, **kw)
+
+
+def test_the_capture_behind_a_won_whack_never_fires_a_second_time():
+    # The victim was already blasted off the pit by the whack choreography; a
+    # second volley shot a corpse and the impact FX rebuilt it to shred it again.
+    em = _em()
+    order = []
+    entry = _armed_advance(em, on_fire=lambda: order.append("fire"),
+                           on_slide=lambda: order.append("slide"))
+    assert entry["advance_only"] is True
+    em.update(0)
+    em.update(AIM_MS)
+    assert order == ["fire"], "the fire hook still lands on the beat the gun would have fired"
+    assert em.projectiles == [], "but no pellet leaves the barrel"
+    assert em.particles == [], "and no muzzle flash either"
+    assert em.holes == [] and em._shake is None, "nothing hits anything"
+    em.update(AIM_MS + PROJECTILE_TRAVEL_MS)
+    assert order == ["fire", "slide"], "the slide follows one pellet flight later, as always"
+    assert em.particles == [], "no impact ring, no blood, no ragdoll — the victim is gone"
+    assert em.holes == []
+    assert em.captures == [], "and the entry retires with the slide"
+
+
+def test_a_plain_capture_behind_no_check_still_shoots_everything():
+    em = _em()
+    order = []
+    entry = _capture(em, on_fire=lambda: order.append("fire"),
+                     on_slide=lambda: order.append("slide"))
+    assert entry["advance_only"] is False
+    em.update(0)
+    em.update(DRAW_MS + AIM_MS)
+    assert order == ["fire"]
+    assert em.projectiles, "the pellets fly"
+    assert [p["kind"] for p in em.particles] == ["flash"], "and the muzzle flashes"
+    for t in range(DRAW_MS + AIM_MS, DRAW_MS + AIM_MS + PROJECTILE_TRAVEL_MS + 20, 20):
+        em.update(t)
+    assert order == ["fire", "slide"]
+    assert {p["kind"] for p in em.particles} >= {"impact", "blood", "ragdoll"}, \
+        "the victim takes the hit it is still standing for"
+    assert em.holes, "and keeps the bullet hole"
+
+
+def test_the_advancing_capture_holds_the_gun_still_and_hides_the_dead_victim():
+    em = _em()
+    plain, advancing = _window(), _window()
+    _capture(em, predrawn=True)
+    em.update(0)
+    em.update(AIM_MS)
+    em.draw_over(plain, AIM_MS)
+    em.captures = []
+    em.particles = []
+    em.projectiles = []
+    em.holes = []
+    _armed_advance(em)
+    em.update(AIM_MS)
+    em.draw_over(advancing, AIM_MS)
+    victim = pg.Rect(4 * _CELL, 4 * _CELL, _CELL, _CELL)
+    assert _pixels(advancing, victim) == _pixels(_window(), victim), \
+        "the victim square stays empty — its body left with the skill-check"
+    assert _pixels(advancing, victim) != _pixels(plain, victim), \
+        "a normal capture does hold the victim sprite there"
 
 
 def test_cut_and_clear_transients_never_leave_the_gun_behind():
@@ -345,3 +430,25 @@ def test_cut_and_clear_transients_never_leave_the_gun_behind():
     _held(em)
     em.clear_transients()
     assert em.has_gun_px() is False, "a new game can never inherit a held gun"
+
+
+def test_advance_only_fire_flags_the_callback_so_the_gunshot_is_muted():
+    # The whack check already fired the real gunshots; the advancing capture is
+    # silent — no shot sound with nothing visible — but kill streaks still count
+    # (board._on_capture_fire reads firing_advance_only to skip shot_callback
+    # while still calling register_kill).
+    em = _em()
+    fired = {}
+    _armed_advance(em, on_fire=lambda: fired.setdefault("advance", em.firing_advance_only))
+    em.update(5000)
+    assert fired["advance"] is True, \
+        "the callback sees the advance flag and can skip the gunshot"
+    assert em.firing_advance_only is False, "the flag never leaks past the callback"
+
+
+def test_a_plain_capture_fire_reports_not_advance_only():
+    em = _em()
+    fired = {}
+    _capture(em, on_fire=lambda: fired.setdefault("advance", em.firing_advance_only))
+    em.update(5000)
+    assert fired["advance"] is False

@@ -1247,7 +1247,7 @@ class Board:
 
     def _on_capture_fire(self, entry, color, victim_sq):
         key = self.effects.register_kill(color, victim_sq, self.cell_size, pg.time.get_ticks())
-        if self.shot_callback is not None:
+        if self.shot_callback is not None and not self.effects.firing_advance_only:
             self.shot_callback(entry)
         if self.announce_callback is not None and key is not None:
             self.announce_callback(key, entry.move.captured)
