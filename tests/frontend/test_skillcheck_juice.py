@@ -6,7 +6,7 @@ import pytest
 from tests.conftest import pygame_display
 from chessshootout.frontend.skillcheck.juice import (
     Trauma, Hitstop, sakurai_vibrate, ease_out_back, torn_sprite, flash_sprite,
-    TRAUMA_DECAY_PER_S, HITSTOP_CAP_MS, TORN_MAX_TIER,
+    TRAUMA_DECAY_PER_S, HITSTOP_CAP_MS, TORN_MAX_TIER, TORN_REGROW_STEPS,
     _TORN_NOTCHES, _TORN_NOTCH_FRAC, _TORN_CRACKS,
 )
 
@@ -283,3 +283,39 @@ def test_flash_cache_hit_returns_same_object():
     base = _piece_surface()
     key = ("r", "w", 48)
     assert flash_sprite(base, key) is flash_sprite(base, key)
+
+
+# --- torn regrow ------------------------------------------------------------
+
+def test_regrow_bucket_zero_hits_the_legacy_cache_key():
+    # bucket 0 must stay byte-identical to the pre-regrow path so every existing
+    # damage frame (and its cache entry) is untouched by the heal feature.
+    base = _piece_surface()
+    key = ("rg", "w", 48, 2)
+    assert torn_sprite(base, key, 2, 0) is torn_sprite(base, key, 2)
+
+
+def test_full_regrow_returns_the_clean_base_identity():
+    base = _piece_surface()
+    assert torn_sprite(base, ("rg2", "w", 48, 3), 3, TORN_REGROW_STEPS) is base
+
+
+def test_regrow_monotonically_restores_opaque_pixels():
+    # "grows its parts back": each step of regrowth shrinks the punched notches,
+    # so opaque coverage must be non-decreasing from full damage to clean.
+    base = _piece_surface(64)
+    counts = [
+        _opaque_count(torn_sprite(base, ("rg3", "w", 64, 3), 3, bucket))
+        for bucket in range(TORN_REGROW_STEPS + 1)
+    ]
+    assert all(b >= a for a, b in zip(counts, counts[1:])), counts
+    assert counts[0] < counts[-1], "full damage must cover fewer pixels than clean"
+
+
+def test_mid_regrow_differs_from_both_ends():
+    base = _piece_surface(64)
+    mid = TORN_REGROW_STEPS // 2
+    full = torn_sprite(base, ("rg4", "w", 64, 3), 3, 0)
+    half = torn_sprite(base, ("rg4", "w", 64, 3), 3, mid)
+    assert half is not base and half is not full
+    assert _opaque_count(half) > _opaque_count(full)

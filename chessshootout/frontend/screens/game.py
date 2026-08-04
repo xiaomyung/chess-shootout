@@ -521,17 +521,17 @@ class GameScreen(Screen):
         self.skillcheck_session.online_verdict_action = action
         self.skillcheck_overlay.resolve_online(won)
 
-    def _apply_online_fail(self, from_sq, to_sq, aim_victim):
+    def _apply_online_fail(self, from_sq, to_sq, aim_victim, kind=None):
         self.skillcheck.lock(from_sq, to_sq)
         log.info("skillcheck move locked from=%s to=%s online=True",
                  coord_from_square(from_sq), coord_from_square(to_sq))
-        self._apply_spectate_fail(from_sq, to_sq, aim_victim)
+        self._apply_spectate_fail(from_sq, to_sq, aim_victim, kind)
 
-    def _apply_spectate_fail(self, from_sq, to_sq, aim_victim):
+    def _apply_spectate_fail(self, from_sq, to_sq, aim_victim, kind=None):
         self.board.trigger_skillcheck_fail(
             from_sq, to_sq, on_fire=self.skillcheck_session.on_skillcheck_miss_fire)
         if aim_victim is not None:
-            self.board.restore_piece(aim_victim)
+            self.board.restore_piece(aim_victim, drop=kind != SkillCheckKind.WHACK)
 
     def on_skillcheck_required(self, payload):
         if "kind" in payload:
@@ -575,13 +575,14 @@ class GameScreen(Screen):
         pending = self.skillcheck_session.online_skillcheck
         self.skillcheck_session.record_online_fail(pending, from_sq, to_sq)
         aim_victim = self.board.aim_suppressed_square
-        return from_sq, to_sq, aim_victim
+        kind = pending[3] if pending is not None else None
+        return from_sq, to_sq, aim_victim, kind
 
     def _resolve_my_skillcheck_failure(self, payload):
-        from_sq, to_sq, aim_victim = self._prepare_online_fail(payload)
+        from_sq, to_sq, aim_victim, kind = self._prepare_online_fail(payload)
         self.board.selected_square = None
         self._begin_online_verdict(
-            False, lambda: self._apply_online_fail(from_sq, to_sq, aim_victim))
+            False, lambda: self._apply_online_fail(from_sq, to_sq, aim_victim, kind))
 
     def on_spectate(self, payload):
         if "kind" in payload:
@@ -596,10 +597,10 @@ class GameScreen(Screen):
         self.app.toast.show("Opponent is lining up a shot…")
 
     def _resolve_spectated_skillcheck_failure(self, payload):
-        from_sq, to_sq, aim_victim = self._prepare_online_fail(payload)
+        from_sq, to_sq, aim_victim, kind = self._prepare_online_fail(payload)
         self.app.toast.show("Opponent missed!")
         self._begin_online_verdict(
-            False, lambda: self._apply_spectate_fail(from_sq, to_sq, aim_victim))
+            False, lambda: self._apply_spectate_fail(from_sq, to_sq, aim_victim, kind))
 
     def _spectate_shot(self, payload):
         target_row = payload.get("target_row")
@@ -1135,6 +1136,7 @@ class GameScreen(Screen):
 
     def _draw_game_scene(self, *, show_panel, show_strips, arrow_hook=None, after_board=None):
         self.skillcheck_session.sync_aim_check_gun()
+        self.skillcheck_session.sync_whack_gun()
         self._draw_game_background()
         self.board.draw_board()
         self._draw_speech_bubbles()

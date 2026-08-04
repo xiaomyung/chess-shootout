@@ -31,6 +31,7 @@ _FOCUS_SHOW_VALUES = ("nothing", "line", "strips")
 _DEFAULT_FOCUS_SHOW = "line"
 _LAUNCH_MODE_VALUES = ("windowed", "maximized", "fullscreen")
 _DEFAULT_LAUNCH_MODE = "windowed"
+_TRUTHY_VALUES = ("1", "true", "on")
 
 _ENV_PATH = paths.get_config_dir() / ".env"
 
@@ -86,6 +87,10 @@ def set_server_addr(value):
 
 def get_news_url():
     return os.environ.get("CHESS_NEWS_URL") or _DEFAULT_NEWS_URL
+
+
+def get_debug_hitbox():
+    return (os.environ.get("CHESS_DEBUG_HITBOX") or "").strip().lower() in _TRUTHY_VALUES
 
 
 def get_country():

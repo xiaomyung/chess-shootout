@@ -1,22 +1,31 @@
 """Whack-a-mole skill-check view controller: click/Space shots share one recoil
 lockout — a locked shot gets NO muzzle/kick/casing, only a dry-click cue, so the
 fire rate is felt — hits adjudicate through the engine's hit_at (grace window
-included), the third hit commits a local win that plays a climb-out from the home
-pit (hitstop freeze -> ease_out_back rise -> deadpan -> fry flash) through
-MOLE_VIEW_WIN_HOLD_MS, while deadline/quota exhaustion commits a fast fail: the
-pits fade, the victim draws nothing (the board-level restore drop takes over),
-and the overlay ends after MOLE_VIEW_FAIL_HOLD_MS. The taunt moved out of the
-controller entirely — the pure engine's mole.pick_taunt(seed) is deterministic per
-check seed so mover and spectator show the same line on the board layer. A telegraphing
-pop that pop_mandatory marks as must-hit pulses a danger rim (Colors.loss lerp)
-instead of the plain white one. Online every registered shot relays exactly once
+included), and BOTH outcomes end on one shared jump-out: the victim rises out of
+its home pit (RISE), hops through an arc half a cell high (HOP), lands with a
+squash (LAND_SQUASH) and settles on its own square at exactly the rest position
+the board draws a piece at — so the fail handoff has no seam and nothing appears
+out of thin air. A win keeps the shredded tier through the jump and then plays the
+deep-fry flash (WIN_HOLD covers hitstop + jump + fry); a fail heals the victim in
+even steps through the arc so it lands intact, holds its home pit open until
+touchdown and then shrinks it closed over PIT_CLOSE (the other pits keep their
+300ms fade), and the session restores the piece WITHOUT the board drop.
+Damage tiers interpolate over the quota (ceil(TORN_MAX_TIER * hits / required)) so
+a queen's five hits break the sprite as evenly as a pawn's three. The taunt moved
+out of the controller entirely — the pure engine's mole.pick_taunt(seed) is
+deterministic per check seed so mover and spectator show the same line on the board
+layer. A telegraphing pop that pop_mandatory marks as must-hit hard-blinks between
+Colors.loss and near-white on a faster period with a thicker rim, instead of the
+calm accent->white lerp. Online every registered shot relays exactly once
 with a keyword (row_f, col_f) target and the client never self-commits —
-resolve() carries the server verdict; a win holds the climb (WIN_HOLD) online and
-on the passive mirror, a fail holds the shared RESULT_HOLD. Passive mirrors
+resolve() carries the server verdict; both verdicts hold their own choreography
+online and on the passive mirror. Passive mirrors
 swallow no input, never touch the OS cursor, stay muted, and replay the mover's
 shots via spectate_shot — which mirrors the mover's pop bookkeeping so a relayed
 hit ducks the mole on the mirror too. The OS cursor hides on active construction
-and is restored on every terminal path.
+and is restored on every terminal path. CHESS_DEBUG_HITBOX draws the engine's true
+hit region (MOLE_HITBOX_FRAC circle on each hole SQUARE center, mapped through the
+controller's affine) and costs nothing when unset.
 """
 
 import gc
@@ -30,11 +39,18 @@ from tests.conftest import pygame_display
 from chessshootout.frontend.skillcheck.controller import SKILLCHECK_RESULT_HOLD_MS
 from chessshootout.frontend.skillcheck.mole_view import (
     MoleController, MOLE_VIEW_FAIL_FADE_MS, MOLE_VIEW_FAIL_HOLD_MS,
-    MOLE_VIEW_WIN_HOLD_MS, MOLE_VIEW_HITSTOP_KILL_MS, MOLE_VIEW_WIN_CLIMB_MS,
-    MOLE_VIEW_WIN_DEADPAN_MS, MOLE_VIEW_RETREAT_MS, MOLE_VIEW_PIP_OFFSET_FRAC)
+    MOLE_VIEW_WIN_HOLD_MS, MOLE_VIEW_HITSTOP_KILL_MS, MOLE_VIEW_WIN_FRY_MS,
+    MOLE_VIEW_WIN_DEADPAN_MS, MOLE_VIEW_RETREAT_MS, MOLE_VIEW_PIP_OFFSET_FRAC,
+    MOLE_VIEW_JUMP_RISE_MS, MOLE_VIEW_JUMP_HOP_MS, MOLE_VIEW_LAND_SQUASH_MS,
+    MOLE_VIEW_PIT_CLOSE_MS, MOLE_VIEW_DANGER_PULSE_MS, MOLE_VIEW_PULSE_MS,
+    _pit_telegraph_surface, _MOLE_STATIC_CACHE)
+from chessshootout.frontend.skillcheck.juice import TORN_REGROW_STEPS
 from chessshootout.frontend.visual.colors import Colors
 from chessshootout.skillcheck.mole import (
     MoleChallenge, MolePop, MOLE_TAUNTS, pick_taunt)
+
+_JUMP_MS = MOLE_VIEW_JUMP_RISE_MS + MOLE_VIEW_JUMP_HOP_MS
+_JUMP_TOTAL_MS = _JUMP_MS + MOLE_VIEW_LAND_SQUASH_MS
 
 _pygame_init = pygame_display(640, 640)
 
@@ -144,7 +160,7 @@ def test_space_fires_at_the_mouse_and_shares_the_click_lockout(monkeypatch):
     assert ctrl._progress == 1, "Space after the lockout fires at the mouse position"
 
 
-def test_third_hit_commits_the_win_after_the_climb_hold():
+def test_third_hit_commits_the_win_after_the_jump_hold():
     ctrl = _mole()
     ctrl.update(800)
     ctrl.handle_event(_click(_hole_px(0)))
@@ -156,9 +172,34 @@ def test_third_hit_commits_the_win_after_the_climb_hold():
     ctrl._audio.play_whack_kill.assert_called_once()
     assert ctrl.done is False
     ctrl.update(3200 + MOLE_VIEW_WIN_HOLD_MS - 50)
-    assert ctrl.done is False, "the climb-out choreography still owns the overlay at 700ms"
+    assert ctrl.done is False, "the jump-out choreography still owns the overlay"
     ctrl.update(3200 + MOLE_VIEW_WIN_HOLD_MS)
     assert ctrl.done is True
+
+
+def test_win_hold_covers_the_hitstop_the_jump_and_the_whole_fry_flash():
+    # The gun capture may only fire once the fry window has fully played; a hold
+    # shorter than the sum would cut the flash mid-frame.
+    total = (MOLE_VIEW_HITSTOP_KILL_MS + _JUMP_TOTAL_MS
+             + MOLE_VIEW_WIN_DEADPAN_MS + MOLE_VIEW_WIN_FRY_MS)
+    assert total <= MOLE_VIEW_WIN_HOLD_MS
+    ctrl = _mole()
+    for now, hole in ((800, 0), (2000, 1), (3200, 2)):
+        ctrl.update(now)
+        ctrl.handle_event(_click(_hole_px(hole)))
+    fry_start = 3200 + MOLE_VIEW_HITSTOP_KILL_MS + _JUMP_TOTAL_MS + MOLE_VIEW_WIN_DEADPAN_MS
+    ctrl.update(int(fry_start) - 20)
+    assert ctrl._flash_active() is False, "the fry waits for the landing plus the deadpan beat"
+    ctrl.update(int(fry_start) + 10)
+    assert ctrl._flash_active() is True
+    ctrl.update(int(fry_start + MOLE_VIEW_WIN_FRY_MS) + 1)
+    assert ctrl._flash_active() is False
+    assert ctrl.done is False, "the fry finishes inside the hold, not after it"
+
+
+def test_fail_hold_covers_the_jump_and_the_home_pit_closing():
+    assert _JUMP_MS + MOLE_VIEW_PIT_CLOSE_MS <= MOLE_VIEW_FAIL_HOLD_MS
+    assert _JUMP_TOTAL_MS <= MOLE_VIEW_FAIL_HOLD_MS
 
 
 def test_grace_window_click_still_hits():
@@ -182,7 +223,7 @@ def test_deadline_commits_a_fast_fail_with_no_controller_taunt():
     ctrl.update(2000 + MOLE_VIEW_FAIL_HOLD_MS - 1)
     assert ctrl.done is False
     ctrl.update(2000 + MOLE_VIEW_FAIL_HOLD_MS)
-    assert ctrl.done is True, "the fail hold is a fast 450ms — no deadpan pause"
+    assert ctrl.done is True, "the fail hold runs the whole jump-out, then the pit close"
     ctrl._audio.play_mole_taunt.assert_not_called()
     for attr in ("_taunt", "_taunt_shown", "_taunt_text"):
         assert not hasattr(ctrl, attr), \
@@ -227,35 +268,45 @@ def test_online_never_self_commits_a_terminal():
     assert ctrl.landed is None and ctrl.done is False, "no self-fail at the deadline online"
 
 
-def test_online_resolve_fail_holds_the_shared_result_hold():
+def test_online_resolve_fail_holds_the_whole_jump_not_the_shared_result_hold():
     ctrl = _mole(on_shot=MagicMock())
     ctrl.update(900)
     ctrl.resolve(False)
     assert ctrl.landed is False
     assert ctrl.done is False
     ctrl.update(900 + SKILLCHECK_RESULT_HOLD_MS)
+    assert ctrl.done is False, "the shared 200ms hold would cut the jump-out in half"
+    ctrl.update(900 + MOLE_VIEW_FAIL_HOLD_MS)
     assert ctrl.done is True
 
 
-def test_online_resolve_win_holds_through_the_climb():
+def test_online_resolve_win_holds_through_the_jump():
     ctrl = _mole(on_shot=MagicMock())
     ctrl.update(900)
     ctrl.resolve(True)
     assert ctrl.landed is True
     ctrl.update(900 + SKILLCHECK_RESULT_HOLD_MS)
-    assert ctrl.done is False, "the shredded climb-out plays online too"
+    assert ctrl.done is False, "the shredded jump-out plays online too"
     ctrl.update(900 + MOLE_VIEW_WIN_HOLD_MS)
     assert ctrl.done is True
 
 
-def test_spectator_resolve_win_holds_through_the_climb_too():
+def test_spectator_resolve_holds_the_same_totals_as_the_mover():
     ctrl = _mole(passive=True)
     ctrl.update(900)
     ctrl.resolve(True)
     ctrl.update(900 + SKILLCHECK_RESULT_HOLD_MS)
-    assert ctrl.done is False, "the mirror shows the same climb-out as the mover"
+    assert ctrl.done is False, "the mirror shows the same jump-out as the mover"
     ctrl.update(900 + MOLE_VIEW_WIN_HOLD_MS)
     assert ctrl.done is True
+
+    missed = _mole(passive=True)
+    missed.update(900)
+    missed.resolve(False)
+    missed.update(900 + MOLE_VIEW_FAIL_HOLD_MS - 1)
+    assert missed.done is False, "the mirror sits through the heal-and-land too"
+    missed.update(900 + MOLE_VIEW_FAIL_HOLD_MS)
+    assert missed.done is True
 
 
 def test_passive_ignores_input_and_mutes_every_cue():
@@ -337,7 +388,7 @@ def test_cursor_restored_once_on_resolve_and_survives_the_drop(monkeypatch):
     ctrl = _mole(on_shot=MagicMock())
     ctrl.update(600)
     ctrl.resolve(False)
-    ctrl.update(600 + SKILLCHECK_RESULT_HOLD_MS)
+    ctrl.update(600 + MOLE_VIEW_FAIL_HOLD_MS)
     assert ctrl.done is True
     del ctrl
     gc.collect()
@@ -373,17 +424,18 @@ def test_draw_smoke_across_states_and_sizes(cell):
         ctrl.draw(surf)
     assert ctrl.landed is True
     for dt in (100, MOLE_VIEW_HITSTOP_KILL_MS + 120,
-               MOLE_VIEW_HITSTOP_KILL_MS + MOLE_VIEW_WIN_CLIMB_MS
-               + MOLE_VIEW_WIN_DEADPAN_MS + 10):
+               MOLE_VIEW_HITSTOP_KILL_MS + _JUMP_MS + 10,
+               MOLE_VIEW_HITSTOP_KILL_MS + _JUMP_TOTAL_MS + MOLE_VIEW_WIN_DEADPAN_MS + 10):
         ctrl.update(3200 + int(dt))
         ctrl.draw(surf)
     failed = _mole(cell=cell, challenge=_one_pop_challenge())
     failed.update(2000)
     failed.draw(surf)
-    failed.update(2000 + MOLE_VIEW_FAIL_FADE_MS + 50)
-    failed.draw(surf)
-    failed.update(2000 + MOLE_VIEW_FAIL_HOLD_MS - 1)
-    failed.draw(surf)
+    for dt in (MOLE_VIEW_JUMP_RISE_MS / 2, _JUMP_MS / 2, MOLE_VIEW_FAIL_FADE_MS + 50,
+               _JUMP_MS + 10, _JUMP_TOTAL_MS + MOLE_VIEW_PIT_CLOSE_MS,
+               MOLE_VIEW_FAIL_HOLD_MS - 1):
+        failed.update(2000 + int(dt))
+        failed.draw(surf)
     assert failed.landed is False
 
 
@@ -454,7 +506,48 @@ def test_queen_capture_telegraphs_the_danger_rim_where_the_pop_is_mandatory():
     plain = _telegraph_surface_for(1, 0)
     assert danger is not plain, "a mandatory pop picks the danger-keyed telegraph surface"
     assert pg.image.tostring(danger, "RGBA") != pg.image.tostring(plain, "RGBA"), \
-        "the danger rim lerps toward Colors.loss, visibly different from the white pulse"
+        "the danger rim blinks hard, visibly different from the calm accent->white pulse"
+
+
+def _rim_span(surf):
+    dark = pg.Color(Colors.well_deep)
+    y = surf.get_height() // 2
+    return sum(1 for x in range(surf.get_width())
+               if surf.get_at((x, y))[:3] == (dark.r, dark.g, dark.b))
+
+
+def test_danger_telegraph_hard_blinks_and_fattens_the_rim_at_the_same_bucket():
+    # The old danger cue lerped toward Colors.loss with the same gentle cosine as
+    # the plain one — near-invisible against the accent-red idle rim. The blink is
+    # two hard states (loss-red -> near-white) and the hot state also thickens the
+    # rim, so a mandatory pop cannot be missed.
+    rx, ry = 33, 19
+    cold = _pit_telegraph_surface(rx, ry, 0, danger=True)
+    hot = _pit_telegraph_surface(rx, ry, 1, danger=True)
+    plain = _pit_telegraph_surface(rx, ry, 1, danger=False)
+    assert pg.image.tostring(hot, "RGBA") != pg.image.tostring(cold, "RGBA"), \
+        "the two blink states are different surfaces, not neighbours on a ramp"
+    assert pg.image.tostring(hot, "RGBA") != pg.image.tostring(plain, "RGBA"), \
+        "the same bucket renders differently once the danger flag is set"
+    assert ("pit_tele", rx, ry, 1, True) in _MOLE_STATIC_CACHE
+    assert ("pit_tele", rx, ry, 1, False) in _MOLE_STATIC_CACHE, \
+        "the cache key carries the danger flag — the two can never collide"
+    assert _rim_span(hot) < _rim_span(cold), \
+        "the hot blink eats into the pit mouth: a visibly fatter rim"
+
+
+def test_danger_pulse_alternates_faster_than_the_calm_telegraph():
+    assert MOLE_VIEW_DANGER_PULSE_MS < MOLE_VIEW_PULSE_MS
+    challenge = MoleChallenge.from_seed("danger-seed", captured_value=9)
+    holes = tuple((7, col) for col in range(challenge.hole_count))
+    ctrl = _mole(challenge=challenge, hole_squares=holes)
+    ctrl._anim_ms = 0.0
+    cold = ctrl._telegraph_surface(0)
+    ctrl._anim_ms = MOLE_VIEW_DANGER_PULSE_MS / 2.0
+    hot = ctrl._telegraph_surface(0)
+    assert cold is not hot, "half a danger period is a full swing to the other state"
+    ctrl._anim_ms = float(MOLE_VIEW_DANGER_PULSE_MS)
+    assert ctrl._telegraph_surface(0) is cold, "a whole period lands back on the cold state"
 
 
 def test_mount_and_schedule_cues_fire_on_their_edges():
@@ -563,6 +656,196 @@ def test_whack_hit_pitch_ladder_muted_when_passive():
     ctrl.update(900)
     ctrl.spectate_shot(800.0, 0, True, progress=1, target=(2.5, 2.5))
     ctrl._audio.play_whack_hit.assert_not_called()
+
+
+@pytest.mark.parametrize("required, ladder", [
+    pytest.param(3, (1, 2, 3), id="pawn_three_hits"),
+    pytest.param(4, (1, 2, 3, 3), id="rook_four_hits"),
+    pytest.param(5, (1, 2, 2, 3, 3), id="queen_five_hits"),
+])
+def test_damage_tiers_interpolate_over_the_hit_quota(required, ladder):
+    # min(progress, 3) saturated a queen at full shred by hit three and left the
+    # last two hits with nothing to show; the ceil interpolation spreads the same
+    # three tiers evenly across whatever quota the captured piece bought.
+    clean = _mole(challenge=_challenge(hits_required=required))
+    assert clean._damage_tier() == 0, "an untouched victim is intact"
+    for progress, tier in enumerate(ladder, start=1):
+        ctrl = _mole(challenge=_challenge(hits_required=required), progress=progress)
+        assert ctrl._damage_tier() == tier, "hit {} of {}".format(progress, required)
+
+
+_FAIL_AT_MS = 4020
+
+
+def _fail_at_two_hits():
+    ctrl = _mole(challenge=_challenge(pops=_POPS[:3], hits_required=3, deadline_ms=5000.0))
+    ctrl.update(800)
+    ctrl.handle_event(_click(_hole_px(0)))
+    ctrl.update(2000)
+    ctrl.handle_event(_click(_hole_px(1)))
+    assert ctrl._progress == 2
+    ctrl.update(_FAIL_AT_MS)
+    assert ctrl.landed is False, "the last pop expired unhit — the 3-hit quota is out of reach"
+    return ctrl
+
+
+def test_fail_jump_regrows_the_victim_continuously_and_lands_it_intact():
+    # The heal is a bucketed continuous regrowth (juice.TORN_REGROW_STEPS), not
+    # tier swaps: the sprite must pass through MANY distinct frames on its way
+    # to clean, never jumping straight from damaged to whole.
+    ctrl = _fail_at_two_hits()
+    assert ctrl._regrow_bucket() == 0, "the victim leaves the pit fully damaged"
+    sprites = []
+    buckets = []
+    steps = 10
+    for i in range(steps + 1):
+        frac = i / steps
+        ctrl.update(int(_FAIL_AT_MS + (MOLE_VIEW_JUMP_RISE_MS
+                                       + MOLE_VIEW_JUMP_HOP_MS) * frac))
+        buckets.append(ctrl._regrow_bucket())
+        sprites.append(ctrl._victim_sprite())
+    assert buckets == sorted(buckets), "regrowth only ever moves toward clean"
+    assert buckets[0] == 0 and buckets[-1] == TORN_REGROW_STEPS
+    assert len(set(id(s) for s in sprites)) >= 6, \
+        "the repair passes through many distinct frames, not one snap"
+    assert sprites[-1] is ctrl._victim, "touchdown is the untouched source sprite"
+
+
+def test_win_jump_keeps_the_shredded_victim_all_the_way_down():
+    ctrl = _mole()
+    for now, hole in ((800, 0), (2000, 1), (3200, 2)):
+        ctrl.update(now)
+        ctrl.handle_event(_click(_hole_px(hole)))
+    for dt in (MOLE_VIEW_HITSTOP_KILL_MS, MOLE_VIEW_HITSTOP_KILL_MS + _JUMP_MS / 2,
+               MOLE_VIEW_HITSTOP_KILL_MS + _JUMP_TOTAL_MS, MOLE_VIEW_WIN_HOLD_MS - 1):
+        ctrl.update(3200 + int(dt))
+        assert ctrl._regrow_bucket() == 0, "only the fail repairs the victim"
+        assert ctrl._damage_tier() == 3
+
+
+def _pit_dark_pixels(surf, ctrl):
+    dark = pg.Color(Colors.well_deep)
+    cx, cy = ctrl.center
+    count = 0
+    for x in range(cx - ctrl._pit_rx, cx + ctrl._pit_rx + 1):
+        for y in range(cy - ctrl._pit_ry, cy + ctrl._pit_ry + 1):
+            if surf.get_at((x, y))[:3] == (dark.r, dark.g, dark.b):
+                count += 1
+    return count
+
+
+def _draw_at(ctrl, now_ms):
+    surf = pg.Surface((640, 640))
+    surf.fill((200, 200, 200))
+    ctrl.update(int(now_ms))
+    ctrl.draw(surf)
+    return surf
+
+
+def test_home_pit_holds_open_under_the_fail_jump_then_shrinks_shut():
+    # The old fail faded every pit at 300ms, so the victim emerged from a patch of
+    # bare board. The home pit is the one it climbs out of — it stays until the feet
+    # are down and only then closes.
+    ctrl = _mole(challenge=_one_pop_challenge())
+    ctrl.update(2000)
+    assert ctrl.landed is False
+    mid = _draw_at(ctrl, 2000 + MOLE_VIEW_JUMP_RISE_MS + MOLE_VIEW_JUMP_HOP_MS / 2)
+    assert _pit_dark_pixels(mid, ctrl) > 0, "the home pit is still open mid-hop"
+    assert ctrl._home_pit_close_scale() == 1.0, "nothing closes while the feet are in the air"
+    _draw_at(ctrl, 2000 + _JUMP_MS + MOLE_VIEW_PIT_CLOSE_MS / 2)
+    assert 0.0 < ctrl._home_pit_close_scale() < 1.0, \
+        "the mouth shrinks the same way it grew open, only backwards"
+    shut = _draw_at(ctrl, 2000 + _JUMP_MS + MOLE_VIEW_PIT_CLOSE_MS)
+    assert ctrl._home_pit_close_scale() == 0.0
+    assert _pit_dark_pixels(shut, ctrl) == 0, "the ground is whole again before the overlay ends"
+
+
+def test_fail_landing_frame_sits_exactly_where_the_board_draws_the_piece():
+    # The seam that made the piece "appear out of thin air": the overlay's last
+    # frame and the board's restored piece must occupy the same pixels.
+    rect = pg.Rect(3 * _CELL, 4 * _CELL, _CELL, _CELL)
+    solid = pg.Surface((_CELL, _CELL))
+    solid.fill((10, 200, 40))
+    challenge = _one_pop_challenge()
+    ctrl = MoleController(challenge, rect, 0, challenge.deadline_ms, hole_squares=_HOLES,
+                          geom=_geom_for(_CELL), audio=MagicMock(), victim_surface=solid)
+    ctrl.update(2000)
+    surf = _draw_at(ctrl, 2000 + MOLE_VIEW_FAIL_HOLD_MS - 1)
+    assert surf.get_at(rect.topleft)[:3] == (10, 200, 40)
+    assert surf.get_at((rect.right - 1, rect.bottom - 1))[:3] == (10, 200, 40)
+    assert surf.get_at((rect.x - 1, rect.bottom - 1))[:3] != (10, 200, 40), \
+        "the settled sprite covers its own cell and not a pixel more"
+
+
+def test_hitbox_overlay_only_draws_when_the_debug_flag_is_set(monkeypatch):
+    monkeypatch.delenv("CHESS_DEBUG_HITBOX", raising=False)
+    off = _draw_at(_mole(), 800)
+    monkeypatch.setenv("CHESS_DEBUG_HITBOX", "1")
+    ctrl = _mole()
+    assert ctrl._debug_hitbox is True, "the flag is read once, at construction"
+    on = _draw_at(ctrl, 800)
+    assert pg.image.tostring(on, "RGBA") != pg.image.tostring(off, "RGBA")
+
+
+def test_hitbox_outline_traces_the_engine_hit_region_on_the_square_center(monkeypatch):
+    monkeypatch.setenv("CHESS_DEBUG_HITBOX", "1")
+    ctrl = _mole()
+    surf = _draw_at(ctrl, 800)
+    row, col = _HOLES[2]
+    cx, cy = _hole_px(2)
+    edge = int(_CELL * 0.55)
+    outline = pg.Color(Colors.spectate)
+    assert surf.get_at((cx + edge - 1, cy))[:3] == (outline.r, outline.g, outline.b), \
+        "the ring sits MOLE_HITBOX_FRAC of a cell out from the square center"
+    assert ctrl._board_to_px(row + 0.5, col + 0.5) == (float(cx), float(cy)), \
+        "the ring is anchored on the square center the engine measures from"
+
+
+def test_on_hit_px_fires_once_per_registered_hit_at_the_impact():
+    # The attacker's gun shoots at what the bullet actually hit — the popped
+    # mole's hole, not the raw cursor — so the slug and the debris agree.
+    shots = []
+    ctrl = _mole(on_hit_px=shots.append)
+    ctrl.update(800)
+    ctrl.handle_event(_click(_hole_px(0)))
+    assert shots == [_hole_px(0)], "one registered hit, one projectile, on the hit hole"
+
+
+def test_on_hit_px_stays_silent_on_whiffs_and_locked_shots():
+    shots = []
+    ctrl = _mole(on_hit_px=shots.append)
+    ctrl.update(800)
+    ctrl.handle_event(_click((600, 600)))
+    assert shots == [], "a whiff throws no projectile"
+    ctrl.handle_event(_click(_hole_px(0)))
+    assert shots == [], "and neither does a shot swallowed by the recoil lockout"
+    ctrl.update(1000)
+    ctrl.handle_event(_click(_hole_px(0)))
+    assert len(shots) == 1, "the first shot past the lockout fires for real"
+
+
+def test_on_hit_px_fires_on_the_quota_hit_too():
+    shots = []
+    ctrl = _mole(on_hit_px=shots.append)
+    ctrl.update(800)
+    ctrl.handle_event(_click(_hole_px(0)))
+    ctrl.update(2000)
+    ctrl.handle_event(_click(_hole_px(1)))
+    ctrl.update(3200)
+    ctrl.handle_event(_click(_hole_px(2)))
+    assert ctrl.landed is True
+    assert len(shots) == 3, "the kill shot is a shot like any other"
+
+
+def test_spectated_hits_fire_the_mirrors_gun_at_the_relayed_point():
+    shots = []
+    ctrl = _mole(passive=True, on_hit_px=shots.append)
+    ctrl.update(900)
+    ctrl.spectate_shot(800.0, 0, True, progress=1, target=(2.5, 2.5))
+    assert shots == [ctrl._board_to_px(2.5, 2.5)], \
+        "the spectator watches the opponent's gun fire at the relayed impact"
+    ctrl.spectate_shot(600.0, 0, False, progress=1, target=(7.5, 7.5))
+    assert len(shots) == 1, "a relay without a progress increase is a miss — no projectile"
 
 
 def test_no_per_frame_logging(caplog):

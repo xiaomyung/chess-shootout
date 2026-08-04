@@ -84,7 +84,7 @@ class SkillCheckSession:
             on_shot=None if passive else (self._send_skillcheck_shot if online else None),
             miss_count=miss_count, passive=passive, audio=self.app.sound_manager,
             hole_squares=hole_squares, captured_value=captured_value, progress=progress,
-            attacker_surface=attacker_surface)
+            attacker_surface=attacker_surface, on_hit_px=self._on_whack_hit_px)
         if controller is None:
             return False
         ply = len(screen.match.move_history) + 1
@@ -94,6 +94,9 @@ class SkillCheckSession:
         self.skillcheck_target = target
         self.active_kind = kind
         self.active_seed = seed
+        if kind == SkillCheckKind.WHACK:
+            self._whack_gun_from = from_sq
+            self._whack_gun_type = capturer.type.value if capturer is not None else None
         screen.board.aim_suppressed_square = target if kind in SUPPRESSING_KINDS else None
         on_done = self._on_online_skillcheck_done if online else self._on_skillcheck_done
         screen.skillcheck_overlay.start(
@@ -131,6 +134,51 @@ class SkillCheckSession:
             fx.aim_victim = None
             fx.aim_victim_scale = 1.0
 
+    def sync_whack_gun(self):
+        screen = self.screen
+        overlay = screen.skillcheck_overlay
+        if (self.active_kind != SkillCheckKind.WHACK or not overlay.is_active()
+                or self._whack_gun_from is None):
+            self.release_whack_gun()
+            return
+        fx = screen.board.effects
+        now = pg.time.get_ticks()
+        target_px = self._whack_aim_px(overlay)
+        if not fx.has_gun_px():
+            fx.hold_gun_px(now_ms=now, attacker_type=self._whack_gun_type,
+                           from_sq=self._whack_gun_from, cell_size=screen.board.cell_size,
+                           target_px=target_px)
+        fx.aim_gun_px(target_px, now)
+
+    def _whack_aim_px(self, overlay):
+        if not overlay.is_passive():
+            return pg.mouse.get_pos()
+        if self._whack_impact_px is not None:
+            return self._whack_impact_px
+        if self.skillcheck_target is None:
+            return None
+        return self.screen.board.cell_rect(self.skillcheck_target).center
+
+    def _on_whack_hit_px(self, px):
+        self._whack_impact_px = px
+        self.screen.board.effects.fire_gun_px(pg.time.get_ticks(), px)
+
+    def release_whack_gun(self):
+        self._clear_whack_gun_context()
+        self.screen.board.effects.release_gun_px(pg.time.get_ticks())
+
+    def _end_whack_gun(self, kind, landed):
+        if kind != SkillCheckKind.WHACK or not landed:
+            self.release_whack_gun()
+            return
+        self._clear_whack_gun_context()
+        self.screen.board.effects.hand_off_gun_px()
+
+    def _clear_whack_gun_context(self):
+        self._whack_gun_from = None
+        self._whack_gun_type = None
+        self._whack_impact_px = None
+
     def _send_skillcheck_shot(self, client_elapsed_ms, direction=None, target=None):
         target_row, target_col = target if target is not None else (None, None)
         self.app.coordinator.send_skill_check_shot(
@@ -147,10 +195,12 @@ class SkillCheckSession:
         self.online_was_spectator = False
         self.online_skillcheck_opened_ms = None
         self.online_verdict_action = None
+        self._clear_whack_gun_context()
 
     def teardown_skillcheck_overlay(self):
         screen = self.screen
         screen.skillcheck_overlay.cancel()
+        self.release_whack_gun()
         screen.board.aim_suppressed_square = None
         self.skillcheck_target = None
         self.active_kind = None
@@ -169,6 +219,7 @@ class SkillCheckSession:
         self.online_was_spectator = False
         action = self.online_verdict_action
         self.online_verdict_action = None
+        self._end_whack_gun(kind, landed)
         self.screen.board.aim_suppressed_square = None
         self.skillcheck_target = None
         self.active_kind = None
@@ -244,6 +295,7 @@ class SkillCheckSession:
         kind = context[3] if len(context) > 3 else None
         seed = self.active_seed
         aim_victim = screen.board.aim_suppressed_square
+        self._end_whack_gun(kind, landed)
         screen.board.aim_suppressed_square = None
         self.active_kind = None
         self.active_seed = None
@@ -264,7 +316,7 @@ class SkillCheckSession:
             screen.board.trigger_skillcheck_fail(
                 from_sq, to_sq, on_fire=self.on_skillcheck_miss_fire)
             if aim_victim is not None:
-                screen.board.restore_piece(aim_victim)
+                screen.board.restore_piece(aim_victim, drop=kind != SkillCheckKind.WHACK)
             if kind == SkillCheckKind.WHACK:
                 self._show_whack_taunt(aim_victim, seed, True)
 

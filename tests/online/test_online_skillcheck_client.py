@@ -125,8 +125,11 @@ def _tap():
 
 
 def _drive_verdict_hold(app):
-    """Advance the overlay past the online result-hold so the deferred apply/lock runs."""
-    app.game.skillcheck_overlay.update(pg.time.get_ticks() + 500)
+    """Advance the overlay past the online result-hold so the deferred apply/lock runs.
+
+    2000 covers every kind's verdict choreography: the shared 200 ms result hold,
+    the whack fail jump-out (750) and the whack win hold (1000)."""
+    app.game.skillcheck_overlay.update(pg.time.get_ticks() + 2000)
 
 
 def _required_payload(frm, to, kind="wheel", promotion=None, value_diff=3,
@@ -305,7 +308,20 @@ def test_failed_aim_result_restores_the_suppressed_victim_after_the_hold():
     app.game.board.restore_piece.assert_not_called()
     _drive_verdict_hold(app)
     assert app.game.board.aim_suppressed_square is None
-    app.game.board.restore_piece.assert_called_once_with(to)
+    app.game.board.restore_piece.assert_called_once_with(to, drop=True)
+
+
+def test_failed_whack_result_restores_without_the_board_drop():
+    # The whack overlay lands the piece itself (jump-out), so the online fail
+    # restore must skip the drop animation or the piece would fall twice.
+    app = _online_app()
+    frm, to = _capture_board(app)
+    app.game.skillcheck_session.skillcheck_gate(frm, to)
+    app.coordinator._handle_skill_check_required(_required_payload(frm, to, kind="whack"))
+    app.game.board.restore_piece = MagicMock()
+    app.coordinator._handle_skill_check_result(_result(frm, to))
+    _drive_verdict_hold(app)
+    app.game.board.restore_piece.assert_called_once_with(to, drop=False)
 
 
 def test_failed_wheel_result_does_not_restore_a_piece():

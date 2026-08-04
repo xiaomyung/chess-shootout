@@ -7,17 +7,34 @@ impossible the required hit count is downgraded at construction time, so the
 challenge is always deterministic for (seed, value_diff, deadline, value).
 Windows stay disjoint even with grace BY CONSTRUCTION: the precue + gap floors
 (180 + 80) exceed the 120ms grace tail.
+
+The pit LAYOUT (`hole_squares`) is a second, independent derivation: a seeded
+farthest-point walk over the free squares around the capture square. The first
+pit is a plain seeded draw; every later one takes the candidate that maximises
+its minimum distance to the pits already placed, exact ties broken by the next
+seeded float. Distances are compared as integer squares, so "exact tie" really
+is exact and the walk is a pure function of (seed, value, square, occupied) --
+load-bearing, because the server re-derives the same layout in its own process
+to adjudicate positional whack shots.
 """
 
+import itertools
+import math
+import os
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
 
+import chessshootout
 from chessshootout.skillcheck import mole, wheel
 from chessshootout.skillcheck.mole import MoleChallenge
 
 CAPTURE_SQ = (3, 3)
 OCCUPIED = {(3, 3), (4, 4)}
+REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(chessshootout.__file__)))
+SPREAD_SEEDS = 50
 
 
 def _durations(challenge):
@@ -340,6 +357,99 @@ def test_hole_squares_always_finds_the_full_count_on_a_near_empty_board():
             squares = mole.hole_squares("open", captured_value, capture_sq, occupied)
             assert len(squares) == min(5, max(3, captured_value))
             assert len(squares) >= 3
+
+
+_LAYOUT_DRIVER = (
+    "from chessshootout.skillcheck import mole;"
+    "print(mole.hole_squares('cross-proc', 9, (3, 3), [(3, 3), (4, 4)]))"
+)
+
+
+def _spread_layouts(count=SPREAD_SEEDS):
+    return [mole.hole_squares(f"spread:{i}", 9, CAPTURE_SQ, {CAPTURE_SQ})
+            for i in range(count)]
+
+
+def _min_gap(square, chosen):
+    return min(math.hypot(square[0] - row, square[1] - col) for row, col in chosen)
+
+
+def _all_collinear(points):
+    (row0, col0), (row1, col1) = points[0], points[1]
+    d_row, d_col = row1 - row0, col1 - col0
+    return all((row - row0) * d_col == (col - col0) * d_row for row, col in points[2:])
+
+
+def test_hole_squares_is_identical_across_repeat_calls_and_a_fresh_process():
+    # the server re-derives this layout in ITS OWN process from (seed, value,
+    # square, occupied) alone, so a pick that leaked hash-order or any live
+    # randomness would desync every positional whack shot. Fresh interpreters
+    # under different PYTHONHASHSEEDs must reproduce the in-process tuple.
+    occupied = [(3, 3), (4, 4)]
+    calls = {mole.hole_squares("cross-proc", 9, (3, 3), occupied) for _ in range(3)}
+    assert len(calls) == 1, "three identical calls, one layout"
+    expected = repr(calls.pop())
+    for hash_seed in ("0", "1", "424242"):
+        out = subprocess.run([sys.executable, "-c", _LAYOUT_DRIVER],
+                             capture_output=True, text=True, cwd=REPO_ROOT,
+                             env={**os.environ, "PYTHONHASHSEED": hash_seed}, check=False)
+        assert out.stdout.strip() == expected, out.stderr
+
+
+def test_hole_squares_never_places_two_pits_on_touching_squares():
+    # the whole point of the farthest-point walk. On the open 7x7 pool the greedy
+    # max-min guarantee (>= half the optimal spread) sits far above the 1.41 that
+    # a diagonal touch would need, so this holds flat -- no "usually" allowance.
+    for layout in _spread_layouts():
+        assert len(layout) == 5
+        assert len(set(layout)) == 5, "pits never repeat a square"
+        for first, second in itertools.combinations(layout, 2):
+            chebyshev = max(abs(first[0] - second[0]), abs(first[1] - second[1]))
+            assert chebyshev > 1, f"{first} and {second} are adjacent in {layout}"
+
+
+def test_hole_squares_never_lines_all_five_pits_up():
+    for layout in _spread_layouts():
+        assert not _all_collinear(list(layout)), f"{layout} is a straight line of pits"
+
+
+def test_each_pit_after_the_first_maximises_its_distance_to_the_earlier_ones():
+    # the placement rule itself, checked against the pool the engine saw: at every
+    # step the taken square is (one of) the candidates whose nearest already-placed
+    # pit is farthest away.
+    occupied = {(3, 3), (4, 4), (2, 5)}
+    for i in range(20):
+        layout = mole.hole_squares(f"greedy:{i}", 9, CAPTURE_SQ, occupied)
+        pool = mole._free_squares(CAPTURE_SQ, occupied, mole.MOLE_HOLE_RADIUS_CELLS, 8)
+        chosen, remaining = [layout[0]], [sq for sq in pool if sq != layout[0]]
+        for square in layout[1:]:
+            best = max(_min_gap(candidate, chosen) for candidate in remaining)
+            assert _min_gap(square, chosen) == pytest.approx(best), \
+                f"{square} is not a farthest point from {chosen}"
+            chosen.append(square)
+            remaining.remove(square)
+
+
+def test_exact_ties_are_broken_by_the_seeded_float_not_by_list_order():
+    # four candidates exactly equidistant from the one placed pit: list order
+    # alone would always hand back the first, which is how straight lines and
+    # clumps crept in. The seeded float has to reach into the whole tied subset.
+    candidates = [(0, 3), (3, 0), (3, 6), (6, 3)]
+    reached = {mole._farthest_index(list(candidates), [(3, 3)], value)
+               for value in (0.0, 0.3, 0.6, 0.9)}
+    assert reached == {0, 1, 2, 3}
+    assert mole._farthest_index(list(candidates), [(3, 3)], 0.999999) == 3
+    near = candidates + [(4, 4)]
+    assert mole._farthest_index(near, [(3, 3)], 0.9) == 3, \
+        "a closer candidate never joins the tie, whatever the float says"
+
+
+def test_hole_squares_layouts_still_vary_across_seeds():
+    # dispersion must not collapse into one canonical corner set: the seeded first
+    # pit plus the seeded tie-breaks keep the layouts genuinely different.
+    layouts = _spread_layouts()
+    assert len(set(layouts)) >= SPREAD_SEEDS // 2
+    assert len({frozenset(layout) for layout in layouts}) >= SPREAD_SEEDS // 3
 
 
 def test_scripted_midpoint_solver_always_reaches_the_quota():

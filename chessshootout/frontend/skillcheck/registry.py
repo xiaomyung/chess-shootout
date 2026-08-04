@@ -14,7 +14,7 @@ def build_controller(kind, *, seed, cell_rect, now_ms, deadline_ms, period_ms=WH
                      from_sq=None, victim_sq=None, attacker_type=None, shot_sound=None,
                      on_shot=None, miss_count=0, passive=False, audio=None,
                      hole_squares=None, captured_value=0, progress=0,
-                     attacker_surface=None):
+                     attacker_surface=None, on_hit_px=None):
     if kind == SkillCheckKind.WHEEL:
         return WheelController(
             WheelChallenge.from_seed(seed, period_ms=period_ms), cell_rect, now_ms,
@@ -33,7 +33,7 @@ def build_controller(kind, *, seed, cell_rect, now_ms, deadline_ms, period_ms=WH
             cell_rect, now_ms, deadline_ms,
             hole_squares=hole_squares, victim_surface=victim_surface, geom=geom,
             shot_sound=shot_sound, on_shot=on_shot, progress=progress, passive=passive,
-            audio=audio)
+            audio=audio, on_hit_px=on_hit_px)
     if kind == SkillCheckKind.COMBO:
         return ComboController(
             ComboChallenge.from_seed(seed, value_diff, deadline_ms, captured_value),

@@ -15,19 +15,42 @@ seed at overlay-open, and on a fail calls screen.show_taunt(victim_sq,
 mole.pick_taunt(seed)) — deterministic per seed, so mover and spectator show the
 same line — plus the taunt sound for the mover only (the spectate mirror stays muted).
 The seed clears on every terminal path so a stale seed can never leak into the
-next check's taunt.
+next check's taunt. The failed WHACK is also the one restore that skips the board
+drop (restore_piece(drop=False)): its overlay already set the victim down on its
+own square, so the piece must simply be there the frame the overlay ends.
+
+While a WHACK runs, the CAPTURER on the board keeps its gun out and tracks the live
+crosshair (the mirror tracks the last relayed impact instead, falling back to the
+victim square before the first relay), and every REGISTERED hit fires that piece's
+own capture projectile at the impact point — whiffs, lockout shots and locked moves
+throw nothing. sync_whack_gun is the single owner of that state: one call per frame
+arms it while the overlay is a live whack and releases it (tumbling drop) the moment
+it is not, which is what covers every teardown path at once. The terminal paths
+release explicitly too, because a screen that stops drawing stops syncing — the gun
+must never survive into the next game.
+
+A WON whack is the one ending that does NOT tumble: the piece hands the same gun to
+the capture choreography (hand_off_gun_px -> predrawn capture, AIM_MS only), so the
+killing shot flows straight into the capture volley with no drop and no second
+draw-flourish. Every other ending — fail, teardown, Esc, resign, new game — keeps the
+approved tumble, and a capture with no check behind it is untouched.
 """
 
+import math
 from unittest.mock import MagicMock
 
 import pygame as pg
+import pytest
 
 from tests.conftest import pygame_display
+from tests.frontend.focus_helpers import FakeTicks, install_clock
 from chessshootout.backend.pieces import PieceColor, PieceType
 from chessshootout.backend.utils import Square
 from chessshootout.frontend.skillcheck.combo_view import ComboController, COMBO_TIME_LIMIT_MS
 from chessshootout.frontend.skillcheck.mole_view import MoleController
 from chessshootout.frontend.skillcheck.registry import build_controller
+from chessshootout.frontend.visual.effects import AIM_MS, DRAW_MS
+from chessshootout.frontend.visual.gunfx import GUNS, PIECE_GUN
 from chessshootout.skillcheck import mole
 from chessshootout.skillcheck.combo import ComboChallenge
 from chessshootout.skillcheck.coordinator import move_roll_key
@@ -178,17 +201,33 @@ def test_sync_aim_check_gun_still_arms_for_aim():
     assert app.game.board.effects.aim_victim is None
 
 
-def test_failed_whack_restores_the_suppressed_victim_and_clears_state():
+def test_failed_whack_restores_the_suppressed_victim_instantly_and_clears_state():
+    # The whack overlay already landed the victim on its own square with the
+    # jump-out; dropping it a second time from above read as the piece appearing
+    # out of thin air and repairing itself mid-air.
     app = _local_app()
     frm, to, _ = _gate(app, SkillCheckKind.WHACK)
     context = app.game.skillcheck_overlay._context
     app.game.skillcheck_overlay.cancel()
     app.game.skillcheck_session._on_skillcheck_done(context, False)
-    assert app.game.board.aim_suppressed_square is None
+    assert app.game.board.aim_suppressed_square is None, "the square stops being suppressed"
     assert app.game.skillcheck_session.active_kind is None
-    assert any(a["sq"] == to for a in app.game.board._restore_anims), \
-        "the surviving victim drops back onto its square, same as a failed aim"
+    assert app.game.board._restore_anims == [], \
+        "no drop animation is queued — the piece simply is on its square"
+    assert app.game.match.piece_at(to) is not None
     assert app.game.skillcheck.is_locked(frm, to) is True
+
+
+@pytest.mark.parametrize("kind", [SkillCheckKind.AIM, SkillCheckKind.COMBO])
+def test_other_failed_kinds_still_drop_the_victim_back_in(kind):
+    # Driven through the done handler directly: the drop policy is a property of
+    # the kind, not of which roll opened the check.
+    app = _local_app()
+    frm, to = _capture_board(app)
+    app.game.board.aim_suppressed_square = to
+    app.game.skillcheck_session._on_skillcheck_done((frm, to, None, kind), False)
+    assert any(a["sq"] == to for a in app.game.board._restore_anims), \
+        "only the whack skips the drop; the approved aim/combo restore is untouched"
 
 
 def test_failed_whack_taunts_from_the_victim_square_on_the_board_layer():
@@ -326,3 +365,220 @@ def test_arrow_keys_reach_the_combo_pad_not_move_stepping():
     assert ctrl._progress + ctrl._wrong_count == 1, "the press registered on the combo pad"
     pg.event.clear()
     app.game.skillcheck_session.teardown_skillcheck_overlay()
+
+
+def _whack_app(monkeypatch):
+    app = _local_app()
+    clock = FakeTicks()
+    install_clock(monkeypatch, clock)
+    frm, to, _ = _gate(app, SkillCheckKind.WHACK)
+    return app, clock, frm, to
+
+
+def _aim_angle(app, frm, target_px):
+    px, py = app.game.board.effects._pivot(frm, app.game.board.cell_size)
+    return math.atan2(target_px[1] - py, target_px[0] - px)
+
+
+def _spin(session, clock, frames=200, step=16):
+    for _ in range(frames):
+        clock.advance(step)
+        session.sync_whack_gun()
+
+
+def _fire_at(ctrl, px, at_ms):
+    ctrl.update(at_ms)
+    ctrl.handle_event(pg.event.Event(pg.MOUSEBUTTONDOWN, {"button": 1, "pos": px}))
+
+
+def _live_pop_shot(ctrl):
+    pop = ctrl.challenge.pops[0]
+    return ctrl._hole_px[pop.hole], ctrl.start_ms + int(pop.t_up_ms) + 10
+
+
+def test_sync_whack_gun_arms_the_capturers_gun_and_eases_after_the_crosshair(monkeypatch):
+    app, clock, frm, to = _whack_app(monkeypatch)
+    session, fx, board = app.game.skillcheck_session, app.game.board.effects, app.game.board
+    right = board.cell_rect(sq(4, 7)).center
+    up = board.cell_rect(sq(0, 3)).center
+    cursor = {"px": right}
+    monkeypatch.setattr(pg.mouse, "get_pos", lambda: cursor["px"])
+    session.sync_whack_gun()
+    assert fx.has_gun_px() is True, "a live whack puts the gun in the attacker's hand"
+    assert fx._whack_gun["from_sq"] == frm, "the CAPTURER aims, not the victim"
+    assert fx._whack_gun["aim"] == pytest.approx(_aim_angle(app, frm, right)), \
+        "it starts pointing at the crosshair instead of swinging in from nowhere"
+    cursor["px"] = up
+    clock.advance(16)
+    session.sync_whack_gun()
+    want = _aim_angle(app, frm, up)
+    swung = fx._whack_gun["aim"]
+    assert want < swung < _aim_angle(app, frm, right), \
+        "one frame after the crosshair moves the barrel is on its way, not there"
+    _spin(session, clock)
+    assert fx._whack_gun["aim"] == pytest.approx(want, abs=0.02), "and it catches up"
+    session.teardown_skillcheck_overlay()
+
+
+def test_teardown_tumbles_the_gun_and_the_next_whack_rearms_clean(monkeypatch):
+    app, clock, frm, to = _whack_app(monkeypatch)
+    session, fx = app.game.skillcheck_session, app.game.board.effects
+    session.sync_whack_gun()
+    session.teardown_skillcheck_overlay()
+    assert fx.has_gun_px() is False, "the gun leaves with the overlay"
+    assert len(fx.drops) == 1, "and tumbles away instead of blinking out"
+    session.sync_whack_gun()
+    assert fx.has_gun_px() is False, "no later frame can resurrect a torn-down check"
+    frm2, _, _ = _gate(app, SkillCheckKind.WHACK)
+    session.sync_whack_gun()
+    assert fx.has_gun_px() is True and fx._whack_gun["from_sq"] == frm2, \
+        "the second check arms its own capturer"
+    session.teardown_skillcheck_overlay()
+
+
+def test_a_new_game_never_inherits_a_held_whack_gun(monkeypatch):
+    app, clock, frm, to = _whack_app(monkeypatch)
+    session, fx = app.game.skillcheck_session, app.game.board.effects
+    session.sync_whack_gun()
+    app.game._reset_to_new_game()
+    assert fx.has_gun_px() is False
+    session.sync_whack_gun()
+    assert fx.has_gun_px() is False, "the stale-overlay invariant holds on the next frame too"
+
+
+def test_leaving_the_screen_releases_the_held_whack_gun(monkeypatch):
+    app, clock, frm, to = _whack_app(monkeypatch)
+    session, fx = app.game.skillcheck_session, app.game.board.effects
+    session.sync_whack_gun()
+    app.game.exit()
+    assert fx.has_gun_px() is False, \
+        "a screen that stops drawing stops syncing — exit must release it itself"
+
+
+def test_a_registered_hit_fires_the_capturers_own_projectile(monkeypatch):
+    app, clock, frm, to = _whack_app(monkeypatch)
+    session, fx = app.game.skillcheck_session, app.game.board.effects
+    session.sync_whack_gun()
+    ctrl = app.game.skillcheck_overlay._controller
+    px, at_ms = _live_pop_shot(ctrl)
+    _fire_at(ctrl, px, at_ms)
+    assert ctrl._progress == 1, "the shot registered"
+    spec = GUNS[PIECE_GUN["queen"]]
+    assert len(fx.projectiles) == spec.pellets, "the queen's blunderbuss empties its spread"
+    assert {pr["color"] for pr in fx.projectiles} == {spec.color}
+    assert all(pr["capture"] is None for pr in fx.projectiles), "the volley is cosmetic"
+    assert fx._whack_gun["fired_at"] is not None, "and the gun kicks"
+    session.teardown_skillcheck_overlay()
+
+
+def test_whiffs_and_lockout_shots_throw_nothing(monkeypatch):
+    app, clock, frm, to = _whack_app(monkeypatch)
+    session, fx = app.game.skillcheck_session, app.game.board.effects
+    session.sync_whack_gun()
+    ctrl = app.game.skillcheck_overlay._controller
+    _fire_at(ctrl, app.game.board.cell_rect(frm).center, ctrl.start_ms + 300)
+    assert ctrl._progress == 0
+    assert fx.projectiles == [], "a whiff never leaves the barrel"
+    px, at_ms = _live_pop_shot(ctrl)
+    _fire_at(ctrl, px, at_ms)
+    fired = len(fx.projectiles)
+    assert fired > 0
+    _fire_at(ctrl, px, at_ms + 1)
+    assert len(fx.projectiles) == fired, "a shot eaten by the recoil lockout fires nothing"
+    session.teardown_skillcheck_overlay()
+
+
+def test_a_locked_move_reopens_no_check_and_holds_no_gun(monkeypatch):
+    app, clock, frm, to = _whack_app(monkeypatch)
+    session, fx = app.game.skillcheck_session, app.game.board.effects
+    context = app.game.skillcheck_overlay._context
+    app.game.skillcheck_overlay.cancel()
+    session._on_skillcheck_done(context, False)
+    assert app.game.skillcheck.is_locked(frm, to) is True
+    session.sync_whack_gun()
+    assert fx.has_gun_px() is False
+    assert session.skillcheck_gate(frm, to) is True, "the locked move is swallowed"
+    session.sync_whack_gun()
+    assert fx.has_gun_px() is False, "a locked retry arms nothing"
+
+
+def test_the_mirror_aims_at_the_victim_then_at_the_relayed_impact(monkeypatch):
+    app = _local_app()
+    clock = FakeTicks()
+    install_clock(monkeypatch, clock)
+    session, fx, board = app.game.skillcheck_session, app.game.board.effects, app.game.board
+    frm, to = _capture_board(app)
+    session.open_spectate_overlay(
+        SkillCheckKind.WHACK, "spec-seed", 0, 5000, frm, to, None, 1)
+    session.sync_whack_gun()
+    assert fx.has_gun_px() is True, "the spectator sees the opponent draw too"
+    victim_px = board.cell_rect(to).center
+    assert fx._whack_gun["aim"] == pytest.approx(_aim_angle(app, frm, victim_px)), \
+        "before the first relay the barrel rests on the victim"
+    ctrl = app.game.skillcheck_overlay._controller
+    ctrl.update(ctrl.start_ms + 900)
+    ctrl.spectate_shot(800.0, 0, True, progress=1, target=(0.5, 0.5))
+    impact = board.cell_rect(sq(0, 0)).center
+    assert fx.projectiles, "the relayed hit fires the mirror's gun"
+    assert {pr["color"] for pr in fx.projectiles} == {GUNS[PIECE_GUN["queen"]].color}
+    _spin(session, clock)
+    assert fx._whack_gun["aim"] == pytest.approx(_aim_angle(app, frm, impact), abs=0.02), \
+        "and the barrel follows the opponent's shots from there on"
+    session.teardown_skillcheck_overlay()
+
+
+@pytest.mark.parametrize("kind", [SkillCheckKind.WHEEL, SkillCheckKind.AIM,
+                                  SkillCheckKind.COMBO])
+def test_no_other_kind_ever_arms_the_px_gun(kind, monkeypatch):
+    app = _local_app()
+    install_clock(monkeypatch, FakeTicks())
+    _gate(app, kind)
+    app.game.skillcheck_session.sync_whack_gun()
+    assert app.game.board.effects.has_gun_px() is False, \
+        "{}: only the whack check hands the piece a tracking gun".format(kind.value)
+    app.game.skillcheck_session.teardown_skillcheck_overlay()
+
+
+def _finish_check(app, landed):
+    context = app.game.skillcheck_overlay._context
+    app.game.skillcheck_overlay.cancel()
+    app.game.skillcheck_session._on_skillcheck_done(context, landed)
+
+
+def test_a_won_whack_hands_the_same_gun_to_the_capture(monkeypatch):
+    # The check gun and the capture gun are the same weapon in the same hand: no
+    # tumble-drop, no second draw-flourish, only the aim beat before it fires.
+    app, clock, frm, to = _whack_app(monkeypatch)
+    session, fx = app.game.skillcheck_session, app.game.board.effects
+    session.sync_whack_gun()
+    _finish_check(app, True)
+    assert fx.has_gun_px() is False and fx.drops == [], \
+        "a won check never throws the gun away mid-shootout"
+    entry = fx.captures[0]
+    assert entry["predrawn"] is True
+    assert entry["fire_at"] == entry["start"] + AIM_MS, "no DRAW_MS — it is already drawn"
+    session.sync_whack_gun()
+    assert fx.has_gun_px() is False, "and the whack state stays gone afterwards"
+
+
+def test_a_failed_whack_still_tumbles_and_the_miss_gun_still_flourishes(monkeypatch):
+    app, clock, frm, to = _whack_app(monkeypatch)
+    session, fx = app.game.skillcheck_session, app.game.board.effects
+    session.sync_whack_gun()
+    _finish_check(app, False)
+    assert fx.has_gun_px() is False
+    assert len(fx.drops) == 1, "the fail keeps the approved tumble"
+    entry = fx.captures[0]
+    assert not entry.get("predrawn"), "the SKILL ISSUE shot draws its own gun"
+    assert entry["fire_at"] == entry["start"] + DRAW_MS + AIM_MS
+
+
+def test_a_plain_capture_is_untouched_by_the_handoff(monkeypatch):
+    app = _local_app()
+    install_clock(monkeypatch, FakeTicks())
+    frm, to = _capture_board(app)
+    app.game.board.apply_gated_move(frm, to)
+    entry = app.game.board.effects.captures[0]
+    assert entry["predrawn"] is False
+    assert entry["fire_at"] == entry["start"] + DRAW_MS + AIM_MS, \
+        "a capture with no check behind it still draws, aims, then fires"

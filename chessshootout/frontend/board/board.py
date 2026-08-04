@@ -1284,7 +1284,9 @@ class Board:
         self.cancel_animations()
         self.start_animation(from_sq, to_sq, piece, bump=True)
 
-    def restore_piece(self, square):
+    def restore_piece(self, square, *, drop=True):
+        if not drop:
+            return
         piece = self.match.piece_at(square)
         if piece is None or self.cell_size <= 0:
             return

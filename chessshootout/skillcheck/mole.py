@@ -201,6 +201,25 @@ def _free_squares(capture_sq, blocked, radius, board_size):
             if (row, col) not in blocked]
 
 
+def _min_gap_sq(square, picked):
+    row, col = square
+    return min((row - other_row) ** 2 + (col - other_col) ** 2
+               for other_row, other_col in picked)
+
+
+def _farthest_index(candidates, picked, tie_value):
+    best = -1
+    tied = []
+    for index, square in enumerate(candidates):
+        gap = _min_gap_sq(square, picked)
+        if gap > best:
+            best = gap
+            tied = [index]
+        elif gap == best:
+            tied.append(index)
+    return tied[int(tie_value * len(tied)) % len(tied)]
+
+
 def hole_squares(seed, captured_value, capture_sq, occupied, board_size=BOARD_SIZE):
     blocked = set(occupied)
     hole_count = _clamped_hole_count(captured_value)
@@ -209,8 +228,11 @@ def hole_squares(seed, captured_value, capture_sq, occupied, board_size=BOARD_SI
     while len(candidates) < hole_count and radius < board_size - 1:
         radius += 1
         candidates = _free_squares(capture_sq, blocked, radius, board_size)
+    if not candidates:
+        return ()
     floats = seeded_floats(f"moleholes:{seed}", MOLE_HOLE_CAP)
-    picked = []
-    for value in floats[:min(hole_count, len(candidates))]:
-        picked.append(candidates.pop(int(value * len(candidates)) % len(candidates)))
+    total = min(hole_count, len(candidates))
+    picked = [candidates.pop(int(floats[0] * len(candidates)) % len(candidates))]
+    for tie_value in floats[1:total]:
+        picked.append(candidates.pop(_farthest_index(candidates, picked, tie_value)))
     return tuple(picked)

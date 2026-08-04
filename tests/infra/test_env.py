@@ -16,7 +16,7 @@ _ISOLATED_VARS = (
     "CHESS_DEFAULT_INCREMENT", "CHESS_COUNTRY",
     "CHESS_SHOW_FPS", "CHESS_SHOW_PING", "CHESS_FOCUS_SHOW",
     "CHESS_NEWS_URL", "CHESS_PROFILE_HINT_SHOWN", "CHESS_LAUNCH_MODE",
-    "CHESS_AUTO_QUEEN",
+    "CHESS_AUTO_QUEEN", "CHESS_DEBUG_HITBOX",
 )
 
 
@@ -405,6 +405,28 @@ def test_auto_queen_round_trips():
     env.set_auto_queen(False)
     assert env.get_auto_queen() is False
     assert "CHESS_AUTO_QUEEN=0" in env._ENV_PATH.read_text(encoding="utf-8")
+
+
+def test_debug_hitbox_defaults_false():
+    assert env.get_debug_hitbox() is False
+
+
+@pytest.mark.parametrize("raw, expected", [
+    pytest.param("1", True, id="one"),
+    pytest.param("true", True, id="true"),
+    pytest.param("TRUE", True, id="uppercase"),
+    pytest.param(" on ", True, id="padded_on"),
+    pytest.param("0", False, id="zero"),
+    pytest.param("", False, id="empty"),
+    pytest.param("yes", False, id="unlisted_word"),
+    pytest.param("off", False, id="off"),
+])
+def test_debug_hitbox_reads_the_truthy_set(monkeypatch, raw, expected):
+    """A dev-only read-only switch: no setter, no persistence, and only the three
+    documented truthy spellings arm the hit-region overlay."""
+    monkeypatch.setenv("CHESS_DEBUG_HITBOX", raw)
+    assert env.get_debug_hitbox() is expected
+    assert not hasattr(env, "set_debug_hitbox")
 
 
 def test_profile_hint_shown_defaults_false():
