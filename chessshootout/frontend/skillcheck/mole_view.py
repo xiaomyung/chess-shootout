@@ -641,8 +641,8 @@ class MoleController(SkillCheckController):
         jump_t = self._jump_elapsed()
         if jump_t is None:
             return 0.0
-        heal_t = jump_t - MOLE_VIEW_JUMP_RISE_MS - MOLE_VIEW_JUMP_HOP_MS
-        return min(max(heal_t / MOLE_VIEW_REGROW_MS, 0.0), 1.0)
+        total = MOLE_VIEW_JUMP_RISE_MS + MOLE_VIEW_JUMP_HOP_MS + MOLE_VIEW_REGROW_MS
+        return min(max(jump_t / total, 0.0), 1.0)
 
     def _regrow_bucket(self):
         if self._landed is not False or self._committed_at is None:
@@ -716,6 +716,8 @@ class MoleController(SkillCheckController):
         return jump_t if jump_t >= 0.0 else None
 
     def _draw_jump(self, window, jump_t, group):
+        if self._landed is False:
+            self._draw_regrow_motes(window, group)
         pit_dy = self._pit_ry // 2
         rest_dy = self._rest_ground_dy()
         if jump_t < MOLE_VIEW_JUMP_RISE_MS:
@@ -735,8 +737,6 @@ class MoleController(SkillCheckController):
             p = 1.0 - land_t / MOLE_VIEW_LAND_SQUASH_MS
             squash = min(int(p * MOLE_VIEW_SQUASH_BUCKETS), MOLE_VIEW_SQUASH_BUCKETS - 1)
         self._blit_victim(window, self.center, 1.0, group, squash=squash, ground_dy=rest_dy)
-        if self._landed is False:
-            self._draw_regrow_motes(window, group)
 
     def _draw_regrow_motes(self, window, group):
         progress = self._heal_progress()
