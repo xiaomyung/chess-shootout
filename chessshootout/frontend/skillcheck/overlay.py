@@ -10,6 +10,7 @@ class SkillCheckOverlay:
         self._controller = None
         self._context = None
         self._on_done = None
+        self._farewell = None
 
     def start(self, controller, context, on_done):
         if self._controller is not None and self._controller is not controller:
@@ -46,8 +47,10 @@ class SkillCheckOverlay:
             self._finish()
 
     def draw(self, window):
-        if self._controller is not None:
-            self._controller.draw(window)
+        controller = self._controller if self._controller is not None else self._farewell
+        self._farewell = None
+        if controller is not None:
+            controller.draw(window)
 
     def relayout(self, cell_rect):
         if self._controller is not None:
@@ -67,13 +70,16 @@ class SkillCheckOverlay:
         self._controller = None
         self._context = None
         self._on_done = None
+        self._farewell = None
         if controller is not None:
             _close_controller(controller)
 
     def _finish(self):
         context = self._context
-        landed = self._controller.landed
+        controller = self._controller
+        landed = controller.landed
         on_done = self._on_done
         self.cancel()
+        self._farewell = controller
         if on_done is not None:
             on_done(context, landed)

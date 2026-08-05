@@ -1,7 +1,10 @@
 """Whack-a-mole skillcheck engine (chessshootout/skillcheck/mole.py): a seeded
-schedule of mole pops over board holes, hit by clicking inside a circular
-board-space hitbox while the pop's half-open window [t_up, t_down + grace) is
-live. The schedule is solved into the skillcheck deadline budget by ONE common
+schedule of mole pops over board holes, hit by clicking inside a tall
+piece-fitted OVAL in board space while the pop's half-open window
+[t_up, t_down + grace) is live. The oval is narrower than a cell and taller
+than it is wide, and its centre sits ABOVE the pit square's centre because the
+popped piece rises out of the hole -- so the hitbox hugs the drawn body, not
+the hole. The schedule is solved into the skillcheck deadline budget by ONE common
 scale factor with per-component floors; when floors make the full quota
 impossible the required hit count is downgraded at construction time, so the
 challenge is always deterministic for (seed, value_diff, deadline, value).
@@ -188,19 +191,50 @@ def test_no_consecutive_repeat_holes_and_all_holes_in_range():
                 assert cur != nxt
 
 
-def test_hit_at_is_a_timed_circular_hitbox_with_dedup():
+def test_hit_at_is_a_timed_oval_hitbox_with_dedup():
     ch = MoleChallenge.from_seed("hit-seed", captured_value=5)
     squares = mole.hole_squares("hit-seed", 5, CAPTURE_SQ, OCCUPIED)
     pop = ch.pops[0]
     t = (pop.t_up_ms + pop.t_down_ms) / 2.0
     row, col = squares[pop.hole]
-    center = (row + 0.5, col + 0.5)
-    assert ch.hit_at(t, center[0], center[1], squares) is True
-    assert ch.hit_at(t, center[0], center[1] + 0.549, squares) is True, "just inside 0.55"
-    assert ch.hit_at(t, center[0], center[1] + 0.551, squares) is False, "just outside 0.55"
-    assert ch.hit_at(pop.t_up_ms - 1.0, center[0], center[1], squares) is False, "wrong time"
-    assert ch.hit_at(t, center[0], center[1], squares, last_hit_pop=0) is False, \
+    # the oval's own centre: half a cell into the square, then lifted by the
+    # pop offset so it sits on the risen piece's body.
+    oval_row = row + 0.5 + mole.MOLE_HITBOX_CY_FRAC
+    oval_col = col + 0.5
+    assert ch.hit_at(t, oval_row, oval_col, squares) is True, "dead centre of the oval"
+    assert ch.hit_at(t, row + 0.5, col + 0.5, squares) is True, \
+        "the square centre stays inside: the 0.30 lift is well within the 0.52 half-height"
+    assert ch.hit_at(pop.t_up_ms - 1.0, oval_row, oval_col, squares) is False, "wrong time"
+    assert ch.hit_at(t, oval_row, oval_col, squares, last_hit_pop=0) is False, \
         "an already-credited pop cannot be double-hit"
+
+
+def test_hit_at_oval_is_taller_than_wide_and_lifted_off_the_hole():
+    ch = MoleChallenge.from_seed("hit-seed", captured_value=5)
+    squares = mole.hole_squares("hit-seed", 5, CAPTURE_SQ, OCCUPIED)
+    pop = ch.pops[0]
+    t = (pop.t_up_ms + pop.t_down_ms) / 2.0
+    row, col = squares[pop.hole]
+    oval_row = row + 0.5 + mole.MOLE_HITBOX_CY_FRAC
+    oval_col = col + 0.5
+    rx, ry = mole.MOLE_HITBOX_RX_FRAC, mole.MOLE_HITBOX_RY_FRAC
+    assert ry > rx, "a standing piece is taller than it is wide"
+    assert ch.hit_at(t, oval_row, oval_col + rx - 0.001, squares) is True, "just inside the waist"
+    assert ch.hit_at(t, oval_row, oval_col + rx + 0.001, squares) is False, "just outside it"
+    assert ch.hit_at(t, oval_row + ry - 0.001, oval_col, squares) is True, "just inside the head"
+    assert ch.hit_at(t, oval_row + ry + 0.001, oval_col, squares) is False, "just past it"
+    # containment is `<=`, so a shot landing exactly ON the rim still counts.
+    assert ch.hit_at(t, oval_row, oval_col + rx, squares) is True, "the rim itself is a hit"
+    assert ch.hit_at(t, oval_row - ry, oval_col, squares) is True, "top of the rim, likewise"
+    # the shape really is an ellipse, not the bounding box: the corner where the
+    # full half-width and the full half-height meet is outside.
+    assert ch.hit_at(t, oval_row + ry * 0.8, oval_col + rx * 0.8, squares) is False, \
+        "the diagonal corner falls outside the oval"
+    assert ch.hit_at(t, row + 0.9, col + 0.5, squares) is False, \
+        "low in the square is under the piece: the oval does not reach the pit floor"
+    assert ch.hit_at(t, row + 0.2, col + 0.95, squares) is False, "wide of the body"
+    assert ch.hit_at(t, row - 0.1, col + 0.5, squares) is True, \
+        "the oval spills ABOVE the pit square, where the risen piece is drawn"
 
 
 def test_hit_at_with_a_short_hole_list_is_a_safe_miss():
@@ -515,7 +549,9 @@ def test_pick_taunt_is_deterministic_per_seed_and_drawn_from_the_table():
     assert mole.pick_taunt("seed-x") == mole.pick_taunt("seed-x")
     texts = {mole.pick_taunt(f"seed-{i}") for i in range(30)}
     assert texts <= set(mole.MOLE_TAUNTS)
-    assert len(texts) >= 2, "the table is genuinely sampled, not pinned to one entry"
+    assert len(set(mole.MOLE_TAUNTS)) == len(mole.MOLE_TAUNTS), "no duplicate taunts"
+    assert len(mole.MOLE_TAUNTS) >= 10, "the pool is wide enough not to feel canned"
+    assert len(texts) >= 5, "the whole table is genuinely sampled, not a handful of entries"
 
 
 def test_occupied_squares_is_row_major_and_skips_empty_cells():

@@ -1,13 +1,22 @@
+"""juice.py owns only the *damage* half of the whack choreography now: a torn
+sprite is a pure function of (key, tier) and nothing else. The regrow buckets
+that used to un-punch the notches step by step are gone — the fail heal is a
+two-source composite built by the view (torn top / whole bottom, split at a
+travelling seam), so juice never needs to know how far along a repair is.
+"""
+
+import inspect
 import math
 
 import pygame as pg
 import pytest
 
 from tests.conftest import pygame_display
+from chessshootout.frontend.skillcheck import juice
 from chessshootout.frontend.skillcheck.juice import (
     Trauma, Hitstop, sakurai_vibrate, ease_out_back, torn_sprite, flash_sprite,
-    TRAUMA_DECAY_PER_S, HITSTOP_CAP_MS, TORN_MAX_TIER, TORN_REGROW_STEPS,
-    _TORN_NOTCHES, _TORN_NOTCH_FRAC, _TORN_CRACKS,
+    TRAUMA_DECAY_PER_S, HITSTOP_CAP_MS, TORN_MAX_TIER,
+    _TORN_NOTCHES, _TORN_NOTCH_FRAC, _TORN_CRACKS, _TORN_CACHE, _torn_surface,
 )
 
 
@@ -285,37 +294,44 @@ def test_flash_cache_hit_returns_same_object():
     assert flash_sprite(base, key) is flash_sprite(base, key)
 
 
-# --- torn regrow ------------------------------------------------------------
+# --- the regrow buckets are gone --------------------------------------------
 
-def test_regrow_bucket_zero_hits_the_legacy_cache_key():
-    # bucket 0 must stay byte-identical to the pre-regrow path so every existing
-    # damage frame (and its cache entry) is untouched by the heal feature.
+def test_torn_sprite_takes_no_regrow_argument():
+    # The heal is a view-side composite over the *undamaged* source sprite now.
+    # Keeping a regrow parameter here would mean two competing repair models and
+    # a cache keyed on a number the view no longer owns.
+    assert list(inspect.signature(torn_sprite).parameters) == ["base", "key", "tier"]
+    assert list(inspect.signature(_torn_surface).parameters) == ["base", "key", "tier"]
+    assert not hasattr(juice, "TORN_REGROW_STEPS")
+
+
+def test_torn_cache_key_is_exactly_the_key_and_the_tier():
+    # A stale third component in the key would strand every entry the view asks
+    # for and rebuild the (expensive) punched surface on every frame.
     base = _piece_surface()
-    key = ("rg", "w", 48, 2)
-    assert torn_sprite(base, key, 2, 0) is torn_sprite(base, key, 2)
+    key = ("cachekey", "w", 48)
+    tier_one = torn_sprite(base, key, 1)
+    tier_three = torn_sprite(base, key, 3)
+    assert tier_one is not tier_three
+    assert _TORN_CACHE[(key, 1)] is tier_one
+    assert _TORN_CACHE[(key, 3)] is tier_three
+    assert torn_sprite(base, key, 1) is tier_one
 
 
-def test_full_regrow_returns_the_clean_base_identity():
+def test_torn_damage_is_seeded_by_the_key():
     base = _piece_surface()
-    assert torn_sprite(base, ("rg2", "w", 48, 3), 3, TORN_REGROW_STEPS) is base
+    a = torn_sprite(base, ("seed-a", 48), 2)
+    b = torn_sprite(base, ("seed-b", 48), 2)
+    assert pg.image.tostring(a, "RGBA") != pg.image.tostring(b, "RGBA"), \
+        "two checks never tear their victims the same way"
 
 
-def test_regrow_monotonically_restores_opaque_pixels():
-    # "grows its parts back": each step of regrowth shrinks the punched notches,
-    # so opaque coverage must be non-decreasing from full damage to clean.
-    base = _piece_surface(64)
-    counts = [
-        _opaque_count(torn_sprite(base, ("rg3", "w", 64, 3), 3, bucket))
-        for bucket in range(TORN_REGROW_STEPS + 1)
-    ]
-    assert all(b >= a for a, b in zip(counts, counts[1:])), counts
-    assert counts[0] < counts[-1], "full damage must cover fewer pixels than clean"
-
-
-def test_mid_regrow_differs_from_both_ends():
-    base = _piece_surface(64)
-    mid = TORN_REGROW_STEPS // 2
-    full = torn_sprite(base, ("rg4", "w", 64, 3), 3, 0)
-    half = torn_sprite(base, ("rg4", "w", 64, 3), 3, mid)
-    assert half is not base and half is not full
-    assert _opaque_count(half) > _opaque_count(full)
+def test_torn_leaves_the_source_sprite_untouched():
+    # The base is the board's shared piece image; the view composites the heal
+    # straight out of it, so a mutating punch would corrupt the whole board.
+    base = _piece_surface()
+    before = pg.image.tostring(base, "RGBA")
+    for tier in range(1, TORN_MAX_TIER + 1):
+        torn_sprite(base, ("untouched", 48, tier), tier)
+    assert pg.image.tostring(base, "RGBA") == before
+    assert base.get_alpha() == 255

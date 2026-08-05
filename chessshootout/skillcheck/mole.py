@@ -1,4 +1,3 @@
-import math
 from dataclasses import dataclass
 
 from chessshootout.backend.utils import BOARD_SIZE
@@ -29,10 +28,13 @@ MOLE_FIT_EPSILON_MS = 0.001
 MOLE_HOLE_MIN = 3
 MOLE_HOLE_CAP = 5
 MOLE_HOLE_RADIUS_CELLS = 3
-MOLE_HITBOX_FRAC = 0.55
+MOLE_HITBOX_RX_FRAC = 0.40
+MOLE_HITBOX_RY_FRAC = 0.52
+MOLE_HITBOX_CY_FRAC = -0.30
 MOLE_RECOIL_LOCKOUT_MS = 180.0
 MOLE_MIN_INTER_SHOT_MS = 80.0
-MOLE_TAUNTS = ("missed me", "lol", "nice aim", "rip", "too slow")
+MOLE_TAUNTS = ("missed me", "lol", "nice aim", "rip", "too slow",
+               "2 ez", "bye bye", "not even close", "lmaoo", "git gud")
 
 
 def pick_taunt(seed):
@@ -174,7 +176,10 @@ class MoleChallenge:
         if hole >= len(hole_squares):
             return False
         row, col = hole_squares[hole]
-        return math.hypot(row_f - (row + 0.5), col_f - (col + 0.5)) <= MOLE_HITBOX_FRAC
+        ccy = row + 0.5 + MOLE_HITBOX_CY_FRAC
+        ccx = col + 0.5
+        return (((col_f - ccx) / MOLE_HITBOX_RX_FRAC) ** 2
+                + ((row_f - ccy) / MOLE_HITBOX_RY_FRAC) ** 2) <= 1.0
 
     def remaining_hittable(self, elapsed_ms, last_hit_pop=-1):
         count = 0

@@ -19,7 +19,6 @@ _TORN_CACHE = new_size_cache()
 _FLASH_CACHE = new_size_cache()
 
 TORN_MAX_TIER = 3
-TORN_REGROW_STEPS = 12
 
 _TORN_NOTCHES = {1: 2, 2: 4, 3: 6}
 _TORN_NOTCH_FRAC = {1: 0.11, 2: 0.15, 3: 0.16}
@@ -136,12 +135,11 @@ def _draw_cracks(surf, bbox, floats, idx, count, width, rgba=_CRACK_RGBA):
         idx += 4
 
 
-def _torn_surface(base, key, tier, regrow_bucket=0):
+def _torn_surface(base, key, tier):
     surf = base.copy()
     bbox = surf.get_bounding_rect()
     if bbox.width <= 0 or bbox.height <= 0:
         return surf
-    damage = 1.0 - regrow_bucket / TORN_REGROW_STEPS
     floats = seeded_floats(f"torn:{key}", _TORN_FLOATS)
     span = min(bbox.width, bbox.height)
     cx, cy = bbox.centerx, bbox.centery
@@ -149,7 +147,7 @@ def _torn_surface(base, key, tier, regrow_bucket=0):
     mask = pg.Surface(surf.get_size(), pg.SRCALPHA)
     mask.fill((255, 255, 255, 255))
     idx = 0
-    radius_base = span * _TORN_NOTCH_FRAC[tier] * damage
+    radius_base = span * _TORN_NOTCH_FRAC[tier]
     for _ in range(_TORN_NOTCHES[tier]):
         ang = floats[idx] * 2.0 * math.pi
         reach = _TORN_REACH_BASE + _TORN_REACH_JITTER * floats[idx + 2]
@@ -160,29 +158,24 @@ def _torn_surface(base, key, tier, regrow_bucket=0):
         ang = floats[idx] * 2.0 * math.pi
         _punch(mask, cx + math.cos(ang) * hx * _TORN_CHUNK_OFFSET,
                cy + math.sin(ang) * hy * _TORN_CHUNK_OFFSET,
-               span * _TORN_CHUNK_FRAC * damage)
+               span * _TORN_CHUNK_FRAC)
         idx += 1
         for _ in range(_TORN_RAGGED):
             _punch(mask, bbox.left + bbox.width * floats[idx],
                    bbox.top + span * _TORN_RAGGED_BAND_FRAC * floats[idx + 1],
-                   span * _TORN_RAGGED_RADIUS_FRAC * damage)
+                   span * _TORN_RAGGED_RADIUS_FRAC)
             idx += 2
     surf.blit(mask, (0, 0), special_flags=pg.BLEND_RGBA_MULT)
-    crack_rgba = (_CRACK_RGBA[0], _CRACK_RGBA[1], _CRACK_RGBA[2],
-                  int(_CRACK_RGBA[3] * damage))
     _draw_cracks(surf, bbox, floats, idx, _TORN_CRACKS[tier],
-                 max(int(span * _TORN_CRACK_WIDTH_FRAC * damage), 1), crack_rgba)
+                 max(int(span * _TORN_CRACK_WIDTH_FRAC), 1))
     return surf
 
 
-def torn_sprite(base, key, tier, regrow_bucket=0):
-    if tier <= 0 or regrow_bucket >= TORN_REGROW_STEPS:
+def torn_sprite(base, key, tier):
+    if tier <= 0:
         return base
-    if regrow_bucket <= 0:
-        return memoized_surface(_TORN_CACHE, (key, tier),
-                                lambda: _torn_surface(base, key, tier))
-    return memoized_surface(_TORN_CACHE, (key, tier, regrow_bucket),
-                            lambda: _torn_surface(base, key, tier, regrow_bucket))
+    return memoized_surface(_TORN_CACHE, (key, tier),
+                            lambda: _torn_surface(base, key, tier))
 
 
 def flash_sprite(base, key):
