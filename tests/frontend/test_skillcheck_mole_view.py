@@ -21,15 +21,32 @@ sparks. The hit flash is suppressed for the whole heal — a white frame there
 would undo half the repair — and the composites are cached per (tier, bucket)
 and thrown away on relayout.
 
-Emergence is one anchored model shared by the intro sink, every pop, every
-retreat and the fail climb-out: the ground line the body stands on interpolates
-from the pit's near lip (pit_ry below the ellipse centre) up to the ellipse
-centre itself as the pop height goes 0 -> 1, and the pit's front half is
-repainted over the body, so the visible bottom edge is the rim ARC and never a
-straight cut across bare board. At full pop the piece is therefore whole and
-completely clear of the lip (POP_HEIGHT_FRAC is 1.0, with the LIFT_CAP overshoot
-riding on top of it), and the fail hop picks the ground line up at 0 and walks
-it down to the rest position without a step at either joint.
+Emergence is one anchored model shared by the intro sink, every pop and the fail
+climb-out: the ground line the body stands on interpolates from the pit's near
+lip (pit_ry below the ellipse centre) up to the ellipse centre itself as the pop
+height goes 0 -> 1, and the body is cut by a MASK anchored on the pit, not by a
+straight clip on the sprite. The mask's boundary is the lower arc of the pit's
+own dark mouth (_pit_mouth derives it off the very inset/rim fractions the pit
+sprite is drawn with, so the two can never drift): deepest under the centre of
+the hole, climbing to the ground line at both rims and staying there for every
+column of a sprite wider than the mouth — the old straight cut left those wings
+hanging over bare board, which is what read as a wall. A short alpha ramp above
+the arc (EMERGE_FADE_FRAC of the mouth's depth) dissolves the body into the hole
+instead of hard-cutting it. The sprite is composited into ONE reusable scratch
+surface per sprite size, so nothing is allocated per frame. At full pop the piece
+is whole and completely clear of the lip (POP_HEIGHT_FRAC is 1.0, with the
+LIFT_CAP overshoot riding on top of it), and the fail hop picks the ground line
+up at 0 and walks it down to the rest position without a step at either joint.
+
+A pop is ONE continuous bounce, never a hold: out_cubic out of the hole to the
+apex at POP_APEX_FRAC of the window (POP_OVERSHOOT past whole), then a gravity
+fall back into it over the rest. The window is the pop's own up-time plus the
+engine's MOLE_GRACE_MS, so the body is on screen exactly as long as the pop is
+hittable, and because the engine ramps up-times per piece value the fall pace
+varies per pop for free. The squash bucket is read straight off the height, so
+the body is compressed leaving the pit and again as it drops back in, upright
+only at the top. A registered hit interrupts the arc wherever it is: the height
+at the hit is latched and driven to zero over RETREAT_MS.
 
 The commit closes the check down instead of switching it off: every pit shrinks
 shut through the same mouth animation that opened it, with the same per-hole
@@ -77,7 +94,7 @@ from chessshootout.frontend.skillcheck import mole_view
 from chessshootout.frontend.skillcheck.controller import SKILLCHECK_RESULT_HOLD_MS
 from chessshootout.frontend.skillcheck.mole_view import (
     MoleController, MOLE_VIEW_FAIL_HOLD_MS,
-    MOLE_VIEW_WIN_HOLD_MS, MOLE_VIEW_HITSTOP_KILL_MS,
+    MOLE_VIEW_WIN_HOLD_MS, MOLE_VIEW_HITSTOP_KILL_MS, MOLE_VIEW_HITSTOP_HIT_MS,
     MOLE_VIEW_RETREAT_MS, MOLE_VIEW_PIP_OFFSET_FRAC,
     MOLE_VIEW_JUMP_RISE_MS, MOLE_VIEW_JUMP_HOP_MS, MOLE_VIEW_LAND_SQUASH_MS,
     MOLE_VIEW_REGROW_MS, MOLE_VIEW_TOSS_MS, MOLE_VIEW_TOSS_SPEED_FRAC,
@@ -87,15 +104,22 @@ from chessshootout.frontend.skillcheck.mole_view import (
     MOLE_VIEW_HEAL_BUCKETS, MOLE_VIEW_SEAM_BAND_FRAC, MOLE_VIEW_SPARK_MS,
     MOLE_VIEW_CASING_REST_MS, MOLE_VIEW_CASING_FADE_MS,
     MOLE_VIEW_CASING_COMMIT_FADE_MS, MOLE_VIEW_HOLE_STAGGER_MS,
-    MOLE_VIEW_POP_HEIGHT_FRAC, MOLE_VIEW_POP_LIFT_CAP, MOLE_VIEW_RISE_MS,
+    MOLE_VIEW_POP_HEIGHT_FRAC, MOLE_VIEW_POP_LIFT_CAP, MOLE_VIEW_POP_APEX_FRAC,
+    MOLE_VIEW_POP_OVERSHOOT, MOLE_VIEW_SQUASH_BUCKETS, MOLE_VIEW_EMERGE_FADE_FRAC,
     MOLE_VIEW_PIP_FADE_DELAY_MS, MOLE_VIEW_PIP_FADE_MS, MOLE_VIEW_CROSS_OUT_MS,
     MOLE_VIEW_SEAM_GLOW_W_FRAC, MOLE_VIEW_SEAM_GLOW_H_FRAC,
     MOLE_VIEW_SEAM_GLOW_CORE, MOLE_VIEW_SPARK_SPEED_FRAC,
     _pit_telegraph_surface, _pit_surface, _pit_front_surface, _seam_band_surface,
-    _seam_glow_surface, _MOLE_STATIC_CACHE)
+    _seam_glow_surface, _pit_mouth, _emerge_mask, _MOLE_STATIC_CACHE)
+from chessshootout.frontend.skillcheck.mole_view import (
+    MOLE_VIEW_BLOOM_BUCKETS, MOLE_VIEW_BLOOM_SPIN_DEG, MOLE_VIEW_CROSS_ARC_PAD_FRAC,
+    MOLE_VIEW_CROSS_ARC_SPAN_DEG, MOLE_VIEW_CROSS_BLADE_W_FRAC, MOLE_VIEW_CROSS_GLOW_FRAC,
+    MOLE_VIEW_CROSS_OUT_BUCKETS, MOLE_VIEW_CROSS_OUT_SCALE, MOLE_VIEW_CROSS_TIP_W_FRAC,
+    MOLE_VIEW_KICK_MS, _crosshair_surface, _cross_glow_surface)
+from chessshootout.skillcheck.mole import MOLE_RECOIL_LOCKOUT_MS
 from chessshootout.frontend.visual.colors import Colors
 from chessshootout.skillcheck.mole import (
-    MoleChallenge, MolePop, MOLE_TAUNTS, pick_taunt,
+    MoleChallenge, MolePop, MOLE_TAUNTS, pick_taunt, MOLE_GRACE_MS,
     MOLE_HITBOX_RX_FRAC, MOLE_HITBOX_RY_FRAC, MOLE_HITBOX_CY_FRAC)
 
 _JUMP_MS = MOLE_VIEW_JUMP_RISE_MS + MOLE_VIEW_JUMP_HOP_MS
@@ -1495,20 +1519,201 @@ def test_the_crosshair_scales_and_fades_out_instead_of_vanishing_on_the_verdict(
     assert _cross_lit(gone, at) == 0
 
 
-def test_the_crosshair_fade_reuses_one_cached_reticle_per_step(monkeypatch):
+def test_the_crosshair_fade_steps_through_a_bounded_set_of_bucketed_reticles(monkeypatch):
     monkeypatch.setattr(pg.mouse, "get_pos", lambda: (600, 600))
     ctrl = _mole(challenge=_one_pop_challenge())
     ctrl.update(2000)
     surf = pg.Surface((640, 640))
-    before = len(_MOLE_STATIC_CACHE)
+    before = {k for k in _MOLE_STATIC_CACHE if k[0] == "cross"}
     for dt in range(1, int(MOLE_VIEW_CROSS_OUT_MS), 2):
         ctrl.update(2000 + dt)
         ctrl.draw(surf)
-    minted = len(_MOLE_STATIC_CACHE) - before
-    assert 0 < minted <= 8, \
-        "the fade builds a handful of integer-sized reticles, not one surface per frame"
-    keys = [k for k in _MOLE_STATIC_CACHE if k[0] == "cross"]
-    assert keys, "and they live in the shared size-keyed cache like every other sprite"
+    minted = {k for k in _MOLE_STATIC_CACHE if k[0] == "cross"} - before
+    assert 0 < len(minted) <= MOLE_VIEW_CROSS_OUT_BUCKETS + 1, \
+        "the fade builds one reticle per scale bucket, not one surface per frame"
+    assert all(k[5] <= MOLE_VIEW_CROSS_OUT_BUCKETS for k in minted), \
+        "and they live in the shared size-keyed cache keyed by out bucket"
+
+
+def test_the_live_reticle_re_blits_one_cached_surface_and_one_glow(monkeypatch):
+    monkeypatch.setattr(pg.mouse, "get_pos", lambda: (600, 600))
+    ctrl = _mole()
+    surf = pg.Surface((640, 640))
+    ctrl.update(600)
+    ctrl.draw(surf)
+    key = ("cross", ctrl._cross_arm, ctrl._cross_gap, ctrl._cross_lw, 0, 0)
+    glow_r = max(int(ctrl.cell_size * MOLE_VIEW_CROSS_GLOW_FRAC), 6)
+    assert key in _MOLE_STATIC_CACHE
+    assert _MOLE_STATIC_CACHE[("crossglow", glow_r)] is _cross_glow_surface(glow_r)
+    before = {k for k in _MOLE_STATIC_CACHE if k[0] in ("cross", "crossglow")}
+    for dt in range(1, 51):
+        ctrl.update(600 + dt)
+        ctrl.draw(surf)
+    after = {k for k in _MOLE_STATIC_CACHE if k[0] in ("cross", "crossglow")}
+    assert after == before, "steady state mints nothing — the cursor is two cached blits"
+
+
+def _amberish(p):
+    return p[0] > 180 and p[1] > 140 and p[2] < 130 and p[3] > 60
+
+
+def _amber_on_east_ray(surf):
+    c = surf.get_width() // 2
+    return any(_amberish(surf.get_at((x, c))) for x in range(c + 17, surf.get_width()))
+
+
+def test_full_bloom_spreads_the_reticle_and_sweeps_the_heated_ring_across_the_gap():
+    rest = _crosshair_surface(15, 4, 2, 0, 0)
+    full = _crosshair_surface(15, 4, 2, MOLE_VIEW_BLOOM_BUCKETS, 0)
+    assert full.get_bounding_rect().width > rest.get_bounding_rect().width, \
+        "recoil pushes the blades and ring outward"
+    assert not _amber_on_east_ray(rest), \
+        "at rest the ring gap sits on the blade line and the arcs stay accent-cool"
+    assert _amber_on_east_ray(full), \
+        "at full bloom the arcs rotate across the blade line and heat to amber"
+
+
+def test_a_shot_lockout_mints_at_most_the_bloom_buckets_and_then_reuses_them(monkeypatch):
+    monkeypatch.setattr(pg.mouse, "get_pos", lambda: (600, 600))
+    ctrl = _mole()
+    surf = pg.Surface((640, 640))
+    ctrl.update(800)
+    ctrl.draw(surf)
+    before = {k for k in _MOLE_STATIC_CACHE if k[0] == "cross"}
+    ctrl.handle_event(_click((600, 600)))
+    for dt in range(0, int(MOLE_RECOIL_LOCKOUT_MS) + 1, 6):
+        ctrl.update(800 + dt)
+        ctrl.draw(surf)
+    minted = {k for k in _MOLE_STATIC_CACHE if k[0] == "cross"} - before
+    assert 0 < len(minted) <= MOLE_VIEW_BLOOM_BUCKETS + 1, \
+        "the bloom walks bucketed reticles while the lockout runs"
+    assert all(k[4] <= MOLE_VIEW_BLOOM_BUCKETS and k[5] == 0 for k in minted)
+    steady = {k for k in _MOLE_STATIC_CACHE if k[0] == "cross"}
+    ctrl.handle_event(_click((600, 600)))
+    for dt in range(0, int(MOLE_RECOIL_LOCKOUT_MS) + 1, 6):
+        ctrl.update(1000 + dt)
+        ctrl.draw(surf)
+    assert {k for k in _MOLE_STATIC_CACHE if k[0] == "cross"} == steady, \
+        "every later shot re-blits the same bucketed set"
+
+
+def _lit_centroid_y(surf, at):
+    ys = [y for x in range(at[0] - 40, at[0] + 40) for y in range(at[1] - 40, at[1] + 40)
+          if sum(surf.get_at((x, y))[:3]) > 90]
+    return sum(ys) / len(ys)
+
+
+def test_the_kick_lifts_the_reticle_and_settles_it_back(monkeypatch):
+    at = (600, 600)
+    monkeypatch.setattr(pg.mouse, "get_pos", lambda: at)
+    ctrl = _mole()
+    rest = _draw_on_black(ctrl, 900)
+    ctrl._flash_ms = 1000.0
+    kicked = _draw_on_black(ctrl, 1000)
+    assert _lit_centroid_y(rest, at) - _lit_centroid_y(kicked, at) >= 2.0, \
+        "the whole reticle rides the recoil upward on the shot frame"
+    settled = _draw_on_black(ctrl, 1000 + int(MOLE_VIEW_KICK_MS))
+    assert abs(_lit_centroid_y(settled, at) - _lit_centroid_y(rest, at)) < 1.0, \
+        "and settles back onto the cursor when the kick window closes"
+
+
+def _bright_span(surf, x, c):
+    return sum(1 for dy in range(-6, 7)
+               if sum(surf.get_at((x, c + dy))[:3]) > 330
+               and surf.get_at((x, c + dy))[3] > 120)
+
+
+def test_reticle_anatomy_amber_dot_needle_blades_dark_contour_and_aligned_ring_gaps():
+    surf = _crosshair_surface(15, 4, 2, 0, 0)
+    c = surf.get_width() // 2
+    center = surf.get_at((c, c))
+    amber = pg.Color(Colors.amber_hi)
+    assert all(abs(center[i] - amber[i]) < 20 for i in range(3)), \
+        "the center dot burns amber_hi"
+    assert 0 < _bright_span(surf, c + 6, c) < _bright_span(surf, c + 17, c) <= 3, \
+        "each blade is a slim needle with a barely-there taper, never a petal wedge"
+    band = [surf.get_at((c + 17, c + dy)) for dy in range(-6, 7)]
+    assert any(sum(p[:3]) < 300 and p[3] > 60 for p in band), \
+        "a dark contour wraps the white core so the cursor reads on light squares"
+    arc_r = 4 + 15 + max(15 * MOLE_VIEW_CROSS_ARC_PAD_FRAC, 2.0)
+    d = int(round(arc_r * math.cos(math.pi / 4)))
+    diag = [surf.get_at((c + d + off, c + d + off)) for off in range(-2, 3)]
+    assert any(p[0] > 180 and p[1] < 150 and p[2] < 130 and p[3] > 120 for p in diag), \
+        "a hairline accent arc rides each diagonal"
+    ray = [surf.get_at((x, c)) for x in range(c + 21, surf.get_width())]
+    assert all(p[3] <= 60 for p in ray), \
+        "and the ring gaps align with the blade lines, so the cardinal axes stay clear"
+
+
+def test_the_crosshair_beats_stay_inside_the_choreography_windows():
+    assert MOLE_VIEW_KICK_MS <= MOLE_RECOIL_LOCKOUT_MS
+    assert MOLE_VIEW_CROSS_OUT_MS < min(MOLE_VIEW_WIN_HOLD_MS, MOLE_VIEW_FAIL_HOLD_MS)
+    assert 0.0 < MOLE_VIEW_CROSS_OUT_SCALE < 1.0
+    assert MOLE_VIEW_BLOOM_BUCKETS >= 4 and MOLE_VIEW_CROSS_OUT_BUCKETS >= 4
+    assert 0.0 < MOLE_VIEW_BLOOM_SPIN_DEG < 45.0
+    assert 0.0 < MOLE_VIEW_CROSS_ARC_SPAN_DEG < 90.0
+    assert MOLE_VIEW_CROSS_TIP_W_FRAC < MOLE_VIEW_CROSS_BLADE_W_FRAC <= 0.15, \
+        "needle blades stay needles — the propeller read came from fat bases"
+
+
+def _corners_stay_board(surface):
+    board = pg.Color(Colors.white_tile)
+    canvas = pg.Surface(surface.get_size())
+    canvas.fill(board)
+    canvas.blit(surface, (0, 0))
+    w, h = surface.get_size()
+    return all(canvas.get_at(p)[:3] == (board.r, board.g, board.b)
+               for p in ((1, 1), (w - 2, 1), (1, h - 2), (w - 2, h - 2)))
+
+
+def test_reticle_surfaces_are_transparent_off_the_marks_at_rest_bloom_and_fade():
+    idle = _crosshair_surface(15, 4, 2, 0, 0)
+    bloomed = _crosshair_surface(15, 4, 2, MOLE_VIEW_BLOOM_BUCKETS, 0)
+    fading = _crosshair_surface(15, 4, 2, 0, MOLE_VIEW_CROSS_OUT_BUCKETS // 2)
+    for surface in (idle, bloomed, fading):
+        assert _corners_stay_board(surface), \
+            "an opaque backing surface would stamp a dark box over the board"
+    fading.set_alpha(128)
+    assert _corners_stay_board(fading), \
+        "the fade's blanket alpha rides on per-pixel alpha, not an opaque plate"
+    fading.set_alpha(255)
+
+
+def test_a_finished_fade_never_poisons_the_cached_reticles_into_opaque_boxes(monkeypatch):
+    # set_alpha(None) on an SRCALPHA surface disables per-pixel alpha for every
+    # later blit of that surface — the shipped bug: after one verdict fade the
+    # next check's live reticle stamped a solid dark box over the board. The
+    # draw path must restore with set_alpha(255), which keeps the channel armed.
+    monkeypatch.setattr(pg.mouse, "get_pos", lambda: (600, 600))
+    ctrl = _mole(challenge=_one_pop_challenge())
+    ctrl.update(2000)
+    surf = pg.Surface((640, 640))
+    for dt in range(1, int(MOLE_VIEW_CROSS_OUT_MS), 2):
+        ctrl.update(2000 + dt)
+        ctrl.draw(surf)
+    live_key = ("cross", ctrl._cross_arm, ctrl._cross_gap, ctrl._cross_lw, 0, 0)
+    assert _corners_stay_board(_MOLE_STATIC_CACHE[live_key]), \
+        "the reticle a later check re-blits still carries its transparency"
+
+
+def test_the_draw_path_never_darkens_the_board_around_the_crosshair(monkeypatch):
+    at = (600, 600)
+    monkeypatch.setattr(pg.mouse, "get_pos", lambda: at)
+    ctrl = _mole()
+    board = pg.Color(Colors.white_tile)
+    surf = pg.Surface((640, 640))
+    surf.fill(board)
+    ctrl.update(600)
+    ctrl._draw_crosshair(surf)
+    half = _crosshair_surface(ctrl._cross_arm, ctrl._cross_gap, ctrl._cross_lw,
+                              0, 0).get_width() // 2
+    for dx, dy in ((-1, -1), (1, -1), (-1, 1), (1, 1)):
+        p = surf.get_at((at[0] + dx * (half - 1), at[1] + dy * (half - 1)))
+        assert p[:3] == (board.r, board.g, board.b), \
+            "the reticle square's empty corners leave the tile untouched"
+    inside = surf.get_at((at[0] + 6, at[1] + 6))
+    assert all(inside[i] >= board[i] for i in range(3)), \
+        "the additive glow can only brighten the tile, never shadow it"
 
 
 def test_fail_landing_frame_sits_exactly_where_the_board_draws_the_piece():
@@ -1630,9 +1835,11 @@ def test_spectated_hits_fire_the_mirrors_gun_at_the_relayed_point():
         "the mirror reads the kill off the relayed progress, not off a local commit"
 
 
-def test_blit_victim_reports_the_rect_it_painted():
-    # The rect is what the seam sparks hang off, so it has to be the real painted
-    # box in both branches — and None when there is nothing on screen at all.
+def test_blit_victim_reports_the_ground_rect_it_stands_on():
+    # The rect is what the seam sparks hang off, so it is the body's GROUND box:
+    # crown to ground line. The standing branch paints exactly that box; the
+    # emerging branch paints the same box plus whatever of the body the mouth arc
+    # still shows below the ground line — and None when nothing is on screen.
     ctrl = _mole(victim_surface=_solid_victim())
     ground = ctrl._rest_ground_dy()
     blank = pg.Surface((640, 640))
@@ -1650,13 +1857,15 @@ def test_blit_victim_reports_the_rect_it_painted():
     assert full_surf.get_at((full.centerx, full.top - 1))[:3] == (0, 0, 0)
     clip_surf = pg.Surface((640, 640))
     clip_surf.fill((0, 0, 0))
-    clipped = ctrl._blit_victim(clip_surf, ctrl.center, 0.5, (0, 0), ground_dy=ground)
+    clipped = ctrl._blit_victim(clip_surf, ctrl.center, 0.5, (0, 0))
     assert clipped.width == full.width
     assert clipped.height == int(ctrl._victim.get_height() * 0.5)
-    assert clipped.bottom == full.bottom, "a half-risen mole stands on the same ground line"
-    assert clip_surf.get_at(clipped.topleft)[:3] == _TOSS_COLOR
+    assert clipped.bottom == ctrl.center[1] + ctrl._emergence_dy(0.5), \
+        "the half-risen mole's ground line is the emergence anchor, nothing else"
+    assert clip_surf.get_at(clipped.topleft)[:3] == _TOSS_COLOR, \
+        "the crown is out of the hole at full strength"
     assert clip_surf.get_at((clipped.centerx, clipped.top - 1))[:3] == (0, 0, 0), \
-        "and the frame really is cut off at the rim, not squashed into it"
+        "and nothing is painted above it"
 
 
 def test_the_pit_lip_is_repainted_over_the_body_only_when_asked():
@@ -1709,9 +1918,8 @@ def test_a_full_pop_shows_the_whole_piece_clear_of_the_pit_lip():
 
 
 def test_an_emerging_body_is_always_cut_inside_the_pit_mouth():
-    # Every intermediate frame's cut line has to live between the ellipse centre
-    # and its near lip: that is the only band the repainted front half covers, so
-    # it is the only band where the cut reads as the concave rim instead of a wall.
+    # Every intermediate frame's ground line has to live between the ellipse
+    # centre and its near lip: that is the band the mouth arc is carved out of.
     ctrl = _mole(victim_surface=_solid_victim())
     surf = pg.Surface((640, 640))
     cy = ctrl.center[1]
@@ -1725,22 +1933,311 @@ def test_an_emerging_body_is_always_cut_inside_the_pit_mouth():
     assert tops[-1] == cy - ctrl._victim.get_height()
 
 
-def test_the_retreat_sinks_back_down_the_wall_it_climbed():
+def _emergence_frame(ctrl, height_frac):
+    surf = pg.Surface((640, 640))
+    surf.fill((0, 0, 0))
+    rect = ctrl._blit_victim(surf, ctrl.center, height_frac, (0, 0), lip=True)
+    return surf, rect
+
+
+def _body_bottoms(surf, rect):
+    # Lowest painted row per column of the emerging body: the boundary the player
+    # reads as the edge of the hole the piece is climbing out of.
+    bottoms = {}
+    for x in range(rect.left, rect.right):
+        lit = [y for y in range(rect.top, surf.get_height()) if surf.get_at((x, y)).g > 0]
+        bottoms[x] = max(lit) if lit else None
+    return bottoms
+
+
+def _lit_span(surf, y, rect):
+    return sum(1 for x in range(rect.left, rect.right) if surf.get_at((x, y)).g > 0)
+
+
+def test_the_emerging_body_is_cut_on_the_pits_own_concave_mouth_arc():
+    # The old cut was one straight row across the whole sprite: a wall the piece
+    # hid behind, with the part of the body wider than the mouth hanging over bare
+    # board below it. The boundary is the mouth's LOWER ARC now — deepest under
+    # the centre of the hole, rising to the ground line at both rims.
+    ctrl = _mole(victim_surface=_solid_victim())
+    cy, cx = ctrl.center[1], ctrl.center[0]
+    surf, rect = _emergence_frame(ctrl, 0.5)
+    bottoms = _body_bottoms(surf, rect)
+    band = ctrl._emerge_fade
+    assert cy + ctrl._mouth_ry - band <= bottoms[cx] <= cy + ctrl._mouth_ry, \
+        "the centre column dips to the deepest point of the mouth, inside its fade band"
+    assert cy - band <= bottoms[rect.left] <= cy, \
+        "and a column past the rim stops on the ground line"
+    assert bottoms[cx] - bottoms[rect.left] >= ctrl._mouth_ry - 1, \
+        "the dip is the whole depth of the mouth, not a rounding artefact"
+    profile = [bottoms[x] for x in range(cx, rect.right)]
+    assert profile == sorted(profile, reverse=True), \
+        "the arc only ever climbs on the way out to the rim: {}".format(profile)
+    mirrored = [bottoms[x] for x in range(rect.right - 1, cx - 1, -1)]
+    assert all(abs(a - b) <= 1 for a, b in zip([bottoms[x] for x in range(rect.left, cx)],
+                                               mirrored)), \
+        "and it is symmetric about the hole"
+
+
+def test_no_row_below_the_ground_line_is_painted_full_width():
+    # The tell of the old wall: a fully opaque row of body running the entire
+    # width of the sprite, below the ground line, on bare board.
+    ctrl = _mole(victim_surface=_solid_victim())
+    cy = ctrl.center[1]
+    for height in (0.2, 0.4, 0.6, 0.8, 0.95):
+        surf, rect = _emergence_frame(ctrl, height)
+        for y in range(cy, cy + ctrl._pit_ry + 1):
+            span = _lit_span(surf, y, rect)
+            assert span <= 2 * ctrl._mouth_rx, \
+                "height {} paints {} px of body across row {} — wider than the mouth".format(
+                    height, span, y - cy)
+
+
+def test_the_body_fades_in_across_the_mouth_line_instead_of_hard_cutting():
+    ctrl = _mole(victim_surface=_solid_victim())
+    fade = ctrl._emerge_fade
+    assert 2 <= fade <= ctrl._mouth_ry // 2, "a short band, not half the hole"
+    assert fade == max(int(ctrl._mouth_ry * MOLE_VIEW_EMERGE_FADE_FRAC), 2), \
+        "the band is a fraction of the mouth's own depth, never a fixed pixel count"
+    assert _mole(cell=2 * _CELL)._emerge_fade > fade, "so it scales with the board"
+    mask = _emerge_mask(_CELL, ctrl._mouth_rx, ctrl._mouth_ry, fade)
+    column = [mask.get_at((_CELL // 2, y)).a for y in range(mask.get_height())]
+    band = column[ctrl._mouth_ry:ctrl._mouth_ry + fade]
+    assert column[ctrl._mouth_ry - 1] == 255, "solid body right up to the band"
+    assert all(b < a for a, b in zip([255] + band, band)), \
+        "then a ramp, one step per row: {}".format(band)
+    assert band[-1] == 0 and column[ctrl._mouth_ry + fade] == 0, \
+        "and it is gone by the arc itself"
+    surf, rect = _emergence_frame(ctrl, 0.5)
+    edge = [surf.get_at((ctrl.center[0], y)).g
+            for y in range(ctrl.center[1] + ctrl._mouth_ry - fade, ctrl.center[1] + ctrl._mouth_ry)]
+    assert all(b < a for a, b in zip(edge, edge[1:])), \
+        "the drawn body dissolves into the hole over the same band: {}".format(edge)
+
+
+def _dark_extent(surf):
+    dark = pg.Color(Colors.well_deep)
+    w, h = surf.get_size()
+    cols = [y for y in range(h) if surf.get_at((w // 2, y))[:3] == (dark.r, dark.g, dark.b)]
+    rows = [x for x in range(w) if surf.get_at((x, h // 2))[:3] == (dark.r, dark.g, dark.b)]
+    return (max(rows) - min(rows) + 1) / 2.0, (max(cols) - min(cols) + 1) / 2.0
+
+
+@pytest.mark.parametrize("cell", [60, 80, 160])
+def test_the_mouth_the_mask_carves_is_the_mouth_the_pit_sprite_draws(cell):
+    # Both are derived off the same inset/rim fractions, so the arc can never
+    # drift off the hole it is supposed to be the near lip of.
+    ctrl = _mole(cell=cell)
+    rx, ry = _dark_extent(_pit_surface(ctrl._pit_rx, ctrl._pit_ry))
+    assert _pit_mouth(ctrl._pit_rx, ctrl._pit_ry) == (ctrl._mouth_rx, ctrl._mouth_ry)
+    assert ctrl._mouth_rx == pytest.approx(rx, abs=1), \
+        "the arc is measured through the same supersample the pit is drawn through"
+    assert ctrl._mouth_ry == pytest.approx(ry, abs=1)
+    assert ctrl._mouth_rx < ctrl._pit_rx and ctrl._mouth_ry < ctrl._pit_ry, \
+        "the mouth sits inside the rim — the body slides under it, never over it"
+
+
+def test_the_emergence_mask_and_its_scratch_are_cached_and_bounded():
+    ctrl = _mole(victim_surface=_solid_victim())
+    key = ("emerge", _CELL, ctrl._mouth_rx, ctrl._mouth_ry, ctrl._emerge_fade)
+    mask = _emerge_mask(_CELL, ctrl._mouth_rx, ctrl._mouth_ry, ctrl._emerge_fade)
+    assert _emerge_mask(_CELL, ctrl._mouth_rx, ctrl._mouth_ry, ctrl._emerge_fade) is mask
+    assert key in _MOLE_STATIC_CACHE, "one mask per sprite width and pit mouth, shared"
+    surf = pg.Surface((640, 640))
+    pop = ctrl.challenge.pops[0]
+    frames = range(int(pop.t_up_ms), int(pop.t_down_ms + MOLE_GRACE_MS), 4)
+    before = sum(1 for k in _MOLE_STATIC_CACHE if k[0] == "emerge")
+    for now in frames:
+        ctrl.update(now)
+        ctrl.draw(surf)
+    minted = sum(1 for k in _MOLE_STATIC_CACHE if k[0] == "emerge") - before
+    assert 0 < minted <= MOLE_VIEW_SQUASH_BUCKETS, \
+        "a whole bounce mints one mask per squash width, not one per frame"
+    assert 0 < len(ctrl._emerge_scratch) <= MOLE_VIEW_SQUASH_BUCKETS, \
+        "and one reusable scratch per width: {}".format(list(ctrl._emerge_scratch))
+    settled = sum(1 for k in _MOLE_STATIC_CACHE if k[0] == "emerge")
+    scratches = dict(ctrl._emerge_scratch)
+    for now in frames:
+        ctrl.update(now + 1)
+        ctrl.draw(surf)
+    assert sum(1 for k in _MOLE_STATIC_CACHE if k[0] == "emerge") == settled
+    assert ctrl._emerge_scratch == scratches, "a second bounce allocates nothing at all"
+    ctrl.relayout(pg.Rect(0, 0, 2 * _CELL, 2 * _CELL))
+    assert ctrl._emerge_scratch == {}, "every scratch was cut for the old sprite size"
+
+
+def _pop_window(pop):
+    # The visual window is the pop's own up-time plus the engine's grace: the body
+    # is on screen for exactly as long as the pop is hittable, never a beat more.
+    return pop.t_down_ms - pop.t_up_ms + MOLE_GRACE_MS
+
+
+def _bounce_track(ctrl, pop, steps=240):
+    window = _pop_window(pop)
+    return [(i / steps, ctrl._render_pop(pop.t_up_ms + window * i / steps))
+            for i in range(steps + 1)]
+
+
+def _bounce_heights(ctrl, pop, steps=240):
+    return [(u, 0.0 if frame is None else frame[1])
+            for u, frame in _bounce_track(ctrl, pop, steps)]
+
+
+def test_the_pop_never_stops_at_the_top_it_bounces_straight_back_down():
+    # The old pop rose over a fixed 140ms, HELD at full height until t_down and
+    # only then retreated — a flat plateau that made every pop feel identical and
+    # dead at the top. It is one continuous arc now: out to the apex, straight
+    # back into the hole, no hold anywhere in the window.
     ctrl = _mole()
-    pops = ctrl.challenge.pops
-    rising = [ctrl._render_pop(pops[0].t_up_ms + MOLE_VIEW_RISE_MS * f)[1]
-              for f in (0.25, 0.5, 0.75, 1.0)]
-    sinking = [ctrl._render_pop(pops[0].t_down_ms + MOLE_VIEW_RETREAT_MS * f)[1]
-               for f in (0.25, 0.5, 0.75)]
-    assert rising[0] < rising[1], "the climb accelerates out of the hole"
-    assert 1.0 < max(rising) <= MOLE_VIEW_POP_LIFT_CAP, \
-        "full height is not the ceiling — the back-ease still bounces off it"
-    assert rising[-1] == pytest.approx(1.0), "and settles on exactly whole"
-    assert sinking == sorted(sinking, reverse=True), "and the retreat is the same walk, reversed"
-    for height in sinking:
-        assert ctrl._emergence_dy(height) == ctrl._emergence_dy(min(height, 1.0)), \
-            "both directions read the anchor off the same height fraction"
-    assert ctrl._render_pop(pops[0].t_down_ms + MOLE_VIEW_RETREAT_MS) is None
+    pop = ctrl.challenge.pops[0]
+    track = _bounce_heights(ctrl, pop)
+    up = [h for u, h in track if u <= MOLE_VIEW_POP_APEX_FRAC]
+    down = [h for u, h in track if u >= MOLE_VIEW_POP_APEX_FRAC]
+    assert all(b > a for a, b in zip(up, up[1:])), "the climb only ever climbs"
+    assert all(b < a for a, b in zip(down, down[1:])), "and the fall only ever falls"
+    peak = max(h for _, h in track)
+    assert [h for _, h in track].count(peak) == 1, \
+        "exactly one frame is at the top — a second one would be a hold"
+
+
+def test_the_apex_lands_on_the_knob_fraction_at_a_touch_past_whole():
+    assert 0.0 < MOLE_VIEW_POP_APEX_FRAC < 0.5, \
+        "the apex is early in the window: a fast punch out, a long fall back"
+    assert MOLE_VIEW_POP_OVERSHOOT > MOLE_VIEW_POP_HEIGHT_FRAC, \
+        "the body clears the lip and lifts off it, it does not stop flush with the ground"
+    assert MOLE_VIEW_POP_OVERSHOOT <= MOLE_VIEW_POP_LIFT_CAP, \
+        "and the lift cap still bounds whatever the curve asks for"
+    ctrl = _mole()
+    pop = ctrl.challenge.pops[0]
+    apex = MOLE_VIEW_POP_HEIGHT_FRAC * MOLE_VIEW_POP_OVERSHOOT
+    at_apex = ctrl._render_pop(pop.t_up_ms + _pop_window(pop) * MOLE_VIEW_POP_APEX_FRAC)
+    assert at_apex[1] == pytest.approx(apex), "full height plus the overshoot, exactly there"
+    assert max(h for _, h in _bounce_heights(ctrl, pop)) == pytest.approx(apex), \
+        "and nothing in the window ever goes higher"
+
+
+def test_the_bounce_is_continuous_across_the_whole_window():
+    ctrl = _mole()
+    pop = ctrl.challenge.pops[0]
+    heights = [h for _, h in _bounce_heights(ctrl, pop, steps=int(_pop_window(pop)))]
+    assert heights[0] == 0.0, "it starts flush with the pit floor"
+    assert heights[-1] == 0.0, "and ends back in it"
+    apex = MOLE_VIEW_POP_HEIGHT_FRAC * MOLE_VIEW_POP_OVERSHOOT
+    steps = [abs(b - a) for a, b in zip(heights, heights[1:])]
+    assert max(steps) < apex * 0.02, \
+        "no millisecond of the arc teleports: biggest step is {}".format(max(steps))
+
+
+def test_the_pop_is_on_screen_for_exactly_as_long_as_it_is_hittable():
+    ctrl = _mole()
+    pop = ctrl.challenge.pops[0]
+    assert ctrl.challenge.pop_up_at(pop.t_down_ms + MOLE_GRACE_MS - 1) == 0
+    assert ctrl.challenge.pop_up_at(pop.t_down_ms + MOLE_GRACE_MS) is None
+    assert ctrl._render_pop(pop.t_down_ms + MOLE_GRACE_MS - 1) is not None, \
+        "the last hittable millisecond still shows something to shoot at"
+    assert ctrl._render_pop(pop.t_down_ms + MOLE_GRACE_MS) is None, \
+        "and the body is gone the instant the grace window closes"
+    assert ctrl._render_pop(pop.t_up_ms) is None, "nothing is drawn on the launch frame itself"
+
+
+def _front_rim_pixels(surf, ctrl, index):
+    accent = pg.Color(Colors.accent)
+    cx, cy = _hole_px(index)
+    return sum(1 for x in range(cx - ctrl._pit_rx, cx + ctrl._pit_rx + 1)
+               for y in range(cy, cy + ctrl._pit_ry + 1)
+               if surf.get_at((x, y))[:3] == (accent.r, accent.g, accent.b))
+
+
+def test_an_emerging_body_never_paints_over_the_rim_it_is_climbing_out_of():
+    # The mask is carved on the pit's dark MOUTH, not on its outer ellipse, so the
+    # accent rim in front of the hole survives every frame of the climb untouched
+    # — which is what the front-half repaint used to be there for.
+    ctrl = _mole(victim_surface=_solid_victim())
+    pop = ctrl.challenge.pops[0]
+    idle = _draw_at(ctrl, pop.t_down_ms + MOLE_GRACE_MS + 30)
+    assert ctrl._render_pop(pop.t_down_ms + MOLE_GRACE_MS + 30) is None, \
+        "the reference frame has no body over the hole at all"
+    bare = _front_rim_pixels(idle, ctrl, pop.hole)
+    assert bare > 0, "the rim really is painted there"
+    for frac in (0.05, 0.15, 0.6, 0.75, 0.9):
+        at = pop.t_up_ms + _pop_window(pop) * frac
+        assert ctrl._render_pop(at)[1] < MOLE_VIEW_POP_HEIGHT_FRAC, \
+            "every probe is a frame the mask owns, not one the front-half repaint does"
+        frame = _draw_at(ctrl, at)
+        assert _front_rim_pixels(frame, ctrl, pop.hole) == bare, \
+            "the body ate the near rim at {} of the window".format(frac)
+
+
+def _fall_rate(ctrl, pop):
+    window = _pop_window(pop)
+    late = MOLE_VIEW_POP_APEX_FRAC + (1.0 - MOLE_VIEW_POP_APEX_FRAC) / 2.0
+    a = ctrl._render_pop(pop.t_up_ms + window * late)[1]
+    b = ctrl._render_pop(pop.t_up_ms + window * late + 50.0)[1]
+    return (a - b) / 50.0
+
+
+def test_a_pop_with_a_longer_up_time_falls_slower_than_a_short_one():
+    # The window is the pop's own up-time, so the ramp the engine builds per piece
+    # value (and squeezes to fit a short deadline) shows up as pace: a queen's
+    # compressed pops snap back down, a pawn's linger.
+    slow = _mole(challenge=_challenge(pops=(MolePop(0, 100.0, 300.0, 1300.0),),
+                                      hits_required=1))
+    fast = _mole(challenge=_challenge(pops=(MolePop(0, 100.0, 300.0, 900.0),),
+                                      hits_required=1))
+    slow_rate = _fall_rate(slow, slow.challenge.pops[0])
+    fast_rate = _fall_rate(fast, fast.challenge.pops[0])
+    assert 0.0 < slow_rate < fast_rate, \
+        "a 1000ms pop drops at {} per ms, a 600ms one at {}".format(slow_rate, fast_rate)
+
+
+def test_the_body_squashes_at_the_launch_and_again_as_it_drops_back_in():
+    # The same compression the fail jump lands on: flattened while it is punching
+    # out of the hole and again as it slams back into it, upright at the apex.
+    ctrl = _mole()
+    pop = ctrl.challenge.pops[0]
+    frames = [f for _, f in _bounce_track(ctrl, pop) if f is not None]
+    launch = frames[0][2]
+    apex = ctrl._render_pop(pop.t_up_ms + _pop_window(pop) * MOLE_VIEW_POP_APEX_FRAC)[2]
+    landing = frames[-1][2]
+    assert launch == MOLE_VIEW_SQUASH_BUCKETS - 1, "fully compressed leaving the pit"
+    assert apex == 0, "and stretched out whole at the top"
+    assert landing == MOLE_VIEW_SQUASH_BUCKETS - 1, "compressed again on the way back in"
+    rising = [f[2] for u, f in _bounce_track(ctrl, pop)
+              if f is not None and u <= MOLE_VIEW_POP_APEX_FRAC]
+    assert rising == sorted(rising, reverse=True), "it unfolds as it climbs"
+
+
+def test_a_hit_ducks_the_mole_from_wherever_the_bounce_had_it():
+    # The duck is an interrupt: whatever height the arc was at when the slug
+    # landed is where the retreat starts. Snapping to full height first would
+    # yank the body UP on a hit.
+    ctrl = _mole()
+    pop = ctrl.challenge.pops[0]
+    at = pop.t_up_ms + _pop_window(pop) * 0.75
+    mid_fall = ctrl._render_pop(at)[1]
+    assert 0.0 < mid_fall < MOLE_VIEW_POP_HEIGHT_FRAC, "the shot lands on a sinking mole"
+    ctrl.update(int(at))
+    ctrl.handle_event(_click(_hole_px(0)))
+    assert ctrl._progress == 1
+    assert ctrl._last_hit_height == pytest.approx(mid_fall)
+    assert ctrl._render_pop(at)[1] == pytest.approx(mid_fall), \
+        "the duck picks the body up exactly where the bounce dropped it"
+    ctrl.update(int(at + MOLE_VIEW_HITSTOP_HIT_MS / 2))
+    assert ctrl._render_pop(at)[1] == pytest.approx(mid_fall), \
+        "the hit freeze holds that frame — it never rewinds the body upward"
+    heights = [mid_fall]
+    for f in (0.4, 0.7):
+        ctrl.update(int(at + MOLE_VIEW_HITSTOP_HIT_MS + MOLE_VIEW_RETREAT_MS * f))
+        heights.append(ctrl._render_pop(at)[1])
+    assert all(b < a for a, b in zip(heights, heights[1:])), \
+        "and then drives it straight into the hole: {}".format(heights)
+    ctrl.update(int(at + MOLE_VIEW_HITSTOP_HIT_MS + MOLE_VIEW_RETREAT_MS))
+    assert ctrl._render_pop(at) is None, "gone one duck later, long before the window ends"
+
+
+def test_the_duck_outruns_the_bounce_it_interrupted():
+    assert MOLE_VIEW_RETREAT_MS < _pop_window(_POPS[0]) * (1.0 - MOLE_VIEW_POP_APEX_FRAC), \
+        "a hit mole has to vanish faster than one that simply fell back on its own"
 
 
 def _jump_bottoms(ctrl, step_ms=4.0):
@@ -1815,7 +2312,11 @@ def _lip_spy(monkeypatch):
     return seen
 
 
-def test_pops_and_the_climb_out_wear_the_pit_lip_but_the_landed_piece_does_not(monkeypatch):
+def test_pops_and_the_climb_out_belong_to_a_pit_but_the_landed_piece_does_not(monkeypatch):
+    # The flag says "this body is in a hole, keep the near rim in front of it".
+    # A body standing at full height gets the front half repainted over it; an
+    # emerging one is cut by the mouth arc instead, which is strictly inside the
+    # rim — same intent, and the pixel proof is the rim test below.
     seen = _lip_spy(monkeypatch)
     surf = pg.Surface((640, 640))
     ctrl = _mole()

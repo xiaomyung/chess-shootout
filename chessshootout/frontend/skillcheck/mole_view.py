@@ -6,28 +6,31 @@ import pygame as pg
 from chessshootout.backend.utils import BOARD_SIZE, Square
 from chessshootout.frontend.skillcheck.controller import SkillCheckController
 from chessshootout.frontend.skillcheck.juice import (
-    Trauma, Hitstop, sakurai_vibrate, ease_out_back, torn_sprite, flash_sprite,
-    TORN_MAX_TIER)
+    Trauma, Hitstop, sakurai_vibrate, torn_sprite, flash_sprite, TORN_MAX_TIER)
 from chessshootout.frontend.visual.cache import new_size_cache, memoized_surface
 from chessshootout.frontend.visual.colors import Colors
-from chessshootout.frontend.visual.draw import cosine_pulse, rounded_rect_surface, supersample
+from chessshootout.frontend.visual.draw import (
+    SUPERSAMPLE, cosine_pulse, rounded_rect_surface, supersample)
 from chessshootout.frontend.visual.tween import out_cubic
 from chessshootout.infra import env
 from chessshootout.skillcheck.mole import (
-    MOLE_HITBOX_CY_FRAC, MOLE_HITBOX_RX_FRAC, MOLE_HITBOX_RY_FRAC, MOLE_INTRO_MS,
-    MOLE_RECOIL_LOCKOUT_MS)
+    MOLE_GRACE_MS, MOLE_HITBOX_CY_FRAC, MOLE_HITBOX_RX_FRAC, MOLE_HITBOX_RY_FRAC,
+    MOLE_INTRO_MS, MOLE_RECOIL_LOCKOUT_MS)
 from chessshootout.skillcheck.rng import seeded_floats
 
 MOLE_VIEW_FAIL_HOLD_MS = 1250
 MOLE_VIEW_HOLE_STAGGER_MS = 40.0
 MOLE_VIEW_HOLE_OPEN_MS = 160.0
-MOLE_VIEW_RISE_MS = 140.0
 MOLE_VIEW_RETREAT_MS = 160.0
 MOLE_VIEW_POP_HEIGHT_FRAC = 1.0
+MOLE_VIEW_POP_OVERSHOOT = 1.08
+MOLE_VIEW_POP_APEX_FRAC = 0.30
 MOLE_VIEW_POP_LIFT_CAP = 1.2
 MOLE_VIEW_PIT_RX_FRAC = 0.42
 MOLE_VIEW_PIT_RY_FRAC = 0.24
 MOLE_VIEW_PIT_RIM_FRAC = 0.14
+MOLE_VIEW_PIT_INSET_FRAC = 0.06
+MOLE_VIEW_EMERGE_FADE_FRAC = 0.35
 MOLE_VIEW_PIT_GLOW_ALPHA = 60
 MOLE_VIEW_PIT_CLOSE_MS = 160.0
 MOLE_VIEW_PULSE_MS = 420
@@ -39,13 +42,24 @@ MOLE_VIEW_DANGER_RIM_SCALE = 1.6
 MOLE_VIEW_SQUASH_BUCKETS = 4
 MOLE_VIEW_SQUASH_X = 0.28
 MOLE_VIEW_SQUASH_Y = 0.38
-MOLE_VIEW_CROSS_ARM_FRAC = 0.16
+MOLE_VIEW_CROSS_ARM_FRAC = 0.19
 MOLE_VIEW_CROSS_GAP_FRAC = 0.05
-MOLE_VIEW_CROSS_RING_FRAC = 0.09
 MOLE_VIEW_CROSS_LW_FRAC = 0.024
+MOLE_VIEW_CROSS_BLADE_W_FRAC = 0.11
+MOLE_VIEW_CROSS_TIP_W_FRAC = 0.035
+MOLE_VIEW_CROSS_ARC_PAD_FRAC = 0.42
+MOLE_VIEW_CROSS_ARC_W_FRAC = 0.9
+MOLE_VIEW_CROSS_ARC_SPAN_DEG = 55.0
+MOLE_VIEW_CROSS_ARC_SEGS = 24
+MOLE_VIEW_CROSS_DOT_FRAC = 0.18
+MOLE_VIEW_CROSS_GLOW_FRAC = 0.16
+MOLE_VIEW_CROSS_GLOW_GAIN = 0.30
 MOLE_VIEW_CROSS_OUT_MS = 120.0
 MOLE_VIEW_CROSS_OUT_SCALE = 0.72
-MOLE_VIEW_BLOOM_FRAC = 0.10
+MOLE_VIEW_CROSS_OUT_BUCKETS = 6
+MOLE_VIEW_BLOOM_BUCKETS = 8
+MOLE_VIEW_BLOOM_SPREAD_FRAC = 0.62
+MOLE_VIEW_BLOOM_SPIN_DEG = 30.0
 MOLE_VIEW_KICK_FRAC = 0.12
 MOLE_VIEW_KICK_MS = 140.0
 MOLE_VIEW_MUZZLE_MS = 90.0
@@ -139,6 +153,11 @@ class MoleToss(typing.NamedTuple):
 
 _PIT_DARK = pg.Color(Colors.well_deep)
 _CROSS_COLOR = pg.Color(Colors.text)
+_CROSS_EDGE = pg.Color(Colors.bg)
+_CROSS_ARC = pg.Color(Colors.accent)
+_CROSS_ARC_HOT = pg.Color(Colors.amber_hi)
+_CROSS_DOT = pg.Color(Colors.amber_hi)
+_CROSS_GLOW = pg.Color(Colors.accent)
 _IMPACT_COLOR = pg.Color(Colors.spectate)
 _HITBOX_COLOR = pg.Color(Colors.spectate)
 _HITBOX_ACTIVE_COLOR = pg.Color(Colors.win)
@@ -146,6 +165,10 @@ _DUST_COLORS = (pg.Color(Colors.text_dim), pg.Color(Colors.text_muted), pg.Color
 _DEBRIS_COLORS = (pg.Color(Colors.amber_hi), pg.Color(Colors.accent_hi), pg.Color(Colors.amber))
 
 _AXES = ((1, 0), (-1, 0), (0, 1), (0, -1))
+
+_POP_APEX = MOLE_VIEW_POP_HEIGHT_FRAC * MOLE_VIEW_POP_OVERSHOOT
+_CLEAR = (0, 0, 0, 0)
+_KEEP = (255, 255, 255)
 
 _MOLE_STATIC_CACHE = new_size_cache()
 
@@ -156,7 +179,8 @@ def _pit_render(rim_color, glow_alpha, rim_scale=1.0):
         rim = pg.Color(rim_color)
         glow = pg.Color(rim.r, rim.g, rim.b, glow_alpha)
         pg.draw.ellipse(surf, glow, pg.Rect(0, 0, w, h))
-        inset_x, inset_y = int(w * 0.06), int(h * 0.06)
+        inset_x = int(w * MOLE_VIEW_PIT_INSET_FRAC)
+        inset_y = int(h * MOLE_VIEW_PIT_INSET_FRAC)
         outer = pg.Rect(inset_x, inset_y, w - 2 * inset_x, h - 2 * inset_y)
         pg.draw.ellipse(surf, rim, outer)
         rim_w = max(int(outer.height * MOLE_VIEW_PIT_RIM_FRAC * rim_scale), 1)
@@ -169,6 +193,29 @@ def _pit_surface(rx, ry):
         return supersample((2 * rx, 2 * ry),
                            _pit_render(Colors.accent, MOLE_VIEW_PIT_GLOW_ALPHA))
     return memoized_surface(_MOLE_STATIC_CACHE, ("pit", rx, ry), build)
+
+
+def _pit_mouth(rx, ry):
+    w, h = 2 * rx * SUPERSAMPLE, 2 * ry * SUPERSAMPLE
+    inset_x = int(w * MOLE_VIEW_PIT_INSET_FRAC)
+    inset_y = int(h * MOLE_VIEW_PIT_INSET_FRAC)
+    rim = max(int((h - 2 * inset_y) * MOLE_VIEW_PIT_RIM_FRAC), 1)
+    return (max((w // 2 - inset_x - rim) // SUPERSAMPLE, 1),
+            max((h // 2 - inset_y - rim) // SUPERSAMPLE, 1))
+
+
+def _emerge_mask(w, rx, ry, fade):
+    def build():
+        mask = pg.Surface((w, ry + fade + 1), pg.SRCALPHA)
+        half = w / 2.0
+        for x in range(w):
+            dx = abs(x + 0.5 - half) / rx
+            arc = round(ry * math.sqrt(1.0 - dx * dx)) if dx < 1.0 else 0
+            mask.fill(_KEEP, (x, 0, 1, arc))
+            for i in range(fade):
+                mask.fill((*_KEEP, int(255 * (1.0 - (i + 1) / fade))), (x, arc + i, 1, 1))
+        return mask
+    return memoized_surface(_MOLE_STATIC_CACHE, ("emerge", w, rx, ry, fade), build)
 
 
 def _pit_front_surface(rx, ry):
@@ -216,16 +263,75 @@ def _seam_glow_surface(w, h):
     return memoized_surface(_MOLE_STATIC_CACHE, ("seamglow", w, h), build)
 
 
-def _crosshair_surface(arm, gap, ring, lw):
+def _cross_blade_points(c, ux, uy, inner, outer, tip_half, base_half):
+    px, py = -uy, ux
+    return ((c + ux * inner + px * tip_half, c + uy * inner + py * tip_half),
+            (c + ux * outer + px * base_half, c + uy * outer + py * base_half),
+            (c + ux * outer - px * base_half, c + uy * outer - py * base_half),
+            (c + ux * inner - px * tip_half, c + uy * inner - py * tip_half))
+
+
+def _cross_arc_points(c, r_in, r_out, a0, a1):
+    segs = MOLE_VIEW_CROSS_ARC_SEGS
+    angles = [a0 + (a1 - a0) * i / segs for i in range(segs + 1)]
+    outer = [(c + r_out * math.cos(a), c + r_out * math.sin(a)) for a in angles]
+    inner = [(c + r_in * math.cos(a), c + r_in * math.sin(a)) for a in reversed(angles)]
+    return outer + inner
+
+
+def _render_cross_blades(surf, k, c, gap, arm, tip_half, base_half):
+    for ux, uy in _AXES:
+        pg.draw.polygon(surf, _CROSS_EDGE, _cross_blade_points(
+            c, ux, uy, gap * k - k, (gap + arm) * k + k,
+            tip_half * k + k, base_half * k + k))
+    for ux, uy in _AXES:
+        pg.draw.polygon(surf, _CROSS_COLOR, _cross_blade_points(
+            c, ux, uy, gap * k, (gap + arm) * k, tip_half * k, base_half * k))
+
+
+def _crosshair_surface(arm, gap, lw, bloom_bucket, out_bucket):
     def build():
-        reach = gap + arm
-        surf = pg.Surface((2 * reach + 1, 2 * reach + 1), pg.SRCALPHA)
-        for dx, dy in _AXES:
-            pg.draw.line(surf, _CROSS_COLOR, (reach + dx * gap, reach + dy * gap),
-                         (reach + dx * reach, reach + dy * reach), lw)
-        pg.draw.circle(surf, _CROSS_COLOR, (reach, reach), ring, lw)
+        bloom = bloom_bucket / MOLE_VIEW_BLOOM_BUCKETS
+        s = (1.0 - (1.0 - MOLE_VIEW_CROSS_OUT_SCALE)
+             * out_bucket / MOLE_VIEW_CROSS_OUT_BUCKETS)
+        a = max(arm * s, 2.0)
+        g = (gap + arm * MOLE_VIEW_BLOOM_SPREAD_FRAC * bloom) * s
+        stroke = max(lw * s, 1.0)
+        tip_half = max(a * MOLE_VIEW_CROSS_TIP_W_FRAC, 0.5) / 2.0
+        base_half = max(a * MOLE_VIEW_CROSS_BLADE_W_FRAC, 2.0) / 2.0
+        arc_r = g + a + max(a * MOLE_VIEW_CROSS_ARC_PAD_FRAC, 2.0)
+        arc_w = max(stroke * MOLE_VIEW_CROSS_ARC_W_FRAC, 1.0)
+        dot_r = max(a * MOLE_VIEW_CROSS_DOT_FRAC, 1.6)
+        spin = math.radians(MOLE_VIEW_BLOOM_SPIN_DEG * bloom)
+        span = math.radians(MOLE_VIEW_CROSS_ARC_SPAN_DEG)
+        arc_col = _CROSS_ARC.lerp(_CROSS_ARC_HOT, bloom)
+        reach = int(math.ceil(arc_r + arc_w)) + 2
+
+        def render(surf, k):
+            c = surf.get_width() / 2.0
+            _render_cross_blades(surf, k, c, g, a, tip_half, base_half)
+            for i in range(4):
+                mid = math.pi / 4.0 + i * math.pi / 2.0 + spin
+                pg.draw.polygon(surf, arc_col, _cross_arc_points(
+                    c, (arc_r - arc_w / 2.0) * k, (arc_r + arc_w / 2.0) * k,
+                    mid - span / 2.0, mid + span / 2.0))
+            pg.draw.circle(surf, _CROSS_EDGE, (c, c), dot_r * k + k)
+            pg.draw.circle(surf, _CROSS_DOT, (c, c), dot_r * k)
+        return supersample(2 * reach + 1, render)
+    key = ("cross", arm, gap, lw, bloom_bucket, out_bucket)
+    return memoized_surface(_MOLE_STATIC_CACHE, key, build)
+
+
+def _cross_glow_surface(r):
+    def build():
+        surf = pg.Surface((2 * r, 2 * r))
+        for i in range(r, 0, -1):
+            gain = (1.0 - i / r) ** 2 * MOLE_VIEW_CROSS_GLOW_GAIN
+            col = (int(_CROSS_GLOW.r * gain), int(_CROSS_GLOW.g * gain),
+                   int(_CROSS_GLOW.b * gain))
+            pg.draw.circle(surf, col, (r, r), i)
         return surf
-    return memoized_surface(_MOLE_STATIC_CACHE, ("cross", arm, gap, ring, lw), build)
+    return memoized_surface(_MOLE_STATIC_CACHE, ("crossglow", r), build)
 
 
 def _danger_render(bucket):
@@ -328,6 +434,7 @@ class MoleController(SkillCheckController):
         self._victim_cache = {}
         self._squash_cache = {}
         self._heal_cache = {}
+        self._emerge_scratch = {}
         self._progress = progress
         self._torn_key = hash(challenge.pops)
         self._last_hit_pop = -1
@@ -335,6 +442,7 @@ class MoleController(SkillCheckController):
             resumed = challenge.pop_up_at(pg.time.get_ticks() - now_ms)
             self._last_hit_pop = resumed if resumed is not None else -1
         self._last_hit_anim_ms = None
+        self._last_hit_height = 0.0
         self._last_hit_px = None
         self._reset_effects(cell_rect.center)
         self._committed_at = None
@@ -384,9 +492,10 @@ class MoleController(SkillCheckController):
         self._hole_px = self._hole_centers()
         self._pit_rx = max(int(cell * MOLE_VIEW_PIT_RX_FRAC), 6)
         self._pit_ry = max(int(cell * MOLE_VIEW_PIT_RY_FRAC), 4)
+        self._mouth_rx, self._mouth_ry = _pit_mouth(self._pit_rx, self._pit_ry)
+        self._emerge_fade = max(int(self._mouth_ry * MOLE_VIEW_EMERGE_FADE_FRAC), 2)
         self._cross_arm = max(int(cell * MOLE_VIEW_CROSS_ARM_FRAC), 4)
         self._cross_gap = max(int(cell * MOLE_VIEW_CROSS_GAP_FRAC), 2)
-        self._cross_ring = max(int(cell * MOLE_VIEW_CROSS_RING_FRAC), 3)
         self._cross_lw = max(round(cell * MOLE_VIEW_CROSS_LW_FRAC), 1)
         self._kick_amp = cell * MOLE_VIEW_KICK_FRAC
         self._pip_w = max(int(cell * MOLE_VIEW_PIP_W_FRAC), 4)
@@ -394,6 +503,7 @@ class MoleController(SkillCheckController):
         self._pip_gap = max(int(cell * MOLE_VIEW_PIP_GAP_FRAC), 2)
         self._squash_cache.clear()
         self._heal_cache.clear()
+        self._emerge_scratch.clear()
 
     def _scaled_victim(self, new_cell):
         if new_cell == self._victim_orig_cell:
@@ -483,8 +593,7 @@ class MoleController(SkillCheckController):
 
     def _register_hit(self, elapsed, shot_px):
         idx = self.challenge.pop_up_at(elapsed)
-        self._last_hit_pop = idx
-        self._last_hit_anim_ms = self._anim_ms
+        self._duck_pop(idx, elapsed)
         hole = self.challenge.pops[idx].hole
         if hole < len(self._hole_px):
             self._last_hit_px = self._hole_px[hole]
@@ -580,8 +689,7 @@ class MoleController(SkillCheckController):
                 self._last_hit_px = px
             idx = self.challenge.pop_up_at(elapsed)
             if idx is not None:
-                self._last_hit_pop = idx
-                self._last_hit_anim_ms = self._anim_ms
+                self._duck_pop(idx, elapsed)
             kill = progress >= self.challenge.hits_required
             self._hit_juice(kill)
             self._emit_hit_px(px, kill)
@@ -850,19 +958,32 @@ class MoleController(SkillCheckController):
         cx = center_px[0] + group[0] + int(vib)
         ground = self._emergence_dy(height_frac) if ground_dy is None else ground_dy
         base_y = center_px[1] + group[1] + ground
-        if height_frac >= 1.0:
-            lift = int((min(height_frac, MOLE_VIEW_POP_LIFT_CAP) - 1.0) * h + lift_px)
-            rect = pg.Rect(cx - w // 2, base_y - h - lift, w, h)
-            window.blit(sprite, rect)
-        else:
+        if height_frac < 1.0:
             clip_h = max(int(h * height_frac), 1)
             rect = pg.Rect(cx - w // 2, base_y - clip_h, w, clip_h)
-            window.blit(sprite, rect, area=pg.Rect(0, 0, w, clip_h))
+            window.blit(self._emerging_sprite(sprite, clip_h - ground), rect.topleft)
+            return rect
+        lift = int((min(height_frac, MOLE_VIEW_POP_LIFT_CAP) - 1.0) * h + lift_px)
+        rect = pg.Rect(cx - w // 2, base_y - h - lift, w, h)
+        window.blit(sprite, rect)
         if lip:
             front = _pit_front_surface(self._pit_rx, self._pit_ry)
             window.blit(front, (center_px[0] + group[0] - front.get_width() // 2,
                                 center_px[1] + group[1]))
         return rect
+
+    def _emerging_sprite(self, sprite, cut):
+        w, h = sprite.get_size()
+        scratch = self._emerge_scratch.get((w, h))
+        if scratch is None:
+            scratch = pg.Surface((w, h), pg.SRCALPHA)
+            self._emerge_scratch[(w, h)] = scratch
+        scratch.fill(_CLEAR)
+        scratch.blit(sprite, (0, 0), special_flags=pg.BLEND_RGBA_MAX)
+        scratch.fill(_CLEAR, (0, max(cut + self._mouth_ry, 0), w, h))
+        scratch.blit(_emerge_mask(w, self._mouth_rx, self._mouth_ry, self._emerge_fade),
+                     (0, cut - self._emerge_fade), special_flags=pg.BLEND_RGBA_MULT)
+        return scratch
 
     def _emergence_dy(self, height_frac):
         return int(self._pit_ry * (1.0 - min(height_frac, 1.0)))
@@ -994,11 +1115,28 @@ class MoleController(SkillCheckController):
             pg.draw.circle(window, _DEBRIS_COLORS[i % len(_DEBRIS_COLORS)],
                            (int(x), int(y)), r)
 
-    def _retreat_frame(self, idx, rt):
-        if rt >= 1.0:
+    @staticmethod
+    def _bounce_height(pop, elapsed):
+        window = pop.t_down_ms - pop.t_up_ms + MOLE_GRACE_MS
+        u = (elapsed - pop.t_up_ms) / window
+        if u <= 0.0 or u >= 1.0:
+            return 0.0
+        if u < MOLE_VIEW_POP_APEX_FRAC:
+            return _POP_APEX * out_cubic(u / MOLE_VIEW_POP_APEX_FRAC)
+        fall = (u - MOLE_VIEW_POP_APEX_FRAC) / (1.0 - MOLE_VIEW_POP_APEX_FRAC)
+        return _POP_APEX * (1.0 - fall * fall)
+
+    @staticmethod
+    def _pop_frame(idx, height):
+        if height <= 0.0:
             return None
-        bucket = min(int(rt * MOLE_VIEW_SQUASH_BUCKETS), MOLE_VIEW_SQUASH_BUCKETS - 1)
-        return idx, MOLE_VIEW_POP_HEIGHT_FRAC * (1.0 - rt), bucket
+        bucket = int((1.0 - height / _POP_APEX) * MOLE_VIEW_SQUASH_BUCKETS)
+        return idx, height, min(bucket, MOLE_VIEW_SQUASH_BUCKETS - 1)
+
+    def _duck_pop(self, idx, elapsed):
+        self._last_hit_pop = idx
+        self._last_hit_anim_ms = self._anim_ms
+        self._last_hit_height = self._bounce_height(self.challenge.pops[idx], elapsed)
 
     def _render_pop(self, elapsed):
         idx = None
@@ -1007,14 +1145,10 @@ class MoleController(SkillCheckController):
                 idx = i
         if idx is None:
             return None
-        pop = self.challenge.pops[idx]
         if idx == self._last_hit_pop and self._last_hit_anim_ms is not None:
-            return self._retreat_frame(
-                idx, (self._anim_ms - self._last_hit_anim_ms) / MOLE_VIEW_RETREAT_MS)
-        if elapsed < pop.t_down_ms:
-            rise = min((elapsed - pop.t_up_ms) / MOLE_VIEW_RISE_MS, 1.0)
-            return idx, MOLE_VIEW_POP_HEIGHT_FRAC * ease_out_back(rise), 0
-        return self._retreat_frame(idx, (elapsed - pop.t_down_ms) / MOLE_VIEW_RETREAT_MS)
+            duck = (self._anim_ms - self._last_hit_anim_ms) / MOLE_VIEW_RETREAT_MS
+            return self._pop_frame(idx, self._last_hit_height * (1.0 - duck))
+        return self._pop_frame(idx, self._bounce_height(self.challenge.pops[idx], elapsed))
 
     def _draw_victim(self, window, elapsed, group):
         if self._victim is None:
@@ -1107,7 +1241,7 @@ class MoleController(SkillCheckController):
             window.blit(surf, (int(x) - surf.get_width() // 2,
                                int(y) - surf.get_height() // 2))
             if alpha < 255:
-                surf.set_alpha(None)
+                surf.set_alpha(255)
 
     @staticmethod
     def _casing_alpha(ground_ms):
@@ -1156,27 +1290,24 @@ class MoleController(SkillCheckController):
             t = self._now - self._flash_ms
             if t < MOLE_VIEW_KICK_MS:
                 my -= int(self._kick_amp * (1.0 - t / MOLE_VIEW_KICK_MS))
-        arm, gap, lw = self._cross_arm, self._cross_gap, self._cross_lw
+        bloom = 0.0
         if self._last_shot_ms is not None:
             t = self._now - self._last_shot_ms
             if t < MOLE_RECOIL_LOCKOUT_MS:
-                gap += int(self.cell_size * MOLE_VIEW_BLOOM_FRAC
-                           * (1.0 - t / MOLE_RECOIL_LOCKOUT_MS))
+                bloom = 1.0 - t / MOLE_RECOIL_LOCKOUT_MS
+        if fade >= 1.0:
+            glow = _cross_glow_surface(
+                max(int(self.cell_size * MOLE_VIEW_CROSS_GLOW_FRAC), 6))
+            window.blit(glow, (mx - glow.get_width() // 2, my - glow.get_height() // 2),
+                        special_flags=pg.BLEND_RGB_ADD)
+        surf = _crosshair_surface(self._cross_arm, self._cross_gap, self._cross_lw,
+                                  round(bloom * MOLE_VIEW_BLOOM_BUCKETS),
+                                  round((1.0 - fade) * MOLE_VIEW_CROSS_OUT_BUCKETS))
         if fade < 1.0:
-            self._blit_crosshair_out(window, mx, my, arm, gap, lw, fade)
-            return
-        for dx, dy in _AXES:
-            pg.draw.line(window, _CROSS_COLOR, (mx + dx * gap, my + dy * gap),
-                         (mx + dx * (gap + arm), my + dy * (gap + arm)), lw)
-        pg.draw.circle(window, _CROSS_COLOR, (mx, my), self._cross_ring, lw)
-
-    def _blit_crosshair_out(self, window, mx, my, arm, gap, lw, fade):
-        scale = MOLE_VIEW_CROSS_OUT_SCALE + (1.0 - MOLE_VIEW_CROSS_OUT_SCALE) * fade
-        surf = _crosshair_surface(max(int(arm * scale), 1), max(int(gap * scale), 1),
-                                  max(int(self._cross_ring * scale), 1), lw)
-        surf.set_alpha(int(255 * fade))
+            surf.set_alpha(int(255 * fade))
         window.blit(surf, (mx - surf.get_width() // 2, my - surf.get_height() // 2))
-        surf.set_alpha(None)
+        if fade < 1.0:
+            surf.set_alpha(255)
 
     def _draw_hitboxes(self, window, elapsed):
         if self._affine is None:
@@ -1217,4 +1348,4 @@ class MoleController(SkillCheckController):
                 surf.set_alpha(alpha)
             window.blit(surf, (x + i * (w + gap), y))
             if alpha < 255:
-                surf.set_alpha(None)
+                surf.set_alpha(255)
