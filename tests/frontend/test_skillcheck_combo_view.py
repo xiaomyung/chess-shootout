@@ -848,16 +848,20 @@ def test_exit_fade_lifts_arrows_pad_and_pips_in_sync_with_the_chips():
 
 
 def test_chip_surfaces_allocate_nothing_per_frame():
+    # Warm through the intro stagger first: every chip variant materializes in
+    # the cache during those frames, so the test self-primes and holds in any
+    # worker regardless of which tests ran before it (xdist scheduling).
     ctrl = _combo_scene(_PROMPTS, 99)
     surf = pg.Surface((700, 700), pg.SRCALPHA)
-    ctrl.update(16)
-    ctrl.draw(surf)
-    chip = _chip_surface(ctrl._chip, ctrl._chip_cut, _CHIP_NEXT)
-    size = len(_CHIP_CACHE)
-    for i in range(2, 60):
+    for i in range(1, 30):
         ctrl.update(i * 16)
         ctrl.draw(surf)
-    assert len(_CHIP_CACHE) == size, "60 frames must not add a single cache entry"
+    chip = _chip_surface(ctrl._chip, ctrl._chip_cut, _CHIP_NEXT)
+    size = len(_CHIP_CACHE)
+    for i in range(30, 90):
+        ctrl.update(i * 16)
+        ctrl.draw(surf)
+    assert len(_CHIP_CACHE) == size, "steady state must not add a single cache entry"
     assert _chip_surface(ctrl._chip, ctrl._chip_cut, _CHIP_NEXT) is chip
 
 
