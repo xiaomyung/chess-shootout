@@ -6,11 +6,16 @@ import pygame as pg
 from chessshootout.backend.utils import BOARD_SIZE, Square
 from chessshootout.frontend.skillcheck.controller import SkillCheckController
 from chessshootout.frontend.skillcheck.juice import (
-    Trauma, Hitstop, sakurai_vibrate, torn_sprite, flash_sprite, TORN_MAX_TIER)
-from chessshootout.frontend.visual.cache import new_size_cache, memoized_surface
+    Trauma, Hitstop, expire_particles, particle_ages, sakurai_vibrate, torn_sprite,
+    flash_sprite, TORN_MAX_TIER)
+from chessshootout.frontend.skillcheck.mole_art import (
+    MOLE_VIEW_BLOOM_BUCKETS, MOLE_VIEW_CASING_SPIN_BUCKET_DEG, MOLE_VIEW_CROSS_OUT_BUCKETS,
+    MOLE_VIEW_PULSE_BUCKETS, _PIT_DARK, _casing_rotated, _cross_glow_surface,
+    _crosshair_surface, _emerge_mask, _muzzle_surface, _pit_front_surface, _pit_mouth,
+    _pit_surface, _pit_telegraph_surface, _seam_band_surface, _seam_glow_surface,
+    _strike_cross_surface, _win_pop_surface)
 from chessshootout.frontend.visual.colors import Colors
-from chessshootout.frontend.visual.draw import (
-    SUPERSAMPLE, cosine_pulse, rounded_rect_surface, supersample)
+from chessshootout.frontend.visual.draw import cosine_pulse, rounded_rect_surface
 from chessshootout.frontend.visual.tween import out_cubic
 from chessshootout.infra import env
 from chessshootout.skillcheck.mole import (
@@ -28,44 +33,23 @@ MOLE_VIEW_POP_APEX_FRAC = 0.30
 MOLE_VIEW_POP_LIFT_CAP = 1.2
 MOLE_VIEW_PIT_RX_FRAC = 0.42
 MOLE_VIEW_PIT_RY_FRAC = 0.24
-MOLE_VIEW_PIT_RIM_FRAC = 0.14
-MOLE_VIEW_PIT_INSET_FRAC = 0.06
 MOLE_VIEW_EMERGE_FADE_FRAC = 0.35
-MOLE_VIEW_PIT_GLOW_ALPHA = 60
 MOLE_VIEW_PIT_CLOSE_MS = 160.0
 MOLE_VIEW_PULSE_MS = 420
-MOLE_VIEW_PULSE_BUCKETS = 6
-MOLE_VIEW_TELE_WHITE_MIN = 0.35
-MOLE_VIEW_TELE_ALPHA_GAIN = 0.5
 MOLE_VIEW_DANGER_PULSE_MS = 200
 MOLE_VIEW_DANGER_SWITCH = 0.5
-MOLE_VIEW_DANGER_RIM_SCALE = 1.6
 MOLE_VIEW_SQUASH_BUCKETS = 4
 MOLE_VIEW_SQUASH_X = 0.28
 MOLE_VIEW_SQUASH_Y = 0.38
 MOLE_VIEW_CROSS_ARM_FRAC = 0.19
 MOLE_VIEW_CROSS_GAP_FRAC = 0.05
 MOLE_VIEW_CROSS_LW_FRAC = 0.024
-MOLE_VIEW_CROSS_BLADE_W_FRAC = 0.11
-MOLE_VIEW_CROSS_TIP_W_FRAC = 0.035
-MOLE_VIEW_CROSS_ARC_PAD_FRAC = 0.42
-MOLE_VIEW_CROSS_ARC_W_FRAC = 0.9
-MOLE_VIEW_CROSS_ARC_SPAN_DEG = 55.0
-MOLE_VIEW_CROSS_ARC_SEGS = 24
-MOLE_VIEW_CROSS_DOT_FRAC = 0.18
 MOLE_VIEW_CROSS_GLOW_FRAC = 0.16
-MOLE_VIEW_CROSS_GLOW_GAIN = 0.30
 MOLE_VIEW_CROSS_OUT_MS = 120.0
-MOLE_VIEW_CROSS_OUT_SCALE = 0.72
-MOLE_VIEW_CROSS_OUT_BUCKETS = 6
-MOLE_VIEW_BLOOM_BUCKETS = 8
-MOLE_VIEW_BLOOM_SPREAD_FRAC = 0.62
-MOLE_VIEW_BLOOM_SPIN_DEG = 30.0
 MOLE_VIEW_KICK_FRAC = 0.12
 MOLE_VIEW_KICK_MS = 140.0
 MOLE_VIEW_MUZZLE_MS = 90.0
 MOLE_VIEW_MUZZLE_FRAC = 0.34
-MOLE_VIEW_MUZZLE_RAY_W_DIV = 6
 MOLE_VIEW_HIT_FLASH_MS = 90.0
 MOLE_VIEW_TRAUMA_PER_HIT = 0.3
 MOLE_VIEW_TRAUMA_OFFSET_FRAC = 0.10
@@ -74,7 +58,6 @@ MOLE_VIEW_HITSTOP_KILL_MS = 200.0
 MOLE_VIEW_VIBRATE_AMP_FRAC = 0.05
 MOLE_VIEW_WIN_POP_MS = 350.0
 MOLE_VIEW_WIN_POP_R_FRAC = 1.1
-MOLE_VIEW_WIN_POP_GAIN = 0.85
 MOLE_VIEW_WIN_HOLD_MS = 750
 MOLE_VIEW_TOSS_MS = 550.0
 MOLE_VIEW_TOSS_SPEED_FRAC = 2.6
@@ -90,10 +73,8 @@ MOLE_VIEW_LAND_SQUASH_MS = 90.0
 MOLE_VIEW_REGROW_MS = 550.0
 MOLE_VIEW_HEAL_BUCKETS = 24
 MOLE_VIEW_SEAM_BAND_FRAC = 0.21
-MOLE_VIEW_SEAM_WHITE_CORE = 0.6
 MOLE_VIEW_SEAM_GLOW_W_FRAC = 1.25
 MOLE_VIEW_SEAM_GLOW_H_FRAC = 0.10
-MOLE_VIEW_SEAM_GLOW_CORE = 0.8
 MOLE_VIEW_SPARK_MS = 260.0
 MOLE_VIEW_SPARK_SPEED_FRAC = 0.30
 MOLE_VIEW_SPARK_RISE_FRAC = 0.12
@@ -110,18 +91,13 @@ MOLE_VIEW_PIP_RADIUS_DIV = 3
 MOLE_VIEW_CROSS_STRIKE_SIZE_FRAC = 0.16
 MOLE_VIEW_CROSS_STRIKE_GAP_FRAC = 0.07
 MOLE_VIEW_CROSS_STRIKE_OFFSET_FRAC = 0.66
-MOLE_VIEW_CROSS_STRIKE_LW_FRAC = 0.12
-MOLE_VIEW_CROSS_STRIKE_PAD_FRAC = 0.28
-MOLE_VIEW_CROSS_STRIKE_RING_LW_FRAC = 0.1
 MOLE_VIEW_CASING_W_FRAC = 0.10
 MOLE_VIEW_CASING_H_FRAC = 0.05
-MOLE_VIEW_CASING_TIP_DIV = 4
 MOLE_VIEW_CASING_VX_FRAC = 1.4
 MOLE_VIEW_CASING_UP_FRAC = 1.8
 MOLE_VIEW_CASING_GRAVITY_FRAC = 7.0
 MOLE_VIEW_CASING_FALL_FRAC = 0.7
 MOLE_VIEW_CASING_SPIN_DPS = 520.0
-MOLE_VIEW_CASING_SPIN_BUCKET_DEG = 20
 MOLE_VIEW_CASING_UP_JITTER = (0.7, 0.6)
 MOLE_VIEW_CASING_REST_MS = 1000.0
 MOLE_VIEW_CASING_FADE_MS = 400.0
@@ -164,283 +140,14 @@ class MoleToss(typing.NamedTuple):
     spin: float
 
 
-_PIT_DARK = pg.Color(Colors.well_deep)
-_CROSS_COLOR = pg.Color(Colors.text)
-_CROSS_EDGE = pg.Color(Colors.bg)
-_CROSS_ARC = pg.Color(Colors.accent)
-_CROSS_ARC_HOT = pg.Color(Colors.amber_hi)
-_CROSS_DOT = pg.Color(Colors.amber_hi)
-_CROSS_GLOW = pg.Color(Colors.accent)
 _IMPACT_COLOR = pg.Color(Colors.spectate)
 _HITBOX_COLOR = pg.Color(Colors.spectate)
 _HITBOX_ACTIVE_COLOR = pg.Color(Colors.win)
 _DUST_COLORS = (pg.Color(Colors.text_dim), pg.Color(Colors.text_muted), pg.Color(Colors.border))
 _DEBRIS_COLORS = (pg.Color(Colors.amber_hi), pg.Color(Colors.accent_hi), pg.Color(Colors.amber))
 
-_AXES = ((1, 0), (-1, 0), (0, 1), (0, -1))
-
 _POP_APEX = MOLE_VIEW_POP_HEIGHT_FRAC * MOLE_VIEW_POP_OVERSHOOT
 _CLEAR = (0, 0, 0, 0)
-_KEEP = (255, 255, 255)
-
-_MOLE_STATIC_CACHE = new_size_cache()
-
-
-def _pit_render(rim_color, glow_alpha, rim_scale=1.0):
-    def render(surf, k):
-        w, h = surf.get_size()
-        rim = pg.Color(rim_color)
-        glow = pg.Color(rim.r, rim.g, rim.b, glow_alpha)
-        pg.draw.ellipse(surf, glow, pg.Rect(0, 0, w, h))
-        inset_x = int(w * MOLE_VIEW_PIT_INSET_FRAC)
-        inset_y = int(h * MOLE_VIEW_PIT_INSET_FRAC)
-        outer = pg.Rect(inset_x, inset_y, w - 2 * inset_x, h - 2 * inset_y)
-        pg.draw.ellipse(surf, rim, outer)
-        rim_w = max(int(outer.height * MOLE_VIEW_PIT_RIM_FRAC * rim_scale), 1)
-        pg.draw.ellipse(surf, _PIT_DARK, outer.inflate(-2 * rim_w, -2 * rim_w))
-    return render
-
-
-def _pit_surface(rx, ry):
-    def build():
-        return supersample((2 * rx, 2 * ry),
-                           _pit_render(Colors.accent, MOLE_VIEW_PIT_GLOW_ALPHA))
-    return memoized_surface(_MOLE_STATIC_CACHE, ("pit", rx, ry), build)
-
-
-def _pit_mouth(rx, ry):
-    w, h = 2 * rx * SUPERSAMPLE, 2 * ry * SUPERSAMPLE
-    inset_x = int(w * MOLE_VIEW_PIT_INSET_FRAC)
-    inset_y = int(h * MOLE_VIEW_PIT_INSET_FRAC)
-    rim = max(int((h - 2 * inset_y) * MOLE_VIEW_PIT_RIM_FRAC), 1)
-    return (max((w // 2 - inset_x - rim) // SUPERSAMPLE, 1),
-            max((h // 2 - inset_y - rim) // SUPERSAMPLE, 1))
-
-
-def _emerge_mask(w, rx, ry, fade):
-    def build():
-        mask = pg.Surface((w, ry + fade + 1), pg.SRCALPHA)
-        half = w / 2.0
-        for x in range(w):
-            dx = abs(x + 0.5 - half) / rx
-            arc = round(ry * math.sqrt(1.0 - dx * dx)) if dx < 1.0 else 0
-            mask.fill(_KEEP, (x, 0, 1, arc))
-            for i in range(fade):
-                mask.fill((*_KEEP, int(255 * (1.0 - (i + 1) / fade))), (x, arc + i, 1, 1))
-        return mask
-    return memoized_surface(_MOLE_STATIC_CACHE, ("emerge", w, rx, ry, fade), build)
-
-
-def _pit_front_surface(rx, ry):
-    def build():
-        pit = _pit_surface(rx, ry)
-        half = max(pit.get_height() // 2, 1)
-        front = pg.Surface((pit.get_width(), half), pg.SRCALPHA)
-        front.blit(pit, (0, half - pit.get_height()))
-        return front
-    return memoized_surface(_MOLE_STATIC_CACHE, ("pit_front", rx, ry), build)
-
-
-def _seam_band_surface(w, h):
-    def build():
-        band = pg.Surface((w, h), pg.SRCALPHA)
-        hot = pg.Color(Colors.amber_hi)
-        white = pg.Color(Colors.text)
-        half = max(h / 2.0, 1.0)
-        for y in range(h):
-            edge = abs(y - half) / half
-            gain = (1.0 - min(edge, 1.0)) ** 2
-            col = hot.lerp(white, MOLE_VIEW_SEAM_WHITE_CORE * (1.0 - edge))
-            pg.draw.line(band, (int(col.r * gain), int(col.g * gain), int(col.b * gain)),
-                         (0, y), (w - 1, y))
-        return band
-    return memoized_surface(_MOLE_STATIC_CACHE, ("seam", w, h), build)
-
-
-def _seam_glow_surface(w, h):
-    def build():
-        surf = pg.Surface((w, h))
-        hot = pg.Color(Colors.amber_hi)
-        white = pg.Color(Colors.text)
-        half_w = max(w / 2.0, 1.0)
-        half_h = max(h / 2.0, 1.0)
-        edge = max(1.0 - MOLE_VIEW_SEAM_GLOW_CORE, 0.001)
-        for y in range(h):
-            v = 1.0 - min(abs(y + 0.5 - half_h) / half_h, 1.0)
-            col = hot.lerp(white, MOLE_VIEW_SEAM_WHITE_CORE * v)
-            for x in range(w):
-                d = min(abs(x + 0.5 - half_w) / half_w, 1.0)
-                gain = v * v * min((1.0 - d) / edge, 1.0)
-                surf.set_at((x, y), (int(col.r * gain), int(col.g * gain), int(col.b * gain)))
-        return surf
-    return memoized_surface(_MOLE_STATIC_CACHE, ("seamglow", w, h), build)
-
-
-def _cross_blade_points(c, ux, uy, inner, outer, tip_half, base_half):
-    px, py = -uy, ux
-    return ((c + ux * inner + px * tip_half, c + uy * inner + py * tip_half),
-            (c + ux * outer + px * base_half, c + uy * outer + py * base_half),
-            (c + ux * outer - px * base_half, c + uy * outer - py * base_half),
-            (c + ux * inner - px * tip_half, c + uy * inner - py * tip_half))
-
-
-def _cross_arc_points(c, r_in, r_out, a0, a1):
-    segs = MOLE_VIEW_CROSS_ARC_SEGS
-    angles = [a0 + (a1 - a0) * i / segs for i in range(segs + 1)]
-    outer = [(c + r_out * math.cos(a), c + r_out * math.sin(a)) for a in angles]
-    inner = [(c + r_in * math.cos(a), c + r_in * math.sin(a)) for a in reversed(angles)]
-    return outer + inner
-
-
-def _render_cross_blades(surf, k, c, gap, arm, tip_half, base_half):
-    for ux, uy in _AXES:
-        pg.draw.polygon(surf, _CROSS_EDGE, _cross_blade_points(
-            c, ux, uy, gap * k - k, (gap + arm) * k + k,
-            tip_half * k + k, base_half * k + k))
-    for ux, uy in _AXES:
-        pg.draw.polygon(surf, _CROSS_COLOR, _cross_blade_points(
-            c, ux, uy, gap * k, (gap + arm) * k, tip_half * k, base_half * k))
-
-
-def _crosshair_surface(arm, gap, lw, bloom_bucket, out_bucket):
-    def build():
-        bloom = bloom_bucket / MOLE_VIEW_BLOOM_BUCKETS
-        s = (1.0 - (1.0 - MOLE_VIEW_CROSS_OUT_SCALE)
-             * out_bucket / MOLE_VIEW_CROSS_OUT_BUCKETS)
-        a = max(arm * s, 2.0)
-        g = (gap + arm * MOLE_VIEW_BLOOM_SPREAD_FRAC * bloom) * s
-        stroke = max(lw * s, 1.0)
-        tip_half = max(a * MOLE_VIEW_CROSS_TIP_W_FRAC, 0.5) / 2.0
-        base_half = max(a * MOLE_VIEW_CROSS_BLADE_W_FRAC, 2.0) / 2.0
-        arc_r = g + a + max(a * MOLE_VIEW_CROSS_ARC_PAD_FRAC, 2.0)
-        arc_w = max(stroke * MOLE_VIEW_CROSS_ARC_W_FRAC, 1.0)
-        dot_r = max(a * MOLE_VIEW_CROSS_DOT_FRAC, 1.6)
-        spin = math.radians(MOLE_VIEW_BLOOM_SPIN_DEG * bloom)
-        span = math.radians(MOLE_VIEW_CROSS_ARC_SPAN_DEG)
-        arc_col = _CROSS_ARC.lerp(_CROSS_ARC_HOT, bloom)
-        reach = int(math.ceil(arc_r + arc_w)) + 2
-
-        def render(surf, k):
-            c = surf.get_width() / 2.0
-            _render_cross_blades(surf, k, c, g, a, tip_half, base_half)
-            for i in range(4):
-                mid = math.pi / 4.0 + i * math.pi / 2.0 + spin
-                pg.draw.polygon(surf, arc_col, _cross_arc_points(
-                    c, (arc_r - arc_w / 2.0) * k, (arc_r + arc_w / 2.0) * k,
-                    mid - span / 2.0, mid + span / 2.0))
-            pg.draw.circle(surf, _CROSS_EDGE, (c, c), dot_r * k + k)
-            pg.draw.circle(surf, _CROSS_DOT, (c, c), dot_r * k)
-        return supersample(2 * reach + 1, render)
-    key = ("cross", arm, gap, lw, bloom_bucket, out_bucket)
-    return memoized_surface(_MOLE_STATIC_CACHE, key, build)
-
-
-def _cross_glow_surface(r):
-    def build():
-        surf = pg.Surface((2 * r, 2 * r))
-        for i in range(r, 0, -1):
-            gain = (1.0 - i / r) ** 2 * MOLE_VIEW_CROSS_GLOW_GAIN
-            col = (int(_CROSS_GLOW.r * gain), int(_CROSS_GLOW.g * gain),
-                   int(_CROSS_GLOW.b * gain))
-            pg.draw.circle(surf, col, (r, r), i)
-        return surf
-    return memoized_surface(_MOLE_STATIC_CACHE, ("crossglow", r), build)
-
-
-def _strike_cross_surface(size, struck):
-    def build():
-        def render(surf, k):
-            w = surf.get_width()
-            r = w / 2.0
-            if struck:
-                pg.draw.circle(surf, pg.Color(Colors.loss), (r, r), r)
-                lw = max(int(w * MOLE_VIEW_CROSS_STRIKE_LW_FRAC), 2)
-                pad = w * MOLE_VIEW_CROSS_STRIKE_PAD_FRAC
-                pg.draw.line(surf, pg.Color(Colors.on_accent), (pad, pad),
-                             (w - pad, w - pad), lw)
-                pg.draw.line(surf, pg.Color(Colors.on_accent), (w - pad, pad),
-                             (pad, w - pad), lw)
-            else:
-                lw = max(int(w * MOLE_VIEW_CROSS_STRIKE_RING_LW_FRAC), 2)
-                pg.draw.circle(surf, pg.Color(Colors.border_strong), (r, r), r - lw, lw)
-        return supersample((size, size), render)
-    return memoized_surface(_MOLE_STATIC_CACHE, ("strike", size, struck), build)
-
-
-def _danger_render(bucket):
-    hot = bucket >= 1
-    rim = pg.Color(Colors.text) if hot else pg.Color(Colors.loss)
-    alpha = 255 if hot else MOLE_VIEW_PIT_GLOW_ALPHA
-    scale = MOLE_VIEW_DANGER_RIM_SCALE if hot else 1.0
-    return _pit_render(rim, alpha, scale)
-
-
-def _telegraph_render(bucket):
-    frac = bucket / (MOLE_VIEW_PULSE_BUCKETS - 1)
-    blend = MOLE_VIEW_TELE_WHITE_MIN + (1.0 - MOLE_VIEW_TELE_WHITE_MIN) * frac
-    rim = pg.Color(Colors.accent).lerp(pg.Color(Colors.text), blend)
-    alpha = int(MOLE_VIEW_PIT_GLOW_ALPHA
-                + (255 - MOLE_VIEW_PIT_GLOW_ALPHA) * frac * MOLE_VIEW_TELE_ALPHA_GAIN)
-    return _pit_render(rim, alpha)
-
-
-def _pit_telegraph_surface(rx, ry, bucket, danger=False):
-    def build():
-        render = _danger_render(bucket) if danger else _telegraph_render(bucket)
-        return supersample((2 * rx, 2 * ry), render)
-    return memoized_surface(_MOLE_STATIC_CACHE, ("pit_tele", rx, ry, bucket, danger), build)
-
-
-def _muzzle_surface(r):
-    def build():
-        surf = pg.Surface((2 * r, 2 * r))
-        hot = pg.Color(Colors.amber_hi)
-        for i in range(r, 0, -1):
-            edge = i / r
-            col = pg.Color(int(hot.r * (1.0 - edge) ** 2), int(hot.g * (1.0 - edge) ** 2),
-                           int(hot.b * (1.0 - edge) ** 2))
-            pg.draw.circle(surf, col, (r, r), i)
-        for dx, dy in _AXES:
-            pg.draw.line(surf, hot, (r, r), (r + dx * r, r + dy * r),
-                         max(r // MOLE_VIEW_MUZZLE_RAY_W_DIV, 1))
-        return surf
-    return memoized_surface(_MOLE_STATIC_CACHE, ("muzzle", r), build)
-
-
-def _win_pop_surface(r):
-    def build():
-        surf = pg.Surface((2 * r, 2 * r))
-        warm = pg.Color(Colors.amber)
-        for i in range(r, 0, -1):
-            edge = i / r
-            gain = (1.0 - edge) ** 2 * MOLE_VIEW_WIN_POP_GAIN
-            pg.draw.circle(surf, (int(warm.r * gain), int(warm.g * gain), int(warm.b * gain)),
-                           (r, r), i)
-        return surf
-    return memoized_surface(_MOLE_STATIC_CACHE, ("winpop", r), build)
-
-
-def _casing_surface(w, h):
-    def build():
-        surf = pg.Surface((w, h), pg.SRCALPHA)
-        surf.fill(pg.Color(Colors.amber))
-        pg.draw.rect(surf, pg.Color(Colors.amber_hi),
-                     pg.Rect(0, 0, max(w // MOLE_VIEW_CASING_TIP_DIV, 1), h))
-        return surf
-    return memoized_surface(_MOLE_STATIC_CACHE, ("casing", w, h), build)
-
-
-def _casing_rotated(w, h, bucket):
-    def build():
-        base = _casing_surface(w, h)
-        deg = bucket * MOLE_VIEW_CASING_SPIN_BUCKET_DEG
-        return base if deg == 0 else pg.transform.rotate(base, deg)
-    return memoized_surface(_MOLE_STATIC_CACHE, ("casing_rot", w, h, bucket), build)
-
-
-def _expire(items, now_ms, ttl_ms):
-    while items and now_ms - items[0][0] >= ttl_ms:
-        items.pop(0)
 
 
 def _blit_alpha(window, surf, pos, alpha):
@@ -760,10 +467,10 @@ class MoleController(SkillCheckController):
         self._trauma.update(now_ms)
         if dt > 0 and not self._hitstop.frozen(now_ms):
             self._anim_ms += dt
-        _expire(self._puffs, now_ms, MOLE_VIEW_PUFF_MS)
-        _expire(self._debris, now_ms, MOLE_VIEW_DEBRIS_MS)
-        _expire(self._impacts, now_ms, MOLE_VIEW_IMPACT_MS)
-        _expire(self._seam_sparks, now_ms, MOLE_VIEW_SPARK_MS)
+        expire_particles(self._puffs, now_ms, MOLE_VIEW_PUFF_MS)
+        expire_particles(self._debris, now_ms, MOLE_VIEW_DEBRIS_MS)
+        expire_particles(self._impacts, now_ms, MOLE_VIEW_IMPACT_MS)
+        expire_particles(self._seam_sparks, now_ms, MOLE_VIEW_SPARK_MS)
         self._casings = [c for c in self._casings if now_ms - c.spawn_ms
                          < c.t_land * 1000.0 + MOLE_VIEW_CASING_REST_MS
                          + MOLE_VIEW_CASING_FADE_MS]
@@ -1135,8 +842,9 @@ class MoleController(SkillCheckController):
         if rect is None:
             return
         cell = self.cell_size
-        for i, (t0, side, frac, speed, rise) in enumerate(self._seam_sparks):
-            tt = (self._now - t0) / MOLE_VIEW_SPARK_MS
+        for i, (age_ms, (side, frac, speed, rise)) in enumerate(
+                particle_ages(self._seam_sparks, self._now)):
+            tt = age_ms / MOLE_VIEW_SPARK_MS
             if not 0.0 <= tt < 1.0:
                 continue
             y = self._seam_y(rect, frac) - cell * MOLE_VIEW_SPARK_RISE_FRAC * rise * tt
@@ -1212,11 +920,11 @@ class MoleController(SkillCheckController):
         cell = self.cell_size
         g = cell * gravity_frac
         speed_base, speed_span = jitter
-        for spawn_ms, x, y, floats in items:
-            tt = (self._now - spawn_ms) / life_ms
+        for age_ms, (x, y, floats) in particle_ages(items, self._now):
+            tt = age_ms / life_ms
             if not 0.0 <= tt < 1.0:
                 continue
-            t = (self._now - spawn_ms) / 1000.0
+            t = age_ms / 1000.0
             r = max(int(cell * r_frac * (1.0 - tt)), 1)
             for j in range(count):
                 ang = floats[j * 2] * 2.0 * math.pi
@@ -1273,8 +981,8 @@ class MoleController(SkillCheckController):
 
     def _draw_impacts(self, window):
         lw = max(self._cross_lw, 1)
-        for spawn_ms, x, y in self._impacts:
-            tt = (self._now - spawn_ms) / MOLE_VIEW_IMPACT_MS
+        for age_ms, (x, y) in particle_ages(self._impacts, self._now):
+            tt = age_ms / MOLE_VIEW_IMPACT_MS
             if not 0.0 <= tt < 1.0:
                 continue
             r = max(int(self.cell_size * MOLE_VIEW_IMPACT_R_FRAC * tt), 2)

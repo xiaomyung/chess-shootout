@@ -12,6 +12,15 @@ first, then cracks, then the max-tier chunk and ragged crown — so tier N reads
 the same prefix tier N-1 read and simply keeps going. That is what makes the
 damage *grow in place* instead of reshuffling on every hit, and it is pinned
 below as set inclusion on the transparent pixels.
+
+juice.py also owns the shared timed-particle lifecycle scaffolding the check
+views run their fixed-TTL burst systems on: expire_particles sweeps the expired
+prefix of a spawn-ordered list of (spawn_ms, *payload) tuples, and
+particle_ages iterates one yielding (age_ms, payload) for EVERY item — it never
+filters, because the views index colors by list position and skip out-of-window
+items themselves. They are module functions rather than a container class on
+purpose: the views' particle attributes stay plain lists, so tests (and
+resets) can assign, compare and slice them directly.
 """
 
 import dataclasses
@@ -24,8 +33,8 @@ import pytest
 from tests.conftest import pygame_display
 from chessshootout.frontend.skillcheck import juice
 from chessshootout.frontend.skillcheck.juice import (
-    Trauma, Hitstop, sakurai_vibrate, torn_sprite, flash_sprite,
-    TRAUMA_DECAY_PER_S, HITSTOP_CAP_MS, TORN_MAX_TIER,
+    Trauma, Hitstop, expire_particles, particle_ages, sakurai_vibrate, torn_sprite,
+    flash_sprite, TRAUMA_DECAY_PER_S, HITSTOP_CAP_MS, TORN_MAX_TIER,
     _TORN_TIERS, _TORN_CACHE, _torn_surface,
 )
 
@@ -269,6 +278,55 @@ def test_sakurai_envelope_decays():
     early = max(abs(sakurai_vibrate(t, start, dur, amp)) for t in range(0, 100))
     late = max(abs(sakurai_vibrate(t, start, dur, amp)) for t in range(300, 400))
     assert late < early
+
+
+# --- timed-particle scaffolding ---------------------------------------------
+
+def test_expire_drops_an_item_at_exactly_its_ttl_boundary():
+    """The sweep boundary is >=, matching the draw loops' half-open [0, 1) age
+    window: the first frame an item can no longer paint is the frame it goes."""
+    items = [(100, "a"), (200, "b")]
+    expire_particles(items, 399, 300.0)
+    assert items == [(100, "a"), (200, "b")], "one ms short of the TTL keeps it"
+    expire_particles(items, 400, 300.0)
+    assert items == [(200, "b")], "and it is dropped the instant age == TTL"
+    expire_particles(items, 500, 300.0)
+    assert items == []
+
+
+def test_expire_sweeps_only_the_expired_prefix_in_spawn_order():
+    """The views append in spawn order, so the sweep walks the front of the
+    list and stops at the first survivor — it never scans past it, which is
+    why an out-of-order item behind a live one is deliberately left alone."""
+    items = [(0, "old"), (500, "mid"), (900, "new")]
+    expire_particles(items, 600, 300.0)
+    assert items == [(500, "mid"), (900, "new")], "survivors keep their order"
+    stale_behind_live = [(900, "live"), (0, "stale")]
+    expire_particles(stale_behind_live, 1000, 300.0)
+    assert stale_behind_live == [(900, "live"), (0, "stale")], \
+        "the sweep is prefix-only: it trusts spawn ordering instead of scanning"
+
+
+def test_particle_ages_yields_every_item_in_order_with_age_and_payload_tail():
+    items = [(100, 5, 6), (250, 7, 8)]
+    assert list(particle_ages(items, 400)) == [(300, (5, 6)), (150, (7, 8))]
+
+
+def test_particle_ages_never_filters_so_positional_color_indexing_holds():
+    """The seam-spark draw indexes its palette by enumerate position over the
+    whole list; a filtering iterator would shift colors whenever an item sat
+    outside its age window. Every item is yielded — future ones with a
+    negative age, expired ones past their TTL — and the draw loops keep the
+    skip themselves."""
+    items = [(1000, "future"), (0, "expired")]
+    assert list(particle_ages(items, 500)) == [(-500, ("future",)), (500, ("expired",))]
+
+
+def test_empty_sweep_and_empty_iteration_are_no_ops():
+    items = []
+    expire_particles(items, 12345, 100.0)
+    assert items == []
+    assert list(particle_ages([], 12345)) == []
 
 
 # --- easing lives in visual/tween now ---------------------------------------

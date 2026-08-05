@@ -93,6 +93,16 @@ through the controller's geom mapping so a board flip carries them with the
 piece, sized off the cell like every other element, cached per (size, struck)
 in the module cache, and fading out on the same commit-relative outro as the
 hit pips.
+
+The static sprite builders (pit/glow/seam/crosshair/muzzle/casing/win-pop/
+strike-cross), their _MOLE_STATIC_CACHE and the knobs only they consume live in
+mole_art.py now — pure code motion, so the surfaces they mint are byte-identical
+and the cache keys unchanged. Constants both a builder and the controller read
+(pulse/bloom/cross-out buckets, the casing spin bucket) are defined in mole_art
+and imported into mole_view, keeping the import one-directional. The fixed-TTL
+particle sweeps (puffs, debris, impacts, seam sparks) run on juice.py's shared
+expire_particles/particle_ages scaffolding; the casings keep their own sweep
+because their TTL varies per item (t_land).
 """
 
 import gc
@@ -124,15 +134,16 @@ from chessshootout.frontend.skillcheck.mole_view import (
     MOLE_VIEW_POP_OVERSHOOT, MOLE_VIEW_SQUASH_BUCKETS, MOLE_VIEW_EMERGE_FADE_FRAC,
     MOLE_VIEW_PIP_FADE_DELAY_MS, MOLE_VIEW_PIP_FADE_MS, MOLE_VIEW_CROSS_OUT_MS,
     MOLE_VIEW_SEAM_GLOW_W_FRAC, MOLE_VIEW_SEAM_GLOW_H_FRAC,
-    MOLE_VIEW_SEAM_GLOW_CORE, MOLE_VIEW_SPARK_SPEED_FRAC,
-    _pit_telegraph_surface, _pit_surface, _pit_front_surface, _seam_band_surface,
-    _seam_glow_surface, _pit_mouth, _emerge_mask, _MOLE_STATIC_CACHE)
-from chessshootout.frontend.skillcheck.mole_view import (
+    MOLE_VIEW_SPARK_SPEED_FRAC, MOLE_VIEW_CROSS_GLOW_FRAC,
+    MOLE_VIEW_CROSS_STRIKE_OFFSET_FRAC, MOLE_VIEW_KICK_MS)
+from chessshootout.frontend.skillcheck.mole_art import (
     MOLE_VIEW_BLOOM_BUCKETS, MOLE_VIEW_BLOOM_SPIN_DEG, MOLE_VIEW_CROSS_ARC_PAD_FRAC,
-    MOLE_VIEW_CROSS_ARC_SPAN_DEG, MOLE_VIEW_CROSS_BLADE_W_FRAC, MOLE_VIEW_CROSS_GLOW_FRAC,
+    MOLE_VIEW_CROSS_ARC_SPAN_DEG, MOLE_VIEW_CROSS_BLADE_W_FRAC,
     MOLE_VIEW_CROSS_OUT_BUCKETS, MOLE_VIEW_CROSS_OUT_SCALE, MOLE_VIEW_CROSS_TIP_W_FRAC,
-    MOLE_VIEW_CROSS_STRIKE_OFFSET_FRAC, MOLE_VIEW_KICK_MS,
-    _crosshair_surface, _cross_glow_surface, _strike_cross_surface)
+    MOLE_VIEW_SEAM_GLOW_CORE,
+    _pit_telegraph_surface, _pit_surface, _pit_front_surface, _seam_band_surface,
+    _seam_glow_surface, _pit_mouth, _emerge_mask, _crosshair_surface,
+    _cross_glow_surface, _strike_cross_surface, _MOLE_STATIC_CACHE)
 from chessshootout.frontend.skillcheck.registry import build_controller
 from chessshootout.skillcheck.mole import MOLE_RECOIL_LOCKOUT_MS
 from chessshootout.frontend.visual.colors import Colors
@@ -2643,3 +2654,4 @@ def test_no_per_frame_logging(caplog):
             ctrl.update(i * 16)
             ctrl.draw(surf)
     assert not caplog.records, "the mole view stays silent on the frame path"
+

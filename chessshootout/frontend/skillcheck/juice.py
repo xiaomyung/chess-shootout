@@ -114,6 +114,16 @@ def sakurai_vibrate(now_ms, start_ms, duration_ms, amp_px):
     return amp_px * envelope * math.sin(t / 1000.0 * _SAKURAI_OMEGA)
 
 
+def expire_particles(items, now_ms, ttl_ms):
+    while items and now_ms - items[0][0] >= ttl_ms:
+        items.pop(0)
+
+
+def particle_ages(items, now_ms):
+    for item in items:
+        yield now_ms - item[0], item[1:]
+
+
 def _punch(mask, cx, cy, radius):
     if radius < 1.0:
         return
