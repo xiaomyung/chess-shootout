@@ -16,7 +16,7 @@ class CheckSpec:
     seed: str
     cell_rect: object
     now_ms: int
-    deadline_ms: int
+    deadline_ms: float
     period_ms: float = WHEEL_PERIOD_MS
     value_diff: int = 0
     victim_surface: object = None
@@ -63,7 +63,8 @@ def _build_whack(spec):
         spec.cell_rect, spec.now_ms, spec.deadline_ms,
         hole_squares=spec.hole_squares, victim_surface=spec.victim_surface, geom=spec.geom,
         from_sq=spec.from_sq, shot_sound=spec.shot_sound, on_shot=spec.on_shot,
-        progress=spec.progress, passive=spec.passive, audio=spec.audio,
+        miss_count=spec.miss_count, progress=spec.progress,
+        passive=spec.passive, audio=spec.audio,
         on_hit_px=spec.on_hit_px, mirror_targets=spec.mirror_targets,
         last_hit_pop=spec.last_hit_pop)
 

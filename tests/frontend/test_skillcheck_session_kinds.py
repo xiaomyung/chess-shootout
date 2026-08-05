@@ -10,6 +10,11 @@ live controller (teardown, screen exit, new-game reset, overlay replacement) cal
 close() so the whack check's hidden OS cursor can never leak. The input swallow
 path is pinned: arrows reach the combo pad, never move-stepping.
 
+Every restorable field on the /resume wire reaches the controller it belongs to:
+the WHACK check rebuilds with the server's hit count AND its whiff count, on the
+mover and on the spectate mirror alike, so a reconnect never re-arms a strike row
+the server has already half-filled.
+
 A failed WHACK taunts with the same loss-coloured FLAIR WORD the kill words use —
 no speech bubble anywhere in it. The session stores the check seed at overlay-open
 and on a fail spawns effects.taunt_tag(pick_taunt(seed)) over the surviving victim
@@ -437,6 +442,34 @@ def test_a_locally_played_whack_controller_never_mirrors():
     app = _local_app()
     _gate(app, SkillCheckKind.WHACK)
     assert app.game.skillcheck_overlay._controller._mirror_targets is False
+    app.game.skillcheck_session.teardown_skillcheck_overlay()
+
+
+def _resumed_whack(app, *, passive, miss_count, progress=1):
+    frm, to = _capture_board(app)
+    session = app.game.skillcheck_session
+    args = (SkillCheckKind.WHACK, "resume-seed", 0, 5000.0, frm, to, None, 1)
+    if passive:
+        session.open_spectate_overlay(*args, elapsed_ms=900.0, miss_count=miss_count,
+                                      progress=progress)
+    else:
+        session.open_skillcheck_overlay(*args, online=True, elapsed_ms=900.0,
+                                        miss_count=miss_count, progress=progress)
+    return app.game.skillcheck_overlay._controller
+
+
+@pytest.mark.parametrize("passive", [False, True], ids=["mover", "spectate_mirror"])
+def test_a_resumed_whack_restores_the_servers_whiff_count(passive):
+    # /resume carries the whiffs the server already counted, exactly as it carries
+    # the hits. Both halves of the wire were live — the controller simply threw the
+    # count away, so a reconnecting mover on two whiffs saw an empty strike row and
+    # the server failed him on what his screen called the first miss. The mirror
+    # rebuilt the same lie for the spectator.
+    app = _local_app()
+    ctrl = _resumed_whack(app, passive=passive, miss_count=2)
+    assert isinstance(ctrl, MoleController)
+    assert ctrl._miss_count == 2, "the snapshot's whiff count reaches the strike row"
+    assert ctrl._progress == 1, "alongside the hit count that always did"
     app.game.skillcheck_session.teardown_skillcheck_overlay()
 
 

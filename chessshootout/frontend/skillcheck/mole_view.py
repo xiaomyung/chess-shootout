@@ -10,12 +10,13 @@ from chessshootout.frontend.skillcheck.juice import (
     flash_sprite, TORN_MAX_TIER)
 from chessshootout.frontend.skillcheck.mole_art import (
     MOLE_VIEW_BLOOM_BUCKETS, MOLE_VIEW_CASING_SPIN_BUCKET_DEG, MOLE_VIEW_CROSS_OUT_BUCKETS,
-    MOLE_VIEW_PULSE_BUCKETS, _PIT_DARK, _casing_rotated, _cross_glow_surface,
-    _crosshair_surface, _emerge_mask, _muzzle_surface, _pit_front_surface, _pit_mouth,
-    _pit_surface, _pit_telegraph_surface, _seam_band_surface, _seam_glow_surface,
-    _strike_cross_surface, _win_pop_surface)
+    MOLE_VIEW_PULSE_BUCKETS, PIT_DARK, casing_rotated, cross_glow_surface,
+    crosshair_surface, emerge_mask, muzzle_surface, pit_front_surface, pit_mouth,
+    pit_surface, pit_telegraph_surface, seam_band_surface, seam_glow_surface,
+    win_pop_surface)
 from chessshootout.frontend.visual.colors import Colors
-from chessshootout.frontend.visual.draw import cosine_pulse, rounded_rect_surface
+from chessshootout.frontend.visual.draw import (
+    cosine_pulse, rounded_rect_surface, strike_pip_surface)
 from chessshootout.frontend.visual.tween import out_cubic
 from chessshootout.infra import env
 from chessshootout.skillcheck.mole import (
@@ -91,6 +92,9 @@ MOLE_VIEW_PIP_RADIUS_DIV = 3
 MOLE_VIEW_CROSS_STRIKE_SIZE_FRAC = 0.16
 MOLE_VIEW_CROSS_STRIKE_GAP_FRAC = 0.07
 MOLE_VIEW_CROSS_STRIKE_OFFSET_FRAC = 0.66
+MOLE_VIEW_CROSS_STRIKE_LW_FRAC = 0.12
+MOLE_VIEW_CROSS_STRIKE_PAD_FRAC = 0.28
+MOLE_VIEW_CROSS_STRIKE_RING_LW_FRAC = 0.1
 MOLE_VIEW_CASING_W_FRAC = 0.10
 MOLE_VIEW_CASING_H_FRAC = 0.05
 MOLE_VIEW_CASING_VX_FRAC = 1.4
@@ -170,7 +174,7 @@ class MoleController(SkillCheckController):
 
     def __init__(self, challenge, cell_rect, now_ms, deadline_ms, *, hole_squares=None,
                  victim_surface=None, geom=None, from_sq=None, shot_sound=None, on_shot=None,
-                 progress=0, passive=False, audio=None, on_hit_px=None,
+                 miss_count=0, progress=0, passive=False, audio=None, on_hit_px=None,
                  mirror_targets=False, last_hit_pop=-1):
         self._init_common(challenge, now_ms, deadline_ms, on_shot=on_shot, passive=passive,
                           audio=audio)
@@ -186,7 +190,7 @@ class MoleController(SkillCheckController):
         self._heal_cache = {}
         self._emerge_scratch = {}
         self._progress = progress
-        self._miss_count = 0
+        self._miss_count = miss_count
         self._torn_key = hash(challenge.pops)
         self._last_hit_pop = last_hit_pop
         self._last_hit_anim_ms = None
@@ -238,7 +242,7 @@ class MoleController(SkillCheckController):
         self._hole_px = self._hole_centers()
         self._pit_rx = max(int(cell * MOLE_VIEW_PIT_RX_FRAC), 6)
         self._pit_ry = max(int(cell * MOLE_VIEW_PIT_RY_FRAC), 4)
-        self._mouth_rx, self._mouth_ry = _pit_mouth(self._pit_rx, self._pit_ry)
+        self._mouth_rx, self._mouth_ry = pit_mouth(self._pit_rx, self._pit_ry)
         self._emerge_fade = max(int(self._mouth_ry * MOLE_VIEW_EMERGE_FADE_FRAC), 2)
         self._cross_arm = max(int(cell * MOLE_VIEW_CROSS_ARM_FRAC), 4)
         self._cross_gap = max(int(cell * MOLE_VIEW_CROSS_GAP_FRAC), 2)
@@ -534,8 +538,7 @@ class MoleController(SkillCheckController):
         if not self._passive:
             self._draw_muzzle(window)
             self._draw_crosshair(window)
-        self._draw_pips(window, group)
-        self._draw_strike_crosses(window, group)
+        self._draw_badges(window, group)
         if self._debug_hitbox:
             self._draw_hitboxes(window, elapsed)
 
@@ -550,7 +553,7 @@ class MoleController(SkillCheckController):
     def _draw_pits(self, window, elapsed, group):
         self._draw_home_pit(window, elapsed, group)
         tele = self._telegraph_hole(elapsed)
-        pit = _pit_surface(self._pit_rx, self._pit_ry)
+        pit = pit_surface(self._pit_rx, self._pit_ry)
         for i, (hx, hy) in enumerate(self._hole_px):
             open_t = (elapsed - i * MOLE_VIEW_HOLE_STAGGER_MS) / MOLE_VIEW_HOLE_OPEN_MS
             if open_t <= 0.0:
@@ -570,7 +573,7 @@ class MoleController(SkillCheckController):
     def _draw_pit_mouth(self, window, cx, cy, scale):
         rx = max(int(self._pit_rx * scale), 2)
         ry = max(int(self._pit_ry * scale), 1)
-        pg.draw.ellipse(window, _PIT_DARK, pg.Rect(cx - rx, cy - ry, 2 * rx, 2 * ry))
+        pg.draw.ellipse(window, PIT_DARK, pg.Rect(cx - rx, cy - ry, 2 * rx, 2 * ry))
 
     def _draw_home_pit(self, window, elapsed, group):
         scale = min(elapsed / MOLE_VIEW_HOLE_OPEN_MS, 1.0) * self._home_pit_close_scale()
@@ -580,7 +583,7 @@ class MoleController(SkillCheckController):
         if scale < 1.0:
             self._draw_pit_mouth(window, cx, cy, scale)
             return
-        surf = _pit_surface(self._pit_rx, self._pit_ry)
+        surf = pit_surface(self._pit_rx, self._pit_ry)
         window.blit(surf, (cx - surf.get_width() // 2, cy - surf.get_height() // 2))
 
     @staticmethod
@@ -619,7 +622,7 @@ class MoleController(SkillCheckController):
         else:
             bucket = int(cosine_pulse(self._anim_ms, MOLE_VIEW_PULSE_MS)
                          * (MOLE_VIEW_PULSE_BUCKETS - 1))
-        return _pit_telegraph_surface(self._pit_rx, self._pit_ry, bucket, danger)
+        return pit_telegraph_surface(self._pit_rx, self._pit_ry, bucket, danger)
 
     def _damage_tier(self):
         required = max(self.challenge.hits_required, 1)
@@ -654,17 +657,15 @@ class MoleController(SkillCheckController):
     def _build_heal_sprite(self, tier, bucket):
         torn = self._torn_victim(tier)
         w, h = torn.get_size()
-        bbox = self._victim_bbox
-        top, span = ((bbox.top, bbox.height) if bbox is not None and bbox.height > 0
-                     else (0, h))
-        seam_y = max(round(top + span * (1.0 - bucket / MOLE_VIEW_HEAL_BUCKETS)), 0)
+        frac = 1.0 - bucket / MOLE_VIEW_HEAL_BUCKETS
+        seam_y = max(round(self._seam_offset(frac, h)), 0)
         surf = pg.Surface((w, h), pg.SRCALPHA)
         if seam_y > 0:
             surf.blit(torn, (0, 0), area=pg.Rect(0, 0, w, seam_y))
         if seam_y < h:
             surf.blit(self._victim, (0, seam_y), area=pg.Rect(0, seam_y, w, h - seam_y))
         band_h = max(int(h * MOLE_VIEW_SEAM_BAND_FRAC), 3)
-        surf.blit(_seam_band_surface(w, band_h), (0, seam_y - band_h // 2),
+        surf.blit(seam_band_surface(w, band_h), (0, seam_y - band_h // 2),
                   special_flags=pg.BLEND_RGB_ADD)
         return surf
 
@@ -716,7 +717,7 @@ class MoleController(SkillCheckController):
         rect = pg.Rect(cx - w // 2, base_y - h - lift, w, h)
         window.blit(sprite, rect)
         if lip:
-            front = _pit_front_surface(self._pit_rx, self._pit_ry)
+            front = pit_front_surface(self._pit_rx, self._pit_ry)
             window.blit(front, (center_px[0] + group[0] - front.get_width() // 2,
                                 center_px[1] + group[1]))
         return rect
@@ -730,7 +731,7 @@ class MoleController(SkillCheckController):
         scratch.fill(_CLEAR)
         scratch.blit(sprite, (0, 0), special_flags=pg.BLEND_RGBA_MAX)
         scratch.fill(_CLEAR, (0, max(cut + self._mouth_ry, 0), w, h))
-        scratch.blit(_emerge_mask(w, self._mouth_rx, self._mouth_ry, self._emerge_fade),
+        scratch.blit(emerge_mask(w, self._mouth_rx, self._mouth_ry, self._emerge_fade),
                      (0, cut - self._emerge_fade), special_flags=pg.BLEND_RGBA_MULT)
         return scratch
 
@@ -827,11 +828,14 @@ class MoleController(SkillCheckController):
             return False
         return 0 < self._heal_bucket() < MOLE_VIEW_HEAL_BUCKETS
 
-    def _seam_y(self, rect, frac):
+    def _seam_offset(self, frac, fallback_h):
         bbox = self._victim_bbox
         if bbox is None or bbox.height <= 0:
-            return rect.top + self._victim.get_height() * frac
-        return rect.top + bbox.top + bbox.height * frac
+            return fallback_h * frac
+        return bbox.top + bbox.height * frac
+
+    def _seam_y(self, rect, frac):
+        return rect.top + self._seam_offset(frac, self._victim.get_height())
 
     def _body_edge_x(self, rect, side):
         bbox = self._victim_bbox
@@ -846,7 +850,7 @@ class MoleController(SkillCheckController):
         bbox = self._victim_bbox
         w = max(int(bbox.width * MOLE_VIEW_SEAM_GLOW_W_FRAC), 4)
         h = max(int(self.cell_size * MOLE_VIEW_SEAM_GLOW_H_FRAC), 3)
-        glow = _seam_glow_surface(w, h)
+        glow = seam_glow_surface(w, h)
         window.blit(glow, (rect.left + bbox.centerx - w // 2, int(y) - h // 2),
                     special_flags=pg.BLEND_RGB_ADD)
 
@@ -977,7 +981,7 @@ class MoleController(SkillCheckController):
             y = y0 + vy * t + 0.5 * g * t * t
             deg = spin * t * MOLE_VIEW_CASING_SPIN_DPS
             bucket = int(deg / MOLE_VIEW_CASING_SPIN_BUCKET_DEG) % buckets
-            surf = _casing_rotated(w, h, bucket)
+            surf = casing_rotated(w, h, bucket)
             alpha = min(self._casing_alpha(t_ms - t_land * 1000.0), cap)
             if alpha <= 0:
                 continue
@@ -1005,16 +1009,16 @@ class MoleController(SkillCheckController):
             return
         r = max(int(self.cell_size * MOLE_VIEW_WIN_POP_R_FRAC), 8)
         px = self._last_hit_px if self._last_hit_px is not None else self.center
-        window.blit(_win_pop_surface(r), (int(px[0]) - r + group[0],
-                                          int(px[1]) - r + group[1]),
+        window.blit(win_pop_surface(r), (int(px[0]) - r + group[0],
+                                         int(px[1]) - r + group[1]),
                     special_flags=pg.BLEND_RGB_ADD)
 
     def _draw_muzzle(self, window):
         if self._flash_ms is None or self._now - self._flash_ms >= MOLE_VIEW_MUZZLE_MS:
             return
         r = max(int(self.cell_size * MOLE_VIEW_MUZZLE_FRAC), 4)
-        window.blit(_muzzle_surface(r), (int(self._flash_px[0]) - r,
-                                         int(self._flash_px[1]) - r),
+        window.blit(muzzle_surface(r), (int(self._flash_px[0]) - r,
+                                        int(self._flash_px[1]) - r),
                     special_flags=pg.BLEND_RGB_ADD)
 
     def _crosshair_fade(self):
@@ -1037,13 +1041,13 @@ class MoleController(SkillCheckController):
             if t < MOLE_RECOIL_LOCKOUT_MS:
                 bloom = 1.0 - t / MOLE_RECOIL_LOCKOUT_MS
         if fade >= 1.0:
-            glow = _cross_glow_surface(
+            glow = cross_glow_surface(
                 max(int(self.cell_size * MOLE_VIEW_CROSS_GLOW_FRAC), 6))
             window.blit(glow, (mx - glow.get_width() // 2, my - glow.get_height() // 2),
                         special_flags=pg.BLEND_RGB_ADD)
-        surf = _crosshair_surface(self._cross_arm, self._cross_gap, self._cross_lw,
-                                  round(bloom * MOLE_VIEW_BLOOM_BUCKETS),
-                                  round((1.0 - fade) * MOLE_VIEW_CROSS_OUT_BUCKETS))
+        surf = crosshair_surface(self._cross_arm, self._cross_gap, self._cross_lw,
+                                 round(bloom * MOLE_VIEW_BLOOM_BUCKETS),
+                                 round((1.0 - fade) * MOLE_VIEW_CROSS_OUT_BUCKETS))
         _blit_alpha(window, surf,
                     (mx - surf.get_width() // 2, my - surf.get_height() // 2),
                     int(255 * fade))
@@ -1065,37 +1069,39 @@ class MoleController(SkillCheckController):
             pg.draw.ellipse(window, _HITBOX_ACTIVE_COLOR if hot else _HITBOX_COLOR, rect,
                             MOLE_VIEW_HITBOX_ACTIVE_LW if hot else MOLE_VIEW_HITBOX_LW)
 
-    def _draw_pips(self, window, group):
+    def _pip_badge(self, index):
+        if index < min(self._progress, self.challenge.hits_required):
+            fill, border = Colors.accent, Colors.accent_hi
+        else:
+            fill, border = Colors.surface, Colors.border_strong
+        radius = max(self._pip_h // MOLE_VIEW_PIP_RADIUS_DIV, 2)
+        return rounded_rect_surface((self._pip_w, self._pip_h), radius, fill,
+                                    border=border, border_width=1)
+
+    def _strike_badge(self, index):
+        return strike_pip_surface(
+            self._strike_size, index < min(self._miss_count, MOLE_MAX_WHIFFS),
+            lw_frac=MOLE_VIEW_CROSS_STRIKE_LW_FRAC,
+            pad_frac=MOLE_VIEW_CROSS_STRIKE_PAD_FRAC,
+            ring_lw_frac=MOLE_VIEW_CROSS_STRIKE_RING_LW_FRAC)
+
+    def _draw_badge_row(self, window, group, anchor, count, size, gap, offset_frac,
+                        sprite_fn, alpha):
+        total = count * size + (count - 1) * gap
+        x = anchor[0] - total // 2 + group[0]
+        y = anchor[1] + int(self.cell_size * offset_frac) + group[1]
+        for i in range(count):
+            _blit_alpha(window, sprite_fn(i), (x + i * (size + gap), y), alpha)
+
+    def _draw_badges(self, window, group):
         alpha = self._commit_fade_alpha(MOLE_VIEW_PIP_FADE_DELAY_MS, MOLE_VIEW_PIP_FADE_MS)
         if alpha <= 0:
             return
-        n = self.challenge.hits_required
-        filled = min(self._progress, n)
-        w, h, gap = self._pip_w, self._pip_h, self._pip_gap
-        total = n * w + (n - 1) * gap
-        x = self.center[0] - total // 2 + group[0]
-        y = self.center[1] + int(self.cell_size * MOLE_VIEW_PIP_OFFSET_FRAC) + group[1]
-        radius = max(h // MOLE_VIEW_PIP_RADIUS_DIV, 2)
-        for i in range(n):
-            if i < filled:
-                fill, border = Colors.accent, Colors.accent_hi
-            else:
-                fill, border = Colors.surface, Colors.border_strong
-            surf = rounded_rect_surface((w, h), radius, fill, border=border, border_width=1)
-            _blit_alpha(window, surf, (x + i * (w + gap), y), alpha)
-
-    def _draw_strike_crosses(self, window, group):
+        self._draw_badge_row(window, group, self.center, self.challenge.hits_required,
+                             self._pip_w, self._pip_gap, MOLE_VIEW_PIP_OFFSET_FRAC,
+                             self._pip_badge, alpha)
         if self._geom is None or self._from_sq is None:
             return
-        alpha = self._commit_fade_alpha(MOLE_VIEW_PIP_FADE_DELAY_MS, MOLE_VIEW_PIP_FADE_MS)
-        if alpha <= 0:
-            return
-        ax, ay = self._geom(self._from_sq)
-        size, gap = self._strike_size, self._strike_gap
-        total = MOLE_MAX_WHIFFS * size + (MOLE_MAX_WHIFFS - 1) * gap
-        x = ax - total // 2 + group[0]
-        y = ay + int(self.cell_size * MOLE_VIEW_CROSS_STRIKE_OFFSET_FRAC) + group[1]
-        struck = min(self._miss_count, MOLE_MAX_WHIFFS)
-        for i in range(MOLE_MAX_WHIFFS):
-            surf = _strike_cross_surface(size, i < struck)
-            _blit_alpha(window, surf, (x + i * (size + gap), y), alpha)
+        self._draw_badge_row(window, group, self._geom(self._from_sq), MOLE_MAX_WHIFFS,
+                             self._strike_size, self._strike_gap,
+                             MOLE_VIEW_CROSS_STRIKE_OFFSET_FRAC, self._strike_badge, alpha)

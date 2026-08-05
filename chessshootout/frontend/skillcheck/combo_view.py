@@ -10,7 +10,8 @@ from chessshootout.frontend.visual.cache import (
     new_size_cache, memoized_surface, render_text)
 from chessshootout.frontend.visual.colors import Colors
 from chessshootout.frontend.visual.draw import (
-    chevron_surface, circle_surface, cosine_pulse, cut_rect_surface, smoothstep, supersample)
+    chevron_surface, circle_surface, cosine_pulse, cut_rect_surface, smoothstep,
+    strike_pip_surface, supersample)
 from chessshootout.frontend.visual.emoji import emoji_surface
 from chessshootout.frontend.visual.fonts import get_display_font
 from chessshootout.frontend.visual.tween import out_back
@@ -202,7 +203,6 @@ _PAD_STATIC_CACHE = new_size_cache()
 _DIR_CHEVRON_CACHE = new_size_cache()
 _RECEPTOR_FILL_CACHE = new_size_cache()
 _SOLID_CACHE = new_size_cache()
-_PIP_CACHE = new_size_cache()
 _FLASH_CACHE = new_size_cache()
 _EMOJI_CACHE = new_size_cache()
 _CHIP_CACHE = new_size_cache()
@@ -283,23 +283,10 @@ def _solid_square(size, color):
 
 
 def _pip_surface(size, struck):
-    def build():
-        def render(surf, k):
-            w = surf.get_width()
-            r = w / 2.0
-            if struck:
-                pg.draw.circle(surf, pg.Color(Colors.loss), (r, r), r)
-                lw = max(int(w * COMBO_VIEW_PIP_STRIKE_LW_FRAC), 2)
-                pad = w * COMBO_VIEW_PIP_STRIKE_PAD_FRAC
-                pg.draw.line(surf, pg.Color(Colors.on_accent), (pad, pad),
-                             (w - pad, w - pad), lw)
-                pg.draw.line(surf, pg.Color(Colors.on_accent), (w - pad, pad),
-                             (pad, w - pad), lw)
-            else:
-                lw = max(int(w * COMBO_VIEW_PIP_RING_LW_FRAC), 2)
-                pg.draw.circle(surf, pg.Color(Colors.border_strong), (r, r), r - lw, lw)
-        return supersample((size, size), render)
-    return memoized_surface(_PIP_CACHE, (size, struck), build)
+    return strike_pip_surface(size, struck,
+                              lw_frac=COMBO_VIEW_PIP_STRIKE_LW_FRAC,
+                              pad_frac=COMBO_VIEW_PIP_STRIKE_PAD_FRAC,
+                              ring_lw_frac=COMBO_VIEW_PIP_RING_LW_FRAC)
 
 
 def _flash_layer(w, h):

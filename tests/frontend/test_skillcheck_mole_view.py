@@ -26,7 +26,7 @@ climb-out: the ground line the body stands on interpolates from the pit's near
 lip (pit_ry below the ellipse centre) up to the ellipse centre itself as the pop
 height goes 0 -> 1, and the body is cut by a MASK anchored on the pit, not by a
 straight clip on the sprite. The mask's boundary is the lower arc of the pit's
-own dark mouth (_pit_mouth derives it off the very inset/rim fractions the pit
+own dark mouth (pit_mouth derives it off the very inset/rim fractions the pit
 sprite is drawn with, so the two can never drift): deepest under the centre of
 the hole, climbing to the ground line at both rims and staying there for every
 column of a sprite wider than the mouth — the old straight cut left those wings
@@ -90,16 +90,21 @@ adopts the relayed pre-increment miss_count the way combo's mirror does. The
 count renders as combo-style strike crosses — border ring slots that fill
 loss-red with an X — in a row directly under the ATTACKER's cell, anchored
 through the controller's geom mapping so a board flip carries them with the
-piece, sized off the cell like every other element, cached per (size, struck)
-in the module cache, and fading out on the same commit-relative outro as the
-hit pips.
+piece, sized off the cell like every other element, cached per (size, struck) and
+knob family, and fading out on the same commit-relative outro as the hit pips —
+the two rows are one _draw_badge_row walked twice off a single shared alpha, since
+everything but the anchor and the sprite was identical between them.
 
-The static sprite builders (pit/glow/seam/crosshair/muzzle/casing/win-pop/
-strike-cross), their _MOLE_STATIC_CACHE and the knobs only they consume live in
-mole_art.py now — pure code motion, so the surfaces they mint are byte-identical
-and the cache keys unchanged. Constants both a builder and the controller read
-(pulse/bloom/cross-out buckets, the casing spin bucket) are defined in mole_art
-and imported into mole_view, keeping the import one-directional. The fixed-TTL
+The static sprite builders (pit/glow/seam/crosshair/muzzle/casing/win-pop), their
+_MOLE_STATIC_CACHE and the knobs only they consume live in mole_art.py — pure code
+motion, so the surfaces they mint are byte-identical and the cache keys unchanged.
+mole_art is a module built to be imported, so the names mole_view pulls out of it
+are public; only its own render helpers stay underscored. Constants both a builder
+and the controller read (pulse/bloom/cross-out buckets, the casing spin bucket) are
+defined in mole_art and imported into mole_view, keeping the import one-directional.
+The strike cross is NOT one of those builders: it and combo's wrong pip were the
+same render body twice over, so the sprite now comes from one cached
+draw.strike_pip_surface both views call with their own knob family. The fixed-TTL
 particle sweeps (puffs, debris, impacts, seam sparks) run on juice.py's shared
 expire_particles/particle_ages scaffolding; the casings keep their own sweep
 because their TTL varies per item (t_land).
@@ -135,16 +140,19 @@ from chessshootout.frontend.skillcheck.mole_view import (
     MOLE_VIEW_PIP_FADE_DELAY_MS, MOLE_VIEW_PIP_FADE_MS, MOLE_VIEW_CROSS_OUT_MS,
     MOLE_VIEW_SEAM_GLOW_W_FRAC, MOLE_VIEW_SEAM_GLOW_H_FRAC,
     MOLE_VIEW_SPARK_SPEED_FRAC, MOLE_VIEW_CROSS_GLOW_FRAC,
-    MOLE_VIEW_CROSS_STRIKE_OFFSET_FRAC, MOLE_VIEW_KICK_MS)
+    MOLE_VIEW_CROSS_STRIKE_OFFSET_FRAC, MOLE_VIEW_CROSS_STRIKE_LW_FRAC,
+    MOLE_VIEW_CROSS_STRIKE_PAD_FRAC, MOLE_VIEW_CROSS_STRIKE_RING_LW_FRAC,
+    MOLE_VIEW_KICK_MS)
 from chessshootout.frontend.skillcheck.mole_art import (
     MOLE_VIEW_BLOOM_BUCKETS, MOLE_VIEW_BLOOM_SPIN_DEG, MOLE_VIEW_CROSS_ARC_PAD_FRAC,
     MOLE_VIEW_CROSS_ARC_SPAN_DEG, MOLE_VIEW_CROSS_BLADE_W_FRAC,
     MOLE_VIEW_CROSS_OUT_BUCKETS, MOLE_VIEW_CROSS_OUT_SCALE, MOLE_VIEW_CROSS_TIP_W_FRAC,
     MOLE_VIEW_SEAM_GLOW_CORE,
-    _pit_telegraph_surface, _pit_surface, _pit_front_surface, _seam_band_surface,
-    _seam_glow_surface, _pit_mouth, _emerge_mask, _crosshair_surface,
-    _cross_glow_surface, _strike_cross_surface, _MOLE_STATIC_CACHE)
+    pit_telegraph_surface, pit_surface, pit_front_surface, seam_band_surface,
+    seam_glow_surface, pit_mouth, emerge_mask, crosshair_surface,
+    cross_glow_surface, _MOLE_STATIC_CACHE)
 from chessshootout.frontend.skillcheck.registry import CheckSpec, build_controller
+from chessshootout.frontend.visual.draw import strike_pip_surface, _STRIKE_PIP_CACHE
 from chessshootout.skillcheck.mole import MOLE_RECOIL_LOCKOUT_MS
 from chessshootout.frontend.visual.colors import Colors
 from chessshootout.skillcheck.types import SkillCheckKind
@@ -635,9 +643,9 @@ def test_danger_telegraph_hard_blinks_and_fattens_the_rim_at_the_same_bucket():
     # two hard states (loss-red -> near-white) and the hot state also thickens the
     # rim, so a mandatory pop cannot be missed.
     rx, ry = 33, 19
-    cold = _pit_telegraph_surface(rx, ry, 0, danger=True)
-    hot = _pit_telegraph_surface(rx, ry, 1, danger=True)
-    plain = _pit_telegraph_surface(rx, ry, 1, danger=False)
+    cold = pit_telegraph_surface(rx, ry, 0, danger=True)
+    hot = pit_telegraph_surface(rx, ry, 1, danger=True)
+    plain = pit_telegraph_surface(rx, ry, 1, danger=False)
     assert pg.image.tostring(hot, "RGBA") != pg.image.tostring(cold, "RGBA"), \
         "the two blink states are different surfaces, not neighbours on a ramp"
     assert pg.image.tostring(hot, "RGBA") != pg.image.tostring(plain, "RGBA"), \
@@ -797,8 +805,41 @@ def test_last_hit_pop_defaults_to_no_hits_and_threads_through_the_registry():
         CheckSpec(seed="s", cell_rect=pg.Rect(3 * _CELL, 4 * _CELL, _CELL, _CELL),
                   now_ms=0, deadline_ms=5000, value_diff=2, captured_value=4,
                   hole_squares=_HOLES, geom=_geom_for(_CELL),
-                  victim_surface=_victim(_CELL), progress=1, last_hit_pop=2))
+                  victim_surface=_victim(_CELL), progress=1, last_hit_pop=2,
+                  miss_count=2))
     assert built._last_hit_pop == 2, "the registry threads the snapshot value to the mole"
+    assert built._progress == 1
+    assert built._miss_count == 2, \
+        "and the whiff count too — dropping it here re-armed a resumed row at 0 of 3"
+
+
+def test_a_resumed_whack_shows_the_servers_whiffs_and_the_next_one_is_the_last():
+    # The server holds the authoritative count; the resumed client used to rebuild
+    # the row at zero, so a player on two whiffs saw one struck cross while the
+    # server failed the check on his third.
+    ctrl = _mole(miss_count=MOLE_MAX_WHIFFS - 1, from_sq=_STRIKE_ATTACKER)
+    anchor = _geom_for(_CELL)(_STRIKE_ATTACKER)
+    surf = pg.Surface((640, 640))
+    surf.fill((30, 30, 30))
+    ctrl.update(800)
+    ctrl.draw(surf)
+    seeded = _strike_band_count(surf, ctrl, anchor)
+    assert seeded > 0, "the restored row shows the server's whiffs the frame it opens"
+    ctrl.handle_event(_click((600, 600)))
+    assert ctrl._miss_count == MOLE_MAX_WHIFFS, "the next whiff counts up from the seed"
+    assert ctrl.landed is False, "and it is the third — the client agrees with the server"
+    surf.fill((30, 30, 30))
+    ctrl.draw(surf)
+    assert _strike_band_count(surf, ctrl, anchor) > seeded, "the last slot fills too"
+
+
+def test_a_resumed_whack_mirror_shows_the_servers_whiffs():
+    ctrl = _mole(passive=True, miss_count=2, from_sq=_STRIKE_ATTACKER)
+    assert ctrl._miss_count == 2, "the spectate mirror restores the same count"
+    ctrl.update(700)
+    ctrl.spectate_shot(600.0, 2, False, progress=0, target=(7.5, 7.5))
+    assert ctrl._miss_count == MOLE_MAX_WHIFFS, \
+        "and the relayed pre-increment count still drives it forward from there"
 
 
 def test_whack_hit_plays_the_pitch_ladder_index():
@@ -1056,8 +1097,8 @@ def test_seam_sparks_are_skipped_when_there_is_no_body_to_hang_them_on():
 
 
 def test_the_seam_band_is_a_shared_cached_module_surface():
-    band = _seam_band_surface(40, 12)
-    assert _seam_band_surface(40, 12) is band, "one band per size, shared by every composite"
+    band = seam_band_surface(40, 12)
+    assert seam_band_surface(40, 12) is band, "one band per size, shared by every composite"
     assert ("seam", 40, 12) in _MOLE_STATIC_CACHE
     assert band.get_size() == (40, 12)
     core = band.get_at((20, 6))
@@ -1138,8 +1179,8 @@ def test_a_damaged_victim_glows_along_the_seam_past_both_body_edges():
 
 
 def test_the_seam_glow_bar_is_a_shared_cached_module_surface():
-    bar = _seam_glow_surface(60, 8)
-    assert _seam_glow_surface(60, 8) is bar, "one bar per size, not one per frame"
+    bar = seam_glow_surface(60, 8)
+    assert seam_glow_surface(60, 8) is bar, "one bar per size, not one per frame"
     assert ("seamglow", 60, 8) in _MOLE_STATIC_CACHE
     assert bar.get_size() == (60, 8)
     core = bar.get_at((30, 4))
@@ -1616,7 +1657,7 @@ def test_the_live_reticle_re_blits_one_cached_surface_and_one_glow(monkeypatch):
     key = ("cross", ctrl._cross_arm, ctrl._cross_gap, ctrl._cross_lw, 0, 0)
     glow_r = max(int(ctrl.cell_size * MOLE_VIEW_CROSS_GLOW_FRAC), 6)
     assert key in _MOLE_STATIC_CACHE
-    assert _MOLE_STATIC_CACHE[("crossglow", glow_r)] is _cross_glow_surface(glow_r)
+    assert _MOLE_STATIC_CACHE[("crossglow", glow_r)] is cross_glow_surface(glow_r)
     before = {k for k in _MOLE_STATIC_CACHE if k[0] in ("cross", "crossglow")}
     for dt in range(1, 51):
         ctrl.update(600 + dt)
@@ -1635,8 +1676,8 @@ def _amber_on_east_ray(surf):
 
 
 def test_full_bloom_spreads_the_reticle_and_sweeps_the_heated_ring_across_the_gap():
-    rest = _crosshair_surface(15, 4, 2, 0, 0)
-    full = _crosshair_surface(15, 4, 2, MOLE_VIEW_BLOOM_BUCKETS, 0)
+    rest = crosshair_surface(15, 4, 2, 0, 0)
+    full = crosshair_surface(15, 4, 2, MOLE_VIEW_BLOOM_BUCKETS, 0)
     assert full.get_bounding_rect().width > rest.get_bounding_rect().width, \
         "recoil pushes the blades and ring outward"
     assert not _amber_on_east_ray(rest), \
@@ -1696,7 +1737,7 @@ def _bright_span(surf, x, c):
 
 
 def test_reticle_anatomy_amber_dot_needle_blades_dark_contour_and_aligned_ring_gaps():
-    surf = _crosshair_surface(15, 4, 2, 0, 0)
+    surf = crosshair_surface(15, 4, 2, 0, 0)
     c = surf.get_width() // 2
     center = surf.get_at((c, c))
     amber = pg.Color(Colors.amber_hi)
@@ -1739,9 +1780,9 @@ def _corners_stay_board(surface):
 
 
 def test_reticle_surfaces_are_transparent_off_the_marks_at_rest_bloom_and_fade():
-    idle = _crosshair_surface(15, 4, 2, 0, 0)
-    bloomed = _crosshair_surface(15, 4, 2, MOLE_VIEW_BLOOM_BUCKETS, 0)
-    fading = _crosshair_surface(15, 4, 2, 0, MOLE_VIEW_CROSS_OUT_BUCKETS // 2)
+    idle = crosshair_surface(15, 4, 2, 0, 0)
+    bloomed = crosshair_surface(15, 4, 2, MOLE_VIEW_BLOOM_BUCKETS, 0)
+    fading = crosshair_surface(15, 4, 2, 0, MOLE_VIEW_CROSS_OUT_BUCKETS // 2)
     for surface in (idle, bloomed, fading):
         assert _corners_stay_board(surface), \
             "an opaque backing surface would stamp a dark box over the board"
@@ -1777,7 +1818,7 @@ def test_the_draw_path_never_darkens_the_board_around_the_crosshair(monkeypatch)
     surf.fill(board)
     ctrl.update(600)
     ctrl._draw_crosshair(surf)
-    half = _crosshair_surface(ctrl._cross_arm, ctrl._cross_gap, ctrl._cross_lw,
+    half = crosshair_surface(ctrl._cross_arm, ctrl._cross_gap, ctrl._cross_lw,
                               0, 0).get_width() // 2
     for dx, dy in ((-1, -1), (1, -1), (-1, 1), (1, 1)):
         p = surf.get_at((at[0] + dx * (half - 1), at[1] + dy * (half - 1)))
@@ -2072,7 +2113,7 @@ def test_the_body_fades_in_across_the_mouth_line_instead_of_hard_cutting():
     assert fade == max(int(ctrl._mouth_ry * MOLE_VIEW_EMERGE_FADE_FRAC), 2), \
         "the band is a fraction of the mouth's own depth, never a fixed pixel count"
     assert _mole(cell=2 * _CELL)._emerge_fade > fade, "so it scales with the board"
-    mask = _emerge_mask(_CELL, ctrl._mouth_rx, ctrl._mouth_ry, fade)
+    mask = emerge_mask(_CELL, ctrl._mouth_rx, ctrl._mouth_ry, fade)
     column = [mask.get_at((_CELL // 2, y)).a for y in range(mask.get_height())]
     band = column[ctrl._mouth_ry:ctrl._mouth_ry + fade]
     assert column[ctrl._mouth_ry - 1] == 255, "solid body right up to the band"
@@ -2100,8 +2141,8 @@ def test_the_mouth_the_mask_carves_is_the_mouth_the_pit_sprite_draws(cell):
     # Both are derived off the same inset/rim fractions, so the arc can never
     # drift off the hole it is supposed to be the near lip of.
     ctrl = _mole(cell=cell)
-    rx, ry = _dark_extent(_pit_surface(ctrl._pit_rx, ctrl._pit_ry))
-    assert _pit_mouth(ctrl._pit_rx, ctrl._pit_ry) == (ctrl._mouth_rx, ctrl._mouth_ry)
+    rx, ry = _dark_extent(pit_surface(ctrl._pit_rx, ctrl._pit_ry))
+    assert pit_mouth(ctrl._pit_rx, ctrl._pit_ry) == (ctrl._mouth_rx, ctrl._mouth_ry)
     assert ctrl._mouth_rx == pytest.approx(rx, abs=1), \
         "the arc is measured through the same supersample the pit is drawn through"
     assert ctrl._mouth_ry == pytest.approx(ry, abs=1)
@@ -2112,8 +2153,8 @@ def test_the_mouth_the_mask_carves_is_the_mouth_the_pit_sprite_draws(cell):
 def test_the_emergence_mask_and_its_scratch_are_cached_and_bounded():
     ctrl = _mole(victim_surface=_solid_victim())
     key = ("emerge", _CELL, ctrl._mouth_rx, ctrl._mouth_ry, ctrl._emerge_fade)
-    mask = _emerge_mask(_CELL, ctrl._mouth_rx, ctrl._mouth_ry, ctrl._emerge_fade)
-    assert _emerge_mask(_CELL, ctrl._mouth_rx, ctrl._mouth_ry, ctrl._emerge_fade) is mask
+    mask = emerge_mask(_CELL, ctrl._mouth_rx, ctrl._mouth_ry, ctrl._emerge_fade)
+    assert emerge_mask(_CELL, ctrl._mouth_rx, ctrl._mouth_ry, ctrl._emerge_fade) is mask
     assert key in _MOLE_STATIC_CACHE, "one mask per sprite width and pit mouth, shared"
     surf = pg.Surface((640, 640))
     pop = ctrl.challenge.pops[0]
@@ -2362,11 +2403,11 @@ def test_the_intro_sink_runs_the_emergence_model_backwards():
 
 
 def test_the_pit_lip_is_the_front_half_of_the_pit_sprite():
-    front = _pit_front_surface(30, 18)
-    pit = _pit_surface(30, 18)
+    front = pit_front_surface(30, 18)
+    pit = pit_surface(30, 18)
     assert front.get_width() == pit.get_width()
     assert front.get_height() == pit.get_height() // 2, "only the near rim is redrawn"
-    assert _pit_front_surface(30, 18) is front, "one lip per pit size, cached like the pit"
+    assert pit_front_surface(30, 18) is front, "one lip per pit size, cached like the pit"
     assert ("pit_front", 30, 18) in _MOLE_STATIC_CACHE
 
 
@@ -2456,6 +2497,18 @@ def test_casings_never_pile_up_across_a_long_check():
 
 
 _STRIKE_ATTACKER = Square(2, 6)
+
+# The strike slot is minted by the SHARED draw.strike_pip_surface builder combo's
+# wrong-pips use; the mole binds it to its own knob family, so the cache key the
+# controller lands on is the (size, struck) pair plus that triple of fractions.
+_STRIKE_KNOBS = (MOLE_VIEW_CROSS_STRIKE_LW_FRAC, MOLE_VIEW_CROSS_STRIKE_PAD_FRAC,
+                 MOLE_VIEW_CROSS_STRIKE_RING_LW_FRAC)
+
+
+def _strike_cross(size, struck):
+    return strike_pip_surface(size, struck, lw_frac=MOLE_VIEW_CROSS_STRIKE_LW_FRAC,
+                              pad_frac=MOLE_VIEW_CROSS_STRIKE_PAD_FRAC,
+                              ring_lw_frac=MOLE_VIEW_CROSS_STRIKE_RING_LW_FRAC)
 
 
 def _strike_band_count(surf, ctrl, anchor):
@@ -2603,7 +2656,7 @@ def test_strike_crosses_fade_with_the_pip_outro_and_restore_the_shared_alpha():
     mid_fade = _draw_at(ctrl, 2000 + MOLE_VIEW_PIP_FADE_DELAY_MS + MOLE_VIEW_PIP_FADE_MS / 2)
     assert _strike_band_count(mid_fade, ctrl, anchor) == 0, \
         "mid-fade the blend is no longer the pure hue — the row is genuinely dimming"
-    struck = _strike_cross_surface(ctrl._strike_size, True)
+    struck = _strike_cross(ctrl._strike_size, True)
     assert struck.get_alpha() == 255, \
         "the faded blit restores the cached surface to 255, never a lingering dim or None"
     gone = _draw_at(ctrl, 2000 + MOLE_VIEW_PIP_FADE_DELAY_MS + MOLE_VIEW_PIP_FADE_MS + 20)
@@ -2618,13 +2671,28 @@ def test_strike_cross_surfaces_are_cached_per_size_and_state():
     surf = pg.Surface((640, 640))
     ctrl.draw(surf)
     size = ctrl._strike_size
-    assert ("strike", size, True) in _MOLE_STATIC_CACHE
-    assert ("strike", size, False) in _MOLE_STATIC_CACHE, \
-        "one draw pass materialises both slot states into the module cache"
-    assert _strike_cross_surface(size, True) is _strike_cross_surface(size, True), \
+    assert (size, True, *_STRIKE_KNOBS) in _STRIKE_PIP_CACHE
+    assert (size, False, *_STRIKE_KNOBS) in _STRIKE_PIP_CACHE, \
+        "one draw pass materialises both slot states into the shared builder's cache"
+    assert _strike_cross(size, True) is _strike_cross(size, True), \
         "every later frame reuses the cached sprite"
-    assert pg.image.tostring(_strike_cross_surface(size, True), "RGBA") != \
-        pg.image.tostring(_strike_cross_surface(size, False), "RGBA")
+    assert pg.image.tostring(_strike_cross(size, True), "RGBA") != \
+        pg.image.tostring(_strike_cross(size, False), "RGBA")
+
+
+def test_the_strike_slot_is_the_same_sprite_combo_mints_for_its_wrong_pips():
+    # One builder, two knob families: while the two families hold the same values
+    # the mole's strike cross and combo's wrong pip are literally the same cached
+    # surface — the duplicated render body that used to mint them twice is gone.
+    from chessshootout.frontend.skillcheck.combo_view import _pip_surface
+    for struck in (True, False):
+        assert _strike_cross(24, struck) is _pip_surface(24, struck), \
+            "identical knobs collapse onto one cache entry, so the pixels cannot drift"
+    tuned = strike_pip_surface(24, True, lw_frac=MOLE_VIEW_CROSS_STRIKE_LW_FRAC * 2,
+                               pad_frac=MOLE_VIEW_CROSS_STRIKE_PAD_FRAC,
+                               ring_lw_frac=MOLE_VIEW_CROSS_STRIKE_RING_LW_FRAC)
+    assert pg.image.tostring(tuned, "RGBA") != pg.image.tostring(_strike_cross(24, True), "RGBA"), \
+        "and the families stay independently tunable — a knob change really re-renders"
 
 
 def test_flipped_board_keeps_the_strike_crosses_under_the_attacker():
@@ -2705,14 +2773,49 @@ def _short_victim(cell=_CELL, headroom_frac=0.4):
 def test_the_seam_travel_stops_at_the_visible_top_of_a_short_piece():
     # The scanner line knits body-bottom to head; it must never keep climbing
     # through the transparent air above a short piece's head. The whole travel
-    # (glow, sparks and the sprite band all route through _seam_y) spans the
-    # victim's visible bounding box, not the full cell-height surface.
+    # (glow, sparks and the sprite band all route through the one bbox clamp in
+    # _seam_offset) spans the victim's visible bounding box, not the full
+    # cell-height surface.
     ctrl = _mole(victim_surface=_short_victim())
     bbox = ctrl._victim_bbox
     assert bbox.top > 0, "the probe sprite must actually have headroom"
     rect = pg.Rect(100, 100, _CELL, _CELL)
     assert ctrl._seam_y(rect, 0.0) == rect.top + bbox.top
     assert ctrl._seam_y(rect, 1.0) == rect.top + bbox.bottom
+
+
+def _band_rows(sprite):
+    # The additive seam band is the only thing in the composite that brightens a
+    # pixel past the probe body's own (200, 200, 210); BLEND_RGB_ADD leaves alpha
+    # alone, so a band laid over the transparent headroom paints nothing at all.
+    return [y for y in range(sprite.get_height())
+            if any(sprite.get_at((x, y))[3] > 0 and max(sprite.get_at((x, y))[:3]) > 215
+                   for x in range(sprite.get_width()))]
+
+
+_BAND_POPS = tuple(MolePop(p.hole, p.t_telegraph_ms + 1.5, p.t_up_ms, p.t_down_ms)
+                   for p in _POPS)
+
+
+def test_the_in_sprite_heal_band_rides_the_same_clamped_seam_as_the_world_glow():
+    # The band baked into the heal composite and the world-space glow bar are two
+    # halves of ONE line, so they read the same bbox-clamped offset. An unclamped
+    # sprite band would walk the full surface height while the glow walked the
+    # bounding box: on a short piece the last buckets would cut the band up in the
+    # transparent headroom, painting NOTHING while the glow bar still rode the head.
+    ctrl = _mole(challenge=_challenge(pops=_BAND_POPS), victim_surface=_short_victim(),
+                 progress=1)
+    bbox = ctrl._victim_bbox
+    rect = pg.Rect(100, 100, _CELL, _CELL)
+    for bucket in (1, MOLE_VIEW_HEAL_BUCKETS // 2, MOLE_VIEW_HEAL_BUCKETS - 1):
+        frac = 1.0 - bucket / MOLE_VIEW_HEAL_BUCKETS
+        rows = _band_rows(ctrl._build_heal_sprite(1, bucket))
+        assert rows, "bucket {} paints a band on the body, not in the headroom".format(bucket)
+        assert bbox.top <= min(rows) and max(rows) <= bbox.bottom, \
+            "bucket {} keeps the whole band inside the visible body".format(bucket)
+        assert ctrl._seam_y(rect, frac) == rect.top + ctrl._seam_offset(
+            frac, ctrl._victim.get_height()), \
+            "and the world-space glow rides the very offset the band was cut at"
 
 
 def test_a_full_height_victim_keeps_the_full_travel():

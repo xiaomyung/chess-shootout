@@ -30,13 +30,10 @@ MOLE_VIEW_MUZZLE_RAY_W_DIV = 6
 MOLE_VIEW_WIN_POP_GAIN = 0.85
 MOLE_VIEW_SEAM_WHITE_CORE = 0.6
 MOLE_VIEW_SEAM_GLOW_CORE = 0.8
-MOLE_VIEW_CROSS_STRIKE_LW_FRAC = 0.12
-MOLE_VIEW_CROSS_STRIKE_PAD_FRAC = 0.28
-MOLE_VIEW_CROSS_STRIKE_RING_LW_FRAC = 0.1
 MOLE_VIEW_CASING_TIP_DIV = 4
 MOLE_VIEW_CASING_SPIN_BUCKET_DEG = 20
 
-_PIT_DARK = pg.Color(Colors.well_deep)
+PIT_DARK = pg.Color(Colors.well_deep)
 _CROSS_COLOR = pg.Color(Colors.text)
 _CROSS_EDGE = pg.Color(Colors.bg)
 _CROSS_ARC = pg.Color(Colors.accent)
@@ -62,18 +59,18 @@ def _pit_render(rim_color, glow_alpha, rim_scale=1.0):
         outer = pg.Rect(inset_x, inset_y, w - 2 * inset_x, h - 2 * inset_y)
         pg.draw.ellipse(surf, rim, outer)
         rim_w = max(int(outer.height * MOLE_VIEW_PIT_RIM_FRAC * rim_scale), 1)
-        pg.draw.ellipse(surf, _PIT_DARK, outer.inflate(-2 * rim_w, -2 * rim_w))
+        pg.draw.ellipse(surf, PIT_DARK, outer.inflate(-2 * rim_w, -2 * rim_w))
     return render
 
 
-def _pit_surface(rx, ry):
+def pit_surface(rx, ry):
     def build():
         return supersample((2 * rx, 2 * ry),
                            _pit_render(Colors.accent, MOLE_VIEW_PIT_GLOW_ALPHA))
     return memoized_surface(_MOLE_STATIC_CACHE, ("pit", rx, ry), build)
 
 
-def _pit_mouth(rx, ry):
+def pit_mouth(rx, ry):
     w, h = 2 * rx * SUPERSAMPLE, 2 * ry * SUPERSAMPLE
     inset_x = int(w * MOLE_VIEW_PIT_INSET_FRAC)
     inset_y = int(h * MOLE_VIEW_PIT_INSET_FRAC)
@@ -82,7 +79,7 @@ def _pit_mouth(rx, ry):
             max((h // 2 - inset_y - rim) // SUPERSAMPLE, 1))
 
 
-def _emerge_mask(w, rx, ry, fade):
+def emerge_mask(w, rx, ry, fade):
     def build():
         mask = pg.Surface((w, ry + fade + 1), pg.SRCALPHA)
         half = w / 2.0
@@ -96,9 +93,9 @@ def _emerge_mask(w, rx, ry, fade):
     return memoized_surface(_MOLE_STATIC_CACHE, ("emerge", w, rx, ry, fade), build)
 
 
-def _pit_front_surface(rx, ry):
+def pit_front_surface(rx, ry):
     def build():
-        pit = _pit_surface(rx, ry)
+        pit = pit_surface(rx, ry)
         half = max(pit.get_height() // 2, 1)
         front = pg.Surface((pit.get_width(), half), pg.SRCALPHA)
         front.blit(pit, (0, half - pit.get_height()))
@@ -106,7 +103,7 @@ def _pit_front_surface(rx, ry):
     return memoized_surface(_MOLE_STATIC_CACHE, ("pit_front", rx, ry), build)
 
 
-def _seam_band_surface(w, h):
+def seam_band_surface(w, h):
     def build():
         band = pg.Surface((w, h), pg.SRCALPHA)
         hot = pg.Color(Colors.amber_hi)
@@ -122,7 +119,7 @@ def _seam_band_surface(w, h):
     return memoized_surface(_MOLE_STATIC_CACHE, ("seam", w, h), build)
 
 
-def _seam_glow_surface(w, h):
+def seam_glow_surface(w, h):
     def build():
         surf = pg.Surface((w, h))
         hot = pg.Color(Colors.amber_hi)
@@ -167,7 +164,7 @@ def _render_cross_blades(surf, k, c, gap, arm, tip_half, base_half):
             c, ux, uy, gap * k, (gap + arm) * k, tip_half * k, base_half * k))
 
 
-def _crosshair_surface(arm, gap, lw, bloom_bucket, out_bucket):
+def crosshair_surface(arm, gap, lw, bloom_bucket, out_bucket):
     def build():
         bloom = bloom_bucket / MOLE_VIEW_BLOOM_BUCKETS
         s = (1.0 - (1.0 - MOLE_VIEW_CROSS_OUT_SCALE)
@@ -200,7 +197,7 @@ def _crosshair_surface(arm, gap, lw, bloom_bucket, out_bucket):
     return memoized_surface(_MOLE_STATIC_CACHE, key, build)
 
 
-def _cross_glow_surface(r):
+def cross_glow_surface(r):
     def build():
         surf = pg.Surface((2 * r, 2 * r))
         for i in range(r, 0, -1):
@@ -210,26 +207,6 @@ def _cross_glow_surface(r):
             pg.draw.circle(surf, col, (r, r), i)
         return surf
     return memoized_surface(_MOLE_STATIC_CACHE, ("crossglow", r), build)
-
-
-def _strike_cross_surface(size, struck):
-    def build():
-        def render(surf, k):
-            w = surf.get_width()
-            r = w / 2.0
-            if struck:
-                pg.draw.circle(surf, pg.Color(Colors.loss), (r, r), r)
-                lw = max(int(w * MOLE_VIEW_CROSS_STRIKE_LW_FRAC), 2)
-                pad = w * MOLE_VIEW_CROSS_STRIKE_PAD_FRAC
-                pg.draw.line(surf, pg.Color(Colors.on_accent), (pad, pad),
-                             (w - pad, w - pad), lw)
-                pg.draw.line(surf, pg.Color(Colors.on_accent), (w - pad, pad),
-                             (pad, w - pad), lw)
-            else:
-                lw = max(int(w * MOLE_VIEW_CROSS_STRIKE_RING_LW_FRAC), 2)
-                pg.draw.circle(surf, pg.Color(Colors.border_strong), (r, r), r - lw, lw)
-        return supersample((size, size), render)
-    return memoized_surface(_MOLE_STATIC_CACHE, ("strike", size, struck), build)
 
 
 def _danger_render(bucket):
@@ -249,14 +226,14 @@ def _telegraph_render(bucket):
     return _pit_render(rim, alpha)
 
 
-def _pit_telegraph_surface(rx, ry, bucket, danger=False):
+def pit_telegraph_surface(rx, ry, bucket, danger=False):
     def build():
         render = _danger_render(bucket) if danger else _telegraph_render(bucket)
         return supersample((2 * rx, 2 * ry), render)
     return memoized_surface(_MOLE_STATIC_CACHE, ("pit_tele", rx, ry, bucket, danger), build)
 
 
-def _muzzle_surface(r):
+def muzzle_surface(r):
     def build():
         surf = pg.Surface((2 * r, 2 * r))
         hot = pg.Color(Colors.amber_hi)
@@ -272,7 +249,7 @@ def _muzzle_surface(r):
     return memoized_surface(_MOLE_STATIC_CACHE, ("muzzle", r), build)
 
 
-def _win_pop_surface(r):
+def win_pop_surface(r):
     def build():
         surf = pg.Surface((2 * r, 2 * r))
         warm = pg.Color(Colors.amber)
@@ -295,7 +272,7 @@ def _casing_surface(w, h):
     return memoized_surface(_MOLE_STATIC_CACHE, ("casing", w, h), build)
 
 
-def _casing_rotated(w, h, bucket):
+def casing_rotated(w, h, bucket):
     def build():
         base = _casing_surface(w, h)
         deg = bucket * MOLE_VIEW_CASING_SPIN_BUCKET_DEG
