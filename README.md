@@ -314,10 +314,11 @@ CI installs from the committed `uv.lock` rather than resolving fresh, so every
 job (and every published binary) gets the exact pinned dependency set. To
 reproduce that environment locally: `uv sync --extra dev`.
 
-These gate merges to `master` (the `test` and `lint` jobs); a third required
-check, `version-bump`, fails any PR that doesn't change `pyproject.toml`'s
-`[project].version`. So a green local run **plus a version bump** means the PR
-checks will pass.
+These gate merges to `master` (the `test` and `lint` jobs), alongside two more
+required checks: `version-bump` fails any PR that doesn't change
+`pyproject.toml`'s `[project].version`, and `lock-check` fails any PR where
+`uv.lock` has drifted from `pyproject.toml`. `make bump` moves both together, so
+a green local run **plus a version bump** means the PR checks will pass.
 
 ### Releasing
 
