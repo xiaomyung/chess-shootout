@@ -151,8 +151,8 @@ server = [
 
 [package.metadata]
 requires-dist = [
-    { name = "cairosvg", marker = "extra == 'build'", specifier = ">=2.7" },
-    { name = "certifi", marker = "extra == 'client'" },
+    { name = "cairosvg", marker = "extra == 'build'", specifier = ">=2.7,<3" },
+    { name = "certifi", marker = "extra == 'client'", specifier = "==2026.5.20" },
     { name = "chess-shootout", extras = ["client"], marker = "extra == 'build'" },
     { name = "chess-shootout", extras = ["client", "server"], marker = "extra == 'dev'" },
     { name = "coverage", extras = ["toml"], marker = "extra == 'dev'", specifier = "==7.14.1" },

@@ -125,12 +125,26 @@ cd /srv/chess-shootout
 ./deploy/update.sh v2.1.5
 ```
 
-The script pulls the matching CI-built (and trivy-scanned) image from GHCR, refreshes
-the compose file from git, recreates the `gameserver` container with the graceful
-`server_shutdown` drain, and reports the installed version before and after
-(`was <ver>@<digest> -> now <ver>@<digest>`, read from `/healthz`). Each run is appended
-to `deploy/update.log` (UTC, gitignored). It falls back to `sudo` automatically when
-your shell isn't in the `docker` group.
+The script pulls the matching CI-built image from GHCR, refreshes the compose file from
+git, recreates the `gameserver` container with the graceful `server_shutdown` drain, and
+reports the installed version before and after (`was <ver>@<digest> -> now
+<ver>@<digest>`, read from `/healthz`). Each run is appended to `deploy/update.log` (UTC,
+gitignored). It falls back to `sudo` automatically when your shell isn't in the `docker`
+group.
+
+A failed pull **aborts the update** and leaves the running container untouched — the
+`up` passes `--no-build`, so a missing or unreachable image can never fall through to
+building the compose file's `build:` stage from whatever source happens to be checked
+out on the box.
+
+### Image scanning is advisory, not a gate
+
+`docker.yml` pushes the image to GHCR **first**, then runs a trivy scan as a
+non-blocking reporting step (`continue-on-error`, table output to the job log, no
+failing exit code). It flags HIGH/CRITICAL findings that already have fixes available,
+but it does **not** hold back a release — a tag with a CRITICAL finding is published and
+pullable exactly like any other. Read the scan output in the workflow log when deciding
+whether to deploy a build.
 
 ## Operations
 

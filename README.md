@@ -20,7 +20,8 @@ server for online two-player matches.
   it is multi-shot, and every miss escalates the sway and shrink.
 - **Whack-a-Mole** — the captured piece dives into a pit and pops back from a
   ring of glowing holes; land its quota of shots before it ducks away for good —
-  three on a pawn, four on a knight, bishop or rook, all five on a queen.
+  three on a pawn, four on a knight, bishop or rook, all five on a queen — and
+  three whiffed shots miss it.
 - **Combo** — a strip of arrow prompts scrolls in; punch each direction in order
   with the Arrows/WASD keys or the on-screen pad, and three wrong inputs miss it.
 - Online, the server adjudicates every shot and your opponent watches a live,
@@ -308,6 +309,10 @@ pip install -e ".[dev]"
 pytest tests -n 8 -q                            # run the test suite
 pylama chessshootout tests                      # pycodestyle + pyflakes; exits 0 when clean
 ```
+
+CI installs from the committed `uv.lock` rather than resolving fresh, so every
+job (and every published binary) gets the exact pinned dependency set. To
+reproduce that environment locally: `uv sync --extra dev`.
 
 These gate merges to `master` (the `test` and `lint` jobs); a third required
 check, `version-bump`, fails any PR that doesn't change `pyproject.toml`'s
