@@ -193,6 +193,66 @@ def test_wheel_still_never_suppresses_a_square():
     app.game.skillcheck_session.teardown_skillcheck_overlay()
 
 
+def test_combo_suppresses_the_attacker_square_and_teardown_restores_it():
+    # the combo overlay draws its own bopping capturer copy at from_sq; without
+    # suppression the board's static sprite showed through under the bop as a
+    # second piece (user-reported double-draw).
+    app = _local_app()
+    frm, to, _ = _gate(app, SkillCheckKind.COMBO)
+    assert app.game.board.attacker_suppressed_square == frm, \
+        "the overlay owns drawing the dancing capturer"
+    app.game.skillcheck_session.teardown_skillcheck_overlay()
+    assert app.game.board.attacker_suppressed_square is None
+
+
+@pytest.mark.parametrize("kind", [SkillCheckKind.WHEEL, SkillCheckKind.AIM,
+                                  SkillCheckKind.WHACK])
+def test_only_combo_suppresses_the_attacker_square(kind):
+    app = _local_app()
+    _gate(app, kind)
+    assert app.game.board.attacker_suppressed_square is None, \
+        "{}: no other kind draws an attacker copy".format(kind.value)
+    app.game.skillcheck_session.teardown_skillcheck_overlay()
+
+
+def test_done_handler_restores_the_attacker_suppression():
+    app = _local_app()
+    frm, to, _ = _gate(app, SkillCheckKind.COMBO)
+    context = app.game.skillcheck_overlay._context
+    app.game.skillcheck_overlay.cancel()
+    app.game.skillcheck_session._on_skillcheck_done(context, False)
+    assert app.game.board.attacker_suppressed_square is None
+
+
+def test_board_reset_clears_the_attacker_suppression():
+    app = _local_app()
+    _gate(app, SkillCheckKind.COMBO)
+    app.game.board.reset_for_new_game()
+    assert app.game.board.attacker_suppressed_square is None
+
+
+def test_board_draw_skips_the_suppressed_attacker_square():
+    # the regression probe for the double-draw itself: with a combo open the
+    # board must leave the capturer's cell untouched (the overlay draws the only
+    # copy) while every other piece still renders.
+    app = _local_app()
+    frm, to, _ = _gate(app, SkillCheckKind.COMBO)
+    board = app.game.board
+    fill = (3, 4, 5, 255)
+    board.window.fill(fill)
+    board.draw_pieces()
+
+    def region_untouched(square):
+        rect = board.cell_rect(square)
+        return all(board.window.get_at((x, y)) == fill
+                   for x in range(rect.left, rect.right, 4)
+                   for y in range(rect.top, rect.bottom, 4))
+
+    assert region_untouched(frm), "the suppressed capturer square stays empty"
+    assert region_untouched(to), "the suppressed victim square stays empty"
+    assert not region_untouched(sq(7, 4)), "the white king still renders"
+
+
 def test_sync_aim_check_gun_is_inert_for_whack_and_combo():
     app = _local_app()
     for want in (SkillCheckKind.WHACK, SkillCheckKind.COMBO):

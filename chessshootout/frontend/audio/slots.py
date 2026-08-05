@@ -69,6 +69,7 @@ def _build_slots():
     slots["combo_wrong"] = Slot("combo_wrong", "skillcheck/combo_wrong")
     slots["combo_complete"] = Slot("combo_complete", "skillcheck/combo_complete")
     slots["combo_fail"] = Slot("combo_fail", "skillcheck/combo_fail")
+    slots["combo_streak"] = Slot("combo_streak", "skillcheck/combo_streak")
     slots["ui_click"] = Slot("ui_click_typewriter", "ui/clicks")
     slots["toast"] = Slot("toast_pop", "ui/toast")
     slots["pickup"] = Slot("pickup", "ui/pickup")

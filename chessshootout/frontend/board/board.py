@@ -147,6 +147,7 @@ class Board:
         self.pending_promotion_square = None
         self._promotion_from = None
         self.aim_suppressed_square = None
+        self.attacker_suppressed_square = None
         self.flipped = False
         self.animations = []
         self._restore_anims = []
@@ -195,6 +196,7 @@ class Board:
         self.effects.clear()
         self.clear_premoves()
         self.aim_suppressed_square = None
+        self.attacker_suppressed_square = None
         self.clear_all_annotations()
         self.end_press()
         self.review_ply = None
@@ -580,6 +582,8 @@ class Board:
         hidden |= {a["sq"] for a in self._restore_anims}
         if self.aim_suppressed_square is not None:
             hidden.add(self.aim_suppressed_square)
+        if self.attacker_suppressed_square is not None:
+            hidden.add(self.attacker_suppressed_square)
         if self.dragging_from is not None:
             hidden.add(self.dragging_from)
         settle_sq = self.drag.settle_target()

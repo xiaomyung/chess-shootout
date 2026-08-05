@@ -99,6 +99,8 @@ class SkillCheckSession:
             self._whack_gun_from = from_sq
             self._whack_gun_type = capturer.type.value if capturer is not None else None
         screen.board.aim_suppressed_square = target if kind in SUPPRESSING_KINDS else None
+        screen.board.attacker_suppressed_square = (
+            from_sq if kind == SkillCheckKind.COMBO else None)
         on_done = self._on_online_skillcheck_done if online else self._on_skillcheck_done
         screen.skillcheck_overlay.start(
             controller, (from_sq, to_sq, promo_type, kind), on_done)
@@ -218,6 +220,7 @@ class SkillCheckSession:
         screen.skillcheck_overlay.cancel()
         self.release_whack_gun()
         screen.board.aim_suppressed_square = None
+        screen.board.attacker_suppressed_square = None
         self.skillcheck_target = None
         self.active_kind = None
         self.active_seed = None
@@ -237,6 +240,7 @@ class SkillCheckSession:
         self.online_verdict_action = None
         self._end_whack_gun(kind)
         self.screen.board.aim_suppressed_square = None
+        self.screen.board.attacker_suppressed_square = None
         self.skillcheck_target = None
         self.active_kind = None
         self.active_seed = None
@@ -317,6 +321,7 @@ class SkillCheckSession:
         aim_victim = screen.board.aim_suppressed_square
         self._end_whack_gun(kind)
         screen.board.aim_suppressed_square = None
+        screen.board.attacker_suppressed_square = None
         self.active_kind = None
         self.active_seed = None
         if landed:

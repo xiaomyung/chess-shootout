@@ -47,6 +47,7 @@ WHACK_COMBO_SLOTS = {
     "combo_wrong": "skillcheck/combo_wrong",
     "combo_complete": "skillcheck/combo_complete",
     "combo_fail": "skillcheck/combo_fail",
+    "combo_streak": "skillcheck/combo_streak",
 }
 
 

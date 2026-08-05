@@ -15,7 +15,7 @@ from chessshootout.frontend.visual.draw import (
 from chessshootout.frontend.visual.emoji import emoji_surface
 from chessshootout.frontend.visual.fonts import get_display_font
 from chessshootout.skillcheck.combo import (
-    COMBO_WRONG_LOCKOUT_MS, COMBO_MAX_WRONGS, COMBO_MIN_INTER_PRESS_MS)
+    COMBO_INTRO_MS, COMBO_WRONG_LOCKOUT_MS, COMBO_MAX_WRONGS, COMBO_MIN_INTER_PRESS_MS)
 from chessshootout.skillcheck.online import SKILLCHECK_HUMAN_FLOOR_MS
 from chessshootout.skillcheck.rng import seeded_floats
 from chessshootout.skillcheck.wheel import SKILLCHECK_DEADLINE_MS
@@ -134,6 +134,23 @@ COMBO_VIEW_BOP_AMP_FRAC = 0.12
 COMBO_VIEW_SHUFFLE_AMP_FRAC = 0.06
 COMBO_VIEW_SHUFFLE_PERIOD = 90.0
 
+COMBO_VIEW_INTRO_FADE_MS = 200.0
+COMBO_VIEW_INTRO_RISE_FRAC = 0.18
+COMBO_VIEW_INTRO_ARROW_MS = 140.0
+COMBO_VIEW_INTRO_STAGGER_MS = 35.0
+COMBO_VIEW_INTRO_DROP_FRAC = 0.35
+
+COMBO_VIEW_PRESS_NUDGE_FRAC = 0.05
+COMBO_VIEW_PRESS_NUDGE_MS = 90.0
+
+COMBO_VIEW_JUDGE_FADE_FRAC = 0.45
+
+COMBO_VIEW_FIRE_IGNITE_MS = 220.0
+COMBO_VIEW_FIRE_IGNITE_RISE_FRAC = 0.8
+COMBO_VIEW_TRAUMA_IGNITE = 0.25
+
+COMBO_VIEW_EXIT_FADE_MS = 200.0
+
 COMBO_VIEW_FLASH_WHITE = "#ffffff"
 
 _RECEPTOR_DIRS = {"up": (0, -1), "down": (0, 1), "left": (-1, 0), "right": (1, 0)}
@@ -248,6 +265,7 @@ def _pad_static(radius, hub_r):
         base = supersample(2 * radius, render)
         for direction, (dx, dy) in _RECEPTOR_DIRS.items():
             arrow = _direction_chevron(chev, Colors.text_dim, direction)
+            arrow.set_alpha(255)
             cx = radius + dx * radius * COMBO_VIEW_CHEVRON_DIST_FRAC
             cy = radius + dy * radius * COMBO_VIEW_CHEVRON_DIST_FRAC
             base.blit(arrow, arrow.get_rect(center=(int(cx), int(cy))))
@@ -352,13 +370,17 @@ class ComboController(SkillCheckController):
         self._committed_at = None
         self._resolved_at = None
         self._closed = False
+        self._closed_at = None
         self._lockout_until = now_ms
         self._last_accept_ms = None
         self._torn_key = hash(challenge.prompts)
-        self._prompt_started_ms = now_ms
+        self._prompt_started_ms = now_ms + COMBO_INTRO_MS
         self._judgement = None
         self._judgement_at = now_ms
         self._brilliant_streak = 0
+        self._fire_started_ms = None
+        self._beat_phase = 0.0
+        self._press_nudge = None
         self._reset_effects()
         self._apply_geometry(cell_rect)
         self._cue("play_skillcheck_appear")
@@ -383,6 +405,8 @@ class ComboController(SkillCheckController):
         self._spot_layer = None
 
     def _apply_geometry(self, cell_rect):
+        self._cell_rect = pg.Rect(cell_rect)
+        self._flying = []
         self._cell = max(int(cell_rect.width), 1)
         cx, cy = (self._board_rect.center if self._board_rect is not None
                   else cell_rect.center)
@@ -439,8 +463,11 @@ class ComboController(SkillCheckController):
         self._apply_geometry(cell_rect)
 
     def set_board_rect(self, board_rect):
-        self._board_rect = pg.Rect(board_rect) if board_rect is not None else None
-        self._ensure_spot_layer()
+        new_rect = pg.Rect(board_rect) if board_rect is not None else None
+        if new_rect == self._board_rect:
+            return
+        self._board_rect = new_rect
+        self._apply_geometry(self._cell_rect)
 
     def handle_event(self, event):
         if self._passive:
@@ -479,6 +506,7 @@ class ComboController(SkillCheckController):
                 and self._now - self._last_accept_ms < COMBO_MIN_INTER_PRESS_MS):
             return
         self._last_accept_ms = self._now
+        self._press_nudge = (direction, self._now)
         if self.challenge.press_correct(self._progress, direction):
             self._register_correct(direction)
         else:
@@ -492,8 +520,11 @@ class ComboController(SkillCheckController):
         if not self._passive:
             if self._judgement == _JUDGE_BRILLIANT:
                 self._brilliant_streak += 1
+                if self._brilliant_streak == COMBO_VIEW_STREAK_FIRE:
+                    self._ignite_fire()
             else:
                 self._brilliant_streak = 0
+                self._fire_started_ms = None
         self._receptor_flash[direction] = self._now
         self._spawn_flying(direction)
         self._spawn_sparks()
@@ -506,9 +537,15 @@ class ComboController(SkillCheckController):
         if self.challenge.is_complete(self._progress):
             self._win()
 
+    def _ignite_fire(self):
+        self._fire_started_ms = self._now
+        self._trauma.add(COMBO_VIEW_TRAUMA_IGNITE)
+        self._cue("play_combo_streak")
+
     def _register_wrong(self, direction):
         self._wrong_count += 1
         self._brilliant_streak = 0
+        self._fire_started_ms = None
         self._lockout_until = self._now + int(COMBO_WRONG_LOCKOUT_MS)
         self._wrong_flash = (direction, self._now)
         self._wiggle_started = self._now
@@ -522,25 +559,42 @@ class ComboController(SkillCheckController):
         self._wiggle_started = self._now
         self._cue("play_combo_wrong")
         if self.challenge.wrongs_exhausted(self._wrong_count):
-            self._closed = True
+            self._close()
 
-    def _win(self):
+    def _close(self):
+        self._closed = True
+        if self._closed_at is None:
+            self._closed_at = self._now
+
+    def _present_win(self):
         self._hitstop.trigger(self._now, COMBO_VIEW_WIN_HITSTOP_MS)
         self._win_flash_until = self._now + COMBO_VIEW_WIN_FLASH_MS
         self._torn_until = self._now + COMBO_VIEW_TORN_MS
         self._spawn_confetti()
-        self._closed = True
         self._cue("play_combo_complete")
+
+    def _present_fail(self):
+        self._judgement = _JUDGE_FAIL
+        self._judgement_at = self._now
+        self._fail_started = self._now
+        self._cue("play_combo_fail")
+
+    def _retract_win(self):
+        self._win_flash_until = None
+        self._torn_until = None
+        self._confetti = None
+        self._confetti_at = None
+
+    def _win(self):
+        self._present_win()
+        self._close()
         if not self._online:
             self._landed = True
             self._committed_at = self._now
 
     def _fail(self):
-        self._judgement = _JUDGE_FAIL
-        self._judgement_at = self._now
-        self._fail_started = self._now
-        self._closed = True
-        self._cue("play_combo_fail")
+        self._present_fail()
+        self._close()
         if not self._online:
             self._landed = False
             self._committed_at = self._now
@@ -556,17 +610,24 @@ class ComboController(SkillCheckController):
         return self._brilliant_streak >= COMBO_VIEW_STREAK_FIRE
 
     def resolve(self, won):
+        if won and self._win_flash_until is None:
+            self._present_win()
+        elif not won and self._fail_started is None:
+            if self._win_flash_until is not None:
+                self._retract_win()
+            self._present_fail()
         self._landed = won
         if self._committed_at is None:
             self._committed_at = self._now
         self._resolved_at = self._now
-        self._closed = True
+        self._close()
 
     def spectate_shot(self, elapsed, miss_count, won, progress=0, direction=None, target=None):
         if progress > self._progress:
             while self._progress < progress:
-                step = direction if direction is not None else self.challenge.expected(
-                    self._progress)
+                last = self._progress == progress - 1
+                step = (direction if direction is not None and last
+                        else self.challenge.expected(self._progress))
                 self._register_correct(step if step is not None else "up")
         else:
             self._wrong_count = miss_count + 1
@@ -574,8 +635,11 @@ class ComboController(SkillCheckController):
             self._register_spectate_wrong(step if step is not None else "up")
 
     def update(self, now_ms):
+        dt = now_ms - self._now
         self._now = now_ms
         self._trauma.update(now_ms)
+        if dt > 0 and not self._hitstop.frozen(now_ms):
+            self._beat_phase += dt * self._bpm() / 60000.0
         if (not self._online and not self._closed
                 and now_ms - self.start_ms >= self.deadline_ms):
             self._fail()
@@ -650,9 +714,40 @@ class ComboController(SkillCheckController):
         self._draw_judgement(window)
 
     def _timer_frac(self):
-        timer_now = self._committed_at if self._committed_at is not None else self._now
+        timer_now = self._terminal_at()
+        timer_now = self._now if timer_now is None else timer_now
         frac = (timer_now - self.start_ms) / max(self.deadline_ms, 1)
         return min(max(frac, 0.0), 1.0)
+
+    def _terminal_at(self):
+        if self._committed_at is not None:
+            return self._committed_at
+        return self._closed_at
+
+    def _exit_fade(self):
+        terminal = self._terminal_at()
+        if terminal is None:
+            return 1.0
+        return max(0.0, 1.0 - (self._now - terminal) / COMBO_VIEW_EXIT_FADE_MS)
+
+    def _intro_k(self):
+        return smoothstep(min((self._now - self.start_ms) / COMBO_VIEW_INTRO_FADE_MS, 1.0))
+
+    def _slot_intro_k(self, index):
+        t = self._now - self.start_ms - index * COMBO_VIEW_INTRO_STAGGER_MS
+        return smoothstep(min(max(t / COMBO_VIEW_INTRO_ARROW_MS, 0.0), 1.0))
+
+    def _press_offset(self):
+        if self._press_nudge is None:
+            return (0, 0)
+        direction, start = self._press_nudge
+        t = self._now - start
+        if t < 0 or t >= COMBO_VIEW_PRESS_NUDGE_MS:
+            return (0, 0)
+        depth = self._cell * COMBO_VIEW_PRESS_NUDGE_FRAC * (
+            1.0 - t / COMBO_VIEW_PRESS_NUDGE_MS)
+        dx, dy = _RECEPTOR_DIRS[direction]
+        return (int(dx * depth), int(dy * depth))
 
     def _spot_radius(self):
         start_r = COMBO_VIEW_SPOT_START_FRAC * 0.5 * math.hypot(
@@ -674,6 +769,9 @@ class ComboController(SkillCheckController):
     def _draw_spotlight(self, window):
         if self._spot_layer is None or self._board_rect is None:
             return
+        fade = self._exit_fade()
+        if fade <= 0.0:
+            return
         radius = self._spot_radius()
         layer = self._spot_layer
         layer.fill(_SPOT_FILL_RGBA)
@@ -686,18 +784,21 @@ class ComboController(SkillCheckController):
         pg.draw.circle(layer, _SPOT_HOLE_RGBA, center, max(int(radius), 1))
         rim_w = max(int(self._cell * COMBO_VIEW_SPOT_RIM_W_FRAC), COMBO_VIEW_SPOT_RIM_W_MIN_PX)
         pg.draw.circle(layer, self._rim_color(), center, max(int(radius), 1), rim_w)
+        layer.set_alpha(int(255 * fade))
         window.blit(layer, self._board_rect.topleft)
 
-    def _beat(self):
+    def _bpm(self):
         remaining = max(self.challenge.prompt_count - self._progress, 0)
         total = max(self.challenge.prompt_count, 1)
-        bpm = COMBO_VIEW_BPM_BASE + COMBO_VIEW_BPM_RAMP * (1.0 - remaining / total)
-        return cosine_pulse(self._now, 60000.0 / bpm)
+        return COMBO_VIEW_BPM_BASE + COMBO_VIEW_BPM_RAMP * (1.0 - remaining / total)
+
+    def _beat(self):
+        return (1.0 - math.cos(2.0 * math.pi * self._beat_phase)) / 2.0
 
     def _draw_dance_floor(self, window):
         if self._geom is None or self._victim_sq is None:
             return
-        alpha = int(COMBO_VIEW_DANCE_ALPHA * self._beat())
+        alpha = int(COMBO_VIEW_DANCE_ALPHA * self._beat() * self._exit_fade())
         if alpha <= 0:
             return
         lit_r = None if self._spot_layer is None else self._spot_radius()
@@ -714,7 +815,8 @@ class ComboController(SkillCheckController):
     def _draw_actors(self, window):
         if self._geom is None:
             return
-        beat = 1.0 if self._hitstop.frozen(self._now) else self._beat()
+        fade = self._exit_fade()
+        beat = (1.0 if self._hitstop.frozen(self._now) else self._beat()) * fade
         attacker = self._scaled_sprite(self._attacker_src)
         if attacker is not None and self._from_sq is not None:
             cx, cy = self._geom(self._from_sq)
@@ -724,7 +826,7 @@ class ComboController(SkillCheckController):
         showing_torn = self._torn_until is not None and self._now < self._torn_until
         if victim is not None and self._victim_sq is not None and not showing_torn:
             cx, cy = self._geom(self._victim_sq)
-            shuffle = int(self._cell * COMBO_VIEW_SHUFFLE_AMP_FRAC
+            shuffle = int(self._cell * COMBO_VIEW_SHUFFLE_AMP_FRAC * fade
                           * math.sin(self._now / COMBO_VIEW_SHUFFLE_PERIOD))
             window.blit(victim, victim.get_rect(center=(cx + shuffle, cy)))
 
@@ -732,6 +834,7 @@ class ComboController(SkillCheckController):
         ox, oy = self._shake()
         plate = _strip_plate(self._plate_w, self._plate_h, self._plate_cut,
                              self._plate_fade_x, self._plate_fade_y)
+        plate.set_alpha(int(255 * self._intro_k()))
         window.blit(plate, (self._plate_left + ox, self._plate_top + oy))
 
     def _draw_strip(self, window):
@@ -740,6 +843,10 @@ class ComboController(SkillCheckController):
         fire = self._fire_active()
         for i, sx in enumerate(self._strip_slots):
             direction = self.challenge.expected(i)
+            intro = self._slot_intro_k(i)
+            if intro <= 0.0:
+                continue
+            dy = int(self._cell * COMBO_VIEW_INTRO_DROP_FRAC * (1.0 - intro))
             wiggle = 0
             if i == self._progress and self._wiggle_started is not None:
                 wiggle = int(sakurai_vibrate(self._now, self._wiggle_started, COMBO_VIEW_WIGGLE_MS,
@@ -753,21 +860,31 @@ class ComboController(SkillCheckController):
             else:
                 size, color = self._strip_chev, Colors.text_dim
             chev = _direction_chevron(size, color, direction)
-            rect = chev.get_rect(center=(sx + ox + wiggle, self._strip_y + oy))
+            chev.set_alpha(int(255 * intro))
+            rect = chev.get_rect(center=(sx + ox + wiggle, self._strip_y + oy - dy))
             drop = max(int(size * COMBO_VIEW_CHEVRON_SHADOW_OFF_FRAC),
                        COMBO_VIEW_CHEVRON_SHADOW_OFF_MIN_PX)
-            window.blit(_chevron_shadow(size, direction), (rect.x + drop, rect.y + drop))
+            shadow = _chevron_shadow(size, direction)
+            shadow.set_alpha(int(255 * intro))
+            window.blit(shadow, (rect.x + drop, rect.y + drop))
             window.blit(chev, rect)
 
     def _draw_fire(self, window, cx, cy):
         sprite = _emoji_sprite(COMBO_VIEW_FIRE_EMOJI, self._fire_size)
         if sprite is None:
             return
+        ignite = 1.0
+        if self._fire_started_ms is not None:
+            ignite = min(max((self._now - self._fire_started_ms)
+                             / COMBO_VIEW_FIRE_IGNITE_MS, 0.0), 1.0)
         pulse = cosine_pulse(self._now, COMBO_VIEW_FIRE_PULSE_MS)
-        sprite.set_alpha(int(COMBO_VIEW_FIRE_ALPHA_MIN
-                             + (COMBO_VIEW_FIRE_ALPHA_MAX - COMBO_VIEW_FIRE_ALPHA_MIN) * pulse))
+        alpha = (COMBO_VIEW_FIRE_ALPHA_MIN
+                 + (COMBO_VIEW_FIRE_ALPHA_MAX - COMBO_VIEW_FIRE_ALPHA_MIN) * pulse)
+        sprite.set_alpha(int(alpha * ignite))
         bob = int(self._fire_size * COMBO_VIEW_FIRE_BOB_FRAC * pulse)
-        window.blit(sprite, sprite.get_rect(center=(cx, cy - bob)))
+        surge = int(self._fire_size * COMBO_VIEW_FIRE_IGNITE_RISE_FRAC
+                    * (1.0 - ease_out_back(ignite)))
+        window.blit(sprite, sprite.get_rect(center=(cx, cy - bob + surge)))
 
     def _deflate_scale(self):
         if self._fail_started is None:
@@ -780,9 +897,13 @@ class ComboController(SkillCheckController):
 
     def _draw_pad(self, window):
         ox, oy = self._shake()
-        left = self._pad_center[0] - self._pad_r + ox
-        top = self._pad_center[1] - self._pad_r + oy
+        nx, ny = self._press_offset()
+        intro = self._intro_k()
+        rise = int(self._cell * COMBO_VIEW_INTRO_RISE_FRAC * (1.0 - intro))
+        left = self._pad_center[0] - self._pad_r + ox + nx
+        top = self._pad_center[1] - self._pad_r + oy + ny + rise
         static = _pad_static(self._pad_r, self._hub_r)
+        static.set_alpha(int(255 * intro))
         window.blit(static, (left, top))
         self._draw_hover(window, left, top)
         if self._now < self._lockout_until:
@@ -821,6 +942,7 @@ class ComboController(SkillCheckController):
 
     def _draw_pips(self, window):
         ox, oy = self._shake()
+        intro = self._intro_k()
         size = max(int(self._cell * COMBO_VIEW_PIP_SIZE_FRAC), 8)
         gap = max(int(self._cell * COMBO_VIEW_PIP_GAP_FRAC), 4)
         total = COMBO_MAX_WRONGS * size + (COMBO_MAX_WRONGS - 1) * gap
@@ -829,6 +951,7 @@ class ComboController(SkillCheckController):
         for i in range(COMBO_MAX_WRONGS):
             x = start + i * (size + gap) + size // 2
             pip = _pip_surface(size, i < self._wrong_count)
+            pip.set_alpha(int(255 * intro))
             window.blit(pip, pip.get_rect(center=(x + ox, y + oy)))
 
     def _draw_flying(self, window):
@@ -870,10 +993,11 @@ class ComboController(SkillCheckController):
         if remaining <= 0:
             return
         ox, oy = self._shake()
+        nx, ny = self._press_offset()
         fill = _wedge_overlay(self._pad_r, self._hub_r, direction, COMBO_VIEW_FLASH_WHITE)
         fill.set_alpha(int(COMBO_VIEW_WHITE_FLASH_ALPHA * (remaining / COMBO_VIEW_WHITE_FLASH_MS)))
-        window.blit(fill, (self._pad_center[0] - self._pad_r + ox,
-                           self._pad_center[1] - self._pad_r + oy))
+        window.blit(fill, (self._pad_center[0] - self._pad_r + ox + nx,
+                           self._pad_center[1] - self._pad_r + oy + ny))
 
     def _draw_win_flash(self, window):
         if self._win_flash_until is None:
@@ -930,6 +1054,13 @@ class ComboController(SkillCheckController):
             return
         window.blit(torn, torn.get_rect(center=self._actor_center(self._victim_sq)))
 
+    def _judge_alpha(self, t):
+        hold = COMBO_VIEW_JUDGE_HOLD_MS * COMBO_VIEW_JUDGE_FADE_FRAC
+        if t <= hold:
+            return 255
+        span = COMBO_VIEW_JUDGE_HOLD_MS - hold
+        return int(255 * (1.0 - (t - hold) / max(span, 1.0)))
+
     def _draw_judgement(self, window):
         if self._judgement is None:
             return
@@ -938,8 +1069,9 @@ class ComboController(SkillCheckController):
             return
         text = render_text(self._judge_font, _JUDGE_TEXT[self._judgement],
                            pg.Color(_JUDGE_COLOR[self._judgement]))
-        text.set_alpha(int(255 * (1.0 - t / COMBO_VIEW_JUDGE_HOLD_MS)))
-        rise = int(self._cell * COMBO_VIEW_JUDGE_RISE_FRAC * (t / COMBO_VIEW_JUDGE_HOLD_MS))
+        text.set_alpha(self._judge_alpha(t))
+        u = t / COMBO_VIEW_JUDGE_HOLD_MS
+        rise = int(self._cell * COMBO_VIEW_JUDGE_RISE_FRAC * (1.0 - (1.0 - u) ** 3))
         offset = max(int(self._cell * COMBO_VIEW_JUDGE_OFFSET_FRAC),
                      COMBO_VIEW_JUDGE_OFFSET_MIN_PX)
         y = self._strip_y - offset - rise

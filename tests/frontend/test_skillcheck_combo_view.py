@@ -13,6 +13,9 @@ from chessshootout.frontend.skillcheck.combo_view import (
     COMBO_VIEW_PLATE_ALPHA, COMBO_VIEW_PLATE_PAD_X_FRAC, COMBO_VIEW_PLATE_PAD_Y_FRAC,
     COMBO_VIEW_PLATE_FADE_X_FRAC, COMBO_VIEW_PLATE_FADE_Y_FRAC,
     COMBO_VIEW_CHEVRON_SHADOW_ALPHA, COMBO_VIEW_CHEVRON_SHADOW_OFF_FRAC,
+    COMBO_VIEW_EXIT_FADE_MS, COMBO_VIEW_FIRE_IGNITE_MS, COMBO_VIEW_INTRO_ARROW_MS,
+    COMBO_VIEW_INTRO_FADE_MS, COMBO_VIEW_INTRO_STAGGER_MS, COMBO_VIEW_JUDGE_FADE_FRAC,
+    COMBO_VIEW_JUDGE_HOLD_MS, COMBO_VIEW_PRESS_NUDGE_MS,
     _JUDGE_BRILLIANT, _JUDGE_CLEAN, _JUDGE_FAIL, _JUDGE_TEXT,
     _PLATE_CACHE, _CHEVRON_SHADOW_CACHE, _strip_plate)
 from chessshootout.frontend.skillcheck.controller import SKILLCHECK_RESULT_HOLD_MS
@@ -20,7 +23,7 @@ from chessshootout.frontend.skillcheck.mole_view import MoleController
 from chessshootout.frontend.skillcheck.registry import build_controller
 from chessshootout.frontend.skillcheck.wheel_view import WheelController
 from chessshootout.skillcheck.combo import (
-    ComboChallenge, COMBO_MAX_WRONGS, COMBO_WRONG_LOCKOUT_MS)
+    ComboChallenge, COMBO_INTRO_MS, COMBO_MAX_WRONGS, COMBO_WRONG_LOCKOUT_MS)
 from chessshootout.skillcheck.types import SkillCheckKind
 
 
@@ -187,18 +190,32 @@ def test_wedge_hit_test_diagonal_adjacent_resolves_by_dominant_axis():
 
 
 def test_judgement_tiers_track_driven_latency():
+    # the first prompt is anchored at the intro's end, so tier boundaries shift
+    # by COMBO_INTRO_MS for the opening press; later presses anchor on the
+    # previous press (covered by the streak tests).
+    anchor = int(COMBO_INTRO_MS)
     brilliant = _combo()
-    brilliant.update(300)
+    brilliant.update(anchor + 300)
     brilliant.handle_event(_key("up"))
     assert brilliant._judgement == _JUDGE_BRILLIANT
     clean = _combo()
-    clean.update(500)
+    clean.update(anchor + 500)
     clean.handle_event(_key("up"))
     assert clean._judgement == _JUDGE_CLEAN
     plain = _combo()
-    plain.update(800)
+    plain.update(anchor + 800)
     plain.handle_event(_key("up"))
     assert plain._judgement is None
+
+
+def test_first_prompt_judgement_never_pays_for_the_intro():
+    # a press 340 ms after the strip has finished arriving is BRILLIANT even
+    # though the raw elapsed-from-open is 640 ms; the old anchor at check-open
+    # made a first-press BRILLIANT humanly unreachable.
+    ctrl = _combo()
+    ctrl.update(int(COMBO_INTRO_MS) + 340)
+    ctrl.handle_event(_key("up"))
+    assert ctrl._judgement == _JUDGE_BRILLIANT
 
 
 def test_judgement_tokens_map_to_the_shipped_copy():
@@ -538,7 +555,7 @@ def _plate_core_rect(ctrl):
     return rect.inflate(-2 * ctrl._plate_fade_x, -2 * ctrl._plate_fade_y)
 
 
-def _lit_board_brightness(ctrl, *, plated, states=(150,)):
+def _lit_board_brightness(ctrl, *, plated, states=(400,)):
     # the strip lives over a lit, dancing board: probe it on a white field so any
     # backing shows up as a straight brightness drop over the same drawn arrows.
     if not plated:
@@ -614,6 +631,7 @@ def test_fire_streak_still_reads_over_the_plate():
             ctrl.update(150 * (i + 1))
             ctrl.handle_event(_key(direction))
         assert ctrl._fire_active() is True
+        ctrl.update(450 + int(COMBO_VIEW_FIRE_IGNITE_MS))
         surf = pg.Surface((700, 700))
         surf.fill((0, 0, 0))
         ctrl.draw(surf)
@@ -742,3 +760,257 @@ def test_no_logging_across_update_and_draw_frames(caplog):
             ctrl.update(i * 16)
             ctrl.draw(surf)
     assert [r for r in caplog.records if r.name.startswith("chess")] == []
+
+
+def _three_wrongs(ctrl, start=300, step=300):
+    t = start
+    for _ in range(COMBO_MAX_WRONGS):
+        ctrl.update(t)
+        ctrl.handle_event(_key("down"))
+        t += step
+    return t - step
+
+
+def test_resize_reanchors_the_pad_to_the_new_board_center():
+    # game.relayout hands the new cell rect BEFORE the new board rect; the old
+    # code left the pad anchored on the stale board center until the next check.
+    ctrl = _combo(board_rect=pg.Rect(0, 0, 700, 700))
+    assert ctrl._pad_center == (350, 350)
+    ctrl.relayout(pg.Rect(0, 0, 90, 90))
+    ctrl.set_board_rect(pg.Rect(100, 60, 480, 480))
+    assert ctrl._pad_center == (340, 300), "the pad re-centers on the new board rect"
+    assert ctrl._spot_layer.get_size() == (480, 480)
+
+
+def test_relayout_drops_stale_inflight_pop_offs():
+    ctrl = _combo(board_rect=pg.Rect(0, 0, 700, 700))
+    ctrl.update(150)
+    ctrl.handle_event(_key("up"))
+    assert len(ctrl._flying) == 1
+    ctrl.relayout(pg.Rect(0, 0, 120, 120))
+    assert ctrl._flying == [], "a resize drops pop-offs pinned to the old strip pixels"
+
+
+def test_online_deadline_resolve_presents_the_fail():
+    # an online check never self-fails at the deadline; when the server's fail
+    # verdict lands on a still-open controller the verdict itself must present
+    # (wheel/aim/mole emit theirs via _emit_verdict; combo was silent+blank).
+    audio = MagicMock()
+    ctrl = _combo(on_shot=MagicMock(), audio=audio)
+    ctrl.update(5200)
+    assert ctrl.landed is None and ctrl._judgement is None
+    ctrl.resolve(False)
+    assert ctrl._judgement == _JUDGE_FAIL
+    assert ctrl._fail_started is not None, "the strip deflate runs off the verdict"
+    audio.play_combo_fail.assert_called_once()
+
+
+def test_online_resolve_win_on_an_unpresented_controller_presents_the_win():
+    audio = MagicMock()
+    ctrl = _combo(on_shot=MagicMock(), audio=audio)
+    ctrl.update(600)
+    ctrl.resolve(True)
+    assert ctrl._confetti is not None
+    audio.play_combo_complete.assert_called_once()
+
+
+def test_online_resolve_matching_the_optimistic_win_never_double_presents():
+    audio = MagicMock()
+    ctrl = _combo(on_shot=MagicMock(), audio=audio)
+    _run_correct(ctrl)
+    audio.play_combo_complete.assert_called_once()
+    confetti = ctrl._confetti
+    ctrl.update(900)
+    ctrl.resolve(True)
+    audio.play_combo_complete.assert_called_once()
+    assert ctrl._confetti is confetti, "the running confetti burst is kept, not respawned"
+
+
+def test_online_verdict_mismatch_retracts_the_optimistic_win():
+    audio = MagicMock()
+    ctrl = _combo(on_shot=MagicMock(), audio=audio)
+    _run_correct(ctrl)
+    assert ctrl._confetti is not None
+    ctrl.update(900)
+    ctrl.resolve(False)
+    assert ctrl.landed is False
+    assert ctrl._confetti is None and ctrl._torn_until is None, \
+        "a server fail on an optimistic win takes the party back"
+    assert ctrl._judgement == _JUDGE_FAIL
+    audio.play_combo_fail.assert_called_once()
+
+
+def test_optimistic_online_close_freezes_the_spotlight_before_the_verdict():
+    ctrl = _combo(on_shot=MagicMock(), board_rect=pg.Rect(0, 0, 700, 700))
+    _three_wrongs(ctrl)
+    assert ctrl.landed is None, "online: the server owns the verdict"
+    frozen = ctrl._spot_radius()
+    ctrl.update(4500)
+    assert ctrl._spot_radius() == frozen, \
+        "the countdown light stops at the local close, not at the late verdict"
+
+
+def test_exit_fade_holds_full_while_live_then_decays_to_zero():
+    ctrl = _combo()
+    ctrl.update(2000)
+    assert ctrl._exit_fade() == 1.0
+    last = _three_wrongs(ctrl)
+    ctrl.update(last + int(COMBO_VIEW_EXIT_FADE_MS) // 2)
+    assert 0.0 < ctrl._exit_fade() < 1.0
+    ctrl.update(last + int(COMBO_VIEW_EXIT_FADE_MS) + 50)
+    assert ctrl._exit_fade() == 0.0
+
+
+def test_exit_fade_lifts_the_scrim_off_the_board():
+    ctrl = _combo(board_rect=pg.Rect(0, 0, 700, 700))
+    last = _three_wrongs(ctrl, start=3000, step=300)
+    ctrl.update(last + int(COMBO_VIEW_EXIT_FADE_MS) + 50)
+    surf = pg.Surface((700, 700))
+    surf.fill((255, 255, 255))
+    ctrl.draw(surf)
+    corner = surf.get_at((5, 5))
+    assert corner[:3] == (255, 255, 255), \
+        "once the exit fade completes the board corner is fully lit again"
+
+
+def test_beat_phase_is_continuous_across_the_tempo_ramp():
+    ctrl = _combo()
+    for t in range(0, 160, 16):
+        ctrl.update(t)
+    before = ctrl._beat()
+    ctrl.handle_event(_key("up"))
+    assert ctrl._beat() == before, "a press ramps the bpm without snapping the phase"
+    ctrl.update(176)
+    assert ctrl._beat() != before, "the beat keeps advancing at the new tempo"
+
+
+def test_hitstop_pauses_the_beat():
+    ctrl = _combo()
+    ctrl.update(300)
+    ctrl.handle_event(_key("down"))
+    frozen = ctrl._beat()
+    ctrl.update(330)
+    assert ctrl._beat() == frozen, "the dance freezes for the wrong-press hitstop"
+    ctrl.update(1000)
+    assert ctrl._beat() != frozen
+
+
+def test_accepted_press_nudges_the_pad_toward_the_direction():
+    ctrl = _combo()
+    ctrl.update(150)
+    ctrl.handle_event(_key("up"))
+    dx, dy = ctrl._press_offset()
+    assert dx == 0 and dy < 0, "the pad dips toward the pressed wedge"
+    ctrl.update(150 + int(COMBO_VIEW_PRESS_NUDGE_MS))
+    assert ctrl._press_offset() == (0, 0), "the nudge springs back and stays put"
+
+
+def test_paced_out_press_does_not_restart_the_nudge():
+    ctrl = _combo()
+    ctrl.update(150)
+    ctrl.handle_event(_key("up"))
+    nudge = ctrl._press_nudge
+    ctrl.update(190)
+    ctrl.handle_event(_key("down"))
+    assert ctrl._press_nudge is nudge, "a press the pacer swallowed moves nothing"
+
+
+def test_intro_staggers_the_arrows_and_raises_the_pad():
+    ctrl = _combo()
+    assert ctrl._intro_k() == 0.0
+    assert ctrl._slot_intro_k(0) == 0.0
+    ctrl.update(int(COMBO_VIEW_INTRO_ARROW_MS))
+    assert ctrl._slot_intro_k(0) == 1.0
+    assert ctrl._slot_intro_k(len(_PROMPTS) - 1) < 1.0, \
+        "the last arrow is still arriving while the first has landed"
+    ctrl.update(int(COMBO_VIEW_INTRO_ARROW_MS
+                    + COMBO_VIEW_INTRO_STAGGER_MS * (len(_PROMPTS) - 1)))
+    assert ctrl._slot_intro_k(len(_PROMPTS) - 1) == 1.0
+    assert ctrl._intro_k() == 1.0
+
+
+def test_intro_finishes_inside_the_engine_intro_budget():
+    n = 7
+    last_arrow = COMBO_VIEW_INTRO_ARROW_MS + COMBO_VIEW_INTRO_STAGGER_MS * (n - 1)
+    assert max(last_arrow, COMBO_VIEW_INTRO_FADE_MS) <= COMBO_INTRO_MS + 50, \
+        "the arrival animation must not eat into the answering time the engine reserves"
+
+
+def test_intro_leaves_the_strip_region_empty_on_the_first_frames():
+    ctrl = _combo_scene(_PROMPTS, 99)
+    surf = pg.Surface((700, 700))
+    surf.fill((0, 0, 0))
+    ctrl.update(5)
+    ctrl.draw(surf)
+    rect = pg.Rect(0, 0, ctrl._strip_big, ctrl._strip_big)
+    rect.center = (ctrl._strip_slots[0], ctrl._strip_y)
+    early = _region_brightness(surf, rect)
+    surf.fill((0, 0, 0))
+    ctrl.update(600)
+    ctrl.draw(surf)
+    settled = _region_brightness(surf, rect)
+    assert settled > early * 3, "arrows fade and drop in instead of popping fully formed"
+
+
+def test_resume_mid_check_skips_the_intro():
+    ctrl = ComboController(
+        ComboChallenge(prompts=_PROMPTS, deadline_ms=5000.0),
+        pg.Rect(0, 0, 80, 80), now_ms=-800, deadline_ms=5000,
+        on_shot=MagicMock(), miss_count=1, progress=2)
+    ctrl.update(0)
+    assert ctrl._intro_k() == 1.0
+    assert ctrl._slot_intro_k(len(_PROMPTS) - 1) == 1.0, \
+        "a resumed check re-opens fully formed at its true elapsed"
+
+
+def test_fire_ignition_cues_the_streak_sound_once():
+    audio = MagicMock()
+    ctrl = _combo(audio=audio)
+    for i, direction in enumerate(_PROMPTS[:3]):
+        ctrl.update(150 * (i + 1))
+        ctrl.handle_event(_key(direction))
+    audio.play_combo_streak.assert_called_once()
+    assert ctrl._fire_started_ms == 450, "ignition is stamped at the third BRILLIANT"
+    ctrl.update(600)
+    ctrl.handle_event(_key(_PROMPTS[3]))
+    audio.play_combo_streak.assert_called_once(), "a fourth BRILLIANT never re-cues"
+
+
+def test_wrong_press_douses_the_ignition_stamp():
+    ctrl = _combo(audio=MagicMock())
+    for i, direction in enumerate(_PROMPTS[:3]):
+        ctrl.update(150 * (i + 1))
+        ctrl.handle_event(_key(direction))
+    assert ctrl._fire_started_ms is not None
+    ctrl.update(700)
+    ctrl.handle_event(_key("up"))
+    assert ctrl._fire_started_ms is None
+
+
+def test_passive_mirror_never_cues_the_streak_sound():
+    audio = MagicMock()
+    ctrl = _combo(passive=True, audio=audio)
+    for p in (1, 2, 3):
+        ctrl.update(150 * p)
+        ctrl.spectate_shot(150 * p, 0, True, progress=p)
+    audio.play_combo_streak.assert_not_called()
+
+
+def test_judgement_alpha_holds_full_then_fades():
+    ctrl = _combo()
+    hold = COMBO_VIEW_JUDGE_HOLD_MS * COMBO_VIEW_JUDGE_FADE_FRAC
+    assert ctrl._judge_alpha(0) == 255
+    assert ctrl._judge_alpha(hold) == 255, "the word stays readable through the hold"
+    fading = ctrl._judge_alpha((hold + COMBO_VIEW_JUDGE_HOLD_MS) / 2)
+    assert 0 < fading < 255
+    assert ctrl._judge_alpha(COMBO_VIEW_JUDGE_HOLD_MS) <= 1
+
+
+def test_spectate_fast_forward_uses_expected_directions_for_intermediate_steps():
+    ctrl = _combo(passive=True, audio=MagicMock())
+    ctrl.update(400)
+    ctrl.spectate_shot(390, 0, False, progress=2, direction="left")
+    assert ctrl._progress == 2
+    assert set(ctrl._receptor_flash) == {"up", "left"}, \
+        "the catch-up step flashes the prompt it consumed; only the live press " \
+        "uses the relayed direction"

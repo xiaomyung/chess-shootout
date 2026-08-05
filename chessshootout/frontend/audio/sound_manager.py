@@ -303,6 +303,9 @@ class SoundManager:
     def play_combo_fail(self):
         self._play("combo_fail")
 
+    def play_combo_streak(self):
+        self._play("combo_streak")
+
     def update_heartbeat(self, fraction_remaining, paused):
         if not self.enabled:
             return
