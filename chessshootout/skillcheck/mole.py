@@ -168,7 +168,8 @@ class MoleChallenge:
                 return index
         return None
 
-    def hit_at(self, elapsed_ms, row_f, col_f, hole_squares, last_hit_pop=-1):
+    def hit_at(self, elapsed_ms, row_f, col_f, hole_squares, last_hit_pop=-1, *,
+               flipped=False):
         index = self.pop_up_at(elapsed_ms)
         if index is None or index == last_hit_pop:
             return False
@@ -176,7 +177,8 @@ class MoleChallenge:
         if hole >= len(hole_squares):
             return False
         row, col = hole_squares[hole]
-        ccy = row + 0.5 + MOLE_HITBOX_CY_FRAC
+        lift = -MOLE_HITBOX_CY_FRAC if flipped else MOLE_HITBOX_CY_FRAC
+        ccy = row + 0.5 + lift
         ccx = col + 0.5
         return (((col_f - ccx) / MOLE_HITBOX_RX_FRAC) ** 2
                 + ((row_f - ccy) / MOLE_HITBOX_RY_FRAC) ** 2) <= 1.0

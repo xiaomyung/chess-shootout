@@ -1295,7 +1295,7 @@ class GameScreen(Screen):
         return self.variant != Variant.ONLINE or self.match.local_color == winner
 
     def _on_flip(self):
-        if self.current_result() is not None:
+        if self.variant == Variant.ONLINE or self.current_result() is not None:
             return
         self.board.cancel_drag_physics()
         self.board.flipped = not self.board.flipped

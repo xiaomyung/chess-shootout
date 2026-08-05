@@ -212,7 +212,8 @@ def _adjudicate_shot(pending, msg, elapsed, backend):
                            pending.deadline_ms, progress=pending.progress,
                            direction=msg.direction,
                            target=(msg.target_row, msg.target_col) if is_whack else None,
-                           hole_squares=holes, last_hit_pop=pending.last_hit_pop)
+                           hole_squares=holes, last_hit_pop=pending.last_hit_pop,
+                           flipped=pending.color == "black")
     won = hit and pending.progress + 1 >= online.hits_required(pending.kind, challenge)
     return challenge, hit, won
 

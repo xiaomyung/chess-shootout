@@ -69,7 +69,7 @@ def is_past_deadline(elapsed_ms, deadline_ms=SKILLCHECK_DEADLINE_MS):
 
 def shot_wins(kind, challenge, elapsed_ms, miss_count=0, deadline_ms=SKILLCHECK_DEADLINE_MS,
               *, progress=0, direction=None, target=None, hole_squares=None,
-              last_hit_pop=-1):
+              last_hit_pop=-1, flipped=False):
     if elapsed_ms < SKILLCHECK_HUMAN_FLOOR_MS or is_past_deadline(elapsed_ms, deadline_ms):
         return False
     if kind == SkillCheckKind.WHEEL:
@@ -79,7 +79,8 @@ def shot_wins(kind, challenge, elapsed_ms, miss_count=0, deadline_ms=SKILLCHECK_
     if kind == SkillCheckKind.WHACK:
         if target is None or hole_squares is None:
             return False
-        return challenge.hit_at(elapsed_ms, target[0], target[1], hole_squares, last_hit_pop)
+        return challenge.hit_at(elapsed_ms, target[0], target[1], hole_squares, last_hit_pop,
+                                flipped=flipped)
     if kind == SkillCheckKind.COMBO:
         return challenge.press_correct(progress, direction)
     return False

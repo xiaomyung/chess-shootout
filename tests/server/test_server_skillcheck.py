@@ -988,6 +988,30 @@ async def _whack_room(app, clock):
     return room, ws_w, ws_b, frm, to, pending, _full_challenge(pending), _holes_for(room)
 
 
+def _qxp_black_backend():
+    return make_backend({
+        sq(7, 4): piece(PieceType.KING, PieceColor.WHITE),
+        sq(0, 4): piece(PieceType.KING, PieceColor.BLACK),
+        sq(3, 3): piece(PieceType.QUEEN, PieceColor.BLACK),
+        sq(4, 3): piece(PieceType.PAWN, PieceColor.WHITE),
+    }, turn=PieceColor.BLACK)
+
+
+async def _black_whack_room(app, clock):
+    room = await _pair(app)
+    room.backend = _qxp_black_backend()
+    room.first_move_at = clock()
+    room.started_at = clock()
+    frm, to = Square(3, 3), Square(4, 3)
+    room.skillcheck_secret = _seed_for(room.backend, frm, to, WHACK)
+    ws_w, ws_b = RecordingWS(), RecordingWS()
+    app.state.connections.add(room.room_id, room.white.client_uuid, ws_w)
+    app.state.connections.add(room.room_id, room.black.client_uuid, ws_b)
+    await handle_move(app, ws_b, room, "black", _move_raw(frm, to))
+    pending = room.pending_skillcheck
+    return room, ws_w, ws_b, frm, to, pending, _full_challenge(pending), _holes_for(room)
+
+
 async def _combo_room(app, clock):
     room, ws_w, ws_b, frm, to = await _capture_room(app, clock, COMBO)
     await handle_move(app, ws_w, room, "white", _move_raw(frm, to))
@@ -1022,6 +1046,58 @@ async def test_whack_true_position_hits_up_to_quota_apply_the_move(app, clock):
     applied = ws_b.of_type("move_applied")[-1]
     assert applied["skill_check_kind"] == "whack" and applied["skill_check_won"] is True
     assert room.skillcheck_log == [SkillCheckOutcome(1, "whack", True, "Qxd5")]
+
+
+@pytest.mark.asyncio
+async def test_black_mover_whack_pit_centres_hit_up_to_quota_and_apply(app, clock):
+    """Pit-square centres sit 0.30 rows off the oval centre under EITHER
+    orientation (0.30 < the 0.52 half-height), so a black mover shooting dead
+    centre must win exactly like a white mover does."""
+    room, ws_w, ws_b, frm, to, pending, ch, holes = await _black_whack_room(app, clock)
+    assert pending.color == "black"
+    outs = []
+    for i in range(ch.hits_required):
+        outs.append(await _fire(app, clock, room, "black", _pop_mid(ch, i),
+                                target=_hole_center(holes, ch.pops[i].hole)))
+    assert outs[:-1] == ["skillcheck_hit"] * (ch.hits_required - 1)
+    assert outs[-1] == "applied"
+    assert len(room.backend.move_history) == 1
+    applied = ws_w.of_type("move_applied")[-1]
+    assert applied["skill_check_kind"] == "whack" and applied["skill_check_won"] is True
+
+
+@pytest.mark.asyncio
+async def test_server_mirrors_the_whack_oval_for_a_black_mover(app, clock):
+    """The asymmetric pin: a black mover renders their own colour at the bottom,
+    so the popped piece rises toward HIGHER board rows on their screen and the
+    server must adjudicate the CY lift mirrored below the pit row. (row + 0.8)
+    is the mirrored oval's exact centre -- a hit for black, while for a white
+    mover the same offset is 0.6 rows past the unflipped centre: a miss."""
+    room, ws_w, ws_b, frm, to, pending, ch, holes = await _black_whack_room(app, clock)
+    row, col = holes[ch.pops[0].hole]
+    out = await _fire(app, clock, room, "black", _pop_mid(ch, 0),
+                      target=(row + 0.8, col + 0.5))
+    assert out == "skillcheck_hit" and pending.progress == 1
+    below = await _fire(app, clock, room, "black", _pop_mid(ch, 1),
+                        target=(holes[ch.pops[1].hole][0] + 0.2,
+                                holes[ch.pops[1].hole][1] + 0.5))
+    assert below == "skillcheck_miss", \
+        "the unflipped centre offset is 0.6 rows off the mirrored oval for black"
+
+
+@pytest.mark.asyncio
+async def test_white_mover_keeps_the_unflipped_whack_oval(app, clock):
+    """The white half of the asymmetric pin, in its own room: (row + 0.8) must
+    stay a miss and (row + 0.2) the exact oval centre."""
+    room, ws_w, ws_b, frm, to, pending, ch, holes = await _whack_room(app, clock)
+    row, col = holes[ch.pops[0].hole]
+    out = await _fire(app, clock, room, "white", _pop_mid(ch, 0),
+                      target=(row + 0.8, col + 0.5))
+    assert out == "skillcheck_miss" and pending.progress == 0
+    assert pending.miss_count == 1
+    out2 = await _fire(app, clock, room, "white", _pop_mid(ch, 0) + 200,
+                       target=(row + 0.2, col + 0.5))
+    assert out2 == "skillcheck_hit", "the white mover's oval centre stays 0.30 rows ABOVE"
 
 
 @pytest.mark.asyncio

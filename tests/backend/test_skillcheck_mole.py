@@ -237,6 +237,36 @@ def test_hit_at_oval_is_taller_than_wide_and_lifted_off_the_hole():
         "the oval spills ABOVE the pit square, where the risen piece is drawn"
 
 
+def test_hit_at_flipped_mirrors_the_lift_below_the_pit_row_in_board_space():
+    # On a flipped board (black at the bottom) the popped piece still rises UP
+    # the SCREEN, which is +rows in board space -- so flipped=True mirrors the
+    # CY lift to the other side of the pit centre. CY is negative, so the
+    # flipped oval centre is row + 0.5 - CY = row + 0.8.
+    ch = MoleChallenge.from_seed("hit-seed", captured_value=5)
+    squares = mole.hole_squares("hit-seed", 5, CAPTURE_SQ, OCCUPIED)
+    pop = ch.pops[0]
+    t = (pop.t_up_ms + pop.t_down_ms) / 2.0
+    row, col = squares[pop.hole]
+    unflipped_row = row + 0.5 + mole.MOLE_HITBOX_CY_FRAC
+    flipped_row = row + 0.5 - mole.MOLE_HITBOX_CY_FRAC
+    oval_col = col + 0.5
+    assert ch.hit_at(t, flipped_row, oval_col, squares, flipped=True) is True, \
+        "dead centre of the mirrored oval"
+    assert ch.hit_at(t, unflipped_row, oval_col, squares, flipped=True) is False, \
+        "the unflipped centre is 0.6 rows off the mirrored oval, past the 0.52 half-height"
+    assert ch.hit_at(t, flipped_row, oval_col, squares) is False, \
+        "and symmetrically the mirrored centre misses the unflipped oval"
+    assert ch.hit_at(t, row + 0.5, oval_col, squares, flipped=True) is True, \
+        "the square centre hits under BOTH orientations: 0.30 lift < 0.52 half-height"
+    assert ch.hit_at(t, row + 0.5, oval_col, squares) is True
+    ry = mole.MOLE_HITBOX_RY_FRAC
+    assert ch.hit_at(t, flipped_row + ry, oval_col, squares, flipped=True) is True, \
+        "the mirrored oval spills BELOW the pit row, where the flipped screen draws the body"
+    assert ch.hit_at(t, flipped_row + ry + 0.001, oval_col, squares, flipped=True) is False
+    assert ch.hit_at(t, unflipped_row, oval_col, squares, flipped=False) is True, \
+        "explicit flipped=False is byte-identical to the historical default"
+
+
 def test_hit_at_with_a_short_hole_list_is_a_safe_miss():
     ch = MoleChallenge.from_seed("short-list", captured_value=9)
     index = next(i for i, pop in enumerate(ch.pops) if pop.hole >= 1)

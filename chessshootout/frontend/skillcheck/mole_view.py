@@ -18,13 +18,12 @@ from chessshootout.skillcheck.mole import (
     MOLE_RECOIL_LOCKOUT_MS)
 from chessshootout.skillcheck.rng import seeded_floats
 
-MOLE_VIEW_FAIL_FADE_MS = 300
 MOLE_VIEW_FAIL_HOLD_MS = 1250
 MOLE_VIEW_HOLE_STAGGER_MS = 40.0
 MOLE_VIEW_HOLE_OPEN_MS = 160.0
 MOLE_VIEW_RISE_MS = 140.0
 MOLE_VIEW_RETREAT_MS = 160.0
-MOLE_VIEW_POP_HEIGHT_FRAC = 0.9
+MOLE_VIEW_POP_HEIGHT_FRAC = 1.0
 MOLE_VIEW_POP_LIFT_CAP = 1.2
 MOLE_VIEW_PIT_RX_FRAC = 0.42
 MOLE_VIEW_PIT_RY_FRAC = 0.24
@@ -44,6 +43,8 @@ MOLE_VIEW_CROSS_ARM_FRAC = 0.16
 MOLE_VIEW_CROSS_GAP_FRAC = 0.05
 MOLE_VIEW_CROSS_RING_FRAC = 0.09
 MOLE_VIEW_CROSS_LW_FRAC = 0.024
+MOLE_VIEW_CROSS_OUT_MS = 120.0
+MOLE_VIEW_CROSS_OUT_SCALE = 0.72
 MOLE_VIEW_BLOOM_FRAC = 0.10
 MOLE_VIEW_KICK_FRAC = 0.12
 MOLE_VIEW_KICK_MS = 140.0
@@ -71,16 +72,21 @@ MOLE_VIEW_JUMP_HEIGHT_FRAC = 0.5
 MOLE_VIEW_LAND_SQUASH_MS = 90.0
 MOLE_VIEW_REGROW_MS = 550.0
 MOLE_VIEW_HEAL_BUCKETS = 24
-MOLE_VIEW_SEAM_BAND_FRAC = 0.16
+MOLE_VIEW_SEAM_BAND_FRAC = 0.21
 MOLE_VIEW_SEAM_WHITE_CORE = 0.6
+MOLE_VIEW_SEAM_GLOW_W_FRAC = 1.25
+MOLE_VIEW_SEAM_GLOW_H_FRAC = 0.10
+MOLE_VIEW_SEAM_GLOW_CORE = 0.8
 MOLE_VIEW_SPARK_MS = 260.0
-MOLE_VIEW_SPARK_SPEED_FRAC = 0.55
-MOLE_VIEW_SPARK_RISE_FRAC = 0.18
+MOLE_VIEW_SPARK_SPEED_FRAC = 0.30
+MOLE_VIEW_SPARK_RISE_FRAC = 0.12
 MOLE_VIEW_SPARK_R_FRAC = 0.035
 MOLE_VIEW_PIP_W_FRAC = 0.11
 MOLE_VIEW_PIP_H_FRAC = 0.20
 MOLE_VIEW_PIP_GAP_FRAC = 0.07
 MOLE_VIEW_PIP_OFFSET_FRAC = 0.66
+MOLE_VIEW_PIP_FADE_DELAY_MS = 300.0
+MOLE_VIEW_PIP_FADE_MS = 250.0
 MOLE_VIEW_CASING_W_FRAC = 0.10
 MOLE_VIEW_CASING_H_FRAC = 0.05
 MOLE_VIEW_CASING_VX_FRAC = 1.4
@@ -92,6 +98,7 @@ MOLE_VIEW_CASING_SPIN_BUCKET_DEG = 20
 MOLE_VIEW_CASING_UP_JITTER = (0.7, 0.6)
 MOLE_VIEW_CASING_REST_MS = 1000.0
 MOLE_VIEW_CASING_FADE_MS = 400.0
+MOLE_VIEW_CASING_COMMIT_FADE_MS = 300.0
 MOLE_VIEW_PUFF_MS = 320.0
 MOLE_VIEW_PUFF_COUNT = 5
 MOLE_VIEW_PUFF_R_FRAC = 0.09
@@ -137,6 +144,8 @@ _HITBOX_COLOR = pg.Color(Colors.spectate)
 _HITBOX_ACTIVE_COLOR = pg.Color(Colors.win)
 _DUST_COLORS = (pg.Color(Colors.text_dim), pg.Color(Colors.text_muted), pg.Color(Colors.border))
 _DEBRIS_COLORS = (pg.Color(Colors.amber_hi), pg.Color(Colors.accent_hi), pg.Color(Colors.amber))
+
+_AXES = ((1, 0), (-1, 0), (0, 1), (0, -1))
 
 _MOLE_STATIC_CACHE = new_size_cache()
 
@@ -188,6 +197,37 @@ def _seam_band_surface(w, h):
     return memoized_surface(_MOLE_STATIC_CACHE, ("seam", w, h), build)
 
 
+def _seam_glow_surface(w, h):
+    def build():
+        surf = pg.Surface((w, h))
+        hot = pg.Color(Colors.amber_hi)
+        white = pg.Color(Colors.text)
+        half_w = max(w / 2.0, 1.0)
+        half_h = max(h / 2.0, 1.0)
+        edge = max(1.0 - MOLE_VIEW_SEAM_GLOW_CORE, 0.001)
+        for y in range(h):
+            v = 1.0 - min(abs(y + 0.5 - half_h) / half_h, 1.0)
+            col = hot.lerp(white, MOLE_VIEW_SEAM_WHITE_CORE * v)
+            for x in range(w):
+                d = min(abs(x + 0.5 - half_w) / half_w, 1.0)
+                gain = v * v * min((1.0 - d) / edge, 1.0)
+                surf.set_at((x, y), (int(col.r * gain), int(col.g * gain), int(col.b * gain)))
+        return surf
+    return memoized_surface(_MOLE_STATIC_CACHE, ("seamglow", w, h), build)
+
+
+def _crosshair_surface(arm, gap, ring, lw):
+    def build():
+        reach = gap + arm
+        surf = pg.Surface((2 * reach + 1, 2 * reach + 1), pg.SRCALPHA)
+        for dx, dy in _AXES:
+            pg.draw.line(surf, _CROSS_COLOR, (reach + dx * gap, reach + dy * gap),
+                         (reach + dx * reach, reach + dy * reach), lw)
+        pg.draw.circle(surf, _CROSS_COLOR, (reach, reach), ring, lw)
+        return surf
+    return memoized_surface(_MOLE_STATIC_CACHE, ("cross", arm, gap, ring, lw), build)
+
+
 def _danger_render(bucket):
     hot = bucket >= 1
     rim = pg.Color(Colors.text) if hot else pg.Color(Colors.loss)
@@ -220,7 +260,7 @@ def _muzzle_surface(r):
             col = pg.Color(int(hot.r * (1.0 - edge) ** 2), int(hot.g * (1.0 - edge) ** 2),
                            int(hot.b * (1.0 - edge) ** 2))
             pg.draw.circle(surf, col, (r, r), i)
-        for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+        for dx, dy in _AXES:
             pg.draw.line(surf, hot, (r, r), (r + dx * r, r + dy * r), max(r // 6, 1))
         return surf
     return memoized_surface(_MOLE_STATIC_CACHE, ("muzzle", r), build)
@@ -265,7 +305,8 @@ class MoleController(SkillCheckController):
 
     def __init__(self, challenge, cell_rect, now_ms, deadline_ms, *, hole_squares=None,
                  victim_surface=None, geom=None, from_sq=None, shot_sound=None, on_shot=None,
-                 progress=0, passive=False, audio=None, on_hit_px=None):
+                 progress=0, passive=False, audio=None, on_hit_px=None,
+                 mirror_targets=False):
         self.challenge = challenge
         self.start_ms = now_ms
         self._now = now_ms
@@ -277,15 +318,16 @@ class MoleController(SkillCheckController):
         self._on_shot = on_shot
         self._on_hit_px = on_hit_px
         self._passive = passive
+        self._mirror_targets = mirror_targets
         self._online = on_shot is not None or passive
         self._audio = audio
         self._victim_orig = victim_surface
         self._victim_orig_cell = max(int(cell_rect.width), 1)
         self._victim = victim_surface
+        self._victim_bbox = None
         self._victim_cache = {}
         self._squash_cache = {}
         self._heal_cache = {}
-        self._owned_pit = None
         self._progress = progress
         self._torn_key = hash(challenge.pops)
         self._last_hit_pop = -1
@@ -336,6 +378,8 @@ class MoleController(SkillCheckController):
         self.cell_size = cell
         if self._victim_orig is not None:
             self._victim = self._scaled_victim(cell)
+        if self._victim is not None:
+            self._victim_bbox = self._victim.get_bounding_rect()
         self._affine = self._derive_affine()
         self._hole_px = self._hole_centers()
         self._pit_rx = max(int(cell * MOLE_VIEW_PIT_RX_FRAC), 6)
@@ -350,7 +394,6 @@ class MoleController(SkillCheckController):
         self._pip_gap = max(int(cell * MOLE_VIEW_PIP_GAP_FRAC), 2)
         self._squash_cache.clear()
         self._heal_cache.clear()
-        self._owned_pit = None
 
     def _scaled_victim(self, new_cell):
         if new_cell == self._victim_orig_cell:
@@ -429,8 +472,9 @@ class MoleController(SkillCheckController):
         target = self._clamp_target(self._shot_target(pos))
         if self._online:
             self._on_shot(elapsed, target=target)
+        flipped = self._affine is not None and self._affine[3] < 0
         if self.challenge.hit_at(elapsed, target[0], target[1], self._hole_squares,
-                                 self._last_hit_pop):
+                                 self._last_hit_pop, flipped=flipped):
             self._register_hit(elapsed, pos)
         else:
             self._spawn_puffs(pos)
@@ -496,7 +540,7 @@ class MoleController(SkillCheckController):
         self._debris.append((self._now, float(pos[0]), float(pos[1]), f))
 
     def _spawn_seam_sparks(self):
-        if self._jump_elapsed() is None:
+        if self._jump_elapsed() is None or self._damage_tier() <= 0:
             return
         bucket = self._heal_bucket()
         while self._last_heal_bucket < bucket:
@@ -508,11 +552,25 @@ class MoleController(SkillCheckController):
                 self._seam_sparks.append(
                     (self._now, side, frac, 0.6 + 0.8 * speed_f, 0.5 + rise_f))
 
+    def _mirror_anchor_y(self, elapsed):
+        idx = self.challenge.pop_up_at(elapsed)
+        if idx is not None:
+            hole = self.challenge.pops[idx].hole
+            if hole < len(self._hole_px):
+                return float(self._hole_px[hole][1])
+        return float(self.center[1])
+
+    def _spectate_px(self, elapsed, target):
+        px = self._board_to_px(target[0], target[1])
+        if px is None or not self._mirror_targets:
+            return px
+        return (px[0], 2.0 * self._mirror_anchor_y(elapsed) - px[1])
+
     def spectate_shot(self, elapsed, miss_count, won, progress=0, direction=None,
                       target=None):
         px = None
         if target is not None:
-            px = self._board_to_px(target[0], target[1])
+            px = self._spectate_px(elapsed, target)
         if px is not None:
             self._impacts.append((self._now, px[0], px[1]))
             self._spawn_casing(px)
@@ -622,8 +680,7 @@ class MoleController(SkillCheckController):
         self._draw_win_pop(window, group)
         if not self._passive:
             self._draw_muzzle(window)
-            if self._committed_at is None:
-                self._draw_crosshair(window)
+            self._draw_crosshair(window)
         self._draw_pips(window, group)
         if self._debug_hitbox:
             self._draw_hitboxes(window, elapsed)
@@ -636,33 +693,23 @@ class MoleController(SkillCheckController):
                 return index, pop.hole
         return None
 
-    def _owned_faded(self, base, fade):
-        if self._owned_pit is None:
-            self._owned_pit = base.copy()
-        self._owned_pit.set_alpha(max(int(fade * 255), 0))
-        return self._owned_pit
-
     def _draw_pits(self, window, elapsed, group):
         self._draw_home_pit(window, elapsed, group)
-        fade = 1.0
-        if self._landed is False and self._committed_at is not None:
-            fade = 1.0 - min(1.0, (self._now - self._committed_at) / MOLE_VIEW_FAIL_FADE_MS)
-            if fade <= 0.0:
-                return
         tele = self._telegraph_hole(elapsed)
         pit = _pit_surface(self._pit_rx, self._pit_ry)
-        if fade < 1.0:
-            pit = self._owned_faded(pit, fade)
         for i, (hx, hy) in enumerate(self._hole_px):
             open_t = (elapsed - i * MOLE_VIEW_HOLE_STAGGER_MS) / MOLE_VIEW_HOLE_OPEN_MS
             if open_t <= 0.0:
                 continue
+            scale = min(open_t, 1.0) * self._pit_close_scale(i)
+            if scale <= 0.0:
+                continue
             cx, cy = hx + group[0], hy + group[1]
-            if open_t < 1.0:
-                self._draw_pit_mouth(window, cx, cy, open_t)
+            if scale < 1.0:
+                self._draw_pit_mouth(window, cx, cy, scale)
                 continue
             surf = pit
-            if tele is not None and i == tele[1] and fade >= 1.0:
+            if tele is not None and i == tele[1]:
                 surf = self._telegraph_surface(tele[0])
             window.blit(surf, (cx - surf.get_width() // 2, cy - surf.get_height() // 2))
 
@@ -682,14 +729,33 @@ class MoleController(SkillCheckController):
         surf = _pit_surface(self._pit_rx, self._pit_ry)
         window.blit(surf, (cx - surf.get_width() // 2, cy - surf.get_height() // 2))
 
+    @staticmethod
+    def _close_ramp(closing_ms):
+        if closing_ms <= 0.0:
+            return 1.0
+        return max(1.0 - closing_ms / MOLE_VIEW_PIT_CLOSE_MS, 0.0)
+
+    def _outro_start(self):
+        if self._committed_at is None:
+            return None
+        if self._landed:
+            return self._committed_at + MOLE_VIEW_HITSTOP_KILL_MS
+        return self._committed_at
+
+    def _pit_close_scale(self, index):
+        start = self._outro_start()
+        if start is None:
+            return 1.0
+        return self._close_ramp(self._now - start - index * MOLE_VIEW_HOLE_STAGGER_MS)
+
     def _home_pit_close_scale(self):
         jump_t = self._jump_elapsed()
-        if jump_t is None:
+        if jump_t is not None:
+            return self._close_ramp(jump_t - MOLE_VIEW_JUMP_RISE_MS - MOLE_VIEW_JUMP_HOP_MS)
+        start = self._outro_start()
+        if start is None:
             return 1.0
-        closing = jump_t - MOLE_VIEW_JUMP_RISE_MS - MOLE_VIEW_JUMP_HOP_MS
-        if closing <= 0.0:
-            return 1.0
-        return max(1.0 - closing / MOLE_VIEW_PIT_CLOSE_MS, 0.0)
+        return self._close_ramp(self._now - start)
 
     def _telegraph_surface(self, index):
         danger = self.challenge.pop_mandatory(index, self._progress)
@@ -782,7 +848,7 @@ class MoleController(SkillCheckController):
             vib = sakurai_vibrate(self._now, self._vibrate_ms, self._vibrate_dur_ms,
                                   self.cell_size * MOLE_VIEW_VIBRATE_AMP_FRAC)
         cx = center_px[0] + group[0] + int(vib)
-        ground = self._pit_ry // 2 if ground_dy is None else ground_dy
+        ground = self._emergence_dy(height_frac) if ground_dy is None else ground_dy
         base_y = center_px[1] + group[1] + ground
         if height_frac >= 1.0:
             lift = int((min(height_frac, MOLE_VIEW_POP_LIFT_CAP) - 1.0) * h + lift_px)
@@ -797,6 +863,9 @@ class MoleController(SkillCheckController):
             window.blit(front, (center_px[0] + group[0] - front.get_width() // 2,
                                 center_px[1] + group[1]))
         return rect
+
+    def _emergence_dy(self, height_frac):
+        return int(self._pit_ry * (1.0 - min(height_frac, 1.0)))
 
     def _rest_ground_dy(self):
         h = self._victim.get_height()
@@ -860,21 +929,21 @@ class MoleController(SkillCheckController):
 
     def _draw_jump(self, window, jump_t, group):
         rect = self._jump_victim_rect(window, jump_t, group)
+        self._draw_seam_glow(window, rect)
         self._draw_seam_sparks(window, rect)
 
     def _jump_victim_rect(self, window, jump_t, group):
-        pit_dy = self._pit_ry // 2
         rest_dy = self._rest_ground_dy()
         if jump_t < MOLE_VIEW_JUMP_RISE_MS:
             return self._blit_victim(window, self.center,
                                      out_cubic(jump_t / MOLE_VIEW_JUMP_RISE_MS),
-                                     group, ground_dy=pit_dy, lip=True)
+                                     group, lip=True)
         hop_t = jump_t - MOLE_VIEW_JUMP_RISE_MS
         if hop_t < MOLE_VIEW_JUMP_HOP_MS:
             u = hop_t / MOLE_VIEW_JUMP_HOP_MS
             lift = self.cell_size * MOLE_VIEW_JUMP_HEIGHT_FRAC * math.sin(math.pi * u)
             return self._blit_victim(window, self.center, 1.0, group, lift_px=lift,
-                                     ground_dy=int(pit_dy + (rest_dy - pit_dy) * u))
+                                     ground_dy=int(rest_dy * u))
         land_t = hop_t - MOLE_VIEW_JUMP_HOP_MS
         squash = 0
         if land_t < MOLE_VIEW_LAND_SQUASH_MS:
@@ -883,20 +952,43 @@ class MoleController(SkillCheckController):
         return self._blit_victim(window, self.center, 1.0, group, squash=squash,
                                  ground_dy=rest_dy)
 
+    def _healing(self):
+        if self._jump_elapsed() is None or self._damage_tier() <= 0:
+            return False
+        return 0 < self._heal_bucket() < MOLE_VIEW_HEAL_BUCKETS
+
+    def _seam_y(self, rect, frac):
+        return rect.top + self._victim.get_height() * frac
+
+    def _body_edge_x(self, rect, side):
+        bbox = self._victim_bbox
+        return rect.left + (bbox.right if side > 0 else bbox.left)
+
+    def _draw_seam_glow(self, window, rect):
+        if rect is None or not self._healing():
+            return
+        y = self._seam_y(rect, 1.0 - self._heal_bucket() / MOLE_VIEW_HEAL_BUCKETS)
+        if y > rect.bottom:
+            return
+        bbox = self._victim_bbox
+        w = max(int(bbox.width * MOLE_VIEW_SEAM_GLOW_W_FRAC), 4)
+        h = max(int(self.cell_size * MOLE_VIEW_SEAM_GLOW_H_FRAC), 3)
+        glow = _seam_glow_surface(w, h)
+        window.blit(glow, (rect.left + bbox.centerx - w // 2, int(y) - h // 2),
+                    special_flags=pg.BLEND_RGB_ADD)
+
     def _draw_seam_sparks(self, window, rect):
         if rect is None:
             return
         cell = self.cell_size
-        full_h = self._victim.get_height()
         for i, (t0, side, frac, speed, rise) in enumerate(self._seam_sparks):
             tt = (self._now - t0) / MOLE_VIEW_SPARK_MS
             if not 0.0 <= tt < 1.0:
                 continue
-            y = (rect.top + full_h * frac
-                 - cell * MOLE_VIEW_SPARK_RISE_FRAC * rise * tt)
+            y = self._seam_y(rect, frac) - cell * MOLE_VIEW_SPARK_RISE_FRAC * rise * tt
             if y > rect.bottom:
                 continue
-            x = ((rect.right if side > 0 else rect.left)
+            x = (self._body_edge_x(rect, side)
                  + side * cell * MOLE_VIEW_SPARK_SPEED_FRAC * speed * tt)
             r = max(int(cell * MOLE_VIEW_SPARK_R_FRAC * (1.0 - tt)), 1)
             pg.draw.circle(window, _DEBRIS_COLORS[i % len(_DEBRIS_COLORS)],
@@ -985,11 +1077,20 @@ class MoleController(SkillCheckController):
                 pg.draw.circle(window, _DEBRIS_COLORS[j % len(_DEBRIS_COLORS)],
                                (int(px), int(py)), r)
 
+    def _commit_fade_alpha(self, delay_ms, span_ms):
+        if self._committed_at is None:
+            return 255
+        fading = self._now - self._committed_at - delay_ms
+        if fading <= 0.0:
+            return 255
+        return max(int(255 * (1.0 - fading / span_ms)), 0)
+
     def _draw_casings(self, window):
         cell = self.cell_size
         w = max(int(cell * MOLE_VIEW_CASING_W_FRAC), 3)
         h = max(int(cell * MOLE_VIEW_CASING_H_FRAC), 2)
         buckets = 360 // MOLE_VIEW_CASING_SPIN_BUCKET_DEG
+        cap = self._commit_fade_alpha(0.0, MOLE_VIEW_CASING_COMMIT_FADE_MS)
         for spawn_ms, x0, y0, vx, vy, g, t_land, spin in self._casings:
             t_ms = self._now - spawn_ms
             t = min(t_ms / 1000.0, t_land)
@@ -998,7 +1099,7 @@ class MoleController(SkillCheckController):
             deg = spin * t * MOLE_VIEW_CASING_SPIN_DPS
             bucket = int(deg / MOLE_VIEW_CASING_SPIN_BUCKET_DEG) % buckets
             surf = _casing_rotated(w, h, bucket)
-            alpha = self._casing_alpha(t_ms - t_land * 1000.0)
+            alpha = min(self._casing_alpha(t_ms - t_land * 1000.0), cap)
             if alpha <= 0:
                 continue
             if alpha < 255:
@@ -1041,7 +1142,15 @@ class MoleController(SkillCheckController):
                                          int(self._flash_px[1]) - r),
                     special_flags=pg.BLEND_RGB_ADD)
 
+    def _crosshair_fade(self):
+        if self._committed_at is None:
+            return 1.0
+        return max(1.0 - (self._now - self._committed_at) / MOLE_VIEW_CROSS_OUT_MS, 0.0)
+
     def _draw_crosshair(self, window):
+        fade = self._crosshair_fade()
+        if fade <= 0.0:
+            return
         mx, my = pg.mouse.get_pos()
         if self._flash_ms is not None:
             t = self._now - self._flash_ms
@@ -1053,10 +1162,21 @@ class MoleController(SkillCheckController):
             if t < MOLE_RECOIL_LOCKOUT_MS:
                 gap += int(self.cell_size * MOLE_VIEW_BLOOM_FRAC
                            * (1.0 - t / MOLE_RECOIL_LOCKOUT_MS))
-        for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+        if fade < 1.0:
+            self._blit_crosshair_out(window, mx, my, arm, gap, lw, fade)
+            return
+        for dx, dy in _AXES:
             pg.draw.line(window, _CROSS_COLOR, (mx + dx * gap, my + dy * gap),
                          (mx + dx * (gap + arm), my + dy * (gap + arm)), lw)
         pg.draw.circle(window, _CROSS_COLOR, (mx, my), self._cross_ring, lw)
+
+    def _blit_crosshair_out(self, window, mx, my, arm, gap, lw, fade):
+        scale = MOLE_VIEW_CROSS_OUT_SCALE + (1.0 - MOLE_VIEW_CROSS_OUT_SCALE) * fade
+        surf = _crosshair_surface(max(int(arm * scale), 1), max(int(gap * scale), 1),
+                                  max(int(self._cross_ring * scale), 1), lw)
+        surf.set_alpha(int(255 * fade))
+        window.blit(surf, (mx - surf.get_width() // 2, my - surf.get_height() // 2))
+        surf.set_alpha(None)
 
     def _draw_hitboxes(self, window, elapsed):
         if self._affine is None:
@@ -1065,16 +1185,20 @@ class MoleController(SkillCheckController):
         live_hole = self.challenge.pops[up].hole if up is not None else None
         rx = abs(self._affine[2]) * MOLE_HITBOX_RX_FRAC
         ry = abs(self._affine[3]) * MOLE_HITBOX_RY_FRAC
+        lift = -MOLE_HITBOX_CY_FRAC if self._affine[3] < 0 else MOLE_HITBOX_CY_FRAC
         for i, (row, col) in enumerate(self._hole_squares):
             if elapsed - i * MOLE_VIEW_HOLE_STAGGER_MS <= 0.0:
                 continue
-            px = self._board_to_px(row + 0.5 + MOLE_HITBOX_CY_FRAC, col + 0.5)
+            px = self._board_to_px(row + 0.5 + lift, col + 0.5)
             rect = pg.Rect(int(px[0] - rx), int(px[1] - ry), int(2 * rx), int(2 * ry))
             hot = i == live_hole
             pg.draw.ellipse(window, _HITBOX_ACTIVE_COLOR if hot else _HITBOX_COLOR, rect,
                             MOLE_VIEW_HITBOX_ACTIVE_LW if hot else MOLE_VIEW_HITBOX_LW)
 
     def _draw_pips(self, window, group):
+        alpha = self._commit_fade_alpha(MOLE_VIEW_PIP_FADE_DELAY_MS, MOLE_VIEW_PIP_FADE_MS)
+        if alpha <= 0:
+            return
         n = self.challenge.hits_required
         filled = min(self._progress, n)
         w, h, gap = self._pip_w, self._pip_h, self._pip_gap
@@ -1089,4 +1213,8 @@ class MoleController(SkillCheckController):
             else:
                 surf = rounded_rect_surface((w, h), radius, Colors.surface,
                                             border=Colors.border_strong, border_width=1)
+            if alpha < 255:
+                surf.set_alpha(alpha)
             window.blit(surf, (x + i * (w + gap), y))
+            if alpha < 255:
+                surf.set_alpha(None)

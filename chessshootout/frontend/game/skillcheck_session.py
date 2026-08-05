@@ -84,7 +84,8 @@ class SkillCheckSession:
             on_shot=None if passive else (self._send_skillcheck_shot if online else None),
             miss_count=miss_count, passive=passive, audio=self.app.sound_manager,
             hole_squares=hole_squares, captured_value=captured_value, progress=progress,
-            attacker_surface=attacker_surface, on_hit_px=self._on_whack_hit_px)
+            attacker_surface=attacker_surface, on_hit_px=self._on_whack_hit_px,
+            mirror_targets=passive and online)
         if controller is None:
             return False
         ply = len(screen.match.move_history) + 1

@@ -355,6 +355,25 @@ def test_spectate_open_arms_the_spectator_latch():
     session.teardown_skillcheck_overlay()
 
 
+def test_a_spectated_whack_controller_mirrors_the_relayed_targets():
+    """Online the two clients always render opposite orientations (own color at the
+    bottom, and the online variant refuses manual flips), while the popped piece rises
+    screen-up on both -- so the passive whack mirror is unconditional."""
+    app = _local_app()
+    session = app.game.skillcheck_session
+    session.open_spectate_overlay(
+        SkillCheckKind.WHACK, "spec-seed", 0, 5000, sq(4, 3), sq(3, 3), None, 1)
+    assert app.game.skillcheck_overlay._controller._mirror_targets is True
+    session.teardown_skillcheck_overlay()
+
+
+def test_a_locally_played_whack_controller_never_mirrors():
+    app = _local_app()
+    _gate(app, SkillCheckKind.WHACK)
+    assert app.game.skillcheck_overlay._controller._mirror_targets is False
+    app.game.skillcheck_session.teardown_skillcheck_overlay()
+
+
 def _mock_controller():
     ctrl = MagicMock()
     ctrl._passive = False
@@ -786,10 +805,14 @@ def test_the_mirror_lands_the_same_kill_package_at_the_relayed_pit(monkeypatch):
         ctrl.spectate_shot(400.0 * i, 0, i == 3, progress=i, target=(2.5, 2.5))
         if i < 3:
             assert _gore(fx) == [], "the mirror waits for the killing relay too"
-    px = ctrl._board_to_px(2.5, 2.5)
+    raw = ctrl._board_to_px(2.5, 2.5)
+    hole = ctrl._hole_squares[ctrl.challenge.pops[0].hole]
+    pit_y = app.game.board.cell_rect(sq(*hole)).center[1]
+    px = (raw[0], 2.0 * pit_y - raw[1])
     assert {p["kind"] for p in _gore(fx)} == GORE
-    assert all(p["px"] == px for p in _gore(fx)), \
-        "the spectator sees the kill on the pit it happened on"
+    assert all(p["px"] == pytest.approx(px) for p in _gore(fx)), \
+        "the spectator sees the kill on the pit it happened on, mirrored onto the side " \
+        "of it where the spectator's own view draws the risen body"
     assert fx._streak_count == 1, "and the streak is credited on the mirror as well"
     app.sound_manager.play_announcer.assert_called_once_with("first_blood")
     session.teardown_skillcheck_overlay()

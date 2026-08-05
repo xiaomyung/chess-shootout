@@ -1,4 +1,5 @@
 from collections import Counter
+from unittest.mock import MagicMock
 
 import pygame as pg
 import pytest
@@ -10,7 +11,7 @@ from chessshootout.backend.utils import Square
 from chessshootout.frontend.board import Board, DRAG_THRESHOLD_PX
 from chessshootout.domain.capture_summary import captured_by, material_advantage
 from chessshootout.frontend.modals.confirm import ConfirmModal
-from tests.helpers import make_app, start_single_screen
+from tests.helpers import make_app, online_start_payload, start_single_screen
 
 
 _pygame_init = pygame_display(1000, 800)
@@ -501,6 +502,43 @@ def test_f_key_flips_board():
     event = pg.event.Event(pg.KEYDOWN, key=pg.K_f, mod=0)
     app.game.handle_key(event)
     assert app.game.board.flipped != initial
+
+
+def _online_app(your_color="black"):
+    app = make_app(900, 500)
+    app.coordinator.client = MagicMock()
+    app.coordinator.client.room_id = "room-flip"
+    app.coordinator._start_online_game(online_start_payload(your_color=your_color))
+    return app
+
+
+def test_online_game_ignores_the_flip_hotkey():
+    """Whack adjudication is orientation-dependent: the server derives the hitbox lift
+    from the mover's color, assuming an online client renders own-color-at-bottom. A
+    manual flip would put optimistic client hits 0.6 rows off the authoritative verdict,
+    so the online variant refuses to flip at all (silent no-op, key still consumed)."""
+    app = _online_app("black")
+    assert app.game.board.flipped is True
+    assert app.game.handle_key(pg.event.Event(pg.KEYDOWN, key=pg.K_f, mod=0)) is True
+    assert app.game.board.flipped is True, "own color stays at the bottom online"
+
+
+def test_online_game_ignores_the_right_menu_flip_action():
+    """The rail's FLIP cap and the F hotkey share the single _on_flip choke point."""
+    app = _online_app("white")
+    assert app.game.board.flipped is False
+    app.sound_manager.play_flip = MagicMock()
+    app.game.right_menu.callbacks["flip"]()
+    assert app.game.board.flipped is False
+    app.sound_manager.play_flip.assert_not_called()
+
+
+def test_local_game_still_flips_from_both_entry_points():
+    app = _new_app()
+    app.game.right_menu.callbacks["flip"]()
+    assert app.game.board.flipped is True
+    app.game.handle_key(pg.event.Event(pg.KEYDOWN, key=pg.K_f, mod=0))
+    assert app.game.board.flipped is False
 
 
 def test_ctrl_z_undoes_last_move():

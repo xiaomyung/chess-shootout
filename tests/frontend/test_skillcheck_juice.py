@@ -3,6 +3,15 @@ sprite is a pure function of (key, tier) and nothing else. The regrow buckets
 that used to un-punch the notches step by step are gone — the fail heal is a
 two-source composite built by the view (torn top / whole bottom, split at a
 travelling seam), so juice never needs to know how far along a repair is.
+
+The damage model itself is "stepped amount, random placement": every punch is
+drawn uniformly inside the sprite's bounding box (no edge ring — any part of
+the body can take a hit), and the tiers are cumulative rather than independent
+rolls. One seeded float stream per key is laid out in fixed blocks — punches
+first, then cracks, then the max-tier chunk and ragged crown — so tier N reads
+the same prefix tier N-1 read and simply keeps going. That is what makes the
+damage *grow in place* instead of reshuffling on every hit, and it is pinned
+below as set inclusion on the transparent pixels.
 """
 
 import inspect
@@ -41,9 +50,45 @@ def _piece_surface(size=48):
     return surf
 
 
+def _hollow_piece_surface(size=48):
+    # Real piece art is not convex — a knight's jaw, a king's cross and every
+    # base/stem junction leave transparent gaps well inside the bounding box,
+    # right where the cracks are drawn. This fixture reproduces that with a
+    # transparent slot straight through the middle of a solid block.
+    surf = pg.Surface((size, size), pg.SRCALPHA)
+    surf.fill((200, 190, 175, 255))
+    pg.draw.rect(surf, (0, 0, 0, 0),
+                 pg.Rect(size // 2 - size // 12, 0, size // 6, size))
+    return surf
+
+
+# Twelve seeds is enough that a placement rule which only ever chews the rim
+# cannot sneak through the body-wide pins below by luck of one lucky key.
+_DAMAGE_KEYS = [(f"torn-{i}", 48) for i in range(12)]
+_DAMAGE_TIERS = tuple(range(1, TORN_MAX_TIER + 1))
+
+
 def _opaque_count(surf):
     w, h = surf.get_size()
     return sum(1 for x in range(w) for y in range(h) if surf.get_at((x, y))[3] > 0)
+
+
+def _transparent_pixels(surf):
+    w, h = surf.get_size()
+    return {(x, y) for x in range(w) for y in range(h) if surf.get_at((x, y))[3] == 0}
+
+
+def _transparent_count_in(surf, rect):
+    return sum(1 for x in range(rect.left, rect.right)
+               for y in range(rect.top, rect.bottom)
+               if surf.get_at((x, y))[3] == 0)
+
+
+def _ink_pixels(surf, base):
+    # Pixels the damage pass re-coloured without removing them: the crack veins.
+    w, h = surf.get_size()
+    return {(x, y) for x in range(w) for y in range(h)
+            if surf.get_at((x, y))[3] > 0 and surf.get_at((x, y)) != base.get_at((x, y))}
 
 
 def _mean_rgb_of_opaque(surf):
@@ -246,12 +291,15 @@ def test_torn_returns_new_surface_for_damaged_tiers():
 
 
 def test_torn_opaque_pixels_strictly_decrease_with_tier():
+    # Not one lucky seed: every key has to lose body on every step up, or the
+    # tier the view picked would read as "no worse than the last hit".
     base = _piece_surface()
     base_n = _opaque_count(base)
-    n1 = _opaque_count(torn_sprite(base, ("n", "w", 48, 1), 1))
-    n2 = _opaque_count(torn_sprite(base, ("n", "w", 48, 2), 2))
-    n3 = _opaque_count(torn_sprite(base, ("n", "w", 48, 3), 3))
-    assert base_n > n1 > n2 > n3
+    for key in _DAMAGE_KEYS:
+        counts = [_opaque_count(_torn_surface(base, key, tier)) for tier in _DAMAGE_TIERS]
+        assert base_n > counts[0], key
+        for higher, lower in zip(counts, counts[1:]):
+            assert higher > lower, (key, counts)
 
 
 def test_torn_cache_hit_returns_same_object():
@@ -271,6 +319,119 @@ def test_torn_different_tiers_produce_different_pixels():
     differing = any(t1.get_at((x, y)) != t2.get_at((x, y))
                     for x in range(w) for y in range(h))
     assert differing
+
+
+# --- stepped amount, random placement ---------------------------------------
+
+def test_torn_tier_tables_only_ever_grow():
+    # The cumulative model rests on both tables being monotone. Tier N draws the
+    # first _TORN_NOTCHES[N] punches of one stream and re-punches the earlier
+    # ones at _TORN_NOTCH_FRAC[N]: a shrinking count would drop wounds, a
+    # shrinking radius would heal their rims, and either way tier N would stop
+    # containing tier N-1.
+    counts = [_TORN_NOTCHES[tier] for tier in _DAMAGE_TIERS]
+    fracs = [_TORN_NOTCH_FRAC[tier] for tier in _DAMAGE_TIERS]
+    cracks = [_TORN_CRACKS[tier] for tier in _DAMAGE_TIERS]
+    assert counts == sorted(counts) and counts[0] < counts[-1]
+    assert fracs == sorted(fracs)
+    assert cracks == sorted(cracks) and cracks[0] < cracks[-1]
+
+
+def test_torn_damage_is_cumulative_tier_over_tier():
+    # The point of the single sequential float stream: damage grows in place.
+    # Punches are hard-edged circles, so "the wound stayed put" is exactly set
+    # inclusion on the transparent pixels — a reshuffle would move a hole and
+    # the inclusion would fail immediately.
+    base = _piece_surface()
+    for key in _DAMAGE_KEYS:
+        holes = [_transparent_pixels(_torn_surface(base, key, tier))
+                 for tier in _DAMAGE_TIERS]
+        for lower, higher in zip(holes, holes[1:]):
+            assert lower <= higher, key
+        assert holes[0] < holes[-1], key
+
+
+def test_torn_damage_lands_in_the_middle_of_the_body_not_just_the_rim():
+    # The old model aimed every punch at a ring around the silhouette, so the
+    # middle third of the sprite was untouchable by construction. Uniform
+    # placement has to put holes there for a healthy share of the seeds.
+    base = _piece_surface()
+    bbox = base.get_bounding_rect()
+    middle = pg.Rect(bbox.left + bbox.width // 3, bbox.top + bbox.height // 3,
+                     bbox.width // 3, bbox.height // 3)
+    hit = [key for key in _DAMAGE_KEYS
+           if _transparent_count_in(_torn_surface(base, key, 2), middle) > 0]
+    assert len(hit) >= len(_DAMAGE_KEYS) // 2, hit
+
+
+def test_torn_damage_spreads_over_the_whole_bbox_not_one_cluster():
+    # Same claim from the other side, pooled over the seeds and on a finer 5x5
+    # grid: the dead-centre cell takes hits (the rim model could not reach it at
+    # all) and so does nearly every other cell, so the placement is spread
+    # rather than parked on one favourite spot.
+    grid = 5
+    base = _piece_surface()
+    bbox = base.get_bounding_rect()
+    intact = _transparent_pixels(base)
+    cells = set()
+    for key in _DAMAGE_KEYS:
+        for x, y in _transparent_pixels(_torn_surface(base, key, 2)) - intact:
+            cells.add((grid * (x - bbox.left) // bbox.width,
+                       grid * (y - bbox.top) // bbox.height))
+    assert (grid // 2, grid // 2) in cells, sorted(cells)
+    assert len(cells) >= grid * grid - 2, sorted(cells)
+
+
+def test_torn_different_keys_punch_different_places():
+    base = _piece_surface()
+    shapes = {frozenset(_transparent_pixels(_torn_surface(base, key, 2)))
+              for key in _DAMAGE_KEYS}
+    assert len(shapes) == len(_DAMAGE_KEYS), "two victims never break identically"
+
+
+def test_the_piece_still_reads_as_a_piece_at_max_tier():
+    # Measured on this fixture, max tier leaves 0.39-0.61 of the body standing
+    # (real piece art keeps more — its silhouette is narrower than this disc, so
+    # a good share of every punch lands on empty box). The floor is the guard
+    # against a radius/count edit that turns the victim into a puff of dust.
+    base = _piece_surface()
+    base_n = _opaque_count(base)
+    left = [_opaque_count(_torn_surface(base, key, TORN_MAX_TIER)) / base_n
+            for key in _DAMAGE_KEYS]
+    assert min(left) > 0.35, left
+    assert sum(left) / len(left) > 0.45, left
+
+
+def test_torn_never_paints_outside_the_silhouette():
+    # Damage only ever removes. The crack veins are clipped to the source alpha,
+    # which is what keeps the cumulative property true on real (non-convex) art:
+    # an unclipped tier-3 crack could ink over a hollow — or over a hole tier 2
+    # had already punched — and tier 3 would no longer contain tier 2.
+    base = _hollow_piece_surface()
+    hollow = _transparent_pixels(base)
+    for key in _DAMAGE_KEYS[:4]:
+        for tier in _DAMAGE_TIERS:
+            assert hollow <= _transparent_pixels(_torn_surface(base, key, tier)), (key, tier)
+
+
+def test_torn_cracks_are_cumulative_too(monkeypatch):
+    # Mute every alpha-punching element and the crack ink is all that is left.
+    # It has to nest tier over tier as well, which only holds because the crack
+    # floats start at a fixed offset in the stream instead of picking up after
+    # however many punches the tier happened to draw.
+    monkeypatch.setattr(juice, "_TORN_NOTCHES", {tier: 0 for tier in _DAMAGE_TIERS})
+    monkeypatch.setattr(juice, "_TORN_CHUNK_FRAC", 0.0)
+    monkeypatch.setattr(juice, "_TORN_RAGGED", 0)
+    base = _piece_surface()
+    intact = _transparent_pixels(base)
+    for key in _DAMAGE_KEYS[:4]:
+        frames = [_torn_surface(base, key, tier) for tier in _DAMAGE_TIERS]
+        assert all(_transparent_pixels(frame) == intact for frame in frames), \
+            "the mute really did silence every punch, so only ink is left to compare"
+        veins = [_ink_pixels(frame, base) for frame in frames]
+        for lower, higher in zip(veins, veins[1:]):
+            assert lower <= higher, key
+        assert veins[0] < veins[-1], key
 
 
 # --- flash_sprite -----------------------------------------------------------

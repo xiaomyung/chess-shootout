@@ -20,21 +20,25 @@ _FLASH_CACHE = new_size_cache()
 
 TORN_MAX_TIER = 3
 
-_TORN_NOTCHES = {1: 2, 2: 4, 3: 6}
-_TORN_NOTCH_FRAC = {1: 0.11, 2: 0.15, 3: 0.16}
+_TORN_NOTCHES = {1: 3, 2: 6, 3: 9}
+_TORN_NOTCH_FRAC = {1: 0.10, 2: 0.11, 3: 0.12}
 _TORN_CRACKS = {1: 1, 2: 2, 3: 3}
 _TORN_CHUNK_FRAC = 0.34
 _TORN_RAGGED = 5
-_TORN_FLOATS = 48
 _CRACK_RGBA = (18, 14, 12, 235)
-_TORN_REACH_BASE = 0.85
-_TORN_REACH_JITTER = 0.25
 _TORN_RADIUS_BASE = 0.7
 _TORN_RADIUS_JITTER = 0.6
 _TORN_CHUNK_OFFSET = 0.6
 _TORN_RAGGED_BAND_FRAC = 0.08
 _TORN_RAGGED_RADIUS_FRAC = 0.09
 _TORN_CRACK_WIDTH_FRAC = 0.03
+_TORN_PUNCH_FLOATS = 3
+_TORN_CRACK_FLOATS = 4
+_TORN_CHUNK_FLOATS = 1
+_TORN_RAGGED_FLOATS = 2
+_TORN_CRACK_BASE = _TORN_PUNCH_FLOATS * max(_TORN_NOTCHES.values())
+_TORN_EXTRA_BASE = _TORN_CRACK_BASE + _TORN_CRACK_FLOATS * max(_TORN_CRACKS.values())
+_TORN_FLOATS = _TORN_EXTRA_BASE + _TORN_CHUNK_FLOATS + _TORN_RAGGED_FLOATS * _TORN_RAGGED
 
 
 def _smooth_noise(now_ms, axis):
@@ -132,7 +136,7 @@ def _draw_cracks(surf, bbox, floats, idx, count, width, rgba=_CRACK_RGBA):
         x1 = inset.left + inset.width * floats[idx + 2]
         y1 = inset.top + inset.height * floats[idx + 3]
         pg.draw.line(surf, rgba, (x0, y0), (x1, y1), width)
-        idx += 4
+        idx += _TORN_CRACK_FLOATS
 
 
 def _torn_surface(base, key, tier):
@@ -142,32 +146,33 @@ def _torn_surface(base, key, tier):
         return surf
     floats = seeded_floats(f"torn:{key}", _TORN_FLOATS)
     span = min(bbox.width, bbox.height)
-    cx, cy = bbox.centerx, bbox.centery
-    hx, hy = bbox.width / 2.0, bbox.height / 2.0
     mask = pg.Surface(surf.get_size(), pg.SRCALPHA)
     mask.fill((255, 255, 255, 255))
-    idx = 0
     radius_base = span * _TORN_NOTCH_FRAC[tier]
+    idx = 0
     for _ in range(_TORN_NOTCHES[tier]):
-        ang = floats[idx] * 2.0 * math.pi
-        reach = _TORN_REACH_BASE + _TORN_REACH_JITTER * floats[idx + 2]
-        _punch(mask, cx + math.cos(ang) * hx * reach, cy + math.sin(ang) * hy * reach,
-               radius_base * (_TORN_RADIUS_BASE + _TORN_RADIUS_JITTER * floats[idx + 1]))
-        idx += 3
+        _punch(mask, bbox.left + bbox.width * floats[idx],
+               bbox.top + bbox.height * floats[idx + 1],
+               radius_base * (_TORN_RADIUS_BASE + _TORN_RADIUS_JITTER * floats[idx + 2]))
+        idx += _TORN_PUNCH_FLOATS
     if tier >= TORN_MAX_TIER:
+        idx = _TORN_EXTRA_BASE
         ang = floats[idx] * 2.0 * math.pi
-        _punch(mask, cx + math.cos(ang) * hx * _TORN_CHUNK_OFFSET,
-               cy + math.sin(ang) * hy * _TORN_CHUNK_OFFSET,
+        _punch(mask, bbox.centerx + math.cos(ang) * bbox.width / 2.0 * _TORN_CHUNK_OFFSET,
+               bbox.centery + math.sin(ang) * bbox.height / 2.0 * _TORN_CHUNK_OFFSET,
                span * _TORN_CHUNK_FRAC)
-        idx += 1
+        idx += _TORN_CHUNK_FLOATS
         for _ in range(_TORN_RAGGED):
             _punch(mask, bbox.left + bbox.width * floats[idx],
                    bbox.top + span * _TORN_RAGGED_BAND_FRAC * floats[idx + 1],
                    span * _TORN_RAGGED_RADIUS_FRAC)
-            idx += 2
-    surf.blit(mask, (0, 0), special_flags=pg.BLEND_RGBA_MULT)
-    _draw_cracks(surf, bbox, floats, idx, _TORN_CRACKS[tier],
+            idx += _TORN_RAGGED_FLOATS
+    veins = pg.Surface(surf.get_size(), pg.SRCALPHA)
+    _draw_cracks(veins, bbox, floats, _TORN_CRACK_BASE, _TORN_CRACKS[tier],
                  max(int(span * _TORN_CRACK_WIDTH_FRAC), 1))
+    veins.blit(surf, (0, 0), special_flags=pg.BLEND_RGBA_MIN)
+    surf.blit(veins, (0, 0))
+    surf.blit(mask, (0, 0), special_flags=pg.BLEND_RGBA_MULT)
     return surf
 
 
