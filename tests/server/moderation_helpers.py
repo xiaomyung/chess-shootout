@@ -1,9 +1,31 @@
 import json
 import random
+import time
 from importlib import resources
 
 from chessshootout.backend.utils import Square, coord_from_square
 from chessshootout.server.moderation import geometry
+
+
+# A millisecond budget only means something on the box it was measured on: the
+# dev box runs the dense pin in ~32 ms, a shared CI runner takes ~7x that for
+# the identical code, so an absolute ceiling would be pinning the hardware
+# rather than the detector. This loop is pure-Python arithmetic of the same
+# flavour the detector does, timed on the machine actually running the test;
+# the ratio against the reference below scales every timing budget with the
+# hardware. Deliberately NOT derived from a detector call -- a regression in
+# shared early-stage code would inflate such a baseline and hide itself.
+CALIBRATION_REFERENCE_MS = 12.5
+CALIBRATION_ITERATIONS = 120_000
+
+
+def machine_scale():
+    start = time.thread_time()
+    acc = 0
+    for i in range(CALIBRATION_ITERATIONS):
+        acc += (i * i) % 7
+    elapsed_ms = (time.thread_time() - start) * 1000
+    return max(1.0, elapsed_ms / CALIBRATION_REFERENCE_MS)
 
 
 DENSE_CLEAN_SEED = 0

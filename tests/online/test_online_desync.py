@@ -250,11 +250,19 @@ def test_flapping_ping_cannot_amplify_resync_directives(client, clock):
 
             for _ in range(8):
                 ws_w.send_text(json.dumps(_ping(7)))
-            ws_b.send_text(json.dumps(_quick_chat()))
 
-            seen = _drain_until_chat(ws_w)
-            assert [m["type"] for m in seen].count("resync_directive") == 1
-            assert [m["type"] for m in seen].count("pong") == 8
+            # Read the exact frame count the debounce must produce -- eight
+            # pongs and one directive -- straight off the pinging socket, where
+            # per-connection ordering makes it deterministic. The opponent's
+            # chat cannot serve as the end marker here: it is sent on the OTHER
+            # socket, so on a loaded runner its relay can overtake the tail of
+            # this socket's pongs. It still proves nothing FURTHER is queued.
+            kinds = [json.loads(ws_w.receive_text())["type"] for _ in range(9)]
+            assert kinds.count("pong") == 8
+            assert kinds.count("resync_directive") == 1
+
+            ws_b.send_text(json.dumps(_quick_chat()))
+            assert _drain_until_chat(ws_w) == [], "the window produced nothing else"
 
 
 def test_sustained_desync_keeps_directing_resync_promptly(client, clock):

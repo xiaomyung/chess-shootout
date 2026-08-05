@@ -160,9 +160,10 @@ def test_worst_case_timing_under_budget():
     finally:
         gc.enable()
 
-    assert worst_ms < TIMING_BUDGET_MS, (
+    budget_ms = TIMING_BUDGET_MS * M.machine_scale()
+    assert worst_ms < budget_ms, (
         f"worst-case detect() {worst_ms:.2f} ms exceeded budget "
-        f"{TIMING_BUDGET_MS} ms -- fix perf, do not loosen silently")
+        f"{budget_ms:.2f} ms -- fix perf, do not loosen silently")
 
 
 def test_dense_clean_set_timing_under_its_own_budget():
@@ -183,7 +184,11 @@ def test_dense_clean_set_timing_under_its_own_budget():
     exact arrow tuple, so repeating an identical call times the MEMO. Every
     sample here is a distinct rotation of the same set -- identical work,
     always a cache miss -- and the min across rotations is the uncontended
-    cost (an xdist-loaded worker inflates individual samples)."""
+    cost (an xdist-loaded worker inflates individual samples).
+
+    The budget is scaled by machine_scale(): the number below is the dev-box
+    ceiling, and a CI runner executing the same code ~7x slower must not read
+    as a regression."""
     arrows = M.dense_clean_arrows()
     assert detector.detect(list(arrows), []).kind == detector.CLEAN, (
         "the pin needs a CLEAN verdict: a block short-circuits the later stages")
@@ -201,9 +206,10 @@ def test_dense_clean_set_timing_under_its_own_budget():
     finally:
         gc.enable()
 
-    assert best_ms < DENSE_TIMING_BUDGET_MS, (
+    budget_ms = DENSE_TIMING_BUDGET_MS * M.machine_scale()
+    assert best_ms < budget_ms, (
         f"dense-clean detect() {best_ms:.2f} ms exceeded budget "
-        f"{DENSE_TIMING_BUDGET_MS} ms -- fix perf, do not loosen silently")
+        f"{budget_ms:.2f} ms -- fix perf, do not loosen silently")
 
 
 def test_detect_is_thread_safe_under_concurrent_callers():
