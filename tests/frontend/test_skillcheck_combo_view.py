@@ -1,5 +1,5 @@
 import logging
-from unittest.mock import MagicMock, call, patch
+from unittest.mock import MagicMock, call
 
 import pygame as pg
 import pytest
@@ -10,15 +10,16 @@ from chessshootout.frontend.skillcheck.aim_view import AimController
 from chessshootout.frontend.skillcheck.combo_view import (
     ComboController, COMBO_VIEW_RESULT_HOLD_MS, COMBO_VIEW_BRILLIANT_TEXT, COMBO_VIEW_CLEAN_TEXT,
     COMBO_VIEW_FAIL_TEXT, COMBO_VIEW_STREAK_FIRE,
-    COMBO_VIEW_PLATE_ALPHA, COMBO_VIEW_PLATE_PAD_X_FRAC, COMBO_VIEW_PLATE_PAD_Y_FRAC,
-    COMBO_VIEW_PLATE_FADE_X_FRAC, COMBO_VIEW_PLATE_FADE_Y_FRAC,
-    COMBO_VIEW_CHEVRON_SHADOW_ALPHA, COMBO_VIEW_CHEVRON_SHADOW_OFF_FRAC,
+    COMBO_VIEW_CHIP_ALPHA, COMBO_VIEW_CHIP_DONE_ALPHA, COMBO_VIEW_CHIP_CUT_FRAC,
+    COMBO_VIEW_CHIP_GAP_FRAC, COMBO_VIEW_CHIP_GAP_MIN_PX,
+    COMBO_VIEW_CHIP_PAD_FRAC, COMBO_VIEW_CHIP_PAD_MIN_PX,
     COMBO_VIEW_EXIT_FADE_MS, COMBO_VIEW_FIRE_IGNITE_MS, COMBO_VIEW_INTRO_ARROW_MS,
     COMBO_VIEW_INTRO_FADE_MS, COMBO_VIEW_INTRO_STAGGER_MS, COMBO_VIEW_JUDGE_FADE_FRAC,
     COMBO_VIEW_JUDGE_HOLD_MS, COMBO_VIEW_PRESS_NUDGE_MS,
     _JUDGE_BRILLIANT, _JUDGE_CLEAN, _JUDGE_FAIL, _JUDGE_TEXT,
-    _PLATE_CACHE, _CHEVRON_SHADOW_CACHE, _strip_plate)
+    _CHIP_CACHE, _CHIP_DONE, _CHIP_IDLE, _CHIP_NEXT, _chip_surface, _direction_chevron)
 from chessshootout.frontend.skillcheck.controller import SKILLCHECK_RESULT_HOLD_MS
+from chessshootout.frontend.visual.colors import Colors
 from chessshootout.frontend.skillcheck.mole_view import MoleController
 from chessshootout.frontend.skillcheck.registry import build_controller
 from chessshootout.frontend.skillcheck.wheel_view import WheelController
@@ -550,83 +551,151 @@ def test_combo_hit_pitch_ladder_muted_when_passive():
     audio.play_combo_hit.assert_not_called()
 
 
-def _plate_core_rect(ctrl):
-    rect = pg.Rect(ctrl._plate_left, ctrl._plate_top, ctrl._plate_w, ctrl._plate_h)
-    return rect.inflate(-2 * ctrl._plate_fade_x, -2 * ctrl._plate_fade_y)
+def _chip_core_rect(ctrl, i):
+    inset = ctrl._chip_cut + 2
+    rect = pg.Rect(0, 0, ctrl._chip - 2 * inset, ctrl._chip - 2 * inset)
+    rect.center = (ctrl._strip_slots[i], ctrl._strip_y)
+    return rect
 
 
-def _lit_board_brightness(ctrl, *, plated, states=(400,)):
-    # the strip lives over a lit, dancing board: probe it on a white field so any
-    # backing shows up as a straight brightness drop over the same drawn arrows.
-    if not plated:
-        ctrl._draw_strip_plate = lambda window: None
+def _lit_board_probe(ctrl, *, chipped, states=(400,)):
+    # the strip lives over a lit, dancing board: probe every chip core on a white
+    # field so each backing shows up as a straight brightness drop under its arrow.
+    if not chipped:
+        ctrl._draw_strip_chips = lambda window: None
     surf = pg.Surface((700, 700))
     surf.fill((255, 255, 255))
     for t in states:
         ctrl.update(t)
     ctrl.draw(surf)
-    return _region_brightness(surf, _plate_core_rect(ctrl))
+    return [_region_brightness(surf, _chip_core_rect(ctrl, i))
+            for i in range(len(ctrl._strip_slots))]
 
 
-def test_strip_plate_darkens_the_lit_board_behind_the_arrows():
-    bare = _lit_board_brightness(_combo_scene(_PROMPTS, 99), plated=False)
-    plated = _lit_board_brightness(_combo_scene(_PROMPTS, 99), plated=True)
-    assert plated < bare * 0.6, \
-        "the backing plate has to swallow the dancing board behind the prompts"
+def test_every_chip_darkens_the_lit_board_under_its_own_arrow():
+    bare = _lit_board_probe(_combo_scene(_PROMPTS, 99), chipped=False)
+    chipped = _lit_board_probe(_combo_scene(_PROMPTS, 99), chipped=True)
+    for i, (b, c) in enumerate(zip(bare, chipped)):
+        assert c < b * 0.6, \
+            "chip {} has to swallow the dancing board behind its own prompt".format(i)
 
 
-def test_spectator_mirror_gets_the_same_backing_plate():
-    def mirror(plated):
+def test_spectator_mirror_gets_the_same_chips():
+    def mirror(chipped):
         ctrl = _combo(passive=True, audio=MagicMock(), board_rect=pg.Rect(0, 0, 700, 700))
-        return _lit_board_brightness(ctrl, plated=plated)
+        probes = _lit_board_probe(ctrl, chipped=chipped)
+        return sum(probes) / len(probes)
 
     assert mirror(True) < mirror(False) * 0.6, \
-        "the read-only spectate mirror draws the plate too, not a bare strip"
+        "the read-only spectate mirror draws the chips too, not a bare strip"
 
 
-def test_strip_plate_edges_fade_out_instead_of_ending_in_a_hard_box():
+def test_chip_silhouette_is_a_crisp_alpha_step_never_a_feathered_ramp():
+    # the plate this replaced feathered its edges over ~14% of its width and the
+    # gradient smeared across the checkerboard; the chip is pinned to the opposite:
+    # full strength at the first edge pixel, dead flat across the whole silhouette.
     ctrl = _combo_scene(_PROMPTS, 99)
-    plate = _strip_plate(ctrl._plate_w, ctrl._plate_h, ctrl._plate_cut,
-                         ctrl._plate_fade_x, ctrl._plate_fade_y)
-    mid_x, mid_y = ctrl._plate_w // 2, ctrl._plate_h // 2
-    assert plate.get_at((mid_x, mid_y)).a == COMBO_VIEW_PLATE_ALPHA, \
-        "the core of the plate carries the full knob alpha"
+    chip = _chip_surface(ctrl._chip, ctrl._chip_cut, _CHIP_IDLE)
+    mid = ctrl._chip // 2
+    row = [chip.get_at((x, mid)).a for x in range(ctrl._chip)]
+    core = max(row)
+    assert COMBO_VIEW_CHIP_ALPHA - 3 <= core <= COMBO_VIEW_CHIP_ALPHA, \
+        "the fill carries the knob alpha — dark enough to read against the board"
+    assert row[0] >= core * 0.9, "the left edge starts at full strength: a step, not a ramp"
+    assert row[-1] >= core * 0.9, "so does the right edge"
+    assert min(row) >= core * 0.9, "no fade band anywhere across the row"
+    col = [chip.get_at((mid, y)).a for y in range(ctrl._chip)]
+    assert col[0] >= core * 0.9 and col[-1] >= core * 0.9 and min(col) >= core * 0.9
 
-    row = [plate.get_at((x, mid_y)).a for x in range(ctrl._plate_fade_x + 1)]
-    assert row[0] == 0, "the left edge is fully transparent — no hard box seam"
-    assert row[-1] == COMBO_VIEW_PLATE_ALPHA
-    assert all(b >= a for a, b in zip(row, row[1:])), "the horizontal ramp climbs monotonically"
-    assert 0 < row[len(row) // 2] < COMBO_VIEW_PLATE_ALPHA, "and it really is a ramp, not a step"
-    assert plate.get_at((ctrl._plate_w - 1, mid_y)).a == 0, "the right edge fades out as well"
-
-    col = [plate.get_at((mid_x, y)).a for y in range(ctrl._plate_fade_y + 1)]
-    assert col[0] == 0 and col[-1] == COMBO_VIEW_PLATE_ALPHA
-    assert all(b >= a for a, b in zip(col, col[1:])), "the vertical ramp climbs monotonically"
-    assert plate.get_at((mid_x, ctrl._plate_h - 1)).a == 0
-    assert plate.get_at((0, 0)).a == 0, "corners take the softer of the two ramps"
+    top = [chip.get_at((x, 1)).a for x in range(ctrl._chip)]
+    assert top[-2] == 0, "the tr cut corner is genuinely cut away"
+    blend = [a for a in top if 0 < a < core * 0.85]
+    assert len(blend) <= 3, "the cut diagonal gets antialiasing pixels, never a feather band"
 
 
-def test_strip_plate_draws_over_the_scrim_and_under_the_arrows_and_judgement():
+def test_next_expected_chip_wears_the_accent_and_it_moves_with_progress():
+    ctrl = _combo(board_rect=pg.Rect(0, 0, 700, 700))
+    n = len(_PROMPTS)
+    assert [ctrl._chip_state(i) for i in range(n)] == [_CHIP_NEXT] + [_CHIP_IDLE] * (n - 1), \
+        "the opening chip is the you-are-here affordance"
+    ctrl.update(150)
+    ctrl.handle_event(_key("up"))
+    assert [ctrl._chip_state(i) for i in range(n)] == \
+        [_CHIP_DONE, _CHIP_NEXT] + [_CHIP_IDLE] * (n - 2), \
+        "a correct press hands the accent to the next chip"
+    done = _combo()
+    _run_correct(done)
+    assert [done._chip_state(i) for i in range(n)] == [_CHIP_DONE] * n, \
+        "a completed run leaves no chip claiming to be next"
+
+
+def _accent_border_pixels(surf):
+    hits = 0
+    for x in range(surf.get_width()):
+        for y in (0, 1):
+            c = surf.get_at((x, y))
+            if c.a > 80 and c.r > 140 and c.r > c.b + 50:
+                hits += 1
+    return hits
+
+
+def test_only_the_next_chip_carries_the_accent_border():
+    ctrl = _combo_scene(_PROMPTS, 99)
+    nxt = _chip_surface(ctrl._chip, ctrl._chip_cut, _CHIP_NEXT)
+    assert _accent_border_pixels(nxt) > ctrl._chip // 3, \
+        "the next chip's top edge is an unbroken accent line"
+    assert _accent_border_pixels(_chip_surface(ctrl._chip, ctrl._chip_cut, _CHIP_IDLE)) == 0
+    assert _accent_border_pixels(_chip_surface(ctrl._chip, ctrl._chip_cut, _CHIP_DONE)) == 0, \
+        "upcoming and consumed chips keep the quiet steel border"
+
+
+def test_consumed_chips_dim_but_keep_a_real_backing():
+    ctrl = _combo_scene(_PROMPTS, 99)
+    mid = ctrl._chip // 2
+    done = _chip_surface(ctrl._chip, ctrl._chip_cut, _CHIP_DONE).get_at((mid, mid)).a
+    idle = _chip_surface(ctrl._chip, ctrl._chip_cut, _CHIP_IDLE).get_at((mid, mid)).a
+    assert COMBO_VIEW_CHIP_DONE_ALPHA - 3 <= done <= COMBO_VIEW_CHIP_DONE_ALPHA
+    assert done < idle, "a consumed chip recedes behind its green arrow"
+    assert done > 90, "but never vanishes — the run stays a legible token row"
+
+
+def test_consumed_chip_reads_dimmer_than_the_next_chip_on_the_board():
+    ctrl = _combo(board_rect=pg.Rect(0, 0, 700, 700))
+    ctrl.update(150)
+    ctrl.handle_event(_key("up"))
+    surf = pg.Surface((700, 700))
+    surf.fill((255, 255, 255))
+    ctrl.update(400)
+    ctrl.draw(surf)
+    consumed = _region_brightness(surf, _chip_core_rect(ctrl, 0))
+    upcoming = _region_brightness(surf, _chip_core_rect(ctrl, 1))
+    assert consumed > upcoming * 1.2, \
+        "the dimmer consumed backing lets more board through than the live chip"
+
+
+def test_chips_draw_over_the_scrim_and_under_the_arrows_and_judgement():
     ctrl = _combo_scene(_PROMPTS, 99)
     order = []
-    for name in ("_draw_dance_floor", "_draw_spotlight", "_draw_strip_plate", "_draw_strip",
+    for name in ("_draw_dance_floor", "_draw_spotlight", "_draw_strip_chips", "_draw_strip",
                  "_draw_flying", "_draw_confetti", "_draw_judgement"):
         setattr(ctrl, name, (lambda tag: lambda window: order.append(tag))(name))
     ctrl.update(150)
     ctrl.draw(pg.Surface((700, 700), pg.SRCALPHA))
-    assert order.index("_draw_dance_floor") < order.index("_draw_strip_plate")
-    assert order.index("_draw_spotlight") < order.index("_draw_strip_plate"), \
-        "the plate sits above the dance-floor tint and the spotlight scrim"
+    assert order.index("_draw_dance_floor") < order.index("_draw_strip_chips")
+    assert order.index("_draw_spotlight") < order.index("_draw_strip_chips"), \
+        "the chips sit above the dance-floor tint and the spotlight scrim"
     for above in ("_draw_strip", "_draw_flying", "_draw_confetti", "_draw_judgement"):
-        assert order.index("_draw_strip_plate") < order.index(above), \
-            "arrows, the popped-off arrow and the judgement all read on top of the plate"
+        assert order.index("_draw_strip_chips") < order.index(above), \
+            "arrows, the popped-off arrow and the judgement all read on top of the chips"
 
 
-def test_fire_streak_still_reads_over_the_plate():
-    def fire_brightness(plated):
+def test_fire_streak_still_reads_over_the_chips():
+    # the flames were the plate's hardest customer and they stay the chips':
+    # drawn after the chip pass, they must lose none of their punch to it.
+    def fire_brightness(chipped):
         ctrl = _combo_scene(_PROMPTS, 99)
-        if not plated:
-            ctrl._draw_strip_plate = lambda window: None
+        if not chipped:
+            ctrl._draw_strip_chips = lambda window: None
         for i, direction in enumerate(_PROMPTS[:3]):
             ctrl.update(150 * (i + 1))
             ctrl.handle_event(_key(direction))
@@ -639,87 +708,98 @@ def test_fire_streak_still_reads_over_the_plate():
         rect.center = (ctrl._strip_slots[ctrl._progress], ctrl._strip_y)
         return _region_brightness(surf, rect)
 
-    plated = fire_brightness(True)
-    assert plated > fire_brightness(False) * 0.9, \
-        "the fire-streak flame is drawn after the plate, so it keeps its punch"
+    assert fire_brightness(True) > fire_brightness(False) * 0.9
 
 
-def test_each_chevron_gets_a_drop_shadow_for_contrast():
-    def arrow_brightness(shadowed):
-        ctrl = _combo_scene(_PROMPTS, 99)
-        surf = pg.Surface((700, 700))
-        surf.fill((255, 255, 255))
-        ctrl.update(150)
-        if shadowed:
-            ctrl.draw(surf)
-        else:
-            with patch("chessshootout.frontend.skillcheck.combo_view._chevron_shadow",
-                       return_value=pg.Surface((1, 1), pg.SRCALPHA)):
-                ctrl.draw(surf)
-        rect = pg.Rect(0, 0, int(ctrl._strip_big * 1.6), ctrl._strip_big)
-        rect.center = (ctrl._strip_slots[0], ctrl._strip_y)
-        return _region_brightness(surf, rect)
-
-    assert arrow_brightness(True) < arrow_brightness(False), \
-        "a dark silhouette under every chevron separates it from the flames behind it"
-
-
-def test_strip_plate_spans_every_slot_and_never_shrinks_as_arrows_are_consumed():
+def test_chips_cover_every_slot_and_geometry_survives_consumption():
+    # the chevron drop shadow died with the plate: a solid chip under every arrow
+    # is the contrast backing now, so each slot must actually own a full chip.
     ctrl = _combo(board_rect=pg.Rect(0, 0, 700, 700))
-    geometry = (ctrl._plate_left, ctrl._plate_top, ctrl._plate_w, ctrl._plate_h)
-    half_chevron = int(ctrl._strip_big * 0.8)
-    assert ctrl._plate_left <= ctrl._strip_slots[0] - half_chevron, \
-        "the plate reaches past the first chevron's outer edge"
-    assert ctrl._plate_left + ctrl._plate_w >= ctrl._strip_slots[-1] + half_chevron
+    assert len(ctrl._strip_slots) == len(_PROMPTS)
+    arrow_span = _direction_chevron(ctrl._strip_big, Colors.accent, "up").get_width()
+    assert ctrl._chip >= arrow_span, \
+        "the chip contains the biggest arrow footprint in any orientation"
+    spacing = ctrl._strip_slots[1] - ctrl._strip_slots[0]
+    assert spacing > ctrl._chip, "tokens keep daylight between them"
+    geometry = (ctrl._chip, ctrl._chip_cut, tuple(ctrl._strip_slots))
     _run_correct(ctrl)
     assert ctrl._progress == len(_PROMPTS)
-    assert (ctrl._plate_left, ctrl._plate_top, ctrl._plate_w, ctrl._plate_h) == geometry, \
-        "the consumed arrows stay on the strip, so the plate keeps its full length"
+    assert (ctrl._chip, ctrl._chip_cut, tuple(ctrl._strip_slots)) == geometry, \
+        "consumed arrows stay on their chips, so the row never reflows mid-check"
 
 
-def test_plate_geometry_derives_from_the_named_knobs():
+def test_chip_geometry_derives_from_the_named_knobs():
     cell = 99
     ctrl = _combo_scene(_PROMPTS, cell)
-    pad_x = int(cell * COMBO_VIEW_PLATE_PAD_X_FRAC)
-    pad_y = int(cell * COMBO_VIEW_PLATE_PAD_Y_FRAC)
-    span = ctrl._strip_slots[-1] - ctrl._strip_slots[0] + ctrl._strip_big
-    assert ctrl._plate_w == span + 2 * pad_x
-    assert ctrl._plate_h == max(ctrl._strip_big, ctrl._fire_size) + 2 * pad_y
-    assert ctrl._plate_fade_x == int(ctrl._plate_w * COMBO_VIEW_PLATE_FADE_X_FRAC)
-    assert ctrl._plate_fade_y == int(ctrl._plate_h * COMBO_VIEW_PLATE_FADE_Y_FRAC)
-    assert 0 < COMBO_VIEW_PLATE_ALPHA < 255, "the plate is translucent, never an opaque slab"
-    assert 0 < COMBO_VIEW_PLATE_FADE_X_FRAC < 0.5 and 0 < COMBO_VIEW_PLATE_FADE_Y_FRAC < 0.5, \
-        "both fades have to leave a solid core between them"
-    assert 0 < COMBO_VIEW_CHEVRON_SHADOW_ALPHA < 255
-    assert 0 < COMBO_VIEW_CHEVRON_SHADOW_OFF_FRAC < 0.5
+    pad = max(int(cell * COMBO_VIEW_CHIP_PAD_FRAC), COMBO_VIEW_CHIP_PAD_MIN_PX)
+    arrow_span = _direction_chevron(ctrl._strip_big, Colors.accent, "up").get_width()
+    assert ctrl._chip == arrow_span + 2 * pad
+    assert ctrl._chip_cut == max(int(ctrl._chip * COMBO_VIEW_CHIP_CUT_FRAC), 3)
+    gap = max(int(cell * COMBO_VIEW_CHIP_GAP_FRAC), COMBO_VIEW_CHIP_GAP_MIN_PX)
+    assert ctrl._strip_slots[1] - ctrl._strip_slots[0] == ctrl._chip + gap
+    assert 0 < COMBO_VIEW_CHIP_DONE_ALPHA < COMBO_VIEW_CHIP_ALPHA < 255, \
+        "chips are translucent, never opaque slabs, and consumed ones sit dimmer"
+    assert 0 < COMBO_VIEW_CHIP_CUT_FRAC < 0.5, "the cut leaves a chip, not a triangle"
 
 
-def test_relayout_resizes_the_plate_with_the_cell():
+def test_relayout_resizes_the_chips_with_the_cell():
     ctrl = _combo(board_rect=pg.Rect(0, 0, 700, 700))
-    small = (ctrl._plate_w, ctrl._plate_h)
+    small = ctrl._chip
     ctrl.relayout(pg.Rect(0, 0, 160, 160))
-    assert ctrl._plate_w > small[0] and ctrl._plate_h > small[1], \
-        "a resize rebuilds the plate for the new cell instead of stretching a stale one"
+    assert ctrl._chip > small, \
+        "a resize rebuilds the chips for the new cell instead of stretching stale ones"
     surf = pg.Surface((700, 700), pg.SRCALPHA)
     ctrl.update(200)
     ctrl.draw(surf)
 
 
-def test_plate_and_chevron_shadows_allocate_nothing_per_frame():
+def test_chips_arrive_staggered_with_their_arrows():
+    ctrl = _combo(board_rect=pg.Rect(0, 0, 700, 700))
+    surf = pg.Surface((700, 700))
+    surf.fill((255, 255, 255))
+    ctrl.update(int(COMBO_VIEW_INTRO_ARROW_MS))
+    ctrl.draw(surf)
+    first = _region_brightness(surf, _chip_core_rect(ctrl, 0))
+    last = _region_brightness(surf, _chip_core_rect(ctrl, len(_PROMPTS) - 1))
+    assert first < last * 0.6, \
+        "the first chip has landed dark while the last is still arriving with its arrow"
+
+
+def test_exit_fade_lifts_the_chips_with_the_check():
+    def bottom_probe(ctrl, surf):
+        rect = pg.Rect(0, 0, ctrl._chip // 3, 5)
+        rect.centerx = ctrl._strip_slots[1]
+        rect.bottom = ctrl._strip_y + ctrl._chip // 2 - 3
+        return _region_brightness(surf, rect)
+
+    ctrl = _combo(board_rect=pg.Rect(0, 0, 700, 700))
+    last = _three_wrongs(ctrl, start=3000, step=300)
+    ctrl.update(last + int(COMBO_VIEW_EXIT_FADE_MS) // 2)
+    mid_surf = pg.Surface((700, 700))
+    mid_surf.fill((255, 255, 255))
+    ctrl.draw(mid_surf)
+    mid = bottom_probe(ctrl, mid_surf)
+    ctrl.update(last + int(COMBO_VIEW_EXIT_FADE_MS) + 50)
+    after_surf = pg.Surface((700, 700))
+    after_surf.fill((255, 255, 255))
+    ctrl.draw(after_surf)
+    after = bottom_probe(ctrl, after_surf)
+    assert after >= 750, "once the exit fade completes the chips are fully lifted"
+    assert mid < after - 80, "mid-fade the chips are still visibly there"
+
+
+def test_chip_surfaces_allocate_nothing_per_frame():
     ctrl = _combo_scene(_PROMPTS, 99)
     surf = pg.Surface((700, 700), pg.SRCALPHA)
     ctrl.update(16)
     ctrl.draw(surf)
-    plate = _strip_plate(ctrl._plate_w, ctrl._plate_h, ctrl._plate_cut,
-                         ctrl._plate_fade_x, ctrl._plate_fade_y)
-    sizes = (len(_PLATE_CACHE), len(_CHEVRON_SHADOW_CACHE))
+    chip = _chip_surface(ctrl._chip, ctrl._chip_cut, _CHIP_NEXT)
+    size = len(_CHIP_CACHE)
     for i in range(2, 60):
         ctrl.update(i * 16)
         ctrl.draw(surf)
-    assert (len(_PLATE_CACHE), len(_CHEVRON_SHADOW_CACHE)) == sizes, \
-        "60 frames must not add a single cache entry"
-    assert _strip_plate(ctrl._plate_w, ctrl._plate_h, ctrl._plate_cut,
-                        ctrl._plate_fade_x, ctrl._plate_fade_y) is plate
+    assert len(_CHIP_CACHE) == size, "60 frames must not add a single cache entry"
+    assert _chip_surface(ctrl._chip, ctrl._chip_cut, _CHIP_NEXT) is chip
 
 
 def test_wrong_press_cues_the_scratch_inside_the_press_handler():
