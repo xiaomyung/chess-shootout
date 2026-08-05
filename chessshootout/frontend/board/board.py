@@ -1246,15 +1246,28 @@ class Board:
                 if self.match.piece_at(Square(r, c)) is not None}
 
     def _on_capture_fire(self, entry, color, victim_sq):
-        key = self.effects.register_kill(color, victim_sq, self.cell_size, pg.time.get_ticks())
-        if self.shot_callback is not None and not self.effects.firing_advance_only:
+        if self.effects.firing_advance_only:
+            return
+        if self.shot_callback is not None:
             self.shot_callback(entry)
+        self._credit_kill(color, victim_sq, entry.move.captured)
+
+    def whack_kill_at(self, px, victim_sq, color, victim_piece):
+        if px is None or victim_sq is None or color is None or self.cell_size <= 0:
+            return
+        self.effects.impact_px(pg.time.get_ticks(), px, self.cell_size)
+        self._credit_kill(color, victim_sq, victim_piece, px=px)
+
+    def _credit_kill(self, color, victim_sq, victim_piece, px=None):
+        key = self.effects.register_kill(color, victim_sq, self.cell_size,
+                                         pg.time.get_ticks(), px=px)
         if self.announce_callback is not None and key is not None:
-            self.announce_callback(key, entry.move.captured)
+            self.announce_callback(key, victim_piece)
 
     def trigger_skillcheck_fail(self, from_sq, to_sq, on_fire=None):
         piece = self.match.piece_at(from_sq)
         if piece is None or self.cell_size <= 0:
+            self.effects._take_gun_handoff(from_sq)
             return
         now = pg.time.get_ticks()
         victim_sq = self.capture_victim_square(piece, from_sq, to_sq)

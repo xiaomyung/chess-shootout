@@ -79,7 +79,8 @@ RAGDOLL_FALL_SHRINK = 0.3
 
 STREAK_LABELS = {2: "DOUBLE KILL", 3: "TRIPLE KILL", 4: "QUADRA KILL",
                  5: "RAMPAGE", 6: "UNSTOPPABLE", 7: "GODLIKE"}
-HIT_WORDS = ("BLAM", "BOOM", "POW", "BANG", "HEADSHOT", "BODIED", "WASTED")
+HIT_WORDS = ("BLAM", "BOOM", "POW", "BANG", "HEADSHOT", "BODIED", "WASTED",
+             "REKT", "DELETED", "GOT EM")
 SWEAR_WORDS = ("DAMN IT", "DANG!", "MISSED!", "ARGH!", "COME ON!", "SO CLOSE", "UGH")
 SKILL_ISSUE_TITLE = "SKILL ISSUE"
 SKILL_ISSUE_SUB = "GET GOOD, BRO"
@@ -236,6 +237,11 @@ class EffectManager:
     def _center(self, sq):
         return self.geom(sq)
 
+    def _anchor(self, p):
+        if "px" in p:
+            return p["px"]
+        return self._center(p["victim_sq"])
+
     @staticmethod
     def _angle_to(origin, target):
         return math.atan2(target[1] - origin[1], target[0] - origin[0])
@@ -278,9 +284,10 @@ class EffectManager:
             if on_slide is not None:
                 on_slide()
             return
+        fire_at = now_ms if handed else now_ms + (0 if predrawn else DRAW_MS) + AIM_MS
         self.captures.append({
             "start": now_ms, "predrawn": predrawn, "advance_only": handed,
-            "fire_at": now_ms + (0 if predrawn else DRAW_MS) + AIM_MS,
+            "fire_at": fire_at,
             "fired": False, "gun": gun, "weapon": weapon,
             "from_sq": from_sq, "victim_sq": victim_sq, "to_sq": to_sq,
             "attacker": attacker_surface, "victim": victim_surface,
@@ -290,6 +297,7 @@ class EffectManager:
 
     def miss(self, *, now_ms, attacker_type, from_sq, victim_sq, cell_size,
              power="med", on_fire=None, occupied=None, callout=True):
+        handed = self._take_gun_handoff(from_sq)
         gun = gunfx.PIECE_GUN.get(attacker_type, "revolver")
         weapon = self._weapon(gun, cell_size)
         if weapon is None:
@@ -299,7 +307,8 @@ class EffectManager:
                 on_fire()
             return
         self.captures.append({
-            "start": now_ms, "fire_at": now_ms + DRAW_MS + AIM_MS,
+            "start": now_ms, "predrawn": handed,
+            "fire_at": now_ms + (0 if handed else DRAW_MS) + AIM_MS,
             "fired": False, "gun": gun, "weapon": weapon,
             "from_sq": from_sq, "victim_sq": victim_sq, "to_sq": victim_sq,
             "attacker": None, "victim": None,
@@ -430,7 +439,7 @@ class EffectManager:
                                "muzzle": muzzle, "aim": g["aim"],
                                "start": now, "dur": MUZZLE_MS})
 
-    def register_kill(self, color, victim_sq, cell, now_ms):
+    def register_kill(self, color, victim_sq, cell, now_ms, px=None):
         if color == self._streak_color:
             self._streak_count += 1
         else:
@@ -446,7 +455,7 @@ class EffectManager:
             self._callout(now_ms, STREAK_LABELS[n], "", "xl" if n >= 5 else "lg", cell,
                           Colors.accent_hi, Colors.accent_glow)
             return STREAK_LABELS[n].lower().replace(" ", "_")
-        self._tag(now_ms, self._pick(HIT_WORDS), victim_sq, cell)
+        self._tag(now_ms, self._pick(HIT_WORDS), victim_sq, cell, px=px)
         return "hit"
 
     def _callout(self, now, text, sub, size, cell, fill, glow):
@@ -456,13 +465,19 @@ class EffectManager:
         dur = CALLOUT_XL_MS if size == "xl" else CALLOUT_LG_MS
         self.callouts = [{"surf": surf, "start": now, "dur": dur}]
 
-    def _tag(self, now, text, victim_sq, cell):
+    def _tag(self, now, text, victim_sq, cell, px=None, fill=None, glow=None):
         size_px = max(int(cell * 0.45), 12)
-        surf, _ = self._build_text_fx(text, size_px, Colors.amber_hi, Colors.tag_stroke,
-                                      Colors.amber_glow)
+        surf, _ = self._build_text_fx(text, size_px, fill or Colors.amber_hi,
+                                      Colors.tag_stroke, glow or Colors.amber_glow)
         surf = pg.transform.rotozoom(surf, TAG_ROTATION_DEG, 1.0)
-        self.particles.append({"kind": "tag", "surf": surf, "victim_sq": victim_sq,
-                               "cell": cell, "start": now, "dur": TAG_MS})
+        particle = {"kind": "tag", "surf": surf, "victim_sq": victim_sq,
+                    "cell": cell, "start": now, "dur": TAG_MS}
+        if px is not None:
+            particle["px"] = px
+        self.particles.append(particle)
+
+    def taunt_tag(self, now_ms, text, victim_sq, cell):
+        self._tag(now_ms, text, victim_sq, cell, fill=Colors.loss, glow=Colors.loss_glow)
 
     def raise_flag(self, sq, cell, now_ms):
         self.flags = [{"sq": sq, "cell": cell, "start": now_ms}]
@@ -528,25 +543,30 @@ class EffectManager:
         return (tx + math.cos(perp) * off + math.cos(aim) * along,
                 ty + math.sin(perp) * off + math.sin(aim) * along)
 
-    def _impact(self, now, from_sq, victim_sq, victim, cell):
-        self.particles.append({"kind": "impact", "victim_sq": victim_sq, "cell": cell,
+    def _impact_package(self, now, anchor, cell):
+        self.particles.append({"kind": "impact", **anchor, "cell": cell,
                                "start": now, "dur": IMPACT_MS})
-        self.particles.append({"kind": "blood", "victim_sq": victim_sq, "cell": cell,
+        self.particles.append({"kind": "blood", **anchor, "cell": cell,
                                "start": now, "dur": BLOOD_MS})
-        self.holes.append({"victim_sq": victim_sq, "cell": cell, "start": now,
+        self.holes.append({**anchor, "cell": cell, "start": now,
                            "dur": HOLE_IN_MS + HOLE_HOLD_MS + HOLE_FADE_MS})
-        spark_n = SPARK_COUNT
         spark_size = max(int(cell * 0.06), 3)
-        for _ in range(spark_n):
+        for _ in range(SPARK_COUNT):
             self.particles.append({
-                "kind": "spark", "victim_sq": victim_sq, "ang": self._rnd(0, math.tau),
+                "kind": "spark", **anchor, "ang": self._rnd(0, math.tau),
                 "dist": self._rnd(20, 70) * cell / 80.0, "size": spark_size,
                 "start": now, "dur": self._rnd(*SPARK_MS)})
         for _ in range(SMOKE_PUFFS):
             self.particles.append({
-                "kind": "smoke", "victim_sq": victim_sq,
+                "kind": "smoke", **anchor,
                 "jx": self._rnd(-8, 8), "jy": self._rnd(-8, 8),
                 "cell": cell, "start": now, "dur": self._rnd(*SMOKE_MS)})
+
+    def impact_px(self, now_ms, px, cell):
+        self._impact_package(now_ms, {"px": px}, cell)
+
+    def _impact(self, now, from_sq, victim_sq, victim, cell):
+        self._impact_package(now, {"victim_sq": victim_sq}, cell)
         if victim is not None:
             aim = self._aim(from_sq, victim_sq)
             self.particles.append({
@@ -578,16 +598,16 @@ class EffectManager:
         self._last_now = now
         for c in list(self.captures):
             if not c["fired"] and now >= c["fire_at"]:
-                if not c.get("advance_only"):
+                advance_only = bool(c.get("advance_only"))
+                if not advance_only:
                     self._shoot(now, c)
                 c["fired"] = True
                 if c["on_fire"] is not None:
-                    self.firing_advance_only = bool(c.get("advance_only"))
+                    self.firing_advance_only = advance_only
                     c["on_fire"]()
                     self.firing_advance_only = False
-            if (c.get("advance_only") and c["fired"]
-                    and now >= c["fire_at"] + PROJECTILE_TRAVEL_MS):
-                self._resolve_capture(now, c)
+                if advance_only:
+                    self._resolve_capture(now, c)
         self.captures = [c for c in self.captures
                          if not (c.get("miss") and c["fired"]
                                  and now >= c["fire_at"] + MISS_HOLD_MS)]
@@ -779,7 +799,7 @@ class EffectManager:
         stroke = max(int(p["cell"] * 0.045), 2)
         layer = _impact_ring_sprite(r, stroke)
         layer.set_alpha(alpha)
-        cx, cy = self._center(p["victim_sq"])
+        cx, cy = self._anchor(p)
         window.blit(layer, (cx - r - 4, cy - r - 4))
 
     def _draw_blood(self, window, p, now):
@@ -793,14 +813,14 @@ class EffectManager:
         alpha = int(217 * (1 - prog))
         layer = _blood_sprite(r)
         layer.set_alpha(alpha)
-        cx, cy = self._center(p["victim_sq"])
+        cx, cy = self._anchor(p)
         window.blit(layer, (cx - r - 1, cy - r - 1))
 
     def _draw_spark(self, window, p, now):
         prog = (now - p["start"]) / p["dur"]
         if not 0.0 <= prog < 1.0:
             return
-        cx, cy = self._center(p["victim_sq"])
+        cx, cy = self._anchor(p)
         dist = p["dist"] * prog
         x = cx + math.cos(p["ang"]) * dist
         y = cy + math.sin(p["ang"]) * dist + 6 * prog
@@ -820,7 +840,7 @@ class EffectManager:
         alpha = int(130 * (1 - prog))
         layer = _smoke_sprite(r)
         layer.set_alpha(alpha)
-        cx, cy = self._center(p["victim_sq"])
+        cx, cy = self._anchor(p)
         window.blit(layer, (cx + p["jx"] - r, cy + p["jy"] - p["cell"] * 0.9 * prog - r))
 
     def _draw_ragdoll(self, window, p, now):
@@ -922,7 +942,7 @@ class EffectManager:
             return
         layer = _hole_sprite(r)
         layer.set_alpha(max(alpha, 0))
-        cx, cy = self._center(h["victim_sq"])
+        cx, cy = self._anchor(h)
         window.blit(layer, (cx - r - 2, cy - r - 2))
 
     @staticmethod
@@ -1009,7 +1029,7 @@ class EffectManager:
         rise, scale, alpha = self._tag_anim(prog)
         img = pg.transform.smoothscale_by(p["surf"], scale)
         img.set_alpha(max(alpha, 0))
-        cx, cy = self._center(p["victim_sq"])
+        cx, cy = self._anchor(p)
         window.blit(img, img.get_rect(center=(cx, cy - rise * p["cell"] * 0.8)))
 
     @staticmethod

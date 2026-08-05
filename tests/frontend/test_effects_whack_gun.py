@@ -16,38 +16,47 @@ PROJECTILE_MAX_MS — the slug's lifetime is capped at its own travel time so it
 AT the impact point. WHACK_SHOT_TRAVEL_MS is deliberately far snappier than the
 capture travel: the pellet has to land while the hit still reads as one beat.
 
-A WON check hands the gun over instead of dropping it: hand_off_gun_px() clears the
-held state SILENTLY (no tumble) and arms a one-shot handoff keyed by the shooter's
-square, which the very next capture() from that square consumes as predrawn — no
-draw-flourish, fire_at only AIM_MS out, so the check's last aimed frame and the
-capture's first aimed frame are the same picture. The latch is keyed by square (a
-capture by any other piece cannot inherit it) and deliberately SURVIVES cut(), which
+A finished check hands the gun over instead of dropping it: hand_off_gun_px() clears
+the held state SILENTLY (no tumble) and arms a one-shot handoff keyed by the
+shooter's square, which the very next capture() OR miss() from that square consumes
+as predrawn — no draw-flourish, so the check's last aimed frame and the shot's first
+aimed frame are the same picture. The latch is keyed by square (a capture by any
+other piece cannot inherit it) and deliberately SURVIVES cut(), which
 board._start_move_animation fires between the handoff and the capture; only a real
-reset (clear_transients) drops it. capture(predrawn=True) is the same switch for
-callers that can pass it directly — the session cannot, because its capture is three
-frames deep behind board.apply_gated_move.
+reset (clear_transients) drops it, and re-arming a check (hold_gun_px) clears a stale
+one. capture(predrawn=True) is the same switch for callers that can pass it directly
+— the session cannot, because its capture is three frames deep behind
+board.apply_gated_move.
 
-A consumed handoff means MORE than a predrawn gun: the whack already killed the
-victim (its body is blasted off the pit by the check's own choreography), so the
-capture behind it is ADVANCE-ONLY — the fire phase is skipped whole. No pellet, no
-muzzle flash, no impact/blood/hole/ragdoll, no victim sprite to draw, no recoil.
-Only the two timing hooks survive, in the same order and at the same offsets a real
-volley would have fired them at (on_fire at fire_at, on_slide one pellet flight
-later), because the board hangs its kill bookkeeping and its slide animation off
-them. Captures with no check behind them still shoot everything.
+A consumed handoff means MORE than a predrawn gun on the WIN path: the whack already
+killed the victim (its body is blasted off the pit by the check's own choreography,
+and the kill flair is credited there at the killing pixel), so the capture behind it
+is ADVANCE-ONLY — the fire phase is skipped whole. No pellet, no muzzle flash, no
+impact/blood/hole/ragdoll, no victim sprite to draw, no recoil, and no wait: it has
+nothing to aim at and nothing to fly, so on_fire and on_slide both land on the very
+first update and the entry retires immediately. board._on_capture_fire reads
+firing_advance_only and returns before crediting a second kill or cueing a gunshot.
+The FAIL path consumes the same handoff, but a miss is a real volley — it draws no
+new gun, then shoots and whiffs on schedule. Captures with no check behind them still
+draw, aim, fire and travel exactly as before.
 """
 
 import math
 import random
+from types import SimpleNamespace
 
 import pygame as pg
 import pytest
 
 from tests.conftest import pygame_display
 from chessshootout.backend.utils import Square
+from chessshootout.domain.match import Match
+from chessshootout.frontend.board import Board
+from chessshootout.frontend.visual.colors import Colors
 from chessshootout.frontend.visual.effects import (
     AIM_MS, CHECK_DROP_MS, DRAW_MS, GUN_PX_AIM_RATE, MUZZLE_MS, PROJECTILE_MAX_MS,
-    PROJECTILE_TRAVEL_MS, WHACK_SHOT_LIFE_EPS_MS, WHACK_SHOT_TRAVEL_MS, EffectManager)
+    PROJECTILE_TRAVEL_MS, TAG_MS, WHACK_SHOT_LIFE_EPS_MS, WHACK_SHOT_TRAVEL_MS,
+    EffectManager)
 from chessshootout.frontend.visual.gunfx import GUNS, PIECE_GUN
 
 _pygame_init = pygame_display(800, 800)
@@ -369,16 +378,26 @@ def test_the_capture_behind_a_won_whack_never_fires_a_second_time():
                            on_slide=lambda: order.append("slide"))
     assert entry["advance_only"] is True
     em.update(0)
-    em.update(AIM_MS)
-    assert order == ["fire"], "the fire hook still lands on the beat the gun would have fired"
-    assert em.projectiles == [], "but no pellet leaves the barrel"
+    assert order == ["fire", "slide"], \
+        "with nothing to aim at and nothing to fly, both hooks land on the first update"
+    assert em.projectiles == [], "no pellet leaves the barrel"
     assert em.particles == [], "and no muzzle flash either"
     assert em.holes == [] and em._shake is None, "nothing hits anything"
-    em.update(AIM_MS + PROJECTILE_TRAVEL_MS)
-    assert order == ["fire", "slide"], "the slide follows one pellet flight later, as always"
     assert em.particles == [], "no impact ring, no blood, no ragdoll — the victim is gone"
-    assert em.holes == []
     assert em.captures == [], "and the entry retires with the slide"
+
+
+def test_the_advancing_capture_waits_out_no_draw_aim_or_travel_beat():
+    em = _em()
+    order = []
+    entry = _armed_advance(em, now_ms=1000, on_fire=lambda: order.append("fire"),
+                           on_slide=lambda: order.append("slide"))
+    assert entry["fire_at"] == entry["start"] == 1000, \
+        "the gun is already up and pointed — no DRAW_MS, no AIM_MS to sit through"
+    em.update(1000)
+    assert order == ["fire", "slide"], \
+        "and no PROJECTILE_TRAVEL_MS wait for a pellet that never flew"
+    assert em.captures == []
 
 
 def test_a_plain_capture_behind_no_check_still_shoots_everything():
@@ -412,8 +431,7 @@ def test_the_advancing_capture_holds_the_gun_still_and_hides_the_dead_victim():
     em.projectiles = []
     em.holes = []
     _armed_advance(em)
-    em.update(AIM_MS)
-    em.draw_over(advancing, AIM_MS)
+    em.draw_over(advancing, 0)
     victim = pg.Rect(4 * _CELL, 4 * _CELL, _CELL, _CELL)
     assert _pixels(advancing, victim) == _pixels(_window(), victim), \
         "the victim square stays empty — its body left with the skill-check"
@@ -433,10 +451,10 @@ def test_cut_and_clear_transients_never_leave_the_gun_behind():
 
 
 def test_advance_only_fire_flags_the_callback_so_the_gunshot_is_muted():
-    # The whack check already fired the real gunshots; the advancing capture is
-    # silent — no shot sound with nothing visible — but kill streaks still count
-    # (board._on_capture_fire reads firing_advance_only to skip shot_callback
-    # while still calling register_kill).
+    # The whack check already fired the real gunshots AND already credited the
+    # kill at the pit it happened on, so the advancing capture is silent all the
+    # way through — board._on_capture_fire reads firing_advance_only and returns
+    # before the gunshot cue, the kill flair and the announcer line.
     em = _em()
     fired = {}
     _armed_advance(em, on_fire=lambda: fired.setdefault("advance", em.firing_advance_only))
@@ -452,3 +470,152 @@ def test_a_plain_capture_fire_reports_not_advance_only():
     _capture(em, on_fire=lambda: fired.setdefault("advance", em.firing_advance_only))
     em.update(5000)
     assert fired["advance"] is False
+
+
+def _fire_board(calls):
+    match = Match()
+    match.new_game()
+    board = Board(pg.display.get_surface(), match,
+                  shot_callback=lambda entry: calls.append("shot"),
+                  announce_callback=lambda key, captured: calls.append(("announce", key)))
+    board.load_assets()
+    board.set_rect(pg.Rect(0, 0, 800, 800))
+    return board
+
+
+def test_an_advancing_capture_cues_no_gunshot_and_credits_no_second_kill():
+    em = _em()
+    calls = []
+    board = _fire_board(calls)
+    board.effects = em
+    entry = SimpleNamespace(move=SimpleNamespace(captured=None))
+    em.firing_advance_only = True
+    board._on_capture_fire(entry, "white", Square(4, 4))
+    assert calls == [], "no gunshot cue and no announcer line behind a won whack"
+    assert em.callouts == [] and em.particles == [], "and no second kill flair"
+    assert em._streak_count == 0, "the streak was already credited at the killing pixel"
+    em.firing_advance_only = False
+    board._on_capture_fire(entry, "white", Square(4, 4))
+    assert calls == ["shot", ("announce", "first_blood")], \
+        "a capture with no check behind it still cues and announces its kill"
+    assert em._streak_count == 1
+
+
+def _miss(em, from_sq=_FROM, victim_sq=Square(4, 4), now_ms=0, **kw):
+    em.miss(now_ms=now_ms, attacker_type="queen", from_sq=from_sq, victim_sq=victim_sq,
+            cell_size=_CELL, **kw)
+    return em.captures[-1]
+
+
+def test_the_failed_whacks_miss_shoots_the_gun_already_in_the_hand():
+    # The fail beat keeps the same weapon on screen: the check's last aimed frame
+    # flows straight into the whiff instead of tumbling and re-drawing a twin gun.
+    em = _em()
+    _held(em, attacker_type="queen")
+    em.hand_off_gun_px()
+    fired = []
+    entry = _miss(em, on_fire=lambda: fired.append(1))
+    assert entry["predrawn"] is True, "no second draw-flourish for a gun it never let go of"
+    assert entry["fire_at"] == AIM_MS, "only the aim beat stands between the check and the whiff"
+    assert em.drops == [], "and nothing tumbles in between"
+    em.update(entry["fire_at"] - 1)
+    assert fired == [] and em.projectiles == []
+    em.update(entry["fire_at"])
+    assert fired == [1], "a miss is NOT advance-only — it really pulls the trigger"
+    assert em.projectiles, "the whole spread leaves the barrel"
+    assert em.callouts, "and the SKILL ISSUE callout still lands with it"
+
+
+def test_a_miss_with_no_handoff_keeps_the_full_draw_and_aim_beat():
+    em = _em()
+    fired = []
+    entry = _miss(em, on_fire=lambda: fired.append(1))
+    assert entry["predrawn"] is False, "nothing was handed over — it draws for itself"
+    assert entry["fire_at"] == DRAW_MS + AIM_MS
+    em.update(entry["fire_at"])
+    assert fired == [1] and em.projectiles
+
+
+def test_the_miss_consumes_the_handoff_so_nothing_inherits_it_afterwards():
+    em = _em()
+    _held(em)
+    em.hand_off_gun_px()
+    _miss(em)
+    em.captures = []
+    assert em._gun_handoff is None
+    assert _capture(em)["predrawn"] is False, "the latch is spent — one shot, not two"
+
+
+def test_register_kill_pins_the_hit_word_to_the_pixel_it_was_earned_at():
+    em = _em()
+    px = (137.0, 421.0)
+    for i in range(7):
+        em.register_kill("white", Square(0, 4), _CELL, i)
+    em.update(10_000)
+    assert em.register_kill("white", Square(0, 4), _CELL, 10_001, px=px) == "hit"
+    tag = [p for p in em.particles if p["kind"] == "tag"][-1]
+    assert tag["px"] == px
+    assert em._anchor(tag) == px, "the word pops where the piece died, not on its home square"
+
+
+def test_a_kill_with_no_pixel_still_anchors_to_the_captured_square():
+    em = _em()
+    for i in range(7):
+        em.register_kill("white", Square(0, 4), _CELL, i)
+    em.update(10_000)
+    em.register_kill("white", Square(2, 3), _CELL, 10_001)
+    tag = [p for p in em.particles if p["kind"] == "tag"][-1]
+    assert "px" not in tag, "the square path stays byte-identical — no anchor key at all"
+    assert em._anchor(tag) == em.geom(Square(2, 3))
+
+
+def test_impact_px_shreds_the_air_at_a_pixel_and_leaves_no_body_behind():
+    em = _em()
+    px = (321.0, 123.0)
+    em.impact_px(0, px, _CELL)
+    kinds = [p["kind"] for p in em.particles]
+    assert set(kinds) == {"impact", "blood", "spark", "smoke"}, \
+        "the whole square-anchored package spawns, minus the ragdoll"
+    assert "ragdoll" not in kinds, "the victim already flew off the pit on the check's own arc"
+    assert len(em.holes) == 1, "and it keeps the bullet hole"
+    assert all(em._anchor(p) == px for p in em.particles)
+    assert em._anchor(em.holes[0]) == px
+    assert all("victim_sq" not in p for p in em.particles + em.holes), \
+        "nothing about a pixel impact refers to a square"
+
+
+def test_impact_px_paints_at_the_pixel_and_nowhere_near_a_square_centre():
+    em = _em()
+    px = (305.0, 105.0)
+    empty = _window()
+    hit = _window()
+    em.impact_px(0, px, _CELL)
+    em.draw_holes(hit, 40)
+    em.draw_over(hit, 40)
+    at_px = pg.Rect(280, 80, 50, 50)
+    at_centre = pg.Rect(338, 138, 24, 24)
+    assert em.geom(Square(1, 3)) == (350, 150), "the pixel sits well off its own square centre"
+    assert _pixels(hit, at_px) != _pixels(empty, at_px), \
+        "the ring, blood and hole all land on the pixel"
+    assert _pixels(hit, at_centre) == _pixels(empty, at_centre), \
+        "and nothing at all lands on the square centre that used to anchor them"
+
+
+def _ink(surf):
+    lit = [surf.get_at((x, y)) for x in range(surf.get_width())
+           for y in range(surf.get_height()) if surf.get_at((x, y)).a > 200]
+    return [sum(c[i] for c in lit) / len(lit) for i in range(3)]
+
+
+def test_the_taunt_tag_wears_the_loss_colour_instead_of_the_kill_amber():
+    em = _em()
+    em.taunt_tag(0, "LOSER", Square(4, 4), _CELL)
+    taunt = [p for p in em.particles if p["kind"] == "tag"][0]
+    assert taunt["victim_sq"] == Square(4, 4) and taunt["dur"] == TAG_MS
+    assert "px" not in taunt, "a taunt belongs to the square that just survived"
+    em.particles = []
+    em._tag(0, "LOSER", Square(4, 4), _CELL)
+    amber = [p for p in em.particles if p["kind"] == "tag"][0]
+    assert _ink(taunt["surf"])[1] < _ink(amber["surf"])[1] - 20, \
+        "the taunt reads red like SKILL ISSUE, not gold like a hit word"
+    assert pg.Color(Colors.loss).g < pg.Color(Colors.amber_hi).g

@@ -159,16 +159,31 @@ class SkillCheckSession:
             return None
         return self.screen.board.cell_rect(self.skillcheck_target).center
 
-    def _on_whack_hit_px(self, px):
+    def _on_whack_hit_px(self, px, kill=False):
         self._whack_impact_px = px
-        self.screen.board.effects.fire_gun_px(pg.time.get_ticks(), px)
+        board = self.screen.board
+        board.effects.fire_gun_px(pg.time.get_ticks(), px)
+        if kill:
+            board.whack_kill_at(px, self.skillcheck_target, self._whack_attacker_color(),
+                                self._whack_victim_piece())
+
+    def _whack_attacker_color(self):
+        if self._whack_gun_from is None:
+            return None
+        attacker = self.screen.match.piece_at(self._whack_gun_from)
+        return attacker.color.value if attacker is not None else None
+
+    def _whack_victim_piece(self):
+        if self.skillcheck_target is None:
+            return None
+        return self.screen.match.piece_at(self.skillcheck_target)
 
     def release_whack_gun(self):
         self._clear_whack_gun_context()
         self.screen.board.effects.release_gun_px(pg.time.get_ticks())
 
-    def _end_whack_gun(self, kind, landed):
-        if kind != SkillCheckKind.WHACK or not landed:
+    def _end_whack_gun(self, kind):
+        if kind != SkillCheckKind.WHACK:
             self.release_whack_gun()
             return
         self._clear_whack_gun_context()
@@ -219,7 +234,7 @@ class SkillCheckSession:
         self.online_was_spectator = False
         action = self.online_verdict_action
         self.online_verdict_action = None
-        self._end_whack_gun(kind, landed)
+        self._end_whack_gun(kind)
         self.screen.board.aim_suppressed_square = None
         self.skillcheck_target = None
         self.active_kind = None
@@ -230,7 +245,11 @@ class SkillCheckSession:
             self._show_whack_taunt(target, seed, not was_spectator)
 
     def _show_whack_taunt(self, square, seed, play_sound):
-        self.screen.show_taunt(square, mole.pick_taunt(seed))
+        if square is None:
+            return
+        board = self.screen.board
+        board.effects.taunt_tag(pg.time.get_ticks(), mole.pick_taunt(seed),
+                                square, board.cell_size)
         if play_sound:
             self.app.sound_manager.play_mole_taunt()
 
@@ -295,7 +314,7 @@ class SkillCheckSession:
         kind = context[3] if len(context) > 3 else None
         seed = self.active_seed
         aim_victim = screen.board.aim_suppressed_square
-        self._end_whack_gun(kind, landed)
+        self._end_whack_gun(kind)
         screen.board.aim_suppressed_square = None
         self.active_kind = None
         self.active_seed = None

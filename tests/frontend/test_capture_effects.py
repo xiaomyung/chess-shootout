@@ -999,7 +999,8 @@ def test_register_kill_returns_the_announcer_key():
 def test_streak_label_table_matches_the_design():
     assert STREAK_LABELS == {2: "DOUBLE KILL", 3: "TRIPLE KILL", 4: "QUADRA KILL",
                              5: "RAMPAGE", 6: "UNSTOPPABLE", 7: "GODLIKE"}
-    assert HIT_WORDS == ("BLAM", "BOOM", "POW", "BANG", "HEADSHOT", "BODIED", "WASTED")
+    assert HIT_WORDS == ("BLAM", "BOOM", "POW", "BANG", "HEADSHOT", "BODIED", "WASTED",
+                         "REKT", "DELETED", "GOT EM")
 
 
 def test_callout_paints_pixels_and_replaces_rather_than_stacks():

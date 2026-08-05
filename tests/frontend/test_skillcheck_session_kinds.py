@@ -10,14 +10,22 @@ live controller (teardown, screen exit, new-game reset, overlay replacement) cal
 close() so the whack check's hidden OS cursor can never leak. The input swallow
 path is pinned: arrows reach the combo pad, never move-stepping.
 
-A failed WHACK hands the taunt to the BOARD layer: the session stores the check
-seed at overlay-open, and on a fail calls screen.show_taunt(victim_sq,
-mole.pick_taunt(seed)) — deterministic per seed, so mover and spectator show the
-same line — plus the taunt sound for the mover only (the spectate mirror stays muted).
-The seed clears on every terminal path so a stale seed can never leak into the
-next check's taunt. The failed WHACK is also the one restore that skips the board
+A failed WHACK taunts with the same loss-coloured FLAIR WORD the kill words use —
+no speech bubble anywhere in it. The session stores the check seed at overlay-open
+and on a fail spawns effects.taunt_tag(pick_taunt(seed)) over the surviving victim
+— deterministic per seed, so mover and spectator render the same word — plus the
+taunt sound for the mover only (the spectate mirror stays muted). The seed clears
+on every terminal path so a stale seed can never leak into the next check's taunt.
+The failed WHACK is also the one restore that skips the board
 drop (restore_piece(drop=False)): its overlay already set the victim down on its
 own square, so the piece must simply be there the frame the overlay ends.
+
+The KILL is credited at the pit, on the hit that earns it — not later at the home
+square. The controller reports every registered hit as (px, kill); on the killing
+one the session calls board.whack_kill_at(px, victim_sq, color, victim_piece),
+the single choke point that registers the streak at that pixel, shreds the air
+there (impact_px) and announces it. The mirror runs the identical package off the
+relayed shot, so a spectator sees and hears the kill on the pit it happened on.
 
 While a WHACK runs, the CAPTURER on the board keeps its gun out and tracks the live
 crosshair (the mirror tracks the last relayed impact instead, falling back to the
@@ -29,14 +37,18 @@ it is not, which is what covers every teardown path at once. The terminal paths
 release explicitly too, because a screen that stops drawing stops syncing — the gun
 must never survive into the next game.
 
-A WON whack is the one ending that does NOT tumble: the piece hands the same gun to
-the capture choreography (hand_off_gun_px -> predrawn capture, AIM_MS only), so the
-killing shot flows straight into the capture with no drop and no second
-draw-flourish. That handoff also arms the capture ADVANCE-ONLY — the whack already
-blasted the victim off the pit, so the capture keeps the aimed gun and the slide but
-fires nothing at the empty square. Every other ending — fail, teardown, Esc, resign,
-new game — keeps the approved tumble and its own drawn-and-fired shot, and a capture
-with no check behind it is untouched.
+NEITHER whack verdict tumbles the gun: win or miss, the piece keeps the weapon and
+hands it to whatever fires next (hand_off_gun_px -> predrawn capture on a win,
+predrawn miss volley on a fail), so the check's last aimed frame flows straight
+into the shot with no drop and no second draw-flourish. On a WIN the handoff also
+arms the capture ADVANCE-ONLY — the whack already blasted the victim off the pit,
+so the capture keeps the aimed gun and the slide but fires nothing at the empty
+square, and with no draw, aim or pellet flight to wait out it resolves on its first
+update. Only the abandonment paths — teardown, Esc, resign, new game — tumble, and
+a capture with no check behind it is untouched. Because the latch outlives the
+check, every branch of trigger_skillcheck_fail that cannot reach effects.miss()
+spends it instead, or the next capture in the game would inherit a predrawn gun
+and silently advance without firing.
 """
 
 import math
@@ -52,7 +64,7 @@ from chessshootout.backend.utils import Square
 from chessshootout.frontend.skillcheck.combo_view import ComboController, COMBO_TIME_LIMIT_MS
 from chessshootout.frontend.skillcheck.mole_view import MoleController
 from chessshootout.frontend.skillcheck.registry import build_controller
-from chessshootout.frontend.visual.effects import AIM_MS, DRAW_MS, PROJECTILE_TRAVEL_MS
+from chessshootout.frontend.visual.effects import AIM_MS, DRAW_MS, EffectManager
 from chessshootout.frontend.visual.gunfx import GUNS, PIECE_GUN
 from chessshootout.skillcheck import mole
 from chessshootout.skillcheck.combo import ComboChallenge
@@ -233,20 +245,52 @@ def test_other_failed_kinds_still_drop_the_victim_back_in(kind):
         "only the whack skips the drop; the approved aim/combo restore is untouched"
 
 
-def test_failed_whack_taunts_from_the_victim_square_on_the_board_layer():
+def _tags_on(fx, square):
+    return [p for p in fx.particles if p["kind"] == "tag" and p.get("victim_sq") == square]
+
+
+def _reference_taunt(cell, text):
+    # Same builder, same cell, same colours -- a byte-identical surface is the only
+    # way to pin the WORD, which the particle keeps only as pre-rendered pixels.
+    ref = EffectManager()
+    ref.taunt_tag(0, text, Square(0, 0), cell)
+    return ref.particles[-1]["surf"]
+
+
+def _same_pixels(left, right):
+    return (left.get_size() == right.get_size()
+            and pg.image.tostring(left, "RGBA") == pg.image.tostring(right, "RGBA"))
+
+
+def test_failed_whack_taunts_with_a_flair_word_over_the_surviving_victim():
     app = _local_app()
     frm, to, _ = _gate(app, SkillCheckKind.WHACK)
-    seed = app.game.skillcheck_session.active_seed
+    session, fx = app.game.skillcheck_session, app.game.board.effects
+    seed = session.active_seed
     assert seed is not None, "the session stores the check seed at overlay-open"
     context = app.game.skillcheck_overlay._context
     app.game.skillcheck_overlay.cancel()
-    app.game.skillcheck_session._on_skillcheck_done(context, False)
-    assert app.game._taunt_square == to, "the taunt bubble anchors to the surviving victim"
-    assert app.game.taunt_bubble.shown_at is not None
-    assert app.game.taunt_bubble.text == mole.pick_taunt(seed).upper(), \
+    session._on_skillcheck_done(context, False)
+    taunts = _tags_on(fx, to)
+    assert len(taunts) == 1, "one flair word, anchored on the surviving victim"
+    assert _same_pixels(taunts[0]["surf"],
+                        _reference_taunt(app.game.board.cell_size, mole.pick_taunt(seed))), \
         "the line comes from the per-check seed, not the controller"
+    assert _tags_on(fx, frm), "and the attacker's own swear still lands on its square"
     app.sound_manager.play_mole_taunt.assert_called_once()
-    assert app.game.skillcheck_session.active_seed is None, "the seed clears at resolution"
+    assert session.active_seed is None, "the seed clears at resolution"
+
+
+def test_the_taunt_is_a_flair_tag_and_never_a_speech_bubble():
+    # Speech bubbles are player chat only -- a mole taunt must not touch them.
+    app = _local_app()
+    _gate(app, SkillCheckKind.WHACK)
+    context = app.game.skillcheck_overlay._context
+    app.game.skillcheck_overlay.cancel()
+    app.game.skillcheck_session._on_skillcheck_done(context, False)
+    assert all(b.shown_at is None for b in app.game.speech_bubbles.values()), \
+        "the chat bubbles stay empty"
+    assert not hasattr(app.game, "taunt_bubble"), "the taunt bubble is gone for good"
 
 
 def test_won_whack_never_taunts():
@@ -255,20 +299,23 @@ def test_won_whack_never_taunts():
     context = app.game.skillcheck_overlay._context
     app.game.skillcheck_overlay.cancel()
     app.game.skillcheck_session._on_skillcheck_done(context, True)
-    assert app.game.taunt_bubble.shown_at is None
+    assert _tags_on(app.game.board.effects, to) == []
     app.sound_manager.play_mole_taunt.assert_not_called()
     assert app.game.skillcheck_session.active_seed is None
 
 
 def test_online_whack_fail_shows_the_board_taunt_with_sound():
     app = _local_app()
-    session = app.game.skillcheck_session
+    session, fx = app.game.skillcheck_session, app.game.board.effects
     session.skillcheck_target = sq(3, 3)
     session.active_seed = "wire-seed"
     session._on_online_skillcheck_done(
         (sq(4, 3), sq(3, 3), None, SkillCheckKind.WHACK), False)
-    assert app.game._taunt_square == sq(3, 3)
-    assert app.game.taunt_bubble.text == mole.pick_taunt("wire-seed").upper(), \
+    taunts = _tags_on(fx, sq(3, 3))
+    assert len(taunts) == 1
+    assert _same_pixels(taunts[0]["surf"],
+                        _reference_taunt(app.game.board.cell_size,
+                                         mole.pick_taunt("wire-seed"))), \
         "both clients derive the same line from the same wire seed"
     app.sound_manager.play_mole_taunt.assert_called_once()
     assert session.active_seed is None
@@ -278,17 +325,25 @@ def test_spectated_online_whack_fail_taunts_silently():
     # _begin_online_verdict nulls online_spectate_kind BEFORE the done handler runs,
     # so spectator-ness must survive on the online_was_spectator latch instead.
     app = _local_app()
-    session = app.game.skillcheck_session
+    session, fx = app.game.skillcheck_session, app.game.board.effects
     session.skillcheck_target = sq(3, 3)
     session.active_seed = "wire-seed"
     session.online_was_spectator = True
     session.online_spectate_kind = None
     session._on_online_skillcheck_done(
         (sq(4, 3), sq(3, 3), None, SkillCheckKind.WHACK), False)
-    assert app.game.taunt_bubble.shown_at is not None, \
-        "the mirror still shows the victim's line"
+    assert _tags_on(fx, sq(3, 3)), "the mirror still shows the victim's line"
     app.sound_manager.play_mole_taunt.assert_not_called()
     assert session.online_was_spectator is False
+
+
+def test_a_taunt_with_no_victim_square_paints_nothing():
+    # aim_suppressed_square is None on every non-capture path; a tag anchored to a
+    # None square would blow up in geom() the first frame it drew.
+    app = _local_app()
+    session, fx = app.game.skillcheck_session, app.game.board.effects
+    session._show_whack_taunt(None, "seed", True)
+    assert [p for p in fx.particles if p["kind"] == "tag"] == []
 
 
 def test_spectate_open_arms_the_spectator_latch():
@@ -550,7 +605,7 @@ def _finish_check(app, landed):
 
 def test_a_won_whack_hands_the_same_gun_to_the_capture(monkeypatch):
     # The check gun and the capture gun are the same weapon in the same hand: no
-    # tumble-drop, no second draw-flourish, only the aim beat before it advances.
+    # tumble-drop, no second draw-flourish, and nothing to aim at any more either.
     app, clock, frm, to = _whack_app(monkeypatch)
     session, fx = app.game.skillcheck_session, app.game.board.effects
     session.sync_whack_gun()
@@ -559,7 +614,8 @@ def test_a_won_whack_hands_the_same_gun_to_the_capture(monkeypatch):
         "a won check never throws the gun away mid-shootout"
     entry = fx.captures[0]
     assert entry["predrawn"] is True
-    assert entry["fire_at"] == entry["start"] + AIM_MS, "no DRAW_MS — it is already drawn"
+    assert entry["fire_at"] == entry["start"], \
+        "no DRAW_MS, no AIM_MS — the gun is up and the victim is already gone"
     assert entry["advance_only"] is True, \
         "the whack already killed the victim — the capture must not shoot the empty square"
     session.sync_whack_gun()
@@ -572,30 +628,58 @@ def test_a_won_whacks_capture_advances_without_firing_a_shot(monkeypatch):
     session.sync_whack_gun()
     _finish_check(app, True)
     entry = fx.captures[0]
-    clock.advance(AIM_MS)
     fx.update(entry["fire_at"])
     assert fx.projectiles == [], "no volley leaves the barrel"
     assert [p["kind"] for p in fx.particles if p["kind"] in ("flash", "impact", "blood",
                                                              "ragdoll")] == [], \
         "and nothing is shot, wounded or thrown around"
     assert fx.holes == []
-    clock.advance(PROJECTILE_TRAVEL_MS)
-    fx.update(entry["fire_at"] + PROJECTILE_TRAVEL_MS)
-    assert fx.captures == [], "the capture retires on its slide"
-    assert board.is_animating() is True, "the attacker still slides onto the square"
+    assert fx.captures == [], "the capture retires on the same update it fires"
+    assert board.is_animating() is True, "the attacker slides onto the square straight away"
 
 
-def test_a_failed_whack_still_tumbles_and_the_miss_gun_still_flourishes(monkeypatch):
+def test_a_failed_whack_hands_the_same_gun_to_the_miss_volley(monkeypatch):
+    # The fail beat is one continuous take too: the gun that was tracking the moles
+    # is the gun that whiffs, so it must not tumble and re-draw a twin in between.
     app, clock, frm, to = _whack_app(monkeypatch)
     session, fx = app.game.skillcheck_session, app.game.board.effects
     session.sync_whack_gun()
     _finish_check(app, False)
     assert fx.has_gun_px() is False
-    assert len(fx.drops) == 1, "the fail keeps the approved tumble"
+    assert fx.drops == [], "a miss keeps the weapon in hand — nothing is thrown away"
     entry = fx.captures[0]
-    assert not entry.get("predrawn"), "the SKILL ISSUE shot draws its own gun"
+    assert entry["miss"] is True
+    assert entry["predrawn"] is True, "the SKILL ISSUE shot inherits the drawn gun"
+    assert entry["fire_at"] == entry["start"] + AIM_MS, \
+        "only the aim beat stands between the check and the whiff — no DRAW_MS"
     assert not entry.get("advance_only"), "and it really does fire at the survivor"
-    assert entry["fire_at"] == entry["start"] + DRAW_MS + AIM_MS
+    assert fx._gun_handoff is None, "the miss spends the latch"
+
+
+def test_the_failed_whacks_volley_still_shoots_and_calls_the_skill_issue(monkeypatch):
+    app, clock, frm, to = _whack_app(monkeypatch)
+    session, fx = app.game.skillcheck_session, app.game.board.effects
+    session.sync_whack_gun()
+    _finish_check(app, False)
+    entry = fx.captures[0]
+    fx.projectiles = []
+    fx.update(entry["fire_at"])
+    assert fx.projectiles, "the whole spread leaves the barrel"
+    assert fx.callouts, "and the SKILL ISSUE callout lands with it"
+
+
+@pytest.mark.parametrize("kind", [SkillCheckKind.WHEEL, SkillCheckKind.AIM,
+                                  SkillCheckKind.COMBO])
+def test_no_other_kind_ever_hands_a_gun_on(kind, monkeypatch):
+    app = _local_app()
+    install_clock(monkeypatch, FakeTicks())
+    session, fx = app.game.skillcheck_session, app.game.board.effects
+    fx.hold_gun_px(now_ms=0, attacker_type="queen", from_sq=sq(4, 3),
+                   cell_size=app.game.board.cell_size)
+    session._end_whack_gun(kind)
+    assert fx._gun_handoff is None, \
+        "{}: only the whack passes its weapon on".format(kind.value)
+    assert len(fx.drops) == 1, "every other kind drops it"
 
 
 def test_a_plain_capture_is_untouched_by_the_handoff(monkeypatch):
@@ -608,3 +692,162 @@ def test_a_plain_capture_is_untouched_by_the_handoff(monkeypatch):
     assert entry["advance_only"] is False, "it has a victim to shoot and it shoots it"
     assert entry["fire_at"] == entry["start"] + DRAW_MS + AIM_MS, \
         "a capture with no check behind it still draws, aims, then fires"
+
+
+GORE = {"impact", "blood", "spark", "smoke"}
+
+
+def _gore(fx):
+    return [p for p in fx.particles if p["kind"] in GORE]
+
+
+def _land_hits(ctrl, count):
+    px = None
+    for pop in ctrl.challenge.pops[:count]:
+        px = ctrl._hole_px[pop.hole]
+        _fire_at(ctrl, px, ctrl.start_ms + int(pop.t_up_ms) + 10)
+    return px
+
+
+def test_the_killing_hit_lands_the_whole_kill_package_on_the_pit(monkeypatch):
+    # The victim dies at the hole it was popping out of, so the gore, the bullet
+    # hole and the streak credit all belong to that pixel — not to the home square
+    # the capture will later slide onto.
+    app, clock, frm, to = _whack_app(monkeypatch)
+    session, fx = app.game.skillcheck_session, app.game.board.effects
+    ctrl = app.game.skillcheck_overlay._controller
+    assert ctrl.challenge.hits_required == 3, "a pawn takes three pops"
+    session.sync_whack_gun()
+    px = _land_hits(ctrl, 3)
+    assert ctrl._progress == 3 and ctrl.landed is True
+    assert {p["kind"] for p in _gore(fx)} == GORE, \
+        "ring, blood, sparks and smoke — the full impact package"
+    assert all(p["px"] == px for p in _gore(fx)), "every piece of it on the pit"
+    assert len(fx.holes) == 1 and fx.holes[0]["px"] == px
+    assert not any(p["kind"] == "ragdoll" for p in fx.particles), \
+        "the body already flew off the pit on the check's own arc"
+    assert fx._streak_count == 1, "the kill is credited once, here"
+    app.sound_manager.play_announcer.assert_called_once_with("first_blood")
+
+
+def test_the_hits_before_the_last_one_credit_nothing(monkeypatch):
+    app, clock, frm, to = _whack_app(monkeypatch)
+    session, fx = app.game.skillcheck_session, app.game.board.effects
+    ctrl = app.game.skillcheck_overlay._controller
+    session.sync_whack_gun()
+    _land_hits(ctrl, 2)
+    assert ctrl._progress == 2, "two of three — the mole is hurt, not dead"
+    assert _gore(fx) == [] and fx.holes == [], "no gore before the kill"
+    assert fx._streak_count == 0
+    app.sound_manager.play_announcer.assert_not_called()
+    app.sound_manager.play_hit.assert_not_called()
+
+
+def test_the_kill_flair_pops_at_the_pit_pixel_and_names_the_victim(monkeypatch):
+    app, clock, frm, to = _whack_app(monkeypatch)
+    session, fx, board = app.game.skillcheck_session, app.game.board.effects, app.game.board
+    fx.register_kill("black", to, board.cell_size, 0)
+    session.sync_whack_gun()
+    px = _land_hits(app.game.skillcheck_overlay._controller, 3)
+    tag = [p for p in fx.particles if p["kind"] == "tag"][-1]
+    assert tag["px"] == px and fx._anchor(tag) == px, \
+        "the hit word pops where the piece died, not on its home square"
+    # The grunt names the piece that actually died, not the one that shot it.
+    app.sound_manager.play_hit.assert_called_once_with(PieceType.PAWN)
+
+
+def test_the_won_whacks_capture_never_credits_the_kill_a_second_time(monkeypatch):
+    # The move animation cuts the live transients as it starts, so the only thing
+    # that could double up is the capture crediting its own kill on top.
+    app, clock, frm, to = _whack_app(monkeypatch)
+    session, fx = app.game.skillcheck_session, app.game.board.effects
+    session.sync_whack_gun()
+    _land_hits(app.game.skillcheck_overlay._controller, 3)
+    holes = len(fx.holes)
+    _finish_check(app, True)
+    fx.update(fx.captures[0]["fire_at"])
+    assert fx._streak_count == 1, "one kill, one streak step"
+    assert _gore(fx) == [], "the advancing capture shreds nothing on the empty square"
+    assert len(fx.holes) == holes, "and punches no second bullet hole"
+    app.sound_manager.play_announcer.assert_called_once_with("first_blood")
+
+
+def test_the_mirror_lands_the_same_kill_package_at_the_relayed_pit(monkeypatch):
+    app = _local_app()
+    install_clock(monkeypatch, FakeTicks())
+    session, fx = app.game.skillcheck_session, app.game.board.effects
+    frm, to = _capture_board(app)
+    session.open_spectate_overlay(
+        SkillCheckKind.WHACK, "spec-seed", 0, 5000, frm, to, None, 1)
+    ctrl = app.game.skillcheck_overlay._controller
+    assert ctrl.challenge.hits_required == 3
+    for i in range(1, 4):
+        ctrl.update(ctrl.start_ms + 400 * i)
+        ctrl.spectate_shot(400.0 * i, 0, i == 3, progress=i, target=(2.5, 2.5))
+        if i < 3:
+            assert _gore(fx) == [], "the mirror waits for the killing relay too"
+    px = ctrl._board_to_px(2.5, 2.5)
+    assert {p["kind"] for p in _gore(fx)} == GORE
+    assert all(p["px"] == px for p in _gore(fx)), \
+        "the spectator sees the kill on the pit it happened on"
+    assert fx._streak_count == 1, "and the streak is credited on the mirror as well"
+    app.sound_manager.play_announcer.assert_called_once_with("first_blood")
+    session.teardown_skillcheck_overlay()
+
+
+def test_a_kill_with_no_attacker_left_on_the_board_credits_nothing(monkeypatch):
+    app, clock, frm, to = _whack_app(monkeypatch)
+    session, fx = app.game.skillcheck_session, app.game.board.effects
+    session._whack_gun_from = sq(5, 5)
+    session._on_whack_hit_px(app.game.board.cell_rect(to).center, kill=True)
+    assert _gore(fx) == [] and fx.holes == [], "no colour to credit, no package"
+    assert fx._streak_count == 0
+    session.teardown_skillcheck_overlay()
+
+
+def _hand_off(fx, board, from_sq):
+    fx.hold_gun_px(now_ms=0, attacker_type="queen", from_sq=from_sq,
+                   cell_size=board.cell_size)
+    fx.hand_off_gun_px()
+    assert fx._gun_handoff == from_sq
+
+
+def test_a_fail_with_no_attacker_still_spends_the_gun_handoff(monkeypatch):
+    # trigger_skillcheck_fail returns early when there is no piece to shoot with;
+    # a handoff left armed there would ride into the NEXT capture, which would then
+    # advance predrawn and silently, firing at nothing.
+    app = _local_app()
+    install_clock(monkeypatch, FakeTicks())
+    board, fx = app.game.board, app.game.board.effects
+    frm, to = _capture_board(app)
+    empty = sq(5, 5)
+    _hand_off(fx, board, empty)
+    board.trigger_skillcheck_fail(empty, to)
+    assert fx.captures == [], "there was no attacker to fire the volley"
+    assert fx._gun_handoff is None, "and the latch is spent anyway"
+    board.apply_gated_move(frm, to)
+    assert fx.captures[0]["predrawn"] is False, "the next capture draws for itself"
+
+
+def test_a_fail_with_no_board_geometry_still_spends_the_gun_handoff(monkeypatch):
+    app = _local_app()
+    install_clock(monkeypatch, FakeTicks())
+    board, fx = app.game.board, app.game.board.effects
+    frm, to = _capture_board(app)
+    _hand_off(fx, board, frm)
+    board.cell_size = 0
+    board.trigger_skillcheck_fail(frm, to)
+    assert fx.captures == [] and fx._gun_handoff is None
+
+
+def test_whack_kill_at_is_inert_without_geometry_or_a_victim(monkeypatch):
+    app = _local_app()
+    install_clock(monkeypatch, FakeTicks())
+    board, fx = app.game.board, app.game.board.effects
+    px = board.cell_rect(sq(3, 3)).center
+    board.whack_kill_at(px, None, "white", None)
+    board.whack_kill_at(px, sq(3, 3), None, None)
+    board.cell_size = 0
+    board.whack_kill_at(px, sq(3, 3), "white", None)
+    assert fx.particles == [] and fx.holes == [] and fx.callouts == []
+    assert fx._streak_count == 0
