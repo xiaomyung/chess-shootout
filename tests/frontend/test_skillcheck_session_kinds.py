@@ -32,9 +32,11 @@ While a WHACK runs, the CAPTURER on the board keeps its gun out and tracks the l
 crosshair (the mirror tracks the last relayed impact instead, falling back to the
 victim square before the first relay), and every REGISTERED hit fires that piece's
 own capture projectile at the impact point — whiffs, lockout shots and locked moves
-throw nothing. sync_whack_gun is the single owner of that state: one call per frame
-arms it while the overlay is a live whack and releases it (tumbling drop) the moment
-it is not, which is what covers every teardown path at once. The terminal paths
+throw nothing. The WhackGun collaborator (frontend/game/whack_gun.py) is the single
+owner of that state — the session keeps the kind lifecycle and threads it the live
+verdict, the mirror flag and the victim square through sync_whack_gun: one call per
+frame arms it while the overlay is a live whack and releases it (tumbling drop) the
+moment it is not, which is what covers every teardown path at once. The terminal paths
 release explicitly too, because a screen that stops drawing stops syncing — the gun
 must never survive into the next game.
 
@@ -764,7 +766,7 @@ def test_no_other_kind_ever_hands_a_gun_on(kind, monkeypatch):
     session, fx = app.game.skillcheck_session, app.game.board.effects
     fx.hold_gun_px(now_ms=0, attacker_type="queen", from_sq=sq(4, 3),
                    cell_size=app.game.board.cell_size)
-    session._end_whack_gun(kind)
+    session.whack_gun.end(kind)
     assert fx._gun_handoff is None, \
         "{}: only the whack passes its weapon on".format(kind.value)
     assert len(fx.drops) == 1, "every other kind drops it"
@@ -888,7 +890,7 @@ def test_the_mirror_lands_the_same_kill_package_at_the_relayed_pit(monkeypatch):
 def test_a_kill_with_no_attacker_left_on_the_board_credits_nothing(monkeypatch):
     app, clock, frm, to = _whack_app(monkeypatch)
     session, fx = app.game.skillcheck_session, app.game.board.effects
-    session._whack_gun_from = sq(5, 5)
+    session.whack_gun.from_sq = sq(5, 5)
     session._on_whack_hit_px(app.game.board.cell_rect(to).center, kill=True)
     assert _gore(fx) == [] and fx.holes == [], "no colour to credit, no package"
     assert fx._streak_count == 0

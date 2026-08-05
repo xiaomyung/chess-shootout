@@ -6,6 +6,7 @@ import pygame as pg
 from chessshootout.backend.pieces import PIECE_VALUES, PieceType
 from chessshootout.backend.utils import PROMO_LETTER_BY_TYPE, Square, coord_from_square
 from chessshootout.frontend.game.variant import Variant
+from chessshootout.frontend.game.whack_gun import WhackGun
 from chessshootout.frontend.skillcheck.registry import build_controller
 from chessshootout.skillcheck import mole
 from chessshootout.skillcheck.online import skillcheck_deadline_ms
@@ -31,6 +32,7 @@ class SkillCheckSession:
     def __init__(self, screen):
         self.screen = screen
         self.app = screen.app
+        self.whack_gun = WhackGun(screen)
         self.skillcheck_log = []
         self._skillcheck_fired_at_ms = None
         self.clear_online_skillcheck_state()
@@ -121,8 +123,7 @@ class SkillCheckSession:
         self.active_kind = kind
         self.active_seed = seed
         if kind == SkillCheckKind.WHACK:
-            self._whack_gun_from = from_sq
-            self._whack_gun_type = capturer.type.value if capturer is not None else None
+            self.whack_gun.arm(from_sq, capturer)
         board.aim_suppressed_square = target if kind in SUPPRESSING_KINDS else None
         board.attacker_suppressed_square = (
             from_sq if kind == SkillCheckKind.COMBO else None)
@@ -159,64 +160,12 @@ class SkillCheckSession:
             fx.aim_victim_scale = 1.0
 
     def sync_whack_gun(self):
-        screen = self.screen
-        overlay = screen.skillcheck_overlay
-        if (self.active_kind != SkillCheckKind.WHACK or not overlay.is_active()
-                or self._whack_gun_from is None):
-            self.release_whack_gun()
-            return
-        fx = screen.board.effects
-        now = pg.time.get_ticks()
-        target_px = self._whack_aim_px(overlay)
-        if not fx.has_gun_px():
-            fx.hold_gun_px(now_ms=now, attacker_type=self._whack_gun_type,
-                           from_sq=self._whack_gun_from, cell_size=screen.board.cell_size,
-                           target_px=target_px)
-        fx.aim_gun_px(target_px, now)
-
-    def _whack_aim_px(self, overlay):
-        if not overlay.is_passive():
-            return pg.mouse.get_pos()
-        if self._whack_impact_px is not None:
-            return self._whack_impact_px
-        if self.skillcheck_target is None:
-            return None
-        return self.screen.board.cell_rect(self.skillcheck_target).center
+        overlay = self.screen.skillcheck_overlay
+        live = self.active_kind == SkillCheckKind.WHACK and overlay.is_active()
+        self.whack_gun.sync(live, overlay.is_passive(), self.skillcheck_target)
 
     def _on_whack_hit_px(self, px, kill=False):
-        self._whack_impact_px = px
-        board = self.screen.board
-        board.effects.fire_gun_px(pg.time.get_ticks(), px)
-        if kill:
-            board.whack_kill_at(px, self.skillcheck_target, self._whack_attacker_color(),
-                                self._whack_victim_piece())
-
-    def _whack_attacker_color(self):
-        if self._whack_gun_from is None:
-            return None
-        attacker = self.screen.match.piece_at(self._whack_gun_from)
-        return attacker.color.value if attacker is not None else None
-
-    def _whack_victim_piece(self):
-        if self.skillcheck_target is None:
-            return None
-        return self.screen.match.piece_at(self.skillcheck_target)
-
-    def release_whack_gun(self):
-        self._clear_whack_gun_context()
-        self.screen.board.effects.release_gun_px(pg.time.get_ticks())
-
-    def _end_whack_gun(self, kind):
-        if kind != SkillCheckKind.WHACK:
-            self.release_whack_gun()
-            return
-        self._clear_whack_gun_context()
-        self.screen.board.effects.hand_off_gun_px()
-
-    def _clear_whack_gun_context(self):
-        self._whack_gun_from = None
-        self._whack_gun_type = None
-        self._whack_impact_px = None
+        self.whack_gun.on_hit_px(px, self.skillcheck_target, kill=kill)
 
     def _send_skillcheck_shot(self, client_elapsed_ms, direction=None, target=None):
         target_row, target_col = target if target is not None else (None, None)
@@ -238,18 +187,18 @@ class SkillCheckSession:
     def clear_online_skillcheck_state(self):
         self._clear_active_check_fields()
         self.pending_online_move = None
-        self._clear_whack_gun_context()
+        self.whack_gun.clear()
 
     def teardown_skillcheck_overlay(self):
         screen = self.screen
         screen.skillcheck_overlay.cancel()
-        self.release_whack_gun()
+        self.whack_gun.release()
         screen.board.aim_suppressed_square = None
         screen.board.attacker_suppressed_square = None
         self._clear_active_check_fields()
 
     def _release_active_check(self, kind):
-        self._end_whack_gun(kind)
+        self.whack_gun.end(kind)
         board = self.screen.board
         board.aim_suppressed_square = None
         board.attacker_suppressed_square = None
