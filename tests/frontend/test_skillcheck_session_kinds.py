@@ -67,7 +67,7 @@ from chessshootout.backend.utils import Square
 from chessshootout.frontend.game.skillcheck_session import CheckContext
 from chessshootout.frontend.skillcheck.combo_view import ComboController, COMBO_TIME_LIMIT_MS
 from chessshootout.frontend.skillcheck.mole_view import MoleController
-from chessshootout.frontend.skillcheck.registry import build_controller
+from chessshootout.frontend.skillcheck.registry import CheckSpec, build_controller
 from chessshootout.frontend.visual.effects import AIM_MS, DRAW_MS, EffectManager
 from chessshootout.frontend.visual.gunfx import GUNS, PIECE_GUN
 from chessshootout.skillcheck import mole
@@ -153,9 +153,10 @@ def test_shot_inverse_round_trips_square_centers_on_both_orientations():
     for flipped in (False, True):
         board.flipped = flipped
         ctrl = build_controller(
-            SkillCheckKind.WHACK, seed="inv-seed", cell_rect=board.cell_rect(Square(3, 3)),
-            now_ms=0, deadline_ms=5000, captured_value=1, hole_squares=((2, 2),),
-            geom=lambda sq: board.cell_rect(sq).center)
+            SkillCheckKind.WHACK,
+            CheckSpec(seed="inv-seed", cell_rect=board.cell_rect(Square(3, 3)),
+                      now_ms=0, deadline_ms=5000, captured_value=1, hole_squares=((2, 2),),
+                      geom=lambda sq: board.cell_rect(sq).center))
         for row, col in ((0, 0), (3, 3), (7, 7), (2, 5)):
             center = board.cell_rect(Square(row, col)).center
             assert ctrl._shot_target(center) == (row + 0.5, col + 0.5), \

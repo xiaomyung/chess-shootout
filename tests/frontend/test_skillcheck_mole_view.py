@@ -144,7 +144,7 @@ from chessshootout.frontend.skillcheck.mole_art import (
     _pit_telegraph_surface, _pit_surface, _pit_front_surface, _seam_band_surface,
     _seam_glow_surface, _pit_mouth, _emerge_mask, _crosshair_surface,
     _cross_glow_surface, _strike_cross_surface, _MOLE_STATIC_CACHE)
-from chessshootout.frontend.skillcheck.registry import build_controller
+from chessshootout.frontend.skillcheck.registry import CheckSpec, build_controller
 from chessshootout.skillcheck.mole import MOLE_RECOIL_LOCKOUT_MS
 from chessshootout.frontend.visual.colors import Colors
 from chessshootout.skillcheck.types import SkillCheckKind
@@ -793,10 +793,11 @@ def test_last_hit_pop_defaults_to_no_hits_and_threads_through_the_registry():
     assert guessy._last_hit_pop == -1, \
         "progress alone no longer back-derives a hit pop from the wall clock"
     built = build_controller(
-        SkillCheckKind.WHACK, seed="s", cell_rect=pg.Rect(3 * _CELL, 4 * _CELL, _CELL, _CELL),
-        now_ms=0, deadline_ms=5000, value_diff=2, captured_value=4,
-        hole_squares=_HOLES, geom=_geom_for(_CELL),
-        victim_surface=_victim(_CELL), progress=1, last_hit_pop=2)
+        SkillCheckKind.WHACK,
+        CheckSpec(seed="s", cell_rect=pg.Rect(3 * _CELL, 4 * _CELL, _CELL, _CELL),
+                  now_ms=0, deadline_ms=5000, value_diff=2, captured_value=4,
+                  hole_squares=_HOLES, geom=_geom_for(_CELL),
+                  victim_surface=_victim(_CELL), progress=1, last_hit_pop=2))
     assert built._last_hit_pop == 2, "the registry threads the snapshot value to the mole"
 
 

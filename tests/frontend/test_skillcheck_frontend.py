@@ -27,7 +27,7 @@ from chessshootout.frontend.skillcheck.aim_view import (
     AIM_MISS_FLASH_MS, AIM_SHOT_HOLD_MS, _spotlight_surface)
 from chessshootout.frontend.skillcheck.controller import SKILLCHECK_RESULT_HOLD_MS
 from chessshootout.frontend.skillcheck.overlay import SkillCheckOverlay
-from chessshootout.frontend.skillcheck.registry import build_controller
+from chessshootout.frontend.skillcheck.registry import CheckSpec, build_controller
 from chessshootout.frontend.skillcheck.wheel_view import (
     WheelController, WHEEL_RESULT_HOLD_MS, _clamp_bubble_left, _needle_polygon)
 from chessshootout.frontend.visual.colors import Colors
@@ -262,16 +262,18 @@ def test_overlay_cancel_clears():
 
 
 def test_registry_builds_wheel_controller():
-    ctrl = build_controller(SkillCheckKind.WHEEL, seed="s", cell_rect=pg.Rect(0, 0, 80, 80),
-                            now_ms=0, deadline_ms=5000)
+    ctrl = build_controller(
+        SkillCheckKind.WHEEL,
+        CheckSpec(seed="s", cell_rect=pg.Rect(0, 0, 80, 80), now_ms=0, deadline_ms=5000))
     assert isinstance(ctrl, WheelController)
 
 
 def test_registry_builds_aim_controller():
-    ctrl = build_controller(SkillCheckKind.AIM, seed="s", cell_rect=pg.Rect(0, 0, 80, 80),
-                            now_ms=0, deadline_ms=5000, value_diff=4,
-                            victim_surface=pg.Surface((80, 80), pg.SRCALPHA),
-                            board_rect=pg.Rect(0, 0, 640, 640))
+    ctrl = build_controller(
+        SkillCheckKind.AIM,
+        CheckSpec(seed="s", cell_rect=pg.Rect(0, 0, 80, 80), now_ms=0, deadline_ms=5000,
+                  value_diff=4, victim_surface=pg.Surface((80, 80), pg.SRCALPHA),
+                  board_rect=pg.Rect(0, 0, 640, 640)))
     assert isinstance(ctrl, AimController)
 
 
@@ -731,15 +733,18 @@ def test_registry_threads_passive_into_both_controllers():
     """passive=True must reach the controller through the registry, not just be stored:
     a passive controller swallows no input and never self-resolves past its deadline. These
     consequences are reachable only if the flag was actually wired into build_controller."""
-    w = build_controller(SkillCheckKind.WHEEL, seed="s", cell_rect=pg.Rect(0, 0, 80, 80),
-                         now_ms=0, deadline_ms=5000, passive=True)
+    w = build_controller(
+        SkillCheckKind.WHEEL,
+        CheckSpec(seed="s", cell_rect=pg.Rect(0, 0, 80, 80), now_ms=0, deadline_ms=5000,
+                  passive=True))
     assert w.handle_event(_tap()) is False, "a registry-built passive wheel ignores the tap"
     w.update(6000)
     assert w.landed is None and w.done is False, "and never self-fails at the deadline"
-    a = build_controller(SkillCheckKind.AIM, seed="s", cell_rect=pg.Rect(0, 0, 80, 80),
-                         now_ms=0, deadline_ms=5000, value_diff=4,
-                         victim_surface=pg.Surface((80, 80), pg.SRCALPHA),
-                         board_rect=pg.Rect(0, 0, 640, 640), passive=True)
+    a = build_controller(
+        SkillCheckKind.AIM,
+        CheckSpec(seed="s", cell_rect=pg.Rect(0, 0, 80, 80), now_ms=0, deadline_ms=5000,
+                  value_diff=4, victim_surface=pg.Surface((80, 80), pg.SRCALPHA),
+                  board_rect=pg.Rect(0, 0, 640, 640), passive=True))
     assert a.handle_event(_tap()) is False, "a registry-built passive aim ignores the tap"
     a.update(7000)
     assert a.landed is None and a.done is False, "only the server verdict resolves a spectated aim"

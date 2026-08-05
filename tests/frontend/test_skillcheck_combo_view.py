@@ -22,7 +22,7 @@ from chessshootout.frontend.skillcheck.combo_view import (
 from chessshootout.frontend.skillcheck.controller import SKILLCHECK_RESULT_HOLD_MS
 from chessshootout.frontend.visual.colors import Colors
 from chessshootout.frontend.skillcheck.mole_view import MoleController
-from chessshootout.frontend.skillcheck.registry import build_controller
+from chessshootout.frontend.skillcheck.registry import CheckSpec, build_controller
 from chessshootout.frontend.skillcheck.wheel_view import WheelController
 from chessshootout.skillcheck.combo import (
     ComboChallenge, COMBO_INTRO_MS, COMBO_MAX_WRONGS, COMBO_WRONG_LOCKOUT_MS)
@@ -284,32 +284,35 @@ def test_passive_ignores_input_and_mirrors_progress():
 
 
 def test_registry_still_builds_wheel_and_aim():
-    wheel = build_controller(SkillCheckKind.WHEEL, seed="s", cell_rect=pg.Rect(0, 0, 80, 80),
-                             now_ms=0, deadline_ms=5000)
+    wheel = build_controller(
+        SkillCheckKind.WHEEL,
+        CheckSpec(seed="s", cell_rect=pg.Rect(0, 0, 80, 80), now_ms=0, deadline_ms=5000))
     assert isinstance(wheel, WheelController)
-    aim = build_controller(SkillCheckKind.AIM, seed="s", cell_rect=pg.Rect(0, 0, 80, 80),
-                           now_ms=0, deadline_ms=5000, value_diff=4,
-                           victim_surface=pg.Surface((80, 80), pg.SRCALPHA),
-                           board_rect=pg.Rect(0, 0, 640, 640))
+    aim = build_controller(
+        SkillCheckKind.AIM,
+        CheckSpec(seed="s", cell_rect=pg.Rect(0, 0, 80, 80), now_ms=0, deadline_ms=5000,
+                  value_diff=4, victim_surface=pg.Surface((80, 80), pg.SRCALPHA),
+                  board_rect=pg.Rect(0, 0, 640, 640)))
     assert isinstance(aim, AimController)
 
 
 def test_registry_builds_combo_from_seed_deterministically():
     kw = dict(cell_rect=pg.Rect(0, 0, 80, 80), now_ms=0, deadline_ms=5000, value_diff=2,
               captured_value=3)
-    one = build_controller(SkillCheckKind.COMBO, seed="x", **kw)
-    two = build_controller(SkillCheckKind.COMBO, seed="x", **kw)
+    one = build_controller(SkillCheckKind.COMBO, CheckSpec(seed="x", **kw))
+    two = build_controller(SkillCheckKind.COMBO, CheckSpec(seed="x", **kw))
     assert isinstance(one, ComboController)
     assert one.challenge.prompts == two.challenge.prompts, "same seed -> same prompts"
 
 
 def test_registry_builds_mole_for_the_whack_kind():
     ctrl = build_controller(
-        SkillCheckKind.WHACK, seed="s", cell_rect=pg.Rect(0, 0, 80, 80), now_ms=0,
-        deadline_ms=5000, value_diff=2, captured_value=4,
-        hole_squares=((3, 3), (3, 4), (4, 3), (4, 4)),
-        board_rect=pg.Rect(0, 0, 640, 640), geom=lambda sq: (0, 0),
-        victim_surface=pg.Surface((80, 80), pg.SRCALPHA))
+        SkillCheckKind.WHACK,
+        CheckSpec(seed="s", cell_rect=pg.Rect(0, 0, 80, 80), now_ms=0,
+                  deadline_ms=5000, value_diff=2, captured_value=4,
+                  hole_squares=((3, 3), (3, 4), (4, 3), (4, 4)),
+                  board_rect=pg.Rect(0, 0, 640, 640), geom=lambda sq: (0, 0),
+                  victim_surface=pg.Surface((80, 80), pg.SRCALPHA)))
     assert isinstance(ctrl, MoleController)
 
 

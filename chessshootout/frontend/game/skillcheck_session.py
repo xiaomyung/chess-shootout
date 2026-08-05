@@ -7,7 +7,7 @@ from chessshootout.backend.pieces import PIECE_VALUES, PieceType
 from chessshootout.backend.utils import PROMO_LETTER_BY_TYPE, Square, coord_from_square
 from chessshootout.frontend.game.variant import Variant
 from chessshootout.frontend.game.whack_gun import WhackGun
-from chessshootout.frontend.skillcheck.registry import build_controller
+from chessshootout.frontend.skillcheck.registry import CheckSpec, build_controller
 from chessshootout.skillcheck import mole
 from chessshootout.skillcheck.online import skillcheck_deadline_ms
 from chessshootout.skillcheck.types import SkillCheckKind, SkillCheckOutcome, whiffs_by_ply
@@ -101,8 +101,8 @@ class SkillCheckSession:
                 screen.match.state, screen.board.SIZE)
         attacker_surface = (self._piece_surface(capturer)
                             if kind == SkillCheckKind.COMBO else None)
-        return build_controller(
-            kind, seed=seed, cell_rect=screen.board.cell_rect(target),
+        spec = CheckSpec(
+            seed=seed, cell_rect=screen.board.cell_rect(target),
             now_ms=pg.time.get_ticks() - int(elapsed_ms), deadline_ms=deadline_ms,
             period_ms=period_for_diff(value_diff), value_diff=value_diff,
             victim_surface=self._victim_surface(target), board_rect=screen.board.rect,
@@ -115,6 +115,7 @@ class SkillCheckSession:
             attacker_surface=attacker_surface, on_hit_px=self._on_whack_hit_px,
             mirror_targets=passive and online,
             last_hit_pop=self.online_last_hit_pop if online else -1)
+        return build_controller(kind, spec)
 
     def _arm_check_state(self, kind, seed, target, from_sq, capturer, elapsed_ms):
         board = self.screen.board
