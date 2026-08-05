@@ -21,6 +21,7 @@ from chessshootout.online.news import NEWS_DATE_FORMAT, format_news_date
 RECENT_MATCHES_LIMIT = 3
 NEWS_BULLET = "• "
 NEWS_GUTTER = 14
+ELLIPSIS = "…"
 
 CARD_GAP = 12
 CARD_CUT = 8
@@ -45,9 +46,14 @@ _BADGE_COLOR = {"win": Colors.win, "loss": Colors.loss, "draw": Colors.text_dim,
 def _elide(font, text, max_w):
     if font.size(text)[0] <= max_w:
         return text
-    while text and font.size(text + "…")[0] > max_w:
-        text = text[:-1]
-    return text + "…"
+    lo, hi = 0, len(text)
+    while lo < hi:
+        mid = (lo + hi + 1) // 2
+        if font.size(text[:mid] + ELLIPSIS)[0] <= max_w:
+            lo = mid
+        else:
+            hi = mid - 1
+    return text[:lo] + ELLIPSIS
 
 
 def _opponent(group, nickname):

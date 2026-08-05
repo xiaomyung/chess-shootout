@@ -19,8 +19,8 @@ import httpx
 import pytest
 
 from chessshootout.online.transport import (
-    FatalResumeError, SchemaVersionMismatch, ServerTransport, ServerWebSocket,
-    TransportHTTPError,
+    FatalResumeError, NEWS_MAX_BYTES, ResponseTooLarge, SchemaVersionMismatch,
+    ServerTransport, ServerWebSocket, TransportError, TransportHTTPError, fetch_news,
 )
 from chessshootout.server.protocol import (
     HealthResponse, MatchmakeRequest, MatchmakeResponse, PROTOCOL_VERSION,
@@ -467,6 +467,116 @@ async def test_share_and_chat_sends_emit_aliased_coord_payloads():
     await ws.send_quick_chat(2)
     chat = json.loads(inner.sent[-1])
     assert chat["type"] == "quick_chat" and chat["preset"] == 2
+
+
+class _ReplayWS:
+    """Hands back canned raw frames the way the websockets client would."""
+
+    def __init__(self, frames):
+        self._frames = list(frames)
+
+    async def recv(self):
+        return self._frames.pop(0)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("raw", [
+    pytest.param('{"type": "move_applied", "ply": Infinity}', id="infinity"),
+    pytest.param('{"type": "move_applied", "ply": -Infinity}', id="negative_infinity"),
+    pytest.param('{"type": "move_applied", "ply": NaN}', id="nan"),
+])
+async def test_recv_discards_frames_carrying_non_standard_json_constants(raw):
+    """json.loads accepts the non-standard Infinity/NaN literals by default, and a
+    hostile server can post them into any numeric field the client later feeds to
+    pygame draw calls (which raise on inf). parse_constant rejects them at the door,
+    and the frame is discarded exactly like any other malformed input."""
+    ws = ServerWebSocket(_ReplayWS([raw, '{"type": "pong"}']))
+    assert await ws.recv() is None
+    assert await ws.recv() == {"type": "pong"}
+
+
+@pytest.mark.asyncio
+async def test_recv_passes_honest_frames_through_untouched():
+    frame = ('{"type": "move_applied", "from": "e2", "to": "e4", "san": "e4", '
+             '"ply": 1, "clock": {"white_remaining": 59.5}}')
+    ws = ServerWebSocket(_ReplayWS([frame, "{not json"]))
+    assert await ws.recv() == {
+        "type": "move_applied", "from": "e2", "to": "e4", "san": "e4",
+        "ply": 1, "clock": {"white_remaining": 59.5},
+    }
+    assert await ws.recv() is None
+
+
+def test_http_response_body_with_a_non_standard_constant_is_rejected():
+    """The same door on the HTTP side: a body that decodes to inf never reaches
+    model_validate, so no inf can ride in on a /reclaim or /resume field."""
+    body = ('{"version": "%s", "room_id": "%s", "session_token": Infinity}'
+            % (PROTOCOL_VERSION, fake_uuid4(50)))
+
+    def handler(request):
+        return httpx.Response(200, content=body,
+                              headers={"content-type": "application/json"})
+
+    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+        st = ServerTransport("localhost:8000", http_client=client)
+        assert st.reclaim_blocking(ALICE) is None
+
+
+class _FakeStream:
+
+    def __init__(self, status_code, chunks):
+        self.status_code = status_code
+        self._chunks = chunks
+        self.closed = False
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc_info):
+        self.closed = True
+        return False
+
+    def iter_bytes(self):
+        yield from self._chunks
+
+
+def _stub_stream(monkeypatch, stream):
+    monkeypatch.setattr(httpx, "stream", lambda *a, **k: stream)
+    return stream
+
+
+def test_fetch_news_aborts_past_the_byte_budget(monkeypatch):
+    """The news body is attacker-controlled if CHESS_NEWS_URL (or the host behind
+    it) is hostile: buffering it whole would OOM the fetch thread. The stream is
+    abandoned the moment the budget is exceeded, so the oversize tail is never read."""
+    chunk = b"x" * 64 * 1024
+    stream = _stub_stream(monkeypatch, _FakeStream(200, [chunk] * 64))
+    with pytest.raises(ResponseTooLarge):
+        fetch_news("https://example.com/news.json")
+    assert stream.closed is True
+
+
+def test_fetch_news_accepts_a_body_at_the_budget(monkeypatch):
+    payload = b'[{"title": "T", "body": "B", "date": "2026-07-14"}]'
+    padding = b" " * (NEWS_MAX_BYTES - len(payload))
+    _stub_stream(monkeypatch, _FakeStream(200, [payload, padding]))
+    assert fetch_news("https://example.com/news.json") == [
+        {"title": "T", "body": "B", "date": "2026-07-14"},
+    ]
+
+
+def test_fetch_news_rejects_non_standard_constants(monkeypatch):
+    _stub_stream(monkeypatch, _FakeStream(
+        200, [b'[{"title": "T", "body": "B", "date": "2026-07-14", "rank": NaN}]']))
+    with pytest.raises(TransportError):
+        fetch_news("https://example.com/news.json")
+
+
+def test_fetch_news_maps_a_non_200_to_a_typed_http_error(monkeypatch):
+    _stub_stream(monkeypatch, _FakeStream(404, [b"nope"]))
+    with pytest.raises(TransportHTTPError) as info:
+        fetch_news("https://example.com/news.json")
+    assert info.value.status_code == 404
 
 
 def test_only_transport_module_imports_httpx_or_websockets():

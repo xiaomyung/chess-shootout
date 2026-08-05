@@ -15,6 +15,16 @@ CACHE_FILENAME = "news_cache.json"
 
 NEWS_MAX_ITEMS = 30
 
+NEWS_TITLE_MAX_CHARS = 200
+NEWS_BODY_MAX_CHARS = 4000
+NEWS_DATE_MAX_CHARS = 32
+
+NEWS_FIELD_MAX_CHARS = {
+    "title": NEWS_TITLE_MAX_CHARS,
+    "body": NEWS_BODY_MAX_CHARS,
+    "date": NEWS_DATE_MAX_CHARS,
+}
+
 NEWS_DATE_FORMAT = "%Y-%m-%d"
 
 
@@ -32,7 +42,10 @@ def _coerce_item(raw):
     if not (_valid_str(raw.get("title")) and _valid_str(raw.get("body"))
             and _valid_str(raw.get("date"))):
         return None
-    return dict(raw)
+    item = dict(raw)
+    for key, limit in NEWS_FIELD_MAX_CHARS.items():
+        item[key] = item[key][:limit]
+    return item
 
 
 def _sort_key(item):

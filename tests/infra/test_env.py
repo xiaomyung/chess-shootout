@@ -593,6 +593,56 @@ def test_set_data_dir_persists_and_reads():
     assert "CHESS_DATA_DIR=/tmp/mygames" in env._ENV_PATH.read_text(encoding="utf-8")
 
 
+@pytest.mark.parametrize("injected", [
+    pytest.param("/tmp/games\nCHESS_SERVER_ADDR=evil.example.com", id="lf"),
+    pytest.param("/tmp/games\r\nCHESS_SERVER_ADDR=evil.example.com", id="crlf"),
+    pytest.param("/tmp/games\rCHESS_SERVER_ADDR=evil.example.com", id="cr"),
+])
+def test_persist_refuses_a_value_carrying_a_line_break(injected, caplog):
+    """.env is one KEY=VALUE per line, so a value with a newline in it writes a
+    second line the next launch honours as a real setting. Every caller but
+    set_data_dir clamps its value; that one persists a browser-chosen directory
+    name verbatim, so the guard belongs in _persist itself."""
+    env._ENV_PATH.write_text("CHESS_LAST_MODE=online\n", encoding="utf-8")
+    with caplog.at_level(logging.WARNING, logger="chess.env"):
+        env.set_data_dir(injected)
+    contents = env._ENV_PATH.read_text(encoding="utf-8")
+    assert "CHESS_SERVER_ADDR" not in contents
+    assert "CHESS_DATA_DIR" not in contents
+    assert "CHESS_LAST_MODE=online" in contents
+    assert any(r.levelno == logging.WARNING for r in caplog.records)
+
+
+def test_persist_still_writes_foreign_lines_when_a_write_is_refused():
+    """The refusal is a dropped write, not a corrupt file: unrelated content the
+    module doesn't own is left exactly where it was."""
+    env._ENV_PATH.write_text(
+        "CHESS_LAST_MODE=online\n"
+        "some hand-typed note that isn't KEY=VALUE\n", encoding="utf-8")
+    env.set_data_dir("/tmp/a\nCHESS_NICKNAME=mallory")
+    contents = env._ENV_PATH.read_text(encoding="utf-8")
+    assert "some hand-typed note that isn't KEY=VALUE" in contents
+    assert "CHESS_NICKNAME" not in contents
+    env.set_master_volume(0.7)
+    contents = env._ENV_PATH.read_text(encoding="utf-8")
+    assert "some hand-typed note that isn't KEY=VALUE" in contents
+    assert "CHESS_MASTER_VOLUME=0.700" in contents
+
+
+@pytest.mark.parametrize("raw, expected", [
+    pytest.param("Magnus", "Magnus", id="normal_name_untouched"),
+    pytest.param("", "", id="empty"),
+    pytest.param(None, "", id="none"),
+    pytest.param("x" * 5000, "x" * env._NICKNAME_MAX_LEN, id="oversize_clipped"),
+])
+def test_clip_nickname_bounds_a_name_without_rewriting_it(raw, expected):
+    """Opponent names arrive from the server and are font-rendered in full before
+    they are clipped to the strip width, so the length bound has to land before
+    they are stored. Unlike sanitize_nickname this only clips -- it is applied to
+    names the server already normalized, and must not rewrite them."""
+    assert env.clip_nickname(raw) == expected
+
+
 def test_set_data_dir_none_clears_override():
     env.set_data_dir("/tmp/mygames")
     env.set_data_dir(None)

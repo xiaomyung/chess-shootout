@@ -20,10 +20,11 @@ import pytest
 
 from tests.conftest import pygame_display
 from chessshootout.frontend.menu.rail_cards import (
-    AVATAR_SIZE, BODY_ROW_H, FOOTER_H, HEADER_H, PAD_X, _item_key,
+    AVATAR_SIZE, BODY_ROW_H, FOOTER_H, HEADER_H, PAD_X, _elide, _item_key,
 )
 from chessshootout.frontend.screens.menu import VIEW_RISE_MS
 from chessshootout.frontend.visual.colors import Colors
+from chessshootout.frontend.visual.fonts import get_font
 from chessshootout.frontend.visual.widgets import avatar_palette
 from chessshootout.infra import env
 from chessshootout.online.news import NewsClient
@@ -582,3 +583,50 @@ def test_news_body_lines_are_memoized_until_refresh(app, stack):
     assert stack._news_body_lines(stack._news_items[0], 300) is first
     _refresh(app)
     assert stack._news_body_lines(stack._news_items[0], 300) is not first
+
+
+def _elide_linear(font, text, max_w):
+    """The pre-binary-search implementation, kept as the oracle: strip one
+    character per font.size call until the ellipsised text fits."""
+    if font.size(text)[0] <= max_w:
+        return text
+    while text and font.size(text + "…")[0] > max_w:
+        text = text[:-1]
+    return text + "…"
+
+
+class _CountingFont:
+
+    def __init__(self, font):
+        self._font = font
+        self.calls = 0
+
+    def size(self, text):
+        self.calls += 1
+        return self._font.size(text)
+
+
+@pytest.mark.parametrize("text", [
+    pytest.param("", id="empty"),
+    pytest.param("W", id="single_char"),
+    pytest.param("Patch 2.12.0 is live", id="headline"),
+    pytest.param("iiiiiiiiiiWWWWWWWWWW", id="mixed_advance_widths"),
+    pytest.param("Server maintenance window moved to Sunday 03:00 UTC", id="long_headline"),
+])
+def test_elide_matches_the_linear_reference_at_every_width(text):
+    """The binary search replaced a per-character scan; the output has to be the
+    same string the scan produced at every width, including the degenerate ones
+    where not even the ellipsis fits."""
+    font = get_font(14, bold=True)
+    for max_w in range(0, 320, 3):
+        assert _elide(font, text, max_w) == _elide_linear(font, text, max_w), max_w
+
+
+def test_elide_measures_a_long_title_a_logarithmic_number_of_times():
+    """The News card elides a server-supplied title EVERY frame. One font.size
+    call per stripped character turned a long title into seconds of layout per
+    frame; the search is now logarithmic in the title length."""
+    title = "news " * 4000
+    font = _CountingFont(get_font(14, bold=True))
+    assert _elide(font, title, 240).endswith("…")
+    assert font.calls < 40, f"{font.calls} measurements for a {len(title)}-char title"

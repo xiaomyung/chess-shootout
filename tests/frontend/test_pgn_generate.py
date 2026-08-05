@@ -61,6 +61,49 @@ def test_pgn_with_csmatchid_still_loads_into_backend():
     assert extract_csmatchid(parsed.headers) == mid
 
 
+def test_adversarial_nickname_cannot_forge_a_second_tag():
+    """The one injection an opponent can reach through the honest server: the
+    nickname validator allows `"`, `[` and `]`, and 20 chars is enough for
+    `X"][Termination "Lag`. The loader's tag regex is unanchored and its dict
+    comprehension lets a later duplicate win, so an unescaped value would forge a
+    real [Termination] tag on the victim's own PGN."""
+    text = generate_pgn([], "white_wins", white_name='X"][Termination "Lag')
+    headers = parse_pgn_headers(text)
+    assert "Termination" not in headers
+    assert headers["White"] == "XTermination Lag"
+    assert headers["Result"] == "1-0"
+    assert text.count("[White ") == 1
+
+
+def test_adversarial_nickname_leaves_the_movetext_parseable():
+    backend = _played("e4", "e5")
+    text = generate_pgn(backend.move_history, "white_wins",
+                        white_name='a"]\\[b', black_name="[CSMatchId]")
+    parsed, ok = load_pgn_into_backend(Backend(), text)
+    assert ok is True
+    assert parsed.moves == ["e4", "e5"]
+    assert parsed.headers["White"] == "ab"
+    assert parsed.headers["Black"] == "CSMatchId"
+    assert extract_csmatchid(parsed.headers) is None
+
+
+def test_termination_and_match_id_values_are_escaped_too():
+    mid = fake_uuid4(9)
+    text = generate_pgn([], "white_wins", match_id=mid,
+                        termination='Abandoned"][Result "0-1')
+    headers = parse_pgn_headers(text)
+    assert headers["Result"] == "1-0"
+    assert headers["Termination"] == "AbandonedResult 0-1"
+    assert extract_csmatchid(headers) == mid
+
+
+def test_ordinary_names_are_emitted_byte_identically():
+    text = generate_pgn([], "draw_agreement", white_name="Magnus C.",
+                        black_name="Hikaru (GM) #1")
+    assert '[White "Magnus C."]' in text
+    assert '[Black "Hikaru (GM) #1"]' in text
+
+
 def test_format_annotations_groups_and_orders_per_ply():
     log = [
         SkillCheckOutcome(13, "wheel", True),

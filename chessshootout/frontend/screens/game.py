@@ -1,4 +1,5 @@
 import logging
+import math
 import random
 import uuid
 from typing import NamedTuple
@@ -48,8 +49,10 @@ from chessshootout.frontend.game.result_flow import ResultFlow, score_str
 from chessshootout.frontend.game.skillcheck_session import CheckContext, SkillCheckSession
 from chessshootout.frontend.game.give_time import GiveTimeHold
 from chessshootout.frontend.game.variant import MATCH_MODE_BY_VARIANT, Variant
+from chessshootout.skillcheck.combo import COMBO_PROMPT_COUNT_MAX
 from chessshootout.server.protocol import (
     CHAT_COOLDOWN_SECONDS, FIRST_MOVE_ABORT_SECONDS, GRACE_SECONDS, Reason,
+    SKILLCHECK_TARGET_MAX,
 )
 from chessshootout.online.client import RECONNECT_TOTAL_SECONDS
 
@@ -117,7 +120,39 @@ ANIM_MS_MIN = 140
 ANIM_MS_MAX = 280
 ANIM_MS_PER_SECOND = 0.5
 
+RESUME_MAX_PLIES = 4096
+SPECTATE_PROGRESS_MAX = COMBO_PROMPT_COUNT_MAX
+
 _RESULT_FADE_CACHE = cache.new_size_cache()
+
+
+def finite_ms(value, default=0.0):
+    try:
+        value = float(value)
+    except (TypeError, ValueError):
+        return default
+    return value if math.isfinite(value) else default
+
+
+def board_coord(value):
+    try:
+        value = float(value)
+    except (TypeError, ValueError):
+        return None
+    if not math.isfinite(value):
+        return None
+    return min(max(value, 0.0), SKILLCHECK_TARGET_MAX)
+
+
+def spectate_target(payload):
+    row = payload.get("target_row")
+    col = payload.get("target_col")
+    if row is None or col is None:
+        return None
+    row, col = board_coord(row), board_coord(col)
+    if row is None or col is None:
+        return None
+    return (row, col)
 
 
 class OnlineCheck(NamedTuple):
@@ -301,8 +336,8 @@ class GameScreen(Screen):
 
     def _apply_online_start_config(self, payload):
         self._chosen_side = payload["your_color"]
-        self.white_name = payload["white_name"]
-        self.black_name = payload["black_name"]
+        self.white_name = env.clip_nickname(payload["white_name"])
+        self.black_name = env.clip_nickname(payload["black_name"])
         self.white_country = payload.get("white_country") or ""
         self.black_country = payload.get("black_country") or ""
         self._time_control = (payload["time_minutes"] * 60, payload["increment_seconds"])
@@ -312,8 +347,8 @@ class GameScreen(Screen):
         self.match.on_local_move_applied = self._on_local_move_applied
         self._match_session_id = payload.get("session_id") or str(uuid.uuid4())
         self.result_flow.series_scores = {
-            payload["white_name"]: float(payload.get("white_score", 0.0)),
-            payload["black_name"]: float(payload.get("black_score", 0.0)),
+            self.white_name: float(payload.get("white_score", 0.0)),
+            self.black_name: float(payload.get("black_score", 0.0)),
         }
         self._opp_disconnected_at_ms = None
         self._local_disconnected_at_ms = None
@@ -444,7 +479,7 @@ class GameScreen(Screen):
 
     def on_resume(self, payload):
         self.match.new_game()
-        for entry in payload.get("move_history", []):
+        for entry in payload.get("move_history", [])[:RESUME_MAX_PLIES]:
             result = self.match.apply_san(entry["san"])
             if not result.legal:
                 log.warning("resume: SAN replay failed at %r", entry.get("san"))
@@ -554,7 +589,7 @@ class GameScreen(Screen):
             kind=SkillCheckKind(payload["kind"]),
             seed=payload["seed"],
             value_diff=int(payload["value_diff"]),
-            deadline_ms=float(payload["deadline_ms"]),
+            deadline_ms=finite_ms(payload["deadline_ms"]),
             from_sq=from_sq,
             to_sq=to_sq,
             promo_type=PROMO_TYPE_BY_LETTER.get(promo) if promo else None,
@@ -572,7 +607,7 @@ class GameScreen(Screen):
         session.online_last_hit_pop = check.last_hit_pop
         session.open_skillcheck_overlay(
             *check.overlay_args(), online=True,
-            elapsed_ms=float(payload.get("elapsed_ms", 0.0)),
+            elapsed_ms=finite_ms(payload.get("elapsed_ms", 0.0)),
             miss_count=int(payload.get("miss_count", 0)))
 
     def _prepare_online_fail(self, payload):
@@ -610,14 +645,11 @@ class GameScreen(Screen):
             False, lambda: self._apply_spectate_fail(from_sq, to_sq, aim_victim, kind))
 
     def _spectate_shot(self, payload):
-        target_row = payload.get("target_row")
-        target_col = payload.get("target_col")
-        target = ((float(target_row), float(target_col))
-                  if target_row is not None and target_col is not None else None)
         self.skillcheck_overlay.spectate_shot(
-            float(payload["elapsed_ms"]), int(payload["miss_count"]), bool(payload["won"]),
-            progress=int(payload.get("progress", 0)),
-            direction=payload.get("direction"), target=target)
+            finite_ms(payload["elapsed_ms"]), int(payload["miss_count"]),
+            bool(payload["won"]),
+            progress=min(int(payload.get("progress", 0)), SPECTATE_PROGRESS_MAX),
+            direction=payload.get("direction"), target=spectate_target(payload))
 
     def _clear_online_move_locks(self, from_sq, to_sq):
         if self.variant != Variant.ONLINE:
@@ -731,15 +763,16 @@ class GameScreen(Screen):
         to_sq = square_from_coord(pending["to"])
         promo = pending.get("promotion")
         promo_type = PROMO_TYPE_BY_LETTER.get(promo) if promo else None
-        elapsed_ms = float(pending.get("elapsed_ms", 0.0))
+        elapsed_ms = finite_ms(pending.get("elapsed_ms", 0.0))
         miss_count = int(pending.get("miss_count", 0))
         captured_value = int(pending.get("captured_value", 0))
-        progress = int(pending.get("progress", 0))
+        progress = min(int(pending.get("progress", 0)), SPECTATE_PROGRESS_MAX)
+        deadline_ms = finite_ms(pending["deadline_ms"])
         self.skillcheck_session.online_last_hit_pop = int(pending.get("last_hit_pop", -1))
         if pending["color"] != self._chosen_side:
             self.skillcheck_session.open_spectate_overlay(
                 kind, pending["seed"], int(pending["value_diff"]),
-                float(pending["deadline_ms"]), from_sq, to_sq, promo_type, captured_value,
+                deadline_ms, from_sq, to_sq, promo_type, captured_value,
                 elapsed_ms=elapsed_ms, miss_count=miss_count, progress=progress)
             self.app.toast.show("Opponent is lining up a shot…")
             return
@@ -748,7 +781,7 @@ class GameScreen(Screen):
         self.skillcheck_session.online_skillcheck_opened_ms = pg.time.get_ticks() - int(elapsed_ms)
         self.skillcheck_session.open_skillcheck_overlay(
             kind, pending["seed"], int(pending["value_diff"]),
-            float(pending["deadline_ms"]), from_sq, to_sq, promo_type, captured_value,
+            deadline_ms, from_sq, to_sq, promo_type, captured_value,
             online=True, elapsed_ms=elapsed_ms, miss_count=miss_count, progress=progress)
 
     def exit(self):

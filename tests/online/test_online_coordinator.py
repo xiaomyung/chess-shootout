@@ -18,6 +18,8 @@ import pytest
 from tests.conftest import pygame_display
 from chessshootout.backend.pieces import PieceColor
 from chessshootout.backend.utils import Square
+from chessshootout.frontend.online_coordinator import TOAST_REASON_MAX_CHARS
+from chessshootout.server.protocol import MAX_NICKNAME_LEN, Reason
 from tests.helpers import (
     make_app, online_start_payload as _online_start_payload, start_single_screen,
 )
@@ -176,6 +178,146 @@ def test_rematch_from_menu_window_end_to_end():
     assert app.game.variant == "online"
     assert app.game._chosen_side == "black"
     assert app.coordinator._subscriber is app.game
+
+
+def _spectate_check(kind, **overrides):
+    payload = {"kind": kind, "seed": "seed-1", "value_diff": 3, "deadline_ms": 5000.0,
+               "from": "e4", "to": "d5", "promotion": None, "captured_value": 3}
+    payload.update(overrides)
+    return payload
+
+
+def _spectate_shot(**overrides):
+    payload = {"elapsed_ms": 100.0, "miss_count": 0, "won": False, "progress": 1}
+    payload.update(overrides)
+    return payload
+
+
+def test_spectate_shot_clamps_hostile_coords_and_progress(monkeypatch):
+    """The mover's own shots are clamped by the whack view before they go on the
+    wire, but the relayed spectate copy is unbounded on the server model — so the
+    client clamps what it consumes. Coordinates land in a pg.draw.circle centre,
+    which raises on a value pygame can't fit in a C int."""
+    from chessshootout.frontend.screens.game import SPECTATE_PROGRESS_MAX
+
+    app = _wired_app()
+    seen = []
+    monkeypatch.setattr(app.game.skillcheck_overlay, "spectate_shot",
+                        lambda *a, **kw: seen.append((a, kw)))
+
+    app.game.on_spectate(_spectate_shot(
+        target_row=1e308 * 10, target_col=-4096.0, progress=10 ** 9,
+        elapsed_ms=float("nan")))
+
+    (elapsed, miss_count, won), kwargs = seen[0]
+    assert kwargs["target"] is None, "a non-finite coordinate is dropped, not drawn"
+    assert kwargs["progress"] == SPECTATE_PROGRESS_MAX
+    assert elapsed == 0.0
+    assert (miss_count, won) == (0, False)
+
+
+def test_spectate_shot_keeps_honest_values_byte_identical(monkeypatch):
+    app = _wired_app()
+    seen = []
+    monkeypatch.setattr(app.game.skillcheck_overlay, "spectate_shot",
+                        lambda *a, **kw: seen.append((a, kw)))
+
+    app.game.on_spectate(_spectate_shot(
+        elapsed_ms=1234.5, miss_count=2, won=True, progress=3,
+        target_row=3.25, target_col=7.75, direction="up"))
+
+    (elapsed, miss_count, won), kwargs = seen[0]
+    assert (elapsed, miss_count, won) == (1234.5, 2, True)
+    assert kwargs == {"progress": 3, "direction": "up", "target": (3.25, 7.75)}
+
+
+@pytest.mark.parametrize("row, col, expected", [
+    pytest.param(9.5, 4.0, (8.0, 4.0), id="row_above_the_board"),
+    pytest.param(-3.0, 4.0, (0.0, 4.0), id="row_below_zero"),
+    pytest.param(2.0, 4096.0, (2.0, 8.0), id="col_above_the_board"),
+])
+def test_spectate_shot_clamps_finite_coords_into_the_board_domain(
+        row, col, expected, monkeypatch):
+    app = _wired_app()
+    seen = []
+    monkeypatch.setattr(app.game.skillcheck_overlay, "spectate_shot",
+                        lambda *a, **kw: seen.append(kw))
+
+    app.game.on_spectate(_spectate_shot(target_row=row, target_col=col))
+
+    assert seen[0]["target"] == expected
+
+
+def test_hostile_spectate_shot_survives_a_real_drawn_frame():
+    """End to end with the real spectate overlay: the coordinates only reach a
+    draw call on the next frame, so the frame is what has to survive."""
+    app = _wired_app()
+    app.coordinator.client.opp_state = "connected"
+    app.game.on_spectate(_spectate_check("whack"))
+    assert app.game.skillcheck_overlay.is_active()
+
+    app.game.on_spectate(_spectate_shot(target_row=float("inf"),
+                                        target_col=1e308 * 10, progress=10 ** 6))
+    app.draw_frame()
+    app.draw_frame()
+
+
+def test_hostile_combo_spectate_progress_cannot_run_away():
+    """combo_view replays the missing prompts one by one (`while self._progress <
+    progress`), so an unbounded server int is an unbounded loop plus the juice
+    allocations each step spawns."""
+    from chessshootout.frontend.screens.game import SPECTATE_PROGRESS_MAX
+
+    app = _wired_app()
+    app.coordinator.client.opp_state = "connected"
+    app.game.on_spectate(_spectate_check("combo"))
+    controller = app.game.skillcheck_overlay._controller
+
+    app.game.on_spectate(_spectate_shot(won=True, progress=10 ** 9))
+
+    assert controller._progress <= SPECTATE_PROGRESS_MAX
+    app.draw_frame()
+
+
+def test_unknown_error_reason_is_truncated_before_it_is_toasted():
+    """An unmapped reason is shown verbatim, and the toast sizes itself from the
+    rendered text — an unbounded reason is an unbounded surface."""
+    app = _wired_app()
+
+    app.coordinator._handle_online_error({"reason": "boom" * 10_000})
+
+    assert app.toast.is_visible()
+    assert len(app.toast._bubbles[-1]["message"]) == TOAST_REASON_MAX_CHARS
+
+
+def test_a_non_string_reason_falls_back_to_the_generic_label():
+    app = _wired_app()
+    app.coordinator._handle_online_error({"reason": {"nested": "payload"}})
+    assert app.toast._bubbles[-1]["message"] == "Server error"
+
+
+def test_mapped_reasons_still_toast_their_full_label():
+    app = _wired_app()
+    app.coordinator._handle_online_error({"reason": Reason.RATE_LIMITED})
+    assert app.toast._bubbles[-1]["message"] == "Slow down a bit"
+
+
+def test_match_found_and_game_start_clip_oversize_names():
+    """A name is rendered in full into a surface before it is clipped to the
+    widget, so the length bound has to land before the modal and the strips."""
+    app = make_app(1000, 800)
+    app.coordinator.client = _mock_client()
+    app.coordinator.client.opp_state = "connected"
+    payload = _online_start_payload(white_name="a" * 400_000, black_name="bob")
+
+    app.coordinator._begin_match_found_transition(payload)
+    assert app.coordinator.match_found_modal.me_name == "a" * MAX_NICKNAME_LEN
+
+    app.coordinator._finish_match_found()
+    assert app.game.white_name == "a" * MAX_NICKNAME_LEN
+    assert app.game.black_name == "bob"
+    assert set(app.game.result_flow.series_scores) == {"a" * MAX_NICKNAME_LEN, "bob"}
+    app.draw_frame()
 
 
 def test_reconnect_available_reflects_the_pending_probe_result():

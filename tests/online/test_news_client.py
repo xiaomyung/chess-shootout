@@ -12,7 +12,8 @@ import pytest
 
 from chessshootout.online import news
 from chessshootout.online.news import (
-    NEWS_MAX_ITEMS, NewsClient, format_news_date, parse_news_items,
+    NEWS_BODY_MAX_CHARS, NEWS_DATE_MAX_CHARS, NEWS_MAX_ITEMS, NEWS_TITLE_MAX_CHARS,
+    NewsClient, format_news_date, parse_news_items,
 )
 from chessshootout.online.transport import TransportError, fetch_news
 
@@ -76,11 +77,30 @@ def test_parse_caps_at_news_max_items_keeping_the_newest():
 
 
 def test_fetch_news_wraps_malformed_url_as_transport_error(monkeypatch):
-    def boom(url, **kwargs):
+    def boom(*args, **kwargs):
         raise httpx.InvalidURL("malformed url")
-    monkeypatch.setattr(httpx, "get", boom)
+    monkeypatch.setattr(httpx, "stream", boom)
     with pytest.raises(TransportError):
         fetch_news("https://[::1")
+
+
+def test_parse_truncates_the_rendered_fields():
+    """A hostile (or broken) feed host controls every string the News card renders.
+    The card lays out the body line by line and elides the title against the card
+    width, so an unbounded field turns into seconds-per-frame layout work; the
+    fields are clipped once, at parse time, before anything is cached or drawn."""
+    raw = [{"title": "T" * 10_000, "body": "B" * 100_000, "date": "9" * 500,
+            "cta": "R" * 10_000}]
+    item = parse_news_items(raw)[0]
+    assert len(item["title"]) == NEWS_TITLE_MAX_CHARS
+    assert len(item["body"]) == NEWS_BODY_MAX_CHARS
+    assert len(item["date"]) == NEWS_DATE_MAX_CHARS
+    assert item["cta"] == "R" * 10_000, "unknown fields are still passed through whole"
+
+
+def test_parse_leaves_normal_length_fields_byte_identical():
+    raw = [{"title": "Patch 2.12.0", "body": "Line one\n- bullet", "date": "2026-07-14"}]
+    assert parse_news_items(raw) == raw
 
 
 def test_generation_starts_at_zero(tmp_path):

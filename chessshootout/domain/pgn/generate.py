@@ -21,6 +21,12 @@ RESULT_CODES = {
 
 TIMEOUT_RESULTS = {"white_wins_on_time", "black_wins_on_time"}
 
+TAG_UNSAFE_CHARS = '"\\[]'
+
+
+def tag_value(raw):
+    return "".join(c for c in str(raw) if c not in TAG_UNSAFE_CHARS)
+
 
 def iter_move_pairs(history):
     for i in range(0, len(history), 2):
@@ -72,15 +78,15 @@ def generate_pgn(move_history, result, white_name="?", black_name="?",
         '[Site "?"]',
         f'[Date "{date.today().strftime("%Y.%m.%d")}"]',
         '[Round "?"]',
-        f'[White "{white_name}"]',
-        f'[Black "{black_name}"]',
+        f'[White "{tag_value(white_name)}"]',
+        f'[Black "{tag_value(black_name)}"]',
         f'[Result "{code}"]',
         f'[TimeControl "{tc_value}"]',
     ]
     if match_id is not None:
-        header.append(f'[CSMatchId "{match_id}"]')
+        header.append(f'[CSMatchId "{tag_value(match_id)}"]')
     if termination is not None:
-        header.append(f'[Termination "{termination}"]')
+        header.append(f'[Termination "{tag_value(termination)}"]')
 
     parts = []
     for idx, (number, white, black) in enumerate(iter_move_pairs(move_history)):

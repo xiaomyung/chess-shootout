@@ -15,6 +15,7 @@ log = logging.getLogger("chess.env")
 _KEY_LINE_RE = re.compile(r"^([A-Za-z_][A-Za-z0-9_]*)\s*=(.*)$")
 _ATOMIC_WRITE_RETRIES = 5
 _ATOMIC_WRITE_BACKOFF_S = 0.03
+_LINE_BREAK_CHARS = ("\r", "\n")
 
 
 _DEV_SERVER_ADDR = "localhost:8000"
@@ -110,6 +111,10 @@ def set_country(code):
 def sanitize_nickname(raw):
     kept = "".join(c for c in (raw or "") if c.isascii() and c.isprintable() and c != "#")
     return re.sub(r"\s+", " ", kept)[:_NICKNAME_MAX_LEN].strip()
+
+
+def clip_nickname(raw):
+    return str(raw or "")[:_NICKNAME_MAX_LEN]
 
 
 def _has_disallowed_nickname_chars(raw):
@@ -382,6 +387,10 @@ def _rewrite_lines(key, replacement):
 
 
 def _persist(key, value):
+    value = str(value)
+    if any(char in value for char in _LINE_BREAK_CHARS):
+        log.warning("refusing to persist key=%s: value contains a line break", key)
+        return
     out_lines, replaced = _rewrite_lines(key, f"{key}={value}")
     if not replaced:
         out_lines.append(f"{key}={value}")

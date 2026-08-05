@@ -29,6 +29,7 @@ NEWS_TIMEOUT_SECONDS = 5.0
 RECLAIM_TIMEOUT_SECONDS = 2.0
 WS_PING_INTERVAL_SECONDS = 20
 WS_PING_TIMEOUT_SECONDS = 30
+NEWS_MAX_BYTES = 512 * 1024
 
 
 _TLS_CONTEXT = ssl.create_default_context(cafile=certifi.where())
@@ -54,16 +55,40 @@ class FatalResumeError(TransportError):
     pass
 
 
-def fetch_news(url, *, timeout=NEWS_TIMEOUT_SECONDS):
+class ResponseTooLarge(TransportError):
+    pass
+
+
+def _reject_json_constant(name):
+    raise ValueError(f"non_standard_json_constant: {name}")
+
+
+def _loads(raw):
+    return json.loads(raw, parse_constant=_reject_json_constant)
+
+
+def _read_capped(response, max_bytes):
+    chunks = []
+    total = 0
+    for chunk in response.iter_bytes():
+        total += len(chunk)
+        if total > max_bytes:
+            raise ResponseTooLarge(f"response_over_{max_bytes}_bytes")
+        chunks.append(chunk)
+    return b"".join(chunks)
+
+
+def fetch_news(url, *, timeout=NEWS_TIMEOUT_SECONDS, max_bytes=NEWS_MAX_BYTES):
     try:
-        r = httpx.get(url, timeout=timeout, verify=_TLS_CONTEXT)
+        with httpx.stream("GET", url, timeout=timeout, verify=_TLS_CONTEXT) as r:
+            if r.status_code != 200:
+                raise TransportHTTPError(r.status_code, f"http_{r.status_code}")
+            body = _read_capped(r, max_bytes)
     except (httpx.HTTPError, httpx.TimeoutException, httpx.InvalidURL) as exc:
         raise TransportError(str(exc)) from exc
-    if r.status_code != 200:
-        raise TransportHTTPError(r.status_code, f"http_{r.status_code}")
     try:
-        return r.json()
-    except json.JSONDecodeError as exc:
+        return _loads(body)
+    except ValueError as exc:
         raise TransportError(f"invalid_json: {exc}") from exc
 
 
@@ -125,8 +150,8 @@ class _UrlBuilder:
 
 def _safe_error_reason(response):
     try:
-        body = response.json()
-    except json.JSONDecodeError:
+        body = _loads(response.content)
+    except ValueError:
         return None
     if not isinstance(body, dict):
         return None
@@ -169,8 +194,8 @@ class ServerTransport:
         if r.status_code != 200:
             return None
         try:
-            return response_model.model_validate(r.json())
-        except (ValueError, json.JSONDecodeError):
+            return response_model.model_validate(_loads(r.content))
+        except ValueError:
             return None
 
     def reclaim_blocking(self, client_uuid, *,
@@ -193,8 +218,8 @@ class ServerTransport:
         if r.status_code != 200:
             return None
         try:
-            return HealthResponse.model_validate(r.json())
-        except (ValueError, json.JSONDecodeError):
+            return HealthResponse.model_validate(_loads(r.content))
+        except ValueError:
             return None
 
     async def matchmake_async(self, req: MatchmakeRequest, http) -> MatchmakeResponse:
@@ -205,7 +230,7 @@ class ServerTransport:
             if reason == Reason.VERSION_MISMATCH:
                 raise SchemaVersionMismatch(reason)
             raise TransportHTTPError(r.status_code, reason)
-        return MatchmakeResponse.model_validate(r.json())
+        return MatchmakeResponse.model_validate(_loads(r.content))
 
     async def cancel_matchmake_async(self, body: CancelMatchmakeRequest, http) -> None:
         url = self._url.http("/matchmake")
@@ -221,7 +246,7 @@ class ServerTransport:
             raise FatalResumeError(_safe_error_reason(r) or f"http_{r.status_code}")
         if r.status_code != 200:
             return None
-        return ResumeResponse.model_validate(r.json())
+        return ResumeResponse.model_validate(_loads(r.content))
 
     def make_async_http(self):
         return self._async_http_factory()
@@ -318,6 +343,6 @@ class ServerWebSocket:
     async def recv(self):
         raw = await self._ws.recv()
         try:
-            return json.loads(raw)
-        except json.JSONDecodeError:
+            return _loads(raw)
+        except ValueError:
             return None
