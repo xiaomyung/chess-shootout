@@ -8,6 +8,7 @@ class Colors:
     overlay_scrim = bg + "d9"
     well_deep = "#0f1218"
 
+    white = "#ffffff"
     text = "#f3f5f8"
     text_dim = "#9aa4b2"
     text_muted = "#5c6573"

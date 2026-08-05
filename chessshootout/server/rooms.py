@@ -64,7 +64,8 @@ class PendingSkillCheck:
     progress: int = 0
     last_hit_pop: int = -1
     last_input_ms: float = -1.0
-    _challenge: object = field(default=None, repr=False)
+    holes: tuple = field(default=(), repr=False, compare=False)
+    _challenge: object = field(default=None, repr=False, compare=False)
 
     @property
     def challenge(self):

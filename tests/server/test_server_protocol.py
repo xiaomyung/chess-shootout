@@ -372,6 +372,7 @@ def test_skillcheck_wire_messages_are_byte_identical_after_the_shared_base_refac
     assert pending.model_dump(by_alias=True) == {
         "kind": "aim", "seed": "seed123", "value_diff": 5, "deadline_ms": 5000.0,
         "captured_value": 0, "elapsed_ms": 1200.0, "miss_count": 2, "progress": 0,
+        "last_hit_pop": -1,
         "from": "e4", "to": "d5", "promotion": "q", "color": "white",
     }
     assert required.model_dump(by_alias=True) == {
@@ -552,11 +553,63 @@ def test_pending_skillcheck_wire_carries_progress_and_captured_value():
     ],
 )
 def test_server_only_pending_fields_never_appear_on_any_skillcheck_wire_model(model):
-    """last_hit_pop and last_input_ms are server-side adjudication state on
-    PendingSkillCheck — no wire model may ever dump them."""
+    """last_input_ms (the anti-mash gate, paced on the server wall clock) and
+    plies_ever (the room's abort counter) are server-side state — no wire model
+    may ever dump them, or a crafted client could pace its bursts against the
+    gate. last_hit_pop is deliberately NOT in this set: it is mover knowledge
+    (which pop the mover already scored), and a reconnecting mover that has to
+    guess it re-credits or forfeits a pop, so PendingSkillCheckWire carries it —
+    pinned by test_pending_skillcheck_wire_carries_last_hit_pop_for_resume."""
     for dumped in (model.model_dump(), model.model_dump(by_alias=True)):
-        assert "last_hit_pop" not in dumped
         assert "last_input_ms" not in dumped
+        assert "plies_ever" not in dumped
+
+
+def test_pending_skillcheck_wire_carries_last_hit_pop_for_resume():
+    """The resume wire echoes the pop the mover has already been credited for, so
+    a mid-whack reconnect neither re-credits it nor forfeits it. Default -1 = no
+    pop scored yet."""
+    wire = PendingSkillCheckWire(
+        kind="whack", seed="s", value_diff=8, deadline_ms=5000.0, captured_value=1,
+        elapsed_ms=1800.0, progress=1, last_hit_pop=2, from_sq="e4", to_sq="d5",
+        color="white")
+    assert wire.model_dump()["last_hit_pop"] == 2
+    assert PendingSkillCheckWire(
+        kind="whack", seed="s", value_diff=8, deadline_ms=5000.0,
+        elapsed_ms=0.0, from_sq="e4", to_sq="d5", color="white").last_hit_pop == -1
+
+
+@pytest.mark.parametrize(
+    "model_cls, field, extra",
+    [
+        pytest.param(SkillCheckRequiredMessage, "deadline_ms", {}, id="required_deadline"),
+        pytest.param(SkillCheckSpectateMessage, "deadline_ms", {}, id="spectate_deadline"),
+        pytest.param(PendingSkillCheckWire, "deadline_ms",
+                     {"elapsed_ms": 0.0, "color": "white"}, id="pending_deadline"),
+        pytest.param(PendingSkillCheckWire, "elapsed_ms",
+                     {"deadline_ms": 5000.0, "color": "white"}, id="pending_elapsed"),
+    ],
+)
+@pytest.mark.parametrize(
+    "bad",
+    [
+        pytest.param(float("nan"), id="nan"),
+        pytest.param(float("inf"), id="inf"),
+        pytest.param(float("-inf"), id="neg_inf"),
+        pytest.param(-1.0, id="negative"),
+    ],
+)
+def test_outbound_skillcheck_millisecond_fields_reject_non_finite_and_negative(
+        model_cls, field, extra, bad):
+    """The outbound geometry the client rebuilds its challenge from is hardened
+    exactly like the inbound client_elapsed_ms: a non-finite or negative
+    deadline/elapsed would make every downstream comparison (deadline test,
+    schedule refit, resume elapsed) meaningless, so it can never be minted."""
+    base = dict(kind="whack", seed="s", value_diff=0, from_sq="e4", to_sq="d5")
+    base.update(extra)
+    base[field] = bad
+    with pytest.raises(ValidationError):
+        model_cls(**base)
 
 
 ALL_SQUARES = [f"{file}{rank}" for file in "abcdefgh" for rank in "12345678"]

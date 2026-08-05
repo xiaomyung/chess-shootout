@@ -428,6 +428,7 @@ def _pending_skillcheck_wire(room, now_ms):
         kind=pending.kind.value, seed=pending.seed, value_diff=pending.value_diff,
         deadline_ms=pending.deadline_ms, captured_value=pending.captured_value,
         elapsed_ms=elapsed, miss_count=pending.miss_count, progress=pending.progress,
+        last_hit_pop=pending.last_hit_pop,
         from_sq=coord_from_square(pending.from_sq),
         to_sq=coord_from_square(pending.to_sq),
         promotion=pending.promotion, color=pending.color,

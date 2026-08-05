@@ -3,17 +3,17 @@ import math
 import pygame as pg
 
 from chessshootout.backend.utils import Square, BOARD_SIZE
-from chessshootout.frontend.skillcheck.controller import (
-    SkillCheckController, SKILLCHECK_RESULT_HOLD_MS)
+from chessshootout.frontend.skillcheck.controller import SkillCheckController
 from chessshootout.frontend.skillcheck.juice import (
-    TORN_MAX_TIER, Trauma, Hitstop, ease_out_back, sakurai_vibrate, torn_sprite)
+    TORN_MAX_TIER, Trauma, Hitstop, sakurai_vibrate, torn_sprite)
 from chessshootout.frontend.visual.cache import (
     new_size_cache, memoized_surface, render_text)
 from chessshootout.frontend.visual.colors import Colors
 from chessshootout.frontend.visual.draw import (
-    chevron_surface, cosine_pulse, cut_rect_surface, smoothstep, supersample)
+    chevron_surface, circle_surface, cosine_pulse, cut_rect_surface, smoothstep, supersample)
 from chessshootout.frontend.visual.emoji import emoji_surface
 from chessshootout.frontend.visual.fonts import get_display_font
+from chessshootout.frontend.visual.tween import out_back
 from chessshootout.skillcheck.combo import (
     COMBO_INTRO_MS, COMBO_WRONG_LOCKOUT_MS, COMBO_MAX_WRONGS, COMBO_MIN_INTER_PRESS_MS)
 from chessshootout.skillcheck.online import SKILLCHECK_HUMAN_FLOOR_MS
@@ -116,6 +116,7 @@ COMBO_VIEW_CONFETTI_MS = 900.0
 COMBO_VIEW_CONFETTI_SPREAD_FRAC = 2.2
 COMBO_VIEW_CONFETTI_GRAV_FRAC = 2.6
 COMBO_VIEW_CONFETTI_SIZE_FRAC = 0.34
+COMBO_VIEW_CONFETTI_SPEED_JITTER = (0.5, 1.0)
 
 COMBO_VIEW_STREAK_FIRE = 3
 COMBO_VIEW_FIRE_EMOJI = "🔥"
@@ -146,7 +147,7 @@ COMBO_VIEW_TRAUMA_IGNITE = 0.25
 
 COMBO_VIEW_EXIT_FADE_MS = 200.0
 
-COMBO_VIEW_FLASH_WHITE = "#ffffff"
+COMBO_VIEW_FLASH_WHITE = Colors.white
 
 _RECEPTOR_DIRS = {"up": (0, -1), "down": (0, 1), "left": (-1, 0), "right": (1, 0)}
 _DIR_ANGLE = {"up": 0, "left": 90, "down": 180, "right": -90}
@@ -200,7 +201,6 @@ _RIM_LOSS = pg.Color(Colors.loss)
 _PAD_STATIC_CACHE = new_size_cache()
 _DIR_CHEVRON_CACHE = new_size_cache()
 _RECEPTOR_FILL_CACHE = new_size_cache()
-_DISC_CACHE = new_size_cache()
 _SOLID_CACHE = new_size_cache()
 _PIP_CACHE = new_size_cache()
 _FLASH_CACHE = new_size_cache()
@@ -274,15 +274,6 @@ def _wedge_overlay(radius, hub_r, direction, color):
     return memoized_surface(_RECEPTOR_FILL_CACHE, (radius, hub_r, direction, str(color)), build)
 
 
-def _disc(radius, color):
-    def build():
-        def render(surf, k):
-            c = surf.get_width() / 2.0
-            pg.draw.circle(surf, pg.Color(color), (c, c), radius * k)
-        return supersample(2 * radius, render)
-    return memoized_surface(_DISC_CACHE, (radius, str(color)), build)
-
-
 def _solid_square(size, color):
     def build():
         surf = pg.Surface((size, size), pg.SRCALPHA)
@@ -332,25 +323,16 @@ class ComboController(SkillCheckController):
                  board_rect=None, geom=None, victim_surface=None, attacker_surface=None,
                  from_sq=None, victim_sq=None, on_shot=None, miss_count=0, progress=0,
                  passive=False, audio=None):
-        self.challenge = challenge
-        self.start_ms = now_ms
-        self._now = now_ms
-        self.deadline_ms = deadline_ms
+        self._init_common(challenge, now_ms, deadline_ms, on_shot=on_shot, passive=passive,
+                          audio=audio)
         self._progress = progress
         self._wrong_count = miss_count
-        self._on_shot = on_shot
-        self._passive = passive
-        self._online = on_shot is not None or passive
-        self._audio = audio
         self._from_sq = from_sq
         self._victim_sq = victim_sq
         self._geom = geom
         self._board_rect = pg.Rect(board_rect) if board_rect is not None else None
         self._victim_src = victim_surface
         self._attacker_src = attacker_surface
-        self._landed = None
-        self._committed_at = None
-        self._resolved_at = None
         self._closed = False
         self._closed_at = None
         self._lockout_until = now_ms
@@ -598,7 +580,7 @@ class ComboController(SkillCheckController):
                 step = (direction if direction is not None and last
                         else self.challenge.expected(self._progress))
                 self._register_correct(step if step is not None else "up")
-        else:
+        elif miss_count + 1 > self._wrong_count:
             self._wrong_count = miss_count + 1
             step = direction if direction is not None else self.challenge.expected(self._progress)
             self._register_spectate_wrong(step if step is not None else "up")
@@ -615,11 +597,7 @@ class ComboController(SkillCheckController):
 
     @property
     def done(self):
-        if self._online:
-            return (self._resolved_at is not None
-                    and self._now - self._resolved_at >= SKILLCHECK_RESULT_HOLD_MS)
-        return (self._committed_at is not None
-                and self._now - self._committed_at >= COMBO_VIEW_RESULT_HOLD_MS)
+        return self._done_after(COMBO_VIEW_RESULT_HOLD_MS)
 
     @property
     def landed(self):
@@ -634,7 +612,7 @@ class ComboController(SkillCheckController):
 
     def _spawn_sparks(self):
         self._sparks = seeded_floats(
-            "combospark:{}:{}".format(self.challenge.prompts, self._progress),
+            f"combospark:{self.challenge.prompts}:{self._progress}",
             COMBO_VIEW_SPARK_MAX)
         self._sparks_at = self._now
         self._spark_count = COMBO_VIEW_SPARK_MIN + int(
@@ -642,7 +620,7 @@ class ComboController(SkillCheckController):
 
     def _spawn_confetti(self):
         self._confetti = seeded_floats(
-            "comboconfetti:{}".format(self.challenge.prompts), COMBO_VIEW_CONFETTI_COUNT * 3)
+            f"comboconfetti:{self.challenge.prompts}", COMBO_VIEW_CONFETTI_COUNT * 3)
         self._confetti_at = self._now
 
     def _shake(self):
@@ -683,9 +661,9 @@ class ComboController(SkillCheckController):
         self._draw_judgement(window)
 
     def _timer_frac(self):
-        timer_now = self._terminal_at()
-        timer_now = self._now if timer_now is None else timer_now
-        frac = (timer_now - self.start_ms) / max(self.deadline_ms, 1)
+        terminal = self._terminal_at()
+        now = self._now if terminal is None else terminal
+        frac = (now - self.start_ms) / max(self.deadline_ms, 1)
         return min(max(frac, 0.0), 1.0)
 
     def _terminal_at(self):
@@ -869,7 +847,7 @@ class ComboController(SkillCheckController):
         sprite.set_alpha(int(alpha * ignite * fade))
         bob = int(self._fire_size * COMBO_VIEW_FIRE_BOB_FRAC * pulse)
         surge = int(self._fire_size * COMBO_VIEW_FIRE_IGNITE_RISE_FRAC
-                    * (1.0 - ease_out_back(ignite)))
+                    * (1.0 - out_back(ignite)))
         window.blit(sprite, sprite.get_rect(center=(cx, cy - bob + surge)))
 
     def _deflate_scale(self):
@@ -896,7 +874,7 @@ class ComboController(SkillCheckController):
         window.blit(static, (left, top))
         self._draw_hover(window, left, top)
         if self._now < self._lockout_until:
-            dim = _disc(self._pad_r, Colors.bg)
+            dim = circle_surface(2 * self._pad_r, Colors.bg)
             dim.set_alpha(int(COMBO_VIEW_PAD_DIM_ALPHA * fade))
             window.blit(dim, (left, top))
         self._draw_receptor_flashes(window, left, top)
@@ -952,7 +930,7 @@ class ComboController(SkillCheckController):
             t = self._now - start
             if t < 0 or t >= COMBO_VIEW_ARROW_FLY_MS:
                 continue
-            progress = ease_out_back(min(t / COMBO_VIEW_ARROW_FLY_MS, 1.0))
+            progress = out_back(min(t / COMBO_VIEW_ARROW_FLY_MS, 1.0))
             rise = int(self._cell * COMBO_VIEW_ARROW_FLY_RISE_FRAC * progress)
             chev = _direction_chevron(self._strip_big, Colors.accent_hi, direction)
             chev.set_alpha(int(255 * (1.0 - t / COMBO_VIEW_ARROW_FLY_MS)))
@@ -1019,9 +997,10 @@ class ComboController(SkillCheckController):
         grav = self._cell * COMBO_VIEW_CONFETTI_GRAV_FRAC
         alpha = int(255 * (1.0 - progress))
         f = self._confetti
+        speed_base, speed_span = COMBO_VIEW_CONFETTI_SPEED_JITTER
         for i in range(COMBO_VIEW_CONFETTI_COUNT):
             ang = (f[i * 3] - 0.5) * math.pi
-            speed = 0.5 + f[i * 3 + 1]
+            speed = speed_base + speed_span * f[i * 3 + 1]
             char = COMBO_VIEW_CONFETTI[
                 int(f[i * 3 + 2] * len(COMBO_VIEW_CONFETTI)) % len(COMBO_VIEW_CONFETTI)]
             surf = _emoji_sprite(char, size)

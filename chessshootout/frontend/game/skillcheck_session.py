@@ -1,4 +1,5 @@
 import logging
+from typing import NamedTuple
 
 import pygame as pg
 
@@ -16,6 +17,13 @@ log = logging.getLogger("chess.frontend")
 
 SUPPRESSING_KINDS = frozenset(
     {SkillCheckKind.AIM, SkillCheckKind.WHACK, SkillCheckKind.COMBO})
+
+
+class CheckContext(NamedTuple):
+    from_sq: Square
+    to_sq: Square
+    promo_type: PieceType | None
+    kind: SkillCheckKind
 
 
 class SkillCheckSession:
@@ -66,14 +74,32 @@ class SkillCheckSession:
         screen = self.screen
         target = self._skillcheck_render_square(kind, seed, value_diff, from_sq, to_sq)
         capturer = screen.match.piece_at(from_sq)
+        controller = self._build_check_controller(
+            kind, seed, value_diff, deadline_ms, from_sq, to_sq, target, capturer,
+            captured_value, online=online, elapsed_ms=elapsed_ms, miss_count=miss_count,
+            progress=progress, passive=passive)
+        if controller is None:
+            return False
+        log.info("skillcheck fired kind=%s ply=%d online=%s passive=%s",
+                 kind.value, len(screen.match.move_history) + 1, online, passive)
+        self._arm_check_state(kind, seed, target, from_sq, capturer, elapsed_ms)
+        on_done = self._on_online_skillcheck_done if online else self._on_skillcheck_done
+        screen.skillcheck_overlay.start(
+            controller, CheckContext(from_sq, to_sq, promo_type, kind), on_done)
+        return True
+
+    def _build_check_controller(self, kind, seed, value_diff, deadline_ms, from_sq, to_sq,
+                                target, capturer, captured_value, *, online, elapsed_ms,
+                                miss_count, progress, passive):
+        screen = self.screen
         hole_squares = None
         if kind == SkillCheckKind.WHACK:
-            hole_squares = mole.hole_squares(
+            hole_squares = mole.holes_for(
                 seed, captured_value, (to_sq.row, to_sq.col),
-                self._occupied_squares(), screen.board.SIZE)
+                screen.match.state, screen.board.SIZE)
         attacker_surface = (self._piece_surface(capturer)
                             if kind == SkillCheckKind.COMBO else None)
-        controller = build_controller(
+        return build_controller(
             kind, seed=seed, cell_rect=screen.board.cell_rect(target),
             now_ms=pg.time.get_ticks() - int(elapsed_ms), deadline_ms=deadline_ms,
             period_ms=period_for_diff(value_diff), value_diff=value_diff,
@@ -85,26 +111,21 @@ class SkillCheckSession:
             miss_count=miss_count, passive=passive, audio=self.app.sound_manager,
             hole_squares=hole_squares, captured_value=captured_value, progress=progress,
             attacker_surface=attacker_surface, on_hit_px=self._on_whack_hit_px,
-            mirror_targets=passive and online)
-        if controller is None:
-            return False
-        ply = len(screen.match.move_history) + 1
+            mirror_targets=passive and online,
+            last_hit_pop=self.online_last_hit_pop if online else -1)
+
+    def _arm_check_state(self, kind, seed, target, from_sq, capturer, elapsed_ms):
+        board = self.screen.board
         self._skillcheck_fired_at_ms = pg.time.get_ticks() - int(elapsed_ms)
-        log.info("skillcheck fired kind=%s ply=%d online=%s passive=%s",
-                 kind.value, ply, online, passive)
         self.skillcheck_target = target
         self.active_kind = kind
         self.active_seed = seed
         if kind == SkillCheckKind.WHACK:
             self._whack_gun_from = from_sq
             self._whack_gun_type = capturer.type.value if capturer is not None else None
-        screen.board.aim_suppressed_square = target if kind in SUPPRESSING_KINDS else None
-        screen.board.attacker_suppressed_square = (
+        board.aim_suppressed_square = target if kind in SUPPRESSING_KINDS else None
+        board.attacker_suppressed_square = (
             from_sq if kind == SkillCheckKind.COMBO else None)
-        on_done = self._on_online_skillcheck_done if online else self._on_skillcheck_done
-        screen.skillcheck_overlay.start(
-            controller, (from_sq, to_sq, promo_type, kind), on_done)
-        return True
 
     def open_spectate_overlay(self, kind, seed, value_diff, deadline_ms,
                               from_sq, to_sq, promo_type, captured_value=0, *,
@@ -112,7 +133,7 @@ class SkillCheckSession:
         screen = self.screen
         screen.board.jump_to_review_ply(None)
         self.pending_online_move = None
-        self.online_skillcheck = (from_sq, to_sq, promo_type, kind)
+        self.online_skillcheck = CheckContext(from_sq, to_sq, promo_type, kind)
         self.online_spectate_kind = kind
         self.online_was_spectator = True
         self.online_skillcheck_opened_ms = pg.time.get_ticks() - int(elapsed_ms)
@@ -203,16 +224,20 @@ class SkillCheckSession:
             client_elapsed_ms, direction=direction,
             target_row=target_row, target_col=target_col)
 
-    def clear_online_skillcheck_state(self):
+    def _clear_active_check_fields(self):
         self.skillcheck_target = None
         self.active_kind = None
         self.active_seed = None
-        self.pending_online_move = None
         self.online_skillcheck = None
         self.online_spectate_kind = None
         self.online_was_spectator = False
         self.online_skillcheck_opened_ms = None
         self.online_verdict_action = None
+        self.online_last_hit_pop = -1
+
+    def clear_online_skillcheck_state(self):
+        self._clear_active_check_fields()
+        self.pending_online_move = None
         self._clear_whack_gun_context()
 
     def teardown_skillcheck_overlay(self):
@@ -221,29 +246,26 @@ class SkillCheckSession:
         self.release_whack_gun()
         screen.board.aim_suppressed_square = None
         screen.board.attacker_suppressed_square = None
-        self.skillcheck_target = None
+        self._clear_active_check_fields()
+
+    def _release_active_check(self, kind):
+        self._end_whack_gun(kind)
+        board = self.screen.board
+        board.aim_suppressed_square = None
+        board.attacker_suppressed_square = None
         self.active_kind = None
         self.active_seed = None
-        self.online_skillcheck = None
-        self.online_spectate_kind = None
-        self.online_was_spectator = False
-        self.online_skillcheck_opened_ms = None
-        self.online_verdict_action = None
 
     def _on_online_skillcheck_done(self, context, landed):
-        kind = context[3] if len(context) > 3 else None
+        kind = context.kind
         target = self.skillcheck_target
         seed = self.active_seed
         was_spectator = self.online_was_spectator
         self.online_was_spectator = False
         action = self.online_verdict_action
         self.online_verdict_action = None
-        self._end_whack_gun(kind)
-        self.screen.board.aim_suppressed_square = None
-        self.screen.board.attacker_suppressed_square = None
+        self._release_active_check(kind)
         self.skillcheck_target = None
-        self.active_kind = None
-        self.active_seed = None
         if action is not None:
             action()
         if kind == SkillCheckKind.WHACK and landed is False and target is not None:
@@ -282,9 +304,6 @@ class SkillCheckSession:
             return None
         return self.screen.board.piece_images_scaled.get((piece.type, piece.color))
 
-    def _occupied_squares(self):
-        return mole.occupied_squares(self.screen.match.state, self.screen.board.SIZE)
-
     def _shot_sound_for(self, capturer):
         if capturer is None:
             return None
@@ -314,16 +333,11 @@ class SkillCheckSession:
 
     def _on_skillcheck_done(self, context, landed):
         screen = self.screen
-        from_sq, to_sq = context[0], context[1]
-        promo_type = context[2] if len(context) > 2 else None
-        kind = context[3] if len(context) > 3 else None
+        from_sq, to_sq = context.from_sq, context.to_sq
+        promo_type, kind = context.promo_type, context.kind
         seed = self.active_seed
         aim_victim = screen.board.aim_suppressed_square
-        self._end_whack_gun(kind)
-        screen.board.aim_suppressed_square = None
-        screen.board.attacker_suppressed_square = None
-        self.active_kind = None
-        self.active_seed = None
+        self._release_active_check(kind)
         if landed:
             screen.board.apply_gated_move(from_sq, to_sq, promo_type)
             self.record_skillcheck(kind, True, len(screen.match.move_history))
@@ -340,8 +354,8 @@ class SkillCheckSession:
                 screen.board.clear_premoves()
             screen.board.trigger_skillcheck_fail(
                 from_sq, to_sq, on_fire=self.on_skillcheck_miss_fire)
-            if aim_victim is not None:
-                screen.board.restore_piece(aim_victim, drop=kind != SkillCheckKind.WHACK)
+            if aim_victim is not None and kind != SkillCheckKind.WHACK:
+                screen.board.restore_piece(aim_victim)
             if kind == SkillCheckKind.WHACK:
                 self._show_whack_taunt(aim_victim, seed, True)
 
@@ -364,10 +378,10 @@ class SkillCheckSession:
     def record_online_fail(self, pending, from_sq, to_sq):
         if pending is None:
             return
-        promo_type = pending[2]
+        promo_type = pending.promo_type
         promo_letter = PROMO_LETTER_BY_TYPE.get(promo_type) if promo_type else None
         self.record_skillcheck(
-            pending[3], False, len(self.screen.match.move_history) + 1,
+            pending.kind, False, len(self.screen.match.move_history) + 1,
             self.screen.match.backend.preview_san(from_sq, to_sq, promo_letter))
 
     def apply_resumed_skillcheck_log(self, wire):

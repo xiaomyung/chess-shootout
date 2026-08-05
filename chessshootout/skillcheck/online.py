@@ -14,6 +14,11 @@ SKILLCHECK_LAG_BOUND_MS = 200.0
 SKILLCHECK_TIME_CAP_MS = 60000.0
 SKILLCHECK_TIME_FRACTION = 0.10
 
+_MIN_INTER_INPUT_MS = {
+    SkillCheckKind.WHACK: MOLE_MIN_INTER_SHOT_MS,
+    SkillCheckKind.COMBO: COMBO_MIN_INTER_PRESS_MS,
+}
+
 
 def skillcheck_deadline_ms(initial_seconds):
     if not initial_seconds:
@@ -109,8 +114,4 @@ def check_expired(kind, challenge, elapsed_ms, miss_count=0, progress=0, last_hi
 
 
 def min_inter_input_ms(kind):
-    if kind == SkillCheckKind.WHACK:
-        return MOLE_MIN_INTER_SHOT_MS
-    if kind == SkillCheckKind.COMBO:
-        return COMBO_MIN_INTER_PRESS_MS
-    return 0.0
+    return _MIN_INTER_INPUT_MS.get(kind, 0.0)

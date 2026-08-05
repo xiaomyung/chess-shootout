@@ -148,7 +148,6 @@ class EffectManager:
         self.rng = rng if rng is not None else random.Random()
         self.geom = None
         self._art = None
-        self.firing_advance_only = False
         self._weapon_cache = {}
         self.particles = []
         self.holes = []
@@ -272,7 +271,7 @@ class EffectManager:
     def capture(self, *, now_ms, attacker_type, attacker_surface, victim_surface,
                 from_sq, victim_sq, to_sq, cell_size, power="med",
                 on_fire=None, on_slide=None, occupied=None, predrawn=False):
-        handed = self._take_gun_handoff(from_sq)
+        handed = self.take_gun_handoff(from_sq)
         predrawn = predrawn or handed
         gun = gunfx.PIECE_GUN.get(attacker_type, "revolver")
         weapon = self._weapon(gun, cell_size)
@@ -280,7 +279,7 @@ class EffectManager:
             if not handed:
                 self._impact(now_ms, from_sq, victim_sq, victim_surface, cell_size)
             if on_fire is not None:
-                on_fire()
+                on_fire(False)
             if on_slide is not None:
                 on_slide()
             return
@@ -297,14 +296,14 @@ class EffectManager:
 
     def miss(self, *, now_ms, attacker_type, from_sq, victim_sq, cell_size,
              power="med", on_fire=None, occupied=None, callout=True):
-        handed = self._take_gun_handoff(from_sq)
+        handed = self.take_gun_handoff(from_sq)
         gun = gunfx.PIECE_GUN.get(attacker_type, "revolver")
         weapon = self._weapon(gun, cell_size)
         if weapon is None:
             if callout:
                 self._skill_issue_callout(now_ms, cell_size)
             if on_fire is not None:
-                on_fire()
+                on_fire(False)
             return
         self.captures.append({
             "start": now_ms, "predrawn": handed,
@@ -408,7 +407,7 @@ class EffectManager:
         self._gun_handoff = g["from_sq"]
         self._whack_gun = None
 
-    def _take_gun_handoff(self, from_sq):
+    def take_gun_handoff(self, from_sq):
         handed = self._gun_handoff == from_sq
         self._gun_handoff = None
         return handed
@@ -535,7 +534,7 @@ class EffectManager:
             "born": now, "max_ms": max_ms})
 
     def _miss_point(self, muzzle, tx, ty, cell):
-        aim = math.atan2(ty - muzzle[1], tx - muzzle[0])
+        aim = self._angle_to(muzzle, (tx, ty))
         side = 1 if self.rng.random() < 0.5 else -1
         perp = aim + math.pi / 2.0
         off = cell * self._rnd(1.0, 1.6) * side
@@ -603,9 +602,7 @@ class EffectManager:
                     self._shoot(now, c)
                 c["fired"] = True
                 if c["on_fire"] is not None:
-                    self.firing_advance_only = advance_only
-                    c["on_fire"]()
-                    self.firing_advance_only = False
+                    c["on_fire"](advance_only)
                 if advance_only:
                     self._resolve_capture(now, c)
         self.captures = [c for c in self.captures
@@ -720,7 +717,7 @@ class EffectManager:
         if c["attacker"] is not None:
             window.blit(c["attacker"], c["attacker"].get_rect(center=(fx, fy)))
         weapon = c["weapon"]
-        aim = math.atan2(ty - fy, tx - fx)
+        aim = self._angle_to((fx, fy), (tx, ty))
         pivot = (fx, fy - c["cell"] * GUN_PIVOT_RISE_FRAC)
         t = now - c["start"]
         if not c.get("predrawn") and t < DRAW_MS:

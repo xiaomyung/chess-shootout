@@ -14,6 +14,7 @@ damage *grow in place* instead of reshuffling on every hit, and it is pinned
 below as set inclusion on the transparent pixels.
 """
 
+import dataclasses
 import inspect
 import math
 
@@ -23,9 +24,9 @@ import pytest
 from tests.conftest import pygame_display
 from chessshootout.frontend.skillcheck import juice
 from chessshootout.frontend.skillcheck.juice import (
-    Trauma, Hitstop, sakurai_vibrate, ease_out_back, torn_sprite, flash_sprite,
+    Trauma, Hitstop, sakurai_vibrate, torn_sprite, flash_sprite,
     TRAUMA_DECAY_PER_S, HITSTOP_CAP_MS, TORN_MAX_TIER,
-    _TORN_NOTCHES, _TORN_NOTCH_FRAC, _TORN_CRACKS, _TORN_CACHE, _torn_surface,
+    _TORN_TIERS, _TORN_CACHE, _torn_surface,
 )
 
 
@@ -115,14 +116,24 @@ def test_named_defaults_are_the_live_tuned_values():
     assert Hitstop()._cap_ms == HITSTOP_CAP_MS
 
 
-def test_torn_max_tier_covers_exactly_the_tier_tables():
-    """TORN_MAX_TIER is public (the check views clamp damage tiers against it),
-    so the per-tier tables must cover exactly tiers 1..TORN_MAX_TIER — a table
-    edit that drifts from the constant is a silent KeyError at draw time."""
-    expected = set(range(1, TORN_MAX_TIER + 1))
-    assert set(_TORN_NOTCHES) == expected
-    assert set(_TORN_NOTCH_FRAC) == expected
-    assert set(_TORN_CRACKS) == expected
+def test_torn_max_tier_covers_exactly_the_tier_tuple():
+    """TORN_MAX_TIER is public (the check views clamp damage tiers against it)
+    and derives from the tier tuple, so tier N always has an entry — the old
+    three parallel dicts could drift from the constant and KeyError at draw
+    time. The tuple entries are frozen: tier data can never be mutated at
+    runtime, only monkeypatched wholesale in tests."""
+    assert len(_TORN_TIERS) == TORN_MAX_TIER
+    assert TORN_MAX_TIER == 3, "the shipped damage model has exactly three tiers"
+    with pytest.raises(dataclasses.FrozenInstanceError):
+        _TORN_TIERS[0].notches = 99
+
+
+def test_torn_tier_tuple_matches_the_shipped_tables():
+    """The 2026-07 shipped per-tier values, byte-for-byte: a refactor of the
+    table SHAPE must not move a single number (the float-stream layout and the
+    cached torn sprites both hang off them)."""
+    assert [(t.notches, t.notch_frac, t.cracks) for t in _TORN_TIERS] == [
+        (3, 0.10, 1), (6, 0.11, 2), (9, 0.12, 3)]
 
 
 # --- Trauma -----------------------------------------------------------------
@@ -160,7 +171,12 @@ def test_trauma_partial_decay_is_linear():
 def test_trauma_offset_zero_at_zero_trauma():
     t = Trauma()
     assert t.offset(1234, 40.0) == (0.0, 0.0)
-    assert t.roll_deg(1234, 8.0) == 0.0
+
+
+def test_trauma_has_no_roll_channel():
+    # roll_deg shipped with the whack juice pass but no view ever consumed it;
+    # the offset channel (axes 0 and 1 of the smooth noise) is the whole API.
+    assert not hasattr(Trauma, "roll_deg")
 
 
 def test_trauma_offset_bounded_by_max_at_full_trauma():
@@ -173,20 +189,12 @@ def test_trauma_offset_bounded_by_max_at_full_trauma():
         assert abs(dy) <= max_px + 1e-9
 
 
-def test_trauma_roll_bounded_by_max_at_full_trauma():
-    t = Trauma()
-    t.add(1.0)
-    for now in range(0, 4000, 37):
-        assert abs(t.roll_deg(now, 9.0)) <= 9.0 + 1e-9
-
-
 def test_trauma_offset_deterministic_for_same_state_and_now():
     a = Trauma()
     a.add(0.5)
     b = Trauma()
     b.add(0.5)
     assert a.offset(999, 20.0) == b.offset(999, 20.0)
-    assert a.roll_deg(999, 5.0) == b.roll_deg(999, 5.0)
 
 
 def test_trauma_offset_moves_with_time():
@@ -263,16 +271,13 @@ def test_sakurai_envelope_decays():
     assert late < early
 
 
-# --- ease_out_back ----------------------------------------------------------
+# --- easing lives in visual/tween now ---------------------------------------
 
-def test_ease_out_back_endpoints():
-    assert ease_out_back(0.0) == pytest.approx(0.0, abs=1e-9)
-    assert ease_out_back(1.0) == pytest.approx(1.0, abs=1e-9)
-
-
-def test_ease_out_back_overshoots_above_one():
-    peak = max(ease_out_back(i / 100.0) for i in range(0, 101))
-    assert peak > 1.0
+def test_juice_owns_no_easing_duplicate():
+    # ease_out_back duplicated tween.out_back with the same overshoot; both
+    # combo call sites clamp their input to [0, 1], where the two are equal
+    # (pinned in test_tween.py). One easing home, no drift.
+    assert not hasattr(juice, "ease_out_back")
 
 
 # --- torn_sprite ------------------------------------------------------------
@@ -324,14 +329,14 @@ def test_torn_different_tiers_produce_different_pixels():
 # --- stepped amount, random placement ---------------------------------------
 
 def test_torn_tier_tables_only_ever_grow():
-    # The cumulative model rests on both tables being monotone. Tier N draws the
-    # first _TORN_NOTCHES[N] punches of one stream and re-punches the earlier
-    # ones at _TORN_NOTCH_FRAC[N]: a shrinking count would drop wounds, a
-    # shrinking radius would heal their rims, and either way tier N would stop
-    # containing tier N-1.
-    counts = [_TORN_NOTCHES[tier] for tier in _DAMAGE_TIERS]
-    fracs = [_TORN_NOTCH_FRAC[tier] for tier in _DAMAGE_TIERS]
-    cracks = [_TORN_CRACKS[tier] for tier in _DAMAGE_TIERS]
+    # The cumulative model rests on the tier tuple being monotone. Tier N draws
+    # the first tier.notches punches of one stream and re-punches the earlier
+    # ones at tier.notch_frac: a shrinking count would drop wounds, a shrinking
+    # radius would heal their rims, and either way tier N would stop containing
+    # tier N-1.
+    counts = [t.notches for t in _TORN_TIERS]
+    fracs = [t.notch_frac for t in _TORN_TIERS]
+    cracks = [t.cracks for t in _TORN_TIERS]
     assert counts == sorted(counts) and counts[0] < counts[-1]
     assert fracs == sorted(fracs)
     assert cracks == sorted(cracks) and cracks[0] < cracks[-1]
@@ -419,7 +424,8 @@ def test_torn_cracks_are_cumulative_too(monkeypatch):
     # It has to nest tier over tier as well, which only holds because the crack
     # floats start at a fixed offset in the stream instead of picking up after
     # however many punches the tier happened to draw.
-    monkeypatch.setattr(juice, "_TORN_NOTCHES", {tier: 0 for tier in _DAMAGE_TIERS})
+    monkeypatch.setattr(juice, "_TORN_TIERS",
+                        tuple(dataclasses.replace(t, notches=0) for t in _TORN_TIERS))
     monkeypatch.setattr(juice, "_TORN_CHUNK_FRAC", 0.0)
     monkeypatch.setattr(juice, "_TORN_RAGGED", 0)
     base = _piece_surface()

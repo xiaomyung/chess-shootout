@@ -45,7 +45,7 @@ from chessshootout.frontend.visual.colors import Colors
 from chessshootout.frontend.visual.backdrop import ArenaBackdrop
 from chessshootout.frontend.visual.effects import TAKEOVER_TOTAL_MS
 from chessshootout.frontend.game.result_flow import ResultFlow, score_str
-from chessshootout.frontend.game.skillcheck_session import SkillCheckSession
+from chessshootout.frontend.game.skillcheck_session import CheckContext, SkillCheckSession
 from chessshootout.frontend.game.give_time import GiveTimeHold
 from chessshootout.frontend.game.variant import MATCH_MODE_BY_VARIANT, Variant
 from chessshootout.server.protocol import (
@@ -129,6 +129,11 @@ class OnlineCheck(NamedTuple):
     to_sq: Square
     promo_type: PieceType | None
     captured_value: int
+    last_hit_pop: int = -1
+
+    def overlay_args(self):
+        return (self.kind, self.seed, self.value_diff, self.deadline_ms,
+                self.from_sq, self.to_sq, self.promo_type, self.captured_value)
 
 
 def compute_animation_ms(initial_seconds):
@@ -519,17 +524,17 @@ class GameScreen(Screen):
         self.skillcheck_session.online_verdict_action = action
         self.skillcheck_overlay.resolve_online(won)
 
-    def _apply_online_fail(self, from_sq, to_sq, aim_victim, kind=None):
+    def _apply_online_fail(self, from_sq, to_sq, aim_victim, kind):
         self.skillcheck.lock(from_sq, to_sq)
         log.info("skillcheck move locked from=%s to=%s online=True",
                  coord_from_square(from_sq), coord_from_square(to_sq))
         self._apply_spectate_fail(from_sq, to_sq, aim_victim, kind)
 
-    def _apply_spectate_fail(self, from_sq, to_sq, aim_victim, kind=None):
+    def _apply_spectate_fail(self, from_sq, to_sq, aim_victim, kind):
         self.board.trigger_skillcheck_fail(
             from_sq, to_sq, on_fire=self.skillcheck_session.on_skillcheck_miss_fire)
-        if aim_victim is not None:
-            self.board.restore_piece(aim_victim, drop=kind != SkillCheckKind.WHACK)
+        if aim_victim is not None and kind != SkillCheckKind.WHACK:
+            self.board.restore_piece(aim_victim)
 
     def on_skillcheck_required(self, payload):
         if "kind" in payload:
@@ -554,17 +559,19 @@ class GameScreen(Screen):
             to_sq=to_sq,
             promo_type=PROMO_TYPE_BY_LETTER.get(promo) if promo else None,
             captured_value=int(payload.get("captured_value", 0)),
+            last_hit_pop=int(payload.get("last_hit_pop", -1)),
         )
 
     def _open_my_skillcheck(self, payload):
         check = self._decode_check(payload)
         session = self.skillcheck_session
         session.pending_online_move = None
-        session.online_skillcheck = (
+        session.online_skillcheck = CheckContext(
             check.from_sq, check.to_sq, check.promo_type, check.kind)
         session.online_skillcheck_opened_ms = pg.time.get_ticks()
+        session.online_last_hit_pop = check.last_hit_pop
         session.open_skillcheck_overlay(
-            *check, online=True,
+            *check.overlay_args(), online=True,
             elapsed_ms=float(payload.get("elapsed_ms", 0.0)),
             miss_count=int(payload.get("miss_count", 0)))
 
@@ -573,7 +580,7 @@ class GameScreen(Screen):
         pending = self.skillcheck_session.online_skillcheck
         self.skillcheck_session.record_online_fail(pending, from_sq, to_sq)
         aim_victim = self.board.aim_suppressed_square
-        kind = pending[3] if pending is not None else None
+        kind = pending.kind if pending is not None else None
         return from_sq, to_sq, aim_victim, kind
 
     def _resolve_my_skillcheck_failure(self, payload):
@@ -591,7 +598,9 @@ class GameScreen(Screen):
             self._spectate_shot(payload)
 
     def _open_spectated_skillcheck(self, payload):
-        self.skillcheck_session.open_spectate_overlay(*self._decode_check(payload))
+        check = self._decode_check(payload)
+        self.skillcheck_session.online_last_hit_pop = check.last_hit_pop
+        self.skillcheck_session.open_spectate_overlay(*check.overlay_args())
         self.app.toast.show("Opponent is lining up a shot…")
 
     def _resolve_spectated_skillcheck_failure(self, payload):
@@ -726,6 +735,7 @@ class GameScreen(Screen):
         miss_count = int(pending.get("miss_count", 0))
         captured_value = int(pending.get("captured_value", 0))
         progress = int(pending.get("progress", 0))
+        self.skillcheck_session.online_last_hit_pop = int(pending.get("last_hit_pop", -1))
         if pending["color"] != self._chosen_side:
             self.skillcheck_session.open_spectate_overlay(
                 kind, pending["seed"], int(pending["value_diff"]),
@@ -733,7 +743,8 @@ class GameScreen(Screen):
                 elapsed_ms=elapsed_ms, miss_count=miss_count, progress=progress)
             self.app.toast.show("Opponent is lining up a shot…")
             return
-        self.skillcheck_session.online_skillcheck = (from_sq, to_sq, promo_type, kind)
+        self.skillcheck_session.online_skillcheck = CheckContext(
+            from_sq, to_sq, promo_type, kind)
         self.skillcheck_session.online_skillcheck_opened_ms = pg.time.get_ticks() - int(elapsed_ms)
         self.skillcheck_session.open_skillcheck_overlay(
             kind, pending["seed"], int(pending["value_diff"]),

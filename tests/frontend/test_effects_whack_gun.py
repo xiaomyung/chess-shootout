@@ -34,8 +34,10 @@ and the kill flair is credited there at the killing pixel), so the capture behin
 is ADVANCE-ONLY — the fire phase is skipped whole. No pellet, no muzzle flash, no
 impact/blood/hole/ragdoll, no victim sprite to draw, no recoil, and no wait: it has
 nothing to aim at and nothing to fly, so on_fire and on_slide both land on the very
-first update and the entry retires immediately. board._on_capture_fire reads
-firing_advance_only and returns before crediting a second kill or cueing a gunshot.
+first update and the entry retires immediately. Every on_fire callback receives the
+advance_only flag as its argument (no instance-flag windowing around the call), and
+board._on_capture_fire returns on it before crediting a second kill or cueing a
+gunshot.
 The FAIL path consumes the same handoff, but a miss is a real volley — it draws no
 new gun, then shoots and whiffs on schedule. Captures with no check behind them still
 draw, aim, fire and travel exactly as before.
@@ -374,7 +376,7 @@ def test_the_capture_behind_a_won_whack_never_fires_a_second_time():
     # second volley shot a corpse and the impact FX rebuilt it to shred it again.
     em = _em()
     order = []
-    entry = _armed_advance(em, on_fire=lambda: order.append("fire"),
+    entry = _armed_advance(em, on_fire=lambda advance_only: order.append("fire"),
                            on_slide=lambda: order.append("slide"))
     assert entry["advance_only"] is True
     em.update(0)
@@ -390,7 +392,7 @@ def test_the_capture_behind_a_won_whack_never_fires_a_second_time():
 def test_the_advancing_capture_waits_out_no_draw_aim_or_travel_beat():
     em = _em()
     order = []
-    entry = _armed_advance(em, now_ms=1000, on_fire=lambda: order.append("fire"),
+    entry = _armed_advance(em, now_ms=1000, on_fire=lambda advance_only: order.append("fire"),
                            on_slide=lambda: order.append("slide"))
     assert entry["fire_at"] == entry["start"] == 1000, \
         "the gun is already up and pointed — no DRAW_MS, no AIM_MS to sit through"
@@ -403,7 +405,7 @@ def test_the_advancing_capture_waits_out_no_draw_aim_or_travel_beat():
 def test_a_plain_capture_behind_no_check_still_shoots_everything():
     em = _em()
     order = []
-    entry = _capture(em, on_fire=lambda: order.append("fire"),
+    entry = _capture(em, on_fire=lambda advance_only: order.append("fire"),
                      on_slide=lambda: order.append("slide"))
     assert entry["advance_only"] is False
     em.update(0)
@@ -450,26 +452,46 @@ def test_cut_and_clear_transients_never_leave_the_gun_behind():
     assert em.has_gun_px() is False, "a new game can never inherit a held gun"
 
 
-def test_advance_only_fire_flags_the_callback_so_the_gunshot_is_muted():
+def test_advance_only_fire_passes_the_flag_to_the_callback_so_the_gunshot_is_muted():
     # The whack check already fired the real gunshots AND already credited the
     # kill at the pit it happened on, so the advancing capture is silent all the
-    # way through — board._on_capture_fire reads firing_advance_only and returns
-    # before the gunshot cue, the kill flair and the announcer line.
+    # way through — on_fire receives advance_only as its argument and
+    # board._on_capture_fire returns on it before the gunshot cue, the kill
+    # flair and the announcer line. The old instance flag (set around the call,
+    # cleared after) is gone: there is no window for an exception or reentrant
+    # fire to leak a stale True through.
     em = _em()
     fired = {}
-    _armed_advance(em, on_fire=lambda: fired.setdefault("advance", em.firing_advance_only))
+    _armed_advance(em, on_fire=lambda advance_only: fired.setdefault("advance", advance_only))
     em.update(5000)
     assert fired["advance"] is True, \
         "the callback sees the advance flag and can skip the gunshot"
-    assert em.firing_advance_only is False, "the flag never leaks past the callback"
+    assert not hasattr(em, "firing_advance_only"), \
+        "the flag travels as an argument, never as shared instance state"
 
 
 def test_a_plain_capture_fire_reports_not_advance_only():
     em = _em()
     fired = {}
-    _capture(em, on_fire=lambda: fired.setdefault("advance", em.firing_advance_only))
+    _capture(em, on_fire=lambda advance_only: fired.setdefault("advance", advance_only))
     em.update(5000)
     assert fired["advance"] is False
+
+
+def test_a_weaponless_fire_still_reports_not_advance_only(monkeypatch):
+    # The two no-art early returns never armed the old flag either — callers
+    # read the initialized False, so the argument form must pass False too.
+    em = _em()
+    monkeypatch.setattr(em, "_weapon", lambda gun, cell: None)
+    seen = []
+    surf = pg.Surface((_CELL, _CELL), pg.SRCALPHA)
+    em.capture(now_ms=0, attacker_type="queen", attacker_surface=surf, victim_surface=surf,
+               from_sq=_FROM, victim_sq=Square(4, 4), to_sq=Square(4, 4), cell_size=_CELL,
+               on_fire=lambda advance_only: seen.append(advance_only))
+    em.miss(now_ms=0, attacker_type="queen", from_sq=_FROM, victim_sq=Square(4, 4),
+            cell_size=_CELL, on_fire=lambda advance_only: seen.append(advance_only))
+    assert em.captures == [], "no weapon art, no staged choreography — both fired inline"
+    assert seen == [False, False]
 
 
 def _fire_board(calls):
@@ -489,13 +511,11 @@ def test_an_advancing_capture_cues_no_gunshot_and_credits_no_second_kill():
     board = _fire_board(calls)
     board.effects = em
     entry = SimpleNamespace(move=SimpleNamespace(captured=None))
-    em.firing_advance_only = True
-    board._on_capture_fire(entry, "white", Square(4, 4))
+    board._on_capture_fire(entry, "white", Square(4, 4), True)
     assert calls == [], "no gunshot cue and no announcer line behind a won whack"
     assert em.callouts == [] and em.particles == [], "and no second kill flair"
     assert em._streak_count == 0, "the streak was already credited at the killing pixel"
-    em.firing_advance_only = False
-    board._on_capture_fire(entry, "white", Square(4, 4))
+    board._on_capture_fire(entry, "white", Square(4, 4), False)
     assert calls == ["shot", ("announce", "first_blood")], \
         "a capture with no check behind it still cues and announces its kill"
     assert em._streak_count == 1
@@ -514,7 +534,7 @@ def test_the_failed_whacks_miss_shoots_the_gun_already_in_the_hand():
     _held(em, attacker_type="queen")
     em.hand_off_gun_px()
     fired = []
-    entry = _miss(em, on_fire=lambda: fired.append(1))
+    entry = _miss(em, on_fire=lambda advance_only: fired.append(1))
     assert entry["predrawn"] is True, "no second draw-flourish for a gun it never let go of"
     assert entry["fire_at"] == AIM_MS, "only the aim beat stands between the check and the whiff"
     assert em.drops == [], "and nothing tumbles in between"
@@ -529,7 +549,7 @@ def test_the_failed_whacks_miss_shoots_the_gun_already_in_the_hand():
 def test_a_miss_with_no_handoff_keeps_the_full_draw_and_aim_beat():
     em = _em()
     fired = []
-    entry = _miss(em, on_fire=lambda: fired.append(1))
+    entry = _miss(em, on_fire=lambda advance_only: fired.append(1))
     assert entry["predrawn"] is False, "nothing was handed over — it draws for itself"
     assert entry["fire_at"] == DRAW_MS + AIM_MS
     em.update(entry["fire_at"])

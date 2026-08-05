@@ -7,11 +7,11 @@ board.aim_suppressed_square. So on the handover frame the board had already
 skipped the suppressed victim square and the overlay -- just cancelled -- drew
 nothing either. One completely blank frame on the victim square.
 
-Every other kind hides this: _on_skillcheck_done restores the piece with
-restore_piece(drop=True), whose fade-in animation keeps the square hidden and
-starts from alpha 0 anyway. A failed WHACK is the one restore that passes
-drop=False, because its own choreography already walked the victim home and set
-it down on the rest position the board draws at -- so there the missing frame is
+Every other kind hides this: _on_skillcheck_done calls restore_piece, whose
+fade-in animation keeps the square hidden and starts from alpha 0 anyway. A
+failed WHACK is the one kind the session skips the restore for entirely (a
+call-site guard -- its own choreography already walked the victim home and set
+it down on the rest position the board draws at), so there the missing frame is
 naked, and it reads in play as the piece blinking once right after it lands.
 
 The fix keeps the retiring controller for exactly one more draw (_farewell), so

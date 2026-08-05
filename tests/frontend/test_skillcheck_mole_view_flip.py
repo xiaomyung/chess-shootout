@@ -19,6 +19,7 @@ from unittest.mock import MagicMock
 import pygame as pg
 
 from tests.conftest import pygame_display
+from tests.helpers import click_event as _click
 from chessshootout.backend.utils import BOARD_SIZE, Square
 from chessshootout.frontend.skillcheck.mole_view import (
     MoleController, MOLE_VIEW_TARGET_MAX)
@@ -64,10 +65,6 @@ def _mole(geom, **kw):
     kw.setdefault("victim_surface", _victim())
     return MoleController(ch, pg.Rect(3 * _CELL, 4 * _CELL, _CELL, _CELL), 0,
                           ch.deadline_ms, geom=geom, **kw), ch
-
-
-def _click(pos):
-    return pg.event.Event(pg.MOUSEBUTTONDOWN, {"button": 1, "pos": pos})
 
 
 def _pop0_mid(ch):
@@ -166,9 +163,10 @@ def test_spectator_mirror_puts_the_relayed_impact_screen_up_of_the_pit():
     """Online the two clients render opposite orientations, but the popped piece rises
     SCREEN-up on both. The mover aims at their own screen-up body (rows around
     hole_row + 0.5 - 0.30), so the raw row read through the spectator's opposite affine
-    lands 0.6 cells on the wrong side of the pit. The passive controller mirrors the
-    display row about the live pit's row centre, putting rings/casings/puffs back on
-    the body the spectator is actually drawing."""
+    lands 0.6 cells on the wrong side of the pit. The passive controller shifts every
+    relayed y screen-up by the DOUBLED head lift (2 x CY_FRAC x cell, a fixed
+    translation), putting rings/casings/puffs back on the body the spectator is
+    actually drawing."""
     controller, ch = _relayed(True)
     px, py = _pop0_pit_px(ch, _flipped_geom)
     _, ix, iy = controller._impacts[-1]
@@ -197,18 +195,40 @@ def test_the_mirror_moves_pixels_only_and_never_the_relayed_progress():
     assert mirrored._last_hit_pop == raw._last_hit_pop
 
 
-def test_a_whiff_with_no_live_pop_mirrors_about_the_victim_square_centre():
-    """Between pops there is no pit to anchor on and the puff is pure cosmetics, so the
-    rule is: fall back to the check's own cell centre (the victim square the overlay is
-    built on). Pinned so the fallback can't silently drift into a no-op."""
+def test_a_whiff_with_no_live_pop_keeps_its_true_spot_shifted_by_the_head_lift():
+    """The old mirror reflected every relayed y about the ACTIVE pop's hole centre
+    (else the capture square), so a whiff far from the anchor rendered at a
+    geometrically unrelated point on the other side of it. The mirror is a fixed
+    screen-up translation by the doubled head lift now, so a stray shot stays at
+    its own true spot, merely lifted like every other relayed shot."""
     controller, ch = _spectator(True)
     assert ch.pop_up_at(0.0) is None, "elapsed 0 is inside the intro, before any pop"
     target = (2.0, 3.5)
     controller.spectate_shot(0.0, 1, False, target=target)
     raw_y = controller._board_to_px(*target)[1]
     _, _, iy = controller._impacts[-1]
-    assert abs(iy - (2.0 * controller.center[1] - raw_y)) < 1e-6
+    assert abs(iy - (raw_y + 2 * _BODY_LIFT_PX)) < 1e-6
     assert abs(controller._puffs[-1][2] - iy) < 1e-6, "the puff spawns on the same point"
+
+
+def test_a_stray_miss_near_an_inactive_hole_renders_on_that_hole_not_reflected():
+    """The bug the translation fixes: a miss aimed at a NON-active hole's body used to
+    reflect about the active pop's anchor and paint rings/puffs at a different hole.
+    It must land on the risen-body spot of the hole it was actually shot at."""
+    controller, ch = _spectator(True)
+    at = _pop0_mid(ch)
+    controller.update(at)
+    holes = _holes()
+    active_hole = ch.pops[0].hole
+    other = next(i for i in range(len(holes)) if i != active_hole)
+    row, col = holes[other]
+    controller.spectate_shot(at, 0, False,
+                             target=(row + 0.5 + MOLE_HITBOX_CY_FRAC, col + 0.5))
+    px, py = _flipped_geom(Square(row, col))
+    _, ix, iy = controller._impacts[-1]
+    assert abs(ix - px) <= 1
+    assert abs(iy - (py + _BODY_LIFT_PX)) <= 1, \
+        "the miss sits screen-up of ITS OWN hole, exactly like a shot on the live pop"
 
 
 def test_edge_pit_ovals_stay_reachable_under_the_clamp_on_both_orientations():

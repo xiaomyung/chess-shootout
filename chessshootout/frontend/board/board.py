@@ -1228,7 +1228,7 @@ class Board:
         attacker = self.piece_images_scaled.get((moving_piece.type, moving_piece.color))
         victim = self.piece_images_scaled.get((captured.type, captured.color))
         if attacker is None or victim is None or self.cell_size <= 0:
-            self._on_capture_fire(entry, color, victim_sq)
+            self._on_capture_fire(entry, color, victim_sq, False)
             return False
         if clear_drag:
             self.drag.clear_drag_state()
@@ -1239,7 +1239,8 @@ class Board:
             from_sq=from_sq, victim_sq=victim_sq, to_sq=to_sq,
             cell_size=self.cell_size, power=self._capture_power(captured.type),
             occupied=self._occupied_squares(),
-            on_fire=lambda: self._on_capture_fire(entry, color, victim_sq),
+            on_fire=lambda advance_only: self._on_capture_fire(entry, color, victim_sq,
+                                                               advance_only),
             on_slide=lambda: self.start_animation(from_sq, to_sq, moving_piece,
                                                   on_complete=on_complete),
         )
@@ -1249,8 +1250,8 @@ class Board:
         return {Square(r, c) for r, c in product(range(self.SIZE), repeat=2)
                 if self.match.piece_at(Square(r, c)) is not None}
 
-    def _on_capture_fire(self, entry, color, victim_sq):
-        if self.effects.firing_advance_only:
+    def _on_capture_fire(self, entry, color, victim_sq, advance_only):
+        if advance_only:
             return
         if self.shot_callback is not None:
             self.shot_callback(entry)
@@ -1271,7 +1272,7 @@ class Board:
     def trigger_skillcheck_fail(self, from_sq, to_sq, on_fire=None):
         piece = self.match.piece_at(from_sq)
         if piece is None or self.cell_size <= 0:
-            self.effects._take_gun_handoff(from_sq)
+            self.effects.take_gun_handoff(from_sq)
             return
         now = pg.time.get_ticks()
         victim_sq = self.capture_victim_square(piece, from_sq, to_sq)
@@ -1281,7 +1282,7 @@ class Board:
             return
         victim = self.match.piece_at(victim_sq)
         power = self._capture_power(victim.type) if victim is not None else "med"
-        fire_cb = (lambda: on_fire(piece.type)) if on_fire is not None else None
+        fire_cb = (lambda advance_only: on_fire(piece.type)) if on_fire is not None else None
         self.effects.miss(
             now_ms=now,
             attacker_type=piece.type.value,
@@ -1301,9 +1302,7 @@ class Board:
         self.cancel_animations()
         self.start_animation(from_sq, to_sq, piece, bump=True)
 
-    def restore_piece(self, square, *, drop=True):
-        if not drop:
-            return
+    def restore_piece(self, square):
         piece = self.match.piece_at(square)
         if piece is None or self.cell_size <= 0:
             return

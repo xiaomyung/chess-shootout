@@ -16,6 +16,7 @@ import pytest
 from tests.conftest import pygame_display
 from chessshootout.backend.utils import Square, coord_from_square
 from chessshootout.frontend.frontend import Frontend
+from chessshootout.frontend.game.skillcheck_session import CheckContext
 from chessshootout.frontend.skillcheck.combo_view import ComboController
 from chessshootout.frontend.skillcheck.mole_view import MoleController
 from chessshootout.online.client import Event
@@ -26,7 +27,7 @@ from chessshootout.skillcheck.combo import ComboChallenge
 from chessshootout.skillcheck.mole import MoleChallenge
 from chessshootout.skillcheck.types import SkillCheckKind, SkillCheckOutcome
 from chessshootout.skillcheck.wheel import placement_square
-from tests.helpers import BLACK, K, P, Q, R, WHITE, make_backend, piece, sq
+from tests.helpers import BLACK, K, P, Q, R, WHITE, click_event, make_backend, piece, sq
 
 
 _pygame_init = pygame_display(1000, 800)
@@ -121,7 +122,7 @@ def _ep_capture_board(app):
 
 
 def _tap():
-    return pg.event.Event(pg.MOUSEBUTTONDOWN, {"button": 1, "pos": (10, 10)})
+    return click_event((10, 10))
 
 
 def _drive_verdict_hold(app):
@@ -308,12 +309,13 @@ def test_failed_aim_result_restores_the_suppressed_victim_after_the_hold():
     app.game.board.restore_piece.assert_not_called()
     _drive_verdict_hold(app)
     assert app.game.board.aim_suppressed_square is None
-    app.game.board.restore_piece.assert_called_once_with(to, drop=True)
+    app.game.board.restore_piece.assert_called_once_with(to)
 
 
 def test_failed_whack_result_restores_without_the_board_drop():
-    # The whack overlay lands the piece itself (jump-out), so the online fail
-    # restore must skip the drop animation or the piece would fall twice.
+    # The whack overlay lands the piece itself (jump-out), so the online fail must
+    # not restore it at all — restore_piece only ever queues the falling animation,
+    # and a second fall read as the piece repairing itself mid-air.
     app = _online_app()
     frm, to = _capture_board(app)
     app.game.skillcheck_session.skillcheck_gate(frm, to)
@@ -321,7 +323,9 @@ def test_failed_whack_result_restores_without_the_board_drop():
     app.game.board.restore_piece = MagicMock()
     app.coordinator._handle_skill_check_result(_result(frm, to))
     _drive_verdict_hold(app)
-    app.game.board.restore_piece.assert_called_once_with(to, drop=False)
+    app.game.board.restore_piece.assert_not_called()
+    assert app.game.match.piece_at(to) is not None, "the victim simply stays on its square"
+    assert app.game.board.aim_suppressed_square is None, "and stops being suppressed"
 
 
 def test_failed_wheel_result_does_not_restore_a_piece():
@@ -565,7 +569,7 @@ def test_a_terminal_result_tears_down_and_clears_all_online_fields():
 def test_reset_to_new_game_clears_every_online_field():
     app = _online_app()
     app.game.skillcheck_session.pending_online_move = (sq(4, 3), sq(3, 3), None)
-    app.game.skillcheck_session.online_skillcheck = (
+    app.game.skillcheck_session.online_skillcheck = CheckContext(
         sq(4, 3), sq(3, 3), None, SkillCheckKind.WHEEL)
     app.game.skillcheck_session.online_spectate_kind = SkillCheckKind.AIM
     app.game.skillcheck_session.online_skillcheck_opened_ms = 123

@@ -124,29 +124,37 @@ async def handle_move(app, websocket, room, color, raw):
     if kind == SkillCheckKind.NONE:
         return await _apply_move(app, room, color, from_sq, to_sq, msg.promotion,
                                  skill_kind=None, skill_won=None)
-    value_diff = online.value_diff_for(facts, msg.promotion)
+    return await _arm_skillcheck(app, room, color, kind, from_sq, to_sq,
+                                 msg.promotion, facts)
+
+
+async def _arm_skillcheck(app, room, color, kind, from_sq, to_sq, promotion, facts):
+    connections = app.state.connections
+    value_diff = online.value_diff_for(facts, promotion)
     seed = secrets.token_hex(16)
     start_ms = app.state.now_ms()
     deadline_ms = online.skillcheck_deadline_ms(room.time_minutes * 60)
+    holes = ()
+    if kind == SkillCheckKind.WHACK:
+        holes = mole.holes_for(seed, facts.captured_value, (to_sq.row, to_sq.col),
+                               room.backend.state, room.backend.SIZE)
     room.pending_skillcheck = PendingSkillCheck(
-        color=color, from_sq=from_sq, to_sq=to_sq, promotion=msg.promotion,
+        color=color, from_sq=from_sq, to_sq=to_sq, promotion=promotion,
         kind=kind, seed=seed, value_diff=value_diff,
         start_ms=start_ms, expires_at_ms=start_ms + deadline_ms, deadline_ms=deadline_ms,
-        captured_value=facts.captured_value,
+        captured_value=facts.captured_value, holes=holes,
     )
     log.info("skillcheck fired room=%s mover=%s kind=%s", room.room_id, color, kind.value)
-    await send(connections.get_for_color(room, color), SkillCheckRequiredMessage(
+    geometry = dict(
         kind=kind.value, seed=seed, value_diff=value_diff, deadline_ms=deadline_ms,
         captured_value=facts.captured_value,
         from_sq=coord_from_square(from_sq), to_sq=coord_from_square(to_sq),
-        promotion=msg.promotion))
+        promotion=promotion)
+    await send(connections.get_for_color(room, color),
+               SkillCheckRequiredMessage(**geometry))
     opp_ws = connections.get_for_color(room, room.opp_color(color))
     if opp_ws is not None:
-        await send(opp_ws, SkillCheckSpectateMessage(
-            kind=kind.value, seed=seed, value_diff=value_diff, deadline_ms=deadline_ms,
-            captured_value=facts.captured_value,
-            from_sq=coord_from_square(from_sq), to_sq=coord_from_square(to_sq),
-            promotion=msg.promotion))
+        await send(opp_ws, SkillCheckSpectateMessage(**geometry))
     return f"skillcheck:{kind.value}"
 
 
@@ -199,20 +207,15 @@ def _shot_payload_ok(pending, msg):
     return True
 
 
-def _adjudicate_shot(pending, msg, elapsed, backend):
+def _adjudicate_shot(pending, msg, elapsed):
     is_whack = pending.kind == SkillCheckKind.WHACK
     challenge = pending.challenge
-    holes = None
-    if is_whack:
-        holes = mole.hole_squares(
-            pending.seed, pending.captured_value,
-            (pending.to_sq.row, pending.to_sq.col),
-            mole.occupied_squares(backend.state, backend.SIZE), backend.SIZE)
     hit = online.shot_wins(pending.kind, challenge, elapsed, pending.miss_count,
                            pending.deadline_ms, progress=pending.progress,
                            direction=msg.direction,
                            target=(msg.target_row, msg.target_col) if is_whack else None,
-                           hole_squares=holes, last_hit_pop=pending.last_hit_pop,
+                           hole_squares=pending.holes if is_whack else None,
+                           last_hit_pop=pending.last_hit_pop,
                            flipped=pending.color == "black")
     won = hit and pending.progress + 1 >= online.hits_required(pending.kind, challenge)
     return challenge, hit, won
@@ -237,7 +240,7 @@ async def handle_skill_check_shot(app, websocket, room, color, raw):
     gap = online.min_inter_input_ms(pending.kind)
     if gap > 0 and pending.last_input_ms >= 0 and raw_elapsed - pending.last_input_ms < gap:
         return "noop"
-    challenge, hit, won = _adjudicate_shot(pending, msg, elapsed, room.backend)
+    challenge, hit, won = _adjudicate_shot(pending, msg, elapsed)
     progress_after = pending.progress + (1 if hit else 0)
     log.debug("skillcheck shot room=%s kind=%s raw_ms=%.1f client=%.1f effective=%d "
               "miss=%d subfloor=%s", room.room_id, pending.kind.value,

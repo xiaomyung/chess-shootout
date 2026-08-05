@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 
+from chessshootout.backend.pieces import PIECE_VALUES, PieceType
 from chessshootout.backend.utils import BOARD_SIZE
 from chessshootout.skillcheck.rng import seeded_floats
 from chessshootout.skillcheck.wheel import SKILLCHECK_DEADLINE_MS
@@ -7,7 +8,7 @@ from chessshootout.skillcheck.wheel import SKILLCHECK_DEADLINE_MS
 MOLE_POPS_TOTAL = 5
 MOLE_HITS_REQUIRED = 3
 MOLE_HITS_MINOR_VALUE = 3
-MOLE_HITS_QUEEN_VALUE = 9
+MOLE_HITS_QUEEN_VALUE = PIECE_VALUES[PieceType.QUEEN]
 MOLE_POPS_COMPRESSED = 3
 MOLE_HITS_COMPRESSED = 2
 MOLE_COMPRESS_DEADLINE_MS = 3500.0
@@ -38,7 +39,7 @@ MOLE_TAUNTS = ("missed me", "lol", "nice aim", "rip", "too slow",
 
 
 def pick_taunt(seed):
-    roll = seeded_floats("moletaunt:{}".format(seed), 1)[0]
+    roll = seeded_floats(f"moletaunt:{seed}", 1)[0]
     return MOLE_TAUNTS[int(roll * len(MOLE_TAUNTS)) % len(MOLE_TAUNTS)]
 
 
@@ -118,6 +119,20 @@ def _scaled_times(scale, gaps, ups):
     )
 
 
+def _refit_times(count, gaps, ups, deadline_ms, required):
+    components = ([(MOLE_INTRO_MS, MOLE_INTRO_FLOOR_MS)]
+                  + [(MOLE_PRECUE_MS, MOLE_PRECUE_FLOOR_MS)] * count
+                  + [(up_ms, MOLE_POP_UP_FLOOR_MS) for up_ms in ups]
+                  + [(gap, MOLE_GAP_FLOOR_MS) for gap in gaps[:count - 1]])
+    scale = _fit_scale(deadline_ms - MOLE_GRACE_MS, components)
+    times = _scaled_times(scale, gaps, ups)
+    inside = sum(1 for _, _, down in times
+                 if down + MOLE_GRACE_MS <= deadline_ms + MOLE_FIT_EPSILON_MS)
+    if inside < required:
+        required = max(1, inside)
+    return times, required
+
+
 @dataclass(frozen=True)
 class MolePop:
     hole: int
@@ -147,16 +162,7 @@ class MoleChallenge:
         ups = _up_times(count, value_diff)
         times = _build(MOLE_INTRO_MS, MOLE_PRECUE_MS, gaps, ups, MOLE_FIRST_POP_MIN_MS)
         if times[-1][2] + MOLE_GRACE_MS > deadline_ms:
-            components = ([(MOLE_INTRO_MS, MOLE_INTRO_FLOOR_MS)]
-                          + [(MOLE_PRECUE_MS, MOLE_PRECUE_FLOOR_MS)] * count
-                          + [(up_ms, MOLE_POP_UP_FLOOR_MS) for up_ms in ups]
-                          + [(gap, MOLE_GAP_FLOOR_MS) for gap in gaps[:count - 1]])
-            scale = _fit_scale(deadline_ms - MOLE_GRACE_MS, components)
-            times = _scaled_times(scale, gaps, ups)
-            inside = sum(1 for _, _, down in times
-                         if down + MOLE_GRACE_MS <= deadline_ms + MOLE_FIT_EPSILON_MS)
-            if inside < required:
-                required = max(1, inside)
+            times, required = _refit_times(count, gaps, ups, deadline_ms, required)
         pops = tuple(MolePop(hole, telegraph, up, down)
                      for hole, (telegraph, up, down) in zip(holes, times))
         return cls(pops=pops, hole_count=hole_count, hits_required=required,
@@ -184,14 +190,9 @@ class MoleChallenge:
                 + ((row_f - ccy) / MOLE_HITBOX_RY_FRAC) ** 2) <= 1.0
 
     def remaining_hittable(self, elapsed_ms, last_hit_pop=-1):
-        count = 0
-        for index, pop in enumerate(self.pops):
-            if pop.t_down_ms + MOLE_GRACE_MS <= elapsed_ms:
-                continue
-            if index == last_hit_pop and pop.t_up_ms <= elapsed_ms:
-                continue
-            count += 1
-        return count
+        return sum(1 for index, pop in enumerate(self.pops)
+                   if pop.t_down_ms + MOLE_GRACE_MS > elapsed_ms
+                   and not (index == last_hit_pop and pop.t_up_ms <= elapsed_ms))
 
     def quota_unreachable(self, elapsed_ms, hits, last_hit_pop=-1):
         return hits + self.remaining_hittable(elapsed_ms, last_hit_pop) < self.hits_required
@@ -243,3 +244,8 @@ def hole_squares(seed, captured_value, capture_sq, occupied, board_size=BOARD_SI
     for tie_value in floats[1:total]:
         picked.append(candidates.pop(_farthest_index(candidates, picked, tie_value)))
     return tuple(picked)
+
+
+def holes_for(seed, captured_value, capture_sq, state, board_size=BOARD_SIZE):
+    return hole_squares(seed, captured_value, capture_sq,
+                        occupied_squares(state, board_size), board_size)

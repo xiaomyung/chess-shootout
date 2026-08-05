@@ -5,6 +5,7 @@ import pygame as pg
 import pytest
 
 from tests.conftest import pygame_display
+from tests.helpers import click_event as _click
 from chessshootout.backend.utils import Square
 from chessshootout.frontend.skillcheck.aim_view import AimController
 from chessshootout.frontend.skillcheck.combo_view import (
@@ -41,10 +42,6 @@ def _key(direction):
 
 def _wasd(direction):
     return pg.event.Event(pg.KEYDOWN, {"key": _WASD_KEYS[direction], "mod": 0})
-
-
-def _click(pos):
-    return pg.event.Event(pg.MOUSEBUTTONDOWN, {"button": 1, "pos": pos})
 
 
 def _combo(prompts=_PROMPTS, **kw):
@@ -531,6 +528,34 @@ def test_spectate_wrong_shows_the_struck_pip_immediately():
     ctrl.spectate_shot(150, 0, False, progress=0)
     assert ctrl._wrong_count == 1, \
         "the server relays the pre-increment miss_count; the mirror shows one struck pip"
+
+
+def test_a_stale_wrong_relay_after_resume_never_reapplies_or_regresses():
+    # A /resume snapshot can already carry a wrong press whose WS relay is still
+    # in flight; the relay arrives with the pre-increment miss_count of a press
+    # the rebuilt controller already counted. Re-taking the wrong branch flashed
+    # a phantom miss and could over-count past server truth — the mirror only
+    # applies a relay that says MORE wrongs than it knows about, and it never
+    # walks the count backwards.
+    ctrl = _combo(passive=True, audio=MagicMock(), miss_count=2, progress=1)
+    ctrl.update(400)
+    ctrl.spectate_shot(350, 1, False, progress=1)
+    assert ctrl._wrong_count == 2, "the snapshot count stands; the stale relay adds nothing"
+    assert ctrl._wrong_flash is None, "and no phantom wrong-flash plays"
+    assert ctrl._closed is False
+    ctrl.spectate_shot(500, 2, False, progress=1)
+    assert ctrl._wrong_count == 3, "a genuinely new wrong press still lands on the mirror"
+    assert ctrl._wrong_flash is not None
+
+
+def test_a_stale_relay_at_max_wrongs_never_spuriously_closes_the_mirror():
+    ctrl = _combo(passive=True, audio=MagicMock(), miss_count=COMBO_MAX_WRONGS - 1,
+                  progress=0)
+    ctrl.update(400)
+    ctrl.spectate_shot(350, COMBO_MAX_WRONGS - 2, False, progress=0)
+    assert ctrl._wrong_count == COMBO_MAX_WRONGS - 1
+    assert ctrl._closed is False, \
+        "a replayed old wrong must not push the mirror over the exhaustion edge"
 
 
 def test_combo_hit_plays_the_pitch_ladder_index():

@@ -1,9 +1,9 @@
+import dataclasses
 import math
 
 import pygame as pg
 
 from chessshootout.frontend.visual.cache import new_size_cache, memoized_surface
-from chessshootout.frontend.visual.tween import OUT_BACK_OVERSHOOT
 from chessshootout.skillcheck.rng import seeded_floats
 
 
@@ -18,11 +18,17 @@ _SAKURAI_OMEGA = 2.0 * math.pi * 55.0
 _TORN_CACHE = new_size_cache()
 _FLASH_CACHE = new_size_cache()
 
-TORN_MAX_TIER = 3
 
-_TORN_NOTCHES = {1: 3, 2: 6, 3: 9}
-_TORN_NOTCH_FRAC = {1: 0.10, 2: 0.11, 3: 0.12}
-_TORN_CRACKS = {1: 1, 2: 2, 3: 3}
+@dataclasses.dataclass(frozen=True)
+class _TornTier:
+    notches: int
+    notch_frac: float
+    cracks: int
+
+
+_TORN_TIERS = (_TornTier(3, 0.10, 1), _TornTier(6, 0.11, 2), _TornTier(9, 0.12, 3))
+TORN_MAX_TIER = len(_TORN_TIERS)
+
 _TORN_CHUNK_FRAC = 0.34
 _TORN_RAGGED = 5
 _CRACK_RGBA = (18, 14, 12, 235)
@@ -36,8 +42,8 @@ _TORN_PUNCH_FLOATS = 3
 _TORN_CRACK_FLOATS = 4
 _TORN_CHUNK_FLOATS = 1
 _TORN_RAGGED_FLOATS = 2
-_TORN_CRACK_BASE = _TORN_PUNCH_FLOATS * max(_TORN_NOTCHES.values())
-_TORN_EXTRA_BASE = _TORN_CRACK_BASE + _TORN_CRACK_FLOATS * max(_TORN_CRACKS.values())
+_TORN_CRACK_BASE = _TORN_PUNCH_FLOATS * max(t.notches for t in _TORN_TIERS)
+_TORN_EXTRA_BASE = _TORN_CRACK_BASE + _TORN_CRACK_FLOATS * max(t.cracks for t in _TORN_TIERS)
 _TORN_FLOATS = _TORN_EXTRA_BASE + _TORN_CHUNK_FLOATS + _TORN_RAGGED_FLOATS * _TORN_RAGGED
 
 
@@ -76,12 +82,6 @@ class Trauma:
         span = shake * max_offset_px
         return (span * _smooth_noise(now_ms, 0), span * _smooth_noise(now_ms, 1))
 
-    def roll_deg(self, now_ms, max_deg):
-        shake = self._value * self._value
-        if shake <= 0.0:
-            return 0.0
-        return shake * max_deg * _smooth_noise(now_ms, 2)
-
     @property
     def value(self):
         return self._value
@@ -114,12 +114,6 @@ def sakurai_vibrate(now_ms, start_ms, duration_ms, amp_px):
     return amp_px * envelope * math.sin(t / 1000.0 * _SAKURAI_OMEGA)
 
 
-def ease_out_back(t, overshoot=OUT_BACK_OVERSHOOT):
-    c3 = overshoot + 1.0
-    u = t - 1.0
-    return 1.0 + c3 * u * u * u + overshoot * u * u
-
-
 def _punch(mask, cx, cy, radius):
     if radius < 1.0:
         return
@@ -148,9 +142,10 @@ def _torn_surface(base, key, tier):
     span = min(bbox.width, bbox.height)
     mask = pg.Surface(surf.get_size(), pg.SRCALPHA)
     mask.fill((255, 255, 255, 255))
-    radius_base = span * _TORN_NOTCH_FRAC[tier]
+    tier_spec = _TORN_TIERS[tier - 1]
+    radius_base = span * tier_spec.notch_frac
     idx = 0
-    for _ in range(_TORN_NOTCHES[tier]):
+    for _ in range(tier_spec.notches):
         _punch(mask, bbox.left + bbox.width * floats[idx],
                bbox.top + bbox.height * floats[idx + 1],
                radius_base * (_TORN_RADIUS_BASE + _TORN_RADIUS_JITTER * floats[idx + 2]))
@@ -168,7 +163,7 @@ def _torn_surface(base, key, tier):
                    span * _TORN_RAGGED_RADIUS_FRAC)
             idx += _TORN_RAGGED_FLOATS
     veins = pg.Surface(surf.get_size(), pg.SRCALPHA)
-    _draw_cracks(veins, bbox, floats, _TORN_CRACK_BASE, _TORN_CRACKS[tier],
+    _draw_cracks(veins, bbox, floats, _TORN_CRACK_BASE, tier_spec.cracks,
                  max(int(span * _TORN_CRACK_WIDTH_FRAC), 1))
     veins.blit(surf, (0, 0), special_flags=pg.BLEND_RGBA_MIN)
     surf.blit(veins, (0, 0))

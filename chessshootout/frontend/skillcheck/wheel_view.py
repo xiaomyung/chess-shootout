@@ -2,8 +2,7 @@ import math
 
 import pygame as pg
 
-from chessshootout.frontend.skillcheck.controller import (
-    SkillCheckController, SKILLCHECK_RESULT_HOLD_MS, EdgeTrigger)
+from chessshootout.frontend.skillcheck.controller import SkillCheckController, EdgeTrigger
 from chessshootout.frontend.visual.cache import new_cache, memoized_surface
 from chessshootout.frontend.visual.colors import Colors
 from chessshootout.frontend.visual.draw import rounded_rect_surface, supersample
@@ -80,19 +79,10 @@ class WheelController(SkillCheckController):
 
     def __init__(self, challenge, cell_rect, now_ms, deadline_ms=WHEEL_DEFAULT_DEADLINE_MS,
                  on_shot=None, passive=False, audio=None):
-        self.challenge = challenge
+        self._init_common(challenge, now_ms, deadline_ms, on_shot=on_shot, passive=passive,
+                          audio=audio)
         self._apply_geometry(cell_rect)
-        self.start_ms = now_ms
-        self._now = now_ms
-        self.deadline_ms = deadline_ms
-        self._committed_at = None
-        self._resolved_at = None
-        self._landed = None
-        self._on_shot = on_shot
-        self._passive = passive
-        self._online = on_shot is not None or passive
         self._frozen_override = None
-        self._audio = audio
         self._tick_edge = EdgeTrigger()
         self._cue("play_skillcheck_appear")
 
@@ -163,11 +153,7 @@ class WheelController(SkillCheckController):
 
     @property
     def done(self):
-        if self._online:
-            return (self._resolved_at is not None
-                    and self._now - self._resolved_at >= SKILLCHECK_RESULT_HOLD_MS)
-        return (self._committed_at is not None
-                and self._now - self._committed_at >= WHEEL_RESULT_HOLD_MS)
+        return self._done_after(WHEEL_RESULT_HOLD_MS)
 
     @property
     def landed(self):
@@ -184,8 +170,7 @@ class WheelController(SkillCheckController):
     def _frozen_elapsed(self):
         if self._frozen_override is not None:
             return self._frozen_override
-        frozen = self._committed_at if self._committed_at is not None else self._now
-        return frozen - self.start_ms
+        return super()._frozen_elapsed()
 
     def draw(self, window):
         cx, cy = self.center

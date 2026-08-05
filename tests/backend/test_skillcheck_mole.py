@@ -31,6 +31,7 @@ from pathlib import Path
 import pytest
 
 import chessshootout
+from chessshootout.backend.pieces import PIECE_VALUES, PieceType
 from chessshootout.skillcheck import mole, wheel
 from chessshootout.skillcheck.mole import MoleChallenge
 
@@ -599,3 +600,27 @@ def test_deadline_is_single_sourced_from_wheel():
     assert mole.SKILLCHECK_DEADLINE_MS is wheel.SKILLCHECK_DEADLINE_MS
     assert "5000" not in Path(mole.__file__).read_text(encoding="utf-8"), \
         "mole.py must import the deadline, never restate the literal"
+
+
+def test_queen_value_is_single_sourced_from_the_piece_table():
+    # the quota ladder steps at the queen's value; restating 9 here would silently
+    # desync the ladder from the engine if a piece were ever revalued.
+    assert mole.MOLE_HITS_QUEEN_VALUE == PIECE_VALUES[PieceType.QUEEN]
+    assert mole._required_hits(PIECE_VALUES[PieceType.QUEEN]) == mole.MOLE_POPS_TOTAL, \
+        "a queen capture still demands every pop"
+
+
+def test_holes_for_composes_the_occupancy_scan_and_the_layout_walk():
+    # the wrapper is the single spelling of "derive this check's pits from a board
+    # state"; server and client must not each re-compose the two primitives.
+    state = [[None] * 8 for _ in range(8)]
+    state[3][3] = "wQ"
+    state[4][4] = "bp"
+    composed = mole.hole_squares("wrap", 5, CAPTURE_SQ,
+                                 mole.occupied_squares(state, 8), 8)
+    assert mole.holes_for("wrap", 5, CAPTURE_SQ, state, 8) == composed
+    assert composed, "the layout is non-empty on a nearly empty board"
+    assert (3, 3) not in composed and (4, 4) not in composed, \
+        "the occupied squares the wrapper scanned are genuinely excluded"
+    assert mole.holes_for("wrap", 5, CAPTURE_SQ, state) == composed, \
+        "board_size defaults to the engine's BOARD_SIZE"

@@ -24,6 +24,7 @@ from chessshootout.server.handlers import (
     handle_takeback_response,
 )
 from chessshootout.server.protocol import PROTOCOL_VERSION, Reason
+from chessshootout.server.rooms import PendingSkillCheck
 from chessshootout.skillcheck import mole, online
 from chessshootout.skillcheck.combo import COMBO_DIRECTIONS, COMBO_MAX_WRONGS
 from chessshootout.skillcheck.triggers import compute_facts
@@ -79,12 +80,16 @@ def _seed_for(backend, frm, to, want_kind, locks=None):
     raise AssertionError("no secret for {}".format(want_kind))
 
 
-async def _capture_room(app, clock, kind):
+async def _capture_room(app, clock, kind, *, backend=None,
+                        frm=Square(4, 3), to=Square(3, 3)):
+    """The one paired-room factory every capture scenario builds on: a board with
+    a legal capture, a secret brute-forced to select `kind` for that move, and a
+    recording socket per side. `backend`/`frm`/`to` swap in the promotion and
+    black-mover boards without re-typing the wiring."""
     room = await _pair(app)
-    room.backend = _qxp_backend()
+    room.backend = _qxp_backend() if backend is None else backend
     room.first_move_at = clock()
     room.started_at = clock()
-    frm, to = Square(4, 3), Square(3, 3)
     room.skillcheck_secret = _seed_for(room.backend, frm, to, kind)
     ws_w, ws_b = RecordingWS(), RecordingWS()
     app.state.connections.add(room.room_id, room.white.client_uuid, ws_w)
@@ -103,16 +108,8 @@ def _promo_capture_backend():
 
 
 async def _promo_capture_room(app, clock, kind):
-    room = await _pair(app)
-    room.backend = _promo_capture_backend()
-    room.first_move_at = clock()
-    room.started_at = clock()
-    frm, to = Square(1, 0), Square(0, 1)
-    room.skillcheck_secret = _seed_for(room.backend, frm, to, kind)
-    ws_w, ws_b = RecordingWS(), RecordingWS()
-    app.state.connections.add(room.room_id, room.white.client_uuid, ws_w)
-    app.state.connections.add(room.room_id, room.black.client_uuid, ws_b)
-    return room, ws_w, ws_b, frm, to
+    return await _capture_room(app, clock, kind, backend=_promo_capture_backend(),
+                               frm=Square(1, 0), to=Square(0, 1))
 
 
 def _move_raw(frm, to, promotion=None):
@@ -147,12 +144,24 @@ def _wheel_loss_elapsed(pending):
     raise AssertionError("no losing wheel elapsed for the stored seed")
 
 
-async def _shoot_at(app, clock, room, color, elapsed_ms):
-    start = room.pending_skillcheck.start_ms
-    clock.set((start + elapsed_ms) / 1000.0)
+def _shot_raw(elapsed, direction=None, target=None):
+    payload = {"type": "skill_check_shot", "client_elapsed_ms": elapsed}
+    if direction is not None:
+        payload["direction"] = direction
+    if target is not None:
+        payload["target_row"], payload["target_col"] = target
+    return json.dumps(payload)
+
+
+async def _fire(app, clock, room, color, elapsed, direction=None, target=None):
+    """The single shot driver for all four kinds: parks the fake clock at the
+    check-relative elapsed and posts the raw frame through the real handler.
+    Omitted direction/target are omitted from the JSON, so a wheel/aim shot is
+    byte-identical to the payload a wheel client actually sends."""
+    clock.set((room.pending_skillcheck.start_ms + elapsed) / 1000.0)
     ws = app.state.connections.get_for_color(room, color)
-    raw = json.dumps({"type": "skill_check_shot", "client_elapsed_ms": elapsed_ms})
-    return await handle_skill_check_shot(app, ws, room, color, raw)
+    return await handle_skill_check_shot(app, ws, room, color,
+                                         _shot_raw(elapsed, direction, target))
 
 
 @pytest.mark.asyncio
@@ -199,18 +208,23 @@ async def test_placement_and_square_keys_never_leak_into_skillcheck_payloads(app
     # board placement is render-only and server-authoritative geometry; no
     # 'placement'/'square' key may appear in the required, spectate, or resume
     # payloads, so it can never feed adjudication or leak the relocated dial
-    # position. For whack the hole layout is derived server-side per shot and
-    # must never ride any wire either, nor may the server-only adjudication
-    # fields (last_hit_pop/last_input_ms) on the stored pending.
+    # position. For whack the hole layout is derived server-side and must never
+    # ride any wire either, nor may last_input_ms — the anti-mash gate is paced
+    # on the server wall clock and knowing it would let a client time its bursts.
+    # last_hit_pop is the deliberate exception: it is mover knowledge and rides
+    # ONLY the resume wire (asserted below), never the live required/spectate pair.
     room, ws_w, ws_b, frm, to = await _capture_room(app, clock, kind)
     await handle_move(app, ws_w, room, "white", _move_raw(frm, to))
-    payloads = ws_w.of_type("skill_check_required") + ws_b.of_type("skill_check_spectate")
-    assert payloads, "the check fired and emitted payloads"
-    payloads = payloads + [_resume_payload(app, room, "white").model_dump(by_alias=True)]
-    for p in payloads:
+    live = ws_w.of_type("skill_check_required") + ws_b.of_type("skill_check_spectate")
+    assert live, "the check fired and emitted payloads"
+    resume = _resume_payload(app, room, "white").model_dump(by_alias=True)
+    for p in live + [resume]:
         for key in ("placement", "square", "hole", "holes", "hole_squares",
-                    "last_hit_pop", "last_input_ms"):
+                    "last_input_ms", "plies_ever"):
             assert key not in p, f"'{key}' must never appear on a skillcheck wire payload"
+    for p in live:
+        assert "last_hit_pop" not in p, "the live challenge pair never carries mover progress"
+    assert resume["last_hit_pop"] == -1, "resume echoes it; nothing has been hit yet"
 
 
 @pytest.mark.asyncio
@@ -233,7 +247,7 @@ async def test_shot_relays_the_winning_position_to_the_opponent(app, clock):
     room, ws_w, ws_b, frm, to = await _capture_room(app, clock, WHEEL)
     await handle_move(app, ws_w, room, "white", _move_raw(frm, to))
     elapsed = _win_elapsed(room.pending_skillcheck)
-    await _shoot_at(app, clock, room, "white", elapsed)
+    await _fire(app, clock, room, "white", elapsed)
     relay = ws_b.of_type("skill_check_spectate_shot")
     assert relay and relay[0]["won"] is True
     assert relay[0]["miss_count"] == 0, "the pre-shot count the mover fired at"
@@ -244,7 +258,7 @@ async def test_shot_relays_the_winning_position_to_the_opponent(app, clock):
 async def test_shot_relays_an_aim_miss_to_the_opponent(app, clock):
     room, ws_w, ws_b, frm, to = await _capture_room(app, clock, AIM)
     await handle_move(app, ws_w, room, "white", _move_raw(frm, to))
-    out = await _shoot_at(app, clock, room, "white", _aim_miss_elapsed(room.pending_skillcheck))
+    out = await _fire(app, clock, room, "white", _aim_miss_elapsed(room.pending_skillcheck))
     assert out == "skillcheck_miss"
     relay = ws_b.of_type("skill_check_spectate_shot")
     assert relay and relay[0]["won"] is False
@@ -256,7 +270,7 @@ async def test_shot_relays_an_aim_miss_to_the_opponent(app, clock):
 async def test_shot_relays_a_wheel_fail_to_the_opponent(app, clock):
     room, ws_w, ws_b, frm, to = await _capture_room(app, clock, WHEEL)
     await handle_move(app, ws_w, room, "white", _move_raw(frm, to))
-    out = await _shoot_at(app, clock, room, "white", _wheel_loss_elapsed(room.pending_skillcheck))
+    out = await _fire(app, clock, room, "white", _wheel_loss_elapsed(room.pending_skillcheck))
     assert out == "skillcheck_fail"
     relay = ws_b.of_type("skill_check_spectate_shot")
     assert relay and relay[0]["won"] is False
@@ -267,7 +281,7 @@ async def test_shot_relay_is_skipped_when_the_opponent_is_gone(app, clock):
     room, ws_w, ws_b, frm, to = await _capture_room(app, clock, WHEEL)
     await handle_move(app, ws_w, room, "white", _move_raw(frm, to))
     app.state.connections.remove(room.room_id, room.black.client_uuid, ws_b)
-    out = await _shoot_at(app, clock, room, "white", _win_elapsed(room.pending_skillcheck))
+    out = await _fire(app, clock, room, "white", _win_elapsed(room.pending_skillcheck))
     assert out.startswith("applied"), "the win still resolves with no opponent to relay to"
     assert not ws_b.of_type("skill_check_spectate_shot")
 
@@ -281,7 +295,7 @@ async def test_aim_miss_relay_is_skipped_when_the_opponent_is_gone(app, clock):
     await handle_move(app, ws_w, room, "white", _move_raw(frm, to))
     app.state.connections.remove(room.room_id, room.black.client_uuid, ws_b)
     ws_b.sent.clear()
-    out = await _shoot_at(app, clock, room, "white", _aim_miss_elapsed(room.pending_skillcheck))
+    out = await _fire(app, clock, room, "white", _aim_miss_elapsed(room.pending_skillcheck))
     assert out == "skillcheck_miss", "the miss resolves with no opponent to relay to"
     assert room.pending_skillcheck is not None, "an aim miss keeps the check pending"
     assert room.pending_skillcheck.miss_count == 1, "the server still escalates after a lone miss"
@@ -304,7 +318,7 @@ async def test_move_while_pending_is_rejected_without_mutation(app, clock):
 async def test_winning_shot_applies_the_move_and_clears_pending(app, clock):
     room, ws_w, ws_b, frm, to = await _capture_room(app, clock, WHEEL)
     await handle_move(app, ws_w, room, "white", _move_raw(frm, to))
-    out = await _shoot_at(app, clock, room, "white", _win_elapsed(room.pending_skillcheck))
+    out = await _fire(app, clock, room, "white", _win_elapsed(room.pending_skillcheck))
     assert out == "applied"
     assert room.pending_skillcheck is None
     assert len(room.backend.move_history) == 1
@@ -316,7 +330,7 @@ async def test_winning_shot_applies_the_move_and_clears_pending(app, clock):
 async def test_failing_shot_locks_the_move_clears_pending_broadcasts_result(app, clock):
     room, ws_w, ws_b, frm, to = await _capture_room(app, clock, WHEEL)
     await handle_move(app, ws_w, room, "white", _move_raw(frm, to))
-    out = await _shoot_at(app, clock, room, "white", 50)  # below the human floor -> fail
+    out = await _fire(app, clock, room, "white", 50)  # below the human floor -> fail
     assert out == "skillcheck_fail"
     assert room.pending_skillcheck is None
     assert (frm, to) in room.skillcheck_locks
@@ -332,7 +346,7 @@ async def test_wheel_is_one_shot_a_non_winning_shot_fails(app, clock):
     ch = online.challenge_from(WHEEL, room.pending_skillcheck.seed,
                                room.pending_skillcheck.value_diff)
     miss = next(e for e in range(120, 800) if not online.shot_wins(WHEEL, ch, e))
-    out = await _shoot_at(app, clock, room, "white", miss)
+    out = await _fire(app, clock, room, "white", miss)
     assert out == "skillcheck_fail", "a wheel never stays pending after its single shot"
 
 
@@ -340,7 +354,7 @@ async def test_wheel_is_one_shot_a_non_winning_shot_fails(app, clock):
 async def test_late_shot_past_deadline_fails_even_if_geometry_would_win(app, clock):
     room, ws_w, ws_b, frm, to = await _capture_room(app, clock, WHEEL)
     await handle_move(app, ws_w, room, "white", _move_raw(frm, to))
-    out = await _shoot_at(app, clock, room, "white", int(online.SKILLCHECK_DEADLINE_MS) + 200)
+    out = await _fire(app, clock, room, "white", int(online.SKILLCHECK_DEADLINE_MS) + 200)
     assert out == "skillcheck_fail"
     assert (frm, to) in room.skillcheck_locks
 
@@ -349,7 +363,7 @@ async def test_late_shot_past_deadline_fails_even_if_geometry_would_win(app, clo
 async def test_aim_miss_keeps_pending_and_increments_server_miss_count(app, clock):
     room, ws_w, ws_b, frm, to = await _capture_room(app, clock, AIM)
     await handle_move(app, ws_w, room, "white", _move_raw(frm, to))
-    out = await _shoot_at(app, clock, room, "white", _aim_miss_elapsed(room.pending_skillcheck))
+    out = await _fire(app, clock, room, "white", _aim_miss_elapsed(room.pending_skillcheck))
     assert out == "skillcheck_miss"
     assert room.pending_skillcheck is not None
     assert room.pending_skillcheck.miss_count == 1
@@ -360,8 +374,8 @@ async def test_aim_miss_keeps_pending_and_increments_server_miss_count(app, cloc
 async def test_aim_hit_after_a_miss_applies_the_move(app, clock):
     room, ws_w, ws_b, frm, to = await _capture_room(app, clock, AIM)
     await handle_move(app, ws_w, room, "white", _move_raw(frm, to))
-    await _shoot_at(app, clock, room, "white", _aim_miss_elapsed(room.pending_skillcheck))
-    out = await _shoot_at(app, clock, room, "white", _win_elapsed(room.pending_skillcheck))
+    await _fire(app, clock, room, "white", _aim_miss_elapsed(room.pending_skillcheck))
+    out = await _fire(app, clock, room, "white", _win_elapsed(room.pending_skillcheck))
     assert out == "applied"
     assert len(room.backend.move_history) == 1
 
@@ -387,7 +401,7 @@ async def test_opponent_shot_is_ignored_not_a_fail(app, clock):
 async def test_pending_is_a_one_shot_latch(app, clock):
     room, ws_w, ws_b, frm, to = await _capture_room(app, clock, WHEEL)
     await handle_move(app, ws_w, room, "white", _move_raw(frm, to))
-    await _shoot_at(app, clock, room, "white", _win_elapsed(room.pending_skillcheck))
+    await _fire(app, clock, room, "white", _win_elapsed(room.pending_skillcheck))
     out = await handle_skill_check_shot(app, ws_w, room, "white", '{"type":"skill_check_shot"}')
     assert out == "noop", "a second shot after resolution finds pending cleared"
     assert len(room.backend.move_history) == 1, "the move applied exactly once"
@@ -397,7 +411,7 @@ async def test_pending_is_a_one_shot_latch(app, clock):
 async def test_locked_move_is_rejected_outright_not_rerolled(app, clock):
     room, ws_w, ws_b, frm, to = await _capture_room(app, clock, WHEEL)
     await handle_move(app, ws_w, room, "white", _move_raw(frm, to))
-    await _shoot_at(app, clock, room, "white", 50)  # fail -> lock
+    await _fire(app, clock, room, "white", 50)  # fail -> lock
     out = await handle_move(app, ws_w, room, "white", _move_raw(frm, to))
     assert out == "locked"
     assert room.pending_skillcheck is None, "the locked move never re-fires a check"
@@ -408,7 +422,7 @@ async def test_locked_move_is_rejected_outright_not_rerolled(app, clock):
 async def test_locks_clear_on_the_next_applied_ply(app, clock):
     room, ws_w, ws_b, frm, to = await _capture_room(app, clock, WHEEL)
     await handle_move(app, ws_w, room, "white", _move_raw(frm, to))
-    await _shoot_at(app, clock, room, "white", 50)
+    await _fire(app, clock, room, "white", 50)
     assert room.skillcheck_locks
     await handle_move(app, ws_w, room, "white", _move_raw(Square(7, 4), Square(6, 4)))
     assert room.skillcheck_locks == set(), "an applied move clears the per-ply locks"
@@ -554,7 +568,7 @@ async def test_resume_wire_carries_live_pending_with_elapsed(app, clock):
 async def test_resume_wire_is_none_after_the_check_resolves(app, clock):
     room, ws_w, ws_b, frm, to = await _capture_room(app, clock, WHEEL)
     await handle_move(app, ws_w, room, "white", _move_raw(frm, to))
-    await _shoot_at(app, clock, room, "white", 50)  # fail
+    await _fire(app, clock, room, "white", 50)  # fail
     assert _resume_payload(app, room, "white") is None, "a resolved check leaves a free turn"
 
 
@@ -589,7 +603,7 @@ async def test_honest_shot_is_judged_at_the_clients_rendered_elapsed(app, clock)
     room, ws_w, ws_b, frm, to = await _capture_room(app, clock, WHEEL)
     await handle_move(app, ws_w, room, "white", _move_raw(frm, to))
     win = _win_elapsed(room.pending_skillcheck)
-    out = await _shoot_at(app, clock, room, "white", win)
+    out = await _fire(app, clock, room, "white", win)
     assert out.startswith("applied"), "the server judges the exact moment the player saw"
 
 
@@ -739,7 +753,7 @@ async def test_shot_and_sweep_in_the_same_tick_resolve_exactly_once(app, clock):
     room, ws_w, ws_b, frm, to = await _capture_room(app, clock, WHEEL)
     await handle_move(app, ws_w, room, "white", _move_raw(frm, to))
     ws_b.sent.clear()
-    out = await _shoot_at(app, clock, room, "white", int(online.SKILLCHECK_DEADLINE_MS) + 10)
+    out = await _fire(app, clock, room, "white", int(online.SKILLCHECK_DEADLINE_MS) + 10)
     await app.state.sweep.step_skillcheck_deadline()
     assert out == "skillcheck_fail"
     assert len(ws_b.of_type("skill_check_result")) == 1, "exactly one fail broadcast"
@@ -760,7 +774,7 @@ async def test_aim_shot_and_sweep_at_the_shrink_boundary_resolve_exactly_once(ap
                    if online.aim_expired(ch, e, pending.miss_count))
     assert gone_at < online.SKILLCHECK_DEADLINE_MS, "the shrink outruns the 5s deadline"
     ws_b.sent.clear()
-    out = await _shoot_at(app, clock, room, "white", gone_at)  # clock now sits at gone_at
+    out = await _fire(app, clock, room, "white", gone_at)  # clock now sits at gone_at
     await app.state.sweep.step_skillcheck_deadline()
     assert out == "skillcheck_fail", "a shot once the piece is gone is a fail, and it wins the race"
     assert room.pending_skillcheck is None
@@ -796,7 +810,7 @@ async def test_winning_shot_is_a_noop_if_pending_is_nulled_during_the_spectate_a
     app.state.connections.add(room.room_id, room.black.client_uuid, nulling)
     await handle_move(app, ws_w, room, "white", _move_raw(frm, to))
     win = _win_elapsed(room.pending_skillcheck)
-    out = await _shoot_at(app, clock, room, "white", win)
+    out = await _fire(app, clock, room, "white", win)
     assert nulling.of_type("skill_check_spectate_shot"), "the spectate-shot was relayed first"
     assert out == "noop", "the post-await guard bails when pending was resolved mid-await"
     assert len(room.backend.move_history) == 0, "the move was NOT applied a second time"
@@ -832,7 +846,7 @@ async def test_sweep_does_not_early_fail_an_aim_check_while_the_piece_remains(ap
 async def test_won_check_appends_an_outcome_to_the_server_log(app, clock):
     room, ws_w, ws_b, frm, to = await _capture_room(app, clock, WHEEL)
     await handle_move(app, ws_w, room, "white", _move_raw(frm, to))
-    await _shoot_at(app, clock, room, "white", _win_elapsed(room.pending_skillcheck))
+    await _fire(app, clock, room, "white", _win_elapsed(room.pending_skillcheck))
     assert room.skillcheck_log == [SkillCheckOutcome(1, "wheel", True, "Qxd5")]
 
 
@@ -840,7 +854,7 @@ async def test_won_check_appends_an_outcome_to_the_server_log(app, clock):
 async def test_failed_check_appends_a_fail_outcome_with_the_whiffed_san(app, clock):
     room, ws_w, ws_b, frm, to = await _capture_room(app, clock, WHEEL)
     await handle_move(app, ws_w, room, "white", _move_raw(frm, to))
-    await _shoot_at(app, clock, room, "white", _wheel_loss_elapsed(room.pending_skillcheck))
+    await _fire(app, clock, room, "white", _wheel_loss_elapsed(room.pending_skillcheck))
     assert room.skillcheck_log == [SkillCheckOutcome(1, "wheel", False, "Qxd5")]
     assert len(room.backend.move_history) == 0, "a failed check lands no ply"
 
@@ -859,7 +873,7 @@ async def test_a_pending_check_is_absent_from_the_log_until_it_resolves(app, clo
     await handle_move(app, ws_w, room, "white", _move_raw(frm, to))
     assert room.pending_skillcheck is not None
     assert room.skillcheck_log == [], "an unresolved check is never recorded"
-    await _shoot_at(app, clock, room, "white", _win_elapsed(room.pending_skillcheck))
+    await _fire(app, clock, room, "white", _win_elapsed(room.pending_skillcheck))
     assert len(room.skillcheck_log) == 1, "recorded exactly once, at resolution"
 
 
@@ -867,7 +881,7 @@ async def test_a_pending_check_is_absent_from_the_log_until_it_resolves(app, clo
 async def test_resume_endpoint_carries_the_skillcheck_log(app, clock):
     room, ws_w, ws_b, frm, to = await _capture_room(app, clock, WHEEL)
     await handle_move(app, ws_w, room, "white", _move_raw(frm, to))
-    await _shoot_at(app, clock, room, "white", _win_elapsed(room.pending_skillcheck))
+    await _fire(app, clock, room, "white", _win_elapsed(room.pending_skillcheck))
     resp = TestClient(app).post("/resume", json={
         "version": PROTOCOL_VERSION, "room_id": room.room_id, "session_token": "ta"})
     assert resp.status_code == 200
@@ -879,7 +893,7 @@ async def test_resume_endpoint_carries_the_skillcheck_log(app, clock):
 async def test_takeback_drops_the_outcomes_for_the_undone_ply(app, clock):
     room, ws_w, ws_b, frm, to = await _capture_room(app, clock, WHEEL)
     await handle_move(app, ws_w, room, "white", _move_raw(frm, to))
-    await _shoot_at(app, clock, room, "white", _win_elapsed(room.pending_skillcheck))
+    await _fire(app, clock, room, "white", _win_elapsed(room.pending_skillcheck))
     assert len(room.skillcheck_log) == 1 and len(room.backend.move_history) == 1
     room.takeback_offered_by = "white"
     raw = json.dumps({"type": "takeback_response", "accept": True})
@@ -927,7 +941,7 @@ async def test_a_shot_past_the_capped_deadline_fails_even_under_the_base(app, cl
     room, ws_w, ws_b, frm, to = await _capture_room(app, clock, WHEEL)
     room.time_minutes = 0.5  # deadline 3000ms
     await handle_move(app, ws_w, room, "white", _move_raw(frm, to))
-    out = await _shoot_at(app, clock, room, "white", 3500)  # past 3000 cap, under 5000 base
+    out = await _fire(app, clock, room, "white", 3500)  # past 3000 cap, under 5000 base
     assert out == "skillcheck_fail"
     assert room.pending_skillcheck is None
     assert len(room.backend.move_history) == 0, "the move never lands past the capped deadline"
@@ -942,17 +956,17 @@ def _full_challenge(pending):
 
 
 def _holes_for(room):
-    """Rebuild the whack hole layout exactly as the server derives it per shot:
-    seeded off the stored pending, anchored at the capture square, avoiding every
-    occupied square of the room's authoritative backend."""
+    """Rebuild the whack hole layout independently of the tuple the server cached
+    at mint: seeded off the stored pending, anchored at the capture square,
+    avoiding every occupied square of the room's authoritative backend. The
+    occupancy scan goes through the production derivation, so a change there is
+    caught here instead of being mirrored by a private copy."""
     pending = room.pending_skillcheck
     backend = room.backend
-    occupied = [(row, col)
-                for row in range(backend.SIZE) for col in range(backend.SIZE)
-                if backend.state[row][col] is not None]
     return mole.hole_squares(pending.seed, pending.captured_value,
                              (pending.to_sq.row, pending.to_sq.col),
-                             occupied, backend.SIZE)
+                             mole.occupied_squares(backend.state, backend.SIZE),
+                             backend.SIZE)
 
 
 def _pop_mid(ch, index):
@@ -963,22 +977,6 @@ def _pop_mid(ch, index):
 def _hole_center(holes, hole):
     row, col = holes[hole]
     return (row + 0.5, col + 0.5)
-
-
-def _shot_raw(elapsed, direction=None, target=None):
-    payload = {"type": "skill_check_shot", "client_elapsed_ms": elapsed}
-    if direction is not None:
-        payload["direction"] = direction
-    if target is not None:
-        payload["target_row"], payload["target_col"] = target
-    return json.dumps(payload)
-
-
-async def _fire(app, clock, room, color, elapsed, direction=None, target=None):
-    clock.set((room.pending_skillcheck.start_ms + elapsed) / 1000.0)
-    ws = app.state.connections.get_for_color(room, color)
-    return await handle_skill_check_shot(app, ws, room, color,
-                                         _shot_raw(elapsed, direction, target))
 
 
 async def _whack_room(app, clock):
@@ -998,15 +996,9 @@ def _qxp_black_backend():
 
 
 async def _black_whack_room(app, clock):
-    room = await _pair(app)
-    room.backend = _qxp_black_backend()
-    room.first_move_at = clock()
-    room.started_at = clock()
-    frm, to = Square(3, 3), Square(4, 3)
-    room.skillcheck_secret = _seed_for(room.backend, frm, to, WHACK)
-    ws_w, ws_b = RecordingWS(), RecordingWS()
-    app.state.connections.add(room.room_id, room.white.client_uuid, ws_w)
-    app.state.connections.add(room.room_id, room.black.client_uuid, ws_b)
+    room, ws_w, ws_b, frm, to = await _capture_room(
+        app, clock, WHACK, backend=_qxp_black_backend(),
+        frm=Square(3, 3), to=Square(4, 3))
     await handle_move(app, ws_b, room, "black", _move_raw(frm, to))
     pending = room.pending_skillcheck
     return room, ws_w, ws_b, frm, to, pending, _full_challenge(pending), _holes_for(room)
@@ -1263,6 +1255,73 @@ async def test_whack_spectate_shots_carry_progress_coords_and_won(app, clock):
     assert relays[0]["direction"] is None
 
 
+def _bare_pending(**kw):
+    base = dict(color="white", from_sq=Square(4, 3), to_sq=Square(3, 3), promotion=None,
+                kind=WHACK, seed="s", value_diff=0, start_ms=0.0, expires_at_ms=5000.0)
+    base.update(kw)
+    return PendingSkillCheck(**base)
+
+
+def test_materialising_a_derived_cache_never_changes_pending_equality():
+    """_challenge and holes are derived caches keyed entirely off the real fields.
+    If they counted toward __eq__, two pendings built from identical inputs would
+    stop comparing equal the moment one of them lazily built its challenge or was
+    minted with a hole layout -- a trap for any identity check on the pending."""
+    a, b = _bare_pending(), _bare_pending()
+    assert a == b, "identical inputs, identical pending"
+    assert a.challenge is not None, "materialise the lazy cache on ONE side only"
+    assert b._challenge is None, "the other side is still unmaterialised"
+    assert a == b, "the derived challenge stays out of the equality"
+    a.holes = ((0, 0), (7, 7))
+    assert a == b, "the cached hole layout stays out of it too"
+    assert _bare_pending(seed="other") != b, "the real inputs still separate two pendings"
+    assert a.challenge is a.challenge, "the challenge is built once and reused"
+
+
+@pytest.mark.asyncio
+async def test_whack_holes_are_derived_once_at_mint_not_per_shot(app, clock):
+    """Rebuilding the pit layout inside the shot handler made the geometry walk
+    attacker-paced: every extra shot bought another radius search. The layout is
+    frozen for the check's lifetime (the board cannot move while one is pending),
+    so it is derived once when the check is armed -- and must equal what an
+    independent re-derivation from the same backend produces."""
+    room, ws_w, ws_b, frm, to, pending, ch, holes = await _whack_room(app, clock)
+    assert pending.holes == holes, "the minted layout is exactly the layout walk's output"
+    assert len(pending.holes) == ch.hole_count, "one pit per hole the schedule uses"
+    minted = pending.holes
+    out = await _fire(app, clock, room, "white", _pop_mid(ch, 0),
+                      target=_hole_center(holes, ch.pops[0].hole))
+    assert out == "skillcheck_hit", "adjudication still runs against the minted layout"
+    assert pending.holes is minted, "a shot never re-derives the geometry"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", [WHEEL, AIM, COMBO])
+async def test_non_positional_kinds_mint_no_hole_layout(app, clock, kind):
+    room, ws_w, ws_b, frm, to = await _capture_room(app, clock, kind)
+    await handle_move(app, ws_w, room, "white", _move_raw(frm, to))
+    assert room.pending_skillcheck.holes == (), \
+        "only the positional kind pays for a pit layout"
+
+
+@pytest.mark.asyncio
+async def test_resume_wire_echoes_the_credited_pop_mid_whack(app, clock):
+    """A mid-whack reconnect must know WHICH pop was already credited: without it
+    the restored client either re-credits a pop that is still up (a free hit) or
+    treats it as unspent and shoots a dead target."""
+    room, ws_w, ws_b, frm, to, pending, ch, holes = await _whack_room(app, clock)
+    assert _resume_payload(app, room, "white").last_hit_pop == -1, "nothing hit yet"
+    await _fire(app, clock, room, "white", _pop_mid(ch, 0),
+                target=_hole_center(holes, ch.pops[0].hole))
+    assert pending.last_hit_pop == 0, "the server credited the first pop"
+    wire = _resume_payload(app, room, "white")
+    assert wire.last_hit_pop == 0, "and the resume wire hands that back verbatim"
+    resp = TestClient(app).post("/resume", json={
+        "version": PROTOCOL_VERSION, "room_id": room.room_id, "session_token": "ta"})
+    assert resp.status_code == 200
+    assert resp.json()["pending_skillcheck"]["last_hit_pop"] == 0
+
+
 @pytest.mark.asyncio
 async def test_combo_full_correct_run_applies_the_move(app, clock):
     room, ws_w, ws_b, frm, to, pending, ch = await _combo_room(app, clock)
@@ -1363,7 +1422,7 @@ async def _terminal_win(app, clock, room):
     pending = room.pending_skillcheck
     ch = _full_challenge(pending)
     if pending.kind in (WHEEL, AIM):
-        return await _shoot_at(app, clock, room, pending.color, _win_elapsed(pending))
+        return await _fire(app, clock, room, pending.color, _win_elapsed(pending))
     if pending.kind == WHACK:
         pending.progress = ch.hits_required - 1
         return await _fire(app, clock, room, pending.color, _pop_mid(ch, 0),

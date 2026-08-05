@@ -89,6 +89,7 @@ import pygame as pg
 import pytest
 
 from tests.conftest import pygame_display
+from tests.helpers import click_event as _click
 from chessshootout.backend.utils import Square
 from chessshootout.frontend.skillcheck import mole_view
 from chessshootout.frontend.skillcheck.controller import SKILLCHECK_RESULT_HOLD_MS
@@ -116,8 +117,10 @@ from chessshootout.frontend.skillcheck.mole_view import (
     MOLE_VIEW_CROSS_ARC_SPAN_DEG, MOLE_VIEW_CROSS_BLADE_W_FRAC, MOLE_VIEW_CROSS_GLOW_FRAC,
     MOLE_VIEW_CROSS_OUT_BUCKETS, MOLE_VIEW_CROSS_OUT_SCALE, MOLE_VIEW_CROSS_TIP_W_FRAC,
     MOLE_VIEW_KICK_MS, _crosshair_surface, _cross_glow_surface)
+from chessshootout.frontend.skillcheck.registry import build_controller
 from chessshootout.skillcheck.mole import MOLE_RECOIL_LOCKOUT_MS
 from chessshootout.frontend.visual.colors import Colors
+from chessshootout.skillcheck.types import SkillCheckKind
 from chessshootout.skillcheck.mole import (
     MoleChallenge, MolePop, MOLE_TAUNTS, pick_taunt, MOLE_GRACE_MS,
     MOLE_HITBOX_RX_FRAC, MOLE_HITBOX_RY_FRAC, MOLE_HITBOX_CY_FRAC)
@@ -162,10 +165,6 @@ def _mole(cell=_CELL, challenge=None, **kw):
     kw.setdefault("victim_surface", _victim(cell))
     return MoleController(challenge, pg.Rect(3 * cell, 4 * cell, cell, cell), 0,
                           challenge.deadline_ms, **kw)
-
-
-def _click(pos):
-    return pg.event.Event(pg.MOUSEBUTTONDOWN, {"button": 1, "pos": pos})
 
 
 def _space():
@@ -638,8 +637,12 @@ def test_danger_pulse_alternates_faster_than_the_calm_telegraph():
 
 
 def test_mount_and_schedule_cues_fire_on_their_edges():
+    # The first update after construction is the fire frame (one frame after the
+    # gate opened, in production): it synchronizes the cue counters, and every
+    # schedule edge crossed on a LATER frame cues exactly once.
     ctrl = _mole()
     ctrl._audio.play_mole_fall.assert_called_once()
+    ctrl.update(0)
     ctrl.update(600)
     ctrl._audio.play_mole_telegraph.assert_called_once()
     ctrl._audio.play_mole_pop.assert_not_called()
@@ -647,6 +650,23 @@ def test_mount_and_schedule_cues_fire_on_their_edges():
     ctrl._audio.play_mole_pop.assert_called_once()
     ctrl.update(1800)
     assert ctrl._audio.play_mole_telegraph.call_count == 2
+
+
+def test_a_resumed_check_fast_forwards_past_stale_cues_without_stacking():
+    # /resume rebuilds the controller with a backdated start_ms, so its first
+    # schedule pass sees every already-elapsed telegraph/pop at once — the old
+    # catch-up loops fired them ALL in that one frame, a machine-gun burst of
+    # stale cues. The first pass now only synchronizes the counters; edges that
+    # come up afterwards still cue normally.
+    ctrl = _mole()
+    ctrl.update(3000)
+    ctrl._audio.play_mole_telegraph.assert_not_called()
+    ctrl._audio.play_mole_pop.assert_not_called()
+    ctrl.update(3150)
+    ctrl._audio.play_mole_pop.assert_called_once(), "the pop at 3100 is genuinely new"
+    ctrl._audio.play_mole_telegraph.assert_not_called()
+    ctrl.update(4150)
+    ctrl._audio.play_mole_telegraph.assert_called_once(), "and so is the telegraph at 4100"
 
 
 def test_relayout_reanchors_geometry():
@@ -668,18 +688,25 @@ def test_out_of_board_shot_clamps_target_within_wire_bounds():
     assert 0.0 <= r < 8.0 and 0.0 <= c < 8.0, "an off-board shot never exceeds the wire bound"
 
 
-def test_sentinel_target_clamps_into_wire_bounds():
+def test_missing_geometry_skips_the_shot_instead_of_laundering_a_sentinel():
+    # The old no-mapper path returned a (-1.0, -1.0) sentinel that the clamp
+    # laundered into a LEGAL (0.0, 0.0) shot: a fabricated coordinate on the
+    # wire and a phantom local adjudication at a8. With no affine there is no
+    # shot at all that frame — nothing relays, nothing adjudicates, and none of
+    # the shot feedback (muzzle, brass, recoil lockout) is spent on it.
     on_shot = MagicMock()
     ch = _challenge()
     ctrl = MoleController(ch, pg.Rect(3 * _CELL, 4 * _CELL, _CELL, _CELL), 0,
                           ch.deadline_ms, hole_squares=_HOLES, audio=MagicMock(),
                           victim_surface=_victim(_CELL), on_shot=on_shot)
     ctrl.update(800)
-    ctrl.handle_event(_click((200, 200)))
-    _, kwargs = on_shot.call_args
-    assert kwargs["target"] == (0.0, 0.0), \
-        "the no-mapper sentinel clamps to an in-range guaranteed miss"
-    assert ctrl._progress == 0, "the clamped sentinel never registers a hit"
+    assert ctrl.handle_event(_click((200, 200))) is True, \
+        "the overlay still swallows the click — it just refuses to invent a shot"
+    on_shot.assert_not_called()
+    assert ctrl._progress == 0
+    assert ctrl._casings == [] and ctrl._flash_ms is None
+    assert ctrl._last_shot_ms is None, "a skipped shot spends no recoil lockout"
+    ctrl._audio.play_whiff_ricochet.assert_not_called()
 
 
 def test_local_edge_shot_adjudicates_on_the_clamped_value(monkeypatch):
@@ -713,20 +740,37 @@ def test_torn_victim_key_is_per_challenge():
     assert a._victim_sprite() is sa, "the same check re-uses its cached torn victim"
 
 
-def test_resume_with_progress_seeds_the_already_hit_pop():
-    now = pg.time.get_ticks()
+def test_resume_last_hit_pop_ctor_param_dedupes_the_already_hit_pop():
+    # The resumed value is the server's own last_hit_pop from the /resume
+    # snapshot, threaded in as a ctor param — the old code GUESSED it off the
+    # wall clock ("whatever pop is up now"), which was wrong whenever the hit
+    # pop had already ducked.
     ch = _challenge()
-    ctrl = MoleController(ch, pg.Rect(3 * _CELL, 4 * _CELL, _CELL, _CELL), now - 1000,
+    ctrl = MoleController(ch, pg.Rect(3 * _CELL, 4 * _CELL, _CELL, _CELL), 0,
                           ch.deadline_ms, hole_squares=_HOLES, geom=_geom_for(_CELL),
-                          audio=MagicMock(), victim_surface=_victim(_CELL), progress=1)
+                          audio=MagicMock(), victim_surface=_victim(_CELL), progress=1,
+                          last_hit_pop=0)
     assert ctrl._last_hit_pop == 0, \
         "resuming mid-pop seeds the hit index so the pop can't be locally re-hit"
-    ctrl.update(now)
+    ctrl.update(1000)
     ctrl.handle_event(_click(_hole_px(0)))
     assert ctrl._progress == 1, "the already-hit pop is deduped on the resumed client"
-    ctrl.update(now + 900)
+    ctrl.update(2000)
     ctrl.handle_event(_click(_hole_px(1)))
     assert ctrl._progress == 2, "a later pop still registers normally"
+
+
+def test_last_hit_pop_defaults_to_no_hits_and_threads_through_the_registry():
+    assert _mole()._last_hit_pop == -1
+    guessy = _mole(progress=1)
+    assert guessy._last_hit_pop == -1, \
+        "progress alone no longer back-derives a hit pop from the wall clock"
+    built = build_controller(
+        SkillCheckKind.WHACK, seed="s", cell_rect=pg.Rect(3 * _CELL, 4 * _CELL, _CELL, _CELL),
+        now_ms=0, deadline_ms=5000, value_diff=2, captured_value=4,
+        hole_squares=_HOLES, geom=_geom_for(_CELL),
+        victim_surface=_victim(_CELL), progress=1, last_hit_pop=2)
+    assert built._last_hit_pop == 2, "the registry threads the snapshot value to the mole"
 
 
 def test_whack_hit_plays_the_pitch_ladder_index():

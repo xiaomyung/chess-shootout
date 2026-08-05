@@ -4,6 +4,9 @@ from typing import Literal, Optional
 
 from pydantic import BaseModel, Field, field_validator
 
+from chessshootout.backend.pieces import PIECE_VALUES, PieceType
+from chessshootout.backend.utils import BOARD_SIZE
+
 
 def _env_float(name, default):
     try:
@@ -35,8 +38,8 @@ CHAT_COOLDOWN_SECONDS = 3.0
 CHAT_PRESET_COUNT = 8
 ANNOTATIONS_PER_SECOND = 10
 MODERATION_TRIP_LIMIT = 3
-SKILLCHECK_TARGET_MAX = 8.0
-SKILLCHECK_MAX_CAPTURED_VALUE = 9
+SKILLCHECK_TARGET_MAX = float(BOARD_SIZE)
+SKILLCHECK_MAX_CAPTURED_VALUE = PIECE_VALUES[PieceType.QUEEN]
 
 UUID4_RE = re.compile(
     r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$",
@@ -172,7 +175,7 @@ class _SkillCheckGeometryBase(BaseModel):
     kind: SkillCheckKindLiteral
     seed: str
     value_diff: int
-    deadline_ms: float
+    deadline_ms: float = Field(ge=0.0, allow_inf_nan=False)
     captured_value: int = Field(default=0, ge=0, le=SKILLCHECK_MAX_CAPTURED_VALUE)
     from_sq: str = Field(alias="from")
     to_sq: str = Field(alias="to")
@@ -182,9 +185,10 @@ class _SkillCheckGeometryBase(BaseModel):
 
 
 class PendingSkillCheckWire(_SkillCheckGeometryBase):
-    elapsed_ms: float
+    elapsed_ms: float = Field(ge=0.0, allow_inf_nan=False)
     miss_count: int = 0
     progress: int = 0
+    last_hit_pop: int = -1
     color: Literal["white", "black"]
 
 

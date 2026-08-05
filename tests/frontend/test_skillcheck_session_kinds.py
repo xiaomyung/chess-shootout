@@ -16,9 +16,10 @@ and on a fail spawns effects.taunt_tag(pick_taunt(seed)) over the surviving vict
 — deterministic per seed, so mover and spectator render the same word — plus the
 taunt sound for the mover only (the spectate mirror stays muted). The seed clears
 on every terminal path so a stale seed can never leak into the next check's taunt.
-The failed WHACK is also the one restore that skips the board
-drop (restore_piece(drop=False)): its overlay already set the victim down on its
-own square, so the piece must simply be there the frame the overlay ends.
+The failed WHACK is also the one restore that skips the board drop (the call
+sites guard restore_piece behind kind != WHACK): its overlay already set the
+victim down on its own square, so the piece must simply be there the frame the
+overlay ends.
 
 The KILL is credited at the pit, on the hit that earns it — not later at the home
 square. The controller reports every registered hit as (px, kill); on the killing
@@ -61,6 +62,7 @@ from tests.conftest import pygame_display
 from tests.frontend.focus_helpers import FakeTicks, install_clock
 from chessshootout.backend.pieces import PieceColor, PieceType
 from chessshootout.backend.utils import Square
+from chessshootout.frontend.game.skillcheck_session import CheckContext
 from chessshootout.frontend.skillcheck.combo_view import ComboController, COMBO_TIME_LIMIT_MS
 from chessshootout.frontend.skillcheck.mole_view import MoleController
 from chessshootout.frontend.skillcheck.registry import build_controller
@@ -69,12 +71,12 @@ from chessshootout.frontend.visual.gunfx import GUNS, PIECE_GUN
 from chessshootout.skillcheck import mole
 from chessshootout.skillcheck.combo import ComboChallenge
 from chessshootout.skillcheck.coordinator import move_roll_key
-from chessshootout.skillcheck.mole import MoleChallenge
+from chessshootout.skillcheck.mole import MOLE_HITBOX_CY_FRAC, MoleChallenge
 from chessshootout.skillcheck.rng import ply_roll
 from chessshootout.skillcheck.triggers import select_skillcheck
 from chessshootout.skillcheck.types import SkillCheckKind
-from tests.helpers import BLACK, K, P, Q, R, WHITE, make_app, make_backend, piece, sq, \
-    start_single_screen
+from tests.helpers import BLACK, K, P, Q, R, WHITE, click_event, make_app, make_backend, \
+    piece, sq, start_single_screen
 
 
 _pygame_init = pygame_display(1100, 800)
@@ -300,7 +302,8 @@ def test_other_failed_kinds_still_drop_the_victim_back_in(kind):
     app = _local_app()
     frm, to = _capture_board(app)
     app.game.board.aim_suppressed_square = to
-    app.game.skillcheck_session._on_skillcheck_done((frm, to, None, kind), False)
+    app.game.skillcheck_session._on_skillcheck_done(
+        CheckContext(frm, to, None, kind), False)
     assert any(a["sq"] == to for a in app.game.board._restore_anims), \
         "only the whack skips the drop; the approved aim/combo restore is untouched"
 
@@ -370,7 +373,7 @@ def test_online_whack_fail_shows_the_board_taunt_with_sound():
     session.skillcheck_target = sq(3, 3)
     session.active_seed = "wire-seed"
     session._on_online_skillcheck_done(
-        (sq(4, 3), sq(3, 3), None, SkillCheckKind.WHACK), False)
+        CheckContext(sq(4, 3), sq(3, 3), None, SkillCheckKind.WHACK), False)
     taunts = _tags_on(fx, sq(3, 3))
     assert len(taunts) == 1
     assert _same_pixels(taunts[0]["surf"],
@@ -391,7 +394,7 @@ def test_spectated_online_whack_fail_taunts_silently():
     session.online_was_spectator = True
     session.online_spectate_kind = None
     session._on_online_skillcheck_done(
-        (sq(4, 3), sq(3, 3), None, SkillCheckKind.WHACK), False)
+        CheckContext(sq(4, 3), sq(3, 3), None, SkillCheckKind.WHACK), False)
     assert _tags_on(fx, sq(3, 3)), "the mirror still shows the victim's line"
     app.sound_manager.play_mole_taunt.assert_not_called()
     assert session.online_was_spectator is False
@@ -440,10 +443,14 @@ def _mock_controller():
     return ctrl
 
 
+def _ctx(frm=None, to=None, kind=SkillCheckKind.WHEEL):
+    return CheckContext(frm or sq(4, 3), to or sq(3, 3), None, kind)
+
+
 def test_teardown_closes_the_live_controller():
     app = _local_app()
     ctrl = _mock_controller()
-    app.game.skillcheck_overlay.start(ctrl, (sq(4, 3), sq(3, 3)), lambda c, landed: None)
+    app.game.skillcheck_overlay.start(ctrl, _ctx(), lambda c, landed: None)
     app.game.skillcheck_session.teardown_skillcheck_overlay()
     ctrl.close.assert_called_once()
 
@@ -451,7 +458,7 @@ def test_teardown_closes_the_live_controller():
 def test_screen_exit_closes_the_live_controller():
     app = _local_app()
     ctrl = _mock_controller()
-    app.game.skillcheck_overlay.start(ctrl, (sq(4, 3), sq(3, 3)), lambda c, landed: None)
+    app.game.skillcheck_overlay.start(ctrl, _ctx(), lambda c, landed: None)
     app.game.exit()
     ctrl.close.assert_called_once()
     assert not app.game.skillcheck_overlay.is_active()
@@ -460,7 +467,7 @@ def test_screen_exit_closes_the_live_controller():
 def test_reset_to_new_game_closes_the_live_controller():
     app = _local_app()
     ctrl = _mock_controller()
-    app.game.skillcheck_overlay.start(ctrl, (sq(4, 3), sq(3, 3)), lambda c, landed: None)
+    app.game.skillcheck_overlay.start(ctrl, _ctx(), lambda c, landed: None)
     app.game._reset_to_new_game()
     ctrl.close.assert_called_once()
 
@@ -469,7 +476,8 @@ def test_overlay_replacement_closes_the_displaced_controller():
     app = _local_app()
     stale = _mock_controller()
     stale._passive = True
-    app.game.skillcheck_overlay.start(stale, (sq(1, 1), sq(2, 2)), lambda c, landed: None)
+    app.game.skillcheck_overlay.start(
+        stale, _ctx(sq(1, 1), sq(2, 2)), lambda c, landed: None)
     _gate(app, SkillCheckKind.WHACK)
     stale.close.assert_called_once()
     assert app.game.skillcheck_overlay._controller is not stale
@@ -482,7 +490,7 @@ def test_normal_overlay_finish_also_closes_the_controller():
     ctrl = _mock_controller()
     ctrl.done = True
     ctrl.landed = True
-    app.game.skillcheck_overlay.start(ctrl, ("ctx",), lambda c, landed: done.append(landed))
+    app.game.skillcheck_overlay.start(ctrl, _ctx(), lambda c, landed: done.append(landed))
     app.game.skillcheck_overlay.update(0)
     ctrl.close.assert_called_once()
     assert done == [True]
@@ -525,7 +533,7 @@ def _spin(session, clock, frames=200, step=16):
 
 def _fire_at(ctrl, px, at_ms):
     ctrl.update(at_ms)
-    ctrl.handle_event(pg.event.Event(pg.MOUSEBUTTONDOWN, {"button": 1, "pos": px}))
+    ctrl.handle_event(click_event(px))
 
 
 def _live_pop_shot(ctrl):
@@ -655,7 +663,8 @@ def test_the_mirror_aims_at_the_victim_then_at_the_relayed_impact(monkeypatch):
     ctrl = app.game.skillcheck_overlay._controller
     ctrl.update(ctrl.start_ms + 900)
     ctrl.spectate_shot(800.0, 0, True, progress=1, target=(0.5, 0.5))
-    impact = board.cell_rect(sq(0, 0)).center
+    cx, cy = board.cell_rect(sq(0, 0)).center
+    impact = (cx, cy + 2.0 * MOLE_HITBOX_CY_FRAC * ctrl._affine[3])
     assert fx.projectiles, "the relayed hit fires the mirror's gun"
     assert {pr["color"] for pr in fx.projectiles} == {GUNS[PIECE_GUN["queen"]].color}
     _spin(session, clock)
@@ -866,13 +875,11 @@ def test_the_mirror_lands_the_same_kill_package_at_the_relayed_pit(monkeypatch):
         if i < 3:
             assert _gore(fx) == [], "the mirror waits for the killing relay too"
     raw = ctrl._board_to_px(2.5, 2.5)
-    hole = ctrl._hole_squares[ctrl.challenge.pops[0].hole]
-    pit_y = app.game.board.cell_rect(sq(*hole)).center[1]
-    px = (raw[0], 2.0 * pit_y - raw[1])
+    px = (raw[0], raw[1] + 2.0 * MOLE_HITBOX_CY_FRAC * ctrl._affine[3])
     assert {p["kind"] for p in _gore(fx)} == GORE
     assert all(p["px"] == pytest.approx(px) for p in _gore(fx)), \
-        "the spectator sees the kill on the pit it happened on, mirrored onto the side " \
-        "of it where the spectator's own view draws the risen body"
+        "the spectator sees the kill at the relayed impact, shifted screen-up by the " \
+        "fixed head-lift so it lands where its own view draws the risen body"
     assert fx._streak_count == 1, "and the streak is credited on the mirror as well"
     app.sound_manager.play_announcer.assert_called_once_with("first_blood")
     session.teardown_skillcheck_overlay()
