@@ -2692,3 +2692,32 @@ def test_the_spectate_mirror_heals_silently():
     assert ctrl._damage_tier() > 0
     ctrl.resolve(False)
     ctrl._audio.play_mole_heal.assert_not_called()
+
+
+def _short_victim(cell=_CELL, headroom_frac=0.4):
+    # A pawn-like sprite: transparent headroom above the visible body.
+    surf = pg.Surface((cell, cell), pg.SRCALPHA)
+    top = int(cell * headroom_frac)
+    pg.draw.rect(surf, (200, 200, 210, 255), pg.Rect(6, top, cell - 12, cell - top - 2))
+    return surf
+
+
+def test_the_seam_travel_stops_at_the_visible_top_of_a_short_piece():
+    # The scanner line knits body-bottom to head; it must never keep climbing
+    # through the transparent air above a short piece's head. The whole travel
+    # (glow, sparks and the sprite band all route through _seam_y) spans the
+    # victim's visible bounding box, not the full cell-height surface.
+    ctrl = _mole(victim_surface=_short_victim())
+    bbox = ctrl._victim_bbox
+    assert bbox.top > 0, "the probe sprite must actually have headroom"
+    rect = pg.Rect(100, 100, _CELL, _CELL)
+    assert ctrl._seam_y(rect, 0.0) == rect.top + bbox.top
+    assert ctrl._seam_y(rect, 1.0) == rect.top + bbox.bottom
+
+
+def test_a_full_height_victim_keeps_the_full_travel():
+    ctrl = _mole()
+    rect = pg.Rect(0, 0, _CELL, _CELL)
+    bbox = ctrl._victim_bbox
+    assert ctrl._seam_y(rect, 0.0) == rect.top + bbox.top
+    assert ctrl._seam_y(rect, 1.0) == rect.top + bbox.bottom

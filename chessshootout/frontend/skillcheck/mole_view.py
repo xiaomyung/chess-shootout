@@ -654,7 +654,10 @@ class MoleController(SkillCheckController):
     def _build_heal_sprite(self, tier, bucket):
         torn = self._torn_victim(tier)
         w, h = torn.get_size()
-        seam_y = max(round(h * (1.0 - bucket / MOLE_VIEW_HEAL_BUCKETS)), 0)
+        bbox = self._victim_bbox
+        top, span = ((bbox.top, bbox.height) if bbox is not None and bbox.height > 0
+                     else (0, h))
+        seam_y = max(round(top + span * (1.0 - bucket / MOLE_VIEW_HEAL_BUCKETS)), 0)
         surf = pg.Surface((w, h), pg.SRCALPHA)
         if seam_y > 0:
             surf.blit(torn, (0, 0), area=pg.Rect(0, 0, w, seam_y))
@@ -825,7 +828,10 @@ class MoleController(SkillCheckController):
         return 0 < self._heal_bucket() < MOLE_VIEW_HEAL_BUCKETS
 
     def _seam_y(self, rect, frac):
-        return rect.top + self._victim.get_height() * frac
+        bbox = self._victim_bbox
+        if bbox is None or bbox.height <= 0:
+            return rect.top + self._victim.get_height() * frac
+        return rect.top + bbox.top + bbox.height * frac
 
     def _body_edge_x(self, rect, side):
         bbox = self._victim_bbox
