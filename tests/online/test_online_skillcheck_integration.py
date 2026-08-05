@@ -94,7 +94,12 @@ def _winning_elapsed(req):
     assert window is not None, "no winning window for the stored seed"
     lo, hi = window
     assert hi - lo > _SLEEP_LEAD_MS, "the win window must absorb the sleep lead both ways"
-    return hi  # aim the shot at the top of the window
+    # Aim at the MIDDLE, not the top. The server scores max(claimed, recv-200ms),
+    # so a shot that leaves late -- a loaded CI runner descheduling the sleep is
+    # enough -- gets scored later than it claims. Aiming at the top leaves zero
+    # room for that and turns a win into a loss; the midpoint absorbs half the
+    # window in either direction.
+    return (lo + hi) // 2
 
 
 def _force_aim(room):
