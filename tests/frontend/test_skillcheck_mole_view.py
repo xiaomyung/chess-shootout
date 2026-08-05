@@ -2655,3 +2655,39 @@ def test_no_per_frame_logging(caplog):
             ctrl.draw(surf)
     assert not caplog.records, "the mole view stays silent on the frame path"
 
+
+def test_a_damaged_fail_cues_the_heal_scanner_once():
+    # The heal scanner bed answers the teleporter seam, so it fires exactly when
+    # the seam does: on a fail verdict over a damaged victim, once, at the jump
+    # start -- the same gate _spawn_seam_sparks uses (damage_tier > 0).
+    ctrl = _mole()
+    ctrl.update(800)
+    ctrl.handle_event(_click(_hole_px(0)))
+    assert ctrl._damage_tier() > 0
+    ctrl.resolve(False)
+    ctrl._audio.play_mole_heal.assert_called_once()
+
+
+def test_an_undamaged_fail_never_cues_the_heal_scanner():
+    ctrl = _mole()
+    ctrl.update(800)
+    ctrl.resolve(False)
+    ctrl._audio.play_mole_heal.assert_not_called()
+
+
+def test_a_win_never_cues_the_heal_scanner():
+    ctrl = _mole()
+    for i, ms in enumerate((800, 2000, 3200)):
+        ctrl.update(ms)
+        ctrl.handle_event(_click(_hole_px(i)))
+    assert ctrl.landed is True
+    ctrl._audio.play_mole_heal.assert_not_called()
+
+
+def test_the_spectate_mirror_heals_silently():
+    ctrl = _mole(passive=True)
+    ctrl.update(800)
+    ctrl.spectate_shot(800.0, 0, False, progress=1, target=(2.5, 2.5))
+    assert ctrl._damage_tier() > 0
+    ctrl.resolve(False)
+    ctrl._audio.play_mole_heal.assert_not_called()

@@ -443,6 +443,7 @@ class MoleController(SkillCheckController):
         if won:
             self._win_ms = self._now
         self._emit_verdict()
+        self._cue_heal()
         self._restore_cursor()
 
     def _commit(self, landed):
@@ -451,7 +452,12 @@ class MoleController(SkillCheckController):
         if landed:
             self._win_ms = self._now
         self._emit_verdict()
+        self._cue_heal()
         self._restore_cursor()
+
+    def _cue_heal(self):
+        if self._landed is False and self._damage_tier() > 0:
+            self._cue("play_mole_heal")
 
     def close(self):
         self._restore_cursor()

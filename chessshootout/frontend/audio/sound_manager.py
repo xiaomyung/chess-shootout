@@ -276,6 +276,9 @@ class SoundManager:
     def play_mole_pop(self):
         self._play("mole_pop")
 
+    def play_mole_heal(self):
+        self._play("mole_heal")
+
     def play_whack_hit(self, combo=0):
         self._play_indexed("whack_hit", combo)
 

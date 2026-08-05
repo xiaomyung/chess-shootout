@@ -38,6 +38,7 @@ WHACK_COMBO_SLOTS = {
     "mole_fall": "skillcheck/mole_fall",
     "mole_telegraph": "skillcheck/mole_telegraph",
     "mole_pop": "skillcheck/mole_pop",
+    "mole_heal": "skillcheck/mole_heal",
     "whack_hit": "skillcheck/whack_hit",
     "whack_kill": "skillcheck/whack_kill",
     "whack_dry": "skillcheck/whack_dry",

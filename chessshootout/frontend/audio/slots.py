@@ -60,6 +60,7 @@ def _build_slots():
     slots["mole_fall"] = Slot("mole_fall", "skillcheck/mole_fall")
     slots["mole_telegraph"] = Slot("mole_telegraph", "skillcheck/mole_telegraph")
     slots["mole_pop"] = Slot("mole_pop", "skillcheck/mole_pop")
+    slots["mole_heal"] = Slot("mole_heal", "skillcheck/mole_heal")
     slots["whack_hit"] = Slot("whack_hit", "skillcheck/whack_hit")
     slots["whack_kill"] = Slot("whack_kill", "skillcheck/whack_kill")
     slots["whack_dry"] = Slot("whack_dry", "skillcheck/whack_dry")
