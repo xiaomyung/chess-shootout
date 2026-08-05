@@ -5,7 +5,8 @@ from chessshootout.server.app import MAX_INBOUND_MESSAGE_BYTES
 from chessshootout.server.protocol import (
     AnnotationDeltaMessage, AnnotationSetWire, AnnotationsStateMessage, ArrowWire,
     AuthMessage, CHAT_PRESET_COUNT, ClockSnapshot, ErrorMessage, GameStartMessage,
-    LockWire, MAX_SHARED_ARROWS, MAX_SHARED_HIGHLIGHTS, MatchmakeRequest,
+    LockWire, MAX_INCREMENT_SECONDS, MAX_SHARED_ARROWS, MAX_SHARED_HIGHLIGHTS,
+    MAX_TIME_MINUTES, MIN_INCREMENT_SECONDS, MIN_TIME_MINUTES, MatchmakeRequest,
     MoveAppliedMessage, MoveMessage, PROTOCOL_VERSION, PendingSkillCheckWire,
     PingMessage, PongMessage, QuickChatMessage, QuickChatReceivedMessage,
     ResumeResponse, ResyncDirectiveMessage, SkillCheckRequiredMessage,
@@ -134,15 +135,62 @@ def test_matchmake_request_accepts(kwargs, attr, expected):
     [
         pytest.param({"time_minutes": -1}, id="negative_time"),
         pytest.param({"side_preference": "middle"}, id="bad_side"),
+        pytest.param({"time_minutes": 0}, id="zero_time"),
+        pytest.param({"increment_seconds": -1}, id="negative_increment"),
+        pytest.param({"time_minutes": MAX_TIME_MINUTES + 1}, id="time_over_cap"),
+        pytest.param({"increment_seconds": MAX_INCREMENT_SECONDS + 1},
+                     id="increment_over_cap"),
+        pytest.param({"time_minutes": 2 ** 40}, id="absurd_time"),
+        pytest.param({"increment_seconds": 2 ** 40}, id="absurd_increment"),
     ],
 )
 def test_matchmake_request_rejects(kwargs):
+    """SECURITY: `_queue` is a defaultdict keyed by the client-supplied
+    (time_minutes, increment_seconds) pair, so unbounded ints let one client mint
+    an unbounded number of never-pairing queue buckets. Both fields are capped at
+    the model boundary, which is the same 422 path every other malformed
+    matchmake field takes."""
     base = {
         "nickname": "Alice", "client_uuid": U1,
         "time_minutes": 5, "increment_seconds": 0,
     }
     with pytest.raises(ValidationError):
         MatchmakeRequest(**{**base, **kwargs})
+
+
+@pytest.mark.parametrize(
+    "minutes, increment",
+    [
+        pytest.param(MIN_TIME_MINUTES, MIN_INCREMENT_SECONDS, id="both_at_minimum"),
+        pytest.param(MAX_TIME_MINUTES, MAX_INCREMENT_SECONDS, id="both_at_maximum"),
+        pytest.param(MAX_TIME_MINUTES, MIN_INCREMENT_SECONDS, id="max_time_no_increment"),
+    ],
+)
+def test_matchmake_request_accepts_the_bounds_themselves(minutes, increment):
+    """The caps are inclusive: the boundary values are legal input, only what is
+    strictly outside them is refused."""
+    req = MatchmakeRequest(nickname="Alice", client_uuid=U1,
+                           time_minutes=minutes, increment_seconds=increment)
+    assert (req.time_minutes, req.increment_seconds) == (minutes, increment)
+
+
+CLIENT_MINUTES = (1, 3, 5, 10, 15, 30)
+CLIENT_INCREMENTS = (0, 2, 5, 10, 15)
+"""Every time control the shipped picker can emit -- CHAMBERS / INCREMENTS in
+chessshootout/frontend/menu/time_picker.py (the picker's remaining chamber is
+the local-only infinity setting, which the online path substitutes with a real
+minute count before it ever reaches the wire)."""
+
+
+@pytest.mark.parametrize("minutes", CLIENT_MINUTES)
+@pytest.mark.parametrize("increment", CLIENT_INCREMENTS)
+def test_matchmake_request_accepts_every_client_producible_time_control(minutes, increment):
+    """Regression fence for the caps: the bounds must sit far outside what the UI
+    can actually produce, so tightening them can never lock real players out."""
+    req = MatchmakeRequest(nickname="Alice", client_uuid=U1,
+                           time_minutes=minutes, increment_seconds=increment)
+    assert MIN_TIME_MINUTES <= req.time_minutes <= MAX_TIME_MINUTES
+    assert MIN_INCREMENT_SECONDS <= req.increment_seconds <= MAX_INCREMENT_SECONDS
 
 
 @pytest.mark.parametrize(

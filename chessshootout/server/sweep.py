@@ -42,6 +42,7 @@ class Sweep:
         await self.step_heartbeat_timeout()
         await self.step_grace_expired()
         self.step_drop_orphans_pre_game()
+        self.step_reap_abandoned_queue()
         await self.step_post_game()
         self.rooms.gc_finished_rooms()
 
@@ -116,6 +117,15 @@ class Sweep:
                     and now - room.started_at >= PREGAME_CONNECT_GRACE_SECONDS):
                 log.info("drop room=%s reason=both_disconnected_pre_game", room.room_id)
                 self.rooms.drop_room_now(room.room_id)
+
+    def step_reap_abandoned_queue(self):
+        for room in self.rooms.stale_queued_rooms():
+            slot = room.white or room.black
+            if slot is not None and self.connections.get_for_uuid(
+                    room.room_id, slot.client_uuid) is not None:
+                continue
+            log.info("drop room=%s reason=queue_abandoned", room.room_id)
+            self.rooms.drop_queued_room(room)
 
     async def _notify_rematch(self, room, color, event):
         ws = self.connections.get_for_color(room, color)

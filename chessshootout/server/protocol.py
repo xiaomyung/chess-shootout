@@ -28,6 +28,10 @@ GIVE_TIME_SECONDS = 15
 GIVE_TIME_TICK_MS = 100
 GIVE_TIME_MAX_HOLD_MS = 600_000
 FIRST_MOVE_ABORT_SECONDS = 60
+MIN_TIME_MINUTES = 1
+MAX_TIME_MINUTES = 180
+MIN_INCREMENT_SECONDS = 0
+MAX_INCREMENT_SECONDS = 180
 GRACE_SECONDS = _env_float("GRACE_SECONDS", 60.0)
 HEARTBEAT_INTERVAL_SECONDS = _env_float("HEARTBEAT_INTERVAL_SECONDS", 2.0)
 HEARTBEAT_MISS_LIMIT = _env_int("HEARTBEAT_MISS_LIMIT", 3)
@@ -202,8 +206,8 @@ class SkillCheckOutcomeWire(BaseModel):
 class MatchmakeRequest(_Base):
     nickname: str
     client_uuid: str
-    time_minutes: int
-    increment_seconds: int
+    time_minutes: int = Field(ge=MIN_TIME_MINUTES, le=MAX_TIME_MINUTES)
+    increment_seconds: int = Field(ge=MIN_INCREMENT_SECONDS, le=MAX_INCREMENT_SECONDS)
     side_preference: Literal["white", "black", "random"] = "random"
     country: Optional[str] = None
     hide_opp_marks: bool = False
@@ -222,13 +226,6 @@ class MatchmakeRequest(_Base):
     @classmethod
     def _uuid4(cls, v):
         return _validate_uuid4(v, "client_uuid")
-
-    @field_validator("time_minutes", "increment_seconds")
-    @classmethod
-    def _non_negative(cls, v):
-        if v < 0:
-            raise ValueError("must be non-negative")
-        return v
 
 
 class MatchmakeResponse(_Base):

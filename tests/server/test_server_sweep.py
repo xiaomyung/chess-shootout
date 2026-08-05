@@ -7,7 +7,7 @@ GC) so we drive each independently without the full asyncio loop.
 import pytest
 
 from chessshootout.server.protocol import GRACE_SECONDS, HEARTBEAT_TIMEOUT_SECONDS, Reason
-from chessshootout.server.rooms import POST_GAME_DISCONNECT_GRACE
+from chessshootout.server.rooms import POST_GAME_DISCONNECT_GRACE, QUEUE_ABANDON_SECONDS
 from chessshootout.server.sweep import PREGAME_CONNECT_GRACE_SECONDS
 from tests.server.test_server_broadcasts import RecordingWS
 from tests.helpers import fake_uuid4
@@ -217,6 +217,9 @@ async def test_sweep_step_all_runs_in_documented_order(sweep, app, clock, monkey
     def _trace_drop():
         calls.append("drop_orphans")
 
+    def _trace_reap_queue():
+        calls.append("reap_queue")
+
     async def _trace_post_game():
         calls.append("post_game")
 
@@ -224,12 +227,69 @@ async def test_sweep_step_all_runs_in_documented_order(sweep, app, clock, monkey
     monkeypatch.setattr(sweep, "step_grace_expired", _trace_grace)
     monkeypatch.setattr(sweep, "step_heartbeat_timeout", _trace_heartbeat)
     monkeypatch.setattr(sweep, "step_drop_orphans_pre_game", _trace_drop)
+    monkeypatch.setattr(sweep, "step_reap_abandoned_queue", _trace_reap_queue)
     monkeypatch.setattr(sweep, "step_post_game", _trace_post_game)
     monkeypatch.setattr(sweep.rooms, "gc_finished_rooms",
                         lambda: calls.append("gc"))
     await sweep.step_all()
     assert calls == ["clock_and_first_move", "heartbeat_timeout", "grace",
-                     "drop_orphans", "post_game", "gc"]
+                     "drop_orphans", "reap_queue", "post_game", "gc"]
+
+
+async def _queue_alone(rooms, time_minutes=5):
+    return await rooms.enqueue(client_uuid=ALICE, nickname="A", session_token="ta",
+                               time_minutes=time_minutes, increment_seconds=0,
+                               side_preference="white")
+
+
+@pytest.mark.asyncio
+async def test_sweep_reaps_a_queued_room_nobody_ever_connected_to(sweep, app, clock):
+    """SECURITY: POST /matchmake with no websocket and no DELETE used to pin a
+    queue slot until process restart, and queue depth counts against max_rooms --
+    ~max_rooms such requests locked every later player out with 503 room_full.
+    The sweep now reaps the abandoned waiter once it is past the TTL."""
+    rooms = app.state.rooms
+    room = await _queue_alone(rooms)
+    clock.advance(QUEUE_ABANDON_SECONDS - 1)
+    sweep.step_reap_abandoned_queue()
+    assert rooms.queue_depth == 1, "a waiter inside the TTL is never reaped"
+    clock.advance(2)
+    sweep.step_reap_abandoned_queue()
+    assert rooms.queue_depth == 0
+    assert rooms.get(room.room_id) is None
+
+
+@pytest.mark.asyncio
+async def test_sweep_never_reaps_a_queued_player_holding_a_live_socket(sweep, app, clock):
+    """A real player waiting for a match auths a websocket to the queued room and
+    holds it open with no timeout on the client side, so age alone cannot mean
+    abandoned. The live socket is the liveness proof: only a queued room with no
+    connection behind it is reapable, which is exactly the shape of the
+    HTTP-only flood. There is no protocol message that tells a waiting client its
+    queue slot vanished, so evicting a connected waiter would strand it in a
+    permanent 'searching' modal."""
+    rooms = app.state.rooms
+    room = await _queue_alone(rooms)
+    app.state.connections.add(room.room_id, ALICE, RecordingWS())
+    clock.advance(QUEUE_ABANDON_SECONDS * 10)
+    sweep.step_reap_abandoned_queue()
+    assert rooms.get(room.room_id) is room
+    assert rooms.queue_depth == 1
+
+
+@pytest.mark.asyncio
+async def test_sweep_reap_leaves_paired_rooms_alone(sweep, app, clock):
+    """The reap walks the queue only: a paired room keeps the `created_at` of the
+    queued room it grew from, so an active game that outlives the TTL must be
+    untouched."""
+    rooms = app.state.rooms
+    room = await _pair(rooms)
+    room.started_at = clock()
+    room.first_move_at = clock()
+    clock.advance(QUEUE_ABANDON_SECONDS * 10)
+    sweep.step_reap_abandoned_queue()
+    assert rooms.get(room.room_id) is room
+    assert rooms.rooms_active == 1
 
 
 @pytest.mark.asyncio

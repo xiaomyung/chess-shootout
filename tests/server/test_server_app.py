@@ -1,11 +1,20 @@
 import json
 import random
+import sys
 
 import pytest
 
-from chessshootout.server.app import PROTOCOL_VERSION, WS_CLOSE_SUPERSEDED
+from chessshootout.server import __main__ as server_main
+from chessshootout.server.app import (
+    MATCHMAKE_PER_IP_LIMIT, MAX_INBOUND_MESSAGE_BYTES, PROTOCOL_VERSION,
+    WS_CLOSE_SUPERSEDED,
+)
 from chessshootout.server.connections import ConnectionRegistry
-from chessshootout.server.protocol import FIRST_MOVE_ABORT_SECONDS, GRACE_SECONDS, Reason
+from chessshootout.server.protocol import (
+    FIRST_MOVE_ABORT_SECONDS, GRACE_SECONDS, MAX_INCREMENT_SECONDS, MAX_TIME_MINUTES,
+    Reason,
+)
+from chessshootout.server.rooms import QUEUE_ABANDON_SECONDS
 from tests.helpers import fake_uuid4
 from tests.server.conftest import ALICE, BOB, auth_msg
 
@@ -110,12 +119,27 @@ def test_matchmake_returns_room_and_token(client):
              "nickname": "", "time_minutes": 5, "increment_seconds": 0},
             id="empty_nickname",
         ),
+        pytest.param(
+            {"version": PROTOCOL_VERSION, "client_uuid": ZED, "nickname": "Z",
+             "time_minutes": MAX_TIME_MINUTES + 1, "increment_seconds": 0},
+            id="time_minutes_over_cap",
+        ),
+        pytest.param(
+            {"version": PROTOCOL_VERSION, "client_uuid": ZED, "nickname": "Z",
+             "time_minutes": 5, "increment_seconds": MAX_INCREMENT_SECONDS + 1},
+            id="increment_over_cap",
+        ),
     ],
 )
 def test_matchmake_rejects_invalid_field(client, body):
-    """Each invalid matchmake field is rejected with 422 before any room is created."""
+    """Each invalid matchmake field is rejected with 422 before any room is created.
+
+    The two over-cap cases are the SECURITY half: an unbounded time control mints
+    a fresh never-pairing queue bucket per distinct pair, so the rejection has to
+    land before enqueue touches `_queue`."""
     assert client.post("/matchmake", json=body).status_code == 422
     assert client.get("/healthz").json()["rooms_active"] == 0
+    assert client.get("/healthz").json()["queue_depth"] == 0
 
 
 def test_matchmake_rejects_already_in_game(client):
@@ -137,6 +161,60 @@ def test_cancel_matchmake_removes_from_queue(client):
     assert cancel.status_code == 200
     r2 = _matchmake(client, uuid=ALICE)
     assert r2.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_abandoned_queue_flood_stops_locking_the_server_out(app, client, clock):
+    """SECURITY, end to end: matchmake with a distinct uuid and a distinct time
+    control per request so nothing ever pairs, then never open a websocket and
+    never cancel. Queue depth counts against max_rooms, and before the reap
+    existed those slots were held until process restart -- max_rooms cheap HTTP
+    calls answered every later player with 503 room_full forever. One sweep past
+    the TTL has to give the capacity back."""
+    max_rooms = app.state.rooms._max_rooms
+    for i in range(max_rooms):
+        assert _matchmake(client, uuid=fake_uuid4(200 + i), nickname=f"N{i}",
+                          time=i + 1).status_code == 200
+    assert client.get("/healthz").json()["queue_depth"] == max_rooms
+    blocked = _matchmake(client, uuid=ZED, nickname="Z", time=100)
+    assert blocked.status_code == 503
+    assert blocked.json()["detail"]["reason"] == Reason.ROOM_FULL
+
+    clock.advance(QUEUE_ABANDON_SECONDS + 1)
+    await _sweep(app)
+
+    assert client.get("/healthz").json()["queue_depth"] == 0
+    assert app.state.rooms._queue == {}, "emptied time-control buckets go too"
+    assert _matchmake(client, uuid=ZED, nickname="Z", time=100).status_code == 200
+
+
+def test_cancel_matchmake_is_rate_limited_per_ip(client):
+    """SECURITY: DELETE /matchmake was the one public endpoint with no per-IP
+    limiter, so it was a free unauthenticated way to hammer the room manager's
+    lock. It now shares the matchmake budget and answers 429 past it."""
+    budget = int(MATCHMAKE_PER_IP_LIMIT.split("/")[0])
+    payload = {"version": PROTOCOL_VERSION, "room_id": fake_uuid4(77),
+               "session_token": "t"}
+    for _ in range(budget):
+        assert client.request("DELETE", "/matchmake", json=payload).status_code == 404
+    limited = client.request("DELETE", "/matchmake", json=payload)
+    assert limited.status_code == 429
+    assert limited.json().get("detail", {}).get("reason") == Reason.RATE_LIMITED
+
+
+def test_search_and_cancel_share_one_matchmake_budget(client):
+    """slowapi keys its buckets by request PATH, not by endpoint function, so
+    POST and DELETE /matchmake draw on the same 60/minute allowance rather than
+    one each. Pinned because it is the surprising half of the fix: the shared
+    budget is still ~30x what a human clicking find/cancel can spend, but a
+    future split of the two limits would silently double the real ceiling."""
+    budget = int(MATCHMAKE_PER_IP_LIMIT.split("/")[0])
+    payload = {"version": PROTOCOL_VERSION, "room_id": fake_uuid4(77),
+               "session_token": "t"}
+    for _ in range(budget - 1):
+        assert client.request("DELETE", "/matchmake", json=payload).status_code == 404
+    assert _matchmake(client, uuid=ALICE).status_code == 200
+    assert _matchmake(client, uuid=BOB).status_code == 429
 
 
 def test_cancel_with_bogus_token_rejected(client):
@@ -531,6 +609,51 @@ async def test_reclaim_closes_a_still_registered_old_socket(app, client):
     assert r.status_code == 200
     assert r.json()["session_token"] != "ta"
     assert old_ws.closed_with == WS_CLOSE_SUPERSEDED
+
+
+def _run_server_main(monkeypatch, argv):
+    captured = {}
+
+    def _fake_run(target, **kwargs):
+        captured["target"] = target
+        captured["kwargs"] = kwargs
+
+    monkeypatch.setenv("CHESS_MAX_ROOMS", "8")
+    monkeypatch.setattr(server_main.uvicorn, "run", _fake_run)
+    monkeypatch.setattr(server_main.logging_setup, "configure", lambda *a, **k: None)
+    monkeypatch.setattr(sys, "argv", argv)
+    server_main._main()
+    return captured
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [
+        pytest.param(["chess-server", "--max-rooms", "8"], id="serve"),
+        pytest.param(["chess-server", "--max-rooms", "8", "--reload"], id="reload"),
+    ],
+)
+def test_runner_caps_inbound_websocket_frames_at_the_protocol_layer(monkeypatch, argv):
+    """SECURITY: uvicorn's ws_max_size defaults to 16 MiB, so an unauthenticated
+    socket could buffer a 16 MB frame in memory before _authenticate_ws ever got
+    to measure it -- N of those OOM the container inside the auth window. The
+    runner now hands the websockets impl the same ceiling the app enforces, so
+    oversize frames die during framing instead of after buffering. Both entry
+    paths (plain serve and --reload, which goes through the app factory) must
+    carry it: a dev-only gap is still a shipped gap."""
+    kwargs = _run_server_main(monkeypatch, argv)["kwargs"]
+    assert kwargs["ws_max_size"] == MAX_INBOUND_MESSAGE_BYTES
+    assert kwargs["ws_ping_interval"] is None
+
+
+def test_runner_app_factory_builds_a_real_app(monkeypatch):
+    """--reload hands uvicorn an import string plus factory=True; the factory has
+    to stay importable and return a working app or the reload path dies at boot."""
+    kwargs = _run_server_main(monkeypatch, ["chess-server", "--reload"])["kwargs"]
+    assert kwargs["factory"] is True
+    monkeypatch.setenv("CHESS_MAX_ROOMS", "8")
+    built = server_main._app_factory()
+    assert built.state.rooms is not None
 
 
 @pytest.mark.asyncio

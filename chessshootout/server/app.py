@@ -72,6 +72,9 @@ WS_CLOSE_SERVER_SHUTDOWN = 4002
 WS_CLOSE_SUPERSEDED = 4003
 
 
+DEFAULT_TRUSTED_PROXIES = "127.0.0.1/32"
+
+
 def _parse_trusted_proxies(raw):
     networks = []
     for part in raw.split(","):
@@ -85,7 +88,18 @@ def _parse_trusted_proxies(raw):
     return networks
 
 
-TRUSTED_PROXIES = _parse_trusted_proxies(os.environ.get("TRUSTED_PROXIES", "127.0.0.1/32"))
+TRUSTED_PROXIES_RAW = os.environ.get("TRUSTED_PROXIES", DEFAULT_TRUSTED_PROXIES)
+TRUSTED_PROXIES = _parse_trusted_proxies(TRUSTED_PROXIES_RAW)
+
+
+def log_trusted_proxies(raw=None, trusted=None):
+    raw = TRUSTED_PROXIES_RAW if raw is None else raw
+    trusted = TRUSTED_PROXIES if trusted is None else trusted
+    if raw.strip() and not trusted:
+        log.warning("trusted proxies unparsable (TRUSTED_PROXIES=%r); "
+                    "rate limits key on the socket peer", raw)
+        return
+    log.info("trusted proxies %s", ",".join(str(net) for net in trusted) or "none")
 
 
 def _peer_trusted(peer, trusted):
@@ -96,13 +110,22 @@ def _peer_trusted(peer, trusted):
     return any(ip in net for net in trusted)
 
 
+def _forwarded_ip(raw):
+    if not raw:
+        return None
+    try:
+        return str(ipaddress.ip_address(raw.strip()))
+    except ValueError:
+        return None
+
+
 def client_ip_key(request, trusted=None):
     trusted = TRUSTED_PROXIES if trusted is None else trusted
     peer = get_remote_address(request)
     if _peer_trusted(peer, trusted):
-        cf = request.headers.get("cf-connecting-ip")
-        if cf:
-            return cf.strip()
+        forwarded = _forwarded_ip(request.headers.get("cf-connecting-ip"))
+        if forwarded is not None:
+            return forwarded
     return peer
 
 
@@ -163,6 +186,7 @@ def create_app(*, now_provider=time.monotonic, max_rooms=DEFAULT_MAX_ROOMS):
     async def lifespan(app):
         log.info("gameserver v%d release=%s listening (max_rooms=%d)",
                  PROTOCOL_VERSION, app_version() or "dev", max_rooms)
+        log_trusted_proxies()
         sweep_task = asyncio.create_task(_sweep_loop(app))
         try:
             yield
@@ -274,7 +298,8 @@ def create_app(*, now_provider=time.monotonic, max_rooms=DEFAULT_MAX_ROOMS):
         return MatchmakeResponse(room_id=room.room_id, session_token=token)
 
     @app.delete("/matchmake")
-    async def delete_matchmake(body: CancelMatchmakeRequest):
+    @limiter.limit(MATCHMAKE_PER_IP_LIMIT)
+    async def delete_matchmake(request: Request, body: CancelMatchmakeRequest):
         try:
             await rooms.cancel_wait(body.room_id, body.session_token)
         except NotInRoomError:
