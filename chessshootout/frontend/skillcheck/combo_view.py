@@ -11,7 +11,7 @@ from chessshootout.frontend.visual.cache import (
     new_size_cache, memoized_surface, render_text)
 from chessshootout.frontend.visual.colors import Colors
 from chessshootout.frontend.visual.draw import (
-    chevron_surface, cosine_pulse, supersample)
+    chevron_surface, cosine_pulse, cut_rect_surface, smoothstep, supersample)
 from chessshootout.frontend.visual.emoji import emoji_surface
 from chessshootout.frontend.visual.fonts import get_display_font
 from chessshootout.skillcheck.combo import (
@@ -36,6 +36,22 @@ COMBO_VIEW_STRIP_GAP_FRAC = 0.55
 COMBO_VIEW_STRIP_CHEVRON_FRAC = 0.34
 COMBO_VIEW_STRIP_SLOT_GAP_FRAC = 0.28
 COMBO_VIEW_STRIP_CURRENT_SCALE = 1.35
+
+COMBO_VIEW_PLATE_COLOR = Colors.well_deep
+COMBO_VIEW_PLATE_ALPHA = 178
+COMBO_VIEW_PLATE_PAD_X_FRAC = 0.44
+COMBO_VIEW_PLATE_PAD_Y_FRAC = 0.30
+COMBO_VIEW_PLATE_PAD_MIN_PX = 6
+COMBO_VIEW_PLATE_CUT_FRAC = 0.36
+COMBO_VIEW_PLATE_FADE_X_FRAC = 0.14
+COMBO_VIEW_PLATE_FADE_Y_FRAC = 0.28
+COMBO_VIEW_PLATE_FADE_MIN_PX = 3
+COMBO_VIEW_PLATE_CORNERS = ("tr", "bl")
+
+COMBO_VIEW_CHEVRON_SHADOW_COLOR = Colors.bg
+COMBO_VIEW_CHEVRON_SHADOW_ALPHA = 140
+COMBO_VIEW_CHEVRON_SHADOW_OFF_FRAC = 0.09
+COMBO_VIEW_CHEVRON_SHADOW_OFF_MIN_PX = 1
 
 COMBO_VIEW_PIP_GAP_FRAC = 0.34
 COMBO_VIEW_PIP_SIZE_FRAC = 0.22
@@ -163,6 +179,8 @@ _SOLID_CACHE = new_size_cache()
 _PIP_CACHE = new_size_cache()
 _FLASH_CACHE = new_size_cache()
 _EMOJI_CACHE = new_size_cache()
+_PLATE_CACHE = new_size_cache()
+_CHEVRON_SHADOW_CACHE = new_size_cache()
 
 
 def _direction_chevron(size, color, direction):
@@ -171,6 +189,42 @@ def _direction_chevron(size, color, direction):
         angle = _DIR_ANGLE[direction]
         return base if angle == 0 else pg.transform.rotate(base, angle)
     return memoized_surface(_DIR_CHEVRON_CACHE, (size, str(color), direction), build)
+
+
+def _chevron_shadow(size, direction):
+    def build():
+        surf = _direction_chevron(size, COMBO_VIEW_CHEVRON_SHADOW_COLOR, direction).copy()
+        surf.fill((255, 255, 255, COMBO_VIEW_CHEVRON_SHADOW_ALPHA),
+                  special_flags=pg.BLEND_RGBA_MULT)
+        return surf
+    return memoized_surface(_CHEVRON_SHADOW_CACHE, (size, direction), build)
+
+
+def _edge_ramp(w, h, fade_x, fade_y, peak):
+    cols = pg.Surface((w, h), pg.SRCALPHA)
+    cols.fill((255, 255, 255, peak))
+    for i in range(fade_x):
+        a = int(peak * smoothstep((i + 0.5) / fade_x))
+        cols.fill((255, 255, 255, a), (i, 0, 1, h))
+        cols.fill((255, 255, 255, a), (w - 1 - i, 0, 1, h))
+    rows = pg.Surface((w, h), pg.SRCALPHA)
+    rows.fill((255, 255, 255, peak))
+    for i in range(fade_y):
+        a = int(peak * smoothstep((i + 0.5) / fade_y))
+        rows.fill((255, 255, 255, a), (0, i, w, 1))
+        rows.fill((255, 255, 255, a), (0, h - 1 - i, w, 1))
+    cols.blit(rows, (0, 0), special_flags=pg.BLEND_RGBA_MIN)
+    return cols
+
+
+def _strip_plate(w, h, cut, fade_x, fade_y):
+    def build():
+        plate = cut_rect_surface((w, h), cut, COMBO_VIEW_PLATE_COLOR,
+                                 corners=COMBO_VIEW_PLATE_CORNERS).copy()
+        plate.blit(_edge_ramp(w, h, fade_x, fade_y, COMBO_VIEW_PLATE_ALPHA), (0, 0),
+                   special_flags=pg.BLEND_RGBA_MULT)
+        return plate
+    return memoized_surface(_PLATE_CACHE, (w, h, cut, fade_x, fade_y), build)
 
 
 def _pad_static(radius, hub_r):
@@ -364,6 +418,22 @@ class ComboController(SkillCheckController):
         start = self._pad_center[0] - total // 2
         self._strip_y = self._pad_top - max(int(self._cell * COMBO_VIEW_STRIP_GAP_FRAC), 12)
         self._strip_slots = [start + i * (slot_w + gap) + slot_w // 2 for i in range(n)]
+        self._layout_plate(start, total)
+
+    def _layout_plate(self, start, total):
+        pad_x = max(int(self._cell * COMBO_VIEW_PLATE_PAD_X_FRAC), COMBO_VIEW_PLATE_PAD_MIN_PX)
+        pad_y = max(int(self._cell * COMBO_VIEW_PLATE_PAD_Y_FRAC), COMBO_VIEW_PLATE_PAD_MIN_PX)
+        self._plate_w = total + 2 * pad_x
+        self._plate_h = max(self._strip_big, self._fire_size) + 2 * pad_y
+        self._plate_cut = max(int(self._plate_h * COMBO_VIEW_PLATE_CUT_FRAC), 1)
+        self._plate_fade_x = min(
+            max(int(self._plate_w * COMBO_VIEW_PLATE_FADE_X_FRAC), COMBO_VIEW_PLATE_FADE_MIN_PX),
+            self._plate_w // 2)
+        self._plate_fade_y = min(
+            max(int(self._plate_h * COMBO_VIEW_PLATE_FADE_Y_FRAC), COMBO_VIEW_PLATE_FADE_MIN_PX),
+            self._plate_h // 2)
+        self._plate_left = start - pad_x
+        self._plate_top = self._strip_y - self._plate_h // 2
 
     def relayout(self, cell_rect):
         self._apply_geometry(cell_rect)
@@ -567,6 +637,7 @@ class ComboController(SkillCheckController):
         self._draw_dance_floor(window)
         self._draw_actors(window)
         self._draw_spotlight(window)
+        self._draw_strip_plate(window)
         self._draw_strip(window)
         self._draw_pad(window)
         self._draw_pips(window)
@@ -657,6 +728,12 @@ class ComboController(SkillCheckController):
                           * math.sin(self._now / COMBO_VIEW_SHUFFLE_PERIOD))
             window.blit(victim, victim.get_rect(center=(cx + shuffle, cy)))
 
+    def _draw_strip_plate(self, window):
+        ox, oy = self._shake()
+        plate = _strip_plate(self._plate_w, self._plate_h, self._plate_cut,
+                             self._plate_fade_x, self._plate_fade_y)
+        window.blit(plate, (self._plate_left + ox, self._plate_top + oy))
+
     def _draw_strip(self, window):
         ox, oy = self._shake()
         deflate = self._deflate_scale()
@@ -670,13 +747,17 @@ class ComboController(SkillCheckController):
             if fire and i >= self._progress:
                 self._draw_fire(window, sx + ox + wiggle, self._strip_y + oy)
             if i < self._progress:
-                chev = _direction_chevron(self._strip_chev, Colors.win, direction)
+                size, color = self._strip_chev, Colors.win
             elif i == self._progress:
-                size = max(int(self._strip_big * deflate), 4)
-                chev = _direction_chevron(size, Colors.accent, direction)
+                size, color = max(int(self._strip_big * deflate), 4), Colors.accent
             else:
-                chev = _direction_chevron(self._strip_chev, Colors.text_dim, direction)
-            window.blit(chev, chev.get_rect(center=(sx + ox + wiggle, self._strip_y + oy)))
+                size, color = self._strip_chev, Colors.text_dim
+            chev = _direction_chevron(size, color, direction)
+            rect = chev.get_rect(center=(sx + ox + wiggle, self._strip_y + oy))
+            drop = max(int(size * COMBO_VIEW_CHEVRON_SHADOW_OFF_FRAC),
+                       COMBO_VIEW_CHEVRON_SHADOW_OFF_MIN_PX)
+            window.blit(_chevron_shadow(size, direction), (rect.x + drop, rect.y + drop))
+            window.blit(chev, rect)
 
     def _draw_fire(self, window, cx, cy):
         sprite = _emoji_sprite(COMBO_VIEW_FIRE_EMOJI, self._fire_size)

@@ -1,5 +1,5 @@
 import logging
-from unittest.mock import MagicMock, call
+from unittest.mock import MagicMock, call, patch
 
 import pygame as pg
 import pytest
@@ -10,12 +10,17 @@ from chessshootout.frontend.skillcheck.aim_view import AimController
 from chessshootout.frontend.skillcheck.combo_view import (
     ComboController, COMBO_VIEW_RESULT_HOLD_MS, COMBO_VIEW_BRILLIANT_TEXT, COMBO_VIEW_CLEAN_TEXT,
     COMBO_VIEW_FAIL_TEXT, COMBO_VIEW_STREAK_FIRE,
-    _JUDGE_BRILLIANT, _JUDGE_CLEAN, _JUDGE_FAIL, _JUDGE_TEXT)
+    COMBO_VIEW_PLATE_ALPHA, COMBO_VIEW_PLATE_PAD_X_FRAC, COMBO_VIEW_PLATE_PAD_Y_FRAC,
+    COMBO_VIEW_PLATE_FADE_X_FRAC, COMBO_VIEW_PLATE_FADE_Y_FRAC,
+    COMBO_VIEW_CHEVRON_SHADOW_ALPHA, COMBO_VIEW_CHEVRON_SHADOW_OFF_FRAC,
+    _JUDGE_BRILLIANT, _JUDGE_CLEAN, _JUDGE_FAIL, _JUDGE_TEXT,
+    _PLATE_CACHE, _CHEVRON_SHADOW_CACHE, _strip_plate)
 from chessshootout.frontend.skillcheck.controller import SKILLCHECK_RESULT_HOLD_MS
 from chessshootout.frontend.skillcheck.mole_view import MoleController
 from chessshootout.frontend.skillcheck.registry import build_controller
 from chessshootout.frontend.skillcheck.wheel_view import WheelController
-from chessshootout.skillcheck.combo import ComboChallenge, COMBO_MAX_WRONGS
+from chessshootout.skillcheck.combo import (
+    ComboChallenge, COMBO_MAX_WRONGS, COMBO_WRONG_LOCKOUT_MS)
 from chessshootout.skillcheck.types import SkillCheckKind
 
 
@@ -526,6 +531,207 @@ def test_combo_hit_pitch_ladder_muted_when_passive():
     ctrl.update(150)
     ctrl.spectate_shot(140, 0, True, progress=1)
     audio.play_combo_hit.assert_not_called()
+
+
+def _plate_core_rect(ctrl):
+    rect = pg.Rect(ctrl._plate_left, ctrl._plate_top, ctrl._plate_w, ctrl._plate_h)
+    return rect.inflate(-2 * ctrl._plate_fade_x, -2 * ctrl._plate_fade_y)
+
+
+def _lit_board_brightness(ctrl, *, plated, states=(150,)):
+    # the strip lives over a lit, dancing board: probe it on a white field so any
+    # backing shows up as a straight brightness drop over the same drawn arrows.
+    if not plated:
+        ctrl._draw_strip_plate = lambda window: None
+    surf = pg.Surface((700, 700))
+    surf.fill((255, 255, 255))
+    for t in states:
+        ctrl.update(t)
+    ctrl.draw(surf)
+    return _region_brightness(surf, _plate_core_rect(ctrl))
+
+
+def test_strip_plate_darkens_the_lit_board_behind_the_arrows():
+    bare = _lit_board_brightness(_combo_scene(_PROMPTS, 99), plated=False)
+    plated = _lit_board_brightness(_combo_scene(_PROMPTS, 99), plated=True)
+    assert plated < bare * 0.6, \
+        "the backing plate has to swallow the dancing board behind the prompts"
+
+
+def test_spectator_mirror_gets_the_same_backing_plate():
+    def mirror(plated):
+        ctrl = _combo(passive=True, audio=MagicMock(), board_rect=pg.Rect(0, 0, 700, 700))
+        return _lit_board_brightness(ctrl, plated=plated)
+
+    assert mirror(True) < mirror(False) * 0.6, \
+        "the read-only spectate mirror draws the plate too, not a bare strip"
+
+
+def test_strip_plate_edges_fade_out_instead_of_ending_in_a_hard_box():
+    ctrl = _combo_scene(_PROMPTS, 99)
+    plate = _strip_plate(ctrl._plate_w, ctrl._plate_h, ctrl._plate_cut,
+                         ctrl._plate_fade_x, ctrl._plate_fade_y)
+    mid_x, mid_y = ctrl._plate_w // 2, ctrl._plate_h // 2
+    assert plate.get_at((mid_x, mid_y)).a == COMBO_VIEW_PLATE_ALPHA, \
+        "the core of the plate carries the full knob alpha"
+
+    row = [plate.get_at((x, mid_y)).a for x in range(ctrl._plate_fade_x + 1)]
+    assert row[0] == 0, "the left edge is fully transparent — no hard box seam"
+    assert row[-1] == COMBO_VIEW_PLATE_ALPHA
+    assert all(b >= a for a, b in zip(row, row[1:])), "the horizontal ramp climbs monotonically"
+    assert 0 < row[len(row) // 2] < COMBO_VIEW_PLATE_ALPHA, "and it really is a ramp, not a step"
+    assert plate.get_at((ctrl._plate_w - 1, mid_y)).a == 0, "the right edge fades out as well"
+
+    col = [plate.get_at((mid_x, y)).a for y in range(ctrl._plate_fade_y + 1)]
+    assert col[0] == 0 and col[-1] == COMBO_VIEW_PLATE_ALPHA
+    assert all(b >= a for a, b in zip(col, col[1:])), "the vertical ramp climbs monotonically"
+    assert plate.get_at((mid_x, ctrl._plate_h - 1)).a == 0
+    assert plate.get_at((0, 0)).a == 0, "corners take the softer of the two ramps"
+
+
+def test_strip_plate_draws_over_the_scrim_and_under_the_arrows_and_judgement():
+    ctrl = _combo_scene(_PROMPTS, 99)
+    order = []
+    for name in ("_draw_dance_floor", "_draw_spotlight", "_draw_strip_plate", "_draw_strip",
+                 "_draw_flying", "_draw_confetti", "_draw_judgement"):
+        setattr(ctrl, name, (lambda tag: lambda window: order.append(tag))(name))
+    ctrl.update(150)
+    ctrl.draw(pg.Surface((700, 700), pg.SRCALPHA))
+    assert order.index("_draw_dance_floor") < order.index("_draw_strip_plate")
+    assert order.index("_draw_spotlight") < order.index("_draw_strip_plate"), \
+        "the plate sits above the dance-floor tint and the spotlight scrim"
+    for above in ("_draw_strip", "_draw_flying", "_draw_confetti", "_draw_judgement"):
+        assert order.index("_draw_strip_plate") < order.index(above), \
+            "arrows, the popped-off arrow and the judgement all read on top of the plate"
+
+
+def test_fire_streak_still_reads_over_the_plate():
+    def fire_brightness(plated):
+        ctrl = _combo_scene(_PROMPTS, 99)
+        if not plated:
+            ctrl._draw_strip_plate = lambda window: None
+        for i, direction in enumerate(_PROMPTS[:3]):
+            ctrl.update(150 * (i + 1))
+            ctrl.handle_event(_key(direction))
+        assert ctrl._fire_active() is True
+        surf = pg.Surface((700, 700))
+        surf.fill((0, 0, 0))
+        ctrl.draw(surf)
+        rect = pg.Rect(0, 0, ctrl._fire_size // 2, ctrl._fire_size // 2)
+        rect.center = (ctrl._strip_slots[ctrl._progress], ctrl._strip_y)
+        return _region_brightness(surf, rect)
+
+    plated = fire_brightness(True)
+    assert plated > fire_brightness(False) * 0.9, \
+        "the fire-streak flame is drawn after the plate, so it keeps its punch"
+
+
+def test_each_chevron_gets_a_drop_shadow_for_contrast():
+    def arrow_brightness(shadowed):
+        ctrl = _combo_scene(_PROMPTS, 99)
+        surf = pg.Surface((700, 700))
+        surf.fill((255, 255, 255))
+        ctrl.update(150)
+        if shadowed:
+            ctrl.draw(surf)
+        else:
+            with patch("chessshootout.frontend.skillcheck.combo_view._chevron_shadow",
+                       return_value=pg.Surface((1, 1), pg.SRCALPHA)):
+                ctrl.draw(surf)
+        rect = pg.Rect(0, 0, int(ctrl._strip_big * 1.6), ctrl._strip_big)
+        rect.center = (ctrl._strip_slots[0], ctrl._strip_y)
+        return _region_brightness(surf, rect)
+
+    assert arrow_brightness(True) < arrow_brightness(False), \
+        "a dark silhouette under every chevron separates it from the flames behind it"
+
+
+def test_strip_plate_spans_every_slot_and_never_shrinks_as_arrows_are_consumed():
+    ctrl = _combo(board_rect=pg.Rect(0, 0, 700, 700))
+    geometry = (ctrl._plate_left, ctrl._plate_top, ctrl._plate_w, ctrl._plate_h)
+    half_chevron = int(ctrl._strip_big * 0.8)
+    assert ctrl._plate_left <= ctrl._strip_slots[0] - half_chevron, \
+        "the plate reaches past the first chevron's outer edge"
+    assert ctrl._plate_left + ctrl._plate_w >= ctrl._strip_slots[-1] + half_chevron
+    _run_correct(ctrl)
+    assert ctrl._progress == len(_PROMPTS)
+    assert (ctrl._plate_left, ctrl._plate_top, ctrl._plate_w, ctrl._plate_h) == geometry, \
+        "the consumed arrows stay on the strip, so the plate keeps its full length"
+
+
+def test_plate_geometry_derives_from_the_named_knobs():
+    cell = 99
+    ctrl = _combo_scene(_PROMPTS, cell)
+    pad_x = int(cell * COMBO_VIEW_PLATE_PAD_X_FRAC)
+    pad_y = int(cell * COMBO_VIEW_PLATE_PAD_Y_FRAC)
+    span = ctrl._strip_slots[-1] - ctrl._strip_slots[0] + ctrl._strip_big
+    assert ctrl._plate_w == span + 2 * pad_x
+    assert ctrl._plate_h == max(ctrl._strip_big, ctrl._fire_size) + 2 * pad_y
+    assert ctrl._plate_fade_x == int(ctrl._plate_w * COMBO_VIEW_PLATE_FADE_X_FRAC)
+    assert ctrl._plate_fade_y == int(ctrl._plate_h * COMBO_VIEW_PLATE_FADE_Y_FRAC)
+    assert 0 < COMBO_VIEW_PLATE_ALPHA < 255, "the plate is translucent, never an opaque slab"
+    assert 0 < COMBO_VIEW_PLATE_FADE_X_FRAC < 0.5 and 0 < COMBO_VIEW_PLATE_FADE_Y_FRAC < 0.5, \
+        "both fades have to leave a solid core between them"
+    assert 0 < COMBO_VIEW_CHEVRON_SHADOW_ALPHA < 255
+    assert 0 < COMBO_VIEW_CHEVRON_SHADOW_OFF_FRAC < 0.5
+
+
+def test_relayout_resizes_the_plate_with_the_cell():
+    ctrl = _combo(board_rect=pg.Rect(0, 0, 700, 700))
+    small = (ctrl._plate_w, ctrl._plate_h)
+    ctrl.relayout(pg.Rect(0, 0, 160, 160))
+    assert ctrl._plate_w > small[0] and ctrl._plate_h > small[1], \
+        "a resize rebuilds the plate for the new cell instead of stretching a stale one"
+    surf = pg.Surface((700, 700), pg.SRCALPHA)
+    ctrl.update(200)
+    ctrl.draw(surf)
+
+
+def test_plate_and_chevron_shadows_allocate_nothing_per_frame():
+    ctrl = _combo_scene(_PROMPTS, 99)
+    surf = pg.Surface((700, 700), pg.SRCALPHA)
+    ctrl.update(16)
+    ctrl.draw(surf)
+    plate = _strip_plate(ctrl._plate_w, ctrl._plate_h, ctrl._plate_cut,
+                         ctrl._plate_fade_x, ctrl._plate_fade_y)
+    sizes = (len(_PLATE_CACHE), len(_CHEVRON_SHADOW_CACHE))
+    for i in range(2, 60):
+        ctrl.update(i * 16)
+        ctrl.draw(surf)
+    assert (len(_PLATE_CACHE), len(_CHEVRON_SHADOW_CACHE)) == sizes, \
+        "60 frames must not add a single cache entry"
+    assert _strip_plate(ctrl._plate_w, ctrl._plate_h, ctrl._plate_cut,
+                        ctrl._plate_fade_x, ctrl._plate_fade_y) is plate
+
+
+def test_wrong_press_cues_the_scratch_inside_the_press_handler():
+    audio = MagicMock()
+    ctrl = _combo(audio=audio)
+    at_cue = {}
+    audio.play_combo_wrong.side_effect = lambda: at_cue.update(
+        wrongs=ctrl._wrong_count, lockout=ctrl._lockout_until)
+    ctrl.update(150)
+    audio.play_combo_wrong.assert_not_called()
+    ctrl.handle_event(_key("down"))
+    assert audio.play_combo_wrong.call_count == 1, \
+        "handle_event returns with the scratch already cued — never a frame later"
+    assert at_cue == {"wrongs": 1, "lockout": 150 + int(COMBO_WRONG_LOCKOUT_MS)}, \
+        "the cue fires inside the wrong-press handler, after the miss is booked"
+
+
+def test_the_scratch_is_never_re_cued_by_a_later_frame_or_the_lockout_ending():
+    audio = MagicMock()
+    ctrl = _combo(audio=audio)
+    surf = pg.Surface((700, 700), pg.SRCALPHA)
+    ctrl.update(150)
+    ctrl.handle_event(_key("down"))
+    for t in range(160, 160 + 3 * int(COMBO_WRONG_LOCKOUT_MS), 16):
+        ctrl.update(t)
+        ctrl.draw(surf)
+    ctrl.handle_event(_key("up"))
+    assert ctrl._progress == 1, "the next correct press lands once the lockout expires"
+    assert audio.play_combo_wrong.call_count == 1, \
+        "no deferred scratch trails the player into the next prompt"
 
 
 def test_no_logging_across_update_and_draw_frames(caplog):
