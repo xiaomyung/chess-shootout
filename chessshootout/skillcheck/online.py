@@ -1,7 +1,7 @@
 from chessshootout.backend.pieces import PIECE_VALUES, PieceType
 from chessshootout.backend.utils import PROMO_TYPE_BY_LETTER
 from chessshootout.skillcheck.aim import AimChallenge
-from chessshootout.skillcheck.combo import COMBO_MIN_INTER_PRESS_MS, ComboChallenge
+from chessshootout.skillcheck.combo import COMBO_SERVER_MIN_INTER_PRESS_MS, ComboChallenge
 from chessshootout.skillcheck.mole import MOLE_MIN_INTER_SHOT_MS, MoleChallenge
 from chessshootout.skillcheck.rng import move_roll_key, ply_roll
 from chessshootout.skillcheck.triggers import select_skillcheck
@@ -11,12 +11,11 @@ from chessshootout.skillcheck.wheel import (
 
 SKILLCHECK_HUMAN_FLOOR_MS = WHEEL_HUMAN_FLOOR_MS
 SKILLCHECK_LAG_BOUND_MS = 200.0
-SKILLCHECK_TIME_CAP_MS = 60000.0
 SKILLCHECK_TIME_FRACTION = 0.10
 
 _MIN_INTER_INPUT_MS = {
     SkillCheckKind.WHACK: MOLE_MIN_INTER_SHOT_MS,
-    SkillCheckKind.COMBO: COMBO_MIN_INTER_PRESS_MS,
+    SkillCheckKind.COMBO: COMBO_SERVER_MIN_INTER_PRESS_MS,
 }
 
 
@@ -24,7 +23,7 @@ def skillcheck_deadline_ms(initial_seconds):
     if not initial_seconds:
         return SKILLCHECK_DEADLINE_MS
     tenth = initial_seconds * SKILLCHECK_TIME_FRACTION * 1000.0
-    return min(SKILLCHECK_DEADLINE_MS, tenth, SKILLCHECK_TIME_CAP_MS)
+    return min(SKILLCHECK_DEADLINE_MS, tenth)
 
 
 def promo_value(promo_char):
@@ -107,7 +106,8 @@ def check_expired(kind, challenge, elapsed_ms, miss_count=0, progress=0, last_hi
     if kind == SkillCheckKind.AIM:
         return aim_expired(challenge, elapsed_ms, miss_count)
     if kind == SkillCheckKind.WHACK:
-        return challenge.quota_unreachable(elapsed_ms, progress, last_hit_pop)
+        return (challenge.quota_unreachable(elapsed_ms, progress, last_hit_pop)
+                or challenge.whiffs_exhausted(miss_count))
     if kind == SkillCheckKind.COMBO:
         return challenge.wrongs_exhausted(miss_count)
     return False

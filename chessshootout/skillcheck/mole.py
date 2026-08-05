@@ -34,6 +34,7 @@ MOLE_HITBOX_RY_FRAC = 0.52
 MOLE_HITBOX_CY_FRAC = -0.30
 MOLE_RECOIL_LOCKOUT_MS = 180.0
 MOLE_MIN_INTER_SHOT_MS = 80.0
+MOLE_MAX_WHIFFS = 3
 MOLE_TAUNTS = ("missed me", "lol", "nice aim", "rip", "too slow",
                "2 ez", "bye bye", "not even close", "lmaoo", "git gud")
 
@@ -199,6 +200,9 @@ class MoleChallenge:
 
     def pop_mandatory(self, index, hits):
         return hits + (len(self.pops) - index) == self.hits_required
+
+    def whiffs_exhausted(self, miss_count):
+        return miss_count >= MOLE_MAX_WHIFFS
 
 
 def _free_squares(capture_sq, blocked, radius, board_size):

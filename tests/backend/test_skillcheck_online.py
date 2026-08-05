@@ -12,8 +12,10 @@ import pytest
 from chessshootout.backend.pieces import PIECE_VALUES, PieceType
 from chessshootout.skillcheck import online
 from chessshootout.skillcheck.aim import AimChallenge
-from chessshootout.skillcheck.combo import COMBO_MIN_INTER_PRESS_MS, ComboChallenge
-from chessshootout.skillcheck.mole import MOLE_MIN_INTER_SHOT_MS, MoleChallenge
+from chessshootout.skillcheck.combo import (
+    COMBO_MIN_INTER_PRESS_MS, COMBO_SERVER_MIN_INTER_PRESS_MS, ComboChallenge)
+from chessshootout.skillcheck.mole import (
+    MOLE_MAX_WHIFFS, MOLE_MIN_INTER_SHOT_MS, MoleChallenge)
 from chessshootout.skillcheck.types import SkillCheckKind, TriggerFacts
 from chessshootout.skillcheck import wheel
 from chessshootout.skillcheck.wheel import WheelChallenge, period_for_diff
@@ -272,7 +274,7 @@ def test_aim_piece_scale_no_crash_on_negative_elapsed():
     (20, 2000.0),      # 20s game: 10% = 2s
     (0, 5000.0),       # no clock -> the base deadline
 ])
-def test_skillcheck_deadline_ms_caps_at_min_base_tenth_and_ceiling(initial_seconds, expected):
+def test_skillcheck_deadline_ms_is_min_of_base_and_tenth_of_tc(initial_seconds, expected):
     assert online.skillcheck_deadline_ms(initial_seconds) == expected
 
 
@@ -410,6 +412,33 @@ def test_check_expired_whack_flips_when_quota_becomes_unreachable():
     assert online.check_expired(WHACK, mole, late, progress=0) is True
 
 
+def test_check_expired_whack_flips_at_max_whiffs_even_mid_schedule():
+    # the whiff cap is the second, independent death condition: the schedule can
+    # still be perfectly winnable (quota reachable, every pop ahead) and the check
+    # is dead anyway once three misses are spent. This is what closes the
+    # spam-every-hole exploit at every server surface through the one predicate.
+    mole_ch = online.challenge_from(WHACK, "s", 0, captured_value=3)
+    early = mole_ch.pops[0].t_up_ms
+    assert mole_ch.quota_unreachable(early, 0) is False, "the schedule alone is winnable"
+    assert online.check_expired(WHACK, mole_ch, early,
+                                miss_count=MOLE_MAX_WHIFFS - 1, progress=0) is False
+    assert online.check_expired(WHACK, mole_ch, early,
+                                miss_count=MOLE_MAX_WHIFFS, progress=0) is True
+    assert online.check_expired(WHACK, mole_ch, early,
+                                miss_count=MOLE_MAX_WHIFFS + 2, progress=0) is True
+
+
+def test_check_expired_whack_either_death_arm_suffices():
+    mole_ch = online.challenge_from(WHACK, "s", 0, captured_value=3)
+    late = mole_ch.pops[-1].t_down_ms + 200.0
+    assert online.check_expired(WHACK, mole_ch, late, miss_count=0, progress=0) is True, \
+        "quota death still fires with zero whiffs"
+    assert online.check_expired(WHACK, mole_ch, 0.0, miss_count=MOLE_MAX_WHIFFS,
+                                progress=0) is True, \
+        "whiff death still fires with the whole schedule ahead"
+    assert online.check_expired(WHACK, mole_ch, 0.0, miss_count=0, progress=0) is False
+
+
 def test_check_expired_combo_flips_at_max_wrongs():
     combo = online.challenge_from(COMBO, "s", 0, captured_value=3)
     assert online.check_expired(COMBO, combo, 200, miss_count=2) is False
@@ -420,4 +449,13 @@ def test_min_inter_input_ms_by_kind():
     assert online.min_inter_input_ms(WHEEL) == 0.0
     assert online.min_inter_input_ms(AIM) == 0.0
     assert online.min_inter_input_ms(WHACK) == MOLE_MIN_INTER_SHOT_MS
-    assert online.min_inter_input_ms(COMBO) == COMBO_MIN_INTER_PRESS_MS
+    assert online.min_inter_input_ms(COMBO) == COMBO_SERVER_MIN_INTER_PRESS_MS
+
+
+def test_server_press_gate_sits_below_the_client_press_gap():
+    # Both gates measure the same inter-press spacing on different clocks. The
+    # elapsed clamp lets network jitter compress a legit gap by up to
+    # SKILLCHECK_LAG_BOUND_MS on the server side, so a server gate at or above
+    # the client's own minimum silently drops presses the client accepted and
+    # desyncs progress. The server threshold must stay strictly below.
+    assert COMBO_SERVER_MIN_INTER_PRESS_MS < COMBO_MIN_INTER_PRESS_MS

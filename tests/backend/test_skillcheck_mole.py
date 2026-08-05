@@ -33,6 +33,7 @@ import pytest
 import chessshootout
 from chessshootout.backend.pieces import PIECE_VALUES, PieceType
 from chessshootout.skillcheck import mole, wheel
+from chessshootout.skillcheck.combo import COMBO_MAX_WRONGS
 from chessshootout.skillcheck.mole import MoleChallenge
 
 CAPTURE_SQ = (3, 3)
@@ -377,6 +378,29 @@ def test_a_five_of_five_dies_the_instant_one_pop_expires_unhit():
         "the first unhit expiry already makes 5-of-5 impossible"
     assert ch.pop_mandatory(0, 0) is True, \
         "pop_mandatory foretells exactly the pop whose miss triggers that death"
+
+
+def test_whiff_cap_mirrors_the_combo_wrong_cap():
+    # Unlimited free misses made whack the one blindly automatable check: a bot
+    # could spam every hole and only the hits counted. Three whiffs now fail the
+    # check outright, the exact budget combo grants wrong presses — the two caps
+    # are deliberately the same number and the same >= comparison.
+    assert mole.MOLE_MAX_WHIFFS == COMBO_MAX_WRONGS == 3
+    ch = MoleChallenge.from_seed("whiffs")
+    assert ch.whiffs_exhausted(0) is False
+    assert ch.whiffs_exhausted(mole.MOLE_MAX_WHIFFS - 1) is False
+    assert ch.whiffs_exhausted(mole.MOLE_MAX_WHIFFS) is True
+    assert ch.whiffs_exhausted(mole.MOLE_MAX_WHIFFS + 5) is True
+
+
+def test_whiffs_exhausted_ignores_the_schedule_entirely():
+    # the cap is a pure counter rule: the same miss_count reads identically on a
+    # full 5-pop schedule and a compressed 3-pop one, before or after any pop.
+    full = MoleChallenge.from_seed("cap:sched")
+    short = MoleChallenge.from_seed("cap:sched", deadline_ms=2000.0)
+    for count in range(6):
+        assert full.whiffs_exhausted(count) == short.whiffs_exhausted(count) \
+            == (count >= mole.MOLE_MAX_WHIFFS)
 
 
 def test_hole_squares_is_deterministic_and_iteration_order_independent():

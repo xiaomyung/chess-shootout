@@ -15,7 +15,7 @@ from chessshootout.frontend.visual.tween import out_cubic
 from chessshootout.infra import env
 from chessshootout.skillcheck.mole import (
     MOLE_GRACE_MS, MOLE_HITBOX_CY_FRAC, MOLE_HITBOX_RX_FRAC, MOLE_HITBOX_RY_FRAC,
-    MOLE_INTRO_MS, MOLE_RECOIL_LOCKOUT_MS)
+    MOLE_INTRO_MS, MOLE_MAX_WHIFFS, MOLE_RECOIL_LOCKOUT_MS)
 from chessshootout.skillcheck.rng import seeded_floats
 
 MOLE_VIEW_FAIL_HOLD_MS = 1250
@@ -107,6 +107,12 @@ MOLE_VIEW_PIP_OFFSET_FRAC = 0.66
 MOLE_VIEW_PIP_FADE_DELAY_MS = 300.0
 MOLE_VIEW_PIP_FADE_MS = 250.0
 MOLE_VIEW_PIP_RADIUS_DIV = 3
+MOLE_VIEW_CROSS_STRIKE_SIZE_FRAC = 0.16
+MOLE_VIEW_CROSS_STRIKE_GAP_FRAC = 0.07
+MOLE_VIEW_CROSS_STRIKE_OFFSET_FRAC = 0.66
+MOLE_VIEW_CROSS_STRIKE_LW_FRAC = 0.12
+MOLE_VIEW_CROSS_STRIKE_PAD_FRAC = 0.28
+MOLE_VIEW_CROSS_STRIKE_RING_LW_FRAC = 0.1
 MOLE_VIEW_CASING_W_FRAC = 0.10
 MOLE_VIEW_CASING_H_FRAC = 0.05
 MOLE_VIEW_CASING_TIP_DIV = 4
@@ -341,6 +347,26 @@ def _cross_glow_surface(r):
     return memoized_surface(_MOLE_STATIC_CACHE, ("crossglow", r), build)
 
 
+def _strike_cross_surface(size, struck):
+    def build():
+        def render(surf, k):
+            w = surf.get_width()
+            r = w / 2.0
+            if struck:
+                pg.draw.circle(surf, pg.Color(Colors.loss), (r, r), r)
+                lw = max(int(w * MOLE_VIEW_CROSS_STRIKE_LW_FRAC), 2)
+                pad = w * MOLE_VIEW_CROSS_STRIKE_PAD_FRAC
+                pg.draw.line(surf, pg.Color(Colors.on_accent), (pad, pad),
+                             (w - pad, w - pad), lw)
+                pg.draw.line(surf, pg.Color(Colors.on_accent), (w - pad, pad),
+                             (pad, w - pad), lw)
+            else:
+                lw = max(int(w * MOLE_VIEW_CROSS_STRIKE_RING_LW_FRAC), 2)
+                pg.draw.circle(surf, pg.Color(Colors.border_strong), (r, r), r - lw, lw)
+        return supersample((size, size), render)
+    return memoized_surface(_MOLE_STATIC_CACHE, ("strike", size, struck), build)
+
+
 def _danger_render(bucket):
     hot = bucket >= 1
     rim = pg.Color(Colors.text) if hot else pg.Color(Colors.loss)
@@ -453,6 +479,7 @@ class MoleController(SkillCheckController):
         self._heal_cache = {}
         self._emerge_scratch = {}
         self._progress = progress
+        self._miss_count = 0
         self._torn_key = hash(challenge.pops)
         self._last_hit_pop = last_hit_pop
         self._last_hit_anim_ms = None
@@ -513,6 +540,8 @@ class MoleController(SkillCheckController):
         self._pip_w = max(int(cell * MOLE_VIEW_PIP_W_FRAC), 4)
         self._pip_h = max(int(cell * MOLE_VIEW_PIP_H_FRAC), 6)
         self._pip_gap = max(int(cell * MOLE_VIEW_PIP_GAP_FRAC), 2)
+        self._strike_size = max(int(cell * MOLE_VIEW_CROSS_STRIKE_SIZE_FRAC), 6)
+        self._strike_gap = max(int(cell * MOLE_VIEW_CROSS_STRIKE_GAP_FRAC), 2)
         self._squash_cache.clear()
         self._heal_cache.clear()
         self._emerge_scratch.clear()
@@ -589,8 +618,11 @@ class MoleController(SkillCheckController):
                                  self._last_hit_pop, flipped=flipped):
             self._register_hit(elapsed, pos)
         else:
+            self._miss_count += 1
             self._spawn_puffs(pos)
             self._cue("play_whiff_ricochet")
+            if not self._online and self.challenge.whiffs_exhausted(self._miss_count):
+                self._commit(False)
         self._spawn_casing(pos)
 
     def _register_hit(self, elapsed, shot_px):
@@ -690,8 +722,11 @@ class MoleController(SkillCheckController):
             kill = progress >= self.challenge.hits_required
             self._hit_juice(kill)
             self._emit_hit_px(px, kill)
-        elif px is not None and not won:
-            self._spawn_puffs(px)
+        elif not won:
+            if miss_count + 1 > self._miss_count:
+                self._miss_count = miss_count + 1
+            if px is not None:
+                self._spawn_puffs(px)
 
     def resolve(self, won):
         self._landed = won
@@ -787,6 +822,7 @@ class MoleController(SkillCheckController):
             self._draw_muzzle(window)
             self._draw_crosshair(window)
         self._draw_pips(window, group)
+        self._draw_strike_crosses(window, group)
         if self._debug_hitbox:
             self._draw_hitboxes(window, elapsed)
 
@@ -1327,3 +1363,19 @@ class MoleController(SkillCheckController):
                 fill, border = Colors.surface, Colors.border_strong
             surf = rounded_rect_surface((w, h), radius, fill, border=border, border_width=1)
             _blit_alpha(window, surf, (x + i * (w + gap), y), alpha)
+
+    def _draw_strike_crosses(self, window, group):
+        if self._geom is None or self._from_sq is None:
+            return
+        alpha = self._commit_fade_alpha(MOLE_VIEW_PIP_FADE_DELAY_MS, MOLE_VIEW_PIP_FADE_MS)
+        if alpha <= 0:
+            return
+        ax, ay = self._geom(self._from_sq)
+        size, gap = self._strike_size, self._strike_gap
+        total = MOLE_MAX_WHIFFS * size + (MOLE_MAX_WHIFFS - 1) * gap
+        x = ax - total // 2 + group[0]
+        y = ay + int(self.cell_size * MOLE_VIEW_CROSS_STRIKE_OFFSET_FRAC) + group[1]
+        struck = min(self._miss_count, MOLE_MAX_WHIFFS)
+        for i in range(MOLE_MAX_WHIFFS):
+            surf = _strike_cross_surface(size, i < struck)
+            _blit_alpha(window, surf, (x + i * (size + gap), y), alpha)

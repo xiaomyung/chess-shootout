@@ -78,6 +78,21 @@ hitstop and is then BLASTED off the pit it was shot at, continuing the shot line
 continuous per-frame rotation and an alpha fade, plus a debris burst at the
 launch. Nothing is ever drawn on the home square again and the pit it left stays
 open — the fail path owns the jump-out/heal/pit-close, the win path owns the toss.
+
+Whiffs are capped at MOLE_MAX_WHIFFS (3), mirroring combo's 3-wrongs rule,
+because free unlimited misses made whack blindly automatable. The controller
+counts its own registered whiffs (lockout-swallowed shots stay free, exactly
+like the server's anti-mash gate keeps throttled shots silent); offline the 3rd
+whiff commits the fail on the spot through the same jump-out presentation every
+other fail path uses, online the count only fills the pips optimistically while
+the server verdict arrives via resolve() as always, and the passive mirror
+adopts the relayed pre-increment miss_count the way combo's mirror does. The
+count renders as combo-style strike crosses — border ring slots that fill
+loss-red with an X — in a row directly under the ATTACKER's cell, anchored
+through the controller's geom mapping so a board flip carries them with the
+piece, sized off the cell like every other element, cached per (size, struck)
+in the module cache, and fading out on the same commit-relative outro as the
+hit pips.
 """
 
 import gc
@@ -116,14 +131,15 @@ from chessshootout.frontend.skillcheck.mole_view import (
     MOLE_VIEW_BLOOM_BUCKETS, MOLE_VIEW_BLOOM_SPIN_DEG, MOLE_VIEW_CROSS_ARC_PAD_FRAC,
     MOLE_VIEW_CROSS_ARC_SPAN_DEG, MOLE_VIEW_CROSS_BLADE_W_FRAC, MOLE_VIEW_CROSS_GLOW_FRAC,
     MOLE_VIEW_CROSS_OUT_BUCKETS, MOLE_VIEW_CROSS_OUT_SCALE, MOLE_VIEW_CROSS_TIP_W_FRAC,
-    MOLE_VIEW_KICK_MS, _crosshair_surface, _cross_glow_surface)
+    MOLE_VIEW_CROSS_STRIKE_OFFSET_FRAC, MOLE_VIEW_KICK_MS,
+    _crosshair_surface, _cross_glow_surface, _strike_cross_surface)
 from chessshootout.frontend.skillcheck.registry import build_controller
 from chessshootout.skillcheck.mole import MOLE_RECOIL_LOCKOUT_MS
 from chessshootout.frontend.visual.colors import Colors
 from chessshootout.skillcheck.types import SkillCheckKind
 from chessshootout.skillcheck.mole import (
     MoleChallenge, MolePop, MOLE_TAUNTS, pick_taunt, MOLE_GRACE_MS,
-    MOLE_HITBOX_RX_FRAC, MOLE_HITBOX_RY_FRAC, MOLE_HITBOX_CY_FRAC)
+    MOLE_HITBOX_RX_FRAC, MOLE_HITBOX_RY_FRAC, MOLE_HITBOX_CY_FRAC, MOLE_MAX_WHIFFS)
 
 _JUMP_MS = MOLE_VIEW_JUMP_RISE_MS + MOLE_VIEW_JUMP_HOP_MS
 _JUMP_TOTAL_MS = _JUMP_MS + MOLE_VIEW_LAND_SQUASH_MS
@@ -2414,7 +2430,9 @@ def test_spent_casings_are_dropped_the_frame_they_turn_invisible():
 
 
 def test_casings_never_pile_up_across_a_long_check():
-    ctrl = _mole()
+    # online: the offline whiff cap would commit a fail on the 3rd of these
+    # shots and swallow the rest, and only online can a check run long anyway.
+    ctrl = _mole(on_shot=MagicMock())
     for i in range(20):
         ctrl.update(800 + i * 200)
         ctrl.handle_event(_click((600, 600)))
@@ -2423,6 +2441,198 @@ def test_casings_never_pile_up_across_a_long_check():
     assert all(ctrl._casing_alpha(ctrl._now - c.spawn_ms - c.t_land * 1000.0) > 0
                for c in ctrl._casings), \
         "the prune boundary and the fade boundary are the same instant"
+
+
+_STRIKE_ATTACKER = Square(2, 6)
+
+
+def _strike_band_count(surf, ctrl, anchor):
+    # Exact Colors.loss matches inside the strike row's own band: the struck fill
+    # is a supersampled solid, so its interior downsamples to the exact hue, and
+    # nothing else on this layer paints loss-red (the danger telegraph never
+    # fires in these fixed schedules and the band sits clear of every pit).
+    loss = pg.Color(Colors.loss)
+    size, gap = ctrl._strike_size, ctrl._strike_gap
+    total = MOLE_MAX_WHIFFS * size + (MOLE_MAX_WHIFFS - 1) * gap
+    x0 = anchor[0] - total // 2 - 6
+    y0 = anchor[1] + int(ctrl.cell_size * MOLE_VIEW_CROSS_STRIKE_OFFSET_FRAC) - 6
+    count = 0
+    for y in range(max(y0, 0), min(y0 + size + 12, surf.get_height())):
+        for x in range(max(x0, 0), min(x0 + total + 12, surf.get_width())):
+            if surf.get_at((x, y)) == loss:
+                count += 1
+    return count
+
+
+def _band_painted(surf, ctrl, anchor, background):
+    size, gap = ctrl._strike_size, ctrl._strike_gap
+    total = MOLE_MAX_WHIFFS * size + (MOLE_MAX_WHIFFS - 1) * gap
+    x0 = anchor[0] - total // 2 - 6
+    y0 = anchor[1] + int(ctrl.cell_size * MOLE_VIEW_CROSS_STRIKE_OFFSET_FRAC) - 6
+    return any(surf.get_at((x, y))[:3] != background
+               for y in range(max(y0, 0), min(y0 + size + 12, surf.get_height()))
+               for x in range(max(x0, 0), min(x0 + total + 12, surf.get_width())))
+
+
+def test_strike_crosses_sit_under_the_attacker_and_fill_on_a_whiff():
+    ctrl = _mole(from_sq=_STRIKE_ATTACKER)
+    anchor = _geom_for(_CELL)(_STRIKE_ATTACKER)
+    surf = pg.Surface((640, 640))
+    surf.fill((30, 30, 30))
+    ctrl.update(800)
+    ctrl.draw(surf)
+    assert _band_painted(surf, ctrl, anchor, (30, 30, 30)), \
+        "the empty slot chrome is on screen from the start, under the attacker's cell"
+    assert _strike_band_count(surf, ctrl, anchor) == 0, "but no cross is struck yet"
+    ctrl.handle_event(_click((600, 600)))
+    assert ctrl._miss_count == 1
+    surf.fill((30, 30, 30))
+    ctrl.draw(surf)
+    one = _strike_band_count(surf, ctrl, anchor)
+    assert one > 0, "the first whiff fills a loss-red strike under the attacker"
+    ctrl.update(1000)
+    ctrl.handle_event(_click((600, 600)))
+    surf.fill((30, 30, 30))
+    ctrl.draw(surf)
+    assert _strike_band_count(surf, ctrl, anchor) > one, "the second whiff fills a second cross"
+
+
+def test_strike_crosses_are_absent_without_an_attacker_square():
+    ctrl = _mole()
+    surf = pg.Surface((640, 640))
+    surf.fill((30, 30, 30))
+    ctrl.update(800)
+    ctrl.handle_event(_click((600, 600)))
+    ctrl.draw(surf)
+    anchor = _geom_for(_CELL)(_STRIKE_ATTACKER)
+    assert not _band_painted(surf, ctrl, anchor, (30, 30, 30)), \
+        "no from_sq means no anchor: the row is skipped whole, never misplaced"
+
+
+def test_two_whiffs_leave_the_check_alive_locally():
+    ctrl = _mole()
+    ctrl.update(800)
+    ctrl.handle_event(_click((600, 600)))
+    ctrl.update(1000)
+    ctrl.handle_event(_click((600, 600)))
+    assert ctrl._miss_count == MOLE_MAX_WHIFFS - 1
+    assert ctrl.landed is None, "two whiffs are survivable — the cap is >= 3"
+    ctrl.update(2000)
+    ctrl.handle_event(_click(_hole_px(1)))
+    assert ctrl._progress == 1, "and hits still land afterwards, untouched by the whiffs"
+
+
+def test_the_third_whiff_fails_the_check_on_the_spot():
+    ctrl = _mole(from_sq=_STRIKE_ATTACKER)
+    for i in range(MOLE_MAX_WHIFFS):
+        ctrl.update(800 + 200 * i)
+        ctrl.handle_event(_click((600, 600)))
+    assert ctrl._miss_count == MOLE_MAX_WHIFFS
+    assert ctrl.landed is False, \
+        "terminal the instant the 3rd whiff lands — the deadline (7s) and quota are untouched"
+    assert ctrl._audio.play_whiff_ricochet.call_count == MOLE_MAX_WHIFFS
+    ctrl.update(1200 + MOLE_VIEW_FAIL_HOLD_MS - 1)
+    assert ctrl.done is False, "the shared fail outro (jump-out, heal, pit close) still runs"
+    ctrl.update(1200 + MOLE_VIEW_FAIL_HOLD_MS)
+    assert ctrl.done is True
+
+
+def test_lockout_swallowed_shots_never_count_toward_the_whiff_cap():
+    ctrl = _mole()
+    ctrl.update(800)
+    ctrl.handle_event(_click((600, 600)))
+    assert ctrl._miss_count == 1
+    ctrl.update(900)
+    ctrl.handle_event(_click((600, 600)))
+    assert ctrl._miss_count == 1, \
+        "a recoil-locked shot is dropped whole — the client mirror of the server's silent gate"
+
+
+def test_online_third_whiff_relays_but_never_self_commits():
+    on_shot = MagicMock()
+    ctrl = _mole(on_shot=on_shot)
+    for i in range(MOLE_MAX_WHIFFS):
+        ctrl.update(800 + 200 * i)
+        ctrl.handle_event(_click((600, 600)))
+    assert ctrl._miss_count == MOLE_MAX_WHIFFS, "the mover's own pips fill optimistically"
+    assert on_shot.call_count == MOLE_MAX_WHIFFS, "every registered whiff reaches the wire"
+    assert ctrl.landed is None and ctrl.done is False, "the verdict online is the server's alone"
+    ctrl.resolve(False)
+    assert ctrl.landed is False
+
+
+def test_spectate_whiffs_drive_the_mirror_pips_from_the_relayed_miss_count():
+    ctrl = _mole(passive=True)
+    ctrl.update(700)
+    ctrl.spectate_shot(600.0, 0, False, progress=0, target=(7.5, 7.5))
+    assert ctrl._miss_count == 1, \
+        "the server relays the pre-increment count; the mirror shows one struck cross"
+    ctrl.spectate_shot(650.0, 0, False, progress=0, target=(7.5, 7.5))
+    assert ctrl._miss_count == 1, "a stale replay adds nothing"
+    ctrl.spectate_shot(700.0, 1, False, progress=0, target=(7.5, 7.5))
+    assert ctrl._miss_count == 2, "a genuinely new whiff lands on the mirror"
+    ctrl.spectate_shot(750.0, MOLE_MAX_WHIFFS - 1, False, progress=0, target=(7.5, 7.5))
+    assert ctrl._miss_count == MOLE_MAX_WHIFFS, "a snapshot jump adopts the count wholesale"
+    ctrl.update(900)
+    ctrl.spectate_shot(800.0, 0, True, progress=1, target=(2.5, 2.5))
+    assert ctrl._miss_count == MOLE_MAX_WHIFFS, "a relayed hit never moves the whiff pips"
+    assert ctrl._progress == 1
+
+
+def test_strike_crosses_fade_with_the_pip_outro_and_restore_the_shared_alpha():
+    ctrl = _mole(from_sq=_STRIKE_ATTACKER, challenge=_one_pop_challenge())
+    anchor = _geom_for(_CELL)(_STRIKE_ATTACKER)
+    ctrl.update(800)
+    ctrl.handle_event(_click((600, 600)))
+    ctrl.update(2000)
+    assert ctrl.landed is False
+    held = _draw_at(ctrl, 2000 + MOLE_VIEW_PIP_FADE_DELAY_MS - 50)
+    assert _strike_band_count(held, ctrl, anchor) > 0, "the crosses hold through the pip delay"
+    mid_fade = _draw_at(ctrl, 2000 + MOLE_VIEW_PIP_FADE_DELAY_MS + MOLE_VIEW_PIP_FADE_MS / 2)
+    assert _strike_band_count(mid_fade, ctrl, anchor) == 0, \
+        "mid-fade the blend is no longer the pure hue — the row is genuinely dimming"
+    struck = _strike_cross_surface(ctrl._strike_size, True)
+    assert struck.get_alpha() == 255, \
+        "the faded blit restores the cached surface to 255, never a lingering dim or None"
+    gone = _draw_at(ctrl, 2000 + MOLE_VIEW_PIP_FADE_DELAY_MS + MOLE_VIEW_PIP_FADE_MS + 20)
+    assert not _band_painted(gone, ctrl, anchor, (200, 200, 200)), \
+        "then the row disappears on the same outro as the hit pips"
+
+
+def test_strike_cross_surfaces_are_cached_per_size_and_state():
+    ctrl = _mole(from_sq=_STRIKE_ATTACKER)
+    ctrl.update(800)
+    ctrl.handle_event(_click((600, 600)))
+    surf = pg.Surface((640, 640))
+    ctrl.draw(surf)
+    size = ctrl._strike_size
+    assert ("strike", size, True) in _MOLE_STATIC_CACHE
+    assert ("strike", size, False) in _MOLE_STATIC_CACHE, \
+        "one draw pass materialises both slot states into the module cache"
+    assert _strike_cross_surface(size, True) is _strike_cross_surface(size, True), \
+        "every later frame reuses the cached sprite"
+    assert pg.image.tostring(_strike_cross_surface(size, True), "RGBA") != \
+        pg.image.tostring(_strike_cross_surface(size, False), "RGBA")
+
+
+def test_flipped_board_keeps_the_strike_crosses_under_the_attacker():
+    def flipped_geom(sq):
+        return (sq.col * _CELL + _CELL // 2, (7 - sq.row) * _CELL + _CELL // 2)
+
+    ctrl = _mole(geom=flipped_geom, from_sq=_STRIKE_ATTACKER)
+    assert ctrl._affine is not None and ctrl._affine[3] < 0, "the mapping really is flipped"
+    ctrl.update(800)
+    ctrl.handle_event(_click((600, 600)))
+    assert ctrl._miss_count == 1
+    surf = pg.Surface((640, 640))
+    surf.fill((30, 30, 30))
+    ctrl.draw(surf)
+    flipped_anchor = flipped_geom(_STRIKE_ATTACKER)
+    plain_anchor = _geom_for(_CELL)(_STRIKE_ATTACKER)
+    assert _strike_band_count(surf, ctrl, flipped_anchor) > 0, \
+        "the row follows the attacker through the flip, still directly under the piece"
+    assert not _band_painted(surf, ctrl, plain_anchor, (30, 30, 30)), \
+        "and nothing is left stranded at the unflipped position"
 
 
 def test_no_per_frame_logging(caplog):

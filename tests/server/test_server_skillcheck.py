@@ -1134,6 +1134,89 @@ async def test_whack_shots_inside_the_min_input_gap_are_silent_noops(app, clock)
     assert pending.progress == 1
 
 
+def _spaced_miss_target(ch, holes):
+    """A guaranteed-whiff position for shots taken around the first pop's window:
+    a hole neither of the first two pops uses, so no pop can be up there whatever
+    the exact elapsed lands on."""
+    wrong_hole = next(h for h in range(ch.hole_count)
+                      if h not in (ch.pops[0].hole, ch.pops[1].hole))
+    return _hole_center(holes, wrong_hole)
+
+
+@pytest.mark.asyncio
+async def test_whack_third_spaced_whiff_fails_and_locks_the_move(app, clock):
+    """The whiff cap in the live shot path: three properly spaced on-board misses
+    (valid coords, wrong hole) fail the check the instant the 3rd lands — the
+    handler's terminal probe runs at miss_count + 1, so the whiff being processed
+    counts. The schedule is untouched (quota still reachable), proving the cap is
+    what killed it, and each whiff relayed to the spectator at the pre-increment
+    count exactly like every other miss."""
+    room, ws_w, ws_b, frm, to, pending, ch, holes = await _whack_room(app, clock)
+    target = _spaced_miss_target(ch, holes)
+    mid = _pop_mid(ch, 0)
+    outs = [await _fire(app, clock, room, "white", mid + 200 * i, target=target)
+            for i in range(mole.MOLE_MAX_WHIFFS)]
+    assert outs == ["skillcheck_miss"] * (mole.MOLE_MAX_WHIFFS - 1) + ["skillcheck_fail"]
+    assert not ch.quota_unreachable(mid + 200 * (mole.MOLE_MAX_WHIFFS - 1) + 1, 0, -1), \
+        "the pops alone were still winnable — only the whiff cap ended it"
+    assert room.pending_skillcheck is None
+    assert (frm, to) in room.skillcheck_locks
+    assert len(room.backend.move_history) == 0
+    assert room.skillcheck_log == [SkillCheckOutcome(1, "whack", False, "Qxd5")]
+    relays = ws_b.of_type("skill_check_spectate_shot")
+    assert [r["miss_count"] for r in relays] == list(range(mole.MOLE_MAX_WHIFFS)), \
+        "every whiff relays once, at the pre-increment count the mover fired at"
+    assert all(r["won"] is False for r in relays)
+    assert ws_b.of_type("skill_check_result")[-1]["won"] is False, "the opponent hears the fail"
+
+
+@pytest.mark.asyncio
+async def test_whack_two_whiffs_then_true_hits_still_win(app, clock):
+    """The cap is >= 3: two whiffs spend no part of the hit quota and leave the
+    run fully winnable through the unchanged hit path."""
+    room, ws_w, ws_b, frm, to, pending, ch, holes = await _whack_room(app, clock)
+    target = _spaced_miss_target(ch, holes)
+    mid = _pop_mid(ch, 0)
+    for i in range(mole.MOLE_MAX_WHIFFS - 1):
+        assert await _fire(app, clock, room, "white", mid + 100 * i,
+                           target=target) == "skillcheck_miss"
+    assert pending.miss_count == mole.MOLE_MAX_WHIFFS - 1, "one whiff short of the cap"
+    outs = [await _fire(app, clock, room, "white", mid + 300,
+                        target=_hole_center(holes, ch.pops[0].hole))]
+    for i in range(1, ch.hits_required):
+        outs.append(await _fire(app, clock, room, "white", _pop_mid(ch, i),
+                                target=_hole_center(holes, ch.pops[i].hole)))
+    assert outs == ["skillcheck_hit"] * (ch.hits_required - 1) + ["applied"]
+    assert room.pending_skillcheck is None
+    assert len(room.backend.move_history) == 1
+    applied = ws_b.of_type("move_applied")[-1]
+    assert applied["skill_check_kind"] == "whack" and applied["skill_check_won"] is True
+
+
+@pytest.mark.asyncio
+async def test_throttled_whack_shots_never_advance_the_whiff_cap(app, clock):
+    """The anti-mash gate sits BEFORE the whiff bookkeeping: a burst of too-fast
+    shots at two-whiffs-from-death is dropped whole — no third whiff, no fail, no
+    relay, no gate movement — so autofire can neither cheat the cap nor trip it."""
+    room, ws_w, ws_b, frm, to, pending, ch, holes = await _whack_room(app, clock)
+    target = _spaced_miss_target(ch, holes)
+    mid = _pop_mid(ch, 0)
+    assert await _fire(app, clock, room, "white", mid, target=target) == "skillcheck_miss"
+    assert await _fire(app, clock, room, "white", mid + 100,
+                       target=target) == "skillcheck_miss"
+    assert pending.miss_count == mole.MOLE_MAX_WHIFFS - 1, "one whiff from death"
+    ws_b.sent.clear()
+    for burst in range(1, 6):
+        assert await _fire(app, clock, room, "white", mid + 100 + burst * 10,
+                           target=target) == "noop", "autofire inside the 80ms gate drops whole"
+    assert room.pending_skillcheck is pending, "no throttled shot reached the terminal probe"
+    assert pending.miss_count == mole.MOLE_MAX_WHIFFS - 1, "and none advanced the cap"
+    assert not ws_b.of_type("skill_check_spectate_shot"), "fully silent: no relay either"
+    assert await _fire(app, clock, room, "white", mid + 300,
+                       target=_hole_center(holes, ch.pops[0].hole)) == "skillcheck_hit", \
+        "an honestly spaced follow-up still lands after the burst"
+
+
 @pytest.mark.asyncio
 async def test_forged_client_elapsed_buys_no_spacing_past_the_anti_mash_gate(app, clock):
     """The anti-mash gate is paced on the SERVER wall clock, never on the
@@ -1189,18 +1272,29 @@ def _whack_quota_dead_elapsed(pending, ch):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("death", ["quota", "whiff_cap"])
 @pytest.mark.parametrize("surface", ["move_gate", "resume", "sweep"])
-async def test_whack_quota_dead_pending_is_dead_at_every_surface(app, clock, surface):
-    """Once too few pops remain for the quota, the pending is dead everywhere at
-    the same instant — the move gate resolves it inline, /resume omits it, and
-    the sweep fails it — all through the one is_dead predicate."""
+async def test_whack_dead_pending_is_dead_at_every_surface(app, clock, surface, death):
+    """Once the check is unwinnable — too few pops remain for the quota, OR the
+    whiff cap is spent — the pending is dead everywhere at the same instant: the
+    move gate resolves it inline, /resume omits it, and the sweep fails it, all
+    through the one is_dead predicate. The live shot handler resolves the 3rd
+    whiff inline at miss_count + 1, so a stored pending never actually reaches
+    the cap; the cap-dead state is forged here to prove that if any path ever
+    let it persist, every surface would still agree it is dead."""
     room, ws_w, ws_b, frm, to, pending, ch, holes = await _whack_room(app, clock)
-    dead_at = _whack_quota_dead_elapsed(pending, ch)
+    if death == "quota":
+        dead_at = _whack_quota_dead_elapsed(pending, ch)
+    else:
+        pending.miss_count = mole.MOLE_MAX_WHIFFS
+        dead_at = _pop_mid(ch, 0)
+        assert not ch.quota_unreachable(dead_at + 1, 0, -1), \
+            "mid-schedule the quota is reachable — only the whiff cap kills it"
     clock.set((pending.start_ms + dead_at + 1) / 1000.0)
     if surface == "resume":
         assert room.pending_skillcheck is pending, "nothing swept it yet"
         assert _resume_payload(app, room, "white") is None, \
-            "a reconnect must not re-hand a quota-dead check"
+            "a reconnect must not re-hand a dead check"
         return
     if surface == "move_gate":
         out = await handle_move(app, ws_w, room, "white", _move_raw(frm, to))
