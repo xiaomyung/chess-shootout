@@ -829,6 +829,9 @@ class ComboController(SkillCheckController):
             window.blit(chip, rect)
 
     def _draw_strip(self, window):
+        fade = self._exit_fade()
+        if fade <= 0.0:
+            return
         ox, oy = self._shake()
         deflate = self._deflate_scale()
         fire = self._fire_active()
@@ -840,7 +843,7 @@ class ComboController(SkillCheckController):
             dy = int(self._cell * COMBO_VIEW_INTRO_DROP_FRAC * (1.0 - intro))
             wiggle = self._slot_wiggle(i)
             if fire and i >= self._progress:
-                self._draw_fire(window, sx + ox + wiggle, self._strip_y + oy)
+                self._draw_fire(window, sx + ox + wiggle, self._strip_y + oy, fade)
             if i < self._progress:
                 size, color = self._strip_chev, Colors.win
             elif i == self._progress:
@@ -848,11 +851,11 @@ class ComboController(SkillCheckController):
             else:
                 size, color = self._strip_chev, Colors.text_dim
             chev = _direction_chevron(size, color, direction)
-            chev.set_alpha(int(255 * intro))
+            chev.set_alpha(int(255 * intro * fade))
             rect = chev.get_rect(center=(sx + ox + wiggle, self._strip_y + oy - dy))
             window.blit(chev, rect)
 
-    def _draw_fire(self, window, cx, cy):
+    def _draw_fire(self, window, cx, cy, fade=1.0):
         sprite = _emoji_sprite(COMBO_VIEW_FIRE_EMOJI, self._fire_size)
         if sprite is None:
             return
@@ -863,7 +866,7 @@ class ComboController(SkillCheckController):
         pulse = cosine_pulse(self._now, COMBO_VIEW_FIRE_PULSE_MS)
         alpha = (COMBO_VIEW_FIRE_ALPHA_MIN
                  + (COMBO_VIEW_FIRE_ALPHA_MAX - COMBO_VIEW_FIRE_ALPHA_MIN) * pulse)
-        sprite.set_alpha(int(alpha * ignite))
+        sprite.set_alpha(int(alpha * ignite * fade))
         bob = int(self._fire_size * COMBO_VIEW_FIRE_BOB_FRAC * pulse)
         surge = int(self._fire_size * COMBO_VIEW_FIRE_IGNITE_RISE_FRAC
                     * (1.0 - ease_out_back(ignite)))
@@ -879,6 +882,9 @@ class ComboController(SkillCheckController):
                    1.0 - COMBO_VIEW_DEFLATE_SPAN * (t / COMBO_VIEW_TORN_MS))
 
     def _draw_pad(self, window):
+        fade = self._exit_fade()
+        if fade <= 0.0:
+            return
         ox, oy = self._shake()
         nx, ny = self._press_offset()
         intro = self._intro_k()
@@ -886,12 +892,12 @@ class ComboController(SkillCheckController):
         left = self._pad_center[0] - self._pad_r + ox + nx
         top = self._pad_center[1] - self._pad_r + oy + ny + rise
         static = _pad_static(self._pad_r, self._hub_r)
-        static.set_alpha(int(255 * intro))
+        static.set_alpha(int(255 * intro * fade))
         window.blit(static, (left, top))
         self._draw_hover(window, left, top)
         if self._now < self._lockout_until:
             dim = _disc(self._pad_r, Colors.bg)
-            dim.set_alpha(COMBO_VIEW_PAD_DIM_ALPHA)
+            dim.set_alpha(int(COMBO_VIEW_PAD_DIM_ALPHA * fade))
             window.blit(dim, (left, top))
         self._draw_receptor_flashes(window, left, top)
 
@@ -924,6 +930,9 @@ class ComboController(SkillCheckController):
                 window.blit(fill, (left, top))
 
     def _draw_pips(self, window):
+        fade = self._exit_fade()
+        if fade <= 0.0:
+            return
         ox, oy = self._shake()
         intro = self._intro_k()
         size = max(int(self._cell * COMBO_VIEW_PIP_SIZE_FRAC), 8)
@@ -934,7 +943,7 @@ class ComboController(SkillCheckController):
         for i in range(COMBO_MAX_WRONGS):
             x = start + i * (size + gap) + size // 2
             pip = _pip_surface(size, i < self._wrong_count)
-            pip.set_alpha(int(255 * intro))
+            pip.set_alpha(int(255 * intro * fade))
             window.blit(pip, pip.get_rect(center=(x + ox, y + oy)))
 
     def _draw_flying(self, window):

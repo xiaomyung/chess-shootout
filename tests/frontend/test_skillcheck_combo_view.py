@@ -788,6 +788,37 @@ def test_exit_fade_lifts_the_chips_with_the_check():
     assert mid < after - 80, "mid-fade the chips are still visibly there"
 
 
+def test_exit_fade_lifts_arrows_pad_and_pips_in_sync_with_the_chips():
+    # Shipped bug: only the chip alpha multiplied the exit fade, so chips vanished
+    # under still-solid arrows and the pad/pips snapped off with the overlay. The
+    # whole unit must ride the same curve: visible mid-fade, fully gone at the end.
+    ctrl = _combo(board_rect=pg.Rect(0, 0, 700, 700))
+    last = _three_wrongs(ctrl, start=3000, step=300)
+
+    def probes(at_ms):
+        ctrl.update(at_ms)
+        surf = pg.Surface((700, 700))
+        surf.fill((255, 255, 255))
+        ctrl.draw(surf)
+        arrow = pg.Rect(0, 0, 8, 8)
+        arrow.center = (ctrl._strip_slots[2], ctrl._strip_y)
+        pad = pg.Rect(0, 0, 8, 8)
+        pad.center = (ctrl._pad_center[0], ctrl._pad_center[1] - int(ctrl._pad_r * 0.6))
+        from chessshootout.frontend.skillcheck.combo_view import \
+            COMBO_VIEW_PIP_ROW_GAP_FRAC
+        pip = pg.Rect(0, 0, 8, 8)
+        pip.center = (ctrl._pad_center[0],
+                      ctrl._pad_bottom
+                      + max(int(ctrl._cell * COMBO_VIEW_PIP_ROW_GAP_FRAC), 10))
+        return [_region_brightness(surf, r) for r in (arrow, pad, pip)]
+
+    mid = probes(last + int(COMBO_VIEW_EXIT_FADE_MS) // 2)
+    after = probes(last + int(COMBO_VIEW_EXIT_FADE_MS) + 50)
+    for name, m, a in zip(("arrow", "pad", "pip"), mid, after):
+        assert a >= 750, f"the {name} must be fully lifted when the exit fade completes"
+        assert m < a - 40, f"the {name} is still visibly present mid-fade"
+
+
 def test_chip_surfaces_allocate_nothing_per_frame():
     ctrl = _combo_scene(_PROMPTS, 99)
     surf = pg.Surface((700, 700), pg.SRCALPHA)
