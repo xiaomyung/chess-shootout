@@ -1,6 +1,7 @@
 import asyncio
 import json
 import secrets
+import time
 
 from pydantic import ValidationError
 
@@ -29,6 +30,7 @@ from chessshootout.server.protocol import (
     TakebackResponseMessage, TimeGrantedMessage,
 )
 from chessshootout.server.moderation import detector
+from chessshootout.server.moderation.load import ModerationLoad
 from chessshootout.server.rooms import PendingSkillCheck
 from chessshootout.server.sweep import RESULT_REASON_BY_GAME_RESULT
 from chessshootout.skillcheck import mole, online
@@ -37,6 +39,51 @@ from chessshootout.skillcheck.types import SkillCheckKind, SkillCheckOutcome
 
 
 log = logging_setup.get_logger("chess.server.app")
+
+RESYNC_NOTIFY_MIN_INTERVAL_SECONDS = 5.0
+RESYNC_DIRECTIVE_MIN_INTERVAL_SECONDS = 1.0
+RESYNC_GATE_PRUNE_THRESHOLD = 512
+
+RESYNC_NOTIFY = "notify"
+RESYNC_DIRECTIVE = "directive"
+
+
+class _ResyncGate:
+
+    def __init__(self):
+        self._last = {}
+
+    def allow(self, key, now, interval):
+        last = self._last.get(key)
+        if last is not None and now - last < interval:
+            return False
+        if len(self._last) >= RESYNC_GATE_PRUNE_THRESHOLD:
+            self._prune(now)
+        self._last[key] = now
+        return True
+
+    def _prune(self, now):
+        stale = max(RESYNC_NOTIFY_MIN_INTERVAL_SECONDS,
+                    RESYNC_DIRECTIVE_MIN_INTERVAL_SECONDS)
+        for key, at in list(self._last.items()):
+            if now - at >= stale:
+                del self._last[key]
+
+
+def _resync_gate(app):
+    gate = getattr(app.state, "resync_gate", None)
+    if gate is None:
+        gate = _ResyncGate()
+        app.state.resync_gate = gate
+    return gate
+
+
+def _moderation_load(app):
+    load = getattr(app.state, "moderation_load", None)
+    if load is None:
+        load = ModerationLoad()
+        app.state.moderation_load = load
+    return load
 
 
 def _color_to_move(backend):
@@ -528,11 +575,19 @@ async def handle_ping(app, websocket, room, color, raw):
         return "ping"
     if room.pending_skillcheck is not None:
         return "ping_pending"
-    if msg.ply != len(room.backend.move_history):
-        await set_resyncing(connections, room, color)
-        await send(connections.get_for_color(room, color), ResyncDirectiveMessage())
-    else:
+    if msg.ply == len(room.backend.move_history):
         await clear_resyncing(connections, room, color)
+        return "ping"
+    gate = _resync_gate(app)
+    now = app.state.now()
+    slot = room.slot(color)
+    if (slot is not None and not slot.desync_active
+            and gate.allow((room.room_id, color, RESYNC_NOTIFY), now,
+                           RESYNC_NOTIFY_MIN_INTERVAL_SECONDS)):
+        await set_resyncing(connections, room, color)
+    if gate.allow((room.room_id, color, RESYNC_DIRECTIVE), now,
+                  RESYNC_DIRECTIVE_MIN_INTERVAL_SECONDS):
+        await send(connections.get_for_color(room, color), ResyncDirectiveMessage())
     return "ping"
 
 
@@ -560,6 +615,8 @@ async def handle_annotations_state(app, websocket, room, color, raw):
         await send(connections.get_for_color(room, color),
                      ErrorMessage(reason=Reason.SHARE_MUTED, msg_type="annotations_state"))
         return "muted"
+    if msg.sharing and _over_moderation_budget(app, room, color):
+        return await _suppress_sharing(app, room, color, "annotations_state")
     was_sharing = store.sharing
     if msg.sharing != store.sharing:
         log.info("annotations sharing room=%s by=%s on=%s",
@@ -598,6 +655,8 @@ async def handle_annotation_delta(app, websocket, room, color, raw):
         await send(connections.get_for_color(room, color),
                      ErrorMessage(reason=Reason.SHARE_MUTED, msg_type="annotation_delta"))
         return "muted"
+    if _over_moderation_budget(app, room, color):
+        return await _suppress_sharing(app, room, color, "annotation_delta")
     if msg.kind == "highlight":
         if msg.action == "add":
             if (msg.square not in store.highlights
@@ -635,6 +694,27 @@ def _moderation_inputs(room, color):
             _last_move_context(room))
 
 
+def _over_moderation_budget(app, room, color):
+    if not app.state.moderation_enabled:
+        return False
+    return _moderation_load(app).over_budget(room.room_id, color, app.state.now())
+
+
+async def _suppress_sharing(app, room, color, msg_type):
+    connections = app.state.connections
+    store = room.annotations_for(color)
+    stopped = store.sharing
+    store.sharing = False
+    store.clear_marks()
+    if stopped:
+        log.warning("annotations load-suppressed room=%s color=%s", room.room_id, color)
+        await _relay_plain(connections, room, color,
+                           AnnotationsStateMessage(sharing=False, highlights=[], arrows=[]))
+    await send(connections.get_for_color(room, color),
+               ErrorMessage(reason=Reason.RATE_LIMITED, msg_type=msg_type))
+    return "load_suppressed"
+
+
 def _moderate(own_arrows, own_highlights, opp_arrows, opp_highlights, context, changed):
     own = detector.detect(own_arrows, own_highlights, changed=changed, context=context)
     if own.kind == detector.BLOCKED:
@@ -663,9 +743,18 @@ async def _relay_or_moderate(app, room, color, msg, changed, msg_type):
     return await _moderate_relay(app, room, color, msg, changed, msg_type)
 
 
+def _timed_moderate(*args):
+    started = time.thread_time()
+    return _moderate(*args), time.thread_time() - started
+
+
 async def _moderate_relay(app, room, color, relay_msg, changed, msg_type):
+    load = _moderation_load(app)
     inputs = _moderation_inputs(room, color)
-    verdict, is_union = await asyncio.to_thread(_moderate, *inputs, changed)
+    async with load.semaphore:
+        outcome, cpu_seconds = await asyncio.to_thread(_timed_moderate, *inputs, changed)
+    load.charge(room.room_id, color, cpu_seconds, app.state.now())
+    verdict, is_union = outcome
     if room.backend is None or room.result is not None:
         return "noop"
     if verdict is None:

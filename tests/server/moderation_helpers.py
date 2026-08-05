@@ -1,12 +1,53 @@
 import json
+import random
 from importlib import resources
 
 from chessshootout.backend.utils import Square, coord_from_square
 from chessshootout.server.moderation import geometry
 
 
+DENSE_CLEAN_SEED = 0
+DENSE_CLEAN_COUNT = 80
+DENSE_STEPS = ((1, 0), (0, 1), (1, 1), (1, -1),
+               (-1, 0), (0, -1), (-1, -1), (-1, 1))
+
+
 def coord(x, y):
     return coord_from_square(Square(row=y, col=x))
+
+
+def dense_clean_arrows():
+    """The cost worst case a hostile client can hold in one legal store: 80
+    single-square arrows (~70 distinct unit edges) scattered over the whole
+    board in all eight directions, verdict CLEAN.
+
+    Why this shape and not "many long arrows": every stage stays in its
+    expensive branch. The vector stage enumerates a translation per
+    (pattern edge, drawn edge) pair sharing a delta, and eight directions
+    keep every delta bucket populated; the heuristic stays under
+    HEURISTIC_SUBSET_MAX_EDGES so it runs the per-centre C4 subset scan
+    instead of the cheap whole-set test; and CLEAN means nothing
+    short-circuits early the way a blocked verdict does. Long random arrows
+    (the input the other timing pin uses) fall out of the vector stage almost
+    immediately and cost ~20x less, which is exactly why they hid this.
+
+    detect() memoises on the exact arrow tuple, so rotating the list is a
+    free cache bust for the attacker -- tests that time this input must
+    rotate between samples or they measure the memo, not the detector."""
+    rng = random.Random(DENSE_CLEAN_SEED)
+    arrows = []
+    seen = set()
+    while len(arrows) < DENSE_CLEAN_COUNT:
+        x, y = rng.randrange(8), rng.randrange(8)
+        dx, dy = rng.choice(DENSE_STEPS)
+        tx, ty = x + dx, y + dy
+        if not (0 <= tx < 8 and 0 <= ty < 8):
+            continue
+        if ((x, y), (tx, ty)) in seen:
+            continue
+        seen.add(((x, y), (tx, ty)))
+        arrows.append((coord(x, y), coord(tx, ty)))
+    return arrows
 
 
 def arrows_from_segments(segments):

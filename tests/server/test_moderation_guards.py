@@ -29,6 +29,7 @@ from tests.server import moderation_helpers as M
 
 
 TIMING_BUDGET_MS = 10.0
+DENSE_TIMING_BUDGET_MS = 120.0
 
 
 def test_knight_l_elbow_matches_client_annotations():
@@ -162,6 +163,47 @@ def test_worst_case_timing_under_budget():
     assert worst_ms < TIMING_BUDGET_MS, (
         f"worst-case detect() {worst_ms:.2f} ms exceeded budget "
         f"{TIMING_BUDGET_MS} ms -- fix perf, do not loosen silently")
+
+
+def test_dense_clean_set_timing_under_its_own_budget():
+    """Second timing pin, for the input class the first one misses.
+
+    test_worst_case_timing_under_budget uses long random lattice arrows: they
+    fall out of the vector stage almost immediately (~1.4 ms measured), so its
+    10 ms budget says nothing about the detector's real ceiling. The dense
+    CLEAN set (moderation_helpers.dense_clean_arrows) keeps every stage in its
+    expensive branch and costs ~32 ms per call on the dev box -- 3x the other
+    pin's budget, and that is NOT a bug to fix by loosening: it is why the
+    server meters moderation CPU per room/player (moderation.load) instead of
+    trusting a per-call bound. This budget exists so an order-of-magnitude
+    regression in that ceiling is caught; the load meter is what bounds the
+    damage in production.
+
+    Sampling differs from the other pin on purpose: detect() memoises on the
+    exact arrow tuple, so repeating an identical call times the MEMO. Every
+    sample here is a distinct rotation of the same set -- identical work,
+    always a cache miss -- and the min across rotations is the uncontended
+    cost (an xdist-loaded worker inflates individual samples)."""
+    arrows = M.dense_clean_arrows()
+    assert detector.detect(list(arrows), []).kind == detector.CLEAN, (
+        "the pin needs a CLEAN verdict: a block short-circuits the later stages")
+
+    best_ms = float("inf")
+    gc.collect()
+    gc.disable()
+    try:
+        for i in range(8):
+            rotated = arrows[i + 1:] + arrows[:i + 1]
+            start = time.thread_time()
+            verdict = detector.detect(rotated, [])
+            best_ms = min(best_ms, (time.thread_time() - start) * 1000)
+            assert verdict.kind == detector.CLEAN
+    finally:
+        gc.enable()
+
+    assert best_ms < DENSE_TIMING_BUDGET_MS, (
+        f"dense-clean detect() {best_ms:.2f} ms exceeded budget "
+        f"{DENSE_TIMING_BUDGET_MS} ms -- fix perf, do not loosen silently")
 
 
 def test_detect_is_thread_safe_under_concurrent_callers():
