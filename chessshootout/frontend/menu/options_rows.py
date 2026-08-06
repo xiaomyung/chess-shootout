@@ -444,12 +444,17 @@ class TextRow(_Row):
             self._edited = False
             if self.on_commit is not None:
                 self.on_commit(self.current_text())
-        elif event.key == pg.K_ESCAPE:
-            self._edited = False
-            self.input.text = str(self.value_getter())
         elif handled:
             self._edited = True
         return handled
+
+    def cancel_edit(self):
+        if not self.input.focused and not self._edited:
+            return False
+        self._edited = False
+        self.input.focused = False
+        self.input.text = str(self.value_getter())
+        return True
 
 
 class OptionsBody(ScrollHost):
@@ -538,5 +543,12 @@ class OptionsBody(ScrollHost):
         for _, rows in self.sections:
             for row in rows:
                 if row.handle_key(event):
+                    return True
+        return False
+
+    def cancel_focused_edit(self):
+        for _, rows in self.sections:
+            for row in rows:
+                if hasattr(row, "cancel_edit") and row.cancel_edit():
                     return True
         return False
