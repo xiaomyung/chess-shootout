@@ -222,9 +222,8 @@ class RoomManager:
             tc = (time_minutes, increment_seconds)
             queue = self._queue[tc]
             if queue:
-                room = queue.pop(0)
-                if not queue:
-                    del self._queue[tc]
+                room = queue[0]
+                self._dequeue(room)
                 first_slot = room.white or room.black
                 first_pref = first_slot.side_preference
                 second_color, first_color_resolved = self._resolve_colors(
@@ -386,6 +385,12 @@ class RoomManager:
         if color is None:
             return None
         return room, color
+
+    def queued_room_for(self, client_uuid):
+        room_id = self._uuid_to_room.get(client_uuid)
+        if room_id is None or room_id in self._active:
+            return None
+        return self._find_in_queue(room_id)
 
     def release_for_new_game(self, client_uuid):
         room_id = self._uuid_to_room.get(client_uuid)

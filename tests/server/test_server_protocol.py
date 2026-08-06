@@ -182,6 +182,22 @@ the local-only infinity setting, which the online path substitutes with a real
 minute count before it ever reaches the wire)."""
 
 
+def test_client_time_control_tables_match_the_shipped_picker():
+    """Drift guard: the tables above are a hand copy of the picker's, and a copy
+    that silently falls behind turns the fence below into a fence around nothing --
+    a newly added chamber would never be checked against the wire caps at all. The
+    frontend import is deliberate and stays inside the test: the no-pygame guard
+    (tests/infra/test_server_no_pygame.py) scans package SOURCE under server/, not
+    tests/. The infinity chamber is excluded on purpose -- it carries no minute
+    count and the online path substitutes a real one before matchmaking."""
+    from chessshootout.frontend.menu.time_picker import CHAMBERS, INCREMENTS
+
+    assert CLIENT_MINUTES == tuple(minutes for minutes, _ in CHAMBERS if minutes is not None)
+    assert CLIENT_INCREMENTS == tuple(INCREMENTS)
+    assert sum(1 for minutes, _ in CHAMBERS if minutes is None) == 1, \
+        "exactly one non-numeric chamber (∞) is expected to be excluded"
+
+
 @pytest.mark.parametrize("minutes", CLIENT_MINUTES)
 @pytest.mark.parametrize("increment", CLIENT_INCREMENTS)
 def test_matchmake_request_accepts_every_client_producible_time_control(minutes, increment):
@@ -189,6 +205,8 @@ def test_matchmake_request_accepts_every_client_producible_time_control(minutes,
     can actually produce, so tightening them can never lock real players out."""
     req = MatchmakeRequest(nickname="Alice", client_uuid=U1,
                            time_minutes=minutes, increment_seconds=increment)
+    assert (req.time_minutes, req.increment_seconds) == (minutes, increment), \
+        "the model preserves the picker's values instead of coercing them"
     assert MIN_TIME_MINUTES <= req.time_minutes <= MAX_TIME_MINUTES
     assert MIN_INCREMENT_SECONDS <= req.increment_seconds <= MAX_INCREMENT_SECONDS
 

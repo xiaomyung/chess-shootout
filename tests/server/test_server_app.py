@@ -5,11 +5,18 @@ import sys
 import pytest
 
 from chessshootout.server import __main__ as server_main
+from fastapi import WebSocketDisconnect
+
 from chessshootout.server.app import (
     MATCHMAKE_PER_IP_LIMIT, MAX_INBOUND_MESSAGE_BYTES, PROTOCOL_VERSION,
-    WS_CLOSE_SUPERSEDED,
+    WS_CLOSE_INVALID_TOKEN, WS_CLOSE_PAYLOAD_TOO_LARGE, WS_CLOSE_SUPERSEDED,
 )
 from chessshootout.server.connections import ConnectionRegistry
+from chessshootout.server.handlers import (
+    RESYNC_DIRECTIVE, RESYNC_GATE_PRUNE_THRESHOLD, RESYNC_NOTIFY,
+    RESYNC_NOTIFY_FLAP_FLOOR_SECONDS, RESYNC_NOTIFY_MIN_INTERVAL_SECONDS,
+    _ResyncGate, handle_ping,
+)
 from chessshootout.server.protocol import (
     FIRST_MOVE_ABORT_SECONDS, GRACE_SECONDS, MAX_INCREMENT_SECONDS, MAX_TIME_MINUTES,
     Reason,
@@ -17,6 +24,7 @@ from chessshootout.server.protocol import (
 from chessshootout.server.rooms import QUEUE_ABANDON_SECONDS
 from tests.helpers import fake_uuid4
 from tests.server.conftest import ALICE, BOB, auth_msg
+from tests.server.test_server_broadcasts import RecordingWS
 
 
 async def _sweep(app):
@@ -150,6 +158,34 @@ def test_matchmake_rejects_already_in_game(client):
     assert r3.status_code == 409
 
 
+def test_matchmake_replaces_the_callers_own_stale_queue_slot(app, client):
+    """A player who walked away from a queue slot -- app killed, socket gone, no
+    DELETE -- used to be answered 409 already_in_game on every retry until the
+    120s abandoned-queue reaper ran, so hitting Play again simply did nothing for
+    up to two minutes. The caller's OWN queued room is released and replaced
+    instead; only rooms belonging to somebody else still refuse."""
+    first = _matchmake(client, uuid=ALICE, time=5)
+
+    second = _matchmake(client, uuid=ALICE, time=10)
+
+    assert first.status_code == 200 and second.status_code == 200
+    assert second.json()["room_id"] != first.json()["room_id"], "a fresh slot, not the old one"
+    assert app.state.rooms.get(first.json()["room_id"]) is None, "the stale slot is gone"
+    assert client.get("/healthz").json()["queue_depth"] == 1, "one waiter, never two"
+    assert app.state.rooms._queue.keys() == {(10, 0)}, "the emptied 5+0 bucket goes too"
+
+
+def test_matchmake_after_dropping_a_queued_socket_succeeds(client):
+    """The same release, driven the way a real client hits it: matchmake, open the
+    websocket to the queued room, drop it, then search again straight away."""
+    first = _matchmake(client, uuid=ALICE)
+    body = first.json()
+    with client.websocket_connect(f"/ws/{body['room_id']}") as ws:
+        ws.send_text(json.dumps(auth_msg(body["session_token"])))
+
+    assert _matchmake(client, uuid=ALICE).status_code == 200
+
+
 def test_cancel_matchmake_removes_from_queue(client):
     """Cancelling frees the uuid: it can re-matchmake afterwards."""
     r = _matchmake(client, uuid=ALICE)
@@ -247,6 +283,65 @@ def test_ws_rejects_non_auth_first_message(client):
                                   "from": "e2", "to": "e4"}))
         with pytest.raises(Exception):
             ws.receive_text()
+
+
+def _fat_multibyte_frame(**fields):
+    """A frame that FITS the character count and BUSTS the byte count: every pad
+    character is two bytes in UTF-8, so len() reads well under the cap while the
+    wire payload is roughly double it."""
+    payload = json.dumps(
+        dict(version=PROTOCOL_VERSION, pad="é" * (MAX_INBOUND_MESSAGE_BYTES - 200),
+             **fields),
+        ensure_ascii=False)
+    assert len(payload) < MAX_INBOUND_MESSAGE_BYTES < len(payload.encode("utf-8"))
+    return payload
+
+
+def test_ws_handshake_over_the_byte_cap_closes_as_too_large(client):
+    """SECURITY: the cap is a BYTE budget — it is the very number handed to
+    uvicorn's ws_max_size — but it used to be measured with len() on the decoded
+    text, i.e. characters. A multi-byte frame was therefore up to 4x the intended
+    ceiling, and create_app used without uvicorn's framing limit (tests, embedding)
+    had no second line of defence at all. The close CODE is what proves which check
+    fired: 1009 is the size guard, 4000 would mean the frame was accepted and only
+    then failed auth."""
+    _matchmake(client, uuid=ALICE)
+    body = _matchmake(client, uuid=BOB).json()
+    with client.websocket_connect(f"/ws/{body['room_id']}") as ws:
+        ws.send_text(_fat_multibyte_frame(type="auth", session_token="bogus"))
+        with pytest.raises(WebSocketDisconnect) as exc:
+            ws.receive_text()
+    assert exc.value.code == WS_CLOSE_PAYLOAD_TOO_LARGE
+
+
+def test_ws_handshake_under_the_byte_cap_reaches_the_token_check(client):
+    """The control for the size guard: an ordinary bad-token handshake must still
+    be refused as an invalid token, not as an oversize frame."""
+    _matchmake(client, uuid=ALICE)
+    body = _matchmake(client, uuid=BOB).json()
+    with client.websocket_connect(f"/ws/{body['room_id']}") as ws:
+        ws.send_text(json.dumps({"version": PROTOCOL_VERSION, "type": "auth",
+                                 "session_token": "bogus"}))
+        with pytest.raises(WebSocketDisconnect) as exc:
+            ws.receive_text()
+    assert exc.value.code == WS_CLOSE_INVALID_TOKEN
+
+
+def test_in_session_frame_over_the_byte_cap_closes_as_too_large(client):
+    """The same byte budget guards every later frame, not just the handshake."""
+    random.seed(0)
+    a = _matchmake(client, uuid=ALICE, side="white").json()
+    b = _matchmake(client, uuid=BOB, side="black").json()
+    with client.websocket_connect(f"/ws/{a['room_id']}") as ws_w:
+        ws_w.send_text(json.dumps(auth_msg(a["session_token"])))
+        with client.websocket_connect(f"/ws/{b['room_id']}") as ws_b:
+            ws_b.send_text(json.dumps(auth_msg(b["session_token"])))
+            ws_w.receive_text()
+            ws_b.receive_text()
+            ws_w.send_text(_fat_multibyte_frame(type="move", **{"from": "e2", "to": "e4"}))
+            with pytest.raises(WebSocketDisconnect) as exc:
+                ws_w.receive_text()
+    assert exc.value.code == WS_CLOSE_PAYLOAD_TOO_LARGE
 
 
 def test_ws_rejects_version_mismatch_auth(client):
@@ -513,6 +608,93 @@ async def _paired_in_progress_room(rooms, clock):
     room.white.connected = True
     room.black.connected = True
     return room
+
+
+async def _resync_room(app, clock):
+    room = await _paired_in_progress_room(app.state.rooms, clock)
+    ws_w, ws_b = RecordingWS(), RecordingWS()
+    app.state.connections.add(room.room_id, room.white.client_uuid, ws_w)
+    app.state.connections.add(room.room_id, room.black.client_uuid, ws_b)
+    return room, ws_w, ws_b
+
+
+def _ping_raw(ply):
+    return json.dumps({"version": PROTOCOL_VERSION, "type": "ping", "ply": ply})
+
+
+def _opp_states(ws):
+    return [m["opp_state"] for m in ws.of_type("connection_status")]
+
+
+async def test_a_lagging_spell_after_a_recovery_notifies_the_opponent_again(app, clock):
+    """REGRESSION: the notify gate was a flat 5s interval keyed on (room, color),
+    and nothing reset it when the player caught up. A second genuine lagging spell
+    starting inside that window was therefore silently unannounced — the opponent's
+    strip read 'connected' while resync directives were still being pushed at the
+    lagging client. Recovering now re-arms the gate down to the flap floor, so the
+    next real spell is announced."""
+    room, ws_w, ws_b = await _resync_room(app, clock)
+    await handle_ping(app, ws_w, room, "white", _ping_raw(7))
+    await handle_ping(app, ws_w, room, "white", _ping_raw(0))
+    clock.advance(RESYNC_NOTIFY_FLAP_FLOOR_SECONDS + 0.1)
+
+    await handle_ping(app, ws_w, room, "white", _ping_raw(7))
+
+    assert _opp_states(ws_b) == ["resyncing", "connected", "resyncing"]
+    assert clock() < RESYNC_NOTIFY_MIN_INTERVAL_SECONDS, \
+        "and well inside the interval that used to swallow it"
+
+
+async def test_a_ply_flap_inside_the_floor_still_notifies_only_once(app, clock):
+    """The reason the gate exists at all: a client whose reported ply oscillates
+    would otherwise toggle the opponent's connection strip at heartbeat rate. The
+    re-arm above must not reopen that door — clearing only drops the wait to the
+    flap floor, and a same-instant flap never gets past it."""
+    room, ws_w, ws_b = await _resync_room(app, clock)
+    for i in range(8):
+        await handle_ping(app, ws_w, room, "white", _ping_raw(7 if i % 2 == 0 else 0))
+    assert _opp_states(ws_b) == ["resyncing", "connected"]
+
+
+def _fill_gate(gate, count, now, interval=RESYNC_NOTIFY_MIN_INTERVAL_SECONDS):
+    for i in range(count):
+        assert gate.allow((f"room-{i}", "white", RESYNC_NOTIFY), now, interval)
+
+
+def test_resync_gate_prunes_expired_keys_and_keeps_live_ones():
+    """The gate is keyed per (room, color, tag) and rooms churn, so without the
+    prune it is an unbounded dict that only ever grows on a busy server. The prune
+    fires on insertion past the threshold and must drop exactly the keys whose
+    window has already passed — a key still inside its window survives, or the
+    prune itself becomes a way to bypass the interval."""
+    gate = _ResyncGate()
+    live = ("live-room", "white", RESYNC_DIRECTIVE)
+    assert gate.allow(live, 4.9, RESYNC_NOTIFY_MIN_INTERVAL_SECONDS)
+    _fill_gate(gate, RESYNC_GATE_PRUNE_THRESHOLD - 1, 0.0)
+    assert len(gate._open_at) == RESYNC_GATE_PRUNE_THRESHOLD
+
+    fresh = ("fresh-room", "white", RESYNC_NOTIFY)
+    assert gate.allow(fresh, 6.0, RESYNC_NOTIFY_MIN_INTERVAL_SECONDS)
+
+    assert set(gate._open_at) == {live, fresh}, \
+        "the 511 windows that closed at 5.0 went; the one open until 9.9 stayed"
+    assert gate.allow(live, 6.0, RESYNC_NOTIFY_MIN_INTERVAL_SECONDS) is False, \
+        "the survivor still holds its remaining window"
+    assert gate.allow(fresh, 6.0, RESYNC_NOTIFY_MIN_INTERVAL_SECONDS) is False, \
+        "and the key inserted through the prune gates like any other"
+    assert gate.allow(fresh, 11.0, RESYNC_NOTIFY_MIN_INTERVAL_SECONDS) is True
+
+
+def test_resync_gate_reopen_never_delays_an_already_open_window():
+    """reopen() lowers the wait, it never raises it: a player who recovers long
+    after the last notification must not have a fresh cooldown imposed on them."""
+    gate = _ResyncGate()
+    key = ("room", "white", RESYNC_NOTIFY)
+    assert gate.allow(key, 0.0, RESYNC_NOTIFY_MIN_INTERVAL_SECONDS)
+    gate.reopen(key, 100.0, RESYNC_NOTIFY_FLAP_FLOOR_SECONDS)
+    assert gate.allow(key, 100.0, RESYNC_NOTIFY_MIN_INTERVAL_SECONDS) is True
+    gate.reopen(("absent", "white", RESYNC_NOTIFY), 0.0, RESYNC_NOTIFY_FLAP_FLOOR_SECONDS)
+    assert "absent" not in [k[0] for k in gate._open_at], "reopen never mints a key"
 
 
 async def test_grace_expiry_without_desync_awards_opponent(app, clock):

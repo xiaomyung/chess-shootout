@@ -15,9 +15,13 @@ from tests.server.conftest import ALICE, BOB
 class RecordingWS:
     def __init__(self):
         self.sent = []
+        self.closed_with = None
 
     async def send_json(self, payload):
         self.sent.append(payload)
+
+    async def close(self, code=1000):
+        self.closed_with = code
 
     def of_type(self, t):
         return [m for m in self.sent if m["type"] == t]

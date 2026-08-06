@@ -26,7 +26,8 @@ from chessshootout.server.handlers import (
 from chessshootout.server.protocol import PROTOCOL_VERSION, Reason
 from chessshootout.server.rooms import PendingSkillCheck
 from chessshootout.skillcheck import mole, online
-from chessshootout.skillcheck.combo import COMBO_DIRECTIONS, COMBO_MAX_WRONGS
+from chessshootout.skillcheck.combo import (
+    COMBO_DIRECTIONS, COMBO_MAX_WRONGS, COMBO_MIN_INTER_PRESS_MS)
 from chessshootout.skillcheck.triggers import compute_facts
 from chessshootout.skillcheck.types import SkillCheckKind, SkillCheckOutcome
 from tests.helpers import fake_uuid4, make_backend, piece, sq
@@ -590,12 +591,13 @@ async def test_resolve_fail_is_idempotent(app, clock):
     assert first is not None and second is None, "a second resolve finds pending already cleared"
 
 
-async def _shoot_claiming(app, clock, room, color, *, arrives_at_ms, claims_ms):
+async def _shoot_claiming(app, clock, room, color, *, arrives_at_ms, claims_ms,
+                          direction=None, target=None):
     """A shot that physically lands at arrives_at_ms but reports claims_ms as the elapsed."""
     clock.set((room.pending_skillcheck.start_ms + arrives_at_ms) / 1000.0)
     ws = app.state.connections.get_for_color(room, color)
-    raw = json.dumps({"type": "skill_check_shot", "client_elapsed_ms": claims_ms})
-    return await handle_skill_check_shot(app, ws, room, color, raw)
+    return await handle_skill_check_shot(app, ws, room, color,
+                                         _shot_raw(claims_ms, direction, target))
 
 
 @pytest.mark.asyncio
@@ -617,17 +619,37 @@ async def test_network_lag_inside_the_bound_does_not_steal_a_clean_hit(app, cloc
     assert out.startswith("applied"), "latency inside the bound never steals a clean hit"
 
 
+def _clamp_discriminating_arrival(pending):
+    """An arrival time where the clamp floor WINS and the raw arrival LOSES.
+
+    Picking a fixed arrival and asserting whatever the engine happens to score
+    made this test pass ~92% of runs on its own: for most random arcs both the
+    claimed 0 ms (sub-floor) and the raw arrival lose, so a server that ignored
+    the clamp entirely produced the same verdict. Only an arrival whose
+    raw-minus-bound moment is a WIN while the raw moment is a LOSS separates
+    'judged at the clamp floor' from 'judged at claimed' and from 'judged at raw'.
+    """
+    ch = online.challenge_from(pending.kind, pending.seed, pending.value_diff)
+    bound = int(online.SKILLCHECK_LAG_BOUND_MS)
+    floor = int(online.SKILLCHECK_HUMAN_FLOOR_MS)
+    for arrival in range(floor + bound + 1, int(online.SKILLCHECK_DEADLINE_MS)):
+        if (online.shot_wins(WHEEL, ch, arrival - bound, 0)
+                and not online.shot_wins(WHEEL, ch, arrival, 0)):
+            return arrival
+    raise AssertionError("no arrival separates the clamp floor from the raw arrival")
+
+
 @pytest.mark.asyncio
 async def test_a_too_early_claim_is_clamped_to_the_lag_bound(app, clock):
     room, ws_w, ws_b, frm, to = await _capture_room(app, clock, WHEEL)
     await handle_move(app, ws_w, room, "white", _move_raw(frm, to))
-    pending = room.pending_skillcheck
-    ch = online.challenge_from(pending.kind, pending.seed, pending.value_diff)
-    bounded = int(2000 - online.SKILLCHECK_LAG_BOUND_MS)
-    out = await _shoot_claiming(app, clock, room, "white", arrives_at_ms=2000, claims_ms=0.0)
-    expected = "applied" if online.shot_wins(WHEEL, ch, bounded, 0) else "skillcheck_fail"
-    assert out.split(":")[0] == expected.split(":")[0], \
-        "a forged-early claim is judged at raw-bound, never the impossible value it claimed"
+    arrival = _clamp_discriminating_arrival(room.pending_skillcheck)
+
+    out = await _shoot_claiming(app, clock, room, "white",
+                                arrives_at_ms=arrival, claims_ms=0.0)
+
+    assert out.startswith("applied"), \
+        "a forged-early claim is judged at raw-bound, never at 0 and never at raw"
 
 
 @pytest.mark.asyncio
@@ -784,37 +806,50 @@ async def test_aim_shot_and_sweep_at_the_shrink_boundary_resolve_exactly_once(ap
         "recorded once, by the shot resolver"
 
 
-class _NullingPendingWS(RecordingWS):
-    """A spectator socket that, on receiving the spectate-shot, simulates the
-    deadline sweep racing in and nulling the room's pending check mid-await."""
+class _RacingSpectatorWS(RecordingWS):
+    """A spectator socket that runs `racer` the instant the spectate-shot lands on
+    it -- the one await inside the shot handler, and therefore the only window a
+    concurrent resolver (deadline sweep, resign/flag finalize) can slip into. Fires
+    once so the racer's own broadcast back to this socket cannot recurse."""
 
-    def __init__(self, room):
+    def __init__(self, racer):
         super().__init__()
-        self._room = room
+        self._racer = racer
+        self._fired = False
 
     async def send_json(self, payload):
         self.sent.append(payload)
-        if payload.get("type") == "skill_check_spectate_shot":
-            self._room.pending_skillcheck = None
+        if not self._fired and payload.get("type") == "skill_check_spectate_shot":
+            self._fired = True
+            await self._racer()
 
 
 @pytest.mark.asyncio
-async def test_winning_shot_is_a_noop_if_pending_is_nulled_during_the_spectate_await(app, clock):
-    # REGRESSION: handle_skill_check_shot re-checks `room.pending_skillcheck is not
-    # pending` AFTER `await send(opp_ws, spectate_shot)` to defeat a deadline-sweep
-    # double-resolve during that await. We arrange a WINNING shot but null pending
-    # the instant the spectate-shot is relayed. Without the post-await guard the move
-    # would be applied (a spurious win recorded); with it, the handler bails as a noop.
-    room, ws_w, ws_b, frm, to = await _capture_room(app, clock, WHEEL)
-    nulling = _NullingPendingWS(room)
-    app.state.connections.add(room.room_id, room.black.client_uuid, nulling)
-    await handle_move(app, ws_w, room, "white", _move_raw(frm, to))
-    win = _win_elapsed(room.pending_skillcheck)
-    out = await _fire(app, clock, room, "white", win)
-    assert nulling.of_type("skill_check_spectate_shot"), "the spectate-shot was relayed first"
-    assert out == "noop", "the post-await guard bails when pending was resolved mid-await"
-    assert len(room.backend.move_history) == 0, "the move was NOT applied a second time"
-    assert room.skillcheck_log == [], "no spurious win was recorded"
+async def test_a_won_shot_is_claimed_before_the_relay_so_a_sweep_cannot_steal_it(app, clock):
+    """REGRESSION: the spectate-shot relay is the shot handler's only await, and
+    the deadline sweep runs on the same loop. A whack forged one whiff past the cap
+    is is_dead -- so the sweep WILL fail it -- while a shot on an up pop still wins:
+    the exact overlap where the two resolvers disagree. The handler therefore claims
+    the pending (nulls it) BEFORE relaying, so the sweep that runs during the relay
+    finds nothing to resolve and the mirrored won=True is never contradicted. With
+    the claim after the relay the opponent saw won=True, then a fail broadcast, and
+    the capture never landed."""
+    room, ws_w, ws_b, frm, to, pending, ch, holes = await _whack_room(app, clock)
+    pending.progress = ch.hits_required - 1
+    pending.miss_count = mole.MOLE_MAX_WHIFFS
+    racing = _RacingSpectatorWS(app.state.sweep.step_skillcheck_deadline)
+    app.state.connections.add(room.room_id, room.black.client_uuid, racing)
+
+    out = await _fire(app, clock, room, "white", _pop_mid(ch, 0),
+                      target=_hole_center(holes, ch.pops[0].hole))
+
+    assert racing.of_type("skill_check_spectate_shot")[-1]["won"] is True
+    assert out == "applied", "the claimed win survives the sweep racing in mid-relay"
+    assert len(room.backend.move_history) == 1
+    assert room.skillcheck_log == [SkillCheckOutcome(1, "whack", True, "Qxd5")]
+    assert not racing.of_type("skill_check_result"), \
+        "no fail contradicts the won=True the opponent already mirrored"
+    assert (frm, to) not in room.skillcheck_locks
 
 
 @pytest.mark.asyncio
@@ -1219,12 +1254,13 @@ async def test_throttled_whack_shots_never_advance_the_whiff_cap(app, clock):
 
 @pytest.mark.asyncio
 async def test_forged_client_elapsed_buys_no_spacing_past_the_anti_mash_gate(app, clock):
-    """The anti-mash gate is paced on the SERVER wall clock, never on the
-    client-reported elapsed. The lag-comp clamp window (200ms) is WIDER than the
-    80ms gate, so adjudicating the gate on the clamped value let a crafted client
-    send two shots in the same instant while claiming 200ms of separation — buying
-    a free extra input per burst. Same-instant sends must always throttle: the
-    second shot is dropped whole, with no relay, no miss, and no gate movement."""
+    """The gate is paced on the ADJUDICATED elapsed, and the adjudication is capped
+    at the real arrival (min(max(claimed, raw - 200ms), raw)). That ceiling is what
+    keeps a crafted client honest: two sends in the same instant adjudicate to the
+    same elapsed however much separation the second one claims, so the sustained
+    input rate can never exceed the real one. Same-instant sends must always
+    throttle: the second shot is dropped whole, with no relay, no miss, and no gate
+    movement."""
     room, ws_w, ws_b, frm, to, pending, ch, holes = await _whack_room(app, clock)
     wrong_hole = next(h for h in range(ch.hole_count) if h != ch.pops[0].hole)
     mid = _pop_mid(ch, 0)
@@ -1242,6 +1278,52 @@ async def test_forged_client_elapsed_buys_no_spacing_past_the_anti_mash_gate(app
     assert pending.miss_count == 1 and pending.progress == 0, "no state change at all"
     assert pending.last_input_ms == gate_before, "a dropped shot never moves the gate"
     assert not ws_b.of_type("skill_check_spectate_shot"), "no relay for the dropped shot"
+
+
+@pytest.mark.asyncio
+async def test_jittered_arrivals_keep_a_legitimately_spaced_combo_press(app, clock):
+    """REGRESSION: the gate used to compare SERVER ARRIVAL deltas, so network
+    jitter that compressed two honestly spaced presses silently ate one of them —
+    the client completed its run locally while the server sat a press short and let
+    the check die at the deadline. Here the presses leave 80ms apart (the client's
+    own floor) but land only 40ms apart because the first one lagged 80ms and the
+    second only 40ms. Adjudicated elapsed is what the player actually saw, so both
+    count; the arrival gap never does."""
+    room, ws_w, ws_b, frm, to, pending, ch = await _combo_room(app, clock)
+    gate = online.min_inter_input_ms(COMBO)
+    sent = (320, 320 + int(COMBO_MIN_INTER_PRESS_MS))
+    arrivals = (sent[0] + 80, sent[1] + 40)
+    assert arrivals[1] - arrivals[0] < gate < sent[1] - sent[0], \
+        "the jitter really does compress an honest gap below the gate"
+
+    outs = [await _shoot_claiming(app, clock, room, "white", arrives_at_ms=arrivals[i],
+                                  claims_ms=sent[i], direction=ch.prompts[i])
+            for i in range(2)]
+
+    assert outs == ["skillcheck_hit", "skillcheck_hit"], "neither honest press is eaten"
+    assert pending.progress == 2
+    assert len(ws_b.of_type("skill_check_spectate_shot")) == 2
+
+
+@pytest.mark.asyncio
+async def test_a_mash_claiming_sub_gate_spacing_is_still_dropped(app, clock):
+    """The other half of the same gate: adjudicating on the claimed elapsed must
+    not become a way to pace a burst. A client that mashes and reports the truth —
+    presses 20ms apart — is throttled on exactly that reported spacing, and the
+    dropped press moves neither the gate nor any check state."""
+    room, ws_w, ws_b, frm, to, pending, ch = await _combo_room(app, clock)
+    first = await _shoot_claiming(app, clock, room, "white", arrives_at_ms=400,
+                                  claims_ms=320, direction=ch.prompts[0])
+    assert first == "skillcheck_hit" and pending.last_input_ms == 320
+    ws_b.sent.clear()
+
+    second = await _shoot_claiming(app, clock, room, "white", arrives_at_ms=440,
+                                   claims_ms=340, direction=ch.prompts[1])
+
+    assert second == "noop", "20ms of claimed spacing is under the 50ms combo gate"
+    assert pending.progress == 1 and pending.miss_count == 0, "no state change at all"
+    assert pending.last_input_ms == 320, "a dropped press never moves the gate"
+    assert not ws_b.of_type("skill_check_spectate_shot"), "no relay for the dropped press"
 
 
 @pytest.mark.asyncio
@@ -1306,6 +1388,54 @@ async def test_whack_dead_pending_is_dead_at_every_surface(app, clock, surface, 
     assert len(room.backend.move_history) == 0
     assert room.skillcheck_log == [SkillCheckOutcome(1, "whack", False, "Qxd5")]
     assert ws_b.of_type("skill_check_result"), "the opponent hears the fail"
+
+
+def _post_resume(app, room, token):
+    resp = TestClient(app).post("/resume", json={
+        "version": PROTOCOL_VERSION, "room_id": room.room_id, "session_token": token})
+    assert resp.status_code == 200
+    return resp.json()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", [WHACK, COMBO])
+async def test_resume_resolves_a_dead_pending_and_serves_the_resulting_lock(app, clock, kind):
+    """/resume used to HIDE a dead pending without resolving it, so the payload
+    carried neither the check NOR the (from,to) lock its failure produces: a
+    reconnecting mover was handed a board where the doomed capture still looked
+    playable, and only the next sweep tick (up to 100ms later, or never if the room
+    was mid-drop) corrected it. The endpoint now fails the check first and answers
+    with the post-fail state. Both terminal shapes are covered — whack dying on an
+    unreachable quota and combo dying on the wrongs cap — because the two reach
+    is_dead through different check_expired branches."""
+    if kind == WHACK:
+        room, ws_w, ws_b, frm, to, pending, ch, holes = await _whack_room(app, clock)
+        dead_at = _whack_quota_dead_elapsed(pending, ch)
+    else:
+        room, ws_w, ws_b, frm, to, pending, ch = await _combo_room(app, clock)
+        pending.miss_count = COMBO_MAX_WRONGS
+        dead_at = 400
+    clock.set((pending.start_ms + dead_at + 1) / 1000.0)
+    assert pending.is_dead(app.state.now_ms()), "the forged state really is terminal"
+
+    payload = _post_resume(app, room, "ta")
+
+    assert payload["pending_skillcheck"] is None, "a dead check is never re-handed"
+    assert payload["skillcheck_locks"] == [
+        {"from": coord_from_square(frm), "to": coord_from_square(to)}], \
+        "and the lock its failure produced rides the same payload"
+    assert room.pending_skillcheck is None
+    assert room.skillcheck_log == [SkillCheckOutcome(1, kind.value, False, "Qxd5")]
+    assert ws_b.of_type("skill_check_result"), "the opponent hears the fail too"
+
+
+@pytest.mark.asyncio
+async def test_resume_leaves_a_live_pending_and_its_move_unlocked(app, clock):
+    room, ws_w, ws_b, frm, to, pending, ch, holes = await _whack_room(app, clock)
+    payload = _post_resume(app, room, "ta")
+    assert payload["pending_skillcheck"]["kind"] == "whack"
+    assert payload["skillcheck_locks"] == [], "a live check locks nothing yet"
+    assert room.pending_skillcheck is pending
 
 
 @pytest.mark.asyncio
@@ -1485,9 +1615,9 @@ async def test_combo_press_without_direction_is_a_noop(app, clock):
 
 @pytest.mark.asyncio
 async def test_combo_mash_burst_cannot_clear_the_run(app, clock):
-    """A scripted 10ms mash cycling all four directions: the 80ms input gate drops
-    seven of every eight presses and the wrongs cap kills the run long before the
-    deadline — mashing can never brute-force the prompt sequence."""
+    """A scripted 10ms mash cycling all four directions: combo's 50ms server gate
+    drops four of every five presses and the wrongs cap kills the run long before
+    the deadline — mashing can never brute-force the prompt sequence."""
     room, ws_w, ws_b, frm, to, pending, ch = await _combo_room(app, clock)
     elapsed, out = 120, None
     while room.pending_skillcheck is not None and elapsed < int(pending.deadline_ms):
@@ -1589,14 +1719,25 @@ async def test_shot_and_sweep_same_tick_resolve_once_for_every_kind(app, clock, 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("kind", ALL_KINDS)
-async def test_winning_shot_nulled_during_the_spectate_await_is_a_noop_for_every_kind(
+async def test_a_finalize_during_the_spectate_relay_preempts_the_win_for_every_kind(
         app, clock, kind):
+    """The claim-before-relay ordering must not let a won shot write a ply onto an
+    already-finished game: a resign or flag landing during the relay await ends the
+    room, and room.result is re-read after the await for exactly that reason. The
+    spectate mirror still went out -- the opponent then gets the result frame, which
+    supersedes it -- but no ply, no series-scoring capture, no log entry lands."""
     room, ws_w, ws_b, frm, to = await _capture_room(app, clock, kind)
-    nulling = _NullingPendingWS(room)
-    app.state.connections.add(room.room_id, room.black.client_uuid, nulling)
+
+    async def _resign():
+        await finalize_and_broadcast(app.state.rooms, app.state.connections, room,
+                                     Reason.RESIGNATION, winner_color="black")
+
+    racing = _RacingSpectatorWS(_resign)
+    app.state.connections.add(room.room_id, room.black.client_uuid, racing)
     await handle_move(app, ws_w, room, "white", _move_raw(frm, to))
     out = await _terminal_win(app, clock, room)
-    assert nulling.of_type("skill_check_spectate_shot"), "the spectate-shot was relayed first"
-    assert out == "noop", "the post-await guard bails for every kind"
+    assert racing.of_type("skill_check_spectate_shot"), "the spectate-shot was relayed first"
+    assert out == "already_over", "the post-await result re-read bails for every kind"
     assert len(room.backend.move_history) == 0
     assert room.skillcheck_log == []
+    assert not ws_w.of_type("move_applied"), "no ply is broadcast after the result"

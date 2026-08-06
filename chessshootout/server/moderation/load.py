@@ -2,6 +2,7 @@ import asyncio
 
 
 MAX_CONCURRENT_DETECTS = 2
+ADMISSION_TIMEOUT_SECONDS = 0.5
 PLAYER_REFILL_CPU_SECONDS = 0.15
 PLAYER_BURST_CPU_SECONDS = 0.6
 ROOM_REFILL_CPU_SECONDS = 0.25
@@ -33,11 +34,13 @@ class _Bucket:
 class ModerationLoad:
 
     def __init__(self, *, max_concurrent=MAX_CONCURRENT_DETECTS,
+                 admission_timeout=ADMISSION_TIMEOUT_SECONDS,
                  player_refill=PLAYER_REFILL_CPU_SECONDS,
                  player_burst=PLAYER_BURST_CPU_SECONDS,
                  room_refill=ROOM_REFILL_CPU_SECONDS,
                  room_burst=ROOM_BURST_CPU_SECONDS):
         self.semaphore = asyncio.Semaphore(max_concurrent)
+        self.admission_timeout = admission_timeout
         self._refill = {PLAYER: player_refill, ROOM: room_refill}
         self._burst = {PLAYER: player_burst, ROOM: room_burst}
         self._buckets = {}

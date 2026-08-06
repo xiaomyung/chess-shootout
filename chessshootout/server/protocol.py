@@ -28,6 +28,7 @@ GIVE_TIME_SECONDS = 15
 GIVE_TIME_TICK_MS = 100
 GIVE_TIME_MAX_HOLD_MS = 600_000
 FIRST_MOVE_ABORT_SECONDS = 60
+QUEUE_MAX_WAIT_SECONDS = 600.0
 MIN_TIME_MINUTES = 1
 MAX_TIME_MINUTES = 180
 MIN_INCREMENT_SECONDS = 0
@@ -79,6 +80,7 @@ class Reason:
     ALREADY_IN_GAME = "already_in_game"
     NOT_IN_ROOM = "not_in_room"
     ROOM_FULL = "room_full"
+    QUEUE_TIMEOUT = "queue_timeout"
     RATE_LIMITED = "rate_limited"
     GAME_ALREADY_OVER = "game_already_over"
     REMATCH_UNAVAILABLE = "rematch_unavailable"

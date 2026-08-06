@@ -18,7 +18,8 @@ from chessshootout.backend.utils import (
     PROMO_LETTER_BY_TYPE, coord_from_square,
 )
 from chessshootout.server import logging_setup
-from chessshootout.server.broadcasts import broadcast_game_start, finalize_and_broadcast
+from chessshootout.server.broadcasts import (
+    broadcast_game_start, finalize_and_broadcast, resolve_skillcheck_fail)
 from chessshootout.server.connections import ConnectionRegistry, send
 from chessshootout.server.handlers import _clock_snapshot, dispatch
 from chessshootout.server.moderation import library
@@ -272,6 +273,10 @@ def create_app(*, now_provider=time.monotonic, max_rooms=DEFAULT_MAX_ROOMS):
                     await send(opp_ws, RematchUpdateMessage(event="opponent_left"))
             log.info("matchmake leaves finished room=%s", finished.room_id)
             rooms.release_for_new_game(body.client_uuid)
+        queued = rooms.queued_room_for(body.client_uuid)
+        if queued is not None:
+            log.info("matchmake releases queue slot room=%s", queued.room_id)
+            rooms.release_for_new_game(body.client_uuid)
         token = RoomManager.make_session_token()
         try:
             room = await rooms.enqueue(
@@ -326,6 +331,9 @@ def create_app(*, now_provider=time.monotonic, max_rooms=DEFAULT_MAX_ROOMS):
         if slot is None:
             log.info("resume rejected room=%s reason=session_expired", body.room_id)
             raise HTTPException(status_code=401, detail={"reason": Reason.SESSION_EXPIRED})
+        dead = room.pending_skillcheck
+        if dead is not None and dead.is_dead(app.state.now_ms()):
+            await resolve_skillcheck_fail(rooms, connections, room)
         if room.backend is not None:
             room.backend.tick_clock()
         history = [
@@ -430,6 +438,10 @@ def _first_validation_reason(exc):
     return errs[0].get("msg", Reason.INVALID_MESSAGE)
 
 
+def _over_inbound_cap(raw):
+    return len(raw.encode("utf-8")) > MAX_INBOUND_MESSAGE_BYTES
+
+
 def _promotion_letter(move):
     if move.promoted_to is None:
         return None
@@ -467,7 +479,7 @@ async def _authenticate_ws(websocket, rooms, room_id):
     except (asyncio.TimeoutError, WebSocketDisconnect):
         await websocket.close(code=WS_CLOSE_INVALID_TOKEN)
         return None
-    if len(first_raw) > MAX_INBOUND_MESSAGE_BYTES:
+    if _over_inbound_cap(first_raw):
         await websocket.close(code=WS_CLOSE_PAYLOAD_TOO_LARGE)
         return None
     try:
@@ -551,7 +563,7 @@ async def _ws_session(app, websocket, room_id):
                 log.warning("ws recv unexpected exc room=%s color=%s exc=%r",
                             room.room_id, color, exc)
                 break
-            if len(raw) > MAX_INBOUND_MESSAGE_BYTES:
+            if _over_inbound_cap(raw):
                 await websocket.close(code=WS_CLOSE_PAYLOAD_TOO_LARGE)
                 return
             current_color = room.color_of(auth_uuid)

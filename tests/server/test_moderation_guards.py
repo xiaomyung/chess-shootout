@@ -35,6 +35,15 @@ TIMING_BUDGET_MS = 10.0
 DENSE_TIMING_BUDGET_MS = 120.0
 
 
+def _clear_detect_memo():
+    """detect() memoises on the exact (arrows, highlights, context, changed) key, so
+    any repeated call is a dict lookup. A timing pin that resamples one input is
+    then timing the memo, and a concurrency pin that replays a warmed input never
+    reaches the cache's write path -- both need the memo emptied first."""
+    detector._CACHE.clear()
+    detector._CACHE_ORDER.clear()
+
+
 def test_knight_l_elbow_matches_client_annotations():
     from chessshootout.frontend.board.annotations import Annotations
 
@@ -146,6 +155,9 @@ def test_worst_case_timing_under_budget():
     # sample -- its true uncontended cost -- is what the worst-input max is
     # taken over. An order-of-magnitude regression pushes every sample over the
     # line; transient contention on one sample no longer can.
+    # The memo is emptied before every sample: repeating one input otherwise made
+    # samples 2 and 3 a bare dict lookup, so the "best" sample was the cache's
+    # cost and the budget bounded nothing.
     worst_ms = 0.0
     gc.collect()
     gc.disable()
@@ -156,6 +168,7 @@ def test_worst_case_timing_under_budget():
                                 M.coord(rng.randrange(8), rng.randrange(8)))
             best_ms = float("inf")
             for _ in range(3):
+                _clear_detect_memo()
                 start = time.thread_time()
                 detector.detect(churned, highlights)
                 best_ms = min(best_ms, (time.thread_time() - start) * 1000)
@@ -244,7 +257,12 @@ def test_detect_is_thread_safe_under_concurrent_callers():
         inputs.append(tuple(a for a in arrows if a[0] != a[1]))
 
     serial = [detector.detect(list(arrows), []).kind for arrows in inputs]
+    # The serial baseline warms the memo for every input, so without this the
+    # concurrent pass is 96 pure cache reads and the unlocked pop(0)/append pair
+    # this test exists to guard is never executed at all.
+    _clear_detect_memo()
     with ThreadPoolExecutor(max_workers=6) as pool:
         concurrent = list(pool.map(
             lambda arrows: detector.detect(list(arrows), []).kind, inputs * 3))
     assert concurrent == serial * 3
+    assert detector._CACHE, "the concurrent pass really did go through the write path"

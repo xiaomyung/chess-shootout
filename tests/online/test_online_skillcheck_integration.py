@@ -109,7 +109,16 @@ def _winning_elapsed(req):
     window = _widest_win_window(kind, ch, deadline)
     assert window is not None, "no winning window for the stored seed"
     lo, hi = window
-    assert hi - lo > _SLEEP_LEAD_MS, "the win window must absorb the sleep lead both ways"
+    # The window has to absorb the sleep lead in BOTH directions, not just one:
+    # aiming at the midpoint spends half of it on an early arrival and half on a
+    # late one, so `> _SLEEP_LEAD_MS` was only ever half the guard it looked like.
+    # The 200ms lag bound is deliberately NOT the yardstick here -- lateness up to
+    # the bound is pinned back to the claimed moment by the clamp and costs the
+    # window nothing, and no shipped geometry draws a window that wide anyway
+    # (wheel measures ~105-125ms, aim ~130-220ms), so a bound-sized requirement
+    # would be an assert that can never hold.
+    assert hi - lo >= 2 * _SLEEP_LEAD_MS, \
+        "the win window must absorb the sleep lead in both directions"
     # Aim at the MIDDLE, not the top. The server scores max(claimed, recv-200ms),
     # so a shot that leaves late -- a loaded CI runner descheduling the sleep is
     # enough -- gets scored later than it claims. Aiming at the top leaves zero

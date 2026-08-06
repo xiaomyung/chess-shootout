@@ -6,9 +6,10 @@ GC) so we drive each independently without the full asyncio loop.
 """
 import pytest
 
-from chessshootout.server.protocol import GRACE_SECONDS, HEARTBEAT_TIMEOUT_SECONDS, Reason
+from chessshootout.server.protocol import (
+    GRACE_SECONDS, HEARTBEAT_TIMEOUT_SECONDS, QUEUE_MAX_WAIT_SECONDS, Reason)
 from chessshootout.server.rooms import POST_GAME_DISCONNECT_GRACE, QUEUE_ABANDON_SECONDS
-from chessshootout.server.sweep import PREGAME_CONNECT_GRACE_SECONDS
+from chessshootout.server.sweep import PREGAME_CONNECT_GRACE_SECONDS, WS_CLOSE_QUEUE_TIMEOUT
 from tests.server.test_server_broadcasts import RecordingWS
 from tests.helpers import fake_uuid4
 from tests.server.conftest import ALICE, BOB
@@ -220,6 +221,9 @@ async def test_sweep_step_all_runs_in_documented_order(sweep, app, clock, monkey
     def _trace_reap_queue():
         calls.append("reap_queue")
 
+    async def _trace_timeout_queue():
+        calls.append("timeout_queue")
+
     async def _trace_post_game():
         calls.append("post_game")
 
@@ -228,12 +232,13 @@ async def test_sweep_step_all_runs_in_documented_order(sweep, app, clock, monkey
     monkeypatch.setattr(sweep, "step_heartbeat_timeout", _trace_heartbeat)
     monkeypatch.setattr(sweep, "step_drop_orphans_pre_game", _trace_drop)
     monkeypatch.setattr(sweep, "step_reap_abandoned_queue", _trace_reap_queue)
+    monkeypatch.setattr(sweep, "step_reap_timed_out_queue", _trace_timeout_queue)
     monkeypatch.setattr(sweep, "step_post_game", _trace_post_game)
     monkeypatch.setattr(sweep.rooms, "gc_finished_rooms",
                         lambda: calls.append("gc"))
     await sweep.step_all()
     assert calls == ["clock_and_first_move", "heartbeat_timeout", "grace",
-                     "drop_orphans", "reap_queue", "post_game", "gc"]
+                     "drop_orphans", "reap_queue", "timeout_queue", "post_game", "gc"]
 
 
 async def _queue_alone(rooms, time_minutes=5):
@@ -260,21 +265,71 @@ async def test_sweep_reaps_a_queued_room_nobody_ever_connected_to(sweep, app, cl
 
 
 @pytest.mark.asyncio
-async def test_sweep_never_reaps_a_queued_player_holding_a_live_socket(sweep, app, clock):
+async def test_the_abandoned_reap_never_touches_a_queued_player_holding_a_live_socket(
+        sweep, app, clock):
     """A real player waiting for a match auths a websocket to the queued room and
     holds it open with no timeout on the client side, so age alone cannot mean
     abandoned. The live socket is the liveness proof: only a queued room with no
-    connection behind it is reapable, which is exactly the shape of the
-    HTTP-only flood. There is no protocol message that tells a waiting client its
-    queue slot vanished, so evicting a connected waiter would strand it in a
-    permanent 'searching' modal."""
+    connection behind it is reapable by THIS step, which is exactly the shape of
+    the HTTP-only flood. A connected waiter is evicted by the hard TTL step
+    instead, which tells it why before closing the socket."""
     rooms = app.state.rooms
     room = await _queue_alone(rooms)
     app.state.connections.add(room.room_id, ALICE, RecordingWS())
-    clock.advance(QUEUE_ABANDON_SECONDS * 10)
+    clock.advance(QUEUE_MAX_WAIT_SECONDS * 10)
     sweep.step_reap_abandoned_queue()
     assert rooms.get(room.room_id) is room
     assert rooms.queue_depth == 1
+
+
+@pytest.mark.asyncio
+async def test_a_connected_waiter_survives_the_abandon_ttl_and_dies_at_the_hard_ttl(
+        sweep, app, clock):
+    """SECURITY: queue depth counts against max_rooms, and the abandoned-queue reap
+    spares anything holding a socket — so ~max_rooms clients that connect and then
+    sit there forever pin every slot and answer real matchmaking with 503 for the
+    life of the process. The hard TTL is liveness-independent: past it the waiter is
+    dequeued whatever its socket is doing, told why, and closed."""
+    rooms = app.state.rooms
+    room = await _queue_alone(rooms)
+    ws = RecordingWS()
+    app.state.connections.add(room.room_id, ALICE, ws)
+
+    clock.advance(QUEUE_ABANDON_SECONDS + 1)
+    await sweep.step_reap_timed_out_queue()
+    assert rooms.queue_depth == 1, "the abandon TTL is not the hard TTL"
+
+    clock.advance(QUEUE_MAX_WAIT_SECONDS)
+    await sweep.step_reap_timed_out_queue()
+
+    assert rooms.queue_depth == 0
+    assert rooms.get(room.room_id) is None
+    assert rooms._queue == {}, "the emptied time-control bucket goes with it"
+    assert rooms._uuid_to_room == {}, "and the uuid is free to matchmake again"
+    assert ws.of_type("error")[-1]["reason"] == Reason.QUEUE_TIMEOUT, \
+        "the waiter is told its search is over instead of hanging on 'searching'"
+    assert ws.closed_with == WS_CLOSE_QUEUE_TIMEOUT
+
+
+@pytest.mark.asyncio
+async def test_the_hard_ttl_reap_needs_no_socket_and_leaves_paired_rooms_alone(
+        sweep, app, clock):
+    """The socketless waiter (already the abandoned reap's job) must not crash the
+    notify path, and a paired room inherits the queued room's created_at, so the
+    TTL walk must stay inside the queue."""
+    rooms = app.state.rooms
+    orphan = await rooms.enqueue(client_uuid=fake_uuid4(91), nickname="Q",
+                                 session_token="tq", time_minutes=3,
+                                 increment_seconds=0, side_preference="white")
+    paired = await _pair(rooms, time_minutes=10)
+    paired.first_move_at = clock()
+    clock.advance(QUEUE_MAX_WAIT_SECONDS + 1)
+
+    await sweep.step_reap_timed_out_queue()
+
+    assert rooms.get(orphan.room_id) is None
+    assert rooms.get(paired.room_id) is paired
+    assert rooms.rooms_active == 1
 
 
 @pytest.mark.asyncio
