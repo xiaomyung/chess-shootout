@@ -13,6 +13,7 @@ import time
 from chessshootout.backend.utils import Square
 from chessshootout.online.client import OnlineClient, fetch_resume
 from chessshootout.skillcheck import online
+from chessshootout.skillcheck.triggers import compute_facts
 from chessshootout.skillcheck.types import SkillCheckKind, SkillCheckOutcome
 from tests.helpers import fake_uuid4
 
@@ -47,15 +48,30 @@ def _room(app):
     return active[0]
 
 
-def _force_wheel(room):
+def _force_kind(room, kind):
+    """Search for a secret whose roll selects `kind` for exd5.
+
+    Each kind owns a full quarter of the capture roll, so 8000 tries missing is
+    not chance -- it means every roll returned NONE, i.e. the room was not at
+    the capture after all (or the move is already locked). The failure prints
+    the facts it actually saw, because "no secret found" on its own sends you
+    hunting the RNG instead of the board state.
+    """
     frm, to = Square(4, 4), Square(3, 3)  # exd5
     for i in range(8000):
-        secret = "force-wheel-{}".format(i)
+        secret = "force-{}-{}".format(kind.value, i)
         if online.select_kind(secret, room.plies_ever, room.backend, frm, to,
-                              room.skillcheck_locks) == SkillCheckKind.WHEEL:
+                              room.skillcheck_locks) == kind:
             room.skillcheck_secret = secret
             return
-    raise AssertionError("no wheel secret found")
+    raise AssertionError(
+        "no {} secret in 8000 tries: facts={} plies_ever={} turn={} locks={}".format(
+            kind.value, compute_facts(room.backend, frm, to, room.skillcheck_locks),
+            room.plies_ever, room.backend.turn, room.skillcheck_locks))
+
+
+def _force_wheel(room):
+    _force_kind(room, SkillCheckKind.WHEEL)
 
 
 # How a win is made deterministic under real CI jitter:
@@ -63,10 +79,10 @@ def _force_wheel(room):
 #   adjudicates min(max(E, raw - lag_bound), raw), where raw is the real arrival gap.
 #   * if the packet lands at raw in [E, E+lag_bound]  -> scored EXACTLY E (the win moment)
 #   * if it lands a touch early, raw in [E - SLEEP_LEAD, E) -> scored at raw
-#   So we aim E at the TOP of the widest win window: a late-ish arrival is pinned to
-#   E (a win), and an early arrival down to (E - SLEEP_LEAD) still falls inside the
-#   window provided the window is at least SLEEP_LEAD wide. SLEEP_LEAD is kept small
-#   (30ms) and the wheel's opening arc is ~120ms wide, so both directions are safe.
+#   So we aim E at the MIDDLE of the widest win window: a late arrival is pinned up to
+#   E (a win) and an early one drops to (E - SLEEP_LEAD), and the midpoint leaves half
+#   the window as slack in both directions. Aiming at the top instead left no room for
+#   lateness at all, which is exactly how a loaded runner turned a win into a loss.
 _SLEEP_LEAD_MS = 30
 
 
@@ -103,14 +119,7 @@ def _winning_elapsed(req):
 
 
 def _force_aim(room):
-    frm, to = Square(4, 4), Square(3, 3)  # exd5
-    for i in range(8000):
-        secret = "force-aim-{}".format(i)
-        if online.select_kind(secret, room.plies_ever, room.backend, frm, to,
-                              room.skillcheck_locks) == SkillCheckKind.AIM:
-            room.skillcheck_secret = secret
-            return
-    raise AssertionError("no aim secret found")
+    _force_kind(room, SkillCheckKind.AIM)
 
 
 def _move(mover, a, b, frm, to):

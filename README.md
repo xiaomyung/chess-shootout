@@ -206,35 +206,34 @@ Two players, one server — authoritative, running the same engine as the client
 
 ### Quick start (local)
 
-```bash
-python -m chessshootout.server                                      # terminal 1 (port 8000)
-CHESS_DATA_DIR=/tmp/cs-a python -m chessshootout.main --client-uuid alice --nickname Alice
-CHESS_DATA_DIR=/tmp/cs-b python -m chessshootout.main --client-uuid bob   --nickname Bob
-```
-
-`CHESS_DATA_DIR` gives each client its own `.env`, settings and PGN folder, so the
-two runs cannot overwrite each other's identity or saved games. Drop it if you
-only need one client.
-
-If port 8000 is already taken, bind the loopback address instead — clients
-default to `localhost:8000`, so nothing else changes:
+Three terminals, copy-paste as-is:
 
 ```bash
-HOST=127.0.0.1 python -m chessshootout.server
+# 1 — server
+HOST=127.0.0.1 PORT=8000 LOG_LEVEL=DEBUG python -m chessshootout.server
+```
+```bash
+# 2 — Alice
+CHESS_SERVER_ADDR=localhost:8000 CHESS_DATA_DIR=/tmp/cs-a LOG_LEVEL=DEBUG \
+  python -m chessshootout.main --client-uuid alice --nickname Alice
+```
+```bash
+# 3 — Bob
+CHESS_SERVER_ADDR=localhost:8000 CHESS_DATA_DIR=/tmp/cs-b LOG_LEVEL=DEBUG \
+  python -m chessshootout.main --client-uuid bob --nickname Bob
 ```
 
-`HOST` and `PORT` both override; a different `PORT` needs a matching
-`CHESS_SERVER_ADDR=localhost:<port>` on each client.
+Every variable is set explicitly so nothing inherited can interfere:
+`CHESS_SERVER_ADDR` beats whatever a saved `.env` holds, `CHESS_DATA_DIR` gives
+each client its own settings and PGN folder, and `HOST=127.0.0.1` binds the
+loopback so a service already on `0.0.0.0:8000` does not collide.
 
 `--client-uuid alice` is a debug shortcut: any non-UUID4 alias is coerced to
 a deterministic UUID4 client-side so the server's validator accepts it. Real
 clients auto-generate and persist a UUID4 on first launch.
 
-In each client pick **Online**, choose time control and side, then hit
-**FIND MATCH** (the server address is set beforehand via **Options → Server**
-— `<ip>` defaults to port 8000, or `<ip>:<port>`; `localhost` for local play).
-When a second player joins with the same time control, both see "Match
-found!" and the game begins.
+In both clients pick **Online**, choose the **same time control**, then hit
+**FIND MATCH** — both see "Match found!" and the game begins.
 
 ### Settings (`.env`)
 
