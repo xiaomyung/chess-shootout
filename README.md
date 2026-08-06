@@ -208,9 +208,23 @@ Two players, one server — authoritative, running the same engine as the client
 
 ```bash
 python -m chessshootout.server                                      # terminal 1 (port 8000)
-python -m chessshootout.main --client-uuid alice --nickname Alice   # terminal 2
-python -m chessshootout.main --client-uuid bob   --nickname Bob     # terminal 3
+CHESS_DATA_DIR=/tmp/cs-a python -m chessshootout.main --client-uuid alice --nickname Alice
+CHESS_DATA_DIR=/tmp/cs-b python -m chessshootout.main --client-uuid bob   --nickname Bob
 ```
+
+`CHESS_DATA_DIR` gives each client its own `.env`, settings and PGN folder, so the
+two runs cannot overwrite each other's identity or saved games. Drop it if you
+only need one client.
+
+If port 8000 is already taken, bind the loopback address instead — clients
+default to `localhost:8000`, so nothing else changes:
+
+```bash
+HOST=127.0.0.1 python -m chessshootout.server
+```
+
+`HOST` and `PORT` both override; a different `PORT` needs a matching
+`CHESS_SERVER_ADDR=localhost:<port>` on each client.
 
 `--client-uuid alice` is a debug shortcut: any non-UUID4 alias is coerced to
 a deterministic UUID4 client-side so the server's validator accepts it. Real

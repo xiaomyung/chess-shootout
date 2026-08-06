@@ -25,9 +25,15 @@ class SettingsController:
     def commit_options_exit(self):
         self._validate_data_folder_on_exit()
         if self._server_addr_row is not None:
-            env.set_server_addr(self._server_addr_row.current_text())
+            self._commit_server_addr(self._server_addr_row.current_text())
         self.frontend.menu.apply_default_time_settings()
         self._flush_deferred_env_writes(force=True)
+
+    def _commit_server_addr(self, typed):
+        if not typed or typed == env.get_server_addr():
+            return
+        env.set_server_addr(typed)
+        self.frontend.toast.show("Server set to {}".format(env.get_server_addr()))
 
     def _validate_data_folder_on_exit(self):
         if self._data_folder_row is None:
@@ -90,7 +96,8 @@ class SettingsController:
             suffix="/" + paths.GAMES_SUBDIR)
         self._server_addr_row = TextRow(
             "Server", "Where online games connect and reconnect",
-            window, env.get_server_addr, placeholder="host or host:port")
+            window, env.get_server_addr, placeholder="host or host:port",
+            on_commit=self._commit_server_addr)
         time_options = [(label, label) for label in env.TIME_CONTROL_VALUES]
         incr_options = [(label, label) for label in env.INCREMENT_VALUES]
         return [

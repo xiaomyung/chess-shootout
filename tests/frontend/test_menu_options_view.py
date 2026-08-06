@@ -261,6 +261,65 @@ def test_text_row_reports_typed_value():
     assert row.current_text() == "chess.example.com:9000"
 
 
+def _type(row, text):
+    row.input.focused = True
+    for ch in text:
+        row.handle_key(pg.event.Event(pg.KEYDOWN, key=ord(ch), mod=0, unicode=ch))
+
+
+def test_enter_commits_the_typed_value_instead_of_snapping_it_back():
+    # The row repaints from its getter whenever the field is unfocused, and
+    # RETURN unfocuses it -- so before the commit hook existed, pressing enter
+    # handed the typed address straight back to the getter and the next frame
+    # painted the OLD value over it. The user's edit was gone before anything
+    # could persist it, and the exit commit then wrote back what was already
+    # stored.
+    stored = ["localhost:8000"]
+    row = TextRow("Server", "where online connects", pg.display.get_surface(),
+                  lambda: stored[0], on_commit=lambda v: stored.__setitem__(0, v))
+    _draw_row(row)
+    row.input.text = ""
+    _type(row, "example.com")
+    row.handle_key(pg.event.Event(pg.KEYDOWN, key=pg.K_RETURN, mod=0, unicode="\r"))
+    assert stored[0] == "example.com", "enter is what saves the address"
+    _draw_row(row)
+    assert row.current_text() == "example.com", "and the field keeps showing it"
+
+
+def test_an_unfocused_edit_survives_until_the_row_is_committed():
+    # Clicking away parks the edit instead of destroying it: the exit commit is
+    # still the backstop for anyone who types and leaves without pressing enter.
+    row = TextRow("Server", "where online connects", pg.display.get_surface(),
+                  lambda: "localhost:8000")
+    _draw_row(row)
+    row.input.text = ""
+    _type(row, "kept.example")
+    row.input.focused = False
+    _draw_row(row)
+    assert row.current_text() == "kept.example"
+
+
+def test_escape_cancels_the_edit_and_restores_the_stored_value():
+    row = TextRow("Server", "where online connects", pg.display.get_surface(),
+                  lambda: "localhost:8000")
+    _draw_row(row)
+    row.input.text = ""
+    _type(row, "typo.example")
+    row.handle_key(pg.event.Event(pg.KEYDOWN, key=pg.K_ESCAPE, mod=0, unicode=""))
+    _draw_row(row)
+    assert row.current_text() == "localhost:8000"
+
+
+def test_a_row_with_no_edit_still_follows_its_getter():
+    value = ["localhost:8000"]
+    row = TextRow("Server", "where online connects", pg.display.get_surface(),
+                  lambda: value[0])
+    _draw_row(row)
+    value[0] = "changed.elsewhere"
+    _draw_row(row)
+    assert row.current_text() == "changed.elsewhere"
+
+
 # --- OptionsBody scrolling (standalone, no view/app needed) ----------------
 
 def test_body_scroll_clamps():
