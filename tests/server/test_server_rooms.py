@@ -4,7 +4,7 @@ import pytest
 
 from chessshootout.server.protocol import GRACE_SECONDS
 from chessshootout.server.rooms import (
-    AlreadyInGameError, InvalidTokenError, NotInRoomError,
+    AlreadyInGameError, InvalidTokenError, NotInRoomError, QUEUE_ABANDON_SECONDS,
     REMATCH_ABSOLUTE_CAP_SECONDS, REMATCH_IDLE_SECONDS, Room, RoomManager,
     SharedAnnotations,
 )
@@ -504,3 +504,108 @@ async def test_zero_ply_abandonment_finalizes_as_aborted_draw(manager):
     manager.finalize_result(room.room_id, "abandonment", "black")
     assert room.result == ("aborted", None)
     assert room.series_scores == {}
+
+
+async def test_stale_queued_rooms_ignores_fresh_waiters(manager, clock):
+    """SECURITY (queue GC): nothing but age decides staleness, and a waiter that
+    has not yet reached the TTL is never listed. Without this floor the reap
+    would evict players in the middle of a normal match search."""
+    await manager.enqueue(**_enqueue_kwargs("alice"))
+    clock.advance(QUEUE_ABANDON_SECONDS - 1)
+    assert manager.stale_queued_rooms() == []
+    clock.advance(2)
+    assert len(manager.stale_queued_rooms()) == 1
+
+
+async def test_stale_queued_rooms_never_lists_active_or_paired_rooms(manager, clock):
+    """Only `_queue` entries are reapable. A paired room carries the same
+    `created_at` as the queued room it grew out of, so an age-only filter that
+    walked `_active` too would delete live games the moment they aged past the
+    TTL."""
+    await manager.enqueue(**_enqueue_kwargs("alice"))
+    room = await manager.enqueue(**_enqueue_kwargs("bob"))
+    clock.advance(QUEUE_ABANDON_SECONDS * 10)
+    assert manager.stale_queued_rooms() == []
+    assert manager.get(room.room_id) is room
+    assert manager.rooms_active == 1
+
+
+async def test_drop_queued_room_frees_the_slot_and_the_uuid(manager, clock):
+    """SECURITY (finding: queued rooms were never garbage-collected). A client
+    that matchmakes and then vanishes without DELETE /matchmake used to pin its
+    queue slot forever; the reap must release the room AND its `_uuid_to_room`
+    entry, otherwise the uuid stays wedged in AlreadyInGame."""
+    room = await manager.enqueue(**_enqueue_kwargs("alice"))
+    clock.advance(QUEUE_ABANDON_SECONDS + 1)
+    stale = manager.stale_queued_rooms()
+    assert stale == [room]
+    assert manager.drop_queued_room(room) is True
+    assert manager.queue_depth == 0
+    assert manager.get(room.room_id) is None
+    assert manager.drop_queued_room(room) is False
+
+
+async def test_reaped_uuid_can_matchmake_again_cleanly(manager, clock):
+    """After the reap the same client re-queues into a brand new room instead of
+    hitting AlreadyInGameError."""
+    room = await manager.enqueue(**_enqueue_kwargs("alice"))
+    clock.advance(QUEUE_ABANDON_SECONDS + 1)
+    manager.drop_queued_room(room)
+    fresh = await manager.enqueue(**_enqueue_kwargs("alice"))
+    assert fresh.room_id != room.room_id
+    assert manager.queue_depth == 1
+
+
+async def test_reaping_a_queued_room_frees_capacity_against_max_rooms(clock):
+    """The bug that made the queue leak exploitable: `enqueue` counts queue depth
+    against `_max_rooms`, so abandoned waiters permanently consumed the room
+    budget and every later matchmake got server_full."""
+    manager = RoomManager(now_provider=clock, max_rooms=2)
+    stale = [await manager.enqueue(**_enqueue_kwargs(name, time_minutes=minutes))
+             for name, minutes in (("alice", 5), ("bob", 10))]
+    with pytest.raises(RuntimeError, match="server_full"):
+        await manager.enqueue(**_enqueue_kwargs("carl", time_minutes=15))
+    clock.advance(QUEUE_ABANDON_SECONDS + 1)
+    for room in manager.stale_queued_rooms():
+        manager.drop_queued_room(room)
+    assert manager.queue_depth == 0
+    assert all(manager.get(room.room_id) is None for room in stale)
+    assert await manager.enqueue(**_enqueue_kwargs("carl", time_minutes=15)) is not None
+
+
+@pytest.mark.parametrize(
+    "drain",
+    [
+        pytest.param(
+            lambda m, room: m.drop_queued_room(room), id="reap",
+        ),
+        pytest.param(
+            lambda m, room: m.release_for_new_game("alice"), id="release_for_new_game",
+        ),
+    ],
+)
+async def test_emptying_a_time_control_bucket_removes_it(manager, drain):
+    """`_queue` is a defaultdict keyed by the caller-supplied (minutes, increment)
+    pair. Every drain path must delete the emptied bucket, else a flood of
+    distinct time controls grows the dict without bound even after the rooms
+    themselves are gone."""
+    room = await manager.enqueue(**_enqueue_kwargs("alice", time_minutes=7,
+                                                   increment_seconds=3))
+    assert (7, 3) in manager._queue
+    drain(manager, room)
+    assert (7, 3) not in manager._queue
+    assert manager.queue_depth == 0
+
+
+async def test_pairing_removes_the_emptied_bucket(manager):
+    """Pairing pops the waiting room out of its bucket; the leftover empty list
+    must go too."""
+    await manager.enqueue(**_enqueue_kwargs("alice", time_minutes=7))
+    await manager.enqueue(**_enqueue_kwargs("bob", time_minutes=7))
+    assert manager._queue == {}
+
+
+async def test_cancel_wait_removes_the_emptied_bucket(manager):
+    room = await manager.enqueue(**_enqueue_kwargs("alice", time_minutes=7))
+    await manager.cancel_wait(room.room_id, session_token="tok-alice")
+    assert manager._queue == {}

@@ -13,6 +13,7 @@ import time
 from chessshootout.backend.utils import Square
 from chessshootout.online.client import OnlineClient, fetch_resume
 from chessshootout.skillcheck import online
+from chessshootout.skillcheck.triggers import compute_facts
 from chessshootout.skillcheck.types import SkillCheckKind, SkillCheckOutcome
 from tests.helpers import fake_uuid4
 
@@ -47,15 +48,30 @@ def _room(app):
     return active[0]
 
 
-def _force_wheel(room):
+def _force_kind(room, kind):
+    """Search for a secret whose roll selects `kind` for exd5.
+
+    Each kind owns a full quarter of the capture roll, so 8000 tries missing is
+    not chance -- it means every roll returned NONE, i.e. the room was not at
+    the capture after all (or the move is already locked). The failure prints
+    the facts it actually saw, because "no secret found" on its own sends you
+    hunting the RNG instead of the board state.
+    """
     frm, to = Square(4, 4), Square(3, 3)  # exd5
     for i in range(8000):
-        secret = "force-wheel-{}".format(i)
+        secret = "force-{}-{}".format(kind.value, i)
         if online.select_kind(secret, room.plies_ever, room.backend, frm, to,
-                              room.skillcheck_locks) == SkillCheckKind.WHEEL:
+                              room.skillcheck_locks) == kind:
             room.skillcheck_secret = secret
             return
-    raise AssertionError("no wheel secret found")
+    raise AssertionError(
+        "no {} secret in 8000 tries: facts={} plies_ever={} turn={} locks={}".format(
+            kind.value, compute_facts(room.backend, frm, to, room.skillcheck_locks),
+            room.plies_ever, room.backend.turn, room.skillcheck_locks))
+
+
+def _force_wheel(room):
+    _force_kind(room, SkillCheckKind.WHEEL)
 
 
 # How a win is made deterministic under real CI jitter:
@@ -63,10 +79,10 @@ def _force_wheel(room):
 #   adjudicates min(max(E, raw - lag_bound), raw), where raw is the real arrival gap.
 #   * if the packet lands at raw in [E, E+lag_bound]  -> scored EXACTLY E (the win moment)
 #   * if it lands a touch early, raw in [E - SLEEP_LEAD, E) -> scored at raw
-#   So we aim E at the TOP of the widest win window: a late-ish arrival is pinned to
-#   E (a win), and an early arrival down to (E - SLEEP_LEAD) still falls inside the
-#   window provided the window is at least SLEEP_LEAD wide. SLEEP_LEAD is kept small
-#   (30ms) and the wheel's opening arc is ~120ms wide, so both directions are safe.
+#   So we aim E at the MIDDLE of the widest win window: a late arrival is pinned up to
+#   E (a win) and an early one drops to (E - SLEEP_LEAD), and the midpoint leaves half
+#   the window as slack in both directions. Aiming at the top instead left no room for
+#   lateness at all, which is exactly how a loaded runner turned a win into a loss.
 _SLEEP_LEAD_MS = 30
 
 
@@ -93,19 +109,26 @@ def _winning_elapsed(req):
     window = _widest_win_window(kind, ch, deadline)
     assert window is not None, "no winning window for the stored seed"
     lo, hi = window
-    assert hi - lo > _SLEEP_LEAD_MS, "the win window must absorb the sleep lead both ways"
-    return hi  # aim the shot at the top of the window
+    # The window has to absorb the sleep lead in BOTH directions, not just one:
+    # aiming at the midpoint spends half of it on an early arrival and half on a
+    # late one, so `> _SLEEP_LEAD_MS` was only ever half the guard it looked like.
+    # The 200ms lag bound is deliberately NOT the yardstick here -- lateness up to
+    # the bound is pinned back to the claimed moment by the clamp and costs the
+    # window nothing, and no shipped geometry draws a window that wide anyway
+    # (wheel measures ~105-125ms, aim ~130-220ms), so a bound-sized requirement
+    # would be an assert that can never hold.
+    assert hi - lo >= 2 * _SLEEP_LEAD_MS, \
+        "the win window must absorb the sleep lead in both directions"
+    # Aim at the MIDDLE, not the top. The server scores max(claimed, recv-200ms),
+    # so a shot that leaves late -- a loaded CI runner descheduling the sleep is
+    # enough -- gets scored later than it claims. Aiming at the top leaves zero
+    # room for that and turns a win into a loss; the midpoint absorbs half the
+    # window in either direction.
+    return (lo + hi) // 2
 
 
 def _force_aim(room):
-    frm, to = Square(4, 4), Square(3, 3)  # exd5
-    for i in range(8000):
-        secret = "force-aim-{}".format(i)
-        if online.select_kind(secret, room.plies_ever, room.backend, frm, to,
-                              room.skillcheck_locks) == SkillCheckKind.AIM:
-            room.skillcheck_secret = secret
-            return
-    raise AssertionError("no aim secret found")
+    _force_kind(room, SkillCheckKind.AIM)
 
 
 def _move(mover, a, b, frm, to):

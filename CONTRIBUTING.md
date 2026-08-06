@@ -55,7 +55,9 @@ name). Pick the level by what the line is *for*, not by habit:
 Never log a skill-check's `room.skillcheck_secret` (the which-fires selector)
 or a per-check geometry `seed`, on either the client or the server — logging
 either would hand a spectator or opponent the information the anti-cheat
-model is built to keep from them. Same spirit for nicknames and client
+model is built to keep from them. That extends to anything the seed derives:
+the whack hole squares and pop schedule, and a combo's prompt sequence, are
+the same secret in another shape. Same spirit for nicknames and client
 UUIDs: log the *setting key* that changed, never the value.
 
 Nothing logs on a per-frame cadence — no log call belongs directly inside
@@ -78,3 +80,10 @@ job blocks merges where it's unchanged from the base branch. Run `make bump`
 `chess-shootout` entry together in one atomic step. A version-only bump can
 also be done by hand: edit both files' version strings to match; no `uv`
 required.
+
+`uv.lock` is not a convenience file — every CI job (and every published
+binary) installs from it with `uv sync --frozen`, and a `lock-check` job runs
+`uv lock --check` to prove it still matches `pyproject.toml`. If your change
+touches a dependency, run `uv lock` and commit the result in the same pull
+request, or the check fails and nothing installs the version you tested
+against.

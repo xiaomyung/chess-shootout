@@ -6,6 +6,8 @@ non-UUID4 ids with a ValidationError, and the FastAPI routes map that into an
 HTTP 422 — keep both, they verify different seams.
 """
 import json
+import logging
+from types import SimpleNamespace
 
 import pydantic
 import pytest
@@ -14,7 +16,8 @@ from starlette.websockets import WebSocketDisconnect
 
 from chessshootout.server.app import (
     PROTOCOL_VERSION, RECLAIM_PER_UUID_LIMIT_PER_MINUTE, UuidRateLimiter,
-    WS_CLOSE_INVALID_TOKEN, create_app,
+    WS_CLOSE_INVALID_TOKEN, _parse_trusted_proxies, client_ip_key, create_app,
+    log_trusted_proxies,
 )
 from chessshootout.server.protocol import (
     CancelMatchmakeRequest, MatchmakeRequest, Reason, ReclaimRequest,
@@ -208,6 +211,78 @@ def test_healthz_includes_queue_depth_and_uptime(clock, client):
     clock.advance(7.5)
     body = client.get("/healthz").json()
     assert body["uptime_s"] == pytest.approx(7.5, abs=1e-3)
+
+
+TRUSTED = _parse_trusted_proxies("127.0.0.1/32,10.0.0.0/8")
+
+
+def _request(peer, **headers):
+    return SimpleNamespace(client=SimpleNamespace(host=peer), headers=headers)
+
+
+@pytest.mark.parametrize(
+    "header, expected",
+    [
+        pytest.param("203.0.113.7", "203.0.113.7", id="valid_header_is_still_used"),
+        pytest.param("not-an-ip", "10.1.2.3", id="garbage_header_falls_back_to_peer"),
+        pytest.param("203.0.113.7, 198.51.100.9", "10.1.2.3",
+                     id="address_list_is_not_one_ip_so_falls_back"),
+        pytest.param("2001:DB8::0:1", "2001:db8::1",
+                     id="ipv6_header_is_canonicalised_to_one_bucket"),
+    ],
+)
+def test_client_ip_key_only_trusts_a_parseable_forwarded_address(header, expected):
+    """SECURITY: cf-connecting-ip was returned verbatim, so whatever arrived in
+    that header became a rate-limit bucket key -- an unbounded string space, one
+    fresh bucket per garbage value. It is now honoured only when it parses as a
+    single IP, and the parsed form is what keys the bucket, so two spellings of
+    one address cannot split into two allowances.
+
+    (Peer-trust itself -- spoofed header from an untrusted peer, trimming, no
+    header at all -- is pinned in test_rate_limit_client_ip.py; this covers only
+    the parse gate on top of it.)"""
+    assert client_ip_key(_request("10.1.2.3", **{"cf-connecting-ip": header}),
+                         trusted=TRUSTED) == expected
+
+
+def test_client_ip_key_with_no_trusted_proxies_always_uses_the_peer():
+    """The behavioural half of the warning below: when TRUSTED_PROXIES parses
+    empty the header is ignored outright rather than trusted by accident."""
+    assert client_ip_key(_request("10.1.2.3", **{"cf-connecting-ip": "203.0.113.7"}),
+                         trusted=[]) == "10.1.2.3"
+
+
+def test_log_trusted_proxies_warns_when_a_configured_value_parses_empty(caplog):
+    """SECURITY (silent failure): a typo'd or drifted TRUSTED_PROXIES parsed to
+    [] with no signal at all, which silently flips client_ip_key to the socket
+    peer -- behind Cloudflare that is one shared bucket for every player on the
+    server, so the per-IP limits stop separating anyone. Config that was set but
+    could not be understood has to be loud."""
+    with caplog.at_level(logging.INFO, logger="chess.server.app"):
+        log_trusted_proxies(raw="not-a-cidr", trusted=[])
+    records = [r for r in caplog.records if r.name == "chess.server.app"]
+    assert [r.levelno for r in records] == [logging.WARNING]
+    assert "not-a-cidr" in records[0].getMessage()
+
+
+@pytest.mark.parametrize(
+    "raw, trusted, expected_fragment",
+    [
+        pytest.param("10.0.0.0/8", _parse_trusted_proxies("10.0.0.0/8"), "10.0.0.0/8",
+                     id="parsed_set_is_reported"),
+        pytest.param("", [], "none", id="deliberately_unset_is_not_a_warning"),
+    ],
+)
+def test_log_trusted_proxies_reports_the_effective_set_at_info(
+        caplog, raw, trusted, expected_fragment):
+    """The set is echoed once at startup so a live server can be checked against
+    what the operator meant to deploy. An empty env var is a deliberate 'trust
+    nobody', not drift, so it stays INFO."""
+    with caplog.at_level(logging.INFO, logger="chess.server.app"):
+        log_trusted_proxies(raw=raw, trusted=trusted)
+    records = [r for r in caplog.records if r.name == "chess.server.app"]
+    assert [r.levelno for r in records] == [logging.INFO]
+    assert expected_fragment in records[0].getMessage()
 
 
 def test_healthz_queue_depth_reflects_pending_room(client):

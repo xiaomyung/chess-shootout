@@ -4,8 +4,11 @@ class SkillCheckOverlay:
         self._controller = None
         self._context = None
         self._on_done = None
+        self._last_draw_controller = None
 
     def start(self, controller, context, on_done):
+        if self._controller is not None and self._controller is not controller:
+            self._controller.close()
         self._controller = controller
         self._context = context
         self._on_done = on_done
@@ -14,15 +17,17 @@ class SkillCheckOverlay:
         return self._controller is not None
 
     def is_passive(self):
-        return getattr(self._controller, "_passive", False)
+        return self._controller is not None and self._controller.passive
 
     def aim_victim_scale(self):
-        fn = getattr(self._controller, "victim_scale", None)
-        return fn() if fn is not None else 1.0
+        if self._controller is None:
+            return 1.0
+        return self._controller.victim_scale()
 
-    def spectate_shot(self, elapsed, miss_count, won):
+    def spectate_shot(self, elapsed, miss_count, won, progress=0, direction=None, target=None):
         if self._controller is not None:
-            self._controller.spectate_shot(elapsed, miss_count, won)
+            self._controller.spectate_shot(elapsed, miss_count, won, progress=progress,
+                                           direction=direction, target=target)
 
     def handle_event(self, event):
         if self._controller is None:
@@ -37,31 +42,39 @@ class SkillCheckOverlay:
             self._finish()
 
     def draw(self, window):
-        if self._controller is not None:
-            self._controller.draw(window)
+        controller = (self._controller if self._controller is not None
+                      else self._last_draw_controller)
+        self._last_draw_controller = None
+        if controller is not None:
+            controller.draw(window)
 
     def relayout(self, cell_rect):
         if self._controller is not None:
             self._controller.relayout(cell_rect)
 
     def set_board_rect(self, board_rect):
-        setter = getattr(self._controller, "set_board_rect", None)
-        if setter is not None:
-            setter(board_rect)
+        if self._controller is not None:
+            self._controller.set_board_rect(board_rect)
 
     def resolve_online(self, won):
         if self._controller is not None:
             self._controller.resolve(won)
 
     def cancel(self):
+        controller = self._controller
         self._controller = None
         self._context = None
         self._on_done = None
+        self._last_draw_controller = None
+        if controller is not None:
+            controller.close()
 
     def _finish(self):
         context = self._context
-        landed = self._controller.landed
+        controller = self._controller
+        landed = controller.landed
         on_done = self._on_done
         self.cancel()
+        self._last_draw_controller = controller
         if on_done is not None:
             on_done(context, landed)

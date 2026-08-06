@@ -130,6 +130,30 @@ def circle_surface(diameter, color):
     return memoized_surface(_CIRCLE_CACHE, (d, color), build)
 
 
+_STRIKE_PIP_CACHE = new_size_cache()
+
+
+def strike_pip_surface(size, struck, *, lw_frac, pad_frac, ring_lw_frac):
+    def build():
+        def render(surf, k):
+            w = surf.get_width()
+            r = w / 2.0
+            if struck:
+                pg.draw.circle(surf, pg.Color(Colors.loss), (r, r), r)
+                lw = max(int(w * lw_frac), 2)
+                pad = w * pad_frac
+                pg.draw.line(surf, pg.Color(Colors.on_accent), (pad, pad),
+                             (w - pad, w - pad), lw)
+                pg.draw.line(surf, pg.Color(Colors.on_accent), (w - pad, pad),
+                             (pad, w - pad), lw)
+            else:
+                lw = max(int(w * ring_lw_frac), 2)
+                pg.draw.circle(surf, pg.Color(Colors.border_strong), (r, r), r - lw, lw)
+        return supersample((size, size), render)
+    key = (size, struck, lw_frac, pad_frac, ring_lw_frac)
+    return memoized_surface(_STRIKE_PIP_CACHE, key, build)
+
+
 def stroked_text(font, text, fill, stroke, sw):
     base = font.render(text, True, fill)
     edge = font.render(text, True, stroke)

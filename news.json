@@ -1,5 +1,10 @@
 [
   {
+    "title": "v2.12.0 — Two-Step",
+    "body": "Two fresh ways to win a capture — the shootout is now a four-way draw:\n- Whack-a-Mole: the captured piece dives into a pit, then pops from a ring of glowing holes — tag it before it ducks away for good, and keep your trigger honest: three whiffed shots and it walks\n- Your attacker keeps the gun out for the whole hunt and swings it after your crosshair; land the last shot and it takes the square still holding it\n- Miss, and the mole climbs back out of the pit, stitches itself together, and has an opinion about your aim\n- Combo: a strip of arrow prompts flies in — hit each one in order with Arrows/WASD or the on-screen pad; three wrong inputs and the dance is over\n- Keep the chain clean and the strip catches fire\n- Your opponent watches your whole check live on their board, painted in spectator blue — every shot, every whiff, every wrong arrow\n- A full sound kit for both: telegraphs, pops, ricochets, a hit ladder that climbs with your streak, and a taunt you will not enjoy",
+    "date": "2026-07-20"
+  },
+  {
     "title": "v2.11.0 — Rules of Engagement",
     "body": "Cleaner shared play and a readable news feed:\n- Shared board drawings are now moderated — prohibited hate symbols are blocked before they reach your opponent, and a blocked mark turns red for you with a heads-up\n- Hide your opponent's shared marks entirely with the new HIDE toggle — flip it in the in-game SIGNALS row or under Options › Online\n- The News card now carries the full history — every past update, expandable and scrollable, with an unread badge for what you haven't read",
     "date": "2026-07-17"

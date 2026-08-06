@@ -1,0 +1,193 @@
+import math
+from dataclasses import dataclass
+
+import pygame as pg
+
+from chessshootout.frontend.visual.cache import new_size_cache, memoized_surface
+from chessshootout.skillcheck.rng import seeded_floats
+
+_NOISE_FREQS = ((13.0, 7.0), (27.0, 11.0))
+_NOISE_PHASE = 1.7
+
+TRAUMA_DECAY_PER_S = 1.5
+HITSTOP_CAP_MS = 250.0
+
+_SAKURAI_OMEGA = 2.0 * math.pi * 55.0
+
+_TORN_CACHE = new_size_cache()
+_FLASH_CACHE = new_size_cache()
+
+
+@dataclass(frozen=True)
+class _TornTier:
+    notches: int
+    notch_frac: float
+    cracks: int
+
+
+_TORN_TIERS = (_TornTier(3, 0.10, 1), _TornTier(6, 0.11, 2), _TornTier(9, 0.12, 3))
+TORN_MAX_TIER = len(_TORN_TIERS)
+
+_TORN_CHUNK_FRAC = 0.34
+_TORN_RAGGED = 5
+_CRACK_RGBA = (18, 14, 12, 235)
+_TORN_RADIUS_BASE = 0.7
+_TORN_RADIUS_JITTER = 0.6
+_TORN_CHUNK_OFFSET = 0.6
+_TORN_RAGGED_BAND_FRAC = 0.08
+_TORN_RAGGED_RADIUS_FRAC = 0.09
+_TORN_CRACK_WIDTH_FRAC = 0.03
+_TORN_PUNCH_FLOATS = 3
+_TORN_CRACK_FLOATS = 4
+_TORN_CHUNK_FLOATS = 1
+_TORN_RAGGED_FLOATS = 2
+_TORN_CRACK_BASE = _TORN_PUNCH_FLOATS * max(t.notches for t in _TORN_TIERS)
+_TORN_EXTRA_BASE = _TORN_CRACK_BASE + _TORN_CRACK_FLOATS * max(t.cracks for t in _TORN_TIERS)
+_TORN_FLOATS = _TORN_EXTRA_BASE + _TORN_CHUNK_FLOATS + _TORN_RAGGED_FLOATS * _TORN_RAGGED
+
+
+def _smooth_noise(now_ms, axis):
+    t = now_ms / 1000.0
+    (base_a, step_a), (base_b, step_b) = _NOISE_FREQS
+    f1 = base_a + axis * step_a
+    f2 = base_b + axis * step_b
+    phase = axis * _NOISE_PHASE
+    return 0.5 * math.sin(t * f1 + phase) + 0.5 * math.sin(t * f2 + phase * 2.0)
+
+
+class Trauma:
+
+    def __init__(self, decay_per_s=TRAUMA_DECAY_PER_S):
+        self._decay_per_s = decay_per_s
+        self._value = 0.0
+        self._last_ms = None
+
+    def add(self, amount):
+        self._value = max(0.0, min(1.0, self._value + amount))
+
+    def update(self, now_ms):
+        if self._last_ms is None:
+            self._last_ms = now_ms
+            return
+        dt = (now_ms - self._last_ms) / 1000.0
+        self._last_ms = now_ms
+        if dt > 0.0:
+            self._value = max(0.0, self._value - self._decay_per_s * dt)
+
+    def offset(self, now_ms, max_offset_px):
+        shake = self._value * self._value
+        if shake <= 0.0:
+            return (0.0, 0.0)
+        span = shake * max_offset_px
+        return (span * _smooth_noise(now_ms, 0), span * _smooth_noise(now_ms, 1))
+
+    @property
+    def value(self):
+        return self._value
+
+
+class Hitstop:
+
+    def __init__(self, cap_ms=HITSTOP_CAP_MS):
+        self._cap_ms = cap_ms
+        self._until = None
+
+    def trigger(self, now_ms, duration_ms):
+        horizon = now_ms + self._cap_ms
+        target = now_ms + min(duration_ms, self._cap_ms)
+        if self._until is not None and self._until > now_ms:
+            target = max(self._until, target)
+        self._until = min(target, horizon)
+
+    def frozen(self, now_ms):
+        return self._until is not None and now_ms < self._until
+
+
+def sakurai_vibrate(now_ms, start_ms, duration_ms, amp_px):
+    if duration_ms <= 0.0:
+        return 0.0
+    t = now_ms - start_ms
+    if t < 0.0 or t >= duration_ms:
+        return 0.0
+    envelope = 1.0 - t / duration_ms
+    return amp_px * envelope * math.sin(t / 1000.0 * _SAKURAI_OMEGA)
+
+
+def expire_particles(items, now_ms, ttl_ms):
+    while items and now_ms - items[0][0] >= ttl_ms:
+        items.pop(0)
+
+
+def particle_ages(items, now_ms):
+    for item in items:
+        yield now_ms - item[0], item[1:]
+
+
+def _punch(mask, cx, cy, radius):
+    if radius < 1.0:
+        return
+    pg.draw.circle(mask, (0, 0, 0, 0), (int(cx), int(cy)), max(int(radius), 1))
+
+
+def _draw_cracks(surf, bbox, floats, idx, count, width):
+    inset = bbox.inflate(-bbox.width // 2, -bbox.height // 2)
+    for _ in range(count):
+        x0 = inset.left + inset.width * floats[idx]
+        y0 = inset.top + inset.height * floats[idx + 1]
+        x1 = inset.left + inset.width * floats[idx + 2]
+        y1 = inset.top + inset.height * floats[idx + 3]
+        pg.draw.line(surf, _CRACK_RGBA, (x0, y0), (x1, y1), width)
+        idx += _TORN_CRACK_FLOATS
+
+
+def _torn_surface(base, key, tier):
+    surf = base.copy()
+    bbox = surf.get_bounding_rect()
+    if bbox.width <= 0 or bbox.height <= 0:
+        return surf
+    floats = seeded_floats(f"torn:{key}", _TORN_FLOATS)
+    span = min(bbox.width, bbox.height)
+    mask = pg.Surface(surf.get_size(), pg.SRCALPHA)
+    mask.fill((255, 255, 255, 255))
+    tier_spec = _TORN_TIERS[tier - 1]
+    radius_base = span * tier_spec.notch_frac
+    idx = 0
+    for _ in range(tier_spec.notches):
+        _punch(mask, bbox.left + bbox.width * floats[idx],
+               bbox.top + bbox.height * floats[idx + 1],
+               radius_base * (_TORN_RADIUS_BASE + _TORN_RADIUS_JITTER * floats[idx + 2]))
+        idx += _TORN_PUNCH_FLOATS
+    if tier >= TORN_MAX_TIER:
+        idx = _TORN_EXTRA_BASE
+        ang = floats[idx] * 2.0 * math.pi
+        _punch(mask, bbox.centerx + math.cos(ang) * bbox.width / 2.0 * _TORN_CHUNK_OFFSET,
+               bbox.centery + math.sin(ang) * bbox.height / 2.0 * _TORN_CHUNK_OFFSET,
+               span * _TORN_CHUNK_FRAC)
+        idx += _TORN_CHUNK_FLOATS
+        for _ in range(_TORN_RAGGED):
+            _punch(mask, bbox.left + bbox.width * floats[idx],
+                   bbox.top + span * _TORN_RAGGED_BAND_FRAC * floats[idx + 1],
+                   span * _TORN_RAGGED_RADIUS_FRAC)
+            idx += _TORN_RAGGED_FLOATS
+    veins = pg.Surface(surf.get_size(), pg.SRCALPHA)
+    _draw_cracks(veins, bbox, floats, _TORN_CRACK_BASE, tier_spec.cracks,
+                 max(int(span * _TORN_CRACK_WIDTH_FRAC), 1))
+    veins.blit(surf, (0, 0), special_flags=pg.BLEND_RGBA_MIN)
+    surf.blit(veins, (0, 0))
+    surf.blit(mask, (0, 0), special_flags=pg.BLEND_RGBA_MULT)
+    return surf
+
+
+def torn_sprite(base, key, tier):
+    if tier <= 0:
+        return base
+    return memoized_surface(_TORN_CACHE, (key, tier),
+                            lambda: _torn_surface(base, key, tier))
+
+
+def flash_sprite(base, key):
+    def build():
+        surf = base.copy()
+        surf.fill((255, 255, 255, 0), special_flags=pg.BLEND_RGB_ADD)
+        return surf
+    return memoized_surface(_FLASH_CACHE, key, build)

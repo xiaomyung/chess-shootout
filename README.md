@@ -12,12 +12,18 @@ server for online two-player matches.
 **Skill-checks — the *Shootout***
 - Every capture and promotion triggers a fast skill-check: win it and the move
   lands; miss it and that move is locked for the turn, so you play something
-  else — no turn is forfeited. Two checks roll 50/50 per capture; promotions are
-  wheel-only.
+  else — no turn is forfeited. Four checks roll an even split per capture;
+  promotions are wheel-only.
 - **Timing wheel** — tap when the needle is inside the shrinking sweet-spot; it
   spins faster the more material is at stake.
 - **Steady-Aim** — a crosshair auto-traces a figure-8 over the shrinking victim;
   it is multi-shot, and every miss escalates the sway and shrink.
+- **Whack-a-Mole** — the captured piece dives into a pit and pops back from a
+  ring of glowing holes; land its quota of shots before it ducks away for good —
+  three on a pawn, four on a knight, bishop or rook, all five on a queen — and
+  three whiffed shots miss it.
+- **Combo** — a strip of arrow prompts flies in and stays put; punch each direction in order
+  with the Arrows/WASD keys or the on-screen pad, and three wrong inputs miss it.
 - Online, the server adjudicates every shot and your opponent watches a live,
   read-only mirror of the same minigame while their own board stays interactive.
 
@@ -56,10 +62,10 @@ server for online two-player matches.
 - A distinct move sound per piece, and a distinct gun on a won capture check —
   pawn revolver, knight hand-cannon, bishop lever-action, rook shotgun, queen
   blunderbuss, king ray-gun — over a victim "oof" (the queen has her own).
-- Skill-check cues: a ding as the wheel or aim opens, a tick each time the
-  needle enters the sweet-spot or the crosshair crosses the target, and a
-  win/miss sting on resolve. Online, only your own check is audible — a
-  spectated opponent's is silent.
+- Skill-check cues: a ding as a check opens, a tick on every good beat — the
+  needle in the sweet-spot, the crosshair on target, a mole tagged, a combo
+  arrow nailed — and a win/miss sting on resolve. Online, only your own check is
+  audible — a spectated opponent's is silent.
 - A universal typewriter click on every button, key, and empty-square press;
   moves, pickups, and drops have their own sounds instead.
 - A two-stage low-time heartbeat that starts slow near 10% on the clock and
@@ -97,6 +103,8 @@ server for online two-player matches.
   opponent's board.
 - Live abort / abandon / reconnect countdowns in the player strips; games with
   no moves played end as **aborted** (nobody wins).
+- Matchmaking gives up after 10 minutes in the queue with a toast — hit
+  **FIND MATCH** again to keep looking.
 - Layered reconnection for WiFi blips, app restarts, and server restarts
   (see [Reconnection](#reconnection)).
 - Crash-log capture for easy bug reports.
@@ -184,7 +192,8 @@ pyenv shell 3.12                  # `python3.12` now resolves for the venv step 
 | `R` | Resign / promote to rook (when a promotion is pending) |
 | `D` | Offer draw |
 | `Q` / `B` / `N` | Promote (queen / bishop / knight) |
-| `Space` / Click | Fire the active skill-check (Shootout) |
+| `Space` / Click | Fire the active skill-check (wheel / aim / whack) |
+| Arrows / WASD | Combo check input, or click the on-screen pad |
 | `Z` | Undo move (`Ctrl+Z` also works; online: takeback request) |
 | `G` | Give 15 seconds (hold the **+15** cap to ramp) |
 | `A` / `S` / `C` | Collapse or expand rail sections |
@@ -199,21 +208,34 @@ Two players, one server — authoritative, running the same engine as the client
 
 ### Quick start (local)
 
+Three terminals, copy-paste as-is:
+
 ```bash
-python -m chessshootout.server                                      # terminal 1 (port 8000)
-python -m chessshootout.main --client-uuid alice --nickname Alice   # terminal 2
-python -m chessshootout.main --client-uuid bob   --nickname Bob     # terminal 3
+# 1 — server
+HOST=127.0.0.1 PORT=8000 LOG_LEVEL=DEBUG python -m chessshootout.server
 ```
+```bash
+# 2 — Alice
+CHESS_SERVER_ADDR=localhost:8000 CHESS_DATA_DIR=/tmp/cs-a LOG_LEVEL=DEBUG \
+  python -m chessshootout.main --client-uuid alice --nickname Alice
+```
+```bash
+# 3 — Bob
+CHESS_SERVER_ADDR=localhost:8000 CHESS_DATA_DIR=/tmp/cs-b LOG_LEVEL=DEBUG \
+  python -m chessshootout.main --client-uuid bob --nickname Bob
+```
+
+Every variable is set explicitly so nothing inherited can interfere:
+`CHESS_SERVER_ADDR` beats whatever a saved `.env` holds, `CHESS_DATA_DIR` gives
+each client its own settings and PGN folder, and `HOST=127.0.0.1` binds the
+loopback so a service already on `0.0.0.0:8000` does not collide.
 
 `--client-uuid alice` is a debug shortcut: any non-UUID4 alias is coerced to
 a deterministic UUID4 client-side so the server's validator accepts it. Real
 clients auto-generate and persist a UUID4 on first launch.
 
-In each client pick **Online**, choose time control and side, then hit
-**FIND MATCH** (the server address is set beforehand via **Options → Server**
-— `<ip>` defaults to port 8000, or `<ip>:<port>`; `localhost` for local play).
-When a second player joins with the same time control, both see "Match
-found!" and the game begins.
+In both clients pick **Online**, choose the **same time control**, then hit
+**FIND MATCH** — both see "Match found!" and the game begins.
 
 ### Settings (`.env`)
 
@@ -303,10 +325,15 @@ pytest tests -n 8 -q                            # run the test suite
 pylama chessshootout tests                      # pycodestyle + pyflakes; exits 0 when clean
 ```
 
-These gate merges to `master` (the `test` and `lint` jobs); a third required
-check, `version-bump`, fails any PR that doesn't change `pyproject.toml`'s
-`[project].version`. So a green local run **plus a version bump** means the PR
-checks will pass.
+CI installs from the committed `uv.lock` rather than resolving fresh, so every
+job (and every published binary) gets the exact pinned dependency set. To
+reproduce that environment locally: `uv sync --extra dev`.
+
+These gate merges to `master` (the `test` and `lint` jobs), alongside two more
+required checks: `version-bump` fails any PR that doesn't change
+`pyproject.toml`'s `[project].version`, and `lock-check` fails any PR where
+`uv.lock` has drifted from `pyproject.toml`. `make bump` moves both together, so
+a green local run **plus a version bump** means the PR checks will pass.
 
 ### Releasing
 

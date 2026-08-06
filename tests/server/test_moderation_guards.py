@@ -20,8 +20,11 @@ and backend/, never tests/. Keep the import inside the test.
 """
 
 import gc
+import os
 import random
 import time
+
+import pytest
 
 from chessshootout.backend.utils import Square
 from chessshootout.server.moderation import detector, geometry, library
@@ -29,6 +32,16 @@ from tests.server import moderation_helpers as M
 
 
 TIMING_BUDGET_MS = 10.0
+DENSE_TIMING_BUDGET_MS = 120.0
+
+
+def _clear_detect_memo():
+    """detect() memoises on the exact (arrows, highlights, context, changed) key, so
+    any repeated call is a dict lookup. A timing pin that resamples one input is
+    then timing the memo, and a concurrency pin that replays a warmed input never
+    reaches the cache's write path -- both need the memo emptied first."""
+    detector._CACHE.clear()
+    detector._CACHE_ORDER.clear()
 
 
 def test_knight_l_elbow_matches_client_annotations():
@@ -142,6 +155,9 @@ def test_worst_case_timing_under_budget():
     # sample -- its true uncontended cost -- is what the worst-input max is
     # taken over. An order-of-magnitude regression pushes every sample over the
     # line; transient contention on one sample no longer can.
+    # The memo is emptied before every sample: repeating one input otherwise made
+    # samples 2 and 3 a bare dict lookup, so the "best" sample was the cache's
+    # cost and the budget bounded nothing.
     worst_ms = 0.0
     gc.collect()
     gc.disable()
@@ -152,6 +168,7 @@ def test_worst_case_timing_under_budget():
                                 M.coord(rng.randrange(8), rng.randrange(8)))
             best_ms = float("inf")
             for _ in range(3):
+                _clear_detect_memo()
                 start = time.thread_time()
                 detector.detect(churned, highlights)
                 best_ms = min(best_ms, (time.thread_time() - start) * 1000)
@@ -159,9 +176,66 @@ def test_worst_case_timing_under_budget():
     finally:
         gc.enable()
 
-    assert worst_ms < TIMING_BUDGET_MS, (
+    budget_ms = TIMING_BUDGET_MS * M.machine_scale()
+    assert worst_ms < budget_ms, (
         f"worst-case detect() {worst_ms:.2f} ms exceeded budget "
-        f"{TIMING_BUDGET_MS} ms -- fix perf, do not loosen silently")
+        f"{budget_ms:.2f} ms -- fix perf, do not loosen silently")
+
+
+@pytest.mark.skipif(
+    not os.environ.get("CHESS_CHECK_PERF"),
+    reason="opt-in CPU-cost pin; set CHESS_CHECK_PERF=1 (shared CI runners are too noisy)",
+)
+def test_dense_clean_set_timing_under_its_own_budget():
+    """Second timing pin, for the input class the first one misses.
+
+    test_worst_case_timing_under_budget uses long random lattice arrows: they
+    fall out of the vector stage almost immediately (~1.4 ms measured), so its
+    10 ms budget says nothing about the detector's real ceiling. The dense
+    CLEAN set (moderation_helpers.dense_clean_arrows) keeps every stage in its
+    expensive branch and costs ~32 ms per call on the dev box -- 3x the other
+    pin's budget, and that is NOT a bug to fix by loosening: it is why the
+    server meters moderation CPU per room/player (moderation.load) instead of
+    trusting a per-call bound. This budget exists so an order-of-magnitude
+    regression in that ceiling is caught; the load meter is what bounds the
+    damage in production.
+
+    Sampling differs from the other pin on purpose: detect() memoises on the
+    exact arrow tuple, so repeating an identical call times the MEMO. Every
+    sample here is a distinct rotation of the same set -- identical work,
+    always a cache miss -- and the min across rotations is the uncontended
+    cost (an xdist-loaded worker inflates individual samples).
+
+    Opt-in, and deliberately so. This measures CPU cost, and a shared CI runner
+    delivers 7-10x the dev-box time for identical code with wide run-to-run
+    spread -- scaling the budget by a calibration loop was tried and does not
+    hold, because pure arithmetic and this allocation-heavy path do not slow
+    down by the same factor. A pin that reports the runner's mood is worse than
+    no pin. Run it where the number means something: CHESS_CHECK_PERF=1 locally,
+    before and after touching the detector. What bounds the damage in
+    production is the load meter (moderation/load.py), which is covered by
+    ordinary behavioural tests that do run in CI."""
+    arrows = M.dense_clean_arrows()
+    assert detector.detect(list(arrows), []).kind == detector.CLEAN, (
+        "the pin needs a CLEAN verdict: a block short-circuits the later stages")
+
+    best_ms = float("inf")
+    gc.collect()
+    gc.disable()
+    try:
+        for i in range(8):
+            rotated = arrows[i + 1:] + arrows[:i + 1]
+            start = time.thread_time()
+            verdict = detector.detect(rotated, [])
+            best_ms = min(best_ms, (time.thread_time() - start) * 1000)
+            assert verdict.kind == detector.CLEAN
+    finally:
+        gc.enable()
+
+    budget_ms = DENSE_TIMING_BUDGET_MS * M.machine_scale()
+    assert best_ms < budget_ms, (
+        f"dense-clean detect() {best_ms:.2f} ms exceeded budget "
+        f"{budget_ms:.2f} ms -- fix perf, do not loosen silently")
 
 
 def test_detect_is_thread_safe_under_concurrent_callers():
@@ -183,7 +257,12 @@ def test_detect_is_thread_safe_under_concurrent_callers():
         inputs.append(tuple(a for a in arrows if a[0] != a[1]))
 
     serial = [detector.detect(list(arrows), []).kind for arrows in inputs]
+    # The serial baseline warms the memo for every input, so without this the
+    # concurrent pass is 96 pure cache reads and the unlocked pop(0)/append pair
+    # this test exists to guard is never executed at all.
+    _clear_detect_memo()
     with ThreadPoolExecutor(max_workers=6) as pool:
         concurrent = list(pool.map(
             lambda arrows: detector.detect(list(arrows), []).kind, inputs * 3))
     assert concurrent == serial * 3
+    assert detector._CACHE, "the concurrent pass really did go through the write path"

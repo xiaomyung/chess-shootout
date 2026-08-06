@@ -87,7 +87,8 @@ ATTRIBUTION_CC0 = [
          url="https://kenney.nl/assets/category:Audio",
          used="piece moves, skill-check cues, UI clicks, slider ticks, ray-gun lasers, "
               "you-win callouts, rail caps/sections/volume, signal chips, quick-chat "
-              "receipt, focus toggle"),
+              "receipt, focus toggle, whack-a-mole pops/telegraph/kill bell, heal-scanner "
+              "bed, combo press ladder, capture-fall cue, taunt callout"),
     dict(who="Dustyroom", title="Casual Game Sounds",
          url="https://dustyroom.com/free-casual-game-sounds/", used="UI / feedback one-shots"),
     dict(who="Ben Jaszczak, Brian Nelson, Kevin Heras, Matthew Nanney (submitted by bart)",
@@ -96,7 +97,7 @@ ATTRIBUTION_CC0 = [
          used="pistol / cannon / rifle capture shots"),
     dict(who="Signature Sounds", title="Bullet / Gun SFX (CC0)",
          url="https://signaturesounds.org/store/p/bulletgun-sfx-cc0",
-         used="foley / reload layers / give-time ratchet"),
+         used="foley / reload layers / give-time ratchet, whack dry-fire + ricochet"),
     dict(who="qubodup (Iwan Gabovitch)", title="Door Open, Door Close Set",
          url="https://opengameart.org/content/door-open-door-close-set",
          used="castle (open+close)"),
@@ -116,6 +117,14 @@ ATTRIBUTION_CC0 = [
          url="https://freesound.org/s/416838/", used="capture hit oof"),
     dict(who="MadamVicious (mvVoiceActing)", title="Girl Taking Damage",
          url="https://freesound.org/s/218190/", used="queen capture oof (female)"),
+    dict(who="musicvision31", title="Record Scratch #6",
+         url="https://freesound.org/s/431779/", used="combo wrong-press scratch"),
+    dict(who="jacksonacademyashmore", title="Airhorn",
+         url="https://freesound.org/s/414208/", used="combo completion airhorn"),
+    dict(who="Autellaem", title="Bruh Sound Effect #1",
+         url="https://freesound.org/s/534387/", used="combo fail sting"),
+    dict(who="LookIMadeAThing", title="Basic Fire whoosh",
+         url="https://freesound.org/s/260554/", used="combo streak ignition whoosh"),
 ]
 
 

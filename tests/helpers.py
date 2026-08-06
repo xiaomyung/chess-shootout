@@ -241,6 +241,13 @@ def key_event(key, unicode=""):
     return pg.event.Event(pg.KEYDOWN, key=key, mod=0, unicode=unicode)
 
 
+def click_event(pos, button=1):
+    """Build a pygame left-click MOUSEBUTTONDOWN event at pos."""
+    import pygame as pg
+
+    return pg.event.Event(pg.MOUSEBUTTONDOWN, {"button": button, "pos": pos})
+
+
 def history_entry(san):
     """A minimal HistoryEntry carrying a pawn move and the given SAN, for move-list
     scroll tests that just need N filler rows."""

@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "chess-shootout"
-version = "2.11.1"
+version = "2.12.0"
 description = "Full-featured local and online chess built with pygame"
 readme = "README.md"
 requires-python = ">=3.12,<3.13"
@@ -28,7 +28,7 @@ client = [
     "pygame==2.6.1",
     "httpx==0.28.1",
     "platformdirs==4.10.0",
-    "certifi",
+    "certifi==2026.5.20",
 ]
 server = [
     "fastapi[standard]==0.115.6",
@@ -49,7 +49,7 @@ build = [
     "chess-shootout[client]",
     "pyinstaller>=6.11,<7",
     "pillow>=11,<12",
-    "cairosvg>=2.7",
+    "cairosvg>=2.7,<3",
 ]
 
 [project.urls]

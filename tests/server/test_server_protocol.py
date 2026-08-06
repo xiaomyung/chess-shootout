@@ -5,7 +5,8 @@ from chessshootout.server.app import MAX_INBOUND_MESSAGE_BYTES
 from chessshootout.server.protocol import (
     AnnotationDeltaMessage, AnnotationSetWire, AnnotationsStateMessage, ArrowWire,
     AuthMessage, CHAT_PRESET_COUNT, ClockSnapshot, ErrorMessage, GameStartMessage,
-    LockWire, MAX_SHARED_ARROWS, MAX_SHARED_HIGHLIGHTS, MatchmakeRequest,
+    LockWire, MAX_INCREMENT_SECONDS, MAX_SHARED_ARROWS, MAX_SHARED_HIGHLIGHTS,
+    MAX_TIME_MINUTES, MIN_INCREMENT_SECONDS, MIN_TIME_MINUTES, MatchmakeRequest,
     MoveAppliedMessage, MoveMessage, PROTOCOL_VERSION, PendingSkillCheckWire,
     PingMessage, PongMessage, QuickChatMessage, QuickChatReceivedMessage,
     ResumeResponse, ResyncDirectiveMessage, SkillCheckRequiredMessage,
@@ -134,15 +135,80 @@ def test_matchmake_request_accepts(kwargs, attr, expected):
     [
         pytest.param({"time_minutes": -1}, id="negative_time"),
         pytest.param({"side_preference": "middle"}, id="bad_side"),
+        pytest.param({"time_minutes": 0}, id="zero_time"),
+        pytest.param({"increment_seconds": -1}, id="negative_increment"),
+        pytest.param({"time_minutes": MAX_TIME_MINUTES + 1}, id="time_over_cap"),
+        pytest.param({"increment_seconds": MAX_INCREMENT_SECONDS + 1},
+                     id="increment_over_cap"),
+        pytest.param({"time_minutes": 2 ** 40}, id="absurd_time"),
+        pytest.param({"increment_seconds": 2 ** 40}, id="absurd_increment"),
     ],
 )
 def test_matchmake_request_rejects(kwargs):
+    """SECURITY: `_queue` is a defaultdict keyed by the client-supplied
+    (time_minutes, increment_seconds) pair, so unbounded ints let one client mint
+    an unbounded number of never-pairing queue buckets. Both fields are capped at
+    the model boundary, which is the same 422 path every other malformed
+    matchmake field takes."""
     base = {
         "nickname": "Alice", "client_uuid": U1,
         "time_minutes": 5, "increment_seconds": 0,
     }
     with pytest.raises(ValidationError):
         MatchmakeRequest(**{**base, **kwargs})
+
+
+@pytest.mark.parametrize(
+    "minutes, increment",
+    [
+        pytest.param(MIN_TIME_MINUTES, MIN_INCREMENT_SECONDS, id="both_at_minimum"),
+        pytest.param(MAX_TIME_MINUTES, MAX_INCREMENT_SECONDS, id="both_at_maximum"),
+        pytest.param(MAX_TIME_MINUTES, MIN_INCREMENT_SECONDS, id="max_time_no_increment"),
+    ],
+)
+def test_matchmake_request_accepts_the_bounds_themselves(minutes, increment):
+    """The caps are inclusive: the boundary values are legal input, only what is
+    strictly outside them is refused."""
+    req = MatchmakeRequest(nickname="Alice", client_uuid=U1,
+                           time_minutes=minutes, increment_seconds=increment)
+    assert (req.time_minutes, req.increment_seconds) == (minutes, increment)
+
+
+CLIENT_MINUTES = (1, 3, 5, 10, 15, 30)
+CLIENT_INCREMENTS = (0, 2, 5, 10, 15)
+"""Every time control the shipped picker can emit -- CHAMBERS / INCREMENTS in
+chessshootout/frontend/menu/time_picker.py (the picker's remaining chamber is
+the local-only infinity setting, which the online path substitutes with a real
+minute count before it ever reaches the wire)."""
+
+
+def test_client_time_control_tables_match_the_shipped_picker():
+    """Drift guard: the tables above are a hand copy of the picker's, and a copy
+    that silently falls behind turns the fence below into a fence around nothing --
+    a newly added chamber would never be checked against the wire caps at all. The
+    frontend import is deliberate and stays inside the test: the no-pygame guard
+    (tests/infra/test_server_no_pygame.py) scans package SOURCE under server/, not
+    tests/. The infinity chamber is excluded on purpose -- it carries no minute
+    count and the online path substitutes a real one before matchmaking."""
+    from chessshootout.frontend.menu.time_picker import CHAMBERS, INCREMENTS
+
+    assert CLIENT_MINUTES == tuple(minutes for minutes, _ in CHAMBERS if minutes is not None)
+    assert CLIENT_INCREMENTS == tuple(INCREMENTS)
+    assert sum(1 for minutes, _ in CHAMBERS if minutes is None) == 1, \
+        "exactly one non-numeric chamber (∞) is expected to be excluded"
+
+
+@pytest.mark.parametrize("minutes", CLIENT_MINUTES)
+@pytest.mark.parametrize("increment", CLIENT_INCREMENTS)
+def test_matchmake_request_accepts_every_client_producible_time_control(minutes, increment):
+    """Regression fence for the caps: the bounds must sit far outside what the UI
+    can actually produce, so tightening them can never lock real players out."""
+    req = MatchmakeRequest(nickname="Alice", client_uuid=U1,
+                           time_minutes=minutes, increment_seconds=increment)
+    assert (req.time_minutes, req.increment_seconds) == (minutes, increment), \
+        "the model preserves the picker's values instead of coercing them"
+    assert MIN_TIME_MINUTES <= req.time_minutes <= MAX_TIME_MINUTES
+    assert MIN_INCREMENT_SECONDS <= req.increment_seconds <= MAX_INCREMENT_SECONDS
 
 
 @pytest.mark.parametrize(
@@ -232,8 +298,8 @@ def test_move_message_promotion_validated():
                                     "from": "e7", "to": "e8", "promotion": "x"})
 
 
-def test_protocol_version_pinned_for_annotations_and_chat():
-    assert PROTOCOL_VERSION == 3
+def test_protocol_version_pinned_for_four_kind_skillchecks():
+    assert PROTOCOL_VERSION == 4
 
 
 def test_skill_check_required_round_trips():
@@ -371,18 +437,19 @@ def test_skillcheck_wire_messages_are_byte_identical_after_the_shared_base_refac
 
     assert pending.model_dump(by_alias=True) == {
         "kind": "aim", "seed": "seed123", "value_diff": 5, "deadline_ms": 5000.0,
-        "elapsed_ms": 1200.0, "miss_count": 2, "from": "e4", "to": "d5",
-        "promotion": "q", "color": "white",
+        "captured_value": 0, "elapsed_ms": 1200.0, "miss_count": 2, "progress": 0,
+        "last_hit_pop": -1,
+        "from": "e4", "to": "d5", "promotion": "q", "color": "white",
     }
     assert required.model_dump(by_alias=True) == {
         "version": PROTOCOL_VERSION, "type": "skill_check_required",
         "kind": "wheel", "seed": "seedreq", "value_diff": -3, "deadline_ms": 4000.0,
-        "miss_count": 1, "from": "a7", "to": "b8", "promotion": "n",
+        "captured_value": 0, "miss_count": 1, "from": "a7", "to": "b8", "promotion": "n",
     }
     assert spectate.model_dump(by_alias=True) == {
         "version": PROTOCOL_VERSION, "type": "skill_check_spectate",
         "kind": "aim", "seed": "seedspec", "value_diff": 0, "deadline_ms": 3000.0,
-        "from": "c2", "to": "c3", "promotion": None,
+        "captured_value": 0, "from": "c2", "to": "c3", "promotion": None,
     }
 
 
@@ -403,6 +470,212 @@ def test_resume_response_carries_pending_and_locks_when_set():
     assert dumped["pending_skillcheck"]["from_sq"] == "e4"
     assert dumped["pending_skillcheck"]["to_sq"] == "d5"
     assert dumped["pending_skillcheck"]["color"] == "white"
+
+
+@pytest.mark.parametrize("kind", ["wheel", "aim", "whack", "combo"])
+def test_skill_check_kind_literal_accepts_all_four_kinds(kind):
+    msg = SkillCheckRequiredMessage(
+        kind=kind, seed="s", value_diff=0, deadline_ms=5000.0,
+        from_sq="e4", to_sq="d5")
+    assert msg.kind == kind
+    assert SkillCheckRequiredMessage.model_validate(msg.model_dump(by_alias=True)) == msg
+
+
+def test_geometry_base_bounds_captured_value():
+    """captured_value rides the shared geometry base: defaults 0, capped at the
+    queen's value 9, and never negative — the whack/combo scaling input can't be
+    forged outside real piece values."""
+    base = dict(kind="whack", seed="s", value_diff=0, deadline_ms=5000.0,
+                from_sq="e4", to_sq="d5")
+    assert SkillCheckRequiredMessage(**base).captured_value == 0
+    assert SkillCheckRequiredMessage(**base, captured_value=9).captured_value == 9
+    for bad in (-1, 10):
+        with pytest.raises(ValidationError):
+            SkillCheckRequiredMessage(**base, captured_value=bad)
+
+
+def test_skill_check_shot_wheel_shape_omits_the_whack_and_combo_fields():
+    """A wheel/aim shot carries only client_elapsed_ms: direction and target_row/col
+    are optional and default to None. This is NOT a v3 compatibility claim — v4 is a
+    hard gate (the version field is checked at the handshake, no v3 client can
+    connect) — it pins that the two positional kinds' fields stay opt-in so the
+    wheel/aim payload never has to send them."""
+    msg = SkillCheckShotMessage.model_validate(
+        {"type": "skill_check_shot", "version": PROTOCOL_VERSION, "client_elapsed_ms": 412.0})
+    assert msg.client_elapsed_ms == 412.0
+    assert msg.direction is None
+    assert msg.target_row is None and msg.target_col is None
+
+
+@pytest.mark.parametrize(
+    "token",
+    [pytest.param("NaN", id="nan"), pytest.param("Infinity", id="inf"),
+     pytest.param("-Infinity", id="neg_inf")],
+)
+def test_skill_check_shot_rejects_non_finite_client_elapsed(token):
+    """pydantic-core parses bare NaN/Infinity JSON tokens into floats. A non-finite
+    client_elapsed_ms would poison every comparison downstream (NaN loses the
+    lag-comp clamp's min/max, the human floor, and the deadline test all at once),
+    so allow_inf_nan=False must reject it at the wire; the handler's
+    `except ValidationError -> noop` then drops the frame with no state change."""
+    raw = ('{"type": "skill_check_shot", "client_elapsed_ms": ' + token + '}')
+    with pytest.raises(ValidationError):
+        SkillCheckShotMessage.model_validate_json(raw)
+
+
+def test_skill_check_shot_carries_combo_direction_and_whack_target():
+    combo = SkillCheckShotMessage(client_elapsed_ms=500.0, direction="left")
+    assert combo.direction == "left"
+    whack = SkillCheckShotMessage(client_elapsed_ms=900.0, target_row=3.5, target_col=0.0)
+    assert (whack.target_row, whack.target_col) == (3.5, 0.0)
+
+
+def test_skill_check_shot_rejects_unknown_direction():
+    with pytest.raises(ValidationError):
+        SkillCheckShotMessage(client_elapsed_ms=500.0, direction="diagonal")
+
+
+@pytest.mark.parametrize("field", ["target_row", "target_col"])
+@pytest.mark.parametrize(
+    "bad",
+    [
+        pytest.param(8.0, id="at_upper_bound_exclusive"),
+        pytest.param(8.5, id="past_upper_bound"),
+        pytest.param(-0.1, id="negative"),
+        pytest.param(float("nan"), id="nan"),
+        pytest.param(float("inf"), id="inf"),
+        pytest.param(float("-inf"), id="neg_inf"),
+    ],
+)
+def test_skill_check_shot_rejects_out_of_board_target(field, bad):
+    with pytest.raises(ValidationError):
+        SkillCheckShotMessage(client_elapsed_ms=500.0, **{field: bad})
+
+
+@pytest.mark.parametrize(
+    "token",
+    [pytest.param("NaN", id="nan"), pytest.param("Infinity", id="inf"),
+     pytest.param("-Infinity", id="neg_inf")],
+)
+def test_skill_check_shot_rejects_non_finite_json_target(token):
+    """pydantic-core parses bare NaN/Infinity JSON tokens, so the ge/lt bounds must
+    reject them at the wire — a non-finite target can never reach adjudication."""
+    raw = ('{"type": "skill_check_shot", "client_elapsed_ms": 500.0, '
+           '"target_row": ' + token + ', "target_col": 1.0}')
+    with pytest.raises(ValidationError):
+        SkillCheckShotMessage.model_validate_json(raw)
+
+
+def test_skill_check_spectate_shot_defaults_keep_the_v3_shape_parsing():
+    msg = SkillCheckSpectateShotMessage.model_validate(
+        {"type": "skill_check_spectate_shot", "elapsed_ms": 742.0,
+         "miss_count": 2, "won": False})
+    assert msg.progress == 0
+    assert msg.direction is None
+    assert msg.target_row is None and msg.target_col is None
+
+
+def test_skill_check_spectate_shot_carries_progress_direction_and_target():
+    msg = SkillCheckSpectateShotMessage(
+        elapsed_ms=900.0, miss_count=1, won=False, progress=2,
+        direction="up", target_row=2.5, target_col=4.5)
+    dumped = msg.model_dump()
+    assert dumped["progress"] == 2
+    assert dumped["direction"] == "up"
+    assert (dumped["target_row"], dumped["target_col"]) == (2.5, 4.5)
+
+
+def test_pending_skillcheck_wire_carries_progress_and_captured_value():
+    wire = PendingSkillCheckWire(
+        kind="whack", seed="s", value_diff=8, deadline_ms=5000.0, captured_value=1,
+        elapsed_ms=1800.0, miss_count=1, progress=2, from_sq="e4", to_sq="d5",
+        color="white")
+    dumped = wire.model_dump()
+    assert (dumped["progress"], dumped["captured_value"]) == (2, 1)
+    assert PendingSkillCheckWire(
+        kind="whack", seed="s", value_diff=8, deadline_ms=5000.0,
+        elapsed_ms=0.0, from_sq="e4", to_sq="d5", color="white").progress == 0
+
+
+@pytest.mark.parametrize(
+    "model",
+    [
+        pytest.param(PendingSkillCheckWire(
+            kind="whack", seed="s", value_diff=8, deadline_ms=5000.0, captured_value=1,
+            elapsed_ms=100.0, progress=1, from_sq="e4", to_sq="d5", color="white"),
+            id="pending_wire"),
+        pytest.param(SkillCheckRequiredMessage(
+            kind="whack", seed="s", value_diff=8, deadline_ms=5000.0, captured_value=1,
+            from_sq="e4", to_sq="d5"), id="required"),
+        pytest.param(SkillCheckSpectateMessage(
+            kind="whack", seed="s", value_diff=8, deadline_ms=5000.0, captured_value=1,
+            from_sq="e4", to_sq="d5"), id="spectate"),
+        pytest.param(SkillCheckSpectateShotMessage(
+            elapsed_ms=900.0, miss_count=1, won=False, progress=1,
+            target_row=2.5, target_col=4.5), id="spectate_shot"),
+        pytest.param(SkillCheckShotMessage(client_elapsed_ms=100.0), id="shot"),
+        pytest.param(SkillCheckResultMessage(won=False, from_sq="e4", to_sq="d5"),
+                     id="result"),
+    ],
+)
+def test_server_only_pending_fields_never_appear_on_any_skillcheck_wire_model(model):
+    """last_input_ms (the anti-mash gate, paced on the server wall clock) and
+    plies_ever (the room's abort counter) are server-side state — no wire model
+    may ever dump them, or a crafted client could pace its bursts against the
+    gate. last_hit_pop is deliberately NOT in this set: it is mover knowledge
+    (which pop the mover already scored), and a reconnecting mover that has to
+    guess it re-credits or forfeits a pop, so PendingSkillCheckWire carries it —
+    pinned by test_pending_skillcheck_wire_carries_last_hit_pop_for_resume."""
+    for dumped in (model.model_dump(), model.model_dump(by_alias=True)):
+        assert "last_input_ms" not in dumped
+        assert "plies_ever" not in dumped
+
+
+def test_pending_skillcheck_wire_carries_last_hit_pop_for_resume():
+    """The resume wire echoes the pop the mover has already been credited for, so
+    a mid-whack reconnect neither re-credits it nor forfeits it. Default -1 = no
+    pop scored yet."""
+    wire = PendingSkillCheckWire(
+        kind="whack", seed="s", value_diff=8, deadline_ms=5000.0, captured_value=1,
+        elapsed_ms=1800.0, progress=1, last_hit_pop=2, from_sq="e4", to_sq="d5",
+        color="white")
+    assert wire.model_dump()["last_hit_pop"] == 2
+    assert PendingSkillCheckWire(
+        kind="whack", seed="s", value_diff=8, deadline_ms=5000.0,
+        elapsed_ms=0.0, from_sq="e4", to_sq="d5", color="white").last_hit_pop == -1
+
+
+@pytest.mark.parametrize(
+    "model_cls, field, extra",
+    [
+        pytest.param(SkillCheckRequiredMessage, "deadline_ms", {}, id="required_deadline"),
+        pytest.param(SkillCheckSpectateMessage, "deadline_ms", {}, id="spectate_deadline"),
+        pytest.param(PendingSkillCheckWire, "deadline_ms",
+                     {"elapsed_ms": 0.0, "color": "white"}, id="pending_deadline"),
+        pytest.param(PendingSkillCheckWire, "elapsed_ms",
+                     {"deadline_ms": 5000.0, "color": "white"}, id="pending_elapsed"),
+    ],
+)
+@pytest.mark.parametrize(
+    "bad",
+    [
+        pytest.param(float("nan"), id="nan"),
+        pytest.param(float("inf"), id="inf"),
+        pytest.param(float("-inf"), id="neg_inf"),
+        pytest.param(-1.0, id="negative"),
+    ],
+)
+def test_outbound_skillcheck_millisecond_fields_reject_non_finite_and_negative(
+        model_cls, field, extra, bad):
+    """The outbound geometry the client rebuilds its challenge from is hardened
+    exactly like the inbound client_elapsed_ms: a non-finite or negative
+    deadline/elapsed would make every downstream comparison (deadline test,
+    schedule refit, resume elapsed) meaningless, so it can never be minted."""
+    base = dict(kind="whack", seed="s", value_diff=0, from_sq="e4", to_sq="d5")
+    base.update(extra)
+    base[field] = bad
+    with pytest.raises(ValidationError):
+        model_cls(**base)
 
 
 ALL_SQUARES = [f"{file}{rank}" for file in "abcdefgh" for rank in "12345678"]

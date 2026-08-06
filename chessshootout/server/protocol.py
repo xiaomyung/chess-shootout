@@ -4,6 +4,9 @@ from typing import Literal, Optional
 
 from pydantic import BaseModel, Field, field_validator
 
+from chessshootout.backend.pieces import PIECE_VALUES, PieceType
+from chessshootout.backend.utils import BOARD_SIZE
+
 
 def _env_float(name, default):
     try:
@@ -19,12 +22,17 @@ def _env_int(name, default):
         return default
 
 
-PROTOCOL_VERSION = 3
+PROTOCOL_VERSION = 4
 MAX_NICKNAME_LEN = 20
 GIVE_TIME_SECONDS = 15
 GIVE_TIME_TICK_MS = 100
 GIVE_TIME_MAX_HOLD_MS = 600_000
 FIRST_MOVE_ABORT_SECONDS = 60
+QUEUE_MAX_WAIT_SECONDS = 600.0
+MIN_TIME_MINUTES = 1
+MAX_TIME_MINUTES = 180
+MIN_INCREMENT_SECONDS = 0
+MAX_INCREMENT_SECONDS = 180
 GRACE_SECONDS = _env_float("GRACE_SECONDS", 60.0)
 HEARTBEAT_INTERVAL_SECONDS = _env_float("HEARTBEAT_INTERVAL_SECONDS", 2.0)
 HEARTBEAT_MISS_LIMIT = _env_int("HEARTBEAT_MISS_LIMIT", 3)
@@ -35,6 +43,8 @@ CHAT_COOLDOWN_SECONDS = 3.0
 CHAT_PRESET_COUNT = 8
 ANNOTATIONS_PER_SECOND = 10
 MODERATION_TRIP_LIMIT = 3
+SKILLCHECK_TARGET_MAX = float(BOARD_SIZE)
+SKILLCHECK_MAX_CAPTURED_VALUE = PIECE_VALUES[PieceType.QUEEN]
 
 UUID4_RE = re.compile(
     r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$",
@@ -70,6 +80,7 @@ class Reason:
     ALREADY_IN_GAME = "already_in_game"
     NOT_IN_ROOM = "not_in_room"
     ROOM_FULL = "room_full"
+    QUEUE_TIMEOUT = "queue_timeout"
     RATE_LIMITED = "rate_limited"
     GAME_ALREADY_OVER = "game_already_over"
     REMATCH_UNAVAILABLE = "rematch_unavailable"
@@ -162,11 +173,16 @@ class AnnotationSetWire(BaseModel):
         return v
 
 
+SkillCheckKindLiteral = Literal["wheel", "aim", "whack", "combo"]
+SkillCheckDirectionLiteral = Literal["up", "down", "left", "right"]
+
+
 class _SkillCheckGeometryBase(BaseModel):
-    kind: Literal["wheel", "aim"]
+    kind: SkillCheckKindLiteral
     seed: str
     value_diff: int
-    deadline_ms: float
+    deadline_ms: float = Field(ge=0.0, allow_inf_nan=False)
+    captured_value: int = Field(default=0, ge=0, le=SKILLCHECK_MAX_CAPTURED_VALUE)
     from_sq: str = Field(alias="from")
     to_sq: str = Field(alias="to")
     promotion: Optional[Literal["q", "r", "b", "n"]] = None
@@ -175,14 +191,16 @@ class _SkillCheckGeometryBase(BaseModel):
 
 
 class PendingSkillCheckWire(_SkillCheckGeometryBase):
-    elapsed_ms: float
+    elapsed_ms: float = Field(ge=0.0, allow_inf_nan=False)
     miss_count: int = 0
+    progress: int = 0
+    last_hit_pop: int = -1
     color: Literal["white", "black"]
 
 
 class SkillCheckOutcomeWire(BaseModel):
     ply: int
-    kind: Literal["wheel", "aim"]
+    kind: SkillCheckKindLiteral
     won: bool
     san: str = ""
 
@@ -190,8 +208,8 @@ class SkillCheckOutcomeWire(BaseModel):
 class MatchmakeRequest(_Base):
     nickname: str
     client_uuid: str
-    time_minutes: int
-    increment_seconds: int
+    time_minutes: int = Field(ge=MIN_TIME_MINUTES, le=MAX_TIME_MINUTES)
+    increment_seconds: int = Field(ge=MIN_INCREMENT_SECONDS, le=MAX_INCREMENT_SECONDS)
     side_preference: Literal["white", "black", "random"] = "random"
     country: Optional[str] = None
     hide_opp_marks: bool = False
@@ -210,13 +228,6 @@ class MatchmakeRequest(_Base):
     @classmethod
     def _uuid4(cls, v):
         return _validate_uuid4(v, "client_uuid")
-
-    @field_validator("time_minutes", "increment_seconds")
-    @classmethod
-    def _non_negative(cls, v):
-        if v < 0:
-            raise ValueError("must be non-negative")
-        return v
 
 
 class MatchmakeResponse(_Base):
@@ -363,7 +374,7 @@ class MoveAppliedMessage(_Base):
     san: str
     clock: ClockSnapshot
     ply: int
-    skill_check_kind: Optional[Literal["wheel", "aim"]] = None
+    skill_check_kind: Optional[SkillCheckKindLiteral] = None
     skill_check_won: Optional[bool] = None
 
     model_config = {"populate_by_name": True}
@@ -483,7 +494,10 @@ class SkillCheckRequiredMessage(_SkillCheckGeometryBase, _Base):
 
 class SkillCheckShotMessage(_Base):
     type: Literal["skill_check_shot"] = "skill_check_shot"
-    client_elapsed_ms: float = 0.0
+    client_elapsed_ms: float = Field(default=0.0, allow_inf_nan=False)
+    direction: Optional[SkillCheckDirectionLiteral] = None
+    target_row: Optional[float] = Field(default=None, ge=0.0, lt=SKILLCHECK_TARGET_MAX)
+    target_col: Optional[float] = Field(default=None, ge=0.0, lt=SKILLCHECK_TARGET_MAX)
 
     model_config = {"extra": "ignore"}
 
@@ -506,6 +520,10 @@ class SkillCheckSpectateShotMessage(_Base):
     elapsed_ms: float
     miss_count: int
     won: bool
+    progress: int = 0
+    direction: Optional[SkillCheckDirectionLiteral] = None
+    target_row: Optional[float] = None
+    target_col: Optional[float] = None
 
 
 class ErrorMessage(_Base):

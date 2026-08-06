@@ -18,7 +18,8 @@ from chessshootout.backend.utils import (
     PROMO_LETTER_BY_TYPE, coord_from_square,
 )
 from chessshootout.server import logging_setup
-from chessshootout.server.broadcasts import broadcast_game_start, finalize_and_broadcast
+from chessshootout.server.broadcasts import (
+    broadcast_game_start, finalize_and_broadcast, resolve_skillcheck_fail)
 from chessshootout.server.connections import ConnectionRegistry, send
 from chessshootout.server.handlers import _clock_snapshot, dispatch
 from chessshootout.server.moderation import library
@@ -72,6 +73,9 @@ WS_CLOSE_SERVER_SHUTDOWN = 4002
 WS_CLOSE_SUPERSEDED = 4003
 
 
+DEFAULT_TRUSTED_PROXIES = "127.0.0.1/32"
+
+
 def _parse_trusted_proxies(raw):
     networks = []
     for part in raw.split(","):
@@ -85,7 +89,18 @@ def _parse_trusted_proxies(raw):
     return networks
 
 
-TRUSTED_PROXIES = _parse_trusted_proxies(os.environ.get("TRUSTED_PROXIES", "127.0.0.1/32"))
+TRUSTED_PROXIES_RAW = os.environ.get("TRUSTED_PROXIES", DEFAULT_TRUSTED_PROXIES)
+TRUSTED_PROXIES = _parse_trusted_proxies(TRUSTED_PROXIES_RAW)
+
+
+def log_trusted_proxies(raw=None, trusted=None):
+    raw = TRUSTED_PROXIES_RAW if raw is None else raw
+    trusted = TRUSTED_PROXIES if trusted is None else trusted
+    if raw.strip() and not trusted:
+        log.warning("trusted proxies unparsable (TRUSTED_PROXIES=%r); "
+                    "rate limits key on the socket peer", raw)
+        return
+    log.info("trusted proxies %s", ",".join(str(net) for net in trusted) or "none")
 
 
 def _peer_trusted(peer, trusted):
@@ -96,13 +111,22 @@ def _peer_trusted(peer, trusted):
     return any(ip in net for net in trusted)
 
 
+def _forwarded_ip(raw):
+    if not raw:
+        return None
+    try:
+        return str(ipaddress.ip_address(raw.strip()))
+    except ValueError:
+        return None
+
+
 def client_ip_key(request, trusted=None):
     trusted = TRUSTED_PROXIES if trusted is None else trusted
     peer = get_remote_address(request)
     if _peer_trusted(peer, trusted):
-        cf = request.headers.get("cf-connecting-ip")
-        if cf:
-            return cf.strip()
+        forwarded = _forwarded_ip(request.headers.get("cf-connecting-ip"))
+        if forwarded is not None:
+            return forwarded
     return peer
 
 
@@ -163,6 +187,7 @@ def create_app(*, now_provider=time.monotonic, max_rooms=DEFAULT_MAX_ROOMS):
     async def lifespan(app):
         log.info("gameserver v%d release=%s listening (max_rooms=%d)",
                  PROTOCOL_VERSION, app_version() or "dev", max_rooms)
+        log_trusted_proxies()
         sweep_task = asyncio.create_task(_sweep_loop(app))
         try:
             yield
@@ -248,6 +273,10 @@ def create_app(*, now_provider=time.monotonic, max_rooms=DEFAULT_MAX_ROOMS):
                     await send(opp_ws, RematchUpdateMessage(event="opponent_left"))
             log.info("matchmake leaves finished room=%s", finished.room_id)
             rooms.release_for_new_game(body.client_uuid)
+        queued = rooms.queued_room_for(body.client_uuid)
+        if queued is not None:
+            log.info("matchmake releases queue slot room=%s", queued.room_id)
+            rooms.release_for_new_game(body.client_uuid)
         token = RoomManager.make_session_token()
         try:
             room = await rooms.enqueue(
@@ -274,7 +303,8 @@ def create_app(*, now_provider=time.monotonic, max_rooms=DEFAULT_MAX_ROOMS):
         return MatchmakeResponse(room_id=room.room_id, session_token=token)
 
     @app.delete("/matchmake")
-    async def delete_matchmake(body: CancelMatchmakeRequest):
+    @limiter.limit(MATCHMAKE_PER_IP_LIMIT)
+    async def delete_matchmake(request: Request, body: CancelMatchmakeRequest):
         try:
             await rooms.cancel_wait(body.room_id, body.session_token)
         except NotInRoomError:
@@ -301,6 +331,9 @@ def create_app(*, now_provider=time.monotonic, max_rooms=DEFAULT_MAX_ROOMS):
         if slot is None:
             log.info("resume rejected room=%s reason=session_expired", body.room_id)
             raise HTTPException(status_code=401, detail={"reason": Reason.SESSION_EXPIRED})
+        dead = room.pending_skillcheck
+        if dead is not None and dead.is_dead(app.state.now_ms()):
+            await resolve_skillcheck_fail(rooms, connections, room)
         if room.backend is not None:
             room.backend.tick_clock()
         history = [
@@ -405,6 +438,10 @@ def _first_validation_reason(exc):
     return errs[0].get("msg", Reason.INVALID_MESSAGE)
 
 
+def _over_inbound_cap(raw):
+    return len(raw.encode("utf-8")) > MAX_INBOUND_MESSAGE_BYTES
+
+
 def _promotion_letter(move):
     if move.promoted_to is None:
         return None
@@ -421,13 +458,14 @@ def _annotation_set_wire(store):
 
 def _pending_skillcheck_wire(room, now_ms):
     pending = room.pending_skillcheck
-    if pending is None or pending.is_expired(now_ms()):
+    if pending is None or pending.is_dead(now_ms()):
         return None
     elapsed = max(0.0, now_ms() - pending.start_ms)
     return PendingSkillCheckWire(
         kind=pending.kind.value, seed=pending.seed, value_diff=pending.value_diff,
-        deadline_ms=pending.deadline_ms, elapsed_ms=elapsed,
-        miss_count=pending.miss_count,
+        deadline_ms=pending.deadline_ms, captured_value=pending.captured_value,
+        elapsed_ms=elapsed, miss_count=pending.miss_count, progress=pending.progress,
+        last_hit_pop=pending.last_hit_pop,
         from_sq=coord_from_square(pending.from_sq),
         to_sq=coord_from_square(pending.to_sq),
         promotion=pending.promotion, color=pending.color,
@@ -441,7 +479,7 @@ async def _authenticate_ws(websocket, rooms, room_id):
     except (asyncio.TimeoutError, WebSocketDisconnect):
         await websocket.close(code=WS_CLOSE_INVALID_TOKEN)
         return None
-    if len(first_raw) > MAX_INBOUND_MESSAGE_BYTES:
+    if _over_inbound_cap(first_raw):
         await websocket.close(code=WS_CLOSE_PAYLOAD_TOO_LARGE)
         return None
     try:
@@ -525,7 +563,7 @@ async def _ws_session(app, websocket, room_id):
                 log.warning("ws recv unexpected exc room=%s color=%s exc=%r",
                             room.room_id, color, exc)
                 break
-            if len(raw) > MAX_INBOUND_MESSAGE_BYTES:
+            if _over_inbound_cap(raw):
                 await websocket.close(code=WS_CLOSE_PAYLOAD_TOO_LARGE)
                 return
             current_color = room.color_of(auth_uuid)

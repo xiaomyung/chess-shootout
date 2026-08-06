@@ -24,16 +24,29 @@ strongest single regression for the move engine.
 Tests mirror the source layout, five dirs under `tests/`:
 
 - `tests/backend/` — the pure chess engine (`chessshootout/backend/`) and the
-  pygame-free `chessshootout/skillcheck/` package (wheel/aim geometry,
-  triggers, weights, coordinator, the cross-side `online` adjudication
-  surface — a peer of `backend/`, imported by both server and frontend, not
-  to be confused with the client-side `chessshootout/online` package below).
+  pygame-free `chessshootout/skillcheck/` package (the four capture-check
+  engines — wheel/aim geometry plus whack (`test_skillcheck_mole.py`) and combo
+  (`test_skillcheck_combo.py`) — triggers, weights, the seeded `rng`
+  (`test_skillcheck_rng.py`, which pins the chained blocks that let
+  `seeded_floats` serve more than four words), coordinator, the cross-side
+  `online` adjudication surface — a peer of `backend/`, imported by both server
+  and frontend, not to be confused with the client-side `chessshootout/online`
+  package below).
 - `tests/frontend/` — pygame UI: the `Frontend` shell and its four screens
   (`menu`/`game`/`history`/`review`, see "Screens" below), board, panels,
-  modals, visual/, the `frontend/skillcheck/` view layer, focus mode, audio
+  modals, visual/, the `frontend/skillcheck/` view layer (wheel/aim plus the
+  whack (`test_skillcheck_mole_view.py`) and combo
+  (`test_skillcheck_combo_view.py`) views and the shared juice/particle helpers
+  (`test_skillcheck_juice.py`), with `test_skillcheck_session_kinds.py` driving
+  all four kinds through a session and `test_effects_whack_gun.py` covering the
+  held-gun choreography a whack check drives on the board), focus mode, audio
   dispatch. Flat — no `tests/frontend/board/` subdirs.
 - `tests/server/` — the `chessshootout/server/` package (FastAPI app,
-  handlers, rooms, sweep, protocol).
+  handlers, rooms, sweep, protocol — the wire models' own field bounds live in
+  `test_server_protocol.py` — and `moderation/`: the symbol detector plus its
+  library and timing pin in `test_moderation_flow.py` /
+  `test_moderation_guards.py`, including the per-room and per-player CPU meter
+  that force-stops sharing once a client outspends its budget).
 - `tests/online/` — client-side online multiplayer: the top-level
   `chessshootout/online/` package (`OnlineClient`, `ServerTransport`) plus
   `chessshootout/frontend/online_coordinator.py` and the offer banners.
@@ -184,6 +197,10 @@ Type hints and full docstrings everywhere are a separate later pass — not requ
 - `tests/server/conftest.py` holds the server-only `clock`/`app`/`client` fixture
   trio, `ALICE`/`BOB`, and `auth_msg` — auto-scoped to `tests/server/` so it
   can't shadow a client-side test's own `app`/`client` names.
+- `tests/server/moderation_helpers.py` is the moderation suite's own builder set
+  (pattern-library readers, canonical/transformed constructions, and the
+  worst-case dense-but-clean arrow store the CPU timing pin measures) — import
+  it as `from tests.server.moderation_helpers import ...`.
 - `tests/frontend/conftest.py` holds a shared `app` fixture (a drawn 1200x900
   `Frontend` with its games folder isolated to a temp dir) for the menu sub-view
   tests; a file with its own `app` fixture overrides it.

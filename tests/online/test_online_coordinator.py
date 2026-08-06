@@ -18,6 +18,13 @@ import pytest
 from tests.conftest import pygame_display
 from chessshootout.backend.pieces import PieceColor
 from chessshootout.backend.utils import Square
+from chessshootout.frontend import online_coordinator as coordinator_module
+from chessshootout.frontend.online_coordinator import (
+    APPLY_FAILED_LABEL, ONLINE_HARD_FAILURE_REASONS, ONLINE_TRANSIENT_REASON_LABELS,
+    TOAST_REASON_MAX_CHARS,
+)
+from chessshootout.online.client import Event, OnlineClient
+from chessshootout.server.protocol import Reason
 from tests.helpers import (
     make_app, online_start_payload as _online_start_payload, start_single_screen,
 )
@@ -176,6 +183,380 @@ def test_rematch_from_menu_window_end_to_end():
     assert app.game.variant == "online"
     assert app.game._chosen_side == "black"
     assert app.coordinator._subscriber is app.game
+
+
+def _spectate_check(kind, **overrides):
+    payload = {"kind": kind, "seed": "seed-1", "value_diff": 3, "deadline_ms": 5000.0,
+               "from": "e4", "to": "d5", "promotion": None, "captured_value": 3}
+    payload.update(overrides)
+    return payload
+
+
+def _spectate_shot(**overrides):
+    payload = {"elapsed_ms": 100.0, "miss_count": 0, "won": False, "progress": 1}
+    payload.update(overrides)
+    return payload
+
+
+def test_spectate_shot_clamps_hostile_coords_and_progress(monkeypatch):
+    """The mover's own shots are clamped by the whack view before they go on the
+    wire, but the relayed spectate copy is unbounded on the server model — so the
+    client clamps what it consumes. Coordinates land in a pg.draw.circle centre,
+    which raises on a value pygame can't fit in a C int."""
+    from chessshootout.frontend.screens.game import SPECTATE_PROGRESS_MAX
+
+    app = _wired_app()
+    seen = []
+    monkeypatch.setattr(app.game.skillcheck_overlay, "spectate_shot",
+                        lambda *a, **kw: seen.append((a, kw)))
+
+    app.game.on_spectate(_spectate_shot(
+        target_row=1e308 * 10, target_col=-4096.0, progress=10 ** 9,
+        elapsed_ms=float("nan")))
+
+    (elapsed, miss_count, won), kwargs = seen[0]
+    assert kwargs["target"] is None, "a non-finite coordinate is dropped, not drawn"
+    assert kwargs["progress"] == SPECTATE_PROGRESS_MAX
+    assert elapsed == 0.0
+    assert (miss_count, won) == (0, False)
+
+
+def test_spectate_shot_keeps_honest_values_byte_identical(monkeypatch):
+    app = _wired_app()
+    seen = []
+    monkeypatch.setattr(app.game.skillcheck_overlay, "spectate_shot",
+                        lambda *a, **kw: seen.append((a, kw)))
+
+    app.game.on_spectate(_spectate_shot(
+        elapsed_ms=1234.5, miss_count=2, won=True, progress=3,
+        target_row=3.25, target_col=7.75, direction="up"))
+
+    (elapsed, miss_count, won), kwargs = seen[0]
+    assert (elapsed, miss_count, won) == (1234.5, 2, True)
+    assert kwargs == {"progress": 3, "direction": "up", "target": (3.25, 7.75)}
+
+
+@pytest.mark.parametrize("row, col, expected", [
+    pytest.param(9.5, 4.0, (8.0, 4.0), id="row_above_the_board"),
+    pytest.param(-3.0, 4.0, (0.0, 4.0), id="row_below_zero"),
+    pytest.param(2.0, 4096.0, (2.0, 8.0), id="col_above_the_board"),
+])
+def test_spectate_shot_clamps_finite_coords_into_the_board_domain(
+        row, col, expected, monkeypatch):
+    app = _wired_app()
+    seen = []
+    monkeypatch.setattr(app.game.skillcheck_overlay, "spectate_shot",
+                        lambda *a, **kw: seen.append(kw))
+
+    app.game.on_spectate(_spectate_shot(target_row=row, target_col=col))
+
+    assert seen[0]["target"] == expected
+
+
+def test_hostile_spectate_shot_survives_a_real_drawn_frame():
+    """End to end with the real spectate overlay: the coordinates only reach a
+    draw call on the next frame, so the frame is what has to survive."""
+    app = _wired_app()
+    app.coordinator.client.opp_state = "connected"
+    app.game.on_spectate(_spectate_check("whack"))
+    assert app.game.skillcheck_overlay.is_active()
+
+    app.game.on_spectate(_spectate_shot(target_row=float("inf"),
+                                        target_col=1e308 * 10, progress=10 ** 6))
+    app.draw_frame()
+    app.draw_frame()
+
+
+@pytest.mark.parametrize("direction", [
+    pytest.param("sideways", id="not_a_compass_point"),
+    pytest.param("UP", id="right_word_wrong_case"),
+    pytest.param("", id="empty_string"),
+    pytest.param(7, id="not_even_a_string"),
+    pytest.param(["up"], id="unhashable"),
+])
+def test_spectated_direction_outside_the_engine_set_is_dropped(direction, monkeypatch):
+    """combo_view keys _RECEPTOR_DIRS/_DIR_ANGLE by the direction verbatim, and
+    a spectate frame is applied outside _guarded_apply -- an unknown value would
+    sit in _receptor_flash/_flying until the next draw() raised KeyError."""
+    app = _wired_app()
+    seen = []
+    monkeypatch.setattr(app.game.skillcheck_overlay, "spectate_shot",
+                        lambda *a, **kw: seen.append(kw))
+
+    app.game.on_spectate(_spectate_shot(direction=direction))
+
+    assert seen[0]["direction"] is None
+
+
+def test_hostile_spectated_direction_survives_a_real_combo_draw():
+    """End to end with the real combo controller: the bad direction only reaches
+    the lookup tables on the next painted frame, so the frame is the assertion."""
+    app = _wired_app()
+    app.coordinator.client.opp_state = "connected"
+    app.game.on_spectate(_spectate_check("combo"))
+    controller = app.game.skillcheck_overlay._controller
+
+    app.game.on_spectate(_spectate_shot(won=True, progress=1, direction="sideways"))
+
+    assert "sideways" not in controller._receptor_flash
+    assert all(entry[0] != "sideways" for entry in controller._flying)
+    app.draw_frame()
+    app.draw_frame()
+
+
+def test_every_engine_direction_is_relayed_untouched(monkeypatch):
+    from chessshootout.skillcheck.combo import COMBO_DIRECTIONS
+
+    app = _wired_app()
+    seen = []
+    monkeypatch.setattr(app.game.skillcheck_overlay, "spectate_shot",
+                        lambda *a, **kw: seen.append(kw))
+
+    for direction in COMBO_DIRECTIONS:
+        app.game.on_spectate(_spectate_shot(direction=direction))
+
+    assert [kw["direction"] for kw in seen] == list(COMBO_DIRECTIONS)
+
+
+@pytest.mark.parametrize("raw", [
+    pytest.param("not-a-number", id="non_numeric_string"),
+    pytest.param(None, id="missing"),
+    pytest.param(float("nan"), id="nan"),
+    pytest.param(float("inf"), id="inf"),
+    pytest.param(float("-inf"), id="negative_inf"),
+    pytest.param({"row": 1}, id="wrong_type_entirely"),
+])
+def test_finite_float_falls_back_on_anything_it_cannot_use(raw):
+    """Every ms field on the wire goes through this: a float() that raises and a
+    float() that succeeds into NaN/inf are both the caller's default, so no
+    non-finite value ever reaches a timer or a draw call."""
+    from chessshootout.frontend.screens.game import _finite_float
+
+    assert _finite_float(raw) == 0.0
+    assert _finite_float(raw, 42.5) == 42.5
+    assert _finite_float(raw, None) is None
+
+
+@pytest.mark.parametrize("raw", [
+    pytest.param("not-a-number", id="non_numeric_string"),
+    pytest.param(None, id="missing"),
+    pytest.param(float("nan"), id="nan"),
+    pytest.param(float("inf"), id="inf"),
+])
+def test_board_coord_drops_what_it_cannot_clamp(raw):
+    from chessshootout.frontend.screens.game import _board_coord
+
+    assert _board_coord(raw) is None
+
+
+def test_board_coord_clamps_finite_values_to_the_board():
+    from chessshootout.frontend.screens.game import _board_coord
+    from chessshootout.server.protocol import SKILLCHECK_TARGET_MAX
+
+    assert _board_coord(-1.0) == 0.0
+    assert _board_coord(1e12) == SKILLCHECK_TARGET_MAX
+    assert _board_coord("3.5") == 3.5, "a numeric string is still a coordinate"
+
+
+@pytest.mark.parametrize("payload", [
+    pytest.param({}, id="no_coords_at_all"),
+    pytest.param({"target_row": 1.0}, id="row_only"),
+    pytest.param({"target_col": 1.0}, id="col_only"),
+    pytest.param({"target_row": 1.0, "target_col": "x"}, id="one_unusable"),
+])
+def test_spectate_target_needs_both_coordinates(payload):
+    from chessshootout.frontend.screens.game import _spectate_target
+
+    assert _spectate_target(payload) is None
+
+
+def test_hostile_combo_spectate_progress_cannot_run_away():
+    """combo_view replays the missing prompts one by one (`while self._progress <
+    progress`), so an unbounded server int is an unbounded loop plus the juice
+    allocations each step spawns."""
+    from chessshootout.frontend.screens.game import SPECTATE_PROGRESS_MAX
+
+    app = _wired_app()
+    app.coordinator.client.opp_state = "connected"
+    app.game.on_spectate(_spectate_check("combo"))
+    controller = app.game.skillcheck_overlay._controller
+
+    app.game.on_spectate(_spectate_shot(won=True, progress=10 ** 9))
+
+    assert controller._progress <= SPECTATE_PROGRESS_MAX
+    app.draw_frame()
+
+
+def test_unknown_error_reason_is_truncated_before_it_is_toasted():
+    """An unmapped reason is shown verbatim, and the toast sizes itself from the
+    rendered text — an unbounded reason is an unbounded surface."""
+    app = _wired_app()
+
+    app.coordinator._handle_online_error({"reason": "boom" * 10_000})
+
+    assert app.toast.is_visible()
+    assert len(app.toast._bubbles[-1]["message"]) == TOAST_REASON_MAX_CHARS
+
+
+def test_a_non_string_reason_falls_back_to_the_generic_label():
+    app = _wired_app()
+    app.coordinator._handle_online_error({"reason": {"nested": "payload"}})
+    assert app.toast._bubbles[-1]["message"] == "Server error"
+
+
+def test_mapped_reasons_still_toast_their_full_label():
+    app = _wired_app()
+    app.coordinator._handle_online_error({"reason": Reason.RATE_LIMITED})
+    assert app.toast._bubbles[-1]["message"] == "Slow down a bit"
+
+
+QUEUE_TIMEOUT_LABEL = ONLINE_TRANSIENT_REASON_LABELS[Reason.QUEUE_TIMEOUT]
+
+
+def _search_config(**overrides):
+    config = {"nickname": "alice", "time_minutes": 5, "increment_seconds": 0,
+              "side": "random"}
+    config.update(overrides)
+    return config
+
+
+def _searching_app(monkeypatch, client=None):
+    """Drive the real matchmaking entry point up to the "Searching…" wait modal.
+
+    The coordinator builds its own client, so the factory is swapped for a
+    stand-in; OnlineClient.connect is neutered on top of that so a test passing
+    a real (hand-wired) client still never opens a socket or spawns a thread."""
+    monkeypatch.setenv("CHESS_SERVER_ADDR", "127.0.0.1:9")
+    monkeypatch.setattr(OnlineClient, "connect", lambda self, addr, request: None)
+    app = make_app(1000, 800)
+    monkeypatch.setattr(coordinator_module, "OnlineClient",
+                        lambda: client if client is not None else _mock_client())
+    app.coordinator._begin_online_flow(_search_config())
+    assert app.coordinator.wait_modal.is_visible()
+    assert app.menu.play_view_visible() is False
+    return app
+
+
+class _ClosingLoop:
+    """An event loop that reports itself running and then raises the instant work
+    is scheduled on it — the window the server's close(4004) opens right behind
+    the queue_timeout frame: the session coroutine finishes and the loop closes
+    between the is_running() check and the schedule."""
+
+    def is_running(self):
+        return True
+
+    def is_closed(self):
+        return False
+
+    def call_soon_threadsafe(self, *args, **kwargs):
+        raise RuntimeError("Event loop is closed")
+
+
+def _queued_client_with_dead_loop(reason):
+    client = OnlineClient()
+    client._loop = _ClosingLoop()
+    client._in_queue = True
+    client._room_id = "room-1"
+    client._session_token = "tok"
+    client._inbound.put(Event("error", {"reason": reason}))
+    return client
+
+
+def test_queue_timeout_ends_the_search_like_the_cancel_button(monkeypatch):
+    """The server drops a room that has sat in the queue for QUEUE_MAX_WAIT_SECONDS
+    and says so before closing the socket. The player is still queued — no game to
+    fall back to — so the wait modal has to come down and the menu has to come
+    back, exactly as if Cancel had been clicked, plus one explanatory toast."""
+    app = _searching_app(monkeypatch)
+    client = app.coordinator.client
+
+    app.coordinator._handle_online_error({"reason": Reason.QUEUE_TIMEOUT})
+
+    assert not app.coordinator.wait_modal.is_visible()
+    assert app.toast.message == QUEUE_TIMEOUT_LABEL
+    assert Reason.QUEUE_TIMEOUT not in app.toast.message, "no raw wire code in the toast"
+    assert app.coordinator.client is None
+    assert app.coordinator._wait_started_at_ms is None
+    client.cancel_queue.assert_called_once()
+    assert app.screen is app.menu
+    assert app.menu.play_view_visible() is True
+
+
+def test_queue_timeout_never_reaches_the_hard_failure_modal(monkeypatch):
+    """Timing out of the queue is an ordinary outcome of a long search, not a
+    broken connection — it must not raise the confirm+Retry modal the
+    unreachable/room-full family gets, and it must toast exactly once."""
+    app = _searching_app(monkeypatch)
+
+    app.coordinator._handle_online_error({"reason": Reason.QUEUE_TIMEOUT})
+
+    assert not app.confirm_modal.is_visible()
+    assert Reason.QUEUE_TIMEOUT not in ONLINE_HARD_FAILURE_REASONS
+    assert len(app.toast._bubbles) == 1
+
+
+def test_search_restarts_cleanly_after_a_queue_timeout(monkeypatch):
+    """Nothing about the timed-out search may linger: the next Play click has to
+    build a fresh client and a fresh wait modal."""
+    app = _searching_app(monkeypatch)
+    app.coordinator._handle_online_error({"reason": Reason.QUEUE_TIMEOUT})
+
+    second = _mock_client("room-2")
+    monkeypatch.setattr(coordinator_module, "OnlineClient", lambda: second)
+    app.coordinator._begin_online_flow(
+        _search_config(time_minutes=10, increment_seconds=5))
+
+    assert app.coordinator.client is second
+    second.connect.assert_called_once()
+    assert app.coordinator.wait_modal.is_visible()
+    assert app.coordinator._wait_started_at_ms is not None
+    assert app.coordinator._pending_game_start_payload is None
+    assert app.menu.play_view_visible() is False
+
+
+def test_queue_timeout_clears_the_search_even_when_the_close_lands_first(monkeypatch):
+    """Ordering pin: the error frame and the close(4004) arrive back to back, so
+    the session thread can already be gone by the time the frame drains the
+    event. Tearing the queue down then schedules onto a loop that is closing
+    underneath the caller — that used to escape as a RuntimeError, get swallowed
+    by _guarded_apply, and leave "Searching…" on screen forever."""
+    app = _searching_app(
+        monkeypatch, client=_queued_client_with_dead_loop(Reason.QUEUE_TIMEOUT))
+    client = app.coordinator.client
+
+    app.coordinator._drain_online_inbound()
+
+    assert app.toast.message == QUEUE_TIMEOUT_LABEL
+    assert app.toast.message != APPLY_FAILED_LABEL
+    assert not app.coordinator.wait_modal.is_visible()
+    assert app.coordinator.client is None
+    assert client.state == "disconnected"
+    assert app.menu.play_view_visible() is True
+
+
+def test_match_found_and_game_start_clip_oversize_names():
+    """A name is rendered in full into a surface before it is clipped to the
+    widget, so the length bound has to land before the modal and the strips.
+
+    The bound under test is env.clip_nickname's, not the server validator's --
+    they happen to be equal, so pinning the protocol constant here would stay
+    green even if the client stopped clipping."""
+    from chessshootout.infra.env import _NICKNAME_MAX_LEN
+
+    app = make_app(1000, 800)
+    app.coordinator.client = _mock_client()
+    app.coordinator.client.opp_state = "connected"
+    payload = _online_start_payload(white_name="a" * 400_000, black_name="bob")
+
+    app.coordinator._begin_match_found_transition(payload)
+    assert app.coordinator.match_found_modal.me_name == "a" * _NICKNAME_MAX_LEN
+
+    app.coordinator._finish_match_found()
+    assert app.game.white_name == "a" * _NICKNAME_MAX_LEN
+    assert app.game.black_name == "bob"
+    assert set(app.game.result_flow.series_scores) == {"a" * _NICKNAME_MAX_LEN, "bob"}
+    app.draw_frame()
 
 
 def test_reconnect_available_reflects_the_pending_probe_result():

@@ -1,21 +1,22 @@
+from fastapi import WebSocketDisconnect
+
 from chessshootout.server import logging_setup
 from chessshootout.server.broadcasts import finalize_and_broadcast, resolve_skillcheck_fail
 from chessshootout.server.connections import send
 from chessshootout.server.protocol import (
-    ConnectionStatusMessage, FIRST_MOVE_ABORT_SECONDS, GRACE_SECONDS, Reason,
-    RematchUpdateMessage,
+    ConnectionStatusMessage, ErrorMessage, FIRST_MOVE_ABORT_SECONDS, GRACE_SECONDS,
+    QUEUE_MAX_WAIT_SECONDS, Reason, RematchUpdateMessage,
 )
 from chessshootout.server.rooms import (
     REMATCH_ABSOLUTE_CAP_SECONDS, REMATCH_IDLE_SECONDS, POST_GAME_DISCONNECT_GRACE,
 )
-from chessshootout.skillcheck import online
-from chessshootout.skillcheck.types import SkillCheckKind
 
 
 log = logging_setup.get_logger("chess.server.app")
 
 
 PREGAME_CONNECT_GRACE_SECONDS = 5.0
+WS_CLOSE_QUEUE_TIMEOUT = 4004
 
 
 RESULT_REASON_BY_GAME_RESULT = {
@@ -44,6 +45,8 @@ class Sweep:
         await self.step_heartbeat_timeout()
         await self.step_grace_expired()
         self.step_drop_orphans_pre_game()
+        self.step_reap_abandoned_queue()
+        await self.step_reap_timed_out_queue()
         await self.step_post_game()
         self.rooms.gc_finished_rooms()
 
@@ -53,13 +56,7 @@ class Sweep:
             pending = room.pending_skillcheck
             if room.result is not None or pending is None:
                 continue
-            expired = pending.is_expired(now_ms)
-            if not expired and pending.kind == SkillCheckKind.AIM:
-                challenge = online.challenge_from(
-                    pending.kind, pending.seed, pending.value_diff)
-                expired = online.aim_expired(
-                    challenge, now_ms - pending.start_ms, pending.miss_count)
-            if expired:
+            if pending.is_dead(now_ms):
                 log.info("skillcheck deadline room=%s color=%s kind=%s",
                          room.room_id, pending.color, pending.kind.value)
                 await resolve_skillcheck_fail(self.rooms, self.connections, room)
@@ -124,6 +121,31 @@ class Sweep:
                     and now - room.started_at >= PREGAME_CONNECT_GRACE_SECONDS):
                 log.info("drop room=%s reason=both_disconnected_pre_game", room.room_id)
                 self.rooms.drop_room_now(room.room_id)
+
+    def step_reap_abandoned_queue(self):
+        for room in self.rooms.stale_queued_rooms():
+            slot = room.white or room.black
+            if slot is not None and self.connections.get_for_uuid(
+                    room.room_id, slot.client_uuid) is not None:
+                continue
+            log.info("drop room=%s reason=queue_abandoned", room.room_id)
+            self.rooms.drop_queued_room(room)
+
+    async def step_reap_timed_out_queue(self):
+        for room in self.rooms.stale_queued_rooms(QUEUE_MAX_WAIT_SECONDS):
+            slot = room.white or room.black
+            ws = (None if slot is None
+                  else self.connections.get_for_uuid(room.room_id, slot.client_uuid))
+            if not self.rooms.drop_queued_room(room):
+                continue
+            log.info("drop room=%s reason=queue_timeout", room.room_id)
+            if ws is None:
+                continue
+            await send(ws, ErrorMessage(reason=Reason.QUEUE_TIMEOUT))
+            try:
+                await ws.close(code=WS_CLOSE_QUEUE_TIMEOUT)
+            except (RuntimeError, WebSocketDisconnect) as exc:
+                log.debug("ws close on queue timeout failed: %s", exc)
 
     async def _notify_rematch(self, room, color, event):
         ws = self.connections.get_for_color(room, color)

@@ -3,11 +3,11 @@
 #   ./deploy/update.sh            # update to the latest release
 #   ./deploy/update.sh v2.1.5     # or roll to a specific release tag
 #
-# Pulls the CI-built, scanned image from GHCR and recreates the gameserver
-# container; refreshes the compose file from git. Falls back to sudo
-# automatically when the shell is not in the docker group. Reports the installed
-# version before and after, and appends a UTC-timestamped record to
-# deploy/update.log.
+# Pulls the CI-built image from GHCR and recreates the gameserver container;
+# refreshes the compose file from git. A failed pull aborts - the deploy never
+# falls back to building from local sources. Falls back to sudo automatically
+# when the shell is not in the docker group. Reports the installed version
+# before and after, and appends a UTC-timestamped record to deploy/update.log.
 set -euo pipefail
 
 HEALTH_URL="http://127.0.0.1:8000/healthz"
@@ -50,15 +50,27 @@ main() {
     tag="latest"
   fi
 
+  local old_tag=""
   if grep -q '^IMAGE_TAG=' .env 2>/dev/null; then
+    old_tag="$(sed -n 's/^IMAGE_TAG=//p' .env | head -1)"
     sed -i "s/^IMAGE_TAG=.*/IMAGE_TAG=${tag}/" .env
   else
     printf 'IMAGE_TAG=%s\n' "$tag" >> .env
   fi
 
-  local pull_status="ok"
-  $dc compose pull gameserver || pull_status="failed"
-  $dc compose up -d
+  # A failed pull must abort: `up` would otherwise fall back to the compose
+  # file's `build:` and put an unreviewed local build into production. Roll
+  # IMAGE_TAG back so a later bare `docker compose up` can't do it either.
+  if ! $dc compose pull gameserver; then
+    if [ -n "$old_tag" ]; then
+      sed -i "s/^IMAGE_TAG=.*/IMAGE_TAG=${old_tag}/" .env
+    fi
+    local failure="pull of ${tag} failed - aborted, still running ${old_ver}@${old_digest}"
+    printf '>> %s\n' "$failure" >&2
+    printf '%s | %-5s | %s\n' "$(now_utc)" "fail" "$failure" >> "$LOG_FILE"
+    exit 1
+  fi
+  $dc compose up -d --no-build
 
   sleep 3
   local health new_ver new_digest
@@ -71,11 +83,11 @@ main() {
   new_digest="$(running_image_id)"; : "${new_digest:=none}"
 
   local outcome="ok"
-  { [ "$pull_status" = "ok" ] && [ "$health" = "ok" ]; } || outcome="check"
+  [ "$health" = "ok" ] || outcome="check"
 
   local summary
   summary="was ${old_ver}@${old_digest} -> now ${new_ver}@${new_digest}"
-  summary="${summary} (tag=${tag} pull=${pull_status} health=${health})"
+  summary="${summary} (tag=${tag} health=${health})"
   printf '>> %s\n' "$summary"
   printf '%s | %-5s | %s\n' "$(now_utc)" "$outcome" "$summary" >> "$LOG_FILE"
 }

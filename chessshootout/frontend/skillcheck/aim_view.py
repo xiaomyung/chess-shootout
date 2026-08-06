@@ -1,7 +1,6 @@
 import pygame as pg
 
-from chessshootout.frontend.skillcheck.controller import (
-    SkillCheckController, SKILLCHECK_RESULT_HOLD_MS, EdgeTrigger)
+from chessshootout.frontend.skillcheck.controller import SkillCheckController, EdgeTrigger
 from chessshootout.frontend.visual.cache import new_cache, memoized_surface
 from chessshootout.frontend.visual.colors import Colors
 from chessshootout.frontend.visual.draw import supersample
@@ -50,27 +49,15 @@ class AimController(SkillCheckController):
                  victim_surface=None, board_rect=None, geom=None, from_sq=None,
                  victim_sq=None, attacker_type=None, shot_sound=None, on_shot=None,
                  miss_count=0, passive=False, audio=None):
-        self.challenge = challenge
-        self.start_ms = now_ms
-        self._now = now_ms
-        self.deadline_ms = deadline_ms
+        self._init_common(challenge, now_ms, deadline_ms, on_shot=on_shot, passive=passive,
+                          audio=audio)
         self.miss_count = miss_count
-        self._on_shot = on_shot
-        self._passive = passive
-        self._online = on_shot is not None or passive
-        self._audio = audio
         self._beep_edge = EdgeTrigger()
-        self._committed_at = None
-        self._resolved_at = None
-        self._landed = None
         self._last_miss_ms = None
         self._shot_render = None
         self._shot_offset = None
         self._shot_held_until = None
-        self._victim_orig = victim_surface
-        self._victim_orig_cell = max(int(cell_rect.width), 1)
-        self._victim = victim_surface
-        self._victim_cache = {}
+        self._init_victim(victim_surface, cell_rect)
         self.cell_size = 0
         self._from_sq = from_sq if from_sq is not None else _SHOOTER_KEY
         self._victim_sq = victim_sq if victim_sq is not None else _VICTIM_KEY
@@ -91,19 +78,6 @@ class AimController(SkillCheckController):
         self.center = cell_rect.center
         self.cell_size = new_cell
 
-    def _scaled_victim(self, new_cell):
-        if new_cell == self._victim_orig_cell:
-            return self._victim_orig
-        cached = self._victim_cache.get(new_cell)
-        if cached is not None:
-            return cached
-        scale = new_cell / self._victim_orig_cell
-        w = max(round(self._victim_orig.get_width() * scale), 1)
-        h = max(round(self._victim_orig.get_height() * scale), 1)
-        surf = pg.transform.smoothscale(self._victim_orig, (w, h))
-        self._victim_cache[new_cell] = surf
-        return surf
-
     def set_board_rect(self, board_rect):
         if board_rect is None:
             self._board_rect = None
@@ -111,22 +85,6 @@ class AimController(SkillCheckController):
             return
         self._board_rect = pg.Rect(board_rect)
         self._fx.board_rect = pg.Rect(board_rect)
-
-    def relayout(self, cell_rect):
-        self._apply_geometry(cell_rect)
-
-    def handle_event(self, event):
-        if self._passive:
-            return False
-        if self._committed_at is not None:
-            return True
-        if event.type == pg.MOUSEBUTTONDOWN and event.button == 1:
-            self._fire()
-            return True
-        if event.type == pg.KEYDOWN and event.key in (pg.K_SPACE, pg.K_RETURN):
-            self._fire()
-            return True
-        return False
 
     def _fire(self):
         elapsed = self._now - self.start_ms
@@ -148,19 +106,16 @@ class AimController(SkillCheckController):
         self._fx.miss(now_ms=self._now, attacker_type=self._attacker_type,
                       from_sq=self._from_sq, victim_sq=self._victim_sq,
                       cell_size=self.cell_size, power="soft",
-                      on_fire=self._shot_sound, callout=False)
+                      on_fire=self._shot_fired, callout=False)
         self._fx.swear(self._now, self._from_sq, self.cell_size)
         if not self._online:
             self._cue("play_swear")
 
-    def resolve(self, won):
-        self._landed = won
-        if self._committed_at is None:
-            self._committed_at = self._now
-        self._resolved_at = self._now
-        self._emit_verdict()
+    def _shot_fired(self, advance_only):
+        if self._shot_sound is not None:
+            self._shot_sound()
 
-    def spectate_shot(self, elapsed, miss_count, won):
+    def spectate_shot(self, elapsed, miss_count, won, progress=0, direction=None, target=None):
         if won:
             self._shot_render = (elapsed, miss_count)
             self._shot_offset = self.challenge.reticle_offset(elapsed, miss_count)
@@ -183,19 +138,7 @@ class AimController(SkillCheckController):
 
     @property
     def done(self):
-        if self._online:
-            return (self._resolved_at is not None
-                    and self._now - self._resolved_at >= SKILLCHECK_RESULT_HOLD_MS)
-        return (self._committed_at is not None
-                and self._now - self._committed_at >= AIM_RESULT_HOLD_MS)
-
-    @property
-    def landed(self):
-        return self._landed
-
-    def _frozen_elapsed(self):
-        frozen = self._committed_at if self._committed_at is not None else self._now
-        return frozen - self.start_ms
+        return self._done_after(AIM_RESULT_HOLD_MS)
 
     def _render_state(self):
         if (self._online and self._landed and self._committed_at is not None
@@ -243,7 +186,7 @@ class AimController(SkillCheckController):
         if self._committed_at is not None and self._landed is not None:
             verdict = pg.Color(Colors.win if self._landed else Colors.loss)
             return verdict, pg.Color(verdict)
-        live = pg.Color(Colors.spectate if self._passive else Colors.accent)
+        live = pg.Color(self._signal_color(Colors.accent))
         cross_col = pg.Color(Colors.text)
         if self._last_miss_ms is not None:
             flash = max(0.0, 1.0 - (self._now - self._last_miss_ms) / AIM_MISS_FLASH_MS)

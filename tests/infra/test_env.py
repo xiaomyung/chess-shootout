@@ -16,7 +16,7 @@ _ISOLATED_VARS = (
     "CHESS_DEFAULT_INCREMENT", "CHESS_COUNTRY",
     "CHESS_SHOW_FPS", "CHESS_SHOW_PING", "CHESS_FOCUS_SHOW",
     "CHESS_NEWS_URL", "CHESS_PROFILE_HINT_SHOWN", "CHESS_LAUNCH_MODE",
-    "CHESS_AUTO_QUEEN",
+    "CHESS_AUTO_QUEEN", "CHESS_DEBUG_HITBOX",
 )
 
 
@@ -407,6 +407,28 @@ def test_auto_queen_round_trips():
     assert "CHESS_AUTO_QUEEN=0" in env._ENV_PATH.read_text(encoding="utf-8")
 
 
+def test_debug_hitbox_defaults_false():
+    assert env.get_debug_hitbox() is False
+
+
+@pytest.mark.parametrize("raw, expected", [
+    pytest.param("1", True, id="one"),
+    pytest.param("true", True, id="true"),
+    pytest.param("TRUE", True, id="uppercase"),
+    pytest.param(" on ", True, id="padded_on"),
+    pytest.param("0", False, id="zero"),
+    pytest.param("", False, id="empty"),
+    pytest.param("yes", False, id="unlisted_word"),
+    pytest.param("off", False, id="off"),
+])
+def test_debug_hitbox_reads_the_truthy_set(monkeypatch, raw, expected):
+    """A dev-only read-only switch: no setter, no persistence, and only the three
+    documented truthy spellings arm the hit-region overlay."""
+    monkeypatch.setenv("CHESS_DEBUG_HITBOX", raw)
+    assert env.get_debug_hitbox() is expected
+    assert not hasattr(env, "set_debug_hitbox")
+
+
 def test_profile_hint_shown_defaults_false():
     assert env.get_profile_hint_shown() is False
 
@@ -569,6 +591,56 @@ def test_set_data_dir_persists_and_reads():
     env.set_data_dir("/tmp/mygames")
     assert os.environ.get("CHESS_DATA_DIR") == "/tmp/mygames"
     assert "CHESS_DATA_DIR=/tmp/mygames" in env._ENV_PATH.read_text(encoding="utf-8")
+
+
+@pytest.mark.parametrize("injected", [
+    pytest.param("/tmp/games\nCHESS_SERVER_ADDR=evil.example.com", id="lf"),
+    pytest.param("/tmp/games\r\nCHESS_SERVER_ADDR=evil.example.com", id="crlf"),
+    pytest.param("/tmp/games\rCHESS_SERVER_ADDR=evil.example.com", id="cr"),
+])
+def test_persist_refuses_a_value_carrying_a_line_break(injected, caplog):
+    """.env is one KEY=VALUE per line, so a value with a newline in it writes a
+    second line the next launch honours as a real setting. Every caller but
+    set_data_dir clamps its value; that one persists a browser-chosen directory
+    name verbatim, so the guard belongs in _persist itself."""
+    env._ENV_PATH.write_text("CHESS_LAST_MODE=online\n", encoding="utf-8")
+    with caplog.at_level(logging.WARNING, logger="chess.env"):
+        env.set_data_dir(injected)
+    contents = env._ENV_PATH.read_text(encoding="utf-8")
+    assert "CHESS_SERVER_ADDR" not in contents
+    assert "CHESS_DATA_DIR" not in contents
+    assert "CHESS_LAST_MODE=online" in contents
+    assert any(r.levelno == logging.WARNING for r in caplog.records)
+
+
+def test_persist_still_writes_foreign_lines_when_a_write_is_refused():
+    """The refusal is a dropped write, not a corrupt file: unrelated content the
+    module doesn't own is left exactly where it was."""
+    env._ENV_PATH.write_text(
+        "CHESS_LAST_MODE=online\n"
+        "some hand-typed note that isn't KEY=VALUE\n", encoding="utf-8")
+    env.set_data_dir("/tmp/a\nCHESS_NICKNAME=mallory")
+    contents = env._ENV_PATH.read_text(encoding="utf-8")
+    assert "some hand-typed note that isn't KEY=VALUE" in contents
+    assert "CHESS_NICKNAME" not in contents
+    env.set_master_volume(0.7)
+    contents = env._ENV_PATH.read_text(encoding="utf-8")
+    assert "some hand-typed note that isn't KEY=VALUE" in contents
+    assert "CHESS_MASTER_VOLUME=0.700" in contents
+
+
+@pytest.mark.parametrize("raw, expected", [
+    pytest.param("Magnus", "Magnus", id="normal_name_untouched"),
+    pytest.param("", "", id="empty"),
+    pytest.param(None, "", id="none"),
+    pytest.param("x" * 5000, "x" * env._NICKNAME_MAX_LEN, id="oversize_clipped"),
+])
+def test_clip_nickname_bounds_a_name_without_rewriting_it(raw, expected):
+    """Opponent names arrive from the server and are font-rendered in full before
+    they are clipped to the strip width, so the length bound has to land before
+    they are stored. Unlike sanitize_nickname this only clips -- it is applied to
+    names the server already normalized, and must not rewrite them."""
+    assert env.clip_nickname(raw) == expected
 
 
 def test_set_data_dir_none_clears_override():

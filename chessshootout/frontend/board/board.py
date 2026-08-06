@@ -147,6 +147,7 @@ class Board:
         self.pending_promotion_square = None
         self._promotion_from = None
         self.aim_suppressed_square = None
+        self.attacker_suppressed_square = None
         self.flipped = False
         self.animations = []
         self._restore_anims = []
@@ -195,6 +196,7 @@ class Board:
         self.effects.clear()
         self.clear_premoves()
         self.aim_suppressed_square = None
+        self.attacker_suppressed_square = None
         self.clear_all_annotations()
         self.end_press()
         self.review_ply = None
@@ -580,6 +582,8 @@ class Board:
         hidden |= {a["sq"] for a in self._restore_anims}
         if self.aim_suppressed_square is not None:
             hidden.add(self.aim_suppressed_square)
+        if self.attacker_suppressed_square is not None:
+            hidden.add(self.attacker_suppressed_square)
         if self.dragging_from is not None:
             hidden.add(self.dragging_from)
         settle_sq = self.drag.settle_target()
@@ -1224,7 +1228,7 @@ class Board:
         attacker = self.piece_images_scaled.get((moving_piece.type, moving_piece.color))
         victim = self.piece_images_scaled.get((captured.type, captured.color))
         if attacker is None or victim is None or self.cell_size <= 0:
-            self._on_capture_fire(entry, color, victim_sq)
+            self._on_capture_fire(entry, color, victim_sq, False)
             return False
         if clear_drag:
             self.drag.clear_drag_state()
@@ -1235,7 +1239,8 @@ class Board:
             from_sq=from_sq, victim_sq=victim_sq, to_sq=to_sq,
             cell_size=self.cell_size, power=self._capture_power(captured.type),
             occupied=self._occupied_squares(),
-            on_fire=lambda: self._on_capture_fire(entry, color, victim_sq),
+            on_fire=lambda advance_only: self._on_capture_fire(entry, color, victim_sq,
+                                                               advance_only),
             on_slide=lambda: self.start_animation(from_sq, to_sq, moving_piece,
                                                   on_complete=on_complete),
         )
@@ -1245,14 +1250,27 @@ class Board:
         return {Square(r, c) for r, c in product(range(self.SIZE), repeat=2)
                 if self.match.piece_at(Square(r, c)) is not None}
 
-    def _on_capture_fire(self, entry, color, victim_sq):
-        key = self.effects.register_kill(color, victim_sq, self.cell_size, pg.time.get_ticks())
+    def _on_capture_fire(self, entry, color, victim_sq, advance_only):
+        if advance_only:
+            return
         if self.shot_callback is not None:
             self.shot_callback(entry)
+        self._credit_kill(color, victim_sq, entry.move.captured)
+
+    def whack_kill_at(self, px, victim_sq, color, victim_piece):
+        if px is None or victim_sq is None or color is None or self.cell_size <= 0:
+            return
+        self.effects.impact_px(pg.time.get_ticks(), px, self.cell_size)
+        self._credit_kill(color, victim_sq, victim_piece, px=px)
+
+    def _credit_kill(self, color, victim_sq, victim_piece, px=None):
+        key = self.effects.register_kill(color, victim_sq, self.cell_size,
+                                         pg.time.get_ticks(), px=px)
         if self.announce_callback is not None and key is not None:
-            self.announce_callback(key, entry.move.captured)
+            self.announce_callback(key, victim_piece)
 
     def trigger_skillcheck_fail(self, from_sq, to_sq, on_fire=None):
+        handed = self.effects.take_gun_handoff(from_sq)
         piece = self.match.piece_at(from_sq)
         if piece is None or self.cell_size <= 0:
             return
@@ -1264,13 +1282,13 @@ class Board:
             return
         victim = self.match.piece_at(victim_sq)
         power = self._capture_power(victim.type) if victim is not None else "med"
-        fire_cb = (lambda: on_fire(piece.type)) if on_fire is not None else None
+        fire_cb = (lambda advance_only: on_fire(piece.type)) if on_fire is not None else None
         self.effects.miss(
             now_ms=now,
             attacker_type=piece.type.value,
             from_sq=from_sq, victim_sq=victim_sq,
             cell_size=self.cell_size, power=power,
-            occupied=self._occupied_squares(), on_fire=fire_cb)
+            occupied=self._occupied_squares(), on_fire=fire_cb, predrawn=handed)
         self.effects.swear(now, from_sq, self.cell_size)
 
     def capture_victim_square(self, piece, from_sq, to_sq):

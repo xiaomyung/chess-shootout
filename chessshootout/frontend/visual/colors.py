@@ -8,6 +8,7 @@ class Colors:
     overlay_scrim = bg + "d9"
     well_deep = "#0f1218"
 
+    white = "#ffffff"
     text = "#f3f5f8"
     text_dim = "#9aa4b2"
     text_muted = "#5c6573"
@@ -40,7 +41,7 @@ class Colors:
     win = "#46d17f"
     loss = "#ff5a4f"
     loss_glow = loss + "8c"
-    spectate = "#7d828c"
+    spectate = "#4a90e2"
     spectate_glow = spectate + "8c"
     check = "#ff3b3b"
     check_fill = check + "6b"

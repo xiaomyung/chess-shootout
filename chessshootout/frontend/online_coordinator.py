@@ -32,6 +32,10 @@ RESYNC_TIMEOUT_MS = 8000
 SKILLCHECK_WATCHDOG_SLACK_MS = 4000
 RECONNECT_MODAL_DEBOUNCE_MS = 500
 
+TOAST_REASON_MAX_CHARS = 80
+APPLY_FAILED_LABEL = "Couldn't apply the server update"
+APPLY_FAILED_TOAST_KEY = "online_apply_failed"
+
 ONLINE_DEFAULT_TIME_MINUTES = 5
 
 RECONNECT_PROBE_INTERVAL_MS = 5000
@@ -56,6 +60,7 @@ ONLINE_HARD_FAILURE_LABELS = {
 ONLINE_HARD_FAILURE_REASONS = frozenset(ONLINE_HARD_FAILURE_LABELS)
 
 ONLINE_TRANSIENT_REASON_LABELS = {
+    Reason.QUEUE_TIMEOUT: "Matchmaking timed out — try again",
     Reason.RATE_LIMITED: "Slow down a bit",
     Reason.NO_TAKEBACK_AVAILABLE: "Nothing to take back",
     Reason.REMATCH_ALREADY_PENDING: "Rematch already requested",
@@ -166,9 +171,11 @@ class OnlineCoordinator:
         if self.client is not None:
             self.client.send_give_time(hold_ms)
 
-    def send_skill_check_shot(self, client_elapsed_ms):
+    def send_skill_check_shot(self, client_elapsed_ms, direction=None,
+                              target_row=None, target_col=None):
         if self.client is not None:
-            self.client.send_skill_check_shot(client_elapsed_ms)
+            self.client.send_skill_check_shot(client_elapsed_ms, direction=direction,
+                                              target_row=target_row, target_col=target_col)
 
     def send_annotations_state(self, sharing, highlights, arrows):
         if self.client is not None:
@@ -186,14 +193,20 @@ class OnlineCoordinator:
         if self.client is not None:
             self.client.send_set_marks_visibility(hide_opp)
 
+    def _guarded_apply(self, what, apply):
+        try:
+            apply()
+            return True
+        except Exception:
+            log.exception("online %s failed", what)
+            self.app.toast.show(APPLY_FAILED_LABEL, key=APPLY_FAILED_TOAST_KEY)
+            return False
+
     def _drain_online_inbound(self):
         if self.client is None:
             return
         for event in self.client.drain_inbound():
-            try:
-                self._handle_online_event(event)
-            except Exception:
-                log.exception("online event handler failed")
+            self._guarded_apply("event handler", lambda: self._handle_online_event(event))
 
     def _handle_online_event(self, event):
         if event.type == "game_start":
@@ -239,6 +252,8 @@ class OnlineCoordinator:
 
     def _handle_online_error(self, payload):
         reason = payload.get("reason", "")
+        if not isinstance(reason, str):
+            reason = ""
         game = self.app.game
         pending_move = game.skillcheck_session.pending_online_move
         if pending_move is not None and reason in MOVE_REJECTION_REASONS:
@@ -271,6 +286,11 @@ class OnlineCoordinator:
                 yes_label="New Search", no_label="Cancel",
             )
             return
+        if reason == Reason.QUEUE_TIMEOUT:
+            log.warning("matchmaking queue timed out")
+            self._on_online_cancel()
+            self.app.toast.show(ONLINE_TRANSIENT_REASON_LABELS[reason])
+            return
         if reason in ONLINE_HARD_FAILURE_REASONS or reason.startswith("http_"):
             log.warning("online hard failure reason=%s", reason)
             self._cancel_resync()
@@ -287,7 +307,8 @@ class OnlineCoordinator:
             )
             return
         if reason:
-            label = ONLINE_TRANSIENT_REASON_LABELS.get(reason, reason)
+            label = ONLINE_TRANSIENT_REASON_LABELS.get(
+                reason, reason[:TOAST_REASON_MAX_CHARS])
             self.app.toast.show(label)
         else:
             self.app.toast.show("Server error")
@@ -507,7 +528,8 @@ class OnlineCoordinator:
         room_id = self.client.room_id if self.client is not None else None
         log.info("match found room=%s side=%s", room_id, payload.get("your_color"))
         self.match_found_modal.show(
-            payload["white_name"], payload["black_name"], payload["your_color"],
+            env.clip_nickname(payload["white_name"]),
+            env.clip_nickname(payload["black_name"]), payload["your_color"],
             self._finish_match_found, seconds=MATCH_FOUND_SECONDS,
             white_country=payload.get("white_country") or "",
             black_country=payload.get("black_country") or "",
@@ -529,8 +551,9 @@ class OnlineCoordinator:
         return str(uuid.uuid4())
 
     def _start_online_game(self, payload):
-        opp_name = (payload.get("white_name") if payload.get("your_color") == "black"
-                    else payload.get("black_name"))
+        opp_name = env.clip_nickname(
+            payload.get("white_name") if payload.get("your_color") == "black"
+            else payload.get("black_name"))
         log.info("game start mode=online side=%s vs=%s tc=%s+%s",
                  payload.get("your_color"), opp_name,
                  payload.get("time_minutes"), payload.get("increment_seconds"))
@@ -888,14 +911,20 @@ class OnlineCoordinator:
             )
             return
         log.info("reconnect: resume ok room=%s", pending["room_id"])
-        self.app.menu.apply_resume_config(resume)
         self.client = OnlineClient()
-        self._start_online_game(resume)
-        self._handle_game_resumed(resume)
+        if not self._guarded_apply("reconnect adoption",
+                                   lambda: self._adopt_resumed_game(resume)):
+            self._abandon_online_game()
+            return
         self.client.reconnect_to_existing(
             pending["addr"], pending["room_id"], pending["session_token"], resume,
         )
         self.app.menu.hide_play_view()
+
+    def _adopt_resumed_game(self, resume):
+        self.app.menu.apply_resume_config(resume)
+        self._start_online_game(resume)
+        self._handle_game_resumed(resume)
 
     def update(self, now):
         self._drain_online_inbound()

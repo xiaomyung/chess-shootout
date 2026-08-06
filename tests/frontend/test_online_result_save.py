@@ -52,7 +52,8 @@ class FakeOnlineClient:
     def send_move(self, from_sq, to_sq, promotion=None):
         self.sent_moves.append((from_sq, to_sq, promotion))
 
-    def send_skill_check_shot(self, client_elapsed_ms=0.0):
+    def send_skill_check_shot(self, client_elapsed_ms=0.0, direction=None,
+                              target_row=None, target_col=None):
         self.shots += 1
 
     def request_state_sync(self):
@@ -158,10 +159,11 @@ def test_online_capture_mate_writes_utf8_bytes(tmp_path, monkeypatch):
     assert data.decode("cp1252", errors="replace") != text
 
 
-def test_auto_save_survives_surrogate_nickname_without_crashing(tmp_path, monkeypatch):
+def test_auto_save_neutralizes_a_surrogate_nickname_instead_of_failing(tmp_path, monkeypatch):
     """A lone surrogate in a nickname (Windows argv/env surrogateescape) is not
-    UTF-8 encodable even with encoding='utf-8'; the save must degrade to None via the
-    widened except, not take down the app mid-frame. A clean save still works after."""
+    UTF-8 encodable even with encoding='utf-8'. tag_value drops every non-printable
+    character, and a surrogate is one, so the name is now sanitized at write time
+    and the save goes through -- the crash class is removed rather than caught."""
     app = _online_app(tmp_path, monkeypatch)
     _land_capture_mate(app)
     app.coordinator._handle_online_result({"reason": "checkmate", "winner_color": "white"})
@@ -169,11 +171,24 @@ def test_auto_save_survives_surrogate_nickname_without_crashing(tmp_path, monkey
     app.game.white_name = "bad\udce9name"
     app.game.result_flow._last_saved_pgn_path = None
     app.game.result_flow._last_saved_result_tag = None
-    assert app.game.result_flow.auto_save_pgn() is None
-    app.game.white_name = "alice"
-    app.game.result_flow._last_saved_pgn_path = None
-    app.game.result_flow._last_saved_result_tag = None
+
     assert app.game.result_flow.auto_save_pgn() is not None
+    assert '[White "badname"]' in _saved_text(app)
+
+
+def test_write_pgn_atomic_still_degrades_on_an_unencodable_body(tmp_path, monkeypatch):
+    """The widened `except (OSError, UnicodeError)` is the backstop under the
+    sanitizers: driven directly with text no codec can emit, the writer reports
+    failure instead of taking down the frame, and leaves no partial file."""
+    app = _online_app(tmp_path, monkeypatch)
+    _land_capture_mate(app)
+    app.coordinator._handle_online_result({"reason": "checkmate", "winner_color": "white"})
+    _settle(app)
+    target = tmp_path / "unencodable.pgn"
+
+    assert app.game.result_flow._write_pgn_atomic(str(target), "bad\udce9body") == "hard_failure"
+    assert not target.exists()
+    assert not list(tmp_path.glob(".*.tmp")), "the partial tmp file is cleaned up"
 
 
 def test_startup_toasts_when_stored_nickname_needs_sanitizing(tmp_path, monkeypatch):

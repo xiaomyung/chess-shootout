@@ -2,7 +2,7 @@
 online.py) that both the authoritative server and the client build on: the single
 challenge_from() both sides render/adjudicate from, server-secret selection,
 value_diff parity, the full-RTT + ms-quantized shot adjudication, the shared human
-floor applied to BOTH kinds, the 5s deadline as a hard ceiling, and the rtt-credit
+floor applied to every kind, the 5s deadline as a hard ceiling, and the rtt-credit
 session-min/cap policy. These are the security-critical primitives, so each property
 is pinned independently.
 """
@@ -12,6 +12,10 @@ import pytest
 from chessshootout.backend.pieces import PIECE_VALUES, PieceType
 from chessshootout.skillcheck import online
 from chessshootout.skillcheck.aim import AimChallenge
+from chessshootout.skillcheck.combo import (
+    COMBO_MIN_INTER_PRESS_MS, COMBO_SERVER_MIN_INTER_PRESS_MS, ComboChallenge)
+from chessshootout.skillcheck.mole import (
+    MOLE_MAX_WHIFFS, MOLE_MIN_INTER_SHOT_MS, MoleChallenge)
 from chessshootout.skillcheck.types import SkillCheckKind, TriggerFacts
 from chessshootout.skillcheck import wheel
 from chessshootout.skillcheck.wheel import WheelChallenge, period_for_diff
@@ -19,7 +23,10 @@ from tests.helpers import BLACK, K, P, Q, WHITE, make_backend, piece, sq
 
 WHEEL = SkillCheckKind.WHEEL
 AIM = SkillCheckKind.AIM
+WHACK = SkillCheckKind.WHACK
+COMBO = SkillCheckKind.COMBO
 NONE = SkillCheckKind.NONE
+FIRE_KINDS = (WHEEL, AIM, WHACK, COMBO)
 
 
 def test_challenge_from_wheel_uses_value_diff_scaled_period():
@@ -98,14 +105,14 @@ def test_select_kind_is_deterministic_for_a_secret():
     backend = _qxp()
     a = online.select_kind("secret", 0, backend, sq(4, 3), sq(3, 3), set())
     b = online.select_kind("secret", 0, backend, sq(4, 3), sq(3, 3), set())
-    assert a == b and a in (WHEEL, AIM)
+    assert a == b and a in FIRE_KINDS
 
 
 def test_select_kind_differs_by_secret():
     backend = _qxp()
     kinds = {online.select_kind("k{}".format(i), 0, backend, sq(4, 3), sq(3, 3), set())
-             for i in range(40)}
-    assert kinds == {WHEEL, AIM}, "different secrets sweep both capture outcomes"
+             for i in range(120)}
+    assert kinds == set(FIRE_KINDS), "different secrets sweep every capture outcome"
 
 
 def test_select_kind_varies_with_ply_index():
@@ -114,8 +121,8 @@ def test_select_kind_varies_with_ply_index():
     # collapse this to a single constant kind for the whole game.
     backend = _qxp()
     kinds = {online.select_kind("s", p, backend, sq(4, 3), sq(3, 3), set())
-             for p in range(40)}
-    assert kinds == {WHEEL, AIM}, "the ply perturbs the roll -- both kinds appear over a game"
+             for p in range(120)}
+    assert kinds == set(FIRE_KINDS), "the ply perturbs the roll -- every kind appears over a game"
 
 
 def test_select_kind_unpredictable_without_the_secret():
@@ -124,7 +131,7 @@ def test_select_kind_unpredictable_without_the_secret():
     guesses = {online.select_kind("guess{}".format(i), 7, backend, sq(4, 3), sq(3, 3), set())
                for i in range(200)}
     assert len(guesses) > 1, "a client guessing the secret cannot pin the kind"
-    assert server in (WHEEL, AIM)
+    assert server in FIRE_KINDS
 
 
 def test_select_kind_locked_move_is_none():
@@ -267,7 +274,7 @@ def test_aim_piece_scale_no_crash_on_negative_elapsed():
     (20, 2000.0),      # 20s game: 10% = 2s
     (0, 5000.0),       # no clock -> the base deadline
 ])
-def test_skillcheck_deadline_ms_caps_at_min_base_tenth_and_ceiling(initial_seconds, expected):
+def test_skillcheck_deadline_ms_is_min_of_base_and_tenth_of_tc(initial_seconds, expected):
     assert online.skillcheck_deadline_ms(initial_seconds) == expected
 
 
@@ -287,3 +294,183 @@ def test_shot_past_the_capped_deadline_never_wins():
                         start_angle_deg=0.0)
     assert online.shot_wins(SkillCheckKind.WHEEL, ch, 3500, deadline_ms=3000.0) is False
     assert online.shot_wins(SkillCheckKind.WHEEL, ch, 3500) is True
+
+
+def test_challenge_from_whack_builds_a_mole_challenge_threading_all_params():
+    ch = online.challenge_from(WHACK, "s", value_diff=3, deadline_ms=3000.0, captured_value=5)
+    assert isinstance(ch, MoleChallenge)
+    assert ch == MoleChallenge.from_seed("s", 3, 3000.0, 5)
+    assert ch.deadline_ms == 3000.0
+
+
+def test_challenge_from_combo_builds_a_combo_challenge_threading_all_params():
+    ch = online.challenge_from(COMBO, "s", value_diff=3, deadline_ms=3000.0, captured_value=6)
+    assert isinstance(ch, ComboChallenge)
+    assert ch == ComboChallenge.from_seed("s", 3, 3000.0, 6)
+    assert ch.deadline_ms == 3000.0
+
+
+def test_challenge_from_wheel_and_aim_ignore_the_new_defaulted_params():
+    # regression: the new deadline_ms/captured_value must NOT leak into the wheel/aim
+    # branches. AIM's own from_seed default deadline is load-bearing geometry, so an
+    # old-style call and a new-style call passing explicit kwargs must build the SAME
+    # challenge -- byte-identical to the pre-change construction.
+    wheel_baseline = WheelChallenge.from_seed("seed-x", period_ms=period_for_diff(7))
+    aim_baseline = AimChallenge.from_seed("seed-x", 7)
+    assert online.challenge_from(WHEEL, "seed-x", 7) == wheel_baseline
+    assert online.challenge_from(WHEEL, "seed-x", 7, deadline_ms=1234.0,
+                                 captured_value=9) == wheel_baseline
+    assert online.challenge_from(AIM, "seed-x", 7) == aim_baseline
+    assert online.challenge_from(AIM, "seed-x", 7, deadline_ms=1234.0,
+                                 captured_value=9) == aim_baseline
+
+
+def _mole_and_holes():
+    ch = online.challenge_from(WHACK, "moleseed", value_diff=0, captured_value=3)
+    holes = tuple((row, 0) for row in range(ch.hole_count))
+    up_ms = next(e for e in range(120, 5000) if ch.pop_up_at(e) is not None)
+    idx = ch.pop_up_at(up_ms)
+    row, col = holes[ch.pops[idx].hole]
+    return ch, holes, up_ms, idx, (row + 0.5, col + 0.5)
+
+
+def test_shot_wins_whack_center_hit_inside_an_up_window():
+    ch, holes, up_ms, _idx, center = _mole_and_holes()
+    assert online.shot_wins(WHACK, ch, up_ms, target=center, hole_squares=holes) is True
+
+
+def test_shot_wins_whack_same_position_between_pops_is_a_miss():
+    ch, holes, _up, _idx, center = _mole_and_holes()
+    between = next(e for e in range(120, 5000) if ch.pop_up_at(e) is None)
+    assert online.shot_wins(WHACK, ch, between, target=center, hole_squares=holes) is False
+
+
+def test_shot_wins_whack_dedups_the_already_hit_pop():
+    ch, holes, up_ms, idx, center = _mole_and_holes()
+    assert online.shot_wins(WHACK, ch, up_ms, target=center, hole_squares=holes,
+                            last_hit_pop=idx) is False
+
+
+def test_shot_wins_whack_needs_both_target_and_hole_squares():
+    ch, holes, up_ms, _idx, center = _mole_and_holes()
+    assert online.shot_wins(WHACK, ch, up_ms, hole_squares=holes) is False
+    assert online.shot_wins(WHACK, ch, up_ms, target=center) is False
+
+
+def test_shot_wins_whack_respects_the_shared_floor_and_deadline():
+    ch, holes, _up, _idx, center = _mole_and_holes()
+    late = int(online.SKILLCHECK_DEADLINE_MS) + 1
+    assert online.shot_wins(WHACK, ch, 100, target=center, hole_squares=holes) is False
+    assert online.shot_wins(WHACK, ch, late, target=center, hole_squares=holes) is False
+
+
+def _combo():
+    return online.challenge_from(COMBO, "comboseed", value_diff=0, captured_value=3)
+
+
+def test_shot_wins_combo_correct_wrong_and_missing_direction():
+    ch = _combo()
+    first = ch.prompts[0]
+    wrong = next(d for d in ("up", "down", "left", "right") if d != first)
+    assert online.shot_wins(COMBO, ch, 200, progress=0, direction=first) is True
+    assert online.shot_wins(COMBO, ch, 200, progress=0, direction=wrong) is False
+    assert online.shot_wins(COMBO, ch, 200, progress=0, direction=None) is False
+
+
+def test_shot_wins_combo_respects_the_shared_floor_and_deadline():
+    ch = _combo()
+    first = ch.prompts[0]
+    late = int(online.SKILLCHECK_DEADLINE_MS) + 1
+    assert online.shot_wins(COMBO, ch, 100, progress=0, direction=first) is False
+    assert online.shot_wins(COMBO, ch, late, progress=0, direction=first) is False
+
+
+def test_shot_wins_falls_through_to_a_loss_for_a_kind_it_cannot_adjudicate():
+    # The trailing `return False` past the COMBO branch is the last line of
+    # defence on the server's resolve path: a shot arriving under a kind with no
+    # adjudicator -- NONE is what select_kind hands back for a locked or
+    # non-triggering move -- must be a loss, not a fall-through win, no matter
+    # which payload rides along with it.
+    ch = _always_arc()
+    late = int(online.SKILLCHECK_DEADLINE_MS) - 1
+    assert online.shot_wins(NONE, ch, 300) is False
+    assert online.shot_wins(NONE, ch, late) is False
+    assert online.shot_wins(NONE, ch, 300, progress=0, direction="up") is False
+    assert online.shot_wins(NONE, ch, 300, target=(0.5, 0.5),
+                            hole_squares=((0, 0),), last_hit_pop=-1) is False
+
+
+def test_hits_required_dispatches_by_kind():
+    assert online.hits_required(WHEEL, _always_arc()) == 1
+    assert online.hits_required(AIM, AimChallenge.from_seed("a", 0)) == 1
+    mole = online.challenge_from(WHACK, "s", 0, captured_value=3)
+    assert online.hits_required(WHACK, mole) == mole.hits_required
+    combo = online.challenge_from(COMBO, "s", 0, captured_value=3)
+    assert online.hits_required(COMBO, combo) == combo.prompt_count
+
+
+def test_check_expired_wheel_is_always_false():
+    assert online.check_expired(WHEEL, _always_arc(), 10000) is False
+
+
+def test_check_expired_aim_matches_aim_expired():
+    aim = AimChallenge.from_seed("a", 0)
+    for elapsed, miss in [(0, 0), (4000, 0), (10000, 3)]:
+        assert online.check_expired(AIM, aim, elapsed, miss) \
+            == online.aim_expired(aim, elapsed, miss)
+
+
+def test_check_expired_whack_flips_when_quota_becomes_unreachable():
+    mole = online.challenge_from(WHACK, "s", 0, captured_value=3)
+    assert online.check_expired(WHACK, mole, 0.0, progress=0) is False
+    late = mole.pops[-1].t_down_ms + 200.0
+    assert online.check_expired(WHACK, mole, late, progress=0) is True
+
+
+def test_check_expired_whack_flips_at_max_whiffs_even_mid_schedule():
+    # the whiff cap is the second, independent death condition: the schedule can
+    # still be perfectly winnable (quota reachable, every pop ahead) and the check
+    # is dead anyway once three misses are spent. This is what closes the
+    # spam-every-hole exploit at every server surface through the one predicate.
+    mole_ch = online.challenge_from(WHACK, "s", 0, captured_value=3)
+    early = mole_ch.pops[0].t_up_ms
+    assert mole_ch.quota_unreachable(early, 0) is False, "the schedule alone is winnable"
+    assert online.check_expired(WHACK, mole_ch, early,
+                                miss_count=MOLE_MAX_WHIFFS - 1, progress=0) is False
+    assert online.check_expired(WHACK, mole_ch, early,
+                                miss_count=MOLE_MAX_WHIFFS, progress=0) is True
+    assert online.check_expired(WHACK, mole_ch, early,
+                                miss_count=MOLE_MAX_WHIFFS + 2, progress=0) is True
+
+
+def test_check_expired_whack_either_death_arm_suffices():
+    mole_ch = online.challenge_from(WHACK, "s", 0, captured_value=3)
+    late = mole_ch.pops[-1].t_down_ms + 200.0
+    assert online.check_expired(WHACK, mole_ch, late, miss_count=0, progress=0) is True, \
+        "quota death still fires with zero whiffs"
+    assert online.check_expired(WHACK, mole_ch, 0.0, miss_count=MOLE_MAX_WHIFFS,
+                                progress=0) is True, \
+        "whiff death still fires with the whole schedule ahead"
+    assert online.check_expired(WHACK, mole_ch, 0.0, miss_count=0, progress=0) is False
+
+
+def test_check_expired_combo_flips_at_max_wrongs():
+    combo = online.challenge_from(COMBO, "s", 0, captured_value=3)
+    assert online.check_expired(COMBO, combo, 200, miss_count=2) is False
+    assert online.check_expired(COMBO, combo, 200, miss_count=3) is True
+
+
+def test_min_inter_input_ms_by_kind():
+    assert online.min_inter_input_ms(WHEEL) == 0.0
+    assert online.min_inter_input_ms(AIM) == 0.0
+    assert online.min_inter_input_ms(WHACK) == MOLE_MIN_INTER_SHOT_MS
+    assert online.min_inter_input_ms(COMBO) == COMBO_SERVER_MIN_INTER_PRESS_MS
+
+
+def test_server_press_gate_sits_below_the_client_press_gap():
+    # Both gates measure the same inter-press spacing on different clocks. The
+    # elapsed clamp lets network jitter compress a legit gap by up to
+    # SKILLCHECK_LAG_BOUND_MS on the server side, so a server gate at or above
+    # the client's own minimum silently drops presses the client accepted and
+    # desyncs progress. The server threshold must stay strictly below.
+    assert COMBO_SERVER_MIN_INTER_PRESS_MS < COMBO_MIN_INTER_PRESS_MS

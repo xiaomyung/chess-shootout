@@ -24,12 +24,28 @@ chmod +x "$APPDIR/AppRun"
 cp packaging/chess.desktop "$APPDIR/chess-shootout.desktop"
 cp assets/icons/icon.png "$APPDIR/chess-shootout.png"
 
-TOOL="$BUILD_ROOT/appimagetool-x86_64.AppImage"
-if [ ! -x "$TOOL" ]; then
-    curl -fsSL -o "$TOOL" \
-        https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage
-    chmod +x "$TOOL"
+# The tool is downloaded and executed, so it is pinned to a release and checked
+# against a recorded digest - never a rolling build, never an unverified binary.
+APPIMAGETOOL_VERSION="1.9.1"
+APPIMAGETOOL_SHA256="ed4ce84f0d9caff66f50bcca6ff6f35aae54ce8135408b3fa33abfc3cb384eb0"
+APPIMAGETOOL_URL="https://github.com/AppImage/appimagetool/releases/download/${APPIMAGETOOL_VERSION}/appimagetool-x86_64.AppImage"
+TOOL="$BUILD_ROOT/appimagetool-${APPIMAGETOOL_VERSION}-x86_64.AppImage"
+
+tool_verified() {
+    [ -f "$TOOL" ] && printf '%s  %s\n' "$APPIMAGETOOL_SHA256" "$TOOL" \
+        | sha256sum --check --status
+}
+
+if ! tool_verified; then
+    rm -f "$TOOL"
+    curl -fsSL -o "$TOOL" "$APPIMAGETOOL_URL"
+    if ! tool_verified; then
+        echo "appimagetool $APPIMAGETOOL_VERSION failed checksum - refusing to run it" >&2
+        rm -f "$TOOL"
+        exit 1
+    fi
 fi
+chmod +x "$TOOL"
 
 # --appimage-extract-and-run avoids needing libfuse2 to run the tool itself.
 ARCH=x86_64 "$TOOL" --appimage-extract-and-run "$APPDIR" "$BUILD_ROOT/ChessShootout-x86_64.AppImage"

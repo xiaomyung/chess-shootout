@@ -118,7 +118,7 @@ def test_capture_fires_a_spread_then_resolves_on_lead_pellet_impact():
     em.capture(now_ms=1000, attacker_type="queen", attacker_surface=_surf(),
                victim_surface=_surf(), from_sq=Square(7, 3), victim_sq=Square(0, 3),
                to_sq=Square(0, 3), cell_size=80, power="hard",
-               on_fire=lambda: fired.append(1), on_slide=lambda: slid.append(1))
+               on_fire=lambda advance_only: fired.append(1), on_slide=lambda: slid.append(1))
     assert len(em.captures) == 1
     c = em.captures[0]
     assert c["fire_at"] == 1000 + DRAW_MS + AIM_MS
@@ -263,7 +263,7 @@ def test_miss_fires_a_spread_then_whiffs_without_a_kill():
     em = _em()
     fired = []
     em.miss(now_ms=1000, attacker_type="queen", from_sq=Square(7, 3),
-            victim_sq=Square(0, 3), cell_size=80, on_fire=lambda: fired.append(1))
+            victim_sq=Square(0, 3), cell_size=80, on_fire=lambda advance_only: fired.append(1))
     assert len(em.captures) == 1
     c = em.captures[0]
     assert c["fire_at"] == 1000 + DRAW_MS + AIM_MS
@@ -999,7 +999,8 @@ def test_register_kill_returns_the_announcer_key():
 def test_streak_label_table_matches_the_design():
     assert STREAK_LABELS == {2: "DOUBLE KILL", 3: "TRIPLE KILL", 4: "QUADRA KILL",
                              5: "RAMPAGE", 6: "UNSTOPPABLE", 7: "GODLIKE"}
-    assert HIT_WORDS == ("BLAM", "BOOM", "POW", "BANG", "HEADSHOT", "BODIED", "WASTED")
+    assert HIT_WORDS == ("BLAM", "BOOM", "POW", "BANG", "HEADSHOT", "BODIED", "WASTED",
+                         "REKT", "DELETED", "GOT EM")
 
 
 def test_callout_paints_pixels_and_replaces_rather_than_stacks():

@@ -130,7 +130,13 @@ class OnlineClient:
         if self._loop is None or not self._loop.is_running():
             self.state = "disconnected"
             return
-        asyncio.run_coroutine_threadsafe(self._cancel_async(), self._loop)
+        cancel = self._cancel_async()
+        try:
+            asyncio.run_coroutine_threadsafe(cancel, self._loop)
+        except RuntimeError:
+            log.debug("cancel dropped: loop already closed")
+            cancel.close()
+            self.state = "disconnected"
 
     async def _cancel_async(self):
         if self._in_queue and self._room_id and self._session_token:
@@ -196,8 +202,10 @@ class OnlineClient:
         self._last_ping_sent_at = time.monotonic()
         self._enqueue("send_ping", ply)
 
-    def send_skill_check_shot(self, client_elapsed_ms):
-        self._enqueue("send_skill_check_shot", client_elapsed_ms)
+    def send_skill_check_shot(self, client_elapsed_ms, direction=None,
+                              target_row=None, target_col=None):
+        self._enqueue("send_skill_check_shot", client_elapsed_ms, direction,
+                      target_row, target_col)
 
     def send_annotations_state(self, sharing, highlights, arrows):
         self._enqueue("send_annotations_state", sharing, highlights, arrows)
@@ -489,6 +497,11 @@ class OnlineClient:
                 if send is None:
                     log.warning("unknown ws send method=%s", method)
                     continue
-                await send(*args)
+                try:
+                    await send(*args)
+                except (WsConnectionClosed, asyncio.CancelledError):
+                    raise
+                except Exception as exc:
+                    log.warning("ws send failed method=%s: %s", method, exc)
         except (WsConnectionClosed, asyncio.CancelledError):
             pass

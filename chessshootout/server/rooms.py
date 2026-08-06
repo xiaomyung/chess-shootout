@@ -10,7 +10,7 @@ from uuid import uuid4
 from chessshootout.backend.backend import Backend
 from chessshootout.backend.utils import Square
 from chessshootout.server.protocol import GRACE_SECONDS, HEARTBEAT_TIMEOUT_SECONDS
-from chessshootout.skillcheck.online import SKILLCHECK_DEADLINE_MS
+from chessshootout.skillcheck import online
 from chessshootout.skillcheck.types import SkillCheckKind
 
 
@@ -18,6 +18,7 @@ REMATCH_IDLE_SECONDS = 300.0
 REMATCH_ABSOLUTE_CAP_SECONDS = 900.0
 POST_GAME_DISCONNECT_GRACE = GRACE_SECONDS
 PAIRING_WAIT_SECONDS = 30
+QUEUE_ABANDON_SECONDS = 120.0
 
 
 class AlreadyInGameError(Exception):
@@ -58,11 +59,31 @@ class PendingSkillCheck:
     value_diff: int
     start_ms: float
     expires_at_ms: float
-    deadline_ms: float = SKILLCHECK_DEADLINE_MS
+    deadline_ms: float = online.SKILLCHECK_DEADLINE_MS
     miss_count: int = 0
+    captured_value: int = 0
+    progress: int = 0
+    last_hit_pop: int = -1
+    last_input_ms: float = -1.0
+    holes: tuple = field(default=(), repr=False, compare=False)
+    _challenge: object = field(default=None, repr=False, compare=False)
+
+    @property
+    def challenge(self):
+        if self._challenge is None:
+            self._challenge = online.challenge_from(
+                self.kind, self.seed, self.value_diff, self.deadline_ms,
+                self.captured_value)
+        return self._challenge
 
     def is_expired(self, now_ms):
         return now_ms > self.expires_at_ms
+
+    def is_dead(self, now_ms):
+        if self.is_expired(now_ms):
+            return True
+        return online.check_expired(self.kind, self.challenge, now_ms - self.start_ms,
+                                    self.miss_count, self.progress, self.last_hit_pop)
 
 
 @dataclass
@@ -201,7 +222,8 @@ class RoomManager:
             tc = (time_minutes, increment_seconds)
             queue = self._queue[tc]
             if queue:
-                room = queue.pop(0)
+                room = queue[0]
+                self._dequeue(room)
                 first_slot = room.white or room.black
                 first_pref = first_slot.side_preference
                 second_color, first_color_resolved = self._resolve_colors(
@@ -278,8 +300,7 @@ class RoomManager:
             slot = room.white or room.black
             if slot is None or slot.session_token != session_token:
                 raise InvalidTokenError()
-            tc = (room.time_minutes, room.increment_seconds)
-            self._queue[tc].remove(room)
+            self._dequeue(room)
             self._uuid_to_room.pop(slot.client_uuid, None)
 
     def _find_in_queue(self, room_id):
@@ -288,6 +309,29 @@ class RoomManager:
                 if room.room_id == room_id:
                     return room
         return None
+
+    def _dequeue(self, room):
+        tc = (room.time_minutes, room.increment_seconds)
+        queue = self._queue.get(tc)
+        if queue is None or room not in queue:
+            return False
+        queue.remove(room)
+        if not queue:
+            del self._queue[tc]
+        return True
+
+    def stale_queued_rooms(self, ttl_seconds=QUEUE_ABANDON_SECONDS):
+        cutoff = self._now() - ttl_seconds
+        return [room for queue in self._queue.values() for room in queue
+                if room.created_at <= cutoff]
+
+    def drop_queued_room(self, room):
+        if not self._dequeue(room):
+            return False
+        for slot in (room.white, room.black):
+            if slot is not None:
+                self._uuid_to_room.pop(slot.client_uuid, None)
+        return True
 
     def mark_connected(self, room_id, color):
         room = self.get(room_id)
@@ -342,6 +386,12 @@ class RoomManager:
             return None
         return room, color
 
+    def queued_room_for(self, client_uuid):
+        room_id = self._uuid_to_room.get(client_uuid)
+        if room_id is None or room_id in self._active:
+            return None
+        return self._find_in_queue(room_id)
+
     def release_for_new_game(self, client_uuid):
         room_id = self._uuid_to_room.get(client_uuid)
         if room_id is None:
@@ -351,8 +401,7 @@ class RoomManager:
             return
         queued = self._find_in_queue(room_id)
         if queued is not None:
-            tc = (queued.time_minutes, queued.increment_seconds)
-            self._queue[tc].remove(queued)
+            self._dequeue(queued)
         self._uuid_to_room.pop(client_uuid, None)
 
     def grace_expired_rooms(self):

@@ -126,6 +126,12 @@ class SoundManager:
     def _play(self, slot):
         self._play_random(self._slot_pool(slot))
 
+    def _play_indexed(self, slot, index):
+        pool = self._slot_pool(slot)
+        if not self.enabled or not pool:
+            return
+        self._play_with_master(pool[max(0, min(int(index), len(pool) - 1))])
+
     def play_move(self, piece_type=None):
         if piece_type is None:
             return
@@ -260,6 +266,48 @@ class SoundManager:
 
     def play_aim_beep(self):
         self._play("aim_beep")
+
+    def play_mole_fall(self):
+        self._play("mole_fall")
+
+    def play_mole_telegraph(self):
+        self._play("mole_telegraph")
+
+    def play_mole_pop(self):
+        self._play("mole_pop")
+
+    def play_mole_heal(self):
+        self._play("mole_heal")
+
+    def play_whack_hit(self, index=0):
+        self._play_indexed("whack_hit", index)
+
+    def play_whack_kill(self):
+        self._play("whack_kill")
+
+    def play_whack_dry(self):
+        self._play("whack_dry")
+
+    def play_mole_taunt(self):
+        self._play("mole_taunt")
+
+    def play_whiff_ricochet(self):
+        self._play("whiff_ricochet")
+
+    def play_combo_hit(self, index=0):
+        self._play_indexed("combo_hit", index)
+
+    def play_combo_wrong(self):
+        self._play("combo_wrong")
+
+    def play_combo_complete(self):
+        self._play("combo_complete")
+
+    def play_combo_fail(self):
+        self._play("combo_fail")
+
+    def play_combo_streak(self):
+        self._play("combo_streak")
 
     def update_heartbeat(self, fraction_remaining, paused):
         if not self.enabled:

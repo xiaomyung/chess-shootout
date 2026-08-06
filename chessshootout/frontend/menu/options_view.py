@@ -81,6 +81,9 @@ class OptionsView(MenuView):
     def handle_key(self, event):
         return self.body.handle_key(event)
 
+    def escape(self):
+        return self.body.cancel_focused_edit()
+
     def active_scrollable(self, pos=None):
         return self.body
 

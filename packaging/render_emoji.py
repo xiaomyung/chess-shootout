@@ -36,13 +36,14 @@ BASE_SIZE = 128
 FONT_PATH = REPO_ROOT / "packaging" / "emoji" / "NotoColorEmoji.ttf"
 
 # Every emoji the client passes to emoji_surface/blit_emoji that is NOT a flag.
-# Keep in sync with the call sites (tests/test_emoji.py guards against drift):
+# Keep in sync with the call sites (tests/frontend/test_emoji.py guards against drift):
 #   match_found ROUND  -> "⚔️"
 #   play hero side pick -> "\U0001f3b2"
 #   directory browser  -> "\U0001f4c1" "\U0001f4c4"
 #   confirm modal      -> "\U0001f4c1" "\U0001f3f3️" "\U0001f91d"
 #   resign effect      -> "\U0001f3f3️"
 #   online banners     -> "\U0001f91d" "↩️"
+#   combo confetti     -> "\U0001f389" "\U00002728" "\U0001f525"
 UI_EMOJI = (
     "⚔️",   # crossed swords
     "🎲",   # game die
@@ -51,6 +52,9 @@ UI_EMOJI = (
     "🏳️",   # white flag
     "🤝",   # handshake
     "↩️",   # left-hook arrow
+    "🎉",   # party popper (combo confetti)
+    "✨",   # sparkles (combo confetti)
+    "🔥",   # fire (combo confetti)
 )
 
 

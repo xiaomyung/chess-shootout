@@ -47,10 +47,10 @@ Sound effects are CC0 unless listed under **Attribution required** below.
 
 ### Public domain (CC0 -- credited as a courtesy, not required)
 
-- **Audio packs (Interface / UI / Impact / Digital / Sci-Fi / Casino / Voiceover)** by Kenney -- https://kenney.nl/assets/category:Audio (piece moves, skill-check cues, UI clicks, slider ticks, ray-gun lasers, you-win callouts, rail caps/sections/volume, signal chips, quick-chat receipt, focus toggle)
+- **Audio packs (Interface / UI / Impact / Digital / Sci-Fi / Casino / Voiceover)** by Kenney -- https://kenney.nl/assets/category:Audio (piece moves, skill-check cues, UI clicks, slider ticks, ray-gun lasers, you-win callouts, rail caps/sections/volume, signal chips, quick-chat receipt, focus toggle, whack-a-mole pops/telegraph/kill bell, heal-scanner bed, combo press ladder, capture-fall cue, taunt callout)
 - **Casual Game Sounds** by Dustyroom -- https://dustyroom.com/free-casual-game-sounds/ (UI / feedback one-shots)
 - **The Free Firearm Sound Library** by Ben Jaszczak, Brian Nelson, Kevin Heras, Matthew Nanney (submitted by bart) -- https://opengameart.org/content/the-free-firearm-sound-library (pistol / cannon / rifle capture shots)
-- **Bullet / Gun SFX (CC0)** by Signature Sounds -- https://signaturesounds.org/store/p/bulletgun-sfx-cc0 (foley / reload layers / give-time ratchet)
+- **Bullet / Gun SFX (CC0)** by Signature Sounds -- https://signaturesounds.org/store/p/bulletgun-sfx-cc0 (foley / reload layers / give-time ratchet, whack dry-fire + ricochet)
 - **Door Open, Door Close Set** by qubodup (Iwan Gabovitch) -- https://opengameart.org/content/door-open-door-close-set (castle (open+close))
 - **Heartbeat Sounds** by bart -- https://opengameart.org/content/heartbeat-sounds (low-time heartbeat loops)
 - **metal pipe fall** by thenotcheeseman -- https://freesound.org/s/679206/ (checkmate)
@@ -60,4 +60,8 @@ Sound effects are CC0 unless listed under **Attribution required** below.
 - **Video Game Character Grunt** by iampatrick -- https://freesound.org/s/839522/ (capture hit oof)
 - **Grunt2 - Death Pain** by tonsil5 -- https://freesound.org/s/416838/ (capture hit oof)
 - **Girl Taking Damage** by MadamVicious (mvVoiceActing) -- https://freesound.org/s/218190/ (queen capture oof (female))
+- **Record Scratch #6** by musicvision31 -- https://freesound.org/s/431779/ (combo wrong-press scratch)
+- **Airhorn** by jacksonacademyashmore -- https://freesound.org/s/414208/ (combo completion airhorn)
+- **Bruh Sound Effect #1** by Autellaem -- https://freesound.org/s/534387/ (combo fail sting)
+- **Basic Fire whoosh** by LookIMadeAThing -- https://freesound.org/s/260554/ (combo streak ignition whoosh)
 

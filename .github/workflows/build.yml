@@ -9,17 +9,25 @@ on:
 
 jobs:
   build:
+    permissions:
+      contents: read
     strategy:
       fail-fast: false
       matrix:
         os: [windows-latest, macos-latest, ubuntu-22.04]
     runs-on: ${{ matrix.os }}
+    env:
+      UV_PYTHON_DOWNLOADS: never
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: "3.12"
-      - run: pip install -e ".[build]"
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          version: "0.11.19"
+          enable-cache: true
+      - run: uv sync --frozen --extra build
 
       - name: Stamp version (posix)
         if: runner.os != 'Windows'
@@ -39,11 +47,11 @@ jobs:
         run: |
           $env:CHESS_VERSION = $env:VER
           $env:CHESS_ONEFILE = "1"
-          pyinstaller --noconfirm chess.spec
+          uv run --no-sync pyinstaller --noconfirm chess.spec
           New-Item -ItemType Directory -Force -Path out | Out-Null
           Move-Item -Force dist/ChessShootout.exe "out/ChessShootout-$env:VER-Portable.exe"
           Remove-Item Env:\CHESS_ONEFILE
-          pyinstaller --noconfirm chess.spec
+          uv run --no-sync pyinstaller --noconfirm chess.spec
           choco install innosetup -y --no-progress
           & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" "/DAppVer=$env:VER" packaging\chess.iss
 
@@ -51,7 +59,7 @@ jobs:
         if: matrix.os == 'macos-latest'
         run: |
           export CHESS_VERSION="$VER"
-          pyinstaller --noconfirm chess.spec
+          uv run --no-sync pyinstaller --noconfirm chess.spec
           mkdir -p out
           hdiutil create -volname "Chess Shootout" -srcfolder dist/ChessShootout.app -ov -format UDZO "out/ChessShootout-$VER.dmg"
 
@@ -59,12 +67,12 @@ jobs:
         if: matrix.os == 'ubuntu-22.04'
         run: |
           export CHESS_VERSION="$VER"
-          pyinstaller --noconfirm chess.spec
+          uv run --no-sync pyinstaller --noconfirm chess.spec
           packaging/build_appimage.sh
           mkdir -p out
           mv ChessShootout-x86_64.AppImage "out/ChessShootout-$VER-x86_64.AppImage"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: dist-${{ matrix.os }}
           path: out/

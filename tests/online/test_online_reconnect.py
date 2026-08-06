@@ -202,6 +202,88 @@ def test_on_reconnect_active_game_no_pending_is_noop(app):
     assert app.coordinator._pending_reconnect is None
 
 
+@pytest.mark.parametrize("mutate", [
+    pytest.param(lambda p: p.update({"move_history": [{"san": "e4"}, {"san": "zzz"}],
+                                     "fen": "not a fen"}),
+                 id="illegal_san_falls_back_to_a_malformed_fen"),
+    pytest.param(lambda p: p.update({"move_history": [{"note": "no san here"}]}),
+                 id="move_entry_without_a_san"),
+    pytest.param(lambda p: p.update({"move_history": "e4e5"}),
+                 id="move_history_is_not_a_list"),
+    pytest.param(lambda p: p.update({"clock": "nope"}),
+                 id="clock_is_not_a_mapping"),
+])
+def test_reconnect_adoption_survives_a_hostile_resume_payload(
+        app, monkeypatch, tmp_path, caplog, mutate):
+    """Every inbound ws event runs inside the drain's try/except, but Reconnect
+    adopts a /resume payload straight from a modal callback — outside it. The FEN
+    fallback in on_resume raises on malformed input, so one bad payload took the
+    whole app down from a button click. Adoption now runs through the same guard:
+    logged, toasted, and the session is dropped back to the menu."""
+    monkeypatch.setenv("CHESS_DATA_DIR", str(tmp_path))
+    monkeypatch.setattr("chessshootout.online.client.OnlineClient.reconnect_to_existing",
+                        lambda self, *a, **kw: None)
+    hostile = _resume_payload()
+    mutate(hostile)
+    monkeypatch.setattr("chessshootout.frontend.online_coordinator.fetch_resume",
+                        lambda *a, **kw: hostile)
+    app.coordinator._pending_reconnect = {
+        "addr": "localhost:8000", "room_id": "room-h", "session_token": "tok",
+    }
+
+    with caplog.at_level(logging.ERROR, logger="chess.frontend"):
+        app.coordinator._on_reconnect_active_game()
+
+    assert app.screen is app.menu
+    assert app.coordinator.client is None
+    assert app.toast.is_visible()
+    assert any("reconnect adoption failed" in r.getMessage() for r in caplog.records)
+
+
+def test_on_resume_never_replays_more_than_the_ply_cap(app, monkeypatch):
+    """The replay loop is driven by a server-supplied list and only breaks on an
+    illegal SAN. A hostile server that sends legal moves forever would spin
+    apply_san until the app dies, so the replay is capped far above any real game
+    (the longest legal game is a few hundred plies)."""
+    from chessshootout.frontend.screens.game import RESUME_MAX_PLIES
+
+    class _Applied:
+        legal = True
+
+    replayed = []
+    monkeypatch.setattr(app.game.match, "apply_san",
+                        lambda san: replayed.append(san) or _Applied())
+    app.game.variant = "online"
+    app.game._time_control = (300, 0)
+
+    app.game.on_resume(_resume_payload(move_history=["e4"] * (RESUME_MAX_PLIES * 4)))
+
+    assert len(replayed) == RESUME_MAX_PLIES
+
+
+def test_reconnect_adoption_clips_an_oversize_opponent_name(app, monkeypatch):
+    """Names are server-supplied and get font-rendered in full before the strip
+    clips them, so a megabyte-long name is a multi-gigabyte surface."""
+    from chessshootout.infra.env import _NICKNAME_MAX_LEN
+
+    monkeypatch.setattr("chessshootout.online.client.OnlineClient.reconnect_to_existing",
+                        lambda self, *a, **kw: None)
+    payload = _resume_payload()
+    payload["black_name"] = "b" * 500_000
+    monkeypatch.setattr("chessshootout.frontend.online_coordinator.fetch_resume",
+                        lambda *a, **kw: payload)
+    app.coordinator._pending_reconnect = {
+        "addr": "localhost:8000", "room_id": "room-n", "session_token": "tok",
+    }
+
+    app.coordinator._on_reconnect_active_game()
+
+    assert app.game.black_name == "b" * _NICKNAME_MAX_LEN
+    assert app.game.white_name == "alice"
+    assert set(app.game.result_flow.series_scores) == {"alice", "b" * _NICKNAME_MAX_LEN}
+    app.draw_frame()
+
+
 def test_async_main_resume_does_not_queue_legacy_events():
     """The async loop only opens the WS on reconnect; it must not queue a
     duplicate game_start/game_resumed pair (the original reset-to-initial race)."""

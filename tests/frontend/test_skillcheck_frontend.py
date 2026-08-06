@@ -21,12 +21,13 @@ from chessshootout.backend.pieces import Piece, PieceType, PieceColor
 from chessshootout.backend.utils import Square
 from chessshootout.domain.premoves import Premove
 from chessshootout.frontend.frontend import Frontend
+from chessshootout.frontend.game.skillcheck_session import CheckContext
 from chessshootout.frontend.skillcheck.aim_view import (
     AimController, AIM_CROSS_LW_FRAC, AIM_RING_LW_FRAC, AIM_RESULT_HOLD_MS,
     AIM_MISS_FLASH_MS, AIM_SHOT_HOLD_MS, _spotlight_surface)
 from chessshootout.frontend.skillcheck.controller import SKILLCHECK_RESULT_HOLD_MS
 from chessshootout.frontend.skillcheck.overlay import SkillCheckOverlay
-from chessshootout.frontend.skillcheck.registry import build_controller
+from chessshootout.frontend.skillcheck.registry import CheckSpec, build_controller
 from chessshootout.frontend.skillcheck.wheel_view import (
     WheelController, WHEEL_RESULT_HOLD_MS, _clamp_bubble_left, _needle_polygon)
 from chessshootout.frontend.visual.colors import Colors
@@ -261,16 +262,18 @@ def test_overlay_cancel_clears():
 
 
 def test_registry_builds_wheel_controller():
-    ctrl = build_controller(SkillCheckKind.WHEEL, seed="s", cell_rect=pg.Rect(0, 0, 80, 80),
-                            now_ms=0, deadline_ms=5000)
+    ctrl = build_controller(
+        SkillCheckKind.WHEEL,
+        CheckSpec(seed="s", cell_rect=pg.Rect(0, 0, 80, 80), now_ms=0, deadline_ms=5000))
     assert isinstance(ctrl, WheelController)
 
 
 def test_registry_builds_aim_controller():
-    ctrl = build_controller(SkillCheckKind.AIM, seed="s", cell_rect=pg.Rect(0, 0, 80, 80),
-                            now_ms=0, deadline_ms=5000, value_diff=4,
-                            victim_surface=pg.Surface((80, 80), pg.SRCALPHA),
-                            board_rect=pg.Rect(0, 0, 640, 640))
+    ctrl = build_controller(
+        SkillCheckKind.AIM,
+        CheckSpec(seed="s", cell_rect=pg.Rect(0, 0, 80, 80), now_ms=0, deadline_ms=5000,
+                  value_diff=4, victim_surface=pg.Surface((80, 80), pg.SRCALPHA),
+                  board_rect=pg.Rect(0, 0, 640, 640)))
     assert isinstance(ctrl, AimController)
 
 
@@ -730,15 +733,18 @@ def test_registry_threads_passive_into_both_controllers():
     """passive=True must reach the controller through the registry, not just be stored:
     a passive controller swallows no input and never self-resolves past its deadline. These
     consequences are reachable only if the flag was actually wired into build_controller."""
-    w = build_controller(SkillCheckKind.WHEEL, seed="s", cell_rect=pg.Rect(0, 0, 80, 80),
-                         now_ms=0, deadline_ms=5000, passive=True)
+    w = build_controller(
+        SkillCheckKind.WHEEL,
+        CheckSpec(seed="s", cell_rect=pg.Rect(0, 0, 80, 80), now_ms=0, deadline_ms=5000,
+                  passive=True))
     assert w.handle_event(_tap()) is False, "a registry-built passive wheel ignores the tap"
     w.update(6000)
     assert w.landed is None and w.done is False, "and never self-fails at the deadline"
-    a = build_controller(SkillCheckKind.AIM, seed="s", cell_rect=pg.Rect(0, 0, 80, 80),
-                         now_ms=0, deadline_ms=5000, value_diff=4,
-                         victim_surface=pg.Surface((80, 80), pg.SRCALPHA),
-                         board_rect=pg.Rect(0, 0, 640, 640), passive=True)
+    a = build_controller(
+        SkillCheckKind.AIM,
+        CheckSpec(seed="s", cell_rect=pg.Rect(0, 0, 80, 80), now_ms=0, deadline_ms=5000,
+                  value_diff=4, victim_surface=pg.Surface((80, 80), pg.SRCALPHA),
+                  board_rect=pg.Rect(0, 0, 640, 640), passive=True))
     assert a.handle_event(_tap()) is False, "a registry-built passive aim ignores the tap"
     a.update(7000)
     assert a.landed is None and a.done is False, "only the server verdict resolves a spectated aim"
@@ -786,7 +792,8 @@ def test_won_skillcheck_applies_move():
     app = Frontend(1100, 800)
     _start_local(app)
     frm, to = _set_queen_takes_pawn(app)
-    app.game.skillcheck_session._on_skillcheck_done((frm, to), True)
+    app.game.skillcheck_session._on_skillcheck_done(
+        CheckContext(frm, to, None, SkillCheckKind.WHEEL), True)
     assert len(app.game.match.move_history) == 1
     assert app.game.match.piece_at(to).type == PieceType.QUEEN
 
@@ -795,7 +802,8 @@ def test_failed_skillcheck_locks_move():
     app = Frontend(1100, 800)
     _start_local(app)
     frm, to = _set_queen_takes_pawn(app)
-    app.game.skillcheck_session._on_skillcheck_done((frm, to), False)
+    app.game.skillcheck_session._on_skillcheck_done(
+        CheckContext(frm, to, None, SkillCheckKind.WHEEL), False)
     assert len(app.game.match.move_history) == 0
     assert app.game.skillcheck.is_locked(frm, to) is True
     assert app.game.skillcheck_session.skillcheck_gate(frm, to) is True
@@ -806,7 +814,8 @@ def test_failed_skillcheck_fires_the_miss_fx():
     app = Frontend(1100, 800)
     _start_local(app)
     frm, to = _set_queen_takes_pawn(app)
-    app.game.skillcheck_session._on_skillcheck_done((frm, to), False)
+    app.game.skillcheck_session._on_skillcheck_done(
+        CheckContext(frm, to, None, SkillCheckKind.WHEEL), False)
     fx = app.game.board.effects
     fired = any(c.get("miss") for c in fx.captures) or bool(fx.callouts)
     assert fired, "a failed skill-check fires the gun-and-miss FX"
@@ -818,7 +827,8 @@ def test_won_skillcheck_logs_resolved_with_kind_ply_and_outcome(caplog):
     _start_local(app)
     frm, to = _set_queen_takes_pawn(app)
     with caplog.at_level(logging.INFO, logger="chess.frontend"):
-        app.game.skillcheck_session._on_skillcheck_done((frm, to, None, SkillCheckKind.WHEEL), True)
+        app.game.skillcheck_session._on_skillcheck_done(
+            CheckContext(frm, to, None, SkillCheckKind.WHEEL), True)
     resolved = [r.getMessage() for r in caplog.records if "skillcheck resolved" in r.getMessage()]
     assert resolved, "a landed check must log its resolution"
     assert "kind=wheel" in resolved[0]
@@ -831,7 +841,8 @@ def test_failed_skillcheck_logs_resolved_and_the_move_lock(caplog):
     _start_local(app)
     frm, to = _set_queen_takes_pawn(app)
     with caplog.at_level(logging.INFO, logger="chess.frontend"):
-        app.game.skillcheck_session._on_skillcheck_done((frm, to, None, SkillCheckKind.AIM), False)
+        app.game.skillcheck_session._on_skillcheck_done(
+            CheckContext(frm, to, None, SkillCheckKind.AIM), False)
     messages = [r.getMessage() for r in caplog.records]
     resolved = [m for m in messages if "skillcheck resolved" in m]
     locked = [m for m in messages if "skillcheck move locked" in m]
@@ -1028,7 +1039,8 @@ def test_premove_chain_survives_a_won_skillcheck():
     app.game.board.try_apply_next_premove()
     assert app.game.skillcheck_overlay.is_active() is True
     assert app.game.board.premoves == [follow], "the rest of the chain survives the deferral"
-    app.game.skillcheck_session._on_skillcheck_done((frm, to), True)
+    app.game.skillcheck_session._on_skillcheck_done(
+        CheckContext(frm, to, None, SkillCheckKind.WHEEL), True)
     assert len(app.game.match.move_history) == 1, "the won move lands"
     assert app.game.board.premoves == [follow], "and the chain lives on for the next turn"
 
@@ -1042,7 +1054,8 @@ def test_premove_chain_is_dropped_on_a_failed_skillcheck():
     app.game.board.premove_color = app.game.match.current_turn()
     app.game.board.try_apply_next_premove()
     assert app.game.board.premoves == [follow]
-    app.game.skillcheck_session._on_skillcheck_done((frm, to), False)
+    app.game.skillcheck_session._on_skillcheck_done(
+        CheckContext(frm, to, None, SkillCheckKind.WHEEL), False)
     assert len(app.game.match.move_history) == 0, "the failed move does not land"
     assert app.game.skillcheck.is_locked(frm, to) is True
     assert app.game.board.premoves == [], "a failed skill-check drops the rest of the chain"
@@ -1055,7 +1068,8 @@ def test_failed_click_move_skillcheck_keeps_opponents_premove():
     opp = Premove(Square(0, 4), Square(0, 5), app.game.match.piece_at(Square(0, 4)))
     app.game.board.premoves = [opp]
     app.game.board.premove_color = PieceColor.BLACK
-    app.game.skillcheck_session._on_skillcheck_done((frm, to), False)
+    app.game.skillcheck_session._on_skillcheck_done(
+        CheckContext(frm, to, None, SkillCheckKind.WHEEL), False)
     assert app.game.board.premoves == [opp], \
         "a failed skill-check must not wipe the opponent's premove"
     assert app.game.skillcheck.is_locked(frm, to) is True
@@ -1116,7 +1130,8 @@ def test_won_aim_capture_applies_the_move_and_clears_suppress():
     app.game.skillcheck.reset(enabled=True, seed=_aim_seed(app.game.match.backend, frm, to))
     app.game.skillcheck_session.skillcheck_gate(frm, to)
     assert app.game.board.aim_suppressed_square == to
-    app.game.skillcheck_session._on_skillcheck_done((frm, to), True)
+    app.game.skillcheck_session._on_skillcheck_done(
+        CheckContext(frm, to, None, SkillCheckKind.AIM), True)
     assert len(app.game.match.move_history) == 1
     assert app.game.match.piece_at(to).type == PieceType.QUEEN
     assert app.game.board.aim_suppressed_square is None, \
@@ -1129,7 +1144,8 @@ def test_failed_aim_clears_suppress_and_swears():
     frm, to = _set_queen_takes_pawn(app)
     app.game.skillcheck.reset(enabled=True, seed=_aim_seed(app.game.match.backend, frm, to))
     app.game.skillcheck_session.skillcheck_gate(frm, to)
-    app.game.skillcheck_session._on_skillcheck_done((frm, to), False)
+    app.game.skillcheck_session._on_skillcheck_done(
+        CheckContext(frm, to, None, SkillCheckKind.AIM), False)
     assert app.game.board.aim_suppressed_square is None
     assert app.game.skillcheck.is_locked(frm, to) is True
     assert any(p.get("kind") == "tag" for p in app.game.board.effects.particles)
@@ -1139,7 +1155,8 @@ def test_every_failed_check_makes_the_piece_swear():
     app = Frontend(1100, 800)
     _start_local(app)
     frm, to = _set_queen_takes_pawn(app)
-    app.game.skillcheck_session._on_skillcheck_done((frm, to), False)
+    app.game.skillcheck_session._on_skillcheck_done(
+        CheckContext(frm, to, None, SkillCheckKind.WHEEL), False)
     fx = app.game.board.effects
     assert any(p.get("kind") == "tag" for p in fx.particles), "a failed wheel curses too"
 
@@ -1172,7 +1189,8 @@ def test_failed_aim_drops_the_surviving_piece_back_in():
     app.game.skillcheck.reset(enabled=True, seed=_aim_seed(app.game.match.backend, frm, to))
     app.game.skillcheck_session.skillcheck_gate(frm, to)
     assert app.game.board.aim_suppressed_square == to
-    app.game.skillcheck_session._on_skillcheck_done((frm, to), False)
+    app.game.skillcheck_session._on_skillcheck_done(
+        CheckContext(frm, to, None, SkillCheckKind.AIM), False)
     assert any(a["sq"] == to for a in app.game.board._restore_anims), \
         "a failed aim drops the surviving victim back onto its square"
 
@@ -1184,7 +1202,8 @@ def test_failed_wheel_never_drops_a_piece_in():
     app.game.skillcheck.reset(enabled=True, seed=_wheel_seed(app.game.match.backend, frm, to))
     app.game.skillcheck_session.skillcheck_gate(frm, to)
     assert app.game.board.aim_suppressed_square is None, "a wheel never suppresses the live piece"
-    app.game.skillcheck_session._on_skillcheck_done((frm, to), False)
+    app.game.skillcheck_session._on_skillcheck_done(
+        CheckContext(frm, to, None, SkillCheckKind.WHEEL), False)
     assert app.game.board._restore_anims == [], \
         "the wheel piece never left, so nothing falls back in"
 
@@ -1286,7 +1305,8 @@ def test_failed_promotion_skillcheck_promotes_nothing():
     app.game.board.handle_click(to)
     app.game.board.pick_promotion(PieceType.ROOK)
     assert app.game.skillcheck_overlay.is_active() is True
-    app.game.skillcheck_session._on_skillcheck_done((frm, to, PieceType.ROOK), False)
+    app.game.skillcheck_session._on_skillcheck_done(
+        CheckContext(frm, to, PieceType.ROOK, SkillCheckKind.WHEEL), False)
     assert app.game.match.piece_at(frm).type == PieceType.PAWN, "a failed wheel promotes to nothing"
     assert app.game.match.piece_at(to) is None
     assert app.game.skillcheck.is_locked(frm, to) is True
@@ -1302,7 +1322,8 @@ def test_won_promotion_skillcheck_uses_the_chosen_piece():
     app.game.board.handle_click(frm)
     app.game.board.handle_click(to)
     app.game.board.pick_promotion(PieceType.ROOK)
-    app.game.skillcheck_session._on_skillcheck_done((frm, to, PieceType.ROOK), True)
+    app.game.skillcheck_session._on_skillcheck_done(
+        CheckContext(frm, to, PieceType.ROOK, SkillCheckKind.WHEEL), True)
     assert app.game.match.piece_at(to).type == PieceType.ROOK, \
         "a won wheel promotes to the chosen piece"
 
@@ -1936,3 +1957,23 @@ def test_overlay_aim_victim_scale_passthrough():
     aim = _cued_aim()
     ov._controller = aim
     assert ov.aim_victim_scale() == aim.victim_scale()
+
+
+def test_base_controller_carries_the_whole_overlay_contract():
+    # The overlay used to getattr-probe close/set_board_rect/victim_scale/_passive
+    # per call; the base class owns real no-op defaults now, so every concrete
+    # controller answers the full surface and the overlay calls it directly. The
+    # wheel (which overrides none of them) is the proof by inheritance.
+    from chessshootout.frontend.skillcheck.controller import SkillCheckController
+    base = SkillCheckController()
+    assert base.passive is False
+    assert base.victim_scale() == 1.0
+    base.close()
+    base.set_board_rect(pg.Rect(0, 0, 10, 10))
+    ov = SkillCheckOverlay()
+    assert ov.is_passive() is False and ov.aim_victim_scale() == 1.0
+    ov.set_board_rect(pg.Rect(0, 0, 10, 10))
+    ov._controller = _cued_wheel(passive=True)
+    assert ov.is_passive() is True, "is_passive reads the public property, not a private probe"
+    ov.set_board_rect(pg.Rect(0, 0, 10, 10))
+    ov.cancel()

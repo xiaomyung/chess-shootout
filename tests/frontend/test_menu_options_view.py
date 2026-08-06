@@ -251,6 +251,31 @@ def test_pathrow_handle_key_types_into_focused_field():
     assert row.current_text() == "z"
 
 
+def test_pathrow_cancel_edit_restores_the_stored_folder():
+    # PathRow holds dirty text exactly like TextRow does -- current_text() reads
+    # straight out of the TextInput -- and commit_options_exit() feeds that text
+    # to the data-folder validator. Without its own cancel it had no way to give
+    # the typed path back, so it needs the same restore TextRow got.
+    row = _path_row(getter=lambda: "/tmp/x")
+    _draw_row(row, pg.Rect(40, 40, 420, 120))
+    row.input.focused = True
+    row.input.text = "/half/typed"
+    assert row.cancel_edit() is True
+    assert row.input.focused is False
+    assert row.current_text() == "/tmp/x"
+
+
+def test_pathrow_with_nothing_focused_declines_the_escape():
+    # the base _Row declares cancel_edit(); every row answers it, and a row that
+    # is not being edited must decline so the Esc falls through to the sub-view.
+    row = _path_row()
+    _draw_row(row, pg.Rect(40, 40, 420, 120))
+    assert row.input.focused is False
+    assert row.cancel_edit() is False
+    assert ToggleRow("Reduce motion", "calm", lambda: False,
+                     lambda v: None).cancel_edit() is False
+
+
 def test_text_row_reports_typed_value():
     row = TextRow("Server", "where online connects", pg.display.get_surface(),
                   lambda: "localhost:8000", placeholder="host or host:port")
@@ -259,6 +284,86 @@ def test_text_row_reports_typed_value():
     row.input.focused = True
     row.input.text = "chess.example.com:9000"
     assert row.current_text() == "chess.example.com:9000"
+
+
+def _type(row, text):
+    row.input.focused = True
+    for ch in text:
+        row.handle_key(pg.event.Event(pg.KEYDOWN, key=ord(ch), mod=0, unicode=ch))
+
+
+def test_enter_commits_the_typed_value_instead_of_snapping_it_back():
+    # The row repaints from its getter whenever the field is unfocused, and
+    # RETURN unfocuses it -- so before the commit hook existed, pressing enter
+    # handed the typed address straight back to the getter and the next frame
+    # painted the OLD value over it. The user's edit was gone before anything
+    # could persist it, and the exit commit then wrote back what was already
+    # stored.
+    stored = ["localhost:8000"]
+    row = TextRow("Server", "where online connects", pg.display.get_surface(),
+                  lambda: stored[0], on_commit=lambda v: stored.__setitem__(0, v))
+    _draw_row(row)
+    row.input.text = ""
+    _type(row, "example.com")
+    row.handle_key(pg.event.Event(pg.KEYDOWN, key=pg.K_RETURN, mod=0, unicode="\r"))
+    assert stored[0] == "example.com", "enter is what saves the address"
+    _draw_row(row)
+    assert row.current_text() == "example.com", "and the field keeps showing it"
+
+
+def test_an_unfocused_edit_survives_until_the_row_is_committed():
+    # Clicking away parks the edit instead of destroying it: the exit commit is
+    # still the backstop for anyone who types and leaves without pressing enter.
+    row = TextRow("Server", "where online connects", pg.display.get_surface(),
+                  lambda: "localhost:8000")
+    _draw_row(row)
+    row.input.text = ""
+    _type(row, "kept.example")
+    row.input.focused = False
+    _draw_row(row)
+    assert row.current_text() == "kept.example"
+
+
+def test_escape_cancels_the_edit_and_restores_the_stored_value():
+    # Escape never reaches the row's key handler: input_router intercepts it
+    # and calls screen.escape(), so a cancel implemented in handle_key would be
+    # dead code that only a unit test could reach. It has to live on the view's
+    # escape(), which is the first link in the menu's Esc chain -- cancel the
+    # field, THEN fall through to leaving the sub-view on a second press.
+    row = TextRow("Server", "where online connects", pg.display.get_surface(),
+                  lambda: "localhost:8000")
+    body = OptionsBody()
+    body.set_sections([("Online", [row])])
+    body.draw(pg.display.get_surface(), pg.Rect(40, 40, 460, 240), _fonts())
+    row.input.text = ""
+    _type(row, "typo.example")
+    assert body.cancel_focused_edit() is True, "the focused edit consumes the escape"
+    body.draw(pg.display.get_surface(), pg.Rect(40, 40, 460, 240), _fonts())
+    assert row.current_text() == "localhost:8000"
+    assert row.input.focused is False
+    assert body.cancel_focused_edit() is False, \
+        "with nothing being edited escape falls through to the sub-view"
+
+
+def test_text_row_ignores_keys_while_it_is_not_focused():
+    # the row only owns the keyboard while its own field is focused; otherwise it
+    # must decline so OptionsBody.handle_key keeps walking to the next row.
+    row = TextRow("Server", "where online connects", pg.display.get_surface(),
+                  lambda: "localhost:8000")
+    _draw_row(row)
+    assert row.input.focused is False
+    assert row.handle_key(pg.event.Event(pg.KEYDOWN, key=pg.K_z, mod=0, unicode="z")) is False
+    assert row.current_text() == "localhost:8000", "and nothing was typed into it"
+
+
+def test_a_row_with_no_edit_still_follows_its_getter():
+    value = ["localhost:8000"]
+    row = TextRow("Server", "where online connects", pg.display.get_surface(),
+                  lambda: value[0])
+    _draw_row(row)
+    value[0] = "changed.elsewhere"
+    _draw_row(row)
+    assert row.current_text() == "changed.elsewhere"
 
 
 # --- OptionsBody scrolling (standalone, no view/app needed) ----------------
@@ -516,3 +621,61 @@ def test_changed_folder_dont_move_still_commits_the_new_dir(tmp_path, monkeypatc
     assert (cur / "games" / "g.pgn").exists()
     assert not (new_dir / "games" / "g.pgn").exists()
     assert str(paths.get_data_dir()) == str(new_dir)
+
+
+def test_escape_in_the_server_field_cancels_before_it_leaves_options(app, monkeypatch):
+    """The whole Esc chain, end to end, on a real app.
+
+    This is the shape that matters: the router hands Esc to screen.escape(),
+    the menu asks the active view first, and only if the view declines does it
+    fall back to leaving the sub-view -- which runs commit_options_exit(). So a
+    half-typed address must be cancelled by the FIRST escape and must never
+    reach the commit, or escape would silently save the thing it looks like it
+    is discarding.
+    """
+    saved = []
+    monkeypatch.setattr(env, "set_server_addr", lambda v: saved.append(v))
+    app.menu.goto_view("options")
+    app.draw_frame()
+    row = app.settings._server_addr_row
+    row.input.focused = True
+    row.input.text = "half-typed.example"
+
+    assert app.screen.escape() is True
+    assert app.menu._active_view == "options", "the first escape stays in options"
+    assert saved == [], "a cancelled edit is never committed"
+    app.draw_frame()
+    assert row.current_text() == env.get_server_addr()
+
+    assert app.screen.escape() is True
+    assert app.menu._active_view == "play", "a second escape leaves the sub-view"
+
+
+def test_escape_in_the_games_folder_field_cancels_before_the_exit_validation(app, monkeypatch):
+    """The same Esc chain over the OTHER editable row, which had no cancel of its
+    own. PathRow keeps the typed path in its TextInput and commit_options_exit()
+    reads it back through current_text(), so before this the first Esc fell
+    straight through to leaving the sub-view and handed the half-typed folder to
+    _validate_data_folder_on_exit -- a bogus "isn't writable" toast on a path the
+    user was still typing, or a real data-dir move if the fragment happened to
+    name a writable directory.
+    """
+    moved = []
+    monkeypatch.setattr(app.settings, "_apply_data_folder_change", moved.append)
+    app.menu.goto_view("options")
+    app.draw_frame()
+    row = app.settings._data_folder_row
+    stored = str(paths.get_data_dir())
+    row.input.focused = True
+    row.input.text = "/half/typed/folder"
+
+    assert app.screen.escape() is True
+    assert app.menu._active_view == "options", "the first escape stays in options"
+    assert row.input.focused is False
+    assert row.current_text() == stored, "the field snaps back to the stored folder"
+
+    assert app.screen.escape() is True
+    assert app.menu._active_view == "play", "a second escape leaves the sub-view"
+    assert moved == [], "the cancelled path never reaches the data-dir move"
+    assert app.toast.message != "That folder isn't writable", \
+        "nor the validator that would have complained about it"

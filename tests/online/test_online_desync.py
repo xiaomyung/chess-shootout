@@ -180,6 +180,119 @@ def test_ping_with_wrong_ply_directs_resync_and_flags_opponent(client):
             assert status["opp_state"] == "resyncing"
 
 
+def _quick_chat():
+    return {"version": PROTOCOL_VERSION, "type": "quick_chat", "preset": 0}
+
+
+def _drain_until_chat(ws):
+    """Sentinel drain: quick_chat is relayed straight through with no state of
+    its own, so the frame after it is a hard end-of-stream marker -- everything
+    the flapping pings produced has to arrive ahead of it."""
+    seen = []
+    while True:
+        msg = json.loads(ws.receive_text())
+        if msg["type"] == "quick_chat_received":
+            return seen
+        seen.append(msg)
+
+
+def test_flapping_ping_notifies_the_opponent_once_per_window(client, clock):
+    """Griefing pin: `ply` is client-supplied, so a hostile client can alternate
+    correct/incorrect plies at the websocket rate limit (30/s) and toggle the
+    opponent's resync state 15 times a second. Every `resyncing` transition
+    toasts the opponent, and toasts dedupe by key, so the opponent ends up with
+    a permanently stuck banner plus UI state flapping at 15 Hz.
+
+    The server debounces the NOTIFY direction only: the opponent is told
+    `resyncing` at most once per RESYNC_NOTIFY_MIN_INTERVAL_SECONDS per
+    connection. Clears stay ungated on purpose -- `connected` raises no toast,
+    and delaying it would leave a stale "opponent is resyncing" banner up after
+    a genuine recovery, which is the honest-path cost this fix must not pay."""
+    from chessshootout.server.handlers import RESYNC_NOTIFY_MIN_INTERVAL_SECONDS
+
+    a, b = _paired_ws(client)
+    with client.websocket_connect(f"/ws/{a['room_id']}") as ws_w:
+        ws_w.send_text(json.dumps(_auth(a["session_token"])))
+        with client.websocket_connect(f"/ws/{b['room_id']}") as ws_b:
+            ws_b.send_text(json.dumps(_auth(b["session_token"])))
+            ws_w.receive_text()
+            ws_b.receive_text()
+
+            for i in range(8):
+                ws_w.send_text(json.dumps(_ping(7 if i % 2 == 0 else 0)))
+            ws_w.send_text(json.dumps(_quick_chat()))
+
+            states = [m["opp_state"] for m in _drain_until_chat(ws_b)
+                      if m["type"] == "connection_status"]
+            assert states == ["resyncing", "connected"]
+
+            clock.advance(RESYNC_NOTIFY_MIN_INTERVAL_SECONDS + 0.1)
+            ws_w.send_text(json.dumps(_ping(7)))
+            status = json.loads(ws_b.receive_text())
+            assert status["type"] == "connection_status"
+            assert status["opp_state"] == "resyncing", (
+                "a fresh window must notify again -- this is a debounce, not a latch")
+
+
+def test_flapping_ping_cannot_amplify_resync_directives(client, clock):
+    """The directive rides back to the sender, and each one drives a /resume, so
+    an unbounded 30/s stream is self-inflicted amplification against the server's
+    own state-rebuild path. One per RESYNC_DIRECTIVE_MIN_INTERVAL_SECONDS is
+    enough: honest clients ping on the 2 s heartbeat, so their recovery cadence
+    is untouched."""
+    a, b = _paired_ws(client)
+    with client.websocket_connect(f"/ws/{a['room_id']}") as ws_w:
+        ws_w.send_text(json.dumps(_auth(a["session_token"])))
+        with client.websocket_connect(f"/ws/{b['room_id']}") as ws_b:
+            ws_b.send_text(json.dumps(_auth(b["session_token"])))
+            ws_w.receive_text()
+            ws_b.receive_text()
+
+            for _ in range(8):
+                ws_w.send_text(json.dumps(_ping(7)))
+
+            # Read the exact frame count the debounce must produce -- eight
+            # pongs and one directive -- straight off the pinging socket, where
+            # per-connection ordering makes it deterministic. The opponent's
+            # chat cannot serve as the end marker here: it is sent on the OTHER
+            # socket, so on a loaded runner its relay can overtake the tail of
+            # this socket's pongs. It still proves nothing FURTHER is queued.
+            kinds = [json.loads(ws_w.receive_text())["type"] for _ in range(9)]
+            assert kinds.count("pong") == 8
+            assert kinds.count("resync_directive") == 1
+
+            ws_b.send_text(json.dumps(_quick_chat()))
+            assert _drain_until_chat(ws_w) == [], "the window produced nothing else"
+
+
+def test_sustained_desync_keeps_directing_resync_promptly(client, clock):
+    """The debounce must not slow a real recovery: a client that is genuinely
+    behind is directed on its very first mismatching ping, and again on the next
+    heartbeat -- the directive interval is shorter than the heartbeat, so an
+    honest client's cadence never hits the gate."""
+    from chessshootout.server.handlers import RESYNC_DIRECTIVE_MIN_INTERVAL_SECONDS
+    from chessshootout.server.protocol import HEARTBEAT_INTERVAL_SECONDS
+
+    assert RESYNC_DIRECTIVE_MIN_INTERVAL_SECONDS < HEARTBEAT_INTERVAL_SECONDS
+
+    a, b = _paired_ws(client)
+    with client.websocket_connect(f"/ws/{a['room_id']}") as ws_w:
+        ws_w.send_text(json.dumps(_auth(a["session_token"])))
+        with client.websocket_connect(f"/ws/{b['room_id']}") as ws_b:
+            ws_b.send_text(json.dumps(_auth(b["session_token"])))
+            ws_w.receive_text()
+            ws_b.receive_text()
+
+            ws_w.send_text(json.dumps(_ping(7)))
+            first = {json.loads(ws_w.receive_text())["type"] for _ in range(2)}
+            assert first == {"pong", "resync_directive"}
+
+            clock.advance(HEARTBEAT_INTERVAL_SECONDS)
+            ws_w.send_text(json.dumps(_ping(7)))
+            second = {json.loads(ws_w.receive_text())["type"] for _ in range(2)}
+            assert second == {"pong", "resync_directive"}
+
+
 def test_reconnecting_client_gets_opponent_present_snapshot(client):
     """On reconnect the server tells the returning client its opponent's real
     presence, so a client that dropped can't be stuck showing the opponent red."""

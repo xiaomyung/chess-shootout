@@ -29,14 +29,25 @@ pinwheel that only the stage-4 net flags, and the split-across-colors collusion
 swastika) are the detector's own fixtures -- this file asserts the RELAY
 consequences, not the geometry.
 """
+import asyncio
 import json
+import os
 import random
+import threading
 import time
+
+import pytest
 
 from chessshootout.server import handlers
 from chessshootout.server.app import PROTOCOL_VERSION, create_app
+from chessshootout.server.handlers import handle_annotation_delta, handle_annotations_state
 from chessshootout.server.moderation import detector
-from chessshootout.server.protocol import Reason
+from chessshootout.server.moderation.load import (
+    BUCKET_PRUNE_THRESHOLD, MAX_CONCURRENT_DETECTS, PLAYER,
+    PLAYER_BURST_CPU_SECONDS, PLAYER_REFILL_CPU_SECONDS, ROOM_BURST_CPU_SECONDS,
+    ROOM_REFILL_CPU_SECONDS, ModerationLoad,
+)
+from chessshootout.server.protocol import ANNOTATIONS_PER_SECOND, Reason
 from tests.helpers import FakeClock
 from tests.server import moderation_helpers as M
 from tests.server.conftest import ALICE, BOB, auth_msg
@@ -536,6 +547,13 @@ def test_add_delta_anchors_search_and_remove_delta_full_scans(client, monkeypatc
 
 # --- worst-case timing pin ----------------------------------------------------
 
+def _clear_detect_memo():
+    """detect() memoises on the exact input key, so a resampled identical call
+    times the memo instead of the detector."""
+    detector._CACHE.clear()
+    detector._CACHE_ORDER.clear()
+
+
 def test_worst_case_delta_moderation_stays_within_budget():
     """Event-loop budget pin: a near-cap store (127 arrows + 63 highlights)
     with an anchored add-update per iteration, plus a full rescan (the remove
@@ -575,16 +593,366 @@ def test_worst_case_delta_moderation_stays_within_budget():
         new = (coord(i % 8, (i * 3) % 8), coord((i + 2) % 8, (i * 5 + 1) % 8))
         if new[0] == new[1]:
             new = (new[0], coord((i + 3) % 8, i % 8))
+        _clear_detect_memo()
         t0 = time.perf_counter()
         verdict = detector.detect(arrows + [new], highlights, changed=new)
         delta_times.append(time.perf_counter() - t0)
         assert verdict.kind in (detector.CLEAN, detector.SUSPECT, detector.BLOCKED)
 
+    # The rescan samples are byte-identical calls, so without emptying the memo
+    # first only sample 1 does any work and the other two time a dict lookup --
+    # the min() would then report the cache's cost, not the rescan's.
     full_times = []
     for _ in range(3):
+        _clear_detect_memo()
         t0 = time.perf_counter()
         detector.detect(arrows, highlights)
         full_times.append(time.perf_counter() - t0)
 
     assert min(delta_times) < budget
     assert min(full_times) < budget
+
+
+# --- moderation load meter ----------------------------------------------------
+#
+# Detection is CPU-heavy work reachable at ANNOTATIONS_PER_SECOND per player on
+# a 1.5-CPU container, and the memo keys on the exact arrow tuple so a shuffled
+# resend is always a cache miss. Two self-paired clients spamming the dense
+# CLEAN set (moderation_helpers.dense_clean_arrows, tens of ms per detect)
+# therefore buy the better part of a CPU-second per second per room, which
+# starves the sweep loop through GIL contention rather than merely making
+# detection slow: clocks stop, heartbeats time out, games abandon.
+#
+# The fix is a meter, not a bypass: over budget the server STOPS SHARING (store
+# cleared, sharing off, opponent told sharing=False, sender gets the same
+# rate_limited frame the annotation limiter sends) rather than publishing marks
+# it has not vetted. Skipping moderation under load instead would be a
+# filter-evasion hole: flood the room, then draw the symbol.
+#
+# Leaky-bucket shape (moderation.load): per-player and per-room buckets refill
+# at a fixed CPU-seconds-per-second rate with a burst capacity on top, so a
+# single expensive-but-legal message can never trip the meter -- only a
+# sustained rate above the refill can. That is what keeps honest play identical:
+# a human draws at mouse-release speed (one delta per right-drag), a flood runs
+# at the limiter's ceiling.
+
+
+class _RecordingWS:
+
+    def __init__(self):
+        self.sent = []
+
+    async def send_json(self, payload):
+        self.sent.append(payload)
+
+    def of_type(self, kind):
+        return [m for m in self.sent if m["type"] == kind]
+
+
+async def _handler_room(app):
+    rooms = app.state.rooms
+    await rooms.enqueue(client_uuid=ALICE, nickname="Alice", session_token="ta",
+                        time_minutes=5, increment_seconds=0, side_preference="white")
+    await rooms.enqueue(client_uuid=BOB, nickname="Bob", session_token="tb",
+                        time_minutes=5, increment_seconds=0, side_preference="black")
+    room = list(rooms._active.values())[0]
+    ws_w, ws_b = _RecordingWS(), _RecordingWS()
+    app.state.connections.add(room.room_id, room.white.client_uuid, ws_w)
+    app.state.connections.add(room.room_id, room.black.client_uuid, ws_b)
+    return room, ws_w, ws_b
+
+
+def _state_raw(arrows, highlights=()):
+    return json.dumps({"version": PROTOCOL_VERSION, "type": "annotations_state",
+                       "sharing": True, "highlights": list(highlights),
+                       "arrows": _wire_arrows(arrows)})
+
+
+def _delta_raw(square):
+    return json.dumps({"version": PROTOCOL_VERSION, "type": "annotation_delta",
+                       "action": "add", "kind": "highlight", "square": square})
+
+
+def _player_debt(load, room, color):
+    bucket = load._buckets.get((PLAYER, room.room_id, color))
+    return 0.0 if bucket is None else bucket.debt
+
+
+async def test_over_budget_room_stops_sharing_without_bypassing_moderation(
+        app, clock, monkeypatch):
+    """Over budget the relay is suppressed, not the moderation: detect() is
+    never reached, because nothing reaches the opponent for it to have vetted.
+    The store is emptied so no later surface (/resume, un-hide snapshot,
+    corrective) can publish the unvetted marks either, and the opponent is told
+    sharing stopped exactly the way a manual share-off tells them."""
+    room, ws_w, ws_b = await _handler_room(app)
+    await handle_annotations_state(app, ws_w, room, "white",
+                                   _state_raw([("e2", "e4")], ["e4"]))
+    assert ws_b.of_type("annotations_state"), "baseline share must relay"
+
+    load = handlers._moderation_load(app)
+    load.charge(room.room_id, "white", ROOM_BURST_CPU_SECONDS, clock())
+
+    detected = []
+    real_detect = detector.detect
+
+    def spy(*args, **kwargs):
+        detected.append(args)
+        return real_detect(*args, **kwargs)
+
+    monkeypatch.setattr(detector, "detect", spy)
+
+    outcome = await handle_annotations_state(app, ws_w, room, "white",
+                                             _state_raw(SWASTIKA))
+
+    assert outcome == "load_suppressed"
+    assert detected == []
+    off = ws_b.of_type("annotations_state")[-1]
+    assert off["sharing"] is False
+    assert off["arrows"] == [] and off["highlights"] == []
+    err = ws_w.of_type("error")[-1]
+    assert err["reason"] == Reason.RATE_LIMITED
+    assert err["msg_type"] == "annotations_state"
+    store = room.annotations_white
+    assert store.sharing is False
+    assert store.arrows == [] and store.highlights == set()
+
+
+async def test_over_budget_delta_is_suppressed_and_never_stored(app, clock):
+    room, ws_w, ws_b = await _handler_room(app)
+    load = handlers._moderation_load(app)
+    load.charge(room.room_id, "white", ROOM_BURST_CPU_SECONDS, clock())
+
+    outcome = await handle_annotation_delta(app, ws_w, room, "white", _delta_raw("e4"))
+
+    assert outcome == "load_suppressed"
+    assert ws_b.of_type("annotation_delta") == []
+    assert room.annotations_white.highlights == set()
+    assert ws_w.of_type("error")[-1]["reason"] == Reason.RATE_LIMITED
+
+
+async def test_suppression_lifts_once_the_bucket_drains(app, clock):
+    """The meter is a leak, not a latch -- the room shares again on its own once
+    the window has refilled, with no reconnect and no operator action."""
+    room, ws_w, ws_b = await _handler_room(app)
+    load = handlers._moderation_load(app)
+    load.charge(room.room_id, "white", ROOM_BURST_CPU_SECONDS, clock())
+    assert await handle_annotations_state(
+        app, ws_w, room, "white", _state_raw([("e2", "e4")])) == "load_suppressed"
+
+    clock.advance(ROOM_BURST_CPU_SECONDS / ROOM_REFILL_CPU_SECONDS + 1.0)
+
+    assert await handle_annotations_state(
+        app, ws_w, room, "white", _state_raw([("e2", "e4")])) == "relayed"
+    assert ws_b.of_type("annotations_state")[-1]["arrows"] == [
+        {"from": "e2", "to": "e4"}]
+
+
+async def test_normal_annotation_traffic_is_metered_but_never_suppressed(app, clock):
+    """The honest-play invariant: a full session of ordinary marks relays every
+    frame and never comes near the budget. The debt assertion keeps this honest
+    -- it proves the meter really is charging these messages (a meter wired to
+    nothing would also pass the relay assertions)."""
+    room, ws_w, ws_b = await _handler_room(app)
+    load = handlers._moderation_load(app)
+
+    marks = [("e2", "e4"), ("g1", "f3"), ("d2", "d4")]
+    for step in range(20):
+        clock.advance(0.25)
+        await handle_annotations_state(app, ws_w, room, "white",
+                                       _state_raw(marks[:1 + step % 3], ["e4", "d5"]))
+        await handle_annotation_delta(app, ws_b, room, "black", _delta_raw("h5"))
+
+    assert len(ws_b.of_type("annotations_state")) == 20
+    assert len(ws_w.of_type("annotation_delta")) == 20
+    assert ws_w.of_type("error") == []
+    assert ws_b.of_type("error") == []
+    assert load.over_budget(room.room_id, "white", clock()) is False
+    assert load.over_budget(room.room_id, "black", clock()) is False
+    assert _player_debt(load, room, "white") > 0.0
+
+
+HUMAN_DRAW_RATE = 3
+
+
+async def _measured_cost(app, room, ws, arrows):
+    load = handlers._moderation_load(app)
+    before = _player_debt(load, room, "white")
+    await handle_annotations_state(app, ws, room, "white", _state_raw(arrows))
+    return _player_debt(load, room, "white") - before
+
+
+async def test_honest_drawing_stays_far_under_the_player_refill(app, clock):
+    """The honest-play half of the budget's justification, and the half that can
+    run anywhere: an ordinary two-mark message charged at a frantic human draw rate
+    has to sit well under the player refill. The headroom here is orders of
+    magnitude, so no runner's mood can flip the verdict -- unlike the flood
+    comparison below, which is a live CPU measurement and is opt-in for that
+    reason."""
+    room, ws_w, _ws_b = await _handler_room(app)
+    await handle_annotations_state(app, ws_w, room, "white", _state_raw([("e2", "e4")]))
+
+    honest_cost = await _measured_cost(app, room, ws_w, [("e2", "e4"), ("g1", "f3")])
+
+    assert honest_cost > 0.0, "the meter really is charging these messages"
+    assert honest_cost * HUMAN_DRAW_RATE < PLAYER_REFILL_CPU_SECONDS, (
+        f"honest drawing {honest_cost * HUMAN_DRAW_RATE:.3f} CPU-s/s no longer "
+        f"fits the {PLAYER_REFILL_CPU_SECONDS} refill -- honest play would trip")
+
+
+@pytest.mark.skipif(
+    not os.environ.get("CHESS_CHECK_PERF"),
+    reason="opt-in CPU-cost pin; set CHESS_CHECK_PERF=1 (shared CI runners are too noisy)",
+)
+async def test_dense_clean_flood_outruns_the_refill(app, clock):
+    """The hostile half: one dense-CLEAN message must cost enough that the
+    limiter's ceiling (ANNOTATIONS_PER_SECOND) outruns the refills, so a flood
+    always fills the bucket. Both claims are ratios of a LIVE thread_time
+    measurement to the shipped constants, and a shared CI runner delivers wildly
+    different CPU-seconds for identical code -- the same reason
+    test_dense_clean_set_timing_under_its_own_budget is opt-in. Run it where the
+    number means something: CHESS_CHECK_PERF=1 locally, before and after touching
+    the detector or the budget."""
+    room, ws_w, _ws_b = await _handler_room(app)
+    await handle_annotations_state(app, ws_w, room, "white", _state_raw([("e2", "e4")]))
+
+    dense_cost = await _measured_cost(app, room, ws_w, M.dense_clean_arrows())
+
+    flood = dense_cost * ANNOTATIONS_PER_SECOND
+    assert flood > PLAYER_REFILL_CPU_SECONDS, (
+        f"one flooding player {flood:.3f} CPU-s/s no longer outruns the "
+        f"{PLAYER_REFILL_CPU_SECONDS} player refill -- re-tune the budget")
+    assert 2 * flood > ROOM_REFILL_CPU_SECONDS, (
+        f"two colluding floods {2 * flood:.3f} CPU-s/s no longer outrun the "
+        f"{ROOM_REFILL_CPU_SECONDS} room refill -- re-tune the budget")
+
+
+async def test_a_saturated_detect_pool_suppresses_instead_of_queueing(app, clock):
+    """SECURITY: CPU is charged only AFTER a detect finishes, so a saturated
+    semaphore used to park every further annotation in an unbounded wait queue --
+    nothing charged, nothing over budget, and coroutines piling up for as long as
+    the flood lasted. Admission is bounded now: a message that cannot get a slot
+    inside ModerationLoad.admission_timeout takes the same force-stop-sharing path
+    an over-budget one does, so the backlog can never outlive the timeout."""
+    room, ws_w, ws_b = await _handler_room(app)
+    load = handlers._moderation_load(app)
+    load.admission_timeout = 0.01
+    for _ in range(MAX_CONCURRENT_DETECTS):
+        await load.semaphore.acquire()
+    try:
+        outcome = await handle_annotations_state(app, ws_w, room, "white",
+                                                 _state_raw([("e2", "e4")]))
+    finally:
+        for _ in range(MAX_CONCURRENT_DETECTS):
+            load.semaphore.release()
+
+    assert outcome == "load_suppressed"
+    assert ws_w.of_type("error")[-1]["reason"] == Reason.RATE_LIMITED
+    assert room.annotations_white.sharing is False, "unvetted marks are never stored"
+    assert room.annotations_white.arrows == []
+    assert ws_b.of_type("annotations_state")[-1]["sharing"] is False, \
+        "the opponent is told sharing stopped, exactly as an over-budget stop tells them"
+
+
+async def test_a_freed_slot_lets_the_next_annotation_through(app, clock):
+    """The bound is a timeout, not a latch: the very next message relays once a
+    detect slot is free again."""
+    room, ws_w, ws_b = await _handler_room(app)
+    load = handlers._moderation_load(app)
+    load.admission_timeout = 0.01
+    for _ in range(MAX_CONCURRENT_DETECTS):
+        await load.semaphore.acquire()
+    assert await handle_annotations_state(
+        app, ws_w, room, "white", _state_raw([("e2", "e4")])) == "load_suppressed"
+    for _ in range(MAX_CONCURRENT_DETECTS):
+        load.semaphore.release()
+
+    assert await handle_annotations_state(
+        app, ws_w, room, "white", _state_raw([("e2", "e4")])) == "relayed"
+
+
+async def test_the_shared_room_bucket_suppresses_the_opponent_too(app, clock):
+    """Pinning the shared-bucket design AND its cost. The room bucket is charged by
+    both colors and read by both, so one player filling it force-stops the
+    OPPONENT's sharing as well, even though the opponent spent nothing. That is
+    deliberate: the abuse this meter defends against is two players cooperating, and
+    a per-player-only budget is trivially beaten by splitting the flood across the
+    pair. The price is this collateral mute, which lasts only as long as the room
+    bucket stays full -- pinned here so it is a known trade, not a surprise."""
+    room, ws_w, ws_b = await _handler_room(app)
+    load = handlers._moderation_load(app)
+    assert await handle_annotations_state(
+        app, ws_b, room, "black", _state_raw([("e7", "e5")])) == "relayed"
+    load.charge(room.room_id, "white", ROOM_BURST_CPU_SECONDS, clock())
+    assert _player_debt(load, room, "black") < PLAYER_BURST_CPU_SECONDS / 100, \
+        "the innocent side's own bucket is nowhere near its own ceiling"
+
+    outcome = await handle_annotation_delta(app, ws_b, room, "black", _delta_raw("h5"))
+
+    assert outcome == "load_suppressed"
+    assert ws_b.of_type("error")[-1]["reason"] == Reason.RATE_LIMITED
+    assert room.annotations_black.sharing is False
+    assert room.annotations_black.highlights == set()
+    assert ws_w.of_type("annotations_state")[-1]["sharing"] is False
+
+
+async def test_detect_concurrency_is_capped_by_the_semaphore(app, monkeypatch):
+    """Bounding rooms one by one is not enough: every detect runs in a worker
+    thread, and N of them at once contend for the GIL with the event loop that
+    ticks clocks and answers heartbeats. The global slot count caps how many can
+    ever be in flight, whatever the room count."""
+    room, ws_w, _ws_b = await _handler_room(app)
+    inflight = {"now": 0, "peak": 0}
+    lock = threading.Lock()
+    real = handlers._moderate
+
+    def slow(*args):
+        with lock:
+            inflight["now"] += 1
+            inflight["peak"] = max(inflight["peak"], inflight["now"])
+        time.sleep(0.05)
+        try:
+            return real(*args)
+        finally:
+            with lock:
+                inflight["now"] -= 1
+
+    monkeypatch.setattr(handlers, "_moderate", slow)
+    await asyncio.gather(*[
+        handle_annotations_state(app, ws_w, room, "white", _state_raw([("e2", "e4")]))
+        for _ in range(6)])
+
+    assert inflight["peak"] == MAX_CONCURRENT_DETECTS
+
+
+def test_load_bucket_refills_over_the_window():
+    """Leaky-bucket arithmetic in isolation: a burst-sized charge trips the
+    meter, and only the passage of time clears it -- proportionally, so a room
+    that keeps spending stays suppressed while one that stops recovers."""
+    load = ModerationLoad(player_refill=1.0, player_burst=2.0,
+                          room_refill=1.0, room_burst=2.0)
+    assert load.over_budget("r", "white", 0.0) is False
+
+    load.charge("r", "white", 2.0, 0.0)
+    assert load.over_budget("r", "white", 0.0) is True
+    assert load.over_budget("r", "black", 0.0) is True, "the room bucket is shared"
+
+    assert load.over_budget("r", "white", 1.5) is False
+    assert load.over_budget("other", "white", 0.0) is False
+
+
+def test_load_meter_prunes_drained_buckets_and_keeps_indebted_ones():
+    """Rooms are per-match uuids, so the ledger would grow for the process
+    lifetime without a sweep -- and the meter cannot lean on rooms.py to tell it
+    a room died. Pruning is self-service: a bucket that has refilled to zero is
+    indistinguishable from one that never existed, so it is dropped, while a
+    bucket still carrying debt survives the sweep it triggers."""
+    load = ModerationLoad(player_refill=1.0, player_burst=2.0,
+                          room_refill=1.0, room_burst=2.0)
+    for i in range(BUCKET_PRUNE_THRESHOLD):
+        now = float(i)
+        load.charge("live", "white", 1.5, now)
+        load.charge(f"gone-{i}", "white", 0.001, now)
+
+    assert len(load._buckets) < BUCKET_PRUNE_THRESHOLD
+    assert load.over_budget("live", "white", float(BUCKET_PRUNE_THRESHOLD)) is True

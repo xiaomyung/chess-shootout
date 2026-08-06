@@ -394,6 +394,20 @@ def test_fen_start_mints_match_session_id():
         {"CSMatchId": app.game._match_session_id}) == app.game._match_session_id
 
 
+def test_fen_start_arms_skillchecks_with_a_fresh_local_seed():
+    # FEN-only payloads used to skip _apply_start_config, leaving the coordinator
+    # at its enabled=False default -- custom-position games silently never rolled
+    # a skill-check.
+    app = make_app()
+    app._start_game_from_fen("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1")
+    assert app.game.skillcheck.enabled is True
+    first_seed = app.game.skillcheck.seed
+    assert first_seed.startswith("local-")
+    app._start_game_from_fen("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1")
+    assert app.game.skillcheck.enabled is True
+    assert app.game.skillcheck.seed != first_seed
+
+
 def test_online_match_session_uses_room_id():
     app = make_app()
     room = fake_uuid4(2)

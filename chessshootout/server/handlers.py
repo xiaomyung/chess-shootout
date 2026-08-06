@@ -1,6 +1,7 @@
 import asyncio
 import json
 import secrets
+import time
 
 from pydantic import ValidationError
 
@@ -29,14 +30,62 @@ from chessshootout.server.protocol import (
     TakebackResponseMessage, TimeGrantedMessage,
 )
 from chessshootout.server.moderation import detector
+from chessshootout.server.moderation.load import ModerationLoad
 from chessshootout.server.rooms import PendingSkillCheck
 from chessshootout.server.sweep import RESULT_REASON_BY_GAME_RESULT
-from chessshootout.skillcheck import online
+from chessshootout.skillcheck import mole, online
 from chessshootout.skillcheck.triggers import compute_facts
 from chessshootout.skillcheck.types import SkillCheckKind, SkillCheckOutcome
 
 
 log = logging_setup.get_logger("chess.server.app")
+
+RESYNC_NOTIFY_MIN_INTERVAL_SECONDS = 5.0
+RESYNC_NOTIFY_FLAP_FLOOR_SECONDS = 1.0
+RESYNC_DIRECTIVE_MIN_INTERVAL_SECONDS = 1.0
+RESYNC_GATE_PRUNE_THRESHOLD = 512
+
+RESYNC_NOTIFY = "notify"
+RESYNC_DIRECTIVE = "directive"
+
+
+class _ResyncGate:
+
+    def __init__(self):
+        self._open_at = {}
+
+    def allow(self, key, now, interval):
+        if now < self._open_at.get(key, now):
+            return False
+        if len(self._open_at) >= RESYNC_GATE_PRUNE_THRESHOLD:
+            self._prune(now)
+        self._open_at[key] = now + interval
+        return True
+
+    def reopen(self, key, now, delay):
+        if key in self._open_at:
+            self._open_at[key] = min(self._open_at[key], now + delay)
+
+    def _prune(self, now):
+        for key, at in list(self._open_at.items()):
+            if at <= now:
+                del self._open_at[key]
+
+
+def _app_state_singleton(app, name, factory):
+    value = getattr(app.state, name, None)
+    if value is None:
+        value = factory()
+        setattr(app.state, name, value)
+    return value
+
+
+def _resync_gate(app):
+    return _app_state_singleton(app, "resync_gate", _ResyncGate)
+
+
+def _moderation_load(app):
+    return _app_state_singleton(app, "moderation_load", ModerationLoad)
 
 
 def _color_to_move(backend):
@@ -86,7 +135,7 @@ async def handle_move(app, websocket, room, color, raw):
                      ErrorMessage(reason=Reason.GAME_ALREADY_OVER, msg_type="move"))
         return "already_over"
     pending = room.pending_skillcheck
-    if pending is not None and pending.is_expired(app.state.now_ms()):
+    if pending is not None and pending.is_dead(app.state.now_ms()):
         await resolve_skillcheck_fail(rooms, connections, room)
         if room.result is not None:
             return "already_over"
@@ -124,26 +173,37 @@ async def handle_move(app, websocket, room, color, raw):
     if kind == SkillCheckKind.NONE:
         return await _apply_move(app, room, color, from_sq, to_sq, msg.promotion,
                                  skill_kind=None, skill_won=None)
-    value_diff = online.value_diff_for(facts, msg.promotion)
+    return await _arm_skillcheck(app, room, color, kind, from_sq, to_sq,
+                                 msg.promotion, facts)
+
+
+async def _arm_skillcheck(app, room, color, kind, from_sq, to_sq, promotion, facts):
+    connections = app.state.connections
+    value_diff = online.value_diff_for(facts, promotion)
     seed = secrets.token_hex(16)
     start_ms = app.state.now_ms()
     deadline_ms = online.skillcheck_deadline_ms(room.time_minutes * 60)
+    holes = ()
+    if kind == SkillCheckKind.WHACK:
+        holes = mole.holes_for(seed, facts.captured_value, (to_sq.row, to_sq.col),
+                               room.backend.state, room.backend.SIZE)
     room.pending_skillcheck = PendingSkillCheck(
-        color=color, from_sq=from_sq, to_sq=to_sq, promotion=msg.promotion,
+        color=color, from_sq=from_sq, to_sq=to_sq, promotion=promotion,
         kind=kind, seed=seed, value_diff=value_diff,
         start_ms=start_ms, expires_at_ms=start_ms + deadline_ms, deadline_ms=deadline_ms,
+        captured_value=facts.captured_value, holes=holes,
     )
     log.info("skillcheck fired room=%s mover=%s kind=%s", room.room_id, color, kind.value)
-    await send(connections.get_for_color(room, color), SkillCheckRequiredMessage(
+    geometry = dict(
         kind=kind.value, seed=seed, value_diff=value_diff, deadline_ms=deadline_ms,
+        captured_value=facts.captured_value,
         from_sq=coord_from_square(from_sq), to_sq=coord_from_square(to_sq),
-        promotion=msg.promotion))
+        promotion=promotion)
+    await send(connections.get_for_color(room, color),
+               SkillCheckRequiredMessage(**geometry))
     opp_ws = connections.get_for_color(room, room.opp_color(color))
     if opp_ws is not None:
-        await send(opp_ws, SkillCheckSpectateMessage(
-            kind=kind.value, seed=seed, value_diff=value_diff, deadline_ms=deadline_ms,
-            from_sq=coord_from_square(from_sq), to_sq=coord_from_square(to_sq),
-            promotion=msg.promotion))
+        await send(opp_ws, SkillCheckSpectateMessage(**geometry))
     return f"skillcheck:{kind.value}"
 
 
@@ -164,7 +224,7 @@ async def _apply_move(app, room, color, from_sq, to_sq, promotion,
     room.annotations_black.clear_marks()
     if room.first_move_at is None:
         room.first_move_at = app.state.now()
-    await clear_resyncing(connections, room, color)
+    await clear_resyncing(app, room, color)
     room.draw_offered_by = None
     room.takeback_offered_by = None
     san = room.backend.move_history[-1].san
@@ -187,6 +247,28 @@ async def _apply_move(app, room, color, from_sq, to_sq, promotion,
     return "applied"
 
 
+def _shot_payload_ok(pending, msg):
+    if pending.kind == SkillCheckKind.COMBO:
+        return msg.direction is not None
+    if pending.kind == SkillCheckKind.WHACK:
+        return msg.target_row is not None and msg.target_col is not None
+    return True
+
+
+def _adjudicate_shot(pending, msg, elapsed):
+    is_whack = pending.kind == SkillCheckKind.WHACK
+    challenge = pending.challenge
+    hit = online.shot_wins(pending.kind, challenge, elapsed, pending.miss_count,
+                           pending.deadline_ms, progress=pending.progress,
+                           direction=msg.direction,
+                           target=(msg.target_row, msg.target_col) if is_whack else None,
+                           hole_squares=pending.holes if is_whack else None,
+                           last_hit_pop=pending.last_hit_pop,
+                           flipped=pending.color == "black")
+    won = hit and pending.progress + 1 >= online.hits_required(pending.kind, challenge)
+    return challenge, hit, won
+
+
 async def handle_skill_check_shot(app, websocket, room, color, raw):
     rooms = app.state.rooms
     connections = app.state.connections
@@ -197,36 +279,56 @@ async def handle_skill_check_shot(app, websocket, room, color, raw):
         msg = SkillCheckShotMessage.model_validate_json(raw)
     except ValidationError:
         return "noop"
+    if not _shot_payload_ok(pending, msg):
+        return "noop"
+    is_whack = pending.kind == SkillCheckKind.WHACK
     recv_ms = app.state.now_ms()
+    raw_elapsed = recv_ms - pending.start_ms
     elapsed = online.adjudicated_elapsed_ms(msg.client_elapsed_ms, recv_ms, pending.start_ms)
-    challenge = online.challenge_from(pending.kind, pending.seed, pending.value_diff)
-    won = online.shot_wins(pending.kind, challenge, elapsed, pending.miss_count,
-                           pending.deadline_ms)
+    gap = online.min_inter_input_ms(pending.kind)
+    if gap > 0 and pending.last_input_ms >= 0 and elapsed - pending.last_input_ms < gap:
+        return "noop"
+    challenge, hit, won = _adjudicate_shot(pending, msg, elapsed)
+    progress_after = pending.progress + (1 if hit else 0)
     log.debug("skillcheck shot room=%s kind=%s raw_ms=%.1f client=%.1f effective=%d "
               "miss=%d subfloor=%s", room.room_id, pending.kind.value,
-              recv_ms - pending.start_ms, msg.client_elapsed_ms, elapsed,
+              raw_elapsed, msg.client_elapsed_ms, elapsed,
               pending.miss_count, elapsed < online.SKILLCHECK_HUMAN_FLOOR_MS)
+    if won:
+        room.pending_skillcheck = None
     opp_ws = connections.get_for_color(room, room.opp_color(color))
     if opp_ws is not None:
         await send(opp_ws, SkillCheckSpectateShotMessage(
-            elapsed_ms=elapsed, miss_count=pending.miss_count, won=won))
-    if room.pending_skillcheck is not pending:
-        return "noop"
+            elapsed_ms=elapsed, miss_count=pending.miss_count, won=won,
+            progress=progress_after, direction=msg.direction,
+            target_row=msg.target_row, target_col=msg.target_col))
     if won:
-        room.pending_skillcheck = None
+        if room.result is not None:
+            return "already_over"
         log.info("skillcheck won room=%s mover=%s kind=%s", room.room_id, color,
                  pending.kind.value)
         return await _apply_move(app, room, color, pending.from_sq, pending.to_sq,
                                  pending.promotion, skill_kind=pending.kind.value,
                                  skill_won=True)
+    if room.pending_skillcheck is not pending:
+        return "noop"
+    if hit:
+        pending.progress = progress_after
+        if is_whack:
+            pending.last_hit_pop = challenge.pop_up_at(elapsed)
+        pending.last_input_ms = elapsed
+        return "skillcheck_hit"
     if pending.kind == SkillCheckKind.WHEEL \
             or online.is_past_deadline(elapsed, pending.deadline_ms) \
-            or online.aim_expired(challenge, elapsed, pending.miss_count):
+            or online.check_expired(pending.kind, challenge, elapsed,
+                                    pending.miss_count + 1, pending.progress,
+                                    pending.last_hit_pop):
         log.info("skillcheck failed room=%s mover=%s kind=%s", room.room_id, color,
                  pending.kind.value)
         await resolve_skillcheck_fail(rooms, connections, room)
         return "skillcheck_fail"
     pending.miss_count += 1
+    pending.last_input_ms = elapsed
     return "skillcheck_miss"
 
 
@@ -459,11 +561,14 @@ async def set_resyncing(connections, room, color):
         await _notify_opp_state(connections, room, color, "resyncing")
 
 
-async def clear_resyncing(connections, room, color):
+async def clear_resyncing(app, room, color):
     slot = room.slot(color)
-    if slot is not None and slot.desync_active:
-        slot.desync_active = False
-        await _notify_opp_state(connections, room, color, "connected")
+    if slot is None or not slot.desync_active:
+        return
+    slot.desync_active = False
+    _resync_gate(app).reopen((room.room_id, color, RESYNC_NOTIFY), app.state.now(),
+                             RESYNC_NOTIFY_FLAP_FLOOR_SECONDS)
+    await _notify_opp_state(app.state.connections, room, color, "connected")
 
 
 async def handle_ping(app, websocket, room, color, raw):
@@ -477,11 +582,19 @@ async def handle_ping(app, websocket, room, color, raw):
         return "ping"
     if room.pending_skillcheck is not None:
         return "ping_pending"
-    if msg.ply != len(room.backend.move_history):
+    if msg.ply == len(room.backend.move_history):
+        await clear_resyncing(app, room, color)
+        return "ping"
+    gate = _resync_gate(app)
+    now = app.state.now()
+    slot = room.slot(color)
+    if (slot is not None and not slot.desync_active
+            and gate.allow((room.room_id, color, RESYNC_NOTIFY), now,
+                           RESYNC_NOTIFY_MIN_INTERVAL_SECONDS)):
         await set_resyncing(connections, room, color)
+    if gate.allow((room.room_id, color, RESYNC_DIRECTIVE), now,
+                  RESYNC_DIRECTIVE_MIN_INTERVAL_SECONDS):
         await send(connections.get_for_color(room, color), ResyncDirectiveMessage())
-    else:
-        await clear_resyncing(connections, room, color)
     return "ping"
 
 
@@ -509,6 +622,8 @@ async def handle_annotations_state(app, websocket, room, color, raw):
         await send(connections.get_for_color(room, color),
                      ErrorMessage(reason=Reason.SHARE_MUTED, msg_type="annotations_state"))
         return "muted"
+    if msg.sharing and _over_moderation_budget(app, room, color):
+        return await _suppress_sharing(app, room, color, "annotations_state")
     was_sharing = store.sharing
     if msg.sharing != store.sharing:
         log.info("annotations sharing room=%s by=%s on=%s",
@@ -547,6 +662,8 @@ async def handle_annotation_delta(app, websocket, room, color, raw):
         await send(connections.get_for_color(room, color),
                      ErrorMessage(reason=Reason.SHARE_MUTED, msg_type="annotation_delta"))
         return "muted"
+    if _over_moderation_budget(app, room, color):
+        return await _suppress_sharing(app, room, color, "annotation_delta")
     if msg.kind == "highlight":
         if msg.action == "add":
             if (msg.square not in store.highlights
@@ -584,6 +701,27 @@ def _moderation_inputs(room, color):
             _last_move_context(room))
 
 
+def _over_moderation_budget(app, room, color):
+    if not app.state.moderation_enabled:
+        return False
+    return _moderation_load(app).over_budget(room.room_id, color, app.state.now())
+
+
+async def _suppress_sharing(app, room, color, msg_type):
+    connections = app.state.connections
+    store = room.annotations_for(color)
+    stopped = store.sharing
+    store.sharing = False
+    store.clear_marks()
+    if stopped:
+        log.warning("annotations load-suppressed room=%s color=%s", room.room_id, color)
+        await _relay_plain(connections, room, color,
+                           AnnotationsStateMessage(sharing=False, highlights=[], arrows=[]))
+    await send(connections.get_for_color(room, color),
+               ErrorMessage(reason=Reason.RATE_LIMITED, msg_type=msg_type))
+    return "load_suppressed"
+
+
 def _moderate(own_arrows, own_highlights, opp_arrows, opp_highlights, context, changed):
     own = detector.detect(own_arrows, own_highlights, changed=changed, context=context)
     if own.kind == detector.BLOCKED:
@@ -612,9 +750,25 @@ async def _relay_or_moderate(app, room, color, msg, changed, msg_type):
     return await _moderate_relay(app, room, color, msg, changed, msg_type)
 
 
+def _timed_moderate(*args):
+    started = time.thread_time()
+    return _moderate(*args), time.thread_time() - started
+
+
 async def _moderate_relay(app, room, color, relay_msg, changed, msg_type):
+    load = _moderation_load(app)
     inputs = _moderation_inputs(room, color)
-    verdict, is_union = await asyncio.to_thread(_moderate, *inputs, changed)
+    try:
+        await asyncio.wait_for(load.semaphore.acquire(), load.admission_timeout)
+    except asyncio.TimeoutError:
+        log.warning("moderation admission timed out room=%s color=%s", room.room_id, color)
+        return await _suppress_sharing(app, room, color, msg_type)
+    try:
+        outcome, cpu_seconds = await asyncio.to_thread(_timed_moderate, *inputs, changed)
+    finally:
+        load.semaphore.release()
+    load.charge(room.room_id, color, cpu_seconds, app.state.now())
+    verdict, is_union = outcome
     if room.backend is None or room.result is not None:
         return "noop"
     if verdict is None:

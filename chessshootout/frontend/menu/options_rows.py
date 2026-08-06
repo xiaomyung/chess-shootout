@@ -136,6 +136,9 @@ class _Row:
     def handle_key(self, event):
         return False
 
+    def cancel_edit(self):
+        return False
+
 
 class ToggleRow(_Row):
 
@@ -394,16 +397,25 @@ class PathRow(_Row):
     def handle_key(self, event):
         return self.input.handle_key(event)
 
+    def cancel_edit(self):
+        if not self.input.focused:
+            return False
+        self.input.focused = False
+        self.input.text = str(self.value_getter())
+        return True
+
 
 class TextRow(_Row):
 
-    def __init__(self, label, desc, window, value_getter, placeholder=""):
+    def __init__(self, label, desc, window, value_getter, placeholder="", on_commit=None):
         super().__init__(label, desc)
         self.value_getter = value_getter
+        self.on_commit = on_commit
         self.input = TextInput(window, max_chars=128, placeholder=placeholder,
                                mono=True, bg=Colors.bg, radius=6)
         self.input.padding = 11
         self.input.text = str(value_getter())
+        self._edited = False
         self._field_rect = pg.Rect(0, 0, 0, 0)
 
     def _control_h(self, fonts):
@@ -411,7 +423,8 @@ class TextRow(_Row):
 
     def _draw_control(self, window, rect, fonts):
         y = rect.centery - FIELD_H // 2
-        if not self.input.focused and self.input.text != str(self.value_getter()):
+        if not self.input.focused and not self._edited \
+                and self.input.text != str(self.value_getter()):
             self.input.text = str(self.value_getter())
         field_left = rect.x + int(rect.width * FIELD_LEFT_FRAC)
         self._field_rect = pg.Rect(field_left, y, rect.right - field_left, FIELD_H)
@@ -434,7 +447,24 @@ class TextRow(_Row):
         return self._field_rect.collidepoint(pos)
 
     def handle_key(self, event):
-        return self.input.handle_key(event)
+        if not self.input.focused:
+            return False
+        handled = self.input.handle_key(event)
+        if event.key in (pg.K_RETURN, pg.K_KP_ENTER):
+            self._edited = False
+            if self.on_commit is not None:
+                self.on_commit(self.current_text())
+        elif handled:
+            self._edited = True
+        return handled
+
+    def cancel_edit(self):
+        if not self.input.focused and not self._edited:
+            return False
+        self._edited = False
+        self.input.focused = False
+        self.input.text = str(self.value_getter())
+        return True
 
 
 class OptionsBody(ScrollHost):
@@ -523,5 +553,12 @@ class OptionsBody(ScrollHost):
         for _, rows in self.sections:
             for row in rows:
                 if row.handle_key(event):
+                    return True
+        return False
+
+    def cancel_focused_edit(self):
+        for _, rows in self.sections:
+            for row in rows:
+                if row.cancel_edit():
                     return True
         return False
