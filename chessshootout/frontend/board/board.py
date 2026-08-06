@@ -1270,9 +1270,9 @@ class Board:
             self.announce_callback(key, victim_piece)
 
     def trigger_skillcheck_fail(self, from_sq, to_sq, on_fire=None):
+        handed = self.effects.take_gun_handoff(from_sq)
         piece = self.match.piece_at(from_sq)
         if piece is None or self.cell_size <= 0:
-            self.effects.take_gun_handoff(from_sq)
             return
         now = pg.time.get_ticks()
         victim_sq = self.capture_victim_square(piece, from_sq, to_sq)
@@ -1288,7 +1288,7 @@ class Board:
             attacker_type=piece.type.value,
             from_sq=from_sq, victim_sq=victim_sq,
             cell_size=self.cell_size, power=power,
-            occupied=self._occupied_squares(), on_fire=fire_cb)
+            occupied=self._occupied_squares(), on_fire=fire_cb, predrawn=handed)
         self.effects.swear(now, from_sq, self.cell_size)
 
     def capture_victim_square(self, piece, from_sq, to_sq):

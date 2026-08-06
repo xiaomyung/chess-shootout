@@ -86,22 +86,6 @@ class AimController(SkillCheckController):
         self._board_rect = pg.Rect(board_rect)
         self._fx.board_rect = pg.Rect(board_rect)
 
-    def relayout(self, cell_rect):
-        self._apply_geometry(cell_rect)
-
-    def handle_event(self, event):
-        if self._passive:
-            return False
-        if self._committed_at is not None:
-            return True
-        if event.type == pg.MOUSEBUTTONDOWN and event.button == 1:
-            self._fire()
-            return True
-        if event.type == pg.KEYDOWN and event.key in (pg.K_SPACE, pg.K_RETURN):
-            self._fire()
-            return True
-        return False
-
     def _fire(self):
         elapsed = self._now - self.start_ms
         if not self._online and self.challenge.on_target(elapsed, self.miss_count):
@@ -131,13 +115,6 @@ class AimController(SkillCheckController):
         if self._shot_sound is not None:
             self._shot_sound()
 
-    def resolve(self, won):
-        self._landed = won
-        if self._committed_at is None:
-            self._committed_at = self._now
-        self._resolved_at = self._now
-        self._emit_verdict()
-
     def spectate_shot(self, elapsed, miss_count, won, progress=0, direction=None, target=None):
         if won:
             self._shot_render = (elapsed, miss_count)
@@ -162,10 +139,6 @@ class AimController(SkillCheckController):
     @property
     def done(self):
         return self._done_after(AIM_RESULT_HOLD_MS)
-
-    @property
-    def landed(self):
-        return self._landed
 
     def _render_state(self):
         if (self._online and self._landed and self._committed_at is not None

@@ -295,8 +295,8 @@ class EffectManager:
         })
 
     def miss(self, *, now_ms, attacker_type, from_sq, victim_sq, cell_size,
-             power="med", on_fire=None, occupied=None, callout=True):
-        handed = self.take_gun_handoff(from_sq)
+             power="med", on_fire=None, occupied=None, callout=True, predrawn=False):
+        handed = self.take_gun_handoff(from_sq) or predrawn
         gun = gunfx.PIECE_GUN.get(attacker_type, "revolver")
         weapon = self._weapon(gun, cell_size)
         if weapon is None:
@@ -755,29 +755,25 @@ class EffectManager:
         elif kind == "tag":
             self._draw_tag(window, p, now)
 
-    def _draw_flash(self, window, p, now):
-        prog = (now - p["start"]) / p["dur"]
-        if not 0.0 <= prog < 1.0:
-            return
+    def _blit_flash(self, window, p, now, prog, muzzle, aim):
         weapon = p["weapon"]
-        if not weapon["flashes"]:
-            return
         fl = weapon["flashes"][min(p["idx"], len(weapon["flashes"]) - 1)]
-        muzzle, aim = self._muzzle(weapon, p["from_sq"], p["victim_sq"], p["cell"])
         rx, ry = self._recoil(p["gun"], weapon, aim, now - p["start"])
         gunfx.draw_flash(window, fl["img"], fl["anchor"], (muzzle[0] + rx, muzzle[1] + ry),
                          aim, prog)
+
+    def _draw_flash(self, window, p, now):
+        prog = (now - p["start"]) / p["dur"]
+        if not 0.0 <= prog < 1.0 or not p["weapon"]["flashes"]:
+            return
+        muzzle, aim = self._muzzle(p["weapon"], p["from_sq"], p["victim_sq"], p["cell"])
+        self._blit_flash(window, p, now, prog, muzzle, aim)
 
     def _draw_flash_px(self, window, p, now):
         prog = (now - p["start"]) / p["dur"]
         if not 0.0 <= prog < 1.0:
             return
-        weapon = p["weapon"]
-        fl = weapon["flashes"][min(p["idx"], len(weapon["flashes"]) - 1)]
-        aim = p["aim"]
-        rx, ry = self._recoil(p["gun"], weapon, aim, now - p["start"])
-        gunfx.draw_flash(window, fl["img"], fl["anchor"],
-                         (p["muzzle"][0] + rx, p["muzzle"][1] + ry), aim, prog)
+        self._blit_flash(window, p, now, prog, p["muzzle"], p["aim"])
 
     def _draw_pellet(self, window, pr):
         speed = math.hypot(pr["vx"], pr["vy"]) or 1.0

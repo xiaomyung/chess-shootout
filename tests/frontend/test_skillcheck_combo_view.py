@@ -6,7 +6,7 @@ import pytest
 
 from tests.conftest import pygame_display
 from tests.helpers import click_event as _click
-from chessshootout.backend.utils import Square
+from chessshootout.backend.utils import BOARD_SIZE, Square
 from chessshootout.frontend.skillcheck.aim_view import AimController
 from chessshootout.frontend.skillcheck.combo_view import (
     ComboController, COMBO_VIEW_RESULT_HOLD_MS, COMBO_VIEW_BRILLIANT_TEXT, COMBO_VIEW_CLEAN_TEXT,
@@ -25,7 +25,8 @@ from chessshootout.frontend.skillcheck.mole_view import MoleController
 from chessshootout.frontend.skillcheck.registry import CheckSpec, build_controller
 from chessshootout.frontend.skillcheck.wheel_view import WheelController
 from chessshootout.skillcheck.combo import (
-    ComboChallenge, COMBO_INTRO_MS, COMBO_MAX_WRONGS, COMBO_WRONG_LOCKOUT_MS)
+    ComboChallenge, COMBO_INTRO_MS, COMBO_MAX_WRONGS, COMBO_MIN_INTER_PRESS_MS,
+    COMBO_WRONG_LOCKOUT_MS)
 from chessshootout.skillcheck.types import SkillCheckKind
 
 
@@ -50,16 +51,16 @@ def _combo(prompts=_PROMPTS, **kw):
         pg.Rect(0, 0, 80, 80), now_ms=0, deadline_ms=5000, **kw)
 
 
-def _combo_scene(prompts, cell):
+def _combo_scene(prompts, cell, **kw):
     center = 350
     rect = pg.Rect(center - cell // 2, center - cell // 2, cell, cell)
+    kw.setdefault("victim_surface", pg.Surface((cell, cell), pg.SRCALPHA))
+    kw.setdefault("attacker_surface", pg.Surface((cell, cell), pg.SRCALPHA))
     return ComboController(
         ComboChallenge(prompts=tuple(prompts), deadline_ms=5000.0),
         rect, now_ms=0, deadline_ms=5000,
         board_rect=pg.Rect(0, 0, 700, 700), geom=lambda sq: (350, 350),
-        victim_surface=pg.Surface((cell, cell), pg.SRCALPHA),
-        attacker_surface=pg.Surface((cell, cell), pg.SRCALPHA),
-        from_sq=Square(4, 4), victim_sq=Square(3, 3), audio=MagicMock())
+        from_sq=Square(4, 4), victim_sq=Square(3, 3), audio=MagicMock(), **kw)
 
 
 def _run_correct(ctrl, prompts=_PROMPTS, key=_key, step=150):
@@ -113,7 +114,10 @@ def test_wrong_press_locks_and_lockout_press_is_ignored():
     assert ctrl._progress == 0
     assert ctrl._wrong_count == 1
     assert ctrl._lockout_until > ctrl._now
-    ctrl.update(200)
+    ctrl.update(300)
+    assert ctrl._now - ctrl._last_accept_ms > COMBO_MIN_INTER_PRESS_MS, \
+        "clear of the anti-mash pacer, so only the lockout can swallow the next press"
+    assert ctrl._now < ctrl._lockout_until
     ctrl.handle_event(_key("up"))
     assert ctrl._progress == 0, "a press inside the lockout does not advance"
     assert ctrl._wrong_count == 1, "a lockout-swallowed press is not counted as a wrong"
@@ -157,6 +161,9 @@ def test_mouse_click_on_wedge_advances():
     ctrl.update(150)
     ctrl.handle_event(_click(_wedge_center(ctrl, "up")))
     assert ctrl._progress == 1
+    ctrl.update(300)
+    assert ctrl._now - ctrl._last_accept_ms > COMBO_MIN_INTER_PRESS_MS, \
+        "past the pacer, so the pad geometry is the only thing left to reject it"
     ctrl.handle_event(_click((5, 5)))
     assert ctrl._progress == 1, "a click outside the pad circle is ignored"
 
@@ -253,7 +260,10 @@ def test_online_does_not_relay_a_lockout_swallowed_press():
     ctrl.update(150)
     ctrl.handle_event(_key("down"))
     assert on_shot.call_count == 1, "an accepted wrong press relays (server counts wrongs)"
-    ctrl.update(200)
+    ctrl.update(300)
+    assert ctrl._now - ctrl._last_accept_ms > COMBO_MIN_INTER_PRESS_MS, \
+        "clear of the pacer, so the lockout is what has to hold the press back"
+    assert ctrl._now < ctrl._lockout_until
     ctrl.handle_event(_key("up"))
     assert on_shot.call_count == 1, "a lockout-swallowed press is never relayed"
 
@@ -590,7 +600,7 @@ def _lit_board_probe(ctrl, *, chipped, states=(400,)):
     # the strip lives over a lit, dancing board: probe every chip core on a white
     # field so each backing shows up as a straight brightness drop under its arrow.
     if not chipped:
-        ctrl._draw_strip_chips = lambda window: None
+        ctrl._draw_strip_chips = lambda window, *_: None
     surf = pg.Surface((700, 700))
     surf.fill((255, 255, 255))
     for t in states:
@@ -706,7 +716,7 @@ def test_chips_draw_over_the_scrim_and_under_the_arrows_and_judgement():
     order = []
     for name in ("_draw_dance_floor", "_draw_spotlight", "_draw_strip_chips", "_draw_strip",
                  "_draw_flying", "_draw_confetti", "_draw_judgement"):
-        setattr(ctrl, name, (lambda tag: lambda window: order.append(tag))(name))
+        setattr(ctrl, name, (lambda tag: lambda window, *_: order.append(tag))(name))
     ctrl.update(150)
     ctrl.draw(pg.Surface((700, 700), pg.SRCALPHA))
     assert order.index("_draw_dance_floor") < order.index("_draw_strip_chips")
@@ -723,7 +733,7 @@ def test_fire_streak_still_reads_over_the_chips():
     def fire_brightness(chipped):
         ctrl = _combo_scene(_PROMPTS, 99)
         if not chipped:
-            ctrl._draw_strip_chips = lambda window: None
+            ctrl._draw_strip_chips = lambda window, *_: None
         for i, direction in enumerate(_PROMPTS[:3]):
             ctrl.update(150 * (i + 1))
             ctrl.handle_event(_key(direction))
@@ -744,8 +754,10 @@ def test_chips_cover_every_slot_and_geometry_survives_consumption():
     # is the contrast backing now, so each slot must actually own a full chip.
     ctrl = _combo(board_rect=pg.Rect(0, 0, 700, 700))
     assert len(ctrl._strip_slots) == len(_PROMPTS)
-    arrow_span = _direction_chevron(ctrl._strip_big, Colors.accent, "up").get_width()
-    assert ctrl._chip >= arrow_span, \
+    footprint = max(
+        max(_direction_chevron(ctrl._strip_big, Colors.accent, d).get_size())
+        for d in ("up", "down", "left", "right"))
+    assert ctrl._chip >= footprint, \
         "the chip contains the biggest arrow footprint in any orientation"
     spacing = ctrl._strip_slots[1] - ctrl._strip_slots[0]
     assert spacing > ctrl._chip, "tokens keep daylight between them"
@@ -1199,23 +1211,42 @@ def test_chip_cache_never_collides_between_palettes():
     assert _chip_surface(40, 8, _CHIP_NEXT, Colors.spectate) is spec
     idle_live = _chip_surface(40, 8, _CHIP_IDLE, Colors.accent)
     idle_spec = _chip_surface(40, 8, _CHIP_IDLE, Colors.spectate)
-    assert pg.image.tostring(idle_live, "RGBA") == pg.image.tostring(idle_spec, "RGBA")
+    assert idle_live is idle_spec, \
+        "an idle chip never carries the accent, so both palettes land on ONE cache entry"
+    assert _chip_surface(40, 8, _CHIP_DONE, Colors.accent) \
+        is _chip_surface(40, 8, _CHIP_DONE, Colors.spectate)
 
 
-def test_spectated_semantic_and_feedback_colours_are_untouched():
-    # Scope pin: win-green consumed arrows, loss-red wrong flashes and the warm
-    # spark/confetti feedback do not change with the palette -- blue means
-    # "someone else's input", never "good/bad".
+def _consumed_strip_row(passive):
+    ctrl = _combo_scene(_PROMPTS, 99, passive=passive)
+    if passive:
+        ctrl.update(400)
+        ctrl.spectate_shot(390, 0, False, progress=2, direction="down")
+    else:
+        for step, direction in enumerate(_PROMPTS[:2]):
+            ctrl.update(300 * (step + 1))
+            ctrl.handle_event(_key(direction))
+    assert ctrl._progress == 2, "two prompts really were consumed"
+    ctrl.update(1500)
+    surf = pg.Surface((700, 700))
+    surf.fill((10, 10, 12))
+    ctrl._draw_strip(surf)
+    return surf
+
+
+def test_spectated_semantic_colours_are_untouched():
+    # Scope pin: a consumed prompt is GOOD, so its arrow stays literally
+    # Colors.win on the mirror too, while every signal element around it has
+    # gone spectate blue. Blue means "someone else's input", never "good/bad".
     live, spec = _combo(), _combo(passive=True)
-    win_live = _direction_chevron(20, Colors.win, "up")
-    win_spec = _direction_chevron(20, Colors.win, "up")
-    assert win_live is win_spec
     assert live._signal_color(Colors.accent) != Colors.win
-    for ctrl in (live, spec):
-        surf = pg.Surface((700, 700), pg.SRCALPHA)
-        ctrl.update(300)
-        ctrl.draw(surf)
     assert spec._signal_color(Colors.accent) == Colors.spectate
+    win = pg.Color(Colors.win)
+    for passive in (False, True):
+        surf = _consumed_strip_row(passive)
+        painted = pg.mask.from_threshold(surf, win, (2, 2, 2, 255)).count()
+        assert painted > 0, \
+            "passive={}: the consumed arrows are drawn in the literal win green".format(passive)
 
 
 def test_the_spectator_never_sees_the_receptor_pad():
@@ -1243,19 +1274,198 @@ def test_the_spectator_never_sees_the_receptor_pad():
     assert marker not in seen["spec"], "the spectator's pad region has no pad at all"
 
 
-def test_the_spectator_still_gets_the_wrong_count_pips():
-    spec = _combo_scene(_PROMPTS, 99)
-    spec._passive = True
+def _pip_row_brightness(wrongs):
+    from chessshootout.frontend.skillcheck.combo_view import \
+        COMBO_VIEW_PIP_ROW_GAP_FRAC
+    spec = _combo_scene(_PROMPTS, 99, passive=True)
     spec.update(400)
-    spec.spectate_shot(400.0, 0, False, progress=0, direction="down")
+    if wrongs:
+        spec.spectate_shot(400.0, 0, False, progress=0, direction="down")
+    assert spec._wrong_count == wrongs
     surf = pg.Surface((700, 700))
     surf.fill((10, 10, 12))
     spec.update(500)
     spec.draw(surf)
-    from chessshootout.frontend.skillcheck.combo_view import \
-        COMBO_VIEW_PIP_ROW_GAP_FRAC
     gap = max(int(99 * COMBO_VIEW_PIP_ROW_GAP_FRAC), 10)
     y = spec._pad_bottom + gap
-    row = pg.Rect(0, y - 8, 700, 16)
-    assert _region_brightness(surf, row) > 11, \
+    return _region_brightness(surf, pg.Rect(0, y - 8, 700, 16))
+
+
+def test_the_spectator_still_gets_the_wrong_count_pips():
+    # An absolute brightness floor here was met by the board fill alone; the
+    # claim is that the STRIKE actually lands on the mirror, so the row is
+    # measured against the identical row of an unstruck mirror.
+    assert _pip_row_brightness(1) > _pip_row_brightness(0), \
         "the strike pips still render for the mirror even with the pad hidden"
+
+
+def _painted(surf):
+    dark = pg.mask.from_threshold(surf, (0, 0, 0), (10, 10, 10, 255)).count()
+    w, h = surf.get_size()
+    return w * h - dark
+
+
+def _pad_feedback_pixels(passive):
+    ctrl = _combo_scene(_PROMPTS, 99, passive=passive)
+    ctrl.update(400)
+    if passive:
+        ctrl.spectate_shot(390, 0, False, progress=1, direction="up")
+    else:
+        ctrl.handle_event(_key("up"))
+    assert ctrl._white_flash is not None and ctrl._sparks is not None, \
+        "the bookkeeping is identical in both modes — only the drawing differs"
+    surf = pg.Surface((700, 700))
+    surf.fill((0, 0, 0))
+    ctrl.update(420)
+    ctrl._draw_white_flash(surf)
+    ctrl._draw_sparks(surf)
+    return _painted(surf)
+
+
+def test_the_spectator_never_sees_the_pad_anchored_flash_or_sparks():
+    # Both are drawn in PAD space: the white wedge fills a receptor of the disc
+    # and the sparks burst off its hub. The mirror hides the pad, so with the
+    # disc gone they read as loose confetti floating in the middle of the board.
+    assert _pad_feedback_pixels(False) > 0, "the mover's own hit feedback still lands"
+    assert _pad_feedback_pixels(True) == 0, \
+        "the mirror has no pad for either of them to sit on"
+
+
+def _torn_scene(rgba):
+    victim = pg.Surface((99, 99), pg.SRCALPHA)
+    pg.draw.circle(victim, rgba, (49, 49), 40)
+    return _combo_scene(_PROMPTS, 99, victim_surface=victim)
+
+
+def test_the_torn_victim_cache_keys_on_the_victim_not_just_the_prompts():
+    # Two combos in one game can easily draw the same five prompts; keyed on
+    # (prompts, cell) alone the second check blitted the FIRST victim's
+    # shredded sprite over its own piece.
+    red, green = _torn_scene((200, 40, 40, 255)), _torn_scene((40, 200, 40, 255))
+    assert red.challenge.prompts == green.challenge.prompts and red._cell == green._cell
+    assert red._torn_key != green._torn_key, "the victim is part of the identity"
+    torn_red, torn_green = red._torn_victim(), green._torn_victim()
+    assert torn_red is not torn_green
+    assert pg.image.tostring(torn_red, "RGBA") != pg.image.tostring(torn_green, "RGBA")
+    again = _torn_scene((200, 40, 40, 255))
+    assert again._torn_victim() is torn_red, \
+        "the same victim, prompts and cell still share one cached sprite"
+
+
+def _dance_scene(passive, cell=70):
+    span = cell * BOARD_SIZE
+    return ComboController(
+        ComboChallenge(prompts=_PROMPTS, deadline_ms=5000.0),
+        pg.Rect(3 * cell, 3 * cell, cell, cell), now_ms=0, deadline_ms=5000,
+        board_rect=pg.Rect(0, 0, span, span),
+        geom=lambda sq: (sq.col * cell + cell // 2, sq.row * cell + cell // 2),
+        victim_surface=pg.Surface((cell, cell), pg.SRCALPHA),
+        attacker_surface=pg.Surface((cell, cell), pg.SRCALPHA),
+        from_sq=Square(4, 4), victim_sq=Square(3, 3), passive=passive, audio=MagicMock())
+
+
+def _tinted_squares(ctrl, cell=70):
+    span = cell * BOARD_SIZE
+    surf = pg.Surface((span, span))
+    surf.fill((0, 0, 0))
+    ctrl._draw_dance_floor(surf)
+    return sum(1 for row in range(BOARD_SIZE) for col in range(BOARD_SIZE)
+               if surf.get_at((col * cell + cell // 2,
+                               row * cell + cell // 2))[:3] != (0, 0, 0))
+
+
+def test_the_dance_floor_stops_at_the_spotlight_edge_on_the_mirror_too():
+    # The lit radius was read off the spot LAYER, which a mirror never builds,
+    # so lit_r came back None and the tint washed over all 64 squares instead of
+    # the lit disc. The radius comes off the board rect now, which both modes have.
+    spec, live = _dance_scene(True), _dance_scene(False)
+    for ctrl in (spec, live):
+        ctrl.update(3600)
+        assert ctrl._beat() > 0.5, "the beat is up, so a tint really is being asked for"
+    assert spec._spot_layer is None, "the mirror genuinely has no spot layer"
+    lit = _tinted_squares(spec)
+    assert 0 < lit < BOARD_SIZE * BOARD_SIZE, \
+        "the mirror tints the lit disc, never the whole board"
+    assert lit == _tinted_squares(live), "and it is the same disc the mover dances on"
+
+
+def test_the_dance_floor_tint_stays_warm_for_the_spectator():
+    # Deliberate exception to the palette sweep: the floor is atmosphere, not a
+    # signal, so it keeps the warm accent on both sides.
+    spec = _dance_scene(True)
+    spec.update(3600)
+    span = 70 * BOARD_SIZE
+    surf = pg.Surface((span, span))
+    surf.fill((0, 0, 0))
+    spec._draw_dance_floor(surf)
+    lit = surf.get_at((3 * 70 + 35, 3 * 70 + 35))
+    assert lit[:3] != (0, 0, 0), "the square under the pad is tinted"
+    accent, blue = pg.Color(Colors.accent), pg.Color(Colors.spectate)
+    assert abs(lit.r - lit.b) > 2, "the tint is not the neutral bed colour"
+    assert (lit.r > lit.b) == (accent.r > accent.b), "it leans warm like the accent"
+    assert (lit.r > lit.b) != (blue.r > blue.b), "and never toward the spectate blue"
+
+
+def test_an_online_win_verdict_retracts_a_locally_presented_fail():
+    # Online three local wrongs close the INPUT and start the blunder
+    # presentation, but they commit nothing — the server can still say the
+    # check was won (a wrong the server threw away as mashing, a resync). The
+    # fail presentation has to be taken back, or the win plays out underneath a
+    # live BLUNDER?? and a deflating arrow.
+    audio = MagicMock()
+    ctrl = _combo(on_shot=MagicMock(), audio=audio)
+    last = _three_wrongs(ctrl)
+    assert ctrl._closed is True and ctrl._fail_started is not None
+    assert ctrl._judgement == _JUDGE_FAIL and ctrl.landed is None
+
+    ctrl.update(last + 100)
+    assert ctrl._deflate_scale() < 1.0, "the prompt arrow is visibly deflating"
+    ctrl.resolve(True)
+    assert ctrl.landed is True
+    assert ctrl._fail_started is None, "the blunder presentation is retracted"
+    assert ctrl._judgement != _JUDGE_FAIL, "and its callout goes with it"
+    assert ctrl._deflate_scale() == 1.0, "the current arrow stops shrinking"
+    assert ctrl._win_flash_until is not None and ctrl._confetti is not None
+    audio.play_combo_complete.assert_called_once()
+
+
+def test_an_online_fail_verdict_never_double_fires_the_fail_cue():
+    audio = MagicMock()
+    ctrl = _combo(on_shot=MagicMock(), audio=audio)
+    last = _three_wrongs(ctrl)
+    assert audio.play_combo_fail.call_count == 1
+    started, judged_at = ctrl._fail_started, ctrl._judgement_at
+
+    ctrl.update(last + 100)
+    ctrl.resolve(False)
+    assert ctrl.landed is False
+    assert audio.play_combo_fail.call_count == 1, \
+        "the verdict confirms the cue the local close already played"
+    assert (ctrl._fail_started, ctrl._judgement_at) == (started, judged_at), \
+        "and the callout keeps its original beat instead of restarting"
+
+
+def test_a_closed_combo_swallows_input_without_acting_on_it():
+    on_shot = MagicMock()
+    ctrl = _combo(on_shot=on_shot)
+    _three_wrongs(ctrl)
+    relayed = on_shot.call_count
+    assert ctrl._closed is True
+
+    ctrl.update(2000)
+    assert ctrl.handle_event(_key("up")) is True, \
+        "a closed check still owns the arrows — they must never step the board"
+    assert ctrl.handle_event(_click(_wedge_center(ctrl, "up"))) is True
+    assert ctrl._progress == 0, "and nothing it swallows advances the run"
+    assert ctrl._wrong_count == COMBO_MAX_WRONGS
+    assert on_shot.call_count == relayed, "nothing more reaches the wire either"
+
+
+def test_a_non_direction_key_is_never_swallowed():
+    ctrl = _combo()
+    ctrl.update(300)
+    for key in (pg.K_h, pg.K_ESCAPE, pg.K_SPACE):
+        event = pg.event.Event(pg.KEYDOWN, {"key": key, "mod": 0})
+        assert ctrl.handle_event(event) is False, \
+            "help, escape and everything else reach the screen behind the pad"
+    assert ctrl._progress == 0 and ctrl._wrong_count == 0

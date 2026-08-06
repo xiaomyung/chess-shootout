@@ -1,5 +1,5 @@
 import math
-import typing
+from typing import NamedTuple
 
 import pygame as pg
 
@@ -125,7 +125,7 @@ MOLE_VIEW_HITBOX_LW = 1
 MOLE_VIEW_HITBOX_ACTIVE_LW = 2
 
 
-class MoleCasing(typing.NamedTuple):
+class MoleCasing(NamedTuple):
     spawn_ms: float
     x0: float
     y0: float
@@ -136,7 +136,7 @@ class MoleCasing(typing.NamedTuple):
     spin: float
 
 
-class MoleToss(typing.NamedTuple):
+class MoleToss(NamedTuple):
     x0: float
     y0: float
     vx: float
@@ -162,12 +162,12 @@ def _blit_alpha(window, surf, pos, alpha):
         surf.set_alpha(255)
 
 
-def _puff_color(tt, j):
-    return _DUST_COLORS[min(int(tt * len(_DUST_COLORS)), len(_DUST_COLORS) - 1)]
+def _puff_color(age_frac, index):
+    return _DUST_COLORS[min(int(age_frac * len(_DUST_COLORS)), len(_DUST_COLORS) - 1)]
 
 
-def _debris_color(tt, j):
-    return _DEBRIS_COLORS[j % len(_DEBRIS_COLORS)]
+def _debris_color(age_frac, index):
+    return _DEBRIS_COLORS[index % len(_DEBRIS_COLORS)]
 
 
 class MoleController(SkillCheckController):
@@ -193,7 +193,8 @@ class MoleController(SkillCheckController):
         self._miss_count = miss_count
         self._torn_key = hash(challenge.pops)
         self._last_hit_pop = last_hit_pop
-        self._last_hit_anim_ms = None
+        self._last_hit_anim_ms = (None if last_hit_pop < 0
+                                  else float(now_ms) - MOLE_VIEW_RETREAT_MS)
         self._last_hit_height = 0.0
         self._last_hit_px = None
         self._reset_effects(cell_rect.center)
@@ -291,13 +292,10 @@ class MoleController(SkillCheckController):
         return (min(max(target[0], 0.0), MOLE_VIEW_TARGET_MAX),
                 min(max(target[1], 0.0), MOLE_VIEW_TARGET_MAX))
 
-    def relayout(self, cell_rect):
-        self._apply_geometry(cell_rect)
-
     def handle_event(self, event):
         if self._passive:
             return False
-        if self._committed_at is not None:
+        if self._committed_at is not None or self._quota_met():
             return True
         if event.type == pg.MOUSEBUTTONDOWN and event.button == 1:
             self._fire(event.pos)
@@ -306,6 +304,9 @@ class MoleController(SkillCheckController):
             self._fire(pg.mouse.get_pos())
             return True
         return False
+
+    def _quota_met(self):
+        return self._progress >= self.challenge.hits_required
 
     def _fire(self, pos):
         if (self._last_shot_ms is not None
@@ -343,7 +344,7 @@ class MoleController(SkillCheckController):
         if hole < len(self._hole_px):
             self._last_hit_px = self._hole_px[hole]
         self._progress += 1
-        kill = self._progress >= self.challenge.hits_required
+        kill = self._quota_met()
         self._hit_juice(kill)
         self._emit_hit_px(shot_px, kill)
         if self._audio is not None and not self._passive:
@@ -430,7 +431,7 @@ class MoleController(SkillCheckController):
             idx = self.challenge.pop_up_at(elapsed)
             if idx is not None:
                 self._duck_pop(idx, elapsed)
-            kill = progress >= self.challenge.hits_required
+            kill = self._quota_met()
             self._hit_juice(kill)
             self._emit_hit_px(px, kill)
         elif not won:
@@ -519,10 +520,6 @@ class MoleController(SkillCheckController):
         if self._committed_at is None:
             return False
         return self._now - self._committed_at >= hold
-
-    @property
-    def landed(self):
-        return self._landed
 
     def draw(self, window):
         elapsed = self._frozen_elapsed()
@@ -876,8 +873,8 @@ class MoleController(SkillCheckController):
 
     @staticmethod
     def _bounce_height(pop, elapsed):
-        window = pop.t_down_ms - pop.t_up_ms + MOLE_GRACE_MS
-        u = (elapsed - pop.t_up_ms) / window
+        up_window_ms = pop.t_down_ms - pop.t_up_ms + MOLE_GRACE_MS
+        u = (elapsed - pop.t_up_ms) / up_window_ms
         if u <= 0.0 or u >= 1.0:
             return 0.0
         if u < MOLE_VIEW_POP_APEX_FRAC:
@@ -1073,7 +1070,8 @@ class MoleController(SkillCheckController):
 
     def _pip_badge(self, index):
         if index < min(self._progress, self.challenge.hits_required):
-            fill, border = Colors.accent, Colors.accent_hi
+            fill = self._signal_color(Colors.accent)
+            border = self._signal_color(Colors.accent_hi)
         else:
             fill, border = Colors.surface, Colors.border_strong
         radius = max(self._pip_h // MOLE_VIEW_PIP_RADIUS_DIV, 2)

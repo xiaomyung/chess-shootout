@@ -1,12 +1,13 @@
 """Whack-a-mole skill-check view controller: click/Space shots share one recoil
 lockout — a locked shot gets NO muzzle/kick/casing, only a dry-click cue, so the
 fire rate is felt — hits adjudicate through the engine's hit_at (grace window
-included), and BOTH outcomes end on one shared jump-out: the victim rises out of
-its home pit (RISE), hops through an arc half a cell high (HOP), lands with a
-squash (LAND_SQUASH) and settles on its own square at exactly the rest position
-the board draws a piece at — so the fail handoff has no seam and nothing appears
-out of thin air. A win keeps the shredded tier through the jump and then plays the
-deep-fry flash (WIN_HOLD covers hitstop + jump + fry); a fail knits the victim
+included). A WIN freezes the shredded victim for the kill hitstop and then blasts
+it off the pit it was shot at (WIN_HOLD covers hitstop + toss). A FAIL is the one
+that ends on the jump-out: the victim rises out of its home pit (RISE), hops
+through an arc half a cell high (HOP), lands with a squash (LAND_SQUASH) and
+settles on its own square at exactly the rest position the board draws a piece at
+— so the fail handoff has no seam and nothing appears out of thin air. On the way
+back that fail also knits the victim
 back together across HEAL_BUCKETS steps spanning RISE + HOP + REGROW, holds its
 home pit open until touchdown and then shrinks it closed over PIT_CLOSE, and the
 session restores the piece WITHOUT the board drop. The heal is a composite, not
@@ -68,8 +69,9 @@ swallow no input, never touch the OS cursor, stay muted, and replay the mover's
 shots via spectate_shot — which mirrors the mover's pop bookkeeping so a relayed
 hit ducks the mole on the mirror too. The OS cursor hides on active construction
 and is restored on every terminal path. CHESS_DEBUG_HITBOX draws the engine's true
-hit region (MOLE_HITBOX_FRAC circle on each hole SQUARE center, mapped through the
-controller's affine) and costs nothing when unset.
+hit region (the MOLE_HITBOX_RX_FRAC/RY_FRAC ellipse, lifted off each hole SQUARE
+center by MOLE_HITBOX_CY_FRAC and mapped through the controller's affine) and
+costs nothing when unset.
 
 A WON check no longer walks the victim home to be shot a second time by the capture
 choreography: on the killing hit the shredded tier-3 sprite freezes for the kill
@@ -2872,17 +2874,138 @@ def test_the_danger_blink_ignores_the_palette_entirely():
     assert pg.image.tostring(live, "RGBA") == pg.image.tostring(spec, "RGBA")
 
 
-def test_spectated_warm_feedback_sprites_are_untouched():
-    # Scope pin: only the signal elements recolour. The warm feedback set is
-    # shared between modes byte for byte -- muzzle, win pop, casings.
-    assert pg.image.tostring(muzzle_surface(14), "RGBA") \
-        == pg.image.tostring(muzzle_surface(14), "RGBA")
-    a = _mole()
-    b = _mole(passive=True)
-    surf_a = pg.Surface((640, 640), pg.SRCALPHA)
-    surf_b = pg.Surface((640, 640), pg.SRCALPHA)
-    a.update(400)
-    b.update(400)
-    a._draw_casings(surf_a)
-    b._draw_casings(surf_b)
-    assert pg.image.tostring(surf_a, "RGBA") == pg.image.tostring(surf_b, "RGBA")
+def _dark_surface():
+    surf = pg.Surface((640, 640))
+    surf.fill((0, 0, 0))
+    return surf
+
+
+def _painted_anywhere(surf):
+    dark = pg.mask.from_threshold(surf, (0, 0, 0), (10, 10, 10, 255)).count()
+    w, h = surf.get_size()
+    return w * h - dark
+
+
+def test_the_muzzle_flash_burns_warm_in_both_modes():
+    # Scope pin, palette side: the muzzle is FEEDBACK, not signal, so its
+    # builder takes no palette at all -- it can only ever paint amber, and the
+    # spectate blue must be nowhere in it.
+    muzzle = muzzle_surface(14)
+    seen = {muzzle.get_at((x, y))[:3]
+            for x in range(muzzle.get_width()) for y in range(muzzle.get_height())}
+    warm, blue = pg.Color(Colors.amber_hi), pg.Color(Colors.spectate)
+    assert (warm.r, warm.g, warm.b) in seen, "the flash core is the warm amber"
+    assert (blue.r, blue.g, blue.b) not in seen
+
+
+def test_spectated_warm_feedback_lands_identically_through_both_draw_paths():
+    # Scope pin, draw side: the two warm elements the MIRROR really does draw --
+    # the win pop and the ejected brass -- must come out of a passive
+    # controller's draw byte for byte the same as the mover's.
+    won_live, won_spec = _mole(on_shot=MagicMock()), _mole(passive=True)
+    pop_live, pop_spec = _dark_surface(), _dark_surface()
+    for ctrl in (won_live, won_spec):
+        ctrl.update(900)
+        ctrl.resolve(True)
+    won_live._draw_win_pop(pop_live, (0, 0))
+    won_spec._draw_win_pop(pop_spec, (0, 0))
+    assert _painted_anywhere(pop_live) > 0, "the win pop really painted something"
+    assert pg.image.tostring(pop_live, "RGBA") == pg.image.tostring(pop_spec, "RGBA")
+
+    live, spec = _mole(on_shot=MagicMock()), _mole(passive=True)
+    live.update(800)
+    live.handle_event(_click(_hole_px(0)))
+    spec.update(800)
+    spec.spectate_shot(800, 0, False, progress=1, target=(2.5, 2.5))
+    assert len(live._casings) == len(spec._casings) == 1, "both modes ejected a case"
+    brass_live, brass_spec = _dark_surface(), _dark_surface()
+    live.update(900)
+    spec.update(900)
+    live._draw_casings(brass_live)
+    spec._draw_casings(brass_spec)
+    assert _painted_anywhere(brass_live) > 0, "the brass really is on screen"
+    assert pg.image.tostring(brass_live, "RGBA") == pg.image.tostring(brass_spec, "RGBA")
+
+
+def test_the_spectated_hit_pips_wear_the_spectate_palette():
+    # The pips are a SIGNAL row -- they say "this is how far the shooter got" --
+    # and _draw_badges runs on the mirror too, so they were the one warm element
+    # left glowing accent-orange beside a board full of spectate blue.
+    live, spec = _mole(on_shot=MagicMock()), _mole(passive=True)
+    live._progress = spec._progress = 2
+    filled_live, filled_spec = live._pip_badge(0), spec._pip_badge(0)
+    assert filled_live is not filled_spec
+    assert pg.image.tostring(filled_live, "RGBA") != pg.image.tostring(filled_spec, "RGBA")
+    blue, accent = pg.Color(Colors.spectate), pg.Color(Colors.accent)
+    seen = {filled_spec.get_at((x, y))[:3]
+            for x in range(filled_spec.get_width()) for y in range(filled_spec.get_height())}
+    assert (blue.r, blue.g, blue.b) in seen, "the mirror's filled pip is the spectate blue"
+    assert (accent.r, accent.g, accent.b) not in seen
+    assert live._pip_badge(2) is spec._pip_badge(2), \
+        "the empty slots carry no palette, so both modes share one sprite"
+    assert live._pip_badge(0) is filled_live and spec._pip_badge(0) is filled_spec, \
+        "and the badge cache keys on the palette, so the modes never collide"
+
+
+def test_online_stops_taking_fire_once_the_local_quota_is_met():
+    # Online the client never self-commits, so nothing closed the input after
+    # the winning hit: a later pop could pass hit_at, re-enter _register_hit,
+    # compute kill=True a SECOND time and fire the whole kill sequence again --
+    # a doubled callout and a second play_whack_kill through the gun -- while
+    # the one server verdict was still in flight. The latch is input-side only:
+    # resolve() is still what ends the check.
+    on_shot = MagicMock()
+    hits = []
+    ctrl = _mole(on_shot=on_shot, on_hit_px=lambda px, kill: hits.append(kill))
+    for now, hole in ((800, 0), (2000, 1), (3200, 2)):
+        ctrl.update(now)
+        ctrl.handle_event(_click(_hole_px(hole)))
+    assert ctrl._progress == 3 and hits == [False, False, True]
+    assert on_shot.call_count == 3
+    assert ctrl._audio.play_whack_kill.call_count == 1
+    assert ctrl.landed is None, "the verdict is still the server's"
+
+    ctrl.update(4400)
+    assert ctrl.challenge.pop_up_at(4400) is not None, \
+        "a fourth pop really is up and would have been hittable"
+    assert ctrl.handle_event(_click(_hole_px(0))) is True, \
+        "the check still owns the mouse — the click never reaches the board"
+    assert on_shot.call_count == 3, "and nothing more reaches the wire"
+    assert ctrl._progress == 3, "the quota cannot be overshot"
+    assert hits == [False, False, True], "no second kill handed to the gun"
+    assert ctrl._audio.play_whack_kill.call_count == 1
+
+
+def test_a_committed_check_swallows_further_fire_without_acting_on_it():
+    # The post-commit gate: once the verdict has landed the overlay is still up
+    # for its hold, and every click on it has to die there rather than fall
+    # through to the board underneath.
+    on_shot = MagicMock()
+    ctrl = _mole(on_shot=on_shot)
+    ctrl.update(900)
+    ctrl.resolve(False)
+    assert ctrl._committed_at is not None
+    casings = list(ctrl._casings)
+
+    ctrl.update(2000)
+    assert ctrl.handle_event(_click(_hole_px(1))) is True
+    assert ctrl.handle_event(_space()) is True
+    assert on_shot.call_count == 0, "a resolved check relays nothing"
+    assert ctrl._progress == 0 and ctrl._miss_count == 0
+    assert ctrl._casings == casings and ctrl._last_shot_ms is None, \
+        "no muzzle, no kick, no brass — the shot never happened"
+
+
+def test_a_resumed_check_keeps_the_already_whacked_pop_underground():
+    # /resume restores the server's last_hit_pop, but without a duck anchor to
+    # go with it the mole the mover already whacked came back at FULL height for
+    # the rest of its window — and the honest re-shot at it was charged as a
+    # whiff, because the engine (rightly) refuses to score the same pop twice.
+    resumed = _mole(on_shot=MagicMock(), progress=1, last_hit_pop=0)
+    assert resumed._last_hit_anim_ms is not None, "the duck is seeded as already over"
+    assert resumed._render_pop(800.0) is None, "the whacked pop stays in its hole"
+
+    fresh = _mole(on_shot=MagicMock())
+    rendered = fresh._render_pop(800.0)
+    assert rendered is not None and rendered[0] == 0, \
+        "an untouched pop in the same window is still up"

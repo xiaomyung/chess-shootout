@@ -346,10 +346,11 @@ def test_play_whack_hit_no_args_uses_index_zero(manager):
     pool[1].play.assert_not_called()
 
 
-def test_play_whack_hit_combo_climbs_pitch_ladder(manager):
+def test_play_whack_hit_index_climbs_pitch_ladder(manager):
+    # the hit streak is the ladder index: the Nth hit in a row plays the Nth rung.
     pool = [MagicMock() for _ in range(4)]
     manager._slots["whack_hit"] = pool
-    manager.play_whack_hit(combo=2)
+    manager.play_whack_hit(index=2)
     pool[2].play.assert_called_once_with(fade_ms=ONESHOT_FADE_MS)
 
 
@@ -361,10 +362,10 @@ def test_play_combo_hit_no_args_uses_index_zero(manager):
     pool[1].play.assert_not_called()
 
 
-def test_play_combo_hit_combo_climbs_pitch_ladder(manager):
+def test_play_combo_hit_index_climbs_pitch_ladder(manager):
     pool = [MagicMock() for _ in range(4)]
     manager._slots["combo_hit"] = pool
-    manager.play_combo_hit(combo=3)
+    manager.play_combo_hit(index=3)
     pool[3].play.assert_called_once_with(fade_ms=ONESHOT_FADE_MS)
 
 

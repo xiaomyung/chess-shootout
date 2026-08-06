@@ -2,7 +2,7 @@ import math
 
 import pygame as pg
 
-from chessshootout.backend.utils import Square, BOARD_SIZE
+from chessshootout.backend.utils import BOARD_SIZE, Square
 from chessshootout.frontend.skillcheck.controller import SkillCheckController
 from chessshootout.frontend.skillcheck.juice import (
     TORN_MAX_TIER, Trauma, Hitstop, sakurai_vibrate, torn_sprite)
@@ -127,7 +127,7 @@ COMBO_VIEW_FIRE_ALPHA_MIN = 120
 COMBO_VIEW_FIRE_ALPHA_MAX = 230
 COMBO_VIEW_FIRE_BOB_FRAC = 0.12
 
-COMBO_VIEW_BOP_AMP_FRAC = 0.12
+COMBO_VIEW_BOB_AMP_FRAC = 0.12
 COMBO_VIEW_SHUFFLE_AMP_FRAC = 0.06
 COMBO_VIEW_SHUFFLE_PERIOD = 90.0
 
@@ -288,7 +288,7 @@ def _pip_surface(size, struck):
 def _flash_layer(w, h):
     def build():
         surf = pg.Surface((max(int(w), 1), max(int(h), 1)))
-        surf.fill((255, 255, 255))
+        surf.fill(pg.Color(COMBO_VIEW_FLASH_WHITE))
         return surf
     return memoized_surface(_FLASH_CACHE, (int(w), int(h)), build)
 
@@ -298,6 +298,12 @@ def _emoji_sprite(char, size):
         base = emoji_surface(char, size)
         return base.copy() if base is not None else None
     return memoized_surface(_EMOJI_CACHE, (char, size), build)
+
+
+def _victim_token(surface):
+    if surface is None:
+        return None
+    return (surface.get_size(), hash(pg.image.tobytes(surface, "RGBA")))
 
 
 class ComboController(SkillCheckController):
@@ -320,7 +326,7 @@ class ComboController(SkillCheckController):
         self._closed_at = None
         self._lockout_until = now_ms
         self._last_accept_ms = None
-        self._torn_key = hash(challenge.prompts)
+        self._torn_key = (hash(challenge.prompts), _victim_token(victim_surface))
         self._prompt_started_ms = now_ms + COMBO_INTRO_MS
         self._judgement = None
         self._judgement_at = now_ms
@@ -361,7 +367,7 @@ class ComboController(SkillCheckController):
         self._pad_r = max(int(self._cell * COMBO_VIEW_PAD_RADIUS_FRAC),
                           COMBO_VIEW_PAD_RADIUS_MIN_PX)
         self._hub_r = max(int(self._pad_r * COMBO_VIEW_HUB_FRAC), 1)
-        self._bbox = 2 * self._pad_r
+        self._pad_size = 2 * self._pad_r
         self._pad_top = cy - self._pad_r
         self._pad_bottom = cy + self._pad_r
         self._judge_font = get_display_font(max(int(self._cell * COMBO_VIEW_JUDGE_FONT_FRAC), 14))
@@ -392,9 +398,6 @@ class ComboController(SkillCheckController):
         start = self._pad_center[0] - total // 2
         self._strip_y = self._pad_top - max(int(self._cell * COMBO_VIEW_STRIP_GAP_FRAC), 12)
         self._strip_slots = [start + i * (self._chip + gap) + self._chip // 2 for i in range(n)]
-
-    def relayout(self, cell_rect):
-        self._apply_geometry(cell_rect)
 
     def set_board_rect(self, board_rect):
         new_rect = pg.Rect(board_rect) if board_rect is not None else None
@@ -519,6 +522,11 @@ class ComboController(SkillCheckController):
         self._confetti = None
         self._confetti_at = None
 
+    def _retract_fail(self):
+        self._fail_started = None
+        if self._judgement == _JUDGE_FAIL:
+            self._judgement = None
+
     def _win(self):
         self._present_win()
         self._close()
@@ -544,9 +552,11 @@ class ComboController(SkillCheckController):
         return self._brilliant_streak >= COMBO_VIEW_STREAK_FIRE
 
     def resolve(self, won):
-        if won and self._win_flash_until is None:
-            self._present_win()
-        elif not won and self._fail_started is None:
+        if won:
+            self._retract_fail()
+            if self._win_flash_until is None:
+                self._present_win()
+        elif self._fail_started is None:
             if self._win_flash_until is not None:
                 self._retract_win()
             self._present_fail()
@@ -582,15 +592,9 @@ class ComboController(SkillCheckController):
     def done(self):
         return self._done_after(COMBO_VIEW_RESULT_HOLD_MS)
 
-    @property
-    def landed(self):
-        return self._landed
-
     def _spawn_flying(self, direction):
-        if self._progress < len(self._strip_slots):
-            sx = self._strip_slots[self._progress]
-        else:
-            sx = self._pad_center[0]
+        sx = (self._strip_slots[self._progress] if self._progress < len(self._strip_slots)
+              else self._pad_center[0])
         self._flying.append((direction, sx, self._strip_y, self._now))
 
     def _spawn_sparks(self):
@@ -620,24 +624,24 @@ class ComboController(SkillCheckController):
         cached = self._scaled.get(id(src))
         if cached is not None:
             return cached
-        if src.get_width() == self._cell and src.get_height() == self._cell:
-            surf = src
-        else:
-            surf = pg.transform.smoothscale(src, (self._cell, self._cell))
+        surf = (src if src.get_size() == (self._cell, self._cell)
+                else pg.transform.smoothscale(src, (self._cell, self._cell)))
         self._scaled[id(src)] = surf
         return surf
 
     def draw(self, window):
-        self._draw_dance_floor(window)
-        self._draw_actors(window)
-        self._draw_spotlight(window)
-        self._draw_strip_chips(window)
-        self._draw_strip(window)
-        self._draw_pad(window)
-        self._draw_pips(window)
-        self._draw_flying(window)
-        self._draw_sparks(window)
-        self._draw_white_flash(window)
+        fade = self._exit_fade()
+        shake = self._shake()
+        self._draw_dance_floor(window, fade)
+        self._draw_actors(window, fade)
+        self._draw_spotlight(window, fade)
+        self._draw_strip_chips(window, fade, shake)
+        self._draw_strip(window, fade, shake)
+        self._draw_pad(window, fade, shake)
+        self._draw_pips(window, fade, shake)
+        self._draw_flying(window, shake)
+        self._draw_sparks(window, shake)
+        self._draw_white_flash(window, shake)
         self._draw_confetti(window)
         self._draw_torn_victim(window)
         self._draw_win_flash(window)
@@ -697,10 +701,10 @@ class ComboController(SkillCheckController):
                         + (1.0 - COMBO_VIEW_SPOT_WARN_FLICKER_MIN) * flicker)
         return base.lerp(_RIM_LOSS, min(max(mix, 0.0), 1.0))
 
-    def _draw_spotlight(self, window):
+    def _draw_spotlight(self, window, fade=None):
         if self._spot_layer is None or self._board_rect is None:
             return
-        fade = self._exit_fade()
+        fade = self._exit_fade() if fade is None else fade
         if fade <= 0.0:
             return
         radius = self._spot_radius()
@@ -726,13 +730,14 @@ class ComboController(SkillCheckController):
     def _beat(self):
         return (1.0 - math.cos(2.0 * math.pi * self._beat_phase)) / 2.0
 
-    def _draw_dance_floor(self, window):
+    def _draw_dance_floor(self, window, fade=None):
         if self._geom is None or self._victim_sq is None:
             return
-        alpha = int(COMBO_VIEW_DANCE_ALPHA * self._beat() * self._exit_fade())
+        fade = self._exit_fade() if fade is None else fade
+        alpha = int(COMBO_VIEW_DANCE_ALPHA * self._beat() * fade)
         if alpha <= 0:
             return
-        lit_r = None if self._spot_layer is None else self._spot_radius()
+        lit_r = None if self._board_rect is None else self._spot_radius()
         tint = _solid_square(self._cell, Colors.accent)
         tint.set_alpha(alpha)
         px, py = self._pad_center
@@ -743,15 +748,15 @@ class ComboController(SkillCheckController):
                     continue
                 window.blit(tint, (cx - self._cell // 2, cy - self._cell // 2))
 
-    def _draw_actors(self, window):
+    def _draw_actors(self, window, fade=None):
         if self._geom is None:
             return
-        fade = self._exit_fade()
+        fade = self._exit_fade() if fade is None else fade
         beat = (1.0 if self._hitstop.frozen(self._now) else self._beat()) * fade
         attacker = self._scaled_sprite(self._attacker_src)
         if attacker is not None and self._from_sq is not None:
             cx, cy = self._geom(self._from_sq)
-            bob = int(self._cell * COMBO_VIEW_BOP_AMP_FRAC * beat)
+            bob = int(self._cell * COMBO_VIEW_BOB_AMP_FRAC * beat)
             window.blit(attacker, attacker.get_rect(center=(cx, cy - bob)))
         victim = self._scaled_sprite(self._victim_src)
         showing_torn = self._torn_until is not None and self._now < self._torn_until
@@ -774,11 +779,11 @@ class ComboController(SkillCheckController):
                                        self._cell * COMBO_VIEW_WIGGLE_AMP_FRAC))
         return 0
 
-    def _draw_strip_chips(self, window):
-        fade = self._exit_fade()
+    def _draw_strip_chips(self, window, fade=None, shake=None):
+        fade = self._exit_fade() if fade is None else fade
         if fade <= 0.0:
             return
-        ox, oy = self._shake()
+        ox, oy = self._shake() if shake is None else shake
         for i, sx in enumerate(self._strip_slots):
             intro = self._slot_intro_k(i)
             if intro <= 0.0:
@@ -791,11 +796,11 @@ class ComboController(SkillCheckController):
                 center=(sx + ox + self._slot_wiggle(i), self._strip_y + oy - dy))
             window.blit(chip, rect)
 
-    def _draw_strip(self, window):
-        fade = self._exit_fade()
+    def _draw_strip(self, window, fade=None, shake=None):
+        fade = self._exit_fade() if fade is None else fade
         if fade <= 0.0:
             return
-        ox, oy = self._shake()
+        ox, oy = self._shake() if shake is None else shake
         deflate = self._deflate_scale()
         fire = self._fire_active()
         for i, sx in enumerate(self._strip_slots):
@@ -845,13 +850,13 @@ class ComboController(SkillCheckController):
         return max(COMBO_VIEW_DEFLATE_FLOOR,
                    1.0 - COMBO_VIEW_DEFLATE_SPAN * (t / COMBO_VIEW_TORN_MS))
 
-    def _draw_pad(self, window):
+    def _draw_pad(self, window, fade=None, shake=None):
         if self._passive:
             return
-        fade = self._exit_fade()
+        fade = self._exit_fade() if fade is None else fade
         if fade <= 0.0:
             return
-        ox, oy = self._shake()
+        ox, oy = self._shake() if shake is None else shake
         nx, ny = self._press_offset()
         intro = self._intro_k()
         rise = int(self._cell * COMBO_VIEW_INTRO_RISE_FRAC * (1.0 - intro))
@@ -879,29 +884,25 @@ class ComboController(SkillCheckController):
         window.blit(fill, (left, top))
 
     def _draw_receptor_flashes(self, window, left, top):
-        for direction, start in self._receptor_flash.items():
-            t = self._now - start
-            if t < 0 or t >= COMBO_VIEW_RECEPTOR_FLASH_MS:
-                continue
-            fill = _wedge_overlay(self._pad_r, self._hub_r, direction,
-                                  self._signal_color(Colors.accent_hi))
-            fill.set_alpha(int(COMBO_VIEW_RECEPTOR_FLASH_ALPHA
-                               * (1.0 - t / COMBO_VIEW_RECEPTOR_FLASH_MS)))
-            window.blit(fill, (left, top))
+        flashes = [(direction, start, COMBO_VIEW_RECEPTOR_FLASH_MS,
+                    COMBO_VIEW_RECEPTOR_FLASH_ALPHA, self._signal_color(Colors.accent_hi))
+                   for direction, start in self._receptor_flash.items()]
         if self._wrong_flash is not None:
-            direction, start = self._wrong_flash
+            flashes.append((*self._wrong_flash, COMBO_VIEW_WRONG_FLASH_MS,
+                            COMBO_VIEW_WRONG_FLASH_ALPHA, Colors.loss))
+        for direction, start, span, alpha, color in flashes:
             t = self._now - start
-            if 0 <= t < COMBO_VIEW_WRONG_FLASH_MS:
-                fill = _wedge_overlay(self._pad_r, self._hub_r, direction, Colors.loss)
-                fill.set_alpha(int(COMBO_VIEW_WRONG_FLASH_ALPHA
-                                   * (1.0 - t / COMBO_VIEW_WRONG_FLASH_MS)))
-                window.blit(fill, (left, top))
+            if t < 0 or t >= span:
+                continue
+            fill = _wedge_overlay(self._pad_r, self._hub_r, direction, color)
+            fill.set_alpha(int(alpha * (1.0 - t / span)))
+            window.blit(fill, (left, top))
 
-    def _draw_pips(self, window):
-        fade = self._exit_fade()
+    def _draw_pips(self, window, fade=None, shake=None):
+        fade = self._exit_fade() if fade is None else fade
         if fade <= 0.0:
             return
-        ox, oy = self._shake()
+        ox, oy = self._shake() if shake is None else shake
         intro = self._intro_k()
         size = max(int(self._cell * COMBO_VIEW_PIP_SIZE_FRAC), 8)
         gap = max(int(self._cell * COMBO_VIEW_PIP_GAP_FRAC), 4)
@@ -914,8 +915,8 @@ class ComboController(SkillCheckController):
             pip.set_alpha(int(255 * intro * fade))
             window.blit(pip, pip.get_rect(center=(x + ox, y + oy)))
 
-    def _draw_flying(self, window):
-        ox, oy = self._shake()
+    def _draw_flying(self, window, shake=None):
+        ox, oy = self._shake() if shake is None else shake
         for direction, sx, sy, start in self._flying:
             t = self._now - start
             if t < 0 or t >= COMBO_VIEW_ARROW_FLY_MS:
@@ -927,13 +928,13 @@ class ComboController(SkillCheckController):
             chev.set_alpha(int(255 * (1.0 - t / COMBO_VIEW_ARROW_FLY_MS)))
             window.blit(chev, chev.get_rect(center=(sx + ox, sy - rise + oy)))
 
-    def _draw_sparks(self, window):
-        if self._sparks is None or self._sparks_at is None:
+    def _draw_sparks(self, window, shake=None):
+        if self._passive or self._sparks is None or self._sparks_at is None:
             return
         t = self._now - self._sparks_at
         if t < 0 or t >= COMBO_VIEW_SPARK_MS:
             return
-        ox, oy = self._shake()
+        ox, oy = self._shake() if shake is None else shake
         cx, cy = self._pad_center
         progress = t / COMBO_VIEW_SPARK_MS
         reach = self._cell * COMBO_VIEW_SPARK_REACH_FRAC * progress
@@ -946,14 +947,14 @@ class ComboController(SkillCheckController):
             y = cy + math.sin(ang) * reach + oy
             window.blit(spark, (x - size / 2.0, y - size / 2.0))
 
-    def _draw_white_flash(self, window):
-        if self._white_flash is None:
+    def _draw_white_flash(self, window, shake=None):
+        if self._passive or self._white_flash is None:
             return
         direction, until = self._white_flash
         remaining = until - self._now
         if remaining <= 0:
             return
-        ox, oy = self._shake()
+        ox, oy = self._shake() if shake is None else shake
         nx, ny = self._press_offset()
         fill = _wedge_overlay(self._pad_r, self._hub_r, direction, COMBO_VIEW_FLASH_WHITE)
         fill.set_alpha(int(COMBO_VIEW_WHITE_FLASH_ALPHA * (remaining / COMBO_VIEW_WHITE_FLASH_MS)))
@@ -970,7 +971,7 @@ class ComboController(SkillCheckController):
             layer = _flash_layer(self._board_rect.width, self._board_rect.height)
             pos = self._board_rect.topleft
         else:
-            layer = _flash_layer(self._bbox, self._bbox)
+            layer = _flash_layer(self._pad_size, self._pad_size)
             pos = (self._pad_center[0] - self._pad_r, self._pad_center[1] - self._pad_r)
         layer.set_alpha(int(COMBO_VIEW_WIN_FLASH_ALPHA * (remaining / COMBO_VIEW_WIN_FLASH_MS)))
         window.blit(layer, pos)

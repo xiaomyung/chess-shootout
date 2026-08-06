@@ -106,35 +106,12 @@ class WheelController(SkillCheckController):
         self._hint_pad_y = round(r * WHEEL_HINT_PAD_Y_FRAC)
         self._hint_gap = round(r * WHEEL_HINT_GAP_FRAC)
 
-    def relayout(self, cell_rect):
-        self._apply_geometry(cell_rect)
-
-    def handle_event(self, event):
-        if self._passive:
-            return False
-        if self._committed_at is not None:
-            return True
-        if event.type == pg.MOUSEBUTTONDOWN and event.button == 1:
-            self._fire()
-            return True
-        if event.type == pg.KEYDOWN and event.key in (pg.K_SPACE, pg.K_RETURN):
-            self._fire()
-            return True
-        return False
-
     def _fire(self):
         if self._online:
             self._committed_at = self._now
             self._on_shot(self._now - self.start_ms)
             return
         self._commit(self._landed_now())
-
-    def resolve(self, won):
-        self._landed = won
-        if self._committed_at is None:
-            self._committed_at = self._now
-        self._resolved_at = self._now
-        self._emit_verdict()
 
     def spectate_shot(self, elapsed, miss_count, won, progress=0, direction=None, target=None):
         self._frozen_override = elapsed
@@ -154,10 +131,6 @@ class WheelController(SkillCheckController):
     @property
     def done(self):
         return self._done_after(WHEEL_RESULT_HOLD_MS)
-
-    @property
-    def landed(self):
-        return self._landed
 
     def _landed_now(self):
         return adjudicate(self.challenge, self._now, self.start_ms, 0.0)

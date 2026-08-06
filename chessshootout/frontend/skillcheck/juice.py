@@ -1,11 +1,10 @@
-import dataclasses
 import math
+from dataclasses import dataclass
 
 import pygame as pg
 
 from chessshootout.frontend.visual.cache import new_size_cache, memoized_surface
 from chessshootout.skillcheck.rng import seeded_floats
-
 
 _NOISE_FREQS = ((13.0, 7.0), (27.0, 11.0))
 _NOISE_PHASE = 1.7
@@ -19,7 +18,7 @@ _TORN_CACHE = new_size_cache()
 _FLASH_CACHE = new_size_cache()
 
 
-@dataclasses.dataclass(frozen=True)
+@dataclass(frozen=True)
 class _TornTier:
     notches: int
     notch_frac: float
@@ -130,16 +129,14 @@ def _punch(mask, cx, cy, radius):
     pg.draw.circle(mask, (0, 0, 0, 0), (int(cx), int(cy)), max(int(radius), 1))
 
 
-def _draw_cracks(surf, bbox, floats, idx, count, width, rgba=_CRACK_RGBA):
-    if width < 1 or rgba[3] <= 0:
-        return
+def _draw_cracks(surf, bbox, floats, idx, count, width):
     inset = bbox.inflate(-bbox.width // 2, -bbox.height // 2)
     for _ in range(count):
         x0 = inset.left + inset.width * floats[idx]
         y0 = inset.top + inset.height * floats[idx + 1]
         x1 = inset.left + inset.width * floats[idx + 2]
         y1 = inset.top + inset.height * floats[idx + 3]
-        pg.draw.line(surf, rgba, (x0, y0), (x1, y1), width)
+        pg.draw.line(surf, _CRACK_RGBA, (x0, y0), (x1, y1), width)
         idx += _TORN_CRACK_FLOATS
 
 

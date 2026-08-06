@@ -155,13 +155,11 @@ def _cross_arc_points(c, r_in, r_out, a0, a1):
 
 
 def _render_cross_blades(surf, k, c, gap, arm, tip_half, base_half):
-    for ux, uy in _AXES:
-        pg.draw.polygon(surf, _CROSS_EDGE, _cross_blade_points(
-            c, ux, uy, gap * k - k, (gap + arm) * k + k,
-            tip_half * k + k, base_half * k + k))
-    for ux, uy in _AXES:
-        pg.draw.polygon(surf, _CROSS_COLOR, _cross_blade_points(
-            c, ux, uy, gap * k, (gap + arm) * k, tip_half * k, base_half * k))
+    for color, pad in ((_CROSS_EDGE, k), (_CROSS_COLOR, 0)):
+        for ux, uy in _AXES:
+            pg.draw.polygon(surf, color, _cross_blade_points(
+                c, ux, uy, gap * k - pad, (gap + arm) * k + pad,
+                tip_half * k + pad, base_half * k + pad))
 
 
 def crosshair_surface(arm, gap, lw, bloom_bucket, out_bucket):
@@ -197,16 +195,18 @@ def crosshair_surface(arm, gap, lw, bloom_bucket, out_bucket):
     return memoized_surface(_MOLE_STATIC_CACHE, key, build)
 
 
+def _radial_glow(r, color, gain_scale):
+    surf = pg.Surface((2 * r, 2 * r))
+    for i in range(r, 0, -1):
+        gain = (1.0 - i / r) ** 2 * gain_scale
+        pg.draw.circle(surf, (int(color.r * gain), int(color.g * gain), int(color.b * gain)),
+                       (r, r), i)
+    return surf
+
+
 def cross_glow_surface(r):
-    def build():
-        surf = pg.Surface((2 * r, 2 * r))
-        for i in range(r, 0, -1):
-            gain = (1.0 - i / r) ** 2 * MOLE_VIEW_CROSS_GLOW_GAIN
-            col = (int(_CROSS_GLOW.r * gain), int(_CROSS_GLOW.g * gain),
-                   int(_CROSS_GLOW.b * gain))
-            pg.draw.circle(surf, col, (r, r), i)
-        return surf
-    return memoized_surface(_MOLE_STATIC_CACHE, ("crossglow", r), build)
+    return memoized_surface(_MOLE_STATIC_CACHE, ("crossglow", r),
+                            lambda: _radial_glow(r, _CROSS_GLOW, MOLE_VIEW_CROSS_GLOW_GAIN))
 
 
 def _danger_render(bucket):
@@ -236,13 +236,8 @@ def pit_telegraph_surface(rx, ry, bucket, danger=False, accent=Colors.accent):
 
 def muzzle_surface(r):
     def build():
-        surf = pg.Surface((2 * r, 2 * r))
         hot = pg.Color(Colors.amber_hi)
-        for i in range(r, 0, -1):
-            edge = i / r
-            col = pg.Color(int(hot.r * (1.0 - edge) ** 2), int(hot.g * (1.0 - edge) ** 2),
-                           int(hot.b * (1.0 - edge) ** 2))
-            pg.draw.circle(surf, col, (r, r), i)
+        surf = _radial_glow(r, hot, 1.0)
         for dx, dy in _AXES:
             pg.draw.line(surf, hot, (r, r), (r + dx * r, r + dy * r),
                          max(r // MOLE_VIEW_MUZZLE_RAY_W_DIV, 1))
@@ -251,16 +246,9 @@ def muzzle_surface(r):
 
 
 def win_pop_surface(r):
-    def build():
-        surf = pg.Surface((2 * r, 2 * r))
-        warm = pg.Color(Colors.amber)
-        for i in range(r, 0, -1):
-            edge = i / r
-            gain = (1.0 - edge) ** 2 * MOLE_VIEW_WIN_POP_GAIN
-            pg.draw.circle(surf, (int(warm.r * gain), int(warm.g * gain), int(warm.b * gain)),
-                           (r, r), i)
-        return surf
-    return memoized_surface(_MOLE_STATIC_CACHE, ("winpop", r), build)
+    return memoized_surface(
+        _MOLE_STATIC_CACHE, ("winpop", r),
+        lambda: _radial_glow(r, pg.Color(Colors.amber), MOLE_VIEW_WIN_POP_GAIN))
 
 
 def _casing_surface(w, h):

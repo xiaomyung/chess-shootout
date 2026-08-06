@@ -14,10 +14,10 @@ call-site guard -- its own choreography already walked the victim home and set
 it down on the rest position the board draws at), so there the missing frame is
 naked, and it reads in play as the piece blinking once right after it lands.
 
-The fix keeps the retiring controller for exactly one more draw (_farewell), so
-the handover frame still shows the overlay's final standing frame. draw() always
-follows update() inside draw_frame, so that farewell lands on the same frame the
-board went blank and nowhere else.
+The fix keeps the retiring controller for exactly one more draw
+(_last_draw_controller), so the handover frame still shows the overlay's final
+standing frame. draw() always follows update() inside draw_frame, so that last
+frame lands on the same frame the board went blank and nowhere else.
 """
 
 from unittest.mock import MagicMock
@@ -90,6 +90,23 @@ def _whack_seed(backend, frm, to):
     raise AssertionError("no WHACK seed found")
 
 
+def _own_the_canvas(app):
+    """Point the app's draw target at a surface this test owns.
+
+    Every pixel assertion below samples the victim cell after driving the whole
+    app, and the shared pg.display is not ours: two tests in one xdist worker
+    hand it back and forth, so a neighbour's leftovers decide what a sampled
+    pixel reads. GameScreen.window is a property over app.window, which carries
+    the backdrop and the skill-check overlay across; Board latched its own
+    reference at construction, so it gets pointed at the same canvas by hand.
+    """
+    canvas = app.window.copy()
+    app.window = canvas
+    app.game.board.window = canvas
+    app.review.board.window = canvas
+    return canvas
+
+
 def _open_failing_whack(monkeypatch):
     """Real local whack check on d5, run out to its fail commit.
 
@@ -100,6 +117,7 @@ def _open_failing_whack(monkeypatch):
     clock = FakeTicks()
     install_clock(monkeypatch, clock)
     app = make_app(1100, 800)
+    canvas = _own_the_canvas(app)
     start_single_screen(app)
     app.game.match.backend = make_backend({
         sq(7, 4): piece(K, WHITE), sq(0, 4): piece(K, BLACK),
@@ -108,7 +126,8 @@ def _open_failing_whack(monkeypatch):
     frm, to = sq(4, 3), sq(3, 3)
     cell_rect = app.game.board.cell_rect(to)
     app.draw_frame()
-    settled = app.window.subsurface(cell_rect).copy()
+    assert app.window is canvas, "the app never reached back for the display surface"
+    settled = canvas.subsurface(cell_rect).copy()
 
     app.game.skillcheck.reset(enabled=True, seed=_whack_seed(app.game.match.backend, frm, to))
     assert app.game.skillcheck_session.skillcheck_gate(frm, to) is True
@@ -140,7 +159,7 @@ def _run_to_handover(app, clock, cell_rect, stencil):
         app.draw_frame()
         active = app.game.skillcheck_overlay.is_active()
         frames.append((clock.t - commit_ms, active,
-                       _piece_only(app.window.subsurface(cell_rect), stencil)))
+                       _piece_only(app.window.subsurface(cell_rect).copy(), stencil)))
         if not active:
             return frames
     raise AssertionError("the fail hold never expired")
@@ -201,10 +220,10 @@ def test_overlay_gives_the_retiring_controller_one_last_draw_then_drops_it():
     assert controller.draw.call_count == 2, \
         "the frame the board was still suppressing must show the overlay's final frame"
     overlay.draw(window)
-    assert controller.draw.call_count == 2, "and exactly one farewell frame, never two"
+    assert controller.draw.call_count == 2, "and exactly one last-draw frame, never two"
 
 
-def test_cancel_drops_the_farewell_frame_so_teardown_paints_nothing():
+def test_cancel_drops_the_last_draw_frame_so_teardown_paints_nothing():
     window = pg.Surface((10, 10))
     controller = MagicMock(done=True, landed=False)
     overlay = SkillCheckOverlay()

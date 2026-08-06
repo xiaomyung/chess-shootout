@@ -148,7 +148,7 @@ class SkillCheckSession:
         overlay = self.screen.skillcheck_overlay
         return overlay.is_active() and not overlay.is_passive()
 
-    def sync_aim_check_gun(self):
+    def sync_aim_victim(self):
         screen = self.screen
         fx = screen.board.effects
         victim = screen.board.aim_suppressed_square

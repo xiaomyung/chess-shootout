@@ -21,6 +21,7 @@ class SkillCheckController:
 
     _audio = None
     _passive = False
+    _landed = None
 
     def _init_common(self, challenge, now_ms, deadline_ms, *, on_shot, passive, audio):
         self.challenge = challenge
@@ -76,7 +77,27 @@ class SkillCheckController:
         self._cue("play_skillcheck_win" if self.landed else "play_skillcheck_miss")
 
     def handle_event(self, event):
+        if self._passive:
+            return False
+        if self._committed_at is not None:
+            return True
+        if event.type == pg.MOUSEBUTTONDOWN and event.button == 1:
+            self._fire()
+            return True
+        if event.type == pg.KEYDOWN and event.key in (pg.K_SPACE, pg.K_RETURN):
+            self._fire()
+            return True
         return False
+
+    def resolve(self, won):
+        self._landed = won
+        if self._committed_at is None:
+            self._committed_at = self._now
+        self._resolved_at = self._now
+        self._emit_verdict()
+
+    def spectate_shot(self, elapsed, miss_count, won, progress=0, direction=None, target=None):
+        pass
 
     def update(self, now_ms):
         pass
@@ -85,7 +106,7 @@ class SkillCheckController:
         pass
 
     def relayout(self, cell_rect):
-        pass
+        self._apply_geometry(cell_rect)
 
     def close(self):
         pass
@@ -106,4 +127,4 @@ class SkillCheckController:
 
     @property
     def landed(self):
-        return None
+        return self._landed

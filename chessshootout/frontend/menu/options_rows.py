@@ -136,6 +136,9 @@ class _Row:
     def handle_key(self, event):
         return False
 
+    def cancel_edit(self):
+        return False
+
 
 class ToggleRow(_Row):
 
@@ -394,6 +397,13 @@ class PathRow(_Row):
     def handle_key(self, event):
         return self.input.handle_key(event)
 
+    def cancel_edit(self):
+        if not self.input.focused:
+            return False
+        self.input.focused = False
+        self.input.text = str(self.value_getter())
+        return True
+
 
 class TextRow(_Row):
 
@@ -549,6 +559,6 @@ class OptionsBody(ScrollHost):
     def cancel_focused_edit(self):
         for _, rows in self.sections:
             for row in rows:
-                if hasattr(row, "cancel_edit") and row.cancel_edit():
+                if row.cancel_edit():
                     return True
         return False

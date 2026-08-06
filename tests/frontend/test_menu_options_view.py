@@ -251,6 +251,31 @@ def test_pathrow_handle_key_types_into_focused_field():
     assert row.current_text() == "z"
 
 
+def test_pathrow_cancel_edit_restores_the_stored_folder():
+    # PathRow holds dirty text exactly like TextRow does -- current_text() reads
+    # straight out of the TextInput -- and commit_options_exit() feeds that text
+    # to the data-folder validator. Without its own cancel it had no way to give
+    # the typed path back, so it needs the same restore TextRow got.
+    row = _path_row(getter=lambda: "/tmp/x")
+    _draw_row(row, pg.Rect(40, 40, 420, 120))
+    row.input.focused = True
+    row.input.text = "/half/typed"
+    assert row.cancel_edit() is True
+    assert row.input.focused is False
+    assert row.current_text() == "/tmp/x"
+
+
+def test_pathrow_with_nothing_focused_declines_the_escape():
+    # the base _Row declares cancel_edit(); every row answers it, and a row that
+    # is not being edited must decline so the Esc falls through to the sub-view.
+    row = _path_row()
+    _draw_row(row, pg.Rect(40, 40, 420, 120))
+    assert row.input.focused is False
+    assert row.cancel_edit() is False
+    assert ToggleRow("Reduce motion", "calm", lambda: False,
+                     lambda v: None).cancel_edit() is False
+
+
 def test_text_row_reports_typed_value():
     row = TextRow("Server", "where online connects", pg.display.get_surface(),
                   lambda: "localhost:8000", placeholder="host or host:port")
@@ -318,6 +343,17 @@ def test_escape_cancels_the_edit_and_restores_the_stored_value():
     assert row.input.focused is False
     assert body.cancel_focused_edit() is False, \
         "with nothing being edited escape falls through to the sub-view"
+
+
+def test_text_row_ignores_keys_while_it_is_not_focused():
+    # the row only owns the keyboard while its own field is focused; otherwise it
+    # must decline so OptionsBody.handle_key keeps walking to the next row.
+    row = TextRow("Server", "where online connects", pg.display.get_surface(),
+                  lambda: "localhost:8000")
+    _draw_row(row)
+    assert row.input.focused is False
+    assert row.handle_key(pg.event.Event(pg.KEYDOWN, key=pg.K_z, mod=0, unicode="z")) is False
+    assert row.current_text() == "localhost:8000", "and nothing was typed into it"
 
 
 def test_a_row_with_no_edit_still_follows_its_getter():
@@ -613,3 +649,33 @@ def test_escape_in_the_server_field_cancels_before_it_leaves_options(app, monkey
 
     assert app.screen.escape() is True
     assert app.menu._active_view == "play", "a second escape leaves the sub-view"
+
+
+def test_escape_in_the_games_folder_field_cancels_before_the_exit_validation(app, monkeypatch):
+    """The same Esc chain over the OTHER editable row, which had no cancel of its
+    own. PathRow keeps the typed path in its TextInput and commit_options_exit()
+    reads it back through current_text(), so before this the first Esc fell
+    straight through to leaving the sub-view and handed the half-typed folder to
+    _validate_data_folder_on_exit -- a bogus "isn't writable" toast on a path the
+    user was still typing, or a real data-dir move if the fragment happened to
+    name a writable directory.
+    """
+    moved = []
+    monkeypatch.setattr(app.settings, "_apply_data_folder_change", moved.append)
+    app.menu.goto_view("options")
+    app.draw_frame()
+    row = app.settings._data_folder_row
+    stored = str(paths.get_data_dir())
+    row.input.focused = True
+    row.input.text = "/half/typed/folder"
+
+    assert app.screen.escape() is True
+    assert app.menu._active_view == "options", "the first escape stays in options"
+    assert row.input.focused is False
+    assert row.current_text() == stored, "the field snaps back to the stored folder"
+
+    assert app.screen.escape() is True
+    assert app.menu._active_view == "play", "a second escape leaves the sub-view"
+    assert moved == [], "the cancelled path never reaches the data-dir move"
+    assert app.toast.message != "That folder isn't writable", \
+        "nor the validator that would have complained about it"

@@ -7,8 +7,8 @@ from chessshootout.skillcheck.wheel import SKILLCHECK_DEADLINE_MS
 
 MOLE_POPS_TOTAL = 5
 MOLE_HITS_REQUIRED = 3
-MOLE_HITS_MINOR_VALUE = 3
-MOLE_HITS_QUEEN_VALUE = PIECE_VALUES[PieceType.QUEEN]
+MOLE_MINOR_PIECE_VALUE = 3
+MOLE_QUEEN_PIECE_VALUE = PIECE_VALUES[PieceType.QUEEN]
 MOLE_POPS_COMPRESSED = 3
 MOLE_HITS_COMPRESSED = 2
 MOLE_COMPRESS_DEADLINE_MS = 3500.0
@@ -55,8 +55,8 @@ def _clamped_hole_count(captured_value):
 
 
 def _required_hits(captured_value):
-    return (MOLE_HITS_REQUIRED + (captured_value >= MOLE_HITS_MINOR_VALUE)
-            + (captured_value >= MOLE_HITS_QUEEN_VALUE))
+    return (MOLE_HITS_REQUIRED + (captured_value >= MOLE_MINOR_PIECE_VALUE)
+            + (captured_value >= MOLE_QUEEN_PIECE_VALUE))
 
 
 def _compressed_hits(required):
@@ -84,7 +84,7 @@ def _up_times(count, value_diff):
             for i in range(count)]
 
 
-def _build(intro_ms, precue_ms, gaps, ups, first_up_min_ms):
+def _build_times(intro_ms, precue_ms, gaps, ups, first_up_min_ms):
     t = max(intro_ms, first_up_min_ms - precue_ms)
     times = []
     for i, up_ms in enumerate(ups):
@@ -111,7 +111,7 @@ def _fit_scale(target, components):
 
 
 def _scaled_times(scale, gaps, ups):
-    return _build(
+    return _build_times(
         max(MOLE_INTRO_FLOOR_MS, MOLE_INTRO_MS * scale),
         max(MOLE_PRECUE_FLOOR_MS, MOLE_PRECUE_MS * scale),
         [max(MOLE_GAP_FLOOR_MS, gap * scale) for gap in gaps],
@@ -161,7 +161,7 @@ class MoleChallenge:
         holes = _hole_sequence(seed, count, hole_count)
         gaps = _gap_sequence(seed)[:count]
         ups = _up_times(count, value_diff)
-        times = _build(MOLE_INTRO_MS, MOLE_PRECUE_MS, gaps, ups, MOLE_FIRST_POP_MIN_MS)
+        times = _build_times(MOLE_INTRO_MS, MOLE_PRECUE_MS, gaps, ups, MOLE_FIRST_POP_MIN_MS)
         if times[-1][2] + MOLE_GRACE_MS > deadline_ms:
             times, required = _refit_times(count, gaps, ups, deadline_ms, required)
         pops = tuple(MolePop(hole, telegraph, up, down)
@@ -213,7 +213,7 @@ def _free_squares(capture_sq, blocked, radius, board_size):
             if (row, col) not in blocked]
 
 
-def _min_gap_sq(square, picked):
+def _min_gap_squared(square, picked):
     row, col = square
     return min((row - other_row) ** 2 + (col - other_col) ** 2
                for other_row, other_col in picked)
@@ -223,7 +223,7 @@ def _farthest_index(candidates, picked, tie_value):
     best = -1
     tied = []
     for index, square in enumerate(candidates):
-        gap = _min_gap_sq(square, picked)
+        gap = _min_gap_squared(square, picked)
         if gap > best:
             best = gap
             tied = [index]

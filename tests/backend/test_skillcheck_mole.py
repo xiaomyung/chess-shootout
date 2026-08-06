@@ -589,13 +589,15 @@ def _motor_model_success_rate():
     return wins / 100.0
 
 
-def test_motor_model_sweep_is_deterministic_and_bounded():
-    # Diagnostic only: NO pass-band assertion on the rate itself.
-    first = _motor_model_success_rate()
-    second = _motor_model_success_rate()
-    assert first == second
-    assert isinstance(first, float)
-    assert 0.0 <= first <= 1.0
+def test_motor_model_sweep_matches_its_pinned_snapshot():
+    # The sweep is a pure function of frozen constants (the offsets above, the pop
+    # schedule and the hitbox), so "run it twice, same answer" could never fail --
+    # it was a tautology dressed up as a determinism check. Pinning the VALUE is
+    # what makes it a regression: retune the schedule or the hitbox and this trips.
+    # The number is DIAGNOSTIC, not a balance target -- there is no success band to
+    # ease toward, so a change here is a prompt to look, not a failure to "fix" by
+    # nudging the rate back.
+    assert _motor_model_success_rate() == pytest.approx(0.93)
 
 
 def test_pick_taunt_is_deterministic_per_seed_and_drawn_from_the_table():
@@ -610,8 +612,9 @@ def test_pick_taunt_is_deterministic_per_seed_and_drawn_from_the_table():
 
 
 def test_occupied_squares_is_row_major_and_skips_empty_cells():
-    # the hole-layout derivation is seeded off this list, so its ORDER is
-    # load-bearing: server and client must walk the grid identically.
+    # hole_squares() consumes this as a set (order-independence is pinned by its
+    # own test), so what matters here is the CONTENT: every occupied cell and no
+    # empty one, in the row-major shape the scan is specified to produce.
     state = [[None] * 3 for _ in range(3)]
     state[0][2] = "wK"
     state[2][0] = "bq"
@@ -629,7 +632,7 @@ def test_deadline_is_single_sourced_from_wheel():
 def test_queen_value_is_single_sourced_from_the_piece_table():
     # the quota ladder steps at the queen's value; restating 9 here would silently
     # desync the ladder from the engine if a piece were ever revalued.
-    assert mole.MOLE_HITS_QUEEN_VALUE == PIECE_VALUES[PieceType.QUEEN]
+    assert mole.MOLE_QUEEN_PIECE_VALUE == PIECE_VALUES[PieceType.QUEEN]
     assert mole._required_hits(PIECE_VALUES[PieceType.QUEEN]) == mole.MOLE_POPS_TOTAL, \
         "a queen capture still demands every pop"
 

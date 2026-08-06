@@ -5,7 +5,7 @@ capturer's cell-scaled sprite and the captured value into the challenge, and the
 controller's own geom-derived affine — the single owner of the px->board inverse —
 round-trips square centers on both orientations. Victim-square suppression now covers
 {AIM, WHACK, COMBO}
-while sync_aim_check_gun stays an AIM-only coupling, and every path that discards a
+while sync_aim_victim stays an AIM-only coupling, and every path that discards a
 live controller (teardown, screen exit, new-game reset, overlay replacement) calls
 close() so the whack check's hidden OS cursor can never leak. The input swallow
 path is pinned: arrows reach the combo pad, never move-stepping.
@@ -126,6 +126,27 @@ def _occupied(app):
     state = app.game.match.state
     return [(row, col) for row in range(8) for col in range(8)
             if state[row][col] is not None]
+
+
+def _ep_capture_board(app):
+    # White pawn e5 x d6 e.p.: the black pawn sits on d5, the landing square d6 is
+    # EMPTY, and the piece that dies is on neither of them. Every other capture in
+    # the game has victim == to, which is exactly why this one is worth pinning.
+    app.game.match.backend = make_backend({
+        sq(7, 4): piece(K, WHITE), sq(0, 4): piece(K, BLACK),
+        sq(3, 4): piece(P, WHITE), sq(3, 3): piece(P, BLACK),
+    }, turn=WHITE, ep_target=sq(2, 3))
+    return sq(3, 4), sq(2, 3), sq(3, 3)
+
+
+def _ep_gate(app, want):
+    frm, to, victim = _ep_capture_board(app)
+    seed = _kind_seed(app.game.match.backend, frm, to, want)
+    app.game.skillcheck.reset(enabled=True, seed=seed)
+    assert app.game.skillcheck_session.skillcheck_gate(frm, to) is True
+    composed = "{}:{}:{}{}{}{}:{}".format(
+        seed, 0, frm.row, frm.col, to.row, to.col, want.value)
+    return frm, to, victim, composed
 
 
 def test_local_whack_gate_hands_the_controller_the_engine_hole_squares():
@@ -263,12 +284,12 @@ def test_board_draw_skips_the_suppressed_attacker_square():
     assert not region_untouched(sq(7, 4)), "the white king still renders"
 
 
-def test_sync_aim_check_gun_is_inert_for_whack_and_combo():
+def test_sync_aim_victim_is_inert_for_whack_and_combo():
     app = _local_app()
     for want in (SkillCheckKind.WHACK, SkillCheckKind.COMBO):
         _gate(app, want)
         assert app.game.board.aim_suppressed_square is not None
-        app.game.skillcheck_session.sync_aim_check_gun()
+        app.game.skillcheck_session.sync_aim_victim()
         fx = app.game.board.effects
         assert fx.aim_victim is None, \
             "{}: the aim held-gun must not draw over the overlay's victim".format(want.value)
@@ -276,13 +297,13 @@ def test_sync_aim_check_gun_is_inert_for_whack_and_combo():
         app.game.skillcheck_session.teardown_skillcheck_overlay()
 
 
-def test_sync_aim_check_gun_still_arms_for_aim():
+def test_sync_aim_victim_still_arms_for_aim():
     app = _local_app()
     frm, to, _ = _gate(app, SkillCheckKind.AIM)
-    app.game.skillcheck_session.sync_aim_check_gun()
+    app.game.skillcheck_session.sync_aim_victim()
     assert app.game.board.effects.aim_victim == to, "the AIM coupling is untouched"
     app.game.skillcheck_session.teardown_skillcheck_overlay()
-    app.game.skillcheck_session.sync_aim_check_gun()
+    app.game.skillcheck_session.sync_aim_victim()
     assert app.game.board.effects.aim_victim is None
 
 
@@ -473,9 +494,15 @@ def test_a_resumed_whack_restores_the_servers_whiff_count(passive):
     app.game.skillcheck_session.teardown_skillcheck_overlay()
 
 
-def _mock_controller():
+def _mock_controller(passive=False):
+    # SkillCheckOverlay.is_passive() reads the PUBLIC .passive property (the
+    # controller base exposes it over its private _passive field). On a MagicMock
+    # every unset attribute auto-creates as a truthy Mock, so a stub that only set
+    # ._passive read as passive=True on every one of these tests -- and the
+    # deliberate override on the stale controller below was inert. Set the
+    # attribute the overlay actually reads, and set it on purpose either way.
     ctrl = MagicMock()
-    ctrl._passive = False
+    ctrl.passive = passive
     return ctrl
 
 
@@ -509,9 +536,12 @@ def test_reset_to_new_game_closes_the_live_controller():
 
 
 def test_overlay_replacement_closes_the_displaced_controller():
+    # The stale check must be PASSIVE for the gate to get as far as replacing it:
+    # a live one swallows the input and skillcheck_gate returns before it ever
+    # opens the second overlay. That is the case this pins -- a spectate mirror
+    # left standing when the next check arms.
     app = _local_app()
-    stale = _mock_controller()
-    stale._passive = True
+    stale = _mock_controller(passive=True)
     app.game.skillcheck_overlay.start(
         stale, _ctx(sq(1, 1), sq(2, 2)), lambda c, landed: None)
     _gate(app, SkillCheckKind.WHACK)
@@ -530,6 +560,31 @@ def test_normal_overlay_finish_also_closes_the_controller():
     app.game.skillcheck_overlay.update(0)
     ctrl.close.assert_called_once()
     assert done == [True]
+
+
+def test_a_kind_with_no_builder_opens_nothing_and_arms_nothing():
+    # build_controller() is a table lookup keyed by kind and returns None for any
+    # kind with no entry -- SkillCheckKind.NONE, what select_kind hands back for a
+    # locked or non-triggering move. open_skillcheck_overlay has to bail on that
+    # None BEFORE _arm_check_state runs, or the session would be left holding a
+    # kind, a target and suppressed squares with no controller drawing any of it.
+    app = _local_app()
+    frm, to = _capture_board(app)
+    session = app.game.skillcheck_session
+    assert build_controller(
+        SkillCheckKind.NONE,
+        CheckSpec(seed="none-seed", cell_rect=app.game.board.cell_rect(frm),
+                  now_ms=0, deadline_ms=5000.0)) is None
+
+    assert session.open_skillcheck_overlay(
+        SkillCheckKind.NONE, "none-seed", 0, 5000.0, frm, to, None, 1,
+        online=False) is False
+    assert app.game.skillcheck_overlay.is_active() is False
+    assert session.active_kind is None and session.active_seed is None
+    assert session.skillcheck_target is None
+    assert app.game.board.aim_suppressed_square is None
+    assert app.game.board.attacker_suppressed_square is None
+    assert session.whack_gun.from_sq is None, "and no gun was armed for it"
 
 
 def test_arrow_keys_reach_the_combo_pad_not_move_stepping():
@@ -977,3 +1032,71 @@ def test_whack_kill_at_is_inert_without_geometry_or_a_victim(monkeypatch):
     board.whack_kill_at(px, sq(3, 3), "white", None)
     assert fx.particles == [] and fx.holes == [] and fx.callouts == []
     assert fx._streak_count == 0
+
+
+# --- en passant: the one capture where from, to and victim are three squares ---
+
+def test_an_en_passant_whack_suppresses_the_ep_pawn_and_digs_around_the_landing():
+    # Two different squares do two different jobs here and it is easy to conflate
+    # them: the VICTIM square (d5) is what the overlay draws and the board must
+    # therefore hide, while the pits are dug around the square the capture LANDS
+    # on (d6, empty) -- because that is what the server passes to mole.holes_for.
+    # Anchoring either one on the other desyncs the client from the server's own
+    # derivation, and this is the only capture that can tell them apart.
+    app = _local_app()
+    frm, to, victim, composed = _ep_gate(app, SkillCheckKind.WHACK)
+    session = app.game.skillcheck_session
+    ctrl = app.game.skillcheck_overlay._controller
+    assert isinstance(ctrl, MoleController)
+    assert (frm, to, victim) == (sq(3, 4), sq(2, 3), sq(3, 3))
+
+    assert session.skillcheck_target == victim, "the check renders over the EP pawn"
+    assert app.game.board.aim_suppressed_square == victim, \
+        "and the live board hides that square, not the empty landing one"
+    assert app.game.board.attacker_suppressed_square is None, "whack never hides the capturer"
+
+    assert ctrl._hole_squares == mole.hole_squares(
+        composed, 1, (to.row, to.col), _occupied(app), 8), \
+        "the pits come off the LANDING square, exactly as the server re-derives them"
+    assert (victim.row, victim.col) not in ctrl._hole_squares, \
+        "the occupied set is the pre-move board, so the doomed pawn still blocks a pit"
+    assert (frm.row, frm.col) not in ctrl._hole_squares, "as does the capturer"
+
+
+def test_an_en_passant_whack_credits_the_kill_on_the_ep_pawn(monkeypatch):
+    # The kill package reads its victim off skillcheck_target. Point that at the
+    # landing square instead and match.piece_at() comes back None on an EP capture,
+    # so the whole kill -- gore, streak, the grunt that names the piece -- silently
+    # evaporates on the one capture that needs it most.
+    app = _local_app()
+    install_clock(monkeypatch, FakeTicks())
+    frm, to, victim, _ = _ep_gate(app, SkillCheckKind.WHACK)
+    session, fx = app.game.skillcheck_session, app.game.board.effects
+    ctrl = app.game.skillcheck_overlay._controller
+    assert ctrl.challenge.hits_required == 3, "a pawn takes three pops"
+    # spend first blood on the other side first, so this kill reaches the grunt
+    # that actually names a piece instead of the one-off FIRST BLOOD callout.
+    fx.register_kill("black", frm, app.game.board.cell_size, 0)
+    session.sync_whack_gun()
+    px = _land_hits(ctrl, 3)
+    assert ctrl.landed is True
+    assert {p["kind"] for p in _gore(fx)} == GORE
+    assert all(p["px"] == px for p in _gore(fx)), "the package lands on the pit it died in"
+    assert fx._streak_count == 1, "and the white side opens its own streak on it"
+    # the grunt names the EP pawn, which only the victim square could resolve
+    app.sound_manager.play_hit.assert_called_once_with(PieceType.PAWN)
+    session.teardown_skillcheck_overlay()
+
+
+def test_an_en_passant_combo_suppresses_the_ep_pawn_and_the_capturer():
+    app = _local_app()
+    frm, to, victim, _ = _ep_gate(app, SkillCheckKind.COMBO)
+    ctrl = app.game.skillcheck_overlay._controller
+    assert isinstance(ctrl, ComboController)
+    assert app.game.skillcheck_session.skillcheck_target == victim
+    assert app.game.board.aim_suppressed_square == victim, \
+        "the combo overlay draws the EP pawn, so the board leaves d5 alone"
+    assert app.game.board.attacker_suppressed_square == frm, \
+        "and the bopping capturer copy still owns e5"
+    assert ctrl._victim_sq == victim, "the controller torn-sprite anchors on the EP pawn too"
+    app.game.skillcheck_session.teardown_skillcheck_overlay()

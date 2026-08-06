@@ -8,8 +8,6 @@ independent per-input odds compound as prob**count.
 
 from pathlib import Path
 
-import pytest
-
 from chessshootout.skillcheck import combo, wheel
 from chessshootout.skillcheck.combo import ComboChallenge
 
@@ -131,13 +129,13 @@ def test_deadline_ms_is_single_sourced_from_wheel():
     assert combo.SKILLCHECK_DEADLINE_MS is wheel.SKILLCHECK_DEADLINE_MS
 
 
-def test_diagnostic_compounding_pass_probability_is_pure_arithmetic():
-    # Whole-combo pass = per_input ** count when the inputs are independent. This
-    # pins the compounding MODEL (harder as the count grows) purely from the
-    # challenge counts -- no easing pass-band is asserted; count is the only lever.
-    per_input = 0.95
-    expected = {5: 0.7737809375, 6: 0.735091890625, 7: 0.69833729609375}
+def test_the_prompt_count_is_the_only_lever_on_the_compounding_difficulty():
+    # Whole-combo pass = per_input ** prompt_count when the inputs are independent,
+    # so the count is the ONLY thing the challenge contributes to the difficulty
+    # curve -- and the count is all this can honestly pin. (The old second
+    # assertion re-derived per_input ** count and compared it to a hardcoded
+    # power of 0.95: arithmetic over a constant, which cannot fail once the count
+    # above is asserted.) No easing pass-band is asserted anywhere.
     for deadline, captured, count in [(5000.0, 0, 5), (5000.0, 3, 6), (5000.0, 9, 7)]:
         ch = ComboChallenge.from_seed("compound", deadline_ms=deadline, captured_value=captured)
         assert ch.prompt_count == count
-        assert per_input ** ch.prompt_count == pytest.approx(expected[count])

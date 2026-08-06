@@ -279,8 +279,8 @@ class SoundManager:
     def play_mole_heal(self):
         self._play("mole_heal")
 
-    def play_whack_hit(self, combo=0):
-        self._play_indexed("whack_hit", combo)
+    def play_whack_hit(self, index=0):
+        self._play_indexed("whack_hit", index)
 
     def play_whack_kill(self):
         self._play("whack_kill")
@@ -294,8 +294,8 @@ class SoundManager:
     def play_whiff_ricochet(self):
         self._play("whiff_ricochet")
 
-    def play_combo_hit(self, combo=0):
-        self._play_indexed("combo_hit", combo)
+    def play_combo_hit(self, index=0):
+        self._play_indexed("combo_hit", index)
 
     def play_combo_wrong(self):
         self._play("combo_wrong")

@@ -385,6 +385,21 @@ def test_shot_wins_combo_respects_the_shared_floor_and_deadline():
     assert online.shot_wins(COMBO, ch, late, progress=0, direction=first) is False
 
 
+def test_shot_wins_falls_through_to_a_loss_for_a_kind_it_cannot_adjudicate():
+    # The trailing `return False` past the COMBO branch is the last line of
+    # defence on the server's resolve path: a shot arriving under a kind with no
+    # adjudicator -- NONE is what select_kind hands back for a locked or
+    # non-triggering move -- must be a loss, not a fall-through win, no matter
+    # which payload rides along with it.
+    ch = _always_arc()
+    late = int(online.SKILLCHECK_DEADLINE_MS) - 1
+    assert online.shot_wins(NONE, ch, 300) is False
+    assert online.shot_wins(NONE, ch, late) is False
+    assert online.shot_wins(NONE, ch, 300, progress=0, direction="up") is False
+    assert online.shot_wins(NONE, ch, 300, target=(0.5, 0.5),
+                            hole_squares=((0, 0),), last_hit_pop=-1) is False
+
+
 def test_hits_required_dispatches_by_kind():
     assert online.hits_required(WHEEL, _always_arc()) == 1
     assert online.hits_required(AIM, AimChallenge.from_seed("a", 0)) == 1

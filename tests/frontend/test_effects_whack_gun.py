@@ -140,9 +140,14 @@ def test_aim_takes_the_short_way_round_the_wrap():
     em = _em()
     px, py = _pivot(em)
     g = _held(em)
-    g["aim"] = math.pi - 0.05
-    em.aim_gun_px((px - 200, py + 10), 16)
-    assert g["aim"] > math.pi - 0.05, \
+    start = math.pi - 0.05
+    g["aim"] = start
+    target = (px - 200, py - 10)
+    raw = em._angle_to(_pivot(em), target) - start
+    assert raw < -math.pi, \
+        "the unwrapped difference is a near-full turn backwards — the wrap is live here"
+    em.aim_gun_px(target, 16)
+    assert g["aim"] > start, \
         "crossing +pi keeps turning the same way instead of unwinding a full circle"
 
 
@@ -385,7 +390,8 @@ def test_the_capture_behind_a_won_whack_never_fires_a_second_time():
     assert em.projectiles == [], "no pellet leaves the barrel"
     assert em.particles == [], "and no muzzle flash either"
     assert em.holes == [] and em._shake is None, "nothing hits anything"
-    assert em.particles == [], "no impact ring, no blood, no ragdoll — the victim is gone"
+    assert {p["kind"] for p in em.particles}.isdisjoint({"impact", "blood", "ragdoll"}), \
+        "no impact ring, no blood, no ragdoll — the victim is gone"
     assert em.captures == [], "and the entry retires with the slide"
 
 
@@ -639,3 +645,52 @@ def test_the_taunt_tag_wears_the_loss_colour_instead_of_the_kill_amber():
     assert _ink(taunt["surf"])[1] < _ink(amber["surf"])[1] - 20, \
         "the taunt reads red like SKILL ISSUE, not gold like a hit word"
     assert pg.Color(Colors.loss).g < pg.Color(Colors.amber_hi).g
+
+
+def test_a_fail_with_nothing_to_capture_still_spends_the_gun_handoff():
+    # trigger_skillcheck_fail bumps instead of shooting when the "capture" turns
+    # out to have no victim (a locked quiet move). That branch reached no
+    # effects.miss() to spend the latch, so the NEXT real capture from that
+    # square inherited a predrawn gun and silently advanced without firing.
+    board = _fire_board([])
+    fx = board.effects
+    frm, to = Square(6, 4), Square(4, 4)
+    assert board.match.piece_at(to) is None, "the destination really is empty"
+    fx.hold_gun_px(now_ms=0, attacker_type="pawn", from_sq=frm, cell_size=board.cell_size)
+    fx.hand_off_gun_px()
+    assert fx._gun_handoff == frm
+
+    board.trigger_skillcheck_fail(frm, to)
+    assert fx.captures == [], "with no victim there is no volley to stage"
+    assert fx._gun_handoff is None, "and the latch is spent on the way out anyway"
+    assert fx.take_gun_handoff(frm) is False
+
+
+def test_the_fail_volley_still_inherits_the_gun_the_board_took_off_the_latch():
+    # The board now spends the latch up front, so it has to hand what it took
+    # straight to the miss — otherwise the whiff would draw a second gun the
+    # piece never let go of.
+    board = _fire_board([])
+    fx = board.effects
+    frm, victim = Square(6, 4), Square(1, 4)
+    assert board.match.piece_at(victim) is not None
+    fx.hold_gun_px(now_ms=0, attacker_type="pawn", from_sq=frm, cell_size=board.cell_size)
+    fx.hand_off_gun_px()
+
+    board.trigger_skillcheck_fail(frm, victim)
+    entry = fx.captures[-1]
+    assert entry["predrawn"] is True, "no second draw-flourish for a gun already in the hand"
+    assert entry["fire_at"] == entry["start"] + AIM_MS, "only the aim beat, no DRAW_MS"
+    assert fx._gun_handoff is None
+    assert fx.drops == [], "and nothing tumbles in between"
+
+
+def test_a_fail_with_no_handoff_behind_it_draws_for_itself():
+    board = _fire_board([])
+    fx = board.effects
+    frm, victim = Square(6, 4), Square(1, 4)
+    board.trigger_skillcheck_fail(frm, victim)
+    entry = fx.captures[-1]
+    assert entry["predrawn"] is False
+    assert entry["fire_at"] == entry["start"] + DRAW_MS + AIM_MS, \
+        "a fail with no check gun behind it still draws, aims, then whiffs"
