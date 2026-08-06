@@ -1,5 +1,7 @@
 import pygame as pg
 
+from chessshootout.frontend.visual.colors import Colors
+
 SKILLCHECK_RESULT_HOLD_MS = 200
 
 
@@ -62,6 +64,9 @@ class SkillCheckController:
                     and self._now - self._resolved_at >= SKILLCHECK_RESULT_HOLD_MS)
         return (self._committed_at is not None
                 and self._now - self._committed_at >= hold_ms)
+
+    def _signal_color(self, live):
+        return Colors.spectate if self._passive else live
 
     def _cue(self, method):
         if self._audio is not None and not self._passive:

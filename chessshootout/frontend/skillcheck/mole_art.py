@@ -63,11 +63,11 @@ def _pit_render(rim_color, glow_alpha, rim_scale=1.0):
     return render
 
 
-def pit_surface(rx, ry):
+def pit_surface(rx, ry, accent=Colors.accent):
     def build():
         return supersample((2 * rx, 2 * ry),
-                           _pit_render(Colors.accent, MOLE_VIEW_PIT_GLOW_ALPHA))
-    return memoized_surface(_MOLE_STATIC_CACHE, ("pit", rx, ry), build)
+                           _pit_render(accent, MOLE_VIEW_PIT_GLOW_ALPHA))
+    return memoized_surface(_MOLE_STATIC_CACHE, ("pit", rx, ry, accent), build)
 
 
 def pit_mouth(rx, ry):
@@ -93,14 +93,14 @@ def emerge_mask(w, rx, ry, fade):
     return memoized_surface(_MOLE_STATIC_CACHE, ("emerge", w, rx, ry, fade), build)
 
 
-def pit_front_surface(rx, ry):
+def pit_front_surface(rx, ry, accent=Colors.accent):
     def build():
-        pit = pit_surface(rx, ry)
+        pit = pit_surface(rx, ry, accent)
         half = max(pit.get_height() // 2, 1)
         front = pg.Surface((pit.get_width(), half), pg.SRCALPHA)
         front.blit(pit, (0, half - pit.get_height()))
         return front
-    return memoized_surface(_MOLE_STATIC_CACHE, ("pit_front", rx, ry), build)
+    return memoized_surface(_MOLE_STATIC_CACHE, ("pit_front", rx, ry, accent), build)
 
 
 def seam_band_surface(w, h):
@@ -217,20 +217,21 @@ def _danger_render(bucket):
     return _pit_render(rim, alpha, scale)
 
 
-def _telegraph_render(bucket):
+def _telegraph_render(bucket, accent):
     frac = bucket / (MOLE_VIEW_PULSE_BUCKETS - 1)
     blend = MOLE_VIEW_TELE_WHITE_MIN + (1.0 - MOLE_VIEW_TELE_WHITE_MIN) * frac
-    rim = pg.Color(Colors.accent).lerp(pg.Color(Colors.text), blend)
+    rim = pg.Color(accent).lerp(pg.Color(Colors.text), blend)
     alpha = int(MOLE_VIEW_PIT_GLOW_ALPHA
                 + (255 - MOLE_VIEW_PIT_GLOW_ALPHA) * frac * MOLE_VIEW_TELE_ALPHA_GAIN)
     return _pit_render(rim, alpha)
 
 
-def pit_telegraph_surface(rx, ry, bucket, danger=False):
+def pit_telegraph_surface(rx, ry, bucket, danger=False, accent=Colors.accent):
     def build():
-        render = _danger_render(bucket) if danger else _telegraph_render(bucket)
+        render = _danger_render(bucket) if danger else _telegraph_render(bucket, accent)
         return supersample((2 * rx, 2 * ry), render)
-    return memoized_surface(_MOLE_STATIC_CACHE, ("pit_tele", rx, ry, bucket, danger), build)
+    key = ("pit_tele", rx, ry, bucket, danger, accent)
+    return memoized_surface(_MOLE_STATIC_CACHE, key, build)
 
 
 def muzzle_surface(r):

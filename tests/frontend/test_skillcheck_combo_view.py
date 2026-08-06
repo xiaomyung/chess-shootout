@@ -1157,3 +1157,62 @@ def test_spectate_fast_forward_uses_expected_directions_for_intermediate_steps()
     assert set(ctrl._receptor_flash) == {"up", "left"}, \
         "the catch-up step flashes the prompt it consumed; only the live press " \
         "uses the relayed direction"
+
+
+def _pixel_set(surf):
+    return {surf.get_at((x, y))[:3]
+            for x in range(surf.get_width()) for y in range(surf.get_height())}
+
+
+def test_a_spectated_combo_signals_in_the_spectate_blue():
+    # Arrows, chips, receptor flashes and the timer rim are the SIGNAL layer;
+    # while the opponent is pressing they render in Colors.spectate through the
+    # base controller's shared _signal_color -- the exact mechanism wheel and
+    # aim already resolve their spectated look through, so all four kinds
+    # agree by construction.
+    live, spec = _combo(), _combo(passive=True)
+    assert live._signal_color(Colors.accent) == Colors.accent
+    assert spec._signal_color(Colors.accent) == Colors.spectate
+    assert spec._signal_color(Colors.accent_hi) == Colors.spectate
+
+    rim = pg.Color(Colors.spectate)
+    chev = _direction_chevron(24, spec._signal_color(Colors.accent), "up")
+    assert (rim.r, rim.g, rim.b) in _pixel_set(chev)
+
+    live.update(200)
+    spec.update(200)
+    assert live._rim_color() == pg.Color(Colors.accent)
+    assert spec._rim_color() == pg.Color(Colors.spectate), \
+        "the timer rim base follows the palette; the loss warn lerp stays semantic"
+
+
+def test_chip_cache_never_collides_between_palettes():
+    # The chip cache used to key on (side, cut, state) alone; with the border
+    # now palette-dependent the first mode to mint a size would poison the
+    # other. Same geometry, both palettes, distinct stable entries -- and only
+    # the NEXT chip differs, because idle/done borders never carried the accent.
+    live = _chip_surface(40, 8, _CHIP_NEXT, Colors.accent)
+    spec = _chip_surface(40, 8, _CHIP_NEXT, Colors.spectate)
+    assert live is not spec
+    assert pg.image.tostring(live, "RGBA") != pg.image.tostring(spec, "RGBA")
+    assert _chip_surface(40, 8, _CHIP_NEXT, Colors.accent) is live
+    assert _chip_surface(40, 8, _CHIP_NEXT, Colors.spectate) is spec
+    idle_live = _chip_surface(40, 8, _CHIP_IDLE, Colors.accent)
+    idle_spec = _chip_surface(40, 8, _CHIP_IDLE, Colors.spectate)
+    assert pg.image.tostring(idle_live, "RGBA") == pg.image.tostring(idle_spec, "RGBA")
+
+
+def test_spectated_semantic_and_feedback_colours_are_untouched():
+    # Scope pin: win-green consumed arrows, loss-red wrong flashes and the warm
+    # spark/confetti feedback do not change with the palette -- blue means
+    # "someone else's input", never "good/bad".
+    live, spec = _combo(), _combo(passive=True)
+    win_live = _direction_chevron(20, Colors.win, "up")
+    win_spec = _direction_chevron(20, Colors.win, "up")
+    assert win_live is win_spec
+    assert live._signal_color(Colors.accent) != Colors.win
+    for ctrl in (live, spec):
+        surf = pg.Surface((700, 700), pg.SRCALPHA)
+        ctrl.update(300)
+        ctrl.draw(surf)
+    assert spec._signal_color(Colors.accent) == Colors.spectate

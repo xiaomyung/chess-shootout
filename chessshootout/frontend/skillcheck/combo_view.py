@@ -178,11 +178,6 @@ _JUDGE_COLOR = {
 _CHIP_DONE = "done"
 _CHIP_NEXT = "next"
 _CHIP_IDLE = "idle"
-_CHIP_BORDER_COLOR = {
-    _CHIP_DONE: COMBO_VIEW_CHIP_BORDER,
-    _CHIP_NEXT: COMBO_VIEW_CHIP_NEXT_BORDER,
-    _CHIP_IDLE: COMBO_VIEW_CHIP_BORDER,
-}
 _CHIP_BAKED_ALPHA = {
     _CHIP_DONE: COMBO_VIEW_CHIP_DONE_ALPHA,
     _CHIP_NEXT: COMBO_VIEW_CHIP_ALPHA,
@@ -196,7 +191,6 @@ _SPOT_FEATHER_RGBA = tuple(
      int(COMBO_VIEW_SCRIM_ALPHA * k / (COMBO_VIEW_SPOT_FEATHER_STEPS + 1)))
     for k in range(COMBO_VIEW_SPOT_FEATHER_STEPS, 0, -1))
 _SPOT_HOLE_RGBA = (0, 0, 0, 0)
-_RIM_ACCENT = pg.Color(Colors.accent)
 _RIM_LOSS = pg.Color(Colors.loss)
 
 _PAD_STATIC_CACHE = new_size_cache()
@@ -216,14 +210,16 @@ def _direction_chevron(size, color, direction):
     return memoized_surface(_DIR_CHEVRON_CACHE, (size, str(color), direction), build)
 
 
-def _chip_surface(side, cut, state):
+def _chip_surface(side, cut, state, next_border=COMBO_VIEW_CHIP_NEXT_BORDER):
+    border = next_border if state == _CHIP_NEXT else COMBO_VIEW_CHIP_BORDER
+
     def build():
         surf = cut_rect_surface((side, side), cut, COMBO_VIEW_CHIP_FILL,
-                                border=_CHIP_BORDER_COLOR[state], border_width=1,
+                                border=border, border_width=1,
                                 corners=COMBO_VIEW_CHIP_CORNERS).copy()
         surf.fill((255, 255, 255, _CHIP_BAKED_ALPHA[state]), special_flags=pg.BLEND_RGBA_MULT)
         return surf
-    return memoized_surface(_CHIP_CACHE, (side, cut, state), build)
+    return memoized_surface(_CHIP_CACHE, (side, cut, state, border), build)
 
 
 def _pad_static(radius, hub_r):
@@ -690,15 +686,16 @@ class ComboController(SkillCheckController):
         return start_r + (end_r - start_r) * self._timer_frac()
 
     def _rim_color(self):
+        base = pg.Color(self._signal_color(Colors.accent))
         frac = self._timer_frac()
         warn_start = 1.0 - COMBO_VIEW_SPOT_WARN_FRAC
         if frac < warn_start:
-            return _RIM_ACCENT
+            return base
         warn_t = (frac - warn_start) / COMBO_VIEW_SPOT_WARN_FRAC
         flicker = cosine_pulse(self._now, COMBO_VIEW_SPOT_WARN_PULSE_MS)
         mix = warn_t * (COMBO_VIEW_SPOT_WARN_FLICKER_MIN
                         + (1.0 - COMBO_VIEW_SPOT_WARN_FLICKER_MIN) * flicker)
-        return _RIM_ACCENT.lerp(_RIM_LOSS, min(max(mix, 0.0), 1.0))
+        return base.lerp(_RIM_LOSS, min(max(mix, 0.0), 1.0))
 
     def _draw_spotlight(self, window):
         if self._spot_layer is None or self._board_rect is None:
@@ -787,7 +784,8 @@ class ComboController(SkillCheckController):
             if intro <= 0.0:
                 continue
             dy = int(self._cell * COMBO_VIEW_INTRO_DROP_FRAC * (1.0 - intro))
-            chip = _chip_surface(self._chip, self._chip_cut, self._chip_state(i))
+            chip = _chip_surface(self._chip, self._chip_cut, self._chip_state(i),
+                                 self._signal_color(COMBO_VIEW_CHIP_NEXT_BORDER))
             chip.set_alpha(int(255 * intro * fade))
             rect = chip.get_rect(
                 center=(sx + ox + self._slot_wiggle(i), self._strip_y + oy - dy))
@@ -812,7 +810,8 @@ class ComboController(SkillCheckController):
             if i < self._progress:
                 size, color = self._strip_chev, Colors.win
             elif i == self._progress:
-                size, color = max(int(self._strip_big * deflate), 4), Colors.accent
+                size = max(int(self._strip_big * deflate), 4)
+                color = self._signal_color(Colors.accent)
             else:
                 size, color = self._strip_chev, Colors.text_dim
             chev = _direction_chevron(size, color, direction)
@@ -872,7 +871,8 @@ class ComboController(SkillCheckController):
         direction = self._receptor_hit(pg.mouse.get_pos())
         if direction is None:
             return
-        fill = _wedge_overlay(self._pad_r, self._hub_r, direction, Colors.accent)
+        fill = _wedge_overlay(self._pad_r, self._hub_r, direction,
+                              self._signal_color(Colors.accent))
         fill.set_alpha(COMBO_VIEW_HOVER_ALPHA)
         window.blit(fill, (left, top))
 
@@ -881,7 +881,8 @@ class ComboController(SkillCheckController):
             t = self._now - start
             if t < 0 or t >= COMBO_VIEW_RECEPTOR_FLASH_MS:
                 continue
-            fill = _wedge_overlay(self._pad_r, self._hub_r, direction, Colors.accent_hi)
+            fill = _wedge_overlay(self._pad_r, self._hub_r, direction,
+                                  self._signal_color(Colors.accent_hi))
             fill.set_alpha(int(COMBO_VIEW_RECEPTOR_FLASH_ALPHA
                                * (1.0 - t / COMBO_VIEW_RECEPTOR_FLASH_MS)))
             window.blit(fill, (left, top))
@@ -919,7 +920,8 @@ class ComboController(SkillCheckController):
                 continue
             progress = out_back(min(t / COMBO_VIEW_ARROW_FLY_MS, 1.0))
             rise = int(self._cell * COMBO_VIEW_ARROW_FLY_RISE_FRAC * progress)
-            chev = _direction_chevron(self._strip_big, Colors.accent_hi, direction)
+            chev = _direction_chevron(self._strip_big, self._signal_color(Colors.accent_hi),
+                                      direction)
             chev.set_alpha(int(255 * (1.0 - t / COMBO_VIEW_ARROW_FLY_MS)))
             window.blit(chev, chev.get_rect(center=(sx + ox, sy - rise + oy)))
 

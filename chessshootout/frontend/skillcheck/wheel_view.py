@@ -205,7 +205,7 @@ class WheelController(SkillCheckController):
                 remaining = max(0.0, 1.0 - elapsed / self.deadline_ms)
                 if remaining > 0.0:
                     blend = (1.0 - remaining) ** WHEEL_TIMER_RAMP
-                    timer_base = Colors.spectate if self._passive else Colors.amber
+                    timer_base = self._signal_color(Colors.amber)
                     timer_color = pg.Color(timer_base).lerp(pg.Color(Colors.loss), blend)
                     inner = (self.radius + self.timer_gap) * k
                     outer = (self.radius + self.ring_w + self.timer_gap) * k
@@ -217,7 +217,7 @@ class WheelController(SkillCheckController):
                         pg.draw.circle(surf, timer_color, _rim_point(c, c, cap_mid, cap_deg), cap_r)
 
             arc_width = self.challenge.arc_width_at(elapsed)
-            arc_color = Colors.spectate if self._passive else Colors.accent
+            arc_color = self._signal_color(Colors.accent)
             if self._committed_at is not None and self._landed is not None:
                 arc_color = Colors.win if self._landed else Colors.loss
             band = _band_polygon(c, c, (self.radius - self.band_w) * k, self.radius * k,

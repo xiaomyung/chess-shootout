@@ -150,7 +150,7 @@ from chessshootout.frontend.skillcheck.mole_art import (
     MOLE_VIEW_SEAM_GLOW_CORE,
     pit_telegraph_surface, pit_surface, pit_front_surface, seam_band_surface,
     seam_glow_surface, pit_mouth, emerge_mask, crosshair_surface,
-    cross_glow_surface, _MOLE_STATIC_CACHE)
+    cross_glow_surface, muzzle_surface, _MOLE_STATIC_CACHE)
 from chessshootout.frontend.skillcheck.registry import CheckSpec, build_controller
 from chessshootout.frontend.visual.draw import strike_pip_surface, _STRIKE_PIP_CACHE
 from chessshootout.skillcheck.mole import MOLE_RECOIL_LOCKOUT_MS
@@ -650,8 +650,8 @@ def test_danger_telegraph_hard_blinks_and_fattens_the_rim_at_the_same_bucket():
         "the two blink states are different surfaces, not neighbours on a ramp"
     assert pg.image.tostring(hot, "RGBA") != pg.image.tostring(plain, "RGBA"), \
         "the same bucket renders differently once the danger flag is set"
-    assert ("pit_tele", rx, ry, 1, True) in _MOLE_STATIC_CACHE
-    assert ("pit_tele", rx, ry, 1, False) in _MOLE_STATIC_CACHE, \
+    assert ("pit_tele", rx, ry, 1, True, Colors.accent) in _MOLE_STATIC_CACHE
+    assert ("pit_tele", rx, ry, 1, False, Colors.accent) in _MOLE_STATIC_CACHE, \
         "the cache key carries the danger flag — the two can never collide"
     assert _rim_span(hot) < _rim_span(cold), \
         "the hot blink eats into the pit mouth: a visibly fatter rim"
@@ -2408,7 +2408,7 @@ def test_the_pit_lip_is_the_front_half_of_the_pit_sprite():
     assert front.get_width() == pit.get_width()
     assert front.get_height() == pit.get_height() // 2, "only the near rim is redrawn"
     assert pit_front_surface(30, 18) is front, "one lip per pit size, cached like the pit"
-    assert ("pit_front", 30, 18) in _MOLE_STATIC_CACHE
+    assert ("pit_front", 30, 18, Colors.accent) in _MOLE_STATIC_CACHE
 
 
 def _lip_spy(monkeypatch):
@@ -2824,3 +2824,65 @@ def test_a_full_height_victim_keeps_the_full_travel():
     bbox = ctrl._victim_bbox
     assert ctrl._seam_y(rect, 0.0) == rect.top + bbox.top
     assert ctrl._seam_y(rect, 1.0) == rect.top + bbox.bottom
+
+
+def test_a_spectated_whack_paints_its_pits_in_the_spectate_blue():
+    # The hole rings and the telegraph pulse are the check's SIGNAL elements --
+    # they say "shoot here". While the opponent is the one shooting, they render
+    # in Colors.spectate, the same blue the wheel's spectated arc and aim's
+    # spectated reticle already use, resolved through the ONE shared
+    # _signal_color mechanism on the base controller. Warm feedback (muzzle,
+    # sparks, casings, pips) and semantic colours (loss, win) stay untouched,
+    # so blue always means "someone else's input", never "good/bad".
+    live = pit_surface(31, 17, Colors.accent)
+    spec = pit_surface(31, 17, Colors.spectate)
+    assert pg.image.tostring(live, "RGBA") != pg.image.tostring(spec, "RGBA")
+    rim = pg.Color(Colors.spectate)
+    seen = {spec.get_at((x, spec.get_height() // 2))[:3] for x in range(spec.get_width())}
+    assert (rim.r, rim.g, rim.b) in seen, "the spectated rim is literally the spectate blue"
+
+    ctrl = _mole(passive=True)
+    assert ctrl._signal_color(Colors.accent) == Colors.spectate
+    assert _mole()._signal_color(Colors.accent) == Colors.accent
+
+
+def test_palette_keyed_pit_caches_never_collide_between_modes():
+    # The pit caches key on geometry; without the palette in the key the first
+    # mode to mint a size would win and the other mode would silently reuse the
+    # wrong colour. Same geometry, both palettes, distinct stable entries.
+    for builder in (pit_surface, pit_front_surface):
+        live = builder(29, 16, Colors.accent)
+        spec = builder(29, 16, Colors.spectate)
+        assert live is not spec
+        assert pg.image.tostring(live, "RGBA") != pg.image.tostring(spec, "RGBA")
+        assert builder(29, 16, Colors.accent) is live
+        assert builder(29, 16, Colors.spectate) is spec
+    tele_live = pit_telegraph_surface(29, 16, 1, False, Colors.accent)
+    tele_spec = pit_telegraph_surface(29, 16, 1, False, Colors.spectate)
+    assert tele_live is not tele_spec
+    assert pg.image.tostring(tele_live, "RGBA") != pg.image.tostring(tele_spec, "RGBA")
+    assert pit_telegraph_surface(29, 16, 1, False, Colors.accent) is tele_live
+
+
+def test_the_danger_blink_ignores_the_palette_entirely():
+    # Danger is semantic (loss red / hard white) -- a spectator must read the
+    # mandatory-pop warning exactly as the mover does.
+    live = pit_telegraph_surface(27, 15, 1, True, Colors.accent)
+    spec = pit_telegraph_surface(27, 15, 1, True, Colors.spectate)
+    assert pg.image.tostring(live, "RGBA") == pg.image.tostring(spec, "RGBA")
+
+
+def test_spectated_warm_feedback_sprites_are_untouched():
+    # Scope pin: only the signal elements recolour. The warm feedback set is
+    # shared between modes byte for byte -- muzzle, win pop, casings.
+    assert pg.image.tostring(muzzle_surface(14), "RGBA") \
+        == pg.image.tostring(muzzle_surface(14), "RGBA")
+    a = _mole()
+    b = _mole(passive=True)
+    surf_a = pg.Surface((640, 640), pg.SRCALPHA)
+    surf_b = pg.Surface((640, 640), pg.SRCALPHA)
+    a.update(400)
+    b.update(400)
+    a._draw_casings(surf_a)
+    b._draw_casings(surf_b)
+    assert pg.image.tostring(surf_a, "RGBA") == pg.image.tostring(surf_b, "RGBA")

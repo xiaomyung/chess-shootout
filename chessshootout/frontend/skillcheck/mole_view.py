@@ -553,7 +553,7 @@ class MoleController(SkillCheckController):
     def _draw_pits(self, window, elapsed, group):
         self._draw_home_pit(window, elapsed, group)
         tele = self._telegraph_hole(elapsed)
-        pit = pit_surface(self._pit_rx, self._pit_ry)
+        pit = pit_surface(self._pit_rx, self._pit_ry, self._signal_color(Colors.accent))
         for i, (hx, hy) in enumerate(self._hole_px):
             open_t = (elapsed - i * MOLE_VIEW_HOLE_STAGGER_MS) / MOLE_VIEW_HOLE_OPEN_MS
             if open_t <= 0.0:
@@ -583,7 +583,7 @@ class MoleController(SkillCheckController):
         if scale < 1.0:
             self._draw_pit_mouth(window, cx, cy, scale)
             return
-        surf = pit_surface(self._pit_rx, self._pit_ry)
+        surf = pit_surface(self._pit_rx, self._pit_ry, self._signal_color(Colors.accent))
         window.blit(surf, (cx - surf.get_width() // 2, cy - surf.get_height() // 2))
 
     @staticmethod
@@ -622,7 +622,8 @@ class MoleController(SkillCheckController):
         else:
             bucket = int(cosine_pulse(self._anim_ms, MOLE_VIEW_PULSE_MS)
                          * (MOLE_VIEW_PULSE_BUCKETS - 1))
-        return pit_telegraph_surface(self._pit_rx, self._pit_ry, bucket, danger)
+        return pit_telegraph_surface(self._pit_rx, self._pit_ry, bucket, danger,
+                                     self._signal_color(Colors.accent))
 
     def _damage_tier(self):
         required = max(self.challenge.hits_required, 1)
@@ -717,7 +718,8 @@ class MoleController(SkillCheckController):
         rect = pg.Rect(cx - w // 2, base_y - h - lift, w, h)
         window.blit(sprite, rect)
         if lip:
-            front = pit_front_surface(self._pit_rx, self._pit_ry)
+            front = pit_front_surface(self._pit_rx, self._pit_ry,
+                                      self._signal_color(Colors.accent))
             window.blit(front, (center_px[0] + group[0] - front.get_width() // 2,
                                 center_px[1] + group[1]))
         return rect

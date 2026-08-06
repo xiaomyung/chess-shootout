@@ -213,7 +213,7 @@ class AimController(SkillCheckController):
         if self._committed_at is not None and self._landed is not None:
             verdict = pg.Color(Colors.win if self._landed else Colors.loss)
             return verdict, pg.Color(verdict)
-        live = pg.Color(Colors.spectate if self._passive else Colors.accent)
+        live = pg.Color(self._signal_color(Colors.accent))
         cross_col = pg.Color(Colors.text)
         if self._last_miss_ms is not None:
             flash = max(0.0, 1.0 - (self._now - self._last_miss_ms) / AIM_MISS_FLASH_MS)
