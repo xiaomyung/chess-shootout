@@ -846,6 +846,8 @@ class ComboController(SkillCheckController):
                    1.0 - COMBO_VIEW_DEFLATE_SPAN * (t / COMBO_VIEW_TORN_MS))
 
     def _draw_pad(self, window):
+        if self._passive:
+            return
         fade = self._exit_fade()
         if fade <= 0.0:
             return

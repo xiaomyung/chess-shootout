@@ -1216,3 +1216,46 @@ def test_spectated_semantic_and_feedback_colours_are_untouched():
         ctrl.update(300)
         ctrl.draw(surf)
     assert spec._signal_color(Colors.accent) == Colors.spectate
+
+
+def test_the_spectator_never_sees_the_receptor_pad():
+    # The pad is an INPUT device -- receptors for the mover's clicks. A
+    # spectator can't press anything, so drawing them a joystick just reads as
+    # "you may click here". The mirror keeps the informational layer instead:
+    # strip, chips, pips, spotlight and judgement.
+    live = _combo_scene(_PROMPTS, 99)
+    spec = _combo_scene(_PROMPTS, 99)
+    spec._passive = True
+    raised = pg.Color(Colors.surface_raised)
+    marker = (raised.r, raised.g, raised.b)
+    probe = pg.Rect(0, 0, int(live._pad_r * 1.2), int(live._pad_r * 1.2))
+    probe.center = live._pad_center
+    seen = {}
+    for tag, ctrl in (("live", live), ("spec", spec)):
+        surf = pg.Surface((700, 700))
+        surf.fill((10, 10, 12))
+        ctrl.update(1600)
+        ctrl.draw(surf)
+        seen[tag] = {surf.get_at((x, y))[:3]
+                     for x in range(probe.left, probe.right, 2)
+                     for y in range(probe.top, probe.bottom, 2)}
+    assert marker in seen["live"], "the mover sees the pad disc"
+    assert marker not in seen["spec"], "the spectator's pad region has no pad at all"
+
+
+def test_the_spectator_still_gets_the_wrong_count_pips():
+    spec = _combo_scene(_PROMPTS, 99)
+    spec._passive = True
+    spec.update(400)
+    spec.spectate_shot(400.0, 0, False, progress=0, direction="down")
+    surf = pg.Surface((700, 700))
+    surf.fill((10, 10, 12))
+    spec.update(500)
+    spec.draw(surf)
+    from chessshootout.frontend.skillcheck.combo_view import \
+        COMBO_VIEW_PIP_ROW_GAP_FRAC
+    gap = max(int(99 * COMBO_VIEW_PIP_ROW_GAP_FRAC), 10)
+    y = spec._pad_bottom + gap
+    row = pg.Rect(0, y - 8, 700, 16)
+    assert _region_brightness(surf, row) > 11, \
+        "the strike pips still render for the mirror even with the pad hidden"
