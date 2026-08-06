@@ -22,7 +22,7 @@ server for online two-player matches.
   ring of glowing holes; land its quota of shots before it ducks away for good —
   three on a pawn, four on a knight, bishop or rook, all five on a queen — and
   three whiffed shots miss it.
-- **Combo** — a strip of arrow prompts scrolls in; punch each direction in order
+- **Combo** — a strip of arrow prompts flies in and stays put; punch each direction in order
   with the Arrows/WASD keys or the on-screen pad, and three wrong inputs miss it.
 - Online, the server adjudicates every shot and your opponent watches a live,
   read-only mirror of the same minigame while their own board stays interactive.
@@ -103,6 +103,8 @@ server for online two-player matches.
   opponent's board.
 - Live abort / abandon / reconnect countdowns in the player strips; games with
   no moves played end as **aborted** (nobody wins).
+- Matchmaking gives up after 10 minutes in the queue with a toast — hit
+  **FIND MATCH** again to keep looking.
 - Layered reconnection for WiFi blips, app restarts, and server restarts
   (see [Reconnection](#reconnection)).
 - Crash-log capture for easy bug reports.
