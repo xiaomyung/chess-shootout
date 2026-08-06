@@ -60,6 +60,7 @@ ONLINE_HARD_FAILURE_LABELS = {
 ONLINE_HARD_FAILURE_REASONS = frozenset(ONLINE_HARD_FAILURE_LABELS)
 
 ONLINE_TRANSIENT_REASON_LABELS = {
+    Reason.QUEUE_TIMEOUT: "Matchmaking timed out — try again",
     Reason.RATE_LIMITED: "Slow down a bit",
     Reason.NO_TAKEBACK_AVAILABLE: "Nothing to take back",
     Reason.REMATCH_ALREADY_PENDING: "Rematch already requested",
@@ -284,6 +285,11 @@ class OnlineCoordinator:
                 on_no=self._abandon_online_game,
                 yes_label="New Search", no_label="Cancel",
             )
+            return
+        if reason == Reason.QUEUE_TIMEOUT:
+            log.warning("matchmaking queue timed out")
+            self._on_online_cancel()
+            self.app.toast.show(ONLINE_TRANSIENT_REASON_LABELS[reason])
             return
         if reason in ONLINE_HARD_FAILURE_REASONS or reason.startswith("http_"):
             log.warning("online hard failure reason=%s", reason)

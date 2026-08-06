@@ -248,6 +248,96 @@ async def test_healthz_async_returns_none_when_unreachable():
         assert await st.healthz_async(http) is None
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("content", [
+    pytest.param(b"<html>502 Bad Gateway</html>", id="html_error_page"),
+    pytest.param(b"", id="empty_body"),
+    pytest.param(b'{"status": "ok", "version": NaN}', id="non_standard_constant"),
+    pytest.param(b'{"status": "ok"}', id="valid_json_wrong_shape"),
+])
+async def test_healthz_async_returns_none_on_a_body_it_cannot_parse(content):
+    """healthz is what tells room_lost apart from server-down, so a proxy that
+    answers 200 with an error page must read as "no health", not as a crash --
+    every failure mode (undecodable, non-standard constant, missing fields)
+    collapses to the same None the unreachable case returns."""
+    def handler(request):
+        return httpx.Response(200, content=content,
+                              headers={"content-type": "application/json"})
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
+        st = ServerTransport("localhost:8000")
+        assert await st.healthz_async(http) is None
+
+
+@pytest.mark.asyncio
+async def test_healthz_async_returns_none_on_a_non_200():
+    transport = httpx.MockTransport(_make_handler(status_code=503, body={}))
+    async with httpx.AsyncClient(transport=transport) as http:
+        st = ServerTransport("localhost:8000")
+        assert await st.healthz_async(http) is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("content", [
+    pytest.param(b"<html>429 Too Many Requests</html>", id="html_error_page"),
+    pytest.param(b"", id="empty_body"),
+    pytest.param(b'{"reason": Infinity}', id="non_standard_constant"),
+    pytest.param(b'["room_full"]', id="json_list_not_an_object"),
+    pytest.param(b'"room_full"', id="json_string_not_an_object"),
+    pytest.param(b'{"detail": 7}', id="detail_is_neither_dict_nor_str"),
+])
+async def test_error_reason_falls_back_to_the_status_when_the_body_is_unusable(content):
+    """_safe_error_reason parses an attacker-reachable error body. Anything it
+    cannot turn into a reason string has to degrade to http_<status>, because the
+    reason is what picks the retry modal's copy."""
+    def handler(request):
+        return httpx.Response(429, content=content,
+                              headers={"content-type": "application/json"})
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
+        st = ServerTransport("localhost:8000")
+        req = MatchmakeRequest(nickname="Alice", client_uuid=ALICE,
+                               time_minutes=5, increment_seconds=0)
+        with pytest.raises(TransportHTTPError) as info:
+            await st.matchmake_async(req, http)
+    assert info.value.reason == "http_429"
+    assert info.value.status_code == 429
+
+
+@pytest.mark.asyncio
+async def test_error_reason_reads_a_plain_string_detail():
+    """FastAPI's own HTTPException(detail="...") shape: the string is the reason."""
+    def handler(request):
+        return httpx.Response(429, json={"detail": "slow_down"})
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
+        st = ServerTransport("localhost:8000")
+        req = MatchmakeRequest(nickname="Alice", client_uuid=ALICE,
+                               time_minutes=5, increment_seconds=0)
+        with pytest.raises(TransportHTTPError) as info:
+            await st.matchmake_async(req, http)
+    assert info.value.reason == "slow_down"
+
+
+@pytest.mark.parametrize("content", [
+    pytest.param(b"<html>502 Bad Gateway</html>", id="html_error_page"),
+    pytest.param(b"", id="empty_body"),
+    pytest.param(b'{"room_id": "r-1"}', id="valid_json_missing_a_required_field"),
+    pytest.param(b'["r-1", "tok"]', id="json_list_not_an_object"),
+])
+def test_blocking_post_returns_none_on_a_body_it_cannot_parse(content):
+    """A 200 that is not the model is indistinguishable from no answer at all --
+    reclaim_blocking runs on the startup path, so it must degrade to "no session
+    to reclaim" rather than propagate a decode error into the menu."""
+    def handler(request):
+        return httpx.Response(200, content=content,
+                              headers={"content-type": "application/json"})
+
+    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+        st = ServerTransport("localhost:8000", http_client=client)
+        assert st.reclaim_blocking(ALICE) is None
+
+
 async def _recv_skip_beacons(ws):
     """Next message that isn't a heartbeat pong, which can interleave with the
     message under test once a client starts pinging."""

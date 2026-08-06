@@ -22,10 +22,18 @@ RESULT_CODES = {
 TIMEOUT_RESULTS = {"white_wins_on_time", "black_wins_on_time"}
 
 TAG_UNSAFE_CHARS = '"\\[]'
+COMMENT_UNSAFE_CHARS = "{}[]\\"
+COMMENT_MAX_CHARS = 256
 
 
 def tag_value(raw):
-    return "".join(c for c in str(raw) if c not in TAG_UNSAFE_CHARS)
+    return "".join(c for c in str(raw) if c not in TAG_UNSAFE_CHARS and c.isprintable())
+
+
+def comment_value(raw):
+    kept = "".join(
+        c for c in str(raw) if c not in COMMENT_UNSAFE_CHARS and c.isprintable())
+    return kept[:COMMENT_MAX_CHARS]
 
 
 def iter_move_pairs(history):
@@ -55,7 +63,8 @@ def format_annotations(log):
 
 
 def _with_annotation(san, annotations, ply):
-    note = annotations.get(ply)
+    raw = annotations.get(ply)
+    note = comment_value(raw) if raw else ""
     return f"{san} {{{note}}}" if note else san
 
 

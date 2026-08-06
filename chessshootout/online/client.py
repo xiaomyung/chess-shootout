@@ -130,7 +130,13 @@ class OnlineClient:
         if self._loop is None or not self._loop.is_running():
             self.state = "disconnected"
             return
-        asyncio.run_coroutine_threadsafe(self._cancel_async(), self._loop)
+        cancel = self._cancel_async()
+        try:
+            asyncio.run_coroutine_threadsafe(cancel, self._loop)
+        except RuntimeError:
+            log.debug("cancel dropped: loop already closed")
+            cancel.close()
+            self.state = "disconnected"
 
     async def _cancel_async(self):
         if self._in_queue and self._room_id and self._session_token:

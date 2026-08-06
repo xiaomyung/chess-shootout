@@ -129,7 +129,8 @@ def _drive_verdict_hold(app):
     """Advance the overlay past the online result-hold so the deferred apply/lock runs.
 
     2000 covers every kind's verdict choreography: the shared 200 ms result hold,
-    the whack fail jump-out (750) and the whack win hold (1000)."""
+    the whack win hold (MOLE_VIEW_WIN_HOLD_MS = 750) and the longer whack fail
+    hold (MOLE_VIEW_FAIL_HOLD_MS = 1250)."""
     app.game.skillcheck_overlay.update(pg.time.get_ticks() + 2000)
 
 
