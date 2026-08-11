@@ -56,8 +56,17 @@ def load():
     load_dotenv(_ENV_PATH, override=False)
     if launch_server_addr:
         return
+    _infer_missing_server_mode()
     if os.environ.get("CHESS_SERVER_ADDR") != _resolved_server_addr():
         _apply_resolved_server_addr()
+
+
+def _infer_missing_server_mode():
+    if os.environ.get("CHESS_SERVER_MODE") in _SERVER_MODE_VALUES:
+        return
+    if _clean_server_addr(os.environ.get("CHESS_SERVER_ADDR")) == _PROD_SERVER_ADDR:
+        os.environ["CHESS_SERVER_MODE"] = SERVER_MODE_OFFICIAL
+        _persist("CHESS_SERVER_MODE", SERVER_MODE_OFFICIAL)
 
 
 def set_overrides(*, client_uuid=None, nickname=None):
@@ -101,8 +110,18 @@ def get_server_mode():
 
 
 def set_server_mode(value):
+    _seed_custom_addr_from_active()
     _set_enum("CHESS_SERVER_MODE", value, _SERVER_MODE_VALUES, _default_server_mode())
     _apply_resolved_server_addr()
+
+
+def _seed_custom_addr_from_active():
+    if _clean_server_addr(os.environ.get("CHESS_CUSTOM_SERVER_ADDR")):
+        return
+    active = _clean_server_addr(os.environ.get("CHESS_SERVER_ADDR"))
+    if active and active != _PROD_SERVER_ADDR:
+        os.environ["CHESS_CUSTOM_SERVER_ADDR"] = active
+        _persist("CHESS_CUSTOM_SERVER_ADDR", active)
 
 
 def _clean_server_addr(value):

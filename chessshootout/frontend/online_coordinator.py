@@ -282,7 +282,7 @@ class OnlineCoordinator:
             return
         if reason == ClientReason.ROOM_LOST:
             log.warning("online room lost — server restarted mid-game")
-            self._end_resync()
+            self._end_resync(replay=False)
             game.result_flow.auto_save_pgn()
             self.reconnecting_modal.hide()
             self.offer_banners.clear()
@@ -300,7 +300,7 @@ class OnlineCoordinator:
             return
         if reason in ONLINE_HARD_FAILURE_REASONS or reason.startswith("http_"):
             log.warning("online hard failure reason=%s", reason)
-            self._end_resync()
+            self._end_resync(replay=False)
             self.wait_modal.hide()
             self.match_found_modal.hide()
             self.offer_banners.clear()
@@ -425,11 +425,11 @@ class OnlineCoordinator:
         if self.client is not None:
             self.client.request_state_sync()
 
-    def _end_resync(self):
+    def _end_resync(self, *, replay=True):
         self._resyncing = False
         buffered = self._resync_buffer
         self._resync_buffer = []
-        if self._subscriber is None:
+        if not replay or self._subscriber is None:
             return
         for method_name, payload in buffered:
             self._forward_board_event(method_name, payload)
@@ -438,7 +438,7 @@ class OnlineCoordinator:
         game = self.app.game
         if game.variant != Variant.ONLINE:
             log.info("resume ignored — no active online game")
-            self._end_resync()
+            self._end_resync(replay=False)
             return
         desired = env.get_hide_opp_marks()
         if bool(payload.get("hide_opp_marks")) != desired:
@@ -605,7 +605,7 @@ class OnlineCoordinator:
         if self.client is not None:
             self.client.disconnect()
             self.client = None
-        self._end_resync()
+        self._end_resync(replay=False)
         self.offer_banners.dismiss("rematch_request")
         self._rematch_offered = False
         self.client = OnlineClient()
@@ -631,7 +631,7 @@ class OnlineCoordinator:
         return time_category_for_minutes(minutes), f"{minutes} + {incr}"
 
     def _drop_client(self, *, cancel_queue=False):
-        self._end_resync()
+        self._end_resync(replay=False)
         if self.client is None:
             return
         if cancel_queue:
@@ -724,7 +724,7 @@ class OnlineCoordinator:
             self._return_to_menu_card()
 
     def retain_for_rematch(self, keep_online):
-        self._end_resync()
+        self._end_resync(replay=False)
         if keep_online:
             self.client.send_left_result()
         elif self.client is not None:

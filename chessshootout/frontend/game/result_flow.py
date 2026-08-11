@@ -72,6 +72,7 @@ class ResultFlow:
         self._saved_final = False
         self._result_await_since_ms = None
         self._result_logged = False
+        self._not_saved_notified = False
         self._final_save_attempted_for = None
 
     def current_result(self):
@@ -346,9 +347,11 @@ class ResultFlow:
         if not self._result_logged:
             self._result_logged = True
             log.info("game end result=%s saved=%s", code, self._save_state_str(path))
-            if self.screen.match.move_history and not self.pgn_available():
-                self.app.toast.dismiss(SAVE_ERROR_TOAST_KEY)
-                self.app.toast.show(GAME_NOT_SAVED_MESSAGE, key=SAVE_ERROR_TOAST_KEY)
+        if (self.screen.match.move_history and not self.pgn_available()
+                and not self._not_saved_notified):
+            self._not_saved_notified = True
+            self.app.toast.dismiss(SAVE_ERROR_TOAST_KEY)
+            self.app.toast.show(GAME_NOT_SAVED_MESSAGE, key=SAVE_ERROR_TOAST_KEY)
 
     def _save_state_str(self, path):
         if path is not None:

@@ -719,6 +719,23 @@ def test_a_cancelled_resync_with_no_subscriber_replays_nothing(caplog):
     assert [r for r in caplog.records if r.levelno >= logging.ERROR] == []
 
 
+def test_a_teardown_exit_drops_the_buffer_even_with_a_live_subscriber():
+    """room_lost and the hard-failure confirms fire while the GameScreen is
+    still subscribed, and the abandon path drops the client before the menu
+    switch -- the no-subscriber guard misses all three orderings. Those exits
+    pass replay=False: the game is over, so a late blocked notification must
+    not toast over the end-of-game modal."""
+    app = _online_app()
+    app.coordinator._resyncing = True
+    app.coordinator._handle_annotations_blocked(_blocked_payload())
+
+    app.coordinator._end_resync(replay=False)
+
+    assert app.coordinator._resync_buffer == []
+    assert app.toast.message is None
+    assert app.game.board.annotations.flagged == set()
+
+
 def test_a_resume_snapshot_is_never_overwritten_by_stale_deltas():
     """The resurrection regression: the opponent draws an arrow and deletes it,
     the server's snapshot omits it, and the mid-resync `add` used to be replayed

@@ -382,6 +382,41 @@ def test_set_server_mode_custom_rewrites_the_resolved_active_address():
     assert "CHESS_SERVER_ADDR=localhost:8000" in contents
 
 
+def test_flipping_modes_preserves_a_pre_mode_custom_address(monkeypatch):
+    """A .env written before the mode keys existed carries the custom host only
+    in the active key. Flipping to Official rewrites that key, so the flip has
+    to seed CHESS_CUSTOM_SERVER_ADDR first -- otherwise the round trip back to
+    Custom lands on localhost and the stored address is gone for good."""
+    monkeypatch.setattr("chessshootout.paths.is_frozen", lambda: False)
+    env._ENV_PATH.write_text("CHESS_SERVER_ADDR=192.168.1.50:8000\n", encoding="utf-8")
+    env.load()
+
+    env.set_server_mode("official")
+    env.set_server_mode("custom")
+
+    assert env.get_server_addr() == "192.168.1.50:8000"
+    contents = env._ENV_PATH.read_text(encoding="utf-8")
+    assert "CHESS_CUSTOM_SERVER_ADDR=192.168.1.50:8000" in contents
+
+
+def test_load_infers_official_mode_from_a_pre_mode_prod_address(monkeypatch):
+    """A source .env pinned to the production host before the mode keys existed
+    means the player chose the official server. Defaulting the mode to custom
+    would skip the prod value as a prefill and rewrite the file to localhost,
+    silently redirecting them off the live server."""
+    monkeypatch.setattr("chessshootout.paths.is_frozen", lambda: False)
+    env._ENV_PATH.write_text(
+        f"CHESS_SERVER_ADDR={env._PROD_SERVER_ADDR}\n", encoding="utf-8")
+
+    env.load()
+
+    assert env.get_server_mode() == "official"
+    assert env.get_server_addr() == env.official_server_addr()
+    contents = env._ENV_PATH.read_text(encoding="utf-8")
+    assert f"CHESS_SERVER_ADDR={env._PROD_SERVER_ADDR}" in contents
+    assert "localhost:8000" not in contents
+
+
 def test_set_custom_server_addr_rewrites_the_active_address_only_in_custom_mode():
     """Editing the Custom field while Official is selected stores the address but
     must not redirect the live connection -- the mode is what picks the target."""

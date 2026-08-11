@@ -30,6 +30,7 @@ watcher inline by default so the retry/report chain is deterministic;
 BEFORE the exit code is known.
 """
 
+import importlib
 import logging
 import os
 import subprocess
@@ -519,3 +520,18 @@ def test_a_non_zero_exit_logs_one_warning_naming_the_tool_and_code(monkeypatch, 
     assert len(lines) == 1
     assert "xdg-open" in lines[0]
     assert "3" in lines[0]
+
+
+def test_no_handler_exit_codes_follow_the_platform(monkeypatch):
+    """xdg-open signals a missing handler with its 3/4 family; macOS `open` has
+    no such family and exits 1 when no app is registered for the type. A single
+    xdg-open table would report the macOS case as a generic open failure
+    instead of the actionable no-handler message."""
+    try:
+        monkeypatch.setattr(sys, "platform", "darwin")
+        assert importlib.reload(open_external).NO_HANDLER_EXIT_CODES == (1,)
+        monkeypatch.setattr(sys, "platform", "linux")
+        assert importlib.reload(open_external).NO_HANDLER_EXIT_CODES == (3, 4)
+    finally:
+        monkeypatch.undo()
+        importlib.reload(open_external)
