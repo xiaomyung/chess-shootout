@@ -20,7 +20,6 @@ from chessshootout.frontend.panels.player_strip import (
 )
 from chessshootout.frontend.panels.right import RightMenu, REVIEW_CAPS
 from chessshootout.frontend.panels.review_strip import ReviewStrip
-from chessshootout.frontend.pgn_open import open_pgn_or_toast
 from chessshootout.frontend.screens.base import Nav, Screen
 from chessshootout.frontend.visual.backdrop import ArenaBackdrop
 from chessshootout.skillcheck.types import SkillCheckOutcome, whiffs_by_ply
@@ -210,7 +209,7 @@ class ReviewScreen(Screen):
         self.app.sound_manager.play_flip()
 
     def _on_open_pgn(self):
-        open_pgn_or_toast(self.app.toast, self._pgn_path)
+        self.app.pgn_opener.open(self._pgn_path)
 
     def _signals_provider(self):
         sm = self.app.sound_manager

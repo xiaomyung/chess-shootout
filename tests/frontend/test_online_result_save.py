@@ -170,7 +170,7 @@ def test_auto_save_neutralizes_a_surrogate_nickname_instead_of_failing(tmp_path,
     _settle(app)
     app.game.white_name = "bad\udce9name"
     app.game.result_flow._last_saved_pgn_path = None
-    app.game.result_flow._last_saved_result_tag = None
+    app.game.result_flow._saved_final = False
 
     assert app.game.result_flow.auto_save_pgn() is not None
     assert '[White "badname"]' in _saved_text(app)
@@ -367,7 +367,7 @@ def test_partial_star_upgrades_to_decisive_result(tmp_path, monkeypatch):
     app = _online_app(tmp_path, monkeypatch)
     _one_quiet_move(app)
     app.game.result_flow.auto_save_pgn()  # forced partial save (result None -> *)
-    assert app.game.result_flow._last_saved_result_tag == "*"
+    assert app.game.result_flow._saved_final is False
     first = app.game.result_flow._last_saved_pgn_path
     assert '[Result "*"]' in _saved_text(app)
     app.game.manual_result = "white_wins_by_resignation"
@@ -400,14 +400,25 @@ def test_room_lost_midgame_saves_partial(tmp_path, monkeypatch):
 
 
 def test_server_shutdown_saves_partial_but_first_move_abort_does_not(tmp_path, monkeypatch):
+    """The result modal's Open PGN button tracks what is actually on disk: a
+    server_shutdown with moves saves a partial and offers the button; a zero-ply
+    abort saves nothing and the button is absent instead of toasting on click."""
     app = _online_app(tmp_path, monkeypatch)
     _one_quiet_move(app)
     app.coordinator._handle_online_result({"reason": "server_shutdown"})
     assert app.game.result_flow._last_saved_pgn_path is not None, "server_shutdown with moves saves"
+    app.game.result_flow.feed_result_menu()
+    app.game.result_menu.draw()
+    assert "open_pgn" in app.game.result_menu.button_rects, "a saved partial is openable"
     app2 = _online_app(tmp_path, monkeypatch)         # fresh, 0 moves
     app2.coordinator._handle_online_result({"reason": "aborted"})
     assert app2.game.result_flow._last_saved_pgn_path is None, \
         "an empty first-move abort is not saved"
+    app2.game.result_flow.feed_result_menu()
+    app2.game.result_menu.draw()
+    assert "open_pgn" not in app2.game.result_menu.button_rects, \
+        "nothing on disk, no Open PGN button"
+    assert "menu" in app2.game.result_menu.button_rects
 
 
 def test_local_capture_mate_still_saves(tmp_path, monkeypatch):

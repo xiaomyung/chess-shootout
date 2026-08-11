@@ -22,7 +22,9 @@ from tests.conftest import pygame_display
 from chessshootout import paths
 from chessshootout.backend.utils import coord_from_square
 from chessshootout.frontend.frontend import Frontend
-from chessshootout.frontend.game.result_flow import AUTOSAVE_THROTTLE_MS
+from chessshootout.frontend.game.result_flow import (
+    AUTOSAVE_THROTTLE_MS, GAME_NOT_SAVED_MESSAGE,
+)
 from chessshootout.online.client import Event
 from tests.helpers import B, BLACK, K, P, Q, WHITE, make_backend, piece, sq
 
@@ -584,13 +586,15 @@ def test_open_pgn_after_a_total_save_failure_does_not_launch_an_empty_file(
         tmp_path, monkeypatch):
     """_last_saved_pgn_path must not survive a failed write of a file this flow
     itself just reserved: os.path.exists() would be True for the 0-byte stub and
-    Open PGN would hand an empty file to the OS instead of toasting."""
+    Open PGN would hand an empty file to the OS instead of toasting. The result
+    modal goes further and drops the button entirely; on_open_pgn stays the
+    backstop underneath."""
     app = _local_app(tmp_path, monkeypatch)
     monkeypatch.setattr(paths, "get_fallback_data_dir", lambda: tmp_path / "fallback")
     app.game.result_flow._write_pgn_atomic = lambda path, text: "hard_failure"
     opened = []
     monkeypatch.setattr("chessshootout.frontend.pgn_open.open_with_default_app",
-                        lambda path: opened.append(path) or True)
+                        lambda path, on_failure=None: opened.append(path) or True)
     toasts = []
     monkeypatch.setattr(app.toast, "show", lambda msg, *a, **k: toasts.append(msg))
 
@@ -601,7 +605,36 @@ def test_open_pgn_after_a_total_save_failure_does_not_launch_an_empty_file(
 
     app.game.result_flow.on_open_pgn()
     assert opened == [], "nothing was handed to the OS"
-    assert "No saved PGN" in toasts
+    assert GAME_NOT_SAVED_MESSAGE in toasts, \
+        "a played game whose save failed gets the save-failure line, not 'no moves'"
+
+    app.game.manual_result = "white_wins_by_resignation"
+    app.game.result_flow.feed_result_menu()
+    app.game.result_menu.draw()
+    assert "open_pgn" not in app.game.result_menu.button_rects, \
+        "the modal never offers a button that can only toast"
+    assert "new_game" in app.game.result_menu.button_rects
+
+
+def test_a_reserved_zero_byte_stub_is_never_handed_to_the_os(tmp_path, monkeypatch):
+    """Second line of defence for the same failure: even when the reserved path
+    does survive on the flow (a permission_transient write leaves the stub in
+    place), an empty file must never reach xdg-open — it sniffs as
+    application/x-zerosize, so the opener exits non-zero and the click looks
+    like it did nothing."""
+    app = _local_app(tmp_path, monkeypatch)
+    _e4(app)
+    stub = app.game.result_flow._reserve_pgn_path(str(tmp_path / "games"), "local")
+    app.game.result_flow._last_saved_pgn_path = stub
+    opened = []
+    monkeypatch.setattr("chessshootout.frontend.pgn_open.open_with_default_app",
+                        lambda path, on_failure=None: opened.append(path) or True)
+
+    assert os.path.getsize(stub) == 0
+    app.game.result_flow.on_open_pgn()
+
+    assert opened == [], "the 0-byte stub is filtered before the launch"
+    assert app.toast.message == GAME_NOT_SAVED_MESSAGE
 
 
 def test_resume_after_back_to_menu_does_not_rewrite_the_game_as_a_local_pgn(

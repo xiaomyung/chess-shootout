@@ -40,7 +40,8 @@ def test_series_chip_paints_amber_score_and_dim_names():
 
 
 def test_set_series_formats_with_en_dash():
-    menu = ResultMenu(pg.display.get_surface(), callbacks={})
+    menu = ResultMenu(pg.display.get_surface(), callbacks={},
+                      pgn_available_provider=lambda: True)
     menu.set_series("alice", "bob", "2", "1")
     assert menu.series == ("alice", "bob", "2–1")
     menu.set_series(None, None, None, None)
@@ -49,7 +50,7 @@ def test_set_series_formats_with_en_dash():
 
 def test_result_modal_paints_series_only_when_online():
     win = pg.display.get_surface()
-    menu = ResultMenu(win, callbacks={})
+    menu = ResultMenu(win, callbacks={}, pgn_available_provider=lambda: True)
     menu.set_rect(pg.Rect(80, 40, 440, 420))
     menu.set_result("VICTORY", "win", "Checkmate · 30 moves", _stats())
     menu.set_series("alice", "bob", "2", "1")

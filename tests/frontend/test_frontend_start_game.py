@@ -14,6 +14,9 @@ from chessshootout.backend.utils import Square
 from chessshootout.backend.pieces import PieceColor
 from chessshootout.infra import countries, env
 from chessshootout.frontend.frontend import Frontend
+from chessshootout.frontend.pgn_open import (
+    MISSING_MESSAGE, NO_HANDLER_MESSAGE, NO_MOVES_MESSAGE, OPEN_FAILED_MESSAGE,
+)
 from chessshootout.frontend.screens.game import OPPONENT_NAME_FOR_MODE
 from chessshootout.online.client import OnlineClient
 from chessshootout.domain.pgn.load import extract_csmatchid, parse_pgn_headers
@@ -313,41 +316,74 @@ def test_auto_save_records_path_and_shows_toast(tmp_path, monkeypatch):
     assert "Saved" in app.toast.message
 
 
-def test_open_pgn_invokes_default_app(tmp_path, monkeypatch):
+def _saved_game(tmp_path, monkeypatch):
     app = make_app()
     app._on_start_game(base_config())
     app.game.match.backend.try_move(Square(6, 4), Square(4, 4))
     monkeypatch.setenv("CHESS_DATA_DIR", str(tmp_path))
     app.game.manual_result = "white_wins"
     app.game.result_flow.auto_save_pgn()
+    return app
+
+
+def test_open_pgn_invokes_default_app(tmp_path, monkeypatch):
+    app = _saved_game(tmp_path, monkeypatch)
     captured = {}
     monkeypatch.setattr(
         "chessshootout.frontend.pgn_open.open_with_default_app",
-        lambda path: captured.setdefault("path", path) or True,
+        lambda path, on_failure=None: captured.update(
+            path=path, on_failure=on_failure) or True,
     )
     app.game.result_flow.on_open_pgn()
     assert captured["path"] == app.game.result_flow._last_saved_pgn_path
+    assert callable(captured["on_failure"]), "the async exit code needs a way back"
 
 
 def test_open_pgn_no_op_when_no_saved_path():
+    """Nothing was ever written for this game, which is a different sentence
+    from "the file you saved is gone" — the two must not share wording. The
+    result modal doesn't even offer the button in that state; on_open_pgn is
+    only a defensive backstop behind it."""
     app = make_app()
     app._on_start_game(base_config())
     app.game.result_flow.on_open_pgn()
-    assert app.toast.message == "No saved PGN"
+    assert app.toast.message == NO_MOVES_MESSAGE
+    assert NO_MOVES_MESSAGE != MISSING_MESSAGE
+    app.game.manual_result = "draw_agreement"
+    app.game.result_flow.feed_result_menu()
+    app.game.result_menu.draw()
+    assert "open_pgn" not in app.game.result_menu.button_rects
+    assert "new_game" in app.game.result_menu.button_rects
 
 
 def test_open_pgn_warns_on_open_failure(tmp_path, monkeypatch):
-    app = make_app()
-    app._on_start_game(base_config())
-    app.game.match.backend.try_move(Square(6, 4), Square(4, 4))
-    monkeypatch.setenv("CHESS_DATA_DIR", str(tmp_path))
-    app.game.manual_result = "white_wins"
-    app.game.result_flow.auto_save_pgn()
+    app = _saved_game(tmp_path, monkeypatch)
     monkeypatch.setattr(
-        "chessshootout.frontend.pgn_open.open_with_default_app", lambda _path: False,
+        "chessshootout.frontend.pgn_open.open_with_default_app",
+        lambda _path, on_failure=None: False,
     )
     app.game.result_flow.on_open_pgn()
-    assert app.toast.message == "Could not open PGN"
+    assert app.toast.message == OPEN_FAILED_MESSAGE
+
+
+def test_open_pgn_reports_an_async_opener_failure_on_the_next_frame(tmp_path, monkeypatch):
+    """The shell owns the drain: pgn_opener.update() runs in draw_frame, so a
+    non-zero exit collected on the watcher thread becomes a toast next frame
+    without any screen doing the work."""
+    app = _saved_game(tmp_path, monkeypatch)
+    reported = []
+    monkeypatch.setattr(
+        "chessshootout.frontend.pgn_open.open_with_default_app",
+        lambda _path, on_failure=None: reported.append(on_failure) or True,
+    )
+    app.toast.hide()
+    app.game.result_flow.on_open_pgn()
+    assert app.toast.message is None, "a launched opener says nothing yet"
+
+    reported[0](3)
+    app.draw_frame()
+
+    assert app.toast.message == NO_HANDLER_MESSAGE
 
 
 def test_local_game_mints_match_session_id():

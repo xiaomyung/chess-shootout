@@ -244,7 +244,7 @@ class GameScreen(Screen):
             "open_pgn": self.result_flow.on_open_pgn,
             "menu": app._on_back_to_menu,
             "rematch": app.coordinator._on_rematch,
-        })
+        }, pgn_available_provider=self.result_flow.pgn_available)
         self.right_menu = RightMenu(window, self.match, {
             "undo": self._on_undo,
             "resign": self._on_resign,

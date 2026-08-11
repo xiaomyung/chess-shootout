@@ -17,6 +17,7 @@ from chessshootout.frontend.modal_registry import ModalSpec
 from chessshootout.frontend.modals.confirm import ConfirmModal
 from chessshootout.frontend.modals.country_picker import CountryPicker
 from chessshootout.frontend.modals.directory_browser import DirectoryBrowser
+from chessshootout.frontend.pgn_open import PgnOpener
 from chessshootout.frontend.settings import SettingsController
 from chessshootout.frontend.modals.help import HelpModal, HOTKEYS
 from chessshootout.frontend.visual.toast import Toast
@@ -101,6 +102,7 @@ class Frontend:
         self.toast = Toast(self.window)
         self.toast.top_inset = self.chrome.HEIGHT
         self.toast.on_new = lambda: self.sound_manager.play_toast()
+        self.pgn_opener = PgnOpener(self.toast)
         if env.normalize_stored_nickname():
             self.toast.show("Your nickname contained non ASCII symbols, I cleaned them :3")
         if not env.get_profile_hint_shown():
@@ -365,6 +367,7 @@ class Frontend:
 
         self.game.give_time.update_give_time_hold()
         self.settings._flush_deferred_env_writes()
+        self.pgn_opener.update()
 
         nav = self.screen.update(now)
         if nav is not None:

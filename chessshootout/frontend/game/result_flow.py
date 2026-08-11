@@ -9,13 +9,17 @@ from chessshootout.domain.result_stats import compute_result_stats
 from chessshootout.domain.pgn.generate import format_annotations, generate_pgn, RESULT_CODES
 from chessshootout.backend.pieces import PieceColor
 from chessshootout.frontend.game.variant import Variant
-from chessshootout.frontend.pgn_open import open_pgn_or_toast
+from chessshootout.frontend.pgn_open import NO_MOVES_MESSAGE
 
 
 log = logging.getLogger("chess.frontend")
 
 AUTOSAVE_THROTTLE_MS = 1000
 RESULT_CONFIRM_TIMEOUT_MS = 4000
+SAVE_ERROR_TOAST_KEY = "pgn_save_error"
+GAMES_FOLDER_HINT = "check the games folder"
+GAME_NOT_SAVED_MESSAGE = f"Game not saved — {GAMES_FOLDER_HINT}"
+SAVE_FAILED_MESSAGE = f"Could not save PGN — {GAMES_FOLDER_HINT}"
 
 RESULT_TEXT = {
     "white_wins": ("White wins", "by checkmate"),
@@ -64,7 +68,8 @@ class ResultFlow:
         self._autosave_last_write_ms = -AUTOSAVE_THROTTLE_MS
         self._autosave_last_ply = 0
         self._last_saved_pgn_path = None
-        self._last_saved_result_tag = None
+        self._pgn_openable = False
+        self._saved_final = False
         self._result_await_since_ms = None
         self._result_logged = False
         self._final_save_attempted_for = None
@@ -153,8 +158,7 @@ class ResultFlow:
             return
         if screen.variant == Variant.ONLINE and self.app.coordinator._resyncing:
             return
-        if RESULT_CODES.get(result) is not None:
-            self.on_result_final(result)
+        self.on_result_final(result)
         if screen._result_first_seen_at_ms is None and self._move_visually_settled():
             screen._result_first_seen_at_ms = pg.time.get_ticks()
             try:
@@ -181,7 +185,12 @@ class ResultFlow:
             self.series_scores[name] = self.series_scores.get(name, 0.0) + 0.5
 
     def on_open_pgn(self):
-        open_pgn_or_toast(self.app.toast, self._last_saved_pgn_path)
+        empty_message = (GAME_NOT_SAVED_MESSAGE if self.screen.match.move_history
+                         else NO_MOVES_MESSAGE)
+        self.app.pgn_opener.open(self._last_saved_pgn_path, empty_message=empty_message)
+
+    def pgn_available(self):
+        return self._pgn_openable
 
     def probe_games_dir_writable(self):
         games_dir = str(paths.get_games_dir())
@@ -197,7 +206,7 @@ class ResultFlow:
         if self._save_error_toast_shown:
             return
         self._save_error_toast_shown = True
-        self.app.toast.show("Could not save PGN — check games folder")
+        self.app.toast.show(SAVE_FAILED_MESSAGE, key=SAVE_ERROR_TOAST_KEY)
 
     def _remove_quietly(self, path):
         try:
@@ -259,20 +268,22 @@ class ResultFlow:
             reserved = True
             self._last_saved_pgn_path = path
         outcome = self._write_pgn_atomic(path, text)
+        if outcome == "ok" and text:
+            self._pgn_openable = True
         if outcome == "hard_failure" and reserved:
             self._remove_quietly(path)
             self._last_saved_pgn_path = None
+            self._pgn_openable = False
         return outcome
 
     def auto_save_pgn(self):
         screen = self.screen
         if not screen.match.move_history:
             return None
-        tag = RESULT_CODES.get(screen.current_result(), "*")
-        if self._last_saved_pgn_path is not None:
-            already_final = self._last_saved_result_tag not in (None, "*")
-            if already_final:
-                return self._last_saved_pgn_path
+        result = screen.current_result()
+        tag = RESULT_CODES.get(result, "*")
+        if self._last_saved_pgn_path is not None and self._saved_final:
+            return self._last_saved_pgn_path
         text = self._build_pgn_text()
         prefix = self._auto_save_prefix()
         primary_dir = self._save_dir or str(paths.get_games_dir())
@@ -292,7 +303,7 @@ class ResultFlow:
             return None
         self._save_failed = False
         path = self._last_saved_pgn_path
-        self._last_saved_result_tag = tag
+        self._saved_final = result is not None
         if tag != "*":
             self.app.toast.show(f"Saved {os.path.basename(path)}")
         return path
@@ -329,12 +340,15 @@ class ResultFlow:
                 self._award_series_draw()
                 self._series_score_awarded = True
         path = None
-        if not self._save_failed or self._final_save_attempted_for != code:
+        if self.screen.match.move_history and self._final_save_attempted_for != code:
             self._final_save_attempted_for = code
             path = self.auto_save_pgn()
         if not self._result_logged:
             self._result_logged = True
             log.info("game end result=%s saved=%s", code, self._save_state_str(path))
+            if self.screen.match.move_history and not self.pgn_available():
+                self.app.toast.dismiss(SAVE_ERROR_TOAST_KEY)
+                self.app.toast.show(GAME_NOT_SAVED_MESSAGE, key=SAVE_ERROR_TOAST_KEY)
 
     def _save_state_str(self, path):
         if path is not None:
