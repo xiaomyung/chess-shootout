@@ -18,6 +18,7 @@ from fastapi.testclient import TestClient
 from tests.conftest import pygame_display
 from chessshootout.domain.match import ONLINE
 from chessshootout.backend.pieces import PieceColor
+from chessshootout.backend.utils import square_from_coord
 from chessshootout.server import connections as connections_module
 from chessshootout.server.app import PROTOCOL_VERSION, create_app
 from chessshootout.server.protocol import MoveAppliedMessage
@@ -608,3 +609,121 @@ def test_resume_with_no_active_online_game_is_dropped_and_clears_the_gate():
 
     assert app.game.match.move_history == []
     assert app.coordinator._resyncing is False
+
+
+BLOCKED_ARROW = {"from": "e2", "to": "e4"}
+BLOCKED_MARKS = {(square_from_coord("e2"), square_from_coord("e4")),
+                 square_from_coord("c3")}
+
+
+def _blocked_payload():
+    return {"action": "blocked", "arrows": [BLOCKED_ARROW],
+            "highlights": ["c3"], "share_muted": False}
+
+
+def _resumable_app():
+    app = _online_app()
+    app.game._time_control = (300, 0)
+    app.game.match.setup_clock(300, 0)
+    return app
+
+
+def _resumed_payload(**extra):
+    payload = {
+        "fen": "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
+        "move_history": [],
+        "clock": {"white_remaining": 300.0, "black_remaining": 300.0,
+                  "running_for": None},
+    }
+    payload.update(extra)
+    return payload
+
+
+def test_marks_state_is_dropped_not_buffered_while_resyncing():
+    """Replaying annotation state/deltas on top of the /resume snapshot is the
+    unsafe option: a mark the opponent deleted before the snapshot comes back
+    from a buffered `add` and sticks until they toggle it again. Every resync
+    exit is followed by an authoritative snapshot (the timeout escalates to a
+    reconnect, which re-emits game_resumed), so marks state is dropped outright
+    rather than queued."""
+    app = _online_app()
+    app.coordinator._resyncing = True
+
+    app.coordinator._handle_annotation_delta(
+        {"action": "add", "kind": "arrow", "from": "e2", "to": "e4"})
+    app.coordinator._handle_annotations_state(
+        {"sharing": True, "highlights": ["c3"], "arrows": [BLOCKED_ARROW]})
+
+    assert app.coordinator._resync_buffer == []
+    assert app.game.board.annotations.opp_arrows == []
+    assert app.game.board.annotations.opp_highlighted_squares == set()
+
+
+def test_a_blocked_notification_survives_a_cancelled_resync():
+    """`annotations_blocked` is the one payload a /resume cannot rebuild: it is a
+    one-shot notification (toast + flag_own), so it keeps buffering while the
+    gate is up and replays on every exit -- including the timeout cancel. The
+    toast assertion is the end-to-end claim: in the real timeout-cancel path a
+    force_reconnect /resume follows and _restore_resumed_annotations hard-resets
+    annotations.flagged, so only the toast truly survives. The flagged assertion
+    is unit-local to this test, which has no follow-up resume."""
+    app = _online_app()
+    app.coordinator._resyncing = True
+    app.coordinator._handle_annotations_blocked(_blocked_payload())
+    assert app.game.board.annotations.flagged == set()
+
+    app.coordinator._cancel_resync()
+
+    assert app.toast.message == "Some marks can't be shared"
+    assert app.game.board.annotations.flagged == BLOCKED_MARKS
+
+
+def test_a_blocked_notification_replays_after_a_resume():
+    """The replay has to run AFTER on_resume, not before: on_resume wipes
+    annotations.flagged, so a blocked notification replayed ahead of it would be
+    erased by the very snapshot that cannot carry it."""
+    app = _resumable_app()
+    app.coordinator._resyncing = True
+    app.coordinator._handle_annotations_blocked(_blocked_payload())
+
+    app.coordinator._handle_game_resumed(_resumed_payload())
+
+    assert app.coordinator._resyncing is False
+    assert app.coordinator._resync_buffer == []
+    assert app.game.board.annotations.flagged == BLOCKED_MARKS
+
+
+def test_a_cancelled_resync_with_no_subscriber_replays_nothing(caplog):
+    """Teardown paths (_drop_client, retain_for_rematch, room_lost) cancel the
+    resync once the GameScreen has already unsubscribed. Replaying there would
+    toast onto the start menu and trip _forward_board_event's "no subscriber"
+    log.error, so the buffer is dropped instead."""
+    app = _online_app()
+    app.coordinator._resyncing = True
+    app.coordinator._handle_annotations_blocked(_blocked_payload())
+    app.coordinator.unsubscribe(app.game)
+
+    with caplog.at_level(logging.ERROR, logger="chess.frontend"):
+        app.coordinator._cancel_resync()
+
+    assert app.coordinator._resync_buffer == []
+    assert app.toast.message is None
+    assert [r for r in caplog.records if r.levelno >= logging.ERROR] == []
+
+
+def test_a_resume_snapshot_is_never_overwritten_by_stale_deltas():
+    """The resurrection regression: the opponent draws an arrow and deletes it,
+    the server's snapshot omits it, and the mid-resync `add` used to be replayed
+    on top of the fresh board -- putting a mark back that the server had already
+    settled as gone."""
+    app = _resumable_app()
+    arrow = (square_from_coord("e2"), square_from_coord("e4"))
+    app.game.board.annotations.set_opp(set(), [arrow])
+    app.coordinator._resyncing = True
+
+    app.coordinator._handle_annotation_delta(
+        {"action": "add", "kind": "arrow", "from": "e2", "to": "e4"})
+    app.coordinator._handle_game_resumed(_resumed_payload(
+        black_annotations={"sharing": True, "highlights": [], "arrows": []}))
+
+    assert app.game.board.annotations.opp_arrows == []

@@ -204,6 +204,7 @@ class GameScreen(Screen):
         self._debut = openings.DebutTracker(self._reviewed_sans)
         self._share_marks = False
         self._share_muted = False
+        self._board_needs_present = False
         self._opp_sharing = False
         self._chat_cooldown_until_ms = 0
         self._speech_anchor_memo = {}
@@ -852,6 +853,7 @@ class GameScreen(Screen):
     def draw(self):
         app = self.app
         now = pg.time.get_ticks()
+        self._board_needs_present = self.board.consume_needs_present()
         if self.current_result() is not None and self.focus_mode:
             if self.focus_transition is None:
                 self._toggle_focus(False)
@@ -956,6 +958,8 @@ class GameScreen(Screen):
         for bubble in self.speech_bubbles.values():
             if bubble.last_rect is not None:
                 rects.append(bubble.last_rect)
+        if self._board_needs_present:
+            rects.append(self.board.rect)
         if self.focus_mode and self._focus_show() == "line":
             top_line, bottom_line = self.time_line.rects_for(self.board, self.board.rect)
             rects.extend([top_line, bottom_line])

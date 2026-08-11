@@ -845,3 +845,81 @@ def test_opp_arrow_renders_alongside_own_arrow(board):
     assert all(own_changed.values()), "own arrow still rendered when opp arrows exist"
     opp_changed = _opp_arrow_changed_pixels(board, Square(4, 0))
     assert any(c.b > c.r and c.b > c.g for c in opp_changed)
+
+
+def _remove_seeded_opp_arrow(board):
+    """Seeds directly (list append never marks) so the remove delta is the only
+    mutator under test."""
+    board.annotations.opp_arrows.append((Square(6, 0), Square(4, 0)))
+    board.needs_present = False
+    board.annotations.apply_opp_delta(
+        "remove", "arrow", arrow=(Square(6, 0), Square(4, 0)))
+
+
+@pytest.mark.parametrize(
+    "mutate",
+    [
+        pytest.param(lambda b: b.annotations.set_opp({Square(2, 2)}, []), id="set_opp"),
+        pytest.param(lambda b: b.annotations.apply_opp_delta(
+            "add", "highlight", square=Square(3, 3)), id="delta_highlight_add"),
+        pytest.param(lambda b: b.annotations.apply_opp_delta(
+            "remove", "highlight", square=Square(3, 3)), id="delta_highlight_remove"),
+        pytest.param(lambda b: b.annotations.apply_opp_delta(
+            "add", "arrow", arrow=(Square(6, 0), Square(4, 0))), id="delta_arrow_add"),
+        pytest.param(lambda b: _remove_seeded_opp_arrow(b), id="delta_arrow_remove"),
+        pytest.param(lambda b: b.annotations.clear_opp(), id="clear_opp"),
+        pytest.param(lambda b: b.annotations.clear(), id="clear"),
+        pytest.param(lambda b: b.annotations.flag_own(
+            [(Square(6, 0), Square(4, 0))], [Square(2, 2)]), id="flag_own"),
+        pytest.param(lambda b: b.clear_all_annotations(), id="clear_all"),
+    ],
+)
+def test_event_less_mutators_mark_the_board_for_the_present_pass(board, mutate):
+    """Every mutator that can fire without a user event (server-pushed opponent
+    marks, a blocked-marks flag, a takeback wipe) lands on a frame the input
+    router never saw, so the present pass only updates the rects dirty_rects()
+    names. Each one must raise the board's present flag or the redraw stays in
+    the back buffer — the never-appearing shared arrows."""
+    board.needs_present = False
+    mutate(board)
+    assert board.needs_present is True
+
+
+def test_consume_needs_present_reports_once_then_falls_back_to_false(board):
+    """The flag is edge-triggered: one draw() consumes it, so the frame after
+    the mutation stops paying for a full-board present."""
+    board.needs_present = False
+    board.annotations.clear_opp()
+    assert board.consume_needs_present() is True
+    assert board.consume_needs_present() is False
+    assert board.needs_present is False
+
+
+def test_a_no_op_arrow_delta_does_not_mark(board):
+    """A duplicate add or an absent remove changes nothing on the board, so it
+    must not buy a full-board present for a no-op wire event."""
+    arrow = (Square(6, 0), Square(4, 0))
+    board.annotations.opp_arrows.append(arrow)
+    board.needs_present = False
+    board.annotations.apply_opp_delta("add", "arrow", arrow=arrow)
+    assert board.needs_present is False
+    board.needs_present = False
+    board.annotations.apply_opp_delta(
+        "remove", "arrow", arrow=(Square(1, 1), Square(2, 2)))
+    assert board.needs_present is False
+
+
+def test_local_right_drag_toggles_do_not_mark(board):
+    """Click-driven toggles ride the router's had_events full flip, so they are
+    deliberately left out — marking here would buy a full-board present that the
+    event pass already guarantees."""
+    board.needs_present = False
+    sq = Square(6, 4)
+    board.begin_right_press(_cell_center(board, sq))
+    board.end_right_press(_cell_center(board, sq))
+    assert sq in board.highlighted_squares
+    assert board.needs_present is False
+    board.begin_right_press(_cell_center(board, sq))
+    board.end_right_press(_cell_center(board, Square(4, 4)))
+    assert (sq, Square(4, 4)) in board.arrows
+    assert board.needs_present is False

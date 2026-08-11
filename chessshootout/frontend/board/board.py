@@ -124,6 +124,7 @@ class Board:
         self.auto_queen_provider = lambda: False
 
         self.rect = pg.Rect(0, 0, 0, 0)
+        self.needs_present = False
         self.frame_pad = 0
         self.cell_size = 0
         self.board_offset_x = 0
@@ -636,6 +637,14 @@ class Board:
 
     def is_restoring(self):
         return bool(self._restore_anims)
+
+    def mark_needs_present(self):
+        self.needs_present = True
+
+    def consume_needs_present(self):
+        was = self.needs_present
+        self.needs_present = False
+        return was
 
     def animation_dirty_rect(self):
         if not self.animations:

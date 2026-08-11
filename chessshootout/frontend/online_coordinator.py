@@ -418,15 +418,17 @@ class OnlineCoordinator:
         if self.client is not None:
             self.client.request_state_sync()
 
-    def _cancel_resync(self):
+    def _end_resync(self):
         self._resyncing = False
-        self._resync_buffer = []
-
-    def _replay_resync_buffer(self):
         buffered = self._resync_buffer
         self._resync_buffer = []
+        if self._subscriber is None:
+            return
         for method_name, payload in buffered:
             self._forward_board_event(method_name, payload)
+
+    def _cancel_resync(self):
+        self._end_resync()
 
     def _handle_game_resumed(self, payload):
         game = self.app.game
@@ -439,8 +441,7 @@ class OnlineCoordinator:
             self.set_marks_visibility(desired)
         target = self._subscriber if self._subscriber is not None else game
         target.on_resume(payload)
-        self._resyncing = False
-        self._replay_resync_buffer()
+        self._end_resync()
 
     def _handle_time_granted(self, payload):
         self._forward_board_event("on_give_time", payload)
@@ -452,13 +453,11 @@ class OnlineCoordinator:
 
     def _handle_annotations_state(self, payload):
         if self._resyncing:
-            self._resync_buffer.append(("on_annotations_state", payload))
             return
         self._forward_board_event("on_annotations_state", payload)
 
     def _handle_annotation_delta(self, payload):
         if self._resyncing:
-            self._resync_buffer.append(("on_annotation_delta", payload))
             return
         self._forward_board_event("on_annotation_delta", payload)
 

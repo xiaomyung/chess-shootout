@@ -18,7 +18,10 @@ import pytest
 from tests.conftest import pygame_display
 from chessshootout.backend.pieces import PieceColor
 from chessshootout.backend.utils import Square
-from chessshootout.frontend.screens.game import CHAT_COOLDOWN_MARGIN_MS, CHAT_PRESETS
+from chessshootout.frontend.screens.game import (
+    CHAT_COOLDOWN_MARGIN_MS, CHAT_PRESETS, PRESENT_SETTLE_MS,
+)
+from chessshootout.infra import env
 from chessshootout.frontend.visual.colors import Colors
 from chessshootout.server.protocol import (
     CHAT_COOLDOWN_SECONDS, CHAT_PRESET_COUNT, MAX_SHARED_ARROWS,
@@ -234,6 +237,112 @@ def test_on_annotation_delta_drops_malformed_payloads():
     game.on_annotation_delta({"action": "add", "kind": "arrow", "from": "e2"})
     assert game.board.annotations.opp_highlighted_squares == set()
     assert game.board.annotations.opp_arrows == []
+
+
+# ---- present path: server-driven marks reach the screen --------------------
+
+
+def _frame(game):
+    """One drawn frame's dirty rects. The animation-settle window is pushed into
+    the past first, so the only board-sized rect the list can contain is the one
+    the present flag adds."""
+    game.board.last_animation_completed_at_ms = -PRESENT_SETTLE_MS
+    game.draw()
+    return game.dirty_rects()
+
+
+def _settled(game):
+    """Baseline rects for a quiet frame. A fresh game starts marked (the board's
+    reset wipes annotations), so one frame consumes that and the second observes
+    the quiet state."""
+    _frame(game)
+    return _frame(game)
+
+
+def test_a_remote_delta_puts_the_board_rect_in_the_dirty_rects():
+    """The reported bug: an opponent arrow arrives on a frame the input router
+    never saw, so Frontend._present only updates the rects dirty_rects() names.
+    Unflagged, the arrow is drawn into the back buffer and never flipped."""
+    game = _online_game()
+    assert game.board.rect not in _settled(game)
+    game.on_annotation_delta({"action": "add", "kind": "arrow", "from": "e2", "to": "e4"})
+    assert game.board.rect in _frame(game)
+
+
+def test_the_board_rect_is_gone_on_the_next_settled_frame():
+    """One mutation buys exactly one full-board present, not a permanent one."""
+    game = _online_game()
+    _settled(game)
+    game.on_annotation_delta({"action": "add", "kind": "highlight", "square": "c6"})
+    assert game.board.rect in _frame(game)
+    assert game.board.rect not in _frame(game)
+
+
+def test_dirty_rects_stays_idempotent_within_one_frame():
+    """Frontend._present asks the screen for its dirty rects twice per frame —
+    once through _needs_full_redraw, once through _present_rects — so the flag is
+    consumed in draw() and dirty_rects() only reads it. Consuming inside
+    dirty_rects() would drop the board rect on the second call and lose the
+    present all over again."""
+    game = _online_game()
+    _settled(game)
+    game.on_annotation_delta({"action": "add", "kind": "highlight", "square": "c6"})
+    assert game.board.rect in _frame(game)
+    assert game.board.rect in game.dirty_rects()
+
+
+def test_a_full_opponent_state_and_a_blocked_flag_both_mark_the_board():
+    game = _online_game()
+    _settled(game)
+    game.on_annotations_state({"sharing": True, "highlights": ["c6"], "arrows": []})
+    assert game.board.rect in _frame(game)
+    assert game.board.rect not in _frame(game)
+    game.on_annotations_blocked({
+        "action": "blocked", "highlights": ["c6"],
+        "arrows": [{"from": "e2", "to": "e4"}],
+    })
+    assert game.board.rect in _frame(game)
+
+
+def test_hidden_opponent_marks_never_mark_the_board():
+    """With HIDE on, both inbound handlers return before they touch the
+    annotations: nothing changed on screen, so nothing may ask for a present."""
+    game = _online_game()
+    env.set_hide_opp_marks(True)
+    _settled(game)
+    game.on_annotations_state({"sharing": True, "highlights": ["c6"], "arrows": []})
+    game.on_annotation_delta({"action": "add", "kind": "arrow", "from": "e2", "to": "e4"})
+    assert game.board.needs_present is False
+    assert game.board.rect not in _frame(game)
+
+
+def test_a_takeback_that_wipes_arrows_marks_the_whole_board():
+    """The undo animation only dirties the from/to span, but the takeback also
+    wipes both sides' marks board-wide — the wipe is what needs the full rect."""
+    game = _online_game()
+    assert game.match.apply_san("e4").legal
+    game.board.arrows = [(ARROW_FROM, ARROW_TO)]
+    game.board.annotations.set_opp({HL2}, [(Square(1, 4), Square(3, 4))])
+    _settled(game)
+    game.on_takeback({"ply": 0, "clock": {}})
+    assert game.board.needs_present is True
+    assert game.board.rect in _frame(game)
+
+
+def test_a_resume_marks_the_board():
+    """on_resume rebuilds the position and then assigns board.highlighted_squares,
+    board.arrows and annotations.flagged directly, bypassing the mutators; the
+    annotation wipe inside on_resume (clear/clear_opp marking the board) is what
+    gets the rebuilt position presented."""
+    game = _online_game(your_color="white")
+    _settled(game)
+    game.on_resume({
+        "move_history": [{"san": "e4"}],
+        "white_annotations": {"sharing": True, "highlights": ["c6"], "arrows": []},
+        "black_annotations": {"sharing": False, "highlights": [], "arrows": []},
+    })
+    assert game.board.needs_present is True
+    assert game.board.rect in _frame(game)
 
 
 # ---- resume restores everything -------------------------------------------
