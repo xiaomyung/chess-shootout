@@ -20,8 +20,8 @@ from chessshootout.frontend.visual.draw import (
 from chessshootout.frontend.visual.tween import out_cubic
 from chessshootout.infra import env
 from chessshootout.skillcheck.mole import (
-    MOLE_GRACE_MS, MOLE_HITBOX_CY_FRAC, MOLE_HITBOX_RX_FRAC, MOLE_HITBOX_RY_FRAC,
-    MOLE_INTRO_MS, MOLE_MAX_WHIFFS, MOLE_RECOIL_LOCKOUT_MS)
+    MOLE_GRACE_MS, MOLE_HITBOX_RX_FRAC, MOLE_HITBOX_RY_FRAC,
+    MOLE_INTRO_MS, MOLE_MAX_WHIFFS, MOLE_RECOIL_LOCKOUT_MS, hitbox_lift)
 from chessshootout.skillcheck.rng import seeded_floats
 
 MOLE_VIEW_FAIL_HOLD_MS = 1250
@@ -175,7 +175,7 @@ class MoleController(SkillCheckController):
     def __init__(self, challenge, cell_rect, now_ms, deadline_ms, *, hole_squares=None,
                  victim_surface=None, geom=None, from_sq=None, shot_sound=None, on_shot=None,
                  miss_count=0, progress=0, passive=False, audio=None, on_hit_px=None,
-                 mirror_targets=False, last_hit_pop=-1):
+                 mirror_targets=False, last_hit_pop=-1, adjudicated_flipped=None):
         self._init_common(challenge, now_ms, deadline_ms, on_shot=on_shot, passive=passive,
                           audio=audio)
         self._hole_squares = tuple(hole_squares) if hole_squares is not None else ()
@@ -184,6 +184,7 @@ class MoleController(SkillCheckController):
         self._shot_sound = shot_sound
         self._on_hit_px = on_hit_px
         self._mirror_targets = mirror_targets
+        self._adjudicated_flipped = adjudicated_flipped
         self._init_victim(victim_surface, cell_rect)
         self._victim_bbox = None
         self._squash_cache = {}
@@ -197,6 +198,7 @@ class MoleController(SkillCheckController):
                                   else float(now_ms) - MOLE_VIEW_RETREAT_MS)
         self._last_hit_height = 0.0
         self._last_hit_px = None
+        self._last_hit_anchor = None
         self._reset_effects(cell_rect.center)
         self._win_ms = None
         self._last_shot_ms = None
@@ -241,6 +243,7 @@ class MoleController(SkillCheckController):
             self._victim_bbox = self._victim.get_bounding_rect()
         self._affine = self._derive_affine()
         self._hole_px = self._hole_centers()
+        self._last_hit_px = self._reanchored_hit_px()
         self._pit_rx = max(int(cell * MOLE_VIEW_PIT_RX_FRAC), 6)
         self._pit_ry = max(int(cell * MOLE_VIEW_PIT_RY_FRAC), 4)
         self._mouth_rx, self._mouth_ry = pit_mouth(self._pit_rx, self._pit_ry)
@@ -292,6 +295,13 @@ class MoleController(SkillCheckController):
         return (min(max(target[0], 0.0), MOLE_VIEW_TARGET_MAX),
                 min(max(target[1], 0.0), MOLE_VIEW_TARGET_MAX))
 
+    def _wire_target(self, target):
+        if (self._adjudicated_flipped is None
+                or self._adjudicated_flipped == (self._affine[3] < 0)):
+            return target
+        return self._clamp_target(
+            (target[0] + 2.0 * hitbox_lift(self._adjudicated_flipped), target[1]))
+
     def handle_event(self, event):
         if self._passive:
             return False
@@ -323,10 +333,12 @@ class MoleController(SkillCheckController):
         if self._shot_sound is not None:
             self._shot_sound()
         elapsed = self._now - self.start_ms
+        wired = self._wire_target(target)
         if self._online:
-            self._on_shot(elapsed, target=target)
-        flipped = self._affine is not None and self._affine[3] < 0
-        if self.challenge.hit_at(elapsed, target[0], target[1], self._hole_squares,
+            self._on_shot(elapsed, target=wired)
+        flipped = (self._affine[3] < 0 if self._adjudicated_flipped is None
+                   else self._adjudicated_flipped)
+        if self.challenge.hit_at(elapsed, wired[0], wired[1], self._hole_squares,
                                  self._last_hit_pop, flipped=flipped):
             self._register_hit(elapsed, pos)
         else:
@@ -343,6 +355,7 @@ class MoleController(SkillCheckController):
         hole = self.challenge.pops[idx].hole
         if hole < len(self._hole_px):
             self._last_hit_px = self._hole_px[hole]
+            self._last_hit_anchor = hole
         self._progress += 1
         kill = self._quota_met()
         self._hit_juice(kill)
@@ -413,8 +426,17 @@ class MoleController(SkillCheckController):
         px = self._board_to_px(target[0], target[1])
         if px is None or not self._mirror_targets:
             return px
-        lift = -MOLE_HITBOX_CY_FRAC if self._affine[3] < 0 else MOLE_HITBOX_CY_FRAC
-        return (px[0], px[1] + 2.0 * lift * self._affine[3])
+        own = hitbox_lift(self._affine[3] < 0)
+        mover = hitbox_lift(bool(self._adjudicated_flipped))
+        return (px[0], px[1] + (own - mover) * self._affine[3])
+
+    def _reanchored_hit_px(self):
+        anchor = self._last_hit_anchor
+        if anchor is None:
+            return None
+        if isinstance(anchor, int):
+            return self._hole_px[anchor] if anchor < len(self._hole_px) else None
+        return self._spectate_px(anchor)
 
     def spectate_shot(self, elapsed, miss_count, won, progress=0, direction=None,
                       target=None):
@@ -428,6 +450,7 @@ class MoleController(SkillCheckController):
             self._progress = progress
             if px is not None:
                 self._last_hit_px = px
+                self._last_hit_anchor = target
             idx = self.challenge.pop_up_at(elapsed)
             if idx is not None:
                 self._duck_pop(idx, elapsed)
@@ -1058,7 +1081,7 @@ class MoleController(SkillCheckController):
         live_hole = self.challenge.pops[up].hole if up is not None else None
         rx = abs(self._affine[2]) * MOLE_HITBOX_RX_FRAC
         ry = abs(self._affine[3]) * MOLE_HITBOX_RY_FRAC
-        lift = -MOLE_HITBOX_CY_FRAC if self._affine[3] < 0 else MOLE_HITBOX_CY_FRAC
+        lift = hitbox_lift(self._affine[3] < 0)
         for i, (row, col) in enumerate(self._hole_squares):
             if elapsed - i * MOLE_VIEW_HOLE_STAGGER_MS <= 0.0:
                 continue

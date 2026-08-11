@@ -9,7 +9,7 @@ from chessshootout.frontend.game.variant import Variant
 from chessshootout.frontend.game.whack_gun import WhackGun
 from chessshootout.frontend.skillcheck.registry import CheckSpec, build_controller
 from chessshootout.skillcheck import mole
-from chessshootout.skillcheck.online import skillcheck_deadline_ms
+from chessshootout.skillcheck.online import adjudicated_flipped, skillcheck_deadline_ms
 from chessshootout.skillcheck.types import SkillCheckKind, SkillCheckOutcome, whiffs_by_ply
 from chessshootout.skillcheck.wheel import period_for_diff, placement_square
 
@@ -114,8 +114,17 @@ class SkillCheckSession:
             hole_squares=hole_squares, captured_value=captured_value, progress=progress,
             attacker_surface=attacker_surface, on_hit_px=self._on_whack_hit_px,
             mirror_targets=passive and online,
-            last_hit_pop=self.online_last_hit_pop if online else -1)
+            last_hit_pop=self.online_last_hit_pop if online else -1,
+            adjudicated_flipped=self._mover_adjudicated_flipped(online, passive))
         return build_controller(kind, spec)
+
+    def _mover_adjudicated_flipped(self, online, passive):
+        if not online:
+            return None
+        side = self.screen._chosen_side
+        if passive:
+            side = "black" if side == "white" else "white"
+        return adjudicated_flipped(side)
 
     def _arm_check_state(self, kind, seed, target, from_sq, capturer, elapsed_ms):
         board = self.screen.board

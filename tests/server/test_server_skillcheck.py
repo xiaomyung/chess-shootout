@@ -1128,6 +1128,46 @@ async def test_white_mover_keeps_the_unflipped_whack_oval(app, clock):
 
 
 @pytest.mark.asyncio
+async def test_the_shot_handler_reads_the_shared_orientation_helper(app, clock, monkeypatch):
+    """The handler's flipped flag must be the RETURN VALUE of
+    online.adjudicated_flipped(pending.color) -- the same importable rule the
+    client normalises its wire target with -- not a re-inlined color comparison.
+    handlers.py binds the online MODULE (from chessshootout.skillcheck import
+    online) and resolves the attribute at call time, so patching the helper on
+    that module and demanding shot_wins receives the stub's unique sentinel BY
+    IDENTITY pins the routing: an inline `pending.color == "black"` would hand
+    shot_wins a plain True instead. The sentinel is truthy, so the real
+    adjudication still scores the black mover's mirrored-oval centre as the
+    exact hit the real helper (pinned below to return True for black) yields."""
+    room, ws_w, ws_b, frm, to, pending, ch, holes = await _black_whack_room(app, clock)
+    real_flipped = online.adjudicated_flipped
+    sentinel = object()
+    asked = []
+
+    def fake_flipped(color):
+        asked.append(color)
+        return sentinel
+
+    seen = []
+    real_shot = online.shot_wins
+
+    def spy(*args, **kwargs):
+        seen.append(kwargs["flipped"])
+        return real_shot(*args, **kwargs)
+
+    monkeypatch.setattr(online, "adjudicated_flipped", fake_flipped)
+    monkeypatch.setattr(online, "shot_wins", spy)
+    row, col = holes[ch.pops[0].hole]
+    out = await _fire(app, clock, room, "black", _pop_mid(ch, 0),
+                      target=(row + 0.8, col + 0.5))
+    assert out == "skillcheck_hit" and pending.progress == 1
+    assert asked == [pending.color] == ["black"]
+    assert len(seen) == 1 and seen[0] is sentinel, \
+        "the handler forwards the helper's return itself, not a re-derived bool"
+    assert real_flipped("black") is True, "the shared rule the sentinel stands in for"
+
+
+@pytest.mark.asyncio
 async def test_whack_hit_at_a_wrong_hole_increments_miss_only(app, clock):
     room, ws_w, ws_b, frm, to, pending, ch, holes = await _whack_room(app, clock)
     wrong_hole = next(h for h in range(ch.hole_count) if h != ch.pops[0].hole)

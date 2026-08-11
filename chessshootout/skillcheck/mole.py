@@ -39,6 +39,10 @@ MOLE_TAUNTS = ("missed me", "lol", "nice aim", "rip", "too slow",
                "2 ez", "bye bye", "not even close", "lmaoo", "git gud")
 
 
+def hitbox_lift(flipped):
+    return -MOLE_HITBOX_CY_FRAC if flipped else MOLE_HITBOX_CY_FRAC
+
+
 def pick_taunt(seed):
     roll = seeded_floats(f"moletaunt:{seed}", 1)[0]
     return MOLE_TAUNTS[int(roll * len(MOLE_TAUNTS)) % len(MOLE_TAUNTS)]
@@ -184,7 +188,7 @@ class MoleChallenge:
         if hole >= len(hole_squares):
             return False
         row, col = hole_squares[hole]
-        lift = -MOLE_HITBOX_CY_FRAC if flipped else MOLE_HITBOX_CY_FRAC
+        lift = hitbox_lift(flipped)
         ccy = row + 0.5 + lift
         ccx = col + 0.5
         return (((col_f - ccx) / MOLE_HITBOX_RX_FRAC) ** 2

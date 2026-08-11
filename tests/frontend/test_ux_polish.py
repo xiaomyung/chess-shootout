@@ -11,7 +11,11 @@ from chessshootout.backend.utils import Square
 from chessshootout.frontend.board import Board, DRAG_THRESHOLD_PX
 from chessshootout.domain.capture_summary import captured_by, material_advantage
 from chessshootout.frontend.modals.confirm import ConfirmModal
-from tests.helpers import make_app, online_start_payload, start_single_screen
+from chessshootout.skillcheck.rng import move_roll_key, ply_roll
+from chessshootout.skillcheck.triggers import select_skillcheck
+from chessshootout.skillcheck.types import SkillCheckKind
+from tests.helpers import BLACK, K, P, Q, WHITE, make_app, make_backend, \
+    online_start_payload, piece, sq, start_single_screen
 
 
 _pygame_init = pygame_display(1000, 800)
@@ -35,8 +39,8 @@ def _new_app():
 def setup_position(board, piece_map, turn=PieceColor.WHITE):
     bk = board.backend
     bk.state = [[None] * 8 for _ in range(8)]
-    for sq, piece in piece_map.items():
-        bk.state[sq.row][sq.col] = piece
+    for square, pc in piece_map.items():
+        bk.state[square.row][square.col] = pc
     bk.turn = turn
     bk.move_history = []
     bk.position_counts = Counter()
@@ -512,25 +516,90 @@ def _online_app(your_color="black"):
     return app
 
 
-def test_online_game_ignores_the_flip_hotkey():
-    """Whack adjudication is orientation-dependent: the server derives the hitbox lift
-    from the mover's color, assuming an online client renders own-color-at-bottom. A
-    manual flip would put optimistic client hits 0.6 rows off the authoritative verdict,
-    so the online variant refuses to flip at all (silent no-op, key still consumed)."""
+def test_online_game_flips_from_the_hotkey():
+    """The server's colour-derived hitbox lift and the client's affine-derived one can
+    no longer disagree: the whack shot is normalised into the server's assumed
+    orientation before it goes on the wire (mole_view._wire_target), so the board is
+    free again -- the 096ec0e flip lock is lifted."""
     app = _online_app("black")
     assert app.game.board.flipped is True
     assert app.game.handle_key(pg.event.Event(pg.KEYDOWN, key=pg.K_f, mod=0)) is True
-    assert app.game.board.flipped is True, "own color stays at the bottom online"
+    assert app.game.board.flipped is False, "a black player may put white at the bottom"
+    app.game.handle_key(pg.event.Event(pg.KEYDOWN, key=pg.K_f, mod=0))
+    assert app.game.board.flipped is True, "and toggle straight back"
 
 
-def test_online_game_ignores_the_right_menu_flip_action():
+def test_online_game_flips_from_the_right_menu_cap():
     """The rail's FLIP cap and the F hotkey share the single _on_flip choke point."""
     app = _online_app("white")
     assert app.game.board.flipped is False
     app.sound_manager.play_flip = MagicMock()
     app.game.right_menu.callbacks["flip"]()
-    assert app.game.board.flipped is False
-    app.sound_manager.play_flip.assert_not_called()
+    assert app.game.board.flipped is True
+    app.sound_manager.play_flip.assert_called_once()
+
+
+def _open_whack_check(app):
+    app.game.match.backend = make_backend({
+        sq(7, 4): piece(K, WHITE), sq(0, 4): piece(K, BLACK),
+        sq(4, 3): piece(Q, WHITE), sq(3, 3): piece(P, BLACK),
+    }, turn=WHITE)
+    frm, to = sq(4, 3), sq(3, 3)
+    for i in range(8000):
+        seed = "flipseed-{}".format(i)
+        roll = ply_roll(seed, move_roll_key(0, frm, to))
+        if select_skillcheck(app.game.match.backend, frm, to, roll) == SkillCheckKind.WHACK:
+            app.game.skillcheck.reset(enabled=True, seed=seed)
+            assert app.game.skillcheck_session.skillcheck_gate(frm, to) is True
+            return
+    raise AssertionError("no whack seed found")
+
+
+def test_a_live_interactive_check_swallows_the_flip_key_before_it_reaches_the_board():
+    """There is deliberately NO flip lock in product code: while a live interactive
+    check runs, the input router swallows every KEYDOWN at the door
+    (screen.swallows_input()), so F cannot reach _on_flip for any kind. This pins
+    the structural swallow the design leans on instead of a lock predicate. The
+    positive control after teardown replays the IDENTICAL posted event through the
+    same router path and demands a flip -- so a dead dispatch, a malformed event
+    dict or an inactive screen can no longer masquerade as a swallow."""
+    app = _new_app()
+    _open_whack_check(app)
+    assert app.game.swallows_input() is True
+    before = app.game.board.flipped
+    flip_event = {"key": pg.K_f, "unicode": "", "mod": 0}
+    pg.event.clear()
+    pg.event.post(pg.event.Event(pg.KEYDOWN, flip_event))
+    app.input_router.check_events()
+    assert app.game.board.flipped is before, "the key never reached _on_flip"
+    app.game.skillcheck_session.teardown_skillcheck_overlay()
+    assert app.game.swallows_input() is False
+    pg.event.clear()
+    pg.event.post(pg.event.Event(pg.KEYDOWN, flip_event))
+    app.input_router.check_events()
+    assert app.game.board.flipped != before, \
+        "the same event path reaches _on_flip once the check is torn down"
+
+
+def test_a_spectated_check_still_flips_and_re_anchors_the_mirror():
+    """Spectating the opponent's check is a reachable flip window (a passive mirror
+    lets input flow). The flip must both turn the board and re-anchor the live
+    overlay through _refresh_skillcheck_geometry, or the mirror keeps rendering at
+    the pre-flip pixel positions."""
+    app = _online_app("white")
+    session = app.game.skillcheck_session
+    session.open_spectate_overlay(
+        SkillCheckKind.WHACK, "spec-seed", 0, 5000, Square(4, 3), Square(3, 3), None, 1)
+    assert app.game.swallows_input() is False, "a passive mirror lets input flow"
+    ctrl = app.game.skillcheck_overlay._controller
+    before = ctrl._hole_px
+    assert app.game.handle_key(pg.event.Event(pg.KEYDOWN, key=pg.K_f, mod=0)) is True
+    assert app.game.board.flipped is True
+    expected = tuple(app.game.board.cell_rect(Square(row, col)).center
+                     for row, col in ctrl._hole_squares)
+    assert ctrl._hole_px == expected != before, \
+        "the mirror's pits re-anchor to the flipped cell centres"
+    session.teardown_skillcheck_overlay()
 
 
 def test_local_game_still_flips_from_both_entry_points():

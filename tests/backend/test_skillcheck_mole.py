@@ -269,6 +269,24 @@ def test_hit_at_flipped_mirrors_the_lift_below_the_pit_row_in_board_space():
         "explicit flipped=False is byte-identical to the historical default"
 
 
+def test_hitbox_lift_mirrors_with_the_orientation():
+    # hitbox_lift is the ONE named rule for which side of the pit the body rises
+    # on: hit_at reads it here and the client's wire normalisation reads the very
+    # same function, so the two can never drift apart again.
+    assert mole.hitbox_lift(False) == mole.MOLE_HITBOX_CY_FRAC
+    assert mole.hitbox_lift(True) == -mole.MOLE_HITBOX_CY_FRAC
+    assert mole.hitbox_lift(True) == -mole.hitbox_lift(False)
+    ch = MoleChallenge.from_seed("hit-seed", captured_value=5)
+    squares = mole.hole_squares("hit-seed", 5, CAPTURE_SQ, OCCUPIED)
+    pop = ch.pops[0]
+    t = (pop.t_up_ms + pop.t_down_ms) / 2.0
+    row, col = squares[pop.hole]
+    for flipped in (False, True):
+        assert ch.hit_at(t, row + 0.5 + mole.hitbox_lift(flipped), col + 0.5, squares,
+                         flipped=flipped) is True, \
+            "hit_at still agrees with the raw constant on both orientations"
+
+
 def test_hit_at_with_a_short_hole_list_is_a_safe_miss():
     ch = MoleChallenge.from_seed("short-list", captured_value=9)
     index = next(i for i, pop in enumerate(ch.pops) if pop.hole >= 1)

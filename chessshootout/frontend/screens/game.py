@@ -843,12 +843,16 @@ class GameScreen(Screen):
         self.player_strip_top.set_rect(r.top_strip_rect, scale=r.scale)
         self.player_strip_bottom.set_rect(r.bottom_strip_rect, scale=r.scale)
         self.result_menu.set_rect(r.result_rect)
-        skillcheck_target = self.skillcheck_session.skillcheck_target
-        if self.skillcheck_overlay.is_active() and skillcheck_target is not None:
-            self.skillcheck_overlay.relayout(self.board.cell_rect(skillcheck_target))
-            self.skillcheck_overlay.set_board_rect(self.board.rect)
+        self._refresh_skillcheck_geometry()
         refresh_capture_icons(self.board, r.strip_height,
                               (self.player_strip_top, self.player_strip_bottom))
+
+    def _refresh_skillcheck_geometry(self):
+        self.skillcheck_session.whack_gun.clear_impact_px()
+        target = self.skillcheck_session.skillcheck_target
+        if self.skillcheck_overlay.is_active() and target is not None:
+            self.skillcheck_overlay.relayout(self.board.cell_rect(target))
+            self.skillcheck_overlay.set_board_rect(self.board.rect)
 
     def draw(self):
         app = self.app
@@ -1332,10 +1336,11 @@ class GameScreen(Screen):
         return self.variant != Variant.ONLINE or self.match.local_color == winner
 
     def _on_flip(self):
-        if self.variant == Variant.ONLINE or self.current_result() is not None:
+        if self.current_result() is not None:
             return
         self.board.cancel_drag_physics()
         self.board.flipped = not self.board.flipped
+        self._refresh_skillcheck_geometry()
         self.app.sound_manager.play_flip()
 
     def _on_resign(self):

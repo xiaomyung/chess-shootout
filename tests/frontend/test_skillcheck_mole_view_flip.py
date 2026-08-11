@@ -12,7 +12,22 @@ server's engine path with the same seed for both colors. The clamp pins keep
 the client's board-edge clamp (BOARD_SIZE - 0.001) strictly inside the server's
 validation ceiling (lt 8.0) so every clamped shot stays wire-valid, and show a
 bottom-edge pit's mirrored oval reaching the clamp ceiling -- the piece spills
-past the top of a flipped board, and the clamped coordinate still lands."""
+past the top of a flipped board, and the clamped coordinate still lands.
+
+Manual flips are legal online again, so the controller now carries the server's
+ASSUMED orientation (adjudicated_flipped = mover plays black) next to its live
+affine. When the two disagree -- a mover who flipped their board -- _wire_target
+shifts the outgoing row by twice the assumed lift into the server's frame and
+re-clamps it, and the local prediction scores that SAME wired row in the same
+assumed orientation the server will use: on an edge pit the shift collapses
+under the clamp, so scoring the raw row through the live affine instead let the
+server land a shot the client had rendered as a whiff (free progress plus a
+desynced mirror). When the orientations agree, or offline where
+adjudicated_flipped is None, the raw target and the live-affine orientation go
+into the predicate bit-identically to the pre-fix path. The spectator mirror
+likewise derives the MOVER's lift from the same field
+instead of assuming the opposite of its own board, so it keeps painting relays
+on the drawn body after either side flips."""
 
 from unittest.mock import MagicMock
 
@@ -37,6 +52,7 @@ _CAPTURED_VALUE = 5
 _CAPTURE_SQ = (3, 3)
 _OCCUPIED = {(3, 3), (4, 4)}
 _BODY_LIFT_PX = int(MOLE_HITBOX_CY_FRAC * _CELL)
+_CELL_RECT = pg.Rect(3 * _CELL, 4 * _CELL, _CELL, _CELL)
 
 
 def _unflipped_geom(sq):
@@ -63,8 +79,7 @@ def _mole(geom, **kw):
     kw.setdefault("hole_squares", _holes())
     kw.setdefault("audio", MagicMock())
     kw.setdefault("victim_surface", _victim())
-    return MoleController(ch, pg.Rect(3 * _CELL, 4 * _CELL, _CELL, _CELL), 0,
-                          ch.deadline_ms, geom=geom, **kw), ch
+    return MoleController(ch, _CELL_RECT, 0, ch.deadline_ms, geom=geom, **kw), ch
 
 
 def _pop0_mid(ch):
@@ -83,6 +98,19 @@ def _fired(geom, dy_px, **kw):
     px, py = _pop0_pit_px(ch, geom)
     assert controller.handle_event(_click((px, py + dy_px))) is True
     return controller
+
+
+def _edge_challenge():
+    return MoleChallenge(pops=(MolePop(0, 500.0, 700.0, 1500.0),),
+                         hole_count=1, hits_required=1, deadline_ms=5000.0)
+
+
+def _edge_mole(geom, hole, **kw):
+    ch = _edge_challenge()
+    kw.setdefault("audio", MagicMock())
+    kw.setdefault("victim_surface", _victim())
+    return MoleController(ch, _CELL_RECT, 0, ch.deadline_ms, geom=geom,
+                          hole_squares=(hole,), **kw), ch
 
 
 def test_flipped_view_scores_the_click_on_the_risen_body_screen_up():
@@ -122,7 +150,7 @@ def test_body_center_shots_agree_between_controller_and_server_for_both_colors()
     for color, geom in (("white", _unflipped_geom), ("black", _flipped_geom)):
         sent = {}
         controller = _fired(
-            geom, _BODY_LIFT_PX,
+            geom, _BODY_LIFT_PX, adjudicated_flipped=color == "black",
             on_shot=lambda elapsed, target=None: sent.update(elapsed=elapsed, target=target))
         assert controller._progress == 1, color
         ch = controller.challenge
@@ -133,6 +161,128 @@ def test_body_center_shots_agree_between_controller_and_server_for_both_colors()
             "the server scores the mover's own-color orientation: {}".format(color)
 
 
+def test_a_manually_flipped_mover_wires_the_row_in_the_servers_assumed_orientation():
+    """A black player who flipped to white-at-bottom aims at the body their OWN screen
+    draws. _wire_target shifts the outgoing row by twice the assumed lift into the
+    server's black-at-bottom frame (the column is orientation-free), so the server
+    scores the shot the mover saw land -- while the raw affine row would lose by
+    0.6 rows against the mirrored oval."""
+    sent = {}
+    controller = _fired(
+        _unflipped_geom, _BODY_LIFT_PX, adjudicated_flipped=True,
+        on_shot=lambda elapsed, target=None: sent.update(elapsed=elapsed, target=target))
+    assert controller._progress == 1, \
+        "local prediction scores the wired row: interior points keep the same verdict"
+    ch = controller.challenge
+    raw = _body_target(ch)
+    assert abs(sent["target"][0] - (raw[0] + 2.0 * mole.hitbox_lift(True))) < 1e-9
+    assert abs(sent["target"][1] - raw[1]) < 1e-9, "the column never moves"
+    assert online.shot_wins(
+        SkillCheckKind.WHACK, ch, sent["elapsed"], 0, ch.deadline_ms,
+        target=sent["target"], hole_squares=_holes(), flipped=True) is True, \
+        "the wired row wins on the server's engine path"
+    assert online.shot_wins(
+        SkillCheckKind.WHACK, ch, sent["elapsed"], 0, ch.deadline_ms,
+        target=raw, hole_squares=_holes(), flipped=True) is False, \
+        "the un-normalised row is what 096ec0e locked the board over"
+
+
+def test_an_agreeing_orientation_wires_the_raw_target_untouched():
+    for flipped, geom in ((False, _unflipped_geom), (True, _flipped_geom)):
+        sent = {}
+        controller = _fired(
+            geom, _BODY_LIFT_PX, adjudicated_flipped=flipped,
+            on_shot=lambda elapsed, target=None: sent.update(elapsed=elapsed, target=target))
+        assert controller._progress == 1, flipped
+        ch = controller.challenge
+        px, py = _pop0_pit_px(ch, geom)
+        raw = controller._clamp_target(controller._shot_target((px, py + _BODY_LIFT_PX)))
+        assert sent["target"] == raw, \
+            "own-color-at-bottom keeps the wire byte-identical to the pre-flip one"
+        assert online.shot_wins(
+            SkillCheckKind.WHACK, ch, sent["elapsed"], 0, ch.deadline_ms,
+            target=sent["target"], hole_squares=_holes(), flipped=flipped) is True
+
+
+def test_an_edge_clamped_shot_scores_locally_exactly_what_the_server_scores():
+    """The free-progress desync: with a disagreeing orientation, an off-board click
+    past an edge pit clamps to the board rim, and _wire_target's +/-0.6 row shift
+    collapses under the second clamp -- the wired row equals the raw one, but the
+    server scores it against the ASSUMED orientation's oval while the raw local
+    prediction scored the live affine's. The client rendered a whiff, the server
+    counted a hit, and the mirror showed one. The prediction therefore evaluates
+    the WIRED row with adjudicated_flipped, so the two verdicts always agree; the
+    raw live-affine verdict is pinned below as the whiff the pre-fix client
+    showed. Both edge rows: a bottom pit under an unflipped live view wired
+    flipped, and a top pit under a flipped live view wired unflipped."""
+    off_board_y = BOARD_SIZE * _CELL + 30
+    for geom, hole, adjudicated in ((_unflipped_geom, (7, 3), True),
+                                    (_flipped_geom, (0, 3), False)):
+        sent = {}
+        controller, ch = _edge_mole(
+            geom, hole, adjudicated_flipped=adjudicated,
+            on_shot=lambda elapsed, target=None: sent.update(elapsed=elapsed, target=target))
+        controller.update(1000.0)
+        pos = (geom(Square(*hole))[0], off_board_y)
+        assert controller.handle_event(_click(pos)) is True
+        server_hit = online.shot_wins(
+            SkillCheckKind.WHACK, ch, sent["elapsed"], 0, ch.deadline_ms,
+            target=sent["target"], hole_squares=[hole], flipped=adjudicated)
+        assert (controller._progress == 1) == server_hit, hole
+        assert server_hit is True, "the clamped edge shot lands on the assumed-frame oval"
+        raw = controller._clamp_target(controller._shot_target(pos))
+        assert ch.hit_at(sent["elapsed"], raw[0], raw[1], [hole],
+                         flipped=geom is _flipped_geom) is False, \
+            "the raw live-affine verdict is the whiff the pre-fix client rendered"
+
+
+def test_agreeing_and_offline_paths_keep_the_raw_target_and_live_orientation(monkeypatch):
+    """The fix only reroutes the DISAGREEING online case: everywhere else the exact
+    pre-fix predicate inputs must reach hit_at -- the raw clamped target (the same
+    object _wire_target passes through untouched) with the live affine's
+    orientation."""
+    scored = []
+    real = MoleChallenge.hit_at
+
+    def spy(self, elapsed_ms, row_f, col_f, hole_squares, last_hit_pop=-1, *,
+            flipped=False):
+        scored.append((row_f, col_f, flipped))
+        return real(self, elapsed_ms, row_f, col_f, hole_squares, last_hit_pop,
+                    flipped=flipped)
+
+    monkeypatch.setattr(MoleChallenge, "hit_at", spy)
+    for adjudicated, geom in ((None, _flipped_geom), (None, _unflipped_geom),
+                              (True, _flipped_geom), (False, _unflipped_geom)):
+        scored.clear()
+        kw = {} if adjudicated is None else {
+            "adjudicated_flipped": adjudicated,
+            "on_shot": lambda elapsed, target=None: None}
+        controller, ch = _mole(geom, **kw)
+        controller.update(_pop0_mid(ch))
+        px, py = _pop0_pit_px(ch, geom)
+        pos = (px, py + _BODY_LIFT_PX)
+        assert controller.handle_event(_click(pos)) is True
+        raw = controller._clamp_target(controller._shot_target(pos))
+        assert scored == [(raw[0], raw[1], geom is _flipped_geom)], adjudicated
+        assert controller._progress == 1, adjudicated
+
+
+def test_the_normalised_row_stays_inside_the_field_bounds():
+    """The +/-0.6 wire shift on an edge pit must re-clamp, or the shifted row would
+    leave the protocol's [0, 8.0) Field bounds and the server would 422 the shot."""
+    down, _ = _mole(_unflipped_geom, adjudicated_flipped=True)
+    shifted = down._wire_target((MOLE_VIEW_TARGET_MAX, 3.5))
+    assert shifted == (MOLE_VIEW_TARGET_MAX, 3.5), "the ceiling clamp holds after the shift"
+    assert shifted[0] < SKILLCHECK_TARGET_MAX
+    up, _ = _mole(_flipped_geom, adjudicated_flipped=False)
+    assert up._wire_target((0.1, 3.5)) == (0.0, 3.5), "and the floor clamp on the way down"
+    agreeing, _ = _mole(_flipped_geom, adjudicated_flipped=True)
+    assert agreeing._wire_target((0.1, 3.5)) == (0.1, 3.5)
+    offline, _ = _mole(_flipped_geom)
+    assert offline._wire_target((0.1, 3.5)) == (0.1, 3.5), \
+        "a local/bot controller carries None and passes every target through"
+
+
 def test_client_clamp_stays_strictly_inside_the_server_validation_ceiling():
     assert MOLE_VIEW_TARGET_MAX < SKILLCHECK_TARGET_MAX, \
         "every clamped client shot passes the server's lt-8.0 field validation"
@@ -141,8 +291,8 @@ def test_client_clamp_stays_strictly_inside_the_server_validation_ceiling():
     assert controller._clamp_target((-0.5, 11.0)) == (0.0, MOLE_VIEW_TARGET_MAX)
 
 
-def _spectator(mirror_targets):
-    return _mole(_flipped_geom, passive=True, mirror_targets=mirror_targets)
+def _spectator(mirror_targets, **kw):
+    return _mole(_flipped_geom, passive=True, mirror_targets=mirror_targets, **kw)
 
 
 def _body_target(ch):
@@ -231,9 +381,68 @@ def test_a_stray_miss_near_an_inactive_hole_renders_on_that_hole_not_reflected()
         "the miss sits screen-up of ITS OWN hole, exactly like a shot on the live pop"
 
 
+def test_the_mirror_lift_follows_the_mover_not_the_spectators_own_board():
+    """After a manual flip both sides can render the SAME way up. The mirror shift is
+    (own_lift - mover_lift) * dy: with mover and spectator both flipped it collapses
+    to zero and the raw mapping already lands screen-up of the pit, where the
+    spectator draws the risen body. The old spectator-derived doubled shift would
+    paint the relay 0.6 rows past it. The default-orientation case (mover opposite,
+    adjudicated_flipped unset) is the unchanged test above."""
+    controller, ch = _spectator(True, adjudicated_flipped=True)
+    at = _pop0_mid(ch)
+    controller.update(at)
+    row, col = _holes()[ch.pops[0].hole]
+    controller.spectate_shot(at, 0, False, progress=1,
+                             target=(row + 0.5 + mole.hitbox_lift(True), col + 0.5))
+    px, py = _pop0_pit_px(ch, _flipped_geom)
+    _, ix, iy = controller._impacts[-1]
+    assert abs(ix - px) <= 1
+    assert abs(iy - (py + _BODY_LIFT_PX)) <= 1, \
+        "the relayed impact sits on the body the spectator draws, screen-up of the pit"
+    assert abs(controller._last_hit_px[1] - iy) < 1e-6, \
+        "the kill/gun anchor follows the same point"
+
+
+def test_the_movers_kill_anchor_re_maps_when_geometry_changes_mid_check():
+    """_last_hit_px is a cached window-space pixel: a mid-check flip (or resize)
+    re-derives _affine and _hole_px but used to leave it at the mirrored-away
+    point, so the win pop and the toss launched from the wrong side of the board.
+    The board-space source IS retained -- the mover keeps the hit hole's index --
+    so _apply_geometry re-maps the anchor through the fresh geometry instead of
+    clearing it."""
+    live = {"geom": _unflipped_geom}
+    controller = _fired(lambda sq: live["geom"](sq), _BODY_LIFT_PX)
+    row, col = _holes()[controller.challenge.pops[0].hole]
+    assert controller._last_hit_px == _unflipped_geom(Square(row, col))
+    live["geom"] = _flipped_geom
+    controller.relayout(_CELL_RECT)
+    assert controller._last_hit_px == _flipped_geom(Square(row, col)), \
+        "the anchor re-maps to the hit hole's fresh pixel, not the stale mirror image"
+
+
+def test_the_spectators_relayed_anchor_re_maps_when_geometry_changes_mid_check():
+    """Same staleness on the passive mirror, whose anchor came from a relayed shot:
+    the relayed board-space target is retained, so the anchor re-maps through the
+    fresh affine AND the fresh mirror shift (which itself depends on the
+    spectator's new orientation), landing back on the body being drawn."""
+    live = {"geom": _flipped_geom}
+    spec, ch = _mole(lambda sq: live["geom"](sq), passive=True, mirror_targets=True)
+    at = _pop0_mid(ch)
+    spec.update(at)
+    spec.spectate_shot(at, 0, False, progress=1, target=_body_target(ch))
+    stale = spec._last_hit_px
+    live["geom"] = _unflipped_geom
+    spec.relayout(_CELL_RECT)
+    row, col = _holes()[ch.pops[0].hole]
+    px, py = _unflipped_geom(Square(row, col))
+    assert spec._last_hit_px != stale
+    assert abs(spec._last_hit_px[0] - px) <= 1
+    assert abs(spec._last_hit_px[1] - (py + _BODY_LIFT_PX)) <= 1, \
+        "the relayed anchor sits on the risen body under the fresh orientation"
+
+
 def test_edge_pit_ovals_stay_reachable_under_the_clamp_on_both_orientations():
-    edge = MoleChallenge(pops=(MolePop(0, 500.0, 700.0, 1500.0),),
-                         hole_count=1, hits_required=1, deadline_ms=5000.0)
+    edge = _edge_challenge()
     assert edge.hit_at(1000.0, MOLE_VIEW_TARGET_MAX, 3.5, [(7, 3)], flipped=True) is True, \
         "a bottom-edge pit's mirrored oval reaches the clamp ceiling: clamped shots land"
     assert edge.hit_at(1000.0, MOLE_VIEW_TARGET_MAX, 3.5, [(7, 3)]) is False, \

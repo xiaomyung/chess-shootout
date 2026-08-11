@@ -67,6 +67,10 @@ def adjudicated_elapsed_ms(client_elapsed_ms, recv_ms, start_ms,
     return int(max(0.0, bounded))
 
 
+def adjudicated_flipped(color):
+    return color == "black"
+
+
 def is_past_deadline(elapsed_ms, deadline_ms=SKILLCHECK_DEADLINE_MS):
     return elapsed_ms > deadline_ms
 
