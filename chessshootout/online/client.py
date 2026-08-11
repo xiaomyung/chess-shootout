@@ -41,27 +41,28 @@ class Event:
     payload: dict
 
 
-def probe_active_game(addr, client_uuid, timeout=2.0):
-    if not addr or not client_uuid:
-        return None
-    try:
-        transport = ServerTransport(addr)
-    except TransportError:
-        return None
-    response = transport.reclaim_blocking(client_uuid, timeout=timeout)
-    if response is None:
-        return None
-    return response.model_dump(by_alias=True)
-
-
-def probe_server_health(addr, timeout=HEALTHZ_TIMEOUT_SECONDS):
+def _probe(addr, request):
     if not addr:
         return None
     try:
         transport = ServerTransport(addr)
     except TransportError:
         return None
-    response = transport.healthz_blocking(timeout=timeout)
+    return request(transport)
+
+
+def probe_active_game(addr, client_uuid, timeout=2.0):
+    if not client_uuid:
+        return None
+    response = _probe(addr, lambda transport: transport.reclaim_blocking(
+        client_uuid, timeout=timeout))
+    if response is None:
+        return None
+    return response.model_dump(by_alias=True)
+
+
+def probe_server_health(addr, timeout=HEALTHZ_TIMEOUT_SECONDS):
+    response = _probe(addr, lambda transport: transport.healthz_blocking(timeout=timeout))
     if response is None:
         return None
     payload = response.model_dump()

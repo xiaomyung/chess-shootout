@@ -48,6 +48,7 @@ CELL_PAD_X = 10
 
 FIELD_H = 34
 BTN_PAD_X = 14
+BTN_CUT = 6
 BTN_GAP = 8
 RESET_PAD_X = 10
 FIELD_LEFT_FRAC = 0.40
@@ -58,7 +59,11 @@ REVEAL_SNAP_EPS = 0.01
 ACTION_STATUS_GAP = 12
 ACTION_MIN_LABEL_W = 120
 
-_STATUS_TONES = {"ok": Colors.win, "warn": Colors.loss, "idle": Colors.text_muted}
+TONE_OK = "ok"
+TONE_WARN = "warn"
+TONE_IDLE = "idle"
+
+_STATUS_TONES = {TONE_OK: Colors.win, TONE_WARN: Colors.loss, TONE_IDLE: Colors.text_muted}
 
 
 class Fonts:
@@ -93,6 +98,15 @@ def _elide_left(font, text, max_w):
     while text and font.size(text)[0] > budget:
         text = text[1:]
     return ell + text
+
+
+def _draw_cut_button(window, rect, font, label):
+    window.blit(cut_rect_surface(rect.size, BTN_CUT, Colors.surface_raised,
+                                 border=Colors.border, border_width=1, corners=("tr",)),
+                rect.topleft)
+    text = render_text(font, label, Colors.text)
+    window.blit(text, (rect.centerx - text.get_width() // 2,
+                       rect.centery - text.get_height() // 2))
 
 
 def _seg_glyph(font, label, color):
@@ -358,12 +372,7 @@ class PathRow(_Row):
             self.input.draw(window)
         else:
             self._draw_rest_path(window, fonts)
-        window.blit(cut_rect_surface(self._change_rect.size, 6, Colors.surface_raised,
-                                     border=Colors.border, border_width=1, corners=("tr",)),
-                    self._change_rect.topleft)
-        ct = render_text(fonts.button, "Change", Colors.text)
-        window.blit(ct, (self._change_rect.centerx - ct.get_width() // 2,
-                         self._change_rect.centery - ct.get_height() // 2))
+        _draw_cut_button(window, self._change_rect, fonts.button, "Change")
         window.blit(reset_surf, (self._reset_rect.centerx - reset_surf.get_width() // 2,
                                  self._reset_rect.centery - reset_surf.get_height() // 2))
         return self._field_rect.x
@@ -563,12 +572,7 @@ class ActionRow(_Row):
         label = self.button_label_getter()
         btn_w = fonts.button.size(label)[0] + 2 * BTN_PAD_X
         self._button_rect = pg.Rect(rect.right - btn_w, y, btn_w, FIELD_H)
-        window.blit(cut_rect_surface(self._button_rect.size, 6, Colors.surface_raised,
-                                     border=Colors.border, border_width=1, corners=("tr",)),
-                    self._button_rect.topleft)
-        bt = render_text(fonts.button, label, Colors.text)
-        window.blit(bt, (self._button_rect.centerx - bt.get_width() // 2,
-                         self._button_rect.centery - bt.get_height() // 2))
+        _draw_cut_button(window, self._button_rect, fonts.button, label)
         tone, text = self.status_getter()
         left = self._button_rect.x
         avail = self._button_rect.x - ACTION_STATUS_GAP \
@@ -650,10 +654,7 @@ class OptionsBody(ScrollHost):
             bg_h = sum(row.full_height(fonts) for row in rows)
         bg = cut_rect_surface((card_w, bg_h), CARD_CUT, Colors.surface, border=Colors.border,
                               border_width=1, corners=("tr",))
-        if bg_h == card.height:
-            window.blit(bg, card.topleft)
-        else:
-            window.blit(bg, card.topleft, pg.Rect(0, 0, card.width, card.height))
+        window.blit(bg, card.topleft, pg.Rect(0, 0, card.width, card.height))
         content_x = card.x + CARD_PAD_X
         content_w = card.width - 2 * CARD_PAD_X
         ry = y

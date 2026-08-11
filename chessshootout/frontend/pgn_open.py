@@ -20,20 +20,9 @@ class PgnOpener:
         self.toast = toast
         self._failures = queue.Queue()
 
-    def has_openable(self, path):
-        if path is None:
-            return False
-        try:
-            return os.path.getsize(path) > 0
-        except OSError:
-            return False
-
     def open(self, path, empty_message=NO_MOVES_MESSAGE):
         if path is None:
             self._toast(empty_message)
-            return False
-        if not os.path.exists(path):
-            self._toast(MISSING_MESSAGE)
             return False
         try:
             size = os.path.getsize(path)

@@ -86,20 +86,22 @@ class Sweep:
                                                  reason, winner_color=winner)
             if room.result is not None:
                 continue
-            now = self._now()
-            reason = room.idle_timeout_reason(now)
-            if reason is None:
-                continue
-            winner = None
-            if reason == Reason.RESIGNATION:
-                winner = room.opp_color(room.color_to_move())
-                winner_slot = room.slot(winner)
-                if winner_slot is None or winner_slot.disconnected_at is not None:
-                    continue
-            log.info("idle timeout room=%s reason=%s winner=%s plies=%d",
-                     room.room_id, reason, winner, room.plies_ever)
-            await finalize_and_broadcast(self.rooms, self.connections, room, reason,
-                                         winner_color=winner)
+            await self._step_idle_timeout(room)
+
+    async def _step_idle_timeout(self, room):
+        reason = room.idle_timeout_reason(self._now())
+        if reason is None:
+            return
+        winner = None
+        if reason == Reason.RESIGNATION:
+            winner = room.opp_color(room.color_to_move())
+            winner_slot = room.slot(winner)
+            if winner_slot is None or winner_slot.disconnected_at is not None:
+                return
+        log.info("idle timeout room=%s reason=%s winner=%s plies=%d",
+                 room.room_id, reason, winner, room.plies_ever)
+        await finalize_and_broadcast(self.rooms, self.connections, room, reason,
+                                     winner_color=winner)
 
     async def step_grace_expired(self):
         for room, gone_color in list(self.rooms.grace_expired_rooms()):

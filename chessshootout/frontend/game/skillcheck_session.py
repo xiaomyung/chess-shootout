@@ -174,6 +174,9 @@ class SkillCheckSession:
         live = self.active_kind == SkillCheckKind.WHACK and overlay.is_active()
         self.whack_gun.sync(live, overlay.is_passive(), self.skillcheck_target)
 
+    def clear_whack_impact_px(self):
+        self.whack_gun.clear_impact_px()
+
     def _on_whack_hit_px(self, px, kill=False):
         self.whack_gun.on_hit_px(px, self.skillcheck_target, kill=kill)
 

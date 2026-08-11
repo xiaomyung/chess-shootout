@@ -51,7 +51,7 @@ from chessshootout.frontend.game.give_time import GiveTimeHold
 from chessshootout.frontend.game.variant import MATCH_MODE_BY_VARIANT, Variant
 from chessshootout.skillcheck.combo import COMBO_DIRECTIONS, COMBO_PROMPT_COUNT_MAX
 from chessshootout.server.protocol import (
-    CHAT_COOLDOWN_SECONDS, GRACE_SECONDS, IDLE_WINDOW_BY_PLIES, Reason,
+    CHAT_COOLDOWN_SECONDS, GRACE_SECONDS, IDLE_SECONDS_BY_OUTCOME, Reason,
     SKILLCHECK_TARGET_MAX,
 )
 from chessshootout.online.client import RECONNECT_TOTAL_SECONDS
@@ -116,9 +116,6 @@ ONLINE_STATIC_RESULTS = {
 }
 IDLE_LABEL_BY_OUTCOME = {Reason.ABORTED: "Abort in", Reason.RESIGNATION: "Resign in"}
 IDLE_RESIGN_NOTICE_SECONDS = 30.0
-IDLE_TOTAL_BY_OUTCOME = {
-    outcome: seconds for outcome, seconds in IDLE_WINDOW_BY_PLIES.values()
-}
 
 ANIM_MS_DEFAULT = 180
 ANIM_MS_MIN = 140
@@ -389,9 +386,9 @@ class GameScreen(Screen):
             return
         outcome = payload.get("outcome")
         raw_color = payload.get("color")
-        if outcome not in IDLE_LABEL_BY_OUTCOME or raw_color not in ("white", "black"):
+        if outcome not in IDLE_SECONDS_BY_OUTCOME or raw_color not in ("white", "black"):
             return
-        total = float(IDLE_TOTAL_BY_OUTCOME[outcome])
+        total = float(IDLE_SECONDS_BY_OUTCOME[outcome])
         seconds = min(max(_finite_float(payload.get("seconds_remaining"), 0.0), 0.0), total)
         color = PieceColor.WHITE if raw_color == "white" else PieceColor.BLACK
         self._idle_window = IdleWindow(
@@ -884,7 +881,7 @@ class GameScreen(Screen):
                               (self.player_strip_top, self.player_strip_bottom))
 
     def _refresh_skillcheck_geometry(self):
-        self.skillcheck_session.whack_gun.clear_impact_px()
+        self.skillcheck_session.clear_whack_impact_px()
         target = self.skillcheck_session.skillcheck_target
         if self.skillcheck_overlay.is_active() and target is not None:
             self.skillcheck_overlay.relayout(self.board.cell_rect(target))

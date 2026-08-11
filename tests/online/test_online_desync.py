@@ -680,7 +680,7 @@ def test_a_blocked_notification_survives_a_cancelled_resync():
     app.coordinator._handle_annotations_blocked(_blocked_payload())
     assert app.game.board.annotations.flagged == set()
 
-    app.coordinator._cancel_resync()
+    app.coordinator._end_resync()
 
     assert app.toast.message == "Some marks can't be shared"
     assert app.game.board.annotations.flagged == BLOCKED_MARKS
@@ -712,7 +712,7 @@ def test_a_cancelled_resync_with_no_subscriber_replays_nothing(caplog):
     app.coordinator.unsubscribe(app.game)
 
     with caplog.at_level(logging.ERROR, logger="chess.frontend"):
-        app.coordinator._cancel_resync()
+        app.coordinator._end_resync()
 
     assert app.coordinator._resync_buffer == []
     assert app.toast.message is None

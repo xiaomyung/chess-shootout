@@ -395,14 +395,14 @@ def test_set_custom_server_addr_rewrites_the_active_address_only_in_custom_mode(
 
 @pytest.mark.parametrize("blank", ["", "   ", None])
 def test_set_custom_server_addr_ignores_a_blank_value(blank):
-    env.set_custom_server_addr("box.local:9001")
-    env.set_custom_server_addr(blank)
+    assert env.set_custom_server_addr("box.local:9001") is True
+    assert env.set_custom_server_addr(blank) is False
     assert env.get_custom_server_addr() == "box.local:9001"
     assert env.get_server_addr() == "box.local:9001"
 
 
 def test_set_custom_server_addr_strips_whitespace():
-    env.set_custom_server_addr("  localhost:8000  ")
+    assert env.set_custom_server_addr("  localhost:8000  ") is True
     assert env.get_custom_server_addr() == "localhost:8000"
 
 
@@ -413,7 +413,7 @@ def test_set_custom_server_addr_refuses_a_value_with_a_line_break():
     where _apply_resolved_server_addr copied it into the active key and the next
     connect blew up with httpx.InvalidURL on a worker thread."""
     env._ENV_PATH.write_text("CHESS_LAST_MODE=online\n", encoding="utf-8")
-    env.set_custom_server_addr("box.local\nCHESS_NICKNAME=mallory")
+    assert env.set_custom_server_addr("box.local\nCHESS_NICKNAME=mallory") is False
     contents = env._ENV_PATH.read_text(encoding="utf-8")
     assert "CHESS_NICKNAME" not in contents
     assert "CHESS_CUSTOM_SERVER_ADDR" not in contents
@@ -436,9 +436,11 @@ def test_set_custom_server_addr_refuses_a_value_with_a_line_break():
 def test_set_custom_server_addr_refuses_control_characters_in_process(dirty):
     """Validation runs BEFORE os.environ is touched: every control character is
     rejected outright, so no unusable address can reach the live process even
-    when _persist would have dropped the file write anyway."""
-    env.set_custom_server_addr("good.local:9001")
-    env.set_custom_server_addr(dirty)
+    when _persist would have dropped the file write anyway. The refusal is
+    reported back, not just logged -- the Options commit toasts "Server set to
+    <old addr>" on a silent one (see test_settings_persist.py)."""
+    assert env.set_custom_server_addr("good.local:9001") is True
+    assert env.set_custom_server_addr(dirty) is False
     assert env.get_custom_server_addr() == "good.local:9001"
     assert env.get_server_addr() == "good.local:9001"
     assert os.environ["CHESS_CUSTOM_SERVER_ADDR"] == "good.local:9001"
@@ -533,7 +535,7 @@ def test_server_mode_and_custom_addr_round_trip_through_the_env_file(monkeypatch
 
 
 def test_custom_server_addr_persists_round_trip():
-    env.set_custom_server_addr("chess.example.com:9000")
+    assert env.set_custom_server_addr("chess.example.com:9000") is True
     assert env.get_custom_server_addr() == "chess.example.com:9000"
     assert env.get_server_addr() == "chess.example.com:9000"
     contents = env._ENV_PATH.read_text(encoding="utf-8")

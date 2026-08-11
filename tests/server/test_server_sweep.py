@@ -1,8 +1,10 @@
 """Sweep step methods exercised in isolation via a fake clock.
 
 The Sweep class wraps the per-tick lifecycle: each step does one thing
-(clock + idle windows, grace expiry, orphan/post-result drop, beacon,
-GC) so we drive each independently without the full asyncio loop.
+(skill-check deadlines, clock + idle windows, heartbeat timeout, grace
+expiry, pre-game orphan drop, abandoned/timed-out queue reaping,
+post-game rematch window, finished-room GC) so we drive each
+independently without the full asyncio loop.
 """
 import pytest
 

@@ -198,7 +198,8 @@ class MoleController(SkillCheckController):
                                   else float(now_ms) - MOLE_VIEW_RETREAT_MS)
         self._last_hit_height = 0.0
         self._last_hit_px = None
-        self._last_hit_anchor = None
+        self._last_hit_hole = None
+        self._last_hit_spectate_target = None
         self._reset_effects(cell_rect.center)
         self._win_ms = None
         self._last_shot_ms = None
@@ -355,7 +356,8 @@ class MoleController(SkillCheckController):
         hole = self.challenge.pops[idx].hole
         if hole < len(self._hole_px):
             self._last_hit_px = self._hole_px[hole]
-            self._last_hit_anchor = hole
+            self._last_hit_hole = hole
+            self._last_hit_spectate_target = None
         self._progress += 1
         kill = self._quota_met()
         self._hit_juice(kill)
@@ -431,12 +433,12 @@ class MoleController(SkillCheckController):
         return (px[0], px[1] + (own - mover) * self._affine[3])
 
     def _reanchored_hit_px(self):
-        anchor = self._last_hit_anchor
-        if anchor is None:
+        hole = self._last_hit_hole
+        if hole is not None:
+            return self._hole_px[hole] if hole < len(self._hole_px) else None
+        if self._last_hit_spectate_target is None:
             return None
-        if isinstance(anchor, int):
-            return self._hole_px[anchor] if anchor < len(self._hole_px) else None
-        return self._spectate_px(anchor)
+        return self._spectate_px(self._last_hit_spectate_target)
 
     def spectate_shot(self, elapsed, miss_count, won, progress=0, direction=None,
                       target=None):
@@ -450,7 +452,8 @@ class MoleController(SkillCheckController):
             self._progress = progress
             if px is not None:
                 self._last_hit_px = px
-                self._last_hit_anchor = target
+                self._last_hit_spectate_target = target
+                self._last_hit_hole = None
             idx = self.challenge.pop_up_at(elapsed)
             if idx is not None:
                 self._duck_pop(idx, elapsed)

@@ -13,16 +13,17 @@ from chessshootout.server.protocol import PROTOCOL_VERSION
 from chessshootout.frontend.game.variant import Variant
 from chessshootout.frontend.menu.options_rows import (
     ActionRow, PathRow, RevealRow, TextRow, ToggleRow, NotchRow, SegmentedRow,
+    TONE_IDLE, TONE_OK, TONE_WARN,
 )
 
 
-log = logging.getLogger("chess.settings")
+log = logging.getLogger("chess.frontend")
 
 SETTINGS_WRITE_DELAY_MS = 400
-SERVER_PROBE_TIMEOUT_S = 3.0
 SERVER_PROBE_BUTTON_IDLE = "Test"
 SERVER_PROBE_BUTTON_PENDING = "Testing…"
 SERVER_SWITCH_BLOCKED_MESSAGE = "Leave the online session to switch servers"
+INVALID_SERVER_ADDR_MESSAGE = "Invalid server address"
 
 
 class SettingsController:
@@ -41,7 +42,7 @@ class SettingsController:
         self._validate_data_folder_on_exit()
         if self._custom_server_row is not None:
             self._commit_custom_server_addr(self._custom_server_row.current_text())
-        self._reset_connection_probe()
+        self._reset_server_probe()
         self.frontend.menu.apply_default_time_settings()
         self._flush_deferred_env_writes(force=True)
 
@@ -55,9 +56,7 @@ class SettingsController:
             self.frontend.toast.show(SERVER_SWITCH_BLOCKED_MESSAGE)
             return
         env.set_server_mode(mode)
-        self._reset_connection_probe()
-        self.frontend.coordinator.on_server_target_changed()
-        log.info("server target set mode=%s addr=%s", mode, env.get_server_addr())
+        self._announce_server_target_change()
 
     def _commit_custom_server_addr(self, typed):
         if not typed or typed == env.get_custom_server_addr():
@@ -65,13 +64,18 @@ class SettingsController:
         if self._online_session_active():
             self.frontend.toast.show(SERVER_SWITCH_BLOCKED_MESSAGE)
             return
-        env.set_custom_server_addr(typed)
-        self._reset_connection_probe()
+        if not env.set_custom_server_addr(typed):
+            self.frontend.toast.show(INVALID_SERVER_ADDR_MESSAGE)
+            return
+        self._announce_server_target_change()
+        if env.get_server_mode() == env.SERVER_MODE_CUSTOM:
+            self.frontend.toast.show(f"Server set to {env.get_server_addr()}")
+
+    def _announce_server_target_change(self):
+        self._reset_server_probe()
         self.frontend.coordinator.on_server_target_changed()
         log.info("server target set mode=%s addr=%s", env.get_server_mode(),
                  env.get_server_addr())
-        if env.get_server_mode() == "custom":
-            self.frontend.toast.show("Server set to {}".format(env.get_server_addr()))
 
     def _on_test_server(self):
         with self._server_probe_lock:
@@ -86,7 +90,7 @@ class SettingsController:
                          daemon=True).start()
 
     def _probe_target_addr(self):
-        if env.get_server_mode() != "custom":
+        if env.get_server_mode() != env.SERVER_MODE_CUSTOM:
             return env.get_server_addr()
         if self._custom_server_row is None:
             return env.get_custom_server_addr()
@@ -95,7 +99,7 @@ class SettingsController:
     def _server_probe_worker(self, addr, gen):
         try:
             started = time.monotonic()
-            health = probe_server_health(addr, timeout=SERVER_PROBE_TIMEOUT_S)
+            health = probe_server_health(addr)
             latency_ms = int((time.monotonic() - started) * 1000)
             outcome = self._describe_health(health, latency_ms)
             with self._server_probe_lock:
@@ -110,14 +114,15 @@ class SettingsController:
 
     def _describe_health(self, health, latency_ms):
         if health is None:
-            return ("warn", "Unreachable")
+            return (TONE_WARN, "Unreachable")
         version = health.get("version")
         if version != PROTOCOL_VERSION:
-            return ("warn", "Protocol mismatch: server v{} ≠ client v{}".format(
-                "?" if version is None else version, PROTOCOL_VERSION))
+            seen = "?" if version is None else version
+            return (TONE_WARN,
+                    f"Protocol mismatch: server v{seen} ≠ client v{PROTOCOL_VERSION}")
         app_version = health.get("app_version") or ""
-        suffix = " · v{}".format(app_version) if app_version else ""
-        return ("ok", "OK · {} ms{}".format(latency_ms, suffix))
+        suffix = f" · v{app_version}" if app_version else ""
+        return (TONE_OK, f"OK · {latency_ms} ms{suffix}")
 
     def _probe_button_label(self):
         with self._server_probe_lock:
@@ -129,13 +134,13 @@ class SettingsController:
             pending = self._server_probe_pending
             probed = self._server_probe_result
         if pending or probed is None:
-            return ("idle", "")
+            return (TONE_IDLE, "")
         addr, outcome = probed
         if addr != self._probe_target_addr():
-            return ("idle", "")
+            return (TONE_IDLE, "")
         return outcome
 
-    def _reset_connection_probe(self):
+    def _reset_server_probe(self):
         with self._server_probe_lock:
             self._server_probe_gen += 1
             self._server_probe_pending = False
@@ -248,10 +253,11 @@ class SettingsController:
             ]),
             ("Online", [
                 SegmentedRow("Server", "Official servers, or your own address",
-                             [("Official", "official"), ("Custom", "custom")],
+                             [("Official", env.SERVER_MODE_OFFICIAL),
+                              ("Custom", env.SERVER_MODE_CUSTOM)],
                              env.get_server_mode, self._apply_server_mode),
                 RevealRow(self._custom_server_row,
-                          lambda: env.get_server_mode() == "custom"),
+                          lambda: env.get_server_mode() == env.SERVER_MODE_CUSTOM),
                 ActionRow("Connection", "Check the server answers before you queue",
                           self._probe_button_label, self._on_test_server,
                           self._probe_status),

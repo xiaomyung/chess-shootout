@@ -46,14 +46,14 @@ RESYNC_NOTIFY_FLAP_FLOOR_SECONDS = 1.0
 RESYNC_DIRECTIVE_MIN_INTERVAL_SECONDS = 1.0
 RESYNC_GATE_PRUNE_THRESHOLD = 512
 
+RESYNC_NOTIFY = "notify"
+RESYNC_DIRECTIVE = "directive"
+
 IDLE_ACTIVITY_TYPES = frozenset({
     "move", "skill_check_shot", "draw_offer", "draw_response",
     "takeback_request", "takeback_response", "give_time", "quick_chat",
     "annotations_state", "annotation_delta", "set_marks_visibility",
 })
-
-RESYNC_NOTIFY = "notify"
-RESYNC_DIRECTIVE = "directive"
 
 
 class _ResyncGate:
@@ -134,11 +134,11 @@ async def dispatch(app, websocket, room, color, raw):
 async def _touch_idle_window(app, room, color):
     window = room.idle_window()
     if (room.result is not None or room.idle_since is None or window is None
-            or window[0] != Reason.RESIGNATION or color != room.color_to_move()):
-        return False
-    room.idle_since = app.state.now()
-    await push_idle_window(app.state.rooms, app.state.connections, room, app.state.now())
-    return True
+            or window.outcome != Reason.RESIGNATION or color != room.color_to_move()):
+        return
+    now = app.state.now()
+    room.idle_since = now
+    await push_idle_window(app.state.rooms, app.state.connections, room, now)
 
 
 async def handle_move(app, websocket, room, color, raw):
@@ -235,8 +235,7 @@ async def _apply_move(app, room, color, from_sq, to_sq, promotion,
     if result.promotion_required:
         room.backend.promote(to_sq, PROMO_TYPE_BY_LETTER[promotion or "q"])
     room.plies_ever += 1
-    room.idle_since = app.state.now() if room.idle_window() is not None else None
-    room.idle_pushed_at = None
+    room.mark_idle_activity(app.state.now() if room.idle_window() is not None else None)
     room.skillcheck_locks.clear()
     room.annotations_white.clear_marks()
     room.annotations_black.clear_marks()
@@ -538,8 +537,7 @@ async def handle_takeback_response(app, websocket, room, color, raw):
             ply=len(room.backend.move_history),
         ))
         if room.result is None and room.idle_window() is not None:
-            room.idle_since = app.state.now()
-            room.idle_pushed_at = None
+            room.mark_idle_activity(app.state.now())
             await push_idle_window(rooms, connections, room, app.state.now(), force=True)
         return "accepted"
     log.info("takeback declined room=%s by=%s", room.room_id, color)

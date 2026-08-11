@@ -183,7 +183,7 @@ class Room:
         window = self.idle_window()
         if window is None or self.idle_since is None:
             return None
-        return max(window[1] - (now - self.idle_since), 0.0)
+        return max(window.seconds - (now - self.idle_since), 0.0)
 
     def idle_timeout_reason(self, now):
         if not self.is_paired():
@@ -191,7 +191,14 @@ class Room:
         remaining = self.idle_remaining(now)
         if remaining is None or remaining > 0.0:
             return None
-        return self.idle_window()[0]
+        return self.idle_window().outcome
+
+    def mark_idle_activity(self, now):
+        self.idle_since = now
+        self.idle_pushed_at = None
+
+    def note_idle_push(self, now):
+        self.idle_pushed_at = now
 
     def hides_opponent_marks(self, color):
         slot = self.slot(color)
@@ -272,7 +279,7 @@ class RoomManager:
                 )
                 room.skillcheck_secret = secrets.token_hex(16)
                 room.started_at = self._now()
-                room.idle_since = room.started_at
+                room.mark_idle_activity(room.started_at)
                 self._uuid_to_room[client_uuid] = room.room_id
                 self._active[room.room_id] = room
                 return room
@@ -542,8 +549,7 @@ class RoomManager:
         room.annotations_black = SharedAnnotations()
         room.started_at = self._now()
         room.first_move_at = None
-        room.idle_since = room.started_at
-        room.idle_pushed_at = None
+        room.mark_idle_activity(room.started_at)
         room.ended_at = None
         room.last_rematch_activity_at = None
         room.game_start_broadcast = False

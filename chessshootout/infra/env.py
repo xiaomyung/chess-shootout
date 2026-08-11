@@ -21,7 +21,9 @@ _LINE_BREAK_CHARS = ("\r", "\n")
 
 _DEV_SERVER_ADDR = "localhost:8000"
 _PROD_SERVER_ADDR = "server.chess-shootout.com"
-_SERVER_MODE_VALUES = ("official", "custom")
+SERVER_MODE_OFFICIAL = "official"
+SERVER_MODE_CUSTOM = "custom"
+_SERVER_MODE_VALUES = (SERVER_MODE_OFFICIAL, SERVER_MODE_CUSTOM)
 _DEFAULT_NEWS_URL = "https://xiaomyung.github.io/chess-shootout/news.json"
 _DEFAULT_MASTER_VOLUME = 0.70
 _DEFAULT_MENU_VOLUME = 0.10
@@ -91,7 +93,7 @@ def official_server_addr():
 
 
 def _default_server_mode():
-    return "official" if paths.is_frozen() else "custom"
+    return SERVER_MODE_OFFICIAL if paths.is_frozen() else SERVER_MODE_CUSTOM
 
 
 def get_server_mode():
@@ -121,18 +123,19 @@ def get_custom_server_addr():
 def set_custom_server_addr(value):
     value = (value or "").strip()
     if not value:
-        return
+        return False
     if _CONTROL_CHAR_RE.search(value):
         log.warning("refusing custom server address: value contains control characters")
-        return
+        return False
     os.environ["CHESS_CUSTOM_SERVER_ADDR"] = value
     _persist("CHESS_CUSTOM_SERVER_ADDR", value)
-    if get_server_mode() == "custom":
+    if get_server_mode() == SERVER_MODE_CUSTOM:
         _apply_resolved_server_addr()
+    return True
 
 
 def _resolved_server_addr():
-    return (official_server_addr() if get_server_mode() == "official"
+    return (official_server_addr() if get_server_mode() == SERVER_MODE_OFFICIAL
             else get_custom_server_addr())
 
 

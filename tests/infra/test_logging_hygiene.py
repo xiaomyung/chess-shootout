@@ -206,6 +206,7 @@ INFO_ALLOWLIST_PREFIXES = (
     "connect to ",
     "online session teardown",
     "reclaim available",
+    "reclaim dropped",
     "rematch offer received",
     "rematch response sent",
     "rematch requested",

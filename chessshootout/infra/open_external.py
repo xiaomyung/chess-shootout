@@ -97,9 +97,9 @@ def _watch(proc, tool, remaining, path, on_failure):
     if code == 0:
         return
     log.warning("external opener %s exited %s path=%s", tool, code, path)
-    if _is_retriable(code, time.monotonic() - started) and remaining:
-        if _launch(remaining, path, on_failure):
-            return
+    if (_is_retriable(code, time.monotonic() - started) and remaining
+            and _launch(remaining, path, on_failure)):
+        return
     on_failure(code)
 
 

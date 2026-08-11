@@ -1,6 +1,6 @@
 import os
 import re
-from typing import Literal, Optional
+from typing import Literal, NamedTuple, Optional
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -103,11 +103,18 @@ class Reason:
     SERVER_SHUTDOWN = "server_shutdown"
 
 
+class IdleWindowSpec(NamedTuple):
+    outcome: str
+    seconds: float
+
+
 IDLE_WINDOW_BY_PLIES = {
-    0: (Reason.ABORTED, FIRST_MOVE_ABORT_SECONDS),
-    1: (Reason.ABORTED, FIRST_MOVE_ABORT_SECONDS),
-    2: (Reason.RESIGNATION, IDLE_RESIGN_SECONDS),
+    0: IdleWindowSpec(Reason.ABORTED, FIRST_MOVE_ABORT_SECONDS),
+    1: IdleWindowSpec(Reason.ABORTED, FIRST_MOVE_ABORT_SECONDS),
+    2: IdleWindowSpec(Reason.RESIGNATION, IDLE_RESIGN_SECONDS),
 }
+
+IDLE_SECONDS_BY_OUTCOME = dict(IDLE_WINDOW_BY_PLIES.values())
 
 
 def normalize_nickname(raw):

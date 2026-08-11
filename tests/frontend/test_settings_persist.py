@@ -10,14 +10,17 @@ Official-mode target honoring a launch-time CHESS_SERVER_ADDR override, the
 missing-version mismatch copy, and the coordinator notification on a server
 target change. The Options-view UI side lives in test_menu_options_view.py.
 """
+import os
 from unittest.mock import MagicMock
 
 import pygame as pg
 import pytest
 
 from chessshootout.frontend.settings import (
-    SERVER_PROBE_BUTTON_IDLE, SERVER_PROBE_BUTTON_PENDING, SettingsController,
+    INVALID_SERVER_ADDR_MESSAGE, SERVER_PROBE_BUTTON_IDLE, SERVER_PROBE_BUTTON_PENDING,
+    SettingsController,
 )
+from chessshootout.infra import env
 from chessshootout.server.protocol import PROTOCOL_VERSION
 
 from tests.conftest import pygame_display
@@ -37,6 +40,21 @@ def controller():
     frontend = MagicMock()
     frontend.coordinator.is_connected.return_value = False
     return SettingsController(frontend)
+
+
+_SERVER_TARGET_VARS = ("CHESS_SERVER_MODE", "CHESS_CUSTOM_SERVER_ADDR", "CHESS_SERVER_ADDR")
+
+
+@pytest.fixture(autouse=True)
+def _isolate_server_target(monkeypatch):
+    """env.set_custom_server_addr writes os.environ directly (not through
+    monkeypatch), so the commit tests below would otherwise leak an address into
+    every later test in the session -- and read a leaked one on the way in."""
+    for var in _SERVER_TARGET_VARS:
+        monkeypatch.delenv(var, raising=False)
+    yield
+    for var in _SERVER_TARGET_VARS:
+        os.environ.pop(var, None)
 
 
 class _Row:
@@ -201,3 +219,31 @@ def test_blocked_custom_addr_commit_does_not_notify_the_coordinator(controller, 
     controller.frontend.coordinator.is_connected.return_value = True
     controller._commit_custom_server_addr("new:8000")
     controller.frontend.coordinator.on_server_target_changed.assert_not_called()
+
+
+@pytest.mark.parametrize("dirty", [
+    pytest.param("box.local\nCHESS_NICKNAME=mallory", id="newline"),
+    pytest.param("box.local\x00:9001", id="nul"),
+    pytest.param("box.local\x1b[31m:9001", id="escape"),
+])
+def test_a_refused_custom_address_toasts_and_skips_the_success_tail(controller, dirty):
+    """env.set_custom_server_addr rejects a control-character address outright, so
+    the commit has to hear about it: before the setter returned a verdict the
+    refusal was a bare log line and the controller carried on -- resetting the
+    probe, telling the coordinator the target moved, and toasting "Server set to
+    <the OLD address>", which is the one lie a settings screen must never tell."""
+    gen_before = controller._server_probe_gen
+    controller._commit_custom_server_addr(dirty)
+    controller.frontend.toast.show.assert_called_once_with(INVALID_SERVER_ADDR_MESSAGE)
+    controller.frontend.coordinator.on_server_target_changed.assert_not_called()
+    assert controller._server_probe_gen == gen_before, "the probe verdict is not disturbed"
+    assert env.get_custom_server_addr() == "localhost:8000"
+
+
+def test_an_accepted_custom_address_announces_the_new_target(controller):
+    """The other half of the same contract: a clean address applies, so the tail
+    runs -- coordinator notified and the toast names the address now in use."""
+    controller._commit_custom_server_addr("box.local:9001")
+    assert env.get_custom_server_addr() == "box.local:9001"
+    controller.frontend.coordinator.on_server_target_changed.assert_called_once_with()
+    controller.frontend.toast.show.assert_called_once_with("Server set to box.local:9001")

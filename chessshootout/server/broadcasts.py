@@ -5,7 +5,8 @@ from chessshootout.skillcheck.types import SkillCheckOutcome
 from chessshootout.server import logging_setup
 from chessshootout.server.connections import broadcast, send
 from chessshootout.server.protocol import (
-    GameStartMessage, IdleWindowMessage, ResultMessage, SkillCheckResultMessage)
+    GameStartMessage, IdleWindowMessage, IdleWindowWire, ResultMessage,
+    SkillCheckResultMessage)
 
 
 log = logging_setup.get_logger("chess.server.app")
@@ -23,21 +24,28 @@ async def finalize_and_broadcast(rooms, connections, room, reason, winner_color=
                     ResultMessage(reason=result_reason, winner_color=result_winner))
 
 
-async def push_idle_window(rooms, connections, room, now, *, force=False):
-    if room.result is not None or room.idle_since is None or room.color_to_move() is None:
-        return
+def _idle_window_wire(room, now):
+    if (room.result is not None or room.idle_since is None
+            or room.color_to_move() is None):
+        return None
     window = room.idle_window()
     if window is None:
+        return None
+    return IdleWindowWire(
+        outcome=window.outcome, color=room.color_to_move(),
+        seconds_remaining=room.idle_remaining(now))
+
+
+async def push_idle_window(rooms, connections, room, now, *, force=False):
+    wire = _idle_window_wire(room, now)
+    if wire is None:
         return
     if (not force and room.idle_pushed_at is not None
             and now - room.idle_pushed_at < IDLE_WINDOW_PUSH_MIN_INTERVAL_SECONDS):
         return
-    room.idle_pushed_at = now
-    msg = IdleWindowMessage(
-        outcome=window[0], color=room.color_to_move(),
-        seconds_remaining=room.idle_remaining(now))
-    log.debug("idle window push room=%s outcome=%s", room.room_id, window[0])
-    await broadcast(rooms, connections, room, msg)
+    room.note_idle_push(now)
+    log.debug("idle window push room=%s outcome=%s", room.room_id, wire.outcome)
+    await broadcast(rooms, connections, room, IdleWindowMessage(**wire.model_dump()))
 
 
 async def resolve_skillcheck_fail(rooms, connections, room):

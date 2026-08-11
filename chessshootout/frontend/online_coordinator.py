@@ -103,6 +103,7 @@ class OnlineCoordinator:
         self._last_heartbeat_sent_ms = 0
         self._wait_started_at_ms = None
         self._match_found_at_ms = None
+        self._match_found_started_seconds_ago = 0.0
         self._pending_game_start_payload = None
         self._rematch_offered = False
         self._prev_online_state = None
@@ -128,6 +129,10 @@ class OnlineCoordinator:
             log.error("board-level event %s arrived with no subscriber", method_name)
             return
         getattr(subscriber, method_name)(payload)
+
+    def _forward_screen_event(self, method_name, payload):
+        target = self._subscriber if self._subscriber is not None else self.app.game
+        getattr(target, method_name)(payload)
 
     def is_connected(self):
         return self.client is not None
@@ -277,7 +282,7 @@ class OnlineCoordinator:
             return
         if reason == ClientReason.ROOM_LOST:
             log.warning("online room lost — server restarted mid-game")
-            self._cancel_resync()
+            self._end_resync()
             game.result_flow.auto_save_pgn()
             self.reconnecting_modal.hide()
             self.offer_banners.clear()
@@ -295,7 +300,7 @@ class OnlineCoordinator:
             return
         if reason in ONLINE_HARD_FAILURE_REASONS or reason.startswith("http_"):
             log.warning("online hard failure reason=%s", reason)
-            self._cancel_resync()
+            self._end_resync()
             self.wait_modal.hide()
             self.match_found_modal.hide()
             self.offer_banners.clear()
@@ -429,20 +434,16 @@ class OnlineCoordinator:
         for method_name, payload in buffered:
             self._forward_board_event(method_name, payload)
 
-    def _cancel_resync(self):
-        self._end_resync()
-
     def _handle_game_resumed(self, payload):
         game = self.app.game
         if game.variant != Variant.ONLINE:
             log.info("resume ignored — no active online game")
-            self._cancel_resync()
+            self._end_resync()
             return
         desired = env.get_hide_opp_marks()
         if bool(payload.get("hide_opp_marks")) != desired:
             self.set_marks_visibility(desired)
-        target = self._subscriber if self._subscriber is not None else game
-        target.on_resume(payload)
+        self._forward_screen_event("on_resume", payload)
         self._end_resync()
 
     def _handle_time_granted(self, payload):
@@ -506,18 +507,15 @@ class OnlineCoordinator:
         self._forward_board_event("on_remote_move", payload)
 
     def _handle_online_result(self, payload):
-        target = self._subscriber if self._subscriber is not None else self.app.game
-        target.on_result(payload)
+        self._forward_screen_event("on_result", payload)
 
     def _handle_connection_status(self, payload):
-        target = self._subscriber if self._subscriber is not None else self.app.game
-        target.on_connection_status(payload)
+        self._forward_screen_event("on_connection_status", payload)
         if payload.get("opp_state", "connected") == "resyncing":
             self.app.toast.show("Opponent is resyncing…")
 
     def _handle_idle_window(self, payload):
-        target = self._subscriber if self._subscriber is not None else self.app.game
-        target.on_idle_window(payload)
+        self._forward_screen_event("on_idle_window", payload)
 
     def _begin_match_found_transition(self, payload):
         if self._pending_game_start_payload is not None:
@@ -526,9 +524,10 @@ class OnlineCoordinator:
         now = pg.time.get_ticks()
         self._match_found_at_ms = now
         try:
-            payload["started_seconds_ago"] = float(payload.get("started_seconds_ago", 0.0))
+            self._match_found_started_seconds_ago = float(
+                payload.get("started_seconds_ago", 0.0))
         except (TypeError, ValueError):
-            payload["started_seconds_ago"] = 0.0
+            self._match_found_started_seconds_ago = 0.0
         self.wait_modal.hide()
         room_id = self.client.room_id if self.client is not None else None
         log.info("match found room=%s side=%s", room_id, payload.get("your_color"))
@@ -547,11 +546,12 @@ class OnlineCoordinator:
         self._pending_game_start_payload = None
         matched_at_ms = self._match_found_at_ms
         self._match_found_at_ms = None
+        elapsed = self._match_found_started_seconds_ago
+        self._match_found_started_seconds_ago = 0.0
         self._wait_started_at_ms = None
         if payload is None:
             return
         self._start_online_game(payload)
-        elapsed = float(payload.get("started_seconds_ago", 0.0))
         if matched_at_ms is not None:
             elapsed += (pg.time.get_ticks() - matched_at_ms) / 1000.0
         self._handle_idle_window({
@@ -605,7 +605,7 @@ class OnlineCoordinator:
         if self.client is not None:
             self.client.disconnect()
             self.client = None
-        self._cancel_resync()
+        self._end_resync()
         self.offer_banners.dismiss("rematch_request")
         self._rematch_offered = False
         self.client = OnlineClient()
@@ -631,7 +631,7 @@ class OnlineCoordinator:
         return time_category_for_minutes(minutes), f"{minutes} + {incr}"
 
     def _drop_client(self, *, cancel_queue=False):
-        self._cancel_resync()
+        self._end_resync()
         if self.client is None:
             return
         if cancel_queue:
@@ -724,7 +724,7 @@ class OnlineCoordinator:
             self._return_to_menu_card()
 
     def retain_for_rematch(self, keep_online):
-        self._cancel_resync()
+        self._end_resync()
         if keep_online:
             self.client.send_left_result()
         elif self.client is not None:
@@ -834,7 +834,7 @@ class OnlineCoordinator:
             self.reconnecting_modal.hide()
         if self._resyncing:
             if pg.time.get_ticks() - self._resync_started_at_ms > RESYNC_TIMEOUT_MS:
-                self._cancel_resync()
+                self._end_resync()
                 if self.client is not None and self.client.state == "connected":
                     log.warning("resync timed out; escalating to reconnect")
                     self.client.force_reconnect()

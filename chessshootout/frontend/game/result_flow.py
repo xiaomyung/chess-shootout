@@ -281,9 +281,9 @@ class ResultFlow:
         if not screen.match.move_history:
             return None
         result = screen.current_result()
-        tag = RESULT_CODES.get(result, "*")
         if self._last_saved_pgn_path is not None and self._saved_final:
             return self._last_saved_pgn_path
+        tag = RESULT_CODES.get(result, "*")
         text = self._build_pgn_text()
         prefix = self._auto_save_prefix()
         primary_dir = self._save_dir or str(paths.get_games_dir())

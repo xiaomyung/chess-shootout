@@ -25,9 +25,9 @@ from chessshootout.frontend.menu.options_rows import (
     NOTCH_COUNT, NOTCH_CELL_W, NOTCH_GAP, Fonts, _elide_left, _fitting_ellipsis,
 )
 from chessshootout.frontend.settings import (
-    SERVER_PROBE_BUTTON_IDLE, SERVER_PROBE_BUTTON_PENDING, SERVER_PROBE_TIMEOUT_S,
-    SERVER_SWITCH_BLOCKED_MESSAGE,
+    SERVER_PROBE_BUTTON_IDLE, SERVER_PROBE_BUTTON_PENDING, SERVER_SWITCH_BLOCKED_MESSAGE,
 )
+from chessshootout.online.transport import HEALTHZ_TIMEOUT_SECONDS
 from chessshootout.frontend.visual.colors import Colors
 from chessshootout.frontend.visual.fonts import get_font, get_mono_font
 from chessshootout.server.protocol import PROTOCOL_VERSION
@@ -1180,7 +1180,7 @@ def _probe_harness(monkeypatch, *, health, monotonic=(10.0, 10.25), inline=True)
         def run_now(self):
             self.target(*self.args, **self.kwargs)
 
-    def fake_probe(addr, timeout=SERVER_PROBE_TIMEOUT_S):
+    def fake_probe(addr, timeout=HEALTHZ_TIMEOUT_SECONDS):
         calls.append((addr, timeout))
         return health
 
@@ -1244,7 +1244,7 @@ def test_a_stale_probe_generation_is_discarded(app, monkeypatch):
         monkeypatch, health={"status": "ok", "version": PROTOCOL_VERSION,
                              "app_version": ""}, inline=False)
     app.settings._on_test_server()
-    app.settings._reset_connection_probe()
+    app.settings._reset_server_probe()
     created[0].run_now()
     assert app.settings._probe_status() == ("idle", ""), \
         "a worker outrun by a reset never lands its result"
@@ -1257,7 +1257,7 @@ def test_the_probe_targets_the_typed_custom_address_not_the_stored_one(
     app.settings._custom_server_row.input.text = "typed.example:9  "
     _created, calls = _probe_harness(monkeypatch, health=None)
     app.settings._on_test_server()
-    assert calls == [("typed.example:9", SERVER_PROBE_TIMEOUT_S)]
+    assert calls == [("typed.example:9", HEALTHZ_TIMEOUT_SECONDS)]
     assert env.get_custom_server_addr() == "localhost:8000", \
         "probing never commits the typed text"
 
@@ -1273,7 +1273,7 @@ def test_the_probe_targets_the_official_address_in_official_mode(app, view, monk
     _created, calls = _probe_harness(monkeypatch, health=None)
     app.settings._on_test_server()
     assert env.get_server_addr() == env.official_server_addr()
-    assert calls == [(env.get_server_addr(), SERVER_PROBE_TIMEOUT_S)]
+    assert calls == [(env.get_server_addr(), HEALTHZ_TIMEOUT_SECONDS)]
 
 
 def test_a_launch_time_addr_override_redirects_the_official_mode_probe(
@@ -1287,7 +1287,7 @@ def test_a_launch_time_addr_override_redirects_the_official_mode_probe(
     _online_rows(app, view)
     _created, calls = _probe_harness(monkeypatch, health=None)
     app.settings._on_test_server()
-    assert calls == [("override.example:9001", SERVER_PROBE_TIMEOUT_S)]
+    assert calls == [("override.example:9001", HEALTHZ_TIMEOUT_SECONDS)]
 
 
 def test_the_probe_result_is_cleared_on_options_exit(app, view, monkeypatch):
@@ -1348,4 +1348,4 @@ def test_the_probe_runs_on_a_daemon_thread_with_the_resolved_address(app, view, 
     assert created[0].daemon is True
     assert created[0].args[0] == "typed.example:9"
     created[0].run_now()
-    assert calls == [("typed.example:9", SERVER_PROBE_TIMEOUT_S)]
+    assert calls == [("typed.example:9", HEALTHZ_TIMEOUT_SECONDS)]
