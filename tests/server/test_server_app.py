@@ -10,6 +10,7 @@ from fastapi import WebSocketDisconnect
 from chessshootout.server.app import (
     MATCHMAKE_PER_IP_LIMIT, MAX_INBOUND_MESSAGE_BYTES, PROTOCOL_VERSION,
     WS_CLOSE_INVALID_TOKEN, WS_CLOSE_PAYLOAD_TOO_LARGE, WS_CLOSE_SUPERSEDED,
+    _idle_window_wire,
 )
 from chessshootout.server.connections import ConnectionRegistry
 from chessshootout.server.handlers import (
@@ -18,8 +19,8 @@ from chessshootout.server.handlers import (
     _ResyncGate, handle_ping,
 )
 from chessshootout.server.protocol import (
-    FIRST_MOVE_ABORT_SECONDS, GRACE_SECONDS, MAX_INCREMENT_SECONDS, MAX_TIME_MINUTES,
-    Reason,
+    FIRST_MOVE_ABORT_SECONDS, GRACE_SECONDS, IDLE_RESIGN_SECONDS,
+    MAX_INCREMENT_SECONDS, MAX_TIME_MINUTES, Reason,
 )
 from chessshootout.server.rooms import QUEUE_ABANDON_SECONDS
 from tests.helpers import fake_uuid4
@@ -400,10 +401,14 @@ def test_full_short_game_e4_e5_resign(client):
             assert applied_w["type"] == "move_applied"
             assert applied_w["san"] == "e4"
             assert applied_b["from"] == "e2"
+            assert json.loads(ws_w.receive_text())["type"] == "idle_window"
+            assert json.loads(ws_b.receive_text())["type"] == "idle_window"
             ws_b.send_text(json.dumps({"version": PROTOCOL_VERSION, "type": "move",
                                         "from": "e7", "to": "e5"}))
             ws_w.receive_text()
             ws_b.receive_text()
+            assert json.loads(ws_w.receive_text())["type"] == "idle_window"
+            assert json.loads(ws_b.receive_text())["type"] == "idle_window"
             ws_w.send_text(json.dumps({"version": PROTOCOL_VERSION, "type": "resign"}))
             res_w = json.loads(ws_w.receive_text())
             ws_b.receive_text()
@@ -699,10 +704,13 @@ def test_resync_gate_reopen_never_delays_an_already_open_window():
 
 async def test_grace_expiry_without_desync_awards_opponent(app, clock):
     """A plain disconnect (no desync signalled) that never recovers is a deliberate
-    leave: the waiting player wins by abandonment."""
+    leave: the waiting player wins by abandonment. Sits at ply 3 — the first ply
+    with no idle window armed — because at plies 1-2 the idle window deliberately
+    expires first in the same step_all pass (pinned in test_server_sweep)."""
     rooms = app.state.rooms
     room = await _paired_in_progress_room(rooms, clock)
-    room.plies_ever = 1
+    room.plies_ever = 3
+    room.idle_since = None
     rooms.mark_disconnected(room.room_id, "white")
     clock.advance(GRACE_SECONDS + 1)
     await _sweep(app)
@@ -715,10 +723,12 @@ async def test_grace_expiry_with_desync_still_awards_opponent(app, clock):
     desync branch aborted the game with no winner, so a deliberate leave right
     after a resync robbed the stayer of the abandonment win. Rule: with moves
     played, a grace expiry ALWAYS awards the opponent; only zero-ply games
-    convert to aborted (finalize_result's central guard)."""
+    convert to aborted (finalize_result's central guard). Ply 3 for the same
+    reason as the test above: below it the idle window wins the step_all pass."""
     rooms = app.state.rooms
     room = await _paired_in_progress_room(rooms, clock)
-    room.plies_ever = 1
+    room.plies_ever = 3
+    room.idle_since = None
     room.white.desync_active = True
     rooms.mark_disconnected(room.room_id, "white")
     clock.advance(GRACE_SECONDS + 1)
@@ -761,6 +771,87 @@ async def test_resume_ticks_clock_before_snapshotting(app, client, clock):
     snap = r.json()["clock"]
     assert snap["white_remaining"] == pytest.approx(initial_white - 7, abs=0.01)
     assert snap["running_for"] == "white"
+
+
+async def _resumable_room(app, clock):
+    rooms = app.state.rooms
+    await rooms.enqueue(client_uuid=ALICE, nickname="A", session_token="ta",
+                        time_minutes=5, increment_seconds=0, side_preference="white")
+    await rooms.enqueue(client_uuid=BOB, nickname="B", session_token="tb",
+                        time_minutes=5, increment_seconds=0, side_preference="black")
+    room = list(rooms._active.values())[0]
+    room.started_at = clock()
+    room.first_move_at = clock()
+    return room
+
+
+def _resume(client, room, token="ta"):
+    return client.post("/resume", json={
+        "version": PROTOCOL_VERSION, "room_id": room.room_id, "session_token": token,
+    })
+
+
+@pytest.mark.asyncio
+async def test_resume_reports_the_armed_idle_window(app, client, clock):
+    room = await _resumable_room(app, clock)
+    room.plies_ever = 2
+    room.idle_since = clock()
+    clock.advance(12)
+
+    r = _resume(client, room)
+
+    assert r.status_code == 200
+    window = r.json()["idle_window"]
+    assert window["outcome"] == "resignation"
+    assert window["color"] == "white"
+    assert window["seconds_remaining"] == pytest.approx(IDLE_RESIGN_SECONDS - 12)
+
+
+@pytest.mark.asyncio
+async def test_resume_reports_no_window_after_ply_three(app, client, clock):
+    room = await _resumable_room(app, clock)
+    room.plies_ever = 3
+    room.idle_since = None
+
+    r = _resume(client, room)
+
+    assert r.status_code == 200
+    assert r.json()["idle_window"] is None
+
+
+@pytest.mark.asyncio
+async def test_idle_window_wire_is_none_for_a_backend_less_room(app, clock):
+    """color_to_move() is None on a queued/unpaired room (no backend), and
+    IdleWindowWire(color=None) would raise — turning /resume into a 500 for
+    any shape where idle_since is set without a paired backend. The wire
+    builder bails to None instead."""
+    room = await app.state.rooms.enqueue(
+        client_uuid=ALICE, nickname="A", session_token="ta",
+        time_minutes=5, increment_seconds=0, side_preference="white")
+    assert room.backend is None
+    room.idle_since = clock()
+
+    assert _idle_window_wire(room, clock()) is None
+
+
+@pytest.mark.asyncio
+async def test_resume_does_not_reset_the_idle_window(app, client, clock):
+    """The anti-dodge posture shared with expired skill-check pendings: a resume
+    is not deliberate presence, and restamping idle_since here would hand the
+    idler a trivial disconnect/resume stall loop. /resume only REPORTS the
+    remaining time so the reconnected client renders an honest badge."""
+    room = await _resumable_room(app, clock)
+    room.plies_ever = 2
+    armed_at = clock()
+    room.idle_since = armed_at
+    clock.advance(30)
+
+    r = _resume(client, room)
+
+    assert r.status_code == 200
+    assert room.idle_since == armed_at
+    assert r.json()["idle_window"]["seconds_remaining"] == pytest.approx(
+        IDLE_RESIGN_SECONDS - 30)
 
 
 class _FakeOldSocket:

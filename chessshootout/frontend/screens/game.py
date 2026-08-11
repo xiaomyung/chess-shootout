@@ -51,7 +51,7 @@ from chessshootout.frontend.game.give_time import GiveTimeHold
 from chessshootout.frontend.game.variant import MATCH_MODE_BY_VARIANT, Variant
 from chessshootout.skillcheck.combo import COMBO_DIRECTIONS, COMBO_PROMPT_COUNT_MAX
 from chessshootout.server.protocol import (
-    CHAT_COOLDOWN_SECONDS, FIRST_MOVE_ABORT_SECONDS, GRACE_SECONDS, Reason,
+    CHAT_COOLDOWN_SECONDS, GRACE_SECONDS, IDLE_WINDOW_BY_PLIES, Reason,
     SKILLCHECK_TARGET_MAX,
 )
 from chessshootout.online.client import RECONNECT_TOTAL_SECONDS
@@ -114,6 +114,11 @@ ONLINE_DRAW_REASONS = {
 ONLINE_STATIC_RESULTS = {
     Reason.ABORTED, Reason.SERVER_SHUTDOWN,
 }
+IDLE_LABEL_BY_OUTCOME = {Reason.ABORTED: "Abort in", Reason.RESIGNATION: "Resign in"}
+IDLE_RESIGN_NOTICE_SECONDS = 30.0
+IDLE_TOTAL_BY_OUTCOME = {
+    outcome: seconds for outcome, seconds in IDLE_WINDOW_BY_PLIES.values()
+}
 
 ANIM_MS_DEFAULT = 180
 ANIM_MS_MIN = 140
@@ -151,6 +156,13 @@ def _spectate_target(payload):
 def _spectate_direction(payload):
     direction = payload.get("direction")
     return direction if direction in COMBO_DIRECTIONS else None
+
+
+class IdleWindow(NamedTuple):
+    outcome: str
+    color: PieceColor
+    deadline_ms: int
+    total_seconds: float
 
 
 class OnlineCheck(NamedTuple):
@@ -196,7 +208,7 @@ class GameScreen(Screen):
         self._match_session_id = None
         self.backdrop = ArenaBackdrop()
         self._last_turn_for_flip = None
-        self._first_move_deadline_ms = None
+        self._idle_window = None
         self._opp_disconnected_at_ms = None
         self._local_disconnected_at_ms = None
         self._focus_click_consumed = False
@@ -372,6 +384,28 @@ class GameScreen(Screen):
         else:
             self._opp_disconnected_at_ms = None
 
+    def on_idle_window(self, payload):
+        if self.variant != Variant.ONLINE or self.match.local_color is None:
+            return
+        outcome = payload.get("outcome")
+        raw_color = payload.get("color")
+        if outcome not in IDLE_LABEL_BY_OUTCOME or raw_color not in ("white", "black"):
+            return
+        total = float(IDLE_TOTAL_BY_OUTCOME[outcome])
+        seconds = min(max(_finite_float(payload.get("seconds_remaining"), 0.0), 0.0), total)
+        color = PieceColor.WHITE if raw_color == "white" else PieceColor.BLACK
+        self._idle_window = IdleWindow(
+            outcome, color, pg.time.get_ticks() + int(seconds * 1000), total)
+        if (outcome == Reason.RESIGNATION and color != self.match.local_color
+                and seconds <= IDLE_RESIGN_NOTICE_SECONDS):
+            idler = self._name_for_color(color)
+            self.app.toast.show(f"{idler} is idle — auto-resign soon", key="idle_resign")
+
+    def _adopt_idle_window(self, payload):
+        self._idle_window = None
+        if isinstance(payload, dict):
+            self.on_idle_window(payload)
+
     def on_annotations_state(self, payload):
         if env.get_hide_opp_marks():
             return
@@ -496,6 +530,7 @@ class GameScreen(Screen):
         self._adopt_resumed_result(payload)
         self.skillcheck_session.apply_resumed_skillcheck_log(payload.get("skillcheck_log", []))
         self._restore_online_skillcheck_state(payload)
+        self._adopt_idle_window(payload.get("idle_window"))
 
     def _restore_resumed_annotations(self, payload):
         if self._chosen_side == "white":
@@ -524,6 +559,7 @@ class GameScreen(Screen):
         if server_ply is not None and server_ply != expected:
             self.app.coordinator._begin_resync()
             return
+        self._idle_window = None
         self.board.clear_all_annotations()
         if self.match.move_history:
             self.skillcheck_session.drop_skillcheck_log_from(len(self.match.move_history))
@@ -690,7 +726,7 @@ class GameScreen(Screen):
         promo_type = PROMO_TYPE_BY_LETTER.get(promo) if promo else None
         result = self.match.apply_remote_move(from_sq, to_sq, promo_type)
         if result.legal:
-            self._first_move_deadline_ms = None
+            self._idle_window = None
             self.board.animate_remote_move(from_sq, to_sq)
             self._clear_online_move_locks(from_sq, to_sq)
             kind = payload.get("skill_check_kind")
@@ -708,7 +744,7 @@ class GameScreen(Screen):
         if not self._apply_online_result(reason, payload.get("winner_color")):
             return
         coordinator = self.app.coordinator
-        self._first_move_deadline_ms = None
+        self._idle_window = None
         self._opp_disconnected_at_ms = None
         self._local_disconnected_at_ms = None
         coordinator.offer_banners.clear()
@@ -1416,7 +1452,7 @@ class GameScreen(Screen):
         self.board.start_undo_animation(move)
 
     def _on_move_landed(self, entry):
-        self._first_move_deadline_ms = None
+        self._idle_window = None
         if entry.gives_checkmate:
             self.app.sound_manager.play_checkmate()
         elif entry.move.is_castle:
@@ -1541,17 +1577,13 @@ class GameScreen(Screen):
             return self._auto_end_remaining(
                 "Abandon in", self._opp_disconnected_at_ms, GRACE_SECONDS, now,
             )
-        if (color == self.match.current_turn()
-                and not self.match.move_history
-                and self._first_move_deadline_ms is not None):
-            remaining_ms = self._first_move_deadline_ms - now
-            if remaining_ms <= 0:
-                return None, None
-            remaining = remaining_ms / 1000.0
-            elapsed = FIRST_MOVE_ABORT_SECONDS - remaining
-            if elapsed < AUTO_END_GATE_FRACTION * FIRST_MOVE_ABORT_SECONDS:
-                return None, None
-            return "Abort in", remaining
+        window = self._idle_window
+        if window is not None and color == window.color:
+            return self._auto_end_remaining(
+                IDLE_LABEL_BY_OUTCOME[window.outcome],
+                window.deadline_ms - int(window.total_seconds * 1000),
+                window.total_seconds, now,
+            )
         return None, None
 
     def _auto_end_remaining(self, label, snap_ms, total_seconds, now_ms):
@@ -1624,6 +1656,7 @@ class GameScreen(Screen):
         self._speech_anchor_memo = {}
         self._game_info_memo = None
         self._result_first_seen_at_ms = None
+        self._idle_window = None
         self.result_flow.reset_for_new_game()
         self.right_menu.reset_for_new_game()
         self.match.new_game()

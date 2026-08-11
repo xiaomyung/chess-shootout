@@ -1655,14 +1655,16 @@ async def test_combo_press_without_direction_is_a_noop(app, clock):
 
 @pytest.mark.asyncio
 async def test_combo_mash_burst_cannot_clear_the_run(app, clock):
-    """A scripted 10ms mash cycling all four directions: combo's 50ms server gate
-    drops four of every five presses and the wrongs cap kills the run long before
-    the deadline — mashing can never brute-force the prompt sequence."""
+    """A scripted 10ms mash: combo's 50ms server gate drops four of every five
+    presses and the wrongs cap kills the run long before the deadline. The mash
+    always presses off-prompt — a direction cycle against the run's random seed
+    occasionally brute-forced the sequence and flaked the suite."""
     room, ws_w, ws_b, frm, to, pending, ch = await _combo_room(app, clock)
     elapsed, out = 120, None
     while room.pending_skillcheck is not None and elapsed < int(pending.deadline_ms):
-        out = await _fire(app, clock, room, "white", elapsed,
-                          direction=COMBO_DIRECTIONS[(elapsed // 10) % 4])
+        expected = ch.prompts[min(room.pending_skillcheck.progress, len(ch.prompts) - 1)]
+        wrong = next(d for d in COMBO_DIRECTIONS if d != expected)
+        out = await _fire(app, clock, room, "white", elapsed, direction=wrong)
         elapsed += 10
     assert len(room.backend.move_history) == 0, "the mash never lands the capture"
     assert room.pending_skillcheck is None and out == "skillcheck_fail"

@@ -22,12 +22,13 @@ def _env_int(name, default):
         return default
 
 
-PROTOCOL_VERSION = 4
+PROTOCOL_VERSION = 5
 MAX_NICKNAME_LEN = 20
 GIVE_TIME_SECONDS = 15
 GIVE_TIME_TICK_MS = 100
 GIVE_TIME_MAX_HOLD_MS = 600_000
 FIRST_MOVE_ABORT_SECONDS = 60
+IDLE_RESIGN_SECONDS = 60
 QUEUE_MAX_WAIT_SECONDS = 600.0
 MIN_TIME_MINUTES = 1
 MAX_TIME_MINUTES = 180
@@ -102,6 +103,13 @@ class Reason:
     SERVER_SHUTDOWN = "server_shutdown"
 
 
+IDLE_WINDOW_BY_PLIES = {
+    0: (Reason.ABORTED, FIRST_MOVE_ABORT_SECONDS),
+    1: (Reason.ABORTED, FIRST_MOVE_ABORT_SECONDS),
+    2: (Reason.RESIGNATION, IDLE_RESIGN_SECONDS),
+}
+
+
 def normalize_nickname(raw):
     if raw is None:
         raise ValueError("nickname required")
@@ -146,6 +154,16 @@ class LockWire(BaseModel):
     to_sq: str = Field(alias="to")
 
     model_config = {"populate_by_name": True}
+
+
+class IdleWindowWire(BaseModel):
+    outcome: Literal["aborted", "resignation"]
+    color: Literal["white", "black"]
+    seconds_remaining: float = Field(ge=0.0, allow_inf_nan=False)
+
+
+class IdleWindowMessage(IdleWindowWire, _Base):
+    type: Literal["idle_window"] = "idle_window"
 
 
 class ArrowWire(BaseModel):
@@ -279,6 +297,7 @@ class ResumeResponse(_Base):
     hide_opp_marks: bool = False
     result_reason: Optional[str] = None
     result_winner: Optional[Literal["white", "black"]] = None
+    idle_window: Optional[IdleWindowWire] = None
 
 
 class ReclaimRequest(_Base):

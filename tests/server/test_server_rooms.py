@@ -2,7 +2,9 @@ import random
 
 import pytest
 
-from chessshootout.server.protocol import GRACE_SECONDS
+from chessshootout.server.protocol import (
+    FIRST_MOVE_ABORT_SECONDS, GRACE_SECONDS, IDLE_RESIGN_SECONDS, Reason,
+)
 from chessshootout.server.rooms import (
     AlreadyInGameError, InvalidTokenError, NotInRoomError, QUEUE_ABANDON_SECONDS,
     REMATCH_ABSOLUTE_CAP_SECONDS, REMATCH_IDLE_SECONDS, Room, RoomManager,
@@ -504,6 +506,110 @@ async def test_zero_ply_abandonment_finalizes_as_aborted_draw(manager):
     manager.finalize_result(room.room_id, "abandonment", "black")
     assert room.result == ("aborted", None)
     assert room.series_scores == {}
+
+
+def _bare_room(**overrides):
+    base = dict(room_id="r", time_minutes=5, increment_seconds=0, created_at=0.0)
+    base.update(overrides)
+    return Room(**base)
+
+
+@pytest.mark.parametrize(
+    "plies, expected",
+    [
+        pytest.param(0, (Reason.ABORTED, FIRST_MOVE_ABORT_SECONDS),
+                     id="ply_zero_abort_window"),
+        pytest.param(1, (Reason.ABORTED, FIRST_MOVE_ABORT_SECONDS),
+                     id="ply_one_abort_window"),
+        pytest.param(2, (Reason.RESIGNATION, IDLE_RESIGN_SECONDS),
+                     id="ply_two_resign_window"),
+        pytest.param(3, None, id="ply_three_disarmed"),
+    ],
+)
+def test_idle_window_table_arms_by_plies_ever(plies, expected):
+    """The whole lifecycle policy in one table: plies 0 and 1 get the no-winner
+    abort window, ply 2 the somebody-loses resign window, and from ply 3 the
+    game never arms an idle window again."""
+    room = _bare_room()
+    room.plies_ever = plies
+    assert room.idle_window() == expected
+
+
+def test_idle_remaining_floors_at_zero_and_is_none_when_disarmed():
+    room = _bare_room()
+    room.plies_ever = 2
+    room.idle_since = 10.0
+    assert room.idle_remaining(10.0) == IDLE_RESIGN_SECONDS
+    assert room.idle_remaining(30.0) == IDLE_RESIGN_SECONDS - 20.0
+    assert room.idle_remaining(10.0 + IDLE_RESIGN_SECONDS + 5.0) == 0.0, \
+        "expired windows report 0.0, never a negative countdown"
+    room.idle_since = None
+    assert room.idle_remaining(30.0) is None
+    room.idle_since = 10.0
+    room.plies_ever = 3
+    assert room.idle_remaining(30.0) is None, \
+        "a stale idle_since past the table's last row means no window at all"
+
+
+@pytest.mark.asyncio
+async def test_pairing_arms_the_abort_window_from_started_at(manager, clock):
+    """The queued waiter carries no window (there is nobody to abort against);
+    the moment the second player pairs, the abort window arms anchored at
+    started_at — the same instant game_start's started_seconds_ago measures
+    from, so server and client count down the same 60 seconds."""
+    queued = await manager.enqueue(**_enqueue_kwargs("alice"))
+    assert queued.idle_since is None
+    clock.advance(5)
+    room = await manager.enqueue(**_enqueue_kwargs("bob"))
+    assert room.started_at == 5.0
+    assert room.idle_since == room.started_at
+    assert room.idle_window() == (Reason.ABORTED, FIRST_MOVE_ABORT_SECONDS)
+
+
+@pytest.mark.asyncio
+async def test_finalize_result_disarms_the_idle_window(manager):
+    await manager.enqueue(**_enqueue_kwargs("alice"))
+    room = await manager.enqueue(**_enqueue_kwargs("bob"))
+    room.idle_pushed_at = 1.0
+    assert room.idle_since is not None
+    manager.finalize_result(room.room_id, "checkmate", winner_color="white")
+    assert room.idle_since is None
+    assert room.idle_pushed_at is None
+
+
+@pytest.mark.asyncio
+async def test_reset_for_rematch_rearms_the_abort_window(manager, clock):
+    await manager.enqueue(**_enqueue_kwargs("alice"))
+    room = await manager.enqueue(**_enqueue_kwargs("bob"))
+    room.plies_ever = 6
+    manager.finalize_result(room.room_id, "checkmate", winner_color="white")
+    room.idle_pushed_at = 99.0
+    clock.advance(30)
+    assert manager.reset_for_rematch(room.room_id) is True
+    assert room.plies_ever == 0
+    assert room.idle_since == room.started_at == clock()
+    assert room.idle_pushed_at is None
+    assert room.idle_window() == (Reason.ABORTED, FIRST_MOVE_ABORT_SECONDS)
+
+
+def test_resignation_is_not_a_zero_ply_abort_reason():
+    """ZERO_PLY_ABORT_REASONS must never grow "resignation". The idle forfeit
+    can only fire at plies_ever == 2, so adding it would change nothing for the
+    idle feature — but it would silently flip a HAND resign at zero plies from a
+    resignation with a winner (the deliberate choice pinned by
+    test_zero_ply_resignation_keeps_its_winner) into a no-winner abort."""
+    assert "resignation" not in RoomManager.ZERO_PLY_ABORT_REASONS
+    assert RoomManager.ZERO_PLY_ABORT_REASONS == ("timeout", "abandonment")
+
+
+@pytest.mark.asyncio
+async def test_color_to_move_is_none_without_a_backend(manager):
+    """The unified helper (it replaced handlers._color_to_move) guards the
+    pre-pairing shape instead of raising on backend=None."""
+    assert _bare_room().color_to_move() is None
+    await manager.enqueue(**_enqueue_kwargs("alice"))
+    room = await manager.enqueue(**_enqueue_kwargs("bob"))
+    assert room.color_to_move() == "white"
 
 
 async def test_stale_queued_rooms_ignores_fresh_waiters(manager, clock):

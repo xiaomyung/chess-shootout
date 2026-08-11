@@ -31,7 +31,7 @@ RESULT_TEXT = {
     "draw_fifty_move": ("Draw", "by fifty-move rule"),
     "draw_insufficient_material": ("Draw", "by insufficient material"),
     "draw_agreement": ("Draw", "by agreement"),
-    "aborted": ("Game aborted", "no moves played"),
+    "aborted": ("Game aborted", "the game never started"),
     "server_shutdown": ("Game cancelled", "server shutting down"),
 }
 

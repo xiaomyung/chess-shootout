@@ -237,6 +237,8 @@ class OnlineCoordinator:
             self._forward_board_event("on_quick_chat", event.payload)
         elif event.type == "connection_status":
             self._handle_connection_status(event.payload)
+        elif event.type == "idle_window":
+            self._handle_idle_window(event.payload)
         elif event.type == "resync_directive":
             self._begin_resync()
         elif event.type == "skill_check_required":
@@ -513,16 +515,20 @@ class OnlineCoordinator:
         if payload.get("opp_state", "connected") == "resyncing":
             self.app.toast.show("Opponent is resyncing…")
 
+    def _handle_idle_window(self, payload):
+        target = self._subscriber if self._subscriber is not None else self.app.game
+        target.on_idle_window(payload)
+
     def _begin_match_found_transition(self, payload):
         if self._pending_game_start_payload is not None:
             return
         self._pending_game_start_payload = payload
         now = pg.time.get_ticks()
         self._match_found_at_ms = now
-        elapsed = float(payload.get("started_seconds_ago", 0.0))
-        self.app.game._first_move_deadline_ms = now + int(
-            (FIRST_MOVE_ABORT_SECONDS - elapsed) * 1000
-        )
+        try:
+            payload["started_seconds_ago"] = float(payload.get("started_seconds_ago", 0.0))
+        except (TypeError, ValueError):
+            payload["started_seconds_ago"] = 0.0
         self.wait_modal.hide()
         room_id = self.client.room_id if self.client is not None else None
         log.info("match found room=%s side=%s", room_id, payload.get("your_color"))
@@ -539,10 +545,19 @@ class OnlineCoordinator:
     def _finish_match_found(self):
         payload = self._pending_game_start_payload
         self._pending_game_start_payload = None
+        matched_at_ms = self._match_found_at_ms
         self._match_found_at_ms = None
         self._wait_started_at_ms = None
-        if payload is not None:
-            self._start_online_game(payload)
+        if payload is None:
+            return
+        self._start_online_game(payload)
+        elapsed = float(payload.get("started_seconds_ago", 0.0))
+        if matched_at_ms is not None:
+            elapsed += (pg.time.get_ticks() - matched_at_ms) / 1000.0
+        self._handle_idle_window({
+            "outcome": Reason.ABORTED, "color": "white",
+            "seconds_remaining": max(FIRST_MOVE_ABORT_SECONDS - elapsed, 0.0),
+        })
 
     def _session_id_for_online(self):
         if self.client is not None and self.client.room_id:
@@ -639,7 +654,7 @@ class OnlineCoordinator:
         game.match.on_local_move_applied = None
         game.right_menu.set_game_info(None)
         game.result_menu.set_online_mode(False)
-        game._first_move_deadline_ms = None
+        game._idle_window = None
         game._opp_disconnected_at_ms = None
         game._local_disconnected_at_ms = None
         self._prev_online_state = None
@@ -772,10 +787,11 @@ class OnlineCoordinator:
             if remaining <= 0:
                 continue
             candidates.append((remaining, total))
-        if game._first_move_deadline_ms is not None and not game.match.move_history:
-            remaining_ms = game._first_move_deadline_ms - now
+        window = game._idle_window
+        if window is not None:
+            remaining_ms = window.deadline_ms - now
             if remaining_ms > 0:
-                candidates.append((remaining_ms / 1000.0, FIRST_MOVE_ABORT_SECONDS))
+                candidates.append((remaining_ms / 1000.0, window.total_seconds))
         if not candidates:
             return None
         remaining, total = min(candidates, key=lambda r: r[0])

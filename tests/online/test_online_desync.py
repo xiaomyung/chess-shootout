@@ -72,6 +72,15 @@ def _paired_ws(client):
     return a, b
 
 
+def _recv_type(ws, msg_type):
+    """Next frame of the given type. Protocol v5 force-pushes idle_window after
+    plies 1 and 2, so positional reads are no longer stable."""
+    while True:
+        msg = json.loads(ws.receive_text())
+        if msg["type"] == msg_type:
+            return msg
+
+
 def test_move_applied_includes_ply(client):
     a, b = _paired_ws(client)
     with client.websocket_connect(f"/ws/{a['room_id']}") as ws_w:
@@ -81,13 +90,13 @@ def test_move_applied_includes_ply(client):
             ws_w.receive_text()
             ws_b.receive_text()
             ws_w.send_text(json.dumps(_move("e2", "e4")))
-            applied_w = json.loads(ws_w.receive_text())
-            applied_b = json.loads(ws_b.receive_text())
+            applied_w = _recv_type(ws_w, "move_applied")
+            applied_b = _recv_type(ws_b, "move_applied")
             assert applied_w["ply"] == 1
             assert applied_b["ply"] == 1
             ws_b.send_text(json.dumps(_move("e7", "e5")))
-            applied_w2 = json.loads(ws_w.receive_text())
-            applied_b2 = json.loads(ws_b.receive_text())
+            applied_w2 = _recv_type(ws_w, "move_applied")
+            applied_b2 = _recv_type(ws_b, "move_applied")
             assert applied_w2["ply"] == 2
             assert applied_b2["ply"] == 2
 
@@ -101,20 +110,19 @@ def test_takeback_applied_includes_ply(client):
             ws_w.receive_text()
             ws_b.receive_text()
             ws_w.send_text(json.dumps(_move("e2", "e4")))
-            ws_w.receive_text()
-            ws_b.receive_text()
+            _recv_type(ws_w, "move_applied")
+            _recv_type(ws_b, "move_applied")
             ws_b.send_text(json.dumps(_move("e7", "e5")))
-            ws_w.receive_text()
-            ws_b.receive_text()
+            _recv_type(ws_w, "move_applied")
+            _recv_type(ws_b, "move_applied")
             ws_b.send_text(json.dumps({"version": PROTOCOL_VERSION,
                                        "type": "takeback_request"}))
-            ws_w.receive_text()
+            _recv_type(ws_w, "takeback_offered")
             ws_w.send_text(json.dumps({"version": PROTOCOL_VERSION,
                                        "type": "takeback_response",
                                        "accept": True}))
-            tb_w = json.loads(ws_w.receive_text())
-            tb_b = json.loads(ws_b.receive_text())
-            assert tb_w["type"] == "takeback_applied"
+            tb_w = _recv_type(ws_w, "takeback_applied")
+            tb_b = _recv_type(ws_b, "takeback_applied")
             assert tb_w["ply"] == 1
             assert tb_b["ply"] == 1
 

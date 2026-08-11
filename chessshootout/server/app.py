@@ -27,7 +27,8 @@ from chessshootout.server.protocol import (
     ANNOTATIONS_PER_SECOND, AnnotationSetWire, ArrowWire,
     AuthMessage, CHAT_COOLDOWN_SECONDS, CancelMatchmakeRequest,
     ConnectionStatusMessage, ErrorMessage,
-    HealthResponse, HistoryEntryWire, LockWire, MatchmakeRequest, MatchmakeResponse,
+    HealthResponse, HistoryEntryWire, IdleWindowWire, LockWire,
+    MatchmakeRequest, MatchmakeResponse,
     PROTOCOL_VERSION, PendingSkillCheckWire, Reason, ReclaimRequest, ReclaimResponse,
     RematchRequestMessage, RematchUpdateMessage,
     ResultMessage, ResumeRequest, ResumeResponse, SkillCheckOutcomeWire, is_uuid4,
@@ -380,6 +381,7 @@ def create_app(*, now_provider=time.monotonic, max_rooms=DEFAULT_MAX_ROOMS):
             hide_opp_marks=slot.hide_opp_marks,
             result_reason=room.result[0] if room.result else None,
             result_winner=room.result[1] if room.result else None,
+            idle_window=_idle_window_wire(room, app.state.now()),
         )
         log.info("resume served room=%s color=%s ply=%d", body.room_id, color, len(history))
         if (connections.get_for_color(room, color) is not None
@@ -454,6 +456,17 @@ def _annotation_set_wire(store):
         highlights=sorted(store.highlights),
         arrows=[ArrowWire(from_sq=frm, to_sq=to) for frm, to in store.arrows],
     )
+
+
+def _idle_window_wire(room, now):
+    if room.idle_since is None or room.color_to_move() is None:
+        return None
+    window = room.idle_window()
+    if window is None:
+        return None
+    return IdleWindowWire(
+        outcome=window[0], color=room.color_to_move(),
+        seconds_remaining=room.idle_remaining(now))
 
 
 def _pending_skillcheck_wire(room, now_ms):

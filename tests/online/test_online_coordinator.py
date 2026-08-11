@@ -23,6 +23,7 @@ from chessshootout.frontend.online_coordinator import (
     APPLY_FAILED_LABEL, ONLINE_HARD_FAILURE_REASONS, ONLINE_TRANSIENT_REASON_LABELS,
     TOAST_REASON_MAX_CHARS,
 )
+from chessshootout.frontend.screens.game import IDLE_RESIGN_NOTICE_SECONDS, IdleWindow
 from chessshootout.online.client import Event, OnlineClient
 from chessshootout.server.protocol import Reason
 from tests.helpers import (
@@ -809,7 +810,7 @@ def test_move_landing_never_dismisses_the_rematch_banner():
 
 def test_unbind_clears_every_field_that_gates_online_behaviour():
     """Four call sites cleared four different subsets of the same nine fields, and they
-    had drifted — a teardown left _first_move_deadline_ms and the disconnect stamps set.
+    had drifted — a teardown left the idle window and the disconnect stamps set.
     They are inert once variant is back to local, but only because of that; one unbind
     now clears the whole set."""
     app = make_app(1000, 800)
@@ -817,7 +818,7 @@ def test_unbind_clears_every_field_that_gates_online_behaviour():
     game.variant = "online"
     game.match.local_color = PieceColor.WHITE
     game.match.on_local_move_applied = lambda *a: None
-    game._first_move_deadline_ms = 12345
+    game._idle_window = IdleWindow(Reason.ABORTED, PieceColor.WHITE, 12345, 60.0)
     game._opp_disconnected_at_ms = 6789
     game._local_disconnected_at_ms = 4321
     app.coordinator._prev_online_state = "reconnecting"
@@ -827,10 +828,115 @@ def test_unbind_clears_every_field_that_gates_online_behaviour():
     assert game.variant == "local"
     assert game.match.local_color is None
     assert game.match.on_local_move_applied is None
-    assert game._first_move_deadline_ms is None
+    assert game._idle_window is None
     assert game._opp_disconnected_at_ms is None
     assert game._local_disconnected_at_ms is None
     assert app.coordinator._prev_online_state is None
+
+
+class _IdleWindowSubscriber:
+
+    def __init__(self):
+        self.seen = []
+
+    def on_idle_window(self, payload):
+        self.seen.append(payload)
+
+
+def test_idle_window_event_routes_to_the_subscriber():
+    """idle_window uses the subscriber-else-app.game fallback form (like result):
+    with a subscriber bound, the payload lands there and app.game's own window
+    stays untouched — the event went through the subscriber, not around it."""
+    app = make_app(1000, 800)
+    sub = _IdleWindowSubscriber()
+    app.coordinator.subscribe(sub)
+    payload = {"outcome": "aborted", "color": "white", "seconds_remaining": 42.0}
+
+    app.coordinator._handle_online_event(Event("idle_window", payload))
+
+    assert sub.seen == [payload]
+    assert app.game._idle_window is None
+
+
+def test_idle_window_event_without_a_subscriber_falls_back_to_app_game():
+    """Strip-level state lives on the persistent GameScreen object, which exists
+    even when it is not the active screen — an idle window pushed while nobody
+    is subscribed must still arm the badge there (same fallback as result), for
+    as long as the screen is still bound to the online session."""
+    app = make_app(1000, 800)
+    app.game.variant = "online"
+    app.game.match.local_color = PieceColor.BLACK
+    assert app.coordinator._subscriber is None
+
+    app.coordinator._handle_online_event(Event("idle_window", {
+        "outcome": "aborted", "color": "white", "seconds_remaining": 30.0,
+    }))
+
+    window = app.game._idle_window
+    assert window is not None
+    assert window.outcome == Reason.ABORTED
+    assert window.color == PieceColor.WHITE
+
+
+def test_a_late_push_after_back_to_menu_never_arms_or_toasts():
+    """on_idle_window is gated on the online context — the same
+    variant+local_color pair _compute_auto_end reads. After back-to-menu
+    unbinds the screen, a straggler push (or one against a plain local game)
+    must not arm a badge or toast an idle notice over it."""
+    app = _wired_app()
+    app._on_back_to_menu()
+    assert app.game.variant == "local"
+
+    app.coordinator._handle_online_event(Event("idle_window", {
+        "outcome": "resignation", "color": "black", "seconds_remaining": 5.0,
+    }))
+
+    assert app.game._idle_window is None
+    assert not any(b["key"] == "idle_resign" for b in app.toast._bubbles)
+
+
+def test_the_waiting_side_gets_one_idle_notice_toast():
+    """The notice is time-gated on IDLE_RESIGN_NOTICE_SECONDS: the forced
+    ply-2 push carries the full window, and refresh pushes keep carrying nearly
+    all of it while the opponent is actively present, so none of those may
+    toast. At or under the threshold — a genuine idle spell — the toast shows
+    once, keyed 'idle_resign' so repeat pushes re-stamp the same bubble instead
+    of stacking new ones. Abort-window pushes never toast, however low they
+    burn — nobody loses on those."""
+    app = _wired_app()
+    app.coordinator._handle_idle_window({
+        "outcome": "resignation", "color": "black", "seconds_remaining": 60.0,
+    })
+    assert not any(b["key"] == "idle_resign" for b in app.toast._bubbles), \
+        "a fresh full window means the opponent just moved — no idle chatter"
+
+    app.coordinator._handle_idle_window({
+        "outcome": "aborted", "color": "black",
+        "seconds_remaining": IDLE_RESIGN_NOTICE_SECONDS - 10.0,
+    })
+    assert not any(b["key"] == "idle_resign" for b in app.toast._bubbles)
+
+    payload = {"outcome": "resignation", "color": "black",
+               "seconds_remaining": IDLE_RESIGN_NOTICE_SECONDS}
+    app.coordinator._handle_idle_window(payload)
+    app.coordinator._handle_idle_window(payload)
+
+    bubbles = [b for b in app.toast._bubbles if b["key"] == "idle_resign"]
+    assert len(bubbles) == 1
+    assert "bob" in bubbles[0]["message"]
+
+
+def test_the_idler_gets_no_notice_toast():
+    """The idler already sees the Resign-in badge on their own strip; toasting
+    them too would double-announce their own countdown. Remaining time is under
+    the notice threshold, so the guard under test is the color one."""
+    app = _wired_app()
+    app.coordinator._handle_idle_window({
+        "outcome": "resignation", "color": "white",
+        "seconds_remaining": IDLE_RESIGN_NOTICE_SECONDS - 10.0,
+    })
+    assert app.game._idle_window is not None
+    assert not any(b["key"] == "idle_resign" for b in app.toast._bubbles)
 
 
 def test_resume_goes_through_the_subscriber_protocol():

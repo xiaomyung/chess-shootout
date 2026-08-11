@@ -6,7 +6,7 @@ heartbeat sweep notices, ~HEARTBEAT_TIMEOUT_SECONDS later).
 """
 import pytest
 
-from chessshootout.server.broadcasts import finalize_and_broadcast
+from chessshootout.server.broadcasts import finalize_and_broadcast, push_idle_window
 from chessshootout.server.connections import broadcast
 from chessshootout.server.protocol import PROTOCOL_VERSION, Reason, ResultMessage
 from tests.server.conftest import ALICE, BOB
@@ -123,3 +123,21 @@ async def test_broadcast_send_failure_to_an_already_disconnected_slot_is_a_noop(
     assert room.white.connected is False
     assert room.white.disconnected_at is None, \
         "the guard leaves the never-connected slot's timer untouched (no fresh stamp)"
+
+
+@pytest.mark.asyncio
+async def test_push_idle_window_bails_on_a_backend_less_room(app, clock):
+    """A queued room has no backend, so color_to_move() is None — a push
+    against that shape (idle_since set but nobody paired) must bail up front
+    instead of building IdleWindowMessage(color=None) and raising mid-
+    broadcast. The untouched idle_pushed_at proves the early return."""
+    rooms = app.state.rooms
+    room = await rooms.enqueue(client_uuid=ALICE, nickname="A", session_token="ta",
+                               time_minutes=5, increment_seconds=0,
+                               side_preference="white")
+    assert room.backend is None
+    room.idle_since = clock()
+
+    await push_idle_window(rooms, app.state.connections, room, clock(), force=True)
+
+    assert room.idle_pushed_at is None

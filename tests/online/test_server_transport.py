@@ -339,11 +339,12 @@ def test_blocking_post_returns_none_on_a_body_it_cannot_parse(content):
 
 
 async def _recv_skip_beacons(ws):
-    """Next message that isn't a heartbeat pong, which can interleave with the
-    message under test once a client starts pinging."""
+    """Next message that isn't ambient wire noise — heartbeat pongs and the
+    idle_window pushes that follow plies 1 and 2 — either of which can
+    interleave with the message under test."""
     while True:
         msg = await asyncio.wait_for(ws.recv(), timeout=10.0)
-        if msg["type"] != "pong":
+        if msg["type"] not in ("pong", "idle_window"):
             return msg
 
 
