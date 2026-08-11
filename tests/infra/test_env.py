@@ -10,7 +10,8 @@ from chessshootout.infra import env
 
 
 _ISOLATED_VARS = (
-    "CHESS_SERVER_ADDR", "CHESS_NICKNAME", "CHESS_CLIENT_UUID",
+    "CHESS_SERVER_ADDR", "CHESS_SERVER_MODE", "CHESS_CUSTOM_SERVER_ADDR",
+    "CHESS_NICKNAME", "CHESS_CLIENT_UUID",
     "CHESS_LAST_MODE", "CHESS_MASTER_VOLUME", "CHESS_MENU_VOLUME", "CHESS_DATA_DIR",
     "CHESS_DEFAULT_TC",
     "CHESS_DEFAULT_INCREMENT", "CHESS_COUNTRY",
@@ -322,21 +323,222 @@ def test_show_stats_zero_reads_false_not_truthy(monkeypatch, getter, key):
     assert getattr(env, getter)() is False
 
 
-def test_server_addr_persists_round_trip():
-    env.set_server_addr("chess.example.com:9000")
+def test_official_server_addr_is_the_production_host():
+    """The Official choice is a constant, never the resolved active address --
+    reading it back through get_server_addr would return whatever Custom last
+    wrote and Official would silently follow it."""
+    assert env.official_server_addr() == env._PROD_SERVER_ADDR
+    assert env.official_server_addr() == "server.chess-shootout.com"
+
+
+def test_server_mode_defaults_to_custom_from_source(monkeypatch):
+    """A source run must keep pointing at localhost by default; a flat "official"
+    default would make every dev launch queue on the production server."""
+    monkeypatch.setattr("chessshootout.paths.is_frozen", lambda: False)
+    assert env.get_server_mode() == "custom"
+    assert env.get_server_addr() == "localhost:8000"
+
+
+def test_server_mode_defaults_to_official_when_frozen(monkeypatch):
+    monkeypatch.setattr("chessshootout.paths.is_frozen", lambda: True)
+    assert env.get_server_mode() == "official"
+    assert env.get_server_addr() == env._PROD_SERVER_ADDR
+
+
+def test_custom_server_addr_defaults_to_localhost():
+    assert env.get_custom_server_addr() == "localhost:8000"
+
+
+def test_custom_server_addr_falls_back_to_an_active_env_override(monkeypatch):
+    """Launched with CHESS_SERVER_ADDR=<box>, the Custom field has to prefill with
+    the address actually in use -- otherwise the row shows localhost while the
+    client talks to the box, and the first commit silently redirects it."""
+    monkeypatch.setenv("CHESS_SERVER_ADDR", "10.0.0.5:8000")
+    assert env.get_custom_server_addr() == "10.0.0.5:8000"
+
+
+def test_custom_server_addr_ignores_the_official_address_as_a_prefill(monkeypatch):
+    """Official mode writes production into the active key; that must not become
+    the Custom prefill, or switching to Custom offers the official host back."""
+    monkeypatch.setenv("CHESS_SERVER_ADDR", env._PROD_SERVER_ADDR)
+    assert env.get_custom_server_addr() == "localhost:8000"
+
+
+def test_set_server_mode_official_rewrites_the_resolved_active_address():
+    env.set_server_mode("official")
+    assert env.get_server_mode() == "official"
+    assert env.get_server_addr() == env.official_server_addr()
+    contents = env._ENV_PATH.read_text(encoding="utf-8")
+    assert "CHESS_SERVER_MODE=official" in contents
+    assert f"CHESS_SERVER_ADDR={env._PROD_SERVER_ADDR}" in contents
+
+
+def test_set_server_mode_custom_rewrites_the_resolved_active_address():
+    env.set_server_mode("official")
+    env.set_server_mode("custom")
+    assert env.get_server_addr() == "localhost:8000"
+    contents = env._ENV_PATH.read_text(encoding="utf-8")
+    assert "CHESS_SERVER_MODE=custom" in contents
+    assert "CHESS_SERVER_ADDR=localhost:8000" in contents
+
+
+def test_set_custom_server_addr_rewrites_the_active_address_only_in_custom_mode():
+    """Editing the Custom field while Official is selected stores the address but
+    must not redirect the live connection -- the mode is what picks the target."""
+    env.set_server_mode("official")
+    env.set_custom_server_addr("box.local:9001")
+    assert env.get_custom_server_addr() == "box.local:9001"
+    assert env.get_server_addr() == env.official_server_addr()
+    env.set_server_mode("custom")
+    assert env.get_server_addr() == "box.local:9001"
+
+
+@pytest.mark.parametrize("blank", ["", "   ", None])
+def test_set_custom_server_addr_ignores_a_blank_value(blank):
+    env.set_custom_server_addr("box.local:9001")
+    env.set_custom_server_addr(blank)
+    assert env.get_custom_server_addr() == "box.local:9001"
+    assert env.get_server_addr() == "box.local:9001"
+
+
+def test_set_custom_server_addr_strips_whitespace():
+    env.set_custom_server_addr("  localhost:8000  ")
+    assert env.get_custom_server_addr() == "localhost:8000"
+
+
+def test_set_custom_server_addr_refuses_a_value_with_a_line_break():
+    """A pasted address carrying a newline would write a second .env line the next
+    launch honours as a real setting, so the whole set is rejected -- file AND
+    process. Dropping only the file write left the newline live in os.environ,
+    where _apply_resolved_server_addr copied it into the active key and the next
+    connect blew up with httpx.InvalidURL on a worker thread."""
+    env._ENV_PATH.write_text("CHESS_LAST_MODE=online\n", encoding="utf-8")
+    env.set_custom_server_addr("box.local\nCHESS_NICKNAME=mallory")
+    contents = env._ENV_PATH.read_text(encoding="utf-8")
+    assert "CHESS_NICKNAME" not in contents
+    assert "CHESS_CUSTOM_SERVER_ADDR" not in contents
+    assert "CHESS_SERVER_ADDR" not in contents
+    assert "CHESS_LAST_MODE=online" in contents
+    assert "\n" not in env.get_custom_server_addr()
+    assert "\n" not in env.get_server_addr()
+    assert env.get_custom_server_addr() == "localhost:8000"
+    assert env.get_server_addr() == "localhost:8000"
+
+
+@pytest.mark.parametrize("dirty", [
+    pytest.param("box.local\rCHESS_NICKNAME=mallory", id="carriage_return"),
+    pytest.param("box.local\nCHESS_NICKNAME=mallory", id="newline"),
+    pytest.param("box.local\tCHESS_NICKNAME=mallory", id="tab"),
+    pytest.param("box.local\x00:9001", id="nul"),
+    pytest.param("box.local\x1b[31m:9001", id="escape"),
+    pytest.param("box.local\x7f:9001", id="delete"),
+])
+def test_set_custom_server_addr_refuses_control_characters_in_process(dirty):
+    """Validation runs BEFORE os.environ is touched: every control character is
+    rejected outright, so no unusable address can reach the live process even
+    when _persist would have dropped the file write anyway."""
+    env.set_custom_server_addr("good.local:9001")
+    env.set_custom_server_addr(dirty)
+    assert env.get_custom_server_addr() == "good.local:9001"
+    assert env.get_server_addr() == "good.local:9001"
+    assert os.environ["CHESS_CUSTOM_SERVER_ADDR"] == "good.local:9001"
+    assert os.environ["CHESS_SERVER_ADDR"] == "good.local:9001"
+
+
+def test_stored_custom_addr_with_a_control_character_is_ignored(monkeypatch):
+    """The setter can't be the only gate: python-dotenv unescapes a quoted
+    value, so a hand-edited CHESS_CUSTOM_SERVER_ADDR="box\\nlocal" arrives with a
+    real newline in it. Reading it back has to drop it, or the load-time
+    re-resolve copies it straight into the active key."""
+    monkeypatch.setenv("CHESS_CUSTOM_SERVER_ADDR", "box\nlocal")
+    env._ENV_PATH.write_text("CHESS_SERVER_MODE=custom\n", encoding="utf-8")
+
+    env.load()
+
+    assert env.get_custom_server_addr() == "localhost:8000"
+    assert "\n" not in env.get_server_addr()
+    assert env.get_server_addr() == "localhost:8000"
+
+
+def test_load_re_resolves_a_stale_active_address_from_a_pre_mode_env_file(monkeypatch):
+    """A .env written before the mode key existed carries only the old custom
+    host. A frozen run defaults to Official, so the active key must be
+    re-resolved at load -- otherwise the client silently keeps talking to a dev
+    box the UI reports as the official server."""
+    monkeypatch.setattr("chessshootout.paths.is_frozen", lambda: True)
+    env._ENV_PATH.write_text("CHESS_SERVER_ADDR=box.local:9001\n", encoding="utf-8")
+
+    env.load()
+
+    assert env.get_server_mode() == "official"
+    assert env.get_server_addr() == env.official_server_addr()
+    contents = env._ENV_PATH.read_text(encoding="utf-8")
+    assert f"CHESS_SERVER_ADDR={env._PROD_SERVER_ADDR}" in contents
+    assert "box.local:9001" not in contents
+
+
+def test_load_re_resolves_when_the_persisted_mode_contradicts_the_active_key(monkeypatch):
+    """Same incoherence with the mode written explicitly (hand-edited .env, or a
+    file half-written by an older build): mode wins, the active key follows."""
+    monkeypatch.setattr("chessshootout.paths.is_frozen", lambda: False)
+    env._ENV_PATH.write_text(
+        "CHESS_SERVER_MODE=official\nCHESS_SERVER_ADDR=box.local:9001\n", encoding="utf-8")
+
+    env.load()
+
+    assert env.get_server_addr() == env.official_server_addr()
+
+
+def test_load_keeps_a_launch_time_server_addr_override(monkeypatch):
+    """CHESS_SERVER_ADDR=<host> in the launching environment is the documented
+    escape hatch and must win for that run: the re-resolve only corrects a value
+    that came out of the .env file, never one the process was started with."""
+    monkeypatch.setattr("chessshootout.paths.is_frozen", lambda: True)
+    monkeypatch.setenv("CHESS_SERVER_ADDR", "launch.local:9100")
+    env._ENV_PATH.write_text(
+        "CHESS_SERVER_MODE=official\nCHESS_SERVER_ADDR=box.local:9001\n", encoding="utf-8")
+
+    env.load()
+
+    assert env.get_server_addr() == "launch.local:9100"
+    assert "CHESS_SERVER_ADDR=box.local:9001" in env._ENV_PATH.read_text(encoding="utf-8")
+
+
+def test_load_leaves_a_coherent_env_file_untouched(caplog):
+    """The re-resolve is a repair, not a startup rewrite -- a file whose active
+    key already agrees with mode + custom must not be persisted again on every
+    launch."""
+    env._ENV_PATH.write_text(
+        "CHESS_SERVER_MODE=custom\nCHESS_CUSTOM_SERVER_ADDR=box.local:9001\n"
+        "CHESS_SERVER_ADDR=box.local:9001\n", encoding="utf-8")
+
+    with caplog.at_level(logging.INFO, logger="chess.env"):
+        env.load()
+
+    assert env.get_server_addr() == "box.local:9001"
+    assert not any("setting persisted" in r.getMessage() for r in caplog.records)
+
+
+def test_server_mode_and_custom_addr_round_trip_through_the_env_file(monkeypatch):
+    """Both new keys plus the resolved active address must survive a real reload
+    through python-dotenv, not just the os.environ writes the setters do."""
+    env.set_server_mode("custom")
+    env.set_custom_server_addr("box.local:9001")
+    for var in ("CHESS_SERVER_MODE", "CHESS_CUSTOM_SERVER_ADDR", "CHESS_SERVER_ADDR"):
+        monkeypatch.delenv(var, raising=False)
+    env.load()
+    assert env.get_server_mode() == "custom"
+    assert env.get_custom_server_addr() == "box.local:9001"
+    assert env.get_server_addr() == "box.local:9001"
+
+
+def test_custom_server_addr_persists_round_trip():
+    env.set_custom_server_addr("chess.example.com:9000")
+    assert env.get_custom_server_addr() == "chess.example.com:9000"
     assert env.get_server_addr() == "chess.example.com:9000"
-    assert "CHESS_SERVER_ADDR" in env._ENV_PATH.read_text(encoding="utf-8")
-
-
-def test_server_addr_strips_whitespace():
-    env.set_server_addr("  localhost:8000  ")
-    assert env.get_server_addr() == "localhost:8000"
-
-
-@pytest.mark.parametrize("blank", ["", "   "])
-def test_server_addr_blank_is_noop_keeps_default(blank):
-    env.set_server_addr(blank)
-    assert env.get_server_addr() == "localhost:8000"
+    contents = env._ENV_PATH.read_text(encoding="utf-8")
+    assert "CHESS_CUSTOM_SERVER_ADDR=chess.example.com:9000" in contents
+    assert "CHESS_SERVER_ADDR=chess.example.com:9000" in contents
 
 
 def test_server_addr_defaults_to_prod_when_frozen(monkeypatch):

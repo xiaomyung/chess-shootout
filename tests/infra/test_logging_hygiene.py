@@ -180,6 +180,7 @@ INFO_ALLOWLIST_PREFIXES = (
     "pygame init ok",
     "frontend ready",
     "setting persisted",
+    "server target set ",
     "screen switch",
     "menu view",
     "game start",
@@ -292,6 +293,36 @@ def test_scripted_local_session_info_lines_match_the_allowlist(
     ):
         assert any(m.startswith(expected_prefix) for m in messages), (
             f"expected story beat missing: {expected_prefix!r} not in {messages}")
+
+
+def test_an_options_pass_over_the_server_rows_emits_no_stray_info(monkeypatch, caplog):
+    """A full Options pass over the #89 server rows — enter, flip the mode
+    (the ONE new INFO line, a user action), let the reveal animate closed for
+    many frames, leave — must emit only allowlisted INFO. The reveal tick, the
+    probe status getters, and the exit-time probe reset all run in that window
+    and must stay silent."""
+    import pygame as pg
+
+    try:
+        app = _enter_options(make_app())
+        with caplog.at_level(logging.INFO):
+            app.settings._apply_server_mode("official")
+            app.coordinator._last_reconnect_probe_ms = pg.time.get_ticks()
+            for _ in range(40):
+                app.draw_frame()
+            app.menu.goto_view("play")
+
+        info_records = [r for r in caplog.records
+                        if r.name.startswith("chess.") and r.levelno == logging.INFO]
+        messages = [r.getMessage() for r in info_records]
+        unexpected = [f"{r.name}:{r.getMessage()}" for r in info_records
+                      if not r.getMessage().startswith(INFO_ALLOWLIST_PREFIXES)]
+        assert unexpected == [], f"unrecognized INFO lines leaking: {unexpected}"
+        assert any(m.startswith("server target set mode=official") for m in messages), \
+            "the mode switch is a documented story beat"
+    finally:
+        for var in ("CHESS_SERVER_MODE", "CHESS_CUSTOM_SERVER_ADDR", "CHESS_SERVER_ADDR"):
+            os.environ.pop(var, None)
 
 
 def _slice_function(path, name):

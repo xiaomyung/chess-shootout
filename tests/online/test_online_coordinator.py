@@ -578,6 +578,81 @@ def test_reconnect_delegates_to_the_probe_glue(monkeypatch):
     assert called == [True]
 
 
+def _pending_entry(addr="old.host:8000", room_id="room-1"):
+    return {"addr": addr, "room_id": room_id, "session_token": "tok"}
+
+
+def test_on_server_target_changed_drops_the_pending_reclaim_and_hides_the_button():
+    """A reclaim is only valid against the host it was probed on. Switching the
+    server target while one is pending left the menu offering Reconnect for the
+    OLD host -- clicking it resumed a game on a server the player just left."""
+    app = make_app(1000, 800)
+    app.coordinator._pending_reconnect = _pending_entry()
+    app.menu.set_reconnect_available(True)
+    assert app.menu.play_view.reconnect_available is True
+
+    app.coordinator.on_server_target_changed()
+
+    assert app.coordinator._pending_reconnect is None
+    assert app.coordinator.reconnect_available() is False
+    assert app.menu.play_view.reconnect_available is False
+
+
+def test_on_server_target_changed_discards_an_in_flight_probe_result(monkeypatch):
+    """The probe runs on a worker thread against the address captured at spawn
+    time, so clearing the pending entry is not enough -- a probe already talking
+    to the old host would land its reclaim a moment later. The generation bump
+    is what makes that late result unadoptable."""
+    monkeypatch.setattr(coordinator_module, "probe_active_game",
+                        lambda addr, uuid: {"room_id": "stale-room", "session_token": "tok"})
+    monkeypatch.setattr(coordinator_module, "fetch_resume",
+                        lambda addr, room, token: {"fen": ""})
+    app = make_app(1000, 800)
+    with app.coordinator._pending_reconnect_lock:
+        app.coordinator._reconnect_probe_gen += 1
+        spawn_gen = app.coordinator._reconnect_probe_gen
+
+    app.coordinator.on_server_target_changed()
+    app.coordinator._reconnect_probe_worker("old.host:8000", "uuid", spawn_gen)
+
+    assert app.coordinator._pending_reconnect is None
+    assert app.coordinator.reconnect_available() is False
+
+    app.coordinator._reconnect_probe_worker(
+        "new.host:8000", "uuid", app.coordinator._reconnect_probe_gen)
+    assert app.coordinator._pending_reconnect is not None
+
+
+def test_on_server_target_changed_reopens_probing_for_the_new_host():
+    """The attempt budget belongs to the host that burned it. An unreachable old
+    address that exhausted RECONNECT_PROBE_MAX_ATTEMPTS must not leave the new
+    target unprobed forever, so the counter and the interval gate both reset."""
+    app = make_app(1000, 800)
+    app.coordinator._reconnect_probe_attempts = coordinator_module.RECONNECT_PROBE_MAX_ATTEMPTS
+    app.coordinator._last_reconnect_probe_ms = pg.time.get_ticks()
+
+    app.coordinator.on_server_target_changed()
+
+    assert app.coordinator._reconnect_probe_attempts == 0
+    assert app.coordinator._last_reconnect_probe_ms == 0
+
+
+def test_on_server_target_changed_with_nothing_pending_is_a_safe_no_op(caplog):
+    """Every server-row edit calls this, and most of them happen with no reclaim
+    in sight -- it must stay silent and leave the button off."""
+    app = make_app(1000, 800)
+    assert app.coordinator._pending_reconnect is None
+
+    with caplog.at_level(logging.INFO, logger="chess.frontend"):
+        app.coordinator.on_server_target_changed()
+        app.coordinator.on_server_target_changed()
+
+    assert app.coordinator._pending_reconnect is None
+    assert app.coordinator.reconnect_available() is False
+    assert app.menu.play_view.reconnect_available is False
+    assert [r for r in caplog.records if r.name == "chess.frontend"] == []
+
+
 def test_coordinator_update_runs_before_screen_update(monkeypatch):
     app = start_single_screen(make_app(1000, 800))
     order = []

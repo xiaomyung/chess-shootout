@@ -19,8 +19,9 @@ import httpx
 import pytest
 
 from chessshootout.online.transport import (
-    FatalResumeError, NEWS_MAX_BYTES, ResponseTooLarge, SchemaVersionMismatch,
-    ServerTransport, ServerWebSocket, TransportError, TransportHTTPError, fetch_news,
+    FatalResumeError, HEALTHZ_TIMEOUT_SECONDS, HTTP_TIMEOUT_SECONDS, NEWS_MAX_BYTES,
+    RECLAIM_TIMEOUT_SECONDS, ResponseTooLarge, SchemaVersionMismatch, ServerTransport,
+    ServerWebSocket, TransportError, TransportHTTPError, fetch_news,
 )
 from chessshootout.server.protocol import (
     HealthResponse, MatchmakeRequest, MatchmakeResponse, PROTOCOL_VERSION,
@@ -277,6 +278,150 @@ async def test_healthz_async_returns_none_on_a_non_200():
         assert await st.healthz_async(http) is None
 
 
+class _RecordingHttp:
+    """Stands in for the httpx client so every kwarg _sync_request passes down is
+    observable. MockTransport can only be inspected through the Request it hands
+    the handler, and a Request has already lost the timeout."""
+
+    def __init__(self, response):
+        self.calls = []
+        self._response = response
+
+    def request(self, method, url, **kwargs):
+        self.calls.append({"method": method, "url": url, **kwargs})
+        return self._response
+
+
+def _health_body(**overrides):
+    body = {"status": "ok", "version": PROTOCOL_VERSION, "app_version": "2.12.1",
+            "rooms_active": 3, "queue_depth": 1, "uptime_s": 12.5}
+    body.update(overrides)
+    return body
+
+
+def test_healthz_blocking_returns_the_parsed_health_payload(captured):
+    transport = httpx.MockTransport(_make_handler(
+        status_code=200, body=_health_body(), capture=captured,
+    ))
+    with httpx.Client(transport=transport) as client:
+        st = ServerTransport("localhost:8000", http_client=client)
+        resp = st.healthz_blocking()
+    assert isinstance(resp, HealthResponse)
+    assert resp.version == PROTOCOL_VERSION
+    assert resp.app_version == "2.12.1"
+    assert resp.rooms_active == 3
+    assert captured[0]["method"] == "GET"
+    assert captured[0]["url"].endswith("/healthz")
+    assert captured[0]["json"] is None
+
+
+def test_healthz_blocking_returns_none_on_a_non_200():
+    transport = httpx.MockTransport(_make_handler(status_code=503, body={}))
+    with httpx.Client(transport=transport) as client:
+        st = ServerTransport("localhost:8000", http_client=client)
+        assert st.healthz_blocking() is None
+
+
+def test_healthz_blocking_returns_none_on_a_transport_error():
+    """Answering for an address that does not resolve is the whole point of the
+    blocking probe, so an unreachable host reads as None rather than raising on
+    the worker thread that called it."""
+    def boom(request):
+        raise httpx.ConnectError("nope")
+
+    with httpx.Client(transport=httpx.MockTransport(boom)) as client:
+        st = ServerTransport("localhost:8000", http_client=client)
+        assert st.healthz_blocking() is None
+
+
+@pytest.mark.parametrize("content", [
+    pytest.param(b"<html>502 Bad Gateway</html>", id="html_error_page"),
+    pytest.param(b"", id="empty_body"),
+    pytest.param(b'{"status": "ok", "version": NaN}', id="non_standard_constant"),
+    pytest.param(b'{"status": "ok"}', id="valid_json_wrong_shape"),
+])
+def test_healthz_blocking_returns_none_on_malformed_json(content):
+    """A captive portal or proxy that answers 200 with an error page is not a
+    healthy server; every unparseable shape has to collapse to the same None the
+    unreachable case returns, or the probe reports a mismatch against garbage."""
+    def handler(request):
+        return httpx.Response(200, content=content,
+                              headers={"content-type": "application/json"})
+
+    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+        st = ServerTransport("localhost:8000", http_client=client)
+        assert st.healthz_blocking() is None
+
+
+@pytest.mark.parametrize("addr", [
+    pytest.param("éxàmple..com", id="invalid_idna_hostname"),
+    pytest.param("a" * 70 + ".com", id="dns_label_over_63_chars"),
+])
+def test_blocking_requests_degrade_to_none_for_a_hostname_httpx_cannot_send_to(addr):
+    """httpx.InvalidURL is not an HTTPError subclass, and the idna codec raises
+    a bare UnicodeError out of getaddrinfo for a label past 63 chars -- both
+    before any packet is sent. _sync_request converts them to TransportError so
+    every blocking caller collapses them to the same None as an unreachable
+    host instead of letting a daemon worker die on an unhandled traceback."""
+    st = ServerTransport(addr)
+    assert st.healthz_blocking() is None
+    assert st.reclaim_blocking(ALICE) is None
+
+
+def test_healthz_blocking_leaves_a_missing_version_detectable():
+    """A /healthz body with no "version" key still validates -- the model's
+    PROTOCOL_VERSION default keeps every other HealthResponse consumer working
+    unchanged -- but model_fields_set records that the key was absent from the
+    raw payload. That is the seam probe_server_health reads to report
+    version=None instead of masking an unknown server as a protocol match."""
+    body = _health_body()
+    del body["version"]
+    transport = httpx.MockTransport(_make_handler(status_code=200, body=body))
+    with httpx.Client(transport=transport) as client:
+        st = ServerTransport("localhost:8000", http_client=client)
+        resp = st.healthz_blocking()
+    assert resp is not None
+    assert resp.version == PROTOCOL_VERSION
+    assert "version" not in resp.model_fields_set
+
+
+def test_healthz_blocking_passes_the_timeout_through():
+    """The probe runs on a worker thread with no cancellation path, so the caller's
+    timeout has to reach httpx -- otherwise the thread hangs on the default."""
+    http = _RecordingHttp(httpx.Response(200, json=_health_body()))
+    st = ServerTransport("localhost:8000", http_client=http)
+    assert st.healthz_blocking(timeout=0.25) is not None
+    assert http.calls[0]["timeout"] == 0.25
+    st.healthz_blocking()
+    assert http.calls[1]["timeout"] == HEALTHZ_TIMEOUT_SECONDS
+
+
+def test_reclaim_and_resume_still_route_through_the_shared_blocking_request(monkeypatch):
+    """reclaim/resume/healthz share one request+parse implementation. If a later
+    edit gives any of them a private copy, the degrade-to-None contract has to be
+    re-proved for it; this pins the routing and each path's timeout."""
+    seen = []
+
+    def record(self, method, path, response_model, timeout, json_body=None):
+        seen.append((method, path, response_model, timeout, json_body))
+        return None
+
+    monkeypatch.setattr(ServerTransport, "_blocking_request", record)
+    st = ServerTransport("localhost:8000")
+    st.reclaim_blocking(ALICE)
+    st.resume_blocking(fake_uuid4(50), "tok-99")
+    st.healthz_blocking()
+    assert [(call[0], call[1]) for call in seen] == [
+        ("POST", "/reclaim"), ("POST", "/resume"), ("GET", "/healthz"),
+    ]
+    assert [call[3] for call in seen] == [
+        RECLAIM_TIMEOUT_SECONDS, HTTP_TIMEOUT_SECONDS, HEALTHZ_TIMEOUT_SECONDS,
+    ]
+    assert seen[0][4]["client_uuid"] == ALICE
+    assert seen[1][4]["session_token"] == "tok-99"
+    assert seen[2][4] is None
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize("content", [
     pytest.param(b"<html>429 Too Many Requests</html>", id="html_error_page"),
@@ -325,7 +470,7 @@ async def test_error_reason_reads_a_plain_string_detail():
     pytest.param(b'{"room_id": "r-1"}', id="valid_json_missing_a_required_field"),
     pytest.param(b'["r-1", "tok"]', id="json_list_not_an_object"),
 ])
-def test_blocking_post_returns_none_on_a_body_it_cannot_parse(content):
+def test_blocking_request_returns_none_on_a_body_it_cannot_parse(content):
     """A 200 that is not the model is indistinguishable from no answer at all --
     reclaim_blocking runs on the startup path, so it must degrade to "no session
     to reclaim" rather than propagate a decode error into the menu."""

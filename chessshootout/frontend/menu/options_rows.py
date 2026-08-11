@@ -52,6 +52,14 @@ BTN_GAP = 8
 RESET_PAD_X = 10
 FIELD_LEFT_FRAC = 0.40
 
+REVEAL_LERP = 0.24
+REVEAL_SNAP_EPS = 0.01
+
+ACTION_STATUS_GAP = 12
+ACTION_MIN_LABEL_W = 120
+
+_STATUS_TONES = {"ok": Colors.win, "warn": Colors.loss, "idle": Colors.text_muted}
+
 
 class Fonts:
     __slots__ = ("title", "desc", "section", "value", "button")
@@ -99,6 +107,12 @@ class _Row:
         self.title = title
         self.desc = desc
 
+    def tick(self):
+        pass
+
+    def animating(self):
+        return False
+
     def _control_h(self, fonts):
         return 0
 
@@ -110,6 +124,9 @@ class _Row:
 
     def height(self, fonts):
         return 2 * ROW_PAD_Y + max(self._label_h(fonts), self._control_h(fonts))
+
+    def full_height(self, fonts):
+        return self.height(fonts)
 
     def draw(self, window, rect, fonts):
         control_left = self._draw_control(window, rect, fonts)
@@ -364,7 +381,7 @@ class PathRow(_Row):
         path_surf = self._rest_cache[1]
         total = path_surf.get_width() + suffix_w
         prev = window.get_clip()
-        window.set_clip(fr.clip(prev) if prev is not None else fr)
+        window.set_clip(fr.clip(prev))
         x = fr.right - total
         window.blit(path_surf, (x, fr.centery - path_surf.get_height() // 2))
         if suffix_surf:
@@ -467,6 +484,117 @@ class TextRow(_Row):
         return True
 
 
+class RevealRow(_Row):
+
+    def __init__(self, inner, visible_getter):
+        super().__init__(inner.title, inner.desc)
+        self.inner = inner
+        self.visible_getter = visible_getter
+        self._t = 1.0 if visible_getter() else 0.0
+        self._collapse_cancelled = self._t == 0.0
+        self._rect = pg.Rect(0, 0, 0, 0)
+
+    def tick(self):
+        visible = self.visible_getter()
+        if visible:
+            self._collapse_cancelled = False
+        elif not self._collapse_cancelled:
+            self._collapse_cancelled = True
+            self.inner.cancel_edit()
+        target = 1.0 if visible else 0.0
+        if abs(self._t - target) < REVEAL_SNAP_EPS:
+            self._t = target
+        else:
+            self._t += (target - self._t) * REVEAL_LERP
+
+    def animating(self):
+        return 0.0 < self._t < 1.0
+
+    def height(self, fonts):
+        return int(round(self.inner.height(fonts) * self._t))
+
+    def full_height(self, fonts):
+        return self.inner.height(fonts)
+
+    def draw(self, window, rect, fonts):
+        self._rect = pg.Rect(rect)
+        full_h = self.inner.height(fonts)
+        prev = window.get_clip()
+        window.set_clip(rect.clip(prev))
+        self.inner.draw(window, pg.Rect(rect.x, rect.centery - full_h // 2,
+                                        rect.width, full_h), fonts)
+        window.set_clip(prev)
+
+    def _live(self, pos):
+        return self._t > 0.0 and self._rect.collidepoint(pos)
+
+    def handle_click(self, pos):
+        if self._live(pos):
+            return self.inner.handle_click(pos)
+        if self._t > 0.0 and not self.inner.contains_control(pos):
+            self.inner.handle_click(pos)
+        return False
+
+    def contains_control(self, pos):
+        return self.inner.contains_control(pos) if self._live(pos) else False
+
+    def handle_key(self, event):
+        return self.inner.handle_key(event) if self.visible_getter() else False
+
+    def cancel_edit(self):
+        return self.inner.cancel_edit() if self._t > 0.0 else False
+
+
+class ActionRow(_Row):
+
+    def __init__(self, title, desc, button_label_getter, on_press, status_getter):
+        super().__init__(title, desc)
+        self.button_label_getter = button_label_getter
+        self.on_press = on_press
+        self.status_getter = status_getter
+        self._button_rect = pg.Rect(0, 0, 0, 0)
+        self._status_cache = None
+
+    def _control_h(self, fonts):
+        return FIELD_H
+
+    def _draw_control(self, window, rect, fonts):
+        y = rect.centery - FIELD_H // 2
+        label = self.button_label_getter()
+        btn_w = fonts.button.size(label)[0] + 2 * BTN_PAD_X
+        self._button_rect = pg.Rect(rect.right - btn_w, y, btn_w, FIELD_H)
+        window.blit(cut_rect_surface(self._button_rect.size, 6, Colors.surface_raised,
+                                     border=Colors.border, border_width=1, corners=("tr",)),
+                    self._button_rect.topleft)
+        bt = render_text(fonts.button, label, Colors.text)
+        window.blit(bt, (self._button_rect.centerx - bt.get_width() // 2,
+                         self._button_rect.centery - bt.get_height() // 2))
+        tone, text = self.status_getter()
+        left = self._button_rect.x
+        avail = self._button_rect.x - ACTION_STATUS_GAP \
+            - (rect.x + ACTION_MIN_LABEL_W + CONTROL_GAP)
+        if text and avail > 0:
+            key = (id(fonts.value), tone, text, avail)
+            if self._status_cache is None or self._status_cache[0] != key:
+                shown = _elide_left(fonts.value, text, avail)
+                self._status_cache = (key, render_text(fonts.value, shown,
+                                                       _STATUS_TONES[tone]))
+            surf = self._status_cache[1]
+            left = self._button_rect.x - ACTION_STATUS_GAP - surf.get_width()
+            _blit_clip(window, surf, (max(left, rect.x), rect.centery - surf.get_height() // 2),
+                       avail)
+        return int(left)
+
+    def handle_click(self, pos):
+        if self._button_rect.collidepoint(pos):
+            self.on_press()
+            return True
+        return False
+
+    def contains_control(self, pos):
+        return self._button_rect.collidepoint(pos)
+
+
 class OptionsBody(ScrollHost):
 
     def __init__(self):
@@ -512,20 +640,33 @@ class OptionsBody(ScrollHost):
         self.scroll.draw_thumb(window)
 
     def _draw_card(self, window, x, y, card_w, rows, fonts):
+        for row in rows:
+            row.tick()
         heights = [row.height(fonts) for row in rows]
         card = pg.Rect(x, round(y), card_w, sum(heights))
         self._card_rects.append(card)
-        window.blit(cut_rect_surface(card.size, CARD_CUT, Colors.surface, border=Colors.border,
-                                     border_width=1, corners=("tr",)), card.topleft)
+        bg_h = card.height
+        if any(row.animating() for row in rows):
+            bg_h = sum(row.full_height(fonts) for row in rows)
+        bg = cut_rect_surface((card_w, bg_h), CARD_CUT, Colors.surface, border=Colors.border,
+                              border_width=1, corners=("tr",))
+        if bg_h == card.height:
+            window.blit(bg, card.topleft)
+        else:
+            window.blit(bg, card.topleft, pg.Rect(0, 0, card.width, card.height))
         content_x = card.x + CARD_PAD_X
         content_w = card.width - 2 * CARD_PAD_X
         ry = y
-        for i, (row, h) in enumerate(zip(rows, heights)):
-            if i > 0:
+        drawn_any = False
+        for row, h in zip(rows, heights):
+            if h <= 0:
+                continue
+            if drawn_any:
                 pg.draw.line(window, pg.Color(Colors.border), (content_x, round(ry)),
                              (content_x + content_w, round(ry)))
             row.draw(window, pg.Rect(content_x, round(ry), content_w, h), fonts)
             ry += h
+            drawn_any = True
         return card.bottom
 
     def _max_scroll(self):

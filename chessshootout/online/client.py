@@ -9,8 +9,8 @@ from dataclasses import dataclass
 from chessshootout import paths
 from chessshootout.infra import crash_log
 from chessshootout.online.transport import (
-    FatalResumeError, ServerTransport, TransportError, TransportHTTPError,
-    SchemaVersionMismatch, WsConnectionClosed,
+    FatalResumeError, HEALTHZ_TIMEOUT_SECONDS, ServerTransport, TransportError,
+    TransportHTTPError, SchemaVersionMismatch, WsConnectionClosed,
 )
 from chessshootout.server.protocol import (
     CancelMatchmakeRequest, GRACE_SECONDS, HEARTBEAT_INTERVAL_SECONDS,
@@ -52,6 +52,22 @@ def probe_active_game(addr, client_uuid, timeout=2.0):
     if response is None:
         return None
     return response.model_dump(by_alias=True)
+
+
+def probe_server_health(addr, timeout=HEALTHZ_TIMEOUT_SECONDS):
+    if not addr:
+        return None
+    try:
+        transport = ServerTransport(addr)
+    except TransportError:
+        return None
+    response = transport.healthz_blocking(timeout=timeout)
+    if response is None:
+        return None
+    payload = response.model_dump()
+    if "version" not in response.model_fields_set:
+        payload["version"] = None
+    return payload
 
 
 def fetch_resume(addr, room_id, session_token):

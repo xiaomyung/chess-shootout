@@ -1,17 +1,28 @@
+import logging
 import os
 import shutil
+import threading
+import time
 
 import pygame as pg
 
 from chessshootout import paths
 from chessshootout.infra import env
+from chessshootout.online.client import probe_server_health
+from chessshootout.server.protocol import PROTOCOL_VERSION
 from chessshootout.frontend.game.variant import Variant
 from chessshootout.frontend.menu.options_rows import (
-    PathRow, TextRow, ToggleRow, NotchRow, SegmentedRow,
+    ActionRow, PathRow, RevealRow, TextRow, ToggleRow, NotchRow, SegmentedRow,
 )
 
 
+log = logging.getLogger("chess.settings")
+
 SETTINGS_WRITE_DELAY_MS = 400
+SERVER_PROBE_TIMEOUT_S = 3.0
+SERVER_PROBE_BUTTON_IDLE = "Test"
+SERVER_PROBE_BUTTON_PENDING = "Testing…"
+SERVER_SWITCH_BLOCKED_MESSAGE = "Leave the online session to switch servers"
 
 
 class SettingsController:
@@ -20,20 +31,115 @@ class SettingsController:
         self.frontend = frontend
         self._deferred_env_writes = {}
         self._data_folder_row = None
-        self._server_addr_row = None
+        self._custom_server_row = None
+        self._server_probe_lock = threading.Lock()
+        self._server_probe_pending = False
+        self._server_probe_result = None
+        self._server_probe_gen = 0
 
     def commit_options_exit(self):
         self._validate_data_folder_on_exit()
-        if self._server_addr_row is not None:
-            self._commit_server_addr(self._server_addr_row.current_text())
+        if self._custom_server_row is not None:
+            self._commit_custom_server_addr(self._custom_server_row.current_text())
+        self._reset_connection_probe()
         self.frontend.menu.apply_default_time_settings()
         self._flush_deferred_env_writes(force=True)
 
-    def _commit_server_addr(self, typed):
-        if not typed or typed == env.get_server_addr():
+    def _online_session_active(self):
+        return self.frontend.coordinator.is_connected()
+
+    def _apply_server_mode(self, mode):
+        if mode == env.get_server_mode():
             return
-        env.set_server_addr(typed)
-        self.frontend.toast.show("Server set to {}".format(env.get_server_addr()))
+        if self._online_session_active():
+            self.frontend.toast.show(SERVER_SWITCH_BLOCKED_MESSAGE)
+            return
+        env.set_server_mode(mode)
+        self._reset_connection_probe()
+        self.frontend.coordinator.on_server_target_changed()
+        log.info("server target set mode=%s addr=%s", mode, env.get_server_addr())
+
+    def _commit_custom_server_addr(self, typed):
+        if not typed or typed == env.get_custom_server_addr():
+            return
+        if self._online_session_active():
+            self.frontend.toast.show(SERVER_SWITCH_BLOCKED_MESSAGE)
+            return
+        env.set_custom_server_addr(typed)
+        self._reset_connection_probe()
+        self.frontend.coordinator.on_server_target_changed()
+        log.info("server target set mode=%s addr=%s", env.get_server_mode(),
+                 env.get_server_addr())
+        if env.get_server_mode() == "custom":
+            self.frontend.toast.show("Server set to {}".format(env.get_server_addr()))
+
+    def _on_test_server(self):
+        with self._server_probe_lock:
+            if self._server_probe_pending:
+                return
+            self._server_probe_gen += 1
+            gen = self._server_probe_gen
+            self._server_probe_pending = True
+            self._server_probe_result = None
+        addr = self._probe_target_addr()
+        threading.Thread(target=self._server_probe_worker, args=(addr, gen),
+                         daemon=True).start()
+
+    def _probe_target_addr(self):
+        if env.get_server_mode() != "custom":
+            return env.get_server_addr()
+        if self._custom_server_row is None:
+            return env.get_custom_server_addr()
+        return self._custom_server_row.current_text() or env.get_custom_server_addr()
+
+    def _server_probe_worker(self, addr, gen):
+        try:
+            started = time.monotonic()
+            health = probe_server_health(addr, timeout=SERVER_PROBE_TIMEOUT_S)
+            latency_ms = int((time.monotonic() - started) * 1000)
+            outcome = self._describe_health(health, latency_ms)
+            with self._server_probe_lock:
+                if gen != self._server_probe_gen:
+                    return
+                self._server_probe_result = (addr, outcome)
+            log.debug("server probe addr=%s outcome=%s", addr, outcome[1])
+        finally:
+            with self._server_probe_lock:
+                if gen == self._server_probe_gen:
+                    self._server_probe_pending = False
+
+    def _describe_health(self, health, latency_ms):
+        if health is None:
+            return ("warn", "Unreachable")
+        version = health.get("version")
+        if version != PROTOCOL_VERSION:
+            return ("warn", "Protocol mismatch: server v{} ≠ client v{}".format(
+                "?" if version is None else version, PROTOCOL_VERSION))
+        app_version = health.get("app_version") or ""
+        suffix = " · v{}".format(app_version) if app_version else ""
+        return ("ok", "OK · {} ms{}".format(latency_ms, suffix))
+
+    def _probe_button_label(self):
+        with self._server_probe_lock:
+            pending = self._server_probe_pending
+        return SERVER_PROBE_BUTTON_PENDING if pending else SERVER_PROBE_BUTTON_IDLE
+
+    def _probe_status(self):
+        with self._server_probe_lock:
+            pending = self._server_probe_pending
+            probed = self._server_probe_result
+        if pending or probed is None:
+            return ("idle", "")
+        addr, outcome = probed
+        if addr != self._probe_target_addr():
+            return ("idle", "")
+        return outcome
+
+    def _reset_connection_probe(self):
+        with self._server_probe_lock:
+            self._server_probe_gen += 1
+            self._server_probe_pending = False
+            self._server_probe_result = None
 
     def _validate_data_folder_on_exit(self):
         if self._data_folder_row is None:
@@ -94,10 +200,10 @@ class SettingsController:
             lambda: str(paths.get_data_dir()),
             self._on_change_data_folder, self._on_reset_data_folder,
             suffix="/" + paths.GAMES_SUBDIR)
-        self._server_addr_row = TextRow(
-            "Server", "Where online games connect and reconnect",
-            window, env.get_server_addr, placeholder="host or host:port",
-            on_commit=self._commit_server_addr)
+        self._custom_server_row = TextRow(
+            "Custom address", "Host or host:port of the server you run",
+            window, env.get_custom_server_addr, placeholder="host or host:port",
+            on_commit=self._commit_custom_server_addr)
         time_options = [(label, label) for label in env.TIME_CONTROL_VALUES]
         incr_options = [(label, label) for label in env.INCREMENT_VALUES]
         return [
@@ -141,7 +247,14 @@ class SettingsController:
                 self._data_folder_row,
             ]),
             ("Online", [
-                self._server_addr_row,
+                SegmentedRow("Server", "Official servers, or your own address",
+                             [("Official", "official"), ("Custom", "custom")],
+                             env.get_server_mode, self._apply_server_mode),
+                RevealRow(self._custom_server_row,
+                          lambda: env.get_server_mode() == "custom"),
+                ActionRow("Connection", "Check the server answers before you queue",
+                          self._probe_button_label, self._on_test_server,
+                          self._probe_status),
                 ToggleRow("Hide opponent's marks",
                           "Never show the arrows and highlights they share",
                           env.get_hide_opp_marks, self.apply_hide_opp_marks),

@@ -894,6 +894,17 @@ class OnlineCoordinator:
             self._spawn_reconnect_probe()
         self.app.menu.set_reconnect_available(self.reconnect_available())
 
+    def on_server_target_changed(self):
+        with self._pending_reconnect_lock:
+            self._reconnect_probe_gen += 1
+            dropped = self._pending_reconnect
+            self._pending_reconnect = None
+        self._reconnect_probe_attempts = 0
+        self._last_reconnect_probe_ms = 0
+        self.app.menu.set_reconnect_available(False)
+        if dropped is not None:
+            log.info("reclaim dropped: server target changed")
+
     def reconnect_available(self):
         with self._pending_reconnect_lock:
             return self._pending_reconnect is not None

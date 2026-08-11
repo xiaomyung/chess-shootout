@@ -13,6 +13,7 @@ from chessshootout.infra import countries
 log = logging.getLogger("chess.env")
 
 _KEY_LINE_RE = re.compile(r"^([A-Za-z_][A-Za-z0-9_]*)\s*=(.*)$")
+_CONTROL_CHAR_RE = re.compile(r"[\x00-\x1f\x7f]")
 _ATOMIC_WRITE_RETRIES = 5
 _ATOMIC_WRITE_BACKOFF_S = 0.03
 _LINE_BREAK_CHARS = ("\r", "\n")
@@ -20,6 +21,7 @@ _LINE_BREAK_CHARS = ("\r", "\n")
 
 _DEV_SERVER_ADDR = "localhost:8000"
 _PROD_SERVER_ADDR = "server.chess-shootout.com"
+_SERVER_MODE_VALUES = ("official", "custom")
 _DEFAULT_NEWS_URL = "https://xiaomyung.github.io/chess-shootout/news.json"
 _DEFAULT_MASTER_VOLUME = 0.70
 _DEFAULT_MENU_VOLUME = 0.10
@@ -46,8 +48,14 @@ def init_paths():
 
 
 def load():
-    if _ENV_PATH.exists():
-        load_dotenv(_ENV_PATH, override=False)
+    if not _ENV_PATH.exists():
+        return
+    launch_server_addr = os.environ.get("CHESS_SERVER_ADDR")
+    load_dotenv(_ENV_PATH, override=False)
+    if launch_server_addr:
+        return
+    if os.environ.get("CHESS_SERVER_ADDR") != _resolved_server_addr():
+        _apply_resolved_server_addr()
 
 
 def set_overrides(*, client_uuid=None, nickname=None):
@@ -78,12 +86,60 @@ def get_server_addr():
     return os.environ.get("CHESS_SERVER_ADDR") or _default_server_addr()
 
 
-def set_server_addr(value):
+def official_server_addr():
+    return _PROD_SERVER_ADDR
+
+
+def _default_server_mode():
+    return "official" if paths.is_frozen() else "custom"
+
+
+def get_server_mode():
+    return _get_enum("CHESS_SERVER_MODE", _SERVER_MODE_VALUES, _default_server_mode())
+
+
+def set_server_mode(value):
+    _set_enum("CHESS_SERVER_MODE", value, _SERVER_MODE_VALUES, _default_server_mode())
+    _apply_resolved_server_addr()
+
+
+def _clean_server_addr(value):
+    value = (value or "").strip()
+    return "" if _CONTROL_CHAR_RE.search(value) else value
+
+
+def get_custom_server_addr():
+    stored = _clean_server_addr(os.environ.get("CHESS_CUSTOM_SERVER_ADDR"))
+    if stored:
+        return stored
+    active = _clean_server_addr(os.environ.get("CHESS_SERVER_ADDR"))
+    if active and active != _PROD_SERVER_ADDR:
+        return active
+    return _DEV_SERVER_ADDR
+
+
+def set_custom_server_addr(value):
     value = (value or "").strip()
     if not value:
         return
-    os.environ["CHESS_SERVER_ADDR"] = value
-    _persist("CHESS_SERVER_ADDR", value)
+    if _CONTROL_CHAR_RE.search(value):
+        log.warning("refusing custom server address: value contains control characters")
+        return
+    os.environ["CHESS_CUSTOM_SERVER_ADDR"] = value
+    _persist("CHESS_CUSTOM_SERVER_ADDR", value)
+    if get_server_mode() == "custom":
+        _apply_resolved_server_addr()
+
+
+def _resolved_server_addr():
+    return (official_server_addr() if get_server_mode() == "official"
+            else get_custom_server_addr())
+
+
+def _apply_resolved_server_addr():
+    resolved = _resolved_server_addr()
+    os.environ["CHESS_SERVER_ADDR"] = resolved
+    _persist("CHESS_SERVER_ADDR", resolved)
 
 
 def get_news_url():

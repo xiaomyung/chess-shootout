@@ -4,6 +4,7 @@ actually starts a game in-process; bot returns early and online connects directl
 the configured server (address lives in Settings — no modal), so neither builds a
 clock or leaves the "menu" mode until the server confirms the game."""
 
+import os
 import random
 
 import pytest
@@ -35,6 +36,20 @@ def _online_payload(**overrides):
 
 
 _pygame_init = pygame_display(1000, 800)
+
+_SERVER_TARGET_VARS = ("CHESS_SERVER_MODE", "CHESS_CUSTOM_SERVER_ADDR", "CHESS_SERVER_ADDR")
+
+
+@pytest.fixture(autouse=True)
+def _isolate_server_target_env(monkeypatch):
+    """env.set_server_mode/set_custom_server_addr write os.environ directly (not
+    via monkeypatch), so the official-mode test would otherwise leak the resolved
+    production address into every later test in the worker."""
+    for var in _SERVER_TARGET_VARS:
+        monkeypatch.delenv(var, raising=False)
+    yield
+    for var in _SERVER_TARGET_VARS:
+        os.environ.pop(var, None)
 
 
 def base_config(**overrides):
@@ -483,16 +498,31 @@ def test_start_game_persists_nickname(monkeypatch, mode_value):
     assert saved == ["Hikaru"]
 
 
-def test_settings_close_persists_server_address(monkeypatch):
-    """Editing the Options server field and leaving the view persists it via
-    env, so the next matchmake + reconnect probe target the last-used server."""
+def test_settings_close_persists_the_custom_server_address(monkeypatch):
+    """Editing the Options custom-address field and leaving the view persists it
+    via env, so the next matchmake + reconnect probe target the last-used
+    server."""
     app = make_app()
     saved = []
-    monkeypatch.setattr(env, "set_server_addr", lambda v: saved.append(v))
+    monkeypatch.setattr(env, "set_custom_server_addr", lambda v: saved.append(v))
     app.menu.goto_view("options")
-    app.settings._server_addr_row.input.text = "chess.example.com:9000"
+    app.settings._custom_server_row.input.text = "chess.example.com:9000"
     app.menu.goto_view("play")
     assert saved == ["chess.example.com:9000"]
+
+
+def test_online_connect_uses_the_official_address_in_official_mode(monkeypatch):
+    """Official mode rewrites the resolved active address at set-time, so
+    matchmaking connects to the production host no matter what custom address
+    is stored."""
+    env.set_custom_server_addr("10.0.0.5:9000")
+    env.set_server_mode("official")
+    app = make_app()
+    connected = []
+    monkeypatch.setattr(OnlineClient, "connect",
+                        lambda self, addr, request: connected.append(addr))
+    app._on_start_game(base_config(mode="online"))
+    assert connected == [env.official_server_addr()]
 
 
 def test_first_run_profile_hint_toasts_once_when_the_flag_is_unset(monkeypatch):
