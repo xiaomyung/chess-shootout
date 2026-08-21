@@ -1,4 +1,6 @@
+import ast
 from collections import Counter
+from pathlib import Path
 
 from chessshootout.backend.backend import Backend, DEFAULT_CASTLING_RIGHTS
 from chessshootout.backend.utils import Square, Move, HistoryEntry
@@ -283,6 +285,32 @@ def write_pgn_fixture(tmp_path, name, white, black, result, moves="1. e4 e5"):
         f'[White "{white}"]\n[Black "{black}"]\n[Result "{result}"]\n\n{moves} {result}\n',
         encoding="utf-8")
     return path
+
+
+def read_source_without_docstrings(path: str | Path) -> str:
+    """
+    Read a Python source file with every inert prose statement blanked.
+    Parses the file and erases the lines of every expression statement
+    whose value is a plain string constant -- module, class, and def
+    docstrings plus bare attribute docstrings -- replacing them with
+    empty lines so every surviving line keeps its original line number.
+    Real code, including string literals used as values, is untouched.
+    Guard tests that scan source text call this instead of read_text()
+    so prose can never trip a code-shape tripwire
+
+    :param path: path to the .py file to read
+    :returns: the docstring-blind source text, line count preserved
+    """
+    source = Path(path).read_text(encoding="utf-8")
+    lines = source.splitlines()
+    tree = ast.parse(source, filename=str(path))
+    for node in ast.walk(tree):
+        if (isinstance(node, ast.Expr)
+                and isinstance(node.value, ast.Constant)
+                and isinstance(node.value.value, str)):
+            for i in range(node.lineno - 1, node.end_lineno):
+                lines[i] = ""
+    return "\n".join(lines) + "\n"
 
 
 def online_start_payload(**overrides):

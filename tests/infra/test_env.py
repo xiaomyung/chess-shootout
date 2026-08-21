@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 
 from chessshootout.infra import env
+from tests.helpers import read_source_without_docstrings
 
 
 _ISOLATED_VARS = (
@@ -908,8 +909,7 @@ def test_env_default_path_derives_from_config_dir_not_file():
     """Regression (package consolidation): env.py lives at chessshootout/infra/,
     so a Path(__file__)-relative default resolves inside the package and drops a
     stray chessshootout/.env. The default must derive from get_config_dir()."""
-    import pathlib
-    src = pathlib.Path(env.__file__).read_text(encoding="utf-8")
+    src = read_source_without_docstrings(env.__file__)
     assert "get_config_dir()" in src
     assert "Path(__file__)" not in src
 
@@ -1046,7 +1046,7 @@ def _client_chess_env_keys():
     for path in _SRC_ROOT.rglob("*.py"):
         if "server" in path.relative_to(_SRC_ROOT).parts:
             continue
-        keys.update(_CHESS_KEY_RE.findall(path.read_text(encoding="utf-8")))
+        keys.update(_CHESS_KEY_RE.findall(read_source_without_docstrings(path)))
     return keys
 
 

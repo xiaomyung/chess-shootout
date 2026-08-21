@@ -1,10 +1,10 @@
 import os
-import pathlib
 
 import pygame as pg
 import pytest
 
 from tests.conftest import pygame_display
+from tests.helpers import read_source_without_docstrings
 from chessshootout.backend.pieces import PieceColor, PieceType
 from chessshootout.paths import PIECES_PNG_DIR
 from chessshootout.frontend.visual import fonts
@@ -106,7 +106,7 @@ def test_fonts_are_not_cached():
 
 
 def test_fonts_py_has_no_cache_decorator():
-    src = pathlib.Path(fonts.__file__).read_text(encoding="utf-8")
+    src = read_source_without_docstrings(fonts.__file__)
     assert "lru_cache" not in src and "@cache" not in src
 
 

@@ -28,8 +28,11 @@ pygame/frontend guard in tests/infra/test_server_no_pygame.py, just walking
 
 import ast
 import os
+import re
 
 import chessshootout
+
+from tests.helpers import read_source_without_docstrings
 
 
 PACKAGE_ROOT = os.path.dirname(os.path.abspath(chessshootout.__file__))
@@ -193,12 +196,26 @@ def test_chessshootout_frontend_has_no_import_cycles():
 INPUT_ROUTER_FORBIDDEN_TOKENS = ("board", "right_menu", "result_menu", "skillcheck", "focus_")
 
 
+def _forbidden_token_pattern(token):
+    """Identifier-boundary match, not a bare substring: `keyboard` must not read as
+    `board`. Only letters and digits block a match -- underscores deliberately do
+    not, so `board_rect`, `self.board` and `right_menu` still count as reaching
+    into a screen's internals. A token spelled with a trailing underscore
+    (`focus_`) stays a prefix match, since that is how the family is named."""
+    tail = "" if token.endswith("_") else r"(?![A-Za-z0-9])"
+    return re.compile(r"(?<![A-Za-z0-9])" + re.escape(token) + tail)
+
+
 def test_input_router_has_no_game_specific_identifiers():
     path = os.path.join(FRONTEND_ROOT, "input_router.py")
     assert os.path.isfile(path), f"expected {path} to exist"
-    with open(path, encoding="utf-8") as f:
-        source = f.read()
-    offenders = [token for token in INPUT_ROUTER_FORBIDDEN_TOKENS if token in source]
+    source = read_source_without_docstrings(path)
+    offenders = []
+    for token in INPUT_ROUTER_FORBIDDEN_TOKENS:
+        match = _forbidden_token_pattern(token).search(source)
+        if match is not None:
+            line_no = source.count("\n", 0, match.start()) + 1
+            offenders.append(f"{token} (line {line_no})")
     assert offenders == [], (
         f"input_router.py must dispatch through the Screen contract only, "
         f"never reach into a screen's internals by name: found {offenders}"
