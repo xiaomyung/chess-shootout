@@ -2,16 +2,20 @@ import asyncio
 import json
 import secrets
 import time
+from collections.abc import Callable, Iterable
+from typing import Any, Literal
 
+from fastapi import FastAPI, WebSocket
 from pydantic import ValidationError
 
+from chessshootout.backend.clock import Clock
 from chessshootout.backend.fen import export_fen
 from chessshootout.backend.pieces import PieceColor
 from chessshootout.backend.utils import (
-    PROMO_TYPE_BY_LETTER, coord_from_square, square_from_coord,
+    PROMO_TYPE_BY_LETTER, Square, coord_from_square, square_from_coord,
 )
 from chessshootout.server import logging_setup
-from chessshootout.server.connections import broadcast, send
+from chessshootout.server.connections import ConnectionRegistry, broadcast, send
 from chessshootout.server.broadcasts import (
     broadcast_game_start, finalize_and_broadcast, push_idle_window,
     resolve_skillcheck_fail)
@@ -32,11 +36,11 @@ from chessshootout.server.protocol import (
 )
 from chessshootout.server.moderation import detector
 from chessshootout.server.moderation.load import ModerationLoad
-from chessshootout.server.rooms import PendingSkillCheck
+from chessshootout.server.rooms import PendingSkillCheck, Room, SharedAnnotations
 from chessshootout.server.sweep import RESULT_REASON_BY_GAME_RESULT
 from chessshootout.skillcheck import mole, online
 from chessshootout.skillcheck.triggers import compute_facts
-from chessshootout.skillcheck.types import SkillCheckKind, SkillCheckOutcome
+from chessshootout.skillcheck.types import SkillCheckKind, SkillCheckOutcome, TriggerFacts
 
 
 log = logging_setup.get_logger("chess.server.app")
@@ -57,11 +61,31 @@ IDLE_ACTIVITY_TYPES = frozenset({
 
 
 class _ResyncGate:
+    """
+    Debounce for the desync repair traffic, keyed by room, colour and which
+    kind of repair it is. A heartbeat arrives every couple of seconds, so
+    without this a board that has fallen behind would earn its opponent a
+    notification and itself an order to refetch on every single ping
+    """
 
-    def __init__(self):
-        self._open_at = {}
+    def __init__(self) -> None:
+        """
+        Start with every gate open, so the first event of each kind fires
+        immediately and the debounce only bites on repeats
+        """
+        self._open_at: dict[tuple[str, str, str], float] = {}
 
-    def allow(self, key, now, interval):
+    def allow(self, key: tuple[str, str, str], now: float, interval: float) -> bool:
+        """
+        Ask whether one debounced event may fire now, and close its gate
+        behind it when it may. This is what keeps the resync notification and
+        the resync directive from following every heartbeat
+
+        :param key: room id, colour and which kind of repair is being gated.
+        :param now: monotonic seconds, the server's own clock.
+        :param interval: seconds this gate stays shut once the event fires.
+        :returns: True when the caller should go ahead and fire the event.
+        """
         if now < self._open_at.get(key, now):
             return False
         if len(self._open_at) >= RESYNC_GATE_PRUNE_THRESHOLD:
@@ -69,17 +93,43 @@ class _ResyncGate:
         self._open_at[key] = now + interval
         return True
 
-    def reopen(self, key, now, delay):
+    def reopen(self, key: tuple[str, str, str], now: float, delay: float) -> None:
+        """
+        Bring a closed gate forward so the next event may fire sooner, used
+        when a player catches up and a fresh lagging spell should be reported
+        promptly instead of waiting out the old interval. A gate that is not
+        closed is left alone
+
+        :param key: room id, colour and which kind of repair is being gated.
+        :param now: monotonic seconds, the server's own clock.
+        :param delay: seconds from now the gate may open at the latest.
+        """
         if key in self._open_at:
             self._open_at[key] = min(self._open_at[key], now + delay)
 
-    def _prune(self, now):
+    def _prune(self, now: float) -> None:
+        """
+        Forget the gates that have already opened again, so a long-lived
+        server does not keep one entry per room and colour it has ever seen
+
+        :param now: monotonic seconds; gates due at or before this are gone.
+        """
         for key, at in list(self._open_at.items()):
             if at <= now:
                 del self._open_at[key]
 
 
-def _app_state_singleton(app, name, factory):
+def _app_state_singleton(app: FastAPI, name: str, factory: Callable[[], Any]) -> Any:
+    """
+    Fetch a helper that lives on the app for the whole process, building it on
+    first use. Keeps per-process machinery such as the resync gate and the
+    moderation meter off module globals, so every test app gets its own
+
+    :param app: the FastAPI application that owns the shared server state.
+    :param name: attribute the helper is stored under on app.state.
+    :param factory: builds the helper the first time it is asked for.
+    :returns: the helper already stored, or the one just built.
+    """
     value = getattr(app.state, name, None)
     if value is None:
         value = factory()
@@ -87,15 +137,38 @@ def _app_state_singleton(app, name, factory):
     return value
 
 
-def _resync_gate(app):
+def _resync_gate(app: FastAPI) -> _ResyncGate:
+    """
+    Get this server's resync debounce gate. One gate serves every room, since
+    it is keyed by room and colour internally
+
+    :param app: the FastAPI application that owns the shared server state.
+    :returns: the process-wide resync gate.
+    """
     return _app_state_singleton(app, "resync_gate", _ResyncGate)
 
 
-def _moderation_load(app):
+def _moderation_load(app: FastAPI) -> ModerationLoad:
+    """
+    Get this server's moderation CPU meter, which decides whether a player may
+    keep having their shared marks screened. One meter serves every room, so a
+    single busy game cannot spend the whole server's screening time
+
+    :param app: the FastAPI application that owns the shared server state.
+    :returns: the process-wide moderation load meter.
+    """
     return _app_state_singleton(app, "moderation_load", ModerationLoad)
 
 
-def _clock_snapshot(clock):
+def _clock_snapshot(clock: Clock | None) -> ClockSnapshot:
+    """
+    Package both players' remaining time for the wire, in the shape every
+    frame that carries clocks expects. A game with no clock reports zeros
+    rather than nothing, so the client always has numbers to draw
+
+    :param clock: the room's engine clock, or None for an unclocked game.
+    :returns: the clock reading to put on the wire.
+    """
     if clock is None:
         return ClockSnapshot(white_remaining=0.0, black_remaining=0.0, running_for=None)
     running = None
@@ -108,18 +181,47 @@ def _clock_snapshot(clock):
     )
 
 
-def _arrow_wires(pairs):
+def _arrow_wires(pairs: Iterable[tuple[str, str]]) -> list[ArrowWire]:
+    """
+    Dress stored arrows up for the wire. Arrows live server-side as plain
+    square pairs, and this is the single place they become wire models
+
+    :param pairs: arrows as origin and destination squares in algebraic form.
+    :returns: the same arrows as wire models, in the order given.
+    """
     return [ArrowWire(from_sq=a[0], to_sq=a[1]) for a in pairs]
 
 
-def peek_type(raw):
+def peek_type(raw: str) -> str | None:
+    """
+    Read just the type out of an inbound frame, so the dispatcher can pick a
+    handler without fully parsing a message that may well be junk. Anything
+    that is not JSON carrying a type is reported as unknown rather than raised
+
+    :param raw: the websocket text frame exactly as it arrived.
+    :returns: the message type, or None when the frame is unusable.
+    """
     try:
         return json.loads(raw).get("type")
     except (json.JSONDecodeError, ValueError):
         return None
 
 
-async def dispatch(app, websocket, room, color, raw):
+async def dispatch(app: FastAPI, websocket: WebSocket, room: Room, color: str,
+                   raw: str) -> tuple[str | None, str]:
+    """
+    Route one inbound websocket frame to the handler that owns that message
+    type, then refresh the idle countdown when the frame was a deliberate
+    action. An unknown type is refused with an error frame instead of dropping
+    the connection
+
+    :param app: the FastAPI application, source of the shared server state.
+    :param websocket: the socket the frame arrived on.
+    :param room: the room this connection is playing in.
+    :param color: the side that sent the frame, white or black.
+    :param raw: the websocket text frame exactly as it arrived.
+    :returns: the message type and the handler's short outcome word, for logs.
+    """
     msg_type = peek_type(raw)
     handler = HANDLERS.get(msg_type)
     if handler is None:
@@ -131,7 +233,18 @@ async def dispatch(app, websocket, room, color, raw):
     return msg_type, verdict
 
 
-async def _touch_idle_window(app, room, color):
+async def _touch_idle_window(app: FastAPI, room: Room, color: str) -> None:
+    """
+    Restart the idle countdown after a deliberate action by the side to move,
+    and push the fresh reading to both players. Only the auto-resign window
+    ever resets -- the abort windows before the first moves never do, because
+    that clock is not running yet and the abort deadline guards the room slot
+    itself rather than a player's thinking time
+
+    :param app: the FastAPI application, source of the shared server state.
+    :param room: the room whose countdown is being refreshed.
+    :param color: the side whose message arrived, white or black.
+    """
     window = room.idle_window()
     if (room.result is not None or room.idle_since is None or window is None
             or window.outcome != Reason.RESIGNATION or color != room.color_to_move()):
@@ -141,7 +254,22 @@ async def _touch_idle_window(app, room, color):
     await push_idle_window(app.state.rooms, app.state.connections, room, now)
 
 
-async def handle_move(app, websocket, room, color, raw):
+async def handle_move(app: FastAPI, websocket: WebSocket, room: Room, color: str,
+                      raw: str) -> str:
+    """
+    Play one move for the side that sent it: confirm it is their turn and the
+    move is not locked out, then either land it or start the skill check it
+    triggers. A check that was already running and has since died is resolved
+    as a miss here first, by exactly the same expiry rule every other surface
+    applies
+
+    :param app: the FastAPI application, source of the shared server state.
+    :param websocket: the socket the move arrived on.
+    :param room: the room the move is being played in.
+    :param color: the side that sent the move, white or black.
+    :param raw: the websocket text frame holding the move.
+    :returns: short outcome word for the dispatch log.
+    """
     rooms = app.state.rooms
     connections = app.state.connections
     if room.backend is None:
@@ -193,7 +321,26 @@ async def handle_move(app, websocket, room, color, raw):
                                  msg.promotion, facts)
 
 
-async def _arm_skillcheck(app, room, color, kind, from_sq, to_sq, promotion, facts):
+async def _arm_skillcheck(app: FastAPI, room: Room, color: str, kind: SkillCheckKind,
+                          from_sq: Square, to_sq: Square, promotion: str | None,
+                          facts: TriggerFacts) -> str:
+    """
+    Start the skill check a move triggered, holding the move back until the
+    player beats it. The challenge is described to the mover and mirrored to
+    the opponent as a read-only spectate view; its seed is drawn fresh for
+    this check and carries nothing of the room secret, and for whack-a-mole
+    the server works out the hole squares itself rather than trusting a client
+
+    :param app: the FastAPI application, source of the shared server state.
+    :param room: the room the move was played in.
+    :param color: the side that must beat the check, white or black.
+    :param kind: which of the four challenges this move drew.
+    :param from_sq: origin square of the move being held back.
+    :param to_sq: destination square of the move being held back.
+    :param promotion: promotion piece letter, or None when not promoting.
+    :param facts: what the move does -- capture, promotion, piece values.
+    :returns: short outcome word naming the kind of check that fired.
+    """
     connections = app.state.connections
     value_diff = online.value_diff_for(facts, promotion)
     seed = secrets.token_hex(16)
@@ -223,8 +370,27 @@ async def _arm_skillcheck(app, room, color, kind, from_sq, to_sq, promotion, fac
     return f"skillcheck:{kind.value}"
 
 
-async def _apply_move(app, room, color, from_sq, to_sq, promotion,
-                      *, skill_kind, skill_won):
+async def _apply_move(app: FastAPI, room: Room, color: str, from_sq: Square,
+                      to_sq: Square, promotion: str | None,
+                      *, skill_kind: str | None, skill_won: bool | None) -> str:
+    """
+    Land a move on the server's own board and tell both players -- the single
+    place a ply actually becomes real. It advances the server-only ply counter
+    that seeds which move draws which check, clears the per-turn move locks
+    and both players' shared marks, records the skill check the move came
+    through, and ends the game right here when the position is final
+
+    :param app: the FastAPI application, source of the shared server state.
+    :param room: the room the move belongs to.
+    :param color: the side playing the move, white or black.
+    :param from_sq: origin square of the move.
+    :param to_sq: destination square of the move.
+    :param promotion: promotion piece letter; a queen when the mover said
+        nothing and the pawn has reached the last rank.
+    :param skill_kind: kind of check the move came through, None when none ran.
+    :param skill_won: whether that check was won, None when none ran.
+    :returns: short outcome word, naming the result reason when the game ended.
+    """
     rooms = app.state.rooms
     connections = app.state.connections
     result = room.backend.try_move(from_sq, to_sq)
@@ -265,7 +431,17 @@ async def _apply_move(app, room, color, from_sq, to_sq, promotion,
     return "applied"
 
 
-def _shot_payload_ok(pending, msg):
+def _shot_payload_ok(pending: PendingSkillCheck, msg: SkillCheckShotMessage) -> bool:
+    """
+    Check that a skill-check input carries the field its challenge needs -- a
+    direction for combo, a board square for whack-a-mole -- before anything is
+    judged. An input missing its payload is dropped quietly rather than
+    counted against the player
+
+    :param pending: the check currently running in this room.
+    :param msg: the input the player sent.
+    :returns: True when the input is shaped for this kind of check.
+    """
     if pending.kind == SkillCheckKind.COMBO:
         return msg.direction is not None
     if pending.kind == SkillCheckKind.WHACK:
@@ -273,7 +449,20 @@ def _shot_payload_ok(pending, msg):
     return True
 
 
-def _adjudicate_shot(pending, msg, elapsed):
+def _adjudicate_shot(pending: PendingSkillCheck, msg: SkillCheckShotMessage,
+                     elapsed: int) -> tuple[Any, bool, bool]:
+    """
+    Decide what one skill-check input did: whether it hit, and whether that
+    hit finishes the check. Every judgement is made against the challenge the
+    server rebuilt from its own seed, never against anything the client
+    described about it
+
+    :param pending: the check currently running in this room.
+    :param msg: the input the player sent.
+    :param elapsed: milliseconds into the check, already clamped server-side.
+    :returns: the rebuilt challenge, whether the input hit, and whether the
+        check is now won.
+    """
     is_whack = pending.kind == SkillCheckKind.WHACK
     challenge = pending.challenge
     hit = online.shot_wins(pending.kind, challenge, elapsed, pending.miss_count,
@@ -287,7 +476,23 @@ def _adjudicate_shot(pending, msg, elapsed):
     return challenge, hit, won
 
 
-async def handle_skill_check_shot(app, websocket, room, color, raw):
+async def handle_skill_check_shot(app: FastAPI, websocket: WebSocket, room: Room,
+                                  color: str, raw: str) -> str:
+    """
+    Take one input during a live skill check and act on it: land the move when
+    the check is beaten, lock that move out for the turn when it is failed,
+    otherwise count the hit or the miss. Only the player facing the check may
+    resolve it, the elapsed time they report is clamped to what the server
+    timed, inputs that arrive too close together are ignored, and the check is
+    re-read after every await in case it was resolved meanwhile
+
+    :param app: the FastAPI application, source of the shared server state.
+    :param websocket: the socket the input arrived on.
+    :param room: the room whose check is running.
+    :param color: the side that sent the input, white or black.
+    :param raw: the websocket text frame holding the input.
+    :returns: short outcome word for the dispatch log.
+    """
     rooms = app.state.rooms
     connections = app.state.connections
     pending = room.pending_skillcheck
@@ -350,7 +555,20 @@ async def handle_skill_check_shot(app, websocket, room, color, raw):
     return "skillcheck_miss"
 
 
-async def handle_resign(app, websocket, room, color, raw):
+async def handle_resign(app: FastAPI, websocket: WebSocket, room: Room, color: str,
+                        raw: str) -> str:
+    """
+    End the game because the sender gave it up, handing the win to their
+    opponent. A game that already has a result is left exactly as it is, so a
+    resignation racing a checkmate cannot rewrite the ending
+
+    :param app: the FastAPI application, source of the shared server state.
+    :param websocket: the socket the resignation arrived on.
+    :param room: the room being given up.
+    :param color: the side resigning, white or black.
+    :param raw: the websocket text frame, unused beyond its type.
+    :returns: short outcome word for the dispatch log.
+    """
     rooms = app.state.rooms
     connections = app.state.connections
     if room.result is not None:
@@ -362,7 +580,20 @@ async def handle_resign(app, websocket, room, color, raw):
     return "resigned"
 
 
-async def handle_draw_offer(app, websocket, room, color, raw):
+async def handle_draw_offer(app: FastAPI, websocket: WebSocket, room: Room, color: str,
+                            raw: str) -> str:
+    """
+    Offer the opponent a draw, or accept theirs when they have one standing,
+    which ends the game as agreed. Each side holds at most one offer at a
+    time, and a played move clears it
+
+    :param app: the FastAPI application, source of the shared server state.
+    :param websocket: the socket the offer arrived on.
+    :param room: the room the offer belongs to.
+    :param color: the side offering, white or black.
+    :param raw: the websocket text frame, unused beyond its type.
+    :returns: short outcome word for the dispatch log.
+    """
     rooms = app.state.rooms
     connections = app.state.connections
     if room.result is not None or room.backend is None:
@@ -379,7 +610,20 @@ async def handle_draw_offer(app, websocket, room, color, raw):
     return "offered"
 
 
-async def handle_draw_response(app, websocket, room, color, raw):
+async def handle_draw_response(app: FastAPI, websocket: WebSocket, room: Room,
+                               color: str, raw: str) -> str:
+    """
+    Answer the opponent's draw offer: accepting ends the game as a draw,
+    declining simply clears the offer. A player cannot answer their own offer,
+    so the reply always comes from the other side
+
+    :param app: the FastAPI application, source of the shared server state.
+    :param websocket: the socket the answer arrived on.
+    :param room: the room the offer belongs to.
+    :param color: the side answering, white or black.
+    :param raw: the websocket text frame holding the answer.
+    :returns: short outcome word for the dispatch log.
+    """
     rooms = app.state.rooms
     connections = app.state.connections
     if room.result is not None or room.draw_offered_by is None:
@@ -400,7 +644,18 @@ async def handle_draw_response(app, websocket, room, color, raw):
     return "declined"
 
 
-async def _restart_rematch(app, room, color):
+async def _restart_rematch(app: FastAPI, room: Room, color: str) -> str:
+    """
+    Start the next game in a room both players have agreed to replay: the room
+    is reset with the colours swapped and a fresh skill-check secret, then the
+    start is announced to both. A room that can no longer be replayed tells
+    the player who asked instead
+
+    :param app: the FastAPI application, source of the shared server state.
+    :param room: the finished room being replayed.
+    :param color: the side whose acceptance triggered the restart.
+    :returns: short outcome word for the dispatch log.
+    """
     rooms = app.state.rooms
     connections = app.state.connections
     if not rooms.reset_for_rematch(room.room_id):
@@ -413,7 +668,22 @@ async def _restart_rematch(app, room, color):
     return "restarted"
 
 
-async def handle_rematch_request(app, websocket, room, color, raw):
+async def handle_rematch_request(app: FastAPI, websocket: WebSocket, room: Room,
+                                 color: str, raw: str) -> str:
+    """
+    Offer another game once this one has finished, which starts immediately
+    when both players have offered. Only a player still sitting on the result
+    screen may offer, a second offer from the same player is refused, and the
+    offer is looked at again after it has been relayed so one withdrawn while
+    the relay was in flight is announced as cancelled
+
+    :param app: the FastAPI application, source of the shared server state.
+    :param websocket: the socket the offer arrived on.
+    :param room: the finished room being offered a replay.
+    :param color: the side offering, white or black.
+    :param raw: the websocket text frame, unused beyond its type.
+    :returns: short outcome word for the dispatch log.
+    """
     rooms = app.state.rooms
     connections = app.state.connections
     if room.result is None:
@@ -442,7 +712,20 @@ async def handle_rematch_request(app, websocket, room, color, raw):
     return "offered"
 
 
-async def handle_rematch_response(app, websocket, room, color, raw):
+async def handle_rematch_response(app: FastAPI, websocket: WebSocket, room: Room,
+                                  color: str, raw: str) -> str:
+    """
+    Answer a rematch offer: accepting restarts the room with the colours
+    swapped, declining tells both players the window is over and closes the
+    room for good. Answering one's own offer does nothing
+
+    :param app: the FastAPI application, source of the shared server state.
+    :param websocket: the socket the answer arrived on.
+    :param room: the finished room the offer belongs to.
+    :param color: the side answering, white or black.
+    :param raw: the websocket text frame holding the answer.
+    :returns: short outcome word for the dispatch log.
+    """
     rooms = app.state.rooms
     connections = app.state.connections
     if room.result is None:
@@ -470,7 +753,21 @@ async def handle_rematch_response(app, websocket, room, color, raw):
     return "declined"
 
 
-async def handle_left_result(app, websocket, room, color, raw):
+async def handle_left_result(app: FastAPI, websocket: WebSocket, room: Room, color: str,
+                             raw: str) -> str:
+    """
+    Note that a player has walked off the result screen back to the menu,
+    which withdraws any rematch offer they had standing and tells the
+    opponent. The room itself stays alive a while longer, in case the other
+    player is still deciding
+
+    :param app: the FastAPI application, source of the shared server state.
+    :param websocket: the socket the notice arrived on.
+    :param room: the finished room being left.
+    :param color: the side leaving, white or black.
+    :param raw: the websocket text frame, unused beyond its type.
+    :returns: short outcome word for the dispatch log.
+    """
     connections = app.state.connections
     if room.result is None:
         return "noop"
@@ -486,7 +783,20 @@ async def handle_left_result(app, websocket, room, color, raw):
     return "left_result"
 
 
-async def handle_takeback_request(app, websocket, room, color, raw):
+async def handle_takeback_request(app: FastAPI, websocket: WebSocket, room: Room,
+                                  color: str, raw: str) -> str:
+    """
+    Ask the opponent to let the last move be retracted. Only the player who is
+    not to move may ask, there has to be a move to take back, and a running
+    skill check blocks the request outright
+
+    :param app: the FastAPI application, source of the shared server state.
+    :param websocket: the socket the request arrived on.
+    :param room: the room the request belongs to.
+    :param color: the side asking, white or black.
+    :param raw: the websocket text frame, unused beyond its type.
+    :returns: short outcome word for the dispatch log.
+    """
     connections = app.state.connections
     if room.result is not None or room.backend is None:
         return "noop"
@@ -510,7 +820,21 @@ async def handle_takeback_request(app, websocket, room, color, raw):
     return "offered"
 
 
-async def handle_takeback_response(app, websocket, room, color, raw):
+async def handle_takeback_response(app: FastAPI, websocket: WebSocket, room: Room,
+                                   color: str, raw: str) -> str:
+    """
+    Answer a takeback request: accepting rewinds the position on the server
+    and sends the rewound state to both boards, declining just clears the
+    request. An accepted takeback also drops the skill-check record for the
+    ply that was popped and restarts the idle countdown
+
+    :param app: the FastAPI application, source of the shared server state.
+    :param websocket: the socket the answer arrived on.
+    :param room: the room the request belongs to.
+    :param color: the side answering, white or black.
+    :param raw: the websocket text frame holding the answer.
+    :returns: short outcome word for the dispatch log.
+    """
     rooms = app.state.rooms
     connections = app.state.connections
     if room.result is not None or room.takeback_offered_by is None:
@@ -545,7 +869,21 @@ async def handle_takeback_response(app, websocket, room, color, raw):
     return "declined"
 
 
-async def handle_give_time(app, websocket, room, color, raw):
+async def handle_give_time(app: FastAPI, websocket: WebSocket, room: Room, color: str,
+                           raw: str) -> str:
+    """
+    Give the opponent clock time as a gift, sized by how long the giver held
+    the button down. The hold is turned into whole chunks server-side, so what
+    lands on the clock comes from the server's own table rather than from the
+    client's arithmetic
+
+    :param app: the FastAPI application, source of the shared server state.
+    :param websocket: the socket the gift arrived on.
+    :param room: the room whose clocks are being changed.
+    :param color: the side giving the time, white or black.
+    :param raw: the websocket text frame holding the hold duration.
+    :returns: short outcome word for the dispatch log.
+    """
     rooms = app.state.rooms
     connections = app.state.connections
     if room.result is not None or room.backend is None or room.backend.clock is None:
@@ -569,20 +907,51 @@ async def handle_give_time(app, websocket, room, color, raw):
     return "granted" if added > 0 else "capped"
 
 
-async def _notify_opp_state(connections, room, color, state):
+async def _notify_opp_state(connections: ConnectionRegistry, room: Room, color: str,
+                            state: Literal["connected", "reconnecting", "resyncing"]
+                            ) -> None:
+    """
+    Tell one player how their opponent's side is doing, which is what turns a
+    board that has gone quiet into a visible note instead of an apparent
+    walk-out
+
+    :param connections: registry of live sockets for every room.
+    :param room: the room both players are in.
+    :param color: the side the news is about; it goes to the other one.
+    :param state: connected, reconnecting or resyncing.
+    """
     opp_ws = connections.get_for_color(room, room.opp_color(color))
     if opp_ws is not None:
         await send(opp_ws, ConnectionStatusMessage(opp_state=state))
 
 
-async def set_resyncing(connections, room, color):
+async def set_resyncing(connections: ConnectionRegistry, room: Room, color: str) -> None:
+    """
+    Mark a player as rebuilding their game state and tell the opponent once,
+    so the pause reads as a repair in progress. Repeat calls while the same
+    spell lasts do nothing
+
+    :param connections: registry of live sockets for every room.
+    :param room: the room the lagging player is in.
+    :param color: the side that has fallen behind, white or black.
+    """
     slot = room.slot(color)
     if slot is not None and not slot.desync_active:
         slot.desync_active = True
         await _notify_opp_state(connections, room, color, "resyncing")
 
 
-async def clear_resyncing(app, room, color):
+async def clear_resyncing(app: FastAPI, room: Room, color: str) -> None:
+    """
+    Mark a player as caught up again and tell the opponent, called whenever
+    the client proves it is on the right ply. It also lets the notification
+    gate reopen shortly, so a fresh lagging spell is reported promptly instead
+    of being swallowed by the previous interval
+
+    :param app: the FastAPI application, source of the shared server state.
+    :param room: the room the recovered player is in.
+    :param color: the side that has caught up, white or black.
+    """
     slot = room.slot(color)
     if slot is None or not slot.desync_active:
         return
@@ -592,7 +961,22 @@ async def clear_resyncing(app, room, color):
     await _notify_opp_state(app.state.connections, room, color, "connected")
 
 
-async def handle_ping(app, websocket, room, color, raw):
+async def handle_ping(app: FastAPI, websocket: WebSocket, room: Room, color: str,
+                      raw: str) -> str:
+    """
+    Answer the client's heartbeat, and use the ply it reports to spot a board
+    that has drifted behind the server's. A lagging client is told to fetch
+    the whole state again and its opponent is told the pause is a resync --
+    both debounced, so a heartbeat every couple of seconds cannot turn into a
+    stream of repairs
+
+    :param app: the FastAPI application, source of the shared server state.
+    :param websocket: the socket the heartbeat arrived on.
+    :param room: the room the heartbeat belongs to.
+    :param color: the side that sent it, white or black.
+    :param raw: the websocket text frame holding the client's ply.
+    :returns: short outcome word for the dispatch log.
+    """
     connections = app.state.connections
     try:
         msg = PingMessage.model_validate_json(raw)
@@ -619,7 +1003,20 @@ async def handle_ping(app, websocket, room, color, raw):
     return "ping"
 
 
-async def _relay_guard(websocket, room, color, limiter, msg_type):
+async def _relay_guard(websocket: WebSocket, room: Room, color: str, limiter: Any,
+                       msg_type: str) -> str | None:
+    """
+    Shared gate for the frames players relay to each other, the shared marks
+    and the quick chat. Nothing is relayed outside a live game, and each
+    player spends an allowance of their own rather than the room's
+
+    :param websocket: the socket the frame arrived on.
+    :param room: the room the frame belongs to.
+    :param color: the side that sent it, white or black.
+    :param limiter: this frame kind's per-player allowance.
+    :param msg_type: message type quoted back in a refusal.
+    :returns: a short outcome word when the frame is refused, else None.
+    """
     if room.backend is None or room.result is not None:
         return "noop"
     if not limiter.hit(room.slot(color).client_uuid):
@@ -628,7 +1025,21 @@ async def _relay_guard(websocket, room, color, limiter, msg_type):
     return None
 
 
-async def handle_annotations_state(app, websocket, room, color, raw):
+async def handle_annotations_state(app: FastAPI, websocket: WebSocket, room: Room,
+                                   color: str, raw: str) -> str:
+    """
+    Take a player's whole set of shared board marks and pass it to the
+    opponent, or switch their sharing off. Marks are screened before they
+    travel, and a player who has been muted or has run through their screening
+    budget has their sharing stopped instead of relayed
+
+    :param app: the FastAPI application, source of the shared server state.
+    :param websocket: the socket the marks arrived on.
+    :param room: the room the marks belong to.
+    :param color: the side sharing them, white or black.
+    :param raw: the websocket text frame holding the whole mark set.
+    :returns: short outcome word for the dispatch log.
+    """
     connections = app.state.connections
     verdict = await _relay_guard(websocket, room, color,
                                  app.state.annotation_limiter, "annotations_state")
@@ -662,7 +1073,21 @@ async def handle_annotations_state(app, websocket, room, color, raw):
     return await _relay_or_moderate(app, room, color, msg, None, "annotations_state")
 
 
-async def handle_annotation_delta(app, websocket, room, color, raw):
+async def handle_annotation_delta(app: FastAPI, websocket: WebSocket, room: Room,
+                                  color: str, raw: str) -> str:
+    """
+    Take a single added or removed mark and pass it on, the cheap path used
+    while a player is actually drawing. The stored set is capped, the change
+    is screened exactly as a whole set would be, and a delta that names no
+    usable square is dropped
+
+    :param app: the FastAPI application, source of the shared server state.
+    :param websocket: the socket the change arrived on.
+    :param room: the room the marks belong to.
+    :param color: the side drawing, white or black.
+    :param raw: the websocket text frame holding the single change.
+    :returns: short outcome word for the dispatch log.
+    """
     connections = app.state.connections
     verdict = await _relay_guard(websocket, room, color,
                                  app.state.annotation_limiter, "annotation_delta")
@@ -707,14 +1132,34 @@ async def handle_annotation_delta(app, websocket, room, color, raw):
     return await _relay_or_moderate(app, room, color, msg, changed, "annotation_delta")
 
 
-def _last_move_context(room):
+def _last_move_context(room: Room) -> tuple[str, ...]:
+    """
+    Give the squares of the move just played, which the mark screener treats
+    as ink already on the board. Without it, an arrow drawn along the last
+    move would read as part of whatever shape is being looked for
+
+    :param room: the room whose board is being screened.
+    :returns: origin and destination squares, empty before the first move.
+    """
     if not room.backend.move_history:
         return ()
     move = room.backend.move_history[-1].move
     return (coord_from_square(move.from_sq), coord_from_square(move.to_sq))
 
 
-def _moderation_inputs(room, color):
+def _moderation_inputs(room: Room, color: str) -> tuple[
+        list[tuple[str, str]], set[str],
+        list[tuple[str, str]], set[str], tuple[str, ...]]:
+    """
+    Gather everything the mark screener has to judge at once: this player's
+    marks, the opponent's, and the last move for context. Both sides are
+    needed because a forbidden shape can be drawn half by each player
+
+    :param room: the room whose marks are being screened.
+    :param color: the side whose change triggered the screening.
+    :returns: own arrows and highlights, the opponent's, and the last-move
+        squares.
+    """
     store = room.annotations_for(color)
     opp_store = room.annotations_for(room.opp_color(color))
     return (list(store.arrows), set(store.highlights),
@@ -722,13 +1167,36 @@ def _moderation_inputs(room, color):
             _last_move_context(room))
 
 
-def _over_moderation_budget(app, room, color):
+def _over_moderation_budget(app: FastAPI, room: Room, color: str) -> bool:
+    """
+    Ask whether this player has already spent their share of screening time.
+    Screening is charged in measured CPU seconds against a per-player and a
+    per-room allowance, so a flood of marks costs the flooder their sharing
+    rather than costing the server its responsiveness
+
+    :param app: the FastAPI application, source of the shared server state.
+    :param room: the room the marks belong to.
+    :param color: the side that would be screened, white or black.
+    :returns: True when the player is over budget and must be cut off.
+    """
     if not app.state.moderation_enabled:
         return False
     return _moderation_load(app).over_budget(room.room_id, color, app.state.now())
 
 
-async def _suppress_sharing(app, room, color, msg_type):
+async def _suppress_sharing(app: FastAPI, room: Room, color: str, msg_type: str) -> str:
+    """
+    Force a player's mark sharing off because screening it costs too much,
+    clearing what they had shared and telling the opponent those marks are
+    gone. The player is told their traffic was refused, not that their drawing
+    was judged
+
+    :param app: the FastAPI application, source of the shared server state.
+    :param room: the room the marks belong to.
+    :param color: the side being cut off, white or black.
+    :param msg_type: message type quoted back in the refusal.
+    :returns: short outcome word for the dispatch log.
+    """
     connections = app.state.connections
     store = room.annotations_for(color)
     stopped = store.sharing
@@ -743,7 +1211,26 @@ async def _suppress_sharing(app, room, color, msg_type):
     return "load_suppressed"
 
 
-def _moderate(own_arrows, own_highlights, opp_arrows, opp_highlights, context, changed):
+def _moderate(own_arrows: list[tuple[str, str]], own_highlights: set[str],
+              opp_arrows: list[tuple[str, str]], opp_highlights: set[str],
+              context: tuple[str, ...],
+              changed: str | tuple[str, str] | None
+              ) -> tuple[detector.Verdict | None, bool]:
+    """
+    Run the shared-mark screener and decide what it found: this player's marks
+    first, then both sides' marks together, since a forbidden shape can be
+    split across the two boards. This is the pure part, safe to run off the
+    event loop
+
+    :param own_arrows: arrows the acting player is sharing.
+    :param own_highlights: squares the acting player is highlighting.
+    :param opp_arrows: arrows the opponent is sharing.
+    :param opp_highlights: squares the opponent is highlighting.
+    :param context: last-move squares, treated as ink already on the board.
+    :param changed: the mark just drawn, to focus the search, or None.
+    :returns: the verdict worth acting on plus whether it came from the two
+        boards combined, or no verdict at all.
+    """
     own = detector.detect(own_arrows, own_highlights, changed=changed, context=context)
     if own.kind == detector.BLOCKED:
         return own, False
@@ -758,25 +1245,76 @@ def _moderate(own_arrows, own_highlights, opp_arrows, opp_highlights, context, c
     return None, False
 
 
-def _own_matched(store, verdict):
+def _own_matched(store: SharedAnnotations, verdict: detector.Verdict
+                 ) -> tuple[list[tuple[str, str]], list[str]]:
+    """
+    Narrow a screener verdict down to the marks this player actually owns, so
+    the reply names only their own arrows and highlights even when the shape
+    was found across both boards
+
+    :param store: the acting player's shared marks.
+    :param verdict: what the screener matched.
+    :returns: the matched arrows and highlights belonging to this player.
+    """
     arrows = [a for a in verdict.matched_arrows if (a[0], a[1]) in store.arrows]
     highlights = [h for h in verdict.matched_highlights if h in store.highlights]
     return arrows, highlights
 
 
-async def _relay_or_moderate(app, room, color, msg, changed, msg_type):
+async def _relay_or_moderate(app: FastAPI, room: Room, color: str,
+                             msg: AnnotationsStateMessage | AnnotationDeltaMessage,
+                             changed: str | tuple[str, str] | None, msg_type: str) -> str:
+    """
+    Send a mark update on to the opponent, screening it first unless screening
+    is switched off for this server. Both the whole-set and the single-mark
+    handlers come through here, so the two behave identically
+
+    :param app: the FastAPI application, source of the shared server state.
+    :param room: the room the marks belong to.
+    :param color: the side that made the change, white or black.
+    :param msg: the mark update waiting to be relayed.
+    :param changed: the mark just drawn, to focus the search, or None.
+    :param msg_type: message type quoted back in any refusal.
+    :returns: short outcome word for the dispatch log.
+    """
     if not app.state.moderation_enabled:
         await _relay_to_opp(app, room, color, msg, msg_type)
         return "relayed"
     return await _moderate_relay(app, room, color, msg, changed, msg_type)
 
 
-def _timed_moderate(*args):
+def _timed_moderate(*args: Any) -> tuple[tuple[detector.Verdict | None, bool], float]:
+    """
+    Run the screener and measure what it cost in CPU time, which is the
+    currency the per-player and per-room budgets are charged in. It runs on a
+    worker thread, where wall clock would measure waiting rather than work
+
+    :param args: the screener inputs, passed straight through.
+    :returns: the screener outcome and the CPU seconds it consumed.
+    """
     started = time.thread_time()
     return _moderate(*args), time.thread_time() - started
 
 
-async def _moderate_relay(app, room, color, relay_msg, changed, msg_type):
+async def _moderate_relay(app: FastAPI, room: Room, color: str,
+                          relay_msg: AnnotationsStateMessage | AnnotationDeltaMessage,
+                          changed: str | tuple[str, str] | None, msg_type: str) -> str:
+    """
+    Screen a mark update off the event loop and act on the verdict: relay it,
+    relay it with a warning, or strip the marks it refused. Only a couple of
+    screenings run at once and each one's measured cost is charged to the
+    player and the room, so anyone who cannot get in or is over budget has
+    their sharing stopped. The room is re-read afterwards, because the game
+    may have ended while the screening ran
+
+    :param app: the FastAPI application, source of the shared server state.
+    :param room: the room the marks belong to.
+    :param color: the side that made the change, white or black.
+    :param relay_msg: the mark update waiting to be relayed.
+    :param changed: the mark just drawn, to focus the search, or None.
+    :param msg_type: message type quoted back in any refusal.
+    :returns: short outcome word for the dispatch log.
+    """
     load = _moderation_load(app)
     inputs = _moderation_inputs(room, color)
     try:
@@ -812,7 +1350,20 @@ async def _moderate_relay(app, room, color, relay_msg, changed, msg_type):
     return "suspect"
 
 
-async def _handle_block(app, room, color, verdict, is_union):
+async def _handle_block(app: FastAPI, room: Room, color: str, verdict: detector.Verdict,
+                        is_union: bool) -> None:
+    """
+    Take away the marks the screener refused and put every board back in
+    step: the offender's copy is stripped, the opponent's too when the shape
+    was only there across both, and enough refusals mute that player's sharing
+    for the rest of the game
+
+    :param app: the FastAPI application, source of the shared server state.
+    :param room: the room the marks belong to.
+    :param color: the side whose marks were refused, white or black.
+    :param verdict: what the screener matched.
+    :param is_union: True when the shape appears only across both boards.
+    """
     connections = app.state.connections
     store = room.annotations_for(color)
     opp_color = room.opp_color(color)
@@ -836,7 +1387,17 @@ async def _handle_block(app, room, color, verdict, is_union):
                      share_muted=muted))
 
 
-async def _corrective_snapshot(app, room, source_color):
+async def _corrective_snapshot(app: FastAPI, room: Room, source_color: str) -> None:
+    """
+    Resend one player's whole mark set to the other after marks were stripped,
+    so the receiving board cannot keep drawing something the server has since
+    removed. Skipped when that player has chosen not to see the opponent's
+    marks at all
+
+    :param app: the FastAPI application, source of the shared server state.
+    :param room: the room the marks belong to.
+    :param source_color: the side whose marks are being resent.
+    """
     connections = app.state.connections
     target_color = room.opp_color(source_color)
     if room.hides_opponent_marks(target_color):
@@ -850,13 +1411,37 @@ async def _corrective_snapshot(app, room, source_color):
         arrows=_arrow_wires(store.arrows)))
 
 
-async def _relay_plain(connections, room, color, msg):
+async def _relay_plain(connections: ConnectionRegistry, room: Room, color: str,
+                       msg: AnnotationsStateMessage) -> None:
+    """
+    Push a mark state straight to the opponent with no screening and no
+    visibility check, for the corrective updates the server itself generates
+    when it has just cleared somebody's marks
+
+    :param connections: registry of live sockets for every room.
+    :param room: the room both players are in.
+    :param color: the side the state is about; it goes to the other one.
+    :param msg: the mark state to send.
+    """
     opp_ws = connections.get_for_color(room, room.opp_color(color))
     if opp_ws is not None:
         await send(opp_ws, msg)
 
 
-async def _relay_to_opp(app, room, color, msg, msg_type):
+async def _relay_to_opp(app: FastAPI, room: Room, color: str,
+                        msg: AnnotationsStateMessage | AnnotationDeltaMessage,
+                        msg_type: str) -> None:
+    """
+    Deliver a mark update to the opponent, unless they have chosen not to see
+    the other player's marks. In that case nothing is sent and the sharer is
+    told once per sharing spell, so they know their drawing is going nowhere
+
+    :param app: the FastAPI application, source of the shared server state.
+    :param room: the room the marks belong to.
+    :param color: the side that made the change, white or black.
+    :param msg: the mark update to deliver.
+    :param msg_type: message type quoted back in the notice.
+    """
     connections = app.state.connections
     opp_color = room.opp_color(color)
     if room.hides_opponent_marks(opp_color):
@@ -871,7 +1456,20 @@ async def _relay_to_opp(app, room, color, msg, msg_type):
         await send(opp_ws, msg)
 
 
-async def handle_set_marks_visibility(app, websocket, room, color, raw):
+async def handle_set_marks_visibility(app: FastAPI, websocket: WebSocket, room: Room,
+                                      color: str, raw: str) -> str:
+    """
+    Switch whether this player sees the opponent's shared marks. Turning them
+    back on resends the opponent's current set at once, so the board is right
+    again without waiting for their next stroke
+
+    :param app: the FastAPI application, source of the shared server state.
+    :param websocket: the socket the choice arrived on.
+    :param room: the room the marks belong to.
+    :param color: the side changing what they see, white or black.
+    :param raw: the websocket text frame holding the choice.
+    :returns: short outcome word for the dispatch log.
+    """
     connections = app.state.connections
     try:
         msg = SetMarksVisibilityMessage.model_validate_json(raw)
@@ -892,7 +1490,20 @@ async def handle_set_marks_visibility(app, websocket, room, color, raw):
     return "shown"
 
 
-async def handle_quick_chat(app, websocket, room, color, raw):
+async def handle_quick_chat(app: FastAPI, websocket: WebSocket, room: Room, color: str,
+                            raw: str) -> str:
+    """
+    Pass a quick-chat phrase to the opponent as its index in the fixed list.
+    It is rate limited like every other relayed frame, and no free text ever
+    crosses between players
+
+    :param app: the FastAPI application, source of the shared server state.
+    :param websocket: the socket the phrase arrived on.
+    :param room: the room the players are in.
+    :param color: the side that sent it, white or black.
+    :param raw: the websocket text frame holding the phrase index.
+    :returns: short outcome word for the dispatch log.
+    """
     connections = app.state.connections
     verdict = await _relay_guard(websocket, room, color,
                                  app.state.chat_limiter, "quick_chat")

@@ -3,6 +3,7 @@ import re
 import time
 from collections import Counter
 from itertools import product
+from typing import Callable
 
 from chessshootout.backend.pieces import (
     BACK_RANK, BISHOP_DIRECTIONS, KING_OFFSETS, KNIGHT_OFFSETS, Piece,
@@ -50,12 +51,30 @@ FIFTY_MOVE_HALFMOVES = 100
 
 
 class Backend:
+    """
+    The chess engine: one position, the moves that reached it, the clock and the
+    repetition count, plus every rule that governs them. Nothing above it -- the
+    board on screen, the online room, the PGN writer -- reimplements a rule of
+    chess; they ask this object what is legal and what the game's state now is
+    """
+
     SIZE = BOARD_SIZE
 
-    def __init__(self):
+    def __init__(self) -> None:
+        """
+        Build an engine on an empty board with White to move and no clock.
+        Callers follow with new_game() for the standard opening setup, or with
+        apply_fen() to load a position
+        """
         self._reset_state()
 
-    def _reset_state(self):
+    def _reset_state(self) -> None:
+        """
+        Put every field back to its blank starting value, so a fresh game cannot
+        inherit a leftover history, castling right, en-passant target or
+        repetition count. It is also the one place the engine's state fields are
+        listed, which is why construction and new_game() both start here
+        """
         self.state = [[None] * self.SIZE for _ in range(self.SIZE)]
         self.turn = PieceColor.WHITE
         self.move_history = []
@@ -65,7 +84,13 @@ class Backend:
         self.position_counts = Counter()
         self.clock = None
 
-    def new_game(self):
+    def new_game(self) -> None:
+        """
+        Set the board up for a standard game and count the starting position as
+        seen once, which is what makes threefold repetition measurable from the
+        very first move. A rematch and an online state rebuild both begin here
+        too, the rebuild then replaying its moves on top
+        """
         self._reset_state()
 
         for col, piece_type in enumerate(BACK_RANK):
@@ -76,37 +101,103 @@ class Backend:
 
         self.position_counts[self._position_key()] = 1
 
-    def setup_clock(self, initial_seconds, increment_seconds, now_provider=time.monotonic):
+    def setup_clock(self, initial_seconds: float, increment_seconds: float,
+                    now_provider: Callable[[], float] = time.monotonic) -> None:
+        """
+        Give the game a clock at the chosen time control and start it running on
+        White. A game with no clock is simply one this was never called on, and
+        it then plays untimed
+
+        :param initial_seconds: starting time per side in seconds
+        :param increment_seconds: seconds returned to a player after each of
+            their moves
+        :param now_provider: source of monotonic seconds; the tests and the
+            server sweep pass their own so time can be driven deliberately
+        """
         self.clock = Clock.create(initial_seconds, increment_seconds, now_provider=now_provider)
         self.clock.start()
 
-    def tick_clock(self):
+    def tick_clock(self) -> None:
+        """
+        Let the clock count down by the real time since the last tick, which the
+        client does once per frame and the server once per sweep step. A game
+        that is already over is never charged -- a fallen flag, and a side with
+        no legal move, both leave the clock untouched
+        """
         if self.clock is None or self.clock.flagged is not None:
             return
         if self._has_no_legal_moves(self.turn):
             return
         self.clock.tick()
 
-    def piece_at(self, square):
+    def piece_at(self, square: Square) -> Piece | None:
+        """
+        Read the piece standing on a square of the live position, the lookup the
+        board makes for drawing, dragging and capture effects
+
+        :param square: square to read, expected to be on the board
+        :returns: the piece standing there, or None when the square is empty
+        """
         return self.state[square.row][square.col]
 
-    def current_turn(self):
+    def current_turn(self) -> PieceColor:
+        """
+        Say whose turn it is, the fact every gate above the engine checks before
+        it lets a player pick a piece up
+
+        :returns: the side to move
+        """
         return self.turn
 
-    def legal_moves_from(self, square):
+    def legal_moves_from(self, square: Square) -> list[Square]:
+        """
+        List the squares a piece may legally move to: what its own rule and the
+        board allow, minus every move that would leave its own king in check.
+        Move highlighting, SAN disambiguation and the mate test all rest on it
+
+        :param square: square the piece stands on; an empty one yields nothing
+        :returns: legal destination squares, in generation order
+        """
         return [
             to_sq for to_sq in self._pseudo_legal_moves(square)
             if not self._would_leave_king_in_check(square, to_sq)
         ]
 
-    def is_in_check(self, color):
+    def is_in_check(self, color: PieceColor) -> bool:
+        """
+        Say whether a side's king is under attack right now, which drives the
+        check highlight, the check sound and the checkmate test
+
+        :param color: side whose king is examined
+        :returns: True when that king is attacked
+        """
         king_sq = self._find_king(color)
         return self._is_square_attacked(king_sq, opponent_of(color))
 
-    def is_game_over(self):
+    def is_game_over(self) -> bool:
+        """
+        Say whether the game has ended by any rule the engine itself knows.
+        Endings that come from the players rather than the position --
+        resignation, an agreed draw, an abort -- live above the engine and are
+        invisible here
+
+        :returns: True when the position or the clock has already ended it
+        """
         return self.game_result() is not None
 
-    def game_result(self):
+    def game_result(self) -> str | None:
+        """
+        Give the code for how the game finished, or None while it is still
+        running; this is what the result screen, the PGN result tag and the
+        online room all read. The rules are tested in a fixed order -- mate or
+        stalemate, then a fallen flag, then insufficient material, threefold
+        repetition and the fifty-move rule -- so a position that satisfies two
+        of them reports the earlier one. A bare white_wins or black_wins means
+        checkmate and nothing else, since every manual ending is spelled out in
+        full, as in white_wins_by_resignation
+
+        :returns: result code, or None while the game is still live
+        """
         if self._has_no_legal_moves(self.turn):
             if self.is_in_check(self.turn):
                 return "black_wins" if self.turn == PieceColor.WHITE else "white_wins"
@@ -123,7 +214,20 @@ class Backend:
             return "draw_fifty_move"
         return None
 
-    def try_move(self, from_sq, to_sq):
+    def try_move(self, from_sq: Square, to_sq: Square) -> MoveResult:
+        """
+        Play a move for the side to move. Every ply the game ever plays comes
+        through here -- a local click, a replayed SAN, a move relayed from the
+        server -- and an illegal attempt is refused without the board being
+        touched. A ply that lands whole is finished here; a pawn reaching the
+        last rank is left half-applied until promote() names its piece, and that
+        is the only case where this does not complete the ply
+
+        :param from_sq: square the piece starts on
+        :param to_sq: square it is moving to
+        :returns: whether the move was legal, what it took, and whether it gave
+            check, mate or stalemate or still needs a promotion choice
+        """
         if self.is_game_over():
             return MoveResult(legal=False)
 
@@ -141,7 +245,19 @@ class Backend:
             return self._apply_promotion_pending(from_sq, to_sq, piece)
         return self._apply_normal(from_sq, to_sq, piece)
 
-    def promote(self, square, piece_type):
+    def promote(self, square: Square, piece_type: PieceType) -> MoveResult:
+        """
+        Finish a promotion by putting the chosen piece on the last rank, the
+        second half of the ply try_move left pending. The history entry takes a
+        freshly built frozen Move and gains its =Q suffix, and only now is the
+        ply complete: this is the one other place _finalize_move runs, so the
+        position is counted for repetition exactly once
+
+        :param square: last-rank square the promoting pawn reached
+        :param piece_type: piece chosen; only queen, rook, bishop and knight
+            are accepted
+        :returns: the finished move's result, check and mate flags included
+        """
         if piece_type not in (PieceType.QUEEN, PieceType.ROOK, PieceType.BISHOP, PieceType.KNIGHT):
             raise ValueError(f"Cannot promote to {piece_type}")
         if not self.move_history or self.move_history[-1].position_key_added is not None:
@@ -161,7 +277,16 @@ class Backend:
         self._finalize_move(entry)
         return self._build_move_result(entry.move.captured)
 
-    def position_at(self, ply):
+    def position_at(self, ply: int) -> list[list[Piece | None]]:
+        """
+        Rebuild the board as it stood after a given number of plies, which is
+        what the review browser draws while a player steps back through a game.
+        The live position is handed back as it is, while an earlier one is
+        rebuilt on a deep copy, so browsing can never disturb the game in play
+
+        :param ply: number of plies played, 0 being the starting position
+        :returns: 8x8 grid of pieces as of that moment
+        """
         if ply < 0 or ply > len(self.move_history):
             raise ValueError(f"Ply {ply} out of range 0..{len(self.move_history)}")
         if ply == len(self.move_history):
@@ -171,7 +296,20 @@ class Backend:
             snapshot.undo()
         return snapshot.state
 
-    def preview_san(self, from_sq, to_sq, promo_letter=None):
+    def preview_san(self, from_sq: Square, to_sq: Square,
+                    promo_letter: str | None = None) -> str:
+        """
+        Name a move in algebraic notation before it is played, which is how a
+        move still waiting on a skill check can already be shown on screen and
+        written into the log. It has to be asked on the pre-move position, since
+        telling two identical pieces apart depends on the board as it stands
+
+        :param from_sq: square the piece starts on
+        :param to_sq: square it would move to
+        :param promo_letter: promotion piece letter to append, or None when the
+            move promotes nothing
+        :returns: SAN for the move, or empty when no piece stands on from_sq
+        """
         piece = self.state[from_sq.row][from_sq.col]
         if piece is None:
             return ""
@@ -185,7 +323,19 @@ class Backend:
             san += f"={promo_letter.upper()}"
         return san
 
-    def apply_san(self, san):
+    def apply_san(self, san: str) -> MoveResult:
+        """
+        Play a move written in algebraic notation, the door a whole game is
+        rebuilt through -- loading a PGN and replaying an online game after a
+        reconnect both come this way. The notation is resolved against the
+        current position and a move that matches no single legal move is
+        refused rather than guessed at; a promotion with no piece named
+        becomes a queen
+
+        :param san: move in standard algebraic notation; !?+# are trimmed off
+        :returns: the result of playing it, illegal when the notation resolved
+            to no single legal move
+        """
         san = san.rstrip("!?+#")
         if not san:
             return MoveResult(legal=False)
@@ -229,7 +379,14 @@ class Backend:
             return self.promote(target, promo_type)
         return result
 
-    def undo(self):
+    def undo(self) -> None:
+        """
+        Take the last ply back, putting the board, the castling rights, the
+        en-passant target, the halfmove clock, the repetition count and both
+        players' times back to what the history entry recorded before that ply.
+        A promotion still waiting on a piece choice is dropped without any of
+        that being unwound, since it never completed in the first place
+        """
         if not self.move_history:
             return
         entry = self.move_history.pop()
@@ -258,7 +415,17 @@ class Backend:
             self.state[m.to_sq.row][m.to_sq.col] = None
             self.state[m.from_sq.row][m.to_sq.col] = m.captured
 
-    def _apply_normal(self, from_sq, to_sq, piece):
+    def _apply_normal(self, from_sq: Square, to_sq: Square, piece: Piece) -> MoveResult:
+        """
+        Apply an everyday move: name it in SAN against the board as it still
+        stands, carry the piece over, and record the finished ply. Anything that
+        is not a castle, an en-passant capture or a promotion lands here
+
+        :param from_sq: square the piece starts on
+        :param to_sq: square it moves to
+        :param piece: piece being moved, already checked as the mover's own
+        :returns: the finished move's result
+        """
         captured = self.state[to_sq.row][to_sq.col]
         san = self._build_san(from_sq, to_sq, piece, captured)
         self.state[to_sq.row][to_sq.col] = piece
@@ -266,7 +433,18 @@ class Backend:
         move = Move(from_sq, to_sq, piece, captured=captured)
         return self._record_and_finalize(move, captured, san)
 
-    def _apply_castle(self, from_sq, to_sq, piece):
+    def _apply_castle(self, from_sq: Square, to_sq: Square, piece: Piece) -> MoveResult:
+        """
+        Apply a castle: the king steps two squares and its rook swings to the
+        far side of it, recorded as O-O or O-O-O. Whether castling was allowed
+        was settled when the move was generated, so only the pieces move here
+
+        :param from_sq: square the king starts on
+        :param to_sq: square the king lands on, which also says whether this is
+            the kingside or the queenside castle
+        :param piece: the castling king
+        :returns: the finished move's result
+        """
         san = "O-O" if to_sq.col == 6 else "O-O-O"
         self.state[to_sq.row][to_sq.col] = piece
         self.state[from_sq.row][from_sq.col] = None
@@ -276,7 +454,18 @@ class Backend:
         move = Move(from_sq, to_sq, piece, is_castle=True)
         return self._record_and_finalize(move, None, san)
 
-    def _apply_en_passant(self, from_sq, to_sq, piece):
+    def _apply_en_passant(self, from_sq: Square, to_sq: Square, piece: Piece) -> MoveResult:
+        """
+        Apply an en-passant capture: the pawn steps diagonally onto an empty
+        square and the pawn it just passed, which sits beside its starting
+        square, comes off the board. It is recorded as a capture, so the
+        halfmove clock resets with it
+
+        :param from_sq: square the capturing pawn starts on
+        :param to_sq: empty square it steps onto
+        :param piece: the capturing pawn
+        :returns: the finished move's result
+        """
         captured_sq = Square(from_sq.row, to_sq.col)
         captured = self.state[captured_sq.row][captured_sq.col]
         san = self._build_san(from_sq, to_sq, piece, captured, is_en_passant=True)
@@ -286,7 +475,21 @@ class Backend:
         move = Move(from_sq, to_sq, piece, captured=captured, is_en_passant=True)
         return self._record_and_finalize(move, captured, san)
 
-    def _apply_promotion_pending(self, from_sq, to_sq, piece):
+    def _apply_promotion_pending(self, from_sq: Square, to_sq: Square,
+                                 piece: Piece) -> MoveResult:
+        """
+        Move the pawn onto the last rank but deliberately leave the ply
+        unfinished, because the player has not yet said what the pawn becomes.
+        The history entry is appended with position_key_added left as None, and
+        that None is the marker that a promotion is pending -- it keeps undo
+        from unwinding state the ply never applied, and it is what promote()
+        checks before it will finish anything
+
+        :param from_sq: square the pawn starts on
+        :param to_sq: last-rank square it moves to
+        :param piece: the promoting pawn
+        :returns: a legal result flagged as needing a promotion choice
+        """
         captured = self.state[to_sq.row][to_sq.col]
         san = self._build_san(from_sq, to_sq, piece, captured)
         self.state[to_sq.row][to_sq.col] = piece
@@ -303,7 +506,19 @@ class Backend:
         self.move_history.append(entry)
         return MoveResult(legal=True, captured=captured, promotion_required=True)
 
-    def _record_and_finalize(self, move, captured, san):
+    def _record_and_finalize(self, move: Move, captured: Piece | None,
+                             san: str) -> MoveResult:
+        """
+        Append a ply that landed whole to the history and settle everything it
+        implies, the shared tail of every move except a pending promotion. The
+        placeholder pre-ply fields written here are overwritten immediately by
+        _finalize_move, which reads them off the live state instead
+
+        :param move: the ply just applied to the board
+        :param captured: piece taken by it, or None when nothing was
+        :param san: notation built before the board changed
+        :returns: the finished move's result
+        """
         entry = HistoryEntry(
             move=move,
             prev_castling_rights=(),
@@ -316,7 +531,23 @@ class Backend:
         self._finalize_move(entry)
         return self._build_move_result(captured)
 
-    def _build_san(self, from_sq, to_sq, piece, captured, is_en_passant=False):
+    def _build_san(self, from_sq: Square, to_sq: Square, piece: Piece,
+                   captured: Piece | None, is_en_passant: bool = False) -> str:
+        """
+        Build a move's notation from the board as it stands before the move is
+        made, which is the only moment two identical pieces can be told apart.
+        Check and mate suffixes are not added here -- _finalize_move appends
+        them once the consequences are known -- and the PGN code never
+        recomputes SAN afterwards, it only reads what was stored
+
+        :param from_sq: square the piece starts on
+        :param to_sq: square it moves to
+        :param piece: piece being moved
+        :param captured: piece being taken, or None; it decides the x
+        :param is_en_passant: True for an en-passant capture, whose taken pawn
+            does not stand on the destination square
+        :returns: SAN for the move, without any check or mate suffix
+        """
         target = f"{SAN_FILES[to_sq.col]}{self.SIZE - to_sq.row}"
         if piece.type == PieceType.PAWN:
             if captured is not None or is_en_passant:
@@ -326,7 +557,18 @@ class Backend:
         capture = "x" if captured is not None else ""
         return f"{SAN_PIECE_LETTER[piece.type]}{disambig}{capture}{target}"
 
-    def _san_disambiguation(self, from_sq, to_sq, piece):
+    def _san_disambiguation(self, from_sq: Square, to_sq: Square, piece: Piece) -> str:
+        """
+        Work out the extra file or rank a move needs when another piece of the
+        same kind could legally reach the same square, which is what tells two
+        knights or two rooks apart in the move list. File alone is preferred,
+        then rank alone, and both only when neither settles it
+
+        :param from_sq: square of the piece that is actually moving
+        :param to_sq: square being moved to
+        :param piece: piece being moved, whose kind and side define its rivals
+        :returns: the disambiguating fragment, empty when none is needed
+        """
         rivals = []
         for r, c in product(range(self.SIZE), repeat=2):
             if r == from_sq.row and c == from_sq.col:
@@ -344,7 +586,21 @@ class Backend:
             return str(self.SIZE - from_sq.row)
         return f"{SAN_FILES[from_sq.col]}{self.SIZE - from_sq.row}"
 
-    def _finalize_move(self, entry):
+    def _finalize_move(self, entry: HistoryEntry) -> None:
+        """
+        Settle everything that follows from a ply that has landed, and the only
+        place any of it happens: the pre-ply state is stamped onto the history
+        entry so undo can rewind, castling rights and the en-passant target are
+        updated, the halfmove clock advances or resets, the turn changes, the
+        new position is counted towards repetition, the SAN gains its + or #,
+        and the clock is charged and handed over or stopped. It runs exactly
+        once per completed ply -- from try_move for a move that lands whole, or
+        from promote() for one that waited on a piece choice, never from both --
+        because counting a position twice would invent a repetition
+
+        :param entry: history entry for the ply that just landed; its pre-ply
+            fields, key, check flags and SAN suffix are all filled in here
+        """
         entry.prev_castling_rights = tuple(self.castling_rights[k] for k in CASTLING_KEYS)
         entry.prev_en_passant_target = self.en_passant_target
         entry.prev_halfmove_clock = self.halfmove_clock
@@ -398,7 +654,16 @@ class Backend:
             else:
                 self.clock.on_move_made(mover)
 
-    def _build_move_result(self, captured):
+    def _build_move_result(self, captured: Piece | None) -> MoveResult:
+        """
+        Package what a caller needs to know once a ply has landed: what it took,
+        and whether the side now to move is in check, mated or stalemated. It is
+        read after the turn has already changed, so the flags describe the
+        player who has to answer the move, not the one who made it
+
+        :param captured: piece the move took, or None when it took nothing
+        :returns: the move result handed back to the UI and the server
+        """
         result = self.game_result()
         is_check = self.is_in_check(self.turn)
         return MoveResult(
@@ -409,7 +674,16 @@ class Backend:
             is_stalemate=result == "draw_stalemate",
         )
 
-    def _position_key(self):
+    def _position_key(self) -> tuple:
+        """
+        Reduce the position to the key threefold repetition is counted by: the
+        pieces on the board, the side to move, the four castling rights and the
+        en-passant target. That target is always part of the key, even when no
+        pawn could actually capture en passant -- a deliberate simplification of
+        the FIDE rule, and one the tests pin down
+
+        :returns: hashable key standing for this position
+        """
         board = tuple(
             tuple((p.type, p.color) if p is not None else None for p in row)
             for row in self.state
@@ -417,7 +691,16 @@ class Backend:
         rights = tuple(self.castling_rights[k] for k in CASTLING_KEYS)
         return (board, self.turn, rights, self.en_passant_target)
 
-    def _pseudo_legal_moves(self, square):
+    def _pseudo_legal_moves(self, square: Square) -> list[Square]:
+        """
+        List where a piece could move given its own rule and what stands on the
+        board, but without asking whether its own king would be left in check.
+        A king's castling destinations are generated here too, and
+        legal_moves_from is what filters the result down to what is really legal
+
+        :param square: square the piece stands on
+        :returns: candidate destination squares, empty when the square is empty
+        """
         piece = self.state[square.row][square.col]
         if piece is None:
             return []
@@ -444,7 +727,15 @@ class Backend:
 
         return []
 
-    def _has_no_legal_moves(self, color):
+    def _has_no_legal_moves(self, color: PieceColor) -> bool:
+        """
+        Say whether a side has no legal move at all, which paired with
+        is_in_check is what separates checkmate from stalemate. It also keeps
+        the clock from running on in a position that is already finished
+
+        :param color: side being tested
+        :returns: True when that side cannot make a single legal move
+        """
         for row, col in product(range(self.SIZE), repeat=2):
             piece = self.state[row][col]
             if piece is None or piece.color != color:
@@ -453,7 +744,19 @@ class Backend:
                 return False
         return True
 
-    def _knight_and_king_moves(self, square, piece, offsets):
+    def _knight_and_king_moves(self, square: Square, piece: Piece,
+                               offsets: list[tuple[int, int]]) -> list[Square]:
+        """
+        Generate the moves of a piece that steps by fixed offsets -- the knight
+        and the king -- keeping the steps that stay on the board and do not land
+        on a friendly piece. Castling is not part of this and is added
+        separately
+
+        :param square: square the piece stands on
+        :param piece: piece being moved, whose side says what is friendly
+        :param offsets: row and column steps to try, as (row delta, col delta)
+        :returns: squares the piece may step to
+        """
         moves = []
 
         for dr, dc in offsets:
@@ -469,7 +772,19 @@ class Backend:
 
         return moves
 
-    def _sliding_moves(self, square, piece, directions):
+    def _sliding_moves(self, square: Square, piece: Piece,
+                       directions: list[tuple[int, int]]) -> list[Square]:
+        """
+        Generate the moves of a piece that slides -- bishop, rook and queen --
+        walking each direction until the edge of the board, a friendly piece or
+        a capture stops it. The captured square is included, anything past it is
+        not
+
+        :param square: square the piece stands on
+        :param piece: piece being moved, whose side decides what blocks it
+        :param directions: one (row delta, col delta) step per direction to walk
+        :returns: squares the piece may slide to
+        """
         moves = []
 
         for dr, dc in directions:
@@ -493,7 +808,18 @@ class Backend:
 
         return moves
 
-    def _pawn_moves(self, square, piece):
+    def _pawn_moves(self, square: Square, piece: Piece) -> list[Square]:
+        """
+        Generate a pawn's moves: one square forward, two from its own starting
+        rank when both squares ahead are clear, a diagonal capture, and the
+        en-passant capture when the current target sits on that diagonal.
+        Promotion is not decided here -- reaching the last rank is noticed when
+        the move is applied
+
+        :param square: square the pawn stands on
+        :param piece: the pawn, whose side sets which way it marches
+        :returns: squares the pawn may move to
+        """
         moves = []
 
         direction = pawn_forward(piece.color)
@@ -523,7 +849,19 @@ class Backend:
 
         return moves
 
-    def _castling_moves(self, square, piece):
+    def _castling_moves(self, square: Square, piece: Piece) -> list[Square]:
+        """
+        Generate a king's castling destinations, which are offered only while
+        the right survives, the king still stands on its home square, the
+        squares between king and rook are empty, and neither the king's square
+        nor the ones it crosses are attacked. The crossing squares are tested
+        with _is_square_attacked rather than by generating the opponent's
+        replies, which is what stops the check test recursing back into here
+
+        :param square: square the king stands on
+        :param piece: the king being moved
+        :returns: castling destinations, empty when neither castle is available
+        """
         if piece.type != PieceType.KING:
             return []
         home_row = king_home_row(piece.color)
@@ -553,7 +891,17 @@ class Backend:
 
         return moves
 
-    def _is_castling_move(self, from_sq, to_sq, piece):
+    def _is_castling_move(self, from_sq: Square, to_sq: Square, piece: Piece) -> bool:
+        """
+        Recognise a king stepping two files from its home square as a castle, so
+        try_move sends it to the handler that also moves the rook. Whether the
+        castle is allowed was already settled by move generation
+
+        :param from_sq: square the piece starts on
+        :param to_sq: square it is moving to
+        :param piece: piece being moved
+        :returns: True when this move is a castle
+        """
         if piece.type != PieceType.KING:
             return False
         home_row = king_home_row(piece.color)
@@ -561,7 +909,17 @@ class Backend:
             return False
         return abs(to_sq.col - from_sq.col) == 2
 
-    def _is_en_passant_move(self, from_sq, to_sq, piece):
+    def _is_en_passant_move(self, from_sq: Square, to_sq: Square, piece: Piece) -> bool:
+        """
+        Recognise a pawn stepping diagonally onto the live en-passant target as
+        an en-passant capture, so it goes to the handler that also lifts the
+        pawn standing beside it
+
+        :param from_sq: square the piece starts on
+        :param to_sq: square it is moving to
+        :param piece: piece being moved
+        :returns: True when this move is an en-passant capture
+        """
         return (
             piece.type == PieceType.PAWN
             and self.en_passant_target is not None
@@ -569,7 +927,17 @@ class Backend:
             and to_sq.col != from_sq.col
         )
 
-    def _has_insufficient_material(self):
+    def _has_insufficient_material(self) -> bool:
+        """
+        Say whether too little material is left for anyone to mate, which draws
+        the game. Bare kings, a lone minor piece and one bishop each on
+        same-coloured squares all count, and so do knight against knight and two
+        knights against a bare king -- those last two are deliberate departures
+        from FIDE, which only calls a position dead when mate is truly
+        impossible. Two bishops against a bare king are treated as sufficient
+
+        :returns: True when the position is drawn for want of material
+        """
         non_kings = []
         bishops = []
         by_color = {PieceColor.WHITE: [], PieceColor.BLACK: []}
@@ -604,7 +972,19 @@ class Backend:
                         return True
         return False
 
-    def _is_square_attacked(self, square, by_color):
+    def _is_square_attacked(self, square: Square, by_color: PieceColor) -> bool:
+        """
+        Say whether a side attacks a given square, the test behind check
+        detection and behind the squares a king may not castle across. Pawn and
+        king attackers are matched by their own geometry instead of by
+        generating their moves, and that special case is a deliberate recursion
+        guard: a king's move generation asks about castling, which asks this
+        question again -- do not simplify it away
+
+        :param square: square being tested; it need not hold a piece
+        :param by_color: side whose attacks are being looked for
+        :returns: True when any piece of that side attacks the square
+        """
         for row, col in product(range(self.SIZE), repeat=2):
             piece = self.state[row][col]
             if piece is None or piece.color != by_color:
@@ -629,7 +1009,18 @@ class Backend:
 
         return False
 
-    def _would_leave_king_in_check(self, from_sq, to_sq):
+    def _would_leave_king_in_check(self, from_sq: Square, to_sq: Square) -> bool:
+        """
+        Try a move on the real board, ask whether the mover's own king ends up
+        attacked, then put everything back; this is the filter that turns
+        pseudo-legal moves into legal ones. The board is restored in a finally
+        block, the en-passant victim included, so nothing can leave the position
+        corrupted part-way through
+
+        :param from_sq: square the piece starts on
+        :param to_sq: square it would move to
+        :returns: True when the move would leave the mover's own king in check
+        """
         piece = self.state[from_sq.row][from_sq.col]
         if piece is None:
             return False
@@ -662,12 +1053,25 @@ class Backend:
 
         return in_check
 
-    def _find_king(self, color):
+    def _find_king(self, color: PieceColor) -> Square:
+        """
+        Locate a side's king, which every check test needs before it can ask
+        whether that square is attacked. A position missing a king is a broken
+        one, so this raises rather than quietly reporting an all-clear
+
+        :param color: side whose king is wanted
+        :returns: the square that king stands on
+        """
         for row, col in product(range(self.SIZE), repeat=2):
             piece = self.state[row][col]
             if piece is not None and piece.type == PieceType.KING and piece.color == color:
                 return Square(row, col)
         raise ValueError(f"No {color} king on the board")
 
-    def _switch_turn(self):
+    def _switch_turn(self) -> None:
+        """
+        Hand the move to the other side, done once when a ply completes and once
+        more when one is taken back. It is the only place the turn ever changes,
+        so it cannot drift out of step with the move history
+        """
         self.turn = opponent_of(self.turn)

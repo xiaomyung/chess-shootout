@@ -1,12 +1,15 @@
+from collections.abc import Callable
+
 from chessshootout.backend.fen import export_fen
 from chessshootout.backend.utils import coord_from_square
 from chessshootout.skillcheck.types import SkillCheckOutcome
 
 from chessshootout.server import logging_setup
-from chessshootout.server.connections import broadcast, send
+from chessshootout.server.connections import ConnectionRegistry, broadcast, send
 from chessshootout.server.protocol import (
     GameStartMessage, IdleWindowMessage, IdleWindowWire, ResultMessage,
     SkillCheckResultMessage)
+from chessshootout.server.rooms import PendingSkillCheck, Room, RoomManager
 
 
 log = logging_setup.get_logger("chess.server.app")
@@ -15,7 +18,21 @@ log = logging_setup.get_logger("chess.server.app")
 IDLE_WINDOW_PUSH_MIN_INTERVAL_SECONDS = 2.0
 
 
-async def finalize_and_broadcast(rooms, connections, room, reason, winner_color=None):
+async def finalize_and_broadcast(rooms: RoomManager, connections: ConnectionRegistry,
+                                 room: Room, reason: str,
+                                 winner_color: str | None = None) -> None:
+    """
+    End a game once and tell both players how it ended. The room decides whether
+    this attempt is the one that lands, and a concurrent caller that lost the
+    race broadcasts nothing; the frame that does go out is built from the stored
+    result, so both players are always told the same outcome
+
+    :param rooms: room manager that records the result
+    :param connections: registry used to reach both players
+    :param room: room whose game is ending
+    :param reason: why it ended, one of the shared reason codes
+    :param winner_color: winning side, or None for a draw or an abort
+    """
     applied = rooms.finalize_result(room.room_id, reason, winner_color=winner_color)
     if not applied:
         return
@@ -24,7 +41,17 @@ async def finalize_and_broadcast(rooms, connections, room, reason, winner_color=
                     ResultMessage(reason=result_reason, winner_color=result_winner))
 
 
-def _idle_window_wire(room, now):
+def _idle_window_wire(room: Room, now: float) -> IdleWindowWire | None:
+    """
+    Describe the countdown running against the silent side to move: what happens
+    when it reaches zero, whose turn it is and how long is left. A finished game,
+    a game with no window armed at this ply, or one with nobody to move has no
+    countdown at all
+
+    :param room: room to describe
+    :param now: monotonic time in seconds, used for the remaining time
+    :returns: the countdown to show, or None when none is running
+    """
     if (room.result is not None or room.idle_since is None
             or room.color_to_move() is None):
         return None
@@ -36,7 +63,21 @@ def _idle_window_wire(room, now):
         seconds_remaining=room.idle_remaining(now))
 
 
-async def push_idle_window(rooms, connections, room, now, *, force=False):
+async def push_idle_window(rooms: RoomManager, connections: ConnectionRegistry,
+                           room: Room, now: float, *, force: bool = False) -> None:
+    """
+    Push the idle countdown to both players so the timer on screen agrees with
+    the one the server keeps. Repeat pushes are throttled, since the sweep would
+    otherwise send one every tick; a caller that has just restarted the window
+    forces the send so the players see the reset immediately
+
+    :param rooms: room manager passed through to the broadcast
+    :param connections: registry used to reach both players
+    :param room: room whose countdown is being pushed
+    :param now: monotonic time in seconds, both the remaining time and the
+        throttle are measured from it
+    :param force: send even when the last push was recent
+    """
     wire = _idle_window_wire(room, now)
     if wire is None:
         return
@@ -48,7 +89,20 @@ async def push_idle_window(rooms, connections, room, now, *, force=False):
     await broadcast(rooms, connections, room, IdleWindowMessage(**wire.model_dump()))
 
 
-async def resolve_skillcheck_fail(rooms, connections, room):
+async def resolve_skillcheck_fail(rooms: RoomManager, connections: ConnectionRegistry,
+                                  room: Room) -> PendingSkillCheck | None:
+    """
+    Lose the skill check that is running: the move never lands, that exact pair
+    of squares is locked for the rest of the turn, the miss is written into the
+    room's shootout log and both boards are told. Every surface that can notice a
+    dead check -- the move gate, resume and the sweep -- funnels through here, so
+    a check is only ever resolved once
+
+    :param rooms: room manager passed through to the broadcast
+    :param connections: registry used to reach both players
+    :param room: room whose pending check is being failed
+    :returns: the check that was resolved, or None when there was none
+    """
     pending = room.pending_skillcheck
     if pending is None:
         return None
@@ -65,7 +119,20 @@ async def resolve_skillcheck_fail(rooms, connections, room):
     return pending
 
 
-async def broadcast_game_start(connections, room, now, rematch=False):
+async def broadcast_game_start(connections: ConnectionRegistry, room: Room,
+                               now: Callable[[], float], rematch: bool = False) -> None:
+    """
+    Start the game on both screens: each player is sent the opening position,
+    both names with their countries and series scores, the time control and
+    their own color. The frames are built per player because the color differs,
+    and each carries how long ago the game actually started so a client that
+    joined late does not run its clock from the wrong instant
+
+    :param connections: registry used to reach both players
+    :param room: paired room whose game is starting
+    :param now: monotonic seconds source, read for the elapsed-since-start value
+    :param rematch: True when this game follows an accepted rematch offer
+    """
     fen = export_fen(room.backend)
     started_seconds_ago = max(now() - (room.started_at or now()), 0.0)
     sent = []
