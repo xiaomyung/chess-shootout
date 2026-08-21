@@ -1,5 +1,10 @@
 [
   {
+    "title": "v2.12.2 — Spring Cleaning",
+    "body": "Under-the-hood maintenance release:\n- A full internal polish pass over the whole codebase, making future fixes and features faster and safer to ship\n- No gameplay changes — everything plays exactly as before",
+    "date": "2026-08-21"
+  },
+  {
     "title": "v2.12.1 — No Loitering",
     "body": "Quality-of-life sweep for online play:\n- Idle openings now resolve themselves: no first moves for a minute aborts the game, and going silent right after the opening auto-resigns — both players see the countdown ticking on the idle side's strip\n- Manual board flip (F) works in online games again, and your skill-check aim follows the flip correctly\n- Pick your server under Options › Online: Official or Custom, with a live connection test button\n- Opponent drawings now appear the instant they land, and reconnects restore the exact shared-marks state\n- Open PGN tells you what went wrong when it can't open — and hides itself when there is nothing saved yet",
     "date": "2026-08-11"

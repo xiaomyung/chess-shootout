@@ -53,8 +53,8 @@ Tests mirror the source layout, five dirs under `tests/`:
 - `tests/infra/` — cross-cutting app lifecycle/config: `paths`, `env`,
   `countries`, `icons`, `log_format`, `crash_log`, `migration`, `utf8`, plus
   whole-repo static guards (`imports`, `logging_hygiene`,
-  `server_no_pygame`) that scan the source tree rather than exercise one
-  module.
+  `server_no_pygame`, `docstring_guard`) that scan the source tree rather than
+  exercise one module.
 
 **Where does a new test go?** By the primary module under test — what the
 asserts verify, not an incidental import. A file that drives a real
@@ -174,7 +174,14 @@ when it is long or reused.
   *strategy* or a non-obvious invariant (tighten them).
 - `helpers.py` keeps its docstrings.
 
-Type hints and full docstrings everywhere are a separate later pass — not required here.
+Production code follows the repo-wide docstring + annotation standard
+(CONTRIBUTING.md, "Docstrings and types"), enforced by
+`tests/infra/test_docstring_guard.py` and mypy strict in CI. The shared
+test-infra modules (`helpers.py`, the conftests, `focus_helpers.py`) follow the
+same standard; ordinary test functions need docstrings only where rationale
+lives (see above). Guards that scan source text read it through
+`helpers.read_source_without_docstrings`, so prose in docstrings can never trip
+a code-shape tripwire — never scan raw file text in a new guard.
 
 ## Fixtures and helpers
 
