@@ -1,9 +1,11 @@
 import math
+from collections.abc import Callable, Sequence
 from typing import NamedTuple
 
 import pygame as pg
 
 from chessshootout.backend.utils import BOARD_SIZE, Square
+from chessshootout.frontend.audio.sound_manager import SoundManager
 from chessshootout.frontend.skillcheck.controller import SkillCheckController
 from chessshootout.frontend.skillcheck.juice import (
     Trauma, Hitstop, expire_particles, particle_ages, sakurai_vibrate, torn_sprite,
@@ -21,7 +23,8 @@ from chessshootout.frontend.visual.tween import out_cubic
 from chessshootout.infra import env
 from chessshootout.skillcheck.mole import (
     MOLE_GRACE_MS, MOLE_HITBOX_RX_FRAC, MOLE_HITBOX_RY_FRAC,
-    MOLE_INTRO_MS, MOLE_MAX_WHIFFS, MOLE_RECOIL_LOCKOUT_MS, hitbox_lift)
+    MOLE_INTRO_MS, MOLE_MAX_WHIFFS, MOLE_RECOIL_LOCKOUT_MS, MoleChallenge, MolePop,
+    hitbox_lift)
 from chessshootout.skillcheck.rng import seeded_floats
 
 MOLE_VIEW_FAIL_HOLD_MS = 1250
@@ -126,6 +129,12 @@ MOLE_VIEW_HITBOX_ACTIVE_LW = 2
 
 
 class MoleCasing(NamedTuple):
+    """
+    One spent shell in flight, from the shot that threw it out to the moment it
+    comes to rest. Speeds are pixels per second and the landing time is
+    seconds, so the whole arc can be evaluated from these at draw time
+    """
+
     spawn_ms: float
     x0: float
     y0: float
@@ -137,6 +146,12 @@ class MoleCasing(NamedTuple):
 
 
 class MoleToss(NamedTuple):
+    """
+    The beaten mole's flight off the board after a won check: where the body
+    left from, how fast, and which way it tumbles. Everything else about the
+    arc is worked out per frame from these
+    """
+
     x0: float
     y0: float
     vx: float
@@ -154,7 +169,18 @@ _POP_APEX = MOLE_VIEW_POP_HEIGHT_FRAC * MOLE_VIEW_POP_OVERSHOOT
 _CLEAR = (0, 0, 0, 0)
 
 
-def _blit_alpha(window, surf, pos, alpha):
+def _blit_alpha(window: pg.Surface, surf: pg.Surface, pos: tuple[int, int],
+                alpha: int) -> None:
+    """
+    Blit a shared sprite at a given opacity and hand it back untouched. Almost
+    everything drawn here comes out of a cache, so a fade has to be put on and
+    taken off around the blit rather than baked into the surface
+
+    :param window: surface being drawn onto
+    :param surf: the shared sprite to blit, left at full opacity afterwards
+    :param pos: top-left corner in window pixels
+    :param alpha: opacity from 0 to 255; 255 blits it as it is
+    """
     if alpha < 255:
         surf.set_alpha(alpha)
     window.blit(surf, pos)
@@ -162,20 +188,102 @@ def _blit_alpha(window, surf, pos, alpha):
         surf.set_alpha(255)
 
 
-def _puff_color(age_frac, index):
+def _puff_color(age_frac: float, index: int) -> pg.Color:
+    """
+    Colour one mote of the dust a wild shot kicks up, cooling through the dim
+    greys as the puff ages
+
+    :param age_frac: how far through its life the puff is, 0.0 fresh to 1.0
+        gone
+    :param index: which mote of the burst it is, ignored here so that dust of
+        one age matches
+    :returns: the colour to draw that mote in
+    """
     return _DUST_COLORS[min(int(age_frac * len(_DUST_COLORS)), len(_DUST_COLORS) - 1)]
 
 
-def _debris_color(age_frac, index):
+def _debris_color(age_frac: float, index: int) -> pg.Color:
+    """
+    Colour one chunk thrown off a mole that was hit, cycling the hot colours so
+    a burst reads as sparks rather than one blob
+
+    :param age_frac: how far through its life the burst is, ignored here since
+        a chunk keeps its colour as it flies
+    :param index: which chunk of the burst it is, which picks the colour
+    :returns: the colour to draw that chunk in
+    """
     return _DEBRIS_COLORS[index % len(_DEBRIS_COLORS)]
 
 
 class MoleController(SkillCheckController):
+    """
+    Runs the Whack-a-Mole check a capture can fire: moles pop out of seeded
+    pits dug around the victim and the player shoots them with the crosshair.
+    The quota grows with the prize -- three pops for a pawn, four for a knight,
+    bishop or rook, all five for a queen -- and the check is lost on
+    MOLE_MAX_WHIFFS wild shots, on the deadline, or as soon as the quota stops
+    being reachable. Online it draws and reports only: a shot travels as an
+    elapsed time plus a board-space point, and the server judges it
+    """
 
-    def __init__(self, challenge, cell_rect, now_ms, deadline_ms, *, hole_squares=None,
-                 victim_surface=None, geom=None, from_sq=None, shot_sound=None, on_shot=None,
-                 miss_count=0, progress=0, passive=False, audio=None, on_hit_px=None,
-                 mirror_targets=False, last_hit_pop=-1, adjudicated_flipped=None):
+    def __init__(self, challenge: MoleChallenge, cell_rect: pg.Rect, now_ms: int,
+                 deadline_ms: float, *,
+                 hole_squares: Sequence[tuple[int, int]] | None = None,
+                 victim_surface: pg.Surface | None = None,
+                 geom: Callable[[Square], tuple[int, int]] | None = None,
+                 from_sq: Square | None = None,
+                 shot_sound: Callable[[], None] | None = None,
+                 on_shot: Callable[..., None] | None = None,
+                 miss_count: int = 0, progress: int = 0, passive: bool = False,
+                 audio: SoundManager | None = None,
+                 on_hit_px: Callable[[tuple[float, float], bool], None] | None = None,
+                 mirror_targets: bool = False, last_hit_pop: int = -1,
+                 adjudicated_flipped: bool | None = None) -> None:
+        """
+        Open one whack check over a square: size everything to the board, hide
+        the pointer in favour of the crosshair and start the mole dropping into
+        its home pit. A check resumed after a reconnect is built with the hits
+        and misses it already had, so it carries on rather than starting again
+
+        :param challenge: the pop schedule, built from the check's seed so both
+            players and the server share it exactly
+        :param cell_rect: the board square the check is anchored on, whose
+            width is the scale for everything drawn
+        :param now_ms: pygame tick count the check counts from, already
+            backdated by however much of the deadline has gone
+        :param deadline_ms: how long the whole check may run, in milliseconds
+        :param hole_squares: pit squares in pit order, derived again from the
+            seed on this machine; the judge derives its own copy and never
+            takes geometry from a client
+        :param victim_surface: sprite of the piece being shot at, which stands
+            in as the mole; None leaves nothing to draw
+        :param geom: turns a board square into its centre in window pixels, the
+            only bridge between board space and the screen; None falls back to
+            a row of pits that can be drawn but never hit
+        :param from_sq: square the capturing piece stands on, which aims the
+            body's flight and anchors the whiff badges
+        :param shot_sound: plays the capturer's own weapon on every shot, None
+            for silence
+        :param on_shot: reports a shot to the server as an elapsed time and a
+            board-space point; None offline, where this controller judges for
+            itself
+        :param miss_count: wild shots already spent, for a resumed check
+        :param progress: moles already hit, likewise
+        :param passive: True for the read-only mirror of the opponent's check,
+            which takes no input and sends nothing
+        :param audio: the app's sound manager, None when there is nothing to
+            play through
+        :param on_hit_px: hands each hit's window pixels back to the game
+            screen, which fires the gun there and takes the piece on the hit
+            that fills the quota
+        :param mirror_targets: True when the shots arriving are the opponent's
+            and have to be re-anchored into this board's orientation
+        :param last_hit_pop: pop already hit before this controller was built,
+            so a resumed check cannot shoot one mole twice; -1 for none
+        :param adjudicated_flipped: which way up the board is for the player
+            actually shooting, since a mole is drawn above its hole; None
+            offline, where nobody else has to agree
+        """
         self._init_common(challenge, now_ms, deadline_ms, on_shot=on_shot, passive=passive,
                           audio=audio)
         self._hole_squares = tuple(hole_squares) if hole_squares is not None else ()
@@ -218,7 +326,14 @@ class MoleController(SkillCheckController):
         self._apply_geometry(cell_rect)
         self._cue("play_mole_fall")
 
-    def _reset_effects(self, flash_px):
+    def _reset_effects(self, flash_px: tuple[int, int]) -> None:
+        """
+        Put every effect back to nothing -- shake, freeze, particles, casings,
+        the body's flight -- so the check starts on a quiet board
+
+        :param flash_px: where the muzzle flash would sit until the first shot
+            moves it, in window pixels
+        """
         self._hit_flash_ms = None
         self._vibrate_ms = None
         self._vibrate_dur_ms = 0.0
@@ -234,7 +349,16 @@ class MoleController(SkillCheckController):
         self._seam_sparks = []
         self._last_heal_bucket = 0
 
-    def _apply_geometry(self, cell_rect):
+    def _apply_geometry(self, cell_rect: pg.Rect) -> None:
+        """
+        Size the whole check to the board as it stands, at build time and again
+        after every resize or flip. Pits, crosshair, badges and the mole sprite
+        are all derived from one cell's width, and the caches keyed by pixel
+        size are dropped because nothing in them fits any more
+
+        :param cell_rect: the board square the check is anchored on, whose
+            width is the scale for everything drawn
+        """
         cell = max(int(cell_rect.width), 1)
         self.center = cell_rect.center
         self.cell_size = cell
@@ -262,7 +386,17 @@ class MoleController(SkillCheckController):
         self._heal_cache.clear()
         self._emerge_scratch.clear()
 
-    def _derive_affine(self):
+    def _derive_affine(self) -> tuple[float, float, float, float] | None:
+        """
+        Measure the board once by asking it for two squares, giving the
+        straight-line mapping between board space and window pixels. Every
+        crossing between the two goes through it: shots on their way out,
+        relayed shots coming in, and the debug hit boxes
+
+        :returns: (x of the first square's centre, its y, pixels per column,
+            pixels per row -- negative when the board is drawn from Black's
+            side), or None when there is no board to measure
+        """
         if self._geom is None:
             return None
         x0, y0 = self._geom(Square(0, 0))
@@ -272,7 +406,14 @@ class MoleController(SkillCheckController):
             return None
         return (float(x0), float(y0), float(dx), float(dy))
 
-    def _hole_centers(self):
+    def _hole_centers(self) -> tuple[tuple[int, int], ...]:
+        """
+        Put every pit on screen, one per pit square. With no board to ask, they
+        are simply spread in a row about the anchor square, which draws but can
+        never be shot at
+
+        :returns: centre of each pit in window pixels, in pit order
+        """
         if self._geom is not None:
             return tuple(self._geom(Square(row, col)) for row, col in self._hole_squares)
         n = len(self._hole_squares)
@@ -280,30 +421,75 @@ class MoleController(SkillCheckController):
         return tuple((int(self.center[0] + (i - (n - 1) / 2.0) * spread), self.center[1])
                      for i in range(n))
 
-    def _board_to_px(self, row_f, col_f):
+    def _board_to_px(self, row_f: float, col_f: float) -> tuple[float, float] | None:
+        """
+        Turn a point in board space into window pixels, which is how a shot the
+        server relayed becomes something this screen can draw
+
+        :param row_f: row in board space, a whole number being a square edge
+            and a half its centre
+        :param col_f: column in that same board space
+        :returns: the point in window pixels, or None with no board mapping
+        """
         if self._affine is None:
             return None
         x0, y0, dx, dy = self._affine
         return (x0 + (col_f - 0.5) * dx, y0 + (row_f - 0.5) * dy)
 
-    def _shot_target(self, pos):
+    def _shot_target(self, pos: tuple[int, int]) -> tuple[float, float] | None:
+        """
+        Turn the pixel the player shot at into the board-space point that gets
+        judged. This pair of numbers is all that ever leaves the machine -- the
+        judge holds the geometry itself, so no client can describe its own hit
+        boxes
+
+        :param pos: where the shot was aimed, in window pixels
+        :returns: (row, column) in board space, or None with no board mapping
+        """
         if self._affine is None:
             return None
         x0, y0, dx, dy = self._affine
         return ((pos[1] - y0) / dy + 0.5, (pos[0] - x0) / dx + 0.5)
 
-    def _clamp_target(self, target):
+    def _clamp_target(self, target: tuple[float, float]) -> tuple[float, float]:
+        """
+        Hold a board-space point inside the board, so neither a shot leaving
+        for the server nor a relayed one being drawn can sit off the edge of it
+
+        :param target: (row, column) in board space
+        :returns: the same point held inside the board's span
+        """
         return (min(max(target[0], 0.0), MOLE_VIEW_TARGET_MAX),
                 min(max(target[1], 0.0), MOLE_VIEW_TARGET_MAX))
 
-    def _wire_target(self, target):
+    def _wire_target(self, target: tuple[float, float]) -> tuple[float, float]:
+        """
+        Restate a shot in the orientation the judge is using. A mole is drawn
+        above its hole, so the hit box is lifted off the square, and a player
+        who has flipped their own board would otherwise report shots lifted the
+        wrong way from where the server looks for them
+
+        :param target: (row, column) in board space as this screen sees it
+        :returns: the point to report, unchanged when both sides already agree
+            which way is up
+        """
         if (self._adjudicated_flipped is None
                 or self._adjudicated_flipped == (self._affine[3] < 0)):
             return target
         return self._clamp_target(
             (target[0] + 2.0 * hitbox_lift(self._adjudicated_flipped), target[1]))
 
-    def handle_event(self, event):
+    def handle_event(self, event: pg.event.Event) -> bool:
+        """
+        Take the player's shots while the check is live: a left click or the
+        space bar fires at the cursor. The mirror takes nothing at all, and
+        once the check is decided or the quota filled events are swallowed
+        rather than acted on, so a late click cannot fall through onto the
+        board
+
+        :param event: event handed down by the skill-check overlay
+        :returns: True when the check consumed it
+        """
         if self._passive:
             return False
         if self._committed_at is not None or self._quota_met():
@@ -316,10 +502,25 @@ class MoleController(SkillCheckController):
             return True
         return False
 
-    def _quota_met(self):
+    def _quota_met(self) -> bool:
+        """
+        Whether enough moles have been hit to land the move -- three for a
+        pawn, four for a knight, bishop or rook, all five pops for a queen
+
+        :returns: True once the quota is filled
+        """
         return self._progress >= self.challenge.hits_required
 
-    def _fire(self, pos):
+    def _fire(self, pos: tuple[int, int]) -> None:
+        """
+        Fire one shot. The recoil lockout can eat it outright; otherwise it
+        becomes a board-space point that is drawn, reported to the server
+        online and judged here offline. A hit ducks the mole and counts towards
+        the quota, a miss spends one of MOLE_MAX_WHIFFS and loses the check
+        when the last is gone
+
+        :param pos: where the shot was aimed, in window pixels
+        """
         if (self._last_shot_ms is not None
                 and self._now - self._last_shot_ms < MOLE_RECOIL_LOCKOUT_MS):
             self._cue("play_whack_dry")
@@ -350,7 +551,16 @@ class MoleController(SkillCheckController):
                 self._commit(False)
         self._spawn_casing(pos)
 
-    def _register_hit(self, elapsed, shot_px):
+    def _register_hit(self, elapsed: float, shot_px: tuple[int, int]) -> None:
+        """
+        Land a hit: the mole that was up ducks away, the quota moves on, the
+        juice plays and the game screen is told where it happened so the gun
+        fires there. Offline the hit that fills the quota also wins the check
+
+        :param elapsed: milliseconds into the check the shot was fired at
+        :param shot_px: where the shot landed in window pixels, used only when
+            the pit it hit cannot be placed
+        """
         idx = self.challenge.pop_up_at(elapsed)
         self._duck_pop(idx, elapsed)
         hole = self.challenge.pops[idx].hole
@@ -369,14 +579,30 @@ class MoleController(SkillCheckController):
             if not self._online:
                 self._commit(True)
 
-    def _emit_hit_px(self, shot_px, kill):
+    def _emit_hit_px(self, shot_px: tuple[float, float] | None, kill: bool) -> None:
+        """
+        Tell the game screen where a hit landed, so the gun's muzzle flash goes
+        off on the board and the hit that fills the quota takes the piece
+        standing there
+
+        :param shot_px: fallback point in window pixels for when the pit is not
+            known, None when there is not even that
+        :param kill: True when this hit fills the quota
+        """
         if self._on_hit_px is None:
             return
         px = self._last_hit_px if self._last_hit_px is not None else shot_px
         if px is not None:
             self._on_hit_px(px, kill)
 
-    def _hit_juice(self, kill):
+    def _hit_juice(self, kill: bool) -> None:
+        """
+        Play everything a hit feels like at once: the screen shakes, the frame
+        freezes for a beat, the body shivers and flashes white, and debris
+        comes off it. The killing hit gets the longer freeze
+
+        :param kill: True when this hit fills the quota
+        """
         self._trauma.add(MOLE_VIEW_TRAUMA_PER_HIT)
         dur = MOLE_VIEW_HITSTOP_KILL_MS if kill else MOLE_VIEW_HITSTOP_HIT_MS
         self._hitstop.trigger(self._now, dur)
@@ -385,7 +611,14 @@ class MoleController(SkillCheckController):
         self._hit_flash_ms = self._now
         self._spawn_debris(self._last_hit_px if self._last_hit_px is not None else self.center)
 
-    def _spawn_casing(self, pos):
+    def _spawn_casing(self, pos: tuple[float, float]) -> None:
+        """
+        Throw a spent shell out of the gun. Its whole arc is drawn from the
+        shot's number, so the same shot always throws the same casing however
+        many times the moment is replayed
+
+        :param pos: where the shot was fired, in window pixels
+        """
         self._shot_count += 1
         cell = self.cell_size
         f = seeded_floats(f"molecasing:{self._shot_count}", 3)
@@ -399,17 +632,48 @@ class MoleController(SkillCheckController):
         self._casings.append(
             MoleCasing(self._now, float(pos[0]), float(pos[1]), vx, vy, g, t_land, spin))
 
-    def _spawn_burst(self, items, pos, prefix, count, tag=""):
+    def _spawn_burst(self, items: list[tuple[float, float, float, tuple[float, ...]]],
+                     pos: tuple[float, float], prefix: str, count: int,
+                     tag: str = "") -> None:
+        """
+        Start one particle burst, keeping only when and where it began plus the
+        seeded numbers its motes fly by. Every mote is worked out again at draw
+        time, so nothing per-particle is ever stored or stepped
+
+        :param items: the burst list to append to
+        :param pos: origin of the burst in window pixels
+        :param prefix: seed namespace, which keeps one effect's randomness out
+            of another's
+        :param count: how many motes the burst has
+        :param tag: extra seed text so two bursts from one shot differ
+        """
         f = seeded_floats(f"{prefix}:{tag}{self._shot_count + 1}", count * 2)
         items.append((self._now, float(pos[0]), float(pos[1]), f))
 
-    def _spawn_puffs(self, pos):
+    def _spawn_puffs(self, pos: tuple[float, float]) -> None:
+        """
+        Kick up dust where a shot hit nothing, the visible half of a whiff
+
+        :param pos: where the shot landed, in window pixels
+        """
         self._spawn_burst(self._puffs, pos, "molepuff", MOLE_VIEW_PUFF_COUNT)
 
-    def _spawn_debris(self, pos, tag=""):
+    def _spawn_debris(self, pos: tuple[float, float], tag: str = "") -> None:
+        """
+        Throw chunks off a mole that has just been hit or beaten
+
+        :param pos: where the hit landed, in window pixels
+        :param tag: extra seed text so the burst on the body's flight differs
+            from the one on the hit that started it
+        """
         self._spawn_burst(self._debris, pos, "moledebris", MOLE_VIEW_DEBRIS_COUNT, tag=tag)
 
-    def _spawn_seam_sparks(self):
+    def _spawn_seam_sparks(self) -> None:
+        """
+        Spit sparks out of the seam while a beaten mole knits itself back
+        together, one pair per step of the healing. Tying them to the steps
+        rather than to frames keeps the shower the same on any machine
+        """
         if self._jump_elapsed() is None or self._damage_tier() <= 0:
             return
         bucket = self._heal_bucket()
@@ -424,7 +688,16 @@ class MoleController(SkillCheckController):
                     (self._now, side, frac, speed_base + speed_span * speed_f,
                      rise_base + rise_span * rise_f))
 
-    def _spectate_px(self, target):
+    def _spectate_px(self, target: tuple[float, float]) -> tuple[float, float] | None:
+        """
+        Turn a shot the server relayed into a point on this board. The screen
+        has already clamped it inside the board before it gets here; what is
+        left is re-anchoring, because the mole sat above its hole on the
+        shooter's screen and this board may be the other way up
+
+        :param target: (row, column) in board space as the shooter aimed it
+        :returns: the point in window pixels, or None with no board mapping
+        """
         px = self._board_to_px(target[0], target[1])
         if px is None or not self._mirror_targets:
             return px
@@ -432,7 +705,16 @@ class MoleController(SkillCheckController):
         mover = hitbox_lift(bool(self._adjudicated_flipped))
         return (px[0], px[1] + (own - mover) * self._affine[3])
 
-    def _reanchored_hit_px(self):
+    def _reanchored_hit_px(self) -> tuple[float, float] | None:
+        """
+        Find where the last hit landed on the board as it is now, from the pit
+        it happened in or, in the mirror, from the point the server relayed.
+        Without this a resize or a flip would leave the win burst and the gun's
+        muzzle sitting on pixels that no longer mean anything
+
+        :returns: the point in window pixels, or None when there is nothing to
+            re-anchor
+        """
         hole = self._last_hit_hole
         if hole is not None:
             return self._hole_px[hole] if hole < len(self._hole_px) else None
@@ -440,8 +722,24 @@ class MoleController(SkillCheckController):
             return None
         return self._spectate_px(self._last_hit_spectate_target)
 
-    def spectate_shot(self, elapsed, miss_count, won, progress=0, direction=None,
-                      target=None):
+    def spectate_shot(self, elapsed: float, miss_count: int, won: bool, progress: int = 0,
+                      direction: str | None = None,
+                      target: tuple[float, float] | None = None) -> None:
+        """
+        Replay one of the opponent's shots inside the read-only mirror, so both
+        players watch the same shootout. Nothing is judged here: the progress
+        and misses are taken as the server states them, and the point is used
+        only to put the impact ring, the casing and the dust somewhere true
+
+        :param elapsed: milliseconds into the check their shot was fired at
+        :param miss_count: wild shots they had spent before this one
+        :param won: True when this shot ended the whole check in their favour
+        :param progress: moles they have hit in total, which is what moves the
+            quota pips
+        :param direction: answer to a combo prompt, never sent for whack
+        :param target: (row, column) in board space they aimed at, already
+            clamped to the board, None when the server sent none
+        """
         px = None
         if target is not None:
             px = self._spectate_px(target)
@@ -466,7 +764,14 @@ class MoleController(SkillCheckController):
             if px is not None:
                 self._spawn_puffs(px)
 
-    def resolve(self, won):
+    def resolve(self, won: bool) -> None:
+        """
+        Take the server's verdict, which is the only thing that ends an online
+        check. The hold before the overlay may close starts here, and a lost
+        check sets the beaten mole healing
+
+        :param won: True when the server says the shooter landed it
+        """
         self._landed = won
         if self._committed_at is None:
             self._committed_at = self._now
@@ -477,7 +782,13 @@ class MoleController(SkillCheckController):
         self._cue_heal()
         self._restore_cursor()
 
-    def _commit(self, landed):
+    def _commit(self, landed: bool) -> None:
+        """
+        End an offline check with a verdict of our own -- the quota filled, the
+        whiffs spent, the deadline gone, or the quota out of reach
+
+        :param landed: True when the player won it
+        """
         self._landed = landed
         self._committed_at = self._now
         if landed:
@@ -486,19 +797,40 @@ class MoleController(SkillCheckController):
         self._cue_heal()
         self._restore_cursor()
 
-    def _cue_heal(self):
+    def _cue_heal(self) -> None:
+        """
+        Play the mole stitching itself back together, but only after a lost
+        check that actually tore it
+        """
         if self._landed is False and self._damage_tier() > 0:
             self._cue("play_mole_heal")
 
-    def close(self):
+    def close(self) -> None:
+        """
+        Give the pointer back when the overlay is torn down without a verdict,
+        which happens when the screen is left or the game ends mid-check
+        """
         self._restore_cursor()
 
-    def _restore_cursor(self):
+    def _restore_cursor(self) -> None:
+        """
+        Show the mouse pointer again, which the check hid while the crosshair
+        stood in for it. Safe to call more than once
+        """
         if self._cursor_hidden:
             pg.mouse.set_visible(True)
             self._cursor_hidden = False
 
-    def update(self, now_ms):
+    def update(self, now_ms: int) -> None:
+        """
+        Advance the check one frame: age the particles, hold the animation
+        clock still through a freeze frame, and play the cues each pop is due.
+        Offline this is also where the check is lost, either on the deadline or
+        the moment the quota can no longer be reached; online none of that
+        happens here, because the server says when it is over
+
+        :param now_ms: pygame tick count in milliseconds for this frame
+        """
         dt = now_ms - self._now
         self._now = now_ms
         self._trauma.update(now_ms)
@@ -522,7 +854,15 @@ class MoleController(SkillCheckController):
                                          elapsed, self._progress, self._last_hit_pop)):
                 self._commit(False)
 
-    def _cue_schedule(self, elapsed):
+    def _cue_schedule(self, elapsed: float) -> None:
+        """
+        Play the telegraph and pop sounds as the schedule reaches them. The
+        first pass only takes note of what has already gone by, so a check
+        adopted mid-flight after a reconnect does not fire every cue it missed
+        in one burst
+
+        :param elapsed: milliseconds since the check started
+        """
         pops = self.challenge.pops
         live = self._cues_primed
         self._cues_primed = True
@@ -537,7 +877,14 @@ class MoleController(SkillCheckController):
                 self._cue("play_mole_pop")
 
     @property
-    def done(self):
+    def done(self) -> bool:
+        """
+        Whether the overlay may close. The verdict is held on screen first,
+        longer after a loss so the mole's escape has time to play; online that
+        hold only starts when the server's verdict arrives
+
+        :returns: True once the overlay can be torn down
+        """
         hold = MOLE_VIEW_WIN_HOLD_MS if self._landed else MOLE_VIEW_FAIL_HOLD_MS
         if self._online:
             if self._resolved_at is None:
@@ -547,7 +894,15 @@ class MoleController(SkillCheckController):
             return False
         return self._now - self._committed_at >= hold
 
-    def draw(self, window):
+    def draw(self, window: pg.Surface) -> None:
+        """
+        Draw the whole check for this frame, back to front: the pits, the dust,
+        the mole, casings, debris, impacts and the win burst, then the player's
+        own crosshair and the two rows of badges. The mirror draws no crosshair
+        -- there is nothing in it for the watcher to aim
+
+        :param window: surface the check is drawn onto
+        """
         elapsed = self._frozen_elapsed()
         off = self._trauma.offset(self._now, self.cell_size * MOLE_VIEW_TRAUMA_OFFSET_FRAC)
         group = (int(off[0]), int(off[1]))
@@ -565,7 +920,15 @@ class MoleController(SkillCheckController):
         if self._debug_hitbox:
             self._draw_hitboxes(window, elapsed)
 
-    def _telegraph_hole(self, elapsed):
+    def _telegraph_hole(self, elapsed: float) -> tuple[int, int] | None:
+        """
+        Find the pit that is lit right now, in the warning window between a
+        mole being telegraphed and appearing
+
+        :param elapsed: milliseconds since the check started
+        :returns: (pop index, pit index) of the lit pit, or None when nothing
+            is warming up
+        """
         if self._committed_at is not None:
             return None
         for index, pop in enumerate(self.challenge.pops):
@@ -573,7 +936,18 @@ class MoleController(SkillCheckController):
                 return index, pop.hole
         return None
 
-    def _draw_pits(self, window, elapsed, group):
+    def _draw_pits(self, window: pg.Surface, elapsed: float,
+                   group: tuple[int, int]) -> None:
+        """
+        Draw the ground: the home pit and every dug pit, each opening on its
+        own beat so the holes arrive as a wave rather than all at once. The one
+        being telegraphed is drawn lit instead of resting
+
+        :param window: surface the pits are drawn onto
+        :param elapsed: milliseconds since the check started
+        :param group: screen-shake offset in pixels, applied to everything
+            anchored to the board
+        """
         self._draw_home_pit(window, elapsed, group)
         tele = self._telegraph_hole(elapsed)
         pit = pit_surface(self._pit_rx, self._pit_ry, self._signal_color(Colors.accent))
@@ -593,12 +967,31 @@ class MoleController(SkillCheckController):
                 surf = self._telegraph_surface(tele[0])
             window.blit(surf, (cx - surf.get_width() // 2, cy - surf.get_height() // 2))
 
-    def _draw_pit_mouth(self, window, cx, cy, scale):
+    def _draw_pit_mouth(self, window: pg.Surface, cx: int, cy: int, scale: float) -> None:
+        """
+        Draw a pit that is only part open as a bare dark oval, which is how a
+        hole looks while it is still being dug and again while it closes at the
+        end of the check
+
+        :param window: surface the pit is drawn onto
+        :param cx: centre of the pit across the window, in pixels
+        :param cy: centre of the pit down the window, in pixels
+        :param scale: how far open it is, 0.0 shut to 1.0 fully dug
+        """
         rx = max(int(self._pit_rx * scale), 2)
         ry = max(int(self._pit_ry * scale), 1)
         pg.draw.ellipse(window, PIT_DARK, pg.Rect(cx - rx, cy - ry, 2 * rx, 2 * ry))
 
-    def _draw_home_pit(self, window, elapsed, group):
+    def _draw_home_pit(self, window: pg.Surface, elapsed: float,
+                       group: tuple[int, int]) -> None:
+        """
+        Draw the hole under the piece being captured, which the mole drops into
+        as the check opens and hops back out of if it survives
+
+        :param window: surface the pit is drawn onto
+        :param elapsed: milliseconds since the check started
+        :param group: screen-shake offset in pixels
+        """
         scale = min(elapsed / MOLE_VIEW_HOLE_OPEN_MS, 1.0) * self._home_pit_close_scale()
         if scale <= 0.0:
             return
@@ -610,25 +1003,54 @@ class MoleController(SkillCheckController):
         window.blit(surf, (cx - surf.get_width() // 2, cy - surf.get_height() // 2))
 
     @staticmethod
-    def _close_ramp(closing_ms):
+    def _close_ramp(closing_ms: float) -> float:
+        """
+        Turn time spent closing into how open a pit still is, the one ramp
+        behind every hole shutting at the end of a check
+
+        :param closing_ms: milliseconds since this pit began to close, zero or
+            less meaning it has not started
+        :returns: how open it is, 1.0 down to 0.0
+        """
         if closing_ms <= 0.0:
             return 1.0
         return max(1.0 - closing_ms / MOLE_VIEW_PIT_CLOSE_MS, 0.0)
 
-    def _outro_start(self):
+    def _outro_start(self) -> float | None:
+        """
+        Say when the ground starts closing up, which is as soon as the check is
+        decided -- except after a win, where the freeze frame on the killing
+        blow is allowed to finish first
+
+        :returns: the tick count in milliseconds it starts at, or None while
+            the check is still being fought
+        """
         if self._committed_at is None:
             return None
         if self._landed:
             return self._committed_at + MOLE_VIEW_HITSTOP_KILL_MS
         return self._committed_at
 
-    def _pit_close_scale(self, index):
+    def _pit_close_scale(self, index: int) -> float:
+        """
+        How open one dug pit still is, staggered so the holes shut in the same
+        wave they opened in
+
+        :param index: which pit, in pit order
+        :returns: how open it is, 1.0 down to 0.0
+        """
         start = self._outro_start()
         if start is None:
             return 1.0
         return self._close_ramp(self._now - start - index * MOLE_VIEW_HOLE_STAGGER_MS)
 
-    def _home_pit_close_scale(self):
+    def _home_pit_close_scale(self) -> float:
+        """
+        How open the mole's home pit still is. A mole that survived hops out of
+        it first, so after a loss the hole only shuts once the hop is over
+
+        :returns: how open it is, 1.0 down to 0.0
+        """
         jump_t = self._jump_elapsed()
         if jump_t is not None:
             return self._close_ramp(jump_t - MOLE_VIEW_JUMP_RISE_MS - MOLE_VIEW_JUMP_HOP_MS)
@@ -637,7 +1059,15 @@ class MoleController(SkillCheckController):
             return 1.0
         return self._close_ramp(self._now - start)
 
-    def _telegraph_surface(self, index):
+    def _telegraph_surface(self, index: int) -> pg.Surface:
+        """
+        Pick the lit pit for a mole on its way up: an ordinary breathing
+        telegraph, or the two-frame alarm when this is a pop the quota cannot
+        survive missing
+
+        :param index: which pop in the schedule is being telegraphed
+        :returns: the shared telegraph pit to blit
+        """
         danger = self.challenge.pop_mandatory(index, self._progress)
         if danger:
             pulse = cosine_pulse(self._anim_ms, MOLE_VIEW_DANGER_PULSE_MS)
@@ -648,26 +1078,60 @@ class MoleController(SkillCheckController):
         return pit_telegraph_surface(self._pit_rx, self._pit_ry, bucket, danger,
                                      self._signal_color(Colors.accent))
 
-    def _damage_tier(self):
+    def _damage_tier(self) -> int:
+        """
+        Say how badly the mole is chewed up, which climbs with the share of the
+        quota already filled. It is how the sprite reports the score without a
+        number anywhere near it
+
+        :returns: tier from 0 for untouched up to TORN_MAX_TIER
+        """
         required = max(self.challenge.hits_required, 1)
         steps = -(-TORN_MAX_TIER * self._progress // required)
         return max(min(steps, TORN_MAX_TIER), 0)
 
-    def _heal_progress(self):
+    def _heal_progress(self) -> float:
+        """
+        How far a mole that survived has got through its escape -- rising,
+        hopping and knitting itself back together are measured as one ramp
+
+        :returns: 0.0 at the verdict up to 1.0 whole again
+        """
         jump_t = self._jump_elapsed()
         if jump_t is None:
             return 0.0
         total = MOLE_VIEW_JUMP_RISE_MS + MOLE_VIEW_JUMP_HOP_MS + MOLE_VIEW_REGROW_MS
         return min(max(jump_t / total, 0.0), 1.0)
 
-    def _heal_bucket(self):
+    def _heal_bucket(self) -> int:
+        """
+        Quantise the healing into steps, so the seam moves in stages whose
+        sprites are each built once and cached instead of once a frame
+
+        :returns: step from 0 to MOLE_VIEW_HEAL_BUCKETS
+        """
         return min(int(self._heal_progress() * MOLE_VIEW_HEAL_BUCKETS),
                    MOLE_VIEW_HEAL_BUCKETS)
 
-    def _torn_victim(self, tier):
+    def _torn_victim(self, tier: int) -> pg.Surface:
+        """
+        Get the victim's sprite chewed up to one tier, keyed by the schedule
+        and the board size so every check tears its mole its own way
+
+        :param tier: how badly torn, 0 leaving the sprite whole
+        :returns: the shared torn sprite
+        """
         return torn_sprite(self._victim, (self._torn_key, self.cell_size), tier)
 
-    def _heal_sprite(self, tier, bucket):
+    def _heal_sprite(self, tier: int, bucket: int) -> pg.Surface:
+        """
+        Get the sprite part-way through healing -- still torn above the seam,
+        whole below it -- for one step of the mole's recovery
+
+        :param tier: how badly torn the body was
+        :param bucket: step of the heal, counted from 0
+        :returns: the sprite for that step, the whole one once healing is done
+        """
         if tier <= 0 or bucket >= MOLE_VIEW_HEAL_BUCKETS:
             return self._victim
         if bucket <= 0:
@@ -678,7 +1142,15 @@ class MoleController(SkillCheckController):
             self._heal_cache[(tier, bucket)] = cached
         return cached
 
-    def _build_heal_sprite(self, tier, bucket):
+    def _build_heal_sprite(self, tier: int, bucket: int) -> pg.Surface:
+        """
+        Build one step of the heal: the torn body down to the seam, the whole
+        body below it, and the hot band laid over the join
+
+        :param tier: how badly torn the body was
+        :param bucket: step of the heal, which fixes where the seam sits
+        :returns: the finished sprite, which the caller caches
+        """
         torn = self._torn_victim(tier)
         w, h = torn.get_size()
         frac = 1.0 - bucket / MOLE_VIEW_HEAL_BUCKETS
@@ -693,7 +1165,14 @@ class MoleController(SkillCheckController):
                   special_flags=pg.BLEND_RGB_ADD)
         return surf
 
-    def _victim_sprite(self):
+    def _victim_sprite(self) -> pg.Surface:
+        """
+        Pick the mole's look for this frame: healing while a survivor knits
+        itself together, otherwise torn to the tier the quota has earned and
+        flashed white for a moment after each hit
+
+        :returns: the sprite to blit
+        """
         tier = self._damage_tier()
         if self._jump_elapsed() is not None:
             return self._heal_sprite(tier, self._heal_bucket())
@@ -702,11 +1181,25 @@ class MoleController(SkillCheckController):
             sprite = flash_sprite(sprite, (self._torn_key, self.cell_size, tier))
         return sprite
 
-    def _flash_active(self):
+    def _flash_active(self) -> bool:
+        """
+        Whether a hit is still flashing the mole white, the brief tell that a
+        shot connected
+
+        :returns: True while the flash is showing
+        """
         return (self._hit_flash_ms is not None
                 and self._now - self._hit_flash_ms < MOLE_VIEW_HIT_FLASH_MS)
 
-    def _squash_variant(self, sprite, bucket):
+    def _squash_variant(self, sprite: pg.Surface, bucket: int) -> pg.Surface:
+        """
+        Squash a sprite wider and shorter for the bounce, cached per sprite and
+        step so the scaling is paid for once rather than every frame
+
+        :param sprite: the sprite to squash
+        :param bucket: how hard to squash it, 0 leaving it alone
+        :returns: the squashed sprite
+        """
         if bucket <= 0:
             return sprite
         key = (id(sprite), bucket)
@@ -719,8 +1212,29 @@ class MoleController(SkillCheckController):
             self._squash_cache[key] = cached
         return cached
 
-    def _blit_victim(self, window, center_px, height_frac, group, squash=0, lift_px=0.0,
-                     ground_dy=None, lip=False):
+    def _blit_victim(self, window: pg.Surface, center_px: tuple[int, int],
+                     height_frac: float, group: tuple[int, int], squash: int = 0,
+                     lift_px: float = 0.0, ground_dy: int | None = None,
+                     lip: bool = False) -> pg.Rect | None:
+        """
+        Draw the mole at one pit, at whatever height it has reached. A body
+        only part-way out is clipped and masked to the hole's mouth so it looks
+        like it is climbing through the ground; a body fully out can be lifted
+        further still for the bounce or the hop
+
+        :param window: surface the mole is drawn onto
+        :param center_px: centre of the pit in window pixels
+        :param height_frac: how far out the body is, 1.0 being fully out and
+            anything above that the overshoot of a bounce
+        :param group: screen-shake offset in pixels
+        :param squash: bounce squash step, 0 for none
+        :param lift_px: extra height above the pit in pixels, used by the hop
+        :param ground_dy: where the feet sit relative to the pit centre in
+            pixels, None to take it from the height instead
+        :param lip: True to draw the near edge of the pit over the body, so it
+            stands in the hole rather than on it
+        :returns: the rect the body was drawn in, or None when nothing was
+        """
         if height_frac <= 0.0:
             return None
         sprite = self._squash_variant(self._victim_sprite(), squash)
@@ -747,7 +1261,17 @@ class MoleController(SkillCheckController):
                                 center_px[1] + group[1]))
         return rect
 
-    def _emerging_sprite(self, sprite, cut):
+    def _emerging_sprite(self, sprite: pg.Surface, cut: int) -> pg.Surface:
+        """
+        Cut a climbing body off at the hole's mouth and fade its lower edge
+        along that arch. One scratch surface per sprite size is reused for
+        this, since it is rebuilt every frame a mole is on its way up
+
+        :param sprite: the body being drawn
+        :param cut: how far down the sprite the ground line falls, in pixels
+        :returns: the scratch surface holding the masked body, valid only until
+            the next call at this size
+        """
         w, h = sprite.get_size()
         scratch = self._emerge_scratch.get((w, h))
         if scratch is None:
@@ -760,25 +1284,57 @@ class MoleController(SkillCheckController):
                      (0, cut - self._emerge_fade), special_flags=pg.BLEND_RGBA_MULT)
         return scratch
 
-    def _emergence_dy(self, height_frac):
+    def _emergence_dy(self, height_frac: float) -> int:
+        """
+        Sink a body that is only part-way out into the pit, so it climbs from
+        the middle of the hole instead of standing on its rim
+
+        :param height_frac: how far out the body is, 0.0 to 1.0
+        :returns: pixels to drop the feet by
+        """
         return int(self._pit_ry * (1.0 - min(height_frac, 1.0)))
 
-    def _rest_ground_dy(self):
+    def _rest_ground_dy(self) -> int:
+        """
+        Where a mole standing on the board rests, as against one standing in
+        its hole -- the offset its victory hop has to land on
+
+        :returns: pixels below the pit centre
+        """
         h = self._victim.get_height()
         return h - h // 2
 
-    def _jump_elapsed(self):
+    def _jump_elapsed(self) -> float | None:
+        """
+        How long a surviving mole has been celebrating, which is also what says
+        the celebration is on at all
+
+        :returns: milliseconds since the check was lost, or None when it was
+            not lost or is not over yet
+        """
         if self._landed is not False or self._committed_at is None:
             return None
         return self._now - self._committed_at
 
-    def _toss_elapsed(self):
+    def _toss_elapsed(self) -> float | None:
+        """
+        How long the beaten mole has been flying, which only starts once the
+        freeze frame on the killing blow has finished
+
+        :returns: milliseconds into the flight, or None when the check was not
+            won or the freeze is still running
+        """
         if not self._landed or self._committed_at is None:
             return None
         toss_t = self._now - self._committed_at - MOLE_VIEW_HITSTOP_KILL_MS
         return toss_t if toss_t >= 0.0 else None
 
-    def _start_toss(self):
+    def _start_toss(self) -> None:
+        """
+        Throw the beaten mole off the board: it leaves the last pit it was hit
+        in, flies away from the piece that shot it, spins a seeded way and
+        sheds debris as it goes
+        """
         origin = self._last_hit_px if self._last_hit_px is not None else self.center
         cell = self.cell_size
         dx, dy = self._toss_direction(origin)
@@ -789,7 +1345,15 @@ class MoleController(SkillCheckController):
                               1.0 if spin < 0.5 else -1.0)
         self._spawn_debris(origin, "toss")
 
-    def _toss_direction(self, origin):
+    def _toss_direction(self, origin: tuple[float, float]) -> tuple[float, float]:
+        """
+        Point the body's flight away from the piece that shot it, so a mole
+        always leaves by the far side of the capture. With no board to measure
+        against, a seeded upward arc stands in
+
+        :param origin: where the body was hit, in window pixels
+        :returns: unit direction as (x, y) in window pixels
+        """
         if self._from_sq is not None and self._geom is not None:
             ax, ay = self._geom(self._from_sq)
             dx, dy = origin[0] - ax, origin[1] - ay
@@ -801,19 +1365,41 @@ class MoleController(SkillCheckController):
         ang = -math.pi * (low + (high - low) * f[0])
         return (math.cos(ang), math.sin(ang))
 
-    def _toss_point(self, toss_t):
+    def _toss_point(self, toss_t: float) -> tuple[float, float]:
+        """
+        Where the flying body has got to, on a plain gravity arc from where it
+        was thrown
+
+        :param toss_t: milliseconds into the flight
+        :returns: the body's centre in window pixels
+        """
         t = toss_t / 1000.0
         g = self.cell_size * MOLE_VIEW_TOSS_GRAVITY_FRAC
         return (self._toss.x0 + self._toss.vx * t,
                 self._toss.y0 + self._toss.vy * t + 0.5 * g * t * t)
 
     @staticmethod
-    def _toss_alpha(progress):
+    def _toss_alpha(progress: float) -> int:
+        """
+        Fade the flying body out over the back half of its arc, so it leaves
+        the board rather than simply stopping at the edge
+
+        :param progress: how far through the flight, 0.0 to 1.0
+        :returns: opacity from 255 down to 0
+        """
         fade = ((progress - MOLE_VIEW_TOSS_FADE_START)
                 / max(1.0 - MOLE_VIEW_TOSS_FADE_START, 0.001))
         return max(int(255 * (1.0 - max(fade, 0.0))), 0)
 
-    def _draw_toss(self, window, toss_t, group):
+    def _draw_toss(self, window: pg.Surface, toss_t: float, group: tuple[int, int]) -> None:
+        """
+        Draw the beaten mole tumbling away after a won check, turning as it
+        flies and fading out on the way
+
+        :param window: surface the body is drawn onto
+        :param toss_t: milliseconds into the flight
+        :param group: screen-shake offset in pixels
+        """
         if self._toss is None or toss_t >= MOLE_VIEW_TOSS_MS:
             return
         x, y = self._toss_point(toss_t)
@@ -823,12 +1409,31 @@ class MoleController(SkillCheckController):
         window.blit(sprite, (int(x) + group[0] - sprite.get_width() // 2,
                              int(y) + group[1] - sprite.get_height() // 2))
 
-    def _draw_jump(self, window, jump_t, group):
+    def _draw_jump(self, window: pg.Surface, jump_t: float, group: tuple[int, int]) -> None:
+        """
+        Draw the surviving mole's victory, body and seam together: it rises,
+        hops and lands while the tears it took knit closed behind it
+
+        :param window: surface the mole is drawn onto
+        :param jump_t: milliseconds since the check was lost
+        :param group: screen-shake offset in pixels
+        """
         rect = self._jump_victim_rect(window, jump_t, group)
         self._draw_seam_glow(window, rect)
         self._draw_seam_sparks(window, rect)
 
-    def _jump_victim_rect(self, window, jump_t, group):
+    def _jump_victim_rect(self, window: pg.Surface, jump_t: float,
+                          group: tuple[int, int]) -> pg.Rect | None:
+        """
+        Draw the mole at whichever stage of its victory it has reached: rising
+        out of the pit, hopping over it, then squashing as it lands
+
+        :param window: surface the mole is drawn onto
+        :param jump_t: milliseconds since the check was lost
+        :param group: screen-shake offset in pixels
+        :returns: the rect the body was drawn in, which the seam effects hang
+            off, or None when nothing was drawn
+        """
         rest_dy = self._rest_ground_dy()
         if jump_t < MOLE_VIEW_JUMP_RISE_MS:
             return self._blit_victim(window, self.center,
@@ -848,25 +1453,63 @@ class MoleController(SkillCheckController):
         return self._blit_victim(window, self.center, 1.0, group, squash=squash,
                                  ground_dy=rest_dy)
 
-    def _healing(self):
+    def _healing(self) -> bool:
+        """
+        Whether the seam should be lit at all, which is only while a mole that
+        took damage is part-way through knitting itself back together
+
+        :returns: True while the seam is still closing
+        """
         if self._jump_elapsed() is None or self._damage_tier() <= 0:
             return False
         return 0 < self._heal_bucket() < MOLE_VIEW_HEAL_BUCKETS
 
-    def _seam_offset(self, frac, fallback_h):
+    def _seam_offset(self, frac: float, fallback_h: int) -> float:
+        """
+        Say where the seam sits down the body. It is measured across the
+        sprite's visible part, so the join tracks the mole itself rather than
+        the transparent padding around it
+
+        :param frac: how far down the body, 0.0 at the top to 1.0 at the bottom
+        :param fallback_h: sprite height to fall back on when the body cannot
+            be measured
+        :returns: offset in pixels from the top of the sprite
+        """
         bbox = self._victim_bbox
         if bbox is None or bbox.height <= 0:
             return fallback_h * frac
         return bbox.top + bbox.height * frac
 
-    def _seam_y(self, rect, frac):
+    def _seam_y(self, rect: pg.Rect, frac: float) -> float:
+        """
+        Put the seam at a real y on screen, for a body drawn in this rect
+
+        :param rect: where the body was drawn this frame
+        :param frac: how far down the body the seam sits
+        :returns: the seam's y in window pixels
+        """
         return rect.top + self._seam_offset(frac, self._victim.get_height())
 
-    def _body_edge_x(self, rect, side):
+    def _body_edge_x(self, rect: pg.Rect, side: int) -> int:
+        """
+        Find one side of the mole's body on screen, which is where the seam
+        sparks fly out from
+
+        :param rect: where the body was drawn this frame
+        :param side: -1 for its left edge, 1 for its right
+        :returns: that edge's x in window pixels
+        """
         bbox = self._victim_bbox
         return rect.left + (bbox.right if side > 0 else bbox.left)
 
-    def _draw_seam_glow(self, window, rect):
+    def _draw_seam_glow(self, window: pg.Surface, rect: pg.Rect | None) -> None:
+        """
+        Draw the bright band riding up the seam as it closes, the loud part of
+        a mole putting itself back together
+
+        :param window: surface the glow is drawn onto
+        :param rect: where the body was drawn this frame, None when it was not
+        """
         if rect is None or not self._healing():
             return
         y = self._seam_y(rect, 1.0 - self._heal_bucket() / MOLE_VIEW_HEAL_BUCKETS)
@@ -879,7 +1522,14 @@ class MoleController(SkillCheckController):
         window.blit(glow, (rect.left + bbox.centerx - w // 2, int(y) - h // 2),
                     special_flags=pg.BLEND_RGB_ADD)
 
-    def _draw_seam_sparks(self, window, rect):
+    def _draw_seam_sparks(self, window: pg.Surface, rect: pg.Rect | None) -> None:
+        """
+        Draw the sparks thrown off the closing seam, each riding out from the
+        edge of the body and rising as it dies
+
+        :param window: surface the sparks are drawn onto
+        :param rect: where the body was drawn this frame, None when it was not
+        """
         if rect is None:
             return
         cell = self.cell_size
@@ -898,7 +1548,16 @@ class MoleController(SkillCheckController):
                            (int(x), int(y)), r)
 
     @staticmethod
-    def _bounce_height(pop, elapsed):
+    def _bounce_height(pop: MolePop, elapsed: float) -> float:
+        """
+        Say how far one mole is out of its hole at this moment: a quick pop up
+        past its full height, then a slower fall back. The window runs a little
+        past the mole dropping, matching the grace the judge allows a shot
+
+        :param pop: the scheduled pop being drawn
+        :param elapsed: milliseconds since the check started
+        :returns: height as a fraction of the body, 0.0 while it is not up
+        """
         up_window_ms = pop.t_down_ms - pop.t_up_ms + MOLE_GRACE_MS
         u = (elapsed - pop.t_up_ms) / up_window_ms
         if u <= 0.0 or u >= 1.0:
@@ -909,18 +1568,43 @@ class MoleController(SkillCheckController):
         return _POP_APEX * (1.0 - fall * fall)
 
     @staticmethod
-    def _pop_frame(idx, height):
+    def _pop_frame(idx: int, height: float) -> tuple[int, float, int] | None:
+        """
+        Turn a height into everything the drawing needs for one mole -- which
+        pop it is, how far out, and how far the bounce has squashed it
+
+        :param idx: which pop in the schedule
+        :param height: how far out of the hole the body is
+        :returns: (pop index, height, squash step), or None when the mole is
+            not up
+        """
         if height <= 0.0:
             return None
         bucket = int((1.0 - height / _POP_APEX) * MOLE_VIEW_SQUASH_BUCKETS)
         return idx, height, min(bucket, MOLE_VIEW_SQUASH_BUCKETS - 1)
 
-    def _duck_pop(self, idx, elapsed):
+    def _duck_pop(self, idx: int, elapsed: float) -> None:
+        """
+        Send a mole that has just been hit back down from wherever it stood,
+        and remember it as the one already taken so no shot can claim it twice
+
+        :param idx: which pop was hit
+        :param elapsed: milliseconds into the check the shot landed at
+        """
         self._last_hit_pop = idx
         self._last_hit_anim_ms = self._anim_ms
         self._last_hit_height = self._bounce_height(self.challenge.pops[idx], elapsed)
 
-    def _render_pop(self, elapsed):
+    def _render_pop(self, elapsed: float) -> tuple[int, float, int] | None:
+        """
+        Work out which mole to draw this frame and how it looks: the most
+        recent one to have come up, either riding its bounce or dropping away
+        from where it was hit
+
+        :param elapsed: milliseconds since the check started
+        :returns: (pop index, height, squash step), or None when there is no
+            mole to draw
+        """
         idx = None
         for i, pop in enumerate(self.challenge.pops):
             if pop.t_up_ms <= elapsed:
@@ -932,7 +1616,17 @@ class MoleController(SkillCheckController):
             return self._pop_frame(idx, self._last_hit_height * (1.0 - duck))
         return self._pop_frame(idx, self._bounce_height(self.challenge.pops[idx], elapsed))
 
-    def _draw_victim(self, window, elapsed, group):
+    def _draw_victim(self, window: pg.Surface, elapsed: float,
+                     group: tuple[int, int]) -> None:
+        """
+        Draw the mole in whichever life it is living: flying off after a check
+        it lost, celebrating one it survived, dropping into its home pit as the
+        check opens, or up in a pit taking a bounce
+
+        :param window: surface the mole is drawn onto
+        :param elapsed: milliseconds since the check started
+        :param group: screen-shake offset in pixels
+        """
         if self._victim is None:
             return
         toss_t = self._toss_elapsed()
@@ -956,8 +1650,27 @@ class MoleController(SkillCheckController):
             return
         self._blit_victim(window, self._hole_px[hole], height_frac, group, squash, lip=True)
 
-    def _draw_burst(self, window, items, life_ms, count, r_frac, speed_frac, jitter,
-                    gravity_frac, color_fn):
+    def _draw_burst(self, window: pg.Surface,
+                    items: list[tuple[float, float, float, tuple[float, ...]]],
+                    life_ms: float, count: int, r_frac: float, speed_frac: float,
+                    jitter: tuple[float, float], gravity_frac: float,
+                    color_fn: Callable[[float, int], pg.Color]) -> None:
+        """
+        Draw one family of particle bursts, working every mote out from its
+        burst's seeded numbers as it is drawn. Dust and debris are the same
+        code with different speeds, gravity and colours
+
+        :param window: surface the motes are drawn onto
+        :param items: the live bursts to draw
+        :param life_ms: how long one burst lasts, in milliseconds
+        :param count: how many motes each burst has
+        :param r_frac: mote radius as a share of one board cell
+        :param speed_frac: how fast they fly, in cells per second
+        :param jitter: (base, span) the seeded speed factor is drawn between
+        :param gravity_frac: downward pull in cells per second squared
+        :param color_fn: picks a mote's colour from the burst's age and the
+            mote's index
+        """
         cell = self.cell_size
         g = cell * gravity_frac
         speed_base, speed_span = jitter
@@ -974,18 +1687,40 @@ class MoleController(SkillCheckController):
                 py = y + math.sin(ang) * speed * t + 0.5 * g * t * t
                 pg.draw.circle(window, color_fn(tt, j), (int(px), int(py)), r)
 
-    def _draw_puffs(self, window):
+    def _draw_puffs(self, window: pg.Surface) -> None:
+        """
+        Draw the dust still hanging where shots hit nothing, which is what a
+        whiff leaves on the board
+
+        :param window: surface the dust is drawn onto
+        """
         self._draw_burst(window, self._puffs, MOLE_VIEW_PUFF_MS, MOLE_VIEW_PUFF_COUNT,
                          MOLE_VIEW_PUFF_R_FRAC, MOLE_VIEW_PUFF_SPEED_FRAC,
                          MOLE_VIEW_PUFF_SPEED_JITTER, 0.0, _puff_color)
 
-    def _draw_debris(self, window):
+    def _draw_debris(self, window: pg.Surface) -> None:
+        """
+        Draw the chunks flying off moles that have been hit, which fall away
+        under gravity rather than hanging like dust
+
+        :param window: surface the debris is drawn onto
+        """
         self._draw_burst(window, self._debris, MOLE_VIEW_DEBRIS_MS, MOLE_VIEW_DEBRIS_COUNT,
                          MOLE_VIEW_DEBRIS_R_FRAC, MOLE_VIEW_DEBRIS_SPEED_FRAC,
                          MOLE_VIEW_DEBRIS_SPEED_JITTER, MOLE_VIEW_DEBRIS_GRAVITY_FRAC,
                          _debris_color)
 
-    def _commit_fade_alpha(self, delay_ms, span_ms):
+    def _commit_fade_alpha(self, delay_ms: float, span_ms: float) -> int:
+        """
+        Fade a piece of the check's furniture away once the verdict is in, so
+        badges and casings clear off the board instead of sitting through the
+        outro
+
+        :param delay_ms: how long after the verdict the fade waits, in
+            milliseconds
+        :param span_ms: how long the fade itself takes, in milliseconds
+        :returns: opacity from 0 to 255, staying full while the check is live
+        """
         if self._committed_at is None:
             return 255
         fading = self._now - self._committed_at - delay_ms
@@ -993,7 +1728,14 @@ class MoleController(SkillCheckController):
             return 255
         return max(int(255 * (1.0 - fading / span_ms)), 0)
 
-    def _draw_casings(self, window):
+    def _draw_casings(self, window: pg.Surface) -> None:
+        """
+        Draw the spent shells: each flies its own arc, tumbles in bucketed
+        steps, rests where it falls and then fades, with the verdict clearing
+        the whole floor early
+
+        :param window: surface the casings are drawn onto
+        """
         cell = self.cell_size
         w = max(int(cell * MOLE_VIEW_CASING_W_FRAC), 3)
         h = max(int(cell * MOLE_VIEW_CASING_H_FRAC), 2)
@@ -1014,13 +1756,26 @@ class MoleController(SkillCheckController):
                                        int(y) - surf.get_height() // 2), alpha)
 
     @staticmethod
-    def _casing_alpha(ground_ms):
+    def _casing_alpha(ground_ms: float) -> int:
+        """
+        Fade a spent shell out after it has lain on the board a while, so a
+        long check does not end up carpeted in brass
+
+        :param ground_ms: milliseconds since it landed
+        :returns: opacity from 255 down to 0
+        """
         fading = ground_ms - MOLE_VIEW_CASING_REST_MS
         if fading <= 0.0:
             return 255
         return max(int(255 * (1.0 - fading / MOLE_VIEW_CASING_FADE_MS)), 0)
 
-    def _draw_impacts(self, window):
+    def _draw_impacts(self, window: pg.Surface) -> None:
+        """
+        Draw the rings spreading where the opponent's shots landed, the
+        mirror's stand-in for the muzzle flash it cannot see
+
+        :param window: surface the rings are drawn onto
+        """
         lw = max(self._cross_lw, 1)
         for age_ms, (x, y) in particle_ages(self._impacts, self._now):
             tt = age_ms / MOLE_VIEW_IMPACT_MS
@@ -1029,7 +1784,14 @@ class MoleController(SkillCheckController):
             r = max(int(self.cell_size * MOLE_VIEW_IMPACT_R_FRAC * tt), 2)
             pg.draw.circle(window, _IMPACT_COLOR, (int(x), int(y)), r, lw)
 
-    def _draw_win_pop(self, window, group):
+    def _draw_win_pop(self, window: pg.Surface, group: tuple[int, int]) -> None:
+        """
+        Draw the burst thrown by the hit that filled the quota, where that last
+        mole was standing
+
+        :param window: surface the burst is drawn onto
+        :param group: screen-shake offset in pixels
+        """
         if self._win_ms is None or self._now - self._win_ms >= MOLE_VIEW_WIN_POP_MS:
             return
         r = max(int(self.cell_size * MOLE_VIEW_WIN_POP_R_FRAC), 8)
@@ -1038,7 +1800,13 @@ class MoleController(SkillCheckController):
                                          int(px[1]) - r + group[1]),
                     special_flags=pg.BLEND_RGB_ADD)
 
-    def _draw_muzzle(self, window):
+    def _draw_muzzle(self, window: pg.Surface) -> None:
+        """
+        Draw the muzzle flash under the crosshair for the moment after a shot,
+        which is what makes the click feel like a trigger
+
+        :param window: surface the flash is drawn onto
+        """
         if self._flash_ms is None or self._now - self._flash_ms >= MOLE_VIEW_MUZZLE_MS:
             return
         r = max(int(self.cell_size * MOLE_VIEW_MUZZLE_FRAC), 4)
@@ -1046,12 +1814,25 @@ class MoleController(SkillCheckController):
                                         int(self._flash_px[1]) - r),
                     special_flags=pg.BLEND_RGB_ADD)
 
-    def _crosshair_fade(self):
+    def _crosshair_fade(self) -> float:
+        """
+        Fade the crosshair away as soon as the check is decided, since there is
+        nothing left to aim at
+
+        :returns: 1.0 while the check is live, falling to 0.0
+        """
         if self._committed_at is None:
             return 1.0
         return max(1.0 - (self._now - self._committed_at) / MOLE_VIEW_CROSS_OUT_MS, 0.0)
 
-    def _draw_crosshair(self, window):
+    def _draw_crosshair(self, window: pg.Surface) -> None:
+        """
+        Draw the sight the player aims with, standing in for the hidden mouse
+        pointer. It kicks upward on each shot and blooms open while the recoil
+        lockout refuses another one, which is how the gun says wait
+
+        :param window: surface the sight is drawn onto
+        """
         fade = self._crosshair_fade()
         if fade <= 0.0:
             return
@@ -1077,7 +1858,16 @@ class MoleController(SkillCheckController):
                     (mx - surf.get_width() // 2, my - surf.get_height() // 2),
                     int(255 * fade))
 
-    def _draw_hitboxes(self, window, elapsed):
+    def _draw_hitboxes(self, window: pg.Surface, elapsed: float) -> None:
+        """
+        Outline the ovals a shot has to land inside to count, the development
+        overlay behind CHESS_DEBUG_HITBOX. They are built from the same
+        board-space fractions the judge tests against, which is what makes them
+        worth looking at
+
+        :param window: surface the outlines are drawn onto
+        :param elapsed: milliseconds since the check started
+        """
         if self._affine is None:
             return
         up = self.challenge.pop_up_at(elapsed)
@@ -1094,7 +1884,15 @@ class MoleController(SkillCheckController):
             pg.draw.ellipse(window, _HITBOX_ACTIVE_COLOR if hot else _HITBOX_COLOR, rect,
                             MOLE_VIEW_HITBOX_ACTIVE_LW if hot else MOLE_VIEW_HITBOX_LW)
 
-    def _pip_badge(self, index):
+    def _pip_badge(self, index: int) -> pg.Surface:
+        """
+        Draw one quota pip, lit once that many moles have been hit. The row
+        says how much shooting the prize costs -- three pips for a pawn, four
+        for a knight, bishop or rook, five for a queen
+
+        :param index: which pip in the row, counted from the left
+        :returns: the shared pip for that state
+        """
         if index < min(self._progress, self.challenge.hits_required):
             fill = self._signal_color(Colors.accent)
             border = self._signal_color(Colors.accent_hi)
@@ -1104,22 +1902,56 @@ class MoleController(SkillCheckController):
         return rounded_rect_surface((self._pip_w, self._pip_h), radius, fill,
                                     border=border, border_width=1)
 
-    def _strike_badge(self, index):
+    def _strike_badge(self, index: int) -> pg.Surface:
+        """
+        Draw one whiff pip: an empty ring while that wild shot is still spare,
+        crossed out once it has been spent. There are MOLE_MAX_WHIFFS of them,
+        and the check is lost the moment the last one is used
+
+        :param index: which pip in the row, counted from the left
+        :returns: the shared pip for that state
+        """
         return strike_pip_surface(
             self._strike_size, index < min(self._miss_count, MOLE_MAX_WHIFFS),
             lw_frac=MOLE_VIEW_CROSS_STRIKE_LW_FRAC,
             pad_frac=MOLE_VIEW_CROSS_STRIKE_PAD_FRAC,
             ring_lw_frac=MOLE_VIEW_CROSS_STRIKE_RING_LW_FRAC)
 
-    def _draw_badge_row(self, window, group, anchor, count, size, gap, offset_frac,
-                        sprite_fn, alpha):
+    def _draw_badge_row(self, window: pg.Surface, group: tuple[int, int],
+                        anchor: tuple[int, int], count: int, size: int, gap: int,
+                        offset_frac: float, sprite_fn: Callable[[int], pg.Surface],
+                        alpha: int) -> None:
+        """
+        Draw one row of badges centred under a square, shared by the quota pips
+        and the whiff pips so both rows sit and fade the same way
+
+        :param window: surface the row is drawn onto
+        :param group: screen-shake offset in pixels
+        :param anchor: centre of the square the row hangs under, in window
+            pixels
+        :param count: how many badges the row has
+        :param size: badge width in pixels
+        :param gap: space between badges in pixels
+        :param offset_frac: how far below the anchor the row sits, as a share
+            of one board cell
+        :param sprite_fn: draws the badge at one index
+        :param alpha: opacity from 0 to 255 for the whole row
+        """
         total = count * size + (count - 1) * gap
         x = anchor[0] - total // 2 + group[0]
         y = anchor[1] + int(self.cell_size * offset_frac) + group[1]
         for i in range(count):
             _blit_alpha(window, sprite_fn(i), (x + i * (size + gap), y), alpha)
 
-    def _draw_badges(self, window, group):
+    def _draw_badges(self, window: pg.Surface, group: tuple[int, int]) -> None:
+        """
+        Draw both scores the player needs at a glance: the quota pips under the
+        capture, and the whiffs left beside the piece doing the shooting. Both
+        fade away once the check is decided
+
+        :param window: surface the badges are drawn onto
+        :param group: screen-shake offset in pixels
+        """
         alpha = self._commit_fade_alpha(MOLE_VIEW_PIP_FADE_DELAY_MS, MOLE_VIEW_PIP_FADE_MS)
         if alpha <= 0:
             return

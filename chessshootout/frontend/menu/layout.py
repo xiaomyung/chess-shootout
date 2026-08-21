@@ -15,6 +15,13 @@ SUBVIEW_MAX_W = 860
 
 @dataclass
 class MenuLayout:
+    """
+    Every rect the menu draws into for one window size, worked out in one
+    place so the rail, the sub-views and the right-hand cards cannot disagree
+    about where they are. The menu screen holds the current one and hands it
+    to each sub-view on relayout and on every draw
+    """
+
     top: int
     scale: float
     rail_rect: pg.Rect
@@ -24,7 +31,22 @@ class MenuLayout:
     subview_rect: pg.Rect
 
 
-def compute_menu_layout(window_width, window_height, top, right_rail=False):
+def compute_menu_layout(window_width: int, window_height: int, top: int,
+                        right_rail: bool = False) -> MenuLayout:
+    """
+    Work out the whole menu's geometry for one window size. It is pure
+    arithmetic -- no pygame drawing, no state -- so the menu screen can call it
+    on every resize and the tests can check the rects without a window. Only
+    the Play view keeps the right-hand card column, so that space either goes
+    to the cards or is given back to the sub-view beside the rail
+
+    :param window_width: window width in pixels
+    :param window_height: window height in pixels, title bar included
+    :param top: y where the menu starts, below the window chrome
+    :param right_rail: True on the Play view, which is the only view that
+        reserves the right-hand card column
+    :returns: the rects and the interface scale for this window size
+    """
     avail_h = max(window_height - top, 1)
     scale = compute_ui_scale(window_width, avail_h)
 
