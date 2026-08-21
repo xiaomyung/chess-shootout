@@ -13,7 +13,8 @@ from chessshootout.backend.utils import (
 from chessshootout.server import logging_setup
 from chessshootout.server.connections import broadcast, send
 from chessshootout.server.broadcasts import (
-    broadcast_game_start, finalize_and_broadcast, resolve_skillcheck_fail)
+    broadcast_game_start, finalize_and_broadcast, push_idle_window,
+    resolve_skillcheck_fail)
 from chessshootout.server.protocol import (
     AnnotationDeltaMessage, AnnotationsBlockedMessage, AnnotationsStateMessage,
     ArrowWire, ClockSnapshot, ConnectionStatusMessage,
@@ -47,6 +48,12 @@ RESYNC_GATE_PRUNE_THRESHOLD = 512
 
 RESYNC_NOTIFY = "notify"
 RESYNC_DIRECTIVE = "directive"
+
+IDLE_ACTIVITY_TYPES = frozenset({
+    "move", "skill_check_shot", "draw_offer", "draw_response",
+    "takeback_request", "takeback_response", "give_time", "quick_chat",
+    "annotations_state", "annotation_delta", "set_marks_visibility",
+})
 
 
 class _ResyncGate:
@@ -88,10 +95,6 @@ def _moderation_load(app):
     return _app_state_singleton(app, "moderation_load", ModerationLoad)
 
 
-def _color_to_move(backend):
-    return "white" if backend.current_turn() == PieceColor.WHITE else "black"
-
-
 def _clock_snapshot(clock):
     if clock is None:
         return ClockSnapshot(white_remaining=0.0, black_remaining=0.0, running_for=None)
@@ -122,7 +125,20 @@ async def dispatch(app, websocket, room, color, raw):
     if handler is None:
         await send(websocket, ErrorMessage(reason=Reason.INVALID_MESSAGE))
         return msg_type, "invalid_message"
-    return msg_type, await handler(app, websocket, room, color, raw)
+    verdict = await handler(app, websocket, room, color, raw)
+    if msg_type in IDLE_ACTIVITY_TYPES:
+        await _touch_idle_window(app, room, color)
+    return msg_type, verdict
+
+
+async def _touch_idle_window(app, room, color):
+    window = room.idle_window()
+    if (room.result is not None or room.idle_since is None or window is None
+            or window.outcome != Reason.RESIGNATION or color != room.color_to_move()):
+        return
+    now = app.state.now()
+    room.idle_since = now
+    await push_idle_window(app.state.rooms, app.state.connections, room, now)
 
 
 async def handle_move(app, websocket, room, color, raw):
@@ -152,7 +168,7 @@ async def handle_move(app, websocket, room, color, raw):
         await send(connections.get_for_color(room, color),
                      ErrorMessage(reason=Reason.INVALID_MOVE_FORMAT))
         return "invalid_move_format"
-    expected = _color_to_move(room.backend)
+    expected = room.color_to_move()
     if expected != color:
         log.info("move rejected room=%s mover=%s expected=%s reason=not_your_turn",
                  room.room_id, color, expected)
@@ -219,6 +235,7 @@ async def _apply_move(app, room, color, from_sq, to_sq, promotion,
     if result.promotion_required:
         room.backend.promote(to_sq, PROMO_TYPE_BY_LETTER[promotion or "q"])
     room.plies_ever += 1
+    room.mark_idle_activity(app.state.now() if room.idle_window() is not None else None)
     room.skillcheck_locks.clear()
     room.annotations_white.clear_marks()
     room.annotations_black.clear_marks()
@@ -244,6 +261,7 @@ async def _apply_move(app, room, color, from_sq, to_sq, promotion,
         reason, winner = RESULT_REASON_BY_GAME_RESULT[game_result]
         await finalize_and_broadcast(rooms, connections, room, reason, winner_color=winner)
         return f"applied+result:{reason}"
+    await push_idle_window(rooms, connections, room, app.state.now(), force=True)
     return "applied"
 
 
@@ -264,7 +282,7 @@ def _adjudicate_shot(pending, msg, elapsed):
                            target=(msg.target_row, msg.target_col) if is_whack else None,
                            hole_squares=pending.holes if is_whack else None,
                            last_hit_pop=pending.last_hit_pop,
-                           flipped=pending.color == "black")
+                           flipped=online.adjudicated_flipped(pending.color))
     won = hit and pending.progress + 1 >= online.hits_required(pending.kind, challenge)
     return challenge, hit, won
 
@@ -474,7 +492,7 @@ async def handle_takeback_request(app, websocket, room, color, raw):
         return "noop"
     if room.pending_skillcheck is not None:
         return "pending"
-    expected = _color_to_move(room.backend)
+    expected = room.color_to_move()
     if color == expected:
         await send(connections.get_for_color(room, color),
                      ErrorMessage(reason=Reason.NOT_YOUR_TURN,
@@ -518,6 +536,9 @@ async def handle_takeback_response(app, websocket, room, color, raw):
             clock=_clock_snapshot(room.backend.clock),
             ply=len(room.backend.move_history),
         ))
+        if room.result is None and room.idle_window() is not None:
+            room.mark_idle_activity(app.state.now())
+            await push_idle_window(rooms, connections, room, app.state.now(), force=True)
         return "accepted"
     log.info("takeback declined room=%s by=%s", room.room_id, color)
     room.takeback_offered_by = None

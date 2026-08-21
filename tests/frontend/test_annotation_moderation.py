@@ -277,8 +277,7 @@ def test_annotations_blocked_buffered_during_resync_then_replayed():
     })
     assert (ARROW_FROM, ARROW_TO) not in game.board.annotations.flagged
     assert coord._resync_buffer == [("on_annotations_blocked", ANY)]
-    coord._resyncing = False
-    coord._replay_resync_buffer()
+    coord._end_resync()
     assert (ARROW_FROM, ARROW_TO) in game.board.annotations.flagged
 
 

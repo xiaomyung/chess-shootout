@@ -37,6 +37,7 @@ class CheckSpec:
     on_hit_px: object = None
     mirror_targets: bool = False
     last_hit_pop: int = -1
+    adjudicated_flipped: object = None
 
 
 def _build_wheel(spec):
@@ -66,7 +67,7 @@ def _build_whack(spec):
         miss_count=spec.miss_count, progress=spec.progress,
         passive=spec.passive, audio=spec.audio,
         on_hit_px=spec.on_hit_px, mirror_targets=spec.mirror_targets,
-        last_hit_pop=spec.last_hit_pop)
+        last_hit_pop=spec.last_hit_pop, adjudicated_flipped=spec.adjudicated_flipped)
 
 
 def _build_combo(spec):

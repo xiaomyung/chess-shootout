@@ -23,6 +23,7 @@ from chessshootout.frontend.online_coordinator import (
     APPLY_FAILED_LABEL, ONLINE_HARD_FAILURE_REASONS, ONLINE_TRANSIENT_REASON_LABELS,
     TOAST_REASON_MAX_CHARS,
 )
+from chessshootout.frontend.screens.game import IDLE_RESIGN_NOTICE_SECONDS, IdleWindow
 from chessshootout.online.client import Event, OnlineClient
 from chessshootout.server.protocol import Reason
 from tests.helpers import (
@@ -577,6 +578,81 @@ def test_reconnect_delegates_to_the_probe_glue(monkeypatch):
     assert called == [True]
 
 
+def _pending_entry(addr="old.host:8000", room_id="room-1"):
+    return {"addr": addr, "room_id": room_id, "session_token": "tok"}
+
+
+def test_on_server_target_changed_drops_the_pending_reclaim_and_hides_the_button():
+    """A reclaim is only valid against the host it was probed on. Switching the
+    server target while one is pending left the menu offering Reconnect for the
+    OLD host -- clicking it resumed a game on a server the player just left."""
+    app = make_app(1000, 800)
+    app.coordinator._pending_reconnect = _pending_entry()
+    app.menu.set_reconnect_available(True)
+    assert app.menu.play_view.reconnect_available is True
+
+    app.coordinator.on_server_target_changed()
+
+    assert app.coordinator._pending_reconnect is None
+    assert app.coordinator.reconnect_available() is False
+    assert app.menu.play_view.reconnect_available is False
+
+
+def test_on_server_target_changed_discards_an_in_flight_probe_result(monkeypatch):
+    """The probe runs on a worker thread against the address captured at spawn
+    time, so clearing the pending entry is not enough -- a probe already talking
+    to the old host would land its reclaim a moment later. The generation bump
+    is what makes that late result unadoptable."""
+    monkeypatch.setattr(coordinator_module, "probe_active_game",
+                        lambda addr, uuid: {"room_id": "stale-room", "session_token": "tok"})
+    monkeypatch.setattr(coordinator_module, "fetch_resume",
+                        lambda addr, room, token: {"fen": ""})
+    app = make_app(1000, 800)
+    with app.coordinator._pending_reconnect_lock:
+        app.coordinator._reconnect_probe_gen += 1
+        spawn_gen = app.coordinator._reconnect_probe_gen
+
+    app.coordinator.on_server_target_changed()
+    app.coordinator._reconnect_probe_worker("old.host:8000", "uuid", spawn_gen)
+
+    assert app.coordinator._pending_reconnect is None
+    assert app.coordinator.reconnect_available() is False
+
+    app.coordinator._reconnect_probe_worker(
+        "new.host:8000", "uuid", app.coordinator._reconnect_probe_gen)
+    assert app.coordinator._pending_reconnect is not None
+
+
+def test_on_server_target_changed_reopens_probing_for_the_new_host():
+    """The attempt budget belongs to the host that burned it. An unreachable old
+    address that exhausted RECONNECT_PROBE_MAX_ATTEMPTS must not leave the new
+    target unprobed forever, so the counter and the interval gate both reset."""
+    app = make_app(1000, 800)
+    app.coordinator._reconnect_probe_attempts = coordinator_module.RECONNECT_PROBE_MAX_ATTEMPTS
+    app.coordinator._last_reconnect_probe_ms = pg.time.get_ticks()
+
+    app.coordinator.on_server_target_changed()
+
+    assert app.coordinator._reconnect_probe_attempts == 0
+    assert app.coordinator._last_reconnect_probe_ms == 0
+
+
+def test_on_server_target_changed_with_nothing_pending_is_a_safe_no_op(caplog):
+    """Every server-row edit calls this, and most of them happen with no reclaim
+    in sight -- it must stay silent and leave the button off."""
+    app = make_app(1000, 800)
+    assert app.coordinator._pending_reconnect is None
+
+    with caplog.at_level(logging.INFO, logger="chess.frontend"):
+        app.coordinator.on_server_target_changed()
+        app.coordinator.on_server_target_changed()
+
+    assert app.coordinator._pending_reconnect is None
+    assert app.coordinator.reconnect_available() is False
+    assert app.menu.play_view.reconnect_available is False
+    assert [r for r in caplog.records if r.name == "chess.frontend"] == []
+
+
 def test_coordinator_update_runs_before_screen_update(monkeypatch):
     app = start_single_screen(make_app(1000, 800))
     order = []
@@ -809,7 +885,7 @@ def test_move_landing_never_dismisses_the_rematch_banner():
 
 def test_unbind_clears_every_field_that_gates_online_behaviour():
     """Four call sites cleared four different subsets of the same nine fields, and they
-    had drifted — a teardown left _first_move_deadline_ms and the disconnect stamps set.
+    had drifted — a teardown left the idle window and the disconnect stamps set.
     They are inert once variant is back to local, but only because of that; one unbind
     now clears the whole set."""
     app = make_app(1000, 800)
@@ -817,7 +893,7 @@ def test_unbind_clears_every_field_that_gates_online_behaviour():
     game.variant = "online"
     game.match.local_color = PieceColor.WHITE
     game.match.on_local_move_applied = lambda *a: None
-    game._first_move_deadline_ms = 12345
+    game._idle_window = IdleWindow(Reason.ABORTED, PieceColor.WHITE, 12345, 60.0)
     game._opp_disconnected_at_ms = 6789
     game._local_disconnected_at_ms = 4321
     app.coordinator._prev_online_state = "reconnecting"
@@ -827,10 +903,115 @@ def test_unbind_clears_every_field_that_gates_online_behaviour():
     assert game.variant == "local"
     assert game.match.local_color is None
     assert game.match.on_local_move_applied is None
-    assert game._first_move_deadline_ms is None
+    assert game._idle_window is None
     assert game._opp_disconnected_at_ms is None
     assert game._local_disconnected_at_ms is None
     assert app.coordinator._prev_online_state is None
+
+
+class _IdleWindowSubscriber:
+
+    def __init__(self):
+        self.seen = []
+
+    def on_idle_window(self, payload):
+        self.seen.append(payload)
+
+
+def test_idle_window_event_routes_to_the_subscriber():
+    """idle_window uses the subscriber-else-app.game fallback form (like result):
+    with a subscriber bound, the payload lands there and app.game's own window
+    stays untouched — the event went through the subscriber, not around it."""
+    app = make_app(1000, 800)
+    sub = _IdleWindowSubscriber()
+    app.coordinator.subscribe(sub)
+    payload = {"outcome": "aborted", "color": "white", "seconds_remaining": 42.0}
+
+    app.coordinator._handle_online_event(Event("idle_window", payload))
+
+    assert sub.seen == [payload]
+    assert app.game._idle_window is None
+
+
+def test_idle_window_event_without_a_subscriber_falls_back_to_app_game():
+    """Strip-level state lives on the persistent GameScreen object, which exists
+    even when it is not the active screen — an idle window pushed while nobody
+    is subscribed must still arm the badge there (same fallback as result), for
+    as long as the screen is still bound to the online session."""
+    app = make_app(1000, 800)
+    app.game.variant = "online"
+    app.game.match.local_color = PieceColor.BLACK
+    assert app.coordinator._subscriber is None
+
+    app.coordinator._handle_online_event(Event("idle_window", {
+        "outcome": "aborted", "color": "white", "seconds_remaining": 30.0,
+    }))
+
+    window = app.game._idle_window
+    assert window is not None
+    assert window.outcome == Reason.ABORTED
+    assert window.color == PieceColor.WHITE
+
+
+def test_a_late_push_after_back_to_menu_never_arms_or_toasts():
+    """on_idle_window is gated on the online context — the same
+    variant+local_color pair _compute_auto_end reads. After back-to-menu
+    unbinds the screen, a straggler push (or one against a plain local game)
+    must not arm a badge or toast an idle notice over it."""
+    app = _wired_app()
+    app._on_back_to_menu()
+    assert app.game.variant == "local"
+
+    app.coordinator._handle_online_event(Event("idle_window", {
+        "outcome": "resignation", "color": "black", "seconds_remaining": 5.0,
+    }))
+
+    assert app.game._idle_window is None
+    assert not any(b["key"] == "idle_resign" for b in app.toast._bubbles)
+
+
+def test_the_waiting_side_gets_one_idle_notice_toast():
+    """The notice is time-gated on IDLE_RESIGN_NOTICE_SECONDS: the forced
+    ply-2 push carries the full window, and refresh pushes keep carrying nearly
+    all of it while the opponent is actively present, so none of those may
+    toast. At or under the threshold — a genuine idle spell — the toast shows
+    once, keyed 'idle_resign' so repeat pushes re-stamp the same bubble instead
+    of stacking new ones. Abort-window pushes never toast, however low they
+    burn — nobody loses on those."""
+    app = _wired_app()
+    app.coordinator._handle_idle_window({
+        "outcome": "resignation", "color": "black", "seconds_remaining": 60.0,
+    })
+    assert not any(b["key"] == "idle_resign" for b in app.toast._bubbles), \
+        "a fresh full window means the opponent just moved — no idle chatter"
+
+    app.coordinator._handle_idle_window({
+        "outcome": "aborted", "color": "black",
+        "seconds_remaining": IDLE_RESIGN_NOTICE_SECONDS - 10.0,
+    })
+    assert not any(b["key"] == "idle_resign" for b in app.toast._bubbles)
+
+    payload = {"outcome": "resignation", "color": "black",
+               "seconds_remaining": IDLE_RESIGN_NOTICE_SECONDS}
+    app.coordinator._handle_idle_window(payload)
+    app.coordinator._handle_idle_window(payload)
+
+    bubbles = [b for b in app.toast._bubbles if b["key"] == "idle_resign"]
+    assert len(bubbles) == 1
+    assert "bob" in bubbles[0]["message"]
+
+
+def test_the_idler_gets_no_notice_toast():
+    """The idler already sees the Resign-in badge on their own strip; toasting
+    them too would double-announce their own countdown. Remaining time is under
+    the notice threshold, so the guard under test is the color one."""
+    app = _wired_app()
+    app.coordinator._handle_idle_window({
+        "outcome": "resignation", "color": "white",
+        "seconds_remaining": IDLE_RESIGN_NOTICE_SECONDS - 10.0,
+    })
+    assert app.game._idle_window is not None
+    assert not any(b["key"] == "idle_resign" for b in app.toast._bubbles)
 
 
 def test_resume_goes_through_the_subscriber_protocol():

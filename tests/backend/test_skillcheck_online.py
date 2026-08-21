@@ -211,6 +211,15 @@ def test_shot_wins_uses_the_shrinking_arc_not_the_full_arc():
     assert online.shot_wins(WHEEL, ch, early) is True
 
 
+def test_adjudicated_flipped_is_black_at_the_bottom():
+    # The single source of the whack orientation the server assumes for a mover:
+    # black renders own-color-at-bottom, i.e. flipped. The server's shot handler
+    # and the client's wire normalisation both import THIS function, so the rule
+    # cannot fork between the two sides.
+    assert online.adjudicated_flipped("black") is True
+    assert online.adjudicated_flipped("white") is False
+
+
 def test_is_past_deadline_boundary():
     assert online.is_past_deadline(online.SKILLCHECK_DEADLINE_MS) is False
     assert online.is_past_deadline(online.SKILLCHECK_DEADLINE_MS + 0.1) is True

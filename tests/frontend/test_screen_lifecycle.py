@@ -21,7 +21,10 @@ import pygame as pg
 import pytest
 
 from tests.conftest import pygame_display
+from chessshootout.backend.pieces import PieceColor
 from chessshootout.backend.utils import Square
+from chessshootout.frontend.screens.game import IdleWindow
+from chessshootout.server.protocol import Reason
 from tests.helpers import key_event, make_app
 
 
@@ -64,6 +67,19 @@ def test_enter_exit_double_exit_reenter_leaves_the_screen_functional(name, tmp_p
     app.screen = screen
     app._compute_layout()
     app.draw_frame()  # must not raise; screen still functional
+
+
+def test_game_reenter_starts_from_a_clean_idle_window_baseline():
+    """Enter always starts from a clean baseline (screen contract): an idle
+    window surviving from a previous online game would paint a phantom
+    Abort/Resign badge on the idler's strip and fold the heartbeat in the next
+    game. _reset_to_new_game owns the clear, so every entry path gets it."""
+    app = make_app()
+    app.switch_to("game")
+    app.game._idle_window = IdleWindow(Reason.ABORTED, PieceColor.WHITE, 60_000, 60.0)
+    app.switch_to("menu")
+    app.switch_to("game")
+    assert app.game._idle_window is None
 
 
 # --- nav matrix --------------------------------------------------------------

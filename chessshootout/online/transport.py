@@ -27,6 +27,7 @@ log = logging.getLogger("chess.client.transport")
 HTTP_TIMEOUT_SECONDS = 5.0
 NEWS_TIMEOUT_SECONDS = 5.0
 RECLAIM_TIMEOUT_SECONDS = 2.0
+HEALTHZ_TIMEOUT_SECONDS = 3.0
 WS_PING_INTERVAL_SECONDS = 20
 WS_PING_TIMEOUT_SECONDS = 30
 NEWS_MAX_BYTES = 512 * 1024
@@ -84,7 +85,7 @@ def fetch_news(url, *, timeout=NEWS_TIMEOUT_SECONDS, max_bytes=NEWS_MAX_BYTES):
             if r.status_code != 200:
                 raise TransportHTTPError(r.status_code, f"http_{r.status_code}")
             body = _read_capped(r, max_bytes)
-    except (httpx.HTTPError, httpx.TimeoutException, httpx.InvalidURL) as exc:
+    except (httpx.HTTPError, httpx.TimeoutException, httpx.InvalidURL, UnicodeError) as exc:
         raise TransportError(str(exc)) from exc
     try:
         return _loads(body)
@@ -182,13 +183,13 @@ class ServerTransport:
                 r = self._http.request(method, url, json=json_body, timeout=timeout)
             else:
                 r = httpx.request(method, url, json=json_body, timeout=timeout, verify=_TLS_CONTEXT)
-        except (httpx.HTTPError, httpx.TimeoutException) as exc:
+        except (httpx.HTTPError, httpx.TimeoutException, httpx.InvalidURL, UnicodeError) as exc:
             raise TransportError(str(exc)) from exc
         return r
 
-    def _blocking_post(self, path, body, response_model, timeout=HTTP_TIMEOUT_SECONDS):
+    def _blocking_request(self, method, path, response_model, timeout, json_body=None):
         try:
-            r = self._sync_request("POST", path, json_body=body, timeout=timeout)
+            r = self._sync_request(method, path, json_body=json_body, timeout=timeout)
         except TransportError:
             return None
         if r.status_code != 200:
@@ -201,13 +202,18 @@ class ServerTransport:
     def reclaim_blocking(self, client_uuid, *,
                          timeout=RECLAIM_TIMEOUT_SECONDS) -> Optional[ReclaimResponse]:
         body = ReclaimRequest(client_uuid=client_uuid).model_dump()
-        return self._blocking_post("/reclaim", body, ReclaimResponse, timeout)
+        return self._blocking_request("POST", "/reclaim", ReclaimResponse, timeout,
+                                      json_body=body)
 
     def resume_blocking(self, room_id, session_token) -> Optional[ResumeResponse]:
         body = ResumeRequest(
             room_id=room_id, session_token=session_token,
         ).model_dump()
-        return self._blocking_post("/resume", body, ResumeResponse)
+        return self._blocking_request("POST", "/resume", ResumeResponse,
+                                      HTTP_TIMEOUT_SECONDS, json_body=body)
+
+    def healthz_blocking(self, *, timeout=HEALTHZ_TIMEOUT_SECONDS) -> Optional[HealthResponse]:
+        return self._blocking_request("GET", "/healthz", HealthResponse, timeout)
 
     async def healthz_async(self, http) -> Optional[HealthResponse]:
         url = self._url.http("/healthz")

@@ -101,8 +101,9 @@ server for online two-player matches.
   marks**) to hide their shared marks entirely — both toggle the same setting.
 - **Quick chat** — preset lines only; your queen speaks them in a bubble on the
   opponent's board.
-- Live abort / abandon / reconnect countdowns in the player strips; games with
-  no moves played end as **aborted** (nobody wins).
+- Live abort / abandon / reconnect countdowns in the player strips: an opening
+  nobody plays ends as **aborted** (nobody wins), and going quiet once both
+  players have moved is an auto-resign — see [Idle timeouts](#idle-timeouts).
 - Matchmaking gives up after 10 minutes in the queue with a toast — hit
   **FIND MATCH** again to keep looking.
 - Layered reconnection for WiFi blips, app restarts, and server restarts
@@ -226,9 +227,10 @@ CHESS_SERVER_ADDR=localhost:8000 CHESS_DATA_DIR=/tmp/cs-b LOG_LEVEL=DEBUG \
 ```
 
 Every variable is set explicitly so nothing inherited can interfere:
-`CHESS_SERVER_ADDR` beats whatever a saved `.env` holds, `CHESS_DATA_DIR` gives
-each client its own settings and PGN folder, and `HOST=127.0.0.1` binds the
-loopback so a service already on `0.0.0.0:8000` does not collide.
+`CHESS_SERVER_ADDR` set at launch beats both a saved `.env` and the in-app
+Official / Custom picker for that run, `CHESS_DATA_DIR` gives each client its own
+settings and PGN folder, and `HOST=127.0.0.1` binds the loopback so a service
+already on `0.0.0.0:8000` does not collide.
 
 `--client-uuid alice` is a debug shortcut: any non-UUID4 alias is coerced to
 a deterministic UUID4 client-side so the server's validator accepts it. Real
@@ -242,11 +244,13 @@ In both clients pick **Online**, choose the **same time control**, then hit
 The client reads a gitignored `.env` at the repo root — copy `.env.example`:
 
 ```
-CHESS_SERVER_ADDR=localhost:8000
+CHESS_SERVER_MODE=custom                # "official" or "custom"
+CHESS_CUSTOM_SERVER_ADDR=localhost:8000 # the address used in custom mode
+CHESS_SERVER_ADDR=localhost:8000        # resolved target; a launch var wins
 CHESS_NICKNAME=YourName
-CHESS_CLIENT_UUID=          # auto-generated UUID4 on first launch
-CHESS_LAST_MODE=            # auto-saved
-CHESS_MASTER_VOLUME=0.70    # 0.0–1.0; the in-game slider writes here
+CHESS_CLIENT_UUID=                      # auto-generated UUID4 on first launch
+CHESS_LAST_MODE=                        # auto-saved
+CHESS_MASTER_VOLUME=0.70                # 0.0–1.0; the slider writes here
 ```
 
 `--client-uuid` and `--nickname` override `.env` for a single run (handy for
@@ -259,10 +263,19 @@ milliseconds. Each is an independent switch (`CHESS_SHOW_FPS`,
 `CHESS_SHOW_FRAME_STATS`, `CHESS_SHOW_1PCT_LOW`, `CHESS_SHOW_FRAMETIME`,
 `CHESS_SHOW_PING`).
 
-With `CHESS_SERVER_ADDR` unset, the downloaded desktop app connects to the
-public server (`server.chess-shootout.com`) while a source checkout uses
-`localhost:8000`; set it — or use in-app **Options → Server** — to point at
-any host, such as a self-hosted server.
+**Options → Online → Server** picks where online games connect: **Official** —
+the public server at `server.chess-shootout.com` — or **Custom**, which reveals
+a **Custom address** field for a host (or `host:port`) you run yourself. The
+**Connection** row's **Test** button checks the server answers before you queue
+and reports the round-trip in milliseconds plus the server's version, or flags a
+protocol mismatch when it is too old or too new for your client. Servers can't
+be swapped mid-session — leave the online game first.
+
+The picker persists as `CHESS_SERVER_MODE` and `CHESS_CUSTOM_SERVER_ADDR`, and
+writes the address it resolves to into `CHESS_SERVER_ADDR`. A downloaded desktop
+app starts on **Official**, a source checkout on **Custom** at `localhost:8000`.
+Setting `CHESS_SERVER_ADDR` in the environment at launch wins for that run and
+bypasses the picker entirely.
 
 ### In-game actions
 
@@ -276,6 +289,24 @@ any host, such as a self-hosted server.
   the grant.
 - **Rematch** (from the result modal) — the same room restarts with swapped
   colors; the series score follows the players, not the colors.
+
+### Idle timeouts
+
+Online openings can't be left hanging: until the game is properly under way,
+whoever is on the move has **60 seconds** to play it.
+
+| Moves played | On the move | Nobody moves for 60 s |
+|---|---|---|
+| None yet | White | Game **aborts** — no winner |
+| White's first, no reply | Black | Game **aborts** — no winner |
+| Both first moves in | White | White **resigns** — an ordinary loss |
+
+Once White's second move lands the game is under way and the chess clock is the
+only deadline left. Both players watch the same countdown on the idle player's
+strip — `Abort in …` or `Resign in …` — and it keeps ticking while that player
+is disconnected, so dropping out buys no extra time. An abort has no winner, no
+series point, and no saved PGN when it lands before a single move; an
+auto-resign is an ordinary resignation, series point and all.
 
 ### Reconnection
 
@@ -300,8 +331,11 @@ Layered recovery:
 If a countdown ends with no reconnect, the game **aborts** (no winner) when a
 desync was left unresolved, or the waiting player **wins by abandonment** when
 the other side simply left; starting a new game while still in one forfeits the
-old immediately. Rooms are in-memory only (no DB), so a true server crash loses
-game state — but New Search starts a fresh game in one click.
+old immediately. A drop pauses nothing else, either: the opening's
+[idle timeouts](#idle-timeouts) keep counting down while you are away, so a
+reconnect that lands after the window can find the game already over. Rooms are
+in-memory only (no DB), so a true server crash loses game state — but New Search
+starts a fresh game in one click.
 
 ### Crash logs
 

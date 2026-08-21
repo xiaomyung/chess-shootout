@@ -18,9 +18,9 @@ def _no_op():
     pass
 
 
-def _make_menu():
+def _make_menu(pgn_available=True):
     callbacks = {key: _no_op for _, key in BUTTONS}
-    return ResultMenu(pg.display.get_surface(), callbacks)
+    return ResultMenu(pg.display.get_surface(), callbacks, lambda: pgn_available)
 
 
 def _stats(kos=(5, 3), streak=4, checks=7, moves=31, clock_left=242.0, material=6,
@@ -137,7 +137,7 @@ def test_buttons_fit_and_stay_inside_modal(size):
 def test_handle_click_fires_callback():
     fired = []
     cbs = {key: (lambda k=key: fired.append(k)) for _, key in BUTTONS}
-    menu = ResultMenu(pg.display.get_surface(), cbs)
+    menu = ResultMenu(pg.display.get_surface(), cbs, lambda: True)
     menu.set_rect(pg.Rect(0, 0, 440, 418))
     menu.set_result("VICTORY", "win", "x", _stats())
     menu.draw()
@@ -163,11 +163,25 @@ def test_reset_hides_menu_and_clears_buttons():
     assert menu.handle_click(menu_center) is False
 
 
+def test_open_pgn_button_absent_when_provider_reports_unavailable():
+    """The modal-level filter itself: whatever the flow behind the provider,
+    a False answer removes Open PGN from the drawn row (and its click rect)
+    while the remaining buttons keep their places."""
+    menu = _make_menu(pgn_available=False)
+    rect = pg.Rect(60, 60, 440, 418)
+    menu.set_rect(rect)
+    menu.set_result("VICTORY", "win", "Checkmate · 31 moves", _stats())
+    menu.window.fill((0, 0, 0))
+    menu.draw()
+    assert "open_pgn" not in menu.button_rects
+    assert "new_game" in menu.button_rects and "menu" in menu.button_rects
+
+
 def test_online_rematch_offered_hides_initiate_button():
     """An incoming rematch request hides the result modal's initiate button; the
     drop-in banner carries Accept/Deny instead, avoiding a duplicate affordance."""
     callbacks = {"rematch": _no_op, "open_pgn": _no_op, "menu": _no_op}
-    menu = ResultMenu(pg.display.get_surface(), callbacks)
+    menu = ResultMenu(pg.display.get_surface(), callbacks, lambda: True)
     menu.set_rect(pg.Rect(0, 0, 440, 418))
     menu.set_online_mode(True)
     menu.set_result("DRAW", "draw", "By agreement · 20 moves", _stats(potg=None))

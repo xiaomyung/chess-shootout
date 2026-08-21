@@ -19,7 +19,8 @@ from chessshootout.backend.utils import (
 )
 from chessshootout.server import logging_setup
 from chessshootout.server.broadcasts import (
-    broadcast_game_start, finalize_and_broadcast, resolve_skillcheck_fail)
+    _idle_window_wire, broadcast_game_start, finalize_and_broadcast,
+    resolve_skillcheck_fail)
 from chessshootout.server.connections import ConnectionRegistry, send
 from chessshootout.server.handlers import _clock_snapshot, dispatch
 from chessshootout.server.moderation import library
@@ -27,7 +28,8 @@ from chessshootout.server.protocol import (
     ANNOTATIONS_PER_SECOND, AnnotationSetWire, ArrowWire,
     AuthMessage, CHAT_COOLDOWN_SECONDS, CancelMatchmakeRequest,
     ConnectionStatusMessage, ErrorMessage,
-    HealthResponse, HistoryEntryWire, LockWire, MatchmakeRequest, MatchmakeResponse,
+    HealthResponse, HistoryEntryWire, LockWire,
+    MatchmakeRequest, MatchmakeResponse,
     PROTOCOL_VERSION, PendingSkillCheckWire, Reason, ReclaimRequest, ReclaimResponse,
     RematchRequestMessage, RematchUpdateMessage,
     ResultMessage, ResumeRequest, ResumeResponse, SkillCheckOutcomeWire, is_uuid4,
@@ -380,6 +382,7 @@ def create_app(*, now_provider=time.monotonic, max_rooms=DEFAULT_MAX_ROOMS):
             hide_opp_marks=slot.hide_opp_marks,
             result_reason=room.result[0] if room.result else None,
             result_winner=room.result[1] if room.result else None,
+            idle_window=_idle_window_wire(room, app.state.now()),
         )
         log.info("resume served room=%s color=%s ply=%d", body.room_id, color, len(history))
         if (connections.get_for_color(room, color) is not None

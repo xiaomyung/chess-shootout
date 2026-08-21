@@ -1,11 +1,14 @@
 """Sweep step methods exercised in isolation via a fake clock.
 
 The Sweep class wraps the per-tick lifecycle: each step does one thing
-(clock + first-move abort, grace expiry, orphan/post-result drop, beacon,
-GC) so we drive each independently without the full asyncio loop.
+(skill-check deadlines, clock + idle windows, heartbeat timeout, grace
+expiry, pre-game orphan drop, abandoned/timed-out queue reaping,
+post-game rematch window, finished-room GC) so we drive each
+independently without the full asyncio loop.
 """
 import pytest
 
+from chessshootout.backend.utils import Square
 from chessshootout.server.protocol import (
     GRACE_SECONDS, HEARTBEAT_TIMEOUT_SECONDS, QUEUE_MAX_WAIT_SECONDS, Reason)
 from chessshootout.server.rooms import POST_GAME_DISCONNECT_GRACE, QUEUE_ABANDON_SECONDS
@@ -32,35 +35,176 @@ def sweep(app):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    "time_minutes, set_first_move, advance, expected_result, expected_reason",
+    "time_minutes, plies_ever, set_first_move, arm_idle, advance, "
+    "expected_result, expected_reason",
     [
-        pytest.param(5, False, 61, ("aborted", None), None,
+        pytest.param(5, 0, False, True, 61, ("aborted", None), None,
                      id="no_first_move_aborts"),
-        pytest.param(1, True, 70, None, Reason.TIMEOUT,
+        pytest.param(1, 1, True, True, 70, None, Reason.TIMEOUT,
                      id="flagged_clock_times_out"),
+        pytest.param(5, 1, True, True, 61, ("aborted", None), None,
+                     id="black_never_replies_aborts"),
+        pytest.param(5, 2, True, True, 61, (Reason.RESIGNATION, "black"), None,
+                     id="silence_after_both_first_moves_resigns"),
+        pytest.param(180, 3, True, False, 600, None, None,
+                     id="ply_three_never_arms"),
     ],
 )
-async def test_sweep_step_clock_and_first_move(sweep, app, clock, time_minutes,
-                                               set_first_move, advance,
-                                               expected_result, expected_reason):
-    """Same step, two distinct outcomes: pre-first-move abort vs clock timeout.
+async def test_sweep_step_clock_and_idle_windows(sweep, app, clock, time_minutes,
+                                                 plies_ever, set_first_move, arm_idle,
+                                                 advance, expected_result,
+                                                 expected_reason):
+    """One step, one armed idle window per IDLE_WINDOW_BY_PLIES row, plus the
+    clock branch it shares the walk with.
 
-    Expected differs in kind per case (the abort branch yields a fixed
-    ("aborted", None) tuple; the timeout branch yields a TIMEOUT reason on the
-    flagged side), so each case carries its own expected — never flattened.
+    Plies 0 and 1 expire as a fixed ("aborted", None) — nobody loses when the
+    game never really started (ply 1 is issue #81: black never replies to
+    white's first move). Ply 2 expires as a RESIGNATION awarding the opponent
+    of the side to move (issue #82: both sides proved present, so silence is a
+    forfeit). Ply 3+ never arms — a 10-minute stall on a 3-hour clock stays a
+    running game. The flagged case pins the clock branch still firing when the
+    idle window is also due-ish: expected differs in kind per case, so each
+    carries its own expected — never flattened.
     """
     room = await _pair(app.state.rooms, time_minutes=time_minutes)
     room.started_at = clock()
+    room.plies_ever = plies_ever
     if set_first_move:
         room.first_move_at = clock()
-        room.plies_ever = 1
+    room.idle_since = clock() if arm_idle else None
     clock.advance(advance)
-    await sweep.step_clock_and_first_move_abort()
-    if expected_result is not None:
-        assert room.result == expected_result
-    else:
+    await sweep.step_clock_and_idle_windows()
+    if expected_reason is not None:
         assert room.result is not None
         assert room.result[0] == expected_reason
+    elif expected_result is not None:
+        assert room.result == expected_result
+    else:
+        assert room.result is None
+
+
+@pytest.mark.asyncio
+async def test_a_flag_in_the_same_tick_beats_the_idle_resign(sweep, app, clock):
+    """The clock branch wins the sweep pass unconditionally: when a flag fall and
+    the idle-resign expiry are both due in the same sweep pass, the clock branch
+    runs first and the idle branch's post-await result re-check stands down.
+    finalize_result is idempotent anyway, but the re-check makes the tie-break
+    intentional — a bullet game where white idles to death on the clock is a
+    TIMEOUT, not an idle resignation."""
+    room = await _pair(app.state.rooms, time_minutes=1)
+    room.started_at = clock()
+    room.first_move_at = clock()
+    room.plies_ever = 2
+    room.idle_since = clock()
+    clock.advance(70)
+    await sweep.step_clock_and_idle_windows()
+    assert room.result is not None
+    assert room.result[0] == Reason.TIMEOUT
+
+
+@pytest.mark.asyncio
+async def test_a_bullet_flag_before_the_ply_one_abort_deadline_is_a_timeout(
+    sweep, app, clock,
+):
+    """Locked product decision: first event wins — a flag that lands with or
+    before the abort deadline stands as a normal timeout. At 1+0 the replier's
+    whole clock fits inside the 60 s ply-1 abort window, so black never
+    replying to white's first move flags on the clock branch before the idle
+    branch gets a look: a real TIMEOUT with a series point for white, not a
+    no-fault abort."""
+    room = await _pair(app.state.rooms, time_minutes=1)
+    room.started_at = clock()
+    assert room.backend.try_move(Square(6, 4), Square(4, 4)).legal
+    room.first_move_at = clock()
+    room.plies_ever = 1
+    room.idle_since = clock()
+    clock.advance(61)
+    await sweep.step_clock_and_idle_windows()
+    assert room.result == (Reason.TIMEOUT, "white")
+    assert room.series_scores == {"A": 1.0}
+
+
+@pytest.mark.asyncio
+async def test_no_idle_resignation_while_the_would_be_winner_is_disconnected(
+    sweep, app, clock,
+):
+    """The inverse of the aligned cases below: black plays ply 2 and then
+    drops, so white sits through an "Abandon in" countdown — awarding black an
+    idle-resign win in that state would contradict the badge on white's
+    screen. The idle branch skips the pass whenever the would-be winner's slot
+    is disconnected and leaves the room to the grace sweep, where abandonment
+    awards the CONNECTED player: white, the idler."""
+    rooms = app.state.rooms
+    room = await _pair(rooms)
+    room.started_at = clock()
+    room.first_move_at = clock()
+    room.plies_ever = 2
+    room.idle_since = clock()
+    room.black.connected = True
+    rooms.mark_disconnected(room.room_id, "black")
+    clock.advance(61)
+    await sweep.step_clock_and_idle_windows()
+    assert room.result is None, "no idle forfeit may crown a disconnected winner"
+    await sweep.step_grace_expired()
+    assert room.result == (Reason.ABANDONMENT, "white")
+
+
+@pytest.mark.asyncio
+async def test_the_idle_resign_beats_a_same_pass_grace_abandonment(sweep, app, clock):
+    """step_clock_and_idle_windows precedes step_grace_expired in step_all, so an
+    idler who also disconnected at window start forfeits by RESIGNATION, not
+    ABANDONMENT — deterministic, and both reasons would name the same winner."""
+    rooms = app.state.rooms
+    room = await _pair(rooms)
+    room.started_at = clock()
+    room.first_move_at = clock()
+    room.plies_ever = 2
+    room.idle_since = clock()
+    room.white.connected = True
+    rooms.mark_disconnected(room.room_id, "white")
+    clock.advance(61)
+    await sweep.step_all()
+    assert room.result == (Reason.RESIGNATION, "black")
+
+
+@pytest.mark.asyncio
+async def test_a_disconnect_does_not_dodge_the_idle_window(sweep, app, clock):
+    """Same posture as expired skill-check pendings: pulling the plug neither
+    pauses nor resets the idle window. No /resume happened, nothing restamped
+    idle_since, and the forfeit still lands on schedule."""
+    rooms = app.state.rooms
+    room = await _pair(rooms)
+    room.started_at = clock()
+    room.first_move_at = clock()
+    room.plies_ever = 2
+    armed_at = clock()
+    room.idle_since = armed_at
+    room.white.connected = True
+    rooms.mark_disconnected(room.room_id, "white")
+    clock.advance(61)
+    assert room.idle_since == armed_at, "the disconnect never touched the window"
+    await sweep.step_clock_and_idle_windows()
+    assert room.result == (Reason.RESIGNATION, "black")
+
+
+@pytest.mark.asyncio
+async def test_the_black_never_moved_abort_beats_a_same_tick_abandonment(sweep, app, clock):
+    """Issue #81's real-world shape: black connects, never replies, and often
+    also drops the socket. The ply-1 abort window expires in the same pass the
+    grace would — step order makes the ABORTED outcome win, so nobody gets a
+    winner and nobody scores a series point off a game that never started."""
+    rooms = app.state.rooms
+    room = await _pair(rooms)
+    room.started_at = clock()
+    room.first_move_at = clock()
+    room.plies_ever = 1
+    room.idle_since = clock()
+    room.black.connected = True
+    rooms.mark_disconnected(room.room_id, "black")
+    clock.advance(61)
+    await sweep.step_all()
+    assert room.result == ("aborted", None)
+    assert room.series_scores == {}
 
 
 @pytest.mark.asyncio
@@ -207,7 +351,7 @@ async def test_sweep_step_all_runs_in_documented_order(sweep, app, clock, monkey
     calls = []
 
     async def _trace_clock():
-        calls.append("clock_and_first_move")
+        calls.append("clock_and_idle")
 
     async def _trace_grace():
         calls.append("grace")
@@ -227,7 +371,7 @@ async def test_sweep_step_all_runs_in_documented_order(sweep, app, clock, monkey
     async def _trace_post_game():
         calls.append("post_game")
 
-    monkeypatch.setattr(sweep, "step_clock_and_first_move_abort", _trace_clock)
+    monkeypatch.setattr(sweep, "step_clock_and_idle_windows", _trace_clock)
     monkeypatch.setattr(sweep, "step_grace_expired", _trace_grace)
     monkeypatch.setattr(sweep, "step_heartbeat_timeout", _trace_heartbeat)
     monkeypatch.setattr(sweep, "step_drop_orphans_pre_game", _trace_drop)
@@ -237,7 +381,7 @@ async def test_sweep_step_all_runs_in_documented_order(sweep, app, clock, monkey
     monkeypatch.setattr(sweep.rooms, "gc_finished_rooms",
                         lambda: calls.append("gc"))
     await sweep.step_all()
-    assert calls == ["clock_and_first_move", "heartbeat_timeout", "grace",
+    assert calls == ["clock_and_idle", "heartbeat_timeout", "grace",
                      "drop_orphans", "reap_queue", "timeout_queue", "post_game", "gc"]
 
 

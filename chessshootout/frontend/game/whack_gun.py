@@ -51,6 +51,9 @@ class WhackGun:
     def clear(self):
         self.from_sq = None
         self.attacker_type = None
+        self.clear_impact_px()
+
+    def clear_impact_px(self):
         self.impact_px = None
 
     def _aim_px(self, passive, target):

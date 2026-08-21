@@ -466,6 +466,32 @@ def test_a_locally_played_whack_controller_never_mirrors():
     app.game.skillcheck_session.teardown_skillcheck_overlay()
 
 
+def test_the_online_whack_spec_carries_the_movers_assumed_orientation():
+    """The CheckSpec threads the server's assumed orientation to the controller:
+    own check = the local colour, spectate mirror = the OPPONENT's colour (the
+    mirror must carry the mover's frame), local/bot = None (wire normalisation
+    passes through, offline behaviour bit-identical). This is the guard for the
+    silent-fallback risk: an unset field reads as bool(None) = False in
+    _spectate_px, quietly reverting the mirror to the old opposite-orientation
+    assumption."""
+    app = _local_app()
+    session = app.game.skillcheck_session
+    frm, to = _capture_board(app)
+    args = (SkillCheckKind.WHACK, "orient-seed", 0, 5000.0, frm, to, None, 1)
+    for side, own, mirror in (("white", False, True), ("black", True, False)):
+        app.game._chosen_side = side
+        session.open_skillcheck_overlay(*args, online=True)
+        assert app.game.skillcheck_overlay._controller._adjudicated_flipped is own, side
+        session.teardown_skillcheck_overlay()
+        session.open_spectate_overlay(*args)
+        assert app.game.skillcheck_overlay._controller._adjudicated_flipped is mirror, side
+        session.teardown_skillcheck_overlay()
+    _gate(app, SkillCheckKind.WHACK)
+    assert app.game.skillcheck_overlay._controller._adjudicated_flipped is None, \
+        "a local/bot game carries no assumed orientation at all"
+    session.teardown_skillcheck_overlay()
+
+
 def _resumed_whack(app, *, passive, miss_count, progress=1):
     frm, to = _capture_board(app)
     session = app.game.skillcheck_session
@@ -616,6 +642,13 @@ def _aim_angle(app, frm, target_px):
     return math.atan2(target_px[1] - py, target_px[0] - px)
 
 
+def _aim_gap(app, frm, target_px):
+    # The eased aim accumulates deltas and can sit a full turn away from atan2's
+    # branch, so a raw angle comparison is only safe before it wraps.
+    live = app.game.board.effects._whack_gun["aim"]
+    return abs((live - _aim_angle(app, frm, target_px) + math.pi) % (2 * math.pi) - math.pi)
+
+
 def _spin(session, clock, frames=200, step=16):
     for _ in range(frames):
         clock.advance(step)
@@ -761,6 +794,38 @@ def test_the_mirror_aims_at_the_victim_then_at_the_relayed_impact(monkeypatch):
     _spin(session, clock)
     assert fx._whack_gun["aim"] == pytest.approx(_aim_angle(app, frm, impact), abs=0.02), \
         "and the barrel follows the opponent's shots from there on"
+    session.teardown_skillcheck_overlay()
+
+
+def test_a_flip_mid_spectate_drops_the_stale_relayed_impact(monkeypatch):
+    """The mirror's aim target is the last relayed impact, stored in WINDOW pixels.
+    A spectator who flips the board after the mover's first hit has moved every
+    square out from under that pixel, so the barrel would keep pointing at the
+    mirrored-away point until the next relay landed. The geometry refresh that
+    re-lays the overlay on a flip (and on a resize) drops the impact with it, so
+    the aim falls back to its default anchor -- the victim's cell in the NEW
+    orientation -- until the opponent's next shot repopulates it."""
+    app = _local_app()
+    clock = FakeTicks()
+    install_clock(monkeypatch, clock)
+    session, board = app.game.skillcheck_session, app.game.board
+    frm, to = _capture_board(app)
+    session.open_spectate_overlay(
+        SkillCheckKind.WHACK, "spec-seed", 0, 5000, frm, to, None, 1)
+    session.sync_whack_gun()
+    ctrl = app.game.skillcheck_overlay._controller
+    ctrl.update(ctrl.start_ms + 900)
+    ctrl.spectate_shot(800.0, 0, True, progress=1, target=(0.5, 0.5))
+    stale = session.whack_gun.impact_px
+    assert stale is not None, "the relay parked an impact in the pre-flip window frame"
+    app.game._on_flip()
+    assert session.whack_gun.impact_px is None, \
+        "the refresh drops the pre-flip pixel instead of re-aiming at it"
+    _spin(session, clock)
+    assert _aim_gap(app, frm, board.cell_rect(to).center) < 0.02, \
+        "the barrel rests on the victim's new square until the next relay"
+    assert _aim_gap(app, frm, stale) > 0.2, \
+        "and never on the point the flip mirrored away"
     session.teardown_skillcheck_overlay()
 
 

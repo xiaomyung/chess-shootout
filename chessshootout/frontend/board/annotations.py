@@ -40,6 +40,7 @@ class Annotations:
     def flag_own(self, arrows, highlights):
         self.flagged.update(arrows)
         self.flagged.update(highlights)
+        self.board.mark_needs_present()
 
     def is_square_annotated(self, sq):
         return sq in self.highlighted_squares or any(
@@ -51,14 +52,17 @@ class Annotations:
         self.arrows = []
         self.flagged = set()
         self._right_drag_start_square = None
+        self.board.mark_needs_present()
 
     def clear_opp(self):
         self.opp_highlighted_squares = set()
         self.opp_arrows = []
+        self.board.mark_needs_present()
 
     def set_opp(self, highlights, arrows):
         self.opp_highlighted_squares = set(highlights)
         self.opp_arrows = list(arrows)
+        self.board.mark_needs_present()
 
     def apply_opp_delta(self, action, kind, square=None, arrow=None):
         if kind == "highlight":
@@ -66,12 +70,15 @@ class Annotations:
                 self.opp_highlighted_squares.add(square)
             else:
                 self.opp_highlighted_squares.discard(square)
+            self.board.mark_needs_present()
             return
         if action == "add":
             if arrow not in self.opp_arrows:
                 self.opp_arrows.append(arrow)
+                self.board.mark_needs_present()
         elif arrow in self.opp_arrows:
             self.opp_arrows.remove(arrow)
+            self.board.mark_needs_present()
 
     def clear_all(self):
         self.clear()

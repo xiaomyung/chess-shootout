@@ -20,6 +20,9 @@ from chessshootout.backend.pieces import PieceType
 from chessshootout.domain.pgn.generate import generate_pgn
 from chessshootout.frontend.modals.help import HOTKEYS
 from chessshootout.frontend.panels.right import SECTION_OPEN
+from chessshootout.frontend.pgn_open import (
+    MISSING_MESSAGE, NO_HANDLER_MESSAGE, NO_MOVES_MESSAGE, OPEN_FAILED_MESSAGE,
+)
 from chessshootout.frontend.screens.base import Nav
 from chessshootout.frontend.screens.review import REVIEW_HOTKEY_KEYS, REVIEW_HOTKEYS
 from tests.helpers import (
@@ -309,16 +312,20 @@ def test_game_help_shows_the_full_list():
 
 
 def test_open_pgn_button_opens_the_loaded_file(tmp_path, monkeypatch):
+    """Review routes through the shared shell service, and hands it a failure
+    callback so an opener that exits non-zero can still reach the player."""
     path = _write_pgn(tmp_path, "test.pgn")
     app = make_app()
     _enter_review(app, path)
     captured = {}
     monkeypatch.setattr(
         "chessshootout.frontend.pgn_open.open_with_default_app",
-        lambda p: captured.setdefault("path", p) or True,
+        lambda p, on_failure=None: captured.update(path=p, on_failure=on_failure) or True,
     )
     app.review._on_open_pgn()
     assert captured["path"] == str(path)
+    assert callable(captured["on_failure"])
+    assert app.toast.message is None
 
 
 def test_open_pgn_button_toasts_on_failure(tmp_path, monkeypatch):
@@ -326,10 +333,11 @@ def test_open_pgn_button_toasts_on_failure(tmp_path, monkeypatch):
     app = make_app()
     _enter_review(app, path)
     monkeypatch.setattr(
-        "chessshootout.frontend.pgn_open.open_with_default_app", lambda p: False,
+        "chessshootout.frontend.pgn_open.open_with_default_app",
+        lambda p, on_failure=None: False,
     )
     app.review._on_open_pgn()
-    assert app.toast.message == "Could not open PGN"
+    assert app.toast.message == OPEN_FAILED_MESSAGE
 
 
 def test_right_click_highlights_and_arrows_still_work_in_review(tmp_path):
@@ -405,19 +413,39 @@ def test_review_help_lists_every_key_review_actually_handles(tmp_path):
 
 
 def test_review_open_pgn_toasts_when_the_file_is_gone(tmp_path, monkeypatch):
-    """Review and the result menu now share one Open-PGN policy: a path that no
-    longer exists toasts "No saved PGN" instead of handing a dead path to the OS."""
+    """Review and the result menu share one Open-PGN policy: a path that no
+    longer exists names that specific failure instead of handing a dead path to
+    the OS — and is worded apart from the never-saved case."""
     path = _write_pgn(tmp_path, "vanishing.pgn")
     app = _enter_review(make_app(), path)
     opened = []
     monkeypatch.setattr("chessshootout.frontend.pgn_open.open_with_default_app",
-                        lambda p: opened.append(p) or True)
+                        lambda p, on_failure=None: opened.append(p) or True)
     os.remove(path)
 
     app.review._on_open_pgn()
 
     assert opened == []
-    assert app.toast.message == "No saved PGN"
+    assert app.toast.message == MISSING_MESSAGE
+    assert MISSING_MESSAGE != NO_MOVES_MESSAGE
+
+
+def test_review_open_pgn_reports_an_opener_that_exits_non_zero(tmp_path, monkeypatch):
+    """The launch succeeds and the failure arrives later, off the UI thread —
+    it reaches the player only because draw_frame drains the opener's queue."""
+    path = _write_pgn(tmp_path, "no-handler.pgn")
+    app = _enter_review(make_app(), path)
+    reported = []
+    monkeypatch.setattr("chessshootout.frontend.pgn_open.open_with_default_app",
+                        lambda p, on_failure=None: reported.append(on_failure) or True)
+
+    app.review._on_open_pgn()
+    assert app.toast.message is None
+
+    reported[0](3)
+    app.draw_frame()
+
+    assert app.toast.message == NO_HANDLER_MESSAGE
 
 
 def test_review_debut_tracks_review_ply(tmp_path):

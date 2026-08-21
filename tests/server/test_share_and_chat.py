@@ -336,6 +336,8 @@ def test_move_wipes_marks_keeps_sharing_and_emits_no_annotation_frame(client):
         _send(ws_w, type="move", **{"from": "e2", "to": "e4"})
         assert _recv(ws_w)["type"] == "move_applied"
         assert _recv(ws_b)["type"] == "move_applied"
+        assert _recv(ws_w)["type"] == "idle_window"
+        assert _recv(ws_b)["type"] == "idle_window"
 
         for store in (room.annotations_white, room.annotations_black):
             assert store.sharing is True
@@ -355,6 +357,8 @@ def test_takeback_wipes_shared_marks(client):
         _send(ws_w, type="move", **{"from": "e2", "to": "e4"})
         assert _recv(ws_w)["type"] == "move_applied"
         assert _recv(ws_b)["type"] == "move_applied"
+        assert _recv(ws_w)["type"] == "idle_window"
+        assert _recv(ws_b)["type"] == "idle_window"
 
         room = _room(client, a)
         for store in (room.annotations_white, room.annotations_black):

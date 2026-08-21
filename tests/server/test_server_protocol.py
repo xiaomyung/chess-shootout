@@ -4,11 +4,13 @@ from pydantic import ValidationError
 from chessshootout.server.app import MAX_INBOUND_MESSAGE_BYTES
 from chessshootout.server.protocol import (
     AnnotationDeltaMessage, AnnotationSetWire, AnnotationsStateMessage, ArrowWire,
-    AuthMessage, CHAT_PRESET_COUNT, ClockSnapshot, ErrorMessage, GameStartMessage,
+    AuthMessage, CHAT_PRESET_COUNT, ClockSnapshot, ErrorMessage,
+    FIRST_MOVE_ABORT_SECONDS, GameStartMessage, IDLE_RESIGN_SECONDS,
+    IDLE_WINDOW_BY_PLIES, IdleWindowMessage, IdleWindowWire,
     LockWire, MAX_INCREMENT_SECONDS, MAX_SHARED_ARROWS, MAX_SHARED_HIGHLIGHTS,
     MAX_TIME_MINUTES, MIN_INCREMENT_SECONDS, MIN_TIME_MINUTES, MatchmakeRequest,
     MoveAppliedMessage, MoveMessage, PROTOCOL_VERSION, PendingSkillCheckWire,
-    PingMessage, PongMessage, QuickChatMessage, QuickChatReceivedMessage,
+    PingMessage, PongMessage, QuickChatMessage, QuickChatReceivedMessage, Reason,
     ResumeResponse, ResyncDirectiveMessage, SkillCheckRequiredMessage,
     SkillCheckResultMessage, SkillCheckOutcomeWire, SkillCheckShotMessage,
     SkillCheckSpectateMessage, SkillCheckSpectateShotMessage, normalize_country,
@@ -298,8 +300,76 @@ def test_move_message_promotion_validated():
                                     "from": "e7", "to": "e8", "promotion": "x"})
 
 
-def test_protocol_version_pinned_for_four_kind_skillchecks():
-    assert PROTOCOL_VERSION == 4
+def test_protocol_version_pinned_for_the_idle_window_push():
+    assert PROTOCOL_VERSION == 5
+
+
+def test_idle_window_table_is_the_single_source_of_policy():
+    """Server and client both read this table (the client renders "Abort in" vs
+    "Resign in" copy off it), so its exact shape is wire-adjacent: plies 0 and 1
+    share the no-winner abort window, ply 2 is the somebody-loses resign window,
+    and nothing else ever arms."""
+    assert IDLE_WINDOW_BY_PLIES == {
+        0: (Reason.ABORTED, FIRST_MOVE_ABORT_SECONDS),
+        1: (Reason.ABORTED, FIRST_MOVE_ABORT_SECONDS),
+        2: (Reason.RESIGNATION, IDLE_RESIGN_SECONDS),
+    }
+
+
+def test_idle_window_message_round_trips():
+    msg = IdleWindowMessage(outcome="resignation", color="white",
+                            seconds_remaining=42.5)
+    expected = {
+        "version": PROTOCOL_VERSION, "type": "idle_window",
+        "outcome": "resignation", "color": "white", "seconds_remaining": 42.5,
+    }
+    assert msg.model_dump() == expected
+    assert IdleWindowMessage.model_validate(expected) == msg
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        pytest.param({"seconds_remaining": -0.1}, id="negative_seconds"),
+        pytest.param({"seconds_remaining": float("nan")}, id="nan_seconds"),
+        pytest.param({"seconds_remaining": float("inf")}, id="inf_seconds"),
+        pytest.param({"outcome": "timeout"}, id="unknown_outcome"),
+        pytest.param({"outcome": "abandonment"}, id="grace_reason_is_not_a_window"),
+        pytest.param({"color": "green"}, id="unknown_color"),
+    ],
+)
+def test_idle_window_message_rejects_bad_fields(kwargs):
+    """The countdown the client renders is hardened like every other wire float:
+    NaN/Infinity would poison the deadline arithmetic and an unknown outcome has
+    no label copy, so none of them can ever be minted."""
+    base = dict(outcome="aborted", color="black", seconds_remaining=10.0)
+    base.update(kwargs)
+    with pytest.raises(ValidationError):
+        IdleWindowMessage(**base)
+
+
+def test_idle_window_message_rejects_non_finite_json_seconds():
+    """pydantic-core parses bare NaN/Infinity JSON tokens into floats, so
+    allow_inf_nan=False must also hold on the model_validate_json path."""
+    raw = ('{"type": "idle_window", "outcome": "aborted", "color": "black", '
+           '"seconds_remaining": NaN}')
+    with pytest.raises(ValidationError):
+        IdleWindowMessage.model_validate_json(raw)
+
+
+def test_resume_response_idle_window_defaults_none_and_carries_the_wire():
+    base = dict(
+        fen="x", move_history=[],
+        clock=ClockSnapshot(white_remaining=1.0, black_remaining=1.0,
+                            running_for="white"),
+        your_color="white", white_name="A", black_name="B",
+        time_minutes=5, increment_seconds=0)
+    assert ResumeResponse(**base).idle_window is None
+    armed = ResumeResponse(**base, idle_window=IdleWindowWire(
+        outcome="aborted", color="black", seconds_remaining=3.0))
+    assert armed.model_dump()["idle_window"] == {
+        "outcome": "aborted", "color": "black", "seconds_remaining": 3.0,
+    }, "the client reads /resume via plain model_dump() — field-name keys"
 
 
 def test_skill_check_required_round_trips():

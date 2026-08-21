@@ -4,7 +4,7 @@ from chessshootout.server import logging_setup
 from chessshootout.server.broadcasts import finalize_and_broadcast, resolve_skillcheck_fail
 from chessshootout.server.connections import send
 from chessshootout.server.protocol import (
-    ConnectionStatusMessage, ErrorMessage, FIRST_MOVE_ABORT_SECONDS, GRACE_SECONDS,
+    ConnectionStatusMessage, ErrorMessage, GRACE_SECONDS,
     QUEUE_MAX_WAIT_SECONDS, Reason, RematchUpdateMessage,
 )
 from chessshootout.server.rooms import (
@@ -41,7 +41,7 @@ class Sweep:
 
     async def step_all(self):
         await self.step_skillcheck_deadline()
-        await self.step_clock_and_first_move_abort()
+        await self.step_clock_and_idle_windows()
         await self.step_heartbeat_timeout()
         await self.step_grace_expired()
         self.step_drop_orphans_pre_game()
@@ -69,7 +69,7 @@ class Sweep:
             if opp_ws is not None:
                 await send(opp_ws, ConnectionStatusMessage(opp_state="reconnecting"))
 
-    async def step_clock_and_first_move_abort(self):
+    async def step_clock_and_idle_windows(self):
         for room in self.rooms.active_rooms():
             if room.result is not None:
                 continue
@@ -84,13 +84,24 @@ class Sweep:
                              room.room_id, reason, winner)
                     await finalize_and_broadcast(self.rooms, self.connections, room,
                                                  reason, winner_color=winner)
-            now = self._now()
-            if (room.is_paired() and room.first_move_at is None
-                    and room.started_at is not None
-                    and now - room.started_at >= FIRST_MOVE_ABORT_SECONDS):
-                log.info("aborted room=%s reason=no_first_move", room.room_id)
-                await finalize_and_broadcast(self.rooms, self.connections, room,
-                                             Reason.ABORTED)
+            if room.result is not None:
+                continue
+            await self._step_idle_timeout(room)
+
+    async def _step_idle_timeout(self, room):
+        reason = room.idle_timeout_reason(self._now())
+        if reason is None:
+            return
+        winner = None
+        if reason == Reason.RESIGNATION:
+            winner = room.opp_color(room.color_to_move())
+            winner_slot = room.slot(winner)
+            if winner_slot is None or winner_slot.disconnected_at is not None:
+                return
+        log.info("idle timeout room=%s reason=%s winner=%s plies=%d",
+                 room.room_id, reason, winner, room.plies_ever)
+        await finalize_and_broadcast(self.rooms, self.connections, room, reason,
+                                     winner_color=winner)
 
     async def step_grace_expired(self):
         for room, gone_color in list(self.rooms.grace_expired_rooms()):

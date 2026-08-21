@@ -1,13 +1,15 @@
 """Client-side wiring for shared annotations + quick chat: OnlineClient send
 facades enqueue the transport method by name, OnlineCoordinator passthroughs
 guard on a live client, and inbound routing forwards to the subscriber. The
-board-state guards diverge on purpose: annotations_state/annotation_delta are
-buffered mid-resync and replayed in order once the resume lands (the server may
-have applied them after the /resume snapshot; delta application is idempotent
-so replaying pre-snapshot ones is safe) while quick_chat_received always
-forwards immediately (a chat is board-independent and delaying it silently
-loses the moment). The buffer dies with the resync: teardown and a failed
-resume both clear it. rate_limited feedback for the new msg_types stays on the
+board-state guards diverge on purpose: annotations_state/annotation_delta
+arriving mid-resync are DROPPED outright — the /resume snapshot is
+authoritative for marks, and replaying a stale delta resurrects a mark the
+opponent deleted before the snapshot — while annotations_blocked, a one-shot
+notification no snapshot can rebuild, buffers and replays in order after the
+resume lands, and quick_chat_received always forwards immediately (a chat is
+board-independent and delaying it silently loses the moment). The blocked
+buffer dies with the resync: teardown and a failed resume both clear it.
+rate_limited feedback for the new msg_types stays on the
 transient toast path — it must never escalate to the confirm/retry modal.
 
 The /resume dump pin lives here too: every response dict the client hands the
@@ -122,51 +124,62 @@ def test_quick_chat_forwarded_to_subscriber():
     subscriber.on_quick_chat.assert_called_once_with(payload)
 
 
-def test_annotations_state_buffered_while_resyncing():
+def test_annotations_state_dropped_while_resyncing():
+    """The /resume snapshot is authoritative for marks state: a stale frame
+    replayed on top of it resurrects marks the opponent deleted before the
+    snapshot. Mid-resync state is dropped outright — never buffered."""
     app, subscriber = _subscribed_coordinator()
     app.coordinator._resyncing = True
     payload = {"sharing": True, "highlights": [], "arrows": []}
     app.coordinator._handle_online_event(Event("annotations_state", payload))
     subscriber.on_annotations_state.assert_not_called()
-    assert app.coordinator._resync_buffer == [("on_annotations_state", payload)]
+    assert app.coordinator._resync_buffer == []
 
 
-def test_annotation_delta_buffered_while_resyncing():
+def test_annotation_delta_dropped_while_resyncing():
+    """Same resurrection bug as state: a buffered `add` for a mark the server
+    already settled as deleted would put it back on the fresh board, so deltas
+    are dropped mid-resync too."""
     app, subscriber = _subscribed_coordinator()
     app.coordinator._resyncing = True
     payload = {"action": "add", "kind": "highlight", "square": "c3"}
     app.coordinator._handle_online_event(Event("annotation_delta", payload))
     subscriber.on_annotation_delta.assert_not_called()
-    assert app.coordinator._resync_buffer == [("on_annotation_delta", payload)]
+    assert app.coordinator._resync_buffer == []
 
 
-def test_buffered_annotation_events_replay_in_order_after_resume():
-    """Frames the server applied after its /resume snapshot land on the fresh
-    board right after on_resume, in arrival order — not silently lost."""
+def test_buffered_blocked_notifications_replay_in_order_after_resume():
+    """annotations_blocked is the one annotation event the snapshot cannot
+    rebuild (a one-shot notification), so it alone buffers through the gate and
+    lands right after on_resume, in arrival order — not silently lost."""
     app, subscriber = _subscribed_coordinator()
     app.game.variant = Variant.ONLINE
     app.coordinator._resyncing = True
-    state = {"sharing": True, "highlights": ["e4"], "arrows": []}
-    delta = {"action": "add", "kind": "highlight", "square": "c3"}
-    app.coordinator._handle_online_event(Event("annotations_state", state))
-    app.coordinator._handle_online_event(Event("annotation_delta", delta))
+    first = {"action": "blocked", "arrows": [], "highlights": ["c3"], "share_muted": False}
+    second = {"action": "blocked", "arrows": [], "highlights": ["d4"], "share_muted": True}
+    app.coordinator._handle_online_event(Event("annotations_blocked", first))
+    app.coordinator._handle_online_event(Event("annotations_blocked", second))
     manager = MagicMock()
     manager.attach_mock(subscriber, "sub")
     app.coordinator._handle_game_resumed({"move_history": []})
     assert manager.mock_calls == [
         call.sub.on_resume({"move_history": []}),
-        call.sub.on_annotations_state(state),
-        call.sub.on_annotation_delta(delta),
+        call.sub.on_annotations_blocked(first),
+        call.sub.on_annotations_blocked(second),
     ]
     assert app.coordinator._resync_buffer == []
     assert app.coordinator._resyncing is False
 
 
 def test_resync_buffer_cleared_on_teardown_and_failed_resume():
+    """Every resync exit empties the blocked buffer — teardown (_drop_client)
+    and a failed resume both flush it — so a later resync never re-delivers a
+    notification from a previous gate."""
     app, subscriber = _subscribed_coordinator()
     app.coordinator._resyncing = True
     app.coordinator._handle_online_event(
-        Event("annotation_delta", {"action": "add", "kind": "highlight", "square": "c3"}))
+        Event("annotations_blocked",
+              {"action": "blocked", "arrows": [], "highlights": ["c3"], "share_muted": False}))
     assert app.coordinator._resync_buffer
     app.coordinator._drop_client()
     assert app.coordinator._resync_buffer == []
@@ -174,11 +187,11 @@ def test_resync_buffer_cleared_on_teardown_and_failed_resume():
 
     app.coordinator._resyncing = True
     app.coordinator._handle_online_event(
-        Event("annotations_state", {"sharing": True, "highlights": [], "arrows": []}))
+        Event("annotations_blocked",
+              {"action": "blocked", "arrows": [], "highlights": ["d4"], "share_muted": False}))
     app.coordinator._handle_game_resumed({"move_history": []})  # variant is LOCAL
     assert app.coordinator._resync_buffer == []
-    subscriber.on_annotations_state.assert_not_called()
-    subscriber.on_annotation_delta.assert_not_called()
+    assert app.coordinator._resyncing is False
 
 
 def test_quick_chat_forwarded_even_while_resyncing():

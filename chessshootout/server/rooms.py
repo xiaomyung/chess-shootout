@@ -8,8 +8,11 @@ from typing import Optional
 from uuid import uuid4
 
 from chessshootout.backend.backend import Backend
+from chessshootout.backend.pieces import PieceColor
 from chessshootout.backend.utils import Square
-from chessshootout.server.protocol import GRACE_SECONDS, HEARTBEAT_TIMEOUT_SECONDS
+from chessshootout.server.protocol import (
+    GRACE_SECONDS, HEARTBEAT_TIMEOUT_SECONDS, IDLE_WINDOW_BY_PLIES,
+)
 from chessshootout.skillcheck import online
 from chessshootout.skillcheck.types import SkillCheckKind
 
@@ -147,6 +150,8 @@ class Room:
     skillcheck_log: list = field(default_factory=list)
     pending_skillcheck: Optional[PendingSkillCheck] = None
     plies_ever: int = 0
+    idle_since: Optional[float] = None
+    idle_pushed_at: Optional[float] = None
     annotations_white: SharedAnnotations = field(default_factory=SharedAnnotations)
     annotations_black: SharedAnnotations = field(default_factory=SharedAnnotations)
 
@@ -165,6 +170,35 @@ class Room:
 
     def opp_color(self, color):
         return "black" if color == "white" else "white"
+
+    def color_to_move(self):
+        if self.backend is None:
+            return None
+        return "white" if self.backend.current_turn() == PieceColor.WHITE else "black"
+
+    def idle_window(self):
+        return IDLE_WINDOW_BY_PLIES.get(self.plies_ever)
+
+    def idle_remaining(self, now):
+        window = self.idle_window()
+        if window is None or self.idle_since is None:
+            return None
+        return max(window.seconds - (now - self.idle_since), 0.0)
+
+    def idle_timeout_reason(self, now):
+        if not self.is_paired():
+            return None
+        remaining = self.idle_remaining(now)
+        if remaining is None or remaining > 0.0:
+            return None
+        return self.idle_window().outcome
+
+    def mark_idle_activity(self, now):
+        self.idle_since = now
+        self.idle_pushed_at = None
+
+    def note_idle_push(self, now):
+        self.idle_pushed_at = now
 
     def hides_opponent_marks(self, color):
         slot = self.slot(color)
@@ -245,6 +279,7 @@ class RoomManager:
                 )
                 room.skillcheck_secret = secrets.token_hex(16)
                 room.started_at = self._now()
+                room.mark_idle_activity(room.started_at)
                 self._uuid_to_room[client_uuid] = room.room_id
                 self._active[room.room_id] = room
                 return room
@@ -430,6 +465,8 @@ class RoomManager:
                 slot.disconnected_at = room.ended_at
         room.last_rematch_activity_at = room.ended_at
         room.pending_skillcheck = None
+        room.idle_since = None
+        room.idle_pushed_at = None
         room.annotations_white.reset()
         room.annotations_black.reset()
         for slot in (room.white, room.black):
@@ -512,6 +549,7 @@ class RoomManager:
         room.annotations_black = SharedAnnotations()
         room.started_at = self._now()
         room.first_move_at = None
+        room.mark_idle_activity(room.started_at)
         room.ended_at = None
         room.last_rematch_activity_at = None
         room.game_start_broadcast = False

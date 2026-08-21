@@ -35,9 +35,10 @@ def _glow_behind(text_surf, color):
 
 class ResultMenu(BaseModal):
 
-    def __init__(self, window, callbacks):
+    def __init__(self, window, callbacks, pgn_available_provider):
         super().__init__(window)
         self.callbacks = callbacks
+        self.pgn_available_provider = pgn_available_provider
         self.online_mode = False
         self.outcome = None
         self.intent = "draw"
@@ -224,6 +225,8 @@ class ResultMenu(BaseModal):
         buttons = ONLINE_BUTTONS if self.online_mode else BUTTONS
         if self.online_mode and self.rematch_offered:
             buttons = [b for b in ONLINE_BUTTONS if b[1] != "rematch"]
+        if not self.pgn_available_provider():
+            buttons = [b for b in buttons if b[1] != "open_pgn"]
         self.button_rects = draw_button_row(
             self.window, row, buttons, self.button_font, gap,
             primary_keys={buttons[0][1]}, cut=True,
