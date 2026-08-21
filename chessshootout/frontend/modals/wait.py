@@ -1,5 +1,6 @@
 import math
 from collections.abc import Callable
+from typing import Any, cast
 
 import pygame as pg
 
@@ -15,7 +16,7 @@ from chessshootout.frontend.visual.fonts import (
 
 RADAR_SWEEP_MS = 1400
 RADAR_PING_MS = 1600
-_SWEEP_CACHE = {}
+_SWEEP_CACHE: dict[tuple[int, str], pg.Surface] = {}
 
 PILL_VPAD = 12
 PILL_INSET = 14
@@ -86,11 +87,12 @@ class WaitModal(BaseModal):
         self.mode_label = ""
         self.tc_text = ""
         self.elapsed = 0
-        self.on_cancel = None
-        self.button_rects = {}
-        self._font_cache = {}
+        self.on_cancel: Callable[[], None] | None = None
+        self.button_rects: dict[str, pg.Rect] = {}
+        self._font_cache: dict[str, Any] = {}
 
-    def show(self, mode_label: str, tc_text: str, on_cancel: Callable[[], None]) -> None:
+    def show(self, mode_label: str, tc_text: str,  # type: ignore[override]
+             on_cancel: Callable[[], None]) -> None:
         """
         Open the card on the match being looked for, with the elapsed counter
         back at zero
@@ -173,10 +175,12 @@ class WaitModal(BaseModal):
         :param panel_w: panel width in pixels the fonts are sized from
         :returns: title, sub-line, mode, time-control, elapsed and button fonts
         """
-        return fonts_for_width(self._font_cache, panel_w, self._build_fonts)
+        return cast(tuple[pg.font.Font, pg.font.Font, pg.font.Font,
+                          pg.font.Font, pg.font.Font, pg.font.Font],
+                    fonts_for_width(self._font_cache, panel_w, self._build_fonts))
 
-    def _build_fonts(self, panel_w: int) -> tuple[pg.font.Font, pg.font.Font, pg.font.Font,
-                                                  pg.font.Font, pg.font.Font, pg.font.Font]:
+    def _build_fonts(self, panel_w: float) -> tuple[pg.font.Font, pg.font.Font, pg.font.Font,
+                                                    pg.font.Font, pg.font.Font, pg.font.Font]:
         """
         Size all six fonts from the panel width, each with a floor so the card
         stays readable in a small window

@@ -24,7 +24,7 @@ class TickGate:
         """
         self._on_tick = on_tick
         self._min_interval_ms = min_interval_ms
-        self._last_pct = None
+        self._last_pct: int | None = None
         self._last_ms = 0
 
     def reset(self) -> None:

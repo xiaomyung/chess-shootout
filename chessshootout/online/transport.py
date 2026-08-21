@@ -3,7 +3,7 @@ import json
 import logging
 import ssl
 from collections.abc import Callable, Iterable
-from typing import Any, NoReturn
+from typing import Any, NoReturn, TypeVar, cast
 
 import certifi
 import httpx
@@ -36,6 +36,8 @@ NEWS_MAX_BYTES = 512 * 1024
 
 
 _TLS_CONTEXT = ssl.create_default_context(cafile=certifi.where())
+
+_ResponseModel = TypeVar("_ResponseModel", bound=BaseModel)
 
 
 class TransportError(Exception):
@@ -282,10 +284,10 @@ def _safe_error_reason(response: httpx.Response) -> str | None:
     if not isinstance(body, dict):
         return None
     if "reason" in body:
-        return body["reason"]
+        return cast(str, body["reason"])
     detail = body.get("detail")
     if isinstance(detail, dict) and "reason" in detail:
-        return detail["reason"]
+        return cast(str, detail["reason"])
     if isinstance(detail, str):
         return detail
     return None
@@ -343,8 +345,9 @@ class ServerTransport:
             raise TransportError(str(exc)) from exc
         return r
 
-    def _blocking_request(self, method: str, path: str, response_model: type[BaseModel],
-                          timeout: float, json_body: dict[str, Any] | None = None) -> Any:
+    def _blocking_request(self, method: str, path: str, response_model: type[_ResponseModel],
+                          timeout: float,
+                          json_body: dict[str, Any] | None = None) -> _ResponseModel | None:
         """
         Make one blocking request and validate the answer into a typed model,
         collapsing every failure into None. Reclaim, resume and health share
@@ -742,6 +745,6 @@ class ServerWebSocket:
         """
         raw = await self._ws.recv()
         try:
-            return _loads(raw)
+            return cast("dict[str, Any] | None", _loads(raw))
         except ValueError:
             return None

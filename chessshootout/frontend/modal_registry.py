@@ -1,4 +1,6 @@
+from collections.abc import Callable
 from dataclasses import dataclass
+from typing import Any, cast
 
 
 @dataclass
@@ -9,9 +11,9 @@ class ModalSpec:
     adds its own; the merged order is what decides Esc, clicks and drawing
     """
 
-    modal: object
+    modal: Any
     esc_dismiss: bool = True
-    on_dismiss: object = None
+    on_dismiss: Callable[[], None] | None = None
 
     def __post_init__(self) -> None:
         """
@@ -56,6 +58,6 @@ def dismiss_topmost(specs: list[ModalSpec]) -> bool:
     """
     for spec in specs:
         if spec.esc_dismiss and spec.modal.is_visible():
-            spec.on_dismiss()
+            cast(Callable[[], None], spec.on_dismiss)()
             return True
     return False

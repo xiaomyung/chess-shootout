@@ -5,7 +5,7 @@ from chessshootout.backend.utils import HistoryEntry
 from chessshootout.skillcheck.types import KIND_LABEL, SkillCheckOutcome
 
 
-RESULT_CODES = {
+RESULT_CODES: dict[str | None, str] = {
     "white_wins": "1-0",
     "black_wins": "0-1",
     "white_wins_on_time": "1-0",
@@ -83,10 +83,10 @@ def format_annotations(log: list[SkillCheckOutcome]) -> dict[int, str]:
     :param log: resolved skill checks in play order
     :returns: ply number to its note text; plies with no check are absent
     """
-    by_ply = {}
+    by_ply: dict[int, list[SkillCheckOutcome]] = {}
     for outcome in log:
         by_ply.setdefault(outcome.ply, []).append(outcome)
-    annotations = {}
+    annotations: dict[int, str] = {}
     for ply, outcomes in by_ply.items():
         tokens = []
         for outcome in outcomes:

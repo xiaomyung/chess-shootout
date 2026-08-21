@@ -1,5 +1,6 @@
 import math
 from collections.abc import Callable
+from typing import TYPE_CHECKING, Any
 
 import pygame as pg
 
@@ -24,6 +25,18 @@ class ScrollHost:
     is_visible -- while the widget itself provides the `scroll` view, the
     `_scroll_px` offset, `is_visible` and its own `handle_click`
     """
+
+    if TYPE_CHECKING:
+        scroll: "ScrollView"
+
+        def is_visible(self) -> bool:
+            """
+            Supplied by the host widget: whether it is on screen at all, which
+            is what lets a hidden list leave the wheel and the press alone
+
+            :returns: True while the host widget is showing
+            """
+            ...
 
     def _store_scroll(self, value: float) -> None:
         """
@@ -123,8 +136,8 @@ class ScrollView:
         self._metrics = get_metrics
         self._wheel_step_px = wheel_step_px
         self.last_activity_ms = 0
-        self._grab = None
-        self._thumb = None
+        self._grab: Any = None
+        self._thumb: Any = None
         self._vel = 0.0
         self._flinging = False
         self._fling_px = 0.0
@@ -192,7 +205,7 @@ class ScrollView:
         m = self._max_px()
         return (self._get() / m) if m else 0.0
 
-    def row_window(self, viewport: pg.Rect, row_h: int) -> tuple[int, int, int]:
+    def row_window(self, viewport: pg.Rect, row_h: int) -> tuple[int, float, int]:
         """
         Work out which rows of an evenly spaced list are on screen, so a long
         list draws only its visible slice instead of every row it holds
@@ -392,7 +405,7 @@ class ScrollView:
             self._thumb = None
             return True
         if self._grab is not None:
-            moved = self._grab["moved"]
+            moved: bool = self._grab["moved"]
             self._grab = None
             if moved and abs(self._vel) >= FLING_MIN_VELOCITY:
                 self._flinging = True

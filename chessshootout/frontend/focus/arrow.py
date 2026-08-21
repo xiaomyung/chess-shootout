@@ -44,7 +44,7 @@ class FocusArrow:
         self._bounds = pg.Rect(0, 0, 0, 0)
         self._prev_bounds = pg.Rect(0, 0, 0, 0)
         self._alpha = FOCUS_ARROW_IDLE_ALPHA
-        self._glyphs = {}
+        self._glyphs: dict[bool, pg.Surface] = {}
 
     def reset(self) -> None:
         """

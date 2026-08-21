@@ -1,5 +1,6 @@
 import math
 import random
+from typing import cast
 
 import pygame as pg
 
@@ -11,7 +12,7 @@ SCALE_MAX = 1.5
 SCALE_REF_HEIGHT = 760.0
 DITHER_SEED = 0x5EED
 
-_DITHER_TILES = {}
+_DITHER_TILES: dict[int, tuple[pg.Surface, pg.Surface]] = {}
 
 
 def _dither_tiles(t: int) -> tuple[pg.Surface, pg.Surface]:
@@ -124,16 +125,16 @@ def arena_background(size: tuple[int, int], center: tuple[float, float] = (0.5, 
                            Colors.battle_bg_hi, Colors.battle_bg, Colors.battle_bg_edge)
     surf = pg.transform.smoothscale(grad, size)
     step = grid if grid is not None else grid_step(h)
-    grid = pg.Surface(size, pg.SRCALPHA)
+    grid_layer = pg.Surface(size, pg.SRCALPHA)
     line = (*pg.Color(Colors.battle_grid)[:3], 6)
     for gx in range(0, w, step):
-        pg.draw.line(grid, line, (gx, 0), (gx, h))
+        pg.draw.line(grid_layer, line, (gx, 0), (gx, h))
     for gy in range(0, h, step):
-        pg.draw.line(grid, line, (0, gy), (w, gy))
-    surf.blit(grid, (0, 0))
+        pg.draw.line(grid_layer, line, (0, gy), (w, gy))
+    surf.blit(grid_layer, (0, 0))
     floor_h = int(h * 0.38)
     floor = pg.Surface((w, floor_h), pg.SRCALPHA)
-    fr, fg, fb = pg.Color(Colors.accent)[:3]
+    fr, fg, fb = cast(tuple[int, int, int], pg.Color(Colors.accent)[:3])
     for row in range(floor_h):
         a = int(13 * row / floor_h)
         pg.draw.line(floor, (fr, fg, fb, a), (0, row), (w, row))
@@ -153,7 +154,7 @@ class ArenaBackdrop:
         """
         Start with nothing cached; the first draw paints the arena
         """
-        self._cache = None
+        self._cache: tuple[tuple[tuple[int, int], tuple[int, int]], pg.Surface] | None = None
 
     def draw(self, window: pg.Surface, board_rect: pg.Rect) -> None:
         """

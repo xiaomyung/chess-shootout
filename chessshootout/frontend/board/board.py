@@ -1,7 +1,7 @@
 import math
 from collections.abc import Callable
 from itertools import product
-from typing import Any
+from typing import Any, cast
 
 import pygame as pg
 
@@ -185,10 +185,10 @@ class Board:
         self.shot_callback = shot_callback
         self.announce_callback = announce_callback
         self.on_premove_queued = on_premove_queued
-        self.skillcheck_gate = None
-        self.skillcheck_armed = None
-        self.locked_targets = None
-        self.auto_queen_provider = lambda: False
+        self.skillcheck_gate: Callable[..., bool] | None = None
+        self.skillcheck_armed: Callable[[], bool] | None = None
+        self.locked_targets: Callable[[Square, Square], bool] | None = None
+        self.auto_queen_provider: Callable[[], bool] = lambda: False
 
         self.rect = pg.Rect(0, 0, 0, 0)
         self.needs_present = False
@@ -196,40 +196,41 @@ class Board:
         self.cell_size = 0
         self.board_offset_x = 0
         self.board_offset_y = 0
-        self._promotion_rects = {}
-        self._frame_surf = None
-        self._checkerboard_surf = None
-        self._check_squares_key = None
-        self._check_squares = []
+        self._promotion_rects: dict[PieceType, pg.Rect] = {}
+        self._frame_surf: pg.Surface | None = None
+        self._checkerboard_surf: pg.Surface | None = None
+        self._check_squares_key: tuple[int, Move | None] | None = None
+        self._check_squares: list[Square] = []
         self._shake_dx = 0
         self._shake_dy = 0
 
         self.file_labels = "abcdefgh"
-        self.file_labels_rendered = []
-        self.rank_labels_rendered = []
+        self.file_labels_rendered: list[pg.Surface] = []
+        self.rank_labels_rendered: list[pg.Surface] = []
 
-        self.piece_images_original = {}
-        self.piece_images_scaled = {}
-        self._sprite_geom = {}
-        self.selected_square = None
-        self.pending_promotion_square = None
-        self._promotion_from = None
-        self.aim_suppressed_square = None
-        self.attacker_suppressed_square = None
+        self.piece_images_original: dict[tuple[PieceType, PieceColor], pg.Surface] = {}
+        self.piece_images_scaled: dict[tuple[PieceType, PieceColor], pg.Surface] = {}
+        self._sprite_geom: dict[tuple[PieceType, PieceColor], dict[str, Any]] = {}
+        self.selected_square: Square | None = None
+        self.pending_promotion_square: Square | None = None
+        self._promotion_from: Square | None = None
+        self.aim_suppressed_square: Square | None = None
+        self.attacker_suppressed_square: Square | None = None
         self.flipped = False
-        self.animations = []
-        self._restore_anims = []
+        self.animations: list[PieceAnimation] = []
+        self._restore_anims: list[dict[str, Any]] = []
         self.effects = EffectManager()
-        self.effects.geom = lambda sq: self._cell_rect(sq.row, sq.col).center
+        self.effects.geom = (
+            lambda sq: self._cell_rect(cast(Square, sq).row, cast(Square, sq).col).center)
         self.animation_duration_ms = 180
         self.last_animation_completed_at_ms = 0
-        self.premoves = []
-        self.premove_color = None
+        self.premoves: list[Premove] = []
+        self.premove_color: PieceColor | None = None
         self.annotations = Annotations(self)
-        self.dragging_from = None
+        self.dragging_from: Square | None = None
         self.drag = DragPhysics(self)
-        self.review_ply = None
-        self._target_ply = None
+        self.review_ply: int | None = None
+        self._target_ply: int | None = None
         self.read_only = False
         self._promo_hotkey_font = get_font(9, bold=True, mono=True)
         self._promo_tag_font = get_font(8, bold=True, mono=True)
@@ -244,7 +245,7 @@ class Board:
         :returns: the engine that owns the live position
         """
         inner = getattr(self.match, "backend", None)
-        return inner if inner is not None else self.match
+        return cast(Backend, inner if inner is not None else self.match)
 
     @property
     def highlighted_squares(self) -> set[Square]:
@@ -338,7 +339,8 @@ class Board:
                 key = (piece_type, piece_color)
                 self.piece_images_original[key] = memoized_surface(
                     _PIECE_IMAGE_CACHE, key,
-                    lambda p=piece: pg.image.load(piece_png_path(p)).convert_alpha())
+                    cast(Callable[[], pg.Surface],
+                         lambda p=piece: pg.image.load(piece_png_path(p)).convert_alpha()))
 
     def _cell_rect_base(self, row: int, col: int) -> pg.Rect:
         """
@@ -390,10 +392,10 @@ class Board:
         :returns: the scaled piece image
         """
         key = (ptype, color, opt)
-        return memoized_surface(
+        return cast(pg.Surface, memoized_surface(
             _PROMO_OPTION_CACHE, key,
             lambda: pg.transform.smoothscale(
-                self.piece_images_original[(ptype, color)], (opt, opt)))
+                self.piece_images_original[(ptype, color)], (opt, opt))))
 
     def _draw_promotion_picker(self) -> None:
         """
@@ -482,7 +484,8 @@ class Board:
             pg.draw.rect(surf, scrim, surf.get_rect(), border_radius=3)
             surf.blit(label, (pad_x, pad_y))
             return surf
-        return memoized_surface(_PROMO_PLATE_CACHE, (text, font, color), build)
+        return cast(pg.Surface,
+                    memoized_surface(_PROMO_PLATE_CACHE, (text, font, color), build))
 
     def pick_promotion(self, ptype: PieceType) -> None:
         """
@@ -591,7 +594,8 @@ class Board:
             ptype, color = k
             sprite, geom = memoized_surface(
                 _SCALED_PIECE_CACHE, (ptype, color, cell),
-                lambda o=original, c=color: _build_scaled_sprite(o, cell, c))
+                cast(Callable[[], tuple[pg.Surface, dict[str, Any]]],
+                     lambda o=original, c=color: _build_scaled_sprite(o, cell, c)))
             self.piece_images_scaled[k] = sprite
             self._sprite_geom[k] = geom
 
@@ -700,7 +704,7 @@ class Board:
             surf = pg.Surface((cs, cs), pg.SRCALPHA)
             surf.fill(color)
             return surf
-        return memoized_surface(_OVERLAY_CACHE, (cs, color), build)
+        return cast(pg.Surface, memoized_surface(_OVERLAY_CACHE, (cs, color), build))
 
     def _in_check_king_squares(self) -> list[Square]:
         """
@@ -1185,7 +1189,7 @@ class Board:
             return history
         return history[:self.review_ply]
 
-    def scaled_capture_icons(self, strip_height: int) -> dict[
+    def scaled_capture_icons(self, strip_height: float) -> dict[
             tuple[PieceType, PieceColor], pg.Surface] | None:
         """
         Small piece icons sized for the player strips, so the captured pieces
@@ -1364,7 +1368,8 @@ class Board:
                 pg.draw.circle(surf, color, (s * k // 2, s * k // 2),
                                radius * k, thickness * k)
             return supersample(s, render)
-        return memoized_surface(_MARKER_CACHE, (s, color, "dot"), build)
+        return cast(pg.Surface,
+                    memoized_surface(_MARKER_CACHE, (s, color, "dot"), build))
 
     def _draw_dot(self, rect: pg.Rect) -> None:
         """
@@ -1621,7 +1626,7 @@ class Board:
             self.selected_square = None
             if self._is_real_move_eligible(live_at_clicked, current_turn, local_color):
                 return self._select_signal(self._try_select(square))
-            return self._premove_select(square, live_at_clicked)
+            return self._premove_select(square, cast(Piece, live_at_clicked))
 
         from_sq = self.selected_square
         self.selected_square = None
@@ -1973,7 +1978,7 @@ class Board:
         entry = self.match.move_history[-1]
         moving_piece = entry.move.piece
 
-        on_complete = (
+        on_complete: Callable[[], None] = (
             (lambda: self._set_pending_promotion(to_sq))
             if promotion_required
             else self._fire_move_landed
@@ -2031,7 +2036,7 @@ class Board:
         """
         rook_from, rook_to = self._castle_rook_squares(
             king_from_sq.row, entry.move.to_sq.col)
-        rook_piece = self.match.piece_at(rook_to)
+        rook_piece = cast(Piece, self.match.piece_at(rook_to))
         self.start_animation(rook_from, rook_to, rook_piece, on_complete=on_complete)
 
     def start_undo_animation(self, move: Move) -> None:
@@ -2050,7 +2055,7 @@ class Board:
         if move.is_castle:
             rook_home, rook_post = self._castle_rook_squares(
                 move.from_sq.row, move.to_sq.col)
-            rook_piece = self.match.piece_at(rook_home)
+            rook_piece = cast(Piece, self.match.piece_at(rook_home))
             self.start_animation(rook_post, rook_home, rook_piece)
 
     def _set_pending_promotion(self, sq: Square) -> None:
@@ -2101,7 +2106,7 @@ class Board:
         :returns: True when the choreography took the move over, False when the
             caller has to animate it itself
         """
-        captured = entry.move.captured
+        captured = cast(Piece, entry.move.captured)
         color = moving_piece.color.value
         victim_sq = (Square(from_sq.row, to_sq.col)
                      if entry.move.is_en_passant else to_sq)
@@ -2398,7 +2403,7 @@ class Board:
         if checker is None:
             return
         self.effects.check(now_ms=pg.time.get_ticks(),
-                           attacker_type=self.match.piece_at(checker).type.value,
+                           attacker_type=cast(Piece, self.match.piece_at(checker)).type.value,
                            king_sq=king_sq, from_sq=checker, cell_size=self.cell_size)
 
     def _try_select(self, square: Square) -> bool:

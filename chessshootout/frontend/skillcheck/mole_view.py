@@ -1,6 +1,6 @@
 import math
 from collections.abc import Callable, Sequence
-from typing import NamedTuple
+from typing import NamedTuple, cast
 
 import pygame as pg
 
@@ -169,7 +169,7 @@ _POP_APEX = MOLE_VIEW_POP_HEIGHT_FRAC * MOLE_VIEW_POP_OVERSHOOT
 _CLEAR = (0, 0, 0, 0)
 
 
-def _blit_alpha(window: pg.Surface, surf: pg.Surface, pos: tuple[int, int],
+def _blit_alpha(window: pg.Surface, surf: pg.Surface, pos: tuple[float, float],
                 alpha: int) -> None:
     """
     Blit a shared sprite at a given opacity and hand it back untouched. Almost
@@ -226,11 +226,13 @@ class MoleController(SkillCheckController):
     elapsed time plus a board-space point, and the server judges it
     """
 
+    challenge: MoleChallenge
+
     def __init__(self, challenge: MoleChallenge, cell_rect: pg.Rect, now_ms: int,
                  deadline_ms: float, *,
                  hole_squares: Sequence[tuple[int, int]] | None = None,
                  victim_surface: pg.Surface | None = None,
-                 geom: Callable[[Square], tuple[int, int]] | None = None,
+                 geom: Callable[[Square | str], tuple[float, float]] | None = None,
                  from_sq: Square | None = None,
                  shot_sound: Callable[[], None] | None = None,
                  on_shot: Callable[..., None] | None = None,
@@ -294,10 +296,10 @@ class MoleController(SkillCheckController):
         self._mirror_targets = mirror_targets
         self._adjudicated_flipped = adjudicated_flipped
         self._init_victim(victim_surface, cell_rect)
-        self._victim_bbox = None
-        self._squash_cache = {}
-        self._heal_cache = {}
-        self._emerge_scratch = {}
+        self._victim_bbox: pg.Rect | None = None
+        self._squash_cache: dict[tuple[int, int], pg.Surface] = {}
+        self._heal_cache: dict[tuple[int, int], pg.Surface] = {}
+        self._emerge_scratch: dict[tuple[int, int], pg.Surface] = {}
         self._progress = progress
         self._miss_count = miss_count
         self._torn_key = hash(challenge.pops)
@@ -305,12 +307,12 @@ class MoleController(SkillCheckController):
         self._last_hit_anim_ms = (None if last_hit_pop < 0
                                   else float(now_ms) - MOLE_VIEW_RETREAT_MS)
         self._last_hit_height = 0.0
-        self._last_hit_px = None
-        self._last_hit_hole = None
-        self._last_hit_spectate_target = None
+        self._last_hit_px: tuple[float, float] | None = None
+        self._last_hit_hole: int | None = None
+        self._last_hit_spectate_target: tuple[float, float] | None = None
         self._reset_effects(cell_rect.center)
-        self._win_ms = None
-        self._last_shot_ms = None
+        self._win_ms: int | None = None
+        self._last_shot_ms: int | None = None
         self._shot_count = 0
         self._next_telegraph = 0
         self._next_pop = 0
@@ -334,19 +336,19 @@ class MoleController(SkillCheckController):
         :param flash_px: where the muzzle flash would sit until the first shot
             moves it, in window pixels
         """
-        self._hit_flash_ms = None
-        self._vibrate_ms = None
+        self._hit_flash_ms: int | None = None
+        self._vibrate_ms: int | None = None
         self._vibrate_dur_ms = 0.0
-        self._flash_ms = None
+        self._flash_ms: int | None = None
         self._flash_px = flash_px
         self._trauma = Trauma()
         self._hitstop = Hitstop()
-        self._toss = None
-        self._casings = []
-        self._puffs = []
-        self._debris = []
-        self._impacts = []
-        self._seam_sparks = []
+        self._toss: MoleToss | None = None
+        self._casings: list[MoleCasing] = []
+        self._puffs: list[tuple[float, float, float, tuple[float, ...]]] = []
+        self._debris: list[tuple[float, float, float, tuple[float, ...]]] = []
+        self._impacts: list[tuple[float, float, float]] = []
+        self._seam_sparks: list[tuple[float, int, float, float, float]] = []
         self._last_heal_bucket = 0
 
     def _apply_geometry(self, cell_rect: pg.Rect) -> None:
@@ -406,7 +408,7 @@ class MoleController(SkillCheckController):
             return None
         return (float(x0), float(y0), float(dx), float(dy))
 
-    def _hole_centers(self) -> tuple[tuple[int, int], ...]:
+    def _hole_centers(self) -> tuple[tuple[float, float], ...]:
         """
         Put every pit on screen, one per pit square. With no board to ask, they
         are simply spread in a row about the anchor square, which draws but can
@@ -473,8 +475,9 @@ class MoleController(SkillCheckController):
         :returns: the point to report, unchanged when both sides already agree
             which way is up
         """
+        affine = cast(tuple[float, float, float, float], self._affine)
         if (self._adjudicated_flipped is None
-                or self._adjudicated_flipped == (self._affine[3] < 0)):
+                or self._adjudicated_flipped == (affine[3] < 0)):
             return target
         return self._clamp_target(
             (target[0] + 2.0 * hitbox_lift(self._adjudicated_flipped), target[1]))
@@ -537,8 +540,9 @@ class MoleController(SkillCheckController):
         elapsed = self._now - self.start_ms
         wired = self._wire_target(target)
         if self._online:
-            self._on_shot(elapsed, target=wired)
-        flipped = (self._affine[3] < 0 if self._adjudicated_flipped is None
+            cast(Callable[..., None], self._on_shot)(elapsed, target=wired)
+        affine = cast(tuple[float, float, float, float], self._affine)
+        flipped = (affine[3] < 0 if self._adjudicated_flipped is None
                    else self._adjudicated_flipped)
         if self.challenge.hit_at(elapsed, wired[0], wired[1], self._hole_squares,
                                  self._last_hit_pop, flipped=flipped):
@@ -561,7 +565,7 @@ class MoleController(SkillCheckController):
         :param shot_px: where the shot landed in window pixels, used only when
             the pit it hit cannot be placed
         """
-        idx = self.challenge.pop_up_at(elapsed)
+        idx = cast(int, self.challenge.pop_up_at(elapsed))
         self._duck_pop(idx, elapsed)
         hole = self.challenge.pops[idx].hole
         if hole < len(self._hole_px):
@@ -701,9 +705,10 @@ class MoleController(SkillCheckController):
         px = self._board_to_px(target[0], target[1])
         if px is None or not self._mirror_targets:
             return px
-        own = hitbox_lift(self._affine[3] < 0)
+        affine = cast(tuple[float, float, float, float], self._affine)
+        own = hitbox_lift(affine[3] < 0)
         mover = hitbox_lift(bool(self._adjudicated_flipped))
-        return (px[0], px[1] + (own - mover) * self._affine[3])
+        return (px[0], px[1] + (own - mover) * affine[3])
 
     def _reanchored_hit_px(self) -> tuple[float, float] | None:
         """
@@ -967,7 +972,7 @@ class MoleController(SkillCheckController):
                 surf = self._telegraph_surface(tele[0])
             window.blit(surf, (cx - surf.get_width() // 2, cy - surf.get_height() // 2))
 
-    def _draw_pit_mouth(self, window: pg.Surface, cx: int, cy: int, scale: float) -> None:
+    def _draw_pit_mouth(self, window: pg.Surface, cx: float, cy: float, scale: float) -> None:
         """
         Draw a pit that is only part open as a bare dark oval, which is how a
         hole looks while it is still being dug and again while it closes at the
@@ -1121,7 +1126,8 @@ class MoleController(SkillCheckController):
         :param tier: how badly torn, 0 leaving the sprite whole
         :returns: the shared torn sprite
         """
-        return torn_sprite(self._victim, (self._torn_key, self.cell_size), tier)
+        return torn_sprite(cast(pg.Surface, self._victim), (self._torn_key, self.cell_size),
+                           tier)
 
     def _heal_sprite(self, tier: int, bucket: int) -> pg.Surface:
         """
@@ -1133,7 +1139,7 @@ class MoleController(SkillCheckController):
         :returns: the sprite for that step, the whole one once healing is done
         """
         if tier <= 0 or bucket >= MOLE_VIEW_HEAL_BUCKETS:
-            return self._victim
+            return cast(pg.Surface, self._victim)
         if bucket <= 0:
             return self._torn_victim(tier)
         cached = self._heal_cache.get((tier, bucket))
@@ -1159,7 +1165,8 @@ class MoleController(SkillCheckController):
         if seam_y > 0:
             surf.blit(torn, (0, 0), area=pg.Rect(0, 0, w, seam_y))
         if seam_y < h:
-            surf.blit(self._victim, (0, seam_y), area=pg.Rect(0, seam_y, w, h - seam_y))
+            surf.blit(cast(pg.Surface, self._victim), (0, seam_y),
+                      area=pg.Rect(0, seam_y, w, h - seam_y))
         band_h = max(int(h * MOLE_VIEW_SEAM_BAND_FRAC), 3)
         surf.blit(seam_band_surface(w, band_h), (0, seam_y - band_h // 2),
                   special_flags=pg.BLEND_RGB_ADD)
@@ -1212,7 +1219,7 @@ class MoleController(SkillCheckController):
             self._squash_cache[key] = cached
         return cached
 
-    def _blit_victim(self, window: pg.Surface, center_px: tuple[int, int],
+    def _blit_victim(self, window: pg.Surface, center_px: tuple[float, float],
                      height_frac: float, group: tuple[int, int], squash: int = 0,
                      lift_px: float = 0.0, ground_dy: int | None = None,
                      lip: bool = False) -> pg.Rect | None:
@@ -1301,7 +1308,7 @@ class MoleController(SkillCheckController):
 
         :returns: pixels below the pit centre
         """
-        h = self._victim.get_height()
+        h = cast(pg.Surface, self._victim).get_height()
         return h - h // 2
 
     def _jump_elapsed(self) -> float | None:
@@ -1375,8 +1382,9 @@ class MoleController(SkillCheckController):
         """
         t = toss_t / 1000.0
         g = self.cell_size * MOLE_VIEW_TOSS_GRAVITY_FRAC
-        return (self._toss.x0 + self._toss.vx * t,
-                self._toss.y0 + self._toss.vy * t + 0.5 * g * t * t)
+        toss = cast(MoleToss, self._toss)
+        return (toss.x0 + toss.vx * t,
+                toss.y0 + toss.vy * t + 0.5 * g * t * t)
 
     @staticmethod
     def _toss_alpha(progress: float) -> int:
@@ -1488,7 +1496,7 @@ class MoleController(SkillCheckController):
         :param frac: how far down the body the seam sits
         :returns: the seam's y in window pixels
         """
-        return rect.top + self._seam_offset(frac, self._victim.get_height())
+        return rect.top + self._seam_offset(frac, cast(pg.Surface, self._victim).get_height())
 
     def _body_edge_x(self, rect: pg.Rect, side: int) -> int:
         """
@@ -1499,7 +1507,7 @@ class MoleController(SkillCheckController):
         :param side: -1 for its left edge, 1 for its right
         :returns: that edge's x in window pixels
         """
-        bbox = self._victim_bbox
+        bbox = cast(pg.Rect, self._victim_bbox)
         return rect.left + (bbox.right if side > 0 else bbox.left)
 
     def _draw_seam_glow(self, window: pg.Surface, rect: pg.Rect | None) -> None:
@@ -1515,7 +1523,7 @@ class MoleController(SkillCheckController):
         y = self._seam_y(rect, 1.0 - self._heal_bucket() / MOLE_VIEW_HEAL_BUCKETS)
         if y > rect.bottom:
             return
-        bbox = self._victim_bbox
+        bbox = cast(pg.Rect, self._victim_bbox)
         w = max(int(bbox.width * MOLE_VIEW_SEAM_GLOW_W_FRAC), 4)
         h = max(int(self.cell_size * MOLE_VIEW_SEAM_GLOW_H_FRAC), 3)
         glow = seam_glow_surface(w, h)
@@ -1878,7 +1886,7 @@ class MoleController(SkillCheckController):
         for i, (row, col) in enumerate(self._hole_squares):
             if elapsed - i * MOLE_VIEW_HOLE_STAGGER_MS <= 0.0:
                 continue
-            px = self._board_to_px(row + 0.5 + lift, col + 0.5)
+            px = cast(tuple[float, float], self._board_to_px(row + 0.5 + lift, col + 0.5))
             rect = pg.Rect(int(px[0] - rx), int(px[1] - ry), int(2 * rx), int(2 * ry))
             hot = i == live_hole
             pg.draw.ellipse(window, _HITBOX_ACTIVE_COLOR if hot else _HITBOX_COLOR, rect,
@@ -1918,7 +1926,7 @@ class MoleController(SkillCheckController):
             ring_lw_frac=MOLE_VIEW_CROSS_STRIKE_RING_LW_FRAC)
 
     def _draw_badge_row(self, window: pg.Surface, group: tuple[int, int],
-                        anchor: tuple[int, int], count: int, size: int, gap: int,
+                        anchor: tuple[float, float], count: int, size: int, gap: int,
                         offset_frac: float, sprite_fn: Callable[[int], pg.Surface],
                         alpha: int) -> None:
         """

@@ -1,5 +1,5 @@
 from collections.abc import Callable
-from typing import Any
+from typing import Any, cast
 
 import pygame as pg
 
@@ -98,4 +98,4 @@ def fonts_for_width(
     if cache.get("width") != width:
         cache["width"] = width
         cache["fonts"] = build(width)
-    return cache["fonts"]
+    return cast(tuple[pg.font.Font, ...], cache["fonts"])

@@ -63,7 +63,7 @@ def whiffs_by_ply(outcomes: list[SkillCheckOutcome]) -> dict[int, list[tuple[str
     :param outcomes: resolved checks in play order, wins and misses alike
     :returns: ply number to its misses as (display label, SAN) pairs
     """
-    whiffs = {}
+    whiffs: dict[int, list[tuple[str, str]]] = {}
     for outcome in outcomes:
         if not outcome.won:
             whiffs.setdefault(outcome.ply, []).append(

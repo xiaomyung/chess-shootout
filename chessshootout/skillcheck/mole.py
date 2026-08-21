@@ -285,7 +285,7 @@ class MoleChallenge:
     re-derives the very schedule it judges shots against
     """
 
-    pops: tuple
+    pops: tuple[MolePop, ...]
     hole_count: int
     hits_required: int
     deadline_ms: float

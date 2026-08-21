@@ -1,5 +1,10 @@
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 
+import pygame as pg
+
+from chessshootout.backend.utils import Square
+from chessshootout.frontend.audio.sound_manager import SoundManager
 from chessshootout.frontend.skillcheck.aim_view import AimController, AIM_TIME_LIMIT_MS
 from chessshootout.frontend.skillcheck.combo_view import ComboController
 from chessshootout.frontend.skillcheck.controller import SkillCheckController
@@ -24,30 +29,30 @@ class CheckSpec:
     """
 
     seed: str
-    cell_rect: object
+    cell_rect: pg.Rect
     now_ms: int
     deadline_ms: float
     period_ms: float = WHEEL_PERIOD_MS
     value_diff: int = 0
-    victim_surface: object = None
-    board_rect: object = None
-    geom: object = None
-    from_sq: object = None
-    victim_sq: object = None
-    attacker_type: object = None
-    shot_sound: object = None
-    on_shot: object = None
+    victim_surface: pg.Surface | None = None
+    board_rect: pg.Rect | None = None
+    geom: Callable[[Square | str], tuple[float, float]] | None = None
+    from_sq: Square | None = None
+    victim_sq: Square | None = None
+    attacker_type: str | None = None
+    shot_sound: Callable[[], None] | None = None
+    on_shot: Callable[..., None] | None = None
     miss_count: int = 0
     passive: bool = False
-    audio: object = None
-    hole_squares: object = None
+    audio: SoundManager | None = None
+    hole_squares: Sequence[tuple[int, int]] | None = None
     captured_value: int = 0
     progress: int = 0
-    attacker_surface: object = None
-    on_hit_px: object = None
+    attacker_surface: pg.Surface | None = None
+    on_hit_px: Callable[[tuple[float, float], bool], None] | None = None
     mirror_targets: bool = False
     last_hit_pop: int = -1
-    adjudicated_flipped: object = None
+    adjudicated_flipped: bool | None = None
 
 
 def _build_wheel(spec: CheckSpec) -> WheelController:

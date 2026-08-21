@@ -1,5 +1,5 @@
 from collections.abc import Container, Sequence
-from typing import Any
+from typing import Any, cast
 
 from chessshootout.backend.backend import Backend
 from chessshootout.backend.pieces import PIECE_VALUES, PieceType
@@ -51,7 +51,7 @@ def promo_value(promo_char: str | None) -> int:
     """
     if promo_char is None:
         return 0
-    return PIECE_VALUES.get(PROMO_TYPE_BY_LETTER.get(promo_char), 0)
+    return PIECE_VALUES.get(cast(PieceType, PROMO_TYPE_BY_LETTER.get(promo_char)), 0)
 
 
 def value_diff_for(facts: TriggerFacts, promo_char: str | None = None) -> int:
@@ -210,16 +210,16 @@ def shot_wins(kind: SkillCheckKind, challenge: Any, elapsed_ms: float, miss_coun
     if elapsed_ms < SKILLCHECK_HUMAN_FLOOR_MS or is_past_deadline(elapsed_ms, deadline_ms):
         return False
     if kind == SkillCheckKind.WHEEL:
-        return challenge.in_arc_at(challenge.needle_deg(elapsed_ms), elapsed_ms)
+        return cast(bool, challenge.in_arc_at(challenge.needle_deg(elapsed_ms), elapsed_ms))
     if kind == SkillCheckKind.AIM:
-        return challenge.on_target(elapsed_ms, miss_count)
+        return cast(bool, challenge.on_target(elapsed_ms, miss_count))
     if kind == SkillCheckKind.WHACK:
         if target is None or hole_squares is None:
             return False
-        return challenge.hit_at(elapsed_ms, target[0], target[1], hole_squares, last_hit_pop,
-                                flipped=flipped)
+        return cast(bool, challenge.hit_at(elapsed_ms, target[0], target[1], hole_squares,
+                                           last_hit_pop, flipped=flipped))
     if kind == SkillCheckKind.COMBO:
-        return challenge.press_correct(progress, direction)
+        return cast(bool, challenge.press_correct(progress, direction))
     return False
 
 
@@ -235,9 +235,9 @@ def hits_required(kind: SkillCheckKind, challenge: Any) -> int:
     :returns: number of hits needed to win the check
     """
     if kind == SkillCheckKind.WHACK:
-        return challenge.hits_required
+        return cast(int, challenge.hits_required)
     if kind == SkillCheckKind.COMBO:
-        return challenge.prompt_count
+        return cast(int, challenge.prompt_count)
     return 1
 
 
@@ -275,10 +275,10 @@ def check_expired(kind: SkillCheckKind, challenge: Any, elapsed_ms: float, miss_
     if kind == SkillCheckKind.AIM:
         return aim_expired(challenge, elapsed_ms, miss_count)
     if kind == SkillCheckKind.WHACK:
-        return (challenge.quota_unreachable(elapsed_ms, progress, last_hit_pop)
-                or challenge.whiffs_exhausted(miss_count))
+        return cast(bool, challenge.quota_unreachable(elapsed_ms, progress, last_hit_pop)
+                    or challenge.whiffs_exhausted(miss_count))
     if kind == SkillCheckKind.COMBO:
-        return challenge.wrongs_exhausted(miss_count)
+        return cast(bool, challenge.wrongs_exhausted(miss_count))
     return False
 
 

@@ -1,5 +1,5 @@
 from collections.abc import Callable
-from typing import Any
+from typing import Any, cast
 
 import pygame as pg
 
@@ -21,10 +21,10 @@ class SkillCheckOverlay:
         Start with the slot empty and no check running. One overlay is built
         with the game screen and reused for every check the game ever fires
         """
-        self._controller = None
-        self._context = None
-        self._on_done = None
-        self._last_draw_controller = None
+        self._controller: SkillCheckController | None = None
+        self._context: Any = None
+        self._on_done: Callable[[Any, bool | None], None] | None = None
+        self._last_draw_controller: SkillCheckController | None = None
 
     def start(self, controller: SkillCheckController, context: Any,
               on_done: Callable[[Any, bool | None], None]) -> None:
@@ -194,7 +194,7 @@ class SkillCheckOverlay:
         retiring controller is parked for its single last draw
         """
         context = self._context
-        controller = self._controller
+        controller = cast(SkillCheckController, self._controller)
         landed = controller.landed
         on_done = self._on_done
         self.cancel()

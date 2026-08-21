@@ -15,7 +15,7 @@ class MoveLockSet:
         Start with nothing locked, which is also the state a completed ply and
         a new game return the set to
         """
-        self._locked = set()
+        self._locked: set[tuple[Square, Square]] = set()
 
     def lock(self, from_sq: Square, to_sq: Square) -> None:
         """

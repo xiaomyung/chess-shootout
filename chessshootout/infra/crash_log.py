@@ -31,7 +31,7 @@ class _ListHandler(logging.Handler):
             start falling off the front
         """
         super().__init__()
-        self.buffer = deque(maxlen=maxlen)
+        self.buffer: deque[str] = deque(maxlen=maxlen)
 
     def emit(self, record: logging.LogRecord) -> None:
         """

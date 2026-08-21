@@ -1,9 +1,11 @@
 from dataclasses import dataclass
 
-from chessshootout.backend.pieces import Piece, PieceType
+from chessshootout.backend.pieces import Piece, PieceColor, PieceType
 
 
 BOARD_SIZE = 8
+
+ClockSnapshot = tuple[float, float, PieceColor | None, float | None, PieceColor | None]
 
 PROMO_LETTER_BY_TYPE = {
     PieceType.QUEEN: "q",
@@ -24,6 +26,14 @@ class Square:
 
     row: int
     col: int
+
+
+PositionKey = tuple[
+    tuple[tuple[tuple[PieceType, PieceColor] | None, ...], ...],
+    PieceColor,
+    tuple[bool, ...],
+    Square | None,
+]
 
 
 def on_board(sq: Square) -> bool:
@@ -116,8 +126,8 @@ class HistoryEntry:
     prev_castling_rights: tuple[bool, ...]
     prev_en_passant_target: Square | None
     prev_halfmove_clock: int
-    position_key_added: tuple | None
+    position_key_added: PositionKey | None
     gives_check: bool = False
     gives_checkmate: bool = False
     san: str = ""
-    prev_clock_snapshot: tuple | None = None
+    prev_clock_snapshot: ClockSnapshot | None = None

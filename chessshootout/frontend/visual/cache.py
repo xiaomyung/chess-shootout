@@ -1,13 +1,14 @@
-from collections.abc import Callable
+from collections.abc import Callable, MutableMapping
 from typing import Any
 from weakref import WeakKeyDictionary
 
 import pygame as pg
 
-_REGISTRY = []
-_SIZE_REGISTRY = []
+_REGISTRY: list[MutableMapping[Any, Any]] = []
+_SIZE_REGISTRY: list[MutableMapping[Any, Any]] = []
 
-_TEXT_CACHE = WeakKeyDictionary()
+_TEXT_CACHE: WeakKeyDictionary[
+    pg.font.Font, dict[tuple[str, str, bool], pg.Surface]] = WeakKeyDictionary()
 _REGISTRY.append(_TEXT_CACHE)
 
 
@@ -47,7 +48,7 @@ def new_cache() -> dict[Any, Any]:
 
     :returns: an empty cache dict for the calling module to key as it likes
     """
-    cache = {}
+    cache: dict[Any, Any] = {}
     _REGISTRY.append(cache)
     return cache
 
@@ -60,7 +61,7 @@ def new_size_cache() -> dict[Any, Any]:
 
     :returns: an empty cache dict, cleared on every window resize
     """
-    cache = {}
+    cache: dict[Any, Any] = {}
     _REGISTRY.append(cache)
     _SIZE_REGISTRY.append(cache)
     return cache

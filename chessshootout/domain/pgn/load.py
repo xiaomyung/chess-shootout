@@ -16,10 +16,10 @@ class ParsedPGN:
     the history list both work from this instead of re-reading the text
     """
 
-    headers: dict = field(default_factory=dict)
-    moves: list = field(default_factory=list)
+    headers: dict[str, str] = field(default_factory=dict)
+    moves: list[str] = field(default_factory=list)
     result: str = "*"
-    move_comments: list = field(default_factory=list)
+    move_comments: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -38,7 +38,7 @@ class PgnSummary:
     black: str
     result_code: str
     sort_key: float
-    match_id: str = None
+    match_id: str | None = None
     white_captures: int = 0
     black_captures: int = 0
     reason: str = ""
@@ -506,8 +506,8 @@ def group_by_csmatchid(
     :returns: each group as its match id and its games, the id being None for
         a game that stands alone
     """
-    order = []
-    groups = {}
+    order: list[tuple[str, str | None]] = []
+    groups: dict[str, list[PgnSummary]] = {}
     for summary in summaries:
         key = summary.match_id or f"__solo__{summary.path}"
         if key not in groups:

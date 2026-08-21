@@ -42,7 +42,7 @@ class OptionsView(MenuView):
         self._scale = 1.0
         self._title_top = 0
         self._title_font = get_display_font(TITLE_FONT_FLOOR)
-        self._fonts_cache = None
+        self._fonts_cache: Fonts | None = None
 
     def enter(self, payload: dict[str, Any] | None = None) -> None:
         """

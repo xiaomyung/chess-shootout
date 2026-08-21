@@ -3,7 +3,7 @@ import os
 import random
 import time
 from collections import deque
-from typing import Any
+from typing import Any, cast
 
 import pygame as pg
 
@@ -89,7 +89,7 @@ def _load_window_icon() -> pg.Surface | None:
             return pg.image.load(str(paths.resource_path("assets", "icons", "icon.png")))
         except (pg.error, OSError):
             return None
-    return cache.memoized_surface(_ICON_CACHE, "icon", build)
+    return cast("pg.Surface | None", cache.memoized_surface(_ICON_CACHE, "icon", build))
 
 
 class Frontend:
@@ -121,15 +121,15 @@ class Frontend:
         icon = _load_window_icon()
         if icon is not None:
             pg.display.set_icon(icon)
-        self._pre_fullscreen_size = None
+        self._pre_fullscreen_size: tuple[int, int] | None = None
         self.settings = SettingsController(self)
         self.chrome = WindowChrome(self.window, on_fullscreen=self._apply_fullscreen)
         self.pacer = FramePacer(self.target_fps)
 
         self._needs_full_present = True
-        self._frame_times = deque(maxlen=PERF_SAMPLE_COUNT)
+        self._frame_times: deque[float] = deque(maxlen=PERF_SAMPLE_COUNT)
         self._last_work_ms = 0.0
-        self._last_frame_start = None
+        self._last_frame_start: float | None = None
 
         self.sound_manager = SoundManager(paths.SOUNDS_DIR, enabled=pg.mixer.get_init() is not None)
         self.coordinator = OnlineCoordinator(self)
@@ -158,7 +158,7 @@ class Frontend:
             ModalSpec(self.directory_browser),
         ]
         self.menu_battle = MenuBattle(sound_manager=self.sound_manager)
-        self._pending_nav = None
+        self._pending_nav: Nav | None = None
 
         self.menu = MenuScreen(self)
         self.game = GameScreen(self)
@@ -474,7 +474,8 @@ class Frontend:
         if self._needs_full_redraw(had_events):
             self._needs_full_present = False
             return None
-        return [pg.Rect(0, 0, self.window_width, self.chrome.HEIGHT)] + self.screen.dirty_rects()
+        return ([pg.Rect(0, 0, self.window_width, self.chrome.HEIGHT)]
+                + cast(list[pg.Rect], self.screen.dirty_rects()))
 
     def _active_modal_specs(self) -> list[ModalSpec]:
         """

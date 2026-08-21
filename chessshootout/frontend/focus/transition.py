@@ -111,10 +111,10 @@ class FocusTransition:
         self.frontend = frontend
         self.collapsing = True
         self.start_ms = 0
-        self.elems = []
-        self.bg = None
+        self.elems: list[_Elem] = []
+        self.bg: pg.Surface | None = None
         self.cur_e = 0.0
-        self.cur_board_rect = None
+        self.cur_board_rect: pg.Rect | None = None
 
     def begin_collapse(self, show: str) -> None:
         """

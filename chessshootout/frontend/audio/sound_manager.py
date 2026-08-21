@@ -1,6 +1,7 @@
 import random
 from dataclasses import dataclass
 from pathlib import Path
+from typing import cast
 
 import pygame as pg
 
@@ -87,7 +88,7 @@ class SoundManager:
         )
         self.heartbeat = heartbeat or HeartbeatConfig()
         self._state = STATE_OFF
-        self._slots = {}
+        self._slots: dict[str, list[pg.mixer.Sound]] = {}
 
         self._sounds_dir = Path(sounds_dir)
 
@@ -720,7 +721,8 @@ class SoundManager:
         desired = self._desired_state(fraction_remaining, paused)
         self._transition_to(desired)
         if desired in (STATE_SLOW, STATE_FAST) and self._heartbeat_channel is not None:
-            self._heartbeat_channel.set_volume(self._heartbeat_volume(fraction_remaining))
+            self._heartbeat_channel.set_volume(
+                self._heartbeat_volume(cast(float, fraction_remaining)))
 
     def _desired_state(self, fraction: float | None, paused: bool) -> str:
         """

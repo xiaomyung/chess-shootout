@@ -6,7 +6,7 @@ from collections import defaultdict, deque
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 from importlib.metadata import PackageNotFoundError, version as _pkg_version
-from typing import Any
+from typing import Any, cast
 
 from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse, Response
@@ -15,6 +15,7 @@ from slowapi import Limiter
 from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
 
+from chessshootout.backend.backend import Backend
 from chessshootout.backend.fen import export_fen
 from chessshootout.backend.utils import (
     Move, PROMO_LETTER_BY_TYPE, coord_from_square,
@@ -232,7 +233,7 @@ class UuidRateLimiter:
         self.limit = limit_per_minute
         self.window = window_seconds
         self._now = now_provider
-        self._calls: dict[str, deque] = defaultdict(deque)
+        self._calls: dict[str, deque[float]] = defaultdict(deque)
 
     def _prune(self, cutoff: float) -> None:
         """
@@ -492,7 +493,8 @@ def create_app(*, now_provider: Callable[[], float] = time.monotonic,
             raise
         if room.is_paired():
             log.info("room paired room=%s white=%s black=%s", room.room_id,
-                     room.white.client_uuid[:8], room.black.client_uuid[:8])
+                     cast(PlayerSlot, room.white).client_uuid[:8],
+                     cast(PlayerSlot, room.black).client_uuid[:8])
         else:
             log.info("room created room=%s uuid=%s", room.room_id, body.client_uuid[:8])
         return MatchmakeResponse(room_id=room.room_id, session_token=token)
@@ -570,15 +572,15 @@ def create_app(*, now_provider: Callable[[], float] = time.monotonic,
             for e in room.skillcheck_log]
         white_annotations = _annotation_set_wire(room.annotations_white)
         black_annotations = _annotation_set_wire(room.annotations_black)
-        if room.hides_opponent_marks(color):
+        if room.hides_opponent_marks(cast(str, color)):
             if color == "white":
                 black_annotations = AnnotationSetWire()
             else:
                 white_annotations = AnnotationSetWire()
         response = ResumeResponse(
-            fen=export_fen(room.backend),
+            fen=export_fen(cast(Backend, room.backend)),
             move_history=history,
-            clock=_clock_snapshot(room.backend.clock),
+            clock=_clock_snapshot(cast(Backend, room.backend).clock),
             your_color=color,
             white_name=room.white.nickname if room.white else "",
             black_name=room.black.nickname if room.black else "",
@@ -593,17 +595,18 @@ def create_app(*, now_provider: Callable[[], float] = time.monotonic,
             skillcheck_log=skillcheck_log,
             white_annotations=white_annotations,
             black_annotations=black_annotations,
-            share_muted=room.annotations_for(color).share_muted,
+            share_muted=room.annotations_for(cast(str, color)).share_muted,
             hide_opp_marks=slot.hide_opp_marks,
             result_reason=room.result[0] if room.result else None,
             result_winner=room.result[1] if room.result else None,
             idle_window=_idle_window_wire(room, app.state.now()),
         )
         log.info("resume served room=%s color=%s ply=%d", body.room_id, color, len(history))
-        if (connections.get_for_color(room, color) is not None
+        if (connections.get_for_color(room, cast(str, color)) is not None
                 and slot is not None and not slot.desync_active):
             slot.desync_active = True
-            opp_ws = connections.get_for_color(room, room.opp_color(color))
+            opp_ws = connections.get_for_color(
+                room, room.opp_color(cast(str, color)))
             if opp_ws is not None:
                 await send(opp_ws, ConnectionStatusMessage(opp_state="resyncing"))
         return response
@@ -812,7 +815,7 @@ async def _authenticate_ws(
     if slot is None:
         await websocket.close(code=WS_CLOSE_INVALID_TOKEN)
         return None
-    return room, color, slot
+    return room, cast(str, color), slot
 
 
 async def _ws_session(app: FastAPI, websocket: WebSocket, room_id: str) -> None:

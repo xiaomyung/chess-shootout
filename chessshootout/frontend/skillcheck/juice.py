@@ -1,7 +1,7 @@
 import math
 from collections.abc import Iterator
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, cast
 
 import pygame as pg
 
@@ -94,7 +94,7 @@ class Trauma:
         """
         self._decay_per_s = decay_per_s
         self._value = 0.0
-        self._last_ms = None
+        self._last_ms: int | None = None
 
     def add(self, amount: float) -> None:
         """
@@ -169,7 +169,7 @@ class Hitstop:
             whichever trigger came last
         """
         self._cap_ms = cap_ms
-        self._until = None
+        self._until: float | None = None
 
     def trigger(self, now_ms: int, duration_ms: float) -> None:
         """
@@ -360,8 +360,8 @@ def torn_sprite(base: pg.Surface, key: Any, tier: int) -> pg.Surface:
     """
     if tier <= 0:
         return base
-    return memoized_surface(_TORN_CACHE, (key, tier),
-                            lambda: _torn_surface(base, key, tier))
+    return cast(pg.Surface, memoized_surface(_TORN_CACHE, (key, tier),
+                                             lambda: _torn_surface(base, key, tier)))
 
 
 def flash_sprite(base: pg.Surface, key: Any) -> pg.Surface:
@@ -383,4 +383,4 @@ def flash_sprite(base: pg.Surface, key: Any) -> pg.Surface:
         surf = base.copy()
         surf.fill((255, 255, 255, 0), special_flags=pg.BLEND_RGB_ADD)
         return surf
-    return memoized_surface(_FLASH_CACHE, key, build)
+    return cast(pg.Surface, memoized_surface(_FLASH_CACHE, key, build))

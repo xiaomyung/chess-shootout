@@ -85,7 +85,7 @@ def compute_facts(backend: Backend, from_sq: Square, to_sq: Square,
     return TriggerFacts(
         is_capture=is_capture,
         capturer_value=capturer_value,
-        captured_value=PIECE_VALUES.get(captured.type, 0) if is_capture else 0,
+        captured_value=PIECE_VALUES.get(captured.type, 0) if captured is not None else 0,
         is_promotion=result.promotion_required,
         is_forced=forced_move(backend, mover, locked),
     )

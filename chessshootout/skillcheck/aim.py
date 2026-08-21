@@ -1,5 +1,6 @@
 import math
 from dataclasses import dataclass
+from typing import cast
 
 from chessshootout.skillcheck.rng import seeded_floats
 from chessshootout.skillcheck.wheel import SKILLCHECK_DEADLINE_MS, needle_speed_mult
@@ -197,7 +198,7 @@ class AimChallenge:
             deadline
         """
         p = min(1.0, (max(0.0, elapsed_ms) / self.deadline_ms) * self.shrink_mult(miss_count))
-        return max(0.0, 1.0 - p ** AIM_SHRINK_EXP)
+        return max(0.0, 1.0 - cast(float, p ** AIM_SHRINK_EXP))
 
     def hit_radius(self, elapsed_ms: float, miss_count: int = 0) -> float:
         """

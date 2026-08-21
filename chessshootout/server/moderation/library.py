@@ -1,7 +1,7 @@
 import json
 from dataclasses import dataclass
 from importlib import resources
-from typing import Any
+from typing import Any, cast
 
 from chessshootout.server.moderation import geometry
 
@@ -25,7 +25,7 @@ class VectorVariant:
     and size
     """
 
-    edges: frozenset
+    edges: frozenset[tuple[tuple[int, int], tuple[int, int]]]
 
 
 @dataclass(frozen=True)
@@ -36,7 +36,7 @@ class RasterVariant:
     That ink count is what coverage is measured against
     """
 
-    rows: tuple
+    rows: tuple[int, ...]
     width: int
     height: int
     ink: int
@@ -57,8 +57,8 @@ class CompiledPattern:
     coverage_threshold: float
     iou_threshold: float
     supersample: int
-    vector_variants: tuple
-    raster_variants: tuple
+    vector_variants: tuple[VectorVariant, ...]
+    raster_variants: tuple[RasterVariant, ...]
 
 
 def _load_json(name: str) -> dict[str, Any]:
@@ -72,7 +72,7 @@ def _load_json(name: str) -> dict[str, Any]:
     """
     resource = resources.files("chessshootout.server.moderation").joinpath(name)
     with resource.open(encoding="utf-8") as source:
-        return json.load(source)
+        return cast(dict[str, Any], json.load(source))
 
 
 def _parse_segments(
@@ -237,8 +237,8 @@ def _compile_pattern(entry: dict[str, Any], supersample: int) -> CompiledPattern
     scale_max = entry["scale_max"]
     segments = _parse_segments(entry["segments"]) if "segments" in entry else []
     cells = _parse_grid(entry["grid"]) if "grid" in entry else set()
-    vector_variants = ()
-    raster_variants = ()
+    vector_variants: tuple[VectorVariant, ...] = ()
+    raster_variants: tuple[RasterVariant, ...] = ()
     if channel in (VECTOR, BOTH) and segments:
         vector_variants = _vector_variants(segments, ops, scale_min, scale_max)
     if channel in (RASTER, BOTH):
@@ -282,7 +282,7 @@ def compiled_patterns() -> tuple[CompiledPattern, ...]:
     :returns: every compiled pattern in library order.
     """
     preload()
-    return _PATTERNS
+    return cast(tuple[CompiledPattern, ...], _PATTERNS)
 
 
 def enabled_patterns() -> tuple[CompiledPattern, ...]:
@@ -294,4 +294,5 @@ def enabled_patterns() -> tuple[CompiledPattern, ...]:
     :returns: the compiled patterns whose action is not DISABLED.
     """
     preload()
-    return tuple(pattern for pattern in _PATTERNS if pattern.action != DISABLED)
+    return tuple(pattern for pattern in cast(tuple[CompiledPattern, ...], _PATTERNS)
+                 if pattern.action != DISABLED)

@@ -1,4 +1,4 @@
-from typing import Any
+from typing import Any, cast
 
 import pygame as pg
 
@@ -69,7 +69,7 @@ class HistoryMenuView(MenuView):
         :param pos: click position in window pixels
         :returns: True when the browser took the click
         """
-        return self.app.history_view.handle_click(pos)
+        return cast(bool, self.app.history_view.handle_click(pos))
 
     def active_scrollable(self, pos: tuple[int, int] | None = None) -> HistoryView:
         """
@@ -80,7 +80,7 @@ class HistoryMenuView(MenuView):
             browser fills the whole sub-view slot
         :returns: the saved-game browser
         """
-        return self.app.history_view
+        return cast(HistoryView, self.app.history_view)
 
     def scrollables(self) -> list[HistoryView]:
         """

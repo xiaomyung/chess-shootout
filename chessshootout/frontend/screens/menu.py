@@ -1,12 +1,12 @@
 import logging
-from typing import Any
+from typing import Any, cast
 
 import pygame as pg
 
 from chessshootout.infra import env
 from chessshootout.infra.open_external import open_with_default_app
 from chessshootout.frontend.layout import compute_layout
-from chessshootout.frontend.menu.layout import compute_menu_layout
+from chessshootout.frontend.menu.layout import MenuLayout, compute_menu_layout
 from chessshootout.frontend.menu.rail import MenuRail
 from chessshootout.frontend.menu.rail_cards import CardStack
 from chessshootout.frontend.menu.shell import build_views
@@ -55,16 +55,16 @@ class MenuScreen(Screen):
         self.card_stack = CardStack(app)
         self.card_stack.refresh()
         self._active_view = "play"
-        self._menu_layout = None
+        self._menu_layout: MenuLayout | None = None
         self._transition_kind = "none"
         self._transition_duration = 0
-        self._transition_tween = None
-        self._scratch = None
+        self._transition_tween: Tween | None = None
+        self._scratch: pg.Surface | None = None
         self._rail_slide_mode = "none"
-        self._rail_slide_tween = None
-        self._rail_slide_snapshot = None
-        self._rail_slide_origin = None
-        self._rail_scratch = None
+        self._rail_slide_tween: Tween | None = None
+        self._rail_slide_snapshot: pg.Surface | None = None
+        self._rail_slide_origin: pg.Rect | None = None
+        self._rail_scratch: pg.Surface | None = None
 
     @property
     def play_view(self) -> Any:
@@ -99,7 +99,7 @@ class MenuScreen(Screen):
 
         :returns: True while the Play panel is showing
         """
-        return self.play_view.is_visible()
+        return cast(bool, self.play_view.is_visible())
 
     def set_reconnect_available(self, available: bool) -> None:
         """
@@ -221,7 +221,7 @@ class MenuScreen(Screen):
         if (self._active_view == "play"
                 and self.app.news_client.generation() != self.card_stack.news_generation()):
             self.card_stack.refresh()
-        layout = self._menu_layout
+        layout = cast(MenuLayout, self._menu_layout)
         rects = [layout.rail_rect, layout.right_rail_full_rect]
         rects += self.views[self._active_view].avoid_rects()
         self.app.menu_battle.set_avoid_rects(rects)
@@ -288,7 +288,7 @@ class MenuScreen(Screen):
         :param include_rail: False while the right column is animating in, so
             it is not painted twice in two places
         """
-        self.views[self._active_view].draw(surface, self._menu_layout)
+        self.views[self._active_view].draw(surface, cast(MenuLayout, self._menu_layout))
         if include_rail and self._active_view == "play":
             self._draw_right_rail_panel(surface)
             self.card_stack.draw(surface, now)
@@ -309,11 +309,11 @@ class MenuScreen(Screen):
             self._rail_slide_tween = Tween(0.0, 1.0, RAIL_SLIDE_MS, now, ease=out_cubic)
         t = self._rail_slide_tween.value(now)
         if self._rail_slide_mode == "out":
-            origin = self._rail_slide_origin
+            origin = cast(pg.Rect, self._rail_slide_origin)
             x = int(origin.x + t * (window.get_width() - origin.x))
-            window.blit(self._rail_slide_snapshot, (x, origin.y))
+            window.blit(cast(pg.Surface, self._rail_slide_snapshot), (x, origin.y))
         else:
-            panel = self._menu_layout.right_rail_full_rect
+            panel = cast(MenuLayout, self._menu_layout).right_rail_full_rect
             if panel.width > 0:
                 dx = int((1.0 - t) * (window.get_width() - panel.x))
                 scratch = self._ensure_scratch("_rail_scratch")
@@ -334,7 +334,7 @@ class MenuScreen(Screen):
         :returns: the snapshot and the rect it was taken from, both None when
             the column has no width in this window
         """
-        panel = self._menu_layout.right_rail_full_rect
+        panel = cast(MenuLayout, self._menu_layout).right_rail_full_rect
         if panel.width <= 0:
             return None, None
         temp = pg.Surface(self.app.window.get_size(), pg.SRCALPHA)
@@ -392,7 +392,7 @@ class MenuScreen(Screen):
         :returns: a transparent surface the size of the current window
         """
         size = self.app.window.get_size()
-        current = getattr(self, attr)
+        current = cast("pg.Surface | None", getattr(self, attr))
         if current is None or current.get_size() != size:
             current = pg.Surface(size, pg.SRCALPHA)
             setattr(self, attr, current)
@@ -406,7 +406,7 @@ class MenuScreen(Screen):
 
         :param window: surface to draw on, the window or a scratch surface
         """
-        panel = self._menu_layout.right_rail_full_rect
+        panel = cast(MenuLayout, self._menu_layout).right_rail_full_rect
         if panel.width <= 0:
             return
         pg.draw.rect(window, pg.Color(Colors.surface), panel)

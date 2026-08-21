@@ -1,4 +1,5 @@
 from collections.abc import Callable
+from typing import cast
 
 import pygame as pg
 
@@ -58,7 +59,7 @@ def _spotlight_surface(r: int) -> pg.Surface:
             pg.draw.circle(surf, (*rgb, int(AIM_SPOTLIGHT_ALPHA * (1.0 - edge) ** 2)),
                            (r, r), radius)
         return surf
-    return memoized_surface(_SPOTLIGHT_CACHE, r, build)
+    return cast(pg.Surface, memoized_surface(_SPOTLIGHT_CACHE, r, build))
 
 
 class AimController(SkillCheckController):
@@ -70,10 +71,12 @@ class AimController(SkillCheckController):
     what runs the check out
     """
 
+    challenge: AimChallenge
+
     def __init__(self, challenge: AimChallenge, cell_rect: pg.Rect, now_ms: int,
                  deadline_ms: float = AIM_TIME_LIMIT_MS,
                  victim_surface: pg.Surface | None = None, board_rect: pg.Rect | None = None,
-                 geom: Callable[[Square], tuple[int, int]] | None = None,
+                 geom: Callable[[Square | str], tuple[float, float]] | None = None,
                  from_sq: Square | None = None, victim_sq: Square | None = None,
                  attacker_type: str | None = None,
                  shot_sound: Callable[[], None] | None = None,
@@ -94,8 +97,9 @@ class AimController(SkillCheckController):
             check draws while the board suppresses that square
         :param board_rect: board rect in window pixels to dim, None to skip the
             scrim
-        :param geom: resolves a square to its centre in window pixels, so the
-            miss choreography can be staged on the real board
+        :param geom: resolves a square, or this view's off-board sentinel
+            keys, to a centre in window pixels, so the miss choreography can
+            be staged on the real board
         :param from_sq: square the attacker fires from
         :param victim_sq: square the victim stands on, which for an en-passant
             capture is not the square being moved to
@@ -111,10 +115,10 @@ class AimController(SkillCheckController):
                           audio=audio)
         self.miss_count = miss_count
         self._beep_edge = EdgeTrigger()
-        self._last_miss_ms = None
-        self._shot_render = None
-        self._shot_offset = None
-        self._shot_held_until = None
+        self._last_miss_ms: int | None = None
+        self._shot_render: tuple[float, int] | None = None
+        self._shot_offset: tuple[float, float] | None = None
+        self._shot_held_until: int | None = None
         self._init_victim(victim_surface, cell_rect)
         self.cell_size = 0
         self._from_sq = from_sq if from_sq is not None else _SHOOTER_KEY
@@ -124,7 +128,7 @@ class AimController(SkillCheckController):
         self._fx = EffectManager()
         self._geom = geom if geom is not None else (lambda key: self.center)
         self._fx.geom = self._geom
-        self._board_rect = None
+        self._board_rect: pg.Rect | None = None
         self.set_board_rect(board_rect)
         self._apply_geometry(cell_rect)
         self._cue("play_aim_lock")
@@ -179,7 +183,7 @@ class AimController(SkillCheckController):
             return
         self._replay_miss(elapsed, self.miss_count)
         if self._online:
-            self._on_shot(elapsed)
+            cast(Callable[..., None], self._on_shot)(elapsed)
 
     def _replay_miss(self, elapsed: float, miss_count: int) -> None:
         """
@@ -393,7 +397,7 @@ class AimController(SkillCheckController):
         :returns: (x, y) offset from the victim centre in board-cell widths
         """
         if (self._committed_at is None and self._shot_offset is not None
-                and self._now < self._shot_held_until):
+                and self._now < cast(int, self._shot_held_until)):
             return self._shot_offset
         return self.challenge.reticle_offset(elapsed, miss)
 

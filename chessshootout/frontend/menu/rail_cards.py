@@ -1,6 +1,6 @@
 import time
 from datetime import datetime
-from typing import Any
+from typing import Any, cast
 
 import pygame as pg
 
@@ -100,7 +100,7 @@ def _valid_news_date(value: object) -> bool:
     :returns: True when it is a date in the feed's own format
     """
     try:
-        datetime.strptime(value, NEWS_DATE_FORMAT)
+        datetime.strptime(cast(str, value), NEWS_DATE_FORMAT)
         return True
     except (ValueError, TypeError):
         return False
@@ -205,16 +205,16 @@ class CardStack(ScrollHost):
         self.app = app
         self._rect = pg.Rect(0, 0, 0, 0)
         self._scale = 1.0
-        self._recent_groups = []
-        self._news_items = []
+        self._recent_groups: list[MatchGroup] = []
+        self._news_items: list[dict[str, Any]] = []
         self._news_generation = -1
-        self._open = None
-        self._open_news_item = None
-        self._news_item_hits = []
-        self._valid_news_dates = []
-        self._body_lines_cache = {}
+        self._open: str | None = None
+        self._open_news_item: tuple[str, str] | None = None
+        self._news_item_hits: list[tuple[pg.Rect, tuple[str, str]]] = []
+        self._valid_news_dates: list[str] = []
+        self._body_lines_cache: dict[tuple[str, str, str, int], list[tuple[int, str]]] = {}
         self.news_box = NewsBox(self)
-        self._cards = []
+        self._cards: list[tuple[str, int, int]] = []
         self._content_h = 0
         self._scroll_px = 0.0
         self.scroll = ScrollView(
@@ -224,8 +224,8 @@ class CardStack(ScrollHost):
             wheel_step_px=BODY_ROW_H,
         )
         self._fonts_ready = False
-        self._profile_avatar_palette = None
-        self._profile_avatar_seed = None
+        self._profile_avatar_palette: tuple[pg.Color, pg.Color] | None = None
+        self._profile_avatar_seed: str | None = None
 
     def is_visible(self) -> bool:
         """
@@ -738,7 +738,7 @@ class CardStack(ScrollHost):
         """
         if not self._news_items:
             return ""
-        return self._news_items[0]["title"]
+        return cast(str, self._news_items[0]["title"])
 
     def _draw_news_card(self, window: pg.Surface, rect: pg.Rect,
                         mouse: tuple[int, int]) -> None:

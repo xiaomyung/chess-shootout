@@ -1,4 +1,5 @@
 from collections.abc import Callable
+from typing import Any, cast
 
 import pygame as pg
 
@@ -31,21 +32,21 @@ class ConfirmModal(BaseModal):
         :param window: the app window surface this modal draws onto
         """
         super().__init__(window)
-        self.title = None
+        self.title: str | None = None
         self.sub = ""
         self.danger = False
-        self.emoji = None
-        self.on_yes = None
-        self.on_no = None
-        self.on_extra = None
+        self.emoji: str | None = None
+        self.on_yes: Callable[[], None] | None = None
+        self.on_no: Callable[[], None] | None = None
+        self.on_extra: Callable[[], None] | None = None
         self.yes_label = "Confirm"
         self.no_label = "Cancel"
         self.extra_label = "Cancel"
-        self.button_rects = {}
+        self.button_rects: dict[str, pg.Rect] = {}
         self._panel = pg.Rect(0, 0, 0, 0)
-        self._font_cache = {}
+        self._font_cache: dict[str, Any] = {}
 
-    def show(self, title: str, on_yes: Callable[[], None],
+    def show(self, title: str, on_yes: Callable[[], None],  # type: ignore[override]
              on_no: Callable[[], None] | None = None, yes_label: str = "Confirm",
              no_label: str = "Cancel", on_extra: Callable[[], None] | None = None,
              extra_label: str = "Cancel", sub: str = "", danger: bool = False,
@@ -110,9 +111,10 @@ class ConfirmModal(BaseModal):
         :param panel_w: panel width in pixels the fonts are sized from
         :returns: title, sub-line and button fonts
         """
-        return fonts_for_width(self._font_cache, panel_w, self._build_fonts)
+        return cast(tuple[pg.font.Font, pg.font.Font, pg.font.Font],
+                    fonts_for_width(self._font_cache, panel_w, self._build_fonts))
 
-    def _build_fonts(self, panel_w: int) -> tuple[pg.font.Font, pg.font.Font, pg.font.Font]:
+    def _build_fonts(self, panel_w: float) -> tuple[pg.font.Font, pg.font.Font, pg.font.Font]:
         """
         Size the title, sub-line and button fonts from the panel width, each
         with a floor so the box stays readable in a small window
@@ -143,7 +145,7 @@ class ConfirmModal(BaseModal):
         btn_h = max(int(panel_w * 0.11), 40)
 
         title_surf = fit_text_to_rect(
-            title_font.render(self.title.upper(), True, Colors.text),
+            title_font.render(cast(str, self.title).upper(), True, Colors.text),
             pg.Rect(0, 0, inner_w, title_font.get_height()))
         sub_lines = wrap_words(self.sub, sub_font, inner_w, SUB_MAX_LINES) if self.sub else []
         line_h = sub_font.get_linesize()
@@ -163,8 +165,8 @@ class ConfirmModal(BaseModal):
         y = content.y
         if self.emoji:
             tile = pg.Rect(content.centerx - icon_side // 2, y, icon_side, icon_side)
-            fill = Colors.surface_hover
-            border = Colors.border
+            fill: str | pg.Color = Colors.surface_hover
+            border: str | pg.Color = Colors.border
             if self.danger:
                 fill = pg.Color(Colors.loss).lerp(pg.Color(Colors.surface_hover), 0.84)
                 border = pg.Color(Colors.loss).lerp(pg.Color(Colors.surface_raised), 0.6)

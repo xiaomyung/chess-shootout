@@ -378,7 +378,7 @@ class ToggleRow(_Row):
         self.getter = getter
         self.setter = setter
         self._ctl = pg.Rect(0, 0, 0, 0)
-        self._pos = None
+        self._pos: float | None = None
 
     def _control_h(self, fonts: Fonts) -> int:
         """
@@ -572,9 +572,9 @@ class SegmentedRow(_Row):
         self.setter = setter
         self.mono = mono
         self.variant = variant
-        self._rects = {}
-        self._mono_font = None
-        self._layout_cache = None
+        self._rects: dict[str, pg.Rect] = {}
+        self._mono_font: tuple[int, pg.font.Font] | None = None
+        self._layout_cache: tuple[tuple[int, int], tuple[list[int], int, int]] | None = None
 
     def _seg_h(self, fonts: Fonts) -> int:
         """
@@ -735,7 +735,7 @@ class PathRow(_Row):
         self._change_rect = pg.Rect(0, 0, 0, 0)
         self._reset_rect = pg.Rect(0, 0, 0, 0)
         self._field_rect = pg.Rect(0, 0, 0, 0)
-        self._rest_cache = None
+        self._rest_cache: tuple[tuple[int, str, int], pg.Surface] | None = None
 
     def _control_h(self, fonts: Fonts) -> int:
         """
@@ -1194,7 +1194,7 @@ class ActionRow(_Row):
         self.on_press = on_press
         self.status_getter = status_getter
         self._button_rect = pg.Rect(0, 0, 0, 0)
-        self._status_cache = None
+        self._status_cache: tuple[tuple[int, str, str, int], pg.Surface] | None = None
 
     def _control_h(self, fonts: Fonts) -> int:
         """
@@ -1278,12 +1278,12 @@ class OptionsBody(ScrollHost):
         the scroll view is wired to this object's own offset and to the panel
         it is last drawn in
         """
-        self.sections = []
+        self.sections: list[tuple[str, list[_Row]]] = []
         self.rect = pg.Rect(0, 0, 0, 0)
-        self.fonts = None
-        self._card_rects = []
+        self.fonts: Fonts | None = None
+        self._card_rects: list[pg.Rect] = []
         self._scroll_px = 0.0
-        self._content_h = 0
+        self._content_h: float = 0
         self.scroll = ScrollView(
             lambda: self._scroll_px,
             self._store_scroll,

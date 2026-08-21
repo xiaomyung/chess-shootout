@@ -1,3 +1,5 @@
+from typing import cast
+
 import pygame as pg
 
 from chessshootout.frontend.visual.cache import new_cache, memoized_surface
@@ -15,7 +17,7 @@ MODAL_RAIL = 5
 MODAL_MAX_WIDTH = 440
 BUTTON_VPAD = 16
 
-INTENT_RAIL = {
+INTENT_RAIL: dict[str | None, str] = {
     "win": Colors.win,
     "loss": Colors.loss,
     "draw": Colors.text_dim,
@@ -193,4 +195,4 @@ class BaseModal:
                                  (w - cutk + railk * (1.0 - SQRT2), railk),
                                  (0, railk)])
             return supersample((width, MODAL_CUT + MODAL_RAIL * 2), render)
-        return memoized_surface(_RAIL_CACHE, (intent, width, str(color)), build)
+        return cast(pg.Surface, memoized_surface(_RAIL_CACHE, (intent, width, str(color)), build))

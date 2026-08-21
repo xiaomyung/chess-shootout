@@ -41,15 +41,15 @@ class DirectoryBrowser(BaseModal, ScrollHost):
         """
         super().__init__(window)
         self.current = os.path.expanduser("~")
-        self.entries = []
+        self.entries: list[tuple[str, str, bool, str]] = []
         self.show_hidden = False
         self.creating = False
-        self.on_select = None
-        self.on_error = None
+        self.on_select: Callable[[str], None] | None = None
+        self.on_error: Callable[[str], None] | None = None
         self._scroll_px = 0.0
         self._content_px = 0
         self.new_folder_input = TextInput(window, max_chars=64, placeholder="new folder")
-        self._row_rects = []
+        self._row_rects: list[tuple[pg.Rect, str, bool]] = []
         self._list_rect = pg.Rect(0, 0, 0, 0)
         self._row_h = 1
         self.scroll = ScrollView(
@@ -83,7 +83,8 @@ class DirectoryBrowser(BaseModal, ScrollHost):
         self.sel_val_font = get_mono_font(max(int(h * 0.03), 14))
         self.button_font = get_font(max(int(h * 0.028), 12), bold=True)
 
-    def show(self, start_dir: str, on_select: Callable[[str], None],
+    def show(self, start_dir: str,  # type: ignore[override]
+             on_select: Callable[[str], None],
              on_error: Callable[[str], None] | None = None) -> None:
         """
         Open the browser on a starting folder and list what is inside it. A

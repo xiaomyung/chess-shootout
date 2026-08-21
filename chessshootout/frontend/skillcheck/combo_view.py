@@ -1,5 +1,6 @@
 import math
 from collections.abc import Callable
+from typing import cast
 
 import pygame as pg
 
@@ -227,7 +228,8 @@ def _direction_chevron(size: int, color: str, direction: str) -> pg.Surface:
         base = chevron_surface(size, color, up=True)
         angle = _DIR_ANGLE[direction]
         return base if angle == 0 else pg.transform.rotate(base, angle)
-    return memoized_surface(_DIR_CHEVRON_CACHE, (size, str(color), direction), build)
+    return cast(pg.Surface,
+                memoized_surface(_DIR_CHEVRON_CACHE, (size, str(color), direction), build))
 
 
 def _chip_surface(side: int, cut: int, state: str,
@@ -260,7 +262,7 @@ def _chip_surface(side: int, cut: int, state: str,
                                 corners=COMBO_VIEW_CHIP_CORNERS).copy()
         surf.fill((255, 255, 255, _CHIP_BAKED_ALPHA[state]), special_flags=pg.BLEND_RGBA_MULT)
         return surf
-    return memoized_surface(_CHIP_CACHE, (side, cut, state, border), build)
+    return cast(pg.Surface, memoized_surface(_CHIP_CACHE, (side, cut, state, border), build))
 
 
 def _pad_static(radius: int, hub_r: int) -> pg.Surface:
@@ -312,7 +314,7 @@ def _pad_static(radius: int, hub_r: int) -> pg.Surface:
             cy = radius + dy * radius * COMBO_VIEW_CHEVRON_DIST_FRAC
             base.blit(arrow, arrow.get_rect(center=(int(cx), int(cy))))
         return base
-    return memoized_surface(_PAD_STATIC_CACHE, (radius, hub_r), build)
+    return cast(pg.Surface, memoized_surface(_PAD_STATIC_CACHE, (radius, hub_r), build))
 
 
 def _wedge_overlay(radius: int, hub_r: int, direction: str, color: str) -> pg.Surface:
@@ -356,7 +358,8 @@ def _wedge_overlay(radius: int, hub_r: int, direction: str, color: str) -> pg.Su
                 pts.append((c + hub_r * k * math.cos(a), c + hub_r * k * math.sin(a)))
             pg.draw.polygon(surf, pg.Color(color), pts)
         return supersample(2 * radius, render)
-    return memoized_surface(_RECEPTOR_FILL_CACHE, (radius, hub_r, direction, str(color)), build)
+    return cast(pg.Surface, memoized_surface(
+        _RECEPTOR_FILL_CACHE, (radius, hub_r, direction, str(color)), build))
 
 
 def _solid_square(size: int, color: str) -> pg.Surface:
@@ -378,7 +381,7 @@ def _solid_square(size: int, color: str) -> pg.Surface:
         surf = pg.Surface((size, size), pg.SRCALPHA)
         surf.fill(pg.Color(color))
         return surf
-    return memoized_surface(_SOLID_CACHE, (size, str(color)), build)
+    return cast(pg.Surface, memoized_surface(_SOLID_CACHE, (size, str(color)), build))
 
 
 def _pip_surface(size: int, struck: bool) -> pg.Surface:
@@ -416,7 +419,7 @@ def _flash_layer(w: int, h: int) -> pg.Surface:
         surf = pg.Surface((max(int(w), 1), max(int(h), 1)))
         surf.fill(pg.Color(COMBO_VIEW_FLASH_WHITE))
         return surf
-    return memoized_surface(_FLASH_CACHE, (int(w), int(h)), build)
+    return cast(pg.Surface, memoized_surface(_FLASH_CACHE, (int(w), int(h)), build))
 
 
 def _emoji_sprite(char: str, size: int) -> pg.Surface | None:
@@ -439,7 +442,7 @@ def _emoji_sprite(char: str, size: int) -> pg.Surface | None:
         """
         base = emoji_surface(char, size)
         return base.copy() if base is not None else None
-    return memoized_surface(_EMOJI_CACHE, (char, size), build)
+    return cast(pg.Surface | None, memoized_surface(_EMOJI_CACHE, (char, size), build))
 
 
 def _victim_token(surface: pg.Surface | None) -> tuple[tuple[int, int], int] | None:
@@ -467,10 +470,12 @@ class ComboController(SkillCheckController):
     press and hands the verdict back through resolve
     """
 
+    challenge: ComboChallenge
+
     def __init__(self, challenge: ComboChallenge, cell_rect: pg.Rect, now_ms: int,
                  deadline_ms: float = COMBO_TIME_LIMIT_MS, *,
                  board_rect: pg.Rect | None = None,
-                 geom: Callable[[Square], tuple[int, int]] | None = None,
+                 geom: Callable[[Square | str], tuple[float, float]] | None = None,
                  victim_surface: pg.Surface | None = None,
                  attacker_surface: pg.Surface | None = None,
                  from_sq: Square | None = None, victim_sq: Square | None = None,
@@ -523,17 +528,17 @@ class ComboController(SkillCheckController):
         self._victim_src = victim_surface
         self._attacker_src = attacker_surface
         self._closed = False
-        self._closed_at = None
+        self._closed_at: int | None = None
         self._lockout_until = now_ms
-        self._last_accept_ms = None
+        self._last_accept_ms: int | None = None
         self._torn_key = (hash(challenge.prompts), _victim_token(victim_surface))
         self._prompt_started_ms = now_ms + COMBO_INTRO_MS
-        self._judgement = None
+        self._judgement: str | None = None
         self._judgement_at = now_ms
         self._brilliant_streak = 0
-        self._fire_started_ms = None
+        self._fire_started_ms: int | None = None
         self._beat_phase = 0.0
-        self._press_nudge = None
+        self._press_nudge: tuple[str, int] | None = None
         self._reset_effects()
         self._apply_geometry(cell_rect)
         self._cue("play_skillcheck_appear")
@@ -545,23 +550,23 @@ class ComboController(SkillCheckController):
         into being at a known zero, so the draw pass can test each one without
         wondering whether it exists yet. Called once, from the constructor
         """
-        self._receptor_flash = {}
-        self._wrong_flash = None
-        self._wiggle_started = None
-        self._flying = []
-        self._sparks = None
-        self._sparks_at = None
+        self._receptor_flash: dict[str, int] = {}
+        self._wrong_flash: tuple[str, int] | None = None
+        self._wiggle_started: int | None = None
+        self._flying: list[tuple[str, int, int, int]] = []
+        self._sparks: tuple[float, ...] | None = None
+        self._sparks_at: int | None = None
         self._spark_count = 0
-        self._white_flash = None
-        self._win_flash_until = None
-        self._torn_until = None
-        self._confetti = None
-        self._confetti_at = None
-        self._fail_started = None
+        self._white_flash: tuple[str, float] | None = None
+        self._win_flash_until: float | None = None
+        self._torn_until: float | None = None
+        self._confetti: tuple[float, ...] | None = None
+        self._confetti_at: int | None = None
+        self._fail_started: int | None = None
         self._trauma = Trauma()
         self._hitstop = Hitstop()
-        self._scaled = {}
-        self._spot_layer = None
+        self._scaled: dict[int, pg.Surface] = {}
+        self._spot_layer: pg.Surface | None = None
 
     def _apply_geometry(self, cell_rect: pg.Rect) -> None:
         """
@@ -714,7 +719,7 @@ class ComboController(SkillCheckController):
         else:
             self._register_wrong(direction)
         if self._online:
-            self._on_shot(elapsed, direction=direction)
+            cast(Callable[..., None], self._on_shot)(elapsed, direction=direction)
 
     def _register_correct(self, direction: str) -> None:
         """
@@ -1024,7 +1029,7 @@ class ComboController(SkillCheckController):
         """
         return self._trauma.offset(self._now, COMBO_VIEW_TRAUMA_MAX_OFFSET)
 
-    def _actor_center(self, sq: Square | None) -> tuple[int, int]:
+    def _actor_center(self, sq: Square | None) -> tuple[float, float]:
         """
         Give the point on screen a piece taking part in this check stands at,
         falling back to the middle of the pad when the board geometry was
@@ -1169,8 +1174,8 @@ class ComboController(SkillCheckController):
 
         :returns: spotlight radius in pixels
         """
-        start_r = COMBO_VIEW_SPOT_START_FRAC * 0.5 * math.hypot(
-            self._board_rect.width, self._board_rect.height)
+        board = cast(pg.Rect, self._board_rect)
+        start_r = COMBO_VIEW_SPOT_START_FRAC * 0.5 * math.hypot(board.width, board.height)
         end_r = COMBO_VIEW_SPOT_END_FRAC * self._pad_r
         return start_r + (end_r - start_r) * self._timer_frac()
 
@@ -1370,7 +1375,7 @@ class ComboController(SkillCheckController):
         deflate = self._deflate_scale()
         fire = self._fire_active()
         for i, sx in enumerate(self._strip_slots):
-            direction = self.challenge.expected(i)
+            direction = cast(str, self.challenge.expected(i))
             intro = self._slot_intro_k(i)
             if intro <= 0.0:
                 continue

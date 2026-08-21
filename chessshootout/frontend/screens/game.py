@@ -3,7 +3,7 @@ import math
 import random
 import uuid
 from collections.abc import Callable
-from typing import Any, NamedTuple
+from typing import Any, NamedTuple, cast
 
 import pygame as pg
 
@@ -275,22 +275,23 @@ class GameScreen(Screen):
         window = app.window
 
         self.variant = Variant.LOCAL
-        self.manual_result = None
+        self.manual_result: str | None = None
         self.white_name = "Player 1"
         self.black_name = "Player 2"
         self.white_country = ""
         self.black_country = ""
         self._chosen_side = "white"
-        self._time_control = None
+        self._time_control: tuple[int, int] | None = None
         self._flag_fall_played = False
-        self._strip_memo = {}
-        self._result_first_seen_at_ms = None
-        self._match_session_id = None
+        self._strip_memo: dict[
+            PieceColor, tuple[tuple[Any, ...], list[PieceType], int]] = {}
+        self._result_first_seen_at_ms: int | None = None
+        self._match_session_id: str | None = None
         self.backdrop = ArenaBackdrop()
-        self._last_turn_for_flip = None
-        self._idle_window = None
-        self._opp_disconnected_at_ms = None
-        self._local_disconnected_at_ms = None
+        self._last_turn_for_flip: PieceColor | None = None
+        self._idle_window: IdleWindow | None = None
+        self._opp_disconnected_at_ms: int | None = None
+        self._local_disconnected_at_ms: int | None = None
         self._focus_click_consumed = False
         self._custom_start = False
         self._debut = openings.DebutTracker(self._reviewed_sans)
@@ -299,8 +300,8 @@ class GameScreen(Screen):
         self._board_needs_present = False
         self._opp_sharing = False
         self._chat_cooldown_until_ms = 0
-        self._speech_anchor_memo = {}
-        self._game_info_memo = None
+        self._speech_anchor_memo: dict[str, tuple[tuple[Any, ...], Square | None]] = {}
+        self._game_info_memo: tuple[tuple[Any, ...], dict[str, Any] | None] | None = None
 
         self.match = Match()
         self.board = Board(window, self.match,
@@ -356,7 +357,7 @@ class GameScreen(Screen):
         self.speech_bubbles = {"white": SpeechBubble(), "black": SpeechBubble()}
 
         self.focus_mode = False
-        self.focus_transition = None
+        self.focus_transition: FocusTransition | None = None
         self.focus_arrow = FocusArrow()
         self.time_line = TimeLine()
         self._focus_panel_hover_ms = LONG_AGO_MS
@@ -373,7 +374,7 @@ class GameScreen(Screen):
 
         :returns: the current pygame display surface
         """
-        return self.app.window
+        return cast(pg.Surface, self.app.window)
 
     def _compute_layout(self) -> None:
         """
@@ -454,7 +455,8 @@ class GameScreen(Screen):
         )
         time_minutes = payload.get("time_minutes")
         increment_seconds = payload.get("increment_seconds")
-        self._time_control = (
+        self._time_control = cast(
+            "tuple[int, int] | None",
             (time_minutes * 60, increment_seconds) if time_minutes is not None else None
         )
 
@@ -553,7 +555,8 @@ class GameScreen(Screen):
         if outcome not in IDLE_SECONDS_BY_OUTCOME or raw_color not in ("white", "black"):
             return
         total = float(IDLE_SECONDS_BY_OUTCOME[outcome])
-        seconds = min(max(_finite_float(payload.get("seconds_remaining"), 0.0), 0.0), total)
+        seconds = min(
+            max(cast(float, _finite_float(payload.get("seconds_remaining"), 0.0)), 0.0), total)
         color = PieceColor.WHITE if raw_color == "white" else PieceColor.BLACK
         self._idle_window = IdleWindow(
             outcome, color, pg.time.get_ticks() + int(seconds * 1000), total)
@@ -754,7 +757,7 @@ class GameScreen(Screen):
         if granted_by == self._chosen_side:
             self.give_time.toast_for_giver(recipient_color, added)
         else:
-            self.give_time.toast_for_receiver(granted_by, added)
+            self.give_time.toast_for_receiver(cast(str, granted_by), added)
 
     def on_resume(self, payload: dict[str, Any]) -> None:
         """
@@ -980,7 +983,7 @@ class GameScreen(Screen):
             kind=SkillCheckKind(payload["kind"]),
             seed=payload["seed"],
             value_diff=int(payload["value_diff"]),
-            deadline_ms=_finite_float(payload["deadline_ms"]),
+            deadline_ms=cast(float, _finite_float(payload["deadline_ms"])),
             from_sq=from_sq,
             to_sq=to_sq,
             promo_type=PROMO_TYPE_BY_LETTER.get(promo) if promo else None,
@@ -1006,7 +1009,7 @@ class GameScreen(Screen):
         session.online_last_hit_pop = NO_LAST_HIT_POP
         session.open_skillcheck_overlay(
             *check.overlay_args(), online=True,
-            elapsed_ms=_finite_float(payload.get("elapsed_ms", 0.0)),
+            elapsed_ms=cast(float, _finite_float(payload.get("elapsed_ms", 0.0))),
             miss_count=int(payload.get("miss_count", 0)))
 
     def _prepare_online_fail(self, payload: dict[str, Any]) -> tuple[
@@ -1094,7 +1097,7 @@ class GameScreen(Screen):
             whether it hit, progress so far and the target or direction
         """
         self.skillcheck_overlay.spectate_shot(
-            _finite_float(payload["elapsed_ms"]), int(payload["miss_count"]),
+            cast(float, _finite_float(payload["elapsed_ms"])), int(payload["miss_count"]),
             bool(payload["won"]),
             progress=min(int(payload.get("progress", 0)), SPECTATE_PROGRESS_MAX),
             direction=_spectate_direction(payload), target=_spectate_target(payload))
@@ -1278,7 +1281,7 @@ class GameScreen(Screen):
             colour shooting, elapsed time, miss count, progress and last hit
         """
         check = self._decode_check(pending)
-        elapsed_ms = _finite_float(pending.get("elapsed_ms", 0.0))
+        elapsed_ms = cast(float, _finite_float(pending.get("elapsed_ms", 0.0)))
         miss_count = int(pending.get("miss_count", 0))
         progress = min(int(pending.get("progress", 0)), SPECTATE_PROGRESS_MAX)
         self.skillcheck_session.online_last_hit_pop = int(
@@ -2136,7 +2139,7 @@ class GameScreen(Screen):
             surf = pg.Surface(size)
             surf.fill((0, 0, 0))
             return surf
-        return cache.memoized_surface(_RESULT_FADE_CACHE, size, build)
+        return cast(pg.Surface, cache.memoized_surface(_RESULT_FADE_CACHE, size, build))
 
     def _draw_result_fade_overlay(self) -> None:
         """

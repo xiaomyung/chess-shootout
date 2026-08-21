@@ -2,7 +2,7 @@ import json
 import math
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, cast
 
 import pygame as pg
 
@@ -74,7 +74,7 @@ def gun_spec(gun: str | None) -> GunSpec:
         has no weapon recorded
     :returns: that gun's spec, or the revolver's
     """
-    return GUNS.get(gun, GUNS["revolver"])
+    return GUNS.get(gun, GUNS["revolver"])  # type: ignore[arg-type]
 
 
 def pellet_spread(spec: GunSpec, base: float,
@@ -235,7 +235,9 @@ def aimed_target(image: pg.Surface, pivot_img: tuple[float, float],
     :param aim: aim angle in radians
     :returns: the projected point in window pixels
     """
-    _, pivot_img, target_img, angle_deg = aimed(image, pivot_img, target_img, aim)
+    _, pivot_img, target_img, angle_deg = cast(
+        tuple[pg.Surface, tuple[float, float], tuple[float, float], float],
+        aimed(image, pivot_img, target_img, aim))
     vec = pg.math.Vector2(target_img[0] - pivot_img[0],
                           target_img[1] - pivot_img[1]).rotate(-angle_deg)
     return screen_pivot[0] + vec.x, screen_pivot[1] + vec.y
@@ -319,7 +321,8 @@ def load_battle_art() -> dict[str, Any]:
 
     :returns: the battle-art bundle: guns and their flash variants
     """
-    return cache.memoized_surface(_BATTLE_ART_CACHE, "art", _build_battle_art)
+    return cast(dict[str, Any],
+                cache.memoized_surface(_BATTLE_ART_CACHE, "art", _build_battle_art))
 
 
 def _build_battle_art() -> dict[str, Any]:
@@ -331,7 +334,7 @@ def _build_battle_art() -> dict[str, Any]:
     :returns: guns keyed by name with their grip and barrel anchors, plus the
         ordered flash variants for each gun
     """
-    data = {"guns": {}, "flashes": {}}
+    data: dict[str, Any] = {"guns": {}, "flashes": {}}
     try:
         manifest = paths.resource_path("assets", "battle_png", "battle_manifest.json")
         with open(manifest, encoding="utf-8") as fh:

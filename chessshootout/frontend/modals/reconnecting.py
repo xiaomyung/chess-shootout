@@ -1,5 +1,6 @@
 import math
 from collections.abc import Callable
+from typing import Any, cast
 
 import pygame as pg
 
@@ -72,7 +73,7 @@ def _ring_base(size: int, color: str) -> pg.Surface:
                 wedge.append((c[0] + s * math.cos(a), c[1] + s * math.sin(a)))
             pg.draw.polygon(surf, (0, 0, 0, 0), wedge)
         return supersample(int(size), render)
-    return memoized_surface(_RING_CACHE, (int(size), color), build)
+    return cast(pg.Surface, memoized_surface(_RING_CACHE, (int(size), color), build))
 
 
 def _ring_surface(size: int, color: str, angle_deg: float) -> pg.Surface:
@@ -105,12 +106,13 @@ class ReconnectingModal(BaseModal):
         :param window: the app window surface this modal draws onto
         """
         super().__init__(window)
-        self.on_abandon = None
-        self._disconnected_at_ms = None
-        self.button_rects = {}
-        self._font_cache = {}
+        self.on_abandon: Callable[[], None] | None = None
+        self._disconnected_at_ms: int | None = None
+        self.button_rects: dict[str, pg.Rect] = {}
+        self._font_cache: dict[str, Any] = {}
 
-    def show(self, disconnected_at_ms: int, on_abandon: Callable[[], None]) -> None:
+    def show(self, disconnected_at_ms: int,  # type: ignore[override]
+             on_abandon: Callable[[], None]) -> None:
         """
         Open the card and count down from the moment the connection went away,
         which the coordinator stamps rather than the card itself
@@ -156,7 +158,8 @@ class ReconnectingModal(BaseModal):
             reference size
         :returns: heading, sub-line, countdown and button fonts
         """
-        return fonts_for_width(self._font_cache, scale, self._build_fonts)
+        return cast(tuple[pg.font.Font, pg.font.Font, pg.font.Font, pg.font.Font],
+                    fonts_for_width(self._font_cache, scale, self._build_fonts))
 
     def _build_fonts(self, scale: float) -> tuple[pg.font.Font, pg.font.Font,
                                                   pg.font.Font, pg.font.Font]:

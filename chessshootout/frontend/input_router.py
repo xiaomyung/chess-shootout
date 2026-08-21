@@ -1,6 +1,6 @@
 import logging
 import os
-from typing import Any
+from typing import Any, cast
 
 import pygame as pg
 
@@ -31,7 +31,7 @@ class InputRouter:
             chrome, the modal list, the sound service and the active screen
         """
         self.frontend = frontend
-        self._scroll_pressed = None
+        self._scroll_pressed: Any = None
         self._click_sound_played = False
 
     def _handle_escape(self) -> None:
@@ -70,7 +70,7 @@ class InputRouter:
 
         :returns: the frontmost visible modal spec, or None when none is open
         """
-        for spec in self.frontend._active_modal_specs():
+        for spec in cast(list[ModalSpec], self.frontend._active_modal_specs()):
             if spec.modal.is_visible():
                 return spec
         return None

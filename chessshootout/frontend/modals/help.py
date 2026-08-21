@@ -51,8 +51,8 @@ class HelpModal(BaseModal, ScrollHost):
         :param window: the app window surface this modal draws onto
         """
         super().__init__(window)
-        self.button_rects = {}
-        self.rows = []
+        self.button_rects: dict[str, pg.Rect] = {}
+        self.rows: list[tuple[str, str]] = []
         self._scroll_px = 0.0
         self._content_px = 0
         self._line_h = 1
@@ -94,7 +94,7 @@ class HelpModal(BaseModal, ScrollHost):
         self.key_font = get_mono_font(ROW_FONT_SIZE)
         self.button_font = get_font(BUTTON_FONT_SIZE, bold=True)
 
-    def show(self, rows: list[tuple[str, str]]) -> None:
+    def show(self, rows: list[tuple[str, str]]) -> None:  # type: ignore[override]
         """
         Open the card on one screen's hotkey list, scrolled back to the top.
         The rows come from HOTKEYS in this module, which the README's hotkey

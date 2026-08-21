@@ -1,5 +1,6 @@
 import math
 from collections.abc import Callable
+from typing import cast
 
 import pygame as pg
 
@@ -133,6 +134,8 @@ class WheelController(SkillCheckController):
     away from the move to pull the player's eyes off the board
     """
 
+    challenge: WheelChallenge
+
     def __init__(self, challenge: WheelChallenge, cell_rect: pg.Rect, now_ms: int,
                  deadline_ms: float = WHEEL_DEFAULT_DEADLINE_MS,
                  on_shot: Callable[[float], None] | None = None, passive: bool = False,
@@ -153,7 +156,7 @@ class WheelController(SkillCheckController):
         self._init_common(challenge, now_ms, deadline_ms, on_shot=on_shot, passive=passive,
                           audio=audio)
         self._apply_geometry(cell_rect)
-        self._frozen_override = None
+        self._frozen_override: float | None = None
         self._tick_edge = EdgeTrigger()
         self._cue("play_skillcheck_appear")
 
@@ -198,7 +201,7 @@ class WheelController(SkillCheckController):
         """
         if self._online:
             self._committed_at = self._now
-            self._on_shot(self._now - self.start_ms)
+            cast(Callable[..., None], self._on_shot)(self._now - self.start_ms)
             return
         self._commit(self._landed_now())
 
@@ -345,7 +348,7 @@ class WheelController(SkillCheckController):
                 pg.draw.circle(surf, pg.Color(Colors.border_strong), (c, c), self.radius * k,
                                max(int(self.ring_w * k), 1))
             return supersample((size, size), render)
-        return memoized_surface(_WHEEL_STATIC_CACHE, self.radius, build)
+        return cast(pg.Surface, memoized_surface(_WHEEL_STATIC_CACHE, self.radius, build))
 
     def _render_dynamic(self, elapsed: float, size: int) -> pg.Surface:
         """

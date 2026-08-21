@@ -3,7 +3,7 @@ import threading
 from collections import defaultdict
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, cast
 
 from chessshootout.backend.utils import BOARD_SIZE, Square, square_from_coord
 
@@ -27,8 +27,8 @@ BLOCKED = "blocked"
 HEURISTIC_ID = "heuristic_c4"
 
 _FLOORS = None
-_CACHE = {}
-_CACHE_ORDER = []
+_CACHE: "dict[tuple[Any, ...], Verdict]" = {}
+_CACHE_ORDER: list[tuple[Any, ...]] = []
 _LOCK = threading.Lock()
 
 
@@ -43,8 +43,8 @@ class Verdict:
 
     kind: str
     pattern_id: object = None
-    matched_arrows: list = field(default_factory=list)
-    matched_highlights: list = field(default_factory=list)
+    matched_arrows: list[tuple[str, str]] = field(default_factory=list)
+    matched_highlights: list[str] = field(default_factory=list)
 
 
 def union_sides(arrows_a: Iterable[tuple[str, str]], highlights_a: Iterable[str],
@@ -234,7 +234,8 @@ def _changed_key(
     """
     if changed_edges is None:
         return None
-    return (frozenset(changed_edges), frozenset(changed_cells))
+    return (frozenset(changed_edges),
+            frozenset(cast(set[tuple[int, int]], changed_cells)))
 
 
 def _cache_put(key: tuple[Any, ...], verdict: Verdict) -> None:
@@ -481,7 +482,9 @@ def _mirror_present(placed_edges: set[tuple[tuple[int, int], tuple[int, int]]],
     cy = (box[1] + box[3]) // 2
     for axis in ("x", "y", "d", "a"):
         reflected = _transform_edges_about(
-            placed_doubled, cx, cy, lambda p, gx, gy, ax=axis: _reflect(p, gx, gy, ax))
+            placed_doubled, cx, cy,
+            cast(Callable[[tuple[int, int], int, int], tuple[int, int]],
+                 lambda p, gx, gy, ax=axis: _reflect(p, gx, gy, ax)))
         if reflected != placed_doubled and reflected <= drawn_doubled:
             return True
     return False
@@ -735,12 +738,15 @@ def _c4_chiral_core(
                      and _transform_edge(edge, cx, cy, _rotate270) in doubled)
     if len(core) < HEURISTIC_MIN_EDGES:
         return None
-    cminx, cminy, cmaxx, cmaxy = geometry.edges_bbox(core)
+    cminx, cminy, cmaxx, cmaxy = cast(tuple[int, int, int, int],
+                                      geometry.edges_bbox(core))
     if (cmaxx - cminx) // 2 > HEURISTIC_MAX_SPAN or (cmaxy - cminy) // 2 > HEURISTIC_MAX_SPAN:
         return None
     for axis in ("x", "y", "d", "a"):
         reflected = _transform_edges_about(
-            core, cx, cy, lambda p, gx, gy, ax=axis: _reflect(p, gx, gy, ax))
+            core, cx, cy,
+            cast(Callable[[tuple[int, int], int, int], tuple[int, int]],
+                 lambda p, gx, gy, ax=axis: _reflect(p, gx, gy, ax)))
         if reflected == core:
             return None
         if reflected <= doubled:
@@ -760,7 +766,8 @@ def _core_tight(core: frozenset[tuple[tuple[int, int], tuple[int, int]]]) -> boo
     """
     if len(core) < HEURISTIC_TIGHT_MIN_EDGES:
         return False
-    minx, miny, maxx, maxy = geometry.edges_bbox(core)
+    minx, miny, maxx, maxy = cast(tuple[int, int, int, int],
+                                  geometry.edges_bbox(core))
     if (maxx - minx) // 2 > HEURISTIC_TIGHT_MAX_SPAN:
         return False
     if (maxy - miny) // 2 > HEURISTIC_TIGHT_MAX_SPAN:
@@ -939,7 +946,9 @@ def _is_c4_chiral(doubled: frozenset[tuple[tuple[int, int], tuple[int, int]]], c
         return False
     for axis in ("x", "y", "d", "a"):
         reflected = _transform_edges_about(
-            doubled, cx, cy, lambda p, gx, gy, ax=axis: _reflect(p, gx, gy, ax))
+            doubled, cx, cy,
+            cast(Callable[[tuple[int, int], int, int], tuple[int, int]],
+                 lambda p, gx, gy, ax=axis: _reflect(p, gx, gy, ax)))
         if reflected == doubled:
             return False
     return True

@@ -1,6 +1,6 @@
 import logging
 from collections.abc import Callable
-from typing import Any, NamedTuple
+from typing import Any, NamedTuple, cast
 
 import pygame as pg
 
@@ -55,8 +55,8 @@ class SkillCheckSession:
         self.screen = screen
         self.app = screen.app
         self.whack_gun = WhackGun(screen)
-        self.skillcheck_log = []
-        self._skillcheck_fired_at_ms = None
+        self.skillcheck_log: list[SkillCheckOutcome] = []
+        self._skillcheck_fired_at_ms: int | None = None
         self.clear_online_skillcheck_state()
 
     def skillcheck_gate(self, from_sq: Square, to_sq: Square,
@@ -117,7 +117,8 @@ class SkillCheckSession:
         promo_letter = PROMO_LETTER_BY_TYPE.get(promo_type) if promo_type is not None else None
         self.app.coordinator.send_move(
             coord_from_square(from_sq), coord_from_square(to_sq), promo_letter)
-        self.pending_online_move = (from_sq, to_sq, promo_type)
+        self.pending_online_move: tuple[Square, Square, PieceType | None] | None = (
+            from_sq, to_sq, promo_type)
         return True
 
     def open_skillcheck_overlay(self, kind: SkillCheckKind, seed: str, value_diff: int,
@@ -209,7 +210,7 @@ class SkillCheckSession:
             now_ms=pg.time.get_ticks() - int(elapsed_ms), deadline_ms=deadline_ms,
             period_ms=period_for_diff(value_diff), value_diff=value_diff,
             victim_surface=self._victim_surface(target), board_rect=screen.board.rect,
-            geom=lambda sq: screen.board.cell_rect(sq).center, from_sq=from_sq,
+            geom=lambda sq: screen.board.cell_rect(cast(Square, sq)).center, from_sq=from_sq,
             victim_sq=target, attacker_type=capturer.type.value if capturer else None,
             shot_sound=self._shot_sound_for(capturer),
             on_shot=None if passive else (self._send_skillcheck_shot if online else None),
@@ -261,9 +262,9 @@ class SkillCheckSession:
         """
         board = self.screen.board
         self._skillcheck_fired_at_ms = pg.time.get_ticks() - int(elapsed_ms)
-        self.skillcheck_target = target
-        self.active_kind = kind
-        self.active_seed = seed
+        self.skillcheck_target: Square | None = target
+        self.active_kind: SkillCheckKind | None = kind
+        self.active_seed: str | None = seed
         if kind == SkillCheckKind.WHACK:
             self.whack_gun.arm(from_sq, capturer)
         board.aim_suppressed_square = target if kind in SUPPRESSING_KINDS else None
@@ -296,10 +297,11 @@ class SkillCheckSession:
         screen = self.screen
         screen.board.jump_to_review_ply(None)
         self.pending_online_move = None
-        self.online_skillcheck = CheckContext(from_sq, to_sq, promo_type, kind)
-        self.online_spectate_kind = kind
+        self.online_skillcheck: CheckContext | None = CheckContext(
+            from_sq, to_sq, promo_type, kind)
+        self.online_spectate_kind: SkillCheckKind | None = kind
         self.online_was_spectator = True
-        self.online_skillcheck_opened_ms = pg.time.get_ticks() - int(elapsed_ms)
+        self.online_skillcheck_opened_ms: int | None = pg.time.get_ticks() - int(elapsed_ms)
         self.open_skillcheck_overlay(
             kind, seed, value_diff, deadline_ms, from_sq, to_sq, promo_type, captured_value,
             online=True, passive=True, elapsed_ms=elapsed_ms, miss_count=miss_count,
@@ -391,7 +393,7 @@ class SkillCheckSession:
         self.online_spectate_kind = None
         self.online_was_spectator = False
         self.online_skillcheck_opened_ms = None
-        self.online_verdict_action = None
+        self.online_verdict_action: Callable[[], None] | None = None
         self.online_last_hit_pop = -1
 
     def clear_online_skillcheck_state(self) -> None:
@@ -473,7 +475,7 @@ class SkillCheckSession:
         if square is None:
             return
         board = self.screen.board
-        board.effects.taunt_tag(pg.time.get_ticks(), mole.pick_taunt(seed),
+        board.effects.taunt_tag(pg.time.get_ticks(), mole.pick_taunt(cast(str, seed)),
                                 square, board.cell_size)
         if play_sound:
             self.app.sound_manager.play_mole_taunt()
@@ -500,7 +502,7 @@ class SkillCheckSession:
             if capturer is not None:
                 victim_sq = screen.board.capture_victim_square(capturer, from_sq, to_sq)
                 if victim_sq is not None:
-                    return victim_sq
+                    return cast(Square, victim_sq)
             return to_sq
         square = placement_square(seed, value_diff,
                                   self._placement_exclusions(from_sq, to_sq), screen.board.SIZE)
@@ -538,7 +540,8 @@ class SkillCheckSession:
         """
         if piece is None:
             return None
-        return self.screen.board.piece_images_scaled.get((piece.type, piece.color))
+        return cast("pg.Surface | None",
+                    self.screen.board.piece_images_scaled.get((piece.type, piece.color)))
 
     def _shot_sound_for(self, capturer: Piece | None) -> Callable[[], None] | None:
         """

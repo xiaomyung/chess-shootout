@@ -37,7 +37,7 @@ class CountryPicker(BaseModal, ScrollHost):
         :param window: the app window surface this modal draws onto
         """
         super().__init__(window)
-        self.on_pick = None
+        self.on_pick: Callable[[str], None] | None = None
         self.current = ""
         self._scroll_px = 0.0
         self._content_px = 0
@@ -45,7 +45,7 @@ class CountryPicker(BaseModal, ScrollHost):
                                 bg=Colors.bg, radius=7)
         self.search.padding = 11
         self._filtered = list(countries.COUNTRIES)
-        self._row_rects = []
+        self._row_rects: list[tuple[pg.Rect, str]] = []
         self._list_rect = pg.Rect(0, 0, 0, 0)
         self._search_rect = pg.Rect(0, 0, 0, 0)
         self._cancel_rect = pg.Rect(0, 0, 0, 0)
@@ -71,7 +71,8 @@ class CountryPicker(BaseModal, ScrollHost):
         self.button_font = get_font(max(int(h * 0.028), 12), bold=True)
         self.search_font = get_font(max(int(h * 0.028), 12))
 
-    def show(self, current_code: str, on_pick: Callable[[str], None]) -> None:
+    def show(self, current_code: str,  # type: ignore[override]
+             on_pick: Callable[[str], None]) -> None:
         """
         Open the picker on the country the player has now, with the search box
         empty and focused and the list back at the top

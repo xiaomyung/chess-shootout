@@ -3,11 +3,12 @@ import json
 import secrets
 import time
 from collections.abc import Callable, Iterable
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
 from fastapi import FastAPI, WebSocket
 from pydantic import ValidationError
 
+from chessshootout.backend.backend import Backend
 from chessshootout.backend.clock import Clock
 from chessshootout.backend.fen import export_fen
 from chessshootout.backend.pieces import PieceColor
@@ -36,7 +37,8 @@ from chessshootout.server.protocol import (
 )
 from chessshootout.server.moderation import detector
 from chessshootout.server.moderation.load import ModerationLoad
-from chessshootout.server.rooms import PendingSkillCheck, Room, SharedAnnotations
+from chessshootout.server.rooms import (
+    PendingSkillCheck, PlayerSlot, Room, SharedAnnotations)
 from chessshootout.server.sweep import RESULT_REASON_BY_GAME_RESULT
 from chessshootout.skillcheck import mole, online
 from chessshootout.skillcheck.triggers import compute_facts
@@ -145,7 +147,7 @@ def _resync_gate(app: FastAPI) -> _ResyncGate:
     :param app: the FastAPI application that owns the shared server state.
     :returns: the process-wide resync gate.
     """
-    return _app_state_singleton(app, "resync_gate", _ResyncGate)
+    return cast(_ResyncGate, _app_state_singleton(app, "resync_gate", _ResyncGate))
 
 
 def _moderation_load(app: FastAPI) -> ModerationLoad:
@@ -157,7 +159,8 @@ def _moderation_load(app: FastAPI) -> ModerationLoad:
     :param app: the FastAPI application that owns the shared server state.
     :returns: the process-wide moderation load meter.
     """
-    return _app_state_singleton(app, "moderation_load", ModerationLoad)
+    return cast(ModerationLoad,
+                _app_state_singleton(app, "moderation_load", ModerationLoad))
 
 
 def _clock_snapshot(clock: Clock | None) -> ClockSnapshot:
@@ -192,14 +195,15 @@ def _arrow_wires(pairs: Iterable[tuple[str, str]]) -> list[ArrowWire]:
     return [ArrowWire(from_sq=a[0], to_sq=a[1]) for a in pairs]
 
 
-def peek_type(raw: str) -> str | None:
+def peek_type(raw: str) -> Any:
     """
     Read just the type out of an inbound frame, so the dispatcher can pick a
     handler without fully parsing a message that may well be junk. Anything
     that is not JSON carrying a type is reported as unknown rather than raised
 
     :param raw: the websocket text frame exactly as it arrived.
-    :returns: the message type, or None when the frame is unusable.
+    :returns: the type field exactly as the frame carried it, which is a message
+        type for a well-formed frame and None when the frame is unusable.
     """
     try:
         return json.loads(raw).get("type")
@@ -346,10 +350,11 @@ async def _arm_skillcheck(app: FastAPI, room: Room, color: str, kind: SkillCheck
     seed = secrets.token_hex(16)
     start_ms = app.state.now_ms()
     deadline_ms = online.skillcheck_deadline_ms(room.time_minutes * 60)
-    holes = ()
+    holes: tuple[tuple[int, int], ...] = ()
     if kind == SkillCheckKind.WHACK:
         holes = mole.holes_for(seed, facts.captured_value, (to_sq.row, to_sq.col),
-                               room.backend.state, room.backend.SIZE)
+                               cast(Backend, room.backend).state,
+                               cast(Backend, room.backend).SIZE)
     room.pending_skillcheck = PendingSkillCheck(
         color=color, from_sq=from_sq, to_sq=to_sq, promotion=promotion,
         kind=kind, seed=seed, value_diff=value_diff,
@@ -393,13 +398,13 @@ async def _apply_move(app: FastAPI, room: Room, color: str, from_sq: Square,
     """
     rooms = app.state.rooms
     connections = app.state.connections
-    result = room.backend.try_move(from_sq, to_sq)
+    result = cast(Backend, room.backend).try_move(from_sq, to_sq)
     if not result.legal:
         await send(connections.get_for_color(room, color),
                      ErrorMessage(reason=Reason.INVALID_MOVE_FORMAT))
         return "illegal"
     if result.promotion_required:
-        room.backend.promote(to_sq, PROMO_TYPE_BY_LETTER[promotion or "q"])
+        cast(Backend, room.backend).promote(to_sq, PROMO_TYPE_BY_LETTER[promotion or "q"])
     room.plies_ever += 1
     room.mark_idle_activity(app.state.now() if room.idle_window() is not None else None)
     room.skillcheck_locks.clear()
@@ -410,19 +415,21 @@ async def _apply_move(app: FastAPI, room: Room, color: str, from_sq: Square,
     await clear_resyncing(app, room, color)
     room.draw_offered_by = None
     room.takeback_offered_by = None
-    san = room.backend.move_history[-1].san
+    san = cast(Backend, room.backend).move_history[-1].san
     if skill_kind is not None:
         room.skillcheck_log.append(SkillCheckOutcome(
-            len(room.backend.move_history), skill_kind, skill_won, san))
+            len(cast(Backend, room.backend).move_history), skill_kind,
+            cast(bool, skill_won), san))
     log.info("move applied room=%s mover=%s san=%s", room.room_id, color, san)
     applied = MoveAppliedMessage(
         from_sq=coord_from_square(from_sq), to_sq=coord_from_square(to_sq),
-        promotion=promotion, san=san, clock=_clock_snapshot(room.backend.clock),
-        ply=len(room.backend.move_history),
+        promotion=promotion, san=san,
+        clock=_clock_snapshot(cast(Backend, room.backend).clock),
+        ply=len(cast(Backend, room.backend).move_history),
         skill_check_kind=skill_kind, skill_check_won=skill_won,
     )
     await broadcast(rooms, connections, room, applied)
-    game_result = room.backend.game_result()
+    game_result = cast(Backend, room.backend).game_result()
     if game_result in RESULT_REASON_BY_GAME_RESULT:
         reason, winner = RESULT_REASON_BY_GAME_RESULT[game_result]
         await finalize_and_broadcast(rooms, connections, room, reason, winner_color=winner)
@@ -468,7 +475,9 @@ def _adjudicate_shot(pending: PendingSkillCheck, msg: SkillCheckShotMessage,
     hit = online.shot_wins(pending.kind, challenge, elapsed, pending.miss_count,
                            pending.deadline_ms, progress=pending.progress,
                            direction=msg.direction,
-                           target=(msg.target_row, msg.target_col) if is_whack else None,
+                           target=(cast(tuple[float, float],
+                                        (msg.target_row, msg.target_col))
+                                   if is_whack else None),
                            hole_squares=pending.holes if is_whack else None,
                            last_hit_pop=pending.last_hit_pop,
                            flipped=online.adjudicated_flipped(pending.color))
@@ -849,16 +858,16 @@ async def handle_takeback_response(app: FastAPI, websocket: WebSocket, room: Roo
         return "self"
     if msg.accept:
         log.info("takeback accepted room=%s by=%s", room.room_id, color)
-        popped_ply = len(room.backend.move_history)
-        room.backend.undo()
+        popped_ply = len(cast(Backend, room.backend).move_history)
+        cast(Backend, room.backend).undo()
         room.skillcheck_log = [e for e in room.skillcheck_log if e.ply < popped_ply]
         room.takeback_offered_by = None
         room.annotations_white.clear_marks()
         room.annotations_black.clear_marks()
         await broadcast(rooms, connections, room, TakebackAppliedMessage(
-            fen=export_fen(room.backend),
-            clock=_clock_snapshot(room.backend.clock),
-            ply=len(room.backend.move_history),
+            fen=export_fen(cast(Backend, room.backend)),
+            clock=_clock_snapshot(cast(Backend, room.backend).clock),
+            ply=len(cast(Backend, room.backend).move_history),
         ))
         if room.result is None and room.idle_window() is not None:
             room.mark_idle_activity(app.state.now())
@@ -1019,7 +1028,7 @@ async def _relay_guard(websocket: WebSocket, room: Room, color: str, limiter: An
     """
     if room.backend is None or room.result is not None:
         return "noop"
-    if not limiter.hit(room.slot(color).client_uuid):
+    if not limiter.hit(cast(PlayerSlot, room.slot(color)).client_uuid):
         await send(websocket, ErrorMessage(reason=Reason.RATE_LIMITED, msg_type=msg_type))
         return "rate_limited"
     return None
@@ -1110,17 +1119,18 @@ async def handle_annotation_delta(app: FastAPI, websocket: WebSocket, room: Room
         return "muted"
     if _over_moderation_budget(app, room, color):
         return await _suppress_sharing(app, room, color, "annotation_delta")
+    changed: str | tuple[str, str] | None
     if msg.kind == "highlight":
         if msg.action == "add":
             if (msg.square not in store.highlights
                     and len(store.highlights) >= MAX_SHARED_HIGHLIGHTS):
                 return "capped"
-            store.highlights.add(msg.square)
+            store.highlights.add(cast(str, msg.square))
         else:
-            store.highlights.discard(msg.square)
+            store.highlights.discard(cast(str, msg.square))
         changed = msg.square if msg.action == "add" else None
     else:
-        pair = (msg.from_sq, msg.to_sq)
+        pair = cast(tuple[str, str], (msg.from_sq, msg.to_sq))
         if msg.action == "add":
             if pair not in store.arrows:
                 if len(store.arrows) >= MAX_SHARED_ARROWS:
@@ -1141,9 +1151,9 @@ def _last_move_context(room: Room) -> tuple[str, ...]:
     :param room: the room whose board is being screened.
     :returns: origin and destination squares, empty before the first move.
     """
-    if not room.backend.move_history:
+    if not cast(Backend, room.backend).move_history:
         return ()
-    move = room.backend.move_history[-1].move
+    move = cast(Backend, room.backend).move_history[-1].move
     return (coord_from_square(move.from_sq), coord_from_square(move.to_sq))
 
 

@@ -1,5 +1,5 @@
 from collections.abc import Callable, Sequence
-from typing import Any, NamedTuple
+from typing import Any, NamedTuple, cast
 
 import pygame as pg
 
@@ -71,7 +71,7 @@ _GLYPH_SPECS = {
     for table in (CAPS, UNTIMED_CAPS, REVIEW_CAPS) for cap in table if cap.glyph
 }
 
-SECTION_OPEN = {}
+SECTION_OPEN: dict[str, bool] = {}
 
 
 def section_open(key: str) -> bool:
@@ -232,8 +232,8 @@ class RailTooltip:
         Start with nothing registered and nothing hovered. One tooltip belongs
         to each rail and lives as long as it does
         """
-        self.entries = []
-        self._hover_key = None
+        self.entries: list[tuple[tuple[str, str | int], pg.Rect, str]] = []
+        self._hover_key: tuple[str, str | int] | None = None
         self._hover_since = 0
         self._mouse = (0, 0)
         self._cache = new_cache()
@@ -307,8 +307,8 @@ class RailTooltip:
         :returns: the bubble surface for that label
         """
         key = (label, font.get_height())
-        return memoized_surface(
-            self._cache, key, lambda: build_tooltip_bubble(font, label, scale))
+        return cast(pg.Surface, memoized_surface(
+            self._cache, key, lambda: build_tooltip_bubble(font, label, scale)))
 
     def _position(self, bubble: pg.Surface, rect: pg.Rect,
                   clip_rect: pg.Rect) -> tuple[int, int]:
@@ -402,7 +402,7 @@ class RightMenu:
         self.chat_presets_provider = chat_presets_provider or (lambda: [])
         self.chat_cooldown_provider = chat_cooldown_provider or (lambda: False)
         self.caps_stacked = caps_stacked
-        self._pair_to_row = {}
+        self._pair_to_row: dict[int, int] = {}
         self._marquee_off = 0.0
 
         self.padding = 10
@@ -430,18 +430,18 @@ class RightMenu:
         self.outer_rect = pg.Rect(0, 0, 0, 0)
         self.moves_rect = pg.Rect(0, 0, 0, 0)
         self.info_rect = pg.Rect(0, 0, 0, 0)
-        self.button_rects = {}
-        self._section_blocks = []
-        self._cap_draws = []
-        self._signal_chips = []
-        self._chat_buttons = []
+        self.button_rects: dict[str, pg.Rect] = {}
+        self._section_blocks: list[SectionBlock] = []
+        self._cap_draws: list[tuple[Cap, pg.Rect]] = []
+        self._signal_chips: list[tuple[SignalChip, pg.Rect]] = []
+        self._chat_buttons: list[tuple[int, pg.Rect]] = []
         self._signal_vol_rect = pg.Rect(0, 0, 0, 0)
         self._signal_notch_band = pg.Rect(0, 0, 0, 0)
         self._signal_notch_step = 1
-        self._chevron_anim = {}
+        self._chevron_anim: dict[str, tuple[int, float, float]] = {}
         self.rail_tooltip = RailTooltip()
-        self.game_info = None
-        self._last_outer_rect = None
+        self.game_info: dict[str, Any] | None = None
+        self._last_outer_rect: pg.Rect | None = None
 
         self.scroll_offset = 0
         self._total_rows = 0
@@ -455,10 +455,12 @@ class RightMenu:
             lambda: (self._moves_viewport, self._content_px),
             wheel_step_px=lambda: self._line_h,
         )
-        self._move_cell_hits = []
+        self._move_cell_hits: list[tuple[pg.Rect, int]] = []
         self._last_seen_total_rows = 0
-        self._last_review_ply = None
-        self._move_rows_cache = None
+        self._last_review_ply: int | None = None
+        self._move_rows_cache: tuple[
+            tuple[int, tuple[tuple[int, int], ...]],
+            list[tuple[Any, ...]], dict[int, int]] | None = None
 
     @property
     def backend(self) -> Backend:
@@ -468,7 +470,7 @@ class RightMenu:
 
         :returns: the engine driving this rail's game
         """
-        return getattr(self.match, "backend", self.match)
+        return cast(Backend, getattr(self.match, "backend", self.match))
 
     def _max_off_rows(self) -> int:
         """
@@ -715,7 +717,7 @@ class RightMenu:
         :param body: the section body they go inside, in window pixels
         :returns: each button paired with the rect it occupies
         """
-        result = []
+        result: list[tuple[Cap, pg.Rect]] = []
         if not caps:
             return result
         gap = scale_floor(CAP_GAP, self.scale, 5)
@@ -743,7 +745,8 @@ class RightMenu:
 
         :param body: the section body they go inside, in window pixels
         """
-        chips = REVIEW_SIGNAL_CHIPS if self.signals_provider()["review"] else SIGNAL_CHIPS
+        provider = cast(Callable[[], dict[str, Any]], self.signals_provider)
+        chips = REVIEW_SIGNAL_CHIPS if provider()["review"] else SIGNAL_CHIPS
         body_top = scale_floor(SECTION_BODY_TOP, self.scale, 4)
         chip_h = scale_floor(SIGNAL_CHIP_H, self.scale, 20)
         gap = scale_floor(SIGNAL_CHIP_GAP, self.scale, 4)
@@ -887,7 +890,7 @@ class RightMenu:
 
         :param rect: the header's area in window pixels
         """
-        info = self.game_info
+        info = cast(dict[str, Any], self.game_info)
         header_h = self.pill_font.get_height() + INFO_HEADER_PAD
         cx = rect.x
         cy = rect.y + header_h // 2
@@ -1047,8 +1050,8 @@ class RightMenu:
         :returns: the rows to draw and, for each move number, the row it
             starts on
         """
-        rows = []
-        pair_to_row = {}
+        rows: list[tuple[Any, ...]] = []
+        pair_to_row: dict[int, int] = {}
         for pair_idx, (number, white_entry, black_entry) in enumerate(iter_move_pairs(history)):
             pair_to_row[pair_idx] = len(rows)
             rows.append(("pair", pair_idx, number, white_entry, black_entry))
@@ -1198,7 +1201,7 @@ class RightMenu:
             if black_entry is not None:
                 black_cell = pg.Rect(black_x, row_y, cell_w, line_h)
                 self._draw_move_cell(black_cell, black_entry, active_ply == black_ply)
-                self._move_cell_hits.append((black_cell, black_ply))
+                self._move_cell_hits.append((black_cell, cast(int, black_ply)))
 
     def _whiff_surface(self, san: str) -> pg.Surface:
         """
@@ -1219,7 +1222,7 @@ class RightMenu:
             surf = self.moves_font.render(san, True, pg.Color(Colors.loss))
             surf.set_alpha(WHIFF_ALPHA)
             return surf
-        return memoized_surface(_WHIFF_CACHE, key, build)
+        return cast(pg.Surface, memoized_surface(_WHIFF_CACHE, key, build))
 
     def _draw_whiff(self, x: int, y: int, w: int, line_h: int,
                     whiff: tuple[str, str] | None) -> None:
@@ -1505,7 +1508,7 @@ class RightMenu:
             if faded:
                 canvas.set_alpha(FADED_ICON_ALPHA)
             return canvas
-        return memoized_surface(_CAP_FG_CACHE, key, build)
+        return cast(pg.Surface, memoized_surface(_CAP_FG_CACHE, key, build))
 
     def _draw_signals(self) -> None:
         """
@@ -1515,7 +1518,7 @@ class RightMenu:
         """
         if not self._signal_chips:
             return
-        state = self.signals_provider()
+        state = cast(Callable[[], dict[str, Any]], self.signals_provider)()
         for chip, rect in self._signal_chips:
             on = bool(state.get(chip.state_key))
             disabled = chip.enabled_key is not None and not state.get(chip.enabled_key)
@@ -1584,7 +1587,7 @@ class RightMenu:
             if cooling:
                 surf.set_alpha(CHAT_DIM_ALPHA)
             return surf
-        return memoized_surface(_CHAT_CACHE, key, build)
+        return cast(pg.Surface, memoized_surface(_CHAT_CACHE, key, build))
 
     def _handle_chat_click(self, pos: tuple[int, int]) -> bool | None:
         """
@@ -1658,7 +1661,7 @@ class RightMenu:
             if disabled:
                 surf.set_alpha(SIGNAL_SHARE_DISABLED_ALPHA)
             return surf
-        return memoized_surface(_SIGNAL_CACHE, key, build)
+        return cast(pg.Surface, memoized_surface(_SIGNAL_CACHE, key, build))
 
     def _draw_vol_row(self, state: dict[str, Any]) -> None:
         """
@@ -1720,7 +1723,7 @@ class RightMenu:
             if dimmed:
                 surf.set_alpha(SIGNAL_DIM_ALPHA)
             return surf
-        return memoized_surface(_SIGNAL_CACHE, key, build)
+        return cast(pg.Surface, memoized_surface(_SIGNAL_CACHE, key, build))
 
     def _handle_signal_click(self, pos: tuple[int, int]) -> bool | None:
         """
@@ -1735,7 +1738,7 @@ class RightMenu:
         """
         if not self._signal_chips:
             return None
-        state = self.signals_provider()
+        state = cast(Callable[[], dict[str, Any]], self.signals_provider)()
         for chip, rect in self._signal_chips:
             if not rect.collidepoint(pos):
                 continue

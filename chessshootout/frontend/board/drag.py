@@ -1,6 +1,6 @@
 import math
 from collections.abc import Callable
-from typing import Any
+from typing import Any, cast
 
 import pygame as pg
 
@@ -47,9 +47,9 @@ class DragPhysics:
             piece sprites and the match, and written back through dragging_from
         """
         self.board = board
-        self._drag = None
-        self._drag_cursor = None
-        self._press_pos = None
+        self._drag: dict[str, Any] | None = None
+        self._drag_cursor: tuple[int, int] | None = None
+        self._press_pos: tuple[int, int] | None = None
 
     def begin_press(self, pos: tuple[int, int]) -> None:
         """
@@ -80,7 +80,7 @@ class DragPhysics:
         if geom is None:
             return (board.cell_size / 2, board.cell_size / 2)
         if press_pos is None:
-            return geom["top_center"]
+            return cast(tuple[float, float], geom["top_center"])
         rect = board._cell_rect(from_sq.row, from_sq.col)
         local = (press_pos[0] - rect.x, press_pos[1] - rect.y)
         surface = board.piece_images_scaled[(piece.type, piece.color)]
@@ -89,7 +89,7 @@ class DragPhysics:
         if inside and geom["bbox"].collidepoint(local) and \
                 surface.get_at((int(local[0]), int(local[1]))).a > 0:
             return local
-        return geom["top_center"]
+        return cast(tuple[float, float], geom["top_center"])
 
     def _begin_drag_physics(self, pos: tuple[int, int], now: int) -> None:
         """
@@ -388,7 +388,7 @@ class DragPhysics:
         :returns: the destination square, or None when nothing is settling
         """
         if self._drag is not None and self._drag["phase"] == "settle":
-            return self._drag["settle_to_sq"]
+            return cast(Square, self._drag["settle_to_sq"])
         return None
 
     def draw_drag_overlay(self) -> None:

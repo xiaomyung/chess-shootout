@@ -24,7 +24,7 @@ class ComboChallenge:
     sides show the same arrows and the judge can score every press
     """
 
-    prompts: tuple
+    prompts: tuple[str, ...]
     deadline_ms: float
 
     @property

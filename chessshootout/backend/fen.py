@@ -130,7 +130,7 @@ def _parse_placement(placement: str) -> list[list[Piece | None]]:
     :param placement: first FEN field, its ranks separated by slashes
     :returns: 8x8 grid of pieces, row 0 being Black's back rank
     """
-    state = [[None] * Backend.SIZE for _ in range(Backend.SIZE)]
+    state: list[list[Piece | None]] = [[None] * Backend.SIZE for _ in range(Backend.SIZE)]
     ranks = placement.split("/")
     if len(ranks) != Backend.SIZE:
         raise ValueError(f"FEN placement must have {Backend.SIZE} ranks: {placement!r}")
@@ -180,5 +180,5 @@ def _parse_ep(field: str) -> Square | None:
         return None
     if len(field) != 2:
         raise ValueError(f"Invalid en-passant field: {field!r}")
-    file_ch, rank_ch = field
+    file_ch, rank_ch = field[0], field[1]
     return Square(Backend.SIZE - int(rank_ch), SAN_FILES.index(file_ch))

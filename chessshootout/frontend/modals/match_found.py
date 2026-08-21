@@ -1,4 +1,5 @@
 from collections.abc import Callable
+from typing import Any, cast
 
 import pygame as pg
 
@@ -43,14 +44,15 @@ class MatchFoundModal(BaseModal):
         self.opp_country = ""
         self.rating = "1500"
         self.rematch = False
-        self.on_done = None
-        self.me_palette = None
-        self.opp_palette = None
+        self.on_done: Callable[[], None] | None = None
+        self.me_palette: tuple[pg.Color, pg.Color] | None = None
+        self.opp_palette: tuple[pg.Color, pg.Color] | None = None
         self._started_at = 0
         self._seconds = 3
-        self._font_cache = {}
+        self._font_cache: dict[str, Any] = {}
 
-    def show(self, white_name: str, black_name: str, your_color: str,
+    def show(self, white_name: str, black_name: str,  # type: ignore[override]
+             your_color: str,
              on_done: Callable[[], None], seconds: int = 3, white_country: str = "",
              black_country: str = "", rematch: bool = False) -> None:
         """
@@ -124,10 +126,12 @@ class MatchFoundModal(BaseModal):
         :returns: eyebrow, name, rating, versus, countdown and avatar-letter
             fonts
         """
-        return fonts_for_width(self._font_cache, panel_w, self._build_fonts)
+        return cast(tuple[pg.font.Font, pg.font.Font, pg.font.Font,
+                          pg.font.Font, pg.font.Font, pg.font.Font],
+                    fonts_for_width(self._font_cache, panel_w, self._build_fonts))
 
-    def _build_fonts(self, panel_w: int) -> tuple[pg.font.Font, pg.font.Font, pg.font.Font,
-                                                  pg.font.Font, pg.font.Font, pg.font.Font]:
+    def _build_fonts(self, panel_w: float) -> tuple[pg.font.Font, pg.font.Font, pg.font.Font,
+                                                    pg.font.Font, pg.font.Font, pg.font.Font]:
         """
         Size all six fonts from the panel width, each with a floor so nothing
         becomes unreadable in a small window
@@ -191,9 +195,11 @@ class MatchFoundModal(BaseModal):
         gap = max(int(panel_w * 0.027), 12)
         side_w = (content.width - vs_surf.get_width() - 2 * gap) / 2
         self._draw_card(content.x + side_w / 2, y, av, side_w, card_h, self.me_name,
-                        self.me_country, name_font, rating_font, letter_font, self.me_palette)
+                        self.me_country, name_font, rating_font, letter_font,
+                        cast(tuple[pg.Color, pg.Color], self.me_palette))
         self._draw_card(content.right - side_w / 2, y, av, side_w, card_h, self.opp_name,
-                        self.opp_country, name_font, rating_font, letter_font, self.opp_palette)
+                        self.opp_country, name_font, rating_font, letter_font,
+                        cast(tuple[pg.Color, pg.Color], self.opp_palette))
         self.window.blit(vs_surf, (content.centerx - vs_surf.get_width() / 2,
                                    y + (card_h - vs_surf.get_height()) / 2))
         y += vs_block_h + g_vs_bottom

@@ -6,7 +6,7 @@ from chessshootout.backend.backend import Backend
 from chessshootout.backend.clock import Clock
 from chessshootout.backend.pieces import Piece, PieceColor, PieceType
 from chessshootout.backend.utils import (
-    HistoryEntry, MoveResult, PROMO_LETTER_BY_TYPE, Square,
+    HistoryEntry, MoveResult, PROMO_LETTER_BY_TYPE, PositionKey, Square,
 )
 
 
@@ -38,7 +38,7 @@ class Match:
         self.local_color = local_color
         self.backend = Backend()
         self.backend.new_game()
-        self.on_local_move_applied = None
+        self.on_local_move_applied: Callable[[Square, Square, str | None], None] | None = None
 
     def try_move(self, from_sq: Square, to_sq: Square) -> MoveResult:
         """
@@ -259,7 +259,7 @@ class Match:
         return self.backend.clock
 
     @property
-    def position_counts(self) -> Counter[tuple]:
+    def position_counts(self) -> Counter[PositionKey]:
         """
         How often each position has been reached, the tally threefold
         repetition is judged from

@@ -1,11 +1,9 @@
 from typing import Any
 
 from chessshootout.backend.clock import Clock
-from chessshootout.backend.pieces import PieceColor, opponent_of
+from chessshootout.backend.pieces import PIECE_VALUES, PieceColor, opponent_of
 from chessshootout.backend.utils import HistoryEntry
-from chessshootout.domain.capture_summary import (
-    PIECE_VALUES, captured_by, material_advantage,
-)
+from chessshootout.domain.capture_summary import captured_by, material_advantage
 
 
 def _ko_count(history: list[HistoryEntry], color: PieceColor) -> int:

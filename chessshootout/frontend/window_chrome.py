@@ -4,7 +4,7 @@ import glob
 import logging
 import os
 from collections.abc import Callable, Iterator
-from typing import Any
+from typing import TYPE_CHECKING, Any, cast
 
 import pygame as pg
 
@@ -13,6 +13,9 @@ from chessshootout.frontend.visual.cache import new_cache, memoized_surface
 from chessshootout.frontend.visual.colors import Colors
 from chessshootout.frontend.visual.draw import supersample
 from chessshootout.frontend.visual.fonts import get_font, get_mono_font
+
+if TYPE_CHECKING:
+    from chessshootout.frontend.win_snap import WindowsSnap as _WindowsSnap
 
 _DOT_CACHE = new_cache()
 _DOT_GLYPH_CACHE = new_cache()
@@ -78,7 +81,8 @@ def _iter_sdl_candidates() -> Iterator[ctypes.CDLL]:
     """
     if os.name == "nt" and hasattr(ctypes, "WinDLL"):
         try:
-            handle = ctypes.windll.kernel32.GetModuleHandleW("SDL2.dll")
+            handle = ctypes.windll.kernel32.GetModuleHandleW(  # type: ignore[attr-defined]
+                "SDL2.dll")
             if handle:
                 yield ctypes.WinDLL("SDL2.dll", handle=handle)
         except (OSError, AttributeError):
@@ -146,21 +150,21 @@ class WindowChrome:
         """
         self.window = window
         self._w, self._h = window.get_size()
-        self._dot_rects = {}
-        self._sdl = None
-        self._win_ptr = None
-        self._sdl_window = None
-        self._cb = None
-        self._wordmark = None
-        self._stats_font = None
-        self._wordmark_accent = None
-        self._logo_surf = None
-        self._cursor = None
+        self._dot_rects: dict[str, pg.Rect] = {}
+        self._sdl: Any = None
+        self._win_ptr: int | None = None
+        self._sdl_window: Any = None
+        self._cb: Any = None
+        self._wordmark: pg.Surface | None = None
+        self._stats_font: pg.font.Font | None = None
+        self._wordmark_accent: pg.Surface | None = None
+        self._logo_surf: pg.Surface | None = None
+        self._cursor: int | None = None
         self._on_fullscreen = on_fullscreen
         self._win_state = "normal"
-        self._fs_press_pos = None
-        self._snap = None
-        self._snap_hwnd = None
+        self._fs_press_pos: tuple[int, int] | None = None
+        self._snap: "_WindowsSnap | None" = None
+        self._snap_hwnd: int | None = None
         self._init_sdl()
 
     def reinit_sdl(self) -> None:
@@ -469,8 +473,8 @@ class WindowChrome:
         tile_right = self.LOGO_MARGIN_LEFT + self.LOGO_SIZE
         if self._wordmark is None:
             return tile_right
-        return (tile_right + self.WORDMARK_GAP
-                + self._wordmark.get_width() + self._wordmark_accent.get_width())
+        return (tile_right + self.WORDMARK_GAP + self._wordmark.get_width()
+                + cast(pg.Surface, self._wordmark_accent).get_width())
 
     def _draw_stats(self, parts: list[str]) -> None:
         """
@@ -543,9 +547,10 @@ class WindowChrome:
         tx = tile.right + self.WORDMARK_GAP
         ty = self.HEIGHT // 2
         wm = self._wordmark
+        accent = cast(pg.Surface, self._wordmark_accent)
         self.window.blit(wm, (tx, ty - wm.get_height() // 2))
-        self.window.blit(self._wordmark_accent,
-                         (tx + wm.get_width(), ty - self._wordmark_accent.get_height() // 2))
+        self.window.blit(accent,
+                         (tx + wm.get_width(), ty - accent.get_height() // 2))
 
     def _draw_dots(self) -> None:
         """
@@ -634,7 +639,7 @@ class WindowChrome:
                     pg.draw.line(surf, dark, (c - g, c - g), (c + g, c + g), lw)
                     pg.draw.line(surf, dark, (c - g, c + g), (c + g, c - g), lw)
             return supersample(self.DOT_RADIUS * 2, render, scale=8)
-        return memoized_surface(_DOT_GLYPH_CACHE, key, build)
+        return cast(pg.Surface, memoized_surface(_DOT_GLYPH_CACHE, key, build))
 
     def handle_click(self, pos: tuple[int, int]) -> bool:
         """

@@ -1,5 +1,5 @@
 import logging
-from typing import Any
+from typing import Any, cast
 
 import pygame as pg
 
@@ -57,11 +57,11 @@ class ReviewScreen(Screen):
 
         self.white_name = "Player 1"
         self.black_name = "Player 2"
-        self._time_control = None
-        self._pgn_result_tag = None
+        self._time_control: tuple[int, int] | None = None
+        self._pgn_result_tag: str | None = None
         self._return_to = "menu"
-        self._skillcheck_log = []
-        self._pgn_path = None
+        self._skillcheck_log: list[SkillCheckOutcome] = []
+        self._pgn_path: str | None = None
         self._custom_start = False
         self._debut = openings.DebutTracker(self._reviewed_sans)
         self.backdrop = ArenaBackdrop()
@@ -93,7 +93,7 @@ class ReviewScreen(Screen):
 
         :returns: the current display surface
         """
-        return self.app.window
+        return cast(pg.Surface, self.app.window)
 
     def enter(self, **payload: Any) -> None:
         """

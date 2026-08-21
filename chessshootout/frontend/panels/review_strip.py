@@ -28,10 +28,10 @@ class ReviewStrip:
         self.rect = pg.Rect(0, 0, 0, 0)
         self.name = ""
         self.player_color = PieceColor.WHITE
-        self.captured = []
+        self.captured: list[PieceType] = []
         self.advantage = 0
-        self.captured_color = None
-        self.icons = {}
+        self.captured_color: PieceColor | None = None
+        self.icons: dict[tuple[PieceType, PieceColor], pg.Surface] = {}
         self.name_font = get_font(14, bold=True)
         self.advantage_font = get_font(12, bold=True)
         self.letter_font = get_font(18, family=DISPLAY)

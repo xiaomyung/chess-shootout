@@ -1,5 +1,6 @@
 import math
 from collections.abc import Callable
+from typing import cast
 
 import pygame as pg
 
@@ -37,13 +38,14 @@ def scale_floor(value: int, scale: float, floor: int = 1) -> int:
     return max(int(value * scale), floor)
 
 
-def cosine_pulse(now_ms: int, period_ms: int) -> float:
+def cosine_pulse(now_ms: float, period_ms: float) -> float:
     """
     A smooth breathing value for anything that should throb rather than blink
     -- the low-time clock, the sharing dot, danger cues in the skill checks.
     It eases at both ends, so the loop has no visible seam
 
-    :param now_ms: pygame tick count in milliseconds for the current frame
+    :param now_ms: current time in milliseconds -- pygame ticks or a
+        fractional animation clock
     :param period_ms: how long one full breath takes, in milliseconds
     :returns: value from 0.0 at the start of the cycle up to 1.0 at its middle
     """
@@ -229,7 +231,7 @@ def infinity_surface(height: float, color: str) -> pg.Surface:
                 y = cy + ay * math.sin(t) * math.cos(t) / d / 0.3536
                 pg.draw.circle(surf, col, (x, y), r)
         return supersample((w, h), render, scale=8)
-    return memoized_surface(_INFINITY_CACHE, (h, str(color)), build)
+    return cast(pg.Surface, memoized_surface(_INFINITY_CACHE, (h, str(color)), build))
 
 
 _CIRCLE_CACHE = new_size_cache()
@@ -263,7 +265,7 @@ def circle_surface(diameter: int, color: str) -> pg.Surface:
             r = surf.get_width() / 2
             pg.draw.circle(surf, pg.Color(color), (r, r), r)
         return supersample(d, render)
-    return memoized_surface(_CIRCLE_CACHE, (d, color), build)
+    return cast(pg.Surface, memoized_surface(_CIRCLE_CACHE, (d, color), build))
 
 
 _STRIKE_PIP_CACHE = new_size_cache()
@@ -311,7 +313,7 @@ def strike_pip_surface(size: int, struck: bool, *, lw_frac: float, pad_frac: flo
                 pg.draw.circle(surf, pg.Color(Colors.border_strong), (r, r), r - lw, lw)
         return supersample((size, size), render)
     key = (size, struck, lw_frac, pad_frac, ring_lw_frac)
-    return memoized_surface(_STRIKE_PIP_CACHE, key, build)
+    return cast(pg.Surface, memoized_surface(_STRIKE_PIP_CACHE, key, build))
 
 
 def stroked_text(font: pg.font.Font, text: str, fill: str, stroke: str, sw: int) -> pg.Surface:
@@ -393,7 +395,7 @@ def rounded_rect_surface(size: int | tuple[int, int], radius: int, fill: str,
                 pg.draw.rect(surf, pg.Color(border), surf.get_rect(),
                              width=max(int(border_width * k), 1), border_radius=r)
         return supersample(size, render)
-    return memoized_surface(_ROUNDED_RECT_CACHE, key, build)
+    return cast(pg.Surface, memoized_surface(_ROUNDED_RECT_CACHE, key, build))
 
 
 _CUT_RECT_CACHE = new_size_cache()
@@ -426,8 +428,8 @@ def _cut_rect_points(left: float, top: float, right: float, bottom: float, cut: 
     return pts
 
 
-def cut_rect_surface(size: int | tuple[int, int], cut: int, fill: str,
-                     border: str | None = None, border_width: int = 1,
+def cut_rect_surface(size: int | tuple[int, int], cut: int, fill: str | pg.Color,
+                     border: str | pg.Color | None = None, border_width: int = 1,
                      corners: tuple[str, ...] = ("tr",)) -> pg.Surface:
     """
     The panel shape the whole game is built from: a rectangle with its
@@ -438,8 +440,9 @@ def cut_rect_surface(size: int | tuple[int, int], cut: int, fill: str,
 
     :param size: panel size in pixels, one number for a square
     :param cut: length of the slice along each cut edge, in pixels
-    :param fill: interior colour as a hex token from Colors
-    :param border: outline colour, or None for a flat shape with no outline
+    :param fill: interior colour, a hex token from Colors or a built Color
+    :param border: outline colour, same forms as fill, or None for a flat
+        shape with no outline
     :param border_width: outline thickness in pixels
     :param corners: which corners to slice, named tl, tr, br and bl
     :returns: the shared panel for exactly that look
@@ -476,7 +479,7 @@ def cut_rect_surface(size: int | tuple[int, int], cut: int, fill: str,
             pg.draw.polygon(surf, pg.Color(fill),
                             _cut_rect_points(bi, bi, w - bi, h - bi, inner_cut, corners))
         return supersample(size, render)
-    return memoized_surface(_CUT_RECT_CACHE, key, build)
+    return cast(pg.Surface, memoized_surface(_CUT_RECT_CACHE, key, build))
 
 
 def build_tooltip_bubble(font: pg.font.Font, label: str, scale: float) -> pg.Surface:
@@ -627,7 +630,7 @@ def dashed_rounded_rect_surface(size: int | tuple[int, int], radius: int, border
             if len(run) >= 2:
                 pg.draw.lines(surf, pg.Color(border), False, run, lw)
         return supersample(size, render)
-    return memoized_surface(_DASHED_RECT_CACHE, key, build)
+    return cast(pg.Surface, memoized_surface(_DASHED_RECT_CACHE, key, build))
 
 
 _DASHED_HLINE_CACHE = new_size_cache()
@@ -664,7 +667,7 @@ def dashed_hline(width: int, color: str, dash: int = 6, gap: int = 5) -> pg.Surf
                 pg.draw.rect(surf, col, pg.Rect(x, 0, seg, 1))
             x += period
         return surf
-    return memoized_surface(_DASHED_HLINE_CACHE, key, build)
+    return cast(pg.Surface, memoized_surface(_DASHED_HLINE_CACHE, key, build))
 
 
 _CHEVRON_CACHE = new_size_cache()
@@ -704,7 +707,7 @@ def chevron_surface(height: int, color: str, up: bool = False) -> pg.Surface:
                 pts = [(bw * 0.12, bh * 0.32), (bw * 0.5, bh * 0.72), (bw * 0.88, bh * 0.32)]
             pg.draw.lines(surf, pg.Color(color), False, pts, lw)
         return supersample((w, h), render)
-    return memoized_surface(_CHEVRON_CACHE, (h, up, str(color)), build)
+    return cast(pg.Surface, memoized_surface(_CHEVRON_CACHE, (h, up, str(color)), build))
 
 
 _ROTATED_CHEVRON_CACHE = new_size_cache()
@@ -735,4 +738,4 @@ def rotated_chevron_surface(height: int, color: str, angle: float) -> pg.Surface
         if bucket == 0:
             return base
         return pg.transform.rotate(base, bucket)
-    return memoized_surface(_ROTATED_CHEVRON_CACHE, key, build)
+    return cast(pg.Surface, memoized_surface(_ROTATED_CHEVRON_CACHE, key, build))

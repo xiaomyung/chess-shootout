@@ -95,7 +95,7 @@ class ModerationLoad:
         self.admission_timeout = admission_timeout
         self._refill = {PLAYER: player_refill, ROOM: room_refill}
         self._burst = {PLAYER: player_burst, ROOM: room_burst}
-        self._buckets = {}
+        self._buckets: dict[tuple[str, ...], _Bucket] = {}
 
     def over_budget(self, room_id: str, color: str, now: float) -> bool:
         """

@@ -1,7 +1,7 @@
 import math
 import random
 from collections.abc import Callable
-from typing import Any
+from typing import Any, cast
 
 import pygame as pg
 
@@ -123,7 +123,7 @@ def _turret_bubble_surface(diameter: int, ring_w: int) -> pg.Surface:
             pg.draw.circle(surf, pg.Color(Colors.surface_raised), (r, r), r)
             pg.draw.circle(surf, pg.Color(Colors.amber), (r, r), r, max(int(ring_w * k), 1))
         return supersample((diameter, diameter), render, scale=8)
-    return memoized_surface(_TURRET_BUBBLE_CACHE, (diameter, ring_w), build)
+    return cast(pg.Surface, memoized_surface(_TURRET_BUBBLE_CACHE, (diameter, ring_w), build))
 
 
 def _quantize(value: float, step: float) -> float:
@@ -236,37 +236,37 @@ class TimePicker:
         self._min_index = 3
         self._inc_index = 2
         self.rect = pg.Rect(0, 0, 0, 0)
-        self._drum_center = (0, 0)
-        self._turret_center = (0, 0)
+        self._drum_center: tuple[float, float] = (0, 0)
+        self._turret_center: tuple[float, float] = (0, 0)
         self._radius = 1.0
         self._turret_radius = 1.0
         self._readout_rect = pg.Rect(0, 0, 0, 0)
         self._rotation = -self._min_index * CHAMBER_STEP_DEG
-        self._rot_tween = None
+        self._rot_tween: Tween | None = None
         self._rot_start = self._rotation
         self._rot_target = self._rotation
         self._rot_steps = 0
         self._rot_ticks = 0
         self._spinning = False
         self._spin_vel = 0.0
-        self._spin_last_ms = None
+        self._spin_last_ms: int | None = None
         self._spin_tick_gate = TickGate(on_tick)
         self._drag_active = False
         self._drag_last_pointer_angle = 0.0
         self._drag_total_delta = 0.0
-        self._drag_last_ms = None
+        self._drag_last_ms: int | None = None
         self._drag_vel = 0.0
         self._drag_vsampled = False
-        self._seat_pop_tween = None
+        self._seat_pop_tween: Tween | None = None
         self._seat_pop_index = self._min_index
         self._turret_angle = TURRET_BASE_DEG + self._inc_index * TURRET_SPREAD_DEG
-        self._turret_tween = None
+        self._turret_tween: Tween | None = None
         self._turret_pending_index = self._inc_index
         self._turret_sweep_start = self._turret_angle
         self._turret_sweep_steps = 0
         self._turret_sweep_ticks = 0
         self._now = 0
-        self._hub_ring = None
+        self._hub_ring: pg.Surface | None = None
         self._label_font = get_mono_font(11, bold=True)
         self._value_font = get_display_font(18)
         self._chamber_font = get_mono_font(13, bold=True)

@@ -25,7 +25,7 @@ class FramePacer:
         self.period = 1.0 / target_fps
         self._now = now
         self._sleep = sleep
-        self._deadline = None
+        self._deadline: float | None = None
 
     def wait(self) -> None:
         """

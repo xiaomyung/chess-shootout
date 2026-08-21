@@ -1,7 +1,7 @@
 import logging
 import os
 from datetime import datetime
-from typing import Any
+from typing import Any, cast
 
 import pygame as pg
 
@@ -79,7 +79,7 @@ class ResultFlow:
         """
         self.screen = screen
         self.app = screen.app
-        self.series_scores = {}
+        self.series_scores: dict[str, float] = {}
         self.reset_for_new_game()
 
     def reset_for_new_game(self) -> None:
@@ -89,21 +89,21 @@ class ResultFlow:
         the once-only logging. The series score deliberately survives, since it
         is what makes a run of online games a series
         """
-        self._result_cache_key = None
-        self._result_cache = None
+        self._result_cache_key: tuple[Any, ...] | None = None
+        self._result_cache: str | None = None
         self._series_score_awarded = False
         self._save_failed = False
         self._save_error_toast_shown = False
-        self._save_dir = None
+        self._save_dir: str | None = None
         self._autosave_last_write_ms = -AUTOSAVE_THROTTLE_MS
         self._autosave_last_ply = 0
-        self._last_saved_pgn_path = None
+        self._last_saved_pgn_path: str | None = None
         self._pgn_openable = False
         self._saved_final = False
-        self._result_await_since_ms = None
+        self._result_await_since_ms: int | None = None
         self._result_logged = False
         self._not_saved_notified = False
-        self._final_save_attempted_for = None
+        self._final_save_attempted_for: str | None = None
 
     def current_result(self) -> str | None:
         """
@@ -175,7 +175,7 @@ class ResultFlow:
         :returns: the local player's colour, or None in a hotseat game
         """
         if self.screen.variant in (Variant.ONLINE, Variant.BOT):
-            return self.screen.match.local_color
+            return cast(PieceColor | None, self.screen.match.local_color)
         return None
 
     def _outcome_word_intent(self, code: str, title: str) -> tuple[str, str]:
@@ -486,7 +486,7 @@ class ResultFlow:
         if outcome != "ok":
             return None
         self._save_failed = False
-        path = self._last_saved_pgn_path
+        path = cast(str, self._last_saved_pgn_path)
         self._saved_final = result is not None
         if tag != "*":
             self.app.toast.show(f"Saved {os.path.basename(path)}")
@@ -499,7 +499,7 @@ class ResultFlow:
 
         :returns: the leading part of the file name
         """
-        return self.screen.variant
+        return cast(str, self.screen.variant)
 
     def _update_incremental_autosave(self) -> None:
         """

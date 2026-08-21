@@ -12,7 +12,7 @@ from chessshootout.backend.pieces import (
 )
 from chessshootout.backend.clock import Clock
 from chessshootout.backend.utils import (
-    BOARD_SIZE, HistoryEntry, Move, MoveResult, Square, on_board,
+    BOARD_SIZE, HistoryEntry, Move, MoveResult, PositionKey, Square, on_board,
 )
 
 
@@ -75,14 +75,14 @@ class Backend:
         repetition count. It is also the one place the engine's state fields are
         listed, which is why construction and new_game() both start here
         """
-        self.state = [[None] * self.SIZE for _ in range(self.SIZE)]
+        self.state: list[list[Piece | None]] = [[None] * self.SIZE for _ in range(self.SIZE)]
         self.turn = PieceColor.WHITE
-        self.move_history = []
-        self.en_passant_target = None
+        self.move_history: list[HistoryEntry] = []
+        self.en_passant_target: Square | None = None
         self.castling_rights = dict(DEFAULT_CASTLING_RIGHTS)
         self.halfmove_clock = 0
-        self.position_counts = Counter()
-        self.clock = None
+        self.position_counts: Counter[PositionKey] = Counter()
+        self.clock: Clock | None = None
 
     def new_game(self) -> None:
         """
@@ -355,7 +355,7 @@ class Backend:
         piece_type = (SAN_LETTER_TO_PIECE[piece_letter]
                       if piece_letter is not None else PieceType.PAWN)
 
-        candidates = []
+        candidates: list[Square] = []
         for r, c in product(range(self.SIZE), repeat=2):
             piece = self.state[r][c]
             if piece is None or piece.type != piece_type or piece.color != self.turn:
@@ -569,7 +569,7 @@ class Backend:
         :param piece: piece being moved, whose kind and side define its rivals
         :returns: the disambiguating fragment, empty when none is needed
         """
-        rivals = []
+        rivals: list[Square] = []
         for r, c in product(range(self.SIZE), repeat=2):
             if r == from_sq.row and c == from_sq.col:
                 continue
@@ -674,7 +674,7 @@ class Backend:
             is_stalemate=result == "draw_stalemate",
         )
 
-    def _position_key(self) -> tuple:
+    def _position_key(self) -> PositionKey:
         """
         Reduce the position to the key threefold repetition is counted by: the
         pieces on the board, the side to move, the four castling rights and the
@@ -938,9 +938,9 @@ class Backend:
 
         :returns: True when the position is drawn for want of material
         """
-        non_kings = []
-        bishops = []
-        by_color = {PieceColor.WHITE: [], PieceColor.BLACK: []}
+        non_kings: list[Piece] = []
+        bishops: list[tuple[int, int, Piece]] = []
+        by_color: dict[PieceColor, list[Piece]] = {PieceColor.WHITE: [], PieceColor.BLACK: []}
         for row, col in product(range(self.SIZE), repeat=2):
             piece = self.state[row][col]
             if piece is None or piece.type == PieceType.KING:
@@ -1035,11 +1035,11 @@ class Backend:
             and captured is None
         )
         ep_sq = Square(from_sq.row, to_sq.col) if ep else None
-        ep_piece = self.state[ep_sq.row][ep_sq.col] if ep else None
+        ep_piece = self.state[ep_sq.row][ep_sq.col] if ep_sq is not None else None
 
         self.state[to_sq.row][to_sq.col] = piece
         self.state[from_sq.row][from_sq.col] = None
-        if ep:
+        if ep_sq is not None:
             self.state[ep_sq.row][ep_sq.col] = None
 
         try:
@@ -1048,7 +1048,7 @@ class Backend:
         finally:
             self.state[from_sq.row][from_sq.col] = piece
             self.state[to_sq.row][to_sq.col] = captured
-            if ep:
+            if ep_sq is not None:
                 self.state[ep_sq.row][ep_sq.col] = ep_piece
 
         return in_check

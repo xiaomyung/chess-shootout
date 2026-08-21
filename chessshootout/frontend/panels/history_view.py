@@ -1,6 +1,7 @@
 import time
 from collections import OrderedDict
 from collections.abc import Callable
+from typing import cast
 
 import pygame as pg
 
@@ -198,9 +199,9 @@ class HistoryView(ScrollHost):
         self.on_open = on_open
         self.rect = pg.Rect(0, 0, 0, 0)
         self.visible = False
-        self.nickname = None
+        self.nickname: str | None = None
         self.filter = "all"
-        self.expanded_match_id = None
+        self.expanded_match_id: str | None = None
         self._scroll_px = 0.0
         self.scroll = ScrollView(
             lambda: self._scroll_px,
@@ -208,14 +209,14 @@ class HistoryView(ScrollHost):
             lambda: (self._list_rect, self._content_h),
             wheel_step_px=SCROLL_STEP,
         )
-        self._groups = []
-        self._filter_rects = {}
-        self._row_hits = []
+        self._groups: list[MatchGroup] = []
+        self._filter_rects: dict[str, pg.Rect] = {}
+        self._row_hits: list[tuple[pg.Rect, tuple[str, str | None]]] = []
         self._list_rect = pg.Rect(0, 0, 0, 0)
         self._content_h = 0
-        self._pawn_orig = None
-        self._pawn_cache = {}
-        self._arrow_cache = {}
+        self._pawn_orig: dict[PieceColor, pg.Surface] | None = None
+        self._pawn_cache: dict[tuple[PieceColor, int], pg.Surface] = {}
+        self._arrow_cache: dict[tuple[int, str, str], pg.Surface] = {}
         self._rescale(1.0)
 
     def _pawn(self, color: PieceColor, size: int) -> pg.Surface:
@@ -321,7 +322,7 @@ class HistoryView(ScrollHost):
         self._chip_cut = sz(6, 4)
         self._stat_cut = sz(8, 5)
         self._card_cut = sz(8, 5)
-        self._card_cache = OrderedDict()
+        self._card_cache: OrderedDict[tuple[str, int, bool], pg.Surface] = OrderedDict()
 
     def set_rect(self, rect: pg.Rect) -> None:
         """
@@ -923,6 +924,6 @@ class HistoryView(ScrollHost):
                 if kind == "toggle":
                     self.expanded_match_id = None if self.expanded_match_id == value else value
                 elif self.on_open is not None:
-                    self.on_open(value)
+                    self.on_open(cast(str, value))
                 return True
         return self.rect.collidepoint(pos)

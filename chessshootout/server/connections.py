@@ -1,12 +1,13 @@
 from collections import defaultdict
 from collections.abc import Iterator
+from typing import cast
 
 from fastapi import WebSocket
 from pydantic import BaseModel
 
 from chessshootout.server import logging_setup
 from chessshootout.server.protocol import ConnectionStatusMessage
-from chessshootout.server.rooms import Room, RoomManager
+from chessshootout.server.rooms import PlayerSlot, Room, RoomManager
 
 
 log = logging_setup.get_logger("chess.server.app")
@@ -104,8 +105,8 @@ class ConnectionRegistry:
         if not room.is_paired():
             return False
         present = self._by_room.get(room.room_id, {})
-        return (room.white.client_uuid in present
-                and room.black.client_uuid in present)
+        return (cast(PlayerSlot, room.white).client_uuid in present
+                and cast(PlayerSlot, room.black).client_uuid in present)
 
     def all_for_room(self, room: Room) -> Iterator[tuple[str, WebSocket]]:
         """

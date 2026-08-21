@@ -2,7 +2,7 @@ import math
 import os
 import random
 from collections.abc import Sequence
-from typing import Any
+from typing import Any, cast
 
 import pygame as pg
 
@@ -99,7 +99,7 @@ def _hitmark_sprite(spread: int, length: float, thick: int) -> pg.Surface:
             outer = (c + dx * (spread + length) * diag, c + dy * (spread + length) * diag)
             pg.draw.line(layer, col, inner, outer, thick)
         return layer
-    return memoized_surface(_HITMARK_CACHE, (spread, length, thick), build)
+    return cast(pg.Surface, memoized_surface(_HITMARK_CACHE, (spread, length, thick), build))
 
 
 def _menu_spark_sprite(size: int, color: str) -> pg.Surface:
@@ -121,7 +121,7 @@ def _menu_spark_sprite(size: int, color: str) -> pg.Surface:
         surf = pg.Surface((size, size), pg.SRCALPHA)
         surf.fill(pg.Color(color))
         return surf
-    return memoized_surface(_MENU_SPARK_CACHE, (size, color), build)
+    return cast(pg.Surface, memoized_surface(_MENU_SPARK_CACHE, (size, color), build))
 
 
 class MenuBattle:
@@ -149,27 +149,27 @@ class MenuBattle:
         self.rng = rng or random.Random()
         self.sound_manager = sound_manager
         self.rect = pg.Rect(0, 0, 0, 0)
-        self.avoid_rects = []
-        self.obstacles = []
+        self.avoid_rects: list[pg.Rect] = []
+        self.obstacles: list[tuple[float, float, float, float]] = []
         self.top_inset = 0
         self.debug = os.environ.get("CHESS_BATTLE_DEBUG") == "1"
         self.scale = 1.0
-        self.pawns = []
-        self.queen = None
-        self.particles = []
-        self.projectiles = []
-        self.drops = []
+        self.pawns: list[dict[str, Any]] = []
+        self.queen: dict[str, Any] | None = None
+        self.particles: list[dict[str, Any]] = []
+        self.projectiles: list[dict[str, Any]] = []
+        self.drops: list[dict[str, Any]] = []
         self.acc = {"qfire": 0.0, "talk": 1.5, "spawn": 0.0}
-        self._last_ms = None
+        self._last_ms: int | None = None
         self._initialized = False
-        self._bg_cache = None
-        self._scrim_cache = None
+        self._bg_cache: tuple[tuple[int, int], pg.Surface] | None = None
+        self._scrim_cache: tuple[tuple[int, int], pg.Surface] | None = None
         self._queen_src = self._load_piece("queen", "white")
         self._pawn_src = self._load_piece("pawn", "black")
         self._battle = gunfx.load_battle_art()
-        self._art = {}
-        self._shadow_surfs = {}
-        self._weapons = {}
+        self._art: dict[str, dict[str, Any]] = {}
+        self._shadow_surfs: dict[str, pg.Surface] = {}
+        self._weapons: dict[str, dict[Any, Any]] = {}
 
     def _load_piece(self, piece_type: str, color: str) -> pg.Surface | None:
         """
@@ -194,7 +194,8 @@ class MenuBattle:
                 return img.subsurface(img.get_bounding_rect()).copy()
             except (pg.error, FileNotFoundError, OSError):
                 return None
-        return memoized_surface(_BATTLE_PIECE_SRC_CACHE, (piece_type, color), build)
+        return cast(pg.Surface | None,
+                    memoized_surface(_BATTLE_PIECE_SRC_CACHE, (piece_type, color), build))
 
     def _rnd(self, lo: float, hi: float) -> float:
         """
@@ -579,12 +580,13 @@ class MenuBattle:
         """
         w, h = self.rect.width, self.rect.height
         qx, qy = w * 0.16, h * 0.52
-        q = {"kind": "queen", "x": qx, "y": qy, "face": 1,
-             "flinch": 0.0, "aim": 0.0, "wp": None, "bubble": None,
-             "anchor_x": qx, "anchor_y": qy, "anchor_ms": None, "weapon": QUEEN_WEAPON,
-             "weapon_switch": self._rnd(WEAPON_SWITCH_MIN, WEAPON_SWITCH_MAX), "recoil": 0.0,
-             "draw_anim": 0.0, "draw_total": GUN_DRAW_SEC, "draw_spins": 0, "draw_grow": True,
-             "kills": 0, "ko_wink_until": 0}
+        q: dict[str, Any] = {
+            "kind": "queen", "x": qx, "y": qy, "face": 1,
+            "flinch": 0.0, "aim": 0.0, "wp": None, "bubble": None,
+            "anchor_x": qx, "anchor_y": qy, "anchor_ms": None, "weapon": QUEEN_WEAPON,
+            "weapon_switch": self._rnd(WEAPON_SWITCH_MIN, WEAPON_SWITCH_MAX), "recoil": 0.0,
+            "draw_anim": 0.0, "draw_total": GUN_DRAW_SEC, "draw_spins": 0, "draw_grow": True,
+            "kills": 0, "ko_wink_until": 0}
         self._size_entity(q)
         return q
 
@@ -611,6 +613,8 @@ class MenuBattle:
             return
         w, h = self.rect.width, self.rect.height
         side = int(self.rng.random() * 4)
+        x: float
+        y: float
         if side == 0:
             x, y = -80, h * self.rng.random()
         elif side == 1:
@@ -621,7 +625,7 @@ class MenuBattle:
             x, y = w * self.rng.random(), -80
         if initial:
             x, y = w * self._rnd(0.08, 0.92), h * self._rnd(0.18, 0.9)
-        p = {
+        p: dict[str, Any] = {
             "kind": "pawn", "x": x, "y": y, "face": 1, "aim": 0.0, "bubble": None,
             "alive": True, "dying": False, "death_ms": 0, "death_dir": 1,
             "standoff": self._rnd(150, 270), "fire": self._rnd(1.5, 4.0),
@@ -717,7 +721,7 @@ class MenuBattle:
         px, py = self._gun_pivot(ent)
         tx, ty = self._body_point(target)
         want = math.atan2(ty - py, tx - px)
-        delta = (want - ent["aim"] + math.pi) % (2 * math.pi) - math.pi
+        delta: float = (want - ent["aim"] + math.pi) % (2 * math.pi) - math.pi
         return abs(delta) < AIM_TOLERANCE
 
     def update(self, now_ms: int) -> None:
@@ -827,7 +831,7 @@ class MenuBattle:
         :param now_ms: pygame ticks in milliseconds
         :param alive: the pawns still standing this frame
         """
-        q = self.queen
+        q = cast(dict[str, Any], self.queen)
         qo = self._entity_obstacles(q)
         if (q["wp"] is None or self._point_in_any(qo, q["wp"][0], q["wp"][1])
                 or math.hypot(q["wp"][0] - q["x"], q["wp"][1] - q["y"]) < 26):
@@ -879,7 +883,7 @@ class MenuBattle:
         :param now_ms: pygame ticks in milliseconds
         :param alive: the pawns still standing this frame
         """
-        q = self.queen
+        q = cast(dict[str, Any], self.queen)
         for p in alive:
             po = self._entity_obstacles(p)
             if p.get("emerging") and self._visible_with(p, po):
@@ -932,7 +936,8 @@ class MenuBattle:
         if self.acc["talk"] <= 0:
             self.acc["talk"] = self._rnd(2.4, 4.6)
             if self.rng.random() < 0.5 or not alive:
-                self._say(self.queen, self._pick(QUEEN_LINES), "queen", now_ms)
+                self._say(cast(dict[str, Any], self.queen),
+                          self._pick(QUEEN_LINES), "queen", now_ms)
             else:
                 self._say(self._pick(alive), self._pick(PAWN_LINES), "pawn", now_ms)
 
@@ -997,9 +1002,9 @@ class MenuBattle:
         art = self._entity_art(ent["kind"])
         base = QUEEN_BASE_H if ent["kind"] == "queen" else PAWN_BASE_H
         hw = (art["w"] if art else base * self.scale) / 2
-        return (ent["x"] - hw >= 0 and ent["x"] + hw <= self.rect.width
-                and ent["y"] - ent["sprite_h"] >= self.top_inset
-                and ent["y"] <= self.rect.height)
+        return cast(bool, ent["x"] - hw >= 0 and ent["x"] + hw <= self.rect.width
+                    and ent["y"] - ent["sprite_h"] >= self.top_inset
+                    and ent["y"] <= self.rect.height)
 
     def _visible_with(self, ent: dict[str, Any],
                       obstacles: Sequence[tuple[float, float, float, float]]) -> bool:
@@ -1070,7 +1075,7 @@ class MenuBattle:
         :param now_ms: pygame ticks in milliseconds
         :param qo: her widened obstacle boxes, which the fresh waypoint avoids
         """
-        q = self.queen
+        q = cast(dict[str, Any], self.queen)
         moved = math.hypot(q["x"] - q["anchor_x"], q["y"] - q["anchor_y"])
         if q["anchor_ms"] is None or moved > IDLE_RADIUS:
             q["anchor_x"], q["anchor_y"], q["anchor_ms"] = q["x"], q["y"], now_ms
@@ -1094,7 +1099,7 @@ class MenuBattle:
         """
         shooter["recoil"] = gunfx.gun_spec(shooter.get("weapon")).recoil * self.scale
         if self.sound_manager is not None:
-            self.sound_manager.play_menu_gun(shooter.get("weapon"))
+            self.sound_manager.play_menu_gun(cast(str, shooter.get("weapon")))
         ax, ay = self._muzzle_point(shooter)
         self._add_flash(shooter, ax, ay, now_ms)
         hit = self.rng.random() >= MISS_CHANCE
@@ -1244,7 +1249,8 @@ class MenuBattle:
                 if p["alive"] and self._visible(p) and self._hits_hitbox(pr, p):
                     return p
             return None
-        return self.queen if self._hits_hitbox(pr, self.queen) else None
+        queen = cast(dict[str, Any], self.queen)
+        return queen if self._hits_hitbox(pr, queen) else None
 
     def _hits_hitbox(self, pr: dict[str, Any], ent: dict[str, Any]) -> bool:
         """
@@ -1259,8 +1265,8 @@ class MenuBattle:
         art = self._entity_art(ent["kind"])
         base = QUEEN_BASE_H if ent["kind"] == "queen" else PAWN_BASE_H
         hw = (art["w"] if art else base * self.scale) / 2
-        return (ent["x"] - hw <= pr["x"] <= ent["x"] + hw
-                and ent["y"] - ent["sprite_h"] <= pr["y"] <= ent["y"])
+        return cast(bool, ent["x"] - hw <= pr["x"] <= ent["x"] + hw
+                    and ent["y"] - ent["sprite_h"] <= pr["y"] <= ent["y"])
 
     def _land_hit(self, is_queen: bool, target: dict[str, Any], now_ms: int) -> None:
         """
@@ -1272,12 +1278,13 @@ class MenuBattle:
         :param target: fighter that was hit
         :param now_ms: pygame ticks in milliseconds of the hit
         """
+        queen = cast(dict[str, Any], self.queen)
         if is_queen:
             self._kill_pawn(target, now_ms)
-            if self.queen["draw_anim"] <= 0 and self.rng.random() < KILL_SPIN_CHANCE:
-                self._start_gun_flourish(self.queen, KILL_SPIN_SEC, 1, False)
+            if queen["draw_anim"] <= 0 and self.rng.random() < KILL_SPIN_CHANCE:
+                self._start_gun_flourish(queen, KILL_SPIN_SEC, 1, False)
         else:
-            self.queen["flinch"] = 1.0
+            queen["flinch"] = 1.0
             bx, by = self._body_point(target)
             self._add_hit(bx, by, now_ms)
 
@@ -1794,7 +1801,7 @@ class MenuBattle:
                 tw = max(s.get_width() for s in surfs)
                 th = sum(s.get_height() for s in surfs) + line_gap * (len(surfs) - 1)
                 cache[ckey] = (surfs, tw + 2 * pad_x, th + 2 * pad_y)
-            return cache[ckey]
+            return cast(tuple[list[pg.Surface], int, int], cache[ckey])
 
         above_lw, above_rw = lw, rw
         for card in self.avoid_rects:
@@ -1930,7 +1937,7 @@ class MenuBattle:
         :returns: the gradient square
         """
         surf = pg.Surface((n, n), pg.SRCALPHA)
-        cr, cg, cb = pg.Color(color)[:3]
+        cr, cg, cb = pg.Color(color)[:3]  # type: ignore[misc]
         c = (n - 1) / 2.0
         for yy in range(n):
             for xx in range(n):

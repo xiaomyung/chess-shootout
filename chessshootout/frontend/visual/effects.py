@@ -1,7 +1,7 @@
 import math
 import random
 from collections.abc import Callable, Iterable, Sequence
-from typing import Any
+from typing import Any, cast
 
 import pygame as pg
 
@@ -116,7 +116,7 @@ def _impact_ring_sprite(r: int, stroke: int) -> pg.Surface:
         layer = pg.Surface((2 * r + 8, 2 * r + 8), pg.SRCALPHA)
         pg.draw.circle(layer, pg.Color(Colors.amber_hi), (r + 4, r + 4), r, stroke)
         return layer
-    return cache.memoized_surface(_IMPACT_RING_CACHE, (r, stroke), build)
+    return cast(pg.Surface, cache.memoized_surface(_IMPACT_RING_CACHE, (r, stroke), build))
 
 
 def _blood_sprite(r: int) -> pg.Surface:
@@ -137,7 +137,7 @@ def _blood_sprite(r: int) -> pg.Surface:
         pg.draw.circle(layer, pg.Color(Colors.blood), (r + 1, r + 1), r)
         pg.draw.circle(layer, pg.Color(Colors.blood_dark), (r + 1, r + 1), int(r * 0.6))
         return layer
-    return cache.memoized_surface(_BLOOD_CACHE, r, build)
+    return cast(pg.Surface, cache.memoized_surface(_BLOOD_CACHE, r, build))
 
 
 def _spark_sprite(size: int) -> pg.Surface:
@@ -157,7 +157,7 @@ def _spark_sprite(size: int) -> pg.Surface:
         surf = pg.Surface((size, size), pg.SRCALPHA)
         surf.fill(pg.Color(Colors.amber_hi))
         return surf
-    return cache.memoized_surface(_SPARK_CACHE, size, build)
+    return cast(pg.Surface, cache.memoized_surface(_SPARK_CACHE, size, build))
 
 
 def _smoke_sprite(r: int) -> pg.Surface:
@@ -178,7 +178,7 @@ def _smoke_sprite(r: int) -> pg.Surface:
         layer = pg.Surface((2 * r, 2 * r), pg.SRCALPHA)
         pg.draw.circle(layer, pg.Color(Colors.smoke), (r, r), r)
         return layer
-    return cache.memoized_surface(_SMOKE_CACHE, r, build)
+    return cast(pg.Surface, cache.memoized_surface(_SMOKE_CACHE, r, build))
 
 
 def _hole_sprite(r: int) -> pg.Surface:
@@ -199,7 +199,7 @@ def _hole_sprite(r: int) -> pg.Surface:
         layer = pg.Surface((2 * r + 4, 2 * r + 4), pg.SRCALPHA)
         pg.draw.circle(layer, pg.Color(Colors.bullet_hole), (r + 2, r + 2), r)
         return layer
-    return cache.memoized_surface(_HOLE_CACHE, r, build)
+    return cast(pg.Surface, cache.memoized_surface(_HOLE_CACHE, r, build))
 
 
 def _takeover_bg_sprite(w: int, h: int) -> pg.Surface:
@@ -222,7 +222,7 @@ def _takeover_bg_sprite(w: int, h: int) -> pg.Surface:
         surf = pg.Surface((w, h))
         surf.fill(pg.Color(Colors.takeover_bg))
         return surf
-    return cache.memoized_surface(_TAKEOVER_BG_CACHE, (w, h), build)
+    return cast(pg.Surface, cache.memoized_surface(_TAKEOVER_BG_CACHE, (w, h), build))
 
 
 class EffectManager:
@@ -245,31 +245,31 @@ class EffectManager:
             for a fresh unseeded one
         """
         self.rng = rng if rng is not None else random.Random()
-        self.geom = None
-        self._art = None
-        self._weapon_cache = {}
-        self.particles = []
-        self.holes = []
-        self.captures = []
-        self.projectiles = []
-        self.drops = []
-        self.callouts = []
-        self.flags = []
-        self._takeover = None
-        self._check_gun = None
-        self._whack_gun = None
-        self._gun_handoff = None
-        self.aim_victim = None
+        self.geom: Callable[[Square | str], tuple[float, float]] | None = None
+        self._art: dict[str, Any] | None = None
+        self._weapon_cache: dict[tuple[str, int], dict[str, Any] | None] = {}
+        self.particles: list[dict[str, Any]] = []
+        self.holes: list[dict[str, Any]] = []
+        self.captures: list[dict[str, Any]] = []
+        self.projectiles: list[dict[str, Any]] = []
+        self.drops: list[dict[str, Any]] = []
+        self.callouts: list[dict[str, Any]] = []
+        self.flags: list[dict[str, Any]] = []
+        self._takeover: dict[str, Any] | None = None
+        self._check_gun: dict[str, Any] | None = None
+        self._whack_gun: dict[str, Any] | None = None
+        self._gun_handoff: Square | None = None
+        self.aim_victim: Square | None = None
         self.aim_victim_scale = 1.0
-        self._king_shake = None
-        self._piece_shakes = {}
-        self._bystanders = set()
-        self._last_now = None
-        self.board_rect = None
-        self._streak_color = None
+        self._king_shake: dict[str, Any] | None = None
+        self._piece_shakes: dict[Square, dict[str, Any]] = {}
+        self._bystanders: set[Square] = set()
+        self._last_now: int | None = None
+        self.board_rect: pg.Rect | None = None
+        self._streak_color: str | None = None
         self._streak_count = 0
         self._first_blood_spent = False
-        self._shake = None
+        self._shake: dict[str, Any] | None = None
 
     def _ensure_art(self) -> dict[str, Any]:
         """
@@ -397,7 +397,7 @@ class EffectManager:
         :param sq: square to locate
         :returns: the square's centre in window pixels
         """
-        return self.geom(sq)
+        return cast(Callable[[Square], tuple[float, float]], self.geom)(sq)
 
     def _anchor(self, p: dict[str, Any]) -> tuple[float, float]:
         """
@@ -410,7 +410,7 @@ class EffectManager:
         :returns: the anchor position in window pixels
         """
         if "px" in p:
-            return p["px"]
+            return cast(tuple[float, float], p["px"])
         return self._center(p["victim_sq"])
 
     @staticmethod
@@ -545,8 +545,8 @@ class EffectManager:
             "occupied": {s for s in (occupied or ()) if s not in (from_sq, victim_sq)},
         })
 
-    def miss(self, *, now_ms: int, attacker_type: str | None, from_sq: Square,
-             victim_sq: Square, cell_size: int, power: str = "med",
+    def miss(self, *, now_ms: int, attacker_type: str | None, from_sq: Square | str,
+             victim_sq: Square | str, cell_size: int, power: str = "med",
              on_fire: Callable[[bool], None] | None = None,
              occupied: Iterable[Square] | None = None, callout: bool = True,
              predrawn: bool = False) -> None:
@@ -559,8 +559,11 @@ class EffectManager:
         :param now_ms: pygame ticks in milliseconds the miss started at
         :param attacker_type: shooting piece type value, which picks its gun;
             None falls back to the revolver
-        :param from_sq: square the attacker fires from
-        :param victim_sq: square that was aimed at and survives
+        :param from_sq: square the attacker fires from, or an opaque sentinel
+            key the caller's geom resolver understands, as the steady-aim
+            overlay passes for its off-board shooter
+        :param victim_sq: square that was aimed at and survives, or the same
+            kind of sentinel key
         :param cell_size: cell size in pixels
         :param power: screen-shake strength key, one of SHAKE_AMP
         :param on_fire: called as the shot goes off, taking the advance-only
@@ -571,7 +574,7 @@ class EffectManager:
         :param predrawn: True when the gun is already out from a check
         """
         handed = self.take_gun_handoff(from_sq) or predrawn
-        gun = gunfx.PIECE_GUN.get(attacker_type, "revolver")
+        gun = gunfx.PIECE_GUN.get(attacker_type, "revolver")  # type: ignore[arg-type]
         weapon = self._weapon(gun, cell_size)
         if weapon is None:
             if callout:
@@ -590,13 +593,15 @@ class EffectManager:
             "miss": True, "callout": callout,
         })
 
-    def swear(self, now_ms: int, victim_sq: Square, cell: int, text: str | None = None) -> None:
+    def swear(self, now_ms: int, victim_sq: Square | str, cell: int,
+              text: str | None = None) -> None:
         """
         Float a frustrated one-liner over a square: what a piece says when it
         whiffs its shot or catches a stray bullet
 
         :param now_ms: pygame ticks in milliseconds
-        :param victim_sq: square the words float over
+        :param victim_sq: square the words float over, or an opaque sentinel
+            key the installed geom resolver understands
         :param cell: cell size in pixels, which the type size scales from
         :param text: exact words to show, or None to pick from SWEAR_WORDS
         """
@@ -719,7 +724,7 @@ class EffectManager:
         :param target_px: first aim point in window pixels, or None to start
             with the barrel level
         """
-        gun = gunfx.PIECE_GUN.get(attacker_type, "revolver")
+        gun = gunfx.PIECE_GUN.get(attacker_type, "revolver")  # type: ignore[arg-type]
         weapon = self._weapon(gun, cell_size)
         if weapon is None:
             return
@@ -787,7 +792,7 @@ class EffectManager:
         self._gun_handoff = g["from_sq"]
         self._whack_gun = None
 
-    def take_gun_handoff(self, from_sq: Square) -> bool:
+    def take_gun_handoff(self, from_sq: Square | str) -> bool:
         """
         Claim the pending handoff for one square, spending it either way. Only
         a shot from that same square inherits the drawn gun, so no other piece
@@ -901,7 +906,7 @@ class EffectManager:
         dur = CALLOUT_XL_MS if size == "xl" else CALLOUT_LG_MS
         self.callouts = [{"surf": surf, "start": now, "dur": dur}]
 
-    def _tag(self, now: int, text: str, victim_sq: Square, cell: int,
+    def _tag(self, now: int, text: str, victim_sq: Square | str, cell: int,
              px: tuple[float, float] | None = None, fill: str | None = None,
              glow: str | None = None) -> None:
         """
@@ -1262,7 +1267,7 @@ class EffectManager:
         """
         cx, cy = self._center(sq)
         half = pr["cell"] / 2.0
-        return abs(pr["x"] - cx) <= half and abs(pr["y"] - cy) <= half
+        return cast(bool, abs(pr["x"] - cx) <= half and abs(pr["y"] - cy) <= half)
 
     def _stray_target(self, pr: dict[str, Any]) -> Square | None:
         """
@@ -1290,8 +1295,8 @@ class EffectManager:
         if r is None:
             return False
         m = pr["cell"]
-        return (pr["x"] < r.x - m or pr["x"] > r.right + m
-                or pr["y"] < r.y - m or pr["y"] > r.bottom + m)
+        return cast(bool, (pr["x"] < r.x - m or pr["x"] > r.right + m
+                           or pr["y"] < r.y - m or pr["y"] > r.bottom + m))
 
     def _resolve_capture(self, now: int, c: dict[str, Any]) -> None:
         """

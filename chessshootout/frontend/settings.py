@@ -4,7 +4,7 @@ import shutil
 import threading
 import time
 from collections.abc import Callable
-from typing import Any
+from typing import Any, cast
 
 import pygame as pg
 
@@ -47,12 +47,12 @@ class SettingsController:
             window, sound, toasts, the menu and the online coordinator
         """
         self.frontend = frontend
-        self._deferred_env_writes = {}
-        self._data_folder_row = None
-        self._custom_server_row = None
+        self._deferred_env_writes: dict[str, tuple[Callable[[], None], int]] = {}
+        self._data_folder_row: PathRow | None = None
+        self._custom_server_row: TextRow | None = None
         self._server_probe_lock = threading.Lock()
         self._server_probe_pending = False
-        self._server_probe_result = None
+        self._server_probe_result: tuple[str, tuple[str, str]] | None = None
         self._server_probe_gen = 0
 
     def commit_options_exit(self) -> None:
@@ -78,7 +78,7 @@ class SettingsController:
 
         :returns: True while the client is connected to a server
         """
-        return self.frontend.coordinator.is_connected()
+        return cast(bool, self.frontend.coordinator.is_connected())
 
     def _apply_server_mode(self, mode: str) -> None:
         """

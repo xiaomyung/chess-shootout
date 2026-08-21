@@ -1,5 +1,7 @@
 from collections.abc import Callable
+from typing import cast
 
+from chessshootout.backend.backend import Backend
 from chessshootout.backend.fen import export_fen
 from chessshootout.backend.utils import coord_from_square
 from chessshootout.skillcheck.types import SkillCheckOutcome
@@ -36,7 +38,7 @@ async def finalize_and_broadcast(rooms: RoomManager, connections: ConnectionRegi
     applied = rooms.finalize_result(room.room_id, reason, winner_color=winner_color)
     if not applied:
         return
-    result_reason, result_winner = room.result
+    result_reason, result_winner = cast(tuple[str, str | None], room.result)
     await broadcast(rooms, connections, room,
                     ResultMessage(reason=result_reason, winner_color=result_winner))
 
@@ -109,8 +111,9 @@ async def resolve_skillcheck_fail(rooms: RoomManager, connections: ConnectionReg
     room.pending_skillcheck = None
     room.skillcheck_locks.add((pending.from_sq, pending.to_sq))
     room.skillcheck_log.append(SkillCheckOutcome(
-        len(room.backend.move_history) + 1, pending.kind.value, False,
-        room.backend.preview_san(pending.from_sq, pending.to_sq, pending.promotion)))
+        len(cast(Backend, room.backend).move_history) + 1, pending.kind.value, False,
+        cast(Backend, room.backend).preview_san(
+            pending.from_sq, pending.to_sq, pending.promotion)))
     await broadcast(rooms, connections, room, SkillCheckResultMessage(
         won=False,
         from_sq=coord_from_square(pending.from_sq),
@@ -133,7 +136,7 @@ async def broadcast_game_start(connections: ConnectionRegistry, room: Room,
     :param now: monotonic seconds source, read for the elapsed-since-start value
     :param rematch: True when this game follows an accepted rematch offer
     """
-    fen = export_fen(room.backend)
+    fen = export_fen(cast(Backend, room.backend))
     started_seconds_ago = max(now() - (room.started_at or now()), 0.0)
     sent = []
     for color in ("white", "black"):

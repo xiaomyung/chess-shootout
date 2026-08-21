@@ -1,4 +1,4 @@
-from typing import Any
+from typing import Any, cast
 
 import pygame as pg
 
@@ -25,9 +25,9 @@ class WhackGun:
             to the board, the match and the effects layer the weapon lives on
         """
         self.screen = screen
-        self.from_sq = None
-        self.attacker_type = None
-        self.impact_px = None
+        self.from_sq: Square | None = None
+        self.attacker_type: str | None = None
+        self.impact_px: tuple[float, float] | None = None
 
     def arm(self, from_sq: Square, capturer: Piece | None) -> None:
         """
@@ -144,7 +144,7 @@ class WhackGun:
             return self.impact_px
         if target is None:
             return None
-        return self.screen.board.cell_rect(target).center
+        return cast(tuple[float, float], self.screen.board.cell_rect(target).center)
 
     def _attacker_color(self) -> str | None:
         """
@@ -170,4 +170,4 @@ class WhackGun:
         """
         if target is None:
             return None
-        return self.screen.match.piece_at(target)
+        return cast(Piece | None, self.screen.match.piece_at(target))

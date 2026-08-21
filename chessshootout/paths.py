@@ -1,12 +1,13 @@
 import os
 import sys
 from pathlib import Path
+from typing import Literal
 
 import platformdirs
 
 
 APP_NAME = "chess-shootout"
-APP_AUTHOR = False
+APP_AUTHOR: Literal[False] = False
 GAMES_SUBDIR = "games"
 
 
@@ -39,7 +40,7 @@ def get_asset_base() -> Path:
     :returns: absolute path that every asset lookup is resolved against
     """
     if is_frozen():
-        return Path(sys._MEIPASS)
+        return Path(sys._MEIPASS)  # type: ignore[attr-defined]
     return _repo_root()
 
 

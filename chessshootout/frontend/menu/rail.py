@@ -1,6 +1,6 @@
 import math
 from collections.abc import Callable
-from typing import Any
+from typing import Any, cast
 
 import pygame as pg
 
@@ -70,14 +70,14 @@ class MenuRail:
         self.rect = pg.Rect(0, 0, 0, 0)
         self.scale = 1.0
         self.active = "play"
-        self._row_rects = {}
-        self._reticle_tween = None
+        self._row_rects: dict[str, pg.Rect] = {}
+        self._reticle_tween: Tween | None = None
         self._label_font = get_font(13, bold=True)
         self._footer_font = get_mono_font(FOOTER_FONT_FLOOR)
         self._footer_prefix = ""
-        self._footer_prefix_surf = None
+        self._footer_prefix_surf: pg.Surface | None = None
         self._footer_prefix_pos = (0, 0)
-        self._credit_surf = None
+        self._credit_surf: pg.Surface | None = None
         self._credit_rect = pg.Rect(0, 0, 0, 0)
         self._credit_hitbox = pg.Rect(0, 0, 0, 0)
 
@@ -281,7 +281,7 @@ class MenuRail:
         if self._footer_prefix_surf is None:
             return
         window.blit(self._footer_prefix_surf, self._footer_prefix_pos)
-        window.blit(self._credit_surf, self._credit_rect.topleft)
+        window.blit(cast(pg.Surface, self._credit_surf), self._credit_rect.topleft)
         hovered = self._credit_hitbox.collidepoint(pg.mouse.get_pos())
         underline = Colors.text if hovered else Colors.text_dim
         pg.draw.line(window, underline, (self._credit_rect.x, self._credit_rect.bottom - 1),

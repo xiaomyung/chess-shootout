@@ -68,7 +68,7 @@ class OfferBanners:
         :param window: the app window every banner is drawn onto
         """
         self.window = window
-        self._banners = []
+        self._banners: list[dict[str, Any]] = []
 
     def push(self, key: str, icon: str, name: str, verb: str, yes_label: str,
              no_label: str, on_yes: Callable[[], None],

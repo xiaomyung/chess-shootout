@@ -1,5 +1,5 @@
 from collections.abc import Callable
-from typing import Any
+from typing import Any, cast
 
 import pygame as pg
 
@@ -69,13 +69,13 @@ class ResultMenu(BaseModal):
         self.callbacks = callbacks
         self.pgn_available_provider = pgn_available_provider
         self.online_mode = False
-        self.outcome = None
+        self.outcome: str | None = None
         self.intent = "draw"
         self.reason = ""
-        self.stats = None
-        self.series = None
+        self.stats: dict[str, Any] | None = None
+        self.series: tuple[str, str, str] | None = None
         self.rematch_offered = False
-        self.button_rects = {}
+        self.button_rects: dict[str, pg.Rect] = {}
         self.outcome_font = get_display_font(48)
         self.reason_font = get_font(12, bold=True)
         self.value_font = get_font(20, bold=True, mono=True)
@@ -83,7 +83,8 @@ class ResultMenu(BaseModal):
         self.button_font = get_font(14, bold=True)
         self.series_name_font = get_font(12, bold=True)
         self.series_score_font = get_font(16, mono=True)
-        self._outcome_cache = None
+        self._outcome_cache: tuple[tuple[str | None, str, int],
+                                   pg.Surface, pg.Surface | None] | None = None
 
     def _on_rect_changed(self) -> None:
         """
@@ -211,7 +212,7 @@ class ResultMenu(BaseModal):
         key = (self.outcome, self.intent, self.outcome_font.get_height())
         if self._outcome_cache is None or self._outcome_cache[0] != key:
             color = OUTCOME_COLOR.get(self.intent, Colors.text)
-            text = stroked_text(self.outcome_font, self.outcome.upper(),
+            text = stroked_text(self.outcome_font, cast(str, self.outcome).upper(),
                                 color, Colors.outcome_stroke, sw)
             text = fit_text_to_rect(
                 text, pg.Rect(0, 0, content.width, int(content.height * 0.3)))
@@ -295,7 +296,7 @@ class ResultMenu(BaseModal):
         :returns: value, suffix and label per cell, the suffix empty on the
             cells that do not use one
         """
-        s = self.stats
+        s = cast(dict[str, Any], self.stats)
         mine, theirs = s["kos"]
         mat = s["material"]
         mat_str = f"+{mat}" if mat > 0 else str(mat)

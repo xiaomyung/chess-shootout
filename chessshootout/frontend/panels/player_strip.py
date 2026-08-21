@@ -1,5 +1,5 @@
 from collections.abc import Iterable
-from typing import Any
+from typing import Any, cast
 
 import pygame as pg
 
@@ -134,25 +134,25 @@ class PlayerStrip:
         self.name = ""
         self.player_color = PieceColor.WHITE
         self.is_bot = False
-        self.rating = None
-        self.clock_seconds = None
-        self.clock_initial_seconds = None
+        self.rating: str | None = None
+        self.clock_seconds: float | None = None
+        self.clock_initial_seconds: float | None = None
         self.active = False
-        self.captured = []
+        self.captured: list[PieceType] = []
         self.advantage = 0
-        self.captured_color = None
-        self.connection_state = None
-        self.country = None
-        self.auto_end_label = None
-        self.auto_end_seconds = None
+        self.captured_color: PieceColor | None = None
+        self.connection_state: str | None = None
+        self.country: str | None = None
+        self.auto_end_label: str | None = None
+        self.auto_end_seconds: float | None = None
         self.ko_count = 0
         self._flash_until_ms = 0
         self._give_time_start_ms = 0
-        self._give_time_amount = 0
+        self._give_time_amount: float = 0
         self._ko_wink_until_ms = 0
         self.scale = 1.0
         self.sharing = False
-        self.sharing_color = None
+        self.sharing_color: str | None = None
         self.name_font = get_font(14, bold=True)
         self.rating_font = get_font(11, bold=True, mono=True)
         self._clock_px = 16
@@ -163,17 +163,17 @@ class PlayerStrip:
         self.letter_font = get_font(18, family=DISPLAY)
         self.auto_end_font = get_font(11, bold=True)
         self._give_time_float_font = get_font(11, bold=True, mono=True)
-        self.icons = {}
+        self.icons: dict[tuple[PieceType, PieceColor], pg.Surface] = {}
         self._avatar = StripAvatar()
-        self._flag_cache = None
+        self._flag_cache: tuple[tuple[str, int], pg.Surface | None] | None = None
         self._flag_rect = pg.Rect(0, 0, 0, 0)
         self._tooltip_alpha = 0.0
         self.tooltip_font = get_font(10, mono=True)
-        self._clock_cache = None
-        self._sharing_dot_cache = None
-        self._tooltip_owned = None
-        self._auto_end_cache = None
-        self._name_clip_cache = None
+        self._clock_cache: tuple[tuple[str, str, pg.font.Font], pg.Surface] | None = None
+        self._sharing_dot_cache: tuple[tuple[str, int], pg.Surface] | None = None
+        self._tooltip_owned: tuple[tuple[str, int, float], pg.Surface] | None = None
+        self._auto_end_cache: tuple[tuple[str, str], pg.Surface] | None = None
+        self._name_clip_cache: tuple[tuple[str, int], pg.Surface] | None = None
 
     def set_rect(self, rect: pg.Rect, scale: float = 1.0) -> None:
         """
@@ -422,9 +422,9 @@ class PlayerStrip:
         """
         label = name.upper()
         key = (label, self.tooltip_font.get_height(), round(self.scale, 3))
-        base = memoized_surface(
+        base = cast(pg.Surface, memoized_surface(
             _TOOLTIP_BASE_CACHE, key,
-            lambda: build_tooltip_bubble(self.tooltip_font, label, self.scale))
+            lambda: build_tooltip_bubble(self.tooltip_font, label, self.scale)))
         if self._tooltip_owned is None or self._tooltip_owned[0] != key:
             self._tooltip_owned = (key, base.copy())
         bubble = self._tooltip_owned[1]

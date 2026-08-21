@@ -2,6 +2,7 @@ import ctypes
 import logging
 import os
 from collections.abc import Callable
+from typing import Any, cast
 
 log = logging.getLogger("chess.chrome")
 
@@ -47,7 +48,7 @@ def maximized_placement(monitor_rect: tuple[int, int, int, int],
 
 
 if os.name == "nt" and ctypes.sizeof(ctypes.c_void_p) == 8:
-    _WNDPROC = ctypes.WINFUNCTYPE(
+    _WNDPROC = ctypes.WINFUNCTYPE(  # type: ignore[attr-defined]
         ctypes.c_ssize_t, ctypes.c_void_p, ctypes.c_uint,
         ctypes.c_size_t, ctypes.c_ssize_t)
 else:
@@ -116,9 +117,9 @@ class WindowsSnap:
         """
         self._hwnd = hwnd
         self._is_fullscreen = is_fullscreen
-        self._user32 = ctypes.windll.user32
-        self._orig_wndproc = None
-        self._wndproc_cb = None
+        self._user32 = ctypes.windll.user32  # type: ignore[attr-defined]
+        self._orig_wndproc: int | None = None
+        self._wndproc_cb: Any = None
         self.maximized = False
         self._configure_signatures()
 
@@ -231,8 +232,8 @@ class WindowsSnap:
         :param lparam: the message's second parameter, often a pointer
         :returns: whatever the original handler answered
         """
-        return self._user32.CallWindowProcW(
-            self._orig_wndproc, hwnd, msg, wparam, lparam)
+        return cast(int, self._user32.CallWindowProcW(
+            self._orig_wndproc, hwnd, msg, wparam, lparam))
 
     def _wndproc(self, hwnd: int, msg: int, wparam: int, lparam: int) -> int:
         """
@@ -277,7 +278,8 @@ class WindowsSnap:
         try:
             rect = _RECT()
             self._user32.GetClientRect(hwnd, ctypes.byref(rect))
-            brush = ctypes.windll.gdi32.GetStockObject(BLACK_BRUSH)
+            brush = ctypes.windll.gdi32.GetStockObject(  # type: ignore[attr-defined]
+                BLACK_BRUSH)
             self._user32.FillRect(hdc, ctypes.byref(rect), brush)
         except Exception:
             log.debug("window snap erase-bg fill failed", exc_info=True)

@@ -1,3 +1,5 @@
+from typing import cast
+
 import pygame as pg
 
 from chessshootout.frontend.visual.cache import new_cache, memoized_surface
@@ -91,8 +93,8 @@ def _base_surface(text: str, flipped: bool, scale: float) -> pg.Surface:
     :returns: the shared bubble surface, which callers must not draw on
     """
     key = (text, flipped, round(scale, 3))
-    return memoized_surface(_BUBBLE_CACHE, key,
-                            lambda: _build_base(text, flipped, scale))
+    return cast(pg.Surface, memoized_surface(_BUBBLE_CACHE, key,
+                                             lambda: _build_base(text, flipped, scale)))
 
 
 class SpeechBubble:
@@ -109,10 +111,10 @@ class SpeechBubble:
         simply idle until a quick-chat line arrives
         """
         self.text = ""
-        self.shown_at = None
-        self.last_rect = None
-        self._owned = {}
-        self._pop_variants = {}
+        self.shown_at: int | None = None
+        self.last_rect: pg.Rect | None = None
+        self._owned: dict[bool, pg.Surface] = {}
+        self._pop_variants: dict[tuple[bool, int], pg.Surface] = {}
 
     def show(self, text: str, now_ms: int) -> None:
         """
@@ -158,7 +160,7 @@ class SpeechBubble:
         :param now_ms: pygame tick count in milliseconds
         :returns: the pop step, 0 to POP_STEPS - 1, and the alpha, 0 to 255
         """
-        age = now_ms - self.shown_at
+        age = now_ms - cast(int, self.shown_at)
         p = min(1.0, max(0.0, age / BUBBLE_POP_MS))
         eased = 1.0 - (1.0 - p) ** 3
         bucket = min(POP_STEPS - 1, int(eased * POP_STEPS))

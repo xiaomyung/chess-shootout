@@ -1,4 +1,5 @@
 from pathlib import Path
+from typing import cast
 
 import pygame as pg
 
@@ -6,7 +7,7 @@ from chessshootout.infra.countries import flag_emoji
 from chessshootout.paths import resource_path
 from chessshootout.frontend.visual.cache import new_cache, memoized_surface
 
-_BASE = {}
+_BASE: dict[str, pg.Surface | None] = {}
 _SCALED_CACHE = new_cache()
 
 _REGIONAL_A = 0x1F1E6
@@ -84,7 +85,7 @@ def emoji_surface(char: str, size: int) -> pg.Surface | None:
         """
         scale = size / h
         return pg.transform.smoothscale(base, (max(int(w * scale), 1), size))
-    return memoized_surface(_SCALED_CACHE, (char, size), build)
+    return cast(pg.Surface, memoized_surface(_SCALED_CACHE, (char, size), build))
 
 
 def blit_emoji(window: pg.Surface, char: str, center: tuple[int, int], size: int) -> bool:

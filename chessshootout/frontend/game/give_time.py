@@ -1,5 +1,5 @@
 import logging
-from typing import Any
+from typing import Any, cast
 
 import pygame as pg
 
@@ -43,7 +43,7 @@ class GiveTimeHold:
         self._give_time_last_ratchet_ms = 0
         self._give_time_hold_ticks = 0
         self._give_time_hold_added = 0.0
-        self._give_time_hold_recipient = None
+        self._give_time_hold_recipient: PieceColor | None = None
 
     def on_cooldown(self) -> bool:
         """
@@ -116,7 +116,7 @@ class GiveTimeHold:
             self._end_give_time_hold()
             return
         now = pg.time.get_ticks()
-        recipient = self._give_time_hold_recipient
+        recipient = cast(PieceColor, self._give_time_hold_recipient)
         while now - self._give_time_hold_last_tick_ms >= GIVE_TIME_TICK_MS:
             self._give_time_hold_last_tick_ms += GIVE_TIME_TICK_MS
             added = clock.add_time(recipient, GIVE_TIME_SECONDS)
@@ -158,7 +158,7 @@ class GiveTimeHold:
         screen = self.screen
         if not self.holding:
             return
-        recipient = self._give_time_hold_recipient
+        recipient = cast(PieceColor, self._give_time_hold_recipient)
         now = pg.time.get_ticks()
         hold_ms = now - self._give_time_hold_start_ms
         clock = screen.match.clock
@@ -208,7 +208,7 @@ class GiveTimeHold:
         screen = self.screen
         if screen.variant == "online" and screen.match.local_color is not None:
             return opponent_of(screen.match.local_color)
-        return screen.match.current_turn()
+        return cast(PieceColor, screen.match.current_turn())
 
     def toast_for_giver(self, recipient_color: PieceColor | str, added: float) -> None:
         """

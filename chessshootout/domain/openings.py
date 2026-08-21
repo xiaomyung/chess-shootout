@@ -93,7 +93,7 @@ class DebutTracker:
             position on screen
         """
         self._sans_provider = sans_provider
-        self._memo = None
+        self._memo: tuple[tuple[int, int | None], tuple[str, str] | None] | None = None
 
     def reset(self) -> None:
         """

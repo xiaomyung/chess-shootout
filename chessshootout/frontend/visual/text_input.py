@@ -59,7 +59,7 @@ class TextInput:
         self.rest_align = rest_align
         self._text = ""
         self.cursor = 0
-        self.sel_anchor = None
+        self.sel_anchor: int | None = None
         self._focused = False
         self.rect = pg.Rect(0, 0, 0, 0)
         self.font_factor = 1.6
@@ -71,7 +71,7 @@ class TextInput:
         self._last_click_ms = -DOUBLE_CLICK_MS
         self._last_click_x = 0
         self._dragging = False
-        self._cursor_width_cache = None
+        self._cursor_width_cache: tuple[tuple[str, int], int] | None = None
 
     @property
     def text(self) -> str:

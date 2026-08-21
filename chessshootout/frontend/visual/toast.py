@@ -1,5 +1,6 @@
 import math
-from typing import Any
+from collections.abc import Callable
+from typing import Any, cast
 
 import pygame as pg
 
@@ -40,9 +41,9 @@ class Toast:
         self.window = window
         self.top_inset = 0
         self.font = get_font(16, bold=True)
-        self._bubbles = []
+        self._bubbles: list[dict[str, Any]] = []
         self._last_ms = 0
-        self.on_new = None
+        self.on_new: Callable[[], None] | None = None
 
     def show(self, message: str, duration_ms: int | None = None, kind: str = "info",
              key: str | None = None) -> None:
@@ -131,7 +132,7 @@ class Toast:
         :param now: pygame tick count in milliseconds
         :returns: True while the bubble still belongs on screen
         """
-        return now - b["shown_at_ms"] < b["duration_ms"] + FADE_OUT_MS
+        return cast(bool, now - b["shown_at_ms"] < b["duration_ms"] + FADE_OUT_MS)
 
     def is_visible(self, now_ms: int | None = None) -> bool:
         """
@@ -174,7 +175,7 @@ class Toast:
         """
         if b.get("overlay") is None:
             b["overlay"] = self._build_bubble_overlay(b)
-        overlay = b["overlay"]
+        overlay: pg.Surface = b["overlay"]
         overlay.set_alpha(self._alpha(b, now))
         return overlay
 

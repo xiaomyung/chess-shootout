@@ -52,8 +52,8 @@ class ProfileView(MenuView):
         self._scale = 1.0
         self._wins = self._losses = self._draws = self._kos = 0
         self._avatar = AvatarBadge()
-        self._avatar_palette = None
-        self._avatar_palette_seed = None
+        self._avatar_palette: tuple[pg.Color, pg.Color] | None = None
+        self._avatar_palette_seed: str | None = None
         self._nickname_rect = pg.Rect(0, 0, 0, 0)
         self._country_rect = pg.Rect(0, 0, 0, 0)
         self._nickname_input = TextInput(

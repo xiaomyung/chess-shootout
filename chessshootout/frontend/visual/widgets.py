@@ -1,5 +1,6 @@
 import hashlib
 import math
+from typing import cast
 from weakref import WeakKeyDictionary
 
 import pygame as pg
@@ -102,7 +103,8 @@ def build_ko_badge(count: int, font: pg.font.Font, height: int,
         surf.blit(build_shell(shell_w, shell_h, winking), (0, (h - shell_h) // 2))
         surf.blit(text, (shell_w + gap, (h - th) // 2))
         return surf
-    return memoized_surface(_KO_BADGE_CACHE, (count, height, winking), build)
+    return cast(pg.Surface,
+                memoized_surface(_KO_BADGE_CACHE, (count, height, winking), build))
 
 
 def build_flat_avatar(size: int, fill: pg.Color | str) -> pg.Surface:
@@ -240,7 +242,8 @@ def wrap_words(text: str, font: pg.font.Font, max_w: int,
     return lines
 
 
-_FIT_TEXT_CACHE = WeakKeyDictionary()
+_FIT_TEXT_CACHE: WeakKeyDictionary[
+    pg.Surface, dict[tuple[int, int], pg.Surface]] = WeakKeyDictionary()
 
 
 def fit_text_to_rect(text_surface: pg.Surface, rect: pg.Rect,
@@ -659,7 +662,7 @@ class AvatarBadge:
         """
         Start with nothing cached; the first draw builds the tile
         """
-        self._cache = None
+        self._cache: tuple[tuple[int, str], pg.Surface] | None = None
 
     def reset(self) -> None:
         """
@@ -702,8 +705,8 @@ class StripAvatar:
         Start with no cached tile and no palette; both appear on first draw
         """
         self._badge = AvatarBadge()
-        self._palette = None
-        self._seed = None
+        self._palette: tuple[pg.Color, pg.Color] | None = None
+        self._seed: str | None = None
 
     def reset(self) -> None:
         """
@@ -770,7 +773,7 @@ def draw_captured_row(window: pg.Surface,
     last_right = x
     size = max(int(ih * 0.5), 6)
     for piece_type in captured:
-        icon = icons.get((piece_type, captured_color))
+        icon = icons.get((piece_type, captured_color))  # type: ignore[arg-type]
         if icon is None:
             continue
         if icon.get_height() != size:

@@ -5,7 +5,7 @@ import time
 from collections import defaultdict
 from collections.abc import Callable, Iterable, Iterator
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, cast
 from uuid import uuid4
 
 from chessshootout.backend.backend import Backend
@@ -15,7 +15,8 @@ from chessshootout.server.protocol import (
     GRACE_SECONDS, HEARTBEAT_TIMEOUT_SECONDS, IDLE_WINDOW_BY_PLIES, IdleWindowSpec,
 )
 from chessshootout.skillcheck import online
-from chessshootout.skillcheck.types import SkillCheckKind
+from chessshootout.skillcheck.types import SkillCheckKind, SkillCheckOutcome
+from chessshootout.skillcheck.wheel import SKILLCHECK_DEADLINE_MS
 
 
 REMATCH_IDLE_SECONDS = 300.0
@@ -92,13 +93,13 @@ class PendingSkillCheck:
     value_diff: int
     start_ms: float
     expires_at_ms: float
-    deadline_ms: float = online.SKILLCHECK_DEADLINE_MS
+    deadline_ms: float = SKILLCHECK_DEADLINE_MS
     miss_count: int = 0
     captured_value: int = 0
     progress: int = 0
     last_hit_pop: int = -1
     last_input_ms: float = -1.0
-    holes: tuple = field(default=(), repr=False, compare=False)
+    holes: tuple[tuple[int, int], ...] = field(default=(), repr=False, compare=False)
     _challenge: object = field(default=None, repr=False, compare=False)
 
     @property
@@ -152,8 +153,8 @@ class SharedAnnotations:
     """
 
     sharing: bool = False
-    highlights: set = field(default_factory=set)
-    arrows: list = field(default_factory=list)
+    highlights: set[str] = field(default_factory=set)
+    arrows: list[tuple[str, str]] = field(default_factory=list)
     trip_count: int = 0
     share_muted: bool = False
     opp_hidden_notice_sent: bool = False
@@ -236,11 +237,11 @@ class Room:
     draw_offered_by: str | None = None
     takeback_offered_by: str | None = None
     rematch_offered_by: set[str] = field(default_factory=set)
-    result: tuple[str, str] | None = None
+    result: tuple[str, str | None] | None = None
     series_scores: dict[str, float] = field(default_factory=dict)
     skillcheck_secret: str = ""
-    skillcheck_locks: set = field(default_factory=set)
-    skillcheck_log: list = field(default_factory=list)
+    skillcheck_locks: set[tuple[Square, Square]] = field(default_factory=set)
+    skillcheck_log: list[SkillCheckOutcome] = field(default_factory=list)
     pending_skillcheck: PendingSkillCheck | None = None
     plies_ever: int = 0
     idle_since: float | None = None
@@ -348,7 +349,7 @@ class Room:
         remaining = self.idle_remaining(now)
         if remaining is None or remaining > 0.0:
             return None
-        return self.idle_window().outcome
+        return cast(IdleWindowSpec, self.idle_window()).outcome
 
     def mark_idle_activity(self, now: float | None) -> None:
         """
@@ -511,7 +512,7 @@ class RoomManager:
             if queue:
                 room = queue[0]
                 self._dequeue(room)
-                first_slot = room.white or room.black
+                first_slot = cast(PlayerSlot, room.white or room.black)
                 first_pref = first_slot.side_preference
                 second_color, first_color_resolved = self._resolve_colors(
                     first_pref, side_preference,

@@ -1,5 +1,5 @@
 import math
-from typing import Any
+from typing import Any, cast
 
 import pygame as pg
 
@@ -27,13 +27,13 @@ class Annotations:
             the window, and told when a repaint is needed
         """
         self.board = board
-        self.highlighted_squares = set()
-        self.arrows = []
-        self.opp_highlighted_squares = set()
-        self.opp_arrows = []
-        self.flagged = set()
-        self._arrow_cache = None
-        self._right_drag_start_square = None
+        self.highlighted_squares: set[Square] = set()
+        self.arrows: list[tuple[Square, Square]] = []
+        self.opp_highlighted_squares: set[Square] = set()
+        self.opp_arrows: list[tuple[Square, Square]] = []
+        self.flagged: set[Square | tuple[Square, Square]] = set()
+        self._arrow_cache: tuple[tuple[Any, ...], pg.Surface] | None = None
+        self._right_drag_start_square: Square | None = None
 
     def toggle_highlight(self, sq: Square) -> bool:
         """
@@ -149,14 +149,14 @@ class Annotations:
         """
         if kind == "highlight":
             if action == "add":
-                self.opp_highlighted_squares.add(square)
+                self.opp_highlighted_squares.add(cast(Square, square))
             else:
-                self.opp_highlighted_squares.discard(square)
+                self.opp_highlighted_squares.discard(cast(Square, square))
             self.board.mark_needs_present()
             return
         if action == "add":
             if arrow not in self.opp_arrows:
-                self.opp_arrows.append(arrow)
+                self.opp_arrows.append(cast(tuple[Square, Square], arrow))
                 self.board.mark_needs_present()
         elif arrow in self.opp_arrows:
             self.opp_arrows.remove(arrow)
@@ -180,7 +180,7 @@ class Annotations:
         :returns: the square the gesture started on, or None when the press
             missed the board
         """
-        sq = self.board.cell_at(pos)
+        sq: Square | None = self.board.cell_at(pos)
         if sq is None:
             return None
         self._right_drag_start_square = sq

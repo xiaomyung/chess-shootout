@@ -6,7 +6,7 @@ import time
 from collections import deque
 from collections.abc import Callable, Coroutine
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, TypeVar, cast
 
 from chessshootout import paths
 from chessshootout.infra import crash_log
@@ -29,6 +29,8 @@ RECONNECT_TOTAL_SECONDS = GRACE_SECONDS
 RECONNECT_INTERVAL_SECONDS = 2
 RECONNECT_BACKOFF_MAX_SECONDS = 8
 PING_SAMPLE_WINDOW = 5
+
+_ProbeResult = TypeVar("_ProbeResult")
 
 
 class ClientReason:
@@ -54,10 +56,11 @@ class Event:
     """
 
     type: str
-    payload: dict
+    payload: dict[str, Any]
 
 
-def _probe(addr: str | None, request: Callable[[ServerTransport], Any]) -> Any:
+def _probe(addr: str | None,
+           request: Callable[[ServerTransport], _ProbeResult]) -> _ProbeResult | None:
     """
     Run one short blocking question against a server address and treat every
     disappointment as no answer. It backs the startup and settings probes, so a
@@ -156,22 +159,22 @@ class OnlineClient:
         separate step, so one client exists per online session and is dropped
         rather than reused once that session ends
         """
-        self._inbound = queue.Queue()
-        self._loop = None
-        self._thread = None
+        self._inbound: queue.Queue[Event] = queue.Queue()
+        self._loop: asyncio.AbstractEventLoop | None = None
+        self._thread: threading.Thread | None = None
         self._stop = threading.Event()
-        self._outbound = None
-        self._ws = None
-        self._transport = None
-        self._addr = None
-        self._room_id = None
-        self._session_token = None
+        self._outbound: asyncio.Queue[tuple[str, tuple[Any, ...]]] | None = None
+        self._ws: ServerWebSocket | None = None
+        self._transport: ServerTransport | None = None
+        self._addr: str | None = None
+        self._room_id: str | None = None
+        self._session_token: str | None = None
         self.state = "disconnected"
         self.opp_state = "connected"
         self._in_queue = False
         self._game_active = False
         self._post_game = False
-        self._ping_samples_ms = deque(maxlen=PING_SAMPLE_WINDOW)
+        self._ping_samples_ms: deque[float] = deque(maxlen=PING_SAMPLE_WINDOW)
         self._heartbeat_interval = HEARTBEAT_INTERVAL_SECONDS
         self._reconnect_total = RECONNECT_TOTAL_SECONDS
         self._last_ping_sent_at = 0.0
@@ -284,12 +287,13 @@ class OnlineClient:
         """
         if self._in_queue and self._room_id and self._session_token:
             try:
-                async with self._transport.make_async_http() as http:
+                transport = cast(ServerTransport, self._transport)
+                async with transport.make_async_http() as http:
                     body = CancelMatchmakeRequest(
                         room_id=self._room_id,
                         session_token=self._session_token,
                     )
-                    await self._transport.cancel_matchmake_async(body, http)
+                    await transport.cancel_matchmake_async(body, http)
             except Exception:
                 pass
         self._in_queue = False
@@ -532,17 +536,19 @@ class OnlineClient:
         against the server's health, so a restarted server reads as a lost room
         rather than as a connection problem
         """
+        transport = cast(ServerTransport, self._transport)
         body = ResumeRequest(
-            room_id=self._room_id, session_token=self._session_token,
+            room_id=cast(str, self._room_id),
+            session_token=cast(str, self._session_token),
         )
         try:
-            async with self._transport.make_async_http() as http:
-                response = await self._transport.resume_async(body, http)
+            async with transport.make_async_http() as http:
+                response = await transport.resume_async(body, http)
         except FatalResumeError as exc:
             log.warning("state-sync fatal: %s", exc)
             try:
-                async with self._transport.make_async_http() as http:
-                    health = await self._transport.healthz_async(http)
+                async with transport.make_async_http() as http:
+                    health = await transport.healthz_async(http)
             except Exception:
                 health = None
             reason = (ClientReason.ROOM_LOST if health is not None
@@ -737,15 +743,17 @@ class OnlineClient:
         loop = asyncio.get_running_loop()
         deadline = loop.time() + self._reconnect_total
         backoff = RECONNECT_INTERVAL_SECONDS
+        transport = cast(ServerTransport, self._transport)
         body = ResumeRequest(
-            room_id=self._room_id, session_token=self._session_token,
+            room_id=cast(str, self._room_id),
+            session_token=cast(str, self._session_token),
         )
-        async with self._transport.make_async_http() as http:
+        async with transport.make_async_http() as http:
             while loop.time() < deadline and not self._stop.is_set():
                 try:
-                    response = await self._transport.resume_async(body, http)
+                    response = await transport.resume_async(body, http)
                 except FatalResumeError:
-                    health = await self._transport.healthz_async(http)
+                    health = await transport.healthz_async(http)
                     if health is not None:
                         return self.ROOM_LOST
                     return None
@@ -767,12 +775,13 @@ class OnlineClient:
         :param request: matchmaking request fields for this search.
         :returns: the room and session token, as plain data.
         """
-        last_exc = None
+        last_exc: Exception | None = None
         req = MatchmakeRequest(**request)
-        async with self._transport.make_async_http() as http:
+        transport = cast(ServerTransport, self._transport)
+        async with transport.make_async_http() as http:
             for attempt in range(SERVER_FULL_RETRIES + 1):
                 try:
-                    return (await self._transport.matchmake_async(req, http)
+                    return (await transport.matchmake_async(req, http)
                             ).model_dump(by_alias=True)
                 except TransportHTTPError as exc:
                     if exc.status_code == 503:
@@ -797,7 +806,9 @@ class OnlineClient:
         for each socket, since readings from a dead connection say nothing
         about the new one
         """
-        ws = await self._transport.ws_connect(self._room_id, self._session_token)
+        transport = cast(ServerTransport, self._transport)
+        ws = await transport.ws_connect(cast(str, self._room_id),
+                                        cast(str, self._session_token))
         self._ws = ws
         self._last_server_msg_at = time.monotonic()
         self.opp_state = "connected"
@@ -881,7 +892,8 @@ class OnlineClient:
         """
         try:
             while not self._stop.is_set():
-                method, args = await self._outbound.get()
+                method, args = await cast(
+                    "asyncio.Queue[tuple[str, tuple[Any, ...]]]", self._outbound).get()
                 send = getattr(ws, method, None)
                 if send is None:
                     log.warning("unknown ws send method=%s", method)

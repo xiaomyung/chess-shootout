@@ -1,4 +1,5 @@
 from collections.abc import Iterable
+from typing import cast
 
 from chessshootout.backend.utils import BOARD_SIZE, Square
 
@@ -220,7 +221,7 @@ def segment_legs(
     :param segments: authored strokes as (start, end) lattice-point pairs.
     :returns: the straight legs those strokes are made of.
     """
-    legs = []
+    legs: list[tuple[tuple[int, int], tuple[int, int]]] = []
     for a, b in segments:
         points = polyline_between(a, b)
         legs.extend((points[i], points[i + 1]) for i in range(len(points) - 1))
@@ -583,7 +584,7 @@ def bitmap_bbox(rows: list[int], width: int) -> tuple[int, int, int, int] | None
             maxx = high
     if miny is None:
         return None
-    return (minx, miny, maxx, maxy)
+    return (minx, miny, maxx, cast(int, maxy))
 
 
 def local_ink(rows: list[int], x0: int, y0: int, x1: int, y1: int) -> int:

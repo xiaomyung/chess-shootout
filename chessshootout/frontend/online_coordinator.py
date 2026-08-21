@@ -2,7 +2,7 @@ import logging
 import threading
 import uuid
 from collections.abc import Callable
-from typing import Any
+from typing import Any, cast
 
 import pygame as pg
 
@@ -23,7 +23,7 @@ from chessshootout.online.client import (
 from chessshootout.server.protocol import (
     FIRST_MOVE_ABORT_SECONDS, GRACE_SECONDS, Reason,
 )
-from chessshootout.skillcheck.online import SKILLCHECK_DEADLINE_MS
+from chessshootout.skillcheck.wheel import SKILLCHECK_DEADLINE_MS
 
 
 log = logging.getLogger("chess.frontend")
@@ -107,26 +107,26 @@ class OnlineCoordinator:
             window, the menu, the game screen, toasts and sound
         """
         self.app = app
-        self.client = None
+        self.client: OnlineClient | None = None
         self.wait_modal = WaitModal(app.window)
         self.match_found_modal = MatchFoundModal(app.window)
         self.reconnecting_modal = ReconnectingModal(app.window)
         self.offer_banners = OfferBanners(app.window)
-        self._subscriber = None
+        self._subscriber: Any = None
 
-        self._online_config = None
+        self._online_config: dict[str, Any] | None = None
         self._resyncing = False
-        self._resync_buffer = []
+        self._resync_buffer: list[tuple[str, dict[str, Any]]] = []
         self._resync_started_at_ms = 0
         self._last_heartbeat_sent_ms = 0
-        self._wait_started_at_ms = None
-        self._match_found_at_ms = None
+        self._wait_started_at_ms: int | None = None
+        self._match_found_at_ms: int | None = None
         self._match_found_started_seconds_ago = 0.0
-        self._pending_game_start_payload = None
+        self._pending_game_start_payload: dict[str, Any] | None = None
         self._rematch_offered = False
-        self._prev_online_state = None
+        self._prev_online_state: str | None = None
 
-        self._pending_reconnect = None
+        self._pending_reconnect: dict[str, Any] | None = None
         self._pending_reconnect_lock = threading.Lock()
         self._last_reconnect_probe_ms = 0
         self._reconnect_probe_inflight = False
@@ -465,7 +465,7 @@ class OnlineCoordinator:
                 self._begin_resync()
             return
         if reason == Reason.NOT_YOUR_TURN:
-            label = NOT_YOUR_TURN_TOASTS.get(payload.get("msg_type"))
+            label = NOT_YOUR_TURN_TOASTS.get(cast(str, payload.get("msg_type")))
             if label is not None:
                 self.app.toast.show(label)
             return
@@ -524,7 +524,7 @@ class OnlineCoordinator:
         """
         game = self.app.game
         opp_color = "black" if game._chosen_side == "white" else "white"
-        return game._name_for_color(opp_color)
+        return cast(str, game._name_for_color(opp_color))
 
     def _push_rematch_banner(self) -> None:
         """
@@ -1030,12 +1030,13 @@ class OnlineCoordinator:
         self.offer_banners.dismiss("rematch_request")
         self._rematch_offered = False
         self.client = OnlineClient()
+        config = cast("dict[str, Any]", self._online_config)
         request = {
-            "nickname": (self._online_config.get("nickname") or "").strip() or "Player",
+            "nickname": (config.get("nickname") or "").strip() or "Player",
             "client_uuid": env.get_or_create_client_uuid(),
-            "time_minutes": self._online_config["time_minutes"] or ONLINE_DEFAULT_TIME_MINUTES,
-            "increment_seconds": self._online_config["increment_seconds"],
-            "side_preference": self._online_config["side"],
+            "time_minutes": config["time_minutes"] or ONLINE_DEFAULT_TIME_MINUTES,
+            "increment_seconds": config["increment_seconds"],
+            "side_preference": config["side"],
             "country": env.get_country() or None,
             "hide_opp_marks": env.get_hide_opp_marks(),
         }
@@ -1054,8 +1055,9 @@ class OnlineCoordinator:
         :returns: the category name (Bullet, Blitz, Rapid) and the minutes plus
             increment as text
         """
-        minutes = self._online_config.get("time_minutes") or ONLINE_DEFAULT_TIME_MINUTES
-        incr = self._online_config.get("increment_seconds", 0) or 0
+        config = cast("dict[str, Any]", self._online_config)
+        minutes = config.get("time_minutes") or ONLINE_DEFAULT_TIME_MINUTES
+        incr = config.get("increment_seconds", 0) or 0
         return time_category_for_minutes(minutes), f"{minutes} + {incr}"
 
     def _drop_client(self, *, cancel_queue: bool = False) -> None:
@@ -1218,7 +1220,7 @@ class OnlineCoordinator:
         """
         self._end_resync(replay=False)
         if keep_online:
-            self.client.send_left_result()
+            cast(OnlineClient, self.client).send_left_result()
         elif self.client is not None:
             self.client.disconnect()
             self.client = None
@@ -1293,7 +1295,7 @@ class OnlineCoordinator:
         if game.variant != Variant.ONLINE:
             return None
         now = pg.time.get_ticks()
-        candidates = []
+        candidates: list[tuple[float, float]] = []
         for snap_ms, total in (
             (game._opp_disconnected_at_ms, GRACE_SECONDS),
             (game._local_disconnected_at_ms, RECONNECT_TOTAL_SECONDS),

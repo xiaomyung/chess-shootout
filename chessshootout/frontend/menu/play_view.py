@@ -1,4 +1,4 @@
-from typing import Any
+from typing import Any, cast
 
 import pygame as pg
 
@@ -117,7 +117,7 @@ def _side_image(color: str) -> pg.Surface | None:
             return img.convert_alpha()
         except (pg.error, OSError):
             return None
-    return memoized_surface(_HERO_ART_CACHE, ("side", color), build)
+    return cast(pg.Surface | None, memoized_surface(_HERO_ART_CACHE, ("side", color), build))
 
 
 def _scaled_side_image(color: str, size: int) -> pg.Surface | None:
@@ -141,7 +141,7 @@ def _scaled_side_image(color: str, size: int) -> pg.Surface | None:
         if img is None:
             return None
         return pg.transform.smoothscale(img, (size, size))
-    return memoized_surface(_HERO_SCALED_CACHE, (color, size), build)
+    return cast(pg.Surface | None, memoized_surface(_HERO_SCALED_CACHE, (color, size), build))
 
 
 def _tracked_surface(font: pg.font.Font, text: str, color: str,
@@ -176,7 +176,7 @@ def _tracked_surface(font: pg.font.Font, text: str, color: str,
             x += g.get_width() + tracking
         return surf
     key = ("tagline", text, font.get_height(), str(color), tracking)
-    return memoized_surface(_HERO_ART_CACHE, key, build)
+    return cast(pg.Surface, memoized_surface(_HERO_ART_CACHE, key, build))
 
 
 class _PopoverAnim:
@@ -193,8 +193,8 @@ class _PopoverAnim:
         been opened must cost nothing
         """
         self.mode = "closed"
-        self._scale_tween = None
-        self._alpha_tween = None
+        self._scale_tween: Tween | None = None
+        self._alpha_tween: Tween | None = None
 
     def open(self) -> None:
         """
@@ -306,7 +306,7 @@ class PlayView(MenuView):
         self.reconnect_available = False
         last_mode = env.get_last_mode()
         self.selected_mode = last_mode if last_mode in SELECTABLE_MODES else SINGLE_SCREEN
-        self.selected_time_minutes = 10
+        self.selected_time_minutes: int | None = 10
         self.selected_increment_seconds = 5
         self.selected_side = "random"
         self.apply_default_time_settings()
@@ -318,9 +318,9 @@ class PlayView(MenuView):
         self._side_open = False
         self._time_anim = _PopoverAnim()
         self._side_anim = _PopoverAnim()
-        self._popover_scratches = {}
+        self._popover_scratches: dict[str, pg.Surface] = {}
 
-        self._menu_layout = None
+        self._menu_layout: MenuLayout | None = None
         self._scale = 1.0
         self._hero_rect = pg.Rect(0, 0, 0, 0)
         self._recon_rect = pg.Rect(0, 0, 0, 0)
@@ -328,7 +328,7 @@ class PlayView(MenuView):
         self._title_pos = (0, 0)
         self._tagline_pos = (0, 0)
         self._title_block = pg.Rect(0, 0, 0, 0)
-        self._mode_rects = {}
+        self._mode_rects: dict[str, pg.Rect] = {}
         self._time_chip = pg.Rect(0, 0, 0, 0)
         self._side_chip = pg.Rect(0, 0, 0, 0)
         self._cta_rect = pg.Rect(0, 0, 0, 0)
@@ -337,9 +337,9 @@ class PlayView(MenuView):
         self._time_popover = pg.Rect(0, 0, 0, 0)
         self._side_popover = pg.Rect(0, 0, 0, 0)
         self._side_readout = pg.Rect(0, 0, 0, 0)
-        self._side_rects = {}
-        self._hover_target = None
-        self._press_target = None
+        self._side_rects: dict[str, pg.Rect] = {}
+        self._hover_target: str | None = None
+        self._press_target: str | None = None
 
         self._title_font = get_display_font(TITLE_FONT)
         self._tagline_font = get_mono_font(TAGLINE_FONT, bold=True)
@@ -520,7 +520,7 @@ class PlayView(MenuView):
         and the start button pinned to the bottom with the FEN link beside it.
         Every rect the panel draws and hit-tests is decided here
         """
-        hero = self._menu_layout.hero_rect
+        hero = cast(MenuLayout, self._menu_layout).hero_rect
         self._hero_rect = pg.Rect(hero)
         self._fit_fonts()
         x = hero.x

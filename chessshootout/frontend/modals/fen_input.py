@@ -28,9 +28,9 @@ class FenInputModal(BaseModal):
         :param window: the app window surface this modal draws onto
         """
         super().__init__(window)
-        self.on_submit = None
+        self.on_submit: Callable[[str], bool] | None = None
         self.error = ""
-        self.button_rects = {}
+        self.button_rects: dict[str, pg.Rect] = {}
         self.text_input = TextInput(window, max_chars=FEN_INPUT_MAX_CHARS,
                                     placeholder="paste FEN…")
         self.title_font = get_font(20, bold=True)
@@ -46,7 +46,7 @@ class FenInputModal(BaseModal):
         self.error_font = self.font(factor=14, min_size=12, bold=False)
         self.button_font = self.font(factor=14, min_size=12, bold=True)
 
-    def show(self, on_submit: Callable[[str], bool]) -> None:
+    def show(self, on_submit: Callable[[str], bool]) -> None:  # type: ignore[override]
         """
         Open the box with an empty, focused field and no complaint showing
 

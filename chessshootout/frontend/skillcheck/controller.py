@@ -1,5 +1,5 @@
 from collections.abc import Callable
-from typing import Any
+from typing import Any, cast
 
 import pygame as pg
 
@@ -50,9 +50,11 @@ class SkillCheckController:
     own
     """
 
-    _audio = None
-    _passive = False
-    _landed = None
+    _audio: SoundManager | None = None
+    _passive: bool = False
+    _landed: bool | None = None
+    _fire: Callable[..., None]
+    _apply_geometry: Callable[[pg.Rect], None]
 
     def _init_common(self, challenge: Any, now_ms: int, deadline_ms: float, *,
                      on_shot: Callable[..., None] | None, passive: bool,
@@ -81,8 +83,8 @@ class SkillCheckController:
         self._passive = passive
         self._online = on_shot is not None or passive
         self._audio = audio
-        self._committed_at = None
-        self._resolved_at = None
+        self._committed_at: int | None = None
+        self._resolved_at: int | None = None
         self._landed = None
 
     def _init_victim(self, victim_surface: pg.Surface | None, cell_rect: pg.Rect) -> None:
@@ -100,7 +102,7 @@ class SkillCheckController:
         self._victim_orig = victim_surface
         self._victim_orig_cell = max(int(cell_rect.width), 1)
         self._victim = victim_surface
-        self._victim_cache = {}
+        self._victim_cache: dict[int, pg.Surface] = {}
 
     def _scaled_victim(self, new_cell: int) -> pg.Surface:
         """
@@ -112,15 +114,16 @@ class SkillCheckController:
         :param new_cell: board cell width in pixels to fit the sprite to
         :returns: the sprite at that size, shared with earlier calls for it
         """
+        orig = cast(pg.Surface, self._victim_orig)
         if new_cell == self._victim_orig_cell:
-            return self._victim_orig
+            return orig
         cached = self._victim_cache.get(new_cell)
         if cached is not None:
             return cached
         scale = new_cell / self._victim_orig_cell
-        w = max(round(self._victim_orig.get_width() * scale), 1)
-        h = max(round(self._victim_orig.get_height() * scale), 1)
-        surf = pg.transform.smoothscale(self._victim_orig, (w, h))
+        w = max(round(orig.get_width() * scale), 1)
+        h = max(round(orig.get_height() * scale), 1)
+        surf = pg.transform.smoothscale(orig, (w, h))
         self._victim_cache[new_cell] = surf
         return surf
 

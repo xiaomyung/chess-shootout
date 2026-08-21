@@ -1,4 +1,5 @@
 from collections.abc import Callable
+from typing import cast
 
 from fastapi import WebSocketDisconnect
 
@@ -11,7 +12,7 @@ from chessshootout.server.protocol import (
 )
 from chessshootout.server.rooms import (
     REMATCH_ABSOLUTE_CAP_SECONDS, REMATCH_IDLE_SECONDS, POST_GAME_DISCONNECT_GRACE,
-    Room, RoomManager,
+    PlayerSlot, Room, RoomManager,
 )
 
 
@@ -143,7 +144,7 @@ class Sweep:
             return
         winner = None
         if reason == Reason.RESIGNATION:
-            winner = room.opp_color(room.color_to_move())
+            winner = room.opp_color(cast(str, room.color_to_move()))
             winner_slot = room.slot(winner)
             if winner_slot is None or winner_slot.disconnected_at is not None:
                 return
@@ -287,7 +288,8 @@ class Sweep:
                              room.room_id, gone_color)
                     self.rooms.drop_room_now(room.room_id)
                 continue
-            if not room.white.at_result and not room.black.at_result:
+            if (not cast(PlayerSlot, room.white).at_result
+                    and not cast(PlayerSlot, room.black).at_result):
                 await self._notify_both(room, "window_expired")
                 log.info("drop room=%s reason=both_left_result", room.room_id)
                 self.rooms.drop_room_now(room.room_id)

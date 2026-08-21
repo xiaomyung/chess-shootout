@@ -32,7 +32,7 @@ class PgnOpener:
         :param toast: the shell's toast bar, where every message is shown
         """
         self.toast = toast
-        self._failures = queue.Queue()
+        self._failures: queue.Queue[int] = queue.Queue()
 
     def open(self, path: str | None, empty_message: str = NO_MOVES_MESSAGE) -> bool:
         """
