@@ -5,7 +5,8 @@ from typing import Any, NamedTuple, cast
 import pygame as pg
 
 from chessshootout.backend.pieces import Piece, PIECE_VALUES, PieceType
-from chessshootout.backend.utils import PROMO_LETTER_BY_TYPE, Square, coord_from_square
+from chessshootout.backend.utils import (
+    BOARD_SIZE, PROMO_LETTER_BY_TYPE, Square, coord_from_square)
 from chessshootout.frontend.game.variant import Variant
 from chessshootout.frontend.game.whack_gun import WhackGun
 from chessshootout.frontend.skillcheck.registry import CheckSpec, build_controller
@@ -111,7 +112,7 @@ class SkillCheckSession:
         piece = screen.match.piece_at(from_sq)
         is_capture = screen.board.capture_victim_square(piece, from_sq, to_sq) is not None
         is_promotion = (piece.type == PieceType.PAWN
-                        and to_sq.row in (0, screen.board.SIZE - 1))
+                        and to_sq.row in (0, BOARD_SIZE - 1))
         if not (is_capture or is_promotion):
             return False
         promo_letter = PROMO_LETTER_BY_TYPE.get(promo_type) if promo_type is not None else None
@@ -202,7 +203,7 @@ class SkillCheckSession:
         if kind == SkillCheckKind.WHACK:
             hole_squares = mole.holes_for(
                 seed, captured_value, (to_sq.row, to_sq.col),
-                screen.match.state, screen.board.SIZE)
+                screen.match.state, BOARD_SIZE)
         attacker_surface = (self._piece_surface(capturer)
                             if kind == SkillCheckKind.COMBO else None)
         spec = CheckSpec(
@@ -505,7 +506,7 @@ class SkillCheckSession:
                     return cast(Square, victim_sq)
             return to_sq
         square = placement_square(seed, value_diff,
-                                  self._placement_exclusions(from_sq, to_sq), screen.board.SIZE)
+                                  self._placement_exclusions(from_sq, to_sq), BOARD_SIZE)
         return Square(square[0], square[1]) if square is not None else to_sq
 
     def _placement_exclusions(self, from_sq: Square, to_sq: Square) -> set[tuple[int, int]]:

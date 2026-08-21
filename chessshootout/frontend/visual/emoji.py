@@ -1,5 +1,4 @@
 from pathlib import Path
-from typing import cast
 
 import pygame as pg
 
@@ -85,7 +84,7 @@ def emoji_surface(char: str, size: int) -> pg.Surface | None:
         """
         scale = size / h
         return pg.transform.smoothscale(base, (max(int(w * scale), 1), size))
-    return cast(pg.Surface, memoized_surface(_SCALED_CACHE, (char, size), build))
+    return memoized_surface(_SCALED_CACHE, (char, size), build)
 
 
 def blit_emoji(window: pg.Surface, char: str, center: tuple[int, int], size: int) -> bool:

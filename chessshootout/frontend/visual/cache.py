@@ -67,12 +67,13 @@ def new_size_cache() -> dict[Any, Any]:
     return cache
 
 
-def memoized_surface(cache: dict[Any, Any], key: Any, build: Callable[[], Any]) -> Any:
+def memoized_surface[T](cache: dict[Any, Any], key: Any, build: Callable[[], T]) -> T:
     """
     Build a drawable once for a given key and reuse it forever after, the
     house pattern for every hand-drawn surface in the UI. Callers pass a
     closure that does the expensive drawing, so nothing is built until the
-    first frame that actually needs it
+    first frame that actually needs it. Whatever that closure returns is what
+    comes back out, so call sites keep their exact type without casting
 
     :param cache: a cache from new_cache or new_size_cache to store it in
     :param key: hashable identity of the drawable -- every input that changes
@@ -81,7 +82,7 @@ def memoized_surface(cache: dict[Any, Any], key: Any, build: Callable[[], Any]) 
         surface bundled with the geometry measured while drawing it
     :returns: the cached value, shared with every other caller of that key
     """
-    surf = cache.get(key)
+    surf: T | None = cache.get(key)
     if surf is None:
         surf = build()
         cache[key] = surf

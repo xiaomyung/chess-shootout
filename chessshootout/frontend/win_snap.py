@@ -150,11 +150,13 @@ class WindowsSnap:
 
     def install(self) -> bool:
         """
-        Turn the borderless window into one Windows is willing to snap: put the
-        window styles back that make it eligible, then step in front of its
-        message handling. A 32-bit host is not supported and says so rather
-        than leaving the window half changed, and any failure is reported so
-        the chrome can carry on without snapping
+        Turn the borderless window into one Windows is willing to snap: step in
+        front of its message handling, then put back the window styles that
+        make it eligible. Nothing about the window or the helper is changed
+        until the handler has actually been swapped, so a failure leaves the
+        window exactly as it was rather than styled and half hooked up. A
+        32-bit host is not supported and says so, and any failure is reported
+        so the chrome can carry on without snapping
 
         :returns: True once the helper is in place and handling messages
         """
@@ -162,15 +164,17 @@ class WindowsSnap:
             log.warning("window snap: 32-bit host unsupported; skipping")
             return False
         try:
-            self.apply_styles()
-            self._orig_wndproc = self._user32.GetWindowLongPtrW(self._hwnd, GWLP_WNDPROC)
-            self._wndproc_cb = _WNDPROC(self._wndproc)
-            addr = ctypes.cast(self._wndproc_cb, ctypes.c_void_p).value
+            previous = self._user32.GetWindowLongPtrW(self._hwnd, GWLP_WNDPROC)
+            callback = _WNDPROC(self._wndproc)
+            addr = ctypes.cast(callback, ctypes.c_void_p).value
             self._user32.SetWindowLongPtrW(self._hwnd, GWLP_WNDPROC, addr)
-            return True
         except Exception:
             log.warning("window snap install failed", exc_info=True)
             return False
+        self._orig_wndproc = previous
+        self._wndproc_cb = callback
+        self.apply_styles()
+        return True
 
     def apply_styles(self) -> None:
         """

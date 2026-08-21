@@ -209,7 +209,7 @@ class Annotations:
             return ("highlight", start, self.toggle_highlight(start))
         return ("arrow", start, end, self.toggle_arrow(start, end))
 
-    def _draw_annotation_highlights(self) -> None:
+    def draw_highlights(self) -> None:
         """
         Fill every highlighted square, this player's in amber (or the warning
         colour when moderation refused them) and the opponent's in their own
@@ -225,7 +225,7 @@ class Annotations:
             rect = board._cell_rect(sq.row, sq.col)
             board.window.blit(board._cell_overlay(Colors.annotation_highlight_opp), rect.topleft)
 
-    def _draw_arrows(self) -> None:
+    def draw_arrows(self) -> None:
         """
         Draw every arrow on one supersampled layer over the board: this
         player's, the opponent's, and the preview of a right-drag still in

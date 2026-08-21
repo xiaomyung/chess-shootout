@@ -20,7 +20,8 @@ from chessshootout.server.handlers import (
 )
 from chessshootout.server.protocol import (
     FIRST_MOVE_ABORT_SECONDS, GRACE_SECONDS, IDLE_RESIGN_SECONDS,
-    MAX_INCREMENT_SECONDS, MAX_TIME_MINUTES, Reason,
+    MAX_INCREMENT_SECONDS, MAX_TIME_MINUTES, MIN_INCREMENT_SECONDS,
+    MIN_TIME_MINUTES, Reason,
 )
 from chessshootout.server.rooms import QUEUE_ABANDON_SECONDS
 from tests.helpers import fake_uuid4
@@ -145,10 +146,31 @@ def test_matchmake_rejects_invalid_field(client, body):
 
     The two over-cap cases are the SECURITY half: an unbounded time control mints
     a fresh never-pairing queue bucket per distinct pair, so the rejection has to
-    land before enqueue touches `_queue`."""
-    assert client.post("/matchmake", json=body).status_code == 422
+    land before enqueue touches `_queue`.
+
+    The body assertion pins WHERE the rejection happens: pydantic's field-error
+    list means MatchmakeRequest's own Field bounds refused the request and the
+    endpoint body never ran. The endpoint used to re-check the time control by hand
+    and answer `{"reason": "invalid_time_control"}` instead -- dead code, since the
+    model's bounds are strictly tighter than that check, and this is the assertion
+    that fails if such a shadowing hand check ever comes back."""
+    r = client.post("/matchmake", json=body)
+    assert r.status_code == 422
+    detail = r.json()["detail"]
+    assert isinstance(detail, list) and detail, "the pydantic field-error list, not a reason"
+    assert all("loc" in err and "type" in err for err in detail)
     assert client.get("/healthz").json()["rooms_active"] == 0
     assert client.get("/healthz").json()["queue_depth"] == 0
+
+
+def test_matchmake_model_bounds_subsume_the_removed_hand_checked_floor():
+    """The endpoint's `time_minutes < 1 or increment_seconds < 0` guard could never
+    fire: MatchmakeRequest already refuses both at the model boundary, so the body
+    was rejected a layer earlier. Removing it stays safe only while the model floors
+    remain at least as tight as the guard's were -- lowering either would reopen a
+    hole the guard is no longer there to (never actually) cover."""
+    assert MIN_TIME_MINUTES >= 1
+    assert MIN_INCREMENT_SECONDS >= 0
 
 
 def test_matchmake_rejects_already_in_game(client):

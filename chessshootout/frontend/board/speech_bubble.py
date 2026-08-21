@@ -93,8 +93,8 @@ def _base_surface(text: str, flipped: bool, scale: float) -> pg.Surface:
     :returns: the shared bubble surface, which callers must not draw on
     """
     key = (text, flipped, round(scale, 3))
-    return cast(pg.Surface, memoized_surface(_BUBBLE_CACHE, key,
-                                             lambda: _build_base(text, flipped, scale)))
+    return memoized_surface(_BUBBLE_CACHE, key,
+                            lambda: _build_base(text, flipped, scale))
 
 
 class SpeechBubble:

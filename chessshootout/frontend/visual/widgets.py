@@ -1,6 +1,5 @@
 import hashlib
 import math
-from typing import cast
 from weakref import WeakKeyDictionary
 
 import pygame as pg
@@ -103,8 +102,7 @@ def build_ko_badge(count: int, font: pg.font.Font, height: int,
         surf.blit(build_shell(shell_w, shell_h, winking), (0, (h - shell_h) // 2))
         surf.blit(text, (shell_w + gap, (h - th) // 2))
         return surf
-    return cast(pg.Surface,
-                memoized_surface(_KO_BADGE_CACHE, (count, height, winking), build))
+    return memoized_surface(_KO_BADGE_CACHE, (count, height, winking), build)
 
 
 def build_flat_avatar(size: int, fill: pg.Color | str) -> pg.Surface:

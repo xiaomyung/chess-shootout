@@ -321,8 +321,7 @@ def load_battle_art() -> dict[str, Any]:
 
     :returns: the battle-art bundle: guns and their flash variants
     """
-    return cast(dict[str, Any],
-                cache.memoized_surface(_BATTLE_ART_CACHE, "art", _build_battle_art))
+    return cache.memoized_surface(_BATTLE_ART_CACHE, "art", _build_battle_art)
 
 
 def _build_battle_art() -> dict[str, Any]:

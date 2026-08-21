@@ -69,8 +69,9 @@ class PgnOpener:
         Report openers that started happily and then failed, which is what a
         machine with no application for .pgn looks like. The failure arrives on
         a watcher thread, so this drain -- run once a frame by the shell -- is
-        where it crosses onto the drawing thread; a burst of them is reported
-        once, since the player only needs telling once
+        where it crosses onto the drawing thread; a burst of them is told to
+        the player once, since one message says all of it, while the rest still
+        reach the log so a crash report shows how many there really were
         """
         reported = False
         while True:
@@ -79,6 +80,7 @@ class PgnOpener:
             except queue.Empty:
                 break
             if reported:
+                log.debug("open pgn failed exit=%s, not shown again this frame", code)
                 continue
             reported = True
             log.warning("open pgn failed exit=%s", code)

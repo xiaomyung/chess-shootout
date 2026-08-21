@@ -1,7 +1,7 @@
 import math
 from collections.abc import Iterator
 from dataclasses import dataclass
-from typing import Any, cast
+from typing import Any
 
 import pygame as pg
 
@@ -360,8 +360,8 @@ def torn_sprite(base: pg.Surface, key: Any, tier: int) -> pg.Surface:
     """
     if tier <= 0:
         return base
-    return cast(pg.Surface, memoized_surface(_TORN_CACHE, (key, tier),
-                                             lambda: _torn_surface(base, key, tier)))
+    return memoized_surface(_TORN_CACHE, (key, tier),
+                            lambda: _torn_surface(base, key, tier))
 
 
 def flash_sprite(base: pg.Surface, key: Any) -> pg.Surface:
@@ -383,4 +383,4 @@ def flash_sprite(base: pg.Surface, key: Any) -> pg.Surface:
         surf = base.copy()
         surf.fill((255, 255, 255, 0), special_flags=pg.BLEND_RGB_ADD)
         return surf
-    return cast(pg.Surface, memoized_surface(_FLASH_CACHE, key, build))
+    return memoized_surface(_FLASH_CACHE, key, build)

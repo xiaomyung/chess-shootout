@@ -1,4 +1,5 @@
 import ctypes
+import gc
 
 import pygame as pg
 import pytest
@@ -13,6 +14,7 @@ from chessshootout.frontend.window_chrome import (
     _HITTEST_RESIZE_TOPLEFT,
     _HITTEST_RESIZE_RIGHT,
     _HITTEST_RESIZE_BOTTOM,
+    _SDL_WINDOW_MAXIMIZED,
 )
 
 
@@ -180,7 +182,7 @@ class _FakeSDL:
         self.SDL_GetWindowFromID = _FakeFn(win_ptr_ret)
         for name in ("SDL_SetWindowHitTest", "SDL_SetWindowMinimumSize",
                      "SDL_MinimizeWindow", "SDL_MaximizeWindow", "SDL_RaiseWindow",
-                     "SDL_SetWindowFullscreen"):
+                     "SDL_SetWindowFullscreen", "SDL_GetWindowFlags"):
             setattr(self, name, _FakeFn(0))
 
 
@@ -278,6 +280,46 @@ def test_apply_fullscreen_false_without_handle():
     assert chrome.apply_fullscreen(True) is False
 
 
+def _sdl_reporting_maximized(chrome, maximized):
+    sdl = _FakeSDL(0xABCD)
+    sdl.SDL_GetWindowFlags.ret = _SDL_WINDOW_MAXIMIZED if maximized else 0
+    chrome._sdl = sdl
+    chrome._win_ptr = 0xABCD
+    return sdl
+
+
+def test_maximize_reports_failure_when_the_request_is_ignored(chrome):
+    """SDL_MaximizeWindow answers nothing and a window manager is free to
+    ignore it. Reporting success on "the call did not raise" made
+    Frontend._maximize_window skip its desktop-size fallback, so a maximized
+    launch stayed at the constructor size with no way to tell."""
+    sdl = _sdl_reporting_maximized(chrome, False)
+    assert chrome.maximize() is False
+    assert sdl.SDL_MaximizeWindow.calls == [(0xABCD,)], "the request is still made"
+    assert sdl.SDL_GetWindowFlags.calls == [(0xABCD,)], "and the outcome read back"
+
+
+def test_maximize_reports_success_when_the_window_comes_back_maximized(chrome):
+    sdl = _sdl_reporting_maximized(chrome, True)
+    assert chrome.maximize() is True
+    assert sdl.SDL_MaximizeWindow.calls == [(0xABCD,)]
+
+
+def test_maximize_reports_failure_when_sdl_call_raises(chrome):
+    sdl = _sdl_reporting_maximized(chrome, True)
+
+    def boom(_ptr):
+        raise OSError("no such entry point")
+
+    sdl.SDL_MaximizeWindow = boom
+    assert chrome.maximize() is False
+
+
+def test_maximize_without_a_window_handle_is_false(chrome):
+    chrome._win_ptr = None
+    assert chrome.maximize() is False
+
+
 def test_fullscreen_titlebar_is_not_draggable(chrome):
     chrome._win_state = "fullscreen"
     assert _hit(chrome, 500, 5) == _HITTEST_NORMAL
@@ -350,6 +392,62 @@ def test_stats_stay_left_of_dots(chrome):
     band = [chrome.window.get_at((x, cy))[:3]
             for x in range(leftmost_dot - chrome.STATS_PAD + 1, leftmost_dot)]
     assert all(px == bg for px in band), "stats must not intrude into the dot padding"
+
+
+def test_reinit_sdl_drops_every_rendered_surface_and_the_font(chrome):
+    """reinit_sdl runs after the drawing surface has been replaced (resize,
+    fullscreen), which is exactly where a pygame font may no longer be used --
+    the repo rule is that no Font outlives a reinit. The readout font, both
+    wordmark halves and the brand mark all have to go, and the next frame has
+    to build them again rather than draw nothing."""
+    chrome.draw(["60 FPS"])
+    assert chrome._stats_font is not None
+    assert chrome._wordmark is not None
+    assert chrome._wordmark_accent is not None
+    assert chrome._logo_surf is not None
+
+    chrome.reinit_sdl()
+
+    assert chrome._stats_font is None, "a Font must never survive a reinit"
+    assert chrome._wordmark is None
+    assert chrome._wordmark_accent is None
+    assert chrome._logo_surf is None
+
+    chrome.draw(["60 FPS"])
+    assert chrome._stats_font is not None
+    assert chrome._wordmark is not None
+    assert chrome._wordmark_accent is not None
+    assert chrome._logo_surf is not None
+
+
+def test_wordmark_right_edge_guards_the_half_it_measures(chrome):
+    """The edge is the sum of BOTH wordmark halves, so a guard that only tests
+    the first one measured None and raised AttributeError -- out of _draw_stats,
+    i.e. taking the whole title bar down on the frame after a partial rebuild."""
+    chrome.draw()
+    chrome._wordmark_accent = None
+    assert chrome._wordmark_right_edge() == chrome.LOGO_MARGIN_LEFT + chrome.LOGO_SIZE
+
+
+def test_the_sdl_window_wrapper_is_held_for_the_life_of_the_window(chrome):
+    """_sdl_window looks unused -- nothing reads it after the id -- but it is a
+    keep-alive, and dropping it is a segfault, not a leak: creating the wrapper
+    makes SDL store a BORROWED pointer back to the Python object, which pygame
+    dereferences whenever it turns an SDL window event into a pygame one.
+    Collect the wrapper and the next VIDEORESIZE reads freed memory (measured:
+    tests/frontend/test_window_resize.py crashed its xdist worker in 7 of 8
+    runs with the field removed, 0 of 8 with it back). So: never None once
+    _init_sdl has run, and reinit must replace it rather than clear it."""
+    assert chrome._sdl_window is not None
+    live_id = chrome._sdl_window.id
+
+    for _ in range(3):
+        chrome.reinit_sdl()
+        gc.collect()
+        assert chrome._sdl_window is not None, "a reinit may never leave the wrapper dropped"
+
+    assert chrome._sdl_window.id == live_id
+    assert chrome._sdl_window.size == pg.display.get_surface().get_size()
 
 
 def test_layout_reserves_titlebar_and_keeps_board_playable_at_min_size():

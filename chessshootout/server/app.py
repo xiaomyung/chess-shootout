@@ -450,9 +450,6 @@ def create_app(*, now_provider: Callable[[], float] = time.monotonic,
         log.info("matchmake nickname=%s uuid=%s tc=%s+%s side=%s",
                  body.nickname, body.client_uuid[:8],
                  body.time_minutes, body.increment_seconds, body.side_preference)
-        if body.time_minutes < 1 or body.increment_seconds < 0:
-            raise HTTPException(status_code=422,
-                                  detail={"reason": Reason.INVALID_TIME_CONTROL})
         prior = rooms.in_progress_room_for(body.client_uuid)
         if prior is not None:
             prior_room, prior_color = prior

@@ -693,13 +693,48 @@ def test_set_enabled_false_calls_stop_all_via_real_channel():
     assert sm.enabled is False
 
 
-def test_set_enabled_true_does_not_stop():
-    sm = SoundManager(SOUNDS_DIR, enabled=False)
+def test_set_enabled_true_does_not_stop(tmp_path):
+    sm = SoundManager(tmp_path, enabled=False)
     stopped = []
     sm.stop_all = lambda: stopped.append(True)
     sm.set_enabled(True)
     assert stopped == []
     assert sm.enabled is True
+
+
+def test_enabling_a_silent_manager_converges_on_the_enabled_start_state(tmp_path, fake_channel):
+    """A manager built enabled=False (no mixer at launch, or sound off in
+    Options) never claimed the heartbeat's reserved channel and never loaded a
+    folder -- main.py's preload() no-ops while silent. Switching sound on has
+    to finish both, or the heartbeat is inaudible for the rest of the run and
+    every first play pays a disk read the preload was meant to have paid."""
+    sm = SoundManager(tmp_path, enabled=False)
+    assert sm._heartbeat_channel is None
+    assert sm._slots == {}
+
+    with patch.object(SoundManager, "_reserve_channel", return_value=fake_channel):
+        sm.set_enabled(True)
+
+    assert sm._heartbeat_channel is fake_channel
+    assert set(sm._slots) == set(SLOTS), "the preload skipped while silent is made up"
+
+    sm._slots["heartbeat_fast"] = [MagicMock(name="hb_fast")]
+    sm.update_heartbeat(0.01, paused=False)
+    assert sm._state == STATE_FAST
+    fake_channel.play.assert_called_once()
+
+
+def test_muting_and_unmuting_keeps_the_channel_already_held(tmp_path, fake_channel):
+    """Only a manager that never had a channel may claim one: re-reserving on
+    every unmute would strand the loop playing on the old channel."""
+    sm = SoundManager(tmp_path, heartbeat_channel=fake_channel, master_volume=1.0)
+    sm.set_enabled(False)
+
+    with patch.object(SoundManager, "_reserve_channel") as reserve:
+        sm.set_enabled(True)
+
+    reserve.assert_not_called()
+    assert sm._heartbeat_channel is fake_channel
 
 
 def test_unmuting_a_manager_built_without_a_mixer_can_still_load_slots():

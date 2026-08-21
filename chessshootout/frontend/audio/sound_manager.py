@@ -199,14 +199,22 @@ class SoundManager:
         """
         Turn the game's sound on or off, behind the speaker button on the rail
         and the switch in Options. Switching it off also fades the looping
-        heartbeat out, which would otherwise carry on unheard
+        heartbeat out, which would otherwise carry on unheard. Switching it on
+        finishes the setting up a manager built silent never did -- claiming
+        the heartbeat's channel and loading the folders -- so sound turned on
+        mid-game behaves exactly like sound that was on all along
 
         :param value: True for sound, False for silence
         """
         new_enabled = bool(value)
-        if not new_enabled and self.enabled:
+        was_enabled = self.enabled
+        if not new_enabled and was_enabled:
             self.stop_all()
         self.enabled = new_enabled
+        if new_enabled and not was_enabled:
+            if self._heartbeat_channel is None:
+                self._heartbeat_channel = self._reserve_channel(0)
+            self.preload()
 
     def _play_at(self, sound: pg.mixer.Sound, volume: float) -> None:
         """

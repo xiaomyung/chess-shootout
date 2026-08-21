@@ -7,7 +7,7 @@ import pygame as pg
 
 from chessshootout.backend.backend import Backend
 from chessshootout.backend.pseudo_legal import piece_can_pseudo_reach, king_square, checking_square
-from chessshootout.backend.utils import HistoryEntry, Move, MoveResult, Square
+from chessshootout.backend.utils import BOARD_SIZE, HistoryEntry, Move, MoveResult, Square
 from chessshootout.frontend.board.annotations import Annotations
 from chessshootout.frontend.board.drag import DragPhysics
 from chessshootout.frontend.visual.animation import PieceAnimation
@@ -26,10 +26,10 @@ from chessshootout.backend.pieces import PieceType, PieceColor, Piece, opponent_
 from chessshootout.frontend.visual.fonts import get_font
 
 
-_OVERLAY_CACHE = new_cache()
+_OVERLAY_CACHE = new_size_cache()
 _PROMO_OPTION_CACHE = new_size_cache()
-_PROMO_PLATE_CACHE = new_cache()
-_MARKER_CACHE = new_cache()
+_PROMO_PLATE_CACHE = new_size_cache()
+_MARKER_CACHE = new_size_cache()
 _PIECE_IMAGE_CACHE = new_cache()
 _SCALED_PIECE_CACHE = new_size_cache()
 
@@ -131,7 +131,6 @@ class Board:
     and the read-only review screen build one
     """
 
-    SIZE = 8
     PLATE_MARGIN = 26
     PLATE_MARGIN_FLOOR = 18
     PLATE_CUT = 18
@@ -191,6 +190,7 @@ class Board:
         self.auto_queen_provider: Callable[[], bool] = lambda: False
 
         self.rect = pg.Rect(0, 0, 0, 0)
+        self.scale = 1.0
         self.needs_present = False
         self.frame_pad = 0
         self.cell_size = 0
@@ -292,8 +292,9 @@ class Board:
         """
         Wipe the board back to a fresh game: orientation, selection, a pending
         promotion, animations, effects, premoves, the squares a skill check was
-        hiding, every mark and the browse position. Screens call this between
-        games, so nothing from the last one can survive into the next
+        hiding, every mark, the memoised check squares and the browse position.
+        Screens call this between games, so nothing from the last one can
+        survive into the next
         """
         self.flipped = False
         self.selected_square = None
@@ -307,6 +308,8 @@ class Board:
         self.clear_all_annotations()
         self.end_press()
         self.review_ply = None
+        self._check_squares_key = None
+        self._check_squares = []
 
     def _render_text(self) -> None:
         """
@@ -320,11 +323,11 @@ class Board:
         coord_font = get_font(size, bold=True, mono=True)
         self.file_labels_rendered = [
             coord_font.render(self.file_labels[i], True, Colors.text_muted)
-            for i in range(self.SIZE)
+            for i in range(BOARD_SIZE)
         ]
         self.rank_labels_rendered = [
-            coord_font.render(str(self.SIZE - r), True, Colors.text_muted)
-            for r in range(self.SIZE)
+            coord_font.render(str(BOARD_SIZE - r), True, Colors.text_muted)
+            for r in range(BOARD_SIZE)
         ]
 
     def _load_piece_images(self) -> None:
@@ -354,8 +357,8 @@ class Board:
         :returns: the square's rect in window pixels
         """
         if self.flipped:
-            row = self.SIZE - 1 - row
-            col = self.SIZE - 1 - col
+            row = BOARD_SIZE - 1 - row
+            col = BOARD_SIZE - 1 - col
         return pg.Rect(
             col * self.cell_size + self.board_offset_x,
             row * self.cell_size + self.board_offset_y,
@@ -392,10 +395,10 @@ class Board:
         :returns: the scaled piece image
         """
         key = (ptype, color, opt)
-        return cast(pg.Surface, memoized_surface(
+        return memoized_surface(
             _PROMO_OPTION_CACHE, key,
             lambda: pg.transform.smoothscale(
-                self.piece_images_original[(ptype, color)], (opt, opt))))
+                self.piece_images_original[(ptype, color)], (opt, opt)))
 
     def _draw_promotion_picker(self) -> None:
         """
@@ -461,7 +464,9 @@ class Board:
     def _promo_nameplate(self, text: str, font: pg.font.Font, color: str) -> pg.Surface:
         """
         The small dark plate carrying a promotion button's hotkey letter or its
-        nickname, cached by text, font and colour so it is built only once
+        nickname, cached by text, font height and colour so it is built only
+        once. The font's height stands in for the font itself in the key, so a
+        cached plate never keeps a font replaced by a resize alive
 
         :param text: label to show, a hotkey letter or a piece nickname
         :param font: font the label is rendered with
@@ -484,8 +489,8 @@ class Board:
             pg.draw.rect(surf, scrim, surf.get_rect(), border_radius=3)
             surf.blit(label, (pad_x, pad_y))
             return surf
-        return cast(pg.Surface,
-                    memoized_surface(_PROMO_PLATE_CACHE, (text, font, color), build))
+        return memoized_surface(
+            _PROMO_PLATE_CACHE, (text, font.get_height(), color), build)
 
     def pick_promotion(self, ptype: PieceType) -> None:
         """
@@ -605,8 +610,8 @@ class Board:
         orientation so they still read correctly when it is turned round
         """
         gutter_cx = (self.rect.x + self.board_offset_x) // 2
-        for visual_row in range(self.SIZE):
-            array_row = (self.SIZE - 1 - visual_row) if self.flipped else visual_row
+        for visual_row in range(BOARD_SIZE):
+            array_row = (BOARD_SIZE - 1 - visual_row) if self.flipped else visual_row
             label = self.rank_labels_rendered[array_row]
             cy = self.board_offset_y + visual_row * self.cell_size + self.cell_size // 2
             self.window.blit(label, (gutter_cx - label.get_width() // 2 + self._shake_dx,
@@ -617,10 +622,10 @@ class Board:
         Draw the file letters along the bottom gutter, following the board's
         orientation so they still read correctly when it is turned round
         """
-        grid_bottom = self.board_offset_y + self.cell_size * self.SIZE
+        grid_bottom = self.board_offset_y + self.cell_size * BOARD_SIZE
         gutter_cy = (grid_bottom + self.rect.bottom) // 2
-        for visual_col in range(self.SIZE):
-            array_col = (self.SIZE - 1 - visual_col) if self.flipped else visual_col
+        for visual_col in range(BOARD_SIZE):
+            array_col = (BOARD_SIZE - 1 - visual_col) if self.flipped else visual_col
             label = self.file_labels_rendered[array_col]
             cx = self.board_offset_x + visual_col * self.cell_size + self.cell_size // 2
             self.window.blit(label, (cx - label.get_width() // 2 + self._shake_dx,
@@ -704,7 +709,7 @@ class Board:
             surf = pg.Surface((cs, cs), pg.SRCALPHA)
             surf.fill(color)
             return surf
-        return cast(pg.Surface, memoized_surface(_OVERLAY_CACHE, (cs, color), build))
+        return memoized_surface(_OVERLAY_CACHE, (cs, color), build)
 
     def _in_check_king_squares(self) -> list[Square]:
         """
@@ -720,7 +725,7 @@ class Board:
         if key != self._check_squares_key:
             self._check_squares_key = key
             result = []
-            for row, col in product(range(self.SIZE), repeat=2):
+            for row, col in product(range(BOARD_SIZE), repeat=2):
                 piece = self.match.piece_at(Square(row, col))
                 if (piece is not None and piece.type == PieceType.KING
                         and self.match.is_in_check(piece.color)):
@@ -862,7 +867,7 @@ class Board:
         Draw the coloured squares, this player's and the opponent's shared
         ones, each side in its own colour
         """
-        self.annotations._draw_annotation_highlights()
+        self.annotations.draw_highlights()
 
     def _draw_review_cue(self) -> None:
         """
@@ -883,7 +888,7 @@ class Board:
         Draw the arrows over the board, including the one currently being
         dragged out
         """
-        self.annotations._draw_arrows()
+        self.annotations.draw_arrows()
 
     def _draw_check_highlight(self) -> None:
         """
@@ -942,7 +947,7 @@ class Board:
         if self.review_ply is not None:
             grid = self.match.position_at(self.review_ply)
             hidden = {a.from_sq for a in self.animations}
-            for row, col in product(range(self.SIZE), repeat=2):
+            for row, col in product(range(BOARD_SIZE), repeat=2):
                 sq = Square(row, col)
                 if sq in hidden:
                     continue
@@ -967,7 +972,7 @@ class Board:
         settle_sq = self.drag.settle_target()
         if settle_sq is not None:
             hidden.add(settle_sq)
-        for row, col in product(range(self.SIZE), repeat=2):
+        for row, col in product(range(BOARD_SIZE), repeat=2):
             sq = Square(row, col)
             if sq in hidden:
                 continue
@@ -1368,8 +1373,7 @@ class Board:
                 pg.draw.circle(surf, color, (s * k // 2, s * k // 2),
                                radius * k, thickness * k)
             return supersample(s, render)
-        return cast(pg.Surface,
-                    memoized_surface(_MARKER_CACHE, (s, color, "dot"), build))
+        return memoized_surface(_MARKER_CACHE, (s, color, "dot"), build)
 
     def _draw_dot(self, rect: pg.Rect) -> None:
         """
@@ -1418,7 +1422,7 @@ class Board:
         self.effects.board_rect = pg.Rect(rect)
         self.frame_pad = scale_floor(self.PLATE_MARGIN, self.scale, self.PLATE_MARGIN_FLOOR)
         inner = rect.width - 2 * self.frame_pad
-        cell_size = max(inner // self.SIZE, 1)
+        cell_size = max(inner // BOARD_SIZE, 1)
         if cell_size != self.cell_size:
             self.effects.clear_weapon_cache()
             opt = max(self.PROMOTION_OPTION_SIZE_MIN,
@@ -1426,7 +1430,7 @@ class Board:
             self._promo_hotkey_font = get_font(max(int(opt * 0.18), 9), bold=True, mono=True)
             self._promo_tag_font = get_font(max(int(opt * 0.13), 8), bold=True, mono=True)
         self.cell_size = cell_size
-        used = self.cell_size * self.SIZE
+        used = self.cell_size * BOARD_SIZE
         free_w = rect.width - 2 * self.frame_pad - used
         free_h = rect.height - 2 * self.frame_pad - used
         self.board_offset_x = rect.x + self.frame_pad + free_w // 2
@@ -1441,14 +1445,14 @@ class Board:
         Pre-render the sixty-four squares onto one surface, so a frame blits the
         whole grid in a single go instead of drawing square after square
         """
-        gs = self.cell_size * self.SIZE
+        gs = self.cell_size * BOARD_SIZE
         if gs <= 0:
             self._checkerboard_surf = None
             return
         surf = pg.Surface((gs, gs)).convert()
         cs = self.cell_size
-        for r in range(self.SIZE):
-            for c in range(self.SIZE):
+        for r in range(BOARD_SIZE):
+            for c in range(BOARD_SIZE):
                 color = Colors.white_tile if (r + c) % 2 == 0 else Colors.black_tile
                 pg.draw.rect(surf, color, pg.Rect(c * cs, r * cs, cs, cs))
         self._checkerboard_surf = surf
@@ -1467,7 +1471,7 @@ class Board:
         surf = plate.copy()
         gx = self.board_offset_x - self.rect.x
         gy = self.board_offset_y - self.rect.y
-        gs = self.cell_size * self.SIZE
+        gs = self.cell_size * BOARD_SIZE
         pg.draw.rect(surf, Colors.border, pg.Rect(gx - 1, gy - 1, gs + 2, gs + 2), 1)
         self._frame_surf = surf
 
@@ -1552,13 +1556,13 @@ class Board:
         x, y = pos
         fcol = (x - self.board_offset_x) / self.cell_size
         frow = (y - self.board_offset_y) / self.cell_size
-        if not (0 <= fcol < self.SIZE and 0 <= frow < self.SIZE):
+        if not (0 <= fcol < BOARD_SIZE and 0 <= frow < BOARD_SIZE):
             return None
         col = int(fcol)
         row = int(frow)
         if self.flipped:
-            row = self.SIZE - 1 - row
-            col = self.SIZE - 1 - col
+            row = BOARD_SIZE - 1 - row
+            col = BOARD_SIZE - 1 - col
         return Square(row, col)
 
     def handle_click(self, square: Square) -> str | None:
@@ -1622,7 +1626,7 @@ class Board:
             self.selected_square = None
             return None
 
-        if self._should_switch_focus_to(square, grid, live_at_clicked, current_turn, local_color):
+        if self._should_switch_focus_to(grid, live_at_clicked, current_turn, local_color):
             self.selected_square = None
             if self._is_real_move_eligible(live_at_clicked, current_turn, local_color):
                 return self._select_signal(self._try_select(square))
@@ -1724,7 +1728,7 @@ class Board:
         piece = self.match.piece_at(from_sq)
         if piece is None or piece.type != PieceType.PAWN:
             return False
-        if to_sq.row not in (0, self.SIZE - 1):
+        if to_sq.row not in (0, BOARD_SIZE - 1):
             return False
         return to_sq in self.match.legal_moves_from(from_sq)
 
@@ -1773,7 +1777,7 @@ class Board:
             return False
         return True
 
-    def _should_switch_focus_to(self, square: Square, grid: list[list[Piece | None]],
+    def _should_switch_focus_to(self, grid: list[list[Piece | None]],
                                 live_at_clicked: Piece | None, current_turn: PieceColor,
                                 local_color: PieceColor | None) -> bool:
         """
@@ -1781,7 +1785,6 @@ class Board:
         instead of trying to move the selected piece onto it. Both pieces have
         to be yours, which is what keeps a capture from being read as a switch
 
-        :param square: square that was clicked
         :param grid: position clicks are read against, premoves projected on
         :param live_at_clicked: piece really standing there in the live position
         :param current_turn: side to move
@@ -2138,7 +2141,7 @@ class Board:
 
         :returns: the occupied squares of the live position
         """
-        return {Square(r, c) for r, c in product(range(self.SIZE), repeat=2)
+        return {Square(r, c) for r, c in product(range(BOARD_SIZE), repeat=2)
                 if self.match.piece_at(Square(r, c)) is not None}
 
     def _on_capture_fire(self, entry: HistoryEntry, color: str, victim_sq: Square,

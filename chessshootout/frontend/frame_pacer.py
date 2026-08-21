@@ -16,12 +16,16 @@ class FramePacer:
         """
         Set the pace, and the two clock calls the pacing stands on so tests can
         drive it without ever really waiting. The first wait establishes the
-        baseline, so building this early costs nothing
+        baseline, so building this early costs nothing. A rate of zero or less
+        describes no frame at all and is turned away here, where the caller can
+        see what it asked for, rather than dividing by zero
 
-        :param target_fps: frames per second to hold
+        :param target_fps: frames per second to hold, which must be positive
         :param now: reads a monotonic clock in seconds
         :param sleep: waits the given number of seconds
         """
+        if target_fps <= 0:
+            raise ValueError(f"target_fps must be positive, got {target_fps}")
         self.period = 1.0 / target_fps
         self._now = now
         self._sleep = sleep

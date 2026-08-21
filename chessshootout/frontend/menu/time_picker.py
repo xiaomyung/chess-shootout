@@ -1,7 +1,7 @@
 import math
 import random
 from collections.abc import Callable
-from typing import Any, cast
+from typing import Any
 
 import pygame as pg
 
@@ -123,7 +123,7 @@ def _turret_bubble_surface(diameter: int, ring_w: int) -> pg.Surface:
             pg.draw.circle(surf, pg.Color(Colors.surface_raised), (r, r), r)
             pg.draw.circle(surf, pg.Color(Colors.amber), (r, r), r, max(int(ring_w * k), 1))
         return supersample((diameter, diameter), render, scale=8)
-    return cast(pg.Surface, memoized_surface(_TURRET_BUBBLE_CACHE, (diameter, ring_w), build))
+    return memoized_surface(_TURRET_BUBBLE_CACHE, (diameter, ring_w), build)
 
 
 def _quantize(value: float, step: float) -> float:

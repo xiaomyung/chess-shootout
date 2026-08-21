@@ -4,6 +4,7 @@ from typing import Any, cast
 import pygame as pg
 
 from chessshootout.backend.pieces import PieceColor, opponent_of
+from chessshootout.backend.utils import BOARD_SIZE
 from chessshootout.domain import openings
 from chessshootout.domain.capture_summary import captured_by, material_advantage
 from chessshootout.domain.match import Match
@@ -200,7 +201,7 @@ class ReviewScreen(Screen):
         window_width, window_height = size
         r = compute_layout(
             window_width, window_height, mode=self.name, focus_mode=False,
-            focus_show=env.get_focus_show(), board_size=self.board.SIZE)
+            focus_show=env.get_focus_show(), board_size=BOARD_SIZE)
         self.board.set_rect(r.board_rect, scale=r.scale)
         self.right_menu.set_rect(r.menu_rect, scale=r.scale)
         self.strip_top.set_rect(r.top_strip_rect, scale=r.scale)

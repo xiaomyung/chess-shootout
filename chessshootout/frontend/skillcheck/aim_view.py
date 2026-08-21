@@ -59,7 +59,7 @@ def _spotlight_surface(r: int) -> pg.Surface:
             pg.draw.circle(surf, (*rgb, int(AIM_SPOTLIGHT_ALPHA * (1.0 - edge) ** 2)),
                            (r, r), radius)
         return surf
-    return cast(pg.Surface, memoized_surface(_SPOTLIGHT_CACHE, r, build))
+    return memoized_surface(_SPOTLIGHT_CACHE, r, build)
 
 
 class AimController(SkillCheckController):
@@ -97,9 +97,10 @@ class AimController(SkillCheckController):
             check draws while the board suppresses that square
         :param board_rect: board rect in window pixels to dim, None to skip the
             scrim
-        :param geom: resolves a square, or this view's off-board sentinel
-            keys, to a centre in window pixels, so the miss choreography can
-            be staged on the real board
+        :param geom: resolves a square to a centre in window pixels, so the
+            miss choreography can be staged on the real board; it is never
+            asked about this view's off-board sentinel keys and None stages
+            everything on the victim's square instead
         :param from_sq: square the attacker fires from
         :param victim_sq: square the victim stands on, which for an en-passant
             capture is not the square being moved to
@@ -126,12 +127,39 @@ class AimController(SkillCheckController):
         self._attacker_type = attacker_type
         self._shot_sound = shot_sound
         self._fx = EffectManager()
-        self._geom = geom if geom is not None else (lambda key: self.center)
+        self._geom = self._own_center_for_sentinels(geom)
         self._fx.geom = self._geom
         self._board_rect: pg.Rect | None = None
         self.set_board_rect(board_rect)
         self._apply_geometry(cell_rect)
         self._cue("play_aim_lock")
+
+    def _own_center_for_sentinels(
+            self, geom: Callable[[Square | str], tuple[float, float]] | None,
+    ) -> Callable[[Square | str], tuple[float, float]]:
+        """
+        Wrap the board's square resolver so the gun-fight can be staged even
+        when nobody told the check which square the shooter or the victim is
+        on. Those two stand in as sentinel strings, which no board resolver
+        knows how to place, so they are answered here with the check's own
+        centre and never handed on
+
+        :param geom: the board's resolver, or None when there is no board to
+            stage on and everything happens over the victim's square
+        :returns: a resolver that always yields a point in window pixels
+        """
+        def resolve(key: Square | str) -> tuple[float, float]:
+            """
+            Place one square or sentinel key for the effects layer
+
+            :param key: a board square, or a sentinel standing in for a
+                square this check was not given
+            :returns: the point in window pixels to stage effects at
+            """
+            if geom is None or isinstance(key, str):
+                return self.center
+            return geom(key)
+        return resolve
 
     def _apply_geometry(self, cell_rect: pg.Rect) -> None:
         """

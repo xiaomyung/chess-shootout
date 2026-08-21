@@ -10,6 +10,7 @@ import pytest
 
 from chessshootout.backend.clock import Clock
 from chessshootout.backend.pieces import PieceColor
+from chessshootout.backend.utils import BOARD_SIZE
 from chessshootout.frontend.focus.time_line import TimeLine
 from chessshootout.frontend.visual.colors import Colors
 from chessshootout.frontend.visual.clock_visual import LOW_TIME_FRACTION
@@ -23,11 +24,9 @@ def _pg():
 
 
 class _Board:
-    SIZE = 8
-
     def __init__(self, rect, flipped=False):
         self.rect = rect
-        self.cell_size = rect.width / self.SIZE
+        self.cell_size = rect.width / BOARD_SIZE
         self.board_offset_x = rect.left
         self.board_offset_y = rect.top
         self.flipped = flipped

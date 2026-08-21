@@ -24,7 +24,9 @@ def export_fen(backend: Backend) -> str:
     Write out the position a backend is holding as a FEN string, the spelling
     the server puts in every game-start and resume payload and the one the menu
     offers as a shareable link. FEN describes the position only -- the move
-    history, the clocks and any skill-check state are not part of it
+    history, the clocks and any skill-check state are not part of it. The move
+    number counts on from the engine's fullmove baseline, so a position loaded
+    at move 24 is still written out as move 24
 
     :param backend: engine whose current position is written out
     :returns: the six-field FEN string for that position
@@ -34,7 +36,8 @@ def export_fen(backend: Backend) -> str:
     rights = _castling_rights_to_fen(backend.castling_rights)
     ep = _square_to_algebraic(backend.en_passant_target)
     halfmove = backend.halfmove_clock
-    fullmove = 1 + len(backend.move_history) // 2
+    plies = len(backend.move_history) + (1 if backend.baseline_black_to_move else 0)
+    fullmove = backend.fullmove_baseline + plies // 2
     return f"{placement} {turn} {rights} {ep} {halfmove} {fullmove}"
 
 
@@ -42,12 +45,15 @@ def apply_fen(backend: Backend, fen: str) -> None:
     """
     Load a position into a backend from a FEN string, which is how a game is
     started from a pasted position. The board, side to move, castling rights,
-    en-passant target and halfmove clock all come from the FEN, while the move
-    history is emptied and the repetition count restarts here, so a loaded game
-    begins with no past to repeat or take back
+    en-passant target, halfmove clock and move number all come from the FEN,
+    while the move history is emptied and the repetition count restarts here, so
+    a loaded game begins with no past to repeat or take back. The move number
+    becomes the engine's fullmove baseline, which is what lets the position be
+    written back out at the number it came in at
 
     :param backend: engine to overwrite; it is changed in place
-    :param fen: FEN string carrying at least its first four fields
+    :param fen: FEN string carrying at least its first four fields, its side to
+        move spelled exactly w or b
     """
     parts = fen.strip().split()
     if len(parts) < 4:
@@ -56,7 +62,10 @@ def apply_fen(backend: Backend, fen: str) -> None:
     turn = parts[1]
     castling = parts[2]
     ep = parts[3]
+    if turn not in ("w", "b"):
+        raise ValueError(f"FEN side to move must be w or b: {turn!r}")
     halfmove = int(parts[4]) if len(parts) >= 5 else 0
+    fullmove = int(parts[5]) if len(parts) >= 6 else 1
 
     state = _parse_placement(placement)
     backend.state = state
@@ -64,9 +73,11 @@ def apply_fen(backend: Backend, fen: str) -> None:
     backend.castling_rights = _parse_castling(castling)
     backend.en_passant_target = _parse_ep(ep)
     backend.halfmove_clock = halfmove
+    backend.fullmove_baseline = fullmove
+    backend.baseline_black_to_move = turn == "b"
     backend.move_history = []
     backend.position_counts = Counter()
-    backend.position_counts[backend._position_key()] = 1
+    backend.position_counts[backend.position_key()] = 1
 
 
 def _rank_to_fen(backend: Backend, row: int) -> str:

@@ -234,7 +234,7 @@ class ClockSnapshot(BaseModel):
 
     white_remaining: float
     black_remaining: float
-    running_for: Literal["white", "black"] | None
+    running_for: Literal["white", "black"] | None = None
 
 
 class HistoryEntryWire(BaseModel):
@@ -966,7 +966,8 @@ class SkillCheckSpectateShotMessage(_Base):
     """
     Mirrors each of the moving player's skill-check inputs to the watching
     opponent: when it came, whether it hit, how far the challenge has got, and
-    where it was aimed. Keeps both screens telling the same story
+    which board square it was aimed at. Keeps both screens telling the same
+    story
     """
 
     type: Literal["skill_check_spectate_shot"] = "skill_check_spectate_shot"
@@ -975,8 +976,8 @@ class SkillCheckSpectateShotMessage(_Base):
     won: bool
     progress: int = 0
     direction: SkillCheckDirectionLiteral | None = None
-    target_row: float | None = None
-    target_col: float | None = None
+    target_row: float | None = Field(default=None, ge=0.0, lt=SKILLCHECK_TARGET_MAX)
+    target_col: float | None = Field(default=None, ge=0.0, lt=SKILLCHECK_TARGET_MAX)
 
 
 class ErrorMessage(_Base):

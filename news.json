@@ -1,7 +1,7 @@
 [
   {
     "title": "v2.12.2 — Spring Cleaning",
-    "body": "Under-the-hood maintenance release:\n- A full internal polish pass over the whole codebase, making future fixes and features faster and safer to ship\n- No gameplay changes — everything plays exactly as before",
+    "body": "Under-the-hood maintenance release:\n- A full internal polish pass over the whole codebase, plus a sweep of small fixes it surfaced\n- Positions pasted as FEN now keep their move number, refuse a malformed side-to-move, and show the check highlight right away\n- Esc no longer acts on things hidden behind a blocking overlay, and sound switched on mid-game now works fully\n- Smoother long sessions: less busywork per frame during live games and when browsing past moves",
     "date": "2026-08-21"
   },
   {

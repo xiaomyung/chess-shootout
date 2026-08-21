@@ -1,6 +1,5 @@
 import math
 from collections.abc import Callable
-from typing import cast
 
 import pygame as pg
 
@@ -109,8 +108,7 @@ def pit_surface(rx: int, ry: int, accent: str = Colors.accent) -> pg.Surface:
         """
         return supersample((2 * rx, 2 * ry),
                            _pit_render(accent, MOLE_VIEW_PIT_GLOW_ALPHA))
-    return cast(pg.Surface,
-                memoized_surface(_MOLE_STATIC_CACHE, ("pit", rx, ry, accent), build))
+    return memoized_surface(_MOLE_STATIC_CACHE, ("pit", rx, ry, accent), build)
 
 
 def pit_mouth(rx: int, ry: int) -> tuple[int, int]:
@@ -160,8 +158,7 @@ def emerge_mask(w: int, rx: int, ry: int, fade: int) -> pg.Surface:
             for i in range(fade):
                 mask.fill((*_KEEP, int(255 * (1.0 - (i + 1) / fade))), (x, arc + i, 1, 1))
         return mask
-    return cast(pg.Surface,
-                memoized_surface(_MOLE_STATIC_CACHE, ("emerge", w, rx, ry, fade), build))
+    return memoized_surface(_MOLE_STATIC_CACHE, ("emerge", w, rx, ry, fade), build)
 
 
 def pit_front_surface(rx: int, ry: int, accent: str = Colors.accent) -> pg.Surface:
@@ -186,8 +183,7 @@ def pit_front_surface(rx: int, ry: int, accent: str = Colors.accent) -> pg.Surfa
         front = pg.Surface((pit.get_width(), half), pg.SRCALPHA)
         front.blit(pit, (0, half - pit.get_height()))
         return front
-    return cast(pg.Surface,
-                memoized_surface(_MOLE_STATIC_CACHE, ("pit_front", rx, ry, accent), build))
+    return memoized_surface(_MOLE_STATIC_CACHE, ("pit_front", rx, ry, accent), build)
 
 
 def seam_band_surface(w: int, h: int) -> pg.Surface:
@@ -217,7 +213,7 @@ def seam_band_surface(w: int, h: int) -> pg.Surface:
             pg.draw.line(band, (int(col.r * gain), int(col.g * gain), int(col.b * gain)),
                          (0, y), (w - 1, y))
         return band
-    return cast(pg.Surface, memoized_surface(_MOLE_STATIC_CACHE, ("seam", w, h), build))
+    return memoized_surface(_MOLE_STATIC_CACHE, ("seam", w, h), build)
 
 
 def seam_glow_surface(w: int, h: int) -> pg.Surface:
@@ -250,7 +246,7 @@ def seam_glow_surface(w: int, h: int) -> pg.Surface:
                 gain = v * v * min((1.0 - d) / edge, 1.0)
                 surf.set_at((x, y), (int(col.r * gain), int(col.g * gain), int(col.b * gain)))
         return surf
-    return cast(pg.Surface, memoized_surface(_MOLE_STATIC_CACHE, ("seamglow", w, h), build))
+    return memoized_surface(_MOLE_STATIC_CACHE, ("seamglow", w, h), build)
 
 
 def _cross_blade_points(c: float, ux: int, uy: int, inner: float, outer: float,
@@ -381,7 +377,7 @@ def crosshair_surface(arm: int, gap: int, lw: int, bloom_bucket: int,
             pg.draw.circle(surf, _CROSS_DOT, (c, c), dot_r * k)
         return supersample(2 * reach + 1, render)
     key = ("cross", arm, gap, lw, bloom_bucket, out_bucket)
-    return cast(pg.Surface, memoized_surface(_MOLE_STATIC_CACHE, key, build))
+    return memoized_surface(_MOLE_STATIC_CACHE, key, build)
 
 
 def _radial_glow(r: int, color: pg.Color, gain_scale: float) -> pg.Surface:
@@ -411,9 +407,9 @@ def cross_glow_surface(r: int) -> pg.Surface:
     :param r: radius of the halo in pixels
     :returns: the shared halo, meant for a BLEND_RGB_ADD blit
     """
-    return cast(pg.Surface, memoized_surface(
+    return memoized_surface(
         _MOLE_STATIC_CACHE, ("crossglow", r),
-        lambda: _radial_glow(r, _CROSS_GLOW, MOLE_VIEW_CROSS_GLOW_GAIN)))
+        lambda: _radial_glow(r, _CROSS_GLOW, MOLE_VIEW_CROSS_GLOW_GAIN))
 
 
 def _danger_render(bucket: int) -> Callable[[pg.Surface, int], None]:
@@ -477,7 +473,7 @@ def pit_telegraph_surface(rx: int, ry: int, bucket: int, danger: bool = False,
         render = _danger_render(bucket) if danger else _telegraph_render(bucket, accent)
         return supersample((2 * rx, 2 * ry), render)
     key = ("pit_tele", rx, ry, bucket, danger, accent)
-    return cast(pg.Surface, memoized_surface(_MOLE_STATIC_CACHE, key, build))
+    return memoized_surface(_MOLE_STATIC_CACHE, key, build)
 
 
 def muzzle_surface(r: int) -> pg.Surface:
@@ -501,7 +497,7 @@ def muzzle_surface(r: int) -> pg.Surface:
             pg.draw.line(surf, hot, (r, r), (r + dx * r, r + dy * r),
                          max(r // MOLE_VIEW_MUZZLE_RAY_W_DIV, 1))
         return surf
-    return cast(pg.Surface, memoized_surface(_MOLE_STATIC_CACHE, ("muzzle", r), build))
+    return memoized_surface(_MOLE_STATIC_CACHE, ("muzzle", r), build)
 
 
 def win_pop_surface(r: int) -> pg.Surface:
@@ -512,9 +508,9 @@ def win_pop_surface(r: int) -> pg.Surface:
     :param r: radius of the burst in pixels
     :returns: the shared burst, meant for a BLEND_RGB_ADD blit
     """
-    return cast(pg.Surface, memoized_surface(
+    return memoized_surface(
         _MOLE_STATIC_CACHE, ("winpop", r),
-        lambda: _radial_glow(r, pg.Color(Colors.amber), MOLE_VIEW_WIN_POP_GAIN)))
+        lambda: _radial_glow(r, pg.Color(Colors.amber), MOLE_VIEW_WIN_POP_GAIN))
 
 
 def _casing_surface(w: int, h: int) -> pg.Surface:
@@ -537,7 +533,7 @@ def _casing_surface(w: int, h: int) -> pg.Surface:
         pg.draw.rect(surf, pg.Color(Colors.amber_hi),
                      pg.Rect(0, 0, max(w // MOLE_VIEW_CASING_TIP_DIV, 1), h))
         return surf
-    return cast(pg.Surface, memoized_surface(_MOLE_STATIC_CACHE, ("casing", w, h), build))
+    return memoized_surface(_MOLE_STATIC_CACHE, ("casing", w, h), build)
 
 
 def casing_rotated(w: int, h: int, bucket: int) -> pg.Surface:
@@ -562,5 +558,4 @@ def casing_rotated(w: int, h: int, bucket: int) -> pg.Surface:
         base = _casing_surface(w, h)
         deg = bucket * MOLE_VIEW_CASING_SPIN_BUCKET_DEG
         return base if deg == 0 else pg.transform.rotate(base, deg)
-    return cast(pg.Surface,
-                memoized_surface(_MOLE_STATIC_CACHE, ("casing_rot", w, h, bucket), build))
+    return memoized_surface(_MOLE_STATIC_CACHE, ("casing_rot", w, h, bucket), build)

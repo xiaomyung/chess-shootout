@@ -117,7 +117,7 @@ def _side_image(color: str) -> pg.Surface | None:
             return img.convert_alpha()
         except (pg.error, OSError):
             return None
-    return cast(pg.Surface | None, memoized_surface(_HERO_ART_CACHE, ("side", color), build))
+    return memoized_surface(_HERO_ART_CACHE, ("side", color), build)
 
 
 def _scaled_side_image(color: str, size: int) -> pg.Surface | None:
@@ -141,7 +141,7 @@ def _scaled_side_image(color: str, size: int) -> pg.Surface | None:
         if img is None:
             return None
         return pg.transform.smoothscale(img, (size, size))
-    return cast(pg.Surface | None, memoized_surface(_HERO_SCALED_CACHE, (color, size), build))
+    return memoized_surface(_HERO_SCALED_CACHE, (color, size), build)
 
 
 def _tracked_surface(font: pg.font.Font, text: str, color: str,
@@ -176,7 +176,7 @@ def _tracked_surface(font: pg.font.Font, text: str, color: str,
             x += g.get_width() + tracking
         return surf
     key = ("tagline", text, font.get_height(), str(color), tracking)
-    return cast(pg.Surface, memoized_surface(_HERO_ART_CACHE, key, build))
+    return memoized_surface(_HERO_ART_CACHE, key, build)
 
 
 class _PopoverAnim:

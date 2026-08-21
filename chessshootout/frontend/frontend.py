@@ -11,6 +11,7 @@ from chessshootout import paths
 from chessshootout.domain.match import SINGLE_SCREEN, ONLINE
 from chessshootout.backend.backend import Backend
 from chessshootout.backend.fen import apply_fen
+from chessshootout.backend.utils import BOARD_SIZE
 from chessshootout.infra import env
 from chessshootout.frontend.menu.menu_battle import MenuBattle
 from chessshootout.frontend.panels.history_view import HistoryView
@@ -89,7 +90,7 @@ def _load_window_icon() -> pg.Surface | None:
             return pg.image.load(str(paths.resource_path("assets", "icons", "icon.png")))
         except (pg.error, OSError):
             return None
-    return cast("pg.Surface | None", cache.memoized_surface(_ICON_CACHE, "icon", build))
+    return cache.memoized_surface(_ICON_CACHE, "icon", build)
 
 
 class Frontend:
@@ -688,7 +689,7 @@ class Frontend:
         r = compute_layout(
             window_width, window_height, mode=board_visible_mode,
             focus_mode=self.game.focus_mode, focus_show=self.game._focus_show(),
-            board_size=self.game.board.SIZE)
+            board_size=BOARD_SIZE)
 
         self.confirm_modal.set_rect(r.result_modal_rect)
         self.coordinator.wait_modal.set_rect(r.flex_rect)

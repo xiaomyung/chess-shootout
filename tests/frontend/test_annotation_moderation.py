@@ -81,7 +81,7 @@ def test_flagged_own_arrow_renders_red_unflagged_stays_amber(board):
     board.annotations._render_arrow = (
         lambda layer, scale, fr, to, color: seen.__setitem__((fr, to), color))
     board.annotations._arrow_cache = None
-    board.annotations._draw_arrows()
+    board.annotations.draw_arrows()
     assert seen[(ARROW_FROM, ARROW_TO)] == Colors.annotation_arrow_flagged
     assert seen[ARROW2] == Colors.annotation_arrow
 
@@ -92,7 +92,7 @@ def test_flagged_own_highlight_renders_red_unflagged_stays_amber(board):
     colors = []
     board.annotations.board._cell_overlay = (
         lambda c: colors.append(c) or pg.Surface((1, 1), pg.SRCALPHA))
-    board.annotations._draw_annotation_highlights()
+    board.annotations.draw_highlights()
     assert Colors.annotation_highlight_flagged in colors
     assert Colors.annotation_highlight in colors
 
@@ -124,8 +124,8 @@ def test_flag_own_tolerates_absent_marks(board):
     assert (ARROW_FROM, ARROW_TO) in board.annotations.flagged
     assert HL in board.annotations.flagged
     board.annotations._arrow_cache = None
-    board.annotations._draw_arrows()
-    board.annotations._draw_annotation_highlights()
+    board.annotations.draw_arrows()
+    board.annotations.draw_highlights()
     assert board.annotations.flagged == {(ARROW_FROM, ARROW_TO), HL}
 
 

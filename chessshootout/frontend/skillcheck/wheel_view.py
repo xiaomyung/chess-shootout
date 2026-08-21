@@ -348,7 +348,7 @@ class WheelController(SkillCheckController):
                 pg.draw.circle(surf, pg.Color(Colors.border_strong), (c, c), self.radius * k,
                                max(int(self.ring_w * k), 1))
             return supersample((size, size), render)
-        return cast(pg.Surface, memoized_surface(_WHEEL_STATIC_CACHE, self.radius, build))
+        return memoized_surface(_WHEEL_STATIC_CACHE, self.radius, build)
 
     def _render_dynamic(self, elapsed: float, size: int) -> pg.Surface:
         """

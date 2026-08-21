@@ -2,11 +2,13 @@ import pygame as pg
 
 from tests.conftest import pygame_display
 from chessshootout.domain.match import Match
+from chessshootout.backend.fen import apply_fen
 from chessshootout.backend.pieces import PieceType, PieceColor, Piece
-from chessshootout.backend.utils import Square
+from chessshootout.backend.utils import BOARD_SIZE, Square
 from chessshootout.frontend.board import Board
 from chessshootout.frontend.board import board as board_module
 from chessshootout.frontend.board.board import PIECE_SCALE
+from chessshootout.frontend.visual import cache as visual_cache
 from chessshootout.frontend.visual.colors import Colors
 from chessshootout.frontend.visual.draw import scale_floor
 
@@ -45,7 +47,7 @@ def test_arena_frame_insets_grid_and_caches_surface():
     board.draw_board()
     board.draw_board()
     assert board._frame_surf is built, "the plate surface is baked once, not per frame"
-    grid_px = board.cell_size * board.SIZE
+    grid_px = board.cell_size * BOARD_SIZE
     assert board.board_offset_x + grid_px <= board.rect.right
     assert board.board_offset_y + grid_px <= board.rect.bottom
 
@@ -448,3 +450,122 @@ def test_scaled_sprites_are_shared_across_boards_at_the_same_cell():
     second.set_rect(pg.Rect(40, 40, 680, 680))
     for key in ((PieceType.QUEEN, PieceColor.WHITE), (PieceType.KNIGHT, PieceColor.BLACK)):
         assert first.piece_images_scaled[key] is second.piece_images_scaled[key]
+
+
+def test_board_seeds_its_ui_scale_in_the_constructor():
+    """self.scale was born inside set_rect, which the draw path does not require.
+
+    _draw_promotion_picker and _draw_review_cue both read self.scale, so a board
+    the layout pass has not reached yet died with AttributeError the first time
+    either ran. The seeded default has to be the one set_rect installs for a
+    zero-size board, or the first laid-out frame would look different.
+    """
+    win = pg.display.get_surface()
+    match = Match()
+    match.new_game()
+    fresh = Board(win, match)
+    laid_out = Board(win, match)
+    laid_out.set_rect(pg.Rect(0, 0, 0, 0))
+    assert fresh.scale == laid_out.scale
+
+
+def test_set_rect_introduces_no_attribute_the_constructor_left_out():
+    """Audit for the next self.scale: set_rect must not invent state on its own.
+
+    Anything only set_rect assigns is unreachable for a board that has not been
+    laid out, and the draw helpers do not check first. Comparing the attribute
+    sets before and after a layout pass catches a new one at the source.
+    """
+    win = pg.display.get_surface()
+    match = Match()
+    match.new_game()
+    board = Board(win, match)
+    board.load_assets()
+    before = set(vars(board))
+    board.set_rect(pg.Rect(40, 40, 680, 680), scale=1.4)
+    assert set(vars(board)) - before == set()
+
+
+def test_draw_helpers_survive_a_board_the_layout_pass_never_reached():
+    """The promotion picker and the review cue draw without a set_rect first.
+
+    Both scale their corner cuts and gaps off self.scale; before the constructor
+    seeded it this raised AttributeError rather than drawing.
+    """
+    win = pg.display.get_surface()
+    win.fill((0, 0, 0))
+    match = Match()
+    match.new_game()
+    board = Board(win, match)
+    board.load_assets()
+    board.pending_promotion_square = Square(1, 0)
+    board._draw_promotion_picker()
+    assert set(board._promotion_rects) == {opt[0] for opt in Board.PROMOTION_OPTIONS}
+    board.rect = pg.Rect(0, 0, 200, 200)
+    board._build_frame_surface()
+    board.review_ply = 0
+    board._draw_review_cue()
+    assert board._frame_surf is not None
+
+
+def test_size_derived_board_caches_are_dropped_by_a_resize():
+    """The wash, marker and promotion-plate caches are keyed by pixel size.
+
+    All three were opened with new_cache(), so clear_size_keyed() -- what the
+    shell runs from its layout pass on every resize -- walked past them and the
+    surfaces built for the old cell size were kept for the life of the process.
+    The plate cache also keyed on the Font object itself, pinning a font the
+    resize had already replaced.
+    """
+    board, _ = _board()
+    board._cell_overlay(Colors.last_move)
+    board._marker_dot_surface(Colors.move_indicator)
+    board._promo_nameplate("Q", board._promo_hotkey_font, Colors.text_dim)
+    size_keyed = (board_module._OVERLAY_CACHE, board_module._MARKER_CACHE,
+                  board_module._PROMO_PLATE_CACHE)
+    assert all(len(entries) for entries in size_keyed), "sanity: each cache filled"
+    assert not any(isinstance(part, pg.font.Font)
+                   for key in board_module._PROMO_PLATE_CACHE for part in key), \
+        "a plate key must not hold a dead Font alive"
+    visual_cache.clear_size_keyed()
+    assert [len(entries) for entries in size_keyed] == [0, 0, 0]
+
+
+def test_board_takes_its_side_length_from_the_engine_constant():
+    """Board.SIZE was a second 8 living beside backend.utils.BOARD_SIZE.
+
+    Two copies of the board's side length can drift apart, and the board is the
+    one that would then read the engine's position through the wrong geometry.
+    The class attribute is gone and every caller reads the engine constant.
+    """
+    board, _ = _board()
+    assert not hasattr(Board, "SIZE")
+    assert board.cell_size == (board.rect.width - 2 * board.frame_pad) // BOARD_SIZE
+    assert len(board.file_labels_rendered) == BOARD_SIZE
+    assert len(board.rank_labels_rendered) == BOARD_SIZE
+
+
+def test_new_game_reset_drops_the_memoised_check_squares():
+    """A standard start and a FEN start share the memo key (0, None).
+
+    _in_check_king_squares memoises on (len(history), last_move), and a game
+    entered from FEN runs reset_for_new_game before apply_fen -- so the previous
+    game's "no king in check" answer at ply 0 was handed straight back for a
+    position that begins in check, and the red square never appeared.
+    """
+    win = pg.display.get_surface()
+    match = Match()
+    match.new_game()
+    board = Board(win, match)
+    board.load_assets()
+    board.set_rect(pg.Rect(40, 40, 680, 680))
+    assert board._in_check_king_squares() == []
+    board.reset_for_new_game()
+    apply_fen(match.backend, "4k3/8/8/8/7q/8/8/4K3 w - - 0 1")
+    white_king = Square(7, 4)
+    assert board._in_check_king_squares() == [white_king]
+    washes = []
+    board._cell_overlay = lambda color: (
+        washes.append(color) or pg.Surface((board.cell_size, board.cell_size), pg.SRCALPHA))
+    board._draw_check_highlight()
+    assert washes == [Colors.check_fill]

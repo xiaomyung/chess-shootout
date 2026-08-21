@@ -1,8 +1,12 @@
+import logging
 import time
 from dataclasses import dataclass, field
 from typing import Callable
 
 from chessshootout.backend.pieces import PieceColor, opponent_of
+
+
+log = logging.getLogger("chess.backend")
 
 
 @dataclass
@@ -201,7 +205,8 @@ class Clock:
         :param white_remaining: seconds left for White as the server sees it
         :param black_remaining: seconds left for Black as the server sees it
         :param running_for: side counting down, spelled as it is on the wire;
-            None or any other value leaves the clock stopped
+            None leaves the clock stopped, and so does any word this does not
+            recognise -- that one is taken tolerantly but logged as degraded
         """
         self.white_remaining = float(white_remaining)
         self.black_remaining = float(black_remaining)
@@ -210,5 +215,8 @@ class Clock:
         elif running_for == "black":
             self.running_for = PieceColor.BLACK
         else:
+            if running_for is not None:
+                log.warning("clock sync: unknown running_for=%r, leaving the clock stopped",
+                            running_for)
             self.running_for = None
         self.last_tick_at = self.now_provider() if self.running_for is not None else None

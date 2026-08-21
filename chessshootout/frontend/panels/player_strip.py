@@ -1,5 +1,5 @@
 from collections.abc import Iterable
-from typing import Any, cast
+from typing import Any
 
 import pygame as pg
 
@@ -422,9 +422,9 @@ class PlayerStrip:
         """
         label = name.upper()
         key = (label, self.tooltip_font.get_height(), round(self.scale, 3))
-        base = cast(pg.Surface, memoized_surface(
+        base = memoized_surface(
             _TOOLTIP_BASE_CACHE, key,
-            lambda: build_tooltip_bubble(self.tooltip_font, label, self.scale)))
+            lambda: build_tooltip_bubble(self.tooltip_font, label, self.scale))
         if self._tooltip_owned is None or self._tooltip_owned[0] != key:
             self._tooltip_owned = (key, base.copy())
         bubble = self._tooltip_owned[1]

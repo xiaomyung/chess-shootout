@@ -307,8 +307,8 @@ class RailTooltip:
         :returns: the bubble surface for that label
         """
         key = (label, font.get_height())
-        return cast(pg.Surface, memoized_surface(
-            self._cache, key, lambda: build_tooltip_bubble(font, label, scale)))
+        return memoized_surface(
+            self._cache, key, lambda: build_tooltip_bubble(font, label, scale))
 
     def _position(self, bubble: pg.Surface, rect: pg.Rect,
                   clip_rect: pg.Rect) -> tuple[int, int]:
@@ -1222,7 +1222,7 @@ class RightMenu:
             surf = self.moves_font.render(san, True, pg.Color(Colors.loss))
             surf.set_alpha(WHIFF_ALPHA)
             return surf
-        return cast(pg.Surface, memoized_surface(_WHIFF_CACHE, key, build))
+        return memoized_surface(_WHIFF_CACHE, key, build)
 
     def _draw_whiff(self, x: int, y: int, w: int, line_h: int,
                     whiff: tuple[str, str] | None) -> None:
@@ -1508,7 +1508,7 @@ class RightMenu:
             if faded:
                 canvas.set_alpha(FADED_ICON_ALPHA)
             return canvas
-        return cast(pg.Surface, memoized_surface(_CAP_FG_CACHE, key, build))
+        return memoized_surface(_CAP_FG_CACHE, key, build)
 
     def _draw_signals(self) -> None:
         """
@@ -1587,7 +1587,7 @@ class RightMenu:
             if cooling:
                 surf.set_alpha(CHAT_DIM_ALPHA)
             return surf
-        return cast(pg.Surface, memoized_surface(_CHAT_CACHE, key, build))
+        return memoized_surface(_CHAT_CACHE, key, build)
 
     def _handle_chat_click(self, pos: tuple[int, int]) -> bool | None:
         """
@@ -1661,7 +1661,7 @@ class RightMenu:
             if disabled:
                 surf.set_alpha(SIGNAL_SHARE_DISABLED_ALPHA)
             return surf
-        return cast(pg.Surface, memoized_surface(_SIGNAL_CACHE, key, build))
+        return memoized_surface(_SIGNAL_CACHE, key, build)
 
     def _draw_vol_row(self, state: dict[str, Any]) -> None:
         """
@@ -1723,7 +1723,7 @@ class RightMenu:
             if dimmed:
                 surf.set_alpha(SIGNAL_DIM_ALPHA)
             return surf
-        return cast(pg.Surface, memoized_surface(_SIGNAL_CACHE, key, build))
+        return memoized_surface(_SIGNAL_CACHE, key, build)
 
     def _handle_signal_click(self, pos: tuple[int, int]) -> bool | None:
         """

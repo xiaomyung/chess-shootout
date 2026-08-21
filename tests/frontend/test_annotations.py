@@ -923,3 +923,27 @@ def test_local_right_drag_toggles_do_not_mark(board):
     board.end_right_press(_cell_center(board, Square(4, 4)))
     assert (sq, Square(4, 4)) in board.arrows
     assert board.needs_present is False
+
+
+def test_mark_drawing_is_public_on_the_annotations_helper():
+    """Board reached into two private methods of a different object.
+
+    draw_highlights and draw_arrows are the helper's own entry points for the
+    board's draw pass, so they belong to the public surface alongside
+    toggle_highlight, set_opp and the rest -- an underscore there said the
+    board was not allowed to call them while it did nothing else.
+    """
+    assert not hasattr(Annotations, "_draw_annotation_highlights")
+    assert not hasattr(Annotations, "_draw_arrows")
+    assert callable(Annotations.draw_highlights)
+    assert callable(Annotations.draw_arrows)
+
+
+def test_board_routes_its_draw_pass_through_the_public_helper(board, monkeypatch):
+    """The board's own private draw helpers still delegate, now publicly."""
+    calls = []
+    monkeypatch.setattr(board.annotations, "draw_highlights", lambda: calls.append("hl"))
+    monkeypatch.setattr(board.annotations, "draw_arrows", lambda: calls.append("arrows"))
+    board._draw_annotation_highlights()
+    board._draw_arrows()
+    assert calls == ["hl", "arrows"]

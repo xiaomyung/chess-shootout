@@ -116,7 +116,7 @@ def _impact_ring_sprite(r: int, stroke: int) -> pg.Surface:
         layer = pg.Surface((2 * r + 8, 2 * r + 8), pg.SRCALPHA)
         pg.draw.circle(layer, pg.Color(Colors.amber_hi), (r + 4, r + 4), r, stroke)
         return layer
-    return cast(pg.Surface, cache.memoized_surface(_IMPACT_RING_CACHE, (r, stroke), build))
+    return cache.memoized_surface(_IMPACT_RING_CACHE, (r, stroke), build)
 
 
 def _blood_sprite(r: int) -> pg.Surface:
@@ -137,7 +137,7 @@ def _blood_sprite(r: int) -> pg.Surface:
         pg.draw.circle(layer, pg.Color(Colors.blood), (r + 1, r + 1), r)
         pg.draw.circle(layer, pg.Color(Colors.blood_dark), (r + 1, r + 1), int(r * 0.6))
         return layer
-    return cast(pg.Surface, cache.memoized_surface(_BLOOD_CACHE, r, build))
+    return cache.memoized_surface(_BLOOD_CACHE, r, build)
 
 
 def _spark_sprite(size: int) -> pg.Surface:
@@ -157,7 +157,7 @@ def _spark_sprite(size: int) -> pg.Surface:
         surf = pg.Surface((size, size), pg.SRCALPHA)
         surf.fill(pg.Color(Colors.amber_hi))
         return surf
-    return cast(pg.Surface, cache.memoized_surface(_SPARK_CACHE, size, build))
+    return cache.memoized_surface(_SPARK_CACHE, size, build)
 
 
 def _smoke_sprite(r: int) -> pg.Surface:
@@ -178,7 +178,7 @@ def _smoke_sprite(r: int) -> pg.Surface:
         layer = pg.Surface((2 * r, 2 * r), pg.SRCALPHA)
         pg.draw.circle(layer, pg.Color(Colors.smoke), (r, r), r)
         return layer
-    return cast(pg.Surface, cache.memoized_surface(_SMOKE_CACHE, r, build))
+    return cache.memoized_surface(_SMOKE_CACHE, r, build)
 
 
 def _hole_sprite(r: int) -> pg.Surface:
@@ -199,7 +199,7 @@ def _hole_sprite(r: int) -> pg.Surface:
         layer = pg.Surface((2 * r + 4, 2 * r + 4), pg.SRCALPHA)
         pg.draw.circle(layer, pg.Color(Colors.bullet_hole), (r + 2, r + 2), r)
         return layer
-    return cast(pg.Surface, cache.memoized_surface(_HOLE_CACHE, r, build))
+    return cache.memoized_surface(_HOLE_CACHE, r, build)
 
 
 def _takeover_bg_sprite(w: int, h: int) -> pg.Surface:
@@ -222,7 +222,7 @@ def _takeover_bg_sprite(w: int, h: int) -> pg.Surface:
         surf = pg.Surface((w, h))
         surf.fill(pg.Color(Colors.takeover_bg))
         return surf
-    return cast(pg.Surface, cache.memoized_surface(_TAKEOVER_BG_CACHE, (w, h), build))
+    return cache.memoized_surface(_TAKEOVER_BG_CACHE, (w, h), build)
 
 
 class EffectManager:
@@ -387,17 +387,18 @@ class EffectManager:
         """
         return seq[int(self.rng.random() * len(seq))]
 
-    def _center(self, sq: Square) -> tuple[float, float]:
+    def _center(self, sq: Square | str) -> tuple[float, float]:
         """
         Locate a square's centre in window pixels through the `geom` resolver
         its owner installed. Every effect is positioned through this one hook,
         which is why they follow the board when it is flipped, resized or
         shaking
 
-        :param sq: square to locate
+        :param sq: square to locate, or a sentinel key the installed resolver
+            understands
         :returns: the square's centre in window pixels
         """
-        return cast(Callable[[Square], tuple[float, float]], self.geom)(sq)
+        return cast(Callable[[Square | str], tuple[float, float]], self.geom)(sq)
 
     def _anchor(self, p: dict[str, Any]) -> tuple[float, float]:
         """

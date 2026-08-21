@@ -228,8 +228,7 @@ def _direction_chevron(size: int, color: str, direction: str) -> pg.Surface:
         base = chevron_surface(size, color, up=True)
         angle = _DIR_ANGLE[direction]
         return base if angle == 0 else pg.transform.rotate(base, angle)
-    return cast(pg.Surface,
-                memoized_surface(_DIR_CHEVRON_CACHE, (size, str(color), direction), build))
+    return memoized_surface(_DIR_CHEVRON_CACHE, (size, str(color), direction), build)
 
 
 def _chip_surface(side: int, cut: int, state: str,
@@ -262,7 +261,7 @@ def _chip_surface(side: int, cut: int, state: str,
                                 corners=COMBO_VIEW_CHIP_CORNERS).copy()
         surf.fill((255, 255, 255, _CHIP_BAKED_ALPHA[state]), special_flags=pg.BLEND_RGBA_MULT)
         return surf
-    return cast(pg.Surface, memoized_surface(_CHIP_CACHE, (side, cut, state, border), build))
+    return memoized_surface(_CHIP_CACHE, (side, cut, state, border), build)
 
 
 def _pad_static(radius: int, hub_r: int) -> pg.Surface:
@@ -314,7 +313,7 @@ def _pad_static(radius: int, hub_r: int) -> pg.Surface:
             cy = radius + dy * radius * COMBO_VIEW_CHEVRON_DIST_FRAC
             base.blit(arrow, arrow.get_rect(center=(int(cx), int(cy))))
         return base
-    return cast(pg.Surface, memoized_surface(_PAD_STATIC_CACHE, (radius, hub_r), build))
+    return memoized_surface(_PAD_STATIC_CACHE, (radius, hub_r), build)
 
 
 def _wedge_overlay(radius: int, hub_r: int, direction: str, color: str) -> pg.Surface:
@@ -358,8 +357,8 @@ def _wedge_overlay(radius: int, hub_r: int, direction: str, color: str) -> pg.Su
                 pts.append((c + hub_r * k * math.cos(a), c + hub_r * k * math.sin(a)))
             pg.draw.polygon(surf, pg.Color(color), pts)
         return supersample(2 * radius, render)
-    return cast(pg.Surface, memoized_surface(
-        _RECEPTOR_FILL_CACHE, (radius, hub_r, direction, str(color)), build))
+    return memoized_surface(
+        _RECEPTOR_FILL_CACHE, (radius, hub_r, direction, str(color)), build)
 
 
 def _solid_square(size: int, color: str) -> pg.Surface:
@@ -381,7 +380,7 @@ def _solid_square(size: int, color: str) -> pg.Surface:
         surf = pg.Surface((size, size), pg.SRCALPHA)
         surf.fill(pg.Color(color))
         return surf
-    return cast(pg.Surface, memoized_surface(_SOLID_CACHE, (size, str(color)), build))
+    return memoized_surface(_SOLID_CACHE, (size, str(color)), build)
 
 
 def _pip_surface(size: int, struck: bool) -> pg.Surface:
@@ -419,7 +418,7 @@ def _flash_layer(w: int, h: int) -> pg.Surface:
         surf = pg.Surface((max(int(w), 1), max(int(h), 1)))
         surf.fill(pg.Color(COMBO_VIEW_FLASH_WHITE))
         return surf
-    return cast(pg.Surface, memoized_surface(_FLASH_CACHE, (int(w), int(h)), build))
+    return memoized_surface(_FLASH_CACHE, (int(w), int(h)), build)
 
 
 def _emoji_sprite(char: str, size: int) -> pg.Surface | None:
@@ -442,7 +441,7 @@ def _emoji_sprite(char: str, size: int) -> pg.Surface | None:
         """
         base = emoji_surface(char, size)
         return base.copy() if base is not None else None
-    return cast(pg.Surface | None, memoized_surface(_EMOJI_CACHE, (char, size), build))
+    return memoized_surface(_EMOJI_CACHE, (char, size), build)
 
 
 def _victim_token(surface: pg.Surface | None) -> tuple[tuple[int, int], int] | None:

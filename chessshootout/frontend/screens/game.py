@@ -15,7 +15,8 @@ from chessshootout.domain.pgn.load import format_time_control
 from chessshootout.backend.pieces import Piece, PieceColor, PieceType, opponent_of
 from chessshootout.backend.pseudo_legal import king_square, piece_square
 from chessshootout.backend.utils import (
-    HistoryEntry, PROMO_TYPE_BY_LETTER, Square, coord_from_square, square_from_coord,
+    BOARD_SIZE, HistoryEntry, PROMO_TYPE_BY_LETTER, Square, coord_from_square,
+    square_from_coord,
 )
 from chessshootout.infra import countries, env
 from chessshootout.frontend import signal_controls
@@ -1390,7 +1391,7 @@ class GameScreen(Screen):
         window_width, window_height = size
         r = compute_layout(
             window_width, window_height, mode=self.name, focus_mode=self.focus_mode,
-            focus_show=self._focus_show(), board_size=self.board.SIZE)
+            focus_show=self._focus_show(), board_size=BOARD_SIZE)
         self.board.set_rect(r.board_rect, scale=r.scale)
         self.right_menu.set_rect(r.menu_rect, scale=r.scale)
         self.player_strip_top.set_rect(r.top_strip_rect, scale=r.scale)
@@ -1984,7 +1985,7 @@ class GameScreen(Screen):
             for bubble in self.speech_bubbles.values():
                 bubble.last_rect = None
             return
-        scale = getattr(self.board, "scale", 1.0)
+        scale = self.board.scale
         for color, bubble in self.speech_bubbles.items():
             if not bubble.active(now):
                 bubble.last_rect = None
@@ -2139,7 +2140,7 @@ class GameScreen(Screen):
             surf = pg.Surface(size)
             surf.fill((0, 0, 0))
             return surf
-        return cast(pg.Surface, cache.memoized_surface(_RESULT_FADE_CACHE, size, build))
+        return cache.memoized_surface(_RESULT_FADE_CACHE, size, build)
 
     def _draw_result_fade_overlay(self) -> None:
         """

@@ -1,5 +1,3 @@
-from typing import cast
-
 import pygame as pg
 
 from chessshootout.frontend.visual.cache import new_cache, memoized_surface
@@ -195,4 +193,4 @@ class BaseModal:
                                  (w - cutk + railk * (1.0 - SQRT2), railk),
                                  (0, railk)])
             return supersample((width, MODAL_CUT + MODAL_RAIL * 2), render)
-        return cast(pg.Surface, memoized_surface(_RAIL_CACHE, (intent, width, str(color)), build))
+        return memoized_surface(_RAIL_CACHE, (intent, width, str(color)), build)

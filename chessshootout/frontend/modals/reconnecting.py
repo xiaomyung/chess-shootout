@@ -73,7 +73,7 @@ def _ring_base(size: int, color: str) -> pg.Surface:
                 wedge.append((c[0] + s * math.cos(a), c[1] + s * math.sin(a)))
             pg.draw.polygon(surf, (0, 0, 0, 0), wedge)
         return supersample(int(size), render)
-    return cast(pg.Surface, memoized_surface(_RING_CACHE, (int(size), color), build))
+    return memoized_surface(_RING_CACHE, (int(size), color), build)
 
 
 def _ring_surface(size: int, color: str, angle_deg: float) -> pg.Surface:

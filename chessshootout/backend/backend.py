@@ -71,9 +71,10 @@ class Backend:
     def _reset_state(self) -> None:
         """
         Put every field back to its blank starting value, so a fresh game cannot
-        inherit a leftover history, castling right, en-passant target or
-        repetition count. It is also the one place the engine's state fields are
-        listed, which is why construction and new_game() both start here
+        inherit a leftover history, castling right, en-passant target,
+        repetition count or fullmove baseline. It is also the one place the
+        engine's state fields are listed, which is why construction and
+        new_game() both start here
         """
         self.state: list[list[Piece | None]] = [[None] * self.SIZE for _ in range(self.SIZE)]
         self.turn = PieceColor.WHITE
@@ -81,6 +82,8 @@ class Backend:
         self.en_passant_target: Square | None = None
         self.castling_rights = dict(DEFAULT_CASTLING_RIGHTS)
         self.halfmove_clock = 0
+        self.fullmove_baseline = 1
+        self.baseline_black_to_move = False
         self.position_counts: Counter[PositionKey] = Counter()
         self.clock: Clock | None = None
 
@@ -121,14 +124,16 @@ class Backend:
         """
         Let the clock count down by the real time since the last tick, which the
         client does once per frame and the server once per sweep step. A game
-        that is already over is never charged -- a fallen flag, and a side with
-        no legal move, both leave the clock untouched
+        that is already over is never charged -- a fallen flag returns at once,
+        and a tick that would flag a side with no legal move is rolled back
+        whole, which keeps the costly move scan out of every routine tick
         """
         if self.clock is None or self.clock.flagged is not None:
             return
-        if self._has_no_legal_moves(self.turn):
-            return
+        before = self.clock.snapshot()
         self.clock.tick()
+        if self.clock.flagged is not None and self._has_no_legal_moves(self.turn):
+            self.clock.restore(before)
 
     def piece_at(self, square: Square) -> Piece | None:
         """
@@ -282,7 +287,10 @@ class Backend:
         Rebuild the board as it stood after a given number of plies, which is
         what the review browser draws while a player steps back through a game.
         The live position is handed back as it is, while an earlier one is
-        rebuilt on a deep copy, so browsing can never disturb the game in play
+        rebuilt on a deep copy, so browsing can never disturb the game in play.
+        The clock is detached for the length of that copy and put straight back:
+        where the pieces stood does not depend on it, and copying a live clock
+        would clone its time source once per lookup
 
         :param ply: number of plies played, 0 being the starting position
         :returns: 8x8 grid of pieces as of that moment
@@ -291,7 +299,12 @@ class Backend:
             raise ValueError(f"Ply {ply} out of range 0..{len(self.move_history)}")
         if ply == len(self.move_history):
             return [list(row) for row in self.state]
-        snapshot = copy.deepcopy(self)
+        clock = self.clock
+        self.clock = None
+        try:
+            snapshot = copy.deepcopy(self)
+        finally:
+            self.clock = clock
         while len(snapshot.move_history) > ply:
             snapshot.undo()
         return snapshot.state
@@ -415,6 +428,16 @@ class Backend:
             self.state[m.to_sq.row][m.to_sq.col] = None
             self.state[m.from_sq.row][m.to_sq.col] = m.captured
 
+    def position_key(self) -> PositionKey:
+        """
+        Hand out the repetition key for the position as it stands, so code
+        outside the engine can seed or read a repetition count without reaching
+        into its internals -- the FEN loader is the caller that needs it
+
+        :returns: hashable key standing for this position
+        """
+        return self._position_key()
+
     def _apply_normal(self, from_sq: Square, to_sq: Square, piece: Piece) -> MoveResult:
         """
         Apply an everyday move: name it in SAN against the board as it still
@@ -497,7 +520,7 @@ class Backend:
         move = Move(from_sq, to_sq, piece, captured=captured)
         entry = HistoryEntry(
             move=move,
-            prev_castling_rights=tuple(self.castling_rights.values()),
+            prev_castling_rights=tuple(self.castling_rights[k] for k in CASTLING_KEYS),
             prev_en_passant_target=self.en_passant_target,
             prev_halfmove_clock=self.halfmove_clock,
             position_key_added=None,

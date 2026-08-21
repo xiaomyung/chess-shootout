@@ -16,6 +16,7 @@ import pytest
 
 from tests.conftest import pygame_display
 from tests.helpers import online_start_payload
+from chessshootout.backend.utils import BOARD_SIZE
 from chessshootout.frontend.frontend import Frontend
 from chessshootout.frontend.online_coordinator import RECONNECT_MODAL_DEBOUNCE_MS
 from chessshootout.frontend.screens.game import (
@@ -381,7 +382,7 @@ def test_menu_mode_centers_flex_modals_on_window(frontend):
 
 
 def _board_centerx(board):
-    return board.board_offset_x + board.cell_size * board.SIZE / 2
+    return board.board_offset_x + board.cell_size * BOARD_SIZE / 2
 
 
 def test_game_mode_centers_flex_modals_on_board(frontend):

@@ -2,6 +2,7 @@ import pygame as pg
 
 from chessshootout.backend.clock import Clock
 from chessshootout.backend.pieces import PieceColor
+from chessshootout.backend.utils import BOARD_SIZE
 from chessshootout.frontend.board.board import Board
 from chessshootout.frontend.focus import layout as focus_layout
 from chessshootout.frontend.visual.clock_visual import LOW_TIME_FRACTION
@@ -29,7 +30,7 @@ class TimeLine:
             own rect during a transition
         :returns: the top and bottom bar rects in window pixels
         """
-        grid = board.cell_size * board.SIZE
+        grid = board.cell_size * BOARD_SIZE
         sx = board_rect.width / board.rect.width if board.rect.width else 1.0
         sy = board_rect.height / board.rect.height if board.rect.height else 1.0
         grid_top = board_rect.top + (board.board_offset_y - board.rect.top) * sy

@@ -99,7 +99,7 @@ def _hitmark_sprite(spread: int, length: float, thick: int) -> pg.Surface:
             outer = (c + dx * (spread + length) * diag, c + dy * (spread + length) * diag)
             pg.draw.line(layer, col, inner, outer, thick)
         return layer
-    return cast(pg.Surface, memoized_surface(_HITMARK_CACHE, (spread, length, thick), build))
+    return memoized_surface(_HITMARK_CACHE, (spread, length, thick), build)
 
 
 def _menu_spark_sprite(size: int, color: str) -> pg.Surface:
@@ -121,7 +121,7 @@ def _menu_spark_sprite(size: int, color: str) -> pg.Surface:
         surf = pg.Surface((size, size), pg.SRCALPHA)
         surf.fill(pg.Color(color))
         return surf
-    return cast(pg.Surface, memoized_surface(_MENU_SPARK_CACHE, (size, color), build))
+    return memoized_surface(_MENU_SPARK_CACHE, (size, color), build)
 
 
 class MenuBattle:
@@ -194,8 +194,7 @@ class MenuBattle:
                 return img.subsurface(img.get_bounding_rect()).copy()
             except (pg.error, FileNotFoundError, OSError):
                 return None
-        return cast(pg.Surface | None,
-                    memoized_surface(_BATTLE_PIECE_SRC_CACHE, (piece_type, color), build))
+        return memoized_surface(_BATTLE_PIECE_SRC_CACHE, (piece_type, color), build)
 
     def _rnd(self, lo: float, hi: float) -> float:
         """
@@ -1099,7 +1098,7 @@ class MenuBattle:
         """
         shooter["recoil"] = gunfx.gun_spec(shooter.get("weapon")).recoil * self.scale
         if self.sound_manager is not None:
-            self.sound_manager.play_menu_gun(cast(str, shooter.get("weapon")))
+            self.sound_manager.play_menu_gun(shooter["weapon"])
         ax, ay = self._muzzle_point(shooter)
         self._add_flash(shooter, ax, ay, now_ms)
         hit = self.rng.random() >= MISS_CHANCE

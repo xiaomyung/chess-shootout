@@ -3,6 +3,7 @@ from typing import Any, cast
 
 import pygame as pg
 
+from chessshootout.backend.utils import BOARD_SIZE
 from chessshootout.infra import env
 from chessshootout.infra.open_external import open_with_default_app
 from chessshootout.frontend.layout import compute_layout
@@ -204,7 +205,7 @@ class MenuScreen(Screen):
             view.relayout(self._menu_layout)
         r = compute_layout(
             size[0], size[1], mode=self.name, focus_mode=False,
-            focus_show=env.get_focus_show(), board_size=self.app.game.board.SIZE)
+            focus_show=env.get_focus_show(), board_size=BOARD_SIZE)
         self.fen_input_modal.set_rect(r.flex_rect)
         self._end_rail_slide()
 

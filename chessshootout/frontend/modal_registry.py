@@ -48,16 +48,20 @@ class ModalSpec:
 
 def dismiss_topmost(specs: list[ModalSpec]) -> bool:
     """
-    Close the frontmost visible modal that Esc is allowed to close, which is
-    the first step of the app's Esc handling. Modals flagged as not
-    Esc-dismissable (match found, reconnecting) are stepped over rather than
-    stopping the search
+    Close the frontmost visible modal when Esc is allowed to close it, the
+    first step of the app's Esc handling. Only the topmost visible modal ever
+    answers Esc: one flagged as not Esc-dismissable (match found,
+    reconnecting) closes nothing but still swallows the press, so Esc can
+    reach neither a card stacked underneath nor the screen the modal covers
 
     :param specs: modal specs in topmost-first order, global ones first
-    :returns: True when a modal was dismissed
+    :returns: True when Esc was consumed, by dismissing the topmost visible
+        modal or by a blocking one refusing to close
     """
     for spec in specs:
-        if spec.esc_dismiss and spec.modal.is_visible():
+        if not spec.modal.is_visible():
+            continue
+        if spec.esc_dismiss:
             cast(Callable[[], None], spec.on_dismiss)()
-            return True
+        return True
     return False
