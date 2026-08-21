@@ -31,7 +31,19 @@ _GAP_FLOOR = 2
 _BUBBLE_CACHE = new_cache()
 
 
-def _build_base(text, flipped, scale):
+def _build_base(text: str, flipped: bool, scale: float) -> pg.Surface:
+    """
+    Draw the bubble a quick-chat line is shown in: a cut-corner plate with the
+    line in it and a tail pointing at the piece it belongs to. The tail sits
+    below the plate normally and above it when the bubble had to be flipped
+    under the piece for want of room
+
+    :param text: line to show, drawn in upper case
+    :param flipped: True when the bubble hangs below its piece, which puts the
+        tail on top
+    :param scale: UI scale factor, which every padding and font size follows
+    :returns: the finished bubble, tail included
+    """
     font = get_font(scale_floor(BUBBLE_TEXT, scale, _TEXT_FLOOR), bold=True)
     text_surf = font.render(text.upper(), True, pg.Color(Colors.text))
     pad_x = scale_floor(BUBBLE_PAD_X, scale, _PAD_X_FLOOR)
@@ -67,38 +79,85 @@ def _build_base(text, flipped, scale):
     return surf
 
 
-def _base_surface(text, flipped, scale):
+def _base_surface(text: str, flipped: bool, scale: float) -> pg.Surface:
+    """
+    Fetch the bubble for a line, building it only the first time it is asked
+    for. The preset lines repeat all game, so this keeps the text rendering off
+    the frame path
+
+    :param text: line to show
+    :param flipped: True for the below-the-piece version, which is cached apart
+    :param scale: UI scale factor, part of the cache key
+    :returns: the shared bubble surface, which callers must not draw on
+    """
     key = (text, flipped, round(scale, 3))
     return memoized_surface(_BUBBLE_CACHE, key,
                             lambda: _build_base(text, flipped, scale))
 
 
 class SpeechBubble:
+    """
+    One player's quick-chat bubble: the canned line they last sent, popping
+    into view over their king or queen and fading out after a few seconds. The
+    game screen keeps one per side and both players see the same thing, since
+    sender and receiver drive it the same way
+    """
 
-    def __init__(self):
+    def __init__(self) -> None:
+        """
+        Start with no line to show. A bubble exists for the whole game and is
+        simply idle until a quick-chat line arrives
+        """
         self.text = ""
         self.shown_at = None
         self.last_rect = None
         self._owned = {}
         self._pop_variants = {}
 
-    def show(self, text, now_ms):
+    def show(self, text: str, now_ms: int) -> None:
+        """
+        Show a line from now, restarting the pop and the fade even if a bubble
+        was already up, so the newest line is always the one on screen
+
+        :param text: preset line to show, kept in upper case
+        :param now_ms: pygame tick count in milliseconds, the moment the line
+            appeared
+        """
         self.text = text.upper()
         self.shown_at = now_ms
         self.last_rect = None
         self._owned = {}
         self._pop_variants = {}
 
-    def active(self, now_ms):
+    def active(self, now_ms: int) -> bool:
+        """
+        Whether this bubble still belongs on screen, which the game screen asks
+        every frame before drawing it
+
+        :param now_ms: pygame tick count in milliseconds
+        :returns: True while the line is inside its few seconds on screen
+        """
         return self.shown_at is not None and 0 <= now_ms - self.shown_at < BUBBLE_MS
 
-    def clear(self):
+    def clear(self) -> None:
+        """
+        Take the bubble down at once, without the fade. A new game and a screen
+        being left both do this, so no line survives into the next game
+        """
         self.shown_at = None
         self.last_rect = None
         self._owned = {}
         self._pop_variants = {}
 
-    def _anim(self, now_ms):
+    def _anim(self, now_ms: int) -> tuple[int, int]:
+        """
+        Work out how the bubble should look at this moment: how far through the
+        pop-in it is, in whole steps so the scaled copies can be reused, and how
+        far the fade-out has taken its alpha
+
+        :param now_ms: pygame tick count in milliseconds
+        :returns: the pop step, 0 to POP_STEPS - 1, and the alpha, 0 to 255
+        """
         age = now_ms - self.shown_at
         p = min(1.0, max(0.0, age / BUBBLE_POP_MS))
         eased = 1.0 - (1.0 - p) ** 3
@@ -110,7 +169,17 @@ class SpeechBubble:
             alpha = 255
         return bucket, alpha
 
-    def _pop_variant(self, flipped, bucket, base):
+    def _pop_variant(self, flipped: bool, bucket: int, base: pg.Surface) -> pg.Surface:
+        """
+        Fetch the shrunken copy of the bubble for one step of the pop-in,
+        building it once. Stepping the scale rather than smoothly scaling every
+        frame is what keeps the pop cheap
+
+        :param flipped: which version of the bubble is being drawn
+        :param bucket: pop step, 0 for the smallest
+        :param base: the full-size bubble to shrink
+        :returns: the scaled bubble for this step
+        """
         key = (flipped, bucket)
         surf = self._pop_variants.get(key)
         if surf is None:
@@ -121,14 +190,37 @@ class SpeechBubble:
             self._pop_variants[key] = surf
         return surf
 
-    def _owned_surface(self, flipped, base):
+    def _owned_surface(self, flipped: bool, base: pg.Surface) -> pg.Surface:
+        """
+        Get this bubble's private copy of the shared surface, made once and kept
+        for the rest of the line's life. The fade sets an alpha on it, which
+        must never be done to the surface the cache hands out
+
+        :param flipped: which version of the bubble is being drawn
+        :param base: the shared bubble to copy
+        :returns: a copy this bubble alone may alter
+        """
         surf = self._owned.get(flipped)
         if surf is None:
             surf = base.copy()
             self._owned[flipped] = surf
         return surf
 
-    def draw(self, window, anchor_rect, bounds_rect, now_ms, scale=1.0):
+    def draw(self, window: pg.Surface, anchor_rect: pg.Rect, bounds_rect: pg.Rect,
+             now_ms: int, scale: float = 1.0) -> None:
+        """
+        Draw the bubble over the piece it belongs to, popping in and fading out
+        as its age says. It sits above the piece by default, flips below when
+        there is no room above, and is nudged sideways to stay on the board.
+        The rect it ended up on is remembered, so the screen can repaint just
+        that patch
+
+        :param window: surface to draw on
+        :param anchor_rect: rect of the piece's square in window pixels
+        :param bounds_rect: the board rect the bubble must stay inside
+        :param now_ms: pygame tick count in milliseconds
+        :param scale: UI scale factor for the text and the padding
+        """
         if not self.active(now_ms):
             self.last_rect = None
             return

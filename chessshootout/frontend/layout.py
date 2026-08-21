@@ -25,6 +25,13 @@ UI_SCALE_REF_H = 764
 
 @dataclass
 class LayoutRects:
+    """
+    Every rect and metric one window's worth of interface needs: where the
+    board sits, the strips above and below it, the right panel, and the slots
+    the shell drops its overlays into. Pure geometry, recomputed per window
+    size and handed straight to the widgets that draw
+    """
+
     top: int
     strip_height: float
     board_rect: pg.Rect
@@ -39,16 +46,57 @@ class LayoutRects:
     scale: float = 1.0
 
 
-def compute_ui_scale(width, height):
+def compute_ui_scale(width: int, height: int) -> float:
+    """
+    Work out how much to grow or shrink the interface for this window, so the
+    same screens stay readable in a small window and do not look sparse in a
+    large one. The reference window scores 1.0, and the answer is clamped at
+    both ends so nothing ever collapses or bloats
+
+    :param width: window width in pixels
+    :param height: usable height in pixels, the window minus the title bar
+    :returns: scale factor within the clamped minimum and maximum
+    """
     scale = min(width / UI_SCALE_REF_W, height / UI_SCALE_REF_H)
     return max(UI_SCALE_MIN, min(UI_SCALE_MAX, scale))
 
 
-def centered_rect(cx, cy, w, h):
+def centered_rect(cx: float, cy: float, w: float, h: float) -> pg.Rect:
+    """
+    Build a rect of a given size around a centre point, the shape behind every
+    centred overlay in the app -- result cards, waiting cards and the wide
+    pickers
+
+    :param cx: centre x in window pixels
+    :param cy: centre y in window pixels
+    :param w: rect width in pixels
+    :param h: rect height in pixels
+    :returns: the rect, centred on cx and cy
+    """
     return pg.Rect(cx - w / 2, cy - h / 2, w, h)
 
 
-def compute_layout(window_width, window_height, *, mode, focus_mode, focus_show, board_size):
+def compute_layout(window_width: int, window_height: int, *, mode: str, focus_mode: bool,
+                   focus_show: str, board_size: int) -> LayoutRects:
+    """
+    Lay out a whole window: fit the largest square board that still leaves room
+    for the right panel, stack the two player strips around it, and mark out
+    the slots the shell hands to its overlays. This is the app's one source of
+    geometry -- the shell calls it at startup, on a resize and on every screen
+    switch, and each screen lays itself out from the same window size
+
+    :param window_width: window width in pixels
+    :param window_height: window height in pixels
+    :param mode: "menu" while no board is showing, anything else while one is;
+        it decides whether overlays centre on the board or on the window
+    :param focus_mode: True while the game screen is collapsed to the board
+        alone, which recentres the board over the whole window
+    :param focus_show: what focus mode keeps beside the board -- "line",
+        "strips" or "nothing"
+    :param board_size: squares per side of the board, the divisor behind cell
+        size and therefore the size of the waiting card
+    :returns: the rects and metrics for this window size
+    """
     window_rect = pg.Rect(0, 0, window_width, window_height)
     top = WindowChrome.HEIGHT
     avail_height = window_height - top

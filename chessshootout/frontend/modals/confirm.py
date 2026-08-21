@@ -1,3 +1,5 @@
+from collections.abc import Callable
+
 import pygame as pg
 
 from chessshootout.frontend.modals.base import BaseModal, MODAL_MAX_WIDTH, MODAL_RAIL
@@ -14,8 +16,20 @@ SUB_MAX_LINES = 3
 
 
 class ConfirmModal(BaseModal):
+    """
+    The app's yes/no question box, asked before anything the player cannot
+    undo: resigning, offering a draw, quitting, moving the saved games folder.
+    It is a global modal, so it outranks whatever the active screen owns for
+    Esc, for clicks and in the draw order, and it wears the shared modal shell
+    """
 
-    def __init__(self, window):
+    def __init__(self, window: pg.Surface) -> None:
+        """
+        Build the single question box the whole app reuses. It starts with no
+        question set, which is also how it reports itself as hidden
+
+        :param window: the app window surface this modal draws onto
+        """
         super().__init__(window)
         self.title = None
         self.sub = ""
@@ -31,8 +45,31 @@ class ConfirmModal(BaseModal):
         self._panel = pg.Rect(0, 0, 0, 0)
         self._font_cache = {}
 
-    def show(self, title, on_yes, on_no=None, yes_label="Confirm", no_label="Cancel",
-             on_extra=None, extra_label="Cancel", sub="", danger=False, emoji=None):
+    def show(self, title: str, on_yes: Callable[[], None],
+             on_no: Callable[[], None] | None = None, yes_label: str = "Confirm",
+             no_label: str = "Cancel", on_extra: Callable[[], None] | None = None,
+             extra_label: str = "Cancel", sub: str = "", danger: bool = False,
+             emoji: str | None = None) -> None:
+        """
+        Ask the player a question and remember what each answer should do.
+        Setting a title is what makes the box visible, so one call both fills
+        it in and puts it on screen
+
+        :param title: the question itself, drawn large and upper-cased
+        :param on_yes: run when the confirming button is clicked
+        :param on_no: run when the cancelling button is clicked, or None to
+            just close the box
+        :param yes_label: text on the confirming button
+        :param no_label: text on the cancelling button
+        :param on_extra: run by a third button, or None to leave that button
+            out entirely
+        :param extra_label: text on that third button
+        :param sub: smaller explanation under the title, wrapped over a few
+            lines, empty for none
+        :param danger: True to tint the rail and icon tile red for an answer
+            that cannot be taken back
+        :param emoji: emoji drawn in a tile above the title, or None for no icon
+        """
         self.title = title
         self.sub = sub
         self.danger = danger
@@ -44,7 +81,11 @@ class ConfirmModal(BaseModal):
         self.no_label = no_label
         self.extra_label = extra_label
 
-    def hide(self):
+    def hide(self) -> None:
+        """
+        Close the box and forget the question along with all three callbacks,
+        so an answer can never fire twice or land in a game that has moved on
+        """
         self.title = None
         self.emoji = None
         self.on_yes = None
@@ -52,20 +93,46 @@ class ConfirmModal(BaseModal):
         self.on_extra = None
         self.button_rects = {}
 
-    def is_visible(self):
+    def is_visible(self) -> bool:
+        """
+        Say whether a question is on screen; the title is the state here,
+        there is no separate flag to keep in step with it
+
+        :returns: True while a question is waiting for an answer
+        """
         return self.title is not None
 
-    def _fonts(self, panel_w):
+    def _fonts(self, panel_w: int) -> tuple[pg.font.Font, pg.font.Font, pg.font.Font]:
+        """
+        Fetch the three fonts for the current panel width, rebuilt only when
+        that width changes so no font is loaded per frame
+
+        :param panel_w: panel width in pixels the fonts are sized from
+        :returns: title, sub-line and button fonts
+        """
         return fonts_for_width(self._font_cache, panel_w, self._build_fonts)
 
-    def _build_fonts(self, panel_w):
+    def _build_fonts(self, panel_w: int) -> tuple[pg.font.Font, pg.font.Font, pg.font.Font]:
+        """
+        Size the title, sub-line and button fonts from the panel width, each
+        with a floor so the box stays readable in a small window
+
+        :param panel_w: panel width in pixels
+        :returns: title, sub-line and button fonts
+        """
         return (
             get_display_font(max(int(panel_w * 0.07), 22)),
             get_font(max(int(panel_w * 0.032), 13), bold=False),
             get_font(max(int(panel_w * 0.034), 13), bold=True),
         )
 
-    def draw(self):
+    def draw(self) -> None:
+        """
+        Paint the question: the shared shell, an optional emoji tile, the
+        title, the wrapped explanation and the button row, in a panel sized to
+        exactly what is there. Drawing is also what fixes the button rects
+        that clicks are tested against
+        """
         if not self.is_visible() or self.rect.width <= 0:
             self.button_rects = {}
             return
@@ -120,7 +187,15 @@ class ConfirmModal(BaseModal):
         self.button_rects = draw_button_row(
             self.window, row, buttons, button_font, pad, primary_keys={"yes"}, cut=True)
 
-    def handle_click(self, pos):
+    def handle_click(self, pos: tuple[int, int]) -> bool:
+        """
+        Turn a click on one of the buttons into the answer it stands for. The
+        box closes before the callback runs, so an answer that opens another
+        modal finds this one already out of the way
+
+        :param pos: click position in window pixels
+        :returns: True when a button took the click
+        """
         if not self.is_visible():
             return False
         callbacks = {"yes": self.on_yes, "no": self.on_no, "extra": self.on_extra}

@@ -14,7 +14,15 @@ DITHER_SEED = 0x5EED
 _DITHER_TILES = {}
 
 
-def _dither_tiles(t):
+def _dither_tiles(t: int) -> tuple[pg.Surface, pg.Surface]:
+    """
+    Build the pair of noise tiles the dither is stamped with: one that lifts a
+    pixel by a single level, one that drops it. They come from a fixed seed,
+    so the same backdrop always comes out pixel for pixel identical
+
+    :param t: tile side in pixels
+    :returns: the add tile and the subtract tile, cached per tile size
+    """
     cached = _DITHER_TILES.get(t)
     if cached is not None:
         return cached
@@ -33,7 +41,16 @@ def _dither_tiles(t):
     return tiles
 
 
-def dither(surf, t=128):
+def dither(surf: pg.Surface, t: int = 128) -> pg.Surface:
+    """
+    Rough a smooth gradient up by one level of noise, which is what stops the
+    arena backdrop from showing banding rings on a large display. The surface
+    is changed in place and handed straight back
+
+    :param surf: surface to dither, modified in place
+    :param t: side of the noise tile stamped across it, in pixels
+    :returns: that same surface, so the call can be chained
+    """
     w, h = surf.get_size()
     add, sub = _dither_tiles(t)
     for x in range(0, w, t):
@@ -43,7 +60,24 @@ def dither(surf, t=128):
     return surf
 
 
-def radial_gradient(n, cx, cy, rx, ry, c0, c1, c2):
+def radial_gradient(n: int, cx: float, cy: float, rx: float, ry: float,
+                    c0: str, c1: str, c2: str) -> pg.Surface:
+    """
+    Paint the small square gradient the arena backdrop is stretched from: a
+    bright core easing through a mid tone into a dark edge. It is drawn small
+    and scaled up afterwards, because filling a window-sized surface pixel by
+    pixel would be far too slow to do on a resize
+
+    :param n: side of the square in pixels, before it is scaled up
+    :param cx: horizontal center, as a fraction of the square
+    :param cy: vertical center, as a fraction of the square
+    :param rx: horizontal radius, as a fraction of the square
+    :param ry: vertical radius, as a fraction of the square
+    :param c0: color at the center
+    :param c1: mid color, reached at six tenths of the radius
+    :param c2: color at the outer edge
+    :returns: the gradient surface, n pixels square
+    """
     surf = pg.Surface((n, n))
     col0, col1, col2 = pg.Color(c0), pg.Color(c1), pg.Color(c2)
     for yy in range(n):
@@ -58,12 +92,33 @@ def radial_gradient(n, cx, cy, rx, ry, c0, c1, c2):
     return surf
 
 
-def grid_step(h):
+def grid_step(h: int) -> int:
+    """
+    Pick how far apart the backdrop's grid lines sit for a given window
+    height, so the arena reads at the same density in a small window as in a
+    maximised one
+
+    :param h: window height in pixels
+    :returns: spacing between grid lines, in pixels
+    """
     scale = max(SCALE_MIN, min(SCALE_MAX, h / SCALE_REF_HEIGHT))
     return max(int(64 * scale), 32)
 
 
-def arena_background(size, center=(0.5, 0.18), grid=None):
+def arena_background(size: tuple[int, int], center: tuple[float, float] = (0.5, 0.18),
+                     grid: int | None = None) -> pg.Surface:
+    """
+    Build the arena the game is played in front of: a radial glow centered on
+    wherever the board sits, a faint grid across it, an accent wash along the
+    floor and a dither pass to kill banding. The menu battle and the
+    focus-mode transition paint theirs from this same function, so every
+    screen shares one arena look
+
+    :param size: window width and height in pixels
+    :param center: glow center as fractions of the window, x then y
+    :param grid: grid spacing in pixels, or None to scale it to the height
+    :returns: the finished backdrop surface
+    """
     w, h = size
     grad = radial_gradient(128, center[0], center[1], 1.2, 0.8,
                            Colors.battle_bg_hi, Colors.battle_bg, Colors.battle_bg_edge)
@@ -87,11 +142,28 @@ def arena_background(size, center=(0.5, 0.18), grid=None):
 
 
 class ArenaBackdrop:
+    """
+    The arena backdrop as a screen owns it: the painted surface is kept and
+    only rebuilt when the window size or the board's position changes, which
+    keeps a per-pixel gradient off the frame budget. The game screen and the
+    review screen each hold one
+    """
 
-    def __init__(self):
+    def __init__(self) -> None:
+        """
+        Start with nothing cached; the first draw paints the arena
+        """
         self._cache = None
 
-    def draw(self, window, board_rect):
+    def draw(self, window: pg.Surface, board_rect: pg.Rect) -> None:
+        """
+        Paint the arena behind the board, repainting only when the window size
+        or the board's center has actually moved -- on a resize, on entering
+        focus mode, or when the side panel changes the board's place
+
+        :param window: surface drawn to, normally the app window
+        :param board_rect: the board's box; its center is where the glow goes
+        """
         size = window.get_size()
         w, h = size
         if w <= 0 or h <= 0:

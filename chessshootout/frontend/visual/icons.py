@@ -1,8 +1,11 @@
 import math
 import os
+from collections.abc import Callable
+from typing import Any
 
 import pygame as pg
 
+from chessshootout.backend.pieces import Piece
 from chessshootout.paths import PIECES_PNG_DIR
 from chessshootout.frontend.visual.cache import new_cache, memoized_surface
 from chessshootout.frontend.visual.colors import Colors
@@ -20,12 +23,32 @@ _ICON_STROKE_FACTOR_THIN = 1.6
 _ICON_STROKE_FACTOR_BOLD = 2.2
 
 
-def _blit_icon(window, rect, side, key, build):
+def _blit_icon(window: pg.Surface, rect: pg.Rect, side: int, key: tuple[Any, ...],
+               build: Callable[[], pg.Surface]) -> None:
+    """
+    Put a finished icon in the middle of the box it was asked for, drawing it
+    only the first time that exact icon and size is needed. Every icon here
+    ends with this call, which is why icons cost nothing after the first frame
+
+    :param window: surface to draw onto
+    :param rect: box the icon is centred in, in window pixels
+    :param side: icon edge length in pixels, already fitted to the box
+    :param key: cache identity -- name, size and every look-bearing argument
+    :param build: draws the icon on a miss
+    """
     window.blit(memoized_surface(_ICON_CACHE, key, build),
                 (rect.centerx - side // 2, rect.centery - side // 2))
 
 
-def piece_png_path(piece):
+def piece_png_path(piece: Piece) -> str:
+    """
+    Name the artwork file for a chess piece. The board and the history view
+    load their sprites through here, so the twelve piece pictures are addressed
+    the same way everywhere
+
+    :param piece: the piece whose art is wanted, type and colour both used
+    :returns: absolute path to that piece's PNG
+    """
     return os.path.join(PIECES_PNG_DIR, f"{piece.type.value}_{piece.color.value}.png")
 
 
@@ -35,17 +58,40 @@ _FILE_BODY = [(6, 4), (13.5, 4), (18, 8.5), (18, 20), (6, 20)]
 _FILE_FOLD = [(13.5, 4), (13.5, 8.5), (18, 8.5)]
 
 
-def _icon_side(rect, fraction=0.74):
+def _icon_side(rect: pg.Rect, fraction: float = 0.74) -> int:
+    """
+    Decide how big an icon may be inside the box it was given, leaving air
+    around it. Icons are square, so the shorter side of the box wins
+
+    :param rect: box the icon has to fit in
+    :param fraction: share of that box the artwork may occupy
+    :returns: icon edge length in pixels
+    """
     return int(min(rect.width, rect.height) * fraction)
 
 
-def draw_folder(window, rect, color):
+def draw_folder(window: pg.Surface, rect: pg.Rect, color: str) -> None:
+    """
+    The folder mark on every directory row of the file browser, the one the
+    player picks a save folder with. Too small a box is skipped rather than
+    drawn as a smudge
+
+    :param window: surface to draw onto
+    :param rect: box the icon is centred in
+    :param color: fill colour as a hex token from Colors
+    """
     side = _icon_side(rect)
     if side < 4:
         return
     col = pg.Color(color)
 
-    def render(surf, k):
+    def render(surf: pg.Surface, k: int) -> None:
+        """
+        Lay the folder outline onto the oversized canvas, in design units
+
+        :param surf: oversized canvas being drawn on
+        :param k: how many times bigger that canvas is than the icon
+        """
         u = side * k / ICON_GRID
         pg.draw.polygon(surf, col, [(x * u, y * u) for x, y in _FOLDER_BODY])
 
@@ -53,14 +99,29 @@ def draw_folder(window, rect, color):
                lambda: supersample(side, render))
 
 
-def draw_file(window, rect, color):
+def draw_file(window: pg.Surface, rect: pg.Rect, color: str) -> None:
+    """
+    The page mark shown for a plain file in the browser, and on the Open PGN
+    cap in review. Its turned-down corner is drawn in a darker tint of the
+    same colour so the shape reads at rail size
+
+    :param window: surface to draw onto
+    :param rect: box the icon is centred in
+    :param color: fill colour as a hex token from Colors
+    """
     side = _icon_side(rect)
     if side < 4:
         return
     col = pg.Color(color)
     fold = col.lerp(pg.Color(Colors.bg), 0.55)
 
-    def render(surf, k):
+    def render(surf: pg.Surface, k: int) -> None:
+        """
+        Lay the page and its folded corner onto the oversized canvas
+
+        :param surf: oversized canvas being drawn on
+        :param k: how many times bigger that canvas is than the icon
+        """
         u = side * k / ICON_GRID
         pg.draw.polygon(surf, col, [(x * u, y * u) for x, y in _FILE_BODY])
         pg.draw.polygon(surf, fold, [(x * u, y * u) for x, y in _FILE_FOLD])
@@ -73,20 +134,47 @@ _FOLDER_OUTLINE = [(3.5, 8), (3.5, 7), (4.4, 6.2), (8.6, 6.2), (10.6, 8.2),
                    (20, 8.2), (20.5, 9), (20.5, 18), (3.5, 18)]
 
 
-def _stroke(surf, col, pts, closed, lw):
+def _stroke(surf: pg.Surface, col: pg.Color, pts: list[tuple[float, float]],
+            closed: bool, lw: int) -> None:
+    """
+    Draw an outline the way the icon set wants it: a polyline with a dot at
+    every corner, which rounds the joints that pygame would otherwise leave
+    notched at thick stroke widths
+
+    :param surf: canvas being drawn on
+    :param col: stroke colour
+    :param pts: outline points in canvas pixels
+    :param closed: whether the last point joins back to the first
+    :param lw: stroke width in canvas pixels
+    """
     pg.draw.lines(surf, col, closed, pts, lw)
     r = max(lw // 2, 1)
     for px, py in pts:
         pg.draw.circle(surf, col, (int(px), int(py)), r)
 
 
-def draw_folder_plus(window, rect, color):
+def draw_folder_plus(window: pg.Surface, rect: pg.Rect, color: str) -> None:
+    """
+    The new-folder tool in the file browser, an outlined folder with a plus
+    inside it. Outlined icons need more room than solid ones, so this one
+    claims a larger share of its box
+
+    :param window: surface to draw onto
+    :param rect: box the icon is centred in
+    :param color: stroke colour as a hex token from Colors
+    """
     side = _icon_side(rect, _ICON_FOOTPRINT_LARGE)
     if side < 6:
         return
     col = pg.Color(color)
 
-    def render(surf, k):
+    def render(surf: pg.Surface, k: int) -> None:
+        """
+        Stroke the folder outline and cross the plus inside it
+
+        :param surf: oversized canvas being drawn on
+        :param k: how many times bigger that canvas is than the icon
+        """
         u = side * k / ICON_GRID
         lw = max(int(_ICON_STROKE_FACTOR * u), 2)
         _stroke(surf, col, [(x * u, y * u) for x, y in _FOLDER_OUTLINE], True, lw)
@@ -97,13 +185,28 @@ def draw_folder_plus(window, rect, color):
                lambda: supersample(side, render, scale=ICON_SUPERSAMPLE))
 
 
-def draw_eye(window, rect, color, off=False):
+def draw_eye(window: pg.Surface, rect: pg.Rect, color: str, off: bool = False) -> None:
+    """
+    The show-hidden-files tool in the file browser. The struck-through form is
+    a separate cache entry, so toggling the tool swaps between two ready icons
+
+    :param window: surface to draw onto
+    :param rect: box the icon is centred in
+    :param color: stroke colour as a hex token from Colors
+    :param off: draw the eye with a slash through it
+    """
     side = _icon_side(rect, _ICON_FOOTPRINT_LARGE)
     if side < 6:
         return
     col = pg.Color(color)
 
-    def render(surf, k):
+    def render(surf: pg.Surface, k: int) -> None:
+        """
+        Sweep the two lids as sine arcs, drop the pupil in and add the slash
+
+        :param surf: oversized canvas being drawn on
+        :param k: how many times bigger that canvas is than the icon
+        """
         u = side * k / ICON_GRID
         lw = max(int(_ICON_STROKE_FACTOR * u), 2)
         x0, x1, cy, amp, n = 3 * u, 21 * u, 12 * u, 4.7 * u, 24
@@ -124,13 +227,27 @@ def draw_eye(window, rect, color, off=False):
 _PLAY_TRIANGLE = [(8, 5), (8, 19), (19, 12)]
 
 
-def draw_play(window, rect, color):
+def draw_play(window: pg.Surface, rect: pg.Rect, color: str) -> None:
+    """
+    The play triangle on the Play row of the menu's Command Rail, the row that
+    holds the whole match setup
+
+    :param window: surface to draw onto
+    :param rect: box the icon is centred in
+    :param color: fill colour as a hex token from Colors
+    """
     side = _icon_side(rect)
     if side < 4:
         return
     col = pg.Color(color)
 
-    def render(surf, k):
+    def render(surf: pg.Surface, k: int) -> None:
+        """
+        Fill the triangle on the oversized canvas
+
+        :param surf: oversized canvas being drawn on
+        :param k: how many times bigger that canvas is than the icon
+        """
         u = side * k / ICON_GRID
         pg.draw.polygon(surf, col, [(x * u, y * u) for x, y in _PLAY_TRIANGLE])
 
@@ -138,13 +255,27 @@ def draw_play(window, rect, color):
                lambda: supersample(side, render))
 
 
-def draw_clock(window, rect, color):
+def draw_clock(window: pg.Surface, rect: pg.Rect, color: str) -> None:
+    """
+    The clock face used for the History row of the rail and for the time
+    control chip on the Play view, where it labels the chosen time
+
+    :param window: surface to draw onto
+    :param rect: box the icon is centred in
+    :param color: stroke colour as a hex token from Colors
+    """
     side = _icon_side(rect, _ICON_FOOTPRINT_MEDIUM)
     if side < 6:
         return
     col = pg.Color(color)
 
-    def render(surf, k):
+    def render(surf: pg.Surface, k: int) -> None:
+        """
+        Ring the dial and set the two hands
+
+        :param surf: oversized canvas being drawn on
+        :param k: how many times bigger that canvas is than the icon
+        """
         u = side * k / ICON_GRID
         lw = max(int(_ICON_STROKE_FACTOR * u), 2)
         cx, cy, r = 12 * u, 12.5 * u, 8 * u
@@ -160,13 +291,26 @@ _MEDAL_RIBBON_L = [(9, 15), (9, 21), (12, 18.5)]
 _MEDAL_RIBBON_R = [(15, 15), (15, 21), (12, 18.5)]
 
 
-def draw_medal(window, rect, color):
+def draw_medal(window: pg.Surface, rect: pg.Rect, color: str) -> None:
+    """
+    The medal on the Battle Pass row of the rail
+
+    :param window: surface to draw onto
+    :param rect: box the icon is centred in
+    :param color: stroke colour as a hex token from Colors
+    """
     side = _icon_side(rect, _ICON_FOOTPRINT_MEDIUM)
     if side < 6:
         return
     col = pg.Color(color)
 
-    def render(surf, k):
+    def render(surf: pg.Surface, k: int) -> None:
+        """
+        Ring the medal, set its diamond and hang the two ribbon tails
+
+        :param surf: oversized canvas being drawn on
+        :param k: how many times bigger that canvas is than the icon
+        """
         u = side * k / ICON_GRID
         lw = max(int(_ICON_STROKE_FACTOR_THIN * u), 2)
         cx, cy, r = 12 * u, 9.5 * u, 6 * u
@@ -183,13 +327,26 @@ def draw_medal(window, rect, color):
 _SHIELD_BODY = [(5, 4), (19, 4), (19, 11.5), (12, 21), (5, 11.5)]
 
 
-def draw_shield(window, rect, color):
+def draw_shield(window: pg.Surface, rect: pg.Rect, color: str) -> None:
+    """
+    The shield on the Armory row of the rail
+
+    :param window: surface to draw onto
+    :param rect: box the icon is centred in
+    :param color: stroke colour as a hex token from Colors
+    """
     side = _icon_side(rect, _ICON_FOOTPRINT_MEDIUM)
     if side < 6:
         return
     col = pg.Color(color)
 
-    def render(surf, k):
+    def render(surf: pg.Surface, k: int) -> None:
+        """
+        Stroke the shield outline and its centre rib
+
+        :param surf: oversized canvas being drawn on
+        :param k: how many times bigger that canvas is than the icon
+        """
         u = side * k / ICON_GRID
         lw = max(int(_ICON_STROKE_FACTOR * u), 2)
         _stroke(surf, col, [(x * u, y * u) for x, y in _SHIELD_BODY], True, lw)
@@ -199,13 +356,27 @@ def draw_shield(window, rect, color):
                lambda: supersample(side, render, scale=ICON_SUPERSAMPLE))
 
 
-def draw_people(window, rect, color):
+def draw_people(window: pg.Surface, rect: pg.Rect, color: str) -> None:
+    """
+    The two figures on the Social row of the rail
+
+    :param window: surface to draw onto
+    :param rect: box the icon is centred in
+    :param color: stroke colour as a hex token from Colors
+    """
     side = _icon_side(rect, _ICON_FOOTPRINT_MEDIUM)
     if side < 6:
         return
     col = pg.Color(color)
 
-    def render(surf, k):
+    def render(surf: pg.Surface, k: int) -> None:
+        """
+        Ring each head and arc the shoulders below it, the smaller figure
+        behind the larger one
+
+        :param surf: oversized canvas being drawn on
+        :param k: how many times bigger that canvas is than the icon
+        """
         u = side * k / ICON_GRID
         lw = max(int(_ICON_STROKE_FACTOR_THIN * u), 2)
         pg.draw.circle(surf, col, (int(8 * u), int(8.5 * u)), int(2.6 * u), width=lw)
@@ -219,13 +390,27 @@ def draw_people(window, rect, color):
                lambda: supersample(side, render, scale=ICON_SUPERSAMPLE))
 
 
-def draw_gear(window, rect, color):
+def draw_gear(window: pg.Surface, rect: pg.Rect, color: str) -> None:
+    """
+    The cog on the Options row of the rail, the row pinned at the foot of the
+    nav list
+
+    :param window: surface to draw onto
+    :param rect: box the icon is centred in
+    :param color: fill colour as a hex token from Colors
+    """
     side = _icon_side(rect, _ICON_FOOTPRINT_LARGE)
     if side < 6:
         return
     col = pg.Color(color)
 
-    def render(surf, k):
+    def render(surf: pg.Surface, k: int) -> None:
+        """
+        Spoke eight tapered teeth around the hub, then punch the centre hole
+
+        :param surf: oversized canvas being drawn on
+        :param k: how many times bigger that canvas is than the icon
+        """
         u = side * k / ICON_GRID
         cx, cy = 12 * u, 12 * u
         r0, r1 = 5.2 * u, 8.4 * u
@@ -248,13 +433,29 @@ def draw_gear(window, rect, color):
                lambda: supersample(side, render, scale=ICON_SUPERSAMPLE))
 
 
-def draw_reticle(window, rect, color, alpha=255):
+def draw_reticle(window: pg.Surface, rect: pg.Rect, color: str, alpha: int = 255) -> None:
+    """
+    The gunsight that marks which rail row is selected, slid onto the active
+    row and breathing on a pulse. Fading is done on the shared cached surface
+    rather than by caching one entry per alpha step
+
+    :param window: surface to draw onto
+    :param rect: box the reticle is centred in
+    :param color: stroke colour as a hex token from Colors
+    :param alpha: opacity from 0 to 255, clamped into that range
+    """
     side = _icon_side(rect, 0.9)
     if side < 6:
         return
     col = pg.Color(color)
 
-    def render(surf, k):
+    def render(surf: pg.Surface, k: int) -> None:
+        """
+        Ring the sight, put a tick outside it on each axis and dot the centre
+
+        :param surf: oversized canvas being drawn on
+        :param k: how many times bigger that canvas is than the icon
+        """
         u = side * k / ICON_GRID
         cx, cy = 12 * u, 12 * u
         r = 7 * u
@@ -273,13 +474,27 @@ def draw_reticle(window, rect, color, alpha=255):
     window.blit(surf, (rect.centerx - side // 2, rect.centery - side // 2))
 
 
-def draw_undo_arrow(window, rect, color):
+def draw_undo_arrow(window: pg.Surface, rect: pg.Rect, color: str) -> None:
+    """
+    The looping arrow on the Undo cap in the game rail, the button that asks
+    to take a move back
+
+    :param window: surface to draw onto
+    :param rect: box the icon is centred in
+    :param color: stroke colour as a hex token from Colors
+    """
     side = _icon_side(rect, _ICON_FOOTPRINT_MEDIUM)
     if side < 6:
         return
     col = pg.Color(color)
 
-    def render(surf, k):
+    def render(surf: pg.Surface, k: int) -> None:
+        """
+        Sweep the arc most of the way round, cap its tail and point its head
+
+        :param surf: oversized canvas being drawn on
+        :param k: how many times bigger that canvas is than the icon
+        """
         u = side * k / ICON_GRID
         lw = max(int(_ICON_STROKE_FACTOR_BOLD * u), 2)
         cx, cy, r = 12 * u, 12 * u, 7.4 * u
@@ -307,13 +522,27 @@ _RESIGN_POLE_X = 7.2
 _RESIGN_BASE = ((4.6, 20.6), (9.8, 20.6))
 
 
-def draw_resign_flag(window, rect, color):
+def draw_resign_flag(window: pg.Surface, rect: pg.Rect, color: str) -> None:
+    """
+    The white flag on the Resign cap in the game rail, the button that gives
+    the game up
+
+    :param window: surface to draw onto
+    :param rect: box the icon is centred in
+    :param color: fill colour as a hex token from Colors
+    """
     side = _icon_side(rect, _ICON_FOOTPRINT_MEDIUM)
     if side < 6:
         return
     col = pg.Color(color)
 
-    def render(surf, k):
+    def render(surf: pg.Surface, k: int) -> None:
+        """
+        Stand the pole on its foot and hang the swallow-tailed flag off it
+
+        :param surf: oversized canvas being drawn on
+        :param k: how many times bigger that canvas is than the icon
+        """
         u = side * k / ICON_GRID
         pole = max(int(2.0 * u), 2)
         px = _RESIGN_POLE_X
@@ -326,13 +555,27 @@ def draw_resign_flag(window, rect, color):
                lambda: supersample(side, render, scale=ICON_SUPERSAMPLE))
 
 
-def draw_flip_arrows(window, rect, color):
+def draw_flip_arrows(window: pg.Surface, rect: pg.Rect, color: str) -> None:
+    """
+    The opposed arrows on the Flip cap, which turns the board round so the
+    other colour is at the bottom
+
+    :param window: surface to draw onto
+    :param rect: box the icon is centred in
+    :param color: stroke colour as a hex token from Colors
+    """
     side = _icon_side(rect, _ICON_FOOTPRINT_MEDIUM)
     if side < 6:
         return
     col = pg.Color(color)
 
-    def render(surf, k):
+    def render(surf: pg.Surface, k: int) -> None:
+        """
+        Draw the two shafts side by side, one headed up and one headed down
+
+        :param surf: oversized canvas being drawn on
+        :param k: how many times bigger that canvas is than the icon
+        """
         u = side * k / ICON_GRID
         lw = max(int(_ICON_STROKE_FACTOR_BOLD * u), 2)
         pg.draw.line(surf, col, (9 * u, 5 * u), (9 * u, 19 * u), lw)
@@ -346,13 +589,27 @@ def draw_flip_arrows(window, rect, color):
                lambda: supersample(side, render, scale=ICON_SUPERSAMPLE))
 
 
-def draw_left_arrow(window, rect, color):
+def draw_left_arrow(window: pg.Surface, rect: pg.Rect, color: str) -> None:
+    """
+    The back arrow on the Menu cap of the review rail, the way out of a
+    reviewed game
+
+    :param window: surface to draw onto
+    :param rect: box the icon is centred in
+    :param color: stroke colour as a hex token from Colors
+    """
     side = _icon_side(rect, _ICON_FOOTPRINT_MEDIUM)
     if side < 6:
         return
     col = pg.Color(color)
 
-    def render(surf, k):
+    def render(surf: pg.Surface, k: int) -> None:
+        """
+        Draw the shaft and its arrowhead pointing left
+
+        :param surf: oversized canvas being drawn on
+        :param k: how many times bigger that canvas is than the icon
+        """
         u = side * k / ICON_GRID
         lw = max(int(_ICON_STROKE_FACTOR_BOLD * u), 2)
         pg.draw.line(surf, col, (5.5 * u, 12 * u), (18.5 * u, 12 * u), lw)

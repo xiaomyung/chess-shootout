@@ -1,4 +1,12 @@
 class Colors:
+    """
+    The game's whole palette in one place: every colour the UI paints with is
+    a hex string on this class, so retheming the game means editing here and
+    nowhere else. Translucent tokens are written as a base token plus a
+    two-digit alpha suffix, which keeps each tint tied to the knob it derives
+    from and is pinned by the token tests
+    """
+
     bg = "#0c0e12"
     surface = "#16191f"
     surface_raised = "#1d212a"

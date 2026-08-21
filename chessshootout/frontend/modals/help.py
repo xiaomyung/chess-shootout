@@ -35,8 +35,21 @@ MIN_HEIGHT = 280
 
 
 class HelpModal(BaseModal, ScrollHost):
+    """
+    The scrolling hotkey card that both the game and the review screen open
+    with ?, drawn in the shared modal shell. Each screen shows it with its own
+    list of rows, so one widget serves both; the master list is HOTKEYS in
+    this module, which has to stay in step with the hotkey table in the README
+    whenever a control is added, renamed or dropped
+    """
 
-    def __init__(self, window):
+    def __init__(self, window: pg.Surface) -> None:
+        """
+        Build the help card once at startup with no rows in it, ready for
+        whichever screen shows it first
+
+        :param window: the app window surface this modal draws onto
+        """
         super().__init__(window)
         self.button_rects = {}
         self.rows = []
@@ -51,7 +64,14 @@ class HelpModal(BaseModal, ScrollHost):
             wheel_step_px=lambda: self._line_h,
         )
 
-    def set_rect(self, rect):
+    def set_rect(self, rect: pg.Rect) -> None:
+        """
+        Place the card, keeping it inside the window and above a minimum size,
+        so the hotkey list stays readable however small the window gets
+
+        :param rect: area the shell would like the card to take, in window
+            pixels
+        """
         win_w, win_h = self.window.get_size()
         margin = 16
         cx = rect.centerx
@@ -63,24 +83,43 @@ class HelpModal(BaseModal, ScrollHost):
         self.rect = pg.Rect(x, y, w, h)
         self._on_rect_changed()
 
-    def _on_rect_changed(self):
+    def _on_rect_changed(self) -> None:
+        """
+        Rebuild the title, row, key and button fonts. Help text is sized in
+        fixed points rather than off the card, so the rows read the same at
+        every window size
+        """
         self.title_font = get_font(TITLE_FONT_SIZE, bold=True)
         self.row_font = get_font(ROW_FONT_SIZE, bold=False)
         self.key_font = get_mono_font(ROW_FONT_SIZE)
         self.button_font = get_font(BUTTON_FONT_SIZE, bold=True)
 
-    def show(self, rows):
+    def show(self, rows: list[tuple[str, str]]) -> None:
+        """
+        Open the card on one screen's hotkey list, scrolled back to the top.
+        The rows come from HOTKEYS in this module, which the README's hotkey
+        table mirrors -- change one and the other has to change with it
+
+        :param rows: (keys, description) pairs to list, in the order shown
+        """
         super().show()
         self.rows = rows
         self._scroll_px = 0.0
         self.scroll.cancel()
 
-    def hide(self):
+    def hide(self) -> None:
+        """
+        Close the card and stop any scroll still gliding
+        """
         super().hide()
         self.button_rects = {}
         self.scroll.cancel()
 
-    def draw(self):
+    def draw(self) -> None:
+        """
+        Paint the card: shell, title, the scrolling hotkey rows and the Close
+        button. Drawing is also what fixes the rects clicks are tested against
+        """
         if not self.visible or self.rect.width <= 0:
             return
         self.scroll.tick()
@@ -108,7 +147,14 @@ class HelpModal(BaseModal, ScrollHost):
             self.button_font, pad, primary_keys={"close"}, cut=True,
         )
 
-    def _draw_rows(self, rows_rect):
+    def _draw_rows(self, rows_rect: pg.Rect) -> None:
+        """
+        Draw the slice of the hotkey list that is on screen, keys in the left
+        column and what they do in the right, clipped to the rows area with a
+        thin line between rows
+
+        :param rows_rect: area the rows may fill, in window pixels
+        """
         self._line_h = self.row_font.get_height() + ROW_PAD_Y
         line_h = self._line_h
         self._content_px = len(self.rows) * line_h
@@ -155,7 +201,14 @@ class HelpModal(BaseModal, ScrollHost):
             self.window.set_clip(prev_clip)
         self.scroll.draw_thumb(self.window)
 
-    def handle_click(self, pos):
+    def handle_click(self, pos: tuple[int, int]) -> bool:
+        """
+        Close the card when the Close button is clicked; a click anywhere else
+        does nothing, leaving the card up
+
+        :param pos: click position in window pixels
+        :returns: True when the button took the click
+        """
         if not self.visible:
             return False
         for key, br in self.button_rects.items():
@@ -164,7 +217,14 @@ class HelpModal(BaseModal, ScrollHost):
                 return True
         return False
 
-    def handle_key(self, event):
+    def handle_key(self, event: pg.event.Event) -> bool:
+        """
+        Close the card on any key at all: it is a read-only reference, so the
+        player pressing something means they are finished reading it
+
+        :param event: pygame KEYDOWN event
+        :returns: True while the card was open, meaning the key was used
+        """
         if not self.visible:
             return False
         self.hide()
