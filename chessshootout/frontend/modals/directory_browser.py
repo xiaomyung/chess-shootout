@@ -83,8 +83,7 @@ class DirectoryBrowser(BaseModal, ScrollHost):
         self.sel_val_font = get_mono_font(max(int(h * 0.03), 14))
         self.button_font = get_font(max(int(h * 0.028), 12), bold=True)
 
-    def show(self, start_dir: str,  # type: ignore[override]
-             on_select: Callable[[str], None],
+    def show(self, start_dir: str, on_select: Callable[[str], None],
              on_error: Callable[[str], None] | None = None) -> None:
         """
         Open the browser on a starting folder and list what is inside it. A

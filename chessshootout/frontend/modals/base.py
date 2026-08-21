@@ -1,3 +1,5 @@
+from typing import Any
+
 import pygame as pg
 
 from chessshootout.frontend.visual.cache import new_cache, memoized_surface
@@ -77,10 +79,15 @@ class BaseModal:
         size = max(int(self.rect.height / factor), min_size)
         return get_font(size, bold=bold)
 
-    def show(self) -> None:
+    def show(self, *args: Any, **kwargs: Any) -> None:
         """
-        Put the modal on screen. Subclasses that need arguments -- a question,
-        a callback -- override this and call up to it once their state is set
+        Put the modal on screen. The signature is open because subclasses
+        override it with their own required arguments -- a question, a
+        callback, a starting folder -- and each fills its state in before
+        calling up to here with nothing
+
+        :param args: ignored here; the arguments a subclass declares instead
+        :param kwargs: ignored here; the keyword arguments a subclass declares
         """
         self.visible = True
 
@@ -175,7 +182,6 @@ class BaseModal:
 
             :returns: freshly drawn rail surface
             """
-
             def render(surf: pg.Surface, k: int) -> None:
                 """
                 Draw the rail polygon at supersampled scale, mitring the

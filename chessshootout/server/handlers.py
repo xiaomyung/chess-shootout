@@ -163,7 +163,7 @@ def _moderation_load(app: FastAPI) -> ModerationLoad:
                 _app_state_singleton(app, "moderation_load", ModerationLoad))
 
 
-def _clock_snapshot(clock: Clock | None) -> ClockSnapshot:
+def clock_snapshot(clock: Clock | None) -> ClockSnapshot:
     """
     Package both players' remaining time for the wire, in the shape every
     frame that carries clocks expects. A game with no clock reports zeros
@@ -184,10 +184,11 @@ def _clock_snapshot(clock: Clock | None) -> ClockSnapshot:
     )
 
 
-def _arrow_wires(pairs: Iterable[tuple[str, str]]) -> list[ArrowWire]:
+def arrow_wires(pairs: Iterable[tuple[str, str]]) -> list[ArrowWire]:
     """
     Dress stored arrows up for the wire. Arrows live server-side as plain
-    square pairs, and this is the single place they become wire models
+    square pairs, and this is the single place they become wire models --
+    the live relays and the resume snapshot both come through here
 
     :param pairs: arrows as origin and destination squares in algebraic form.
     :returns: the same arrows as wire models, in the order given.
@@ -398,13 +399,14 @@ async def _apply_move(app: FastAPI, room: Room, color: str, from_sq: Square,
     """
     rooms = app.state.rooms
     connections = app.state.connections
-    result = cast(Backend, room.backend).try_move(from_sq, to_sq)
+    backend = cast(Backend, room.backend)
+    result = backend.try_move(from_sq, to_sq)
     if not result.legal:
         await send(connections.get_for_color(room, color),
                      ErrorMessage(reason=Reason.INVALID_MOVE_FORMAT))
         return "illegal"
     if result.promotion_required:
-        cast(Backend, room.backend).promote(to_sq, PROMO_TYPE_BY_LETTER[promotion or "q"])
+        backend.promote(to_sq, PROMO_TYPE_BY_LETTER[promotion or "q"])
     room.plies_ever += 1
     room.mark_idle_activity(app.state.now() if room.idle_window() is not None else None)
     room.skillcheck_locks.clear()
@@ -415,21 +417,21 @@ async def _apply_move(app: FastAPI, room: Room, color: str, from_sq: Square,
     await clear_resyncing(app, room, color)
     room.draw_offered_by = None
     room.takeback_offered_by = None
-    san = cast(Backend, room.backend).move_history[-1].san
+    san = backend.move_history[-1].san
     if skill_kind is not None:
         room.skillcheck_log.append(SkillCheckOutcome(
-            len(cast(Backend, room.backend).move_history), skill_kind,
+            len(backend.move_history), skill_kind,
             cast(bool, skill_won), san))
     log.info("move applied room=%s mover=%s san=%s", room.room_id, color, san)
     applied = MoveAppliedMessage(
         from_sq=coord_from_square(from_sq), to_sq=coord_from_square(to_sq),
         promotion=promotion, san=san,
-        clock=_clock_snapshot(cast(Backend, room.backend).clock),
-        ply=len(cast(Backend, room.backend).move_history),
+        clock=clock_snapshot(backend.clock),
+        ply=len(backend.move_history),
         skill_check_kind=skill_kind, skill_check_won=skill_won,
     )
     await broadcast(rooms, connections, room, applied)
-    game_result = cast(Backend, room.backend).game_result()
+    game_result = backend.game_result()
     if game_result in RESULT_REASON_BY_GAME_RESULT:
         reason, winner = RESULT_REASON_BY_GAME_RESULT[game_result]
         await finalize_and_broadcast(rooms, connections, room, reason, winner_color=winner)
@@ -858,16 +860,17 @@ async def handle_takeback_response(app: FastAPI, websocket: WebSocket, room: Roo
         return "self"
     if msg.accept:
         log.info("takeback accepted room=%s by=%s", room.room_id, color)
-        popped_ply = len(cast(Backend, room.backend).move_history)
-        cast(Backend, room.backend).undo()
+        backend = cast(Backend, room.backend)
+        popped_ply = len(backend.move_history)
+        backend.undo()
         room.skillcheck_log = [e for e in room.skillcheck_log if e.ply < popped_ply]
         room.takeback_offered_by = None
         room.annotations_white.clear_marks()
         room.annotations_black.clear_marks()
         await broadcast(rooms, connections, room, TakebackAppliedMessage(
-            fen=export_fen(cast(Backend, room.backend)),
-            clock=_clock_snapshot(cast(Backend, room.backend).clock),
-            ply=len(cast(Backend, room.backend).move_history),
+            fen=export_fen(backend),
+            clock=clock_snapshot(backend.clock),
+            ply=len(backend.move_history),
         ))
         if room.result is None and room.idle_window() is not None:
             room.mark_idle_activity(app.state.now())
@@ -911,7 +914,7 @@ async def handle_give_time(app: FastAPI, websocket: WebSocket, room: Room, color
              room.room_id, color, hold_ms, ticks, added)
     await broadcast(rooms, connections, room, TimeGrantedMessage(
         granted_by=color, seconds_added=added,
-        clock=_clock_snapshot(room.backend.clock),
+        clock=clock_snapshot(room.backend.clock),
     ))
     return "granted" if added > 0 else "capped"
 
@@ -1151,9 +1154,10 @@ def _last_move_context(room: Room) -> tuple[str, ...]:
     :param room: the room whose board is being screened.
     :returns: origin and destination squares, empty before the first move.
     """
-    if not cast(Backend, room.backend).move_history:
+    backend = cast(Backend, room.backend)
+    if not backend.move_history:
         return ()
-    move = cast(Backend, room.backend).move_history[-1].move
+    move = backend.move_history[-1].move
     return (coord_from_square(move.from_sq), coord_from_square(move.to_sq))
 
 
@@ -1355,7 +1359,7 @@ async def _moderate_relay(app: FastAPI, room: Room, color: str,
                  AnnotationsBlockedMessage(
                      action="suspect",
                      highlights=sus_highlights,
-                     arrows=_arrow_wires(sus_arrows),
+                     arrows=arrow_wires(sus_arrows),
                      share_muted=store.share_muted))
     return "suspect"
 
@@ -1393,7 +1397,7 @@ async def _handle_block(app: FastAPI, room: Room, color: str, verdict: detector.
                  AnnotationsBlockedMessage(
                      action="blocked",
                      highlights=own_highlights,
-                     arrows=_arrow_wires(own_arrows),
+                     arrows=arrow_wires(own_arrows),
                      share_muted=muted))
 
 
@@ -1418,7 +1422,7 @@ async def _corrective_snapshot(app: FastAPI, room: Room, source_color: str) -> N
     store = room.annotations_for(source_color)
     await send(target_ws, AnnotationsStateMessage(
         sharing=True, highlights=sorted(store.highlights),
-        arrows=_arrow_wires(store.arrows)))
+        arrows=arrow_wires(store.arrows)))
 
 
 async def _relay_plain(connections: ConnectionRegistry, room: Room, color: str,
@@ -1496,7 +1500,7 @@ async def handle_set_marks_visibility(app: FastAPI, websocket: WebSocket, room: 
     opp_store = room.annotations_for(room.opp_color(color))
     await send(connections.get_for_color(room, color), AnnotationsStateMessage(
         sharing=opp_store.sharing, highlights=sorted(opp_store.highlights),
-        arrows=_arrow_wires(opp_store.arrows)))
+        arrows=arrow_wires(opp_store.arrows)))
     return "shown"
 
 

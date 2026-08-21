@@ -116,6 +116,20 @@ def _validate_coord(value: str, name: str) -> str:
     return value
 
 
+def _validate_coords(values: list[str]) -> list[str]:
+    """
+    Gate a whole set of highlighted squares in one go, the list counterpart of
+    the single-square gate. A set holding one unusable square is refused whole,
+    so a mark that cannot be drawn never reaches the other player
+
+    :param values: candidate squares in algebraic form, e.g. e4.
+    :returns: the same list once every entry names a real board square.
+    """
+    for value in values:
+        _validate_coord(value, "coord")
+    return values
+
+
 class Reason:
     """
     The closed vocabulary of reason codes shared by server and client: why an
@@ -126,7 +140,6 @@ class Reason:
     VERSION_MISMATCH = "version_mismatch"
     INVALID_MESSAGE = "invalid_message"
     INVALID_MOVE_FORMAT = "invalid_move_format"
-    INVALID_TIME_CONTROL = "invalid_time_control"
     NOT_YOUR_TURN = "not_your_turn"
     SKILLCHECK_PENDING = "skillcheck_pending"
     MOVE_LOCKED = "move_locked"
@@ -234,7 +247,7 @@ class ClockSnapshot(BaseModel):
 
     white_remaining: float
     black_remaining: float
-    running_for: Literal["white", "black"] | None = None
+    running_for: Literal["white", "black"] | None
 
 
 class HistoryEntryWire(BaseModel):
@@ -328,9 +341,7 @@ class AnnotationSetWire(BaseModel):
         :param v: highlighted squares in algebraic form.
         :returns: the same list once every entry names a real square.
         """
-        for sq in v:
-            _validate_coord(sq, "coord")
-        return v
+        return _validate_coords(v)
 
 
 SkillCheckKindLiteral = Literal["wheel", "aim", "whack", "combo"]
@@ -790,9 +801,7 @@ class AnnotationsStateMessage(_Base):
         :param v: highlighted squares in algebraic form.
         :returns: the same list once every entry names a real square.
         """
-        for sq in v:
-            _validate_coord(sq, "coord")
-        return v
+        return _validate_coords(v)
 
 
 class AnnotationDeltaMessage(_Base):

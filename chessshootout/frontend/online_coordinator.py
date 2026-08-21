@@ -661,7 +661,6 @@ class OnlineCoordinator:
                 declining one
             :returns: callback the banner runs when that button is clicked
             """
-
             def fire() -> None:
                 """
                 Send this button's answer to the opponent when the player
@@ -1155,8 +1154,9 @@ class OnlineCoordinator:
                                   navigate: bool = True) -> None:
         """
         End an online session for good: save the game, drop the connection,
-        clear every online overlay and unbind the board. Normally it also
-        returns the player to the menu and resets the board for a new game
+        clear every online overlay and unbind the board. Normally it also puts
+        the player back on the menu's play card, Reconnect probing and all,
+        and resets the board for a new game
 
         :param reason: short label for the log line, such as restart_search
         :param navigate: False to leave the player where they are, used when a
@@ -1172,10 +1172,7 @@ class OnlineCoordinator:
         self.unbind_game_from_online()
         if not navigate:
             return
-        if self.app.screen is self.app.menu:
-            self.app.menu.show_play_view()
-        else:
-            self.app.switch_to("menu")
+        self._return_to_menu_card()
         game._reset_to_new_game()
 
     def _return_to_menu_card(self) -> None:
@@ -1342,14 +1339,13 @@ class OnlineCoordinator:
         heartbeat and the reconnecting card. A resync that has not landed
         within eight seconds heals itself here, by giving up and reconnecting
         """
+        now = pg.time.get_ticks()
         if (self.wait_modal.is_visible() and self._match_found_at_ms is None
                 and self._wait_started_at_ms is not None):
-            self.wait_modal.set_elapsed(
-                (pg.time.get_ticks() - self._wait_started_at_ms) // 1000)
+            self.wait_modal.set_elapsed((now - self._wait_started_at_ms) // 1000)
         self.match_found_modal.update()
         self._track_local_online_state()
         self._send_heartbeat_if_due()
-        now = pg.time.get_ticks()
         game = self.app.game
         reconnecting = (game.variant == Variant.ONLINE and game.current_result() is None
                         and self.client is not None
@@ -1363,7 +1359,7 @@ class OnlineCoordinator:
         elif self.reconnecting_modal.is_visible():
             self.reconnecting_modal.hide()
         if self._resyncing:
-            if pg.time.get_ticks() - self._resync_started_at_ms > RESYNC_TIMEOUT_MS:
+            if now - self._resync_started_at_ms > RESYNC_TIMEOUT_MS:
                 self._end_resync()
                 if self.client is not None and self.client.state == "connected":
                     log.warning("resync timed out; escalating to reconnect")

@@ -5,6 +5,7 @@ from typing import Any, cast
 import pygame as pg
 
 from chessshootout.frontend.modals.base import BaseModal, MODAL_MAX_WIDTH, MODAL_RAIL
+from chessshootout.frontend.visual.cache import new_size_cache, memoized_surface
 from chessshootout.frontend.visual.clock_visual import format_countdown
 from chessshootout.frontend.visual.colors import Colors
 from chessshootout.frontend.visual.draw import supersample, rounded_rect_surface, circle_surface
@@ -16,7 +17,7 @@ from chessshootout.frontend.visual.fonts import (
 
 RADAR_SWEEP_MS = 1400
 RADAR_PING_MS = 1600
-_SWEEP_CACHE: dict[tuple[int, str], pg.Surface] = {}
+_SWEEP_CACHE = new_size_cache()
 
 PILL_VPAD = 12
 PILL_INSET = 14
@@ -34,8 +35,13 @@ def _radar_sweep(size: int, color: str) -> pg.Surface:
     :param color: sweep colour as a hex string
     :returns: sweep surface, brightest along its leading edge
     """
-    key = (size, color)
-    if key not in _SWEEP_CACHE:
+    def build() -> pg.Surface:
+        """
+        Render the sweep for this size and colour, called only when the cache
+        has nothing for them yet
+
+        :returns: freshly drawn sweep surface
+        """
         def render(surf: pg.Surface, k: int) -> None:
             """
             Draw the sweep at supersampled scale as a fan of thin wedges, each
@@ -64,8 +70,8 @@ def _radar_sweep(size: int, color: str) -> pg.Surface:
                     (cx + outer * math.cos(a1), cy + outer * math.sin(a1)),
                 ])
             pg.draw.circle(surf, (0, 0, 0, 0), (int(cx), int(cy)), int(inner))
-        _SWEEP_CACHE[key] = supersample(int(size), render)
-    return _SWEEP_CACHE[key]
+        return supersample(int(size), render)
+    return memoized_surface(_SWEEP_CACHE, (size, color), build)
 
 
 class WaitModal(BaseModal):
@@ -91,7 +97,7 @@ class WaitModal(BaseModal):
         self.button_rects: dict[str, pg.Rect] = {}
         self._font_cache: dict[str, Any] = {}
 
-    def show(self, mode_label: str, tc_text: str,  # type: ignore[override]
+    def show(self, mode_label: str, tc_text: str,
              on_cancel: Callable[[], None]) -> None:
         """
         Open the card on the match being looked for, with the elapsed counter
@@ -267,7 +273,7 @@ class WaitModal(BaseModal):
         """
         if not self.visible:
             return False
-        for key, br in self.button_rects.items():
+        for br in self.button_rects.values():
             if br.collidepoint(pos):
                 callback = self.on_cancel
                 self.hide()

@@ -44,6 +44,7 @@ from chessshootout.frontend.focus.arrow import (
 from chessshootout.frontend.focus.time_line import TimeLine
 from chessshootout.frontend.focus.transition import FocusTransition
 from chessshootout.frontend.layout import compute_layout
+from chessshootout.frontend.online_coordinator import ONLINE_TRANSIENT_REASON_LABELS
 from chessshootout.frontend.visual import cache
 from chessshootout.frontend.visual.colors import Colors
 from chessshootout.frontend.visual.backdrop import ArenaBackdrop
@@ -119,6 +120,9 @@ ONLINE_STATIC_RESULTS = {
 }
 IDLE_LABEL_BY_OUTCOME = {Reason.ABORTED: "Abort in", Reason.RESIGNATION: "Resign in"}
 IDLE_RESIGN_NOTICE_SECONDS = 30.0
+
+OPPONENT_AIMING_LABEL = "Opponent is lining up a shot…"
+RESUME_FEN_FAILED_LABEL = "Couldn't rebuild the position — resyncing"
 
 ANIM_MS_DEFAULT = 180
 ANIM_MS_MIN = 140
@@ -776,8 +780,7 @@ class GameScreen(Screen):
             result = self.match.apply_san(entry["san"])
             if not result.legal:
                 log.warning("resume: SAN replay failed at %r", entry.get("san"))
-                apply_fen(self.match.backend, payload["fen"])
-                self._custom_start = True
+                self._adopt_resumed_fen(payload.get("fen"))
                 break
         if self._time_control is not None:
             initial, incr = self._time_control
@@ -792,6 +795,26 @@ class GameScreen(Screen):
         self.skillcheck_session.apply_resumed_skillcheck_log(payload.get("skillcheck_log", []))
         self._restore_online_skillcheck_state(payload)
         self._adopt_idle_window(payload.get("idle_window"))
+
+    def _adopt_resumed_fen(self, fen: Any) -> None:
+        """
+        Take the position from the FEN a resume snapshot carries, the fallback
+        for a move list that would not replay. A FEN the engine refuses is
+        dropped rather than allowed to abandon the rest of the adoption: the
+        replayed prefix stays on the board, the player is told, and the resync
+        heartbeat converges the two sides again
+
+        :param fen: the snapshot's FEN field exactly as the server sent it,
+            which is to say not to be trusted
+        """
+        try:
+            apply_fen(self.match.backend, str(fen))
+        except (IndexError, KeyError, ValueError):
+            log.warning("resume: FEN fallback refused")
+            self.app.toast.show(RESUME_FEN_FAILED_LABEL, key="resume_fen_failed")
+            return
+        self._custom_start = True
+        self.board.forget_position_memos()
 
     def _restore_resumed_annotations(self, payload: dict[str, Any]) -> None:
         """
@@ -1073,7 +1096,7 @@ class GameScreen(Screen):
         check = self._decode_check(payload)
         self.skillcheck_session.online_last_hit_pop = NO_LAST_HIT_POP
         self.skillcheck_session.open_spectate_overlay(*check.overlay_args())
-        self.app.toast.show("Opponent is lining up a shot…")
+        self.app.toast.show(OPPONENT_AIMING_LABEL)
 
     def _resolve_spectated_skillcheck_failure(self, payload: dict[str, Any]) -> None:
         """
@@ -1211,7 +1234,7 @@ class GameScreen(Screen):
         except Exception:
             log.exception("online result verdict/teardown failed")
             coordinator._begin_resync()
-        if reason == "timeout" and not self._flag_fall_played:
+        if reason == Reason.TIMEOUT and not self._flag_fall_played:
             self._flag_fall_played = True
             self.app.sound_manager.play_flag_fall()
 
@@ -1291,7 +1314,7 @@ class GameScreen(Screen):
             self.skillcheck_session.open_spectate_overlay(
                 *check.overlay_args(),
                 elapsed_ms=elapsed_ms, miss_count=miss_count, progress=progress)
-            self.app.toast.show("Opponent is lining up a shot…")
+            self.app.toast.show(OPPONENT_AIMING_LABEL)
             return
         self.skillcheck_session.online_skillcheck = CheckContext(
             check.from_sq, check.to_sq, check.promo_type, check.kind)
@@ -1359,7 +1382,6 @@ class GameScreen(Screen):
                 and self.skillcheck_session.pending_online_move is None
                 and not self.skillcheck_session.skillcheck_swallows_input()):
             self.board.try_apply_next_premove()
-        return None
 
     def _maybe_play_flag_fall(self) -> None:
         """
@@ -1867,7 +1889,8 @@ class GameScreen(Screen):
         Tell the player their mark sharing has been muted for this game, the
         one explanation for why the share control no longer does anything
         """
-        self.app.toast.show("Mark sharing is muted for this game", key="marks_muted")
+        self.app.toast.show(ONLINE_TRANSIENT_REASON_LABELS[Reason.SHARE_MUTED],
+                            key="marks_muted")
 
     def _on_share_blocked(self) -> None:
         """

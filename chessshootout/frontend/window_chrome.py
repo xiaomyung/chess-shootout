@@ -4,7 +4,7 @@ import glob
 import logging
 import os
 from collections.abc import Callable, Iterator
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any
 
 import pygame as pg
 
@@ -62,7 +62,6 @@ class _SDLPoint(ctypes.Structure):
 
 _FS_DRAG_EXIT_PX = 8
 _SDL_WINDOW_FULLSCREEN_DESKTOP = 0x00001001
-_SDL_WINDOW_MAXIMIZED = 0x00000080
 
 
 _HITTEST_CB = ctypes.CFUNCTYPE(
@@ -173,17 +172,15 @@ class WindowChrome:
         Hook the window handling back up after the drawing surface has been
         replaced, which every resize and every fullscreen change does. Without
         this the bar would go on drawing but the window would quietly stop
-        being draggable and resizable. Everything the bar had rendered for the
-        old surface is thrown away at the same time -- the readout font above
-        all, since a font may not outlive a pygame reinit -- and drawn again on
-        the next frame
+        being draggable and resizable. Nothing the bar has rendered is thrown
+        away: replacing the surface is a set_mode, not a pygame teardown, so
+        the brand mark, the wordmark halves and the readout font all stay
+        valid -- and on Windows this runs once per frame of an edge drag, where
+        dropping them would reload a PNG off disk and rebuild a font every
+        single frame
         """
         self._sdl = None
         self._win_ptr = None
-        self._stats_font = None
-        self._wordmark = None
-        self._wordmark_accent = None
-        self._logo_surf = None
         self._init_sdl()
 
     def _init_sdl(self) -> None:
@@ -332,8 +329,6 @@ class WindowChrome:
         self._sdl.SDL_RaiseWindow.argtypes = [ctypes.c_void_p]
         self._sdl.SDL_SetWindowFullscreen.argtypes = [ctypes.c_void_p, ctypes.c_uint32]
         self._sdl.SDL_SetWindowFullscreen.restype = ctypes.c_int
-        self._sdl.SDL_GetWindowFlags.argtypes = [ctypes.c_void_p]
-        self._sdl.SDL_GetWindowFlags.restype = ctypes.c_uint32
 
     def _resize_code(self, x: int, y: int) -> int | None:
         """
@@ -546,7 +541,8 @@ class WindowChrome:
         Draw the brand mark and the CHESS SHOOTOUT wordmark at the left end of
         the bar, the game's name in front of the player at all times. Both the
         image and the two rendered words are built on the first frame and
-        reused from then on
+        reused from then on; the two wordmark halves are only ever built
+        together, so either one missing rebuilds the pair
         """
         tile = pg.Rect(self.LOGO_MARGIN_LEFT, (self.HEIGHT - self.LOGO_SIZE) // 2,
                        self.LOGO_SIZE, self.LOGO_SIZE)
@@ -556,14 +552,14 @@ class WindowChrome:
             self.window.blit(self._logo_surf, tile)
         else:
             pg.draw.rect(self.window, pg.Color(Colors.accent), tile, border_radius=5)
-        if self._wordmark is None:
+        if self._wordmark is None or self._wordmark_accent is None:
             font = get_font(self.WORDMARK_FONT_PX, bold=True)
             self._wordmark = font.render("CHESS ", True, pg.Color(Colors.text))
             self._wordmark_accent = font.render("SHOOTOUT", True, pg.Color(Colors.accent))
         tx = tile.right + self.WORDMARK_GAP
         ty = self.HEIGHT // 2
         wm = self._wordmark
-        accent = cast(pg.Surface, self._wordmark_accent)
+        accent = self._wordmark_accent
         self.window.blit(wm, (tx, ty - wm.get_height() // 2))
         self.window.blit(accent,
                          (tx + wm.get_width(), ty - accent.get_height() // 2))
@@ -729,24 +725,21 @@ class WindowChrome:
     def maximize(self) -> bool:
         """
         Ask the system to maximise the window, used at launch when the player
-        has chosen to start that way. Asking is not the same as getting it: a
-        window manager is free to ignore the request, so the window is asked
-        afterwards whether it really is maximised. The caller is told the true
-        outcome, since it has to fall back to simply growing the surface to the
-        desktop
+        has chosen to start that way. Issuing the request is as far as this
+        can go: on Wayland the maximised flag is only set once the compositor
+        answers, some frames later, so reading it back here would call a
+        perfectly good maximise a failure. The caller is told whether the
+        request went out, since it has to fall back to simply growing the
+        surface to the desktop when it could not
 
-        :returns: True when the window came back maximised
+        :returns: True when SDL took the maximise request
         """
         if self._win_ptr is None:
             return False
         try:
             self._sdl.SDL_MaximizeWindow(self._win_ptr)
-            flags = self._sdl.SDL_GetWindowFlags(self._win_ptr)
         except Exception:
             log.warning("maximize failed", exc_info=True)
-            return False
-        if not flags & _SDL_WINDOW_MAXIMIZED:
-            log.warning("maximize request left the window unmaximized")
             return False
         return True
 

@@ -14,7 +14,6 @@ from chessshootout.frontend.window_chrome import (
     _HITTEST_RESIZE_TOPLEFT,
     _HITTEST_RESIZE_RIGHT,
     _HITTEST_RESIZE_BOTTOM,
-    _SDL_WINDOW_MAXIMIZED,
 )
 
 
@@ -182,7 +181,7 @@ class _FakeSDL:
         self.SDL_GetWindowFromID = _FakeFn(win_ptr_ret)
         for name in ("SDL_SetWindowHitTest", "SDL_SetWindowMinimumSize",
                      "SDL_MinimizeWindow", "SDL_MaximizeWindow", "SDL_RaiseWindow",
-                     "SDL_SetWindowFullscreen", "SDL_GetWindowFlags"):
+                     "SDL_SetWindowFullscreen"):
             setattr(self, name, _FakeFn(0))
 
 
@@ -280,33 +279,28 @@ def test_apply_fullscreen_false_without_handle():
     assert chrome.apply_fullscreen(True) is False
 
 
-def _sdl_reporting_maximized(chrome, maximized):
+def _sdl_on(chrome):
     sdl = _FakeSDL(0xABCD)
-    sdl.SDL_GetWindowFlags.ret = _SDL_WINDOW_MAXIMIZED if maximized else 0
     chrome._sdl = sdl
     chrome._win_ptr = 0xABCD
     return sdl
 
 
-def test_maximize_reports_failure_when_the_request_is_ignored(chrome):
-    """SDL_MaximizeWindow answers nothing and a window manager is free to
-    ignore it. Reporting success on "the call did not raise" made
-    Frontend._maximize_window skip its desktop-size fallback, so a maximized
-    launch stayed at the constructor size with no way to tell."""
-    sdl = _sdl_reporting_maximized(chrome, False)
-    assert chrome.maximize() is False
-    assert sdl.SDL_MaximizeWindow.calls == [(0xABCD,)], "the request is still made"
-    assert sdl.SDL_GetWindowFlags.calls == [(0xABCD,)], "and the outcome read back"
-
-
-def test_maximize_reports_success_when_the_window_comes_back_maximized(chrome):
-    sdl = _sdl_reporting_maximized(chrome, True)
+def test_maximize_reports_success_once_the_request_is_issued(chrome):
+    """maximize() may only report whether SDL took the request. Reading the
+    MAXIMIZED flag straight back was tried and reverted: on Wayland the
+    compositor sets it some frames later, so a perfectly good maximize read as
+    a failure — a WARNING at every maximized launch, plus Frontend's
+    desktop-size fallback firing on top of a window already being maximized."""
+    sdl = _sdl_on(chrome)
+    assert not hasattr(sdl, "SDL_GetWindowFlags"), \
+        "the fake declares no flag call, so a readback would raise and be caught"
     assert chrome.maximize() is True
     assert sdl.SDL_MaximizeWindow.calls == [(0xABCD,)]
 
 
 def test_maximize_reports_failure_when_sdl_call_raises(chrome):
-    sdl = _sdl_reporting_maximized(chrome, True)
+    sdl = _sdl_on(chrome)
 
     def boom(_ptr):
         raise OSError("no such entry point")
@@ -394,30 +388,29 @@ def test_stats_stay_left_of_dots(chrome):
     assert all(px == bg for px in band), "stats must not intrude into the dot padding"
 
 
-def test_reinit_sdl_drops_every_rendered_surface_and_the_font(chrome):
-    """reinit_sdl runs after the drawing surface has been replaced (resize,
-    fullscreen), which is exactly where a pygame font may no longer be used --
-    the repo rule is that no Font outlives a reinit. The readout font, both
-    wordmark halves and the brand mark all have to go, and the next frame has
-    to build them again rather than draw nothing."""
+def test_reinit_sdl_keeps_every_rendered_surface_and_the_font(chrome):
+    """reinit_sdl runs after _recreate_window_surface, which is a set_mode --
+    NOT pg.quit(). Surfaces and Fonts both survive a set_mode, and the
+    "no Font outlives a reinit" rule is about a real pygame teardown. Clearing
+    them here was tried and reverted: on Windows _sync_window_surface calls
+    this once per frame of an edge drag, so every one of those frames reloaded
+    brand_mark.png off disk and rebuilt the readout TTF."""
     chrome.draw(["60 FPS"])
-    assert chrome._stats_font is not None
-    assert chrome._wordmark is not None
-    assert chrome._wordmark_accent is not None
-    assert chrome._logo_surf is not None
+    font = chrome._stats_font
+    wordmark = chrome._wordmark
+    accent = chrome._wordmark_accent
+    logo = chrome._logo_surf
+    assert None not in (font, wordmark, accent, logo)
 
     chrome.reinit_sdl()
 
-    assert chrome._stats_font is None, "a Font must never survive a reinit"
-    assert chrome._wordmark is None
-    assert chrome._wordmark_accent is None
-    assert chrome._logo_surf is None
+    assert chrome._stats_font is font, "a set_mode must not cost a font rebuild"
+    assert chrome._wordmark is wordmark
+    assert chrome._wordmark_accent is accent
+    assert chrome._logo_surf is logo, "nor a PNG re-read off disk"
 
     chrome.draw(["60 FPS"])
-    assert chrome._stats_font is not None
-    assert chrome._wordmark is not None
-    assert chrome._wordmark_accent is not None
-    assert chrome._logo_surf is not None
+    assert chrome._logo_surf is logo
 
 
 def test_wordmark_right_edge_guards_the_half_it_measures(chrome):
@@ -427,6 +420,18 @@ def test_wordmark_right_edge_guards_the_half_it_measures(chrome):
     chrome.draw()
     chrome._wordmark_accent = None
     assert chrome._wordmark_right_edge() == chrome.LOGO_MARGIN_LEFT + chrome.LOGO_SIZE
+
+
+def test_draw_logo_rebuilds_when_only_one_wordmark_half_is_missing(chrome):
+    """Same half-built state, second site: _draw_logo guarded on _wordmark
+    alone and then blitted _wordmark_accent, so an accent half lost on its own
+    took the title bar down with an AttributeError instead of re-rendering the
+    pair."""
+    chrome.draw()
+    chrome._wordmark_accent = None
+    chrome.draw()
+    assert chrome._wordmark is not None
+    assert chrome._wordmark_accent is not None
 
 
 def test_the_sdl_window_wrapper_is_held_for_the_life_of_the_window(chrome):

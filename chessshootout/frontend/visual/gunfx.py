@@ -74,7 +74,7 @@ def gun_spec(gun: str | None) -> GunSpec:
         has no weapon recorded
     :returns: that gun's spec, or the revolver's
     """
-    return GUNS.get(gun, GUNS["revolver"])  # type: ignore[arg-type]
+    return GUNS.get(gun or "revolver", GUNS["revolver"])
 
 
 def pellet_spread(spec: GunSpec, base: float,

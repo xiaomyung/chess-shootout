@@ -191,3 +191,12 @@ def test_online_rematch_offered_hides_initiate_button():
     menu.draw()
     assert "rematch" not in menu.button_rects
     assert "menu" in menu.button_rects
+
+
+def test_detail_font_is_ready_before_the_first_layout_pass():
+    """detail_font drew the highlight strip and the stat-grid suffixes but was the
+    one font born in _on_rect_changed rather than in __init__, next to its six
+    siblings — a draw that reached those blocks before the card was ever placed
+    died on AttributeError."""
+    menu = _make_menu()
+    assert isinstance(menu.detail_font, pg.font.Font)

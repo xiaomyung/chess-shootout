@@ -81,6 +81,40 @@ def test_videoresize_clamps_to_minimum(ev_w, ev_h, exp_w, exp_h):
     assert app.window_height == exp_h
 
 
+def test_videoresize_goes_through_the_shell_resize_entry_point(monkeypatch):
+    """The router owns no resize sequence of its own: a VIDEORESIZE hands the
+    clamped size to the same _finish_resize the Windows edge-drag sync uses, so
+    the two paths cannot drift on what settling a resize means."""
+    app = Frontend(1000, 800)
+    calls = []
+    real_finish = app._finish_resize
+    monkeypatch.setattr(app, "_finish_resize",
+                        lambda w, h: calls.append((w, h)) or real_finish(w, h))
+    new_w, new_h = MIN_WINDOW_WIDTH + 120, MIN_WINDOW_HEIGHT + 60
+    pg.event.post(pg.event.Event(
+        pg.VIDEORESIZE, {"w": new_w, "h": new_h, "size": (new_w, new_h)}))
+
+    app.input_router.check_events()
+
+    assert calls == [(new_w, new_h)]
+    assert (app.window_width, app.window_height) == (new_w, new_h)
+
+
+def test_videoresize_still_tells_the_active_screen_before_laying_out(monkeypatch):
+    """A screen animating snapshots of the old surface has to hear about the new
+    one before anything is measured against it, so on_resize stays ahead of the
+    layout pass however the resize arrived."""
+    app = Frontend(1000, 800)
+    order = []
+    monkeypatch.setattr(app.screen, "on_resize", lambda: order.append("on_resize"))
+    monkeypatch.setattr(app, "_compute_layout", lambda: order.append("layout"))
+    pg.event.post(pg.event.Event(pg.VIDEORESIZE, {"w": 1100, "h": 850, "size": (1100, 850)}))
+
+    app.input_router.check_events()
+
+    assert order == ["on_resize", "layout"]
+
+
 def test_sync_reallocates_surface_when_os_window_grew(monkeypatch):
     """The Windows fix: when the OS reports a larger window than the current
     surface (native maximize / edge-drag), _sync_window_surface re-set_modes so

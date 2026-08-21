@@ -94,7 +94,7 @@ class HelpModal(BaseModal, ScrollHost):
         self.key_font = get_mono_font(ROW_FONT_SIZE)
         self.button_font = get_font(BUTTON_FONT_SIZE, bold=True)
 
-    def show(self, rows: list[tuple[str, str]]) -> None:  # type: ignore[override]
+    def show(self, rows: list[tuple[str, str]]) -> None:
         """
         Open the card on one screen's hotkey list, scrolled back to the top.
         The rows come from HOTKEYS in this module, which the README's hotkey
@@ -211,7 +211,7 @@ class HelpModal(BaseModal, ScrollHost):
         """
         if not self.visible:
             return False
-        for key, br in self.button_rects.items():
+        for br in self.button_rects.values():
             if br.collidepoint(pos):
                 self.hide()
                 return True

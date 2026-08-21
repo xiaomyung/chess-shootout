@@ -13,6 +13,7 @@ from chessshootout.backend.pieces import PieceColor
 from chessshootout.backend.utils import Square
 from chessshootout.server.protocol import (
     GRACE_SECONDS, HEARTBEAT_TIMEOUT_SECONDS, IDLE_WINDOW_BY_PLIES, IdleWindowSpec,
+    Reason,
 )
 from chessshootout.skillcheck import online
 from chessshootout.skillcheck.types import SkillCheckKind, SkillCheckOutcome
@@ -821,7 +822,7 @@ class RoomManager:
                         and now - slot.disconnected_at >= GRACE_SECONDS):
                     yield room, color
 
-    ZERO_PLY_ABORT_REASONS = ("timeout", "abandonment")
+    ZERO_PLY_ABORT_REASONS = (Reason.TIMEOUT, Reason.ABANDONMENT)
 
     def finalize_result(self, room_id: str, reason: str,
                         winner_color: str | None = None) -> bool:
@@ -843,7 +844,7 @@ class RoomManager:
         if room is None or room.result is not None:
             return False
         if room.plies_ever == 0 and reason in self.ZERO_PLY_ABORT_REASONS:
-            reason, winner_color = "aborted", None
+            reason, winner_color = Reason.ABORTED, None
         room.result = (reason, winner_color)
         room.ended_at = self._now()
         for slot in (room.white, room.black):
@@ -872,7 +873,7 @@ class RoomManager:
         :param reason: why the game ended.
         :param winner_color: the winning side, None for a draw or an abort.
         """
-        if reason in ("aborted", "server_shutdown"):
+        if reason in (Reason.ABORTED, Reason.SERVER_SHUTDOWN):
             return
         scores = room.series_scores
         if winner_color in ("white", "black"):

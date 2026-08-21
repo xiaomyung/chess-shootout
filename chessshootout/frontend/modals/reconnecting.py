@@ -42,7 +42,6 @@ def _ring_base(size: int, color: str) -> pg.Surface:
     :param color: ring colour as a hex string
     :returns: ring surface with the gap at the top
     """
-
     def build() -> pg.Surface:
         """
         Render the ring for this size and colour, called only when the cache
@@ -50,7 +49,6 @@ def _ring_base(size: int, color: str) -> pg.Surface:
 
         :returns: freshly drawn ring surface
         """
-
         def render(surf: pg.Surface, k: int) -> None:
             """
             Draw the ring at supersampled scale: a filled circle hollowed out
@@ -111,8 +109,7 @@ class ReconnectingModal(BaseModal):
         self.button_rects: dict[str, pg.Rect] = {}
         self._font_cache: dict[str, Any] = {}
 
-    def show(self, disconnected_at_ms: int,  # type: ignore[override]
-             on_abandon: Callable[[], None]) -> None:
+    def show(self, disconnected_at_ms: int, on_abandon: Callable[[], None]) -> None:
         """
         Open the card and count down from the moment the connection went away,
         which the coordinator stamps rather than the card itself
@@ -236,7 +233,7 @@ class ReconnectingModal(BaseModal):
         """
         if not self.visible:
             return False
-        for key, br in self.button_rects.items():
+        for br in self.button_rects.values():
             if br.collidepoint(pos):
                 if self.on_abandon is not None:
                     self.on_abandon()

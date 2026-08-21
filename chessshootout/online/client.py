@@ -16,7 +16,7 @@ from chessshootout.online.transport import (
 )
 from chessshootout.server.protocol import (
     CancelMatchmakeRequest, GRACE_SECONDS, HEARTBEAT_INTERVAL_SECONDS,
-    HEARTBEAT_MISS_LIMIT, MatchmakeRequest, ResumeRequest,
+    HEARTBEAT_MISS_LIMIT, MatchmakeRequest, Reason, ResumeRequest,
 )
 
 
@@ -677,7 +677,7 @@ class OnlineClient:
             mm = await self._matchmake_with_retries(request)
         except SchemaVersionMismatch as exc:
             log.warning("schema version mismatch reason=%s", exc)
-            self._inbound.put(Event("error", {"reason": "version_mismatch"}))
+            self._inbound.put(Event("error", {"reason": Reason.VERSION_MISMATCH}))
             self.state = "disconnected"
             return
         except Exception as exc:
@@ -770,7 +770,8 @@ class OnlineClient:
         """
         Ask for a seat, retrying while the server is full or unreachable. A
         busy server is worth a few tries, since seats free up constantly, but a
-        request the server rejects on its merits is raised at once
+        request the server rejects on its merits -- a protocol mismatch
+        included -- is raised at once
 
         :param request: matchmaking request fields for this search.
         :returns: the room and session token, as plain data.
@@ -783,6 +784,8 @@ class OnlineClient:
                 try:
                     return (await transport.matchmake_async(req, http)
                             ).model_dump(by_alias=True)
+                except SchemaVersionMismatch:
+                    raise
                 except TransportHTTPError as exc:
                     if exc.status_code == 503:
                         last_exc = RuntimeError("room_full")

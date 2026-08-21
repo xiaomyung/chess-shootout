@@ -1280,7 +1280,6 @@ class OptionsBody(ScrollHost):
         """
         self.sections: list[tuple[str, list[_Row]]] = []
         self.rect = pg.Rect(0, 0, 0, 0)
-        self.fonts: Fonts | None = None
         self._card_rects: list[pg.Rect] = []
         self._scroll_px = 0.0
         self._content_h: float = 0
@@ -1325,7 +1324,6 @@ class OptionsBody(ScrollHost):
         """
         self.scroll.tick()
         self.rect = pg.Rect(rect)
-        self.fonts = fonts
         self._scroll_px = max(0.0, min(self._scroll_px, self._max_scroll()))
         prev = window.get_clip()
         window.set_clip(rect)

@@ -444,15 +444,19 @@ class ServerTransport:
         """
         Join the matchmaking queue and take back the room and seat the server
         assigned. A protocol mismatch is raised as its own error so the client
-        can tell the player to update, and any other refusal keeps its status
-        and reason for the retry decision
+        can tell the player to update, any other refusal keeps its status and
+        reason for the retry decision, and a server that cannot be reached at
+        all is reported as a transport failure the search retries through
 
         :param req: the matchmaking request, already validated.
         :param http: async client shared by this session's requests.
         :returns: the room id and session token to open the websocket with.
         """
         url = self._url.http("/matchmake")
-        r = await http.post(url, json=req.model_dump())
+        try:
+            r = await http.post(url, json=req.model_dump())
+        except (httpx.HTTPError, httpx.TimeoutException) as exc:
+            raise TransportError(str(exc)) from exc
         if r.status_code >= 400:
             reason = _safe_error_reason(r) or f"http_{r.status_code}"
             if reason == Reason.VERSION_MISMATCH:

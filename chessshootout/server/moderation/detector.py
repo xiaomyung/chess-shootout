@@ -1,7 +1,7 @@
 import math
 import threading
 from collections import defaultdict
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Iterator
 from dataclasses import dataclass, field
 from typing import Any, cast
 
@@ -25,6 +25,8 @@ SUSPECT = "suspect"
 BLOCKED = "blocked"
 
 HEURISTIC_ID = "heuristic_c4"
+
+REFLECTION_AXES = ("x", "y", "d", "a")
 
 _FLOORS = None
 _CACHE: "dict[tuple[Any, ...], Verdict]" = {}
@@ -305,7 +307,7 @@ def _run(arrows: list[tuple[str, str]], highlights: list[str],
         return Verdict(CLEAN)
 
     anchor_edges = drawn_edges if changed_edges is None else changed_edges
-    vector = _stage_vector(drawn_edges, anchor_edges, arrow_edges, arrows)
+    vector = _stage_vector(drawn_edges, anchor_edges, arrow_edges)
     if vector is not None:
         return Verdict(BLOCKED, pattern_id=vector[0].id, matched_arrows=vector[2],
                        matched_highlights=[])
@@ -344,7 +346,6 @@ def _stage_vector(
         anchor_edges: set[tuple[tuple[int, int], tuple[int, int]]],
         arrow_edges: list[tuple[tuple[str, str],
                                 set[tuple[tuple[int, int], tuple[int, int]]]]],
-        arrows: list[tuple[str, str]],
 ) -> tuple[library.CompiledPattern,
            set[tuple[tuple[int, int], tuple[int, int]]], list[tuple[str, str]]] | None:
     """
@@ -357,7 +358,6 @@ def _stage_vector(
     :param anchor_edges: edges placements must line up with, the newest mark's
         when there is one, otherwise the whole drawing's.
     :param arrow_edges: each arrow paired with the edges it lays down.
-    :param arrows: the drawn arrows, in the order they were shared.
     :returns: the pattern, the edges it matched and the arrows that drew them,
         or None when nothing matched.
     """
@@ -480,11 +480,7 @@ def _mirror_present(placed_edges: set[tuple[tuple[int, int], tuple[int, int]]],
         return False
     cx = (box[0] + box[2]) // 2
     cy = (box[1] + box[3]) // 2
-    for axis in ("x", "y", "d", "a"):
-        reflected = _transform_edges_about(
-            placed_doubled, cx, cy,
-            cast(Callable[[tuple[int, int], int, int], tuple[int, int]],
-                 lambda p, gx, gy, ax=axis: _reflect(p, gx, gy, ax)))
+    for reflected in _reflections_about(placed_doubled, cx, cy):
         if reflected != placed_doubled and reflected <= drawn_doubled:
             return True
     return False
@@ -742,11 +738,7 @@ def _c4_chiral_core(
                                       geometry.edges_bbox(core))
     if (cmaxx - cminx) // 2 > HEURISTIC_MAX_SPAN or (cmaxy - cminy) // 2 > HEURISTIC_MAX_SPAN:
         return None
-    for axis in ("x", "y", "d", "a"):
-        reflected = _transform_edges_about(
-            core, cx, cy,
-            cast(Callable[[tuple[int, int], int, int], tuple[int, int]],
-                 lambda p, gx, gy, ax=axis: _reflect(p, gx, gy, ax)))
+    for reflected in _reflections_about(core, cx, cy):
         if reflected == core:
             return None
         if reflected <= doubled:
@@ -928,6 +920,27 @@ def _transform_edges_about(
     return out
 
 
+def _reflections_about(
+        edges: Iterable[tuple[tuple[int, int], tuple[int, int]]], cx: int, cy: int,
+) -> Iterator[set[tuple[tuple[int, int], tuple[int, int]]]]:
+    """
+    Mirror one edge set about a centre along each of the four axes in turn, the
+    walk every handedness test in the pinwheel net makes. The mirrors are yielded
+    one at a time, so a test that has seen enough stops the work there
+
+    :param edges: canonical edges on the doubled lattice.
+    :param cx: centre column the mirrors work about.
+    :param cy: centre row the mirrors work about.
+    :returns: one mirrored edge set per axis, vertical, horizontal then the two
+        diagonals.
+    """
+    for axis in REFLECTION_AXES:
+        yield _transform_edges_about(
+            edges, cx, cy,
+            cast(Callable[[tuple[int, int], int, int], tuple[int, int]],
+                 lambda p, gx, gy, ax=axis: _reflect(p, gx, gy, ax)))
+
+
 def _is_c4_chiral(doubled: frozenset[tuple[tuple[int, int], tuple[int, int]]], cx: int,
                   cy: int) -> bool:
     """
@@ -944,11 +957,7 @@ def _is_c4_chiral(doubled: frozenset[tuple[tuple[int, int], tuple[int, int]]], c
     rotated = _transform_edges_about(doubled, cx, cy, _rotate90)
     if rotated != doubled:
         return False
-    for axis in ("x", "y", "d", "a"):
-        reflected = _transform_edges_about(
-            doubled, cx, cy,
-            cast(Callable[[tuple[int, int], int, int], tuple[int, int]],
-                 lambda p, gx, gy, ax=axis: _reflect(p, gx, gy, ax)))
+    for reflected in _reflections_about(doubled, cx, cy):
         if reflected == doubled:
             return False
     return True

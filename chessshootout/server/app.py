@@ -22,13 +22,13 @@ from chessshootout.backend.utils import (
 )
 from chessshootout.server import logging_setup
 from chessshootout.server.broadcasts import (
-    _idle_window_wire, broadcast_game_start, finalize_and_broadcast,
+    broadcast_game_start, finalize_and_broadcast, idle_window_wire,
     resolve_skillcheck_fail)
 from chessshootout.server.connections import ConnectionRegistry, send
-from chessshootout.server.handlers import _clock_snapshot, dispatch
+from chessshootout.server.handlers import arrow_wires, clock_snapshot, dispatch
 from chessshootout.server.moderation import library
 from chessshootout.server.protocol import (
-    ANNOTATIONS_PER_SECOND, AnnotationSetWire, ArrowWire,
+    ANNOTATIONS_PER_SECOND, AnnotationSetWire,
     AuthMessage, CHAT_COOLDOWN_SECONDS, CancelMatchmakeRequest,
     ConnectionStatusMessage, ErrorMessage,
     HealthResponse, HistoryEntryWire, LockWire,
@@ -577,7 +577,7 @@ def create_app(*, now_provider: Callable[[], float] = time.monotonic,
         response = ResumeResponse(
             fen=export_fen(cast(Backend, room.backend)),
             move_history=history,
-            clock=_clock_snapshot(cast(Backend, room.backend).clock),
+            clock=clock_snapshot(cast(Backend, room.backend).clock),
             your_color=color,
             white_name=room.white.nickname if room.white else "",
             black_name=room.black.nickname if room.black else "",
@@ -596,11 +596,11 @@ def create_app(*, now_provider: Callable[[], float] = time.monotonic,
             hide_opp_marks=slot.hide_opp_marks,
             result_reason=room.result[0] if room.result else None,
             result_winner=room.result[1] if room.result else None,
-            idle_window=_idle_window_wire(room, app.state.now()),
+            idle_window=idle_window_wire(room, app.state.now()),
         )
         log.info("resume served room=%s color=%s ply=%d", body.room_id, color, len(history))
         if (connections.get_for_color(room, cast(str, color)) is not None
-                and slot is not None and not slot.desync_active):
+                and not slot.desync_active):
             slot.desync_active = True
             opp_ws = connections.get_for_color(
                 room, room.opp_color(cast(str, color)))
@@ -689,7 +689,7 @@ def _first_validation_reason(exc: ValidationError) -> str:
     :param exc: validation error raised while parsing a request body
     :returns: the first failure's message, or the generic invalid-message code
     """
-    errs = exc.errors() if hasattr(exc, "errors") else []
+    errs = exc.errors()
     if not errs:
         return Reason.INVALID_MESSAGE
     return errs[0].get("msg", Reason.INVALID_MESSAGE)
@@ -736,7 +736,7 @@ def _annotation_set_wire(store: SharedAnnotations) -> AnnotationSetWire:
     return AnnotationSetWire(
         sharing=store.sharing,
         highlights=sorted(store.highlights),
-        arrows=[ArrowWire(from_sq=frm, to_sq=to) for frm, to in store.arrows],
+        arrows=arrow_wires(store.arrows),
     )
 
 

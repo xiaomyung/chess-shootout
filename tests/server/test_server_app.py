@@ -10,8 +10,8 @@ from fastapi import WebSocketDisconnect
 from chessshootout.server.app import (
     MATCHMAKE_PER_IP_LIMIT, MAX_INBOUND_MESSAGE_BYTES, PROTOCOL_VERSION,
     WS_CLOSE_INVALID_TOKEN, WS_CLOSE_PAYLOAD_TOO_LARGE, WS_CLOSE_SUPERSEDED,
-    _idle_window_wire,
 )
+from chessshootout.server.broadcasts import idle_window_wire
 from chessshootout.server.connections import ConnectionRegistry
 from chessshootout.server.handlers import (
     RESYNC_DIRECTIVE, RESYNC_GATE_PRUNE_THRESHOLD, RESYNC_NOTIFY,
@@ -853,7 +853,7 @@ async def test_idle_window_wire_is_none_for_a_backend_less_room(app, clock):
     assert room.backend is None
     room.idle_since = clock()
 
-    assert _idle_window_wire(room, clock()) is None
+    assert idle_window_wire(room, clock()) is None
 
 
 @pytest.mark.asyncio

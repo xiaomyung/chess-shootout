@@ -5,7 +5,7 @@ import pygame as pg
 
 from chessshootout.backend.pieces import PieceColor, PieceType
 from chessshootout.frontend.board import Board
-from chessshootout.infra.countries import flag_emoji, name_for
+from chessshootout.infra.countries import name_for
 from chessshootout.frontend.visual.clock_visual import (
     LOW_TIME_FRACTION, format_clock, format_countdown,
 )
@@ -15,7 +15,7 @@ from chessshootout.frontend.visual.draw import (
     rounded_rect_surface, blit_centered, circle_surface, cut_rect_surface, scale_floor,
     cosine_pulse, build_tooltip_bubble,
 )
-from chessshootout.frontend.visual.emoji import emoji_surface
+from chessshootout.frontend.visual.emoji import flag_surface
 from chessshootout.frontend.visual.fonts import get_font, DISPLAY
 from chessshootout.frontend.visual.widgets import (
     StripAvatar, build_ko_badge, KO_WINK_MS, strip_frame_metrics, draw_captured_row,
@@ -365,19 +365,18 @@ class PlayerStrip:
 
     def _flag_surface(self, height: int) -> pg.Surface | None:
         """
-        Fetch this player's country flag at the size the strip needs, kept in
-        a one-entry cache so a flag is only rendered when the country or the
-        strip height actually changes
+        Fetch this player's country flag at the size the strip needs, through
+        the shared flag lookup so a strip cannot disagree with the rest of the
+        app about what a code looks like. The answer is held in a one-entry
+        cache, since the strip asks for it on every single frame and the
+        country changes at most once a game
 
         :param height: wanted flag height in pixels
         :returns: the flag image, or None when the player has no country set
         """
-        char = flag_emoji(self.country)
-        if not char:
-            return None
-        key = (char, height)
+        key = (self.country or "", height)
         if self._flag_cache is None or self._flag_cache[0] != key:
-            self._flag_cache = (key, emoji_surface(char, height))
+            self._flag_cache = (key, flag_surface(self.country, height))
         return self._flag_cache[1]
 
     def _advance_tooltip(self, hovering: bool) -> float:

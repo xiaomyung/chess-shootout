@@ -43,7 +43,7 @@ async def finalize_and_broadcast(rooms: RoomManager, connections: ConnectionRegi
                     ResultMessage(reason=result_reason, winner_color=result_winner))
 
 
-def _idle_window_wire(room: Room, now: float) -> IdleWindowWire | None:
+def idle_window_wire(room: Room, now: float) -> IdleWindowWire | None:
     """
     Describe the countdown running against the silent side to move: what happens
     when it reaches zero, whose turn it is and how long is left. A finished game,
@@ -54,14 +54,14 @@ def _idle_window_wire(room: Room, now: float) -> IdleWindowWire | None:
     :param now: monotonic time in seconds, used for the remaining time
     :returns: the countdown to show, or None when none is running
     """
-    if (room.result is not None or room.idle_since is None
-            or room.color_to_move() is None):
+    color = room.color_to_move()
+    if room.result is not None or room.idle_since is None or color is None:
         return None
     window = room.idle_window()
     if window is None:
         return None
     return IdleWindowWire(
-        outcome=window.outcome, color=room.color_to_move(),
+        outcome=window.outcome, color=color,
         seconds_remaining=room.idle_remaining(now))
 
 
@@ -80,7 +80,7 @@ async def push_idle_window(rooms: RoomManager, connections: ConnectionRegistry,
         throttle are measured from it
     :param force: send even when the last push was recent
     """
-    wire = _idle_window_wire(room, now)
+    wire = idle_window_wire(room, now)
     if wire is None:
         return
     if (not force and room.idle_pushed_at is not None
@@ -108,12 +108,12 @@ async def resolve_skillcheck_fail(rooms: RoomManager, connections: ConnectionReg
     pending = room.pending_skillcheck
     if pending is None:
         return None
+    backend = cast(Backend, room.backend)
     room.pending_skillcheck = None
     room.skillcheck_locks.add((pending.from_sq, pending.to_sq))
     room.skillcheck_log.append(SkillCheckOutcome(
-        len(cast(Backend, room.backend).move_history) + 1, pending.kind.value, False,
-        cast(Backend, room.backend).preview_san(
-            pending.from_sq, pending.to_sq, pending.promotion)))
+        len(backend.move_history) + 1, pending.kind.value, False,
+        backend.preview_san(pending.from_sq, pending.to_sq, pending.promotion)))
     await broadcast(rooms, connections, room, SkillCheckResultMessage(
         won=False,
         from_sq=coord_from_square(pending.from_sq),

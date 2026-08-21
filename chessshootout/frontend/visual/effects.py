@@ -575,7 +575,7 @@ class EffectManager:
         :param predrawn: True when the gun is already out from a check
         """
         handed = self.take_gun_handoff(from_sq) or predrawn
-        gun = gunfx.PIECE_GUN.get(attacker_type, "revolver")  # type: ignore[arg-type]
+        gun = gunfx.PIECE_GUN.get(attacker_type or "", "revolver")
         weapon = self._weapon(gun, cell_size)
         if weapon is None:
             if callout:
@@ -725,7 +725,7 @@ class EffectManager:
         :param target_px: first aim point in window pixels, or None to start
             with the barrel level
         """
-        gun = gunfx.PIECE_GUN.get(attacker_type, "revolver")  # type: ignore[arg-type]
+        gun = gunfx.PIECE_GUN.get(attacker_type or "", "revolver")
         weapon = self._weapon(gun, cell_size)
         if weapon is None:
             return

@@ -316,8 +316,9 @@ class SettingsController:
     def defer_master_volume_write(self) -> None:
         """
         Ask for the master volume to be saved shortly. The volume control on
-        the game rail calls this after each nudge, so holding it down writes
-        once at the end instead of on every step
+        the game rail calls this after each nudge and the Options slider on
+        every release, so holding either one down writes once at the end
+        instead of on every step
         """
         self._defer_env_write("master_volume", self._commit_master_volume)
 
@@ -384,8 +385,7 @@ class SettingsController:
             ("Audio", [
                 NotchRow("Master volume", "", lambda: sound_manager.master_volume,
                          self._set_master_volume, on_tick=sound_manager.play_ui_tick,
-                         on_release=lambda: self._defer_env_write(
-                             "master_volume", self._commit_master_volume)),
+                         on_release=self.defer_master_volume_write),
                 NotchRow("Menu volume", "", lambda: sound_manager.menu_volume,
                          self._set_menu_volume, on_tick=sound_manager.play_ui_tick,
                          on_release=lambda: self._defer_env_write(

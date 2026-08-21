@@ -68,7 +68,7 @@ def _stat_slot(label: str, value: int | str, width: int) -> str:
 log = logging.getLogger("chess.frontend")
 
 
-_ICON_CACHE = cache.new_cache()
+_WINDOW_ICON_CACHE = cache.new_cache()
 
 
 def _load_window_icon() -> pg.Surface | None:
@@ -90,7 +90,7 @@ def _load_window_icon() -> pg.Surface | None:
             return pg.image.load(str(paths.resource_path("assets", "icons", "icon.png")))
         except (pg.error, OSError):
             return None
-    return cache.memoized_surface(_ICON_CACHE, "icon", build)
+    return cache.memoized_surface(_WINDOW_ICON_CACHE, "icon", build)
 
 
 class Frontend:
@@ -128,6 +128,7 @@ class Frontend:
         self.pacer = FramePacer(self.target_fps)
 
         self._needs_full_present = True
+        self._last_layout_size: tuple[int, int] | None = None
         self._frame_times: deque[float] = deque(maxlen=PERF_SAMPLE_COUNT)
         self._last_work_ms = 0.0
         self._last_frame_start: float | None = None
@@ -682,7 +683,7 @@ class Frontend:
         """
         window_width, window_height = self.window.get_size()
         size = (window_width, window_height)
-        if size != getattr(self, "_last_layout_size", None):
+        if size != self._last_layout_size:
             self._last_layout_size = size
             cache.clear_size_keyed()
         board_visible_mode = "game" if self.screen is self.game else "menu"

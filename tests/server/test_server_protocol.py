@@ -300,24 +300,24 @@ def test_move_message_promotion_validated():
                                     "from": "e7", "to": "e8", "promotion": "x"})
 
 
-def test_clock_snapshot_defaults_to_nobody_counting_down():
-    """A stopped clock is the ordinary state of a game that has not started yet or
-    has already ended, not an exceptional one, so running_for defaults to None like
-    every other nullable field on this wire -- it used to be the file's only
-    nullable field a caller had to spell out. The dumped shape is unchanged: the
-    key is still always emitted, so nothing on the client's side of the wire moves."""
-    stopped = ClockSnapshot(white_remaining=300.0, black_remaining=180.0)
-    assert stopped.running_for is None
+def test_clock_snapshot_requires_the_running_side_to_be_stated():
+    """running_for carries no default ON PURPOSE. It is decoded from server payloads
+    on the client, so a truncated clock -- the key missing entirely -- has to fail
+    validation and route into the client's error path. A default of None would make
+    that payload parse and silently freeze both clocks instead. Both producers pass
+    the field explicitly, so requiring it costs the server nothing."""
+    with pytest.raises(ValidationError) as info:
+        ClockSnapshot(white_remaining=300.0, black_remaining=180.0)
+    assert [err["loc"] for err in info.value.errors()] == [("running_for",)]
+    stopped = ClockSnapshot(white_remaining=300.0, black_remaining=180.0, running_for=None)
     assert stopped.model_dump() == {
         "white_remaining": 300.0, "black_remaining": 180.0, "running_for": None,
     }
-    ticking = ClockSnapshot(white_remaining=1.0, black_remaining=2.0, running_for="black")
-    assert ticking.running_for == "black", "an explicit side still wins over the default"
 
 
-def test_clock_snapshot_still_rejects_an_unknown_running_side():
-    """The default is None, not "anything goes": only the two colours parse, so a
-    defaulted field can never become a hole in the Literal."""
+def test_clock_snapshot_rejects_an_unknown_running_side():
+    """Only the two colours parse: a stated side is still a closed Literal, so no
+    third value can reach a client clock through this field."""
     with pytest.raises(ValidationError):
         ClockSnapshot(white_remaining=1.0, black_remaining=1.0, running_for="green")
 

@@ -311,11 +311,8 @@ class InputRouter:
                 h = max(event.h, MIN_WINDOW_HEIGHT)
                 if os.name == "nt" or (w, h) != (event.w, event.h):
                     frontend._recreate_window_surface(w, h)
-                frontend.window_width = w
-                frontend.window_height = h
-                self._cancel_all_scroll()
                 frontend.screen.on_resize()
-                frontend._compute_layout()
+                frontend._finish_resize(w, h)
         if dropped:
             log.debug("dropped %d stale events pending nav %s",
                       dropped, frontend._pending_nav.name)

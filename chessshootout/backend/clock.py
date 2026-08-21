@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 from typing import Callable
 
 from chessshootout.backend.pieces import PieceColor, opponent_of
+from chessshootout.backend.utils import ClockSnapshot
 
 
 log = logging.getLogger("chess.backend")
@@ -154,7 +155,7 @@ class Clock:
         """
         return self.white_remaining if color == PieceColor.WHITE else self.black_remaining
 
-    def snapshot(self) -> tuple[float, float, PieceColor | None, float | None, PieceColor | None]:
+    def snapshot(self) -> ClockSnapshot:
         """
         Capture the whole clock so an undo or an agreed takeback can put it back
         exactly as it was. The move history stores one snapshot per ply, which
@@ -172,10 +173,7 @@ class Clock:
             self.flagged,
         )
 
-    def restore(
-        self,
-        snap: tuple[float, float, PieceColor | None, float | None, PieceColor | None],
-    ) -> None:
+    def restore(self, snap: ClockSnapshot) -> None:
         """
         Put the clock back to a captured state, which is how a player gets their
         time back when a ply is undone. Everything outside the snapshot -- the

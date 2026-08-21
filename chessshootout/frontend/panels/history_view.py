@@ -298,7 +298,6 @@ class HistoryView(ScrollHost):
             """
             return max(int(base * scale), minimum)
         self._title_font = get_display_font(sz(26, 16))
-        self._menu_font = get_font(sz(13, 11), bold=True)
         self._filter_font = get_font(sz(12, 10), bold=True)
         self._count_font = get_mono_font(sz(12, 10), bold=True)
         self._stat_num_font = get_mono_font(sz(22, 15), bold=True)

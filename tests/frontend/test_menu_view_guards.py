@@ -2,7 +2,7 @@
 
 Mirrors the screen guards in test_screen_guards.py, one directory down:
 
-1. No concrete menu view module (hero/history_host/options_view/profile_view/stubs)
+1. No concrete menu view module (play_view/history_host/options_view/profile_view/stubs)
    imports a SIBLING view module -- views never reach across to each other. The shared MenuView
    base lives in menu/view.py (a leaf), which every view legitimately imports.
 2. menu/shell.py::build_views is the SINGLE registration point: shell is the only

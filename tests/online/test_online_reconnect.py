@@ -22,8 +22,12 @@ import pytest
 
 from tests.conftest import pygame_display
 from chessshootout.backend.pieces import PieceColor
+from chessshootout.backend.utils import Square
 from chessshootout.frontend.frontend import Frontend
+from chessshootout.frontend.game.variant import Variant
 from chessshootout.frontend.online_coordinator import RECONNECT_PROBE_MAX_ATTEMPTS
+from chessshootout.frontend.screens.game import RESUME_FEN_FAILED_LABEL
+from chessshootout.server.protocol import Reason
 
 
 _pygame_init = pygame_display(1000, 800)
@@ -203,9 +207,6 @@ def test_on_reconnect_active_game_no_pending_is_noop(app):
 
 
 @pytest.mark.parametrize("mutate", [
-    pytest.param(lambda p: p.update({"move_history": [{"san": "e4"}, {"san": "zzz"}],
-                                     "fen": "not a fen"}),
-                 id="illegal_san_falls_back_to_a_malformed_fen"),
     pytest.param(lambda p: p.update({"move_history": [{"note": "no san here"}]}),
                  id="move_entry_without_a_san"),
     pytest.param(lambda p: p.update({"move_history": "e4e5"}),
@@ -216,10 +217,11 @@ def test_on_reconnect_active_game_no_pending_is_noop(app):
 def test_reconnect_adoption_survives_a_hostile_resume_payload(
         app, monkeypatch, tmp_path, caplog, mutate):
     """Every inbound ws event runs inside the drain's try/except, but Reconnect
-    adopts a /resume payload straight from a modal callback — outside it. The FEN
-    fallback in on_resume raises on malformed input, so one bad payload took the
-    whole app down from a button click. Adoption now runs through the same guard:
-    logged, toasted, and the session is dropped back to the menu."""
+    adopts a /resume payload straight from a modal callback — outside it. A
+    payload the replay chokes on took the whole app down from a button click.
+    Adoption now runs through the same guard: logged, toasted, and the session is
+    dropped back to the menu. (A malformed FEN is no longer one of these cases —
+    on_resume degrades instead of raising; see the FEN-fallback tests below.)"""
     monkeypatch.setenv("CHESS_DATA_DIR", str(tmp_path))
     monkeypatch.setattr("chessshootout.online.client.OnlineClient.reconnect_to_existing",
                         lambda self, *a, **kw: None)
@@ -238,6 +240,52 @@ def test_reconnect_adoption_survives_a_hostile_resume_payload(
     assert app.coordinator.client is None
     assert app.toast.is_visible()
     assert any("reconnect adoption failed" in r.getMessage() for r in caplog.records)
+
+
+def test_resume_keeps_adopting_when_the_fen_fallback_is_refused(app, caplog):
+    """The FEN is a rescue path for a move list that would not replay, and it
+    arrives from the server like everything else in the snapshot. A FEN the engine
+    refuses must not throw the rest of the adoption away with it — the clock, the
+    result and the idle window all land after it, and the replayed prefix stays on
+    the board for the resync heartbeat to converge."""
+    app.toast = MagicMock()
+    app.game.variant = Variant.ONLINE
+    app.game._time_control = (300, 2)
+    app.game.match.local_color = PieceColor.WHITE
+    app.game._chosen_side = "white"
+    payload = _resume_payload(move_history=("e4", "zzz"),
+                              white_remaining=61.0, black_remaining=42.0,
+                              running_for="white")
+    payload["fen"] = "not a fen"
+    payload["idle_window"] = {"outcome": Reason.RESIGNATION, "color": "white",
+                              "seconds_remaining": 20.0}
+
+    with caplog.at_level(logging.WARNING, logger="chess.frontend"):
+        app.game.on_resume(payload)
+
+    assert [e.san for e in app.game.match.move_history] == ["e4"]
+    assert app.game.match.clock.white_remaining == pytest.approx(61.0)
+    assert app.game.match.clock.black_remaining == pytest.approx(42.0)
+    assert app.game._idle_window is not None
+    app.toast.show.assert_any_call(RESUME_FEN_FAILED_LABEL, key="resume_fen_failed")
+    assert any("FEN fallback refused" in r.getMessage() for r in caplog.records)
+
+
+def test_resume_fen_fallback_refreshes_the_check_highlight(app):
+    """The board memoises which kings are in check against (ply count, last move).
+    A resume that falls back to the FEN empties the move history, so a board that
+    has already drawn its opening position matches its own stale (0, None) entry —
+    and a resumed position with a king under fire drew no warning at all."""
+    app.game.variant = Variant.ONLINE
+    app.game._time_control = None
+    app.game.match.local_color = PieceColor.WHITE
+    assert app.game.board._in_check_king_squares() == []
+
+    payload = _resume_payload(move_history=("zzz",))
+    payload["fen"] = "rnb1kbnr/pppp1ppp/8/4p3/6Pq/5P2/PPPPP2P/RNBQKBNR w KQkq - 1 3"
+    app.game.on_resume(payload)
+
+    assert app.game.board._in_check_king_squares() == [Square(7, 4)]
 
 
 def test_on_resume_never_replays_more_than_the_ply_cap(app, monkeypatch):

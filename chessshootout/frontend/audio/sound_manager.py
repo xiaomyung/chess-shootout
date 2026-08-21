@@ -1,4 +1,5 @@
 import random
+import threading
 from dataclasses import dataclass
 from pathlib import Path
 from typing import cast
@@ -89,6 +90,7 @@ class SoundManager:
         self.heartbeat = heartbeat or HeartbeatConfig()
         self._state = STATE_OFF
         self._slots: dict[str, list[pg.mixer.Sound]] = {}
+        self._warming = False
 
         self._sounds_dir = Path(sounds_dir)
 
@@ -104,9 +106,10 @@ class SoundManager:
     def preload(self) -> None:
         """
         Load every sound folder up front, run once at launch as soon as the
-        window is up. Sounds are otherwise loaded the first time they are
-        played, which would make the first shot of a game wait on the disk --
-        this pays that cost while the menu is still opening
+        window is up and again on a background worker whenever sound is turned
+        back on. Sounds are otherwise loaded the first time they are played,
+        which would make the first shot of a game wait on the disk -- this pays
+        that cost while the menu is still opening
         """
         for name in SLOTS:
             self._slot_pool(name)
@@ -201,8 +204,9 @@ class SoundManager:
         and the switch in Options. Switching it off also fades the looping
         heartbeat out, which would otherwise carry on unheard. Switching it on
         finishes the setting up a manager built silent never did -- claiming
-        the heartbeat's channel and loading the folders -- so sound turned on
-        mid-game behaves exactly like sound that was on all along
+        the heartbeat's channel here and now, and loading the folders on a
+        worker -- so sound turned on mid-game behaves exactly like sound that
+        was on all along without costing the frame that turned it on
 
         :param value: True for sound, False for silence
         """
@@ -214,7 +218,30 @@ class SoundManager:
         if new_enabled and not was_enabled:
             if self._heartbeat_channel is None:
                 self._heartbeat_channel = self._reserve_channel(0)
+            self.warm_in_background()
+
+    def warm_in_background(self) -> None:
+        """
+        Load every sound folder off the frame loop. Unmuting mid-game would
+        otherwise read a whole sound library from disk inside one frame and
+        stall the game for a fifth of a second; a slot asked for before its
+        turn comes round simply loads itself as it always did. A warm already
+        running is left to finish rather than started a second time
+        """
+        if self._warming:
+            return
+        self._warming = True
+        threading.Thread(target=self._warm, daemon=True).start()
+
+    def _warm(self) -> None:
+        """
+        Run one background cache-warm and let go of the flag afterwards, so a
+        later unmute can warm whatever this pass did not reach
+        """
+        try:
             self.preload()
+        finally:
+            self._warming = False
 
     def _play_at(self, sound: pg.mixer.Sound, volume: float) -> None:
         """

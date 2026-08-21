@@ -201,6 +201,8 @@ class Board:
         self._checkerboard_surf: pg.Surface | None = None
         self._check_squares_key: tuple[int, Move | None] | None = None
         self._check_squares: list[Square] = []
+        self._review_grid_memo: tuple[
+            tuple[int, int], list[list[Piece | None]]] | None = None
         self._shake_dx = 0
         self._shake_dy = 0
 
@@ -248,6 +250,19 @@ class Board:
         return cast(Backend, inner if inner is not None else self.match)
 
     @property
+    def _local_color(self) -> PieceColor | None:
+        """
+        The colour this client is allowed to move online, read off the match
+        every time so a board handed a bare engine in tests simply has none.
+        Every click policy that has to tell your own pieces from the
+        opponent's asks here
+
+        :returns: the local player's colour, None when both sides are played
+            on this machine
+        """
+        return cast("PieceColor | None", getattr(self.match, "local_color", None))
+
+    @property
     def highlighted_squares(self) -> set[Square]:
         """
         The squares this player has coloured in by right-clicking. The
@@ -292,7 +307,7 @@ class Board:
         """
         Wipe the board back to a fresh game: orientation, selection, a pending
         promotion, animations, effects, premoves, the squares a skill check was
-        hiding, every mark, the memoised check squares and the browse position.
+        hiding, every mark, the memoised positions and the browse position.
         Screens call this between games, so nothing from the last one can
         survive into the next
         """
@@ -308,8 +323,19 @@ class Board:
         self.clear_all_annotations()
         self.end_press()
         self.review_ply = None
+        self.forget_position_memos()
+
+    def forget_position_memos(self) -> None:
+        """
+        Throw away everything remembered about the position itself -- which
+        kings are in check and the browsed grid. Both are keyed on the ply
+        count, which a position adopted from a FEN can repeat while standing
+        for something completely different, so anything that rewrites the
+        board underneath them has to say so here
+        """
         self._check_squares_key = None
         self._check_squares = []
+        self._review_grid_memo = None
 
     def _render_text(self) -> None:
         """
@@ -733,6 +759,23 @@ class Board:
             self._check_squares = result
         return self._check_squares
 
+    def _reviewed_grid(self, ply: int) -> list[list[Piece | None]]:
+        """
+        The position as it stood after a ply, memoised because rebuilding it
+        means replaying the game into a copy of the engine and the browsed
+        board is redrawn every frame. The key carries the ply count as well,
+        so a move or a takeback under the browse position drops it
+
+        :param ply: half-move being browsed, 0 being the starting position
+        :returns: an 8x8 grid of pieces, None where a square is empty
+        """
+        key = (ply, len(self.match.move_history))
+        cached = self._review_grid_memo
+        if cached is None or cached[0] != key:
+            cached = (key, self.match.position_at(ply))
+            self._review_grid_memo = cached
+        return cached[1]
+
     def _draw_last_move_highlight(self) -> None:
         """
         Tint the two squares of the move just played, or of the move being
@@ -942,10 +985,10 @@ class Board:
         check has taken over. Those suppressed squares belong to the check --
         the skill-check session sets them when it arms and clears them when it
         releases -- and the board only reads them. While the player is browsing,
-        the reviewed position is drawn straight from the history instead
+        the reviewed position is drawn from the memoised history instead
         """
         if self.review_ply is not None:
-            grid = self.match.position_at(self.review_ply)
+            grid = self._reviewed_grid(self.review_ply)
             hidden = {a.from_sq for a in self.animations}
             for row, col in product(range(BOARD_SIZE), repeat=2):
                 sq = Square(row, col)
@@ -1535,7 +1578,7 @@ class Board:
         piece = grid[chain_tip.row][chain_tip.col]
         if piece is None:
             return False
-        local_color = getattr(self.match, "local_color", None)
+        local_color = self._local_color
         if local_color is not None and piece.color != local_color:
             return False
         if piece.color == self.match.current_turn():
@@ -1599,7 +1642,7 @@ class Board:
         piece_at_clicked = grid[square.row][square.col]
         live_at_clicked = self.match.state[square.row][square.col]
         current_turn = self.match.current_turn()
-        local_color = getattr(self.match, "local_color", None)
+        local_color = self._local_color
 
         if self.selected_square is None:
             chain_piece = self._premove_chain_piece(
@@ -1871,7 +1914,7 @@ class Board:
         :param piece: piece being picked up
         :returns: True when the piece was picked up
         """
-        local_color = getattr(self.match, "local_color", None)
+        local_color = self._local_color
         if local_color is not None and piece.color != local_color:
             return False
         if self.premove_color is not None and self.premove_color != piece.color:
@@ -2411,19 +2454,16 @@ class Board:
 
     def _try_select(self, square: Square) -> bool:
         """
-        Pick a piece up for a real move: it has to be there, it has to belong
-        to the side to move, and online it has to be yours
+        Pick a piece up for a real move, on exactly the terms every other click
+        path asks about: it has to be there, it has to belong to the side to
+        move, and online it has to be yours
 
         :param square: square that was clicked
         :returns: True when the piece was picked up
         """
         piece = self.match.piece_at(square)
-        if piece is None:
-            return False
-        if piece.color != self.match.current_turn():
-            return False
-        local_color = getattr(self.match, "local_color", None)
-        if local_color is not None and piece.color != local_color:
+        if not self._is_real_move_eligible(
+                piece, self.match.current_turn(), self._local_color):
             return False
         self.selected_square = square
         return True

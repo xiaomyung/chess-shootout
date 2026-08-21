@@ -209,6 +209,92 @@ def test_apply_fen_invalid_raises():
 
 
 @pytest.mark.parametrize(
+    "placement",
+    [
+        pytest.param(
+            "rnbqkbnrr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR",
+            id="nine_pieces_on_a_rank",
+        ),
+        pytest.param(
+            "8p/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR",
+            id="piece_after_a_full_run_of_empties",
+        ),
+    ],
+)
+def test_apply_fen_rejects_a_rank_that_runs_past_the_board(placement):
+    """An overfilled rank used to index off the end of the row and raise
+    IndexError, which walked straight past the paste box's ValueError/KeyError
+    catcher and crashed the app -- a bad paste is a rejection, not a crash."""
+    backend = Backend()
+    with pytest.raises(ValueError):
+        apply_fen(backend, f"{placement} w KQkq - 0 1")
+
+
+@pytest.mark.parametrize(
+    "field",
+    [
+        pytest.param("a1", id="rank_1_lets_a_pawn_capture_onto_the_back_rank"),
+        pytest.param("e0", id="rank_below_the_board"),
+        pytest.param("e9", id="rank_above_the_board"),
+        pytest.param("z3", id="file_off_the_board"),
+        pytest.param("e4", id="rank_no_double_push_can_be_answered_on"),
+    ],
+)
+def test_apply_fen_rejects_an_en_passant_target_off_the_two_legal_ranks(field):
+    """Only ranks 3 and 6 can hold an en-passant target. A target anywhere else
+    was accepted verbatim and armed a capture the rules cannot produce: with a1
+    loaded, a pawn 'captures en passant' onto the back rank, deletes a piece of
+    its OWN side beside it and lands where it can never promote."""
+    backend = Backend()
+    with pytest.raises(ValueError):
+        apply_fen(backend, f"4k3/8/8/8/8/8/8/4K3 w - {field} 0 1")
+
+
+@pytest.mark.parametrize(
+    "turn, field, expected",
+    [
+        pytest.param("b", "e3", Square(5, 4), id="white_double_push_answer"),
+        pytest.param("w", "e6", Square(2, 4), id="black_double_push_answer"),
+    ],
+)
+def test_apply_fen_keeps_the_two_real_en_passant_ranks(turn, field, expected):
+    """The tightened field must still load every target a real game produces."""
+    backend = Backend()
+    apply_fen(backend, f"4k3/8/8/8/8/8/8/4K3 {turn} - {field} 0 1")
+    assert backend.en_passant_target == expected
+
+
+@pytest.mark.parametrize(
+    "tail",
+    [
+        pytest.param("0 1;", id="trailing_punctuation"),
+        pytest.param("0 bm", id="epd_operation_in_the_move_number"),
+        pytest.param("hmvc 3;", id="epd_named_counters"),
+        pytest.param("0 0", id="move_number_zero"),
+        pytest.param("0 -3", id="negative_move_number"),
+    ],
+)
+def test_apply_fen_takes_a_spoiled_counter_as_its_default(tail):
+    """The two counters at the tail are the fields exporters mangle -- EPD writes
+    operations there, some tools leave a semicolon behind. None of that describes
+    the position, so it must cost the player the counter and not the whole paste;
+    a move number below 1 is meaningless and reads as the default too."""
+    backend = Backend()
+    apply_fen(backend, f"rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - {tail}")
+    assert backend.fullmove_baseline == 1
+    assert export_fen(backend).split()[5] == "1"
+
+
+def test_apply_fen_takes_a_spoiled_halfmove_clock_as_zero():
+    """A junk halfmove clock cannot be trusted to count anything, so it starts the
+    fifty-move count over rather than rejecting the position."""
+    backend = Backend()
+    apply_fen(backend, "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - x 7")
+    assert backend.halfmove_clock == 0
+    assert backend.fullmove_baseline == 7
+
+
+@pytest.mark.parametrize(
     "token",
     [
         pytest.param("W", id="uppercase_white"),
@@ -219,8 +305,9 @@ def test_apply_fen_invalid_raises():
     ],
 )
 def test_apply_fen_rejects_a_side_to_move_that_is_not_w_or_b(token):
-    """Every other FEN field raises on junk; the side to move used to fall through
-    to Black, so a mistyped token silently handed the move to the wrong player."""
+    """The side to move used to fall through to Black on anything that was not a
+    w, so a mistyped token silently handed the move to the wrong player. Unlike
+    the two counters at the tail there is no sane default to fall back on."""
     backend = Backend()
     backend.new_game()
     fen = f"rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR {token} KQkq - 0 1"

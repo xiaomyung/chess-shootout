@@ -11,6 +11,7 @@ from chessshootout.backend.pieces import (
     opponent_of, pawn_forward, pawn_start_row,
 )
 from chessshootout.backend.clock import Clock
+from chessshootout.backend.pseudo_legal import king_square
 from chessshootout.backend.utils import (
     BOARD_SIZE, HistoryEntry, Move, MoveResult, PositionKey, Square, on_board,
 )
@@ -86,6 +87,7 @@ class Backend:
         self.baseline_black_to_move = False
         self.position_counts: Counter[PositionKey] = Counter()
         self.clock: Clock | None = None
+        self._legal_move_memo: tuple[int, bool] | None = None
 
     def new_game(self) -> None:
         """
@@ -124,16 +126,17 @@ class Backend:
         """
         Let the clock count down by the real time since the last tick, which the
         client does once per frame and the server once per sweep step. A game
-        that is already over is never charged -- a fallen flag returns at once,
-        and a tick that would flag a side with no legal move is rolled back
-        whole, which keeps the costly move scan out of every routine tick
+        that is already over is never charged: a fallen flag returns at once,
+        and so does a position whose side to move is mated or stalemated, whose
+        clocks freeze where they stood. The costly legal-move scan behind that
+        second test is memoized, so it costs one pass per position rather than
+        one per tick
         """
         if self.clock is None or self.clock.flagged is not None:
             return
-        before = self.clock.snapshot()
+        if self._side_to_move_has_no_legal_moves():
+            return
         self.clock.tick()
-        if self.clock.flagged is not None and self._has_no_legal_moves(self.turn):
-            self.clock.restore(before)
 
     def piece_at(self, square: Square) -> Piece | None:
         """
@@ -398,11 +401,14 @@ class Backend:
         en-passant target, the halfmove clock, the repetition count and both
         players' times back to what the history entry recorded before that ply.
         A promotion still waiting on a piece choice is dropped without any of
-        that being unwound, since it never completed in the first place
+        that being unwound, since it never completed in the first place. The
+        remembered legal-move verdict goes too, because a different ply may now
+        be played into the very ply count the old one was remembered against
         """
         if not self.move_history:
             return
         entry = self.move_history.pop()
+        self._legal_move_memo = None
         m = entry.move
 
         if entry.position_key_added is not None:
@@ -437,6 +443,16 @@ class Backend:
         :returns: hashable key standing for this position
         """
         return self._position_key()
+
+    def reset_legal_move_memo(self) -> None:
+        """
+        Forget the remembered verdict on whether the side to move is out of
+        legal moves. The FEN loader is the caller that needs it: the verdict is
+        remembered against the number of plies played, and loading a position
+        leaves that number at zero while replacing every piece on the board, so
+        nothing else would tell the new position from the old one
+        """
+        self._legal_move_memo = None
 
     def _apply_normal(self, from_sq: Square, to_sq: Square, piece: Piece) -> MoveResult:
         """
@@ -664,6 +680,7 @@ class Backend:
         entry.position_key_added = key
         in_check = self.is_in_check(self.turn)
         no_moves = self._has_no_legal_moves(self.turn)
+        self._legal_move_memo = (len(self.move_history), no_moves)
         entry.gives_checkmate = in_check and no_moves
         entry.gives_check = in_check and not no_moves
         if entry.gives_checkmate:
@@ -766,6 +783,24 @@ class Backend:
             if self.legal_moves_from(Square(row, col)):
                 return False
         return True
+
+    def _side_to_move_has_no_legal_moves(self) -> bool:
+        """
+        Answer the same question as _has_no_legal_moves for the side to move,
+        but from the verdict already reached for this position where there is
+        one. The whole-board scan is far too heavy to repeat once a frame, and
+        the clock asks exactly that often; every ply that lands leaves its own
+        verdict here, and the plies played so far is what tells one position's
+        answer from another's
+
+        :returns: True when the side to move cannot make a single legal move
+        """
+        plies = len(self.move_history)
+        if self._legal_move_memo is not None and self._legal_move_memo[0] == plies:
+            return self._legal_move_memo[1]
+        stuck = self._has_no_legal_moves(self.turn)
+        self._legal_move_memo = (plies, stuck)
+        return stuck
 
     def _knight_and_king_moves(self, square: Square, piece: Piece,
                                offsets: list[tuple[int, int]]) -> list[Square]:
@@ -1079,17 +1114,18 @@ class Backend:
     def _find_king(self, color: PieceColor) -> Square:
         """
         Locate a side's king, which every check test needs before it can ask
-        whether that square is attacked. A position missing a king is a broken
-        one, so this raises rather than quietly reporting an all-clear
+        whether that square is attacked. The search itself is the shared one
+        over a plain board grid; what this adds is the engine's stricter
+        reading of a missing king -- a live position without one is broken, so
+        it raises rather than quietly reporting an all-clear
 
         :param color: side whose king is wanted
         :returns: the square that king stands on
         """
-        for row, col in product(range(self.SIZE), repeat=2):
-            piece = self.state[row][col]
-            if piece is not None and piece.type == PieceType.KING and piece.color == color:
-                return Square(row, col)
-        raise ValueError(f"No {color} king on the board")
+        square = king_square(self.state, color)
+        if square is None:
+            raise ValueError(f"No {color} king on the board")
+        return square
 
     def _switch_turn(self) -> None:
         """

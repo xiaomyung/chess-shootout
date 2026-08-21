@@ -51,7 +51,10 @@ def promo_value(promo_char: str | None) -> int:
     """
     if promo_char is None:
         return 0
-    return PIECE_VALUES.get(cast(PieceType, PROMO_TYPE_BY_LETTER.get(promo_char)), 0)
+    promo_type = PROMO_TYPE_BY_LETTER.get(promo_char)
+    if promo_type is None:
+        return 0
+    return PIECE_VALUES[promo_type]
 
 
 def value_diff_for(facts: TriggerFacts, promo_char: str | None = None) -> int:

@@ -1,5 +1,4 @@
 import hashlib
-import math
 from weakref import WeakKeyDictionary
 
 import pygame as pg
@@ -10,7 +9,7 @@ from chessshootout.frontend.visual.cache import (
     render_text, new_cache, memoized_surface,
 )
 from chessshootout.frontend.visual.draw import (
-    supersample, rounded_rect_surface, infinity_surface, blit_centered, cut_rect_surface,
+    supersample, rounded_rect_surface, blit_centered, cut_rect_surface,
 )
 
 
@@ -22,9 +21,6 @@ BUTTON_LABEL_PADDING_PX = 6
 BUTTON_RADIUS = 8
 BUTTON_CUT = 6
 PILL_PAD_Y = 6
-SEGMENT_RADIUS = 8
-SEGMENT_INNER_RADIUS = 6
-CHIP_RADIUS = 7
 KO_WINK_MS = 520
 
 AVATAR_CUT_FRAC = 0.22
@@ -355,51 +351,6 @@ def draw_button(window: pg.Surface, rect: pg.Rect, label: str, font: pg.font.Fon
     )
 
 
-_GEAR_CACHE = new_cache()
-
-
-def draw_gear(window: pg.Surface, rect: pg.Rect) -> None:
-    """
-    Draw a toothed gear glyph, the settings symbol, sized to fill the rect.
-    It is built from polygons rather than an image file, so the finished glyph
-    is cached per size
-
-    :param window: surface drawn to, normally the app window
-    :param rect: box the gear fills; its size keys the cache
-    """
-    def render(surf: pg.Surface, k: int) -> None:
-        """
-        Paint the gear onto the oversized supersampling canvas: eight
-        trapezoid teeth around a ring
-
-        :param surf: oversized canvas, k times the requested size
-        :param k: supersampling factor, unused here because every dimension
-            is derived from the canvas itself
-        """
-        w, h = surf.get_size()
-        cx, cy = w / 2, h / 2
-        r = min(w, h) * 0.30
-        teeth = 8
-        r0, r1 = r * 0.72, r * 1.46
-        hw_base, hw_tip = r * 0.30, r * 0.16
-        for i in range(teeth):
-            a = math.tau * i / teeth
-            dx, dy = math.cos(a), math.sin(a)
-            px, py = -dy, dx
-            pg.draw.polygon(surf, Colors.text, [
-                (cx + dx * r0 + px * hw_base, cy + dy * r0 + py * hw_base),
-                (cx + dx * r0 - px * hw_base, cy + dy * r0 - py * hw_base),
-                (cx + dx * r1 - px * hw_tip, cy + dy * r1 - py * hw_tip),
-                (cx + dx * r1 + px * hw_tip, cy + dy * r1 + py * hw_tip),
-            ])
-        hole_r = r * 0.40
-        pg.draw.circle(surf, Colors.text, (int(cx), int(cy)), int(r), width=int(r - hole_r))
-
-    size = (max(rect.width, 1), max(rect.height, 1))
-    window.blit(memoized_surface(_GEAR_CACHE, size, lambda: supersample(size, render, scale=8)),
-                rect.topleft)
-
-
 def draw_button_row(window: pg.Surface, rect: pg.Rect, buttons: list[tuple[str, str]],
                     font: pg.font.Font, gap: int, disabled_keys: set[str] | None = None,
                     primary_keys: set[str] | None = None,
@@ -480,104 +431,6 @@ def draw_toggle(window: pg.Surface, rect: pg.Rect, fraction: float) -> None:
                            (int(knob_x + knob_d / 2), h // 2), int(knob_d / 2))
         return supersample(rect.size, render, scale=6)
     window.blit(memoized_surface(_TOGGLE_CACHE, key, build), rect.topleft)
-
-
-def draw_segmented(window: pg.Surface, rect: pg.Rect, options: list[tuple[str, str]],
-                   selected_key: str, font: pg.font.Font,
-                   gap: int = 3) -> dict[str, pg.Rect]:
-    """
-    Draw a segmented control -- several labelled cells sharing one frame, the
-    chosen one filled with the accent -- and report where each cell landed so
-    the caller can route clicks. An unlimited-time option is drawn with the
-    hand-built infinity glyph, since the bundled fonts have no such character
-
-    :param window: surface drawn to, normally the app window
-    :param rect: the whole control's box in window pixels
-    :param options: label and key pairs, drawn left to right
-    :param selected_key: key of the cell drawn as chosen
-    :param font: font for the labels
-    :param gap: pixel gap between cells and around the inner row
-    :returns: rect per option key, empty when the control was too narrow
-    """
-    n = len(options)
-    if n == 0 or rect.width <= gap * (n + 1):
-        return {}
-    window.blit(rounded_rect_surface(rect.size, SEGMENT_RADIUS, Colors.surface_raised,
-                                     border=Colors.border, border_width=1),
-                rect.topleft)
-    inner = rect.inflate(-2 * gap, -2 * gap)
-    seg_w = (inner.width - gap * (n - 1)) / n
-    rects = {}
-    for i, (label, key) in enumerate(options):
-        sr = pg.Rect(round(inner.x + i * (seg_w + gap)), inner.y, round(seg_w), inner.height)
-        if key == selected_key:
-            window.blit(rounded_rect_surface(sr.size, SEGMENT_INNER_RADIUS, Colors.accent),
-                        sr.topleft)
-            color = Colors.on_accent
-        elif sr.collidepoint(pg.mouse.get_pos()):
-            color = Colors.text
-        else:
-            color = Colors.text_dim
-        if label == "∞":
-            glyph = infinity_surface(int(sr.height * 0.42), color)
-        else:
-            glyph = fit_text_to_rect(render_text(font, label, color), sr, padding=3)
-        window.blit(glyph, (sr.centerx - glyph.get_width() / 2,
-                            sr.centery - glyph.get_height() / 2))
-        rects[key] = sr
-    return rects
-
-
-def draw_chip_row(window: pg.Surface, rect: pg.Rect, options: list[tuple[str, str]],
-                  selected_key: str, font: pg.font.Font, gap: int = 5,
-                  locked: bool = False) -> dict[str, pg.Rect]:
-    """
-    Draw a row of separate chips, one per option, with the chosen one accented
-    and report where each landed. A key beginning with a double underscore is
-    a navigation chip rather than a choice, so it never reads as selected;
-    locking greys the whole row and drops hover, for a choice already fixed
-
-    :param window: surface drawn to, normally the app window
-    :param rect: the strip the chips are spread across
-    :param options: label and key pairs, drawn left to right
-    :param selected_key: key of the chip drawn as chosen
-    :param font: font for the labels
-    :param gap: pixel gap between chips
-    :param locked: True to draw the row inactive and ignore the cursor
-    :returns: rect per option key, empty when the row was too narrow
-    """
-    n = len(options)
-    if n == 0 or rect.width <= gap * (n - 1):
-        return {}
-    chip_w = (rect.width - gap * (n - 1)) / n
-    rects = {}
-    mouse = pg.mouse.get_pos()
-    for i, (label, key) in enumerate(options):
-        cr = pg.Rect(round(rect.x + i * (chip_w + gap)), rect.y, round(chip_w), rect.height)
-        is_nav = isinstance(key, str) and key.startswith("__")
-        on = (not is_nav) and key == selected_key
-        hovered = (not locked) and cr.collidepoint(mouse)
-        if locked:
-            bg, border = Colors.surface, Colors.border
-            color = Colors.text_muted
-        elif on:
-            bg, border, color = Colors.surface_raised, Colors.accent, Colors.text
-        elif is_nav:
-            bg, border, color = Colors.surface, Colors.border, Colors.accent_hi
-        elif hovered:
-            bg, border, color = Colors.surface_hover, Colors.border, Colors.text
-        else:
-            bg, border, color = Colors.surface, Colors.border, Colors.text_dim
-        window.blit(rounded_rect_surface(cr.size, CHIP_RADIUS, bg, border=border, border_width=1),
-                    cr.topleft)
-        if label == "∞":
-            glyph = infinity_surface(int(cr.height * 0.42), color)
-        else:
-            glyph = fit_text_to_rect(render_text(font, label, color), cr, padding=3)
-        window.blit(glyph, (cr.centerx - glyph.get_width() // 2,
-                            cr.centery - glyph.get_height() // 2))
-        rects[key] = cr
-    return rects
 
 
 def scroll_thumb_rect(track_rect: pg.Rect, total: float, visible: float,
@@ -767,11 +620,13 @@ def draw_captured_row(window: pg.Surface,
     :param ih: inner strip height in pixels, which sets the icon size
     :returns: x of the right edge of the last icon drawn, or x if none fit
     """
+    if captured_color is None:
+        return x
     cursor = x
     last_right = x
     size = max(int(ih * 0.5), 6)
     for piece_type in captured:
-        icon = icons.get((piece_type, captured_color))  # type: ignore[arg-type]
+        icon = icons.get((piece_type, captured_color))
         if icon is None:
             continue
         if icon.get_height() != size:

@@ -46,7 +46,7 @@ class FenInputModal(BaseModal):
         self.error_font = self.font(factor=14, min_size=12, bold=False)
         self.button_font = self.font(factor=14, min_size=12, bold=True)
 
-    def show(self, on_submit: Callable[[str], bool]) -> None:  # type: ignore[override]
+    def show(self, on_submit: Callable[[str], bool]) -> None:
         """
         Open the box with an empty, focused field and no complaint showing
 

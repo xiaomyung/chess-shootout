@@ -46,7 +46,7 @@ class ConfirmModal(BaseModal):
         self._panel = pg.Rect(0, 0, 0, 0)
         self._font_cache: dict[str, Any] = {}
 
-    def show(self, title: str, on_yes: Callable[[], None],  # type: ignore[override]
+    def show(self, title: str, on_yes: Callable[[], None],
              on_no: Callable[[], None] | None = None, yes_label: str = "Confirm",
              no_label: str = "Cancel", on_extra: Callable[[], None] | None = None,
              extra_label: str = "Cancel", sub: str = "", danger: bool = False,

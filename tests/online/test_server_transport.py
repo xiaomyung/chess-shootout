@@ -160,6 +160,33 @@ async def test_matchmake_async_sends_country(captured):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("raised, text", [
+    pytest.param(httpx.ConnectError("connection refused"), "connection refused",
+                 id="connection_refused"),
+    pytest.param(httpx.ConnectTimeout("timed out"), "timed out", id="timed_out"),
+])
+async def test_matchmake_async_wraps_a_network_failure_in_transport_error(raised, text):
+    """matchmake was the one request method that let a raw httpx exception escape:
+    _matchmake_with_retries only catches TransportError, so an unreachable server
+    skipped the retry loop entirely and reached the player as whatever text httpx
+    happened to put in the exception. Wrapped, it joins the same retry-then-
+    server_unreachable path resume_async and healthz_async already feed, and the
+    httpx text survives inside the wrapper for the log."""
+    def boom(request):
+        raise raised
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(boom)) as http:
+        st = ServerTransport("localhost:8000")
+        req = MatchmakeRequest(nickname="Alice", client_uuid=ALICE,
+                               time_minutes=5, increment_seconds=0)
+        with pytest.raises(TransportError) as info:
+            await st.matchmake_async(req, http)
+    assert not isinstance(info.value, (TransportHTTPError, SchemaVersionMismatch)), (
+        "a network failure is the plain transport error, not an HTTP or schema one")
+    assert text in str(info.value)
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     "status_code, body, expected_exc, expected_status",
     [

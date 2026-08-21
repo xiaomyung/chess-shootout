@@ -78,6 +78,7 @@ class ResultMenu(BaseModal):
         self.button_rects: dict[str, pg.Rect] = {}
         self.outcome_font = get_display_font(48)
         self.reason_font = get_font(12, bold=True)
+        self.detail_font = get_font(11, bold=True)
         self.value_font = get_font(20, bold=True, mono=True)
         self.label_font = get_font(10, bold=True)
         self.button_font = get_font(14, bold=True)

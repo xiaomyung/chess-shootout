@@ -27,7 +27,7 @@ def _seed_floats(seed: str) -> tuple[float, ...]:
     :param seed: per-check seed, the only input the figure-8 varies with
     :returns: (which lobe, start jitter, initial rotation), each in [0, 1)
     """
-    return seeded_floats("aim:{}".format(seed), 3)
+    return seeded_floats(f"aim:{seed}", 3)
 
 
 def _amplitude() -> float:

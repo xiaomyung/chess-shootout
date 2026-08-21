@@ -38,8 +38,6 @@ class MatchFoundModal(BaseModal):
         super().__init__(window)
         self.me_name = ""
         self.opp_name = ""
-        self.me_side = "white"
-        self.opp_side = "black"
         self.me_country = ""
         self.opp_country = ""
         self.rating = "1500"
@@ -51,8 +49,7 @@ class MatchFoundModal(BaseModal):
         self._seconds = 3
         self._font_cache: dict[str, Any] = {}
 
-    def show(self, white_name: str, black_name: str,  # type: ignore[override]
-             your_color: str,
+    def show(self, white_name: str, black_name: str, your_color: str,
              on_done: Callable[[], None], seconds: int = 3, white_country: str = "",
              black_country: str = "", rematch: bool = False) -> None:
         """
@@ -71,11 +68,11 @@ class MatchFoundModal(BaseModal):
         """
         self.rematch = rematch
         if your_color == "white":
-            self.me_name, self.me_side, self.me_country = white_name, "white", white_country
-            self.opp_name, self.opp_side, self.opp_country = black_name, "black", black_country
+            self.me_name, self.me_country = white_name, white_country
+            self.opp_name, self.opp_country = black_name, black_country
         else:
-            self.me_name, self.me_side, self.me_country = black_name, "black", black_country
-            self.opp_name, self.opp_side, self.opp_country = white_name, "white", white_country
+            self.me_name, self.me_country = black_name, black_country
+            self.opp_name, self.opp_country = white_name, white_country
         self.on_done = on_done
         self._seconds = seconds
         self._started_at = pg.time.get_ticks()
@@ -194,10 +191,10 @@ class MatchFoundModal(BaseModal):
 
         gap = max(int(panel_w * 0.027), 12)
         side_w = (content.width - vs_surf.get_width() - 2 * gap) / 2
-        self._draw_card(content.x + side_w / 2, y, av, side_w, card_h, self.me_name,
+        self._draw_card(content.x + side_w / 2, y, av, side_w, self.me_name,
                         self.me_country, name_font, rating_font, letter_font,
                         cast(tuple[pg.Color, pg.Color], self.me_palette))
-        self._draw_card(content.right - side_w / 2, y, av, side_w, card_h, self.opp_name,
+        self._draw_card(content.right - side_w / 2, y, av, side_w, self.opp_name,
                         self.opp_country, name_font, rating_font, letter_font,
                         cast(tuple[pg.Color, pg.Color], self.opp_palette))
         self.window.blit(vs_surf, (content.centerx - vs_surf.get_width() / 2,
@@ -211,19 +208,20 @@ class MatchFoundModal(BaseModal):
         self.window.blit(label, (cx, y))
         self.window.blit(number, (cx + label.get_width(), y))
 
-    def _draw_card(self, cx: float, y: float, av: int, side_w: float, card_h: int,
+    def _draw_card(self, cx: float, y: float, av: int, side_w: float,
                    name: str, country: str, name_font: pg.font.Font,
                    rating_font: pg.font.Font, letter_font: pg.font.Font,
                    palette: tuple[pg.Color, pg.Color]) -> None:
         """
         Draw one of the two players: their avatar with their initial on it,
-        then their flag and nickname, then the rating line underneath
+        then their flag and nickname, then the rating line underneath. The
+        block's height is fixed by those three parts, so the caller measures it
+        rather than passing it in
 
         :param cx: horizontal centre of this player's half, in window pixels
         :param y: top of the player block, in window pixels
         :param av: avatar width and height in pixels
         :param side_w: width this half may use, which the nickname is fitted to
-        :param card_h: full height of the player block in pixels
         :param name: nickname to show
         :param country: ISO country code for the flag, empty for none
         :param name_font: font for the nickname

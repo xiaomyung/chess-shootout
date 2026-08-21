@@ -125,6 +125,37 @@ def test_draw_pieces_uses_historical_grid_in_review_mode():
     assert (6, 4) in blitted
 
 
+def test_draw_pieces_memoises_the_reviewed_grid(monkeypatch):
+    """position_at replays the game into a copy of the engine, and a browsed board
+    redraws every frame — so the grid is memoised on (ply, len(history)). A second
+    draw at the same ply must reuse it; moving the browse position or landing a
+    ply must not."""
+    backend = Backend()
+    backend.new_game()
+    backend.try_move(Square(6, 4), Square(4, 4))
+    backend.try_move(Square(1, 4), Square(3, 4))
+    bd = Board(pg.display.get_surface(), backend)
+    bd.load_assets()
+    bd.set_rect(pg.Rect(0, 0, 400, 400))
+    calls = []
+    real_position_at = backend.position_at
+    monkeypatch.setattr(backend, "position_at",
+                        lambda ply: calls.append(ply) or real_position_at(ply))
+
+    bd.jump_to_review_ply(0)
+    bd.draw_pieces()
+    bd.draw_pieces()
+    assert calls == [0], "a repeat draw at the same ply must not rebuild the position"
+
+    bd.jump_to_review_ply(1)
+    bd.draw_pieces()
+    assert calls == [0, 1], "moving the browse position must invalidate the memo"
+
+    backend.try_move(Square(7, 6), Square(5, 5))
+    bd.draw_pieces()
+    assert calls == [0, 1, 1], "a landed ply must invalidate the memo"
+
+
 def test_review_click_in_live_game_snaps_to_live_and_never_selects(board):
     board.match.try_move(Square(6, 4), Square(4, 4))
     board.review_ply = 0

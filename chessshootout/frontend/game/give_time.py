@@ -3,10 +3,9 @@ from typing import Any, cast
 
 import pygame as pg
 
-from chessshootout.frontend.game.variant import Variant
-
 from chessshootout.backend.clock import Clock
 from chessshootout.backend.pieces import PieceColor, opponent_of
+from chessshootout.frontend.game.variant import Variant
 from chessshootout.server.protocol import GIVE_TIME_SECONDS, GIVE_TIME_TICK_MS
 
 
@@ -206,7 +205,7 @@ class GiveTimeHold:
         :returns: the side that receives the seconds
         """
         screen = self.screen
-        if screen.variant == "online" and screen.match.local_color is not None:
+        if screen.variant == Variant.ONLINE and screen.match.local_color is not None:
             return opponent_of(screen.match.local_color)
         return cast(PieceColor, screen.match.current_turn())
 

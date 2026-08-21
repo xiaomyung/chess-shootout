@@ -140,11 +140,7 @@ def king_square(state: list[list[Piece | None]], color: PieceColor) -> Square | 
     :param color: side whose king is wanted
     :returns: the king's square, or None when that king is not on the grid
     """
-    for row, col in product(range(BOARD_SIZE), repeat=2):
-        piece = state[row][col]
-        if piece is not None and piece.type == PieceType.KING and piece.color == color:
-            return Square(row, col)
-    return None
+    return piece_square(state, PieceType.KING, color)
 
 
 def piece_square(state: list[list[Piece | None]], ptype: PieceType,

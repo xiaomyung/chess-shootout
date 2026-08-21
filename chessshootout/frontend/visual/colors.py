@@ -50,7 +50,6 @@ class Colors:
     loss = "#ff5a4f"
     loss_glow = loss + "8c"
     spectate = "#4a90e2"
-    spectate_glow = spectate + "8c"
     check = "#ff3b3b"
     check_fill = check + "6b"
 

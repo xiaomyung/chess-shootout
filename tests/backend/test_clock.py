@@ -11,12 +11,14 @@ import logging
 
 import pytest
 
+from chessshootout.backend.backend import Backend
 from chessshootout.backend.clock import Clock
+from chessshootout.backend.fen import apply_fen
 from chessshootout.backend.pieces import PieceColor
 
 from tests.helpers import (
     BLACK, WHITE, K, Q, R, B, P,
-    make_backend, piece, sq,
+    NO_CASTLING, make_backend, piece, sq,
 )
 
 
@@ -274,8 +276,8 @@ def test_timeout_black_results_in_white_wins_on_time():
 
 def test_timeout_outranks_insufficient_material_DEVIATION():
     """FIDE 6.9 draws a flag-fall the opponent can't mate; we lose it (chess.com).
-    The falling flag is what makes tick_clock scan for legal moves at all, and
-    White has plenty here, so the tick stands instead of being rolled back."""
+    Only a side with no legal move at all keeps its clock frozen, and White has
+    plenty here, so the flag falls on the tick."""
     bk = make_backend({
         sq(7, 4): piece(K, WHITE),
         sq(0, 4): piece(K, BLACK),
@@ -292,9 +294,9 @@ def test_timeout_outranks_insufficient_material_DEVIATION():
 
 
 def test_no_tick_after_game_over():
-    """A mated side must never be flagged on top of the mate, so the tick that
-    would have dropped the flag is rolled back whole -- remaining times, running
-    side and the last-tick stamp included, exactly as if it never ran."""
+    """A mated side must never be flagged on top of the mate, so the clock is not
+    charged at all in a position with no legal move -- remaining times, running
+    side and the last-tick stamp all stand exactly as they were."""
     bk = make_backend({
         sq(7, 7): piece(K, WHITE),
         sq(6, 5): piece(P, WHITE),
@@ -314,10 +316,11 @@ def test_no_tick_after_game_over():
     assert bk.game_result() == "black_wins"
 
 
-def test_routine_tick_never_scans_for_legal_moves():
-    """The client ticks the clock once per frame. Nothing about a tick that leaves
-    both flags standing depends on whose move is legal, so the whole-board scan
-    must stay out of it -- it used to run on every single frame."""
+def test_routine_ticks_scan_for_legal_moves_at_most_once_per_position():
+    """The client ticks the clock once per frame, and the whole-board scan is far
+    too heavy to pay for at that rate -- it used to run on every single frame.
+    The verdict a position gets is remembered instead, so only the first frame
+    in a position looks at the board."""
     bk = make_backend({
         sq(7, 4): piece(K, WHITE),
         sq(0, 4): piece(K, BLACK),
@@ -329,13 +332,97 @@ def test_routine_tick_never_scans_for_legal_moves():
     for step in (1.0, 2.0, 3.0):
         ts[0] = step
         bk.tick_clock()
-    assert scans == []
+    assert scans == [PieceColor.WHITE]
     assert bk.clock.white_remaining == pytest.approx(297.0)
 
 
+def test_ticks_after_a_ply_reuse_the_verdict_that_ply_already_reached():
+    """Every ply that lands already asks whether the side to move is stuck -- that
+    question is what tells checkmate from an ordinary move -- so the frames that
+    follow it must not ask the board all over again."""
+    bk = make_backend({
+        sq(7, 4): piece(K, WHITE),
+        sq(0, 4): piece(K, BLACK),
+        sq(6, 0): piece(P, WHITE),
+    })
+    ts = [0.0]
+    bk.setup_clock(300, 0, now_provider=fake_now(ts))
+    assert bk.try_move(sq(6, 0), sq(5, 0)).legal
+    scans = watch_legal_move_scans(bk)
+    for step in (1.0, 2.0, 3.0):
+        ts[0] = step
+        bk.tick_clock()
+    assert scans == []
+    assert bk.clock.black_remaining == pytest.approx(297.0)
+
+
+def test_a_dead_position_freezes_a_running_clock_at_its_full_time():
+    """A clock still running on a position that has no legal move -- a finished
+    game set up from a FEN, say -- must not bleed a single second, because the
+    times on screen are the ones the game ended at. One scan settles that for the
+    whole position, however many frames go by."""
+    bk = make_backend({
+        sq(7, 7): piece(K, WHITE),
+        sq(6, 5): piece(P, WHITE),
+        sq(6, 6): piece(P, WHITE),
+        sq(6, 7): piece(P, WHITE),
+        sq(7, 0): piece(R, BLACK),
+        sq(0, 0): piece(K, BLACK),
+    }, turn=WHITE, castling_rights=NO_CASTLING)
+    ts = [0.0]
+    bk.setup_clock(60, 0, now_provider=fake_now(ts))
+    scans = watch_legal_move_scans(bk)
+    for step in range(1, 11):
+        ts[0] = step * 30.0
+        bk.tick_clock()
+    assert scans == [PieceColor.WHITE]
+    assert bk.clock.white_remaining == 60
+    assert bk.clock.flagged is None
+
+
+def test_loading_a_finished_position_freezes_a_clock_that_was_already_running():
+    """apply_fen swaps the whole board in without touching the clock, and it
+    leaves the ply count at the same zero the previous position had -- so the
+    loader has to drop the remembered verdict, or a game that is already over
+    goes on charging the side to move."""
+    bk = Backend()
+    bk.new_game()
+    ts = [0.0]
+    bk.setup_clock(60, 0, now_provider=fake_now(ts))
+    ts[0] = 1.0
+    bk.tick_clock()
+    before_load = bk.clock.white_remaining
+    apply_fen(bk, "7k/8/8/8/8/8/5PPP/r6K w - - 0 1")
+    ts[0] = 40.0
+    bk.tick_clock()
+    assert bk.game_result() == "black_wins"
+    assert bk.clock.white_remaining == pytest.approx(before_load)
+
+
+def test_a_take_back_drops_the_verdict_before_another_ply_reuses_its_number():
+    """The verdict is remembered against the number of plies played, and a
+    promotion left waiting on its piece files none of its own. Take the mate back
+    and push a pawn instead and both plies are ply 1, so a verdict that outlived
+    the take-back would freeze a clock that has to keep running."""
+    bk = make_backend({
+        sq(2, 6): piece(K, WHITE),
+        sq(2, 0): piece(Q, WHITE),
+        sq(1, 1): piece(P, WHITE),
+        sq(0, 7): piece(K, BLACK),
+    }, turn=WHITE, castling_rights=NO_CASTLING)
+    ts = [0.0]
+    bk.setup_clock(300, 0, now_provider=fake_now(ts))
+    assert bk.try_move(sq(2, 0), sq(0, 0)).is_checkmate
+    bk.undo()
+    assert bk.try_move(sq(1, 1), sq(0, 1)).promotion_required
+    ts[0] = 5.0
+    bk.tick_clock()
+    assert bk.clock.white_remaining == pytest.approx(295.0)
+
+
 def test_flag_falling_tick_scans_once_and_keeps_the_flag():
-    """The scan is not dropped, only deferred: the one tick that drops a flag pays
-    for it, and a side that does have moves keeps the flag it just lost."""
+    """The scan the tick pays for settles the position, not the flag: a side that
+    does have moves is charged as usual and keeps the flag it just lost."""
     bk = make_backend({
         sq(7, 4): piece(K, WHITE),
         sq(0, 4): piece(K, BLACK),

@@ -13,6 +13,8 @@ from chessshootout.frontend.frontend import Frontend
 
 os.environ.setdefault("SSL_CERT_FILE", certifi.where())
 
+log = logging.getLogger("chess.main")
+
 
 def _parse_args() -> argparse.Namespace:
     """
@@ -39,7 +41,6 @@ def main() -> None:
     configure_basic(os.environ.get("LOG_LEVEL", "INFO").upper())
     silence_third_party_loggers()
     handler = crash_log.install_memory_handler()
-    log = logging.getLogger("chess.main")
     log.info("client starting pid=%s", os.getpid())
     env.init_paths()
     env.load()

@@ -11,6 +11,8 @@ processed asset tree existing (that is exercised by the integration suite).
 """
 
 import random
+import threading
+import time
 from unittest.mock import MagicMock, patch
 
 import pygame as pg
@@ -58,6 +60,31 @@ def _inject(manager, slot):
     target = MagicMock(name=slot)
     manager._slots[slot] = [target]
     return target
+
+
+class _DeferredThread:
+    """Stand-in for threading.Thread that captures the worker instead of
+    running it, so a test can drive the background cache-warm on its own
+    thread and stay deterministic."""
+
+    started = []
+
+    def __init__(self, target=None, daemon=False):
+        self.target = target
+        self.daemon = daemon
+
+    def start(self):
+        _DeferredThread.started.append(self)
+
+
+@pytest.fixture
+def deferred_warm():
+    """Freeze the background cache-warm: set_enabled runs its synchronous half
+    and the loading half is handed back for the test to run (or not)."""
+    _DeferredThread.started = []
+    with patch("chessshootout.frontend.audio.sound_manager.threading.Thread",
+               _DeferredThread):
+        yield _DeferredThread
 
 
 def test_master_volume_explicit_override(sm):
@@ -702,18 +729,21 @@ def test_set_enabled_true_does_not_stop(tmp_path):
     assert sm.enabled is True
 
 
-def test_enabling_a_silent_manager_converges_on_the_enabled_start_state(tmp_path, fake_channel):
+def test_enabling_a_silent_manager_converges_on_the_enabled_start_state(
+        tmp_path, fake_channel, deferred_warm):
     """A manager built enabled=False (no mixer at launch, or sound off in
     Options) never claimed the heartbeat's reserved channel and never loaded a
     folder -- main.py's preload() no-ops while silent. Switching sound on has
     to finish both, or the heartbeat is inaudible for the rest of the run and
-    every first play pays a disk read the preload was meant to have paid."""
+    every first play pays a disk read the preload was meant to have paid. The
+    loading half now runs on a worker, so the test drives that worker itself."""
     sm = SoundManager(tmp_path, enabled=False)
     assert sm._heartbeat_channel is None
     assert sm._slots == {}
 
     with patch.object(SoundManager, "_reserve_channel", return_value=fake_channel):
         sm.set_enabled(True)
+    deferred_warm.started[0].target()
 
     assert sm._heartbeat_channel is fake_channel
     assert set(sm._slots) == set(SLOTS), "the preload skipped while silent is made up"
@@ -722,6 +752,64 @@ def test_enabling_a_silent_manager_converges_on_the_enabled_start_state(tmp_path
     sm.update_heartbeat(0.01, paused=False)
     assert sm._state == STATE_FAST
     fake_channel.play.assert_called_once()
+
+
+def test_unmuting_warms_the_cache_off_the_frame_loop(tmp_path, fake_channel, deferred_warm):
+    """Unmuting used to preload the whole library inside set_enabled, i.e.
+    inside one frame -- measured at ~190 ms of disk reads with the game
+    running. The channel reservation stays synchronous (the heartbeat needs
+    it now); the loading goes to a daemon worker, so the calling frame leaves
+    set_enabled with nothing read yet."""
+    sm = SoundManager(tmp_path, enabled=False)
+
+    with patch.object(SoundManager, "_reserve_channel", return_value=fake_channel):
+        sm.set_enabled(True)
+
+    assert sm._heartbeat_channel is fake_channel, "reserving the channel stays synchronous"
+    assert sm._slots == {}, "no folder may be read on the frame that unmuted"
+    assert len(deferred_warm.started) == 1
+    assert deferred_warm.started[0].daemon is True, "a warm must never hold the process open"
+
+
+def test_a_second_unmute_does_not_start_a_second_warm(tmp_path, fake_channel, deferred_warm):
+    """Toggling mute repeatedly must not stack worker threads all reading the
+    same folders; the warm already in flight is left to finish."""
+    sm = SoundManager(tmp_path, enabled=False)
+    with patch.object(SoundManager, "_reserve_channel", return_value=fake_channel):
+        sm.set_enabled(True)
+        sm.set_enabled(False)
+        sm.set_enabled(True)
+    assert len(deferred_warm.started) == 1
+
+    deferred_warm.started[0].target()
+    sm.set_enabled(False)
+    sm.set_enabled(True)
+    assert len(deferred_warm.started) == 2, "a finished warm frees the slot for the next one"
+
+
+def test_a_real_background_warm_runs_off_the_caller_and_clears_its_flag(tmp_path, fake_channel):
+    """The unpatched path end to end: the loading really happens on another
+    thread (not the one that unmuted), runs to completion, and hands the guard
+    flag back so a later unmute is not blocked forever."""
+    sm = SoundManager(tmp_path, enabled=False)
+    ran_on = []
+    real_preload = sm.preload
+
+    def recording_preload():
+        ran_on.append(threading.current_thread())
+        real_preload()
+
+    sm.preload = recording_preload
+    with patch.object(SoundManager, "_reserve_channel", return_value=fake_channel):
+        sm.set_enabled(True)
+
+    deadline = time.monotonic() + 10
+    while sm._warming and time.monotonic() < deadline:
+        time.sleep(0.01)
+    assert ran_on and ran_on[0] is not threading.main_thread(), \
+        "the frame that unmuted must not be the one reading the folders"
+    assert sm._warming is False, "the flag must come back or unmuting jams for good"
+    assert set(sm._slots) == set(SLOTS)
 
 
 def test_muting_and_unmuting_keeps_the_channel_already_held(tmp_path, fake_channel):
@@ -737,11 +825,12 @@ def test_muting_and_unmuting_keeps_the_channel_already_held(tmp_path, fake_chann
     assert sm._heartbeat_channel is fake_channel
 
 
-def test_unmuting_a_manager_built_without_a_mixer_can_still_load_slots():
+def test_unmuting_a_manager_built_without_a_mixer_can_still_load_slots(deferred_warm):
     """Frontend builds the manager with enabled=pg.mixer.get_init() is not None, so
     a box with no audio device gets enabled=False. The user can still hit the mute
     toggle (audio panel / options), which flips enabled back on — lazy slot loading
-    then dereferences _sounds_dir, so it must never have been None."""
+    then dereferences _sounds_dir, so it must never have been None. The warm is
+    held back here so the loading under test is this thread's alone."""
     sm = SoundManager(SOUNDS_DIR, enabled=False)
     assert sm._sounds_dir is not None
 

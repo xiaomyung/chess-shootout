@@ -62,13 +62,17 @@ class OfferBanners:
 
     def __init__(self, window: pg.Surface) -> None:
         """
-        Start with an empty stack. One instance is built beside the online
+        Start with an empty stack, with the three fonts left unbuilt until the
+        first banner is actually drawn. One instance is built beside the online
         coordinator at startup and reused for every game
 
         :param window: the app window every banner is drawn onto
         """
         self.window = window
         self._banners: list[dict[str, Any]] = []
+        self._name_font: pg.font.Font | None = None
+        self._verb_font: pg.font.Font | None = None
+        self._btn_font: pg.font.Font | None = None
 
     def push(self, key: str, icon: str, name: str, verb: str, yes_label: str,
              no_label: str, on_yes: Callable[[], None],
@@ -166,7 +170,8 @@ class OfferBanners:
 
         :returns: the name, verb and button fonts, in that order
         """
-        if getattr(self, "_name_font", None) is None:
+        if (self._name_font is None or self._verb_font is None
+                or self._btn_font is None):
             self._name_font = get_font(13, bold=True)
             self._verb_font = get_font(13, bold=True)
             self._btn_font = get_font(12, bold=True)

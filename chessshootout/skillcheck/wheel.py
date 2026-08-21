@@ -1,6 +1,7 @@
 from collections.abc import Iterable
 from dataclasses import dataclass
 
+from chessshootout.backend.utils import BOARD_SIZE
 from chessshootout.skillcheck.rng import seeded_floats
 
 WHEEL_ARC_DEGREES = 60.0
@@ -73,7 +74,7 @@ def _placement_floats(seed: str) -> tuple[float, ...]:
 
 
 def placement_square(seed: str, value_diff: int, excluded: Iterable[tuple[int, int]] = (),
-                     board_size: int = 8) -> tuple[int, int] | None:
+                     board_size: int = BOARD_SIZE) -> tuple[int, int] | None:
     """
     Choose the board square the wheel dial is drawn over, fixed by the seed so
     it is never a surprise to only one side. When it does not relocate the
