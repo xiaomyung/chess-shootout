@@ -1,4 +1,5 @@
 from chessshootout.backend.backend import Backend
+from chessshootout.backend.fen import apply_fen
 from tests.helpers import (
     BLACK, WHITE, K,
     make_backend, piece, sq,
@@ -52,3 +53,22 @@ def test_piece_instances_not_in_key():
     bk1 = make_backend(pieces1)
     bk2 = make_backend(pieces2)
     assert bk1._position_key() == bk2._position_key()
+
+
+def test_public_position_key_matches_the_private_one():
+    """The FEN loader seeds its repetition count from outside the engine, so the
+    key has to be reachable without touching Backend._position_key across the
+    module boundary -- the public delegate must return exactly the same key."""
+    bk = Backend()
+    bk.new_game()
+    assert bk.position_key() == bk._position_key()
+    bk.try_move(sq(6, 4), sq(4, 4))
+    assert bk.position_key() == bk._position_key()
+
+
+def test_apply_fen_seeds_the_repetition_count_under_the_public_key():
+    """A position loaded from FEN must be counted once under the very key a later
+    repetition of it will hash to, or threefold would need four visits."""
+    bk = Backend()
+    apply_fen(bk, "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1")
+    assert bk.position_counts[bk.position_key()] == 1

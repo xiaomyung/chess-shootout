@@ -6,7 +6,7 @@ from chessshootout.server.protocol import (
     AnnotationDeltaMessage, AnnotationSetWire, AnnotationsStateMessage, ArrowWire,
     AuthMessage, CHAT_PRESET_COUNT, ClockSnapshot, ErrorMessage,
     FIRST_MOVE_ABORT_SECONDS, GameStartMessage, IDLE_RESIGN_SECONDS,
-    IDLE_WINDOW_BY_PLIES, IdleWindowMessage, IdleWindowWire,
+    IDLE_SECONDS_BY_OUTCOME, IDLE_WINDOW_BY_PLIES, IdleWindowMessage, IdleWindowWire,
     LockWire, MAX_INCREMENT_SECONDS, MAX_SHARED_ARROWS, MAX_SHARED_HIGHLIGHTS,
     MAX_TIME_MINUTES, MIN_INCREMENT_SECONDS, MIN_TIME_MINUTES, MatchmakeRequest,
     MoveAppliedMessage, MoveMessage, PROTOCOL_VERSION, PendingSkillCheckWire,
@@ -300,6 +300,28 @@ def test_move_message_promotion_validated():
                                     "from": "e7", "to": "e8", "promotion": "x"})
 
 
+def test_clock_snapshot_requires_the_running_side_to_be_stated():
+    """running_for carries no default ON PURPOSE. It is decoded from server payloads
+    on the client, so a truncated clock -- the key missing entirely -- has to fail
+    validation and route into the client's error path. A default of None would make
+    that payload parse and silently freeze both clocks instead. Both producers pass
+    the field explicitly, so requiring it costs the server nothing."""
+    with pytest.raises(ValidationError) as info:
+        ClockSnapshot(white_remaining=300.0, black_remaining=180.0)
+    assert [err["loc"] for err in info.value.errors()] == [("running_for",)]
+    stopped = ClockSnapshot(white_remaining=300.0, black_remaining=180.0, running_for=None)
+    assert stopped.model_dump() == {
+        "white_remaining": 300.0, "black_remaining": 180.0, "running_for": None,
+    }
+
+
+def test_clock_snapshot_rejects_an_unknown_running_side():
+    """Only the two colours parse: a stated side is still a closed Literal, so no
+    third value can reach a client clock through this field."""
+    with pytest.raises(ValidationError):
+        ClockSnapshot(white_remaining=1.0, black_remaining=1.0, running_for="green")
+
+
 def test_protocol_version_pinned_for_the_idle_window_push():
     assert PROTOCOL_VERSION == 5
 
@@ -314,6 +336,24 @@ def test_idle_window_table_is_the_single_source_of_policy():
         1: (Reason.ABORTED, FIRST_MOVE_ABORT_SECONDS),
         2: (Reason.RESIGNATION, IDLE_RESIGN_SECONDS),
     }
+
+
+def test_idle_seconds_by_outcome_loses_no_ply_row_to_the_collapse():
+    """IDLE_SECONDS_BY_OUTCOME is built by dropping the ply keys off
+    IDLE_WINDOW_BY_PLIES and re-keying by outcome, which silently keeps only the
+    LAST duration when two ply rows share an outcome. Today plies 0 and 1 agree on
+    the abort window so nothing is lost -- but the client renders its countdown
+    label and total off this collapsed table, so the moment a future edit gives one
+    of them a different duration the client would draw a window the server is not
+    keeping. This is the pin that makes such an edit loud instead of silent."""
+    lossless = {}
+    for plies, spec in IDLE_WINDOW_BY_PLIES.items():
+        assert lossless.setdefault(spec.outcome, spec.seconds) == spec.seconds, \
+            f"ply {plies} maps {spec.outcome} to a duration another ply row disagrees with"
+    assert IDLE_SECONDS_BY_OUTCOME == lossless, \
+        "the shipped table is exactly that lossless mapping, with every outcome present"
+    assert set(IDLE_SECONDS_BY_OUTCOME) == {spec.outcome for spec in
+                                            IDLE_WINDOW_BY_PLIES.values()}
 
 
 def test_idle_window_message_round_trips():
@@ -653,6 +693,68 @@ def test_skill_check_spectate_shot_carries_progress_direction_and_target():
     assert dumped["progress"] == 2
     assert dumped["direction"] == "up"
     assert (dumped["target_row"], dumped["target_col"]) == (2.5, 4.5)
+
+
+@pytest.mark.parametrize("field", ["target_row", "target_col"])
+@pytest.mark.parametrize(
+    "bad",
+    [
+        pytest.param(8.0, id="at_upper_bound_exclusive"),
+        pytest.param(8.5, id="past_upper_bound"),
+        pytest.param(-0.1, id="negative"),
+        pytest.param(float("nan"), id="nan"),
+        pytest.param(float("inf"), id="inf"),
+        pytest.param(float("-inf"), id="neg_inf"),
+    ],
+)
+def test_skill_check_spectate_shot_rejects_out_of_board_target(field, bad):
+    """The spectate mirror carries the same board bounds as the mover's own
+    SkillCheckShotMessage, which is where these coordinates come from -- the server
+    copies an already-bounded shot onto the mirror, so an out-of-board value can
+    only be a bug on our side. The client clamps defensively when it draws
+    (_board_coord in screens/game.py), but the two halves of one wire pair must not
+    disagree about what is representable: without the bounds a NaN or an off-board
+    row could be minted here and never be minted on the inbound twin."""
+    with pytest.raises(ValidationError):
+        SkillCheckSpectateShotMessage(elapsed_ms=100.0, miss_count=0, won=False,
+                                      **{field: bad})
+
+
+@pytest.mark.parametrize(
+    "token",
+    [pytest.param("NaN", id="nan"), pytest.param("Infinity", id="inf"),
+     pytest.param("-Infinity", id="neg_inf")],
+)
+def test_skill_check_spectate_shot_rejects_non_finite_json_target(token):
+    """pydantic-core parses bare NaN/Infinity JSON tokens into floats, so the mirror
+    has to reject them on the model_validate_json path too -- the same hardening the
+    inbound shot already had."""
+    raw = ('{"type": "skill_check_spectate_shot", "elapsed_ms": 100.0, '
+           '"miss_count": 0, "won": false, "target_row": ' + token +
+           ', "target_col": 1.0}')
+    with pytest.raises(ValidationError):
+        SkillCheckSpectateShotMessage.model_validate_json(raw)
+
+
+@pytest.mark.parametrize("value", [0.0, 3.5, 7.999])
+def test_skill_check_spectate_shot_accepts_every_on_board_target(value):
+    """The bounds are the board itself: both edges of a real aim point stay legal,
+    so hardening the mirror cannot drop a shot the mover was allowed to fire."""
+    msg = SkillCheckSpectateShotMessage(elapsed_ms=100.0, miss_count=0, won=False,
+                                        target_row=value, target_col=value)
+    assert (msg.target_row, msg.target_col) == (value, value)
+
+
+def test_spectate_shot_target_bounds_match_the_movers_own_shot_bounds():
+    """Drift guard for the pair: whatever a mover is allowed to send as a target
+    is exactly what the mirror is allowed to relay. Tightening one side alone would
+    make the server unable to mirror a legal shot, or reopen the gap this closed."""
+    inbound = SkillCheckShotMessage.model_fields
+    mirror = SkillCheckSpectateShotMessage.model_fields
+    for name in ("target_row", "target_col"):
+        assert [str(m) for m in inbound[name].metadata] == \
+            [str(m) for m in mirror[name].metadata], \
+            f"{name} carries different constraints on the two halves of the pair"
 
 
 def test_pending_skillcheck_wire_carries_progress_and_captured_value():

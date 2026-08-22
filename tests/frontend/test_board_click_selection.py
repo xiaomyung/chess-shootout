@@ -5,6 +5,7 @@ forcing a second click. Existing premove chains stay queued across a focus
 switch — the chain belongs to its piece, not to the current selection.
 """
 
+import inspect
 from collections import Counter
 
 import pygame as pg
@@ -118,3 +119,18 @@ def test_click_then_chain_two_independent_pieces(board):
     moves = {(pm.from_sq, pm.to_sq) for pm in board.premoves}
     assert (Square(6, 4), Square(4, 4)) in moves
     assert (Square(6, 3), Square(4, 3)) in moves
+
+
+def test_focus_switch_predicate_takes_only_what_it_reads(board):
+    """The clicked square was passed in and never read.
+
+    _should_switch_focus_to decides from the current selection, the projected
+    grid and the live piece under the cursor -- the square itself was a leftover
+    that made the call site look as though it mattered. Calling positionally
+    with only the four values it uses pins the signature to its real inputs.
+    """
+    board.handle_click(Square(6, 4))
+    assert board._should_switch_focus_to(
+        board.match.state, board.match.piece_at(Square(6, 3)), PieceColor.WHITE, None)
+    assert list(inspect.signature(Board._should_switch_focus_to).parameters) == [
+        "self", "grid", "live_at_clicked", "current_turn", "local_color"]

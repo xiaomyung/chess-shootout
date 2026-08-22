@@ -26,7 +26,6 @@ import math
 import os
 import subprocess
 import sys
-from pathlib import Path
 
 import pytest
 
@@ -35,6 +34,7 @@ from chessshootout.backend.pieces import PIECE_VALUES, PieceType
 from chessshootout.skillcheck import mole, wheel
 from chessshootout.skillcheck.combo import COMBO_MAX_WRONGS
 from chessshootout.skillcheck.mole import MoleChallenge
+from tests.helpers import read_source_without_docstrings
 
 CAPTURE_SQ = (3, 3)
 OCCUPIED = {(3, 3), (4, 4)}
@@ -643,7 +643,7 @@ def test_occupied_squares_is_row_major_and_skips_empty_cells():
 
 def test_deadline_is_single_sourced_from_wheel():
     assert mole.SKILLCHECK_DEADLINE_MS is wheel.SKILLCHECK_DEADLINE_MS
-    assert "5000" not in Path(mole.__file__).read_text(encoding="utf-8"), \
+    assert "5000" not in read_source_without_docstrings(mole.__file__), \
         "mole.py must import the deadline, never restate the literal"
 
 

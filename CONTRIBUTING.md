@@ -33,6 +33,52 @@ If you do not agree to these terms, please do not submit a contribution. To
 record your agreement, state in your pull request that you have read and accept
 this file.
 
+## Docstrings and types
+
+Every def -- dunders, properties, nested closures -- and every class in
+`chessshootout/` (plus the shared test infra: `tests/helpers.py`, the root and
+server `conftest.py`, `tests/frontend/focus_helpers.py`) carries a reST
+docstring and a fully annotated signature. `tests/infra/test_docstring_guard.py`
+enforces the shape and `mypy` (strict, gated in CI) enforces the types, so a
+regression fails the build.
+
+The house shape:
+
+```python
+def my_fun(x: int, z: int | str, w: str | None = None) -> int:
+    """
+    Two or three plain-language sentences. Lead with what the function does
+    for the game or server -- its role in the project -- then the technical
+    contract. No trailing period on the last summary sentence
+
+    :param x: what it means, 1-2 sentences with units or ownership
+    :param z: same
+    :param w: same; say what None means
+    :returns: description only, no type; omit the line when returning None
+    """
+```
+
+- Opening `"""` on its own line; blank line between summary and fields; one
+  `:param name:` per parameter in exact signature order (skip `self`/`cls`,
+  `*args`/`**kwargs` under their plain names); `:returns:` present exactly when
+  the return annotation is neither `None` nor `NoReturn`; no `:raises:` or
+  other tags. Class docstrings carry no field lists -- constructor parameters
+  are documented on `__init__`.
+- Wrap docstring prose at ~80 columns (hard guard ceiling 92); ASCII plus at
+  most the arrows and check glyphs already used in the UI. No em dashes -- use
+  `--`.
+- Summaries must be immediately understandable and non-tautological:
+  ":param x: the x" is a review reject.
+- Annotations use PEP 604 unions (`int | str`, `X | None`) and builtin
+  generics; every parameter and an explicit return type on every def. Do not
+  add `from __future__ import annotations`.
+- **When you touch a function, re-verify its docstring and typehints still
+  match its behavior** -- a stale docstring is treated as a bug.
+- Comments remain banned in production code with exactly one exception:
+  `# type: ignore[code]`, always error-code-qualified (CI errors on bare
+  ignores), permitted only where a third-party library's typing forces it --
+  never to silence an error in our own code.
+
 ## Logging
 
 Every module gets its own `log = logging.getLogger(__name__)` (or the

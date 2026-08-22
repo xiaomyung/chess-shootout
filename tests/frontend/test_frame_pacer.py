@@ -27,6 +27,20 @@ def _pacer(target_fps=300, **kwargs):
     return pacer, ft
 
 
+@pytest.mark.parametrize("target_fps", [0, -60])
+def test_a_non_positive_rate_is_refused_at_construction(target_fps):
+    """A rate of zero blew up inside the constructor with ZeroDivisionError,
+    and a negative one built a pacer with a negative period that never sleeps.
+    Both are the caller's mistake, so both are named as one."""
+    with pytest.raises(ValueError):
+        FramePacer(target_fps)
+
+
+def test_a_positive_rate_builds_the_matching_period():
+    pacer, _ = _pacer(target_fps=120)
+    assert pacer.period == pytest.approx(1.0 / 120.0)
+
+
 def test_first_wait_sets_baseline_and_sleeps_one_period():
     pacer, ft = _pacer()
     pacer.wait()

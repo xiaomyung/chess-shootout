@@ -6,10 +6,9 @@ per-move deadline the time control allows. Difficulty is exactly the count:
 independent per-input odds compound as prob**count.
 """
 
-from pathlib import Path
-
 from chessshootout.skillcheck import combo, wheel
 from chessshootout.skillcheck.combo import ComboChallenge
+from tests.helpers import read_source_without_docstrings
 
 
 def test_from_seed_is_deterministic():
@@ -125,7 +124,7 @@ def test_wrongs_exhausted_boundaries():
 
 def test_deadline_ms_is_single_sourced_from_wheel():
     # No 5000 literal may live in combo.py; the deadline is imported, not restated.
-    assert "5000" not in Path(combo.__file__).read_text(encoding="utf-8")
+    assert "5000" not in read_source_without_docstrings(combo.__file__)
     assert combo.SKILLCHECK_DEADLINE_MS is wheel.SKILLCHECK_DEADLINE_MS
 
 

@@ -1,7 +1,13 @@
-from typing import NamedTuple, Optional
+from collections.abc import Callable, Sequence
+from typing import Any, NamedTuple, cast
 
 import pygame as pg
 
+from chessshootout.backend.backend import Backend
+from chessshootout.backend.utils import HistoryEntry
+from chessshootout.domain.match import Match
+from chessshootout.frontend.audio.sound_manager import SoundManager
+from chessshootout.frontend.board import Board
 from chessshootout.frontend.visual.colors import Colors
 from chessshootout.infra import env
 from chessshootout.domain.pgn.generate import iter_move_pairs
@@ -20,6 +26,12 @@ from chessshootout.frontend.visual.cache import render_text, new_cache, memoized
 
 
 class Cap(NamedTuple):
+    """
+    One button in the rail's ACTIONS row -- undo, resign, flip and the rest.
+    The tables below are the single description of what a button looks like
+    and what its tooltip says; the screens only choose which table to use
+    """
+
     key: str
     icon: str
     glyph: str
@@ -59,10 +71,19 @@ _GLYPH_SPECS = {
     for table in (CAPS, UNTIMED_CAPS, REVIEW_CAPS) for cap in table if cap.glyph
 }
 
-SECTION_OPEN = {}
+SECTION_OPEN: dict[str, bool] = {}
 
 
-def section_open(key):
+def section_open(key: str) -> bool:
+    """
+    Say whether one rail section is expanded, reading the player's stored
+    preference the first time it is asked and remembering it afterwards. The
+    answer is shared by every rail on screen, so the game and review rails
+    always agree on which sections are open
+
+    :param key: section name, one of actions, signals or chat
+    :returns: True when that section should draw its body
+    """
     if key not in SECTION_OPEN:
         SECTION_OPEN[key] = env.get_rail_section_open(key)
     return SECTION_OPEN[key]
@@ -154,13 +175,20 @@ _WHIFF_CACHE = new_cache()
 
 
 class SignalChip(NamedTuple):
+    """
+    One toggle in the rail's SIGNALS row -- share marks, hide marks,
+    auto-queen, sound. The chip only draws and reports clicks: it reads its on
+    or off state out of the screen's signals provider and fires the callback
+    of that name, so the screen owns what the toggle actually means
+    """
+
     key: str
     label: str
     on_color: str
     state_key: str
     callback: str
     tooltip: str
-    enabled_key: Optional[str] = None
+    enabled_key: str | None = None
 
 
 SIGNAL_CHIPS = [
@@ -178,6 +206,12 @@ SIGNAL_VOL_TOOLTIP = "VOLUME — CLICK A NOTCH; FIRST NOTCH TOGGLES 0%"
 
 
 class SectionBlock(NamedTuple):
+    """
+    Where one collapsible section of the rail ended up in this layout: its
+    divider, its clickable header and the body underneath. A collapsed section
+    keeps its header and divider and simply draws no body
+    """
+
     key: str
     divider_y: int
     header: pg.Rect
@@ -186,22 +220,60 @@ class SectionBlock(NamedTuple):
 
 
 class RailTooltip:
+    """
+    The one tooltip the rail shows at a time, explaining whatever the cursor
+    is resting on -- a button, a chip, a section header, a chat preset. Every
+    hoverable thing registers itself while the rail draws, and this picks the
+    one under the cursor, waits out a short delay and fades the bubble in
+    """
 
-    def __init__(self):
-        self.entries = []
-        self._hover_key = None
+    def __init__(self) -> None:
+        """
+        Start with nothing registered and nothing hovered. One tooltip belongs
+        to each rail and lives as long as it does
+        """
+        self.entries: list[tuple[tuple[str, str | int], pg.Rect, str]] = []
+        self._hover_key: tuple[str, str | int] | None = None
         self._hover_since = 0
         self._mouse = (0, 0)
         self._cache = new_cache()
 
-    def begin_frame(self):
+    def begin_frame(self) -> None:
+        """
+        Forget last frame's hoverable areas and take one reading of the cursor
+        for this one, so everything the rail draws is tested against the same
+        position. The rail calls this before it draws its sections
+        """
         self.entries.clear()
         self._mouse = pg.mouse.get_pos()
 
-    def register(self, key, rect, label):
+    def register(self, key: tuple[str, str | int], rect: pg.Rect, label: str) -> None:
+        """
+        Offer one area as hoverable while the rail draws it. Registration
+        order is the priority order, so the first area under the cursor wins
+
+        :param key: identity of this area, such as ("cap", "resign"); a change
+            of key is what restarts the hover delay
+        :param rect: the hoverable area in window pixels
+        :param label: tooltip text to show for it
+        """
         self.entries.append((key, pg.Rect(rect), label))
 
-    def draw(self, window, clip_rect, scale, now, font):
+    def draw(self, window: pg.Surface, clip_rect: pg.Rect, scale: float, now: int,
+             font: pg.font.Font) -> None:
+        """
+        Show the bubble for whatever the cursor is on, once it has rested
+        there long enough to mean it, then fade it in. Moving to a different
+        control restarts the wait, so sweeping across the rail never trails a
+        string of tooltips
+
+        :param window: surface the bubble is drawn onto
+        :param clip_rect: the rail's area, which the bubble is kept inside
+        :param scale: the layout's global scale factor
+        :param now: pygame tick count in milliseconds, which times the delay
+            and the fade
+        :param font: font the tooltip text is rendered in
+        """
         hovered = None
         for key, rect, label in self.entries:
             if rect.collidepoint(self._mouse):
@@ -223,12 +295,33 @@ class RailTooltip:
         bubble.set_alpha(int(255 * alpha))
         window.blit(bubble, self._position(bubble, rect, clip_rect))
 
-    def _bubble(self, label, scale, font):
+    def _bubble(self, label: str, scale: float, font: pg.font.Font) -> pg.Surface:
+        """
+        Fetch the drawn bubble for one label, built once and then reused, so
+        hovering does not rebuild the same surface every frame
+
+        :param label: tooltip text
+        :param scale: the layout's global scale factor, which sizes the
+            padding
+        :param font: font the text is rendered in
+        :returns: the bubble surface for that label
+        """
         key = (label, font.get_height())
         return memoized_surface(
             self._cache, key, lambda: build_tooltip_bubble(font, label, scale))
 
-    def _position(self, bubble, rect, clip_rect):
+    def _position(self, bubble: pg.Surface, rect: pg.Rect,
+                  clip_rect: pg.Rect) -> tuple[int, int]:
+        """
+        Place the bubble above the control it describes, dropping it
+        underneath when there is no room over it and nudging it sideways to
+        stay within the rail
+
+        :param bubble: the bubble being placed, read for its size
+        :param rect: the hovered control's area in window pixels
+        :param clip_rect: the rail's area, which the bubble is kept inside
+        :returns: the bubble's top-left corner in window pixels
+        """
         w, h = bubble.get_size()
         x = max(clip_rect.left, min(rect.centerx - w // 2, clip_rect.right - w))
         y = rect.top - h - TOOLTIP_GAP
@@ -238,14 +331,62 @@ class RailTooltip:
 
 
 class RightMenu:
+    """
+    The command rail down the right-hand side of the board: the game header,
+    the scrolling shot log of moves played, and the collapsible ACTIONS,
+    SIGNALS and QUICK CHAT sections. It reads the game through the match it
+    was given and asks its owning screen for everything else through
+    providers, so the same rail serves a live game and a PGN review
+    """
 
-    def __init__(self, window, match, callbacks, board=None,
-                 buttons_provider=None,
-                 disabled_keys_provider=None, whiffs_provider=None,
-                 debut_provider=None, signals_provider=None,
-                 sounds=None, chat_visible_provider=None,
-                 chat_presets_provider=None, chat_cooldown_provider=None,
-                 caps_stacked=False, suppress_click=None):
+    def __init__(self, window: pg.Surface, match: Match,
+                 callbacks: dict[str, Callable[..., None]], board: Board | None = None,
+                 buttons_provider: Callable[[], list[Cap]] | None = None,
+                 disabled_keys_provider: Callable[[], set[str]] | None = None,
+                 whiffs_provider: Callable[[], dict[int, list[tuple[str, str]]]] | None = None,
+                 debut_provider: Callable[[], tuple[str, str] | None] | None = None,
+                 signals_provider: Callable[[], dict[str, Any]] | None = None,
+                 sounds: SoundManager | None = None,
+                 chat_visible_provider: Callable[[], bool] | None = None,
+                 chat_presets_provider: Callable[[], Sequence[str]] | None = None,
+                 chat_cooldown_provider: Callable[[], bool] | None = None,
+                 caps_stacked: bool = False,
+                 suppress_click: Callable[[], None] | None = None) -> None:
+        """
+        Build a rail for one screen and wire it to that screen's game. Each
+        provider is asked afresh every frame, so the rail never holds a stale
+        copy of the game's state, and every provider left out falls back to a
+        harmless empty answer -- which is how the review rail ends up with no
+        signals, no chat and no disabled buttons
+
+        :param window: the app window the rail paints into
+        :param match: the game the header and the move list are read from
+        :param callbacks: button key to what pressing it does, keyed by the
+            same names the button and chip tables use
+        :param board: board the move list drives when a move is clicked, and
+            reads the browsed ply back from; None leaves the log read-only
+        :param buttons_provider: which action buttons to show this frame,
+            defaulting to the full in-game set
+        :param disabled_keys_provider: which of those buttons are greyed out
+            right now, such as give-time during its cooldown
+        :param whiffs_provider: missed skill checks by ply, drawn struck
+            through under the move they were attempted on
+        :param debut_provider: the ECO code and opening name to print under
+            the log header, or None when there is no named opening
+        :param signals_provider: state of every toggle in the SIGNALS section
+            plus the volume; None hides the whole section
+        :param sounds: sound manager for the rail's own clicks, None for a
+            silent rail
+        :param chat_visible_provider: whether the QUICK CHAT section exists at
+            all, which it does only in an online game
+        :param chat_presets_provider: the canned phrases to offer as buttons
+        :param chat_cooldown_provider: whether chat is resting, which dims the
+            buttons and swallows their clicks
+        :param caps_stacked: True to stack full-width labelled buttons, as the
+            review rail does, instead of one row of icons
+        :param suppress_click: called when the rail has handled a click, so
+            the shell does not also play its generic UI click
+        """
         self.window = window
         self.match = match
         self.callbacks = callbacks
@@ -261,7 +402,7 @@ class RightMenu:
         self.chat_presets_provider = chat_presets_provider or (lambda: [])
         self.chat_cooldown_provider = chat_cooldown_provider or (lambda: False)
         self.caps_stacked = caps_stacked
-        self._pair_to_row = {}
+        self._pair_to_row: dict[int, int] = {}
         self._marquee_off = 0.0
 
         self.padding = 10
@@ -289,18 +430,18 @@ class RightMenu:
         self.outer_rect = pg.Rect(0, 0, 0, 0)
         self.moves_rect = pg.Rect(0, 0, 0, 0)
         self.info_rect = pg.Rect(0, 0, 0, 0)
-        self.button_rects = {}
-        self._section_blocks = []
-        self._cap_draws = []
-        self._signal_chips = []
-        self._chat_buttons = []
+        self.button_rects: dict[str, pg.Rect] = {}
+        self._section_blocks: list[SectionBlock] = []
+        self._cap_draws: list[tuple[Cap, pg.Rect]] = []
+        self._signal_chips: list[tuple[SignalChip, pg.Rect]] = []
+        self._chat_buttons: list[tuple[int, pg.Rect]] = []
         self._signal_vol_rect = pg.Rect(0, 0, 0, 0)
         self._signal_notch_band = pg.Rect(0, 0, 0, 0)
         self._signal_notch_step = 1
-        self._chevron_anim = {}
+        self._chevron_anim: dict[str, tuple[int, float, float]] = {}
         self.rail_tooltip = RailTooltip()
-        self.game_info = None
-        self._last_outer_rect = None
+        self.game_info: dict[str, Any] | None = None
+        self._last_outer_rect: pg.Rect | None = None
 
         self.scroll_offset = 0
         self._total_rows = 0
@@ -314,30 +455,78 @@ class RightMenu:
             lambda: (self._moves_viewport, self._content_px),
             wheel_step_px=lambda: self._line_h,
         )
-        self._move_cell_hits = []
+        self._move_cell_hits: list[tuple[pg.Rect, int]] = []
         self._last_seen_total_rows = 0
-        self._last_review_ply = None
-        self._move_rows_cache = None
+        self._last_review_ply: int | None = None
+        self._move_rows_cache: tuple[
+            tuple[int, tuple[tuple[int, int], ...]],
+            list[tuple[Any, ...]], dict[int, int]] | None = None
 
     @property
-    def backend(self):
-        return getattr(self.match, "backend", self.match)
+    def backend(self) -> Backend:
+        """
+        The chess engine behind whatever the rail was handed, which is a Match
+        in the app and a bare engine in tests
 
-    def _max_off_rows(self):
+        :returns: the engine driving this rail's game
+        """
+        return cast(Backend, getattr(self.match, "backend", self.match))
+
+    def _max_off_rows(self) -> int:
+        """
+        How far back the move list can be scrolled, counted in rows above the
+        bottom. A log shorter than the viewport cannot scroll at all
+
+        :returns: the largest allowed scroll offset in rows
+        """
         return max(0, self._total_rows - self._max_lines)
 
-    def _get_scroll_px(self):
+    def _get_scroll_px(self) -> int:
+        """
+        Translate the rail's row-based scroll position into the pixels-from-
+        the-top the shared scroll view works in. The move list counts rows up
+        from the newest move, which is the opposite direction
+
+        :returns: distance from the top of the log in pixels
+        """
         return (self._max_off_rows() - self.scroll_offset) * self._line_h
 
-    def _set_scroll_px(self, px):
+    def _set_scroll_px(self, px: float) -> None:
+        """
+        Adopt a scroll position the shared scroll view has worked out, turning
+        pixels from the top back into whole rows up from the newest move and
+        clamping it to the log
+
+        :param px: distance from the top of the log in pixels
+        """
         rows_from_top = round(px / self._line_h) if self._line_h else 0
         self.scroll_offset = max(0, min(self._max_off_rows() - rows_from_top,
                                         self._max_off_rows()))
 
-    def is_visible(self):
+    def is_visible(self) -> bool:
+        """
+        Whether the rail is on screen, which the input router asks before
+        sending it a scroll or a click. The rail is always showing while its
+        screen is -- focus mode drops it by not drawing the screen's panel at
+        all rather than by hiding it here
+
+        :returns: True, always
+        """
         return True
 
-    def set_rect(self, rect, scale=1.0):
+    def set_rect(self, rect: pg.Rect, scale: float = 1.0) -> None:
+        """
+        Lay the whole rail out for a new window size: rebuild every font at
+        the new scale, float the card inside the space it was given, then
+        stack the sections up from the bottom and give the move log whatever
+        height is left over. Called on every layout pass and again whenever a
+        section is expanded or collapsed
+
+        :param rect: the area the layout reserved for the rail, in window
+            pixels
+        :param scale: the layout's global scale factor, 1.0 at the reference
+            window size
+        """
         self.scale = scale
         self.font = get_font(max(int(rect.width / self.moves_font_factor), 10), mono=True)
         self.moves_font = get_font(
@@ -385,7 +574,16 @@ class RightMenu:
                       scale_floor(LOG_MIN_H, scale, 70))
         self.moves_rect = pg.Rect(self.outer_rect.x + p, moves_top, inner_w, moves_h)
 
-    def _layout_sections(self, inner_w):
+    def _layout_sections(self, inner_w: int) -> int:
+        """
+        Stack the rail's sections against the bottom of the card and place
+        everything inside the open ones -- buttons, chips, chat grid. It also
+        rebuilds the clickable button rects, so a button is only ever
+        clickable where it was actually drawn
+
+        :param inner_w: width available inside the card, in pixels
+        :returns: the top of the stack, which is where the move log has to end
+        """
         scale = self.scale
         p = self.padding
         div_top = scale_floor(SECTION_DIVIDER_TOP, scale, 4)
@@ -427,12 +625,27 @@ class RightMenu:
             y += block_h
         return stack_top
 
-    def _visible_sections(self):
+    def _visible_sections(self) -> list[str]:
+        """
+        Which sections this rail carries, in the order they stack. Quick chat
+        only exists in an online game, so off the wire the rail is two
+        sections rather than three
+
+        :returns: section names, topmost first
+        """
         if self.chat_visible_provider():
             return list(SECTION_ORDER)
         return [key for key in SECTION_ORDER if key != "chat"]
 
-    def _section_body_height(self, key):
+    def _section_body_height(self, key: str) -> int:
+        """
+        How tall one section's body is in this layout. A collapsed section --
+        or one whose provider has nothing to offer -- measures zero, which is
+        what shrinks the stack and hands the space to the move log
+
+        :param key: section name, one of actions, signals or chat
+        :returns: body height in pixels, 0 when the section shows no body
+        """
         if not section_open(key):
             return 0
         if key == "actions":
@@ -443,7 +656,14 @@ class RightMenu:
             return self._chat_body_height()
         return 0
 
-    def _actions_body_height(self):
+    def _actions_body_height(self) -> int:
+        """
+        How much room the action buttons need: one icon row in a game, or a
+        full-width labelled row per button on the review rail
+
+        :returns: height of the ACTIONS body in pixels, 0 when the screen
+            offers no buttons
+        """
         caps = self.buttons_provider()
         if not caps:
             return 0
@@ -454,7 +674,14 @@ class RightMenu:
             return body_top + len(caps) * cap_h + (len(caps) - 1) * gap
         return body_top + scale_floor(CAP_H_GAME, self.scale, 30)
 
-    def _signals_body_height(self):
+    def _signals_body_height(self) -> int:
+        """
+        How much room the signals need: one row of toggle chips over the
+        volume notches
+
+        :returns: height of the SIGNALS body in pixels, 0 when the screen has
+            no signals to show
+        """
         if self.signals_provider is None:
             return 0
         body_top = scale_floor(SECTION_BODY_TOP, self.scale, 4)
@@ -463,7 +690,14 @@ class RightMenu:
         vol_h = scale_floor(SIGNAL_NOTCH_CELL_H, self.scale, 14)
         return body_top + chip_h + gap + vol_h
 
-    def _chat_body_height(self):
+    def _chat_body_height(self) -> int:
+        """
+        How much room the quick-chat grid needs, from the number of phrases
+        laid out two to a row
+
+        :returns: height of the QUICK CHAT body in pixels, 0 when there are no
+            phrases
+        """
         presets = self.chat_presets_provider()
         if not presets:
             return 0
@@ -473,8 +707,17 @@ class RightMenu:
         rows = -(-len(presets) // CHAT_COLS)
         return body_top + rows * btn_h + (rows - 1) * gap
 
-    def _layout_caps(self, caps, body):
-        result = []
+    def _layout_caps(self, caps: list[Cap], body: pg.Rect) -> list[tuple[Cap, pg.Rect]]:
+        """
+        Place the action buttons inside the ACTIONS body -- one full-width row
+        each when they are stacked, otherwise share the width evenly across a
+        single row of icons
+
+        :param caps: the buttons to place, in the order they were offered
+        :param body: the section body they go inside, in window pixels
+        :returns: each button paired with the rect it occupies
+        """
+        result: list[tuple[Cap, pg.Rect]] = []
         if not caps:
             return result
         gap = scale_floor(CAP_GAP, self.scale, 5)
@@ -494,8 +737,16 @@ class RightMenu:
             x += cap_w + gap
         return result
 
-    def _layout_signals(self, body):
-        chips = REVIEW_SIGNAL_CHIPS if self.signals_provider()["review"] else SIGNAL_CHIPS
+    def _layout_signals(self, body: pg.Rect) -> None:
+        """
+        Place the toggle chips and the volume notches inside the SIGNALS body.
+        A review rail carries only the sound chip, since none of the others
+        mean anything with no game running
+
+        :param body: the section body they go inside, in window pixels
+        """
+        provider = cast(Callable[[], dict[str, Any]], self.signals_provider)
+        chips = REVIEW_SIGNAL_CHIPS if provider()["review"] else SIGNAL_CHIPS
         body_top = scale_floor(SECTION_BODY_TOP, self.scale, 4)
         chip_h = scale_floor(SIGNAL_CHIP_H, self.scale, 20)
         gap = scale_floor(SIGNAL_CHIP_GAP, self.scale, 4)
@@ -513,7 +764,14 @@ class RightMenu:
         self._signal_notch_step = cell_w + notch_gap
         self._signal_notch_band = pg.Rect(body.x + x0, vol_top, total, vol_h)
 
-    def _layout_chat(self, body):
+    def _layout_chat(self, body: pg.Rect) -> None:
+        """
+        Place the quick-chat phrases as a two-column grid inside the QUICK
+        CHAT body, remembering each button by the index of its phrase, which
+        is what travels to the opponent when it is pressed
+
+        :param body: the section body the grid goes inside, in window pixels
+        """
         presets = self.chat_presets_provider()
         self._chat_buttons = []
         if not presets:
@@ -530,7 +788,16 @@ class RightMenu:
             self._chat_buttons.append(
                 (index, pg.Rect(round(x), round(y), round(btn_w), btn_h)))
 
-    def _vol_geometry(self, width):
+    def _vol_geometry(self, width: int) -> tuple[int, int, int, int]:
+        """
+        Measure the volume row: where the notches start and how big each one
+        is, given the fixed slot the percentage readout always occupies. That
+        fixed slot is why the notches never shift as the number changes
+
+        :param width: width of the volume row in pixels
+        :returns: the first notch's x offset, one notch's width, the gap
+            between notches and the whole band's width
+        """
         cell_w = scale_floor(SIGNAL_NOTCH_CELL_W, self.scale, 8)
         gap = scale_floor(SIGNAL_NOTCH_GAP, self.scale, 2)
         slot_w = notch_readout_slot_w(self.signal_num_font)
@@ -538,22 +805,47 @@ class RightMenu:
         x0, total = notch_geometry(width, SIGNAL_NOTCH_COUNT, cell_w, gap, slot_w, readout_gap)
         return x0, cell_w, gap, total
 
-    def _info_section_height(self):
+    def _info_section_height(self) -> int:
+        """
+        How tall the header block above the move log is, from its pill row
+        plus however many lines of game info the screen supplied
+
+        :returns: header height in pixels, 0 when there is no game info
+        """
         if self.game_info is None:
             return 0
         header_h = self.pill_font.get_height() + INFO_HEADER_PAD
         lines = self.game_info.get("lines", [])
         return header_h + self._info_line_height() * len(lines) + self.padding
 
-    def _info_line_height(self):
+    def _info_line_height(self) -> int:
+        """
+        Line spacing for the header's info lines, such as the series score
+
+        :returns: one line's height in pixels
+        """
         return self.font.get_linesize() + 2
 
-    def set_game_info(self, info):
+    def set_game_info(self, info: dict[str, Any] | None) -> None:
+        """
+        Adopt the header block the screen built -- variant pill, time control,
+        round number and any extra lines -- and lay the rail out again, since
+        a header of a different height moves the move log. Passing None clears
+        the header, which is what unbinding a game from an online session does
+
+        :param info: header block with mode, time_control, round and lines, or
+            None for no header at all
+        """
         self.game_info = info
         if self._last_outer_rect is not None:
             self.set_rect(self._last_outer_rect, self.scale)
 
-    def reset_for_new_game(self):
+    def reset_for_new_game(self) -> None:
+        """
+        Wipe everything the rail remembered about the game just finished --
+        scroll position, row cache, browse position and the opening marquee --
+        so a new game starts at the top of an empty log
+        """
         self.scroll_offset = 0
         self._total_rows = 0
         self._last_seen_total_rows = 0
@@ -563,7 +855,13 @@ class RightMenu:
         self._marquee_off = 0.0
         self._move_rows_cache = None
 
-    def draw_menu(self):
+    def draw_menu(self) -> None:
+        """
+        Paint the whole rail for this frame -- card, header, move log, scroll
+        thumb and the sections underneath -- with everything clipped to the
+        card so a long line never spills onto the board. This is also the
+        frame that advances any scroll fling still in flight
+        """
         self.scroll.tick()
         prev_clip = self.window.get_clip()
         self.window.set_clip(self.outer_rect)
@@ -583,8 +881,16 @@ class RightMenu:
         self._draw_sections()
         self.window.set_clip(prev_clip)
 
-    def _draw_game_info(self, rect):
-        info = self.game_info
+    def _draw_game_info(self, rect: pg.Rect) -> None:
+        """
+        Draw the header above the move log: the variant pill, the time
+        control, the round number over on the right, and any extra lines such
+        as the online series score. A line too wide for the card is cut off
+        rather than wrapped
+
+        :param rect: the header's area in window pixels
+        """
+        info = cast(dict[str, Any], self.game_info)
         header_h = self.pill_font.get_height() + INFO_HEADER_PAD
         cx = rect.x
         cy = rect.y + header_h // 2
@@ -614,10 +920,29 @@ class RightMenu:
                 surf = surf.subsurface(pg.Rect(0, 0, max_w, surf.get_height()))
             self.window.blit(surf, (rect.x, rect.y + header_h + i * line_h))
 
-    def _draw_mode_pill(self, text, x, cy):
+    def _draw_mode_pill(self, text: str, x: int, cy: int) -> int:
+        """
+        Draw the little pill naming what kind of game this is -- Local, Online
+        or Review -- at the left of the header
+
+        :param text: pill text, already in capitals
+        :param x: left edge of the pill in window pixels
+        :param cy: vertical centre of the header row
+        :returns: the x to carry on from, just past the pill
+        """
         return draw_pill(self.window, text, x, cy, self.pill_font)
 
-    def handle_click(self, pos):
+    def handle_click(self, pos: tuple[int, int]) -> bool:
+        """
+        Route a click that landed on the rail. Action buttons come first, then
+        the signal chips and volume, the chat buttons, the section headers,
+        and last the move list, where clicking a move jumps the board to that
+        ply. A disabled button still swallows its click, so a greyed-out
+        control never falls through to whatever is behind it
+
+        :param pos: click position in window pixels
+        :returns: True when the rail consumed the click
+        """
         disabled = self.disabled_keys_provider()
         for key, rect in self.button_rects.items():
             if rect.collidepoint(pos):
@@ -650,28 +975,83 @@ class RightMenu:
             return True
         return False
 
-    def handle_scroll(self, pos, dy):
+    def handle_scroll(self, pos: tuple[int, int], dy: int) -> bool:
+        """
+        Scroll the move log by a wheel notch, ignored when the pointer is not
+        over the log or the log is short enough to fit
+
+        :param pos: cursor position in window pixels
+        :param dy: wheel notches, positive scrolling back through the game
+        :returns: True when the log took the scroll
+        """
         return self.scroll.handle_wheel(pos, dy)
 
-    def handle_press(self, pos):
+    def handle_press(self, pos: tuple[int, int]) -> bool:
+        """
+        Begin a drag-scroll of the move log, either by grabbing the scroll
+        thumb or by dragging the list itself
+
+        :param pos: press position in window pixels
+        :returns: True when the log took the press, which makes the rail the
+            shell's scroll target until release
+        """
         return self.scroll.handle_press(pos) is not None
 
-    def handle_motion(self, pos):
+    def handle_motion(self, pos: tuple[int, int]) -> bool:
+        """
+        Carry a drag-scroll of the move log along with the cursor, which also
+        samples the speed a fling would carry on with
+
+        :param pos: cursor position in window pixels
+        :returns: True while a drag-scroll is in flight
+        """
         return self.scroll.handle_motion(pos)
 
-    def handle_release(self, pos):
+    def handle_release(self, pos: tuple[int, int]) -> bool:
+        """
+        End a drag-scroll, letting a fast drag fling on under its own
+        momentum. Answering False tells the shell the press never became a
+        drag, so it should be treated as a plain click on the rail
+
+        :param pos: release position in window pixels
+        :returns: True when the press had actually dragged
+        """
         return self.scroll.handle_release()
 
-    def _move_rows(self, history, whiffs):
+    def _move_rows(self, history: list[HistoryEntry],
+                   whiffs: dict[int, list[tuple[str, str]]]) -> list[tuple[Any, ...]]:
+        """
+        Build the rows of the shot log -- one per numbered move plus a row for
+        each missed shot underneath it -- and keep them until the game or the
+        misses change, since they are needed on every frame
+
+        :param history: plies in play order
+        :param whiffs: missed skill checks by ply
+        :returns: the log's rows, ready to draw top to bottom
+        """
         key = (len(history), tuple(sorted((ply, len(v)) for ply, v in whiffs.items())))
         if self._move_rows_cache is None or self._move_rows_cache[0] != key:
             self._move_rows_cache = (key, *self._build_move_rows(history, whiffs))
         self._pair_to_row = self._move_rows_cache[2]
         return self._move_rows_cache[1]
 
-    def _build_move_rows(self, history, whiffs):
-        rows = []
-        pair_to_row = {}
+    def _build_move_rows(self, history: list[HistoryEntry],
+                         whiffs: dict[int, list[tuple[str, str]]]) -> tuple[
+                             list[tuple[Any, ...]], dict[int, int]]:
+        """
+        Walk the game one numbered move at a time and turn it into log rows: a
+        pair row carrying White's and Black's moves, then one row for each
+        round of misses either of them shot on that move. It also notes which
+        row each move landed on, which is how browsing to a ply can scroll
+        that move into view
+
+        :param history: plies in play order
+        :param whiffs: missed skill checks by ply
+        :returns: the rows to draw and, for each move number, the row it
+            starts on
+        """
+        rows: list[tuple[Any, ...]] = []
+        pair_to_row: dict[int, int] = {}
         for pair_idx, (number, white_entry, black_entry) in enumerate(iter_move_pairs(history)):
             pair_to_row[pair_idx] = len(rows)
             rows.append(("pair", pair_idx, number, white_entry, black_entry))
@@ -686,7 +1066,15 @@ class RightMenu:
                     black_whiffs[k] if k < len(black_whiffs) else None))
         return rows, pair_to_row
 
-    def _draw_log_header(self, rect):
+    def _draw_log_header(self, rect: pg.Rect) -> int:
+        """
+        Draw the top of the shot log: the SHOT LOG label, the live ply count,
+        the opening being played and the dashed rule under them
+
+        :param rect: the move log's area in window pixels
+        :returns: how far down the log the move rows may start, in pixels from
+            its top
+        """
         pad = self.padding
         label = render_text(self.micro_font, "SHOT LOG", Colors.text_muted)
         count = render_text(self.micro_font, f"{len(self.match.move_history)} PLY",
@@ -706,7 +1094,17 @@ class RightMenu:
                          (rect.x + pad, sep_y))
         return sep_y + scale_floor(LOG_ROWS_GAP, self.scale, 4) - rect.y
 
-    def _draw_debut_row(self, rect, debut, y):
+    def _draw_debut_row(self, rect: pg.Rect, debut: tuple[str, str], y: int) -> int:
+        """
+        Print the name of the opening under the log header. A name too long
+        for the rail scrolls sideways while the cursor rests on it, easing
+        back when the cursor leaves, so a long line can still be read in full
+
+        :param rect: the move log's area in window pixels
+        :param debut: the ECO code and the opening's name
+        :param y: top of the row in window pixels
+        :returns: the y just below the row
+        """
         pad = self.padding
         _, name = debut
         name_surf = render_text(self.debut_name_font, name.upper(), Colors.text_dim)
@@ -732,7 +1130,15 @@ class RightMenu:
         self.window.set_clip(prev_clip)
         return y + row_h
 
-    def _draw_moves(self, rect):
+    def _draw_moves(self, rect: pg.Rect) -> None:
+        """
+        Draw the move list itself and keep its scrolling honest. A player who
+        has scrolled back stays put as new moves arrive rather than being
+        yanked to the bottom, browsing to a ply scrolls that move into view,
+        and every move cell drawn is remembered so it can be clicked
+
+        :param rect: the move log's area in window pixels
+        """
         header_h = self._draw_log_header(rect)
         history = self.match.move_history
         line_h = self.moves_font.get_linesize() + 6
@@ -795,18 +1201,44 @@ class RightMenu:
             if black_entry is not None:
                 black_cell = pg.Rect(black_x, row_y, cell_w, line_h)
                 self._draw_move_cell(black_cell, black_entry, active_ply == black_ply)
-                self._move_cell_hits.append((black_cell, black_ply))
+                self._move_cell_hits.append((black_cell, cast(int, black_ply)))
 
-    def _whiff_surface(self, san):
+    def _whiff_surface(self, san: str) -> pg.Surface:
+        """
+        Render the move a player fluffed in the loss colour, faded back so a
+        miss reads as an also-ran beside the move that actually landed
+
+        :param san: the attempted move in algebraic notation
+        :returns: the shared surface for that missed move
+        """
         key = (san, self.moves_font.get_height())
 
-        def build():
+        def build() -> pg.Surface:
+            """
+            Draw the missed move the first time this one is asked for
+
+            :returns: the faded loss-coloured move text
+            """
             surf = self.moves_font.render(san, True, pg.Color(Colors.loss))
             surf.set_alpha(WHIFF_ALPHA)
             return surf
         return memoized_surface(_WHIFF_CACHE, key, build)
 
-    def _draw_whiff(self, x, y, w, line_h, whiff):
+    def _draw_whiff(self, x: int, y: int, w: int, line_h: int,
+                    whiff: tuple[str, str] | None) -> None:
+        """
+        Draw one missed shot in the move list, struck through, so the log
+        keeps a record of the captures that were attempted and lost as well as
+        the moves that were played. Half of a whiff row is often empty,
+        because the two players rarely miss on the same move
+
+        :param x: left edge of the cell in window pixels
+        :param y: top of the row in window pixels
+        :param w: cell width in pixels, which the text is cropped to
+        :param line_h: row height in pixels
+        :param whiff: the check label and the move that was missed, or None
+            for an empty half of the row
+        """
         if whiff is None:
             return
         surf = self._whiff_surface(whiff[1])
@@ -821,7 +1253,13 @@ class RightMenu:
         pg.draw.line(self.window, pg.Color(Colors.loss),
                      (x + 4, strike_y), (x + 4 + draw_w, strike_y), 1)
 
-    def _reveal_active_ply_on_nav(self):
+    def _reveal_active_ply_on_nav(self) -> None:
+        """
+        Scroll the move the player has just browsed to into view, and only
+        then -- a browse position that has not moved leaves the log where the
+        player put it, so scrolling back through a finished game is not undone
+        every frame
+        """
         review_ply = self.board.review_ply if self.board is not None else None
         if review_ply == self._last_review_ply:
             return
@@ -832,7 +1270,16 @@ class RightMenu:
         self.scroll_offset = self._scroll_offset_to_show_row(
             self._pair_to_row.get(pair_idx, pair_idx))
 
-    def _draw_move_cell(self, rect, entry, active):
+    def _draw_move_cell(self, rect: pg.Rect, entry: HistoryEntry, active: bool) -> None:
+        """
+        Draw one move in the log, framed and brightened when it is the move
+        the board is currently showing. The notation is the SAN the engine
+        built when the move was played, never worked out again here
+
+        :param rect: the cell's area in window pixels
+        :param entry: the ply being drawn
+        :param active: True when the board is standing on this move
+        """
         if active:
             self.window.blit(
                 cut_rect_surface(rect.size, scale_floor(MOVE_CELL_CUT, self.scale, 5),
@@ -843,12 +1290,27 @@ class RightMenu:
         surf = render_text(self.moves_font, entry.san, color)
         self.window.blit(surf, (rect.x + 4, rect.centery - surf.get_height() / 2))
 
-    def _active_ply(self, history_len):
+    def _active_ply(self, history_len: int) -> int:
+        """
+        Which move the log should highlight: the one being browsed while the
+        player is looking back, otherwise the latest move played
+
+        :param history_len: number of plies played so far
+        :returns: the ply to highlight, 0 meaning the starting position
+        """
         if self.board is not None and self.board.review_ply is not None:
             return self.board.review_ply
         return history_len
 
-    def _scroll_offset_to_show_row(self, row_idx):
+    def _scroll_offset_to_show_row(self, row_idx: int) -> int:
+        """
+        Work out the smallest scroll move that brings one row of the log into
+        view, pulling it to the bottom edge when it is below the window and to
+        the top when it is above. A row already showing is left where it is
+
+        :param row_idx: index of the row that has to be visible
+        :returns: the scroll offset to use, in rows up from the newest move
+        """
         if self._max_lines <= 0:
             return self.scroll_offset
         max_offset = max(0, self._total_rows - self._max_lines)
@@ -863,7 +1325,15 @@ class RightMenu:
         new_offset = self._total_rows - new_end
         return max(0, min(new_offset, max_offset))
 
-    def toggle_section(self, key):
+    def toggle_section(self, key: str) -> None:
+        """
+        Expand or collapse one rail section, from its header or its hotkey.
+        The choice is stored for next time and shared with every other rail,
+        the chevron spins from where it currently stands, and the rail is laid
+        out again because the move log grows or shrinks with it
+
+        :param key: section name, one of actions, signals or chat
+        """
         now = pg.time.get_ticks()
         cur = self._chevron_frac(key, now)
         SECTION_OPEN[key] = not section_open(key)
@@ -875,7 +1345,13 @@ class RightMenu:
         if self.sounds is not None:
             self.sounds.play_section_toggle()
 
-    def _draw_sections(self):
+    def _draw_sections(self) -> None:
+        """
+        Draw the stack below the move log -- each section's divider and header
+        first, then the bodies of the open ones -- and finish with the tooltip
+        over whatever the cursor found, which has to be last so it sits on top
+        of everything it describes
+        """
         now = pg.time.get_ticks()
         self.rail_tooltip.begin_frame()
         for block in self._section_blocks:
@@ -889,11 +1365,24 @@ class RightMenu:
         self.rail_tooltip.draw(
             self.window, self.outer_rect, self.scale, now, self.tooltip_font)
 
-    def _draw_divider(self, block):
+    def _draw_divider(self, block: SectionBlock) -> None:
+        """
+        Rule the dashed line that separates one section from what is above it
+
+        :param block: the section being drawn, read for its divider position
+        """
         self.window.blit(dashed_hline(block.header.width, Colors.border),
                          (block.header.x, block.divider_y))
 
-    def _draw_section_header(self, block, now):
+    def _draw_section_header(self, block: SectionBlock, now: int) -> None:
+        """
+        Draw a section's clickable header: its name on the left and, on the
+        right, the chevron that turns as the section opens and closes
+
+        :param block: the section being drawn
+        :param now: pygame tick count in milliseconds, which drives the
+            chevron's turn
+        """
         header = block.header
         label = render_text(self.section_font, SECTION_LABELS[block.key], Colors.text_muted)
         self.window.blit(label, (header.x, header.centery - label.get_height() // 2))
@@ -903,7 +1392,15 @@ class RightMenu:
         self.window.blit(chev, (header.right - chev.get_width(),
                                 header.centery - chev.get_height() // 2))
 
-    def _chevron_frac(self, key, now):
+    def _chevron_frac(self, key: str, now: int) -> float:
+        """
+        How far through its turn a section's chevron is, so a toggle mid-spin
+        carries on from where it stood instead of snapping
+
+        :param key: section name, one of actions, signals or chat
+        :param now: pygame tick count in milliseconds
+        :returns: 0 for fully closed through to 1 for fully open
+        """
         target = 1.0 if section_open(key) else 0.0
         anim = self._chevron_anim.get(key)
         if anim is None:
@@ -916,7 +1413,12 @@ class RightMenu:
             return from_frac
         return from_frac + (to_frac - from_frac) * smoothstep(t)
 
-    def _draw_caps(self):
+    def _draw_caps(self) -> None:
+        """
+        Draw the action buttons and register each one for a tooltip. A button
+        lights on hover and sinks a pixel while held, and a disabled one is
+        drawn flat with a faded icon and never reacts to the cursor
+        """
         if not self._cap_draws:
             return
         disabled = self.disabled_keys_provider()
@@ -939,12 +1441,30 @@ class RightMenu:
                 self._draw_cap_icon(cap, rect, is_disabled, off)
             self.rail_tooltip.register(("cap", cap.key), rect, cap.tooltip)
 
-    def _draw_cap_icon(self, cap, rect, faded, off):
+    def _draw_cap_icon(self, cap: Cap, rect: pg.Rect, faded: bool, off: int) -> None:
+        """
+        Draw an icon-only action button, as the in-game rail uses, with the
+        artwork centred in the button
+
+        :param cap: the button being drawn
+        :param rect: its area in window pixels
+        :param faded: True when the button is disabled
+        :param off: vertical nudge in pixels while the button is held
+        """
         fg = self._cap_foreground(cap, faded)
         self.window.blit(fg, (rect.centerx - fg.get_width() // 2,
                               rect.centery - fg.get_height() // 2 + off))
 
-    def _draw_cap_stacked(self, cap, rect, faded, off):
+    def _draw_cap_stacked(self, cap: Cap, rect: pg.Rect, faded: bool, off: int) -> None:
+        """
+        Draw a full-width action button with its icon and its label side by
+        side, which is how the review rail lists its actions
+
+        :param cap: the button being drawn
+        :param rect: its area in window pixels
+        :param faded: True when the button is disabled
+        :param off: vertical nudge in pixels while the button is held
+        """
         fg = self._cap_foreground(cap, faded)
         pad = scale_floor(CAP_LABEL_PAD, self.scale, 6)
         icon_x = rect.x + pad
@@ -954,11 +1474,27 @@ class RightMenu:
         self.window.blit(label, (icon_x + fg.get_width() + pad,
                                  rect.centery - label.get_height() // 2 + off))
 
-    def _cap_foreground(self, cap, faded):
+    def _cap_foreground(self, cap: Cap, faded: bool) -> pg.Surface:
+        """
+        Build a button's artwork -- either a drawn icon or a typed glyph such
+        as the draw sign -- optically centred on the ink rather than on the
+        box, so a half-height character does not sit off centre. Each one is
+        drawn once per size and disabled state and then reused
+
+        :param cap: the button whose artwork is wanted
+        :param faded: True for the dimmed disabled version
+        :returns: the shared artwork surface for that button
+        """
         box = self._cap_fg_box
         key = (cap.key, box, faded)
 
-        def build():
+        def build() -> pg.Surface:
+            """
+            Draw the button's artwork the first time this combination is asked
+            for, centring it on its ink and fading it when disabled
+
+            :returns: the finished artwork surface
+            """
             if cap.glyph:
                 font = self._glyph_fonts[(cap.glyph_pt, cap.glyph_bold)]
                 surf = font.render(cap.glyph, True, pg.Color(Colors.rail_icon))
@@ -974,10 +1510,15 @@ class RightMenu:
             return canvas
         return memoized_surface(_CAP_FG_CACHE, key, build)
 
-    def _draw_signals(self):
+    def _draw_signals(self) -> None:
+        """
+        Draw the toggle chips and the volume row, each chip showing the state
+        the screen reports this frame and registering its own tooltip. A chip
+        the screen says is unavailable is drawn dashed and dimmed
+        """
         if not self._signal_chips:
             return
-        state = self.signals_provider()
+        state = cast(Callable[[], dict[str, Any]], self.signals_provider)()
         for chip, rect in self._signal_chips:
             on = bool(state.get(chip.state_key))
             disabled = chip.enabled_key is not None and not state.get(chip.enabled_key)
@@ -987,7 +1528,12 @@ class RightMenu:
             self.rail_tooltip.register(("signal", chip.key), rect, chip.tooltip)
         self._draw_vol_row(state)
 
-    def _draw_chat(self):
+    def _draw_chat(self) -> None:
+        """
+        Draw the quick-chat phrase buttons and give each one a tooltip showing
+        what it would send. While chat is cooling down they are all dimmed and
+        the tooltip says so instead
+        """
         if not self._chat_buttons:
             return
         presets = self.chat_presets_provider()
@@ -1006,10 +1552,29 @@ class RightMenu:
             tooltip = "CHAT COOLING DOWN" if cooling else f"SEND: {label}"
             self.rail_tooltip.register(("chat", index), rect, tooltip)
 
-    def _chat_button_surface(self, size, label, hovered, pressed, cooling):
+    def _chat_button_surface(self, size: tuple[int, int], label: str, hovered: bool,
+                             pressed: bool, cooling: bool) -> pg.Surface:
+        """
+        Build one quick-chat button in the state it is in -- resting, hovered,
+        held or cooling down -- keeping each variant so the grid costs nothing
+        to redraw every frame
+
+        :param size: button width and height in pixels
+        :param label: the phrase this button sends
+        :param hovered: True while the cursor is over it
+        :param pressed: True while it is held down
+        :param cooling: True while chat is resting, which dims the whole
+            button
+        :returns: the shared surface for that state
+        """
         key = (tuple(size), label, hovered, pressed, cooling, self.chat_font.get_height())
 
-        def build():
+        def build() -> pg.Surface:
+            """
+            Draw this button state the first time it is asked for
+
+            :returns: the finished button surface
+            """
             fill = Colors.surface_hover if hovered else Colors.surface_raised
             surf = cut_rect_surface(size, scale_floor(CHAT_CUT, self.scale, 5), fill,
                                     border=Colors.border, border_width=1,
@@ -1024,7 +1589,16 @@ class RightMenu:
             return surf
         return memoized_surface(_CHAT_CACHE, key, build)
 
-    def _handle_chat_click(self, pos):
+    def _handle_chat_click(self, pos: tuple[int, int]) -> bool | None:
+        """
+        Send the phrase whose button was clicked, passing only its index on to
+        the screen. A click while chat is cooling down is swallowed rather
+        than sent, so the button cannot be hammered into a rejection
+
+        :param pos: click position in window pixels
+        :returns: True when a chat button took the click, or None when the
+            click missed them all and the rail should keep looking
+        """
         if not self._chat_buttons:
             return None
         cooling = self.chat_cooldown_provider()
@@ -1042,10 +1616,29 @@ class RightMenu:
             return True
         return None
 
-    def _chip_surface(self, chip, w, h, on, disabled):
+    def _chip_surface(self, chip: SignalChip, w: int, h: int, on: bool,
+                      disabled: bool) -> pg.Surface:
+        """
+        Build one signal chip: a status dot and a label in a rounded outline,
+        wearing the toggle's own colour when it is on, a dashed dim shell when
+        it is unavailable. The dot is lined up with the capital letters of the
+        label rather than with the whole line box, and each state is kept
+
+        :param chip: the toggle being drawn
+        :param w: chip width in pixels
+        :param h: chip height in pixels
+        :param on: True when the toggle is currently on
+        :param disabled: True when the toggle cannot be used at all
+        :returns: the shared surface for that state
+        """
         key = ("chip", chip.key, w, h, on, disabled, self.chip_font.get_height())
 
-        def build():
+        def build() -> pg.Surface:
+            """
+            Draw this chip state the first time it is asked for
+
+            :returns: the finished chip surface
+            """
             if disabled:
                 surf = rounded_rect_surface((w, h), h, Colors.surface_raised).copy()
                 surf.blit(dashed_rounded_rect_surface((w, h), h, Colors.border), (0, 0))
@@ -1070,7 +1663,14 @@ class RightMenu:
             return surf
         return memoized_surface(_SIGNAL_CACHE, key, build)
 
-    def _draw_vol_row(self, state):
+    def _draw_vol_row(self, state: dict[str, Any]) -> None:
+        """
+        Draw the volume row under the chips, dimmed while sound is off. The
+        level comes from the screen, clamped first, because it is drawn as a
+        count of filled notches
+
+        :param state: this frame's signal state, read for volume and sound_on
+        """
         rect = self._signal_vol_rect
         if rect.width <= 0:
             return
@@ -1080,13 +1680,30 @@ class RightMenu:
             rect.topleft)
         self.rail_tooltip.register(("signal", "vol"), rect, SIGNAL_VOL_TOOLTIP)
 
-    def _vol_surface(self, w, h, vol, dimmed):
+    def _vol_surface(self, w: int, h: int, vol: float, dimmed: bool) -> pg.Surface:
+        """
+        Build the volume row: a VOL label, ten notches filled up to the
+        current level, and the percentage in its fixed slot at the right.
+        Every distinct reading is kept, so a steady volume costs nothing to
+        redraw
+
+        :param w: row width in pixels
+        :param h: row height in pixels
+        :param vol: volume from 0 to 1
+        :param dimmed: True when sound is off, which fades the whole row
+        :returns: the shared surface for that reading
+        """
         filled = int(round(vol * SIGNAL_NOTCH_COUNT))
         pct = int(round(vol * 100))
         key = ("vol", w, h, filled, pct, dimmed,
                self.micro_font.get_height(), self.signal_num_font.get_height())
 
-        def build():
+        def build() -> pg.Surface:
+            """
+            Draw this volume reading the first time it is asked for
+
+            :returns: the finished volume row surface
+            """
             surf = pg.Surface((w, h), pg.SRCALPHA)
             label = render_text(self.micro_font, "VOL", Colors.text_muted)
             surf.blit(label, (0, (h - label.get_height()) // 2))
@@ -1108,10 +1725,20 @@ class RightMenu:
             return surf
         return memoized_surface(_SIGNAL_CACHE, key, build)
 
-    def _handle_signal_click(self, pos):
+    def _handle_signal_click(self, pos: tuple[int, int]) -> bool | None:
+        """
+        Act on a click in the signals section: fire a chip's toggle, or set
+        the volume from the notch that was hit. A chip the screen has
+        disabled swallows its click without toggling anything -- share is the
+        one that answers back, so a player muted by moderation is told why
+
+        :param pos: click position in window pixels
+        :returns: True when the section took the click, or None when it missed
+            everything here and the rail should keep looking
+        """
         if not self._signal_chips:
             return None
-        state = self.signals_provider()
+        state = cast(Callable[[], dict[str, Any]], self.signals_provider)()
         for chip, rect in self._signal_chips:
             if not rect.collidepoint(pos):
                 continue
@@ -1134,7 +1761,15 @@ class RightMenu:
             return True
         return None
 
-    def _handle_vol_click(self, pos, state):
+    def _handle_vol_click(self, pos: tuple[int, int], state: dict[str, Any]) -> None:
+        """
+        Set the volume to the notch that was clicked. Clicking the first notch
+        while it is already the level drops the volume to zero, which is what
+        makes the leftmost notch double as a quick mute
+
+        :param pos: click position in window pixels
+        :param state: this frame's signal state, read for the current volume
+        """
         target = notch_value_from_click(
             pos[0], self._signal_notch_band.x, self._signal_notch_step,
             SIGNAL_NOTCH_COUNT, state.get("volume", 0.0))

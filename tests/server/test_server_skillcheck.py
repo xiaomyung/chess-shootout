@@ -23,7 +23,8 @@ from chessshootout.server.handlers import (
     handle_move, handle_ping, handle_skill_check_shot, handle_takeback_request,
     handle_takeback_response,
 )
-from chessshootout.server.protocol import PROTOCOL_VERSION, Reason
+from chessshootout.server.protocol import (
+    PROTOCOL_VERSION, SKILLCHECK_TARGET_MAX, Reason)
 from chessshootout.server.rooms import PendingSkillCheck
 from chessshootout.skillcheck import mole, online
 from chessshootout.skillcheck.combo import (
@@ -1504,6 +1505,10 @@ async def test_resume_wire_echoes_progress_and_captured_value_mid_whack(app, clo
 
 @pytest.mark.asyncio
 async def test_whack_spectate_shots_carry_progress_coords_and_won(app, clock):
+    """The relay is built from the mover's already-bounded shot, so every mirrored
+    coordinate is on the board -- which is also what lets SkillCheckSpectateShotMessage
+    carry the same ge/lt bounds as the inbound twin without ever refusing a real
+    relay: a whole winning whack run has to survive the tightened model."""
     room, ws_w, ws_b, frm, to, pending, ch, holes = await _whack_room(app, clock)
     required = ch.hits_required
     for i in range(required):
@@ -1517,6 +1522,9 @@ async def test_whack_spectate_shots_carry_progress_coords_and_won(app, clock):
     assert (relays[0]["target_row"], relays[0]["target_col"]) == (row, col), \
         "the opponent mirrors the mover's actual shot position"
     assert relays[0]["direction"] is None
+    for r in relays:
+        assert 0.0 <= r["target_row"] < SKILLCHECK_TARGET_MAX
+        assert 0.0 <= r["target_col"] < SKILLCHECK_TARGET_MAX
 
 
 def _bare_pending(**kw):

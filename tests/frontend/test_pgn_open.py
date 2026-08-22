@@ -213,16 +213,26 @@ def test_a_failed_open_logs_exactly_one_warning(monkeypatch, tmp_path):
 
 
 def test_a_burst_of_queued_failures_collapses_to_one_toast(monkeypatch, tmp_path):
+    """One message for the player, every exit code in the log: the drops used
+    to be thrown away silently, so a crash report showed a single failure where
+    three different openers had died, and the two later codes -- the ones that
+    say which opener it was -- were gone."""
     harness = _Harness(monkeypatch)
     path = _pgn(tmp_path)
-    for _ in range(3):
+    for code in (3, 1, 4):
         harness.opener.open(path)
-        harness.fail_async(3)
+        harness.fail_async(code)
 
     with caplog_at_debug() as records:
         harness.opener.update()
 
-    assert len(records) == 1, "a multi-click burst must not spam the log"
+    warnings = [r for r in records if r.levelno == logging.WARNING]
+    assert [r.getMessage() for r in warnings] == ["open pgn failed exit=3"], \
+        "a multi-click burst must not spam the log with warnings"
+    dropped = [r.getMessage() for r in records if r.levelno == logging.DEBUG]
+    assert dropped == ["open pgn failed exit=1, not shown again this frame",
+                       "open pgn failed exit=4, not shown again this frame"], \
+        "the failures that never reached the toast keep their own exit codes"
     assert harness.chirps == [1], "nor chirp three times"
     assert harness.message == NO_HANDLER_MESSAGE
 

@@ -3,11 +3,15 @@ import asyncio
 import time
 from types import SimpleNamespace
 
+import httpx
 import pytest
 
 from chessshootout.online.client import (
-    OnlineClient, PING_SAMPLE_WINDOW, RECONNECT_BACKOFF_MAX_SECONDS)
-from chessshootout.online.transport import _UrlBuilder, _split_addr, WsConnectionClosed
+    OnlineClient, PING_SAMPLE_WINDOW, RECONNECT_BACKOFF_MAX_SECONDS,
+    SERVER_FULL_RETRIES)
+from chessshootout.online.transport import (
+    SchemaVersionMismatch,
+    ServerTransport, TransportError, _UrlBuilder, _split_addr, WsConnectionClosed)
 
 
 @pytest.mark.parametrize(
@@ -248,6 +252,68 @@ def test_resume_backoff_grows_and_is_bounded(monkeypatch):
     assert result == {"ok": True}
     assert sleeps == [2, 4, 8, 8], "exponential backoff, capped at the max"
     assert max(sleeps) <= RECONNECT_BACKOFF_MAX_SECONDS
+
+
+def test_matchmake_reports_server_unreachable_when_the_connection_is_refused(monkeypatch):
+    """The receiving half of transport.matchmake_async's TransportError wrap, driven
+    through the REAL transport: an unreachable server is worth retrying (the box may
+    be restarting), and once the retries are spent the player is told
+    server_unreachable. Before the wrap the raw httpx exception flew straight out of
+    this loop -- no retries, and the reason shown was httpx's own message."""
+    attempts = {"n": 0}
+
+    def refuse(request):
+        attempts["n"] += 1
+        raise httpx.ConnectError("connection refused")
+
+    async def fake_sleep(d):
+        pass
+
+    monkeypatch.setattr(asyncio, "sleep", fake_sleep)
+
+    client = OnlineClient()
+    client._transport = ServerTransport(
+        "localhost:8000",
+        async_http_factory=lambda: httpx.AsyncClient(transport=httpx.MockTransport(refuse)))
+    request = {"nickname": "Alice", "client_uuid": "00000000-0000-4000-8000-000000000000",
+               "time_minutes": 5, "increment_seconds": 0}
+
+    with pytest.raises(RuntimeError) as info:
+        asyncio.run(client._matchmake_with_retries(request))
+
+    assert str(info.value) == "server_unreachable"
+    assert attempts["n"] == SERVER_FULL_RETRIES + 1, "every attempt in the loop was spent"
+    assert isinstance(info.value.__cause__, TransportError)
+
+
+def test_matchmake_raises_a_protocol_mismatch_at_once_without_retrying(monkeypatch):
+    """SchemaVersionMismatch subclasses TransportError, so the retry arm used to
+    swallow it: a protocol mismatch burned every retry and then surfaced as the
+    misleading server_unreachable. It is a rejection on the merits -- one attempt,
+    raised as itself, so the version-mismatch modal can name the real problem."""
+    attempts = {"n": 0}
+
+    def wrong_version(request):
+        attempts["n"] += 1
+        return httpx.Response(409, json={"detail": {"reason": "version_mismatch"}})
+
+    async def fake_sleep(d):
+        raise AssertionError("a protocol mismatch must not be retried")
+
+    monkeypatch.setattr(asyncio, "sleep", fake_sleep)
+
+    client = OnlineClient()
+    client._transport = ServerTransport(
+        "localhost:8000",
+        async_http_factory=lambda: httpx.AsyncClient(
+            transport=httpx.MockTransport(wrong_version)))
+    request = {"nickname": "Alice", "client_uuid": "00000000-0000-4000-8000-000000000000",
+               "time_minutes": 5, "increment_seconds": 0}
+
+    with pytest.raises(SchemaVersionMismatch):
+        asyncio.run(client._matchmake_with_retries(request))
+
+    assert attempts["n"] == 1, "a rejection on the merits is not retried"
 
 
 def test_send_loop_survives_a_send_error_and_keeps_going():

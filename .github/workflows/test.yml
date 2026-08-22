@@ -61,6 +61,9 @@ jobs:
       - name: Run pylama
         run: uv run --no-sync pylama chessshootout tests
 
+      - name: Run mypy
+        run: uv run --no-sync mypy
+
   version-bump:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest

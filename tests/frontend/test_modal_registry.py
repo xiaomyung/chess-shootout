@@ -6,10 +6,12 @@ active screen's modals(), global first, and that merged, ordered list drives
 the click cascade, KEYDOWN forwarding, Esc-dismiss, _blocking_modal_visible,
 _active_scrollable, and the reversed draw order. This file pins two drift bugs
 the registry fixed (confirm now outranks help for clicks/keys/Esc, matching its
-topmost draw position), a sweep that exercises every registry entry through the
-same generic surface, and the screen-ownership behaviors from the split: a
-menu-owned modal left open doesn't gate the game screen, and a screen's own
-modal stops being active (drawn/dismissable) once its screen is inactive.
+topmost draw position), a third one dismiss_topmost itself carried (Esc used to
+reach past an esc_dismiss=False card to whatever sat underneath it), a sweep
+that exercises every registry entry through the same generic surface, and the
+screen-ownership behaviors from the split: a menu-owned modal left open doesn't
+gate the game screen, and a screen's own modal stops being active
+(drawn/dismissable) once its screen is inactive.
 """
 
 import os
@@ -19,6 +21,7 @@ import pygame as pg
 import pytest
 
 from tests.conftest import pygame_display
+from chessshootout.frontend.modal_registry import dismiss_topmost
 from chessshootout.frontend.modals.help import HOTKEYS
 from tests.helpers import make_app, start_single_screen
 
@@ -86,6 +89,20 @@ ADJACENT_GLOBAL_PAIRS = [
     (a, b) for a, b in zip(GLOBAL_PRIORITY_ORDER, GLOBAL_PRIORITY_ORDER[1:])
     if a not in NON_DISMISSABLE and b not in NON_DISMISSABLE
 ]
+
+BLOCKING_OVER_DISMISSABLE_PAIRS = [
+    (top, under)
+    for i, top in enumerate(GLOBAL_PRIORITY_ORDER) if top in NON_DISMISSABLE
+    for under in GLOBAL_PRIORITY_ORDER[i + 1:] if under not in NON_DISMISSABLE
+]
+
+DISMISSABLE_OVER_BLOCKING_PAIRS = [
+    (top, under)
+    for i, top in enumerate(GLOBAL_PRIORITY_ORDER) if top == "confirm_modal"
+    for under in GLOBAL_PRIORITY_ORDER[i + 1:] if under in NON_DISMISSABLE
+]
+
+BELOW_EVERY_BLOCKER = sorted({under for _, under in BLOCKING_OVER_DISMISSABLE_PAIRS})
 
 
 def test_registry_priority_order():
@@ -262,10 +279,77 @@ def test_esc_dismisses_only_the_topmost_of_two_stacked_global_modals(top_name, u
 
 @pytest.mark.parametrize("name", sorted(NON_DISMISSABLE))
 def test_esc_does_not_dismiss_non_dismissable_modals(name):
+    """The blocking cards refuse Esc outright but still swallow it: dismiss_topmost
+    reports True so the router lets Esc go no further while the card is up."""
     app = _app()
     OPENERS[name](app)
+    assert dismiss_topmost(app._active_modal_specs()) is True
     app.input_router._handle_escape()
     assert _modal(app, name).is_visible() is True
+
+
+@pytest.mark.parametrize("top_name, under_name", BLOCKING_OVER_DISMISSABLE_PAIRS)
+def test_esc_dismisses_nothing_when_the_topmost_visible_modal_blocks_it(top_name, under_name):
+    """Regression: dismiss_topmost used to step over an esc_dismiss=False spec and
+    keep scanning, so Esc reached a dismissable card stacked *underneath* a
+    blocking one and cancelled it invisibly. The topmost visible modal decides
+    alone: when it refuses Esc, nothing below it closes either, and the press
+    is consumed rather than falling through to the screen."""
+    app = _app()
+    OPENERS[under_name](app)
+    OPENERS[top_name](app)
+    assert _modal(app, top_name).is_visible() is True
+    assert _modal(app, under_name).is_visible() is True
+
+    assert dismiss_topmost(app._active_modal_specs()) is True
+    app.input_router._handle_escape()
+
+    assert _modal(app, top_name).is_visible() is True
+    assert _modal(app, under_name).is_visible() is True
+
+
+def test_esc_under_a_blocking_modal_never_reaches_the_screen():
+    """A blocking card must swallow Esc entirely: while the reconnecting modal
+    covers a live game, Esc may not fall through to GameScreen.escape() and
+    open the resign confirmation underneath the overlay."""
+    app = _app()
+    _start_game(app)
+    OPENERS["reconnecting_modal"](app)
+    app.input_router._handle_escape()
+    assert app.coordinator.reconnecting_modal.is_visible() is True
+    assert app.confirm_modal.is_visible() is False
+
+
+@pytest.mark.parametrize("top_name, under_name", DISMISSABLE_OVER_BLOCKING_PAIRS)
+def test_esc_dismisses_a_dismissable_modal_stacked_over_a_blocking_one(top_name, under_name):
+    """The mirror of the regression above: a blocking card only shields what is
+    below it, never what draws on top of it, so confirm still answers Esc while
+    match-found or reconnecting sits behind it and that card stays put."""
+    app = _app()
+    OPENERS[under_name](app)
+    OPENERS[top_name](app)
+    assert _modal(app, top_name).is_visible() is True
+
+    app.input_router._handle_escape()
+
+    assert _modal(app, top_name).is_visible() is False
+    assert _modal(app, under_name).is_visible() is True
+
+
+@pytest.mark.parametrize("name", BELOW_EVERY_BLOCKER)
+def test_hidden_blocking_modals_never_shield_the_card_below_them(name):
+    """A blocking spec only owns Esc while it is actually on screen -- hidden ones
+    are skipped entirely by the scan. Both blockers outrank these entries in the
+    registry, so stopping at a hidden one would leave every card below
+    match-found permanently undismissable."""
+    app = _app()
+    OPENERS[name](app)
+    assert [b for b in sorted(NON_DISMISSABLE) if _modal(app, b).is_visible()] == []
+    assert _modal(app, name).is_visible() is True
+
+    app.input_router._handle_escape()
+
+    assert _modal(app, name).is_visible() is False
 
 
 def test_menu_owned_modal_left_open_does_not_gate_the_game_screen():

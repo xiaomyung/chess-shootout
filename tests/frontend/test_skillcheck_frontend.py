@@ -18,13 +18,13 @@ import pytest
 
 from tests.conftest import pygame_display
 from chessshootout.backend.pieces import Piece, PieceType, PieceColor
-from chessshootout.backend.utils import Square
+from chessshootout.backend.utils import BOARD_SIZE, Square
 from chessshootout.domain.premoves import Premove
 from chessshootout.frontend.frontend import Frontend
 from chessshootout.frontend.game.skillcheck_session import CheckContext
 from chessshootout.frontend.skillcheck.aim_view import (
     AimController, AIM_CROSS_LW_FRAC, AIM_RING_LW_FRAC, AIM_RESULT_HOLD_MS,
-    AIM_MISS_FLASH_MS, AIM_SHOT_HOLD_MS, _spotlight_surface)
+    AIM_MISS_FLASH_MS, AIM_SHOT_HOLD_MS, _spotlight_surface, _SHOOTER_KEY, _VICTIM_KEY)
 from chessshootout.frontend.skillcheck.controller import SKILLCHECK_RESULT_HOLD_MS
 from chessshootout.frontend.skillcheck.overlay import SkillCheckOverlay
 from chessshootout.frontend.skillcheck.registry import CheckSpec, build_controller
@@ -321,6 +321,38 @@ def test_aim_miss_plays_the_shot_sound_when_the_gun_fires():
     assert played == [], "the shot is silent until the draw-and-aim finishes"
     ctrl.update(600)
     assert played == [1], "the dry-fire plays the gunshot when the gun actually fires"
+
+
+def test_aim_miss_with_a_real_geom_and_no_shooter_square_never_leaks_a_sentinel():
+    """A check opened without a from_sq/victim_sq stands the missing squares in as
+    sentinel strings. A board resolver only understands Squares -- the production
+    one is `board.cell_rect(sq).center` -- so handing it a sentinel would blow up
+    inside EffectManager the first time the miss choreography looked up a centre.
+    The view answers its own sentinels with its centre and passes real squares
+    straight through, so the wiring is safe whichever resolver is installed."""
+    surf = pg.display.get_surface()
+    asked = []
+
+    def board_geom(sq):
+        asked.append(sq)
+        return (sq.col * 80 + 40, sq.row * 80 + 40)
+
+    ctrl = AimController(_aim_centerable(), pg.Rect(160, 240, 80, 80), now_ms=0,
+                         victim_surface=pg.Surface((80, 80), pg.SRCALPHA),
+                         board_rect=pg.Rect(0, 0, 640, 640), geom=board_geom,
+                         from_sq=None, victim_sq=None, attacker_type="queen")
+    ctrl.update(10)
+    ctrl.handle_event(_tap())
+    assert ctrl.miss_count == 1, "the shot was played out as a miss"
+    assert [c for c in ctrl._fx.captures if c.get("miss")], "a dry-fire is staged"
+    for now in range(20, 900, 20):
+        ctrl.update(now)
+        ctrl.draw(surf)
+    assert asked == [], "the board resolver is never asked to place a sentinel"
+    assert ctrl._geom(_SHOOTER_KEY) == ctrl.center == (200, 280)
+    assert ctrl._geom(_VICTIM_KEY) == ctrl.center
+    assert ctrl._geom(Square(1, 2)) == (200, 120), "a real square still routes to the board"
+    assert asked == [Square(1, 2)], "and only a real square reaches the resolver"
 
 
 def test_aim_miss_then_center_hit_still_wins():
@@ -875,7 +907,7 @@ def test_wheel_relocates_to_a_random_on_board_square():
     frm, to = _set_queen_takes_pawn(app)
     target = _render_wheel(app, frm, to, _seed_where(app, frm, to, 8, relocates=True))
     assert target != to
-    assert 0 <= target.row < app.game.board.SIZE and 0 <= target.col < app.game.board.SIZE
+    assert 0 <= target.row < BOARD_SIZE and 0 <= target.col < BOARD_SIZE
 
 
 def test_wheel_can_still_spawn_on_the_capture_square():
@@ -920,7 +952,7 @@ def test_gate_target_matches_the_pure_engine_placement():
     for i in range(200):
         seed = "match-{}".format(i)
         exclusions = app.game.skillcheck_session._placement_exclusions(frm, to)
-        engine = placement_square(seed, 8, exclusions, app.game.board.SIZE)
+        engine = placement_square(seed, 8, exclusions, BOARD_SIZE)
         target = _render_wheel(app, frm, to, seed)
         assert target == (to if engine is None else Square(engine[0], engine[1]))
 

@@ -7,6 +7,7 @@ call literally sits inside a known per-frame draw/update function, and no log
 call anywhere references a skill-check secret or geometry seed).
 """
 
+import ast
 import logging
 import os
 import re
@@ -17,6 +18,7 @@ import chessshootout
 
 from tests.conftest import pygame_display
 from tests.frontend.focus_helpers import FakeTicks, install_clock, make_app, start_game
+from tests.helpers import read_source_without_docstrings
 from chessshootout.backend.pieces import PieceColor
 from chessshootout.frontend.screens.base import Nav
 
@@ -327,28 +329,20 @@ def test_an_options_pass_over_the_server_rows_emits_no_stray_info(monkeypatch, c
 
 
 def _slice_function(path, name):
+    """The function's own lines, docstring-blind. The span comes from the AST of
+    the real file (a text scan for `def <name>(` could match inside a string and
+    slice the wrong region), and the text comes from the blanked source, whose
+    line numbers are preserved -- so a docstring inside a per-frame function is
+    invisible to the log-call regex below, while its code is not."""
     with open(path, encoding="utf-8") as f:
-        lines = f.readlines()
-    start = None
-    def_indent = None
-    for i, line in enumerate(lines):
-        stripped = line.strip()
-        if stripped.startswith(f"def {name}(") or stripped.startswith(f"async def {name}("):
-            start = i
-            def_indent = len(line) - len(line.lstrip())
-            break
-    assert start is not None, f"{name} not found in {path}"
-    end = len(lines)
-    for j in range(start + 1, len(lines)):
-        line = lines[j]
-        stripped = line.strip()
-        if not stripped:
-            continue
-        cur_indent = len(line) - len(line.lstrip())
-        if cur_indent <= def_indent:
-            end = j
-            break
-    return "".join(lines[start:end])
+        original = f.read()
+    tree = ast.parse(original, filename=path)
+    nodes = [n for n in ast.walk(tree)
+             if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)) and n.name == name]
+    assert len(nodes) == 1, f"expected exactly one def {name} in {path}, found {len(nodes)}"
+    node = nodes[0]
+    lines = read_source_without_docstrings(path).splitlines(keepends=True)
+    return "".join(lines[node.lineno - 1:node.end_lineno])
 
 
 def test_no_log_calls_in_known_per_frame_functions():
@@ -393,8 +387,7 @@ def test_no_secret_or_seed_in_any_log_call():
                 continue
             path = os.path.join(dirpath, name)
             scanned += 1
-            with open(path, encoding="utf-8") as f:
-                text = f.read()
+            text = read_source_without_docstrings(path)
             for span in _log_call_spans(text):
                 if re.search(r"secret|seed", span, re.IGNORECASE):
                     offenders.append(f"{os.path.relpath(path, REPO_ROOT)}: {span.splitlines()[0]}")

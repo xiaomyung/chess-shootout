@@ -1,9 +1,10 @@
 import logging
 import os
+from typing import Any, cast
 
 import pygame as pg
 
-from chessshootout.frontend.modal_registry import dismiss_topmost
+from chessshootout.frontend.modal_registry import ModalSpec, dismiss_topmost
 from chessshootout.frontend.screens.base import Nav
 from chessshootout.frontend.window_chrome import MIN_WINDOW_WIDTH, MIN_WINDOW_HEIGHT
 
@@ -12,13 +13,35 @@ log = logging.getLogger("chess.frontend")
 
 
 class InputRouter:
+    """
+    The app's one event pump. Every frame it drains the pygame queue and hands
+    what it finds -- keys, clicks, drags, the wheel, window resizes -- to the
+    window chrome, then to whatever is layered over the screen, then to the
+    active screen itself. It only ever dispatches: it holds no state about
+    what any screen is showing and never reaches into one by name
+    """
 
-    def __init__(self, frontend):
+    def __init__(self, frontend: Any) -> None:
+        """
+        Build the router once at startup, owned by the shell for the whole
+        run. All it remembers between frames is the widget an in-flight scroll
+        drag belongs to and whether the click being handled already sounded
+
+        :param frontend: the Frontend shell, the router's route to the window
+            chrome, the modal list, the sound service and the active screen
+        """
         self.frontend = frontend
-        self._scroll_pressed = None
+        self._scroll_pressed: Any = None
         self._click_sound_played = False
 
-    def _handle_escape(self):
+    def _handle_escape(self) -> None:
+        """
+        Handle Esc, which is always a context Back or Cancel and never closes
+        the window from here. A screen that is grabbing raw input keeps Esc
+        for itself; otherwise the frontmost dismissable overlay closes, and
+        only when nothing is layered over the screen does the screen answer,
+        which is where the menu can finally raise its quit confirmation
+        """
         frontend = self.frontend
         if frontend.screen.swallows_input():
             return
@@ -28,19 +51,39 @@ class InputRouter:
         if isinstance(result, Nav):
             frontend.request_nav(result)
 
-    def _dismiss_confirm(self):
+    def _dismiss_confirm(self) -> None:
+        """
+        Close the shared confirmation card when Esc cancels it, and put the
+        menu back on its Play view so cancelling never strands the player on
+        an empty screen. Registered as that card's dismiss action
+        """
         frontend = self.frontend
         frontend.confirm_modal.hide()
         if frontend.screen is frontend.menu:
             frontend.menu.show_play_view()
 
-    def _top_visible_modal(self):
-        for spec in self.frontend._active_modal_specs():
+    def _top_visible_modal(self) -> ModalSpec | None:
+        """
+        Find the card that currently owns input. The merged list puts the
+        shell's own modals ahead of the active screen's, so the first visible
+        one in that order is the one on top for clicks and for keys alike
+
+        :returns: the frontmost visible modal spec, or None when none is open
+        """
+        for spec in cast(list[ModalSpec], self.frontend._active_modal_specs()):
             if spec.modal.is_visible():
                 return spec
         return None
 
-    def _dismiss_top_modal(self):
+    def _dismiss_top_modal(self) -> bool:
+        """
+        Take one step back out of whatever is layered over the screen: the
+        frontmost Esc-dismissable card first, and failing that the offer
+        banners, where waving away a rematch offer also declines it so the
+        opponent is not left waiting
+
+        :returns: True when something closed and Esc should go no further
+        """
         frontend = self.frontend
         if dismiss_topmost(frontend._active_modal_specs()):
             return True
@@ -52,14 +95,26 @@ class InputRouter:
             return True
         return False
 
-    def _active_scrollable(self):
+    def _active_scrollable(self) -> Any:
+        """
+        Decide what the wheel and a scroll drag should move. A visible card
+        always outranks the screen behind it, and one that does not scroll
+        swallows the wheel rather than letting it fall through to the screen
+
+        :returns: the widget to scroll, or None when nothing here scrolls
+        """
         frontend = self.frontend
         top = self._top_visible_modal()
         if top is not None:
             return top.modal if top.scrollable else None
         return frontend.screen.active_scrollable()
 
-    def _cancel_all_scroll(self):
+    def _cancel_all_scroll(self) -> None:
+        """
+        Stop every scroll in the app at once, on screens and cards that are
+        not even showing. The shell calls this on a window resize, where all
+        that content moves underneath a drag that is still in flight
+        """
         frontend = self.frontend
         self._scroll_pressed = None
         for spec in frontend._modal_registry:
@@ -72,7 +127,14 @@ class InputRouter:
                 if spec.scrollable:
                     spec.modal.scroll.cancel()
 
-    def _handle_left_drag_motion(self, pos):
+    def _handle_left_drag_motion(self, pos: tuple[int, int]) -> None:
+        """
+        Route cursor movement while the left button is down. A scroll drag
+        that started earlier keeps the motion to itself; everything else goes
+        to the active screen, which is how a dragged piece follows the mouse
+
+        :param pos: cursor position in window pixels
+        """
         frontend = self.frontend
         if self._scroll_pressed is not None:
             if not self._scroll_pressed.is_visible():
@@ -81,17 +143,40 @@ class InputRouter:
                 return
         frontend.screen.handle_motion(pos)
 
-    def mouse_left_clicked(self, pos, *, ui_click=True):
+    def mouse_left_clicked(self, pos: tuple[int, int], *, ui_click: bool = True) -> None:
+        """
+        Deliver one left click and play the interface click sound afterwards,
+        unless whatever took the click already made a sound of its own. Every
+        click goes through here, so nothing else has to think about the sound
+
+        :param pos: click position in window pixels
+        :param ui_click: False to stay silent, for a synthetic click that is
+            not the player pressing a control
+        """
         frontend = self.frontend
         self._click_sound_played = False
         self._dispatch_left_click(pos)
         if ui_click and not self._click_sound_played:
             frontend.sound_manager.play_ui_click()
 
-    def suppress_click_sound(self):
+    def suppress_click_sound(self) -> None:
+        """
+        Say that the click being dispatched right now already made its own
+        sound, so the generic interface click is not layered on top. Called
+        from inside a click handler, while that click is still being handled
+        """
         self._click_sound_played = True
 
-    def _dispatch_left_click(self, pos):
+    def _dispatch_left_click(self, pos: tuple[int, int]) -> None:
+        """
+        Offer a left click to each layer in turn and stop at the first taker:
+        the window chrome, then the frontmost visible card, then the offer
+        banners, then the active screen. A screen answering with a navigation
+        intent has it queued instead of run, so no screen is replaced from
+        inside its own click handler
+
+        :param pos: click position in window pixels
+        """
         frontend = self.frontend
         if frontend.chrome.handle_click(pos):
             return
@@ -105,7 +190,15 @@ class InputRouter:
         if isinstance(result, Nav):
             frontend.request_nav(result)
 
-    def _mouse_left_pressed(self, pos):
+    def _mouse_left_pressed(self, pos: tuple[int, int]) -> None:
+        """
+        Begin a left press. A scrollable under the cursor claims it as a
+        possible scroll drag; otherwise it counts as a click straight away,
+        and the press is passed on to the screen too when it landed below the
+        title bar and nothing is blocking input
+
+        :param pos: press position in window pixels
+        """
         frontend = self.frontend
         scrollable = self._active_scrollable()
         if scrollable is not None and scrollable.handle_press(pos):
@@ -115,7 +208,14 @@ class InputRouter:
         if pos[1] >= frontend.chrome.HEIGHT and not frontend._blocking_modal_visible():
             frontend.screen.handle_press(pos)
 
-    def _mouse_left_released(self, pos):
+    def _mouse_left_released(self, pos: tuple[int, int]) -> None:
+        """
+        Finish a left press. A scroll drag the player never actually moved is
+        treated as a plain click on that widget instead, so tapping a row in a
+        list still works; anything else goes to the screen to end its drag
+
+        :param pos: release position in window pixels
+        """
         frontend = self.frontend
         if self._scroll_pressed is not None:
             scrollable = self._scroll_pressed
@@ -126,7 +226,18 @@ class InputRouter:
             return
         frontend.screen.handle_release(pos)
 
-    def check_events(self):
+    def check_events(self) -> bool:
+        """
+        Drain the pygame queue once per frame and route everything in it --
+        the whole app's input in a single pass. A screen change asked for
+        along the way is only queued here; the shell runs it after this
+        dispatch pass finishes, and every event still queued behind it is
+        dropped so nothing reaches a screen that is about to be replaced. A
+        request to close the window is honoured whatever else is pending
+
+        :returns: True when the queue held at least one event, which is what
+            tells the shell to present this frame in full
+        """
         frontend = self.frontend
         events = pg.event.get()
         dropped = 0
@@ -200,11 +311,8 @@ class InputRouter:
                 h = max(event.h, MIN_WINDOW_HEIGHT)
                 if os.name == "nt" or (w, h) != (event.w, event.h):
                     frontend._recreate_window_surface(w, h)
-                frontend.window_width = w
-                frontend.window_height = h
-                self._cancel_all_scroll()
                 frontend.screen.on_resize()
-                frontend._compute_layout()
+                frontend._finish_resize(w, h)
         if dropped:
             log.debug("dropped %d stale events pending nav %s",
                       dropped, frontend._pending_nav.name)

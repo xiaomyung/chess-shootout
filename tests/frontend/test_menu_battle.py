@@ -16,6 +16,7 @@ import random
 from unittest.mock import MagicMock
 
 import pygame as pg
+import pytest
 
 from tests.conftest import pygame_display
 from chessshootout.frontend.menu.menu_battle import (
@@ -806,6 +807,24 @@ def test_fire_plays_the_shooters_gun_sound():
     p["weapon"] = "revolver"
     b._fire(p, b.queen, False, 5000)
     b.sound_manager.play_menu_gun.assert_called_once_with("revolver")
+
+
+def test_every_spawned_fighter_kind_carries_a_weapon():
+    """Both fighter kinds are built with a weapon, and _fire reads that key directly
+    rather than shrugging it off with .get(): a future kind that forgot one raises at
+    the shot instead of quietly asking the mixer for a gun called None, whose sound
+    slot does not exist and so plays nothing at all."""
+    b = _battle()
+    fighters = [b.queen, *b.pawns]
+    assert len(fighters) == 1 + INITIAL_PAWNS, "both kinds are on the field"
+    assert {f["kind"] for f in fighters} == {"queen", "pawn"}
+    for fighter in fighters:
+        assert fighter["weapon"], f"a {fighter['kind']} spawns holding a weapon"
+    b.sound_manager = MagicMock()
+    weaponless = {k: v for k, v in b.pawns[0].items() if k != "weapon"}
+    with pytest.raises(KeyError):
+        b._fire(weaponless, b.queen, False, 5000)
+    b.sound_manager.play_menu_gun.assert_not_called()
 
 
 def test_fire_without_sound_manager_does_not_crash():

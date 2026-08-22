@@ -5,6 +5,7 @@ import subprocess
 import sys
 import threading
 import time
+from collections.abc import Callable
 
 from chessshootout import paths
 
@@ -23,7 +24,18 @@ _BUNDLE_SCOPED_KEYS = ("SSL_CERT_FILE", "SSL_CERT_DIR", "PYTHONPATH", "PYTHONHOM
                        "GDK_PIXBUF_MODULE_FILE", "GI_TYPELIB_PATH", "QT_PLUGIN_PATH")
 
 
-def child_env():
+def child_env() -> dict[str, str] | None:
+    """
+    Build the environment a helper program should be started with, undoing the
+    surgery a packaged build performs on its own process. A frozen run prepends
+    the bundle to the library search paths and points the TLS variables at the
+    bundled certificates; a file handler that inherited either would load our
+    libraries or our CA bundle and die quietly, so those keys are restored from
+    their saved originals or removed outright
+
+    :returns: the cleaned environment to hand a child process, or None from a
+        source run, where the process environment is already clean
+    """
     if not paths.is_frozen():
         return None
     child = dict(os.environ)
@@ -44,7 +56,18 @@ def child_env():
     return child
 
 
-def open_with_default_app(path, on_failure=None):
+def open_with_default_app(path: str, on_failure: Callable[[int], None] | None = None) -> bool:
+    """
+    Hand a saved PGN or a link to whatever the player's system opens it with --
+    this is the whole of Open PGN and of the menu's outbound links. Starting the
+    opener is not proof it worked, so on platforms with a real child process an
+    exit watcher keeps observing it and reports a late failure back
+
+    :param path: file path or URL to open, exactly as the system opener wants it
+    :param on_failure: called from a watcher thread with the opener's exit code
+        when it starts but then fails; None asks for no follow-up at all
+    :returns: True once an opener was started, False when none could be
+    """
     if sys.platform.startswith("win"):
         try:
             os.startfile(path)
@@ -64,7 +87,20 @@ def open_with_default_app(path, on_failure=None):
     return False
 
 
-def _launch(candidates, path, on_failure):
+def _launch(candidates: list[list[str]], path: str,
+            on_failure: Callable[[int], None] | None) -> bool:
+    """
+    Try each opener command in turn until one actually starts, detaching it
+    from the game so quitting never kills the player's editor. When a follow-up
+    is wanted, a daemon watcher thread is started for that child and is handed
+    the openers that were not tried, so it can fall through to them later
+
+    :param candidates: opener commands to try in order, each an argv list
+    :param path: file path or URL, already the last argument of every command
+    :param on_failure: reported to when the started opener turns out to fail,
+        and the trigger for starting the watcher at all
+    :returns: True once one command started, False when every one refused to
+    """
     env = child_env()
     for index, cmd in enumerate(candidates):
         try:
@@ -87,7 +123,21 @@ def _launch(candidates, path, on_failure):
     return False
 
 
-def _watch(proc, tool, remaining, path, on_failure):
+def _watch(proc: subprocess.Popen[bytes], tool: str, remaining: list[list[str]], path: str,
+           on_failure: Callable[[int], None]) -> None:
+    """
+    Watch a started opener from its own daemon thread and turn a bad exit into
+    something the player is told about, which is the whole point: on a machine
+    where nothing claims .pgn the opener starts happily and then exits, and the
+    game used to show nothing at all. A child still alive after the wait is
+    treated as a success and reaped in the background
+
+    :param proc: the opener process that was started
+    :param tool: its command name, used only for the log line
+    :param remaining: openers not tried yet, one of which may be run instead
+    :param path: file path or URL being opened, carried into a retry
+    :param on_failure: told the exit code once a failure is final
+    """
     started = time.monotonic()
     try:
         code = proc.wait(timeout=OPEN_WAIT_TIMEOUT_S)
@@ -103,11 +153,30 @@ def _watch(proc, tool, remaining, path, on_failure):
     on_failure(code)
 
 
-def _is_retriable(code, elapsed):
+def _is_retriable(code: int, elapsed: float) -> bool:
+    """
+    Decide whether a failed opener is worth replacing with the next one. The
+    test is deliberately narrow: an opener may run the real handler in the
+    foreground and pass its exit status back, so a player who opened a PGN,
+    edited it and closed it badly must not have the file reopened behind them.
+    Only a child that died too fast to have been used, or one carrying the
+    known no-handler codes, earns a retry
+
+    :param code: exit status the opener returned
+    :param elapsed: seconds the child was alive, measured from its start
+    :returns: True when the next opener in the list should be tried
+    """
     return elapsed < FOREGROUND_HANDLER_MIN_S or code in NO_HANDLER_EXIT_CODES
 
 
-def _reap(proc):
+def _reap(proc: subprocess.Popen[bytes]) -> None:
+    """
+    Block on a still-running opener until it finally exits, so a long-lived
+    child leaves no zombie behind. It runs on the watcher thread that already
+    gave up on the child, and its exit status is deliberately ignored
+
+    :param proc: the opener process that outlived the watcher's wait
+    """
     try:
         proc.wait()
     except OSError:

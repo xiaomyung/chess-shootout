@@ -14,7 +14,7 @@ from tests.helpers import make_app as _make_app_at, start_single_screen
 from chessshootout.backend.pieces import Piece, PieceColor, PieceType
 from chessshootout.backend.utils import Square
 from chessshootout.frontend.board.speech_bubble import (
-    SpeechBubble, BUBBLE_MS, POP_STEPS,
+    SpeechBubble, BUBBLE_MS, BUBBLE_POP_MS, POP_STEPS,
 )
 
 
@@ -225,3 +225,25 @@ def test_dirty_rects_include_active_bubble(monkeypatch):
     last = game.speech_bubbles["white"].last_rect
     assert last is not None
     assert last in game.dirty_rects()
+
+
+def test_bubble_is_drawn_at_the_board_ui_scale(monkeypatch):
+    """The game screen hands the widget the board's own scale, not a stand-in.
+
+    It used to read it as getattr(self.board, "scale", 1.0) because Board only
+    grew the attribute inside set_rect; the board seeds it in its constructor
+    now, so the hedge is gone and the real value must still reach the widget --
+    a bubble on a scaled-up board is a visibly bigger bubble.
+    """
+    ticks = FakeTicks()
+    game = _game(monkeypatch, ticks)
+    game.board.scale = 1.0
+    game.show_speech_bubble("white", "GG")
+    ticks.advance(BUBBLE_POP_MS)
+    game._draw_speech_bubbles()
+    small = game.speech_bubbles["white"].last_rect
+    game.board.scale = 2.0
+    game._draw_speech_bubbles()
+    big = game.speech_bubbles["white"].last_rect
+    assert small is not None and big is not None
+    assert big.width > small.width and big.height > small.height

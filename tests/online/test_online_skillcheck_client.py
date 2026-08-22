@@ -14,7 +14,7 @@ import pygame as pg
 import pytest
 
 from tests.conftest import pygame_display
-from chessshootout.backend.utils import Square, coord_from_square
+from chessshootout.backend.utils import BOARD_SIZE, Square, coord_from_square
 from chessshootout.frontend.frontend import Frontend
 from chessshootout.frontend.game.skillcheck_session import CheckContext
 from chessshootout.frontend.skillcheck.combo_view import ComboController
@@ -219,7 +219,7 @@ def test_required_wheel_placement_matches_the_pure_engine():
     app.game.skillcheck_session.skillcheck_gate(frm, to)
     app.coordinator._handle_skill_check_required(_required_payload(frm, to, value_diff=8))
     exclusions = app.game.skillcheck_session._placement_exclusions(frm, to)
-    engine = placement_square("seed-1", 8, exclusions, app.game.board.SIZE)
+    engine = placement_square("seed-1", 8, exclusions, BOARD_SIZE)
     expected = to if engine is None else sq(engine[0], engine[1])
     assert app.game.skillcheck_session.skillcheck_target == expected
 
@@ -401,7 +401,7 @@ def test_spectate_overlay_matches_the_pure_engine_render_square():
     app.coordinator._handle_skill_check_spectate(
         _spectate_payload(frm, to, kind="wheel", value_diff=8))
     exclusions = app.game.skillcheck_session._placement_exclusions(frm, to)
-    engine = placement_square("seed-1", 8, exclusions, app.game.board.SIZE)
+    engine = placement_square("seed-1", 8, exclusions, BOARD_SIZE)
     expected = to if engine is None else sq(engine[0], engine[1])
     assert app.game.skillcheck_session.skillcheck_target == expected, \
         "the spectator reconstructs the same relocated square as the mover"
@@ -489,7 +489,7 @@ def test_resume_reopens_my_pending_check_at_the_right_elapsed():
     assert pg.time.get_ticks() - ctrl.start_ms == pytest.approx(1200, abs=80), "back-dated start"
     frm, to = sq(4, 3), sq(3, 3)
     exclusions = app.game.skillcheck_session._placement_exclusions(frm, to)
-    engine = placement_square("s", 3, exclusions, app.game.board.SIZE)
+    engine = placement_square("s", 3, exclusions, BOARD_SIZE)
     expected = to if engine is None else sq(engine[0], engine[1])
     assert app.game.skillcheck_session.skillcheck_target == expected, \
         "resume renders the same engine-seeded square as the live gate"

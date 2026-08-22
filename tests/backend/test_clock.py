@@ -7,14 +7,18 @@ the mover's clock running until ``promote`` finalizes the ply, and undo round-tr
 the full clock snapshot.
 """
 
+import logging
+
 import pytest
 
+from chessshootout.backend.backend import Backend
 from chessshootout.backend.clock import Clock
+from chessshootout.backend.fen import apply_fen
 from chessshootout.backend.pieces import PieceColor
 
 from tests.helpers import (
     BLACK, WHITE, K, Q, R, B, P,
-    make_backend, piece, sq,
+    NO_CASTLING, make_backend, piece, sq,
 )
 
 
@@ -25,6 +29,21 @@ def fake_now(ts):
 def make_clock(initial=300, increment=5, ts=None):
     ts = ts if ts is not None else [0.0]
     return Clock.create(initial, increment, now_provider=fake_now(ts)), ts
+
+
+def watch_legal_move_scans(backend):
+    """Records every _has_no_legal_moves call the engine makes. The scan walks all
+    64 squares generating legal moves for each piece, so it is by far the most
+    expensive thing tick_clock could do -- and tick_clock runs once per frame."""
+    calls = []
+    original = backend._has_no_legal_moves
+
+    def counted(color):
+        calls.append(color)
+        return original(color)
+
+    backend._has_no_legal_moves = counted
+    return calls
 
 
 def test_clock_construction_defaults():
@@ -256,7 +275,9 @@ def test_timeout_black_results_in_white_wins_on_time():
 
 
 def test_timeout_outranks_insufficient_material_DEVIATION():
-    """FIDE 6.9 draws a flag-fall the opponent can't mate; we lose it (chess.com)."""
+    """FIDE 6.9 draws a flag-fall the opponent can't mate; we lose it (chess.com).
+    Only a side with no legal move at all keeps its clock frozen, and White has
+    plenty here, so the flag falls on the tick."""
     bk = make_backend({
         sq(7, 4): piece(K, WHITE),
         sq(0, 4): piece(K, BLACK),
@@ -266,10 +287,16 @@ def test_timeout_outranks_insufficient_material_DEVIATION():
     bk.setup_clock(initial_seconds=1.0, increment_seconds=0, now_provider=fake_now(ts))
     ts[0] = 2.0
     bk.tick_clock()
+    assert bk.clock.flagged == PieceColor.WHITE
+    assert bk.clock.white_remaining == 0
+    assert bk.clock.running_for is None
     assert bk.game_result() == "black_wins_on_time"
 
 
 def test_no_tick_after_game_over():
+    """A mated side must never be flagged on top of the mate, so the clock is not
+    charged at all in a position with no legal move -- remaining times, running
+    side and the last-tick stamp all stand exactly as they were."""
     bk = make_backend({
         sq(7, 7): piece(K, WHITE),
         sq(6, 5): piece(P, WHITE),
@@ -281,10 +308,154 @@ def test_no_tick_after_game_over():
     ts = [0.0]
     bk.setup_clock(60, 0, now_provider=fake_now(ts))
     assert bk.game_result() == "black_wins"
-    pre_white = bk.clock.white_remaining
+    pre = bk.clock.snapshot()
     ts[0] = 999.0
     bk.tick_clock()
-    assert bk.clock.white_remaining == pre_white
+    assert bk.clock.snapshot() == pre
+    assert bk.clock.flagged is None
+    assert bk.game_result() == "black_wins"
+
+
+def test_routine_ticks_scan_for_legal_moves_at_most_once_per_position():
+    """The client ticks the clock once per frame, and the whole-board scan is far
+    too heavy to pay for at that rate -- it used to run on every single frame.
+    The verdict a position gets is remembered instead, so only the first frame
+    in a position looks at the board."""
+    bk = make_backend({
+        sq(7, 4): piece(K, WHITE),
+        sq(0, 4): piece(K, BLACK),
+        sq(6, 0): piece(P, WHITE),
+    })
+    ts = [0.0]
+    bk.setup_clock(300, 0, now_provider=fake_now(ts))
+    scans = watch_legal_move_scans(bk)
+    for step in (1.0, 2.0, 3.0):
+        ts[0] = step
+        bk.tick_clock()
+    assert scans == [PieceColor.WHITE]
+    assert bk.clock.white_remaining == pytest.approx(297.0)
+
+
+def test_ticks_after_a_ply_reuse_the_verdict_that_ply_already_reached():
+    """Every ply that lands already asks whether the side to move is stuck -- that
+    question is what tells checkmate from an ordinary move -- so the frames that
+    follow it must not ask the board all over again."""
+    bk = make_backend({
+        sq(7, 4): piece(K, WHITE),
+        sq(0, 4): piece(K, BLACK),
+        sq(6, 0): piece(P, WHITE),
+    })
+    ts = [0.0]
+    bk.setup_clock(300, 0, now_provider=fake_now(ts))
+    assert bk.try_move(sq(6, 0), sq(5, 0)).legal
+    scans = watch_legal_move_scans(bk)
+    for step in (1.0, 2.0, 3.0):
+        ts[0] = step
+        bk.tick_clock()
+    assert scans == []
+    assert bk.clock.black_remaining == pytest.approx(297.0)
+
+
+def test_a_dead_position_freezes_a_running_clock_at_its_full_time():
+    """A clock still running on a position that has no legal move -- a finished
+    game set up from a FEN, say -- must not bleed a single second, because the
+    times on screen are the ones the game ended at. One scan settles that for the
+    whole position, however many frames go by."""
+    bk = make_backend({
+        sq(7, 7): piece(K, WHITE),
+        sq(6, 5): piece(P, WHITE),
+        sq(6, 6): piece(P, WHITE),
+        sq(6, 7): piece(P, WHITE),
+        sq(7, 0): piece(R, BLACK),
+        sq(0, 0): piece(K, BLACK),
+    }, turn=WHITE, castling_rights=NO_CASTLING)
+    ts = [0.0]
+    bk.setup_clock(60, 0, now_provider=fake_now(ts))
+    scans = watch_legal_move_scans(bk)
+    for step in range(1, 11):
+        ts[0] = step * 30.0
+        bk.tick_clock()
+    assert scans == [PieceColor.WHITE]
+    assert bk.clock.white_remaining == 60
+    assert bk.clock.flagged is None
+
+
+def test_loading_a_finished_position_freezes_a_clock_that_was_already_running():
+    """apply_fen swaps the whole board in without touching the clock, and it
+    leaves the ply count at the same zero the previous position had -- so the
+    loader has to drop the remembered verdict, or a game that is already over
+    goes on charging the side to move."""
+    bk = Backend()
+    bk.new_game()
+    ts = [0.0]
+    bk.setup_clock(60, 0, now_provider=fake_now(ts))
+    ts[0] = 1.0
+    bk.tick_clock()
+    before_load = bk.clock.white_remaining
+    apply_fen(bk, "7k/8/8/8/8/8/5PPP/r6K w - - 0 1")
+    ts[0] = 40.0
+    bk.tick_clock()
+    assert bk.game_result() == "black_wins"
+    assert bk.clock.white_remaining == pytest.approx(before_load)
+
+
+def test_a_take_back_drops_the_verdict_before_another_ply_reuses_its_number():
+    """The verdict is remembered against the number of plies played, and a
+    promotion left waiting on its piece files none of its own. Take the mate back
+    and push a pawn instead and both plies are ply 1, so a verdict that outlived
+    the take-back would freeze a clock that has to keep running."""
+    bk = make_backend({
+        sq(2, 6): piece(K, WHITE),
+        sq(2, 0): piece(Q, WHITE),
+        sq(1, 1): piece(P, WHITE),
+        sq(0, 7): piece(K, BLACK),
+    }, turn=WHITE, castling_rights=NO_CASTLING)
+    ts = [0.0]
+    bk.setup_clock(300, 0, now_provider=fake_now(ts))
+    assert bk.try_move(sq(2, 0), sq(0, 0)).is_checkmate
+    bk.undo()
+    assert bk.try_move(sq(1, 1), sq(0, 1)).promotion_required
+    ts[0] = 5.0
+    bk.tick_clock()
+    assert bk.clock.white_remaining == pytest.approx(295.0)
+
+
+def test_flag_falling_tick_scans_once_and_keeps_the_flag():
+    """The scan the tick pays for settles the position, not the flag: a side that
+    does have moves is charged as usual and keeps the flag it just lost."""
+    bk = make_backend({
+        sq(7, 4): piece(K, WHITE),
+        sq(0, 4): piece(K, BLACK),
+        sq(6, 0): piece(P, WHITE),
+    })
+    ts = [0.0]
+    bk.setup_clock(initial_seconds=1.0, increment_seconds=0, now_provider=fake_now(ts))
+    scans = watch_legal_move_scans(bk)
+    ts[0] = 2.0
+    bk.tick_clock()
+    assert scans == [PieceColor.WHITE]
+    assert bk.clock.flagged == PieceColor.WHITE
+    assert bk.game_result() == "black_wins_on_time"
+
+
+def test_tick_after_a_flag_has_fallen_scans_nothing_more():
+    """Once a flag is down the clock is finished, so every later frame returns
+    before the scan and before touching a single field."""
+    bk = make_backend({
+        sq(7, 4): piece(K, WHITE),
+        sq(0, 4): piece(K, BLACK),
+        sq(6, 0): piece(P, WHITE),
+    })
+    ts = [0.0]
+    bk.setup_clock(initial_seconds=1.0, increment_seconds=0, now_provider=fake_now(ts))
+    ts[0] = 2.0
+    bk.tick_clock()
+    after_flag = bk.clock.snapshot()
+    scans = watch_legal_move_scans(bk)
+    ts[0] = 50.0
+    bk.tick_clock()
+    assert scans == []
+    assert bk.clock.snapshot() == after_flag
 
 
 def test_undo_restores_clock_state():
@@ -378,3 +549,46 @@ def test_add_time_to_flagged_player_is_noop():
     assert added == 0.0
     assert clock.white_remaining == 0.0
     assert clock.flagged == PieceColor.WHITE
+
+
+@pytest.mark.parametrize(
+    "running_for, expected_side, expect_anchor",
+    [
+        pytest.param("white", PieceColor.WHITE, True, id="white_running"),
+        pytest.param("black", PieceColor.BLACK, True, id="black_running"),
+        pytest.param(None, None, False, id="nobody_running"),
+    ],
+)
+def test_restore_from_server_adopts_known_wire_values_silently(
+    running_for, expected_side, expect_anchor, caplog
+):
+    """The three spellings the server actually sends are routine sync, not a
+    degraded state, so none of them may leave a warning in the crash-log buffer."""
+    clock, ts = make_clock(300, 5)
+    ts[0] = 9.0
+    with caplog.at_level(logging.WARNING, logger="chess.backend"):
+        clock.restore_from_server(120.0, 90.5, running_for)
+    assert clock.white_remaining == 120.0
+    assert clock.black_remaining == 90.5
+    assert clock.running_for == expected_side
+    assert clock.last_tick_at == (9.0 if expect_anchor else None)
+    assert [r for r in caplog.records if r.name == "chess.backend"] == []
+
+
+def test_restore_from_server_warns_but_still_stops_on_an_unknown_side(caplog):
+    """A side the client cannot read is a degraded sync, not a crash: the clock
+    still stops tolerantly, but silence used to make it look like the server had
+    genuinely sent 'nobody is running' -- the warning names the value instead."""
+    clock, ts = make_clock(300, 5)
+    clock.start()
+    ts[0] = 4.0
+    with caplog.at_level(logging.WARNING, logger="chess.backend"):
+        clock.restore_from_server(120.0, 90.0, "sideways")
+    assert clock.running_for is None
+    assert clock.last_tick_at is None
+    assert clock.white_remaining == 120.0
+    assert clock.black_remaining == 90.0
+    warnings = [r for r in caplog.records
+                if r.name == "chess.backend" and r.levelno == logging.WARNING]
+    assert len(warnings) == 1
+    assert "sideways" in warnings[0].getMessage()

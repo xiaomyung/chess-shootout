@@ -1,3 +1,5 @@
+from collections.abc import Callable
+
 import pygame as pg
 
 from chessshootout.infra import countries
@@ -19,10 +21,23 @@ ROW_CODE_INSET = 10
 
 
 class CountryPicker(BaseModal, ScrollHost):
+    """
+    The searchable country list behind the flag on the player's profile,
+    opened from the Profile sub-view of the menu. It is a global modal drawn
+    in the shared shell, and it scrolls its own list, so while it is up the
+    mouse wheel belongs to it rather than to the screen behind it
+    """
 
-    def __init__(self, window):
+    def __init__(self, window: pg.Surface) -> None:
+        """
+        Build the picker once at startup, with the whole country list loaded
+        and a search box ready. It knows nothing about the player's country
+        until show hands it one
+
+        :param window: the app window surface this modal draws onto
+        """
         super().__init__(window)
-        self.on_pick = None
+        self.on_pick: Callable[[str], None] | None = None
         self.current = ""
         self._scroll_px = 0.0
         self._content_px = 0
@@ -30,7 +45,7 @@ class CountryPicker(BaseModal, ScrollHost):
                                 bg=Colors.bg, radius=7)
         self.search.padding = 11
         self._filtered = list(countries.COUNTRIES)
-        self._row_rects = []
+        self._row_rects: list[tuple[pg.Rect, str]] = []
         self._list_rect = pg.Rect(0, 0, 0, 0)
         self._search_rect = pg.Rect(0, 0, 0, 0)
         self._cancel_rect = pg.Rect(0, 0, 0, 0)
@@ -43,7 +58,11 @@ class CountryPicker(BaseModal, ScrollHost):
         )
         self._on_rect_changed()
 
-    def _on_rect_changed(self):
+    def _on_rect_changed(self) -> None:
+        """
+        Rebuild the padding and every font from the new size, so the title,
+        the rows, the search box and the button all scale with the window
+        """
         h = max(self.rect.height, 1)
         self.padding = max(int(self.rect.width * 0.032), 12)
         self.title_font = get_display_font(max(int(h * 0.044), 16))
@@ -52,7 +71,16 @@ class CountryPicker(BaseModal, ScrollHost):
         self.button_font = get_font(max(int(h * 0.028), 12), bold=True)
         self.search_font = get_font(max(int(h * 0.028), 12))
 
-    def show(self, current_code, on_pick):
+    def show(self, current_code: str, on_pick: Callable[[str], None]) -> None:
+        """
+        Open the picker on the country the player has now, with the search box
+        empty and focused and the list back at the top
+
+        :param current_code: the player's current ISO country code, empty when
+            they have no flag set
+        :param on_pick: run with the code the player picks, empty string when
+            they choose to have no flag
+        """
         self.current = countries.normalize(current_code)
         self.on_pick = on_pick
         self.search.text = ""
@@ -62,12 +90,21 @@ class CountryPicker(BaseModal, ScrollHost):
         self._apply_filter()
         super().show()
 
-    def hide(self):
+    def hide(self) -> None:
+        """
+        Close the picker, take keyboard focus off the search box and stop any
+        scroll still gliding, so it opens clean the next time
+        """
         super().hide()
         self.search.focused = False
         self.scroll.cancel()
 
-    def _apply_filter(self):
+    def _apply_filter(self) -> None:
+        """
+        Narrow the list to what the player has typed, matching either an
+        accent-folded country name or a country code, and jump back to the top
+        of the results
+        """
         raw = self.search.text.strip()
         self._scroll_px = 0.0
         self.scroll.cancel()
@@ -79,14 +116,26 @@ class CountryPicker(BaseModal, ScrollHost):
         self._filtered = [(code, name) for code, name in countries.COUNTRIES
                           if folded in countries.fold(name) or upper in code]
 
-    def _entries(self):
+    def _entries(self) -> list[tuple[str, str]]:
+        """
+        Build the rows to draw: the filtered countries, led by a no-flag row
+        whenever nothing has been typed, so clearing the flag is always one
+        click away
+
+        :returns: (country code, label) pairs in the order they are drawn
+        """
         rows = []
         if not self.search.text.strip():
             rows.append(("", "No flag"))
         rows.extend(self._filtered)
         return rows
 
-    def draw(self):
+    def draw(self) -> None:
+        """
+        Paint the picker: shell, title, search box, country list and the
+        Cancel button, with the list taking whatever room is left between
+        them. Drawing is also what fixes the rects clicks are tested against
+        """
         if not self.visible or self.rect.width <= 0:
             return
         self.scroll.tick()
@@ -116,7 +165,14 @@ class CountryPicker(BaseModal, ScrollHost):
         self._content_px = len(entries) * self._row_h
         self._draw_list(entries)
 
-    def _draw_list(self, entries):
+    def _draw_list(self, entries: list[tuple[str, str]]) -> None:
+        """
+        Draw the slice of the country list that is actually on screen, clipped
+        to the list area, and remember where each row landed so a click can be
+        matched to a country
+
+        :param entries: every row of the filtered list, in display order
+        """
         self._row_rects = []
         max_px = max(0, self._content_px - self._list_rect.height)
         self._scroll_px = max(0.0, min(self._scroll_px, max_px))
@@ -137,7 +193,17 @@ class CountryPicker(BaseModal, ScrollHost):
             self.window.set_clip(prev)
         self.scroll.draw_thumb(self.window)
 
-    def _draw_row(self, row_rect, code, label, mouse):
+    def _draw_row(self, row_rect: pg.Rect, code: str, label: str,
+                  mouse: tuple[int, int]) -> None:
+        """
+        Draw one country row -- flag, name and code -- framed when it is the
+        country the player already has and lit while the cursor is over it
+
+        :param row_rect: area of this row in window pixels
+        :param code: ISO country code, empty on the no-flag row
+        :param label: country name as the player reads it
+        :param mouse: cursor position in window pixels, for the hover state
+        """
         selected = code == self.current
         if selected:
             self.window.blit(
@@ -160,13 +226,27 @@ class CountryPicker(BaseModal, ScrollHost):
             self.window.blit(code_surf, (row_rect.right - ROW_CODE_INSET - code_surf.get_width(),
                                          row_rect.centery - code_surf.get_height() // 2))
 
-    def _pick(self, code):
+    def _pick(self, code: str) -> None:
+        """
+        Settle on a country: close the picker first and only then tell the
+        profile, so the callback runs with the modal already gone
+
+        :param code: chosen ISO country code, empty string for no flag
+        """
         cb = self.on_pick
         self.hide()
         if cb is not None:
             cb(code)
 
-    def handle_click(self, pos):
+    def handle_click(self, pos: tuple[int, int]) -> bool:
+        """
+        Route a click to the search box, the Cancel button or a country row.
+        The picker claims every click while it is open, since it covers the
+        profile behind it and nothing there should react
+
+        :param pos: click position in window pixels
+        :returns: True whenever the picker is open
+        """
         if not self.visible:
             return False
         if self._search_rect.collidepoint(pos):
@@ -182,7 +262,14 @@ class CountryPicker(BaseModal, ScrollHost):
                     return True
         return True
 
-    def handle_key(self, event):
+    def handle_key(self, event: pg.event.Event) -> bool:
+        """
+        Feed typing to the search box and re-filter the list on every change
+        that lands, which is what makes the search feel live
+
+        :param event: pygame KEYDOWN event
+        :returns: True when the search box took the key
+        """
         if not self.visible:
             return False
         consumed = self.search.handle_key(event)

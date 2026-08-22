@@ -160,6 +160,33 @@ async def test_matchmake_async_sends_country(captured):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("raised, text", [
+    pytest.param(httpx.ConnectError("connection refused"), "connection refused",
+                 id="connection_refused"),
+    pytest.param(httpx.ConnectTimeout("timed out"), "timed out", id="timed_out"),
+])
+async def test_matchmake_async_wraps_a_network_failure_in_transport_error(raised, text):
+    """matchmake was the one request method that let a raw httpx exception escape:
+    _matchmake_with_retries only catches TransportError, so an unreachable server
+    skipped the retry loop entirely and reached the player as whatever text httpx
+    happened to put in the exception. Wrapped, it joins the same retry-then-
+    server_unreachable path resume_async and healthz_async already feed, and the
+    httpx text survives inside the wrapper for the log."""
+    def boom(request):
+        raise raised
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(boom)) as http:
+        st = ServerTransport("localhost:8000")
+        req = MatchmakeRequest(nickname="Alice", client_uuid=ALICE,
+                               time_minutes=5, increment_seconds=0)
+        with pytest.raises(TransportError) as info:
+            await st.matchmake_async(req, http)
+    assert not isinstance(info.value, (TransportHTTPError, SchemaVersionMismatch)), (
+        "a network failure is the plain transport error, not an HTTP or schema one")
+    assert text in str(info.value)
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     "status_code, body, expected_exc, expected_status",
     [
@@ -815,16 +842,33 @@ def test_fetch_news_maps_a_non_200_to_a_typed_http_error(monkeypatch):
     assert info.value.status_code == 404
 
 
+def _imports_a_third_party_root(path, roots):
+    """AST rather than a line-anchored regex: prose naming httpx can never trip it,
+    and no import spelling can hide from it. Relative imports are skipped -- they
+    resolve inside chessshootout, so they can never name a third-party root."""
+    import ast
+
+    with open(path, encoding="utf-8") as f:
+        tree = ast.parse(f.read(), filename=path)
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            if any(alias.name.split(".")[0] in roots for alias in node.names):
+                return True
+        elif isinstance(node, ast.ImportFrom):
+            if node.level:
+                continue
+            if node.module and node.module.split(".")[0] in roots:
+                return True
+    return False
+
+
 def test_only_transport_module_imports_httpx_or_websockets():
     import os
-    import re
 
     import chessshootout
 
     package_root = os.path.dirname(os.path.abspath(chessshootout.__file__))
-    bad_pattern = re.compile(r"^\s*(import\s+httpx|import\s+websockets|"
-                                r"from\s+httpx|from\s+websockets)",
-                                re.MULTILINE)
+    roots = {"httpx", "websockets"}
     offenders = []
     scanned = 0
     for pkg in ("frontend", "online"):
@@ -838,9 +882,8 @@ def test_only_transport_module_imports_httpx_or_websockets():
                 scanned += 1
                 if path.endswith(os.path.join("online", "transport.py")):
                     continue
-                with open(path, encoding="utf-8") as f:
-                    if bad_pattern.search(f.read()):
-                        offenders.append(path)
+                if _imports_a_third_party_root(path, roots):
+                    offenders.append(path)
     assert scanned > 50, f"only scanned {scanned} files, guard root is likely wrong"
     assert offenders == [], (
         f"only online/transport.py may import httpx/websockets: {offenders}"

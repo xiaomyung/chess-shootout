@@ -8,6 +8,14 @@ LOOP = "loop"
 
 @dataclass(frozen=True)
 class Slot:
+    """
+    One named sound in the game, and the two folders behind it: where the
+    offline processor reads its raw takes from, and where the finished files
+    the game plays live. Every slot is a folder, and how many files are in it
+    is what decides the behaviour -- none at all is a deliberate silence, one
+    always plays, several become a pool picked from at random
+    """
+
     src: str
     dst: str
     profile: str = SHORT
@@ -38,7 +46,17 @@ STREAKS = ("first_blood", "double_kill", "triple_kill", "quadra_kill",
            "rampage", "unstoppable", "godlike")
 
 
-def _build_slots():
+def _build_slots() -> dict[str, Slot]:
+    """
+    Write out the game's entire sound catalogue once, at import: every piece
+    move, every gun, the announcer's kill-streak calls, the skill-check cues,
+    the interface clicks and the clock sounds, each pointed at the folder it
+    lives in. This registry is the single source of truth shared by the running
+    game and the offline sound processor, which is why this module holds no
+    pygame and no playback code of its own
+
+    :returns: every slot, keyed by the name the game plays it under
+    """
     slots = {}
     for piece in PIECES:
         slots[f"move_{piece}"] = Slot(f"move_{piece}", f"moves/{piece}")
@@ -108,13 +126,36 @@ def _build_slots():
 SLOTS = _build_slots()
 
 
-def move_slot(piece_value):
+def move_slot(piece_value: str) -> str:
+    """
+    Name the slot holding a piece's move sound, so that each kind of piece has
+    its own weight when it lands on a square
+
+    :param piece_value: the piece kind's lowercase name, a PieceType value
+    :returns: the slot name to play the move through
+    """
     return f"move_{piece_value}"
 
 
-def gun_slot(piece_value):
+def gun_slot(piece_value: str) -> str:
+    """
+    Name the slot holding the weapon a piece fires when it captures -- a pawn
+    a revolver, a king a ray gun. The piece-to-weapon table lives here and is
+    mirrored by the visual gun effects, with a drift guard keeping the two in
+    step
+
+    :param piece_value: the capturing piece kind's lowercase name
+    :returns: the slot name of that piece's gun
+    """
     return f"gun_{PIECE_GUN[piece_value]}"
 
 
-def hit_slot(victim_value):
+def hit_slot(victim_value: str) -> str:
+    """
+    Name the slot for the grunt a piece makes as it is shot off the board. The
+    queen has a voice of her own; every other piece shares one
+
+    :param victim_value: the captured piece kind's lowercase name
+    :returns: the slot name of the hit sound to play
+    """
     return "announcer_hits_queen" if victim_value == "queen" else "announcer_hits"

@@ -245,7 +245,15 @@ _RAW = (
 )
 
 
-def fold(name):
+def fold(name: str) -> str:
+    """
+    Flatten a country name so searching and sorting ignore accents and case,
+    which is what lets a player type "reunion" and still find the accented
+    entry in the country picker. It is also the sort key this list is built on
+
+    :param name: country name exactly as it is displayed, accents included
+    :returns: accent-free casefolded form, only ever compared, never shown
+    """
     decomposed = unicodedata.normalize("NFKD", name)
     return "".join(ch for ch in decomposed if not unicodedata.combining(ch)).casefold()
 
@@ -261,21 +269,51 @@ _CODES_TUPLE = tuple(code for code, _ in COUNTRIES)
 _REGIONAL_INDICATOR_A = 0x1F1E6
 
 
-def normalize(code):
+def normalize(code: str | None) -> str:
+    """
+    Turn whatever was stored, typed or sent by the server into a country code
+    this list actually knows, or into the empty string meaning no country set.
+    Every other function here runs it first, so an unknown code is never shown
+
+    :param code: candidate two-letter code in any case; blank or None allowed
+    :returns: the uppercase code when recognised, otherwise the empty string
+    """
     code = (code or "").strip().upper()
     return code if code in CODES else ""
 
 
-def flag_emoji(code):
+def flag_emoji(code: str | None) -> str:
+    """
+    Give a country its flag as the regional-indicator pair its two letters map
+    to. The frontend never renders that pair as text -- it uses it to look up
+    the pre-rendered flag PNG drawn beside a player's nickname
+
+    :param code: two-letter country code; unknown or blank means no flag
+    :returns: the two-character flag emoji, or empty when there is no country
+    """
     code = normalize(code)
     if not code:
         return ""
     return "".join(chr(_REGIONAL_INDICATOR_A + ord(ch) - ord("A")) for ch in code)
 
 
-def name_for(code):
+def name_for(code: str | None) -> str:
+    """
+    Give the display name of a country code, which is what the profile view
+    shows once a player has picked one. An unknown code answers empty, and the
+    caller turns that into the invitation to choose a country
+
+    :param code: two-letter country code, blank or unknown allowed
+    :returns: the country's display name, or empty when it is not a known code
+    """
     return _NAMES.get(normalize(code), "")
 
 
-def random_code():
+def random_code() -> str:
+    """
+    Pick a country at random, used to give the practice opponents in local and
+    bot games a flag so the player strips look like a real match
+
+    :returns: one known two-letter country code, uniformly chosen
+    """
     return random.choice(_CODES_TUPLE)

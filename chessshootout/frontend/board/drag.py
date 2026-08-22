@@ -1,8 +1,11 @@
 import math
+from collections.abc import Callable
+from typing import Any, cast
 
 import pygame as pg
 
-from chessshootout.backend.utils import Square
+from chessshootout.backend.pieces import Piece
+from chessshootout.backend.utils import HistoryEntry, Square
 
 DRAG_THRESHOLD_PX = 6
 DRAG_GHOST_ALPHA_FRACTION = 0.30
@@ -26,22 +29,58 @@ DRAG_SETTLE_MAX_T = 2.0
 
 
 class DragPhysics:
-    def __init__(self, board):
-        self.board = board
-        self._drag = None
-        self._drag_cursor = None
-        self._press_pos = None
+    """
+    The weight and swing of a piece the player is dragging. It owns the grab
+    point on the sprite, the torsional spring that tilts the piece as the hand
+    moves and the settle glide that drops it onto a square; the Board hands it
+    every press, motion and release. The DRAG_K_* and LIFT_SCALE constants above
+    are approved feel-tuning knobs, not derived quantities
+    """
 
-    def begin_press(self, pos):
+    def __init__(self, board: Any) -> None:
+        """
+        Bind the drag physics to the board that owns it. Nothing is being
+        dragged yet -- drag state appears only once a press has travelled far
+        enough to count as a drag
+
+        :param board: the Board this belongs to, read for square geometry,
+            piece sprites and the match, and written back through dragging_from
+        """
+        self.board = board
+        self._drag: dict[str, Any] | None = None
+        self._drag_cursor: tuple[int, int] | None = None
+        self._press_pos: tuple[int, int] | None = None
+
+    def begin_press(self, pos: tuple[int, int]) -> None:
+        """
+        Remember where the left button went down. That point is both the grab
+        point on the sprite and the origin the drag threshold is measured from,
+        so a click and a drag start out identically
+
+        :param pos: press position in window pixels
+        """
         self._press_pos = pos
 
-    def _grab_local_for(self, from_sq, press_pos, piece):
+    def _grab_local_for(self, from_sq: Square, press_pos: tuple[int, int] | None,
+                        piece: Piece) -> tuple[float, float]:
+        """
+        Work out where on the sprite the player took hold, which decides how far
+        the piece swings while it is carried. A press on visible art grabs
+        exactly there; a press on a transparent corner, or no press at all,
+        falls back to the top of the art so the piece hangs by its head
+
+        :param from_sq: square the piece is being lifted from
+        :param press_pos: press position in window pixels, or None when the drag
+            did not start from a press
+        :param piece: piece being lifted, which selects the sprite geometry
+        :returns: grab point in sprite-local pixels
+        """
         board = self.board
         geom = board._sprite_geom.get((piece.type, piece.color))
         if geom is None:
             return (board.cell_size / 2, board.cell_size / 2)
         if press_pos is None:
-            return geom["top_center"]
+            return cast(tuple[float, float], geom["top_center"])
         rect = board._cell_rect(from_sq.row, from_sq.col)
         local = (press_pos[0] - rect.x, press_pos[1] - rect.y)
         surface = board.piece_images_scaled[(piece.type, piece.color)]
@@ -50,9 +89,18 @@ class DragPhysics:
         if inside and geom["bbox"].collidepoint(local) and \
                 surface.get_at((int(local[0]), int(local[1]))).a > 0:
             return local
-        return geom["top_center"]
+        return cast(tuple[float, float], geom["top_center"])
 
-    def _begin_drag_physics(self, pos, now):
+    def _begin_drag_physics(self, pos: tuple[int, int], now: int) -> None:
+        """
+        Turn a press on the selected square into a live drag, capturing the grab
+        point, the lever arm from it to the sprite's centre of mass and the
+        entry glide that pulls the piece from its home square to the cursor. A
+        square with no piece on it leaves no state behind
+
+        :param pos: cursor position in window pixels
+        :param now: pygame tick count in milliseconds
+        """
         board = self.board
         piece = board.match.piece_at(board.selected_square)
         if piece is None:
@@ -83,7 +131,16 @@ class DragPhysics:
             "phase": "drag",
         }
 
-    def update_drag_physics(self, now):
+    def update_drag_physics(self, now: int) -> None:
+        """
+        Step the carried piece one frame: ease the lift and the entry glide,
+        measure how fast the hand is moving and accelerating, then integrate the
+        torsional spring that tilts the piece. A piece already dropping onto a
+        square goes to the settle integrator instead, and a read-only board or a
+        browsed position freezes the whole thing
+
+        :param now: pygame tick count in milliseconds
+        """
         board = self.board
         if board.read_only or board.review_ply is not None:
             return
@@ -142,7 +199,19 @@ class DragPhysics:
         d["theta"] = theta
         d["omega"] = omega
 
-    def begin_settle(self, target_sq, on_settled):
+    def begin_settle(self, target_sq: Square,
+                     on_settled: Callable[[], None] | None) -> None:
+        """
+        Start the glide that drops the carried piece onto a square and rocks it
+        upright. Both endings come through here: a move that landed glides to
+        its destination, and a drag that landed nothing glides home. The
+        callback is what a landed move waits on, so the drop is seen before the
+        move is announced
+
+        :param target_sq: square the piece glides onto
+        :param on_settled: called once when the piece has come to rest, or None
+            when nothing is waiting on the drop
+        """
         d = self._drag
         if d is None:
             return
@@ -162,7 +231,17 @@ class DragPhysics:
         d["settle_dur_ms"] = self.board.animation_duration_ms
         d["on_settled"] = on_settled
 
-    def _update_settle(self, d, now):
+    def _update_settle(self, d: dict[str, Any], now: int) -> None:
+        """
+        Step the drop glide: ease the piece toward the centre of its target
+        square while a stiff spring brings the tilt back upright. It finishes
+        when both are done, or once DRAG_SETTLE_MAX_T times the glide duration
+        has passed, so a piece can never be left hanging. Drag state is cleared
+        before the settle callback runs
+
+        :param d: the live drag state, already known to be in the settle phase
+        :param now: pygame tick count in milliseconds
+        """
         board = self.board
         dt = max(0.0, min((now - d["last_tick"]) / 1000.0, DRAG_DT_MAX))
         d["last_tick"] = now
@@ -198,19 +277,37 @@ class DragPhysics:
             if cb is not None:
                 cb()
 
-    def clear_drag_state(self):
+    def clear_drag_state(self) -> None:
+        """
+        Drop every trace of the current drag, the board's dragging_from
+        included, so that square goes back to being drawn by the ordinary piece
+        pass
+        """
         self._drag = None
         self.board.dragging_from = None
         self._drag_cursor = None
 
-    def cancel_drag_physics(self):
+    def cancel_drag_physics(self) -> None:
+        """
+        Abandon a drag outright, which is what a resize, a new game or a screen
+        being left does. A settle that was already running still fires its
+        callback, so a move waiting on the drop is never lost
+        """
         d = self._drag
         self.clear_drag_state()
         self._press_pos = None
         if d is not None and d["phase"] == "settle" and d["on_settled"] is not None:
             d["on_settled"]()
 
-    def update_drag_motion(self, pos):
+    def update_drag_motion(self, pos: tuple[int, int]) -> None:
+        """
+        Follow the cursor for a press that is becoming a drag or already is one.
+        The press only turns into a drag once it has moved DRAG_THRESHOLD_PX,
+        which is what keeps a plain click from lifting the piece; a read-only
+        board, an open promotion picker and a browsed position all refuse
+
+        :param pos: cursor position in window pixels
+        """
         board = self.board
         if board.read_only:
             return
@@ -231,7 +328,15 @@ class DragPhysics:
             return
         self._begin_drag_physics(pos, pg.time.get_ticks())
 
-    def end_press(self):
+    def end_press(self) -> bool:
+        """
+        Finish a left press. A drag whose move already landed is left to the
+        settle it is running; a drag that landed nothing is sent gliding back to
+        the square it came from, so a piece is never left stuck to the cursor
+
+        :returns: True when a piece really was being dragged, which the screen
+            uses to decide whether to play the drop sound
+        """
         board = self.board
         was_dragging = board.dragging_from is not None
         self._press_pos = None
@@ -244,26 +349,74 @@ class DragPhysics:
         self.clear_drag_state()
         return was_dragging
 
-    def is_dragging(self):
+    def is_dragging(self) -> bool:
+        """
+        Whether a piece is off its square in the player's hand right now, the
+        drop glide included. The board asks before it decides which squares to
+        draw pieces on
+
+        :returns: True while a piece is being carried or dropped
+        """
         return self._drag is not None or self.board.dragging_from is not None
 
-    def is_settling(self):
+    def is_settling(self) -> bool:
+        """
+        Whether the carried piece is in its closing glide onto a square. The
+        board counts this as animating, so a fresh click cannot cut the drop
+        short
+
+        :returns: True while the settle glide is running
+        """
         return self._drag is not None and self._drag["phase"] == "settle"
 
-    def is_active(self):
+    def is_active(self) -> bool:
+        """
+        Whether any drag state is held at all, carrying or settling. The move
+        choreography asks this before handing a landing move over to a settle
+        rather than to a normal piece animation
+
+        :returns: True while drag state exists
+        """
         return self._drag is not None
 
-    def settle_target(self):
+    def settle_target(self) -> Square | None:
+        """
+        The square a settling piece is heading for. The ordinary piece pass
+        leaves that square empty until the glide is over, so the piece is never
+        drawn twice at once
+
+        :returns: the destination square, or None when nothing is settling
+        """
         if self._drag is not None and self._drag["phase"] == "settle":
-            return self._drag["settle_to_sq"]
+            return cast(Square, self._drag["settle_to_sq"])
         return None
 
-    def draw_drag_overlay(self):
+    def draw_drag_overlay(self) -> None:
+        """
+        Draw the carried piece on top of everything else on the board. Nothing
+        is drawn while the player is browsing the move history, where the board
+        belongs to a past position rather than to the cursor
+        """
         if self.board.review_ply is not None:
             return
         self._draw_dragged_piece()
 
-    def _blit_lifted(self, surface, pivot_local, screen_pivot, angle_deg, zoom):
+    def _blit_lifted(self, surface: pg.Surface, pivot_local: tuple[float, float],
+                     screen_pivot: tuple[float, float], angle_deg: float,
+                     zoom: float) -> None:
+        """
+        Blit a rotated and scaled sprite so one chosen point of it lands exactly
+        on a chosen point on screen. That is what keeps the grab point glued to
+        the cursor however far the piece has swung
+
+        :param surface: sprite to draw, either the piece or its shadow
+        :param pivot_local: pivot in sprite-local pixels, the grab point while
+            carrying and the centre of mass while settling
+        :param screen_pivot: where that pivot must land, in window pixels
+        :param angle_deg: rotation in degrees, counter-clockwise as pygame
+            counts them
+        :param zoom: scale factor, above 1 while the piece is lifted
+        """
         rotated = pg.transform.rotozoom(surface, angle_deg, zoom)
         w, h = surface.get_size()
         sw, sh = w * zoom, h * zoom
@@ -272,7 +425,13 @@ class DragPhysics:
         center = (screen_pivot[0] - offset.x, screen_pivot[1] - offset.y)
         self.board.window.blit(rotated, rotated.get_rect(center=center))
 
-    def _draw_dragged_piece(self):
+    def _draw_dragged_piece(self) -> None:
+        """
+        Draw the piece in hand: a faded ghost left behind on its home square, a
+        shadow dropped below it and the piece itself tilted and enlarged by the
+        lift. A settling piece pivots about its centre of mass instead of the
+        grab point, so it lands squarely, and leaves no ghost behind
+        """
         d = self._drag
         if d is None:
             return
@@ -297,7 +456,18 @@ class DragPhysics:
         self._blit_lifted(shadow, pivot_local, shadow_anchor, angle_deg, zoom)
         self._blit_lifted(surface, pivot_local, anchor, angle_deg, zoom)
 
-    def reanchor_for_remote(self, entry, from_sq, to_sq):
+    def reanchor_for_remote(self, entry: HistoryEntry, from_sq: Square,
+                            to_sq: Square) -> None:
+        """
+        Handle the opponent capturing the very piece this player is holding. The
+        piece is about to be shot off the board, so its drag is sent straight
+        into a settle onto its own square and the capture choreography plays on
+        a piece that is standing still. Any other remote move is left alone
+
+        :param entry: history entry of the remote move that just landed
+        :param from_sq: square that move came from
+        :param to_sq: square it went to
+        """
         if self._drag is None or entry.move.captured is None:
             return
         victim_sq = (Square(from_sq.row, to_sq.col)

@@ -256,3 +256,17 @@ def test_button_click_also_animates_out_and_fires_once(monkeypatch):
     holder["ms"] += EXIT_MS + 1
     ob.draw(BOARD)
     assert ob._banners == []
+
+
+def test_fonts_are_declared_on_the_instance_and_built_once():
+    """The three fonts used to be conjured by a getattr probe against a name that
+    existed nowhere else in the class, so a typo would have silently rebuilt all
+    three on every draw. They are declared unbuilt at construction and the first
+    draw fills them in for good."""
+    ob = _banners()
+    assert (ob._name_font, ob._verb_font, ob._btn_font) == (None, None, None)
+
+    fonts = ob._fonts()
+
+    assert all(font is not None for font in fonts)
+    assert ob._fonts() == fonts

@@ -1,4 +1,6 @@
 import math
+from collections.abc import Callable
+from typing import Any, cast
 
 import pygame as pg
 
@@ -30,9 +32,31 @@ BUTTON_HEIGHT_REF = 46
 _RING_CACHE = new_cache()
 
 
-def _ring_base(size, color):
-    def build():
-        def render(surf, k):
+def _ring_base(size: int, color: str) -> pg.Surface:
+    """
+    Build, and from then on reuse, the spinner's ring with a gap cut out of
+    the top. It is drawn once per size and colour because the animation
+    rotates this surface instead of redrawing the ring every frame
+
+    :param size: ring diameter in pixels
+    :param color: ring colour as a hex string
+    :returns: ring surface with the gap at the top
+    """
+    def build() -> pg.Surface:
+        """
+        Render the ring for this size and colour, called only when the cache
+        has nothing for them yet
+
+        :returns: freshly drawn ring surface
+        """
+        def render(surf: pg.Surface, k: int) -> None:
+            """
+            Draw the ring at supersampled scale: a filled circle hollowed out
+            from the middle, then a wedge cleared to leave the gap
+
+            :param surf: oversized surface being drawn into
+            :param k: supersample factor every size must be multiplied by
+            """
             s = surf.get_width()
             c = (s / 2, s / 2)
             stroke = max(int(SPINNER_STROKE * k), 2)
@@ -50,41 +74,99 @@ def _ring_base(size, color):
     return memoized_surface(_RING_CACHE, (int(size), color), build)
 
 
-def _ring_surface(size, color, angle_deg):
+def _ring_surface(size: int, color: str, angle_deg: float) -> pg.Surface:
+    """
+    Give the spinner ring turned to a given angle, which is how the waiting
+    animation spins without any drawing work per frame
+
+    :param size: ring diameter in pixels
+    :param color: ring colour as a hex string
+    :param angle_deg: clockwise rotation in degrees
+    :returns: rotated ring surface
+    """
     base = _ring_base(size, color)
     return pg.transform.rotozoom(base, -angle_deg, 1.0)
 
 
 class ReconnectingModal(BaseModal):
+    """
+    The card drawn over the board while this client has lost the server and is
+    trying to get back into its game, counting down the time left before the
+    game is gone. The online coordinator owns it, and Esc cannot dismiss it --
+    only the Abandon game button gets the player out
+    """
 
-    def __init__(self, window):
+    def __init__(self, window: pg.Surface) -> None:
+        """
+        Build the card once at startup; it stays hidden until this client's
+        own connection actually drops
+
+        :param window: the app window surface this modal draws onto
+        """
         super().__init__(window)
-        self.on_abandon = None
-        self._disconnected_at_ms = None
-        self.button_rects = {}
-        self._font_cache = {}
+        self.on_abandon: Callable[[], None] | None = None
+        self._disconnected_at_ms: int | None = None
+        self.button_rects: dict[str, pg.Rect] = {}
+        self._font_cache: dict[str, Any] = {}
 
-    def show(self, disconnected_at_ms, on_abandon):
+    def show(self, disconnected_at_ms: int, on_abandon: Callable[[], None]) -> None:
+        """
+        Open the card and count down from the moment the connection went away,
+        which the coordinator stamps rather than the card itself
+
+        :param disconnected_at_ms: pygame tick count in milliseconds at which
+            the connection dropped
+        :param on_abandon: run when the player gives the game up from here
+        """
         super().show()
         self._disconnected_at_ms = disconnected_at_ms
         self.on_abandon = on_abandon
 
-    def hide(self):
+    def hide(self) -> None:
+        """
+        Close the card and forget both the drop time and the abandon callback
+        """
         super().hide()
         self.on_abandon = None
         self._disconnected_at_ms = None
         self.button_rects = {}
 
-    def _remaining(self):
+    def _remaining(self) -> float:
+        """
+        Work out how much of the reconnect window is left, which is the figure
+        the card counts down. With no drop time stamped it reports the whole
+        window rather than guessing
+
+        :returns: seconds left before the game is lost, negative once the
+            window has run out
+        """
         if self._disconnected_at_ms is None:
             return RECONNECT_TOTAL_SECONDS
         elapsed = (pg.time.get_ticks() - self._disconnected_at_ms) / 1000.0
         return RECONNECT_TOTAL_SECONDS - elapsed
 
-    def _fonts(self, scale):
-        return fonts_for_width(self._font_cache, scale, self._build_fonts)
+    def _fonts(self, scale: float) -> tuple[pg.font.Font, pg.font.Font,
+                                            pg.font.Font, pg.font.Font]:
+        """
+        Fetch the card's four fonts for the current scale, rebuilt only when
+        that scale changes so no font is loaded per frame
 
-    def _build_fonts(self, scale):
+        :param scale: size factor taken from the board area, 1.0 at the
+            reference size
+        :returns: heading, sub-line, countdown and button fonts
+        """
+        return cast(tuple[pg.font.Font, pg.font.Font, pg.font.Font, pg.font.Font],
+                    fonts_for_width(self._font_cache, scale, self._build_fonts))
+
+    def _build_fonts(self, scale: float) -> tuple[pg.font.Font, pg.font.Font,
+                                                  pg.font.Font, pg.font.Font]:
+        """
+        Size the heading, sub-line, countdown and button fonts from the scale,
+        each with a floor so the card stays readable over a small board
+
+        :param scale: size factor taken from the board area
+        :returns: heading, sub-line, countdown and button fonts
+        """
         return (
             get_display_font(max(int(HEADING_REF * scale), 16)),
             get_font(max(int(SUB_REF * scale), 11), bold=False),
@@ -92,7 +174,13 @@ class ReconnectingModal(BaseModal):
             get_font(max(int(BUTTON_REF * scale), 12), bold=True),
         )
 
-    def draw(self):
+    def draw(self) -> None:
+        """
+        Paint the card over the board: a dimming scrim, the spinning ring, the
+        heading and its reassuring line, the countdown and the Abandon game
+        button. Drawing is also what fixes the button rect clicks are tested
+        against
+        """
         if not self.visible or self.rect.width <= 0:
             self.button_rects = {}
             return
@@ -134,10 +222,18 @@ class ReconnectingModal(BaseModal):
             self.window, row, [("Abandon game", "abandon")], button_font, self.padding,
             cut=True)
 
-    def handle_click(self, pos):
+    def handle_click(self, pos: tuple[int, int]) -> bool:
+        """
+        Turn a click on Abandon game into giving the game up. The card is left
+        on screen for the coordinator to take down as it tears the session
+        apart
+
+        :param pos: click position in window pixels
+        :returns: True when the button took the click
+        """
         if not self.visible:
             return False
-        for key, br in self.button_rects.items():
+        for br in self.button_rects.values():
             if br.collidepoint(pos):
                 if self.on_abandon is not None:
                     self.on_abandon()

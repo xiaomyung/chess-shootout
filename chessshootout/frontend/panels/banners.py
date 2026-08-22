@@ -1,3 +1,6 @@
+from collections.abc import Callable
+from typing import Any
+
 import pygame as pg
 
 from chessshootout.frontend.visual.colors import Colors
@@ -23,7 +26,18 @@ SLIDE_MS = 260
 EXIT_MS = 200
 
 
-def _button_surface(label, font, ok):
+def _button_surface(label: str, font: pg.font.Font, ok: bool) -> pg.Surface:
+    """
+    Draw one of the two answer buttons a banner carries, sized around its own
+    label so Accept and Decline stay readable next to each other. The
+    accepting button is filled with the accent colour, the declining one is a
+    plain outlined chip
+
+    :param label: button text, such as Accept or Deny
+    :param font: font the label is rendered in
+    :param ok: True for the accepting button, which gets the accent fill
+    :returns: the finished button surface, ready to blit
+    """
     text = font.render(label, True, Colors.on_accent if ok else Colors.text)
     w = max(text.get_width() + 2 * BTN_PAD_X, BTN_MIN_W)
     h = text.get_height() + 2 * BTN_PAD_Y
@@ -39,12 +53,45 @@ def _button_surface(label, font, ok):
 
 
 class OfferBanners:
+    """
+    The stack of offers the opponent has made -- a draw, a takeback, a rematch
+    -- shown as cards that slide down over the board with an Accept and a
+    Decline button. The online coordinator owns them end to end: it pushes and
+    dismisses them, while the app shell draws the stack and routes clicks here
+    """
 
-    def __init__(self, window):
+    def __init__(self, window: pg.Surface) -> None:
+        """
+        Start with an empty stack, with the three fonts left unbuilt until the
+        first banner is actually drawn. One instance is built beside the online
+        coordinator at startup and reused for every game
+
+        :param window: the app window every banner is drawn onto
+        """
         self.window = window
-        self._banners = []
+        self._banners: list[dict[str, Any]] = []
+        self._name_font: pg.font.Font | None = None
+        self._verb_font: pg.font.Font | None = None
+        self._btn_font: pg.font.Font | None = None
 
-    def push(self, key, icon, name, verb, yes_label, no_label, on_yes, on_no):
+    def push(self, key: str, icon: str, name: str, verb: str, yes_label: str,
+             no_label: str, on_yes: Callable[[], None],
+             on_no: Callable[[], None]) -> None:
+        """
+        Put a new offer on screen, sliding in below whatever is already
+        stacked. Pushing the same kind of offer twice replaces the first one,
+        so a repeated request never leaves two banners asking the same thing
+
+        :param key: offer kind, such as draw_offered, which also identifies it
+            for a later dismiss
+        :param icon: emoji shown in the banner's chip
+        :param name: opponent's display name, shown before the verb
+        :param verb: what they are asking, such as offers a draw
+        :param yes_label: text on the accepting button
+        :param no_label: text on the declining button
+        :param on_yes: run when the accepting button is clicked
+        :param on_no: run when the declining button is clicked
+        """
         self._banners = [b for b in self._banners if b["key"] != key]
         self._banners.append({
             "key": key, "icon": icon, "name": name, "verb": verb,
@@ -54,37 +101,93 @@ class OfferBanners:
             "ok_rect": pg.Rect(0, 0, 0, 0), "no_rect": pg.Rect(0, 0, 0, 0),
         })
 
-    def clear(self):
+    def clear(self) -> None:
+        """
+        Drop every banner at once with no exit animation, used when a game
+        ends, a new one starts or the session is torn down
+        """
         self._banners = []
 
-    def dismiss(self, key):
+    def dismiss(self, key: str) -> None:
+        """
+        Answer or withdraw one offer, sliding that banner back up out of view
+        instead of making it vanish. A banner already on its way out is left
+        alone, so its exit is never restarted
+
+        :param key: offer kind to take down, as given to push
+        """
         now = pg.time.get_ticks()
         for b in self._banners:
             if b["key"] == key and b["leaving_at"] is None:
                 b["leaving_at"] = now
 
-    def is_empty(self):
+    def is_empty(self) -> bool:
+        """
+        Whether there is any offer still standing, which the input router asks
+        before letting Esc dismiss the stack
+
+        :returns: True when nothing is waiting to be answered
+        """
         return self.count() == 0
 
-    def needs_frames(self):
+    def needs_frames(self) -> bool:
+        """
+        Whether the stack still has something to animate, including banners
+        that are only sliding out. The shell keeps presenting whole frames
+        while this is true, so an exit is never left half drawn
+
+        :returns: True while any banner is on screen or leaving
+        """
         return bool(self._banners)
 
-    def count(self):
+    def count(self) -> int:
+        """
+        How many offers are still waiting for an answer, counting only banners
+        that have not started sliding out
+
+        :returns: number of live offers
+        """
         return sum(1 for b in self._banners if b["leaving_at"] is None)
 
-    def _banner_height(self, name_font, btn_font):
+    def _banner_height(self, name_font: pg.font.Font, btn_font: pg.font.Font) -> int:
+        """
+        Work out how tall every banner in the stack is, from the tallest thing
+        it has to hold -- the icon chip, the message or the buttons. One height
+        is shared by all of them so the stack spaces evenly
+
+        :param name_font: font the opponent's name is rendered in
+        :param btn_font: font the two button labels are rendered in
+        :returns: banner height in pixels
+        """
         content_h = max(ICON_SIZE, name_font.get_height(),
                         btn_font.get_height() + 2 * BTN_PAD_Y)
         return content_h + 2 * PAD_V
 
-    def _fonts(self):
-        if getattr(self, "_name_font", None) is None:
+    def _fonts(self) -> tuple[pg.font.Font, pg.font.Font, pg.font.Font]:
+        """
+        Hand back the three fonts a banner is drawn with, building them the
+        first time one is actually needed rather than at startup
+
+        :returns: the name, verb and button fonts, in that order
+        """
+        if (self._name_font is None or self._verb_font is None
+                or self._btn_font is None):
             self._name_font = get_font(13, bold=True)
             self._verb_font = get_font(13, bold=True)
             self._btn_font = get_font(12, bold=True)
         return self._name_font, self._verb_font, self._btn_font
 
-    def draw(self, board_rect):
+    def draw(self, board_rect: pg.Rect) -> None:
+        """
+        Paint the whole stack across the top of the board, each banner eased
+        down from above and each one that has been answered eased back up. A
+        banner whose exit has finished is dropped here, so the stack tidies
+        itself as it draws, and everything is clipped to the given area so
+        nothing spills over the rest of the window
+
+        :param board_rect: area the banners are centred over and clipped to,
+            the board on the game screen and the whole content area elsewhere
+        """
         if not self._banners or board_rect.width <= 0:
             return
         name_font, verb_font, btn_font = self._fonts()
@@ -108,7 +211,24 @@ class OfferBanners:
             target_y += h + STACK_GAP
         self.window.set_clip(prev_clip)
 
-    def _draw_one(self, b, board_rect, y, h, name_font, verb_font, btn_font):
+    def _draw_one(self, b: dict[str, Any], board_rect: pg.Rect, y: float, h: int,
+                  name_font: pg.font.Font, verb_font: pg.font.Font,
+                  btn_font: pg.font.Font) -> None:
+        """
+        Paint a single banner -- icon chip, "name asks this" message and the
+        two buttons -- centred over the board and wide enough for whatever it
+        says. It also records where the buttons landed, which is what makes
+        them clickable, so a banner is only answerable once it has been drawn
+
+        :param b: the banner record being drawn, updated in place with the two
+            button rects
+        :param board_rect: area the banner is centred over
+        :param y: top edge in window pixels, wherever the slide has reached
+        :param h: banner height in pixels, shared by the whole stack
+        :param name_font: font for the opponent's name
+        :param verb_font: font for what they are asking
+        :param btn_font: font for the two button labels
+        """
         name_surf = name_font.render(b["name"], True, Colors.amber_hi)
         verb_surf = verb_font.render(f" {b['verb']}", True, Colors.text)
         msg_w = name_surf.get_width() + verb_surf.get_width()
@@ -144,7 +264,17 @@ class OfferBanners:
         b["ok_rect"] = pg.Rect(ox, cy - ok_surf.get_height() / 2,
                                ok_surf.get_width(), ok_surf.get_height())
 
-    def handle_click(self, pos):
+    def handle_click(self, pos: tuple[int, int]) -> bool:
+        """
+        Answer whichever banner button was clicked, which is how a draw,
+        takeback or rematch is accepted or declined. The banner starts sliding
+        out before its callback runs, so one answer can never be sent twice,
+        and a banner already leaving ignores clicks altogether
+
+        :param pos: click position in window pixels
+        :returns: True when a button took the click, which stops it reaching
+            the board underneath
+        """
         for b in list(self._banners):
             if b["leaving_at"] is not None:
                 continue

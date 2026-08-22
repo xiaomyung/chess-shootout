@@ -21,7 +21,7 @@ from chessshootout.backend.utils import Square
 from chessshootout.frontend import online_coordinator as coordinator_module
 from chessshootout.frontend.online_coordinator import (
     APPLY_FAILED_LABEL, ONLINE_HARD_FAILURE_REASONS, ONLINE_TRANSIENT_REASON_LABELS,
-    TOAST_REASON_MAX_CHARS,
+    RECONNECT_PROBE_MAX_ATTEMPTS, TOAST_REASON_MAX_CHARS,
 )
 from chessshootout.frontend.screens.game import IDLE_RESIGN_NOTICE_SECONDS, IdleWindow
 from chessshootout.online.client import Event, OnlineClient
@@ -1074,6 +1074,21 @@ def test_teardown_from_game_screen_still_returns_to_menu():
     assert app.screen is app.game
     app.coordinator._tear_down_online_session("test")
     assert app.screen is app.menu
+
+
+def test_teardown_returns_through_the_shared_menu_card_route():
+    """Teardown carried its own copy of _return_to_menu_card's body. Going through
+    the real thing means a torn-down session also lands on the menu with a fresh
+    set of Reconnect probe attempts, like every other route back -- otherwise a
+    session that died after three fruitless probes never probes again."""
+    app = _wired_app()
+    app.coordinator._reconnect_probe_attempts = RECONNECT_PROBE_MAX_ATTEMPTS
+
+    app.coordinator._tear_down_online_session("test")
+
+    assert app.screen is app.menu
+    assert app.menu.play_view_visible()
+    assert app.coordinator._reconnect_probe_attempts == 0
 
 
 def test_opponent_left_while_viewing_the_result_does_not_yank_to_menu():

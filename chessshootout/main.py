@@ -13,20 +13,34 @@ from chessshootout.frontend.frontend import Frontend
 
 os.environ.setdefault("SSL_CERT_FILE", certifi.where())
 
+log = logging.getLogger("chess.main")
 
-def _parse_args():
+
+def _parse_args() -> argparse.Namespace:
+    """
+    Read the two overrides the client accepts on the command line. They shadow
+    the stored CHESS_CLIENT_UUID and CHESS_NICKNAME for one run, which is how
+    a second copy of the game can play as a different person for testing
+
+    :returns: parsed arguments; client_uuid and nickname are None when unused
+    """
     p = argparse.ArgumentParser(description="Pygame chess client")
     p.add_argument("--client-uuid", help="Override CHESS_CLIENT_UUID for this run")
     p.add_argument("--nickname", help="Override CHESS_NICKNAME for this run")
     return p.parse_args()
 
 
-def main():
+def main() -> None:
+    """
+    Start the game and run it to the end: set up logging and crash capture,
+    load the stored settings, bring pygame up, then build the app shell and
+    drive its frame loop until the player quits. Anything that escapes the
+    loop is written to a crash log before it is re-raised
+    """
     args = _parse_args()
     configure_basic(os.environ.get("LOG_LEVEL", "INFO").upper())
     silence_third_party_loggers()
     handler = crash_log.install_memory_handler()
-    log = logging.getLogger("chess.main")
     log.info("client starting pid=%s", os.getpid())
     env.init_paths()
     env.load()

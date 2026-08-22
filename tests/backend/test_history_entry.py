@@ -88,6 +88,45 @@ def test_history_entry_records_move_shape(
     assert entry.san == san
 
 
+def test_pending_promotion_records_rights_in_castling_keys_order():
+    """prev_castling_rights is a positional tuple that undo re-zips against
+    CASTLING_KEYS, so it must be built in that fixed order and never from dict
+    insertion order -- an engine whose rights dict was rebuilt in another order
+    (a FEN load, a hand-built fixture) would otherwise stamp the pending entry
+    with WK/WQ/BK/BQ scrambled."""
+    bk = make_backend({
+        sq(1, 1): piece(P, WHITE),
+        sq(0, 0): piece(R, BLACK),
+        sq(7, 7): piece(K, WHITE),
+        sq(0, 7): piece(K, BLACK),
+    }, castling_rights={"BQ": True, "WK": False, "BK": False, "WQ": True})
+    assert tuple(bk.castling_rights.values()) == (True, False, False, True)
+    result = bk.try_move(sq(1, 1), sq(0, 0))
+    assert result.promotion_required
+    entry = bk.move_history[-1]
+    assert entry.position_key_added is None
+    assert entry.prev_castling_rights == (False, True, False, True)
+
+
+def test_completed_promotion_undo_restores_scrambled_rights():
+    """The pending tuple is overwritten by _finalize_move at promote() time, so the
+    round trip has to survive the whole two-step ply: taking the a8 rook clears BQ,
+    and undo must put every flag back under its own key."""
+    rights = {"BQ": True, "WK": False, "BK": True, "WQ": True}
+    bk = make_backend({
+        sq(1, 1): piece(P, WHITE),
+        sq(0, 0): piece(R, BLACK),
+        sq(7, 7): piece(K, WHITE),
+        sq(0, 7): piece(K, BLACK),
+    }, castling_rights=dict(rights))
+    bk.try_move(sq(1, 1), sq(0, 0))
+    bk.promote(sq(0, 0), Q)
+    assert bk.castling_rights["BQ"] is False
+    assert bk.move_history[-1].prev_castling_rights == (False, True, True, True)
+    bk.undo()
+    assert bk.castling_rights == rights
+
+
 def test_prev_state_round_trips_via_undo():
     """Undo restores the pre-ply castling rights and halfmove clock snapshotted
     into the HistoryEntry, not just the board."""

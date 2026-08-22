@@ -75,13 +75,82 @@ def test_apply_fen_initial_round_trips():
     assert export_fen(backend) == INITIAL_FEN
 
 
-def test_apply_fen_mid_game_round_trips_except_fullmove():
-    """apply_fen clears history, so exported fullmove resets to 1; position fields match."""
-    loaded = "rnbqkbnr/pp1ppppp/8/2p5/4P3/5N2/PPPP1PPP/RNBQKB1R b KQkq - 1 2"
+@pytest.mark.parametrize(
+    "loaded",
+    [
+        pytest.param(
+            "rnbqkbnr/pp1ppppp/8/2p5/4P3/5N2/PPPP1PPP/RNBQKB1R b KQkq - 1 2",
+            id="black_to_move_move_2",
+        ),
+        pytest.param(
+            "r1bqkb1r/pppp1ppp/2n2n2/4p3/2B1P3/5N2/PPPP1PPP/RNBQK2R w KQkq - 4 4",
+            id="white_to_move_move_4",
+        ),
+        pytest.param(
+            "8/8/4k3/8/8/4K3/8/8 b - - 12 47",
+            id="black_to_move_deep_endgame",
+        ),
+    ],
+)
+def test_apply_fen_mid_game_round_trips_including_fullmove(loaded):
+    """apply_fen clears the move history, so the fullmove number can only survive
+    a round trip if the engine keeps the loaded number as a baseline -- exporting
+    from len(move_history) alone would reset every loaded position to move 1."""
     backend = Backend()
     apply_fen(backend, loaded)
-    re_exported = export_fen(backend)
-    assert re_exported.split()[:5] == loaded.split()[:5]
+    assert export_fen(backend) == loaded
+
+
+@pytest.mark.parametrize(
+    "loaded, moves, expected_fullmoves",
+    [
+        pytest.param(
+            "r1bqkbnr/pppp1ppp/2n5/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R b KQkq - 3 3",
+            [(Square(0, 6), Square(2, 5)), (Square(7, 5), Square(4, 2))],
+            [4, 4],
+            id="black_to_move_advances_on_black_ply",
+        ),
+        pytest.param(
+            "r1bqkbnr/pppp1ppp/2n5/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R w KQkq - 4 4",
+            [(Square(7, 5), Square(4, 2)), (Square(0, 6), Square(2, 5))],
+            [4, 5],
+            id="white_to_move_advances_on_black_ply",
+        ),
+    ],
+)
+def test_fullmove_advances_from_a_loaded_position(loaded, moves, expected_fullmoves):
+    """The move number climbs once per completed move-pair counted from the side
+    that was to move at load, so a position loaded with Black to move reaches the
+    next number one ply sooner than one loaded with White to move."""
+    backend = Backend()
+    apply_fen(backend, loaded)
+    seen = []
+    for from_sq, to_sq in moves:
+        assert backend.try_move(from_sq, to_sq).legal
+        seen.append(int(export_fen(backend).split()[5]))
+    assert seen == expected_fullmoves
+
+
+def test_fullmove_returns_to_the_loaded_number_after_undo():
+    """Undo walks the move number back down the same baseline it climbed, so a
+    browse-and-take-back cycle cannot leave the exported FEN a move ahead."""
+    loaded = "r1bqkbnr/pppp1ppp/2n5/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R b KQkq - 3 3"
+    backend = Backend()
+    apply_fen(backend, loaded)
+    assert backend.try_move(Square(0, 6), Square(2, 5)).legal
+    assert export_fen(backend).split()[5] == "4"
+    backend.undo()
+    assert export_fen(backend) == loaded
+
+
+def test_new_game_resets_the_fullmove_baseline_of_a_loaded_engine():
+    """A rematch reuses the same Backend object, so new_game() must clear the
+    baseline a previously loaded FEN left behind or the fresh game would start
+    numbering at the old position's move number."""
+    backend = Backend()
+    apply_fen(backend, "8/8/4k3/8/8/4K3/8/8 b - - 12 47")
+    backend.new_game()
+    assert export_fen(backend) == INITIAL_FEN
 
 
 def test_apply_fen_clears_move_history():
@@ -137,6 +206,129 @@ def test_apply_fen_invalid_raises():
     backend = Backend()
     with pytest.raises(ValueError):
         apply_fen(backend, "garbage")
+
+
+@pytest.mark.parametrize(
+    "placement",
+    [
+        pytest.param(
+            "rnbqkbnrr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR",
+            id="nine_pieces_on_a_rank",
+        ),
+        pytest.param(
+            "8p/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR",
+            id="piece_after_a_full_run_of_empties",
+        ),
+    ],
+)
+def test_apply_fen_rejects_a_rank_that_runs_past_the_board(placement):
+    """An overfilled rank used to index off the end of the row and raise
+    IndexError, which walked straight past the paste box's ValueError/KeyError
+    catcher and crashed the app -- a bad paste is a rejection, not a crash."""
+    backend = Backend()
+    with pytest.raises(ValueError):
+        apply_fen(backend, f"{placement} w KQkq - 0 1")
+
+
+@pytest.mark.parametrize(
+    "field",
+    [
+        pytest.param("a1", id="rank_1_lets_a_pawn_capture_onto_the_back_rank"),
+        pytest.param("e0", id="rank_below_the_board"),
+        pytest.param("e9", id="rank_above_the_board"),
+        pytest.param("z3", id="file_off_the_board"),
+        pytest.param("e4", id="rank_no_double_push_can_be_answered_on"),
+    ],
+)
+def test_apply_fen_rejects_an_en_passant_target_off_the_two_legal_ranks(field):
+    """Only ranks 3 and 6 can hold an en-passant target. A target anywhere else
+    was accepted verbatim and armed a capture the rules cannot produce: with a1
+    loaded, a pawn 'captures en passant' onto the back rank, deletes a piece of
+    its OWN side beside it and lands where it can never promote."""
+    backend = Backend()
+    with pytest.raises(ValueError):
+        apply_fen(backend, f"4k3/8/8/8/8/8/8/4K3 w - {field} 0 1")
+
+
+@pytest.mark.parametrize(
+    "turn, field, expected",
+    [
+        pytest.param("b", "e3", Square(5, 4), id="white_double_push_answer"),
+        pytest.param("w", "e6", Square(2, 4), id="black_double_push_answer"),
+    ],
+)
+def test_apply_fen_keeps_the_two_real_en_passant_ranks(turn, field, expected):
+    """The tightened field must still load every target a real game produces."""
+    backend = Backend()
+    apply_fen(backend, f"4k3/8/8/8/8/8/8/4K3 {turn} - {field} 0 1")
+    assert backend.en_passant_target == expected
+
+
+@pytest.mark.parametrize(
+    "tail",
+    [
+        pytest.param("0 1;", id="trailing_punctuation"),
+        pytest.param("0 bm", id="epd_operation_in_the_move_number"),
+        pytest.param("hmvc 3;", id="epd_named_counters"),
+        pytest.param("0 0", id="move_number_zero"),
+        pytest.param("0 -3", id="negative_move_number"),
+    ],
+)
+def test_apply_fen_takes_a_spoiled_counter_as_its_default(tail):
+    """The two counters at the tail are the fields exporters mangle -- EPD writes
+    operations there, some tools leave a semicolon behind. None of that describes
+    the position, so it must cost the player the counter and not the whole paste;
+    a move number below 1 is meaningless and reads as the default too."""
+    backend = Backend()
+    apply_fen(backend, f"rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - {tail}")
+    assert backend.fullmove_baseline == 1
+    assert export_fen(backend).split()[5] == "1"
+
+
+def test_apply_fen_takes_a_spoiled_halfmove_clock_as_zero():
+    """A junk halfmove clock cannot be trusted to count anything, so it starts the
+    fifty-move count over rather than rejecting the position."""
+    backend = Backend()
+    apply_fen(backend, "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - x 7")
+    assert backend.halfmove_clock == 0
+    assert backend.fullmove_baseline == 7
+
+
+@pytest.mark.parametrize(
+    "token",
+    [
+        pytest.param("W", id="uppercase_white"),
+        pytest.param("B", id="uppercase_black"),
+        pytest.param("white", id="spelled_out_side"),
+        pytest.param("x", id="junk_letter"),
+        pytest.param("-", id="dash"),
+    ],
+)
+def test_apply_fen_rejects_a_side_to_move_that_is_not_w_or_b(token):
+    """The side to move used to fall through to Black on anything that was not a
+    w, so a mistyped token silently handed the move to the wrong player. Unlike
+    the two counters at the tail there is no sane default to fall back on."""
+    backend = Backend()
+    backend.new_game()
+    fen = f"rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR {token} KQkq - 0 1"
+    with pytest.raises(ValueError):
+        apply_fen(backend, fen)
+
+
+@pytest.mark.parametrize(
+    "token, expected",
+    [
+        pytest.param("w", PieceColor.WHITE, id="white_to_move"),
+        pytest.param("b", PieceColor.BLACK, id="black_to_move"),
+    ],
+)
+def test_apply_fen_accepts_both_legal_side_tokens(token, expected):
+    """The tightened validation must still let the two spellings the FEN standard
+    defines straight through."""
+    backend = Backend()
+    fen = f"rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR {token} KQkq - 0 1"
+    apply_fen(backend, fen)
+    assert backend.turn == expected
 
 
 def test_apply_fen_minimal_4_field_form():
