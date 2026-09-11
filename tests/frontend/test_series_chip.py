@@ -1,7 +1,7 @@
 """Series-score chip: the name | score | name pill (dim names, amber-hi mono score
 with an en-dash). Rendered on the online result modal. Verifies the palette, the
-en-dash formatting, and that the result modal only paints it in online mode with a
-series set."""
+en-dash formatting, and that the result modal paints it on either online face
+with a series set but never on the local one."""
 
 import pygame as pg
 
@@ -9,7 +9,7 @@ from tests.conftest import pygame_display
 from chessshootout.frontend.visual.colors import Colors
 from chessshootout.frontend.visual.fonts import get_font, get_mono_font
 from chessshootout.frontend.visual.widgets import draw_series_chip
-from chessshootout.frontend.modals.result import ResultMenu
+from chessshootout.frontend.modals.result import ResultButtons, ResultMenu
 
 
 _pg = pygame_display(620, 520)
@@ -57,14 +57,32 @@ def test_result_modal_paints_series_only_when_online():
     region = pg.Rect(80, 40, 440, 420)
 
     win.fill((0, 0, 0))
-    menu.set_online_mode(False)
+    menu.set_buttons(ResultButtons.LOCAL)
     menu.draw()
     without = _count(win, region, Colors.amber_hi, tol=12)
 
     win.fill((0, 0, 0))
-    menu.set_online_mode(True)
+    menu.set_buttons(ResultButtons.ONLINE)
     menu.draw()
     with_series = _count(win, region, Colors.amber_hi, tol=12)
 
     assert without == 0
     assert with_series > 0
+
+
+def test_series_chip_survives_the_rematch_window_closing():
+    """The score the two of them played to is a fact about the finished game,
+    not about whether a rematch is still on offer — so the closed online face
+    keeps the chip the live one showed."""
+    win = pg.display.get_surface()
+    menu = ResultMenu(win, callbacks={}, pgn_available_provider=lambda: True)
+    menu.set_rect(pg.Rect(80, 40, 440, 420))
+    menu.set_result("DEFEAT", "loss", "Resignation · 30 moves", _stats())
+    menu.set_series("alice", "bob", "2", "1")
+    region = pg.Rect(80, 40, 440, 420)
+
+    win.fill((0, 0, 0))
+    menu.set_buttons(ResultButtons.ONLINE_CLOSED)
+    menu.draw()
+
+    assert _count(win, region, Colors.amber_hi, tol=12) > 0
