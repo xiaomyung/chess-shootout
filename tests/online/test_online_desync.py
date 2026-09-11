@@ -542,15 +542,132 @@ def test_remote_move_with_illegal_payload_triggers_resync():
     app.coordinator.client.request_state_sync.assert_called_once()
 
 
-def test_resync_gate_drops_subsequent_move_applied():
-    """A held gate drops the move without applying it or firing a new request."""
-    app = _online_app()
+def test_a_move_during_a_resync_is_held_back_then_applied_after_the_snapshot():
+    """/resume is an out-of-band HTTP call that takes a few hundred ms through
+    the edge, and the socket keeps delivering moves the whole time. Dropping
+    those left the rebuilt board short of exactly the plies that landed in that
+    window, so the very next heartbeat ordered another rebuild. The move is
+    held while the gate is up -- nothing applied, no second request -- and
+    replayed onto the snapshot once it lands."""
+    app = _resumable_app()
     app.coordinator._resyncing = True
-    payload = {"from": "e2", "to": "e4", "san": "e4", "ply": 1,
-               "clock": {}}
+    payload = {"from": "e2", "to": "e4", "san": "e4", "ply": 1, "clock": {}}
+
     app.coordinator._handle_remote_move_applied(payload)
+
     assert len(app.game.match.move_history) == 0
     app.coordinator.client.request_state_sync.assert_not_called()
+    assert app.coordinator._resync_buffer == [("on_remote_move", payload)]
+
+    app.coordinator._handle_game_resumed(_resumed_payload())
+
+    assert app.coordinator._resyncing is False
+    assert [e.san for e in app.game.match.move_history] == ["e4"]
+
+
+def test_a_held_move_the_snapshot_already_contains_is_not_replayed():
+    """LOAD-BEARING: the snapshot is taken after the held move landed on the
+    server, so it already carries that ply. Replaying it on top would be a
+    move at a ply the board is past -- a ply gap, and a fresh resync from the
+    repair that was meant to end one."""
+    app = _resumable_app()
+    app.coordinator._resyncing = True
+    app.coordinator._handle_remote_move_applied(
+        {"from": "e2", "to": "e4", "san": "e4", "ply": 1, "clock": {}})
+    app.coordinator._handle_remote_move_applied(
+        {"from": "e7", "to": "e5", "san": "e5", "ply": 2, "clock": {}})
+
+    app.coordinator._handle_game_resumed(_resumed_payload(
+        move_history=[{"san": "e4"}, {"san": "e5"}]))
+
+    assert [e.san for e in app.game.match.move_history] == ["e4", "e5"]
+    assert app.coordinator._resyncing is False
+    app.coordinator.client.request_state_sync.assert_not_called()
+    assert app.coordinator._resync_buffer == []
+
+
+def test_only_the_held_moves_past_the_snapshot_are_replayed():
+    """The mixed case the live window produces: one held move the snapshot
+    caught, one it did not. The board ends on the later ply, once."""
+    app = _resumable_app()
+    app.coordinator._resyncing = True
+    app.coordinator._handle_remote_move_applied(
+        {"from": "e2", "to": "e4", "san": "e4", "ply": 1, "clock": {}})
+    app.coordinator._handle_remote_move_applied(
+        {"from": "e7", "to": "e5", "san": "e5", "ply": 2, "clock": {}})
+
+    app.coordinator._handle_game_resumed(_resumed_payload(move_history=[{"san": "e4"}]))
+
+    assert [e.san for e in app.game.match.move_history] == ["e4", "e5"]
+    assert app.coordinator._resyncing is False
+    app.coordinator.client.request_state_sync.assert_not_called()
+
+
+def test_a_held_move_without_a_readable_ply_is_not_replayed():
+    """A move that cannot be placed against the snapshot is dropped rather than
+    guessed at -- the next heartbeat settles it if it mattered."""
+    app = _resumable_app()
+    app.coordinator._resyncing = True
+    app.coordinator._handle_remote_move_applied(
+        {"from": "e2", "to": "e4", "san": "e4", "ply": "1", "clock": {}})
+
+    app.coordinator._handle_game_resumed(_resumed_payload())
+
+    assert app.game.match.move_history == []
+
+
+def test_the_timeout_replays_held_moves_against_the_board_it_has():
+    """The 8 s self-heal ends the resync without a snapshot; the held moves are
+    still judged against the board's ply, so the one that follows on lands and
+    a stale one does not."""
+    from chessshootout.frontend.online_coordinator import RESYNC_TIMEOUT_MS
+    app = _online_app()
+    app.coordinator.client.state = "connected"
+    app.coordinator._resyncing = True
+    app.coordinator._resync_started_at_ms = pg.time.get_ticks() - (RESYNC_TIMEOUT_MS + 1000)
+    app.coordinator._handle_remote_move_applied(
+        {"from": "e2", "to": "e4", "san": "e4", "ply": 0, "clock": {}})
+    app.coordinator._handle_remote_move_applied(
+        {"from": "e2", "to": "e4", "san": "e4", "ply": 1, "clock": {}})
+
+    app.coordinator._update_online_phase()
+
+    assert app.coordinator._resyncing is False
+    assert [e.san for e in app.game.match.move_history] == ["e4"]
+
+
+def test_a_replay_that_starts_a_new_resync_holds_the_rest_back_again():
+    """A held move with a gap in it starts a fresh rebuild mid-replay. What
+    was queued behind it must go back behind the new gate, not straight onto
+    a board that is about to be rebuilt."""
+    app = _resumable_app()
+    app.coordinator._resyncing = True
+    gapped = {"from": "e7", "to": "e5", "san": "e5", "ply": 3, "clock": {}}
+    trailing = {"from": "g1", "to": "f3", "san": "Nf3", "ply": 4, "clock": {}}
+    app.coordinator._handle_remote_move_applied(gapped)
+    app.coordinator._handle_remote_move_applied(trailing)
+
+    app.coordinator._handle_game_resumed(_resumed_payload(move_history=[{"san": "e4"}]))
+
+    assert app.coordinator._resyncing is True
+    assert app.coordinator._resync_buffer == [("on_remote_move", trailing)]
+    assert [e.san for e in app.game.match.move_history] == ["e4"]
+
+
+def test_a_resync_with_no_session_never_raises_the_gate(caplog):
+    """The gate is only ever lowered by a snapshot or the 8 s timeout. Raising
+    it with no client to ask for the snapshot -- a verdict failing on a board
+    whose session was already dropped -- left the toast flashing and the next
+    game gated for eight seconds. With nobody to ask, nothing starts, and it
+    goes by at DEBUG: there is no repair to warn about."""
+    app = _online_app()
+    app.coordinator.client = None
+
+    with caplog.at_level(logging.DEBUG, logger="chess.frontend"):
+        app.coordinator._begin_resync(ResyncCause.SERVER_DIRECTIVE)
+
+    assert app.coordinator._resyncing is False
+    assert [r.levelno for r in caplog.records if "resync" in r.getMessage()] == [logging.DEBUG]
 
 
 def test_takeback_applied_with_skipped_ply_triggers_resync():
@@ -735,10 +852,11 @@ def test_resync_gate_is_cleared_when_the_socket_is_kept_for_a_rematch():
     assert app.coordinator._resyncing is False
 
 
-def test_resume_with_no_active_online_game_is_dropped_and_clears_the_gate():
+def test_a_finished_game_snapshot_with_no_online_board_is_dropped_and_clears_the_gate():
     """The post-game rematch window keeps the socket alive after the user is back
-    on the menu (variant flipped to "local"). A late /resume reply there has no
-    live game to rebuild — it must not replay moves into the inactive screen."""
+    on the menu (variant flipped to "local"). A late /resume of the game that
+    just ended has no live board to rebuild -- it must not replay moves into
+    the inactive screen."""
     app = _online_app()
     app.game.variant = "local"
     app.coordinator._begin_resync(ResyncCause.SERVER_DIRECTIVE)
@@ -747,10 +865,88 @@ def test_resume_with_no_active_online_game_is_dropped_and_clears_the_gate():
         "fen": "",
         "move_history": [{"san": "e4"}, {"san": "e5"}],
         "clock": {},
+        "result_reason": "resignation", "result_winner": "white",
     })
 
     assert app.game.match.move_history == []
     assert app.coordinator._resyncing is False
+
+
+def _live_snapshot(**extra):
+    payload = {
+        "your_color": "black", "white_name": "Alice", "black_name": "Bob",
+        "white_country": "", "black_country": "",
+        "time_minutes": 5, "increment_seconds": 0,
+        "white_score": 1.0, "black_score": 0.5,
+        "fen": "", "move_history": [{"san": "e4"}, {"san": "e5"}, {"san": "Nf3"}],
+        "clock": {"white_remaining": 250.0, "black_remaining": 240.0,
+                  "running_for": "black"},
+    }
+    payload.update(extra)
+    return payload
+
+
+def _assert_adopted_live_snapshot(app):
+    assert app.screen is app.game
+    assert app.game.variant == "online"
+    assert app.game.current_result() is None
+    assert app.game.match.local_color == PieceColor.BLACK
+    assert (app.game.white_name, app.game.black_name) == ("Alice", "Bob")
+    assert [e.san for e in app.game.match.move_history] == ["e4", "e5", "Nf3"]
+    assert app.game.match.clock.black_remaining == pytest.approx(240.0)
+    assert app.game.result_flow.series_scores == {"white": 1.0, "black": 0.5}
+    assert app.coordinator._resyncing is False
+    assert app.coordinator._heartbeat_ply() == 3
+
+
+def test_a_live_snapshot_arriving_on_the_menu_is_adopted_whole(monkeypatch, tmp_path):
+    """The opponent accepted a rematch while this client sat on the menu with
+    the window open and its socket briefly down; the reconnect's /resume then
+    describes a game already running. Ignoring it left the player with no route
+    back onto that board. It is adopted the way a reconnect adopts one -- menu
+    settings, board, clocks, series -- and the second pass through the handler
+    lands on a live online board, so the adoption terminates."""
+    monkeypatch.setenv("CHESS_DATA_DIR", str(tmp_path))
+    app = _online_app()
+    app.coordinator.client.room_id = "room-1"
+    app.switch_to("menu")
+    app.coordinator.unbind_game_from_online()
+    assert app.game.variant == "local"
+
+    app.coordinator._handle_game_resumed(_live_snapshot())
+
+    _assert_adopted_live_snapshot(app)
+
+
+def test_a_live_snapshot_arriving_on_the_result_card_is_adopted_whole(monkeypatch, tmp_path):
+    """Same rematch, but the player never left the finished board: the card
+    is still up when the snapshot of the NEXT game lands. The result belongs to
+    the previous game, so it is cleared with everything else."""
+    monkeypatch.setenv("CHESS_DATA_DIR", str(tmp_path))
+    app = _online_app()
+    app.coordinator.client.room_id = "room-1"
+    app.game.manual_result = "white_wins_by_resignation"
+    assert app.game.current_result() is not None
+
+    app.coordinator._handle_game_resumed(_live_snapshot())
+
+    _assert_adopted_live_snapshot(app)
+
+
+def test_a_finished_game_snapshot_on_the_result_card_stays_on_the_card(monkeypatch, tmp_path):
+    """A snapshot of the game that just ended, delivered while its card is
+    still up, is the ordinary resync landing -- not a new game to adopt."""
+    monkeypatch.setenv("CHESS_DATA_DIR", str(tmp_path))
+    app = _resumable_app()
+    app.game._chosen_side = "white"
+    app.game.manual_result = "white_wins_by_resignation"
+
+    app.coordinator._handle_game_resumed(_resumed_payload(
+        move_history=[{"san": "e4"}], result_reason="resignation", result_winner="white"))
+
+    assert app.game.current_result() == "white_wins_by_resignation"
+    assert [e.san for e in app.game.match.move_history] == ["e4"]
+    assert app.game.white_name == "Alice"
 
 
 BLOCKED_ARROW = {"from": "e2", "to": "e4"}
@@ -912,7 +1108,23 @@ def test_a_directive_the_client_has_already_outrun_is_dropped():
     app.coordinator.client.request_state_sync.assert_not_called()
 
 
-def test_a_directive_about_a_different_ply_is_obeyed():
+def test_a_directive_about_a_ply_the_client_is_already_past_is_dropped():
+    """The delayed order can arrive after MORE than the one update it was
+    written about -- a recapture pair lands as two broadcasts in a row. A
+    client two plies past the order has nothing left to fetch either."""
+    from chessshootout.backend.utils import Square
+    app = _online_app()
+    app.coordinator.client.state = "connected"
+    app.game.match.try_move(Square(6, 4), Square(4, 4))
+    app.game.match.try_move(Square(1, 4), Square(3, 4))
+
+    app.coordinator._handle_online_event(_directive(server_ply=1))
+
+    assert app.coordinator._resyncing is False
+    app.coordinator.client.request_state_sync.assert_not_called()
+
+
+def test_a_directive_about_a_ply_ahead_of_the_client_is_obeyed():
     app = _online_app()
     app.coordinator.client.state = "connected"
 
@@ -1115,7 +1327,7 @@ def test_every_resync_call_site_names_a_real_cause():
             scanned += 1
             used.extend(_begin_resync_call_causes(os.path.join(dirpath, name)))
     assert scanned >= 40, f"only scanned {scanned} files, guard root is likely wrong"
-    assert len(used) == 8, f"expected the eight known call sites, found {len(used)}"
+    assert len(used) == 10, f"expected the ten known call sites, found {len(used)}"
     assert {getattr(ResyncCause, name) for name in used} == _resync_cause_values()
 
 
@@ -1221,6 +1433,63 @@ def test_the_spectator_is_silent_through_the_verdict_too():
     app.coordinator._send_heartbeat_if_due()
 
     assert app.coordinator.client.pings == 0
+
+
+def test_a_verdict_parked_past_every_overlay_hold_is_played_out_by_the_watchdog(monkeypatch):
+    """The consequence of a verdict waits for the overlay's flourish to finish.
+    With no overlay left to finish it -- the controller was already gone --
+    it waited forever, the heartbeat stayed silent the whole time, and the
+    server eventually gave this client up as disconnected. Past the longest
+    flourish plus a margin, the watchdog runs it, and the heartbeat resumes."""
+    from tests.frontend.focus_helpers import FakeTicks
+    from chessshootout.frontend.online_coordinator import SKILLCHECK_VERDICT_MAX_MS
+    ticks = FakeTicks()
+    monkeypatch.setattr(pg.time, "get_ticks", ticks)
+    app = _online_app()
+    app.coordinator.client.state = "connected"
+    session = app.game.skillcheck_session
+    ran = []
+    session.online_verdict_action = lambda: ran.append(True)
+    session.online_verdict_set_ms = ticks()
+
+    ticks.advance(SKILLCHECK_VERDICT_MAX_MS)
+    app.coordinator._tick_skillcheck_watchdog()
+
+    assert ran == []
+    assert session.online_verdict_action is not None
+
+    ticks.advance(1)
+    app.coordinator._tick_skillcheck_watchdog()
+
+    assert ran == [True]
+    assert session.online_verdict_action is None
+    assert session.online_verdict_set_ms is None
+    assert app.coordinator._resyncing is False
+    app.coordinator._last_heartbeat_sent_ms = ticks() - 5000
+    app.coordinator._send_heartbeat_if_due()
+    app.coordinator.client.send_ping.assert_called_once_with(0)
+
+
+def test_a_stalled_verdict_that_fails_to_play_out_resyncs_the_game(monkeypatch):
+    from tests.frontend.focus_helpers import FakeTicks
+    from chessshootout.frontend.online_coordinator import SKILLCHECK_VERDICT_MAX_MS
+    ticks = FakeTicks()
+    monkeypatch.setattr(pg.time, "get_ticks", ticks)
+    app = _online_app()
+    session = app.game.skillcheck_session
+
+    def _explode():
+        raise RuntimeError("the verdict could not be played out")
+
+    session.online_verdict_action = _explode
+    session.online_verdict_set_ms = ticks()
+    ticks.advance(SKILLCHECK_VERDICT_MAX_MS + 1)
+
+    app.coordinator._tick_skillcheck_watchdog()
+
+    assert session.online_verdict_action is None
+    assert app.coordinator._resyncing is True
+    app.coordinator.client.request_state_sync.assert_called_once()
 
 
 def test_a_rejected_quiet_move_asks_for_the_whole_state_back():

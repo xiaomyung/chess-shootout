@@ -37,7 +37,7 @@ from chessshootout.frontend.panels.right import (
 from chessshootout.frontend.panels.player_strip import (
     PlayerStrip, is_white, top_strip_color, refresh_capture_icons,
 )
-from chessshootout.frontend.modals.result import ResultMenu
+from chessshootout.frontend.modals.result import ResultButtons, ResultMenu
 from chessshootout.frontend.focus.arrow import (
     FocusArrow, FOCUS_EDGE_ZONE_PX, FOCUS_ARROW_D, LONG_AGO_MS,
 )
@@ -507,7 +507,7 @@ class GameScreen(Screen):
         self._opp_disconnected_at_ms = None
         self._local_disconnected_at_ms = None
         self.skillcheck.reset(enabled=True, seed="online")
-        self.result_menu.set_online_mode(True)
+        self.result_menu.set_buttons(ResultButtons.ONLINE)
 
     def _on_local_move_applied(self, from_sq: Square, to_sq: Square,
                                promotion: str | None) -> None:

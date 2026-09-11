@@ -239,7 +239,7 @@ def test_watchdog_awards_score_for_on_time_win(tmp_path, monkeypatch):
     fake_now[0] += RESULT_CONFIRM_TIMEOUT_MS + 100
     app.game.result_flow.update_result_pending()
     assert app.game.manual_result == "white_wins_on_time"
-    assert app.game.result_flow.series_scores.get("alice") == 1.0, "on-time win still scores"
+    assert app.game.result_flow.series_score("white") == 1.0, "on-time win still scores"
 
 
 def test_online_result_saves_before_the_move_animation_settles(tmp_path, monkeypatch):
@@ -351,7 +351,7 @@ def test_result_redelivery_saves_once_and_scores_once(tmp_path, monkeypatch):
     app.coordinator._handle_online_result(result)                # reconnect re-delivery
     app.game.result_flow.update_result_pending()
     assert len(_pgn_files(tmp_path)) == 1, "one file despite re-delivery"
-    assert app.game.result_flow.series_scores.get("alice") == 1.0, "scored exactly once"
+    assert app.game.result_flow.series_score("white") == 1.0, "scored exactly once"
 
 
 def _one_quiet_move(app):

@@ -16,7 +16,8 @@ import pytest
 
 from tests.conftest import pygame_display
 from tests.helpers import online_start_payload
-from chessshootout.backend.utils import BOARD_SIZE
+from chessshootout.backend.pieces import PieceColor
+from chessshootout.backend.utils import BOARD_SIZE, Square
 from chessshootout.frontend.frontend import Frontend
 from chessshootout.frontend import online_coordinator as coordinator_module
 from chessshootout.frontend.online_coordinator import RECONNECT_MODAL_DEBOUNCE_MS
@@ -25,6 +26,7 @@ from chessshootout.frontend.screens.game import (
 )
 from chessshootout.frontend.visual.colors import Colors
 from chessshootout.frontend.modals.reconnecting import ReconnectingModal
+from chessshootout.frontend.modals.result import ResultButtons
 from chessshootout.frontend.online_coordinator import (
     MATCH_FOUND_SECONDS, NOT_YOUR_TURN_TOASTS, ONLINE_GAME_STATE_REASONS,
     ONLINE_HARD_FAILURE_LABELS, ONLINE_HARD_FAILURE_REASONS,
@@ -653,6 +655,99 @@ def test_rematch_update_window_expired_returns_to_menu(frontend):
     assert frontend.menu.play_view_visible()
 
 
+def _arm_post_game_on_card(frontend, tmp_path, monkeypatch):
+    """A finished online game whose result card is still up: the real online
+    entry (names, colour, series, subscription) followed by a server verdict."""
+    monkeypatch.setenv("CHESS_DATA_DIR", str(tmp_path))
+    frontend.coordinator.client = MagicMock()
+    frontend.coordinator.client.room_id = "room-1"
+    frontend.coordinator._start_online_game(
+        online_start_payload(white_name="Me", black_name="Them", white_score=2.0))
+    frontend.game.match.try_move(Square(6, 4), Square(4, 4))
+    frontend.game.manual_result = "white_wins_by_resignation"
+    assert frontend.screen is frontend.game
+    assert frontend.game.current_result() is not None
+
+
+def _close_window_by_decline(frontend):
+    frontend.coordinator._rematch_offered = True
+    frontend.coordinator._handle_rematch_update({"event": "declined"})
+
+
+def _close_window_by_expiry(frontend):
+    frontend.coordinator._handle_rematch_update({"event": "window_expired"})
+
+
+def _close_window_by_unavailable(frontend):
+    frontend.coordinator._handle_online_error({"reason": Reason.REMATCH_UNAVAILABLE})
+
+
+WINDOW_CLOSERS = {
+    "declined": _close_window_by_decline,
+    "window_expired": _close_window_by_expiry,
+    "rematch_unavailable": _close_window_by_unavailable,
+}
+
+
+@pytest.mark.parametrize("closer", sorted(WINDOW_CLOSERS))
+def test_the_rematch_window_closing_under_the_result_card_keeps_the_online_board(
+        frontend, tmp_path, monkeypatch, closer):
+    """A declined rematch used to unbind the board while the card was still
+    up: the card flipped to New Game, its DEFEAT/VICTORY title to a colour
+    win, the series chip vanished, and New Game opened a hot-seat game under
+    the two online nicknames. The session goes, the board stays exactly the
+    online game it was, and the card offers a new search instead."""
+    _arm_post_game_on_card(frontend, tmp_path, monkeypatch)
+
+    WINDOW_CLOSERS[closer](frontend)
+
+    game = frontend.game
+    assert frontend.screen is game
+    assert frontend.coordinator.client is None
+    assert game.result_menu.button_state is ResultButtons.ONLINE_CLOSED
+    assert game.variant == "online"
+    assert (game.white_name, game.black_name) == ("Me", "Them")
+    assert game.result_flow._perspective_color() == PieceColor.WHITE
+    assert game.result_flow.series_score("white") == 2.0
+    assert game.current_result() == "white_wins_by_resignation"
+    assert frontend.coordinator._rematch_offered is False
+    assert game._idle_window is None
+    frontend.draw_frame()
+
+
+def test_new_search_from_a_closed_result_card_starts_a_fresh_search(
+        frontend, tmp_path, monkeypatch):
+    """The card's New Search row: the finished board is torn down for good, the
+    player lands on the menu, and the search repeats the last settings."""
+    _arm_post_game_on_card(frontend, tmp_path, monkeypatch)
+    _close_window_by_decline(frontend)
+    config = {"nickname": "Me", "time_minutes": 5, "increment_seconds": 0, "side": "white"}
+    frontend.coordinator._online_config = config
+    searches = []
+    monkeypatch.setattr(frontend.coordinator, "_begin_online_flow",
+                        lambda cfg: searches.append(cfg))
+
+    frontend.game.result_menu.callbacks["new_search"]()
+
+    assert searches == [config]
+    assert frontend.screen is frontend.menu
+    assert frontend.game.variant == "local"
+    assert frontend.game.current_result() is None
+
+
+def test_menu_from_a_closed_result_card_returns_to_the_play_view(
+        frontend, tmp_path, monkeypatch):
+    _arm_post_game_on_card(frontend, tmp_path, monkeypatch)
+    _close_window_by_expiry(frontend)
+
+    frontend._on_back_to_menu()
+
+    assert frontend.screen is frontend.menu
+    assert frontend.menu.play_view_visible()
+    assert frontend.coordinator.client is None
+    assert frontend.game.variant == "local"
+
+
 def test_rematch_update_declined_logs_the_teardown_reason(frontend, caplog):
     _arm_post_game(frontend, disconnect=lambda: None)
     frontend.coordinator._rematch_offered = True
@@ -694,7 +789,7 @@ def test_online_result_redelivery_does_not_double_count(frontend, monkeypatch):
     payload = {"reason": "resignation", "winner_color": "white"}
     frontend.coordinator._handle_online_result(payload)
     frontend.coordinator._handle_online_result(payload)
-    assert frontend.game.result_flow.series_scores["Me"] == 1.0
+    assert frontend.game.result_flow.series_score("white") == 1.0
     assert frontend.game.manual_result == "white_wins_by_resignation"
 
 
