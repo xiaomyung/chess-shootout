@@ -395,7 +395,22 @@ class SkillCheckSession:
         self.online_was_spectator = False
         self.online_skillcheck_opened_ms = None
         self.online_verdict_action: Callable[[], None] | None = None
+        self.online_verdict_set_ms: int | None = None
         self.online_last_hit_pop = -1
+
+    def take_online_verdict_action(self) -> Callable[[], None] | None:
+        """
+        Hand over the consequence parked behind the overlay's verdict
+        flourish and forget it here, so whoever takes it -- the overlay's
+        finish, a result that arrived first, the screen leaving -- runs it
+        exactly once. The stamp of when it was parked goes with it
+
+        :returns: the parked action, or None when nothing is waiting
+        """
+        action = self.online_verdict_action
+        self.online_verdict_action = None
+        self.online_verdict_set_ms = None
+        return action
 
     def clear_online_skillcheck_state(self) -> None:
         """
@@ -453,8 +468,7 @@ class SkillCheckSession:
         seed = self.active_seed
         was_spectator = self.online_was_spectator
         self.online_was_spectator = False
-        action = self.online_verdict_action
-        self.online_verdict_action = None
+        action = self.take_online_verdict_action()
         self._release_active_check(kind)
         self.skillcheck_target = None
         if action is not None:

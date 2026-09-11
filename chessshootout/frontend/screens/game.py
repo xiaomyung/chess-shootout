@@ -124,7 +124,6 @@ IDLE_LABEL_BY_OUTCOME = {Reason.ABORTED: "Abort in", Reason.RESIGNATION: "Resign
 IDLE_RESIGN_NOTICE_SECONDS = 30.0
 
 OPPONENT_AIMING_LABEL = "Opponent is lining up a shot…"
-RESUME_FEN_FAILED_LABEL = "Couldn't rebuild the position — resyncing"
 
 ANIM_MS_DEFAULT = 180
 ANIM_MS_MIN = 140
@@ -136,6 +135,17 @@ SPECTATE_PROGRESS_MAX = COMBO_PROMPT_COUNT_MAX
 NO_LAST_HIT_POP = -1
 
 _RESULT_FADE_CACHE = cache.new_size_cache()
+
+
+class ResumeReplayError(RuntimeError):
+    """
+    Raised when the move list in a resume snapshot will not replay on a fresh
+    board, so the position the server describes cannot be rebuilt here. The
+    coordinator answers by giving the game up rather than playing on from a
+    truncated history that would never agree with the server again
+    """
+
+    pass
 
 
 def _finite_float(value: Any, default: float | None = 0.0) -> float | None:
@@ -332,6 +342,7 @@ class GameScreen(Screen):
             "open_pgn": self.result_flow.on_open_pgn,
             "menu": app._on_back_to_menu,
             "rematch": app.coordinator._on_rematch,
+            "new_search": app.coordinator._restart_online_search,
         }, pgn_available_provider=self.result_flow.pgn_available)
         self.right_menu = RightMenu(window, self.match, {
             "undo": self._on_undo,
@@ -471,7 +482,8 @@ class GameScreen(Screen):
         """
         Set up a server-backed game from the pairing the server sent: both
         nicknames and countries, the agreed time control, which colour is
-        local and the running series score. It also points the match's local
+        local and the running series score, adopted wholesale by colour as
+        the server states it for this game. It also points the match's local
         move hook at the coordinator, which is what puts moves on the wire
 
         :param payload: game-start or resume payload -- your_color, names,
@@ -489,8 +501,8 @@ class GameScreen(Screen):
         self.match.on_local_move_applied = self._on_local_move_applied
         self._match_session_id = payload.get("session_id") or str(uuid.uuid4())
         self.result_flow.series_scores = {
-            self.white_name: float(payload.get("white_score", 0.0)),
-            self.black_name: float(payload.get("black_score", 0.0)),
+            "white": float(payload.get("white_score", 0.0)),
+            "black": float(payload.get("black_score", 0.0)),
         }
         self._opp_disconnected_at_ms = None
         self._local_disconnected_at_ms = None
@@ -770,10 +782,11 @@ class GameScreen(Screen):
         """
         Rebuild the whole game from the server's resume snapshot after a drop,
         a restart or a resync. The position is rebuilt by starting a new game
-        and replaying the SANs -- never by patching the current board -- and
-        the FEN is only used as a fallback when a SAN fails to replay
+        and replaying the SANs -- never by patching the current board -- and a
+        SAN that will not replay raises ResumeReplayError, since a partial
+        history is worse than none
 
-        :param payload: resume payload -- move history, FEN, clock, marks,
+        :param payload: resume payload -- move history, clock, marks,
             skill-check log and locks, any pending check, result and idle
             window
         """
@@ -781,9 +794,8 @@ class GameScreen(Screen):
         for entry in payload.get("move_history", [])[:RESUME_MAX_PLIES]:
             result = self.match.apply_san(entry["san"])
             if not result.legal:
-                log.warning("resume: SAN replay failed at %r", entry.get("san"))
-                self._adopt_resumed_fen(payload.get("fen"))
-                break
+                raise ResumeReplayError(
+                    f"resume: SAN replay failed at ply {len(self.match.move_history) + 1}")
         if self._time_control is not None:
             initial, incr = self._time_control
             self.match.setup_clock(initial, incr)
@@ -797,26 +809,6 @@ class GameScreen(Screen):
         self.skillcheck_session.apply_resumed_skillcheck_log(payload.get("skillcheck_log", []))
         self._restore_online_skillcheck_state(payload)
         self._adopt_idle_window(payload.get("idle_window"))
-
-    def _adopt_resumed_fen(self, fen: Any) -> None:
-        """
-        Take the position from the FEN a resume snapshot carries, the fallback
-        for a move list that would not replay. A FEN the engine refuses is
-        dropped rather than allowed to abandon the rest of the adoption: the
-        replayed prefix stays on the board, the player is told, and the resync
-        heartbeat converges the two sides again
-
-        :param fen: the snapshot's FEN field exactly as the server sent it,
-            which is to say not to be trusted
-        """
-        try:
-            apply_fen(self.match.backend, str(fen))
-        except (IndexError, KeyError, ValueError):
-            log.warning("resume: FEN fallback refused")
-            self.app.toast.show(RESUME_FEN_FAILED_LABEL, key="resume_fen_failed")
-            return
-        self._custom_start = True
-        self.board.forget_position_memos()
 
     def _restore_resumed_annotations(self, payload: dict[str, Any]) -> None:
         """
@@ -916,16 +908,45 @@ class GameScreen(Screen):
         """
         Play out the server's verdict on an open skill check: the overlay runs
         its win or miss flourish first and the consequence is held back until
-        that finishes, so the move never lands before the shot is shown
+        that finishes, so the move never lands before the shot is shown. With
+        no overlay open to finish -- a kind this client could not draw -- the
+        consequence runs at once, and a failure there resyncs the game
 
         :param won: True when the server says the shot hit
         :param action: what to run once the overlay has finished -- apply the
             move, or lock it and play the miss
         """
-        self.skillcheck_session.online_skillcheck = None
-        self.skillcheck_session.online_spectate_kind = None
-        self.skillcheck_session.online_verdict_action = action
+        session = self.skillcheck_session
+        session.online_skillcheck = None
+        session.online_spectate_kind = None
+        session.online_verdict_action = action
+        session.online_verdict_set_ms = pg.time.get_ticks()
         self.skillcheck_overlay.resolve_online(won)
+        if self.skillcheck_overlay.is_active():
+            return
+        if not self._flush_parked_verdict():
+            self.app.coordinator._begin_resync(ResyncCause.VERDICT_LOST)
+
+    def _flush_parked_verdict(self) -> bool:
+        """
+        Run the consequence of a skill-check verdict that is still waiting on
+        an overlay, when nothing is going to finish that overlay -- no
+        controller was open, the screen is leaving, or the ending arrived
+        first. Running it is what lands the won move; leaving it parked would
+        hold the heartbeat off forever. The action is taken exactly once
+
+        :returns: True when the action ran cleanly or there was none, False
+            when it raised
+        """
+        action = self.skillcheck_session.take_online_verdict_action()
+        if action is None:
+            return True
+        try:
+            action()
+        except Exception:
+            log.exception("parked skill-check verdict failed")
+            return False
+        return True
 
     def _apply_online_fail(self, from_sq: Square, to_sq: Square,
                            aim_victim: Square | None,
@@ -1171,33 +1192,35 @@ class GameScreen(Screen):
     def _apply_remote_move_payload(self, payload: dict[str, Any]) -> None:
         """
         Land a server-confirmed move on the local board, animate it and log
-        its skill check. A move whose SAN is already the last one played is
-        just a clock update, and a ply number that disagrees with the local
-        history -- or a move the engine calls illegal -- triggers a resync
+        its skill check. Every move-applied message marks the point where the
+        server re-arms or drops its idle window, so the countdown showing is
+        cleared first and only a fresh push brings one back. The echo of a ply
+        this client already holds -- same ply number, same squares, same
+        promotion -- is just a clock update, and a ply number that disagrees
+        with the local history, or a move the engine calls illegal, triggers
+        a resync
 
         :param payload: move-applied payload -- from, to, SAN, ply, clock,
             promotion letter and the skill-check kind and outcome if any
         """
+        self._idle_window = None
         from_sq = square_from_coord(payload["from"])
         to_sq = square_from_coord(payload["to"])
-        san = payload.get("san")
-        last = self.match.move_history[-1] if self.match.move_history else None
-        if last is not None and last.san == san:
+        promo = payload.get("promotion")
+        promo_type = PROMO_TYPE_BY_LETTER.get(promo) if promo else None
+        server_ply = payload.get("ply")
+        if self._is_move_echo(from_sq, to_sq, promo_type, payload.get("san"), server_ply):
             self._apply_clock_snap(payload, default_to_existing=True)
             self._clear_online_move_locks(from_sq, to_sq)
             return
-        server_ply = payload.get("ply")
         expected = len(self.match.move_history) + 1
         if server_ply is not None and server_ply != expected:
             log.warning("move ply gap server_ply=%s expected=%d", server_ply, expected)
             self.app.coordinator._begin_resync(ResyncCause.MOVE_PLY_GAP)
             return
         self._apply_clock_snap(payload, default_to_existing=True)
-        promo = payload.get("promotion")
-        promo_type = PROMO_TYPE_BY_LETTER.get(promo) if promo else None
         result = self.match.apply_remote_move(from_sq, to_sq, promo_type)
         if result.legal:
-            self._idle_window = None
             self.board.animate_remote_move(from_sq, to_sq)
             self._clear_online_move_locks(from_sq, to_sq)
             kind = payload.get("skill_check_kind")
@@ -1207,6 +1230,35 @@ class GameScreen(Screen):
                     payload.get("ply") or len(self.match.move_history))
         else:
             self.app.coordinator._begin_resync(ResyncCause.MOVE_ILLEGAL)
+
+    def _is_move_echo(self, from_sq: Square, to_sq: Square,
+                      promo_type: PieceType | None, san: Any,
+                      server_ply: Any) -> bool:
+        """
+        Tell whether a move-applied message describes the ply already on top
+        of the local history -- this client's own move coming back, or a won
+        skill check whose consequence has already been played -- rather than
+        a new ply. The judgement is by ply number and squares, never by SAN
+        alone: a recapture on the same square reads exactly like the capture
+        it answers. A message with no ply number falls back to matching the
+        SAN and the squares
+
+        :param from_sq: square the reported move started from
+        :param to_sq: square it arrived on
+        :param promo_type: piece the reported move promoted to, None for an
+            ordinary move
+        :param san: SAN the server attached, only consulted without a ply
+        :param server_ply: the ply number the server stamped, None when absent
+        :returns: True when the top of the local history is that same ply
+        """
+        if not self.match.move_history:
+            return False
+        last = self.match.move_history[-1]
+        same_squares = last.move.from_sq == from_sq and last.move.to_sq == to_sq
+        if server_ply is None:
+            return same_squares and last.san == san
+        return (server_ply == len(self.match.move_history) and same_squares
+                and last.move.promoted_to == promo_type)
 
     def on_result(self, payload: dict[str, Any]) -> None:
         """
@@ -1229,8 +1281,7 @@ class GameScreen(Screen):
         self._local_disconnected_at_ms = None
         coordinator.offer_banners.clear()
         self.skillcheck_session.pending_online_move = None
-        pending_action = self.skillcheck_session.online_verdict_action
-        self.skillcheck_session.online_verdict_action = None
+        pending_action = self.skillcheck_session.take_online_verdict_action()
         try:
             if pending_action is not None:
                 pending_action()
@@ -1331,12 +1382,15 @@ class GameScreen(Screen):
         """
         Hand the window back and cancel everything screen-local, so nothing
         from this game leaks into the next screen: the coordinator
-        subscription, focus mode, an in-flight drag, queued premoves, board
-        marks and any live skill-check overlay all go. Entering again always
-        starts from a clean baseline
+        subscription, focus mode, an in-flight drag, a give-time hold, queued
+        premoves, board marks and any live skill-check overlay all go. A
+        verdict still parked behind that overlay is played out first rather
+        than lost with it. Entering again always starts from a clean baseline
         """
         super().exit()
         self.app.coordinator.unsubscribe(self)
+        self._flush_parked_verdict()
+        self.give_time.cancel_give_time_hold()
         did_focus = self.focus_mode or self.focus_transition is not None
         if did_focus:
             self._force_focus_off_instant()
@@ -2077,8 +2131,8 @@ class GameScreen(Screen):
         """
         key = (self.app.screen is self, self.variant, self._time_control,
                self.white_name, self.black_name,
-               self.result_flow.series_scores.get(self.white_name, 0.0),
-               self.result_flow.series_scores.get(self.black_name, 0.0))
+               self.result_flow.series_score("white"),
+               self.result_flow.series_score("black"))
         if self._game_info_memo is not None and self._game_info_memo[0] == key:
             return
         info = self._compute_game_info()
@@ -2102,8 +2156,8 @@ class GameScreen(Screen):
         pill = VARIANT_PILL_LABELS[self.variant]
         info = {"mode": pill, "time_control": tc, "round": rnd, "lines": []}
         if self.variant == Variant.ONLINE:
-            white_score = self.result_flow.series_scores.get(self.white_name, 0.0)
-            black_score = self.result_flow.series_scores.get(self.black_name, 0.0)
+            white_score = self.result_flow.series_score("white")
+            black_score = self.result_flow.series_score("black")
             info["lines"] = [
                 f"{self.white_name}  {score_str(white_score)} – "
                 f"{score_str(black_score)}  {self.black_name}",
@@ -2118,8 +2172,8 @@ class GameScreen(Screen):
 
         :returns: the round number, starting at one
         """
-        total = (self.result_flow.series_scores.get(self.white_name, 0.0)
-                 + self.result_flow.series_scores.get(self.black_name, 0.0))
+        total = (self.result_flow.series_score("white")
+                 + self.result_flow.series_score("black"))
         return int(total) + 1
 
     def _result_elapsed_ms(self) -> int | None:
@@ -2369,7 +2423,6 @@ class GameScreen(Screen):
         :param entry: the history entry for the ply, complete with its SAN and
             its check and mate flags
         """
-        self._idle_window = None
         if entry.gives_checkmate:
             self.app.sound_manager.play_checkmate()
         elif entry.move.is_castle:
