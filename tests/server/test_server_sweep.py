@@ -17,7 +17,8 @@ from chessshootout.server.app import create_app
 from chessshootout.server.protocol import (
     GRACE_SECONDS, HEARTBEAT_TIMEOUT_SECONDS, QUEUE_MAX_WAIT_SECONDS, Reason,
     WS_CLOSE_QUEUE_TIMEOUT)
-from chessshootout.server.rooms import POST_GAME_DISCONNECT_GRACE, QUEUE_ABANDON_SECONDS
+from chessshootout.server.rooms import (
+    POST_GAME_DISCONNECT_GRACE, QUEUE_ABANDON_SECONDS, REMATCH_IDLE_SECONDS)
 from chessshootout.server.sweep import (
     PREGAME_CONNECT_GRACE_SECONDS, SWEEP_ERROR_LOG_INTERVAL_SECONDS,
     SWEEP_STALE_SECONDS)
@@ -119,7 +120,7 @@ async def test_a_bullet_flag_before_the_ply_one_abort_deadline_is_a_timeout(
     clock.advance(61)
     await sweep.step_clock_and_idle_windows()
     assert room.result == (Reason.TIMEOUT, "white")
-    assert room.series_scores == {"A": 1.0}
+    assert room.series_scores == {room.white.client_uuid: 1.0}
 
 
 @pytest.mark.asyncio
@@ -234,13 +235,16 @@ async def test_sweep_step_grace_expired_with_desync_awards_opponent(sweep, app, 
     assert room.result == (Reason.ABANDONMENT, "black")
 
 
-async def test_post_game_leaver_grace_restarts_at_the_result(sweep, app, clock):
-    """REGRESSION (v2.10.0 live smoke): the winner never saw the VICTORY screen.
-    The leaver's pre-result disconnected_at also satisfied the post-game rematch
-    grace, so opponent_left fired in the same sweep pass as the result and the
-    client tore the session down instantly. finalize_result now restamps a
-    disconnected slot's clock to ended_at: the post-game window gets its full
-    grace measured from the result, not from the original disconnect."""
+async def test_post_game_leaver_never_closes_the_window_on_the_player_who_stayed(
+    sweep, app, clock,
+):
+    """The v2.13.1 rule (was: opponent_left after POST_GAME_DISCONNECT_GRACE).
+    An abandonment already leaves the loser's socket gone, so the grace branch
+    tore the winner's rematch window down seconds after the VICTORY screen
+    appeared -- with nothing to offer a rematch to. The player who stayed now
+    keeps the window for its whole life: no rematch_update, no drop, however
+    long the other one is away. finalize_result still restamps the leaver's
+    disconnected_at to ended_at, which is what the both-gone grace measures."""
     room = await pair_room(app.state.rooms)
     room.started_at = clock()
     room.first_move_at = clock()
@@ -253,14 +257,33 @@ async def test_post_game_leaver_grace_restarts_at_the_result(sweep, app, clock):
     assert room.white.disconnected_at == room.ended_at
     ws_black = RecordingWS()
     app.state.connections.add(room.room_id, room.black.client_uuid, ws_black)
-    clock.advance(POST_GAME_DISCONNECT_GRACE - 1)
+    for _ in range(4):
+        clock.advance(POST_GAME_DISCONNECT_GRACE)
+        await sweep.step_post_game()
+        assert app.state.rooms.get(room.room_id) is room
+        assert not ws_black.of_type("rematch_update")
+
+
+async def test_post_game_window_still_expires_on_idle_with_one_player_gone(
+    sweep, app, clock,
+):
+    """The other half of the same rule: waiting forever is not the answer either.
+    With the leaver still away the window ends on its own idle deadline, and the
+    player who stayed is told so rather than finding a dead room."""
+    room = await pair_room(app.state.rooms)
+    room.started_at = clock()
+    room.first_move_at = clock()
+    room.plies_ever = 1
+    room.white.connected = True
+    app.state.rooms.mark_disconnected(room.room_id, "white")
+    clock.advance(61)
+    await sweep.step_grace_expired()
+    ws_black = RecordingWS()
+    app.state.connections.add(room.room_id, room.black.client_uuid, ws_black)
+    clock.advance(REMATCH_IDLE_SECONDS + 1)
     await sweep.step_post_game()
-    assert app.state.rooms.get(room.room_id) is room, "room survives inside the fresh grace"
-    assert not ws_black.of_type("rematch_update")
-    clock.advance(2)
-    await sweep.step_post_game()
-    updates = ws_black.of_type("rematch_update")
-    assert updates and updates[-1]["event"] == "opponent_left"
+    assert app.state.rooms.get(room.room_id) is None
+    assert [m["event"] for m in ws_black.of_type("rematch_update")] == ["window_expired"]
 
 
 CARL = fake_uuid4(3)

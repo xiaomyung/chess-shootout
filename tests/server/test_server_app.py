@@ -937,6 +937,68 @@ def _auth(ws, body):
     ws.send_text(json.dumps(auth_msg(body["session_token"])))
 
 
+def test_a_socket_that_missed_the_game_start_is_handed_it_on_reconnect(app, client):
+    """REGRESSION: broadcast_game_start skips a colour with no live socket yet
+    still marks the room as started, so a player whose connection was superseded
+    in that instant was only ever told `connection_status` and sat on an empty
+    board for the rest of the game. The seat now remembers whether it was told,
+    so the returning socket is handed the start -- once, not on every reconnect."""
+    random.seed(0)
+    r1 = _matchmake(client, uuid=ALICE, side="white")
+    r2 = _matchmake(client, uuid=BOB, side="black")
+    room = app.state.rooms.get(r1.json()["room_id"])
+    with client.websocket_connect(f"/ws/{r2.json()['room_id']}") as ws_b:
+        _auth(ws_b, r2.json())
+        room.game_start_broadcast = True
+        room.slot(room.color_of(BOB)).game_start_sent = True
+        with client.websocket_connect(f"/ws/{r1.json()['room_id']}") as ws_w:
+            _auth(ws_w, r1.json())
+            start = _recv(ws_w)
+            assert start["type"] == "game_start"
+            assert start["your_color"] == room.color_of(ALICE)
+            assert room.slot(room.color_of(ALICE)).game_start_sent is True
+            assert _recv(ws_w)["type"] == "connection_status"
+        with client.websocket_connect(f"/ws/{r1.json()['room_id']}") as ws_w2:
+            _auth(ws_w2, r1.json())
+            assert _recv(ws_w2)["type"] == "connection_status", \
+                "a seat already told the game started is not told twice"
+
+
+def test_a_reconnect_after_leaving_the_result_does_not_put_the_player_back_on_it(
+    app, client,
+):
+    """REGRESSION: the reconnect block re-armed `at_result`, so a player who had
+    already walked back to the menu counted as sitting on the result screen
+    again -- the both-left-result drop (pinned in test_rematch_lifecycle) never
+    fired and the finished room lived out its whole window. Only finalize_result
+    arms the flag now, and only left_result clears it."""
+    random.seed(0)
+    r1 = _matchmake(client, uuid=ALICE, side="white")
+    r2 = _matchmake(client, uuid=BOB, side="black")
+    room = app.state.rooms.get(r1.json()["room_id"])
+    with client.websocket_connect(f"/ws/{r2.json()['room_id']}") as ws_b:
+        _auth(ws_b, r2.json())
+        with client.websocket_connect(f"/ws/{r1.json()['room_id']}") as ws_w:
+            _auth(ws_w, r1.json())
+            _recv(ws_w)
+            _recv(ws_b)
+            ws_w.send_text(json.dumps({"version": PROTOCOL_VERSION, "type": "resign"}))
+            assert _recv(ws_w)["type"] == "result"
+            assert _recv(ws_b)["type"] == "result"
+            ws_w.send_text(json.dumps({"version": PROTOCOL_VERSION,
+                                       "type": "left_result"}))
+            ws_w.send_text(json.dumps({"version": PROTOCOL_VERSION,
+                                       "type": "ping", "ply": 0}))
+            assert _recv(ws_w)["type"] == "pong"
+            assert room.slot(room.color_of(ALICE)).at_result is False
+        with client.websocket_connect(f"/ws/{r1.json()['room_id']}") as ws_w2:
+            _auth(ws_w2, r1.json())
+            assert _recv(ws_w2)["type"] == "result"
+            assert room.slot(room.color_of(ALICE)).at_result is False, \
+                "coming back to hear the result is not sitting on the card again"
+            assert room.slot(room.color_of(BOB)).at_result is True
+
+
 def test_a_rematch_reroutes_heartbeats_and_the_teardown_to_the_new_color(
     app, client, clock,
 ):

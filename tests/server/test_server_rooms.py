@@ -255,6 +255,8 @@ async def test_reset_for_rematch_swaps_colors_and_clears_state(manager, clock):
     room.takeback_offered_by = "white"
     room.rematch_offered_by = {"white", "black"}
     room.game_start_broadcast = True
+    room.white.game_start_sent = True
+    room.black.game_start_sent = True
     manager.finalize_result(room.room_id, "checkmate", winner_color="white")
     assert room.result is not None
     assert room.white.at_result is True
@@ -272,10 +274,34 @@ async def test_reset_for_rematch_swaps_colors_and_clears_state(manager, clock):
     assert room.first_move_at is None
     assert room.white.at_result is False
     assert room.black.at_result is False
+    assert room.white.game_start_sent is False
+    assert room.black.game_start_sent is False
     assert room.white.client_uuid == pre_black_uuid
     assert room.black.client_uuid == pre_white_uuid
     assert len(room.backend.move_history) == 0
     assert room.backend.clock is not None
+
+
+@pytest.mark.asyncio
+async def test_reset_for_rematch_gives_an_away_player_a_fresh_grace(manager, clock):
+    """REGRESSION: finalize_result restamps a disconnected slot to ended_at, and
+    the rematch used to inherit that stamp -- a player who dropped during the
+    previous game started the new one with their whole grace already spent and
+    lost it by abandonment on the first sweep. The reset restamps to now for a
+    player still away, and clears the stamp for one who is back."""
+    await manager.enqueue(**_enqueue_kwargs("alice"))
+    room = await manager.enqueue(**_enqueue_kwargs("bob"))
+    room.white.connected = True
+    room.black.connected = True
+    manager.mark_disconnected(room.room_id, "white")
+    manager.finalize_result(room.room_id, "checkmate", winner_color="black")
+    assert room.white.disconnected_at == room.ended_at
+    clock.advance(120)
+
+    assert manager.reset_for_rematch(room.room_id) is True
+    back, away = room.white, room.black
+    assert back.connected is True and back.disconnected_at is None
+    assert away.connected is False and away.disconnected_at == clock()
 
 
 @pytest.mark.asyncio
@@ -386,21 +412,37 @@ async def test_slot_by_token_returns_correct_slot(manager):
 
 @pytest.mark.asyncio
 async def test_series_scores_award_win_and_persist_across_rematch(manager):
-    """A win gives the winner +1 keyed by nickname; a later draw gives both +0.5;
-    the tally survives the color swap of a rematch."""
+    """A win gives the winner +1 keyed by client uuid; a later draw gives both
+    +0.5; the tally survives the color swap of a rematch."""
     await manager.enqueue(**_enqueue_kwargs("alice"))
     room = await manager.enqueue(**_enqueue_kwargs("bob"))
     rid = room.room_id
-    white_name = room.white.nickname
-    black_name = room.black.nickname
+    white_uuid = room.white.client_uuid
+    black_uuid = room.black.client_uuid
     manager.finalize_result(rid, "checkmate", "white")
-    assert room.series_scores[white_name] == 1.0
+    assert room.series_scores[white_uuid] == 1.0
     assert room.score_for("white") == 1.0
     assert room.score_for("black") == 0.0
     manager.reset_for_rematch(rid)
     manager.finalize_result(rid, "draw_repetition", None)
-    assert room.series_scores[white_name] == 1.5
-    assert room.series_scores[black_name] == 0.5
+    assert room.series_scores[white_uuid] == 1.5
+    assert room.series_scores[black_uuid] == 0.5
+
+
+@pytest.mark.asyncio
+async def test_series_scores_stay_separate_for_two_identical_nicknames(manager):
+    """REGRESSION: scores were keyed by nickname, so two players who both left
+    the default name in place shared one tally -- a draw read as 1.0 apiece on
+    both strips, and a win credited the loser too. Keyed by the uuid they are
+    two players again."""
+    await manager.enqueue(**_enqueue_kwargs("alice", nickname="Player"))
+    room = await manager.enqueue(**_enqueue_kwargs("bob", nickname="Player"))
+    assert room.white.nickname == room.black.nickname == "Player"
+    manager.finalize_result(room.room_id, "draw_agreement", None)
+    assert room.score_for("white") == 0.5
+    assert room.score_for("black") == 0.5
+    assert sorted(room.series_scores) == sorted(
+        [room.white.client_uuid, room.black.client_uuid])
 
 
 @pytest.mark.asyncio
@@ -515,8 +557,8 @@ async def test_zero_ply_draw_agreement_stays_a_draw(manager):
     assert room.plies_ever == 0
     manager.finalize_result(room.room_id, "draw_agreement", None)
     assert room.result == ("draw_agreement", None)
-    assert room.series_scores[room.white.nickname] == 0.5
-    assert room.series_scores[room.black.nickname] == 0.5
+    assert room.series_scores[room.white.client_uuid] == 0.5
+    assert room.series_scores[room.black.client_uuid] == 0.5
     assert room.score_for("white") == 0.5
     assert room.score_for("black") == 0.5
 

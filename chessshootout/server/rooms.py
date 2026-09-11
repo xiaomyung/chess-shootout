@@ -91,8 +91,9 @@ class GameAlreadyStartedError(Exception):
 class PlayerSlot:
     """
     One seat in a room: who the player is, how they are recognised across
-    reconnects, and the live state of their connection. A seat outlives any
-    single socket, which is what makes a dropped connection recoverable
+    reconnects, the live state of their connection and whether they have been
+    told the current game started. A seat outlives any single socket, which is
+    what makes a dropped connection recoverable
     """
 
     client_uuid: str
@@ -109,6 +110,7 @@ class PlayerSlot:
     resync_logged: bool = False
     last_seen: float = 0.0
     at_result: bool = False
+    game_start_sent: bool = False
 
     def strike(self, now: float) -> int:
         """
@@ -348,14 +350,26 @@ class Room:
     def score_for(self, color: str) -> float:
         """
         Read a side's running score in this room's series, the number shown
-        beside the names. Scores are keyed by nickname, so they survive the
-        colour swap a rematch performs
+        beside the names. Scores are keyed by the player's own id, so they
+        survive the colour swap a rematch performs and two opponents who happen
+        to share a nickname still keep separate scores
 
         :param color: white or black.
         :returns: that side's series score, 0.0 while the seat is empty.
         """
         slot = self.slot(color)
-        return self.series_scores.get(slot.nickname, 0.0) if slot else 0.0
+        return self.series_scores.get(slot.client_uuid, 0.0) if slot else 0.0
+
+    def seconds_since_start(self, now: float) -> float:
+        """
+        How long this game has been running, the figure every game start
+        carries so a client that joined late runs its clock from the right
+        instant rather than from the moment it happened to connect
+
+        :param now: monotonic seconds, the server's own clock.
+        :returns: seconds since the game started, never negative.
+        """
+        return max(now - (self.started_at or now), 0.0)
 
     def is_paired(self) -> bool:
         """
@@ -588,8 +602,9 @@ class RoomManager:
         clocks, draws the room's own skill-check secret and starts the idle
         countdown
 
-        :param client_uuid: the player's stable id; one game at a time.
-        :param nickname: display name, and the key their series score uses.
+        :param client_uuid: the player's stable id; one game at a time, and the
+            key their series score is filed under.
+        :param nickname: display name shown to the opponent.
         :param session_token: token this seat will be proved with.
         :param time_minutes: base minutes per side, half of the queue key.
         :param increment_seconds: seconds added per move, the other half.
@@ -961,8 +976,9 @@ class RoomManager:
     def _award_series(room: Room, reason: str, winner_color: str | None) -> None:
         """
         Add this game to the room's running series score: a point to the
-        winner, half each for a draw. A game that never really happened --
-        aborted, or cut short by the server going down -- scores nothing
+        winner, half each for a draw, filed under the player's own id rather
+        than their name. A game that never really happened -- aborted, or cut
+        short by the server going down -- scores nothing
 
         :param room: the room being finalised.
         :param reason: why the game ended.
@@ -974,11 +990,11 @@ class RoomManager:
         if winner_color in ("white", "black"):
             slot = room.slot(winner_color)
             if slot is not None:
-                scores[slot.nickname] = scores.get(slot.nickname, 0.0) + 1.0
+                scores[slot.client_uuid] = scores.get(slot.client_uuid, 0.0) + 1.0
         elif reason.startswith("draw"):
             for slot in (room.white, room.black):
                 if slot is not None:
-                    scores[slot.nickname] = scores.get(slot.nickname, 0.0) + 0.5
+                    scores[slot.client_uuid] = scores.get(slot.client_uuid, 0.0) + 0.5
 
     def finished_timed_out(self, room: Room) -> bool:
         """
@@ -1064,7 +1080,9 @@ class RoomManager:
         Turn a finished room back into a fresh game with the colours swapped:
         new board and clocks, a new skill-check secret, cleared marks, offers
         and result, and the ply counter back to zero. The series scores are
-        the one thing that survives, since they are the point of a series
+        the one thing that survives, since they are the point of a series. A
+        player who is away starts the new game on a full grace period rather
+        than inheriting one already spent on the game just played
 
         :param room_id: the finished room to replay.
         :returns: True when the room could be replayed and has been reset.
@@ -1100,6 +1118,8 @@ class RoomManager:
         for slot in (room.white, room.black):
             if slot is not None:
                 slot.at_result = False
+                slot.game_start_sent = False
+                slot.disconnected_at = None if slot.connected else self._now()
                 slot.end_resync_spell()
         return True
 

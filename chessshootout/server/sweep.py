@@ -373,12 +373,33 @@ class Sweep:
         await self._notify_rematch(room, "white", event)
         await self._notify_rematch(room, "black", event)
 
+    def _both_gone_past_grace(self, room: Room, now: float) -> bool:
+        """
+        Tell whether a finished room with no live socket on either side has
+        been left alone long enough to close. A player who dropped out of the
+        rematch window is given the same grace a live game gives them, so
+        closing an app for a moment does not cost the window; a seat that was
+        never connected at all has nobody to wait for
+
+        :param room: the finished room, currently holding neither socket.
+        :param now: monotonic seconds, the sweep's own clock.
+        :returns: True when neither player is still inside their grace.
+        """
+        for color in ("white", "black"):
+            slot = room.slot(color)
+            if slot is None or slot.disconnected_at is None:
+                continue
+            if now - slot.disconnected_at < POST_GAME_DISCONNECT_GRACE:
+                return False
+        return True
+
     async def step_post_game(self) -> None:
         """
         Look after the window a finished room stays alive for, so the two
-        players can agree a rematch, and close it once there is nothing left
-        to wait for: both gone, one gone past the grace period, both back at
-        the menu, or the window simply run out
+        players can agree a rematch. One player dropping out of it does not
+        close it -- they are given the whole window to come back -- so it ends
+        only when there is nothing left to wait for: both gone past the grace
+        period, both back at the menu, or the window simply run out
         """
         now = self._now()
         for room in self.rooms.active_rooms():
@@ -388,28 +409,19 @@ class Sweep:
                 white_present = self.connections.get_for_color(room, "white") is not None
                 black_present = self.connections.get_for_color(room, "black") is not None
                 if not white_present and not black_present:
-                    log.info("drop room=%s reason=both_disconnected_post_result",
-                             room.room_id)
-                    self.rooms.drop_room_now(room.room_id)
+                    if self._both_gone_past_grace(room, now):
+                        log.info("drop room=%s reason=both_disconnected_post_result",
+                                 room.room_id)
+                        self.rooms.drop_room_now(room.room_id)
                     continue
-                present_color = "white" if white_present else "black"
                 if (room.ended_at is not None
                         and now - room.ended_at >= REMATCH_ABSOLUTE_CAP_SECONDS):
                     await self._notify_both(room, "window_expired")
                     log.info("drop room=%s reason=rematch_cap", room.room_id)
                     self.rooms.drop_room_now(room.room_id)
                     continue
-                if not (white_present and black_present):
-                    gone_color = "black" if white_present else "white"
-                    gone = room.slot(gone_color)
-                    if (gone is not None and gone.disconnected_at is not None
-                            and now - gone.disconnected_at >= POST_GAME_DISCONNECT_GRACE):
-                        await self._notify_rematch(room, present_color, "opponent_left")
-                        log.info("drop room=%s reason=rematch_grace_expired gone=%s",
-                                 room.room_id, gone_color)
-                        self.rooms.drop_room_now(room.room_id)
-                    continue
-                if (not cast(PlayerSlot, room.white).at_result
+                if (white_present and black_present
+                        and not cast(PlayerSlot, room.white).at_result
                         and not cast(PlayerSlot, room.black).at_result):
                     await self._notify_both(room, "window_expired")
                     log.info("drop room=%s reason=both_left_result", room.room_id)
