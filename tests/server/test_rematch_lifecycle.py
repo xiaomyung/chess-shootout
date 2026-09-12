@@ -230,7 +230,9 @@ async def test_sweep_keeps_room_while_both_on_result(app, clock):
 
 
 @pytest.mark.asyncio
-async def test_sweep_drops_both_disconnected_immediately(app):
+async def test_sweep_drops_both_never_connected_immediately(app):
+    """Nobody ever held a socket on this room, so there is no absence to wait
+    out: the both-gone grace only protects a player who was actually there."""
     rooms = app.state.rooms
     room, _, _ = await _finished_room(app, connect_a=False, connect_b=False)
     await app.state.sweep.step_post_game()
@@ -238,18 +240,111 @@ async def test_sweep_drops_both_disconnected_immediately(app):
 
 
 @pytest.mark.asyncio
-async def test_sweep_one_gone_grace_then_opponent_left(app, clock):
+async def test_sweep_drops_both_disconnected_only_after_the_grace(app, clock):
+    """Both players closing their app is the one thing that still ends the
+    window early -- but not on the same tick. Each gets the post-game grace to
+    come back first, so a pair reopening the game keeps their series."""
+    rooms = app.state.rooms
+    room, ws_a, ws_b = await _finished_room(app)
+    for uuid, ws in ((ALICE, ws_a), (BOB, ws_b)):
+        app.state.connections.remove(room.room_id, uuid, ws)
+        rooms.mark_disconnected(room.room_id, room.color_of(uuid))
+    clock.advance(POST_GAME_DISCONNECT_GRACE - 1)
+    await app.state.sweep.step_post_game()
+    assert rooms.rooms_active == 1
+    clock.advance(2)
+    await app.state.sweep.step_post_game()
+    assert rooms.rooms_active == 0
+
+
+@pytest.mark.asyncio
+async def test_sweep_keeps_the_window_open_while_one_player_is_away(app, clock):
+    """v2.13.1: a post-game disconnect no longer ends the rematch window. The
+    opponent going quiet for minutes leaves the room alive and says nothing to
+    the player still on the result screen, who keeps their Rematch button until
+    the window's own idle deadline."""
     rooms = app.state.rooms
     room, ws_a, ws_b = await _finished_room(app)
     bob_color = room.color_of(BOB)
     app.state.connections.remove(room.room_id, BOB, ws_b)
     rooms.mark_disconnected(room.room_id, bob_color)
+    assert REMATCH_IDLE_SECONDS > POST_GAME_DISCONNECT_GRACE, \
+        "the window has to outlive the grace for this rule to mean anything"
+    clock.advance(REMATCH_IDLE_SECONDS - 1)
     await app.state.sweep.step_post_game()
-    assert rooms.rooms_active == 1
-    clock.advance(POST_GAME_DISCONNECT_GRACE + 1)
+    assert rooms.rooms_active == 1, \
+        "well past Bob's grace, the window Alice is looking at is still open"
+    assert ws_a.events() == []
+    clock.advance(1)
     await app.state.sweep.step_post_game()
     assert rooms.rooms_active == 0
-    assert "opponent_left" in ws_a.events()
+    assert ws_a.events() == ["window_expired"]
+
+
+@pytest.mark.asyncio
+async def test_rematch_accept_waits_while_the_offerer_is_away(app):
+    """REGRESSION: accepting an offer whose offerer had dropped reset the room
+    and set game_start_broadcast anyway -- the acceptor was thrown into a new
+    game alone, and the returning socket was only ever told 'connected'. The
+    restart now waits: the offer stands, the room is untouched, and the acceptor
+    is told the other one is reconnecting."""
+    rooms = app.state.rooms
+    room, ws_a, ws_b = await _finished_room(app)
+    alice_color = room.color_of(ALICE)
+    await _offer(app, room, ws_a, ALICE)
+    app.state.connections.remove(room.room_id, ALICE, ws_a)
+    rooms.mark_disconnected(room.room_id, alice_color)
+
+    assert await _respond(app, room, ws_b, BOB, True) == "offerer_absent"
+    assert ws_b.events()[-1] == "opponent_reconnecting"
+    assert room.rematch_offered_by == {alice_color}
+    assert room.result is not None
+    assert room.game_start_broadcast is False
+    assert rooms.rooms_active == 1
+    assert "game_start" not in ws_b.types()
+
+
+@pytest.mark.asyncio
+async def test_rematch_accept_after_the_offerer_returns_starts_both_boards(app):
+    """The second half of the deferred restart: the offer that stood is still
+    good, so one more accept once the socket is back starts the game for both."""
+    room, ws_a, ws_b = await _finished_room(app)
+    alice_color = room.color_of(ALICE)
+    await _offer(app, room, ws_a, ALICE)
+    app.state.connections.remove(room.room_id, ALICE, ws_a)
+    app.state.rooms.mark_disconnected(room.room_id, alice_color)
+    assert await _respond(app, room, ws_b, BOB, True) == "offerer_absent"
+
+    ws_a2 = FakeWS()
+    app.state.connections.add(room.room_id, ALICE, ws_a2)
+    app.state.rooms.mark_connected(room.room_id, alice_color)
+    assert await _respond(app, room, ws_b, BOB, True) == "restarted"
+    assert "game_start" in ws_a2.types()
+    assert "game_start" in ws_b.types()
+    assert room.color_of(ALICE) != alice_color
+
+
+@pytest.mark.asyncio
+async def test_both_offers_standing_with_one_away_leaves_one_offer_to_answer(app):
+    """The other way into the deferred restart: the second offer arrives while
+    the first offerer is away. Leaving both offers standing would deadlock --
+    neither side may offer or answer twice -- so only the away player's offer is
+    kept, and the one still here restarts the game by answering it."""
+    room, ws_a, ws_b = await _finished_room(app)
+    alice_color = room.color_of(ALICE)
+    bob_color = room.color_of(BOB)
+    await _offer(app, room, ws_a, ALICE)
+    app.state.connections.remove(room.room_id, ALICE, ws_a)
+    app.state.rooms.mark_disconnected(room.room_id, alice_color)
+
+    assert await _offer(app, room, ws_b, BOB) == "offerer_absent"
+    assert room.rematch_offered_by == {alice_color}
+    assert bob_color not in room.rematch_offered_by
+
+    ws_a2 = FakeWS()
+    app.state.connections.add(room.room_id, ALICE, ws_a2)
+    app.state.rooms.mark_connected(room.room_id, alice_color)
+    assert await _respond(app, room, ws_b, BOB, True) == "restarted"
 
 
 @pytest.mark.asyncio

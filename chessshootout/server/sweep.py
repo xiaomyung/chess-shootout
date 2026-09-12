@@ -215,7 +215,9 @@ class Sweep:
         Tick every running clock, end the games that have just run out of
         time, and only then look at the idle countdowns. Flag-fall is settled
         first on purpose, so a clock running out in the same tick as an idle
-        window wins and the game ends on time rather than on silence
+        window wins and the game ends on time rather than on silence. A board
+        with no plies on it -- a game taken all the way back -- is never
+        charged: the abort window governs an empty board, not the clock
         """
         for room in self.rooms.active_rooms():
             try:
@@ -223,7 +225,7 @@ class Sweep:
                     continue
                 backend = room.backend
                 if (backend is not None and backend.clock is not None
-                        and room.first_move_at is not None):
+                        and room.first_move_at is not None and backend.move_history):
                     backend.tick_clock()
                     game_result = backend.game_result()
                     if game_result in RESULT_REASON_BY_GAME_RESULT:
@@ -373,12 +375,31 @@ class Sweep:
         await self._notify_rematch(room, "white", event)
         await self._notify_rematch(room, "black", event)
 
+    def _both_gone_past_grace(self, room: Room, now: float) -> bool:
+        """
+        Tell whether a finished room with no live socket on either side has
+        been left alone long enough to close. A player who dropped out of the
+        rematch window is given the same grace a live game gives them, so
+        closing an app for a moment does not cost the window; a seat that was
+        never connected at all has nobody to wait for
+
+        :param room: the finished room, currently holding neither socket.
+        :param now: monotonic seconds, the sweep's own clock.
+        :returns: True when neither player is still inside their grace.
+        """
+        return all(
+            slot is None or slot.disconnected_at is None
+            or now - slot.disconnected_at >= POST_GAME_DISCONNECT_GRACE
+            for slot in (room.white, room.black)
+        )
+
     async def step_post_game(self) -> None:
         """
         Look after the window a finished room stays alive for, so the two
-        players can agree a rematch, and close it once there is nothing left
-        to wait for: both gone, one gone past the grace period, both back at
-        the menu, or the window simply run out
+        players can agree a rematch. One player dropping out of it does not
+        close it -- they are given the whole window to come back -- so it ends
+        only when there is nothing left to wait for: both gone past the grace
+        period, both back at the menu, or the window simply run out
         """
         now = self._now()
         for room in self.rooms.active_rooms():
@@ -388,28 +409,19 @@ class Sweep:
                 white_present = self.connections.get_for_color(room, "white") is not None
                 black_present = self.connections.get_for_color(room, "black") is not None
                 if not white_present and not black_present:
-                    log.info("drop room=%s reason=both_disconnected_post_result",
-                             room.room_id)
-                    self.rooms.drop_room_now(room.room_id)
+                    if self._both_gone_past_grace(room, now):
+                        log.info("drop room=%s reason=both_disconnected_post_result",
+                                 room.room_id)
+                        self.rooms.drop_room_now(room.room_id)
                     continue
-                present_color = "white" if white_present else "black"
                 if (room.ended_at is not None
                         and now - room.ended_at >= REMATCH_ABSOLUTE_CAP_SECONDS):
                     await self._notify_both(room, "window_expired")
                     log.info("drop room=%s reason=rematch_cap", room.room_id)
                     self.rooms.drop_room_now(room.room_id)
                     continue
-                if not (white_present and black_present):
-                    gone_color = "black" if white_present else "white"
-                    gone = room.slot(gone_color)
-                    if (gone is not None and gone.disconnected_at is not None
-                            and now - gone.disconnected_at >= POST_GAME_DISCONNECT_GRACE):
-                        await self._notify_rematch(room, present_color, "opponent_left")
-                        log.info("drop room=%s reason=rematch_grace_expired gone=%s",
-                                 room.room_id, gone_color)
-                        self.rooms.drop_room_now(room.room_id)
-                    continue
-                if (not cast(PlayerSlot, room.white).at_result
+                if (white_present and black_present
+                        and not cast(PlayerSlot, room.white).at_result
                         and not cast(PlayerSlot, room.black).at_result):
                     await self._notify_both(room, "window_expired")
                     log.info("drop room=%s reason=both_left_result", room.room_id)

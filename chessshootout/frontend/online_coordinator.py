@@ -2,7 +2,7 @@ import logging
 import threading
 import uuid
 from collections.abc import Callable
-from typing import Any, cast
+from typing import Any, NamedTuple, cast
 
 import pygame as pg
 
@@ -11,6 +11,7 @@ from chessshootout.backend.utils import Square, coord_from_square, square_from_c
 from chessshootout.domain.pgn.load import time_category_for_minutes
 from chessshootout.frontend.modals.match_found import MatchFoundModal
 from chessshootout.frontend.modals.reconnecting import ReconnectingModal
+from chessshootout.frontend.modals.result import NEW_SEARCH_LABEL, ResultButtons
 from chessshootout.frontend.modals.wait import WaitModal
 from chessshootout.frontend.panels.banners import OfferBanners
 from chessshootout.frontend.panels.player_strip import AUTO_END_RED_THRESHOLD_SECONDS
@@ -102,6 +103,34 @@ NOT_YOUR_TURN_TOASTS = {
 }
 
 
+HELD_SCREEN_LEVEL_EVENTS = frozenset({"on_idle_window"})
+
+
+class HeldEvent(NamedTuple):
+    """
+    One server event kept back while a resync is in flight, together with the
+    route it has to take when it is replayed. The route travels with the event
+    because the buffer mixes board-level news, which only a subscribed screen
+    can take, with screen-level news the game screen takes either way
+    """
+
+    method: str
+    payload: dict[str, Any]
+    screen_level: bool
+
+
+class ReconnectAnswer(NamedTuple):
+    """
+    What a reconnect's background fetch left for the main thread to adopt: the
+    reclaim entry it was sent after, and the snapshot it brought back. The two
+    travel together because a failed fetch still has to hand the entry back so
+    the Reconnect button can offer it again
+    """
+
+    pending: dict[str, Any]
+    resume: dict[str, Any] | None
+
+
 class ResyncCause:
     """
     The closed set of reasons this client rebuilds a game from the server. Every
@@ -146,7 +175,7 @@ class OnlineCoordinator:
 
         self._online_config: dict[str, Any] | None = None
         self._resyncing = False
-        self._resync_buffer: list[tuple[str, dict[str, Any]]] = []
+        self._resync_buffer: list[HeldEvent] = []
         self._resync_started_at_ms = 0
         self._last_heartbeat_sent_ms = 0
         self._wait_started_at_ms: int | None = None
@@ -162,6 +191,8 @@ class OnlineCoordinator:
         self._reconnect_probe_inflight = False
         self._reconnect_probe_gen = 0
         self._reconnect_probe_attempts = 0
+        self._reconnect_resume_thread: threading.Thread | None = None
+        self._reconnect_result: ReconnectAnswer | None = None
 
     def subscribe(self, subscriber: Any) -> None:
         """
@@ -411,6 +442,22 @@ class OnlineCoordinator:
             self.app.toast.show(APPLY_FAILED_LABEL, key=APPLY_FAILED_TOAST_KEY)
             return False
 
+    def _apply_or_abandon(self, what: str, apply: Callable[[], None]) -> bool:
+        """
+        Run one piece of work that rebuilds the board from server data, and
+        give the game up when it cannot. Half a game is worse than none: a
+        board that failed to rebuild would never agree with the server again,
+        so the player is put back on the menu instead
+
+        :param what: short label for the log line, such as resume adoption
+        :param apply: the rebuild to run, called with no arguments
+        :returns: True when it ran cleanly, False when the game was abandoned
+        """
+        if self._guarded_apply(what, apply):
+            return True
+        self._abandon_online_game()
+        return False
+
     def _drain_online_inbound(self) -> None:
         """
         Take everything the network thread has queued since the last frame and
@@ -476,11 +523,14 @@ class OnlineCoordinator:
     def _handle_resync_directive(self, payload: dict[str, Any]) -> None:
         """
         Obey the server's order to rebuild the game, unless a rebuild is
-        already under way or this client has already caught up to the very ply
-        the order was written against -- an order the network delayed past its
-        own answer. Anything unreadable in the payload is treated as an order
-        worth obeying, and named only by its type, so a server sending text
-        where a ply belongs cannot put that text in the log
+        already under way or this client is sitting on exactly the ply the
+        order was written against -- an order the network delayed past its own
+        answer. A client that is somehow AHEAD of the server still rebuilds:
+        that is a move the server never took, or a rematch whose game start
+        never arrived, and the server's word is the one that counts. Anything
+        unreadable in the payload is treated as an order worth obeying, and
+        named only by its type, so a server sending text where a ply belongs
+        cannot put that text in the log
 
         :param payload: resync-directive message, carrying the ply the server
             was on when it decided
@@ -545,9 +595,9 @@ class OnlineCoordinator:
             self.offer_banners.clear()
             self.app.confirm_modal.show(
                 "Server restarted — game ended",
-                on_yes=self._restart_online_search,
+                on_yes=self.restart_search,
                 on_no=self._abandon_online_game,
-                yes_label="New Search", no_label="Cancel",
+                yes_label=NEW_SEARCH_LABEL, no_label="Cancel",
             )
             return
         if reason == Reason.QUEUE_TIMEOUT:
@@ -572,9 +622,9 @@ class OnlineCoordinator:
                 reason, ONLINE_HARD_FAILURE_LABELS[ClientReason.SERVER_UNREACHABLE])
             self.app.confirm_modal.show(
                 label,
-                on_yes=self._restart_online_search,
+                on_yes=self.restart_search,
                 on_no=self._on_online_cancel,
-                yes_label="New Search", no_label="Cancel",
+                yes_label=NEW_SEARCH_LABEL, no_label="Cancel",
             )
             return
         if reason:
@@ -587,12 +637,12 @@ class OnlineCoordinator:
     def _dismiss_pairing_ui(self) -> None:
         """
         Clear everything a search or a game had on screen before a dialog takes
-        over: any rebuild in progress, both pairing cards and the offer banners.
-        Shared by the refusals that end with a confirm dialog of their own
+        over: any rebuild in progress, both pairing cards along with the pairing
+        they were holding, and the offer banners. Shared by the refusals that
+        end with a confirm dialog of their own
         """
         self._end_resync(replay=False)
-        self.wait_modal.hide()
-        self.match_found_modal.hide()
+        self._clear_search_state()
         self.offer_banners.clear()
 
     def _update_required_sub(self, reason: str, payload: dict[str, Any]) -> str:
@@ -696,17 +746,20 @@ class OnlineCoordinator:
     def _end_rematch_window(self) -> None:
         """
         Close the post-game rematch window for good: drop the offer, save the
-        game and tear the session down. The player stays on the finished board
-        while that is still what they are looking at, otherwise off to the menu
+        game and let the session go. A player still looking at the finished
+        board keeps it as the online game it was -- names, colours and series
+        intact -- with the result card now offering a new search in place of
+        the rematch; anyone else is sent back to the menu
         """
         self._clear_rematch_offer()
         game = self.app.game
         stay_on_result = (self.app.screen is game
                           and game.current_result() is not None)
-        self._tear_down_online_session("rematch_window_closed",
-                                       navigate=not stay_on_result)
-        if not stay_on_result:
-            self._return_to_menu_card()
+        if stay_on_result:
+            self._close_session_keep_board("rematch_window_closed")
+            game.result_menu.set_buttons(ResultButtons.ONLINE_CLOSED)
+            return
+        self._tear_down_online_session("rematch_window_closed")
 
     def _handle_rematch_update(self, payload: dict[str, Any]) -> None:
         """
@@ -783,25 +836,34 @@ class OnlineCoordinator:
         Start rebuilding the whole game from the server after a suspected
         desync, asking for a fresh snapshot and holding board events back until
         it lands. Asking again while one is already running does nothing, so the
-        one line it writes marks the start of a repair, not every attempt
+        one line it writes marks the start of a repair, not every attempt. With
+        no session left to ask, nothing starts: a gate raised with nobody to
+        answer would only hold the board hostage until it timed out
 
         :param cause: which ResyncCause member sent us here
         """
         if self._resyncing:
+            return
+        if self.client is None:
+            log.debug("resync skipped cause=%s: no session", cause)
             return
         log.warning("resync begin cause=%s client_ply=%d",
                     cause, len(self.app.game.match.move_history))
         self._resyncing = True
         self.offer_banners.clear()
         self._resync_started_at_ms = pg.time.get_ticks()
-        if self.client is not None:
-            self.client.request_state_sync()
+        self.client.request_state_sync()
 
     def _end_resync(self, *, replay: bool = True) -> None:
         """
-        Finish a resync and let the game screen see events again, replaying the
-        few that were buffered while the snapshot was in flight. Teardowns turn
-        the replay off, since there is no board left to replay onto
+        Finish a resync and let the game screen see events again, replaying in
+        order the few events that were buffered while the snapshot was in
+        flight. Each kind is judged against the board the snapshot left: a move
+        replays only past the current ply, a takeback only from exactly one
+        above it, and an idle countdown always, since it is newer than anything
+        the snapshot carried. Should a replay start a fresh rebuild, what
+        remains goes back behind the new gate. Teardowns turn the replay off,
+        since there is no board left to replay onto
 
         :param replay: False to throw the buffered events away instead
         """
@@ -810,19 +872,111 @@ class OnlineCoordinator:
         self._resync_buffer = []
         if not replay or self._subscriber is None:
             return
-        for method_name, payload in buffered:
-            self._forward_board_event(method_name, payload)
+        for entry in buffered:
+            if self._resyncing:
+                self._resync_buffer.append(entry)
+                continue
+            if not self._replay_fits_board(entry):
+                continue
+            if entry.method == "on_remote_move":
+                self._dismiss_move_invalidated_offers()
+            if entry.screen_level:
+                self._forward_screen_event(entry.method, entry.payload)
+            else:
+                self._forward_board_event(entry.method, entry.payload)
+
+    def _hold_during_resync(self, method_name: str, payload: dict[str, Any]) -> bool:
+        """
+        Put one inbound event behind the resync gate when a rebuild is in
+        flight, so news the snapshot was taken too early to carry is replayed
+        rather than lost. The route it will be replayed on is recorded with it
+
+        :param method_name: subscriber method the event would have been
+            forwarded to
+        :param payload: decoded server message for that method
+        :returns: True when the event was buffered and the caller must stop
+        """
+        if not self._resyncing:
+            return False
+        self._resync_buffer.append(HeldEvent(
+            method_name, payload, method_name in HELD_SCREEN_LEVEL_EVENTS))
+        return True
+
+    def _replay_fits_board(self, entry: HeldEvent) -> bool:
+        """
+        Judge a buffered event against the board the snapshot left behind, the
+        re-gate every replay passes through. Moves and takebacks each have a
+        ply the board has to be sitting at; everything else is newer than the
+        snapshot by definition and always replays
+
+        :param entry: the buffered event being reconsidered
+        :returns: True when the event still has something to add to the board
+        """
+        if entry.method == "on_remote_move":
+            return self._move_is_past_board(entry.payload)
+        if entry.method == "on_takeback":
+            return self._takeback_fits_board(entry.payload)
+        return True
+
+    def _payload_ply(self, payload: dict[str, Any]) -> int | None:
+        """
+        Read the ply number off a server message, refusing anything that is not
+        a whole number. A payload without a readable ply cannot be placed
+        against the board at all, which is what the callers act on
+
+        :param payload: decoded server message that should carry a ply
+        :returns: the ply the message reports, or None when it has none
+        """
+        ply = payload.get("ply")
+        return ply if isinstance(ply, int) else None
+
+    def _move_is_past_board(self, payload: dict[str, Any]) -> bool:
+        """
+        Say whether a move held back during a resync still has something to
+        add to the board: only a ply beyond the current history does. A move
+        without a readable ply cannot be placed and is not replayed
+
+        :param payload: buffered move message carrying the ply it produced
+        :returns: True when the move's ply is beyond the board's ply count
+        """
+        ply = self._payload_ply(payload)
+        return ply is not None and ply > len(self.app.game.match.move_history)
+
+    def _takeback_fits_board(self, payload: dict[str, Any]) -> bool:
+        """
+        Say whether a takeback held back during a resync still has a ply to
+        unwind: only one that lands the board exactly one ply lower does.
+        Anything else the snapshot has already accounted for, and replaying it
+        would only hand the game screen a gap it answers with a fresh rebuild
+
+        :param payload: buffered takeback message carrying the ply it leaves
+        :returns: True when the takeback undoes the board's own last ply
+        """
+        ply = self._payload_ply(payload)
+        return ply is not None and ply == len(self.app.game.match.move_history) - 1
 
     def _handle_game_resumed(self, payload: dict[str, Any]) -> None:
         """
         Adopt a full state snapshot from the server, which is how both a
         reconnect and a resync end. The game screen rebuilds itself from it,
-        and the hide-marks preference is re-sent whenever the server disagrees
+        and the hide-marks preference is re-sent whenever the server disagrees.
+        A snapshot of a game still running that lands while this client is off
+        the board -- back on the menu inside the rematch window, or still on
+        the result card of the game just finished -- is adopted whole, the way
+        a reconnect adopts one; a snapshot of a finished game is ignored on
+        the menu and lands on the card like any other. Being off the board is
+        read off the result card actually on screen, never off the engine,
+        which may be sitting on a result the server has not confirmed. A
+        snapshot the board cannot rebuild from ends the session
 
         :param payload: resume snapshot: move history, clocks, shared marks,
             any pending skill check and the idle window
         """
         game = self.app.game
+        off_board = game.variant != Variant.ONLINE or game.result_menu.is_visible()
+        if off_board and payload.get("result_reason") is None:
+            self._adopt_off_board_snapshot(payload)
+            return
         if game.variant != Variant.ONLINE:
             log.info("resume ignored — no active online game")
             self._end_resync(replay=False)
@@ -830,8 +984,25 @@ class OnlineCoordinator:
         desired = env.get_hide_opp_marks()
         if bool(payload.get("hide_opp_marks")) != desired:
             self.set_marks_visibility(desired)
-        self._forward_screen_event("on_resume", payload)
+        if not self._apply_or_abandon(
+                "resume adoption",
+                lambda: self._forward_screen_event("on_resume", payload)):
+            return
         self._end_resync()
+
+    def _adopt_off_board_snapshot(self, payload: dict[str, Any]) -> None:
+        """
+        Take a snapshot of a game still running that arrived while the player
+        is not on its board -- back on the menu inside the rematch window, or
+        still reading the result card of the game just finished. It is adopted
+        whole, the way a reconnect adopts one, so the board is rebuilt around
+        them rather than patched
+
+        :param payload: resume snapshot the server sent for the live game
+        """
+        log.debug("resume adopting off-board variant=%s", self.app.game.variant)
+        self._apply_or_abandon("resume adoption",
+                               lambda: self._adopt_resumed_game(payload))
 
     def _handle_time_granted(self, payload: dict[str, Any]) -> None:
         """
@@ -846,12 +1017,14 @@ class OnlineCoordinator:
     def _handle_takeback_applied(self, payload: dict[str, Any]) -> None:
         """
         Pass on a takeback the server accepted, which unwinds the last ply on
-        the board. Dropped while a resync is in flight, because the snapshot on
-        its way already accounts for it
+        the board. During a resync it is held back rather than dropped: the
+        snapshot may have been taken before the rewind landed on the server, so
+        dropping it left the board a ply ahead and the next heartbeat ordered
+        another rebuild
 
         :param payload: takeback message: resulting ply and clock snapshot
         """
-        if self._resyncing:
+        if self._hold_during_resync("on_takeback", payload):
             return
         self._forward_board_event("on_takeback", payload)
 
@@ -887,8 +1060,7 @@ class OnlineCoordinator:
         :param payload: blocked message: the offending marks and whether
             sharing was muted for the rest of the game
         """
-        if self._resyncing:
-            self._resync_buffer.append(("on_annotations_blocked", payload))
+        if self._hold_during_resync("on_annotations_blocked", payload):
             return
         self._forward_board_event("on_annotations_blocked", payload)
 
@@ -961,11 +1133,14 @@ class OnlineCoordinator:
         """
         Deliver the opponent's move to the board and clear the offers it
         invalidates. Because the coordinator updates before the active screen
-        does, a premove waiting for this reply still fires in the same frame
+        does, a premove waiting for this reply still fires in the same frame.
+        During a resync the move is held back rather than dropped: the snapshot
+        on its way was taken before this move landed on the server, so the ply
+        would otherwise be lost and the board left behind all over again
 
         :param payload: move message: squares, SAN, resulting ply and clocks
         """
-        if self._resyncing:
+        if self._hold_during_resync("on_remote_move", payload):
             return
         self._dismiss_move_invalidated_offers()
         self._forward_board_event("on_remote_move", payload)
@@ -995,11 +1170,15 @@ class OnlineCoordinator:
         """
         Pass on the server-pushed countdown that ends a game nobody is playing
         -- an abort before the first moves, an auto-resign after them -- so the
-        board can show it ticking down
+        board can show it ticking down. During a resync it is held back rather
+        than dropped, since the snapshot was taken before it and the player
+        would otherwise sit with no warning that the game is about to end
 
         :param payload: idle-window message: the outcome, the idle colour and
             the seconds left
         """
+        if self._hold_during_resync("on_idle_window", payload):
+            return
         self._forward_screen_event("on_idle_window", payload)
 
     def _begin_match_found_transition(self, payload: dict[str, Any]) -> None:
@@ -1120,12 +1299,17 @@ class OnlineCoordinator:
     def _on_server_addr_connect(self, addr: str) -> None:
         """
         Open a fresh connection to the chosen server and queue for a match,
-        replacing whatever session was there before. An empty address means
-        there is nowhere to play, so the search is cancelled instead
+        replacing whatever session was there before. Starting a search also
+        retires any reconnect fetch still out on a worker thread, so its answer
+        cannot land on top of the session this one is about to open. An empty
+        address means there is nowhere to play, so the search is cancelled
+        instead
 
         :param addr: server address to connect to, from the server picker
         """
         log.info("connect to %s", addr)
+        with self._pending_reconnect_lock:
+            self._reconnect_probe_gen += 1
         if not addr:
             self._on_online_cancel()
             return
@@ -1171,12 +1355,15 @@ class OnlineCoordinator:
         """
         Let go of the server session, either by leaving the matchmaking queue
         or by closing the socket outright. A resync in flight is abandoned with
-        it, since there would be nothing left to apply the answer to
+        it, since there would be nothing left to apply the answer to, and the
+        remembered connection state goes too, so the next session is watched
+        from scratch
 
         :param cancel_queue: True while still queued, so the server drops the
             entry instead of leaving it to time out
         """
         self._end_resync(replay=False)
+        self._prev_online_state = None
         if self.client is None:
             return
         if cancel_queue:
@@ -1208,11 +1395,20 @@ class OnlineCoordinator:
         game.match.local_color = None
         game.match.on_local_move_applied = None
         game.right_menu.set_game_info(None)
-        game.result_menu.set_online_mode(False)
-        game._idle_window = None
+        game.result_menu.set_buttons(ResultButtons.LOCAL)
+        self._clear_online_countdowns()
+
+    def _clear_online_countdowns(self) -> None:
+        """
+        Stop every countdown that only means something with a server behind
+        it -- the idle window and both disconnect timers -- once the session
+        is gone, so nothing keeps ticking towards an ending that can no
+        longer arrive. Running it twice on the way out is harmless
+        """
+        game = self.app.game
+        game.clear_idle_window()
         game._opp_disconnected_at_ms = None
         game._local_disconnected_at_ms = None
-        self._prev_online_state = None
 
     def _on_online_cancel(self) -> None:
         """
@@ -1227,7 +1423,7 @@ class OnlineCoordinator:
         self.offer_banners.clear()
         self._return_to_menu_card()
 
-    def _on_rematch(self) -> None:
+    def request_rematch(self) -> None:
         """
         Act on the result menu's Rematch button, which either accepts the offer
         already on the table or sends one of the player's own and says so in a
@@ -1258,30 +1454,39 @@ class OnlineCoordinator:
         self._drop_client()
         self.unbind_game_from_online()
 
-    def _tear_down_online_session(self, reason: str = "unspecified",
-                                  navigate: bool = True) -> None:
+    def _tear_down_online_session(self, reason: str = "unspecified") -> None:
         """
         End an online session for good: save the game, drop the connection,
-        clear every online overlay and unbind the board. Normally it also puts
-        the player back on the menu's play card, Reconnect probing and all,
-        and resets the board for a new game
+        clear every online overlay, unbind the board, put the player back on
+        the menu's play card with Reconnect probing and all, and reset the
+        board for a new game
 
         :param reason: short label for the log line, such as restart_search
-        :param navigate: False to leave the player where they are, used when a
-            finished board is still worth looking at
+        """
+        self._close_session_keep_board(reason)
+        self.unbind_game_from_online()
+        self._return_to_menu_card()
+        self.app.game._reset_to_new_game()
+
+    def _close_session_keep_board(self, reason: str) -> None:
+        """
+        Let the server session go while leaving the board exactly the online
+        game it was: the game is saved, the connection dropped, every online
+        overlay and countdown cleared, but the colours, the names and the
+        result card's series all stay. This is the teardown's first half, and
+        on its own it is what a rematch window closing under a player still
+        reading the result gets
+
+        :param reason: short label for the log line, such as
+            rematch_window_closed
         """
         log.info("online session teardown reason=%s", reason)
-        game = self.app.game
-        game.result_flow.auto_save_pgn()
+        self.app.game.result_flow.auto_save_pgn()
         self._drop_client()
         self.reconnecting_modal.hide()
         self._clear_search_state()
         self.offer_banners.clear()
-        self.unbind_game_from_online()
-        if not navigate:
-            return
-        self._return_to_menu_card()
-        game._reset_to_new_game()
+        self._clear_online_countdowns()
 
     def _return_to_menu_card(self) -> None:
         """
@@ -1303,7 +1508,7 @@ class OnlineCoordinator:
         self._tear_down_online_session("reconnect_cancelled")
         self._return_to_menu_card()
 
-    def _restart_online_search(self) -> None:
+    def restart_search(self) -> None:
         """
         Start a brand new search with the settings from the last one, the New
         Search answer to a hard failure. With no remembered settings there is
@@ -1444,16 +1649,28 @@ class OnlineCoordinator:
 
     def _tick_skillcheck_watchdog(self) -> None:
         """
-        Rescue a skill check whose verdict never came back: once the overlay has
-        been open well past the deadline, it is torn down and the whole state
-        resynced, so one lost message cannot leave the player stuck
+        Rescue a skill check that has stalled on either side of its verdict.
+        A check whose verdict never came back is torn down once the overlay
+        has been open well past the deadline, and the whole state resynced. A
+        verdict that did come back but whose consequence is still parked long
+        after any overlay flourish could have finished is reaped by the game
+        screen, which owns it, and the game resynced only if playing it out
+        fails -- left parked, it would hold the heartbeat off until the server
+        gave this client up
         """
-        session = self.app.game.skillcheck_session
+        game = self.app.game
+        session = game.skillcheck_session
+        now = pg.time.get_ticks()
+        outcome = game.reap_stalled_verdict(now)
+        if outcome is not None:
+            if outcome is False:
+                self._begin_resync(ResyncCause.VERDICT_LOST)
+            return
         if (session.online_skillcheck is None
                 or session.online_skillcheck_opened_ms is None
-                or not self.app.game.skillcheck_overlay.is_active()):
+                or not game.skillcheck_overlay.is_active()):
             return
-        elapsed = pg.time.get_ticks() - session.online_skillcheck_opened_ms
+        elapsed = now - session.online_skillcheck_opened_ms
         if elapsed > SKILLCHECK_DEADLINE_MS + SKILLCHECK_WATCHDOG_SLACK_MS:
             session.teardown_skillcheck_overlay()
             self._begin_resync(ResyncCause.VERDICT_LOST)
@@ -1502,7 +1719,9 @@ class OnlineCoordinator:
         """
         addr = env.get_server_addr()
         client_uuid = env.get_or_create_client_uuid()
+        resume_thread = self._reconnect_resume_thread
         if (not addr or not client_uuid or self._reconnect_probe_inflight
+                or (resume_thread is not None and resume_thread.is_alive())
                 or self._reconnect_probe_attempts >= RECONNECT_PROBE_MAX_ATTEMPTS):
             return
         with self._pending_reconnect_lock:
@@ -1600,21 +1819,76 @@ class OnlineCoordinator:
 
     def _on_reconnect_active_game(self) -> None:
         """
-        Rejoin a reclaimed game: fetch a fresh snapshot, rebuild the board from
-        it, and only then attach the socket. A failed fetch keeps the offer
-        alive behind a Retry dialog, a failed rebuild abandons the game
+        Rejoin a reclaimed game: fetch a fresh snapshot off the main thread, so
+        a slow server never freezes the window, and adopt whatever comes back
+        on the next frame. The fetch carries the probe generation it started
+        under, so a server change in the meantime discards its answer
         """
         with self._pending_reconnect_lock:
             self._reconnect_probe_gen += 1
+            gen = self._reconnect_probe_gen
             pending = self._pending_reconnect
             self._pending_reconnect = None
         if pending is None:
             return
         log.info("reconnect: resume begin room=%s", pending["room_id"])
         self.app.menu.set_reconnect_available(False)
-        resume = fetch_resume(
-            pending["addr"], pending["room_id"], pending["session_token"],
-        )
+        thread = threading.Thread(
+            target=self._reconnect_resume_worker, args=(pending, gen), daemon=True)
+        self._reconnect_resume_thread = thread
+        thread.start()
+
+    def _reconnect_resume_worker(self, pending: dict[str, Any], gen: int) -> None:
+        """
+        Fetch the snapshot for a reconnect off the main thread and leave it,
+        fetched or not, for the next frame to adopt. An answer whose generation
+        has gone stale -- the server target changed while it was out -- is
+        dropped, and a fetch that raises counts as one that failed, logged with
+        its traceback so the crash report says what went wrong on the worker
+
+        :param pending: the reclaim entry being rejoined: server address, room
+            id and session token
+        :param gen: probe generation this fetch was started under
+        """
+        resume: dict[str, Any] | None = None
+        try:
+            resume = fetch_resume(pending["addr"], pending["room_id"], pending["session_token"])
+        except Exception:
+            log.exception("reconnect: resume fetch failed")
+        finally:
+            with self._pending_reconnect_lock:
+                if gen == self._reconnect_probe_gen:
+                    self._reconnect_result = ReconnectAnswer(pending, resume)
+
+    def _drain_reconnect_result(self) -> None:
+        """
+        Pick up the snapshot a reconnect fetch left behind and adopt it, on the
+        main thread where the board and the socket may be touched. Nothing
+        waiting means nothing to do
+        """
+        with self._pending_reconnect_lock:
+            answer = self._reconnect_result
+            self._reconnect_result = None
+        if answer is None:
+            return
+        self._adopt_reconnect_result(answer)
+
+    def _adopt_reconnect_result(self, answer: ReconnectAnswer) -> None:
+        """
+        Finish a reconnect from the snapshot its fetch brought back: rebuild
+        the board from it and only then attach the socket. An answer that comes
+        back after the player has started something else -- a fresh search, a
+        second reconnect -- is dropped rather than allowed to tear down the
+        session they now have. A failed fetch keeps the offer alive behind a
+        Retry dialog, a failed rebuild abandons the game
+
+        :param answer: the reclaim entry that was fetched for, paired with the
+            snapshot it brought back or None when the fetch failed
+        """
+        pending, resume = answer.pending, answer.resume
+        if self.client is not None:
+            log.debug("reconnect answer ignored — session already live")
+            return
         if resume is None:
             log.warning("reconnect: fresh /resume failed; restoring pending entry")
             with self._pending_reconnect_lock:
@@ -1629,9 +1903,10 @@ class OnlineCoordinator:
             return
         log.info("reconnect: resume ok room=%s", pending["room_id"])
         self.client = OnlineClient()
-        if not self._guarded_apply("reconnect adoption",
-                                   lambda: self._adopt_resumed_game(resume)):
-            self._abandon_online_game()
+        if not self._apply_or_abandon("reconnect adoption",
+                                      lambda: self._adopt_resumed_game(resume)):
+            return
+        if self.client is None:
             return
         self.client.reconnect_to_existing(
             pending["addr"], pending["room_id"], pending["session_token"], resume,
@@ -1643,11 +1918,13 @@ class OnlineCoordinator:
         Rebuild a whole game out of a server snapshot -- menu settings, board,
         clocks, marks and any pending skill check -- as one step, so a half
         restored game can never be left on screen. Whatever the search still had
-        on screen or was holding back goes with it, since the snapshot is now
-        the board this client is on
+        on screen or was holding back goes with it -- the resync buffer
+        included, since the board those events were judged against is the one
+        being thrown away
 
         :param resume: resume snapshot fetched from the server
         """
+        self._resync_buffer.clear()
         self._clear_search_state()
         self.app.menu.apply_resume_config(resume)
         self._start_online_game(resume)
@@ -1656,13 +1933,15 @@ class OnlineCoordinator:
     def update(self, now: int) -> None:
         """
         Advance the online side of one frame: drain the server's messages
-        first, then the heartbeat, the online cards and the Reconnect button.
-        The shell runs this before the active screen updates, so a premove
-        answering the opponent's move still fires in the same frame
+        first, adopt any reconnect snapshot that has come back, then the
+        heartbeat, the online cards and the Reconnect button. The shell runs
+        this before the active screen updates, so a premove answering the
+        opponent's move still fires in the same frame
 
         :param now: pygame tick count in milliseconds since pygame init
         """
         self._drain_online_inbound()
+        self._drain_reconnect_result()
         self._update_heartbeat()
         self._update_online_phase()
         self._refresh_reconnect_button()

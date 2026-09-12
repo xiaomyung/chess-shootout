@@ -6,15 +6,17 @@ Two reconnect paths land here:
    the GameScreen's variant is already "online", so `_handle_game_resumed`
    is enough on its own — replay SANs + apply the server's clock snapshot.
 2. App-restart resume. The user clicks the start-menu Reconnect button on
-   a fresh process. `_on_reconnect_active_game` now drives the full setup
-   synchronously: `_start_online_game(resume)` followed by
-   `_handle_game_resumed(resume)`. The async loop only opens the WS — it
-   no longer queues a duplicate `game_start` / `game_resumed` pair, which
-   used to race with the 500 ms match-found transition and reset the
-   board + clock back to the starting position with full time.
+   a fresh process. `_on_reconnect_active_game` fetches /resume on a worker
+   thread and the next `coordinator.update()` adopts the answer on the main
+   thread via `_adopt_reconnect_result`: `_start_online_game(resume)`
+   followed by `_handle_game_resumed(resume)`. The async loop only opens
+   the WS — it no longer queues a duplicate `game_start` / `game_resumed`
+   pair, which used to race with the 500 ms match-found transition and
+   reset the board + clock back to the starting position with full time.
 """
 
 import logging
+import threading
 from unittest.mock import MagicMock
 
 import pygame as pg
@@ -22,12 +24,11 @@ import pytest
 
 from tests.conftest import pygame_display
 from chessshootout.backend.pieces import PieceColor
-from chessshootout.backend.utils import Square
 from chessshootout.frontend.frontend import Frontend
 from chessshootout.frontend.game.variant import Variant
-from chessshootout.frontend.online_coordinator import RECONNECT_PROBE_MAX_ATTEMPTS
-from chessshootout.frontend.screens.game import RESUME_FEN_FAILED_LABEL
-from chessshootout.server.protocol import Reason
+from chessshootout.frontend.online_coordinator import (
+    APPLY_FAILED_LABEL, RECONNECT_PROBE_MAX_ATTEMPTS, ReconnectAnswer,
+)
 
 
 _pygame_init = pygame_display(1000, 800)
@@ -39,6 +40,17 @@ def app():
     fe.sound_manager = MagicMock()
     yield fe
     pg.display.set_mode((1000, 800))
+
+
+def _reconnect_now(app):
+    """Press Reconnect, let the worker finish its fetch, and run the frame that
+    adopts the answer -- the whole path a real click takes, minus the wait."""
+    app.coordinator._on_reconnect_active_game()
+    thread = app.coordinator._reconnect_resume_thread
+    if thread is not None:
+        thread.join(timeout=5)
+        assert not thread.is_alive(), "the resume fetch never returned"
+    app.coordinator.update(pg.time.get_ticks())
 
 
 def _resume_payload(
@@ -109,8 +121,8 @@ def test_handle_game_resumed_does_not_reset_clock_to_initial(app):
 
 
 def test_on_reconnect_active_game_sets_up_online_state_and_clock(app, monkeypatch):
-    """App-restart Reconnect drives the full main-thread setup synchronously;
-    reconnect_to_existing is stubbed so no thread/WS opens."""
+    """App-restart Reconnect fetches off-thread and adopts on the next frame;
+    reconnect_to_existing is stubbed so no WS opens."""
     monkeypatch.setattr(
         "chessshootout.online.client.OnlineClient.reconnect_to_existing",
         lambda self, *a, **kw: None,
@@ -132,7 +144,7 @@ def test_on_reconnect_active_game_sets_up_online_state_and_clock(app, monkeypatc
         ),
     }
 
-    app.coordinator._on_reconnect_active_game()
+    _reconnect_now(app)
 
     assert app.screen is app.game
     assert app.game.variant == "online"
@@ -168,7 +180,7 @@ def test_on_reconnect_active_game_refetches_resume_to_avoid_drift(app, monkeypat
         "session_token": "tok",
         "resume": _resume_payload(),
     }
-    app.coordinator._on_reconnect_active_game()
+    _reconnect_now(app)
     assert calls == [("localhost:8000", "room-y", "tok")]
     assert app.game.match.clock.white_remaining == pytest.approx(42.0)
 
@@ -189,7 +201,7 @@ def test_on_reconnect_active_game_failed_refetch_restores_pending(app, monkeypat
         "resume": _resume_payload(),
     }
     app.coordinator._pending_reconnect = dict(pending)
-    app.coordinator._on_reconnect_active_game()
+    _reconnect_now(app)
     assert app.screen is app.menu
     assert app.coordinator._pending_reconnect == pending
     assert app.menu.play_view.reconnect_available
@@ -213,15 +225,18 @@ def test_on_reconnect_active_game_no_pending_is_noop(app):
                  id="move_history_is_not_a_list"),
     pytest.param(lambda p: p.update({"clock": "nope"}),
                  id="clock_is_not_a_mapping"),
+    pytest.param(lambda p: p.pop("time_minutes"),
+                 id="time_control_missing_before_the_board_is_even_built"),
 ])
 def test_reconnect_adoption_survives_a_hostile_resume_payload(
         app, monkeypatch, tmp_path, caplog, mutate):
     """Every inbound ws event runs inside the drain's try/except, but Reconnect
-    adopts a /resume payload straight from a modal callback — outside it. A
+    adopts a /resume payload from its own worker's answer — outside it. A
     payload the replay chokes on took the whole app down from a button click.
-    Adoption now runs through the same guard: logged, toasted, and the session is
-    dropped back to the menu. (A malformed FEN is no longer one of these cases —
-    on_resume degrades instead of raising; see the FEN-fallback tests below.)"""
+    Adoption now runs through the same guard, at both layers: the snapshot
+    replay (`resume adoption`) and the game start around it (`reconnect
+    adoption`). Either way: logged, toasted once, and the session is dropped
+    back to the menu."""
     monkeypatch.setenv("CHESS_DATA_DIR", str(tmp_path))
     monkeypatch.setattr("chessshootout.online.client.OnlineClient.reconnect_to_existing",
                         lambda self, *a, **kw: None)
@@ -234,58 +249,45 @@ def test_reconnect_adoption_survives_a_hostile_resume_payload(
     }
 
     with caplog.at_level(logging.ERROR, logger="chess.frontend"):
-        app.coordinator._on_reconnect_active_game()
+        _reconnect_now(app)
 
     assert app.screen is app.menu
     assert app.coordinator.client is None
     assert app.toast.is_visible()
-    assert any("reconnect adoption failed" in r.getMessage() for r in caplog.records)
+    failures = [r for r in caplog.records if "adoption failed" in r.getMessage()]
+    assert len(failures) == 1
 
 
-def test_resume_keeps_adopting_when_the_fen_fallback_is_refused(app, caplog):
-    """The FEN is a rescue path for a move list that would not replay, and it
-    arrives from the server like everything else in the snapshot. A FEN the engine
-    refuses must not throw the rest of the adoption away with it — the clock, the
-    result and the idle window all land after it, and the replayed prefix stays on
-    the board for the resync heartbeat to converge."""
+def test_a_snapshot_that_will_not_replay_abandons_the_game(app, caplog, monkeypatch, tmp_path):
+    """There is no FEN rescue any more: a history the engine cannot replay used
+    to leave a truncated board whose heartbeat ply was permanently wrong, so
+    the server ordered a resync every few seconds forever. Now the replay
+    raises, the coordinator's guard catches it, and the game is abandoned
+    outright -- session dropped, back on the menu, one toast, no resync gate
+    left up and no ply for the heartbeat to misreport."""
+    monkeypatch.setenv("CHESS_DATA_DIR", str(tmp_path))
     app.toast = MagicMock()
+    app.coordinator.client = MagicMock()
+    app.coordinator.client.room_id = "room-1"
+    app.coordinator.subscribe(app.game)
+    app.screen = app.game
     app.game.variant = Variant.ONLINE
     app.game._time_control = (300, 2)
     app.game.match.local_color = PieceColor.WHITE
     app.game._chosen_side = "white"
-    payload = _resume_payload(move_history=("e4", "zzz"),
-                              white_remaining=61.0, black_remaining=42.0,
-                              running_for="white")
-    payload["fen"] = "not a fen"
-    payload["idle_window"] = {"outcome": Reason.RESIGNATION, "color": "white",
-                              "seconds_remaining": 20.0}
+    app.coordinator._resyncing = True
+    payload = _resume_payload(move_history=("e4", "zzz"))
 
-    with caplog.at_level(logging.WARNING, logger="chess.frontend"):
-        app.game.on_resume(payload)
+    with caplog.at_level(logging.ERROR, logger="chess.frontend"):
+        app.coordinator._handle_game_resumed(payload)
 
-    assert [e.san for e in app.game.match.move_history] == ["e4"]
-    assert app.game.match.clock.white_remaining == pytest.approx(61.0)
-    assert app.game.match.clock.black_remaining == pytest.approx(42.0)
-    assert app.game._idle_window is not None
-    app.toast.show.assert_any_call(RESUME_FEN_FAILED_LABEL, key="resume_fen_failed")
-    assert any("FEN fallback refused" in r.getMessage() for r in caplog.records)
-
-
-def test_resume_fen_fallback_refreshes_the_check_highlight(app):
-    """The board memoises which kings are in check against (ply count, last move).
-    A resume that falls back to the FEN empties the move history, so a board that
-    has already drawn its opening position matches its own stale (0, None) entry —
-    and a resumed position with a king under fire drew no warning at all."""
-    app.game.variant = Variant.ONLINE
-    app.game._time_control = None
-    app.game.match.local_color = PieceColor.WHITE
-    assert app.game.board._in_check_king_squares() == []
-
-    payload = _resume_payload(move_history=("zzz",))
-    payload["fen"] = "rnb1kbnr/pppp1ppp/8/4p3/6Pq/5P2/PPPPP2P/RNBQKBNR w KQkq - 1 3"
-    app.game.on_resume(payload)
-
-    assert app.game.board._in_check_king_squares() == [Square(7, 4)]
+    assert app.coordinator.client is None
+    assert app.screen is app.menu
+    assert app.coordinator._resyncing is False
+    assert app.coordinator._heartbeat_ply() is None
+    app.toast.show.assert_called_once_with(APPLY_FAILED_LABEL, key="online_apply_failed")
+    assert [r.getMessage() for r in caplog.records
+            if r.levelno >= logging.ERROR] == ["online resume adoption failed"]
 
 
 def test_on_resume_never_replays_more_than_the_ply_cap(app, monkeypatch):
@@ -324,12 +326,151 @@ def test_reconnect_adoption_clips_an_oversize_opponent_name(app, monkeypatch):
         "addr": "localhost:8000", "room_id": "room-n", "session_token": "tok",
     }
 
-    app.coordinator._on_reconnect_active_game()
+    _reconnect_now(app)
 
     assert app.game.black_name == "b" * _NICKNAME_MAX_LEN
     assert app.game.white_name == "alice"
-    assert set(app.game.result_flow.series_scores) == {"alice", "b" * _NICKNAME_MAX_LEN}
     app.draw_frame()
+
+
+def test_a_reconnect_fetch_that_hangs_never_holds_the_frame(app, monkeypatch):
+    """/resume used to be called on the render thread from the button's
+    callback: a server that answered slowly froze the whole window for as
+    long as it took. The fetch now runs on a worker, and a frame drawn while
+    it is still out returns at once with the player still on the menu."""
+    monkeypatch.setattr("chessshootout.online.client.OnlineClient.reconnect_to_existing",
+                        lambda self, *a, **kw: None)
+    release = threading.Event()
+    answer = _resume_payload(move_history=("e4",))
+    released = []
+
+    def _slow_fetch(addr, room_id, session_token):
+        released.append(release.wait(timeout=5))
+        return answer
+
+    monkeypatch.setattr("chessshootout.frontend.online_coordinator.fetch_resume", _slow_fetch)
+    app.coordinator._pending_reconnect = {
+        "addr": "localhost:8000", "room_id": "room-s", "session_token": "tok",
+    }
+
+    app.coordinator._on_reconnect_active_game()
+    app.coordinator.update(pg.time.get_ticks())
+
+    assert app.screen is app.menu
+    assert app.coordinator.client is None
+    assert not app.menu.play_view.reconnect_available, "the offer is taken while the fetch is out"
+    assert app.coordinator._reconnect_resume_thread.is_alive()
+
+    release.set()
+    app.coordinator._reconnect_resume_thread.join(timeout=5)
+    assert released == [True], "the test never released the fetch"
+    app.coordinator.update(pg.time.get_ticks())
+
+    assert app.screen is app.game
+    assert [e.san for e in app.game.match.move_history] == ["e4"]
+
+
+def test_a_reconnect_fetch_answering_a_stale_generation_is_dropped(app, monkeypatch):
+    """The fetch carries the probe generation it left under. A server change
+    while it was out bumps that generation, so the answer it brings back
+    belongs to a game on a server the player has already left."""
+    monkeypatch.setattr("chessshootout.frontend.online_coordinator.fetch_resume",
+                        lambda *a, **kw: _resume_payload())
+    app.coordinator._pending_reconnect = {
+        "addr": "localhost:8000", "room_id": "room-g", "session_token": "tok",
+    }
+    monkeypatch.setattr("threading.Thread", lambda *a, **k: MagicMock())
+
+    app.coordinator._on_reconnect_active_game()
+    gen = app.coordinator._reconnect_probe_gen
+    app.coordinator.on_server_target_changed()
+    app.coordinator._reconnect_resume_worker(
+        {"addr": "localhost:8000", "room_id": "room-g", "session_token": "tok"}, gen)
+    app.coordinator.update(pg.time.get_ticks())
+
+    assert app.coordinator._reconnect_result is None
+    assert app.screen is app.menu
+    assert app.coordinator.client is None
+
+
+def test_a_search_started_mid_fetch_retires_the_reconnect_answer(app, monkeypatch):
+    """REGRESSION: the /resume answer is adopted a frame or more after the
+    worker fetched it. A player who gave up waiting and pressed Play in that
+    window had the fresh search's client torn down and replaced by the old
+    room's board. Starting a search retires the fetch's generation, so its
+    answer is never even filed."""
+    monkeypatch.setattr("chessshootout.online.client.OnlineClient.connect",
+                        lambda self, *a, **kw: None)
+    monkeypatch.setattr("chessshootout.online.client.OnlineClient.reconnect_to_existing",
+                        lambda self, *a, **kw: None)
+    release = threading.Event()
+    released = []
+
+    def _slow_fetch(addr, room_id, session_token):
+        released.append(release.wait(timeout=5))
+        return _resume_payload(move_history=("e4",))
+
+    monkeypatch.setattr("chessshootout.frontend.online_coordinator.fetch_resume", _slow_fetch)
+    app.coordinator._pending_reconnect = {
+        "addr": "localhost:8000", "room_id": "room-r", "session_token": "tok",
+    }
+    app.coordinator._online_config = {
+        "nickname": "alice", "time_minutes": 5, "increment_seconds": 0, "side": "random",
+    }
+
+    app.coordinator._on_reconnect_active_game()
+    app.coordinator._on_server_addr_connect("localhost:8000")
+    searching = app.coordinator.client
+    release.set()
+    app.coordinator._reconnect_resume_thread.join(timeout=5)
+    assert released == [True], "the test never released the fetch"
+
+    assert app.coordinator._reconnect_result is None, \
+        "a retired fetch never files its answer for the next frame"
+    app.coordinator._drain_reconnect_result()
+    assert app.coordinator.client is searching
+    assert app.screen is app.menu
+    assert app.game.match.move_history == []
+
+
+def test_a_reconnect_answer_is_refused_once_a_session_is_live(app, monkeypatch, caplog):
+    """The generation bump is the first gate; this is the second. Whatever put
+    a session there -- a search, a second Reconnect press -- adopting on top of
+    it would disconnect a live client and rebuild the board from another
+    room's snapshot, so a late answer is dropped where it lands."""
+    monkeypatch.setattr("chessshootout.online.client.OnlineClient.reconnect_to_existing",
+                        lambda self, *a, **kw: None)
+    live = MagicMock()
+    app.coordinator.client = live
+    pending = {"addr": "localhost:8000", "room_id": "room-r", "session_token": "tok"}
+
+    with caplog.at_level(logging.DEBUG, logger="chess.frontend"):
+        app.coordinator._adopt_reconnect_result(
+            ReconnectAnswer(pending, _resume_payload(move_history=("e4",))))
+
+    assert app.coordinator.client is live
+    assert app.screen is app.menu
+    assert app.game.match.move_history == []
+    assert not app.confirm_modal.is_visible()
+    assert any("reconnect answer ignored" in r.getMessage() for r in caplog.records)
+
+
+def test_the_reclaim_probe_stays_quiet_while_a_reconnect_fetch_is_out(app, monkeypatch):
+    """The probe bumps the generation every time it spawns. One spawning while
+    the reconnect fetch is still out would strand that fetch's answer, so the
+    live worker thread is what keeps the probe from starting."""
+    started = []
+    monkeypatch.setattr("threading.Thread",
+                        lambda *a, **k: started.append(1) or MagicMock())
+    app.coordinator._reconnect_resume_thread = MagicMock(is_alive=lambda: True)
+    app.coordinator._reconnect_probe_inflight = False
+    app.coordinator._pending_reconnect = None
+    app.coordinator._reconnect_probe_attempts = 0
+    monkeypatch.setattr("chessshootout.infra.env.get_server_addr", lambda: "localhost:8000")
+
+    app.coordinator._spawn_reconnect_probe()
+
+    assert started == []
 
 
 def test_async_main_resume_does_not_queue_legacy_events():

@@ -183,7 +183,7 @@ def test_series_score_formatting(white_score, black_score, expected):
     app.game.white_name = "Alice"
     app.game.black_name = "Bob"
     app.game._time_control = (60, 0)
-    app.game.result_flow.series_scores = {"Alice": white_score, "Bob": black_score}
+    app.game.result_flow.series_scores = {"white": white_score, "black": black_score}
     info = app.game._compute_game_info()
     assert info["lines"][0] == expected
     assert info["time_control"] == "1+0"
@@ -191,36 +191,52 @@ def test_series_score_formatting(white_score, black_score, expected):
 
 def test_series_seeded_from_server_scores():
     """The client adopts the server-authoritative series scores from the
-    game_start payload, overwriting any stale local tally (so a reconnect can't
-    desync the count)."""
+    game_start payload wholesale, by colour, overwriting any stale local tally
+    (so a reconnect can't desync the count)."""
     app = _make_app()
-    app.game.result_flow.series_scores = {"A": 2, "C": 1}
+    app.game.result_flow.series_scores = {"white": 2, "black": 1}
     app.coordinator._start_online_game({
         "your_color": "white", "white_name": "A", "black_name": "B",
         "time_minutes": 3, "increment_seconds": 0,
         "white_score": 1.0, "black_score": 0.5,
     })
-    assert app.game.result_flow.series_scores == {"A": 1.0, "B": 0.5}
+    assert app.game.result_flow.series_scores == {"white": 1.0, "black": 0.5}
 
 
-def test_series_seeded_keyed_by_player_through_color_swap():
-    """Score is keyed by player identity: a rematch with swapped colors carries
-    each player's server score onto the right name."""
+def test_series_seeded_by_colour_as_the_server_states_it():
+    """Scores are keyed by the colour held in THIS game: the server already
+    resolves the rematch colour swap (it keys by uuid) and states each colour's
+    score for the pairing it sends, so the client never re-derives ownership
+    from a nickname."""
     app = _make_app()
     app.coordinator._start_online_game({
         "your_color": "black", "white_name": "B", "black_name": "A",
         "time_minutes": 3, "increment_seconds": 0,
         "white_score": 0.0, "black_score": 1.0,
     })
-    assert app.game.result_flow.series_scores == {"A": 1.0, "B": 0.0}
+    assert app.game.result_flow.series_scores == {"white": 0.0, "black": 1.0}
     assert app.game._compute_game_info()["lines"][0] == "B  0 – 1  A"
+
+
+def test_identical_nicknames_keep_two_series_scores():
+    """Two players both called "Player" used to collapse into one dict key, so
+    a draw scored ½+½ = 1 on a single line. Colour keys keep them apart."""
+    app = _make_app()
+    app.coordinator._start_online_game({
+        "your_color": "white", "white_name": "Player", "black_name": "Player",
+        "time_minutes": 3, "increment_seconds": 0,
+        "white_score": 0.0, "black_score": 0.0,
+    })
+    app.coordinator._handle_online_result({"reason": "draw_repetition"})
+    assert app.game.result_flow.series_scores == {"white": 0.5, "black": 0.5}
+    assert app.game._compute_game_info()["lines"][0] == "Player  ½ – ½  Player"
 
 
 @pytest.mark.parametrize(
     "winner_color, expected_scores",
     [
-        pytest.param("white", {"Alice": 1, "Bob": 0.0}, id="white_win"),
-        pytest.param("black", {"Alice": 0.0, "Bob": 1}, id="black_win"),
+        pytest.param("white", {"white": 1, "black": 0.0}, id="white_win"),
+        pytest.param("black", {"white": 0.0, "black": 1}, id="black_win"),
     ],
 )
 def test_series_increments_on_win(winner_color, expected_scores):
@@ -228,7 +244,7 @@ def test_series_increments_on_win(winner_color, expected_scores):
     app.switch_to("game", variant=ONLINE)
     app.game.white_name = "Alice"
     app.game.black_name = "Bob"
-    app.game.result_flow.series_scores = {"Alice": 0.0, "Bob": 0.0}
+    app.game.result_flow.series_scores = {"white": 0.0, "black": 0.0}
     app.coordinator._handle_online_result({"reason": "checkmate", "winner_color": winner_color})
     assert app.game.result_flow.series_scores == expected_scores
 
@@ -238,9 +254,9 @@ def test_series_increments_on_draw():
     app.switch_to("game", variant=ONLINE)
     app.game.white_name = "Alice"
     app.game.black_name = "Bob"
-    app.game.result_flow.series_scores = {"Alice": 0.0, "Bob": 0.0}
+    app.game.result_flow.series_scores = {"white": 0.0, "black": 0.0}
     app.coordinator._handle_online_result({"reason": "draw_repetition"})
-    assert app.game.result_flow.series_scores == {"Alice": 0.5, "Bob": 0.5}
+    assert app.game.result_flow.series_scores == {"white": 0.5, "black": 0.5}
 
 
 def test_aborted_does_not_change_series():
@@ -248,9 +264,9 @@ def test_aborted_does_not_change_series():
     app.switch_to("game", variant=ONLINE)
     app.game.white_name = "Alice"
     app.game.black_name = "Bob"
-    app.game.result_flow.series_scores = {"Alice": 1, "Bob": 0}
+    app.game.result_flow.series_scores = {"white": 1, "black": 0}
     app.coordinator._handle_online_result({"reason": "aborted"})
-    assert app.game.result_flow.series_scores == {"Alice": 1, "Bob": 0}
+    assert app.game.result_flow.series_scores == {"white": 1, "black": 0}
 
 
 def test_server_shutdown_is_neutral_result_with_its_own_text():
@@ -260,11 +276,11 @@ def test_server_shutdown_is_neutral_result_with_its_own_text():
     app.switch_to("game", variant=ONLINE)
     app.game.white_name = "Alice"
     app.game.black_name = "Bob"
-    app.game.result_flow.series_scores = {"Alice": 1, "Bob": 0}
+    app.game.result_flow.series_scores = {"white": 1, "black": 0}
     app.coordinator._handle_online_result({"reason": "server_shutdown"})
     assert app.game.manual_result == "server_shutdown"
     assert app.game.result_flow.result_text() == ("Game cancelled", "server shutting down")
-    assert app.game.result_flow.series_scores == {"Alice": 1, "Bob": 0}
+    assert app.game.result_flow.series_scores == {"white": 1, "black": 0}
 
 
 def test_refresh_game_info_rebuilds_only_when_its_inputs_change(monkeypatch):
@@ -280,7 +296,7 @@ def test_refresh_game_info_rebuilds_only_when_its_inputs_change(monkeypatch):
     game._refresh_game_info()
     game._refresh_game_info()
     assert len(calls) == 1, "an unchanged key never recomputes"
-    game.result_flow.series_scores = {game.white_name: 1.0}
+    game.result_flow.series_scores = {"white": 1.0}
     game._refresh_game_info()
     assert len(calls) == 2, "a score change rebuilds exactly once"
     game._refresh_game_info()
@@ -288,23 +304,24 @@ def test_refresh_game_info_rebuilds_only_when_its_inputs_change(monkeypatch):
 
 
 def test_score_follows_player_through_color_swap_end_to_end():
-    """Two games, same opponent. Game 1: I play white and win. Game 2: I play
-    black. My nickname's score stays 1 regardless of the color I hold."""
+    """Two games, same opponent. Game 1: I play white and win -- the point is
+    awarded locally to white. Game 2: I play black and the server's game_start
+    re-seeds the colours wholesale, so my point now sits under black and the
+    rail line reads it on my side."""
     app = _make_app()
     app.coordinator._start_online_game({
         "your_color": "white", "white_name": "Me", "black_name": "Friend",
         "time_minutes": 3, "increment_seconds": 0,
     })
     app.coordinator._handle_online_result({"reason": "checkmate", "winner_color": "white"})
-    assert app.game.result_flow.series_scores["Me"] == 1
-    assert app.game.result_flow.series_scores["Friend"] == 0.0
+    assert app.game.result_flow.series_score("white") == 1
+    assert app.game.result_flow.series_score("black") == 0.0
     app.coordinator._start_online_game({
         "your_color": "black", "white_name": "Friend", "black_name": "Me",
         "time_minutes": 3, "increment_seconds": 0,
         "white_score": 0.0, "black_score": 1.0,
     })
-    assert app.game.result_flow.series_scores["Me"] == 1
-    assert app.game.result_flow.series_scores["Friend"] == 0.0
+    assert app.game.result_flow.series_scores == {"white": 0.0, "black": 1.0}
     assert app.game._compute_game_info()["lines"][0] == "Friend  0 – 1  Me"
 
 
@@ -325,7 +342,7 @@ def test_online_win_result_subtitle_reports_actual_reason(reason, winner, expect
     app.switch_to("game", variant=ONLINE)
     app.game.white_name = "Alice"
     app.game.black_name = "Bob"
-    app.game.result_flow.series_scores = {"Alice": 0.0, "Bob": 0.0}
+    app.game.result_flow.series_scores = {"white": 0.0, "black": 0.0}
     app.coordinator._handle_online_result({"reason": reason, "winner_color": winner})
     assert app.game.result_flow.result_text() == expected
 
@@ -345,7 +362,7 @@ def test_online_draw_result_subtitle(draw_reason, expected):
     app.switch_to("game", variant=ONLINE)
     app.game.white_name = "Alice"
     app.game.black_name = "Bob"
-    app.game.result_flow.series_scores = {"Alice": 0.0, "Bob": 0.0}
+    app.game.result_flow.series_scores = {"white": 0.0, "black": 0.0}
     app.coordinator._handle_online_result({"reason": draw_reason})
     assert app.game.result_flow.result_text() == expected
 

@@ -302,7 +302,9 @@ unversioned client is always admitted.
   control. Online, the total is server-authoritative and the clock reconciles on
   the grant.
 - **Rematch** (from the result modal) — the same room restarts with swapped
-  colors; the series score follows the players, not the colors.
+  colors; the series score follows the players, not the colors. The window stays
+  open while an opponent reconnects; once it closes the card offers **New
+  Search** instead.
 
 ### Idle timeouts
 

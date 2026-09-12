@@ -124,7 +124,7 @@ def test_result_with_no_subscriber_still_saves_and_scores(tmp_path, monkeypatch)
 
     assert app.game.manual_result == "white_wins_by_resignation"
     assert app.game.result_flow._last_saved_pgn_path is not None
-    assert app.game.result_flow.series_scores["alice"] == 1.0
+    assert app.game.result_flow.series_score("white") == 1.0
 
 
 def test_offer_and_connection_status_never_require_a_subscriber():
@@ -559,8 +559,33 @@ def test_match_found_and_game_start_clip_oversize_names():
     app.coordinator._finish_match_found()
     assert app.game.white_name == "a" * _NICKNAME_MAX_LEN
     assert app.game.black_name == "bob"
-    assert set(app.game.result_flow.series_scores) == {"a" * _NICKNAME_MAX_LEN, "bob"}
     app.draw_frame()
+
+
+def test_a_hard_failure_inside_the_match_found_card_releases_the_pairing():
+    """A server failure landing while the match-found card counts down used to
+    hide the card but leave the pairing it was holding: the next game_start was
+    ignored as a duplicate and the heartbeat claimed no ply for the rest of the
+    run. The refusal now clears the whole search, so the next pairing opens a
+    board the heartbeat can report."""
+    app = make_app(1000, 800)
+    app.coordinator.client = _mock_client()
+    app.coordinator._begin_match_found_transition(_online_start_payload())
+    assert app.coordinator._pending_game_start_payload is not None
+
+    app.coordinator._handle_online_error({"reason": Reason.ROOM_FULL})
+
+    assert app.coordinator._pending_game_start_payload is None
+    assert app.coordinator._match_found_at_ms is None
+    assert app.coordinator._wait_started_at_ms is None
+    assert not app.coordinator.match_found_modal.is_visible()
+
+    app.coordinator.client = _mock_client()
+    app.coordinator._begin_match_found_transition(_online_start_payload())
+    app.coordinator._finish_match_found()
+
+    assert app.screen is app.game
+    assert app.coordinator._heartbeat_ply() == 0
 
 
 def test_reconnect_available_reflects_the_pending_probe_result():
@@ -899,7 +924,6 @@ def test_unbind_clears_every_field_that_gates_online_behaviour():
     game._idle_window = IdleWindow(Reason.ABORTED, PieceColor.WHITE, 12345, 60.0)
     game._opp_disconnected_at_ms = 6789
     game._local_disconnected_at_ms = 4321
-    app.coordinator._prev_online_state = "reconnecting"
 
     app.coordinator.unbind_game_from_online()
 
@@ -909,6 +933,17 @@ def test_unbind_clears_every_field_that_gates_online_behaviour():
     assert game._idle_window is None
     assert game._opp_disconnected_at_ms is None
     assert game._local_disconnected_at_ms is None
+
+
+def test_dropping_the_client_forgets_the_watched_connection_state():
+    """The remembered state belongs to the session, not to the board: letting
+    the client go is what makes the next one watched from scratch, so a stale
+    "reconnecting" cannot stamp a disconnect countdown on a brand new game."""
+    app = make_app(1000, 800)
+    app.coordinator._prev_online_state = "reconnecting"
+
+    app.coordinator._drop_client()
+
     assert app.coordinator._prev_online_state is None
 
 

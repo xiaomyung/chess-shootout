@@ -1,4 +1,5 @@
 from collections.abc import Callable
+from enum import Enum
 from typing import Any, cast
 
 import pygame as pg
@@ -13,8 +14,30 @@ from chessshootout.frontend.visual.widgets import (
 from chessshootout.frontend.visual.fonts import get_font, get_display_font
 
 
+class ResultButtons(Enum):
+    """
+    Which row of next steps the finished game leaves open: another hot-seat
+    game locally, a rematch while the online session is still alive, or only a
+    fresh search once the rematch window has closed
+    """
+
+    LOCAL = "local"
+    ONLINE = "online"
+    ONLINE_CLOSED = "online_closed"
+
+
+NEW_SEARCH_LABEL = "New Search"
+
 BUTTONS = [("New Game", "new_game"), ("Open PGN", "open_pgn"), ("Menu", "menu")]
 ONLINE_BUTTONS = [("Rematch", "rematch"), ("Open PGN", "open_pgn"), ("Menu", "menu")]
+ONLINE_CLOSED_BUTTONS = [(NEW_SEARCH_LABEL, "new_search"), ("Open PGN", "open_pgn"),
+                         ("Menu", "menu")]
+
+BUTTONS_BY_STATE = {
+    ResultButtons.LOCAL: BUTTONS,
+    ResultButtons.ONLINE: ONLINE_BUTTONS,
+    ResultButtons.ONLINE_CLOSED: ONLINE_CLOSED_BUTTONS,
+}
 
 SCORE_SEP = "–"
 STRIP_CUT = 9
@@ -61,14 +84,14 @@ class ResultMenu(BaseModal):
 
         :param window: the app window surface this modal draws onto
         :param callbacks: button key to the action it runs, keyed by new_game,
-            open_pgn, menu and rematch
+            rematch, new_search, open_pgn and menu
         :param pgn_available_provider: asked while drawing whether a saved PGN
             exists, which decides if Open PGN is offered at all
         """
         super().__init__(window)
         self.callbacks = callbacks
         self.pgn_available_provider = pgn_available_provider
-        self.online_mode = False
+        self.button_state = ResultButtons.LOCAL
         self.outcome: str | None = None
         self.intent = "draw"
         self.reason = ""
@@ -140,21 +163,22 @@ class ResultMenu(BaseModal):
         else:
             self.series = (name_a, name_b, f"{score_a}{SCORE_SEP}{score_b}")
 
-    def set_online_mode(self, online: bool) -> None:
+    def set_buttons(self, state: ResultButtons) -> None:
         """
-        Switch the card between its local and online faces, which decides
-        whether the first button reads New Game or Rematch and whether the
-        series chip may show at all
+        Choose which row of next steps the card offers, which is also what
+        decides whether the series chip may show: every online face keeps it,
+        a local one never has one to keep
 
-        :param online: True while this is an online game
+        :param state: the face the card wears from now on
         """
-        self.online_mode = online
+        self.button_state = state
 
     def set_rematch_offered(self, offered: bool) -> None:
         """
         Note that the opponent has already asked for a rematch, which takes
         the player's own Rematch button off the row -- they answer through the
-        banner over the board instead
+        banner over the board instead. Only a live online session has one to
+        take off
 
         :param offered: True while a rematch offer from the opponent stands
         """
@@ -245,13 +269,14 @@ class ResultMenu(BaseModal):
     def _draw_series(self, content: pg.Rect, y: int) -> int:
         """
         Draw the chip holding the running score between the two players, which
-        only an online game with a set series keeps
+        only an online game with a set series keeps. A closed rematch window
+        still shows it: the score the two of them played to stands
 
         :param content: usable area inside the shell, in window pixels
         :param y: top of this block in window pixels
         :returns: y where the next block starts, in window pixels
         """
-        if not self.online_mode or self.series is None:
+        if self.button_state is ResultButtons.LOCAL or self.series is None:
             return y
         name_a, name_b, score = self.series
         chip = draw_series_chip(
@@ -373,18 +398,19 @@ class ResultMenu(BaseModal):
 
     def _draw_buttons(self, content: pg.Rect) -> None:
         """
-        Draw the row of what to do next, which differs by game: Rematch online
-        and New Game locally, with Rematch dropped while the opponent's own
-        offer is standing and Open PGN dropped when nothing has been saved yet
+        Draw the row of what to do next, which differs by game: New Game
+        locally, Rematch while the online session lives and New Search once it
+        has closed, with Rematch dropped while the opponent's own offer is
+        standing and Open PGN dropped when nothing has been saved yet
 
         :param content: usable area inside the shell, in window pixels
         """
         btn_h = self._button_height()
         gap = max(int(content.width * 0.02), 6)
         row = pg.Rect(content.x, content.bottom - btn_h, content.width, btn_h)
-        buttons = ONLINE_BUTTONS if self.online_mode else BUTTONS
-        if self.online_mode and self.rematch_offered:
-            buttons = [b for b in ONLINE_BUTTONS if b[1] != "rematch"]
+        buttons = BUTTONS_BY_STATE[self.button_state]
+        if self.button_state is ResultButtons.ONLINE and self.rematch_offered:
+            buttons = [b for b in buttons if b[1] != "rematch"]
         if not self.pgn_available_provider():
             buttons = [b for b in buttons if b[1] != "open_pgn"]
         self.button_rects = draw_button_row(

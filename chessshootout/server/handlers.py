@@ -639,7 +639,12 @@ async def _restart_rematch(app: FastAPI, room: Room, color: str) -> str:
     Start the next game in a room both players have agreed to replay: the room
     is reset with the colours swapped and a fresh skill-check secret, then the
     start is announced to both. A room that can no longer be replayed tells
-    the player who asked instead
+    the player who asked instead. Nothing starts while the opponent's socket is
+    away, since they would never hear the start: the away player's offer stands
+    and the one still here is told they are reconnecting, so accepting once
+    they are back is all it takes. Only the away player's offer is left
+    standing, so the player who is here always has an offer to answer rather
+    than two offers facing each other with nothing to trigger the start
 
     :param app: the FastAPI application, source of the shared server state.
     :param room: the finished room being replayed.
@@ -648,24 +653,30 @@ async def _restart_rematch(app: FastAPI, room: Room, color: str) -> str:
     """
     rooms = app.state.rooms
     connections = app.state.connections
+    opp = room.opp_color(color)
+    asker_ws = connections.get_for_color(room, color)
+    if connections.get_for_color(room, opp) is None:
+        log.info("rematch restart deferred room=%s waiting_for=%s", room.room_id, opp)
+        room.rematch_offered_by.discard(color)
+        await send(asker_ws, RematchUpdateMessage(event="opponent_reconnecting"))
+        return "offerer_absent"
     if not rooms.reset_for_rematch(room.room_id):
-        await send(connections.get_for_color(room, color),
-                     ErrorMessage(reason=Reason.REMATCH_UNAVAILABLE,
-                                    msg_type="rematch_response"))
+        await send(asker_ws, ErrorMessage(reason=Reason.REMATCH_UNAVAILABLE,
+                                          msg_type="rematch_response"))
         return "unavailable"
     log.info("rematch restart room=%s", room.room_id)
-    await broadcast_game_start(connections, room, app.state.now, rematch=True)
+    await broadcast_game_start(connections, room, app.state.now)
     return "restarted"
 
 
 async def handle_rematch_request(app: FastAPI, websocket: WebSocket, room: Room,
                                  color: str, raw: str) -> str:
     """
-    Offer another game once this one has finished, which starts immediately
-    when both players have offered. Only a player still sitting on the result
-    screen may offer, a second offer from the same player is refused, and the
-    offer is looked at again after it has been relayed so one withdrawn while
-    the relay was in flight is announced as cancelled
+    Offer another game once this one has finished, which starts as soon as both
+    players have offered and both are still connected. Only a player still
+    sitting on the result screen may offer, a second offer from the same player
+    is refused, and the offer is looked at again after it has been relayed so
+    one withdrawn while the relay was in flight is announced as cancelled
 
     :param app: the FastAPI application, source of the shared server state.
     :param websocket: the socket the offer arrived on.
@@ -707,7 +718,9 @@ async def handle_rematch_response(app: FastAPI, websocket: WebSocket, room: Room
     """
     Answer a rematch offer: accepting restarts the room with the colours
     swapped, declining tells both players the window is over and closes the
-    room for good. Answering one's own offer does nothing
+    room for good. Answering one's own offer does nothing, and an acceptance
+    while the offerer's socket is away waits for them instead of starting a
+    game one side would never hear about
 
     :param app: the FastAPI application, source of the shared server state.
     :param websocket: the socket the answer arrived on.
@@ -817,7 +830,9 @@ async def handle_takeback_response(app: FastAPI, websocket: WebSocket, room: Roo
     and sends the rewound state to both boards, declining just clears the
     request. An accepted takeback also drops the skill-check record for the
     ply that was popped, stamps the rewind so a heartbeat still in flight is
-    read as such, and restarts the idle countdown
+    read as such, and restarts the idle countdown. A takeback that empties the
+    history leaves first_move_at alone -- the room is still a game in progress
+    -- and the sweep is what stops charging a board with nothing on it
 
     :param app: the FastAPI application, source of the shared server state.
     :param websocket: the socket the answer arrived on.

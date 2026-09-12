@@ -71,8 +71,9 @@ class ResultFlow:
     def __init__(self, screen: Any) -> None:
         """
         Set the flow up for the life of the game screen. Only the series score
-        is created here -- everything else belongs to a single game and is
-        reset for each new one
+        is created here, keyed by colour and re-seeded from the server at each
+        game start -- everything else belongs to a single game and is reset
+        for each new one
 
         :param screen: the GameScreen this flow belongs to, and its only route
             to the match, the result card, toasts and the coordinator
@@ -81,6 +82,18 @@ class ResultFlow:
         self.app = screen.app
         self.series_scores: dict[str, float] = {}
         self.reset_for_new_game()
+
+    def series_score(self, color: str) -> float:
+        """
+        Read one side's points in the running online series, which is kept by
+        the colour each player holds in the current game and re-seeded from
+        the server at every game start, so a rematch's colour swap never
+        misfiles a point
+
+        :param color: side to read, as white or black
+        :returns: that side's points so far, zero when none are recorded
+        """
+        return self.series_scores.get(color, 0.0)
 
     def reset_for_new_game(self) -> None:
         """
@@ -161,8 +174,8 @@ class ResultFlow:
         if screen.variant == Variant.ONLINE:
             screen.result_menu.set_series(
                 screen.white_name, screen.black_name,
-                score_str(self.series_scores.get(screen.white_name, 0.0)),
-                score_str(self.series_scores.get(screen.black_name, 0.0)))
+                score_str(self.series_score("white")),
+                score_str(self.series_score("black")))
         else:
             screen.result_menu.set_series(None, None, None, None)
 
@@ -279,20 +292,19 @@ class ResultFlow:
     def _award_series_win(self, winner: str) -> None:
         """
         Give the winner their point in the running series, which exists only in
-        online games and is kept per player name
+        online games and is kept by the colour held in this game
 
         :param winner: colour that won, as white or black
         """
-        name = self.screen._name_for_color(winner)
-        self.series_scores[name] = self.series_scores.get(name, 0.0) + 1
+        self.series_scores[winner] = self.series_score(winner) + 1
 
     def _award_series_draw(self) -> None:
         """
-        Split the point between both players for a drawn game, the other half
+        Split the point between both sides for a drawn game, the other half
         of how an online series is scored
         """
-        for name in (self.screen.white_name, self.screen.black_name):
-            self.series_scores[name] = self.series_scores.get(name, 0.0) + 0.5
+        for color in ("white", "black"):
+            self.series_scores[color] = self.series_score(color) + 0.5
 
     def on_open_pgn(self) -> None:
         """

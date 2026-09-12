@@ -162,46 +162,66 @@ async def resolve_skillcheck_fail(rooms: RoomManager, connections: ConnectionReg
     return pending
 
 
-async def broadcast_game_start(connections: ConnectionRegistry, room: Room,
-                               now: Callable[[], float], rematch: bool = False) -> None:
+def game_start_message(room: Room, color: str, now: float) -> GameStartMessage:
     """
-    Start the game on both screens: each player is sent the opening position,
-    both names with their countries and series scores, the time control and
-    their own color. The frames are built per player because the color differs,
-    and each carries how long ago the game actually started so a client that
-    joined late does not run its clock from the wrong instant. The moment is
-    stamped as a history change with no previous length, since what a client
-    was showing before a game start cannot be known
+    Build one player's view of a game starting: the opening position, both
+    names with their countries and series scores, the time control and their
+    own color. It is built per player because the color differs, and carries
+    how long ago the game actually started so a client that joined late does
+    not run its clock from the wrong instant. Both the start broadcast and a
+    socket arriving after it come through here, so a player who missed the
+    start is told exactly what the other one was told -- the rematch flag
+    included, which is read off the room rather than passed in
+
+    :param room: paired room whose game is starting
+    :param color: the side this frame is for, white or black
+    :param now: monotonic seconds, read for the elapsed-since-start value
+    :returns: the start frame to send to that player
+    """
+    return GameStartMessage(
+        fen=export_fen(cast(Backend, room.backend)),
+        white_name=room.white.nickname if room.white else "",
+        black_name=room.black.nickname if room.black else "",
+        time_minutes=room.time_minutes,
+        increment_seconds=room.increment_seconds,
+        your_color=color,
+        started_seconds_ago=room.seconds_since_start(now),
+        white_score=room.score_for("white"),
+        black_score=room.score_for("black"),
+        white_country=room.white.country if room.white else None,
+        black_country=room.black.country if room.black else None,
+        rematch=room.is_rematch,
+    )
+
+
+async def broadcast_game_start(connections: ConnectionRegistry, room: Room,
+                               now: Callable[[], float]) -> None:
+    """
+    Start the game on both screens, telling each player what they need in their
+    own colors and noting per seat that they have been told -- a socket that
+    was absent here, or whose frame failed to go out, is handed the same start
+    when it comes back. The moment is stamped as a history change with no
+    previous length, since what a client was showing before a game start cannot
+    be known, and it is the one instant the frames, the log line and the stamp
+    all share
 
     :param connections: registry used to reach both players
     :param room: paired room whose game is starting
-    :param now: monotonic seconds source, read for the elapsed-since-start value
-        and for the history-change stamp
-    :param rematch: True when this game follows an accepted rematch offer
+    :param now: monotonic seconds source, read once for the elapsed-since-start
+        value and for the history-change stamp
     """
-    fen = export_fen(cast(Backend, room.backend))
-    started_seconds_ago = max(now() - (room.started_at or now()), 0.0)
+    sent_at = now()
     sent = []
     for color in ("white", "black"):
         ws = connections.get_for_color(room, color)
-        if ws is None:
+        slot = room.slot(color)
+        if ws is None or slot is None:
             continue
-        await send(ws, GameStartMessage(
-            fen=fen,
-            white_name=room.white.nickname if room.white else "",
-            black_name=room.black.nickname if room.black else "",
-            time_minutes=room.time_minutes,
-            increment_seconds=room.increment_seconds,
-            your_color=color,
-            started_seconds_ago=started_seconds_ago,
-            white_score=room.score_for("white"),
-            black_score=room.score_for("black"),
-            white_country=room.white.country if room.white else None,
-            black_country=room.black.country if room.black else None,
-            rematch=rematch,
-        ))
+        if not await send(ws, game_start_message(room, color, sent_at)):
+            continue
+        slot.game_start_sent = True
         sent.append(color)
-    room.note_history_change(now(), None)
+    room.note_history_change(sent_at, None)
     room.game_start_broadcast = True
     log.info("game_start broadcast room=%s sent_to=%s elapsed=%.2f",
-             room.room_id, sent, started_seconds_ago)
+             room.room_id, sent, room.seconds_since_start(sent_at))

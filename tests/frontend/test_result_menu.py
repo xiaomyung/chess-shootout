@@ -1,12 +1,15 @@
 """ResultMenu render invariants: the intent accent rail, perspective-coloured
 Anton outcome word, the 6-stat grid, the PLAY OF THE GAME strip, a primary-first
-button row, and click routing."""
+button row per ResultButtons face, and click routing."""
 
 import pygame as pg
 import pytest
 
 from tests.conftest import pygame_display
-from chessshootout.frontend.modals.result import BUTTONS, ResultMenu
+from tests.helpers import make_app, start_single_screen
+from chessshootout.backend.utils import Square
+from chessshootout.frontend.modals.result import (
+    BUTTONS, ONLINE_CLOSED_BUTTONS, ResultButtons, ResultMenu)
 from chessshootout.frontend.visual.colors import Colors
 from chessshootout.frontend.visual.widgets import BUTTON_LABEL_PADDING_PX, fit_text_to_rect
 
@@ -183,7 +186,7 @@ def test_online_rematch_offered_hides_initiate_button():
     callbacks = {"rematch": _no_op, "open_pgn": _no_op, "menu": _no_op}
     menu = ResultMenu(pg.display.get_surface(), callbacks, lambda: True)
     menu.set_rect(pg.Rect(0, 0, 440, 418))
-    menu.set_online_mode(True)
+    menu.set_buttons(ResultButtons.ONLINE)
     menu.set_result("DRAW", "draw", "By agreement · 20 moves", _stats(potg=None))
     menu.set_rematch_offered(True)
     assert menu.rematch_offered is True
@@ -191,6 +194,61 @@ def test_online_rematch_offered_hides_initiate_button():
     menu.draw()
     assert "rematch" not in menu.button_rects
     assert "menu" in menu.button_rects
+
+
+def test_closed_rematch_window_offers_new_search_and_never_new_game():
+    """#94: a denied rematch closes the session while the card is still up.
+    New Game there would open a hot-seat board wearing the two online
+    nicknames, so the closed face offers a fresh search instead — and a
+    standing offer from the dead session no longer strips anything."""
+    callbacks = {key: _no_op for _, key in ONLINE_CLOSED_BUTTONS}
+    menu = ResultMenu(pg.display.get_surface(), callbacks, lambda: True)
+    menu.set_rect(pg.Rect(0, 0, 440, 418))
+    menu.set_buttons(ResultButtons.ONLINE_CLOSED)
+    menu.set_result("DEFEAT", "loss", "Resignation · 20 moves", _stats())
+    menu.set_rematch_offered(True)
+    menu.draw()
+    assert set(menu.button_rects) == {"new_search", "open_pgn", "menu"}
+
+
+def test_new_search_button_fires_its_own_callback():
+    """The closed face's primary button routes to its own key, so the shell can
+    start a search without the card knowing anything about the coordinator."""
+    fired = []
+    cbs = {key: (lambda k=key: fired.append(k)) for _, key in ONLINE_CLOSED_BUTTONS}
+    menu = ResultMenu(pg.display.get_surface(), cbs, lambda: True)
+    menu.set_rect(pg.Rect(0, 0, 440, 418))
+    menu.set_buttons(ResultButtons.ONLINE_CLOSED)
+    menu.set_result("VICTORY", "win", "x", _stats())
+    menu.draw()
+    assert menu.handle_click(menu.button_rects["new_search"].center) is True
+    assert fired == ["new_search"]
+
+
+def test_new_game_refuses_a_board_that_was_online():
+    """#94's last line of defence, in the shell rather than the card: whatever
+    put New Game in front of the player, the callback must not reopen a board
+    whose names and sides came from an online match. The same call on a local
+    board still swaps the players and wipes the result."""
+    app = make_app(900, 700)
+    start_single_screen(app)
+    app.game.variant = "online"
+    app.game.white_name, app.game.black_name = "alice", "bob"
+    app.game.match.backend.try_move(Square(6, 4), Square(4, 4))
+    app.game.result_menu.set_result("DEFEAT", "loss", "Resignation · 1 move")
+
+    app._on_new_game()
+
+    assert (app.game.white_name, app.game.black_name) == ("alice", "bob")
+    assert len(app.game.match.move_history) == 1
+    assert app.game.result_menu.is_visible() is True
+
+    app.game.variant = "local"
+    app._on_new_game()
+
+    assert (app.game.white_name, app.game.black_name) == ("bob", "alice")
+    assert app.game.match.move_history == []
+    assert app.game.result_menu.is_visible() is False
 
 
 def test_detail_font_is_ready_before_the_first_layout_pass():

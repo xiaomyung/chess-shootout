@@ -5,7 +5,7 @@ from fastapi import APIRouter, FastAPI, WebSocket, WebSocketDisconnect
 from pydantic import ValidationError
 
 from chessshootout.server import logging_setup
-from chessshootout.server.broadcasts import broadcast_game_start
+from chessshootout.server.broadcasts import broadcast_game_start, game_start_message
 from chessshootout.server.connections import ConnectionRegistry, send
 from chessshootout.server.handlers import HANDLERS, dispatch, peek_type
 from chessshootout.server.limits import (
@@ -90,12 +90,15 @@ async def _ws_session(app: FastAPI, websocket: WebSocket, room_id: str) -> None:
     Own one player's live connection for as long as it lasts: authenticate,
     file the socket while closing any older one the same player left behind,
     tell them where the game currently stands, then pump inbound frames through
-    the dispatch table until the socket goes away. The player's color is re-read
-    from the room on every frame, because a rematch swaps colors underneath a
-    connection that never dropped. Oversized frames close the socket outright,
-    a flood is answered with an error frame instead of being processed, and a
-    handler that fails outright costs the sender an error frame rather than
-    their connection
+    the dispatch table until the socket goes away. A player who was away when a
+    game started -- a rematch begun while their socket was down -- is handed
+    that start here, since nothing else would ever tell them, and the seat is
+    only marked as told once the frame actually went out. The player's
+    color is re-read from the room on every frame, because a rematch swaps
+    colors underneath a connection that never dropped. Oversized frames close
+    the socket outright, a flood is answered with an error frame instead of
+    being processed, and a handler that fails outright costs the sender an
+    error frame rather than their connection
 
     :param app: application holding the rooms, sockets and clock
     :param websocket: accepted socket for this player
@@ -120,7 +123,6 @@ async def _ws_session(app: FastAPI, websocket: WebSocket, room_id: str) -> None:
              connections.has_both(room))
 
     if room.result is not None:
-        slot.at_result = True
         reason, winner = room.result
         await send(websocket, ResultMessage(reason=reason, winner_color=winner))
         if room.opp_color(auth_color) in room.rematch_offered_by:
@@ -137,6 +139,9 @@ async def _ws_session(app: FastAPI, websocket: WebSocket, room_id: str) -> None:
         if opp_ws is not None:
             await send(opp_ws, ConnectionStatusMessage(opp_state="connected"))
         if room.game_start_broadcast:
+            if not slot.game_start_sent and await send(
+                    websocket, game_start_message(room, auth_color, app.state.now())):
+                slot.game_start_sent = True
             await send(websocket, ConnectionStatusMessage(
                 opp_state="connected" if opp_ws is not None else "reconnecting"))
 

@@ -263,17 +263,20 @@ class Frontend:
 
     def _on_new_game(self) -> None:
         """
-        Start another game on the same screen, offered once one has ended. In
-        a local game the two players trade sides along with their names and
-        countries, so whoever just played black opens the next one
+        Start another hot-seat game on the same screen, offered once a local
+        one has ended. The two players trade sides along with their names and
+        countries, so whoever just played black opens the next one. A board
+        that was online refuses outright, rather than reopening with the two
+        online nicknames still on it
         """
-        if self.game.variant == Variant.LOCAL:
-            self.game._chosen_side = (
-                "black" if self.game._chosen_side == "white" else "white")
-            self.game.white_name, self.game.black_name = (
-                self.game.black_name, self.game.white_name)
-            self.game.white_country, self.game.black_country = (
-                self.game.black_country, self.game.white_country)
+        if self.game.variant != Variant.LOCAL:
+            return
+        self.game._chosen_side = (
+            "black" if self.game._chosen_side == "white" else "white")
+        self.game.white_name, self.game.black_name = (
+            self.game.black_name, self.game.white_name)
+        self.game.white_country, self.game.black_country = (
+            self.game.black_country, self.game.white_country)
         self.game._reset_to_new_game()
         self.sound_manager.play_game_start()
 

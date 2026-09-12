@@ -1,7 +1,7 @@
 import json
 import re
 from collections.abc import Iterator
-from typing import Any
+from typing import Any, cast
 
 import pytest
 from fastapi import FastAPI
@@ -9,7 +9,7 @@ from fastapi.testclient import TestClient
 
 from chessshootout.backend.backend import Backend
 from chessshootout.backend.pieces import PieceColor, PieceType
-from chessshootout.backend.utils import Square, coord_from_square
+from chessshootout.backend.utils import Square, coord_from_square, square_from_coord
 from chessshootout.server.app import create_app
 from chessshootout.server.handlers import handle_skill_check_shot
 from chessshootout.server.rooms import Room, RoomManager
@@ -186,6 +186,24 @@ async def pair_room(rooms: RoomManager, *, time_minutes: int = 5,
     return await rooms.enqueue(client_uuid=BOB, nickname="B", session_token=tokens[1],
                                time_minutes=time_minutes, increment_seconds=0,
                                side_preference="black")
+
+
+OPENING_PLIES = (("e2", "e4"), ("e7", "e5"), ("g1", "f3"), ("b8", "c6"))
+
+
+def play_plies(room: Room, count: int) -> None:
+    """
+    Put real plies on a paired room's board, which the tests that hand-stamp
+    first_move_at need: the clock sweep only charges a room that has both a
+    first move stamped and something on the board
+
+    :param room: the paired room whose engine the opening is played into
+    :param count: how many plies of the stock opening to play, at most four
+    """
+    assert count <= len(OPENING_PLIES), "the stock opening is only four plies long"
+    backend = cast(Backend, room.backend)
+    for frm, to in OPENING_PLIES[:count]:
+        assert backend.try_move(square_from_coord(frm), square_from_coord(to)).legal
 
 
 def capture_backend() -> Backend:

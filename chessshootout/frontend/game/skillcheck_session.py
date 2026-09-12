@@ -9,6 +9,7 @@ from chessshootout.backend.utils import (
     BOARD_SIZE, PROMO_LETTER_BY_TYPE, Square, coord_from_square)
 from chessshootout.frontend.game.variant import Variant
 from chessshootout.frontend.game.whack_gun import WhackGun
+from chessshootout.frontend.skillcheck.mole_view import MOLE_VIEW_FAIL_HOLD_MS
 from chessshootout.frontend.skillcheck.registry import CheckSpec, build_controller
 from chessshootout.skillcheck import mole
 from chessshootout.skillcheck.online import adjudicated_flipped, skillcheck_deadline_ms
@@ -20,6 +21,9 @@ log = logging.getLogger("chess.frontend")
 
 SUPPRESSING_KINDS = frozenset(
     {SkillCheckKind.AIM, SkillCheckKind.WHACK, SkillCheckKind.COMBO})
+
+SKILLCHECK_VERDICT_SLACK_MS = 2000
+SKILLCHECK_VERDICT_MAX_MS = MOLE_VIEW_FAIL_HOLD_MS + SKILLCHECK_VERDICT_SLACK_MS
 
 
 class CheckContext(NamedTuple):
@@ -395,7 +399,37 @@ class SkillCheckSession:
         self.online_was_spectator = False
         self.online_skillcheck_opened_ms = None
         self.online_verdict_action: Callable[[], None] | None = None
+        self.online_verdict_set_ms: int | None = None
         self.online_last_hit_pop = -1
+
+    def park_online_verdict_action(self, action: Callable[[], None],
+                                   now_ms: int) -> None:
+        """
+        Hold the consequence of a server verdict back until the overlay has
+        finished showing the shot, stamping when it was parked so a watchdog
+        can tell waiting apart from lost. The mirror image of
+        take_online_verdict_action, and the only way an action is parked
+
+        :param action: what to run once the flourish is over -- land the won
+            move, or lock it and play the miss
+        :param now_ms: pygame tick count the action is being parked at
+        """
+        self.online_verdict_action = action
+        self.online_verdict_set_ms = now_ms
+
+    def take_online_verdict_action(self) -> Callable[[], None] | None:
+        """
+        Hand over the consequence parked behind the overlay's verdict
+        flourish and forget it here, so whoever takes it -- the overlay's
+        finish, a result that arrived first, the screen leaving -- runs it
+        exactly once. The stamp of when it was parked goes with it
+
+        :returns: the parked action, or None when nothing is waiting
+        """
+        action = self.online_verdict_action
+        self.online_verdict_action = None
+        self.online_verdict_set_ms = None
+        return action
 
     def clear_online_skillcheck_state(self) -> None:
         """
@@ -453,8 +487,7 @@ class SkillCheckSession:
         seed = self.active_seed
         was_spectator = self.online_was_spectator
         self.online_was_spectator = False
-        action = self.online_verdict_action
-        self.online_verdict_action = None
+        action = self.take_online_verdict_action()
         self._release_active_check(kind)
         self.skillcheck_target = None
         if action is not None:

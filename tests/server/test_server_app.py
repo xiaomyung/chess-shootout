@@ -35,9 +35,10 @@ from chessshootout.server.protocol import (
 )
 from chessshootout.server.rooms import QUEUE_ABANDON_SECONDS, RoomManager
 from chessshootout.server.sweep import SWEEP_STALE_SECONDS, Sweep
+from chessshootout.server.ws_session import _ws_session
 from tests.helpers import FakeClock, fake_uuid4
 from tests.server.conftest import (
-    ALICE, BOB, KV_TOKEN_RE, RecordingWS, auth_msg, pair_room)
+    ALICE, BOB, KV_TOKEN_RE, RecordingWS, auth_msg, pair_room, play_plies)
 
 
 TINY_PER_IP_LIMIT = "2/minute"
@@ -937,6 +938,168 @@ def _auth(ws, body):
     ws.send_text(json.dumps(auth_msg(body["session_token"])))
 
 
+def test_a_socket_that_missed_the_game_start_is_handed_it_on_reconnect(app, client):
+    """REGRESSION: broadcast_game_start skips a colour with no live socket yet
+    still marks the room as started, so a player whose connection was superseded
+    in that instant was only ever told `connection_status` and sat on an empty
+    board for the rest of the game. The seat now remembers whether it was told,
+    so the returning socket is handed the start -- once, not on every reconnect."""
+    random.seed(0)
+    r1 = _matchmake(client, uuid=ALICE, side="white")
+    r2 = _matchmake(client, uuid=BOB, side="black")
+    room = app.state.rooms.get(r1.json()["room_id"])
+    with client.websocket_connect(f"/ws/{r2.json()['room_id']}") as ws_b:
+        _auth(ws_b, r2.json())
+        room.game_start_broadcast = True
+        room.slot(room.color_of(BOB)).game_start_sent = True
+        with client.websocket_connect(f"/ws/{r1.json()['room_id']}") as ws_w:
+            _auth(ws_w, r1.json())
+            start = _recv(ws_w)
+            assert start["type"] == "game_start"
+            assert start["your_color"] == room.color_of(ALICE)
+            assert room.slot(room.color_of(ALICE)).game_start_sent is True
+            assert _recv(ws_w)["type"] == "connection_status"
+        with client.websocket_connect(f"/ws/{r1.json()['room_id']}") as ws_w2:
+            _auth(ws_w2, r1.json())
+            assert _recv(ws_w2)["type"] == "connection_status", \
+                "a seat already told the game started is not told twice"
+
+
+class _DeadWS(RecordingWS):
+    """A socket that has already gone away -- every send raises, which is what
+    connections.send() turns into a False return."""
+
+    async def send_json(self, payload):
+        raise RuntimeError("socket gone")
+
+
+class _ScriptedWS(RecordingWS):
+    """A socket that reads a fixed script of inbound frames and then hangs up.
+
+    With fail_first (the default) the very first frame the server writes back
+    is lost, which is a socket that dropped between the handshake and the
+    reply; with fail_first=False the same script runs on a healthy socket, so
+    one class covers both halves of a retry test."""
+
+    def __init__(self, frames, fail_first=True):
+        super().__init__()
+        self._frames = list(frames)
+        self._fail_next = fail_first
+
+    async def receive_text(self):
+        if self._frames:
+            return self._frames.pop(0)
+        raise WebSocketDisconnect()
+
+    async def send_json(self, payload):
+        if self._fail_next:
+            self._fail_next = False
+            raise RuntimeError("socket gone")
+        await super().send_json(payload)
+
+
+async def test_a_reconnect_hand_over_that_never_went_out_is_retried(app):
+    """The other half of the same bug, on the ws_session side: the seat was
+    marked told the moment the hand-over was attempted, so a socket that died
+    between the handshake and the reply burned its one chance at the start and
+    every later reconnect was answered with connection_status alone."""
+    room = await pair_room(app.state.rooms)
+    room.game_start_broadcast = True
+    app.state.connections.add(room.room_id, room.black.client_uuid, RecordingWS())
+
+    await _ws_session(app, _ScriptedWS([json.dumps(auth_msg("ta"))]), room.room_id)
+
+    assert room.white.game_start_sent is False
+
+    healthy = _ScriptedWS([json.dumps(auth_msg("ta"))], fail_first=False)
+    await _ws_session(app, healthy, room.room_id)
+
+    assert healthy.types()[0] == "game_start"
+    assert room.white.game_start_sent is True
+
+
+async def test_a_catch_up_start_says_so_when_the_game_is_a_rematch(app):
+    """The rematch flag is what makes the match-found card read "Rematch", and
+    a socket catching up on a start it missed has to be told the same thing the
+    broadcast said. It is read off the room, so the two can never disagree."""
+    room = await pair_room(app.state.rooms)
+    room.result = (Reason.RESIGNATION, "white")
+    assert app.state.rooms.reset_for_rematch(room.room_id)
+    assert room.is_rematch is True
+    room.game_start_broadcast = True
+    app.state.connections.add(room.room_id, room.black.client_uuid, RecordingWS())
+
+    catching_up = _ScriptedWS([json.dumps(auth_msg(room.white.session_token))],
+                              fail_first=False)
+    await _ws_session(app, catching_up, room.room_id)
+
+    start = catching_up.of_type("game_start")
+    assert start and start[0]["rematch"] is True
+
+
+async def test_a_game_start_that_never_went_out_is_not_marked_as_told(app, client):
+    """REGRESSION: the seat was marked told before the send was known to have
+    worked, so a socket that died in that instant was recorded as having been
+    handed the start it never got -- and the ws_session reconnect block, which
+    reads exactly that flag, then refused to hand it over again. The seat is
+    only marked once the frame actually went out, so the returning socket is
+    still handed the start."""
+    random.seed(0)
+    r1 = _matchmake(client, uuid=ALICE, side="white")
+    _matchmake(client, uuid=BOB, side="black")
+    room = app.state.rooms.get(r1.json()["room_id"])
+    alice_color, bob_color = room.color_of(ALICE), room.color_of(BOB)
+    app.state.connections.add(room.room_id, ALICE, _DeadWS())
+    app.state.connections.add(room.room_id, BOB, RecordingWS())
+
+    await broadcast_game_start(app.state.connections, room, app.state.now)
+
+    assert room.slot(alice_color).game_start_sent is False
+    assert room.slot(bob_color).game_start_sent is True
+    assert room.game_start_broadcast is True
+    with client.websocket_connect(f"/ws/{r1.json()['room_id']}") as ws_w:
+        _auth(ws_w, r1.json())
+        start = _recv(ws_w)
+        assert start["type"] == "game_start"
+        assert start["your_color"] == alice_color
+        assert room.slot(alice_color).game_start_sent is True
+
+
+def test_a_reconnect_after_leaving_the_result_does_not_put_the_player_back_on_it(
+    app, client,
+):
+    """REGRESSION: the reconnect block re-armed `at_result`, so a player who had
+    already walked back to the menu counted as sitting on the result screen
+    again -- the both-left-result drop (pinned in test_rematch_lifecycle) never
+    fired and the finished room lived out its whole window. Only finalize_result
+    arms the flag now, and only left_result clears it."""
+    random.seed(0)
+    r1 = _matchmake(client, uuid=ALICE, side="white")
+    r2 = _matchmake(client, uuid=BOB, side="black")
+    room = app.state.rooms.get(r1.json()["room_id"])
+    with client.websocket_connect(f"/ws/{r2.json()['room_id']}") as ws_b:
+        _auth(ws_b, r2.json())
+        with client.websocket_connect(f"/ws/{r1.json()['room_id']}") as ws_w:
+            _auth(ws_w, r1.json())
+            _recv(ws_w)
+            _recv(ws_b)
+            ws_w.send_text(json.dumps({"version": PROTOCOL_VERSION, "type": "resign"}))
+            assert _recv(ws_w)["type"] == "result"
+            assert _recv(ws_b)["type"] == "result"
+            ws_w.send_text(json.dumps({"version": PROTOCOL_VERSION,
+                                       "type": "left_result"}))
+            ws_w.send_text(json.dumps({"version": PROTOCOL_VERSION,
+                                       "type": "ping", "ply": 0}))
+            assert _recv(ws_w)["type"] == "pong"
+            assert room.slot(room.color_of(ALICE)).at_result is False
+        with client.websocket_connect(f"/ws/{r1.json()['room_id']}") as ws_w2:
+            _auth(ws_w2, r1.json())
+            assert _recv(ws_w2)["type"] == "result"
+            assert room.slot(room.color_of(ALICE)).at_result is False, \
+                "coming back to hear the result is not sitting on the card again"
+            assert room.slot(room.color_of(BOB)).at_result is True
+
+
 def test_a_rematch_reroutes_heartbeats_and_the_teardown_to_the_new_color(
     app, client, clock,
 ):
@@ -1131,6 +1294,7 @@ async def test_clock_flag_during_play_broadcasts_timeout(app, clock):
     rooms = app.state.rooms
     room = await pair_room(rooms, time_minutes=1)
     room.started_at = clock()
+    play_plies(room, 1)
     room.first_move_at = clock()
     room.plies_ever = 1
     clock.advance(70)

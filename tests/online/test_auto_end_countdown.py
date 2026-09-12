@@ -4,9 +4,12 @@ Drives Frontend._strip_state / _compute_auto_end / _update_heartbeat directly:
 no server fixture, no real WebSocket. The idle window (abort/resign) is
 server-pushed and client-cleared: the client arms only from an idle_window
 push, a resume payload, or match-found's started_seconds_ago, and clears on
-every applied move / takeback / result. All auto-end windows are 60 s; the
-10 % gate hides the badge for the first 6 s; the heartbeat red threshold is
-10 s remaining.
+every move_applied message (this client's own echo included), takeback and
+result -- never when the move animation lands, because the server's forced
+idle_window push follows the move_applied and would be wiped by a clear that
+runs 140-280 ms later (#95). All auto-end windows are 60 s; the 10 % gate
+hides the badge for the first 6 s; the heartbeat red threshold is 10 s
+remaining.
 """
 
 from unittest.mock import MagicMock
@@ -184,14 +187,21 @@ def test_an_idle_window_push_replaces_the_client_deadline(monkeypatch):
 
 
 def test_move_applied_clears_the_window_until_the_next_push(monkeypatch):
-    """Both move paths clear the window — the local move-landed transition and
-    the coordinator's remote move-applied — and nothing re-arms it client-side:
-    the next badge can only come from another server push."""
+    """Every move_applied message -- the opponent's move and this client's own
+    echo alike -- is the boundary the server's forced idle_window push follows,
+    so that is where the old window goes and nowhere else: the animation
+    landing leaves it alone, and nothing re-arms it client-side, so the next
+    badge can only come from another server push."""
     app = _online_app()
     monkeypatch.setattr(pg.time, "get_ticks", lambda: 30_000)
     app.game._idle_window = ABORT_WHITE
     app.game.match.try_move(Square(6, 4), Square(4, 4))
     app.game._on_move_landed(app.game.match.move_history[-1])
+    assert app.game._idle_window == ABORT_WHITE, "the landing is not a boundary"
+    app.coordinator._handle_remote_move_applied(
+        {"from": "e2", "to": "e4", "san": "e4", "ply": 1, "clock": {}})
+    assert app.coordinator._resyncing is False
+    assert len(app.game.match.move_history) == 1, "the echo lands nothing twice"
     assert app.game._idle_window is None
     assert _strip(app, PieceColor.WHITE)["auto_end_label"] is None
 
@@ -201,6 +211,69 @@ def test_move_applied_clears_the_window_until_the_next_push(monkeypatch):
     app.coordinator._handle_remote_move_applied(payload)
     assert app.coordinator._resyncing is False
     assert app.game._idle_window is None
+
+
+def test_abort_badge_survives_the_landing_on_the_receiver(monkeypatch):
+    """#95, receiver side, in the real wire order: white's first move arrives,
+    the server's forced push arms the abort window against black, and only
+    then does the animation land. The landing must not wipe the window the
+    push just armed, or black never sees the countdown."""
+    app = _online_app()
+    app.game.match.local_color = PieceColor.BLACK
+    ticks = _ticks(monkeypatch)
+    app.game.on_remote_move({"from": "e2", "to": "e4", "san": "e4", "ply": 1, "clock": {}})
+    app.game.on_idle_window({
+        "outcome": "aborted", "color": "black",
+        "seconds_remaining": float(FIRST_MOVE_ABORT_SECONDS),
+    })
+    app.game._on_move_landed(app.game.match.move_history[-1])
+    assert app.game._idle_window is not None
+    ticks["now"] = 7_000
+    assert _strip(app, PieceColor.BLACK)["auto_end_label"] == "Abort in"
+    assert _strip(app, PieceColor.WHITE)["auto_end_label"] is None
+
+
+def test_abort_badge_survives_the_landing_on_the_mover(monkeypatch):
+    """#95, mover side: the local move applies at once, its echo comes back,
+    the forced push arms black's window, and the animation lands last. The
+    echo is the clear; the landing after it must leave the window alone."""
+    app = _online_app()
+    ticks = _ticks(monkeypatch)
+    app.game.match.try_move(Square(6, 4), Square(4, 4))
+    app.coordinator._handle_remote_move_applied(
+        {"from": "e2", "to": "e4", "san": "e4", "ply": 1, "clock": {}})
+    assert app.game._idle_window is None, "the echo is the boundary"
+    app.game.on_idle_window({
+        "outcome": "aborted", "color": "black",
+        "seconds_remaining": float(FIRST_MOVE_ABORT_SECONDS),
+    })
+    app.game._on_move_landed(app.game.match.move_history[-1])
+    assert app.game._idle_window is not None
+    ticks["now"] = 7_000
+    assert _strip(app, PieceColor.BLACK)["auto_end_label"] == "Abort in"
+    assert app.coordinator._resyncing is False
+
+
+def test_resign_badge_survives_the_landing_at_ply_two(monkeypatch):
+    """The same landing used to kill the ply-2 resign window: after black's
+    reply the server arms the resign countdown against white, and the badge
+    has to be there once the reply's animation is over."""
+    app = _online_app()
+    ticks = _ticks(monkeypatch)
+    app.game.match.try_move(Square(6, 4), Square(4, 4))
+    app.coordinator._handle_remote_move_applied(
+        {"from": "e2", "to": "e4", "san": "e4", "ply": 1, "clock": {}})
+    app.game.on_remote_move({"from": "e7", "to": "e5", "san": "e5", "ply": 2, "clock": {}})
+    app.game.on_idle_window({
+        "outcome": "resignation", "color": "white",
+        "seconds_remaining": float(IDLE_RESIGN_SECONDS),
+    })
+    app.game._on_move_landed(app.game.match.move_history[-1])
+    assert app.game._idle_window is not None
+    ticks["now"] = 7_000
+    state = _strip(app, PieceColor.WHITE)
+    assert state["auto_end_label"] == "Resign in"
+    assert state["auto_end_seconds"] == pytest.approx(IDLE_RESIGN_SECONDS - 7, abs=0.1)
 
 
 def test_compute_auto_end_alone_does_not_clear_the_window(monkeypatch):
@@ -287,14 +360,15 @@ def test_a_garbage_idle_window_payload_is_ignored(monkeypatch):
 
 
 @pytest.mark.parametrize("show_mode", ["nothing", "line", "strips"])
-def test_idle_window_clears_via_move_landed_in_every_focus_show_mode(
+def test_idle_window_clears_at_the_move_boundary_in_every_focus_show_mode(
     monkeypatch, show_mode,
 ):
     """Regression for the focus-mode gap: _update_player_strips (and the old
     _compute_auto_end reset it used to carry) never runs in focus 'nothing'/'line'
-    show modes, so the window must clear at the real move-landed transition
-    regardless of whether strips are drawn, and the heartbeat fraction must stop
-    folding in the idle window once it does."""
+    show modes, so the clear has to live at a transition that runs whatever is
+    drawn. That transition is the move_applied message -- not the landing,
+    which comes after the server's re-arm -- and the heartbeat fraction must
+    stop folding in the idle window at that same point."""
     app = _online_app()
     app.game._time_control = (300, 0)
     app.game.match.setup_clock(300, 0)
@@ -321,6 +395,11 @@ def test_idle_window_clears_via_move_landed_in_every_focus_show_mode(
 
     app.game.match.try_move(Square(6, 4), Square(4, 4))
     app.game._on_move_landed(app.game.match.move_history[-1])
+    assert app.game._idle_window == ABORT_WHITE, "the landing leaves the window alone"
+    assert app.coordinator._auto_end_heartbeat_fraction() is not None
+
+    app.coordinator._handle_remote_move_applied(
+        {"from": "e2", "to": "e4", "san": "e4", "ply": 1, "clock": {}})
     assert app.game._idle_window is None
     assert app.coordinator._auto_end_heartbeat_fraction() is None
 
