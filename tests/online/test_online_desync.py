@@ -27,7 +27,7 @@ from chessshootout.server import connections as connections_module
 from chessshootout.server.app import create_app
 from chessshootout.server.protocol import (
     MoveAppliedMessage, PROTOCOL_VERSION, RESYNC_STABLE_MISMATCH_HEARTBEATS,
-    RESYNC_TRANSIT_GRACE_SECONDS,
+    RESYNC_TRANSIT_GRACE_SECONDS, Reason,
 )
 from tests.helpers import (
     FakeClock, auth_msg, fake_uuid4, read_source_without_docstrings,
@@ -654,6 +654,124 @@ def test_a_replay_that_starts_a_new_resync_holds_the_rest_back_again():
     assert [e.san for e in app.game.match.move_history] == ["e4"]
 
 
+def _standing_banner_keys(app):
+    """Offers still answerable -- a dismissed one keeps its slot while it
+    slides out, marked by a leaving_at stamp."""
+    return [b["key"] for b in app.coordinator.offer_banners._banners
+            if b["leaving_at"] is None]
+
+
+def test_a_replayed_move_takes_down_the_offers_it_invalidates():
+    """REGRESSION: the replay forwarded the move straight to the board, so the
+    draw and takeback banners the move makes meaningless stayed on screen and
+    answerable -- a Deny click after a resync sent an answer to an offer that
+    had already been overtaken by a ply."""
+    app = _resumable_app()
+    app.coordinator._resyncing = True
+    app.coordinator._handle_remote_move_applied(
+        {"from": "e2", "to": "e4", "san": "e4", "ply": 1, "clock": {}})
+    app.coordinator._push_offer_banner("takeback_offered")
+    assert _standing_banner_keys(app) == ["takeback_offered"]
+
+    app.coordinator._handle_game_resumed(_resumed_payload())
+
+    assert [e.san for e in app.game.match.move_history] == ["e4"]
+    assert _standing_banner_keys(app) == []
+
+
+def test_a_held_idle_window_reaches_the_board_after_the_snapshot():
+    """The countdown that ends a game nobody is playing was dropped mid-resync,
+    so a player whose repair overlapped the push sat with no warning at all and
+    the game ended under them. It is newer than the snapshot, so it replays
+    unconditionally -- after on_resume, which clears whatever window the
+    snapshot carried."""
+    app = _resumable_app()
+    app.coordinator._resyncing = True
+    app.coordinator._handle_remote_move_applied(
+        {"from": "e2", "to": "e4", "san": "e4", "ply": 1, "clock": {}})
+    app.coordinator._handle_idle_window(
+        {"outcome": Reason.ABORTED, "color": "black", "seconds_remaining": 12.0})
+
+    app.coordinator._handle_game_resumed(_resumed_payload())
+
+    assert [e.san for e in app.game.match.move_history] == ["e4"]
+    assert app.game._idle_window is not None
+    assert app.game._idle_window.outcome == Reason.ABORTED
+
+
+def test_a_rebuilt_board_throws_the_held_events_away(monkeypatch, tmp_path):
+    """A reconnect or a whole-game adoption replaces the board the buffered
+    events were judged against, so replaying them onto the new one is at best
+    a ply gap and at worst somebody else's game. Both callers discard it."""
+    monkeypatch.setenv("CHESS_DATA_DIR", str(tmp_path))
+    app = _online_app()
+    app.coordinator.client.room_id = "room-1"
+    app.coordinator._resyncing = True
+    app.coordinator._handle_remote_move_applied(
+        {"from": "e2", "to": "e4", "san": "e4", "ply": 9, "clock": {}})
+
+    app.coordinator._adopt_resumed_game(_live_snapshot())
+
+    assert app.coordinator._resync_buffer == []
+    assert app.coordinator._resyncing is False
+    assert [e.san for e in app.game.match.move_history] == ["e4", "e5", "Nf3"]
+
+
+def test_a_held_takeback_replays_in_order_with_the_moves_around_it():
+    """The takeback used to be dropped mid-resync while the moves either side
+    of it were held, so the replay put the retracted ply back and the board
+    ended a move ahead of the server. Held in the same queue, it unwinds
+    between them and the corrected move lands on top."""
+    app = _resumable_app()
+    app.coordinator._resyncing = True
+    app.coordinator._handle_remote_move_applied(
+        {"from": "e2", "to": "e4", "san": "e4", "ply": 1, "clock": {}})
+    app.coordinator._handle_takeback_applied({"fen": "", "clock": {}, "ply": 0})
+    app.coordinator._handle_remote_move_applied(
+        {"from": "d2", "to": "d4", "san": "d4", "ply": 1, "clock": {}})
+
+    app.coordinator._handle_game_resumed(_resumed_payload())
+
+    assert [e.san for e in app.game.match.move_history] == ["d4"]
+    assert app.coordinator._resyncing is False
+
+
+def test_a_held_takeback_the_snapshot_already_applied_is_dropped():
+    """LOAD-BEARING: the snapshot is taken after the rewind landed on the
+    server, so it already sits at the rewound ply. Forwarding the takeback on
+    top would pop a ply the server still has -- and the game screen answers a
+    ply it cannot place with a fresh rebuild, so the repair would restart
+    itself."""
+    app = _resumable_app()
+    app.coordinator._resyncing = True
+    app.coordinator._handle_takeback_applied({"fen": "", "clock": {}, "ply": 1})
+
+    app.coordinator._handle_game_resumed(_resumed_payload(move_history=[{"san": "e4"}]))
+
+    assert [e.san for e in app.game.match.move_history] == ["e4"]
+    assert app.coordinator._resyncing is False
+    app.coordinator.client.request_state_sync.assert_not_called()
+
+
+def test_a_held_takeback_under_a_snapshot_that_caught_the_move_still_unwinds():
+    """The mixed window: the snapshot caught the first move but not the
+    takeback that followed it, nor the replacement move. The stale move is
+    skipped, the takeback unwinds the ply the snapshot carried, and the board
+    ends one ply on -- with no second resync."""
+    app = _resumable_app()
+    app.coordinator._resyncing = True
+    app.coordinator._handle_remote_move_applied(
+        {"from": "e2", "to": "e4", "san": "e4", "ply": 1, "clock": {}})
+    app.coordinator._handle_takeback_applied({"fen": "", "clock": {}, "ply": 0})
+    app.coordinator._handle_remote_move_applied(
+        {"from": "d2", "to": "d4", "san": "d4", "ply": 1, "clock": {}})
+
+    app.coordinator._handle_game_resumed(_resumed_payload(move_history=[{"san": "e4"}]))
+
+    assert [e.san for e in app.game.match.move_history] == ["d4"]
+    assert app.coordinator._resyncing is False
+
+
 def test_a_resync_with_no_session_never_raises_the_gate(caplog):
     """The gate is only ever lowered by a snapshot or the 8 s timeout. Raising
     it with no client to ask for the snapshot -- a verdict failing on a board
@@ -926,11 +1044,36 @@ def test_a_live_snapshot_arriving_on_the_result_card_is_adopted_whole(monkeypatc
     app = _online_app()
     app.coordinator.client.room_id = "room-1"
     app.game.manual_result = "white_wins_by_resignation"
-    assert app.game.current_result() is not None
+    app.game.result_flow.feed_result_menu()
+    assert app.game.result_menu.is_visible()
 
     app.coordinator._handle_game_resumed(_live_snapshot())
 
     _assert_adopted_live_snapshot(app)
+
+
+def test_an_unconfirmed_engine_result_with_no_card_up_resumes_in_place(
+        monkeypatch, tmp_path):
+    """REGRESSION: off-the-board was read off the engine, which during a resync
+    can be sitting on a mate the server has not confirmed yet -- so an ordinary
+    snapshot of the live game was mistaken for a new game to adopt and tore the
+    screen down and back up under the player. The card on screen is what says
+    the player is off the board; a result nobody has been shown is not."""
+    monkeypatch.setenv("CHESS_DATA_DIR", str(tmp_path))
+    app = _resumable_app()
+    app.game._chosen_side = "white"
+    app.game.manual_result = "white_wins_by_resignation"
+    assert app.game.result_menu.is_visible() is False
+    app.coordinator._resyncing = True
+    rebuilt = []
+    monkeypatch.setattr(app.coordinator, "_adopt_resumed_game", rebuilt.append)
+
+    app.coordinator._handle_game_resumed(_resumed_payload(move_history=[{"san": "e4"}]))
+
+    assert rebuilt == [], "the live board resumes in place, it is not torn down"
+    assert app.coordinator._resyncing is False
+    assert [e.san for e in app.game.match.move_history] == ["e4"]
+    assert app.game.white_name == "Alice"
 
 
 def test_a_finished_game_snapshot_on_the_result_card_stays_on_the_card(monkeypatch, tmp_path):
@@ -1108,10 +1251,12 @@ def test_a_directive_the_client_has_already_outrun_is_dropped():
     app.coordinator.client.request_state_sync.assert_not_called()
 
 
-def test_a_directive_about_a_ply_the_client_is_already_past_is_dropped():
-    """The delayed order can arrive after MORE than the one update it was
-    written about -- a recapture pair lands as two broadcasts in a row. A
-    client two plies past the order has nothing left to fetch either."""
+def test_a_directive_about_a_ply_behind_the_client_is_still_obeyed():
+    """LOAD-BEARING: only exact equality is a stale order. A client AHEAD of
+    the server is the dangerous direction -- a move the server never took, or a
+    rematch whose game_start never arrived -- and treating that as "nothing
+    left to fetch" left the two boards permanently apart with the client
+    refusing every order it got."""
     from chessshootout.backend.utils import Square
     app = _online_app()
     app.coordinator.client.state = "connected"
@@ -1120,8 +1265,8 @@ def test_a_directive_about_a_ply_the_client_is_already_past_is_dropped():
 
     app.coordinator._handle_online_event(_directive(server_ply=1))
 
-    assert app.coordinator._resyncing is False
-    app.coordinator.client.request_state_sync.assert_not_called()
+    assert app.coordinator._resyncing is True
+    app.coordinator.client.request_state_sync.assert_called_once()
 
 
 def test_a_directive_about_a_ply_ahead_of_the_client_is_obeyed():

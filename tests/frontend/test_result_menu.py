@@ -196,17 +196,6 @@ def test_online_rematch_offered_hides_initiate_button():
     assert "menu" in menu.button_rects
 
 
-def test_set_online_mode_still_selects_the_two_faces_it_always_did():
-    """set_buttons is the real control now, but the bool shim stays: the game
-    screen still flips the card online when a match starts and the coordinator
-    flips it back when a session is unbound."""
-    menu = _make_menu()
-    menu.set_online_mode(True)
-    assert menu.button_state is ResultButtons.ONLINE
-    menu.set_online_mode(False)
-    assert menu.button_state is ResultButtons.LOCAL
-
-
 def test_closed_rematch_window_offers_new_search_and_never_new_game():
     """#94: a denied rematch closes the session while the card is still up.
     New Game there would open a hot-seat board wearing the two online

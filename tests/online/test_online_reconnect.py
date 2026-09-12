@@ -392,6 +392,65 @@ def test_a_reconnect_fetch_answering_a_stale_generation_is_dropped(app, monkeypa
     assert app.coordinator.client is None
 
 
+def test_a_search_started_mid_fetch_retires_the_reconnect_answer(app, monkeypatch):
+    """REGRESSION: the /resume answer is adopted a frame or more after the
+    worker fetched it. A player who gave up waiting and pressed Play in that
+    window had the fresh search's client torn down and replaced by the old
+    room's board. Starting a search retires the fetch's generation, so its
+    answer is never even filed."""
+    monkeypatch.setattr("chessshootout.online.client.OnlineClient.connect",
+                        lambda self, *a, **kw: None)
+    monkeypatch.setattr("chessshootout.online.client.OnlineClient.reconnect_to_existing",
+                        lambda self, *a, **kw: None)
+    release = threading.Event()
+
+    def _slow_fetch(addr, room_id, session_token):
+        assert release.wait(timeout=5), "the test never released the fetch"
+        return _resume_payload(move_history=("e4",))
+
+    monkeypatch.setattr("chessshootout.frontend.online_coordinator.fetch_resume", _slow_fetch)
+    app.coordinator._pending_reconnect = {
+        "addr": "localhost:8000", "room_id": "room-r", "session_token": "tok",
+    }
+    app.coordinator._online_config = {
+        "nickname": "alice", "time_minutes": 5, "increment_seconds": 0, "side": "random",
+    }
+
+    app.coordinator._on_reconnect_active_game()
+    app.coordinator._on_server_addr_connect("localhost:8000")
+    searching = app.coordinator.client
+    release.set()
+    app.coordinator._reconnect_resume_thread.join(timeout=5)
+
+    assert app.coordinator._reconnect_result is None, \
+        "a retired fetch never files its answer for the next frame"
+    app.coordinator._drain_reconnect_result()
+    assert app.coordinator.client is searching
+    assert app.screen is app.menu
+    assert app.game.match.move_history == []
+
+
+def test_a_reconnect_answer_is_refused_once_a_session_is_live(app, monkeypatch, caplog):
+    """The generation bump is the first gate; this is the second. Whatever put
+    a session there -- a search, a second Reconnect press -- adopting on top of
+    it would disconnect a live client and rebuild the board from another
+    room's snapshot, so a late answer is dropped where it lands."""
+    monkeypatch.setattr("chessshootout.online.client.OnlineClient.reconnect_to_existing",
+                        lambda self, *a, **kw: None)
+    live = MagicMock()
+    app.coordinator.client = live
+    pending = {"addr": "localhost:8000", "room_id": "room-r", "session_token": "tok"}
+
+    with caplog.at_level(logging.DEBUG, logger="chess.frontend"):
+        app.coordinator._adopt_reconnect_result(pending, _resume_payload(move_history=("e4",)))
+
+    assert app.coordinator.client is live
+    assert app.screen is app.menu
+    assert app.game.match.move_history == []
+    assert not app.confirm_modal.is_visible()
+    assert any("reconnect answer ignored" in r.getMessage() for r in caplog.records)
+
+
 def test_the_reclaim_probe_stays_quiet_while_a_reconnect_fetch_is_out(app, monkeypatch):
     """The probe bumps the generation every time it spawns. One spawning while
     the reconnect fetch is still out would strand that fetch's answer, so the

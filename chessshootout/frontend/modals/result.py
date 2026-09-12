@@ -171,16 +171,6 @@ class ResultMenu(BaseModal):
         """
         self.button_state = state
 
-    def set_online_mode(self, online: bool) -> None:
-        """
-        Switch the card between its local and live-online faces, the older way
-        of asking for set_buttons that the game screen still uses when a game
-        starts and the coordinator when a session is unbound
-
-        :param online: True while this is a live online game
-        """
-        self.set_buttons(ResultButtons.ONLINE if online else ResultButtons.LOCAL)
-
     def set_rematch_offered(self, offered: bool) -> None:
         """
         Note that the opponent has already asked for a rematch, which takes
