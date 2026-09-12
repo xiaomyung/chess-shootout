@@ -26,9 +26,11 @@ class ResultButtons(Enum):
     ONLINE_CLOSED = "online_closed"
 
 
+NEW_SEARCH_LABEL = "New Search"
+
 BUTTONS = [("New Game", "new_game"), ("Open PGN", "open_pgn"), ("Menu", "menu")]
 ONLINE_BUTTONS = [("Rematch", "rematch"), ("Open PGN", "open_pgn"), ("Menu", "menu")]
-ONLINE_CLOSED_BUTTONS = [("New Search", "new_search"), ("Open PGN", "open_pgn"),
+ONLINE_CLOSED_BUTTONS = [(NEW_SEARCH_LABEL, "new_search"), ("Open PGN", "open_pgn"),
                          ("Menu", "menu")]
 
 BUTTONS_BY_STATE = {

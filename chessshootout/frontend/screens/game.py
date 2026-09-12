@@ -52,7 +52,8 @@ from chessshootout.frontend.visual.colors import Colors
 from chessshootout.frontend.visual.backdrop import ArenaBackdrop
 from chessshootout.frontend.visual.effects import TAKEOVER_TOTAL_MS
 from chessshootout.frontend.game.result_flow import ResultFlow, score_str
-from chessshootout.frontend.game.skillcheck_session import CheckContext, SkillCheckSession
+from chessshootout.frontend.game.skillcheck_session import (
+    CheckContext, SKILLCHECK_VERDICT_MAX_MS, SkillCheckSession)
 from chessshootout.frontend.game.give_time import GiveTimeHold
 from chessshootout.frontend.game.variant import MATCH_MODE_BY_VARIANT, Variant
 from chessshootout.skillcheck.combo import COMBO_DIRECTIONS, COMBO_PROMPT_COUNT_MAX
@@ -135,17 +136,6 @@ SPECTATE_PROGRESS_MAX = COMBO_PROMPT_COUNT_MAX
 NO_LAST_HIT_POP = -1
 
 _RESULT_FADE_CACHE = cache.new_size_cache()
-
-
-class ResumeReplayError(RuntimeError):
-    """
-    Raised when the move list in a resume snapshot will not replay on a fresh
-    board, so the position the server describes cannot be rebuilt here. The
-    coordinator answers by giving the game up rather than playing on from a
-    truncated history that would never agree with the server again
-    """
-
-    pass
 
 
 def _finite_float(value: Any, default: float | None = 0.0) -> float | None:
@@ -341,8 +331,8 @@ class GameScreen(Screen):
             "new_game": app._on_new_game,
             "open_pgn": self.result_flow.on_open_pgn,
             "menu": app._on_back_to_menu,
-            "rematch": app.coordinator._on_rematch,
-            "new_search": app.coordinator._restart_online_search,
+            "rematch": app.coordinator.request_rematch,
+            "new_search": app.coordinator.restart_search,
         }, pgn_available_provider=self.result_flow.pgn_available)
         self.right_menu = RightMenu(window, self.match, {
             "undo": self._on_undo,
@@ -557,6 +547,15 @@ class GameScreen(Screen):
         else:
             self._opp_disconnected_at_ms = None
 
+    def clear_idle_window(self) -> None:
+        """
+        Take the auto-end badge off the strips, done wherever the countdown
+        stops meaning anything: a move or takeback the server confirmed, the
+        result, a new game, or the online session going away. Only a fresh
+        push from the server brings a window back
+        """
+        self._idle_window = None
+
     def on_idle_window(self, payload: dict[str, Any]) -> None:
         """
         Adopt the idle countdown the server pushes when the side to move has
@@ -592,7 +591,7 @@ class GameScreen(Screen):
 
         :param payload: idle-window block from a resume response, or None
         """
-        self._idle_window = None
+        self.clear_idle_window()
         if isinstance(payload, dict):
             self.on_idle_window(payload)
 
@@ -782,9 +781,11 @@ class GameScreen(Screen):
         """
         Rebuild the whole game from the server's resume snapshot after a drop,
         a restart or a resync. The position is rebuilt by starting a new game
-        and replaying the SANs -- never by patching the current board -- and a
-        SAN that will not replay raises ResumeReplayError, since a partial
-        history is worse than none
+        and replaying the SANs -- never by patching the current board -- of at
+        most RESUME_MAX_PLIES plies, and a SAN that will not replay raises,
+        since a partial history is worse than none: the coordinator catches it
+        and gives the game up rather than playing on from a board that would
+        never agree with the server again
 
         :param payload: resume payload -- move history, clock, marks,
             skill-check log and locks, any pending check, result and idle
@@ -794,7 +795,7 @@ class GameScreen(Screen):
         for entry in payload.get("move_history", [])[:RESUME_MAX_PLIES]:
             result = self.match.apply_san(entry["san"])
             if not result.legal:
-                raise ResumeReplayError(
+                raise ValueError(
                     f"resume: SAN replay failed at ply {len(self.match.move_history) + 1}")
         if self._time_control is not None:
             initial, incr = self._time_control
@@ -856,7 +857,7 @@ class GameScreen(Screen):
             log.warning("takeback ply gap server_ply=%s expected=%d", server_ply, expected)
             self.app.coordinator._begin_resync(ResyncCause.TAKEBACK_PLY_GAP)
             return
-        self._idle_window = None
+        self.clear_idle_window()
         self.board.clear_all_annotations()
         if self.match.move_history:
             self.skillcheck_session.drop_skillcheck_log_from(len(self.match.move_history))
@@ -919,8 +920,7 @@ class GameScreen(Screen):
         session = self.skillcheck_session
         session.online_skillcheck = None
         session.online_spectate_kind = None
-        session.online_verdict_action = action
-        session.online_verdict_set_ms = pg.time.get_ticks()
+        session.park_online_verdict_action(action, pg.time.get_ticks())
         self.skillcheck_overlay.resolve_online(won)
         if self.skillcheck_overlay.is_active():
             return
@@ -947,6 +947,29 @@ class GameScreen(Screen):
             log.exception("parked skill-check verdict failed")
             return False
         return True
+
+    def reap_stalled_verdict(self, now_ms: int) -> bool | None:
+        """
+        Play out a verdict still parked long after any overlay flourish could
+        have finished, and tear the overlay down with it. Left parked, it would
+        hold the heartbeat off until the server gave this client up, so the
+        coordinator's watchdog asks every frame and resyncs when the answer is
+        that the action would not run
+
+        :param now_ms: pygame tick count for this frame
+        :returns: None when nothing is parked past the ceiling, True when the
+            parked action ran, False when it raised
+        """
+        session = self.skillcheck_session
+        parked_at = session.online_verdict_set_ms
+        if (session.online_verdict_action is None or parked_at is None
+                or now_ms - parked_at <= SKILLCHECK_VERDICT_MAX_MS):
+            return None
+        log.warning("skill-check verdict stalled parked_ms=%d", now_ms - parked_at)
+        played = self._flush_parked_verdict()
+        if self.skillcheck_overlay.is_active():
+            session.teardown_skillcheck_overlay()
+        return played
 
     def _apply_online_fail(self, from_sq: Square, to_sq: Square,
                            aim_victim: Square | None,
@@ -1203,7 +1226,7 @@ class GameScreen(Screen):
         :param payload: move-applied payload -- from, to, SAN, ply, clock,
             promotion letter and the skill-check kind and outcome if any
         """
-        self._idle_window = None
+        self.clear_idle_window()
         from_sq = square_from_coord(payload["from"])
         to_sq = square_from_coord(payload["to"])
         promo = payload.get("promotion")
@@ -1227,7 +1250,7 @@ class GameScreen(Screen):
             if kind is not None:
                 self.skillcheck_session.record_skillcheck(
                     kind, bool(payload.get("skill_check_won")),
-                    payload.get("ply") or len(self.match.move_history))
+                    server_ply or len(self.match.move_history))
         else:
             self.app.coordinator._begin_resync(ResyncCause.MOVE_ILLEGAL)
 
@@ -1276,18 +1299,18 @@ class GameScreen(Screen):
         if not self._apply_online_result(reason, payload.get("winner_color")):
             return
         coordinator = self.app.coordinator
-        self._idle_window = None
+        self.clear_idle_window()
         self._opp_disconnected_at_ms = None
         self._local_disconnected_at_ms = None
         coordinator.offer_banners.clear()
         self.skillcheck_session.pending_online_move = None
-        pending_action = self.skillcheck_session.take_online_verdict_action()
+        applied = self._flush_parked_verdict()
         try:
-            if pending_action is not None:
-                pending_action()
             self.skillcheck_session.teardown_skillcheck_overlay()
         except Exception:
-            log.exception("online result verdict/teardown failed")
+            log.exception("online result overlay teardown failed")
+            applied = False
+        if not applied:
             coordinator._begin_resync(ResyncCause.RESULT_APPLY_FAILED)
         if reason == Reason.TIMEOUT and not self._flag_fall_played:
             self._flag_fall_played = True
@@ -2789,7 +2812,7 @@ class GameScreen(Screen):
         self._speech_anchor_memo = {}
         self._game_info_memo = None
         self._result_first_seen_at_ms = None
-        self._idle_window = None
+        self.clear_idle_window()
         self.result_flow.reset_for_new_game()
         self.right_menu.reset_for_new_game()
         self.match.new_game()
