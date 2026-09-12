@@ -832,8 +832,8 @@ async def handle_takeback_response(app: FastAPI, websocket: WebSocket, room: Roo
     request. An accepted takeback also drops the skill-check record for the
     ply that was popped, stamps the rewind so a heartbeat still in flight is
     read as such, and restarts the idle countdown. A takeback that empties the
-    history puts the room back before its first move, so the clocks stop as
-    they were before anybody had played
+    history leaves first_move_at alone -- the room is still a game in progress
+    -- and the sweep is what stops charging a board with nothing on it
 
     :param app: the FastAPI application, source of the shared server state.
     :param websocket: the socket the answer arrived on.
@@ -860,8 +860,6 @@ async def handle_takeback_response(app: FastAPI, websocket: WebSocket, room: Roo
         popped_ply = len(backend.move_history)
         backend.undo()
         room.note_history_change(app.state.now(), popped_ply)
-        if not backend.move_history:
-            room.first_move_at = None
         room.skillcheck_log = [e for e in room.skillcheck_log if e.ply < popped_ply]
         room.takeback_offered_by = None
         room.annotations_white.clear_marks()

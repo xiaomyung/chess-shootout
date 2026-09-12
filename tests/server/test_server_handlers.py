@@ -265,12 +265,11 @@ async def test_an_accepted_takeback_at_ply_one_restamps_the_abort_window(app, cl
 
 
 async def test_a_takeback_of_the_only_move_stops_the_clock_again(app, clock):
-    """REGRESSION: first_move_at survived a takeback back to an empty board, so
-    a room that was once more pre-game than it had ever been kept charging the
-    side to move -- at a short time control the pair could flag before either
-    had played. Taking the only move back puts the room back before its first
-    move: nothing is charged, and the silence aborts the game as it would have
-    before the move."""
+    """REGRESSION: an empty board kept charging the side to move -- at a short
+    time control the pair could flag before either had played. The sweep is
+    what stops it: no plies, no tick. first_move_at deliberately STAYS set,
+    because clearing it told in_progress_room_for, heartbeat_timed_out_rooms
+    and step_drop_orphans_pre_game that a live room was still pre-game."""
     room, ws_w, ws_b = await _wired_room(app)
     await _move(app, room, ws_w, "white", "e2", "e4")
     assert room.first_move_at is not None
@@ -279,7 +278,8 @@ async def test_a_takeback_of_the_only_move_stops_the_clock_again(app, clock):
     await dispatch(app, ws_b, room, "black",
                    _msg(type="takeback_response", accept=True))
 
-    assert room.first_move_at is None
+    assert room.first_move_at is not None
+    assert app.state.rooms.in_progress_room_for(room.white.client_uuid) == (room, "white")
     assert not room.backend.move_history
     remaining = (room.backend.clock.white_remaining, room.backend.clock.black_remaining)
     clock.advance(FIRST_MOVE_ABORT_SECONDS + 1)

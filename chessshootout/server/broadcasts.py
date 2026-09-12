@@ -200,9 +200,10 @@ async def broadcast_game_start(connections: ConnectionRegistry, room: Room,
     """
     Start the game on both screens, telling each player what they need in their
     own colors and noting per seat that they have been told -- a socket that
-    was absent here is handed the same start when it comes back. The moment is
-    stamped as a history change with no previous length, since what a client
-    was showing before a game start cannot be known
+    was absent here, or whose frame failed to go out, is handed the same start
+    when it comes back. The moment is stamped as a history change with no
+    previous length, since what a client was showing before a game start cannot
+    be known
 
     :param connections: registry used to reach both players
     :param room: paired room whose game is starting
@@ -217,7 +218,8 @@ async def broadcast_game_start(connections: ConnectionRegistry, room: Room,
         slot = room.slot(color)
         if ws is None or slot is None:
             continue
-        await send(ws, game_start_message(room, color, sent_at, rematch))
+        if not await send(ws, game_start_message(room, color, sent_at, rematch)):
+            continue
         slot.game_start_sent = True
         sent.append(color)
     room.note_history_change(now(), None)

@@ -24,7 +24,7 @@ from chessshootout.server.sweep import (
     SWEEP_STALE_SECONDS)
 from tests.helpers import FakeClock, fake_uuid4
 from tests.server.conftest import (
-    ALICE, APP_KEY, RecordingWS, assert_sweep_clean, pair_room)
+    ALICE, APP_KEY, RecordingWS, assert_sweep_clean, pair_room, play_plies)
 
 
 @pytest.fixture
@@ -34,27 +34,28 @@ def sweep(app):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    "time_minutes, plies_ever, set_first_move, arm_idle, advance, "
-    "expected_result, expected_reason",
+    "time_minutes, plies_ever, arm_idle, advance, expected_result, expected_reason",
     [
-        pytest.param(5, 0, False, True, 61, ("aborted", None), None,
+        pytest.param(5, 0, True, 61, ("aborted", None), None,
                      id="no_first_move_aborts"),
-        pytest.param(1, 1, True, True, 70, None, Reason.TIMEOUT,
+        pytest.param(1, 1, True, 70, None, Reason.TIMEOUT,
                      id="flagged_clock_times_out"),
-        pytest.param(5, 1, True, True, 61, ("aborted", None), None,
+        pytest.param(5, 1, True, 61, ("aborted", None), None,
                      id="black_never_replies_aborts"),
-        pytest.param(5, 2, True, True, 61, (Reason.RESIGNATION, "black"), None,
+        pytest.param(5, 2, True, 61, (Reason.RESIGNATION, "black"), None,
                      id="silence_after_both_first_moves_resigns"),
-        pytest.param(180, 3, True, False, 600, None, None,
+        pytest.param(180, 3, False, 600, None, None,
                      id="ply_three_never_arms"),
     ],
 )
 async def test_sweep_step_clock_and_idle_windows(sweep, app, clock, time_minutes,
-                                                 plies_ever, set_first_move, arm_idle,
+                                                 plies_ever, arm_idle,
                                                  advance, expected_result,
                                                  expected_reason):
     """One step, one armed idle window per IDLE_WINDOW_BY_PLIES row, plus the
-    clock branch it shares the walk with.
+    clock branch it shares the walk with. Every row plays its plies onto the
+    board for real, because the clock branch now also asks whether there is
+    anything on the board to charge for.
 
     Plies 0 and 1 expire as a fixed ("aborted", None) — nobody loses when the
     game never really started (ply 1 is issue #81: black never replies to
@@ -68,7 +69,8 @@ async def test_sweep_step_clock_and_idle_windows(sweep, app, clock, time_minutes
     room = await pair_room(app.state.rooms, time_minutes=time_minutes)
     room.started_at = clock()
     room.plies_ever = plies_ever
-    if set_first_move:
+    play_plies(room, plies_ever)
+    if plies_ever:
         room.first_move_at = clock()
     room.idle_since = clock() if arm_idle else None
     clock.advance(advance)
@@ -92,6 +94,7 @@ async def test_a_flag_in_the_same_tick_beats_the_idle_resign(sweep, app, clock):
     TIMEOUT, not an idle resignation."""
     room = await pair_room(app.state.rooms, time_minutes=1)
     room.started_at = clock()
+    play_plies(room, 2)
     room.first_move_at = clock()
     room.plies_ever = 2
     room.idle_since = clock()
@@ -618,6 +621,7 @@ async def test_a_poisoned_room_leaves_its_siblings_ticking(
     healthy = await _pair_nth(rooms, 1, time_minutes=1)
     for room in (poisoned, healthy):
         room.started_at = clock()
+        play_plies(room, 2)
         room.first_move_at = clock()
         room.plies_ever = 2
 

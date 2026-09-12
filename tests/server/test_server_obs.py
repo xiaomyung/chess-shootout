@@ -22,7 +22,8 @@ from chessshootout.server.protocol import (
 from chessshootout.server.limits import WS_MESSAGES_PER_SECOND
 from chessshootout.server.ws_session import _ws_session
 from chessshootout.server.sweep import PREGAME_CONNECT_GRACE_SECONDS
-from tests.server.conftest import ALICE, BOB, RecordingWS, auth_msg, pair_room
+from tests.server.conftest import (
+    ALICE, BOB, RecordingWS, auth_msg, pair_room, play_plies)
 
 
 def _matchmake(client, *, uuid, side):
@@ -266,6 +267,7 @@ async def _end_by_flag_fall(app, clock):
     room = await pair_room(rooms, time_minutes=1)
     app.state.connections.add(room.room_id, room.white.client_uuid, RecordingWS())
     app.state.connections.add(room.room_id, room.black.client_uuid, RecordingWS())
+    play_plies(room, 1)
     room.plies_ever = 1
     room.first_move_at = clock()
     clock.advance(70)
@@ -313,7 +315,7 @@ FINALIZE_PATHS = [
                  id="handlers_draw_offer_reciprocated"),
     pytest.param(_end_by_accepted_draw_response, Reason.DRAW_AGREEMENT, "none", 2, 0.0,
                  id="handlers_draw_response_accepted"),
-    pytest.param(_end_by_flag_fall, Reason.TIMEOUT, "black", 1, 70.0,
+    pytest.param(_end_by_flag_fall, Reason.TIMEOUT, "white", 1, 70.0,
                  id="sweep_flag_fall"),
     pytest.param(_end_by_idle_window, Reason.RESIGNATION, "black", 2,
                  IDLE_RESIGN_SECONDS + 1.0, id="sweep_idle_window"),

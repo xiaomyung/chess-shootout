@@ -92,7 +92,8 @@ async def _ws_session(app: FastAPI, websocket: WebSocket, room_id: str) -> None:
     tell them where the game currently stands, then pump inbound frames through
     the dispatch table until the socket goes away. A player who was away when a
     game started -- a rematch begun while their socket was down -- is handed
-    that start here, since nothing else would ever tell them. The player's
+    that start here, since nothing else would ever tell them, and the seat is
+    only marked as told once the frame actually went out. The player's
     color is re-read from the room on every frame, because a rematch swaps
     colors underneath a connection that never dropped. Oversized frames close
     the socket outright, a flood is answered with an error frame instead of
@@ -139,9 +140,9 @@ async def _ws_session(app: FastAPI, websocket: WebSocket, room_id: str) -> None:
             await send(opp_ws, ConnectionStatusMessage(opp_state="connected"))
         if room.game_start_broadcast:
             if not slot.game_start_sent:
-                await send(websocket,
-                           game_start_message(room, auth_color, app.state.now()))
-                slot.game_start_sent = True
+                if await send(websocket,
+                              game_start_message(room, auth_color, app.state.now())):
+                    slot.game_start_sent = True
             await send(websocket, ConnectionStatusMessage(
                 opp_state="connected" if opp_ws is not None else "reconnecting"))
 
