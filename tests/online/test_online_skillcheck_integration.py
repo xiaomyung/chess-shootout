@@ -13,10 +13,10 @@ import time
 from chessshootout.backend.utils import Square
 from chessshootout.online.client import OnlineClient, fetch_resume
 from chessshootout.skillcheck import online
-from chessshootout.skillcheck.triggers import compute_facts
 from chessshootout.skillcheck.types import SkillCheckKind, SkillCheckOutcome
 from tests.helpers import fake_uuid4
-from tests.online.online_helpers import wait_for
+from tests.online.online_helpers import (
+    SLEEP_LEAD_MS, force_kind, room_of, wait_for, winning_elapsed)
 
 
 def _pair(addr, white_uuid, black_uuid):
@@ -33,93 +33,30 @@ def _pair(addr, white_uuid, black_uuid):
     return a, b
 
 
-def _room(app):
-    active = list(app.state.rooms._active.values())
-    assert len(active) == 1, "expected exactly one paired room"
-    return active[0]
-
-
-def _force_kind(room, kind):
-    """Search for a secret whose roll selects `kind` for exd5.
-
-    Each kind owns a full quarter of the capture roll, so 8000 tries missing is
-    not chance -- it means every roll returned NONE, i.e. the room was not at
-    the capture after all (or the move is already locked). The failure prints
-    the facts it actually saw, because "no secret found" on its own sends you
-    hunting the RNG instead of the board state.
-    """
-    frm, to = Square(4, 4), Square(3, 3)  # exd5
-    for i in range(8000):
-        secret = "force-{}-{}".format(kind.value, i)
-        if online.select_kind(secret, room.plies_ever, room.backend, frm, to,
-                              room.skillcheck_locks) == kind:
-            room.skillcheck_secret = secret
-            return
-    raise AssertionError(
-        "no {} secret in 8000 tries: facts={} plies_ever={} turn={} locks={}".format(
-            kind.value, compute_facts(room.backend, frm, to, room.skillcheck_locks),
-            room.plies_ever, room.backend.turn, room.skillcheck_locks))
-
-
 def _force_wheel(room):
-    _force_kind(room, SkillCheckKind.WHEEL)
-
-
-# How a win is made deterministic under real CI jitter:
-#   The client sleeps (E - SLEEP_LEAD_MS) then sends client_elapsed = E. The server
-#   adjudicates min(max(E, raw - lag_bound), raw), where raw is the real arrival gap.
-#   * if the packet lands at raw in [E, E+lag_bound]  -> scored EXACTLY E (the win moment)
-#   * if it lands a touch early, raw in [E - SLEEP_LEAD, E) -> scored at raw
-#   So we aim E at the MIDDLE of the widest win window: a late arrival is pinned up to
-#   E (a win) and an early one drops to (E - SLEEP_LEAD), and the midpoint leaves half
-#   the window as slack in both directions. Aiming at the top instead left no room for
-#   lateness at all, which is exactly how a loaded runner turned a win into a loss.
-_SLEEP_LEAD_MS = 30
-
-
-def _widest_win_window(kind, ch, deadline):
-    best = None
-    e = int(online.SKILLCHECK_HUMAN_FLOOR_MS) + 1
-    end = int(deadline)
-    while e < end:
-        if online.shot_wins(kind, ch, e, 0, deadline):
-            start = e
-            while e < end and online.shot_wins(kind, ch, e, 0, deadline):
-                e += 1
-            if best is None or (e - 1 - start) > (best[1] - best[0]):
-                best = (start, e - 1)
-        else:
-            e += 1
-    return best
+    """Force the exd5 capture in a paired room to draw a wheel check."""
+    force_kind(room, Square(4, 4), Square(3, 3), SkillCheckKind.WHEEL)
 
 
 def _winning_elapsed(req):
+    """Read the armed check off the wire payload and aim at its win window.
+
+    How a win is made deterministic under real CI jitter: the client sleeps
+    (E - SLEEP_LEAD_MS) then sends client_elapsed = E. The server adjudicates
+    min(max(E, raw - lag_bound), raw), where raw is the real arrival gap.
+      * lands at raw in [E, E+lag_bound]        -> scored EXACTLY E (the win moment)
+      * lands a touch early, raw in [E-lead, E) -> scored at raw
+    winning_elapsed aims at the MIDDLE of the widest win window, so either
+    direction has half the window as slack.
+    """
     kind = SkillCheckKind(req["kind"])
-    ch = online.challenge_from(kind, req["seed"], int(req["value_diff"]))
-    deadline = float(req["deadline_ms"])
-    window = _widest_win_window(kind, ch, deadline)
-    assert window is not None, "no winning window for the stored seed"
-    lo, hi = window
-    # The window has to absorb the sleep lead in BOTH directions, not just one:
-    # aiming at the midpoint spends half of it on an early arrival and half on a
-    # late one, so `> _SLEEP_LEAD_MS` was only ever half the guard it looked like.
-    # The 200ms lag bound is deliberately NOT the yardstick here -- lateness up to
-    # the bound is pinned back to the claimed moment by the clamp and costs the
-    # window nothing, and no shipped geometry draws a window that wide anyway
-    # (wheel measures ~105-125ms, aim ~130-220ms), so a bound-sized requirement
-    # would be an assert that can never hold.
-    assert hi - lo >= 2 * _SLEEP_LEAD_MS, \
-        "the win window must absorb the sleep lead in both directions"
-    # Aim at the MIDDLE, not the top. The server scores max(claimed, recv-200ms),
-    # so a shot that leaves late -- a loaded CI runner descheduling the sleep is
-    # enough -- gets scored later than it claims. Aiming at the top leaves zero
-    # room for that and turns a win into a loss; the midpoint absorbs half the
-    # window in either direction.
-    return (lo + hi) // 2
+    challenge = online.challenge_from(kind, req["seed"], int(req["value_diff"]))
+    return winning_elapsed(kind, challenge, float(req["deadline_ms"]))
 
 
 def _force_aim(room):
-    _force_kind(room, SkillCheckKind.AIM)
+    """Force the exd5 capture in a paired room to draw a steady-aim check."""
+    force_kind(room, Square(4, 4), Square(3, 3), SkillCheckKind.AIM)
 
 
 def _move(mover, a, b, frm, to):
@@ -131,7 +68,7 @@ def _move(mover, a, b, frm, to):
 def _reach_capture(a, b, app, force=_force_wheel):
     _move(a, a, b, "e2", "e4")            # 1. e4 (white)
     _move(b, a, b, "d7", "d5")            # 1... d5 (black)
-    room = _room(app)
+    room = room_of(app)
     force(room)
     a.send_move("e4", "d5")               # 2. exd5 -> fires the check
     req = wait_for(a, "skill_check_required")
@@ -157,7 +94,7 @@ def test_a_won_check_applies_the_move_and_records_the_win(server_with_app):
     a, b = _pair("localhost:{}".format(port), fake_uuid4(23), fake_uuid4(24))
     room, req, spec = _reach_capture(a, b, app)
     elapsed = _winning_elapsed(req)
-    time.sleep((elapsed - _SLEEP_LEAD_MS) / 1000.0)  # land in [E, E+lag_bound] -> scored at E
+    time.sleep((elapsed - SLEEP_LEAD_MS) / 1000.0)  # land in [E, E+lag_bound] -> scored at E
     a.send_skill_check_shot(elapsed)
     a_applied = wait_for(a, "move_applied")
     b_applied = wait_for(b, "move_applied")
@@ -192,7 +129,7 @@ def test_resume_after_a_won_check_carries_the_skillcheck_log(server_with_app):
     a, b = _pair(addr, fake_uuid4(27), fake_uuid4(28))
     room, req, spec = _reach_capture(a, b, app)
     elapsed = _winning_elapsed(req)
-    time.sleep((elapsed - _SLEEP_LEAD_MS) / 1000.0)  # land in [E, E+lag_bound] -> scored at E
+    time.sleep((elapsed - SLEEP_LEAD_MS) / 1000.0)  # land in [E, E+lag_bound] -> scored at E
     a.send_skill_check_shot(elapsed)
     assert wait_for(a, "move_applied") is not None
     assert wait_for(b, "move_applied") is not None

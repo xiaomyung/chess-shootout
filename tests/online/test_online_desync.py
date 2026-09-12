@@ -20,7 +20,10 @@ from fastapi.testclient import TestClient
 import chessshootout
 from tests.conftest import pygame_display
 from chessshootout.domain.match import ONLINE
-from chessshootout.frontend.online_coordinator import ResyncCause
+from chessshootout.frontend.game.skillcheck_session import SKILLCHECK_VERDICT_MAX_MS
+from chessshootout.frontend.online_coordinator import (
+    HeldEvent, ResyncCause, SKILLCHECK_WATCHDOG_SLACK_MS)
+from chessshootout.skillcheck.wheel import SKILLCHECK_DEADLINE_MS
 from chessshootout.backend.pieces import PieceColor
 from chessshootout.backend.utils import square_from_coord
 from chessshootout.server import connections as connections_module
@@ -29,9 +32,12 @@ from chessshootout.server.protocol import (
     MoveAppliedMessage, PROTOCOL_VERSION, RESYNC_STABLE_MISMATCH_HEARTBEATS,
     RESYNC_TRANSIT_GRACE_SECONDS, Reason,
 )
+from tests.frontend.focus_helpers import FakeTicks
 from tests.helpers import (
-    FakeClock, auth_msg, fake_uuid4, read_source_without_docstrings,
+    FakeClock, auth_msg, capture_board, fake_uuid4, online_app as skillcheck_app,
+    read_source_without_docstrings,
 )
+from tests.online.online_helpers import required_payload, result_payload, spectate_payload
 
 
 ALICE = fake_uuid4(1)
@@ -557,7 +563,8 @@ def test_a_move_during_a_resync_is_held_back_then_applied_after_the_snapshot():
 
     assert len(app.game.match.move_history) == 0
     app.coordinator.client.request_state_sync.assert_not_called()
-    assert app.coordinator._resync_buffer == [("on_remote_move", payload)]
+    assert app.coordinator._resync_buffer == [
+        HeldEvent("on_remote_move", payload, screen_level=False)]
 
     app.coordinator._handle_game_resumed(_resumed_payload())
 
@@ -650,7 +657,8 @@ def test_a_replay_that_starts_a_new_resync_holds_the_rest_back_again():
     app.coordinator._handle_game_resumed(_resumed_payload(move_history=[{"san": "e4"}]))
 
     assert app.coordinator._resyncing is True
-    assert app.coordinator._resync_buffer == [("on_remote_move", trailing)]
+    assert app.coordinator._resync_buffer == [
+        HeldEvent("on_remote_move", trailing, screen_level=False)]
     assert [e.san for e in app.game.match.move_history] == ["e4"]
 
 
@@ -1342,7 +1350,6 @@ def _cause_server_directive():
 
 
 def _cause_move_rejected():
-    from chessshootout.server.protocol import Reason
     app = _online_app()
     app.coordinator._handle_online_error(
         {"reason": Reason.INVALID_MOVE_FORMAT, "msg_type": "move"})
@@ -1372,16 +1379,11 @@ def _cause_takeback_ply_gap():
 
 
 def _cause_verdict_lost():
-    from chessshootout.frontend.online_coordinator import SKILLCHECK_WATCHDOG_SLACK_MS
-    from chessshootout.skillcheck.wheel import SKILLCHECK_DEADLINE_MS
-    from tests.online.test_online_skillcheck_client import (
-        _capture_board, _online_app as _skillcheck_app, _required_payload,
-    )
-    app = _skillcheck_app()
+    app = skillcheck_app()
     app.screen = app.game
-    frm, to = _capture_board(app)
+    frm, to = capture_board(app)
     app.game.skillcheck_session.skillcheck_gate(frm, to)
-    app.coordinator._handle_skill_check_required(_required_payload(frm, to))
+    app.coordinator._handle_skill_check_required(required_payload(frm, to))
     app.game.skillcheck_session.online_skillcheck_opened_ms = (
         pg.time.get_ticks() - SKILLCHECK_DEADLINE_MS - SKILLCHECK_WATCHDOG_SLACK_MS - 100)
     app.coordinator._tick_skillcheck_watchdog()
@@ -1561,15 +1563,12 @@ def test_the_spectator_is_silent_through_the_verdict_too():
     through the real verdict the server broadcasts -- skill_check_result, which
     only ever carries a miss -- so the flag being set is the production path's
     doing rather than the test's."""
-    from tests.online.test_online_skillcheck_client import (
-        _capture_board, _online_app as _skillcheck_app, _result, _spectate_payload,
-    )
-    app = _skillcheck_app("black")
+    app = skillcheck_app("black")
     app.screen = app.game
-    frm, to = _capture_board(app)
-    app.coordinator._handle_skill_check_spectate(_spectate_payload(frm, to))
+    frm, to = capture_board(app)
+    app.coordinator._handle_skill_check_spectate(spectate_payload(frm, to))
 
-    app.coordinator._handle_skill_check_result(_result(frm, to))
+    app.coordinator._handle_skill_check_result(result_payload(frm, to))
 
     assert app.game.skillcheck_session.online_verdict_action is not None, \
         "the real spectate verdict is what opens the window, not a hand-set flag"
@@ -1586,8 +1585,6 @@ def test_a_verdict_parked_past_every_overlay_hold_is_played_out_by_the_watchdog(
     it waited forever, the heartbeat stayed silent the whole time, and the
     server eventually gave this client up as disconnected. Past the longest
     flourish plus a margin, the watchdog runs it, and the heartbeat resumes."""
-    from tests.frontend.focus_helpers import FakeTicks
-    from chessshootout.frontend.online_coordinator import SKILLCHECK_VERDICT_MAX_MS
     ticks = FakeTicks()
     monkeypatch.setattr(pg.time, "get_ticks", ticks)
     app = _online_app()
@@ -1616,8 +1613,6 @@ def test_a_verdict_parked_past_every_overlay_hold_is_played_out_by_the_watchdog(
 
 
 def test_a_stalled_verdict_that_fails_to_play_out_resyncs_the_game(monkeypatch):
-    from tests.frontend.focus_helpers import FakeTicks
-    from chessshootout.frontend.online_coordinator import SKILLCHECK_VERDICT_MAX_MS
     ticks = FakeTicks()
     monkeypatch.setattr(pg.time, "get_ticks", ticks)
     app = _online_app()
@@ -1642,7 +1637,6 @@ def test_a_rejected_quiet_move_asks_for_the_whole_state_back():
     own quiet move locally and the server refused it. No heartbeat can catch
     that -- the client is on a ply the server will never reach -- so the
     rejection itself has to drive the repair."""
-    from chessshootout.server.protocol import Reason
     app = _online_app()
 
     app.coordinator._handle_online_error(
@@ -1655,7 +1649,6 @@ def test_a_rejected_quiet_move_asks_for_the_whole_state_back():
 def test_a_rejected_skill_check_shot_is_not_a_desync():
     """Scoped by msg_type on purpose: a refused skill-check input says nothing
     about the board, and resyncing there would tear down a live check."""
-    from chessshootout.server.protocol import Reason
     app = _online_app()
 
     app.coordinator._handle_online_error(
@@ -1669,7 +1662,6 @@ def test_a_takeback_refusal_still_only_toasts():
     """not_your_turn answering a takeback request is an ordinary game-state
     answer with its own toast, and must not be swept into the move-rejection
     branch."""
-    from chessshootout.server.protocol import Reason
     app = _online_app()
 
     app.coordinator._handle_online_error(

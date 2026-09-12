@@ -260,11 +260,13 @@ async def test_post_game_leaver_never_closes_the_window_on_the_player_who_stayed
     assert room.white.disconnected_at == room.ended_at
     ws_black = RecordingWS()
     app.state.connections.add(room.room_id, room.black.client_uuid, ws_black)
-    for _ in range(4):
-        clock.advance(POST_GAME_DISCONNECT_GRACE)
-        await sweep.step_post_game()
-        assert app.state.rooms.get(room.room_id) is room
-        assert not ws_black.of_type("rematch_update")
+    assert REMATCH_IDLE_SECONDS > POST_GAME_DISCONNECT_GRACE, \
+        "the window has to outlive the grace for this rule to mean anything"
+    clock.advance(REMATCH_IDLE_SECONDS - 1)
+    await sweep.step_post_game()
+    assert app.state.rooms.get(room.room_id) is room, \
+        "well past the leaver's grace, the window is still open"
+    assert not ws_black.of_type("rematch_update")
 
 
 async def test_post_game_window_still_expires_on_idle_with_one_player_gone(

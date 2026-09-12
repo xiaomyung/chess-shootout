@@ -372,7 +372,7 @@ def test_the_update_card_is_shown_once_per_refusal(frontend, caplog):
 
 def test_room_lost_shows_new_search_modal(frontend, monkeypatch):
     restart_calls = []
-    monkeypatch.setattr(frontend.coordinator, "_restart_online_search",
+    monkeypatch.setattr(frontend.coordinator, "restart_search",
                         lambda: restart_calls.append(True))
     frontend.coordinator._handle_online_error({"reason": "room_lost"})
     assert frontend.confirm_modal.is_visible()
@@ -582,26 +582,26 @@ def test_offer_accept_and_decline_pop_and_send(frontend):
     assert sent == [True, False]
 
 
-def test_on_rematch_accepts_when_offered(frontend):
+def test_request_rematch_accepts_when_offered(frontend):
     sent = []
     frontend.coordinator.client = SimpleNamespace(
         send_rematch_response=lambda accept: sent.append(("resp", accept)),
         send_rematch_request=lambda: sent.append(("req",)))
     frontend.coordinator._rematch_offered = True
     frontend.game.result_menu.set_rematch_offered(True)
-    frontend.coordinator._on_rematch()
+    frontend.coordinator.request_rematch()
     assert sent == [("resp", True)]
     assert frontend.coordinator._rematch_offered is False
     assert frontend.game.result_menu.rematch_offered is False
 
 
-def test_on_rematch_requests_when_not_offered(frontend):
+def test_request_rematch_requests_when_not_offered(frontend):
     sent = []
     frontend.coordinator.client = SimpleNamespace(
         send_rematch_response=lambda accept: sent.append(("resp", accept)),
         send_rematch_request=lambda: sent.append(("req",)))
     frontend.coordinator._rematch_offered = False
-    frontend.coordinator._on_rematch()
+    frontend.coordinator.request_rematch()
     assert sent == [("req",)]
 
 
@@ -767,11 +767,11 @@ def test_abandon_online_game_logs_the_teardown_reason(frontend, caplog):
     assert lines == ["online session teardown reason=reconnect_cancelled"]
 
 
-def test_restart_online_search_logs_the_teardown_reason(frontend, caplog):
+def test_restart_search_logs_the_teardown_reason(frontend, caplog):
     frontend.coordinator.client = SimpleNamespace(disconnect=lambda: None)
     frontend._online_config = None
     with caplog.at_level(logging.INFO, logger="chess.frontend"):
-        frontend.coordinator._restart_online_search()
+        frontend.coordinator.restart_search()
     lines = [r.getMessage() for r in caplog.records
              if r.getMessage().startswith("online session teardown")]
     assert lines == ["online session teardown reason=restart_search"]

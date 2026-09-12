@@ -35,6 +35,7 @@ from tests.conftest import pygame_display
 from chessshootout.backend.backend import Backend
 from chessshootout.backend.utils import Square
 from chessshootout.frontend.board import Board
+from chessshootout.frontend.online_coordinator import HeldEvent
 from chessshootout.frontend.visual.colors import Colors
 from chessshootout.infra import env
 from chessshootout.server.protocol import Reason
@@ -276,7 +277,8 @@ def test_annotations_blocked_buffered_during_resync_then_replayed():
         "highlights": [], "share_muted": False,
     })
     assert (ARROW_FROM, ARROW_TO) not in game.board.annotations.flagged
-    assert coord._resync_buffer == [("on_annotations_blocked", ANY)]
+    assert coord._resync_buffer == [
+        HeldEvent("on_annotations_blocked", ANY, screen_level=False)]
     coord._end_resync()
     assert (ARROW_FROM, ARROW_TO) in game.board.annotations.flagged
 

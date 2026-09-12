@@ -17,35 +17,17 @@ from tests.conftest import pygame_display
 from chessshootout.frontend.game.skillcheck_session import CheckContext
 from chessshootout.frontend.online_coordinator import ResyncCause
 from chessshootout.skillcheck.types import SkillCheckKind
-from tests.helpers import BLACK, K, P, Q, WHITE, make_backend, online_start_payload, piece, sq
-from tests.online.test_online_skillcheck_client import FakeOnlineClient, _move_applied
+from tests.helpers import WHITE, capture_board, move_applied, online_app
 
 
 _pygame_init = pygame_display(1000, 800)
-
-
-def _online_app(your_color="white"):
-    from chessshootout.frontend.frontend import Frontend
-    app = Frontend(1000, 800)
-    app.sound_manager = MagicMock()
-    app.coordinator.client = FakeOnlineClient()
-    app.coordinator._start_online_game(online_start_payload(your_color=your_color))
-    return app
-
-
-def _capture_board(app):
-    app.game.match.backend = make_backend({
-        sq(7, 4): piece(K, WHITE), sq(0, 4): piece(K, BLACK),
-        sq(4, 3): piece(Q, WHITE), sq(3, 3): piece(P, BLACK),
-    }, turn=WHITE)
-    return sq(4, 3), sq(3, 3)
 
 
 def test_exit_cancels_a_give_time_hold():
     """A hold in progress when the player leaves the screen must not survive
     into the next screen or the next game: exit() drops it like every other
     screen-local thing."""
-    app = _online_app()
+    app = online_app()
     app.game.give_time.holding = True
     app.game.give_time._give_time_hold_recipient = "black"
     app.game.exit()
@@ -57,7 +39,7 @@ def test_exit_runs_a_parked_verdict_before_tearing_the_overlay_down():
     """The teardown nulls the parked action; running it first is what keeps a
     won capture the server already confirmed from vanishing when the player
     leaves mid-flourish."""
-    app = _online_app()
+    app = online_app()
     ran = []
     session = app.game.skillcheck_session
     session.online_verdict_action = lambda: ran.append(True)
@@ -71,7 +53,7 @@ def test_exit_runs_a_parked_verdict_before_tearing_the_overlay_down():
 def test_exit_swallows_a_parked_verdict_that_raises(caplog):
     """exit() must complete whatever the parked action does; a failure is
     logged, not raised into the navigation that is leaving the screen."""
-    app = _online_app()
+    app = online_app()
 
     def explode():
         raise RuntimeError("the verdict could not be played out")
@@ -88,12 +70,12 @@ def test_a_verdict_with_no_overlay_to_wait_for_lands_the_move_at_once():
     client could not draw). The won move_applied must not park its apply
     behind an overlay that will never finish -- it applies now, and the
     heartbeat, which is held off while an action is parked, is free again."""
-    app = _online_app()
-    frm, to = _capture_board(app)
+    app = online_app()
+    frm, to = capture_board(app)
     session = app.game.skillcheck_session
     session.online_skillcheck = CheckContext(frm, to, None, SkillCheckKind.WHEEL)
     assert not app.game.skillcheck_overlay.is_active()
-    app.coordinator._handle_remote_move_applied(_move_applied(frm, to, 1, kind="wheel", won=True))
+    app.coordinator._handle_remote_move_applied(move_applied(frm, to, 1, kind="wheel", won=True))
     assert len(app.game.match.move_history) == 1
     assert app.game.match.piece_at(to).color == WHITE
     assert session.online_verdict_action is None
@@ -107,7 +89,7 @@ def test_a_verdict_with_no_overlay_whose_action_fails_resyncs(monkeypatch):
     """The immediate run has the same safety net as the overlay path: an apply
     that blows up rebuilds the game from the server instead of leaving a
     half-applied ply behind."""
-    app = _online_app()
+    app = online_app()
     causes = []
     monkeypatch.setattr(app.coordinator, "_begin_resync", causes.append)
 
@@ -122,7 +104,7 @@ def test_a_verdict_with_no_overlay_whose_action_fails_resyncs(monkeypatch):
 def test_begin_online_verdict_stamps_when_the_action_was_parked():
     """The parked action carries the tick it was parked at, which is what a
     watchdog needs to tell "waiting on the flourish" from "lost"."""
-    app = _online_app()
+    app = online_app()
     app.game.skillcheck_overlay.start(MagicMock(landed=None), None, lambda *_: None)
     app.game._begin_online_verdict(True, lambda: None)
     assert app.game.skillcheck_session.online_verdict_action is not None

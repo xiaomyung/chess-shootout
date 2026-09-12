@@ -559,7 +559,6 @@ def test_match_found_and_game_start_clip_oversize_names():
     app.coordinator._finish_match_found()
     assert app.game.white_name == "a" * _NICKNAME_MAX_LEN
     assert app.game.black_name == "bob"
-    assert app.game.result_flow.series_scores == {"white": 0.0, "black": 0.0}
     app.draw_frame()
 
 
@@ -925,7 +924,6 @@ def test_unbind_clears_every_field_that_gates_online_behaviour():
     game._idle_window = IdleWindow(Reason.ABORTED, PieceColor.WHITE, 12345, 60.0)
     game._opp_disconnected_at_ms = 6789
     game._local_disconnected_at_ms = 4321
-    app.coordinator._prev_online_state = "reconnecting"
 
     app.coordinator.unbind_game_from_online()
 
@@ -935,6 +933,17 @@ def test_unbind_clears_every_field_that_gates_online_behaviour():
     assert game._idle_window is None
     assert game._opp_disconnected_at_ms is None
     assert game._local_disconnected_at_ms is None
+
+
+def test_dropping_the_client_forgets_the_watched_connection_state():
+    """The remembered state belongs to the session, not to the board: letting
+    the client go is what makes the next one watched from scratch, so a stale
+    "reconnecting" cannot stamp a disconnect countdown on a brand new game."""
+    app = make_app(1000, 800)
+    app.coordinator._prev_online_state = "reconnecting"
+
+    app.coordinator._drop_client()
+
     assert app.coordinator._prev_online_state is None
 
 

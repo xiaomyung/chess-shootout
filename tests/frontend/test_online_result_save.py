@@ -19,62 +19,17 @@ from chessshootout.backend.utils import coord_from_square
 from chessshootout.domain.match import SINGLE_SCREEN
 from chessshootout.frontend.frontend import Frontend
 from chessshootout.frontend.game.result_flow import RESULT_CONFIRM_TIMEOUT_MS
-from tests.helpers import BLACK, B, K, P, Q, WHITE, make_backend, piece, sq
+from tests.helpers import (
+    BLACK, B, K, P, Q, WHITE, make_backend, online_app, piece, sq)
 
 
 _pygame_init = pygame_display(1000, 800)
 
 
-class FakeOnlineClient:
-    def __init__(self, room_id="room-1"):
-        self.room_id = room_id
-        self.state = "connected"
-        self.opp_state = "connected"
-        self.sent_moves = []
-        self.shots = 0
-        self.state_syncs = 0
-
-    def disconnect(self):
-        self.state = "disconnected"
-
-    def send_ping(self, ply):
-        pass
-
-    def is_connected(self):
-        return self.state == "connected"
-
-    def is_server_silent(self):
-        return False
-
-    def heartbeat_interval(self):
-        return 2.0
-
-    def send_move(self, from_sq, to_sq, promotion=None):
-        self.sent_moves.append((from_sq, to_sq, promotion))
-
-    def send_skill_check_shot(self, client_elapsed_ms=0.0, direction=None,
-                              target_row=None, target_col=None):
-        self.shots += 1
-
-    def request_state_sync(self):
-        self.state_syncs += 1
-
-    def get_ping_ms(self):
-        return None
-
-
 def _online_app(tmp_path, monkeypatch, your_color="white"):
+    """The shared online app, with saves pointed at the test's own directory."""
     monkeypatch.setenv("CHESS_DATA_DIR", str(tmp_path))
-    app = Frontend(1000, 800)
-    app.sound_manager = MagicMock()
-    app.coordinator.client = FakeOnlineClient()
-    app.coordinator._start_online_game({
-        "white_name": "alice", "black_name": "bob", "your_color": your_color,
-        "time_minutes": 5, "increment_seconds": 0,
-        "white_country": "", "black_country": "",
-        "white_score": 0.0, "black_score": 0.0,
-    })
-    return app
+    return online_app(your_color)
 
 
 def _capture_mate_board(app):

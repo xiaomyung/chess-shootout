@@ -973,9 +973,13 @@ class _DeadWS(RecordingWS):
         raise RuntimeError("socket gone")
 
 
-class _FirstSendDiesWS(RecordingWS):
-    """Authenticates, loses the very first frame the server writes back, then
-    hangs up -- a socket that dropped between the handshake and the reply."""
+class _ScriptedWS(RecordingWS):
+    """A socket that reads a fixed script of inbound frames and then hangs up.
+
+    With fail_first (the default) the very first frame the server writes back
+    is lost, which is a socket that dropped between the handshake and the
+    reply; with fail_first=False the same script runs on a healthy socket, so
+    one class covers both halves of a retry test."""
 
     def __init__(self, frames, fail_first=True):
         super().__init__()
@@ -1003,15 +1007,34 @@ async def test_a_reconnect_hand_over_that_never_went_out_is_retried(app):
     room.game_start_broadcast = True
     app.state.connections.add(room.room_id, room.black.client_uuid, RecordingWS())
 
-    await _ws_session(app, _FirstSendDiesWS([json.dumps(auth_msg("ta"))]), room.room_id)
+    await _ws_session(app, _ScriptedWS([json.dumps(auth_msg("ta"))]), room.room_id)
 
     assert room.white.game_start_sent is False
 
-    healthy = _FirstSendDiesWS([json.dumps(auth_msg("ta"))], fail_first=False)
+    healthy = _ScriptedWS([json.dumps(auth_msg("ta"))], fail_first=False)
     await _ws_session(app, healthy, room.room_id)
 
     assert healthy.types()[0] == "game_start"
     assert room.white.game_start_sent is True
+
+
+async def test_a_catch_up_start_says_so_when_the_game_is_a_rematch(app):
+    """The rematch flag is what makes the match-found card read "Rematch", and
+    a socket catching up on a start it missed has to be told the same thing the
+    broadcast said. It is read off the room, so the two can never disagree."""
+    room = await pair_room(app.state.rooms)
+    room.result = (Reason.RESIGNATION, "white")
+    assert app.state.rooms.reset_for_rematch(room.room_id)
+    assert room.is_rematch is True
+    room.game_start_broadcast = True
+    app.state.connections.add(room.room_id, room.black.client_uuid, RecordingWS())
+
+    catching_up = _ScriptedWS([json.dumps(auth_msg(room.white.session_token))],
+                              fail_first=False)
+    await _ws_session(app, catching_up, room.room_id)
+
+    start = catching_up.of_type("game_start")
+    assert start and start[0]["rematch"] is True
 
 
 async def test_a_game_start_that_never_went_out_is_not_marked_as_told(app, client):

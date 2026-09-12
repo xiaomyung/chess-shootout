@@ -268,12 +268,14 @@ async def test_sweep_keeps_the_window_open_while_one_player_is_away(app, clock):
     bob_color = room.color_of(BOB)
     app.state.connections.remove(room.room_id, BOB, ws_b)
     rooms.mark_disconnected(room.room_id, bob_color)
-    for _ in range(4):
-        clock.advance(POST_GAME_DISCONNECT_GRACE)
-        await app.state.sweep.step_post_game()
-        assert rooms.rooms_active == 1
+    assert REMATCH_IDLE_SECONDS > POST_GAME_DISCONNECT_GRACE, \
+        "the window has to outlive the grace for this rule to mean anything"
+    clock.advance(REMATCH_IDLE_SECONDS - 1)
+    await app.state.sweep.step_post_game()
+    assert rooms.rooms_active == 1, \
+        "well past Bob's grace, the window Alice is looking at is still open"
     assert ws_a.events() == []
-    clock.advance(REMATCH_IDLE_SECONDS)
+    clock.advance(1)
     await app.state.sweep.step_post_game()
     assert rooms.rooms_active == 0
     assert ws_a.events() == ["window_expired"]

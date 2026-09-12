@@ -82,6 +82,14 @@ def test_series_chip_survives_the_rematch_window_closing():
     region = pg.Rect(80, 40, 440, 420)
 
     win.fill((0, 0, 0))
+    menu.set_buttons(ResultButtons.LOCAL)
+    menu.set_series(None, None, None, None)
+    menu.draw()
+    assert _count(win, region, Colors.amber_hi, tol=12) == 0, \
+        "the control: a card with no series to show paints no amber at all"
+
+    menu.set_series("alice", "bob", "2", "1")
+    win.fill((0, 0, 0))
     menu.set_buttons(ResultButtons.ONLINE_CLOSED)
     menu.draw()
 

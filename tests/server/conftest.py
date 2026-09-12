@@ -200,6 +200,7 @@ def play_plies(room: Room, count: int) -> None:
     :param room: the paired room whose engine the opening is played into
     :param count: how many plies of the stock opening to play, at most four
     """
+    assert count <= len(OPENING_PLIES), "the stock opening is only four plies long"
     backend = cast(Backend, room.backend)
     for frm, to in OPENING_PLIES[:count]:
         assert backend.try_move(square_from_coord(frm), square_from_coord(to)).legal

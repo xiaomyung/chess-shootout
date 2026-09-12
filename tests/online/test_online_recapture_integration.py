@@ -17,20 +17,18 @@ server-side secret) and the shot's claimed elapsed, which rides the lag-comp
 clamp exactly as tests/online/test_online_skillcheck_integration.py does.
 """
 import time
+from contextlib import contextmanager
 
 import pygame as pg
 
 from chessshootout.backend.pieces import PieceColor
 from chessshootout.backend.utils import square_from_coord
 from chessshootout.online.client import OnlineClient
-from chessshootout.skillcheck import online
 from chessshootout.skillcheck.types import SkillCheckKind
 from tests.conftest import pygame_display
 from tests.helpers import fake_uuid4, make_app
-from tests.online.online_helpers import wait_for
-from tests.online.test_online_skillcheck_integration import (
-    _SLEEP_LEAD_MS, _widest_win_window,
-)
+from tests.online.online_helpers import SLEEP_LEAD_MS, force_kind, room_of, wait_for, \
+    winning_elapsed
 
 
 _pygame_init = pygame_display(1000, 800)
@@ -95,19 +93,21 @@ def _pair(addr, white_uuid, black_uuid):
     return _Seat(a, start_a.payload), _Seat(b, start_b.payload)
 
 
+@contextmanager
 def _seats(server_with_app, monkeypatch, white_uuid, black_uuid):
     """Build both seats against the running server, with the reconnect probe
-    pointed at it too so no test ever reaches for the real internet."""
+    pointed at it too so no test ever reaches for the real internet.
+
+    Both sockets are closed on the way out whatever happens, so an assertion
+    that fires mid-game cannot leave a live client behind for the next test."""
     port, app = server_with_app
     monkeypatch.setenv("CHESS_SERVER_ADDR", f"localhost:{port}")
     white, black = _pair(f"localhost:{port}", white_uuid, black_uuid)
-    return white, black, app
-
-
-def _room(app):
-    active = list(app.state.rooms._active.values())
-    assert len(active) == 1, "expected exactly one paired room"
-    return active[0]
+    try:
+        yield white, black, app
+    finally:
+        white.client.disconnect()
+        black.client.disconnect()
 
 
 def _pump(seats, seconds):
@@ -146,30 +146,8 @@ def _quiet_move(seats, mover, frm, to, ply):
 
 
 def _force_wheel(room, frm, to):
-    """Pick a room secret whose roll turns this capture into a wheel.
-
-    Every kind owns a quarter of the capture roll, so 8000 misses would mean
-    the room is not at the capture at all rather than bad luck."""
-    from_sq, to_sq = square_from_coord(frm), square_from_coord(to)
-    for i in range(8000):
-        secret = f"force-wheel-{i}"
-        if online.select_kind(secret, room.plies_ever, room.backend, from_sq, to_sq,
-                              room.skillcheck_locks) == SkillCheckKind.WHEEL:
-            room.skillcheck_secret = secret
-            return
-    raise AssertionError(
-        "no wheel secret in 8000 tries: plies_ever={} turn={} locks={}".format(
-            room.plies_ever, room.backend.turn, room.skillcheck_locks))
-
-
-def _winning_elapsed(pending):
-    """Aim at the middle of the widest window the armed check can be won in."""
-    window = _widest_win_window(pending.kind, pending.challenge, float(pending.deadline_ms))
-    assert window is not None, "no winning window for the armed check"
-    lo, hi = window
-    assert hi - lo >= 2 * _SLEEP_LEAD_MS, \
-        "the win window must absorb the sleep lead in both directions"
-    return (lo + hi) // 2
+    """Force this capture to draw a wheel check by picking the room's secret."""
+    force_kind(room, square_from_coord(frm), square_from_coord(to), SkillCheckKind.WHEEL)
 
 
 def _win_capture(seats, mover, room, frm, to, ply):
@@ -183,8 +161,8 @@ def _win_capture(seats, mover, room, frm, to, ply):
         "the server never armed the check"
     pending = room.pending_skillcheck
     assert pending.kind == SkillCheckKind.WHEEL
-    elapsed = _winning_elapsed(pending)
-    time.sleep((elapsed - _SLEEP_LEAD_MS) / 1000.0)  # land in [E, E+lag_bound] -> scored at E
+    elapsed = winning_elapsed(pending.kind, pending.challenge, float(pending.deadline_ms))
+    time.sleep((elapsed - SLEEP_LEAD_MS) / 1000.0)  # land in [E, E+lag_bound] -> scored at E
     mover.client.send_skill_check_shot(elapsed)
     assert _pump_until(seats, _both_at(seats, ply)), \
         f"the won capture {frm}{to} never landed on both boards"
@@ -195,33 +173,31 @@ def test_a_recapture_lands_on_both_boards_and_draws_no_directive(
     """1.e4 e5 2.Nf3 Nc6 3.Nxe5 Nxe5 -- the last two plies share a SAN, which
     is what a recapture always looks like. Both must land on both boards, and
     the heartbeats that follow must leave the server with nothing to correct."""
-    white, black, app = _seats(server_with_app, monkeypatch, fake_uuid4(41), fake_uuid4(42))
-    seats = (white, black)
-    _quiet_move(seats, white, "e2", "e4", 1)
-    _quiet_move(seats, black, "e7", "e5", 2)
-    _quiet_move(seats, white, "g1", "f3", 3)
-    _quiet_move(seats, black, "b8", "c6", 4)
+    with _seats(server_with_app, monkeypatch, fake_uuid4(41), fake_uuid4(42)) as (
+            white, black, app):
+        seats = (white, black)
+        _quiet_move(seats, white, "e2", "e4", 1)
+        _quiet_move(seats, black, "e7", "e5", 2)
+        _quiet_move(seats, white, "g1", "f3", 3)
+        _quiet_move(seats, black, "b8", "c6", 4)
 
-    room = _room(app)
-    _win_capture(seats, white, room, "f3", "e5", 5)
-    _win_capture(seats, black, room, "c6", "e5", 6)
+        room = room_of(app)
+        _win_capture(seats, white, room, "f3", "e5", 5)
+        _win_capture(seats, black, room, "c6", "e5", 6)
 
-    expected = ["e4", "e5", "Nf3", "Nc6", "Nxe5", "Nxe5"]
-    assert white.sans() == expected, "the mover's own recapture is not an echo"
-    assert black.sans() == expected
-    assert [entry.san for entry in room.backend.move_history] == expected
-    assert white.resyncs == [] and black.resyncs == []
+        expected = ["e4", "e5", "Nf3", "Nc6", "Nxe5", "Nxe5"]
+        assert white.sans() == expected, "the mover's own recapture is not an echo"
+        assert black.sans() == expected
+        assert [entry.san for entry in room.backend.move_history] == expected
+        assert white.resyncs == [] and black.resyncs == []
 
-    _pump(seats, QUIET_WINDOW_SECONDS)
-    assert "resync_directive" not in white.events, "the server had nothing to correct"
-    assert "resync_directive" not in black.events
-    assert white.resyncs == [] and black.resyncs == []
-    assert white.app.coordinator._resyncing is False
-    assert black.app.coordinator._resyncing is False
-    assert white.plies() == black.plies() == len(room.backend.move_history) == 6
-
-    white.client.disconnect()
-    black.client.disconnect()
+        _pump(seats, QUIET_WINDOW_SECONDS)
+        assert "resync_directive" not in white.events, "the server had nothing to correct"
+        assert "resync_directive" not in black.events
+        assert white.resyncs == [] and black.resyncs == []
+        assert white.app.coordinator._resyncing is False
+        assert black.app.coordinator._resyncing is False
+        assert white.plies() == black.plies() == len(room.backend.move_history) == 6
 
 
 def test_the_abort_badge_survives_the_first_move_on_the_real_wire(
@@ -229,31 +205,32 @@ def test_the_abort_badge_survives_the_first_move_on_the_real_wire(
     """#95 over the wire: the server pushes idle_window right behind the
     move_applied for white's first move, and the animation that finishes a
     couple of hundred milliseconds later must leave that window alone."""
-    white, black, _app = _seats(server_with_app, monkeypatch, fake_uuid4(43), fake_uuid4(44))
-    seats = (white, black)
-    _quiet_move(seats, white, "e2", "e4", 1)
-    assert _pump_until(seats, lambda: black.game._idle_window is not None), \
-        "the server never pushed the abort window"
-    _pump(seats, ANIMATION_WINDOW_SECONDS)
+    with _seats(server_with_app, monkeypatch, fake_uuid4(43), fake_uuid4(44)) as (
+            white, black, _app):
+        seats = (white, black)
+        _quiet_move(seats, white, "e2", "e4", 1)
+        assert _pump_until(seats, lambda: black.game._idle_window is not None), \
+            "the server never pushed the abort window"
+        _pump(seats, ANIMATION_WINDOW_SECONDS)
 
-    for seat in seats:
-        applied = seat.events.index("move_applied")
-        assert "idle_window" in seat.events[applied:], \
-            "the forced push follows the move on the wire"
-    assert not black.game.board.is_animating(), "the animation had time to finish"
-    window = black.game._idle_window
-    assert window is not None, "the landing is not what clears the window"
-    assert window.color == PieceColor.BLACK
-    assert white.game._idle_window is not None
+        for seat in seats:
+            applied = seat.events.index("move_applied")
+            assert "idle_window" in seat.events[applied:], \
+                "the forced push follows the move on the wire"
+        assert not black.game.board.is_animating(), "the animation had time to finish"
+        window = black.game._idle_window
+        assert window is not None, "the landing is not what clears the window"
+        assert window.color == PieceColor.BLACK
+        assert white.game._idle_window is not None
 
-    # The badge is held back for the first tenth of the window, so read the
-    # strips from seven seconds in rather than waiting there.
-    shown_at = window.deadline_ms - int(window.total_seconds * 1000) + 7_000
-    monkeypatch.setattr(pg.time, "get_ticks", lambda: shown_at)
-    turn = black.game.match.current_turn()
-    assert black.game._strip_state(PieceColor.BLACK, turn, False)["auto_end_label"] == "Abort in"
-    assert black.game._strip_state(PieceColor.WHITE, turn, False)["auto_end_label"] is None
-    assert white.game._strip_state(PieceColor.BLACK, turn, False)["auto_end_label"] == "Abort in"
-
-    white.client.disconnect()
-    black.client.disconnect()
+        # The badge is held back for the first tenth of the window, so read the
+        # strips from seven seconds in rather than waiting there.
+        shown_at = window.deadline_ms - int(window.total_seconds * 1000) + 7_000
+        monkeypatch.setattr(pg.time, "get_ticks", lambda: shown_at)
+        turn = black.game.match.current_turn()
+        assert black.game._strip_state(
+            PieceColor.BLACK, turn, False)["auto_end_label"] == "Abort in"
+        assert black.game._strip_state(
+            PieceColor.WHITE, turn, False)["auto_end_label"] is None
+        assert white.game._strip_state(
+            PieceColor.BLACK, turn, False)["auto_end_label"] == "Abort in"

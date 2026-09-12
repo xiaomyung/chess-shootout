@@ -27,7 +27,7 @@ from chessshootout.backend.pieces import PieceColor
 from chessshootout.frontend.frontend import Frontend
 from chessshootout.frontend.game.variant import Variant
 from chessshootout.frontend.online_coordinator import (
-    APPLY_FAILED_LABEL, RECONNECT_PROBE_MAX_ATTEMPTS,
+    APPLY_FAILED_LABEL, RECONNECT_PROBE_MAX_ATTEMPTS, ReconnectAnswer,
 )
 
 
@@ -330,7 +330,6 @@ def test_reconnect_adoption_clips_an_oversize_opponent_name(app, monkeypatch):
 
     assert app.game.black_name == "b" * _NICKNAME_MAX_LEN
     assert app.game.white_name == "alice"
-    assert app.game.result_flow.series_scores == {"white": 0.0, "black": 0.0}
     app.draw_frame()
 
 
@@ -343,9 +342,10 @@ def test_a_reconnect_fetch_that_hangs_never_holds_the_frame(app, monkeypatch):
                         lambda self, *a, **kw: None)
     release = threading.Event()
     answer = _resume_payload(move_history=("e4",))
+    released = []
 
     def _slow_fetch(addr, room_id, session_token):
-        assert release.wait(timeout=5), "the test never released the fetch"
+        released.append(release.wait(timeout=5))
         return answer
 
     monkeypatch.setattr("chessshootout.frontend.online_coordinator.fetch_resume", _slow_fetch)
@@ -363,6 +363,7 @@ def test_a_reconnect_fetch_that_hangs_never_holds_the_frame(app, monkeypatch):
 
     release.set()
     app.coordinator._reconnect_resume_thread.join(timeout=5)
+    assert released == [True], "the test never released the fetch"
     app.coordinator.update(pg.time.get_ticks())
 
     assert app.screen is app.game
@@ -403,9 +404,10 @@ def test_a_search_started_mid_fetch_retires_the_reconnect_answer(app, monkeypatc
     monkeypatch.setattr("chessshootout.online.client.OnlineClient.reconnect_to_existing",
                         lambda self, *a, **kw: None)
     release = threading.Event()
+    released = []
 
     def _slow_fetch(addr, room_id, session_token):
-        assert release.wait(timeout=5), "the test never released the fetch"
+        released.append(release.wait(timeout=5))
         return _resume_payload(move_history=("e4",))
 
     monkeypatch.setattr("chessshootout.frontend.online_coordinator.fetch_resume", _slow_fetch)
@@ -421,6 +423,7 @@ def test_a_search_started_mid_fetch_retires_the_reconnect_answer(app, monkeypatc
     searching = app.coordinator.client
     release.set()
     app.coordinator._reconnect_resume_thread.join(timeout=5)
+    assert released == [True], "the test never released the fetch"
 
     assert app.coordinator._reconnect_result is None, \
         "a retired fetch never files its answer for the next frame"
@@ -442,7 +445,8 @@ def test_a_reconnect_answer_is_refused_once_a_session_is_live(app, monkeypatch, 
     pending = {"addr": "localhost:8000", "room_id": "room-r", "session_token": "tok"}
 
     with caplog.at_level(logging.DEBUG, logger="chess.frontend"):
-        app.coordinator._adopt_reconnect_result(pending, _resume_payload(move_history=("e4",)))
+        app.coordinator._adopt_reconnect_result(
+            ReconnectAnswer(pending, _resume_payload(move_history=("e4",))))
 
     assert app.coordinator.client is live
     assert app.screen is app.menu

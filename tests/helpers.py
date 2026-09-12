@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from chessshootout.backend.backend import Backend, DEFAULT_CASTLING_RIGHTS
-from chessshootout.backend.utils import Square, Move, MoveResult, HistoryEntry
+from chessshootout.backend.utils import Square, Move, MoveResult, HistoryEntry, coord_from_square
 from chessshootout.backend.pieces import Piece, PieceColor, PieceType
 from chessshootout.server.protocol import PROTOCOL_VERSION
 
@@ -539,3 +539,234 @@ def auth_msg(token: str) -> dict[str, Any]:
     :returns: the auth frame, ready to send as JSON
     """
     return {"version": PROTOCOL_VERSION, "type": "auth", "session_token": token}
+
+
+class FakeOnlineClient:
+    """
+    A stand-in for OnlineClient that records what the coordinator sent it
+    instead of opening a socket, used by every frontend test that needs an
+    online board without a server. Everything the coordinator asks of a client
+    each frame -- connection state, the heartbeat, the inbound queue -- is
+    answered from memory
+    """
+
+    def __init__(self, room_id: str = "room-1") -> None:
+        """
+        Build a client that already believes it is connected, so a test can
+        hand it to the coordinator and start driving events immediately
+
+        :param room_id: room id the coordinator files the session under
+        """
+        self.room_id = room_id
+        self.state = "connected"
+        self.opp_state = "connected"
+        self.sent_moves: list[tuple[str, str, str | None]] = []
+        self.shots = 0
+        self.shot_calls: list[tuple[float, str | None, float | None, float | None]] = []
+        self.state_syncs = 0
+        self.pings = 0
+        self.last_shot_elapsed: float | None = None
+        self.last_shot_direction: str | None = None
+        self.last_shot_target: tuple[float | None, float | None] | None = None
+        self._queue: list[Any] = []
+
+    def queue(self, event: Any) -> None:
+        """
+        Line an inbound event up for the next drain, which is how a test makes
+        the coordinator see a server message on a frame of its choosing
+
+        :param event: the Event the client should hand over next
+        """
+        self._queue.append(event)
+
+    def drain_inbound(self) -> list[Any]:
+        """
+        Hand over everything queued since the last drain and forget it, the
+        same contract the real client's inbound queue has
+
+        :returns: the queued events, oldest first
+        """
+        events = self._queue
+        self._queue = []
+        return events
+
+    def disconnect(self) -> None:
+        """
+        Close the fake session, which only flips the state a test reads back
+        """
+        self.state = "disconnected"
+
+    def send_ping(self, ply: int | None) -> None:
+        """
+        Count a heartbeat instead of sending one, so a test can assert the
+        heartbeat ran without a server to answer it
+
+        :param ply: the ply the coordinator claims to be showing, or None
+        """
+        self.pings += 1
+
+    def is_connected(self) -> bool:
+        """
+        Say whether the fake socket is still up
+
+        :returns: True until disconnect() was called
+        """
+        return self.state == "connected"
+
+    def is_server_silent(self) -> bool:
+        """
+        Report the server as answering, since nothing here can go quiet
+
+        :returns: always False
+        """
+        return False
+
+    def heartbeat_interval(self) -> float:
+        """
+        Report the heartbeat cadence the coordinator paces itself by
+
+        :returns: seconds between pings, the server's own default
+        """
+        return 2.0
+
+    def send_move(self, from_sq: str, to_sq: str, promotion: str | None = None) -> None:
+        """
+        Record a move the board handed over, which is what the hold-gate tests
+        assert on
+
+        :param from_sq: square the piece leaves, spelled as e2
+        :param to_sq: square the piece is aimed at, spelled as e4
+        :param promotion: promotion piece letter, or None when not promoting
+        """
+        self.sent_moves.append((from_sq, to_sq, promotion))
+
+    def send_skill_check_shot(self, client_elapsed_ms: float = 0.0,
+                              direction: str | None = None,
+                              target_row: float | None = None,
+                              target_col: float | None = None) -> None:
+        """
+        Record one skill-check input, keeping both a running count and the
+        whole call so aim and combo tests can read back what travelled
+
+        :param client_elapsed_ms: how far into the check the input happened
+        :param direction: combo prompt direction, or None for other kinds
+        :param target_row: aimed row in board space, or None when not aiming
+        :param target_col: aimed column in board space, or None when not aiming
+        """
+        self.shots += 1
+        self.last_shot_elapsed = client_elapsed_ms
+        self.last_shot_direction = direction
+        self.last_shot_target = (target_row, target_col)
+        self.shot_calls.append((client_elapsed_ms, direction, target_row, target_col))
+
+    def request_state_sync(self) -> None:
+        """
+        Count a resync request instead of asking a server for a snapshot
+        """
+        self.state_syncs += 1
+
+    def get_ping_ms(self) -> int | None:
+        """
+        Report no measured round trip, the way a session before its first pong
+        does
+
+        :returns: always None
+        """
+        return None
+
+    def force_reconnect(self) -> None:
+        """
+        Swallow the coordinator's order to reopen the socket, since there is
+        no socket here to reopen
+        """
+
+    def send_left_result(self) -> None:
+        """
+        Swallow the note that the player stepped off the result screen, which
+        only the rematch window on a real server cares about
+        """
+
+    def cancel_queue(self) -> None:
+        """
+        Swallow a request to leave the matchmaking queue
+        """
+
+    def send_draw_response(self, accept: bool) -> None:
+        """
+        Swallow the player's answer to a draw offer
+
+        :param accept: True when the offer was accepted
+        """
+
+    def send_takeback_response(self, accept: bool) -> None:
+        """
+        Swallow the player's answer to a takeback request
+
+        :param accept: True when the request was allowed
+        """
+
+    def send_rematch_response(self, accept: bool) -> None:
+        """
+        Swallow the player's answer to a rematch offer
+
+        :param accept: True when the offer was accepted
+        """
+
+
+def online_app(your_color: str = "white") -> "Frontend":
+    """
+    Boot a whole app already sitting on an online board against a fake client,
+    the starting point for every test that drives the coordinator without a
+    server. The game screen is opened through the coordinator's own door, so
+    the board is wired exactly as a real match leaves it
+
+    :param your_color: side the local player takes, white or black
+    :returns: the app, on a live online game screen
+    """
+    from unittest.mock import MagicMock
+
+    from chessshootout.frontend.frontend import Frontend
+
+    app = Frontend(1000, 800)
+    app.sound_manager = MagicMock()
+    app.coordinator.client = FakeOnlineClient()
+    app.coordinator._start_online_game(online_start_payload(your_color=your_color))
+    return app
+
+
+def capture_board(app: "Frontend") -> tuple[Square, Square]:
+    """
+    Set the game screen's board to the smallest position a capture can happen
+    in: a white queen on d4 that can take a black pawn on d5, with both kings
+    out of the way so Qxd5 is the only thing the position is about
+
+    :param app: the app whose game screen board is being replaced
+    :returns: the capture's from and to squares
+    """
+    app.game.match.backend = make_backend({
+        sq(7, 4): piece(K, WHITE), sq(0, 4): piece(K, BLACK),
+        sq(4, 3): piece(Q, WHITE), sq(3, 3): piece(P, BLACK),
+    }, turn=WHITE)
+    return sq(4, 3), sq(3, 3)
+
+
+def move_applied(frm: Square, to: Square, ply: int, *, kind: str | None = None,
+                 won: bool | None = None, san: str = "Qxd5") -> dict[str, Any]:
+    """
+    Build the move-applied message the server sends once a ply has landed,
+    including the skill-check verdict when the ply was fought over
+
+    :param frm: square the move started from
+    :param to: square it arrived on
+    :param ply: the ply number the server stamped on it
+    :param kind: skill-check kind the move was fought over, or None for a
+        quiet move
+    :param won: the server's verdict on that check, or None without one
+    :param san: SAN the server attached to the ply
+    :returns: the move-applied payload
+    """
+    return {
+        "from": coord_from_square(frm), "to": coord_from_square(to), "san": san,
+        "clock": {"white_remaining": 300.0, "black_remaining": 300.0, "running_for": "black"},
+        "ply": ply, "skill_check_kind": kind, "skill_check_won": won,
+    }

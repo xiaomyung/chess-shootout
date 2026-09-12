@@ -192,7 +192,9 @@ a code-shape tripwire — never scan raw file text in a new guard.
 ## Fixtures and helpers
 
 - Pure data / builders → `tests/helpers.py` (imported explicitly, e.g. `make_backend`,
-  `sq`, `play_*`, `make_app()`/`start_single_screen()`). `make_app()` boots a
+  `sq`, `play_*`, `make_app()`/`start_single_screen()`, plus the online doubles
+  `FakeOnlineClient`, `online_app()`, `capture_board()` and `move_applied()`).
+  `make_app()` boots a
   real `Frontend` shell — every screen constructed, sitting on `MenuScreen` —
   never a partial or screen-less double. `start_single_screen()` drives the
   real `switch_to("game", ...)` path into a local hot-seat game (the
@@ -216,7 +218,11 @@ a code-shape tripwire — never scan raw file text in a new guard.
   names; server test modules import shared helpers from here, never from each
   other.
 - `tests/online/online_helpers.py` holds `wait_for` / `collect_for`, the two
-  polling waits every end-to-end online test needs.
+  polling waits every end-to-end online test needs, plus the skill-check
+  fixtures both the faked and the real-server files share: the payload builders
+  (`required_payload`, `result_payload`, `spectate_payload`), `drive_verdict_hold`,
+  `room_of`, `force_kind`, `widest_win_window` / `winning_elapsed` and
+  `SLEEP_LEAD_MS`.
 - `tests/server/moderation_helpers.py` is the moderation suite's own builder set
   (pattern-library readers, canonical/transformed constructions, and the
   worst-case dense-but-clean arrow store the CPU timing pin measures) — import
