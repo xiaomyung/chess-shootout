@@ -139,10 +139,9 @@ async def _ws_session(app: FastAPI, websocket: WebSocket, room_id: str) -> None:
         if opp_ws is not None:
             await send(opp_ws, ConnectionStatusMessage(opp_state="connected"))
         if room.game_start_broadcast:
-            if not slot.game_start_sent:
-                if await send(websocket,
-                              game_start_message(room, auth_color, app.state.now())):
-                    slot.game_start_sent = True
+            if not slot.game_start_sent and await send(
+                    websocket, game_start_message(room, auth_color, app.state.now())):
+                slot.game_start_sent = True
             await send(websocket, ConnectionStatusMessage(
                 opp_state="connected" if opp_ws is not None else "reconnecting"))
 

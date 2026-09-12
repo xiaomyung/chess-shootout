@@ -317,6 +317,7 @@ class Room:
     ended_at: float | None = None
     last_rematch_activity_at: float | None = None
     game_start_broadcast: bool = False
+    is_rematch: bool = False
     draw_offered_by: str | None = None
     takeback_offered_by: str | None = None
     rematch_offered_by: set[str] = field(default_factory=set)
@@ -1080,9 +1081,11 @@ class RoomManager:
         Turn a finished room back into a fresh game with the colours swapped:
         new board and clocks, a new skill-check secret, cleared marks, offers
         and result, and the ply counter back to zero. The series scores are
-        the one thing that survives, since they are the point of a series. A
-        player who is away starts the new game on a full grace period rather
-        than inheriting one already spent on the game just played
+        the one thing that survives, since they are the point of a series. The
+        room is marked a rematch from here on, so every start frame it sends --
+        the broadcast and any catch-up copy -- says so. A player who is away
+        starts the new game on a full grace period rather than inheriting one
+        already spent on the game just played
 
         :param room_id: the finished room to replay.
         :returns: True when the room could be replayed and has been reset.
@@ -1111,6 +1114,7 @@ class RoomManager:
         room.ended_at = None
         room.last_rematch_activity_at = None
         room.game_start_broadcast = False
+        room.is_rematch = True
         room.draw_offered_by = None
         room.takeback_offered_by = None
         room.rematch_offered_by = set()

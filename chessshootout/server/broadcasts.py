@@ -162,8 +162,7 @@ async def resolve_skillcheck_fail(rooms: RoomManager, connections: ConnectionReg
     return pending
 
 
-def game_start_message(room: Room, color: str, now: float,
-                       rematch: bool = False) -> GameStartMessage:
+def game_start_message(room: Room, color: str, now: float) -> GameStartMessage:
     """
     Build one player's view of a game starting: the opening position, both
     names with their countries and series scores, the time control and their
@@ -171,12 +170,12 @@ def game_start_message(room: Room, color: str, now: float,
     how long ago the game actually started so a client that joined late does
     not run its clock from the wrong instant. Both the start broadcast and a
     socket arriving after it come through here, so a player who missed the
-    start is told exactly what the other one was told
+    start is told exactly what the other one was told -- the rematch flag
+    included, which is read off the room rather than passed in
 
     :param room: paired room whose game is starting
     :param color: the side this frame is for, white or black
     :param now: monotonic seconds, read for the elapsed-since-start value
-    :param rematch: True when this game follows an accepted rematch offer
     :returns: the start frame to send to that player
     """
     return GameStartMessage(
@@ -191,25 +190,25 @@ def game_start_message(room: Room, color: str, now: float,
         black_score=room.score_for("black"),
         white_country=room.white.country if room.white else None,
         black_country=room.black.country if room.black else None,
-        rematch=rematch,
+        rematch=room.is_rematch,
     )
 
 
 async def broadcast_game_start(connections: ConnectionRegistry, room: Room,
-                               now: Callable[[], float], rematch: bool = False) -> None:
+                               now: Callable[[], float]) -> None:
     """
     Start the game on both screens, telling each player what they need in their
     own colors and noting per seat that they have been told -- a socket that
     was absent here, or whose frame failed to go out, is handed the same start
     when it comes back. The moment is stamped as a history change with no
     previous length, since what a client was showing before a game start cannot
-    be known
+    be known, and it is the one instant the frames, the log line and the stamp
+    all share
 
     :param connections: registry used to reach both players
     :param room: paired room whose game is starting
-    :param now: monotonic seconds source, read for the elapsed-since-start value
-        and for the history-change stamp
-    :param rematch: True when this game follows an accepted rematch offer
+    :param now: monotonic seconds source, read once for the elapsed-since-start
+        value and for the history-change stamp
     """
     sent_at = now()
     sent = []
@@ -218,11 +217,11 @@ async def broadcast_game_start(connections: ConnectionRegistry, room: Room,
         slot = room.slot(color)
         if ws is None or slot is None:
             continue
-        if not await send(ws, game_start_message(room, color, sent_at, rematch)):
+        if not await send(ws, game_start_message(room, color, sent_at)):
             continue
         slot.game_start_sent = True
         sent.append(color)
-    room.note_history_change(now(), None)
+    room.note_history_change(sent_at, None)
     room.game_start_broadcast = True
     log.info("game_start broadcast room=%s sent_to=%s elapsed=%.2f",
              room.room_id, sent, room.seconds_since_start(sent_at))

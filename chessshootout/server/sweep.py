@@ -387,13 +387,11 @@ class Sweep:
         :param now: monotonic seconds, the sweep's own clock.
         :returns: True when neither player is still inside their grace.
         """
-        for color in ("white", "black"):
-            slot = room.slot(color)
-            if slot is None or slot.disconnected_at is None:
-                continue
-            if now - slot.disconnected_at < POST_GAME_DISCONNECT_GRACE:
-                return False
-        return True
+        return all(
+            slot is None or slot.disconnected_at is None
+            or now - slot.disconnected_at >= POST_GAME_DISCONNECT_GRACE
+            for slot in (room.white, room.black)
+        )
 
     async def step_post_game(self) -> None:
         """

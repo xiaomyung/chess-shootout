@@ -654,19 +654,18 @@ async def _restart_rematch(app: FastAPI, room: Room, color: str) -> str:
     rooms = app.state.rooms
     connections = app.state.connections
     opp = room.opp_color(color)
+    asker_ws = connections.get_for_color(room, color)
     if connections.get_for_color(room, opp) is None:
         log.info("rematch restart deferred room=%s waiting_for=%s", room.room_id, opp)
         room.rematch_offered_by.discard(color)
-        await send(connections.get_for_color(room, color),
-                   RematchUpdateMessage(event="opponent_reconnecting"))
+        await send(asker_ws, RematchUpdateMessage(event="opponent_reconnecting"))
         return "offerer_absent"
     if not rooms.reset_for_rematch(room.room_id):
-        await send(connections.get_for_color(room, color),
-                     ErrorMessage(reason=Reason.REMATCH_UNAVAILABLE,
-                                    msg_type="rematch_response"))
+        await send(asker_ws, ErrorMessage(reason=Reason.REMATCH_UNAVAILABLE,
+                                          msg_type="rematch_response"))
         return "unavailable"
     log.info("rematch restart room=%s", room.room_id)
-    await broadcast_game_start(connections, room, app.state.now, rematch=True)
+    await broadcast_game_start(connections, room, app.state.now)
     return "restarted"
 
 
